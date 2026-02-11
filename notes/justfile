@@ -1,0 +1,13 @@
+# Build PDF
+compile:
+    latexmk -pdf main.tex
+
+# Open the generated PDF
+open:
+    open main.pdf
+
+compile-open: compile open
+
+# Remove all generated files
+clean:
+    latexmk -c

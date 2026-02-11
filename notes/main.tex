@@ -1,0 +1,72 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb}
+\usepackage{bm}
+\usepackage{hyperref, xcolor}
+\usepackage[
+backend=biber,
+sorting=none,
+style=numeric-comp
+]{biblatex} %Imports biblatex package
+\addbibresource{references.bib}
+
+\renewcommand{\Re}{\operatorname{Re}}
+\renewcommand{\Im}{\operatorname{Im}}
+\newcommand{\ettriangle}{ET$-\Delta$}
+\newcommand{\etaligned}{ET-2L-aligned}
+\newcommand{\etmisaligned}{ET-2L-misaligned}
+\newcommand{\fref}{f_{\rm{ref}}}
+\newcommand{\phiref}{\phi_{\rm{ref}}}
+
+% For comments
+\newcommand{\bernardo}[1]{{\color{red} [BV: #1]}}
+\newcommand{\rs}[1]{{\color{blue} [RS: #1]}}
+
+\title{SGWB}
+\author{Bernardo Veronese}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+\section{Theory}
+
+We label our parameter vector by $\theta$, comprising astrophysical parameters
+$\theta_a$ and cosmological parameters $\theta_c$. The likelihood is given by
+the squared SNR of the residuals:
+
+\begin{equation}
+	\mathcal{L} \propto 2T \sum_{a,b}\int_{f_{\rm{min}}}^{f_{\rm{max}}} \left(S_h(\theta) - S_{h,\rm{data}}\right)^2 \frac{\Gamma^2_{ab}(f)}{S_{n,a}(f)S_{n,b}(f)} df.
+	\label{eq:likelihood}
+\end{equation}
+
+The spectral density of the data, $S_{h,\rm{data}}$, is the sum of the
+contributions of all astrophysical sources, see~\cite{Belgacem:2024ohp}:
+
+\begin{equation}
+	S_h^{\rm{astro}}(f) = \frac{1}{T} \sum_{i=1}^{N} |\tilde{h}_{i,+}(f)|^2 + |\tilde{h}_{i,\times}(f)|^2,
+	\label{eq:data-spectral-density}
+\end{equation}
+
+\bernardo{Where did the sum over extrinsic parameters go?}
+
+In practice, the sum will be carried out over a known catalog, like those
+provided by the COBA
+paper~\cite{Branchesi:2023mws}\footnote{\url{https://apps.et-gw.eu/tds/?r=18321}}.
+
+\section{TODOs}
+\begin{itemize}
+	\item Read~\cite{Capurri:2023jsy} thoroughly
+	\item Read~\cite{Belgacem:2018lbp} thoroughly
+	\item Read ET Blue Book section 2.3.2
+	\item Learn about PLS (power law integrated sensitivty curve)
+	\item Download BNS catalog from COBA paper
+	\item Think about how to implement SGWB-related stuff (talk to Nicolo about it)
+	\item Run benchmark with~\cite{Capurri:2023jsy}
+\end{itemize}
+
+\printbibliography
+\end{document}
