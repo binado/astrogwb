@@ -18,3 +18,13 @@ asgwb = "asgwb:main"
 [build-system]
 requires = ["uv_build>=0.10.2,<0.11.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests that call external libraries or services (deselect with -m 'not integration')",
+]
