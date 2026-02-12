@@ -1,0 +1,38 @@
+repos:
+- hooks:
+  - id: check-yaml
+  - id: end-of-file-fixer
+  - id: trailing-whitespace
+  repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v5.0.0
+- hooks:
+  - args:
+    - --fix
+    id: ruff
+    types_or:
+    - python
+  - id: ruff-format
+    types_or:
+    - python
+  repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.11.6
+- repo: https://github.com/astral-sh/uv-pre-commit
+  # uv version.
+  rev: 0.10.2
+  hooks:
+    # Update the uv lockfile
+    - id: uv-lock
+- hooks:
+  - args:
+    - --remove-empty-cells
+    - --remove-all-notebook-metadata
+    id: nb-clean
+  repo: https://github.com/srstevenson/nb-clean
+  rev: 4.0.1
+- hooks:
+  - id: commitizen
+  - id: commitizen-branch
+    stages:
+    - pre-push
+  repo: https://github.com/commitizen-tools/commitizen
+  rev: v4.6.0
