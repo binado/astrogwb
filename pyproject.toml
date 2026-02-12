@@ -1,0 +1,20 @@
+[project]
+name = "asgwb"
+version = "0.1.0"
+description = "Constraining cosmology with the SGWB from astrophysical sources"
+readme = "README.md"
+authors = [
+    { name = "binado", email = "bernardopveronese@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "bilby>=2.7.1",
+    "numpy>=2.4.2",
+]
+
+[project.scripts]
+asgwb = "asgwb:main"
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"
