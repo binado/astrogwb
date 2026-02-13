@@ -10,12 +10,13 @@ import argparse
 import json
 import logging
 import re
-import subprocess
 import sys
 from glob import glob
 from pathlib import Path
 
 import h5py
+
+from utils import get_git_revision
 
 logger = logging.getLogger(__name__)
 
@@ -26,20 +27,6 @@ def _natural_sort_key(path: str) -> list[int | str]:
     for part in re.split(r"(\d+)", Path(path).stem):
         parts.append(int(part) if part.isdigit() else part)
     return parts
-
-
-def _get_git_revision() -> str | None:
-    try:
-        return (
-            subprocess.check_output(
-                ["git", "rev-parse", "HEAD"],
-                stderr=subprocess.DEVNULL,
-            )
-            .decode()
-            .strip()
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
 
 
 def merge_hdf5_files(
@@ -182,7 +169,7 @@ def main() -> None:
         input_files.sort(key=_natural_sort_key)
 
     metadata: dict[str, str] = {"command": json.dumps(sys.argv)}
-    git_rev = _get_git_revision()
+    git_rev = get_git_revision()
     if git_rev is not None:
         metadata["git_revision"] = git_rev
 

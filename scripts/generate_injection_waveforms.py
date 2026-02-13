@@ -1,12 +1,13 @@
 import argparse
-import logging
 import json
+import logging
 import shutil
-import subprocess
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Iterable, Iterator, Literal, TypedDict, cast
+
+from utils import get_git_revision
 
 import h5py
 import numpy as np
@@ -124,20 +125,6 @@ def generate_injection_waveforms_for_chunk(
         if not chunk_completed and not preserve_tempfiles:
             for npz_path in chunk_npz_files:
                 npz_path.unlink(missing_ok=True)
-
-
-def _get_git_revision() -> str | None:
-    try:
-        return (
-            subprocess.check_output(
-                ["git", "rev-parse", "HEAD"],
-                stderr=subprocess.DEVNULL,
-            )
-            .decode()
-            .strip()
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
 
 
 def consolidate_to_hdf5(
@@ -334,7 +321,7 @@ def main() -> None:
         parser.error("--batch must be > 0")
 
     metadata: dict[str, str] = {"args": json.dumps(vars(args), default=str)}
-    git_rev = _get_git_revision()
+    git_rev = get_git_revision()
     if git_rev is not None:
         metadata["git_revision"] = git_rev
 
