@@ -1,6 +1,9 @@
 import argparse
 import logging
+import shlex
 import shutil
+import subprocess
+import sys
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -124,9 +127,24 @@ def generate_injection_waveforms_for_chunk(
                 npz_path.unlink(missing_ok=True)
 
 
+def _get_git_revision() -> str | None:
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
 def consolidate_to_hdf5(
     tmpdir: Path,
     output_file: Path,
+    metadata: dict[str, str] | None = None,
 ) -> None:
     """Read all .npz files from tmpdir and write them into a single HDF5 file.
 
@@ -169,6 +187,10 @@ def consolidate_to_hdf5(
             for key in param_keys
         }
 
+        if metadata:
+            for k, v in metadata.items():
+                hf.attrs[k] = v
+
         for i, npz_path in enumerate(npz_files):
             data = np.load(npz_path)
             ds_plus[i] = data["plus"]
@@ -203,6 +225,7 @@ def generate_injection_waveforms(
     offset: int = 0,
     batch: int | None = None,
     preserve_tempfiles: bool = False,
+    metadata: dict[str, str] | None = None,
 ) -> None:
     tmpdir = output_file.parent / f".tmp_{output_file.stem}"
     tmpdir.mkdir(parents=True, exist_ok=True)
@@ -240,7 +263,7 @@ def generate_injection_waveforms(
             for chunk in indexed_reader:
                 process_chunk(chunk)
 
-        consolidate_to_hdf5(tmpdir, output_file)
+        consolidate_to_hdf5(tmpdir, output_file, metadata=metadata)
     finally:
         if not preserve_tempfiles:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -311,6 +334,11 @@ def main() -> None:
     if args.batch is not None and args.batch <= 0:
         parser.error("--batch must be > 0")
 
+    metadata: dict[str, str] = {"command": shlex.join(sys.argv)}
+    git_rev = _get_git_revision()
+    if git_rev is not None:
+        metadata["git_revision"] = git_rev
+
     generate_injection_waveforms(
         injection_file=args.injection_file,
         output_file=args.output_file,
@@ -324,6 +352,7 @@ def main() -> None:
         offset=args.offset,
         batch=args.batch,
         preserve_tempfiles=args.preserve_tempfiles,
+        metadata=metadata,
     )
 
 
