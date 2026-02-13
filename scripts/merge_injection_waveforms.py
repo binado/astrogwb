@@ -7,6 +7,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import re
 import sys
@@ -14,6 +15,8 @@ from glob import glob
 from pathlib import Path
 
 import h5py
+
+from utils import get_git_revision
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +29,11 @@ def _natural_sort_key(path: str) -> list[int | str]:
     return parts
 
 
-def merge_hdf5_files(input_files: list[Path], output_file: Path) -> None:
+def merge_hdf5_files(
+    input_files: list[Path],
+    output_file: Path,
+    metadata: dict[str, str] | None = None,
+) -> None:
     """Concatenate per-batch HDF5 waveform files along the injection axis.
 
     Each input file must have the columnar layout produced by
@@ -104,6 +111,20 @@ def merge_hdf5_files(input_files: list[Path], output_file: Path) -> None:
             for key in param_keys
         }
 
+        # --- Propagate source metadata from first input file ---
+        with h5py.File(input_files[0], "r") as first_hf:
+            if "args" in first_hf.attrs:
+                source_args = json.loads(first_hf.attrs["args"])
+                source_args.pop("offset", None)
+                source_args.pop("batch", None)
+                out.attrs["source_args"] = json.dumps(source_args, default=str)
+            if "git_revision" in first_hf.attrs:
+                out.attrs["source_git_revision"] = first_hf.attrs["git_revision"]
+
+        if metadata:
+            for k, v in metadata.items():
+                out.attrs[k] = v
+
         # --- Fill pass ---
         offset = 0
         for path in input_files:
@@ -147,7 +168,14 @@ def main() -> None:
     if not args.no_sort:
         input_files.sort(key=_natural_sort_key)
 
-    merge_hdf5_files([Path(f) for f in input_files], args.output_file)
+    metadata: dict[str, str] = {"command": json.dumps(sys.argv)}
+    git_rev = get_git_revision()
+    if git_rev is not None:
+        metadata["git_revision"] = git_rev
+
+    merge_hdf5_files(
+        [Path(f) for f in input_files], args.output_file, metadata=metadata
+    )
 
 
 if __name__ == "__main__":
