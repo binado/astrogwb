@@ -333,8 +333,7 @@ def main() -> None:
     if args.batch is not None and args.batch <= 0:
         parser.error("--batch must be > 0")
 
-    args_dict = {k: v for k, v in vars(args).items() if k not in ("offset", "batch")}
-    metadata: dict[str, str] = {"args": json.dumps(args_dict, default=str)}
+    metadata: dict[str, str] = {"args": json.dumps(vars(args), default=str)}
     git_rev = _get_git_revision()
     if git_rev is not None:
         metadata["git_revision"] = git_rev

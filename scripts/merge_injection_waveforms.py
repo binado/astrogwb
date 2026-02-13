@@ -126,9 +126,13 @@ def merge_hdf5_files(
 
         # --- Propagate source metadata from first input file ---
         with h5py.File(input_files[0], "r") as first_hf:
-            for attr in ("args", "git_revision"):
-                if attr in first_hf.attrs:
-                    out.attrs[f"source_{attr}"] = first_hf.attrs[attr]
+            if "args" in first_hf.attrs:
+                source_args = json.loads(first_hf.attrs["args"])
+                source_args.pop("offset", None)
+                source_args.pop("batch", None)
+                out.attrs["source_args"] = json.dumps(source_args, default=str)
+            if "git_revision" in first_hf.attrs:
+                out.attrs["source_git_revision"] = first_hf.attrs["git_revision"]
 
         if metadata:
             for k, v in metadata.items():
