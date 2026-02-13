@@ -1,5 +1,6 @@
 import argparse
 import logging
+import shlex
 import shutil
 import subprocess
 import sys
@@ -333,7 +334,7 @@ def main() -> None:
     if args.batch is not None and args.batch <= 0:
         parser.error("--batch must be > 0")
 
-    metadata: dict[str, str] = {"command": " ".join(sys.argv)}
+    metadata: dict[str, str] = {"command": shlex.join(sys.argv)}
     git_rev = _get_git_revision()
     if git_rev is not None:
         metadata["git_revision"] = git_rev
