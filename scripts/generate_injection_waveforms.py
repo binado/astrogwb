@@ -1,9 +1,8 @@
 import argparse
 import logging
-import shlex
+import json
 import shutil
 import subprocess
-import sys
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -334,7 +333,8 @@ def main() -> None:
     if args.batch is not None and args.batch <= 0:
         parser.error("--batch must be > 0")
 
-    metadata: dict[str, str] = {"command": shlex.join(sys.argv)}
+    args_dict = {k: v for k, v in vars(args).items() if k not in ("offset", "batch")}
+    metadata: dict[str, str] = {"args": json.dumps(args_dict, default=str)}
     git_rev = _get_git_revision()
     if git_rev is not None:
         metadata["git_revision"] = git_rev

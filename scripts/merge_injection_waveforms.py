@@ -7,8 +7,10 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import re
+import subprocess
 import sys
 from glob import glob
 from pathlib import Path
@@ -26,7 +28,25 @@ def _natural_sort_key(path: str) -> list[int | str]:
     return parts
 
 
-def merge_hdf5_files(input_files: list[Path], output_file: Path) -> None:
+def _get_git_revision() -> str | None:
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def merge_hdf5_files(
+    input_files: list[Path],
+    output_file: Path,
+    metadata: dict[str, str] | None = None,
+) -> None:
     """Concatenate per-batch HDF5 waveform files along the injection axis.
 
     Each input file must have the columnar layout produced by
@@ -104,6 +124,16 @@ def merge_hdf5_files(input_files: list[Path], output_file: Path) -> None:
             for key in param_keys
         }
 
+        # --- Propagate source metadata from first input file ---
+        with h5py.File(input_files[0], "r") as first_hf:
+            for attr in ("args", "git_revision"):
+                if attr in first_hf.attrs:
+                    out.attrs[f"source_{attr}"] = first_hf.attrs[attr]
+
+        if metadata:
+            for k, v in metadata.items():
+                out.attrs[k] = v
+
         # --- Fill pass ---
         offset = 0
         for path in input_files:
@@ -147,7 +177,14 @@ def main() -> None:
     if not args.no_sort:
         input_files.sort(key=_natural_sort_key)
 
-    merge_hdf5_files([Path(f) for f in input_files], args.output_file)
+    metadata: dict[str, str] = {"command": json.dumps(sys.argv)}
+    git_rev = _get_git_revision()
+    if git_rev is not None:
+        metadata["git_revision"] = git_rev
+
+    merge_hdf5_files(
+        [Path(f) for f in input_files], args.output_file, metadata=metadata
+    )
 
 
 if __name__ == "__main__":
