@@ -140,6 +140,26 @@ export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 module load miniconda/24.4.0-libmamba
+
+# Ensure we use the real conda executable, not a legacy alias like "source activate".
+if alias conda >/dev/null 2>&1; then
+    unalias conda
+fi
+
+CONDA_BIN="$(type -P conda || true)"
+if [[ -z "${CONDA_BIN}" ]]; then
+    echo "Error: 'conda' not found after loading miniconda module." >&2
+    exit 1
+fi
+
+eval "$("${CONDA_BIN}" shell.bash hook)"
+
+# Validate CONDA_DEFAULT_ENV before activation
+if [[ -z "${CONDA_DEFAULT_ENV:-}" ]]; then
+    echo "Error: CONDA_DEFAULT_ENV is not set. Please ensure a conda environment is activated or set CONDA_DEFAULT_ENV." >&2
+    exit 1
+fi
+
 conda activate "${CONDA_DEFAULT_ENV}"
 
 # Choose launcher based on environment.
