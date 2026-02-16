@@ -122,7 +122,7 @@ set -euo pipefail
 
 # Work split config (passed via --export)
 BATCH_SIZE="${BATCH_SIZE:-5000}"
-export CHUNKSIZE="${CHUNKSIZE:-100}"
+export CHUNKSIZE="${CHUNKSIZE:-1000}"
 export NWORKERS="${NWORKERS:-${SLURM_CPUS_PER_TASK:-1}}"
 OUTPUT_DIR="${OUTPUT_DIR:-out}"
 
