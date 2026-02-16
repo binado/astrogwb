@@ -121,16 +121,18 @@ sbatch --array=0-$((NUM_JOBS - 1)) \
 set -euo pipefail
 
 # Work split config (passed via --export)
-export BATCH_SIZE="${BATCH_SIZE:-5000}"
+BATCH_SIZE="${BATCH_SIZE:-5000}"
 export CHUNKSIZE="${CHUNKSIZE:-100}"
 export NWORKERS="${NWORKERS:-${SLURM_CPUS_PER_TASK:-1}}"
-export OUTPUT_DIR="${OUTPUT_DIR:-out}"
-export INJECTION_FILE="${INJECTION_FILE}"
+OUTPUT_DIR="${OUTPUT_DIR:-out}"
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:-0}"
 export OFFSET=$((TASK_ID * BATCH_SIZE))
 export BATCH="${BATCH_SIZE}"
+export INJECTION_FILE="${INJECTION_FILE}"
+export INPUT="${INJECTION_FILE}"
 export OUTPUT_FILE="${OUTPUT_DIR}/waveforms_batch_${TASK_ID}.h5"
+export OUTPUT="${OUTPUT_FILE}"
 
 mkdir -p "${OUTPUT_DIR}"
 
@@ -141,6 +143,26 @@ export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 module load miniconda/24.4.0-libmamba
+
+# Ensure we use the real conda executable, not a legacy alias like "source activate".
+if alias conda >/dev/null 2>&1; then
+    unalias conda
+fi
+
+CONDA_BIN="$(type -P conda || true)"
+if [[ -z "${CONDA_BIN}" ]]; then
+    echo "Error: 'conda' not found after loading miniconda module." >&2
+    exit 1
+fi
+
+eval "$("${CONDA_BIN}" shell.bash hook)"
+
+# Validate CONDA_DEFAULT_ENV before activation
+if [[ -z "${CONDA_DEFAULT_ENV:-}" ]]; then
+    echo "Error: CONDA_DEFAULT_ENV is not set. Please ensure a conda environment is activated or set CONDA_DEFAULT_ENV." >&2
+    exit 1
+fi
+
 conda activate "${CONDA_DEFAULT_ENV}"
 
 # Choose launcher based on environment.
