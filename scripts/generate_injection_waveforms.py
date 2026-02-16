@@ -1,18 +1,16 @@
-import argparse
 import json
 import logging
 import shutil
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from pathlib import Path
-from typing import Iterable, Iterator, Literal, TypedDict, cast
-
-from utils import get_git_revision
+from typing import Annotated, Iterable, Iterator, Literal, TypedDict, cast
 
 import h5py
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from pydantic import Field
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
     convert_to_lal_binary_neutron_star_parameters,
@@ -23,6 +21,12 @@ from bilby.gw.source import (
     lal_binary_neutron_star,
 )
 from bilby.gw.waveform_generator import WaveformGenerator
+from pydantic_settings import (
+    BaseSettings,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
+)
+from utils import get_config_filepath, get_git_revision
 
 from asgwb.io import load_injection_file
 
@@ -35,6 +39,53 @@ class Polarizations(TypedDict):
 
 
 GWSIGNAL_WAVEFORM_APPROXIMANTS = ["SEOBNRv5HM", "SEOBNRv5PHM"]
+
+
+class InjectionWaveformSettings(BaseSettings):
+    """
+    Given an input injection file (CSV or HDF5) containing binary parameters,
+    generate the corresponding waveforms and save them to an output HDF5 file.
+
+    Arguments may be provided from a config.toml file, environment variables,
+    or command-line arguments.
+    """
+
+    model_config = SettingsConfigDict(
+        cli_parse_args=True,
+        cli_kebab_case=True,
+        cli_implicit_flags=True,
+    )
+
+    injection_file: Path
+    output_file: Path
+    waveform_approximant: str = "IMRPhenomPV2_NRTidalv2"
+    reference_frequency: float = 50.0
+    sampling_frequency: float = 2048.0
+    duration: float = 8.0
+    source_type: Literal["BBH", "BHNS", "BNS"] = "BNS"
+    chunksize: int = 1000
+    nworkers: int = 1
+    offset: Annotated[int, Field(ge=0)] = 0
+    batch: Annotated[int | None, Field(gt=0)] = None
+    preserve_tempfiles: bool = False
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        config_filepath = get_config_filepath(Path(__file__))
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            TomlConfigSettingsSource(settings_cls, toml_file=config_filepath),
+            file_secret_settings,
+        )
 
 
 def generate_injection_waveform(
@@ -255,91 +306,39 @@ def generate_injection_waveforms(
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def main() -> None:
+def run(settings: InjectionWaveformSettings) -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-    parser = argparse.ArgumentParser(
-        description="Generate gravitational-wave injection waveforms"
-    )
-    parser.add_argument(
-        "injection_file", type=Path, help="Path to the injection CSV file"
-    )
-    parser.add_argument("output_file", type=Path, help="Path to the output HDF5 file")
-    parser.add_argument(
-        "--waveform-approximant", required=True, help="Waveform approximant name"
-    )
-    parser.add_argument(
-        "--reference-frequency",
-        type=float,
-        default=50.0,
-        help="Reference frequency in Hz",
-    )
-    parser.add_argument(
-        "--sampling-frequency",
-        type=float,
-        required=True,
-        help="Sampling frequency in Hz",
-    )
-    parser.add_argument(
-        "--duration", type=float, required=True, help="Signal duration in seconds"
-    )
-    parser.add_argument(
-        "--source-type",
-        choices=["BBH", "BHNS", "BNS"],
-        default="BBH",
-        help="Source type",
-    )
-    parser.add_argument(
-        "--chunksize", type=int, default=1000, help="Number of injections per chunk"
-    )
-    parser.add_argument(
-        "--nworkers", type=int, default=1, help="Number of parallel workers"
-    )
-    parser.add_argument(
-        "--offset",
-        type=int,
-        default=0,
-        help="Number of injections to skip from the start of the file",
-    )
-    parser.add_argument(
-        "--batch",
-        type=int,
-        default=None,
-        help="Number of injections to process after offset (default: all remaining)",
-    )
-    parser.add_argument(
-        "--preserve-tempfiles",
-        action="store_true",
-        help="Keep temporary .npz files after consolidation (useful for debugging)",
-    )
-    args = parser.parse_args()
-    if args.offset < 0:
-        parser.error("--offset must be >= 0")
-    if args.batch is not None and args.batch <= 0:
-        parser.error("--batch must be > 0")
-
-    metadata: dict[str, str] = {"args": json.dumps(vars(args), default=str)}
+    settings_as_dict = settings.model_dump()
+    logger.info("Running with settings:")
+    for k, v in settings_as_dict.items():
+        logger.info("\t%s = %s", k, v)
+    metadata: dict[str, str] = {"args": json.dumps(settings.model_dump(), default=str)}
     git_rev = get_git_revision()
     if git_rev is not None:
         metadata["git_revision"] = git_rev
 
     generate_injection_waveforms(
-        injection_file=args.injection_file,
-        output_file=args.output_file,
-        waveform_approximant=args.waveform_approximant,
-        reference_frequency=args.reference_frequency,
-        sampling_frequency=args.sampling_frequency,
-        duration=args.duration,
-        source_type=args.source_type,
-        chunksize=args.chunksize,
-        nworkers=args.nworkers,
-        offset=args.offset,
-        batch=args.batch,
-        preserve_tempfiles=args.preserve_tempfiles,
+        injection_file=settings.injection_file,
+        output_file=settings.output_file,
+        waveform_approximant=settings.waveform_approximant,
+        reference_frequency=settings.reference_frequency,
+        sampling_frequency=settings.sampling_frequency,
+        duration=settings.duration,
+        source_type=settings.source_type,
+        chunksize=settings.chunksize,
+        nworkers=settings.nworkers,
+        offset=settings.offset,
+        batch=settings.batch,
+        preserve_tempfiles=settings.preserve_tempfiles,
         metadata=metadata,
     )
+
+
+def main() -> None:
+    run(settings=InjectionWaveformSettings())
 
 
 if __name__ == "__main__":
