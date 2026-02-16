@@ -127,10 +127,12 @@ export NWORKERS="${NWORKERS:-${SLURM_CPUS_PER_TASK:-1}}"
 OUTPUT_DIR="${OUTPUT_DIR:-out}"
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:-0}"
+SCRIPT_DIR="scripts"
+SCRIPT_FILE="scripts/generate_injection_waveforms.py"
 export OFFSET=$((TASK_ID * BATCH_SIZE))
 export BATCH="${BATCH_SIZE}"
 export INJECTION_FILE="${INJECTION_FILE}"
-export INPUT="${INJECTION_FILE}"
+export INPUT="${INJECTION_FILE} ${SCRIPT_FILE}"
 export OUTPUT_FILE="${OUTPUT_DIR}/waveforms_batch_${TASK_ID}.h5"
 export OUTPUT="${OUTPUT_FILE}"
 
@@ -172,11 +174,11 @@ else
   RUNNER=(python)
 fi
 
-if command -v jobnanny >/dev/null 2>&1; then
-  RUNNER=(jobnanny "${RUNNER[@]}")
+if command -v job-nanny >/dev/null 2>&1; then
+  RUNNER=(job-nanny "${RUNNER[@]}")
 fi
 
 echo "Task ${TASK_ID}: offset=${OFFSET} batch=${BATCH_SIZE} workers=${NWORKERS} output=${OUTPUT_FILE}"
 
-"${RUNNER[@]}" scripts/generate_injection_waveforms.py
+"${RUNNER[@]}" generate_injection_waveforms.py
 EOF
