@@ -4,13 +4,12 @@ import shutil
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from pathlib import Path
-from typing import Annotated, Iterable, Iterator, Literal, TypedDict, cast
+from typing import Iterable, Iterator, Literal, TypedDict, cast
 
 import h5py
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from pydantic import Field
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
     convert_to_lal_binary_neutron_star_parameters,
@@ -31,6 +30,14 @@ from utils import get_config_filepath, get_git_revision
 from asgwb.io import load_injection_file
 
 logger = logging.getLogger(__name__)
+
+
+def _config_file() -> Path:
+    current_filepath = Path(__file__)
+    current_filename = current_filepath.stem
+    configfile = current_filepath.parent.parent / f"{current_filename}.config.toml"
+    print(configfile)
+    return configfile
 
 
 class Polarizations(TypedDict):
@@ -65,8 +72,8 @@ class InjectionWaveformSettings(BaseSettings):
     source_type: Literal["BBH", "BHNS", "BNS"] = "BNS"
     chunksize: int = 1000
     nworkers: int = 1
-    offset: Annotated[int, Field(ge=0)] = 0
-    batch: Annotated[int | None, Field(gt=0)] = None
+    offset: int = 0
+    batch: int | None = None
     preserve_tempfiles: bool = False
 
     @classmethod
@@ -315,6 +322,7 @@ def run(settings: InjectionWaveformSettings) -> None:
     logger.info("Running with settings:")
     for k, v in settings_as_dict.items():
         logger.info("\t%s = %s", k, v)
+
     metadata: dict[str, str] = {"args": json.dumps(settings.model_dump(), default=str)}
     git_rev = get_git_revision()
     if git_rev is not None:
