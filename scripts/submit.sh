@@ -137,14 +137,29 @@ export NWORKERS="${NWORKERS:-${SLURM_CPUS_PER_TASK:-1}}"
 OUTPUT_DIR="${OUTPUT_DIR:-out}"
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:-0}"
-SCRIPT_DIR="scripts"
-SCRIPT_FILE="scripts/generate_injection_waveforms.py"
+SUBMIT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
+SCRIPT_FILE="${SUBMIT_DIR}/scripts/generate_injection_waveforms.py"
+if [[ "${INJECTION_FILE}" != /* ]]; then
+    INJECTION_FILE="${SUBMIT_DIR}/${INJECTION_FILE}"
+fi
+if [[ "${OUTPUT_DIR}" != /* ]]; then
+    OUTPUT_DIR="${SUBMIT_DIR}/${OUTPUT_DIR}"
+fi
 export OFFSET=$((TASK_ID * BATCH_SIZE))
 export BATCH="${BATCH_SIZE}"
 export INJECTION_FILE="${INJECTION_FILE}"
 export INPUT="${INJECTION_FILE} ${SCRIPT_FILE}"
 export OUTPUT_FILE="${OUTPUT_DIR}/waveforms_batch_${TASK_ID}.h5"
 export OUTPUT="${OUTPUT_FILE}"
+
+if [[ ! -f "${SCRIPT_FILE}" ]]; then
+    echo "Error: Script file '${SCRIPT_FILE}' not found." >&2
+    exit 1
+fi
+if [[ ! -f "${INJECTION_FILE}" ]]; then
+    echo "Error: Injection file '${INJECTION_FILE}' not found." >&2
+    exit 1
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 
@@ -178,9 +193,11 @@ fi
 conda activate "${SUBMIT_CONDA_PREFIX}"
 
 # Ensure relative paths resolve from the submission directory.
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
+cd "${SUBMIT_DIR}"
 
 echo "Task ${TASK_ID}: offset=${OFFSET} batch=${BATCH_SIZE} workers=${NWORKERS} output=${OUTPUT_FILE}"
+echo "Using script: ${SCRIPT_FILE}"
+echo "Using injection file: ${INJECTION_FILE}"
 echo "Using python: $(command -v python)"
 python -c "import sys, h5py; print(f'Python executable: {sys.executable}'); print(f'h5py version: {h5py.__version__}')"
 
