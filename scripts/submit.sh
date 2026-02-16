@@ -107,9 +107,19 @@ BATCH_SIZE=$(((TOTAL_INJECTIONS + NUM_JOBS - 1) / NUM_JOBS))
 
 echo "Submitting ${NUM_JOBS} jobs for ${TOTAL_INJECTIONS} injections (batch size: ${BATCH_SIZE})"
 
+# Capture the exact conda environment from submit time so compute nodes do not
+# fall back to the module's base environment.
+SUBMIT_CONDA_PREFIX="${CONDA_PREFIX:-}"
+SUBMIT_CONDA_DEFAULT_ENV="${CONDA_DEFAULT_ENV:-}"
+if [[ -z "${SUBMIT_CONDA_PREFIX}" ]]; then
+    echo "Error: CONDA_PREFIX is empty. Activate your target conda env before submitting."
+    exit 1
+fi
+echo "Submit-time conda env: ${SUBMIT_CONDA_PREFIX} (${SUBMIT_CONDA_DEFAULT_ENV:-unknown})"
+
 # Use a quoted heredoc 'EOF' to prevent local variable expansion
 sbatch --array=0-$((NUM_JOBS - 1)) \
---export=ALL,INJECTION_FILE="${FILENAME}",OUTPUT_DIR="${OUTPUT_DIR}",BATCH_SIZE="${BATCH_SIZE}" << 'EOF'
+--export=ALL,INJECTION_FILE="${FILENAME}",OUTPUT_DIR="${OUTPUT_DIR}",BATCH_SIZE="${BATCH_SIZE}",SUBMIT_CONDA_PREFIX="${SUBMIT_CONDA_PREFIX}",SUBMIT_CONDA_DEFAULT_ENV="${SUBMIT_CONDA_DEFAULT_ENV}" << 'EOF'
 #!/bin/bash
 #SBATCH --job-name=inj-waveforms
 #SBATCH --cpus-per-task=8
@@ -159,13 +169,13 @@ fi
 
 eval "$("${CONDA_BIN}" shell.bash hook)"
 
-# Validate CONDA_DEFAULT_ENV before activation
-if [[ -z "${CONDA_DEFAULT_ENV:-}" ]]; then
-    echo "Error: CONDA_DEFAULT_ENV is not set. Please ensure a conda environment is activated or set CONDA_DEFAULT_ENV." >&2
+# Activate the exact environment captured at submission time.
+if [[ -z "${SUBMIT_CONDA_PREFIX:-}" ]]; then
+    echo "Error: SUBMIT_CONDA_PREFIX is not set in the job environment." >&2
     exit 1
 fi
 
-conda activate "${CONDA_DEFAULT_ENV}"
+conda activate "${SUBMIT_CONDA_PREFIX}"
 
 # Ensure relative paths resolve from the submission directory.
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
