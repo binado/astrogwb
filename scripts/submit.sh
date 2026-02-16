@@ -167,18 +167,16 @@ fi
 
 conda activate "${CONDA_DEFAULT_ENV}"
 
-# Choose launcher based on environment.
-if command -v uv >/dev/null 2>&1; then
-  RUNNER=(uv run python)
-else
-  RUNNER=(python)
-fi
-
-if command -v job-nanny >/dev/null 2>&1; then
-  RUNNER=(job-nanny "${RUNNER[@]}")
-fi
+# Ensure relative paths resolve from the submission directory.
+cd "${SLURM_SUBMIT_DIR:-$PWD}"
 
 echo "Task ${TASK_ID}: offset=${OFFSET} batch=${BATCH_SIZE} workers=${NWORKERS} output=${OUTPUT_FILE}"
+echo "Using python: $(command -v python)"
+python -c "import sys, h5py; print(f'Python executable: {sys.executable}'); print(f'h5py version: {h5py.__version__}')"
 
-"${RUNNER[@]}" generate_injection_waveforms.py
+if command -v job-nanny >/dev/null 2>&1; then
+  job-nanny python "${SCRIPT_FILE}"
+else
+  python "${SCRIPT_FILE}"
+fi
 EOF
