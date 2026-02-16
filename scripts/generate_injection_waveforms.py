@@ -10,7 +10,6 @@ import h5py
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from pydantic import Field
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
     convert_to_lal_binary_neutron_star_parameters,
@@ -21,6 +20,7 @@ from bilby.gw.source import (
     lal_binary_neutron_star,
 )
 from bilby.gw.waveform_generator import WaveformGenerator
+from pydantic import Field
 from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
@@ -31,14 +31,6 @@ from utils import get_config_filepath, get_git_revision
 from asgwb.io import load_injection_file
 
 logger = logging.getLogger(__name__)
-
-
-def _config_file() -> Path:
-    current_filepath = Path(__file__)
-    current_filename = current_filepath.stem
-    configfile = current_filepath.parent.parent / f"{current_filename}.config.toml"
-    print(configfile)
-    return configfile
 
 
 class Polarizations(TypedDict):
