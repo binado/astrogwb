@@ -121,10 +121,11 @@ sbatch --array=0-$((NUM_JOBS - 1)) \
 set -euo pipefail
 
 # Work split config (passed via --export)
-BATCH_SIZE="${BATCH_SIZE:-5000}"
-export CHUNKSIZE="${CHUNKSIZE:-1000}"
+export BATCH_SIZE="${BATCH_SIZE:-5000}"
+export CHUNKSIZE="${CHUNKSIZE:-100}"
 export NWORKERS="${NWORKERS:-${SLURM_CPUS_PER_TASK:-1}}"
-OUTPUT_DIR="${OUTPUT_DIR:-out}"
+export OUTPUT_DIR="${OUTPUT_DIR:-out}"
+export INJECTION_FILE="${INJECTION_FILE}"
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:-0}"
 export OFFSET=$((TASK_ID * BATCH_SIZE))
