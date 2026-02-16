@@ -107,9 +107,19 @@ BATCH_SIZE=$(((TOTAL_INJECTIONS + NUM_JOBS - 1) / NUM_JOBS))
 
 echo "Submitting ${NUM_JOBS} jobs for ${TOTAL_INJECTIONS} injections (batch size: ${BATCH_SIZE})"
 
+# Capture the exact conda environment from submit time so compute nodes do not
+# fall back to the module's base environment.
+SUBMIT_CONDA_PREFIX="${CONDA_PREFIX:-}"
+SUBMIT_CONDA_DEFAULT_ENV="${CONDA_DEFAULT_ENV:-}"
+if [[ -z "${SUBMIT_CONDA_PREFIX}" ]]; then
+    echo "Error: CONDA_PREFIX is empty. Activate your target conda env before submitting."
+    exit 1
+fi
+echo "Submit-time conda env: ${SUBMIT_CONDA_PREFIX} (${SUBMIT_CONDA_DEFAULT_ENV:-unknown})"
+
 # Use a quoted heredoc 'EOF' to prevent local variable expansion
 sbatch --array=0-$((NUM_JOBS - 1)) \
---export=ALL,INJECTION_FILE="${FILENAME}",OUTPUT_DIR="${OUTPUT_DIR}",BATCH_SIZE="${BATCH_SIZE}" << 'EOF'
+--export=ALL,INJECTION_FILE="${FILENAME}",OUTPUT_DIR="${OUTPUT_DIR}",BATCH_SIZE="${BATCH_SIZE}",SUBMIT_CONDA_PREFIX="${SUBMIT_CONDA_PREFIX}",SUBMIT_CONDA_DEFAULT_ENV="${SUBMIT_CONDA_DEFAULT_ENV}" << 'EOF'
 #!/bin/bash
 #SBATCH --job-name=inj-waveforms
 #SBATCH --cpus-per-task=8
@@ -127,12 +137,29 @@ export NWORKERS="${NWORKERS:-${SLURM_CPUS_PER_TASK:-1}}"
 OUTPUT_DIR="${OUTPUT_DIR:-out}"
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:-0}"
+SUBMIT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
+SCRIPT_FILE="${SUBMIT_DIR}/scripts/generate_injection_waveforms.py"
+if [[ "${INJECTION_FILE}" != /* ]]; then
+    INJECTION_FILE="${SUBMIT_DIR}/${INJECTION_FILE}"
+fi
+if [[ "${OUTPUT_DIR}" != /* ]]; then
+    OUTPUT_DIR="${SUBMIT_DIR}/${OUTPUT_DIR}"
+fi
 export OFFSET=$((TASK_ID * BATCH_SIZE))
 export BATCH="${BATCH_SIZE}"
 export INJECTION_FILE="${INJECTION_FILE}"
-export INPUT="${INJECTION_FILE}"
+export INPUT="${INJECTION_FILE} ${SCRIPT_FILE}"
 export OUTPUT_FILE="${OUTPUT_DIR}/waveforms_batch_${TASK_ID}.h5"
 export OUTPUT="${OUTPUT_FILE}"
+
+if [[ ! -f "${SCRIPT_FILE}" ]]; then
+    echo "Error: Script file '${SCRIPT_FILE}' not found." >&2
+    exit 1
+fi
+if [[ ! -f "${INJECTION_FILE}" ]]; then
+    echo "Error: Injection file '${INJECTION_FILE}' not found." >&2
+    exit 1
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 
@@ -157,26 +184,26 @@ fi
 
 eval "$("${CONDA_BIN}" shell.bash hook)"
 
-# Validate CONDA_DEFAULT_ENV before activation
-if [[ -z "${CONDA_DEFAULT_ENV:-}" ]]; then
-    echo "Error: CONDA_DEFAULT_ENV is not set. Please ensure a conda environment is activated or set CONDA_DEFAULT_ENV." >&2
+# Activate the exact environment captured at submission time.
+if [[ -z "${SUBMIT_CONDA_PREFIX:-}" ]]; then
+    echo "Error: SUBMIT_CONDA_PREFIX is not set in the job environment." >&2
     exit 1
 fi
 
-conda activate "${CONDA_DEFAULT_ENV}"
+conda activate "${SUBMIT_CONDA_PREFIX}"
 
-# Choose launcher based on environment.
-if command -v uv >/dev/null 2>&1; then
-  RUNNER=(uv run python)
-else
-  RUNNER=(python)
-fi
-
-if command -v jobnanny >/dev/null 2>&1; then
-  RUNNER=(jobnanny "${RUNNER[@]}")
-fi
+# Ensure relative paths resolve from the submission directory.
+cd "${SUBMIT_DIR}"
 
 echo "Task ${TASK_ID}: offset=${OFFSET} batch=${BATCH_SIZE} workers=${NWORKERS} output=${OUTPUT_FILE}"
+echo "Using script: ${SCRIPT_FILE}"
+echo "Using injection file: ${INJECTION_FILE}"
+echo "Using python: $(command -v python)"
+python -c "import sys, h5py; print(f'Python executable: {sys.executable}'); print(f'h5py version: {h5py.__version__}')"
 
-"${RUNNER[@]}" scripts/generate_injection_waveforms.py
+if command -v job-nanny >/dev/null 2>&1; then
+  job-nanny python "${SCRIPT_FILE}"
+else
+  python "${SCRIPT_FILE}"
+fi
 EOF
