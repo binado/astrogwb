@@ -33,14 +33,6 @@ from asgwb.io import load_injection_file
 logger = logging.getLogger(__name__)
 
 
-def _config_file() -> Path:
-    current_filepath = Path(__file__)
-    current_filename = current_filepath.stem
-    configfile = current_filepath.parent.parent / f"{current_filename}.config.toml"
-    print(configfile)
-    return configfile
-
-
 class Polarizations(TypedDict):
     plus: npt.NDArray[np.float64]
     cross: npt.NDArray[np.float64]
