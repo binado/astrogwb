@@ -322,7 +322,6 @@ def run(settings: InjectionWaveformSettings) -> None:
     logger.info("Running with settings:")
     for k, v in settings_as_dict.items():
         logger.info("\t%s = %s", k, v)
-
     metadata: dict[str, str] = {"args": json.dumps(settings.model_dump(), default=str)}
     git_rev = get_git_revision()
     if git_rev is not None:
