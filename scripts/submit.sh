@@ -129,7 +129,10 @@ OUTPUT_DIR="${OUTPUT_DIR:-out}"
 TASK_ID="${SLURM_ARRAY_TASK_ID:-0}"
 export OFFSET=$((TASK_ID * BATCH_SIZE))
 export BATCH="${BATCH_SIZE}"
+export INJECTION_FILE="${INJECTION_FILE}"
+export INPUT="${INJECTION_FILE}"
 export OUTPUT_FILE="${OUTPUT_DIR}/waveforms_batch_${TASK_ID}.h5"
+export OUTPUT="${OUTPUT_FILE}"
 
 mkdir -p "${OUTPUT_DIR}"
 
