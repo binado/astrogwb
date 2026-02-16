@@ -4,12 +4,13 @@ import shutil
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from pathlib import Path
-from typing import Iterable, Iterator, Literal, TypedDict, cast
+from typing import Annotated, Iterable, Iterator, Literal, TypedDict, cast
 
 import h5py
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+from pydantic import Field
 from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
     convert_to_lal_binary_neutron_star_parameters,
@@ -72,8 +73,8 @@ class InjectionWaveformSettings(BaseSettings):
     source_type: Literal["BBH", "BHNS", "BNS"] = "BNS"
     chunksize: int = 1000
     nworkers: int = 1
-    offset: int = 0
-    batch: int | None = None
+    offset: Annotated[int, Field(ge=0)] = 0
+    batch: Annotated[int | None, Field(gt=0)] = None
     preserve_tempfiles: bool = False
 
     @classmethod
