@@ -131,9 +131,9 @@ def get_safe_signal_duration_from_parameter_dict(
     
     if not has_detector_frame and not has_source_frame:
         raise ValueError(
-            "Missing mass parameters. Provide either both 'mass_1' and 'mass_2' "
-            "(detector frame), or both 'mass_1_source' and 'mass_2_source' "
-            "(source frame with redshift)."
+            "Incomplete mass parameters. Both masses must be specified in the same frame: "
+            "either both 'mass_1' and 'mass_2' (detector frame), "
+            "or both 'mass_1_source' and 'mass_2_source' (source frame with redshift)."
         )
     
     if has_detector_frame:
