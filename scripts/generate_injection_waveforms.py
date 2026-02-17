@@ -113,25 +113,42 @@ def get_safe_signal_duration_from_parameter_dict(
 ) -> int:
     """Get safe signal duration from parameter dictionary."""
     parameters = injection.copy()
-    if "mass_1" in parameters:
+    
+    # Validate that mass parameters are consistent (all detector-frame or all source-frame)
+    has_detector_frame = "mass_1" in parameters and "mass_2" in parameters
+    has_source_frame = "mass_1_source" in parameters and "mass_2_source" in parameters
+    has_mixed = (
+        ("mass_1" in parameters and "mass_2_source" in parameters) or
+        ("mass_1_source" in parameters and "mass_2" in parameters)
+    )
+    
+    if has_mixed:
+        raise ValueError(
+            "Cannot mix detector-frame and source-frame mass parameters. "
+            "Provide either both 'mass_1' and 'mass_2' (detector frame), "
+            "or both 'mass_1_source' and 'mass_2_source' (source frame with redshift)."
+        )
+    
+    if not has_detector_frame and not has_source_frame:
+        raise ValueError(
+            "Incomplete mass parameters. Both masses must be specified in the same frame: "
+            "either both 'mass_1' and 'mass_2' (detector frame), "
+            "or both 'mass_1_source' and 'mass_2_source' (source frame with redshift)."
+        )
+    
+    if has_detector_frame:
         mass_1 = parameters["mass_1"]
-    elif "mass_1_source" in parameters:
+        mass_2 = parameters["mass_2"]
+    else:  # has_source_frame
         if "redshift" not in parameters:
-            raise ValueError("Missing redshift in injection parameters")
+            raise ValueError(
+                "Missing 'redshift' in injection parameters. "
+                "Redshift is required when using source-frame masses "
+                "(mass_1_source, mass_2_source)."
+            )
         z = parameters["redshift"]
         mass_1 = parameters["mass_1_source"] * (1 + z)
-    else:
-        raise ValueError("Missing mass_1 or mass_1_source in injection parameters")
-
-    if "mass_2" in parameters:
-        mass_2 = parameters["mass_2"]
-    elif "mass_2_source" in parameters:
-        if "redshift" not in parameters:
-            raise ValueError("Missing redshift in injection parameters")
-        z = parameters["redshift"]
         mass_2 = parameters["mass_2_source"] * (1 + z)
-    else:
-        raise ValueError("Missing mass_2 or mass_2_source in injection parameters")
 
     if use_spin_parameters and all(
         param in parameters for param in ["a_1", "a_2", "tilt_1", "tilt_2"]
