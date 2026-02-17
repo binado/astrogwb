@@ -14,11 +14,13 @@ from bilby.gw.conversion import (
     convert_to_lal_binary_black_hole_parameters,
     convert_to_lal_binary_neutron_star_parameters,
 )
+from bilby.gw.detector import get_safe_signal_duration
 from bilby.gw.source import (
     gwsignal_binary_black_hole,
     lal_binary_black_hole,
     lal_binary_neutron_star,
 )
+from bilby.gw.utils import calculate_time_to_merger
 from bilby.gw.waveform_generator import WaveformGenerator
 from pydantic import Field
 from pydantic_settings import (
@@ -61,7 +63,7 @@ class InjectionWaveformSettings(BaseSettings):
     waveform_approximant: str = "IMRPhenomPV2_NRTidalv2"
     reference_frequency: float = 50.0
     sampling_frequency: float = 2048.0
-    duration: float = 8.0
+    minimum_frequency: float = 2.0
     source_type: Literal["BBH", "BHNS", "BNS"] = "BNS"
     chunksize: int = 1000
     nworkers: int = 1
@@ -91,18 +93,72 @@ class InjectionWaveformSettings(BaseSettings):
 def generate_injection_waveform(
     injection_parameters: dict[str, float],
     waveform_generator: WaveformGenerator,
+    minimum_frequency: float = 2.0,
+    safety: float = 1.1,
 ) -> Polarizations:
     """Generate the plus and cross polarizations for a given set of injection parameters."""
+    duration = get_safe_signal_duration_from_parameter_dict(
+        injection_parameters, minimum_frequency=minimum_frequency, safety=safety
+    )
+    waveform_generator.duration = duration
     waveform = waveform_generator.frequency_domain_strain(injection_parameters)
     return cast(Polarizations, waveform)
+
+
+def get_safe_signal_duration_from_parameter_dict(
+    injection: dict[str, float],
+    minimum_frequency: float = 2.0,
+    use_spin_parameters: bool = True,
+    safety: float = 1.1,
+) -> int:
+    """Get safe signal duration from parameter dictionary."""
+    parameters = injection.copy()
+    if "mass_1" in parameters:
+        mass_1 = parameters["mass_1"]
+    elif "mass_1_source" in parameters:
+        if "redshift" not in parameters:
+            raise ValueError("Missing redshift in injection parameters")
+        z = parameters["redshift"]
+        mass_1 = parameters["mass_1_source"] * (1 + z)
+    else:
+        raise ValueError("Missing mass_1 or mass_1_source in injection parameters")
+
+    if "mass_2" in parameters:
+        mass_2 = parameters["mass_2"]
+    elif "mass_2_source" in parameters:
+        if "redshift" not in parameters:
+            raise ValueError("Missing redshift in injection parameters")
+        z = parameters["redshift"]
+        mass_2 = parameters["mass_2_source"] * (1 + z)
+    else:
+        raise ValueError("Missing mass_2 or mass_2_source in injection parameters")
+
+    if use_spin_parameters and all(
+        param in parameters for param in ["a_1", "a_2", "tilt_1", "tilt_2"]
+    ):
+        # Use bilby's more comprehensive duration calculation that includes spin
+        a_1, a_2 = parameters["a_1"], parameters["a_2"]
+        tilt_1, tilt_2 = parameters["tilt_1"], parameters["tilt_2"]
+        return get_safe_signal_duration(
+            mass_1, mass_2, a_1, a_2, tilt_1, tilt_2, minimum_frequency
+        )
+    else:
+        # Fallback to simple calculation without spin
+        return int(
+            np.ceil(
+                calculate_time_to_merger(
+                    minimum_frequency, mass_1, mass_2, safety=safety
+                )
+            )
+        )
 
 
 def get_bilby_waveform_generator(
     waveform_approximant: str,
     reference_frequency: float,
     sampling_frequency: float,
-    duration: float,
-    source_type: Literal["BBH", "BHNS", "BNS"],
+    duration: float = 8.0,
+    source_type: Literal["BBH", "BHNS", "BNS"] = "BNS",
 ) -> WaveformGenerator:
     waveform_arguments = {
         "waveform_approximant": waveform_approximant,
@@ -134,7 +190,7 @@ def generate_injection_waveforms_for_chunk(
     waveform_approximant: str,
     reference_frequency: float,
     sampling_frequency: float,
-    duration: float,
+    minimum_frequency: float,
     source_type: Literal["BBH", "BHNS", "BNS"],
     preserve_tempfiles: bool = False,
 ) -> None:
@@ -150,7 +206,7 @@ def generate_injection_waveforms_for_chunk(
         waveform_approximant,
         reference_frequency,
         sampling_frequency,
-        duration,
+        8.0,
         source_type,
     )
     columns = chunk.columns.tolist()
@@ -161,7 +217,9 @@ def generate_injection_waveforms_for_chunk(
             i = row.Index
             injection_parameters = dict(zip(columns, row[1:]))
             polarizations = generate_injection_waveform(
-                injection_parameters, waveform_generator
+                injection_parameters,
+                waveform_generator,
+                minimum_frequency=minimum_frequency,
             )
             npz_path = tmpdir / f"{i}.npz"
             chunk_npz_files.append(npz_path)
@@ -255,7 +313,7 @@ def generate_injection_waveforms(
     waveform_approximant: str,
     reference_frequency: float,
     sampling_frequency: float,
-    duration: float,
+    minimum_frequency: float,
     source_type: Literal["BBH", "BHNS", "BNS"],
     chunksize: int = 1000,
     nworkers: int = 1,
@@ -287,7 +345,7 @@ def generate_injection_waveforms(
         waveform_approximant=waveform_approximant,
         reference_frequency=reference_frequency,
         sampling_frequency=sampling_frequency,
-        duration=duration,
+        minimum_frequency=minimum_frequency,
         source_type=source_type,
         preserve_tempfiles=preserve_tempfiles,
     )
@@ -326,7 +384,7 @@ def run(settings: InjectionWaveformSettings) -> None:
         waveform_approximant=settings.waveform_approximant,
         reference_frequency=settings.reference_frequency,
         sampling_frequency=settings.sampling_frequency,
-        duration=settings.duration,
+        minimum_frequency=settings.minimum_frequency,
         source_type=settings.source_type,
         chunksize=settings.chunksize,
         nworkers=settings.nworkers,
