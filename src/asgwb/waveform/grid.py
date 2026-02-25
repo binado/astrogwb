@@ -7,6 +7,15 @@ import numpy as np
 import numpy.typing as npt
 
 
+def frequency_array(
+    duration: float, sampling_frequency: float
+) -> npt.NDArray[np.float64]:
+    nsamples = np.rint(duration * sampling_frequency).astype(np.int32).item()
+    nfrequencies = nsamples // 2 + 1
+    nyquist_frequency = sampling_frequency / 2
+    return np.linspace(0, nyquist_frequency, nfrequencies, dtype=np.float64)
+
+
 @dataclass(frozen=True)
 class FrequencyGrid:
     """Immutable frequency grid parameterising a waveform computation."""
@@ -30,6 +39,13 @@ class FrequencyGrid:
                 f"minimum_frequency must be non-negative, got {self.minimum_frequency}"
             )
 
+        nyquist_frequency = self.sampling_frequency / 2
+        if self.maximum_frequency > nyquist_frequency:
+            raise ValueError(
+                f"maximum_frequency ({self.maximum_frequency}) must be less than or "
+                f"equal to the Nyquist frequency ({nyquist_frequency})"
+            )
+
     @cached_property
     def frequencies(self) -> npt.NDArray[np.float64]:
         delta_f = 1.0 / self.duration
@@ -38,4 +54,10 @@ class FrequencyGrid:
             self.maximum_frequency + delta_f,
             delta_f,
             dtype=np.float64,
+        )
+
+    @cached_property
+    def in_band_mask(self) -> npt.NDArray[bool]:
+        return (self.frequencies >= self.minimum_frequency) & (
+            self.frequencies <= self.maximum_frequency
         )
