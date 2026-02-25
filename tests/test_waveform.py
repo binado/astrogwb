@@ -135,6 +135,16 @@ class TestFrequencyGrid:
                 reference_frequency=50.0,
             )
 
+    def test_non_positive_sampling_frequency_raises(self):
+        with pytest.raises(ValueError, match="sampling_frequency"):
+            FrequencyGrid(
+                duration=8.0,
+                sampling_frequency=-2048.0,
+                minimum_frequency=20.0,
+                maximum_frequency=1024.0,
+                reference_frequency=50.0,
+            )
+
     def test_negative_min_frequency_raises(self):
         with pytest.raises(ValueError, match="minimum_frequency"):
             FrequencyGrid(
