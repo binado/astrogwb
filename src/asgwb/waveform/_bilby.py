@@ -53,9 +53,13 @@ class BilbyWaveformBackend:
             source_model = lal_binary_neutron_star
             parameter_conversion = convert_to_lal_binary_neutron_star_parameters
 
+        # See full waveform arguments in
+        # https://github.com/bilby-dev/bilby/blob/0985f75c664786e21cc4f662d4f12fe181b1a536/bilby/gw/source.py#L337
         waveform_arguments = {
             "waveform_approximant": self._approximant,
             "reference_frequency": self._grid.reference_frequency,
+            "minimum_frequency": self._grid.minimum_frequency,
+            "maximum_frequency": self._grid.maximum_frequency,
         }
 
         return BilbyWaveformGenerator(
