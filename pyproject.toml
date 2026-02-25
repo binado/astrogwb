@@ -31,7 +31,7 @@ dev = [
 [tool.ruff]
 include = ["src/**/*.py", "tests/**/*.py"]
 
-[tool.ty]
+[tool.ty.src]
 include = ["src", "tests"]
 
 [tool.pytest.ini_options]
