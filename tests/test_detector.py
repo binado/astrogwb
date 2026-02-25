@@ -1,5 +1,7 @@
 """Tests for asgwb.detector module (PowerSpectralDensity and Detector)."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import pytest
@@ -11,7 +13,7 @@ from .conftest import requires_bilby
 
 
 @pytest.fixture
-def h1_dict() -> dict:
+def h1_dict() -> dict[str, float | str]:
     return {
         "name": "H1",
         "minimum_frequency": 20.0,
@@ -58,7 +60,7 @@ def test_to_bilby_psd_unknown_curve_type():
 # ---------------------------------------------------------------------------
 
 
-def test_from_dict(h1_dict, aplus_psd):
+def test_from_dict(h1_dict: dict[str, float | str], aplus_psd: PowerSpectralDensity):
     det = Detector.from_dict(h1_dict, psd=aplus_psd)
 
     assert det.name == "H1"
@@ -69,14 +71,14 @@ def test_from_dict(h1_dict, aplus_psd):
     assert det.duty_factor == 0.7
 
 
-def test_from_dict_with_string_psd(h1_dict):
+def test_from_dict_with_string_psd(h1_dict: dict[str, float | str]):
     det = Detector.from_dict(h1_dict, psd="AplusDesign_psd.txt")
 
     assert isinstance(det.psd, PowerSpectralDensity)
     assert det.psd.file.name == "AplusDesign_psd.txt"
 
 
-def test_from_dict_no_psd_raises(h1_dict):
+def test_from_dict_no_psd_raises(h1_dict: dict[str, float | str]):
     # dict has no default_noise_curve key and psd arg is None → KeyError
     incomplete = {k: v for k, v in h1_dict.items() if k != "name"}
     with pytest.raises(KeyError):
@@ -98,7 +100,7 @@ def test_from_file_missing_detector():
         Detector.from_file("NONEXISTENT")
 
 
-def test_from_file_custom_path(tmp_path):
+def test_from_file_custom_path(tmp_path: Path):
     toml_content = """\
 [mytable.TEST]
 default_noise_curve = "AplusDesign_psd.txt"
@@ -131,7 +133,7 @@ duty_factor = 0.8
 
 @pytest.mark.integration
 @requires_bilby
-def test_to_bilby_psd(aplus_psd):
+def test_to_bilby_psd(aplus_psd: PowerSpectralDensity):
     import bilby
 
     bilby_psd = aplus_psd.to_bilby_psd()
