@@ -327,3 +327,4 @@ TSWLatexianTemp*
 #*Notes.bib
 __pycache__
 config
+.DS_Store
