@@ -1,6 +1,6 @@
 # LIGO Hanford
 [detectors.H1]
-default_noise_curve = "APlusDesign_psd.txt"
+default_noise_curve = "AplusDesign_psd.txt"
 minimum_frequency = 20
 maximum_frequency = 2048
 length = 4
@@ -15,7 +15,7 @@ duty_factor = 0.7
 
 # LIGO Livingston
 [detectors.L1]
-default_noise_curve = "APlusDesign_psd.txt"
+default_noise_curve = "AplusDesign_psd.txt"
 minimum_frequency = 20
 maximum_frequency = 2048
 length = 4
