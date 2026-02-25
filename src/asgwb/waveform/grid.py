@@ -35,7 +35,7 @@ def frequency_array(
 
 def resolve_frequency_bounds(
     sampling_frequency: float,
-    minimum_frequency: float = 0.0,
+    minimum_frequency: float = 10.0,
     maximum_frequency: float | None = None,
 ) -> tuple[float, float]:
     if sampling_frequency <= 0:
@@ -89,7 +89,7 @@ class FrequencyGrid:
     duration: float
     sampling_frequency: float
     reference_frequency: float
-    minimum_frequency: float = 0.0
+    minimum_frequency: float = 10.0
     maximum_frequency: float | None = None
 
     def __post_init__(self) -> None:

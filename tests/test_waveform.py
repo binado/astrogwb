@@ -71,7 +71,7 @@ def bbh_params() -> dict[str, float]:
 class TestFrequencyGrid:
     def test_resolve_frequency_bounds_defaults_to_nyquist(self):
         min_frequency, max_frequency = resolve_frequency_bounds(2048.0)
-        assert min_frequency == pytest.approx(0.0)
+        assert min_frequency == pytest.approx(10.0)
         assert max_frequency == pytest.approx(1024.0)
 
     def test_resolve_frequency_bounds_explicit_maximum(self):
@@ -111,7 +111,7 @@ class TestFrequencyGrid:
             sampling_frequency=2048.0,
             reference_frequency=50.0,
         )
-        assert grid.minimum_frequency == 0.0
+        assert grid.minimum_frequency == 10.0
         assert grid.maximum_frequency == pytest.approx(1024.0)
 
     def test_frequencies_array(self, grid: FrequencyGrid):

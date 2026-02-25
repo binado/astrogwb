@@ -49,7 +49,7 @@ class InjectionWaveformSettings(BaseSettings):
     waveform_approximant: str = "IMRPhenomPV2_NRTidalv2"
     reference_frequency: float = 50.0
     sampling_frequency: float = 2048.0
-    minimum_frequency: float = 0.0
+    minimum_frequency: float = 10.0
     maximum_frequency: float | None = None
     duration: float = 8.0
     source_type: SourceType = "BNS"
@@ -255,7 +255,7 @@ def generate_injection_waveforms(
     sampling_frequency: float,
     duration: float,
     source_type: SourceType,
-    minimum_frequency: float = 0.0,
+    minimum_frequency: float = 10.0,
     maximum_frequency: float | None = None,
     chunksize: int = 1000,
     nworkers: int = 1,
