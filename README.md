@@ -5,7 +5,7 @@ from astrophysical sources.
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.11+
 - [`uv`](https://docs.astral.sh/uv/)
 
 ## Local installation

@@ -18,7 +18,7 @@
 - `uv run python scripts/generate_injection_waveforms.py --help`: inspect script CLI options.
 
 ## Coding Style & Naming Conventions
-- Target Python `>=3.12`; use 4-space indentation and explicit type hints for public APIs.
+- Target Python `>=3.11`; use 4-space indentation and explicit type hints for public APIs.
 - Follow Ruff defaults for linting and formatting; do not hand-format against the formatter.
 - Use `snake_case` for modules/functions/variables, `PascalCase` for classes, and `UPPER_SNAKE_CASE` for constants.
 - Keep file/path handling via `pathlib.Path` and prefer config-driven behavior over hardcoded paths.
