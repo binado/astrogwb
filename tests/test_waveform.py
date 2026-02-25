@@ -190,20 +190,20 @@ requires_bilby = pytest.mark.skipif(
 @pytest.mark.integration
 @requires_bilby
 class TestBilbyWaveformBackendIntegration:
-    def test_bns(self, grid, bns_params):
+    def test_bns(self, grid: FrequencyGrid, bns_params: dict[str, float]):
         backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
         pol = backend.frequency_domain_polarizations(bns_params)
         assert isinstance(pol, WaveformPolarizations)
         assert pol.hp.shape == pol.hc.shape
         assert pol.hp.dtype == np.complex128
 
-    def test_bbh(self, grid, bbh_params):
+    def test_bbh(self, grid: FrequencyGrid, bbh_params: dict[str, float]):
         backend = BilbyWaveformBackend("IMRPhenomXP", grid, "BBH")
         pol = backend.frequency_domain_polarizations(bbh_params)
         assert isinstance(pol, WaveformPolarizations)
         assert pol.hp.shape == pol.hc.shape
 
-    def test_caches_generator(self, grid):
+    def test_caches_generator(self, grid: FrequencyGrid):
         """The bilby WaveformGenerator is constructed only once."""
         backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
         gen1 = backend._waveform_generator
@@ -214,7 +214,7 @@ class TestBilbyWaveformBackendIntegration:
 @pytest.mark.integration
 @requires_bilby
 class TestWaveformGeneratorIntegration:
-    def test_end_to_end(self, grid, bns_params):
+    def test_end_to_end(self, grid: FrequencyGrid, bns_params: dict[str, float]):
         gen = WaveformGenerator(
             approximant="IMRPhenomPV2_NRTidalv2",
             grid=grid,
