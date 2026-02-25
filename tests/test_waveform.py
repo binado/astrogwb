@@ -88,7 +88,7 @@ class TestFrequencyGrid:
             maximum_frequency=20.0,
             reference_frequency=50.0,
         )
-        freqs = grid.frequencies
+        freqs = grid.in_band_frequencies
         delta_f = 1.0 / 4.0  # = 0.25
         expected = np.arange(10.0, 20.0 + delta_f, delta_f, dtype=np.float64)
         np.testing.assert_array_almost_equal(freqs, expected)
