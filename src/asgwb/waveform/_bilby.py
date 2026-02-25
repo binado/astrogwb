@@ -3,12 +3,12 @@ from __future__ import annotations
 from functools import cached_property
 from typing import TYPE_CHECKING
 
-from .grid import FrequencyGrid
 from .generator import SourceType
+from .grid import FrequencyGrid
 from .polarizations import WaveformPolarizations
 
 if TYPE_CHECKING:
-    from bilby.gw.waveform_generator import WaveformGenerator as BilbyWFG
+    from bilby.gw.waveform_generator import WaveformGenerator as BilbyWaveformGenerator
 
 GWSIGNAL_WAVEFORM_APPROXIMANTS = frozenset(["SEOBNRv5HM", "SEOBNRv5PHM"])
 
@@ -28,7 +28,7 @@ class BilbyWaveformBackend:
         self._source_type = source_type
 
     @cached_property
-    def _waveform_generator(self) -> BilbyWFG:
+    def _waveform_generator(self) -> BilbyWaveformGenerator:
         from bilby.gw.conversion import (
             convert_to_lal_binary_black_hole_parameters,
             convert_to_lal_binary_neutron_star_parameters,
@@ -38,7 +38,9 @@ class BilbyWaveformBackend:
             lal_binary_black_hole,
             lal_binary_neutron_star,
         )
-        from bilby.gw.waveform_generator import WaveformGenerator as BilbyWFG
+        from bilby.gw.waveform_generator import (
+            WaveformGenerator as BilbyWaveformGenerator,
+        )
 
         if self._source_type == "BBH":
             source_model = (
@@ -56,7 +58,7 @@ class BilbyWaveformBackend:
             "reference_frequency": self._grid.reference_frequency,
         }
 
-        return BilbyWFG(
+        return BilbyWaveformGenerator(
             parameters=None,
             frequency_domain_source_model=source_model,
             duration=self._grid.duration,
