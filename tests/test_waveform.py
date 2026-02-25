@@ -39,12 +39,8 @@ def bns_params() -> dict[str, float]:
         "dec": 0.0,
         "lambda_1": 400.0,
         "lambda_2": 400.0,
-        "a_1": 0.0,
-        "a_2": 0.0,
-        "tilt_1": 0.0,
-        "tilt_2": 0.0,
-        "phi_12": 0.0,
-        "phi_jl": 0.0,
+        "chi_1": 0.0,
+        "chi_2": 0.0,
     }
 
 
