@@ -208,9 +208,15 @@ def test_bilby_backend_satisfies_protocol():
 # ---------------------------------------------------------------------------
 
 
+requires_bilby = pytest.mark.skipif(
+    pytest.importorskip("bilby", reason="bilby not installed") is None,
+    reason="bilby not installed",
+)
+
+
 @pytest.mark.integration
+@requires_bilby
 def test_bilby_backend_bns(grid, bns_params):
-    pytest.importorskip("bilby")
     backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
     pol = backend.frequency_domain_polarizations(bns_params)
     assert isinstance(pol, WaveformPolarizations)
@@ -219,8 +225,8 @@ def test_bilby_backend_bns(grid, bns_params):
 
 
 @pytest.mark.integration
+@requires_bilby
 def test_bilby_backend_bbh(grid, bbh_params):
-    pytest.importorskip("bilby")
     backend = BilbyWaveformBackend("IMRPhenomXP", grid, "BBH")
     pol = backend.frequency_domain_polarizations(bbh_params)
     assert isinstance(pol, WaveformPolarizations)
@@ -228,8 +234,8 @@ def test_bilby_backend_bbh(grid, bbh_params):
 
 
 @pytest.mark.integration
+@requires_bilby
 def test_waveform_generator_end_to_end(grid, bns_params):
-    pytest.importorskip("bilby")
     gen = WaveformGenerator(
         approximant="IMRPhenomPV2_NRTidalv2",
         grid=grid,
@@ -242,9 +248,9 @@ def test_waveform_generator_end_to_end(grid, bns_params):
 
 
 @pytest.mark.integration
+@requires_bilby
 def test_bilby_backend_caches_generator(grid):
     """The bilby WaveformGenerator is constructed only once."""
-    pytest.importorskip("bilby")
     backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
     gen1 = backend._waveform_generator
     gen2 = backend._waveform_generator

@@ -125,17 +125,27 @@ duty_factor = 0.8
 # ---------------------------------------------------------------------------
 
 
+requires_bilby = pytest.mark.skipif(
+    pytest.importorskip("bilby", reason="bilby not installed") is None,
+    reason="bilby not installed",
+)
+
+
 @pytest.mark.integration
+@requires_bilby
 def test_to_bilby_psd():
-    bilby = pytest.importorskip("bilby")
+    import bilby
+
     psd = PowerSpectralDensity.from_noise_curve_dir("AplusDesign_psd.txt")
     bilby_psd = psd.to_bilby_psd()
     assert isinstance(bilby_psd, bilby.gw.detector.PowerSpectralDensity)
 
 
 @pytest.mark.integration
+@requires_bilby
 def test_to_bilby_detector():
-    bilby = pytest.importorskip("bilby")
+    import bilby
+
     det = Detector.from_file("H1")
     ifo = det.to_bilby_detector()
     assert isinstance(ifo, bilby.gw.detector.Interferometer)
