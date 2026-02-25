@@ -13,6 +13,8 @@ from asgwb.waveform import (
 )
 from asgwb.waveform._bilby import BilbyWaveformBackend
 
+from .conftest import requires_bilby
+
 
 @pytest.fixture
 def grid() -> FrequencyGrid:
@@ -185,16 +187,6 @@ class TestBilbyWaveformBackend:
         )
         backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
         assert isinstance(backend, WaveformBackend)
-
-
-try:
-    import bilby as _bilby  # noqa: F401
-
-    _BILBY_AVAILABLE = True
-except ImportError:
-    _BILBY_AVAILABLE = False
-
-requires_bilby = pytest.mark.skipif(not _BILBY_AVAILABLE, reason="bilby not installed")
 
 
 @pytest.mark.integration

@@ -7,10 +7,7 @@ import pytest
 from asgwb.detector.psd import PowerSpectralDensity
 from asgwb.detector.detector import Detector
 
-
-# ---------------------------------------------------------------------------
-# PowerSpectralDensity
-# ---------------------------------------------------------------------------
+from .conftest import requires_bilby
 
 
 def test_from_noise_curve_dir_valid():
@@ -123,16 +120,6 @@ duty_factor = 0.8
 # ---------------------------------------------------------------------------
 # Integration tests (require bilby)
 # ---------------------------------------------------------------------------
-
-
-try:
-    import bilby as _bilby  # noqa: F401
-
-    _BILBY_AVAILABLE = True
-except ImportError:
-    _BILBY_AVAILABLE = False
-
-requires_bilby = pytest.mark.skipif(not _BILBY_AVAILABLE, reason="bilby not installed")
 
 
 @pytest.mark.integration
