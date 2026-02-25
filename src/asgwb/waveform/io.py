@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 
@@ -40,17 +41,21 @@ def dump_waveform_npz(
                 raise ValueError(f"Parameter '{key}' must be scalar, got {type(value)}")
             param_payload[f"{_PARAM_KEY_PREFIX}{key}"] = float(value)
 
-    np.savez(
-        path,
-        hp=polarizations.hp,
-        hc=polarizations.hc,
-        grid_duration=polarizations.grid.duration,
-        grid_sampling_frequency=polarizations.grid.sampling_frequency,
-        grid_minimum_frequency=polarizations.grid.minimum_frequency,
-        grid_maximum_frequency=polarizations.grid.maximum_frequency,
-        grid_reference_frequency=polarizations.grid.reference_frequency,
+    maximum_frequency = polarizations.grid.maximum_frequency
+    if maximum_frequency is None:
+        raise ValueError("grid.maximum_frequency must be resolved before serialization")
+
+    payload = {
+        "hp": polarizations.hp,
+        "hc": polarizations.hc,
+        "grid_duration": polarizations.grid.duration,
+        "grid_sampling_frequency": polarizations.grid.sampling_frequency,
+        "grid_minimum_frequency": polarizations.grid.minimum_frequency,
+        "grid_maximum_frequency": maximum_frequency,
+        "grid_reference_frequency": polarizations.grid.reference_frequency,
         **param_payload,
-    )
+    }
+    np.savez(path, **cast(dict[str, Any], payload))
 
 
 def _read_grid(data: np.lib.npyio.NpzFile) -> FrequencyGrid:

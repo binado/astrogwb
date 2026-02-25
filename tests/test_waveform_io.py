@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
@@ -53,11 +54,12 @@ def test_dump_waveform_npz_rejects_non_npz_extension(
 def test_dump_waveform_npz_rejects_non_scalar_parameter(
     tmp_path: Path, polarizations: WaveformPolarizations
 ):
+    invalid_parameters = cast(dict[str, float], {"mass_1": np.array([1.4, 1.5])})
     with pytest.raises(ValueError, match="must be scalar"):
         dump_waveform_npz(
             path=tmp_path / "waveform.npz",
             polarizations=polarizations,
-            parameters={"mass_1": np.array([1.4, 1.5])},
+            parameters=invalid_parameters,
         )
 
 
