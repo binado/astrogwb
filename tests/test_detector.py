@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from asgwb.detector.psd import PowerSpectralDensity
 from asgwb.detector.detector import Detector
+from asgwb.detector.psd import PowerSpectralDensity
 
 from .conftest import requires_bilby
 
@@ -53,11 +53,6 @@ def test_to_bilby_psd_unknown_curve_type():
     psd = PowerSpectralDensity(file=Path("irrelevant.txt"), curve_type="bad")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="Unknown curve type"):
         psd.to_bilby_psd()
-
-
-# ---------------------------------------------------------------------------
-# Detector
-# ---------------------------------------------------------------------------
 
 
 def test_from_dict(h1_dict: dict[str, float | str], aplus_psd: PowerSpectralDensity):
@@ -124,11 +119,6 @@ duty_factor = 0.8
     assert det.name == "TEST"
     assert det.length == 2.0
     assert det.duty_factor == 0.8
-
-
-# ---------------------------------------------------------------------------
-# Integration tests (require bilby)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
