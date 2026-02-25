@@ -10,6 +10,7 @@ from asgwb.waveform import (
     WaveformBackend,
     WaveformGenerator,
     WaveformPolarizations,
+    resolve_frequency_bounds,
 )
 from asgwb.waveform._bilby import BilbyWaveformBackend
 
@@ -68,6 +69,28 @@ def bbh_params() -> dict[str, float]:
 
 
 class TestFrequencyGrid:
+    def test_resolve_frequency_bounds_defaults_to_nyquist(self):
+        min_frequency, max_frequency = resolve_frequency_bounds(2048.0)
+        assert min_frequency == pytest.approx(10.0)
+        assert max_frequency == pytest.approx(1024.0)
+
+    def test_resolve_frequency_bounds_explicit_maximum(self):
+        min_frequency, max_frequency = resolve_frequency_bounds(
+            sampling_frequency=2048.0,
+            minimum_frequency=10.0,
+            maximum_frequency=800.0,
+        )
+        assert min_frequency == pytest.approx(10.0)
+        assert max_frequency == pytest.approx(800.0)
+
+    def test_resolve_frequency_bounds_invalid_maximum(self):
+        with pytest.raises(ValueError, match="Nyquist"):
+            resolve_frequency_bounds(
+                sampling_frequency=2048.0,
+                minimum_frequency=10.0,
+                maximum_frequency=1200.0,
+            )
+
     def test_construction(self):
         grid = FrequencyGrid(
             duration=8.0,
@@ -81,6 +104,15 @@ class TestFrequencyGrid:
         assert grid.minimum_frequency == 20.0
         assert grid.maximum_frequency == 1024.0
         assert grid.reference_frequency == 50.0
+
+    def test_construction_defaults_frequency_bounds(self):
+        grid = FrequencyGrid(
+            duration=8.0,
+            sampling_frequency=2048.0,
+            reference_frequency=50.0,
+        )
+        assert grid.minimum_frequency == 10.0
+        assert grid.maximum_frequency == pytest.approx(1024.0)
 
     def test_frequencies_array(self, grid: FrequencyGrid):
         nyquist_frequency = grid.sampling_frequency / 2.0
@@ -170,12 +202,12 @@ class TestWaveformPolarizations:
             reference_frequency=50.0,
         )
         n = len(grid.frequencies)
-        hp = np.zeros(n, dtype=np.complex128)
-        hc = np.zeros(n, dtype=np.complex128)
-        pol = WaveformPolarizations(grid=grid, hp=hp, hc=hc)
+        plus = np.zeros(n, dtype=np.complex128)
+        cross = np.zeros(n, dtype=np.complex128)
+        pol = WaveformPolarizations(grid=grid, plus=plus, cross=cross)
         assert pol.grid is grid
-        assert pol.hp is hp
-        assert pol.hc is hc
+        assert pol.plus is plus
+        assert pol.cross is cross
 
 
 class TestBilbyWaveformBackend:
@@ -191,6 +223,19 @@ class TestBilbyWaveformBackend:
         assert isinstance(backend, WaveformBackend)
 
 
+class TestWaveformGenerator:
+    def test_from_sampling_builds_grid(self):
+        gen = WaveformGenerator.from_sampling(
+            approximant="IMRPhenomPV2_NRTidalv2",
+            duration=8.0,
+            sampling_frequency=2048.0,
+            reference_frequency=50.0,
+            source_type="BNS",
+        )
+        assert gen.grid.minimum_frequency == pytest.approx(10.0)
+        assert gen.grid.maximum_frequency == pytest.approx(1024.0)
+
+
 @pytest.mark.integration
 @requires_bilby
 class TestBilbyWaveformBackendIntegration:
@@ -198,14 +243,14 @@ class TestBilbyWaveformBackendIntegration:
         backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
         pol = backend.frequency_domain_polarizations(bns_params)
         assert isinstance(pol, WaveformPolarizations)
-        assert pol.hp.shape == pol.hc.shape
-        assert pol.hp.dtype == np.complex128
+        assert pol.plus.shape == pol.cross.shape
+        assert pol.plus.dtype == np.complex128
 
     def test_bbh(self, grid: FrequencyGrid, bbh_params: dict[str, float]):
         backend = BilbyWaveformBackend("IMRPhenomXP", grid, "BBH")
         pol = backend.frequency_domain_polarizations(bbh_params)
         assert isinstance(pol, WaveformPolarizations)
-        assert pol.hp.shape == pol.hc.shape
+        assert pol.plus.shape == pol.cross.shape
 
     def test_caches_generator(self, grid: FrequencyGrid):
         """The bilby WaveformGenerator is constructed only once."""
@@ -227,4 +272,4 @@ class TestWaveformGeneratorIntegration:
         pol = gen.frequency_domain_polarizations(bns_params)
         assert isinstance(pol, WaveformPolarizations)
         assert pol.grid is grid
-        assert pol.hp.shape == pol.hc.shape
+        assert pol.plus.shape == pol.cross.shape
