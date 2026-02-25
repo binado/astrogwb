@@ -13,10 +13,6 @@ from asgwb.waveform import (
 )
 from asgwb.waveform._bilby import BilbyWaveformBackend
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def grid() -> FrequencyGrid:
@@ -71,11 +67,6 @@ def bbh_params() -> dict[str, float]:
         "phi_12": 0.0,
         "phi_jl": 0.0,
     }
-
-
-# ---------------------------------------------------------------------------
-# FrequencyGrid
-# ---------------------------------------------------------------------------
 
 
 def test_frequency_grid_construction():
@@ -164,11 +155,6 @@ def test_frequency_grid_negative_min_frequency_raises():
         )
 
 
-# ---------------------------------------------------------------------------
-# WaveformPolarizations
-# ---------------------------------------------------------------------------
-
-
 def test_waveform_polarizations_construction():
     grid = FrequencyGrid(
         duration=8.0,
@@ -186,11 +172,6 @@ def test_waveform_polarizations_construction():
     assert pol.hc is hc
 
 
-# ---------------------------------------------------------------------------
-# BilbyWaveformBackend satisfies Protocol
-# ---------------------------------------------------------------------------
-
-
 def test_bilby_backend_satisfies_protocol():
     grid = FrequencyGrid(
         duration=8.0,
@@ -201,11 +182,6 @@ def test_bilby_backend_satisfies_protocol():
     )
     backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
     assert isinstance(backend, WaveformBackend)
-
-
-# ---------------------------------------------------------------------------
-# Integration tests (require bilby)
-# ---------------------------------------------------------------------------
 
 
 requires_bilby = pytest.mark.skipif(
