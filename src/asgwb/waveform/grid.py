@@ -33,6 +33,39 @@ def frequency_array(
     return np.linspace(0, nyquist_frequency, nfrequencies, dtype=np.float64)
 
 
+def resolve_frequency_bounds(
+    sampling_frequency: float,
+    minimum_frequency: float = 0.0,
+    maximum_frequency: float | None = None,
+) -> tuple[float, float]:
+    if sampling_frequency <= 0:
+        raise ValueError(
+            f"sampling_frequency must be positive, got {sampling_frequency}"
+        )
+
+    nyquist_frequency = sampling_frequency / 2.0
+    resolved_maximum_frequency = (
+        nyquist_frequency if maximum_frequency is None else maximum_frequency
+    )
+
+    if minimum_frequency < 0:
+        raise ValueError(
+            f"minimum_frequency must be non-negative, got {minimum_frequency}"
+        )
+    if minimum_frequency >= resolved_maximum_frequency:
+        raise ValueError(
+            f"minimum_frequency ({minimum_frequency}) must be less than "
+            f"maximum_frequency ({resolved_maximum_frequency})"
+        )
+    if resolved_maximum_frequency > nyquist_frequency:
+        raise ValueError(
+            f"maximum_frequency ({resolved_maximum_frequency}) must be less than or "
+            f"equal to the Nyquist frequency ({nyquist_frequency})"
+        )
+
+    return minimum_frequency, resolved_maximum_frequency
+
+
 @dataclass(frozen=True)
 class FrequencyGrid:
     """
@@ -44,19 +77,20 @@ class FrequencyGrid:
         The duration of the segment in seconds.
     sampling_frequency : float
         The sampling frequency in Hertz.
-    minimum_frequency : float
+    minimum_frequency : float, optional
         The minimum frequency to include in the grid in Hertz.
-    maximum_frequency : float
-        The maximum frequency to include in the grid in Hertz.
     reference_frequency : float
         The reference frequency in Hertz.
+    maximum_frequency : float | None, optional
+        The maximum frequency to include in the grid in Hertz. If None, defaults
+        to the Nyquist frequency.
     """
 
     duration: float
     sampling_frequency: float
-    minimum_frequency: float
-    maximum_frequency: float
     reference_frequency: float
+    minimum_frequency: float = 0.0
+    maximum_frequency: float | None = None
 
     def __post_init__(self) -> None:
         if self.duration <= 0:
@@ -65,22 +99,14 @@ class FrequencyGrid:
             raise ValueError(
                 f"sampling_frequency must be positive, got {self.sampling_frequency}"
             )
-        if self.minimum_frequency >= self.maximum_frequency:
-            raise ValueError(
-                f"minimum_frequency ({self.minimum_frequency}) must be less than "
-                f"maximum_frequency ({self.maximum_frequency})"
-            )
-        if self.minimum_frequency < 0:
-            raise ValueError(
-                f"minimum_frequency must be non-negative, got {self.minimum_frequency}"
-            )
 
-        nyquist_frequency = self.sampling_frequency / 2
-        if self.maximum_frequency > nyquist_frequency:
-            raise ValueError(
-                f"maximum_frequency ({self.maximum_frequency}) must be less than or "
-                f"equal to the Nyquist frequency ({nyquist_frequency})"
-            )
+        resolved_minimum, resolved_maximum = resolve_frequency_bounds(
+            sampling_frequency=self.sampling_frequency,
+            minimum_frequency=self.minimum_frequency,
+            maximum_frequency=self.maximum_frequency,
+        )
+        object.__setattr__(self, "minimum_frequency", resolved_minimum)
+        object.__setattr__(self, "maximum_frequency", resolved_maximum)
 
     @cached_property
     def frequencies(self) -> npt.NDArray[np.float64]:

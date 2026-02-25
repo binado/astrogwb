@@ -4,22 +4,11 @@ import shutil
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from pathlib import Path
-from typing import Annotated, Iterable, Iterator, Literal, TypedDict, cast
+from typing import Annotated, Iterable, Iterator
 
 import h5py
 import numpy as np
-import numpy.typing as npt
 import pandas as pd
-from bilby.gw.conversion import (
-    convert_to_lal_binary_black_hole_parameters,
-    convert_to_lal_binary_neutron_star_parameters,
-)
-from bilby.gw.source import (
-    gwsignal_binary_black_hole,
-    lal_binary_black_hole,
-    lal_binary_neutron_star,
-)
-from bilby.gw.waveform_generator import WaveformGenerator
 from pydantic import Field
 from pydantic_settings import (
     BaseSettings,
@@ -29,16 +18,15 @@ from pydantic_settings import (
 from utils import get_config_filepath, get_git_revision
 
 from asgwb.io import load_injection_file
+from asgwb.waveform import (
+    FrequencyGrid,
+    SourceType,
+    WaveformGenerator,
+    WaveformPolarizations,
+)
+from asgwb.waveform.io import dump_waveform_npz, load_waveform_npz
 
 logger = logging.getLogger(__name__)
-
-
-class Polarizations(TypedDict):
-    plus: npt.NDArray[np.float64]
-    cross: npt.NDArray[np.float64]
-
-
-GWSIGNAL_WAVEFORM_APPROXIMANTS = ["SEOBNRv5HM", "SEOBNRv5PHM"]
 
 
 class InjectionWaveformSettings(BaseSettings):
@@ -61,8 +49,10 @@ class InjectionWaveformSettings(BaseSettings):
     waveform_approximant: str = "IMRPhenomPV2_NRTidalv2"
     reference_frequency: float = 50.0
     sampling_frequency: float = 2048.0
+    minimum_frequency: float = 0.0
+    maximum_frequency: float | None = None
     duration: float = 8.0
-    source_type: Literal["BBH", "BHNS", "BNS"] = "BNS"
+    source_type: SourceType = "BNS"
     chunksize: int = 1000
     nworkers: int = 1
     offset: Annotated[int, Field(ge=0)] = 0
@@ -91,40 +81,32 @@ class InjectionWaveformSettings(BaseSettings):
 def generate_injection_waveform(
     injection_parameters: dict[str, float],
     waveform_generator: WaveformGenerator,
-) -> Polarizations:
+) -> WaveformPolarizations:
     """Generate the plus and cross polarizations for a given set of injection parameters."""
-    waveform = waveform_generator.frequency_domain_strain(injection_parameters)
-    return cast(Polarizations, waveform)
+    return waveform_generator.frequency_domain_polarizations(injection_parameters)
 
 
-def get_bilby_waveform_generator(
+def get_waveform_generator(
     waveform_approximant: str,
     reference_frequency: float,
     sampling_frequency: float,
+    minimum_frequency: float,
+    maximum_frequency: float | None,
     duration: float,
-    source_type: Literal["BBH", "BHNS", "BNS"],
+    source_type: SourceType,
 ) -> WaveformGenerator:
-    waveform_arguments = {
-        "waveform_approximant": waveform_approximant,
-        "reference_frequency": reference_frequency,
-    }
-    if source_type == "BBH":
-        source_model = (
-            gwsignal_binary_black_hole
-            if waveform_approximant in GWSIGNAL_WAVEFORM_APPROXIMANTS
-            else lal_binary_black_hole
-        )
-        parameter_conversion = convert_to_lal_binary_black_hole_parameters
-    else:
-        source_model = lal_binary_neutron_star
-        parameter_conversion = convert_to_lal_binary_neutron_star_parameters
-    return WaveformGenerator(
-        parameters=None,
-        frequency_domain_source_model=source_model,
+    grid = FrequencyGrid(
         duration=duration,
         sampling_frequency=sampling_frequency,
-        parameter_conversion=parameter_conversion,
-        waveform_arguments=waveform_arguments,
+        reference_frequency=reference_frequency,
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
+    )
+
+    return WaveformGenerator(
+        approximant=waveform_approximant,
+        grid=grid,
+        source_type=source_type,
     )
 
 
@@ -134,8 +116,10 @@ def generate_injection_waveforms_for_chunk(
     waveform_approximant: str,
     reference_frequency: float,
     sampling_frequency: float,
+    minimum_frequency: float,
+    maximum_frequency: float | None,
     duration: float,
-    source_type: Literal["BBH", "BHNS", "BNS"],
+    source_type: SourceType,
     preserve_tempfiles: bool = False,
 ) -> None:
     """Generate waveforms for a chunk of injections, saving each as a .npz file.
@@ -146,10 +130,12 @@ def generate_injection_waveforms_for_chunk(
     start = chunk.index[0]
     end = chunk.index[-1]
     logger.info("Processing injections %d-%d", start, end)
-    waveform_generator = get_bilby_waveform_generator(
+    waveform_generator = get_waveform_generator(
         waveform_approximant,
         reference_frequency,
         sampling_frequency,
+        minimum_frequency,
+        maximum_frequency,
         duration,
         source_type,
     )
@@ -159,17 +145,19 @@ def generate_injection_waveforms_for_chunk(
     try:
         for row in chunk.itertuples():
             i = row.Index
-            injection_parameters = dict(zip(columns, row[1:]))
+            injection_parameters = {
+                column: float(value)
+                for column, value in zip(columns, row[1:], strict=True)
+            }
             polarizations = generate_injection_waveform(
                 injection_parameters, waveform_generator
             )
             npz_path = tmpdir / f"{i}.npz"
             chunk_npz_files.append(npz_path)
-            np.savez(
-                npz_path,
-                plus=polarizations["plus"],
-                cross=polarizations["cross"],
-                **injection_parameters,
+            dump_waveform_npz(
+                path=npz_path,
+                polarizations=polarizations,
+                parameters=injection_parameters,
             )
         chunk_completed = True
     finally:
@@ -195,11 +183,9 @@ def consolidate_to_hdf5(
 
     n_injections = len(npz_files)
 
-    # Peek at the first file to discover shapes and parameter keys.
-    first = np.load(npz_files[0])
-    freq_bins = first["plus"].shape[0]
-    param_keys = [k for k in first.files if k not in ("plus", "cross")]
-    first.close()
+    first_pol, first_parameters = load_waveform_npz(npz_files[0])
+    freq_bins = first_pol.hp.shape[0]
+    param_keys = list(first_parameters.keys())
 
     with h5py.File(output_file, "w") as hf:
         pol_group = hf.create_group("polarizations")
@@ -229,12 +215,24 @@ def consolidate_to_hdf5(
                 hf.attrs[k] = v
 
         for i, npz_path in enumerate(npz_files):
-            data = np.load(npz_path)
-            ds_plus[i] = data["plus"]
-            ds_cross[i] = data["cross"]
+            polarizations, parameters = load_waveform_npz(npz_path, grid=first_pol.grid)
+            if polarizations.hp.shape[0] != freq_bins:
+                raise ValueError(
+                    f"Frequency bins mismatch in {npz_path}: "
+                    f"expected {freq_bins}, got {polarizations.hp.shape[0]}"
+                )
+
+            file_param_keys = list(parameters.keys())
+            if file_param_keys != param_keys:
+                raise ValueError(
+                    f"Parameter keys mismatch in {npz_path}: "
+                    f"expected {param_keys}, got {file_param_keys}"
+                )
+
+            ds_plus[i] = polarizations.hp
+            ds_cross[i] = polarizations.hc
             for key in param_keys:
-                ds_params[key][i] = data[key].item()
-            data.close()
+                ds_params[key][i] = parameters[key]
 
 
 def reindex_chunks(
@@ -256,7 +254,9 @@ def generate_injection_waveforms(
     reference_frequency: float,
     sampling_frequency: float,
     duration: float,
-    source_type: Literal["BBH", "BHNS", "BNS"],
+    source_type: SourceType,
+    minimum_frequency: float = 0.0,
+    maximum_frequency: float | None = None,
     chunksize: int = 1000,
     nworkers: int = 1,
     offset: int = 0,
@@ -287,6 +287,8 @@ def generate_injection_waveforms(
         waveform_approximant=waveform_approximant,
         reference_frequency=reference_frequency,
         sampling_frequency=sampling_frequency,
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
         duration=duration,
         source_type=source_type,
         preserve_tempfiles=preserve_tempfiles,
@@ -326,6 +328,8 @@ def run(settings: InjectionWaveformSettings) -> None:
         waveform_approximant=settings.waveform_approximant,
         reference_frequency=settings.reference_frequency,
         sampling_frequency=settings.sampling_frequency,
+        minimum_frequency=settings.minimum_frequency,
+        maximum_frequency=settings.maximum_frequency,
         duration=settings.duration,
         source_type=settings.source_type,
         chunksize=settings.chunksize,
