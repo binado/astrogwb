@@ -14,8 +14,8 @@ class WaveformPolarizations:
     """Plus and cross polarization arrays on a frequency grid."""
 
     grid: FrequencyGrid
-    hp: npt.NDArray[np.complex128]
-    hc: npt.NDArray[np.complex128]
+    plus: npt.NDArray[np.complex128]
+    cross: npt.NDArray[np.complex128]
 
     def dump(self, path: Path, parameters: dict[str, float] | None = None) -> None:
         from .io import dump_waveform_npz

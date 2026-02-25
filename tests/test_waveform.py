@@ -202,12 +202,12 @@ class TestWaveformPolarizations:
             reference_frequency=50.0,
         )
         n = len(grid.frequencies)
-        hp = np.zeros(n, dtype=np.complex128)
-        hc = np.zeros(n, dtype=np.complex128)
-        pol = WaveformPolarizations(grid=grid, hp=hp, hc=hc)
+        plus = np.zeros(n, dtype=np.complex128)
+        cross = np.zeros(n, dtype=np.complex128)
+        pol = WaveformPolarizations(grid=grid, plus=plus, cross=cross)
         assert pol.grid is grid
-        assert pol.hp is hp
-        assert pol.hc is hc
+        assert pol.plus is plus
+        assert pol.cross is cross
 
 
 class TestBilbyWaveformBackend:
@@ -223,6 +223,19 @@ class TestBilbyWaveformBackend:
         assert isinstance(backend, WaveformBackend)
 
 
+class TestWaveformGenerator:
+    def test_from_sampling_builds_grid(self):
+        gen = WaveformGenerator.from_sampling(
+            approximant="IMRPhenomPV2_NRTidalv2",
+            duration=8.0,
+            sampling_frequency=2048.0,
+            reference_frequency=50.0,
+            source_type="BNS",
+        )
+        assert gen.grid.minimum_frequency == pytest.approx(10.0)
+        assert gen.grid.maximum_frequency == pytest.approx(1024.0)
+
+
 @pytest.mark.integration
 @requires_bilby
 class TestBilbyWaveformBackendIntegration:
@@ -230,14 +243,14 @@ class TestBilbyWaveformBackendIntegration:
         backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
         pol = backend.frequency_domain_polarizations(bns_params)
         assert isinstance(pol, WaveformPolarizations)
-        assert pol.hp.shape == pol.hc.shape
-        assert pol.hp.dtype == np.complex128
+        assert pol.plus.shape == pol.cross.shape
+        assert pol.plus.dtype == np.complex128
 
     def test_bbh(self, grid: FrequencyGrid, bbh_params: dict[str, float]):
         backend = BilbyWaveformBackend("IMRPhenomXP", grid, "BBH")
         pol = backend.frequency_domain_polarizations(bbh_params)
         assert isinstance(pol, WaveformPolarizations)
-        assert pol.hp.shape == pol.hc.shape
+        assert pol.plus.shape == pol.cross.shape
 
     def test_caches_generator(self, grid: FrequencyGrid):
         """The bilby WaveformGenerator is constructed only once."""
@@ -259,4 +272,4 @@ class TestWaveformGeneratorIntegration:
         pol = gen.frequency_domain_polarizations(bns_params)
         assert isinstance(pol, WaveformPolarizations)
         assert pol.grid is grid
-        assert pol.hp.shape == pol.hc.shape
+        assert pol.plus.shape == pol.cross.shape

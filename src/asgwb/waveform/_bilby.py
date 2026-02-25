@@ -76,5 +76,5 @@ class BilbyWaveformBackend:
     ) -> WaveformPolarizations:
         result = self._waveform_generator.frequency_domain_strain(parameters)
         return WaveformPolarizations(
-            grid=self._grid, hp=result["plus"], hc=result["cross"]
+            grid=self._grid, plus=result["plus"], cross=result["cross"]
         )

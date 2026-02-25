@@ -24,9 +24,9 @@ def grid() -> FrequencyGrid:
 @pytest.fixture
 def polarizations(grid: FrequencyGrid) -> WaveformPolarizations:
     n = len(grid.frequencies)
-    hp = np.arange(n, dtype=np.float64).astype(np.complex128)
-    hc = (np.arange(n, dtype=np.float64) * 1j).astype(np.complex128)
-    return WaveformPolarizations(grid=grid, hp=hp, hc=hc)
+    plus = np.arange(n, dtype=np.float64).astype(np.complex128)
+    cross = (np.arange(n, dtype=np.float64) * 1j).astype(np.complex128)
+    return WaveformPolarizations(grid=grid, plus=plus, cross=cross)
 
 
 def test_dump_and_load_waveform_npz_round_trip(
@@ -39,8 +39,8 @@ def test_dump_and_load_waveform_npz_round_trip(
     loaded_polarizations, loaded_parameters = load_waveform_npz(path=path)
 
     assert loaded_polarizations.grid == polarizations.grid
-    np.testing.assert_allclose(loaded_polarizations.hp, polarizations.hp)
-    np.testing.assert_allclose(loaded_polarizations.hc, polarizations.hc)
+    np.testing.assert_allclose(loaded_polarizations.plus, polarizations.plus)
+    np.testing.assert_allclose(loaded_polarizations.cross, polarizations.cross)
     assert loaded_parameters == parameters
 
 
@@ -90,6 +90,6 @@ def test_waveform_polarizations_wrappers_round_trip(
     loaded_polarizations, loaded_parameters = WaveformPolarizations.load(path=path)
 
     assert loaded_polarizations.grid == polarizations.grid
-    np.testing.assert_allclose(loaded_polarizations.hp, polarizations.hp)
-    np.testing.assert_allclose(loaded_polarizations.hc, polarizations.hc)
+    np.testing.assert_allclose(loaded_polarizations.plus, polarizations.plus)
+    np.testing.assert_allclose(loaded_polarizations.cross, polarizations.cross)
     assert loaded_parameters == parameters

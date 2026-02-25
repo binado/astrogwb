@@ -19,7 +19,6 @@ from utils import get_config_filepath, get_git_revision
 
 from asgwb.io import load_injection_file
 from asgwb.waveform import (
-    FrequencyGrid,
     SourceType,
     WaveformGenerator,
     WaveformPolarizations,
@@ -95,18 +94,14 @@ def get_waveform_generator(
     duration: float,
     source_type: SourceType,
 ) -> WaveformGenerator:
-    grid = FrequencyGrid(
+    return WaveformGenerator.from_sampling(
+        approximant=waveform_approximant,
         duration=duration,
         sampling_frequency=sampling_frequency,
         reference_frequency=reference_frequency,
+        source_type=source_type,
         minimum_frequency=minimum_frequency,
         maximum_frequency=maximum_frequency,
-    )
-
-    return WaveformGenerator(
-        approximant=waveform_approximant,
-        grid=grid,
-        source_type=source_type,
     )
 
 
@@ -184,7 +179,7 @@ def consolidate_to_hdf5(
     n_injections = len(npz_files)
 
     first_pol, first_parameters = load_waveform_npz(npz_files[0])
-    freq_bins = first_pol.hp.shape[0]
+    freq_bins = first_pol.plus.shape[0]
     param_keys = list(first_parameters.keys())
 
     with h5py.File(output_file, "w") as hf:
@@ -216,10 +211,10 @@ def consolidate_to_hdf5(
 
         for i, npz_path in enumerate(npz_files):
             polarizations, parameters = load_waveform_npz(npz_path, grid=first_pol.grid)
-            if polarizations.hp.shape[0] != freq_bins:
+            if polarizations.plus.shape[0] != freq_bins:
                 raise ValueError(
                     f"Frequency bins mismatch in {npz_path}: "
-                    f"expected {freq_bins}, got {polarizations.hp.shape[0]}"
+                    f"expected {freq_bins}, got {polarizations.plus.shape[0]}"
                 )
 
             file_param_keys = list(parameters.keys())
@@ -229,8 +224,8 @@ def consolidate_to_hdf5(
                     f"expected {param_keys}, got {file_param_keys}"
                 )
 
-            ds_plus[i] = polarizations.hp
-            ds_cross[i] = polarizations.hc
+            ds_plus[i] = polarizations.plus
+            ds_cross[i] = polarizations.cross
             for key in param_keys:
                 ds_params[key][i] = parameters[key]
 

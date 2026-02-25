@@ -11,7 +11,7 @@ from .polarizations import WaveformPolarizations
 _NPZ_SUFFIX = ".npz"
 _GRID_KEY_PREFIX = "grid_"
 _PARAM_KEY_PREFIX = "param_"
-_REQUIRED_WAVEFORM_KEYS = ("hp", "hc")
+_WAVEFORM_KEYS = ("plus", "cross")
 _REQUIRED_GRID_KEYS = (
     f"{_GRID_KEY_PREFIX}duration",
     f"{_GRID_KEY_PREFIX}sampling_frequency",
@@ -46,8 +46,8 @@ def dump_waveform_npz(
         raise ValueError("grid.maximum_frequency must be resolved before serialization")
 
     payload = {
-        "hp": polarizations.hp,
-        "hc": polarizations.hc,
+        "plus": polarizations.plus,
+        "cross": polarizations.cross,
         "grid_duration": polarizations.grid.duration,
         "grid_sampling_frequency": polarizations.grid.sampling_frequency,
         "grid_minimum_frequency": polarizations.grid.minimum_frequency,
@@ -59,11 +59,7 @@ def dump_waveform_npz(
 
 
 def _read_grid(data: np.lib.npyio.NpzFile) -> FrequencyGrid:
-    missing_keys = [
-        key
-        for key in (*_REQUIRED_WAVEFORM_KEYS, *_REQUIRED_GRID_KEYS)
-        if key not in data.files
-    ]
+    missing_keys = [key for key in _REQUIRED_GRID_KEYS if key not in data.files]
     if missing_keys:
         missing = ", ".join(sorted(missing_keys))
         raise ValueError(f"Missing required NPZ keys: {missing}")
@@ -75,6 +71,19 @@ def _read_grid(data: np.lib.npyio.NpzFile) -> FrequencyGrid:
         maximum_frequency=float(data["grid_maximum_frequency"].item()),
         reference_frequency=float(data["grid_reference_frequency"].item()),
     )
+
+
+def _read_polarizations(
+    data: np.lib.npyio.NpzFile, grid: FrequencyGrid
+) -> WaveformPolarizations:
+    if all(key in data.files for key in _WAVEFORM_KEYS):
+        return WaveformPolarizations(
+            grid=grid,
+            plus=np.asarray(data["plus"], dtype=np.complex128),
+            cross=np.asarray(data["cross"], dtype=np.complex128),
+        )
+    missing = [key for key in _WAVEFORM_KEYS if key not in data.files]
+    raise ValueError(f"Missing waveform polarization keys in NPZ file: {missing}")
 
 
 def load_waveform_npz(
@@ -94,10 +103,9 @@ def load_waveform_npz(
             for key in data.files
             if key.startswith(_PARAM_KEY_PREFIX)
         }
-        polarizations = WaveformPolarizations(
+        polarizations = _read_polarizations(
+            data=data,
             grid=serialized_grid if grid is None else grid,
-            hp=np.asarray(data["hp"], dtype=np.complex128),
-            hc=np.asarray(data["hc"], dtype=np.complex128),
         )
 
     return polarizations, parameters
