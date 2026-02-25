@@ -7,7 +7,7 @@ authors = [
     { name = "binado", email = "bernardopveronese@gmail.com" }
 ]
 license = { file = "LICENSE" }
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "bilby>=2.7.1",
     "h5py>=3.13.0",
@@ -24,7 +24,15 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "ruff>=0.15.2",
+    "ty>=0.0.18",
 ]
+
+[tool.ruff]
+include = ["src/**/*.py", "tests/**/*.py"]
+
+[tool.ty]
+include = ["src", "tests"]
 
 [tool.pytest.ini_options]
 markers = [
