@@ -82,19 +82,21 @@ class TestFrequencyGrid:
         assert grid.maximum_frequency == 1024.0
         assert grid.reference_frequency == 50.0
 
-    def test_frequencies_array(self):
-        grid = FrequencyGrid(
-            duration=4.0,
-            sampling_frequency=2048.0,
-            minimum_frequency=10.0,
-            maximum_frequency=20.0,
-            reference_frequency=50.0,
+    def test_frequencies_array(self, grid: FrequencyGrid):
+        nyquist_frequency = grid.sampling_frequency / 2.0
+        assert grid.frequencies[0] == pytest.approx(0.0)
+        assert grid.frequencies[-1] == pytest.approx(nyquist_frequency)
+        assert grid.in_band_frequencies[0] == pytest.approx(grid.minimum_frequency)
+        assert grid.in_band_frequencies[-1] == pytest.approx(grid.maximum_frequency)
+
+    @requires_bilby
+    def test_frequencies_array_matches_bilby(self, grid: FrequencyGrid):
+        from bilby.core.utils.series import create_frequency_series
+
+        frequencies_bilby = create_frequency_series(
+            grid.sampling_frequency, grid.duration
         )
-        freqs = grid.in_band_frequencies
-        delta_f = 1.0 / 4.0  # = 0.25
-        expected = np.arange(10.0, 20.0 + delta_f, delta_f, dtype=np.float64)
-        np.testing.assert_array_almost_equal(freqs, expected)
-        assert freqs[0] == pytest.approx(10.0)
+        np.testing.assert_allclose(grid.frequencies, frequencies_bilby)
 
     def test_frozen(self):
         grid = FrequencyGrid(
