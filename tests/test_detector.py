@@ -125,10 +125,14 @@ duty_factor = 0.8
 # ---------------------------------------------------------------------------
 
 
-requires_bilby = pytest.mark.skipif(
-    pytest.importorskip("bilby", reason="bilby not installed") is None,
-    reason="bilby not installed",
-)
+try:
+    import bilby as _bilby  # noqa: F401
+
+    _BILBY_AVAILABLE = True
+except ImportError:
+    _BILBY_AVAILABLE = False
+
+requires_bilby = pytest.mark.skipif(not _BILBY_AVAILABLE, reason="bilby not installed")
 
 
 @pytest.mark.integration
