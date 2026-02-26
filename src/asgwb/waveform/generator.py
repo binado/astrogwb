@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from .grid import FrequencyGrid
+
+if TYPE_CHECKING:
+    from bilby.gw.waveform_generator import WaveformGenerator as BilbyWaveformGenerator
 from .polarizations import WaveformPolarizations
 
 SourceType = Literal["BBH", "BHNS", "BNS"]
@@ -56,3 +59,13 @@ class WaveformGenerator:
         self, parameters: dict[str, float]
     ) -> WaveformPolarizations:
         return self._backend.frequency_domain_polarizations(parameters)
+
+    def as_bilby_waveform_generator(self) -> BilbyWaveformGenerator:
+        from ._bilby import BilbyWaveformBackend
+
+        if not isinstance(self._backend, BilbyWaveformBackend):
+            backend = BilbyWaveformBackend(
+                self.approximant, self.grid, self.source_type
+            )
+            return backend.waveform_generator
+        return self._backend.waveform_generator

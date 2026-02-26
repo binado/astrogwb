@@ -123,12 +123,16 @@ class TestFrequencyGrid:
 
     @requires_bilby
     def test_frequencies_array_matches_bilby(self, grid: FrequencyGrid):
-        from bilby.core.utils.series import create_frequency_series
-
-        frequencies_bilby = create_frequency_series(
-            grid.sampling_frequency, grid.duration
+        generator = WaveformGenerator.from_sampling(
+            approximant="IMRPhenomPV2_NRTidalv2",
+            duration=8.0,
+            sampling_frequency=2048.0,
+            reference_frequency=50.0,
+            source_type="BNS",
         )
-        np.testing.assert_allclose(grid.frequencies, frequencies_bilby)
+        ours = generator.grid.frequencies
+        theirs = generator.as_bilby_waveform_generator().frequency_array
+        np.testing.assert_allclose(ours, theirs)
 
     def test_frozen(self):
         grid = FrequencyGrid(
@@ -255,8 +259,8 @@ class TestBilbyWaveformBackendIntegration:
     def test_caches_generator(self, grid: FrequencyGrid):
         """The bilby WaveformGenerator is constructed only once."""
         backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
-        gen1 = backend._waveform_generator
-        gen2 = backend._waveform_generator
+        gen1 = backend.waveform_generator
+        gen2 = backend.waveform_generator
         assert gen1 is gen2
 
 

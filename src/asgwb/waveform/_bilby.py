@@ -28,7 +28,7 @@ class BilbyWaveformBackend:
         self._source_type = source_type
 
     @cached_property
-    def _waveform_generator(self) -> BilbyWaveformGenerator:
+    def waveform_generator(self) -> BilbyWaveformGenerator:
         from bilby.gw.conversion import (
             convert_to_lal_binary_black_hole_parameters,
             convert_to_lal_binary_neutron_star_parameters,
@@ -74,7 +74,7 @@ class BilbyWaveformBackend:
     def frequency_domain_polarizations(
         self, parameters: dict[str, float]
     ) -> WaveformPolarizations:
-        result = self._waveform_generator.frequency_domain_strain(parameters)
+        result = self.waveform_generator.frequency_domain_strain(parameters)
         return WaveformPolarizations(
             grid=self._grid, plus=result["plus"], cross=result["cross"]
         )
