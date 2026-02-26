@@ -36,3 +36,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv run --group dev pytest
+
+  test-bilby-integration:
+    name: Test bilby integration (Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: uv run --group dev --extra bilby pytest -m integration
