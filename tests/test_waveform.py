@@ -248,7 +248,7 @@ class TestBilbyWaveformBackend:
                 "bilby.gw.conversion": None,
             },
         ):
-            with pytest.raises(ImportError, match="bilby is required.*pip install bilby"):
+            with pytest.raises(ImportError, match=r"bilby is required.*asgwb\[bilby\]"):
                 _ = backend.waveform_generator
 
 

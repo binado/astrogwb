@@ -45,7 +45,9 @@ class BilbyWaveformBackend:
         except ImportError as exc:
             raise ImportError(
                 "bilby is required to use BilbyWaveformBackend. "
-                "Install it with: pip install bilby"
+                "Install it with: uv pip install 'asgwb[bilby]' "
+                "(or pip install 'asgwb[bilby]' / pip install bilby). "
+                "If working in this repo, use: uv sync --extra bilby"
             ) from exc
 
         if self._source_type == "BBH":

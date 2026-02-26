@@ -16,6 +16,24 @@ Install project and development dependencies:
 uv sync --group dev
 ```
 
+Install with optional `bilby` support:
+
+```bash
+uv sync --group dev --extra bilby
+```
+
+If you already synced and just want to enable the optional dependency:
+
+```bash
+uv sync --extra bilby
+```
+
+For consumers installing `asgwb` as a dependency, install the extra with:
+
+```bash
+uv pip install "asgwb[bilby]"
+```
+
 Run project scripts inside the managed environment:
 
 ```bash
