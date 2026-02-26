@@ -75,7 +75,15 @@ class Detector:
         return cls.from_dict(detector_data, psd=psd)
 
     def to_bilby_detector(self) -> Interferometer:
-        from bilby.gw.detector import Interferometer
+        try:
+            from bilby.gw.detector import Interferometer
+        except ImportError as exc:
+            raise ImportError(
+                "bilby is required to convert Detector to a bilby Interferometer. "
+                "Install it with: uv pip install 'asgwb[bilby]' "
+                "(or pip install 'asgwb[bilby]' / pip install bilby). "
+                "If working in this repo, use: uv sync --extra bilby"
+            ) from exc
 
         return Interferometer(
             name=self.name,

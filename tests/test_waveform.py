@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 
@@ -123,12 +126,12 @@ class TestFrequencyGrid:
 
     @requires_bilby
     def test_frequencies_array_matches_bilby(self, grid: FrequencyGrid):
-        from bilby.core.utils.series import create_frequency_series
-
-        frequencies_bilby = create_frequency_series(
-            grid.sampling_frequency, grid.duration
+        generator = WaveformGenerator(
+            approximant="IMRPhenomPV2_NRTidalv2", grid=grid, source_type="BNS"
         )
-        np.testing.assert_allclose(grid.frequencies, frequencies_bilby)
+        ours = generator.grid.frequencies
+        theirs = generator.as_bilby_waveform_generator().frequency_array
+        np.testing.assert_allclose(ours, theirs)
 
     def test_frozen(self):
         grid = FrequencyGrid(
@@ -222,6 +225,28 @@ class TestBilbyWaveformBackend:
         backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
         assert isinstance(backend, WaveformBackend)
 
+    def test_missing_bilby_raises_import_error(self):
+        grid = FrequencyGrid(
+            duration=8.0,
+            sampling_frequency=2048.0,
+            minimum_frequency=20.0,
+            maximum_frequency=1024.0,
+            reference_frequency=50.0,
+        )
+        backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
+        with patch.dict(
+            sys.modules,
+            {
+                "bilby": None,
+                "bilby.gw": None,
+                "bilby.gw.waveform_generator": None,
+                "bilby.gw.source": None,
+                "bilby.gw.conversion": None,
+            },
+        ):
+            with pytest.raises(ImportError, match=r"bilby is required.*asgwb\[bilby\]"):
+                _ = backend.waveform_generator
+
 
 class TestWaveformGenerator:
     def test_from_sampling_builds_grid(self):
@@ -255,8 +280,8 @@ class TestBilbyWaveformBackendIntegration:
     def test_caches_generator(self, grid: FrequencyGrid):
         """The bilby WaveformGenerator is constructed only once."""
         backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
-        gen1 = backend._waveform_generator
-        gen2 = backend._waveform_generator
+        gen1 = backend.waveform_generator
+        gen2 = backend.waveform_generator
         assert gen1 is gen2
 
 
