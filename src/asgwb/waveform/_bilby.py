@@ -29,18 +29,26 @@ class BilbyWaveformBackend:
 
     @cached_property
     def waveform_generator(self) -> BilbyWaveformGenerator:
-        from bilby.gw.conversion import (
-            convert_to_lal_binary_black_hole_parameters,
-            convert_to_lal_binary_neutron_star_parameters,
-        )
-        from bilby.gw.source import (
-            gwsignal_binary_black_hole,
-            lal_binary_black_hole,
-            lal_binary_neutron_star,
-        )
-        from bilby.gw.waveform_generator import (
-            WaveformGenerator as BilbyWaveformGenerator,
-        )
+        try:
+            from bilby.gw.conversion import (
+                convert_to_lal_binary_black_hole_parameters,
+                convert_to_lal_binary_neutron_star_parameters,
+            )
+            from bilby.gw.source import (
+                gwsignal_binary_black_hole,
+                lal_binary_black_hole,
+                lal_binary_neutron_star,
+            )
+            from bilby.gw.waveform_generator import (
+                WaveformGenerator as BilbyWaveformGenerator,
+            )
+        except ImportError as exc:
+            raise ImportError(
+                "bilby is required to use BilbyWaveformBackend. "
+                "Install it with: uv pip install 'asgwb[bilby]' "
+                "(or pip install 'asgwb[bilby]' / pip install bilby). "
+                "If working in this repo, use: uv sync --extra bilby"
+            ) from exc
 
         if self._source_type == "BBH":
             source_model = (
