@@ -126,12 +126,8 @@ class TestFrequencyGrid:
 
     @requires_bilby
     def test_frequencies_array_matches_bilby(self, grid: FrequencyGrid):
-        generator = WaveformGenerator.from_sampling(
-            approximant="IMRPhenomPV2_NRTidalv2",
-            duration=8.0,
-            sampling_frequency=2048.0,
-            reference_frequency=50.0,
-            source_type="BNS",
+        generator = WaveformGenerator(
+            approximant="IMRPhenomPV2_NRTidalv2", grid=grid, source_type="BNS"
         )
         ours = generator.grid.frequencies
         theirs = generator.as_bilby_waveform_generator().frequency_array
