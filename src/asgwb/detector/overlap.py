@@ -272,9 +272,15 @@ def overlap_reduction_function(
     d = _chord_distance(lat1, lon1, lat2, lon2)
     alpha = 2.0 * math.pi * frequencies * d / C_LIGHT
 
-    # Bisector angle of each detector (orientation angle)
-    bisector_1 = math.radians((detector_1.xarm_azimuth + detector_1.yarm_azimuth) / 2.0)
-    bisector_2 = math.radians((detector_2.xarm_azimuth + detector_2.yarm_azimuth) / 2.0)
+    # Bisector angle of each detector (orientation angle) using vector averaging to handle wraparound
+    def _bisector(az1: float, az2: float) -> float:
+        a1, a2 = math.radians(az1), math.radians(az2)
+        x = math.cos(a1) + math.cos(a2)
+        y = math.sin(a1) + math.sin(a2)
+        return math.atan2(y, x) % (2 * math.pi)
+
+    bisector_1 = _bisector(detector_1.xarm_azimuth, detector_1.yarm_azimuth)
+    bisector_2 = _bisector(detector_2.xarm_azimuth, detector_2.yarm_azimuth)
 
     # Bearing angles along the baseline
     course_1 = math.radians(_initial_course(lat1, lat2, lon1, lon2))
