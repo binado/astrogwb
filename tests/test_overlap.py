@@ -27,36 +27,34 @@ def frequencies() -> np.ndarray:
 
 
 @pytest.fixture
-def make_detector() -> Callable[..., Detector]:
-    """Factory fixture to create Detector instances with stub PSDs."""
+def detector_name(request: pytest.FixtureRequest) -> str:
+    return request.param
 
-    def _factory(
-        name: str,
-        latitude: float,
-        longitude: float,
-        xarm_azimuth: float,
-        yarm_azimuth: float,
-    ) -> Detector:
-        from unittest.mock import MagicMock
 
-        psd = MagicMock()
-        return Detector(
-            name=name,
-            psd=psd,
-            minimum_frequency=10.0,
-            maximum_frequency=2048.0,
-            length=4.0,
-            latitude=latitude,
-            longitude=longitude,
-            elevation=0.0,
-            xarm_azimuth=xarm_azimuth,
-            yarm_azimuth=yarm_azimuth,
-            xarm_tilt=0.0,
-            yarm_tilt=0.0,
-            duty_factor=0.7,
-        )
+@pytest.fixture
+def detector(detector_name: str) -> Detector:
+    return Detector.from_file(detector_name)
 
-    return _factory
+
+@pytest.fixture
+def detector_pair_names(request: pytest.FixtureRequest) -> tuple[str, str]:
+    return request.param
+
+
+@pytest.fixture
+def detector_pair(detector_pair_names: tuple[str, str]) -> tuple[Detector, Detector]:
+    det1_name, det2_name = detector_pair_names
+    return Detector.from_file(det1_name), Detector.from_file(det2_name)
+
+
+@pytest.fixture
+def detector_network_names(request: pytest.FixtureRequest) -> tuple[str, ...]:
+    return request.param
+
+
+@pytest.fixture
+def detector_network(detector_network_names: tuple[str, ...]) -> list[Detector]:
+    return [Detector.from_file(name) for name in detector_network_names]
 
 
 @pytest.fixture
@@ -111,53 +109,48 @@ class TestCourseAngles:
 class TestORFColocated:
     """Co-located, co-aligned detectors should give ORF = 1 at low frequencies."""
 
-    def test_identical_detectors_low_freq(
-        self, make_detector: Callable[..., Detector]
-    ) -> None:
-        det = make_detector("D1", 0.0, 0.0, 135.0, 225.0)
+    @pytest.mark.parametrize("detector_name", ["H1"], indirect=True)
+    def test_identical_detectors_low_freq(self, detector: Detector) -> None:
         freqs = np.array([1e-4, 1e-3])
-        orf = overlap_reduction_function(freqs, det, det)
+        orf = overlap_reduction_function(freqs, detector, detector)
         # In the GWFast convention the ORF is not normalised to 1 for
         # identical detectors.  For an L-shaped detector (half-angle 45°):
         # ORF(f→0) = sin²(45°) × 2/15 = 1/15 ≈ 0.0667.
         # Verify the value is constant across these low frequencies.
         assert np.allclose(orf, 1.0 / 15.0, atol=1e-3)
 
-    def test_output_shape(
-        self, frequencies: np.ndarray, make_detector: Callable[..., Detector]
-    ) -> None:
-        det = make_detector("D1", 0.0, 0.0, 135.0, 225.0)
-        orf = overlap_reduction_function(frequencies, det, det)
+    @pytest.mark.parametrize("detector_name", ["H1"], indirect=True)
+    def test_output_shape(self, frequencies: np.ndarray, detector: Detector) -> None:
+        orf = overlap_reduction_function(frequencies, detector, detector)
         assert orf.shape == frequencies.shape
 
-    def test_scalar_frequency(self, make_detector: Callable[..., Detector]) -> None:
-        det = make_detector("D1", 0.0, 0.0, 135.0, 225.0)
-        orf = overlap_reduction_function(np.array([10.0]), det, det)
+    @pytest.mark.parametrize("detector_name", ["H1"], indirect=True)
+    def test_scalar_frequency(self, detector: Detector) -> None:
+        orf = overlap_reduction_function(np.array([10.0]), detector, detector)
         assert orf.shape == (1,)
 
 
 class TestORFSymmetry:
     """ORF should be symmetric: gamma(f, d1, d2) == gamma(f, d2, d1)."""
 
+    @pytest.mark.parametrize("detector_pair_names", [("H1", "L1")], indirect=True)
     def test_h1_l1_symmetry(
-        self, frequencies: np.ndarray, make_detector: Callable[..., Detector]
+        self, frequencies: np.ndarray, detector_pair: tuple[Detector, Detector]
     ) -> None:
-        h1 = make_detector("H1", 46.455, -119.408, 125.999, 215.999)
-        l1 = make_detector("L1", 30.563, -90.774, 197.716, 287.716)
-        orf_12 = overlap_reduction_function(frequencies, h1, l1)
-        orf_21 = overlap_reduction_function(frequencies, l1, h1)
+        det1, det2 = detector_pair
+        orf_12 = overlap_reduction_function(frequencies, det1, det2)
+        orf_21 = overlap_reduction_function(frequencies, det2, det1)
         assert np.allclose(orf_12, orf_21, rtol=1e-10)
 
 
 class TestORFET:
     """ET detectors (60° arms) should have ORF ≈ sqrt(3)/2 at zero separation."""
 
+    @pytest.mark.parametrize("detector_pair_names", [("E1", "E2")], indirect=True)
     def test_et_collocated_low_freq(
-        self, make_detector: Callable[..., Detector]
+        self, detector_pair: tuple[Detector, Detector]
     ) -> None:
-        # E1 and E2 share same position but different orientations
-        e1 = make_detector("E1", 43.63, 10.5, 70.57, 130.57)
-        e2 = make_detector("E2", 43.63, 10.5, 190.57, 250.57)
+        e1, e2 = detector_pair
         freqs = np.array([1e-4])
         orf = overlap_reduction_function(freqs, e1, e2)
         # 60° arm detectors: sin(30°)*sin(30°) factor modifies response
@@ -166,40 +159,40 @@ class TestORFET:
 
 
 class TestPairwise:
+    @pytest.mark.parametrize(
+        "detector_network_names", [("H1", "L1", "V1")], indirect=True
+    )
     def test_returns_correct_shape(
-        self, frequencies: np.ndarray, make_detector: Callable[..., Detector]
+        self, frequencies: np.ndarray, detector_network: list[Detector]
     ) -> None:
-        d1 = make_detector("H1", 46.455, -119.408, 125.999, 215.999)
-        d2 = make_detector("L1", 30.563, -90.774, 197.716, 287.716)
-        d3 = make_detector("V1", 43.631, 10.504, 70.567, 160.567)
-        result = pairwise_overlap_reduction_function(frequencies, [d1, d2, d3])
+        result = pairwise_overlap_reduction_function(frequencies, detector_network)
         assert result.shape == (3, 3, len(frequencies))
 
+    @pytest.mark.parametrize("detector_pair_names", [("H1", "L1")], indirect=True)
     def test_values_match_individual(
-        self, frequencies: np.ndarray, make_detector: Callable[..., Detector]
+        self, frequencies: np.ndarray, detector_pair: tuple[Detector, Detector]
     ) -> None:
-        d1 = make_detector("H1", 46.455, -119.408, 125.999, 215.999)
-        d2 = make_detector("L1", 30.563, -90.774, 197.716, 287.716)
+        d1, d2 = detector_pair
         pairwise = pairwise_overlap_reduction_function(frequencies, [d1, d2])
         individual = overlap_reduction_function(frequencies, d1, d2)
         assert np.allclose(pairwise[0, 1, :], individual)
 
+    @pytest.mark.parametrize(
+        "detector_network_names", [("H1", "L1", "V1")], indirect=True
+    )
     def test_symmetric(
-        self, frequencies: np.ndarray, make_detector: Callable[..., Detector]
+        self, frequencies: np.ndarray, detector_network: list[Detector]
     ) -> None:
-        d1 = make_detector("H1", 46.455, -119.408, 125.999, 215.999)
-        d2 = make_detector("L1", 30.563, -90.774, 197.716, 287.716)
-        d3 = make_detector("V1", 43.631, 10.504, 70.567, 160.567)
-        result = pairwise_overlap_reduction_function(frequencies, [d1, d2, d3])
+        result = pairwise_overlap_reduction_function(frequencies, detector_network)
         for i in range(3):
             for j in range(3):
                 assert np.allclose(result[i, j, :], result[j, i, :])
 
+    @pytest.mark.parametrize("detector_pair_names", [("H1", "L1")], indirect=True)
     def test_diagonal_is_zero(
-        self, frequencies: np.ndarray, make_detector: Callable[..., Detector]
+        self, frequencies: np.ndarray, detector_pair: tuple[Detector, Detector]
     ) -> None:
-        d1 = make_detector("H1", 46.455, -119.408, 125.999, 215.999)
-        d2 = make_detector("L1", 30.563, -90.774, 197.716, 287.716)
+        d1, d2 = detector_pair
         result = pairwise_overlap_reduction_function(frequencies, [d1, d2])
         assert np.allclose(result[0, 0, :], 0.0)
         assert np.allclose(result[1, 1, :], 0.0)
