@@ -19,10 +19,6 @@ from asgwb.detector.overlap import (
     _initial_course,
 )
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 def frequencies() -> np.ndarray:
@@ -79,11 +75,6 @@ def load_fixture() -> Callable[[pathlib.Path], dict[str, np.ndarray]]:
     return _loader
 
 
-# ---------------------------------------------------------------------------
-# Unit tests – geometry helpers
-# ---------------------------------------------------------------------------
-
-
 class TestChordDistance:
     def test_same_location(self) -> None:
         d = _chord_distance(0.0, 0.0, 0.0, 0.0)
@@ -115,11 +106,6 @@ class TestCourseAngles:
         c_rev = _final_course(46.5, 30.6, -119.4, -90.8)
         # The final course should differ from the initial course
         assert c_fwd != pytest.approx(c_rev, abs=1.0)
-
-
-# ---------------------------------------------------------------------------
-# Unit tests – ORF behaviour
-# ---------------------------------------------------------------------------
 
 
 class TestORFColocated:
@@ -217,11 +203,6 @@ class TestPairwise:
         result = pairwise_overlap_reduction_function(frequencies, [d1, d2])
         assert np.allclose(result[0, 0, :], 0.0)
         assert np.allclose(result[1, 1, :], 0.0)
-
-
-# ---------------------------------------------------------------------------
-# Integration tests – GWFast comparison
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
