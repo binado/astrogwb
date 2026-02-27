@@ -12,7 +12,7 @@ Run once in a throwaway environment via::
     uv run scripts/generate_orf_fixtures.py
 
 Saves ``tests/fixtures/gwfast_orf_reference.npz`` with arrays:
-``frequency``, ``H1_L1``, ``H1_V1`` (50 points, 20–2048 Hz geomspace grid).
+``frequencies``, ``H1_L1``, ``H1_V1`` (50 points, 20–2048 Hz geomspace grid).
 """
 
 from __future__ import annotations
