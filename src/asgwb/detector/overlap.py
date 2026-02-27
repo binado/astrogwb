@@ -24,11 +24,20 @@ _LOW_ALPHA_THRESHOLD = 2e-3
 def _chord_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Straight-line distance through Earth between two surface points (km).
 
-    Args:
-        lat1, lon1: latitude/longitude of detector 1 in degrees.
-        lat2, lon2: latitude/longitude of detector 2 in degrees.
+    Parameters
+    ----------
+    lat1 : float
+        Latitude of detector 1 in degrees.
+    lon1 : float
+        Longitude of detector 1 in degrees.
+    lat2 : float
+        Latitude of detector 2 in degrees.
+    lon2 : float
+        Longitude of detector 2 in degrees.
 
-    Returns:
+    Returns
+    -------
+    float
         Chord distance in km.
     """
     lat1_r = math.radians(lat1)
@@ -50,11 +59,20 @@ def _chord_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float
 def _initial_course(lat1: float, lat2: float, lon1: float, lon2: float) -> float:
     """Bearing (azimuth) from detector 1 toward detector 2 (degrees, N-clockwise).
 
-    Args:
-        lat1, lat2: latitudes in degrees.
-        lon1, lon2: longitudes in degrees.
+    Parameters
+    ----------
+    lat1 : float
+        Latitude of detector 1 in degrees.
+    lat2 : float
+        Latitude of detector 2 in degrees.
+    lon1 : float
+        Longitude of detector 1 in degrees.
+    lon2 : float
+        Longitude of detector 2 in degrees.
 
-    Returns:
+    Returns
+    -------
+    float
         Initial bearing in degrees.
     """
     lat1_r = math.radians(lat1)
@@ -73,18 +91,38 @@ def _final_course(lat1: float, lat2: float, lon1: float, lon2: float) -> float:
 
     Computed as the reverse bearing at detector 2.
 
-    Args:
-        lat1, lat2: latitudes in degrees.
-        lon1, lon2: longitudes in degrees.
+    Parameters
+    ----------
+    lat1 : float
+        Latitude of detector 1 in degrees.
+    lat2 : float
+        Latitude of detector 2 in degrees.
+    lon1 : float
+        Longitude of detector 1 in degrees.
+    lon2 : float
+        Longitude of detector 2 in degrees.
 
-    Returns:
+    Returns
+    -------
+    float
         Final bearing in degrees.
     """
     return (_initial_course(lat2, lat1, lon2, lon1) + 180.0) % 360
 
 
 def _g1(alpha: np.ndarray) -> np.ndarray:
-    """First angular response function."""
+    """First angular response function.
+
+    Parameters
+    ----------
+    alpha : np.ndarray
+        Angular frequency parameter.
+
+    Returns
+    -------
+    np.ndarray
+        First angular response values.
+    """
     with np.errstate(invalid="ignore", divide="ignore"):
         result = (
             (1.0 / (alpha**2))
@@ -96,7 +134,18 @@ def _g1(alpha: np.ndarray) -> np.ndarray:
 
 
 def _g2(alpha: np.ndarray) -> np.ndarray:
-    """Second angular response function."""
+    """Second angular response function.
+
+    Parameters
+    ----------
+    alpha : np.ndarray
+        Angular frequency parameter.
+
+    Returns
+    -------
+    np.ndarray
+        Second angular response values.
+    """
     with np.errstate(invalid="ignore", divide="ignore"):
         result = (
             -(1.0 / (3.0 * alpha**2))
@@ -108,7 +157,18 @@ def _g2(alpha: np.ndarray) -> np.ndarray:
 
 
 def _g3(alpha: np.ndarray) -> np.ndarray:
-    """Third angular response function."""
+    """Third angular response function.
+
+    Parameters
+    ----------
+    alpha : np.ndarray
+        Angular frequency parameter.
+
+    Returns
+    -------
+    np.ndarray
+        Third angular response values.
+    """
     with np.errstate(invalid="ignore", divide="ignore"):
         result = (
             -(1.0 / (6.0 * alpha**2))
@@ -129,15 +189,24 @@ def _get_orf(
 ) -> np.ndarray:
     """Core ORF computation.
 
-    Args:
-        alpha: 2*pi*f*d/c, frequency-distance parameter (array).
-        beta: angle between the two detector bisectors (radians).
-        delta: orientation angle of detector 1 relative to baseline (radians).
-        big_delta: orientation angle of detector 2 relative to baseline (radians).
-        ang_btw_arms_1: half opening angle of detector 1 arms (radians).
-        ang_btw_arms_2: half opening angle of detector 2 arms (radians).
+    Parameters
+    ----------
+    alpha : np.ndarray
+        2*pi*f*d/c, frequency-distance parameter (array).
+    beta : float
+        Angle between the two detector bisectors (radians).
+    delta : float
+        Orientation angle of detector 1 relative to baseline (radians).
+    big_delta : float
+        Orientation angle of detector 2 relative to baseline (radians).
+    ang_btw_arms_1 : float
+        Half opening angle of detector 1 arms (radians).
+    ang_btw_arms_2 : float
+        Half opening angle of detector 2 arms (radians).
 
-    Returns:
+    Returns
+    -------
+    np.ndarray
         ORF values as a numpy array.
     """
     sin1 = math.sin(ang_btw_arms_1)
@@ -179,12 +248,18 @@ def overlap_reduction_function(
     The overlap reduction function encodes the geometric sensitivity of a
     detector pair to an isotropic stochastic GW background.
 
-    Args:
-        frequencies: 1-D frequency array in Hz.
-        detector_1: First detector.
-        detector_2: Second detector.
+    Parameters
+    ----------
+    frequencies : np.ndarray
+        1-D frequency array in Hz.
+    detector_1 : Detector
+        First detector.
+    detector_2 : Detector
+        Second detector.
 
-    Returns:
+    Returns
+    -------
+    np.ndarray
         1-D array of ORF values, same length as ``frequencies``.
     """
     frequencies = np.asarray(frequencies, dtype=float)
@@ -229,11 +304,16 @@ def pairwise_overlap_reduction_function(
 ) -> dict[tuple[str, str], np.ndarray]:
     """Compute ORFs for all unique pairs in a detector network.
 
-    Args:
-        frequencies: 1-D frequency array in Hz.
-        detectors: Sequence of Detector objects.
+    Parameters
+    ----------
+    frequencies : np.ndarray
+        1-D frequency array in Hz.
+    detectors : Sequence[Detector]
+        Sequence of Detector objects.
 
-    Returns:
+    Returns
+    -------
+    dict[tuple[str, str], np.ndarray]
         Dict mapping ``(name_1, name_2)`` tuples to ORF arrays.
     """
     result: dict[tuple[str, str], np.ndarray] = {}
