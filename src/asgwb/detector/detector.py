@@ -50,8 +50,8 @@ class Detector:
             elevation=data["elevation"],
             xarm_azimuth=data["xarm_azimuth"],
             yarm_azimuth=data["yarm_azimuth"],
-            xarm_tilt=data["xarm_tilt"],
-            yarm_tilt=data["yarm_tilt"],
+            xarm_tilt=data.get("xarm_tilt", 0.0),
+            yarm_tilt=data.get("yarm_tilt", 0.0),
             duty_factor=data["duty_factor"],
         )
 

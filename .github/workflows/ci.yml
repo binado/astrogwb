@@ -24,9 +24,38 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: uv run --group dev ty check
 
+  generate-fixtures:
+    name: Generate test fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+      - name: Cache ORF reference fixtures
+        id: cache-fixtures
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures
+          key: orf-fixtures-${{ hashFiles('src/asgwb/detector/overlap.py', 'scripts/generate_orf_fixtures.py') }}
+      - name: Generate ORF reference fixtures
+        if: steps.cache-fixtures.outputs.cache-hit != 'true'
+        run: |
+          uv run python -c "
+          import numpy as np, pathlib
+          from asgwb.detector import Detector, overlap_reduction_function
+          freqs = np.geomspace(20, 2048, 50)
+          h1, l1, v1 = Detector.from_file('H1'), Detector.from_file('L1'), Detector.from_file('V1')
+          h1_l1 = overlap_reduction_function(freqs, h1, l1)
+          h1_v1 = overlap_reduction_function(freqs, h1, v1)
+          out = pathlib.Path('tests/fixtures/gwfast_orf_reference.npz')
+          out.parent.mkdir(exist_ok=True)
+          np.savez(out, frequencies=freqs, H1_L1=h1_l1, H1_V1=h1_v1)
+          print(f'Saved {out}')
+          "
+
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    needs: generate-fixtures
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
@@ -35,14 +64,25 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Restore ORF reference fixtures
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures
+          key: orf-fixtures-${{ hashFiles('src/asgwb/detector/overlap.py', 'scripts/generate_orf_fixtures.py') }}
       - run: uv run --group dev pytest
 
   test-bilby-integration:
     name: Test bilby integration (Python 3.12)
     runs-on: ubuntu-latest
+    needs: generate-fixtures
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+      - name: Restore ORF reference fixtures
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures
+          key: orf-fixtures-${{ hashFiles('src/asgwb/detector/overlap.py', 'scripts/generate_orf_fixtures.py') }}
       - run: uv run --group dev --extra bilby pytest -m integration
