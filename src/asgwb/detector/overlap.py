@@ -294,11 +294,16 @@ def overlap_reduction_function(
     beta = course_2 - course_1 - math.pi
 
     # Half opening angle of each detector (radians)
-    ang_btw_arms_1 = math.radians(
-        abs(detector_1.xarm_azimuth - detector_1.yarm_azimuth) / 2.0
+    def _half_opening_angle(az1: float, az2: float) -> float:
+        # Minimal signed angular difference
+        diff = ((az1 - az2 + 180.0) % 360.0) - 180.0
+        return math.radians(abs(diff) / 2.0)
+
+    ang_btw_arms_1 = _half_opening_angle(
+        detector_1.xarm_azimuth, detector_1.yarm_azimuth
     )
-    ang_btw_arms_2 = math.radians(
-        abs(detector_2.xarm_azimuth - detector_2.yarm_azimuth) / 2.0
+    ang_btw_arms_2 = _half_opening_angle(
+        detector_2.xarm_azimuth, detector_2.yarm_azimuth
     )
 
     return _get_orf(alpha, beta, delta, big_delta, ang_btw_arms_1, ang_btw_arms_2)
