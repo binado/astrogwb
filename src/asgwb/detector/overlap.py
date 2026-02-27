@@ -301,7 +301,7 @@ def overlap_reduction_function(
 def pairwise_overlap_reduction_function(
     frequencies: np.ndarray,
     detectors: Sequence[Detector],
-) -> dict[tuple[str, str], np.ndarray]:
+) -> np.ndarray:
     """Compute ORFs for all unique pairs in a detector network.
 
     Parameters
@@ -313,13 +313,23 @@ def pairwise_overlap_reduction_function(
 
     Returns
     -------
-    dict[tuple[str, str], np.ndarray]
-        Dict mapping ``(name_1, name_2)`` tuples to ORF arrays.
+    np.ndarray
+        Array of shape ``(n_detector, n_detector, n_frequencies)`` containing
+        ORF values. The array is symmetric in the first two indices, and the
+        diagonal entries are zero.
     """
-    result: dict[tuple[str, str], np.ndarray] = {}
+    frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
+    n = len(det_list)
+    n_freq = frequencies.shape[0]
+
+    out = np.zeros((n, n, n_freq), dtype=float)
+
     for i, d1 in enumerate(det_list):
-        for d2 in det_list[i + 1 :]:
-            key = (d1.name, d2.name)
-            result[key] = overlap_reduction_function(frequencies, d1, d2)
-    return result
+        for j in range(i + 1, n):
+            d2 = det_list[j]
+            orf = overlap_reduction_function(frequencies, d1, d2)
+            out[i, j, :] = orf
+            out[j, i, :] = orf
+
+    return out

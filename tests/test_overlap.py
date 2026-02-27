@@ -147,19 +147,35 @@ class TestORFET:
 
 
 class TestPairwise:
-    def test_returns_all_pairs(self) -> None:
+    def test_returns_correct_shape(self) -> None:
         d1 = _make_detector("H1", 46.455, -119.408, 125.999, 215.999)
         d2 = _make_detector("L1", 30.563, -90.774, 197.716, 287.716)
         d3 = _make_detector("V1", 43.631, 10.504, 70.567, 160.567)
         result = pairwise_overlap_reduction_function(FREQUENCIES, [d1, d2, d3])
-        assert set(result.keys()) == {("H1", "L1"), ("H1", "V1"), ("L1", "V1")}
+        assert result.shape == (3, 3, len(FREQUENCIES))
 
     def test_values_match_individual(self) -> None:
         d1 = _make_detector("H1", 46.455, -119.408, 125.999, 215.999)
         d2 = _make_detector("L1", 30.563, -90.774, 197.716, 287.716)
         pairwise = pairwise_overlap_reduction_function(FREQUENCIES, [d1, d2])
         individual = overlap_reduction_function(FREQUENCIES, d1, d2)
-        assert np.allclose(pairwise[("H1", "L1")], individual)
+        assert np.allclose(pairwise[0, 1, :], individual)
+
+    def test_symmetric(self) -> None:
+        d1 = _make_detector("H1", 46.455, -119.408, 125.999, 215.999)
+        d2 = _make_detector("L1", 30.563, -90.774, 197.716, 287.716)
+        d3 = _make_detector("V1", 43.631, 10.504, 70.567, 160.567)
+        result = pairwise_overlap_reduction_function(FREQUENCIES, [d1, d2, d3])
+        for i in range(3):
+            for j in range(3):
+                assert np.allclose(result[i, j, :], result[j, i, :])
+
+    def test_diagonal_is_zero(self) -> None:
+        d1 = _make_detector("H1", 46.455, -119.408, 125.999, 215.999)
+        d2 = _make_detector("L1", 30.563, -90.774, 197.716, 287.716)
+        result = pairwise_overlap_reduction_function(FREQUENCIES, [d1, d2])
+        assert np.allclose(result[0, 0, :], 0.0)
+        assert np.allclose(result[1, 1, :], 0.0)
 
 
 # ---------------------------------------------------------------------------
