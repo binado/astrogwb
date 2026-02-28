@@ -110,6 +110,19 @@ def _final_course(lat1: float, lat2: float, lon1: float, lon2: float) -> float:
     return (_initial_course(lat2, lat1, lon2, lon1) + 180.0) % 360
 
 
+def _opening_angle(az1: float, az2: float) -> float:
+    """Minimal opening angle between detector arms in radians."""
+    diff = ((az1 - az2 + 180.0) % 360.0) - 180.0
+    return math.radians(abs(diff))
+
+
+def _azimuth_bisector(az1: float, az2: float) -> float:
+    """Circular mean (bisector) of two azimuth angles in radians."""
+    a1 = math.radians(az1)
+    a2 = math.radians(az2)
+    return math.atan2(math.sin(a1) + math.sin(a2), math.cos(a1) + math.cos(a2))
+
+
 def _g1(alpha: np.ndarray) -> np.ndarray:
     """First angular response function.
 
@@ -124,13 +137,17 @@ def _g1(alpha: np.ndarray) -> np.ndarray:
         First angular response values.
     """
     with np.errstate(invalid="ignore", divide="ignore"):
-        result = (
-            (1.0 / (alpha**2))
-            - (9.0 / (2.0 * alpha**4))
-            + (9.0 / (2.0 * alpha**3)) * np.sinc(2.0 * alpha / math.pi)
-            + (9.0 / (4.0 * alpha**4)) * np.cos(2.0 * alpha)
+        return (
+            (5.0 / 16.0)
+            * (
+                -9.0 * alpha * np.cos(alpha)
+                - 6.0 * alpha**3 * np.cos(alpha)
+                + 9.0 * np.sin(alpha)
+                + 3.0 * alpha**2 * np.sin(alpha)
+                + alpha**4 * np.sin(alpha)
+            )
+            / alpha**5
         )
-    return result
 
 
 def _g2(alpha: np.ndarray) -> np.ndarray:
@@ -147,13 +164,17 @@ def _g2(alpha: np.ndarray) -> np.ndarray:
         Second angular response values.
     """
     with np.errstate(invalid="ignore", divide="ignore"):
-        result = (
-            -(1.0 / (3.0 * alpha**2))
-            + (3.0 / (2.0 * alpha**4))
-            - (3.0 / (2.0 * alpha**3)) * np.sinc(2.0 * alpha / math.pi)
-            - (3.0 / (4.0 * alpha**4)) * np.cos(2.0 * alpha)
+        return (
+            (5.0 / 16.0)
+            * (
+                45.0 * alpha * np.cos(alpha)
+                + 6.0 * alpha**3 * np.cos(alpha)
+                - 45.0 * np.sin(alpha)
+                + 9.0 * alpha**2 * np.sin(alpha)
+                + 3.0 * alpha**4 * np.sin(alpha)
+            )
+            / alpha**5
         )
-    return result
 
 
 def _g3(alpha: np.ndarray) -> np.ndarray:
@@ -170,13 +191,17 @@ def _g3(alpha: np.ndarray) -> np.ndarray:
         Third angular response values.
     """
     with np.errstate(invalid="ignore", divide="ignore"):
-        result = (
-            -(1.0 / (6.0 * alpha**2))
-            + (1.0 / (2.0 * alpha**3)) * np.sinc(2.0 * alpha / math.pi)
-            + (1.0 / (4.0 * alpha**4)) * np.cos(2.0 * alpha)
-            - (1.0 / (4.0 * alpha**4))
+        return (
+            (5.0 / 4.0)
+            * (
+                15.0 * alpha * np.cos(alpha)
+                - 4.0 * alpha**3 * np.cos(alpha)
+                - 15.0 * np.sin(alpha)
+                + 9.0 * alpha**2 * np.sin(alpha)
+                - alpha**4 * np.sin(alpha)
+            )
+            / alpha**5
         )
-    return result
 
 
 def _get_orf(
@@ -194,15 +219,15 @@ def _get_orf(
     alpha : np.ndarray
         2*pi*f*d/c, frequency-distance parameter (array).
     beta : float
-        Angle between the two detector bisectors (radians).
+        Angular separation between detectors (radians).
     delta : float
-        Orientation angle of detector 1 relative to baseline (radians).
+        GWFast orientation parameter delta (radians).
     big_delta : float
-        Orientation angle of detector 2 relative to baseline (radians).
+        GWFast orientation parameter Delta (radians).
     ang_btw_arms_1 : float
-        Half opening angle of detector 1 arms (radians).
+        Opening angle of detector 1 arms (radians).
     ang_btw_arms_2 : float
-        Half opening angle of detector 2 arms (radians).
+        Opening angle of detector 2 arms (radians).
 
     Returns
     -------
@@ -212,30 +237,26 @@ def _get_orf(
     sin1 = math.sin(ang_btw_arms_1)
     sin2 = math.sin(ang_btw_arms_2)
 
-    cos_beta = math.cos(beta)
-    cos2_delta = math.cos(2.0 * delta)
-    cos2_big_delta = math.cos(2.0 * big_delta)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        g1 = _g1(alpha)
+        g2 = _g2(alpha)
+        g3 = _g3(alpha)
 
-    low_alpha = alpha < _LOW_ALPHA_THRESHOLD
-
-    g1 = np.where(low_alpha, 2.0 / 15.0, _g1(alpha))
-    g2 = np.where(low_alpha, -1.0 / 15.0, _g2(alpha))
-    g3 = np.where(low_alpha, -1.0 / 30.0, _g3(alpha))
-
-    orf = (
-        sin1
-        * sin2
-        * (
-            g1 * cos_beta
-            + g2 * cos_beta * cos2_delta * cos2_big_delta
-            - g3
-            * (
-                math.cos(2.0 * (delta - big_delta))
-                + math.cos(2.0 * (delta + big_delta))
-            )
+        theta_1 = (math.cos(0.5 * beta) ** 4) * g1
+        theta_2 = (
+            (math.cos(0.5 * beta) ** 4) * g2
+            + g3
+            - (math.sin(0.5 * beta) ** 4) * (g2 + g1)
         )
-    )
-    return orf
+        high_alpha_orf = (
+            (math.cos(4.0 * delta) * theta_1 + math.cos(4.0 * big_delta) * theta_2)
+            * sin1
+            * sin2
+        )
+
+    # Mirror GWFast's low-alpha substitution exactly for the L-L branch.
+    low_alpha_orf = math.cos(4.0 * delta) * sin1 * sin1
+    return np.where(alpha > _LOW_ALPHA_THRESHOLD, high_alpha_orf, low_alpha_orf)
 
 
 def overlap_reduction_function(
@@ -272,39 +293,24 @@ def overlap_reduction_function(
     d = _chord_distance(lat1, lon1, lat2, lon2)
     alpha = 2.0 * math.pi * frequencies * d / C_LIGHT
 
-    # Bisector angle of each detector (orientation angle) using vector averaging to handle wraparound
-    def _bisector(az1: float, az2: float) -> float:
-        a1, a2 = math.radians(az1), math.radians(az2)
-        x = math.cos(a1) + math.cos(a2)
-        y = math.sin(a1) + math.sin(a2)
-        return math.atan2(y, x) % (2 * math.pi)
+    # GWFast uses "xax" (detector orientation). Our detector schema stores
+    # both arms, so use their circular bisector as the effective xax.
+    xax_1 = _azimuth_bisector(detector_1.xarm_azimuth, detector_1.yarm_azimuth)
+    xax_2 = _azimuth_bisector(detector_2.xarm_azimuth, detector_2.yarm_azimuth)
 
-    bisector_1 = _bisector(detector_1.xarm_azimuth, detector_1.yarm_azimuth)
-    bisector_2 = _bisector(detector_2.xarm_azimuth, detector_2.yarm_azimuth)
+    # Bearing angles along the baseline as used in GWFast.
+    ang_1 = math.radians(_initial_course(lat1, lat2, lon1, lon2) - 90.0)
+    ang_2 = math.radians(_final_course(lat1, lat2, lon1, lon2) - 90.0)
 
-    # Bearing angles along the baseline
-    course_1 = math.radians(_initial_course(lat1, lat2, lon1, lon2))
-    course_2 = math.radians(_final_course(lat1, lat2, lon1, lon2))
+    delta = 0.5 * ((xax_1 + ang_1) - (xax_2 + ang_2))
+    big_delta = 0.5 * ((xax_1 + ang_1) + (xax_2 + ang_2))
 
-    # delta: detector orientation relative to direction toward the other detector
-    delta = bisector_1 - course_1
-    big_delta = bisector_2 - course_2
+    # GWFast beta: angular separation between detectors.
+    asin_arg = max(-1.0, min(1.0, 0.5 * d / R_EARTH))
+    beta = 2.0 * math.asin(asin_arg)
 
-    # beta: angle between the bisectors (in the baseline frame)
-    beta = course_2 - course_1 - math.pi
-
-    # Half opening angle of each detector (radians)
-    def _half_opening_angle(az1: float, az2: float) -> float:
-        # Minimal signed angular difference
-        diff = ((az1 - az2 + 180.0) % 360.0) - 180.0
-        return math.radians(abs(diff) / 2.0)
-
-    ang_btw_arms_1 = _half_opening_angle(
-        detector_1.xarm_azimuth, detector_1.yarm_azimuth
-    )
-    ang_btw_arms_2 = _half_opening_angle(
-        detector_2.xarm_azimuth, detector_2.yarm_azimuth
-    )
+    ang_btw_arms_1 = _opening_angle(detector_1.xarm_azimuth, detector_1.yarm_azimuth)
+    ang_btw_arms_2 = _opening_angle(detector_2.xarm_azimuth, detector_2.yarm_azimuth)
 
     return _get_orf(alpha, beta, delta, big_delta, ang_btw_arms_1, ang_btw_arms_2)
 

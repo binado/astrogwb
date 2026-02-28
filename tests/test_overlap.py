@@ -14,6 +14,7 @@ from asgwb.detector import (
     pairwise_overlap_reduction_function,
 )
 from asgwb.detector.overlap import (
+    _azimuth_bisector,
     _chord_distance,
     _final_course,
     _initial_course,
@@ -106,6 +107,13 @@ class TestCourseAngles:
         assert c_fwd != pytest.approx(c_rev, abs=1.0)
 
 
+class TestAzimuthBisector:
+    def test_wraparound(self) -> None:
+        # Bisector of 10° and 350° should be 0° (not 180°).
+        b = np.rad2deg(_azimuth_bisector(10.0, 350.0))
+        assert b == pytest.approx(0.0, abs=1e-6)
+
+
 class TestORFColocated:
     """Co-located, co-aligned detectors should give ORF = 1 at low frequencies."""
 
@@ -113,11 +121,9 @@ class TestORFColocated:
     def test_identical_detectors_low_freq(self, detector: Detector) -> None:
         freqs = np.array([1e-4, 1e-3])
         orf = overlap_reduction_function(freqs, detector, detector)
-        # In the GWFast convention the ORF is not normalised to 1 for
-        # identical detectors.  For an L-shaped detector (half-angle 45°):
-        # ORF(f→0) = sin²(45°) × 2/15 = 1/15 ≈ 0.0667.
-        # Verify the value is constant across these low frequencies.
-        assert np.allclose(orf, 1.0 / 15.0, atol=1e-3)
+        # In GWFast's low-alpha branch for L-L detectors this evaluates to 1
+        # for co-located, co-aligned identical detectors.
+        assert np.allclose(orf, 1.0, atol=1e-8)
 
     @pytest.mark.parametrize("detector_name", ["H1"], indirect=True)
     def test_output_shape(self, frequencies: np.ndarray, detector: Detector) -> None:
