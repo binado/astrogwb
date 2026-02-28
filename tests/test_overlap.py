@@ -101,7 +101,7 @@ class TestCourseAngles:
         assert c == pytest.approx(0.0, abs=1e-3)
 
     def test_reverse_course(self) -> None:
-        c_fwd = _initial_course(46.5, -119.4, 30.6, -90.8)
+        c_fwd = _initial_course(46.5, 30.6, -119.4, -90.8)
         c_rev = _final_course(46.5, 30.6, -119.4, -90.8)
         # The final course should differ from the initial course
         assert c_fwd != pytest.approx(c_rev, abs=1.0)
