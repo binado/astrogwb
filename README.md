@@ -54,7 +54,7 @@ pre-generated reference fixture stored in `tests/fixtures/`.  The fixture is
 not committed to git; generate it once before running integration tests locally:
 
 ```bash
-uv run python scripts/generate_orf_fixtures.py
+uv run --script scripts/generate_orf_fixtures.py
 uv run pytest -m integration
 ```
 
