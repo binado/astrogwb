@@ -115,20 +115,16 @@ class TestAzimuthBisector:
 
 
 class TestORFColocated:
-    """Co-located, co-aligned detectors should give ORF = 1 at low frequencies."""
+    """Co-located, co-aligned detectors should give ORF = 1."""
 
     @pytest.mark.parametrize("detector_name", ["H1"], indirect=True)
-    def test_identical_detectors_low_freq(self, detector: Detector) -> None:
-        freqs = np.array([1e-4, 1e-3])
-        orf = overlap_reduction_function(freqs, detector, detector)
-        # In GWFast's low-alpha branch for L-L detectors this evaluates to 1
-        # for co-located, co-aligned identical detectors.
-        assert np.allclose(orf, 1.0, atol=1e-8)
-
-    @pytest.mark.parametrize("detector_name", ["H1"], indirect=True)
-    def test_output_shape(self, frequencies: np.ndarray, detector: Detector) -> None:
-        orf = overlap_reduction_function(frequencies, detector, detector)
-        assert orf.shape == frequencies.shape
+    def test_identical_detectors(
+        self, detector: Detector, frequencies: np.ndarray
+    ) -> None:
+        actual = overlap_reduction_function(frequencies, detector, detector)
+        expected = np.ones_like(frequencies)
+        assert actual.shape == expected.shape
+        np.testing.assert_allclose(actual, expected)
 
     @pytest.mark.parametrize("detector_name", ["H1"], indirect=True)
     def test_scalar_frequency(self, detector: Detector) -> None:
