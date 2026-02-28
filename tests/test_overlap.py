@@ -195,13 +195,13 @@ class TestPairwise:
                 assert np.allclose(result[i, j, :], result[j, i, :])
 
     @pytest.mark.parametrize("detector_pair_names", [("H1", "L1")], indirect=True)
-    def test_diagonal_is_zero(
+    def test_diagonal_is_normalized(
         self, frequencies: np.ndarray, detector_pair: tuple[Detector, Detector]
     ) -> None:
         d1, d2 = detector_pair
         result = pairwise_overlap_reduction_function(frequencies, [d1, d2])
-        assert np.allclose(result[0, 0, :], 0.0)
-        assert np.allclose(result[1, 1, :], 0.0)
+        np.testing.assert_allclose(result[0, 0, :], 1.0)
+        np.testing.assert_allclose(result[1, 1, :], 1.0)
 
 
 @pytest.mark.integration

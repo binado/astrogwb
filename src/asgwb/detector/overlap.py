@@ -333,7 +333,7 @@ def pairwise_overlap_reduction_function(
     np.ndarray
         Array of shape ``(n_detector, n_detector, n_frequencies)`` containing
         ORF values. The array is symmetric in the first two indices, and the
-        diagonal entries are zero.
+        diagonal entries are normalized to one.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
@@ -343,6 +343,7 @@ def pairwise_overlap_reduction_function(
     out = np.zeros((n, n, n_freq), dtype=float)
 
     for i, d1 in enumerate(det_list):
+        out[i, i, :] = 1.0
         for j in range(i + 1, n):
             d2 = det_list[j]
             orf = overlap_reduction_function(frequencies, d1, d2)
