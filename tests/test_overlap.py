@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import pathlib
 from collections.abc import Callable
+from dataclasses import replace
+import math
+import pathlib
 
 import numpy as np
 import pytest
@@ -14,6 +16,7 @@ from asgwb.detector import (
     pairwise_overlap_reduction_function,
 )
 from asgwb.detector.overlap import (
+    R_EARTH,
     _azimuth_bisector,
     _chord_distance,
     _final_course,
@@ -62,6 +65,16 @@ def detector_network(detector_network_names: tuple[str, ...]) -> list[Detector]:
 def fixture_path() -> pathlib.Path:
     """Path to the GWFast reference fixture."""
     return pathlib.Path(__file__).parent / "fixtures" / "gwfast_orf_reference.npz"
+
+
+@pytest.fixture
+def et_fixture_path() -> pathlib.Path:
+    """Path to the GWFast ET triangular reference fixture."""
+    return (
+        pathlib.Path(__file__).parent
+        / "fixtures"
+        / "gwfast_orf_reference_et_triangle.npz"
+    )
 
 
 @pytest.fixture
@@ -198,7 +211,6 @@ class TestPairwise:
         np.testing.assert_allclose(result[1, 1, :], 1.0)
 
 
-@pytest.mark.integration
 class TestGWFastComparison:
     """Compare our ORF implementation against the reference fixture.
 
@@ -236,3 +248,55 @@ class TestGWFastComparison:
             det2 = Detector.from_file(det2_name)
             ours = overlap_reduction_function(freqs, det1, det2)
             np.testing.assert_allclose(ours, reference, atol=1e-4)
+
+    def test_et_triangle_sum_upper_pairs_matches_reference(
+        self,
+        et_fixture_path: pathlib.Path,
+        load_fixture: Callable[[pathlib.Path], dict[str, np.ndarray]],
+    ) -> None:
+        fixture = load_fixture(et_fixture_path)
+        freqs = fixture["frequencies"]
+        reference_sum = fixture["sum_upper_pairs"]
+
+        # Build a gwfast-aligned ET triangle from the ETS definition:
+        # lat=40+31/60, long=9+25/60, xax=0, arm length=10 km.
+        base = Detector.from_file("E1")
+        ets_lat = 40.0 + 31.0 / 60.0
+        ets_lon = 9.0 + 25.0 / 60.0
+        arm_length_km = 10.0
+
+        # Equilateral triangle vertices in local EN coordinates (km), centered.
+        height = math.sqrt(3.0) * arm_length_km / 2.0
+        en_offsets_km = [
+            (-arm_length_km / 2.0, -height / 3.0),
+            (arm_length_km / 2.0, -height / 3.0),
+            (0.0, 2.0 * height / 3.0),
+        ]
+
+        def _to_lat_lon(east_km: float, north_km: float) -> tuple[float, float]:
+            dlat = math.degrees(north_km / R_EARTH)
+            dlon = math.degrees(east_km / (R_EARTH * math.cos(math.radians(ets_lat))))
+            return ets_lat + dlat, ets_lon + dlon
+
+        # Effective bisector orientations matching gwfast ETS branch indexing.
+        xax_values = [-90.0, -30.0, 30.0]
+        et_dets: list[Detector] = []
+        for idx, ((east_km, north_km), xax) in enumerate(
+            zip(en_offsets_km, xax_values, strict=True)
+        ):
+            lat, lon = _to_lat_lon(east_km, north_km)
+            et_dets.append(
+                replace(
+                    base,
+                    name=f"ETS_like_{idx}",
+                    latitude=lat,
+                    longitude=lon,
+                    xarm_azimuth=(xax - 30.0) % 360.0,
+                    yarm_azimuth=(xax + 30.0) % 360.0,
+                )
+            )
+
+        pairwise = pairwise_overlap_reduction_function(freqs, et_dets)
+        ours_sum = pairwise[0, 1, :] + pairwise[0, 2, :] + pairwise[1, 2, :]
+
+        np.testing.assert_allclose(ours_sum, reference_sum, atol=1e-4)
