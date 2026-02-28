@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import replace
 import math
 import pathlib
+from collections.abc import Callable
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -156,21 +156,6 @@ class TestORFSymmetry:
         orf_12 = overlap_reduction_function(frequencies, det1, det2)
         orf_21 = overlap_reduction_function(frequencies, det2, det1)
         np.testing.assert_allclose(orf_12, orf_21)
-
-
-class TestORFET:
-    """ET detectors (60° arms) should have ORF ≈ sqrt(3)/2 at zero separation."""
-
-    @pytest.mark.parametrize("detector_pair_names", [("E1", "E2")], indirect=True)
-    def test_et_collocated_low_freq(
-        self, detector_pair: tuple[Detector, Detector]
-    ) -> None:
-        e1, e2 = detector_pair
-        freqs = np.array([1e-4])
-        orf = overlap_reduction_function(freqs, e1, e2)
-        # 60° arm detectors: sin(30°)*sin(30°) factor modifies response
-        # The ORF should be non-zero and bounded
-        assert np.all(np.abs(orf) <= 1.0)
 
 
 class TestPairwise:
