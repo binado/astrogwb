@@ -142,7 +142,7 @@ class TestORFSymmetry:
         det1, det2 = detector_pair
         orf_12 = overlap_reduction_function(frequencies, det1, det2)
         orf_21 = overlap_reduction_function(frequencies, det2, det1)
-        assert np.allclose(orf_12, orf_21, rtol=1e-10)
+        np.testing.assert_allclose(orf_12, orf_21)
 
 
 class TestORFET:
@@ -177,7 +177,7 @@ class TestPairwise:
         d1, d2 = detector_pair
         pairwise = pairwise_overlap_reduction_function(frequencies, [d1, d2])
         individual = overlap_reduction_function(frequencies, d1, d2)
-        assert np.allclose(pairwise[0, 1, :], individual)
+        np.testing.assert_allclose(pairwise[0, 1, :], individual)
 
     @pytest.mark.parametrize(
         "detector_network_names", [("H1", "L1", "V1")], indirect=True
@@ -186,9 +186,7 @@ class TestPairwise:
         self, frequencies: np.ndarray, detector_network: list[Detector]
     ) -> None:
         result = pairwise_overlap_reduction_function(frequencies, detector_network)
-        for i in range(3):
-            for j in range(3):
-                assert np.allclose(result[i, j, :], result[j, i, :])
+        np.testing.assert_allclose(result, np.transpose(result, (1, 0, 2)))
 
     @pytest.mark.parametrize("detector_pair_names", [("H1", "L1")], indirect=True)
     def test_diagonal_is_normalized(
@@ -237,7 +235,4 @@ class TestGWFastComparison:
             det1 = Detector.from_file(det1_name)
             det2 = Detector.from_file(det2_name)
             ours = overlap_reduction_function(freqs, det1, det2)
-
-            assert np.allclose(ours, reference, atol=1e-4), (
-                f"Max discrepancy for {det1_name}-{det2_name}: {np.max(np.abs(ours - reference))}"
-            )
+            np.testing.assert_allclose(ours, reference, atol=1e-4)
