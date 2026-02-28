@@ -38,19 +38,7 @@ jobs:
           key: orf-fixtures-${{ hashFiles('src/asgwb/detector/overlap.py', 'scripts/generate_orf_fixtures.py') }}
       - name: Generate ORF reference fixtures
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
-        run: |
-          uv run python -c "
-          import numpy as np, pathlib
-          from asgwb.detector import Detector, overlap_reduction_function
-          freqs = np.geomspace(20, 2048, 50)
-          h1, l1, v1 = Detector.from_file('H1'), Detector.from_file('L1'), Detector.from_file('V1')
-          h1_l1 = overlap_reduction_function(freqs, h1, l1)
-          h1_v1 = overlap_reduction_function(freqs, h1, v1)
-          out = pathlib.Path('tests/fixtures/gwfast_orf_reference.npz')
-          out.parent.mkdir(exist_ok=True)
-          np.savez(out, frequencies=freqs, H1_L1=h1_l1, H1_V1=h1_v1)
-          print(f'Saved {out}')
-          "
+        run: uv run --script scripts/generate_orf_fixtures.py
 
   test:
     name: Test (Python ${{ matrix.python-version }})
