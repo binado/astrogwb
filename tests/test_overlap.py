@@ -214,22 +214,34 @@ class TestGWFastComparison:
         uv run --script scripts/generate_orf_fixtures.py
     """
 
-    @pytest.mark.parametrize("pair", [("H1", "L1"), ("H1", "V1")])
+    @staticmethod
+    def _pairs_from_fixture(fixture: dict[str, np.ndarray]) -> list[tuple[str, str]]:
+        pairs: list[tuple[str, str]] = []
+        for key in fixture:
+            if key == "frequencies":
+                continue
+            parts = key.split("_", maxsplit=1)
+            if len(parts) != 2:
+                raise ValueError(f"Unexpected fixture key format: {key}")
+            pairs.append((parts[0], parts[1]))
+        return pairs
+
     def test_matches_reference(
         self,
-        pair: tuple[str, str],
         fixture_path: pathlib.Path,
         load_fixture: Callable[[pathlib.Path], dict[str, np.ndarray]],
     ) -> None:
-        det1_name, det2_name = pair
         fixture = load_fixture(fixture_path)
         freqs = fixture["frequencies"]
-        reference = fixture[f"{det1_name}_{det2_name}"]
+        pairs = self._pairs_from_fixture(fixture)
+        assert pairs, "No detector pairs found in ORF fixture"
 
-        det1 = Detector.from_file(det1_name)
-        det2 = Detector.from_file(det2_name)
-        ours = overlap_reduction_function(freqs, det1, det2)
+        for det1_name, det2_name in pairs:
+            reference = fixture[f"{det1_name}_{det2_name}"]
+            det1 = Detector.from_file(det1_name)
+            det2 = Detector.from_file(det2_name)
+            ours = overlap_reduction_function(freqs, det1, det2)
 
-        assert np.allclose(ours, reference, atol=1e-4), (
-            f"Max discrepancy for {det1_name}-{det2_name}: {np.max(np.abs(ours - reference))}"
-        )
+            assert np.allclose(ours, reference, atol=1e-4), (
+                f"Max discrepancy for {det1_name}-{det2_name}: {np.max(np.abs(ours - reference))}"
+            )
