@@ -254,8 +254,9 @@ def _get_orf(
             * sin2
         )
 
-    # Mirror GWFast's low-alpha substitution exactly for the L-L branch.
-    low_alpha_orf = math.cos(4.0 * delta) * sin1 * sin1
+    # Keep the low-alpha substitution while preserving both detectors' opening-angle
+    # dependence as in the high-alpha expression.
+    low_alpha_orf = math.cos(4.0 * delta) * sin1 * sin2
     return np.where(alpha > _LOW_ALPHA_THRESHOLD, high_alpha_orf, low_alpha_orf)
 
 

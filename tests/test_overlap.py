@@ -17,9 +17,11 @@ from asgwb.detector import (
 )
 from asgwb.detector.overlap import (
     R_EARTH,
+    _LOW_ALPHA_THRESHOLD,
     _azimuth_bisector,
     _chord_distance,
     _final_course,
+    _get_orf,
     _initial_course,
 )
 
@@ -161,6 +163,21 @@ class TestORFSymmetry:
         orf_12 = overlap_reduction_function(frequencies, det1, det2)
         orf_21 = overlap_reduction_function(frequencies, det2, det1)
         np.testing.assert_allclose(orf_12, orf_21)
+
+
+class TestORFLowAlpha:
+    def test_uses_both_opening_angles(self) -> None:
+        alpha = np.array([_LOW_ALPHA_THRESHOLD * 0.5])
+        beta = 0.9
+        delta = 0.37
+        big_delta = 1.1
+        ang1 = math.pi / 2.0
+        ang2 = math.pi / 3.0
+
+        actual = _get_orf(alpha, beta, delta, big_delta, ang1, ang2)
+        expected = np.cos(4.0 * delta) * np.sin(ang1) * np.sin(ang2)
+
+        np.testing.assert_allclose(actual, np.array([expected]))
 
 
 class TestPairwise:
