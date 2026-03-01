@@ -82,6 +82,11 @@ def load_fixture() -> Callable[[pathlib.Path], dict[str, np.ndarray]]:
     """Factory fixture to load NPZ fixture files."""
 
     def _loader(path: pathlib.Path) -> dict[str, np.ndarray]:
+        if not path.exists():
+            pytest.skip(
+                f"Missing ORF fixture: {path.name}. "
+                "Regenerate with `uv run --script scripts/generate_orf_fixtures.py`."
+            )
         return dict(np.load(path))
 
     return _loader
