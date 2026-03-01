@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#   "gwfast @ git+https://github.com/CosmoStatGW/gwfast.git",
+#   "gwfast @ git+https://github.com/CosmoStatGW/gwfast.git@8488749e769702724910c4728b71ae2bc7427ce9",
 #   "numpy<1.27",
 # ]
 # ///
