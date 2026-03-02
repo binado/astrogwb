@@ -35,6 +35,10 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Verify ORF reference fixtures are present
+        run: |
+          test -f tests/fixtures/gwfast_orf_reference.npz
+          test -f tests/fixtures/gwfast_orf_reference_et_triangle.npz
       - run: uv run --group dev pytest
 
   test-bilby-integration:
@@ -45,4 +49,8 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+      - name: Verify ORF reference fixtures are present
+        run: |
+          test -f tests/fixtures/gwfast_orf_reference.npz
+          test -f tests/fixtures/gwfast_orf_reference_et_triangle.npz
       - run: uv run --group dev --extra bilby pytest -m integration
