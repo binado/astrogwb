@@ -22,9 +22,13 @@ def redshift_pdf(
     Optionally convolves the merger rate with a time-delay distribution before
     projecting into detector-frame coordinates via the comoving volume element.
     """
-    pdf = source_frame_distribution
+    pdf = np.array(source_frame_distribution, dtype=float)
     # Normalize source_frame distribution to 1 at z = 0 so it can be multiplied
     # by the local merger rate afterwards
+    if pdf[0] == 0:
+        raise ValueError(
+            "source_frame_distribution[0] is zero; cannot normalize at z=0"
+        )
     pdf /= pdf[0]
     if callable(time_delay_fn):
         # Convolve merger rate density with time delay distribution
