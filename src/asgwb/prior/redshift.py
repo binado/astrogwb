@@ -50,7 +50,15 @@ def redshift_pdf(
         pdf *= z >= z_min
     if z_max is not None:
         pdf *= z <= z_max
-    return pdf / trapezoid(pdf, x=z) if normalize else pdf
+    if not normalize:
+        return pdf
+    norm = trapezoid(pdf, x=z)
+    if not np.isfinite(norm) or norm <= 0.0:
+        raise ValueError(
+            "Failed to normalize redshift PDF: integral over specified z-range "
+            "is non-positive or non-finite. Check z_min/z_max and input distribution."
+        )
+    return pdf / norm
 
 
 def madau_dickinson_source_frame_distribution(
