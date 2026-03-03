@@ -4,7 +4,6 @@ from collections.abc import Callable
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.integrate import trapezoid
 
 
 def redshift_pdf(
@@ -42,7 +41,7 @@ def redshift_pdf(
         time_delay_pdf = time_delay_fn(time_delay, minimum_time_delay)
         dt_dz = cosmology.hubble_time.value * cosmology.lookback_time_integrand(z)
         joint_pdf = time_delay_pdf * dt_dz * pdf
-        pdf = trapezoid(joint_pdf, x=z)
+        pdf = np.trapezoid(joint_pdf, x=z)
 
     dvc_dz = cosmology.differential_comoving_volume(z).value
     pdf *= 4.0 * np.pi * dvc_dz / (1.0 + z)
@@ -52,7 +51,7 @@ def redshift_pdf(
         pdf *= z <= z_max
     if not normalize:
         return pdf
-    norm = trapezoid(pdf, x=z)
+    norm = np.trapezoid(pdf, x=z)
     if not np.isfinite(norm) or norm <= 0.0:
         raise ValueError(
             "Failed to normalize redshift PDF: integral over specified z-range "
