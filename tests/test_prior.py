@@ -88,13 +88,14 @@ class TestInverseTimeDelayPdf:
         assert np.all(result >= 0)
 
     def test_analytical_normalization(self):
-        """For a 1-D slice, ∫_{t_min}^{t_max} (1/t)/log(t_max/t_min) dt = 1."""
+        """A single-row input integrates to 1: ∫_{t_min}^{t_max} pdf dt ≈ 1."""
         t_min, t_max = 0.05, 10.0
-        # Use a fine log-spaced grid to avoid discretization error near t_min
+        # Use a fine log-spaced grid to avoid discretization error near t_min.
+        # Shape (1, N): one row whose max_time_delay is t_max.
         t = np.logspace(np.log10(t_min), np.log10(t_max), 2000)
-        log_norm = np.log(t_max / t_min)
-        pdf = (1.0 / t) / log_norm
-        integral = trapezoid(pdf, x=t)
+        time_delay = t[np.newaxis, :]  # shape (1, 2000)
+        pdf = inverse_time_delay_pdf(time_delay, t_min)  # shape (1, 2000)
+        integral = trapezoid(pdf[0], x=t)
         assert integral == pytest.approx(1.0, rel=1e-3)
 
     def test_available_models_registry(self):
