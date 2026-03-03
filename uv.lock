@@ -24,16 +24,12 @@ name = "asgwb"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "bilby" },
     { name = "h5py" },
     { name = "lalsuite" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pydantic-settings" },
-]
-
-[package.optional-dependencies]
-bilby = [
-    { name = "bilby" },
 ]
 
 [package.dev-dependencies]
@@ -45,14 +41,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bilby", marker = "extra == 'bilby'", specifier = ">=2.7.1" },
+    { name = "bilby", specifier = ">=2.7.1" },
     { name = "h5py", specifier = ">=3.13.0" },
     { name = "lalsuite", specifier = ">=7.26.4" },
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "pandas", specifier = ">=3.0.0" },
     { name = "pydantic-settings", specifier = ">=2.10.1" },
 ]
-provides-extras = ["bilby"]
 
 [package.metadata.requires-dev]
 dev = [

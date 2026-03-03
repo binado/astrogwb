@@ -9,16 +9,12 @@ authors = [
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
+    "bilby>=2.7.1",
     "h5py>=3.13.0",
     "lalsuite>=7.26.4",
     "numpy>=2.4.2",
     "pandas>=3.0.0",
     "pydantic-settings>=2.10.1",
-]
-
-[project.optional-dependencies]
-bilby = [
-    "bilby>=2.7.1",
 ]
 
 [build-system]
