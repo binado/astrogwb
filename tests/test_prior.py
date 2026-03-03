@@ -150,7 +150,6 @@ class TestRedshiftPdf:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
 class TestPriorClasses:
     def test_uniform_source_frame_prior_sampling(self):
         from asgwb.prior import UniformSourceFramePrior
