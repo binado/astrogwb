@@ -39,10 +39,10 @@ jobs:
         run: |
           test -f tests/fixtures/gwfast_orf_reference.npz
           test -f tests/fixtures/gwfast_orf_reference_et_triangle.npz
-      - run: uv run --group dev pytest
+      - run: uv run --group dev pytest -m "not integration"
 
-  test-bilby-integration:
-    name: Test bilby integration (Python 3.12)
+  test-integration:
+    name: Test integration (Python 3.12)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,4 +53,4 @@ jobs:
         run: |
           test -f tests/fixtures/gwfast_orf_reference.npz
           test -f tests/fixtures/gwfast_orf_reference_et_triangle.npz
-      - run: uv run --group dev --extra bilby pytest -m integration
+      - run: uv run --group dev pytest -m integration
