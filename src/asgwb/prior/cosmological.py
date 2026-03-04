@@ -61,7 +61,14 @@ class ParametrizedCosmological(Cosmological):
         self.num_interp = num_interp
         self.model_parameters = self._extract_model_parameters(**kwargs)
         if isinstance(time_delay_fn, str):
-            time_delay_fn = AVAILABLE_TIME_DELAY_MODELS[time_delay_fn]
+            try:
+                time_delay_fn = AVAILABLE_TIME_DELAY_MODELS[time_delay_fn]
+            except KeyError:
+                valid_keys = ", ".join(sorted(AVAILABLE_TIME_DELAY_MODELS))
+                raise ValueError(
+                    f"Unknown time_delay_fn {time_delay_fn!r}. "
+                    f"Valid options are: {valid_keys}"
+                ) from None
         self.time_delay_fn = time_delay_fn
         for key in self.model_parameters:
             kwargs.pop(key, None)
