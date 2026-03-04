@@ -1,17 +1,39 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import Protocol
 
 import numpy as np
+import numpy.typing as npt
 from numpy.typing import NDArray
+
+
+class TimeDelayPdf(Protocol):
+    def pdf(self, t: npt.NDArray) -> NDArray: ...
+
+
+class InverseTimeDelayPdf:
+    def __init__(self, minimum_time_delay: float = 0.02) -> None:
+        self.minimum_time_delay = minimum_time_delay
+
+    def pdf(self, t: npt.NDArray) -> NDArray:
+        """Normalized inverse time-delay distribution, truncated at minimum_time_delay."""
+        max_time_delay = np.max(t, axis=1)
+        integration_domain = max_time_delay > self.minimum_time_delay
+        norm = np.ones_like(max_time_delay)
+        norm[integration_domain] = np.log(
+            max_time_delay[integration_domain] / self.minimum_time_delay
+        )
+        causal_slice = t > self.minimum_time_delay
+        res = np.zeros_like(t)
+        res[causal_slice] = 1 / t[causal_slice]
+        return res / norm[:, np.newaxis]
 
 
 def redshift_pdf(
     z: NDArray,
     cosmology,
     source_frame_distribution: NDArray,
-    time_delay_fn: Callable | None,
-    minimum_time_delay: float = 0.02,  # Gyr
+    time_delay_fn: TimeDelayPdf | None,
     z_min: float | None = None,
     z_max: float | None = None,
     normalize: bool = True,
@@ -29,7 +51,7 @@ def redshift_pdf(
             "source_frame_distribution[0] is zero; cannot normalize at z=0"
         )
     pdf /= pdf[0]
-    if callable(time_delay_fn):
+    if time_delay_fn is not None:
         # Convolve merger rate density with time delay distribution
         lookback_time = cosmology.lookback_time(z).value  # Gyr
         # In astropy, lookback time is an integration from 0 to z,
@@ -37,8 +59,7 @@ def redshift_pdf(
         # By defining time_delay[i, j] = t_j - t_i, we want to integrate over
         # its positive values, therefore over the j axis (=-1 in numpy)
         time_delay = lookback_time[np.newaxis, :] - lookback_time[:, np.newaxis]
-        # time_delay_fn should return a normalized pdf with signature (i,j) -> (i,j)
-        time_delay_pdf = time_delay_fn(time_delay, minimum_time_delay)
+        time_delay_pdf = time_delay_fn.pdf(time_delay)
         dt_dz = cosmology.hubble_time.value * cosmology.lookback_time_integrand(z)
         joint_pdf = time_delay_pdf * dt_dz * pdf
         pdf = np.trapezoid(joint_pdf, x=z)
@@ -76,19 +97,9 @@ def power_law_source_frame_distribution(z: NDArray, lamb: float) -> NDArray:
 
 
 def inverse_time_delay_pdf(time_delay: NDArray, minimum_time_delay: float) -> NDArray:
-    """Normalized inverse time-delay distribution, truncated at minimum_time_delay."""
-    max_time_delay = np.max(time_delay, axis=1)
-    integration_domain = max_time_delay > minimum_time_delay
-    norm = np.ones_like(max_time_delay)
-    norm[integration_domain] = np.log(
-        max_time_delay[integration_domain] / minimum_time_delay
-    )
-    causal_slice = time_delay > minimum_time_delay
-    res = np.zeros_like(time_delay)
-    res[causal_slice] = 1 / time_delay[causal_slice]
-    return res / norm[:, np.newaxis]
+    return InverseTimeDelayPdf(minimum_time_delay=minimum_time_delay).pdf(time_delay)
 
 
-AVAILABLE_TIME_DELAY_MODELS: dict[str, Callable] = {
-    "inverse_time_delay": inverse_time_delay_pdf,
+AVAILABLE_TIME_DELAY_MODELS: dict[str, TimeDelayPdf] = {
+    "inverse_time_delay": InverseTimeDelayPdf(),
 }

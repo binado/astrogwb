@@ -9,6 +9,8 @@ from .cosmological import (
 )
 from .redshift import (
     AVAILABLE_TIME_DELAY_MODELS,
+    InverseTimeDelayPdf,
+    TimeDelayPdf,
     inverse_time_delay_pdf,
     madau_dickinson_source_frame_distribution,
     power_law_source_frame_distribution,
@@ -25,6 +27,8 @@ __all__ = [
     "power_law_source_frame_distribution",
     "inverse_time_delay_pdf",
     "AVAILABLE_TIME_DELAY_MODELS",
+    "TimeDelayPdf",
+    "InverseTimeDelayPdf",
     # prior classes
     "UniformSourceFramePrior",
     "ParametrizedCosmological",

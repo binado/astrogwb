@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import operator
 from abc import abstractmethod
-from collections.abc import Callable
 
 import numpy as np
 from bilby.gw.prior import Cosmological, UniformSourceFrame
 
 from .redshift import (
     AVAILABLE_TIME_DELAY_MODELS,
+    TimeDelayPdf,
     madau_dickinson_source_frame_distribution,
     power_law_source_frame_distribution,
     redshift_pdf,
@@ -39,8 +39,8 @@ class ParametrizedCosmological(Cosmological):
     num_interp:
         Number of interpolation points for the redshift grid.
     time_delay_fn:
-        Optional callable for time-delay convolution. Must accept
-        ``(time_delay_array, minimum_time_delay)`` and return a normalized PDF.
+        Optional time-delay model for convolution. Must expose
+        ``pdf(time_delay_array)`` and return a normalized PDF.
         Keys in ``AVAILABLE_TIME_DELAY_MODELS`` are accepted string shortcuts.
     **kwargs:
         Model parameters (e.g. ``lamb=2.9``) are extracted and the rest are
@@ -55,7 +55,7 @@ class ParametrizedCosmological(Cosmological):
         self,
         *args,
         num_interp: int = DEFAULT_NUM_INTERP,
-        time_delay_fn: Callable | str | None = None,
+        time_delay_fn: TimeDelayPdf | str | None = None,
         **kwargs,
     ) -> None:
         self.num_interp = num_interp

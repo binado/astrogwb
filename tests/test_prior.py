@@ -8,7 +8,7 @@ from scipy.integrate import trapezoid
 
 from asgwb.prior.redshift import (
     AVAILABLE_TIME_DELAY_MODELS,
-    inverse_time_delay_pdf,
+    InverseTimeDelayPdf,
     madau_dickinson_source_frame_distribution,
     power_law_source_frame_distribution,
     redshift_pdf,
@@ -76,7 +76,9 @@ class TestInverseTimeDelayPdf:
         """Values at or below minimum_time_delay should be zero."""
         time_delay = np.array([[0.0, 0.01, 0.5], [0.0, 0.01, 0.5]])
         minimum_time_delay = 0.02
-        result = inverse_time_delay_pdf(time_delay, minimum_time_delay)
+        result = InverseTimeDelayPdf(minimum_time_delay=minimum_time_delay).pdf(
+            time_delay
+        )
         assert result[0, 0] == 0.0
         assert result[0, 1] == 0.0
 
@@ -84,7 +86,7 @@ class TestInverseTimeDelayPdf:
         """Output should be non-negative everywhere."""
         # time_delay values spanning causal and non-causal regions
         time_delay = np.linspace(-1.0, 5.0, 100).reshape(10, 10)
-        result = inverse_time_delay_pdf(time_delay, minimum_time_delay=0.02)
+        result = InverseTimeDelayPdf(minimum_time_delay=0.02).pdf(time_delay)
         assert np.all(result >= 0)
 
     def test_analytical_normalization(self):
@@ -94,13 +96,15 @@ class TestInverseTimeDelayPdf:
         # Shape (1, N): one row whose max_time_delay is t_max.
         t = np.logspace(np.log10(t_min), np.log10(t_max), 2000)
         time_delay = t[np.newaxis, :]  # shape (1, 2000)
-        pdf = inverse_time_delay_pdf(time_delay, t_min)  # shape (1, 2000)
+        pdf = InverseTimeDelayPdf(minimum_time_delay=t_min).pdf(time_delay)
         integral = trapezoid(pdf[0], x=t)
         assert integral == pytest.approx(1.0, rel=1e-3)
 
     def test_available_models_registry(self):
         assert "inverse_time_delay" in AVAILABLE_TIME_DELAY_MODELS
-        assert callable(AVAILABLE_TIME_DELAY_MODELS["inverse_time_delay"])
+        model = AVAILABLE_TIME_DELAY_MODELS["inverse_time_delay"]
+        assert hasattr(model, "pdf")
+        assert callable(model.pdf)
 
 
 class TestRedshiftPdf:
@@ -116,7 +120,7 @@ class TestRedshiftPdf:
             z_array,
             flat_lcdm,
             source_dist,
-            time_delay_fn=inverse_time_delay_pdf,
+            time_delay_fn=InverseTimeDelayPdf(),
         )
         integral = trapezoid(pdf, x=z_array)
         assert integral == pytest.approx(1.0, rel=1e-3)
