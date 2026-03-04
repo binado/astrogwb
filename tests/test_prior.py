@@ -15,11 +15,6 @@ from asgwb.prior.redshift import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def z_array():
     return np.linspace(0.01, 3.0, 300)
@@ -31,11 +26,6 @@ def flat_lcdm():
     from astropy.cosmology import FlatLambdaCDM
 
     return FlatLambdaCDM(H0=67.4, Om0=0.315)
-
-
-# ---------------------------------------------------------------------------
-# Pure function tests
-# ---------------------------------------------------------------------------
 
 
 class TestPowerLawSourceFrameDistribution:
@@ -147,11 +137,6 @@ class TestRedshiftPdf:
         )
         assert np.all(pdf[z < z_min] == 0.0)
         assert np.all(pdf[z > z_max] == 0.0)
-
-
-# ---------------------------------------------------------------------------
-# Integration tests (require bilby + lal)
-# ---------------------------------------------------------------------------
 
 
 class TestPriorClasses:
