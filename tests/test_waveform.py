@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import sys
-from unittest.mock import patch
-
 import numpy as np
 import pytest
 
@@ -16,8 +13,6 @@ from asgwb.waveform import (
     resolve_frequency_bounds,
 )
 from asgwb.waveform._bilby import BilbyWaveformBackend
-
-from .conftest import requires_bilby
 
 
 @pytest.fixture
@@ -124,7 +119,6 @@ class TestFrequencyGrid:
         assert grid.in_band_frequencies[0] == pytest.approx(grid.minimum_frequency)
         assert grid.in_band_frequencies[-1] == pytest.approx(grid.maximum_frequency)
 
-    @requires_bilby
     def test_frequencies_array_matches_bilby(self, grid: FrequencyGrid):
         generator = WaveformGenerator(
             approximant="IMRPhenomPV2_NRTidalv2", grid=grid, source_type="BNS"
@@ -225,28 +219,6 @@ class TestBilbyWaveformBackend:
         backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
         assert isinstance(backend, WaveformBackend)
 
-    def test_missing_bilby_raises_import_error(self):
-        grid = FrequencyGrid(
-            duration=8.0,
-            sampling_frequency=2048.0,
-            minimum_frequency=20.0,
-            maximum_frequency=1024.0,
-            reference_frequency=50.0,
-        )
-        backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
-        with patch.dict(
-            sys.modules,
-            {
-                "bilby": None,
-                "bilby.gw": None,
-                "bilby.gw.waveform_generator": None,
-                "bilby.gw.source": None,
-                "bilby.gw.conversion": None,
-            },
-        ):
-            with pytest.raises(ImportError, match=r"bilby is required.*asgwb\[bilby\]"):
-                _ = backend.waveform_generator
-
 
 class TestWaveformGenerator:
     def test_from_sampling_builds_grid(self):
@@ -262,7 +234,6 @@ class TestWaveformGenerator:
 
 
 @pytest.mark.integration
-@requires_bilby
 class TestBilbyWaveformBackendIntegration:
     def test_bns(self, grid: FrequencyGrid, bns_params: dict[str, float]):
         backend = BilbyWaveformBackend("IMRPhenomPV2_NRTidalv2", grid, "BNS")
@@ -286,7 +257,6 @@ class TestBilbyWaveformBackendIntegration:
 
 
 @pytest.mark.integration
-@requires_bilby
 class TestWaveformGeneratorIntegration:
     def test_end_to_end(self, grid: FrequencyGrid, bns_params: dict[str, float]):
         gen = WaveformGenerator(

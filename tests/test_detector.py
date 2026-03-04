@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from asgwb.detector.detector import Detector
 from asgwb.detector.psd import PowerSpectralDensity
-
-from .conftest import requires_bilby
 
 
 @pytest.fixture
@@ -55,17 +51,6 @@ def test_to_bilby_psd_unknown_curve_type():
     psd = PowerSpectralDensity(file=Path("irrelevant.txt"), curve_type="bad")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="Unknown curve type"):
         psd.to_bilby_psd()
-
-
-def test_to_bilby_psd_missing_bilby_raises_import_error(
-    aplus_psd: PowerSpectralDensity,
-):
-    with patch.dict(
-        sys.modules,
-        {"bilby": None, "bilby.gw": None, "bilby.gw.detector": None},
-    ):
-        with pytest.raises(ImportError, match=r"bilby is required.*asgwb\[bilby\]"):
-            aplus_psd.to_bilby_psd()
 
 
 def test_from_dict(h1_dict: dict[str, float | str], aplus_psd: PowerSpectralDensity):
@@ -134,18 +119,6 @@ duty_factor = 0.8
     assert det.duty_factor == 0.8
 
 
-def test_to_bilby_detector_missing_bilby_raises_import_error():
-    det = Detector.from_file("H1")
-    with patch.dict(
-        sys.modules,
-        {"bilby": None, "bilby.gw": None, "bilby.gw.detector": None},
-    ):
-        with pytest.raises(ImportError, match=r"bilby is required.*asgwb\[bilby\]"):
-            det.to_bilby_detector()
-
-
-@pytest.mark.integration
-@requires_bilby
 def test_to_bilby_psd(aplus_psd: PowerSpectralDensity):
     import bilby
 
@@ -153,8 +126,6 @@ def test_to_bilby_psd(aplus_psd: PowerSpectralDensity):
     assert isinstance(bilby_psd, bilby.gw.detector.PowerSpectralDensity)
 
 
-@pytest.mark.integration
-@requires_bilby
 def test_to_bilby_detector():
     import bilby
 

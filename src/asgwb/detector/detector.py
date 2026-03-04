@@ -3,12 +3,11 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import Self
+
+from bilby.gw.detector import Interferometer
 
 from .psd import PowerSpectralDensity
-
-if TYPE_CHECKING:
-    from bilby.gw.detector import Interferometer
 
 DETECTOR_FILE = Path(__file__).parent / "detectors.toml"
 
@@ -75,16 +74,6 @@ class Detector:
         return cls.from_dict(detector_data, psd=psd)
 
     def to_bilby_detector(self) -> Interferometer:
-        try:
-            from bilby.gw.detector import Interferometer
-        except ImportError as exc:
-            raise ImportError(
-                "bilby is required to convert Detector to a bilby Interferometer. "
-                "Install it with: uv pip install 'asgwb[bilby]' "
-                "(or pip install 'asgwb[bilby]' / pip install bilby). "
-                "If working in this repo, use: uv sync --extra bilby"
-            ) from exc
-
         return Interferometer(
             name=self.name,
             power_spectral_density=self.psd.to_bilby_psd(),
