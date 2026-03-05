@@ -158,10 +158,10 @@ def compute_partial_sum_for_chunk(
     maximum_frequency: float | None,
     duration: float,
     source_type: SourceType,
-) -> tuple[npt.NDArray[np.float64], int, int, int]:
+) -> tuple[npt.NDArray[np.float64], int, int, int] | None:
     """Compute a per-frequency partial sum for one injection chunk."""
     if chunk.empty:
-        return np.zeros(0, dtype=np.float64), 0, -1, -1
+        return None
 
     chunk_start = int(chunk.index[0])
     chunk_end = int(chunk.index[-1])
@@ -326,9 +326,10 @@ def compute_spectral_density_with_injections(
     n_chunks = 0
     if nworkers > 1:
         with ProcessPoolExecutor(max_workers=nworkers) as executor:
-            for partial_sum, processed, chunk_start, chunk_end in executor.map(
-                process_chunk, indexed_reader
-            ):
+            for chunk_result in executor.map(process_chunk, indexed_reader):
+                if chunk_result is None:
+                    continue
+                partial_sum, processed, chunk_start, chunk_end = chunk_result
                 if partial_sum.shape != sum_abs_sq.shape:
                     raise ValueError(
                         f"Frequency bins mismatch in chunk {chunk_start}-{chunk_end}: "
@@ -339,7 +340,10 @@ def compute_spectral_density_with_injections(
                 n_chunks += 1
     else:
         for chunk in indexed_reader:
-            partial_sum, processed, chunk_start, chunk_end = process_chunk(chunk)
+            chunk_result = process_chunk(chunk)
+            if chunk_result is None:
+                continue
+            partial_sum, processed, chunk_start, chunk_end = chunk_result
             if partial_sum.shape != sum_abs_sq.shape:
                 raise ValueError(
                     f"Frequency bins mismatch in chunk {chunk_start}-{chunk_end}: "
