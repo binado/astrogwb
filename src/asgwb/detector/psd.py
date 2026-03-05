@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self
 
+import numpy as np
+import numpy.typing as npt
 from bilby.gw.detector import PowerSpectralDensity as BilbyPowerSpectralDensity
+
+if TYPE_CHECKING:
+    from scipy.interpolate import CubicSpline
+
 
 NOISE_CURVES_BASE_DIR = Path(__file__).parent / "noise_curves"
 
@@ -13,6 +19,22 @@ NOISE_CURVES_BASE_DIR = Path(__file__).parent / "noise_curves"
 class PowerSpectralDensity:
     file: Path
     curve_type: Literal["psd", "asd"]
+
+    def __post_init__(self):
+        self._psd_interpolator: CubicSpline | None = None
+
+    def _build_interpolator(self) -> CubicSpline:
+        from scipy.interpolate import CubicSpline
+
+        f, psd = np.loadtxt(self.file, unpack=True)
+        if self.curve_type == "asd":
+            psd = psd**2
+        return CubicSpline(f, psd)
+
+    def __call__(self, frequency: npt.NDArray) -> npt.NDArray:
+        if self._psd_interpolator is None:
+            self._psd_interpolator = self._build_interpolator()
+        return self._psd_interpolator(frequency)
 
     def to_bilby_psd(self) -> BilbyPowerSpectralDensity:
         if self.curve_type not in {"psd", "asd"}:
