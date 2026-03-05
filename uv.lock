@@ -24,12 +24,14 @@ name = "asgwb"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "astropy" },
     { name = "bilby" },
     { name = "h5py" },
     { name = "lalsuite" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pydantic-settings" },
+    { name = "scipy" },
 ]
 
 [package.dev-dependencies]
@@ -41,12 +43,14 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "astropy", specifier = ">=7.2.0" },
     { name = "bilby", specifier = ">=2.7.1" },
     { name = "h5py", specifier = ">=3.13.0" },
     { name = "lalsuite", specifier = ">=7.26.4" },
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "pandas", specifier = ">=3.0.0" },
     { name = "pydantic-settings", specifier = ">=2.10.1" },
+    { name = "scipy", specifier = ">=1.17.0" },
 ]
 
 [package.metadata.requires-dev]
