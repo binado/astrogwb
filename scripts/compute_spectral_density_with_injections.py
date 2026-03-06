@@ -257,7 +257,7 @@ def compute_spectral_density_with_injections(
         minimum_frequency=minimum_frequency,
         maximum_frequency=maximum_frequency,
     )
-    frequency_axis = grid.in_band_frequencies.astype(np.float64, copy=False)
+    frequency_axis = grid.frequencies.astype(np.float64, copy=False)
     sum_abs_sq = np.zeros(frequency_axis.shape[0], dtype=np.float64)
 
     read_kwargs: dict[str, int | range] = {}
