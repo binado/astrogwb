@@ -29,7 +29,7 @@ import h5py
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
@@ -48,6 +48,28 @@ from asgwb.waveform import SourceType, WaveformGenerator
 from asgwb.waveform.grid import FrequencyGrid
 
 logger = logging.getLogger(__name__)
+
+
+class SpectralDensityMetadata(BaseModel):
+    duration: float
+    sampling_frequency: float
+    reference_frequency: float
+    minimum_frequency: float
+    maximum_frequency: float | None
+    n_events_processed: int
+    n_events_requested: int
+    n_chunks: int
+    args: str | None = None
+    git_revision: str | None = None
+
+    def to_frequency_grid(self) -> FrequencyGrid:
+        return FrequencyGrid(
+            duration=self.duration,
+            sampling_frequency=self.sampling_frequency,
+            reference_frequency=self.reference_frequency,
+            minimum_frequency=self.minimum_frequency,
+            maximum_frequency=self.maximum_frequency,
+        )
 
 
 class ComputeSpectralDensitySettings(BaseSettings):
@@ -193,31 +215,10 @@ def reindex_chunks(
         next_index = stop_index
 
 
-def expected_frequency_axis(
-    duration: float,
-    sampling_frequency: float,
-    reference_frequency: float,
-    minimum_frequency: float,
-    maximum_frequency: float | None,
-) -> npt.NDArray[np.float64]:
-    grid = FrequencyGrid(
-        duration=duration,
-        sampling_frequency=sampling_frequency,
-        reference_frequency=reference_frequency,
-        minimum_frequency=minimum_frequency,
-        maximum_frequency=maximum_frequency,
-    )
-    return grid.in_band_frequencies.astype(np.float64, copy=False)
-
-
 def write_power_output(
     output_file: Path,
     sum_abs_sq: npt.NDArray[np.float64],
-    frequency_axis: npt.NDArray[np.float64],
-    n_events_processed: int,
-    n_events_requested: int,
-    n_chunks: int,
-    metadata: dict[str, str] | None = None,
+    metadata: SpectralDensityMetadata,
 ) -> None:
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(output_file, "w") as out:
@@ -227,23 +228,10 @@ def write_power_output(
             dtype=np.float64,
             compression="gzip",
         )
-        out.create_dataset(
-            "frequency",
-            data=frequency_axis,
-            dtype=np.float64,
-            compression="gzip",
-        )
-        out["frequency"].attrs["units"] = "Hz"
         out.attrs["definition"] = (
             "sum_abs_sq[f] = sum_events (|plus[event,f]|^2 + |cross[event,f]|^2)"
         )
-        out.attrs["n_events_processed"] = n_events_processed
-        out.attrs["n_events_requested"] = n_events_requested
-        out.attrs["n_chunks"] = n_chunks
-        out.attrs["n_freq"] = int(frequency_axis.shape[0])
-        if metadata:
-            for k, v in metadata.items():
-                out.attrs[k] = v
+        out.attrs["metadata_json"] = metadata.model_dump_json()
 
 
 def compute_spectral_density_with_injections(
@@ -262,13 +250,14 @@ def compute_spectral_density_with_injections(
     batch: int | None = None,
     metadata: dict[str, str] | None = None,
 ) -> None:
-    frequency_axis = expected_frequency_axis(
+    grid = FrequencyGrid(
         duration=duration,
         sampling_frequency=sampling_frequency,
         reference_frequency=reference_frequency,
         minimum_frequency=minimum_frequency,
         maximum_frequency=maximum_frequency,
     )
+    frequency_axis = grid.in_band_frequencies.astype(np.float64, copy=False)
     sum_abs_sq = np.zeros(frequency_axis.shape[0], dtype=np.float64)
 
     read_kwargs: dict[str, int | range] = {}
@@ -326,40 +315,51 @@ def compute_spectral_density_with_injections(
             n_chunks += 1
 
     n_events_requested = batch if batch is not None else -1
-    write_power_output(
-        output_file=output_file,
-        sum_abs_sq=sum_abs_sq,
-        frequency_axis=frequency_axis,
+    run_metadata = SpectralDensityMetadata(
+        duration=duration,
+        sampling_frequency=sampling_frequency,
+        reference_frequency=reference_frequency,
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
         n_events_processed=n_events_processed,
         n_events_requested=n_events_requested,
         n_chunks=n_chunks,
-        metadata=metadata,
+        args=metadata.get("args") if metadata else None,
+        git_revision=metadata.get("git_revision") if metadata else None,
+    )
+    write_power_output(
+        output_file=output_file,
+        sum_abs_sq=sum_abs_sq,
+        metadata=run_metadata,
     )
     logger.info("Wrote reduced spectrum to %s", output_file)
 
 
 def _load_partial_file(
     path: Path,
-) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], int]:
+) -> tuple[npt.NDArray[np.float64], SpectralDensityMetadata]:
     with h5py.File(path, "r") as hf:
-        if "sum_abs_sq" not in hf or "frequency" not in hf:
-            raise KeyError(
-                f"Expected datasets '/sum_abs_sq' and '/frequency' in {path}"
-            )
-        sum_abs_sq = hf["sum_abs_sq"][:]
-        frequency = hf["frequency"][:]
-        n_events_processed = int(hf.attrs.get("n_events_processed", -1))
-    if sum_abs_sq.ndim != 1 or frequency.ndim != 1:
-        raise ValueError(f"Expected 1D datasets in {path}")
-    if sum_abs_sq.shape != frequency.shape:
-        raise ValueError(
-            f"Shape mismatch in {path}: sum_abs_sq {sum_abs_sq.shape} vs frequency {frequency.shape}"
+        if "sum_abs_sq" not in hf:
+            raise KeyError(f"Expected dataset '/sum_abs_sq' in {path}")
+        if "metadata_json" not in hf.attrs:
+            raise KeyError(f"Expected attribute 'metadata_json' in {path}")
+        sum_abs_sq_dataset = hf["sum_abs_sq"]
+        assert isinstance(sum_abs_sq_dataset, h5py.Dataset)
+        sum_abs_sq = sum_abs_sq_dataset[:].astype(np.float64, copy=False)
+        metadata = SpectralDensityMetadata.model_validate_json(
+            hf.attrs["metadata_json"]
         )
-    return (
-        sum_abs_sq.astype(np.float64, copy=False),
-        frequency.astype(np.float64, copy=False),
-        n_events_processed,
-    )
+
+    if sum_abs_sq.ndim != 1:
+        raise ValueError(f"Expected 1D sum_abs_sq dataset in {path}")
+
+    expected_freq = metadata.to_frequency_grid().in_band_frequencies
+    if sum_abs_sq.shape != expected_freq.shape:
+        raise ValueError(
+            f"Shape mismatch in {path}: sum_abs_sq {sum_abs_sq.shape} vs expected frequency {expected_freq.shape}"
+        )
+
+    return sum_abs_sq.astype(np.float64, copy=False), metadata
 
 
 def merge_partial_sum_files(
@@ -372,37 +372,48 @@ def merge_partial_sum_files(
         sys.exit(1)
 
     total_sum: npt.NDArray[np.float64] | None = None
-    frequency_ref: npt.NDArray[np.float64] | None = None
+    base_metadata: SpectralDensityMetadata | None = None
     total_events_processed = 0
 
     for i, path in enumerate(input_files, start=1):
-        part_sum, part_frequency, part_events = _load_partial_file(path)
+        part_sum, part_metadata = _load_partial_file(path)
         if total_sum is None:
             total_sum = part_sum.copy()
-            frequency_ref = part_frequency
+            base_metadata = part_metadata
         else:
-            assert frequency_ref is not None
+            assert base_metadata is not None
             if part_sum.shape != total_sum.shape:
                 raise ValueError(
                     f"Frequency bins mismatch in {path}: {part_sum.shape} vs {total_sum.shape}"
                 )
-            if not np.allclose(part_frequency, frequency_ref, rtol=0.0, atol=0.0):
-                raise ValueError(f"Frequency axis mismatch in {path}")
+            if part_metadata.to_frequency_grid() != base_metadata.to_frequency_grid():
+                raise ValueError(f"Metadata (grid parameters) mismatch in {path}")
             total_sum += part_sum
-        if part_events >= 0:
-            total_events_processed += part_events
+
+        if part_metadata.n_events_processed >= 0:
+            total_events_processed += part_metadata.n_events_processed
         logger.info("Merged %d/%d: %s", i, len(input_files), path.name)
 
     assert total_sum is not None
-    assert frequency_ref is not None
-    write_power_output(
-        output_file=output_file,
-        sum_abs_sq=total_sum,
-        frequency_axis=frequency_ref,
+    assert base_metadata is not None
+
+    merged_metadata = SpectralDensityMetadata(
+        duration=base_metadata.duration,
+        sampling_frequency=base_metadata.sampling_frequency,
+        reference_frequency=base_metadata.reference_frequency,
+        minimum_frequency=base_metadata.minimum_frequency,
+        maximum_frequency=base_metadata.maximum_frequency,
         n_events_processed=total_events_processed,
         n_events_requested=-1,
         n_chunks=len(input_files),
-        metadata=metadata,
+        args=metadata.get("args") if metadata else None,
+        git_revision=metadata.get("git_revision") if metadata else None,
+    )
+
+    write_power_output(
+        output_file=output_file,
+        sum_abs_sq=total_sum,
+        metadata=merged_metadata,
     )
 
     with h5py.File(output_file, "a") as out:
