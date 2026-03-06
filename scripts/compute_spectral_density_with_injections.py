@@ -43,7 +43,7 @@ except (
     from scripts.utils import get_config_filepath, get_git_revision
 
 from asgwb.io import load_injection_file
-from asgwb.waveform import SourceType, WaveformGenerator, WaveformPolarizations
+from asgwb.waveform import SourceType, WaveformGenerator
 from asgwb.waveform.grid import FrequencyGrid
 
 logger = logging.getLogger(__name__)
@@ -113,33 +113,6 @@ def _filter_macos_sidecars(paths: list[str]) -> list[Path]:
     return filtered
 
 
-def get_waveform_generator(
-    waveform_approximant: str,
-    reference_frequency: float,
-    sampling_frequency: float,
-    minimum_frequency: float,
-    maximum_frequency: float | None,
-    duration: float,
-    source_type: SourceType,
-) -> WaveformGenerator:
-    return WaveformGenerator.from_sampling(
-        approximant=waveform_approximant,
-        duration=duration,
-        sampling_frequency=sampling_frequency,
-        reference_frequency=reference_frequency,
-        source_type=source_type,
-        minimum_frequency=minimum_frequency,
-        maximum_frequency=maximum_frequency,
-    )
-
-
-def generate_injection_waveform(
-    injection_parameters: dict[str, float],
-    waveform_generator: WaveformGenerator,
-) -> WaveformPolarizations:
-    return waveform_generator.frequency_domain_polarizations(injection_parameters)
-
-
 def compute_partial_sum_for_chunk(
     chunk: pd.DataFrame,
     waveform_approximant: str,
@@ -158,14 +131,14 @@ def compute_partial_sum_for_chunk(
     chunk_end = int(chunk.index[-1])
     logger.info("Processing injections %d-%d", chunk_start, chunk_end)
 
-    waveform_generator = get_waveform_generator(
-        waveform_approximant=waveform_approximant,
-        reference_frequency=reference_frequency,
+    waveform_generator = WaveformGenerator.from_sampling(
+        approximant=waveform_approximant,
+        duration=duration,
         sampling_frequency=sampling_frequency,
+        reference_frequency=reference_frequency,
+        source_type=source_type,
         minimum_frequency=minimum_frequency,
         maximum_frequency=maximum_frequency,
-        duration=duration,
-        source_type=source_type,
     )
 
     columns = chunk.columns.tolist()
@@ -175,9 +148,8 @@ def compute_partial_sum_for_chunk(
         injection_parameters = {
             column: float(value) for column, value in zip(columns, row[1:], strict=True)
         }
-        polarizations = generate_injection_waveform(
-            injection_parameters=injection_parameters,
-            waveform_generator=waveform_generator,
+        polarizations = waveform_generator.frequency_domain_polarizations(
+            injection_parameters
         )
         contribution = polarizations.squared_sum()
         if partial_sum is None:
