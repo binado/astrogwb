@@ -147,6 +147,8 @@ if [[ "${OUTPUT_DIR}" != /* ]]; then
 fi
 OFFSET=$((TASK_ID * BATCH_SIZE))
 OUTPUT_FILE="${OUTPUT_DIR}/spectral_density_batch_${TASK_ID}.h5"
+export INPUT="${INJECTION_FILE} ${SCRIPT_FILE}"
+export OUTPUT="${OUTPUT_FILE}"
 
 if [[ ! -f "${SCRIPT_FILE}" ]]; then
     echo "Error: Script file '${SCRIPT_FILE}' not found." >&2
