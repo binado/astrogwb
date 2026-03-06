@@ -300,6 +300,11 @@ def compute_spectral_density_with_injections(
                 sum_abs_sq += chunk_result.partial_sum
                 n_events_processed += chunk_result.processed
                 n_chunks += 1
+                logger.info(
+                    "Processed %d events in chunk, %d total",
+                    chunk_result.processed,
+                    n_events_processed,
+                )
     else:
         for chunk in indexed_reader:
             chunk_result = process_chunk(chunk)
@@ -313,6 +318,11 @@ def compute_spectral_density_with_injections(
             sum_abs_sq += chunk_result.partial_sum
             n_events_processed += chunk_result.processed
             n_chunks += 1
+            logger.info(
+                "Processed %d events in chunk, %d total",
+                chunk_result.processed,
+                n_events_processed,
+            )
 
     n_events_requested = batch if batch is not None else -1
     run_metadata = SpectralDensityMetadata(
