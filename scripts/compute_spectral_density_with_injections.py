@@ -19,6 +19,7 @@ import logging
 import re
 import sys
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
 from functools import partial
 from glob import glob
 from pathlib import Path
@@ -113,6 +114,14 @@ def _filter_macos_sidecars(paths: list[str]) -> list[Path]:
     return filtered
 
 
+@dataclass(frozen=True, slots=True)
+class ChunkPartialSum:
+    partial_sum: npt.NDArray[np.float64]
+    processed: int
+    chunk_start: int
+    chunk_end: int
+
+
 def compute_partial_sum_for_chunk(
     chunk: pd.DataFrame,
     waveform_approximant: str,
@@ -122,7 +131,7 @@ def compute_partial_sum_for_chunk(
     maximum_frequency: float | None,
     duration: float,
     source_type: SourceType,
-) -> tuple[npt.NDArray[np.float64], int, int, int] | None:
+) -> ChunkPartialSum | None:
     """Compute a per-frequency partial sum for one injection chunk."""
     if chunk.empty:
         return None
@@ -164,7 +173,12 @@ def compute_partial_sum_for_chunk(
         processed += 1
 
     assert partial_sum is not None
-    return partial_sum, processed, chunk_start, chunk_end
+    return ChunkPartialSum(
+        partial_sum=partial_sum,
+        processed=processed,
+        chunk_start=chunk_start,
+        chunk_end=chunk_end,
+    )
 
 
 def reindex_chunks(
@@ -289,28 +303,26 @@ def compute_spectral_density_with_injections(
             for chunk_result in executor.map(process_chunk, indexed_reader):
                 if chunk_result is None:
                     continue
-                partial_sum, processed, chunk_start, chunk_end = chunk_result
-                if partial_sum.shape != sum_abs_sq.shape:
+                if chunk_result.partial_sum.shape != sum_abs_sq.shape:
                     raise ValueError(
-                        f"Frequency bins mismatch in chunk {chunk_start}-{chunk_end}: "
-                        f"{partial_sum.shape} vs {sum_abs_sq.shape}"
+                        f"Frequency bins mismatch in chunk {chunk_result.chunk_start}-{chunk_result.chunk_end}: "
+                        f"{chunk_result.partial_sum.shape} vs {sum_abs_sq.shape}"
                     )
-                sum_abs_sq += partial_sum
-                n_events_processed += processed
+                sum_abs_sq += chunk_result.partial_sum
+                n_events_processed += chunk_result.processed
                 n_chunks += 1
     else:
         for chunk in indexed_reader:
             chunk_result = process_chunk(chunk)
             if chunk_result is None:
                 continue
-            partial_sum, processed, chunk_start, chunk_end = chunk_result
-            if partial_sum.shape != sum_abs_sq.shape:
+            if chunk_result.partial_sum.shape != sum_abs_sq.shape:
                 raise ValueError(
-                    f"Frequency bins mismatch in chunk {chunk_start}-{chunk_end}: "
-                    f"{partial_sum.shape} vs {sum_abs_sq.shape}"
+                    f"Frequency bins mismatch in chunk {chunk_result.chunk_start}-{chunk_result.chunk_end}: "
+                    f"{chunk_result.partial_sum.shape} vs {sum_abs_sq.shape}"
                 )
-            sum_abs_sq += partial_sum
-            n_events_processed += processed
+            sum_abs_sq += chunk_result.partial_sum
+            n_events_processed += chunk_result.processed
             n_chunks += 1
 
     n_events_requested = batch if batch is not None else -1
