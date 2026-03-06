@@ -140,15 +140,6 @@ def generate_injection_waveform(
     return waveform_generator.frequency_domain_polarizations(injection_parameters)
 
 
-def _sum_abs_sq_from_polarizations(
-    plus: npt.NDArray[np.complex128],
-    cross: npt.NDArray[np.complex128],
-) -> npt.NDArray[np.float64]:
-    if plus.shape != cross.shape:
-        raise ValueError(f"plus/cross shape mismatch: {plus.shape} vs {cross.shape}")
-    return (np.abs(plus) ** 2 + np.abs(cross) ** 2).astype(np.float64, copy=False)
-
-
 def compute_partial_sum_for_chunk(
     chunk: pd.DataFrame,
     waveform_approximant: str,
@@ -188,10 +179,7 @@ def compute_partial_sum_for_chunk(
             injection_parameters=injection_parameters,
             waveform_generator=waveform_generator,
         )
-        contribution = _sum_abs_sq_from_polarizations(
-            plus=polarizations.plus,
-            cross=polarizations.cross,
-        )
+        contribution = polarizations.squared_sum()
         if partial_sum is None:
             partial_sum = contribution.copy()
         else:
