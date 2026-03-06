@@ -82,6 +82,7 @@ class BilbyWaveformBackend:
         self, parameters: dict[str, float]
     ) -> WaveformPolarizations:
         result = self.waveform_generator.frequency_domain_strain(parameters)
+        assert result is not None
         return WaveformPolarizations(
             grid=self._grid, plus=result["plus"], cross=result["cross"]
         )
