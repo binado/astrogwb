@@ -85,6 +85,7 @@ class ComputeSpectralDensitySettings(BaseSettings):
     nworkers: Annotated[int, Field(gt=0)] = 1
     offset: Annotated[int, Field(ge=0)] = 0
     batch: Annotated[int | None, Field(gt=0)] = None
+    verbose: bool = True
 
     @classmethod
     def settings_customise_sources(
@@ -125,7 +126,7 @@ class WaveformGeneratorConfig(NamedTuple):
 def _init_worker(config: WaveformGeneratorConfig) -> None:
     global _WORKER_WAVEFORM_GENERATOR
     _WORKER_WAVEFORM_GENERATOR = WaveformGenerator.from_sampling(
-        waveform_approximant=config.waveform_approximant,
+        approximant=config.waveform_approximant,
         reference_frequency=config.reference_frequency,
         sampling_frequency=config.sampling_frequency,
         minimum_frequency=config.minimum_frequency,
@@ -393,11 +394,13 @@ def run(settings: ComputeSpectralDensitySettings) -> None:
 
 
 def main() -> None:
+    settings = ComputeSpectralDensitySettings()
+    log_level = logging.INFO if settings.verbose else logging.WARNING
     logging.basicConfig(
-        level=logging.INFO,
+        level=log_level,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-    run(settings=ComputeSpectralDensitySettings())
+    run(settings=settings)
 
 
 if __name__ == "__main__":
