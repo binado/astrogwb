@@ -1,4 +1,4 @@
-"""Compute waveform power directly from injections without intermediate waveform I/O.
+"""Compute spectral density directly from injections without intermediate waveform I/O.
 
 The script loads injections in chunks, has each worker generate waveforms for its
 assigned chunk, accumulates ``sum_abs_sq[f] += |h_plus|^2 + |h_cross|^2``, and
@@ -7,17 +7,15 @@ writes the reduced spectrum to a compact HDF5 file.
 
 from __future__ import annotations
 
-import json
 import logging
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Annotated, Iterable, Iterator, NamedTuple
 
-import h5py
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
@@ -25,12 +23,13 @@ from pydantic_settings import (
 )
 
 try:
-    from utils import get_config_filepath, get_git_revision
+    from utils import get_config_filepath
 except (
     ModuleNotFoundError
 ):  # pragma: no cover - import path differs in test/module usage
-    from scripts.utils import get_config_filepath, get_git_revision
+    from scripts.utils import get_config_filepath
 
+from asgwb.gwb import SpectralDensity
 from asgwb.io import load_injection_file
 from asgwb.waveform import SourceType, WaveformGenerator
 from asgwb.waveform.grid import FrequencyGrid
@@ -38,28 +37,6 @@ from asgwb.waveform.grid import FrequencyGrid
 logger = logging.getLogger(__name__)
 
 _WORKER_WAVEFORM_GENERATOR: WaveformGenerator | None = None
-
-
-class SpectralDensityMetadata(BaseModel):
-    duration: float
-    sampling_frequency: float
-    reference_frequency: float
-    minimum_frequency: float
-    maximum_frequency: float | None
-    n_events_processed: int
-    n_events_requested: int
-    n_chunks: int
-    args: str | None = None
-    git_revision: str | None = None
-
-    def to_frequency_grid(self) -> FrequencyGrid:
-        return FrequencyGrid(
-            duration=self.duration,
-            sampling_frequency=self.sampling_frequency,
-            reference_frequency=self.reference_frequency,
-            minimum_frequency=self.minimum_frequency,
-            maximum_frequency=self.maximum_frequency,
-        )
 
 
 class ComputeSpectralDensitySettings(BaseSettings):
@@ -202,34 +179,6 @@ def reindex_chunks(
         next_index = stop_index
 
 
-def write_power_output(
-    output_file: Path,
-    frequency_axis: npt.NDArray[np.float64],
-    sum_abs_sq: npt.NDArray[np.float64],
-    metadata: SpectralDensityMetadata,
-) -> None:
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(output_file, "w") as out:
-        out.create_dataset(
-            "frequency",
-            data=frequency_axis,
-            dtype=np.float64,
-            compression="gzip",
-        )
-        out.create_dataset(
-            "sum_abs_sq",
-            data=sum_abs_sq,
-            dtype=np.float64,
-            compression="gzip",
-        )
-        out.attrs["definition"] = (
-            "sum_abs_sq[f] = sum_events (|plus[event,f]|^2 + |cross[event,f]|^2)"
-        )
-        out.attrs["metadata_json"] = metadata.model_dump_json()
-        out.attrs["n_events_processed"] = metadata.n_events_processed
-        out.attrs["n_chunks"] = metadata.n_chunks
-
-
 def _accumulate_chunk_result(
     sum_abs_sq: npt.NDArray[np.float64],
     chunk_result: ChunkPartialSum | None,
@@ -267,7 +216,6 @@ def compute_spectral_density_with_injections(
     nworkers: int = 1,
     offset: int = 0,
     batch: int | None = None,
-    metadata: dict[str, str] | None = None,
 ) -> None:
     grid = FrequencyGrid(
         duration=duration,
@@ -343,37 +291,20 @@ def compute_spectral_density_with_injections(
                 n_events_processed += processed
                 n_chunks += chunk_count
 
-    n_events_requested = batch if batch is not None else -1
-    run_metadata = SpectralDensityMetadata(
-        duration=duration,
-        sampling_frequency=sampling_frequency,
-        reference_frequency=reference_frequency,
-        minimum_frequency=minimum_frequency,
-        maximum_frequency=maximum_frequency,
-        n_events_processed=n_events_processed,
-        n_events_requested=n_events_requested,
-        n_chunks=n_chunks,
-        args=metadata.get("args") if metadata else None,
-        git_revision=metadata.get("git_revision") if metadata else None,
+    spectral_density = SpectralDensity(grid=grid, spectral_density=sum_abs_sq)
+    spectral_density.dump(output_file)
+    logger.info(
+        "Wrote reduced spectrum to %s (%d events across %d chunks)",
+        output_file,
+        n_events_processed,
+        n_chunks,
     )
-    write_power_output(
-        output_file=output_file,
-        frequency_axis=frequency_axis,
-        sum_abs_sq=sum_abs_sq,
-        metadata=run_metadata,
-    )
-    logger.info("Wrote reduced spectrum to %s", output_file)
 
 
 def run(settings: ComputeSpectralDensitySettings) -> None:
     logger.info("Running with settings:")
     for k, v in settings.model_dump().items():
         logger.info("\t%s = %s", k, v)
-
-    metadata: dict[str, str] = {"args": json.dumps(settings.model_dump(), default=str)}
-    git_rev = get_git_revision()
-    if git_rev is not None:
-        metadata["git_revision"] = git_rev
 
     compute_spectral_density_with_injections(
         injection_file=settings.injection_file,
@@ -389,7 +320,6 @@ def run(settings: ComputeSpectralDensitySettings) -> None:
         nworkers=settings.nworkers,
         offset=settings.offset,
         batch=settings.batch,
-        metadata=metadata,
     )
 
 
