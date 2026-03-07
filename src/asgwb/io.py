@@ -113,7 +113,12 @@ def _read_spectral_density_dataset(hf: h5py.File) -> npt.NDArray[np.float64]:
         )
 
     dataset = hf[_SPECTRAL_DENSITY_DATASET]
-    assert isinstance(dataset, h5py.Dataset)
+    if not isinstance(dataset, h5py.Dataset):
+        raise TypeError(
+            f"Expected '/{_SPECTRAL_DENSITY_DATASET}' to be an h5py.Dataset, "
+            f"got {type(dataset).__name__}. This may indicate file corruption or "
+            f"that the HDF5 group was accessed instead of a dataset."
+        )
     spectral_density = np.asarray(dataset[:], dtype=np.float64)
     if spectral_density.ndim != 1:
         raise ValueError(
