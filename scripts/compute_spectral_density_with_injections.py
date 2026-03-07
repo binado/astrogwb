@@ -1,29 +1,17 @@
 """Compute waveform power directly from injections without intermediate waveform I/O.
 
-This script supports two modes:
-
-1) compute (default):
-   - Load injections in chunks.
-   - Each worker generates waveforms for its chunk and computes:
-         sum_abs_sq[f] += |h_plus|^2 + |h_cross|^2
-   - The parent process reduces all chunk partial sums and writes a compact HDF5 file.
-
-2) merge:
-   - Sum multiple partial output files (for example from SLURM array jobs).
+The script loads injections in chunks, has each worker generate waveforms for its
+assigned chunk, accumulates ``sum_abs_sq[f] += |h_plus|^2 + |h_cross|^2``, and
+writes the reduced spectrum to a compact HDF5 file.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
-import sys
 from multiprocessing import Pool
-from dataclasses import dataclass
-from functools import partial
-from glob import glob
 from pathlib import Path
-from typing import Annotated, Iterable, Iterator, Literal
+from typing import Annotated, Iterable, Iterator, NamedTuple
 
 import h5py
 import numpy as np
@@ -49,6 +37,8 @@ from asgwb.waveform.grid import FrequencyGrid
 
 logger = logging.getLogger(__name__)
 
+_WORKER_WAVEFORM_GENERATOR: WaveformGenerator | None = None
+
 
 class SpectralDensityMetadata(BaseModel):
     duration: float
@@ -73,7 +63,7 @@ class SpectralDensityMetadata(BaseModel):
 
 
 class ComputeSpectralDensitySettings(BaseSettings):
-    """Settings for streaming waveform-power computation and partial-file merging."""
+    """Settings for streaming waveform-power computation."""
 
     model_config = SettingsConfigDict(
         cli_parse_args=True,
@@ -81,11 +71,9 @@ class ComputeSpectralDensitySettings(BaseSettings):
         cli_implicit_flags=True,
     )
 
-    mode: Literal["compute", "merge"] = "compute"
     output_file: Path
 
-    # compute mode inputs
-    injection_file: Path | None = None
+    injection_file: Path
     waveform_approximant: str = "IMRPhenomPV2_NRTidalv2"
     reference_frequency: float = 50.0
     sampling_frequency: float = 2048.0
@@ -97,10 +85,6 @@ class ComputeSpectralDensitySettings(BaseSettings):
     nworkers: Annotated[int, Field(gt=0)] = 1
     offset: Annotated[int, Field(ge=0)] = 0
     batch: Annotated[int | None, Field(gt=0)] = None
-
-    # merge mode inputs
-    input_pattern: str | None = None
-    no_sort: bool = False
 
     @classmethod
     def settings_customise_sources(
@@ -121,38 +105,39 @@ class ComputeSpectralDensitySettings(BaseSettings):
         )
 
 
-def _natural_sort_key(path: str) -> list[int | str]:
-    parts: list[int | str] = []
-    for part in re.split(r"(\d+)", Path(path).stem):
-        parts.append(int(part) if part.isdigit() else part)
-    return parts
-
-
-def _filter_macos_sidecars(paths: list[str]) -> list[Path]:
-    filtered = [Path(p) for p in paths if not Path(p).name.startswith("._")]
-    skipped = len(paths) - len(filtered)
-    if skipped > 0:
-        logger.warning("Skipping %d macOS sidecar files (._*)", skipped)
-    return filtered
-
-
-@dataclass(frozen=True, slots=True)
-class ChunkPartialSum:
+class ChunkPartialSum(NamedTuple):
     partial_sum: npt.NDArray[np.float64]
     processed: int
     chunk_start: int
     chunk_end: int
 
 
-def compute_partial_sum_for_chunk(
+class WaveformGeneratorConfig(NamedTuple):
+    waveform_approximant: str
+    reference_frequency: float
+    sampling_frequency: float
+    minimum_frequency: float
+    maximum_frequency: float | None
+    duration: float
+    source_type: SourceType
+
+
+def _init_worker(config: WaveformGeneratorConfig) -> None:
+    global _WORKER_WAVEFORM_GENERATOR
+    _WORKER_WAVEFORM_GENERATOR = WaveformGenerator.from_sampling(
+        waveform_approximant=config.waveform_approximant,
+        reference_frequency=config.reference_frequency,
+        sampling_frequency=config.sampling_frequency,
+        minimum_frequency=config.minimum_frequency,
+        maximum_frequency=config.maximum_frequency,
+        duration=config.duration,
+        source_type=config.source_type,
+    )
+
+
+def _compute_partial_sum_for_chunk_with_generator(
     chunk: pd.DataFrame,
-    waveform_approximant: str,
-    reference_frequency: float,
-    sampling_frequency: float,
-    minimum_frequency: float,
-    maximum_frequency: float | None,
-    duration: float,
-    source_type: SourceType,
+    waveform_generator: WaveformGenerator,
 ) -> ChunkPartialSum | None:
     """Compute a per-frequency partial sum for one injection chunk."""
     if chunk.empty:
@@ -161,16 +146,6 @@ def compute_partial_sum_for_chunk(
     chunk_start = int(chunk.index[0])
     chunk_end = int(chunk.index[-1])
     logger.info("Processing injections %d-%d", chunk_start, chunk_end)
-
-    waveform_generator = WaveformGenerator.from_sampling(
-        approximant=waveform_approximant,
-        duration=duration,
-        sampling_frequency=sampling_frequency,
-        reference_frequency=reference_frequency,
-        source_type=source_type,
-        minimum_frequency=minimum_frequency,
-        maximum_frequency=maximum_frequency,
-    )
 
     columns = chunk.columns.tolist()
     partial_sum: npt.NDArray[np.float64] | None = None
@@ -203,6 +178,17 @@ def compute_partial_sum_for_chunk(
     )
 
 
+def _compute_partial_sum_for_chunk_in_worker(
+    chunk: pd.DataFrame,
+) -> ChunkPartialSum | None:
+    if _WORKER_WAVEFORM_GENERATOR is None:
+        raise RuntimeError("Waveform generator has not been initialized in worker")
+    return _compute_partial_sum_for_chunk_with_generator(
+        chunk=chunk,
+        waveform_generator=_WORKER_WAVEFORM_GENERATOR,
+    )
+
+
 def reindex_chunks(
     chunks: Iterable[pd.DataFrame], start_index: int
 ) -> Iterator[pd.DataFrame]:
@@ -217,11 +203,18 @@ def reindex_chunks(
 
 def write_power_output(
     output_file: Path,
+    frequency_axis: npt.NDArray[np.float64],
     sum_abs_sq: npt.NDArray[np.float64],
     metadata: SpectralDensityMetadata,
 ) -> None:
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with h5py.File(output_file, "w") as out:
+        out.create_dataset(
+            "frequency",
+            data=frequency_axis,
+            dtype=np.float64,
+            compression="gzip",
+        )
         out.create_dataset(
             "sum_abs_sq",
             data=sum_abs_sq,
@@ -232,6 +225,31 @@ def write_power_output(
             "sum_abs_sq[f] = sum_events (|plus[event,f]|^2 + |cross[event,f]|^2)"
         )
         out.attrs["metadata_json"] = metadata.model_dump_json()
+        out.attrs["n_events_processed"] = metadata.n_events_processed
+        out.attrs["n_chunks"] = metadata.n_chunks
+
+
+def _accumulate_chunk_result(
+    sum_abs_sq: npt.NDArray[np.float64],
+    chunk_result: ChunkPartialSum | None,
+) -> tuple[int, int]:
+    if chunk_result is None:
+        return 0, 0
+
+    if chunk_result.partial_sum.shape != sum_abs_sq.shape:
+        raise ValueError(
+            f"Frequency bins mismatch in chunk {chunk_result.chunk_start}-{chunk_result.chunk_end}: "
+            f"{chunk_result.partial_sum.shape} vs {sum_abs_sq.shape}"
+        )
+
+    logger.info(
+        "Processed %d events in chunk %d-%d",
+        chunk_result.processed,
+        chunk_result.chunk_start,
+        chunk_result.chunk_end,
+    )
+    sum_abs_sq += chunk_result.partial_sum
+    return chunk_result.processed, 1
 
 
 def compute_spectral_density_with_injections(
@@ -274,8 +292,7 @@ def compute_spectral_density_with_injections(
     )
     indexed_reader = reindex_chunks(reader, start_index=offset)
 
-    process_chunk = partial(
-        compute_partial_sum_for_chunk,
+    generator_config = WaveformGeneratorConfig(
         waveform_approximant=waveform_approximant,
         reference_frequency=reference_frequency,
         sampling_frequency=sampling_frequency,
@@ -287,30 +304,43 @@ def compute_spectral_density_with_injections(
 
     n_events_processed = 0
     n_chunks = 0
-    with Pool(processes=nworkers) as pool:
-        results = []
-        for chunk_result in pool.imap_unordered(
-            process_chunk, indexed_reader, chunksize=1
-        ):
-            if chunk_result is None:
-                continue
-            logger.info(
-                "Processed %d events in chunk %d-%d",
-                chunk_result.processed,
-                chunk_result.chunk_start,
-                chunk_result.chunk_end,
+    if nworkers == 1:
+        waveform_generator = WaveformGenerator.from_sampling(
+            approximant=waveform_approximant,
+            duration=duration,
+            sampling_frequency=sampling_frequency,
+            reference_frequency=reference_frequency,
+            source_type=source_type,
+            minimum_frequency=minimum_frequency,
+            maximum_frequency=maximum_frequency,
+        )
+        for chunk in indexed_reader:
+            processed, chunk_count = _accumulate_chunk_result(
+                sum_abs_sq=sum_abs_sq,
+                chunk_result=_compute_partial_sum_for_chunk_with_generator(
+                    chunk=chunk,
+                    waveform_generator=waveform_generator,
+                ),
             )
-            results.append(chunk_result)
-
-    for chunk_result in results:
-        if chunk_result.partial_sum.shape != sum_abs_sq.shape:
-            raise ValueError(
-                f"Frequency bins mismatch in chunk {chunk_result.chunk_start}-{chunk_result.chunk_end}: "
-                f"{chunk_result.partial_sum.shape} vs {sum_abs_sq.shape}"
-            )
-        sum_abs_sq += chunk_result.partial_sum
-        n_events_processed += chunk_result.processed
-        n_chunks += 1
+            n_events_processed += processed
+            n_chunks += chunk_count
+    else:
+        with Pool(
+            processes=nworkers,
+            initializer=_init_worker,
+            initargs=(generator_config,),
+        ) as pool:
+            for chunk_result in pool.imap_unordered(
+                _compute_partial_sum_for_chunk_in_worker,
+                indexed_reader,
+                chunksize=1,
+            ):
+                processed, chunk_count = _accumulate_chunk_result(
+                    sum_abs_sq=sum_abs_sq,
+                    chunk_result=chunk_result,
+                )
+                n_events_processed += processed
+                n_chunks += chunk_count
 
     n_events_requested = batch if batch is not None else -1
     run_metadata = SpectralDensityMetadata(
@@ -327,96 +357,11 @@ def compute_spectral_density_with_injections(
     )
     write_power_output(
         output_file=output_file,
+        frequency_axis=frequency_axis,
         sum_abs_sq=sum_abs_sq,
         metadata=run_metadata,
     )
     logger.info("Wrote reduced spectrum to %s", output_file)
-
-
-def _load_partial_file(
-    path: Path,
-) -> tuple[npt.NDArray[np.float64], SpectralDensityMetadata]:
-    with h5py.File(path, "r") as hf:
-        if "sum_abs_sq" not in hf:
-            raise KeyError(f"Expected dataset '/sum_abs_sq' in {path}")
-        if "metadata_json" not in hf.attrs:
-            raise KeyError(f"Expected attribute 'metadata_json' in {path}")
-        sum_abs_sq_dataset = hf["sum_abs_sq"]
-        assert isinstance(sum_abs_sq_dataset, h5py.Dataset)
-        sum_abs_sq = sum_abs_sq_dataset[:].astype(np.float64, copy=False)
-        metadata = SpectralDensityMetadata.model_validate_json(
-            hf.attrs["metadata_json"]
-        )
-
-    if sum_abs_sq.ndim != 1:
-        raise ValueError(f"Expected 1D sum_abs_sq dataset in {path}")
-
-    expected_freq = metadata.to_frequency_grid().in_band_frequencies
-    if sum_abs_sq.shape != expected_freq.shape:
-        raise ValueError(
-            f"Shape mismatch in {path}: sum_abs_sq {sum_abs_sq.shape} vs expected frequency {expected_freq.shape}"
-        )
-
-    return sum_abs_sq.astype(np.float64, copy=False), metadata
-
-
-def merge_partial_sum_files(
-    input_files: list[Path],
-    output_file: Path,
-    metadata: dict[str, str] | None = None,
-) -> None:
-    if not input_files:
-        logger.error("No input files provided")
-        sys.exit(1)
-
-    total_sum: npt.NDArray[np.float64] | None = None
-    base_metadata: SpectralDensityMetadata | None = None
-    total_events_processed = 0
-
-    for i, path in enumerate(input_files, start=1):
-        part_sum, part_metadata = _load_partial_file(path)
-        if total_sum is None:
-            total_sum = part_sum.copy()
-            base_metadata = part_metadata
-        else:
-            assert base_metadata is not None
-            if part_sum.shape != total_sum.shape:
-                raise ValueError(
-                    f"Frequency bins mismatch in {path}: {part_sum.shape} vs {total_sum.shape}"
-                )
-            if part_metadata.to_frequency_grid() != base_metadata.to_frequency_grid():
-                raise ValueError(f"Metadata (grid parameters) mismatch in {path}")
-            total_sum += part_sum
-
-        if part_metadata.n_events_processed >= 0:
-            total_events_processed += part_metadata.n_events_processed
-        logger.info("Merged %d/%d: %s", i, len(input_files), path.name)
-
-    assert total_sum is not None
-    assert base_metadata is not None
-
-    merged_metadata = SpectralDensityMetadata(
-        duration=base_metadata.duration,
-        sampling_frequency=base_metadata.sampling_frequency,
-        reference_frequency=base_metadata.reference_frequency,
-        minimum_frequency=base_metadata.minimum_frequency,
-        maximum_frequency=base_metadata.maximum_frequency,
-        n_events_processed=total_events_processed,
-        n_events_requested=-1,
-        n_chunks=len(input_files),
-        args=metadata.get("args") if metadata else None,
-        git_revision=metadata.get("git_revision") if metadata else None,
-    )
-
-    write_power_output(
-        output_file=output_file,
-        sum_abs_sq=total_sum,
-        metadata=merged_metadata,
-    )
-
-    with h5py.File(output_file, "a") as out:
-        out.attrs["n_input_files"] = len(input_files)
-    logger.info("Wrote merged spectrum to %s", output_file)
 
 
 def run(settings: ComputeSpectralDensitySettings) -> None:
@@ -429,38 +374,20 @@ def run(settings: ComputeSpectralDensitySettings) -> None:
     if git_rev is not None:
         metadata["git_revision"] = git_rev
 
-    if settings.mode == "compute":
-        if settings.injection_file is None:
-            raise ValueError("injection_file is required when mode='compute'")
-        compute_spectral_density_with_injections(
-            injection_file=settings.injection_file,
-            output_file=settings.output_file,
-            waveform_approximant=settings.waveform_approximant,
-            reference_frequency=settings.reference_frequency,
-            sampling_frequency=settings.sampling_frequency,
-            minimum_frequency=settings.minimum_frequency,
-            maximum_frequency=settings.maximum_frequency,
-            duration=settings.duration,
-            source_type=settings.source_type,
-            chunksize=settings.chunksize,
-            nworkers=settings.nworkers,
-            offset=settings.offset,
-            batch=settings.batch,
-            metadata=metadata,
-        )
-        return
-
-    if settings.input_pattern is None:
-        raise ValueError("input_pattern is required when mode='merge'")
-    input_files = _filter_macos_sidecars(glob(settings.input_pattern))
-    if not input_files:
-        logger.error("No valid input files matched pattern: %s", settings.input_pattern)
-        sys.exit(1)
-    if not settings.no_sort:
-        input_files.sort(key=lambda p: _natural_sort_key(str(p)))
-    merge_partial_sum_files(
-        input_files=input_files,
+    compute_spectral_density_with_injections(
+        injection_file=settings.injection_file,
         output_file=settings.output_file,
+        waveform_approximant=settings.waveform_approximant,
+        reference_frequency=settings.reference_frequency,
+        sampling_frequency=settings.sampling_frequency,
+        minimum_frequency=settings.minimum_frequency,
+        maximum_frequency=settings.maximum_frequency,
+        duration=settings.duration,
+        source_type=settings.source_type,
+        chunksize=settings.chunksize,
+        nworkers=settings.nworkers,
+        offset=settings.offset,
+        batch=settings.batch,
         metadata=metadata,
     )
 
