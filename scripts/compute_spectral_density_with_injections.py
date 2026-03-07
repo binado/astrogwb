@@ -18,7 +18,7 @@ import json
 import logging
 import re
 import sys
-from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import Pool
 from dataclasses import dataclass
 from functools import partial
 from glob import glob
@@ -287,42 +287,30 @@ def compute_spectral_density_with_injections(
 
     n_events_processed = 0
     n_chunks = 0
-    if nworkers > 1:
-        with ProcessPoolExecutor(max_workers=nworkers) as executor:
-            for chunk_result in executor.map(process_chunk, indexed_reader):
-                if chunk_result is None:
-                    continue
-                if chunk_result.partial_sum.shape != sum_abs_sq.shape:
-                    raise ValueError(
-                        f"Frequency bins mismatch in chunk {chunk_result.chunk_start}-{chunk_result.chunk_end}: "
-                        f"{chunk_result.partial_sum.shape} vs {sum_abs_sq.shape}"
-                    )
-                sum_abs_sq += chunk_result.partial_sum
-                n_events_processed += chunk_result.processed
-                n_chunks += 1
-                logger.info(
-                    "Processed %d events in chunk, %d total",
-                    chunk_result.processed,
-                    n_events_processed,
-                )
-    else:
-        for chunk in indexed_reader:
-            chunk_result = process_chunk(chunk)
+    with Pool(processes=nworkers) as pool:
+        results = []
+        for chunk_result in pool.imap_unordered(
+            process_chunk, indexed_reader, chunksize=1
+        ):
             if chunk_result is None:
                 continue
-            if chunk_result.partial_sum.shape != sum_abs_sq.shape:
-                raise ValueError(
-                    f"Frequency bins mismatch in chunk {chunk_result.chunk_start}-{chunk_result.chunk_end}: "
-                    f"{chunk_result.partial_sum.shape} vs {sum_abs_sq.shape}"
-                )
-            sum_abs_sq += chunk_result.partial_sum
-            n_events_processed += chunk_result.processed
-            n_chunks += 1
             logger.info(
-                "Processed %d events in chunk, %d total",
+                "Processed %d events in chunk %d-%d",
                 chunk_result.processed,
-                n_events_processed,
+                chunk_result.chunk_start,
+                chunk_result.chunk_end,
             )
+            results.append(chunk_result)
+
+    for chunk_result in results:
+        if chunk_result.partial_sum.shape != sum_abs_sq.shape:
+            raise ValueError(
+                f"Frequency bins mismatch in chunk {chunk_result.chunk_start}-{chunk_result.chunk_end}: "
+                f"{chunk_result.partial_sum.shape} vs {sum_abs_sq.shape}"
+            )
+        sum_abs_sq += chunk_result.partial_sum
+        n_events_processed += chunk_result.processed
+        n_chunks += 1
 
     n_events_requested = batch if batch is not None else -1
     run_metadata = SpectralDensityMetadata(

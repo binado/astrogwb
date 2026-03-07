@@ -1,12 +1,12 @@
 mode = "compute"
 injection_file = "data/injections_COBA_BNS.csv"
-output_file = "waveform_power_partial.h5"
+output_file = "spectral_density2.h5"
 reference_frequency = 20.0
 sampling_frequency = 8192
 duration = 1.0
 offset = 0
 nworkers = 8
-chunksize = 1000
+chunksize = 25000
 
 # Merge mode example:
 # mode = "merge"
