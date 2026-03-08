@@ -82,7 +82,18 @@ class BilbyWaveformBackend:
         self, parameters: dict[str, float]
     ) -> WaveformPolarizations:
         result = self.waveform_generator.frequency_domain_strain(parameters)
-        assert result is not None
+        if result is None:
+            raise RuntimeError(
+                "BilbyWaveformGenerator.frequency_domain_strain returned None "
+                f"for parameters {parameters!r}"
+            )
+
+        missing_keys = [key for key in ("plus", "cross") if key not in result]
+        if missing_keys:
+            raise RuntimeError(
+                "BilbyWaveformGenerator.frequency_domain_strain result is missing "
+                f"required polarization keys: {missing_keys}"
+            )
         return WaveformPolarizations(
             grid=self._grid, plus=result["plus"], cross=result["cross"]
         )
