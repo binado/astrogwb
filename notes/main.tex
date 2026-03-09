@@ -34,12 +34,12 @@ style=numeric-comp
 
 \section{Theory}
 
-We label our parameter vector by $\theta$, comprising astrophysical parameters
-$\theta_a$ and cosmological parameters $\theta_c$. The likelihood is given by
-the squared SNR of the residuals:
+We label our hyperparameter vector by $\Lambda$, comprising astrophysical
+parameters $\Lambda_a$ and cosmological parameters $\Lambda_c$. The likelihood
+is given by the squared SNR of the residuals:
 
 \begin{equation}
-	\mathcal{L} \propto 2T \sum_{a,b}\int_{f_{\rm{min}}}^{f_{\rm{max}}} \left(S_h(\theta) - S_{h,\rm{data}}\right)^2 \frac{\Gamma^2_{ab}(f)}{S_{n,a}(f)S_{n,b}(f)} df.
+	\mathcal{L} \propto 2T \sum_{a,b}\int_{f_{\rm{min}}}^{f_{\rm{max}}} \left(S_h(\Lambda) - S_{h,\rm{data}}\right)^2 \frac{\Gamma^2_{ab}(f)}{S_{n,a}(f)S_{n,b}(f)} df.
 	\label{eq:likelihood}
 \end{equation}
 
@@ -47,15 +47,54 @@ The spectral density of the data, $S_{h,\rm{data}}$, is the sum of the
 contributions of all astrophysical sources, see~\cite{Belgacem:2024ohp}:
 
 \begin{equation}
-	S_h^{\rm{astro}}(f) = \frac{1}{T} \sum_{i=1}^{N} |\tilde{h}_{i,+}(f)|^2 + |\tilde{h}_{i,\times}(f)|^2,
+	S_h^{\rm{astro}}(f) = \frac{1}{T} \sum_{i=1}^{N} |\tilde{h}_{i,+}(f, \theta_i)|^2 + |\tilde{h}_{i,\times}(f, \theta_i)|^2,
 	\label{eq:data-spectral-density}
 \end{equation}
 
-\bernardo{Where did the sum over extrinsic parameters go?}
+where $\theta_i$ denotes the intrinsic and extrinsic parameters of the $i$-th
+source, and $N$ is the total number of sources.
 
 In practice, the sum will be carried out over a known catalog, like those
 provided by the COBA
 paper~\cite{Branchesi:2023mws}\footnote{\url{https://apps.et-gw.eu/tds/?r=18321}}.
+The averages over parameters are then replaced by the average over the catalog,
+which is a Monte Carlo sampling of the underlying population.
+
+In general, the theoretical expression for $S_h^{\rm{astro}}$ is given by:
+
+\begin{equation}
+	\begin{aligned}
+		S_h^{\rm{astro}}(f; \Lambda_a, \Lambda_c) & = \left \langle \left[|\tilde{h}_{+}(f, \theta)|^2 + |\tilde{h}_{\times}(f, \theta)|^2\right] \right \rangle,                                                       \\
+		                                          & = \int dz d\theta_i \, p(z, \theta_i | \Lambda) \left \langle \left[|\tilde{h}_{+}(f, \theta)|^2 + |\tilde{h}_{\times}(f, \theta)|^2\right] \right \rangle_{\iota},
+	\end{aligned}
+	\label{eq:theoretical-spectral-density}
+\end{equation}
+
+The conditional probability $p(z, \theta_i | \Lambda)$ is the probability of
+having a source with parameters $\theta_i$ at redshift $z$, given the
+hyperparameters $\Lambda$. We assume that the distribution of intrinsic
+parameters is independent of redshift, so that we can write $p(z, \theta_i |
+	\Lambda) = p(z | \Lambda) p(\theta_i | \Lambda)$. The redshift distribution is
+given by:
+
+\begin{equation}
+	p(z | \Lambda) = \frac{R(z; \Lambda)}{1+z} \frac{dV_c}{dz},
+	\label{eq:redshift-distribution}
+\end{equation}
+
+where $R(z; \Lambda)$ is the merger rate per comoving volumeat redshift $z$. We
+model it with the functional form inspired by the star formation rate density,
+
+\begin{equation}
+	R(z; \Lambda) = R_0 \frac{(1+z)^{\alpha}}{1 + \left(\frac{1+z}{1+z_p}\right)^{\alpha+\beta}},
+	\label{eq:merger-rate}
+\end{equation}
+
+where $\alpha, \beta, z_p \in \Lambda_a$, and $R_0$ is the local merger rate
+density given in $\rm{Mpc}^{-3} \, \rm{yr}^{-1}$. The term $dV_c/dz$ is the
+jacobian for the change of variable from comoving volume to redshift. The $1+z$
+factor accounts for the time dilation between the source frame and the detector
+frame.
 
 \section{TODOs}
 \begin{itemize}
@@ -69,4 +108,51 @@ paper~\cite{Branchesi:2023mws}\footnote{\url{https://apps.et-gw.eu/tds/?r=18321}
 \end{itemize}
 
 \printbibliography
+
+\appendix
+
+\section{Marginalization over the inclination angle}
+
+On the assumption that the waveform is dominate by the $(2, 2)$ mode, the
+marginalization over the inclination angle $\iota$ can be performed
+analytically. We write the waveform polarizations as
+
+\begin{equation}
+	\begin{aligned}
+		h_+(f, \theta)              & = A(f, \theta) \frac{1 + \cos^2\iota}{2}, \\
+		\quad h_{\times}(f, \theta) & = A(f, \theta) \cos\iota,
+	\end{aligned}
+	\label{eq:waveform-polarizations-inclination}
+\end{equation}
+
+Let $I(f, \theta) = |\tilde{h}_{+}(f, \theta)|^2 + |\tilde{h}_{\times}(f,
+	\theta)|^2$. We can factor out the dependence on the inclination angle as
+follows:
+
+The average over the inclination angle is given by the integral
+
+\begin{equation}
+	\langle I(f, \theta) \rangle_\iota = \frac{1}{\mathcal{N}} \int_0^\pi d\iota p(\iota) \left[|\tilde{h}_{+}(f, \theta)|^2 + |\tilde{h}_{\times}(f, \theta)|^2\right],
+	\label{eq:inclination-averaged-waveform}
+\end{equation}
+
+where the normalization factor $\mathcal{N}$ is given by
+
+\begin{equation}
+	\mathcal{N} = \int_0^\pi d\iota p(\iota).
+	\label{eq:inclination-averaged-waveform-normalization}
+\end{equation}
+
+The natural choice of prior for the inclination angle is a uniform distribution
+in $\cos \iota$, which corresponds to an isotropic distribution of sources in
+the sky, in which case $\mathcal{N} = 2$. Thus,
+Eq.~\eqref{eq:inclination-averaged-waveform} becomes:
+
+\begin{align}
+	\nonumber
+	\langle I(f, \theta) \rangle_\iota & = \frac{1}{2} |A(f, \theta)|^2 \int d\cos\iota \left[ \left(\frac{1 + \cos^2\iota}{2}\right)^2 + \cos^2\iota \right] \\
+	\nonumber
+	                                   & = \frac{4}{5} |A(f, \theta)|^2                                                                                       \\
+	                                   & = \frac{2}{5} I(f, \theta, \iota = 0).
+\end{align}
 \end{document}

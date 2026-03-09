@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy.typing as npt
 import numpy as np
+import numpy.typing as npt
 
 from .grid import FrequencyGrid
 
@@ -29,3 +29,15 @@ class WaveformPolarizations:
         from .io import load_waveform_npz
 
         return load_waveform_npz(path=path, grid=grid)
+
+    def squared_sum(self) -> npt.NDArray[np.float64]:
+        out = np.square(self.plus.real, dtype=np.float64)
+        tmp_buf = np.empty_like(out, dtype=out.dtype)
+        for buf in (
+            self.plus.imag,
+            self.cross.real,
+            self.cross.imag,
+        ):
+            np.square(buf, out=tmp_buf)
+            out += tmp_buf
+        return out
