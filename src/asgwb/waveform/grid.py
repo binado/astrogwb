@@ -130,6 +130,8 @@ class FrequencyGrid:
         ndarray
             A boolean array of the same shape as `frequencies`.
         """
+        if self.maximum_frequency is None:
+            raise RuntimeError("maximum_frequency should be resolved in __post_init__")
         return (self.frequencies >= self.minimum_frequency) & (
             self.frequencies <= self.maximum_frequency
         )
@@ -145,3 +147,63 @@ class FrequencyGrid:
             An array of frequencies in Hertz from `minimum_frequency` to `maximum_frequency`.
         """
         return self.frequencies[self.in_band_mask]
+
+    def resample(
+        self,
+        x: npt.NDArray[np.float64] | npt.NDArray[np.complex128],
+        grid: FrequencyGrid,
+    ) -> npt.NDArray[np.float64] | npt.NDArray[np.complex128]:
+        """Resample values from ``grid`` onto this frequency grid.
+
+        Values are linearly interpolated over the overlap of the source and target
+        in-band frequency ranges. Samples outside that overlap are masked with
+        ``NaN``.
+        """
+        values = np.asarray(x)
+        if values.ndim != 1:
+            raise ValueError(f"x must be a 1D array, got {values.ndim} dimensions")
+        if values.shape != grid.frequencies.shape:
+            raise ValueError(
+                "x shape does not match source grid frequencies: "
+                f"{values.shape} vs {grid.frequencies.shape}"
+            )
+
+        source_frequencies = grid.in_band_frequencies
+        source_values = values[grid.in_band_mask]
+
+        if np.iscomplexobj(source_values):
+            out = np.full(
+                self.frequencies.shape, np.nan + 1j * np.nan, dtype=np.complex128
+            )
+        else:
+            out = np.full(self.frequencies.shape, np.nan, dtype=np.float64)
+
+        if source_frequencies.size == 0:
+            return out
+
+        if source_frequencies.size == 1:
+            target_mask = self.in_band_mask & np.isclose(
+                self.frequencies, source_frequencies[0]
+            )
+            out[target_mask] = source_values[0]
+            return out
+
+        target_mask = (
+            self.in_band_mask
+            & (self.frequencies >= source_frequencies[0])
+            & (self.frequencies <= source_frequencies[-1])
+        )
+        target_frequencies = self.frequencies[target_mask]
+
+        if np.iscomplexobj(source_values):
+            out[target_mask] = np.interp(
+                target_frequencies, source_frequencies, source_values.real
+            ) + 1j * np.interp(
+                target_frequencies, source_frequencies, source_values.imag
+            )
+            return out
+
+        out[target_mask] = np.interp(
+            target_frequencies, source_frequencies, source_values
+        )
+        return out

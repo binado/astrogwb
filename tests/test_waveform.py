@@ -188,6 +188,127 @@ class TestFrequencyGrid:
                 reference_frequency=50.0,
             )
 
+    def test_resample_same_grid_returns_values(self):
+        source = FrequencyGrid(
+            duration=4.0,
+            sampling_frequency=8.0,
+            minimum_frequency=0.0,
+            maximum_frequency=4.0,
+            reference_frequency=1.0,
+        )
+        x = np.arange(source.frequencies.size, dtype=np.float64)
+
+        y = source.resample(x, source)
+
+        np.testing.assert_allclose(y, x)
+
+    def test_resample_to_grid_with_twice_frequency_spacing(self):
+        source = FrequencyGrid(
+            duration=4.0,
+            sampling_frequency=8.0,
+            minimum_frequency=0.0,
+            maximum_frequency=4.0,
+            reference_frequency=1.0,
+        )
+        target = FrequencyGrid(
+            duration=2.0,
+            sampling_frequency=8.0,
+            minimum_frequency=0.0,
+            maximum_frequency=4.0,
+            reference_frequency=1.0,
+        )
+        x = np.arange(source.frequencies.size, dtype=np.float64)
+
+        y = target.resample(x, source)
+
+        np.testing.assert_allclose(y, x[::2])
+
+    def test_resample_to_grid_with_half_frequency_spacing(self):
+        source = FrequencyGrid(
+            duration=2.0,
+            sampling_frequency=8.0,
+            minimum_frequency=0.0,
+            maximum_frequency=4.0,
+            reference_frequency=1.0,
+        )
+        target = FrequencyGrid(
+            duration=4.0,
+            sampling_frequency=8.0,
+            minimum_frequency=0.0,
+            maximum_frequency=4.0,
+            reference_frequency=1.0,
+        )
+        x = np.arange(source.frequencies.size, dtype=np.float64)
+
+        y = target.resample(x, source)
+
+        np.testing.assert_allclose(y[::2], x)
+
+    def test_resample_masks_values_outside_source_band_with_nan(self):
+        source = FrequencyGrid(
+            duration=4.0,
+            sampling_frequency=8.0,
+            minimum_frequency=1.0,
+            maximum_frequency=3.0,
+            reference_frequency=1.0,
+        )
+        target = FrequencyGrid(
+            duration=4.0,
+            sampling_frequency=8.0,
+            minimum_frequency=0.5,
+            maximum_frequency=3.5,
+            reference_frequency=1.0,
+        )
+        x = source.frequencies.astype(np.float64, copy=True)
+
+        y = target.resample(x, source)
+        overlap_mask = (target.frequencies >= 1.0) & (target.frequencies <= 3.0)
+        left_mask = target.in_band_mask & (target.frequencies < 1.0)
+        right_mask = target.in_band_mask & (target.frequencies > 3.0)
+
+        np.testing.assert_allclose(y[overlap_mask], target.frequencies[overlap_mask])
+        assert np.isnan(y[left_mask]).all()
+        assert np.isnan(y[right_mask]).all()
+
+    def test_resample_complex_values_preserves_complex_dtype(self):
+        source = FrequencyGrid(
+            duration=4.0,
+            sampling_frequency=8.0,
+            minimum_frequency=1.0,
+            maximum_frequency=3.0,
+            reference_frequency=1.0,
+        )
+        target = FrequencyGrid(
+            duration=4.0,
+            sampling_frequency=8.0,
+            minimum_frequency=0.5,
+            maximum_frequency=3.5,
+            reference_frequency=1.0,
+        )
+        x = source.frequencies.astype(np.complex128) + 1j * np.arange(
+            source.frequencies.size, dtype=np.float64
+        )
+
+        y = target.resample(x, source)
+        overlap_mask = (target.frequencies >= 1.0) & (target.frequencies <= 3.0)
+        outside_mask = target.in_band_mask & ~overlap_mask
+
+        assert y.dtype == np.complex128
+        np.testing.assert_allclose(
+            y[overlap_mask],
+            x[overlap_mask],
+        )
+        assert np.isnan(y.real[outside_mask]).all()
+        assert np.isnan(y.imag[outside_mask]).all()
+
+    def test_resample_rejects_non_1d_input(self, grid: FrequencyGrid):
+        with pytest.raises(ValueError, match="1D"):
+            grid.resample(np.zeros((2, 2), dtype=np.float64), grid)
+
+    def test_resample_rejects_shape_mismatch(self, grid: FrequencyGrid):
+        with pytest.raises(ValueError, match="shape"):
+            grid.resample(np.zeros(grid.frequencies.size - 1, dtype=np.float64), grid)
+
 
 class TestWaveformPolarizations:
     def test_construction(self):
