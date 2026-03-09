@@ -103,7 +103,8 @@ class SGWBGaussianLikelihood(Likelihood):
         samples_df = pd.DataFrame(samples, columns=sample_keys)
         z = np.asarray(samples_df["redshift"])
         cosmology = self.cosmology(parameters)
-        dgw = self.gravitational_wave_distance(z, parameters, cosmology)
+        luminosity_distance = cosmology.luminosity_distance(z)
+        dgw = self.gravitational_wave_distance(z, luminosity_distance, parameters)
 
         out = np.zeros_like(self.frequencies)
         for sample, dgw_per_sample in zip(
@@ -125,10 +126,14 @@ class SGWBGaussianLikelihood(Likelihood):
         return (4 / 3) * np.pi * f**3 * spectral_density / h0**2
 
     def gravitational_wave_distance(
-        self, z: npt.NDArray, parameters: dict[str, float], cosmology: Cosmology
+        self,
+        redshift: npt.NDArray,
+        luminosity_distance: npt.NDArray,
+        parameters: dict[str, float],
     ) -> npt.NDArray:
-        chi0 = parameters["chi0"]
-        return chi0 * cosmology.luminosity_distance(z)
+        chi0, chin = parameters["chi0"], parameters["chin"]
+        chiz = chi0 + (1 - chi0) / (1 + redshift) ** chin
+        return chiz * luminosity_distance
 
     def log_likelihood(self, parameters: dict[str, float] | None = None) -> float:
         """Compute the Gaussian log-likelihood.
