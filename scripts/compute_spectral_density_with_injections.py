@@ -21,13 +21,7 @@ from pydantic_settings import (
     SettingsConfigDict,
     TomlConfigSettingsSource,
 )
-
-try:
-    from utils import get_config_filepath
-except (
-    ModuleNotFoundError
-):  # pragma: no cover - import path differs in test/module usage
-    from scripts.utils import get_config_filepath
+from utils import get_config_filepath
 
 from asgwb.gwb import SpectralDensity
 from asgwb.io import load_injection_file
