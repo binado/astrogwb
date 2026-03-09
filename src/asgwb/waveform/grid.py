@@ -167,6 +167,8 @@ class FrequencyGrid:
                 "x shape does not match source grid frequencies: "
                 f"{values.shape} vs {grid.frequencies.shape}"
             )
+        if self == grid:
+            return values.copy()
 
         source_frequencies = grid.in_band_frequencies
         source_values = values[grid.in_band_mask]
