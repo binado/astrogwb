@@ -18,6 +18,5 @@ def get_cosmology(parameters: dict[str, float]) -> Cosmology:
     Get astropy cosmology instance from a dictionary of parameters.
     Missing parameters are filled in with defaults from Planck18.
     """
-    defaults = Planck18.parameters
-    parameters.update(defaults)
-    return Cosmology(**parameters)
+    merged = {**Planck18.parameters, **parameters}
+    return Cosmology(**merged)
