@@ -1,5 +1,5 @@
 from functools import cached_property
-from typing import Protocol, Sequence
+from typing import Sequence
 
 import numpy as np
 import numpy.typing as npt
@@ -9,12 +9,9 @@ from bilby.core.likelihood import Likelihood
 from asgwb.cosmology import Cosmology, get_cosmology
 from asgwb.detector import Detector
 from asgwb.detector.overlap import pairwise_overlap_reduction_function
+from asgwb.gwb import SpectralDensity
 from asgwb.prior.intrinsic import IntrinsicPriorDictGenerator
 from asgwb.waveform import WaveformGenerator
-
-
-class FiducialSpectralDensityGenerator(Protocol):
-    def __call__(self, frequencies: npt.NDArray) -> npt.NDArray: ...
 
 
 class SGWBGaussianLikelihood(Likelihood):
@@ -22,7 +19,7 @@ class SGWBGaussianLikelihood(Likelihood):
         self,
         waveform_generator: WaveformGenerator,
         detectors: Sequence[Detector],
-        fiducial_spectral_density_generator: FiducialSpectralDensityGenerator,
+        fiducial_spectral_density: SpectralDensity,
         intrinsic_prior_dict_generator: IntrinsicPriorDictGenerator,
         mc_integral_npoints: int = 256,
         observation_time: float = 1,
@@ -35,7 +32,7 @@ class SGWBGaussianLikelihood(Likelihood):
             )
         self.detectors = detectors
         self.waveform_generator = waveform_generator
-        self.fiducial_spectral_density_generator = fiducial_spectral_density_generator
+        self._fiducial_spectral_density_input = fiducial_spectral_density
         self.intrinsic_prior_dict_generator = intrinsic_prior_dict_generator
         self.mc_integral_npoints = mc_integral_npoints
         self.observation_time = observation_time
@@ -47,11 +44,11 @@ class SGWBGaussianLikelihood(Likelihood):
         return get_cosmology(parameters)
 
     @cached_property
-    def frequencies(self) -> npt.NDArray:
+    def frequencies(self) -> npt.NDArray[np.float64]:
         return self.waveform_generator.grid.frequencies
 
     @cached_property
-    def inverse_covariance(self) -> npt.NDArray:
+    def inverse_covariance(self) -> npt.NDArray[np.float64]:
         orf_pair = pairwise_overlap_reduction_function(self.frequencies, self.detectors)
         psds = np.stack([det.psd(self.frequencies) for det in self.detectors], axis=-1)
         psd_prod = np.einsum("ij,ik->ijk", psds, psds)
@@ -64,14 +61,20 @@ class SGWBGaussianLikelihood(Likelihood):
         return out_before_sum[:, det_i, det_j].sum(axis=-1)
 
     @cached_property
-    def fiducial_spectral_density(self) -> npt.NDArray:
-        return self.fiducial_spectral_density_generator(self.frequencies)
+    def fiducial_spectral_density(self) -> npt.NDArray[np.float64]:
+        return np.asarray(
+            self.waveform_generator.grid.resample(
+                self._fiducial_spectral_density_input.spectral_density,
+                self._fiducial_spectral_density_input.grid,
+            ),
+            dtype=np.float64,
+        )
 
     @cached_property
     def log_2observation_time(self) -> float:
         return np.log(2 * self.observation_time)
 
-    def energy_flux(self, injection: dict[str, float]) -> npt.NDArray:
+    def energy_flux(self, injection: dict[str, float]) -> npt.NDArray[np.float64]:
         # We compute the energy flux for a face-on source at luminosity distance 1Mpc.
         injection.update({"luminosity_distance": 1, "theta_jn": 0})
         _ = injection.pop("redshift", None)
@@ -81,7 +84,7 @@ class SGWBGaussianLikelihood(Likelihood):
 
         return polarizations.squared_sum()
 
-    def spectral_density(self, parameters: dict[str, float]) -> npt.NDArray:
+    def spectral_density(self, parameters: dict[str, float]) -> npt.NDArray[np.float64]:
         """
         Compute the spectral density over the intrinsic parameter prior volume using Monte Carlo integration.
         """
@@ -107,7 +110,7 @@ class SGWBGaussianLikelihood(Likelihood):
         out *= 0.4
         return out
 
-    def omega_gw(self, parameters: dict[str, float]) -> npt.NDArray:
+    def omega_gw(self, parameters: dict[str, float]) -> npt.NDArray[np.float64]:
         spectral_density = self.spectral_density(parameters)
         h0 = parameters["H0"]
         f = self.frequencies
@@ -118,7 +121,7 @@ class SGWBGaussianLikelihood(Likelihood):
         redshift: npt.NDArray,
         luminosity_distance: npt.NDArray,
         parameters: dict[str, float],
-    ) -> npt.NDArray:
+    ) -> npt.NDArray[np.float64]:
         chi0, chin = parameters["chi0"], parameters["chin"]
         chiz = chi0 + (1 - chi0) / (1 + redshift) ** chin
         return chiz * luminosity_distance
