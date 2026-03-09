@@ -79,19 +79,7 @@ class SGWBGaussianLikelihood(Likelihood):
             injection
         )
 
-        # Compute the squared magnitude of the plus and cross polarizations
-        out = np.square(polarizations.plus.real)
-        tmp_buf = np.empty_like(out)
-
-        for buf in (
-            polarizations.plus.imag,
-            polarizations.cross.real,
-            polarizations.cross.imag,
-        ):
-            np.square(buf, out=tmp_buf)
-            out += tmp_buf
-
-        return out
+        return polarizations.squared_sum()
 
     def spectral_density(self, parameters: dict[str, float]) -> npt.NDArray:
         """
