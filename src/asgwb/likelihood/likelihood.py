@@ -76,10 +76,11 @@ class SGWBGaussianLikelihood(Likelihood):
 
     def energy_flux(self, injection: dict[str, float]) -> npt.NDArray[np.float64]:
         # We compute the energy flux for a face-on source at luminosity distance 1Mpc.
-        injection.update({"luminosity_distance": 1, "theta_jn": 0})
-        _ = injection.pop("redshift", None)
+        injection_copy = injection.copy()
+        injection_copy.update({"luminosity_distance": 1, "theta_jn": 0})
+        _ = injection_copy.pop("redshift", None)
         polarizations = self.waveform_generator.frequency_domain_polarizations(
-            injection
+            injection_copy
         )
 
         return polarizations.squared_sum()
