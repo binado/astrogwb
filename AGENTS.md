@@ -34,3 +34,11 @@
 - Keep commits focused and atomic; include tests/docs updates with behavior changes.
 - PRs should include: purpose, key changes, commands run (tests/lint), and any data or config impacts.
 - For pipeline/cluster changes, include a concrete invocation example and expected output location.
+
+## Cursor Cloud specific instructions
+
+- **No services to start.** This is a pure Python scientific computing library with no servers, databases, or background daemons.
+- **uv is the only package manager.** All commands should be run via `uv run ...`. The venv lives at `.venv/`.
+- **Integration test fixtures are not committed to git.** Before running `uv run pytest -m integration`, generate them once with `uv run --script scripts/generate_orf_fixtures.py`. The generated `.npz` files land in `tests/fixtures/`.
+- **Build-system version warning is benign.** `uv sync` may emit `warning: build_system.requires = ["uv_build>=0.10.2,<0.11.0"] does not contain the current uv version ...` — this does not affect functionality.
+- Refer to the "Build, Test, and Development Commands" section above for standard lint/test/format commands.
