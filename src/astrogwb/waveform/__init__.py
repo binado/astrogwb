@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import io
-import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
@@ -72,7 +70,9 @@ def save_polarization_power_catalog(
             for name, values in catalog.samples.items()
         }
     )
-    _write_npz(path, payload)
+    # numpy's savez stub types **kwds against the preceding allow_pickle: bool
+    # parameter, so a dynamically-keyed payload trips invalid-argument-type.
+    np.savez(path, **payload)  # ty: ignore[invalid-argument-type]
 
 
 def load_polarization_power_catalog(path: str | Path) -> PolarizationPowerCatalog:
@@ -109,11 +109,3 @@ def _validate_catalog_shapes(
             raise ValueError(
                 f"sample {name!r} length must match polarization_power sample axis"
             )
-
-
-def _write_npz(path: str | Path, payload: dict[str, NDArray[Any]]) -> None:
-    with zipfile.ZipFile(path, mode="w", compression=zipfile.ZIP_STORED) as archive:
-        for name, values in payload.items():
-            buffer = io.BytesIO()
-            np.save(buffer, values)
-            archive.writestr(f"{name}.npy", buffer.getvalue())
