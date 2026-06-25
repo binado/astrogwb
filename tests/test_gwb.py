@@ -29,8 +29,8 @@ def test_spectral_density_uses_average_mode_factor() -> None:
         average_mode="catalog_inclination",
     )
 
-    np.testing.assert_allclose(np.asarray(analytic), np.array([18.0, 14.0]))
-    np.testing.assert_allclose(np.asarray(catalog), np.array([45.0, 35.0]))
+    np.testing.assert_allclose(np.asarray(analytic), np.array([24.0, 56.0 / 3.0]))
+    np.testing.assert_allclose(np.asarray(catalog), np.array([60.0, 140.0 / 3.0]))
 
 
 def test_gaussian_bin_scale_infers_and_accepts_df() -> None:

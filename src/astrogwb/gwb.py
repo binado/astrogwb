@@ -18,8 +18,12 @@ def spectral_density(
     average_mode: AverageMode,
 ) -> jax.Array:
     factor = 0.4 if average_mode == "analytic_inclination" else 1.0
-    normalized_weights = weights / jnp.sum(weights)
-    return factor * total_merger_rate * jnp.dot(polarization_power, normalized_weights)
+    return (
+        factor
+        * total_merger_rate
+        * jnp.dot(polarization_power, weights)
+        / weights.shape[0]
+    )
 
 
 def gaussian_bin_scale(
