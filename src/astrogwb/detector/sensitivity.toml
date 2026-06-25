@@ -1,0 +1,155 @@
+# Detector sensitivities, keyed by the public detector name reported by
+# gwmock's detector_names(). Plain str codes (H1, L1, ...) match directly;
+# gwmock preset CustomDetectors match on their .name (e.g. ET1_SARD).
+#
+# psd_reference may be a gwmock-noise bundled preset (e.g. "ET_D_psd"), a
+# file in astrogwb's noise_curves/ directory, an absolute path, or a URL.
+# LAL/CE/Virgo/KAGRA curves are kept local (not bundled upstream).
+
+[H1]
+psd_reference = "AplusDesign_psd.txt"
+minimum_frequency = 20
+maximum_frequency = 2048
+duty_factor = 0.7
+
+[L1]
+psd_reference = "AplusDesign_psd.txt"
+minimum_frequency = 20
+maximum_frequency = 2048
+duty_factor = 0.7
+
+[V1]
+psd_reference = "avirgo_O5low_NEW_psd.txt"
+minimum_frequency = 20
+maximum_frequency = 2048
+duty_factor = 0.7
+
+[K1]
+psd_reference = "kagra_128Mpc_psd.txt"
+minimum_frequency = 20
+maximum_frequency = 2048
+duty_factor = 0.7
+
+# --- Einstein Telescope: triangle (str E1/E2/E3, geometry.toml) ---
+[E1]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[E2]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[E3]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+# --- ET L-shaped sites (str S1/S2/R1/R2, geometry.toml) ---
+[S1]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[S2]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[R1]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[R2]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+# --- Cosmic Explorer (str C1/C2, geometry.toml) ---
+[C1]
+psd_reference = "cosmic_explorer_strain_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[C2]
+psd_reference = "cosmic_explorer_strain_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+# --- ET gwmock presets (CustomDetector geometry from gwmock_signal) ---
+[E0]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[ET1_SARD]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[ET2_SARD]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[ET3_SARD]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[ET1_EMR]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[ET2_EMR]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[ET3_EMR]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[ET1_2L_ALIGNED_SARD]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[ET2_2L_ALIGNED_EMR]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[ET1_2L_MISALIGNED_SARD]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85
+
+[ET2_2L_MISALIGNED_EMR]
+psd_reference = "ET-000A-18_ETD_hlf_psd.txt"
+minimum_frequency = 10
+maximum_frequency = 2048
+duty_factor = 0.85

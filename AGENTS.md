@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/asgwb/`: Python package code. Core detector logic lives in `src/asgwb/detector/` (`detector.py`, `psd.py`, `detectors.toml`, and bundled noise curves).
+- `src/astrogwb/`: Python package code. Core detector logic lives in `src/astrogwb/detector/` (`overlap.py`, `sensitivity.py`, `setup.py`, `geometry.toml`, `sensitivity.toml`, and bundled noise curves). gwmock owns detector geometry and PSD loading; astrogwb owns the frequency-dependent ORF and the SGWB analysis policy.
 - `tests/`: Pytest suite (`test_detector.py`) with unit and integration coverage.
 - `scripts/`: Research workflows (waveform generation, merge utilities, SLURM submission via `submit.sh`).
 - `config/`: Runtime TOML defaults (for example, `generate_injection_waveforms.toml`).

@@ -1,16 +1,29 @@
-"""Frequency-dependent overlap reduction and effective PSD utilities."""
+"""Frequency-dependent overlap reduction and effective PSD utilities.
+
+The frequency-dependent overlap reduction function (ORF) is astrogwb's own
+contribution: gwmock ships only the long-wavelength, co-located limit
+(``gamma = 2 D_i:D_j``). This module keeps the validated analytic ORF
+(angle-based ``g1/g2/g3`` expansion) and feeds it geometry sourced from
+gwmock ``CustomDetector`` objects — either passed in directly (ET presets)
+or resolved from astrogwb's :mod:`geometry.toml` table for LAL/CE site
+codes given as plain strings.
+"""
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import Sequence
+import tomllib
+from collections.abc import Mapping, Sequence
+from functools import cache
+from pathlib import Path
 
 import numpy as np
 from gwmock_signal.detector import CustomDetector
+from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
 
-from .detector import Detector
+from ._types import DetectorSpec
+from .sensitivity import Sensitivity, evaluate_psd
 
 R_EARTH = 6371.0  # km
 C_LIGHT = 299792.458  # km/s
@@ -18,85 +31,88 @@ C_LIGHT = 299792.458  # km/s
 _LOW_ALPHA_THRESHOLD = 2e-3
 _NETWORK_SENSITIVITY_FACTOR = 0.16
 
-DetectorSpec = Detector | CustomDetector
+GEOMETRY_FILE = Path(__file__).parent / "geometry.toml"
 
 
-@dataclass(frozen=True)
-class _Geometry:
-    name: str
-    latitude: float
-    longitude: float
-    elevation: float
-    xarm_azimuth: float
-    yarm_azimuth: float
+@cache
+def _geometry_table() -> Mapping[str, CustomDetector]:
+    """Load ``geometry.toml`` into name -> ``CustomDetector`` (radians)."""
+    with open(GEOMETRY_FILE, "rb") as f:
+        data = tomllib.load(f)
+    return {name: _custom_detector(name, row) for name, row in data.items()}
 
 
-def _geometry(detector: DetectorSpec) -> _Geometry:
-    if isinstance(detector, Detector):
-        return _Geometry(
-            name=detector.name,
-            latitude=detector.latitude,
-            longitude=detector.longitude,
-            elevation=detector.elevation,
-            xarm_azimuth=detector.xarm_azimuth,
-            yarm_azimuth=detector.yarm_azimuth,
-        )
-    if isinstance(detector, CustomDetector):
-        return _Geometry(
-            name=detector.name,
-            latitude=math.degrees(detector.latitude_rad),
-            longitude=math.degrees(detector.longitude_rad),
-            elevation=detector.elevation_m,
-            xarm_azimuth=math.degrees(detector.xarm_azimuth_rad),
-            yarm_azimuth=math.degrees(detector.yarm_azimuth_rad),
-        )
-    raise TypeError(
-        "detector must be an astrogwb Detector or gwmock_signal CustomDetector"
+def _custom_detector(name: str, row: Mapping) -> CustomDetector:
+    return CustomDetector(
+        name=name,
+        latitude_rad=math.radians(float(row["latitude"])),
+        longitude_rad=math.radians(float(row["longitude"])),
+        elevation_m=float(row["elevation"]),
+        xarm_azimuth_rad=math.radians(float(row["xarm_azimuth"])),
+        yarm_azimuth_rad=math.radians(float(row["yarm_azimuth"])),
+        xarm_tilt_rad=math.radians(float(row.get("xarm_tilt", 0.0))),
+        yarm_tilt_rad=math.radians(float(row.get("yarm_tilt", 0.0))),
     )
 
 
+def _resolve_geometry(spec: DetectorSpec) -> CustomDetector:
+    """Resolve a detector spec to a ``CustomDetector`` carrying geometry.
+
+    ``CustomDetector`` instances (ET presets, ad-hoc configs) already carry
+    angles and pass through; ``str`` LAL/CE/ET site codes are looked up in
+    the :mod:`geometry.toml` table.
+    """
+    if isinstance(spec, CustomDetector):
+        return spec
+    try:
+        return _geometry_table()[spec]
+    except KeyError as exc:
+        raise KeyError(
+            f"Unknown detector {spec!r}; not in geometry.toml. "
+            "Pass a gwmock CustomDetector for ad-hoc geometry."
+        ) from exc
+
+
 def _chord_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    lat1_r = math.radians(lat1)
-    lon1_r = math.radians(lon1)
-    lat2_r = math.radians(lat2)
-    lon2_r = math.radians(lon2)
+    """Straight-line (chord) distance in km between two points on Earth.
 
-    x1 = math.cos(lat1_r) * math.cos(lon1_r)
-    y1 = math.cos(lat1_r) * math.sin(lon1_r)
-    z1 = math.sin(lat1_r)
+    All angles are in radians.
+    """
+    x1 = math.cos(lat1) * math.cos(lon1)
+    y1 = math.cos(lat1) * math.sin(lon1)
+    z1 = math.sin(lat1)
 
-    x2 = math.cos(lat2_r) * math.cos(lon2_r)
-    y2 = math.cos(lat2_r) * math.sin(lon2_r)
-    z2 = math.sin(lat2_r)
+    x2 = math.cos(lat2) * math.cos(lon2)
+    y2 = math.cos(lat2) * math.sin(lon2)
+    z2 = math.sin(lat2)
 
     return R_EARTH * math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2 + (z2 - z1) ** 2)
 
 
 def _initial_course(lat1: float, lat2: float, lon1: float, lon2: float) -> float:
-    lat1_r = math.radians(lat1)
-    lat2_r = math.radians(lat2)
-    dlon = math.radians(lon2 - lon1)
-
-    x = math.cos(lat2_r) * math.sin(dlon)
-    y = math.cos(lat1_r) * math.sin(lat2_r) - math.sin(lat1_r) * math.cos(
-        lat2_r
-    ) * math.cos(dlon)
-    return math.degrees(math.atan2(x, y)) % 360
+    """Initial great-circle bearing from point 1 to point 2 (radians)."""
+    dlon = lon2 - lon1
+    x = math.cos(lat2) * math.sin(dlon)
+    y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(
+        dlon
+    )
+    return math.atan2(x, y) % (2.0 * math.pi)
 
 
 def _final_course(lat1: float, lat2: float, lon1: float, lon2: float) -> float:
-    return (_initial_course(lat2, lat1, lon2, lon1) + 180.0) % 360
+    """Final great-circle bearing arriving at point 2 (radians)."""
+    return (_initial_course(lat2, lat1, lon2, lon1) + math.pi) % (2.0 * math.pi)
 
 
 def _opening_angle(az1: float, az2: float) -> float:
-    diff = ((az1 - az2 + 180.0) % 360.0) - 180.0
-    return math.radians(abs(diff))
+    """Smallest angle between two arm azimuths (radians in, radians out)."""
+    diff = ((az1 - az2 + math.pi) % (2.0 * math.pi)) - math.pi
+    return abs(diff)
 
 
 def _azimuth_bisector(az1: float, az2: float) -> float:
-    a1 = math.radians(az1)
-    a2 = math.radians(az2)
-    return math.atan2(math.sin(a1) + math.sin(a2), math.cos(a1) + math.cos(a2))
+    """Circular-mean bisector of two azimuths (radians in, radians out)."""
+    return math.atan2(math.sin(az1) + math.sin(az2), math.cos(az1) + math.cos(az2))
 
 
 def _g1(alpha: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -181,23 +197,43 @@ def overlap_reduction_function(
     detector_1: DetectorSpec,
     detector_2: DetectorSpec,
 ) -> NDArray[np.float64]:
-    frequencies = np.asarray(frequencies, dtype=float)
-    det1 = _geometry(detector_1)
-    det2 = _geometry(detector_2)
+    """Frequency-dependent ORF between two detectors.
 
-    d = _chord_distance(det1.latitude, det1.longitude, det2.latitude, det2.longitude)
+    Each detector is a ``str`` site code (resolved via ``geometry.toml``)
+    or a gwmock ``CustomDetector``.
+    """
+    frequencies = np.asarray(frequencies, dtype=float)
+    det1 = _resolve_geometry(detector_1)
+    det2 = _resolve_geometry(detector_2)
+
+    d = _chord_distance(
+        det1.latitude_rad,
+        det1.longitude_rad,
+        det2.latitude_rad,
+        det2.longitude_rad,
+    )
     alpha = 2.0 * math.pi * frequencies * d / C_LIGHT
 
-    xax_1 = _azimuth_bisector(det1.xarm_azimuth, det1.yarm_azimuth)
-    xax_2 = _azimuth_bisector(det2.xarm_azimuth, det2.yarm_azimuth)
+    xax_1 = _azimuth_bisector(det1.xarm_azimuth_rad, det1.yarm_azimuth_rad)
+    xax_2 = _azimuth_bisector(det2.xarm_azimuth_rad, det2.yarm_azimuth_rad)
 
-    ang_1 = math.radians(
-        _initial_course(det1.latitude, det2.latitude, det1.longitude, det2.longitude)
-        - 90.0
+    ang_1 = (
+        _initial_course(
+            det1.latitude_rad,
+            det2.latitude_rad,
+            det1.longitude_rad,
+            det2.longitude_rad,
+        )
+        - 0.5 * math.pi
     )
-    ang_2 = math.radians(
-        _final_course(det1.latitude, det2.latitude, det1.longitude, det2.longitude)
-        - 90.0
+    ang_2 = (
+        _final_course(
+            det1.latitude_rad,
+            det2.latitude_rad,
+            det1.longitude_rad,
+            det2.longitude_rad,
+        )
+        - 0.5 * math.pi
     )
 
     delta = 0.5 * ((xax_1 + ang_1) - (xax_2 + ang_2))
@@ -206,8 +242,8 @@ def overlap_reduction_function(
     asin_arg = max(-1.0, min(1.0, 0.5 * d / R_EARTH))
     beta = 2.0 * math.asin(asin_arg)
 
-    ang_btw_arms_1 = _opening_angle(det1.xarm_azimuth, det1.yarm_azimuth)
-    ang_btw_arms_2 = _opening_angle(det2.xarm_azimuth, det2.yarm_azimuth)
+    ang_btw_arms_1 = _opening_angle(det1.xarm_azimuth_rad, det1.yarm_azimuth_rad)
+    ang_btw_arms_2 = _opening_angle(det2.xarm_azimuth_rad, det2.yarm_azimuth_rad)
 
     return _get_orf(alpha, beta, delta, big_delta, ang_btw_arms_1, ang_btw_arms_2)
 
@@ -216,6 +252,7 @@ def pairwise_overlap_reduction_function(
     frequencies: ArrayLike,
     detectors: Sequence[DetectorSpec],
 ) -> NDArray[np.float64]:
+    """Symmetric ``(n, n, nfreq)`` ORF matrix with unit diagonal."""
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
     n = len(det_list)
@@ -232,21 +269,33 @@ def pairwise_overlap_reduction_function(
 
 def effective_psd(
     frequencies: ArrayLike,
-    detectors: Sequence[Detector],
+    detectors: Sequence[DetectorSpec],
+    sensitivities: Mapping[str, Sensitivity],
 ) -> NDArray[np.float64]:
+    """Network effective PSD from an inverse-variance cross-correlation sum.
+
+    ``detectors`` are matched to ``sensitivities`` by their public name
+    (gwmock ``detector_names``): plain str codes match directly, while
+    preset ``CustomDetector`` objects match on their ``name`` (e.g.
+    ``ET1_SARD``). The contraction and ``_NETWORK_SENSITIVITY_FACTOR``
+    are unchanged from the pre-refactor implementation.
+    """
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
     if len(det_list) < 2:
         return np.full(frequencies.shape, np.inf, dtype=float)
 
+    names = detector_names(det_list)
+    psds = [
+        evaluate_psd(sensitivities[name].psd_reference, frequencies) for name in names
+    ]
+
     inverse_variance = np.zeros(frequencies.shape, dtype=float)
     for i, det1 in enumerate(det_list):
-        psd1 = det1.psd.evaluate(frequencies)
-        for det2 in det_list[i + 1 :]:
-            psd2 = det2.psd.evaluate(frequencies)
-            gamma = overlap_reduction_function(frequencies, det1, det2)
+        for j in range(i + 1, len(det_list)):
+            gamma = overlap_reduction_function(frequencies, det1, det_list[j])
             with np.errstate(invalid="ignore", divide="ignore"):
-                contribution = gamma**2 / (psd1 * psd2)
+                contribution = gamma**2 / (psds[i] * psds[j])
             inverse_variance += np.where(np.isfinite(contribution), contribution, 0.0)
 
     with np.errstate(invalid="ignore", divide="ignore"):

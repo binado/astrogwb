@@ -9,6 +9,7 @@ authors = [
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
+    "gwmock-noise>=0.5.3",
     "gwmock-signal>=0.9.2",
     "jax>=0.10.2",
     "numpy>=2.4.2",

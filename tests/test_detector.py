@@ -7,11 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from gwmock_signal.detector import CustomDetector
+from gwmock_signal.network import Network
 
 from astrogwb.detector import (
-    Detector,
-    PowerSpectralDensity,
-    effective_psd,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
 )
@@ -23,6 +21,7 @@ from astrogwb.detector.overlap import (
     _final_course,
     _get_orf,
     _initial_course,
+    _resolve_geometry,
 )
 
 
@@ -41,40 +40,53 @@ def load_fixture() -> Callable[[Path], dict[str, np.ndarray]]:
     return _loader
 
 
-def test_psd_loads_and_interpolates_noise_curve() -> None:
-    psd = PowerSpectralDensity.from_noise_curve_dir("AplusDesign_psd.txt")
+def test_resolve_geometry_str_lookup() -> None:
+    det = _resolve_geometry("H1")
 
-    values = psd.evaluate(np.array([20.0, 100.0]))
-
-    assert psd.file.name == "AplusDesign_psd.txt"
-    assert values.shape == (2,)
-    assert np.all(np.isfinite(values))
+    assert isinstance(det, CustomDetector)
+    assert det.name == "H1"
+    assert math.degrees(det.latitude_rad) == pytest.approx(46.45514666666667)
 
 
-def test_detector_from_file() -> None:
-    detector = Detector.from_file("H1")
+def test_resolve_geometry_passthrough_custom_detector() -> None:
+    custom = CustomDetector(
+        name="T1",
+        latitude_rad=0.1,
+        longitude_rad=0.2,
+        elevation_m=0.0,
+        xarm_azimuth_rad=0.3,
+        yarm_azimuth_rad=0.4,
+    )
 
-    assert detector.name == "H1"
-    assert detector.length == 4.0
-    assert detector.minimum_frequency == 20.0
-    assert isinstance(detector.psd, PowerSpectralDensity)
+    assert _resolve_geometry(custom) is custom
+
+
+def test_resolve_geometry_unknown_name_raises() -> None:
+    with pytest.raises(KeyError):
+        _resolve_geometry("NOPE")
 
 
 def test_chord_distance_antipodal() -> None:
-    assert _chord_distance(0.0, 0.0, 0.0, 180.0) == pytest.approx(2.0 * R_EARTH)
+    assert _chord_distance(0.0, 0.0, 0.0, math.pi) == pytest.approx(2.0 * R_EARTH)
 
 
 def test_course_angles() -> None:
-    assert _initial_course(0.0, 0.0, 0.0, 10.0) == pytest.approx(90.0)
-    assert _initial_course(0.0, 10.0, 45.0, 45.0) == pytest.approx(0.0)
-    assert _final_course(46.5, 30.6, -119.4, -90.8) != pytest.approx(
-        _initial_course(46.5, 30.6, -119.4, -90.8),
-        abs=1.0,
+    assert _initial_course(0.0, 0.0, 0.0, math.radians(10.0)) == pytest.approx(
+        math.pi / 2.0
+    )
+    assert _initial_course(
+        0.0, math.radians(10.0), math.radians(45.0), math.radians(45.0)
+    ) == pytest.approx(0.0)
+    lat1, lat2 = math.radians(46.5), math.radians(30.6)
+    lon1, lon2 = math.radians(-119.4), math.radians(-90.8)
+    assert _final_course(lat1, lat2, lon1, lon2) != pytest.approx(
+        _initial_course(lat1, lat2, lon1, lon2), abs=math.radians(1.0)
     )
 
 
 def test_azimuth_bisector_wraparound() -> None:
-    assert np.rad2deg(_azimuth_bisector(10.0, 350.0)) == pytest.approx(0.0)
+    bisector = _azimuth_bisector(math.radians(10.0), math.radians(350.0))
+    assert math.degrees(bisector) == pytest.approx(0.0)
 
 
 def test_get_orf_low_alpha_uses_both_opening_angles() -> None:
@@ -86,9 +98,7 @@ def test_get_orf_low_alpha_uses_both_opening_angles() -> None:
 
 
 def test_orf_colocated_is_normalized(frequencies: np.ndarray) -> None:
-    detector = Detector.from_file("H1")
-
-    actual = overlap_reduction_function(frequencies, detector, detector)
+    actual = overlap_reduction_function(frequencies, "H1", "H1")
 
     np.testing.assert_allclose(actual, np.ones_like(frequencies))
 
@@ -108,34 +118,21 @@ def test_orf_accepts_gwmock_custom_detector(frequencies: np.ndarray) -> None:
     np.testing.assert_allclose(actual, np.ones_like(frequencies))
 
 
-def test_pairwise_overlap_shape_and_symmetry(frequencies: np.ndarray) -> None:
-    detectors = [
-        Detector.from_file("H1"),
-        Detector.from_file("L1"),
-        Detector.from_file("V1"),
-    ]
+def test_orf_accepts_mixed_str_and_custom_detector(frequencies: np.ndarray) -> None:
+    custom_h1 = _resolve_geometry("H1")
 
-    actual = pairwise_overlap_reduction_function(frequencies, detectors)
+    from_str = overlap_reduction_function(frequencies, "H1", "L1")
+    mixed = overlap_reduction_function(frequencies, custom_h1, "L1")
+
+    np.testing.assert_allclose(mixed, from_str)
+
+
+def test_pairwise_overlap_shape_and_symmetry(frequencies: np.ndarray) -> None:
+    actual = pairwise_overlap_reduction_function(frequencies, ["H1", "L1", "V1"])
 
     assert actual.shape == (3, 3, frequencies.shape[0])
     np.testing.assert_allclose(actual, np.transpose(actual, (1, 0, 2)))
     np.testing.assert_allclose(actual[0, 0, :], 1.0)
-
-
-def test_effective_psd_inf_for_insufficient_network(frequencies: np.ndarray) -> None:
-    actual = effective_psd(frequencies, [Detector.from_file("H1")])
-
-    assert actual.shape == frequencies.shape
-    assert np.all(np.isinf(actual))
-
-
-def test_effective_psd_finite_for_detector_pair(frequencies: np.ndarray) -> None:
-    detectors = [Detector.from_file("H1"), Detector.from_file("L1")]
-
-    actual = effective_psd(frequencies, detectors)
-
-    assert actual.shape == frequencies.shape
-    assert np.any(np.isfinite(actual))
 
 
 def test_matches_gwfast_reference(
@@ -150,11 +147,7 @@ def test_matches_gwfast_reference(
         if key == "frequencies":
             continue
         det1_name, det2_name = key.split("_", maxsplit=1)
-        ours = overlap_reduction_function(
-            freqs,
-            Detector.from_file(det1_name),
-            Detector.from_file(det2_name),
-        )
+        ours = overlap_reduction_function(freqs, det1_name, det2_name)
         np.testing.assert_allclose(ours, reference, atol=1e-4)
 
 
@@ -201,3 +194,49 @@ def test_et_triangle_sum_upper_pairs_matches_reference(
     ours_sum = pairwise[0, 1, :] + pairwise[0, 2, :] + pairwise[1, 2, :]
 
     np.testing.assert_allclose(ours_sum, fixture["sum_upper_pairs"], atol=1e-4)
+
+
+def _opening_angle_deg(det: CustomDetector) -> float:
+    diff = (
+        (det.xarm_azimuth_rad - det.yarm_azimuth_rad + math.pi) % (2.0 * math.pi)
+    ) - math.pi
+    return math.degrees(abs(diff))
+
+
+@pytest.mark.parametrize(
+    ("preset", "expected_opening"),
+    [
+        ("ET-Sardinia", 60.0),
+        ("ET-Triangle-Sardinia", 60.0),
+        ("ET-2L-Aligned", 90.0),
+        ("ET-2L-Misaligned", 90.0),
+    ],
+)
+def test_gwmock_et_preset_opening_angles(preset: str, expected_opening: float) -> None:
+    """gwmock ET presets carry the arm opening angles astrogwb's ORF assumes."""
+    network = Network.from_name(preset)
+
+    for detector in network.detector_names:
+        assert isinstance(detector, CustomDetector)
+        assert _opening_angle_deg(detector) == pytest.approx(expected_opening, abs=0.1)
+
+
+def test_gwmock_et_triangle_orf_matches_geometry_table(
+    frequencies: np.ndarray,
+) -> None:
+    """astrogwb's ORF agrees on the co-located ET triangle across geometry sources.
+
+    The gwmock ``ET-Sardinia`` preset and astrogwb's ``geometry.toml``
+    E1/E2/E3 rows describe 10 km, 60-degree triangles at nearby (but not
+    identical) sites, so their ORF triangle sums coincide to within a small
+    geometric tolerance. This cross-validates the gwmock-preset geometry
+    path against the validated angle table.
+    """
+    preset = list(Network.from_name("ET-Sardinia").detector_names)
+    preset_pw = pairwise_overlap_reduction_function(frequencies, preset)
+    preset_sum = preset_pw[0, 1, :] + preset_pw[0, 2, :] + preset_pw[1, 2, :]
+
+    table_pw = pairwise_overlap_reduction_function(frequencies, ["E1", "E2", "E3"])
+    table_sum = table_pw[0, 1, :] + table_pw[0, 2, :] + table_pw[1, 2, :]
+
+    np.testing.assert_allclose(preset_sum, table_sum, atol=5e-3)

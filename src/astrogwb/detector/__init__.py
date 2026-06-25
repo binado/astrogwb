@@ -1,15 +1,26 @@
-from .detector import Detector
+from ._types import DetectorSpec
 from .overlap import (
     effective_psd,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
 )
-from .psd import PowerSpectralDensity
+from .sensitivity import (
+    Sensitivity,
+    evaluate_psd,
+    load_sensitivity,
+    load_sensitivity_map,
+)
+from .setup import AnalysisContext, analysis_setup
 
 __all__ = [
-    "Detector",
-    "PowerSpectralDensity",
+    "AnalysisContext",
+    "DetectorSpec",
+    "Sensitivity",
+    "analysis_setup",
     "effective_psd",
+    "evaluate_psd",
+    "load_sensitivity",
+    "load_sensitivity_map",
     "overlap_reduction_function",
     "pairwise_overlap_reduction_function",
 ]
