@@ -136,6 +136,7 @@ def test_effective_psd_inf_for_single_detector(frequencies: np.ndarray) -> None:
     assert np.all(np.isinf(actual))
 
 
+@pytest.mark.integration
 def test_analysis_setup_et_preset_custom_detectors(frequencies: np.ndarray) -> None:
     ctx = analysis_setup("ET-Triangle-Sardinia")
 

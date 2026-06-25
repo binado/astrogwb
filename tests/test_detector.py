@@ -158,6 +158,7 @@ def test_pairwise_overlap_shape_and_symmetry(frequencies: np.ndarray) -> None:
     np.testing.assert_allclose(actual[0, 0, :], 1.0)
 
 
+@pytest.mark.integration
 def test_matches_gwfast_reference(
     load_fixture: Callable[[Path], dict[str, np.ndarray]],
 ) -> None:
@@ -174,6 +175,7 @@ def test_matches_gwfast_reference(
         np.testing.assert_allclose(ours, reference, atol=1e-4)
 
 
+@pytest.mark.integration
 def test_et_triangle_sum_upper_pairs_matches_reference(
     load_fixture: Callable[[Path], dict[str, np.ndarray]],
 ) -> None:
@@ -226,6 +228,7 @@ def _opening_angle_deg(det: CustomDetector) -> float:
     return math.degrees(abs(diff))
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("preset", "expected_opening"),
     [
@@ -244,6 +247,7 @@ def test_gwmock_et_preset_opening_angles(preset: str, expected_opening: float) -
         assert _opening_angle_deg(detector) == pytest.approx(expected_opening, abs=0.1)
 
 
+@pytest.mark.integration
 def test_gwmock_et_triangle_orf_matches_geometry_table(
     frequencies: np.ndarray,
 ) -> None:
