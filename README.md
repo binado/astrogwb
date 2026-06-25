@@ -15,7 +15,7 @@ array contractions and inference.
 
 For preset networks (HLVK, ET layouts, …), use gwmock's `Network` presets via
 `analysis_setup`. astrogwb also ships supplemental geometry (`geometry.toml`,
-`load_geometry`) and local noise curves for detectors without a suitable
+`load_detector`) and local noise curves for detectors without a suitable
 gwmock preset or LAL code (for example Cosmic Explorer sites). On top of
 gwmock's geometry and PSD loading, astrogwb adds the frequency-dependent
 overlap reduction function, the out-of-band PSD policy, and SGWB analysis
@@ -48,18 +48,18 @@ ctx_et = analysis_setup("ET-Triangle-Sardinia")
 ```
 
 For a combined ET + Cosmic Explorer network there is no gwmock preset, so
-build the `Network` from detectors. Use `load_geometry`, a factory that
+build the `Network` from detectors. Use `load_detector`, a factory that
 returns a gwmock `CustomDetector` from astrogwb's `geometry.toml`, for the
 CE detectors:
 
 ```python
 from gwmock_signal.network import Network
-from astrogwb.detector import analysis_setup, load_geometry
+from astrogwb.detector import analysis_setup, load_detector
 
 # C2 (CE at Livingston) has no LAL code, and LAL's "C1" is the Caltech 40m
-# prototype (CIT_40) — not Cosmic Explorer. load_geometry sources astrogwb's
+# prototype (CIT_40) — not Cosmic Explorer. load_detector sources astrogwb's
 # CE geometry instead, so the network is built from the intended sites.
-detectors = [load_geometry(name) for name in ("E1", "E2", "E3", "C1", "C2")]
+detectors = [load_detector(name) for name in ("E1", "E2", "E3", "C1", "C2")]
 network = Network.from_detectors(detectors, name="ET+CE")
 
 ctx = analysis_setup(network)

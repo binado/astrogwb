@@ -41,7 +41,7 @@ def _custom_detector(name: str, row: Mapping) -> CustomDetector:
     )
 
 
-def load_geometry(name: str) -> CustomDetector:
+def load_detector(name: str) -> CustomDetector:
     """Look up a detector's geometry from the ``geometry.toml`` table.
 
     Returns a gwmock ``CustomDetector``, which can be fed to
@@ -58,7 +58,7 @@ def load_geometry(name: str) -> CustomDetector:
         ) from exc
 
 
-def resolve_geometry(spec: DetectorSpec) -> CustomDetector:
+def resolve_detector(spec: DetectorSpec) -> CustomDetector:
     """Resolve a detector spec to a ``CustomDetector`` carrying geometry.
 
     ``CustomDetector`` instances (ET presets, ad-hoc configs) already carry
@@ -67,4 +67,4 @@ def resolve_geometry(spec: DetectorSpec) -> CustomDetector:
     """
     if isinstance(spec, CustomDetector):
         return spec
-    return load_geometry(spec)
+    return load_detector(spec)

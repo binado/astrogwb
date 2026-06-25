@@ -10,10 +10,10 @@ from gwmock_signal.detector import CustomDetector
 from gwmock_signal.network import Network
 
 from astrogwb.detector import (
-    load_geometry,
+    load_detector,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
-    resolve_geometry,
+    resolve_detector,
 )
 from astrogwb.detector.overlap import (
     R_EARTH,
@@ -41,37 +41,37 @@ def load_fixture() -> Callable[[Path], dict[str, np.ndarray]]:
     return _loader
 
 
-def test_resolve_geometry_str_lookup() -> None:
-    det = resolve_geometry("H1")
+def test_resolve_detector_str_lookup() -> None:
+    det = resolve_detector("H1")
 
     assert isinstance(det, CustomDetector)
     assert det.name == "H1"
     assert math.degrees(det.latitude_rad) == pytest.approx(46.45514666666667)
 
 
-def test_load_geometry_returns_custom_detector() -> None:
-    det = load_geometry("V1")
+def test_load_detector_returns_custom_detector() -> None:
+    det = load_detector("V1")
 
     assert isinstance(det, CustomDetector)
     assert det.name == "V1"
     assert math.degrees(det.latitude_rad) == pytest.approx(43.631414472222225)
 
 
-def test_load_geometry_cosmic_explorer_is_not_lal_prototype() -> None:
+def test_load_detector_cosmic_explorer_is_not_lal_prototype() -> None:
     # LAL's "C1" code is the Caltech 40m prototype (CIT_40, lat ~34.17), but
-    # astrogwb's C1 is Cosmic Explorer at Hanford. load_geometry must source
+    # astrogwb's C1 is Cosmic Explorer at Hanford. load_detector must source
     # the latter so CE networks are built from the right site.
-    det = load_geometry("C1")
+    det = load_detector("C1")
 
     assert math.degrees(det.latitude_rad) == pytest.approx(46.45514666666667)
 
 
-def test_load_geometry_unknown_name_raises() -> None:
+def test_load_detector_unknown_name_raises() -> None:
     with pytest.raises(KeyError):
-        load_geometry("NOPE")
+        load_detector("NOPE")
 
 
-def test_resolve_geometry_passthrough_custom_detector() -> None:
+def test_resolve_detector_passthrough_custom_detector() -> None:
     custom = CustomDetector(
         name="T1",
         latitude_rad=0.1,
@@ -81,12 +81,12 @@ def test_resolve_geometry_passthrough_custom_detector() -> None:
         yarm_azimuth_rad=0.4,
     )
 
-    assert resolve_geometry(custom) is custom
+    assert resolve_detector(custom) is custom
 
 
-def test_resolve_geometry_unknown_name_raises() -> None:
+def test_resolve_detector_unknown_name_raises() -> None:
     with pytest.raises(KeyError):
-        resolve_geometry("NOPE")
+        resolve_detector("NOPE")
 
 
 def test_chord_distance_antipodal() -> None:
@@ -142,7 +142,7 @@ def test_orf_accepts_gwmock_custom_detector(frequencies: np.ndarray) -> None:
 
 
 def test_orf_accepts_mixed_str_and_custom_detector(frequencies: np.ndarray) -> None:
-    custom_h1 = resolve_geometry("H1")
+    custom_h1 = resolve_detector("H1")
 
     from_str = overlap_reduction_function(frequencies, "H1", "L1")
     mixed = overlap_reduction_function(frequencies, custom_h1, "L1")

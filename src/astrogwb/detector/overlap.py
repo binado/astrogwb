@@ -16,7 +16,7 @@ from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
 
 from ._types import DetectorSpec
-from .geometry import resolve_geometry
+from .geometry import resolve_detector
 from .sensitivity import Sensitivity, evaluate_psd
 
 R_EARTH = 6371.0  # km
@@ -156,8 +156,8 @@ def overlap_reduction_function(
     or a gwmock ``CustomDetector``.
     """
     frequencies = np.asarray(frequencies, dtype=float)
-    det1 = resolve_geometry(detector_1)
-    det2 = resolve_geometry(detector_2)
+    det1 = resolve_detector(detector_1)
+    det2 = resolve_detector(detector_2)
 
     d = _chord_distance(
         det1.latitude_rad,
