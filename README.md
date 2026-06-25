@@ -3,7 +3,8 @@
 Small utilities for astrophysical stochastic gravitational-wave background
 array contractions and inference.
 
-`gwmock-signal` owns detector and waveform objects. `astrogwb` provides:
+`gwmock-signal` owns preset detector networks and waveform backends.
+`gwmock-noise` owns bundled PSD presets and interpolation. `astrogwb` provides:
 
 - SGWB spectral-density contractions and Omega_GW conversions.
 - Frequency-dependent ORF and effective PSD utilities.
@@ -12,10 +13,13 @@ array contractions and inference.
 
 ## Detector analysis
 
-gwmock is the single source of truth for detector geometry (`gwmock-signal`)
-and noise curves (`gwmock-noise`). astrogwb adds the SGWB-specific
-frequency-dependent overlap reduction function and the analysis policy on
-top. `analysis_setup` is the entry point:
+For preset networks (HLVK, ET layouts, …), use gwmock's `Network` presets via
+`analysis_setup`. astrogwb also ships supplemental geometry (`geometry.toml`,
+`load_geometry`) and local noise curves for detectors without a suitable
+gwmock preset or LAL code (for example Cosmic Explorer sites). On top of
+gwmock's geometry and PSD loading, astrogwb adds the frequency-dependent
+overlap reduction function, the out-of-band PSD policy, and SGWB analysis
+setup. `analysis_setup` is the entry point:
 
 ```python
 import numpy as np
@@ -101,7 +105,11 @@ Run tests:
 
 ```bash
 uv run pytest
+uv run pytest -m "not integration"   # fast unit tests only
 ```
+
+Regression fixtures under `tests/fixtures/` are committed; integration tests
+cross-check gwfast and skip if optional fixtures are missing.
 
 Format and lint:
 
