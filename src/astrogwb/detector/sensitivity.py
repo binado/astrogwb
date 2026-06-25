@@ -22,7 +22,7 @@ from gwmock_noise.gaussian.psd import (
     is_remote_psd_reference,
     resolve_bundled_psd_preset,
 )
-from gwmock_noise.spectral import load_and_interpolate_psd, load_spectral_series
+from gwmock_noise.spectral import interpolate_real_spectral_series, load_spectral_series
 from gwmock_signal.network import Network
 from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
@@ -98,12 +98,12 @@ def evaluate_psd(
     """
     resolved = resolve_psd_path(reference)
     frequencies = np.asarray(frequencies, dtype=float)
-    values = load_and_interpolate_psd(resolved, frequencies)
+    grid, grid_values = load_spectral_series(resolved, kind="PSD")
+    values = interpolate_real_spectral_series(grid, grid_values, frequencies)
 
     if out_of_band == "zero":
         return values
 
-    grid, _ = load_spectral_series(resolved, kind="PSD")
     out_of_band_mask = (frequencies < grid.min()) | (frequencies > grid.max())
     return np.where(out_of_band_mask, np.inf, values)
 
