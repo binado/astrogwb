@@ -55,6 +55,23 @@ def _custom_detector(name: str, row: Mapping) -> CustomDetector:
     )
 
 
+def load_geometry(name: str) -> CustomDetector:
+    """Look up a detector's geometry from the ``geometry.toml`` table.
+
+    Returns a gwmock ``CustomDetector``, which can be fed to
+    :meth:`Network.from_detectors` to compose custom networks (e.g. mixing
+    LAL site codes with non-LAL detectors such as Cosmic Explorer at
+    Livingston, which has no LAL code).
+    """
+    try:
+        return _geometry_table()[name]
+    except KeyError as exc:
+        raise KeyError(
+            f"Unknown detector {name!r}; not in geometry.toml. "
+            "Pass a gwmock CustomDetector for ad-hoc geometry."
+        ) from exc
+
+
 def _resolve_geometry(spec: DetectorSpec) -> CustomDetector:
     """Resolve a detector spec to a ``CustomDetector`` carrying geometry.
 
@@ -64,13 +81,7 @@ def _resolve_geometry(spec: DetectorSpec) -> CustomDetector:
     """
     if isinstance(spec, CustomDetector):
         return spec
-    try:
-        return _geometry_table()[spec]
-    except KeyError as exc:
-        raise KeyError(
-            f"Unknown detector {spec!r}; not in geometry.toml. "
-            "Pass a gwmock CustomDetector for ad-hoc geometry."
-        ) from exc
+    return load_geometry(spec)
 
 
 def _chord_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

@@ -29,6 +29,44 @@ psd = ctx.effective_psd(f)             # network effective PSD
 ctx_et = analysis_setup("ET-Triangle-Sardinia")  # CustomDetector presets
 ```
 
+### Building a detector network
+
+`analysis_setup` accepts either a gwmock preset name (see
+`Network.list_names()`) or a `Network` you assemble yourself. For an
+Einstein Telescope network, a preset is enough:
+
+```python
+from astrogwb.detector import analysis_setup
+
+ctx_et = analysis_setup("ET-triangle")   # str codes E1, E2, E3
+# or the L-shaped Sardinia layout (gwmock CustomDetector presets):
+ctx_et = analysis_setup("ET-Triangle-Sardinia")
+```
+
+For a combined ET + Cosmic Explorer network there is no gwmock preset, so
+build the `Network` from detectors. Use `load_geometry`, a factory that
+returns a gwmock `CustomDetector` from astrogwb's `geometry.toml`, for the
+CE detectors:
+
+```python
+from gwmock_signal.network import Network
+from astrogwb.detector import analysis_setup, load_geometry
+
+# C2 (CE at Livingston) has no LAL code, and LAL's "C1" is the Caltech 40m
+# prototype (CIT_40) — not Cosmic Explorer. load_geometry sources astrogwb's
+# CE geometry instead, so the network is built from the intended sites.
+detectors = [load_geometry(name) for name in ("E1", "E2", "E3", "C1", "C2")]
+network = Network.from_detectors(detectors, name="ET+CE")
+
+ctx = analysis_setup(network)
+ctx.effective_psd(f)            # network effective PSD
+ctx.overlap(f, "E1", "C1")      # ORF between any two members
+```
+
+Sensitivity curves are matched to detectors by their public name
+(`E1`, `C1`, `ET1_SARD`, …), so every member must have an entry in
+`sensitivity.toml`.
+
 ### Migration from the pre-refactor API
 
 | Removed (old)                                   | Replacement (new)                                            |

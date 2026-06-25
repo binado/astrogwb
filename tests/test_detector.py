@@ -10,6 +10,7 @@ from gwmock_signal.detector import CustomDetector
 from gwmock_signal.network import Network
 
 from astrogwb.detector import (
+    load_geometry,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
 )
@@ -46,6 +47,28 @@ def test_resolve_geometry_str_lookup() -> None:
     assert isinstance(det, CustomDetector)
     assert det.name == "H1"
     assert math.degrees(det.latitude_rad) == pytest.approx(46.45514666666667)
+
+
+def test_load_geometry_returns_custom_detector() -> None:
+    det = load_geometry("V1")
+
+    assert isinstance(det, CustomDetector)
+    assert det.name == "V1"
+    assert math.degrees(det.latitude_rad) == pytest.approx(43.631414472222225)
+
+
+def test_load_geometry_cosmic_explorer_is_not_lal_prototype() -> None:
+    # LAL's "C1" code is the Caltech 40m prototype (CIT_40, lat ~34.17), but
+    # astrogwb's C1 is Cosmic Explorer at Hanford. load_geometry must source
+    # the latter so CE networks are built from the right site.
+    det = load_geometry("C1")
+
+    assert math.degrees(det.latitude_rad) == pytest.approx(46.45514666666667)
+
+
+def test_load_geometry_unknown_name_raises() -> None:
+    with pytest.raises(KeyError):
+        load_geometry("NOPE")
 
 
 def test_resolve_geometry_passthrough_custom_detector() -> None:
