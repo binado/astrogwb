@@ -18,11 +18,7 @@ def spectral_density(
 ):
     factor = 0.4 if average_mode == "analytic_inclination" else 1.0
     normalized_weights = weights / jnp.sum(weights)
-    return (
-        factor
-        * total_merger_rate
-        * jnp.sum(polarization_power * normalized_weights[None, :], axis=1)
-    )
+    return factor * total_merger_rate * jnp.dot(polarization_power, normalized_weights)
 
 
 def gaussian_bin_scale(effective_psd, frequencies, observation_time, *, df=None):
