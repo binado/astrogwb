@@ -1,27 +1,48 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any, Protocol
+
+import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 
-from astrogwb.gwb import gaussian_bin_scale, spectral_density
+from astrogwb.gwb import AverageMode, gaussian_bin_scale, spectral_density
+
+
+class LogImportanceWeightsFn(Protocol):
+    def __call__(
+        self,
+        params: Mapping[str, Any],
+        samples: Mapping[str, jax.Array],
+    ) -> jax.Array: ...
+
+
+class MergerRateFn(Protocol):
+    def __call__(
+        self,
+        params: Mapping[str, Any],
+        *,
+        observation_time: float,
+    ) -> float | jax.Array: ...
 
 
 def numpyro_model(
     *,
-    frequencies,
-    polarization_power,
-    samples,
-    observed_spectral_density,
-    effective_psd,
-    observation_time,
-    average_mode,
-    log_importance_weights_fn,
-    merger_rate_fn,
-    priors=None,
-    constants=None,
-    frequency_mask=None,
-):
+    frequencies: jax.Array,
+    polarization_power: jax.Array,
+    samples: Mapping[str, jax.Array],
+    observed_spectral_density: jax.Array,
+    effective_psd: jax.Array,
+    observation_time: float,
+    average_mode: AverageMode,
+    log_importance_weights_fn: LogImportanceWeightsFn,
+    merger_rate_fn: MergerRateFn,
+    priors: Mapping[str, dist.Distribution] | None = None,
+    constants: Mapping[str, Any] | None = None,
+    frequency_mask: jax.Array | None = None,
+) -> None:
     priors = priors or {}
     constants = constants or {}
 
