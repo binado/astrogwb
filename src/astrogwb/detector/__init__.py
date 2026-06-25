@@ -10,20 +10,19 @@ from .sensitivity import (
     evaluate_psd,
     load_sensitivity,
     load_sensitivity_map,
+    load_sensitivities_for_network,
 )
-from .setup import AnalysisContext, analysis_setup
 
 __all__ = [
-    "AnalysisContext",
     "DetectorSpec",
     "Sensitivity",
-    "analysis_setup",
     "effective_psd",
     "evaluate_psd",
     "load_detector",
     "load_sensitivity",
-    "resolve_detector",
     "load_sensitivity_map",
+    "load_sensitivities_for_network",
+    "resolve_detector",
     "overlap_reduction_function",
     "pairwise_overlap_reduction_function",
 ]

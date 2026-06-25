@@ -18,9 +18,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from gwmock_signal.network import Network
+
 from astrogwb.detector import (
-    analysis_setup,
+    effective_psd,
     evaluate_psd,
+    load_sensitivities_for_network,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
 )
@@ -55,12 +58,14 @@ def test_regression_effective_psd() -> None:
     fixture = _load("regression_effective_psd.npz")
     freqs = fixture["frequencies"]
 
-    np.testing.assert_allclose(
-        analysis_setup("H1L1").effective_psd(freqs), fixture["H1_L1"]
-    )
-    np.testing.assert_allclose(
-        analysis_setup("H1L1V1").effective_psd(freqs), fixture["H1_L1_V1"]
-    )
+    for network_name, key in (("H1L1", "H1_L1"), ("H1L1V1", "H1_L1_V1")):
+        network = Network.from_name(network_name)
+        actual = effective_psd(
+            freqs,
+            network.detector_names,
+            load_sensitivities_for_network(network),
+        )
+        np.testing.assert_allclose(actual, fixture[key])
 
 
 def test_regression_psd_evaluate() -> None:

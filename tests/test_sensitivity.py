@@ -7,12 +7,13 @@ import pytest
 from gwmock_signal.detector import CustomDetector
 
 from astrogwb.detector import (
-    AnalysisContext,
     Sensitivity,
-    analysis_setup,
+    effective_psd,
     evaluate_psd,
     load_sensitivity,
     load_sensitivity_map,
+    load_sensitivities_for_network,
+    overlap_reduction_function,
 )
 from astrogwb.detector.sensitivity import resolve_psd_path
 
@@ -97,31 +98,28 @@ def test_load_sensitivity_map_multiple() -> None:
     assert sensitivities["V1"].psd_reference == "avirgo_O5low_NEW_psd.txt"
 
 
-def test_analysis_setup_str_network() -> None:
-    ctx = analysis_setup("HLVK")
+def test_load_sensitivities_for_network_str_network() -> None:
+    sensitivities = load_sensitivities_for_network("HLVK")
 
-    assert isinstance(ctx, AnalysisContext)
-    assert ctx.detector_names == ("H1", "L1", "V1", "K1")
-    assert set(ctx.sensitivities) == {"H1", "L1", "V1", "K1"}
+    assert set(sensitivities) == {"H1", "L1", "V1", "K1"}
 
 
-def test_analysis_context_overlap_and_effective_psd(
-    frequencies: np.ndarray,
-) -> None:
-    ctx = analysis_setup("H1L1V1")
+def test_network_overlap_and_effective_psd(frequencies: np.ndarray) -> None:
+    from gwmock_signal.network import Network
 
-    orf = ctx.overlap(frequencies, "H1", "L1")
+    network = Network.from_name("H1L1V1")
+    sensitivities = load_sensitivities_for_network(network)
+
+    orf = overlap_reduction_function(frequencies, "H1", "L1")
     assert orf.shape == frequencies.shape
     assert np.all(np.isfinite(orf))
 
-    eff = ctx.effective_psd(frequencies)
+    eff = effective_psd(frequencies, network.detector_names, sensitivities)
     assert eff.shape == frequencies.shape
     assert np.any(np.isfinite(eff))
 
 
 def test_effective_psd_inf_for_single_detector(frequencies: np.ndarray) -> None:
-    from astrogwb.detector import effective_psd
-
     actual = effective_psd(frequencies, ["H1"], load_sensitivity_map(["H1"]))
 
     assert actual.shape == frequencies.shape
@@ -129,12 +127,15 @@ def test_effective_psd_inf_for_single_detector(frequencies: np.ndarray) -> None:
 
 
 @pytest.mark.integration
-def test_analysis_setup_et_preset_custom_detectors(frequencies: np.ndarray) -> None:
-    ctx = analysis_setup("ET-Triangle-Sardinia")
+def test_load_sensitivities_for_network_et_preset(frequencies: np.ndarray) -> None:
+    from gwmock_signal.network import Network
 
-    names = ctx.detector_names
+    network = Network.from_name("ET-Triangle-Sardinia")
+    sensitivities = load_sensitivities_for_network(network)
+
+    names = network.detector_names
     assert all(isinstance(d, CustomDetector) for d in names)
-    assert set(ctx.sensitivities) == {"ET1_SARD", "ET2_SARD", "ET3_SARD"}
+    assert set(sensitivities) == {"ET1_SARD", "ET2_SARD", "ET3_SARD"}
 
-    eff = ctx.effective_psd(frequencies)
+    eff = effective_psd(frequencies, network.detector_names, sensitivities)
     assert np.any(np.isfinite(eff))

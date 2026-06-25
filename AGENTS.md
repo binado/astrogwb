@@ -2,14 +2,14 @@
 
 ## Project Structure & Module Organization
 - `src/astrogwb/`: Python package code.
-  - `detector/`: ORF, effective PSD, `analysis_setup`, `geometry.toml`, `sensitivity.toml`, and bundled noise curves.
+  - `detector/`: ORF, effective PSD, `load_sensitivities_for_network`, `geometry.toml`, `sensitivity.toml`, and bundled noise curves.
   - `gwb.py`: JAX SGWB spectral-density contractions and Omega_GW conversions.
   - `waveform/`: polarization-power catalog generation and persistence.
   - `sampling/`: thin NumPyro model for caller-prepared arrays.
 - `tests/`: Pytest suite with unit and integration coverage; committed `tests/fixtures/*.npz` for regression locks.
 - `notes/`: LaTeX notes/manuscript support files (`notes/justfile` for PDF build helpers).
 
-gwmock-signal owns preset detector networks; gwmock-noise owns bundled PSD presets and interpolation. astrogwb owns the frequency-dependent ORF, out-of-band PSD policy, supplemental geometry/noise tables for str-named detectors, and SGWB analysis setup.
+gwmock-signal owns preset detector networks; gwmock-noise owns bundled PSD presets and interpolation. astrogwb owns the frequency-dependent ORF, out-of-band PSD policy, supplemental geometry/noise tables for str-named detectors, and SGWB detector utilities.
 
 ## Build, Test, and Development Commands
 - `uv sync --group dev`: create/update the local environment with dev dependencies.
