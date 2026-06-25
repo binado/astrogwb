@@ -1,7 +1,7 @@
 from ._types import DetectorSpec
+from .geometry import load_geometry, resolve_geometry
 from .overlap import (
     effective_psd,
-    load_geometry,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
 )
@@ -22,6 +22,7 @@ __all__ = [
     "evaluate_psd",
     "load_geometry",
     "load_sensitivity",
+    "resolve_geometry",
     "load_sensitivity_map",
     "overlap_reduction_function",
     "pairwise_overlap_reduction_function",

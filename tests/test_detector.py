@@ -13,6 +13,7 @@ from astrogwb.detector import (
     load_geometry,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
+    resolve_geometry,
 )
 from astrogwb.detector.overlap import (
     R_EARTH,
@@ -22,7 +23,6 @@ from astrogwb.detector.overlap import (
     _final_course,
     _get_orf,
     _initial_course,
-    _resolve_geometry,
 )
 
 
@@ -42,7 +42,7 @@ def load_fixture() -> Callable[[Path], dict[str, np.ndarray]]:
 
 
 def test_resolve_geometry_str_lookup() -> None:
-    det = _resolve_geometry("H1")
+    det = resolve_geometry("H1")
 
     assert isinstance(det, CustomDetector)
     assert det.name == "H1"
@@ -81,12 +81,12 @@ def test_resolve_geometry_passthrough_custom_detector() -> None:
         yarm_azimuth_rad=0.4,
     )
 
-    assert _resolve_geometry(custom) is custom
+    assert resolve_geometry(custom) is custom
 
 
 def test_resolve_geometry_unknown_name_raises() -> None:
     with pytest.raises(KeyError):
-        _resolve_geometry("NOPE")
+        resolve_geometry("NOPE")
 
 
 def test_chord_distance_antipodal() -> None:
@@ -142,7 +142,7 @@ def test_orf_accepts_gwmock_custom_detector(frequencies: np.ndarray) -> None:
 
 
 def test_orf_accepts_mixed_str_and_custom_detector(frequencies: np.ndarray) -> None:
-    custom_h1 = _resolve_geometry("H1")
+    custom_h1 = resolve_geometry("H1")
 
     from_str = overlap_reduction_function(frequencies, "H1", "L1")
     mixed = overlap_reduction_function(frequencies, custom_h1, "L1")
