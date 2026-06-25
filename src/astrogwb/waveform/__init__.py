@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
 
@@ -23,12 +24,12 @@ class _BatchPolarizationBackend(Protocol):
         *,
         sampling_frequency: float,
         minimum_frequency: float,
-        parameters: dict[str, ArrayLike],
+        parameters: Mapping[str, ArrayLike],
     ) -> Any: ...
 
 
 def generate_catalog_polarization_power(
-    samples: dict[str, ArrayLike],
+    samples: Mapping[str, ArrayLike],
     *,
     approximant: str,
     sampling_frequency: float,
