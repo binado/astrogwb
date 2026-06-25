@@ -1,9 +1,11 @@
+# Detector geometry (degrees, metres). Used to build the analytic
+# frequency-dependent overlap reduction function for str-named (LAL/CE/ET)
+# detectors. gwmock CustomDetector presets carry their own geometry and do
+# not consult this table. ET rows are cross-validated against gwmock presets
+# in the test suite. Angles follow the LAL convention used by CustomDetector.
+
 # LIGO Hanford
-[detectors.H1]
-default_noise_curve = "AplusDesign_psd.txt"
-minimum_frequency = 20
-maximum_frequency = 2048
-length = 4
+[H1]
 latitude = 46.45514666666667  # "46 + 27. / 60 + 18.528 / 3600"
 longitude = -119.4076571388889  # "-(119 + 24. / 60 + 27.5657 / 3600)"
 elevation = 142.554
@@ -11,14 +13,9 @@ xarm_azimuth = 125.9994
 yarm_azimuth = 215.9994
 xarm_tilt = -0.0006195
 yarm_tilt = 1.25e-05
-duty_factor = 0.7
 
 # LIGO Livingston
-[detectors.L1]
-default_noise_curve = "AplusDesign_psd.txt"
-minimum_frequency = 20
-maximum_frequency = 2048
-length = 4
+[L1]
 latitude = 30.562894333333332  # "30 + 33. / 60 + 46.4196 / 3600"
 longitude = -90.77424038888888  # "-(90 + 46. / 60 + 27.2654 / 3600)"
 elevation = -6.574
@@ -26,27 +23,17 @@ xarm_azimuth = 197.7165
 yarm_azimuth = 287.7165
 xarm_tilt = -0.0003121
 yarm_tilt = -0.0006107
-duty_factor = 0.7
 
 # Virgo
-[detectors.V1]
-default_noise_curve = "avirgo_O5low_NEW_psd.txt"
-minimum_frequency = 20
-maximum_frequency = 2048
-length = 3
+[V1]
 latitude = 43.631414472222225  # "43 + 37. / 60 + 53.0921 / 3600"
 longitude = 10.504496611111112  # "10 + 30. / 60 + 16.1878 / 3600"
 elevation = 51.884
 xarm_azimuth = 70.5674
 yarm_azimuth = 160.5674
-duty_factor = 0.7
 
 # KAGRA
-[detectors.K1]
-default_noise_curve = "kagra_128Mpc_psd.txt"
-minimum_frequency = 20
-maximum_frequency = 2048
-length = 3
+[K1]
 latitude = 36.411860338888886  # "36 + 24 / 60 + 42.69722 / 3600"
 longitude = 137.30595603055556  # "137 + 18 / 60 + 21.44171 / 3600"
 elevation = 414.181
@@ -54,107 +41,65 @@ xarm_azimuth = 29.603765108422728  # "90 - 60.39623489157727"
 yarm_azimuth = 119.60357629670688  # "90 + 29.60357629670688"
 xarm_tilt = 0.0031414
 yarm_tilt = -0.003627
-duty_factor = 0.7
 
 # ET triangular shape 1/3
-[detectors.E1]
-default_noise_curve = "ET-000A-18_ETD_hlf_psd.txt"
-length = 10
-minimum_frequency = 10
-maximum_frequency = 2048
+[E1]
 latitude = 43.63
 longitude = 10.5
 elevation = 52
 xarm_azimuth = 70.57
 yarm_azimuth = 130.57
-duty_factor = 0.85
 
 # ET triangular shape 2/3
-[detectors.E2]
-default_noise_curve = "ET-000A-18_ETD_hlf_psd.txt"
-length = 10
-minimum_frequency = 10
-maximum_frequency = 2048
+[E2]
 latitude = 43.72
 longitude = 10.55
 elevation = 60
 xarm_azimuth = 190.57
 yarm_azimuth = 250.57
-duty_factor = 0.85
 
 # ET triangular shape 3/3
-[detectors.E3]
-default_noise_curve = "ET-000A-18_ETD_hlf_psd.txt"
-length = 10
-minimum_frequency = 10
-maximum_frequency = 2048
+[E3]
 latitude = 43.7
 longitude = 10.42
 elevation = 60
 xarm_azimuth = 310.57
 yarm_azimuth = 10.57
-duty_factor = 0.85
 
 # ET L-shaped (aligned) Sardinia
-[detectors.S1]
-default_noise_curve = "ET-000A-18_ETD_hlf_psd.txt"
-template = "ET"
-length = 15
-minimum_frequency = 10
-maximum_frequency = 2048
+[S1]
 latitude = 40.52
 longitude = 9.417
 elevation = 300
 xarm_azimuth = 349.4
 yarm_azimuth = 79.4
-duty_factor = 0.85
 
 # ET L-shaped (mis-aligned) Sardinia
-[detectors.S2]
-default_noise_curve = "ET-000A-18_ETD_hlf_psd.txt"
-length = 15
-minimum_frequency = 10
-maximum_frequency = 2048
+[S2]
 latitude = 40.52
 longitude = 9.417
 elevation = 300
 xarm_azimuth = 21.75
 yarm_azimuth = 111.75
-duty_factor = 0.85
 
 # ET L-shaped (aligned) Netherlands
-[detectors.R1]
-default_noise_curve = "ET-000A-18_ETD_hlf_psd.txt"
-length = 15
-minimum_frequency = 10
-maximum_frequency = 2048
+[R1]
 latitude = 50.72
 longitude = 5.921
 elevation = 300
 xarm_azimuth = 261.86
 yarm_azimuth = 351.86
-duty_factor = 0.85
 
 # ET L-shaped (mis-aligned) Netherlands
-[detectors.R2]
-default_noise_curve = "ET-000A-18_ETD_hlf_psd.txt"
-length = 15
-minimum_frequency = 10
-maximum_frequency = 2048
+[R2]
 latitude = 50.72
 longitude = 5.921
 elevation = 0
 xarm_azimuth = 258.67
 yarm_azimuth = 348.67
-duty_factor = 0.85
 
-# Cosmic explorer in Hanford
-[detectors.C1]
-default_noise_curve = "cosmic_explorer_strain_psd.txt"
-template = "CE"
-minimum_frequency = 10
-maximum_frequency = 2048
-length = 40
+# Cosmic Explorer at Hanford
+[C1]
 latitude = 46.45514666666667  # "46 + 27. / 60 + 18.528 / 3600"
 longitude = -119.4076571388889  # "-(119 + 24. / 60 + 27.5657 / 3600)"
 elevation = 142.554
@@ -162,14 +107,9 @@ xarm_azimuth = 125.9994
 yarm_azimuth = 215.994
 xarm_tilt = -0.0006195
 yarm_tilt = 1.25e-05
-duty_factor = 0.85
 
-# Cosmic explorer in Livingston
-[detectors.C2]
-default_noise_curve = "cosmic_explorer_strain_psd.txt"
-minimum_frequency = 10
-maximum_frequency = 2048
-length = 40
+# Cosmic Explorer at Livingston
+[C2]
 latitude = 30.562894333333332  # "30 + 33. / 60 + 46.4196 / 3600"
 longitude = -90.77424038888888  # "-(90 + 46. / 60 + 27.2654 / 3600)"
 elevation = -6.574
@@ -177,4 +117,3 @@ xarm_azimuth = 197.7165
 yarm_azimuth = 287.7165
 xarm_tilt = -0.0003121
 yarm_tilt = -0.0006107
-duty_factor = 0.85

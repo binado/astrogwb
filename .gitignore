@@ -1,5 +1,10 @@
 data
 
+*.md
+!README.md
+!AGENTS.md
+!CLAUDE.md
+
 ## Core latex/pdflatex auxiliary files:
 *.aux
 *.lof

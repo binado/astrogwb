@@ -13,6 +13,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
       - run: uv run --group dev ruff check
       - run: uv run --group dev ruff format --check
 
@@ -22,19 +24,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
       - run: uv run --group dev ty check
 
   test:
-    name: Test (Python ${{ matrix.python-version }})
+    name: Test (Python 3.12)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
       - name: Verify ORF reference fixtures are present
         run: |
           test -f tests/fixtures/gwfast_orf_reference.npz

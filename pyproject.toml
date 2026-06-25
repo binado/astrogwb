@@ -1,5 +1,5 @@
 [project]
-name = "asgwb"
+name = "astrogwb"
 version = "0.1.0"
 description = "Constraining cosmology with the SGWB from astrophysical sources"
 readme = "README.md"
@@ -7,14 +7,13 @@ authors = [
     { name = "binado", email = "bernardopveronese@gmail.com" }
 ]
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "bilby>=2.7.1",
-    "h5py>=3.13.0",
-    "lalsuite>=7.26.4",
+    "gwmock-noise>=0.5.3",
+    "gwmock-signal>=0.9.2",
+    "jax>=0.10.2",
     "numpy>=2.4.2",
-    "pandas>=3.0.0",
-    "pydantic-settings>=2.10.1",
+    "numpyro>=0.21.0",
 ]
 
 [build-system]
