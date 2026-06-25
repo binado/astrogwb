@@ -33,17 +33,18 @@ OutOfBand = Literal["inf", "zero"]
 
 @dataclass(frozen=True, slots=True)
 class Sensitivity:
-    """An observing scenario for one detector: a PSD plus its usable band.
+    """Noise curve reference for one detector.
 
     ``psd_reference`` may be a gwmock-noise bundled preset name (e.g.
     ``"ET_D_psd"``), a file in astrogwb's ``noise_curves/`` directory, an
     absolute path, or an HTTP(S) URL.
+
+    ``sensitivity.toml`` may also list ``minimum_frequency``,
+    ``maximum_frequency``, and ``duty_factor`` as reference metadata for
+    analysis setup; those fields are not loaded into this object.
     """
 
     psd_reference: str | Path
-    minimum_frequency: float
-    maximum_frequency: float
-    duty_factor: float = 1.0
 
     def evaluate(
         self, frequencies: ArrayLike, *, out_of_band: OutOfBand = "inf"
@@ -126,9 +127,4 @@ def _load_sensitivity_table(path: str | Path | None) -> Mapping[str, dict]:
 
 
 def _sensitivity_from_dict(data: Mapping) -> Sensitivity:
-    return Sensitivity(
-        psd_reference=data["psd_reference"],
-        minimum_frequency=float(data["minimum_frequency"]),
-        maximum_frequency=float(data["maximum_frequency"]),
-        duty_factor=float(data.get("duty_factor", 1.0)),
-    )
+    return Sensitivity(psd_reference=data["psd_reference"])

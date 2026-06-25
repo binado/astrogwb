@@ -78,24 +78,16 @@ def test_evaluate_psd_bundled_preset_runs() -> None:
 
 
 def test_sensitivity_evaluate_delegates() -> None:
-    sensitivity = Sensitivity(
-        psd_reference="AplusDesign_psd.txt",
-        minimum_frequency=20.0,
-        maximum_frequency=2048.0,
-    )
+    sensitivity = Sensitivity(psd_reference="AplusDesign_psd.txt")
 
     direct = evaluate_psd("AplusDesign_psd.txt", np.array([100.0]))
     np.testing.assert_allclose(sensitivity.evaluate(np.array([100.0])), direct)
-    assert sensitivity.duty_factor == 1.0
 
 
 def test_load_sensitivity_single() -> None:
     sensitivity = load_sensitivity("H1")
 
     assert sensitivity.psd_reference == "AplusDesign_psd.txt"
-    assert sensitivity.minimum_frequency == 20.0
-    assert sensitivity.maximum_frequency == 2048.0
-    assert sensitivity.duty_factor == 0.7
 
 
 def test_load_sensitivity_map_multiple() -> None:
