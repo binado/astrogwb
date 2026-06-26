@@ -53,7 +53,9 @@ def test_gaussian_bin_scale_scales_with_observation_time_in_years() -> None:
     one_year = gaussian_bin_scale(eff, freqs, 1.0)
     two_years = gaussian_bin_scale(eff, freqs, 2.0)
 
-    np.testing.assert_allclose(np.asarray(two_years), np.asarray(one_year / jnp.sqrt(2.0)))
+    np.testing.assert_allclose(
+        np.asarray(two_years), np.asarray(one_year / jnp.sqrt(2.0))
+    )
 
 
 def test_frequency_mask_bounds() -> None:
