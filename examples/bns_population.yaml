@@ -1,0 +1,108 @@
+# BNS population for the importance-sampling waveform catalog.
+#
+# Consumed by `gwmock-pop simulate` (see README "Population generation"). Each
+# entry is either a `sampler` (the engine injects the PRNG `key` and `n_samples`)
+# or a `transform` (derives values from other parameters, referenced as `@name`).
+#
+# Parameter names are gwmock-pop *canonical* names, matching exactly what the
+# downstream waveform backend (`gwmock_signal.waveform.RippleBackend`) requires:
+# `detector_frame_mass_1/2`, `luminosity_distance`, `spin_1z/2z`, `lambda_1/2`,
+# `inclination`, `coa_phase`. Omitted optional parameters (e.g. the in-plane
+# spin components) default to zero in the backend.
+parameters:
+  # 1) Madau-Dickinson redshift distribution.
+  #    Cosmology (flat-LambdaCDM) matches the MCMC fiducial in
+  #    notebooks/analysis_numpyro.py: H0 = 67.66 km/s/Mpc, Omega_m = 0.3096.
+  #    The values are anchored here and reused by the distance transform below
+  #    (via YAML aliases) so the two stages cannot drift apart.
+  redshift:
+    sampler:
+      function: madau_dickinson_redshift
+      arguments:
+        z_min: 0.0
+        z_max: 20.0
+        # Rate-evolution shape parameters, stated explicitly at the gwmock-pop
+        # defaults (the MCMC fiducial in analysis_numpyro.py is kept in sync).
+        gamma: 2.7
+        kappa: 2.9
+        z_peak: 1.9
+        hubble_constant: &hubble_constant 67.66
+        omega_m: &omega_m 0.3096
+
+  # 2) Redshift -> luminosity distance (flat-LambdaCDM lookup, Mpc). Same
+  #    cosmology as the redshift sampler (aliased from the anchors above).
+  luminosity_distance:
+    transform:
+      function: redshift_to_luminosity_distance
+      arguments:
+        redshift: "@redshift"
+        hubble_constant: *hubble_constant
+        omega_m: *omega_m
+
+  # 3) Uniform component masses, in the *detector frame* (solar masses) -- this
+  #    is the gwmock-pop convention and the exact key the waveform backend reads.
+  detector_frame_mass_1:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: 1.0
+        maximum: 2.5
+  detector_frame_mass_2:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: 1.0
+        maximum: 2.5
+
+  # 4) Aligned spins: only the z-components are sampled; the in-plane components
+  #    are left unset and default to zero, which is what "aligned" means (an
+  #    aligned-spin approximant rejects nonzero in-plane spins).
+  spin_1z:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: -0.05
+        maximum: 0.05
+  spin_2z:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: -0.05
+        maximum: 0.05
+
+  # 5) Uniform tidal deformabilities (dimensionless; require an NRTidal/TaylorF2
+  #    approximant downstream, and must be >= 0).
+  lambda_1:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: 0.0
+        maximum: 5000.0
+  lambda_2:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: 0.0
+        maximum: 5000.0
+
+  # 6) Inclination fixed at 0.
+  inclination:
+    transform:
+      function: constant_like
+      arguments:
+        reference: "@redshift"
+        value: 0.0
+
+  # 7) Coalescence phase and time fixed at 0.
+  coa_phase:
+    transform:
+      function: constant_like
+      arguments:
+        reference: "@redshift"
+        value: 0.0
+  coa_time:
+    transform:
+      function: constant_like
+      arguments:
+        reference: "@redshift"
+        value: 0.0

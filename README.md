@@ -99,6 +99,38 @@ maps frequencies outside the curve grid to `inf`, matching the old
 inverse-variance contraction; `out_of_band="zero"` returns gwmock-noise's
 raw clipped-to-zero interpolation.
 
+## Population generation
+
+The importance-sampling waveform catalog starts from a population of intrinsic
+parameters. We delegate the sampling to [`gwmock-pop`][gwmock-pop]: the BNS
+population is defined declaratively in [`examples/bns_population.yaml`](examples/bns_population.yaml)
+and drawn with the `gwmock-pop simulate` CLI.
+
+```bash
+uv run gwmock-pop simulate \
+  --config examples/bns_population.yaml \
+  --n 1000 \
+  --output out/bns_population.h5 \
+  --seed 42
+```
+
+`--output` accepts `.csv`, `.h5`, or `.hdf5`; use `.h5` for the structured
+output the downstream catalog step consumes. The result is a table of `n`
+intrinsic samples — one column per parameter, using gwmock-pop *canonical*
+names (`detector_frame_mass_1/2`, `luminosity_distance`, `spin_1z/2z`,
+`lambda_1/2`, `inclination`, `coa_phase`, `coa_time`) — which feeds directly
+into `generate_catalog_polarization_power` (`src/astrogwb/waveform/__init__.py`)
+as its `samples` mapping.
+
+The committed config encodes a BNS population with a Madau–Dickinson redshift
+distribution (converted to luminosity distance), uniform detector-frame masses,
+aligned spins (in-plane components zero), uniform tidal deformabilities, and
+inclination/coalescence phase/time fixed at zero. Edit the `arguments` blocks to
+retune ranges. The aligned-spin + tidal parameters suit a non-precessing NRTidal
+approximant downstream.
+
+[gwmock-pop]: https://leuven-gravity-institute.github.io/gwmock-pop/
+
 ## Requirements
 
 - Python 3.12+
