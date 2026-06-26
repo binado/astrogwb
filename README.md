@@ -9,7 +9,7 @@ array contractions and inference.
 - SGWB spectral-density contractions and Omega_GW conversions.
 - Frequency-dependent ORF and effective PSD utilities.
 - Minimal waveform polarization-power catalog persistence.
-- A thin NumPyro model for caller-prepared arrays.
+- A thin NumPyro model for caller-prepared arrays, driven by a single `merger_rate_and_log_weights_fn(params, samples) -> (total_merger_rate, log_weights)` callback.
 
 ## Detector analysis
 
@@ -136,6 +136,53 @@ YAML graph itself.
 
 [gwmock-pop]: https://leuven-gravity-institute.github.io/gwmock-pop/
 
+## MCMC inference notebook
+
+`notebooks/mcmc.py` (a [py:percent](https://jupytext.readthedocs.io/en/latest/formats-percent.html)
+script, runnable as a notebook) is the NumPyro port of
+`ASGWB.jl/notebooks/mcmc.jl`. It performs Bayesian inference on the
+cosmological and astrophysical parameters that drive the CBC stochastic
+background via **importance-weighted NUTS**: a fixed proposal catalog supplies
+the per-source polarization powers, and NUTS reweights them analytically — no
+waveform is regenerated during sampling.
+
+**Prerequisites**
+
+- A `.npz` polarization-power catalog written by
+  `astrogwb.waveform.save_polarization_power_catalog`. Set `CATALOG_PATH` at the
+  top of the notebook to point at it. Each source must carry `redshift` and
+  `luminosity_distance`, and the polarization-power columns must already include
+  the `1/d_{L,\mathrm{fid}}^2` scaling so the importance-weight math is exact.
+- `gwmock-pop` provides the JAX-traceable Madau–Dickinson rate and flat-ΛCDM
+  cosmology used by the reference `make_merger_rate_and_log_weights_fn` factory
+  defined in the notebook.
+
+**Conventions**
+
+`observation_time` is in **years**. It cancels in the relative spectrum but sets
+the likelihood noise scale (see `gaussian_bin_scale` in `astrogwb.gwb`).
+
+**Running**
+
+```bash
+uv sync --group dev                                   # bundles Jupyter, arviz, corner, matplotlib
+uv run jupyter nbconvert --to notebook --execute notebooks/mcmc.py
+# or open in JupyterLab:
+uv run jupyter lab notebooks/mcmc.py
+```
+
+End-to-end execution is deferred until a real catalog exists: the committed
+`CATALOG_PATH = "catalog.npz"` is a placeholder, so the data-dependent cells are
+correct by construction but only run once a catalog is produced.
+
+**Outputs**
+
+Each run writes an ArviZ `InferenceData` to
+`chains/chains-<params>-det=<det>-seed<n>-<ts>.nc` alongside a sibling `.json`
+run config (catalog path, detectors, seed, fiducials, sampler settings).
+Diagnostics surface the model's `importance_relative_ess` (the key proposal
+health check — should stay close to 1) and `total_merger_rate`.
+
 ## Requirements
 
 - Python 3.12+
@@ -143,7 +190,8 @@ YAML graph itself.
 
 ## Development
 
-Install dependencies:
+Install dependencies (the dev group also bundles Jupyter, arviz, corner, and
+matplotlib so the MCMC notebook in `notebooks/` runs out of the box):
 
 ```bash
 uv sync --group dev
