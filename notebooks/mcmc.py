@@ -71,13 +71,15 @@ from gwmock_pop.distributions.madau_dickinson import (
     madau_dickinson_rate,
 )
 from gwmock_pop.cosmology.flat_lambda_cdm import (
+    SPEED_OF_LIGHT,
+    build_distance_lookup,
+    compute_normalized_hubble_parameter,
     compute_luminosity_distance,
     compute_differential_comoving_volume,
 )
 
 print("jax x64:", jax.config.jax_enable_x64)
 
-SPEED_OF_LIGHT_KM_S = 299_792.458
 SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
 
 
@@ -88,6 +90,7 @@ class GridImportanceContext:
     proposal_log_pdf: jax.Array
     fiducial_luminosity_distance: jax.Array
     local_merger_rate: float
+
 
 # %% [markdown]
 # ## Configuration
@@ -117,7 +120,7 @@ detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity
 # --- RNG / run settings -----------------------------------------------------
 seed = 42
 local_merger_rate = 161.0  # [Gpc^-3 yr^-1], matches COBA simulations
-observation_time = 1.0     # [yr]; cancels in S_h, kept for the likelihood scale
+observation_time = 1.0  # [yr]; cancels in S_h, kept for the likelihood scale
 
 # --- Redshift integration range ---------------------------------------------
 z_min = 0.0
@@ -133,8 +136,8 @@ f_max = 100.0
 fiducials = {
     "H0": 67.66,
     "Omega_m": 0.3096,
-    "xi_0": 1.0,   # GR modified-propagation amplitude
-    "xi_n": 0.0,   # GR modified-propagation slope
+    "xi_0": 1.0,  # GR modified-propagation amplitude
+    "xi_n": 0.0,  # GR modified-propagation slope
     "gamma": 2.7,
     "kappa": 3.0,  # gwmock-pop offset convention (Julia κ)
     "z_peak": 2.0,
@@ -258,31 +261,24 @@ grid_importance_context = GridImportanceContext(
 # \Rightarrow \Xi \equiv 1$). At $\theta = $ fiducial all three terms vanish, so weights
 # $\equiv 1$. `log_p_proposal` and `dL_fid` are the constants precomputed above.
 
+
 # %%
-def cumulative_trapezoid(y: jax.Array, x: jax.Array) -> jax.Array:
-    dx = jnp.diff(x)
-    increments = 0.5 * (y[1:] + y[:-1]) * dx
-    return jnp.concatenate([jnp.zeros(1, dtype=y.dtype), jnp.cumsum(increments)])
-
-
 def flat_lcdm_grid(
     params: Mapping[str, Any],
     ctx: GridImportanceContext,
 ) -> tuple[jax.Array, jax.Array]:
-    z = ctx.z_grid
     h0 = params["H0"]
     omega_m = params["Omega_m"]
 
-    e_z = jnp.sqrt(omega_m * (1.0 + z) ** 3 + (1.0 - omega_m))
-    comoving_integral = cumulative_trapezoid(1.0 / e_z, z)
-    comoving_distance = SPEED_OF_LIGHT_KM_S / h0 * comoving_integral
-    luminosity_distance = (1.0 + z) * comoving_distance
+    z, comoving_distance, luminosity_distance = build_distance_lookup(
+        hubble_constant=h0,
+        omega_m=omega_m,
+        max_redshift=float(ctx.z_grid[-1]),
+        n_grid=ctx.z_grid.shape[0],
+    )
+    e_z = compute_normalized_hubble_parameter(redshift=z, omega_m=omega_m)
     differential_comoving_volume = (
-        4.0
-        * jnp.pi
-        * comoving_distance**2
-        * SPEED_OF_LIGHT_KM_S
-        / (h0 * e_z)
+        4.0 * jnp.pi * comoving_distance**2 / (h0 * e_z) * SPEED_OF_LIGHT / 1000
     )
     return luminosity_distance, differential_comoving_volume
 
@@ -303,9 +299,7 @@ def reference_merger_rate_and_log_weights_fn(params, samples, *, observation_tim
             n_grid=n_grid,
         )
     )
-    dL_theta = compute_luminosity_distance(
-        z, params["H0"], params["Omega_m"], n_grid
-    )
+    dL_theta = compute_luminosity_distance(z, params["H0"], params["Omega_m"], n_grid)
     xi = params["xi_0"] + (1.0 - params["xi_0"]) / (1.0 + z) ** params["xi_n"]
     log_weights = (
         (log_p_target - log_p_proposal)
@@ -318,9 +312,7 @@ def reference_merger_rate_and_log_weights_fn(params, samples, *, observation_tim
     rate_shape = madau_dickinson_rate(
         z_grid, params["gamma"], params["kappa"], params["z_peak"]
     )  # source-frame ψ(z), ψ(0)=1
-    dVc = compute_differential_comoving_volume(
-        z_grid, params["H0"], params["Omega_m"]
-    )
+    dVc = compute_differential_comoving_volume(z_grid, params["H0"], params["Omega_m"])
     integrand = rate_shape / (1.0 + z_grid) * dVc
     integral_Mpc3 = jnp.trapezoid(integrand, z_grid)
     total_merger_rate = 1e-9 * local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
@@ -368,9 +360,7 @@ def merger_rate_and_log_weights_fn(params, samples, *, observation_time):
         - 2.0 * jnp.log(xi)
     )
 
-    total_merger_rate = (
-        1e-9 * ctx.local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
-    )
+    total_merger_rate = 1e-9 * ctx.local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
     return total_merger_rate, log_weights
 
 
