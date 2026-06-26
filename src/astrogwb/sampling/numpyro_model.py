@@ -16,8 +16,6 @@ class MergerRateAndLogWeightsFn(Protocol):
         self,
         params: Mapping[str, Any],
         samples: Mapping[str, jax.Array],
-        *,
-        observation_time: float,
     ) -> tuple[float | jax.Array, jax.Array]: ...
 
 
@@ -40,8 +38,7 @@ def numpyro_model(
     Parameters
     ----------
     observation_time:
-        Observation time in years, passed through to
-        ``merger_rate_and_log_weights_fn`` and ``gaussian_bin_scale``.
+        Observation time in years, used only in the likelihood noise scale.
     """
     priors = priors or {}
     constants = constants or {}
@@ -54,7 +51,6 @@ def numpyro_model(
     total_merger_rate, log_weights = merger_rate_and_log_weights_fn(
         params,
         samples,
-        observation_time=observation_time,
     )
     weights = jnp.exp(log_weights)
     model_spectral_density = spectral_density(

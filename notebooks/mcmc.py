@@ -282,7 +282,7 @@ def flat_lcdm_grid(
     return luminosity_distance, differential_comoving_volume
 
 
-def merger_rate_and_log_weights_fn(params, samples, *, observation_time):
+def merger_rate_and_log_weights_fn(params, samples):
     ctx = grid_importance_context
     z = ctx.z_samples
     z_grid = ctx.z_grid
@@ -354,7 +354,6 @@ ones_weights = jnp.ones((n_samples,))
 rate0, _ = merger_rate_and_log_weights_fn(
     fiducials,
     samples,
-    observation_time=observation_time,
 )
 S_h0 = spectral_density(
     polarization_power, ones_weights, rate0, average_mode="analytic_inclination"
