@@ -117,17 +117,22 @@ uv run gwmock-pop simulate \
 `--output` accepts `.csv`, `.h5`, or `.hdf5`; use `.h5` for the structured
 output the downstream catalog step consumes. The result is a table of `n`
 intrinsic samples — one column per parameter, using gwmock-pop *canonical*
-names (`detector_frame_mass_1/2`, `luminosity_distance`, `spin_1z/2z`,
-`lambda_1/2`, `inclination`, `coa_phase`, `coa_time`) — which feeds directly
-into `generate_catalog_polarization_power` (`src/astrogwb/waveform/__init__.py`)
-as its `samples` mapping.
+names (`source_frame_mass_1/2`, `luminosity_distance`, `spin_1z/2z`,
+`lambda_1/2`, `inclination`, `coa_phase`, `coa_time`).
 
 The committed config encodes a BNS population with a Madau–Dickinson redshift
-distribution (converted to luminosity distance), uniform detector-frame masses,
-aligned spins (in-plane components zero), uniform tidal deformabilities, and
-inclination/coalescence phase/time fixed at zero. Edit the `arguments` blocks to
-retune ranges. The aligned-spin + tidal parameters suit a non-precessing NRTidal
-approximant downstream.
+distribution (converted to luminosity distance), uniform source-frame component
+masses ordered so `mass_1 >= mass_2`, aligned spins (in-plane components zero),
+uniform tidal deformabilities, and inclination/coalescence phase/time fixed at
+zero. Edit the `arguments` blocks to retune ranges. The aligned-spin + tidal
+parameters suit a non-precessing NRTidal approximant downstream.
+
+Masses are emitted in the **source frame**. The waveform backend
+(`generate_catalog_polarization_power`, `src/astrogwb/waveform/__init__.py`)
+consumes *detector-frame* masses, so the catalog-build step applies the
+redshift conversion `detector_frame_mass = source_frame_mass * (1 + z)` when it
+loads this population — gwmock-pop cannot express the `(1 + z)` factor in the
+YAML graph itself.
 
 [gwmock-pop]: https://leuven-gravity-institute.github.io/gwmock-pop/
 

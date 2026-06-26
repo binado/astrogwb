@@ -4,11 +4,13 @@
 # entry is either a `sampler` (the engine injects the PRNG `key` and `n_samples`)
 # or a `transform` (derives values from other parameters, referenced as `@name`).
 #
-# Parameter names are gwmock-pop *canonical* names, matching exactly what the
-# downstream waveform backend (`gwmock_signal.waveform.RippleBackend`) requires:
-# `detector_frame_mass_1/2`, `luminosity_distance`, `spin_1z/2z`, `lambda_1/2`,
-# `inclination`, `coa_phase`. Omitted optional parameters (e.g. the in-plane
-# spin components) default to zero in the backend.
+# Parameter names are gwmock-pop *canonical* names. Most map directly onto what
+# the downstream waveform backend (`gwmock_signal.waveform.RippleBackend`)
+# consumes: `luminosity_distance`, `spin_1z/2z`, `lambda_1/2`, `inclination`,
+# `coa_phase`. Omitted optional parameters (e.g. the in-plane spin components)
+# default to zero in the backend. The exception is the masses: this file emits
+# *source-frame* `source_frame_mass_1/2`, which the catalog-build step converts
+# to the backend's `detector_frame_mass_1/2` via `* (1 + z)` (see below).
 parameters:
   # 1) Madau-Dickinson redshift distribution.
   #    Cosmology (flat-LambdaCDM) matches the MCMC fiducial in
@@ -39,20 +41,38 @@ parameters:
         hubble_constant: *hubble_constant
         omega_m: *omega_m
 
-  # 3) Uniform component masses, in the *detector frame* (solar masses) -- this
-  #    is the gwmock-pop convention and the exact key the waveform backend reads.
-  detector_frame_mass_1:
+  # 3) Uniform component masses, in the *source frame* (solar masses), ordered
+  #    so mass_1 >= mass_2. `joint_uniform_mass_pair` returns a (2, n) stack
+  #    (row 0 = larger, row 1 = smaller); `take_row` splits it into the two
+  #    columns. The pair is marked `intermediate` so only the split columns are
+  #    written to the output file.
+  #
+  #    NOTE: the waveform backend consumes *detector-frame* masses. The
+  #    source -> detector conversion (detector = source * (1 + z)) is applied at
+  #    catalog-build time, in the step that loads this population and calls
+  #    `generate_catalog_polarization_power`.
+  mass_pair:
+    intermediate: true
     sampler:
-      function: uniform
+      function: joint_uniform_mass_pair
       arguments:
-        minimum: 1.0
-        maximum: 2.5
-  detector_frame_mass_2:
-    sampler:
-      function: uniform
+        m1_min: 1.0
+        m1_max: 2.5
+        m2_min: 1.0
+        m2_max: 2.5
+        ordered: true
+  source_frame_mass_1:
+    transform:
+      function: take_row
       arguments:
-        minimum: 1.0
-        maximum: 2.5
+        matrix: "@mass_pair"
+        index: 0
+  source_frame_mass_2:
+    transform:
+      function: take_row
+      arguments:
+        matrix: "@mass_pair"
+        index: 1
 
   # 4) Aligned spins: only the z-components are sampled; the in-plane components
   #    are left unset and default to zero, which is what "aligned" means (an
