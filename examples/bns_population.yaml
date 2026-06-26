@@ -22,7 +22,7 @@ parameters:
       function: madau_dickinson_redshift
       arguments:
         z_min: 0.0
-        z_max: 20.0
+        z_max: &z_max 20.0
         # Rate-evolution shape parameters, stated explicitly at the gwmock-pop
         # defaults (the MCMC fiducial in analysis_numpyro.py is kept in sync).
         gamma: 2.7
@@ -33,6 +33,9 @@ parameters:
 
   # 2) Redshift -> luminosity distance (flat-LambdaCDM lookup, Mpc). Same
   #    cosmology as the redshift sampler (aliased from the anchors above).
+  #    `max_redshift` is aliased to `z_max` so the lookup grid covers the full
+  #    sampled range; otherwise gwmock-pop's default (max_redshift=10.0) would
+  #    silently clamp the distance of any z > 10 event to d_L(z=10).
   luminosity_distance:
     transform:
       function: redshift_to_luminosity_distance
@@ -40,6 +43,7 @@ parameters:
         redshift: "@redshift"
         hubble_constant: *hubble_constant
         omega_m: *omega_m
+        max_redshift: *z_max
 
   # 3) Uniform component masses, in the *source frame* (solar masses), ordered
   #    so mass_1 >= mass_2. `joint_uniform_mass_pair` returns a (2, n) stack
