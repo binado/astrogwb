@@ -43,6 +43,14 @@ def numpyro_model(
     constants: Mapping[str, Any] | None = None,
     frequency_mask: jax.Array | None = None,
 ) -> None:
+    """NumPyro model for importance-weighted SGWB inference.
+
+    Parameters
+    ----------
+    observation_time:
+        Observation time in years, passed through to ``merger_rate_fn`` and
+        ``gaussian_bin_scale``.
+    """
     priors = priors or {}
     constants = constants or {}
 
