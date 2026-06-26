@@ -35,10 +35,58 @@ def numpyro_model(
 ) -> None:
     """NumPyro model for importance-weighted SGWB inference.
 
+    Samples hyperparameters from ``priors``, evaluates a fixed proposal catalog
+    through ``merger_rate_and_log_weights_fn``, and compares the predicted
+    stochastic gravitational-wave background (SGWB) spectral density to
+    ``observed_spectral_density`` under a per-frequency Gaussian likelihood.
+
+    The predicted spectrum is built from precomputed per-source polarization
+    powers and importance weights ``exp(log_weights)``; waveform generation is
+    not part of this model. ``constants`` are merged with sampled parameters
+    before the callback is invoked.
+
+    Registered sites:
+
+    - one ``numpyro.sample`` per entry in ``priors``;
+    - ``total_merger_rate`` and ``importance_relative_ess`` as deterministics;
+    - ``spectral_density_obs`` as the observed Gaussian likelihood.
+
     Parameters
     ----------
+    frequencies:
+        Frequency grid in Hz, shape ``(F,)``.
+    polarization_power:
+        Per-source polarization power at each frequency, shape ``(F, N)`` where
+        ``N`` is the catalog size.
+    samples:
+        Catalog arrays passed to ``merger_rate_and_log_weights_fn``. Each value
+        should have leading dimension ``N``.
+    observed_spectral_density:
+        Observed SGWB spectral density at ``frequencies``, shape ``(F,)`` (or
+        the masked subset when ``frequency_mask`` is set).
+    effective_psd:
+        Network effective power spectral density at ``frequencies``, shape
+        ``(F,)``.
     observation_time:
-        Observation time in years, used only in the likelihood noise scale.
+        Observation time in years, used only in the likelihood noise scale via
+        :func:`astrogwb.gwb.gaussian_bin_scale`.
+    average_mode:
+        How inclination is averaged when contracting polarization power:
+        ``"analytic_inclination"`` applies the usual 0.4 factor;
+        ``"catalog_inclination"`` uses the catalog weights directly.
+    merger_rate_and_log_weights_fn:
+        Callable ``(params, samples) -> (total_merger_rate, log_weights)``.
+        ``params`` merges ``constants`` with sampled values; ``log_weights``
+        has shape ``(N,)``. ``total_merger_rate`` is in mergers per second.
+    priors:
+        Mapping from parameter name to NumPyro prior distribution. Keys become
+        sampled sites; defaults to an empty mapping (likelihood-only model).
+    constants:
+        Fixed parameter values merged into ``params`` for the callback. Defaults
+        to an empty mapping.
+    frequency_mask:
+        Optional boolean mask of shape ``(F,)``. When provided, only masked
+        frequency bins enter the likelihood.
     """
     priors = priors or {}
     constants = constants or {}
