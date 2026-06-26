@@ -25,6 +25,7 @@ build-backend = "uv_build"
 dev = [
     "arviz>=1.2.0",
     "corner>=2.2.3",
+    "h5netcdf>=1.8.1",
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
     "matplotlib>=3.11.0",
