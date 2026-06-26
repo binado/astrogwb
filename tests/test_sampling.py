@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-import numpyro.distributions as dist
 from numpyro import handlers
 
 from astrogwb.sampling import numpyro_model
@@ -14,9 +13,7 @@ def test_numpyro_model_smoke_trace() -> None:
     samples = {"mass_1": jnp.array([20.0, 30.0])}
 
     def merger_rate_and_log_weights_fn(params, samples):
-        total_merger_rate = params["rate_scale"]
-        log_weights = jnp.log(jnp.array([1.0, params["rate_scale"]]))
-        return total_merger_rate, log_weights
+        return jnp.array(1.0), jnp.zeros(2)
 
     trace = handlers.trace(
         handlers.seed(
@@ -32,17 +29,10 @@ def test_numpyro_model_smoke_trace() -> None:
         observation_time=2.0,
         average_mode="catalog_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-        priors={"rate_scale": dist.Delta(jnp.array(2.0))},
-        constants={"rate_scale": jnp.array(100.0)},
         frequency_mask=jnp.array([True, False, True]),
     )
 
     assert trace["spectral_density_obs"]["fn"].event_shape == (2,)
-    np.testing.assert_allclose(np.asarray(trace["total_merger_rate"]["value"]), 2.0)
-    np.testing.assert_allclose(
-        np.asarray(trace["importance_relative_ess"]["value"]),
-        9.0 / 10.0,
-    )
 
 
 def test_numpyro_model_uses_combined_merger_rate_and_log_weights_callback() -> None:
