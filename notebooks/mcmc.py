@@ -235,7 +235,7 @@ log_p_proposal = jnp.log(
 # $\equiv 1$. `log_p_proposal` and `dL_fid` are the constants precomputed above.
 
 # %%
-def log_importance_weights_fn(params, samples):
+def merger_rate_and_log_weights_fn(params, samples, *, observation_time):
     z = jnp.asarray(samples["redshift"])
 
     log_p_target = jnp.log(
@@ -255,13 +255,24 @@ def log_importance_weights_fn(params, samples):
         z, params["H0"], params["Omega_m"], n_grid
     )
     xi = params["xi_0"] + (1.0 - params["xi_0"]) / (1.0 + z) ** params["xi_n"]
-
-    return (
+    log_weights = (
         (log_p_target - log_p_proposal)
         + 2.0 * jnp.log(dL_fid)
         - 2.0 * jnp.log(dL_theta)
         - 2.0 * jnp.log(xi)
     )
+
+    z_grid = jnp.linspace(z_min, z_max, n_grid)
+    rate_shape = madau_dickinson_rate(
+        z_grid, params["gamma"], params["kappa"], params["z_peak"]
+    )  # source-frame ψ(z), ψ(0)=1
+    dVc = compute_differential_comoving_volume(
+        z_grid, params["H0"], params["Omega_m"]
+    )
+    integrand = rate_shape / (1.0 + z_grid) * dVc
+    integral_Mpc3 = jnp.trapezoid(integrand, z_grid)
+    total_merger_rate = 1e-9 * local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
+    return total_merger_rate, log_weights
 
 
 # %% [markdown]
@@ -282,19 +293,6 @@ def log_importance_weights_fn(params, samples):
 SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
 
 
-def merger_rate_fn(params, *, observation_time):
-    z_grid = jnp.linspace(z_min, z_max, n_grid)
-    rate_shape = madau_dickinson_rate(
-        z_grid, params["gamma"], params["kappa"], params["z_peak"]
-    )  # source-frame ψ(z), ψ(0)=1
-    dVc = compute_differential_comoving_volume(
-        z_grid, params["H0"], params["Omega_m"]
-    )
-    integrand = rate_shape / (1.0 + z_grid) * dVc
-    integral_Mpc3 = jnp.trapezoid(integrand, z_grid)
-    return 1e-9 * local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
-
-
 # %% [markdown]
 # ## Visualizing $\Omega_{\mathrm{GW}}$ at the fiducial point
 #
@@ -304,7 +302,11 @@ def merger_rate_fn(params, *, observation_time):
 
 # %%
 ones_weights = jnp.ones((n_samples,))
-rate0 = merger_rate_fn(fiducials, observation_time=observation_time)
+rate0, _ = merger_rate_and_log_weights_fn(
+    fiducials,
+    samples,
+    observation_time=observation_time,
+)
 S_h0 = spectral_density(
     polarization_power, ones_weights, rate0, average_mode="analytic_inclination"
 )
@@ -343,8 +345,7 @@ model = partial(
     numpyro_model,
     observation_time=observation_time,
     average_mode="analytic_inclination",
-    log_importance_weights_fn=log_importance_weights_fn,
-    merger_rate_fn=merger_rate_fn,
+    merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     priors=priors,
     constants=constants,
     frequency_mask=freq_mask,
