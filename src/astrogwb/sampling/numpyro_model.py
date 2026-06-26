@@ -62,11 +62,13 @@ def numpyro_model(
         Catalog arrays passed to ``merger_rate_and_log_weights_fn``. Each value
         should have leading dimension ``N``.
     observed_spectral_density:
-        Observed SGWB spectral density at ``frequencies``, shape ``(F,)`` (or
-        the masked subset when ``frequency_mask`` is set).
+        Observed SGWB spectral density at ``frequencies``, shape ``(F,)``.
+        Must be the full frequency grid even when ``frequency_mask`` is set;
+        masking is applied inside the model.
     effective_psd:
         Network effective power spectral density at ``frequencies``, shape
-        ``(F,)``.
+        ``(F,)``. Must match ``frequencies``; masked internally when
+        ``frequency_mask`` is set.
     observation_time:
         Observation time in years, used only in the likelihood noise scale via
         :func:`astrogwb.gwb.gaussian_bin_scale`.
@@ -86,7 +88,7 @@ def numpyro_model(
         to an empty mapping.
     frequency_mask:
         Optional boolean mask of shape ``(F,)``. When provided, only masked
-        frequency bins enter the likelihood.
+        bins from the full-length arrays above enter the likelihood.
     """
     priors = priors or {}
     constants = constants or {}
