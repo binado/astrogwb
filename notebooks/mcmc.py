@@ -39,7 +39,6 @@
 
 # %%
 from collections.abc import Mapping
-from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
@@ -56,7 +55,7 @@ from numpyro.infer import MCMC, NUTS
 import matplotlib.pyplot as plt
 
 # astrogwb: minimal "bring-your-own-physics" core
-from astrogwb.sampling.numpyro_model import numpyro_model
+from astrogwb.sampling.numpyro_model import MergerRateAndLogWeightsFn, numpyro_model
 from astrogwb.gwb import (
     spectral_density,
     omega_gw_from_spectral_density,
@@ -74,21 +73,11 @@ from gwmock_pop.cosmology.flat_lambda_cdm import (
     SPEED_OF_LIGHT,
     build_distance_lookup,
     compute_normalized_hubble_parameter,
-    compute_luminosity_distance,
 )
 
 print("jax x64:", jax.config.jax_enable_x64)
 
 SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
-
-
-@dataclass(frozen=True)
-class GridImportanceContext:
-    z_grid: jax.Array
-    z_samples: jax.Array
-    proposal_log_pdf: jax.Array
-    fiducial_luminosity_distance: jax.Array
-    local_merger_rate: float
 
 
 # %% [markdown]
@@ -174,7 +163,8 @@ print("sampling:", tuple(priors), "| fixed:", tuple(constants))
 #   source's fiducial redshift, so the importance-weight math (which multiplies by
 #   $d_{L,\mathrm{fid}}^2 / d_{L,\theta}^2$) is exact.
 # - `samples` — per-source intrinsic parameters; **must include `redshift`** (consumed by
-#   the importance weights). Stored as `sample__<name>` keys and restored into a dict.
+#   the importance weights) and `luminosity_distance` (the fiducial EM luminosity
+#   distance). Stored as `sample__<name>` keys and restored into a dict.
 #
 # > **Deferred:** there is no working catalog file yet, so this cell (and everything
 # > downstream of it) will only execute once `CATALOG_PATH` points at a real file. The cells
@@ -188,6 +178,9 @@ polarization_power = jnp.asarray(catalog.polarization_power)  # (nfreq, nsamples
 samples = {name: jnp.asarray(v) for name, v in catalog.samples.items()}
 
 assert "redshift" in samples, "catalog samples must include 'redshift' for the weights"
+assert "luminosity_distance" in samples, (
+    "catalog samples must include 'luminosity_distance' for the weights"
+)
 
 n_freq, n_samples = polarization_power.shape
 print(f"loaded catalog: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
@@ -211,18 +204,14 @@ print("band bins:", int(jnp.sum(freq_mask)), "of", frequencies.shape[0])
 # %% [markdown]
 # ## Precompute fiducial constants for the weights
 #
-# The proposal log-density `log p_proposal(z)` and the fiducial luminosity distances
-# $d_{L,\mathrm{fid}}(z)$ depend only on the fixed fiducial point, so we evaluate them **once**
-# here. The NUTS-time weight function then reuses these arrays and evaluates one shared
-# redshift grid per proposed $\Lambda$ for target distances, target redshift density, and
-# total merger-rate normalization.
+# The proposal log-density `log p_proposal(z)` depends only on the fixed fiducial point,
+# so we evaluate it **once** here. The NUTS-time weight function then reuses this array
+# and evaluates one shared redshift grid per proposed $\Lambda$ for target distances,
+# target redshift density, and total merger-rate normalization.
 
 # %%
 z_samples = jnp.asarray(samples["redshift"])
 
-dL_fid = compute_luminosity_distance(
-    z_samples, fiducials["H0"], fiducials["Omega_m"], n_grid
-)
 log_p_proposal = jnp.log(
     madau_dickinson_redshift_pdf(
         z_samples,
@@ -237,14 +226,6 @@ log_p_proposal = jnp.log(
     )
 )
 
-grid_importance_context = GridImportanceContext(
-    z_grid=jnp.linspace(z_min, z_max, n_grid),
-    z_samples=z_samples,
-    proposal_log_pdf=log_p_proposal,
-    fiducial_luminosity_distance=dL_fid,
-    local_merger_rate=local_merger_rate,
-)
-
 
 # %% [markdown]
 # ## Importance weights
@@ -253,18 +234,23 @@ grid_importance_context = GridImportanceContext(
 #
 # $$\log w_i = \big[\log p_\mathrm{target}(z_i) - \log p_\mathrm{proposal}(z_i)\big]
 #             + 2\log d_{L,\mathrm{fid}}(z_i) - 2\log d_{L,\theta}(z_i)
-#             - 2\log \Xi_\theta(z_i)$$
+#             + 2\log \Xi_\mathrm{fid}(z_i) - 2\log \Xi_\theta(z_i)$$
 #
 # with the modified-propagation ratio
 # $\Xi_\theta(z) = \Xi_0 + (1-\Xi_0)/(1+z)^{\Xi_n}$ (GR $\Rightarrow \Xi_0=1, \Xi_n=0
-# \Rightarrow \Xi \equiv 1$). At $\theta = $ fiducial all three terms vanish, so weights
-# $\equiv 1$. `log_p_proposal` and `dL_fid` are the constants precomputed above.
+# \Rightarrow \Xi \equiv 1$). At $\theta = $ fiducial all correction terms vanish, so
+# weights $\equiv 1$. `log_p_proposal` is precomputed above;
+# `samples["luminosity_distance"]` supplies the fiducial EM luminosity distances.
 
 
 # %%
+def log_gw_em_ratio(z, xi_0, xi_n):
+    return jnp.log(xi_0 + (1.0 - xi_0) * jnp.exp(-xi_n * jnp.log1p(z)))
+
+
 def flat_lcdm_grid(
     params: Mapping[str, Any],
-    ctx: GridImportanceContext,
+    z_grid: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     h0 = params["H0"]
     omega_m = params["Omega_m"]
@@ -272,8 +258,8 @@ def flat_lcdm_grid(
     z, comoving_distance, luminosity_distance = build_distance_lookup(
         hubble_constant=h0,
         omega_m=omega_m,
-        max_redshift=float(ctx.z_grid[-1]),
-        n_grid=ctx.z_grid.shape[0],
+        max_redshift=float(z_grid[-1]),
+        n_grid=z_grid.shape[0],
     )
     e_z = compute_normalized_hubble_parameter(redshift=z, omega_m=omega_m)
     differential_comoving_volume = (
@@ -282,49 +268,69 @@ def flat_lcdm_grid(
     return luminosity_distance, differential_comoving_volume
 
 
-def merger_rate_and_log_weights_fn(params, samples):
-    ctx = grid_importance_context
-    z = ctx.z_samples
-    z_grid = ctx.z_grid
+def make_merger_rate_and_log_weights_fn(
+    *,
+    z_grid: jax.Array,
+    proposal_log_pdf: jax.Array,
+    local_merger_rate: float,
+    fiducial_xi_0: float,
+    fiducial_xi_n: float,
+) -> MergerRateAndLogWeightsFn:
+    def merger_rate_and_log_weights_fn(params, samples):
+        z = samples["redshift"]
+        d_l_fid = samples["luminosity_distance"]
 
-    luminosity_distance_grid, dvc_dz_grid = flat_lcdm_grid(params, ctx)
-    dL_theta = jnp.interp(
-        z,
-        z_grid,
-        luminosity_distance_grid,
-        left=luminosity_distance_grid[0],
-        right=luminosity_distance_grid[-1],
-    )
+        luminosity_distance_grid, dvc_dz_grid = flat_lcdm_grid(params, z_grid)
+        d_l_theta = jnp.interp(
+            z,
+            z_grid,
+            luminosity_distance_grid,
+            left=luminosity_distance_grid[0],
+            right=luminosity_distance_grid[-1],
+        )
 
-    rate_shape_grid = madau_dickinson_rate(
-        z_grid, params["gamma"], params["kappa"], params["z_peak"]
-    )
-    unnormalized_pdf_grid = rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid
-    integral_Mpc3 = jnp.trapezoid(unnormalized_pdf_grid, z_grid)
+        rate_shape_grid = madau_dickinson_rate(
+            z_grid, params["gamma"], params["kappa"], params["z_peak"]
+        )
+        unnormalized_pdf_grid = rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid
+        integral_Mpc3 = jnp.trapezoid(unnormalized_pdf_grid, z_grid)
 
-    rate_shape_samples = madau_dickinson_rate(
-        z, params["gamma"], params["kappa"], params["z_peak"]
-    )
-    dvc_dz_samples = jnp.interp(
-        z,
-        z_grid,
-        dvc_dz_grid,
-        left=dvc_dz_grid[0],
-        right=dvc_dz_grid[-1],
-    )
-    target_pdf = rate_shape_samples / (1.0 + z) * dvc_dz_samples / integral_Mpc3
+        rate_shape_samples = madau_dickinson_rate(
+            z, params["gamma"], params["kappa"], params["z_peak"]
+        )
+        dvc_dz_samples = jnp.interp(
+            z,
+            z_grid,
+            dvc_dz_grid,
+            left=dvc_dz_grid[0],
+            right=dvc_dz_grid[-1],
+        )
+        target_pdf = rate_shape_samples / (1.0 + z) * dvc_dz_samples / integral_Mpc3
 
-    xi = params["xi_0"] + (1.0 - params["xi_0"]) / (1.0 + z) ** params["xi_n"]
-    log_weights = (
-        jnp.log(target_pdf)
-        - ctx.proposal_log_pdf
-        + 2.0 * jnp.log(ctx.fiducial_luminosity_distance)
-        - 2.0 * jnp.log(dL_theta)
-        - 2.0 * jnp.log(xi)
-    )
+        log_fiducial_gw_em_ratio = log_gw_em_ratio(z, fiducial_xi_0, fiducial_xi_n)
+        log_target_gw_em_ratio = log_gw_em_ratio(z, params["xi_0"], params["xi_n"])
+        log_weights = (
+            jnp.log(target_pdf)
+            - proposal_log_pdf
+            + 2.0 * jnp.log(d_l_fid)
+            - 2.0 * jnp.log(d_l_theta)
+            + 2.0 * log_fiducial_gw_em_ratio
+            - 2.0 * log_target_gw_em_ratio
+        )
 
-    total_merger_rate = 1e-9 * ctx.local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
-    return total_merger_rate, log_weights
+        total_merger_rate = 1e-9 * local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
+        return total_merger_rate, log_weights
+
+    return merger_rate_and_log_weights_fn
+
+
+merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
+    z_grid=jnp.linspace(z_min, z_max, n_grid),
+    proposal_log_pdf=log_p_proposal,
+    local_merger_rate=local_merger_rate,
+    fiducial_xi_0=fiducials["xi_0"],
+    fiducial_xi_n=fiducials["xi_n"],
+)
 
 
 # %% [markdown]
