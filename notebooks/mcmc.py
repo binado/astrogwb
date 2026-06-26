@@ -38,7 +38,10 @@
 # *before* any JAX array is created.
 
 # %%
+from collections.abc import Mapping
+from dataclasses import dataclass
 from functools import partial
+from typing import Any
 
 import jax
 
@@ -73,6 +76,18 @@ from gwmock_pop.cosmology.flat_lambda_cdm import (
 )
 
 print("jax x64:", jax.config.jax_enable_x64)
+
+SPEED_OF_LIGHT_KM_S = 299_792.458
+SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
+
+
+@dataclass(frozen=True)
+class GridImportanceContext:
+    z_grid: jax.Array
+    z_samples: jax.Array
+    proposal_log_pdf: jax.Array
+    fiducial_luminosity_distance: jax.Array
+    local_merger_rate: float
 
 # %% [markdown]
 # ## Configuration
@@ -196,8 +211,9 @@ print("band bins:", int(jnp.sum(freq_mask)), "of", frequencies.shape[0])
 #
 # The proposal log-density `log p_proposal(z)` and the fiducial luminosity distances
 # $d_{L,\mathrm{fid}}(z)$ depend only on the fixed fiducial point, so we evaluate them **once**
-# here. The NUTS-time weight function then reuses these arrays, keeping the per-step cost to
-# one MD pdf + one distance integral at the proposed $\Lambda$.
+# here. The NUTS-time weight function then reuses these arrays and evaluates one shared
+# redshift grid per proposed $\Lambda$ for target distances, target redshift density, and
+# total merger-rate normalization.
 
 # %%
 z_samples = jnp.asarray(samples["redshift"])
@@ -219,6 +235,14 @@ log_p_proposal = jnp.log(
     )
 )
 
+grid_importance_context = GridImportanceContext(
+    z_grid=jnp.linspace(z_min, z_max, n_grid),
+    z_samples=z_samples,
+    proposal_log_pdf=log_p_proposal,
+    fiducial_luminosity_distance=dL_fid,
+    local_merger_rate=local_merger_rate,
+)
+
 
 # %% [markdown]
 # ## Importance weights
@@ -235,7 +259,35 @@ log_p_proposal = jnp.log(
 # $\equiv 1$. `log_p_proposal` and `dL_fid` are the constants precomputed above.
 
 # %%
-def merger_rate_and_log_weights_fn(params, samples, *, observation_time):
+def cumulative_trapezoid(y: jax.Array, x: jax.Array) -> jax.Array:
+    dx = jnp.diff(x)
+    increments = 0.5 * (y[1:] + y[:-1]) * dx
+    return jnp.concatenate([jnp.zeros(1, dtype=y.dtype), jnp.cumsum(increments)])
+
+
+def flat_lcdm_grid(
+    params: Mapping[str, Any],
+    ctx: GridImportanceContext,
+) -> tuple[jax.Array, jax.Array]:
+    z = ctx.z_grid
+    h0 = params["H0"]
+    omega_m = params["Omega_m"]
+
+    e_z = jnp.sqrt(omega_m * (1.0 + z) ** 3 + (1.0 - omega_m))
+    comoving_integral = cumulative_trapezoid(1.0 / e_z, z)
+    comoving_distance = SPEED_OF_LIGHT_KM_S / h0 * comoving_integral
+    luminosity_distance = (1.0 + z) * comoving_distance
+    differential_comoving_volume = (
+        4.0
+        * jnp.pi
+        * comoving_distance**2
+        * SPEED_OF_LIGHT_KM_S
+        / (h0 * e_z)
+    )
+    return luminosity_distance, differential_comoving_volume
+
+
+def reference_merger_rate_and_log_weights_fn(params, samples, *, observation_time):
     z = jnp.asarray(samples["redshift"])
 
     log_p_target = jnp.log(
@@ -275,6 +327,53 @@ def merger_rate_and_log_weights_fn(params, samples, *, observation_time):
     return total_merger_rate, log_weights
 
 
+def merger_rate_and_log_weights_fn(params, samples, *, observation_time):
+    ctx = grid_importance_context
+    z = ctx.z_samples
+    z_grid = ctx.z_grid
+
+    luminosity_distance_grid, dvc_dz_grid = flat_lcdm_grid(params, ctx)
+    dL_theta = jnp.interp(
+        z,
+        z_grid,
+        luminosity_distance_grid,
+        left=luminosity_distance_grid[0],
+        right=luminosity_distance_grid[-1],
+    )
+
+    rate_shape_grid = madau_dickinson_rate(
+        z_grid, params["gamma"], params["kappa"], params["z_peak"]
+    )
+    unnormalized_pdf_grid = rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid
+    integral_Mpc3 = jnp.trapezoid(unnormalized_pdf_grid, z_grid)
+
+    rate_shape_samples = madau_dickinson_rate(
+        z, params["gamma"], params["kappa"], params["z_peak"]
+    )
+    dvc_dz_samples = jnp.interp(
+        z,
+        z_grid,
+        dvc_dz_grid,
+        left=dvc_dz_grid[0],
+        right=dvc_dz_grid[-1],
+    )
+    target_pdf = rate_shape_samples / (1.0 + z) * dvc_dz_samples / integral_Mpc3
+
+    xi = params["xi_0"] + (1.0 - params["xi_0"]) / (1.0 + z) ** params["xi_n"]
+    log_weights = (
+        jnp.log(target_pdf)
+        - ctx.proposal_log_pdf
+        + 2.0 * jnp.log(ctx.fiducial_luminosity_distance)
+        - 2.0 * jnp.log(dL_theta)
+        - 2.0 * jnp.log(xi)
+    )
+
+    total_merger_rate = (
+        1e-9 * ctx.local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
+    )
+    return total_merger_rate, log_weights
+
+
 # %% [markdown]
 # ## Total merger rate
 #
@@ -289,8 +388,78 @@ def merger_rate_and_log_weights_fn(params, samples, *, observation_time):
 # The $10^{-9}$ converts $R_\mathrm{local}$ from $\mathrm{Gpc}^{-3}$ to $\mathrm{Mpc}^{-3}$;
 # dividing by seconds-per-year turns the per-year local rate into per-second.
 
+# %% [markdown]
+# ## Callback validation and timing
+#
+# The optimized callback keeps the same model-facing signature as the reference callback.
+# Enable these checks after loading a real catalog to compare total rates, log weights, and
+# post-JIT callback timing for representative parameter points.
+
 # %%
-SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
+RUN_CALLBACK_VALIDATION = False
+RUN_CALLBACK_BENCHMARK = False
+
+if RUN_CALLBACK_VALIDATION:
+    validation_params = {
+        "fiducial": fiducials,
+        "shifted_h0": {**fiducials, "H0": 74.0},
+        "shifted_omega_m": {**fiducials, "Omega_m": 0.4},
+        "shifted_population": {
+            **fiducials,
+            "gamma": 3.2,
+            "kappa": 4.0,
+            "z_peak": 2.4,
+        },
+    }
+
+    for label, params in validation_params.items():
+        ref_rate, ref_log_weights = reference_merger_rate_and_log_weights_fn(
+            params,
+            samples,
+            observation_time=observation_time,
+        )
+        opt_rate, opt_log_weights = merger_rate_and_log_weights_fn(
+            params,
+            samples,
+            observation_time=observation_time,
+        )
+        rate_rel_err = jnp.abs(opt_rate / ref_rate - 1.0)
+        logw_abs_err = jnp.max(jnp.abs(opt_log_weights - ref_log_weights))
+        print(
+            f"{label}: rate_rel_err={float(rate_rel_err):.3e} "
+            f"max_logw_abs_err={float(logw_abs_err):.3e}"
+        )
+
+if RUN_CALLBACK_BENCHMARK:
+    import time
+
+    benchmark_params = {**fiducials, "H0": 74.0, "Omega_m": 0.4}
+    reference_jit = jax.jit(
+        lambda: reference_merger_rate_and_log_weights_fn(
+            benchmark_params,
+            samples,
+            observation_time=observation_time,
+        )
+    )
+    optimized_jit = jax.jit(
+        lambda: merger_rate_and_log_weights_fn(
+            benchmark_params,
+            samples,
+            observation_time=observation_time,
+        )
+    )
+
+    jax.block_until_ready(reference_jit())
+    jax.block_until_ready(optimized_jit())
+
+    for label, fn in [
+        ("reference", reference_jit),
+        ("optimized", optimized_jit),
+    ]:
+        start = time.perf_counter()
+        jax.block_until_ready(fn())
+        elapsed_ms = 1e3 * (time.perf_counter() - start)
+        print(f"{label}: {elapsed_ms:.2f} ms")
 
 
 # %% [markdown]
