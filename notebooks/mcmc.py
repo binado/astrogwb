@@ -75,7 +75,6 @@ from gwmock_pop.cosmology.flat_lambda_cdm import (
     build_distance_lookup,
     compute_normalized_hubble_parameter,
     compute_luminosity_distance,
-    compute_differential_comoving_volume,
 )
 
 print("jax x64:", jax.config.jax_enable_x64)
@@ -283,42 +282,6 @@ def flat_lcdm_grid(
     return luminosity_distance, differential_comoving_volume
 
 
-def reference_merger_rate_and_log_weights_fn(params, samples, *, observation_time):
-    z = jnp.asarray(samples["redshift"])
-
-    log_p_target = jnp.log(
-        madau_dickinson_redshift_pdf(
-            z,
-            z_max=z_max,
-            z_min=z_min,
-            gamma=params["gamma"],
-            kappa=params["kappa"],
-            z_peak=params["z_peak"],
-            hubble_constant=params["H0"],
-            omega_m=params["Omega_m"],
-            n_grid=n_grid,
-        )
-    )
-    dL_theta = compute_luminosity_distance(z, params["H0"], params["Omega_m"], n_grid)
-    xi = params["xi_0"] + (1.0 - params["xi_0"]) / (1.0 + z) ** params["xi_n"]
-    log_weights = (
-        (log_p_target - log_p_proposal)
-        + 2.0 * jnp.log(dL_fid)
-        - 2.0 * jnp.log(dL_theta)
-        - 2.0 * jnp.log(xi)
-    )
-
-    z_grid = jnp.linspace(z_min, z_max, n_grid)
-    rate_shape = madau_dickinson_rate(
-        z_grid, params["gamma"], params["kappa"], params["z_peak"]
-    )  # source-frame ψ(z), ψ(0)=1
-    dVc = compute_differential_comoving_volume(z_grid, params["H0"], params["Omega_m"])
-    integrand = rate_shape / (1.0 + z_grid) * dVc
-    integral_Mpc3 = jnp.trapezoid(integrand, z_grid)
-    total_merger_rate = 1e-9 * local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
-    return total_merger_rate, log_weights
-
-
 def merger_rate_and_log_weights_fn(params, samples, *, observation_time):
     ctx = grid_importance_context
     z = ctx.z_samples
@@ -377,79 +340,6 @@ def merger_rate_and_log_weights_fn(params, samples, *, observation_time):
 #
 # The $10^{-9}$ converts $R_\mathrm{local}$ from $\mathrm{Gpc}^{-3}$ to $\mathrm{Mpc}^{-3}$;
 # dividing by seconds-per-year turns the per-year local rate into per-second.
-
-# %% [markdown]
-# ## Callback validation and timing
-#
-# The optimized callback keeps the same model-facing signature as the reference callback.
-# Enable these checks after loading a real catalog to compare total rates, log weights, and
-# post-JIT callback timing for representative parameter points.
-
-# %%
-RUN_CALLBACK_VALIDATION = False
-RUN_CALLBACK_BENCHMARK = False
-
-if RUN_CALLBACK_VALIDATION:
-    validation_params = {
-        "fiducial": fiducials,
-        "shifted_h0": {**fiducials, "H0": 74.0},
-        "shifted_omega_m": {**fiducials, "Omega_m": 0.4},
-        "shifted_population": {
-            **fiducials,
-            "gamma": 3.2,
-            "kappa": 4.0,
-            "z_peak": 2.4,
-        },
-    }
-
-    for label, params in validation_params.items():
-        ref_rate, ref_log_weights = reference_merger_rate_and_log_weights_fn(
-            params,
-            samples,
-            observation_time=observation_time,
-        )
-        opt_rate, opt_log_weights = merger_rate_and_log_weights_fn(
-            params,
-            samples,
-            observation_time=observation_time,
-        )
-        rate_rel_err = jnp.abs(opt_rate / ref_rate - 1.0)
-        logw_abs_err = jnp.max(jnp.abs(opt_log_weights - ref_log_weights))
-        print(
-            f"{label}: rate_rel_err={float(rate_rel_err):.3e} "
-            f"max_logw_abs_err={float(logw_abs_err):.3e}"
-        )
-
-if RUN_CALLBACK_BENCHMARK:
-    import time
-
-    benchmark_params = {**fiducials, "H0": 74.0, "Omega_m": 0.4}
-    reference_jit = jax.jit(
-        lambda: reference_merger_rate_and_log_weights_fn(
-            benchmark_params,
-            samples,
-            observation_time=observation_time,
-        )
-    )
-    optimized_jit = jax.jit(
-        lambda: merger_rate_and_log_weights_fn(
-            benchmark_params,
-            samples,
-            observation_time=observation_time,
-        )
-    )
-
-    jax.block_until_ready(reference_jit())
-    jax.block_until_ready(optimized_jit())
-
-    for label, fn in [
-        ("reference", reference_jit),
-        ("optimized", optimized_jit),
-    ]:
-        start = time.perf_counter()
-        jax.block_until_ready(fn())
-        elapsed_ms = 1e3 * (time.perf_counter() - start)
-        print(f"{label}: {elapsed_ms:.2f} ms")
 
 
 # %% [markdown]
