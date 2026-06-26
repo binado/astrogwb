@@ -62,6 +62,7 @@ from astrogwb.gwb import (
     frequency_mask as make_frequency_mask,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
+from astrogwb.utils import SECONDS_PER_YEAR
 from astrogwb.waveform import load_polarization_power_catalog
 
 # gwmock-pop: JAX-traceable population + cosmology physics for the weights
@@ -76,8 +77,6 @@ from gwmock_pop.cosmology.flat_lambda_cdm import (
 )
 
 print("jax x64:", jax.config.jax_enable_x64)
-
-SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
 
 
 # %% [markdown]
