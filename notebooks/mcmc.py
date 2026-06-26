@@ -38,7 +38,7 @@
 # *before* any JAX array is created.
 
 # %%
-import functools
+from functools import partial
 
 import jax
 
@@ -332,21 +332,15 @@ observed_spectral_density = S_h0
 # %% [markdown]
 # ## Running the MCMC
 #
-# We bind the catalog arrays and callbacks into a thin model wrapper with
-# `functools.partial`, then run NUTS. Like the Julia run (which used ForwardDiff), we use
-# **forward-mode** differentiation — the weight chain goes through grid-based cosmology
-# integrals that are forward-mode friendly. Production defaults mirror Julia
-# (`num_warmup=3000, num_samples=3000, target_accept=0.9`); `DEBUG` uses a small smoke
-# setting.
+# We pass the large catalog arrays as dynamic JAX arguments to `mcmc.run`, not as closed-over
+# constants. Like the Julia run (which used ForwardDiff), we use **forward-mode**
+# differentiation — the weight chain goes through grid-based cosmology integrals that are
+# forward-mode friendly. Production defaults mirror Julia (`num_warmup=3000,
+# num_samples=3000, target_accept=0.9`); `DEBUG` uses a small smoke setting.
 
 # %%
-model = functools.partial(
+model = partial(
     numpyro_model,
-    frequencies=frequencies,
-    polarization_power=polarization_power,
-    samples=samples,
-    observed_spectral_density=observed_spectral_density,
-    effective_psd=effective_psd_arr,
     observation_time=observation_time,
     average_mode="analytic_inclination",
     log_importance_weights_fn=log_importance_weights_fn,
@@ -374,9 +368,18 @@ mcmc = MCMC(
     num_samples=num_samples,
     num_chains=num_chains,
     progress_bar=True,
+    jit_model_args=True,
 )
 rng_key = jax.random.PRNGKey(seed)
-mcmc.run(rng_key, extra_fields=("num_steps", "accept_prob", "diverging"))
+mcmc.run(
+    rng_key,
+    frequencies=frequencies,
+    polarization_power=polarization_power,
+    samples=samples,
+    observed_spectral_density=observed_spectral_density,
+    effective_psd=effective_psd_arr,
+    extra_fields=("num_steps", "accept_prob", "diverging"),
+)
 mcmc.print_summary()
 
 # %% [markdown]
