@@ -23,6 +23,11 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "arviz>=1.2.0",
+    "corner>=2.2.3",
+    "ipykernel>=7.3.0",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.11.0",
     "pytest>=9.0.2",
     "ruff>=0.15.2",
     "ty>=0.0.18",

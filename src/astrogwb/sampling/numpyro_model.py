@@ -11,21 +11,12 @@ import numpyro.distributions as dist
 from astrogwb.gwb import AverageMode, gaussian_bin_scale, spectral_density
 
 
-class LogImportanceWeightsFn(Protocol):
+class MergerRateAndLogWeightsFn(Protocol):
     def __call__(
         self,
         params: Mapping[str, Any],
         samples: Mapping[str, jax.Array],
-    ) -> jax.Array: ...
-
-
-class MergerRateFn(Protocol):
-    def __call__(
-        self,
-        params: Mapping[str, Any],
-        *,
-        observation_time: float,
-    ) -> float | jax.Array: ...
+    ) -> tuple[float | jax.Array, jax.Array]: ...
 
 
 def numpyro_model(
@@ -37,12 +28,18 @@ def numpyro_model(
     effective_psd: jax.Array,
     observation_time: float,
     average_mode: AverageMode,
-    log_importance_weights_fn: LogImportanceWeightsFn,
-    merger_rate_fn: MergerRateFn,
+    merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     priors: Mapping[str, dist.Distribution] | None = None,
     constants: Mapping[str, Any] | None = None,
     frequency_mask: jax.Array | None = None,
 ) -> None:
+    """NumPyro model for importance-weighted SGWB inference.
+
+    Parameters
+    ----------
+    observation_time:
+        Observation time in years, used only in the likelihood noise scale.
+    """
     priors = priors or {}
     constants = constants or {}
 
@@ -51,9 +48,11 @@ def numpyro_model(
     }
     params = {**constants, **sampled_params}
 
-    log_weights = log_importance_weights_fn(params, samples)
+    total_merger_rate, log_weights = merger_rate_and_log_weights_fn(
+        params,
+        samples,
+    )
     weights = jnp.exp(log_weights)
-    total_merger_rate = merger_rate_fn(params, observation_time=observation_time)
     model_spectral_density = spectral_density(
         polarization_power,
         weights,
