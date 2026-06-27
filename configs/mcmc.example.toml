@@ -21,21 +21,21 @@ chain_method = "auto"        # auto | parallel | sequential | vectorized
 [catalog]
 path = "out/bns_polarization_power_catalog.npz"
 detectors = ["S1", "R1", "C1"]   # resolved via bundled geometry.toml / sensitivity.toml
-f_min = 10.0                 # analysis band low edge [Hz]
-f_max = 100.0                # analysis band high edge [Hz]
+f_min = 2.0                 # analysis band low edge [Hz]
+f_max = 4096.0                # analysis band high edge [Hz]
 
 [cosmology]
 z_min = 0.0
 z_max = 20.0                 # must bracket all catalog redshifts (importance-weight requirement)
-n_grid = 4096                # grid points for cosmology integrals / MD normalization
+n_grid = 256                # grid points for cosmology integrals / MD normalization
 
 [sampler]
-num_warmup = 3000
-num_samples = 3000
-num_chains = 1
+num_warmup = 2000
+num_samples = 2000
+num_chains = 4
 target_accept = 0.9
 forward_mode_differentiation = true   # Julia used ForwardDiff; grid integrals are fwd-friendly
-progress_bar = false                  # off for headless SLURM logs
+progress_bar = true
 jit_model_args = true
 
 [fiducials]
@@ -44,10 +44,10 @@ jit_model_args = true
 H0 = 67.66
 Omega_m = 0.3096
 xi_0 = 1.0
-xi_n = 0.0
+xi_n = 1.91
 gamma = 2.7
-kappa = 3.0
-z_peak = 2.0
+kappa = 2.9
+z_peak = 1.9
 
 # Priors: one [priors.<param>] table per sampled parameter.
 # Supported types: uniform (low/high), normal (loc/scale), loguniform (low/high).
