@@ -18,7 +18,7 @@ Usage::
     uv run python scripts/run_mcmc.py --config configs/mcmc.example.toml
 
 The script is meant to back a SLURM job array with one TOML config per task; see
-``scripts/submit_mcmc.sbatch``.
+``scripts/submit_mcmc.sh -i configs/``.
 """
 
 from __future__ import annotations
