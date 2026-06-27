@@ -15,6 +15,7 @@ dependencies = [
     "jax>=0.10.2",
     "numpy>=2.4.2",
     "numpyro>=0.21.0",
+    "pydantic>=2.0",
 ]
 
 [build-system]

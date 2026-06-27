@@ -6,11 +6,12 @@ hyperparameters, reading every setting from a TOML config file and emitting only
 ``logging`` progress (no plots). It saves an ArviZ ``InferenceData`` NetCDF plus a
 JSON run-config record, exactly like the notebook.
 
-Design constraint (do not "tidy" away): the module top imports **stdlib only**.
-``OMP_NUM_THREADS`` / ``XLA_FLAGS`` and ``numpyro.set_host_device_count(...)`` must
-be set *before* JAX initializes its backend, so all heavy imports (jax, numpyro,
-astrogwb, gwmock_pop) happen inside functions that run only after
-:func:`configure_runtime`. See ``configure_runtime`` for the ordering.
+Design constraint (do not "tidy" away): the module top imports only stdlib and
+pydantic -- neither touches JAX. ``OMP_NUM_THREADS`` / ``XLA_FLAGS`` and
+``numpyro.set_host_device_count(...)`` must be set *before* JAX initializes its
+backend, so the heavy imports (jax, numpyro, astrogwb, gwmock_pop) happen inside
+functions that run only after :func:`configure_runtime`. See ``configure_runtime``
+for the ordering.
 
 Usage::
 
@@ -23,16 +24,16 @@ The script is meant to back a SLURM job array with one TOML config per task; see
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import json
 import logging
 import os
 import subprocess
 import tomllib
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger("run_mcmc")
 
@@ -40,11 +41,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 # --------------------------------------------------------------------------- #
-# Configuration dataclasses
+# Configuration models
+#
+# pydantic owns coercion (str -> Path, list -> tuple), defaults, and structural
+# validation; ``extra="forbid"`` turns config typos (e.g. ``num_warump``) into
+# loud errors. Cross-field derivation (resolving ``sampled_params``, aligning
+# ``priors``, computing ``constants``) lives in the ``RunConfig`` validator.
 # --------------------------------------------------------------------------- #
-@dataclass(frozen=True)
-class RuntimeConfig:
+_STRICT = ConfigDict(frozen=True, extra="forbid")
+
+
+class RuntimeConfig(BaseModel):
     """Device/thread control. Consumed by :func:`configure_runtime`."""
+
+    model_config = _STRICT
 
     platform: str = "auto"  # auto | cpu | gpu
     host_device_count: int | None = None  # CPU devices for parallel chains
@@ -52,47 +62,94 @@ class RuntimeConfig:
     chain_method: str = "auto"  # auto | parallel | sequential | vectorized
 
 
-@dataclass(frozen=True)
-class CatalogConfig:
+class CatalogConfig(BaseModel):
+    model_config = _STRICT
+
     path: Path
     detectors: tuple[str, ...]
     f_min: float
     f_max: float
 
 
-@dataclass(frozen=True)
-class CosmoConfig:
+class CosmoConfig(BaseModel):
+    model_config = _STRICT
+
     z_min: float
     z_max: float
     n_grid: int
 
 
-@dataclass(frozen=True)
-class SamplerConfig:
+class SamplerConfig(BaseModel):
+    model_config = _STRICT
+
     num_warmup: int
     num_samples: int
-    num_chains: int
-    target_accept: float
-    forward_mode_differentiation: bool
-    progress_bar: bool
-    jit_model_args: bool
+    num_chains: int = 1
+    target_accept: float = 0.9
+    forward_mode_differentiation: bool = True
+    progress_bar: bool = False
+    jit_model_args: bool = True
 
 
-@dataclass(frozen=True)
-class RunConfig:
-    seed: int
-    local_merger_rate: float
-    observation_time: float
+class OutputConfig(BaseModel):
+    model_config = _STRICT
+
+    outdir: Path = Path("chains")
+    label: str = ""
+
+
+class RunConfig(BaseModel):
+    model_config = _STRICT
+
+    seed: int = 42
+    local_merger_rate: float = 161.0
+    observation_time: float = 1.0
     fiducials: dict[str, float]
     priors: dict[str, dict[str, Any]]  # prior name -> spec table
-    sampled_params: tuple[str, ...]
-    constants: dict[str, float]
-    runtime: RuntimeConfig
+    # Unset (empty) -> default to the keys present in [priors]; resolved below.
+    sampled_params: tuple[str, ...] = ()
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     catalog: CatalogConfig
     cosmology: CosmoConfig
     sampler: SamplerConfig
-    outdir: Path
-    label: str = ""
+    output: OutputConfig = Field(default_factory=OutputConfig)
+    # Derived in the validator (every fiducial not sampled).
+    constants: dict[str, float] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _resolve_sampled_and_constants(self) -> RunConfig:
+        if not self.fiducials:
+            raise ValueError("config must define a non-empty [fiducials] table")
+        if not self.priors:
+            raise ValueError("config must define at least one [priors.<param>] table")
+
+        sampled = self.sampled_params or tuple(self.priors)
+        missing_priors = [p for p in sampled if p not in self.priors]
+        if missing_priors:
+            raise ValueError(
+                f"sampled_params without a [priors.*] table: {missing_priors}"
+            )
+        missing_fid = [p for p in sampled if p not in self.fiducials]
+        if missing_fid:
+            raise ValueError(f"sampled_params missing from [fiducials]: {missing_fid}")
+
+        # Keep prior order aligned with sampled_params and drop unsampled tables.
+        aligned_priors = {name: self.priors[name] for name in sampled}
+        constants = {k: v for k, v in self.fiducials.items() if k not in sampled}
+
+        # Frozen model: object.__setattr__ is pydantic's own escape hatch.
+        object.__setattr__(self, "sampled_params", sampled)
+        object.__setattr__(self, "priors", aligned_priors)
+        object.__setattr__(self, "constants", constants)
+        return self
+
+    @property
+    def outdir(self) -> Path:
+        return self.output.outdir
+
+    @property
+    def label(self) -> str:
+        return self.output.label
 
 
 # --------------------------------------------------------------------------- #
@@ -144,96 +201,25 @@ def load_config(path: Path) -> dict[str, Any]:
 
 
 def build_run_config(raw: dict[str, Any], args: argparse.Namespace) -> RunConfig:
-    """Validate the raw TOML mapping and apply CLI overrides into a RunConfig.
+    """Apply CLI overrides to the raw TOML mapping and validate it into a RunConfig.
 
-    ``sampled_params`` defaults to the keys present in ``[priors]``; ``constants``
-    is every fiducial *not* sampled, mirroring the notebook's split.
+    CLI overrides (``--seed`` / ``--outdir`` / ``--label``) are merged into the raw
+    mapping first so they take precedence over the file; pydantic then handles
+    coercion, defaults, and validation. ``sampled_params`` defaults to the keys in
+    ``[priors]`` and ``constants`` is derived inside :class:`RunConfig`.
     """
-    fiducials = {k: float(v) for k, v in dict(raw.get("fiducials", {})).items()}
-    if not fiducials:
-        raise ValueError("config must define a non-empty [fiducials] table")
-
-    priors_raw = dict(raw.get("priors", {}))
-    if not priors_raw:
-        raise ValueError("config must define at least one [priors.<param>] table")
-
-    # Default sampled params to the priors present; allow explicit override/ordering.
-    sampled_params = tuple(raw.get("sampled_params", list(priors_raw.keys())))
-    missing_priors = [p for p in sampled_params if p not in priors_raw]
-    if missing_priors:
-        raise ValueError(f"sampled_params without a [priors.*] table: {missing_priors}")
-    missing_fid = [p for p in sampled_params if p not in fiducials]
-    if missing_fid:
-        raise ValueError(f"sampled_params missing from [fiducials]: {missing_fid}")
-
-    # Keep prior order aligned with sampled_params and drop unsampled prior tables.
-    priors = {name: dict(priors_raw[name]) for name in sampled_params}
-    constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
-
-    runtime_raw = dict(raw.get("runtime", {}))
-    runtime = RuntimeConfig(
-        platform=str(runtime_raw.get("platform", "auto")),
-        host_device_count=runtime_raw.get("host_device_count"),
-        cpu_threads=int(runtime_raw.get("cpu_threads", 0)),
-        chain_method=str(runtime_raw.get("chain_method", "auto")),
-    )
-
-    catalog_raw = raw["catalog"]
-    catalog = CatalogConfig(
-        path=Path(catalog_raw["path"]),
-        detectors=tuple(catalog_raw["detectors"]),
-        f_min=float(catalog_raw["f_min"]),
-        f_max=float(catalog_raw["f_max"]),
-    )
-
-    cosmo_raw = raw["cosmology"]
-    cosmology = CosmoConfig(
-        z_min=float(cosmo_raw["z_min"]),
-        z_max=float(cosmo_raw["z_max"]),
-        n_grid=int(cosmo_raw["n_grid"]),
-    )
-
-    sampler_raw = raw["sampler"]
-    sampler = SamplerConfig(
-        num_warmup=int(sampler_raw["num_warmup"]),
-        num_samples=int(sampler_raw["num_samples"]),
-        num_chains=int(sampler_raw.get("num_chains", 1)),
-        target_accept=float(sampler_raw.get("target_accept", 0.9)),
-        forward_mode_differentiation=bool(
-            sampler_raw.get("forward_mode_differentiation", True)
-        ),
-        progress_bar=bool(sampler_raw.get("progress_bar", False)),
-        jit_model_args=bool(sampler_raw.get("jit_model_args", True)),
-    )
-
-    output_raw = dict(raw.get("output", {}))
-    outdir = Path(output_raw.get("outdir", "chains"))
-    label = str(output_raw.get("label", ""))
-
-    # CLI overrides win over the config file.
-    seed = int(raw.get("seed", 42))
+    raw = dict(raw)
     if args.seed is not None:
-        seed = args.seed
-    if args.outdir is not None:
-        outdir = args.outdir
-    if args.label is not None:
-        label = args.label
+        raw["seed"] = args.seed
+    if args.outdir is not None or args.label is not None:
+        output = dict(raw.get("output", {}))
+        if args.outdir is not None:
+            output["outdir"] = str(args.outdir)
+        if args.label is not None:
+            output["label"] = args.label
+        raw["output"] = output
 
-    return RunConfig(
-        seed=seed,
-        local_merger_rate=float(raw.get("local_merger_rate", 161.0)),
-        observation_time=float(raw.get("observation_time", 1.0)),
-        fiducials=fiducials,
-        priors=priors,
-        sampled_params=sampled_params,
-        constants=constants,
-        runtime=runtime,
-        catalog=catalog,
-        cosmology=cosmology,
-        sampler=sampler,
-        outdir=outdir,
-        label=label,
-    )
+    return RunConfig.model_validate(raw)
 
 
 def build_prior(spec: dict[str, Any]):
@@ -625,10 +611,10 @@ def save(mcmc, config: RunConfig) -> Path:
         "fiducials": config.fiducials,
         "constants": config.constants,
         "priors": config.priors,
-        "cosmology": dataclasses.asdict(config.cosmology),
+        "cosmology": config.cosmology.model_dump(mode="json"),
         "band": {"f_min": config.catalog.f_min, "f_max": config.catalog.f_max},
-        "sampler": dataclasses.asdict(config.sampler),
-        "runtime": dataclasses.asdict(config.runtime),
+        "sampler": config.sampler.model_dump(mode="json"),
+        "runtime": config.runtime.model_dump(mode="json"),
         "git_revision": _git_revision(),
         "timestamp": timestamp,
     }
