@@ -423,6 +423,7 @@ def run(config: RunConfig, jax, chain_method: str):
     from functools import partial
 
     import jax.numpy as jnp
+    from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
     from numpyro.infer import MCMC, NUTS
 
     from astrogwb.detector import effective_psd, load_sensitivity_map
@@ -430,7 +431,6 @@ def run(config: RunConfig, jax, chain_method: str):
     from astrogwb.gwb import spectral_density
     from astrogwb.sampling.numpyro_model import numpyro_model
     from astrogwb.waveform import load_polarization_power_catalog
-    from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
 
     cat = config.catalog
     cosmo = config.cosmology
@@ -534,6 +534,7 @@ def run(config: RunConfig, jax, chain_method: str):
         model,
         target_accept_prob=sampler.target_accept,
         forward_mode_differentiation=sampler.forward_mode_differentiation,
+        dense_mass=True,
     )
     mcmc = MCMC(
         kernel,
