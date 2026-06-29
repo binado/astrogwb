@@ -22,9 +22,9 @@
 #
 # The strategy is **importance sampling over a fixed proposal catalog**: a one-off catalog
 # of CBC sources (drawn at a *fiducial* parameter point) provides the per-source
-# polarization powers $|A_+|^2 + |A_\times|^2$. During NUTS we never regenerate waveforms;
+# polarization powers $|\tilde{h}_+ (f, \theta)|^2 + |\tilde{h}_\times (f, \theta)|^2$. During NUTS we never regenerate waveforms;
 # instead we reweight the catalog with analytic, JAX-traceable importance weights so the
-# likelihood depends on the sampled parameters $\Lambda$ through `exp(log_weights)` and the
+# likelihood depends on the sampled parameters $\Lambda$ through them and the
 # total merger rate only.
 #
 # To run the notebook end-to-end you must point `CATALOG_PATH` at an `.npz`
@@ -200,8 +200,8 @@ sensitivities = load_sensitivity_map(detnames)
 effective_psd_arr = jnp.asarray(
     effective_psd(frequencies, list(detnames), sensitivities)
 )
-freq_mask = make_frequency_mask(frequencies, fmin=f_min, fmax=f_max)
-print("band bins:", int(jnp.sum(freq_mask)), "of", frequencies.shape[0])
+mask = make_frequency_mask(frequencies, fmin=f_min, fmax=f_max)
+print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 
 
 # %%
@@ -212,7 +212,7 @@ def plot_effective_psd(frequencies: jax.Array, effective_psd: jax.Array, mask: j
     ax.set(xlabel=r"$f$ [Hz]", ylabel=r"$S_{\text{eff}}(f)$ [1/Hz]", title="Effective PSD")
     return fig
 
-plot_effective_psd(frequencies, effective_psd_arr, freq_mask)
+plot_effective_psd(frequencies, effective_psd_arr, mask)
 
 # %% [markdown]
 # ## Modelling the astrophysical SGWB
@@ -391,50 +391,35 @@ merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
 
 
 # %% [markdown]
-# ## Visualizing $\Omega_{\mathrm{GW}}$ at the fiducial point
+# ## Visualizing $\Omega_{\mathrm{GW}}(f)$
 #
-# With weights $\equiv 1$ (the fiducial spectrum), `spectral_density` reduces to
-# `0.4 · rate · mean_over_sources(polarization_power)`. We convert to $\Omega_{\mathrm{GW}}(f)$
-# and plot the positive part on log-log axes (Julia `plot_fiducial_omega_gw`).
+# In the cell below, we plot $\Omega_{GW}(f, \Lambda_0)$.
 
 # %%
+def plot_omegagw(spectral_density: jax.Array, frequencies: jax.Array, mask: jax.Array, *, color: str = "black", ymin: float = 1e-15):
+    omega_gw = omega_gw_from_spectral_density(spectral_density, frequencies)
+    pos = omega_gw > 0.0
+    fig, ax = plt.subplots()
+    ax.loglog(np.asarray(frequencies[mask & pos]), np.asarray(omega_gw[mask & pos]), color=color)
+    ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$")
+    ax.set_ylim(ymin, None)
+    return fig
+
 ones_weights = jnp.ones((n_samples,))
 rate0, _ = merger_rate_and_log_weights_fn(
     fiducials,
     samples,
 )
-S_h0 = spectral_density(
+observed_spectral_density = spectral_density(
     polarization_power, ones_weights, rate0, average_mode="analytic_inclination"
 )
-
-omega0 = omega_gw_from_spectral_density(S_h0, frequencies)
-pos = omega0 > 0.0
-
-fig, ax = plt.subplots(figsize=(9, 4.5))
-ax.loglog(np.asarray(frequencies[pos]), np.asarray(omega0[pos]))
-ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-ax.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$")
-ax.set_ylim(1e-15, None)
-ax.set_title("Fiducial astrophysical GWB")
-fig.tight_layout()
-
-# %% [markdown]
-# ## Observed (injected) data
-#
-# We inject the fiducial spectrum as the observed data, so the truth sits at the fiducial
-# parameter point (the profile/recovery setup of the Julia notebook).
-
-# %%
-observed_spectral_density = S_h0
+plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-15)
 
 # %% [markdown]
 # ## Running the MCMC
 #
-# We pass the large catalog arrays as dynamic JAX arguments to `mcmc.run`, not as closed-over
-# constants. Like the Julia run (which used ForwardDiff), we use **forward-mode**
-# differentiation — the weight chain goes through grid-based cosmology integrals that are
-# forward-mode friendly. Production defaults mirror Julia (`num_warmup=3000,
-# num_samples=3000, target_accept=0.9`); `DEBUG` uses a small smoke setting.
+# We run the NUTS sampler as implemented in the `numpyro` python package.
 
 # %%
 model = partial(
@@ -444,7 +429,7 @@ model = partial(
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     priors=priors,
     constants=constants,
-    frequency_mask=freq_mask,
+    frequency_mask=mask,
 )
 
 kernel = NUTS(
@@ -460,6 +445,7 @@ mcmc = MCMC(
     num_chains=num_chains,
     progress_bar=True,
     jit_model_args=True,
+    chain_method="vectorized"
 )
 rng_key = jax.random.PRNGKey(seed)
 mcmc.run(
@@ -512,11 +498,6 @@ print("saved:", base)
 
 # %% [markdown]
 # ## Diagnostic plots
-#
-# `arviz_stats.summary`, then `arviz_plots` trace, autocorrelation, and marginal/pair
-# plots. We also surface the model's `importance_relative_ess` and `total_merger_rate`
-# deterministics — the relative effective sample size is the key health check that the
-# proposal catalog still reweights well at the posterior.
 
 # %%
 summary = azs.summary(inference_data, var_names=list(sampled_params))
@@ -538,11 +519,3 @@ if len(sampled_params) >= 2:
     )
 else:
     azp.plot_dist(inference_data, var_names=list(sampled_params))
-
-# %%
-# importance-sampling health: relative ESS should stay close to 1 across draws
-post = inference_data["posterior"]
-ress = post["importance_relative_ess"].values.ravel()
-rate = post["total_merger_rate"].values.ravel()
-print(f"relative_ess: mean={ress.mean():.3f} min={ress.min():.3f}")
-print(f"total_merger_rate [/s]: mean={rate.mean():.4e}")
