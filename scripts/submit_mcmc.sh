@@ -132,6 +132,8 @@ cd "${SUBMIT_DIR}"
 # Pin CPU threads to the allocation so XLA/OMP do not oversubscribe the node.
 # (run_mcmc.py also honors [runtime] cpu_threads; either is sufficient.)
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export INPUT="*"
+export OUTPUT="*"
 
 echo "Task ${TASK_ID}: running ${CONFIG}"
 
