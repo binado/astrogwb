@@ -2,23 +2,24 @@
 
 This is the SLURM-friendly port of ``notebooks/mcmc.py``: it importance-reweights a
 fixed polarization-power catalog through NUTS to infer cosmological / population
-hyperparameters, reading every setting from a TOML config file and emitting only
-``logging`` progress (no plots). It saves an ArviZ ``InferenceData`` NetCDF plus a
-JSON run-config record, exactly like the notebook.
+hyperparameters, reading every setting from a TOML or JSON config file and emitting
+only ``logging`` progress (no plots). It saves an ArviZ ``InferenceData`` NetCDF plus
+a JSON run-config record, exactly like the notebook.
 
-Design constraint (do not "tidy" away): the module top imports only stdlib and
-pydantic -- neither touches JAX. ``OMP_NUM_THREADS`` / ``XLA_FLAGS`` and
-``numpyro.set_host_device_count(...)`` must be set *before* JAX initializes its
-backend, so the heavy imports (jax, numpyro, astrogwb, gwmock_pop) happen inside
-functions that run only after :func:`configure_runtime`. See ``configure_runtime``
-for the ordering.
+Design constraint (do not "tidy" away): config parsing lives in
+``astrogwb.sampling.config`` (stdlib + pydantic only). ``OMP_NUM_THREADS`` /
+``XLA_FLAGS`` and ``numpyro.set_host_device_count(...)`` must be set *before* JAX
+initializes its backend, so the heavy imports (jax, numpyro, astrogwb, gwmock_pop)
+happen inside functions that run only after :func:`configure_runtime`. See
+``configure_runtime`` for the ordering.
 
 Usage::
 
     uv run python scripts/run_mcmc.py --config configs/mcmc.example.toml
+    uv run python scripts/run_mcmc.py --config configs/mcmc/sweep/ET-2L-aligned__H0.json
 
-The script is meant to back a SLURM job array with one TOML config per task; see
-``scripts/submit_mcmc.sh -i configs/``.
+The script is meant to back a SLURM job array with one config per task; see
+``scripts/submit_mcmc.sh -i configs/mcmc/sweep``.
 """
 
 from __future__ import annotations
@@ -28,12 +29,16 @@ import json
 import logging
 import os
 import subprocess
-import tomllib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from astrogwb.sampling.config import (
+    RunConfig,
+    RuntimeConfig,
+    build_run_config,
+    load_config,
+)
 
 logger = logging.getLogger("run_mcmc")
 
@@ -41,132 +46,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 # --------------------------------------------------------------------------- #
-# Configuration models
-#
-# pydantic owns coercion (str -> Path, list -> tuple), defaults, and structural
-# validation; ``extra="forbid"`` turns config typos (e.g. ``num_warump``) into
-# loud errors. Cross-field derivation (resolving ``sampled_params``, aligning
-# ``priors``, computing ``constants``) lives in the ``RunConfig`` validator.
-# --------------------------------------------------------------------------- #
-_STRICT = ConfigDict(frozen=True, extra="forbid")
-
-
-class RuntimeConfig(BaseModel):
-    """Device/thread control. Consumed by :func:`configure_runtime`."""
-
-    model_config = _STRICT
-
-    platform: str = "auto"  # auto | cpu | gpu
-    host_device_count: int | None = None  # CPU devices for parallel chains
-    cpu_threads: int = 0  # 0 -> leave XLA/OMP default
-    chain_method: str = "auto"  # auto | parallel | sequential | vectorized
-
-
-class CatalogConfig(BaseModel):
-    model_config = _STRICT
-
-    path: Path
-    detectors: tuple[str, ...]
-    f_min: float
-    f_max: float
-
-
-class CosmoConfig(BaseModel):
-    model_config = _STRICT
-
-    z_min: float
-    z_max: float
-    n_grid: int
-
-
-class SamplerConfig(BaseModel):
-    model_config = _STRICT
-
-    num_warmup: int
-    num_samples: int
-    num_chains: int = 1
-    target_accept: float = 0.9
-    forward_mode_differentiation: bool = True
-    progress_bar: bool = False
-    jit_model_args: bool = True
-
-
-class OutputConfig(BaseModel):
-    model_config = _STRICT
-
-    outdir: Path = Path("chains")
-    label: str = ""
-
-
-class RunConfig(BaseModel):
-    model_config = _STRICT
-
-    seed: int = 42
-    local_merger_rate: float = 161.0
-    observation_time: float = 1.0
-    fiducials: dict[str, float]
-    priors: dict[str, dict[str, Any]]  # prior name -> spec table
-    # Unset (empty) -> default to the keys present in [priors]; resolved below.
-    sampled_params: tuple[str, ...] = ()
-    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
-    catalog: CatalogConfig
-    cosmology: CosmoConfig
-    sampler: SamplerConfig
-    output: OutputConfig = Field(default_factory=OutputConfig)
-    # Derived in the validator (every fiducial not sampled).
-    constants: dict[str, float] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _resolve_sampled_and_constants(self) -> RunConfig:
-        if not self.fiducials:
-            raise ValueError("config must define a non-empty [fiducials] table")
-        if not self.priors:
-            raise ValueError("config must define at least one [priors.<param>] table")
-
-        sampled = self.sampled_params or tuple(self.priors)
-        missing_priors = [p for p in sampled if p not in self.priors]
-        if missing_priors:
-            raise ValueError(
-                f"sampled_params without a [priors.*] table: {missing_priors}"
-            )
-        missing_fid = [p for p in sampled if p not in self.fiducials]
-        if missing_fid:
-            raise ValueError(f"sampled_params missing from [fiducials]: {missing_fid}")
-
-        # Keep prior order aligned with sampled_params and drop unsampled tables.
-        aligned_priors = {name: self.priors[name] for name in sampled}
-        constants = {k: v for k, v in self.fiducials.items() if k not in sampled}
-
-        # Frozen model: object.__setattr__ is pydantic's own escape hatch.
-        object.__setattr__(self, "sampled_params", sampled)
-        object.__setattr__(self, "priors", aligned_priors)
-        object.__setattr__(self, "constants", constants)
-        return self
-
-    @property
-    def outdir(self) -> Path:
-        return self.output.outdir
-
-    @property
-    def label(self) -> str:
-        return self.output.label
-
-
-# --------------------------------------------------------------------------- #
-# CLI / config parsing
+# CLI
 # --------------------------------------------------------------------------- #
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Headless NumPyro MCMC runner for the astrophysical GWB. Reads all "
-            "settings from a TOML config; saves an ArviZ NetCDF + JSON record."
+            "settings from a TOML or JSON config; saves an ArviZ NetCDF + JSON record."
         )
     )
     parser.add_argument(
         "--config",
         type=Path,
         required=True,
-        help="Path to the TOML config file for this run / array task.",
+        help="Path to the TOML or JSON config file for this run / array task.",
     )
     parser.add_argument(
         "--seed",
@@ -192,34 +85,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Log at WARNING instead of INFO.",
     )
     return parser.parse_args(argv)
-
-
-def load_config(path: Path) -> dict[str, Any]:
-    """Parse a TOML config file into a plain dict."""
-    with open(path, "rb") as handle:
-        return tomllib.load(handle)
-
-
-def build_run_config(raw: dict[str, Any], args: argparse.Namespace) -> RunConfig:
-    """Apply CLI overrides to the raw TOML mapping and validate it into a RunConfig.
-
-    CLI overrides (``--seed`` / ``--outdir`` / ``--label``) are merged into the raw
-    mapping first so they take precedence over the file; pydantic then handles
-    coercion, defaults, and validation. ``sampled_params`` defaults to the keys in
-    ``[priors]`` and ``constants`` is derived inside :class:`RunConfig`.
-    """
-    raw = dict(raw)
-    if args.seed is not None:
-        raw["seed"] = args.seed
-    if args.outdir is not None or args.label is not None:
-        output = dict(raw.get("output", {}))
-        if args.outdir is not None:
-            output["outdir"] = str(args.outdir)
-        if args.label is not None:
-            output["label"] = args.label
-        raw["output"] = output
-
-    return RunConfig.model_validate(raw)
 
 
 def build_prior(spec: dict[str, Any]):
@@ -636,7 +501,12 @@ def save(mcmc, config: RunConfig) -> Path:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     raw = load_config(args.config)
-    config = build_run_config(raw, args)
+    config = build_run_config(
+        raw,
+        seed=args.seed,
+        outdir=args.outdir,
+        label=args.label,
+    )
 
     logging.basicConfig(
         level=logging.WARNING if args.quiet else logging.INFO,

@@ -1,10 +1,10 @@
 #!/bin/bash
-# Submit a SLURM job array over MCMC TOML configs in a directory.
-# One array task per *.toml file (sorted); each task runs scripts/run_mcmc.py.
+# Submit a SLURM job array over MCMC configs in a directory.
+# One array task per *.toml or *.json file (sorted); each task runs scripts/run_mcmc.py.
 # Adapt --partition / --account / module loads inside the heredoc to your cluster.
 #
 # Usage:
-#   ./scripts/submit_mcmc.sh -i configs/
+#   ./scripts/submit_mcmc.sh -i configs/mcmc/sweep
 #
 # Ensure the cluster env has dev deps (arviz, jupyter, etc.): uv sync --group dev
 
@@ -13,7 +13,7 @@ set -euo pipefail
 function usage() {
     echo "Usage: $0 -i <config_dir>"
     echo "       $0 <config_dir>"
-    echo "  config_dir: Directory containing one *.toml config per array task"
+    echo "  config_dir: Directory containing one *.toml or *.json config per array task"
     exit 1
 }
 
@@ -72,9 +72,9 @@ fi
 CONFIGS=()
 while IFS= read -r config; do
     CONFIGS+=("$config")
-done < <(find "${INPUT_DIR}" -maxdepth 1 -type f -name '*.toml' | sort)
+done < <(find "${INPUT_DIR}" -maxdepth 1 -type f \( -name '*.toml' -o -name '*.json' \) | sort)
 if [[ ${#CONFIGS[@]} -eq 0 ]]; then
-    echo "Error: No *.toml configs found in '${INPUT_DIR}'." >&2
+    echo "Error: No *.toml or *.json configs found in '${INPUT_DIR}'." >&2
     exit 1
 fi
 
