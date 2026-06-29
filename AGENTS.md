@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 - `src/astrogwb/`: Python package code.
   - `detector/`: ORF, effective PSD, `load_sensitivities_for_network`, `geometry.toml`, `sensitivity.toml`, and bundled noise curves.
-  - `gwb.py`: JAX SGWB spectral-density contractions, Omega_GW conversions, and `gaussian_bin_scale` (note: `observation_time` is in **years**).
+  - `gwb/`: `spectral.py` (SGWB spectral-density contractions, Omega_GW conversions, and `gaussian_bin_scale`; note: `observation_time` is in **years**), `snr.py` (matched-filter SNR).
   - `waveform/`: polarization-power catalog generation and persistence.
   - `sampling/`: thin NumPyro model for caller-prepared arrays; the model takes a single `merger_rate_and_log_weights_fn(params, samples) -> (total_merger_rate, log_weights)` callback.
   - `utils.py`: small unit-conversion helpers (`SECONDS_PER_YEAR`, `years_to_seconds`).
