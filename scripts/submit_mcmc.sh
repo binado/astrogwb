@@ -100,9 +100,8 @@ sbatch --array=0-"${ARRAY_MAX}" \
 #SBATCH --output=logs/mcmc_%A_%a.out
 #SBATCH --error=logs/mcmc_%A_%a.err
 #
-# GPU runs: uncomment the line below and set platform = "gpu" (or "auto") in the config.
-# The script auto-detects the device and switches chain_method to "vectorized".
-##SBATCH --gres=gpu:1
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
 
 set -euo pipefail
 
