@@ -48,7 +48,9 @@ num_cpus = multiprocessing.cpu_count()
 import numpyro
 numpyro.set_host_device_count(num_cpus)
 
-import arviz as az
+import arviz_base as azb
+import arviz_plots as azp
+import arviz_stats as azs
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -87,6 +89,7 @@ from gwmock_pop.cosmology.flat_lambda_cdm import (
 
 jax.config.update("jax_enable_x64", True)
 # %config InlineBackend.figure_format = 'retina'
+azp.style.use("arviz-variat")
 
 
 # %% [markdown]
@@ -473,7 +476,7 @@ mcmc.print_summary()
 # %% [markdown]
 # ## Saving the run
 #
-# We convert to an ArviZ `InferenceData` and write it to NetCDF,
+# We convert to an `xarray.DataTree` via `arviz_base` and write it to NetCDF,
 # alongside a small JSON record of the run configuration.
 
 # %%
@@ -486,8 +489,8 @@ params_suffix = "-".join(sampled_params)
 det_suffix = ",".join(detnames)
 base = f"chains-{params_suffix}-det={det_suffix}-seed{seed}-{timestamp}"
 
-idata = az.from_numpyro(mcmc)
-idata.to_netcdf(out_dir / f"{base}.nc")
+inference_data = azb.from_numpyro(mcmc)
+inference_data.to_netcdf(out_dir / f"{base}.nc")
 
 run_config = {
     "catalog_path": str(CATALOG_PATH),
@@ -510,36 +513,35 @@ print("saved:", base)
 # %% [markdown]
 # ## Diagnostic plots
 #
-# `az.summary` (Julia `summarystats`), trace and autocorrelation plots, and a `corner`
-# plot for $\ge 2$ sampled parameters (the `PairPlots` analog) or `az.plot_posterior` for a
-# single parameter. We also surface the model's `importance_relative_ess` and
-# `total_merger_rate` deterministics — the relative effective sample size is the key health
-# check that the proposal catalog still reweights well at the posterior.
+# `arviz_stats.summary`, then `arviz_plots` trace, autocorrelation, and marginal/pair
+# plots. We also surface the model's `importance_relative_ess` and `total_merger_rate`
+# deterministics — the relative effective sample size is the key health check that the
+# proposal catalog still reweights well at the posterior.
 
 # %%
-summary = az.summary(idata)
+summary = azs.summary(inference_data, var_names=list(sampled_params))
 summary
 
 # %%
-az.plot_trace(idata, var_names=list(sampled_params))
-plt.tight_layout()
+azp.plot_trace_dist(inference_data, var_names=list(sampled_params))
 
 # %%
-az.plot_autocorr(idata, var_names=list(sampled_params))
-plt.tight_layout()
+azp.plot_autocorr(inference_data, var_names=list(sampled_params))
 
 # %%
 if len(sampled_params) >= 2:
-    import corner
-
-    corner.corner(idata, var_names=list(sampled_params))
+    azp.plot_pair(
+        inference_data,
+        var_names=list(sampled_params),
+        marginal_kind="kde",
+        marginal=True,
+    )
 else:
-    az.plot_posterior(idata, var_names=list(sampled_params))
-plt.tight_layout()
+    azp.plot_dist(inference_data, var_names=list(sampled_params))
 
 # %%
 # importance-sampling health: relative ESS should stay close to 1 across draws
-post = idata.posterior
+post = inference_data["posterior"]
 ress = post["importance_relative_ess"].values.ravel()
 rate = post["total_merger_rate"].values.ravel()
 print(f"relative_ess: mean={ress.mean():.3f} min={ress.min():.3f}")
