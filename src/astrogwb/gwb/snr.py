@@ -11,15 +11,17 @@ def inner_product(
     observation_time_sec: float | jax.Array,
     df: float | jax.Array,
 ) -> jax.Array:
-    """Discrete frequency-domain inner product for a diagonal Gaussian noise model.
+    r"""Discrete frequency-domain inner product for a diagonal Gaussian noise model.
 
-    ``⟨a, b⟩ = 2 T Δf Σ_i a_i b_i / effective_psd_i²``,
+    :math:`\langle a, b \rangle = 2 T \Delta f \sum_i a_i b_i / \mathrm{effective\_psd}_i^2`,
 
-    where ``σ_i = effective_psd_i / √(2 T Δf)`` and observation time ``T`` is in
-    seconds with bin width ``Δf =`` ``df`` in Hz.
+    where :math:`\sigma_i = \mathrm{effective\_psd}_i / \sqrt{2 T \Delta f}` and
+    observation time :math:`T` is in seconds with bin width :math:`\Delta f =`
+    ``df`` in Hz.
 
-    With ``a = b`` equal to a strain spectral density ``S_h``,
-    ``⟨S_h, S_h⟩`` is matched-filter **SNR²**; see :func:`spectral_snr_squared`.
+    With :math:`a = b` equal to a strain spectral density :math:`S_h`,
+    :math:`\langle S_h, S_h \rangle` is matched-filter
+    :math:`\mathrm{SNR}^2`; see :func:`spectral_snr_squared`.
     """
     prefactor = 2.0 * observation_time_sec * df
     return prefactor * jnp.sum(a * b / effective_psd**2)
@@ -31,14 +33,14 @@ def spectral_snr_squared(
     observation_time_sec: float | jax.Array,
     df: float | jax.Array,
 ) -> jax.Array:
-    """Discrete matched-filter **SNR²** for a diagonal Gaussian noise model.
+    r"""Discrete matched-filter :math:`\mathrm{SNR}^2` for a diagonal Gaussian noise model.
 
-    ``SNR² = ⟨S_h, S_h⟩ = Σ_i S_{h,i}² / σ_i²``,
+    :math:`\mathrm{SNR}^2 = \langle S_h, S_h \rangle = \sum_i S_{h,i}^2 / \sigma_i^2`,
 
-    where ``σ_i = effective_psd_i / √(2 T Δf)`` with observation time ``T`` in
-    seconds and bin width ``Δf =`` ``df`` in Hz.
+    where :math:`\sigma_i = \mathrm{effective\_psd}_i / \sqrt{2 T \Delta f}` with
+    observation time :math:`T` in seconds and bin width :math:`\Delta f =` ``df`` in Hz.
 
-    The per-bin ``σ`` matches :func:`astrogwb.gwb.gaussian_bin_scale` when
+    The per-bin :math:`\sigma` matches :func:`astrogwb.gwb.gaussian_bin_scale` when
     ``df`` is the same width used there and ``observation_time_sec`` is the
     corresponding value in seconds.
     """
@@ -57,7 +59,9 @@ def spectral_snr(
     observation_time_sec: float | jax.Array,
     df: float | jax.Array,
 ) -> jax.Array:
-    """``SNR = √(SNR²)`` with ``SNR²`` from :func:`spectral_snr_squared`."""
+    r""":math:`\mathrm{SNR} = \sqrt{\mathrm{SNR}^2}` with :math:`\mathrm{SNR}^2` from
+    :func:`spectral_snr_squared`.
+    """
     return jnp.sqrt(
         spectral_snr_squared(
             spectral_density,
