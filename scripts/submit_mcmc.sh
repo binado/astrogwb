@@ -133,6 +133,7 @@ cd "${SUBMIT_DIR}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 export INPUT="*"
 export OUTPUT="*"
+export JAX_PLATFORMS="cuda"
 
 echo "Task ${TASK_ID}: running ${CONFIG}"
 
