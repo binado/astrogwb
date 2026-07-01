@@ -35,17 +35,16 @@
 # ## Imports and JAX configuration
 
 # %%
-from collections.abc import Mapping
 from datetime import datetime
 from functools import partial
 import json
 import multiprocessing
 from pathlib import Path
-from typing import Any
 
 # Setting JAX to use all available CPU cores for parallelization
 num_cpus = multiprocessing.cpu_count()
 import numpyro
+
 numpyro.set_host_device_count(num_cpus)
 
 import arviz_base as azb
@@ -59,14 +58,13 @@ from numpyro.infer import MCMC, NUTS
 
 import matplotlib.pyplot as plt
 
-from astrogwb.sampling.numpyro_model import MergerRateAndLogWeightsFn, numpyro_model
+from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.gwb import (
     spectral_density,
     omega_gw_from_spectral_density,
     frequency_mask as make_frequency_mask,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
-from astrogwb.utils import SECONDS_PER_YEAR
 from astrogwb.waveform import load_polarization_power_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
@@ -76,16 +74,8 @@ from matplotlib.projections import register_projection
 
 register_projection(MplAxes)
 
-# gwmock-pop: JAX-traceable population + cosmology physics for the weights
-from gwmock_pop.distributions.madau_dickinson import (
-    madau_dickinson_redshift_pdf,
-    madau_dickinson_rate,
-)
-from gwmock_pop.cosmology.flat_lambda_cdm import (
-    SPEED_OF_LIGHT,
-    build_distance_lookup,
-    compute_normalized_hubble_parameter,
-)
+# gwmock-pop: still needed for the proposal redshift PDF precompute.
+from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
 
 jax.config.update("jax_enable_x64", True)
 # %config InlineBackend.figure_format = 'retina'
@@ -101,8 +91,10 @@ DEBUG = False  # small smoke settings for first runs; set False for the producti
 # --- Catalog input (placeholder — see schema markdown below) ----------------
 # No working polarization-power catalog exists yet; set this once one is produced.
 
+
 def get_root_dir() -> Path:
     return Path.cwd().parent
+
 
 ROOT_DIR = get_root_dir()
 CATALOG_PATH = ROOT_DIR / "out/bns_polarization_power_catalog.npz"
@@ -205,12 +197,21 @@ print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 
 
 # %%
-def plot_effective_psd(frequencies: jax.Array, effective_psd: jax.Array, mask: jax.Array, *, color: str = "black"):
+def plot_effective_psd(
+    frequencies: jax.Array,
+    effective_psd: jax.Array,
+    mask: jax.Array,
+    *,
+    color: str = "black",
+):
     fig, ax = plt.subplots()
     ax.loglog(frequencies, effective_psd, color=color, ls="--")
     ax.loglog(frequencies[mask], effective_psd[mask], color=color)
-    ax.set(xlabel=r"$f$ [Hz]", ylabel=r"$S_{\text{eff}}(f)$ [1/Hz]", title="Effective PSD")
+    ax.set(
+        xlabel=r"$f$ [Hz]", ylabel=r"$S_{\text{eff}}(f)$ [1/Hz]", title="Effective PSD"
+    )
     return fig
+
 
 plot_effective_psd(frequencies, effective_psd_arr, mask)
 
@@ -260,12 +261,12 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 #
 # ### Implementing the model
 #
-# To implement and use the importance sampling model in the pipeline, it suffices to implement a 
+# To implement and use the importance sampling model in the pipeline, it suffices to implement a
 #
 # ```python
 # def merger_rate_and_log_weights(parameters: jax.Array, samples: jax.Array):
 #     pass
-# ``` 
+# ```
 #
 #
 # which returns a tuple of (merger rate, log importance weights). While it would be conceptually simpler to pass separate functions for each quantity, encapsulating all the logic in a single function allows the caller to efficiently implement the cosmology integrals which are used in both calculations.
@@ -294,92 +295,13 @@ log_p_proposal = jnp.log(
 
 
 # %% [markdown]
-# We implement the `merger_rate_and_log_weights` function in the cell below:
+# The `merger_rate_and_log_weights` callback is packaged in
+# `astrogwb.importance.models` (BNS + Madau-Dickinson rate + modified
+# GW/EM propagation). We import the canonical, tested factory and bind it
+# to this notebook's proposal catalog here.
 
 # %%
-def log_gw_em_ratio(z, xi_0, xi_n):
-    return jnp.log(xi_0 + (1.0 - xi_0) * jnp.exp(-xi_n * jnp.log1p(z)))
-
-
-def flat_lcdm_grid(
-    params: Mapping[str, Any],
-    max_redshift: float,
-    n_grid: int = 256
-) -> tuple[jax.Array, jax.Array]:
-    h0 = params["H0"]
-    omega_m = params["Omega_m"]
-
-    z, comoving_distance, luminosity_distance = build_distance_lookup(
-        hubble_constant=h0,
-        omega_m=omega_m,
-        max_redshift=max_redshift,
-        n_grid=n_grid,
-    )
-    e_z = compute_normalized_hubble_parameter(redshift=z, omega_m=omega_m)
-    differential_comoving_volume = (
-        4.0 * jnp.pi * comoving_distance**2 / (h0 * e_z) * SPEED_OF_LIGHT / 1000
-    )
-    return luminosity_distance, differential_comoving_volume
-
-
-def make_merger_rate_and_log_weights_fn(
-    *,
-    z_grid: jax.Array,
-    proposal_log_pdf: jax.Array,
-    local_merger_rate: float,
-    fiducial_xi_0: float,
-    fiducial_xi_n: float,
-) -> MergerRateAndLogWeightsFn:
-    n_grid = z_grid.shape[0]
-    max_redshift = float(z_grid[-1])
-    
-    def merger_rate_and_log_weights_fn(params, samples):
-        z = samples["redshift"]
-        d_l_fid = samples["luminosity_distance"]
-
-        luminosity_distance_grid, dvc_dz_grid = flat_lcdm_grid(params, max_redshift, n_grid)
-        d_l_theta = jnp.interp(
-            z,
-            z_grid,
-            luminosity_distance_grid,
-            left=luminosity_distance_grid[0],
-            right=luminosity_distance_grid[-1],
-        )
-
-        rate_shape_grid = madau_dickinson_rate(
-            z_grid, params["gamma"], params["kappa"], params["z_peak"]
-        )
-        unnormalized_pdf_grid = rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid
-        integral_Mpc3 = jnp.trapezoid(unnormalized_pdf_grid, z_grid)
-
-        rate_shape_samples = madau_dickinson_rate(
-            z, params["gamma"], params["kappa"], params["z_peak"]
-        )
-        dvc_dz_samples = jnp.interp(
-            z,
-            z_grid,
-            dvc_dz_grid,
-            left=dvc_dz_grid[0],
-            right=dvc_dz_grid[-1],
-        )
-        target_pdf = rate_shape_samples / (1.0 + z) * dvc_dz_samples / integral_Mpc3
-
-        log_fiducial_gw_em_ratio = log_gw_em_ratio(z, fiducial_xi_0, fiducial_xi_n)
-        log_target_gw_em_ratio = log_gw_em_ratio(z, params["xi_0"], params["xi_n"])
-        log_weights = (
-            jnp.log(target_pdf)
-            - proposal_log_pdf
-            + 2.0 * jnp.log(d_l_fid)
-            - 2.0 * jnp.log(d_l_theta)
-            + 2.0 * log_fiducial_gw_em_ratio
-            - 2.0 * log_target_gw_em_ratio
-        )
-
-        total_merger_rate = 1e-9 * local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
-        return total_merger_rate, log_weights
-
-    return merger_rate_and_log_weights_fn
-
+from astrogwb.importance.models import make_merger_rate_and_log_weights_fn
 
 merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
     z_grid=jnp.linspace(z_min, z_max, n_grid),
@@ -395,16 +317,29 @@ merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
 #
 # In the cell below, we plot $\Omega_{GW}(f, \Lambda_0)$.
 
+
 # %%
-def plot_omegagw(spectral_density: jax.Array, frequencies: jax.Array, mask: jax.Array, *, color: str = "black", ymin: float = 1e-15):
+def plot_omegagw(
+    spectral_density: jax.Array,
+    frequencies: jax.Array,
+    mask: jax.Array,
+    *,
+    color: str = "black",
+    ymin: float = 1e-15,
+):
     omega_gw = omega_gw_from_spectral_density(spectral_density, frequencies)
     pos = omega_gw > 0.0
     fig, ax = plt.subplots()
-    ax.loglog(np.asarray(frequencies[mask & pos]), np.asarray(omega_gw[mask & pos]), color=color)
+    ax.loglog(
+        np.asarray(frequencies[mask & pos]),
+        np.asarray(omega_gw[mask & pos]),
+        color=color,
+    )
     ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
     ax.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$")
     ax.set_ylim(ymin, None)
     return fig
+
 
 ones_weights = jnp.ones((n_samples,))
 rate0, _ = merger_rate_and_log_weights_fn(
@@ -436,7 +371,7 @@ kernel = NUTS(
     model,
     target_accept_prob=target_accept,
     forward_mode_differentiation=True,
-    dense_mass=True
+    dense_mass=True,
 )
 mcmc = MCMC(
     kernel,
@@ -445,7 +380,7 @@ mcmc = MCMC(
     num_chains=num_chains,
     progress_bar=True,
     jit_model_args=True,
-    chain_method="vectorized"
+    chain_method="vectorized",
 )
 rng_key = jax.random.PRNGKey(seed)
 mcmc.run(
