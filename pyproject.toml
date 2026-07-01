@@ -24,10 +24,13 @@ requires = ["uv_build>=0.10.2,<0.11.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = [
+plotting = [
     "arviz>=1.2.0",
-    "corner>=2.2.3",
+    "corner @ git+https://github.com/dfm/corner.py@d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4",
     "h5netcdf>=1.8.1",
+]
+dev = [
+    { include-group = "plotting" },
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
     "matplotlib>=3.11.0",

@@ -8,20 +8,21 @@
   - `sampling/`: thin NumPyro model for caller-prepared arrays; the model takes a single `merger_rate_and_log_weights_fn(params, samples) -> (total_merger_rate, log_weights)` callback.
   - `utils.py`: small unit-conversion helpers (`SECONDS_PER_YEAR`, `years_to_seconds`).
 - `tests/`: Pytest suite with unit and integration coverage; committed `tests/fixtures/*.npz` for regression locks.
-- `notebooks/`: runnable, version-controlled workflows. `mcmc.py` (py:percent) is the NumPyro port of ASGWB.jl's importance-weighted NUTS run.
+- `notebooks/`: runnable, version-controlled workflows. `mcmc.py` (py:percent) is the NumPyro port of ASGWB.jl's importance-weighted NUTS run; `mcmc_plotting.py` loads saved chains and produces corner and diagnostic plots.
 - `notes/`: LaTeX notes/manuscript support files (`notes/justfile` for PDF build helpers).
 
 gwmock-signal owns preset detector networks; gwmock-noise owns bundled PSD presets and interpolation. astrogwb owns the frequency-dependent ORF, out-of-band PSD policy, supplemental geometry/noise tables for str-named detectors, and SGWB detector utilities.
 
 ## Build, Test, and Development Commands
-- `uv sync --group dev`: create/update the local environment with dev dependencies.
+- `uv sync --group dev`: create/update the local environment with dev dependencies (includes the `plotting` group: arviz, corner, h5netcdf).
+- `uv sync --group plotting`: install notebook plotting dependencies only (arviz, corner, h5netcdf).
 - `uv run pytest`: run all tests.
 - `uv run pytest -m "not integration"`: run fast unit tests only.
 - `uv run ruff check . --fix`: lint and apply safe fixes.
 - `uv run ruff format .`: format Python files.
 - `uvx ty check`: type check.
 - `pre-commit run --all-files`: run all configured quality hooks before pushing.
-- `uv run jupyter nbconvert --to notebook --execute notebooks/mcmc.py`: run the MCMC notebook end-to-end (or open in JupyterLab after `uv sync --group dev`, which bundles Jupyter, arviz, corner, and matplotlib).
+- `uv run jupyter nbconvert --to notebook --execute notebooks/mcmc.py`: run the MCMC notebook end-to-end (or open in JupyterLab after `uv sync --group dev` or `uv sync --group plotting`, which bundle arviz, corner, and matplotlib).
 
 ## Coding Style & Naming Conventions
 - Target Python `>=3.12`; use 4-space indentation and explicit type hints for public APIs.
