@@ -1,5 +1,8 @@
 data
 
+# Generated MCMC sweep configs (regenerate via scripts/generate_mcmc_configs.py)
+configs/mcmc/sweep/
+
 *.md
 !README.md
 !AGENTS.md
