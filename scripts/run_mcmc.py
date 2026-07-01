@@ -31,7 +31,6 @@ import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from astrogwb.sampling.config import (
     RunConfig,
@@ -39,6 +38,7 @@ from astrogwb.sampling.config import (
     build_run_config,
     load_config,
 )
+from astrogwb.sampling.priors import build_prior
 
 logger = logging.getLogger("run_mcmc")
 
@@ -85,36 +85,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Log at WARNING instead of INFO.",
     )
     return parser.parse_args(argv)
-
-
-def build_prior(spec: dict[str, Any]):
-    """Materialize a small TOML prior spec into a ``numpyro`` distribution.
-
-    Supported ``type`` values: ``uniform`` (low/high), ``normal`` (loc/scale),
-    ``loguniform`` (low/high). Imported lazily so this stays callable only after
-    the runtime is configured.
-    """
-    import numpyro.distributions as dist
-
-    kind = str(spec["type"]).lower()
-    if kind == "uniform":
-        return dist.Uniform(low=float(spec["low"]), high=float(spec["high"]))
-    if kind == "normal":
-        return dist.Normal(loc=float(spec["loc"]), scale=float(spec["scale"]))
-    if kind == "loguniform":
-        # numpyro exposes a LogUniform distribution (base distribution of a log
-        # transform); fall back to a transformed Uniform if unavailable.
-        low, high = float(spec["low"]), float(spec["high"])
-        if hasattr(dist, "LogUniform"):
-            return dist.LogUniform(low=low, high=high)
-        import jax.numpy as jnp
-        from numpyro.distributions.transforms import ExpTransform
-
-        return dist.TransformedDistribution(
-            dist.Uniform(low=jnp.log(low), high=jnp.log(high)),
-            ExpTransform(),
-        )
-    raise ValueError(f"unsupported prior type: {spec['type']!r}")
 
 
 # --------------------------------------------------------------------------- #
