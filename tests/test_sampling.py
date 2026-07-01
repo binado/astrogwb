@@ -74,14 +74,14 @@ def test_numpyro_model_uses_combined_merger_rate_and_log_weights_callback() -> N
 
 def test_build_prior_uniform() -> None:
     d = build_prior({"type": "uniform", "low": 0.0, "high": 2.0})
-    assert d.low == 0.0
-    assert d.high == 2.0
+    assert d.low == 0.0  # ty: ignore[unresolved-attribute]
+    assert d.high == 2.0  # ty: ignore[unresolved-attribute]
 
 
 def test_build_prior_normal() -> None:
     d = build_prior({"type": "normal", "loc": 1.0, "scale": 0.5})
-    np.testing.assert_allclose(d.loc, 1.0)
-    np.testing.assert_allclose(d.scale, 0.5)
+    np.testing.assert_allclose(d.loc, 1.0)  # ty: ignore[unresolved-attribute]
+    np.testing.assert_allclose(d.scale, 0.5)  # ty: ignore[unresolved-attribute]
 
 
 def test_build_prior_loguniform_bounds() -> None:
@@ -108,6 +108,6 @@ def test_build_priors_mapping() -> None:
         }
     )
     assert set(priors) == {"H0", "Omega_m"}
-    assert priors["H0"].low == 20.0
-    assert priors["H0"].high == 140.0
-    np.testing.assert_allclose(priors["Omega_m"].loc, 0.3)
+    assert priors["H0"].low == 20.0  # ty: ignore[unresolved-attribute]
+    assert priors["H0"].high == 140.0  # ty: ignore[unresolved-attribute]
+    np.testing.assert_allclose(priors["Omega_m"].loc, 0.3)  # ty: ignore[unresolved-attribute]
