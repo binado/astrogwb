@@ -205,6 +205,7 @@ dev = [
 plotting = [
     { name = "arviz" },
     { name = "corner" },
+    { name = "h5netcdf" },
 ]
 
 [package.metadata]
@@ -234,6 +235,7 @@ dev = [
 plotting = [
     { name = "arviz", specifier = ">=1.2.0" },
     { name = "corner", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
+    { name = "h5netcdf", specifier = ">=1.8.1" },
 ]
 
 [[package]]

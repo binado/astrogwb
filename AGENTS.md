@@ -14,8 +14,8 @@
 gwmock-signal owns preset detector networks; gwmock-noise owns bundled PSD presets and interpolation. astrogwb owns the frequency-dependent ORF, out-of-band PSD policy, supplemental geometry/noise tables for str-named detectors, and SGWB detector utilities.
 
 ## Build, Test, and Development Commands
-- `uv sync --group dev`: create/update the local environment with dev dependencies (includes the `plotting` group: arviz, corner).
-- `uv sync --group plotting`: install notebook plotting dependencies only (arviz, corner).
+- `uv sync --group dev`: create/update the local environment with dev dependencies (includes the `plotting` group: arviz, corner, h5netcdf).
+- `uv sync --group plotting`: install notebook plotting dependencies only (arviz, corner, h5netcdf).
 - `uv run pytest`: run all tests.
 - `uv run pytest -m "not integration"`: run fast unit tests only.
 - `uv run ruff check . --fix`: lint and apply safe fixes.
