@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -47,10 +47,12 @@ class CosmoConfig(BaseModel):
 class SamplerConfig(BaseModel):
     model_config = _STRICT
 
-    num_warmup: int
-    num_samples: int
-    num_chains: int = 1
-    target_accept: float = 0.9
+    num_warmup: Annotated[int, Field(gt=0)]
+    num_samples: Annotated[int, Field(gt=0)]
+    num_chains: Annotated[int, Field(gt=0)] = 1
+    target_accept: Annotated[float, Field(gt=0.0, lt=1.0)] = 0.9
+    dense_mass: bool = True
+    max_tree_depth: Annotated[int, Field(gt=0, le=20)] = 10
     forward_mode_differentiation: bool = True
     progress_bar: bool = False
     jit_model_args: bool = True
