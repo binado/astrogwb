@@ -1,10 +1,10 @@
 [project]
 name = "astrogwb"
 version = "0.1.0"
-description = "Constraining cosmology with the SGWB from astrophysical sources"
+description = "Constraining cosmology with the SGWB from compact binary coalescences"
 readme = "README.md"
 authors = [
-    { name = "binado", email = "bernardopveronese@gmail.com" }
+    { name = "Bernardo Veronese", email = "bernardopveronese@gmail.com" }
 ]
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
