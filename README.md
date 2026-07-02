@@ -83,23 +83,6 @@ Sensitivity curves are matched to detectors by their public name
 (`E1`, `C1`, `ET1_SARD`, …), so every member must have an entry in
 `sensitivity.toml`.
 
-### Migration from the pre-refactor API
-
-| Removed (old)                                   | Replacement (new)                                            |
-| ----------------------------------------------- | ------------------------------------------------------------ |
-| `Detector` dataclass                            | `DetectorSpec` (`str` site code or gwmock `CustomDetector`) |
-| `Detector.from_file("H1")`                      | `"H1"` passed directly, resolved via `geometry.toml`         |
-| `PowerSpectralDensity` / `.evaluate(f)`         | `Sensitivity` + `evaluate_psd(reference, f)`                 |
-| `PowerSpectralDensity.from_noise_curve_dir(...)`| `evaluate_psd(reference, f)` (reference resolves preset/file/URL) |
-| `effective_psd(f, detectors)`                   | `effective_psd(f, detectors, load_sensitivities_for_network(network))` |
-| `detectors.toml`                                | `geometry.toml` (geometry) + `sensitivity.toml` (PSD/band/duty) |
-
-Out-of-band behavior: `evaluate_psd(..., out_of_band="inf")` (the default)
-maps frequencies outside the curve grid to `inf`, matching the old
-`PowerSpectralDensity` semantics so out-of-band bins drop out of an
-inverse-variance contraction; `out_of_band="zero"` returns gwmock-noise's
-raw clipped-to-zero interpolation.
-
 ## Population generation
 
 The importance-sampling waveform catalog starts from a population of intrinsic
