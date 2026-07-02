@@ -153,6 +153,7 @@ def run(config: RunConfig, jax, chain_method: str):
     import jax.numpy as jnp
     from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
     from numpyro.infer import MCMC, NUTS
+    from numpyro.infer.initialization import init_to_value
 
     from astrogwb.detector import effective_psd, load_sensitivity_map
     from astrogwb.gwb import frequency_mask as make_frequency_mask
@@ -262,11 +263,16 @@ def run(config: RunConfig, jax, chain_method: str):
     )
 
     sampler = config.sampler
+    init_strategy = init_to_value(value=config.fiducials)
     kernel = NUTS(
         model,
         target_accept_prob=sampler.target_accept,
+        adapt_step_size=True,
+        adapt_mass_matrix=True,
         forward_mode_differentiation=sampler.forward_mode_differentiation,
-        dense_mass=True,
+        dense_mass=sampler.dense_mass,
+        max_tree_depth=sampler.max_tree_depth,
+        init_strategy=init_strategy,
     )
     mcmc = MCMC(
         kernel,
