@@ -263,7 +263,9 @@ def run(config: RunConfig, jax, chain_method: str):
     )
 
     sampler = config.sampler
-    init_strategy = init_to_value(value=config.fiducials)
+    init_strategy = init_to_value(
+        values={name: config.fiducials[name] for name in config.sampled_params}
+    )
     kernel = NUTS(
         model,
         target_accept_prob=sampler.target_accept,
