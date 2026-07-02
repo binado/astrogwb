@@ -10,6 +10,7 @@ array contractions and inference.
 - Frequency-dependent ORF and effective PSD utilities.
 - Minimal waveform polarization-power catalog persistence.
 - A thin NumPyro model for caller-prepared arrays, driven by a single `merger_rate_and_log_weights_fn(params, samples) -> (total_merger_rate, log_weights)` callback.
+- Reference importance-weighting models under `astrogwb.importance.models.*` (import explicitly from the model module, not package `__init__` barrels).
 
 ## Detector analysis
 
@@ -154,8 +155,9 @@ waveform is regenerated during sampling.
   `luminosity_distance`, and the polarization-power columns must already include
   the `1/d_{L,\mathrm{fid}}^2` scaling so the importance-weight math is exact.
 - `gwmock-pop` provides the JAX-traceable Madau–Dickinson rate and flat-ΛCDM
-  cosmology used by the reference `make_merger_rate_and_log_weights_fn` factory
-  defined in the notebook.
+  cosmology. The reference callback factory lives in
+  `astrogwb.importance.models.bns_madau_dickinson_modified_propagation`;
+  shared cosmology helpers are in `astrogwb.cosmology`.
 
 **Conventions**
 

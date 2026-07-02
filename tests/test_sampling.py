@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 from numpyro import handlers
 
 from astrogwb.sampling import numpyro_model
+from astrogwb.sampling.priors import build_prior
 
 
 def test_numpyro_model_smoke_trace() -> None:
@@ -68,3 +70,20 @@ def test_numpyro_model_uses_combined_merger_rate_and_log_weights_callback() -> N
         np.asarray(trace["importance_relative_ess"]["value"]),
         49.0 / 50.0,
     )
+
+
+def test_build_prior_uniform() -> None:
+    d = build_prior({"type": "uniform", "low": 0.0, "high": 2.0})
+    assert d.low == 0.0  # ty: ignore[unresolved-attribute]
+    assert d.high == 2.0  # ty: ignore[unresolved-attribute]
+
+
+def test_build_prior_normal() -> None:
+    d = build_prior({"type": "normal", "loc": 1.0, "scale": 0.5})
+    np.testing.assert_allclose(d.loc, 1.0)  # ty: ignore[unresolved-attribute]
+    np.testing.assert_allclose(d.scale, 0.5)  # ty: ignore[unresolved-attribute]
+
+
+def test_build_prior_rejects_unknown_type() -> None:
+    with pytest.raises(ValueError, match="unsupported prior type"):
+        build_prior({"type": "mystery", "low": 0.0, "high": 1.0})

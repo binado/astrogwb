@@ -31,7 +31,6 @@ import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from astrogwb.sampling.config import (
     RunConfig,
@@ -85,36 +84,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Log at WARNING instead of INFO.",
     )
     return parser.parse_args(argv)
-
-
-def build_prior(spec: dict[str, Any]):
-    """Materialize a small TOML prior spec into a ``numpyro`` distribution.
-
-    Supported ``type`` values: ``uniform`` (low/high), ``normal`` (loc/scale),
-    ``loguniform`` (low/high). Imported lazily so this stays callable only after
-    the runtime is configured.
-    """
-    import numpyro.distributions as dist
-
-    kind = str(spec["type"]).lower()
-    if kind == "uniform":
-        return dist.Uniform(low=float(spec["low"]), high=float(spec["high"]))
-    if kind == "normal":
-        return dist.Normal(loc=float(spec["loc"]), scale=float(spec["scale"]))
-    if kind == "loguniform":
-        # numpyro exposes a LogUniform distribution (base distribution of a log
-        # transform); fall back to a transformed Uniform if unavailable.
-        low, high = float(spec["low"]), float(spec["high"])
-        if hasattr(dist, "LogUniform"):
-            return dist.LogUniform(low=low, high=high)
-        import jax.numpy as jnp
-        from numpyro.distributions.transforms import ExpTransform
-
-        return dist.TransformedDistribution(
-            dist.Uniform(low=jnp.log(low), high=jnp.log(high)),
-            ExpTransform(),
-        )
-    raise ValueError(f"unsupported prior type: {spec['type']!r}")
 
 
 # --------------------------------------------------------------------------- #
@@ -175,112 +144,6 @@ def configure_runtime(rc: RuntimeConfig, num_chains: int):
 
 
 # --------------------------------------------------------------------------- #
-# Physics -- copied from notebooks/mcmc.py (lines 246-332).
-# Heavy deps are imported lazily so the module top stays stdlib-only; the imports
-# resolve from sys.modules cache and run only at JAX trace time.
-# --------------------------------------------------------------------------- #
-def log_gw_em_ratio(z, xi_0, xi_n):
-    import jax.numpy as jnp
-
-    return jnp.log(xi_0 + (1.0 - xi_0) * jnp.exp(-xi_n * jnp.log1p(z)))
-
-
-def flat_lcdm_grid(params, max_redshift: float, n_grid: int):
-    import jax.numpy as jnp
-    from gwmock_pop.cosmology.flat_lambda_cdm import (
-        SPEED_OF_LIGHT,
-        build_distance_lookup,
-        compute_normalized_hubble_parameter,
-    )
-
-    h0 = params["H0"]
-    omega_m = params["Omega_m"]
-
-    # ``max_redshift`` / ``n_grid`` are passed as static Python scalars, not read
-    # from a (possibly traced) ``z_grid`` -- ``float(tracer)`` would raise a
-    # ConcretizationTypeError once this runs inside the jitted NUTS model.
-    z, comoving_distance, luminosity_distance = build_distance_lookup(
-        hubble_constant=h0,
-        omega_m=omega_m,
-        max_redshift=max_redshift,
-        n_grid=n_grid,
-    )
-    e_z = compute_normalized_hubble_parameter(redshift=z, omega_m=omega_m)
-    differential_comoving_volume = (
-        4.0 * jnp.pi * comoving_distance**2 / (h0 * e_z) * SPEED_OF_LIGHT / 1000
-    )
-    return luminosity_distance, differential_comoving_volume
-
-
-def make_merger_rate_and_log_weights_fn(
-    *,
-    z_grid,
-    proposal_log_pdf,
-    local_merger_rate: float,
-    fiducial_xi_0: float,
-    fiducial_xi_n: float,
-):
-    import jax.numpy as jnp
-    from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
-
-    from astrogwb.utils import SECONDS_PER_YEAR
-
-    # Extract the cosmology grid extent eagerly (z_grid is concrete here at
-    # factory-build time) so the jitted closure never calls float() on a tracer.
-    max_redshift = float(z_grid[-1])
-    n_grid = int(z_grid.shape[0])
-
-    def merger_rate_and_log_weights_fn(params, samples):
-        z = samples["redshift"]
-        d_l_fid = samples["luminosity_distance"]
-
-        luminosity_distance_grid, dvc_dz_grid = flat_lcdm_grid(
-            params, max_redshift, n_grid
-        )
-        d_l_theta = jnp.interp(
-            z,
-            z_grid,
-            luminosity_distance_grid,
-            left=luminosity_distance_grid[0],
-            right=luminosity_distance_grid[-1],
-        )
-
-        rate_shape_grid = madau_dickinson_rate(
-            z_grid, params["gamma"], params["kappa"], params["z_peak"]
-        )
-        unnormalized_pdf_grid = rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid
-        integral_Mpc3 = jnp.trapezoid(unnormalized_pdf_grid, z_grid)
-
-        rate_shape_samples = madau_dickinson_rate(
-            z, params["gamma"], params["kappa"], params["z_peak"]
-        )
-        dvc_dz_samples = jnp.interp(
-            z,
-            z_grid,
-            dvc_dz_grid,
-            left=dvc_dz_grid[0],
-            right=dvc_dz_grid[-1],
-        )
-        target_pdf = rate_shape_samples / (1.0 + z) * dvc_dz_samples / integral_Mpc3
-
-        log_fiducial_gw_em_ratio = log_gw_em_ratio(z, fiducial_xi_0, fiducial_xi_n)
-        log_target_gw_em_ratio = log_gw_em_ratio(z, params["xi_0"], params["xi_n"])
-        log_weights = (
-            jnp.log(target_pdf)
-            - proposal_log_pdf
-            + 2.0 * jnp.log(d_l_fid)
-            - 2.0 * jnp.log(d_l_theta)
-            + 2.0 * log_fiducial_gw_em_ratio
-            - 2.0 * log_target_gw_em_ratio
-        )
-
-        total_merger_rate = 1e-9 * local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
-        return total_merger_rate, log_weights
-
-    return merger_rate_and_log_weights_fn
-
-
-# --------------------------------------------------------------------------- #
 # Inference
 # --------------------------------------------------------------------------- #
 def run(config: RunConfig, jax, chain_method: str):
@@ -294,7 +157,11 @@ def run(config: RunConfig, jax, chain_method: str):
     from astrogwb.detector import effective_psd, load_sensitivity_map
     from astrogwb.gwb import frequency_mask as make_frequency_mask
     from astrogwb.gwb import spectral_density
+    from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+        make_merger_rate_and_log_weights_fn,
+    )
     from astrogwb.sampling.numpyro_model import numpyro_model
+    from astrogwb.sampling.priors import build_prior
     from astrogwb.waveform import load_polarization_power_catalog
 
     cat = config.catalog
