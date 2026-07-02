@@ -7,7 +7,7 @@ cosmology primitives they share.
 
 Import from explicit submodules rather than this package root:
 
-- :mod:`astrogwb.importance.cosmology` — shared cosmology helpers
+- :mod:`astrogwb.cosmology` — shared cosmology helpers
 - :mod:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation` —
   the BNS + Madau-Dickinson reference callback factory
 """

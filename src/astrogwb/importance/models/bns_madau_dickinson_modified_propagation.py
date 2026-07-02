@@ -23,7 +23,7 @@ from typing import Any, Mapping
 import jax.numpy as jnp
 from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
-from astrogwb.importance.cosmology import flat_lcdm_grid, log_gw_em_ratio
+from astrogwb.cosmology import flat_lcdm_grid, log_gw_em_ratio
 from astrogwb.sampling.numpyro_model import MergerRateAndLogWeightsFn
 from astrogwb.utils import SECONDS_PER_YEAR
 

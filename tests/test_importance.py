@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
 
-from astrogwb.importance.cosmology import flat_lcdm_grid, log_gw_em_ratio
+from astrogwb.cosmology import flat_lcdm_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )

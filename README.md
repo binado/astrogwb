@@ -157,7 +157,7 @@ waveform is regenerated during sampling.
 - `gwmock-pop` provides the JAX-traceable Madau–Dickinson rate and flat-ΛCDM
   cosmology. The reference callback factory lives in
   `astrogwb.importance.models.bns_madau_dickinson_modified_propagation`;
-  shared cosmology helpers are in `astrogwb.importance.cosmology`.
+  shared cosmology helpers are in `astrogwb.cosmology`.
 
 **Conventions**
 
