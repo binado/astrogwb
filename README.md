@@ -17,7 +17,7 @@ uv sync --all-groups --all-extras
 Our inference framework uses an importance sampling scheme to calculate the spectral density of the astrophysical SGWB with a fixed population of CBCs. To generate the population, we suggest using the excellent [`gwmock-pop`](https://leuven-gravity-institute.github.io/gwmock-pop/) package.
 
 An example BNS population is defined declaratively in [`examples/bns_population.yaml`](examples/bns_population.yaml)
-and drawn with the `gwmock-pop simulate` CLI. Here's how to 
+and drawn with the `gwmock-pop simulate` CLI. Here's how to
 simulate a BNS population of 1000 sources:
 
 ```bash
@@ -39,12 +39,27 @@ distribution (converted to luminosity distance), uniform source-frame component
 masses ordered so `mass_1 >= mass_2`, aligned spins (in-plane components zero),
 uniform tidal deformabilities, and inclination/coalescence phase/time fixed at
 zero. Edit the `arguments` blocks to retune ranges. The aligned-spin + tidal
-parameters suit a non-precessing NRTidal approximant downstream. 
+parameters suit a non-precessing NRTidal approximant downstream.
 The mass priors are defined in the source frame.
 
 ## Generating waveforms for the population catalog
 
-We provide a [helper script](./scripts/generate_waveforms.py) which wraps the `gwmock-signal` package for generating the frequency-domain polarizations for a given population of CBCs which enter the spectral density calculation.
+We provide a [helper script](./scripts/generate_polarization_power_catalog.py) which wraps the [`gwmock-signal`](https://github.com/Leuven-Gravity-Institute/gwmock-signal) package for generating the frequency-domain polarizations for a given population of CBCs which enter the spectral density calculation.
+
+Here is an example:
+
+```bash
+uv run python scripts/generate_polarization_power_catalog.py \
+--population out/bns_population.csv \
+--output out/bns_waveforms_df=1Hz.npz \
+--approximant IMRPhenomXAS_NRTidalv3 \
+--sampling-frequency 8192 \
+--minimum-frequency 2 \
+--maximum-frequency 4096 \
+--reference-frequency 20 \
+--frequency-resolution 1 \
+--chunk-size 2048
+```
 
 ## Running inference
 
