@@ -102,6 +102,7 @@ observation_time = 1.0  # [yr]; cancels in S_h, kept for the likelihood scale
 # Grid settings
 seed = 42
 npoints = 101  # grid points per sampled parameter
+chunk_size = 64  # grid points evaluated per vectorized batch (bounds peak memory)
 
 if DEBUG:
     npoints = 21
@@ -337,8 +338,14 @@ def make_param_grid(distribution: dist.Distribution, npoints: int) -> jax.Array:
 #
 # We evaluate the model's log joint density directly at the physical parameter
 # values via `log_density`, which returns the unnormalized log-posterior
-# `log p(\Lambda) + log L(\Lambda)`. The evaluation is `jit`-compiled and `vmap`-ed
-# over the grid.
+# `log p(\Lambda) + log L(\Lambda)`.
+#
+# Each evaluation builds catalog-sized importance weights and a full-frequency
+# spectrum, so a single `vmap` over the whole grid would force XLA to materialize
+# those arrays for every grid point at once (`npoints**2 x N`), which OOMs on
+# realistic catalogs. We instead use `jax.lax.map` with `batch_size=chunk_size`:
+# it vectorizes within each chunk and scans across chunks, bounding peak memory
+# to `chunk_size x (N + F)`.
 
 
 # %%
@@ -350,8 +357,12 @@ def _log_posterior(param_values: dict[str, jax.Array]) -> jax.Array:
 def compute_logposterior_1d():
     (name,) = sorted(sampled_params)
     grid = make_param_grid(priors[name], npoints)
-    fn = jax.jit(jax.vmap(lambda v: _log_posterior({name: v})))
-    return name, grid, fn(grid)
+    eval_grid = jax.jit(
+        lambda values: jax.lax.map(
+            lambda v: _log_posterior({name: v}), values, batch_size=chunk_size
+        )
+    )
+    return name, grid, eval_grid(grid)
 
 
 def compute_logposterior_2d():
@@ -359,8 +370,15 @@ def compute_logposterior_2d():
     grid0 = make_param_grid(priors[name0], npoints)
     grid1 = make_param_grid(priors[name1], npoints)
     mesh0, mesh1 = jnp.meshgrid(grid0, grid1, indexing="ij")
-    fn = jax.jit(jax.vmap(lambda a, b: _log_posterior({name0: a, name1: b})))
-    logpost = fn(mesh0.ravel(), mesh1.ravel()).reshape(mesh0.shape)
+    points = jnp.stack([mesh0.ravel(), mesh1.ravel()], axis=-1)
+    eval_grid = jax.jit(
+        lambda pts: jax.lax.map(
+            lambda p: _log_posterior({name0: p[0], name1: p[1]}),
+            pts,
+            batch_size=chunk_size,
+        )
+    )
+    logpost = eval_grid(points).reshape(mesh0.shape)
     return (name0, grid0), (name1, grid1), logpost
 
 
