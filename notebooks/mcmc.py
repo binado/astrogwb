@@ -296,12 +296,14 @@ log_p_proposal = jnp.log(
 
 # %% [markdown]
 # The `merger_rate_and_log_weights` callback is packaged in
-# `astrogwb.importance.models` (BNS + Madau-Dickinson rate + modified
-# GW/EM propagation). We import the canonical, tested factory and bind it
-# to this notebook's proposal catalog here.
+# `astrogwb.importance.models.bns_madau_dickinson_modified_propagation`
+# (BNS + Madau-Dickinson rate + modified GW/EM propagation). We import the
+# canonical, tested factory and bind it to this notebook's proposal catalog here.
 
 # %%
-from astrogwb.importance.models import make_merger_rate_and_log_weights_fn
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    make_merger_rate_and_log_weights_fn,
+)
 
 merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
     z_grid=jnp.linspace(z_min, z_max, n_grid),

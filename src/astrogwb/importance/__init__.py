@@ -3,15 +3,13 @@
 The :mod:`astrogwb.sampling.numpyro_model` is callback-driven: it accepts any
 ``(params, samples) -> (total_merger_rate, log_weights)`` callable. This
 subpackage packages reference realizations of that callback together with the
-cosmology primitives they share, so scripts and notebooks import one canonical,
-tested implementation rather than duplicating it.
+cosmology primitives they share.
+
+Import from explicit submodules rather than this package root:
+
+- :mod:`astrogwb.importance.cosmology` — shared cosmology helpers
+- :mod:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation` —
+  the BNS + Madau-Dickinson reference callback factory
 """
 
-from .cosmology import flat_lcdm_grid, log_gw_em_ratio
-from .models import make_merger_rate_and_log_weights_fn
-
-__all__ = [
-    "flat_lcdm_grid",
-    "log_gw_em_ratio",
-    "make_merger_rate_and_log_weights_fn",
-]
+__all__: list[str] = []

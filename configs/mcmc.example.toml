@@ -50,7 +50,7 @@ kappa = 2.9
 z_peak = 1.9
 
 # Priors: one [priors.<param>] table per sampled parameter.
-# Supported types: uniform (low/high), normal (loc/scale), loguniform (low/high).
+# Supported types: uniform (low/high), normal (loc/scale).
 [priors.H0]
 type = "uniform"
 low = 20.0

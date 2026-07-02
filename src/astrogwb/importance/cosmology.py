@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+import jax
 import jax.numpy as jnp
 from gwmock_pop.cosmology.flat_lambda_cdm import (
     SPEED_OF_LIGHT,
@@ -24,7 +25,11 @@ from gwmock_pop.cosmology.flat_lambda_cdm import (
 )
 
 
-def log_gw_em_ratio(z, xi_0, xi_n):
+def log_gw_em_ratio(
+    z: jax.Array,
+    xi_0: float | jax.Array,
+    xi_n: float | jax.Array,
+) -> jax.Array:
     """Log of the modified-propagation GW-to-EM luminosity-distance ratio.
 
     Models a departure from the standard ``d_GW = d_EM`` propagation as
@@ -51,7 +56,7 @@ def flat_lcdm_grid(
     params: Mapping[str, Any],
     max_redshift: float,
     n_grid: int,
-) -> tuple[jnp.ndarray, jnp.ndarray]:
+) -> tuple[jax.Array, jax.Array]:
     """Luminosity distance and differential comoving volume on a redshift grid.
 
     Parameters

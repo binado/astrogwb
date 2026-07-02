@@ -6,7 +6,7 @@ import pytest
 from numpyro import handlers
 
 from astrogwb.sampling import numpyro_model
-from astrogwb.sampling.priors import build_prior, build_priors
+from astrogwb.sampling.priors import build_prior
 
 
 def test_numpyro_model_smoke_trace() -> None:
@@ -84,30 +84,6 @@ def test_build_prior_normal() -> None:
     np.testing.assert_allclose(d.scale, 0.5)  # ty: ignore[unresolved-attribute]
 
 
-def test_build_prior_loguniform_bounds() -> None:
-    import jax
-
-    d = build_prior({"type": "loguniform", "low": 1.0, "high": 100.0})
-    # LogUniform samples are positive and within [low, high].
-    key = jax.random.PRNGKey(0)
-    samples = np.asarray(d.sample(key=key, sample_shape=(8,)))
-    assert np.all(samples >= 1.0)
-    assert np.all(samples <= 100.0)
-
-
 def test_build_prior_rejects_unknown_type() -> None:
     with pytest.raises(ValueError, match="unsupported prior type"):
         build_prior({"type": "mystery", "low": 0.0, "high": 1.0})
-
-
-def test_build_priors_mapping() -> None:
-    priors = build_priors(
-        {
-            "H0": {"type": "uniform", "low": 20.0, "high": 140.0},
-            "Omega_m": {"type": "normal", "loc": 0.3, "scale": 0.1},
-        }
-    )
-    assert set(priors) == {"H0", "Omega_m"}
-    assert priors["H0"].low == 20.0  # ty: ignore[unresolved-attribute]
-    assert priors["H0"].high == 140.0  # ty: ignore[unresolved-attribute]
-    np.testing.assert_allclose(priors["Omega_m"].loc, 0.3)  # ty: ignore[unresolved-attribute]

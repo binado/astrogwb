@@ -32,14 +32,12 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from astrogwb.importance.models import make_merger_rate_and_log_weights_fn
 from astrogwb.sampling.config import (
     RunConfig,
     RuntimeConfig,
     build_run_config,
     load_config,
 )
-from astrogwb.sampling.priors import build_prior
 
 logger = logging.getLogger("run_mcmc")
 
@@ -159,7 +157,11 @@ def run(config: RunConfig, jax, chain_method: str):
     from astrogwb.detector import effective_psd, load_sensitivity_map
     from astrogwb.gwb import frequency_mask as make_frequency_mask
     from astrogwb.gwb import spectral_density
+    from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+        make_merger_rate_and_log_weights_fn,
+    )
     from astrogwb.sampling.numpyro_model import numpyro_model
+    from astrogwb.sampling.priors import build_prior
     from astrogwb.waveform import load_polarization_power_catalog
 
     cat = config.catalog

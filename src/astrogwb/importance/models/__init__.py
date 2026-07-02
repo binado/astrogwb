@@ -1,7 +1,7 @@
-"""Reference importance-weights models packaged as merger-rate/log-weight callbacks."""
+"""Reference importance-weights models packaged as merger-rate/log-weight callbacks.
 
-from .bns_madau_dickinson_modified_propagation import (
-    make_merger_rate_and_log_weights_fn,
-)
+Import concrete models from their modules directly, e.g.
+:mod:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation`.
+"""
 
-__all__ = ["make_merger_rate_and_log_weights_fn"]
+__all__: list[str] = []

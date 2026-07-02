@@ -13,9 +13,10 @@ invoking it.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from numpyro.distributions import Distribution
+if TYPE_CHECKING:
+    from numpyro.distributions import Distribution
 
 
 def build_prior(spec: dict[str, Any]) -> Distribution:
@@ -25,7 +26,6 @@ def build_prior(spec: dict[str, Any]) -> Distribution:
 
     - ``uniform`` (keys: ``low``, ``high``)
     - ``normal``  (keys: ``loc``, ``scale``)
-    - ``loguniform`` (keys: ``low``, ``high``)
 
     Parameters
     ----------
@@ -44,35 +44,4 @@ def build_prior(spec: dict[str, Any]) -> Distribution:
         return dist.Uniform(low=float(spec["low"]), high=float(spec["high"]))
     if kind == "normal":
         return dist.Normal(loc=float(spec["loc"]), scale=float(spec["scale"]))
-    if kind == "loguniform":
-        # numpyro exposes a LogUniform distribution (base distribution of a log
-        # transform); fall back to a transformed Uniform if unavailable.
-        low, high = float(spec["low"]), float(spec["high"])
-        if hasattr(dist, "LogUniform"):
-            return dist.LogUniform(low=low, high=high)
-        import jax.numpy as jnp
-        from numpyro.distributions.transforms import ExpTransform
-
-        return dist.TransformedDistribution(
-            dist.Uniform(low=jnp.log(low), high=jnp.log(high)),
-            ExpTransform(),
-        )
     raise ValueError(f"unsupported prior type: {spec['type']!r}")
-
-
-def build_priors(specs: dict[str, dict[str, Any]]) -> dict[str, Distribution]:
-    """Materialize a ``{name: spec}`` mapping into ``{name: distribution}``.
-
-    Convenience wrapper over :func:`build_prior` for the common case of
-    converting a whole ``[priors.*]`` config block at once.
-
-    Parameters
-    ----------
-    specs:
-        Mapping from parameter name to prior spec.
-
-    Returns
-    -------
-    dict[str, numpyro.distributions.Distribution]
-    """
-    return {name: build_prior(spec) for name, spec in specs.items()}
