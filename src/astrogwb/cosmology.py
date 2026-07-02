@@ -52,12 +52,14 @@ def log_gw_em_ratio(
     return jnp.log(xi_0 + (1.0 - xi_0) * jnp.exp(-xi_n * jnp.log1p(z)))
 
 
-def flat_lcdm_grid(
+def distance_and_volume_grid(
     params: Mapping[str, Any],
     max_redshift: float,
     n_grid: int,
 ) -> tuple[jax.Array, jax.Array]:
     """Luminosity distance and differential comoving volume on a redshift grid.
+
+    Currently only supports flat LCDM cosmology.
 
     Parameters
     ----------

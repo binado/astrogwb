@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
 
-from astrogwb.cosmology import flat_lcdm_grid, log_gw_em_ratio
+from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
@@ -56,7 +56,7 @@ def test_log_gw_em_ratio_increases_with_redshift() -> None:
 # flat_lcdm_grid
 # --------------------------------------------------------------------------- #
 def test_flat_lcdm_grid_shapes_and_finiteness() -> None:
-    d_l, dvc_dz = flat_lcdm_grid(FIDUCIALS, max_redshift=Z_MAX, n_grid=N_GRID)
+    d_l, dvc_dz = distance_and_volume_grid(FIDUCIALS, max_redshift=Z_MAX, n_grid=N_GRID)
     d_l = np.asarray(d_l)
     dvc_dz = np.asarray(dvc_dz)
     assert d_l.shape == (N_GRID,)
@@ -71,7 +71,7 @@ def test_flat_lcdm_grid_shapes_and_finiteness() -> None:
 def test_flat_lcdm_grid_accepts_jax_scalar_max_redshift() -> None:
     # Documents the static-scalar contract: a concrete (non-traced) jnp scalar
     # for max_redshift must not crash the build -- gwmock_pop accepts it.
-    d_l, _ = flat_lcdm_grid(
+    d_l, _ = distance_and_volume_grid(
         FIDUCIALS, max_redshift=float(jnp.asarray(Z_MAX)), n_grid=N_GRID
     )
     assert np.asarray(d_l).shape == (N_GRID,)
@@ -99,7 +99,7 @@ def _build_synthetic_callback(n_samples: int = 16):
 
     # Luminosity distances consistent with the fiducial cosmology, evaluated on
     # the same grid so the closure interpolates sensible values.
-    d_l_grid, _ = flat_lcdm_grid(FIDUCIALS, max_redshift=Z_MAX, n_grid=N_GRID)
+    d_l_grid, _ = distance_and_volume_grid(FIDUCIALS, max_redshift=Z_MAX, n_grid=N_GRID)
     d_l_samples = jnp.interp(z_samples, z_grid, d_l_grid)
 
     samples = {

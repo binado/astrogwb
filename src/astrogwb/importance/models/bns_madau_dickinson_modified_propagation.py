@@ -23,7 +23,7 @@ from typing import Any, Mapping
 import jax.numpy as jnp
 from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
-from astrogwb.cosmology import flat_lcdm_grid, log_gw_em_ratio
+from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.sampling.numpyro_model import MergerRateAndLogWeightsFn
 from astrogwb.utils import SECONDS_PER_YEAR
 
@@ -77,7 +77,7 @@ def make_merger_rate_and_log_weights_fn(
         z = samples["redshift"]
         d_l_fid = samples["luminosity_distance"]
 
-        luminosity_distance_grid, dvc_dz_grid = flat_lcdm_grid(
+        luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(
             params, max_redshift, n_grid
         )
         d_l_theta = jnp.interp(
