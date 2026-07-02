@@ -52,7 +52,7 @@ class SamplerConfig(BaseModel):
     num_chains: int = 1
     target_accept: float = 0.9
     dense_mass: bool = True
-    max_tree_depths: int = 10
+    max_tree_depth: int = 10
     forward_mode_differentiation: bool = True
     progress_bar: bool = False
     jit_model_args: bool = True
