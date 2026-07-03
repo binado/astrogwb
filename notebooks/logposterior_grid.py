@@ -324,9 +324,9 @@ model_kwargs = {
 # %% [markdown]
 # ## Building the parameter grid
 #
-# For each sampled parameter we build a grid. A `custom_range` (e.g. from
-# `grid_ranges`) takes precedence and concentrates `npoints` there for better
-# resolution; otherwise the range is derived from the prior:
+# For each sampled parameter we build a grid. `low`/`high` (e.g. from
+# `grid_ranges`) override the corresponding bound and concentrate `npoints` there
+# for better resolution; any bound left as `None` is derived from the prior:
 #
 # - `Uniform(low, high)` → `linspace(low, high, npoints)`;
 # - `Normal(loc, scale)` → `linspace(loc - 5 scale, loc + 5 scale, npoints)`.
@@ -336,20 +336,22 @@ model_kwargs = {
 def make_param_grid(
     distribution: dist.Distribution,
     npoints: int,
-    custom_range: tuple[float, float] | None = None,
+    low: float | None = None,
+    high: float | None = None,
 ) -> jax.Array:
-    if custom_range is not None:
-        lo, hi = custom_range
-        return jnp.linspace(lo, hi, npoints)
-    if isinstance(distribution, dist.Uniform):
-        return jnp.linspace(distribution.low, distribution.high, npoints)
-    if isinstance(distribution, dist.Normal):
-        lo = distribution.loc - 5.0 * distribution.scale
-        hi = distribution.loc + 5.0 * distribution.scale
-        return jnp.linspace(lo, hi, npoints)
-    raise NotImplementedError(
-        f"grid unsupported for distribution {type(distribution).__name__}"
-    )
+    if low is None or high is None:
+        if isinstance(distribution, dist.Uniform):
+            prior_low, prior_high = distribution.low, distribution.high
+        elif isinstance(distribution, dist.Normal):
+            prior_low = distribution.loc - 5.0 * distribution.scale
+            prior_high = distribution.loc + 5.0 * distribution.scale
+        else:
+            raise NotImplementedError(
+                f"grid unsupported for distribution {type(distribution).__name__}"
+            )
+        low = prior_low if low is None else low
+        high = prior_high if high is None else high
+    return jnp.linspace(low, high, npoints)
 
 
 # %% [markdown]
@@ -395,15 +397,18 @@ eval_grid_points = jax.jit(
 
 def compute_logposterior_1d():
     (name,) = sampled_param_names
-    grid = make_param_grid(priors[name], npoints, grid_ranges.get(name))
+    low, high = grid_ranges.get(name, (None, None))
+    grid = make_param_grid(priors[name], npoints, low, high)
     logpost = eval_grid_points(grid[:, None])
     return name, grid, logpost
 
 
 def compute_logposterior_2d():
     name0, name1 = sampled_param_names
-    grid0 = make_param_grid(priors[name0], npoints, grid_ranges.get(name0))
-    grid1 = make_param_grid(priors[name1], npoints, grid_ranges.get(name1))
+    low0, high0 = grid_ranges.get(name0, (None, None))
+    low1, high1 = grid_ranges.get(name1, (None, None))
+    grid0 = make_param_grid(priors[name0], npoints, low0, high0)
+    grid1 = make_param_grid(priors[name1], npoints, low1, high1)
     mesh0, mesh1 = jnp.meshgrid(grid0, grid1, indexing="ij")
     points = jnp.stack([mesh0.ravel(), mesh1.ravel()], axis=-1)
     logpost = eval_grid_points(points).reshape(mesh0.shape)
