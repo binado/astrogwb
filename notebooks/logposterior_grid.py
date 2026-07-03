@@ -110,6 +110,13 @@ chunk_size = 64  # grid points evaluated per vectorized batch (bounds peak memor
 if DEBUG:
     npoints = 21
 
+# Optional custom per-parameter grid ranges as {name: (low, high)}. When a sampled
+# parameter appears here, the grid is built over this range instead of the full
+# prior (concentrating `npoints` for better resolution) and the plot axes are
+# limited to it. Parameters without an entry fall back to their prior range and
+# auto-scaled axes. Example: grid_ranges = {"H0": (55.0, 85.0)}.
+grid_ranges: dict[str, tuple[float, float]] = {}
+
 # Redshift grid for the cosmology integrals (and MD normalization)
 z_min = 0.0
 z_max = 20.0
@@ -317,14 +324,23 @@ model_kwargs = {
 # %% [markdown]
 # ## Building the parameter grid
 #
-# For each sampled parameter we build a grid from its prior:
+# For each sampled parameter we build a grid. A `custom_range` (e.g. from
+# `grid_ranges`) takes precedence and concentrates `npoints` there for better
+# resolution; otherwise the range is derived from the prior:
 #
 # - `Uniform(low, high)` → `linspace(low, high, npoints)`;
 # - `Normal(loc, scale)` → `linspace(loc - 5 scale, loc + 5 scale, npoints)`.
 
 
 # %%
-def make_param_grid(distribution: dist.Distribution, npoints: int) -> jax.Array:
+def make_param_grid(
+    distribution: dist.Distribution,
+    npoints: int,
+    custom_range: tuple[float, float] | None = None,
+) -> jax.Array:
+    if custom_range is not None:
+        lo, hi = custom_range
+        return jnp.linspace(lo, hi, npoints)
     if isinstance(distribution, dist.Uniform):
         return jnp.linspace(distribution.low, distribution.high, npoints)
     if isinstance(distribution, dist.Normal):
@@ -379,15 +395,15 @@ eval_grid_points = jax.jit(
 
 def compute_logposterior_1d():
     (name,) = sampled_param_names
-    grid = make_param_grid(priors[name], npoints)
+    grid = make_param_grid(priors[name], npoints, grid_ranges.get(name))
     logpost = eval_grid_points(grid[:, None])
     return name, grid, logpost
 
 
 def compute_logposterior_2d():
     name0, name1 = sampled_param_names
-    grid0 = make_param_grid(priors[name0], npoints)
-    grid1 = make_param_grid(priors[name1], npoints)
+    grid0 = make_param_grid(priors[name0], npoints, grid_ranges.get(name0))
+    grid1 = make_param_grid(priors[name1], npoints, grid_ranges.get(name1))
     mesh0, mesh1 = jnp.meshgrid(grid0, grid1, indexing="ij")
     points = jnp.stack([mesh0.ravel(), mesh1.ravel()], axis=-1)
     logpost = eval_grid_points(points).reshape(mesh0.shape)
@@ -694,10 +710,18 @@ else:
 
 # %%
 if len(sampled_params) == 1:
-    plot_posterior_1d(name, grid, logpost)
+    plot_posterior_1d(name, grid, logpost, axlim=grid_ranges.get(name))
 else:
     marginal0, marginal1 = compute_marginal_distributions(logpost, axis0[1], axis1[1])
-    plot_posterior_2d(axis0, axis1, logpost, marginal0=marginal0, marginal1=marginal1)
+    plot_posterior_2d(
+        axis0,
+        axis1,
+        logpost,
+        marginal0=marginal0,
+        marginal1=marginal1,
+        axlim0=grid_ranges.get(axis0[0]),
+        axlim1=grid_ranges.get(axis1[0]),
+    )
 
 # %% [markdown]
 # ## Saving the grid
@@ -748,7 +772,14 @@ run_config = {
         }
         for name in sorted(sampled_params)
     },
-    "grid": {"npoints": npoints},
+    "grid": {
+        "npoints": npoints,
+        "ranges": {
+            name: list(grid_ranges[name])
+            for name in sorted(sampled_params)
+            if name in grid_ranges
+        },
+    },
 }
 (out_dir / f"{base}.json").write_text(json.dumps(run_config, indent=2))
 print("saved:", base)
