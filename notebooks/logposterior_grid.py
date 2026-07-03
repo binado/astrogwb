@@ -383,22 +383,37 @@ def compute_logposterior_2d():
 
 
 # %% [markdown]
-# ## Plotting the log-posterior
+# ## Plotting the posterior
+#
+# We exponentiate the (unnormalized) log-posterior to recover the posterior up to
+# a constant. To avoid overflow we use the standard log-sum-exp stabilization:
+# subtract the maximum log-posterior before exponentiating. This is safe because
+# the overall normalization is irrelevant for plotting the shape.
 
 
 # %%
-def plot_logposterior_1d(
+def safe_exponentialize(logpost: np.ndarray) -> np.ndarray:
+    """Convert a log-posterior array to an (unnormalized) posterior stably.
+
+    Subtracts the max to keep the largest exponent at 0, so `exp` never overflows.
+    """
+    logpost = np.asarray(logpost, dtype=np.float64)
+    return np.exp(logpost - np.max(logpost))
+
+
+def plot_posterior_1d(
     name: str, grid: jax.Array, logpost: jax.Array, *, color: str = "black"
 ):
+    posterior = safe_exponentialize(logpost)
     fig, ax = plt.subplots()
-    ax.plot(np.asarray(grid), np.asarray(logpost), color=color)
+    ax.plot(np.asarray(grid), posterior, color=color)
     ax.axvline(fiducials[name], color="tab:red", ls="--", label="fiducial")
-    ax.set(xlabel=name, ylabel="log posterior (unnormalized)")
+    ax.set(xlabel=name, ylabel="posterior (unnormalized)")
     ax.legend()
     return fig
 
 
-def plot_logposterior_2d(
+def plot_posterior_2d(
     axis0: tuple[str, jax.Array],
     axis1: tuple[str, jax.Array],
     logpost: jax.Array,
@@ -407,11 +422,10 @@ def plot_logposterior_2d(
 ):
     (name0, grid0), (name1, grid1) = axis0, axis1
     mesh0, mesh1 = np.meshgrid(np.asarray(grid0), np.asarray(grid1), indexing="ij")
+    posterior = safe_exponentialize(logpost)
     fig, ax = plt.subplots()
-    cf = ax.contourf(mesh0, mesh1, np.asarray(logpost), levels=levels)
-    ax.contour(
-        mesh0, mesh1, np.asarray(logpost), levels=levels, colors="k", linewidths=0.3
-    )
+    cf = ax.contourf(mesh0, mesh1, posterior, levels=levels)
+    ax.contour(mesh0, mesh1, posterior, levels=levels, colors="k", linewidths=0.3)
     ax.scatter(
         fiducials[name0],
         fiducials[name1],
@@ -421,7 +435,7 @@ def plot_logposterior_2d(
     )
     ax.set(xlabel=name0, ylabel=name1)
     ax.legend()
-    fig.colorbar(cf, ax=ax, label="log posterior (unnormalized)")
+    fig.colorbar(cf, ax=ax, label="posterior (unnormalized)")
     return fig
 
 
@@ -434,11 +448,11 @@ def plot_logposterior_2d(
 if len(sampled_params) == 1:
     name, grid, logpost = compute_logposterior_1d()
     print(f"evaluated log-posterior over {name}: {logpost.shape[0]} points")
-    plot_logposterior_1d(name, grid, logpost)
+    plot_posterior_1d(name, grid, logpost)
 else:
     axis0, axis1, logpost = compute_logposterior_2d()
     print(f"evaluated log-posterior over {axis0[0]} x {axis1[0]}: {logpost.shape} grid")
-    plot_logposterior_2d(axis0, axis1, logpost)
+    plot_posterior_2d(axis0, axis1, logpost)
 
 # %% [markdown]
 # ## Saving the grid
