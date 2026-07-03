@@ -39,6 +39,7 @@ from functools import partial
 import json
 import multiprocessing
 from pathlib import Path
+import time
 
 # Setting JAX to use all available CPU cores for parallelization
 num_cpus = multiprocessing.cpu_count()
@@ -51,8 +52,10 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 from numpyro.infer.util import log_density
+from scipy.ndimage import gaussian_filter
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap, colorConverter
 
 from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.gwb import (
@@ -346,39 +349,48 @@ def make_param_grid(distribution: dist.Distribution, npoints: int) -> jax.Array:
 # realistic catalogs. We instead use `jax.lax.map` with `batch_size=chunk_size`:
 # it vectorizes within each chunk and scans across chunks, bounding peak memory
 # to `chunk_size x (N + F)`.
+#
+# We build the jitted evaluator **once** at module scope. `jax.jit` caches by
+# `(function object, input shapes)`, so re-running the evaluation/plotting cells
+# below reuses the compiled program; only changing `npoints` (which changes the
+# input shape) triggers a recompile. The evaluator takes a `(M, D)` array of grid
+# points, where `D = len(sampled_params)`, so the same function serves the 1D and
+# 2D cases.
 
 
 # %%
+sampled_param_names = sorted(sampled_params)
+
+
 def _log_posterior(param_values: dict[str, jax.Array]) -> jax.Array:
     log_joint, _ = log_density(model, (), model_kwargs, param_values)
     return log_joint
 
 
+def _log_posterior_from_point(point: jax.Array) -> jax.Array:
+    param_values = {name: point[i] for i, name in enumerate(sampled_param_names)}
+    return _log_posterior(param_values)
+
+
+eval_grid_points = jax.jit(
+    lambda points: jax.lax.map(_log_posterior_from_point, points, batch_size=chunk_size)
+)
+
+
 def compute_logposterior_1d():
-    (name,) = sorted(sampled_params)
+    (name,) = sampled_param_names
     grid = make_param_grid(priors[name], npoints)
-    eval_grid = jax.jit(
-        lambda values: jax.lax.map(
-            lambda v: _log_posterior({name: v}), values, batch_size=chunk_size
-        )
-    )
-    return name, grid, eval_grid(grid)
+    logpost = eval_grid_points(grid[:, None])
+    return name, grid, logpost
 
 
 def compute_logposterior_2d():
-    name0, name1 = sorted(sampled_params)
+    name0, name1 = sampled_param_names
     grid0 = make_param_grid(priors[name0], npoints)
     grid1 = make_param_grid(priors[name1], npoints)
     mesh0, mesh1 = jnp.meshgrid(grid0, grid1, indexing="ij")
     points = jnp.stack([mesh0.ravel(), mesh1.ravel()], axis=-1)
-    eval_grid = jax.jit(
-        lambda pts: jax.lax.map(
-            lambda p: _log_posterior({name0: p[0], name1: p[1]}),
-            pts,
-            batch_size=chunk_size,
-        )
-    )
-    logpost = eval_grid(points).reshape(mesh0.shape)
+    logpost = eval_grid_points(points).reshape(mesh0.shape)
     return (name0, grid0), (name1, grid1), logpost
 
 
@@ -394,6 +406,16 @@ def compute_logposterior_2d():
 # integrating the joint posterior over the other axis (trapezoidal rule on the
 # grid). The marginals are then shown above and to the right of the joint panel in
 # a corner-plot style layout.
+#
+# The joint panel reuses the styling of `corner.hist2d`: monochrome filled contours
+# whose levels are **credible regions** (0.5/1/1.5/2-sigma, i.e. the density
+# thresholds enclosing the corresponding fraction of the posterior mass) with
+# increasing opacity toward the peak. We skip corner's `np.histogram2d` step because
+# our grid already holds the posterior density; on a uniform grid the equal cell
+# areas make the density value proportional to the enclosed mass, so corner's level
+# computation carries over unchanged. Optional Gaussian smoothing uses
+# `scipy.ndimage` (kept off the JAX device, since the device holds the large
+# catalog/model and a round-trip here can stall plotting for tens of seconds).
 
 
 # %%
@@ -440,6 +462,118 @@ def plot_posterior_1d(
     return fig
 
 
+def gaussian_filter_2d(image: np.ndarray, sigma: float) -> np.ndarray:
+    """Separable Gaussian smoothing of a 2D grid, `sigma` in grid cells.
+
+    Deliberately uses `scipy.ndimage` rather than JAX: this runs during plotting,
+    where the JAX devices hold the (large) catalog and compiled model. Routing the
+    smoothing through JAX forces a host<->device round-trip that blocks on pending
+    device work and, under memory pressure, can stall for tens of seconds. scipy
+    keeps the plot path entirely on the CPU (and needs no XLA compilation).
+    """
+    return gaussian_filter(np.asarray(image, dtype=np.float64), sigma)
+
+
+def hist2d_density(
+    x: jax.Array,
+    y: jax.Array,
+    density: jax.Array,
+    ax: MplAxes,
+    *,
+    color: str = "k",
+    sigmas: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0),
+    smooth: float | None = None,
+    fill_contours: bool = True,
+    plot_contours: bool = True,
+):
+    """Render a precomputed posterior density with `corner.hist2d` styling.
+
+    Adapted from `corner.hist2d`: we skip its `np.histogram2d` step because
+    `density[i, j]` already estimates the (unnormalized) posterior at
+    `(x[i], y[j])`. On a uniform grid the cell areas are equal, so the density
+    value is proportional to the enclosed probability mass and corner's
+    credible-region level computation applies unchanged. `x`/`y` are treated as
+    the bin centers of the grid.
+    """
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    H = np.asarray(density, dtype=np.float64)
+
+    if smooth is not None:
+        H = gaussian_filter_2d(H, smooth)
+
+    # Sigma credible-region levels: fraction of total mass they enclose.
+    levels = 1.0 - np.exp(-0.5 * np.asarray(sigmas, dtype=np.float64) ** 2)
+
+    # Monochrome colormaps keyed off the axes background, exactly as corner does.
+    base_color = ax.get_facecolor()
+    base_cmap = LinearSegmentedColormap.from_list(
+        "base_cmap", [base_color, base_color], N=2
+    )
+    rgba_color = colorConverter.to_rgba(color)
+    contour_cmap = [list(rgba_color) for _ in levels] + [rgba_color]
+    for i in range(len(levels)):
+        contour_cmap[i][-1] *= float(i) / (len(levels) + 1)
+
+    # Map each mass level to a density threshold V (highest density first).
+    Hflat = H.flatten()
+    Hflat = Hflat[np.argsort(Hflat)[::-1]]
+    sm = np.cumsum(Hflat)
+    sm /= sm[-1]
+    V = np.empty(len(levels))
+    for i, v0 in enumerate(levels):
+        try:
+            V[i] = Hflat[sm <= v0][-1]
+        except IndexError:
+            V[i] = Hflat[0]
+    V.sort()
+    m = np.diff(V) == 0
+    while np.any(m):
+        V[np.where(m)[0][0]] *= 1.0 - 1e-4
+        m = np.diff(V) == 0
+    V.sort()
+
+    # Pad by two cells so contours close cleanly at the plot edges.
+    H2 = H.min() + np.zeros((H.shape[0] + 4, H.shape[1] + 4))
+    H2[2:-2, 2:-2] = H
+    H2[2:-2, 1] = H[:, 0]
+    H2[2:-2, -2] = H[:, -1]
+    H2[1, 2:-2] = H[0]
+    H2[-2, 2:-2] = H[-1]
+    H2[1, 1] = H[0, 0]
+    H2[1, -2] = H[0, -1]
+    H2[-2, 1] = H[-1, 0]
+    H2[-2, -2] = H[-1, -1]
+    X2 = np.concatenate(
+        [
+            x[0] + np.array([-2, -1]) * np.diff(x[:2]),
+            x,
+            x[-1] + np.array([1, 2]) * np.diff(x[-2:]),
+        ]
+    )
+    Y2 = np.concatenate(
+        [
+            y[0] + np.array([-2, -1]) * np.diff(y[:2]),
+            y,
+            y[-1] + np.array([1, 2]) * np.diff(y[-2:]),
+        ]
+    )
+
+    if fill_contours:
+        # White base fill hides the densest region before the alpha-graded fills.
+        ax.contourf(X2, Y2, H2.T, [V.min(), H.max()], cmap=base_cmap, antialiased=False)
+        ax.contourf(
+            X2,
+            Y2,
+            H2.T,
+            np.concatenate([[0], V, [H.max() * (1 + 1e-4)]]),
+            colors=contour_cmap,
+            antialiased=False,
+        )
+    if plot_contours:
+        ax.contour(X2, Y2, H2.T, V, colors=color)
+
+
 def plot_posterior_2d(
     axis0: tuple[str, jax.Array],
     axis1: tuple[str, jax.Array],
@@ -447,19 +581,22 @@ def plot_posterior_2d(
     *,
     marginal0: np.ndarray | None = None,
     marginal1: np.ndarray | None = None,
-    levels: int = 30,
+    color: str = "k",
+    truth_color: str = "#4682b4",
+    sigmas: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0),
+    smooth: float | None = 1.0,
 ):
     """Corner-style plot: joint 2D posterior with optional 1D marginals.
 
-    If `marginal0`/`marginal1` are provided (posterior densities over `axis0`/
-    `axis1` grids), they are drawn in panels above and to the right of the joint
-    panel, mimicking a `corner`-style layout. Otherwise only the joint panel is
-    drawn.
+    The joint panel uses `hist2d_density` (corner styling: monochrome filled
+    credible-region contours). If `marginal0`/`marginal1` are provided (posterior
+    densities over `axis0`/`axis1` grids), they are drawn in panels above and to
+    the right of the joint panel, mimicking a `corner`-style layout. `smooth` is a
+    Gaussian sigma in grid cells (set to `None` to disable smoothing).
     """
     (name0, grid0), (name1, grid1) = axis0, axis1
     grid0 = np.asarray(grid0)
     grid1 = np.asarray(grid1)
-    mesh0, mesh1 = np.meshgrid(grid0, grid1, indexing="ij")
     posterior = safe_exponentialize(logpost)
 
     show_marginals = marginal0 is not None and marginal1 is not None
@@ -483,26 +620,25 @@ def plot_posterior_2d(
         ax_top = ax_right = None
 
     # Joint panel.
-    cf = ax_joint.contourf(mesh0, mesh1, posterior, levels=levels)
-    ax_joint.contour(mesh0, mesh1, posterior, levels=levels, colors="k", linewidths=0.3)
-    ax_joint.scatter(
-        fiducials[name0], fiducials[name1], color="tab:red", marker="x", label="fiducial"
+    hist2d_density(
+        grid0, grid1, posterior, ax_joint, color=color, sigmas=sigmas, smooth=smooth
     )
+    ax_joint.axvline(fiducials[name0], color=truth_color)
+    ax_joint.axhline(fiducials[name1], color=truth_color)
+    ax_joint.plot(fiducials[name0], fiducials[name1], marker="s", color=truth_color)
     ax_joint.set(xlabel=name0, ylabel=name1)
-    ax_joint.legend()
 
     if show_marginals:
         # Top marginal: p(name0) = integrate out name1.
-        ax_top.plot(grid0, marginal0, color="black")
-        ax_top.axvline(fiducials[name0], color="tab:red", ls="--")
-        ax_top.set(ylabel=f"p({name0})")
+        ax_top.plot(grid0, marginal0, color=color)
+        ax_top.axvline(fiducials[name0], color=truth_color)
+        ax_top.set_yticks([])
 
         # Right marginal: p(name1), rotated so its x-axis aligns with the joint y-axis.
-        ax_right.plot(marginal1, grid1, color="black")
-        ax_right.axhline(fiducials[name1], color="tab:red", ls="--")
-        ax_right.set(xlabel=f"p({name1})")
+        ax_right.plot(marginal1, grid1, color=color)
+        ax_right.axhline(fiducials[name1], color=truth_color)
+        ax_right.set_xticks([])
 
-    fig.colorbar(cf, ax=ax_joint, label="posterior (unnormalized)")
     return fig
 
 
@@ -510,18 +646,42 @@ def plot_posterior_2d(
 # ## Running the grid evaluation
 #
 # We dispatch to the 1D or 2D routine based on the number of sampled parameters.
+#
+# JAX dispatches the jitted evaluation asynchronously, so `compute_logposterior_*`
+# returns almost instantly with an *unrealized* array; the real work only happens
+# when the values are first read on the host. We call `jax.block_until_ready` here
+# to force (and time) the computation in this cell, rather than having its cost
+# surface later inside plotting. This cell is intentionally separate from the
+# plotting cell so re-plotting never re-triggers the grid evaluation.
+
+# %%
+_t0 = time.perf_counter()
+if len(sampled_params) == 1:
+    name, grid, logpost = compute_logposterior_1d()
+    logpost = jax.block_until_ready(logpost)
+    print(
+        f"evaluated log-posterior over {name}: {logpost.shape[0]} points "
+        f"in {time.perf_counter() - _t0:.1f}s"
+    )
+else:
+    axis0, axis1, logpost = compute_logposterior_2d()
+    logpost = jax.block_until_ready(logpost)
+    print(
+        f"evaluated log-posterior over {axis0[0]} x {axis1[0]}: {logpost.shape} grid "
+        f"in {time.perf_counter() - _t0:.1f}s"
+    )
+
+# %% [markdown]
+# ## Plotting
+#
+# This cell only reads the already-materialized `logpost`, so it is fast and safe
+# to re-run repeatedly (e.g. to tweak styling) without recomputing the grid.
 
 # %%
 if len(sampled_params) == 1:
-    name, grid, logpost = compute_logposterior_1d()
-    print(f"evaluated log-posterior over {name}: {logpost.shape[0]} points")
     plot_posterior_1d(name, grid, logpost)
 else:
-    axis0, axis1, logpost = compute_logposterior_2d()
-    print(f"evaluated log-posterior over {axis0[0]} x {axis1[0]}: {logpost.shape} grid")
-    marginal0, marginal1 = compute_marginal_distributions(
-        logpost, axis0[1], axis1[1]
-    )
+    marginal0, marginal1 = compute_marginal_distributions(logpost, axis0[1], axis1[1])
     plot_posterior_2d(axis0, axis1, logpost, marginal0=marginal0, marginal1=marginal1)
 
 # %% [markdown]
