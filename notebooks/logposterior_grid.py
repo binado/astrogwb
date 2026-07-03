@@ -389,6 +389,11 @@ def compute_logposterior_2d():
 # a constant. To avoid overflow we use the standard log-sum-exp stabilization:
 # subtract the maximum log-posterior before exponentiating. This is safe because
 # the overall normalization is irrelevant for plotting the shape.
+#
+# For the 2D case we also compute the **marginal** posterior of each parameter by
+# integrating the joint posterior over the other axis (trapezoidal rule on the
+# grid). The marginals are then shown above and to the right of the joint panel in
+# a corner-plot style layout.
 
 
 # %%
@@ -399,6 +404,28 @@ def safe_exponentialize(logpost: np.ndarray) -> np.ndarray:
     """
     logpost = np.asarray(logpost, dtype=np.float64)
     return np.exp(logpost - np.max(logpost))
+
+
+def compute_marginal_distributions(
+    logpdf: jax.Array, x: jax.Array, y: jax.Array
+) -> tuple[np.ndarray, np.ndarray]:
+    """Marginalize a 2D log-posterior over each axis.
+
+    `logpdf[i, j]` is the (unnormalized) log-posterior at `(x[i], y[j])`.
+    Returns `(marginal_x, marginal_y)`, each a normalized 1D posterior density
+    evaluated on its respective grid, obtained by integrating out the other
+    variable via trapezoidal quadrature on the supplied grid.
+    """
+    posterior = safe_exponentialize(logpdf)
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    # Integrate out y (axis=1) -> function of x; integrate out x (axis=0) -> of y.
+    marginal_x = np.trapezoid(posterior, x=y, axis=1)
+    marginal_y = np.trapezoid(posterior, x=x, axis=0)
+    # Normalize each to a proper density over its own grid.
+    marginal_x = marginal_x / np.trapezoid(marginal_x, x=x)
+    marginal_y = marginal_y / np.trapezoid(marginal_y, x=y)
+    return marginal_x, marginal_y
 
 
 def plot_posterior_1d(
@@ -418,24 +445,64 @@ def plot_posterior_2d(
     axis1: tuple[str, jax.Array],
     logpost: jax.Array,
     *,
+    marginal0: np.ndarray | None = None,
+    marginal1: np.ndarray | None = None,
     levels: int = 30,
 ):
+    """Corner-style plot: joint 2D posterior with optional 1D marginals.
+
+    If `marginal0`/`marginal1` are provided (posterior densities over `axis0`/
+    `axis1` grids), they are drawn in panels above and to the right of the joint
+    panel, mimicking a `corner`-style layout. Otherwise only the joint panel is
+    drawn.
+    """
     (name0, grid0), (name1, grid1) = axis0, axis1
-    mesh0, mesh1 = np.meshgrid(np.asarray(grid0), np.asarray(grid1), indexing="ij")
+    grid0 = np.asarray(grid0)
+    grid1 = np.asarray(grid1)
+    mesh0, mesh1 = np.meshgrid(grid0, grid1, indexing="ij")
     posterior = safe_exponentialize(logpost)
-    fig, ax = plt.subplots()
-    cf = ax.contourf(mesh0, mesh1, posterior, levels=levels)
-    ax.contour(mesh0, mesh1, posterior, levels=levels, colors="k", linewidths=0.3)
-    ax.scatter(
-        fiducials[name0],
-        fiducials[name1],
-        color="tab:red",
-        marker="x",
-        label="fiducial",
+
+    show_marginals = marginal0 is not None and marginal1 is not None
+    if show_marginals:
+        fig = plt.figure()
+        gs = fig.add_gridspec(
+            2,
+            2,
+            width_ratios=(4, 1),
+            height_ratios=(1, 4),
+            wspace=0.05,
+            hspace=0.05,
+        )
+        ax_top = fig.add_subplot(gs[0, 0])
+        ax_joint = fig.add_subplot(gs[1, 0], sharex=ax_top)
+        ax_right = fig.add_subplot(gs[1, 1], sharey=ax_joint)
+        plt.setp(ax_top.get_xticklabels(), visible=False)
+        plt.setp(ax_right.get_yticklabels(), visible=False)
+    else:
+        fig, ax_joint = plt.subplots()
+        ax_top = ax_right = None
+
+    # Joint panel.
+    cf = ax_joint.contourf(mesh0, mesh1, posterior, levels=levels)
+    ax_joint.contour(mesh0, mesh1, posterior, levels=levels, colors="k", linewidths=0.3)
+    ax_joint.scatter(
+        fiducials[name0], fiducials[name1], color="tab:red", marker="x", label="fiducial"
     )
-    ax.set(xlabel=name0, ylabel=name1)
-    ax.legend()
-    fig.colorbar(cf, ax=ax, label="posterior (unnormalized)")
+    ax_joint.set(xlabel=name0, ylabel=name1)
+    ax_joint.legend()
+
+    if show_marginals:
+        # Top marginal: p(name0) = integrate out name1.
+        ax_top.plot(grid0, marginal0, color="black")
+        ax_top.axvline(fiducials[name0], color="tab:red", ls="--")
+        ax_top.set(ylabel=f"p({name0})")
+
+        # Right marginal: p(name1), rotated so its x-axis aligns with the joint y-axis.
+        ax_right.plot(marginal1, grid1, color="black")
+        ax_right.axhline(fiducials[name1], color="tab:red", ls="--")
+        ax_right.set(xlabel=f"p({name1})")
+
+    fig.colorbar(cf, ax=ax_joint, label="posterior (unnormalized)")
     return fig
 
 
@@ -452,7 +519,10 @@ if len(sampled_params) == 1:
 else:
     axis0, axis1, logpost = compute_logposterior_2d()
     print(f"evaluated log-posterior over {axis0[0]} x {axis1[0]}: {logpost.shape} grid")
-    plot_posterior_2d(axis0, axis1, logpost)
+    marginal0, marginal1 = compute_marginal_distributions(
+        logpost, axis0[1], axis1[1]
+    )
+    plot_posterior_2d(axis0, axis1, logpost, marginal0=marginal0, marginal1=marginal1)
 
 # %% [markdown]
 # ## Saving the grid
