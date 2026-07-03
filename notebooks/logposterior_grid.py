@@ -451,13 +451,20 @@ def compute_marginal_distributions(
 
 
 def plot_posterior_1d(
-    name: str, grid: jax.Array, logpost: jax.Array, *, color: str = "black"
+    name: str,
+    grid: jax.Array,
+    logpost: jax.Array,
+    *,
+    color: str = "black",
+    axlim: tuple[float, float] | None = None,
 ):
     posterior = safe_exponentialize(logpost)
     fig, ax = plt.subplots()
     ax.plot(np.asarray(grid), posterior, color=color)
     ax.axvline(fiducials[name], color="tab:red", ls="--", label="fiducial")
     ax.set(xlabel=name, ylabel="posterior (unnormalized)")
+    if axlim is not None:
+        ax.set_xlim(axlim)
     ax.legend()
     return fig
 
@@ -585,6 +592,8 @@ def plot_posterior_2d(
     truth_color: str = "#4682b4",
     sigmas: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0),
     smooth: float | None = 1.0,
+    axlim0: tuple[float, float] | None = None,
+    axlim1: tuple[float, float] | None = None,
 ):
     """Corner-style plot: joint 2D posterior with optional 1D marginals.
 
@@ -592,7 +601,9 @@ def plot_posterior_2d(
     credible-region contours). If `marginal0`/`marginal1` are provided (posterior
     densities over `axis0`/`axis1` grids), they are drawn in panels above and to
     the right of the joint panel, mimicking a `corner`-style layout. `smooth` is a
-    Gaussian sigma in grid cells (set to `None` to disable smoothing).
+    Gaussian sigma in grid cells (set to `None` to disable smoothing). `axlim0`/
+    `axlim1` set the limits of the `axis0`/`axis1` axes; the shared marginal panels
+    follow via `sharex`/`sharey`.
     """
     (name0, grid0), (name1, grid1) = axis0, axis1
     grid0 = np.asarray(grid0)
@@ -627,6 +638,10 @@ def plot_posterior_2d(
     ax_joint.axhline(fiducials[name1], color=truth_color)
     ax_joint.plot(fiducials[name0], fiducials[name1], marker="s", color=truth_color)
     ax_joint.set(xlabel=name0, ylabel=name1)
+    if axlim0 is not None:
+        ax_joint.set_xlim(axlim0)
+    if axlim1 is not None:
+        ax_joint.set_ylim(axlim1)
 
     if show_marginals:
         # Top marginal: p(name0) = integrate out name1.
