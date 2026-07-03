@@ -34,12 +34,12 @@
 # ## Imports and JAX configuration
 
 # %%
-from datetime import datetime
-from functools import partial
 import json
 import multiprocessing
-from pathlib import Path
 import time
+from datetime import datetime
+from functools import partial
+from pathlib import Path
 
 # Setting JAX to use all available CPU cores for parallelization
 num_cpus = multiprocessing.cpu_count()
@@ -49,27 +49,28 @@ numpyro.set_host_device_count(num_cpus)
 
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
-from numpyro.infer.util import log_density
-from scipy.ndimage import gaussian_filter
-
-import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap, colorConverter
-
-from astrogwb.sampling.numpyro_model import numpyro_model
-from astrogwb.gwb import (
-    spectral_density,
-    omega_gw_from_spectral_density,
-    frequency_mask as make_frequency_mask,
-)
-from astrogwb.detector import load_sensitivity_map, effective_psd
-from astrogwb.waveform import load_polarization_power_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
 # matplotlib axes so plotting behaves as expected after importing detector utilities.
 from matplotlib.axes import Axes as MplAxes
+from matplotlib.colors import LinearSegmentedColormap, colorConverter
 from matplotlib.projections import register_projection
+from numpyro.infer.util import log_density
+from scipy.ndimage import gaussian_filter
+
+from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.gwb import (
+    frequency_mask as make_frequency_mask,
+)
+from astrogwb.gwb import (
+    omega_gw_from_spectral_density,
+    spectral_density,
+)
+from astrogwb.sampling.numpyro_model import numpyro_model
+from astrogwb.waveform import load_polarization_power_catalog
 
 register_projection(MplAxes)
 
@@ -104,18 +105,12 @@ observation_time = 1.0  # [yr]; cancels in S_h, kept for the likelihood scale
 
 # Grid settings
 seed = 42
-npoints = 101  # grid points per sampled parameter
+npoints = 256  # grid points per sampled parameter
 chunk_size = 64  # grid points evaluated per vectorized batch (bounds peak memory)
 
 if DEBUG:
     npoints = 21
 
-# Optional custom per-parameter grid ranges as {name: (low, high)}. When a sampled
-# parameter appears here, the grid is built over this range instead of the full
-# prior (concentrating `npoints` for better resolution) and the plot axes are
-# limited to it. Parameters without an entry fall back to their prior range and
-# auto-scaled axes. Example: grid_ranges = {"H0": (55.0, 85.0)}.
-grid_ranges: dict[str, tuple[float, float]] = {}
 
 # Redshift grid for the cosmology integrals (and MD normalization)
 z_min = 0.0
@@ -148,7 +143,14 @@ hyperprior_dists = {
     "z_peak": dist.Uniform(0.05, 10.0),
 }
 
-sampled_params = set(("H0",))
+# Optional custom per-parameter grid ranges as {name: (low, high)}. When a sampled
+# parameter appears here, the grid is built over this range instead of the full
+# prior (concentrating `npoints` for better resolution) and the plot axes are
+# limited to it. Parameters without an entry fall back to their prior range and
+# auto-scaled axes. Example: grid_ranges = {"H0": (55.0, 85.0)}.
+grid_ranges: dict[str, tuple[float, float]] = {"xi_0": (0.9, 1.1), "xi_n": (0.3, 3.0)}
+
+sampled_params = ("xi_0", "xi_n")
 
 assert 1 <= len(sampled_params) <= 2, (
     "the log-posterior grid supports only 1 or 2 sampled parameters"
