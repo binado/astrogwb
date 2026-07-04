@@ -69,6 +69,9 @@ from astrogwb.gwb import (
     omega_gw_from_spectral_density,
     spectral_density,
 )
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    make_merger_rate_and_log_weights_fn,
+)
 from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.waveform import load_polarization_power_catalog
 
@@ -245,10 +248,6 @@ log_p_proposal = jnp.log(
 
 
 # %%
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    make_merger_rate_and_log_weights_fn,
-)
-
 merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
     z_grid=jnp.linspace(z_min, z_max, n_grid),
     proposal_log_pdf=log_p_proposal,
@@ -379,7 +378,7 @@ def make_param_grid(
 
 
 # %%
-sampled_param_names = sorted(sampled_params)
+sampled_param_names = tuple(sampled_params)
 
 
 def _log_posterior(param_values: dict[str, jax.Array]) -> jax.Array:
