@@ -146,7 +146,7 @@ hyperprior_dists = {
     "local_merger_rate": dist.Uniform(7.6, 250.0),
 }
 
-sampled_params = set(("H0", "local_merger_rate"))
+sampled_params = set(("H0",))
 
 priors = {k: hyperprior_dists[k] for k in sampled_params}
 constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
