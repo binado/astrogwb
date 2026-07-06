@@ -51,6 +51,7 @@ import arviz_plots as azp
 import arviz_stats as azs
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
@@ -317,14 +318,19 @@ sigma_fisher = float(amplitude_fiducial / snr)
 print(f"SNR={snr:.3f} sigma_fisher={sigma_fisher:.3f}")
 
 # %%
-pc = azp.plot_dist(inference_data, var_names=["amplitude"])
-ax = pc.get_target("amplitude", {})
-x = np.linspace(
-    amplitude_fiducial - 4 * sigma_fisher, amplitude_fiducial + 4 * sigma_fisher, 400
-)
-pdf = np.exp(-0.5 * ((x - amplitude_fiducial) / sigma_fisher) ** 2) / (
-    sigma_fisher * np.sqrt(2 * np.pi)
-)
-ax.plot(x, pdf, color="C1", linestyle="--", label="Fisher $\\mathcal{N}(A_{fid}, 1/\\mathrm{SNR}^2)$")
-ax.axvline(amplitude_fiducial, color="k", linestyle=":", label="injected $A_{fid}$")
+kde = azs.kde(inference_data, var_names=["amplitude"])["amplitude"]
+x_kde = kde.sel(plot_axis="x").values
+y_kde = kde.sel(plot_axis="y").values
+
+mu = amplitude_fiducial
+x = np.linspace(mu - 4 * sigma_fisher, mu + 4 * sigma_fisher, 400)
+pdf = np.exp(-0.5 * ((x - mu) / sigma_fisher) ** 2) / (sigma_fisher * np.sqrt(2 * np.pi))
+
+fig, ax = plt.subplots()
+ax.plot(x_kde, y_kde, label="posterior KDE")
+ax.fill_between(x_kde, y_kde, alpha=0.2)
+ax.plot(x, pdf, linestyle="--", label=r"Fisher $\mathcal{N}(A_\mathrm{fid}, 1/\mathrm{SNR}^2)$")
+ax.axvline(mu, color="k", linestyle=":", label=r"injected $A_\mathrm{fid}$")
+ax.set_xlabel("amplitude")
+ax.set_ylabel("density")
 ax.legend()
