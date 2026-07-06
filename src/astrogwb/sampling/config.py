@@ -69,7 +69,6 @@ class RunConfig(BaseModel):
     model_config = _STRICT
 
     seed: int = 42
-    local_merger_rate: float = 161.0
     observation_time: float = 1.0
     fiducials: dict[str, float]
     priors: dict[str, dict[str, Any]]  # prior name -> spec table

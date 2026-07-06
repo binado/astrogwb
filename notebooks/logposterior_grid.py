@@ -103,7 +103,6 @@ CATALOG_PATH = ROOT_DIR / "out/bns_polarization_power_catalog.npz"
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
-local_merger_rate = 161.0  # [Gpc^-3 yr^-1], matches COBA simulations
 observation_time = 1.0  # [yr]; cancels in S_h, kept for the likelihood scale
 
 # Grid settings
@@ -133,6 +132,7 @@ fiducials = {
     "gamma": 2.7,
     "kappa": 3.0,
     "z_peak": 2.0,
+    "local_merger_rate": 161.0,
 }
 
 # --- Hyperprior bounds (order: cosmology, then population) -------------------
@@ -251,7 +251,6 @@ log_p_proposal = jnp.log(
 merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
     z_grid=jnp.linspace(z_min, z_max, n_grid),
     proposal_log_pdf=log_p_proposal,
-    local_merger_rate=local_merger_rate,
     fiducial_xi_0=fiducials["xi_0"],
     fiducial_xi_n=fiducials["xi_n"],
 )
@@ -764,7 +763,6 @@ run_config = {
     "detectors": list(detnames),
     "seed": seed,
     "observation_time": observation_time,
-    "local_merger_rate": local_merger_rate,
     "sampled_params": sorted(sampled_params),
     "fiducials": fiducials,
     "priors": {

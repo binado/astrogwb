@@ -32,7 +32,6 @@ def make_merger_rate_and_log_weights_fn(
     *,
     z_grid: jnp.ndarray,
     proposal_log_pdf: jnp.ndarray,
-    local_merger_rate: float,
     fiducial_xi_0: float,
     fiducial_xi_n: float,
 ) -> MergerRateAndLogWeightsFn:
@@ -42,6 +41,8 @@ def make_merger_rate_and_log_weights_fn(
     fiducial parameter point) to arbitrary sampled hyperparameters. It is
     JAX-traceable and intended to be passed (pre-built) to
     :func:`~astrogwb.sampling.numpyro_model.numpyro_model`.
+    The callback's ``params`` mapping must include ``local_merger_rate`` in
+    ``Gpc^-3 yr^-1`` alongside the cosmology and population parameters.
 
     Parameters
     ----------
@@ -52,8 +53,6 @@ def make_merger_rate_and_log_weights_fn(
     proposal_log_pdf:
         Precomputed ``log`` of the proposal redshift PDF evaluated at the
         catalog redshifts, shape ``(N,)``.
-    local_merger_rate:
-        Local (z=0) merger rate in ``Gpc^-3 yr^-1``.
     fiducial_xi_0, fiducial_xi_n:
         Modified-propagation parameters of the *proposal* catalog; the weight
         Jacobian includes their ratio against the sampled ``xi_0`` / ``xi_n``.
@@ -117,7 +116,9 @@ def make_merger_rate_and_log_weights_fn(
             - 2.0 * log_target_gw_em_ratio
         )
 
-        total_merger_rate = 1e-9 * local_merger_rate * integral_Mpc3 / SECONDS_PER_YEAR
+        total_merger_rate = (
+            1e-9 * params["local_merger_rate"] * integral_Mpc3 / SECONDS_PER_YEAR
+        )
         return total_merger_rate, log_weights
 
     return merger_rate_and_log_weights_fn

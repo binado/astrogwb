@@ -38,12 +38,12 @@ DETECTOR_NETWORKS: dict[str, tuple[str, ...]] = {
 
 # Julia generate_mcmc_configs.jl sets minus w0 (unsupported in the Python runner).
 SAMPLE_ONLY_SETS: dict[str, tuple[str, ...]] = {
-    "H0": ("H0",),
-    "Omega_m": ("H0", "Omega_m"),
-    "modified-propagation": ("xi_0", "xi_n"),
-    "H0-MD": ("H0", "gamma", "kappa", "z_peak"),
-    "H0-peak": ("H0", "z_peak"),
-    "Xi_0-MD": ("xi_0", "gamma", "kappa", "z_peak"),
+    "H0": ("H0", "local_merger_rate"),
+    "Omega_m": ("H0", "Omega_m", "local_merger_rate"),
+    "modified-propagation": ("xi_0", "xi_n", "local_merger_rate"),
+    "H0-MD": ("H0", "gamma", "kappa", "z_peak", "local_merger_rate"),
+    "H0-peak": ("H0", "z_peak", "local_merger_rate"),
+    "Xi_0-MD": ("xi_0", "gamma", "kappa", "z_peak", "local_merger_rate"),
 }
 
 # Uniform bounds from mcmc.jl hyperprior_dists (Python parameter names).
@@ -55,6 +55,7 @@ PRIOR_TABLES: dict[str, dict[str, Any]] = {
     "gamma": {"type": "uniform", "low": 0.5, "high": 10.0},
     "kappa": {"type": "uniform", "low": 0.05, "high": 10.0},
     "z_peak": {"type": "uniform", "low": 0.05, "high": 10.0},
+    "local_merger_rate": {"type": "uniform", "low": 7.6, "high": 250.0},
 }
 
 
