@@ -75,7 +75,9 @@ def test_flat_lcdm_grid_accepts_jax_scalar_max_redshift() -> None:
     # Documents the static-scalar contract: a concrete (non-traced) jnp scalar
     # for max_redshift must not crash the build -- gwmock_pop accepts it.
     d_l, _ = distance_and_volume_grid(
-        FIDUCIALS, max_redshift=float(jnp.asarray(Z_MAX)), n_grid=N_GRID
+        FIDUCIALS,
+        max_redshift=jnp.asarray(Z_MAX),  # ty: ignore[invalid-argument-type]
+        n_grid=N_GRID,
     )
     assert np.asarray(d_l).shape == (N_GRID,)
 

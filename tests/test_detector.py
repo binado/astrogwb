@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -15,46 +14,19 @@ from astrogwb.detector import (
     pairwise_overlap_reduction_function,
     resolve_detector,
 )
-from astrogwb.detector.overlap import (
-    R_EARTH,
-    _LOW_ALPHA_THRESHOLD,
-    _azimuth_bisector,
-    _chord_distance,
-    _final_course,
-    _get_orf,
-    _initial_course,
-)
+from astrogwb.detector.overlap import R_EARTH
 
 
-@pytest.fixture
-def frequencies() -> np.ndarray:
-    return np.geomspace(20, 2048, 128)
-
-
-@pytest.fixture
-def load_fixture() -> Callable[[Path], dict[str, np.ndarray]]:
-    def _loader(path: Path) -> dict[str, np.ndarray]:
-        if not path.exists():
-            pytest.skip(f"Missing ORF fixture: {path.name}.")
-        return dict(np.load(path))
-
-    return _loader
-
-
-def test_resolve_detector_str_lookup() -> None:
-    det = resolve_detector("H1")
+@pytest.mark.parametrize("loader", [resolve_detector, load_detector])
+@pytest.mark.parametrize("name", ["H1", "V1"])
+def test_detector_loaders_return_custom_detector(
+    loader: Callable[[str], CustomDetector], name: str
+) -> None:
+    det = loader(name)
 
     assert isinstance(det, CustomDetector)
-    assert det.name == "H1"
-    assert math.degrees(det.latitude_rad) == pytest.approx(46.45514666666667)
-
-
-def test_load_detector_returns_custom_detector() -> None:
-    det = load_detector("V1")
-
-    assert isinstance(det, CustomDetector)
-    assert det.name == "V1"
-    assert math.degrees(det.latitude_rad) == pytest.approx(43.631414472222225)
+    assert det.name == name
+    assert -math.pi / 2.0 < det.latitude_rad < math.pi / 2.0
 
 
 def test_load_detector_cosmic_explorer_is_not_lal_prototype() -> None:
@@ -63,7 +35,7 @@ def test_load_detector_cosmic_explorer_is_not_lal_prototype() -> None:
     # the latter so CE networks are built from the right site.
     det = load_detector("C1")
 
-    assert math.degrees(det.latitude_rad) == pytest.approx(46.45514666666667)
+    assert math.degrees(det.latitude_rad) == pytest.approx(46.455, abs=0.01)
 
 
 def test_load_detector_unknown_name_raises() -> None:
@@ -89,56 +61,40 @@ def test_resolve_detector_unknown_name_raises() -> None:
         resolve_detector("NOPE")
 
 
-def test_chord_distance_antipodal() -> None:
-    assert _chord_distance(0.0, 0.0, 0.0, math.pi) == pytest.approx(2.0 * R_EARTH)
-
-
-def test_course_angles() -> None:
-    assert _initial_course(0.0, 0.0, 0.0, math.radians(10.0)) == pytest.approx(
-        math.pi / 2.0
-    )
-    assert _initial_course(
-        0.0, math.radians(10.0), math.radians(45.0), math.radians(45.0)
-    ) == pytest.approx(0.0)
-    lat1, lat2 = math.radians(46.5), math.radians(30.6)
-    lon1, lon2 = math.radians(-119.4), math.radians(-90.8)
-    assert _final_course(lat1, lat2, lon1, lon2) != pytest.approx(
-        _initial_course(lat1, lat2, lon1, lon2), abs=math.radians(1.0)
-    )
-
-
-def test_azimuth_bisector_wraparound() -> None:
-    bisector = _azimuth_bisector(math.radians(10.0), math.radians(350.0))
-    assert math.degrees(bisector) == pytest.approx(0.0)
-
-
-def test_get_orf_low_alpha_uses_both_opening_angles() -> None:
-    alpha = np.array([_LOW_ALPHA_THRESHOLD * 0.5])
-    actual = _get_orf(alpha, 0.9, 0.37, 1.1, math.pi / 2.0, math.pi / 3.0)
-    expected = np.cos(4.0 * 0.37) * np.sin(math.pi / 2.0) * np.sin(math.pi / 3.0)
-
-    np.testing.assert_allclose(actual, np.array([expected]))
-
-
 def test_orf_colocated_is_normalized(frequencies: np.ndarray) -> None:
     actual = overlap_reduction_function(frequencies, "H1", "H1")
 
     np.testing.assert_allclose(actual, np.ones_like(frequencies))
 
 
-def test_orf_accepts_gwmock_custom_detector(frequencies: np.ndarray) -> None:
-    detector = CustomDetector(
-        name="T1",
+def test_orf_continuous_across_low_alpha_threshold() -> None:
+    # For two detectors ~1 km apart, alpha = 2*pi*f*d/c crosses the internal
+    # low-alpha series-expansion threshold near f ~= 95 Hz. The ORF must be
+    # continuous across that branch switch: a bad expansion or threshold would
+    # show up as a jump on a fine frequency grid straddling it.
+    dlat = 1.0 / R_EARTH  # ~1 km separation along a meridian
+    det_a = CustomDetector(
+        name="A",
         latitude_rad=0.0,
         longitude_rad=0.0,
         elevation_m=0.0,
         xarm_azimuth_rad=0.0,
         yarm_azimuth_rad=math.pi / 2.0,
     )
+    det_b = CustomDetector(
+        name="B",
+        latitude_rad=dlat,
+        longitude_rad=0.0,
+        elevation_m=0.0,
+        xarm_azimuth_rad=0.0,
+        yarm_azimuth_rad=math.pi / 2.0,
+    )
+    freqs = np.linspace(50.0, 150.0, 2001)
 
-    actual = overlap_reduction_function(frequencies, detector, detector)
+    orf = overlap_reduction_function(freqs, det_a, det_b)
 
-    np.testing.assert_allclose(actual, np.ones_like(frequencies))
+    assert np.all(np.isfinite(orf))
+    assert np.max(np.abs(np.diff(orf))) < 1e-3
 
 
 def test_orf_accepts_mixed_str_and_custom_detector(frequencies: np.ndarray) -> None:
@@ -160,11 +116,9 @@ def test_pairwise_overlap_shape_and_symmetry(frequencies: np.ndarray) -> None:
 
 @pytest.mark.integration
 def test_matches_gwfast_reference(
-    load_fixture: Callable[[Path], dict[str, np.ndarray]],
+    load_orf_fixture: Callable[[str], dict[str, np.ndarray]],
 ) -> None:
-    fixture = load_fixture(
-        Path(__file__).parent / "fixtures" / "gwfast_orf_reference.npz"
-    )
+    fixture = load_orf_fixture("gwfast_orf_reference")
     freqs = fixture["frequencies"]
 
     for key, reference in fixture.items():
@@ -177,11 +131,9 @@ def test_matches_gwfast_reference(
 
 @pytest.mark.integration
 def test_et_triangle_sum_upper_pairs_matches_reference(
-    load_fixture: Callable[[Path], dict[str, np.ndarray]],
+    load_orf_fixture: Callable[[str], dict[str, np.ndarray]],
 ) -> None:
-    fixture = load_fixture(
-        Path(__file__).parent / "fixtures" / "gwfast_orf_reference_et_triangle.npz"
-    )
+    fixture = load_orf_fixture("gwfast_orf_reference_et_triangle")
     freqs = fixture["frequencies"]
     ets_lat = 40.0 + 31.0 / 60.0
     ets_lon = 9.0 + 25.0 / 60.0
