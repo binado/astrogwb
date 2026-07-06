@@ -21,5 +21,6 @@ uv sync --group dev
 ## Notebooks
 
 - **`mcmc.py`** — importance-weighted NUTS inference (NumPyro port of ASGWB.jl)
+- **`mcmc_amplitude_toy.py`** — smoke-test sibling of `mcmc.py`: same pipeline scaffolding, but the cosmology/population callback is replaced by a trivial single-parameter amplitude model, to sanity-check that NUTS recovers a known injection
 - **`mcmc_plotting.py`** — load saved chains and produce diagnostic and corner plots
 - **`logposterior_grid.py`** — evaluate the log-posterior on a parameter grid
