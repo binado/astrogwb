@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Protocol
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -9,14 +9,7 @@ import numpyro
 import numpyro.distributions as dist
 
 from astrogwb.gwb import AverageMode, gaussian_bin_scale, spectral_density
-
-
-class MergerRateAndLogWeightsFn(Protocol):
-    def __call__(
-        self,
-        params: Mapping[str, Any],
-        samples: Mapping[str, jax.Array],
-    ) -> tuple[float | jax.Array, jax.Array]: ...
+from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 
 
 def numpyro_model(
