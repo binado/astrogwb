@@ -136,7 +136,6 @@ def build_potential(config: RunConfig, jax):
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         z_grid=z_grid,
         proposal_log_pdf=log_p_proposal,
-        local_merger_rate=config.local_merger_rate,
         fiducial_xi_0=config.fiducials["xi_0"],
         fiducial_xi_n=config.fiducials["xi_n"],
     )

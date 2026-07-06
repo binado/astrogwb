@@ -5,12 +5,14 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
+from astrogwb.utils import SECONDS_PER_YEAR
 
 # Standard cosmology + population hyperparameters used across the tests.
 FIDUCIALS = {
@@ -21,6 +23,7 @@ FIDUCIALS = {
     "gamma": 2.7,
     "kappa": 3.0,
     "z_peak": 2.0,
+    "local_merger_rate": 161.0,
 }
 
 Z_MIN = 0.0
@@ -110,7 +113,6 @@ def _build_synthetic_callback(n_samples: int = 16):
     fn = make_merger_rate_and_log_weights_fn(
         z_grid=z_grid,
         proposal_log_pdf=proposal_log_pdf,
-        local_merger_rate=161.0,
         fiducial_xi_0=FIDUCIALS["xi_0"],
         fiducial_xi_n=FIDUCIALS["xi_n"],
     )
@@ -126,6 +128,40 @@ def test_make_merger_rate_and_log_weights_fn_smoke() -> None:
     assert total_rate > 0.0
     assert np.all(np.isfinite(log_weights))
     assert log_weights.shape == (samples["redshift"].shape[0],)
+
+
+def test_local_merger_rate_scales_total_rate_without_changing_weights() -> None:
+    fn, samples = _build_synthetic_callback()
+    fiducial_rate, fiducial_log_weights = fn(FIDUCIALS, samples)
+
+    scaled_params = {**FIDUCIALS, "local_merger_rate": 2.5 * 161.0}
+    scaled_rate, scaled_log_weights = fn(scaled_params, samples)
+
+    assert float(scaled_rate) == pytest.approx(2.5 * float(fiducial_rate))
+    np.testing.assert_allclose(scaled_log_weights, fiducial_log_weights)
+
+
+def test_fiducial_local_merger_rate_preserves_rate_calculation() -> None:
+    fn, samples = _build_synthetic_callback()
+    total_rate, _ = fn(FIDUCIALS, samples)
+
+    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
+    _, dvc_dz_grid = distance_and_volume_grid(
+        FIDUCIALS, max_redshift=Z_MAX, n_grid=N_GRID
+    )
+    rate_shape_grid = madau_dickinson_rate(
+        z_grid,
+        FIDUCIALS["gamma"],
+        FIDUCIALS["kappa"],
+        FIDUCIALS["z_peak"],
+    )
+    integral_mpc3 = jnp.trapezoid(
+        rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid,
+        z_grid,
+    )
+    expected = 1e-9 * 161.0 * float(integral_mpc3) / SECONDS_PER_YEAR
+
+    assert float(total_rate) == pytest.approx(expected)
 
 
 def test_make_merger_rate_and_log_weights_fn_fiducial_weights_finite_and_healthy() -> (

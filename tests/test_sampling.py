@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from numpyro import handlers
+from pydantic import ValidationError
 
 from astrogwb.sampling import numpyro_model
+from astrogwb.sampling.config import build_run_config, load_config
 from astrogwb.sampling.priors import build_prior
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_numpyro_model_smoke_trace() -> None:
@@ -87,3 +93,24 @@ def test_build_prior_normal() -> None:
 def test_build_prior_rejects_unknown_type() -> None:
     with pytest.raises(ValueError, match="unsupported prior type"):
         build_prior({"type": "mystery", "low": 0.0, "high": 1.0})
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    ["configs/mcmc.example.toml", "configs/mcmc.cosmology.toml"],
+)
+def test_shipped_mcmc_configs_fix_local_merger_rate(relative_path: str) -> None:
+    config = build_run_config(load_config(REPO_ROOT / relative_path))
+
+    assert "local_merger_rate" not in config.sampled_params
+    assert config.fiducials["local_merger_rate"] == 161.0
+    assert "local_merger_rate" not in config.priors
+    assert config.constants["local_merger_rate"] == 161.0
+
+
+def test_legacy_top_level_local_merger_rate_is_rejected() -> None:
+    raw = load_config(REPO_ROOT / "configs/mcmc.example.toml")
+    raw["local_merger_rate"] = raw["fiducials"]["local_merger_rate"]
+
+    with pytest.raises(ValidationError, match="local_merger_rate"):
+        build_run_config(raw)

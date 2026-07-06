@@ -55,6 +55,7 @@ PRIOR_TABLES: dict[str, dict[str, Any]] = {
     "gamma": {"type": "uniform", "low": 0.5, "high": 10.0},
     "kappa": {"type": "uniform", "low": 0.05, "high": 10.0},
     "z_peak": {"type": "uniform", "low": 0.05, "high": 10.0},
+    "local_merger_rate": {"type": "uniform", "low": 7.6, "high": 250.0},
 }
 
 

@@ -3,7 +3,6 @@
 # (configs/task_0.toml, ...) and edit the parts that differ between tasks.
 
 seed = 42
-local_merger_rate = 161.0    # [Gpc^-3 yr^-1], matches COBA simulations
 observation_time = 1.0       # [yr]; cancels in S_h, kept for the likelihood scale
 
 # Parameters to infer. Each must have a [priors.<name>] table and a [fiducials]
@@ -50,6 +49,7 @@ xi_n = 1.91
 gamma = 2.7
 kappa = 2.9
 z_peak = 1.9
+local_merger_rate = 161.0    # [Gpc^-3 yr^-1], matches COBA simulations
 
 # Priors: one [priors.<param>] table per sampled parameter.
 # Supported types: uniform (low/high), normal (loc/scale).
