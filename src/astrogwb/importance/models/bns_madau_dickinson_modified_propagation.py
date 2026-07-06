@@ -1,7 +1,7 @@
 """Reference importance-weights model: BNS + Madau-Dickinson rate + modified propagation.
 
 This module packages one concrete realization of the
-:class:`~astrogwb.sampling.numpyro_model.MergerRateAndLogWeightsFn` callback:
+:class:`~astrogwb.importance.protocol.MergerRateAndLogWeightsFn` callback:
 a binary-neutron-star population whose merger-rate density follows the
 Madau-Dickinson (2017) shape, evolved on a flat-LambdaCDM cosmology, with a
 phenomenological GW-to-EM luminosity-distance ratio (``xi_0``, ``xi_n``)
@@ -24,7 +24,7 @@ import jax.numpy as jnp
 from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
-from astrogwb.sampling.numpyro_model import MergerRateAndLogWeightsFn
+from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.utils import SECONDS_PER_YEAR
 
 
