@@ -324,16 +324,24 @@ y_kde = kde.sel(plot_axis="y").values
 
 mu = amplitude_fiducial
 x = np.linspace(mu - 4 * sigma_fisher, mu + 4 * sigma_fisher, 400)
-pdf = np.exp(-0.5 * ((x - mu) / sigma_fisher) ** 2) / (sigma_fisher * np.sqrt(2 * np.pi))
+pdf = np.exp(-0.5 * ((x - mu) / sigma_fisher) ** 2) / (
+    sigma_fisher * np.sqrt(2 * np.pi)
+)
 
 # Scoped reset: `azp.style.use` above mutated the global matplotlib rcParams,
 # which would otherwise leak arviz's styling into this hand-built figure too.
 with plt.style.context("default", after_reset=True):
     fig, ax = plt.subplots()
-    ax.plot(x_kde, y_kde, label="posterior KDE")
-    ax.fill_between(x_kde, y_kde, alpha=0.2)
-    ax.plot(x, pdf, linestyle="--", label=r"Fisher $\mathcal{N}(A_\mathrm{fid}, 1/\mathrm{SNR}^2)$")
-    ax.axvline(mu, color="k", linestyle=":", label=r"injected $A_\mathrm{fid}$")
-    ax.set_xlabel("amplitude")
-    ax.set_ylabel("density")
-    ax.legend()
+    ax.plot(x_kde, y_kde, label="MCMC posterior", color="black")
+    ax.fill_between(x_kde, y_kde, alpha=0.2, color="black")
+    ax.plot(
+        x,
+        pdf,
+        linestyle="--",
+        label=r"$\mathcal{N}(A_\mathrm{fid}, 1/\rho_0^2)$",
+        color="black",
+        lw=2.0,
+    )
+    ax.set_xlabel("Amplitude")
+    ax.set_ylabel("Posterior density")
+    ax.legend(loc="upper right")
