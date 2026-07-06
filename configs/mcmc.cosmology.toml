@@ -4,7 +4,7 @@
 seed = 42
 observation_time = 1.0
 
-sampled_params = ["H0", "Omega_m", "local_merger_rate"]
+sampled_params = ["H0", "Omega_m"]
 
 [runtime]
 platform = "auto"
@@ -53,11 +53,6 @@ high = 140.0
 type = "uniform"
 low = 0.05
 high = 0.95
-
-[priors.local_merger_rate]
-type = "uniform"
-low = 7.6
-high = 250.0
 
 [output]
 outdir = "chains"
