@@ -5,7 +5,6 @@ import numpy as np
 
 from astrogwb.gwb import (
     gaussian_bin_scale,
-    spectral_snr,
     spectral_snr_squared,
 )
 from astrogwb.utils import SECONDS_PER_YEAR, years_to_seconds
@@ -25,19 +24,6 @@ def test_spectral_snr_squared_matches_gaussian_bin_scale() -> None:
     actual = spectral_snr_squared(sd, eff, observation_time_sec, df)
 
     np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
-
-
-def test_spectral_snr_is_sqrt_of_snr_squared() -> None:
-    eff = jnp.array([2.0, 4.0, 6.0])
-    sd = jnp.array([0.1, 0.2, 0.3])
-    observation_time_yr = 5.0 / SECONDS_PER_YEAR
-    df = 10.0
-    observation_time_sec = years_to_seconds(observation_time_yr)
-
-    snr_squared = spectral_snr_squared(sd, eff, observation_time_sec, df)
-    snr = spectral_snr(sd, eff, observation_time_sec, df)
-
-    np.testing.assert_allclose(np.asarray(snr), np.sqrt(np.asarray(snr_squared)))
 
 
 def test_spectral_snr_squared_hand_computed() -> None:

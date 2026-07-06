@@ -78,16 +78,20 @@ def test_numpyro_model_uses_combined_merger_rate_and_log_weights_callback() -> N
     )
 
 
-def test_build_prior_uniform() -> None:
-    d = build_prior({"type": "uniform", "low": 0.0, "high": 2.0})
-    assert d.low == 0.0  # ty: ignore[unresolved-attribute]
-    assert d.high == 2.0  # ty: ignore[unresolved-attribute]
+@pytest.mark.parametrize(
+    ("spec", "expected_attrs"),
+    [
+        ({"type": "uniform", "low": 0.0, "high": 2.0}, {"low": 0.0, "high": 2.0}),
+        ({"type": "normal", "loc": 1.0, "scale": 0.5}, {"loc": 1.0, "scale": 0.5}),
+    ],
+)
+def test_build_prior_happy_path(
+    spec: dict[str, object], expected_attrs: dict[str, float]
+) -> None:
+    d = build_prior(spec)
 
-
-def test_build_prior_normal() -> None:
-    d = build_prior({"type": "normal", "loc": 1.0, "scale": 0.5})
-    np.testing.assert_allclose(d.loc, 1.0)  # ty: ignore[unresolved-attribute]
-    np.testing.assert_allclose(d.scale, 0.5)  # ty: ignore[unresolved-attribute]
+    for attr, expected in expected_attrs.items():
+        np.testing.assert_allclose(getattr(d, attr), expected)
 
 
 def test_build_prior_rejects_unknown_type() -> None:

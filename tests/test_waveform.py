@@ -50,10 +50,12 @@ class _Backend:
     def generate_fd_polarizations_batch(
         self, approximant, *, sampling_frequency, minimum_frequency, parameters
     ):
-        assert approximant == "Toy"
-        assert sampling_frequency == 128.0
-        assert minimum_frequency == 10.0
-        assert parameters["mass_1"].shape == (2,)
+        self.received = dict(
+            approximant=approximant,
+            sampling_frequency=sampling_frequency,
+            minimum_frequency=minimum_frequency,
+            parameters=parameters,
+        )
         return _Polarizations(
             frequencies=jnp.array([10.0, 20.0, 30.0]),
             plus=jnp.array([[1.0 + 1.0j, 2.0, 3.0], [4.0, 5.0 + 1.0j, 6.0]]),
@@ -63,15 +65,20 @@ class _Backend:
 
 def test_generate_catalog_polarization_power_transposes_raw_power() -> None:
     samples = {"mass_1": jnp.array([20.0, 30.0])}
+    backend = _Backend()
 
     actual = generate_catalog_polarization_power(
         samples,
         approximant="Toy",
         sampling_frequency=128.0,
         minimum_frequency=10.0,
-        backend=_Backend(),
+        backend=backend,
     )
 
+    assert backend.received["approximant"] == "Toy"
+    assert backend.received["sampling_frequency"] == 128.0
+    assert backend.received["minimum_frequency"] == 10.0
+    assert backend.received["parameters"]["mass_1"].shape == (2,)
     expected = np.array(
         [
             [2.0, 17.0],
