@@ -89,7 +89,7 @@ def build_potential(config: RunConfig, jax):
     from astrogwb.gwb import frequency_mask as make_frequency_mask
     from astrogwb.gwb import spectral_density
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-        compute_proposal_log_pdf,
+        compute_proposal_logpdf,
         make_merger_rate_and_log_weights_fn,
     )
     from astrogwb.sampling.numpyro_model import numpyro_model
@@ -119,7 +119,7 @@ def build_potential(config: RunConfig, jax):
 
     z_samples = jnp.asarray(samples["redshift"])
     z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
-    log_p_proposal = compute_proposal_log_pdf(
+    log_p_proposal = compute_proposal_logpdf(
         z_samples, z_grid=z_grid, fiducials=config.fiducials
     )
 

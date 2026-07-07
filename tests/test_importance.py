@@ -10,7 +10,7 @@ from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pd
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_proposal_log_pdf,
+    compute_proposal_logpdf,
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.utils import SECONDS_PER_YEAR
@@ -84,13 +84,13 @@ def test_flat_lcdm_grid_accepts_jax_scalar_max_redshift() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# compute_proposal_log_pdf
+# compute_proposal_logpdf
 # --------------------------------------------------------------------------- #
-def test_compute_proposal_log_pdf_matches_manual_computation() -> None:
+def test_compute_proposal_logpdf_matches_manual_computation() -> None:
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
     z_samples = jnp.linspace(0.01, Z_MAX - 0.01, 16)
 
-    out = compute_proposal_log_pdf(z_samples, z_grid=z_grid, fiducials=FIDUCIALS)
+    out = compute_proposal_logpdf(z_samples, z_grid=z_grid, fiducials=FIDUCIALS)
     out = np.asarray(out)
 
     expected = np.asarray(

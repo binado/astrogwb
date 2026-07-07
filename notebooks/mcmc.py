@@ -276,14 +276,14 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 
 # %%
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_proposal_log_pdf,
+    compute_proposal_logpdf,
     make_merger_rate_and_log_weights_fn,
 )
 
 z_samples = jnp.asarray(samples["redshift"])
 z_grid = jnp.linspace(z_min, z_max, n_grid)
 
-log_p_proposal = compute_proposal_log_pdf(
+log_p_proposal = compute_proposal_logpdf(
     z_samples, z_grid=z_grid, fiducials=fiducials
 )
 

@@ -31,7 +31,7 @@ from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.utils import SECONDS_PER_YEAR
 
 
-def compute_proposal_log_pdf(
+def compute_proposal_logpdf(
     redshift: jnp.ndarray,
     *,
     z_grid: jnp.ndarray,
