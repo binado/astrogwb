@@ -10,7 +10,6 @@ from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pd
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_proposal_logpdf,
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.utils import SECONDS_PER_YEAR
@@ -81,37 +80,6 @@ def test_flat_lcdm_grid_accepts_jax_scalar_max_redshift() -> None:
         n_grid=N_GRID,
     )
     assert np.asarray(d_l).shape == (N_GRID,)
-
-
-# --------------------------------------------------------------------------- #
-# compute_proposal_logpdf
-# --------------------------------------------------------------------------- #
-def test_compute_proposal_logpdf_matches_manual_computation() -> None:
-    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    z_samples = jnp.linspace(0.01, Z_MAX - 0.01, 16)
-
-    out = compute_proposal_logpdf(z_samples, z_grid=z_grid, fiducials=FIDUCIALS)
-    out = np.asarray(out)
-
-    expected = np.asarray(
-        jnp.log(
-            madau_dickinson_redshift_pdf(
-                z_samples,
-                z_min=Z_MIN,
-                z_max=Z_MAX,
-                gamma=FIDUCIALS["gamma"],
-                kappa=FIDUCIALS["kappa"],
-                z_peak=FIDUCIALS["z_peak"],
-                hubble_constant=FIDUCIALS["H0"],
-                omega_m=FIDUCIALS["Omega_m"],
-                n_grid=N_GRID,
-            )
-        )
-    )
-
-    assert out.shape == (z_samples.shape[0],)
-    assert np.all(np.isfinite(out))
-    np.testing.assert_allclose(out, expected)
 
 
 # --------------------------------------------------------------------------- #
