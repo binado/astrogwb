@@ -70,15 +70,13 @@ from astrogwb.gwb import (
     spectral_density,
 )
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    compute_proposal_log_pdf,
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.waveform import load_polarization_power_catalog
 
 register_projection(MplAxes)
-
-# gwmock-pop: still needed for the proposal redshift PDF precompute.
-from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
 
 jax.config.update("jax_enable_x64", True)
 # %config InlineBackend.figure_format = 'retina'
@@ -231,25 +229,16 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 
 # %%
 z_samples = jnp.asarray(samples["redshift"])
+z_grid = jnp.linspace(z_min, z_max, n_grid)
 
-log_p_proposal = jnp.log(
-    madau_dickinson_redshift_pdf(
-        z_samples,
-        z_max=z_max,
-        z_min=z_min,
-        gamma=fiducials["gamma"],
-        kappa=fiducials["kappa"],
-        z_peak=fiducials["z_peak"],
-        hubble_constant=fiducials["H0"],
-        omega_m=fiducials["Omega_m"],
-        n_grid=n_grid,
-    )
+log_p_proposal = compute_proposal_log_pdf(
+    z_samples, z_grid=z_grid, fiducials=fiducials
 )
 
 
 # %%
 merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
-    z_grid=jnp.linspace(z_min, z_max, n_grid),
+    z_grid=z_grid,
     proposal_log_pdf=log_p_proposal,
     fiducial_xi_0=fiducials["xi_0"],
     fiducial_xi_n=fiducials["xi_n"],

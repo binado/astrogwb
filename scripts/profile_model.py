@@ -82,7 +82,6 @@ def build_potential(config: RunConfig, jax):
     extracts the potential-energy function via NumPyro's public ``initialize_model``.
     """
     import jax.numpy as jnp
-    from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
     from numpyro.infer.initialization import init_to_value
     from numpyro.infer.util import initialize_model
 
@@ -90,6 +89,7 @@ def build_potential(config: RunConfig, jax):
     from astrogwb.gwb import frequency_mask as make_frequency_mask
     from astrogwb.gwb import spectral_density
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+        compute_proposal_log_pdf,
         make_merger_rate_and_log_weights_fn,
     )
     from astrogwb.sampling.numpyro_model import numpyro_model
@@ -118,21 +118,11 @@ def build_potential(config: RunConfig, jax):
     freq_mask = make_frequency_mask(frequencies, fmin=cat.f_min, fmax=cat.f_max)
 
     z_samples = jnp.asarray(samples["redshift"])
-    log_p_proposal = jnp.log(
-        madau_dickinson_redshift_pdf(
-            z_samples,
-            z_max=cosmo.z_max,
-            z_min=cosmo.z_min,
-            gamma=config.fiducials["gamma"],
-            kappa=config.fiducials["kappa"],
-            z_peak=config.fiducials["z_peak"],
-            hubble_constant=config.fiducials["H0"],
-            omega_m=config.fiducials["Omega_m"],
-            n_grid=cosmo.n_grid,
-        )
+    z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
+    log_p_proposal = compute_proposal_log_pdf(
+        z_samples, z_grid=z_grid, fiducials=config.fiducials
     )
 
-    z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         z_grid=z_grid,
         proposal_log_pdf=log_p_proposal,

@@ -21,11 +21,42 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 import jax.numpy as jnp
-from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
+from gwmock_pop.distributions.madau_dickinson import (
+    madau_dickinson_rate,
+    madau_dickinson_redshift_pdf,
+)
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.utils import SECONDS_PER_YEAR
+
+
+def compute_proposal_log_pdf(
+    redshift: jnp.ndarray,
+    *,
+    z_grid: jnp.ndarray,
+    fiducials: Mapping[str, float],
+) -> jnp.ndarray:
+    """Log of the fiducial Madau-Dickinson proposal redshift PDF at `redshift`.
+
+    Mirrors the factory's `z_grid` convention: z_min/z_max/n_grid are read from
+    the grid ends and length. `fiducials` must contain `gamma`, `kappa`,
+    `z_peak`, `H0`, `Omega_m`. Result has shape `(N,)`, ready to pass as
+    `proposal_log_pdf`.
+    """
+    return jnp.log(
+        madau_dickinson_redshift_pdf(
+            redshift,
+            z_min=float(z_grid[0]),
+            z_max=float(z_grid[-1]),
+            gamma=fiducials["gamma"],
+            kappa=fiducials["kappa"],
+            z_peak=fiducials["z_peak"],
+            hubble_constant=fiducials["H0"],
+            omega_m=fiducials["Omega_m"],
+            n_grid=int(z_grid.shape[0]),
+        )
+    )
 
 
 def make_merger_rate_and_log_weights_fn(

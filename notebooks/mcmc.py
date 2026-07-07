@@ -74,9 +74,6 @@ from matplotlib.projections import register_projection
 
 register_projection(MplAxes)
 
-# gwmock-pop: still needed for the proposal redshift PDF precompute.
-from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
-
 jax.config.update("jax_enable_x64", True)
 # %config InlineBackend.figure_format = 'retina'
 azp.style.use("arviz-variat")
@@ -278,36 +275,28 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 # target redshift density, and total merger-rate normalization.
 
 # %%
-z_samples = jnp.asarray(samples["redshift"])
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    compute_proposal_log_pdf,
+    make_merger_rate_and_log_weights_fn,
+)
 
-log_p_proposal = jnp.log(
-    madau_dickinson_redshift_pdf(
-        z_samples,
-        z_max=z_max,
-        z_min=z_min,
-        gamma=fiducials["gamma"],
-        kappa=fiducials["kappa"],
-        z_peak=fiducials["z_peak"],
-        hubble_constant=fiducials["H0"],
-        omega_m=fiducials["Omega_m"],
-        n_grid=n_grid,
-    )
+z_samples = jnp.asarray(samples["redshift"])
+z_grid = jnp.linspace(z_min, z_max, n_grid)
+
+log_p_proposal = compute_proposal_log_pdf(
+    z_samples, z_grid=z_grid, fiducials=fiducials
 )
 
 
 # %% [markdown]
 # The `merger_rate_and_log_weights` callback is packaged in
 # `astrogwb.importance.models.bns_madau_dickinson_modified_propagation`
-# (BNS + Madau-Dickinson rate + modified GW/EM propagation). We import the
-# canonical, tested factory and bind it to this notebook's proposal catalog here.
+# (BNS + Madau-Dickinson rate + modified GW/EM propagation). We bind the
+# canonical, tested factory to this notebook's proposal catalog here.
 
 # %%
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    make_merger_rate_and_log_weights_fn,
-)
-
 merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
-    z_grid=jnp.linspace(z_min, z_max, n_grid),
+    z_grid=z_grid,
     proposal_log_pdf=log_p_proposal,
     fiducial_xi_0=fiducials["xi_0"],
     fiducial_xi_n=fiducials["xi_n"],

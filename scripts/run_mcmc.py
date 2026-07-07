@@ -151,7 +151,6 @@ def run(config: RunConfig, jax, chain_method: str):
     from functools import partial
 
     import jax.numpy as jnp
-    from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
     from numpyro.infer import MCMC, NUTS
     from numpyro.infer.initialization import init_to_value
 
@@ -159,6 +158,7 @@ def run(config: RunConfig, jax, chain_method: str):
     from astrogwb.gwb import frequency_mask as make_frequency_mask
     from astrogwb.gwb import spectral_density
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+        compute_proposal_log_pdf,
         make_merger_rate_and_log_weights_fn,
     )
     from astrogwb.sampling.numpyro_model import numpyro_model
@@ -216,21 +216,11 @@ def run(config: RunConfig, jax, chain_method: str):
 
     # --- Precompute fiducial proposal log-density ----------------------------
     z_samples = jnp.asarray(samples["redshift"])
-    log_p_proposal = jnp.log(
-        madau_dickinson_redshift_pdf(
-            z_samples,
-            z_max=cosmo.z_max,
-            z_min=cosmo.z_min,
-            gamma=config.fiducials["gamma"],
-            kappa=config.fiducials["kappa"],
-            z_peak=config.fiducials["z_peak"],
-            hubble_constant=config.fiducials["H0"],
-            omega_m=config.fiducials["Omega_m"],
-            n_grid=cosmo.n_grid,
-        )
+    z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
+    log_p_proposal = compute_proposal_log_pdf(
+        z_samples, z_grid=z_grid, fiducials=config.fiducials
     )
 
-    z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         z_grid=z_grid,
         proposal_log_pdf=log_p_proposal,
