@@ -238,7 +238,7 @@ def plot_omegagw(
     ax.set_ylim(ymin, None)
     return fig
 
-plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-12)
+plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-12);
 
 # %% [markdown]
 # ## Network sensitivity and cross-correlation SNR
