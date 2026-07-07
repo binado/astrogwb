@@ -32,21 +32,38 @@ from astrogwb.utils import SECONDS_PER_YEAR
 
 
 def compute_proposal_logpdf(
-    redshift: jnp.ndarray,
+    redshifts: jnp.ndarray,
     *,
     z_grid: jnp.ndarray,
     fiducials: Mapping[str, float],
 ) -> jnp.ndarray:
-    """Log of the fiducial Madau-Dickinson proposal redshift PDF at `redshift`.
+    """Log of the fiducial Madau-Dickinson proposal redshift PDF at `redshifts`.
 
-    Mirrors the factory's `z_grid` convention: z_min/z_max/n_grid are read from
-    the grid ends and length. `fiducials` must contain `gamma`, `kappa`,
-    `z_peak`, `H0`, `Omega_m`. Result has shape `(N,)`, ready to pass as
-    `proposal_log_pdf`.
+    Mirrors the factory's ``z_grid`` convention: ``z_min`` / ``z_max`` /
+    ``n_grid`` are read from the grid ends and length.
+
+    Parameters
+    ----------
+    redshifts:
+        Catalog redshifts at which to evaluate the proposal PDF, shape ``(N,)``.
+    z_grid:
+        Redshift grid used for Madau-Dickinson normalization. ``z_min``,
+        ``z_max``, and ``n_grid`` are inferred from the first element, last
+        element, and length of this array.
+    fiducials:
+        Fiducial hyperparameters for the proposal distribution. Must contain
+        ``gamma``, ``kappa``, ``z_peak``, ``H0``, and ``Omega_m``.
+
+    Returns
+    -------
+    jnp.ndarray
+        ``log`` of the normalized Madau-Dickinson redshift PDF evaluated at
+        ``redshifts``, shape ``(N,)``. Ready to pass as ``proposal_log_pdf`` to
+        :func:`make_merger_rate_and_log_weights_fn`.
     """
     return jnp.log(
         madau_dickinson_redshift_pdf(
-            redshift,
+            redshifts,
             z_min=float(z_grid[0]),
             z_max=float(z_grid[-1]),
             gamma=fiducials["gamma"],
