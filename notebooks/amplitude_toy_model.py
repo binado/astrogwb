@@ -73,6 +73,23 @@ from matplotlib.projections import register_projection
 
 register_projection(MplAxes)
 
+plt.style.library["paper-figures"] = {
+    # "figure.figsize": (colwidth, colwidth),
+    "figure.dpi": 200,
+    "text.usetex": True,
+    "font.family": "sans-serif",
+    "font.size": 14,
+    "axes.labelsize": "medium",
+    "axes.titlesize": "medium",
+    "figure.labelsize": "medium",
+    "figure.titlesize": "medium",
+    # Make the legend/label fonts a little smaller
+    "legend.fontsize": "small",
+    "legend.title_fontsize": "small",
+    "xtick.labelsize": "small",
+    "ytick.labelsize": "small",
+}
+
 jax.config.update("jax_enable_x64", True)
 # %config InlineBackend.figure_format = 'retina'
 azp.style.use("arviz-variat")
@@ -84,26 +101,24 @@ azp.style.use("arviz-variat")
 # %%
 DEBUG = False  # small smoke settings for first runs; set False for the production run
 
-# --- Catalog input (placeholder — see schema markdown below) ----------------
-# No working polarization-power catalog exists yet; set this once one is produced.
-
 
 def get_root_dir() -> Path:
     return Path.cwd().parent
 
 
 ROOT_DIR = get_root_dir()
-CATALOG_PATH = ROOT_DIR / "out/bns_polarization_power_catalog.npz"
+CATALOG_PATH = ROOT_DIR / "out/bns_waveforms_df=1Hz.npz"
+output_path = ROOT_DIR / "figures/amplitude_toy_fisher_overlay.pdf"
 
 # Detector settings
-detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
+detnames = ("S1", "R1")  # resolve via bundled geometry.toml / sensitivity.toml
 observation_time = 1.0  # [yr]; cancels in S_h, kept for the likelihood scale
 
 # MCMC settings
 seed = 42
 num_chains = num_cpus  # one chain per CPU core
-num_warmup = 250
-num_samples = 250
+num_warmup = 200
+num_samples = 500
 target_accept = 0.9
 
 if DEBUG:
@@ -330,7 +345,7 @@ pdf = np.exp(-0.5 * ((x - mu) / sigma_fisher) ** 2) / (
 
 # Scoped reset: `azp.style.use` above mutated the global matplotlib rcParams,
 # which would otherwise leak arviz's styling into this hand-built figure too.
-with plt.style.context("default", after_reset=True):
+with plt.style.context("paper-figures", after_reset=True):
     fig, ax = plt.subplots()
     ax.plot(x_kde, y_kde, label="MCMC posterior", color="black")
     ax.fill_between(x_kde, y_kde, alpha=0.2, color="black")
@@ -345,3 +360,7 @@ with plt.style.context("default", after_reset=True):
     ax.set_xlabel("Amplitude")
     ax.set_ylabel("Posterior density")
     ax.legend(loc="upper right")
+
+output_path.parent.mkdir(parents=True, exist_ok=True)
+fig.savefig(output_path, bbox_inches="tight")
+print("saved figure:", output_path)
