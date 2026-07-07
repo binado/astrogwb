@@ -15,19 +15,30 @@
 # %% [markdown]
 # # Matched-filter SNR by detector network
 #
-# The fiducial astrophysical SGWB (same proposal population as `notebooks/mcmc.py`)
-# has a spectral density $S_h(f)$ that depends only on the source population and
-# cosmology — the polarization-power catalog, the importance weights, and the total
-# merger rate. It does **not** depend on the detector network. Only the effective PSD
-# $S_{\mathrm{eff}}(f)$ varies from one network to another.
+# A stochastic gravitational-wave background (SGWB) from the superposition of
+# compact-binary coalescences (CBCs) can be searched for with a **cross-correlation**
+# (matched-filter) analysis. For a given astrophysical model, the central question is:
+# how detectable is that background with different future detector networks?
 #
-# This notebook exploits that factorization: it computes $S_h(f)$ **once** at the
-# fiducial point, then loops over the candidate detector networks below,
-# computing only `effective_psd` and the resulting matched-filter
-# (cross-correlation) SNR for each, and tabulates the results.
-
-# %% [markdown]
-# ## Imports and JAX configuration
+# The answer factorizes into a **signal** and a **noise** piece. The astrophysical
+# strain spectral density $S_h(f)$ is set by the CBC population, cosmology, and
+# propagation assumptions. It does **not** depend on where the detectors sit or how
+# they are oriented. What changes from one network to another is the **network
+# sensitivity** $S_{\mathrm{eff}}(f)$, which combines the one-sided noise PSDs of
+# each instrument with the overlap reduction functions $\Gamma_{ab}(f)$ between
+# baselines.
+#
+# For a diagonal Gaussian noise model, the matched-filter signal-to-noise ratio is
+#
+# $$
+# \mathrm{SNR}^2 = 2 T \Delta f \sum_i \frac{S_{h,i}^2}{S_{\mathrm{eff},i}^2},
+# $$
+#
+# where $T$ is the observation time and $\Delta f$ the frequency bin width. This
+# notebook evaluates $S_h(f)$ **once** at a fiducial astrophysical point, then
+# recomputes only $S_{\mathrm{eff}}(f)$ for each candidate Einstein Telescope (ET)
+# and Cosmic Explorer (CE) network listed below. The population model is the same
+# one used for cosmological inference in `notebooks/mcmc.py`.
 
 # %%
 from pathlib import Path
@@ -59,11 +70,20 @@ jax.config.update("jax_enable_x64", True)
 
 
 # %% [markdown]
-# ## Pipeline configuration
+# ## Fiducial astrophysical model
 #
-# Mirrors `notebooks/mcmc.py`'s fiducial configuration exactly (same catalog,
-# cosmology grid, frequency band, and fiducial parameter point).
-
+# We hold the following fixed throughout the comparison:
+#
+# - **Population:** binary neutron star mergers with a Madau–Dickinson merger-rate
+#   history, parameterized by $(\gamma, \kappa, z_{\mathrm{peak}})$ and normalized
+#   by the local merger rate.
+# - **Cosmology and propagation:** fiducial $H_0$, $\Omega_m$, and modified-propagation
+#   parameters $(\xi_0, \xi_n)$.
+# - **Observation:** $T = 1\,\mathrm{yr}$, analysis band $f \in [2, 4096]\,\mathrm{Hz}$.
+# - **Detector networks:** six configurations — an ET triangular three-site network,
+#   ET two-L-shaped variants with aligned and misaligned arm geometry, each with and
+#   without a Cosmic Explorer Hanford site. The specific site labels are given in the
+#   cell below.
 
 # %%
 def get_root_dir() -> Path:
@@ -106,7 +126,15 @@ fiducials = {
 }
 
 # %% [markdown]
-# ## Loading the waveform catalog
+# ## Proposal waveform ensemble
+#
+# Rather than drawing fresh waveforms for every calculation, we use a fixed Monte
+# Carlo ensemble of CBC sources generated at a fiducial parameter point
+# $\Lambda_0$. Each realization contributes polarization power
+# $|\tilde{h}_+(f, \theta_i)|^2 + |\tilde{h}_\times(f, \theta_i)|^2$ as a function
+# of frequency, together with redshift and luminosity distance so that population
+# reweighting can be applied analytically. This is the same proposal catalog used
+# in `notebooks/mcmc.py`.
 
 # %%
 catalog = load_polarization_power_catalog(CATALOG_PATH)
@@ -124,11 +152,25 @@ n_freq, n_samples = polarization_power.shape
 print(f"loaded catalog: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
 
 # %% [markdown]
-# ## Fiducial spectral density (computed once)
+# ## Fiducial spectral density
 #
-# $S_h(f)$ depends only on the source population + cosmology, so we evaluate it a
-# single time here at the fiducial point, using the fiducial importance weights
-# from `merger_rate_and_log_weights_fn`.
+# The strain spectral density of the astrophysical SGWB is the incoherent sum of
+# many unresolved CBC signals. With importance sampling over the fixed proposal
+# ensemble, it is estimated as
+#
+# $$
+# S_h(f) = \frac{N(\Lambda_0)}{T}\,\frac{1}{N_{\mathrm{inj}}} \sum_{i=1}^{N_{\mathrm{inj}}}
+# \omega_i(\Lambda_0)\,\bigl[|\tilde{h}_+(f, \theta_i)|^2 + |\tilde{h}_\times(f, \theta_i)|^2\bigr],
+# $$
+#
+# where $N(\Lambda_0)/T$ is the volume-integrated merger rate at the fiducial point
+# and $\omega_i(\Lambda_0)$ are the importance weights. Even at $\Lambda = \Lambda_0$
+# these weights are not necessarily unity: the proposal redshift distribution need
+# not coincide with the target Madau–Dickinson rate, and the weights also encode
+# distance and modified-propagation corrections relative to the proposal draw.
+#
+# We evaluate $S_h(f)$ once at the fiducial parameters. Only frequency bins where
+# the detectors are sensitive contribute appreciably to the SNR integral below.
 
 # %%
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
@@ -160,6 +202,19 @@ df = jnp.mean(jnp.diff(frequencies))
 obs_sec = years_to_seconds(observation_time)
 print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 
+# %% [markdown]
+# ## Energy density spectrum $\Omega_{\mathrm{GW}}(f)$
+#
+# It is often convenient to express the background in terms of the fractional energy
+# density per logarithmic frequency,
+#
+# $$
+# \Omega_{\mathrm{GW}}(f) = \frac{1}{\rho_c}\,\frac{\mathrm{d}\rho_{\mathrm{GW}}}{\mathrm{d}\ln f},
+# $$
+#
+# which is related to $S_h(f)$ by $\Omega_{\mathrm{GW}}(f) \propto f^3 S_h(f)$. The
+# plot below shows the fiducial astrophysical spectrum that each network would
+# attempt to detect — a useful sanity check before comparing SNRs.
 
 # %%
 def plot_omegagw(
@@ -186,12 +241,31 @@ def plot_omegagw(
 plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-12)
 
 # %% [markdown]
-# ## SNR sweep over detector networks
+# ## Network sensitivity and cross-correlation SNR
 #
-# Only `effective_psd` changes per network; the observed spectral density is
-# reused unchanged. Applying
-# `mask` enforces the $[f_{\min}, f_{\max}]$ analysis band (out-of-band bins already
-# carry $S_{\mathrm{eff}} = \infty$ and drop out on their own).
+# For a network of detectors $a, b, \ldots$, the effective noise PSD that enters the
+# cross-correlation search is
+#
+# $$
+# S_{\mathrm{eff}}(f) = \left(\sum_{a,b} \frac{\Gamma_{ab}^2(f)}{S_{n,a}(f)\,S_{n,b}(f)}\right)^{-1/2},
+# $$
+#
+# where $S_{n,a}(f)$ is the one-sided noise PSD of detector $a$ and $\Gamma_{ab}(f)$
+# is the overlap reduction function for baselines $a$–$b$, encoding their separation
+# and orientation relative to an isotropic, unpolarized background.
+#
+# More baselines and favourable geometry yield a lower $S_{\mathrm{eff}}$ and hence a
+# higher SNR for the same $S_h(f)$. Among the networks below:
+#
+# - **ET triangular** uses three co-located ET sites, maximizing the number of
+#   independent cross-correlations at a single location.
+# - **ET two-L** variants place two ET arms in an L-shaped configuration; the
+#   aligned and misaligned layouts differ in baseline orientations and hence in
+#   $\Gamma_{ab}(f)$.
+# - Adding **CE-Hanford** introduces a long Cosmic Explorer arm, extending sensitive
+#   baselines and improving low-frequency sensitivity.
+#
+# $S_h(f)$ is held fixed across this sweep; only $S_{\mathrm{eff}}(f)$ changes.
 
 # %%
 rows = []
@@ -209,10 +283,15 @@ for label, dets in DETECTOR_NETWORKS.items():
     )
 
 # %% [markdown]
-# ## Results table
+# ## Comparing networks
 #
-# A pandas `DataFrame` is the natural fit for this small labeled table; call
-# `.to_xarray()` on it if an `xarray.Dataset` is more convenient downstream.
+# The table ranks the candidate networks by matched-filter SNR for the **same**
+# astrophysical signal and observation time. A higher SNR means a stronger expected
+# cross-correlation detection of the fiducial background; ratios of SNR values
+# quantify how much one network improves over another at this fixed model point.
+#
+# This is a single-point forecast. A full assessment of detectability across
+# parameter uncertainty requires the Bayesian analysis in `notebooks/mcmc.py`.
 
 # %%
 df_snr = pd.DataFrame(rows).set_index("network").sort_values("snr", ascending=False)
