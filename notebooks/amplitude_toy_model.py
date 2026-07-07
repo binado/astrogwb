@@ -108,6 +108,7 @@ def get_root_dir() -> Path:
 
 ROOT_DIR = get_root_dir()
 CATALOG_PATH = ROOT_DIR / "out/bns_waveforms_df=1Hz.npz"
+output_path = ROOT_DIR / "figures/amplitude_toy_fisher_overlay.pdf"
 
 # Detector settings
 detnames = ("S1", "R1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -359,3 +360,7 @@ with plt.style.context("paper-figures", after_reset=True):
     ax.set_xlabel("Amplitude")
     ax.set_ylabel("Posterior density")
     ax.legend(loc="upper right")
+
+output_path.parent.mkdir(parents=True, exist_ok=True)
+fig.savefig(output_path, bbox_inches="tight")
+print("saved figure:", output_path)
