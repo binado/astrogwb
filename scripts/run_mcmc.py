@@ -174,6 +174,7 @@ def run(config: RunConfig, jax, chain_method: str):
     frequencies = jnp.asarray(catalog.frequencies)
     polarization_power = jnp.asarray(compute_polarization_power(catalog))
     samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
+    del catalog
     assert "redshift" in samples, (
         "catalog samples must include 'redshift' for the weights"
     )

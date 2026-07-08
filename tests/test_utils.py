@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
+import pytest
 
 from astrogwb.utils import repo_root
 
@@ -12,14 +11,10 @@ def test_repo_root_from_repo_cwd() -> None:
     assert (root / "src/astrogwb").is_dir()
 
 
-def test_repo_root_from_notebooks_cwd() -> None:
+def test_repo_root_from_notebooks_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
     notebooks = repo_root() / "notebooks"
-    cwd = Path.cwd()
-    os.chdir(notebooks)
-    try:
-        assert repo_root() == notebooks.parent
-    finally:
-        os.chdir(cwd)
+    monkeypatch.chdir(notebooks)
+    assert repo_root() == notebooks.parent
 
 
 def test_repo_root_from_explicit_start() -> None:

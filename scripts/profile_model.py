@@ -104,6 +104,7 @@ def build_potential(config: RunConfig, jax):
     frequencies = jnp.asarray(catalog.frequencies)
     polarization_power = jnp.asarray(compute_polarization_power(catalog))
     samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
+    del catalog
     n_freq, n_samples = polarization_power.shape
     logger.info(
         "Loaded catalog %s: n_frequency_bins=%d n_proposal_samples=%d",

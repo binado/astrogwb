@@ -164,6 +164,7 @@ catalog = load_catalog(CATALOG_PATH)
 frequencies = jnp.asarray(catalog.frequencies)
 polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)
 samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
+del catalog
 
 assert "redshift" in samples, "catalog samples must include 'redshift' for the weights"
 assert "luminosity_distance" in samples, (

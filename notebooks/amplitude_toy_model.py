@@ -156,6 +156,7 @@ catalog = load_catalog(CATALOG_PATH)
 frequencies = jnp.asarray(catalog.frequencies)
 polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)
 samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
+del catalog
 
 n_freq, n_samples = polarization_power.shape
 print(f"loaded catalog: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
