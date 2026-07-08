@@ -163,16 +163,17 @@ def run(config: RunConfig, jax, chain_method: str):
     )
     from astrogwb.sampling.numpyro_model import numpyro_model
     from astrogwb.sampling.priors import build_prior
-    from astrogwb.waveform import load_polarization_power_catalog
+    from astrogwb.waveform import polarization_power as compute_polarization_power
+    from waveform_catalog import load_waveform_catalog
 
     cat = config.catalog
     cosmo = config.cosmology
 
     # --- Load proposal catalog ------------------------------------------------
-    catalog = load_polarization_power_catalog(cat.path)
+    catalog = load_waveform_catalog(cat.path)
     frequencies = jnp.asarray(catalog.frequencies)
-    polarization_power = jnp.asarray(catalog.polarization_power)
-    samples = {name: jnp.asarray(v) for name, v in catalog.samples.items()}
+    polarization_power = jnp.asarray(compute_polarization_power(catalog))
+    samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
     assert "redshift" in samples, (
         "catalog samples must include 'redshift' for the weights"
     )

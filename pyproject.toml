@@ -17,7 +17,11 @@ dependencies = [
     "numpy>=2.5.1",
     "numpyro>=0.21.0",
     "pydantic>=2.0",
+    "waveform-catalog",
 ]
+
+[tool.uv.sources]
+waveform-catalog = { path = "../waveform-catalog/python", editable = true }
 
 [build-system]
 requires = ["uv_build>=0.11.26,<0.12.0"]

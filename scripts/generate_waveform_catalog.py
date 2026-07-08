@@ -8,12 +8,7 @@ from pathlib import Path
 import numpy as np
 from gwmock_pop.loaders.file_loader import read_population_catalogue
 from gwmock_signal.waveform import RippleBackend
-
-from astrogwb.waveform import (
-    PolarizationPowerCatalog,
-    generate_catalog_polarization_power,
-    save_polarization_power_catalog,
-)
+from waveform_catalog import WaveformCatalog, save_waveform_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +21,8 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Load a gwmock-pop population file, convert source-frame masses to the "
             "detector frame, generate frequency-domain waveforms with the Ripple "
-            "backend, and persist the polarization-power catalog."
+            "backend, and persist the complex polarizations as a waveform_catalog "
+            "HDF5 file (see the waveform-catalog repo's SPEC.md)."
         )
     )
     parser.add_argument(
@@ -38,8 +34,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("out/bns_polarization_power_catalog.npz"),
-        help="Destination .npz for the polarization-power catalog.",
+        default=Path("out/bns_waveform_catalog.h5"),
+        help="Destination .h5 for the waveform catalog.",
     )
     parser.add_argument(
         "--approximant",
@@ -136,17 +132,21 @@ def _effective_resolution(segment_duration: float, sampling_frequency: float) ->
 
 def _truncate(
     frequencies: np.ndarray,
-    polarization_power: np.ndarray,
+    plus: np.ndarray,
+    cross: np.ndarray,
     maximum_frequency: float | None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Restrict the frequency axis (and matching power rows) to f <= maximum_frequency."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Restrict the frequency axis (and matching polarization columns) to f <= f_max.
+
+    ``plus`` and ``cross`` are in the backend's ``(n_events, n_freq)`` orientation.
+    """
     if maximum_frequency is None:
-        return frequencies, polarization_power
+        return frequencies, plus, cross
     mask = frequencies <= maximum_frequency
-    return frequencies[mask], polarization_power[mask, :]
+    return frequencies[mask], plus[:, mask], cross[:, mask]
 
 
-def _generate_chunked(
+def _generate_polarizations(
     samples: dict[str, np.ndarray],
     *,
     approximant: str,
@@ -155,44 +155,48 @@ def _generate_chunked(
     backend: RippleBackend,
     maximum_frequency: float | None,
     chunk_size: int,
-) -> PolarizationPowerCatalog:
-    """Generate the catalog one event-chunk at a time, reusing one fixed-grid backend.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Generate polarizations chunk by chunk, reusing one fixed-grid backend.
 
     The backend already carries a fixed ``segment_duration``, so every chunk lands on
     the same frequency axis and the chunks concatenate directly along the event axis.
     Each chunk is truncated to ``maximum_frequency`` before being accumulated, so the
-    running ``polarization_power`` stays bounded too.
+    running polarization arrays stay bounded too. Returns ``frequencies`` plus
+    ``(n_events, n_freq)`` complex ``plus``/``cross`` arrays.
     """
     n_events = samples["detector_frame_mass_1"].shape[0]
+    step = chunk_size if 0 < chunk_size < n_events else n_events
     frequencies: np.ndarray | None = None
-    power_chunks: list[np.ndarray] = []
-    for start in range(0, n_events, chunk_size):
-        stop = min(start + chunk_size, n_events)
+    plus_chunks: list[np.ndarray] = []
+    cross_chunks: list[np.ndarray] = []
+    for start in range(0, n_events, step):
+        stop = min(start + step, n_events)
         chunk_samples = {
             name: np.asarray(values)[start:stop] for name, values in samples.items()
         }
-        chunk_catalog = generate_catalog_polarization_power(
-            chunk_samples,
-            approximant=approximant,
+        polarizations = backend.generate_fd_polarizations_batch(
+            approximant,
             sampling_frequency=sampling_frequency,
             minimum_frequency=minimum_frequency,
-            backend=backend,
+            parameters=chunk_samples,
         )
-        chunk_frequencies, chunk_power = _truncate(
-            np.asarray(chunk_catalog.frequencies),
-            np.asarray(chunk_catalog.polarization_power),
+        chunk_frequencies, chunk_plus, chunk_cross = _truncate(
+            np.asarray(polarizations.frequencies),
+            np.asarray(polarizations.plus),
+            np.asarray(polarizations.cross),
             maximum_frequency,
         )
         if frequencies is None:
             frequencies = chunk_frequencies
-        power_chunks.append(chunk_power)
+        plus_chunks.append(chunk_plus)
+        cross_chunks.append(chunk_cross)
         logger.info("Generated chunk %d:%d of %d events", start, stop, n_events)
 
     assert frequencies is not None  # n_events > 0 guaranteed by the population loader
-    return PolarizationPowerCatalog(
-        frequencies=frequencies,
-        polarization_power=np.concatenate(power_chunks, axis=1),
-        samples=dict(samples),
+    return (
+        frequencies,
+        np.concatenate(plus_chunks, axis=0),
+        np.concatenate(cross_chunks, axis=0),
     )
 
 
@@ -243,49 +247,47 @@ def main() -> None:
         effective_df,
     )
 
-    if 0 < args.chunk_size < n_events:
-        catalog = _generate_chunked(
-            samples,
-            approximant=args.approximant,
-            sampling_frequency=args.sampling_frequency,
-            minimum_frequency=args.minimum_frequency,
-            backend=backend,
-            maximum_frequency=args.maximum_frequency,
-            chunk_size=args.chunk_size,
-        )
-    else:
-        catalog = generate_catalog_polarization_power(
-            samples,
-            approximant=args.approximant,
-            sampling_frequency=args.sampling_frequency,
-            minimum_frequency=args.minimum_frequency,
-            backend=backend,
-        )
-        frequencies, polarization_power = _truncate(
-            np.asarray(catalog.frequencies),
-            np.asarray(catalog.polarization_power),
-            args.maximum_frequency,
-        )
-        catalog = PolarizationPowerCatalog(
-            frequencies=frequencies,
-            polarization_power=polarization_power,
-            samples=catalog.samples,
-        )
-
+    frequencies, plus, cross = _generate_polarizations(
+        samples,
+        approximant=args.approximant,
+        sampling_frequency=args.sampling_frequency,
+        minimum_frequency=args.minimum_frequency,
+        backend=backend,
+        maximum_frequency=args.maximum_frequency,
+        chunk_size=args.chunk_size,
+    )
     if args.maximum_frequency is not None:
         logger.info("Truncated frequency axis to f <= %.1f Hz", args.maximum_frequency)
 
-    frequencies = np.asarray(catalog.frequencies)
-    polarization_power = np.asarray(catalog.polarization_power)
-    n_freq, n_events = polarization_power.shape
+    maximum_frequency = (
+        args.maximum_frequency
+        if args.maximum_frequency is not None
+        else args.sampling_frequency / 2.0
+    )
+    # The backend's (n_events, n_freq) orientation transposes into the catalog's
+    # in-memory (nfreq, nsamples) convention.
+    catalog = WaveformCatalog(
+        frequencies=frequencies,
+        plus=plus.T,
+        cross=cross.T,
+        source_parameters={
+            name: np.asarray(values, dtype=np.float64)
+            for name, values in samples.items()
+        },
+        approximant=args.approximant,
+        minimum_frequency=args.minimum_frequency,
+        maximum_frequency=maximum_frequency,
+        reference_frequency=args.reference_frequency,
+        sampling_frequency=args.sampling_frequency,
+    )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    save_polarization_power_catalog(args.output, catalog)
+    save_waveform_catalog(args.output, catalog)
 
     logger.info(
         "Saved catalog: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",
-        n_events,
-        n_freq,
+        catalog.nsamples,
+        catalog.nfreq,
         float(frequencies[0]),
         float(frequencies[-1]),
         args.approximant,
