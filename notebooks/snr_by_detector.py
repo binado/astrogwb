@@ -57,7 +57,7 @@ from astrogwb.gwb import (
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from pluscross import load_catalog
-from astrogwb.utils import years_to_seconds
+from astrogwb.utils import repo_root, years_to_seconds
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
 # mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
@@ -87,11 +87,7 @@ jax.config.update("jax_enable_x64", True)
 #   cell below.
 
 # %%
-def get_root_dir() -> Path:
-    return Path.cwd().parent
-
-
-ROOT_DIR = get_root_dir()
+ROOT_DIR = repo_root()
 CATALOG_PATH = ROOT_DIR / "out/bns_waveform_catalog.h5"
 
 DETECTOR_NETWORKS: dict[str, tuple[str, ...]] = {

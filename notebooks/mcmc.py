@@ -65,6 +65,7 @@ from astrogwb.gwb import (
     frequency_mask as make_frequency_mask,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
+from astrogwb.utils import repo_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from pluscross import load_catalog
 
@@ -90,11 +91,7 @@ DEBUG = False  # small smoke settings for first runs; set False for the producti
 # No working polarization-power catalog exists yet; set this once one is produced.
 
 
-def get_root_dir() -> Path:
-    return Path.cwd().parent
-
-
-ROOT_DIR = get_root_dir()
+ROOT_DIR = repo_root()
 CATALOG_PATH = ROOT_DIR / "out/bns_waveform_catalog.h5"
 
 # Detector settings

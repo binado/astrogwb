@@ -65,7 +65,7 @@ from astrogwb.gwb import (
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from pluscross import load_catalog
-from astrogwb.utils import years_to_seconds
+from astrogwb.utils import repo_root, years_to_seconds
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
 # mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
@@ -103,11 +103,7 @@ azp.style.use("arviz-variat")
 DEBUG = False  # small smoke settings for first runs; set False for the production run
 
 
-def get_root_dir() -> Path:
-    return Path.cwd().parent
-
-
-ROOT_DIR = get_root_dir()
+ROOT_DIR = repo_root()
 CATALOG_PATH = ROOT_DIR / "out/bns_waveform_catalog.h5"
 output_path = ROOT_DIR / "figures/amplitude_toy_fisher_overlay.pdf"
 
