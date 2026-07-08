@@ -56,7 +56,7 @@ from astrogwb.gwb import (
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from waveform_catalog import load_waveform_catalog
+from pluscross import load_catalog
 from astrogwb.utils import years_to_seconds
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
@@ -138,7 +138,7 @@ fiducials = {
 # in `notebooks/mcmc.py`.
 
 # %%
-catalog = load_waveform_catalog(CATALOG_PATH)
+catalog = load_catalog(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
 polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)

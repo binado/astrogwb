@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from waveform_catalog import WaveformCatalog
+from pluscross import WaveformCatalog
 
 from astrogwb.waveform import polarization_power
 
@@ -9,8 +9,8 @@ from astrogwb.waveform import polarization_power
 def test_polarization_power_reduces_catalog() -> None:
     catalog = WaveformCatalog(
         frequencies=np.array([10.0, 20.0, 30.0]),
-        plus=np.array([[1.0 + 1.0j, 4.0], [2.0, 5.0 + 1.0j], [3.0, 6.0]]),
-        cross=np.array([[0.0, 1.0j], [1.0, 0.0], [0.0, 2.0]]),
+        plus=np.array([[1.0 + 1.0j, 2.0, 3.0], [4.0, 5.0 + 1.0j, 6.0]]),
+        cross=np.array([[0.0, 1.0, 0.0], [1.0j, 0.0, 2.0]]),
         source_parameters={"mass_1": np.array([20.0, 30.0])},
         approximant="Toy",
         minimum_frequency=10.0,

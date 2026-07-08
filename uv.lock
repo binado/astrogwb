@@ -187,8 +187,8 @@ dependencies = [
     { name = "jax", extra = ["cuda12"], marker = "sys_platform == 'linux'" },
     { name = "numpy" },
     { name = "numpyro" },
+    { name = "pluscross" },
     { name = "pydantic" },
-    { name = "waveform-catalog" },
 ]
 
 [package.dev-dependencies]
@@ -218,8 +218,8 @@ requires-dist = [
     { name = "jax", extras = ["cuda12"], marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "numpyro", specifier = ">=0.21.0" },
+    { name = "pluscross", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "waveform-catalog", editable = "../waveform-catalog/python" },
 ]
 
 [package.metadata.requires-dev]
@@ -2423,6 +2423,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pluscross"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "h5py" },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d0/2f/3e1934c673dd5cb868d9dad1eb8d40fa43c2ed4297a7316ddd22592b63bb/pluscross-0.1.0.tar.gz", hash = "sha256:8d1c2e791f302e9744e32aa43f89199fc3a6ce0d2c5bf81fc0e9345698eb25c2", size = 4670, upload-time = "2026-07-08T11:34:09.934Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/89/d3/f44575475c066eaf4525cccce5a3e3c314dae2588e66834a8d2e9b364e5f/pluscross-0.1.0-py3-none-any.whl", hash = "sha256:44cb2b966925c2b2d708c2612fdbe2eeabc9bc91cfbe3128d49a13e203e134c7", size = 5759, upload-time = "2026-07-08T11:34:08.688Z" },
+]
+
+[[package]]
 name = "prometheus-client"
 version = "0.25.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3424,23 +3437,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/1e/67/cbae4bf7683a64755
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8d/96/04e7b441807b26b794da5b11e59ed7f83b2cf8af202bd7eba8ad2fa6046e/wadler_lindig-0.1.7-py3-none-any.whl", hash = "sha256:e3ec83835570fd0a9509f969162aeb9c65618f998b1f42918cfc8d45122fe953", size = 20516, upload-time = "2025-06-18T07:00:41.684Z" },
 ]
-
-[[package]]
-name = "waveform-catalog"
-version = "0.1.0"
-source = { editable = "../waveform-catalog/python" }
-dependencies = [
-    { name = "h5py" },
-    { name = "numpy" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "h5py", specifier = ">=3.10" },
-    { name = "numpy", specifier = ">=1.26" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
-]
-provides-extras = ["test"]
 
 [[package]]
 name = "wcwidth"

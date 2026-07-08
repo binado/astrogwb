@@ -75,7 +75,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 )
 from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from waveform_catalog import load_waveform_catalog
+from pluscross import load_catalog
 
 register_projection(MplAxes)
 
@@ -169,7 +169,7 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # per-source parameter samples.
 
 # %%
-catalog = load_waveform_catalog(CATALOG_PATH)
+catalog = load_catalog(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
 polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)

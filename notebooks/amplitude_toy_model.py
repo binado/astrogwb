@@ -27,8 +27,8 @@
 # It is a smoke/sanity test: can NUTS recover a known injected amplitude from
 # a fiducial catalog?
 #
-# To run the notebook end-to-end you must point `CATALOG_PATH` at a waveform-catalog
-# `.h5` file of complex polarizations (see the waveform-catalog repo SPEC.md).
+# To run the notebook end-to-end you must point `CATALOG_PATH` at a pluscross
+# `.h5` catalog of complex polarizations.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -64,7 +64,7 @@ from astrogwb.gwb import (
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from waveform_catalog import load_waveform_catalog
+from pluscross import load_catalog
 from astrogwb.utils import years_to_seconds
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
@@ -155,7 +155,7 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # - `samples` — per-source parameters, stored as `sample__<name>` keys and restored into a dict.
 
 # %%
-catalog = load_waveform_catalog(CATALOG_PATH)
+catalog = load_catalog(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
 polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)

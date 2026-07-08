@@ -44,7 +44,7 @@ The mass priors are defined in the source frame.
 
 ## Generating waveforms for the population catalog
 
-We provide a [helper script](./scripts/generate_waveform_catalog.py) which wraps the [`gwmock-signal`](https://github.com/Leuven-Gravity-Institute/gwmock-signal) package for generating the frequency-domain polarizations for a given population of CBCs which enter the spectral density calculation. The output is a `waveform_catalog` HDF5 file of complex polarizations (see the waveform-catalog repo's `SPEC.md`), which the inference consumers reduce to polarization power at load time.
+We provide a [helper script](./scripts/generate_waveform_catalog.py) which wraps the [`gwmock-signal`](https://github.com/Leuven-Gravity-Institute/gwmock-signal) package for generating the frequency-domain polarizations for a given population of CBCs which enter the spectral density calculation. The output is a [`pluscross`](https://pypi.org/project/pluscross/) HDF5 catalog of complex polarizations, which the inference consumers reduce to polarization power at load time.
 
 Here is an example:
 

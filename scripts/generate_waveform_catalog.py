@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from gwmock_pop.loaders.file_loader import read_population_catalogue
 from gwmock_signal.waveform import RippleBackend
-from waveform_catalog import WaveformCatalog, save_waveform_catalog
+from pluscross import WaveformCatalog, save_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,8 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Load a gwmock-pop population file, convert source-frame masses to the "
             "detector frame, generate frequency-domain waveforms with the Ripple "
-            "backend, and persist the complex polarizations as a waveform_catalog "
-            "HDF5 file (see the waveform-catalog repo's SPEC.md)."
+            "backend, and persist the complex polarizations as a pluscross "
+            "HDF5 catalog (see the pluscross repo's SPEC.md)."
         )
     )
     parser.add_argument(
@@ -264,12 +264,12 @@ def main() -> None:
         if args.maximum_frequency is not None
         else args.sampling_frequency / 2.0
     )
-    # The backend's (n_events, n_freq) orientation transposes into the catalog's
-    # in-memory (nfreq, nsamples) convention.
+    # The backend returns (n_events, n_freq), matching pluscross's
+    # (nsamples, nfreq) in-memory convention.
     catalog = WaveformCatalog(
         frequencies=frequencies,
-        plus=plus.T,
-        cross=cross.T,
+        plus=plus,
+        cross=cross,
         source_parameters={
             name: np.asarray(values, dtype=np.float64)
             for name, values in samples.items()
@@ -282,7 +282,7 @@ def main() -> None:
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    save_waveform_catalog(args.output, catalog)
+    save_catalog(args.output, catalog)
 
     logger.info(
         "Saved catalog: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",
