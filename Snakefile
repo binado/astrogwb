@@ -32,7 +32,7 @@ rule amplitude_toy:
     output:
         AMPLITUDE_TOY_PDF,
     shell:
-        "uv run python notebooks/amplitude_toy_model.py --config configs/paper.toml"
+        "uv run python notebooks/amplitude_toy_model.py --config {input.config}"
 
 
 rule snr_by_detector:
@@ -43,7 +43,7 @@ rule snr_by_detector:
         pdf=SNR_BY_DETECTOR_PDF,
         csv=SNR_BY_DETECTOR_CSV,
     shell:
-        "uv run python notebooks/snr_by_detector.py --config configs/paper.toml"
+        "uv run python notebooks/snr_by_detector.py --config {input.config}"
 
 
 rule mcmc_compare_posteriors:
@@ -53,4 +53,4 @@ rule mcmc_compare_posteriors:
     output:
         POSTERIOR_PDF,
     shell:
-        "uv run python notebooks/mcmc_compare_posteriors.py --config configs/paper.toml"
+        "uv run python notebooks/mcmc_compare_posteriors.py --config {input.config}"

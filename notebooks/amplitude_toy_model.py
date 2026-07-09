@@ -27,8 +27,9 @@
 # It is a smoke/sanity test: can NUTS recover a known injected amplitude from
 # a fiducial catalog?
 #
-# To run the notebook end-to-end you must point `CATALOG_PATH` at a pluscross
-# `.h5` catalog of complex polarizations.
+# To run the notebook end-to-end, set `[paths].catalog` in
+# [`configs/paper.toml`](../configs/paper.toml) (or pass `--config`) to a
+# pluscross `.h5` catalog of complex polarizations.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -101,6 +102,11 @@ azp.style.use("arviz-variat")
 
 # %% [markdown]
 # ## Pipeline configuration
+#
+# Settings come from [`configs/paper.toml`](../configs/paper.toml)
+# (`[paths]`, `[analysis]`, `[figures.amplitude_toy]`). Set
+# `figures.amplitude_toy.debug = true` for a short smoke run
+# (100 warmup / 100 samples / 1 chain).
 
 # %%
 _LOOSE_CONFIG = ConfigDict(extra="ignore", frozen=True)
@@ -193,7 +199,9 @@ output_path = _resolve_path(figure_config.output_pdf, ROOT_DIR)
 detnames = (
     figure_config.detectors
 )  # resolve via bundled geometry.toml / sensitivity.toml
-observation_time = paper_config.analysis.observation_time  # [yr]
+observation_time = (
+    paper_config.analysis.observation_time
+)  # [yr]; cancels in S_h, kept for the likelihood scale
 
 # MCMC settings
 seed = figure_config.seed
@@ -228,7 +236,7 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # %% [markdown]
 # ## Loading the waveform catalog
 #
-# Our method requires a waveform catalog computed for a fiducial population of CBCs. We offer a script to generate that in the [scripts directory](../scripts/generate_polarization_power_catalog.py).
+# Our method requires a waveform catalog computed for a fiducial population of CBCs. We offer a script to generate that in the [scripts directory](../scripts/generate_waveform_catalog.py).
 #
 # The catalog is an `.npz` file with this schema:
 #

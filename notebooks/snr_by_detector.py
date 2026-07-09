@@ -83,11 +83,14 @@ jax.config.update("jax_enable_x64", True)
 #   by the local merger rate.
 # - **Cosmology and propagation:** fiducial $H_0$, $\Omega_m$, and modified-propagation
 #   parameters $(\xi_0, \xi_n)$.
-# - **Observation:** $T = 1\,\mathrm{yr}$, analysis band $f \in [2, 4096]\,\mathrm{Hz}$.
+# - **Observation:** $T$ and the analysis band $[f_{\min}, f_{\max}]$ come from
+#   `[analysis]` in [`configs/paper.toml`](../configs/paper.toml) (defaults:
+#   $T = 1\,\mathrm{yr}$, $f \in [2, 4096]\,\mathrm{Hz}$).
 # - **Detector networks:** six configurations — an ET triangular three-site network,
 #   ET two-L-shaped variants with aligned and misaligned arm geometry, each with and
-#   without a Cosmic Explorer Hanford site. The specific site labels are given in the
-#   cell below.
+#   without a Cosmic Explorer Hanford site. Site labels live in
+#   `[detector_networks]`; which networks to plot is set by
+#   `[figures.snr_by_detector].networks`.
 
 # %%
 _LOOSE_CONFIG = ConfigDict(extra="ignore", frozen=True)

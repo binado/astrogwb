@@ -64,6 +64,10 @@ plt.rcParams.update(**pub_rc)
 
 # %% [markdown]
 # ## Notebook configuration
+#
+# Labels, chain paths, colors, linestyles, and axis/legend kwargs come from
+# `[figures.mcmc_compare_posteriors]` in
+# [`configs/paper.toml`](../configs/paper.toml) (override with `--config`).
 
 # %%
 _LOOSE_CONFIG = ConfigDict(extra="ignore", frozen=True)
