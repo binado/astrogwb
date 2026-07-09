@@ -6,6 +6,10 @@ data
 # Generated MCMC sweep configs (regenerate via scripts/generate_mcmc_configs.py)
 configs/mcmc/sweep/
 
+# Generated paper-figure workflow state/artifacts.
+.snakemake/
+figures/*.csv
+
 *.md
 !README.md
 !AGENTS.md

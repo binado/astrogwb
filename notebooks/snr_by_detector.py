@@ -41,12 +41,15 @@
 # one used for cosmological inference in `notebooks/mcmc.py`.
 
 # %%
+import argparse
 from pathlib import Path
+import tomllib
 
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import pandas as pd
+from pydantic import BaseModel, ConfigDict
 
 from astrogwb.gwb import (
     spectral_density,
@@ -80,47 +83,111 @@ jax.config.update("jax_enable_x64", True)
 #   by the local merger rate.
 # - **Cosmology and propagation:** fiducial $H_0$, $\Omega_m$, and modified-propagation
 #   parameters $(\xi_0, \xi_n)$.
-# - **Observation:** $T = 1\,\mathrm{yr}$, analysis band $f \in [2, 4096]\,\mathrm{Hz}$.
+# - **Observation:** $T$ and the analysis band $[f_{\min}, f_{\max}]$ come from
+#   `[analysis]` in [`configs/paper.toml`](../configs/paper.toml) (defaults:
+#   $T = 1\,\mathrm{yr}$, $f \in [2, 4096]\,\mathrm{Hz}$).
 # - **Detector networks:** six configurations — an ET triangular three-site network,
 #   ET two-L-shaped variants with aligned and misaligned arm geometry, each with and
-#   without a Cosmic Explorer Hanford site. The specific site labels are given in the
-#   cell below.
+#   without a Cosmic Explorer Hanford site. Site labels live in
+#   `[detector_networks]`; which networks to plot is set by
+#   `[figures.snr_by_detector].networks`.
 
 # %%
-ROOT_DIR = repo_root()
-CATALOG_PATH = ROOT_DIR / "out/bns_waveform_catalog.h5"
+_LOOSE_CONFIG = ConfigDict(extra="ignore", frozen=True)
 
-DETECTOR_NETWORKS: dict[str, tuple[str, ...]] = {
-    "ET-triangular": ("E1", "E2", "E3"),
-    "ET-triangular-CE-Hanford": ("E1", "E2", "E3", "C1"),
-    "ET-2L-aligned": ("S1", "R1"),
-    "ET-2L-aligned-CE-Hanford": ("S1", "R1", "C1"),
-    "ET-2L-misaligned": ("S2", "R2"),
-    "ET-2L-misaligned-CE-Hanford": ("S2", "R2", "C1"),
+
+class PathsConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    catalog: Path
+
+
+class CosmologyConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    z_min: float = 0.0
+    z_max: float = 20.0
+    n_grid: int = 256
+
+
+class AnalysisConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    observation_time: float = 1.0
+    f_min: float = 2.0
+    f_max: float = 4096.0
+    fiducials: dict[str, float]
+    cosmology: CosmologyConfig = CosmologyConfig()
+
+
+class SNRByDetectorConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    networks: tuple[str, ...] = ()
+    output_csv: Path = Path("figures/snr_by_detector.csv")
+    output_pdf: Path = Path("figures/snr_by_detector.pdf")
+    figure_dpi: int = 300
+
+
+class FigureConfigs(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    snr_by_detector: SNRByDetectorConfig
+
+
+class PaperConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    paths: PathsConfig
+    analysis: AnalysisConfig
+    detector_networks: dict[str, tuple[str, ...]]
+    figures: FigureConfigs
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
+    args, _ = parser.parse_known_args()
+    return args
+
+
+def _resolve_path(path: Path, root: Path) -> Path:
+    return path if path.is_absolute() else root / path
+
+
+def _load_config(path: Path) -> PaperConfig:
+    with path.open("rb") as handle:
+        return PaperConfig.model_validate(tomllib.load(handle))
+
+
+ROOT_DIR = repo_root()
+args = _parse_args()
+config_path = _resolve_path(args.config, ROOT_DIR)
+paper_config = _load_config(config_path)
+figure_config = paper_config.figures.snr_by_detector
+
+CATALOG_PATH = _resolve_path(paper_config.paths.catalog, ROOT_DIR)
+
+network_names = figure_config.networks or tuple(paper_config.detector_networks)
+DETECTOR_NETWORKS = {
+    name: paper_config.detector_networks[name] for name in network_names
 }
 
-observation_time = 1.0  # [yr]
+observation_time = paper_config.analysis.observation_time  # [yr]
 
 # Redshift grid for the cosmology integrals (and MD normalization)
-z_min = 0.0
-z_max = 20.0
-n_grid = 256  # grid points for cosmology integrals / MD normalization
+z_min = paper_config.analysis.cosmology.z_min
+z_max = paper_config.analysis.cosmology.z_max
+n_grid = (
+    paper_config.analysis.cosmology.n_grid
+)  # grid points for cosmology integrals / MD normalization
 
 # Frequency band for the analysis
-f_min = 2
-f_max = 4096
+f_min = paper_config.analysis.f_min
+f_max = paper_config.analysis.f_max
 
 # Fiducial parameters
-fiducials = {
-    "H0": 67.66,
-    "Omega_m": 0.3096,
-    "xi_0": 1.0,
-    "xi_n": 1.91,
-    "gamma": 2.7,
-    "kappa": 3.0,
-    "z_peak": 2.0,
-    "local_merger_rate": 161.0,
-}
+fiducials = paper_config.analysis.fiducials
 
 # %% [markdown]
 # ## Proposal waveform ensemble
@@ -137,7 +204,9 @@ fiducials = {
 catalog = load_catalog(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
-polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)
+polarization_power = jnp.asarray(
+    compute_polarization_power(catalog)
+)  # (nfreq, nsamples)
 samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
 del catalog
 
@@ -214,6 +283,7 @@ print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 # plot below shows the fiducial astrophysical spectrum that each network would
 # attempt to detect — a useful sanity check before comparing SNRs.
 
+
 # %%
 def plot_omegagw(
     spectral_density: jax.Array,
@@ -236,8 +306,8 @@ def plot_omegagw(
     ax.set_ylim(ymin, None)
     return fig
 
-plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-12);
 
+plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-12)
 # %% [markdown]
 # ## Network sensitivity and cross-correlation SNR
 #
@@ -294,3 +364,21 @@ for label, dets in DETECTOR_NETWORKS.items():
 # %%
 df_snr = pd.DataFrame(rows).set_index("network").sort_values("snr", ascending=False)
 df_snr.style.format(precision=2)
+
+# %%
+output_csv = _resolve_path(figure_config.output_csv, ROOT_DIR)
+output_pdf = _resolve_path(figure_config.output_pdf, ROOT_DIR)
+output_csv.parent.mkdir(parents=True, exist_ok=True)
+output_pdf.parent.mkdir(parents=True, exist_ok=True)
+df_snr.to_csv(output_csv)
+
+df_plot = df_snr.sort_values("snr", ascending=True)
+fig, ax = plt.subplots(figsize=(6.5, 3.8))
+ax.barh(df_plot.index, df_plot["snr"], color="0.25")
+ax.set_xlabel("Matched-filter SNR")
+ax.set_ylabel("")
+ax.grid(axis="x", alpha=0.25)
+fig.tight_layout()
+fig.savefig(output_pdf, dpi=figure_config.figure_dpi, bbox_inches="tight")
+print("saved table:", output_csv)
+print("saved figure:", output_pdf)

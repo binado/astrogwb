@@ -16,14 +16,15 @@
 # # Comparing 1D posteriors
 
 # %%
-from dataclasses import dataclass
-from itertools import product
+import argparse
 from pathlib import Path
+import tomllib
 from typing import Any
 
 import arviz_stats as azs
 import matplotlib.pyplot as plt
 import numpy.typing as npt
+from pydantic import BaseModel, ConfigDict
 import xarray as xr
 
 from astrogwb.utils import repo_root
@@ -50,94 +51,127 @@ pub_rc = {
     "legend.title_fontsize": "small",
     "xtick.labelsize": "small",
     "ytick.labelsize": "small",
-
     # X-axis ticks
-    'xtick.direction': 'in',       # Point ticks inward
-    'xtick.minor.visible': True,   # Turn on minor ticks
-    'xtick.top': True,             # Draw ticks on the top spine as well
-    
+    "xtick.direction": "in",  # Point ticks inward
+    "xtick.minor.visible": True,  # Turn on minor ticks
+    "xtick.top": True,  # Draw ticks on the top spine as well
     # Y-axis ticks
-    'ytick.direction': 'in',       # Point ticks inward
-    'ytick.minor.visible': True,   # Turn on minor ticks
-    'ytick.right': True,           # Draw ticks on the right spine as well
+    "ytick.direction": "in",  # Point ticks inward
+    "ytick.minor.visible": True,  # Turn on minor ticks
+    "ytick.right": True,  # Draw ticks on the right spine as well
 }
 plt.rcParams.update(**pub_rc)
 
 # %% [markdown]
 # ## Notebook configuration
+#
+# Labels, chain paths, colors, linestyles, and axis/legend kwargs come from
+# `[figures.mcmc_compare_posteriors]` in
+# [`configs/paper.toml`](../configs/paper.toml) (override with `--config`).
 
 # %%
-BASE_DIR = repo_root()
-OUT_DIR = BASE_DIR / "figures"
-
-LABELS = [
-    r"ET-$\Delta$",
-    r"ET-$\Delta +$ CE",
-    r"ET-2L",
-    r"ET-2L $+$ CE",
-    r"ET-2L-$\alpha$",
-    r"ET-2L-$\alpha +$ CE",
-]
-
-PATHS = [
-    "chains/mcmc-H0-det=E1,E2,E3-seed42-20260630-091326.nc",
-    "chains/mcmc-H0-det=E1,E2,E3,C1-seed42-20260630-082136.nc",
-    "chains/mcmc-H0-det=S1,R1-seed42-20260629-201613.nc",
-    "chains/mcmc-H0-det=S1,R1,C1-seed42-20260629-105230.nc",
-    "chains/mcmc-H0-det=S2,R2-seed42-20260630-053542.nc",
-    "chains/mcmc-H0-det=S2,R2,C1-seed42-20260630-034738.nc"
-]
-
-COLORS = ["tab:blue", "tab:orange", "tab:green"]
-STYLES = ["-", "--"]
-color_styles = list(product(COLORS, STYLES))
-
-VAR_NAME = "H0"
-OUT_FILE = OUT_DIR / f"mcmc_compare_posteriors_{VAR_NAME}.pdf"
-FIGURE_DPI = 300
+_LOOSE_CONFIG = ConfigDict(extra="ignore", frozen=True)
 
 
-# %%
-@dataclass(frozen=True)
-class PosteriorConfig:
+class PathsConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    chains_dir: Path = Path("chains")
+
+
+class PosteriorConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
     label: str
-    path: str | Path
+    path: Path
     color: str
     linestyle: str
 
     def load_posterior_samples(self, base_dir: Path) -> xr.DataTree:
-        fullpath = base_dir / self.path
+        fullpath = self.path if self.path.is_absolute() else base_dir / self.path
         return xr.open_datatree(fullpath, engine="h5netcdf")
-    
-    def get_x_and_prob_arrays(self, base_dir: Path, group: str, var_name: str) -> tuple[npt.NDArray, npt.NDArray]:
+
+    def get_x_and_prob_arrays(
+        self, base_dir: Path, group: str, var_name: str
+    ) -> tuple[npt.NDArray, npt.NDArray]:
         dtree = self.load_posterior_samples(base_dir)
         kde = azs.kde(dtree, group=group, var_names=var_name)[var_name]
         x, prob = kde.sel(plot_axis="x").to_numpy(), kde.sel(plot_axis="y").to_numpy()
         return x, prob
 
-configs = [
-    PosteriorConfig(label=label, path=path, color=color, linestyle=linestyle)
-    for label, path, (color, linestyle) in zip(LABELS, PATHS, color_styles)
-]
+
+class PosteriorFigureConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    var_name: str = "H0"
+    output_pdf: Path = Path("figures/mcmc_compare_posteriors_H0.pdf")
+    figure_dpi: int = 300
+    group: str = "posterior"
+    posteriors: tuple[PosteriorConfig, ...]
+    ax_kwargs: dict[str, Any] = {}
+    legend_kwargs: dict[str, Any] = {}
+
+
+class FigureConfigs(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    mcmc_compare_posteriors: PosteriorFigureConfig
+
+
+class PaperConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    paths: PathsConfig = PathsConfig()
+    figures: FigureConfigs
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
+    args, _ = parser.parse_known_args()
+    return args
+
+
+def _resolve_path(path: Path, root: Path) -> Path:
+    return path if path.is_absolute() else root / path
+
+
+def _load_config(path: Path) -> PaperConfig:
+    with path.open("rb") as handle:
+        return PaperConfig.model_validate(tomllib.load(handle))
+
+
+BASE_DIR = repo_root()
+args = _parse_args()
+config_path = _resolve_path(args.config, BASE_DIR)
+paper_config = _load_config(config_path)
+figure_config = paper_config.figures.mcmc_compare_posteriors
+configs = list(figure_config.posteriors)
+VAR_NAME = figure_config.var_name
+OUT_FILE = _resolve_path(figure_config.output_pdf, BASE_DIR)
+FIGURE_DPI = figure_config.figure_dpi
 
 
 # %% [markdown]
 # Defining the plotting function:
 
+
 # %%
 def plot_posteriors(
-        configs: list[PosteriorConfig],
-        var_name: str,
-        base_dir: Path, 
-        *, 
-        group: str = "posterior",
-        ax_kwargs: dict[str, Any] | None = None,
-        legend_kwargs: dict[str, Any] | None = None
-    ):
+    configs: list[PosteriorConfig],
+    var_name: str,
+    base_dir: Path,
+    *,
+    group: str = "posterior",
+    ax_kwargs: dict[str, Any] | None = None,
+    legend_kwargs: dict[str, Any] | None = None,
+):
     fig, ax = plt.subplots()
     for config in configs:
         x, prob = config.get_x_and_prob_arrays(base_dir, group, var_name)
-        ax.plot(x, prob, label=config.label, color=config.color, linestyle=config.linestyle)
+        ax.plot(
+            x, prob, label=config.label, color=config.color, linestyle=config.linestyle
+        )
 
     ax_kwargs = ax_kwargs or {}
     legend_kwargs = legend_kwargs or {}
@@ -151,18 +185,16 @@ def plot_posteriors(
 # Plotting:
 
 # %%
-ax_kwargs = {
-    "xlabel": r"$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$", 
-    "ylabel": "Posterior density"
-}
-legend_kwargs = {
-    "ncol": 3,
-    "loc": "lower center",           # anchor point on the legend box
-    "bbox_to_anchor": (0.5, 1.02),   # above the axes (axes coords)
-    "frameon": False,
-    "borderaxespad": 0,
-}
-fig = plot_posteriors(configs, VAR_NAME, BASE_DIR, ax_kwargs=ax_kwargs, legend_kwargs=legend_kwargs)
+ax_kwargs = figure_config.ax_kwargs
+legend_kwargs = figure_config.legend_kwargs
+fig = plot_posteriors(
+    configs,
+    VAR_NAME,
+    BASE_DIR,
+    group=figure_config.group,
+    ax_kwargs=ax_kwargs,
+    legend_kwargs=legend_kwargs,
+)
 fig.subplots_adjust(top=0.85)
 
 if OUT_FILE is not None:
