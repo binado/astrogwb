@@ -1,5 +1,9 @@
 paper_config: configs/paper.toml
 
+mcmc_configs:
+  example: configs/mcmc.example.toml
+  output_dir: configs/mcmc/sweep
+
 amplitude_toy:
   output_pdf: figures/amplitude_toy_fisher_overlay.pdf
 

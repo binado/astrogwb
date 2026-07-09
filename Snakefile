@@ -1,4 +1,5 @@
 from pathlib import Path
+import importlib.util
 import tomllib
 
 
@@ -21,12 +22,35 @@ POSTERIOR_CHAINS = [
     for entry in PAPER_CONFIG["figures"]["mcmc_compare_posteriors"]["posteriors"]
 ]
 
+_GEN_SPEC = importlib.util.spec_from_file_location(
+    "generate_mcmc_configs",
+    Path("scripts/generate_mcmc_configs.py"),
+)
+_GEN = importlib.util.module_from_spec(_GEN_SPEC)
+assert _GEN_SPEC.loader is not None
+_GEN_SPEC.loader.exec_module(_GEN)
+
+MCMC_CONFIG_EXAMPLE = config["mcmc_configs"]["example"]
+MCMC_CONFIG_DIR = config["mcmc_configs"]["output_dir"]
+MCMC_CONFIGS = [f"{MCMC_CONFIG_DIR}/{name}" for name in _GEN.sweep_filenames()]
+
 
 rule paper_figures:
     input:
         AMPLITUDE_TOY_PDF,
         SNR_BY_DETECTOR_PDF,
         POSTERIOR_PDF,
+
+
+rule mcmc_configs:
+    input:
+        example=MCMC_CONFIG_EXAMPLE,
+    output:
+        MCMC_CONFIGS,
+    params:
+        outdir=MCMC_CONFIG_DIR,
+    shell:
+        "uv run python scripts/generate_mcmc_configs.py {params.outdir} --force"
 
 
 rule amplitude_toy:

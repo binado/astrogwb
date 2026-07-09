@@ -70,6 +70,19 @@ There are two working examples provided in the repo:
 
 Both examples assume a population of binary neutron star (BNS) mergers following the example described above. See the notebook for more details on how the inference is set up.
 
+Generate the detector × sample-parameter sweep configs (from
+[`configs/mcmc.example.toml`](configs/mcmc.example.toml)) with Snakemake:
+
+```bash
+uv run snakemake --cores 1 mcmc_configs
+```
+
+Then submit the array on a SLURM cluster:
+
+```bash
+./scripts/submit_mcmc.sh -i configs/mcmc/sweep
+```
+
 ### Outputs
 
 Each run writes an ArviZ `InferenceData` to

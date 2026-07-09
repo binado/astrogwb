@@ -83,6 +83,15 @@ def make_config(
     return build_run_config(raw)
 
 
+def sweep_filenames() -> list[str]:
+    """Return ``{network}__{sample}.json`` names for the full detector/sample grid."""
+    return [
+        f"{network_label}__{sample_label}.json"
+        for network_label in DETECTOR_NETWORKS
+        for sample_label in SAMPLE_ONLY_SETS
+    ]
+
+
 def generate_configs(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     *,
