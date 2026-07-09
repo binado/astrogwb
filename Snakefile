@@ -11,6 +11,7 @@ CATALOG = PAPER_CONFIG["paths"]["catalog"]
 AMPLITUDE_TOY_PDF = PAPER_CONFIG["figures"]["amplitude_toy"]["output_pdf"]
 SNR_BY_DETECTOR_PDF = PAPER_CONFIG["figures"]["snr_by_detector"]["output_pdf"]
 SNR_BY_DETECTOR_CSV = PAPER_CONFIG["figures"]["snr_by_detector"]["output_csv"]
+SNR_BY_DETECTOR_TEX = PAPER_CONFIG["figures"]["snr_by_detector"]["output_tex"]
 POSTERIOR_PDF = PAPER_CONFIG["figures"]["mcmc_compare_posteriors"]["output_pdf"]
 POSTERIOR_CHAINS = [
     entry["path"]
@@ -42,6 +43,7 @@ rule snr_by_detector:
     output:
         pdf=SNR_BY_DETECTOR_PDF,
         csv=SNR_BY_DETECTOR_CSV,
+        tex=SNR_BY_DETECTOR_TEX,
     shell:
         "uv run python notebooks/snr_by_detector.py --config {input.config}"
 

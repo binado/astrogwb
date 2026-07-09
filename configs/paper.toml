@@ -59,6 +59,7 @@ networks = [
   "ET-2L-misaligned-CE-Hanford",
 ]
 output_csv = "figures/snr_by_detector.csv"
+output_tex = "figures/snr_by_detector.tex"
 output_pdf = "figures/snr_by_detector.pdf"
 figure_dpi = 300
 
