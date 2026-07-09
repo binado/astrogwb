@@ -7,7 +7,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.4
 #   kernelspec:
-#     display_name: asgwb (3.12.9)
+#     display_name: astrogwb (3.12.9)
 #     language: python
 #     name: python3
 # ---
@@ -24,6 +24,7 @@ from typing import Any
 import arviz_stats as azs
 import matplotlib.pyplot as plt
 import numpy.typing as npt
+import pandas as pd
 from pydantic import BaseModel, ConfigDict
 import xarray as xr
 
@@ -99,6 +100,18 @@ class PosteriorConfig(BaseModel):
         x, prob = kde.sel(plot_axis="x").to_numpy(), kde.sel(plot_axis="y").to_numpy()
         return x, prob
 
+    def get_hdi(
+        self,
+        base_dir: Path,
+        group: str,
+        var_name: str,
+        *,
+        prob: float = 0.6827,
+    ) -> tuple[float, float]:
+        dtree = self.load_posterior_samples(base_dir)
+        hdi = azs.hdi(dtree, group=group, var_names=var_name, prob=prob)[var_name]
+        return float(hdi.sel(ci_bound="lower")), float(hdi.sel(ci_bound="upper"))
+
 
 class PosteriorFigureConfig(BaseModel):
     model_config = _LOOSE_CONFIG
@@ -153,7 +166,7 @@ FIGURE_DPI = figure_config.figure_dpi
 
 
 # %% [markdown]
-# Defining the plotting function:
+# Defining the plotting and summary helpers:
 
 
 # %%
@@ -181,6 +194,29 @@ def plot_posteriors(
     return fig
 
 
+def summarize_hdi(
+    configs: list[PosteriorConfig],
+    var_name: str,
+    base_dir: Path,
+    *,
+    group: str = "posterior",
+    prob: float = 0.6827,
+) -> pd.DataFrame:
+    rows = []
+    for config in configs:
+        lower, upper = config.get_hdi(base_dir, group, var_name, prob=prob)
+        rows.append(
+            {
+                "label": config.label,
+                "lower": lower,
+                "upper": upper,
+                "width": upper - lower,
+                "sigma": (upper - lower) / 2,
+            }
+        )
+    return pd.DataFrame(rows).sort_values("sigma", ascending=True).reset_index(drop=True)
+
+
 # %% [markdown]
 # Plotting:
 
@@ -200,5 +236,17 @@ fig.subplots_adjust(top=0.85)
 if OUT_FILE is not None:
     OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT_FILE, dpi=FIGURE_DPI, bbox_inches="tight")
+
+# %% [markdown]
+# 1σ HDI summary:
+
+# %%
+hdi_summary = summarize_hdi(
+    configs,
+    VAR_NAME,
+    BASE_DIR,
+    group=figure_config.group,
+)
+hdi_summary.style.format(precision=2)
 
 # %%
