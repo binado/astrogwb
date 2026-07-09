@@ -80,6 +80,30 @@ health check — should stay close to 1) and `total_merger_rate`.
 
 See the [plotting notebook](./notebooks/mcmc_plotting.py) for examples of how to visualize the results.
 
+## Paper figures
+
+The paper-figure workflow is configured by [`configs/paper.toml`](configs/paper.toml).
+Each figure notebook reads only the section it needs and remains runnable as a
+Jupytext `py:percent` notebook or as a script.
+
+Preview the declared workflow:
+
+```bash
+uv run snakemake --dry-run paper_figures
+```
+
+Build all declared paper figures:
+
+```bash
+uv run snakemake --cores 1 paper_figures
+```
+
+Build one configured target:
+
+```bash
+uv run snakemake --cores 1 figures/mcmc_compare_posteriors_H0.pdf
+```
+
 ## Requirements
 
 - Python 3.12+

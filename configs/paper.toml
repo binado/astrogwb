@@ -1,0 +1,116 @@
+[paths]
+catalog = "out/bns_waveform_catalog.h5"
+figures_dir = "figures"
+chains_dir = "chains"
+
+[analysis]
+observation_time = 1.0
+f_min = 2.0
+f_max = 4096.0
+
+[analysis.cosmology]
+z_min = 0.0
+z_max = 20.0
+n_grid = 256
+
+[analysis.fiducials]
+H0 = 67.66
+Omega_m = 0.3096
+xi_0 = 1.0
+xi_n = 1.91
+gamma = 2.7
+kappa = 3.0
+z_peak = 2.0
+local_merger_rate = 161.0
+
+[detector_networks]
+"ET-triangular" = ["E1", "E2", "E3"]
+"ET-triangular-CE-Hanford" = ["E1", "E2", "E3", "C1"]
+"ET-2L-aligned" = ["S1", "R1"]
+"ET-2L-aligned-CE-Hanford" = ["S1", "R1", "C1"]
+"ET-2L-misaligned" = ["S2", "R2"]
+"ET-2L-misaligned-CE-Hanford" = ["S2", "R2", "C1"]
+
+[figures.amplitude_toy]
+detectors = ["S1", "R1"]
+seed = 42
+debug = false
+output_pdf = "figures/amplitude_toy_fisher_overlay.pdf"
+merger_rate_norm = 1e-3
+amplitude_fiducial = 1.0
+
+[figures.amplitude_toy.prior]
+low = 0.1
+high = 10.0
+
+[figures.amplitude_toy.sampler]
+num_warmup = 200
+num_samples = 500
+num_chains = "auto"
+target_accept = 0.9
+
+[figures.snr_by_detector]
+networks = [
+  "ET-triangular",
+  "ET-triangular-CE-Hanford",
+  "ET-2L-aligned",
+  "ET-2L-aligned-CE-Hanford",
+  "ET-2L-misaligned",
+  "ET-2L-misaligned-CE-Hanford",
+]
+output_csv = "figures/snr_by_detector.csv"
+output_pdf = "figures/snr_by_detector.pdf"
+figure_dpi = 300
+
+[figures.mcmc_compare_posteriors]
+var_name = "H0"
+output_pdf = "figures/mcmc_compare_posteriors_H0.pdf"
+figure_dpi = 300
+group = "posterior"
+
+[figures.mcmc_compare_posteriors.ax_kwargs]
+xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'
+ylabel = "Posterior density"
+
+[figures.mcmc_compare_posteriors.legend_kwargs]
+ncol = 3
+loc = "lower center"
+bbox_to_anchor = [0.5, 1.02]
+frameon = false
+borderaxespad = 0
+
+[[figures.mcmc_compare_posteriors.posteriors]]
+label = 'ET-$\Delta$'
+path = "chains/mcmc-H0-det=E1,E2,E3-seed42-20260630-091326.nc"
+color = "tab:blue"
+linestyle = "-"
+
+[[figures.mcmc_compare_posteriors.posteriors]]
+label = 'ET-$\Delta +$ CE'
+path = "chains/mcmc-H0-det=E1,E2,E3,C1-seed42-20260630-082136.nc"
+color = "tab:blue"
+linestyle = "--"
+
+[[figures.mcmc_compare_posteriors.posteriors]]
+label = "ET-2L"
+path = "chains/mcmc-H0-det=S1,R1-seed42-20260629-201613.nc"
+color = "tab:orange"
+linestyle = "-"
+
+[[figures.mcmc_compare_posteriors.posteriors]]
+label = 'ET-2L $+$ CE'
+path = "chains/mcmc-H0-det=S1,R1,C1-seed42-20260629-105230.nc"
+color = "tab:orange"
+linestyle = "--"
+
+[[figures.mcmc_compare_posteriors.posteriors]]
+label = 'ET-2L-$\alpha$'
+path = "chains/mcmc-H0-det=S2,R2-seed42-20260630-053542.nc"
+color = "tab:green"
+linestyle = "-"
+
+[[figures.mcmc_compare_posteriors.posteriors]]
+label = 'ET-2L-$\alpha +$ CE'
+path = "chains/mcmc-H0-det=S2,R2,C1-seed42-20260630-034738.nc"
+color = "tab:green"
+linestyle = "--"

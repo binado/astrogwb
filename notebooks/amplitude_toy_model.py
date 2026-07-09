@@ -34,11 +34,13 @@
 # ## Imports and JAX configuration
 
 # %%
+import argparse
 from datetime import datetime
 from functools import partial
 import json
 import multiprocessing
 from pathlib import Path
+import tomllib
 
 # Setting JAX to use all available CPU cores for parallelization
 num_cpus = multiprocessing.cpu_count()
@@ -54,6 +56,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
+from pydantic import BaseModel, ConfigDict
 from numpyro.infer import MCMC, NUTS
 
 from astrogwb.sampling.numpyro_model import numpyro_model
@@ -100,40 +103,124 @@ azp.style.use("arviz-variat")
 # ## Pipeline configuration
 
 # %%
-DEBUG = False  # small smoke settings for first runs; set False for the production run
+_LOOSE_CONFIG = ConfigDict(extra="ignore", frozen=True)
+
+
+class PathsConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    catalog: Path
+    chains_dir: Path = Path("chains")
+
+
+class AnalysisConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    observation_time: float = 1.0
+    f_min: float = 2.0
+    f_max: float = 4096.0
+
+
+class AmplitudePriorConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    low: float = 0.1
+    high: float = 10.0
+
+
+class AmplitudeSamplerConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    num_warmup: int = 200
+    num_samples: int = 500
+    num_chains: int | str = "auto"
+    target_accept: float = 0.9
+
+
+class AmplitudeToyConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    detectors: tuple[str, ...] = ("S1", "R1")
+    seed: int = 42
+    debug: bool = False
+    output_pdf: Path = Path("figures/amplitude_toy_fisher_overlay.pdf")
+    merger_rate_norm: float = 1e-3
+    amplitude_fiducial: float = 1.0
+    prior: AmplitudePriorConfig = AmplitudePriorConfig()
+    sampler: AmplitudeSamplerConfig = AmplitudeSamplerConfig()
+
+
+class FigureConfigs(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    amplitude_toy: AmplitudeToyConfig
+
+
+class PaperConfig(BaseModel):
+    model_config = _LOOSE_CONFIG
+
+    paths: PathsConfig
+    analysis: AnalysisConfig
+    figures: FigureConfigs
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
+    args, _ = parser.parse_known_args()
+    return args
+
+
+def _resolve_path(path: Path, root: Path) -> Path:
+    return path if path.is_absolute() else root / path
+
+
+def _load_config(path: Path) -> PaperConfig:
+    with path.open("rb") as handle:
+        return PaperConfig.model_validate(tomllib.load(handle))
 
 
 ROOT_DIR = repo_root()
-CATALOG_PATH = ROOT_DIR / "out/bns_waveform_catalog.h5"
-output_path = ROOT_DIR / "figures/amplitude_toy_fisher_overlay.pdf"
+args = _parse_args()
+config_path = _resolve_path(args.config, ROOT_DIR)
+paper_config = _load_config(config_path)
+figure_config = paper_config.figures.amplitude_toy
+
+CATALOG_PATH = _resolve_path(paper_config.paths.catalog, ROOT_DIR)
+output_path = _resolve_path(figure_config.output_pdf, ROOT_DIR)
 
 # Detector settings
-detnames = ("S1", "R1")  # resolve via bundled geometry.toml / sensitivity.toml
-observation_time = 1.0  # [yr]; cancels in S_h, kept for the likelihood scale
+detnames = (
+    figure_config.detectors
+)  # resolve via bundled geometry.toml / sensitivity.toml
+observation_time = paper_config.analysis.observation_time  # [yr]
 
 # MCMC settings
-seed = 42
-num_chains = num_cpus  # one chain per CPU core
-num_warmup = 200
-num_samples = 500
-target_accept = 0.9
+seed = figure_config.seed
+num_chains_raw = figure_config.sampler.num_chains
+num_chains = num_cpus if num_chains_raw == "auto" else int(num_chains_raw)
+num_warmup = figure_config.sampler.num_warmup
+num_samples = figure_config.sampler.num_samples
+target_accept = figure_config.sampler.target_accept
 
-if DEBUG:
+if figure_config.debug:
     num_warmup, num_samples, num_chains, target_accept = 100, 100, 1, 0.9
 
 # Frequency band for the analysis
-f_min = 2
-f_max = 4096
+f_min = paper_config.analysis.f_min
+f_max = paper_config.analysis.f_max
 
 # The toy model: S_h is linear in `amplitude` through the merger rate; the
 # importance weights are all unity, so `merger_rate_norm` sets the SNR scale.
-merger_rate_norm = 1e-3  # mergers/sec, hand-picked, tunable for SNR
-amplitude_fiducial = 1.0
+merger_rate_norm = figure_config.merger_rate_norm  # mergers/sec
+amplitude_fiducial = figure_config.amplitude_fiducial
 
 fiducials = {"amplitude": amplitude_fiducial}
-hyperprior_dists = {"amplitude": dist.Uniform(0.1, 10.0)}
+hyperprior_dists = {
+    "amplitude": dist.Uniform(figure_config.prior.low, figure_config.prior.high)
+}
 
-sampled_params = set(("amplitude",))
+sampled_params = ("amplitude",)
 
 priors = {k: hyperprior_dists[k] for k in sampled_params}
 constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
@@ -154,7 +241,9 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 catalog = load_catalog(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
-polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)
+polarization_power = jnp.asarray(
+    compute_polarization_power(catalog)
+)  # (nfreq, nsamples)
 samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
 del catalog
 
@@ -260,7 +349,7 @@ mcmc.print_summary()
 # %%
 
 
-out_dir = Path("chains")
+out_dir = _resolve_path(paper_config.paths.chains_dir, ROOT_DIR)
 out_dir.mkdir(exist_ok=True)
 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 params_suffix = "-".join(sampled_params)
@@ -271,8 +360,10 @@ inference_data = azb.from_numpyro(mcmc)
 inference_data.to_netcdf(out_dir / f"{base}.nc")
 
 run_config = {
+    "config_path": str(config_path),
     "catalog_path": str(CATALOG_PATH),
     "detectors": list(detnames),
+    "output_path": str(output_path),
     "seed": seed,
     "observation_time": observation_time,
     "sampled_params": list(sampled_params),
