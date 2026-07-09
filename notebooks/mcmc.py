@@ -65,7 +65,9 @@ from astrogwb.gwb import (
     frequency_mask as make_frequency_mask,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
-from astrogwb.waveform import load_polarization_power_catalog
+from astrogwb.utils import repo_root
+from astrogwb.waveform import polarization_power as compute_polarization_power
+from pluscross import load_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
 # mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
@@ -89,12 +91,8 @@ DEBUG = False  # small smoke settings for first runs; set False for the producti
 # No working polarization-power catalog exists yet; set this once one is produced.
 
 
-def get_root_dir() -> Path:
-    return Path.cwd().parent
-
-
-ROOT_DIR = get_root_dir()
-CATALOG_PATH = ROOT_DIR / "out/bns_polarization_power_catalog.npz"
+ROOT_DIR = repo_root()
+CATALOG_PATH = ROOT_DIR / "out/bns_waveform_catalog.h5"
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -161,11 +159,12 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # - `samples` — per-source parameters, stored as `sample__<name>` keys and restored into a dict.
 
 # %%
-catalog = load_polarization_power_catalog(CATALOG_PATH)
+catalog = load_catalog(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
-polarization_power = jnp.asarray(catalog.polarization_power)  # (nfreq, nsamples)
-samples = {name: jnp.asarray(v) for name, v in catalog.samples.items()}
+polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)
+samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
+del catalog
 
 assert "redshift" in samples, "catalog samples must include 'redshift' for the weights"
 assert "luminosity_distance" in samples, (

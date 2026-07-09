@@ -74,7 +74,9 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.sampling.numpyro_model import numpyro_model
-from astrogwb.waveform import load_polarization_power_catalog
+from astrogwb.utils import repo_root
+from astrogwb.waveform import polarization_power as compute_polarization_power
+from pluscross import load_catalog
 
 register_projection(MplAxes)
 
@@ -92,12 +94,8 @@ DEBUG = False  # small smoke settings for first runs; set False for the producti
 # No working polarization-power catalog exists yet; set this once one is produced.
 
 
-def get_root_dir() -> Path:
-    return Path.cwd().parent
-
-
-ROOT_DIR = get_root_dir()
-CATALOG_PATH = ROOT_DIR / "out/bns_polarization_power_catalog.npz"
+ROOT_DIR = repo_root()
+CATALOG_PATH = ROOT_DIR / "out/bns_waveform_catalog.h5"
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -168,11 +166,12 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # per-source parameter samples.
 
 # %%
-catalog = load_polarization_power_catalog(CATALOG_PATH)
+catalog = load_catalog(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
-polarization_power = jnp.asarray(catalog.polarization_power)  # (nfreq, nsamples)
-samples = {name: jnp.asarray(v) for name, v in catalog.samples.items()}
+polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)
+samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
+del catalog
 
 assert "redshift" in samples, "catalog samples must include 'redshift' for the weights"
 assert "luminosity_distance" in samples, (

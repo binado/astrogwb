@@ -4,9 +4,9 @@
 - `src/astrogwb/`: Python package code.
   - `detector/`: ORF, effective PSD, `load_sensitivities_for_network`, `geometry.toml`, `sensitivity.toml`, and bundled noise curves.
   - `gwb/`: `spectral.py` (SGWB spectral-density contractions, Omega_GW conversions, and `gaussian_bin_scale`; note: `observation_time` is in **years**), `snr.py` (matched-filter SNR).
-  - `waveform/`: polarization-power catalog generation and persistence.
+  - `waveform/`: reduces loaded `pluscross` waveform catalogs to polarization power for inference (`polarization_power`); catalog IO and generation live in `pluscross` and `scripts/generate_waveform_catalog.py`.
   - `sampling/`: thin NumPyro model for caller-prepared arrays; the model takes a single `merger_rate_and_log_weights_fn(params, samples) -> (total_merger_rate, log_weights)` callback.
-  - `utils.py`: small unit-conversion helpers (`SECONDS_PER_YEAR`, `years_to_seconds`).
+  - `utils.py`: unit-conversion helpers (`SECONDS_PER_YEAR`, `years_to_seconds`) and `repo_root()` for resolving the repository from notebooks or scripts.
 - `tests/`: Pytest suite with unit and integration coverage; committed `tests/fixtures/*.npz` for regression locks.
 - `notebooks/`: runnable, version-controlled workflows. `mcmc.py` (py:percent) is the NumPyro port of ASGWB.jl's importance-weighted NUTS run; `mcmc_plotting.py` loads saved chains and produces corner and diagnostic plots.
 - `notes/`: LaTeX notes/manuscript support files (`notes/justfile` for PDF build helpers).

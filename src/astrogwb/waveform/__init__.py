@@ -1,15 +1,11 @@
-from __future__ import annotations
+"""Waveform-catalog consumption helpers.
 
-from astrogwb.waveform.polarization_power import (
-    PolarizationPowerCatalog,
-    generate_catalog_polarization_power,
-    load_polarization_power_catalog,
-    save_polarization_power_catalog,
-)
+Catalog IO lives in the external ``pluscross`` package; this package only
+reduces loaded catalogs to the derived quantities the inference stack needs.
+"""
+
+from astrogwb.waveform.polarization_power import polarization_power
 
 __all__ = [
-    "PolarizationPowerCatalog",
-    "generate_catalog_polarization_power",
-    "load_polarization_power_catalog",
-    "save_polarization_power_catalog",
+    "polarization_power",
 ]

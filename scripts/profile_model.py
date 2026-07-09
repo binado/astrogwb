@@ -94,15 +94,17 @@ def build_potential(config: RunConfig, jax):
     )
     from astrogwb.sampling.numpyro_model import numpyro_model
     from astrogwb.sampling.priors import build_prior
-    from astrogwb.waveform import load_polarization_power_catalog
+    from astrogwb.waveform import polarization_power as compute_polarization_power
+    from pluscross import load_catalog
 
     cat = config.catalog
     cosmo = config.cosmology
 
-    catalog = load_polarization_power_catalog(cat.path)
+    catalog = load_catalog(cat.path)
     frequencies = jnp.asarray(catalog.frequencies)
-    polarization_power = jnp.asarray(catalog.polarization_power)
-    samples = {name: jnp.asarray(v) for name, v in catalog.samples.items()}
+    polarization_power = jnp.asarray(compute_polarization_power(catalog))
+    samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
+    del catalog
     n_freq, n_samples = polarization_power.shape
     logger.info(
         "Loaded catalog %s: n_frequency_bins=%d n_proposal_samples=%d",

@@ -27,8 +27,8 @@
 # It is a smoke/sanity test: can NUTS recover a known injected amplitude from
 # a fiducial catalog?
 #
-# To run the notebook end-to-end you must point `CATALOG_PATH` at an `.npz`
-# polarization-power catalog (schema documented below).
+# To run the notebook end-to-end you must point `CATALOG_PATH` at a pluscross
+# `.h5` catalog of complex polarizations.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -63,8 +63,9 @@ from astrogwb.gwb import (
     frequency_mask as make_frequency_mask,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
-from astrogwb.waveform import load_polarization_power_catalog
-from astrogwb.utils import years_to_seconds
+from astrogwb.waveform import polarization_power as compute_polarization_power
+from pluscross import load_catalog
+from astrogwb.utils import repo_root, years_to_seconds
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
 # mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
@@ -102,12 +103,8 @@ azp.style.use("arviz-variat")
 DEBUG = False  # small smoke settings for first runs; set False for the production run
 
 
-def get_root_dir() -> Path:
-    return Path.cwd().parent
-
-
-ROOT_DIR = get_root_dir()
-CATALOG_PATH = ROOT_DIR / "out/bns_waveforms_df=1Hz.npz"
+ROOT_DIR = repo_root()
+CATALOG_PATH = ROOT_DIR / "out/bns_waveform_catalog.h5"
 output_path = ROOT_DIR / "figures/amplitude_toy_fisher_overlay.pdf"
 
 # Detector settings
@@ -154,11 +151,12 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # - `samples` — per-source parameters, stored as `sample__<name>` keys and restored into a dict.
 
 # %%
-catalog = load_polarization_power_catalog(CATALOG_PATH)
+catalog = load_catalog(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
-polarization_power = jnp.asarray(catalog.polarization_power)  # (nfreq, nsamples)
-samples = {name: jnp.asarray(v) for name, v in catalog.samples.items()}
+polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)
+samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
+del catalog
 
 n_freq, n_samples = polarization_power.shape
 print(f"loaded catalog: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
