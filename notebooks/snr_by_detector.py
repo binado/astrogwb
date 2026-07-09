@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.3
+#       jupytext_version: 1.19.4
 #   kernelspec:
 #     display_name: astrogwb (3.12.9)
 #     language: python
@@ -125,6 +125,7 @@ class SNRByDetectorConfig(BaseModel):
 
     networks: tuple[str, ...] = ()
     output_csv: Path = Path("figures/snr_by_detector.csv")
+    output_tex: Path = Path("figures/snr_by_detector.tex")
     output_pdf: Path = Path("figures/snr_by_detector.pdf")
     figure_dpi: int = 300
 
@@ -336,19 +337,27 @@ plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1
 # $S_h(f)$ is held fixed across this sweep; only $S_{\mathrm{eff}}(f)$ changes.
 
 # %%
+AMPLITUDE_VALUES = {
+    "H0": fiducials["H0"],
+    "xi_0": fiducials["xi_0"],
+    "merger_rate": fiducials["local_merger_rate"],
+}
+
 rows = []
 for label, dets in DETECTOR_NETWORKS.items():
     sensitivities = load_sensitivity_map(dets)
     eff = jnp.asarray(effective_psd(frequencies, list(dets), sensitivities))
     snr = float(spectral_snr(observed_spectral_density[mask], eff[mask], obs_sec, df))
-    rows.append(
-        {
-            "network": label,
-            "detectors": ",".join(dets),
-            "n_detectors": len(dets),
-            "snr": snr,
-        }
-    )
+    row = {
+        "network": label,
+        "detectors": ",".join(dets),
+        "n_detectors": len(dets),
+        "snr": snr,
+    }
+    for name, value in AMPLITUDE_VALUES.items():
+        row[f"sigma_{name}"] = value / snr
+        row[f"rel_sigma_{name}"] = 1 / snr
+    rows.append(row)
 
 # %% [markdown]
 # ## Comparing networks
@@ -357,20 +366,37 @@ for label, dets in DETECTOR_NETWORKS.items():
 # astrophysical signal and observation time. A higher SNR means a stronger expected
 # cross-correlation detection of the fiducial background; ratios of SNR values
 # quantify how much one network improves over another at this fixed model point.
-#
-# This is a single-point forecast. A full assessment of detectability across
-# parameter uncertainty requires the Bayesian analysis in `notebooks/mcmc.py`.
 
 # %%
 df_snr = pd.DataFrame(rows).set_index("network").sort_values("snr", ascending=False)
-df_snr.style.format(precision=2)
+_precision_cols = [
+    col
+    for name in AMPLITUDE_VALUES
+    for col in (f"sigma_{name}", f"rel_sigma_{name}")
+]
+df_snr.style.format(
+    {
+        "snr": "{:.2f}",
+        "n_detectors": "{:.0f}",
+        **{col: "{:.3g}" for col in _precision_cols},
+    }
+)
 
 # %%
 output_csv = _resolve_path(figure_config.output_csv, ROOT_DIR)
+output_tex = _resolve_path(figure_config.output_tex, ROOT_DIR)
 output_pdf = _resolve_path(figure_config.output_pdf, ROOT_DIR)
 output_csv.parent.mkdir(parents=True, exist_ok=True)
 output_pdf.parent.mkdir(parents=True, exist_ok=True)
 df_snr.to_csv(output_csv)
+
+latex = df_snr.to_latex(
+    float_format="%.3g",
+    caption="Matched-filter SNR and amplitude-parameter precision by network.",
+    label="tab:snr_by_detector",
+)
+output_tex.write_text(latex)
+print(latex)
 
 df_plot = df_snr.sort_values("snr", ascending=True)
 fig, ax = plt.subplots(figsize=(6.5, 3.8))
@@ -381,4 +407,5 @@ ax.grid(axis="x", alpha=0.25)
 fig.tight_layout()
 fig.savefig(output_pdf, dpi=figure_config.figure_dpi, bbox_inches="tight")
 print("saved table:", output_csv)
+print("saved latex:", output_tex)
 print("saved figure:", output_pdf)
