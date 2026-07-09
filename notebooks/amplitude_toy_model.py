@@ -29,7 +29,9 @@
 #
 # To run the notebook end-to-end, set `[paths].catalog` in
 # [`configs/paper.toml`](../configs/paper.toml) (or pass `--config`) to a
-# pluscross `.h5` catalog of complex polarizations.
+# pluscross `.h5` catalog of complex polarizations. Figure-local knobs
+# (detectors, seed, sampler, outputs) are argparse defaults in the config
+# cell — edit them in Jupyter, override with flags headless.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -41,6 +43,7 @@ from functools import partial
 import json
 import multiprocessing
 from pathlib import Path
+
 # Setting JAX to use all available CPU cores for parallelization
 num_cpus = multiprocessing.cpu_count()
 import numpyro
@@ -55,10 +58,9 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
-from pydantic import BaseModel, ConfigDict
 from numpyro.infer import MCMC, NUTS
 
-from astrogwb.config import load_config_model
+from astrogwb.config import load_mapping
 from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.gwb import (
     spectral_density,
@@ -102,76 +104,47 @@ azp.style.use("arviz-variat")
 # %% [markdown]
 # ## Pipeline configuration
 #
-# Settings come from [`configs/paper.toml`](../configs/paper.toml)
-# (`[paths]`, `[analysis]`, `[figures.amplitude_toy]`). Set
-# `figures.amplitude_toy.debug = true` for a short smoke run
-# (100 warmup / 100 samples / 1 chain).
+# Shared paths and analysis band come from [`configs/paper.toml`](../configs/paper.toml)
+# (`[paths]`, `[analysis]`). Figure-local knobs are argparse defaults below —
+# edit them in Jupyter, override with flags headless (`--debug` for a short
+# smoke run: 100 warmup / 100 samples / 1 chain). Promote happy values by
+# updating the defaults (and toml for shared settings).
+
 
 # %%
-_LOOSE_CONFIG = ConfigDict(extra="ignore", frozen=True)
-
-
-class PathsConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    catalog: Path
-    chains_dir: Path = Path("chains")
-
-
-class AnalysisConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    observation_time: float = 1.0
-    f_min: float = 2.0
-    f_max: float = 4096.0
-
-
-class AmplitudePriorConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    low: float = 0.1
-    high: float = 10.0
-
-
-class AmplitudeSamplerConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    num_warmup: int = 200
-    num_samples: int = 500
-    num_chains: int | str = "auto"
-    target_accept: float = 0.9
-
-
-class AmplitudeToyConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    detectors: tuple[str, ...] = ("S1", "R1")
-    seed: int = 42
-    debug: bool = False
-    output_pdf: Path = Path("figures/amplitude_toy_fisher_overlay.pdf")
-    merger_rate_norm: float = 1e-3
-    amplitude_fiducial: float = 1.0
-    prior: AmplitudePriorConfig = AmplitudePriorConfig()
-    sampler: AmplitudeSamplerConfig = AmplitudeSamplerConfig()
-
-
-class FigureConfigs(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    amplitude_toy: AmplitudeToyConfig
-
-
-class PaperConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    paths: PathsConfig
-    analysis: AnalysisConfig
-    figures: FigureConfigs
-
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
+    parser.add_argument(
+        "--output-pdf",
+        type=Path,
+        default=Path("figures/amplitude_toy_fisher_overlay.pdf"),
+    )
+    parser.add_argument(
+        "--detectors",
+        nargs="*",
+        default=["S1", "R1"],
+        help="Detector site codes (resolved via bundled geometry/sensitivity).",
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--debug",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Short smoke run (100 warmup / 100 samples / 1 chain).",
+    )
+    parser.add_argument("--merger-rate-norm", type=float, default=1e-3)
+    parser.add_argument("--amplitude-fiducial", type=float, default=1.0)
+    parser.add_argument("--prior-low", type=float, default=0.1)
+    parser.add_argument("--prior-high", type=float, default=10.0)
+    parser.add_argument("--num-warmup", type=int, default=200)
+    parser.add_argument("--num-samples", type=int, default=500)
+    parser.add_argument(
+        "--num-chains",
+        default="auto",
+        help='Chain count, or "auto" for one chain per CPU.',
+    )
+    parser.add_argument("--target-accept", type=float, default=0.9)
     args, _ = parser.parse_known_args()
     return args
 
@@ -183,48 +156,39 @@ def _resolve_path(path: Path, root: Path) -> Path:
 ROOT_DIR = repo_root()
 args = _parse_args()
 config_path = _resolve_path(args.config, ROOT_DIR)
-paper_config = load_config_model(
-    config_path,
-    PaperConfig,
-    # figures={"amplitude_toy": {"debug": True}},
-)
-figure_config = paper_config.figures.amplitude_toy
+paper = load_mapping(config_path)
 
-CATALOG_PATH = _resolve_path(paper_config.paths.catalog, ROOT_DIR)
-output_path = _resolve_path(figure_config.output_pdf, ROOT_DIR)
+CATALOG_PATH = _resolve_path(Path(paper["paths"]["catalog"]), ROOT_DIR)
+output_path = _resolve_path(args.output_pdf, ROOT_DIR)
 
 # Detector settings
-detnames = (
-    figure_config.detectors
-)  # resolve via bundled geometry.toml / sensitivity.toml
-observation_time = (
-    paper_config.analysis.observation_time
-)  # [yr]; cancels in S_h, kept for the likelihood scale
+detnames = tuple(args.detectors)  # resolve via bundled geometry.toml / sensitivity.toml
+observation_time = paper["analysis"][
+    "observation_time"
+]  # [yr]; cancels in S_h, kept for the likelihood scale
 
 # MCMC settings
-seed = figure_config.seed
-num_chains_raw = figure_config.sampler.num_chains
+seed = args.seed
+num_chains_raw = args.num_chains
 num_chains = num_cpus if num_chains_raw == "auto" else int(num_chains_raw)
-num_warmup = figure_config.sampler.num_warmup
-num_samples = figure_config.sampler.num_samples
-target_accept = figure_config.sampler.target_accept
+num_warmup = args.num_warmup
+num_samples = args.num_samples
+target_accept = args.target_accept
 
-if figure_config.debug:
+if args.debug:
     num_warmup, num_samples, num_chains, target_accept = 100, 100, 1, 0.9
 
 # Frequency band for the analysis
-f_min = paper_config.analysis.f_min
-f_max = paper_config.analysis.f_max
+f_min = paper["analysis"]["f_min"]
+f_max = paper["analysis"]["f_max"]
 
 # The toy model: S_h is linear in `amplitude` through the merger rate; the
 # importance weights are all unity, so `merger_rate_norm` sets the SNR scale.
-merger_rate_norm = figure_config.merger_rate_norm  # mergers/sec
-amplitude_fiducial = figure_config.amplitude_fiducial
+merger_rate_norm = args.merger_rate_norm  # mergers/sec
+amplitude_fiducial = args.amplitude_fiducial
 
 fiducials = {"amplitude": amplitude_fiducial}
-hyperprior_dists = {
-    "amplitude": dist.Uniform(figure_config.prior.low, figure_config.prior.high)
-}
+hyperprior_dists = {"amplitude": dist.Uniform(args.prior_low, args.prior_high)}
 
 sampled_params = ("amplitude",)
 
@@ -355,7 +319,7 @@ mcmc.print_summary()
 # %%
 
 
-out_dir = _resolve_path(paper_config.paths.chains_dir, ROOT_DIR)
+out_dir = _resolve_path(Path(paper["paths"]["chains_dir"]), ROOT_DIR)
 out_dir.mkdir(exist_ok=True)
 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 params_suffix = "-".join(sampled_params)

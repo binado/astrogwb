@@ -1,8 +1,7 @@
-"""Shared config loading helpers (stdlib + pydantic only).
+"""Shared config loading helpers (stdlib only).
 
-Load TOML/JSON into a dict, deep-merge optional overrides, then validate with a
-caller-supplied pydantic model. Kept free of JAX so scripts can parse configs
-before runtime initialization.
+Load TOML/JSON into a dict and deep-merge optional overrides. Kept free of JAX
+so scripts can parse configs before runtime initialization.
 """
 
 from __future__ import annotations
@@ -11,11 +10,7 @@ import json
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, TypeVar
-
-from pydantic import BaseModel
-
-T = TypeVar("T", bound=BaseModel)
+from typing import Any
 
 
 def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
@@ -43,9 +38,3 @@ def load_mapping(path: Path) -> dict[str, Any]:
         if suffix == ".json":
             return json.load(handle)
     raise ValueError(f"unsupported config extension: {path.suffix!r}")
-
-
-def load_config_model(path: Path, model: type[T], **overrides: Any) -> T:
-    """Load ``path``, deep-merge top-level ``**overrides``, and validate as ``model``."""
-    raw = deep_merge(load_mapping(path), overrides)
-    return model.model_validate(raw)

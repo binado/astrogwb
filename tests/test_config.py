@@ -5,35 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel, ConfigDict
 
-from astrogwb.config import deep_merge, load_config_model, load_mapping
+from astrogwb.config import deep_merge, load_mapping
 from astrogwb.sampling.config import build_run_config, load_config
 from astrogwb.utils import repo_root
 
 REPO_ROOT = repo_root()
-
-_LOOSE = ConfigDict(extra="ignore", frozen=True)
-
-
-class _Nested(BaseModel):
-    model_config = _LOOSE
-
-    var_name: str = "H0"
-    figure_dpi: int = 300
-
-
-class _Figures(BaseModel):
-    model_config = _LOOSE
-
-    compare: _Nested = _Nested()
-
-
-class _ToyConfig(BaseModel):
-    model_config = _LOOSE
-
-    seed: int = 1
-    figures: _Figures = _Figures()
 
 
 def test_deep_merge_nested_dicts_and_list_replacement() -> None:
@@ -57,33 +34,6 @@ def test_deep_merge_nested_dicts_and_list_replacement() -> None:
     # Inputs are not mutated.
     assert base["figures"]["compare"]["var_name"] == "H0"
     assert base["networks"] == ["A", "B"]
-
-
-def test_load_config_model_applies_kwargs_overrides(tmp_path: Path) -> None:
-    path = tmp_path / "paper.toml"
-    path.write_text(
-        "\n".join(
-            [
-                "seed = 7",
-                "",
-                "[figures.compare]",
-                'var_name = "H0"',
-                "figure_dpi = 300",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    config = load_config_model(
-        path,
-        _ToyConfig,
-        figures={"compare": {"var_name": "Omega_m"}},
-    )
-
-    assert config.seed == 7
-    assert config.figures.compare.var_name == "Omega_m"
-    assert config.figures.compare.figure_dpi == 300
 
 
 def test_load_mapping_rejects_unsupported_extension(tmp_path: Path) -> None:

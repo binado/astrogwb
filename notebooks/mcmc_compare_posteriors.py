@@ -17,6 +17,7 @@
 
 # %%
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -24,10 +25,9 @@ import arviz_stats as azs
 import matplotlib.pyplot as plt
 import numpy.typing as npt
 import pandas as pd
-from pydantic import BaseModel, ConfigDict
 import xarray as xr
 
-from astrogwb.config import load_config_model
+from astrogwb.config import load_mapping
 from astrogwb.utils import repo_root
 
 # %config InlineBackend.figure_format = "retina"
@@ -66,23 +66,16 @@ plt.rcParams.update(**pub_rc)
 # %% [markdown]
 # ## Notebook configuration
 #
-# Labels, chain paths, colors, linestyles, and axis/legend kwargs come from
+# Nested plot data (posterior list, `ax_kwargs`, `legend_kwargs`) comes from
 # `[figures.mcmc_compare_posteriors]` in
-# [`configs/paper.toml`](../configs/paper.toml) (override with `--config`).
+# [`configs/paper.toml`](../configs/paper.toml). Scalars (`var_name`, dpi,
+# output path, group) are argparse defaults below — edit in Jupyter, override
+# with flags headless. Promote happy values by updating those defaults / toml.
+
 
 # %%
-_LOOSE_CONFIG = ConfigDict(extra="ignore", frozen=True)
-
-
-class PathsConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    chains_dir: Path = Path("chains")
-
-
-class PosteriorConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
+@dataclass(frozen=True)
+class PosteriorConfig:
     label: str
     path: Path
     color: str
@@ -113,34 +106,17 @@ class PosteriorConfig(BaseModel):
         return float(hdi.sel(ci_bound="lower")), float(hdi.sel(ci_bound="upper"))
 
 
-class PosteriorFigureConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    var_name: str = "H0"
-    output_pdf: Path = Path("figures/mcmc_compare_posteriors_H0.pdf")
-    figure_dpi: int = 300
-    group: str = "posterior"
-    posteriors: tuple[PosteriorConfig, ...]
-    ax_kwargs: dict[str, Any] = {}
-    legend_kwargs: dict[str, Any] = {}
-
-
-class FigureConfigs(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    mcmc_compare_posteriors: PosteriorFigureConfig
-
-
-class PaperConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    paths: PathsConfig = PathsConfig()
-    figures: FigureConfigs
-
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
+    parser.add_argument(
+        "--output-pdf",
+        type=Path,
+        default=Path("figures/mcmc_compare_posteriors_H0.pdf"),
+    )
+    parser.add_argument("--figure-dpi", type=int, default=300)
+    parser.add_argument("--var-name", default="H0")
+    parser.add_argument("--group", default="posterior")
     args, _ = parser.parse_known_args()
     return args
 
@@ -152,16 +128,24 @@ def _resolve_path(path: Path, root: Path) -> Path:
 BASE_DIR = repo_root()
 args = _parse_args()
 config_path = _resolve_path(args.config, BASE_DIR)
-paper_config = load_config_model(
-    config_path,
-    PaperConfig,
-    # figures={"mcmc_compare_posteriors": {"var_name": "Omega_m"}},
-)
-figure_config = paper_config.figures.mcmc_compare_posteriors
-configs = list(figure_config.posteriors)
-VAR_NAME = figure_config.var_name
-OUT_FILE = _resolve_path(figure_config.output_pdf, BASE_DIR)
-FIGURE_DPI = figure_config.figure_dpi
+paper = load_mapping(config_path)
+figure = paper["figures"]["mcmc_compare_posteriors"]
+
+configs = [
+    PosteriorConfig(
+        label=entry["label"],
+        path=Path(entry["path"]),
+        color=entry["color"],
+        linestyle=entry["linestyle"],
+    )
+    for entry in figure["posteriors"]
+]
+VAR_NAME = args.var_name
+OUT_FILE = _resolve_path(args.output_pdf, BASE_DIR)
+FIGURE_DPI = args.figure_dpi
+GROUP = args.group
+ax_kwargs = figure.get("ax_kwargs", {})
+legend_kwargs = figure.get("legend_kwargs", {})
 
 
 # %% [markdown]
@@ -213,20 +197,20 @@ def summarize_hdi(
                 "sigma": (upper - lower) / 2,
             }
         )
-    return pd.DataFrame(rows).sort_values("sigma", ascending=True).reset_index(drop=True)
+    return (
+        pd.DataFrame(rows).sort_values("sigma", ascending=True).reset_index(drop=True)
+    )
 
 
 # %% [markdown]
 # Plotting:
 
 # %%
-ax_kwargs = figure_config.ax_kwargs
-legend_kwargs = figure_config.legend_kwargs
 fig = plot_posteriors(
     configs,
     VAR_NAME,
     BASE_DIR,
-    group=figure_config.group,
+    group=GROUP,
     ax_kwargs=ax_kwargs,
     legend_kwargs=legend_kwargs,
 )
@@ -244,7 +228,7 @@ hdi_summary = summarize_hdi(
     configs,
     VAR_NAME,
     BASE_DIR,
-    group=figure_config.group,
+    group=GROUP,
 )
 hdi_summary.style.format(precision=2)
 

@@ -82,9 +82,16 @@ See the [plotting notebook](./notebooks/mcmc_plotting.py) for examples of how to
 
 ## Paper figures
 
-The paper-figure workflow is configured by [`configs/paper.toml`](configs/paper.toml).
-Each figure notebook reads only the section it needs and remains runnable as a
-Jupytext `py:percent` notebook or as a script.
+Shared analysis settings (catalog path, fiducials, detector networks, nested
+posterior plot entries) live in [`configs/paper.toml`](configs/paper.toml).
+Figure-local knobs (output paths, dpi, sampler settings, which networks to
+plot) are argparse defaults in each Jupytext notebook — edit them in Jupyter,
+override with CLI flags headless, and promote happy values by updating those
+defaults (and `paper.toml` for shared/nested data).
+
+Snakemake reads [`configs/workflow.yaml`](configs/workflow.yaml) for the paper
+config path and declared output paths, then passes `--config` plus output-path
+flags into each notebook.
 
 Preview the declared workflow:
 
