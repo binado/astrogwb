@@ -26,6 +26,8 @@ import matplotlib.pyplot as plt
 import numpy.typing as npt
 import xarray as xr
 
+from astrogwb.utils import repo_root
+
 # %config InlineBackend.figure_format = "retina"
 
 # %% [markdown]
@@ -65,7 +67,7 @@ plt.rcParams.update(**pub_rc)
 # ## Notebook configuration
 
 # %%
-BASE_DIR = Path.cwd().parent
+BASE_DIR = repo_root()
 OUT_DIR = BASE_DIR / "figures"
 
 LABELS = [
