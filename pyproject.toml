@@ -16,8 +16,12 @@ dependencies = [
     "jax[cpu]>=0.10.2; sys_platform != 'linux'",
     "numpy>=2.5.1",
     "numpyro>=0.21.0",
-    "pydantic>=2.0",
     "pluscross>=0.1.0,<0.2.0",
+]
+
+[project.optional-dependencies]
+mcmc = [
+    "pydantic>=2.0",
 ]
 
 [build-system]

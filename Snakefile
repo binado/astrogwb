@@ -50,7 +50,7 @@ rule mcmc_configs:
     params:
         outdir=MCMC_CONFIG_DIR,
     shell:
-        "uv run python scripts/generate_mcmc_configs.py {params.outdir} --force"
+        "uv run --extra mcmc python scripts/generate_mcmc_configs.py {params.outdir} --force"
 
 
 rule amplitude_toy:

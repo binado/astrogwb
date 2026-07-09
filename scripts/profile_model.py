@@ -14,8 +14,8 @@ is reused so the JAX device / x64 setup matches production exactly.
 
 Usage::
 
-    uv run python scripts/profile_model.py --config configs/mcmc.example.toml
-    uv run python scripts/profile_model.py --config configs/mcmc.example.toml --iters 100
+    uv run --extra mcmc python scripts/profile_model.py --config configs/mcmc.example.toml
+    uv run --extra mcmc python scripts/profile_model.py --config configs/mcmc.example.toml --iters 100
 
 Open the generated ``perfetto_trace.json.gz`` at https://ui.perfetto.dev
 (no TensorBoard install required).

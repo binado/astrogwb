@@ -3,11 +3,12 @@
 
 Run from the repository root::
 
-    uv run python scripts/generate_mcmc_configs.py [output_dir]
+    uv run --extra mcmc python scripts/generate_mcmc_configs.py [output_dir]
 
 Base settings (fiducials, catalog, cosmology, sampler, runtime, output) are taken
 from ``configs/mcmc.example.toml``. Sweep-specific fields override detectors,
-``sampled_params``, and the corresponding prior tables.
+``sampled_params``, and the corresponding prior tables. Requires the ``mcmc``
+optional extra (pydantic) for ``RunConfig`` validation.
 """
 
 from __future__ import annotations

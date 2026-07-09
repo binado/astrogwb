@@ -197,6 +197,10 @@ dependencies = [
     { name = "numpy" },
     { name = "numpyro" },
     { name = "pluscross" },
+]
+
+[package.optional-dependencies]
+mcmc = [
     { name = "pydantic" },
 ]
 
@@ -229,8 +233,9 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "numpyro", specifier = ">=0.21.0" },
     { name = "pluscross", specifier = ">=0.1.0,<0.2.0" },
-    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pydantic", marker = "extra == 'mcmc'", specifier = ">=2.0" },
 ]
+provides-extras = ["mcmc"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -613,7 +618,7 @@ wheels = [
 
 [[package]]
 name = "corner"
-version = "2.2.4.dev32+gd9c1219df"
+version = "2.3.0rc1"
 source = { git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4#d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" }
 dependencies = [
     { name = "matplotlib" },

@@ -15,9 +15,11 @@ gwmock-signal owns preset detector networks; gwmock-noise owns bundled PSD prese
 
 ## Build, Test, and Development Commands
 - `uv sync --group dev`: create/update the local environment with dev dependencies (includes the `plotting` group: arviz, corner, h5netcdf).
+- `uv sync --extra mcmc`: install pydantic for validated MCMC `RunConfig` parsing (`scripts/run_mcmc.py`, config generation, related tests).
+- `uv sync --extra mcmc --group dev`: typical full local/CI install for MCMC scripts + notebooks + tests.
 - `uv sync --group plotting`: install notebook plotting dependencies only (arviz, corner, h5netcdf).
-- `uv run pytest`: run all tests.
-- `uv run pytest -m "not integration"`: run fast unit tests only.
+- `uv run --extra mcmc --group dev pytest`: run all tests (include `--extra mcmc` when exercising `RunConfig`).
+- `uv run --extra mcmc --group dev pytest -m "not integration"`: run fast unit tests only.
 - `uv run ruff check . --fix`: lint and apply safe fixes.
 - `uv run ruff format .`: format Python files.
 - `uvx ty check`: type check.

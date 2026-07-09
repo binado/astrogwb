@@ -12,6 +12,16 @@ git clone git@github.com:binado/astrogwb.git
 uv sync --all-groups --all-extras
 ```
 
+Core inference libraries install without pydantic. The optional ``mcmc`` extra
+adds pydantic for validated ``RunConfig`` parsing used by
+[`scripts/run_mcmc.py`](scripts/run_mcmc.py) and related tools:
+
+```bash
+uv sync --extra mcmc
+# or with notebook/dev tooling:
+uv sync --extra mcmc --group dev
+```
+
 ## Generating a population of CBCs
 
 Our inference framework uses an importance sampling scheme to calculate the spectral density of the astrophysical SGWB with a fixed population of CBCs. To generate the population, we suggest using the excellent [`gwmock-pop`](https://leuven-gravity-institute.github.io/gwmock-pop/) package.
@@ -77,7 +87,8 @@ Generate the detector × sample-parameter sweep configs (from
 uv run snakemake --cores 1 mcmc_configs
 ```
 
-Then submit the array on a SLURM cluster:
+Then submit the array on a SLURM cluster (cluster env needs
+`uv sync --extra mcmc`):
 
 ```bash
 ./scripts/submit_mcmc.sh -i configs/mcmc/sweep
@@ -132,10 +143,13 @@ uv run snakemake --cores 1 figures/mcmc_compare_posteriors_H0.pdf
 ## Development
 
 Install dependencies (the dev group also bundles Jupyter, arviz, corner, and
-matplotlib so the MCMC notebook in `notebooks/` runs out of the box):
+matplotlib so the MCMC notebook in `notebooks/` runs out of the box). Include
+the `mcmc` extra when running config-validated MCMC scripts or the related
+tests:
 
 ```bash
 uv sync --group dev
+uv sync --extra mcmc --group dev
 ```
 
 Run tests:

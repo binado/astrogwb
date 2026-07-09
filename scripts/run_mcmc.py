@@ -15,9 +15,10 @@ happen inside functions that run only after :func:`configure_runtime`. See
 
 Usage::
 
-    uv run python scripts/run_mcmc.py --config configs/mcmc.example.toml
-    uv run python scripts/run_mcmc.py --config configs/mcmc/sweep/ET-2L-aligned__H0.json
+    uv run --extra mcmc python scripts/run_mcmc.py --config configs/mcmc.example.toml
+    uv run --extra mcmc python scripts/run_mcmc.py --config configs/mcmc/sweep/ET-2L-aligned__H0.json
 
+Requires the ``mcmc`` optional extra (pydantic) for ``RunConfig`` validation.
 The script is meant to back a SLURM job array with one config per task; see
 ``scripts/submit_mcmc.sh -i configs/mcmc/sweep``.
 """

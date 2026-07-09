@@ -6,7 +6,8 @@
 # Usage:
 #   ./scripts/submit_mcmc.sh -i configs/mcmc/sweep
 #
-# Ensure the cluster env has dev deps (arviz, jupyter, etc.): uv sync --group dev
+# Ensure the cluster env has the mcmc extra (pydantic) plus any needed groups:
+#   uv sync --extra mcmc --group dev
 
 set -euo pipefail
 
@@ -138,8 +139,8 @@ export JAX_PLATFORMS="cuda"
 echo "Task ${TASK_ID}: running ${CONFIG}"
 
 if command -v job-nanny >/dev/null 2>&1; then
-    job-nanny uv run python scripts/run_mcmc.py --config "${CONFIG}"
+    job-nanny uv run --extra mcmc python scripts/run_mcmc.py --config "${CONFIG}"
 else
-    uv run python scripts/run_mcmc.py --config "${CONFIG}"
+    uv run --extra mcmc python scripts/run_mcmc.py --config "${CONFIG}"
 fi
 EOF
