@@ -43,7 +43,6 @@
 # %%
 import argparse
 from pathlib import Path
-import tomllib
 
 import jax
 import jax.numpy as jnp
@@ -51,6 +50,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from pydantic import BaseModel, ConfigDict
 
+from astrogwb.config import load_config_model
 from astrogwb.gwb import (
     spectral_density,
     frequency_mask as make_frequency_mask,
@@ -156,15 +156,14 @@ def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
 
 
-def _load_config(path: Path) -> PaperConfig:
-    with path.open("rb") as handle:
-        return PaperConfig.model_validate(tomllib.load(handle))
-
-
 ROOT_DIR = repo_root()
 args = _parse_args()
 config_path = _resolve_path(args.config, ROOT_DIR)
-paper_config = _load_config(config_path)
+paper_config = load_config_model(
+    config_path,
+    PaperConfig,
+    # figures={"snr_by_detector": {"figure_dpi": 150}},
+)
 figure_config = paper_config.figures.snr_by_detector
 
 CATALOG_PATH = _resolve_path(paper_config.paths.catalog, ROOT_DIR)

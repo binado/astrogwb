@@ -41,8 +41,6 @@ from functools import partial
 import json
 import multiprocessing
 from pathlib import Path
-import tomllib
-
 # Setting JAX to use all available CPU cores for parallelization
 num_cpus = multiprocessing.cpu_count()
 import numpyro
@@ -60,6 +58,7 @@ import numpyro.distributions as dist
 from pydantic import BaseModel, ConfigDict
 from numpyro.infer import MCMC, NUTS
 
+from astrogwb.config import load_config_model
 from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.gwb import (
     spectral_density,
@@ -181,15 +180,14 @@ def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
 
 
-def _load_config(path: Path) -> PaperConfig:
-    with path.open("rb") as handle:
-        return PaperConfig.model_validate(tomllib.load(handle))
-
-
 ROOT_DIR = repo_root()
 args = _parse_args()
 config_path = _resolve_path(args.config, ROOT_DIR)
-paper_config = _load_config(config_path)
+paper_config = load_config_model(
+    config_path,
+    PaperConfig,
+    # figures={"amplitude_toy": {"debug": True}},
+)
 figure_config = paper_config.figures.amplitude_toy
 
 CATALOG_PATH = _resolve_path(paper_config.paths.catalog, ROOT_DIR)

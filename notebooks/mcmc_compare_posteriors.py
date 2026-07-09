@@ -18,7 +18,6 @@
 # %%
 import argparse
 from pathlib import Path
-import tomllib
 from typing import Any
 
 import arviz_stats as azs
@@ -28,6 +27,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict
 import xarray as xr
 
+from astrogwb.config import load_config_model
 from astrogwb.utils import repo_root
 
 # %config InlineBackend.figure_format = "retina"
@@ -149,15 +149,14 @@ def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
 
 
-def _load_config(path: Path) -> PaperConfig:
-    with path.open("rb") as handle:
-        return PaperConfig.model_validate(tomllib.load(handle))
-
-
 BASE_DIR = repo_root()
 args = _parse_args()
 config_path = _resolve_path(args.config, BASE_DIR)
-paper_config = _load_config(config_path)
+paper_config = load_config_model(
+    config_path,
+    PaperConfig,
+    # figures={"mcmc_compare_posteriors": {"var_name": "Omega_m"}},
+)
 figure_config = paper_config.figures.mcmc_compare_posteriors
 configs = list(figure_config.posteriors)
 VAR_NAME = figure_config.var_name
