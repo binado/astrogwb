@@ -18,9 +18,10 @@ Usage::
     uv run --extra mcmc python scripts/run_mcmc.py --config configs/mcmc.example.toml
     uv run --extra mcmc python scripts/run_mcmc.py --config configs/mcmc/sweep/ET-2L-aligned__H0.json
 
-Requires the ``mcmc`` optional extra (pydantic) for ``RunConfig`` validation.
+Requires the ``mcmc`` optional extra (pydantic plus ArviZ NetCDF output support)
+for ``RunConfig`` validation and chain serialization.
 The script is meant to back a SLURM job array with one config per task; see
-``scripts/submit_mcmc.sh -i configs/mcmc/sweep``.
+``python scripts/submit_mcmc.py -i configs/mcmc/sweep``.
 """
 
 from __future__ import annotations
@@ -323,7 +324,9 @@ def _git_revision() -> str | None:
         return None
 
 
-def output_paths(config: RunConfig, *, timestamp: str | None = None) -> tuple[Path, Path]:
+def output_paths(
+    config: RunConfig, *, timestamp: str | None = None
+) -> tuple[Path, Path]:
     """Return the chain and sidecar paths a run will write.
 
     Campaign configs always have a label.  Auto-labelled ad-hoc runs retain the

@@ -12,9 +12,10 @@ git clone git@github.com:binado/astrogwb.git
 uv sync --all-groups --all-extras
 ```
 
-Core inference libraries install without pydantic. The optional ``mcmc`` extra
-adds pydantic for validated ``RunConfig`` parsing used by
-[`scripts/run_mcmc.py`](scripts/run_mcmc.py) and related tools:
+Core inference libraries install without the headless runner dependencies. The
+optional ``mcmc`` extra adds pydantic for validated ``RunConfig`` parsing and
+ArviZ's NetCDF output support used by [`scripts/run_mcmc.py`](scripts/run_mcmc.py)
+and related tools:
 
 ```bash
 uv sync --extra mcmc
@@ -81,14 +82,15 @@ There are two working examples provided in the repo:
 Both examples assume a population of binary neutron star (BNS) mergers following the example described above. See the notebook for more details on how the inference is set up.
 
 Generate the detector × sample-parameter sweep configs (from
-[`configs/mcmc.example.toml`](configs/mcmc.example.toml)) with Snakemake:
+[`configs/mcmc.example.toml`](configs/mcmc.example.toml)) directly:
 
 ```bash
-uv run snakemake --cores 1 mcmc_configs
+uv run --extra mcmc python scripts/generate_mcmc_configs.py --force
 ```
 
 Then submit the array on a SLURM cluster (cluster env needs
-`uv sync --extra mcmc`):
+`uv sync --extra mcmc`, which includes config validation and ArviZ NetCDF
+output support):
 
 ```bash
 python scripts/submit_mcmc.py -i configs/mcmc/sweep
@@ -143,9 +145,9 @@ uv run snakemake --cores 1 figures/mcmc_compare_posteriors_H0.pdf
 ## Development
 
 Install dependencies (the dev group also bundles Jupyter, arviz, corner, and
-matplotlib so the MCMC notebook in `notebooks/` runs out of the box). Include
-the `mcmc` extra when running config-validated MCMC scripts or the related
-tests:
+matplotlib so the MCMC notebook in `notebooks/` runs out of the box). The
+`mcmc` extra alone is sufficient for the headless runner, including ArviZ
+NetCDF output; include it with dev tools for related tests:
 
 ```bash
 uv sync --group dev

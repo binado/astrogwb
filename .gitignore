@@ -3,8 +3,7 @@ data
 # Local Jupyter UI only; version-control notebooks/ as Jupytext py:percent .py files.
 *.ipynb
 
-# Generated MCMC sweep configs (regenerate via scripts/generate_mcmc_configs.py)
-configs/mcmc/sweep/
+# Generated MCMC run artifacts and frozen manifests.
 configs/mcmc/frozen/
 configs/mcmc/manifests/
 chains/

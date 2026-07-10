@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 mcmc = [
+    "arviz[h5netcdf]>=1.2.0",
     "pydantic>=2.0",
 ]
 

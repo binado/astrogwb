@@ -135,6 +135,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/37/e66d037fd935f40606fc5dc1c610d78653037dd62d656a25cead401d81dc/arviz-1.2.0-py3-none-any.whl", hash = "sha256:3b2b313b4b57ebb2e028c5237e4eacbd4f56084d0162128f8f1f42266c7cf515", size = 9153, upload-time = "2026-06-12T17:41:13.149Z" },
 ]
 
+[package.optional-dependencies]
+h5netcdf = [
+    { name = "arviz-base", extra = ["h5netcdf"] },
+]
+
 [[package]]
 name = "arviz-base"
 version = "1.2.0"
@@ -148,6 +153,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e6/d7/4db6e89b0cc5a26ce0e84accd5dd6ff43572eb32e9b46c577bd5d219ed6a/arviz_base-1.2.0.tar.gz", hash = "sha256:be06f9c15c53a951a971bef697e6b0a68497aae4d1670be065dd8f0482e9efca", size = 1410416, upload-time = "2026-06-12T15:54:46.517Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/37/d7/82e5f456d50b6accf06d137594282bf6984526fa1b329a061f7b91b123aa/arviz_base-1.2.0-py3-none-any.whl", hash = "sha256:a3f7023b665823068ff4b973bb6205eacc65f3c0a446cc099d7e5326b50f1ffc", size = 1427453, upload-time = "2026-06-12T15:54:44.805Z" },
+]
+
+[package.optional-dependencies]
+h5netcdf = [
+    { name = "h5netcdf", extra = ["h5py"] },
 ]
 
 [[package]]
@@ -201,6 +211,7 @@ dependencies = [
 
 [package.optional-dependencies]
 mcmc = [
+    { name = "arviz", extra = ["h5netcdf"] },
     { name = "pydantic" },
 ]
 
@@ -225,6 +236,7 @@ plotting = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arviz", extras = ["h5netcdf"], marker = "extra == 'mcmc'", specifier = ">=1.2.0" },
     { name = "gwmock-noise", specifier = ">=0.6.1" },
     { name = "gwmock-pop", specifier = ">=0.10.3" },
     { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.9.3" },
@@ -618,7 +630,7 @@ wheels = [
 
 [[package]]
 name = "corner"
-version = "2.3.0rc1"
+version = "2.2.4.dev32+gd9c1219df"
 source = { git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4#d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" }
 dependencies = [
     { name = "matplotlib" },
@@ -1052,6 +1064,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ef/03/92d6cc02c0055158167255980461155d6e17f1c4143c03f8bcc18d3e3f3a/h5netcdf-1.8.1.tar.gz", hash = "sha256:9b396a4cc346050fc1a4df8523bc1853681ec3544e0449027ae397cb953c7a16", size = 78679, upload-time = "2026-01-23T07:35:31.233Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b1/8b/88f16936a8e8070a83d36239555227ecd91728f9ef222c5382cda07e0fd6/h5netcdf-1.8.1-py3-none-any.whl", hash = "sha256:a76ed7cfc9b8a8908ea7057c4e57e27307acff1049b7f5ed52db6c2247636879", size = 62915, upload-time = "2026-01-23T07:35:30.195Z" },
+]
+
+[package.optional-dependencies]
+h5py = [
+    { name = "h5py" },
 ]
 
 [[package]]
