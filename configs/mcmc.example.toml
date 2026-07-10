@@ -41,14 +41,14 @@ jit_model_args = true
 
 [fiducials]
 # The proposal catalog's parameter point. Julia Xi_0 -> xi_0, Xi_n -> xi_n
-# (GR is xi_0=1, xi_n=0). kappa=3.0 is gwmock-pop's offset convention (Julia kappa).
+# (GR is xi_0=1, xi_n=0). Madau–Dickinson shape: gamma, kappa, z_peak.
 H0 = 67.66
 Omega_m = 0.3096
 xi_0 = 1.0
 xi_n = 1.91
-gamma = 2.7
-kappa = 2.9
-z_peak = 1.9
+gamma = 1.42
+kappa = 4.62
+z_peak = 1.84
 local_merger_rate = 161.0    # [Gpc^-3 yr^-1], matches COBA simulations
 
 # Priors: one [priors.<param>] table per sampled parameter.

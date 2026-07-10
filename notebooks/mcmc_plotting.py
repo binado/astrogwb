@@ -70,9 +70,9 @@ FIDUCIALS: dict[str, float] = {
     "Omega_m": 0.3096,
     "chi0": 1.0,
     "chin": 1.91,
-    "gamma": 2.7,
-    "kappa": 2.9,
-    "z_peak": 1.9,
+    "gamma": 1.42,
+    "kappa": 4.62,
+    "z_peak": 1.84,
 }
 VAR_LABELS = {
     "H0": r"$H_0$",

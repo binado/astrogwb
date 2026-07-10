@@ -20,9 +20,9 @@ FIDUCIALS = {
     "Omega_m": 0.3096,
     "xi_0": 1.0,
     "xi_n": 1.91,
-    "gamma": 2.7,
-    "kappa": 3.0,
-    "z_peak": 2.0,
+    "gamma": 1.42,
+    "kappa": 4.62,
+    "z_peak": 1.84,
     "local_merger_rate": 161.0,
 }
 
