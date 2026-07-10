@@ -1,0 +1,90 @@
+# MCMC sweep campaigns.  This is the single source of truth for the generator
+# and the Snakemake workflow.
+
+[networks]
+ET-triangular = ["E1", "E2", "E3"]
+ET-triangular-CE-Hanford = ["E1", "E2", "E3", "C1"]
+ET-2L-aligned = ["S1", "R1"]
+ET-2L-aligned-CE-Hanford = ["S1", "R1", "C1"]
+ET-2L-misaligned = ["S2", "R2"]
+ET-2L-misaligned-CE-Hanford = ["S2", "R2", "C1"]
+
+[priors.H0]
+type = "uniform"
+low = 20.0
+high = 140.0
+
+[priors.Omega_m]
+type = "uniform"
+low = 0.05
+high = 0.95
+
+[priors.xi_0]
+type = "uniform"
+low = 0.5
+high = 5.0
+
+[priors.xi_n]
+type = "uniform"
+low = 0.3
+high = 3.0
+
+[priors.gamma]
+type = "uniform"
+low = 0.5
+high = 10.0
+
+[priors.kappa]
+type = "uniform"
+low = 0.05
+high = 10.0
+
+[priors.z_peak]
+type = "uniform"
+low = 0.05
+high = 10.0
+
+[priors.local_merger_rate]
+type = "uniform"
+low = 7.6
+high = 250.0
+
+[campaigns.cosmology.H0]
+sampled_params = ["H0"]
+
+[campaigns.cosmology.H0-Omega_m]
+sampled_params = ["H0", "Omega_m"]
+
+[campaigns.cosmology.H0-merger-rate]
+sampled_params = ["H0", "local_merger_rate"]
+
+[campaigns.cosmology.H0-merger-rate-gauss]
+sampled_params = ["H0", "local_merger_rate"]
+
+[campaigns.cosmology.H0-merger-rate-gauss.priors.local_merger_rate]
+type = "normal"
+loc = 161.0
+scale = 1.61
+
+[campaigns.modified-propagation.Xi_0]
+sampled_params = ["xi_0"]
+
+[campaigns.modified-propagation.Xi_0-n]
+sampled_params = ["xi_0", "xi_n"]
+
+[campaigns.modified-propagation.Xi_0-H0-gauss]
+sampled_params = ["xi_0", "H0"]
+
+[campaigns.modified-propagation.Xi_0-H0-gauss.priors.H0]
+type = "normal"
+loc = 67.66
+scale = 0.6766
+
+[campaigns.astrophysical.H0-peak]
+sampled_params = ["H0", "z_peak"]
+
+[campaigns.astrophysical.H0-MD]
+sampled_params = ["H0", "gamma", "kappa", "z_peak"]
+
+[campaigns.astrophysical.Xi_0-MD]
+sampled_params = ["xi_0", "gamma", "kappa", "z_peak"]

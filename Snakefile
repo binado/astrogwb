@@ -3,7 +3,7 @@ from pathlib import Path
 import tomllib
 
 from astrogwb.config.catalogs import catalog_path, load_catalog_recipes, population_path
-from astrogwb.sampling.sweeps import CAMPAIGNS, campaign_runs, sweep_filenames
+from astrogwb.config.sweeps import load_sweep_spec
 
 
 configfile: "configs/workflow.yaml"
@@ -20,8 +20,10 @@ DEFAULT_CATALOG = PAPER_CONFIG["catalog"]["id"]
 if DEFAULT_CATALOG not in CATALOG_RECIPES:
     raise ValueError(f"paper catalog {DEFAULT_CATALOG!r} is not in the registry")
 
-SWEEP_CONFIGS = [f"configs/mcmc/{filename}" for filename in sweep_filenames()]
-SWEEP_CAMPAIGNS = tuple(CAMPAIGNS)
+SWEEP_SPEC_PATH = "configs/mcmc.sweeps.toml"
+SWEEP_SPEC = load_sweep_spec(Path(SWEEP_SPEC_PATH))
+SWEEP_CONFIGS = [f"configs/mcmc/{filename}" for filename in SWEEP_SPEC.filenames()]
+SWEEP_CAMPAIGNS = tuple(SWEEP_SPEC.campaigns)
 CHAINS_DIR = PAPER_CONFIG["paths"]["chains_dir"]
 AMPLITUDE_TOY_PDF = config["amplitude_toy"]["output_pdf"]
 SNR_BY_DETECTOR_PDF = config["snr_by_detector"]["output_pdf"]
@@ -45,7 +47,7 @@ def campaign_config_dir(campaign):
 
 def campaign_chains(catalog, campaign):
     if campaign in SWEEP_CAMPAIGNS:
-        runs = campaign_runs(campaign)
+        runs = SWEEP_SPEC.campaign_runs(campaign)
     else:
         runs = sorted(glob_wildcards(campaign_config_dir(campaign) + "/{run}.json").run)
     return [f"{CHAINS_DIR}/{catalog}/{campaign}/{run}.nc" for run in runs]
@@ -82,7 +84,7 @@ rule generate_sweep_configs:
     input:
         example="configs/mcmc.example.toml",
         generator="scripts/generate_mcmc_configs.py",
-        sweep_spec="src/astrogwb/sampling/sweeps.py",
+        sweep_spec=SWEEP_SPEC_PATH,
     output:
         SWEEP_CONFIGS,
     shell:

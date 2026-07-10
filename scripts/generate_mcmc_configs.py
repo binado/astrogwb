@@ -22,21 +22,14 @@ from pathlib import Path
 from typing import Any
 
 from astrogwb.config.mcmc import RunConfig, build_run_config, save_config
-from astrogwb.sampling.sweeps import (
-    CAMPAIGNS,
-    DETECTOR_NETWORKS,
-    FIDUCIAL_H0,
-    FIDUCIAL_LOCAL_MERGER_RATE,
-    PRIOR_TABLES,
-    RELATIVE_GAUSSIAN_SIGMA,
-    sweep_filenames,
-)
+from astrogwb.config.sweeps import DEFAULT_SWEEP_SPEC, SweepSpec, load_sweep_spec
 
 logger = logging.getLogger("generate_mcmc_configs")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_DIR = "configs/mcmc"
 DEFAULT_EXAMPLE_CONFIG = REPO_ROOT / "configs" / "mcmc.example.toml"
+
 
 def _resolve_repo_path(path: str | Path) -> Path:
     resolved = Path(path)
@@ -59,21 +52,22 @@ def make_config(
     sampled_params: tuple[str, ...],
     *,
     example_config: Path = DEFAULT_EXAMPLE_CONFIG,
+    priors: dict[str, dict[str, Any]],
     prior_overrides: dict[str, dict[str, Any]] | None = None,
 ) -> RunConfig:
     """Build a validated run config for one sweep point."""
     raw = deepcopy(_load_base_config(_resolve_repo_path(example_config)))
     raw["analysis"] = {**raw["analysis"], "detectors": list(detectors)}
     raw["sampled_params"] = list(sampled_params)
-    priors = {name: deepcopy(PRIOR_TABLES[name]) for name in sampled_params}
+    selected_priors = {name: deepcopy(priors[name]) for name in sampled_params}
     if prior_overrides:
         for name, override in prior_overrides.items():
             if name not in sampled_params:
                 raise ValueError(
                     f"prior override for {name!r} but it is not in sampled_params"
                 )
-            priors[name] = deepcopy(override)
-    raw["priors"] = priors
+            selected_priors[name] = deepcopy(override)
+    raw["priors"] = selected_priors
     return build_run_config(raw)
 
 
@@ -81,21 +75,23 @@ def generate_configs(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     *,
     example_config: str | Path = DEFAULT_EXAMPLE_CONFIG,
+    sweep_spec: SweepSpec | None = None,
     skip_existing: bool = True,
 ) -> tuple[Path, list[Path], list[Path]]:
     """Write campaign JSON configs; return (output_dir, written, skipped) paths."""
     resolved_output_dir = _resolve_output_dir(output_dir)
     resolved_example_config = _resolve_repo_path(example_config)
+    sweep_spec = sweep_spec or load_sweep_spec()
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
     written: list[Path] = []
     skipped: list[Path] = []
 
-    for campaign, sample_sets in CAMPAIGNS.items():
+    for campaign, sample_sets in sweep_spec.campaigns.items():
         campaign_dir = resolved_output_dir / campaign
         campaign_dir.mkdir(parents=True, exist_ok=True)
 
-        for network_label, detectors in DETECTOR_NETWORKS.items():
+        for network_label, detectors in sweep_spec.networks.items():
             for sample_label, (sampled_params, prior_overrides) in sample_sets.items():
                 filename = f"{network_label}__{sample_label}.json"
                 path = campaign_dir / filename
@@ -108,6 +104,7 @@ def generate_configs(
                     detectors,
                     sampled_params,
                     example_config=resolved_example_config,
+                    priors=sweep_spec.priors,
                     prior_overrides=prior_overrides,
                 )
                 save_config(config, path)
@@ -143,6 +140,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"MCMC configs root directory (default: {DEFAULT_OUTPUT_DIR})",
     )
     parser.add_argument(
+        "--sweep-spec",
+        type=Path,
+        default=DEFAULT_SWEEP_SPEC,
+        help=f"Sweep campaign TOML (default: {DEFAULT_SWEEP_SPEC})",
+    )
+    parser.add_argument(
         "--example",
         type=Path,
         default=DEFAULT_EXAMPLE_CONFIG,
@@ -168,6 +171,7 @@ def main(argv: list[str] | None = None) -> None:
     generate_configs(
         args.output_dir,
         example_config=args.example,
+        sweep_spec=load_sweep_spec(args.sweep_spec),
         skip_existing=not args.force,
     )
 
