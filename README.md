@@ -75,6 +75,8 @@ uv run python scripts/generate_waveform_catalog.py \
 
 These two commands are also Snakemake dependencies: requesting the catalog or
 an MCMC target automatically builds any missing or stale upstream files.
+Their population and waveform settings are kept in
+[`configs/paper.toml`](configs/paper.toml).
 
 ## Running inference
 

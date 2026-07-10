@@ -105,13 +105,7 @@ rule bns_waveform_catalog:
     output:
         CATALOG,
     params:
-        approximant="IMRPhenomXAS_NRTidalv3",
-        sampling_frequency=8192,
-        minimum_frequency=2,
-        maximum_frequency=4096,
-        reference_frequency=20,
-        frequency_resolution=WAVEFORM_CATALOG["frequency_resolution"],
-        chunk_size=2048,
+        **WAVEFORM_CATALOG,
     shell:
         "uv run python scripts/generate_waveform_catalog.py"
         " --population {input.population}"
