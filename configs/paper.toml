@@ -3,6 +3,13 @@ catalog = "out/bns_waveform_catalog_n=16384_df=1Hz.h5"
 figures_dir = "figures"
 chains_dir = "chains"
 
+[population]
+n_samples = 16384
+seed = 42
+
+[waveform_catalog]
+frequency_resolution = 1.0
+
 [analysis]
 observation_time = 1.0
 f_min = 2.0

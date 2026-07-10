@@ -28,14 +28,15 @@ uv sync --extra mcmc --group dev
 Our inference framework uses an importance sampling scheme to calculate the spectral density of the astrophysical SGWB with a fixed population of CBCs. To generate the population, we suggest using the excellent [`gwmock-pop`](https://leuven-gravity-institute.github.io/gwmock-pop/) package.
 
 An example BNS population is defined declaratively in [`examples/bns_population.yaml`](examples/bns_population.yaml)
-and drawn with the `gwmock-pop simulate` CLI. Here's how to
-simulate a BNS population of 1000 sources:
+and drawn with the `gwmock-pop simulate` CLI. The paper workflow uses the
+sample count and seed in [`configs/paper.toml`](configs/paper.toml); its
+equivalent explicit command is:
 
 ```bash
 uv run gwmock-pop simulate \
   --config examples/bns_population.yaml \
-  --n 1000 \
-  --output out/bns_population.h5 \
+  --n 16384 \
+  --output out/bns_n=16384.h5 \
   --seed 42
 ```
 
@@ -57,12 +58,12 @@ The mass priors are defined in the source frame.
 
 We provide a [helper script](./scripts/generate_waveform_catalog.py) which wraps the [`gwmock-signal`](https://github.com/Leuven-Gravity-Institute/gwmock-signal) package for generating the frequency-domain polarizations for a given population of CBCs which enter the spectral density calculation. The output is a [`pluscross`](https://pypi.org/project/pluscross/) HDF5 catalog of complex polarizations, which the inference consumers reduce to polarization power at load time.
 
-Here is an example:
+The corresponding explicit waveform command is:
 
 ```bash
 uv run python scripts/generate_waveform_catalog.py \
---population out/bns_population.csv \
---output out/bns_waveform_catalog.h5 \
+--population out/bns_n=16384.h5 \
+--output out/bns_waveform_catalog_n=16384_df=1Hz.h5 \
 --approximant IMRPhenomXAS_NRTidalv3 \
 --sampling-frequency 8192 \
 --minimum-frequency 2 \
@@ -71,6 +72,9 @@ uv run python scripts/generate_waveform_catalog.py \
 --frequency-resolution 1 \
 --chunk-size 2048
 ```
+
+These two commands are also Snakemake dependencies: requesting the catalog or
+an MCMC target automatically builds any missing or stale upstream files.
 
 ## Running inference
 
@@ -112,11 +116,10 @@ uv sync --extra mcmc --group slurm
 uv run snakemake --profile profiles/slurm mcmc_paper_h0
 ```
 
-Reproducibility is layered on git plus content hashes instead of lock files:
-curated configs are committed, each config pins the catalog's SHA-256
-(`[catalog] sha256`, verified by `run_mcmc.py` before JAX initializes), and
-`snakemake -n` reports any config or catalog drift as pending reruns. Chains
-and sidecars are written `protected()` (read-only); before intentionally
+Reproducibility is layered on committed recipes, fixed population seeds, and
+content hashes instead of lock files: Snakemake rebuilds chains after catalog
+or config drift, while each chain sidecar records the catalog's actual SHA-256.
+Chains and sidecars are written `protected()` (read-only); before intentionally
 redoing a run, `chmod +w` its outputs and rerun with `--forcerun`.
 
 **One-time migration on existing cluster checkouts** (chains produced by the

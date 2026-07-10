@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import tomllib
 
@@ -11,6 +12,9 @@ with PAPER_CONFIG_PATH.open("rb") as handle:
     PAPER_CONFIG = tomllib.load(handle)
 
 CATALOG = PAPER_CONFIG["paths"]["catalog"]
+POPULATION = f"out/bns_n={PAPER_CONFIG['population']['n_samples']}.h5"
+POPULATION_CONFIG = "examples/bns_population.yaml"
+WAVEFORM_CATALOG = PAPER_CONFIG["waveform_catalog"]
 CHAINS_DIR = PAPER_CONFIG["paths"]["chains_dir"]
 AMPLITUDE_TOY_PDF = config["amplitude_toy"]["output_pdf"]
 SNR_BY_DETECTOR_PDF = config["snr_by_detector"]["output_pdf"]
@@ -43,6 +47,16 @@ def campaign_chains(campaign):
     return [f"{CHAINS_DIR}/{campaign}/{run}.nc" for run in sorted(runs)]
 
 
+def run_config_path(wc):
+    return Path(campaign_config_dir(wc.campaign)) / f"{wc.run}.json"
+
+
+def run_catalog_path(wc):
+    """Return the catalog consumed by one run's self-describing config."""
+    raw = json.loads(run_config_path(wc).read_text(encoding="utf-8"))
+    return raw["catalog"]["path"]
+
+
 wildcard_constraints:
     campaign="[^/]+",
     run="[^/]+",
@@ -65,10 +79,56 @@ rule paper_figures:
         POSTERIOR_PDF,
 
 
+rule bns_population:
+    input:
+        population_config=POPULATION_CONFIG,
+        paper_config=str(PAPER_CONFIG_PATH),
+    output:
+        POPULATION,
+    params:
+        n_samples=PAPER_CONFIG["population"]["n_samples"],
+        seed=PAPER_CONFIG["population"]["seed"],
+        outdir=str(Path(POPULATION).parent),
+    shell:
+        "mkdir -p {params.outdir}\n"
+        "uv run gwmock-pop simulate"
+        " --config {input.population_config}"
+        " --n {params.n_samples}"
+        " --output {output}"
+        " --seed {params.seed}"
+
+
+rule bns_waveform_catalog:
+    input:
+        population=POPULATION,
+        paper_config=str(PAPER_CONFIG_PATH),
+    output:
+        CATALOG,
+    params:
+        approximant="IMRPhenomXAS_NRTidalv3",
+        sampling_frequency=8192,
+        minimum_frequency=2,
+        maximum_frequency=4096,
+        reference_frequency=20,
+        frequency_resolution=WAVEFORM_CATALOG["frequency_resolution"],
+        chunk_size=2048,
+    shell:
+        "uv run python scripts/generate_waveform_catalog.py"
+        " --population {input.population}"
+        " --output {output}"
+        " --approximant {params.approximant}"
+        " --sampling-frequency {params.sampling_frequency}"
+        " --minimum-frequency {params.minimum_frequency}"
+        " --maximum-frequency {params.maximum_frequency}"
+        " --reference-frequency {params.reference_frequency}"
+        " --frequency-resolution {params.frequency_resolution}"
+        " --chunk-size {params.chunk_size}"
+
+
 rule run_mcmc:
     input:
-        config=lambda wc: f"{campaign_config_dir(wc.campaign)}/{wc.run}.json",
-        catalog=CATALOG,
+        config=run_config_path,
+        catalog=run_catalog_path,
     output:
         chain=protected(CHAINS_DIR + "/{campaign}/{run}.nc"),
         sidecar=protected(CHAINS_DIR + "/{campaign}/{run}.json"),

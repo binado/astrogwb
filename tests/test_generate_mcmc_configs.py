@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import tomllib
 from pathlib import Path
 
 from astrogwb.sampling.config import build_run_config, load_config
@@ -39,6 +40,26 @@ def test_make_config_uses_custom_example_toml(tmp_path: Path) -> None:
     assert config.catalog.detectors == ("E1", "E2", "E3")
     assert config.sampled_params == ("H0",)
     assert config.priors["H0"]["type"] == "uniform"
+
+
+def test_active_mcmc_configs_use_the_paper_catalog() -> None:
+    with (REPO_ROOT / "configs" / "paper.toml").open("rb") as handle:
+        expected_catalog = tomllib.load(handle)["paths"]["catalog"]
+
+    assert str(make_config(("E1", "E2", "E3"), ("H0",)).catalog.path) == (
+        expected_catalog
+    )
+
+    config_paths = [
+        *REPO_ROOT.glob("configs/mcmc/*/*.json"),
+        *REPO_ROOT.glob("configs/mcmc/curated/paper-h0/*.json"),
+    ]
+
+    assert config_paths
+    assert {
+        str(build_run_config(load_config(path)).catalog.path)
+        for path in config_paths
+    } == {expected_catalog}
 
 
 def test_make_config_applies_prior_overrides() -> None:

@@ -28,13 +28,14 @@
     "chain_method": "auto"
   },
   "catalog": {
-    "path": "out/bns_waveform_catalog.h5",
+    "path": "out/bns_waveform_catalog_n=16384_df=1Hz.h5",
     "detectors": [
       "S1",
       "R1"
     ],
     "f_min": 2.0,
-    "f_max": 4096.0
+    "f_max": 4096.0,
+    "sha256": null
   },
   "cosmology": {
     "z_min": 0.0,
