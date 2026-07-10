@@ -13,6 +13,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb.config import deep_merge, load_mapping
+from astrogwb.hashing import canonical_sha256
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
@@ -35,6 +36,9 @@ class CatalogConfig(BaseModel):
     detectors: tuple[str, ...]
     f_min: float
     f_max: float
+    # Optional content pin: when set, the runner verifies the catalog file's
+    # SHA-256 before loading it. Ad-hoc runs may leave it unset.
+    sha256: str | None = None
 
 
 class CosmoConfig(BaseModel):
@@ -115,6 +119,11 @@ class RunConfig(BaseModel):
     @property
     def label(self) -> str:
         return self.output.label
+
+
+def config_sha256(config: RunConfig) -> str:
+    """Content digest of a resolved run config, independent of key order."""
+    return canonical_sha256(config.model_dump(mode="json"))
 
 
 def load_config(path: Path) -> dict[str, Any]:

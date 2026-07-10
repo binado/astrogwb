@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from astrogwb.config import deep_merge, load_mapping
-from astrogwb.sampling.config import build_run_config, load_config
+from astrogwb.sampling.config import build_run_config, config_sha256, load_config
 from astrogwb.utils import repo_root
 
 REPO_ROOT = repo_root()
@@ -61,3 +61,26 @@ def test_build_run_config_deep_merges_extra_overrides() -> None:
     assert config.sampler.num_samples == 13
     # Unrelated sampler fields keep their file values.
     assert config.sampler.target_accept == raw["sampler"]["target_accept"]
+
+
+def test_catalog_sha256_pin_is_optional_and_round_trips() -> None:
+    raw = load_config(REPO_ROOT / "configs/mcmc.example.toml")
+    unpinned = build_run_config(raw)
+    assert unpinned.catalog.sha256 is None
+
+    digest = "0" * 64
+    pinned = build_run_config(raw, catalog={"sha256": digest})
+    assert pinned.catalog.sha256 == digest
+    assert pinned.model_dump(mode="json")["catalog"]["sha256"] == digest
+
+
+def test_config_sha256_stable_across_key_order_and_sensitive_to_values() -> None:
+    raw = load_config(REPO_ROOT / "configs/mcmc.example.toml")
+    reordered = dict(reversed(list(raw.items())))
+
+    assert config_sha256(build_run_config(raw)) == config_sha256(
+        build_run_config(reordered)
+    )
+    assert config_sha256(build_run_config(raw)) != config_sha256(
+        build_run_config(raw, seed=99)
+    )
