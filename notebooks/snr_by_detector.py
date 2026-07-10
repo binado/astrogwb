@@ -12,6 +12,8 @@
 #     name: python3
 # ---
 
+# ruff: noqa: E402
+
 # %% [markdown]
 # # Matched-filter SNR by detector network
 #
@@ -49,7 +51,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from astrogwb.config.loading import load_mapping
 from astrogwb.gwb import (
     spectral_density,
     frequency_mask as make_frequency_mask,
@@ -82,17 +83,40 @@ jax.config.update("jax_enable_x64", True)
 #   by the local merger rate.
 # - **Cosmology and propagation:** fiducial $H_0$, $\Omega_m$, and modified-propagation
 #   parameters $(\xi_0, \xi_n)$.
-# - **Observation:** $T$ and the analysis band $[f_{\min}, f_{\max}]$ come from
-#   `[analysis]` in [`configs/paper.toml`](../configs/paper.toml) (defaults:
-#   $T = 1\,\mathrm{yr}$, $f \in [2, 4096]\,\mathrm{Hz}$).
-# - **Detector networks:** site labels live in `[detector_networks]`; which networks
-#   to plot is set by the `--networks` argparse default below (edit in Jupyter, or
-#   override headless). Promote happy values by updating those defaults.
+# - **Observation:** $T$ and the analysis band $[f_{\min}, f_{\max}]$ use the
+#   editable defaults below ($T = 1\,\mathrm{yr}$, $f \in [2, 4096]\,\mathrm{Hz}$).
+# - **Detector networks:** editable site-label mappings live below. Repeat
+#   `--network NAME=DET1,DET2,...` to add or override definitions, then use
+#   `--networks NAME...` to select which definitions are evaluated.
+#
+# Direct runs are self-contained. The paper workflow reads `configs/paper.toml`
+# and passes every authoritative scientific value as an explicit CLI argument.
 
 # %%
 DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
-
-_DEFAULT_NETWORKS = [
+DEFAULT_OBSERVATION_TIME = 1.0
+DEFAULT_F_MIN = 2.0
+DEFAULT_F_MAX = 4096.0
+DEFAULT_Z_MIN = 0.0
+DEFAULT_Z_MAX = 20.0
+DEFAULT_N_GRID = 256
+DEFAULT_H0 = 67.66
+DEFAULT_OMEGA_M = 0.3096
+DEFAULT_XI_0 = 1.0
+DEFAULT_XI_N = 1.91
+DEFAULT_GAMMA = 1.42
+DEFAULT_KAPPA = 4.62
+DEFAULT_Z_PEAK = 1.84
+DEFAULT_LOCAL_MERGER_RATE = 161.0
+DEFAULT_DETECTOR_NETWORKS = {
+    "ET-triangular": ("E1", "E2", "E3"),
+    "ET-triangular-CE-Hanford": ("E1", "E2", "E3", "C1"),
+    "ET-2L-aligned": ("S1", "R1"),
+    "ET-2L-aligned-CE-Hanford": ("S1", "R1", "C1"),
+    "ET-2L-misaligned": ("S2", "R2"),
+    "ET-2L-misaligned-CE-Hanford": ("S2", "R2", "C1"),
+}
+DEFAULT_NETWORKS = [
     "ET-triangular",
     "ET-triangular-CE-Hanford",
     "ET-2L-aligned",
@@ -102,9 +126,44 @@ _DEFAULT_NETWORKS = [
 ]
 
 
+def _parse_network_definition(value: str) -> tuple[str, tuple[str, ...]]:
+    if "=" not in value:
+        raise ValueError(
+            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
+        )
+    name, detector_list = value.split("=", 1)
+    name = name.strip()
+    detectors = tuple(detector.strip() for detector in detector_list.split(","))
+    if not name or not detectors or any(not detector for detector in detectors):
+        raise ValueError(
+            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
+        )
+    return name, detectors
+
+
+def _resolve_networks(
+    defaults: dict[str, tuple[str, ...]],
+    definitions: list[str],
+    selected: list[str],
+) -> dict[str, tuple[str, ...]]:
+    networks = dict(defaults)
+    cli_names: set[str] = set()
+    for definition in definitions:
+        name, detectors = _parse_network_definition(definition)
+        if name in cli_names:
+            raise ValueError(f"duplicate --network definition for {name!r}")
+        cli_names.add(name)
+        networks[name] = detectors
+
+    names = selected or list(networks)
+    unknown = [name for name in names if name not in networks]
+    if unknown:
+        raise ValueError(f"unknown selected network(s): {', '.join(unknown)}")
+    return {name: networks[name] for name in names}
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
     parser.add_argument(
         "--catalog",
         type=Path,
@@ -132,12 +191,43 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument(
+        "--observation-time", type=float, default=DEFAULT_OBSERVATION_TIME
+    )
+    parser.add_argument("--f-min", type=float, default=DEFAULT_F_MIN)
+    parser.add_argument("--f-max", type=float, default=DEFAULT_F_MAX)
+    parser.add_argument("--z-min", type=float, default=DEFAULT_Z_MIN)
+    parser.add_argument("--z-max", type=float, default=DEFAULT_Z_MAX)
+    parser.add_argument("--n-grid", type=int, default=DEFAULT_N_GRID)
+    parser.add_argument("--h0", type=float, default=DEFAULT_H0)
+    parser.add_argument("--omega-m", type=float, default=DEFAULT_OMEGA_M)
+    parser.add_argument("--xi-0", type=float, default=DEFAULT_XI_0)
+    parser.add_argument("--xi-n", type=float, default=DEFAULT_XI_N)
+    parser.add_argument("--gamma", type=float, default=DEFAULT_GAMMA)
+    parser.add_argument("--kappa", type=float, default=DEFAULT_KAPPA)
+    parser.add_argument("--z-peak", type=float, default=DEFAULT_Z_PEAK)
+    parser.add_argument(
+        "--local-merger-rate", type=float, default=DEFAULT_LOCAL_MERGER_RATE
+    )
+    parser.add_argument(
+        "--network",
+        action="append",
+        default=[],
+        metavar="NAME=DET1,DET2,...",
+        help="Add or override a detector-network definition (repeatable).",
+    )
+    parser.add_argument(
         "--networks",
         nargs="*",
-        default=_DEFAULT_NETWORKS,
-        help="Network names from [detector_networks] to include (default: all six).",
+        default=DEFAULT_NETWORKS,
+        help="Defined network names to include (default: the six paper networks).",
     )
     args, _ = parser.parse_known_args()
+    try:
+        args.resolved_networks = _resolve_networks(
+            DEFAULT_DETECTOR_NETWORKS, args.network, args.networks
+        )
+    except ValueError as error:
+        parser.error(str(error))
     return args
 
 
@@ -147,8 +237,6 @@ def _resolve_path(path: Path, root: Path) -> Path:
 
 ROOT_DIR = repo_root()
 args = _parse_args()
-config_path = _resolve_path(args.config, ROOT_DIR)
-paper = load_mapping(config_path)
 
 CATALOG_PATH = _resolve_path(args.catalog, ROOT_DIR)
 output_pdf = _resolve_path(args.output_pdf, ROOT_DIR)
@@ -158,25 +246,29 @@ output_sigmas_csv = _resolve_path(args.output_sigmas_csv, ROOT_DIR)
 output_sigmas_tex = _resolve_path(args.output_sigmas_tex, ROOT_DIR)
 figure_dpi = args.figure_dpi
 
-detector_networks = paper["detector_networks"]
-network_names = args.networks or list(detector_networks)
-DETECTOR_NETWORKS = {name: tuple(detector_networks[name]) for name in network_names}
-
-analysis = paper["analysis"]
-observation_time = analysis["observation_time"]  # [yr]
+DETECTOR_NETWORKS = args.resolved_networks
+observation_time = args.observation_time  # [yr]
 
 # Redshift grid for the cosmology integrals (and MD normalization)
-cosmology = analysis["cosmology"]
-z_min = cosmology["z_min"]
-z_max = cosmology["z_max"]
-n_grid = cosmology["n_grid"]  # grid points for cosmology integrals / MD normalization
+z_min = args.z_min
+z_max = args.z_max
+n_grid = args.n_grid  # grid points for cosmology integrals / MD normalization
 
 # Frequency band for the analysis
-f_min = analysis["f_min"]
-f_max = analysis["f_max"]
+f_min = args.f_min
+f_max = args.f_max
 
 # Fiducial parameters
-fiducials = analysis["fiducials"]
+fiducials = {
+    "H0": args.h0,
+    "Omega_m": args.omega_m,
+    "xi_0": args.xi_0,
+    "xi_n": args.xi_n,
+    "gamma": args.gamma,
+    "kappa": args.kappa,
+    "z_peak": args.z_peak,
+    "local_merger_rate": args.local_merger_rate,
+}
 # %% [markdown]
 # ## Proposal waveform ensemble
 #

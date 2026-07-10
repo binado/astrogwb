@@ -14,6 +14,17 @@ PAPER_CONFIG_PATH = Path(config["paper_config"])
 with PAPER_CONFIG_PATH.open("rb") as handle:
     PAPER_CONFIG = tomllib.load(handle)
 
+PAPER_ANALYSIS = PAPER_CONFIG["analysis"]
+PAPER_COSMOLOGY = PAPER_ANALYSIS["cosmology"]
+PAPER_FIDUCIALS = PAPER_ANALYSIS["fiducials"]
+PAPER_NETWORKS = PAPER_CONFIG["detector_networks"]
+PAPER_NETWORK_NAMES = list(PAPER_NETWORKS)
+PAPER_NETWORK_ARGS = [
+    argument
+    for name, detectors in PAPER_NETWORKS.items()
+    for argument in ("--network", f"{name}={','.join(detectors)}")
+]
+
 CATALOG_REGISTRY_PATH = Path(config["catalog"]["registry"])
 CATALOG_RECIPES = load_catalog_recipes(CATALOG_REGISTRY_PATH)
 DEFAULT_CATALOG = config["catalog"]["id"]
@@ -184,10 +195,18 @@ rule amplitude_toy:
         config=str(PAPER_CONFIG_PATH),
     output:
         AMPLITUDE_TOY_PDF,
+    params:
+        chains_dir=PAPER_CONFIG["paths"]["chains_dir"],
+        observation_time=PAPER_ANALYSIS["observation_time"],
+        f_min=PAPER_ANALYSIS["f_min"],
+        f_max=PAPER_ANALYSIS["f_max"],
     shell:
         "uv run python notebooks/amplitude_toy_model.py"
         " --catalog {input.catalog:q}"
-        " --config {input.config:q}"
+        " --chains-dir {params.chains_dir:q}"
+        " --observation-time {params.observation_time}"
+        " --f-min {params.f_min}"
+        " --f-max {params.f_max}"
         " --output-pdf {output:q}"
 
 
@@ -201,10 +220,42 @@ rule snr_by_detector:
         tex=SNR_BY_DETECTOR_TEX,
         sigmas_csv=SNR_BY_DETECTOR_SIGMAS_CSV,
         sigmas_tex=SNR_BY_DETECTOR_SIGMAS_TEX,
+    params:
+        observation_time=PAPER_ANALYSIS["observation_time"],
+        f_min=PAPER_ANALYSIS["f_min"],
+        f_max=PAPER_ANALYSIS["f_max"],
+        z_min=PAPER_COSMOLOGY["z_min"],
+        z_max=PAPER_COSMOLOGY["z_max"],
+        n_grid=PAPER_COSMOLOGY["n_grid"],
+        h0=PAPER_FIDUCIALS["H0"],
+        omega_m=PAPER_FIDUCIALS["Omega_m"],
+        xi_0=PAPER_FIDUCIALS["xi_0"],
+        xi_n=PAPER_FIDUCIALS["xi_n"],
+        gamma=PAPER_FIDUCIALS["gamma"],
+        kappa=PAPER_FIDUCIALS["kappa"],
+        z_peak=PAPER_FIDUCIALS["z_peak"],
+        local_merger_rate=PAPER_FIDUCIALS["local_merger_rate"],
+        network_args=PAPER_NETWORK_ARGS,
+        network_names=PAPER_NETWORK_NAMES,
     shell:
         "uv run python notebooks/snr_by_detector.py"
         " --catalog {input.catalog:q}"
-        " --config {input.config:q}"
+        " --observation-time {params.observation_time}"
+        " --f-min {params.f_min}"
+        " --f-max {params.f_max}"
+        " --z-min {params.z_min}"
+        " --z-max {params.z_max}"
+        " --n-grid {params.n_grid}"
+        " --h0 {params.h0}"
+        " --omega-m {params.omega_m}"
+        " --xi-0 {params.xi_0}"
+        " --xi-n {params.xi_n}"
+        " --gamma {params.gamma}"
+        " --kappa {params.kappa}"
+        " --z-peak {params.z_peak}"
+        " --local-merger-rate {params.local_merger_rate}"
+        " {params.network_args:q}"
+        " --networks {params.network_names:q}"
         " --output-pdf {output.pdf:q}"
         " --output-csv {output.csv:q}"
         " --output-tex {output.tex:q}"
