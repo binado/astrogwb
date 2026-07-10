@@ -143,6 +143,9 @@ def write_manifest(configs: list[str]) -> Path:
 
 
 def submit_array(manifest: Path, config_count: int) -> subprocess.CompletedProcess[str]:
+    # SLURM opens the --output/--error files before the batch script body runs,
+    # so logs/ must exist at submission time; the in-job mkdir is too late.
+    Path("logs").mkdir(exist_ok=True)
     return subprocess.run(
         [
             "sbatch",

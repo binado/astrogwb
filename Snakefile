@@ -30,8 +30,8 @@ POSTERIOR_CHAINS = [
     _POSTERIOR_RUNS[entry["run"]]["outputs"]["chain"]
     for entry in POSTERIOR_FIGURE["posteriors"]
 ]
-CAMPAIGN_INVENTORY = "configs/mcmc/campaigns/paper-h0-legacy.toml"
-CAMPAIGN_FROZEN_DIR = "configs/mcmc/frozen/paper-h0-legacy"
+CAMPAIGN_INVENTORY = config["mcmc_campaign"]["inventory"]
+CAMPAIGN_FROZEN_DIR = config["mcmc_campaign"]["frozen_dir"]
 CAMPAIGN_MANIFEST = f"{CAMPAIGN_FROZEN_DIR}/array-manifest.txt"
 
 

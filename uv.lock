@@ -221,6 +221,7 @@ dev = [
     { name = "corner" },
     { name = "h5netcdf" },
     { name = "ipykernel" },
+    { name = "jinja2" },
     { name = "jupyter" },
     { name = "matplotlib" },
     { name = "pytest" },
@@ -232,6 +233,7 @@ plotting = [
     { name = "arviz" },
     { name = "corner" },
     { name = "h5netcdf" },
+    { name = "jinja2" },
 ]
 
 [package.metadata]
@@ -255,6 +257,7 @@ dev = [
     { name = "corner", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
     { name = "h5netcdf", specifier = ">=1.8.1" },
     { name = "ipykernel", specifier = ">=7.3.0" },
+    { name = "jinja2", specifier = ">=3.1" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.11.0" },
     { name = "pytest", specifier = ">=9.0.2" },
@@ -266,6 +269,7 @@ plotting = [
     { name = "arviz", specifier = ">=1.2.0" },
     { name = "corner", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
     { name = "h5netcdf", specifier = ">=1.8.1" },
+    { name = "jinja2", specifier = ">=3.1" },
 ]
 
 [[package]]
