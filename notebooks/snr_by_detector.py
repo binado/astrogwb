@@ -112,6 +112,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-tex", type=Path, default=Path("figures/snr_by_detector.tex")
     )
+    parser.add_argument(
+        "--output-sigmas-csv",
+        type=Path,
+        default=Path("figures/snr_by_detector_sigmas.csv"),
+    )
+    parser.add_argument(
+        "--output-sigmas-tex",
+        type=Path,
+        default=Path("figures/snr_by_detector_sigmas.tex"),
+    )
     parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument(
         "--networks",
@@ -136,6 +146,8 @@ CATALOG_PATH = _resolve_path(Path(paper["paths"]["catalog"]), ROOT_DIR)
 output_pdf = _resolve_path(args.output_pdf, ROOT_DIR)
 output_csv = _resolve_path(args.output_csv, ROOT_DIR)
 output_tex = _resolve_path(args.output_tex, ROOT_DIR)
+output_sigmas_csv = _resolve_path(args.output_sigmas_csv, ROOT_DIR)
+output_sigmas_tex = _resolve_path(args.output_sigmas_tex, ROOT_DIR)
 figure_dpi = args.figure_dpi
 
 detector_networks = paper["detector_networks"]
@@ -335,11 +347,18 @@ for label, dets in DETECTOR_NETWORKS.items():
 # quantify how much one network improves over another at this fixed model point.
 
 # %%
-df_snr = pd.DataFrame(rows).set_index("network").sort_values("snr", ascending=False)
+_snr_cols = ["network", "detectors", "n_detectors", "snr"]
 _precision_cols = [
     col for name in AMPLITUDE_VALUES for col in (f"sigma_{name}", f"rel_sigma_{name}")
 ]
-df_snr.style.format(
+df_all = pd.DataFrame(rows).sort_values("snr", ascending=False).reset_index(drop=True)
+df_snr = df_all[_snr_cols]
+df_sigmas = df_all[_snr_cols + _precision_cols]
+
+df_snr.style.format({"snr": "{:.2f}", "n_detectors": "{:.0f}"})
+
+# %%
+df_sigmas.style.format(
     {
         "snr": "{:.2f}",
         "n_detectors": "{:.0f}",
@@ -349,20 +368,33 @@ df_snr.style.format(
 
 # %%
 output_csv.parent.mkdir(parents=True, exist_ok=True)
+output_sigmas_csv.parent.mkdir(parents=True, exist_ok=True)
 output_pdf.parent.mkdir(parents=True, exist_ok=True)
-df_snr.to_csv(output_csv)
 
-latex = df_snr.to_latex(
+df_snr.to_csv(output_csv, index=False)
+df_sigmas.to_csv(output_sigmas_csv, index=False)
+
+latex_snr = df_snr.to_latex(
+    index=False,
     float_format="%.3g",
-    caption="Matched-filter SNR and amplitude-parameter precision by network.",
+    caption="Matched-filter SNR by detector network.",
     label="tab:snr_by_detector",
 )
-output_tex.write_text(latex)
-print(latex)
+output_tex.write_text(latex_snr)
+
+latex_sigmas = df_sigmas.to_latex(
+    index=False,
+    float_format="%.3g",
+    caption="Matched-filter SNR and amplitude-parameter precision by network.",
+    label="tab:snr_by_detector_sigmas",
+)
+output_sigmas_tex.write_text(latex_sigmas)
+print(latex_snr)
+print(latex_sigmas)
 
 df_plot = df_snr.sort_values("snr", ascending=True)
 fig, ax = plt.subplots(figsize=(6.5, 3.8))
-ax.barh(df_plot.index, df_plot["snr"], color="0.25")
+ax.barh(df_plot["network"], df_plot["snr"], color="0.25")
 ax.set_xlabel("Matched-filter SNR")
 ax.set_ylabel("")
 ax.grid(axis="x", alpha=0.25)
@@ -370,4 +402,6 @@ fig.tight_layout()
 fig.savefig(output_pdf, dpi=figure_dpi, bbox_inches="tight")
 print("saved table:", output_csv)
 print("saved latex:", output_tex)
+print("saved sigmas table:", output_sigmas_csv)
+print("saved sigmas latex:", output_sigmas_tex)
 print("saved figure:", output_pdf)

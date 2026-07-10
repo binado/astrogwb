@@ -48,36 +48,42 @@ frameon = false
 borderaxespad = 0
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-triangular"
 label = 'ET-$\Delta$'
 run = "et-triangular"
 color = "tab:blue"
 linestyle = "-"
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-triangular-CE-Hanford"
 label = 'ET-$\Delta +$ CE'
 run = "et-triangular-ce-hanford"
 color = "tab:blue"
 linestyle = "--"
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-2L-aligned"
 label = "ET-2L"
 run = "et-2l-aligned"
 color = "tab:orange"
 linestyle = "-"
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-2L-aligned-CE-Hanford"
 label = 'ET-2L $+$ CE'
 run = "et-2l-aligned-ce-hanford"
 color = "tab:orange"
 linestyle = "--"
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-2L-misaligned"
 label = 'ET-2L-$\alpha$'
 run = "et-2l-misaligned"
 color = "tab:green"
 linestyle = "-"
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-2L-misaligned-CE-Hanford"
 label = 'ET-2L-$\alpha +$ CE'
 run = "et-2l-misaligned-ce-hanford"
 color = "tab:green"
