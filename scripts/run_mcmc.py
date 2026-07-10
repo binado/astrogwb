@@ -20,8 +20,8 @@ Usage::
 
 Requires the ``mcmc`` optional extra (pydantic plus ArviZ NetCDF output support)
 for ``RunConfig`` validation and chain serialization.
-The script is meant to back a SLURM job array with one config per task; see
-``python scripts/submit_mcmc.py -i configs/mcmc/cosmology``.
+Batch runs are dispatched by the Snakemake ``run_mcmc`` rule (one config per
+job); see the Snakefile and ``profiles/slurm/config.yaml``.
 """
 
 from __future__ import annotations
@@ -34,10 +34,12 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from astrogwb.hashing import file_sha256
 from astrogwb.sampling.config import (
     RunConfig,
     RuntimeConfig,
     build_run_config,
+    config_sha256,
     load_config,
 )
 
@@ -309,6 +311,25 @@ def run(config: RunConfig, jax, chain_method: str):
     return mcmc
 
 
+def verify_catalog(config: RunConfig) -> str:
+    """Hash the catalog, check it against an optional config pin, return the digest.
+
+    Runs before :func:`configure_runtime` so a missing or stale catalog aborts
+    the job without initializing JAX or claiming a GPU.
+    """
+    path = config.catalog.path
+    if not path.is_file():
+        raise FileNotFoundError(f"catalog not found: {path}")
+    digest = file_sha256(path)
+    expected = config.catalog.sha256
+    if expected is not None and digest != expected:
+        raise ValueError(
+            f"catalog {path} SHA-256 mismatch: config pins {expected}, got {digest}. "
+            "Regenerate the catalog or update the pin intentionally."
+        )
+    return digest
+
+
 def _git_revision() -> str | None:
     try:
         return (
@@ -358,27 +379,14 @@ def ensure_output_paths_available(
     return nc_path, json_path
 
 
-def save(
-    mcmc,
-    config: RunConfig,
-    *,
-    timestamp: str | None = None,
-    force: bool = False,
-) -> Path:
-    """Write the ArviZ NetCDF + JSON run record, and log the IS health check."""
-    import arviz as az
-
-    config.outdir.mkdir(parents=True, exist_ok=True)
-    timestamp = timestamp or datetime.now().strftime("%Y%m%d-%H%M%S")
-    nc_path, json_path = ensure_output_paths_available(
-        config, timestamp=timestamp, force=force
-    )
-
-    idata = az.from_numpyro(mcmc)
-    idata.to_netcdf(nc_path)
-
-    run_record = {
+def build_run_record(
+    config: RunConfig, *, timestamp: str, catalog_sha256: str | None
+) -> dict:
+    """Assemble the JSON sidecar recording the run's inputs and provenance."""
+    return {
         "catalog_path": str(config.catalog.path),
+        "catalog_sha256": catalog_sha256,
+        "config_sha256": config_sha256(config),
         "detectors": list(config.catalog.detectors),
         "seed": config.seed,
         "observation_time": config.observation_time,
@@ -393,6 +401,31 @@ def save(
         "git_revision": _git_revision(),
         "timestamp": timestamp,
     }
+
+
+def save(
+    mcmc,
+    config: RunConfig,
+    *,
+    timestamp: str | None = None,
+    force: bool = False,
+    catalog_sha256: str | None = None,
+) -> Path:
+    """Write the ArviZ NetCDF + JSON run record, and log the IS health check."""
+    import arviz as az
+
+    config.outdir.mkdir(parents=True, exist_ok=True)
+    timestamp = timestamp or datetime.now().strftime("%Y%m%d-%H%M%S")
+    nc_path, json_path = ensure_output_paths_available(
+        config, timestamp=timestamp, force=force
+    )
+
+    idata = az.from_numpyro(mcmc)
+    idata.to_netcdf(nc_path)
+
+    run_record = build_run_record(
+        config, timestamp=timestamp, catalog_sha256=catalog_sha256
+    )
     json_path.write_text(json.dumps(run_record, indent=2, default=str))
 
     # Importance-sampling health: relative ESS near 1 means the proposal catalog
@@ -433,9 +466,19 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     ensure_output_paths_available(config, timestamp=timestamp, force=args.force)
 
+    # Hash (and, when pinned, verify) the catalog before JAX claims a device.
+    catalog_sha256 = verify_catalog(config)
+    logger.info("Catalog SHA-256: %s", catalog_sha256)
+
     jax, chain_method = configure_runtime(config.runtime, config.sampler.num_chains)
     mcmc = run(config, jax, chain_method)
-    save(mcmc, config, timestamp=timestamp, force=args.force)
+    save(
+        mcmc,
+        config,
+        timestamp=timestamp,
+        force=args.force,
+        catalog_sha256=catalog_sha256,
+    )
 
 
 if __name__ == "__main__":
