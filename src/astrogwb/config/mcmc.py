@@ -12,8 +12,8 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from astrogwb.config import deep_merge, load_mapping
-from astrogwb.hashing import canonical_sha256
+from astrogwb.config.hashing import canonical_sha256
+from astrogwb.config.loading import deep_merge, load_mapping
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 

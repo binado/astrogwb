@@ -30,7 +30,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 
-from astrogwb.sampling.config import RunConfig, build_run_config, load_config
+from astrogwb.config.mcmc import RunConfig, build_run_config, load_config
 from run_mcmc import configure_runtime
 
 logger = logging.getLogger("profile_model")

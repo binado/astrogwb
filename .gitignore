@@ -348,4 +348,7 @@ TSWLatexianTemp*
 #*Notes.bib
 __pycache__
 config
+!src/astrogwb/config/
+!src/astrogwb/config/**
+src/astrogwb/config/__pycache__/
 .DS_Store

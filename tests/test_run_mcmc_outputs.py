@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from astrogwb.hashing import file_sha256
-from astrogwb.sampling.config import build_run_config, config_sha256
+from astrogwb.config.hashing import file_sha256
+from astrogwb.config.mcmc import build_run_config, config_sha256
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _SPEC = importlib.util.spec_from_file_location(

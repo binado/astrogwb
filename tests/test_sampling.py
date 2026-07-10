@@ -9,7 +9,7 @@ from numpyro import handlers
 from pydantic import ValidationError
 
 from astrogwb.sampling import numpyro_model
-from astrogwb.sampling.config import build_run_config, load_config
+from astrogwb.config.mcmc import build_run_config, load_config
 from astrogwb.sampling.priors import build_prior
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

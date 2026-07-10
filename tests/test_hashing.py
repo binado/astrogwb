@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from astrogwb.hashing import canonical_json, canonical_sha256, file_sha256
+from astrogwb.config.hashing import canonical_json, canonical_sha256, file_sha256
 
 
 def test_canonical_sha256_is_key_order_invariant() -> None:

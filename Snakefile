@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 import tomllib
 
-from astrogwb.catalogs import catalog_path, load_catalog_recipes, population_path
+from astrogwb.config.catalogs import catalog_path, load_catalog_recipes, population_path
 from astrogwb.sampling.sweeps import CAMPAIGNS, campaign_runs, sweep_filenames
 
 

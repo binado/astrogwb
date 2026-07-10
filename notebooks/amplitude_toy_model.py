@@ -61,7 +61,7 @@ import numpy as np
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
 
-from astrogwb.config import load_mapping
+from astrogwb.config.loading import load_mapping
 from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.gwb import (
     spectral_density,
@@ -70,7 +70,7 @@ from astrogwb.gwb import (
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from astrogwb.catalogs import catalog_path, load_catalog_recipes
+from astrogwb.config.catalogs import catalog_path, load_catalog_recipes
 from pluscross import load_catalog
 from astrogwb.utils import repo_root, years_to_seconds
 

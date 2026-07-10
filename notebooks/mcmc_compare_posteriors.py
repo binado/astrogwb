@@ -27,7 +27,7 @@ import numpy.typing as npt
 import pandas as pd
 import xarray as xr
 
-from astrogwb.config import load_mapping
+from astrogwb.config.loading import load_mapping
 from astrogwb.utils import repo_root
 
 # %config InlineBackend.figure_format = "retina"

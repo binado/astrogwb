@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from astrogwb.catalogs import catalog_path, load_catalog_recipes, population_path
+from astrogwb.config.catalogs import catalog_path, load_catalog_recipes, population_path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

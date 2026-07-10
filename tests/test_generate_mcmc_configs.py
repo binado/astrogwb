@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-from astrogwb.sampling.config import build_run_config, load_config
+from astrogwb.config.mcmc import build_run_config, load_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

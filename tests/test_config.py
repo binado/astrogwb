@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from astrogwb.config import deep_merge, load_mapping
-from astrogwb.sampling.config import build_run_config, config_sha256, load_config
+from astrogwb.config.loading import deep_merge, load_mapping
+from astrogwb.config.mcmc import build_run_config, config_sha256, load_config
 from astrogwb.utils import repo_root
 
 REPO_ROOT = repo_root()

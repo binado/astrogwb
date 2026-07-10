@@ -7,7 +7,7 @@ only ``logging`` progress (no plots). It saves an ArviZ ``InferenceData`` NetCDF
 a JSON run-config record, exactly like the notebook.
 
 Design constraint (do not "tidy" away): config parsing lives in
-``astrogwb.sampling.config`` (stdlib + pydantic only). ``OMP_NUM_THREADS`` /
+``astrogwb.config.mcmc`` (stdlib + pydantic only). ``OMP_NUM_THREADS`` /
 ``XLA_FLAGS`` and ``numpyro.set_host_device_count(...)`` must be set *before* JAX
 initializes its backend, so the heavy imports (jax, numpyro, astrogwb, gwmock_pop)
 happen inside functions that run only after :func:`configure_runtime`. See
@@ -34,8 +34,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from astrogwb.hashing import file_sha256
-from astrogwb.sampling.config import (
+from astrogwb.config.hashing import file_sha256
+from astrogwb.config.mcmc import (
     RunConfig,
     RuntimeConfig,
     build_run_config,

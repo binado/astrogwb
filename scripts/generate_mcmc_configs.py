@@ -21,7 +21,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from astrogwb.sampling.config import RunConfig, build_run_config, save_config
+from astrogwb.config.mcmc import RunConfig, build_run_config, save_config
 from astrogwb.sampling.sweeps import (
     CAMPAIGNS,
     DETECTOR_NETWORKS,

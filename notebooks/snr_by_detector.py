@@ -49,7 +49,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from astrogwb.config import load_mapping
+from astrogwb.config.loading import load_mapping
 from astrogwb.gwb import (
     spectral_density,
     frequency_mask as make_frequency_mask,
@@ -58,7 +58,7 @@ from astrogwb.gwb import (
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from astrogwb.catalogs import catalog_path, load_catalog_recipes
+from astrogwb.config.catalogs import catalog_path, load_catalog_recipes
 from pluscross import load_catalog
 from astrogwb.utils import repo_root, years_to_seconds
 
