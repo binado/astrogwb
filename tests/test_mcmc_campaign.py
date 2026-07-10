@@ -81,7 +81,9 @@ def test_inventory_rejects_duplicate_ids_and_paths(tmp_path: Path) -> None:
         build_lock(inventory, root=tmp_path)
 
     inventory.write_text(
-        inventory.read_text(encoding="utf-8").replace('id = "network-a"', 'id = "network-b"', 1),
+        inventory.read_text(encoding="utf-8").replace(
+            'id = "network-a"', 'id = "network-b"', 1
+        ),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="duplicate curated config paths"):

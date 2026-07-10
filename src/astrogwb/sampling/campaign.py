@@ -135,7 +135,11 @@ def default_lock_path(inventory_path: str | Path) -> Path:
 
 
 def _source_path(inventory_path: Path, config_path: Path) -> Path:
-    return config_path if config_path.is_absolute() else (inventory_path.parent / config_path)
+    return (
+        config_path
+        if config_path.is_absolute()
+        else (inventory_path.parent / config_path)
+    )
 
 
 def _display_path(path: Path, root: Path) -> str:
@@ -161,7 +165,9 @@ def _locked_config(
     )
 
 
-def build_lock(inventory_path: str | Path, *, root: str | Path | None = None) -> CampaignLock:
+def build_lock(
+    inventory_path: str | Path, *, root: str | Path | None = None
+) -> CampaignLock:
     """Validate an inventory and build the lock that would be committed for it."""
     inventory_file = Path(inventory_path).resolve()
     repository = Path(root).resolve() if root is not None else Path.cwd().resolve()
@@ -254,8 +260,12 @@ def materialize_campaign(
     """Create a first lock or rematerialize generated configs from an existing one."""
     inventory_file = Path(inventory_path).resolve()
     repository = Path(root).resolve() if root is not None else Path.cwd().resolve()
-    requested_lock = Path(lock_path) if lock_path is not None else default_lock_path(inventory_file)
-    lock_file = requested_lock if requested_lock.is_absolute() else repository / requested_lock
+    requested_lock = (
+        Path(lock_path) if lock_path is not None else default_lock_path(inventory_file)
+    )
+    lock_file = (
+        requested_lock if requested_lock.is_absolute() else repository / requested_lock
+    )
 
     if lock_file.exists():
         lock = load_lock(lock_file)

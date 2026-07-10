@@ -32,7 +32,11 @@ def test_deep_merge_nested_dicts_and_list_replacement() -> None:
         "networks": ["C"],
     }
     # Inputs are not mutated.
-    assert base["figures"]["compare"]["var_name"] == "H0"
+    figures = base["figures"]
+    assert isinstance(figures, dict)
+    compare = figures["compare"]
+    assert isinstance(compare, dict)
+    assert compare["var_name"] == "H0"
     assert base["networks"] == ["A", "B"]
 
 

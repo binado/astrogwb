@@ -11,8 +11,9 @@ _GEN_SPEC = importlib.util.spec_from_file_location(
     "generate_mcmc_configs",
     REPO_ROOT / "scripts" / "generate_mcmc_configs.py",
 )
+if _GEN_SPEC is None or _GEN_SPEC.loader is None:
+    raise RuntimeError("failed to load generate_mcmc_configs module spec")
 _GEN = importlib.util.module_from_spec(_GEN_SPEC)
-assert _GEN_SPEC.loader is not None
 _GEN_SPEC.loader.exec_module(_GEN)
 
 DEFAULT_EXAMPLE_CONFIG = _GEN.DEFAULT_EXAMPLE_CONFIG
