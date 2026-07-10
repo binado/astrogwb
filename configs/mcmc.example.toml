@@ -12,7 +12,7 @@ sampled_params = ["H0"]
 
 [runtime]
 platform = "auto"            # auto | cpu | gpu  (auto lets JAX pick GPU if present)
-host_device_count = 1        # CPU devices for parallel chains; should be >= num_chains
+# Omit host_device_count to create one CPU device per configured chain automatically.
 cpu_threads = 0              # 0 = leave JAX/XLA default; else OMP/XLA intra-op threads
 chain_method = "auto"        # auto | parallel | sequential | vectorized
                              # auto -> vectorized on a single GPU, else parallel

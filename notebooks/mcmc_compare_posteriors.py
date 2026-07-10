@@ -17,17 +17,18 @@
 
 # %%
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
-import tomllib
 from typing import Any
 
 import arviz_stats as azs
 import matplotlib.pyplot as plt
 import numpy.typing as npt
 import pandas as pd
-from pydantic import BaseModel, ConfigDict
 import xarray as xr
 
+from astrogwb.config import load_mapping
+from astrogwb.sampling.campaign import load_lock
 from astrogwb.utils import repo_root
 
 # %config InlineBackend.figure_format = "retina"
@@ -66,23 +67,17 @@ plt.rcParams.update(**pub_rc)
 # %% [markdown]
 # ## Notebook configuration
 #
-# Labels, chain paths, colors, linestyles, and axis/legend kwargs come from
+# Nested plot data (posterior list, `ax_kwargs`, `legend_kwargs`) comes from
 # `[figures.mcmc_compare_posteriors]` in
-# [`configs/paper.toml`](../configs/paper.toml) (override with `--config`).
+# [`configs/paper.toml`](../configs/paper.toml). Scalars (`var_name`, dpi,
+# output path, group) are argparse defaults below — edit in Jupyter, override
+# with flags headless. Promote happy values by updating those defaults / toml.
+
 
 # %%
-_LOOSE_CONFIG = ConfigDict(extra="ignore", frozen=True)
-
-
-class PathsConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    chains_dir: Path = Path("chains")
-
-
-class PosteriorConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
+@dataclass(frozen=True)
+class PosteriorConfig:
+    network: str
     label: str
     path: Path
     color: str
@@ -113,34 +108,32 @@ class PosteriorConfig(BaseModel):
         return float(hdi.sel(ci_bound="lower")), float(hdi.sel(ci_bound="upper"))
 
 
-class PosteriorFigureConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    var_name: str = "H0"
-    output_pdf: Path = Path("figures/mcmc_compare_posteriors_H0.pdf")
-    figure_dpi: int = 300
-    group: str = "posterior"
-    posteriors: tuple[PosteriorConfig, ...]
-    ax_kwargs: dict[str, Any] = {}
-    legend_kwargs: dict[str, Any] = {}
-
-
-class FigureConfigs(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    mcmc_compare_posteriors: PosteriorFigureConfig
-
-
-class PaperConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    paths: PathsConfig = PathsConfig()
-    figures: FigureConfigs
-
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
+    parser.add_argument(
+        "--output-pdf",
+        type=Path,
+        default=Path("figures/mcmc_compare_posteriors_H0.pdf"),
+    )
+    parser.add_argument(
+        "--snr-csv",
+        type=Path,
+        default=Path("figures/snr_by_detector.csv"),
+    )
+    parser.add_argument(
+        "--output-csv",
+        type=Path,
+        default=Path("figures/mcmc_compare_posteriors_H0.csv"),
+    )
+    parser.add_argument(
+        "--output-tex",
+        type=Path,
+        default=Path("figures/mcmc_compare_posteriors_H0.tex"),
+    )
+    parser.add_argument("--figure-dpi", type=int, default=300)
+    parser.add_argument("--var-name", default="H0")
+    parser.add_argument("--group", default="posterior")
     args, _ = parser.parse_known_args()
     return args
 
@@ -149,20 +142,34 @@ def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
 
 
-def _load_config(path: Path) -> PaperConfig:
-    with path.open("rb") as handle:
-        return PaperConfig.model_validate(tomllib.load(handle))
-
-
 BASE_DIR = repo_root()
 args = _parse_args()
 config_path = _resolve_path(args.config, BASE_DIR)
-paper_config = _load_config(config_path)
-figure_config = paper_config.figures.mcmc_compare_posteriors
-configs = list(figure_config.posteriors)
-VAR_NAME = figure_config.var_name
-OUT_FILE = _resolve_path(figure_config.output_pdf, BASE_DIR)
-FIGURE_DPI = figure_config.figure_dpi
+paper = load_mapping(config_path)
+figure = paper["figures"]["mcmc_compare_posteriors"]
+lock_path = _resolve_path(Path(figure["campaign_lock"]), BASE_DIR)
+campaign = load_lock(lock_path)
+
+configs = [
+    PosteriorConfig(
+        network=entry["network"],
+        label=entry["label"],
+        path=Path(campaign.run(entry["run"]).outputs["chain"]),
+        color=entry["color"],
+        linestyle=entry["linestyle"],
+    )
+    for entry in figure["posteriors"]
+]
+VAR_NAME = args.var_name
+OUT_FILE = _resolve_path(args.output_pdf, BASE_DIR)
+SNR_CSV = _resolve_path(args.snr_csv, BASE_DIR)
+OUT_CSV = _resolve_path(args.output_csv, BASE_DIR)
+OUT_TEX = _resolve_path(args.output_tex, BASE_DIR)
+FIGURE_DPI = args.figure_dpi
+GROUP = args.group
+FIDUCIALS = paper["analysis"]["fiducials"]
+ax_kwargs = figure.get("ax_kwargs", {})
+legend_kwargs = figure.get("legend_kwargs", {})
 
 
 # %% [markdown]
@@ -207,6 +214,7 @@ def summarize_hdi(
         lower, upper = config.get_hdi(base_dir, group, var_name, prob=prob)
         rows.append(
             {
+                "network": config.network,
                 "label": config.label,
                 "lower": lower,
                 "upper": upper,
@@ -214,20 +222,62 @@ def summarize_hdi(
                 "sigma": (upper - lower) / 2,
             }
         )
-    return pd.DataFrame(rows).sort_values("sigma", ascending=True).reset_index(drop=True)
+    return (
+        pd.DataFrame(rows).sort_values("sigma", ascending=True).reset_index(drop=True)
+    )
+
+
+def compare_snr_and_hdi(
+    configs: list[PosteriorConfig],
+    snr_table: pd.DataFrame,
+    var_name: str,
+    fiducial: float,
+    base_dir: Path,
+    *,
+    group: str = "posterior",
+    prob: float = 0.6827,
+) -> pd.DataFrame:
+    """Join detector SNRs with HDI widths and fractional relative sigmas."""
+    missing = [c.network for c in configs if c.network not in snr_table.index]
+    if missing:
+        raise KeyError(
+            "SNR table missing network keys required by posterior configs: "
+            + ", ".join(missing)
+        )
+
+    rows = []
+    for config in configs:
+        snr = float(snr_table.loc[config.network, "snr"])
+        lower, upper = config.get_hdi(base_dir, group, var_name, prob=prob)
+        sigma_hdi = (upper - lower) / 2
+        rows.append(
+            {
+                "network": config.network,
+                "label": config.label,
+                "snr": snr,
+                "lower": lower,
+                "upper": upper,
+                "sigma_hdi": sigma_hdi,
+                "rel_sigma_snr": 1.0 / snr,
+                "rel_sigma_hdi": sigma_hdi / fiducial,
+            }
+        )
+    return (
+        pd.DataFrame(rows)
+        .sort_values("rel_sigma_hdi", ascending=True)
+        .reset_index(drop=True)
+    )
 
 
 # %% [markdown]
 # Plotting:
 
 # %%
-ax_kwargs = figure_config.ax_kwargs
-legend_kwargs = figure_config.legend_kwargs
 fig = plot_posteriors(
     configs,
     VAR_NAME,
     BASE_DIR,
-    group=figure_config.group,
+    group=GROUP,
     ax_kwargs=ax_kwargs,
     legend_kwargs=legend_kwargs,
 )
@@ -245,8 +295,59 @@ hdi_summary = summarize_hdi(
     configs,
     VAR_NAME,
     BASE_DIR,
-    group=figure_config.group,
+    group=GROUP,
 )
 hdi_summary.style.format(precision=2)
+
+# %% [markdown]
+# SNR vs HDI fractional precision:
+#
+# Reads the SNR-only table from `notebooks/snr_by_detector.py` (`network` primary
+# key) and appends `rel_sigma_snr = 1/\mathrm{SNR}` together with
+# `rel_sigma_hdi = \sigma_{\mathrm{HDI}} / \theta_{\mathrm{fid}}`.
+
+# %%
+if VAR_NAME not in FIDUCIALS:
+    raise KeyError(
+        f"fiducial value for var_name={VAR_NAME!r} not found in "
+        f"[analysis.fiducials]; available: {sorted(FIDUCIALS)}"
+    )
+fiducial_value = float(FIDUCIALS[VAR_NAME])
+snr_table = pd.read_csv(SNR_CSV, index_col="network")
+comparison = compare_snr_and_hdi(
+    configs,
+    snr_table,
+    VAR_NAME,
+    fiducial_value,
+    BASE_DIR,
+    group=GROUP,
+)
+comparison.style.format(
+    {
+        "snr": "{:.2f}",
+        "lower": "{:.2f}",
+        "upper": "{:.2f}",
+        "sigma_hdi": "{:.3g}",
+        "rel_sigma_snr": "{:.3g}",
+        "rel_sigma_hdi": "{:.3g}",
+    }
+)
+
+# %%
+OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
+comparison.to_csv(OUT_CSV, index=False)
+latex = comparison.to_latex(
+    index=False,
+    float_format="%.3g",
+    caption=(
+        f"Matched-filter SNR and fractional $1\\sigma$ precision for ${VAR_NAME}$ "
+        r"from SNR scaling and posterior HDI."
+    ),
+    label=f"tab:mcmc_compare_posteriors_{VAR_NAME}",
+)
+OUT_TEX.write_text(latex)
+print(latex)
+print("saved table:", OUT_CSV)
+print("saved latex:", OUT_TEX)
 
 # %%

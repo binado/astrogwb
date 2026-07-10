@@ -43,14 +43,13 @@
 # %%
 import argparse
 from pathlib import Path
-import tomllib
 
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import pandas as pd
-from pydantic import BaseModel, ConfigDict
 
+from astrogwb.config import load_mapping
 from astrogwb.gwb import (
     spectral_density,
     frequency_mask as make_frequency_mask,
@@ -86,68 +85,50 @@ jax.config.update("jax_enable_x64", True)
 # - **Observation:** $T$ and the analysis band $[f_{\min}, f_{\max}]$ come from
 #   `[analysis]` in [`configs/paper.toml`](../configs/paper.toml) (defaults:
 #   $T = 1\,\mathrm{yr}$, $f \in [2, 4096]\,\mathrm{Hz}$).
-# - **Detector networks:** six configurations — an ET triangular three-site network,
-#   ET two-L-shaped variants with aligned and misaligned arm geometry, each with and
-#   without a Cosmic Explorer Hanford site. Site labels live in
-#   `[detector_networks]`; which networks to plot is set by
-#   `[figures.snr_by_detector].networks`.
+# - **Detector networks:** site labels live in `[detector_networks]`; which networks
+#   to plot is set by the `--networks` argparse default below (edit in Jupyter, or
+#   override headless). Promote happy values by updating those defaults.
 
 # %%
-_LOOSE_CONFIG = ConfigDict(extra="ignore", frozen=True)
-
-
-class PathsConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    catalog: Path
-
-
-class CosmologyConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    z_min: float = 0.0
-    z_max: float = 20.0
-    n_grid: int = 256
-
-
-class AnalysisConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    observation_time: float = 1.0
-    f_min: float = 2.0
-    f_max: float = 4096.0
-    fiducials: dict[str, float]
-    cosmology: CosmologyConfig = CosmologyConfig()
-
-
-class SNRByDetectorConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    networks: tuple[str, ...] = ()
-    output_csv: Path = Path("figures/snr_by_detector.csv")
-    output_tex: Path = Path("figures/snr_by_detector.tex")
-    output_pdf: Path = Path("figures/snr_by_detector.pdf")
-    figure_dpi: int = 300
-
-
-class FigureConfigs(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    snr_by_detector: SNRByDetectorConfig
-
-
-class PaperConfig(BaseModel):
-    model_config = _LOOSE_CONFIG
-
-    paths: PathsConfig
-    analysis: AnalysisConfig
-    detector_networks: dict[str, tuple[str, ...]]
-    figures: FigureConfigs
+_DEFAULT_NETWORKS = [
+    "ET-triangular",
+    "ET-triangular-CE-Hanford",
+    "ET-2L-aligned",
+    "ET-2L-aligned-CE-Hanford",
+    "ET-2L-misaligned",
+    "ET-2L-misaligned-CE-Hanford",
+]
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
+    parser.add_argument(
+        "--output-pdf", type=Path, default=Path("figures/snr_by_detector.pdf")
+    )
+    parser.add_argument(
+        "--output-csv", type=Path, default=Path("figures/snr_by_detector.csv")
+    )
+    parser.add_argument(
+        "--output-tex", type=Path, default=Path("figures/snr_by_detector.tex")
+    )
+    parser.add_argument(
+        "--output-sigmas-csv",
+        type=Path,
+        default=Path("figures/snr_by_detector_sigmas.csv"),
+    )
+    parser.add_argument(
+        "--output-sigmas-tex",
+        type=Path,
+        default=Path("figures/snr_by_detector_sigmas.tex"),
+    )
+    parser.add_argument("--figure-dpi", type=int, default=300)
+    parser.add_argument(
+        "--networks",
+        nargs="*",
+        default=_DEFAULT_NETWORKS,
+        help="Network names from [detector_networks] to include (default: all six).",
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -156,40 +137,38 @@ def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
 
 
-def _load_config(path: Path) -> PaperConfig:
-    with path.open("rb") as handle:
-        return PaperConfig.model_validate(tomllib.load(handle))
-
-
 ROOT_DIR = repo_root()
 args = _parse_args()
 config_path = _resolve_path(args.config, ROOT_DIR)
-paper_config = _load_config(config_path)
-figure_config = paper_config.figures.snr_by_detector
+paper = load_mapping(config_path)
 
-CATALOG_PATH = _resolve_path(paper_config.paths.catalog, ROOT_DIR)
+CATALOG_PATH = _resolve_path(Path(paper["paths"]["catalog"]), ROOT_DIR)
+output_pdf = _resolve_path(args.output_pdf, ROOT_DIR)
+output_csv = _resolve_path(args.output_csv, ROOT_DIR)
+output_tex = _resolve_path(args.output_tex, ROOT_DIR)
+output_sigmas_csv = _resolve_path(args.output_sigmas_csv, ROOT_DIR)
+output_sigmas_tex = _resolve_path(args.output_sigmas_tex, ROOT_DIR)
+figure_dpi = args.figure_dpi
 
-network_names = figure_config.networks or tuple(paper_config.detector_networks)
-DETECTOR_NETWORKS = {
-    name: paper_config.detector_networks[name] for name in network_names
-}
+detector_networks = paper["detector_networks"]
+network_names = args.networks or list(detector_networks)
+DETECTOR_NETWORKS = {name: tuple(detector_networks[name]) for name in network_names}
 
-observation_time = paper_config.analysis.observation_time  # [yr]
+analysis = paper["analysis"]
+observation_time = analysis["observation_time"]  # [yr]
 
 # Redshift grid for the cosmology integrals (and MD normalization)
-z_min = paper_config.analysis.cosmology.z_min
-z_max = paper_config.analysis.cosmology.z_max
-n_grid = (
-    paper_config.analysis.cosmology.n_grid
-)  # grid points for cosmology integrals / MD normalization
+cosmology = analysis["cosmology"]
+z_min = cosmology["z_min"]
+z_max = cosmology["z_max"]
+n_grid = cosmology["n_grid"]  # grid points for cosmology integrals / MD normalization
 
 # Frequency band for the analysis
-f_min = paper_config.analysis.f_min
-f_max = paper_config.analysis.f_max
+f_min = analysis["f_min"]
+f_max = analysis["f_max"]
 
 # Fiducial parameters
-fiducials = paper_config.analysis.fiducials
-
+fiducials = analysis["fiducials"]
 # %% [markdown]
 # ## Proposal waveform ensemble
 #
@@ -368,13 +347,18 @@ for label, dets in DETECTOR_NETWORKS.items():
 # quantify how much one network improves over another at this fixed model point.
 
 # %%
-df_snr = pd.DataFrame(rows).set_index("network").sort_values("snr", ascending=False)
+_snr_cols = ["network", "detectors", "n_detectors", "snr"]
 _precision_cols = [
-    col
-    for name in AMPLITUDE_VALUES
-    for col in (f"sigma_{name}", f"rel_sigma_{name}")
+    col for name in AMPLITUDE_VALUES for col in (f"sigma_{name}", f"rel_sigma_{name}")
 ]
-df_snr.style.format(
+df_all = pd.DataFrame(rows).sort_values("snr", ascending=False).reset_index(drop=True)
+df_snr = df_all[_snr_cols]
+df_sigmas = df_all[_snr_cols + _precision_cols]
+
+df_snr.style.format({"snr": "{:.2f}", "n_detectors": "{:.0f}"})
+
+# %%
+df_sigmas.style.format(
     {
         "snr": "{:.2f}",
         "n_detectors": "{:.0f}",
@@ -383,29 +367,41 @@ df_snr.style.format(
 )
 
 # %%
-output_csv = _resolve_path(figure_config.output_csv, ROOT_DIR)
-output_tex = _resolve_path(figure_config.output_tex, ROOT_DIR)
-output_pdf = _resolve_path(figure_config.output_pdf, ROOT_DIR)
 output_csv.parent.mkdir(parents=True, exist_ok=True)
+output_sigmas_csv.parent.mkdir(parents=True, exist_ok=True)
 output_pdf.parent.mkdir(parents=True, exist_ok=True)
-df_snr.to_csv(output_csv)
 
-latex = df_snr.to_latex(
+df_snr.to_csv(output_csv, index=False)
+df_sigmas.to_csv(output_sigmas_csv, index=False)
+
+latex_snr = df_snr.to_latex(
+    index=False,
     float_format="%.3g",
-    caption="Matched-filter SNR and amplitude-parameter precision by network.",
+    caption="Matched-filter SNR by detector network.",
     label="tab:snr_by_detector",
 )
-output_tex.write_text(latex)
-print(latex)
+output_tex.write_text(latex_snr)
+
+latex_sigmas = df_sigmas.to_latex(
+    index=False,
+    float_format="%.3g",
+    caption="Matched-filter SNR and amplitude-parameter precision by network.",
+    label="tab:snr_by_detector_sigmas",
+)
+output_sigmas_tex.write_text(latex_sigmas)
+print(latex_snr)
+print(latex_sigmas)
 
 df_plot = df_snr.sort_values("snr", ascending=True)
 fig, ax = plt.subplots(figsize=(6.5, 3.8))
-ax.barh(df_plot.index, df_plot["snr"], color="0.25")
+ax.barh(df_plot["network"], df_plot["snr"], color="0.25")
 ax.set_xlabel("Matched-filter SNR")
 ax.set_ylabel("")
 ax.grid(axis="x", alpha=0.25)
 fig.tight_layout()
-fig.savefig(output_pdf, dpi=figure_config.figure_dpi, bbox_inches="tight")
+fig.savefig(output_pdf, dpi=figure_dpi, bbox_inches="tight")
 print("saved table:", output_csv)
 print("saved latex:", output_tex)
+print("saved sigmas table:", output_sigmas_csv)
+print("saved sigmas latex:", output_sigmas_tex)
 print("saved figure:", output_pdf)

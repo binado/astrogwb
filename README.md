@@ -12,6 +12,17 @@ git clone git@github.com:binado/astrogwb.git
 uv sync --all-groups --all-extras
 ```
 
+Core inference libraries install without the headless runner dependencies. The
+optional ``mcmc`` extra adds pydantic for validated ``RunConfig`` parsing and
+ArviZ's NetCDF output support used by [`scripts/run_mcmc.py`](scripts/run_mcmc.py)
+and related tools:
+
+```bash
+uv sync --extra mcmc
+# or with notebook/dev tooling:
+uv sync --extra mcmc --group dev
+```
+
 ## Generating a population of CBCs
 
 Our inference framework uses an importance sampling scheme to calculate the spectral density of the astrophysical SGWB with a fixed population of CBCs. To generate the population, we suggest using the excellent [`gwmock-pop`](https://leuven-gravity-institute.github.io/gwmock-pop/) package.
@@ -70,6 +81,24 @@ There are two working examples provided in the repo:
 
 Both examples assume a population of binary neutron star (BNS) mergers following the example described above. See the notebook for more details on how the inference is set up.
 
+Generate the detector × sample-parameter sweep configs (from
+[`configs/mcmc.example.toml`](configs/mcmc.example.toml)) into the three
+campaign directories under `configs/mcmc/{cosmology,modified-propagation,astrophysical}/`:
+
+```bash
+uv run --extra mcmc python scripts/generate_mcmc_configs.py --force
+```
+
+Then submit one campaign array on a SLURM cluster (cluster env needs
+`uv sync --extra mcmc`, which includes config validation and ArviZ NetCDF
+output support):
+
+```bash
+python scripts/submit_mcmc.py -i configs/mcmc/cosmology
+python scripts/submit_mcmc.py -i configs/mcmc/modified-propagation
+python scripts/submit_mcmc.py -i configs/mcmc/astrophysical
+```
+
 ### Outputs
 
 Each run writes an ArviZ `InferenceData` to
@@ -82,9 +111,16 @@ See the [plotting notebook](./notebooks/mcmc_plotting.py) for examples of how to
 
 ## Paper figures
 
-The paper-figure workflow is configured by [`configs/paper.toml`](configs/paper.toml).
-Each figure notebook reads only the section it needs and remains runnable as a
-Jupytext `py:percent` notebook or as a script.
+Shared analysis settings (catalog path, fiducials, detector networks, nested
+posterior plot entries) live in [`configs/paper.toml`](configs/paper.toml).
+Figure-local knobs (output paths, dpi, sampler settings, which networks to
+plot) are argparse defaults in each Jupytext notebook — edit them in Jupyter,
+override with CLI flags headless, and promote happy values by updating those
+defaults (and `paper.toml` for shared/nested data).
+
+Snakemake reads [`configs/workflow.yaml`](configs/workflow.yaml) for the paper
+config path and declared output paths, then passes `--config` plus output-path
+flags into each notebook.
 
 Preview the declared workflow:
 
@@ -112,10 +148,13 @@ uv run snakemake --cores 1 figures/mcmc_compare_posteriors_H0.pdf
 ## Development
 
 Install dependencies (the dev group also bundles Jupyter, arviz, corner, and
-matplotlib so the MCMC notebook in `notebooks/` runs out of the box):
+matplotlib so the MCMC notebook in `notebooks/` runs out of the box). The
+`mcmc` extra alone is sufficient for the headless runner, including ArviZ
+NetCDF output; include it with dev tools for related tests:
 
 ```bash
 uv sync --group dev
+uv sync --extra mcmc --group dev
 ```
 
 Run tests:

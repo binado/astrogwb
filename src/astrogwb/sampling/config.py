@@ -7,11 +7,12 @@ configs before JAX initializes.
 from __future__ import annotations
 
 import json
-import tomllib
 from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from astrogwb.config import deep_merge, load_mapping
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
@@ -118,13 +119,7 @@ class RunConfig(BaseModel):
 
 def load_config(path: Path) -> dict[str, Any]:
     """Parse a TOML or JSON config file into a plain dict."""
-    suffix = path.suffix.lower()
-    with path.open("rb") as handle:
-        if suffix == ".toml":
-            return tomllib.load(handle)
-        if suffix == ".json":
-            return json.load(handle)
-    raise ValueError(f"unsupported config extension: {path.suffix!r}")
+    return load_mapping(path)
 
 
 def save_config(config: RunConfig, path: Path) -> None:
@@ -142,17 +137,24 @@ def build_run_config(
     seed: int | None = None,
     outdir: Path | None = None,
     label: str | None = None,
+    **overrides: Any,
 ) -> RunConfig:
-    """Apply optional overrides and validate a raw config mapping into a RunConfig."""
-    raw = dict(raw)
+    """Apply optional overrides and validate a raw config mapping into a RunConfig.
+
+    Named ``seed`` / ``outdir`` / ``label`` remain for CLI compatibility. Extra
+    ``**overrides`` are deep-merged into the raw mapping (nested dicts merge;
+    other values replace) before validation.
+    """
+    cli_overrides: dict[str, Any] = {}
     if seed is not None:
-        raw["seed"] = seed
+        cli_overrides["seed"] = seed
     if outdir is not None or label is not None:
-        output = dict(raw.get("output", {}))
+        output: dict[str, Any] = {}
         if outdir is not None:
             output["outdir"] = str(outdir)
         if label is not None:
             output["label"] = label
-        raw["output"] = output
+        cli_overrides["output"] = output
 
-    return RunConfig.model_validate(raw)
+    merged = deep_merge(raw, deep_merge(overrides, cli_overrides))
+    return RunConfig.model_validate(merged)

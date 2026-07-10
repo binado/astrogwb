@@ -1,0 +1,20 @@
+paper_config: configs/paper.toml
+
+mcmc_campaign:
+  inventory: configs/mcmc/campaigns/paper-h0-legacy.toml
+  frozen_dir: configs/mcmc/frozen/paper-h0-legacy
+
+amplitude_toy:
+  output_pdf: figures/amplitude_toy_fisher_overlay.pdf
+
+snr_by_detector:
+  output_pdf: figures/snr_by_detector.pdf
+  output_csv: figures/snr_by_detector.csv
+  output_tex: figures/snr_by_detector.tex
+  output_sigmas_csv: figures/snr_by_detector_sigmas.csv
+  output_sigmas_tex: figures/snr_by_detector_sigmas.tex
+
+mcmc_compare_posteriors:
+  output_pdf: figures/mcmc_compare_posteriors_H0.pdf
+  output_csv: figures/mcmc_compare_posteriors_H0.csv
+  output_tex: figures/mcmc_compare_posteriors_H0.tex

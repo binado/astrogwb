@@ -31,43 +31,10 @@ local_merger_rate = 161.0
 "ET-2L-misaligned" = ["S2", "R2"]
 "ET-2L-misaligned-CE-Hanford" = ["S2", "R2", "C1"]
 
-[figures.amplitude_toy]
-detectors = ["S1", "R1"]
-seed = 42
-debug = false
-output_pdf = "figures/amplitude_toy_fisher_overlay.pdf"
-merger_rate_norm = 1e-3
-amplitude_fiducial = 1.0
-
-[figures.amplitude_toy.prior]
-low = 0.1
-high = 10.0
-
-[figures.amplitude_toy.sampler]
-num_warmup = 200
-num_samples = 500
-num_chains = "auto"
-target_accept = 0.9
-
-[figures.snr_by_detector]
-networks = [
-  "ET-triangular",
-  "ET-triangular-CE-Hanford",
-  "ET-2L-aligned",
-  "ET-2L-aligned-CE-Hanford",
-  "ET-2L-misaligned",
-  "ET-2L-misaligned-CE-Hanford",
-]
-output_csv = "figures/snr_by_detector.csv"
-output_tex = "figures/snr_by_detector.tex"
-output_pdf = "figures/snr_by_detector.pdf"
-figure_dpi = 300
-
 [figures.mcmc_compare_posteriors]
-var_name = "H0"
-output_pdf = "figures/mcmc_compare_posteriors_H0.pdf"
-figure_dpi = 300
-group = "posterior"
+# Posterior styling lives below; the chain paths are resolved from this immutable
+# campaign lock so figure selection is stable even when output layout evolves.
+campaign_lock = "configs/mcmc/campaigns/paper-h0-legacy.lock.json"
 
 [figures.mcmc_compare_posteriors.ax_kwargs]
 xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'
@@ -81,37 +48,43 @@ frameon = false
 borderaxespad = 0
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-triangular"
 label = 'ET-$\Delta$'
-path = "chains/mcmc-H0-det=E1,E2,E3-seed42-20260630-091326.nc"
+run = "et-triangular"
 color = "tab:blue"
 linestyle = "-"
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-triangular-CE-Hanford"
 label = 'ET-$\Delta +$ CE'
-path = "chains/mcmc-H0-det=E1,E2,E3,C1-seed42-20260630-082136.nc"
+run = "et-triangular-ce-hanford"
 color = "tab:blue"
 linestyle = "--"
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-2L-aligned"
 label = "ET-2L"
-path = "chains/mcmc-H0-det=S1,R1-seed42-20260629-201613.nc"
+run = "et-2l-aligned"
 color = "tab:orange"
 linestyle = "-"
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-2L-aligned-CE-Hanford"
 label = 'ET-2L $+$ CE'
-path = "chains/mcmc-H0-det=S1,R1,C1-seed42-20260629-105230.nc"
+run = "et-2l-aligned-ce-hanford"
 color = "tab:orange"
 linestyle = "--"
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-2L-misaligned"
 label = 'ET-2L-$\alpha$'
-path = "chains/mcmc-H0-det=S2,R2-seed42-20260630-053542.nc"
+run = "et-2l-misaligned"
 color = "tab:green"
 linestyle = "-"
 
 [[figures.mcmc_compare_posteriors.posteriors]]
+network = "ET-2L-misaligned-CE-Hanford"
 label = 'ET-2L-$\alpha +$ CE'
-path = "chains/mcmc-H0-det=S2,R2,C1-seed42-20260630-034738.nc"
+run = "et-2l-misaligned-ce-hanford"
 color = "tab:green"
 linestyle = "--"
