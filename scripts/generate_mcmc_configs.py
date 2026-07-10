@@ -3,10 +3,11 @@
 
 Run from the repository root::
 
-    uv run --extra mcmc python scripts/generate_mcmc_configs.py [output_dir]
+    uv run --extra mcmc python scripts/generate_mcmc_configs.py [output_dir] [--example PATH]
 
 Base settings (fiducials, catalog, cosmology, sampler, runtime, output) are taken
-from ``configs/mcmc.example.toml``. Sweep-specific fields override detectors,
+from the example TOML (default ``configs/mcmc.example.toml``). Sweep-specific fields
+override detectors,
 ``sampled_params``, and the corresponding prior tables. Requires the ``mcmc``
 optional extra (pydantic) for ``RunConfig`` validation.
 """
@@ -26,7 +27,7 @@ logger = logging.getLogger("generate_mcmc_configs")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_DIR = "configs/mcmc/sweep"
-EXAMPLE_CONFIG = REPO_ROOT / "configs" / "mcmc.example.toml"
+DEFAULT_EXAMPLE_CONFIG = REPO_ROOT / "configs" / "mcmc.example.toml"
 
 DETECTOR_NETWORKS: dict[str, tuple[str, ...]] = {
     "ET-triangular": ("E1", "E2", "E3"),
@@ -60,24 +61,30 @@ PRIOR_TABLES: dict[str, dict[str, Any]] = {
 }
 
 
-def _resolve_output_dir(path: str | Path) -> Path:
+def _resolve_repo_path(path: str | Path) -> Path:
     resolved = Path(path)
     if not resolved.is_absolute():
         resolved = REPO_ROOT / resolved
     return resolved.resolve()
 
 
-def _base_from_example() -> dict[str, Any]:
-    with EXAMPLE_CONFIG.open("rb") as handle:
+def _resolve_output_dir(path: str | Path) -> Path:
+    return _resolve_repo_path(path)
+
+
+def _load_base_config(example_config: Path) -> dict[str, Any]:
+    with example_config.open("rb") as handle:
         return tomllib.load(handle)
 
 
 def make_config(
     detectors: tuple[str, ...],
     sampled_params: tuple[str, ...],
+    *,
+    example_config: Path = DEFAULT_EXAMPLE_CONFIG,
 ) -> RunConfig:
     """Build a validated run config for one sweep point."""
-    raw = deepcopy(_base_from_example())
+    raw = deepcopy(_load_base_config(_resolve_repo_path(example_config)))
     raw["catalog"] = {**raw["catalog"], "detectors": list(detectors)}
     raw["sampled_params"] = list(sampled_params)
     raw["priors"] = {name: PRIOR_TABLES[name] for name in sampled_params}
@@ -96,10 +103,12 @@ def sweep_filenames() -> list[str]:
 def generate_configs(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     *,
+    example_config: str | Path = DEFAULT_EXAMPLE_CONFIG,
     skip_existing: bool = True,
 ) -> tuple[Path, list[Path], list[Path]]:
     """Write sweep JSON configs; return (output_dir, written, skipped) paths."""
     resolved_output_dir = _resolve_output_dir(output_dir)
+    resolved_example_config = _resolve_repo_path(example_config)
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
     written: list[Path] = []
@@ -114,7 +123,11 @@ def generate_configs(
                 logger.info("skipping existing config %s", path)
                 continue
 
-            config = make_config(detectors, sampled_params)
+            config = make_config(
+                detectors,
+                sampled_params,
+                example_config=resolved_example_config,
+            )
             save_config(config, path)
             written.append(path)
             logger.info(
@@ -146,6 +159,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Output directory (default: {DEFAULT_OUTPUT_DIR})",
     )
     parser.add_argument(
+        "--example",
+        type=Path,
+        default=DEFAULT_EXAMPLE_CONFIG,
+        help=(
+            "Base TOML template for fiducials, catalog, cosmology, sampler, "
+            "runtime, and output."
+        ),
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Overwrite existing config files instead of skipping them.",
@@ -159,7 +181,11 @@ def main(argv: list[str] | None = None) -> None:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-    generate_configs(args.output_dir, skip_existing=not args.force)
+    generate_configs(
+        args.output_dir,
+        example_config=args.example,
+        skip_existing=not args.force,
+    )
 
 
 if __name__ == "__main__":
