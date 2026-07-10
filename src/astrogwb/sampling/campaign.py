@@ -3,7 +3,7 @@
 Campaign inventories are small, editable TOML files.  Freezing an inventory turns
 the validated configs into a JSON lock file.  The lock, rather than a generated
 directory of configs, is the reproducibility artifact: it embeds everything the
-runner needs and records the digest of every curated source config.
+runner needs and records digests of each curated config and catalog.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from .config import OutputConfig, RunConfig, build_run_config, save_config
 
 CAMPAIGN_FORMAT_VERSION = 1
 _STRICT = ConfigDict(frozen=True, extra="forbid")
+_HASH_CHUNK_SIZE = 1024 * 1024
 
 
 def canonical_json(value: Any) -> str:
@@ -31,6 +32,15 @@ def canonical_json(value: Any) -> str:
 def canonical_sha256(value: Any) -> str:
     """SHA-256 of a JSON-compatible value, independent of whitespace/key order."""
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def file_sha256(path: str | Path) -> str:
+    """Return the SHA-256 digest of a file without loading it into memory."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        while chunk := handle.read(_HASH_CHUNK_SIZE):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def config_payload(config: RunConfig) -> dict[str, Any]:
@@ -88,6 +98,8 @@ class LockedRun(BaseModel):
     source_config: str
     source_sha256: str
     config_sha256: str
+    # Omitted only by historical locks created before catalog content was pinned.
+    catalog_sha256: str | None = None
     config: dict[str, Any]
     detectors: tuple[str, ...]
     sampled_params: tuple[str, ...]
@@ -142,6 +154,11 @@ def _source_path(inventory_path: Path, config_path: Path) -> Path:
     )
 
 
+def _repository_path(path: Path, root: Path) -> Path:
+    """Resolve a repository-relative path in the same way the runner does."""
+    return path if path.is_absolute() else root / path
+
+
 def _display_path(path: Path, root: Path) -> str:
     try:
         return str(path.resolve().relative_to(root.resolve()))
@@ -177,6 +194,11 @@ def build_lock(
         source_path = _source_path(inventory_file, declared.config).resolve()
         source = build_run_config(load_mapping(source_path))
         frozen = _locked_config(source, inventory, declared.id)
+        catalog_path = _repository_path(source.catalog.path, repository)
+        if not catalog_path.is_file():
+            raise ValueError(
+                f"catalog for campaign run {declared.id!r} not found: {catalog_path}"
+            )
         outdir = frozen.outdir
         label = frozen.label
         if not label:
@@ -190,6 +212,7 @@ def build_lock(
                 source_config=_display_path(source_path, repository),
                 source_sha256=config_sha256(source),
                 config_sha256=config_sha256(frozen),
+                catalog_sha256=file_sha256(catalog_path),
                 config=config_payload(frozen),
                 detectors=frozen.catalog.detectors,
                 sampled_params=frozen.sampled_params,
@@ -243,6 +266,17 @@ def _verify_source_hashes(
                 f"curated config for run {locked.id!r} changed under immutable campaign "
                 f"{lock.campaign_id!r}; create a new campaign ID"
             )
+        if locked.catalog_sha256 is not None:
+            catalog_path = _repository_path(source.catalog.path, root)
+            if not catalog_path.is_file():
+                raise ValueError(
+                    f"catalog for campaign run {locked.id!r} not found: {catalog_path}"
+                )
+            if file_sha256(catalog_path) != locked.catalog_sha256:
+                raise ValueError(
+                    f"catalog for run {locked.id!r} changed under immutable campaign "
+                    f"{lock.campaign_id!r}; create a new campaign ID"
+                )
 
 
 def default_frozen_dir(lock: CampaignLock, *, root: str | Path = ".") -> Path:

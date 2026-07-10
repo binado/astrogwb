@@ -99,6 +99,21 @@ python scripts/submit_mcmc.py -i configs/mcmc/modified-propagation
 python scripts/submit_mcmc.py -i configs/mcmc/astrophysical
 ```
 
+The reproducible paper campaign uses a frozen manifest and its immutable lock;
+submission validates every frozen config and the catalog SHA-256 before calling
+`sbatch`:
+
+```bash
+uv run --extra mcmc python scripts/freeze_mcmc_campaign.py \
+  configs/mcmc/campaigns/paper-h0.toml
+uv run --extra mcmc python scripts/submit_mcmc.py \
+  --manifest configs/mcmc/frozen/paper-h0/array-manifest.txt \
+  --campaign-lock configs/mcmc/campaigns/paper-h0.lock.json
+```
+
+`--bypass-locks` is an explicit escape hatch for debugging or intentional legacy
+submissions and should not be used for paper production runs.
+
 ### Outputs
 
 Each run writes an ArviZ `InferenceData` to

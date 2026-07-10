@@ -1,0 +1,26 @@
+version = 1
+campaign_id = "paper-h0"
+
+[[runs]]
+id = "et-triangular"
+config = "../curated/paper-h0/et-triangular.json"
+
+[[runs]]
+id = "et-triangular-ce-hanford"
+config = "../curated/paper-h0/et-triangular-ce-hanford.json"
+
+[[runs]]
+id = "et-2l-aligned"
+config = "../curated/paper-h0/et-2l-aligned.json"
+
+[[runs]]
+id = "et-2l-aligned-ce-hanford"
+config = "../curated/paper-h0/et-2l-aligned-ce-hanford.json"
+
+[[runs]]
+id = "et-2l-misaligned"
+config = "../curated/paper-h0/et-2l-misaligned.json"
+
+[[runs]]
+id = "et-2l-misaligned-ce-hanford"
+config = "../curated/paper-h0/et-2l-misaligned-ce-hanford.json"

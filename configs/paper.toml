@@ -1,5 +1,5 @@
 [paths]
-catalog = "out/bns_waveform_catalog.h5"
+catalog = "out/bns_waveform_catalog_n=16384_df=1Hz.h5"
 figures_dir = "figures"
 chains_dir = "chains"
 
@@ -34,7 +34,7 @@ local_merger_rate = 161.0
 [figures.mcmc_compare_posteriors]
 # Posterior styling lives below; the chain paths are resolved from this immutable
 # campaign lock so figure selection is stable even when output layout evolves.
-campaign_lock = "configs/mcmc/campaigns/paper-h0-legacy.lock.json"
+campaign_lock = "configs/mcmc/campaigns/paper-h0.lock.json"
 
 [figures.mcmc_compare_posteriors.ax_kwargs]
 xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'

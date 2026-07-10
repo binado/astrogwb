@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 from uuid import uuid4
 
 CONFIG_SUFFIXES = frozenset({".json", ".toml"})
+logger = logging.getLogger(__name__)
 
 BATCH_SCRIPT = textwrap.dedent(
     """\
@@ -88,6 +89,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         help="non-empty file with one existing TOML or JSON config per line",
     )
+    parser.add_argument(
+        "--campaign-lock",
+        type=Path,
+        help="immutable campaign lock to validate before submitting",
+    )
+    parser.add_argument(
+        "--bypass-locks",
+        action="store_true",
+        help="skip campaign-lock validation (for debugging or known legacy data)",
+    )
     args = parser.parse_args(argv)
 
     if args.input_dir is not None and args.input is not None:
@@ -142,6 +153,82 @@ def write_manifest(configs: list[str]) -> Path:
     return manifest
 
 
+def validate_campaign_lock(lock_path: Path, configs: list[str]) -> None:
+    """Ensure a complete frozen campaign and its catalogs match ``lock_path``."""
+    from astrogwb.sampling.campaign import config_sha256, file_sha256, load_lock
+    from astrogwb.sampling.config import RunConfig, build_run_config, load_config
+
+    lock = load_lock(lock_path)
+    missing_digests = [run.id for run in lock.runs if run.catalog_sha256 is None]
+    if missing_digests:
+        raise ValueError(
+            f"Campaign lock '{lock_path}' does not pin catalog SHA-256 values for "
+            f"run(s): {', '.join(missing_digests)}. Use --bypass-locks only for "
+            "intentional legacy submissions."
+        )
+
+    expected = {run.config_sha256: run for run in lock.runs}
+    if len(expected) != len(lock.runs):
+        raise ValueError(f"Campaign lock '{lock_path}' has duplicate config digests.")
+
+    submitted: dict[str, RunConfig] = {}
+    submitted_paths: dict[str, str] = {}
+    for config_path in configs:
+        config = build_run_config(load_config(Path(config_path)))
+        digest = config_sha256(config)
+        if digest in submitted:
+            run_id = expected[digest].id if digest in expected else config_path
+            raise ValueError(
+                f"Campaign manifest submits config {run_id!r} more than once."
+            )
+        submitted[digest] = config
+        submitted_paths[digest] = config_path
+
+    if set(submitted) != set(expected):
+        missing = [
+            run.id for digest, run in expected.items() if digest not in submitted
+        ]
+        unexpected = [
+            config_path
+            for digest, config_path in submitted_paths.items()
+            if digest not in expected
+        ]
+        details: list[str] = []
+        if missing:
+            details.append(f"missing locked run(s): {', '.join(missing)}")
+        if unexpected:
+            details.append(f"unlocked config(s): {', '.join(unexpected)}")
+        raise ValueError(
+            f"Campaign manifest must contain every config from '{lock_path}' exactly "
+            f"once ({'; '.join(details)})."
+        )
+
+    catalogs: dict[Path, str] = {}
+    for digest, config in submitted.items():
+        expected_digest = expected[digest].catalog_sha256
+        assert expected_digest is not None
+        catalog_path = config.catalog.path
+        if not catalog_path.is_absolute():
+            catalog_path = Path.cwd() / catalog_path
+        catalog_path = catalog_path.resolve()
+        previous_digest = catalogs.setdefault(catalog_path, expected_digest)
+        if previous_digest != expected_digest:
+            raise ValueError(
+                f"Campaign lock '{lock_path}' assigns conflicting SHA-256 values to "
+                f"catalog '{catalog_path}'."
+            )
+
+    for catalog_path, expected_digest in catalogs.items():
+        if not catalog_path.is_file():
+            raise ValueError(f"Locked catalog '{catalog_path}' not found.")
+        actual_digest = file_sha256(catalog_path)
+        if actual_digest != expected_digest:
+            raise ValueError(
+                f"Locked catalog '{catalog_path}' SHA-256 mismatch: expected "
+                f"{expected_digest}, got {actual_digest}."
+            )
+
+
 def submit_array(manifest: Path, config_count: int) -> subprocess.CompletedProcess[str]:
     # SLURM opens the --output/--error files before the batch script body runs,
     # so logs/ must exist at submission time; the in-job mkdir is too late.
@@ -160,6 +247,7 @@ def submit_array(manifest: Path, config_count: int) -> subprocess.CompletedProce
 
 
 def main(argv: list[str] | None = None) -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = parse_args(argv)
     try:
         if args.manifest is not None:
@@ -173,10 +261,18 @@ def main(argv: list[str] | None = None) -> None:
     except ValueError as error:
         raise SystemExit(f"Error: {error}") from error
 
-    print(f"Submitting {len(configs)} MCMC jobs (array 0-{len(configs) - 1})")
-    print(f"Manifest: {manifest}")
+    if args.bypass_locks:
+        logger.warning("bypassing campaign-lock validation")
+    elif args.campaign_lock is not None:
+        try:
+            validate_campaign_lock(args.campaign_lock, configs)
+        except (OSError, ValueError) as error:
+            raise SystemExit(f"Error: {error}") from error
+
+    logger.info("submitting %d MCMC jobs (array 0-%d)", len(configs), len(configs) - 1)
+    logger.info("manifest: %s", manifest)
     for index, config in enumerate(configs):
-        print(f"  [{index}] {config}")
+        logger.info("  [%d] %s", index, config)
 
     try:
         result = submit_array(manifest, len(configs))
@@ -184,15 +280,15 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("Error: 'sbatch' was not found on PATH.") from error
     except subprocess.CalledProcessError as error:
         if error.stdout:
-            print(error.stdout, end="")
+            logger.info("%s", error.stdout.rstrip())
         if error.stderr:
-            print(error.stderr, end="", file=sys.stderr)
+            logger.error("%s", error.stderr.rstrip())
         raise SystemExit(error.returncode) from error
 
     if result.stdout:
-        print(result.stdout, end="")
+        logger.info("%s", result.stdout.rstrip())
     if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
+        logger.error("%s", result.stderr.rstrip())
 
 
 if __name__ == "__main__":

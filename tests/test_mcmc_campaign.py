@@ -8,6 +8,7 @@ import pytest
 from astrogwb.sampling.campaign import (
     build_lock,
     config_sha256,
+    file_sha256,
     load_lock,
     materialize_campaign,
 )
@@ -30,6 +31,9 @@ def _config(*, prior_high: float = 140.0) -> dict[str, object]:
 
 
 def _inventory(tmp_path: Path, *, legacy: bool = False) -> Path:
+    catalog = tmp_path / "out" / "catalog.h5"
+    catalog.parent.mkdir()
+    catalog.write_bytes(b"catalog bytes")
     curated = tmp_path / "curated.json"
     curated.write_text(json.dumps(_config()), encoding="utf-8")
     inventory = tmp_path / "campaign.toml"
@@ -66,6 +70,7 @@ def test_lock_uses_canonical_resolved_config_and_deterministic_outputs(
     assert config.priors["H0"]["high"] == 140.0
     assert config.sampler.dense_mass is True
     assert run.config_sha256 == config_sha256(config)
+    assert run.catalog_sha256 == file_sha256(tmp_path / "out" / "catalog.h5")
     assert build_lock(inventory, root=tmp_path) == lock
 
 
@@ -126,3 +131,23 @@ def test_legacy_inventory_preserves_explicit_outputs(tmp_path: Path) -> None:
     assert run.outputs["chain"] == "chains/old-timestamped-name.nc"
     assert run.config["fiducials"]["local_merger_rate"] == 161.0
     assert run.config["sampler"]["max_tree_depth"] == 10
+
+
+def test_freeze_rejects_catalog_changes(tmp_path: Path) -> None:
+    inventory = _inventory(tmp_path)
+    lock_path = tmp_path / "campaign.lock.json"
+    materialize_campaign(inventory, lock_path=lock_path, root=tmp_path)
+
+    (tmp_path / "out" / "catalog.h5").write_bytes(b"changed catalog bytes")
+
+    with pytest.raises(ValueError, match="catalog for run 'network-a' changed"):
+        materialize_campaign(inventory, lock_path=lock_path, root=tmp_path)
+
+
+def test_historical_lock_without_catalog_digest_remains_readable() -> None:
+    lock = load_lock(
+        Path(__file__).resolve().parent.parent
+        / "configs/mcmc/campaigns/paper-h0-legacy.lock.json"
+    )
+
+    assert all(run.catalog_sha256 is None for run in lock.runs)
