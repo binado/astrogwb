@@ -91,7 +91,7 @@ Then submit the array on a SLURM cluster (cluster env needs
 `uv sync --extra mcmc`):
 
 ```bash
-./scripts/submit_mcmc.sh -i configs/mcmc/sweep
+python scripts/submit_mcmc.py -i configs/mcmc/sweep
 ```
 
 ### Outputs
