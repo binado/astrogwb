@@ -1,6 +1,9 @@
-import json
+import re
 from pathlib import Path
 import tomllib
+
+from astrogwb.catalogs import catalog_path, load_catalog_recipes, population_path
+from astrogwb.sampling.sweeps import CAMPAIGNS, campaign_runs, sweep_filenames
 
 
 configfile: "configs/workflow.yaml"
@@ -11,10 +14,14 @@ PAPER_CONFIG_PATH = Path(config["paper_config"])
 with PAPER_CONFIG_PATH.open("rb") as handle:
     PAPER_CONFIG = tomllib.load(handle)
 
-CATALOG = PAPER_CONFIG["paths"]["catalog"]
-POPULATION = f"out/bns_n={PAPER_CONFIG['population']['n_samples']}.h5"
-POPULATION_CONFIG = "examples/bns_population.yaml"
-WAVEFORM_CATALOG = PAPER_CONFIG["waveform_catalog"]
+CATALOG_REGISTRY_PATH = Path(PAPER_CONFIG["catalog"]["registry"])
+CATALOG_RECIPES = load_catalog_recipes(CATALOG_REGISTRY_PATH)
+DEFAULT_CATALOG = PAPER_CONFIG["catalog"]["id"]
+if DEFAULT_CATALOG not in CATALOG_RECIPES:
+    raise ValueError(f"paper catalog {DEFAULT_CATALOG!r} is not in the registry")
+
+SWEEP_CONFIGS = [f"configs/mcmc/{filename}" for filename in sweep_filenames()]
+SWEEP_CAMPAIGNS = tuple(CAMPAIGNS)
 CHAINS_DIR = PAPER_CONFIG["paths"]["chains_dir"]
 AMPLITUDE_TOY_PDF = config["amplitude_toy"]["output_pdf"]
 SNR_BY_DETECTOR_PDF = config["snr_by_detector"]["output_pdf"]
@@ -27,37 +34,29 @@ POSTERIOR_CSV = config["mcmc_compare_posteriors"]["output_csv"]
 POSTERIOR_TEX = config["mcmc_compare_posteriors"]["output_tex"]
 POSTERIOR_FIGURE = PAPER_CONFIG["figures"]["mcmc_compare_posteriors"]
 POSTERIOR_CHAINS = [
-    f"{CHAINS_DIR}/{POSTERIOR_FIGURE['campaign']}/{entry['run']}.nc"
+    f"{CHAINS_DIR}/{DEFAULT_CATALOG}/{POSTERIOR_FIGURE['campaign']}/{entry['run']}.nc"
     for entry in POSTERIOR_FIGURE["posteriors"]
 ]
-
-# Sweep campaigns keep their generated configs directly under
-# configs/mcmc/<campaign>/ (see scripts/generate_mcmc_configs.py); every other
-# campaign is hand-curated under configs/mcmc/curated/<campaign>/.
-SWEEP_CAMPAIGNS = ("cosmology", "modified-propagation", "astrophysical")
-
 
 def campaign_config_dir(campaign):
     base = "configs/mcmc" if campaign in SWEEP_CAMPAIGNS else "configs/mcmc/curated"
     return f"{base}/{campaign}"
 
 
-def campaign_chains(campaign):
-    runs = glob_wildcards(campaign_config_dir(campaign) + "/{run}.json").run
-    return [f"{CHAINS_DIR}/{campaign}/{run}.nc" for run in sorted(runs)]
+def campaign_chains(catalog, campaign):
+    if campaign in SWEEP_CAMPAIGNS:
+        runs = campaign_runs(campaign)
+    else:
+        runs = sorted(glob_wildcards(campaign_config_dir(campaign) + "/{run}.json").run)
+    return [f"{CHAINS_DIR}/{catalog}/{campaign}/{run}.nc" for run in runs]
 
 
 def run_config_path(wc):
     return Path(campaign_config_dir(wc.campaign)) / f"{wc.run}.json"
 
 
-def run_catalog_path(wc):
-    """Return the catalog consumed by one run's self-describing config."""
-    raw = json.loads(run_config_path(wc).read_text(encoding="utf-8"))
-    return raw["catalog"]["path"]
-
-
 wildcard_constraints:
+    catalog="|".join(re.escape(catalog_id) for catalog_id in CATALOG_RECIPES),
     campaign="[^/]+",
     run="[^/]+",
 
@@ -79,57 +78,67 @@ rule paper_figures:
         POSTERIOR_PDF,
 
 
+rule generate_sweep_configs:
+    input:
+        example="configs/mcmc.example.toml",
+        generator="scripts/generate_mcmc_configs.py",
+        sweep_spec="src/astrogwb/sampling/sweeps.py",
+    output:
+        SWEEP_CONFIGS,
+    shell:
+        "uv run --extra mcmc python {input.generator} --force"
+
+
 rule bns_population:
     input:
-        population_config=POPULATION_CONFIG,
-        paper_config=str(PAPER_CONFIG_PATH),
+        population_config=lambda wc: CATALOG_RECIPES[wc.catalog].population_config,
+        registry=str(CATALOG_REGISTRY_PATH),
     output:
-        POPULATION,
+        "out/populations/{catalog}.h5",
     params:
-        n_samples=PAPER_CONFIG["population"]["n_samples"],
-        seed=PAPER_CONFIG["population"]["seed"],
-        outdir=str(Path(POPULATION).parent),
+        recipe=lambda wc: CATALOG_RECIPES[wc.catalog],
+        outdir=lambda wc: str(population_path(wc.catalog).parent),
     shell:
         "mkdir -p {params.outdir}\n"
         "uv run gwmock-pop simulate"
         " --config {input.population_config}"
-        " --n {params.n_samples}"
+        " --n {params.recipe.n_samples}"
         " --output {output}"
-        " --seed {params.seed}"
+        " --seed {params.recipe.seed}"
 
 
 rule bns_waveform_catalog:
     input:
-        population=POPULATION,
-        paper_config=str(PAPER_CONFIG_PATH),
+        population="out/populations/{catalog}.h5",
+        registry=str(CATALOG_REGISTRY_PATH),
     output:
-        CATALOG,
+        "out/catalogs/{catalog}.h5",
     params:
-        **WAVEFORM_CATALOG,
+        recipe=lambda wc: CATALOG_RECIPES[wc.catalog],
     shell:
         "uv run python scripts/generate_waveform_catalog.py"
         " --population {input.population}"
         " --output {output}"
-        " --approximant {params.approximant}"
-        " --sampling-frequency {params.sampling_frequency}"
-        " --minimum-frequency {params.minimum_frequency}"
-        " --maximum-frequency {params.maximum_frequency}"
-        " --reference-frequency {params.reference_frequency}"
-        " --frequency-resolution {params.frequency_resolution}"
-        " --chunk-size {params.chunk_size}"
+        " --approximant {params.recipe.approximant}"
+        " --sampling-frequency {params.recipe.sampling_frequency}"
+        " --minimum-frequency {params.recipe.minimum_frequency}"
+        " --maximum-frequency {params.recipe.maximum_frequency}"
+        " --reference-frequency {params.recipe.reference_frequency}"
+        " --frequency-resolution {params.recipe.frequency_resolution}"
+        " --chunk-size {params.recipe.chunk_size}"
 
 
 rule run_mcmc:
     input:
         config=run_config_path,
-        catalog=run_catalog_path,
+        catalog="out/catalogs/{catalog}.h5",
     output:
-        chain=protected(CHAINS_DIR + "/{campaign}/{run}.nc"),
-        sidecar=protected(CHAINS_DIR + "/{campaign}/{run}.json"),
+        chain=protected(CHAINS_DIR + "/{catalog}/{campaign}/{run}.nc"),
+        sidecar=protected(CHAINS_DIR + "/{catalog}/{campaign}/{run}.json"),
     params:
         # Override for local smoke tests: --config jax_platforms=cpu
         jax_platforms=config.get("jax_platforms", "cuda"),
-        outdir=lambda wc: f"{CHAINS_DIR}/{wc.campaign}",
+        outdir=lambda wc: f"{CHAINS_DIR}/{wc.catalog}/{wc.campaign}",
     resources:
         cpus_per_task=4,
         mem_mb=8000,
@@ -144,28 +153,32 @@ rule run_mcmc:
         if command -v job-nanny >/dev/null 2>&1; then
             job-nanny uv run --extra mcmc python scripts/run_mcmc.py \
                 --config {input.config} --outdir {params.outdir} \
-                --label {wildcards.run} --force
+                --label {wildcards.run} --catalog {input.catalog} --force
         else
             uv run --extra mcmc python scripts/run_mcmc.py \
                 --config {input.config} --outdir {params.outdir} \
-                --label {wildcards.run} --force
+                --label {wildcards.run} --catalog {input.catalog} --force
         fi
         """
 
 
 rule mcmc_paper_h0:
     input:
-        campaign_chains("paper-h0"),
+        campaign_chains(DEFAULT_CATALOG, "paper-h0"),
 
 
 rule mcmc_sweeps:
     input:
-        [chain for campaign in SWEEP_CAMPAIGNS for chain in campaign_chains(campaign)],
+        [
+            chain
+            for campaign in SWEEP_CAMPAIGNS
+            for chain in campaign_chains(DEFAULT_CATALOG, campaign)
+        ],
 
 
 rule amplitude_toy:
     input:
-        catalog=CATALOG,
+        catalog=str(catalog_path(DEFAULT_CATALOG)),
         config=str(PAPER_CONFIG_PATH),
     output:
         AMPLITUDE_TOY_PDF,
@@ -177,7 +190,7 @@ rule amplitude_toy:
 
 rule snr_by_detector:
     input:
-        catalog=CATALOG,
+        catalog=str(catalog_path(DEFAULT_CATALOG)),
         config=str(PAPER_CONFIG_PATH),
     output:
         pdf=SNR_BY_DETECTOR_PDF,

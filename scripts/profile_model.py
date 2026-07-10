@@ -14,8 +14,8 @@ is reused so the JAX device / x64 setup matches production exactly.
 
 Usage::
 
-    uv run --extra mcmc python scripts/profile_model.py --config configs/mcmc.example.toml
-    uv run --extra mcmc python scripts/profile_model.py --config configs/mcmc.example.toml --iters 100
+    uv run --extra mcmc python scripts/profile_model.py \
+        --config configs/mcmc.example.toml --catalog out/catalogs/bns-n16384-df1.h5
 
 Open the generated ``perfetto_trace.json.gz`` at https://ui.perfetto.dev
 (no TensorBoard install required).
@@ -50,6 +50,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to the TOML or JSON config file (same format as run_mcmc.py).",
     )
     parser.add_argument(
+        "--catalog",
+        type=Path,
+        required=True,
+        help="Waveform catalog to profile against the configured inference model.",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -75,7 +81,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def build_potential(config: RunConfig, jax):
+def build_potential(config: RunConfig, catalog_path: Path, jax):
     """Rebuild the production model inputs and return (potential_fn, init_params).
 
     Mirrors ``scripts.run_mcmc.run`` up to (but excluding) the NUTS/MCMC step, then
@@ -97,10 +103,10 @@ def build_potential(config: RunConfig, jax):
     from astrogwb.waveform import polarization_power as compute_polarization_power
     from pluscross import load_catalog
 
-    cat = config.catalog
+    analysis = config.analysis
     cosmo = config.cosmology
 
-    catalog = load_catalog(cat.path)
+    catalog = load_catalog(catalog_path)
     frequencies = jnp.asarray(catalog.frequencies)
     polarization_power = jnp.asarray(compute_polarization_power(catalog))
     samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
@@ -108,16 +114,18 @@ def build_potential(config: RunConfig, jax):
     n_freq, n_samples = polarization_power.shape
     logger.info(
         "Loaded catalog %s: n_frequency_bins=%d n_proposal_samples=%d",
-        cat.path,
+        catalog_path,
         n_freq,
         n_samples,
     )
 
-    sensitivities = load_sensitivity_map(cat.detectors)
+    sensitivities = load_sensitivity_map(analysis.detectors)
     effective_psd_arr = jnp.asarray(
-        effective_psd(frequencies, list(cat.detectors), sensitivities)
+        effective_psd(frequencies, list(analysis.detectors), sensitivities)
     )
-    freq_mask = make_frequency_mask(frequencies, fmin=cat.f_min, fmax=cat.f_max)
+    freq_mask = make_frequency_mask(
+        frequencies, fmin=analysis.f_min, fmax=analysis.f_max
+    )
 
     z_samples = jnp.asarray(samples["redshift"])
     z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
@@ -197,7 +205,7 @@ def main(argv: list[str] | None = None) -> None:
 
     jax, _ = configure_runtime(config.runtime, config.sampler.num_chains)
 
-    potential_fn, init_params = build_potential(config, jax)
+    potential_fn, init_params = build_potential(config, args.catalog, jax)
 
     forward_mode = config.sampler.forward_mode_differentiation and not args.reverse_ad
     ad_mode = "forward" if forward_mode else "reverse"

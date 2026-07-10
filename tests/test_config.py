@@ -63,15 +63,23 @@ def test_build_run_config_deep_merges_extra_overrides() -> None:
     assert config.sampler.target_accept == raw["sampler"]["target_accept"]
 
 
-def test_catalog_sha256_pin_is_optional_and_round_trips() -> None:
+def test_analysis_settings_round_trip() -> None:
     raw = load_config(REPO_ROOT / "configs/mcmc.example.toml")
-    unpinned = build_run_config(raw)
-    assert unpinned.catalog.sha256 is None
+    config = build_run_config(raw)
 
-    digest = "0" * 64
-    pinned = build_run_config(raw, catalog={"sha256": digest})
-    assert pinned.catalog.sha256 == digest
-    assert pinned.model_dump(mode="json")["catalog"]["sha256"] == digest
+    assert config.analysis.detectors == ("S1", "R1", "C1")
+    assert config.analysis.f_min == 2.0
+    assert config.model_dump(mode="json")["analysis"]["f_max"] == 4096.0
+
+
+def test_curated_configs_are_catalog_independent() -> None:
+    config_paths = list((REPO_ROOT / "configs/mcmc/curated").glob("*/*.json"))
+
+    assert config_paths
+    for path in config_paths:
+        raw = load_config(path)
+        assert "catalog" not in raw
+        assert build_run_config(raw).analysis.detectors
 
 
 def test_config_sha256_stable_across_key_order_and_sensitive_to_values() -> None:

@@ -148,7 +148,11 @@ args = _parse_args()
 config_path = _resolve_path(args.config, BASE_DIR)
 paper = load_mapping(config_path)
 figure = paper["figures"]["mcmc_compare_posteriors"]
-chains_dir = Path(paper["paths"]["chains_dir"]) / figure["campaign"]
+chains_dir = (
+    Path(paper["paths"]["chains_dir"])
+    / paper["catalog"]["id"]
+    / figure["campaign"]
+)
 
 configs = [
     PosteriorConfig(

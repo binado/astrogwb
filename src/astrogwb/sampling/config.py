@@ -29,16 +29,12 @@ class RuntimeConfig(BaseModel):
     chain_method: str = "auto"  # auto | parallel | sequential | vectorized
 
 
-class CatalogConfig(BaseModel):
+class AnalysisConfig(BaseModel):
     model_config = _STRICT
 
-    path: Path
     detectors: tuple[str, ...]
     f_min: float
     f_max: float
-    # Optional content pin: when set, the runner verifies the catalog file's
-    # SHA-256 before loading it. Ad-hoc runs may leave it unset.
-    sha256: str | None = None
 
 
 class CosmoConfig(BaseModel):
@@ -80,7 +76,7 @@ class RunConfig(BaseModel):
     # Unset (empty) -> default to the keys present in [priors]; resolved below.
     sampled_params: tuple[str, ...] = ()
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
-    catalog: CatalogConfig
+    analysis: AnalysisConfig
     cosmology: CosmoConfig
     sampler: SamplerConfig
     output: OutputConfig = Field(default_factory=OutputConfig)

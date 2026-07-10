@@ -28,15 +28,15 @@ uv sync --extra mcmc --group dev
 Our inference framework uses an importance sampling scheme to calculate the spectral density of the astrophysical SGWB with a fixed population of CBCs. To generate the population, we suggest using the excellent [`gwmock-pop`](https://leuven-gravity-institute.github.io/gwmock-pop/) package.
 
 An example BNS population is defined declaratively in [`examples/bns_population.yaml`](examples/bns_population.yaml)
-and drawn with the `gwmock-pop simulate` CLI. The paper workflow uses the
-sample count and seed in [`configs/paper.toml`](configs/paper.toml); its
-equivalent explicit command is:
+and drawn with the `gwmock-pop simulate` CLI. The default catalog recipe lives
+in [`configs/catalogs.toml`](configs/catalogs.toml); its equivalent explicit
+command is:
 
 ```bash
 uv run gwmock-pop simulate \
   --config examples/bns_population.yaml \
   --n 16384 \
-  --output out/bns_n=16384.h5 \
+  --output out/populations/bns-n16384-df1.h5 \
   --seed 42
 ```
 
@@ -62,8 +62,8 @@ The corresponding explicit waveform command is:
 
 ```bash
 uv run python scripts/generate_waveform_catalog.py \
---population out/bns_n=16384.h5 \
---output out/bns_waveform_catalog_n=16384_df=1Hz.h5 \
+--population out/populations/bns-n16384-df1.h5 \
+--output out/catalogs/bns-n16384-df1.h5 \
 --approximant IMRPhenomXAS_NRTidalv3 \
 --sampling-frequency 8192 \
 --minimum-frequency 2 \
@@ -73,10 +73,10 @@ uv run python scripts/generate_waveform_catalog.py \
 --chunk-size 2048
 ```
 
-These two commands are also Snakemake dependencies: requesting the catalog or
-an MCMC target automatically builds any missing or stale upstream files.
-Their population and waveform settings are kept in
-[`configs/paper.toml`](configs/paper.toml).
+These commands are also Snakemake dependencies. Requesting
+`out/catalogs/bns-n16384-df1.h5` or an MCMC target builds missing or stale
+upstream files. Add a new named recipe to `configs/catalogs.toml` rather than
+changing an existing one, so results remain isolated by catalog ID.
 
 ## Running inference
 
@@ -85,28 +85,26 @@ There are two working examples provided in the repo:
 - The [`run_mcmc.py` script](./scripts/run_mcmc.py) accepts a TOML or JSON configuration file and is suitable for running MCMC on a cluster.
 - The [`mcmc.py` notebook](./notebooks/mcmc.py) has the same functionality as the script but can be run interactively in a Jupyter notebook. You can use `uvx jupytext --to ipynb notebooks/mcmc.py` to convert it to a Jupyter notebook in your local machine.
 
-Both examples assume a population of binary neutron star (BNS) mergers following the example described above. See the notebook for more details on how the inference is set up.
-
-Generate the detector × sample-parameter sweep configs (from
-[`configs/mcmc.example.toml`](configs/mcmc.example.toml)) into the three
-sweep directories under `configs/mcmc/{cosmology,modified-propagation,astrophysical}/`:
+Both examples assume a population of binary neutron star (BNS) mergers following the example described above. The headless runner takes the proposal catalog explicitly:
 
 ```bash
-uv run --extra mcmc python scripts/generate_mcmc_configs.py --force
+uv run --extra mcmc python scripts/run_mcmc.py \
+  --config configs/mcmc.example.toml \
+  --catalog out/catalogs/bns-n16384-df1.h5
 ```
 
-Batch runs are driven by the Snakemake `run_mcmc` rule: the chain
-`chains/<campaign>/<run>.nc` (plus its `.json` sidecar) is built from
-`configs/mcmc/curated/<campaign>/<run>.json` — sweep campaigns
-(`cosmology`, `modified-propagation`, `astrophysical`) resolve directly to
-`configs/mcmc/<campaign>/<run>.json` instead. Request a single run by its
-output path, or a whole campaign via the aggregate targets:
+Batch runs are driven by the Snakemake `run_mcmc` rule. Sweep configs are
+generated automatically from [`configs/mcmc.example.toml`](configs/mcmc.example.toml)
+and are intentionally not versioned. Curated paper configs remain committed.
+Chains are namespaced by catalog ID, so the same inference configuration can be
+run against multiple proposal catalogs without overwriting results:
 
 ```bash
 uv run snakemake -n mcmc_paper_h0                    # dry-run: shows pending work
-uv run snakemake chains/paper-h0/et-triangular.nc    # one run
+uv run snakemake chains/bns-n16384-df1/paper-h0/et-triangular.nc
 uv run snakemake mcmc_paper_h0                       # the six paper-h0 runs
 uv run snakemake mcmc_sweeps                         # all generated sweep configs
+uv run snakemake chains/bns-n8192-df1/cosmology/ET-2L-aligned__H0.nc
 ```
 
 On a SLURM cluster, install the executor plugin and submit through the
@@ -118,24 +116,23 @@ uv sync --extra mcmc --group slurm
 uv run snakemake --profile profiles/slurm mcmc_paper_h0
 ```
 
-Reproducibility is layered on committed recipes, fixed population seeds, and
-content hashes instead of lock files: Snakemake rebuilds chains after catalog
-or config drift, while each chain sidecar records the catalog's actual SHA-256.
+Reproducibility is layered on committed catalog recipes, fixed population seeds,
+and content hashes instead of lock files. Each chain sidecar records the exact
+catalog path and SHA-256 used; its MCMC config hash is independent of catalog
+selection. Snakemake rebuilds chains after recipe or config drift.
 Chains and sidecars are written `protected()` (read-only); before intentionally
 redoing a run, `chmod +w` its outputs and rerun with `--forcerun`.
 
-**One-time migration on existing cluster checkouts** (chains produced by the
-retired `submit_mcmc.py` flow have no Snakemake metadata): register them once
-with `uv run snakemake --touch mcmc_paper_h0` while they are still writable.
-For figure-only builds on machines with pre-existing chains,
-`--rerun-triggers mtime` is the escape hatch to suppress metadata-based
-reruns. Always dry-run (`-n`) before real runs on the cluster — note that
+Existing non-namespaced chains are left untouched. The catalog-namespaced
+workflow builds fresh chains instead of registering legacy outputs with
+`--touch`. Always dry-run (`-n`) before real runs on the cluster — note that
 `paper_figures` pulls `run_mcmc` into its DAG, so on a machine without chains
 it will schedule MCMC runs.
 
 ### Outputs
 
-Each run writes an ArviZ `InferenceData` to `chains/<campaign>/<run>.nc`
+Each workflow run writes an ArviZ `InferenceData` to
+`chains/<catalog-id>/<campaign>/<run>.nc`
 (ad-hoc unlabelled runs keep the timestamped
 `chains/mcmc-<params>-det=<det>-seed<n>-<ts>.nc` convention) alongside a
 sibling `.json` sidecar recording the run's provenance: catalog path and
@@ -148,8 +145,9 @@ See the [plotting notebook](./notebooks/mcmc_plotting.py) for examples of how to
 
 ## Paper figures
 
-Shared analysis settings (catalog path, fiducials, detector networks, nested
+Shared paper settings (default catalog ID, fiducials, detector networks, nested
 posterior plot entries) live in [`configs/paper.toml`](configs/paper.toml).
+Reusable catalog recipes live in [`configs/catalogs.toml`](configs/catalogs.toml).
 Figure-local knobs (output paths, dpi, sampler settings, which networks to
 plot) are argparse defaults in each Jupytext notebook — edit them in Jupyter,
 override with CLI flags headless, and promote happy values by updating those

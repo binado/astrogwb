@@ -1,20 +1,10 @@
 [paths]
-catalog = "out/bns_waveform_catalog_n=16384_df=1Hz.h5"
 figures_dir = "figures"
 chains_dir = "chains"
 
-[population]
-n_samples = 16384
-seed = 42
-
-[waveform_catalog]
-approximant = "IMRPhenomXAS_NRTidalv3"
-sampling_frequency = 8192.0
-minimum_frequency = 2.0
-maximum_frequency = 4096.0
-reference_frequency = 20.0
-frequency_resolution = 1.0
-chunk_size = 2048
+[catalog]
+registry = "configs/catalogs.toml"
+id = "bns-n16384-df1"
 
 [analysis]
 observation_time = 1.0

@@ -27,9 +27,10 @@
 # It is a smoke/sanity test: can NUTS recover a known injected amplitude from
 # a fiducial catalog?
 #
-# To run the notebook end-to-end, set `[paths].catalog` in
-# [`configs/paper.toml`](../configs/paper.toml) (or pass `--config`) to a
-# pluscross `.h5` catalog of complex polarizations. Figure-local knobs
+# To run the notebook end-to-end, select a catalog ID in
+# [`configs/paper.toml`](../configs/paper.toml) (or pass `--config`); the
+# registry resolves it to a pluscross `.h5` catalog of complex polarizations.
+# Figure-local knobs
 # (detectors, seed, sampler, outputs) are argparse defaults in the config
 # cell — edit them in Jupyter, override with flags headless.
 
@@ -69,6 +70,7 @@ from astrogwb.gwb import (
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
+from astrogwb.catalogs import catalog_path, load_catalog_recipes
 from pluscross import load_catalog
 from astrogwb.utils import repo_root, years_to_seconds
 
@@ -158,7 +160,11 @@ args = _parse_args()
 config_path = _resolve_path(args.config, ROOT_DIR)
 paper = load_mapping(config_path)
 
-CATALOG_PATH = _resolve_path(Path(paper["paths"]["catalog"]), ROOT_DIR)
+catalog_registry = _resolve_path(Path(paper["catalog"]["registry"]), ROOT_DIR)
+catalog_id = paper["catalog"]["id"]
+if catalog_id not in load_catalog_recipes(catalog_registry):
+    raise ValueError(f"unknown catalog {catalog_id!r} in {catalog_registry}")
+CATALOG_PATH = _resolve_path(catalog_path(catalog_id), ROOT_DIR)
 output_path = _resolve_path(args.output_pdf, ROOT_DIR)
 
 # Detector settings

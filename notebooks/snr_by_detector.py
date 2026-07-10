@@ -58,6 +58,7 @@ from astrogwb.gwb import (
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
+from astrogwb.catalogs import catalog_path, load_catalog_recipes
 from pluscross import load_catalog
 from astrogwb.utils import repo_root, years_to_seconds
 
@@ -142,7 +143,11 @@ args = _parse_args()
 config_path = _resolve_path(args.config, ROOT_DIR)
 paper = load_mapping(config_path)
 
-CATALOG_PATH = _resolve_path(Path(paper["paths"]["catalog"]), ROOT_DIR)
+catalog_registry = _resolve_path(Path(paper["catalog"]["registry"]), ROOT_DIR)
+catalog_id = paper["catalog"]["id"]
+if catalog_id not in load_catalog_recipes(catalog_registry):
+    raise ValueError(f"unknown catalog {catalog_id!r} in {catalog_registry}")
+CATALOG_PATH = _resolve_path(catalog_path(catalog_id), ROOT_DIR)
 output_pdf = _resolve_path(args.output_pdf, ROOT_DIR)
 output_csv = _resolve_path(args.output_csv, ROOT_DIR)
 output_tex = _resolve_path(args.output_tex, ROOT_DIR)
