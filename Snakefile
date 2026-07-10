@@ -1,5 +1,5 @@
 from pathlib import Path
-import importlib.util
+import json
 import tomllib
 
 
@@ -17,22 +17,18 @@ SNR_BY_DETECTOR_PDF = config["snr_by_detector"]["output_pdf"]
 SNR_BY_DETECTOR_CSV = config["snr_by_detector"]["output_csv"]
 SNR_BY_DETECTOR_TEX = config["snr_by_detector"]["output_tex"]
 POSTERIOR_PDF = config["mcmc_compare_posteriors"]["output_pdf"]
+POSTERIOR_FIGURE = PAPER_CONFIG["figures"]["mcmc_compare_posteriors"]
+POSTERIOR_LOCK = POSTERIOR_FIGURE["campaign_lock"]
+with Path(POSTERIOR_LOCK).open() as handle:
+    _POSTERIOR_CAMPAIGN = json.load(handle)
+_POSTERIOR_RUNS = {run["id"]: run for run in _POSTERIOR_CAMPAIGN["runs"]}
 POSTERIOR_CHAINS = [
-    entry["path"]
-    for entry in PAPER_CONFIG["figures"]["mcmc_compare_posteriors"]["posteriors"]
+    _POSTERIOR_RUNS[entry["run"]]["outputs"]["chain"]
+    for entry in POSTERIOR_FIGURE["posteriors"]
 ]
-
-_GEN_SPEC = importlib.util.spec_from_file_location(
-    "generate_mcmc_configs",
-    Path("scripts/generate_mcmc_configs.py"),
-)
-_GEN = importlib.util.module_from_spec(_GEN_SPEC)
-assert _GEN_SPEC.loader is not None
-_GEN_SPEC.loader.exec_module(_GEN)
-
-MCMC_CONFIG_EXAMPLE = config["mcmc_configs"]["example"]
-MCMC_CONFIG_DIR = config["mcmc_configs"]["output_dir"]
-MCMC_CONFIGS = [f"{MCMC_CONFIG_DIR}/{name}" for name in _GEN.sweep_filenames()]
+CAMPAIGN_INVENTORY = "configs/mcmc/campaigns/paper-h0-legacy.toml"
+CAMPAIGN_FROZEN_DIR = "configs/mcmc/frozen/paper-h0-legacy"
+CAMPAIGN_MANIFEST = f"{CAMPAIGN_FROZEN_DIR}/array-manifest.txt"
 
 
 rule paper_figures:
@@ -42,16 +38,18 @@ rule paper_figures:
         POSTERIOR_PDF,
 
 
-rule mcmc_configs:
+rule mcmc_campaign:
     input:
-        example=MCMC_CONFIG_EXAMPLE,
+        inventory=CAMPAIGN_INVENTORY,
+        lock=POSTERIOR_LOCK,
     output:
-        MCMC_CONFIGS,
+        manifest=CAMPAIGN_MANIFEST,
     params:
-        outdir=MCMC_CONFIG_DIR,
+        frozen_dir=CAMPAIGN_FROZEN_DIR,
     shell:
-        "uv run --extra mcmc python scripts/generate_mcmc_configs.py"
-        " {params.outdir} --example {input.example} --force"
+        "uv run --extra mcmc python scripts/freeze_mcmc_campaign.py"
+        " {input.inventory} --lock {input.lock} --frozen-dir {params.frozen_dir}"
+        " --manifest {output.manifest}"
 
 
 rule amplitude_toy:
@@ -85,10 +83,11 @@ rule snr_by_detector:
 rule mcmc_compare_posteriors:
     input:
         config=str(PAPER_CONFIG_PATH),
+        lock=POSTERIOR_LOCK,
         chains=POSTERIOR_CHAINS,
     output:
         POSTERIOR_PDF,
     shell:
-        "uv run python notebooks/mcmc_compare_posteriors.py"
+        "uv run --extra mcmc python notebooks/mcmc_compare_posteriors.py"
         " --config {input.config}"
         " --output-pdf {output}"

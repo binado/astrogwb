@@ -1,0 +1,29 @@
+version = 1
+campaign_id = "paper-h0-legacy"
+# These six runs predate deterministic campaign output names.  Their timestamped
+# labels are intentionally retained so the paper figure points at existing chains.
+legacy = true
+
+[[runs]]
+id = "et-triangular"
+config = "../curated/paper-h0-legacy/et-triangular.json"
+
+[[runs]]
+id = "et-triangular-ce-hanford"
+config = "../curated/paper-h0-legacy/et-triangular-ce-hanford.json"
+
+[[runs]]
+id = "et-2l-aligned"
+config = "../curated/paper-h0-legacy/et-2l-aligned.json"
+
+[[runs]]
+id = "et-2l-aligned-ce-hanford"
+config = "../curated/paper-h0-legacy/et-2l-aligned-ce-hanford.json"
+
+[[runs]]
+id = "et-2l-misaligned"
+config = "../curated/paper-h0-legacy/et-2l-misaligned.json"
+
+[[runs]]
+id = "et-2l-misaligned-ce-hanford"
+config = "../curated/paper-h0-legacy/et-2l-misaligned-ce-hanford.json"

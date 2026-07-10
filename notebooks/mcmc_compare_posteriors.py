@@ -28,6 +28,7 @@ import pandas as pd
 import xarray as xr
 
 from astrogwb.config import load_mapping
+from astrogwb.sampling.campaign import load_lock
 from astrogwb.utils import repo_root
 
 # %config InlineBackend.figure_format = "retina"
@@ -130,11 +131,13 @@ args = _parse_args()
 config_path = _resolve_path(args.config, BASE_DIR)
 paper = load_mapping(config_path)
 figure = paper["figures"]["mcmc_compare_posteriors"]
+lock_path = _resolve_path(Path(figure["campaign_lock"]), BASE_DIR)
+campaign = load_lock(lock_path)
 
 configs = [
     PosteriorConfig(
         label=entry["label"],
-        path=Path(entry["path"]),
+        path=Path(campaign.run(entry["run"]).outputs["chain"]),
         color=entry["color"],
         linestyle=entry["linestyle"],
     )

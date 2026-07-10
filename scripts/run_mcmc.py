@@ -84,6 +84,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Log at WARNING instead of INFO.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing NetCDF chain and/or JSON sidecar for this run.",
+    )
     return parser.parse_args(argv)
 
 
@@ -318,20 +323,55 @@ def _git_revision() -> str | None:
         return None
 
 
-def save(mcmc, config: RunConfig) -> Path:
+def output_paths(config: RunConfig, *, timestamp: str | None = None) -> tuple[Path, Path]:
+    """Return the chain and sidecar paths a run will write.
+
+    Campaign configs always have a label.  Auto-labelled ad-hoc runs retain the
+    timestamped naming convention, while still allowing a collision check before
+    expensive sampling starts.
+    """
+    if config.label:
+        base = config.label
+    else:
+        timestamp = timestamp or datetime.now().strftime("%Y%m%d-%H%M%S")
+        params_suffix = "-".join(config.sampled_params)
+        det_suffix = ",".join(config.catalog.detectors)
+        base = f"mcmc-{params_suffix}-det={det_suffix}-seed{config.seed}-{timestamp}"
+    return config.outdir / f"{base}.nc", config.outdir / f"{base}.json"
+
+
+def ensure_output_paths_available(
+    config: RunConfig, *, timestamp: str | None = None, force: bool = False
+) -> tuple[Path, Path]:
+    """Fail before sampling if either output artifact already exists."""
+    nc_path, json_path = output_paths(config, timestamp=timestamp)
+    existing = [path for path in (nc_path, json_path) if path.exists()]
+    if existing and not force:
+        names = ", ".join(str(path) for path in existing)
+        raise FileExistsError(
+            f"refusing to replace existing MCMC output(s): {names}. "
+            "Pass --force only for an intentional replacement."
+        )
+    return nc_path, json_path
+
+
+def save(
+    mcmc,
+    config: RunConfig,
+    *,
+    timestamp: str | None = None,
+    force: bool = False,
+) -> Path:
     """Write the ArviZ NetCDF + JSON run record, and log the IS health check."""
     import arviz as az
 
     config.outdir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    params_suffix = "-".join(config.sampled_params)
-    det_suffix = ",".join(config.catalog.detectors)
-    base = config.label or (
-        f"mcmc-{params_suffix}-det={det_suffix}-seed{config.seed}-{timestamp}"
+    timestamp = timestamp or datetime.now().strftime("%Y%m%d-%H%M%S")
+    nc_path, json_path = ensure_output_paths_available(
+        config, timestamp=timestamp, force=force
     )
 
     idata = az.from_numpyro(mcmc)
-    nc_path = config.outdir / f"{base}.nc"
     idata.to_netcdf(nc_path)
 
     run_record = {
@@ -350,7 +390,6 @@ def save(mcmc, config: RunConfig) -> Path:
         "git_revision": _git_revision(),
         "timestamp": timestamp,
     }
-    json_path = config.outdir / f"{base}.json"
     json_path.write_text(json.dumps(run_record, indent=2, default=str))
 
     # Importance-sampling health: relative ESS near 1 means the proposal catalog
@@ -385,9 +424,15 @@ def main(argv: list[str] | None = None) -> None:
         tuple(config.constants),
     )
 
+    # Pick a single timestamp now and check both artifacts before JAX starts.
+    # Labelled campaign runs are deterministic; auto-labelled runs preserve the
+    # existing timestamp convention.
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    ensure_output_paths_available(config, timestamp=timestamp, force=args.force)
+
     jax, chain_method = configure_runtime(config.runtime, config.sampler.num_chains)
     mcmc = run(config, jax, chain_method)
-    save(mcmc, config)
+    save(mcmc, config, timestamp=timestamp, force=args.force)
 
 
 if __name__ == "__main__":

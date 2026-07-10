@@ -1,10 +1,11 @@
 #!/bin/bash
-# Submit a SLURM job array over MCMC configs in a directory.
-# One array task per *.toml or *.json file (sorted); each task runs scripts/run_mcmc.py.
+# Submit a SLURM job array over MCMC configs in a directory or manifest.
+# One array task per config; each task runs scripts/run_mcmc.py.
 # Adapt --partition / --account / module loads inside the heredoc to your cluster.
 #
 # Usage:
 #   ./scripts/submit_mcmc.sh -i configs/mcmc/sweep
+#   ./scripts/submit_mcmc.sh --manifest configs/mcmc/frozen/paper-h0-v2/array-manifest.txt
 #
 # Ensure the cluster env has the mcmc extra (pydantic) plus any needed groups:
 #   uv sync --extra mcmc --group dev
@@ -13,12 +14,15 @@ set -euo pipefail
 
 function usage() {
     echo "Usage: $0 -i <config_dir>"
+    echo "       $0 --manifest <array_manifest>"
     echo "       $0 <config_dir>"
     echo "  config_dir: Directory containing one *.toml or *.json config per array task"
+    echo "  array_manifest: Non-empty file with one existing *.toml or *.json config per line"
     exit 1
 }
 
 INPUT_DIR=""
+MANIFEST_INPUT=""
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -32,6 +36,14 @@ while [[ $# -gt 0 ]]; do
                 usage
             fi
             INPUT_DIR="$2"
+            shift 2
+            ;;
+        --manifest)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: Missing value for $1." >&2
+                usage
+            fi
+            MANIFEST_INPUT="$2"
             shift 2
             ;;
         --)
@@ -60,28 +72,59 @@ if [[ ${#POSITIONAL_ARGS[@]} -gt 1 ]]; then
     usage
 fi
 
-if [[ -z "${INPUT_DIR}" ]]; then
-    echo "Error: Missing config directory." >&2
+if [[ -n "${INPUT_DIR}" && -n "${MANIFEST_INPUT}" ]]; then
+    echo "Error: --input and --manifest are mutually exclusive." >&2
+    exit 1
+fi
+
+if [[ -z "${INPUT_DIR}" && -z "${MANIFEST_INPUT}" ]]; then
+    echo "Error: Missing config directory or manifest." >&2
     usage
 fi
 
-if [[ ! -d "${INPUT_DIR}" ]]; then
-    echo "Error: Config directory '${INPUT_DIR}' not found." >&2
-    exit 1
-fi
-
 CONFIGS=()
-while IFS= read -r config; do
-    CONFIGS+=("$config")
-done < <(find "${INPUT_DIR}" -maxdepth 1 -type f \( -name '*.toml' -o -name '*.json' \) | sort)
-if [[ ${#CONFIGS[@]} -eq 0 ]]; then
-    echo "Error: No *.toml or *.json configs found in '${INPUT_DIR}'." >&2
-    exit 1
-fi
+if [[ -n "${MANIFEST_INPUT}" ]]; then
+    if [[ ! -f "${MANIFEST_INPUT}" ]]; then
+        echo "Error: Manifest '${MANIFEST_INPUT}' not found." >&2
+        exit 1
+    fi
+    MANIFEST="${MANIFEST_INPUT}"
+    while IFS= read -r config || [[ -n "${config}" ]]; do
+        if [[ -z "${config}" ]]; then
+            echo "Error: Manifest '${MANIFEST}' contains an empty line." >&2
+            exit 1
+        fi
+        if [[ "${config}" != *.toml && "${config}" != *.json ]]; then
+            echo "Error: Manifest entry '${config}' is not a TOML or JSON config." >&2
+            exit 1
+        fi
+        if [[ ! -f "${config}" ]]; then
+            echo "Error: Manifest config '${config}' not found." >&2
+            exit 1
+        fi
+        CONFIGS+=("${config}")
+    done < "${MANIFEST}"
+    if [[ ${#CONFIGS[@]} -eq 0 ]]; then
+        echo "Error: Manifest '${MANIFEST}' is empty." >&2
+        exit 1
+    fi
+else
+    if [[ ! -d "${INPUT_DIR}" ]]; then
+        echo "Error: Config directory '${INPUT_DIR}' not found." >&2
+        exit 1
+    fi
+    while IFS= read -r config; do
+        CONFIGS+=("$config")
+    done < <(find "${INPUT_DIR}" -maxdepth 1 -type f \( -name '*.toml' -o -name '*.json' \) | sort)
+    if [[ ${#CONFIGS[@]} -eq 0 ]]; then
+        echo "Error: No *.toml or *.json configs found in '${INPUT_DIR}'." >&2
+        exit 1
+    fi
 
-mkdir -p logs
-MANIFEST="logs/mcmc_manifest_${RANDOM}.txt"
-printf '%s\n' "${CONFIGS[@]}" > "${MANIFEST}"
+    mkdir -p logs
+    MANIFEST="logs/mcmc_manifest_${RANDOM}.txt"
+    printf '%s\n' "${CONFIGS[@]}" > "${MANIFEST}"
+fi
 
 ARRAY_MAX=$(( ${#CONFIGS[@]} - 1 ))
 echo "Submitting ${#CONFIGS[@]} MCMC jobs (array 0-${ARRAY_MAX})"
