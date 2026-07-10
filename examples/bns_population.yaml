@@ -23,11 +23,10 @@ parameters:
       arguments:
         z_min: 0.0
         z_max: &z_max 20.0
-        # Rate-evolution shape parameters, stated explicitly at the gwmock-pop
-        # defaults (the MCMC fiducial in analysis_numpyro.py is kept in sync).
-        gamma: 2.7
-        kappa: 2.9
-        z_peak: 1.9
+        # Rate-evolution shape parameters (Madau–Dickinson fiducials).
+        gamma: 1.42
+        kappa: 4.62
+        z_peak: 1.84
         hubble_constant: &hubble_constant 67.66
         omega_m: &omega_m 0.3096
 
