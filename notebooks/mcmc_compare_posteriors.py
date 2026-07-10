@@ -68,11 +68,11 @@ plt.rcParams.update(**pub_rc)
 #
 # Nested plot data (posterior list, `ax_kwargs`, `legend_kwargs`) comes from
 # `[figures.mcmc_compare_posteriors]` in
-# [`configs/paper.toml`](../configs/paper.toml); each posterior's chain is
-# resolved as `<paths.chains_dir>/<campaign>/<run>.nc`, matching the Snakemake
-# `run_mcmc` rule's outputs. Scalars (`var_name`, dpi, output path, group) are
-# argparse defaults below — edit in Jupyter, override with flags headless.
-# Promote happy values by updating those defaults / toml.
+# [`configs/paper.toml`](../configs/paper.toml). Chain paths and scalar options
+# (`var_name`, dpi, output path, group) are argparse defaults below — edit them in
+# Jupyter or override with flags headless. Snakemake supplies the ordered chain
+# paths as declared workflow inputs. Promote happy values by updating those
+# defaults / toml.
 
 
 # %%
@@ -109,9 +109,26 @@ class PosteriorConfig:
         return float(hdi.sel(ci_bound="lower")), float(hdi.sel(ci_bound="upper"))
 
 
+DEFAULT_CHAIN_PATHS = [
+    Path("chains/bns-n16384-df1/paper-h0/et-triangular.nc"),
+    Path("chains/bns-n16384-df1/paper-h0/et-triangular-ce-hanford.nc"),
+    Path("chains/bns-n16384-df1/paper-h0/et-2l-aligned.nc"),
+    Path("chains/bns-n16384-df1/paper-h0/et-2l-aligned-ce-hanford.nc"),
+    Path("chains/bns-n16384-df1/paper-h0/et-2l-misaligned.nc"),
+    Path("chains/bns-n16384-df1/paper-h0/et-2l-misaligned-ce-hanford.nc"),
+]
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
+    parser.add_argument(
+        "--chains",
+        type=Path,
+        nargs="+",
+        default=DEFAULT_CHAIN_PATHS,
+        help="Ordered chain paths matching the posterior entries in the config.",
+    )
     parser.add_argument(
         "--output-pdf",
         type=Path,
@@ -148,21 +165,22 @@ args = _parse_args()
 config_path = _resolve_path(args.config, BASE_DIR)
 paper = load_mapping(config_path)
 figure = paper["figures"]["mcmc_compare_posteriors"]
-chains_dir = (
-    Path(paper["paths"]["chains_dir"])
-    / paper["catalog"]["id"]
-    / figure["campaign"]
-)
+posterior_entries = figure["posteriors"]
+if len(args.chains) != len(posterior_entries):
+    raise ValueError(
+        f"received {len(args.chains)} chain paths for "
+        f"{len(posterior_entries)} posterior entries"
+    )
 
 configs = [
     PosteriorConfig(
         network=entry["network"],
         label=entry["label"],
-        path=chains_dir / f"{entry['run']}.nc",
+        path=chain_path,
         color=entry["color"],
         linestyle=entry["linestyle"],
     )
-    for entry in figure["posteriors"]
+    for entry, chain_path in zip(posterior_entries, args.chains, strict=True)
 ]
 VAR_NAME = args.var_name
 OUT_FILE = _resolve_path(args.output_pdf, BASE_DIR)

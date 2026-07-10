@@ -14,11 +14,11 @@ PAPER_CONFIG_PATH = Path(config["paper_config"])
 with PAPER_CONFIG_PATH.open("rb") as handle:
     PAPER_CONFIG = tomllib.load(handle)
 
-CATALOG_REGISTRY_PATH = Path(PAPER_CONFIG["catalog"]["registry"])
+CATALOG_REGISTRY_PATH = Path(config["catalog"]["registry"])
 CATALOG_RECIPES = load_catalog_recipes(CATALOG_REGISTRY_PATH)
-DEFAULT_CATALOG = PAPER_CONFIG["catalog"]["id"]
+DEFAULT_CATALOG = config["catalog"]["id"]
 if DEFAULT_CATALOG not in CATALOG_RECIPES:
-    raise ValueError(f"paper catalog {DEFAULT_CATALOG!r} is not in the registry")
+    raise ValueError(f"workflow catalog {DEFAULT_CATALOG!r} is not in the registry")
 
 SWEEP_SPEC_PATH = "configs/mcmc.sweeps.toml"
 SWEEP_SPEC = load_sweep_spec(Path(SWEEP_SPEC_PATH))
@@ -186,8 +186,9 @@ rule amplitude_toy:
         AMPLITUDE_TOY_PDF,
     shell:
         "uv run python notebooks/amplitude_toy_model.py"
-        " --config {input.config}"
-        " --output-pdf {output}"
+        " --catalog {input.catalog:q}"
+        " --config {input.config:q}"
+        " --output-pdf {output:q}"
 
 
 rule snr_by_detector:
@@ -202,12 +203,13 @@ rule snr_by_detector:
         sigmas_tex=SNR_BY_DETECTOR_SIGMAS_TEX,
     shell:
         "uv run python notebooks/snr_by_detector.py"
-        " --config {input.config}"
-        " --output-pdf {output.pdf}"
-        " --output-csv {output.csv}"
-        " --output-tex {output.tex}"
-        " --output-sigmas-csv {output.sigmas_csv}"
-        " --output-sigmas-tex {output.sigmas_tex}"
+        " --catalog {input.catalog:q}"
+        " --config {input.config:q}"
+        " --output-pdf {output.pdf:q}"
+        " --output-csv {output.csv:q}"
+        " --output-tex {output.tex:q}"
+        " --output-sigmas-csv {output.sigmas_csv:q}"
+        " --output-sigmas-tex {output.sigmas_tex:q}"
 
 
 rule mcmc_compare_posteriors:
@@ -221,8 +223,9 @@ rule mcmc_compare_posteriors:
         tex=POSTERIOR_TEX,
     shell:
         "uv run --extra mcmc python notebooks/mcmc_compare_posteriors.py"
-        " --config {input.config}"
-        " --snr-csv {input.snr_csv}"
-        " --output-pdf {output.pdf}"
-        " --output-csv {output.csv}"
-        " --output-tex {output.tex}"
+        " --chains {input.chains:q}"
+        " --config {input.config:q}"
+        " --snr-csv {input.snr_csv:q}"
+        " --output-pdf {output.pdf:q}"
+        " --output-csv {output.csv:q}"
+        " --output-tex {output.tex:q}"

@@ -27,11 +27,10 @@
 # It is a smoke/sanity test: can NUTS recover a known injected amplitude from
 # a fiducial catalog?
 #
-# To run the notebook end-to-end, select a catalog ID in
-# [`configs/paper.toml`](../configs/paper.toml) (or pass `--config`); the
-# registry resolves it to a pluscross `.h5` catalog of complex polarizations.
-# Figure-local knobs
-# (detectors, seed, sampler, outputs) are argparse defaults in the config
+# To run the notebook end-to-end, use the editable catalog default in the
+# configuration cell below or pass `--catalog` headless. Snakemake supplies the
+# concrete pluscross `.h5` catalog as a declared workflow input. Figure-local
+# knobs (detectors, seed, sampler, outputs) are argparse defaults in the config
 # cell — edit them in Jupyter, override with flags headless.
 
 # %% [markdown]
@@ -62,6 +61,7 @@ import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
 
 from astrogwb.config.loading import load_mapping
+from astrogwb.config.hashing import file_sha256
 from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.gwb import (
     spectral_density,
@@ -70,7 +70,6 @@ from astrogwb.gwb import (
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from astrogwb.config.catalogs import catalog_path, load_catalog_recipes
 from pluscross import load_catalog
 from astrogwb.utils import repo_root, years_to_seconds
 
@@ -114,9 +113,18 @@ azp.style.use("arviz-variat")
 
 
 # %%
+DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
+    parser.add_argument(
+        "--catalog",
+        type=Path,
+        default=DEFAULT_CATALOG_PATH,
+        help="Waveform catalog to use (Snakemake passes its declared input).",
+    )
     parser.add_argument(
         "--output-pdf",
         type=Path,
@@ -160,11 +168,7 @@ args = _parse_args()
 config_path = _resolve_path(args.config, ROOT_DIR)
 paper = load_mapping(config_path)
 
-catalog_registry = _resolve_path(Path(paper["catalog"]["registry"]), ROOT_DIR)
-catalog_id = paper["catalog"]["id"]
-if catalog_id not in load_catalog_recipes(catalog_registry):
-    raise ValueError(f"unknown catalog {catalog_id!r} in {catalog_registry}")
-CATALOG_PATH = _resolve_path(catalog_path(catalog_id), ROOT_DIR)
+CATALOG_PATH = _resolve_path(args.catalog, ROOT_DIR)
 output_path = _resolve_path(args.output_pdf, ROOT_DIR)
 
 # Detector settings
@@ -215,6 +219,7 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 
 # %%
 catalog = load_catalog(CATALOG_PATH)
+catalog_sha256 = file_sha256(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
 polarization_power = jnp.asarray(
@@ -338,6 +343,7 @@ inference_data.to_netcdf(out_dir / f"{base}.nc")
 run_config = {
     "config_path": str(config_path),
     "catalog_path": str(CATALOG_PATH),
+    "catalog_sha256": catalog_sha256,
     "detectors": list(detnames),
     "output_path": str(output_path),
     "seed": seed,

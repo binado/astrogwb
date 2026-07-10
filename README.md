@@ -145,17 +145,20 @@ See the [plotting notebook](./notebooks/mcmc_plotting.py) for examples of how to
 
 ## Paper figures
 
-Shared paper settings (default catalog ID, fiducials, detector networks, nested
+Shared scientific and presentation settings (fiducials, detector networks, nested
 posterior plot entries) live in [`configs/paper.toml`](configs/paper.toml).
-Reusable catalog recipes live in [`configs/catalogs.toml`](configs/catalogs.toml).
+Reusable catalog recipes live in [`configs/catalogs.toml`](configs/catalogs.toml),
+while the catalog selected for the paper workflow lives in
+[`configs/workflow.yaml`](configs/workflow.yaml).
 Figure-local knobs (output paths, dpi, sampler settings, which networks to
-plot) are argparse defaults in each Jupytext notebook — edit them in Jupyter,
-override with CLI flags headless, and promote happy values by updating those
-defaults (and `paper.toml` for shared/nested data).
+plot), catalog paths, and posterior chain paths are argparse defaults in each
+Jupytext notebook — edit them in Jupyter, override with CLI flags headless, and
+promote happy values by updating those defaults (and `paper.toml` for
+shared/nested data).
 
 Snakemake reads [`configs/workflow.yaml`](configs/workflow.yaml) for the paper
-config path and declared output paths, then passes `--config` plus output-path
-flags into each notebook.
+config path, selected catalog, and declared output paths. It passes concrete
+catalog and chain inputs, `--config`, and output-path flags into each notebook.
 
 Preview the declared workflow:
 

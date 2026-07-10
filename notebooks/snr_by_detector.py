@@ -58,7 +58,6 @@ from astrogwb.gwb import (
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from astrogwb.config.catalogs import catalog_path, load_catalog_recipes
 from pluscross import load_catalog
 from astrogwb.utils import repo_root, years_to_seconds
 
@@ -91,6 +90,8 @@ jax.config.update("jax_enable_x64", True)
 #   override headless). Promote happy values by updating those defaults.
 
 # %%
+DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
+
 _DEFAULT_NETWORKS = [
     "ET-triangular",
     "ET-triangular-CE-Hanford",
@@ -104,6 +105,12 @@ _DEFAULT_NETWORKS = [
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
+    parser.add_argument(
+        "--catalog",
+        type=Path,
+        default=DEFAULT_CATALOG_PATH,
+        help="Waveform catalog to use (Snakemake passes its declared input).",
+    )
     parser.add_argument(
         "--output-pdf", type=Path, default=Path("figures/snr_by_detector.pdf")
     )
@@ -143,11 +150,7 @@ args = _parse_args()
 config_path = _resolve_path(args.config, ROOT_DIR)
 paper = load_mapping(config_path)
 
-catalog_registry = _resolve_path(Path(paper["catalog"]["registry"]), ROOT_DIR)
-catalog_id = paper["catalog"]["id"]
-if catalog_id not in load_catalog_recipes(catalog_registry):
-    raise ValueError(f"unknown catalog {catalog_id!r} in {catalog_registry}")
-CATALOG_PATH = _resolve_path(catalog_path(catalog_id), ROOT_DIR)
+CATALOG_PATH = _resolve_path(args.catalog, ROOT_DIR)
 output_pdf = _resolve_path(args.output_pdf, ROOT_DIR)
 output_csv = _resolve_path(args.output_csv, ROOT_DIR)
 output_tex = _resolve_path(args.output_tex, ROOT_DIR)
