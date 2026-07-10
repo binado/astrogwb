@@ -108,7 +108,9 @@ def test_gaussian_campaign_priors(tmp_path: Path) -> None:
     generate_configs(output_dir, skip_existing=False)
 
     merger_gauss = build_run_config(
-        load_config(output_dir / "cosmology" / "ET-2L-aligned__H0-merger-rate-gauss.json")
+        load_config(
+            output_dir / "cosmology" / "ET-2L-aligned__H0-merger-rate-gauss.json"
+        )
     )
     assert merger_gauss.sampled_params == ("H0", "local_merger_rate")
     assert merger_gauss.priors["H0"]["type"] == "uniform"
