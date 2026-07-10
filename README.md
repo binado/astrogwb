@@ -82,18 +82,21 @@ There are two working examples provided in the repo:
 Both examples assume a population of binary neutron star (BNS) mergers following the example described above. See the notebook for more details on how the inference is set up.
 
 Generate the detector × sample-parameter sweep configs (from
-[`configs/mcmc.example.toml`](configs/mcmc.example.toml)) directly:
+[`configs/mcmc.example.toml`](configs/mcmc.example.toml)) into the three
+campaign directories under `configs/mcmc/{cosmology,modified-propagation,astrophysical}/`:
 
 ```bash
 uv run --extra mcmc python scripts/generate_mcmc_configs.py --force
 ```
 
-Then submit the array on a SLURM cluster (cluster env needs
+Then submit one campaign array on a SLURM cluster (cluster env needs
 `uv sync --extra mcmc`, which includes config validation and ArviZ NetCDF
 output support):
 
 ```bash
-python scripts/submit_mcmc.py -i configs/mcmc/sweep
+python scripts/submit_mcmc.py -i configs/mcmc/cosmology
+python scripts/submit_mcmc.py -i configs/mcmc/modified-propagation
+python scripts/submit_mcmc.py -i configs/mcmc/astrophysical
 ```
 
 ### Outputs
