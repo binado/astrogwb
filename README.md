@@ -83,42 +83,59 @@ Both examples assume a population of binary neutron star (BNS) mergers following
 
 Generate the detector × sample-parameter sweep configs (from
 [`configs/mcmc.example.toml`](configs/mcmc.example.toml)) into the three
-campaign directories under `configs/mcmc/{cosmology,modified-propagation,astrophysical}/`:
+sweep directories under `configs/mcmc/{cosmology,modified-propagation,astrophysical}/`:
 
 ```bash
 uv run --extra mcmc python scripts/generate_mcmc_configs.py --force
 ```
 
-Then submit one campaign array on a SLURM cluster (cluster env needs
-`uv sync --extra mcmc`, which includes config validation and ArviZ NetCDF
-output support):
+Batch runs are driven by the Snakemake `run_mcmc` rule: the chain
+`chains/<campaign>/<run>.nc` (plus its `.json` sidecar) is built from
+`configs/mcmc/curated/<campaign>/<run>.json` — sweep campaigns
+(`cosmology`, `modified-propagation`, `astrophysical`) resolve directly to
+`configs/mcmc/<campaign>/<run>.json` instead. Request a single run by its
+output path, or a whole campaign via the aggregate targets:
 
 ```bash
-python scripts/submit_mcmc.py -i configs/mcmc/cosmology
-python scripts/submit_mcmc.py -i configs/mcmc/modified-propagation
-python scripts/submit_mcmc.py -i configs/mcmc/astrophysical
+uv run snakemake -n mcmc_paper_h0                    # dry-run: shows pending work
+uv run snakemake chains/paper-h0/et-triangular.nc    # one run
+uv run snakemake mcmc_paper_h0                       # the six paper-h0 runs
+uv run snakemake mcmc_sweeps                         # all generated sweep configs
 ```
 
-The reproducible paper campaign uses a frozen manifest and its immutable lock;
-submission validates every frozen config and the catalog SHA-256 before calling
-`sbatch`:
+On a SLURM cluster, install the executor plugin and submit through the
+committed profile (each `run_mcmc` job gets a GPU and lands in one job array;
+logs go to `.snakemake/slurm_logs/`):
 
 ```bash
-uv run --extra mcmc python scripts/freeze_mcmc_campaign.py \
-  configs/mcmc/campaigns/paper-h0.toml
-uv run --extra mcmc python scripts/submit_mcmc.py \
-  --manifest configs/mcmc/frozen/paper-h0/array-manifest.txt \
-  --campaign-lock configs/mcmc/campaigns/paper-h0.lock.json
+uv sync --extra mcmc --group slurm
+uv run snakemake --profile profiles/slurm mcmc_paper_h0
 ```
 
-`--bypass-locks` is an explicit escape hatch for debugging or intentional legacy
-submissions and should not be used for paper production runs.
+Reproducibility is layered on git plus content hashes instead of lock files:
+curated configs are committed, each config pins the catalog's SHA-256
+(`[catalog] sha256`, verified by `run_mcmc.py` before JAX initializes), and
+`snakemake -n` reports any config or catalog drift as pending reruns. Chains
+and sidecars are written `protected()` (read-only); before intentionally
+redoing a run, `chmod +w` its outputs and rerun with `--forcerun`.
+
+**One-time migration on existing cluster checkouts** (chains produced by the
+retired `submit_mcmc.py` flow have no Snakemake metadata): register them once
+with `uv run snakemake --touch mcmc_paper_h0` while they are still writable.
+For figure-only builds on machines with pre-existing chains,
+`--rerun-triggers mtime` is the escape hatch to suppress metadata-based
+reruns. Always dry-run (`-n`) before real runs on the cluster — note that
+`paper_figures` pulls `run_mcmc` into its DAG, so on a machine without chains
+it will schedule MCMC runs.
 
 ### Outputs
 
-Each run writes an ArviZ `InferenceData` to
-`chains/chains-<params>-det=<det>-seed<n>-<ts>.nc` alongside a sibling `.json`
-run config (catalog path, detectors, seed, fiducials, sampler settings).
+Each run writes an ArviZ `InferenceData` to `chains/<campaign>/<run>.nc`
+(ad-hoc unlabelled runs keep the timestamped
+`chains/mcmc-<params>-det=<det>-seed<n>-<ts>.nc` convention) alongside a
+sibling `.json` sidecar recording the run's provenance: catalog path and
+`catalog_sha256`, the resolved `config_sha256`, detectors, seed, fiducials,
+priors, sampler settings, and the git revision.
 Diagnostics surface the model's `importance_relative_ess` (the key proposal
 health check — should stay close to 1) and `total_merger_rate`.
 
