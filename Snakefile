@@ -1,5 +1,4 @@
 from pathlib import Path
-import json
 import tomllib
 
 
@@ -12,6 +11,7 @@ with PAPER_CONFIG_PATH.open("rb") as handle:
     PAPER_CONFIG = tomllib.load(handle)
 
 CATALOG = PAPER_CONFIG["paths"]["catalog"]
+CHAINS_DIR = PAPER_CONFIG["paths"]["chains_dir"]
 AMPLITUDE_TOY_PDF = config["amplitude_toy"]["output_pdf"]
 SNR_BY_DETECTOR_PDF = config["snr_by_detector"]["output_pdf"]
 SNR_BY_DETECTOR_CSV = config["snr_by_detector"]["output_csv"]
@@ -22,17 +22,40 @@ POSTERIOR_PDF = config["mcmc_compare_posteriors"]["output_pdf"]
 POSTERIOR_CSV = config["mcmc_compare_posteriors"]["output_csv"]
 POSTERIOR_TEX = config["mcmc_compare_posteriors"]["output_tex"]
 POSTERIOR_FIGURE = PAPER_CONFIG["figures"]["mcmc_compare_posteriors"]
-POSTERIOR_LOCK = POSTERIOR_FIGURE["campaign_lock"]
-with Path(POSTERIOR_LOCK).open() as handle:
-    _POSTERIOR_CAMPAIGN = json.load(handle)
-_POSTERIOR_RUNS = {run["id"]: run for run in _POSTERIOR_CAMPAIGN["runs"]}
 POSTERIOR_CHAINS = [
-    _POSTERIOR_RUNS[entry["run"]]["outputs"]["chain"]
+    f"{CHAINS_DIR}/{POSTERIOR_FIGURE['campaign']}/{entry['run']}.nc"
     for entry in POSTERIOR_FIGURE["posteriors"]
 ]
-CAMPAIGN_INVENTORY = config["mcmc_campaign"]["inventory"]
-CAMPAIGN_FROZEN_DIR = config["mcmc_campaign"]["frozen_dir"]
-CAMPAIGN_MANIFEST = f"{CAMPAIGN_FROZEN_DIR}/array-manifest.txt"
+
+# Sweep campaigns keep their generated configs directly under
+# configs/mcmc/<campaign>/ (see scripts/generate_mcmc_configs.py); every other
+# campaign is hand-curated under configs/mcmc/curated/<campaign>/.
+SWEEP_CAMPAIGNS = ("cosmology", "modified-propagation", "astrophysical")
+
+
+def campaign_config_dir(campaign):
+    base = "configs/mcmc" if campaign in SWEEP_CAMPAIGNS else "configs/mcmc/curated"
+    return f"{base}/{campaign}"
+
+
+def campaign_chains(campaign):
+    runs = glob_wildcards(campaign_config_dir(campaign) + "/{run}.json").run
+    return [f"{CHAINS_DIR}/{campaign}/{run}.nc" for run in sorted(runs)]
+
+
+wildcard_constraints:
+    campaign="[^/]+",
+    run="[^/]+",
+
+
+# Everything except run_mcmc runs on the submit host under a cluster executor.
+localrules:
+    paper_figures,
+    mcmc_paper_h0,
+    mcmc_sweeps,
+    amplitude_toy,
+    snr_by_detector,
+    mcmc_compare_posteriors,
 
 
 rule paper_figures:
@@ -42,18 +65,48 @@ rule paper_figures:
         POSTERIOR_PDF,
 
 
-rule mcmc_campaign:
+rule run_mcmc:
     input:
-        inventory=CAMPAIGN_INVENTORY,
-        lock=POSTERIOR_LOCK,
+        config=lambda wc: f"{campaign_config_dir(wc.campaign)}/{wc.run}.json",
+        catalog=CATALOG,
     output:
-        manifest=CAMPAIGN_MANIFEST,
+        chain=protected(CHAINS_DIR + "/{campaign}/{run}.nc"),
+        sidecar=protected(CHAINS_DIR + "/{campaign}/{run}.json"),
     params:
-        frozen_dir=CAMPAIGN_FROZEN_DIR,
+        # Override for local smoke tests: --config jax_platforms=cpu
+        jax_platforms=config.get("jax_platforms", "cuda"),
+        outdir=lambda wc: f"{CHAINS_DIR}/{wc.campaign}",
+    resources:
+        cpus_per_task=4,
+        mem_mb=8000,
+        runtime=240,
     shell:
-        "uv run --extra mcmc python scripts/freeze_mcmc_campaign.py"
-        " {input.inventory} --lock {input.lock} --frozen-dir {params.frozen_dir}"
-        " --manifest {output.manifest}"
+        """
+        export OMP_NUM_THREADS={resources.cpus_per_task}
+        export JAX_PLATFORMS={params.jax_platforms}
+        # job-nanny I/O conventions; harmless when the wrapper is absent.
+        export INPUT="*"
+        export OUTPUT="*"
+        if command -v job-nanny >/dev/null 2>&1; then
+            job-nanny uv run --extra mcmc python scripts/run_mcmc.py \
+                --config {input.config} --outdir {params.outdir} \
+                --label {wildcards.run} --force
+        else
+            uv run --extra mcmc python scripts/run_mcmc.py \
+                --config {input.config} --outdir {params.outdir} \
+                --label {wildcards.run} --force
+        fi
+        """
+
+
+rule mcmc_paper_h0:
+    input:
+        campaign_chains("paper-h0"),
+
+
+rule mcmc_sweeps:
+    input:
+        [chain for campaign in SWEEP_CAMPAIGNS for chain in campaign_chains(campaign)],
 
 
 rule amplitude_toy:
@@ -91,7 +144,6 @@ rule snr_by_detector:
 rule mcmc_compare_posteriors:
     input:
         config=str(PAPER_CONFIG_PATH),
-        lock=POSTERIOR_LOCK,
         chains=POSTERIOR_CHAINS,
         snr_csv=SNR_BY_DETECTOR_CSV,
     output:

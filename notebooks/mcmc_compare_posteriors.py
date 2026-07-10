@@ -28,7 +28,6 @@ import pandas as pd
 import xarray as xr
 
 from astrogwb.config import load_mapping
-from astrogwb.sampling.campaign import load_lock
 from astrogwb.utils import repo_root
 
 # %config InlineBackend.figure_format = "retina"
@@ -69,9 +68,11 @@ plt.rcParams.update(**pub_rc)
 #
 # Nested plot data (posterior list, `ax_kwargs`, `legend_kwargs`) comes from
 # `[figures.mcmc_compare_posteriors]` in
-# [`configs/paper.toml`](../configs/paper.toml). Scalars (`var_name`, dpi,
-# output path, group) are argparse defaults below — edit in Jupyter, override
-# with flags headless. Promote happy values by updating those defaults / toml.
+# [`configs/paper.toml`](../configs/paper.toml); each posterior's chain is
+# resolved as `<paths.chains_dir>/<campaign>/<run>.nc`, matching the Snakemake
+# `run_mcmc` rule's outputs. Scalars (`var_name`, dpi, output path, group) are
+# argparse defaults below — edit in Jupyter, override with flags headless.
+# Promote happy values by updating those defaults / toml.
 
 
 # %%
@@ -147,14 +148,13 @@ args = _parse_args()
 config_path = _resolve_path(args.config, BASE_DIR)
 paper = load_mapping(config_path)
 figure = paper["figures"]["mcmc_compare_posteriors"]
-lock_path = _resolve_path(Path(figure["campaign_lock"]), BASE_DIR)
-campaign = load_lock(lock_path)
+chains_dir = Path(paper["paths"]["chains_dir"]) / figure["campaign"]
 
 configs = [
     PosteriorConfig(
         network=entry["network"],
         label=entry["label"],
-        path=Path(campaign.run(entry["run"]).outputs["chain"]),
+        path=chains_dir / f"{entry['run']}.nc",
         color=entry["color"],
         linestyle=entry["linestyle"],
     )

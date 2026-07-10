@@ -32,9 +32,9 @@ local_merger_rate = 161.0
 "ET-2L-misaligned-CE-Hanford" = ["S2", "R2", "C1"]
 
 [figures.mcmc_compare_posteriors]
-# Posterior styling lives below; the chain paths are resolved from this immutable
-# campaign lock so figure selection is stable even when output layout evolves.
-campaign_lock = "configs/mcmc/campaigns/paper-h0.lock.json"
+# Posterior styling lives below; each entry's chain resolves to
+# <paths.chains_dir>/<campaign>/<run>.nc, produced by the Snakemake run_mcmc rule.
+campaign = "paper-h0"
 
 [figures.mcmc_compare_posteriors.ax_kwargs]
 xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'
