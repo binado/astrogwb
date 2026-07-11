@@ -1,4 +1,5 @@
-# Cluster execution profile: snakemake --profile profiles/slurm <target>
+# MCMC profile: snakemake --snakefile workflow/mcmc.smk \
+#   --profile profiles/slurm --configfile <batch.yaml> mcmc
 # Requires `uv sync --extra mcmc --group slurm` on the submit host.
 # Job logs land under .snakemake/slurm_logs/.
 executor: slurm

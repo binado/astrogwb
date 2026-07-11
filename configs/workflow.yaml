@@ -1,8 +1,8 @@
 paper_config: configs/paper.toml
 
 catalog:
-  registry: configs/catalogs.toml
   id: bns-n16384-df1
+  path: out/catalogs/bns-n16384-df1.h5
 
 amplitude_toy:
   output_pdf: figures/amplitude_toy_fisher_overlay.pdf

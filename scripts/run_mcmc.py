@@ -21,7 +21,7 @@ Usage::
 Requires the ``mcmc`` optional extra (pydantic plus ArviZ NetCDF output support)
 for ``RunConfig`` validation and chain serialization.
 Batch runs are dispatched by the Snakemake ``run_mcmc`` rule (one config per
-job); see the Snakefile and ``profiles/slurm/config.yaml``.
+job); see ``workflow/mcmc.smk`` and ``profiles/slurm/config.yaml``.
 """
 
 from __future__ import annotations

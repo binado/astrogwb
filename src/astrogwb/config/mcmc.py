@@ -118,8 +118,8 @@ class RunConfig(BaseModel):
 
 
 def config_sha256(config: RunConfig) -> str:
-    """Content digest of a resolved run config, independent of key order."""
-    return canonical_sha256(config.model_dump(mode="json"))
+    """Digest inference settings, excluding output routing."""
+    return canonical_sha256(config.model_dump(mode="json", exclude={"output"}))
 
 
 def load_config(path: Path) -> dict[str, Any]:

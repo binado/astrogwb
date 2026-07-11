@@ -92,3 +92,16 @@ def test_config_sha256_stable_across_key_order_and_sensitive_to_values() -> None
     assert config_sha256(build_run_config(raw)) != config_sha256(
         build_run_config(raw, seed=99)
     )
+
+
+def test_config_sha256_excludes_output_routing() -> None:
+    raw = load_config(REPO_ROOT / "configs/mcmc.example.toml")
+
+    baseline = build_run_config(raw)
+    routed = build_run_config(
+        raw,
+        outdir=Path("chains/another-catalog/campaign"),
+        label="another-run",
+    )
+
+    assert config_sha256(baseline) == config_sha256(routed)

@@ -1,11 +1,15 @@
-"""Named waveform-catalog recipes and their deterministic workflow paths."""
+"""Waveform-catalog recipes and their deterministic workflow paths."""
 
 from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any
+
+
+_CATALOG_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 @dataclass(frozen=True)
@@ -35,23 +39,17 @@ def catalog_path(catalog_id: str) -> Path:
     return Path("out/catalogs") / f"{catalog_id}.h5"
 
 
-def load_catalog_recipes(path: Path) -> dict[str, CatalogRecipe]:
-    """Load a committed TOML registry of named catalog recipes."""
+def load_catalog_recipe(path: Path) -> CatalogRecipe:
+    """Load one catalog recipe, using the TOML filename as its catalog ID."""
     with path.open("rb") as handle:
         raw = tomllib.load(handle)
 
-    catalogs = raw.get("catalogs")
-    if not isinstance(catalogs, dict) or not catalogs:
-        raise ValueError(f"catalog registry {path} must define [catalogs.<id>] tables")
-
-    recipes: dict[str, CatalogRecipe] = {}
-    for catalog_id, config in catalogs.items():
-        if "/" in catalog_id or not catalog_id:
-            raise ValueError(f"invalid catalog id {catalog_id!r}")
-        if not isinstance(config, dict):
-            raise ValueError(f"catalog {catalog_id!r} must be a table")
-        recipes[catalog_id] = _recipe_from_mapping(catalog_id, config)
-    return recipes
+    catalog_id = path.stem
+    if not _CATALOG_ID_PATTERN.fullmatch(catalog_id):
+        raise ValueError(f"invalid catalog id {catalog_id!r}")
+    if not isinstance(raw, dict):
+        raise ValueError(f"catalog recipe {path} must be a TOML table")
+    return _recipe_from_mapping(catalog_id, raw)
 
 
 def _recipe_from_mapping(catalog_id: str, config: dict[str, Any]) -> CatalogRecipe:

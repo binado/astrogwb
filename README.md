@@ -27,10 +27,10 @@ uv sync --extra mcmc --group dev
 
 Our inference framework uses an importance sampling scheme to calculate the spectral density of the astrophysical SGWB with a fixed population of CBCs. To generate the population, we suggest using the excellent [`gwmock-pop`](https://leuven-gravity-institute.github.io/gwmock-pop/) package.
 
-An example BNS population is defined declaratively in [`examples/bns_population.yaml`](examples/bns_population.yaml)
-and drawn with the `gwmock-pop simulate` CLI. The default catalog recipe lives
-in [`configs/catalogs.toml`](configs/catalogs.toml); its equivalent explicit
-command is:
+An example BNS population is defined declaratively in [`examples/bns_population.yaml`](examples/bns_population.yaml).
+The complete default recipe lives in
+[`configs/catalogs/bns-n16384-df1.toml`](configs/catalogs/bns-n16384-df1.toml).
+Its equivalent explicit population command is:
 
 ```bash
 uv run gwmock-pop simulate \
@@ -73,10 +73,19 @@ uv run python scripts/generate_waveform_catalog.py \
 --chunk-size 2048
 ```
 
-These commands are also Snakemake dependencies. Requesting
-`out/catalogs/bns-n16384-df1.h5` or an MCMC target builds missing or stale
-upstream files. Add a new named recipe to `configs/catalogs.toml` rather than
-changing an existing one, so results remain isolated by catalog ID.
+The local catalog workflow joins the population and waveform steps. Requesting
+a waveform catalog builds its missing or stale population first:
+
+```bash
+uv run snakemake \
+  --snakefile workflow/catalog.smk \
+  --cores 1 \
+  out/catalogs/bns-n16384-df1.h5
+```
+
+Each catalog has an independent `configs/catalogs/<catalog-id>.toml` recipe, so
+editing one recipe cannot invalidate another catalog. Catalog generation is not
+part of the MCMC submission workflow.
 
 ## Running inference
 
@@ -93,41 +102,52 @@ uv run --extra mcmc python scripts/run_mcmc.py \
   --catalog out/catalogs/bns-n16384-df1.h5
 ```
 
-Batch runs are driven by the Snakemake `run_mcmc` rule. Sweep configs are
-generated automatically from [`configs/mcmc.example.toml`](configs/mcmc.example.toml)
-and are intentionally not versioned. Curated paper configs remain committed.
-Chains are namespaced by catalog ID, so the same inference configuration can be
-run against multiple proposal catalogs without overwriting results:
+Generate sweep configs explicitly on the local machine or cluster submit host;
+existing configs are skipped unless `--force` is supplied:
 
 ```bash
-uv run snakemake -n mcmc_paper_h0                    # dry-run: shows pending work
-uv run snakemake chains/bns-n16384-df1/paper-h0/et-triangular.nc
-uv run snakemake mcmc_paper_h0                       # the six paper-h0 runs
-uv run snakemake mcmc_sweeps                         # all generated sweep configs
-uv run snakemake chains/bns-n8192-df1/cosmology/ET-2L-aligned__H0.nc
+uv run --extra mcmc python scripts/generate_mcmc_configs.py
 ```
 
-On a SLURM cluster, install the executor plugin and submit through the
-committed profile (each `run_mcmc` job gets a GPU and lands in one job array;
-logs go to `.snakemake/slurm_logs/`):
+Batch submission uses an explicit manifest such as
+[`configs/mcmc.batch.example.yaml`](configs/mcmc.batch.example.yaml). The
+manifest selects one existing catalog and lists every MCMC config to submit.
+Chains remain namespaced by catalog ID. A missing catalog or config stops the
+workflow instead of triggering preprocessing.
+
+Dry-run the selected batch locally:
+
+```bash
+uv run snakemake \
+  --snakefile workflow/mcmc.smk \
+  --configfile configs/mcmc.batch.example.yaml \
+  --dry-run mcmc
+```
+
+On a SLURM cluster, install the executor plugin and submit through the committed
+profile. Each `run_mcmc` job gets a GPU and compatible jobs land in an array;
+logs go to `.snakemake/slurm_logs/`:
 
 ```bash
 uv sync --extra mcmc --group slurm
-uv run snakemake --profile profiles/slurm mcmc_paper_h0
+uv run snakemake \
+  --snakefile workflow/mcmc.smk \
+  --profile profiles/slurm \
+  --configfile /home/user/batches/paper-h0.yaml \
+  mcmc
 ```
 
 Reproducibility is layered on committed catalog recipes, fixed population seeds,
 and content hashes instead of lock files. Each chain sidecar records the exact
-catalog path and SHA-256 used; its MCMC config hash is independent of catalog
-selection. Snakemake rebuilds chains after recipe or config drift.
+catalog path and SHA-256 used; its MCMC config hash excludes output routing and
+is independent of catalog selection. Snakemake reruns selected chains after
+their catalog or config changes.
 Chains and sidecars are written `protected()` (read-only); before intentionally
 redoing a run, `chmod +w` its outputs and rerun with `--forcerun`.
 
-Existing non-namespaced chains are left untouched. The catalog-namespaced
-workflow builds fresh chains instead of registering legacy outputs with
-`--touch`. Always dry-run (`-n`) before real runs on the cluster — note that
-`paper_figures` pulls `run_mcmc` into its DAG, so on a machine without chains
-it will schedule MCMC runs.
+Existing non-namespaced chains are left untouched. Always dry-run before real
+cluster submissions. The MCMC workflow cannot generate catalogs, and the paper
+workflow cannot generate catalogs or chains.
 
 ### Outputs
 
@@ -155,7 +175,7 @@ Jupyter or from the shell without Snakemake or a configuration file.
 For reproducible paper builds, scientific and presentation settings (fiducials,
 detector networks, nested posterior plot entries) live in
 [`configs/paper.toml`](configs/paper.toml).
-Reusable catalog recipes live in [`configs/catalogs.toml`](configs/catalogs.toml),
+Reusable catalog recipes live in [`configs/catalogs/`](configs/catalogs/),
 while the catalog selected for the paper workflow lives in
 [`configs/workflow.yaml`](configs/workflow.yaml).
 Figure-local knobs (output paths, dpi, sampler settings, which networks to plot),
@@ -173,19 +193,20 @@ notebook remains config-driven and receives `--config` plus concrete chain input
 Preview the declared workflow:
 
 ```bash
-uv run snakemake --dry-run paper_figures
+uv run snakemake --snakefile workflow/paper.smk --dry-run paper_figures
 ```
 
 Build all declared paper figures:
 
 ```bash
-uv run snakemake --cores 1 paper_figures
+uv run snakemake --snakefile workflow/paper.smk --cores 1 paper_figures
 ```
 
 Build one configured target:
 
 ```bash
-uv run snakemake --cores 1 figures/mcmc_compare_posteriors_H0.pdf
+uv run snakemake --snakefile workflow/paper.smk --cores 1 \
+  figures/mcmc_compare_posteriors_H0.pdf
 ```
 
 ## Requirements
