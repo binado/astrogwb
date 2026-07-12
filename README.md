@@ -192,6 +192,64 @@ The partition names (`gpu`, `cpu`) are cluster-specific — verify them with
 differ. Adjust `cpus_per_task`, `mem_mb`, and `runtime` in the profile's
 `default-resources` to match your allocation.
 
+### Running a batch locally on multiple cores
+
+For smaller sweeps you can skip SLURM entirely and let Snakemake pack
+independent `run_mcmc` jobs across the cores of your own machine with
+[`profiles/local`](profiles/local/config.yaml). It forces the CPU JAX backend
+and confines each run to `cpus_per_task` cores — both the BLAS pools and, via
+`XLA_FLAGS intra_op_parallelism_threads`, JAX's XLA CPU pool — so concurrent
+runs do not oversubscribe. The core budget lives only in the profile; it never
+enters a run's config hash.
+
+As a worked example, run the **cosmology sweep** locally. First generate the
+sweep configs (writes `configs/mcmc/cosmology/<network>__<params>.json`):
+
+```bash
+uv run --extra mcmc python scripts/generate_mcmc_configs.py
+```
+
+Then point a batch manifest at the cosmology configs you want. A minimal
+`configs/mcmc.batch.cosmology.yaml` selecting the ET-triangular `H0`,
+`H0`+`Omega_m`, and `H0`+merger-rate points:
+
+```yaml
+catalog:
+  id: bns-n16384-df1
+  path: out/catalogs/bns-n16384-df1.h5
+
+chains_dir: chains
+jax_platforms: cuda  # overridden to cpu by profiles/local
+
+runs:
+  - campaign: cosmology
+    config: configs/mcmc/cosmology/ET-triangular__H0.json
+  - campaign: cosmology
+    config: configs/mcmc/cosmology/ET-triangular__H0-Omega_m.json
+  - campaign: cosmology
+    config: configs/mcmc/cosmology/ET-triangular__H0-merger-rate.json
+```
+
+Dry-run, then submit on (say) 8 cores. With the profile's `cpus_per_task: 4`,
+Snakemake runs `floor(8 / 4) = 2` sweep points at a time:
+
+```bash
+uv run snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/local --configfile configs/mcmc.batch.cosmology.yaml \
+  --cores 8 --dry-run mcmc
+
+uv run snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/local --configfile configs/mcmc.batch.cosmology.yaml \
+  --cores 8 mcmc
+```
+
+To trade per-run speed for more concurrency, lower `cpus_per_task` (and the
+matching `set-threads`) in `profiles/local`: `cpus_per_task: 2` runs four sweep
+points at once on the same 8 cores. Because each step is dominated by a large
+catalog contraction that BLAS already parallelizes, more independent runs
+usually beats more threads per run — keep the sweep configs single-chain
+(`num_chains = 1`) and let the job level do the work.
+
 Reproducibility is layered on committed catalog recipes, fixed population seeds,
 and content hashes instead of lock files. Each chain sidecar records the exact
 catalog path and SHA-256 used; its MCMC config hash excludes output routing and
