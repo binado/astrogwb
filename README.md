@@ -124,18 +124,73 @@ uv run snakemake \
   --dry-run mcmc
 ```
 
-On a SLURM cluster, install the executor plugin and submit through the committed
-profile. Each `run_mcmc` job gets a GPU and compatible jobs land in an array;
-logs go to `.snakemake/slurm_logs/`:
+### Deploying on a SLURM cluster
 
-```bash
-uv sync --extra mcmc --group slurm
-uv run snakemake \
-  --snakefile workflow/mcmc.smk \
-  --profile profiles/slurm \
-  --configfile /home/user/batches/paper-h0.yaml \
-  mcmc
-```
+The workflow submits to SLURM through a committed Snakemake *profile* — a bundle
+of executor flags and `default-resources`. The Snakefile itself is
+backend-agnostic; the profile decides *where* jobs land. Two profiles ship with
+the repo:
+
+| Profile | Partition | GPU | JAX backend |
+| --- | --- | --- | --- |
+| `profiles/slurm` | `gpu` | `--gres=gpu:1` | `cuda` |
+| `profiles/slurm-cpu` | `cpu` | none | `cpu` |
+
+Both request 12 h wall-clock (`runtime: 720`) and batch compatible `run_mcmc`
+jobs into a SLURM array. The CPU profile also forces `JAX_PLATFORMS=cpu` so JAX
+does not try to initialize CUDA on a CPU node.
+
+1. **Install the executor plugin on the submit host.** The `slurm` group pulls
+   in `snakemake-executor-plugin-slurm`:
+
+   ```bash
+   uv sync --extra mcmc --group slurm
+   ```
+
+2. **Prepare the batch manifest.** Copy
+   [`configs/mcmc.batch.example.yaml`](configs/mcmc.batch.example.yaml), point it
+   at one existing catalog, and list the MCMC configs to submit. Generate sweep
+   configs first with `uv run --extra mcmc python scripts/generate_mcmc_configs.py`
+   if you haven't already.
+
+3. **Dry-run before every real submission** to see the job graph without touching
+   the scheduler:
+
+   ```bash
+   uv run snakemake \
+     --snakefile workflow/mcmc.smk \
+     --profile profiles/slurm \
+     --configfile /home/user/batches/paper-h0.yaml \
+     --dry-run mcmc
+   ```
+
+4. **Submit.** Drop `--dry-run` and pick the profile for your target partition —
+   this is the only change needed to switch between GPU and CPU:
+
+   ```bash
+   # GPU nodes
+   uv run snakemake \
+     --snakefile workflow/mcmc.smk \
+     --profile profiles/slurm \
+     --configfile /home/user/batches/paper-h0.yaml \
+     mcmc
+
+   # CPU nodes
+   uv run snakemake \
+     --snakefile workflow/mcmc.smk \
+     --profile profiles/slurm-cpu \
+     --configfile /home/user/batches/paper-h0.yaml \
+     mcmc
+   ```
+
+   Keep the Snakemake process alive for the duration of the run (submit inside
+   `tmux`/`screen` or as a lightweight batch job); it stays up submitting and
+   polling the array. Per-job SLURM logs land under `.snakemake/slurm_logs/`.
+
+The partition names (`gpu`, `cpu`) are cluster-specific — verify them with
+`sinfo -s` and edit the `slurm_partition` in the relevant profile if they
+differ. Adjust `cpus_per_task`, `mem_mb`, and `runtime` in the profile's
+`default-resources` to match your allocation.
 
 Reproducibility is layered on committed catalog recipes, fixed population seeds,
 and content hashes instead of lock files. Each chain sidecar records the exact
