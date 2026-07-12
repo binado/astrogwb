@@ -65,7 +65,15 @@ rule run_mcmc:
         runtime=720,
     shell:
         """
+        # Deployment-level core budget: cpus_per_task is the single source of
+        # truth, injected by the executor profile. Cap the BLAS thread pools and
+        # -- crucially -- XLA's CPU Eigen pool, the knob JAX actually respects
+        # (OMP_NUM_THREADS alone does not bound XLA compute). Harmless on GPU.
+        # Kept out of the RunConfig so it never enters config_sha256.
         export OMP_NUM_THREADS={resources.cpus_per_task}
+        export OPENBLAS_NUM_THREADS={resources.cpus_per_task}
+        export MKL_NUM_THREADS={resources.cpus_per_task}
+        export XLA_FLAGS="--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads={resources.cpus_per_task}"
         export JAX_PLATFORMS={params.jax_platforms:q}
         # job-nanny I/O conventions; harmless when the wrapper is absent.
         export INPUT="*"
