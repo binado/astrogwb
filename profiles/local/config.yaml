@@ -18,14 +18,11 @@ config:
   - jax_platforms=cpu
 
 # Account each run_mcmc job at its core footprint so --cores packs jobs
-# correctly. cpus_per_task below is the single source of truth: the rule exports
-# it as the BLAS *and* XLA intra-op thread cap, so each concurrent run is
-# actually confined to that many cores (no oversubscription). Keep set-threads
-# equal to cpus_per_task.
+# correctly. Rule threads are passed to the runner as its BLAS/XLA thread cap.
 set-threads:
   - run_mcmc=4
 
-default-resources:
-  cpus_per_task: 4
-  mem_mb: 8000
-  runtime: 720
+set-resources:
+  run_mcmc:
+    mem_mb: 8000
+    runtime: 720

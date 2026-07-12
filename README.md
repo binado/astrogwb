@@ -127,7 +127,7 @@ uv run snakemake \
 ### Deploying on a SLURM cluster
 
 The workflow submits to SLURM through a committed Snakemake *profile* — a bundle
-of executor flags and `default-resources`. The Snakefile itself is
+of executor flags and rule-specific resource overrides. The Snakefile itself is
 backend-agnostic; the profile decides *where* jobs land. Two profiles ship with
 the repo:
 
@@ -137,7 +137,7 @@ the repo:
 | `profiles/slurm-cpu` | `cpu` | none | `cpu` |
 
 Both request 12 h wall-clock (`runtime: 720`) and batch compatible `run_mcmc`
-jobs into a SLURM array. The CPU profile also forces `JAX_PLATFORMS=cpu` so JAX
+jobs into a SLURM array. The CPU profile also selects `--platform cpu` so JAX
 does not try to initialize CUDA on a CPU node.
 
 1. **Install the executor plugin on the submit host.** The `slurm` group pulls
@@ -189,18 +189,18 @@ does not try to initialize CUDA on a CPU node.
 
 The partition names (`gpu`, `cpu`) are cluster-specific — verify them with
 `sinfo -s` and edit the `slurm_partition` in the relevant profile if they
-differ. Adjust `cpus_per_task`, `mem_mb`, and `runtime` in the profile's
-`default-resources` to match your allocation.
+differ. Adjust `set-threads` for the CPU allocation, and `mem_mb` / `runtime`
+under the profile's `set-resources.run_mcmc` entry.
 
 ### Running a batch locally on multiple cores
 
 For smaller sweeps you can skip SLURM entirely and let Snakemake pack
 independent `run_mcmc` jobs across the cores of your own machine with
 [`profiles/local`](profiles/local/config.yaml). It forces the CPU JAX backend
-and confines each run to `cpus_per_task` cores — both the BLAS pools and, via
-`XLA_FLAGS intra_op_parallelism_threads`, JAX's XLA CPU pool — so concurrent
-runs do not oversubscribe. The core budget lives only in the profile; it never
-enters a run's config hash.
+and confines each run to its Snakemake thread allocation — both the BLAS pools
+and, via `XLA_FLAGS intra_op_parallelism_threads`, JAX's XLA CPU pool — so
+concurrent runs do not oversubscribe. The core budget lives only in the profile;
+it never enters a run's config hash.
 
 As a worked example, run the **cosmology sweep** locally. First generate the
 sweep configs (writes `configs/mcmc/cosmology/<network>__<params>.json`):
@@ -230,8 +230,8 @@ runs:
     config: configs/mcmc/cosmology/ET-triangular__H0-merger-rate.json
 ```
 
-Dry-run, then submit on (say) 8 cores. With the profile's `cpus_per_task: 4`,
-Snakemake runs `floor(8 / 4) = 2` sweep points at a time:
+Dry-run, then submit on (say) 8 cores. With the profile's `run_mcmc=4` thread
+override, Snakemake runs `floor(8 / 4) = 2` sweep points at a time:
 
 ```bash
 uv run snakemake --snakefile workflow/mcmc.smk \
@@ -243,9 +243,9 @@ uv run snakemake --snakefile workflow/mcmc.smk \
   --cores 8 mcmc
 ```
 
-To trade per-run speed for more concurrency, lower `cpus_per_task` (and the
-matching `set-threads`) in `profiles/local`: `cpus_per_task: 2` runs four sweep
-points at once on the same 8 cores. Because each step is dominated by a large
+To trade per-run speed for more concurrency, lower the `set-threads` value in
+`profiles/local`: `run_mcmc=2` runs four sweep points at once on the same 8
+cores. Because each step is dominated by a large
 catalog contraction that BLAS already parallelizes, more independent runs
 usually beats more threads per run — keep the sweep configs single-chain
 (`num_chains = 1`) and let the job level do the work.
@@ -270,7 +270,8 @@ Each workflow run writes an ArviZ `InferenceData` to
 `chains/mcmc-<params>-det=<det>-seed<n>-<ts>.nc` convention) alongside a
 sibling `.json` sidecar recording the run's provenance: catalog path and
 `catalog_sha256`, the resolved `config_sha256`, detectors, seed, fiducials,
-priors, sampler settings, and the git revision.
+priors, sampler settings, requested/resolved runtime controls, and the git
+revision.
 Diagnostics surface the model's `importance_relative_ess` (the key proposal
 health check — should stay close to 1) and `total_merger_rate`.
 

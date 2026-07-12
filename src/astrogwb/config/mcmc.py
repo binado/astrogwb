@@ -18,17 +18,6 @@ from astrogwb.config.loading import deep_merge
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
 
-class RuntimeConfig(BaseModel):
-    """Device/thread control for :func:`scripts.run_mcmc.configure_runtime`."""
-
-    model_config = _STRICT
-
-    platform: str = "auto"  # auto | cpu | gpu
-    host_device_count: int | None = None  # CPU devices for parallel chains
-    cpu_threads: int = 0  # 0 -> leave XLA/OMP default
-    chain_method: str = "auto"  # auto | parallel | sequential | vectorized
-
-
 class AnalysisConfig(BaseModel):
     model_config = _STRICT
 
@@ -75,7 +64,6 @@ class RunConfig(BaseModel):
     priors: dict[str, dict[str, Any]]  # prior name -> spec table
     # Unset (empty) -> default to the keys present in [priors]; resolved below.
     sampled_params: tuple[str, ...] = ()
-    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     analysis: AnalysisConfig
     cosmology: CosmoConfig
     sampler: SamplerConfig

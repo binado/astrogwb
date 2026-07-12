@@ -6,7 +6,7 @@ Run from the repository root::
     uv run --extra mcmc python scripts/generate_mcmc_configs.py --force
 
 Writes into ``configs/mcmc/{cosmology,modified-propagation,astrophysical}/``.
-Base settings (fiducials, analysis, cosmology, sampler, runtime, output) are taken
+Base settings (fiducials, analysis, cosmology, sampler, output) are taken
 from the example TOML (default ``configs/mcmc.example.toml``). Campaign-specific
 fields override detectors, ``sampled_params``, and prior tables. Requires the
 ``mcmc`` optional extra (pydantic) for ``RunConfig`` validation.
@@ -169,8 +169,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=DEFAULT_EXAMPLE_CONFIG,
         help=(
-            "Base TOML template for fiducials, catalog, cosmology, sampler, "
-            "runtime, and output."
+            "Base TOML template for fiducials, cosmology, sampler, and output."
         ),
     )
     parser.add_argument(

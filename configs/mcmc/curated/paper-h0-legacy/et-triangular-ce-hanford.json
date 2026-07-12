@@ -1,6 +1,5 @@
 {
   "seed": 42, "observation_time": 1.0, "sampled_params": ["H0"],
-  "runtime": {"platform": "auto", "host_device_count": 1, "cpu_threads": 0, "chain_method": "auto"},
   "analysis": {"detectors": ["E1", "E2", "E3", "C1"], "f_min": 2.0, "f_max": 4096.0},
   "cosmology": {"z_min": 0.0, "z_max": 20.0, "n_grid": 256},
   "sampler": {"num_warmup": 2000, "num_samples": 2000, "num_chains": 4, "target_accept": 0.9, "forward_mode_differentiation": true, "progress_bar": true, "jit_model_args": true},

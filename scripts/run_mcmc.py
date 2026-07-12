@@ -30,18 +30,15 @@ import argparse
 import json
 import logging
 import os
+import re
 import subprocess
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
 from astrogwb.config.hashing import file_sha256
 from astrogwb.config.loading import load_mapping
-from astrogwb.config.mcmc import (
-    RunConfig,
-    RuntimeConfig,
-    build_run_config,
-    config_sha256,
-)
+from astrogwb.config.mcmc import RunConfig, build_run_config, config_sha256
 
 logger = logging.getLogger("run_mcmc")
 
@@ -51,6 +48,71 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
+def positive_int(value: str) -> int:
+    """Parse a strictly positive integer for runtime CLI controls."""
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def add_runtime_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add deployment/runtime controls shared by runner entrypoints."""
+    parser.add_argument(
+        "--platform",
+        choices=("auto", "cpu", "gpu"),
+        default="auto",
+        help="JAX platform (default: auto; gpu selects the CUDA backend).",
+    )
+    parser.add_argument(
+        "--host-device-count",
+        type=positive_int,
+        default=None,
+        help="Logical host devices (default: sampler.num_chains).",
+    )
+    parser.add_argument(
+        "--cpu-threads",
+        type=positive_int,
+        default=None,
+        help="Cap OMP/BLAS/XLA CPU threads; omitted leaves inherited settings.",
+    )
+    parser.add_argument(
+        "--chain-method",
+        choices=("auto", "parallel", "sequential", "vectorized"),
+        default="auto",
+        help="NumPyro chain method (default: auto).",
+    )
+
+
+@dataclass(frozen=True)
+class RuntimeOptions:
+    """Runtime choices made at the CLI boundary, separate from scientific config."""
+
+    platform: str = "auto"
+    host_device_count: int | None = None
+    cpu_threads: int | None = None
+    chain_method: str = "auto"
+
+
+@dataclass(frozen=True)
+class ResolvedRuntime:
+    """Runtime settings actually applied after JAX device discovery."""
+
+    platform: str
+    host_device_count: int
+    cpu_threads: int | None
+    chain_method: str
+
+
+def runtime_options_from_args(args: argparse.Namespace) -> RuntimeOptions:
+    return RuntimeOptions(
+        platform=args.platform,
+        host_device_count=args.host_device_count,
+        cpu_threads=args.cpu_threads,
+        chain_method=args.chain_method,
+    )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -98,37 +160,52 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Replace an existing NetCDF chain and/or JSON sidecar for this run.",
     )
+    add_runtime_arguments(parser)
     return parser.parse_args(argv)
 
 
 # --------------------------------------------------------------------------- #
 # Runtime / device configuration (MUST run before any JAX import elsewhere)
 # --------------------------------------------------------------------------- #
-def configure_runtime(rc: RuntimeConfig, num_chains: int):
+def configure_runtime(options: RuntimeOptions, num_chains: int):
     """Configure CPU threads, device platform, and host device count, then import jax.
 
-    Returns the imported ``jax`` module and the resolved ``chain_method``. This is
-    the only place allowed to set the env vars / host device count, and it must run
+    Returns the imported ``jax`` module and a resolved runtime record. This is the
+    only place allowed to set the env vars / host device count, and it must run
     before anything else triggers JAX backend initialization.
     """
-    # 1. CPU thread limits (no-op when cpu_threads <= 0).
-    if rc.cpu_threads and rc.cpu_threads > 0:
-        n = str(rc.cpu_threads)
+    # 1. CPU thread limits (no-op when omitted).
+    if options.cpu_threads is not None:
+        n = str(options.cpu_threads)
         for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
             os.environ[var] = n
         xla_flags = os.environ.get("XLA_FLAGS", "")
-        os.environ["XLA_FLAGS"] = (
+        xla_flags = re.sub(
+            r"(?<!\S)(?:--)?intra_op_parallelism_threads(?:=\S+|\s+\S+)",
+            "",
+            xla_flags,
+        )
+        xla_flags = re.sub(
+            r"(?<!\S)--xla_cpu_multi_thread_eigen=\S+",
+            "",
+            xla_flags,
+        )
+        updated_xla_flags = (
             f"{xla_flags} --xla_cpu_multi_thread_eigen=true "
-            f"intra_op_parallelism_threads={rc.cpu_threads}"
-        ).strip()
+            f"intra_op_parallelism_threads={options.cpu_threads}"
+        )
+        os.environ["XLA_FLAGS"] = " ".join(updated_xla_flags.split())
 
     # 2. Force a platform when requested; "auto" lets JAX pick (GPU if present).
-    platform = rc.platform.lower()
-    if platform in ("cpu", "gpu"):
-        os.environ["JAX_PLATFORMS"] = platform
+    if options.platform == "auto":
+        os.environ.pop("JAX_PLATFORMS", None)
+    else:
+        os.environ["JAX_PLATFORMS"] = (
+            "cuda" if options.platform == "gpu" else options.platform
+        )
 
     # 3. Host device count for CPU parallel chains -- must precede jax init.
-    host_device_count = rc.host_device_count or num_chains
+    host_device_count = options.host_device_count or num_chains
     import numpyro
 
     numpyro.set_host_device_count(host_device_count)
@@ -150,12 +227,17 @@ def configure_runtime(rc: RuntimeConfig, num_chains: int):
 
     # 5. Resolve chain_method. On a single GPU vectorized chains are best; CPU
     #    chains go on separate host devices via "parallel".
-    chain_method = rc.chain_method.lower()
+    chain_method = options.chain_method
     if chain_method == "auto":
         chain_method = "vectorized" if resolved_platform == "gpu" else "parallel"
     logger.info("chain_method=%s (num_chains=%d)", chain_method, num_chains)
 
-    return jax, chain_method
+    return jax, ResolvedRuntime(
+        platform=resolved_platform,
+        host_device_count=host_device_count,
+        cpu_threads=options.cpu_threads,
+        chain_method=chain_method,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -381,6 +463,8 @@ def build_run_record(
     catalog_path: Path,
     timestamp: str,
     catalog_sha256: str | None,
+    runtime_options: RuntimeOptions,
+    resolved_runtime: ResolvedRuntime,
 ) -> dict:
     """Assemble the JSON sidecar recording the run's inputs and provenance."""
     return {
@@ -400,7 +484,10 @@ def build_run_record(
             "f_max": config.analysis.f_max,
         },
         "sampler": config.sampler.model_dump(mode="json"),
-        "runtime": config.runtime.model_dump(mode="json"),
+        "runtime": {
+            "requested": asdict(runtime_options),
+            "resolved": asdict(resolved_runtime),
+        },
         "git_revision": _git_revision(),
         "timestamp": timestamp,
     }
@@ -411,6 +498,8 @@ def save(
     config: RunConfig,
     *,
     catalog_path: Path,
+    runtime_options: RuntimeOptions,
+    resolved_runtime: ResolvedRuntime,
     timestamp: str | None = None,
     force: bool = False,
     catalog_sha256: str | None = None,
@@ -432,6 +521,8 @@ def save(
         catalog_path=catalog_path,
         timestamp=timestamp,
         catalog_sha256=catalog_sha256,
+        runtime_options=runtime_options,
+        resolved_runtime=resolved_runtime,
     )
     json_path.write_text(json.dumps(run_record, indent=2, default=str))
 
@@ -477,8 +568,11 @@ def main(argv: list[str] | None = None) -> None:
     catalog_sha256 = verify_catalog(args.catalog)
     logger.info("Catalog SHA-256: %s", catalog_sha256)
 
-    jax, chain_method = configure_runtime(config.runtime, config.sampler.num_chains)
-    mcmc = run(config, args.catalog, jax, chain_method)
+    runtime_options = runtime_options_from_args(args)
+    jax, resolved_runtime = configure_runtime(
+        runtime_options, config.sampler.num_chains
+    )
+    mcmc = run(config, args.catalog, jax, resolved_runtime.chain_method)
     save(
         mcmc,
         config,
@@ -486,6 +580,8 @@ def main(argv: list[str] | None = None) -> None:
         timestamp=timestamp,
         force=args.force,
         catalog_sha256=catalog_sha256,
+        runtime_options=runtime_options,
+        resolved_runtime=resolved_runtime,
     )
 
 

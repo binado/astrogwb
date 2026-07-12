@@ -11,8 +11,10 @@ slurm-array-jobs: run_mcmc
 # CPU node. Overrides the "cuda" default in workflow/mcmc.smk.
 config:
   - jax_platforms=cpu
-default-resources:
-  slurm_partition: cpu
-  cpus_per_task: 4
-  mem_mb: 8000
-  runtime: 720
+set-threads:
+  - run_mcmc=4
+set-resources:
+  run_mcmc:
+    slurm_partition: cpu
+    mem_mb: 8000
+    runtime: 720

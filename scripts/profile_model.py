@@ -32,7 +32,11 @@ from pathlib import Path
 
 from astrogwb.config.loading import load_mapping
 from astrogwb.config.mcmc import RunConfig, build_run_config
-from run_mcmc import configure_runtime
+from run_mcmc import (
+    add_runtime_arguments,
+    configure_runtime,
+    runtime_options_from_args,
+)
 
 logger = logging.getLogger("profile_model")
 
@@ -79,6 +83,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Force reverse-mode AD (default follows the config's forward_mode flag).",
     )
+    add_runtime_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -204,7 +209,10 @@ def main(argv: list[str] | None = None) -> None:
     config = build_run_config(raw, seed=args.seed)
     logger.info("Config: %s", args.config)
 
-    jax, _ = configure_runtime(config.runtime, config.sampler.num_chains)
+    jax, _ = configure_runtime(
+        runtime_options_from_args(args),
+        config.sampler.num_chains,
+    )
 
     potential_fn, init_params = build_potential(config, args.catalog, jax)
 
