@@ -7,7 +7,7 @@ only ``logging`` progress (no plots). It saves an ArviZ ``InferenceData`` NetCDF
 a JSON run-config record, exactly like the notebook.
 
 Design constraint (do not "tidy" away): config parsing lives in
-``astrogwb.sampling.config`` (stdlib + pydantic only). ``OMP_NUM_THREADS`` /
+``astrogwb.config.mcmc`` (stdlib + pydantic only). ``OMP_NUM_THREADS`` /
 ``XLA_FLAGS`` and ``numpyro.set_host_device_count(...)`` must be set *before* JAX
 initializes its backend, so the heavy imports (jax, numpyro, astrogwb, gwmock_pop)
 happen inside functions that run only after :func:`configure_runtime`. See
@@ -15,13 +15,13 @@ happen inside functions that run only after :func:`configure_runtime`. See
 
 Usage::
 
-    uv run --extra mcmc python scripts/run_mcmc.py --config configs/mcmc.example.toml
-    uv run --extra mcmc python scripts/run_mcmc.py --config configs/mcmc/cosmology/ET-2L-aligned__H0.json
+    uv run --extra mcmc python scripts/run_mcmc.py \
+        --config configs/mcmc.example.toml --catalog out/catalogs/bns-n16384-df1.h5
 
 Requires the ``mcmc`` optional extra (pydantic plus ArviZ NetCDF output support)
 for ``RunConfig`` validation and chain serialization.
-The script is meant to back a SLURM job array with one config per task; see
-``python scripts/submit_mcmc.py -i configs/mcmc/cosmology``.
+Batch runs are dispatched by the Snakemake ``run_mcmc`` rule (one config per
+job); see ``workflow/mcmc.smk`` and ``profiles/slurm/config.yaml``.
 """
 
 from __future__ import annotations
@@ -34,11 +34,13 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from astrogwb.sampling.config import (
+from astrogwb.config.hashing import file_sha256
+from astrogwb.config.loading import load_mapping
+from astrogwb.config.mcmc import (
     RunConfig,
     RuntimeConfig,
     build_run_config,
-    load_config,
+    config_sha256,
 )
 
 logger = logging.getLogger("run_mcmc")
@@ -61,6 +63,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         required=True,
         help="Path to the TOML or JSON config file for this run / array task.",
+    )
+    parser.add_argument(
+        "--catalog",
+        type=Path,
+        required=True,
+        help="Waveform catalog to reweight for this run.",
     )
     parser.add_argument(
         "--seed",
@@ -153,7 +161,7 @@ def configure_runtime(rc: RuntimeConfig, num_chains: int):
 # --------------------------------------------------------------------------- #
 # Inference
 # --------------------------------------------------------------------------- #
-def run(config: RunConfig, jax, chain_method: str):
+def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     """Replicate the notebook inference cells headlessly and return the MCMC object."""
     from functools import partial
 
@@ -173,11 +181,11 @@ def run(config: RunConfig, jax, chain_method: str):
     from astrogwb.waveform import polarization_power as compute_polarization_power
     from pluscross import load_catalog
 
-    cat = config.catalog
+    analysis = config.analysis
     cosmo = config.cosmology
 
     # --- Load proposal catalog ------------------------------------------------
-    catalog = load_catalog(cat.path)
+    catalog = load_catalog(catalog_path)
     frequencies = jnp.asarray(catalog.frequencies)
     polarization_power = jnp.asarray(compute_polarization_power(catalog))
     samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
@@ -191,7 +199,7 @@ def run(config: RunConfig, jax, chain_method: str):
     n_freq, n_samples = polarization_power.shape
     logger.info(
         "Loaded catalog %s: n_frequency_bins=%d n_proposal_samples=%d",
-        cat.path,
+        catalog_path,
         n_freq,
         n_samples,
     )
@@ -210,17 +218,19 @@ def run(config: RunConfig, jax, chain_method: str):
         )
 
     # --- Effective PSD and analysis band -------------------------------------
-    sensitivities = load_sensitivity_map(cat.detectors)
+    sensitivities = load_sensitivity_map(analysis.detectors)
     effective_psd_arr = jnp.asarray(
-        effective_psd(frequencies, list(cat.detectors), sensitivities)
+        effective_psd(frequencies, list(analysis.detectors), sensitivities)
     )
-    freq_mask = make_frequency_mask(frequencies, fmin=cat.f_min, fmax=cat.f_max)
+    freq_mask = make_frequency_mask(
+        frequencies, fmin=analysis.f_min, fmax=analysis.f_max
+    )
     logger.info(
         "Analysis band: %d of %d bins (%.1f-%.1f Hz)",
         int(jnp.sum(freq_mask)),
         frequencies.shape[0],
-        cat.f_min,
-        cat.f_max,
+        analysis.f_min,
+        analysis.f_max,
     )
 
     # --- Precompute fiducial proposal log-density ----------------------------
@@ -309,6 +319,13 @@ def run(config: RunConfig, jax, chain_method: str):
     return mcmc
 
 
+def verify_catalog(path: Path) -> str:
+    """Hash a catalog before JAX starts, returning its content digest."""
+    if not path.is_file():
+        raise FileNotFoundError(f"catalog not found: {path}")
+    return file_sha256(path)
+
+
 def _git_revision() -> str | None:
     try:
         return (
@@ -338,7 +355,7 @@ def output_paths(
     else:
         timestamp = timestamp or datetime.now().strftime("%Y%m%d-%H%M%S")
         params_suffix = "-".join(config.sampled_params)
-        det_suffix = ",".join(config.catalog.detectors)
+        det_suffix = ",".join(config.analysis.detectors)
         base = f"mcmc-{params_suffix}-det={det_suffix}-seed{config.seed}-{timestamp}"
     return config.outdir / f"{base}.nc", config.outdir / f"{base}.json"
 
@@ -358,12 +375,45 @@ def ensure_output_paths_available(
     return nc_path, json_path
 
 
+def build_run_record(
+    config: RunConfig,
+    *,
+    catalog_path: Path,
+    timestamp: str,
+    catalog_sha256: str | None,
+) -> dict:
+    """Assemble the JSON sidecar recording the run's inputs and provenance."""
+    return {
+        "catalog_path": str(catalog_path),
+        "catalog_sha256": catalog_sha256,
+        "config_sha256": config_sha256(config),
+        "detectors": list(config.analysis.detectors),
+        "seed": config.seed,
+        "observation_time": config.observation_time,
+        "sampled_params": list(config.sampled_params),
+        "fiducials": config.fiducials,
+        "constants": config.constants,
+        "priors": config.priors,
+        "cosmology": config.cosmology.model_dump(mode="json"),
+        "band": {
+            "f_min": config.analysis.f_min,
+            "f_max": config.analysis.f_max,
+        },
+        "sampler": config.sampler.model_dump(mode="json"),
+        "runtime": config.runtime.model_dump(mode="json"),
+        "git_revision": _git_revision(),
+        "timestamp": timestamp,
+    }
+
+
 def save(
     mcmc,
     config: RunConfig,
     *,
+    catalog_path: Path,
     timestamp: str | None = None,
     force: bool = False,
+    catalog_sha256: str | None = None,
 ) -> Path:
     """Write the ArviZ NetCDF + JSON run record, and log the IS health check."""
     import arviz as az
@@ -377,22 +427,12 @@ def save(
     idata = az.from_numpyro(mcmc)
     idata.to_netcdf(nc_path)
 
-    run_record = {
-        "catalog_path": str(config.catalog.path),
-        "detectors": list(config.catalog.detectors),
-        "seed": config.seed,
-        "observation_time": config.observation_time,
-        "sampled_params": list(config.sampled_params),
-        "fiducials": config.fiducials,
-        "constants": config.constants,
-        "priors": config.priors,
-        "cosmology": config.cosmology.model_dump(mode="json"),
-        "band": {"f_min": config.catalog.f_min, "f_max": config.catalog.f_max},
-        "sampler": config.sampler.model_dump(mode="json"),
-        "runtime": config.runtime.model_dump(mode="json"),
-        "git_revision": _git_revision(),
-        "timestamp": timestamp,
-    }
+    run_record = build_run_record(
+        config,
+        catalog_path=catalog_path,
+        timestamp=timestamp,
+        catalog_sha256=catalog_sha256,
+    )
     json_path.write_text(json.dumps(run_record, indent=2, default=str))
 
     # Importance-sampling health: relative ESS near 1 means the proposal catalog
@@ -408,7 +448,7 @@ def save(
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    raw = load_config(args.config)
+    raw = load_mapping(args.config)
     config = build_run_config(
         raw,
         seed=args.seed,
@@ -433,9 +473,20 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     ensure_output_paths_available(config, timestamp=timestamp, force=args.force)
 
+    # Hash the catalog before JAX claims a device.
+    catalog_sha256 = verify_catalog(args.catalog)
+    logger.info("Catalog SHA-256: %s", catalog_sha256)
+
     jax, chain_method = configure_runtime(config.runtime, config.sampler.num_chains)
-    mcmc = run(config, jax, chain_method)
-    save(mcmc, config, timestamp=timestamp, force=args.force)
+    mcmc = run(config, args.catalog, jax, chain_method)
+    save(
+        mcmc,
+        config,
+        catalog_path=args.catalog,
+        timestamp=timestamp,
+        force=args.force,
+        catalog_sha256=catalog_sha256,
+    )
 
 
 if __name__ == "__main__":

@@ -47,6 +47,10 @@ dev = [
     "snakemake>=9.13.4",
     "ty>=0.0.56",
 ]
+slurm = [
+    { include-group = "dev" },
+    "snakemake-executor-plugin-slurm>=1.5",
+]
 
 [tool.ruff]
 include = ["src/**/*.py", "tests/**/*.py"]

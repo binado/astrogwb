@@ -1,0 +1,12 @@
+catalog:
+  id: bns-n16384-df1
+  path: out/catalogs/bns-n16384-df1.h5
+
+chains_dir: chains
+jax_platforms: cuda
+
+runs:
+  - campaign: paper-h0
+    config: configs/mcmc/curated/paper-h0/et-triangular.json
+  - campaign: paper-h0
+    config: configs/mcmc/curated/paper-h0/et-triangular-ce-hanford.json

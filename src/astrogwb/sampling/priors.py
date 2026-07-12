@@ -1,7 +1,7 @@
 """Materialize NumPyro prior distributions from serializable config specs.
 
 This module is the bridge between the validated, JSON-serializable prior tables
-in :mod:`astrogwb.sampling.config` (plain dicts like ``{"type": "uniform",
+in :mod:`astrogwb.config.mcmc` (plain dicts like ``{"type": "uniform",
 "low": 0.0, "high": 1.0}``) and live ``numpyro.distributions`` objects handed
 to :func:`astrogwb.sampling.numpyro_model.numpyro_model`.
 

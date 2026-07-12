@@ -235,6 +235,20 @@ plotting = [
     { name = "h5netcdf" },
     { name = "jinja2" },
 ]
+slurm = [
+    { name = "arviz" },
+    { name = "corner" },
+    { name = "h5netcdf" },
+    { name = "ipykernel" },
+    { name = "jinja2" },
+    { name = "jupyter" },
+    { name = "matplotlib" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "snakemake" },
+    { name = "snakemake-executor-plugin-slurm" },
+    { name = "ty" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -270,6 +284,20 @@ plotting = [
     { name = "corner", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
     { name = "h5netcdf", specifier = ">=1.8.1" },
     { name = "jinja2", specifier = ">=3.1" },
+]
+slurm = [
+    { name = "arviz", specifier = ">=1.2.0" },
+    { name = "corner", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
+    { name = "h5netcdf", specifier = ">=1.8.1" },
+    { name = "ipykernel", specifier = ">=7.3.0" },
+    { name = "jinja2", specifier = ">=3.1" },
+    { name = "jupyter", specifier = ">=1.1.1" },
+    { name = "matplotlib", specifier = ">=3.11.0" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "ruff", specifier = ">=0.15.20" },
+    { name = "snakemake", specifier = ">=9.13.4" },
+    { name = "snakemake-executor-plugin-slurm", specifier = ">=1.5" },
+    { name = "ty", specifier = ">=0.0.56" },
 ]
 
 [[package]]
@@ -3509,6 +3537,37 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/9e/c2/45aa858e55edbb7dbc243ed60859f4f3d92d63ecdd67a80632aa3659fe6b/snakemake-9.23.1.tar.gz", hash = "sha256:ef8d698bfce66a6669cc29df7e344b0b367fd90956c725e5ae0a79a556e8e93f", size = 6802587, upload-time = "2026-06-18T09:42:57.653Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/65/2cb1c99117746bea8aff34dc434703f8f23d3876860e2ff3ebeccb754b0f/snakemake-9.23.1-py3-none-any.whl", hash = "sha256:9fdbfff25f1b442cdf7906ca06b465fc24b9bf72e2d51514fb93d83e3f8aeb35", size = 1162133, upload-time = "2026-06-18T09:42:55.541Z" },
+]
+
+[[package]]
+name = "snakemake-executor-plugin-slurm"
+version = "2.7.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pyyaml" },
+    { name = "snakemake-executor-plugin-slurm-jobstep" },
+    { name = "snakemake-interface-common" },
+    { name = "snakemake-interface-executor-plugins" },
+    { name = "throttler" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/08/1f/62228ec30dc6138fbc6b30dc519d4a7ea87b9e3d91849b01a9883d234c10/snakemake_executor_plugin_slurm-2.7.1.tar.gz", hash = "sha256:b78bc1fe6de633c281fbb9c122af7c838656083df076a5860271a68b6ecba5b3", size = 39391, upload-time = "2026-06-01T09:41:15.958Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5b/c9/498402ca72dfcd7bd66303f0713aadd532e03f0adf53a0f616055afcad48/snakemake_executor_plugin_slurm-2.7.1-py3-none-any.whl", hash = "sha256:4c63216bdb7c016b774c77c58dc663d81d2fca5756a247a2e1abb476bf0708f1", size = 45592, upload-time = "2026-06-01T09:41:16.735Z" },
+]
+
+[[package]]
+name = "snakemake-executor-plugin-slurm-jobstep"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "snakemake-interface-common" },
+    { name = "snakemake-interface-executor-plugins" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fc/ec/4d4e41125a29717b71610ae7962a3cde0552c6b0c72c995139b8a0adeb7b/snakemake_executor_plugin_slurm_jobstep-0.6.1.tar.gz", hash = "sha256:0ed2feaa88d1d64f35dc66b4990f131d3f151733edece90d5e952dec0e8f7feb", size = 7437, upload-time = "2026-05-27T12:14:28.522Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/40/85/c6f70395037964e1d3b5334dde546cebc4bb0d05bd4c96399b03b6c4beab/snakemake_executor_plugin_slurm_jobstep-0.6.1-py3-none-any.whl", hash = "sha256:120e122ee1317257bd9608a2a458527ad9fe4520aa1a86109e9ce2ac322321ef", size = 8275, upload-time = "2026-05-27T12:14:29.514Z" },
 ]
 
 [[package]]

@@ -17,8 +17,7 @@ cpu_threads = 0              # 0 = leave JAX/XLA default; else OMP/XLA intra-op 
 chain_method = "auto"        # auto | parallel | sequential | vectorized
                              # auto -> vectorized on a single GPU, else parallel
 
-[catalog]
-path = "out/bns_waveform_catalog.h5"
+[analysis]
 detectors = ["S1", "R1", "C1"]   # resolved via bundled geometry.toml / sensitivity.toml
 f_min = 2.0                 # analysis band low edge [Hz]
 f_max = 4096.0                # analysis band high edge [Hz]

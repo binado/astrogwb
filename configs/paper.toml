@@ -1,5 +1,4 @@
 [paths]
-catalog = "out/bns_waveform_catalog.h5"
 figures_dir = "figures"
 chains_dir = "chains"
 
@@ -32,9 +31,9 @@ local_merger_rate = 161.0
 "ET-2L-misaligned-CE-Hanford" = ["S2", "R2", "C1"]
 
 [figures.mcmc_compare_posteriors]
-# Posterior styling lives below; the chain paths are resolved from this immutable
-# campaign lock so figure selection is stable even when output layout evolves.
-campaign_lock = "configs/mcmc/campaigns/paper-h0-legacy.lock.json"
+# Posterior styling and logical run IDs live below. Snakemake resolves the run IDs
+# to concrete chain inputs and passes those paths to the plotting notebook.
+campaign = "paper-h0"
 
 [figures.mcmc_compare_posteriors.ax_kwargs]
 xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'

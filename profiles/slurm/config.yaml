@@ -1,0 +1,15 @@
+# MCMC profile: snakemake --snakefile workflow/mcmc.smk \
+#   --profile profiles/slurm --configfile <batch.yaml> mcmc
+# Requires `uv sync --extra mcmc --group slurm` on the submit host.
+# Job logs land under .snakemake/slurm_logs/.
+executor: slurm
+jobs: 32
+# Batch run_mcmc jobs into one SLURM job array per resource footprint
+# (parity with the retired sbatch --array flow).
+slurm-array-jobs: run_mcmc
+default-resources:
+  slurm_partition: gpu
+  slurm_extra: "'--gres=gpu:1'"
+  cpus_per_task: 4
+  mem_mb: 8000
+  runtime: 240

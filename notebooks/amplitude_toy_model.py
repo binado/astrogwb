@@ -12,6 +12,8 @@
 #     name: python3
 # ---
 
+# ruff: noqa: E402
+
 # %% [markdown]
 # # Single-amplitude toy MCMC
 #
@@ -27,11 +29,9 @@
 # It is a smoke/sanity test: can NUTS recover a known injected amplitude from
 # a fiducial catalog?
 #
-# To run the notebook end-to-end, set `[paths].catalog` in
-# [`configs/paper.toml`](../configs/paper.toml) (or pass `--config`) to a
-# pluscross `.h5` catalog of complex polarizations. Figure-local knobs
-# (detectors, seed, sampler, outputs) are argparse defaults in the config
-# cell — edit them in Jupyter, override with flags headless.
+# To run the notebook end-to-end, use the editable defaults in the configuration
+# cell below or override them with command-line flags. Snakemake supplies the
+# paper settings and concrete pluscross `.h5` catalog as explicit arguments.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -60,7 +60,7 @@ import numpy as np
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
 
-from astrogwb.config import load_mapping
+from astrogwb.config.hashing import file_sha256
 from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.gwb import (
     spectral_density,
@@ -104,22 +104,39 @@ azp.style.use("arviz-variat")
 # %% [markdown]
 # ## Pipeline configuration
 #
-# Shared paths and analysis band come from [`configs/paper.toml`](../configs/paper.toml)
-# (`[paths]`, `[analysis]`). Figure-local knobs are argparse defaults below —
-# edit them in Jupyter, override with flags headless (`--debug` for a short
-# smoke run: 100 warmup / 100 samples / 1 chain). Promote happy values by
-# updating the defaults (and toml for shared settings).
+# Every setting consumed by this notebook has an editable default below. These
+# defaults make direct Jupyter and command-line runs self-contained; the paper
+# workflow passes its authoritative values from `configs/paper.toml` explicitly.
+# Use `--debug` for a short smoke run (100 warmup / 100 samples / 1 chain).
 
 
 # %%
+DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
+DEFAULT_CHAINS_DIR = "chains"
+DEFAULT_OBSERVATION_TIME = 1.0
+DEFAULT_F_MIN = 2.0
+DEFAULT_F_MAX = 4096.0
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=Path("configs/paper.toml"))
+    parser.add_argument(
+        "--catalog",
+        type=Path,
+        default=DEFAULT_CATALOG_PATH,
+        help="Waveform catalog to use (Snakemake passes its declared input).",
+    )
     parser.add_argument(
         "--output-pdf",
         type=Path,
         default=Path("figures/amplitude_toy_fisher_overlay.pdf"),
     )
+    parser.add_argument("--chains-dir", type=Path, default=Path(DEFAULT_CHAINS_DIR))
+    parser.add_argument(
+        "--observation-time", type=float, default=DEFAULT_OBSERVATION_TIME
+    )
+    parser.add_argument("--f-min", type=float, default=DEFAULT_F_MIN)
+    parser.add_argument("--f-max", type=float, default=DEFAULT_F_MAX)
     parser.add_argument(
         "--detectors",
         nargs="*",
@@ -155,17 +172,14 @@ def _resolve_path(path: Path, root: Path) -> Path:
 
 ROOT_DIR = repo_root()
 args = _parse_args()
-config_path = _resolve_path(args.config, ROOT_DIR)
-paper = load_mapping(config_path)
 
-CATALOG_PATH = _resolve_path(Path(paper["paths"]["catalog"]), ROOT_DIR)
+CATALOG_PATH = _resolve_path(args.catalog, ROOT_DIR)
 output_path = _resolve_path(args.output_pdf, ROOT_DIR)
+out_dir = _resolve_path(args.chains_dir, ROOT_DIR)
 
 # Detector settings
 detnames = tuple(args.detectors)  # resolve via bundled geometry.toml / sensitivity.toml
-observation_time = paper["analysis"][
-    "observation_time"
-]  # [yr]; cancels in S_h, kept for the likelihood scale
+observation_time = args.observation_time  # [yr]; cancels in S_h, kept for scale
 
 # MCMC settings
 seed = args.seed
@@ -179,8 +193,8 @@ if args.debug:
     num_warmup, num_samples, num_chains, target_accept = 100, 100, 1, 0.9
 
 # Frequency band for the analysis
-f_min = paper["analysis"]["f_min"]
-f_max = paper["analysis"]["f_max"]
+f_min = args.f_min
+f_max = args.f_max
 
 # The toy model: S_h is linear in `amplitude` through the merger rate; the
 # importance weights are all unity, so `merger_rate_norm` sets the SNR scale.
@@ -209,6 +223,7 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 
 # %%
 catalog = load_catalog(CATALOG_PATH)
+catalog_sha256 = file_sha256(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
 polarization_power = jnp.asarray(
@@ -319,8 +334,7 @@ mcmc.print_summary()
 # %%
 
 
-out_dir = _resolve_path(Path(paper["paths"]["chains_dir"]), ROOT_DIR)
-out_dir.mkdir(exist_ok=True)
+out_dir.mkdir(parents=True, exist_ok=True)
 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 params_suffix = "-".join(sampled_params)
 det_suffix = ",".join(detnames)
@@ -330,12 +344,14 @@ inference_data = azb.from_numpyro(mcmc)
 inference_data.to_netcdf(out_dir / f"{base}.nc")
 
 run_config = {
-    "config_path": str(config_path),
+    "chains_dir": str(out_dir),
     "catalog_path": str(CATALOG_PATH),
+    "catalog_sha256": catalog_sha256,
     "detectors": list(detnames),
     "output_path": str(output_path),
     "seed": seed,
     "observation_time": observation_time,
+    "frequency_band": {"f_min": f_min, "f_max": f_max},
     "sampled_params": list(sampled_params),
     "fiducials": fiducials,
     "merger_rate_norm": merger_rate_norm,

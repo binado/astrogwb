@@ -4,6 +4,9 @@ data
 *.ipynb
 
 # Generated MCMC run artifacts and frozen manifests.
+configs/mcmc/astrophysical/
+configs/mcmc/cosmology/
+configs/mcmc/modified-propagation/
 configs/mcmc/frozen/
 configs/mcmc/manifests/
 chains/
@@ -345,4 +348,7 @@ TSWLatexianTemp*
 #*Notes.bib
 __pycache__
 config
+!src/astrogwb/config/
+!src/astrogwb/config/**
+src/astrogwb/config/__pycache__/
 .DS_Store
