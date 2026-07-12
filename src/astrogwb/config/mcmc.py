@@ -13,7 +13,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb.config.hashing import canonical_sha256
-from astrogwb.config.loading import deep_merge, load_mapping
+from astrogwb.config.loading import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
@@ -120,11 +120,6 @@ class RunConfig(BaseModel):
 def config_sha256(config: RunConfig) -> str:
     """Digest inference settings, excluding output routing."""
     return canonical_sha256(config.model_dump(mode="json", exclude={"output"}))
-
-
-def load_config(path: Path) -> dict[str, Any]:
-    """Parse a TOML or JSON config file into a plain dict."""
-    return load_mapping(path)
 
 
 def save_config(config: RunConfig, path: Path) -> None:

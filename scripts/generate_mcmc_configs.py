@@ -16,19 +16,47 @@ from __future__ import annotations
 
 import argparse
 import logging
-import tomllib
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from astrogwb.config.loading import load_mapping
 from astrogwb.config.mcmc import RunConfig, build_run_config, save_config
-from astrogwb.config.sweeps import DEFAULT_SWEEP_SPEC, SweepSpec, load_sweep_spec
 
 logger = logging.getLogger("generate_mcmc_configs")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_DIR = "configs/mcmc"
 DEFAULT_EXAMPLE_CONFIG = REPO_ROOT / "configs" / "mcmc.example.toml"
+DEFAULT_SWEEP_SPEC = REPO_ROOT / "configs" / "mcmc.sweeps.toml"
+
+
+@dataclass(frozen=True)
+class SweepSpec:
+    """Networks, priors, and campaign runs used to generate MCMC configs."""
+
+    networks: dict[str, tuple[str, ...]]
+    priors: dict[str, dict[str, Any]]
+    campaigns: dict[str, dict[str, tuple[tuple[str, ...], dict[str, dict[str, Any]]]]]
+
+
+def load_sweep_spec(path: Path = DEFAULT_SWEEP_SPEC) -> SweepSpec:
+    """Parse a sweep TOML file into the data required to generate its configs."""
+    raw = load_mapping(path)
+    networks = {name: tuple(detectors) for name, detectors in raw["networks"].items()}
+    priors = deepcopy(raw["priors"])
+    campaigns = {
+        campaign: {
+            label: (
+                tuple(run["sampled_params"]),
+                deepcopy(run.get("priors", {})),
+            )
+            for label, run in runs.items()
+        }
+        for campaign, runs in raw["campaigns"].items()
+    }
+    return SweepSpec(networks=networks, priors=priors, campaigns=campaigns)
 
 
 def _resolve_repo_path(path: str | Path) -> Path:
@@ -36,15 +64,6 @@ def _resolve_repo_path(path: str | Path) -> Path:
     if not resolved.is_absolute():
         resolved = REPO_ROOT / resolved
     return resolved.resolve()
-
-
-def _resolve_output_dir(path: str | Path) -> Path:
-    return _resolve_repo_path(path)
-
-
-def _load_base_config(example_config: Path) -> dict[str, Any]:
-    with example_config.open("rb") as handle:
-        return tomllib.load(handle)
 
 
 def make_config(
@@ -56,7 +75,7 @@ def make_config(
     prior_overrides: dict[str, dict[str, Any]] | None = None,
 ) -> RunConfig:
     """Build a validated run config for one sweep point."""
-    raw = deepcopy(_load_base_config(_resolve_repo_path(example_config)))
+    raw = load_mapping(_resolve_repo_path(example_config))
     raw["analysis"] = {**raw["analysis"], "detectors": list(detectors)}
     raw["sampled_params"] = list(sampled_params)
     selected_priors = {name: deepcopy(priors[name]) for name in sampled_params}
@@ -79,7 +98,7 @@ def generate_configs(
     skip_existing: bool = True,
 ) -> tuple[Path, list[Path], list[Path]]:
     """Write campaign JSON configs; return (output_dir, written, skipped) paths."""
-    resolved_output_dir = _resolve_output_dir(output_dir)
+    resolved_output_dir = _resolve_repo_path(output_dir)
     resolved_example_config = _resolve_repo_path(example_config)
     sweep_spec = sweep_spec or load_sweep_spec()
     resolved_output_dir.mkdir(parents=True, exist_ok=True)

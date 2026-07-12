@@ -4,6 +4,7 @@ from astrogwb.config.catalogs import load_catalog_recipe
 
 
 RECIPE_DIR = Path("configs/catalogs")
+_RECIPE_CACHE = {}
 
 
 def recipe_path(wildcards):
@@ -11,7 +12,10 @@ def recipe_path(wildcards):
 
 
 def recipe(wildcards):
-    return load_catalog_recipe(recipe_path(wildcards))
+    catalog = wildcards.catalog
+    if catalog not in _RECIPE_CACHE:
+        _RECIPE_CACHE[catalog] = load_catalog_recipe(recipe_path(wildcards))
+    return _RECIPE_CACHE[catalog]
 
 
 wildcard_constraints:

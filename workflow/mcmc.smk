@@ -1,22 +1,27 @@
 import re
+from pathlib import Path
 
-from astrogwb.config.batches import parse_mcmc_batch
 
+CATALOG_ID = config["catalog"]["id"]
+CATALOG_PATH = config["catalog"]["path"]
+CHAINS_DIR = Path(config["chains_dir"])
+JAX_PLATFORMS = config.get("jax_platforms", "cuda")
 
-BATCH = parse_mcmc_batch(config)
-RUN_CONFIGS = {
-    (run.campaign, run.run): str(run.config_path)
-    for run in BATCH.runs
-}
-CHAIN_PATTERN = str(
-    BATCH.chains_dir / BATCH.catalog_id / "{campaign}" / "{run}.nc"
-)
-SIDECAR_PATTERN = str(
-    BATCH.chains_dir / BATCH.catalog_id / "{campaign}" / "{run}.json"
-)
+RUN_CONFIGS = {}
+for entry in config["runs"]:
+    campaign = entry["campaign"]
+    config_path = Path(entry["config"])
+    run = config_path.stem
+    key = (campaign, run)
+    if key in RUN_CONFIGS:
+        raise ValueError(f"duplicate MCMC run {campaign}/{run}")
+    RUN_CONFIGS[key] = str(config_path)
+
+CHAIN_PATTERN = str(CHAINS_DIR / CATALOG_ID / "{campaign}" / "{run}.nc")
+SIDECAR_PATTERN = str(CHAINS_DIR / CATALOG_ID / "{campaign}" / "{run}.json")
 CHAINS = [
-    str(BATCH.chains_dir / BATCH.catalog_id / run.campaign / f"{run.run}.nc")
-    for run in BATCH.runs
+    str(CHAINS_DIR / CATALOG_ID / campaign / f"{run}.nc")
+    for campaign, run in RUN_CONFIGS
 ]
 
 
@@ -31,8 +36,8 @@ def run_config_path(wildcards):
 
 
 wildcard_constraints:
-    campaign="|".join(re.escape(run.campaign) for run in BATCH.runs),
-    run="|".join(re.escape(run.run) for run in BATCH.runs),
+    campaign="|".join(re.escape(campaign) for campaign, _ in RUN_CONFIGS),
+    run="|".join(re.escape(run) for _, run in RUN_CONFIGS),
 
 
 localrules:
@@ -47,15 +52,13 @@ rule mcmc:
 rule run_mcmc:
     input:
         config=run_config_path,
-        catalog=str(BATCH.catalog_path),
+        catalog=CATALOG_PATH,
     output:
         chain=protected(CHAIN_PATTERN),
         sidecar=protected(SIDECAR_PATTERN),
     params:
-        jax_platforms=BATCH.jax_platforms,
-        outdir=lambda wc: str(
-            BATCH.chains_dir / BATCH.catalog_id / wc.campaign
-        ),
+        jax_platforms=JAX_PLATFORMS,
+        outdir=lambda wc: str(CHAINS_DIR / CATALOG_ID / wc.campaign),
     resources:
         cpus_per_task=4,
         mem_mb=8000,

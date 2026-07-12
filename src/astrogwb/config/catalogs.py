@@ -1,22 +1,17 @@
-"""Waveform-catalog recipes and their deterministic workflow paths."""
+"""Typed waveform-catalog recipe loading."""
 
 from __future__ import annotations
 
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-import re
+import tomllib
 from typing import Any
-
-
-_CATALOG_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 @dataclass(frozen=True)
 class CatalogRecipe:
     """Inputs required to build one reusable waveform catalog."""
 
-    catalog_id: str
     population_config: Path
     n_samples: int
     seed: int
@@ -29,35 +24,19 @@ class CatalogRecipe:
     chunk_size: int
 
 
-def population_path(catalog_id: str) -> Path:
-    """Workflow output path for a named population realization."""
-    return Path("out/populations") / f"{catalog_id}.h5"
-
-
-def catalog_path(catalog_id: str) -> Path:
-    """Workflow output path for a named waveform catalog."""
-    return Path("out/catalogs") / f"{catalog_id}.h5"
-
-
 def load_catalog_recipe(path: Path) -> CatalogRecipe:
-    """Load one catalog recipe, using the TOML filename as its catalog ID."""
+    """Load one catalog recipe from TOML."""
     with path.open("rb") as handle:
         raw = tomllib.load(handle)
 
-    catalog_id = path.stem
-    if not _CATALOG_ID_PATTERN.fullmatch(catalog_id):
-        raise ValueError(f"invalid catalog id {catalog_id!r}")
-    if not isinstance(raw, dict):
-        raise ValueError(f"catalog recipe {path} must be a TOML table")
-    return _recipe_from_mapping(catalog_id, raw)
+    return _recipe_from_mapping(path.stem, raw)
 
 
-def _recipe_from_mapping(catalog_id: str, config: dict[str, Any]) -> CatalogRecipe:
+def _recipe_from_mapping(recipe_name: str, config: dict[str, Any]) -> CatalogRecipe:
     try:
         population = config["population"]
         waveform = config["waveform"]
         return CatalogRecipe(
-            catalog_id=catalog_id,
             population_config=Path(population["config"]),
             n_samples=int(population["n_samples"]),
             seed=int(population["seed"]),
@@ -70,4 +49,4 @@ def _recipe_from_mapping(catalog_id: str, config: dict[str, Any]) -> CatalogReci
             chunk_size=int(waveform["chunk_size"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"invalid catalog recipe {catalog_id!r}") from exc
+        raise ValueError(f"invalid catalog recipe {recipe_name!r}") from exc

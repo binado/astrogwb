@@ -30,7 +30,8 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 
-from astrogwb.config.mcmc import RunConfig, build_run_config, load_config
+from astrogwb.config.loading import load_mapping
+from astrogwb.config.mcmc import RunConfig, build_run_config
 from run_mcmc import configure_runtime
 
 logger = logging.getLogger("profile_model")
@@ -199,7 +200,7 @@ def main(argv: list[str] | None = None) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    raw = load_config(args.config)
+    raw = load_mapping(args.config)
     config = build_run_config(raw, seed=args.seed)
     logger.info("Config: %s", args.config)
 

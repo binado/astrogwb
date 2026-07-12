@@ -35,12 +35,12 @@ from datetime import datetime
 from pathlib import Path
 
 from astrogwb.config.hashing import file_sha256
+from astrogwb.config.loading import load_mapping
 from astrogwb.config.mcmc import (
     RunConfig,
     RuntimeConfig,
     build_run_config,
     config_sha256,
-    load_config,
 )
 
 logger = logging.getLogger("run_mcmc")
@@ -448,7 +448,7 @@ def save(
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    raw = load_config(args.config)
+    raw = load_mapping(args.config)
     config = build_run_config(
         raw,
         seed=args.seed,

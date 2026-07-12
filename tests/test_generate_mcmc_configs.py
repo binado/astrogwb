@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 
-from astrogwb.config.mcmc import build_run_config, load_config
-from astrogwb.config.sweeps import load_sweep_spec
+from astrogwb.config.loading import load_mapping
+from astrogwb.config.mcmc import build_run_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -15,12 +16,20 @@ _GEN_SPEC = importlib.util.spec_from_file_location(
 if _GEN_SPEC is None or _GEN_SPEC.loader is None:
     raise RuntimeError("failed to load generate_mcmc_configs module spec")
 _GEN = importlib.util.module_from_spec(_GEN_SPEC)
+sys.modules[_GEN_SPEC.name] = _GEN
 _GEN_SPEC.loader.exec_module(_GEN)
 
 DEFAULT_EXAMPLE_CONFIG = _GEN.DEFAULT_EXAMPLE_CONFIG
 generate_configs = _GEN.generate_configs
+load_sweep_spec = _GEN.load_sweep_spec
 make_config = _GEN.make_config
 SWEEP_SPEC = load_sweep_spec()
+EXPECTED_FILENAMES = {
+    f"{campaign}/{network_label}__{sample_label}.json"
+    for campaign, sample_sets in SWEEP_SPEC.campaigns.items()
+    for network_label in SWEEP_SPEC.networks
+    for sample_label in sample_sets
+}
 
 
 def test_make_config_uses_custom_example_toml(tmp_path: Path) -> None:
@@ -89,13 +98,13 @@ def test_generate_configs_propagates_custom_example_settings(tmp_path: Path) -> 
     assert skipped == []
     assert written
 
-    generated = build_run_config(load_config(written[0]))
+    generated = build_run_config(load_mapping(written[0]))
     assert generated.sampler.num_warmup == 123
     assert generated.sampler.num_chains == 4
     assert generated.runtime.host_device_count is None
     assert (
         generated.analysis.detectors
-        != build_run_config(load_config(DEFAULT_EXAMPLE_CONFIG)).analysis.detectors
+        != build_run_config(load_mapping(DEFAULT_EXAMPLE_CONFIG)).analysis.detectors
     )
 
 
@@ -104,13 +113,13 @@ def test_generate_configs_writes_campaign_subdirs(tmp_path: Path) -> None:
     _, written, skipped = generate_configs(output_dir, skip_existing=False)
 
     assert skipped == []
-    assert len(written) == len(SWEEP_SPEC.filenames())
+    assert len(written) == len(EXPECTED_FILENAMES)
 
     campaign_dirs = {path.parent.name for path in written}
     assert campaign_dirs == set(SWEEP_SPEC.campaigns)
 
     relative = {str(path.relative_to(output_dir)) for path in written}
-    assert relative == set(SWEEP_SPEC.filenames())
+    assert relative == EXPECTED_FILENAMES
 
 
 def test_gaussian_campaign_priors(tmp_path: Path) -> None:
@@ -118,7 +127,7 @@ def test_gaussian_campaign_priors(tmp_path: Path) -> None:
     generate_configs(output_dir, skip_existing=False)
 
     merger_gauss = build_run_config(
-        load_config(
+        load_mapping(
             output_dir / "cosmology" / "ET-2L-aligned__H0-merger-rate-gauss.json"
         )
     )
@@ -131,7 +140,7 @@ def test_gaussian_campaign_priors(tmp_path: Path) -> None:
     }
 
     xi_h0_gauss = build_run_config(
-        load_config(
+        load_mapping(
             output_dir / "modified-propagation" / "ET-2L-aligned__Xi_0-H0-gauss.json"
         )
     )
