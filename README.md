@@ -270,8 +270,9 @@ Each workflow run writes an ArviZ `InferenceData` to
 `chains/mcmc-<params>-det=<det>-seed<n>-<ts>.nc` convention) alongside a
 sibling `.json` sidecar recording the run's provenance: catalog path and
 `catalog_sha256`, the resolved `config_sha256`, detectors, seed, fiducials,
-priors, sampler settings, requested/resolved runtime controls, and the git
-revision.
+priors, sampler settings, and the git revision. Runtime controls
+(`--platform`, `--chain-method`, etc.) affect only how a run executes, not
+its scientific result, so they are not recorded.
 Diagnostics surface the model's `importance_relative_ess` (the key proposal
 health check — should stay close to 1) and `total_merger_rate`.
 

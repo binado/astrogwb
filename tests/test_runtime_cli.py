@@ -14,7 +14,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.run_mcmc import (  # noqa: E402
-    ResolvedRuntime,
     RuntimeOptions,
     build_run_record,
     configure_runtime,
@@ -101,13 +100,13 @@ def test_configure_runtime_replaces_xla_thread_limit_and_preserves_flags(
     )
     fake_jax, host_counts = _install_fake_runtime_modules(monkeypatch, "cpu")
 
-    jax, resolved = configure_runtime(
+    jax, chain_method = configure_runtime(
         RuntimeOptions(platform="cpu", cpu_threads=4), num_chains=2
     )
 
     assert jax is fake_jax
     assert host_counts == [2]
-    assert resolved == ResolvedRuntime("cpu", 2, 4, "parallel")
+    assert chain_method == "parallel"
     assert os.environ["JAX_PLATFORMS"] == "cpu"
     assert os.environ["OMP_NUM_THREADS"] == "4"
     assert os.environ["OPENBLAS_NUM_THREADS"] == "4"
@@ -134,9 +133,9 @@ def test_configure_runtime_omitted_thread_cap_preserves_environment(
     monkeypatch.setenv("JAX_PLATFORMS", "cpu")
     _install_fake_runtime_modules(monkeypatch, "gpu")
 
-    _, resolved = configure_runtime(RuntimeOptions(), num_chains=3)
+    _, chain_method = configure_runtime(RuntimeOptions(), num_chains=3)
 
-    assert resolved == ResolvedRuntime("gpu", 3, None, "vectorized")
+    assert chain_method == "vectorized"
     for name, value in inherited.items():
         assert os.environ[name] == value
     assert "JAX_PLATFORMS" not in os.environ
@@ -152,33 +151,16 @@ def test_gpu_cli_selection_maps_to_cuda_backend(
     assert os.environ["JAX_PLATFORMS"] == "cuda"
 
 
-def test_sidecar_separates_requested_and_resolved_runtime_from_config_hash() -> None:
+def test_sidecar_omits_runtime_settings() -> None:
     config = build_run_config(load_mapping(REPO_ROOT / "configs/mcmc.example.toml"))
-    requested = RuntimeOptions("auto", None, None, "auto")
-    resolved = ResolvedRuntime("cpu", 4, None, "parallel")
 
     record = build_run_record(
         config,
         catalog_path=Path("catalog.h5"),
         timestamp="20260712-120000",
         catalog_sha256="catalog-hash",
-        runtime_options=requested,
-        resolved_runtime=resolved,
     )
 
-    assert record["runtime"] == {
-        "requested": {
-            "platform": "auto",
-            "host_device_count": None,
-            "cpu_threads": None,
-            "chain_method": "auto",
-        },
-        "resolved": {
-            "platform": "cpu",
-            "host_device_count": 4,
-            "cpu_threads": None,
-            "chain_method": "parallel",
-        },
-    }
+    assert "runtime" not in record
     assert record["config_sha256"] == config_sha256(config)
     assert "runtime" not in config.model_dump(mode="json")

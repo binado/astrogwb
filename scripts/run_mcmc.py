@@ -32,7 +32,7 @@ import logging
 import os
 import re
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -92,16 +92,6 @@ class RuntimeOptions:
     host_device_count: int | None = None
     cpu_threads: int | None = None
     chain_method: str = "auto"
-
-
-@dataclass(frozen=True)
-class ResolvedRuntime:
-    """Runtime settings actually applied after JAX device discovery."""
-
-    platform: str
-    host_device_count: int
-    cpu_threads: int | None
-    chain_method: str
 
 
 def runtime_options_from_args(args: argparse.Namespace) -> RuntimeOptions:
@@ -167,10 +157,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # --------------------------------------------------------------------------- #
 # Runtime / device configuration (MUST run before any JAX import elsewhere)
 # --------------------------------------------------------------------------- #
-def configure_runtime(options: RuntimeOptions, num_chains: int):
+def configure_runtime(options: RuntimeOptions, num_chains: int) -> tuple:
     """Configure CPU threads, device platform, and host device count, then import jax.
 
-    Returns the imported ``jax`` module and a resolved runtime record. This is the
+    Returns the imported ``jax`` module and the resolved chain method. This is the
     only place allowed to set the env vars / host device count, and it must run
     before anything else triggers JAX backend initialization.
     """
@@ -232,12 +222,7 @@ def configure_runtime(options: RuntimeOptions, num_chains: int):
         chain_method = "vectorized" if resolved_platform == "gpu" else "parallel"
     logger.info("chain_method=%s (num_chains=%d)", chain_method, num_chains)
 
-    return jax, ResolvedRuntime(
-        platform=resolved_platform,
-        host_device_count=host_device_count,
-        cpu_threads=options.cpu_threads,
-        chain_method=chain_method,
-    )
+    return jax, chain_method
 
 
 # --------------------------------------------------------------------------- #
@@ -463,8 +448,6 @@ def build_run_record(
     catalog_path: Path,
     timestamp: str,
     catalog_sha256: str | None,
-    runtime_options: RuntimeOptions,
-    resolved_runtime: ResolvedRuntime,
 ) -> dict:
     """Assemble the JSON sidecar recording the run's inputs and provenance."""
     return {
@@ -484,10 +467,6 @@ def build_run_record(
             "f_max": config.analysis.f_max,
         },
         "sampler": config.sampler.model_dump(mode="json"),
-        "runtime": {
-            "requested": asdict(runtime_options),
-            "resolved": asdict(resolved_runtime),
-        },
         "git_revision": _git_revision(),
         "timestamp": timestamp,
     }
@@ -498,8 +477,6 @@ def save(
     config: RunConfig,
     *,
     catalog_path: Path,
-    runtime_options: RuntimeOptions,
-    resolved_runtime: ResolvedRuntime,
     timestamp: str | None = None,
     force: bool = False,
     catalog_sha256: str | None = None,
@@ -521,8 +498,6 @@ def save(
         catalog_path=catalog_path,
         timestamp=timestamp,
         catalog_sha256=catalog_sha256,
-        runtime_options=runtime_options,
-        resolved_runtime=resolved_runtime,
     )
     json_path.write_text(json.dumps(run_record, indent=2, default=str))
 
@@ -569,10 +544,8 @@ def main(argv: list[str] | None = None) -> None:
     logger.info("Catalog SHA-256: %s", catalog_sha256)
 
     runtime_options = runtime_options_from_args(args)
-    jax, resolved_runtime = configure_runtime(
-        runtime_options, config.sampler.num_chains
-    )
-    mcmc = run(config, args.catalog, jax, resolved_runtime.chain_method)
+    jax, chain_method = configure_runtime(runtime_options, config.sampler.num_chains)
+    mcmc = run(config, args.catalog, jax, chain_method)
     save(
         mcmc,
         config,
@@ -580,8 +553,6 @@ def main(argv: list[str] | None = None) -> None:
         timestamp=timestamp,
         force=args.force,
         catalog_sha256=catalog_sha256,
-        runtime_options=runtime_options,
-        resolved_runtime=resolved_runtime,
     )
 
 
