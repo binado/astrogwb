@@ -62,7 +62,7 @@ rule run_mcmc:
     resources:
         cpus_per_task=4,
         mem_mb=8000,
-        runtime=240,
+        runtime=720,
     shell:
         """
         export OMP_NUM_THREADS={resources.cpus_per_task}
