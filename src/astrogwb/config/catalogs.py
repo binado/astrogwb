@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import tomllib
-from typing import Any
+
+from astrogwb.config.loading import load_mapping
 
 
 @dataclass(frozen=True)
@@ -26,16 +26,10 @@ class CatalogRecipe:
 
 def load_catalog_recipe(path: Path) -> CatalogRecipe:
     """Load one catalog recipe from TOML."""
-    with path.open("rb") as handle:
-        raw = tomllib.load(handle)
-
-    return _recipe_from_mapping(path.stem, raw)
-
-
-def _recipe_from_mapping(recipe_name: str, config: dict[str, Any]) -> CatalogRecipe:
+    raw = load_mapping(path)
     try:
-        population = config["population"]
-        waveform = config["waveform"]
+        population = raw["population"]
+        waveform = raw["waveform"]
         return CatalogRecipe(
             population_config=Path(population["config"]),
             n_samples=int(population["n_samples"]),
@@ -49,4 +43,4 @@ def _recipe_from_mapping(recipe_name: str, config: dict[str, Any]) -> CatalogRec
             chunk_size=int(waveform["chunk_size"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"invalid catalog recipe {recipe_name!r}") from exc
+        raise ValueError(f"invalid catalog recipe {path.stem!r}") from exc

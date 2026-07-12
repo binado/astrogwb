@@ -1,5 +1,6 @@
 import ast
 from collections.abc import Callable
+from functools import lru_cache
 from pathlib import Path
 import tomllib
 from typing import cast
@@ -37,6 +38,7 @@ def _literal_assignments(path: Path) -> dict[str, object]:
     return assignments
 
 
+@lru_cache(maxsize=None)
 def _network_helpers() -> dict[str, object]:
     tree = ast.parse(_source(SNR_NOTEBOOK))
     wanted = {"_parse_network_definition", "_resolve_networks"}

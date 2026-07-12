@@ -20,7 +20,7 @@ for entry in config["runs"]:
 CHAIN_PATTERN = str(CHAINS_DIR / CATALOG_ID / "{campaign}" / "{run}.nc")
 SIDECAR_PATTERN = str(CHAINS_DIR / CATALOG_ID / "{campaign}" / "{run}.json")
 CHAINS = [
-    str(CHAINS_DIR / CATALOG_ID / campaign / f"{run}.nc")
+    CHAIN_PATTERN.format(campaign=campaign, run=run)
     for campaign, run in RUN_CONFIGS
 ]
 
@@ -70,13 +70,12 @@ rule run_mcmc:
         # job-nanny I/O conventions; harmless when the wrapper is absent.
         export INPUT="*"
         export OUTPUT="*"
+        # Prefix run_mcmc with the job-nanny wrapper only when it is installed.
+        NANNY=
         if command -v job-nanny >/dev/null 2>&1; then
-            job-nanny uv run --extra mcmc python scripts/run_mcmc.py \
-                --config {input.config:q} --outdir {params.outdir:q} \
-                --label {wildcards.run:q} --catalog {input.catalog:q} --force
-        else
-            uv run --extra mcmc python scripts/run_mcmc.py \
-                --config {input.config:q} --outdir {params.outdir:q} \
-                --label {wildcards.run:q} --catalog {input.catalog:q} --force
+            NANNY=job-nanny
         fi
+        $NANNY uv run --extra mcmc python scripts/run_mcmc.py \
+            --config {input.config:q} --outdir {params.outdir:q} \
+            --label {wildcards.run:q} --catalog {input.catalog:q} --force
         """
