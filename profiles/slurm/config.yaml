@@ -12,6 +12,6 @@ set-threads:
 set-resources:
   run_mcmc:
     slurm_partition: gpu
-    slurm_extra: "'--gres=gpu:1'"
+    gres: "gpu:1"
     mem_mb: 8000
     runtime: 720
