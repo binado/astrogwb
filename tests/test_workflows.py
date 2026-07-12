@@ -110,7 +110,7 @@ def test_mcmc_thread_override_controls_runner_cpu_budget(tmp_path: Path) -> None
     assert result.returncode == 0, result.stderr
     assert "threads: 2" in result.stdout
     assert "--cpu-threads 2" in result.stdout
-    assert "--platform gpu" in result.stdout
+    assert "--platform cuda" in result.stdout
     assert "cpus_per_task" not in result.stdout
     assert "OMP_NUM_THREADS" not in result.stdout
     assert "OPENBLAS_NUM_THREADS" not in result.stdout

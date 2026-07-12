@@ -59,9 +59,9 @@ def add_runtime_arguments(parser: argparse.ArgumentParser) -> None:
     """Add deployment/runtime controls shared by runner entrypoints."""
     parser.add_argument(
         "--platform",
-        choices=("auto", "cpu", "gpu"),
+        choices=("auto", "cpu", "cuda"),
         default="auto",
-        help="JAX platform (default: auto; gpu selects the CUDA backend).",
+        help="JAX platform (default: auto; written to JAX_PLATFORMS when not auto).",
     )
     parser.add_argument(
         "--host-device-count",
@@ -174,13 +174,11 @@ def configure_runtime(options: RuntimeOptions, num_chains: int) -> tuple:
             f"intra_op_parallelism_threads={options.cpu_threads}"
         )
 
-    # 2. Force a platform when requested; "auto" lets JAX pick (GPU if present).
+    # 2. Force a platform when requested; "auto" lets JAX pick (CUDA if present).
     if options.platform == "auto":
         os.environ.pop("JAX_PLATFORMS", None)
     else:
-        os.environ["JAX_PLATFORMS"] = (
-            "cuda" if options.platform == "gpu" else options.platform
-        )
+        os.environ["JAX_PLATFORMS"] = options.platform
 
     # 3. Host device count for CPU parallel chains -- must precede jax init.
     host_device_count = options.host_device_count or num_chains
@@ -204,7 +202,8 @@ def configure_runtime(options: RuntimeOptions, num_chains: int) -> tuple:
     )
 
     # 5. Resolve chain_method. On a single GPU vectorized chains are best; CPU
-    #    chains go on separate host devices via "parallel".
+    #    chains go on separate host devices via "parallel". JAX reports the
+    #    device platform as "gpu" even when JAX_PLATFORMS=cuda.
     chain_method = options.chain_method
     if chain_method == "auto":
         chain_method = "vectorized" if resolved_platform == "gpu" else "parallel"

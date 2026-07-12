@@ -47,7 +47,7 @@ def test_runtime_cli_defaults_and_choices() -> None:
             "--catalog",
             "catalog.h5",
             "--platform",
-            "gpu",
+            "cuda",
             "--host-device-count",
             "2",
             "--cpu-threads",
@@ -57,7 +57,7 @@ def test_runtime_cli_defaults_and_choices() -> None:
         ]
     )
     assert runtime_options_from_args(args) == RuntimeOptions(
-        platform="gpu",
+        platform="cuda",
         host_device_count=2,
         cpu_threads=5,
         chain_method="sequential",
@@ -138,12 +138,13 @@ def test_configure_runtime_omitted_thread_cap_preserves_environment(
     assert "JAX_PLATFORMS" not in os.environ
 
 
-def test_gpu_cli_selection_maps_to_cuda_backend(
+def test_cuda_cli_sets_jax_platforms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Fake device.platform is still "gpu": that is what JAX reports after CUDA init.
     _install_fake_runtime_modules(monkeypatch, "gpu")
 
-    configure_runtime(RuntimeOptions(platform="gpu"), num_chains=1)
+    configure_runtime(RuntimeOptions(platform="cuda"), num_chains=1)
 
     assert os.environ["JAX_PLATFORMS"] == "cuda"
 

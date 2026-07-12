@@ -5,9 +5,7 @@ from pathlib import Path
 CATALOG_ID = config["catalog"]["id"]
 CATALOG_PATH = config["catalog"]["path"]
 CHAINS_DIR = Path(config["chains_dir"])
-JAX_PLATFORM = {"cuda": "gpu"}.get(
-    config.get("jax_platforms", "cuda"), config.get("jax_platforms", "cuda")
-)
+JAX_PLATFORM = config.get("jax_platforms", "cuda")
 
 RUN_CONFIGS = {}
 for entry in config["runs"]:
