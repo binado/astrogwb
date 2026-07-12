@@ -30,7 +30,6 @@ import argparse
 import json
 import logging
 import os
-import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -164,27 +163,16 @@ def configure_runtime(options: RuntimeOptions, num_chains: int) -> tuple:
     only place allowed to set the env vars / host device count, and it must run
     before anything else triggers JAX backend initialization.
     """
-    # 1. CPU thread limits (no-op when omitted).
+    # 1. CPU thread limits (no-op when omitted). --cpu-threads owns the
+    #    thread policy: set BLAS/OMP caps and replace XLA_FLAGS outright.
     if options.cpu_threads is not None:
         n = str(options.cpu_threads)
         for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
             os.environ[var] = n
-        xla_flags = os.environ.get("XLA_FLAGS", "")
-        xla_flags = re.sub(
-            r"(?<!\S)(?:--)?intra_op_parallelism_threads(?:=\S+|\s+\S+)",
-            "",
-            xla_flags,
-        )
-        xla_flags = re.sub(
-            r"(?<!\S)--xla_cpu_multi_thread_eigen=\S+",
-            "",
-            xla_flags,
-        )
-        updated_xla_flags = (
-            f"{xla_flags} --xla_cpu_multi_thread_eigen=true "
+        os.environ["XLA_FLAGS"] = (
+            f"--xla_cpu_multi_thread_eigen=true "
             f"intra_op_parallelism_threads={options.cpu_threads}"
         )
-        os.environ["XLA_FLAGS"] = " ".join(updated_xla_flags.split())
 
     # 2. Force a platform when requested; "auto" lets JAX pick (GPU if present).
     if options.platform == "auto":

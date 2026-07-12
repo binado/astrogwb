@@ -89,7 +89,7 @@ def _install_fake_runtime_modules(monkeypatch: pytest.MonkeyPatch, platform: str
     return fake_jax, host_counts
 
 
-def test_configure_runtime_replaces_xla_thread_limit_and_preserves_flags(
+def test_configure_runtime_overwrites_xla_flags_when_cpu_threads_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(
@@ -111,12 +111,9 @@ def test_configure_runtime_replaces_xla_thread_limit_and_preserves_flags(
     assert os.environ["OMP_NUM_THREADS"] == "4"
     assert os.environ["OPENBLAS_NUM_THREADS"] == "4"
     assert os.environ["MKL_NUM_THREADS"] == "4"
-    assert "intra_op_parallelism_threads=99" not in os.environ["XLA_FLAGS"]
-    assert "intra_op_parallelism_threads=4" in os.environ["XLA_FLAGS"]
-    assert "--xla_cpu_multi_thread_eigen=false" not in os.environ["XLA_FLAGS"]
-    assert os.environ["XLA_FLAGS"].count("--xla_cpu_multi_thread_eigen=true") == 1
-    assert "--xla_force_host_platform_device_count=8" in os.environ["XLA_FLAGS"]
-    assert "--xla_dump_to=/tmp/xla" in os.environ["XLA_FLAGS"]
+    assert os.environ["XLA_FLAGS"] == (
+        "--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads=4"
+    )
 
 
 def test_configure_runtime_omitted_thread_cap_preserves_environment(
