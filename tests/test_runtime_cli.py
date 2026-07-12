@@ -9,16 +9,14 @@ import pytest
 
 from astrogwb.config.loading import load_mapping
 from astrogwb.config.mcmc import build_run_config, config_sha256
+from astrogwb.runtime import configure_runtime
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.run_mcmc import (  # noqa: E402
-    RuntimeOptions,
     build_run_record,
-    configure_runtime,
     parse_args,
-    runtime_options_from_args,
 )
 
 
@@ -31,14 +29,11 @@ def test_runtime_cli_rejects_non_positive_counts(flag: str, value: str) -> None:
 
 def test_runtime_cli_defaults_and_choices() -> None:
     args = parse_args(["--config", "config.toml", "--catalog", "catalog.h5"])
-    options = runtime_options_from_args(args)
 
-    assert options == RuntimeOptions(
-        platform="auto",
-        host_device_count=None,
-        cpu_threads=None,
-        chain_method="auto",
-    )
+    assert args.platform == "auto"
+    assert args.host_device_count is None
+    assert args.cpu_threads is None
+    assert args.chain_method == "auto"
 
     args = parse_args(
         [
@@ -56,12 +51,10 @@ def test_runtime_cli_defaults_and_choices() -> None:
             "sequential",
         ]
     )
-    assert runtime_options_from_args(args) == RuntimeOptions(
-        platform="cuda",
-        host_device_count=2,
-        cpu_threads=5,
-        chain_method="sequential",
-    )
+    assert args.platform == "cuda"
+    assert args.host_device_count == 2
+    assert args.cpu_threads == 5
+    assert args.chain_method == "sequential"
 
 
 class _FakeJaxConfig:
@@ -101,7 +94,7 @@ def test_configure_runtime_overwrites_xla_flags_when_cpu_threads_set(
     fake_jax, host_counts = _install_fake_runtime_modules(monkeypatch, "cpu")
 
     jax, chain_method = configure_runtime(
-        RuntimeOptions(platform="cpu", cpu_threads=4), num_chains=2
+        num_chains=2, platform="cpu", cpu_threads=4
     )
 
     assert jax is fake_jax
@@ -130,7 +123,7 @@ def test_configure_runtime_omitted_thread_cap_preserves_environment(
     monkeypatch.setenv("JAX_PLATFORMS", "cpu")
     _install_fake_runtime_modules(monkeypatch, "gpu")
 
-    _, chain_method = configure_runtime(RuntimeOptions(), num_chains=3)
+    _, chain_method = configure_runtime(num_chains=3)
 
     assert chain_method == "vectorized"
     for name, value in inherited.items():
@@ -138,13 +131,13 @@ def test_configure_runtime_omitted_thread_cap_preserves_environment(
     assert "JAX_PLATFORMS" not in os.environ
 
 
-def test_cuda_cli_sets_jax_platforms(
+def test_cuda_platform_sets_jax_platforms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Fake device.platform is still "gpu": that is what JAX reports after CUDA init.
     _install_fake_runtime_modules(monkeypatch, "gpu")
 
-    configure_runtime(RuntimeOptions(platform="cuda"), num_chains=1)
+    configure_runtime(num_chains=1, platform="cuda")
 
     assert os.environ["JAX_PLATFORMS"] == "cuda"
 

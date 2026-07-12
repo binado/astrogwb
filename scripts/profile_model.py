@@ -9,8 +9,9 @@ shows which XLA ops dominate the model math (the cosmology grid integrals,
 ``spectral_density`` contraction).
 
 The model inputs are rebuilt here (not imported from ``run_mcmc``) so this stays
-a self-contained profiling entrypoint; only :func:`run_mcmc.configure_runtime`
-is reused so the JAX device / x64 setup matches production exactly.
+a self-contained profiling entrypoint; only
+:func:`astrogwb.runtime.configure_runtime` is reused so the JAX device / x64
+setup matches production exactly.
 
 Usage::
 
@@ -32,11 +33,7 @@ from pathlib import Path
 
 from astrogwb.config.loading import load_mapping
 from astrogwb.config.mcmc import RunConfig, build_run_config
-from run_mcmc import (
-    add_runtime_arguments,
-    configure_runtime,
-    runtime_options_from_args,
-)
+from astrogwb.runtime import add_runtime_arguments, configure_runtime
 
 logger = logging.getLogger("profile_model")
 
@@ -210,8 +207,11 @@ def main(argv: list[str] | None = None) -> None:
     logger.info("Config: %s", args.config)
 
     jax, _ = configure_runtime(
-        runtime_options_from_args(args),
-        config.sampler.num_chains,
+        num_chains=config.sampler.num_chains,
+        platform=args.platform,
+        host_device_count=args.host_device_count,
+        cpu_threads=args.cpu_threads,
+        chain_method=args.chain_method,
     )
 
     potential_fn, init_params = build_potential(config, args.catalog, jax)
