@@ -7,7 +7,7 @@ to :func:`astrogwb.sampling.numpyro_model.numpyro_model`.
 
 NumPyro/JAX are imported lazily inside :func:`build_prior` so that importing
 this module does not itself initialize the JAX backend; callers must run their
-runtime configuration (see ``scripts.run_mcmc.configure_runtime``) before
+runtime configuration (see :func:`astrogwb.runtime.configure_runtime`) before
 invoking it.
 """
 

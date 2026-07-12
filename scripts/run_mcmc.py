@@ -10,8 +10,8 @@ Design constraint (do not "tidy" away): config parsing lives in
 ``astrogwb.config.mcmc`` (stdlib + pydantic only). ``OMP_NUM_THREADS`` /
 ``XLA_FLAGS`` and ``numpyro.set_host_device_count(...)`` must be set *before* JAX
 initializes its backend, so the heavy imports (jax, numpyro, astrogwb, gwmock_pop)
-happen inside functions that run only after :func:`configure_runtime`. See
-``configure_runtime`` for the ordering.
+happen inside functions that run only after
+:func:`astrogwb.runtime.configure_runtime`. See that function for the ordering.
 
 Usage::
 
@@ -29,19 +29,14 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
 from astrogwb.config.hashing import file_sha256
 from astrogwb.config.loading import load_mapping
-from astrogwb.config.mcmc import (
-    RunConfig,
-    RuntimeConfig,
-    build_run_config,
-    config_sha256,
-)
+from astrogwb.config.mcmc import RunConfig, build_run_config, config_sha256
+from astrogwb.runtime import add_runtime_arguments, configure_runtime
 
 logger = logging.getLogger("run_mcmc")
 
@@ -98,64 +93,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Replace an existing NetCDF chain and/or JSON sidecar for this run.",
     )
+    add_runtime_arguments(parser)
     return parser.parse_args(argv)
-
-
-# --------------------------------------------------------------------------- #
-# Runtime / device configuration (MUST run before any JAX import elsewhere)
-# --------------------------------------------------------------------------- #
-def configure_runtime(rc: RuntimeConfig, num_chains: int):
-    """Configure CPU threads, device platform, and host device count, then import jax.
-
-    Returns the imported ``jax`` module and the resolved ``chain_method``. This is
-    the only place allowed to set the env vars / host device count, and it must run
-    before anything else triggers JAX backend initialization.
-    """
-    # 1. CPU thread limits (no-op when cpu_threads <= 0).
-    if rc.cpu_threads and rc.cpu_threads > 0:
-        n = str(rc.cpu_threads)
-        for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
-            os.environ[var] = n
-        xla_flags = os.environ.get("XLA_FLAGS", "")
-        os.environ["XLA_FLAGS"] = (
-            f"{xla_flags} --xla_cpu_multi_thread_eigen=true "
-            f"intra_op_parallelism_threads={rc.cpu_threads}"
-        ).strip()
-
-    # 2. Force a platform when requested; "auto" lets JAX pick (GPU if present).
-    platform = rc.platform.lower()
-    if platform in ("cpu", "gpu"):
-        os.environ["JAX_PLATFORMS"] = platform
-
-    # 3. Host device count for CPU parallel chains -- must precede jax init.
-    host_device_count = rc.host_device_count or num_chains
-    import numpyro
-
-    numpyro.set_host_device_count(host_device_count)
-
-    # 4. Now JAX may initialize. Enable x64 before any array is created.
-    import jax
-
-    jax.config.update("jax_enable_x64", True)
-
-    devices = jax.devices()
-    resolved_platform = devices[0].platform
-    logger.info(
-        "JAX x64=%s | platform=%s | devices=%s | host_device_count=%d",
-        jax.config.read("jax_enable_x64"),
-        resolved_platform,
-        devices,
-        host_device_count,
-    )
-
-    # 5. Resolve chain_method. On a single GPU vectorized chains are best; CPU
-    #    chains go on separate host devices via "parallel".
-    chain_method = rc.chain_method.lower()
-    if chain_method == "auto":
-        chain_method = "vectorized" if resolved_platform == "gpu" else "parallel"
-    logger.info("chain_method=%s (num_chains=%d)", chain_method, num_chains)
-
-    return jax, chain_method
 
 
 # --------------------------------------------------------------------------- #
@@ -400,7 +339,6 @@ def build_run_record(
             "f_max": config.analysis.f_max,
         },
         "sampler": config.sampler.model_dump(mode="json"),
-        "runtime": config.runtime.model_dump(mode="json"),
         "git_revision": _git_revision(),
         "timestamp": timestamp,
     }
@@ -477,7 +415,13 @@ def main(argv: list[str] | None = None) -> None:
     catalog_sha256 = verify_catalog(args.catalog)
     logger.info("Catalog SHA-256: %s", catalog_sha256)
 
-    jax, chain_method = configure_runtime(config.runtime, config.sampler.num_chains)
+    jax, chain_method = configure_runtime(
+        num_chains=config.sampler.num_chains,
+        platform=args.platform,
+        host_device_count=args.host_device_count,
+        cpu_threads=args.cpu_threads,
+        chain_method=args.chain_method,
+    )
     mcmc = run(config, args.catalog, jax, chain_method)
     save(
         mcmc,

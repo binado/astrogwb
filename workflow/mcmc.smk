@@ -5,7 +5,7 @@ from pathlib import Path
 CATALOG_ID = config["catalog"]["id"]
 CATALOG_PATH = config["catalog"]["path"]
 CHAINS_DIR = Path(config["chains_dir"])
-JAX_PLATFORMS = config.get("jax_platforms", "cuda")
+JAX_PLATFORM = config.get("jax_platforms", "cuda")
 
 RUN_CONFIGS = {}
 for entry in config["runs"]:
@@ -57,16 +57,14 @@ rule run_mcmc:
         chain=protected(CHAIN_PATTERN),
         sidecar=protected(SIDECAR_PATTERN),
     params:
-        jax_platforms=JAX_PLATFORMS,
+        platform=JAX_PLATFORM,
         outdir=lambda wc: str(CHAINS_DIR / CATALOG_ID / wc.campaign),
+    threads: 4
     resources:
-        cpus_per_task=4,
         mem_mb=8000,
-        runtime=240,
+        runtime=720,
     shell:
         """
-        export OMP_NUM_THREADS={resources.cpus_per_task}
-        export JAX_PLATFORMS={params.jax_platforms:q}
         # job-nanny I/O conventions; harmless when the wrapper is absent.
         export INPUT="*"
         export OUTPUT="*"
@@ -77,5 +75,6 @@ rule run_mcmc:
         fi
         $NANNY uv run --extra mcmc python scripts/run_mcmc.py \
             --config {input.config:q} --outdir {params.outdir:q} \
-            --label {wildcards.run:q} --catalog {input.catalog:q} --force
+            --label {wildcards.run:q} --catalog {input.catalog:q} \
+            --platform {params.platform:q} --cpu-threads {threads} --force
         """

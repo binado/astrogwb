@@ -1,5 +1,5 @@
-# MCMC profile: snakemake --snakefile workflow/mcmc.smk \
-#   --profile profiles/slurm --configfile <batch.yaml> mcmc
+# CPU MCMC profile: snakemake --snakefile workflow/mcmc.smk \
+#   --profile profiles/slurm-cpu --configfile <batch.yaml> mcmc
 # Requires `uv sync --extra mcmc --group slurm` on the submit host.
 # Job logs land under .snakemake/slurm_logs/.
 executor: slurm
@@ -7,11 +7,14 @@ jobs: 32
 # Batch run_mcmc jobs into one SLURM job array per resource footprint
 # (parity with the retired sbatch --array flow).
 slurm-array-jobs: run_mcmc
+# Force the JAX backend to CPU so run_mcmc does not try to init CUDA on a
+# CPU node. Overrides the "cuda" default in workflow/mcmc.smk.
+config:
+  - jax_platforms=cpu
 set-threads:
   - run_mcmc=4
 set-resources:
   run_mcmc:
-    slurm_partition: gpu
-    slurm_extra: "'--gres=gpu:1'"
+    slurm_partition: cpu
     mem_mb: 8000
     runtime: 720

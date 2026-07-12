@@ -1,0 +1,28 @@
+# Local batch profile: run the MCMC batch on this machine (no SLURM), packing
+# multiple run_mcmc subprocesses across cores.
+#   snakemake --snakefile workflow/mcmc.smk \
+#     --profile profiles/local --configfile <batch.yaml> --cores 8 mcmc
+# Uses Snakemake's default local executor -- no executor plugin required.
+#
+# Two layers of parallelism combine here:
+#   * job-level: Snakemake runs floor(--cores / threads) run_mcmc jobs at once;
+#   * chain-level: on CPU the runner auto-selects chain_method="parallel" and
+#     spreads a run's num_chains over that many logical CPU devices.
+# Size --cores against (concurrent jobs) x (cores each job actually uses) so the
+# machine is not oversubscribed. For a large sweep, prefer single-chain configs
+# and let the job level do the work.
+
+# Force JAX onto CPU so run_mcmc does not try to initialize CUDA on a machine
+# with no GPU (overrides the "cuda" default in workflow/mcmc.smk).
+config:
+  - jax_platforms=cpu
+
+# Account each run_mcmc job at its core footprint so --cores packs jobs
+# correctly. Rule threads are passed to the runner as its BLAS/XLA thread cap.
+set-threads:
+  - run_mcmc=4
+
+set-resources:
+  run_mcmc:
+    mem_mb: 8000
+    runtime: 720

@@ -6,12 +6,6 @@ observation_time = 1.0
 
 sampled_params = ["H0", "Omega_m"]
 
-[runtime]
-platform = "auto"
-host_device_count = 1
-cpu_threads = 0
-chain_method = "auto"
-
 [analysis]
 detectors = ["S1", "R1", "C1"]
 f_min = 2.0

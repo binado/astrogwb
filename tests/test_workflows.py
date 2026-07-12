@@ -81,6 +81,43 @@ def test_mcmc_workflow_expands_multiple_manifest_runs(tmp_path: Path) -> None:
     assert "rule bns_waveform_catalog:" not in result.stdout
 
 
+def test_mcmc_thread_override_controls_runner_cpu_budget(tmp_path: Path) -> None:
+    catalog = tmp_path / "catalog.h5"
+    run_config = tmp_path / "selected-run.json"
+    catalog.touch()
+    run_config.write_text("{}\n", encoding="utf-8")
+    manifest = _write_manifest(
+        tmp_path,
+        catalog,
+        [{"campaign": "test-campaign", "config": str(run_config)}],
+    )
+
+    result = _snakemake(
+        "--snakefile",
+        "workflow/mcmc.smk",
+        "--configfile",
+        str(manifest),
+        "--dry-run",
+        "--forceall",
+        "--printshellcmds",
+        "--cores",
+        "2",
+        "mcmc",
+        "--set-threads",
+        "run_mcmc=2",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "threads: 2" in result.stdout
+    assert "--cpu-threads 2" in result.stdout
+    assert "--platform cuda" in result.stdout
+    assert "cpus_per_task" not in result.stdout
+    assert "OMP_NUM_THREADS" not in result.stdout
+    assert "OPENBLAS_NUM_THREADS" not in result.stdout
+    assert "MKL_NUM_THREADS" not in result.stdout
+    assert "XLA_FLAGS" not in result.stdout
+
+
 def test_mcmc_workflow_rejects_duplicate_campaign_and_config_stem(
     tmp_path: Path,
 ) -> None:

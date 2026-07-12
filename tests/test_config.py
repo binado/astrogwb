@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from astrogwb.config.loading import deep_merge, load_mapping
 from astrogwb.config.mcmc import build_run_config, config_sha256
@@ -80,6 +81,27 @@ def test_curated_configs_are_catalog_independent() -> None:
         raw = load_mapping(path)
         assert "catalog" not in raw
         assert build_run_config(raw).analysis.detectors
+
+
+def test_all_committed_mcmc_configs_validate_without_runtime() -> None:
+    config_paths = [
+        REPO_ROOT / "configs/mcmc.example.toml",
+        REPO_ROOT / "configs/mcmc.cosmology.toml",
+        *(REPO_ROOT / "configs/mcmc/curated").glob("*/*.json"),
+    ]
+
+    for path in config_paths:
+        raw = load_mapping(path)
+        assert "runtime" not in raw
+        build_run_config(raw)
+
+
+def test_build_run_config_rejects_legacy_runtime_section() -> None:
+    raw = load_mapping(REPO_ROOT / "configs/mcmc.example.toml")
+    raw["runtime"] = {"platform": "cpu"}
+
+    with pytest.raises(ValidationError, match="runtime"):
+        build_run_config(raw)
 
 
 def test_config_sha256_stable_across_key_order_and_sensitive_to_values() -> None:
