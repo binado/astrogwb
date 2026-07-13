@@ -4,6 +4,7 @@ data
 *.ipynb
 
 # Generated MCMC run artifacts and frozen manifests.
+/out/
 configs/mcmc/astrophysical/
 configs/mcmc/cosmology/
 configs/mcmc/modified-propagation/

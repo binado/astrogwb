@@ -10,12 +10,27 @@ Base settings (fiducials, analysis, cosmology, sampler, output) are taken
 from the example TOML (default ``configs/mcmc.example.toml``). Campaign-specific
 fields override detectors, ``sampled_params``, and prior tables. Requires the
 ``mcmc`` optional extra (pydantic) for ``RunConfig`` validation.
+
+Pass ``--write-manifests`` to also (re)generate the Snakemake batch manifest
+for each campaign (``configs/mcmc/manifests/mcmc.batch.{campaign}.json``),
+listing every config written for that campaign for use with
+``workflow/mcmc.smk``. A manifest is catalog-free: it holds only
+``{"chains_dir": ..., "runs": [...]}``. ``workflow/mcmc.smk`` sources the
+catalog separately from ``configs/workflow.yaml`` (shared with the paper
+workflow), so the same manifest can be run against any catalog without
+regenerating it. Like the JSON configs, generated manifests are gitignored
+(``configs/mcmc/manifests/``) -- they are fully reproducible from
+``configs/mcmc.sweeps.toml``, so there is nothing to commit::
+
+    uv run --extra mcmc python scripts/generate_mcmc_configs.py --write-manifests --force
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +45,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_DIR = "configs/mcmc"
 DEFAULT_EXAMPLE_CONFIG = REPO_ROOT / "configs" / "mcmc.example.toml"
 DEFAULT_SWEEP_SPEC = REPO_ROOT / "configs" / "mcmc.sweeps.toml"
+DEFAULT_MANIFEST_DIR = REPO_ROOT / "configs" / "mcmc" / "manifests"
+DEFAULT_CHAINS_DIR = "chains"
 
 
 @dataclass(frozen=True)
@@ -90,30 +107,74 @@ def make_config(
     return build_run_config(raw)
 
 
+def render_manifest(
+    campaign: str,
+    run_configs: list[Path],
+    *,
+    chains_dir: str,
+) -> str:
+    """Render a Snakemake batch manifest (``workflow/mcmc.smk`` schema) as JSON.
+
+    Snakemake's ``--configfile`` loader (``snakemake.common.configfile``) tries
+    JSON before YAML regardless of file extension, so JSON needs no hand-rolled
+    escaping and no extra dependency (``pyyaml`` is not part of the ``mcmc``
+    extra this script is documented to run under).
+
+    The manifest deliberately carries no ``catalog`` field: which data file to
+    reweight is not a sweep concern, so ``workflow/mcmc.smk`` sources it
+    separately from ``configs/workflow.yaml``. This lets the same manifest run
+    against any catalog without regenerating it.
+
+    ``jax_platforms`` is deliberately not part of this schema either: it is a
+    runtime concern (which JAX backend to init), not an MCMC-campaign concern,
+    and ``workflow/mcmc.smk`` already defaults it to ``"cuda"``. The Snakemake
+    profile you run with (``profiles/local``, ``profiles/slurm-cpu``, ...)
+    is what actually decides it.
+    """
+    manifest = {
+        "chains_dir": chains_dir,
+        "runs": [
+            {"campaign": campaign, "config": path.as_posix()} for path in run_configs
+        ],
+    }
+    return json.dumps(manifest, indent=2) + "\n"
+
+
 def generate_configs(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     *,
     example_config: str | Path = DEFAULT_EXAMPLE_CONFIG,
     sweep_spec: SweepSpec | None = None,
     skip_existing: bool = True,
-) -> tuple[Path, list[Path], list[Path]]:
-    """Write campaign JSON configs; return (output_dir, written, skipped) paths."""
+    write_manifests: bool = False,
+    manifest_dir: str | Path = DEFAULT_MANIFEST_DIR,
+    chains_dir: str = DEFAULT_CHAINS_DIR,
+) -> tuple[Path, list[Path], list[Path], list[Path], list[Path]]:
+    """Write campaign JSON configs and, if requested, their batch manifests.
+
+    Returns ``(output_dir, written, skipped, written_manifests, skipped_manifests)``.
+    """
     resolved_output_dir = _resolve_repo_path(output_dir)
     resolved_example_config = _resolve_repo_path(example_config)
+    resolved_manifest_dir = _resolve_repo_path(manifest_dir)
     sweep_spec = sweep_spec or load_sweep_spec()
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
     written: list[Path] = []
     skipped: list[Path] = []
+    written_manifests: list[Path] = []
+    skipped_manifests: list[Path] = []
 
     for campaign, sample_sets in sweep_spec.campaigns.items():
         campaign_dir = resolved_output_dir / campaign
         campaign_dir.mkdir(parents=True, exist_ok=True)
+        campaign_runs: list[Path] = []
 
         for network_label, detectors in sweep_spec.networks.items():
             for sample_label, (sampled_params, prior_overrides) in sample_sets.items():
                 filename = f"{network_label}__{sample_label}.json"
                 path = campaign_dir / filename
+                campaign_runs.append(Path(os.path.relpath(path, REPO_ROOT)))
                 if skip_existing and path.exists():
                     skipped.append(path)
                     logger.info("skipping existing config %s", path)
@@ -136,13 +197,36 @@ def generate_configs(
                     sampled_params,
                 )
 
+        if write_manifests:
+            resolved_manifest_dir.mkdir(parents=True, exist_ok=True)
+            manifest_path = resolved_manifest_dir / f"mcmc.batch.{campaign}.json"
+            if skip_existing and manifest_path.exists():
+                skipped_manifests.append(manifest_path)
+                logger.info("skipping existing manifest %s", manifest_path)
+                continue
+            manifest_text = render_manifest(
+                campaign,
+                campaign_runs,
+                chains_dir=chains_dir,
+            )
+            manifest_path.write_text(manifest_text, encoding="utf-8")
+            written_manifests.append(manifest_path)
+            logger.info(
+                "wrote manifest %s campaign=%s runs=%d",
+                manifest_path,
+                campaign,
+                len(campaign_runs),
+            )
+
     logger.info(
-        "done output_dir=%s written=%d skipped=%d",
+        "done output_dir=%s written=%d skipped=%d written_manifests=%d skipped_manifests=%d",
         resolved_output_dir,
         len(written),
         len(skipped),
+        len(written_manifests),
+        len(skipped_manifests),
     )
-    return resolved_output_dir, written, skipped
+    return resolved_output_dir, written, skipped, written_manifests, skipped_manifests
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -168,14 +252,38 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--example",
         type=Path,
         default=DEFAULT_EXAMPLE_CONFIG,
-        help=(
-            "Base TOML template for fiducials, cosmology, sampler, and output."
-        ),
+        help=("Base TOML template for fiducials, cosmology, sampler, and output."),
     )
     parser.add_argument(
         "--force",
         action="store_true",
         help="Overwrite existing config files instead of skipping them.",
+    )
+    parser.add_argument(
+        "--write-manifests",
+        action="store_true",
+        help=(
+            "Also (re)generate a Snakemake batch manifest per campaign "
+            "(configs/mcmc/manifests/mcmc.batch.{campaign}.json), holding only "
+            "chains_dir and the campaign's runs -- no catalog field. "
+            "workflow/mcmc.smk sources the catalog separately from "
+            "configs/workflow.yaml. Gitignored, like the JSON configs: fully "
+            "reproducible from mcmc.sweeps.toml."
+        ),
+    )
+    parser.add_argument(
+        "--manifest-dir",
+        type=Path,
+        default=DEFAULT_MANIFEST_DIR,
+        help=(
+            "Directory for generated batch manifests "
+            f"(default: {DEFAULT_MANIFEST_DIR}). Only used with --write-manifests."
+        ),
+    )
+    parser.add_argument(
+        "--chains-dir",
+        default=DEFAULT_CHAINS_DIR,
+        help=f"chains_dir for generated manifests (default: {DEFAULT_CHAINS_DIR}).",
     )
     return parser.parse_args(argv)
 
@@ -191,6 +299,9 @@ def main(argv: list[str] | None = None) -> None:
         example_config=args.example,
         sweep_spec=load_sweep_spec(args.sweep_spec),
         skip_existing=not args.force,
+        write_manifests=args.write_manifests,
+        manifest_dir=args.manifest_dir,
+        chains_dir=args.chains_dir,
     )
 
 
