@@ -53,7 +53,6 @@ def test_write_manifests_lists_every_campaign_run_in_order(tmp_path: Path) -> No
         catalog_id="test-catalog",
         catalog_path="out/catalogs/test-catalog.h5",
         chains_dir="test-chains",
-        jax_platforms="cpu",
     )
     _output_dir, written, _skipped, written_manifests, _skipped_manifests = result
 
@@ -66,7 +65,9 @@ def test_write_manifests_lists_every_campaign_run_in_order(tmp_path: Path) -> No
         "path": "out/catalogs/test-catalog.h5",
     }
     assert manifest["chains_dir"] == "test-chains"
-    assert manifest["jax_platforms"] == "cpu"
+    # jax_platforms is a runtime concern owned by the Snakemake profile, not
+    # the MCMC campaign -- it must never appear in a generated manifest.
+    assert "jax_platforms" not in manifest
     assert [run["campaign"] for run in manifest["runs"]] == ["cosmology"] * 4
 
     # Network-outer, sample-label-inner order, matching the JSON generation loop.

@@ -12,8 +12,11 @@ fields override detectors, ``sampled_params``, and prior tables. Requires the
 ``mcmc`` optional extra (pydantic) for ``RunConfig`` validation.
 
 Pass ``--write-manifests`` to also (re)generate the Snakemake batch manifest
-for each campaign (``configs/mcmc.batch.{campaign}.json``), listing every
-config written for that campaign for use with ``workflow/mcmc.smk``::
+for each campaign (``configs/mcmc/manifests/mcmc.batch.{campaign}.json``),
+listing every config written for that campaign for use with
+``workflow/mcmc.smk``. Like the JSON configs, generated manifests are
+gitignored (``configs/mcmc/manifests/``) -- they are fully reproducible from
+``configs/mcmc.sweeps.toml``, so there is nothing to commit::
 
     uv run --extra mcmc python scripts/generate_mcmc_configs.py --write-manifests --force
 """
@@ -38,11 +41,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_DIR = "configs/mcmc"
 DEFAULT_EXAMPLE_CONFIG = REPO_ROOT / "configs" / "mcmc.example.toml"
 DEFAULT_SWEEP_SPEC = REPO_ROOT / "configs" / "mcmc.sweeps.toml"
-DEFAULT_MANIFEST_DIR = REPO_ROOT / "configs"
+DEFAULT_MANIFEST_DIR = REPO_ROOT / "configs" / "mcmc" / "manifests"
 DEFAULT_CATALOG_ID = "bns-n16384-df1"
 DEFAULT_CATALOG_PATH = "out/catalogs/bns-n16384-df1.h5"
 DEFAULT_CHAINS_DIR = "chains"
-DEFAULT_JAX_PLATFORMS = "cuda"
 
 
 @dataclass(frozen=True)
@@ -110,7 +112,6 @@ def render_manifest(
     catalog_id: str,
     catalog_path: str,
     chains_dir: str,
-    jax_platforms: str,
 ) -> str:
     """Render a Snakemake batch manifest (``workflow/mcmc.smk`` schema) as JSON.
 
@@ -118,11 +119,16 @@ def render_manifest(
     JSON before YAML regardless of file extension, so JSON needs no hand-rolled
     escaping and no extra dependency (``pyyaml`` is not part of the ``mcmc``
     extra this script is documented to run under).
+
+    ``jax_platforms`` is deliberately not part of this schema: it is a runtime
+    concern (which JAX backend to init), not an MCMC-campaign concern, and
+    ``workflow/mcmc.smk`` already defaults it to ``"cuda"``. The Snakemake
+    profile you run with (``profiles/local``, ``profiles/slurm-cpu``, ...)
+    is what actually decides it.
     """
     manifest = {
         "catalog": {"id": catalog_id, "path": catalog_path},
         "chains_dir": chains_dir,
-        "jax_platforms": jax_platforms,
         "runs": [
             {"campaign": campaign, "config": path.as_posix()} for path in run_configs
         ],
@@ -141,7 +147,6 @@ def generate_configs(
     catalog_id: str = DEFAULT_CATALOG_ID,
     catalog_path: str = DEFAULT_CATALOG_PATH,
     chains_dir: str = DEFAULT_CHAINS_DIR,
-    jax_platforms: str = DEFAULT_JAX_PLATFORMS,
 ) -> tuple[Path, list[Path], list[Path], list[Path], list[Path]]:
     """Write campaign JSON configs and, if requested, their batch manifests.
 
@@ -203,7 +208,6 @@ def generate_configs(
                 catalog_id=catalog_id,
                 catalog_path=catalog_path,
                 chains_dir=chains_dir,
-                jax_platforms=jax_platforms,
             )
             manifest_path.write_text(manifest_text, encoding="utf-8")
             written_manifests.append(manifest_path)
@@ -260,7 +264,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Also (re)generate a Snakemake batch manifest per campaign "
-            "(configs/mcmc.batch.{campaign}.json)."
+            "(configs/mcmc/manifests/mcmc.batch.{campaign}.json). Gitignored, "
+            "like the JSON configs: fully reproducible from mcmc.sweeps.toml."
         ),
     )
     parser.add_argument(
@@ -287,11 +292,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_CHAINS_DIR,
         help=f"chains_dir for generated manifests (default: {DEFAULT_CHAINS_DIR}).",
     )
-    parser.add_argument(
-        "--jax-platforms",
-        default=DEFAULT_JAX_PLATFORMS,
-        help=f"jax_platforms for generated manifests (default: {DEFAULT_JAX_PLATFORMS}).",
-    )
     return parser.parse_args(argv)
 
 
@@ -311,7 +311,6 @@ def main(argv: list[str] | None = None) -> None:
         catalog_id=args.catalog_id,
         catalog_path=args.catalog_path,
         chains_dir=args.chains_dir,
-        jax_platforms=args.jax_platforms,
     )
 
 
