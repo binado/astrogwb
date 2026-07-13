@@ -21,6 +21,7 @@ figures/*.csv
 !README.md
 !AGENTS.md
 !CLAUDE.md
+!docs/**/*.md
 
 ## Core latex/pdflatex auxiliary files:
 *.aux
