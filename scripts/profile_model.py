@@ -143,11 +143,11 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
         fiducial_xi_n=config.fiducials["xi_n"],
     )
 
-    ones_weights = jnp.ones((n_samples,))
-    rate0, _ = merger_rate_and_log_weights_fn(config.fiducials, samples)
+    rate0, log_weights0 = merger_rate_and_log_weights_fn(config.fiducials, samples)
+    weights0 = jnp.exp(log_weights0)
     observed_spectral_density = spectral_density(
         polarization_power,
-        ones_weights,
+        weights0,
         rate0,
         average_mode="analytic_inclination",
     )

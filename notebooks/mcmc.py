@@ -331,13 +331,13 @@ def plot_omegagw(
     return fig
 
 
-ones_weights = jnp.ones((n_samples,))
-rate0, _ = merger_rate_and_log_weights_fn(
+rate0, log_weights0 = merger_rate_and_log_weights_fn(
     fiducials,
     samples,
 )
+weights0 = jnp.exp(log_weights0)
 observed_spectral_density = spectral_density(
-    polarization_power, ones_weights, rate0, average_mode="analytic_inclination"
+    polarization_power, weights0, rate0, average_mode="analytic_inclination"
 )
 plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-15)
 
