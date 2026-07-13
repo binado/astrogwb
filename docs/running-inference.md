@@ -1,0 +1,66 @@
+# Running inference
+
+There are two working examples provided in the repo:
+
+- The [`run_mcmc.py` script](../scripts/run_mcmc.py) accepts a TOML or JSON configuration file and is suitable for running MCMC on a cluster.
+- The [`mcmc.py` notebook](../notebooks/mcmc.py) has the same functionality as the script but can be run interactively in a Jupyter notebook. You can use `uvx jupytext --to ipynb notebooks/mcmc.py` to convert it to a Jupyter notebook in your local machine.
+
+Both examples assume a population of binary neutron star (BNS) mergers following the example described in [Generating catalogs](./catalog-generation.md). The headless runner takes the proposal catalog explicitly:
+
+```bash
+uv run --extra mcmc python scripts/run_mcmc.py \
+  --config configs/mcmc.example.toml \
+  --catalog out/catalogs/bns-n16384-df1.h5
+```
+
+## Generating sweep configs
+
+Generate sweep configs explicitly on the local machine or cluster submit host;
+existing configs are skipped unless `--force` is supplied:
+
+```bash
+uv run --extra mcmc python scripts/generate_mcmc_configs.py
+```
+
+The committed [`configs/mcmc.sweeps.toml`](../configs/mcmc.sweeps.toml) is a
+declarative product of named detector `[networks]`, likelihood
+`[observations]`, inference `[analyses]`, and prior variants. Each `[runs.*]`
+table selects lists from those collections and expands
+`networks × analyses × observations`. Invariant cosmology, sampler, fiducial,
+and output settings come from the sweep's explicitly declared
+[`configs/mcmc.base.toml`](../configs/mcmc.base.toml).
+
+An observation supplies a complete `observation_time`, `f_min`, and `f_max`.
+An analysis selects a named prior variant for every sampled parameter and may
+optionally override existing base fiducials inline:
+
+```toml
+[analyses.H0]
+sampled_params = ["H0"]
+priors = { H0 = "uniform" }
+fiducials = { H0 = 67.66 }
+```
+
+Overrides affect the injected spectrum, proposal density, fixed constants,
+and sampler initialization. They cannot introduce parameters absent from the
+base fiducial table. Generated run IDs contain every product dimension:
+`<network>__<analysis>__<observation>`.
+
+To submit generated sweep configs as a batch (locally or on SLURM), see
+[Snakemake workflow](./snakemake-workflow.md#mcmc-workflow).
+
+## Outputs
+
+Each workflow run writes an ArviZ `InferenceData` to
+`chains/<catalog-id>/<campaign>/<run>.nc`
+(ad-hoc unlabelled runs keep the timestamped
+`chains/mcmc-<params>-det=<det>-seed<n>-<ts>.nc` convention) alongside a
+sibling `.json` sidecar recording the run's provenance: catalog path and
+`catalog_sha256`, the resolved `config_sha256`, detectors, seed, fiducials,
+priors, sampler settings, and the git revision. Runtime controls
+(`--platform`, `--chain-method`, etc.) affect only how a run executes, not
+its scientific result, so they are not recorded.
+Diagnostics surface the model's `importance_relative_ess` (the key proposal
+health check — should stay close to 1) and `total_merger_rate`.
+
+See the [plotting notebook](../notebooks/mcmc_plotting.py) for examples of how to visualize the results.
