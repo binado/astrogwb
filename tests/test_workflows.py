@@ -82,6 +82,47 @@ def test_mcmc_workflow_expands_multiple_manifest_runs(tmp_path: Path) -> None:
     assert "rule bns_waveform_catalog:" not in result.stdout
 
 
+def test_mcmc_catalog_id_override_uses_derived_path(tmp_path: Path) -> None:
+    catalog_id = f"test-{tmp_path.name}"
+    catalog = REPO_ROOT / "out" / "catalogs" / f"{catalog_id}.h5"
+    run_config = tmp_path / "selected-run.json"
+    run_config.write_text("{}\n", encoding="utf-8")
+    manifest = _write_manifest(
+        tmp_path,
+        [{"campaign": "test-campaign", "config": str(run_config)}],
+    )
+    catalog_config = tmp_path / "catalog-config.json"
+    catalog_config.write_text(
+        json.dumps({"catalog": {"id": catalog_id}}),
+        encoding="utf-8",
+    )
+
+    catalog.parent.mkdir(parents=True, exist_ok=True)
+    catalog.touch()
+    try:
+        result = _snakemake(
+            "--snakefile",
+            "workflow/mcmc.smk",
+            "--configfile",
+            str(catalog_config),
+            str(manifest),
+            "--dry-run",
+            "--forceall",
+            "--cores",
+            "1",
+            "mcmc",
+        )
+    finally:
+        catalog.unlink()
+
+    assert result.returncode == 0, result.stderr
+    assert f"out/catalogs/{catalog_id}.h5" in result.stdout
+    assert "out/catalogs/bns-n16384-df1.h5" not in result.stdout
+    assert str(tmp_path / f"chains/{catalog_id}/test-campaign/selected-run.nc") in (
+        result.stdout
+    )
+
+
 def test_mcmc_thread_override_controls_runner_cpu_budget(tmp_path: Path) -> None:
     catalog = tmp_path / "catalog.h5"
     run_config = tmp_path / "selected-run.json"

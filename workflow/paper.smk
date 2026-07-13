@@ -22,7 +22,9 @@ PAPER_NETWORK_ARGS = [
 ]
 
 CATALOG_ID = config["catalog"]["id"]
-CATALOG_PATH = config["catalog"]["path"]
+CATALOG_PATH = (
+    config["catalog"].get("path") or f"out/catalogs/{CATALOG_ID}.h5"
+)
 CHAINS_DIR = PAPER_CONFIG["paths"]["chains_dir"]
 AMPLITUDE_TOY_PDF = config["amplitude_toy"]["output_pdf"]
 SNR_BY_DETECTOR_PDF = config["snr_by_detector"]["output_pdf"]
