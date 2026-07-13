@@ -25,9 +25,11 @@ uv sync --extra mcmc --group dev
 
 ## Documentation
 
+Typical path: [catalogs](docs/catalog-generation.md) → [inference](docs/running-inference.md) → [Snakemake](docs/snakemake-workflow.md). Paper builds are covered in [Paper figures](docs/paper-figures.md).
+
 - [Generating catalogs](docs/catalog-generation.md): building a population of CBCs with `gwmock-pop` and its waveform catalog with `gwmock-signal`.
-- [Running inference](docs/running-inference.md): running `scripts/run_mcmc.py` / `notebooks/mcmc.py`, generating sweep configs, and interpreting chain outputs.
-- [Paper figures](docs/paper-figures.md): the self-contained analysis notebooks and configs behind the paper's figures.
+- [Running inference](docs/running-inference.md): running `scripts/run_mcmc.py` / `notebooks/mcmc.py`, generating sweep configs, and interpreting chain outputs / diagnostics.
+- [Paper figures](docs/paper-figures.md): the analysis notebooks, `configs/paper.toml`, and dry-run/build commands for the paper's figures.
 - [Snakemake workflow](docs/snakemake-workflow.md): the catalog, MCMC, and paper Snakefiles, batch manifests, and SLURM/local deployment.
 
 ## Requirements
@@ -50,8 +52,8 @@ uv sync --extra mcmc --group dev
 Run tests:
 
 ```bash
-uv run pytest
-uv run pytest -m "not integration"   # fast unit tests only
+uv run --extra mcmc --group dev pytest
+uv run --extra mcmc --group dev pytest -m "not integration"   # fast unit tests only
 ```
 
 Regression fixtures under `tests/fixtures/` are committed; integration tests

@@ -25,6 +25,8 @@ uv run snakemake \
 
 ### Batch manifests
 
+Generate sweep configs as described in
+[Generating sweep configs](./running-inference.md#generating-sweep-configs).
 Add `--write-manifests` to also (re)generate a full-sweep batch manifest per
 campaign —
 `configs/mcmc/manifests/mcmc.batch.{cosmology,astrophysical,modified-propagation}.json`
@@ -99,8 +101,9 @@ the repo:
 | `profiles/slurm-cpu` | `cpu` | none | `cpu` |
 
 Both request 12 h wall-clock (`runtime: 720`) and batch compatible `run_mcmc`
-jobs into a SLURM array. The CPU profile also selects `--platform cpu` so JAX
-does not try to initialize CUDA on a CPU node.
+jobs into a SLURM array. The CPU profile also sets `jax_platforms=cpu` (passed
+through as `--platform cpu`) so JAX does not try to initialize CUDA on a CPU
+node.
 
 1. **Install the executor plugin on the submit host.** The `slurm` group pulls
    in `snakemake-executor-plugin-slurm`:
@@ -212,7 +215,15 @@ catalog contraction that BLAS already parallelizes, more independent runs
 usually beats more threads per run — keep the sweep configs single-chain
 (`num_chains = 1`) and let the job level do the work.
 
-### Reproducibility
+## Paper workflow
+
+[`workflow/paper.smk`](../workflow/paper.smk) builds paper figures from
+[`configs/paper.toml`](../configs/paper.toml) and the catalog selected in
+[`configs/workflow.yaml`](../configs/workflow.yaml). Dry-run and build commands
+live in [Paper figures](./paper-figures.md); this page covers only how the
+Snakefiles source catalogs, chains, and configuration.
+
+## Reproducibility
 
 Reproducibility is layered on committed catalog recipes, fixed population seeds,
 and content hashes instead of lock files. Each chain sidecar records the exact

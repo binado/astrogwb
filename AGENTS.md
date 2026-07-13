@@ -9,6 +9,7 @@
   - `utils.py`: unit-conversion helpers (`SECONDS_PER_YEAR`, `years_to_seconds`) and `repo_root()` for resolving the repository from notebooks or scripts.
 - `tests/`: Pytest suite with unit and integration coverage; committed `tests/fixtures/*.npz` for regression locks.
 - `notebooks/`: runnable, version-controlled workflows. `mcmc.py` (py:percent) is the NumPyro port of ASGWB.jl's importance-weighted NUTS run; `mcmc_plotting.py` loads saved chains and produces corner and diagnostic plots.
+- `docs/`: topic guides linked from the root README (catalog generation, inference, paper figures, Snakemake/SLURM).
 - `notes/`: LaTeX notes/manuscript support files (`notes/justfile` for PDF build helpers).
 
 gwmock-signal owns preset detector networks; gwmock-noise owns bundled PSD presets and interpolation. astrogwb owns the frequency-dependent ORF, out-of-band PSD policy, supplemental geometry/noise tables for str-named detectors, and SGWB detector utilities.
