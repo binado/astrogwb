@@ -27,9 +27,12 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+from pluscross import load_catalog
 
 from astrogwb.gwb import (
     frequency_mask as make_frequency_mask,
+)
+from astrogwb.gwb import (
     omega_gw_from_spectral_density,
     spectral_density,
 )
@@ -39,7 +42,6 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 )
 from astrogwb.utils import repo_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from pluscross import load_catalog
 
 jax.config.update("jax_enable_x64", True)
 # %config InlineBackend.figure_format = 'retina'
@@ -57,7 +59,9 @@ CATALOG_PATHS = [
 ]
 LABELS = ["df = 1 Hz", "df = 2 Hz"]
 
-assert len(CATALOG_PATHS) == len(LABELS), "CATALOG_PATHS and LABELS must have equal length"
+assert len(CATALOG_PATHS) == len(LABELS), (
+    "CATALOG_PATHS and LABELS must have equal length"
+)
 
 # Redshift grid for the cosmology integrals (and MD normalization)
 z_min = 0.0
@@ -118,11 +122,11 @@ for path, label in zip(CATALOG_PATHS, LABELS, strict=True):
         fiducial_xi_n=fiducials["xi_n"],
     )
 
-    ones_weights = jnp.ones((n_samples,))
-    rate0, _ = merger_rate_and_log_weights_fn(fiducials, samples)
+    rate0, log_weights0 = merger_rate_and_log_weights_fn(fiducials, samples)
+    weights0 = jnp.exp(log_weights0)
     sh = spectral_density(
         polarization_power,
-        ones_weights,
+        weights0,
         rate0,
         average_mode="analytic_inclination",
     )
