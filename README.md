@@ -139,6 +139,22 @@ overrides `catalog`, with no manifest regeneration required. Chains remain
 namespaced by catalog ID. A missing catalog or config stops the workflow
 instead of triggering preprocessing.
 
+To select a catalog in the standard `out/catalogs/<id>.h5` location, override
+only its ID. For a catalog stored elsewhere, provide both the ID used to
+namespace chains and the catalog path:
+
+```bash
+# Uses out/catalogs/my-catalog.h5.
+--config "catalog={'id':'my-catalog'}"
+
+# Uses an externally stored catalog.
+--config "catalog={'id':'my-catalog','path':'/data/catalogs/my-catalog.h5'}"
+```
+
+Append the appropriate `--config` argument to the Snakemake commands below.
+Use the nested dictionary syntax shown here rather than a flat
+`catalog.id=...` key.
+
 Note the manifest schema has no `jax_platforms` field: which JAX backend to
 initialize is a runtime concern owned by the Snakemake profile you run with
 (`profiles/local`, `profiles/slurm`, `profiles/slurm-cpu`), not a property of
