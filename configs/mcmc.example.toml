@@ -1,6 +1,6 @@
-# Example config for scripts/run_mcmc.py -- the headless NumPyro MCMC runner.
-# Mirrors the Configuration cell of notebooks/mcmc.py. Copy this per array task
-# (configs/task_0.toml, ...) and edit the parts that differ between tasks.
+# Concrete example for scripts/run_mcmc.py -- the headless NumPyro MCMC runner.
+# This file is independently runnable and is not the sweep generator's base;
+# declarative sweeps use configs/mcmc.base.toml instead.
 
 seed = 42
 observation_time = 1.0       # [yr]; cancels in S_h, kept for the likelihood scale

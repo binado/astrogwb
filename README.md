@@ -109,6 +109,30 @@ existing configs are skipped unless `--force` is supplied:
 uv run --extra mcmc python scripts/generate_mcmc_configs.py
 ```
 
+The committed [`configs/mcmc.sweeps.toml`](configs/mcmc.sweeps.toml) is a
+declarative product of named detector `[networks]`, likelihood
+`[observations]`, inference `[analyses]`, and prior variants. Each `[runs.*]`
+table selects lists from those collections and expands
+`networks × analyses × observations`. Invariant cosmology, sampler, fiducial,
+and output settings come from the sweep's explicitly declared
+[`configs/mcmc.base.toml`](configs/mcmc.base.toml).
+
+An observation supplies a complete `observation_time`, `f_min`, and `f_max`.
+An analysis selects a named prior variant for every sampled parameter and may
+optionally override existing base fiducials inline:
+
+```toml
+[analyses.H0]
+sampled_params = ["H0"]
+priors = { H0 = "uniform" }
+fiducials = { H0 = 67.66 }
+```
+
+Overrides affect the injected spectrum, proposal density, fixed constants,
+and sampler initialization. They cannot introduce parameters absent from the
+base fiducial table. Generated run IDs contain every product dimension:
+`<network>__<analysis>__<observation>`.
+
 Add `--write-manifests` to also (re)generate a full-sweep batch manifest per
 campaign —
 `configs/mcmc/manifests/mcmc.batch.{cosmology,astrophysical,modified-propagation}.json`
@@ -257,7 +281,7 @@ it never enters a run's config hash.
 
 As a worked example, run the **cosmology sweep** locally. First generate the
 sweep configs and their batch manifest (writes
-`configs/mcmc/cosmology/<network>__<params>.json` and
+`configs/mcmc/cosmology/<network>__<analysis>__<observation>.json` and
 `configs/mcmc/manifests/mcmc.batch.cosmology.json`):
 
 ```bash
@@ -265,7 +289,7 @@ uv run --extra mcmc python scripts/generate_mcmc_configs.py --write-manifests
 ```
 
 `configs/mcmc/manifests/mcmc.batch.cosmology.json` now lists all 24 cosmology
-sweep points (6 networks x 4 sample-label combos). To run only a subset
+sweep points (6 networks × 4 analyses × 1 observation). To run only a subset
 locally — e.g. the ET-triangular `H0`, `H0`+`Omega_m`, and `H0`+merger-rate
 points — copy it somewhere and trim the `runs` list rather than editing the
 generated file in place (the next `--write-manifests --force` run overwrites

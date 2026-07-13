@@ -1,5 +1,7 @@
-# MCMC sweep campaigns.  This is the single source of truth for the generator
-# and the Snakemake workflow.
+# Declarative MCMC sweep campaigns. Each [runs.*] table expands the Cartesian
+# product of its named networks, analyses, and observations.
+
+base_config = "mcmc.base.toml"
 
 [networks.ET-triangular]
 detectors = ["E1", "E2", "E3"]
@@ -9,8 +11,6 @@ detectors = ["E1", "E2", "E3", "C1"]
 
 [networks.ET-2L-aligned]
 detectors = ["S1", "R1"]
-# f_min = 5.0     # optional per-network override; omit to inherit the base
-# f_max = 2048.0
 
 [networks.ET-2L-aligned-CE-Hanford]
 detectors = ["S1", "R1", "C1"]
@@ -21,82 +21,133 @@ detectors = ["S2", "R2"]
 [networks.ET-2L-misaligned-CE-Hanford]
 detectors = ["S2", "R2", "C1"]
 
-[priors.H0]
+[observations.baseline]
+observation_time = 1.0
+f_min = 2.0
+f_max = 4096.0
+
+[analyses.H0]
+sampled_params = ["H0"]
+priors = { H0 = "uniform" }
+
+[analyses.H0-Omega_m]
+sampled_params = ["H0", "Omega_m"]
+priors = { H0 = "uniform", Omega_m = "uniform" }
+
+[analyses.H0-merger-rate]
+sampled_params = ["H0", "local_merger_rate"]
+priors = { H0 = "uniform", local_merger_rate = "uniform" }
+
+[analyses.H0-merger-rate-gauss]
+sampled_params = ["H0", "local_merger_rate"]
+priors = { H0 = "uniform", local_merger_rate = "normal" }
+
+[analyses.Xi_0]
+sampled_params = ["xi_0"]
+priors = { xi_0 = "uniform" }
+
+[analyses.Xi_0-n]
+sampled_params = ["xi_0", "xi_n"]
+priors = { xi_0 = "uniform", xi_n = "uniform" }
+
+[analyses.Xi_0-H0-gauss]
+sampled_params = ["xi_0", "H0"]
+priors = { xi_0 = "uniform", H0 = "normal" }
+
+[analyses.H0-peak]
+sampled_params = ["H0", "z_peak"]
+priors = { H0 = "uniform", z_peak = "uniform" }
+
+[analyses.H0-MD]
+sampled_params = ["H0", "gamma", "kappa", "z_peak"]
+priors = { H0 = "uniform", gamma = "uniform", kappa = "uniform", z_peak = "uniform" }
+
+[analyses.Xi_0-MD]
+sampled_params = ["xi_0", "gamma", "kappa", "z_peak"]
+priors = { xi_0 = "uniform", gamma = "uniform", kappa = "uniform", z_peak = "uniform" }
+
+[priors.H0.uniform]
 type = "uniform"
 low = 20.0
 high = 140.0
 
-[priors.Omega_m]
-type = "uniform"
-low = 0.05
-high = 0.95
-
-[priors.xi_0]
-type = "uniform"
-low = 0.5
-high = 5.0
-
-[priors.xi_n]
-type = "uniform"
-low = 0.3
-high = 3.0
-
-[priors.gamma]
-type = "uniform"
-low = 0.5
-high = 10.0
-
-[priors.kappa]
-type = "uniform"
-low = 0.05
-high = 10.0
-
-[priors.z_peak]
-type = "uniform"
-low = 0.05
-high = 10.0
-
-[priors.local_merger_rate]
-type = "uniform"
-low = 7.6
-high = 250.0
-
-[campaigns.cosmology.H0]
-sampled_params = ["H0"]
-
-[campaigns.cosmology.H0-Omega_m]
-sampled_params = ["H0", "Omega_m"]
-
-[campaigns.cosmology.H0-merger-rate]
-sampled_params = ["H0", "local_merger_rate"]
-
-[campaigns.cosmology.H0-merger-rate-gauss]
-sampled_params = ["H0", "local_merger_rate"]
-
-[campaigns.cosmology.H0-merger-rate-gauss.priors.local_merger_rate]
-type = "normal"
-loc = 161.0
-scale = 1.61
-
-[campaigns.modified-propagation.Xi_0]
-sampled_params = ["xi_0"]
-
-[campaigns.modified-propagation.Xi_0-n]
-sampled_params = ["xi_0", "xi_n"]
-
-[campaigns.modified-propagation.Xi_0-H0-gauss]
-sampled_params = ["xi_0", "H0"]
-
-[campaigns.modified-propagation.Xi_0-H0-gauss.priors.H0]
+[priors.H0.normal]
 type = "normal"
 loc = 67.66
 scale = 0.6766
 
-[campaigns.astrophysical.H0-peak]
-sampled_params = ["H0", "z_peak"]
+[priors.Omega_m.uniform]
+type = "uniform"
+low = 0.05
+high = 0.95
 
-[campaigns.astrophysical.H0-MD]
-sampled_params = ["H0", "gamma", "kappa", "z_peak"]
+[priors.xi_0.uniform]
+type = "uniform"
+low = 0.5
+high = 5.0
 
-[campaigns.astrophysical.Xi_0-MD]
-sampled_params = ["xi_0", "gamma", "kappa", "z_peak"]
+[priors.xi_n.uniform]
+type = "uniform"
+low = 0.3
+high = 3.0
+
+[priors.gamma.uniform]
+type = "uniform"
+low = 0.5
+high = 10.0
+
+[priors.kappa.uniform]
+type = "uniform"
+low = 0.05
+high = 10.0
+
+[priors.z_peak.uniform]
+type = "uniform"
+low = 0.05
+high = 10.0
+
+[priors.local_merger_rate.uniform]
+type = "uniform"
+low = 7.6
+high = 250.0
+
+[priors.local_merger_rate.normal]
+type = "normal"
+loc = 161.0
+scale = 1.61
+
+[runs.cosmology]
+networks = [
+    "ET-triangular",
+    "ET-triangular-CE-Hanford",
+    "ET-2L-aligned",
+    "ET-2L-aligned-CE-Hanford",
+    "ET-2L-misaligned",
+    "ET-2L-misaligned-CE-Hanford",
+]
+analyses = ["H0", "H0-Omega_m", "H0-merger-rate", "H0-merger-rate-gauss"]
+observations = ["baseline"]
+
+[runs.modified-propagation]
+networks = [
+    "ET-triangular",
+    "ET-triangular-CE-Hanford",
+    "ET-2L-aligned",
+    "ET-2L-aligned-CE-Hanford",
+    "ET-2L-misaligned",
+    "ET-2L-misaligned-CE-Hanford",
+]
+analyses = ["Xi_0", "Xi_0-n", "Xi_0-H0-gauss"]
+observations = ["baseline"]
+
+[runs.astrophysical]
+networks = [
+    "ET-triangular",
+    "ET-triangular-CE-Hanford",
+    "ET-2L-aligned",
+    "ET-2L-aligned-CE-Hanford",
+    "ET-2L-misaligned",
+    "ET-2L-misaligned-CE-Hanford",
+]
+analyses = ["H0-peak", "H0-MD", "Xi_0-MD"]
+observations = ["baseline"]

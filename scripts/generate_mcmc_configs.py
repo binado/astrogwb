@@ -6,14 +6,14 @@ Run from the repository root::
     uv run --extra mcmc python scripts/generate_mcmc_configs.py --force
 
 Writes into ``configs/mcmc/{cosmology,modified-propagation,astrophysical}/``.
-Base settings (fiducials, analysis, cosmology, sampler, output) are taken
-from the example TOML (default ``configs/mcmc.example.toml``). Campaign-specific
-fields override detectors, ``sampled_params``, and prior tables. Requires the
-``mcmc`` optional extra (pydantic) for ``RunConfig`` validation.
+The declarative sweep spec names a base template plus networks, observations,
+analyses, and prior variants. Each campaign expands its selected components as
+``networks x analyses x observations`` before every point is validated as a
+``RunConfig``. Requires the ``mcmc`` optional extra (pydantic).
 
 Pass ``--write-manifests`` to also (re)generate the Snakemake batch manifest
 for each campaign (``configs/mcmc/manifests/mcmc.batch.{campaign}.json``),
-listing every config written for that campaign for use with
+listing every selected config for that campaign for use with
 ``workflow/mcmc.smk``. A manifest is catalog-free: it holds only
 ``{"chains_dir": ..., "runs": [...]}``. ``workflow/mcmc.smk`` sources the
 catalog separately from ``configs/workflow.yaml`` (shared with the paper
@@ -30,11 +30,15 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
+from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb.config.loading import load_mapping
 from astrogwb.config.mcmc import RunConfig, build_run_config, save_config
@@ -43,53 +47,246 @@ logger = logging.getLogger("generate_mcmc_configs")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_DIR = "configs/mcmc"
-DEFAULT_EXAMPLE_CONFIG = REPO_ROOT / "configs" / "mcmc.example.toml"
 DEFAULT_SWEEP_SPEC = REPO_ROOT / "configs" / "mcmc.sweeps.toml"
 DEFAULT_MANIFEST_DIR = REPO_ROOT / "configs" / "mcmc" / "manifests"
 DEFAULT_CHAINS_DIR = "chains"
 
-
-@dataclass(frozen=True)
-class NetworkSpec:
-    """One sweep network: its detectors and an optional analysis band override."""
-
-    detectors: tuple[str, ...]
-    f_min: float | None = None
-    f_max: float | None = None
+_STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+_NonEmptyStrings = Annotated[tuple[str, ...], Field(min_length=1)]
+_PriorLibrary = dict[str, dict[str, dict[str, Any]]]
 
 
-@dataclass(frozen=True)
-class SweepSpec:
-    """Networks, priors, and campaign runs used to generate MCMC configs."""
+def _duplicates(values: tuple[str, ...]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for value in values:
+        if value in seen and value not in duplicates:
+            duplicates.append(value)
+        seen.add(value)
+    return duplicates
 
-    networks: dict[str, NetworkSpec]
-    priors: dict[str, dict[str, Any]]
-    campaigns: dict[str, dict[str, tuple[tuple[str, ...], dict[str, dict[str, Any]]]]]
+
+class NetworkSpec(BaseModel):
+    """A named detector network used by a sweep."""
+
+    model_config = _STRICT
+
+    detectors: _NonEmptyStrings
+
+    @model_validator(mode="after")
+    def _detectors_are_unique(self) -> NetworkSpec:
+        duplicates = _duplicates(self.detectors)
+        if duplicates:
+            raise ValueError(f"duplicate detectors: {duplicates}")
+        return self
 
 
-def load_sweep_spec(path: Path = DEFAULT_SWEEP_SPEC) -> SweepSpec:
-    """Parse a sweep TOML file into the data required to generate its configs."""
-    raw = load_mapping(path)
-    networks = {
-        name: NetworkSpec(
-            detectors=tuple(spec["detectors"]),
-            f_min=spec.get("f_min"),
-            f_max=spec.get("f_max"),
-        )
-        for name, spec in raw["networks"].items()
-    }
-    priors = deepcopy(raw["priors"])
-    campaigns = {
-        campaign: {
-            label: (
-                tuple(run["sampled_params"]),
-                deepcopy(run.get("priors", {})),
+class ObservationSpec(BaseModel):
+    """Likelihood exposure and frequency mask for a sweep point."""
+
+    model_config = _STRICT
+
+    observation_time: Annotated[float, Field(gt=0.0)]
+    f_min: Annotated[float, Field(gt=0.0)]
+    f_max: Annotated[float, Field(gt=0.0)]
+
+    @model_validator(mode="after")
+    def _frequency_bounds_are_ordered(self) -> ObservationSpec:
+        if self.f_min >= self.f_max:
+            raise ValueError("f_min must be less than f_max")
+        return self
+
+
+class AnalysisSpec(BaseModel):
+    """Sampled parameters, named priors, and optional fiducial overrides."""
+
+    model_config = _STRICT
+
+    sampled_params: _NonEmptyStrings
+    priors: dict[str, str]
+    fiducials: dict[str, float] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _priors_match_sampled_params(self) -> AnalysisSpec:
+        duplicates = _duplicates(self.sampled_params)
+        if duplicates:
+            raise ValueError(f"duplicate sampled_params: {duplicates}")
+
+        sampled = set(self.sampled_params)
+        prior_parameters = set(self.priors)
+        if sampled != prior_parameters:
+            missing = sorted(sampled - prior_parameters)
+            extra = sorted(prior_parameters - sampled)
+            raise ValueError(
+                "priors must exactly match sampled_params "
+                f"(missing={missing}, extra={extra})"
             )
-            for label, run in runs.items()
+        return self
+
+
+class RunSpec(BaseModel):
+    """Named component selections whose Cartesian product forms a campaign."""
+
+    model_config = _STRICT
+
+    networks: _NonEmptyStrings
+    analyses: _NonEmptyStrings
+    observations: _NonEmptyStrings
+
+    @model_validator(mode="after")
+    def _selections_are_unique(self) -> RunSpec:
+        for field_name in ("networks", "analyses", "observations"):
+            values = getattr(self, field_name)
+            duplicates = _duplicates(values)
+            if duplicates:
+                raise ValueError(f"duplicate {field_name}: {duplicates}")
+        return self
+
+
+class SweepConfig(BaseModel):
+    """Complete declarative specification for MCMC sweep campaigns."""
+
+    model_config = _STRICT
+
+    base_config: Path
+    networks: Annotated[dict[str, NetworkSpec], Field(min_length=1)]
+    observations: Annotated[dict[str, ObservationSpec], Field(min_length=1)]
+    analyses: Annotated[dict[str, AnalysisSpec], Field(min_length=1)]
+    priors: Annotated[_PriorLibrary, Field(min_length=1)]
+    runs: Annotated[dict[str, RunSpec], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def _references_exist(self) -> SweepConfig:
+        for analysis_name, analysis in self.analyses.items():
+            for parameter, prior_name in analysis.priors.items():
+                parameter_priors = self.priors.get(parameter)
+                if parameter_priors is None:
+                    raise ValueError(
+                        f"analysis {analysis_name!r} references priors for unknown "
+                        f"parameter {parameter!r}"
+                    )
+                if prior_name not in parameter_priors:
+                    raise ValueError(
+                        f"analysis {analysis_name!r} references unknown prior "
+                        f"{parameter}.{prior_name}"
+                    )
+
+        component_maps = {
+            "networks": self.networks,
+            "analyses": self.analyses,
+            "observations": self.observations,
         }
-        for campaign, runs in raw["campaigns"].items()
+        for run_name, run in self.runs.items():
+            for field_name, components in component_maps.items():
+                missing = sorted(set(getattr(run, field_name)) - set(components))
+                if missing:
+                    raise ValueError(
+                        f"run {run_name!r} references unknown {field_name}: {missing}"
+                    )
+        return self
+
+
+@dataclass(frozen=True)
+class SweepPoint:
+    """One named point in a campaign's Cartesian product."""
+
+    campaign: str
+    network: str
+    analysis: str
+    observation: str
+
+    @property
+    def filename(self) -> str:
+        """Return the collision-resistant generated configuration filename."""
+        return f"{self.network}__{self.analysis}__{self.observation}.json"
+
+
+def load_sweep_config(path: Path) -> SweepConfig:
+    """Load a sweep TOML/JSON file and resolve its base path relative to it."""
+    resolved_path = path.resolve()
+    sweep = SweepConfig.model_validate(load_mapping(resolved_path))
+    base_config = sweep.base_config
+    if not base_config.is_absolute():
+        base_config = resolved_path.parent / base_config
+    return sweep.model_copy(update={"base_config": base_config.resolve()})
+
+
+def iter_sweep_points(sweep: SweepConfig) -> Iterator[SweepPoint]:
+    """Yield sweep points in network/analysis/observation declaration order."""
+    for campaign, run in sweep.runs.items():
+        for network in run.networks:
+            for analysis in run.analyses:
+                for observation in run.observations:
+                    yield SweepPoint(
+                        campaign=campaign,
+                        network=network,
+                        analysis=analysis,
+                        observation=observation,
+                    )
+
+
+def load_sweep_base(sweep: SweepConfig) -> dict[str, Any]:
+    """Load and validate the invariant base mapping for a sweep."""
+    base = load_mapping(sweep.base_config)
+    fiducials = base.get("fiducials")
+    if not isinstance(fiducials, dict) or not fiducials:
+        raise ValueError(
+            f"sweep base {sweep.base_config} must define a non-empty [fiducials] table"
+        )
+
+    for name, value in fiducials.items():
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError(f"base fiducial {name!r} must be numeric")
+        if not math.isfinite(value):
+            raise ValueError(f"base fiducial {name!r} must be finite")
+
+    base_names = set(fiducials)
+    for analysis_name, analysis in sweep.analyses.items():
+        unknown = sorted(set(analysis.fiducials) - base_names)
+        if unknown:
+            raise ValueError(
+                f"analysis {analysis_name!r} overrides unknown fiducials: {unknown}"
+            )
+    return base
+
+
+def materialize_run_config(
+    base: dict[str, Any],
+    sweep: SweepConfig,
+    point: SweepPoint,
+) -> RunConfig:
+    """Merge one sweep point with its base and return a validated run config."""
+    network = sweep.networks[point.network]
+    observation = sweep.observations[point.observation]
+    analysis = sweep.analyses[point.analysis]
+
+    base_fiducials = base.get("fiducials")
+    if not isinstance(base_fiducials, dict) or not base_fiducials:
+        raise ValueError("sweep base must define a non-empty [fiducials] table")
+    unknown_fiducials = sorted(set(analysis.fiducials) - set(base_fiducials))
+    if unknown_fiducials:
+        raise ValueError(
+            f"analysis {point.analysis!r} overrides unknown fiducials: "
+            f"{unknown_fiducials}"
+        )
+
+    raw = deepcopy(base)
+    raw["fiducials"] = {
+        **deepcopy(base_fiducials),
+        **analysis.fiducials,
     }
-    return SweepSpec(networks=networks, priors=priors, campaigns=campaigns)
+    raw["observation_time"] = observation.observation_time
+    raw["analysis"] = {
+        "detectors": list(network.detectors),
+        "f_min": observation.f_min,
+        "f_max": observation.f_max,
+    }
+    raw["sampled_params"] = list(analysis.sampled_params)
+    raw["priors"] = {
+        parameter: deepcopy(sweep.priors[parameter][prior_name])
+        for parameter, prior_name in analysis.priors.items()
+    }
+    return build_run_config(raw)
 
 
 def _resolve_repo_path(path: str | Path) -> Path:
@@ -97,41 +294,6 @@ def _resolve_repo_path(path: str | Path) -> Path:
     if not resolved.is_absolute():
         resolved = REPO_ROOT / resolved
     return resolved.resolve()
-
-
-def make_config(
-    detectors: tuple[str, ...],
-    sampled_params: tuple[str, ...],
-    *,
-    example_config: Path = DEFAULT_EXAMPLE_CONFIG,
-    priors: dict[str, dict[str, Any]],
-    prior_overrides: dict[str, dict[str, Any]] | None = None,
-    f_min: float | None = None,
-    f_max: float | None = None,
-) -> RunConfig:
-    """Build a validated run config for one sweep point.
-
-    ``f_min``/``f_max`` override the example TOML's analysis band when given;
-    when ``None``, the generated config inherits the example's base band.
-    """
-    raw = load_mapping(_resolve_repo_path(example_config))
-    analysis = {**raw["analysis"], "detectors": list(detectors)}
-    if f_min is not None:
-        analysis["f_min"] = f_min
-    if f_max is not None:
-        analysis["f_max"] = f_max
-    raw["analysis"] = analysis
-    raw["sampled_params"] = list(sampled_params)
-    selected_priors = {name: deepcopy(priors[name]) for name in sampled_params}
-    if prior_overrides:
-        for name, override in prior_overrides.items():
-            if name not in sampled_params:
-                raise ValueError(
-                    f"prior override for {name!r} but it is not in sampled_params"
-                )
-            selected_priors[name] = deepcopy(override)
-    raw["priors"] = selected_priors
-    return build_run_config(raw)
 
 
 def render_manifest(
@@ -170,8 +332,7 @@ def render_manifest(
 def generate_configs(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     *,
-    example_config: str | Path = DEFAULT_EXAMPLE_CONFIG,
-    sweep_spec: SweepSpec | None = None,
+    sweep_spec: SweepConfig | None = None,
     skip_existing: bool = True,
     write_manifests: bool = False,
     manifest_dir: str | Path = DEFAULT_MANIFEST_DIR,
@@ -182,9 +343,26 @@ def generate_configs(
     Returns ``(output_dir, written, skipped, written_manifests, skipped_manifests)``.
     """
     resolved_output_dir = _resolve_repo_path(output_dir)
-    resolved_example_config = _resolve_repo_path(example_config)
     resolved_manifest_dir = _resolve_repo_path(manifest_dir)
-    sweep_spec = sweep_spec or load_sweep_spec()
+    sweep_spec = sweep_spec or load_sweep_config(DEFAULT_SWEEP_SPEC)
+    base = load_sweep_base(sweep_spec)
+
+    planned: list[tuple[SweepPoint, Path, RunConfig]] = []
+    campaign_runs: dict[str, list[Path]] = {
+        campaign: [] for campaign in sweep_spec.runs
+    }
+    generated_paths: set[Path] = set()
+    for point in iter_sweep_points(sweep_spec):
+        path = resolved_output_dir / point.campaign / point.filename
+        if path in generated_paths:
+            raise ValueError(f"duplicate generated config path: {path}")
+        generated_paths.add(path)
+        relative_path = Path(os.path.relpath(path, REPO_ROOT))
+        campaign_runs[point.campaign].append(relative_path)
+        config = materialize_run_config(base, sweep_spec, point)
+        planned.append((point, path, config))
+
+    # All points are validated before the first directory or file is created.
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
     written: list[Path] = []
@@ -192,41 +370,25 @@ def generate_configs(
     written_manifests: list[Path] = []
     skipped_manifests: list[Path] = []
 
-    for campaign, sample_sets in sweep_spec.campaigns.items():
-        campaign_dir = resolved_output_dir / campaign
-        campaign_dir.mkdir(parents=True, exist_ok=True)
-        campaign_runs: list[Path] = []
+    for point, path, config in planned:
+        if skip_existing and path.exists():
+            skipped.append(path)
+            logger.info("skipping existing config %s", path)
+            continue
 
-        for network_label, network in sweep_spec.networks.items():
-            for sample_label, (sampled_params, prior_overrides) in sample_sets.items():
-                filename = f"{network_label}__{sample_label}.json"
-                path = campaign_dir / filename
-                campaign_runs.append(Path(os.path.relpath(path, REPO_ROOT)))
-                if skip_existing and path.exists():
-                    skipped.append(path)
-                    logger.info("skipping existing config %s", path)
-                    continue
+        save_config(config, path)
+        written.append(path)
+        logger.info(
+            "wrote config %s campaign=%s network=%s analysis=%s observation=%s",
+            path,
+            point.campaign,
+            point.network,
+            point.analysis,
+            point.observation,
+        )
 
-                config = make_config(
-                    network.detectors,
-                    sampled_params,
-                    example_config=resolved_example_config,
-                    priors=sweep_spec.priors,
-                    prior_overrides=prior_overrides,
-                    f_min=network.f_min,
-                    f_max=network.f_max,
-                )
-                save_config(config, path)
-                written.append(path)
-                logger.info(
-                    "wrote config %s campaign=%s detectors=%s sampled_params=%s",
-                    path,
-                    campaign,
-                    network.detectors,
-                    sampled_params,
-                )
-
-        if write_manifests:
+    if write_manifests:
+        for campaign, run_configs in campaign_runs.items():
             resolved_manifest_dir.mkdir(parents=True, exist_ok=True)
             manifest_path = resolved_manifest_dir / f"mcmc.batch.{campaign}.json"
             if skip_existing and manifest_path.exists():
@@ -235,7 +397,7 @@ def generate_configs(
                 continue
             manifest_text = render_manifest(
                 campaign,
-                campaign_runs,
+                run_configs,
                 chains_dir=chains_dir,
             )
             manifest_path.write_text(manifest_text, encoding="utf-8")
@@ -244,7 +406,7 @@ def generate_configs(
                 "wrote manifest %s campaign=%s runs=%d",
                 manifest_path,
                 campaign,
-                len(campaign_runs),
+                len(run_configs),
             )
 
     logger.info(
@@ -276,12 +438,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=DEFAULT_SWEEP_SPEC,
         help=f"Sweep campaign TOML (default: {DEFAULT_SWEEP_SPEC})",
-    )
-    parser.add_argument(
-        "--example",
-        type=Path,
-        default=DEFAULT_EXAMPLE_CONFIG,
-        help=("Base TOML template for fiducials, cosmology, sampler, and output."),
     )
     parser.add_argument(
         "--force",
@@ -325,8 +481,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     generate_configs(
         args.output_dir,
-        example_config=args.example,
-        sweep_spec=load_sweep_spec(args.sweep_spec),
+        sweep_spec=load_sweep_config(args.sweep_spec),
         skip_existing=not args.force,
         write_manifests=args.write_manifests,
         manifest_dir=args.manifest_dir,
