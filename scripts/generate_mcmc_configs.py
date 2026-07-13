@@ -14,8 +14,12 @@ fields override detectors, ``sampled_params``, and prior tables. Requires the
 Pass ``--write-manifests`` to also (re)generate the Snakemake batch manifest
 for each campaign (``configs/mcmc/manifests/mcmc.batch.{campaign}.json``),
 listing every config written for that campaign for use with
-``workflow/mcmc.smk``. Like the JSON configs, generated manifests are
-gitignored (``configs/mcmc/manifests/``) -- they are fully reproducible from
+``workflow/mcmc.smk``. A manifest is catalog-free: it holds only
+``{"chains_dir": ..., "runs": [...]}``. ``workflow/mcmc.smk`` sources the
+catalog separately from ``configs/workflow.yaml`` (shared with the paper
+workflow), so the same manifest can be run against any catalog without
+regenerating it. Like the JSON configs, generated manifests are gitignored
+(``configs/mcmc/manifests/``) -- they are fully reproducible from
 ``configs/mcmc.sweeps.toml``, so there is nothing to commit::
 
     uv run --extra mcmc python scripts/generate_mcmc_configs.py --write-manifests --force
@@ -42,8 +46,6 @@ DEFAULT_OUTPUT_DIR = "configs/mcmc"
 DEFAULT_EXAMPLE_CONFIG = REPO_ROOT / "configs" / "mcmc.example.toml"
 DEFAULT_SWEEP_SPEC = REPO_ROOT / "configs" / "mcmc.sweeps.toml"
 DEFAULT_MANIFEST_DIR = REPO_ROOT / "configs" / "mcmc" / "manifests"
-DEFAULT_CATALOG_ID = "bns-n16384-df1"
-DEFAULT_CATALOG_PATH = "out/catalogs/bns-n16384-df1.h5"
 DEFAULT_CHAINS_DIR = "chains"
 
 
@@ -109,8 +111,6 @@ def render_manifest(
     campaign: str,
     run_configs: list[Path],
     *,
-    catalog_id: str,
-    catalog_path: str,
     chains_dir: str,
 ) -> str:
     """Render a Snakemake batch manifest (``workflow/mcmc.smk`` schema) as JSON.
@@ -120,14 +120,18 @@ def render_manifest(
     escaping and no extra dependency (``pyyaml`` is not part of the ``mcmc``
     extra this script is documented to run under).
 
-    ``jax_platforms`` is deliberately not part of this schema: it is a runtime
-    concern (which JAX backend to init), not an MCMC-campaign concern, and
-    ``workflow/mcmc.smk`` already defaults it to ``"cuda"``. The Snakemake
+    The manifest deliberately carries no ``catalog`` field: which data file to
+    reweight is not a sweep concern, so ``workflow/mcmc.smk`` sources it
+    separately from ``configs/workflow.yaml``. This lets the same manifest run
+    against any catalog without regenerating it.
+
+    ``jax_platforms`` is deliberately not part of this schema either: it is a
+    runtime concern (which JAX backend to init), not an MCMC-campaign concern,
+    and ``workflow/mcmc.smk`` already defaults it to ``"cuda"``. The Snakemake
     profile you run with (``profiles/local``, ``profiles/slurm-cpu``, ...)
     is what actually decides it.
     """
     manifest = {
-        "catalog": {"id": catalog_id, "path": catalog_path},
         "chains_dir": chains_dir,
         "runs": [
             {"campaign": campaign, "config": path.as_posix()} for path in run_configs
@@ -144,8 +148,6 @@ def generate_configs(
     skip_existing: bool = True,
     write_manifests: bool = False,
     manifest_dir: str | Path = DEFAULT_MANIFEST_DIR,
-    catalog_id: str = DEFAULT_CATALOG_ID,
-    catalog_path: str = DEFAULT_CATALOG_PATH,
     chains_dir: str = DEFAULT_CHAINS_DIR,
 ) -> tuple[Path, list[Path], list[Path], list[Path], list[Path]]:
     """Write campaign JSON configs and, if requested, their batch manifests.
@@ -205,8 +207,6 @@ def generate_configs(
             manifest_text = render_manifest(
                 campaign,
                 campaign_runs,
-                catalog_id=catalog_id,
-                catalog_path=catalog_path,
                 chains_dir=chains_dir,
             )
             manifest_path.write_text(manifest_text, encoding="utf-8")
@@ -264,8 +264,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Also (re)generate a Snakemake batch manifest per campaign "
-            "(configs/mcmc/manifests/mcmc.batch.{campaign}.json). Gitignored, "
-            "like the JSON configs: fully reproducible from mcmc.sweeps.toml."
+            "(configs/mcmc/manifests/mcmc.batch.{campaign}.json), holding only "
+            "chains_dir and the campaign's runs -- no catalog field. "
+            "workflow/mcmc.smk sources the catalog separately from "
+            "configs/workflow.yaml. Gitignored, like the JSON configs: fully "
+            "reproducible from mcmc.sweeps.toml."
         ),
     )
     parser.add_argument(
@@ -276,16 +279,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Directory for generated batch manifests "
             f"(default: {DEFAULT_MANIFEST_DIR}). Only used with --write-manifests."
         ),
-    )
-    parser.add_argument(
-        "--catalog-id",
-        default=DEFAULT_CATALOG_ID,
-        help=f"Catalog id for generated manifests (default: {DEFAULT_CATALOG_ID}).",
-    )
-    parser.add_argument(
-        "--catalog-path",
-        default=DEFAULT_CATALOG_PATH,
-        help=f"Catalog path for generated manifests (default: {DEFAULT_CATALOG_PATH}).",
     )
     parser.add_argument(
         "--chains-dir",
@@ -308,8 +301,6 @@ def main(argv: list[str] | None = None) -> None:
         skip_existing=not args.force,
         write_manifests=args.write_manifests,
         manifest_dir=args.manifest_dir,
-        catalog_id=args.catalog_id,
-        catalog_path=args.catalog_path,
         chains_dir=args.chains_dir,
     )
 

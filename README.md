@@ -112,7 +112,8 @@ uv run --extra mcmc python scripts/generate_mcmc_configs.py
 Add `--write-manifests` to also (re)generate a full-sweep batch manifest per
 campaign —
 `configs/mcmc/manifests/mcmc.batch.{cosmology,astrophysical,modified-propagation}.json`
-— each listing every config just written for that campaign. Existing manifests
+— each holding only `chains_dir` and every config just written for that
+campaign; manifests carry no catalog field (see below). Existing manifests
 are skipped unless `--force` is supplied, same as the JSON configs. Like the
 JSON configs, generated manifests are gitignored (`configs/mcmc/manifests/`):
 they are fully reproducible from `configs/mcmc.sweeps.toml`, so there is
@@ -125,10 +126,18 @@ uv run --extra mcmc python scripts/generate_mcmc_configs.py --write-manifests
 Batch submission uses an explicit manifest such as
 [`configs/mcmc.batch.example.json`](configs/mcmc.batch.example.json) — plain
 JSON, since Snakemake's `--configfile` loader tries JSON before YAML
-regardless of extension. The manifest selects one existing catalog and lists
-every MCMC config to submit. Chains remain namespaced by catalog ID. A
-missing catalog or config stops the workflow instead of triggering
-preprocessing.
+regardless of extension. The manifest lists `chains_dir` and every MCMC
+config to submit; it carries no catalog field. `workflow/mcmc.smk` sources
+the catalog separately from [`configs/workflow.yaml`](configs/workflow.yaml)
+(shared with the paper workflow) via a `configfile:` directive, deriving
+`out/catalogs/<id>.h5` from `catalog.id` unless `catalog.path` is set
+explicitly. This decouples which runs make up a campaign (the manifest, fully
+reproducible from `configs/mcmc.sweeps.toml`) from which data file to
+reweight (the catalog) — the same manifest runs against any catalog by
+editing `configs/workflow.yaml` or passing an extra `--configfile` that
+overrides `catalog`, with no manifest regeneration required. Chains remain
+namespaced by catalog ID. A missing catalog or config stops the workflow
+instead of triggering preprocessing.
 
 Note the manifest schema has no `jax_platforms` field: which JAX backend to
 initialize is a runtime concern owned by the Snakemake profile you run with
@@ -175,7 +184,11 @@ does not try to initialize CUDA on a CPU node.
    (gitignored — regenerate them on whichever host needs them), each listing
    every config for that campaign. Copy the one you want (or
    [`configs/mcmc.batch.example.json`](configs/mcmc.batch.example.json) for a
-   hand-picked selection) and point it at one existing catalog.
+   hand-picked selection). Manifests carry no catalog field, so which catalog
+   to use is set separately: `workflow/mcmc.smk` sources it from
+   [`configs/workflow.yaml`](configs/workflow.yaml). Point that file's
+   `catalog.id` (and `catalog.path`, if the catalog doesn't live at the
+   default `out/catalogs/<id>.h5`) at one existing catalog before submitting.
 
 3. **Dry-run before every real submission** to see the job graph without touching
    the scheduler:

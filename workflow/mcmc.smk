@@ -2,8 +2,19 @@ import re
 from pathlib import Path
 
 
-CATALOG_ID = config["catalog"]["id"]
-CATALOG_PATH = config["catalog"]["path"]
+configfile: "configs/workflow.yaml"   # catalog source, shared with paper.smk
+
+
+try:
+    _CATALOG_CONFIG = config["catalog"]
+    CATALOG_ID = _CATALOG_CONFIG["id"]
+except KeyError as exc:
+    raise KeyError(
+        "missing 'catalog' config: define catalog.id (and optionally "
+        "catalog.path) in configs/workflow.yaml, or pass a --configfile "
+        "that sets it"
+    ) from exc
+CATALOG_PATH = _CATALOG_CONFIG.get("path") or f"out/catalogs/{CATALOG_ID}.h5"
 CHAINS_DIR = Path(config["chains_dir"])
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
 

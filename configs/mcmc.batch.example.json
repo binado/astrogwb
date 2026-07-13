@@ -1,8 +1,4 @@
 {
-  "catalog": {
-    "id": "bns-n16384-df1",
-    "path": "out/catalogs/bns-n16384-df1.h5"
-  },
   "chains_dir": "chains",
   "runs": [
     {

@@ -50,8 +50,6 @@ def test_write_manifests_lists_every_campaign_run_in_order(tmp_path: Path) -> No
         sweep_spec=_sweep_spec(),
         write_manifests=True,
         manifest_dir=tmp_path,
-        catalog_id="test-catalog",
-        catalog_path="out/catalogs/test-catalog.h5",
         chains_dir="test-chains",
     )
     _output_dir, written, _skipped, written_manifests, _skipped_manifests = result
@@ -60,10 +58,7 @@ def test_write_manifests_lists_every_campaign_run_in_order(tmp_path: Path) -> No
     assert written_manifests == [manifest_path]
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["catalog"] == {
-        "id": "test-catalog",
-        "path": "out/catalogs/test-catalog.h5",
-    }
+    assert "catalog" not in manifest
     assert manifest["chains_dir"] == "test-chains"
     # jax_platforms is a runtime concern owned by the Snakemake profile, not
     # the MCMC campaign -- it must never appear in a generated manifest.

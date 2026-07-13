@@ -45,17 +45,18 @@ def test_mcmc_workflow_expands_multiple_manifest_runs(tmp_path: Path) -> None:
     second_run_config.write_text("", encoding="utf-8")
     manifest = _write_manifest(
         tmp_path,
-        catalog,
         [
             {"campaign": "first-campaign", "config": str(run_config)},
             {"campaign": "second-campaign", "config": str(second_run_config)},
         ],
     )
+    catalog_config = _write_catalog_config(tmp_path, catalog)
 
     result = _snakemake(
         "--snakefile",
         "workflow/mcmc.smk",
         "--configfile",
+        str(catalog_config),
         str(manifest),
         "--dry-run",
         "--forceall",
@@ -88,14 +89,15 @@ def test_mcmc_thread_override_controls_runner_cpu_budget(tmp_path: Path) -> None
     run_config.write_text("{}\n", encoding="utf-8")
     manifest = _write_manifest(
         tmp_path,
-        catalog,
         [{"campaign": "test-campaign", "config": str(run_config)}],
     )
+    catalog_config = _write_catalog_config(tmp_path, catalog)
 
     result = _snakemake(
         "--snakefile",
         "workflow/mcmc.smk",
         "--configfile",
+        str(catalog_config),
         str(manifest),
         "--dry-run",
         "--forceall",
@@ -131,17 +133,18 @@ def test_mcmc_workflow_rejects_duplicate_campaign_and_config_stem(
     second_config.write_text("", encoding="utf-8")
     manifest = _write_manifest(
         tmp_path,
-        catalog,
         [
             {"campaign": "test-campaign", "config": str(first_config)},
             {"campaign": "test-campaign", "config": str(second_config)},
         ],
     )
+    catalog_config = _write_catalog_config(tmp_path, catalog)
 
     result = _snakemake(
         "--snakefile",
         "workflow/mcmc.smk",
         "--configfile",
+        str(catalog_config),
         str(manifest),
         "--dry-run",
         "--cores",
@@ -159,14 +162,15 @@ def test_mcmc_workflow_does_not_generate_missing_catalog(tmp_path: Path) -> None
     run_config.write_text("{}\n", encoding="utf-8")
     manifest = _write_manifest(
         tmp_path,
-        tmp_path / "missing.h5",
         [{"campaign": "test-campaign", "config": str(run_config)}],
     )
+    catalog_config = _write_catalog_config(tmp_path, tmp_path / "missing.h5")
 
     result = _snakemake(
         "--snakefile",
         "workflow/mcmc.smk",
         "--configfile",
+        str(catalog_config),
         str(manifest),
         "--dry-run",
         "--cores",
@@ -197,12 +201,11 @@ def test_paper_workflow_exposes_only_figure_rules() -> None:
     }
 
 
-def _write_manifest(tmp_path: Path, catalog: Path, runs: list[dict[str, str]]) -> Path:
+def _write_manifest(tmp_path: Path, runs: list[dict[str, str]]) -> Path:
     manifest = tmp_path / "batch.json"
     manifest.write_text(
         json.dumps(
             {
-                "catalog": {"id": "test-catalog", "path": str(catalog)},
                 "chains_dir": str(tmp_path / "chains"),
                 "runs": runs,
             }
@@ -210,3 +213,12 @@ def _write_manifest(tmp_path: Path, catalog: Path, runs: list[dict[str, str]]) -
         encoding="utf-8",
     )
     return manifest
+
+
+def _write_catalog_config(tmp_path: Path, catalog: Path) -> Path:
+    catalog_config = tmp_path / "catalog-config.json"
+    catalog_config.write_text(
+        json.dumps({"catalog": {"id": "test-catalog", "path": str(catalog)}}),
+        encoding="utf-8",
+    )
+    return catalog_config
