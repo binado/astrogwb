@@ -59,6 +59,7 @@ include = ["src/**/*.py", "tests/**/*.py"]
 include = ["src", "tests"]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 markers = [
     "integration: tests that call external libraries or services (deselect with -m 'not integration')",
 ]

@@ -1,0 +1,106 @@
+{
+  "catalog": {
+    "id": "bns-n16384-df1",
+    "path": "out/catalogs/bns-n16384-df1.h5"
+  },
+  "chains_dir": "chains",
+  "jax_platforms": "cuda",
+  "runs": [
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-triangular__H0.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-triangular__H0-Omega_m.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-triangular__H0-merger-rate.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-triangular__H0-merger-rate-gauss.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-triangular-CE-Hanford__H0.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-triangular-CE-Hanford__H0-Omega_m.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-triangular-CE-Hanford__H0-merger-rate.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-triangular-CE-Hanford__H0-merger-rate-gauss.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-aligned__H0.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-aligned__H0-Omega_m.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-aligned__H0-merger-rate.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-aligned__H0-merger-rate-gauss.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-aligned-CE-Hanford__H0.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-aligned-CE-Hanford__H0-Omega_m.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-aligned-CE-Hanford__H0-merger-rate.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-aligned-CE-Hanford__H0-merger-rate-gauss.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-misaligned__H0.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-misaligned__H0-Omega_m.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-misaligned__H0-merger-rate.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-misaligned__H0-merger-rate-gauss.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-misaligned-CE-Hanford__H0.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-misaligned-CE-Hanford__H0-Omega_m.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-misaligned-CE-Hanford__H0-merger-rate.json"
+    },
+    {
+      "campaign": "cosmology",
+      "config": "configs/mcmc/cosmology/ET-2L-misaligned-CE-Hanford__H0-merger-rate-gauss.json"
+    }
+  ]
+}
