@@ -107,6 +107,7 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     import jax.numpy as jnp
     from numpyro.infer import MCMC, NUTS
     from numpyro.infer.initialization import init_to_value
+    from pluscross import load_catalog
 
     from astrogwb.detector import effective_psd, load_sensitivity_map
     from astrogwb.gwb import frequency_mask as make_frequency_mask
@@ -118,7 +119,6 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     from astrogwb.sampling.numpyro_model import numpyro_model
     from astrogwb.sampling.priors import build_prior
     from astrogwb.waveform import polarization_power as compute_polarization_power
-    from pluscross import load_catalog
 
     analysis = config.analysis
     cosmo = config.cosmology
@@ -187,11 +187,11 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     )
 
     # --- Inject the fiducial spectrum as observed data (no plot) -------------
-    ones_weights = jnp.ones((n_samples,))
-    rate0, _ = merger_rate_and_log_weights_fn(config.fiducials, samples)
+    rate0, log_weights0 = merger_rate_and_log_weights_fn(config.fiducials, samples)
+    weights0 = jnp.exp(log_weights0)
     observed_spectral_density = spectral_density(
         polarization_power,
-        ones_weights,
+        weights0,
         rate0,
         average_mode="analytic_inclination",
     )
