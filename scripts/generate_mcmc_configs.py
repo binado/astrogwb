@@ -50,10 +50,19 @@ DEFAULT_CHAINS_DIR = "chains"
 
 
 @dataclass(frozen=True)
+class NetworkSpec:
+    """One sweep network: its detectors and an optional analysis band override."""
+
+    detectors: tuple[str, ...]
+    f_min: float | None = None
+    f_max: float | None = None
+
+
+@dataclass(frozen=True)
 class SweepSpec:
     """Networks, priors, and campaign runs used to generate MCMC configs."""
 
-    networks: dict[str, tuple[str, ...]]
+    networks: dict[str, NetworkSpec]
     priors: dict[str, dict[str, Any]]
     campaigns: dict[str, dict[str, tuple[tuple[str, ...], dict[str, dict[str, Any]]]]]
 
@@ -61,7 +70,14 @@ class SweepSpec:
 def load_sweep_spec(path: Path = DEFAULT_SWEEP_SPEC) -> SweepSpec:
     """Parse a sweep TOML file into the data required to generate its configs."""
     raw = load_mapping(path)
-    networks = {name: tuple(detectors) for name, detectors in raw["networks"].items()}
+    networks = {
+        name: NetworkSpec(
+            detectors=tuple(spec["detectors"]),
+            f_min=spec.get("f_min"),
+            f_max=spec.get("f_max"),
+        )
+        for name, spec in raw["networks"].items()
+    }
     priors = deepcopy(raw["priors"])
     campaigns = {
         campaign: {
@@ -90,10 +106,21 @@ def make_config(
     example_config: Path = DEFAULT_EXAMPLE_CONFIG,
     priors: dict[str, dict[str, Any]],
     prior_overrides: dict[str, dict[str, Any]] | None = None,
+    f_min: float | None = None,
+    f_max: float | None = None,
 ) -> RunConfig:
-    """Build a validated run config for one sweep point."""
+    """Build a validated run config for one sweep point.
+
+    ``f_min``/``f_max`` override the example TOML's analysis band when given;
+    when ``None``, the generated config inherits the example's base band.
+    """
     raw = load_mapping(_resolve_repo_path(example_config))
-    raw["analysis"] = {**raw["analysis"], "detectors": list(detectors)}
+    analysis = {**raw["analysis"], "detectors": list(detectors)}
+    if f_min is not None:
+        analysis["f_min"] = f_min
+    if f_max is not None:
+        analysis["f_max"] = f_max
+    raw["analysis"] = analysis
     raw["sampled_params"] = list(sampled_params)
     selected_priors = {name: deepcopy(priors[name]) for name in sampled_params}
     if prior_overrides:
@@ -170,7 +197,7 @@ def generate_configs(
         campaign_dir.mkdir(parents=True, exist_ok=True)
         campaign_runs: list[Path] = []
 
-        for network_label, detectors in sweep_spec.networks.items():
+        for network_label, network in sweep_spec.networks.items():
             for sample_label, (sampled_params, prior_overrides) in sample_sets.items():
                 filename = f"{network_label}__{sample_label}.json"
                 path = campaign_dir / filename
@@ -181,11 +208,13 @@ def generate_configs(
                     continue
 
                 config = make_config(
-                    detectors,
+                    network.detectors,
                     sampled_params,
                     example_config=resolved_example_config,
                     priors=sweep_spec.priors,
                     prior_overrides=prior_overrides,
+                    f_min=network.f_min,
+                    f_max=network.f_max,
                 )
                 save_config(config, path)
                 written.append(path)
@@ -193,7 +222,7 @@ def generate_configs(
                     "wrote config %s campaign=%s detectors=%s sampled_params=%s",
                     path,
                     campaign,
-                    detectors,
+                    network.detectors,
                     sampled_params,
                 )
 

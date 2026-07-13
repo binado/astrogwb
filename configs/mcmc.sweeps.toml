@@ -1,13 +1,25 @@
 # MCMC sweep campaigns.  This is the single source of truth for the generator
 # and the Snakemake workflow.
 
-[networks]
-ET-triangular = ["E1", "E2", "E3"]
-ET-triangular-CE-Hanford = ["E1", "E2", "E3", "C1"]
-ET-2L-aligned = ["S1", "R1"]
-ET-2L-aligned-CE-Hanford = ["S1", "R1", "C1"]
-ET-2L-misaligned = ["S2", "R2"]
-ET-2L-misaligned-CE-Hanford = ["S2", "R2", "C1"]
+[networks.ET-triangular]
+detectors = ["E1", "E2", "E3"]
+
+[networks.ET-triangular-CE-Hanford]
+detectors = ["E1", "E2", "E3", "C1"]
+
+[networks.ET-2L-aligned]
+detectors = ["S1", "R1"]
+# f_min = 5.0     # optional per-network override; omit to inherit the base
+# f_max = 2048.0
+
+[networks.ET-2L-aligned-CE-Hanford]
+detectors = ["S1", "R1", "C1"]
+
+[networks.ET-2L-misaligned]
+detectors = ["S2", "R2"]
+
+[networks.ET-2L-misaligned-CE-Hanford]
+detectors = ["S2", "R2", "C1"]
 
 [priors.H0]
 type = "uniform"
