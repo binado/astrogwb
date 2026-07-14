@@ -101,13 +101,13 @@ parameters:
       function: uniform
       arguments:
         minimum: 0.0
-        maximum: 5000.0
+        maximum: 2000.0
   lambda_2:
     sampler:
       function: uniform
       arguments:
         minimum: 0.0
-        maximum: 5000.0
+        maximum: 2000.0
 
   # 6) Inclination fixed at 0.
   inclination:
