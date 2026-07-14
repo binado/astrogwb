@@ -43,7 +43,7 @@ class SamplerConfig(BaseModel):
     target_accept: Annotated[float, Field(gt=0.0, lt=1.0)] = 0.9
     dense_mass: bool = True
     max_tree_depth: Annotated[int, Field(gt=0, le=20)] = 10
-    forward_mode_differentiation: bool = True
+    forward_mode_differentiation: bool = False
     progress_bar: bool = False
     jit_model_args: bool = True
 
