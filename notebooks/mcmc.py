@@ -38,10 +38,10 @@
 # install` astrogwb — the `mcmc` extra plus the notebook-plotting packages
 # tracked as the `plotting` dependency group in `pyproject.toml` (dependency
 # groups aren't installable via a pip extra, so they're listed explicitly
-# below) — force a TPU-flavored `jaxlib`/`libtpu` (Colab's default JAX install
-# otherwise pulls in `jax[cuda12]`, per the `sys_platform == "linux"` marker in
-# `pyproject.toml`), and mount Google Drive, where the waveform catalog is
-# expected to live. Locally this cell is a no-op.
+# below) — then detect TPU hardware before selecting the TPU-specific JAX
+# build. CPU and GPU Colab runtimes retain JAX auto-detection. Finally, mount
+# Google Drive, where the waveform catalog is expected to live. Locally this
+# cell is a no-op.
 
 # %%
 import subprocess
@@ -54,6 +54,7 @@ try:
 except ImportError:
     IN_COLAB = False
 
+HAS_COLAB_TPU = False
 if IN_COLAB:
     subprocess.check_call(
         [
@@ -68,19 +69,23 @@ if IN_COLAB:
             "jinja2",
         ]
     )
-    # Override the CUDA-flavored jaxlib astrogwb pulled in above with the
-    # TPU-specific build so JAX actually talks to the TPU cores.
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "-q", "-U", "jax[tpu]"]
-    )
+    from astrogwb.runtime import colab_tpu_available
+
+    HAS_COLAB_TPU = colab_tpu_available()
+    if HAS_COLAB_TPU:
+        # Install libtpu only when the runtime exposes TPU hardware. Importing
+        # astrogwb.runtime above is safe because that module is stdlib-only.
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "-q", "-U", "jax[tpu]"]
+        )
 
     from google.colab import drive
 
     drive.mount("/content/drive")
 
-# Platform for astrogwb.runtime.configure_runtime: TPU on Colab, otherwise let
-# JAX auto-detect (CPU locally, or CUDA if a GPU is visible).
-platform = "tpu" if IN_COLAB else "auto"
+# Force TPU only when Colab exposes its device; otherwise let JAX auto-detect
+# CPU or CUDA.
+platform = "tpu" if HAS_COLAB_TPU else "auto"
 
 # %% [markdown]
 # ## Runtime & sampler sizing
@@ -88,7 +93,7 @@ platform = "tpu" if IN_COLAB else "auto"
 # `num_chains` must be fixed before we hand the device platform to
 # `configure_runtime` below — it seeds `numpyro.set_host_device_count`, which
 # has to run before JAX claims a device. Locally we run one chain per CPU
-# core; on an accelerator (GPU/TPU) a handful of vectorized chains is plenty.
+# core; Colab uses four chains on CPU, GPU, and TPU runtimes.
 
 # %%
 import multiprocessing
@@ -96,8 +101,8 @@ import multiprocessing
 DEBUG = False  # small smoke settings for first runs; set False for the production run
 
 seed = 42
-# one chain per CPU core locally; a handful of vectorized chains on GPU/TPU
-num_chains = 4 if platform in ("cuda", "tpu") else multiprocessing.cpu_count()
+# One chain per CPU core locally; a fixed, modest count on every Colab runtime.
+num_chains = 4 if IN_COLAB else multiprocessing.cpu_count()
 num_warmup = 250
 num_samples = 250
 target_accept = 0.9
@@ -111,9 +116,10 @@ if DEBUG:
 # `configure_runtime` (`src/astrogwb/runtime.py`) is the single place allowed
 # to set `XLA_FLAGS`/`JAX_PLATFORMS`/`numpyro.set_host_device_count` and import
 # `jax`; it must run before any other cell imports `jax` or `numpyro`. It
-# resolves `chain_method` from the actual device platform (`"parallel"` for
-# CPU host devices, `"vectorized"` for a single GPU/TPU) — the same helper
-# `scripts/run_mcmc.py` uses for the headless runner.
+# resolves `chain_method` from the visible device count: `"parallel"` when
+# every chain has a device, `"vectorized"` when GPU/TPU devices are fewer than
+# chains, and `"sequential"` when CPU devices are insufficient. The same
+# helper is used by `scripts/run_mcmc.py` for the headless runner.
 
 # %%
 from datetime import datetime
@@ -164,12 +170,11 @@ azp.style.use("arviz-variat")
 # --- Catalog input (placeholder — see schema markdown below) ----------------
 # No working polarization-power catalog exists yet; set this once one is produced.
 
-ROOT_DIR = repo_root()
-CATALOG_PATH = (
-    Path("/content/drive/MyDrive/asgwb/bns_waveform_catalog.h5")
-    if IN_COLAB
-    else ROOT_DIR / "out/bns_waveform_catalog.h5"
-)
+if IN_COLAB:
+    CATALOG_PATH = Path("/content/drive/MyDrive/asgwb/bns_waveform_catalog.h5")
+else:
+    ROOT_DIR = repo_root()
+    CATALOG_PATH = ROOT_DIR / "out/bns_waveform_catalog.h5"
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml

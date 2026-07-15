@@ -18,9 +18,12 @@ uv run --extra mcmc python scripts/run_mcmc.py \
 Both entrypoints resolve their JAX platform and chain method through
 [`astrogwb.runtime.configure_runtime`](../src/astrogwb/runtime.py), which must
 run before `jax`/`numpyro` are otherwise imported. `--platform` accepts
-`auto` (default), `cpu`, `cuda`, or `tpu`; `chain_method` then auto-resolves
-to `"parallel"` on CPU host devices or `"vectorized"` on a single GPU/TPU
-(override with `--chain-method`). For the headless runner:
+`auto` (default), `cpu`, `cuda`, or `tpu`. The chain method auto-resolves to
+`"parallel"` whenever at least one visible device is available per chain,
+including multi-device GPU/TPU runs. With fewer accelerator devices than
+chains it uses `"vectorized"`; with too few CPU devices it uses
+`"sequential"`. Explicit `--chain-method` values always take precedence. For
+the headless runner:
 
 ```bash
 uv run --extra mcmc python scripts/run_mcmc.py \
@@ -29,14 +32,14 @@ uv run --extra mcmc python scripts/run_mcmc.py \
   --platform tpu
 ```
 
-The `mcmc.py` notebook detects a Google Colab runtime automatically (its
-first cell checks for `google.colab`), and on Colab it `pip install`s
-astrogwb + the notebook-plotting dependencies, forces a TPU-flavored
-`jaxlib`/`libtpu` (Colab's default JAX install otherwise resolves to
-`jax[cuda12]`), mounts Google Drive for the waveform catalog, and passes
-`platform="tpu"` into `configure_runtime`. Point `CATALOG_PATH`'s
-Colab branch at wherever you upload the catalog on Drive. Off Colab the
-bootstrap cell is a no-op and the notebook behaves exactly as it does today.
+The `mcmc.py` notebook detects Google Colab automatically and uses four chains
+for every Colab hardware type. It checks for a TPU device before importing
+JAX: TPU runtimes install `jax[tpu]` and pass `platform="tpu"`, while CPU and
+GPU runtimes retain `platform="auto"` so JAX can select their available
+backend. The bootstrap also installs astrogwb and plotting dependencies and
+mounts Google Drive for the waveform catalog. Point `CATALOG_PATH`'s Colab
+branch at wherever you upload the catalog on Drive. Off Colab the bootstrap
+cell is a no-op.
 
 ## Generating sweep configs
 
