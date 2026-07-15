@@ -16,5 +16,5 @@ set-threads:
 set-resources:
   run_mcmc:
     slurm_partition: cpu
-    mem_mb: 8000
-    runtime: 720
+    mem_mb: 16000
+    runtime: 1440
