@@ -345,7 +345,10 @@ def plot_corner(
 
 
 # %% [markdown]
-# ## Command-line configuration and execution
+# ## Command-line configuration
+#
+# Every setting below can be overridden with a CLI flag when running this
+# notebook headless; otherwise the defaults above are used.
 
 
 # %%
@@ -387,82 +390,104 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def main(argv: Sequence[str] | None = None) -> None:
-    args = _parse_args(argv)
-    root = repo_root()
+args = _parse_args()
+root = repo_root()
 
-    # Chain order: [xi_0 only, xi_0 + n, narrow R0 prior, broad R0 prior].
-    chain_paths = [
-        _resolve_path(args.xi0_chain, root),
-        _resolve_path(args.xi0_n_chain, root),
-        _resolve_path(args.prior_narrow_chain, root),
-        _resolve_path(args.prior_broad_chain, root),
-    ]
-
-    inference_data: list[xr.DataTree] = []
-    try:
-        inference_data = [load_inference_data(path) for path in chain_paths]
-        validate_inference_data(
-            inference_data,
-            args.marginal_labels,
-            group=args.group,
-            expected_count=4,
-        )
-
-        xi_n_data = [inference_data[1]]
-        xi_n_labels = [args.marginal_labels[1]]
-        prior_data = [inference_data[2], inference_data[3]]
-
-        fiducials = {
-            "xi_0": args.xi_0,
-            "xi_n": args.xi_n,
-            "local_merger_rate": args.local_merger_rate,
-        }
-
-        plt.rcParams.update(**PUBLICATION_RC)
-
-        # (i) Xi_0--n corner from the two-parameter propagation chain.
-        xi_n_corner_figure = plot_corner(
-            xi_n_data,
-            xi_n_labels,
-            XI_N_VAR_NAMES,
-            group=args.group,
-            fiducials=fiducials,
-        )
-
-        # (ii) Marginal Xi_0 posterior overlaid across all four chains.
-        xi0_marginal_figure = plot_marginal_posteriors(
-            inference_data,
-            args.marginal_labels,
-            var_name="xi_0",
-            group=args.group,
-        )
-
-        # (iii) Xi_0--R0 corner comparing the narrow and broad merger-rate priors.
-        merger_rate_corner_figure = plot_corner(
-            prior_data,
-            args.prior_labels,
-            MERGER_RATE_VAR_NAMES,
-            group=args.group,
-            fiducials=fiducials,
-        )
-
-        outputs = {
-            _resolve_path(args.output_xi_n_corner_pdf, root): xi_n_corner_figure,
-            _resolve_path(args.output_xi0_marginal_pdf, root): xi0_marginal_figure,
-            _resolve_path(
-                args.output_merger_rate_corner_pdf, root
-            ): merger_rate_corner_figure,
-        }
-        for output_path, figure in outputs.items():
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
-            print("saved figure:", output_path)
-    finally:
-        for tree in inference_data:
-            tree.close()
-
+# %% [markdown]
+# ## Load the chains
+#
+# Read the four inference runs from disk and check that each one carries the
+# posterior variables the figures below need.
 
 # %%
-if __name__ == "__main__":
-    main()
+# Chain order: [xi_0 only, xi_0 + n, narrow R0 prior, broad R0 prior].
+chain_paths = [
+    _resolve_path(args.xi0_chain, root),
+    _resolve_path(args.xi0_n_chain, root),
+    _resolve_path(args.prior_narrow_chain, root),
+    _resolve_path(args.prior_broad_chain, root),
+]
+
+inference_data: list[xr.DataTree] = [load_inference_data(path) for path in chain_paths]
+validate_inference_data(
+    inference_data,
+    args.marginal_labels,
+    group=args.group,
+    expected_count=4,
+)
+
+xi_n_data = [inference_data[1]]
+xi_n_labels = [args.marginal_labels[1]]
+prior_data = [inference_data[2], inference_data[3]]
+
+fiducials = {
+    "xi_0": args.xi_0,
+    "xi_n": args.xi_n,
+    "local_merger_rate": args.local_merger_rate,
+}
+
+plt.rcParams.update(**PUBLICATION_RC)
+
+# %% [markdown]
+# ## Figure (i): $\Xi_0$--$n$ corner
+#
+# Both propagation parameters are sampled together in this chain, so this
+# corner plot shows how well they can be told apart from each other.
+
+# %%
+xi_n_corner_figure = plot_corner(
+    xi_n_data,
+    xi_n_labels,
+    XI_N_VAR_NAMES,
+    group=args.group,
+    fiducials=fiducials,
+)
+xi_n_corner_figure
+
+# %% [markdown]
+# ## Figure (ii): $\Xi_0$ marginal posterior overlay
+#
+# Compares how tightly $\Xi_0$ is constrained across all four inference
+# setups, from the simplest (fixed cosmology and population) to the most
+# flexible.
+
+# %%
+xi0_marginal_figure = plot_marginal_posteriors(
+    inference_data,
+    args.marginal_labels,
+    var_name="xi_0",
+    group=args.group,
+)
+xi0_marginal_figure
+
+# %% [markdown]
+# ## Figure (iii): $\Xi_0$--$\mathcal{R}_0$ corner, narrow vs. broad prior
+#
+# Shows how assuming more or less prior knowledge about the local merger
+# rate affects the joint constraint on $\Xi_0$ and $\mathcal{R}_0$.
+
+# %%
+merger_rate_corner_figure = plot_corner(
+    prior_data,
+    args.prior_labels,
+    MERGER_RATE_VAR_NAMES,
+    group=args.group,
+    fiducials=fiducials,
+)
+merger_rate_corner_figure
+
+# %% [markdown]
+# ## Save figures
+#
+# Write the three figures above to the configured output paths.
+
+# %%
+outputs = {
+    _resolve_path(args.output_xi_n_corner_pdf, root): xi_n_corner_figure,
+    _resolve_path(args.output_xi0_marginal_pdf, root): xi0_marginal_figure,
+    _resolve_path(args.output_merger_rate_corner_pdf, root): merger_rate_corner_figure,
+}
+for output_path, figure in outputs.items():
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
+    print("saved figure:", output_path)
