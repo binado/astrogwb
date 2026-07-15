@@ -11,6 +11,10 @@ slurm-array-jobs: run_mcmc
 # CPU node. Overrides the "cuda" default in workflow/mcmc.smk.
 config:
   - jax_platforms=cpu
+# workflow/mcmc.smk passes rule threads as --host-device-count on CPU jobs
+# (one logical device per concurrent chain, --cpu-threads pinned to 1), and
+# threads also sets --cpus-per-task via Snakemake's SLURM resource mapping,
+# so this must be >= the run config's [sampler] num_chains.
 set-threads:
   - run_mcmc=4
 set-resources:

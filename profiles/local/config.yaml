@@ -18,7 +18,10 @@ config:
   - jax_platforms=cpu
 
 # Account each run_mcmc job at its core footprint so --cores packs jobs
-# correctly. Rule threads are passed to the runner as its BLAS/XLA thread cap.
+# correctly. On CPU, workflow/mcmc.smk passes rule threads as
+# --host-device-count (one logical device per concurrent chain, with
+# --cpu-threads pinned to 1) rather than a BLAS/XLA thread cap, so this must
+# be >= the run config's [sampler] num_chains.
 set-threads:
   - run_mcmc=4
 
