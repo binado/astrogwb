@@ -32,25 +32,105 @@
 # to be correct by construction but will only execute once such a catalog exists.
 
 # %% [markdown]
-# ## Imports and JAX configuration
+# ## Environment bootstrap (Colab vs. local)
+#
+# Detect whether this notebook is running on Google Colab. On Colab we probe
+# for TPU hardware *before* any `pip install` (stdlib-only, same signals as
+# `astrogwb.runtime.colab_tpu_available`) and install `astrogwb[mcmc,tpu]` or
+# `astrogwb[mcmc,cuda]`. Plotting packages from the `plotting` dependency
+# group are listed explicitly (groups aren't installable via a pip extra).
+# Finally, mount Google Drive for the waveform catalog. Locally this cell is
+# a no-op.
+
+# %%
+import os
+import subprocess
+import sys
+
+try:
+    import google.colab  # noqa: F401
+
+    IN_COLAB = True
+except ImportError:
+    IN_COLAB = False
+
+# Stdlib-only probe — choose accelerator extras before resolving deps so a
+# TPU VM never downloads the jax[cuda12] stack.
+HAS_COLAB_TPU = IN_COLAB and (
+    os.path.exists("/dev/accel0") or bool(os.environ.get("COLAB_TPU_ADDR"))
+)
+
+if IN_COLAB:
+    _extras = "mcmc,tpu" if HAS_COLAB_TPU else "mcmc,cuda"
+    subprocess.check_call(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            f"astrogwb[{_extras}] @ git+https://github.com/binado/astrogwb.git@main",
+            "arviz[h5netcdf]>=1.2.0",
+            "corner",
+            "jinja2",
+        ]
+    )
+
+    from google.colab import drive
+
+    drive.mount("/content/drive")
+
+# Force TPU only when Colab exposes its device; otherwise let JAX auto-detect
+# CPU or CUDA.
+platform = "tpu" if HAS_COLAB_TPU else "auto"
+
+# %% [markdown]
+# ## Runtime & sampler sizing
+#
+# `num_chains` must be fixed before we hand the device platform to
+# `configure_runtime` below — it seeds `numpyro.set_host_device_count`, which
+# has to run before JAX claims a device. Locally we run one chain per CPU
+# core; Colab uses four chains on CPU, GPU, and TPU runtimes.
+
+# %%
+import multiprocessing
+
+DEBUG = False  # small smoke settings for first runs; set False for the production run
+
+seed = 42
+# One chain per CPU core locally; a fixed, modest count on every Colab runtime.
+num_chains = 4 if IN_COLAB else multiprocessing.cpu_count()
+num_warmup = 250
+num_samples = 250
+target_accept = 0.9
+
+if DEBUG:
+    num_warmup, num_samples, num_chains, target_accept = 100, 100, 1, 0.9
+
+# %% [markdown]
+# ## Imports and JAX/device configuration
+#
+# `configure_runtime` (`src/astrogwb/runtime.py`) is the single place allowed
+# to set `XLA_FLAGS`/`JAX_PLATFORMS`/`numpyro.set_host_device_count` and import
+# `jax`; it must run before any other cell imports `jax` or `numpyro`. It
+# resolves `chain_method` from the visible device count: `"parallel"` when
+# every chain has a device, `"vectorized"` when GPU/TPU devices are fewer than
+# chains, and `"sequential"` when CPU devices are insufficient. The same
+# helper is used by `scripts/run_mcmc.py` for the headless runner.
 
 # %%
 from datetime import datetime
 from functools import partial
 import json
-import multiprocessing
 from pathlib import Path
 
-# Setting JAX to use all available CPU cores for parallelization
-num_cpus = multiprocessing.cpu_count()
-import numpyro
+from astrogwb.runtime import configure_runtime
 
-numpyro.set_host_device_count(num_cpus)
+jax, chain_method = configure_runtime(num_chains=num_chains, platform=platform)
 
 import arviz_base as azb
 import arviz_plots as azp
 import arviz_stats as azs
-import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
@@ -76,7 +156,6 @@ from matplotlib.projections import register_projection
 
 register_projection(MplAxes)
 
-jax.config.update("jax_enable_x64", True)
 # %config InlineBackend.figure_format = 'retina'
 azp.style.use("arviz-variat")
 
@@ -85,28 +164,18 @@ azp.style.use("arviz-variat")
 # ## Pipeline configuration
 
 # %%
-DEBUG = False  # small smoke settings for first runs; set False for the production run
-
 # --- Catalog input (placeholder — see schema markdown below) ----------------
 # No working polarization-power catalog exists yet; set this once one is produced.
 
-
-ROOT_DIR = repo_root()
-CATALOG_PATH = ROOT_DIR / "out/bns_waveform_catalog.h5"
+if IN_COLAB:
+    CATALOG_PATH = Path("/content/drive/MyDrive/asgwb/bns_waveform_catalog.h5")
+else:
+    ROOT_DIR = repo_root()
+    CATALOG_PATH = ROOT_DIR / "out/bns_waveform_catalog.h5"
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
 observation_time = 1.0  # [yr]; cancels in S_h, kept for the likelihood scale
-
-# MCMC settings
-seed = 42
-num_chains = num_cpus  # one chain per CPU core
-num_warmup = 250
-num_samples = 250
-target_accept = 0.9
-
-if DEBUG:
-    num_warmup, num_samples, num_chains, target_accept = 100, 100, 1, 0.9
 
 # Redshift grid for the cosmology integrals (and MD normalization)
 z_min = 0.0
@@ -370,7 +439,7 @@ mcmc = MCMC(
     num_chains=num_chains,
     progress_bar=True,
     jit_model_args=True,
-    chain_method="vectorized",
+    chain_method=chain_method,
 )
 rng_key = jax.random.PRNGKey(seed)
 mcmc.run(

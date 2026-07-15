@@ -19,7 +19,8 @@ Usage::
         --config configs/mcmc.example.toml --catalog out/catalogs/bns-n16384-df1.h5
 
 Requires the ``mcmc`` optional extra (pydantic plus ArviZ NetCDF output support)
-for ``RunConfig`` validation and chain serialization.
+for ``RunConfig`` validation and chain serialization. Add ``--extra cuda`` or
+``--extra tpu`` for the matching JAX accelerator plugin.
 Batch runs are dispatched by the Snakemake ``run_mcmc`` rule (one config per
 job); see ``workflow/mcmc.smk`` and ``profiles/slurm/config.yaml``.
 """

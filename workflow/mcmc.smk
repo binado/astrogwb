@@ -84,8 +84,24 @@ rule run_mcmc:
         if command -v job-nanny >/dev/null 2>&1; then
             NANNY=job-nanny
         fi
-        $NANNY uv run --extra mcmc python scripts/run_mcmc.py \
+        if [ "{params.platform}" = "cpu" ]; then
+            # CPU jobs: chain_method resolves to "parallel", which needs one
+            # logical host device per concurrent chain. Spend the allocated
+            # threads on --host-device-count (must be >= the run config's
+            # num_chains) instead of also fanning each chain out over
+            # BLAS/XLA intra-op threads, which would oversubscribe the cores
+            # actually granted by --cores/cpus-per-task.
+            RUNTIME_FLAGS="--host-device-count {threads} --cpu-threads 1"
+            UV_EXTRAS="--extra mcmc"
+        else
+            # GPU jobs: chain_method resolves to "vectorized" on the single
+            # GPU device, so host-device-count is irrelevant; spend the
+            # allocated CPUs on host-side BLAS/data-loading threads instead.
+            RUNTIME_FLAGS="--cpu-threads {threads}"
+            UV_EXTRAS="--extra mcmc --extra cuda"
+        fi
+        $NANNY uv run $UV_EXTRAS python scripts/run_mcmc.py \
             --config {input.config:q} --outdir {params.outdir:q} \
             --label {wildcards.run:q} --catalog {input.catalog:q} \
-            --platform {params.platform:q} --cpu-threads {threads} --force
+            --platform {params.platform:q} $RUNTIME_FLAGS --force
         """

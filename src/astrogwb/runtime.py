@@ -16,6 +16,17 @@ from types import ModuleType
 logger = logging.getLogger(__name__)
 
 
+def colab_tpu_available() -> bool:
+    """Return whether a Colab runtime exposes TPU hardware.
+
+    ``/dev/accel0`` is the current TPU VM device signal.  The environment
+    variable is retained as a fallback for older Colab TPU runtimes.  Keep
+    this check stdlib-only so callers can select a JAX build before importing
+    JAX and initializing a backend.
+    """
+    return os.path.exists("/dev/accel0") or bool(os.environ.get("COLAB_TPU_ADDR"))
+
+
 def positive_int(value: str) -> int:
     """Parse a strictly positive integer for runtime CLI controls."""
     parsed = int(value)
@@ -28,7 +39,7 @@ def add_runtime_arguments(parser: argparse.ArgumentParser) -> None:
     """Add deployment/runtime controls shared by runner entrypoints."""
     parser.add_argument(
         "--platform",
-        choices=("auto", "cpu", "cuda"),
+        choices=("auto", "cpu", "cuda", "tpu"),
         default="auto",
         help="JAX platform (default: auto; written to JAX_PLATFORMS when not auto).",
     )
@@ -104,14 +115,18 @@ def configure_runtime(
         resolved_host_device_count,
     )
 
-    # 5. Resolve chain_method. On a single GPU vectorized chains are best; CPU
-    #    chains go on separate host devices via "parallel". JAX reports the
-    #    device platform as "gpu" even when JAX_PLATFORMS=cuda.
+    # 5. Resolve chain_method. Use one device per chain whenever enough devices
+    #    are visible. When an accelerator has fewer devices than chains, map
+    #    vectorized chains onto it; insufficient CPU devices run sequentially.
+    #    JAX reports the platform as "gpu" even when JAX_PLATFORMS=cuda.
     resolved_chain_method = chain_method
     if resolved_chain_method == "auto":
-        resolved_chain_method = (
-            "vectorized" if resolved_platform == "gpu" else "parallel"
-        )
+        if len(devices) >= num_chains:
+            resolved_chain_method = "parallel"
+        elif resolved_platform in ("gpu", "tpu"):
+            resolved_chain_method = "vectorized"
+        else:
+            resolved_chain_method = "sequential"
     logger.info("chain_method=%s (num_chains=%d)", resolved_chain_method, num_chains)
 
     return jax, resolved_chain_method

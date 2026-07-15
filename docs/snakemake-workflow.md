@@ -29,7 +29,7 @@ Generate sweep configs as described in
 [Generating sweep configs](./running-inference.md#generating-sweep-configs).
 Add `--write-manifests` to also (re)generate a full-sweep batch manifest per
 campaign —
-`configs/mcmc/manifests/mcmc.batch.{cosmology,astrophysical,modified-propagation}.json`
+`configs/mcmc/manifests/mcmc.batch.{cosmology,cosmology-all-detectors,astrophysical,astrophysical-all-detectors,modified-propagation,modified-propagation-all-detectors}.json`
 — each holding only `chains_dir` and every config just written for that
 campaign; manifests carry no catalog field (see below). Existing manifests
 are skipped unless `--force` is supplied, same as the JSON configs. Like the
@@ -95,29 +95,34 @@ of executor flags and rule-specific resource overrides. The Snakefile itself is
 backend-agnostic; the profile decides *where* jobs land. Two profiles ship with
 the repo:
 
-| Profile | Partition | GPU | JAX backend |
-| --- | --- | --- | --- |
-| `profiles/slurm` | `gpu` | `--gres=gpu:1` | `cuda` |
-| `profiles/slurm-cpu` | `cpu` | none | `cpu` |
+| Profile | Partition | GPU / CPUs | Mem / walltime | JAX backend |
+| --- | --- | --- | --- | --- |
+| `profiles/slurm` | `gpu` | `gpu: 1`, `cpus_per_gpu: 4` | 8 GB / 12 h (`runtime: 720`) | `cuda` |
+| `profiles/slurm-cpu` | `cpu` | 4 CPUs via `set-threads` | 16 GB / 24 h (`runtime: 1440`) | `cpu` |
 
-Both request 12 h wall-clock (`runtime: 720`) and batch compatible `run_mcmc`
-jobs into a SLURM array. The CPU profile also sets `jax_platforms=cpu` (passed
-through as `--platform cpu`) so JAX does not try to initialize CUDA on a CPU
-node.
+Both batch compatible `run_mcmc` jobs into a SLURM array. The GPU profile
+requests one GPU and ties four CPUs to it via `cpus_per_gpu` (plugin-native
+`gpu` / `cpus_per_gpu` resources, not `--gres`). The CPU profile sets
+`jax_platforms=cpu` (passed through as `--platform cpu`) so JAX does not try
+to initialize CUDA on a CPU node, and spends rule threads on
+`--host-device-count` (one logical device per concurrent chain, with
+`--cpu-threads` pinned to 1).
 
 1. **Install the executor plugin on the submit host.** The `slurm` group pulls
-   in `snakemake-executor-plugin-slurm`:
+   in `snakemake-executor-plugin-slurm`. Add `--extra cuda` for the GPU
+   profile (omit it for CPU-only):
 
    ```bash
-   uv sync --extra mcmc --group slurm
+   uv sync --extra mcmc --extra cuda --group slurm   # profiles/slurm
+   uv sync --extra mcmc --group slurm                # profiles/slurm-cpu
    ```
 
 2. **Prepare the batch manifest.** Generate sweep configs and their manifests
    with `uv run --extra mcmc python scripts/generate_mcmc_configs.py --write-manifests`
-   if you haven't already — this writes
-   `configs/mcmc/manifests/mcmc.batch.{cosmology,astrophysical,modified-propagation}.json`
-   (gitignored — regenerate them on whichever host needs them), each listing
-   every config for that campaign. Copy the one you want (or
+   if you haven't already — this writes one gitignored manifest per campaign
+   under `configs/mcmc/manifests/` (regenerate them on whichever host needs
+   them), including the quick ET-2L campaigns and the `*-all-detectors`
+   campaigns. Copy the one you want (or
    [`configs/mcmc.batch.example.json`](../configs/mcmc.batch.example.json) for a
    hand-picked selection). Manifests carry no catalog field, so which catalog
    to use is set separately: `workflow/mcmc.smk` sources it from
@@ -169,13 +174,14 @@ under the profile's `set-resources.run_mcmc` entry.
 For smaller sweeps you can skip SLURM entirely and let Snakemake pack
 independent `run_mcmc` jobs across the cores of your own machine with
 [`profiles/local`](../profiles/local/config.yaml). It forces the CPU JAX backend
-and confines each run to its Snakemake thread allocation — both the BLAS pools
-and, via `XLA_FLAGS intra_op_parallelism_threads`, JAX's XLA CPU pool — so
-concurrent runs do not oversubscribe. The core budget lives only in the profile;
-it never enters a run's config hash.
+and passes rule threads as `--host-device-count` (with `--cpu-threads` pinned to
+1) so each job gets one logical device per concurrent chain without
+oversubscribing BLAS/XLA. The core budget lives only in the profile; it never
+enters a run's config hash. Keep `set-threads.run_mcmc` ≥ the run config's
+`[sampler] num_chains`.
 
-As a worked example, run the **cosmology sweep** locally. First generate the
-sweep configs and their batch manifest (writes
+As a worked example, run the **cosmology** (quick ET-2L) sweep locally. First
+generate the sweep configs and their batch manifest (writes
 `configs/mcmc/cosmology/<network>__<analysis>__<observation>.json` and
 `configs/mcmc/manifests/mcmc.batch.cosmology.json`):
 
@@ -183,12 +189,12 @@ sweep configs and their batch manifest (writes
 uv run --extra mcmc python scripts/generate_mcmc_configs.py --write-manifests
 ```
 
-`configs/mcmc/manifests/mcmc.batch.cosmology.json` now lists all 24 cosmology
-sweep points (6 networks × 4 analyses × 1 observation). To run only a subset
-locally — e.g. the ET-triangular `H0`, `H0`+`Omega_m`, and `H0`+merger-rate
-points — copy it somewhere and trim the `runs` list rather than editing the
-generated file in place (the next `--write-manifests --force` run overwrites
-it):
+`configs/mcmc/manifests/mcmc.batch.cosmology.json` now lists all 8 cosmology
+sweep points (2 networks × 4 analyses × 1 observation). For the full six-network
+grid use `mcmc.batch.cosmology-all-detectors.json` (24 points). To run only a
+subset locally — e.g. a few ET-2L `H0` analyses — copy the manifest somewhere
+and trim the `runs` list rather than editing the generated file in place (the
+next `--write-manifests --force` run overwrites it):
 
 ```bash
 cp configs/mcmc/manifests/mcmc.batch.cosmology.json configs/mcmc.batch.cosmology-local.json
@@ -210,10 +216,8 @@ uv run snakemake --snakefile workflow/mcmc.smk \
 
 To trade per-run speed for more concurrency, lower the `set-threads` value in
 `profiles/local`: `run_mcmc=2` runs four sweep points at once on the same 8
-cores. Because each step is dominated by a large
-catalog contraction that BLAS already parallelizes, more independent runs
-usually beats more threads per run — keep the sweep configs single-chain
-(`num_chains = 1`) and let the job level do the work.
+cores (and must still be ≥ each run's `num_chains`). For a large sweep, prefer
+single-chain configs (`num_chains = 1`) and let the job level do the work.
 
 ## Paper workflow
 

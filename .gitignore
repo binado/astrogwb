@@ -8,6 +8,7 @@ data
 configs/mcmc/astrophysical/
 configs/mcmc/cosmology/
 configs/mcmc/modified-propagation/
+configs/mcmc/*-all-detectors/
 configs/mcmc/frozen/
 configs/mcmc/manifests/
 chains/
