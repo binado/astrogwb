@@ -18,19 +18,17 @@
 # This notebook assembles the modified-GW-propagation figures used by the paper
 # workflow. The propagation effect is parameterized by the phenomenological
 # GW-to-EM luminosity-distance ratio $(\Xi_0, n)$ of Belgacem et al. It compares
-# four inference runs on the same detector network:
+# three inference runs on the same detector network:
 #
 # 1. $\Xi_0$ only (population and cosmology fixed at their fiducial values),
-# 2. $\Xi_0 + n$ (both propagation parameters sampled),
-# 3. $\Xi_0 + \mathcal{R}_0$ with a *narrow* prior on the local merger rate, and
-# 4. $\Xi_0 + \mathcal{R}_0$ with a *broad* prior on the local merger rate.
+# 2. $\Xi_0 + n$ (both propagation parameters sampled), and
+# 3. $\Xi_0 + H_0$ with a Gaussian prior on the Hubble constant.
 #
 # It produces three figures:
 #
 # - a corner plot of the $\Xi_0$--$n$ posterior (chain 2),
-# - an overlay of the marginal $\Xi_0$ posterior across all four chains, and
-# - an overlaid $\Xi_0$--$\mathcal{R}_0$ corner plot comparing the narrow and
-#   broad merger-rate priors (chains 3 and 4).
+# - an overlay of the marginal $\Xi_0$ posterior across all three chains, and
+# - a $\Xi_0$--$H_0$ corner plot (chain 3).
 #
 # Chain paths and labels are separate inputs. This keeps chain loading outside the
 # plotting helpers and makes it possible to select different inference runs without
@@ -73,44 +71,39 @@ register_projection(MplAxes)
 _CHAIN_DIR = Path("chains/bns-n16384-df1/modified-propagation")
 _NETWORK = "ET-2L-aligned-CE-Hanford"
 
-DEFAULT_XI0_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi0__baseline.nc"
-DEFAULT_XI0_N_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi0-n__baseline.nc"
-DEFAULT_PRIOR_NARROW_CHAIN = (
-    _CHAIN_DIR / f"{_NETWORK}__Xi0-merger-rate-gauss__baseline.nc"
-)
-DEFAULT_PRIOR_BROAD_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi0-merger-rate__baseline.nc"
+DEFAULT_XI0_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0__baseline.nc"
+DEFAULT_XI0_N_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0-n__baseline.nc"
+DEFAULT_H0_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0-H0-gauss__baseline.nc"
 
 # Fiducial (injected) values marked as truths on the corner plots.
 DEFAULT_XI_0 = 1.0
 DEFAULT_XI_N = 1.91
-DEFAULT_LOCAL_MERGER_RATE = 161.0
+DEFAULT_H0 = 67.66
 
 XI_0_LABEL = r"$\Xi_0$"
 XI_N_LABEL = r"$n$"
-LOCAL_MERGER_RATE_LABEL = r"$\mathcal{R}_0\,[\mathrm{Gpc^{-3}\,yr^{-1}}]$"
+H0_LABEL = r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
 
 VAR_LABELS = {
     "xi_0": XI_0_LABEL,
     "xi_n": XI_N_LABEL,
-    "local_merger_rate": LOCAL_MERGER_RATE_LABEL,
+    "H0": H0_LABEL,
 }
 
 # Variable groups for each corner plot.
 XI_N_VAR_NAMES = ("xi_0", "xi_n")
-MERGER_RATE_VAR_NAMES = ("xi_0", "local_merger_rate")
+H0_VAR_NAMES = ("xi_0", "H0")
 CORNER_LEVELS = (0.6827, 0.9545)
 
-# Labels for the four-chain marginal overlay, in chain order.
+# Labels for the three-chain marginal overlay, in chain order.
 DEFAULT_MARGINAL_LABELS = [
     r"$\Xi_0$",
     r"$\Xi_0 + n$",
-    r"$\Xi_0 + \mathcal{R}_0$ (narrow prior)",
-    r"$\Xi_0 + \mathcal{R}_0$ (broad prior)",
+    r"$\Xi_0 + H_0$",
 ]
-# Labels for the narrow/broad merger-rate corner comparison, in chain order.
-DEFAULT_PRIOR_LABELS = [
-    r"narrow $\mathcal{R}_0$ prior",
-    r"broad $\mathcal{R}_0$ prior",
+# Label for the single-chain Xi_0-H0 corner plot.
+DEFAULT_H0_LABELS = [
+    r"$\Xi_0 + H_0$",
 ]
 
 PUBLICATION_RC = {
@@ -356,14 +349,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--xi0-chain", type=Path, default=DEFAULT_XI0_CHAIN)
     parser.add_argument("--xi0-n-chain", type=Path, default=DEFAULT_XI0_N_CHAIN)
-    parser.add_argument(
-        "--prior-narrow-chain", type=Path, default=DEFAULT_PRIOR_NARROW_CHAIN
-    )
-    parser.add_argument(
-        "--prior-broad-chain", type=Path, default=DEFAULT_PRIOR_BROAD_CHAIN
-    )
-    parser.add_argument("--marginal-labels", nargs=4, default=DEFAULT_MARGINAL_LABELS)
-    parser.add_argument("--prior-labels", nargs=2, default=DEFAULT_PRIOR_LABELS)
+    parser.add_argument("--h0-chain", type=Path, default=DEFAULT_H0_CHAIN)
+    parser.add_argument("--marginal-labels", nargs=3, default=DEFAULT_MARGINAL_LABELS)
+    parser.add_argument("--h0-labels", nargs=1, default=DEFAULT_H0_LABELS)
     parser.add_argument(
         "--output-xi-n-corner-pdf",
         type=Path,
@@ -375,17 +363,15 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=Path("figures/mcmc_modified_propagation_Xi0_marginal.pdf"),
     )
     parser.add_argument(
-        "--output-merger-rate-corner-pdf",
+        "--output-h0-corner-pdf",
         type=Path,
-        default=Path("figures/mcmc_modified_propagation_Xi0_merger_rate_corner.pdf"),
+        default=Path("figures/mcmc_modified_propagation_Xi0_H0_corner.pdf"),
     )
     parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument("--group", default="posterior")
     parser.add_argument("--xi-0", type=float, default=DEFAULT_XI_0)
     parser.add_argument("--xi-n", type=float, default=DEFAULT_XI_N)
-    parser.add_argument(
-        "--local-merger-rate", type=float, default=DEFAULT_LOCAL_MERGER_RATE
-    )
+    parser.add_argument("--h0", type=float, default=DEFAULT_H0)
     args, _ = parser.parse_known_args(argv)
     return args
 
@@ -396,16 +382,15 @@ root = repo_root()
 # %% [markdown]
 # ## Load the chains
 #
-# Read the four inference runs from disk and check that each one carries the
+# Read the three inference runs from disk and check that each one carries the
 # posterior variables the figures below need.
 
 # %%
-# Chain order: [xi_0 only, xi_0 + n, narrow R0 prior, broad R0 prior].
+# Chain order: [xi_0 only, xi_0 + n, xi_0 + H0].
 chain_paths = [
     _resolve_path(args.xi0_chain, root),
     _resolve_path(args.xi0_n_chain, root),
-    _resolve_path(args.prior_narrow_chain, root),
-    _resolve_path(args.prior_broad_chain, root),
+    _resolve_path(args.h0_chain, root),
 ]
 
 inference_data: list[xr.DataTree] = [load_inference_data(path) for path in chain_paths]
@@ -413,17 +398,17 @@ validate_inference_data(
     inference_data,
     args.marginal_labels,
     group=args.group,
-    expected_count=4,
+    expected_count=3,
 )
 
 xi_n_data = [inference_data[1]]
 xi_n_labels = [args.marginal_labels[1]]
-prior_data = [inference_data[2], inference_data[3]]
+h0_data = [inference_data[2]]
 
 fiducials = {
     "xi_0": args.xi_0,
     "xi_n": args.xi_n,
-    "local_merger_rate": args.local_merger_rate,
+    "H0": args.h0,
 }
 
 plt.rcParams.update(**PUBLICATION_RC)
@@ -447,7 +432,7 @@ xi_n_corner_figure
 # %% [markdown]
 # ## Figure (ii): $\Xi_0$ marginal posterior overlay
 #
-# Compares how tightly $\Xi_0$ is constrained across all four inference
+# Compares how tightly $\Xi_0$ is constrained across all three inference
 # setups, from the simplest (fixed cosmology and population) to the most
 # flexible.
 
@@ -461,20 +446,20 @@ xi0_marginal_figure = plot_marginal_posteriors(
 xi0_marginal_figure
 
 # %% [markdown]
-# ## Figure (iii): $\Xi_0$--$\mathcal{R}_0$ corner, narrow vs. broad prior
+# ## Figure (iii): $\Xi_0$--$H_0$ corner
 #
-# Shows how assuming more or less prior knowledge about the local merger
-# rate affects the joint constraint on $\Xi_0$ and $\mathcal{R}_0$.
+# Shows the joint constraint on $\Xi_0$ and the Hubble constant $H_0$ when
+# $H_0$ is sampled under a Gaussian prior.
 
 # %%
-merger_rate_corner_figure = plot_corner(
-    prior_data,
-    args.prior_labels,
-    MERGER_RATE_VAR_NAMES,
+h0_corner_figure = plot_corner(
+    h0_data,
+    args.h0_labels,
+    H0_VAR_NAMES,
     group=args.group,
     fiducials=fiducials,
 )
-merger_rate_corner_figure
+h0_corner_figure
 
 # %% [markdown]
 # ## Save figures
@@ -485,7 +470,7 @@ merger_rate_corner_figure
 outputs = {
     _resolve_path(args.output_xi_n_corner_pdf, root): xi_n_corner_figure,
     _resolve_path(args.output_xi0_marginal_pdf, root): xi0_marginal_figure,
-    _resolve_path(args.output_merger_rate_corner_pdf, root): merger_rate_corner_figure,
+    _resolve_path(args.output_h0_corner_pdf, root): h0_corner_figure,
 }
 for output_path, figure in outputs.items():
     output_path.parent.mkdir(parents=True, exist_ok=True)
