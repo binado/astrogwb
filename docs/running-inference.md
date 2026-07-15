@@ -13,6 +13,31 @@ uv run --extra mcmc python scripts/run_mcmc.py \
   --catalog out/catalogs/bns-n16384-df1.h5
 ```
 
+## Running on an accelerator (GPU/TPU, incl. Google Colab)
+
+Both entrypoints resolve their JAX platform and chain method through
+[`astrogwb.runtime.configure_runtime`](../src/astrogwb/runtime.py), which must
+run before `jax`/`numpyro` are otherwise imported. `--platform` accepts
+`auto` (default), `cpu`, `cuda`, or `tpu`; `chain_method` then auto-resolves
+to `"parallel"` on CPU host devices or `"vectorized"` on a single GPU/TPU
+(override with `--chain-method`). For the headless runner:
+
+```bash
+uv run --extra mcmc python scripts/run_mcmc.py \
+  --config configs/mcmc.example.toml \
+  --catalog out/catalogs/bns-n16384-df1.h5 \
+  --platform tpu
+```
+
+The `mcmc.py` notebook detects a Google Colab runtime automatically (its
+first cell checks for `google.colab`), and on Colab it `pip install`s
+astrogwb + the notebook-plotting dependencies, forces a TPU-flavored
+`jaxlib`/`libtpu` (Colab's default JAX install otherwise resolves to
+`jax[cuda12]`), mounts Google Drive for the waveform catalog, and passes
+`platform="tpu"` into `configure_runtime`. Point `CATALOG_PATH`'s
+Colab branch at wherever you upload the catalog on Drive. Off Colab the
+bootstrap cell is a no-op and the notebook behaves exactly as it does today.
+
 ## Generating sweep configs
 
 Generate sweep configs explicitly on the local machine or cluster submit host;
