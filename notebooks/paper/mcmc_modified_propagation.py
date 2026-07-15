@@ -46,6 +46,7 @@ import arviz_stats as azs
 import corner
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import xarray as xr
 from arviz_base.labels import MapLabeller
 from matplotlib.axes import Axes as MplAxes
@@ -337,6 +338,34 @@ def plot_corner(
     return fig
 
 
+def xi0_hdi_table(
+    inference_data: Sequence[xr.DataTree],
+    labels: Sequence[str],
+    *,
+    var_name: str = "xi_0",
+    prob: float = CORNER_LEVELS[0],
+    group: str = "posterior",
+) -> pd.DataFrame:
+    """1-sigma HDI table for `var_name`: left/right bounds and sigma."""
+    validate_inference_data(
+        inference_data, labels, required_vars=(var_name,), group=group
+    )
+    rows = []
+    for tree, label in zip(inference_data, labels, strict=True):
+        hdi = azs.hdi(tree, prob=prob, group=group, var_names=var_name)[var_name]
+        left = float(hdi.sel(ci_bound="lower"))
+        right = float(hdi.sel(ci_bound="upper"))
+        rows.append(
+            {
+                "chain": label,
+                "left": left,
+                "right": right,
+                "sigma": (right - left) / 2.0,
+            }
+        )
+    return pd.DataFrame(rows).set_index("chain")
+
+
 # %% [markdown]
 # ## Command-line configuration
 #
@@ -444,6 +473,17 @@ xi0_marginal_figure = plot_marginal_posteriors(
     group=args.group,
 )
 xi0_marginal_figure
+
+# %% [markdown]
+# ## Table: $\Xi_0$ 1$\sigma$ HDI per chain
+#
+# Reports the 68.27% highest-density interval of $\Xi_0$ for each chain, with
+# the left/right bounds and the half-width $\sigma = (\mathrm{right} -
+# \mathrm{left}) / 2$.
+
+# %%
+xi0_hdi = xi0_hdi_table(inference_data, args.marginal_labels, group=args.group)
+xi0_hdi
 
 # %% [markdown]
 # ## Figure (iii): $\Xi_0$--$H_0$ corner
