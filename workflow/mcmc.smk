@@ -92,13 +92,15 @@ rule run_mcmc:
             # BLAS/XLA intra-op threads, which would oversubscribe the cores
             # actually granted by --cores/cpus-per-task.
             RUNTIME_FLAGS="--host-device-count {threads} --cpu-threads 1"
+            UV_EXTRAS="--extra mcmc"
         else
             # GPU jobs: chain_method resolves to "vectorized" on the single
             # GPU device, so host-device-count is irrelevant; spend the
             # allocated CPUs on host-side BLAS/data-loading threads instead.
             RUNTIME_FLAGS="--cpu-threads {threads}"
+            UV_EXTRAS="--extra mcmc --extra cuda"
         fi
-        $NANNY uv run --extra mcmc python scripts/run_mcmc.py \
+        $NANNY uv run $UV_EXTRAS python scripts/run_mcmc.py \
             --config {input.config:q} --outdir {params.outdir:q} \
             --label {wildcards.run:q} --catalog {input.catalog:q} \
             --platform {params.platform:q} $RUNTIME_FLAGS --force

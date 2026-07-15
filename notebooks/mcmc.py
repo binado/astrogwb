@@ -34,16 +34,16 @@
 # %% [markdown]
 # ## Environment bootstrap (Colab vs. local)
 #
-# Detect whether this notebook is running on Google Colab. On Colab we `pip
-# install` astrogwb — the `mcmc` extra plus the notebook-plotting packages
-# tracked as the `plotting` dependency group in `pyproject.toml` (dependency
-# groups aren't installable via a pip extra, so they're listed explicitly
-# below) — then detect TPU hardware before selecting the TPU-specific JAX
-# build. CPU and GPU Colab runtimes retain JAX auto-detection. Finally, mount
-# Google Drive, where the waveform catalog is expected to live. Locally this
-# cell is a no-op.
+# Detect whether this notebook is running on Google Colab. On Colab we probe
+# for TPU hardware *before* any `pip install` (stdlib-only, same signals as
+# `astrogwb.runtime.colab_tpu_available`) and install `astrogwb[mcmc,tpu]` or
+# `astrogwb[mcmc,cuda]`. Plotting packages from the `plotting` dependency
+# group are listed explicitly (groups aren't installable via a pip extra).
+# Finally, mount Google Drive for the waveform catalog. Locally this cell is
+# a no-op.
 
 # %%
+import os
 import subprocess
 import sys
 
@@ -54,8 +54,14 @@ try:
 except ImportError:
     IN_COLAB = False
 
-HAS_COLAB_TPU = False
+# Stdlib-only probe — choose accelerator extras before resolving deps so a
+# TPU VM never downloads the jax[cuda12] stack.
+HAS_COLAB_TPU = IN_COLAB and (
+    os.path.exists("/dev/accel0") or bool(os.environ.get("COLAB_TPU_ADDR"))
+)
+
 if IN_COLAB:
+    _extras = "mcmc,tpu" if HAS_COLAB_TPU else "mcmc,cuda"
     subprocess.check_call(
         [
             sys.executable,
@@ -63,21 +69,12 @@ if IN_COLAB:
             "pip",
             "install",
             "-q",
-            "astrogwb[mcmc] @ git+https://github.com/binado/astrogwb.git@main",
+            f"astrogwb[{_extras}] @ git+https://github.com/binado/astrogwb.git@main",
             "arviz[h5netcdf]>=1.2.0",
             "corner",
             "jinja2",
         ]
     )
-    from astrogwb.runtime import colab_tpu_available
-
-    HAS_COLAB_TPU = colab_tpu_available()
-    if HAS_COLAB_TPU:
-        # Install libtpu only when the runtime exposes TPU hardware. Importing
-        # astrogwb.runtime above is safe because that module is stdlib-only.
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "-q", "-U", "jax[tpu]"]
-        )
 
     from google.colab import drive
 

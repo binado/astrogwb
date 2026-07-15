@@ -13,6 +13,9 @@ uv run --extra mcmc python scripts/run_mcmc.py \
   --catalog out/catalogs/bns-n16384-df1.h5
 ```
 
+Add `--extra cuda` (or `--extra tpu`) when you need the matching JAX
+accelerator plugin.
+
 ## Running on an accelerator (GPU/TPU, incl. Google Colab)
 
 Both entrypoints resolve their JAX platform and chain method through
@@ -26,20 +29,21 @@ chains it uses `"vectorized"`; with too few CPU devices it uses
 the headless runner:
 
 ```bash
-uv run --extra mcmc python scripts/run_mcmc.py \
+uv run --extra mcmc --extra tpu python scripts/run_mcmc.py \
   --config configs/mcmc.example.toml \
   --catalog out/catalogs/bns-n16384-df1.h5 \
   --platform tpu
 ```
 
 The `mcmc.py` notebook detects Google Colab automatically and uses four chains
-for every Colab hardware type. It checks for a TPU device before importing
-JAX: TPU runtimes install `jax[tpu]` and pass `platform="tpu"`, while CPU and
-GPU runtimes retain `platform="auto"` so JAX can select their available
-backend. The bootstrap also installs astrogwb and plotting dependencies and
-mounts Google Drive for the waveform catalog. Point `CATALOG_PATH`'s Colab
-branch at wherever you upload the catalog on Drive. Off Colab the bootstrap
-cell is a no-op.
+for every Colab hardware type. It probes for TPU hardware with a stdlib-only
+check *before* any `pip install`, then installs `astrogwb[mcmc,tpu]` or
+`astrogwb[mcmc,cuda]`. The `mcmc` extra is the runner/plotting stack; `cuda`
+and `tpu` are accelerator plugins (prefer one). TPU runs pass
+`platform="tpu"`; CPU and GPU retain `platform="auto"`. The bootstrap also
+installs plotting dependencies and mounts Google Drive for the waveform
+catalog. Point `CATALOG_PATH`'s Colab branch at wherever you upload the
+catalog on Drive. Off Colab the bootstrap cell is a no-op.
 
 ## Generating sweep configs
 

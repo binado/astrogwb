@@ -9,16 +9,21 @@ The easiest way to install the package is using the `uv` package manager:
 
 ```bash
 git clone git@github.com:binado/astrogwb.git
-uv sync --all-groups --all-extras
+uv sync --all-groups --extra mcmc
 ```
 
 Core inference libraries install without the headless runner dependencies. The
 optional ``mcmc`` extra adds pydantic for validated ``RunConfig`` parsing and
-ArviZ's NetCDF output support used by [`scripts/run_mcmc.py`](scripts/run_mcmc.py)
-and related tools:
+ArviZ's NetCDF output support used by [`scripts/run_mcmc.py`](scripts/run_mcmc.py).
+Pair it with an accelerator extra when needed: ``cuda`` (``jax[cuda12]``) or
+``tpu`` (``jax[tpu]``):
 
 ```bash
 uv sync --extra mcmc
+# GPU (Linux):
+uv sync --extra mcmc --extra cuda
+# TPU (e.g. Colab):
+uv sync --extra mcmc --extra tpu
 # or with notebook/dev tooling:
 uv sync --extra mcmc --group dev
 ```

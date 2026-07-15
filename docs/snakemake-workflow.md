@@ -106,10 +106,12 @@ through as `--platform cpu`) so JAX does not try to initialize CUDA on a CPU
 node.
 
 1. **Install the executor plugin on the submit host.** The `slurm` group pulls
-   in `snakemake-executor-plugin-slurm`:
+   in `snakemake-executor-plugin-slurm`. Add `--extra cuda` for the GPU
+   profile (omit it for CPU-only):
 
    ```bash
-   uv sync --extra mcmc --group slurm
+   uv sync --extra mcmc --extra cuda --group slurm   # profiles/slurm
+   uv sync --extra mcmc --group slurm                # profiles/slurm-cpu
    ```
 
 2. **Prepare the batch manifest.** Generate sweep configs and their manifests
