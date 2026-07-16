@@ -290,7 +290,6 @@ def plot_corner(
             color=color,
             fig=fig,
             hist_kwargs={
-                "density": True,
                 "linestyle": linestyle,
                 "linewidth": 1.5,
             },
