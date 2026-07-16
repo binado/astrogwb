@@ -436,7 +436,6 @@ xi_n_corner_figure = plot_corner(
     fiducials=fiducials,
     colors=[CATEGORY["modified_propagation"]],
 )
-xi_n_corner_figure
 
 # %% [markdown]
 # ## Figure (ii): $\Xi_0$ marginal posterior overlay
@@ -453,7 +452,6 @@ xi0_marginal_figure = plot_marginal_posteriors(
     group=args.group,
     colors=combo_colors(len(inference_data)),
 )
-xi0_marginal_figure
 
 # %% [markdown]
 # ## Table: $\Xi_0$ 1$\sigma$ HDI per chain
@@ -481,7 +479,6 @@ h0_corner_figure = plot_corner(
     fiducials=fiducials,
     colors=[CATEGORY["modified_propagation"]],
 )
-h0_corner_figure
 
 # %% [markdown]
 # ## Save figures
