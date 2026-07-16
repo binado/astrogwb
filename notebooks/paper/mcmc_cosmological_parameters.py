@@ -47,6 +47,12 @@ from matplotlib.lines import Line2D
 from matplotlib.projections import register_projection
 from pluscross import load_catalog
 
+from _paper_style import (
+    CORNER_LEVELS,
+    combo_colors,
+    get_corner_kwargs,
+    use_paper_style,
+)
 from astrogwb.config.loading import load_mapping
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.gwb import frequency_mask as make_frequency_mask
@@ -138,29 +144,6 @@ DEFAULT_PRIOR_LABELS = [
 H0_LABEL = r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
 LOCAL_MERGER_RATE_LABEL = r"$\mathcal{R}_0\,[\mathrm{Gpc^{-3}\,yr^{-1}}]$"
 CORNER_VAR_NAMES = ("H0", "local_merger_rate")
-CORNER_LEVELS = (0.6827, 0.9545)
-
-PUBLICATION_RC = {
-    "text.usetex": True,
-    "font.family": "serif",
-    "mathtext.fontset": "cm",
-    "font.size": 14,
-    "axes.labelsize": "medium",
-    "axes.unicode_minus": False,
-    "axes.titlesize": "medium",
-    "figure.labelsize": "medium",
-    "figure.titlesize": "medium",
-    "legend.fontsize": "small",
-    "legend.title_fontsize": "small",
-    "xtick.labelsize": "small",
-    "ytick.labelsize": "small",
-    "xtick.direction": "in",
-    "xtick.minor.visible": True,
-    "xtick.top": True,
-    "ytick.direction": "in",
-    "ytick.minor.visible": True,
-    "ytick.right": True,
-}
 
 
 # %% [markdown]
@@ -410,19 +393,17 @@ def plot_h0_merger_rate_corner(
             range=plot_range,
             color=color,
             fig=fig,
-            plot_datapoints=False,
-            plot_density=False,
-            fill_contours=False,
-            levels=list(CORNER_LEVELS),
             hist_kwargs={
-                "density": True,
                 "linestyle": linestyle,
                 "linewidth": 1.5,
             },
             contour_kwargs={"linestyles": linestyle, "linewidths": 1.5},
             truths=truths if index == 0 else None,
-            truth_color="C3",
-            max_n_ticks=4,
+            **get_corner_kwargs(
+                plot_datapoints=False,
+                plot_density=False,
+                fill_contours=False,
+            ),
         )
 
     if fig is None:  # pragma: no cover - guarded by validation
@@ -545,7 +526,7 @@ def build_snr_h0_constraint_table(
     *,
     h0_fiducial: float,
     group: str = "posterior",
-    probability: float = 0.6827,
+    probability: float = CORNER_LEVELS[0],
 ) -> pd.DataFrame:
     """Combine SNR scaling and sampled H0 HDI constraints by network."""
     validate_inference_data(
@@ -711,32 +692,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def _entry_styles(
-    entries: Sequence[Mapping[str, Any]],
-    count: int,
-) -> tuple[list[str], list[str]]:
-    colors = [
-        str(entry.get("color", f"C{index}")) for index, entry in enumerate(entries)
-    ]
-    linestyles = [str(entry.get("linestyle", "-")) for entry in entries]
-    if len(colors) < count:
-        colors.extend(f"C{index}" for index in range(len(colors), count))
-        linestyles.extend("-" for _ in range(len(linestyles), count))
-    return colors[:count], linestyles[:count]
-
-
-def _detector_styles(
-    entries: Sequence[Mapping[str, Any]],
-    network_names: Sequence[str],
-) -> tuple[list[str], list[str]]:
-    by_network = {str(entry["network"]): entry for entry in entries}
-    ordered_entries = [
-        by_network.get(name, {"color": f"C{index}", "linestyle": "-"})
-        for index, name in enumerate(network_names)
-    ]
-    return _entry_styles(ordered_entries, len(network_names))
-
-
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = repo_root()
@@ -782,16 +737,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             prior_data, args.prior_labels, group=args.group
         )
 
-        detector_colors, detector_linestyles = _detector_styles(
-            figure_config["detector_posteriors"], list(networks)
-        )
-        prior_colors, prior_linestyles = _entry_styles(
-            figure_config["prior_posteriors"], len(prior_data)
-        )
+        detector_colors = combo_colors(len(networks))
+        detector_linestyles = ["-"] * len(networks)
+        prior_colors = combo_colors(len(prior_data))
+        prior_linestyles = ["-"] * len(prior_data)
         corner_colors = [prior_colors[index] for index in corner_indices]
         corner_linestyles = [prior_linestyles[index] for index in corner_indices]
 
-        plt.rcParams.update(**PUBLICATION_RC)
+        use_paper_style()
         detector_figure = plot_h0_posteriors(
             detector_data,
             args.detector_labels,

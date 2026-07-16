@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -19,6 +20,8 @@ NOTEBOOK_PATH = REPO_ROOT / "notebooks/paper/mcmc_cosmological_parameters.py"
 
 @pytest.fixture(scope="module")
 def cosmology_notebook() -> ModuleType:
+    if str(NOTEBOOK_PATH.parent) not in sys.path:
+        sys.path.insert(0, str(NOTEBOOK_PATH.parent))
     spec = importlib.util.spec_from_file_location(
         "mcmc_cosmological_parameters", NOTEBOOK_PATH
     )

@@ -63,53 +63,35 @@ frameon = false
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-triangular"
 label = 'ET-$\Delta$'
-color = "tab:blue"
-linestyle = "-"
 
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-triangular-CE-Hanford"
 label = 'ET-$\Delta +$ CE'
-color = "tab:blue"
-linestyle = "--"
 
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-aligned"
 label = "ET-2L"
-color = "tab:orange"
-linestyle = "-"
 
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-aligned-CE-Hanford"
 label = 'ET-2L $+$ CE'
-color = "tab:orange"
-linestyle = "--"
 
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-misaligned"
 label = 'ET-2L-$\alpha$'
-color = "tab:green"
-linestyle = "-"
 
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-misaligned-CE-Hanford"
 label = 'ET-2L-$\alpha +$ CE'
-color = "tab:green"
-linestyle = "--"
 
 [[figures.mcmc_cosmological_parameters.prior_posteriors]]
 analysis = "H0"
 label = '$H_0$ (fixed $\mathcal{R}_0$)'
-color = "black"
-linestyle = "-"
 
 [[figures.mcmc_cosmological_parameters.prior_posteriors]]
 analysis = "H0-merger-rate-gauss"
 label = '$H_0 + \mathcal{R}_0$ (narrow prior)'
-color = "tab:blue"
-linestyle = "--"
 
 [[figures.mcmc_cosmological_parameters.prior_posteriors]]
 analysis = "H0-merger-rate"
 label = '$H_0 + \mathcal{R}_0$ (broad prior)'
-color = "tab:orange"
-linestyle = "-"
