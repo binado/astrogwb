@@ -53,6 +53,14 @@ from matplotlib.axes import Axes as MplAxes
 from matplotlib.lines import Line2D
 from matplotlib.projections import register_projection
 
+from _paper_style import (
+    CATEGORY,
+    CORNER_LEVELS,
+    TRUTH,
+    combo_colors,
+    get_corner_kwargs,
+    use_paper_style,
+)
 from astrogwb.utils import repo_root
 
 # gwpy (via gwmock-signal) replaces matplotlib's rectilinear axes. ArviZ can then
@@ -94,7 +102,6 @@ VAR_LABELS = {
 # Variable groups for each corner plot.
 XI_N_VAR_NAMES = ("xi_0", "xi_n")
 H0_VAR_NAMES = ("xi_0", "H0")
-CORNER_LEVELS = (0.6827, 0.9545)
 
 # Labels for the three-chain marginal overlay, in chain order.
 DEFAULT_MARGINAL_LABELS = [
@@ -106,29 +113,6 @@ DEFAULT_MARGINAL_LABELS = [
 DEFAULT_H0_LABELS = [
     r"$\Xi_0 + H_0$",
 ]
-
-PUBLICATION_RC = {
-    "text.usetex": True,
-    "font.family": "serif",
-    "mathtext.fontset": "cm",
-    "font.size": 14,
-    "axes.labelsize": "medium",
-    "axes.unicode_minus": False,
-    "axes.titlesize": "medium",
-    "figure.labelsize": "medium",
-    "figure.titlesize": "medium",
-    "legend.fontsize": "small",
-    "legend.title_fontsize": "small",
-    "xtick.labelsize": "small",
-    "ytick.labelsize": "small",
-    "xtick.direction": "in",
-    "xtick.minor.visible": True,
-    "xtick.top": True,
-    "ytick.direction": "in",
-    "ytick.minor.visible": True,
-    "ytick.right": True,
-}
-
 
 # %% [markdown]
 # ## Input and validation helpers
@@ -274,6 +258,7 @@ def plot_corner(
     linestyles: Sequence[str] | None = None,
     group: str = "posterior",
     fiducials: Mapping[str, float] | None = None,
+    truth_color: str = str(TRUTH["color"]),
     legend_kwargs: Mapping[str, Any] | None = None,
 ) -> plt.Figure:
     """Overlay one or more corner posteriors over the same `var_names`."""
@@ -304,10 +289,6 @@ def plot_corner(
             range=plot_range,
             color=color,
             fig=fig,
-            plot_datapoints=False,
-            plot_density=False,
-            fill_contours=False,
-            levels=list(CORNER_LEVELS),
             hist_kwargs={
                 "density": True,
                 "linestyle": linestyle,
@@ -315,8 +296,7 @@ def plot_corner(
             },
             contour_kwargs={"linestyles": linestyle, "linewidths": 1.5},
             truths=truths if index == 0 else None,
-            truth_color="C3",
-            max_n_ticks=4,
+            **get_corner_kwargs(truth_color=truth_color),
         )
 
     if fig is None:  # pragma: no cover - guarded by validation
@@ -440,7 +420,7 @@ fiducials = {
     "H0": args.h0,
 }
 
-plt.rcParams.update(**PUBLICATION_RC)
+use_paper_style()
 
 # %% [markdown]
 # ## Figure (i): $\Xi_0$--$n$ corner
@@ -455,6 +435,7 @@ xi_n_corner_figure = plot_corner(
     XI_N_VAR_NAMES,
     group=args.group,
     fiducials=fiducials,
+    colors=[CATEGORY["modified_propagation"]],
 )
 xi_n_corner_figure
 
@@ -471,6 +452,7 @@ xi0_marginal_figure = plot_marginal_posteriors(
     args.marginal_labels,
     var_name="xi_0",
     group=args.group,
+    colors=combo_colors(len(inference_data)),
 )
 xi0_marginal_figure
 
@@ -498,6 +480,7 @@ h0_corner_figure = plot_corner(
     H0_VAR_NAMES,
     group=args.group,
     fiducials=fiducials,
+    colors=[CATEGORY["modified_propagation"]],
 )
 h0_corner_figure
 
