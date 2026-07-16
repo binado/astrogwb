@@ -56,6 +56,7 @@ def get_corner_kwargs(**overrides: object) -> dict[str, object]:
         "plot_datapoints": True,
         "plot_density": True,
         "fill_contours": True,
+        "smooth1d": 1.0,
         "levels": CORNER_LEVELS,
         "truth_color": str(TRUTH["color"]),
         "max_n_ticks": 4,
