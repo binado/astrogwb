@@ -104,6 +104,24 @@ def test_select_corner_inference_data_requires_exactly_two_joint_chains(
         )
 
 
+def test_detector_network_styles_pair_et_with_ce(
+    cosmology_notebook: ModuleType,
+) -> None:
+    networks = {
+        "ET-triangular": ("E1", "E2", "E3"),
+        "ET-triangular-CE-Hanford": ("E1", "E2", "E3", "C1"),
+        "ET-2L-aligned": ("S1", "R1"),
+        "ET-2L-aligned-CE-Hanford": ("S1", "R1", "C1"),
+    }
+
+    colors, linestyles = cosmology_notebook.detector_network_styles(networks)
+
+    assert colors[0] == colors[1]
+    assert colors[2] == colors[3]
+    assert colors[0] != colors[2]
+    assert linestyles == ["-", "--", "-", "--"]
+
+
 def test_posterior_and_corner_plot_helpers_accept_loaded_data(
     cosmology_notebook: ModuleType,
 ) -> None:

@@ -297,6 +297,29 @@ def _validate_styles(
     return resolved_colors, resolved_linestyles
 
 
+def _base_network_name(name: str) -> str:
+    """Map an ET+CE network name onto its ET-only counterpart."""
+    suffix = "-CE-Hanford"
+    return name[: -len(suffix)] if name.endswith(suffix) else name
+
+
+def detector_network_styles(
+    networks: Mapping[str, tuple[str, ...]],
+) -> tuple[list[str], list[str]]:
+    """Shared color per ET / ET+CE pair; dashed linestyle for CE companions."""
+    names = list(networks)
+    bases: list[str] = []
+    for name in names:
+        base = _base_network_name(name)
+        if base not in bases:
+            bases.append(base)
+    palette = combo_colors(len(bases))
+    color_by_base = dict(zip(bases, palette, strict=True))
+    colors = [color_by_base[_base_network_name(name)] for name in names]
+    linestyles = ["--" if name.endswith("-CE-Hanford") else "-" for name in names]
+    return colors, linestyles
+
+
 # %% [markdown]
 # ## Posterior plotting helpers
 
@@ -782,8 +805,7 @@ broad_labels = [corner_labels[1]]
 prior_density_data = [prior_data[0], prior_data[1]]
 prior_density_labels = [args.prior_labels[0], args.prior_labels[1]]
 
-detector_colors = combo_colors(len(networks))
-detector_linestyles = ["-"] * len(networks)
+detector_colors, detector_linestyles = detector_network_styles(networks)
 prior_density_colors = combo_colors(len(prior_density_data))
 prior_density_linestyles = ["-"] * len(prior_density_data)
 prior_colors = combo_colors(len(prior_data))
