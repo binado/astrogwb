@@ -43,6 +43,7 @@ def _inference_tree(
     *,
     include_h0: bool = True,
     include_local_merger_rate: bool = False,
+    include_omega_m: bool = False,
     seed: int = 0,
 ) -> xr.DataTree:
     rng = np.random.default_rng(seed)
@@ -54,6 +55,8 @@ def _inference_tree(
             ("chain", "draw"),
             rng.normal(161.0, 3.0, (2, 200)),
         )
+    if include_omega_m:
+        variables["Omega_m"] = (("chain", "draw"), rng.normal(0.31, 0.02, (2, 200)))
     posterior = xr.Dataset(
         variables,
         coords={"chain": np.arange(2), "draw": np.arange(200)},
@@ -127,28 +130,40 @@ def test_posterior_and_corner_plot_helpers_accept_loaded_data(
 ) -> None:
     narrow = _inference_tree(include_local_merger_rate=True, seed=4)
     broad = _inference_tree(include_local_merger_rate=True, seed=5)
-    fiducials = {"H0": 67.66, "local_merger_rate": 161.0}
+    omega_m = _inference_tree(include_omega_m=True, seed=6)
+    merger_rate_fiducials = {"H0": 67.66, "local_merger_rate": 161.0}
+    omega_m_fiducials = {"H0": 67.66, "Omega_m": 0.3096}
 
     posterior_figure = cosmology_notebook.plot_h0_posteriors(
         [narrow, broad], ["narrow", "broad"]
     )
-    narrow_corner_figure = cosmology_notebook.plot_h0_merger_rate_corner(
+    narrow_corner_figure = cosmology_notebook.plot_corner(
         [narrow],
         ["narrow"],
-        fiducials=fiducials,
+        cosmology_notebook.MERGER_RATE_VAR_NAMES,
+        fiducials=merger_rate_fiducials,
     )
-    broad_corner_figure = cosmology_notebook.plot_h0_merger_rate_corner(
+    broad_corner_figure = cosmology_notebook.plot_corner(
         [broad],
         ["broad"],
-        fiducials=fiducials,
+        cosmology_notebook.MERGER_RATE_VAR_NAMES,
+        fiducials=merger_rate_fiducials,
+    )
+    omega_m_corner_figure = cosmology_notebook.plot_corner(
+        [omega_m],
+        [r"$H_0 + \Omega_m$"],
+        cosmology_notebook.OMEGA_M_VAR_NAMES,
+        fiducials=omega_m_fiducials,
     )
 
     assert len(posterior_figure.axes[0].lines) == 2
     assert len(narrow_corner_figure.axes) == 4
     assert len(broad_corner_figure.axes) == 4
+    assert len(omega_m_corner_figure.axes) == 4
     plt.close(posterior_figure)
     plt.close(narrow_corner_figure)
     plt.close(broad_corner_figure)
+    plt.close(omega_m_corner_figure)
 
 
 def test_build_snr_h0_constraint_table(

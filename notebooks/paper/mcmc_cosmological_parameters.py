@@ -19,8 +19,8 @@
 # workflow. It evaluates the fiducial SGWB once, computes the matched-filter SNR
 # for each detector network, and compares those estimates with sampled $H_0$
 # posteriors. It also compares fixed and narrow priors on the local merger
-# rate $\mathcal{R}_0$, and shows separate joint $H_0$--$\mathcal{R}_0$ corners
-# for the narrow and broad merger-rate priors.
+# rate $\mathcal{R}_0$, shows separate joint $H_0$--$\mathcal{R}_0$ corners
+# for the narrow and broad merger-rate priors, and an $H_0$--$\Omega_m$ corner.
 #
 # Chain paths and labels are separate inputs. This keeps chain loading outside the
 # plotting helpers and makes it possible to select different inference runs without
@@ -49,6 +49,7 @@ from matplotlib.projections import register_projection
 from pluscross import load_catalog
 
 from _paper_style import (
+    CATEGORY,
     CORNER_LEVELS,
     combo_colors,
     get_corner_kwargs,
@@ -159,9 +160,24 @@ DEFAULT_PRIOR_LABELS = [
     r"$H_0 + \mathcal{R}_0$ (broad prior)",
 ]
 
+DEFAULT_OMEGA_M_CHAIN = Path(
+    "chains/bns-n16384-df1/cosmology-all-detectors/"
+    "ET-2L-aligned-CE-Hanford__H0-Omega_m__baseline.nc"
+)
+DEFAULT_OMEGA_M_LABEL = r"$H_0 + \Omega_m$"
+
 H0_LABEL = r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
 LOCAL_MERGER_RATE_LABEL = r"$\mathcal{R}_0\,[\mathrm{Gpc^{-3}\,yr^{-1}}]$"
-CORNER_VAR_NAMES = ("H0", "local_merger_rate")
+OMEGA_M_LABEL = r"$\Omega_m$"
+VAR_LABELS = {
+    "H0": H0_LABEL,
+    "local_merger_rate": LOCAL_MERGER_RATE_LABEL,
+    "Omega_m": OMEGA_M_LABEL,
+}
+MERGER_RATE_VAR_NAMES = ("H0", "local_merger_rate")
+OMEGA_M_VAR_NAMES = ("H0", "Omega_m")
+# Kept for select_corner_inference_data / older call sites.
+CORNER_VAR_NAMES = MERGER_RATE_VAR_NAMES
 
 
 # %% [markdown]
@@ -373,12 +389,13 @@ def plot_h0_posteriors(
 
 def _pooled_corner_range(
     inference_data: Sequence[xr.DataTree],
+    var_names: Sequence[str],
     *,
     group: str,
     padding_fraction: float = 0.02,
 ) -> list[tuple[float, float]]:
     ranges: list[tuple[float, float]] = []
-    for name in CORNER_VAR_NAMES:
+    for name in var_names:
         values = np.concatenate(
             [np.asarray(tree[group][name]).reshape(-1) for tree in inference_data]
         )
@@ -390,9 +407,10 @@ def _pooled_corner_range(
     return ranges
 
 
-def plot_h0_merger_rate_corner(
+def plot_corner(
     inference_data: Sequence[xr.DataTree],
     labels: Sequence[str],
+    var_names: Sequence[str],
     *,
     colors: Sequence[str] | None = None,
     linestyles: Sequence[str] | None = None,
@@ -400,35 +418,33 @@ def plot_h0_merger_rate_corner(
     fiducials: Mapping[str, float] | None = None,
     legend_kwargs: Mapping[str, Any] | None = None,
 ) -> plt.Figure:
-    """Overlay one or more H0--local-merger-rate corner posteriors."""
+    """Overlay one or more corner posteriors over the same `var_names`."""
+    var_names = tuple(var_names)
     validate_inference_data(
         inference_data,
         labels,
-        required_vars=CORNER_VAR_NAMES,
+        required_vars=var_names,
         group=group,
     )
     resolved_colors, resolved_linestyles = _validate_styles(
         len(inference_data), colors, linestyles
     )
     labeller = MapLabeller(
-        var_name_map={
-            "H0": H0_LABEL,
-            "local_merger_rate": LOCAL_MERGER_RATE_LABEL,
-        }
+        var_name_map={name: VAR_LABELS.get(name, name) for name in var_names}
     )
     truths = None
     if fiducials is not None:
-        truths = {name: fiducials[name] for name in CORNER_VAR_NAMES}
+        truths = {name: fiducials[name] for name in var_names}
 
     fig: plt.Figure | None = None
-    plot_range = _pooled_corner_range(inference_data, group=group)
+    plot_range = _pooled_corner_range(inference_data, var_names, group=group)
     for index, (tree, color, linestyle) in enumerate(
         zip(inference_data, resolved_colors, resolved_linestyles, strict=True)
     ):
         fig = corner.corner(
             tree,
             group=group,
-            var_names=list(CORNER_VAR_NAMES),
+            var_names=list(var_names),
             labeller=labeller,
             range=plot_range,
             color=color,
@@ -463,6 +479,29 @@ def plot_h0_merger_rate_corner(
         fig.legend(handles=handles, **resolved_legend_kwargs)
     fig.tight_layout()
     return fig
+
+
+def plot_h0_merger_rate_corner(
+    inference_data: Sequence[xr.DataTree],
+    labels: Sequence[str],
+    *,
+    colors: Sequence[str] | None = None,
+    linestyles: Sequence[str] | None = None,
+    group: str = "posterior",
+    fiducials: Mapping[str, float] | None = None,
+    legend_kwargs: Mapping[str, Any] | None = None,
+) -> plt.Figure:
+    """Overlay one or more H0--local-merger-rate corner posteriors."""
+    return plot_corner(
+        inference_data,
+        labels,
+        MERGER_RATE_VAR_NAMES,
+        colors=colors,
+        linestyles=linestyles,
+        group=group,
+        fiducials=fiducials,
+        legend_kwargs=legend_kwargs,
+    )
 
 
 # %% [markdown]
@@ -672,6 +711,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--prior-chains", type=Path, nargs="+", default=DEFAULT_PRIOR_CHAINS
     )
     parser.add_argument("--prior-labels", nargs="+", default=DEFAULT_PRIOR_LABELS)
+    parser.add_argument("--omega-m-chain", type=Path, default=DEFAULT_OMEGA_M_CHAIN)
+    parser.add_argument("--omega-m-label", default=DEFAULT_OMEGA_M_LABEL)
     parser.add_argument(
         "--output-detector-pdf",
         type=Path,
@@ -695,6 +736,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=Path(
             "figures/mcmc_cosmological_parameters_H0_merger_rate_broad_corner.pdf"
         ),
+    )
+    parser.add_argument(
+        "--output-omega-m-corner-pdf",
+        type=Path,
+        default=Path("figures/mcmc_cosmological_parameters_H0_Omega_m_corner.pdf"),
     )
     parser.add_argument(
         "--output-csv",
@@ -777,8 +823,11 @@ if len(args.prior_chains) != 3:
 
 detector_paths = [_resolve_path(path, root) for path in args.detector_chains]
 prior_paths = [_resolve_path(path, root) for path in args.prior_chains]
+omega_m_path = _resolve_path(args.omega_m_chain, root)
 detector_data = [load_inference_data(path) for path in detector_paths]
 prior_data = [load_inference_data(path) for path in prior_paths]
+omega_m_data = [load_inference_data(omega_m_path)]
+omega_m_labels = [args.omega_m_label]
 
 validate_inference_data(
     detector_data,
@@ -791,6 +840,13 @@ validate_inference_data(
     args.prior_labels,
     group=args.group,
     expected_count=3,
+)
+validate_inference_data(
+    omega_m_data,
+    omega_m_labels,
+    required_vars=OMEGA_M_VAR_NAMES,
+    group=args.group,
+    expected_count=1,
 )
 corner_data, corner_labels, corner_indices = select_corner_inference_data(
     prior_data, args.prior_labels, group=args.group
@@ -867,9 +923,10 @@ prior_figure = plot_h0_posteriors(
 # Joint constraint when the local merger rate carries a narrow Gaussian prior.
 
 # %%
-narrow_corner_figure = plot_h0_merger_rate_corner(
+narrow_corner_figure = plot_corner(
     narrow_data,
     narrow_labels,
+    MERGER_RATE_VAR_NAMES,
     colors=[corner_colors[0]],
     linestyles=[corner_linestyles[0]],
     group=args.group,
@@ -884,11 +941,28 @@ narrow_corner_figure = plot_h0_merger_rate_corner(
 # enough that a shared axis range is unhelpful.
 
 # %%
-broad_corner_figure = plot_h0_merger_rate_corner(
+broad_corner_figure = plot_corner(
     broad_data,
     broad_labels,
+    MERGER_RATE_VAR_NAMES,
     colors=[corner_colors[1]],
     linestyles=[corner_linestyles[1]],
+    group=args.group,
+    fiducials=fiducials,
+)
+
+# %% [markdown]
+# ## Figure (v): $H_0$--$\Omega_m$ corner
+#
+# Joint constraint when both the Hubble constant and the matter density
+# parameter are sampled together.
+
+# %%
+omega_m_corner_figure = plot_corner(
+    omega_m_data,
+    omega_m_labels,
+    OMEGA_M_VAR_NAMES,
+    colors=[CATEGORY["cosmology"]],
     group=args.group,
     fiducials=fiducials,
 )
@@ -941,6 +1015,7 @@ outputs = {
     _resolve_path(args.output_prior_pdf, root): prior_figure,
     _resolve_path(args.output_narrow_corner_pdf, root): narrow_corner_figure,
     _resolve_path(args.output_broad_corner_pdf, root): broad_corner_figure,
+    _resolve_path(args.output_omega_m_corner_pdf, root): omega_m_corner_figure,
 }
 for output_path, figure in outputs.items():
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -953,5 +1028,5 @@ write_constraint_table(constraint_table, csv_path, tex_path)
 print("saved constraint table:", csv_path)
 print("saved LaTeX table:", tex_path)
 
-for tree in [*detector_data, *prior_data]:
+for tree in [*detector_data, *prior_data, *omega_m_data]:
     tree.close()

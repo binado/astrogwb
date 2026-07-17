@@ -36,6 +36,7 @@ local_merger_rate = 161.0
 campaign = "cosmology-all-detectors"
 detector_analysis = "H0"
 prior_network = "ET-2L-aligned-CE-Hanford"
+omega_m_analysis = "H0-Omega_m"
 
 [figures.mcmc_cosmological_parameters.detector_ax_kwargs]
 xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'

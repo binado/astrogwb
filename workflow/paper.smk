@@ -32,6 +32,7 @@ COSMOLOGY_DETECTOR_PDF = COSMOLOGY_OUTPUTS["output_detector_pdf"]
 COSMOLOGY_PRIOR_PDF = COSMOLOGY_OUTPUTS["output_prior_pdf"]
 COSMOLOGY_NARROW_CORNER_PDF = COSMOLOGY_OUTPUTS["output_narrow_corner_pdf"]
 COSMOLOGY_BROAD_CORNER_PDF = COSMOLOGY_OUTPUTS["output_broad_corner_pdf"]
+COSMOLOGY_OMEGA_M_CORNER_PDF = COSMOLOGY_OUTPUTS["output_omega_m_corner_pdf"]
 COSMOLOGY_CSV = COSMOLOGY_OUTPUTS["output_csv"]
 COSMOLOGY_TEX = COSMOLOGY_OUTPUTS["output_tex"]
 COSMOLOGY_FIGURE = PAPER_CONFIG["figures"]["mcmc_cosmological_parameters"]
@@ -50,6 +51,12 @@ PRIOR_CHAINS = [
     for entry in PRIOR_POSTERIORS
 ]
 PRIOR_LABELS = [entry["label"] for entry in PRIOR_POSTERIORS]
+OMEGA_M_CHAIN = (
+    f"{CHAINS_DIR}/{CATALOG_ID}/{COSMOLOGY_CAMPAIGN}/"
+    f"{COSMOLOGY_FIGURE['prior_network']}__"
+    f"{COSMOLOGY_FIGURE['omega_m_analysis']}__baseline.nc"
+)
+OMEGA_M_LABEL = r"$H_0 + \Omega_m$"
 
 
 localrules:
@@ -65,6 +72,7 @@ rule paper_figures:
         COSMOLOGY_PRIOR_PDF,
         COSMOLOGY_NARROW_CORNER_PDF,
         COSMOLOGY_BROAD_CORNER_PDF,
+        COSMOLOGY_OMEGA_M_CORNER_PDF,
         COSMOLOGY_CSV,
         COSMOLOGY_TEX,
 
@@ -96,11 +104,13 @@ rule mcmc_cosmological_parameters:
         config=str(PAPER_CONFIG_PATH),
         detector_chains=DETECTOR_CHAINS,
         prior_chains=PRIOR_CHAINS,
+        omega_m_chain=OMEGA_M_CHAIN,
     output:
         detector_pdf=COSMOLOGY_DETECTOR_PDF,
         prior_pdf=COSMOLOGY_PRIOR_PDF,
         narrow_corner_pdf=COSMOLOGY_NARROW_CORNER_PDF,
         broad_corner_pdf=COSMOLOGY_BROAD_CORNER_PDF,
+        omega_m_corner_pdf=COSMOLOGY_OMEGA_M_CORNER_PDF,
         csv=COSMOLOGY_CSV,
         tex=COSMOLOGY_TEX,
     params:
@@ -120,8 +130,9 @@ rule mcmc_cosmological_parameters:
         local_merger_rate=PAPER_FIDUCIALS["local_merger_rate"],
         network_args=PAPER_NETWORK_ARGS,
         network_names=PAPER_NETWORK_NAMES,
-        detector_labels=DETECTOR_LABELS,
-        prior_labels=PRIOR_LABELS,
+        detector_labels=lambda wildcards: DETECTOR_LABELS,
+        prior_labels=lambda wildcards: PRIOR_LABELS,
+        omega_m_label=lambda wildcards: OMEGA_M_LABEL,
     shell:
         "uv run --extra mcmc --group plotting"
         " python notebooks/paper/mcmc_cosmological_parameters.py"
@@ -131,6 +142,8 @@ rule mcmc_cosmological_parameters:
         " --detector-labels {params.detector_labels:q}"
         " --prior-chains {input.prior_chains:q}"
         " --prior-labels {params.prior_labels:q}"
+        " --omega-m-chain {input.omega_m_chain:q}"
+        " --omega-m-label {params.omega_m_label:q}"
         " --observation-time {params.observation_time}"
         " --f-min {params.f_min}"
         " --f-max {params.f_max}"
@@ -151,5 +164,6 @@ rule mcmc_cosmological_parameters:
         " --output-prior-pdf {output.prior_pdf:q}"
         " --output-narrow-corner-pdf {output.narrow_corner_pdf:q}"
         " --output-broad-corner-pdf {output.broad_corner_pdf:q}"
+        " --output-omega-m-corner-pdf {output.omega_m_corner_pdf:q}"
         " --output-csv {output.csv:q}"
         " --output-tex {output.tex:q}"

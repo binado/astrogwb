@@ -26,7 +26,8 @@ config path, selected catalog, and declared output paths. It translates
 `paper.toml` into explicit analysis, cosmology, fiducial, detector-network, chain,
 label, and styling inputs. The unified cosmology rule produces two marginalized
 $H_0$ comparisons, separate $H_0$--$\mathcal{R}_0$ corner plots for the narrow
-and broad merger-rate priors, and a CSV/LaTeX SNR-and-constraint table.
+and broad merger-rate priors, an $H_0$--$\Omega_m$ corner plot, and a CSV/LaTeX
+SNR-and-constraint table.
 
 Preview the declared workflow:
 
