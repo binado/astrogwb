@@ -18,8 +18,8 @@
 # This notebook assembles the cosmology figures and table used by the paper
 # workflow. It evaluates the fiducial SGWB once, computes the matched-filter SNR
 # for each detector network, and compares those estimates with sampled $H_0$
-# posteriors. It also compares fixed, narrow, and broad priors on the local merger
-# rate $\mathcal{R}_0$, including separate joint $H_0$--$\mathcal{R}_0$ corners
+# posteriors. It also compares fixed and narrow priors on the local merger
+# rate $\mathcal{R}_0$, and shows separate joint $H_0$--$\mathcal{R}_0$ corners
 # for the narrow and broad merger-rate priors.
 #
 # Chain paths and labels are separate inputs. This keeps chain loading outside the
@@ -777,8 +777,15 @@ narrow_labels = [corner_labels[0]]
 broad_data = [corner_data[1]]
 broad_labels = [corner_labels[1]]
 
+# Density overlay excludes the broad prior: its H0 mass is too diffuse to
+# compare usefully with the fixed and narrow-prior posteriors.
+prior_density_data = [prior_data[0], prior_data[1]]
+prior_density_labels = [args.prior_labels[0], args.prior_labels[1]]
+
 detector_colors = combo_colors(len(networks))
 detector_linestyles = ["-"] * len(networks)
+prior_density_colors = combo_colors(len(prior_density_data))
+prior_density_linestyles = ["-"] * len(prior_density_data)
 prior_colors = combo_colors(len(prior_data))
 prior_linestyles = ["-"] * len(prior_data)
 corner_colors = [prior_colors[index] for index in corner_indices]
@@ -817,15 +824,16 @@ detector_figure = plot_h0_posteriors(
 # %% [markdown]
 # ## Figure (ii): $H_0$ prior comparison
 #
-# Compares fixed, narrow, and broad priors on the local merger rate
-# $\mathcal{R}_0$ for a single network.
+# Compares fixed and narrow priors on the local merger rate $\mathcal{R}_0$
+# for a single network. The broad-prior posterior is omitted here and shown
+# only in its own corner plot below.
 
 # %%
 prior_figure = plot_h0_posteriors(
-    prior_data,
-    args.prior_labels,
-    colors=prior_colors,
-    linestyles=prior_linestyles,
+    prior_density_data,
+    prior_density_labels,
+    colors=prior_density_colors,
+    linestyles=prior_density_linestyles,
     group=args.group,
     ax_kwargs=figure_config.get("prior_ax_kwargs"),
     legend_kwargs=figure_config.get("prior_legend_kwargs"),
