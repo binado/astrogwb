@@ -2,13 +2,13 @@
 
 The analysis notebooks
 [`amplitude_toy_model.py`](../notebooks/amplitude_toy_model.py) and
-[`snr_by_detector.py`](../notebooks/snr_by_detector.py) are self-contained: their
-configuration cells hold editable scientific defaults, and every consumed setting
-can be overridden with a command-line flag. They can therefore run directly in
-Jupyter or from the shell without Snakemake or a configuration file.
-The structured posterior plotting notebook
-[`mcmc_compare_posteriors.py`](../notebooks/mcmc_compare_posteriors.py) is
-config-driven instead.
+[`mcmc_cosmological_parameters.py`](../notebooks/paper/mcmc_cosmological_parameters.py)
+hold editable scientific defaults and expose command-line overrides for scientific
+inputs, paths, and labels. They can therefore run directly in Jupyter or from the shell.
+The cosmology notebook reads paper plot styling from `configs/paper.toml`;
+its two ordered chain groups and their labels can be replaced independently with
+`--detector-chains`/`--detector-labels` and
+`--prior-chains`/`--prior-labels`.
 
 For reproducible paper builds, scientific and presentation settings (fiducials,
 detector networks, nested posterior plot entries) live in
@@ -22,11 +22,12 @@ notebook. Edit them in Jupyter or override them with CLI flags headless. Keep th
 analysis-notebook defaults aligned with `paper.toml` when promoting paper values.
 
 Snakemake reads [`configs/workflow.yaml`](../configs/workflow.yaml) for the paper
-config path, selected catalog, and declared output paths. For the self-contained
-analysis notebooks it translates `paper.toml` into explicit analysis, cosmology,
-fiducial, path, and detector-network arguments.
-[`mcmc_compare_posteriors.py`](../notebooks/mcmc_compare_posteriors.py) receives
-`--config` plus concrete chain inputs.
+config path, selected catalog, and declared output paths. It translates
+`paper.toml` into explicit analysis, cosmology, fiducial, detector-network, chain,
+label, and styling inputs. The unified cosmology rule produces two marginalized
+$H_0$ comparisons, separate $H_0$--$\mathcal{R}_0$ corner plots for the narrow
+and broad merger-rate priors, an $H_0$--$\Omega_m$ corner plot, and a CSV/LaTeX
+SNR-and-constraint table.
 
 Preview the declared workflow:
 
@@ -44,7 +45,7 @@ Build one configured target:
 
 ```bash
 uv run snakemake --snakefile workflow/paper.smk --cores 1 \
-  figures/mcmc_compare_posteriors_H0.pdf
+  figures/mcmc_cosmological_parameters_H0_by_detector.pdf
 ```
 
 See [Snakemake workflow](./snakemake-workflow.md#paper-workflow) for a pipeline

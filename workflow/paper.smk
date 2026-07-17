@@ -27,33 +27,54 @@ CATALOG_PATH = (
 )
 CHAINS_DIR = PAPER_CONFIG["paths"]["chains_dir"]
 AMPLITUDE_TOY_PDF = config["amplitude_toy"]["output_pdf"]
-SNR_BY_DETECTOR_PDF = config["snr_by_detector"]["output_pdf"]
-SNR_BY_DETECTOR_CSV = config["snr_by_detector"]["output_csv"]
-SNR_BY_DETECTOR_TEX = config["snr_by_detector"]["output_tex"]
-SNR_BY_DETECTOR_SIGMAS_CSV = config["snr_by_detector"]["output_sigmas_csv"]
-SNR_BY_DETECTOR_SIGMAS_TEX = config["snr_by_detector"]["output_sigmas_tex"]
-POSTERIOR_PDF = config["mcmc_compare_posteriors"]["output_pdf"]
-POSTERIOR_CSV = config["mcmc_compare_posteriors"]["output_csv"]
-POSTERIOR_TEX = config["mcmc_compare_posteriors"]["output_tex"]
-POSTERIOR_FIGURE = PAPER_CONFIG["figures"]["mcmc_compare_posteriors"]
-POSTERIOR_CHAINS = [
-    f"{CHAINS_DIR}/{CATALOG_ID}/{POSTERIOR_FIGURE['campaign']}/{entry['run']}.nc"
-    for entry in POSTERIOR_FIGURE["posteriors"]
+COSMOLOGY_OUTPUTS = config["mcmc_cosmological_parameters"]
+COSMOLOGY_DETECTOR_PDF = COSMOLOGY_OUTPUTS["output_detector_pdf"]
+COSMOLOGY_PRIOR_PDF = COSMOLOGY_OUTPUTS["output_prior_pdf"]
+COSMOLOGY_NARROW_CORNER_PDF = COSMOLOGY_OUTPUTS["output_narrow_corner_pdf"]
+COSMOLOGY_BROAD_CORNER_PDF = COSMOLOGY_OUTPUTS["output_broad_corner_pdf"]
+COSMOLOGY_OMEGA_M_CORNER_PDF = COSMOLOGY_OUTPUTS["output_omega_m_corner_pdf"]
+COSMOLOGY_CSV = COSMOLOGY_OUTPUTS["output_csv"]
+COSMOLOGY_TEX = COSMOLOGY_OUTPUTS["output_tex"]
+COSMOLOGY_FIGURE = PAPER_CONFIG["figures"]["mcmc_cosmological_parameters"]
+COSMOLOGY_CAMPAIGN = COSMOLOGY_FIGURE["campaign"]
+DETECTOR_POSTERIORS = COSMOLOGY_FIGURE["detector_posteriors"]
+DETECTOR_CHAINS = [
+    f"{CHAINS_DIR}/{CATALOG_ID}/{COSMOLOGY_CAMPAIGN}/"
+    f"{entry['network']}__{COSMOLOGY_FIGURE['detector_analysis']}__baseline.nc"
+    for entry in DETECTOR_POSTERIORS
 ]
+DETECTOR_LABELS = [entry["label"] for entry in DETECTOR_POSTERIORS]
+PRIOR_POSTERIORS = COSMOLOGY_FIGURE["prior_posteriors"]
+PRIOR_CHAINS = [
+    f"{CHAINS_DIR}/{CATALOG_ID}/{COSMOLOGY_CAMPAIGN}/"
+    f"{COSMOLOGY_FIGURE['prior_network']}__{entry['analysis']}__baseline.nc"
+    for entry in PRIOR_POSTERIORS
+]
+PRIOR_LABELS = [entry["label"] for entry in PRIOR_POSTERIORS]
+OMEGA_M_CHAIN = (
+    f"{CHAINS_DIR}/{CATALOG_ID}/{COSMOLOGY_CAMPAIGN}/"
+    f"{COSMOLOGY_FIGURE['prior_network']}__"
+    f"{COSMOLOGY_FIGURE['omega_m_analysis']}__baseline.nc"
+)
+OMEGA_M_LABEL = r"$H_0 + \Omega_m$"
 
 
 localrules:
     paper_figures,
     amplitude_toy,
-    snr_by_detector,
-    mcmc_compare_posteriors,
+    mcmc_cosmological_parameters,
 
 
 rule paper_figures:
     input:
         AMPLITUDE_TOY_PDF,
-        SNR_BY_DETECTOR_PDF,
-        POSTERIOR_PDF,
+        COSMOLOGY_DETECTOR_PDF,
+        COSMOLOGY_PRIOR_PDF,
+        COSMOLOGY_NARROW_CORNER_PDF,
+        COSMOLOGY_BROAD_CORNER_PDF,
+        COSMOLOGY_OMEGA_M_CORNER_PDF,
+        COSMOLOGY_CSV,
+        COSMOLOGY_TEX,
 
 
 rule amplitude_toy:
@@ -77,16 +98,21 @@ rule amplitude_toy:
         " --output-pdf {output:q}"
 
 
-rule snr_by_detector:
+rule mcmc_cosmological_parameters:
     input:
         catalog=CATALOG_PATH,
         config=str(PAPER_CONFIG_PATH),
+        detector_chains=DETECTOR_CHAINS,
+        prior_chains=PRIOR_CHAINS,
+        omega_m_chain=OMEGA_M_CHAIN,
     output:
-        pdf=SNR_BY_DETECTOR_PDF,
-        csv=SNR_BY_DETECTOR_CSV,
-        tex=SNR_BY_DETECTOR_TEX,
-        sigmas_csv=SNR_BY_DETECTOR_SIGMAS_CSV,
-        sigmas_tex=SNR_BY_DETECTOR_SIGMAS_TEX,
+        detector_pdf=COSMOLOGY_DETECTOR_PDF,
+        prior_pdf=COSMOLOGY_PRIOR_PDF,
+        narrow_corner_pdf=COSMOLOGY_NARROW_CORNER_PDF,
+        broad_corner_pdf=COSMOLOGY_BROAD_CORNER_PDF,
+        omega_m_corner_pdf=COSMOLOGY_OMEGA_M_CORNER_PDF,
+        csv=COSMOLOGY_CSV,
+        tex=COSMOLOGY_TEX,
     params:
         observation_time=PAPER_ANALYSIS["observation_time"],
         f_min=PAPER_ANALYSIS["f_min"],
@@ -104,9 +130,20 @@ rule snr_by_detector:
         local_merger_rate=PAPER_FIDUCIALS["local_merger_rate"],
         network_args=PAPER_NETWORK_ARGS,
         network_names=PAPER_NETWORK_NAMES,
+        detector_labels=lambda wildcards: DETECTOR_LABELS,
+        prior_labels=lambda wildcards: PRIOR_LABELS,
+        omega_m_label=lambda wildcards: OMEGA_M_LABEL,
     shell:
-        "uv run python notebooks/snr_by_detector.py"
+        "uv run --extra mcmc --group plotting"
+        " python notebooks/paper/mcmc_cosmological_parameters.py"
+        " --config {input.config:q}"
         " --catalog {input.catalog:q}"
+        " --detector-chains {input.detector_chains:q}"
+        " --detector-labels {params.detector_labels:q}"
+        " --prior-chains {input.prior_chains:q}"
+        " --prior-labels {params.prior_labels:q}"
+        " --omega-m-chain {input.omega_m_chain:q}"
+        " --omega-m-label {params.omega_m_label:q}"
         " --observation-time {params.observation_time}"
         " --f-min {params.f_min}"
         " --f-max {params.f_max}"
@@ -123,27 +160,10 @@ rule snr_by_detector:
         " --local-merger-rate {params.local_merger_rate}"
         " {params.network_args:q}"
         " --networks {params.network_names:q}"
-        " --output-pdf {output.pdf:q}"
-        " --output-csv {output.csv:q}"
-        " --output-tex {output.tex:q}"
-        " --output-sigmas-csv {output.sigmas_csv:q}"
-        " --output-sigmas-tex {output.sigmas_tex:q}"
-
-
-rule mcmc_compare_posteriors:
-    input:
-        config=str(PAPER_CONFIG_PATH),
-        chains=POSTERIOR_CHAINS,
-        snr_csv=SNR_BY_DETECTOR_CSV,
-    output:
-        pdf=POSTERIOR_PDF,
-        csv=POSTERIOR_CSV,
-        tex=POSTERIOR_TEX,
-    shell:
-        "uv run --extra mcmc python notebooks/mcmc_compare_posteriors.py"
-        " --chains {input.chains:q}"
-        " --config {input.config:q}"
-        " --snr-csv {input.snr_csv:q}"
-        " --output-pdf {output.pdf:q}"
+        " --output-detector-pdf {output.detector_pdf:q}"
+        " --output-prior-pdf {output.prior_pdf:q}"
+        " --output-narrow-corner-pdf {output.narrow_corner_pdf:q}"
+        " --output-broad-corner-pdf {output.broad_corner_pdf:q}"
+        " --output-omega-m-corner-pdf {output.omega_m_corner_pdf:q}"
         " --output-csv {output.csv:q}"
         " --output-tex {output.tex:q}"

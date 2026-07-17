@@ -6,14 +6,11 @@ catalog:
 amplitude_toy:
   output_pdf: figures/amplitude_toy_fisher_overlay.pdf
 
-snr_by_detector:
-  output_pdf: figures/snr_by_detector.pdf
-  output_csv: figures/snr_by_detector.csv
-  output_tex: figures/snr_by_detector.tex
-  output_sigmas_csv: figures/snr_by_detector_sigmas.csv
-  output_sigmas_tex: figures/snr_by_detector_sigmas.tex
-
-mcmc_compare_posteriors:
-  output_pdf: figures/mcmc_compare_posteriors_H0.pdf
-  output_csv: figures/mcmc_compare_posteriors_H0.csv
-  output_tex: figures/mcmc_compare_posteriors_H0.tex
+mcmc_cosmological_parameters:
+  output_detector_pdf: figures/mcmc_cosmological_parameters_H0_by_detector.pdf
+  output_prior_pdf: figures/mcmc_cosmological_parameters_H0_merger_rate_priors.pdf
+  output_narrow_corner_pdf: figures/mcmc_cosmological_parameters_H0_merger_rate_narrow_corner.pdf
+  output_broad_corner_pdf: figures/mcmc_cosmological_parameters_H0_merger_rate_broad_corner.pdf
+  output_omega_m_corner_pdf: figures/mcmc_cosmological_parameters_H0_Omega_m_corner.pdf
+  output_csv: figures/mcmc_cosmological_parameters_H0_by_detector.csv
+  output_tex: figures/mcmc_cosmological_parameters_H0_by_detector.tex

@@ -30,60 +30,69 @@ local_merger_rate = 161.0
 "ET-2L-misaligned" = ["S2", "R2"]
 "ET-2L-misaligned-CE-Hanford" = ["S2", "R2", "C1"]
 
-[figures.mcmc_compare_posteriors]
-# Posterior styling and logical run IDs live below. Snakemake resolves the run IDs
-# to concrete chain inputs and passes those paths to the plotting notebook.
-campaign = "paper-h0"
+[figures.mcmc_cosmological_parameters]
+# Snakemake resolves these logical cosmology runs to concrete chain inputs. Direct
+# notebook runs can replace both ordered path lists and their labels through CLI.
+campaign = "cosmology-all-detectors"
+detector_analysis = "H0"
+prior_network = "ET-2L-aligned-CE-Hanford"
+omega_m_analysis = "H0-Omega_m"
 
-[figures.mcmc_compare_posteriors.ax_kwargs]
+[figures.mcmc_cosmological_parameters.detector_ax_kwargs]
 xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'
 ylabel = "Posterior density"
 
-[figures.mcmc_compare_posteriors.legend_kwargs]
+[figures.mcmc_cosmological_parameters.detector_legend_kwargs]
 ncol = 3
 loc = "lower center"
 bbox_to_anchor = [0.5, 1.02]
 frameon = false
 borderaxespad = 0
 
-[[figures.mcmc_compare_posteriors.posteriors]]
+[figures.mcmc_cosmological_parameters.prior_ax_kwargs]
+xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'
+ylabel = "Posterior density"
+
+[figures.mcmc_cosmological_parameters.prior_legend_kwargs]
+loc = "best"
+frameon = false
+
+[figures.mcmc_cosmological_parameters.corner_legend_kwargs]
+loc = "upper right"
+frameon = false
+
+[[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-triangular"
 label = 'ET-$\Delta$'
-run = "et-triangular"
-color = "tab:blue"
-linestyle = "-"
 
-[[figures.mcmc_compare_posteriors.posteriors]]
+[[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-triangular-CE-Hanford"
 label = 'ET-$\Delta +$ CE'
-run = "et-triangular-ce-hanford"
-color = "tab:blue"
-linestyle = "--"
 
-[[figures.mcmc_compare_posteriors.posteriors]]
+[[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-aligned"
 label = "ET-2L"
-run = "et-2l-aligned"
-color = "tab:orange"
-linestyle = "-"
 
-[[figures.mcmc_compare_posteriors.posteriors]]
+[[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-aligned-CE-Hanford"
 label = 'ET-2L $+$ CE'
-run = "et-2l-aligned-ce-hanford"
-color = "tab:orange"
-linestyle = "--"
 
-[[figures.mcmc_compare_posteriors.posteriors]]
+[[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-misaligned"
 label = 'ET-2L-$\alpha$'
-run = "et-2l-misaligned"
-color = "tab:green"
-linestyle = "-"
 
-[[figures.mcmc_compare_posteriors.posteriors]]
+[[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-misaligned-CE-Hanford"
 label = 'ET-2L-$\alpha +$ CE'
-run = "et-2l-misaligned-ce-hanford"
-color = "tab:green"
-linestyle = "--"
+
+[[figures.mcmc_cosmological_parameters.prior_posteriors]]
+analysis = "H0"
+label = '$H_0$ (fixed $\mathcal{R}_0$)'
+
+[[figures.mcmc_cosmological_parameters.prior_posteriors]]
+analysis = "H0-merger-rate-gauss"
+label = '$H_0 + \mathcal{R}_0$ (narrow prior)'
+
+[[figures.mcmc_cosmological_parameters.prior_posteriors]]
+analysis = "H0-merger-rate"
+label = '$H_0 + \mathcal{R}_0$ (broad prior)'
