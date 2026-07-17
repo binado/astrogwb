@@ -33,7 +33,7 @@ local_merger_rate = 161.0
 [figures.mcmc_cosmological_parameters]
 # Snakemake resolves these logical cosmology runs to concrete chain inputs. Direct
 # notebook runs can replace both ordered path lists and their labels through CLI.
-campaign = "cosmology"
+campaign = "cosmology-all-detectors"
 detector_analysis = "H0"
 prior_network = "ET-2L-aligned-CE-Hanford"
 

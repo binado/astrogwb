@@ -107,13 +107,27 @@ DEFAULT_DETECTOR_NETWORKS = {
 DEFAULT_NETWORKS = list(DEFAULT_DETECTOR_NETWORKS)
 
 DEFAULT_DETECTOR_CHAINS = [
-    Path("chains/bns-n16384-df1/cosmology/ET-triangular__H0__baseline.nc"),
-    Path("chains/bns-n16384-df1/cosmology/ET-triangular-CE-Hanford__H0__baseline.nc"),
-    Path("chains/bns-n16384-df1/cosmology/ET-2L-aligned__H0__baseline.nc"),
-    Path("chains/bns-n16384-df1/cosmology/ET-2L-aligned-CE-Hanford__H0__baseline.nc"),
-    Path("chains/bns-n16384-df1/cosmology/ET-2L-misaligned__H0__baseline.nc"),
     Path(
-        "chains/bns-n16384-df1/cosmology/ET-2L-misaligned-CE-Hanford__H0__baseline.nc"
+        "chains/bns-n16384-df1/cosmology-all-detectors/ET-triangular__H0__baseline.nc"
+    ),
+    Path(
+        "chains/bns-n16384-df1/cosmology-all-detectors/"
+        "ET-triangular-CE-Hanford__H0__baseline.nc"
+    ),
+    Path(
+        "chains/bns-n16384-df1/cosmology-all-detectors/ET-2L-aligned__H0__baseline.nc"
+    ),
+    Path(
+        "chains/bns-n16384-df1/cosmology-all-detectors/"
+        "ET-2L-aligned-CE-Hanford__H0__baseline.nc"
+    ),
+    Path(
+        "chains/bns-n16384-df1/cosmology-all-detectors/"
+        "ET-2L-misaligned__H0__baseline.nc"
+    ),
+    Path(
+        "chains/bns-n16384-df1/cosmology-all-detectors/"
+        "ET-2L-misaligned-CE-Hanford__H0__baseline.nc"
     ),
 ]
 DEFAULT_DETECTOR_LABELS = [
@@ -126,13 +140,16 @@ DEFAULT_DETECTOR_LABELS = [
 ]
 
 DEFAULT_PRIOR_CHAINS = [
-    Path("chains/bns-n16384-df1/cosmology/ET-2L-aligned-CE-Hanford__H0__baseline.nc"),
     Path(
-        "chains/bns-n16384-df1/cosmology/"
+        "chains/bns-n16384-df1/cosmology-all-detectors/"
+        "ET-2L-aligned-CE-Hanford__H0__baseline.nc"
+    ),
+    Path(
+        "chains/bns-n16384-df1/cosmology-all-detectors/"
         "ET-2L-aligned-CE-Hanford__H0-merger-rate-gauss__baseline.nc"
     ),
     Path(
-        "chains/bns-n16384-df1/cosmology/"
+        "chains/bns-n16384-df1/cosmology-all-detectors/"
         "ET-2L-aligned-CE-Hanford__H0-merger-rate__baseline.nc"
     ),
 ]
