@@ -455,11 +455,7 @@ def plot_corner(
             },
             contour_kwargs={"linestyles": linestyle, "linewidths": 1.5},
             truths=truths if index == 0 else None,
-            **get_corner_kwargs(
-                plot_datapoints=False,
-                plot_density=False,
-                fill_contours=False,
-            ),
+            **get_corner_kwargs(),
         )
 
     if fig is None:  # pragma: no cover - guarded by validation
@@ -587,14 +583,97 @@ def compute_network_snrs(
 
 def _hdi(
     tree: xr.DataTree,
+    var_name: str = "H0",
     *,
     group: str,
     probability: float,
 ) -> tuple[float, float]:
-    interval = azs.hdi(tree, group=group, var_names="H0", prob=probability)["H0"]
+    interval = azs.hdi(tree, group=group, var_names=var_name, prob=probability)[
+        var_name
+    ]
     return (
         float(interval.sel(ci_bound="lower")),
         float(interval.sel(ci_bound="upper")),
+    )
+
+
+def _posterior_median(
+    tree: xr.DataTree,
+    var_name: str,
+    *,
+    group: str,
+) -> float:
+    return float(np.nanmedian(np.asarray(tree[group][var_name]).reshape(-1)))
+
+
+def format_median_hdi(
+    median: float,
+    lower: float,
+    upper: float,
+    *,
+    precision: str = ".3g",
+) -> str:
+    """Format a posterior as journal-style $x_{-l}^{+u}$ from median and HDI."""
+    return (
+        f"${median:{precision}}"
+        f"_{{-{(median - lower):{precision}}}}"
+        f"^{{+{(upper - median):{precision}}}}$"
+    )
+
+
+def build_h0_r0_uncertainty_table(
+    inference_data: Sequence[xr.DataTree],
+    labels: Sequence[str],
+    *,
+    group: str = "posterior",
+    probability: float = CORNER_LEVELS[0],
+) -> pd.DataFrame:
+    """Compare $H_0$ and $\\mathcal{R}_0$ constraints across prior-comparison runs.
+
+    Rows are analyses (fixed $\\mathcal{R}_0$, then joint $H_0+\\mathcal{R}_0$
+    runs). Cells are median with 68% HDI as $x_{-l}^{+u}$; missing parameters
+    are shown as an em dash.
+    """
+    validate_inference_data(inference_data, labels, group=group)
+    rows: list[dict[str, str]] = []
+    for tree, label in zip(inference_data, labels, strict=True):
+        h0_median = _posterior_median(tree, "H0", group=group)
+        h0_lower, h0_upper = _hdi(tree, "H0", group=group, probability=probability)
+        row = {
+            "analysis": label,
+            "H0": format_median_hdi(h0_median, h0_lower, h0_upper),
+            "local_merger_rate": "—",
+        }
+        if "local_merger_rate" in tree[group].data_vars:
+            rate_median = _posterior_median(tree, "local_merger_rate", group=group)
+            rate_lower, rate_upper = _hdi(
+                tree, "local_merger_rate", group=group, probability=probability
+            )
+            row["local_merger_rate"] = format_median_hdi(
+                rate_median, rate_lower, rate_upper
+            )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def h0_r0_uncertainty_table_latex(table: pd.DataFrame) -> str:
+    """Format the H0 / R0 uncertainty comparison as publication LaTeX."""
+    latex_table = table.rename(
+        columns={
+            "analysis": "Analysis",
+            "H0": H0_LABEL,
+            "local_merger_rate": LOCAL_MERGER_RATE_LABEL,
+        }
+    )
+    return latex_table.to_latex(
+        index=False,
+        escape=False,
+        caption=(
+            "Median and 68.27\\% HDI constraints on $H_0$ and "
+            r"$\mathcal{R}_0$ for fixed versus joint local-merger-rate analyses. "
+            "Entries are $x_{-l}^{+u}$."
+        ),
+        label="tab:mcmc_cosmological_parameters_h0_r0",
     )
 
 
@@ -627,7 +706,7 @@ def build_snr_h0_constraint_table(
         networks.items(), inference_data, labels, strict=True
     ):
         snr = float(snr_by_network.loc[network, "snr"])
-        lower, upper = _hdi(tree, group=group, probability=probability)
+        lower, upper = _hdi(tree, "H0", group=group, probability=probability)
         sigma_hdi = (upper - lower) / 2
         sigma_snr = h0_fiducial / snr
         rows.append(
@@ -950,6 +1029,26 @@ broad_corner_figure = plot_corner(
     group=args.group,
     fiducials=fiducials,
 )
+
+# %% [markdown]
+# ## Table: $H_0$ vs $H_0+\mathcal{R}_0$ uncertainties
+#
+# Compact journal-style comparison of the prior-comparison runs. Analyses are
+# rows (clearer than a one-row nested header when $\mathcal{R}_0$ is absent from
+# the fixed-rate case). Each entry is the posterior median with the 68.27% HDI
+# written as $x_{-l}^{+u}$.
+
+# %%
+h0_r0_uncertainty_table = build_h0_r0_uncertainty_table(
+    prior_data, args.prior_labels, group=args.group
+)
+h0_r0_uncertainty_table
+
+# %% [markdown]
+# ## LaTeX: $H_0$ vs $H_0+\mathcal{R}_0$ uncertainties
+
+# %%
+print(h0_r0_uncertainty_table_latex(h0_r0_uncertainty_table))
 
 # %% [markdown]
 # ## Figure (v): $H_0$--$\Omega_m$ corner

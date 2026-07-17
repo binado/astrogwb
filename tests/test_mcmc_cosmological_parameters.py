@@ -166,6 +166,24 @@ def test_posterior_and_corner_plot_helpers_accept_loaded_data(
     plt.close(omega_m_corner_figure)
 
 
+def test_build_h0_r0_uncertainty_table(
+    cosmology_notebook: ModuleType,
+) -> None:
+    fixed = _inference_tree(seed=7)
+    narrow = _inference_tree(include_local_merger_rate=True, seed=8)
+    table = cosmology_notebook.build_h0_r0_uncertainty_table(
+        [fixed, narrow],
+        ["fixed", "narrow"],
+    )
+
+    assert list(table.columns) == ["analysis", "H0", "local_merger_rate"]
+    assert table.loc[0, "local_merger_rate"] == "—"
+    assert table.loc[0, "H0"].startswith("$")
+    assert table.loc[1, "local_merger_rate"].startswith("$")
+    assert "_{-" in table.loc[1, "H0"]
+    assert "^{+" in table.loc[1, "H0"]
+
+
 def test_build_snr_h0_constraint_table(
     cosmology_notebook: ModuleType,
 ) -> None:
