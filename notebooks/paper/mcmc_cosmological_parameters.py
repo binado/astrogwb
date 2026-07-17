@@ -19,7 +19,8 @@
 # workflow. It evaluates the fiducial SGWB once, computes the matched-filter SNR
 # for each detector network, and compares those estimates with sampled $H_0$
 # posteriors. It also compares fixed, narrow, and broad priors on the local merger
-# rate $\mathcal{R}_0$, including the joint $H_0$--$\mathcal{R}_0$ plane.
+# rate $\mathcal{R}_0$, including separate joint $H_0$--$\mathcal{R}_0$ corners
+# for the narrow and broad merger-rate priors.
 #
 # Chain paths and labels are separate inputs. This keeps chain loading outside the
 # plotting helpers and makes it possible to select different inference runs without
@@ -359,13 +360,12 @@ def plot_h0_merger_rate_corner(
     fiducials: Mapping[str, float] | None = None,
     legend_kwargs: Mapping[str, Any] | None = None,
 ) -> plt.Figure:
-    """Overlay narrow/broad H0--local-merger-rate corner posteriors."""
+    """Overlay one or more H0--local-merger-rate corner posteriors."""
     validate_inference_data(
         inference_data,
         labels,
         required_vars=CORNER_VAR_NAMES,
         group=group,
-        expected_count=2,
     )
     resolved_colors, resolved_linestyles = _validate_styles(
         len(inference_data), colors, linestyles
@@ -408,18 +408,19 @@ def plot_h0_merger_rate_corner(
 
     if fig is None:  # pragma: no cover - guarded by validation
         raise RuntimeError("corner did not create a figure")
-    handles = [
-        Line2D([], [], color=color, linestyle=linestyle, label=label)
-        for label, color, linestyle in zip(
-            labels, resolved_colors, resolved_linestyles, strict=True
-        )
-    ]
-    resolved_legend_kwargs = {
-        "loc": "upper right",
-        "frameon": False,
-        **dict(legend_kwargs or {}),
-    }
-    fig.legend(handles=handles, **resolved_legend_kwargs)
+    if len(inference_data) > 1:
+        handles = [
+            Line2D([], [], color=color, linestyle=linestyle, label=label)
+            for label, color, linestyle in zip(
+                labels, resolved_colors, resolved_linestyles, strict=True
+            )
+        ]
+        resolved_legend_kwargs = {
+            "loc": "upper right",
+            "frameon": False,
+            **dict(legend_kwargs or {}),
+        }
+        fig.legend(handles=handles, **resolved_legend_kwargs)
     fig.tight_layout()
     return fig
 
@@ -568,16 +569,8 @@ def build_snr_h0_constraint_table(
     return pd.DataFrame(rows)
 
 
-def write_constraint_table(
-    table: pd.DataFrame,
-    csv_path: Path,
-    tex_path: Path,
-) -> str:
-    """Write the machine-readable and publication-formatted constraint tables."""
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    tex_path.parent.mkdir(parents=True, exist_ok=True)
-    table.to_csv(csv_path, index=False)
-
+def constraint_table_latex(table: pd.DataFrame) -> str:
+    """Format the constraint table as a publication LaTeX tabular."""
     latex_table = table.rename(
         columns={
             "network": "Network",
@@ -593,7 +586,7 @@ def write_constraint_table(
             "rel_sigma_h0_snr": r"$1/{\rm SNR}$",
         }
     )
-    latex = latex_table.to_latex(
+    return latex_table.to_latex(
         index=False,
         escape=False,
         float_format="%.3g",
@@ -603,12 +596,27 @@ def write_constraint_table(
         ),
         label="tab:mcmc_cosmological_parameters_h0_by_detector",
     )
+
+
+def write_constraint_table(
+    table: pd.DataFrame,
+    csv_path: Path,
+    tex_path: Path,
+) -> str:
+    """Write the machine-readable and publication-formatted constraint tables."""
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    tex_path.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(csv_path, index=False)
+    latex = constraint_table_latex(table)
     tex_path.write_text(latex, encoding="utf-8")
     return latex
 
 
 # %% [markdown]
-# ## Command-line configuration and execution
+# ## Command-line configuration
+#
+# Every setting below can be overridden with a CLI flag when running this
+# notebook headless; otherwise the defaults above are used.
 
 
 # %%
@@ -635,9 +643,18 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=Path("figures/mcmc_cosmological_parameters_H0_merger_rate_priors.pdf"),
     )
     parser.add_argument(
-        "--output-corner-pdf",
+        "--output-narrow-corner-pdf",
         type=Path,
-        default=Path("figures/mcmc_cosmological_parameters_H0_merger_rate_corner.pdf"),
+        default=Path(
+            "figures/mcmc_cosmological_parameters_H0_merger_rate_narrow_corner.pdf"
+        ),
+    )
+    parser.add_argument(
+        "--output-broad-corner-pdf",
+        type=Path,
+        default=Path(
+            "figures/mcmc_cosmological_parameters_H0_merger_rate_broad_corner.pdf"
+        ),
     )
     parser.add_argument(
         "--output-csv",
@@ -692,142 +709,202 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def main(argv: Sequence[str] | None = None) -> None:
-    args = _parse_args(argv)
-    root = repo_root()
-    config = load_mapping(_resolve_path(args.config, root))
-    figure_config = config["figures"]["mcmc_cosmological_parameters"]
-    networks = args.resolved_networks
+args = _parse_args()
+root = repo_root()
 
-    if len(args.detector_chains) != len(args.detector_labels):
-        raise ValueError(
-            "--detector-chains and --detector-labels must have equal length"
-        )
-    if len(args.detector_chains) != len(networks):
-        raise ValueError(
-            "detector chain count must match --networks: "
-            f"received {len(args.detector_chains)} chains for {len(networks)} networks"
-        )
-    if len(args.prior_chains) != len(args.prior_labels):
-        raise ValueError("--prior-chains and --prior-labels must have equal length")
-    if len(args.prior_chains) != 3:
-        raise ValueError("the prior comparison requires exactly three chains")
-
-    detector_data: list[xr.DataTree] = []
-    prior_data: list[xr.DataTree] = []
-    try:
-        detector_paths = [_resolve_path(path, root) for path in args.detector_chains]
-        prior_paths = [_resolve_path(path, root) for path in args.prior_chains]
-        detector_data = [load_inference_data(path) for path in detector_paths]
-        prior_data = [load_inference_data(path) for path in prior_paths]
-
-        validate_inference_data(
-            detector_data,
-            args.detector_labels,
-            group=args.group,
-            expected_count=len(networks),
-        )
-        validate_inference_data(
-            prior_data,
-            args.prior_labels,
-            group=args.group,
-            expected_count=3,
-        )
-        corner_data, corner_labels, corner_indices = select_corner_inference_data(
-            prior_data, args.prior_labels, group=args.group
-        )
-
-        detector_colors = combo_colors(len(networks))
-        detector_linestyles = ["-"] * len(networks)
-        prior_colors = combo_colors(len(prior_data))
-        prior_linestyles = ["-"] * len(prior_data)
-        corner_colors = [prior_colors[index] for index in corner_indices]
-        corner_linestyles = [prior_linestyles[index] for index in corner_indices]
-
-        use_paper_style()
-        detector_figure = plot_h0_posteriors(
-            detector_data,
-            args.detector_labels,
-            colors=detector_colors,
-            linestyles=detector_linestyles,
-            group=args.group,
-            ax_kwargs=figure_config.get("detector_ax_kwargs"),
-            legend_kwargs=figure_config.get("detector_legend_kwargs"),
-        )
-        prior_figure = plot_h0_posteriors(
-            prior_data,
-            args.prior_labels,
-            colors=prior_colors,
-            linestyles=prior_linestyles,
-            group=args.group,
-            ax_kwargs=figure_config.get("prior_ax_kwargs"),
-            legend_kwargs=figure_config.get("prior_legend_kwargs"),
-        )
-
-        fiducials = {
-            "H0": args.h0,
-            "Omega_m": args.omega_m,
-            "xi_0": args.xi_0,
-            "xi_n": args.xi_n,
-            "gamma": args.gamma,
-            "kappa": args.kappa,
-            "z_peak": args.z_peak,
-            "local_merger_rate": args.local_merger_rate,
-        }
-        corner_figure = plot_h0_merger_rate_corner(
-            corner_data,
-            corner_labels,
-            colors=corner_colors,
-            linestyles=corner_linestyles,
-            group=args.group,
-            fiducials=fiducials,
-            legend_kwargs=figure_config.get("corner_legend_kwargs"),
-        )
-
-        detector_pdf = _resolve_path(args.output_detector_pdf, root)
-        prior_pdf = _resolve_path(args.output_prior_pdf, root)
-        corner_pdf = _resolve_path(args.output_corner_pdf, root)
-        for output in (detector_pdf, prior_pdf, corner_pdf):
-            output.parent.mkdir(parents=True, exist_ok=True)
-        detector_figure.savefig(detector_pdf, dpi=args.figure_dpi, bbox_inches="tight")
-        prior_figure.savefig(prior_pdf, dpi=args.figure_dpi, bbox_inches="tight")
-        corner_figure.savefig(corner_pdf, dpi=args.figure_dpi, bbox_inches="tight")
-
-        snr_table = compute_network_snrs(
-            _resolve_path(args.catalog, root),
-            networks,
-            fiducials,
-            observation_time=args.observation_time,
-            f_min=args.f_min,
-            f_max=args.f_max,
-            z_min=args.z_min,
-            z_max=args.z_max,
-            n_grid=args.n_grid,
-        )
-        constraint_table = build_snr_h0_constraint_table(
-            networks,
-            detector_data,
-            args.detector_labels,
-            snr_table,
-            h0_fiducial=args.h0,
-            group=args.group,
-        )
-        latex = write_constraint_table(
-            constraint_table,
-            _resolve_path(args.output_csv, root),
-            _resolve_path(args.output_tex, root),
-        )
-        print(latex)
-        print("saved detector posterior figure:", detector_pdf)
-        print("saved prior posterior figure:", prior_pdf)
-        print("saved corner figure:", corner_pdf)
-        print("saved constraint table:", _resolve_path(args.output_csv, root))
-        print("saved LaTeX table:", _resolve_path(args.output_tex, root))
-    finally:
-        for tree in [*detector_data, *prior_data]:
-            tree.close()
-
+# %% [markdown]
+# ## Load the chains
+#
+# Read the detector-network and prior-comparison inference runs from disk and
+# check that each one carries the posterior variables the figures below need.
 
 # %%
-if __name__ == "__main__":
-    main()
+config = load_mapping(_resolve_path(args.config, root))
+figure_config = config["figures"]["mcmc_cosmological_parameters"]
+networks = args.resolved_networks
+
+if len(args.detector_chains) != len(args.detector_labels):
+    raise ValueError("--detector-chains and --detector-labels must have equal length")
+if len(args.detector_chains) != len(networks):
+    raise ValueError(
+        "detector chain count must match --networks: "
+        f"received {len(args.detector_chains)} chains for {len(networks)} networks"
+    )
+if len(args.prior_chains) != len(args.prior_labels):
+    raise ValueError("--prior-chains and --prior-labels must have equal length")
+if len(args.prior_chains) != 3:
+    raise ValueError("the prior comparison requires exactly three chains")
+
+detector_paths = [_resolve_path(path, root) for path in args.detector_chains]
+prior_paths = [_resolve_path(path, root) for path in args.prior_chains]
+detector_data = [load_inference_data(path) for path in detector_paths]
+prior_data = [load_inference_data(path) for path in prior_paths]
+
+validate_inference_data(
+    detector_data,
+    args.detector_labels,
+    group=args.group,
+    expected_count=len(networks),
+)
+validate_inference_data(
+    prior_data,
+    args.prior_labels,
+    group=args.group,
+    expected_count=3,
+)
+corner_data, corner_labels, corner_indices = select_corner_inference_data(
+    prior_data, args.prior_labels, group=args.group
+)
+narrow_data = [corner_data[0]]
+narrow_labels = [corner_labels[0]]
+broad_data = [corner_data[1]]
+broad_labels = [corner_labels[1]]
+
+detector_colors = combo_colors(len(networks))
+detector_linestyles = ["-"] * len(networks)
+prior_colors = combo_colors(len(prior_data))
+prior_linestyles = ["-"] * len(prior_data)
+corner_colors = [prior_colors[index] for index in corner_indices]
+corner_linestyles = [prior_linestyles[index] for index in corner_indices]
+
+fiducials = {
+    "H0": args.h0,
+    "Omega_m": args.omega_m,
+    "xi_0": args.xi_0,
+    "xi_n": args.xi_n,
+    "gamma": args.gamma,
+    "kappa": args.kappa,
+    "z_peak": args.z_peak,
+    "local_merger_rate": args.local_merger_rate,
+}
+
+use_paper_style()
+
+# %% [markdown]
+# ## Figure (i): $H_0$ by detector network
+#
+# Marginalized $H_0$ posteriors for each configured detector network under the
+# baseline cosmology analysis.
+
+# %%
+detector_figure = plot_h0_posteriors(
+    detector_data,
+    args.detector_labels,
+    colors=detector_colors,
+    linestyles=detector_linestyles,
+    group=args.group,
+    ax_kwargs=figure_config.get("detector_ax_kwargs"),
+    legend_kwargs=figure_config.get("detector_legend_kwargs"),
+)
+
+# %% [markdown]
+# ## Figure (ii): $H_0$ prior comparison
+#
+# Compares fixed, narrow, and broad priors on the local merger rate
+# $\mathcal{R}_0$ for a single network.
+
+# %%
+prior_figure = plot_h0_posteriors(
+    prior_data,
+    args.prior_labels,
+    colors=prior_colors,
+    linestyles=prior_linestyles,
+    group=args.group,
+    ax_kwargs=figure_config.get("prior_ax_kwargs"),
+    legend_kwargs=figure_config.get("prior_legend_kwargs"),
+)
+
+# %% [markdown]
+# ## Figure (iii): Narrow-prior $H_0$--$\mathcal{R}_0$ corner
+#
+# Joint constraint when the local merger rate carries a narrow Gaussian prior.
+
+# %%
+narrow_corner_figure = plot_h0_merger_rate_corner(
+    narrow_data,
+    narrow_labels,
+    colors=[corner_colors[0]],
+    linestyles=[corner_linestyles[0]],
+    group=args.group,
+    fiducials=fiducials,
+)
+
+# %% [markdown]
+# ## Figure (iv): Broad-prior $H_0$--$\mathcal{R}_0$ corner
+#
+# Joint constraint when the local merger rate carries a broad prior. Plotted
+# separately from the narrow-prior corner because the posterior masses differ
+# enough that a shared axis range is unhelpful.
+
+# %%
+broad_corner_figure = plot_h0_merger_rate_corner(
+    broad_data,
+    broad_labels,
+    colors=[corner_colors[1]],
+    linestyles=[corner_linestyles[1]],
+    group=args.group,
+    fiducials=fiducials,
+)
+
+# %% [markdown]
+# ## Fiducial SNR and $H_0$ constraint table
+#
+# Evaluate the fiducial SGWB once, compute the matched-filter SNR for each
+# detector network, and combine those estimates with sampled $H_0$ HDI widths.
+
+# %%
+snr_table = compute_network_snrs(
+    _resolve_path(args.catalog, root),
+    networks,
+    fiducials,
+    observation_time=args.observation_time,
+    f_min=args.f_min,
+    f_max=args.f_max,
+    z_min=args.z_min,
+    z_max=args.z_max,
+    n_grid=args.n_grid,
+)
+constraint_table = build_snr_h0_constraint_table(
+    networks,
+    detector_data,
+    args.detector_labels,
+    snr_table,
+    h0_fiducial=args.h0,
+    group=args.group,
+)
+constraint_table
+
+# %% [markdown]
+# ## LaTeX constraint table
+#
+# Publication-formatted version of the table above.
+
+# %%
+print(constraint_table_latex(constraint_table))
+
+# %% [markdown]
+# ## Save figures and table
+#
+# Write the figures and machine-readable / LaTeX constraint tables to the
+# configured output paths.
+
+# %%
+outputs = {
+    _resolve_path(args.output_detector_pdf, root): detector_figure,
+    _resolve_path(args.output_prior_pdf, root): prior_figure,
+    _resolve_path(args.output_narrow_corner_pdf, root): narrow_corner_figure,
+    _resolve_path(args.output_broad_corner_pdf, root): broad_corner_figure,
+}
+for output_path, figure in outputs.items():
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
+    print("saved figure:", output_path)
+
+csv_path = _resolve_path(args.output_csv, root)
+tex_path = _resolve_path(args.output_tex, root)
+write_constraint_table(constraint_table, csv_path, tex_path)
+print("saved constraint table:", csv_path)
+print("saved LaTeX table:", tex_path)
+
+for tree in [*detector_data, *prior_data]:
+    tree.close()

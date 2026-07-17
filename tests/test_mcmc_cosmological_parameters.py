@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -18,18 +17,26 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 NOTEBOOK_PATH = REPO_ROOT / "notebooks/paper/mcmc_cosmological_parameters.py"
 
 
-@pytest.fixture(scope="module")
-def cosmology_notebook() -> ModuleType:
+def _load_helpers() -> ModuleType:
+    """Load notebook helpers without executing the analysis cells."""
+    source = NOTEBOOK_PATH.read_text(encoding="utf-8")
+    marker = "\nargs = _parse_args()\n"
+    cutoff = source.find(marker)
+    if cutoff < 0:
+        raise RuntimeError(
+            f"could not find helper cutoff marker {marker!r} in {NOTEBOOK_PATH}"
+        )
+    module = ModuleType("mcmc_cosmological_parameters")
+    module.__file__ = str(NOTEBOOK_PATH)
     if str(NOTEBOOK_PATH.parent) not in sys.path:
         sys.path.insert(0, str(NOTEBOOK_PATH.parent))
-    spec = importlib.util.spec_from_file_location(
-        "mcmc_cosmological_parameters", NOTEBOOK_PATH
-    )
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    exec(compile(source[:cutoff], str(NOTEBOOK_PATH), "exec"), module.__dict__)
     return module
+
+
+@pytest.fixture(scope="module")
+def cosmology_notebook() -> ModuleType:
+    return _load_helpers()
 
 
 def _inference_tree(
@@ -102,20 +109,28 @@ def test_posterior_and_corner_plot_helpers_accept_loaded_data(
 ) -> None:
     narrow = _inference_tree(include_local_merger_rate=True, seed=4)
     broad = _inference_tree(include_local_merger_rate=True, seed=5)
+    fiducials = {"H0": 67.66, "local_merger_rate": 161.0}
 
     posterior_figure = cosmology_notebook.plot_h0_posteriors(
         [narrow, broad], ["narrow", "broad"]
     )
-    corner_figure = cosmology_notebook.plot_h0_merger_rate_corner(
-        [narrow, broad],
-        ["narrow", "broad"],
-        fiducials={"H0": 67.66, "local_merger_rate": 161.0},
+    narrow_corner_figure = cosmology_notebook.plot_h0_merger_rate_corner(
+        [narrow],
+        ["narrow"],
+        fiducials=fiducials,
+    )
+    broad_corner_figure = cosmology_notebook.plot_h0_merger_rate_corner(
+        [broad],
+        ["broad"],
+        fiducials=fiducials,
     )
 
     assert len(posterior_figure.axes[0].lines) == 2
-    assert len(corner_figure.axes) == 4
+    assert len(narrow_corner_figure.axes) == 4
+    assert len(broad_corner_figure.axes) == 4
     plt.close(posterior_figure)
-    plt.close(corner_figure)
+    plt.close(narrow_corner_figure)
+    plt.close(broad_corner_figure)
 
 
 def test_build_snr_h0_constraint_table(

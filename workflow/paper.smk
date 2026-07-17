@@ -30,7 +30,8 @@ AMPLITUDE_TOY_PDF = config["amplitude_toy"]["output_pdf"]
 COSMOLOGY_OUTPUTS = config["mcmc_cosmological_parameters"]
 COSMOLOGY_DETECTOR_PDF = COSMOLOGY_OUTPUTS["output_detector_pdf"]
 COSMOLOGY_PRIOR_PDF = COSMOLOGY_OUTPUTS["output_prior_pdf"]
-COSMOLOGY_CORNER_PDF = COSMOLOGY_OUTPUTS["output_corner_pdf"]
+COSMOLOGY_NARROW_CORNER_PDF = COSMOLOGY_OUTPUTS["output_narrow_corner_pdf"]
+COSMOLOGY_BROAD_CORNER_PDF = COSMOLOGY_OUTPUTS["output_broad_corner_pdf"]
 COSMOLOGY_CSV = COSMOLOGY_OUTPUTS["output_csv"]
 COSMOLOGY_TEX = COSMOLOGY_OUTPUTS["output_tex"]
 COSMOLOGY_FIGURE = PAPER_CONFIG["figures"]["mcmc_cosmological_parameters"]
@@ -62,7 +63,8 @@ rule paper_figures:
         AMPLITUDE_TOY_PDF,
         COSMOLOGY_DETECTOR_PDF,
         COSMOLOGY_PRIOR_PDF,
-        COSMOLOGY_CORNER_PDF,
+        COSMOLOGY_NARROW_CORNER_PDF,
+        COSMOLOGY_BROAD_CORNER_PDF,
         COSMOLOGY_CSV,
         COSMOLOGY_TEX,
 
@@ -97,7 +99,8 @@ rule mcmc_cosmological_parameters:
     output:
         detector_pdf=COSMOLOGY_DETECTOR_PDF,
         prior_pdf=COSMOLOGY_PRIOR_PDF,
-        corner_pdf=COSMOLOGY_CORNER_PDF,
+        narrow_corner_pdf=COSMOLOGY_NARROW_CORNER_PDF,
+        broad_corner_pdf=COSMOLOGY_BROAD_CORNER_PDF,
         csv=COSMOLOGY_CSV,
         tex=COSMOLOGY_TEX,
     params:
@@ -146,6 +149,7 @@ rule mcmc_cosmological_parameters:
         " --networks {params.network_names:q}"
         " --output-detector-pdf {output.detector_pdf:q}"
         " --output-prior-pdf {output.prior_pdf:q}"
-        " --output-corner-pdf {output.corner_pdf:q}"
+        " --output-narrow-corner-pdf {output.narrow_corner_pdf:q}"
+        " --output-broad-corner-pdf {output.broad_corner_pdf:q}"
         " --output-csv {output.csv:q}"
         " --output-tex {output.tex:q}"
