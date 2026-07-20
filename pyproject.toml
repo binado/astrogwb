@@ -26,7 +26,7 @@ mcmc = [
     "pydantic>=2.0",
 ]
 cuda = [
-    "jax[cuda12]>=0.10.2",
+    "jax[cuda12]>=0.11.0",
 ]
 tpu = [
     "jax[tpu]>=0.10.2",
