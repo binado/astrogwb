@@ -14,3 +14,8 @@ mcmc_cosmological_parameters:
   output_omega_m_corner_pdf: figures/mcmc_cosmological_parameters_H0_Omega_m_corner.pdf
   output_csv: figures/mcmc_cosmological_parameters_H0_by_detector.csv
   output_tex: figures/mcmc_cosmological_parameters_H0_by_detector.tex
+
+mcmc_modified_propagation:
+  output_xi_n_corner_pdf: figures/mcmc_modified_propagation_Xi0_n_corner.pdf
+  output_xi0_marginal_pdf: figures/mcmc_modified_propagation_Xi0_marginal.pdf
+  output_h0_corner_pdf: figures/mcmc_modified_propagation_Xi0_H0_corner.pdf

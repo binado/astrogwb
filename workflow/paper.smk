@@ -58,11 +58,43 @@ OMEGA_M_CHAIN = (
 )
 OMEGA_M_LABEL = r"$H_0 + \Omega_m$"
 
+MODIFIED_PROPAGATION_FIGURE = PAPER_CONFIG["figures"]["mcmc_modified_propagation"]
+MODIFIED_PROPAGATION_CAMPAIGN = MODIFIED_PROPAGATION_FIGURE["campaign"]
+MODIFIED_PROPAGATION_NETWORK = MODIFIED_PROPAGATION_FIGURE["network"]
+MODIFIED_PROPAGATION_XI0_CHAIN = (
+    f"{CHAINS_DIR}/{CATALOG_ID}/{MODIFIED_PROPAGATION_CAMPAIGN}/"
+    f"{MODIFIED_PROPAGATION_NETWORK}__"
+    f"{MODIFIED_PROPAGATION_FIGURE['xi0_analysis']}__baseline.nc"
+)
+MODIFIED_PROPAGATION_XI0_N_CHAIN = (
+    f"{CHAINS_DIR}/{CATALOG_ID}/{MODIFIED_PROPAGATION_CAMPAIGN}/"
+    f"{MODIFIED_PROPAGATION_NETWORK}__"
+    f"{MODIFIED_PROPAGATION_FIGURE['xi0_n_analysis']}__baseline.nc"
+)
+MODIFIED_PROPAGATION_H0_CHAIN = (
+    f"{CHAINS_DIR}/{CATALOG_ID}/{MODIFIED_PROPAGATION_CAMPAIGN}/"
+    f"{MODIFIED_PROPAGATION_NETWORK}__"
+    f"{MODIFIED_PROPAGATION_FIGURE['h0_analysis']}__baseline.nc"
+)
+MODIFIED_PROPAGATION_MARGINAL_LABELS = MODIFIED_PROPAGATION_FIGURE["marginal_labels"]
+MODIFIED_PROPAGATION_H0_LABELS = MODIFIED_PROPAGATION_FIGURE["h0_labels"]
+MODIFIED_PROPAGATION_OUTPUTS = config["mcmc_modified_propagation"]
+MODIFIED_PROPAGATION_XI_N_CORNER_PDF = MODIFIED_PROPAGATION_OUTPUTS[
+    "output_xi_n_corner_pdf"
+]
+MODIFIED_PROPAGATION_XI0_MARGINAL_PDF = MODIFIED_PROPAGATION_OUTPUTS[
+    "output_xi0_marginal_pdf"
+]
+MODIFIED_PROPAGATION_H0_CORNER_PDF = MODIFIED_PROPAGATION_OUTPUTS[
+    "output_h0_corner_pdf"
+]
+
 
 localrules:
     paper_figures,
     amplitude_toy,
     mcmc_cosmological_parameters,
+    mcmc_modified_propagation,
 
 
 rule paper_figures:
@@ -75,6 +107,9 @@ rule paper_figures:
         COSMOLOGY_OMEGA_M_CORNER_PDF,
         COSMOLOGY_CSV,
         COSMOLOGY_TEX,
+        MODIFIED_PROPAGATION_XI_N_CORNER_PDF,
+        MODIFIED_PROPAGATION_XI0_MARGINAL_PDF,
+        MODIFIED_PROPAGATION_H0_CORNER_PDF,
 
 
 rule amplitude_toy:
@@ -167,3 +202,35 @@ rule mcmc_cosmological_parameters:
         " --output-omega-m-corner-pdf {output.omega_m_corner_pdf:q}"
         " --output-csv {output.csv:q}"
         " --output-tex {output.tex:q}"
+
+
+rule mcmc_modified_propagation:
+    input:
+        config=str(PAPER_CONFIG_PATH),
+        xi0_chain=MODIFIED_PROPAGATION_XI0_CHAIN,
+        xi0_n_chain=MODIFIED_PROPAGATION_XI0_N_CHAIN,
+        h0_chain=MODIFIED_PROPAGATION_H0_CHAIN,
+    output:
+        xi_n_corner_pdf=MODIFIED_PROPAGATION_XI_N_CORNER_PDF,
+        xi0_marginal_pdf=MODIFIED_PROPAGATION_XI0_MARGINAL_PDF,
+        h0_corner_pdf=MODIFIED_PROPAGATION_H0_CORNER_PDF,
+    params:
+        marginal_labels=MODIFIED_PROPAGATION_MARGINAL_LABELS,
+        h0_labels=MODIFIED_PROPAGATION_H0_LABELS,
+        xi_0=PAPER_FIDUCIALS["xi_0"],
+        xi_n=PAPER_FIDUCIALS["xi_n"],
+        h0=PAPER_FIDUCIALS["H0"],
+    shell:
+        "uv run --extra mcmc --group plotting"
+        " python notebooks/paper/mcmc_modified_propagation.py"
+        " --xi0-chain {input.xi0_chain:q}"
+        " --xi0-n-chain {input.xi0_n_chain:q}"
+        " --h0-chain {input.h0_chain:q}"
+        " --marginal-labels {params.marginal_labels:q}"
+        " --h0-labels {params.h0_labels:q}"
+        " --xi-0 {params.xi_0}"
+        " --xi-n {params.xi_n}"
+        " --h0 {params.h0}"
+        " --output-xi-n-corner-pdf {output.xi_n_corner_pdf:q}"
+        " --output-xi0-marginal-pdf {output.xi0_marginal_pdf:q}"
+        " --output-h0-corner-pdf {output.h0_corner_pdf:q}"
