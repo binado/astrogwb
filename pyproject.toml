@@ -9,15 +9,15 @@ authors = [
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
-    "gwmock-noise>=0.7.1",
-    "gwmock-pop>=0.11.1",
+    "gwmock-noise>=0.7.2",
+    "gwmock-pop>=0.11.2",
     "gwmock-signal[jax]>=0.10.0",
     # Bare/CPU JAX in the base install; pair the mcmc extra with cuda or tpu.
-    "jax>=0.10.2; sys_platform == 'linux'",
+    "jax>=0.11.0; sys_platform == 'linux'",
     "jax[cpu]>=0.10.2; sys_platform != 'linux'",
     "numpy>=2.5.1",
     "numpyro>=0.21.0",
-    "pluscross>=0.1.0,<0.2.0",
+    "pluscross>=0.2.0,<0.3.0",
 ]
 
 [project.optional-dependencies]
@@ -48,11 +48,11 @@ dev = [
     { include-group = "plotting" },
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
-    "matplotlib>=3.11.0",
+    "matplotlib>=3.11.1",
     "pytest>=9.0.2",
-    "ruff>=0.15.21",
+    "ruff>=0.15.22",
     "snakemake>=9.13.4",
-    "ty>=0.0.59",
+    "ty>=0.0.61",
 ]
 slurm = [
     { include-group = "dev" },
