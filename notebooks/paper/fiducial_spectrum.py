@@ -37,8 +37,12 @@ from matplotlib.projections import register_projection
 from pluscross import load_catalog
 
 from _paper_style import CATEGORY, use_paper_style
-from astrogwb.gwb import frequency_mask as make_frequency_mask
-from astrogwb.gwb import omega_gw_from_spectral_density, spectral_density
+from astrogwb.gwb import (
+    frequency_mask as make_frequency_mask,
+    hubble_constant_si,
+    omega_gw_from_spectral_density,
+    spectral_density,
+)
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_proposal_logpdf,
     make_merger_rate_and_log_weights_fn,
@@ -156,6 +160,7 @@ def plot_omega_and_sh(
     spectral_density_arr: jax.Array,
     mask: jax.Array,
     *,
+    h0: float,
     omega_gw_min: float = DEFAULT_OMEGA_GW_MIN,
     omega_color: str | None = None,
     sh_color: str | None = None,
@@ -166,30 +171,34 @@ def plot_omega_and_sh(
     if sh_color is None:
         sh_color = CATEGORY["astrophysical"]
 
-    omega_gw = omega_gw_from_spectral_density(spectral_density_arr, frequencies)
+    omega_gw = omega_gw_from_spectral_density(
+        spectral_density_arr,
+        frequencies,
+        hubble_constant_si=hubble_constant_si(h0),
+    )
     pos = (omega_gw > 0.0) & (spectral_density_arr > 0.0) & mask
     freq = np.asarray(frequencies[pos])
     omega = np.asarray(omega_gw[pos])
     sh = np.asarray(spectral_density_arr[pos])
     sh_ymin = sh_ymin_matching_omega_floor(omega, sh, omega_gw_min)
 
-    fig, ax_omega = plt.subplots()
-    ax_sh = ax_omega.twinx()
+    fig, ax_sh = plt.subplots()
+    ax_omega = ax_sh.twinx()
 
+    (line_sh,) = ax_sh.loglog(freq, sh, color=sh_color, label=r"$S_h$")
     (line_omega,) = ax_omega.loglog(
         freq, omega, color=omega_color, label=r"$\Omega_{\mathrm{GW}}$"
     )
-    (line_sh,) = ax_sh.loglog(freq, sh, color=sh_color, label=r"$S_h$")
 
-    ax_omega.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-    ax_omega.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$", color=omega_color)
+    ax_sh.set_xlabel(r"$f\ \mathrm{(Hz)}$")
     ax_sh.set_ylabel(r"$S_h(f)\ \mathrm{[Hz^{-1}]}$", color=sh_color)
-    ax_omega.tick_params(axis="y", colors=omega_color)
+    ax_omega.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$", color=omega_color)
     ax_sh.tick_params(axis="y", colors=sh_color)
-    ax_omega.set_ylim(omega_gw_min, None)
+    ax_omega.tick_params(axis="y", colors=omega_color)
     ax_sh.set_ylim(sh_ymin, None)
-    ax_omega.legend(
-        handles=[line_omega, line_sh],
+    ax_omega.set_ylim(omega_gw_min, None)
+    ax_sh.legend(
+        handles=[line_sh, line_omega],
         loc="upper right",
         frameon=False,
     )
@@ -250,10 +259,10 @@ use_paper_style()
 # ## Fiducial spectrum
 #
 # Load the waveform catalog, evaluate importance weights at $\Lambda_0$, and
-# form $S_h(f, \Lambda_0)$. Convert to $\Omega_{\mathrm{GW}}(f)$ for the left
-# axis. The $S_h$ floor is inferred from the frequency where
-# $\Omega_{\mathrm{GW}}$ meets `--omega-gw-min`, so both curves show the same
-# frequency band.
+# form $S_h(f, \Lambda_0)$. Convert to $\Omega_{\mathrm{GW}}(f)$ for the right
+# axis using the configured fiducial $H_0$ (not the package $H_0$ default).
+# The $S_h$ floor is inferred from the frequency where $\Omega_{\mathrm{GW}}$
+# meets `--omega-gw-min`, so both curves show the same frequency band.
 
 # %%
 catalog_path = _resolve_path(args.catalog, root)
@@ -271,6 +280,7 @@ figure = plot_omega_and_sh(
     frequencies,
     observed_spectral_density,
     mask,
+    h0=args.h0,
     omega_gw_min=args.omega_gw_min,
 )
 
