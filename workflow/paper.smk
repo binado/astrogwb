@@ -27,7 +27,9 @@ CATALOG_PATH = (
 )
 CHAINS_DIR = PAPER_CONFIG["paths"]["chains_dir"]
 AMPLITUDE_TOY_PDF = config["amplitude_toy"]["output_pdf"]
-FIDUCIAL_SPECTRUM_PDF = config["fiducial_spectrum"]["output_pdf"]
+FIDUCIAL_SPECTRUM = config["fiducial_spectrum"]
+FIDUCIAL_SPECTRUM_PDF = FIDUCIAL_SPECTRUM["output_pdf"]
+FIDUCIAL_SPECTRUM_OMEGA_GW_MIN = FIDUCIAL_SPECTRUM["omega_gw_min"]
 COSMOLOGY_OUTPUTS = config["mcmc_cosmological_parameters"]
 COSMOLOGY_DETECTOR_PDF = COSMOLOGY_OUTPUTS["output_detector_pdf"]
 COSMOLOGY_PRIOR_PDF = COSMOLOGY_OUTPUTS["output_prior_pdf"]
@@ -156,6 +158,7 @@ rule fiducial_spectrum:
         kappa=PAPER_FIDUCIALS["kappa"],
         z_peak=PAPER_FIDUCIALS["z_peak"],
         local_merger_rate=PAPER_FIDUCIALS["local_merger_rate"],
+        omega_gw_min=FIDUCIAL_SPECTRUM_OMEGA_GW_MIN,
     shell:
         "uv run --group plotting"
         " python notebooks/paper/fiducial_spectrum.py"
@@ -173,6 +176,7 @@ rule fiducial_spectrum:
         " --kappa {params.kappa}"
         " --z-peak {params.z_peak}"
         " --local-merger-rate {params.local_merger_rate}"
+        " --omega-gw-min {params.omega_gw_min}"
         " --output-pdf {output:q}"
 
 

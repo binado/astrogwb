@@ -7,7 +7,9 @@ and [`fiducial_spectrum.py`](../notebooks/paper/fiducial_spectrum.py)
 hold editable scientific defaults and expose command-line overrides for scientific
 inputs, paths, and labels. They can therefore run directly in Jupyter or from the shell.
 The spectrum notebook plots fiducial $\Omega_{\mathrm{GW}}(f)$ and $S_h(f)$ on dual
-$y$-axes (`--omega-ymin` / `--sh-ymin`).
+$y$-axes. Configure the $\Omega_{\mathrm{GW}}$ floor via `omega_gw_min` in
+`workflow.yaml` (or `--omega-gw-min`); $S_h$'s floor is inferred at the matching
+frequency so both curves show the same band.
 The cosmology notebook reads paper plot styling from `configs/paper.toml`;
 its two ordered chain groups and their labels can be replaced independently with
 `--detector-chains`/`--detector-labels` and

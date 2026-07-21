@@ -74,8 +74,7 @@ DEFAULT_GAMMA = 1.42
 DEFAULT_KAPPA = 4.62
 DEFAULT_Z_PEAK = 1.84
 DEFAULT_LOCAL_MERGER_RATE = 161.0
-DEFAULT_OMEGA_YMIN = 1e-15
-DEFAULT_SH_YMIN = 1e-55
+DEFAULT_OMEGA_GW_MIN = 1e-15
 DEFAULT_OUTPUT_PDF = Path("figures/fiducial_spectrum.pdf")
 DEFAULT_FIGURE_DPI = 300
 
@@ -133,13 +132,31 @@ def compute_fiducial_spectral_density(
     return frequencies, observed_spectral_density, mask
 
 
+def sh_ymin_matching_omega_floor(
+    omega_gw: np.ndarray,
+    spectral_density_arr: np.ndarray,
+    omega_gw_min: float,
+) -> float:
+    """Infer $S_h$ ymin from the frequency where $\\Omega_{\\mathrm{GW}}$ hits its floor.
+
+    Picks the bin whose $\\Omega_{\\mathrm{GW}}$ is closest (in log space) to
+    ``omega_gw_min`` and returns $S_h$ there, so both axes show the same
+    frequency band when clipped at their respective floors.
+    """
+    if omega_gw_min <= 0.0:
+        raise ValueError(f"omega_gw_min must be positive, got {omega_gw_min}")
+    if omega_gw.size == 0:
+        raise ValueError("cannot infer S_h ymin from an empty spectrum")
+    index = int(np.argmin(np.abs(np.log(omega_gw) - np.log(omega_gw_min))))
+    return float(spectral_density_arr[index])
+
+
 def plot_omega_and_sh(
     frequencies: jax.Array,
     spectral_density_arr: jax.Array,
     mask: jax.Array,
     *,
-    omega_ymin: float = DEFAULT_OMEGA_YMIN,
-    sh_ymin: float = DEFAULT_SH_YMIN,
+    omega_gw_min: float = DEFAULT_OMEGA_GW_MIN,
     omega_color: str | None = None,
     sh_color: str | None = None,
 ) -> Figure:
@@ -154,6 +171,7 @@ def plot_omega_and_sh(
     freq = np.asarray(frequencies[pos])
     omega = np.asarray(omega_gw[pos])
     sh = np.asarray(spectral_density_arr[pos])
+    sh_ymin = sh_ymin_matching_omega_floor(omega, sh, omega_gw_min)
 
     fig, ax_omega = plt.subplots()
     ax_sh = ax_omega.twinx()
@@ -168,7 +186,7 @@ def plot_omega_and_sh(
     ax_sh.set_ylabel(r"$S_h(f)\ \mathrm{[Hz^{-1}]}$", color=sh_color)
     ax_omega.tick_params(axis="y", colors=omega_color)
     ax_sh.tick_params(axis="y", colors=sh_color)
-    ax_omega.set_ylim(omega_ymin, None)
+    ax_omega.set_ylim(omega_gw_min, None)
     ax_sh.set_ylim(sh_ymin, None)
     ax_omega.legend(
         handles=[line_omega, line_sh],
@@ -196,8 +214,15 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--local-merger-rate", type=float, default=DEFAULT_LOCAL_MERGER_RATE
     )
-    parser.add_argument("--omega-ymin", type=float, default=DEFAULT_OMEGA_YMIN)
-    parser.add_argument("--sh-ymin", type=float, default=DEFAULT_SH_YMIN)
+    parser.add_argument(
+        "--omega-gw-min",
+        type=float,
+        default=DEFAULT_OMEGA_GW_MIN,
+        help=(
+            "Lower y-limit for Omega_GW; S_h ymin is taken from S_h at the "
+            "frequency where Omega_GW is closest to this floor."
+        ),
+    )
     parser.add_argument("--output-pdf", type=Path, default=DEFAULT_OUTPUT_PDF)
     parser.add_argument("--figure-dpi", type=int, default=DEFAULT_FIGURE_DPI)
     args, _ = parser.parse_known_args(argv)
@@ -226,7 +251,9 @@ use_paper_style()
 #
 # Load the waveform catalog, evaluate importance weights at $\Lambda_0$, and
 # form $S_h(f, \Lambda_0)$. Convert to $\Omega_{\mathrm{GW}}(f)$ for the left
-# axis.
+# axis. The $S_h$ floor is inferred from the frequency where
+# $\Omega_{\mathrm{GW}}$ meets `--omega-gw-min`, so both curves show the same
+# frequency band.
 
 # %%
 catalog_path = _resolve_path(args.catalog, root)
@@ -244,8 +271,7 @@ figure = plot_omega_and_sh(
     frequencies,
     observed_spectral_density,
     mask,
-    omega_ymin=args.omega_ymin,
-    sh_ymin=args.sh_ymin,
+    omega_gw_min=args.omega_gw_min,
 )
 
 # %% [markdown]
