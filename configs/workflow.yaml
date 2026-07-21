@@ -6,6 +6,9 @@ catalog:
 amplitude_toy:
   output_pdf: figures/amplitude_toy_fisher_overlay.pdf
 
+fiducial_spectrum:
+  output_pdf: figures/fiducial_spectrum.pdf
+
 mcmc_cosmological_parameters:
   output_detector_pdf: figures/mcmc_cosmological_parameters_H0_by_detector.pdf
   output_prior_pdf: figures/mcmc_cosmological_parameters_H0_merger_rate_priors.pdf

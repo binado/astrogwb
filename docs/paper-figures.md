@@ -1,10 +1,13 @@
 # Paper figures
 
 The analysis notebooks
-[`amplitude_toy_model.py`](../notebooks/amplitude_toy_model.py) and
-[`mcmc_cosmological_parameters.py`](../notebooks/paper/mcmc_cosmological_parameters.py)
+[`amplitude_toy_model.py`](../notebooks/amplitude_toy_model.py),
+[`mcmc_cosmological_parameters.py`](../notebooks/paper/mcmc_cosmological_parameters.py),
+and [`fiducial_spectrum.py`](../notebooks/paper/fiducial_spectrum.py)
 hold editable scientific defaults and expose command-line overrides for scientific
 inputs, paths, and labels. They can therefore run directly in Jupyter or from the shell.
+The spectrum notebook plots fiducial $\Omega_{\mathrm{GW}}(f)$ and $S_h(f)$ on dual
+$y$-axes (`--omega-ymin` / `--sh-ymin`).
 The cosmology notebook reads paper plot styling from `configs/paper.toml`;
 its two ordered chain groups and their labels can be replaced independently with
 `--detector-chains`/`--detector-labels` and
@@ -24,10 +27,11 @@ analysis-notebook defaults aligned with `paper.toml` when promoting paper values
 Snakemake reads [`configs/workflow.yaml`](../configs/workflow.yaml) for the paper
 config path, selected catalog, and declared output paths. It translates
 `paper.toml` into explicit analysis, cosmology, fiducial, detector-network, chain,
-label, and styling inputs. The unified cosmology rule produces two marginalized
-$H_0$ comparisons, separate $H_0$--$\mathcal{R}_0$ corner plots for the narrow
-and broad merger-rate priors, an $H_0$--$\Omega_m$ corner plot, and a CSV/LaTeX
-SNR-and-constraint table.
+label, and styling inputs. The `fiducial_spectrum` rule builds
+`figures/fiducial_spectrum.pdf` from the shared catalog and fiducials. The unified
+cosmology rule produces two marginalized $H_0$ comparisons, separate
+$H_0$--$\mathcal{R}_0$ corner plots for the narrow and broad merger-rate priors,
+an $H_0$--$\Omega_m$ corner plot, and a CSV/LaTeX SNR-and-constraint table.
 
 Preview the declared workflow:
 
@@ -42,6 +46,11 @@ uv run snakemake --snakefile workflow/paper.smk --cores 1 paper_figures
 ```
 
 Build one configured target:
+
+```bash
+uv run snakemake --snakefile workflow/paper.smk --cores 1 \
+  figures/fiducial_spectrum.pdf
+```
 
 ```bash
 uv run snakemake --snakefile workflow/paper.smk --cores 1 \
