@@ -14,7 +14,7 @@ dependencies = [
     "gwmock-signal[jax]>=0.11.0",
     # Bare/CPU JAX in the base install; pair the mcmc extra with cuda or tpu.
     "jax>=0.10.2; sys_platform == 'linux'",
-    "jax[cpu]>=0.10.2; sys_platform != 'linux'",
+    "jax[cpu]>=0.11.0; sys_platform != 'linux'",
     "numpy>=2.5.1",
     "numpyro>=0.21.0",
     "pluscross>=0.1.0,<0.2.0",
