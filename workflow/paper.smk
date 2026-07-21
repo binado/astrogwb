@@ -27,6 +27,9 @@ CATALOG_PATH = (
 )
 CHAINS_DIR = PAPER_CONFIG["paths"]["chains_dir"]
 AMPLITUDE_TOY_PDF = config["amplitude_toy"]["output_pdf"]
+FIDUCIAL_SPECTRUM = config["fiducial_spectrum"]
+FIDUCIAL_SPECTRUM_PDF = FIDUCIAL_SPECTRUM["output_pdf"]
+FIDUCIAL_SPECTRUM_OMEGA_GW_MIN = FIDUCIAL_SPECTRUM["omega_gw_min"]
 COSMOLOGY_OUTPUTS = config["mcmc_cosmological_parameters"]
 COSMOLOGY_DETECTOR_PDF = COSMOLOGY_OUTPUTS["output_detector_pdf"]
 COSMOLOGY_PRIOR_PDF = COSMOLOGY_OUTPUTS["output_prior_pdf"]
@@ -93,6 +96,7 @@ MODIFIED_PROPAGATION_H0_CORNER_PDF = MODIFIED_PROPAGATION_OUTPUTS[
 localrules:
     paper_figures,
     amplitude_toy,
+    fiducial_spectrum,
     mcmc_cosmological_parameters,
     mcmc_modified_propagation,
 
@@ -100,6 +104,7 @@ localrules:
 rule paper_figures:
     input:
         AMPLITUDE_TOY_PDF,
+        FIDUCIAL_SPECTRUM_PDF,
         COSMOLOGY_DETECTOR_PDF,
         COSMOLOGY_PRIOR_PDF,
         COSMOLOGY_NARROW_CORNER_PDF,
@@ -130,6 +135,48 @@ rule amplitude_toy:
         " --observation-time {params.observation_time}"
         " --f-min {params.f_min}"
         " --f-max {params.f_max}"
+        " --output-pdf {output:q}"
+
+
+rule fiducial_spectrum:
+    input:
+        catalog=CATALOG_PATH,
+        config=str(PAPER_CONFIG_PATH),
+    output:
+        FIDUCIAL_SPECTRUM_PDF,
+    params:
+        f_min=PAPER_ANALYSIS["f_min"],
+        f_max=PAPER_ANALYSIS["f_max"],
+        z_min=PAPER_COSMOLOGY["z_min"],
+        z_max=PAPER_COSMOLOGY["z_max"],
+        n_grid=PAPER_COSMOLOGY["n_grid"],
+        h0=PAPER_FIDUCIALS["H0"],
+        omega_m=PAPER_FIDUCIALS["Omega_m"],
+        xi_0=PAPER_FIDUCIALS["xi_0"],
+        xi_n=PAPER_FIDUCIALS["xi_n"],
+        gamma=PAPER_FIDUCIALS["gamma"],
+        kappa=PAPER_FIDUCIALS["kappa"],
+        z_peak=PAPER_FIDUCIALS["z_peak"],
+        local_merger_rate=PAPER_FIDUCIALS["local_merger_rate"],
+        omega_gw_min=FIDUCIAL_SPECTRUM_OMEGA_GW_MIN,
+    shell:
+        "uv run --group plotting"
+        " python notebooks/paper/fiducial_spectrum.py"
+        " --catalog {input.catalog:q}"
+        " --f-min {params.f_min}"
+        " --f-max {params.f_max}"
+        " --z-min {params.z_min}"
+        " --z-max {params.z_max}"
+        " --n-grid {params.n_grid}"
+        " --h0 {params.h0}"
+        " --omega-m {params.omega_m}"
+        " --xi-0 {params.xi_0}"
+        " --xi-n {params.xi_n}"
+        " --gamma {params.gamma}"
+        " --kappa {params.kappa}"
+        " --z-peak {params.z_peak}"
+        " --local-merger-rate {params.local_merger_rate}"
+        " --omega-gw-min {params.omega_gw_min}"
         " --output-pdf {output:q}"
 
 

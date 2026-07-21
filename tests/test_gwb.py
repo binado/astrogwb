@@ -76,3 +76,13 @@ def test_omega_gw_round_trip() -> None:
     actual = spectral_density_from_omega_gw(omega, freqs, hubble_constant_si=1.0)
 
     np.testing.assert_allclose(np.asarray(actual), np.asarray(strain), rtol=1e-6)
+
+
+def test_hubble_constant_si_matches_h0_si_default() -> None:
+    from astrogwb.gwb import H0_SI, hubble_constant_si
+
+    np.testing.assert_allclose(hubble_constant_si(67.74), H0_SI)
+    np.testing.assert_allclose(
+        hubble_constant_si(67.66),
+        H0_SI * (67.66 / 67.74),
+    )
