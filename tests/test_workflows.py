@@ -237,6 +237,7 @@ def test_paper_workflow_exposes_only_figure_rules() -> None:
     assert set(result.stdout.split()) == {
         "amplitude_toy",
         "mcmc_cosmological_parameters",
+        "mcmc_modified_propagation",
         "paper_figures",
     }
 
