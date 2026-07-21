@@ -29,7 +29,7 @@ cuda = [
     "jax[cuda12]>=0.11.0",
 ]
 tpu = [
-    "jax[tpu]>=0.10.2",
+    "jax[tpu]>=0.11.0",
 ]
 
 [build-system]
