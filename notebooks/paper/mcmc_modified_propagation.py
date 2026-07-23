@@ -593,31 +593,20 @@ def build_snr_xi0_n_constraint_table(
         )
 
     rows: list[dict[str, Any]] = []
-    for (network, detectors), tree, label in zip(
-        networks.items(), inference_data, labels, strict=True
-    ):
+    for network, tree, label in zip(networks, inference_data, labels, strict=True):
         snr = float(snr_by_network.loc[network, "snr"])
         xi0_lower, xi0_upper = _hdi(tree, "xi_0", group=group, probability=probability)
         n_lower, n_upper = _hdi(tree, "xi_n", group=group, probability=probability)
         sigma_xi0_hdi = (xi0_upper - xi0_lower) / 2
         sigma_n_hdi = (n_upper - n_lower) / 2
-        sigma_xi0_snr = xi_0_fiducial / snr
         rows.append(
             {
-                "network": network,
                 "label": label,
-                "detectors": ",".join(detectors),
-                "n_detectors": len(detectors),
                 "snr": snr,
-                "xi0_hdi_lower": xi0_lower,
-                "xi0_hdi_upper": xi0_upper,
                 "sigma_xi0_hdi": sigma_xi0_hdi,
-                "sigma_xi0_snr": sigma_xi0_snr,
                 "rel_sigma_xi0_hdi": sigma_xi0_hdi / xi_0_fiducial,
-                "rel_sigma_xi0_snr": 1.0 / snr,
-                "n_hdi_lower": n_lower,
-                "n_hdi_upper": n_upper,
                 "sigma_n_hdi": sigma_n_hdi,
+                "rel_sigma_xi0_snr": 1.0 / snr,
             }
         )
     return pd.DataFrame(rows)
@@ -627,20 +616,12 @@ def xi0_n_constraint_table_latex(table: pd.DataFrame) -> str:
     """Format the $\\Xi_0$/$n$ constraint table as a publication LaTeX tabular."""
     latex_table = table.rename(
         columns={
-            "network": "Network",
-            "label": "Label",
-            "detectors": "Detectors",
-            "n_detectors": r"$N_{\rm det}$",
+            "label": "Detector Network",
             "snr": "SNR",
-            "xi0_hdi_lower": r"$\Xi_{0,\rm low}$",
-            "xi0_hdi_upper": r"$\Xi_{0,\rm high}$",
             "sigma_xi0_hdi": r"$\sigma_{\Xi_0}^{\rm HDI}$",
-            "sigma_xi0_snr": r"$\sigma_{\Xi_0}^{\rm SNR}$",
             "rel_sigma_xi0_hdi": r"$\sigma_{\Xi_0}^{\rm HDI}/\Xi_0$",
-            "rel_sigma_xi0_snr": r"$1/{\rm SNR}$",
-            "n_hdi_lower": r"$n_{\rm low}$",
-            "n_hdi_upper": r"$n_{\rm high}$",
             "sigma_n_hdi": r"$\sigma_n^{\rm HDI}$",
+            "rel_sigma_xi0_snr": r"$1/{\rm SNR}$",
         }
     )
     return latex_table.to_latex(

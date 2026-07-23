@@ -120,22 +120,13 @@ def test_build_snr_xi0_n_constraint_table(
     )
 
     assert list(result.columns) == [
-        "network",
         "label",
-        "detectors",
-        "n_detectors",
         "snr",
-        "xi0_hdi_lower",
-        "xi0_hdi_upper",
         "sigma_xi0_hdi",
-        "sigma_xi0_snr",
         "rel_sigma_xi0_hdi",
-        "rel_sigma_xi0_snr",
-        "n_hdi_lower",
-        "n_hdi_upper",
         "sigma_n_hdi",
+        "rel_sigma_xi0_snr",
     ]
-    assert result.loc[0, "sigma_xi0_snr"] == pytest.approx(0.1)
     assert result.loc[0, "rel_sigma_xi0_snr"] == pytest.approx(0.1)
     assert result.loc[0, "sigma_xi0_hdi"] > 0
     assert result.loc[0, "sigma_n_hdi"] > 0
@@ -163,20 +154,12 @@ def test_xi0_n_constraint_table_latex_contains_snr_column(
     table = pd.DataFrame(
         [
             {
-                "network": "network-a",
                 "label": "ET",
-                "detectors": "E1,E2,E3",
-                "n_detectors": 3,
                 "snr": 10.0,
-                "xi0_hdi_lower": 0.9,
-                "xi0_hdi_upper": 1.1,
                 "sigma_xi0_hdi": 0.1,
-                "sigma_xi0_snr": 0.1,
                 "rel_sigma_xi0_hdi": 0.1,
-                "rel_sigma_xi0_snr": 0.1,
-                "n_hdi_lower": 1.5,
-                "n_hdi_upper": 2.3,
                 "sigma_n_hdi": 0.4,
+                "rel_sigma_xi0_snr": 0.1,
             }
         ]
     )
@@ -184,4 +167,5 @@ def test_xi0_n_constraint_table_latex_contains_snr_column(
     latex = modified_propagation_notebook.xi0_n_constraint_table_latex(table)
 
     assert "SNR" in latex
-    assert "network-a" in latex
+    assert "Detector Network" in latex
+    assert "ET" in latex
