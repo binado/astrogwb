@@ -134,10 +134,10 @@ DEFAULT_DETECTOR_CHAINS = [
 DEFAULT_DETECTOR_LABELS = [
     r"ET-$\Delta$",
     r"ET-$\Delta +$ CE",
+    "ET-2L-par",
+    r"ET-2L-par $+$ CE",
     "ET-2L",
     r"ET-2L $+$ CE",
-    r"ET-2L-$\alpha$",
-    r"ET-2L-$\alpha +$ CE",
 ]
 
 DEFAULT_PRIOR_CHAINS = [
@@ -702,24 +702,15 @@ def build_snr_h0_constraint_table(
         )
 
     rows: list[dict[str, Any]] = []
-    for (network, detectors), tree, label in zip(
-        networks.items(), inference_data, labels, strict=True
-    ):
+    for network, tree, label in zip(networks, inference_data, labels, strict=True):
         snr = float(snr_by_network.loc[network, "snr"])
         lower, upper = _hdi(tree, "H0", group=group, probability=probability)
         sigma_hdi = (upper - lower) / 2
-        sigma_snr = h0_fiducial / snr
         rows.append(
             {
-                "network": network,
                 "label": label,
-                "detectors": ",".join(detectors),
-                "n_detectors": len(detectors),
                 "snr": snr,
-                "h0_hdi_lower": lower,
-                "h0_hdi_upper": upper,
                 "sigma_h0_hdi": sigma_hdi,
-                "sigma_h0_snr": sigma_snr,
                 "rel_sigma_h0_hdi": sigma_hdi / h0_fiducial,
                 "rel_sigma_h0_snr": 1.0 / snr,
             }
@@ -731,15 +722,9 @@ def constraint_table_latex(table: pd.DataFrame) -> str:
     """Format the constraint table as a publication LaTeX tabular."""
     latex_table = table.rename(
         columns={
-            "network": "Network",
-            "label": "Label",
-            "detectors": "Detectors",
-            "n_detectors": r"$N_{\rm det}$",
+            "label": "Detector Network",
             "snr": "SNR",
-            "h0_hdi_lower": r"$H_{0,\rm low}$",
-            "h0_hdi_upper": r"$H_{0,\rm high}$",
             "sigma_h0_hdi": r"$\sigma_{H_0}^{\rm HDI}$",
-            "sigma_h0_snr": r"$\sigma_{H_0}^{\rm SNR}$",
             "rel_sigma_h0_hdi": r"$\sigma_{H_0}^{\rm HDI}/H_0$",
             "rel_sigma_h0_snr": r"$1/{\rm SNR}$",
         }

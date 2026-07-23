@@ -24,11 +24,14 @@
 # 2. $\Xi_0 + n$ (both propagation parameters sampled), and
 # 3. $\Xi_0 + H_0$ with a Gaussian prior on the Hubble constant.
 #
-# It produces three figures:
+# It produces three figures and two tables:
 #
 # - a corner plot of the $\Xi_0$--$n$ posterior (chain 2),
-# - an overlay of the marginal $\Xi_0$ posterior across all three chains, and
-# - a $\Xi_0$--$H_0$ corner plot (chain 3).
+# - an overlay of the marginal $\Xi_0$ posterior across all three chains,
+# - a $\Xi_0$--$H_0$ corner plot (chain 3),
+# - a $\Xi_0$ 1$\sigma$ HDI table across the three chains, and
+# - a matched-filter-SNR / $\Xi_0$-$n$ HDI constraint table across detector
+#   networks, using the joint $\Xi_0 + n$ chain for each network.
 #
 # Chain paths and labels are separate inputs. This keeps chain loading outside the
 # plotting helpers and makes it possible to select different inference runs without
@@ -44,6 +47,8 @@ from typing import Any
 
 import arviz_stats as azs
 import corner
+import jax
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -52,6 +57,7 @@ from arviz_base.labels import MapLabeller
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.lines import Line2D
 from matplotlib.projections import register_projection
+from pluscross import load_catalog
 
 from _paper_style import (
     CATEGORY,
@@ -61,11 +67,20 @@ from _paper_style import (
     get_corner_kwargs,
     use_paper_style,
 )
-from astrogwb.utils import repo_root
+from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.gwb import frequency_mask as make_frequency_mask
+from astrogwb.gwb import spectral_density, spectral_snr
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    compute_proposal_logpdf,
+    make_merger_rate_and_log_weights_fn,
+)
+from astrogwb.utils import repo_root, years_to_seconds
+from astrogwb.waveform import polarization_power as compute_polarization_power
 
 # gwpy (via gwmock-signal) replaces matplotlib's rectilinear axes. ArviZ can then
 # mis-detect the backend, so restore the standard matplotlib projection.
 register_projection(MplAxes)
+jax.config.update("jax_enable_x64", True)
 
 # %config InlineBackend.figure_format = "retina"
 
@@ -114,6 +129,44 @@ DEFAULT_H0_LABELS = [
     r"$\Xi_0 + H_0$",
 ]
 
+# Fiducial population/cosmology hyperparameters needed to evaluate the SGWB and
+# its matched-filter SNR for the by-detector constraint table below.
+DEFAULT_OMEGA_M = 0.3096
+DEFAULT_GAMMA = 1.42
+DEFAULT_KAPPA = 4.62
+DEFAULT_Z_PEAK = 1.84
+DEFAULT_LOCAL_MERGER_RATE = 161.0
+
+DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
+DEFAULT_OBSERVATION_TIME = 1.0
+DEFAULT_F_MIN = 2.0
+DEFAULT_F_MAX = 4096.0
+DEFAULT_Z_MIN = 0.0
+DEFAULT_Z_MAX = 20.0
+DEFAULT_N_GRID = 256
+
+DEFAULT_DETECTOR_NETWORKS = {
+    "ET-triangular": ("E1", "E2", "E3"),
+    "ET-triangular-CE-Hanford": ("E1", "E2", "E3", "C1"),
+    "ET-2L-aligned": ("S1", "R1"),
+    "ET-2L-aligned-CE-Hanford": ("S1", "R1", "C1"),
+    "ET-2L-misaligned": ("S2", "R2"),
+    "ET-2L-misaligned-CE-Hanford": ("S2", "R2", "C1"),
+}
+DEFAULT_NETWORKS = list(DEFAULT_DETECTOR_NETWORKS)
+DEFAULT_DETECTOR_LABELS = [
+    r"ET-$\Delta$",
+    r"ET-$\Delta +$ CE",
+    "ET-2L-par",
+    r"ET-2L-par $+$ CE",
+    "ET-2L",
+    r"ET-2L $+$ CE",
+]
+_DETECTOR_CHAIN_DIR = Path("chains/bns-n16384-df1/modified-propagation-all-detectors")
+DEFAULT_DETECTOR_XI0_N_CHAINS = [
+    _DETECTOR_CHAIN_DIR / f"{name}__Xi_0-n__baseline.nc" for name in DEFAULT_NETWORKS
+]
+
 # %% [markdown]
 # ## Input and validation helpers
 
@@ -121,6 +174,65 @@ DEFAULT_H0_LABELS = [
 # %%
 def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
+
+
+def _parse_network_definition(value: str) -> tuple[str, tuple[str, ...]]:
+    if "=" not in value:
+        raise ValueError(
+            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
+        )
+    name, detector_list = value.split("=", 1)
+    name = name.strip()
+    detectors = tuple(detector.strip() for detector in detector_list.split(","))
+    if not name or not detectors or any(not detector for detector in detectors):
+        raise ValueError(
+            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
+        )
+    return name, detectors
+
+
+def _resolve_networks(
+    defaults: Mapping[str, tuple[str, ...]],
+    definitions: Sequence[str],
+    selected: Sequence[str],
+) -> dict[str, tuple[str, ...]]:
+    networks = dict(defaults)
+    cli_names: set[str] = set()
+    for definition in definitions:
+        name, detectors = _parse_network_definition(definition)
+        if name in cli_names:
+            raise ValueError(f"duplicate --network definition for {name!r}")
+        cli_names.add(name)
+        networks[name] = detectors
+
+    names = list(selected) or list(networks)
+    unknown = [name for name in names if name not in networks]
+    if unknown:
+        raise ValueError(f"unknown selected network(s): {', '.join(unknown)}")
+    return {name: networks[name] for name in names}
+
+
+def _base_network_name(name: str) -> str:
+    """Map an ET+CE network name onto its ET-only counterpart."""
+    suffix = "-CE-Hanford"
+    return name[: -len(suffix)] if name.endswith(suffix) else name
+
+
+def detector_network_styles(
+    networks: Mapping[str, tuple[str, ...]],
+) -> tuple[list[str], list[str]]:
+    """Shared color per ET / ET+CE pair; dashed linestyle for CE companions."""
+    names = list(networks)
+    bases: list[str] = []
+    for name in names:
+        base = _base_network_name(name)
+        if base not in bases:
+            bases.append(base)
+    palette = combo_colors(len(bases))
+    color_by_base = dict(zip(bases, palette, strict=True))
+    colors = [color_by_base[_base_network_name(name)] for name in names]
+    linestyles = ["--" if name.endswith("-CE-Hanford") else "-" for name in names]
+    return colors, linestyles
 
 
 def load_inference_data(path: Path) -> xr.DataTree:
@@ -346,6 +458,199 @@ def xi0_hdi_table(
 
 
 # %% [markdown]
+# ## Fiducial SNR and $\Xi_0$/$n$ constraint table by detector
+
+
+# %%
+def compute_network_snrs(
+    catalog_path: Path,
+    networks: Mapping[str, tuple[str, ...]],
+    fiducials: Mapping[str, float],
+    *,
+    observation_time: float,
+    f_min: float,
+    f_max: float,
+    z_min: float,
+    z_max: float,
+    n_grid: int,
+) -> pd.DataFrame:
+    """Compute the fiducial matched-filter SNR for each detector network."""
+    catalog = load_catalog(catalog_path)
+    frequencies = jnp.asarray(catalog.frequencies)
+    polarization_power = jnp.asarray(compute_polarization_power(catalog))
+    samples = {
+        name: jnp.asarray(values) for name, values in catalog.source_parameters.items()
+    }
+    del catalog
+
+    missing = [
+        name for name in ("redshift", "luminosity_distance") if name not in samples
+    ]
+    if missing:
+        raise ValueError(
+            "catalog samples are missing required parameter(s): " + ", ".join(missing)
+        )
+
+    z_grid = jnp.linspace(z_min, z_max, n_grid)
+    proposal_log_pdf = compute_proposal_logpdf(
+        samples["redshift"], z_grid=z_grid, fiducials=fiducials
+    )
+    merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
+        z_grid=z_grid,
+        proposal_log_pdf=proposal_log_pdf,
+        fiducial_xi_0=fiducials["xi_0"],
+        fiducial_xi_n=fiducials["xi_n"],
+    )
+    total_rate, log_weights = merger_rate_and_log_weights_fn(fiducials, samples)
+    observed_spectral_density = spectral_density(
+        polarization_power,
+        jnp.exp(log_weights),
+        total_rate,
+        average_mode="analytic_inclination",
+    )
+
+    mask = make_frequency_mask(frequencies, fmin=f_min, fmax=f_max)
+    frequency_spacing = jnp.mean(jnp.diff(frequencies))
+    observation_seconds = years_to_seconds(observation_time)
+
+    rows: list[dict[str, Any]] = []
+    for network, detectors in networks.items():
+        sensitivities = load_sensitivity_map(detectors)
+        effective_noise = jnp.asarray(
+            effective_psd(frequencies, list(detectors), sensitivities)
+        )
+        snr = float(
+            spectral_snr(
+                observed_spectral_density[mask],
+                effective_noise[mask],
+                observation_seconds,
+                frequency_spacing,
+            )
+        )
+        rows.append(
+            {
+                "network": network,
+                "detectors": ",".join(detectors),
+                "n_detectors": len(detectors),
+                "snr": snr,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _hdi(
+    tree: xr.DataTree,
+    var_name: str,
+    *,
+    group: str,
+    probability: float,
+) -> tuple[float, float]:
+    interval = azs.hdi(tree, group=group, var_names=var_name, prob=probability)[
+        var_name
+    ]
+    return (
+        float(interval.sel(ci_bound="lower")),
+        float(interval.sel(ci_bound="upper")),
+    )
+
+
+def _posterior_median(
+    tree: xr.DataTree,
+    var_name: str,
+    *,
+    group: str,
+) -> float:
+    return float(np.nanmedian(np.asarray(tree[group][var_name]).reshape(-1)))
+
+
+def build_snr_xi0_n_constraint_table(
+    networks: Mapping[str, tuple[str, ...]],
+    inference_data: Sequence[xr.DataTree],
+    labels: Sequence[str],
+    snr_table: pd.DataFrame,
+    *,
+    xi_0_fiducial: float,
+    group: str = "posterior",
+    probability: float = CORNER_LEVELS[0],
+) -> pd.DataFrame:
+    """Combine SNR scaling and sampled $\\Xi_0$/$n$ HDI constraints by network.
+
+    `n` has no simple SNR-scaling analog (unlike `xi_0`, which enters as an
+    overall amplitude rescaling), so only its HDI-based half-width is reported.
+    """
+    validate_inference_data(
+        inference_data,
+        labels,
+        required_vars=XI_N_VAR_NAMES,
+        group=group,
+        expected_count=len(networks),
+    )
+    snr_by_network = snr_table.set_index("network")
+    missing_networks = [name for name in networks if name not in snr_by_network.index]
+    if missing_networks:
+        raise KeyError(
+            "SNR table is missing configured network(s): " + ", ".join(missing_networks)
+        )
+
+    rows: list[dict[str, Any]] = []
+    for network, tree, label in zip(networks, inference_data, labels, strict=True):
+        snr = float(snr_by_network.loc[network, "snr"])
+        xi0_lower, xi0_upper = _hdi(tree, "xi_0", group=group, probability=probability)
+        n_lower, n_upper = _hdi(tree, "xi_n", group=group, probability=probability)
+        sigma_xi0_hdi = (xi0_upper - xi0_lower) / 2
+        sigma_n_hdi = (n_upper - n_lower) / 2
+        rows.append(
+            {
+                "label": label,
+                "snr": snr,
+                "sigma_xi0_hdi": sigma_xi0_hdi,
+                "rel_sigma_xi0_hdi": sigma_xi0_hdi / xi_0_fiducial,
+                "sigma_n_hdi": sigma_n_hdi,
+                "rel_sigma_xi0_snr": 1.0 / snr,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def xi0_n_constraint_table_latex(table: pd.DataFrame) -> str:
+    """Format the $\\Xi_0$/$n$ constraint table as a publication LaTeX tabular."""
+    latex_table = table.rename(
+        columns={
+            "label": "Detector Network",
+            "snr": "SNR",
+            "sigma_xi0_hdi": r"$\sigma_{\Xi_0}^{\rm HDI}$",
+            "rel_sigma_xi0_hdi": r"$\sigma_{\Xi_0}^{\rm HDI}/\Xi_0$",
+            "sigma_n_hdi": r"$\sigma_n^{\rm HDI}$",
+            "rel_sigma_xi0_snr": r"$1/{\rm SNR}$",
+        }
+    )
+    return latex_table.to_latex(
+        index=False,
+        escape=False,
+        float_format="%.3g",
+        caption=(
+            r"Matched-filter SNR and $\Xi_0$/$n$ constraints by detector network. "
+            "Posterior constraints are half-widths of the 68.27\\% HDI."
+        ),
+        label="tab:mcmc_modified_propagation_xi0_n_by_detector",
+    )
+
+
+def write_xi0_n_constraint_table(
+    table: pd.DataFrame,
+    csv_path: Path,
+    tex_path: Path,
+) -> str:
+    """Write the machine-readable and publication-formatted constraint tables."""
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    tex_path.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(csv_path, index=False)
+    latex = xi0_n_constraint_table_latex(table)
+    tex_path.write_text(latex, encoding="utf-8")
+    return latex
+
+
+# %% [markdown]
 # ## Command-line configuration
 #
 # Every setting below can be overridden with a CLI flag when running this
@@ -375,12 +680,64 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path("figures/mcmc_modified_propagation_Xi0_H0_corner.pdf"),
     )
+    parser.add_argument(
+        "--detector-xi0-n-chains",
+        type=Path,
+        nargs="+",
+        default=DEFAULT_DETECTOR_XI0_N_CHAINS,
+    )
+    parser.add_argument("--detector-labels", nargs="+", default=DEFAULT_DETECTOR_LABELS)
+    parser.add_argument(
+        "--output-xi0-n-csv",
+        type=Path,
+        default=Path("figures/mcmc_modified_propagation_Xi0_n_by_detector.csv"),
+    )
+    parser.add_argument(
+        "--output-xi0-n-tex",
+        type=Path,
+        default=Path("figures/mcmc_modified_propagation_Xi0_n_by_detector.tex"),
+    )
+    parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
+    parser.add_argument(
+        "--network",
+        action="append",
+        default=[],
+        metavar="NAME=DET1,DET2,...",
+        help="Add or override a detector-network definition (repeatable).",
+    )
+    parser.add_argument(
+        "--networks",
+        nargs="*",
+        default=DEFAULT_NETWORKS,
+        help="Defined network names to include in detector-chain order.",
+    )
+    parser.add_argument(
+        "--observation-time", type=float, default=DEFAULT_OBSERVATION_TIME
+    )
+    parser.add_argument("--f-min", type=float, default=DEFAULT_F_MIN)
+    parser.add_argument("--f-max", type=float, default=DEFAULT_F_MAX)
+    parser.add_argument("--z-min", type=float, default=DEFAULT_Z_MIN)
+    parser.add_argument("--z-max", type=float, default=DEFAULT_Z_MAX)
+    parser.add_argument("--n-grid", type=int, default=DEFAULT_N_GRID)
+    parser.add_argument("--omega-m", type=float, default=DEFAULT_OMEGA_M)
+    parser.add_argument("--gamma", type=float, default=DEFAULT_GAMMA)
+    parser.add_argument("--kappa", type=float, default=DEFAULT_KAPPA)
+    parser.add_argument("--z-peak", type=float, default=DEFAULT_Z_PEAK)
+    parser.add_argument(
+        "--local-merger-rate", type=float, default=DEFAULT_LOCAL_MERGER_RATE
+    )
     parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument("--group", default="posterior")
     parser.add_argument("--xi-0", type=float, default=DEFAULT_XI_0)
     parser.add_argument("--xi-n", type=float, default=DEFAULT_XI_N)
     parser.add_argument("--h0", type=float, default=DEFAULT_H0)
     args, _ = parser.parse_known_args(argv)
+    try:
+        args.resolved_networks = _resolve_networks(
+            DEFAULT_DETECTOR_NETWORKS, args.network, args.networks
+        )
+    except ValueError as error:
+        parser.error(str(error))
     return args
 
 
@@ -417,7 +774,34 @@ fiducials = {
     "xi_0": args.xi_0,
     "xi_n": args.xi_n,
     "H0": args.h0,
+    "Omega_m": args.omega_m,
+    "gamma": args.gamma,
+    "kappa": args.kappa,
+    "z_peak": args.z_peak,
+    "local_merger_rate": args.local_merger_rate,
 }
+
+networks = args.resolved_networks
+if len(args.detector_xi0_n_chains) != len(args.detector_labels):
+    raise ValueError(
+        "--detector-xi0-n-chains and --detector-labels must have equal length"
+    )
+if len(args.detector_xi0_n_chains) != len(networks):
+    raise ValueError(
+        "detector chain count must match --networks: "
+        f"received {len(args.detector_xi0_n_chains)} chains for {len(networks)} networks"
+    )
+detector_xi0_n_paths = [
+    _resolve_path(path, root) for path in args.detector_xi0_n_chains
+]
+detector_xi0_n_data = [load_inference_data(path) for path in detector_xi0_n_paths]
+validate_inference_data(
+    detector_xi0_n_data,
+    args.detector_labels,
+    required_vars=XI_N_VAR_NAMES,
+    group=args.group,
+    expected_count=len(networks),
+)
 
 use_paper_style()
 
@@ -481,9 +865,47 @@ h0_corner_figure = plot_corner(
 )
 
 # %% [markdown]
-# ## Save figures
+# ## Fiducial SNR and $\Xi_0$/$n$ constraint table by detector
 #
-# Write the three figures above to the configured output paths.
+# Evaluate the fiducial SGWB once, compute the matched-filter SNR for each
+# detector network, and combine those estimates with the sampled $\Xi_0$/$n$
+# HDI widths from the joint $\Xi_0 + n$ chain for that network.
+
+# %%
+snr_table = compute_network_snrs(
+    _resolve_path(args.catalog, root),
+    networks,
+    fiducials,
+    observation_time=args.observation_time,
+    f_min=args.f_min,
+    f_max=args.f_max,
+    z_min=args.z_min,
+    z_max=args.z_max,
+    n_grid=args.n_grid,
+)
+xi0_n_constraint_table = build_snr_xi0_n_constraint_table(
+    networks,
+    detector_xi0_n_data,
+    args.detector_labels,
+    snr_table,
+    xi_0_fiducial=args.xi_0,
+    group=args.group,
+)
+xi0_n_constraint_table
+
+# %% [markdown]
+# ## LaTeX $\Xi_0$/$n$ constraint table
+#
+# Publication-formatted version of the table above.
+
+# %%
+print(xi0_n_constraint_table_latex(xi0_n_constraint_table))
+
+# %% [markdown]
+# ## Save figures and table
+#
+# Write the three figures above, and the machine-readable / LaTeX constraint
+# tables, to the configured output paths.
 
 # %%
 outputs = {
@@ -495,3 +917,9 @@ for output_path, figure in outputs.items():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
     print("saved figure:", output_path)
+
+xi0_n_csv_path = _resolve_path(args.output_xi0_n_csv, root)
+xi0_n_tex_path = _resolve_path(args.output_xi0_n_tex, root)
+write_xi0_n_constraint_table(xi0_n_constraint_table, xi0_n_csv_path, xi0_n_tex_path)
+print("saved constraint table:", xi0_n_csv_path)
+print("saved LaTeX table:", xi0_n_tex_path)
