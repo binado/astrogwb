@@ -43,9 +43,9 @@ low = 20.0
 high = 140.0
 
 [priors.Omega_m]
-type = "uniform"
-low = 0.05
-high = 0.95
+type = "normal"
+loc = 0.3096
+scale = 0.006
 
 [output]
 outdir = "chains"
