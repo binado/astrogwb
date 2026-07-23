@@ -71,19 +71,19 @@ label = 'ET-$\Delta +$ CE'
 
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-aligned"
-label = "ET-2L"
+label = "ET-2L-par"
 
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-aligned-CE-Hanford"
-label = 'ET-2L $+$ CE'
+label = 'ET-2L-par $+$ CE'
 
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-misaligned"
-label = 'ET-2L-$\alpha$'
+label = "ET-2L"
 
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-misaligned-CE-Hanford"
-label = 'ET-2L-$\alpha +$ CE'
+label = 'ET-2L $+$ CE'
 
 [[figures.mcmc_cosmological_parameters.prior_posteriors]]
 analysis = "H0"
@@ -108,3 +108,28 @@ xi0_n_analysis = "Xi_0-n"
 h0_analysis = "Xi_0-H0-gauss"
 marginal_labels = ['$\Xi_0$', '$\Xi_0 + n$', '$\Xi_0 + H_0$']
 h0_labels = ['$\Xi_0 + H_0$']
+detector_campaign = "modified-propagation-all-detectors"
+
+[[figures.mcmc_modified_propagation.detector_posteriors]]
+network = "ET-triangular"
+label = 'ET-$\Delta$'
+
+[[figures.mcmc_modified_propagation.detector_posteriors]]
+network = "ET-triangular-CE-Hanford"
+label = 'ET-$\Delta +$ CE'
+
+[[figures.mcmc_modified_propagation.detector_posteriors]]
+network = "ET-2L-aligned"
+label = "ET-2L-par"
+
+[[figures.mcmc_modified_propagation.detector_posteriors]]
+network = "ET-2L-aligned-CE-Hanford"
+label = 'ET-2L-par $+$ CE'
+
+[[figures.mcmc_modified_propagation.detector_posteriors]]
+network = "ET-2L-misaligned"
+label = "ET-2L"
+
+[[figures.mcmc_modified_propagation.detector_posteriors]]
+network = "ET-2L-misaligned-CE-Hanford"
+label = 'ET-2L $+$ CE'

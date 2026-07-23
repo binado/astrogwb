@@ -81,6 +81,20 @@ MODIFIED_PROPAGATION_H0_CHAIN = (
 )
 MODIFIED_PROPAGATION_MARGINAL_LABELS = MODIFIED_PROPAGATION_FIGURE["marginal_labels"]
 MODIFIED_PROPAGATION_H0_LABELS = MODIFIED_PROPAGATION_FIGURE["h0_labels"]
+MODIFIED_PROPAGATION_DETECTOR_CAMPAIGN = MODIFIED_PROPAGATION_FIGURE[
+    "detector_campaign"
+]
+MODIFIED_PROPAGATION_DETECTOR_POSTERIORS = MODIFIED_PROPAGATION_FIGURE[
+    "detector_posteriors"
+]
+MODIFIED_PROPAGATION_XI0_N_DETECTOR_CHAINS = [
+    f"{CHAINS_DIR}/{CATALOG_ID}/{MODIFIED_PROPAGATION_DETECTOR_CAMPAIGN}/"
+    f"{entry['network']}__{MODIFIED_PROPAGATION_FIGURE['xi0_n_analysis']}__baseline.nc"
+    for entry in MODIFIED_PROPAGATION_DETECTOR_POSTERIORS
+]
+MODIFIED_PROPAGATION_XI0_N_DETECTOR_LABELS = [
+    entry["label"] for entry in MODIFIED_PROPAGATION_DETECTOR_POSTERIORS
+]
 MODIFIED_PROPAGATION_OUTPUTS = config["mcmc_modified_propagation"]
 MODIFIED_PROPAGATION_XI_N_CORNER_PDF = MODIFIED_PROPAGATION_OUTPUTS[
     "output_xi_n_corner_pdf"
@@ -91,6 +105,8 @@ MODIFIED_PROPAGATION_XI0_MARGINAL_PDF = MODIFIED_PROPAGATION_OUTPUTS[
 MODIFIED_PROPAGATION_H0_CORNER_PDF = MODIFIED_PROPAGATION_OUTPUTS[
     "output_h0_corner_pdf"
 ]
+MODIFIED_PROPAGATION_XI0_N_CSV = MODIFIED_PROPAGATION_OUTPUTS["output_xi0_n_csv"]
+MODIFIED_PROPAGATION_XI0_N_TEX = MODIFIED_PROPAGATION_OUTPUTS["output_xi0_n_tex"]
 
 
 localrules:
@@ -115,6 +131,8 @@ rule paper_figures:
         MODIFIED_PROPAGATION_XI_N_CORNER_PDF,
         MODIFIED_PROPAGATION_XI0_MARGINAL_PDF,
         MODIFIED_PROPAGATION_H0_CORNER_PDF,
+        MODIFIED_PROPAGATION_XI0_N_CSV,
+        MODIFIED_PROPAGATION_XI0_N_TEX,
 
 
 rule amplitude_toy:
@@ -254,19 +272,37 @@ rule mcmc_cosmological_parameters:
 rule mcmc_modified_propagation:
     input:
         config=str(PAPER_CONFIG_PATH),
+        catalog=CATALOG_PATH,
         xi0_chain=MODIFIED_PROPAGATION_XI0_CHAIN,
         xi0_n_chain=MODIFIED_PROPAGATION_XI0_N_CHAIN,
         h0_chain=MODIFIED_PROPAGATION_H0_CHAIN,
+        xi0_n_detector_chains=MODIFIED_PROPAGATION_XI0_N_DETECTOR_CHAINS,
     output:
         xi_n_corner_pdf=MODIFIED_PROPAGATION_XI_N_CORNER_PDF,
         xi0_marginal_pdf=MODIFIED_PROPAGATION_XI0_MARGINAL_PDF,
         h0_corner_pdf=MODIFIED_PROPAGATION_H0_CORNER_PDF,
+        xi0_n_csv=MODIFIED_PROPAGATION_XI0_N_CSV,
+        xi0_n_tex=MODIFIED_PROPAGATION_XI0_N_TEX,
     params:
         marginal_labels=MODIFIED_PROPAGATION_MARGINAL_LABELS,
         h0_labels=MODIFIED_PROPAGATION_H0_LABELS,
         xi_0=PAPER_FIDUCIALS["xi_0"],
         xi_n=PAPER_FIDUCIALS["xi_n"],
         h0=PAPER_FIDUCIALS["H0"],
+        omega_m=PAPER_FIDUCIALS["Omega_m"],
+        gamma=PAPER_FIDUCIALS["gamma"],
+        kappa=PAPER_FIDUCIALS["kappa"],
+        z_peak=PAPER_FIDUCIALS["z_peak"],
+        local_merger_rate=PAPER_FIDUCIALS["local_merger_rate"],
+        observation_time=PAPER_ANALYSIS["observation_time"],
+        f_min=PAPER_ANALYSIS["f_min"],
+        f_max=PAPER_ANALYSIS["f_max"],
+        z_min=PAPER_COSMOLOGY["z_min"],
+        z_max=PAPER_COSMOLOGY["z_max"],
+        n_grid=PAPER_COSMOLOGY["n_grid"],
+        network_args=PAPER_NETWORK_ARGS,
+        network_names=PAPER_NETWORK_NAMES,
+        xi0_n_detector_labels=lambda wildcards: MODIFIED_PROPAGATION_XI0_N_DETECTOR_LABELS,
     shell:
         "uv run --extra mcmc --group plotting"
         " python notebooks/paper/mcmc_modified_propagation.py"
@@ -281,3 +317,21 @@ rule mcmc_modified_propagation:
         " --output-xi-n-corner-pdf {output.xi_n_corner_pdf:q}"
         " --output-xi0-marginal-pdf {output.xi0_marginal_pdf:q}"
         " --output-h0-corner-pdf {output.h0_corner_pdf:q}"
+        " --catalog {input.catalog:q}"
+        " --detector-xi0-n-chains {input.xi0_n_detector_chains:q}"
+        " --detector-labels {params.xi0_n_detector_labels:q}"
+        " {params.network_args:q}"
+        " --networks {params.network_names:q}"
+        " --omega-m {params.omega_m}"
+        " --gamma {params.gamma}"
+        " --kappa {params.kappa}"
+        " --z-peak {params.z_peak}"
+        " --local-merger-rate {params.local_merger_rate}"
+        " --observation-time {params.observation_time}"
+        " --f-min {params.f_min}"
+        " --f-max {params.f_max}"
+        " --z-min {params.z_min}"
+        " --z-max {params.z_max}"
+        " --n-grid {params.n_grid}"
+        " --output-xi0-n-csv {output.xi0_n_csv:q}"
+        " --output-xi0-n-tex {output.xi0_n_tex:q}"
