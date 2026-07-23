@@ -134,10 +134,10 @@ DEFAULT_DETECTOR_CHAINS = [
 DEFAULT_DETECTOR_LABELS = [
     r"ET-$\Delta$",
     r"ET-$\Delta +$ CE",
+    "ET-2L-par",
+    r"ET-2L-par $+$ CE",
     "ET-2L",
     r"ET-2L $+$ CE",
-    r"ET-2L-$\alpha$",
-    r"ET-2L-$\alpha +$ CE",
 ]
 
 DEFAULT_PRIOR_CHAINS = [
