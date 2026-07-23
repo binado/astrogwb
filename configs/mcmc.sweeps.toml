@@ -32,7 +32,7 @@ priors = { H0 = "uniform" }
 
 [analyses.H0-Omega_m]
 sampled_params = ["H0", "Omega_m"]
-priors = { H0 = "uniform", Omega_m = "uniform" }
+priors = { H0 = "uniform", Omega_m = "normal" }
 
 [analyses.H0-merger-rate]
 sampled_params = ["H0", "local_merger_rate"]
@@ -76,6 +76,11 @@ scale = 0.6766
 type = "uniform"
 low = 0.05
 high = 0.95
+
+[priors.Omega_m.normal]
+type = "normal"
+loc = 0.3096
+scale = 0.006
 
 [priors.xi_0.uniform]
 type = "uniform"
