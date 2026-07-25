@@ -4,9 +4,14 @@
 # Job logs land under .snakemake/slurm_logs/.
 executor: slurm
 jobs: 32
-# Batch run_mcmc jobs into one SLURM job array per resource footprint
-# (parity with the retired sbatch --array flow).
-slurm-array-jobs: run_mcmc
+# NOTE: run_mcmc jobs were previously batched into one SLURM job array via
+# `slurm-array-jobs: run_mcmc` (parity with the retired sbatch --array flow).
+# Disabled: with heterogeneous wildcards per run, the SLURM array executor
+# can only encode the first job's wildcards/output paths in the shared
+# array comment string, so every other array task's wait-for-files check
+# ends up waiting on the wrong output file and fails with a spurious
+# MissingOutputException, even though the run actually completed
+# successfully. Submitting run_mcmc jobs individually avoids this.
 # Force the JAX backend to CPU so run_mcmc does not try to init CUDA on a
 # CPU node. Overrides the "cuda" default in workflow/mcmc.smk.
 config:
