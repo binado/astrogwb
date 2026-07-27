@@ -306,6 +306,7 @@ def plot_marginal_posteriors(
     colors: Sequence[str] | None = None,
     linestyles: Sequence[str] | None = None,
     group: str = "posterior",
+    fiducial: float | None = None,
     ax_kwargs: Mapping[str, Any] | None = None,
     legend_kwargs: Mapping[str, Any] | None = None,
 ) -> plt.Figure:
@@ -329,6 +330,9 @@ def plot_marginal_posteriors(
         x = kde.sel(plot_axis="x").to_numpy()
         probability = kde.sel(plot_axis="y").to_numpy()
         ax.plot(x, probability, label=label, color=color, linestyle=linestyle)
+
+    if fiducial is not None:
+        ax.axvline(fiducial, **TRUTH)
 
     resolved_ax_kwargs = {
         "xlabel": VAR_LABELS.get(var_name, var_name),
@@ -835,6 +839,7 @@ xi0_marginal_figure = plot_marginal_posteriors(
     var_name="xi_0",
     group=args.group,
     colors=combo_colors(len(inference_data)),
+    fiducial=fiducials["xi_0"],
 )
 
 # %% [markdown]

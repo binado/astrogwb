@@ -1,15 +1,15 @@
 """Shared paper-figure styling for the notebooks in this directory.
 
 Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
-style, and a loader for ``paper.mplstyle``. This module is independent of the
-``astrogwb`` package: it imports nothing from it, and nothing in the package
-imports this.
+style (solid), and a loader for ``paper.mplstyle``. This module is independent
+of the ``astrogwb`` package: it imports nothing from it, and nothing in the
+package imports this.
 
 Convention:
 - category accents are the default color for single-posterior figures;
 - the network palette colors the detector-network comparison figures;
 - ``combo_colors`` orders the per-parameter-combination marginal overlay;
-- truth / fiducial markers are always neutral dashed (``TRUTH``), everywhere.
+- truth / fiducial markers are always neutral solid (``TRUTH``), everywhere.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ NETWORK: dict[str, str] = {
     "ET+CE": "#F0E442",
 }
 
-TRUTH: dict[str, object] = {"color": "0.15", "linestyle": "--", "linewidth": 1.0}
+TRUTH: dict[str, object] = {"color": "0.15", "linestyle": "-", "linewidth": 1.0}
 
 CORNER_LEVELS: tuple[float, ...] = (0.6827, 0.9545)
 
