@@ -387,7 +387,17 @@ def plot_h0_posteriors(
         **dict(ax_kwargs or {}),
     }
     ax.set(**resolved_ax_kwargs)
-    ax.legend(**dict(legend_kwargs or {}))
+    handles = [
+        Line2D([], [], color=color, linestyle=linestyle, label=label)
+        for label, color, linestyle in zip(
+            labels, resolved_colors, resolved_linestyles, strict=True
+        )
+    ]
+    resolved_legend_kwargs = {
+        "handlelength": 2.5,
+        **dict(legend_kwargs or {}),
+    }
+    ax.legend(handles=handles, **resolved_legend_kwargs)
     fig.tight_layout()
     return fig
 

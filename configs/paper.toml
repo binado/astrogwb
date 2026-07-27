@@ -48,6 +48,7 @@ loc = "lower center"
 bbox_to_anchor = [0.5, 1.02]
 frameon = false
 borderaxespad = 0
+handlelength = 2.5
 
 [figures.mcmc_cosmological_parameters.prior_ax_kwargs]
 xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'
