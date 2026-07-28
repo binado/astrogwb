@@ -35,28 +35,26 @@ cosmology rule produces two marginalized $H_0$ comparisons, separate
 $H_0$--$\mathcal{R}_0$ corner plots for the narrow and broad merger-rate priors,
 an $H_0$--$\Omega_m$ corner plot, and a CSV/LaTeX SNR-and-constraint table.
 
-Preview the declared workflow:
+Preview the declared workflow (`just` defaults to `--dry-run`):
 
 ```bash
-uv run snakemake --snakefile workflow/paper.smk --dry-run paper_figures
+just paper
 ```
 
 Build all declared paper figures:
 
 ```bash
-uv run snakemake --snakefile workflow/paper.smk --cores 1 paper_figures
+just dry=0 paper
 ```
 
 Build one configured target:
 
 ```bash
-uv run snakemake --snakefile workflow/paper.smk --cores 1 \
-  figures/fiducial_spectrum.pdf
+just dry=0 paper figures/fiducial_spectrum.pdf
 ```
 
 ```bash
-uv run snakemake --snakefile workflow/paper.smk --cores 1 \
-  figures/mcmc_cosmological_parameters_H0_by_detector.pdf
+just dry=0 paper figures/mcmc_cosmological_parameters_H0_by_detector.pdf
 ```
 
 See [Snakemake workflow](./snakemake-workflow.md#paper-workflow) for a pipeline

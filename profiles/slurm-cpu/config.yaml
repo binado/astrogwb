@@ -1,5 +1,6 @@
-# CPU MCMC profile: snakemake --snakefile workflow/mcmc.smk \
-#   --profile profiles/slurm-cpu --configfile <batch.json> mcmc
+# CPU MCMC profile: just dry=0 mcmc-slurm-cpu <batch.json>
+#   snakemake --snakefile workflow/mcmc.smk \
+#     --profile profiles/slurm-cpu --configfile <batch.json> mcmc
 # Requires `uv sync --extra mcmc --group slurm` on the submit host.
 # Job logs land under .snakemake/slurm_logs/.
 executor: slurm
