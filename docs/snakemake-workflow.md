@@ -10,15 +10,20 @@ driven by a committed Snakemake *profile* that decides where jobs run:
 - [`workflow/paper.smk`](../workflow/paper.smk): builds paper figures
   (see [Paper figures](./paper-figures.md)).
 
+The [`scripts/workflow.py`](../scripts/workflow.py) CLI wraps common invocations
+(`uv run python scripts/workflow.py --help`). Snakemake subcommands default to
+`--dry-run`; pass `--submit` for a real run. The CLI expands to the same
+`uv run snakemake …` commands shown below.
+
 ## Catalog workflow
 
 Requesting a waveform catalog builds its missing or stale population first:
 
 ```bash
-uv run snakemake \
-  --snakefile workflow/catalog.smk \
-  --cores 1 \
-  out/catalogs/bns-n16384-df1.h5
+uv run python scripts/workflow.py catalog out/catalogs/bns-n16384-df1.h5 --submit
+# expands to:
+# uv run snakemake --snakefile workflow/catalog.smk --cores 1 \
+#   out/catalogs/bns-n16384-df1.h5
 ```
 
 ## MCMC workflow
@@ -38,7 +43,7 @@ they are fully reproducible from `configs/mcmc.sweeps.toml`, so there is
 nothing to commit.
 
 ```bash
-uv run --extra mcmc python scripts/generate_mcmc_configs.py --write-manifests
+uv run python scripts/workflow.py gen-configs
 ```
 
 Batch submission uses an explicit manifest such as
@@ -69,9 +74,9 @@ namespace chains and the catalog path:
 --config "catalog={'id':'my-catalog','path':'/data/catalogs/my-catalog.h5'}"
 ```
 
-Append the appropriate `--config` argument to the Snakemake commands below.
-Use the nested dictionary syntax shown here rather than a flat
-`catalog.id=...` key.
+Append the appropriate `--config` argument after `--` on
+`scripts/workflow.py mcmc …` (or directly on snakemake). Use the nested
+dictionary syntax shown here rather than a flat `catalog.id=...` key.
 
 Note the manifest schema has no `jax_platforms` field: which JAX backend to
 initialize is a runtime concern owned by the Snakemake profile you run with
@@ -79,13 +84,10 @@ initialize is a runtime concern owned by the Snakemake profile you run with
 an MCMC campaign, so it is never written by the generator. `workflow/mcmc.smk`
 itself defaults to `cuda` when a manifest doesn't set it.
 
-Dry-run the selected batch locally:
+Dry-run the selected batch (default; omit `--submit`):
 
 ```bash
-uv run snakemake \
-  --snakefile workflow/mcmc.smk \
-  --configfile configs/mcmc.batch.example.json \
-  --dry-run mcmc
+uv run python scripts/workflow.py mcmc configs/mcmc.batch.example.json --profile local
 ```
 
 ### Deploying on a SLURM cluster
@@ -118,11 +120,11 @@ to initialize CUDA on a CPU node, and spends rule threads on
    ```
 
 2. **Prepare the batch manifest.** Generate sweep configs and their manifests
-   with `uv run --extra mcmc python scripts/generate_mcmc_configs.py --write-manifests`
-   if you haven't already — this writes one gitignored manifest per campaign
-   under `configs/mcmc/manifests/` (regenerate them on whichever host needs
-   them), including the quick ET-2L campaigns and the `*-all-detectors`
-   campaigns. Copy the one you want (or
+   with `uv run python scripts/workflow.py gen-configs` if you haven't already —
+   this writes one gitignored manifest per campaign under
+   `configs/mcmc/manifests/` (regenerate them on whichever host needs them),
+   including the quick ET-2L campaigns and the `*-all-detectors` campaigns.
+   Copy the one you want (or
    [`configs/mcmc.batch.example.json`](../configs/mcmc.batch.example.json) for a
    hand-picked selection). Manifests carry no catalog field, so which catalog
    to use is set separately: `workflow/mcmc.smk` sources it from
@@ -131,31 +133,31 @@ to initialize CUDA on a CPU node, and spends rule threads on
    default `out/catalogs/<id>.h5`) at one existing catalog before submitting.
 
 3. **Dry-run before every real submission** to see the job graph without touching
-   the scheduler:
+   the scheduler (`scripts/workflow.py` defaults to `--dry-run`):
 
    ```bash
-   uv run snakemake \
-     --snakefile workflow/mcmc.smk \
-     --profile profiles/slurm \
-     --configfile /home/user/batches/paper-h0.json \
-     --dry-run mcmc
+   uv run python scripts/workflow.py mcmc /home/user/batches/paper-h0.json --profile slurm
    ```
 
-4. **Submit.** Drop `--dry-run` and pick the profile for your target partition —
+4. **Submit.** Pass `--submit` and pick `--profile` for your target partition —
    this is the only change needed to switch between GPU and CPU:
 
    ```bash
    # GPU nodes
+   uv run python scripts/workflow.py mcmc /home/user/batches/paper-h0.json \
+     --profile slurm --submit
+
+   # CPU nodes
+   uv run python scripts/workflow.py mcmc /home/user/batches/paper-h0.json \
+     --profile slurm-cpu --submit
+   ```
+
+   Equivalent expanded form for the GPU path:
+
+   ```bash
    uv run snakemake \
      --snakefile workflow/mcmc.smk \
      --profile profiles/slurm \
-     --configfile /home/user/batches/paper-h0.json \
-     mcmc
-
-   # CPU nodes
-   uv run snakemake \
-     --snakefile workflow/mcmc.smk \
-     --profile profiles/slurm-cpu \
      --configfile /home/user/batches/paper-h0.json \
      mcmc
    ```
@@ -186,7 +188,7 @@ generate the sweep configs and their batch manifest (writes
 `configs/mcmc/manifests/mcmc.batch.cosmology.json`):
 
 ```bash
-uv run --extra mcmc python scripts/generate_mcmc_configs.py --write-manifests
+uv run python scripts/workflow.py gen-configs
 ```
 
 `configs/mcmc/manifests/mcmc.batch.cosmology.json` now lists all 8 cosmology
@@ -205,13 +207,9 @@ Dry-run, then submit on (say) 8 cores. With the profile's `run_mcmc=4` thread
 override, Snakemake runs `floor(8 / 4) = 2` sweep points at a time:
 
 ```bash
-uv run snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/local --configfile configs/mcmc.batch.cosmology-local.json \
-  --cores 8 --dry-run mcmc
-
-uv run snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/local --configfile configs/mcmc.batch.cosmology-local.json \
-  --cores 8 mcmc
+uv run python scripts/workflow.py mcmc configs/mcmc.batch.cosmology-local.json --profile local
+uv run python scripts/workflow.py mcmc configs/mcmc.batch.cosmology-local.json \
+  --profile local --submit
 ```
 
 To trade per-run speed for more concurrency, lower the `set-threads` value in
