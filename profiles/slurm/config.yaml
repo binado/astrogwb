@@ -1,4 +1,4 @@
-# MCMC profile: just dry=0 mcmc-slurm <batch.json>
+# MCMC profile: uv run python scripts/workflow.py mcmc <batch.json> --profile slurm --submit
 #   snakemake --snakefile workflow/mcmc.smk \
 #     --profile profiles/slurm --configfile <batch.json> mcmc
 # Requires `uv sync --extra mcmc --extra cuda --group slurm` on the submit host.

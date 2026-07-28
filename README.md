@@ -34,14 +34,13 @@ Typical path: [catalogs](docs/catalog-generation.md) → [inference](docs/runnin
 
 - [Generating catalogs](docs/catalog-generation.md): building a population of CBCs with `gwmock-pop` and its waveform catalog with `gwmock-signal`.
 - [Running inference](docs/running-inference.md): running `scripts/run_mcmc.py` / `notebooks/mcmc.py`, generating sweep configs, and interpreting chain outputs / diagnostics.
-- [Paper figures](docs/paper-figures.md): the analysis notebooks, `configs/paper.toml`, and `just paper` / `just dry=0 paper` build commands.
-- [Snakemake workflow](docs/snakemake-workflow.md): the catalog, MCMC, and paper Snakefiles, batch manifests, and SLURM/local deployment. Operator shortcuts live in the root [`justfile`](justfile) (`just --list`).
+- [Paper figures](docs/paper-figures.md): the analysis notebooks, `configs/paper.toml`, and `scripts/workflow.py paper` build commands.
+- [Snakemake workflow](docs/snakemake-workflow.md): the catalog, MCMC, and paper Snakefiles, batch manifests, and SLURM/local deployment. Operator shortcuts live in [`scripts/workflow.py`](scripts/workflow.py).
 
 ## Requirements
 
 - Python 3.12+
 - [`uv`](https://docs.astral.sh/uv/)
-- [`just`](https://github.com/casey/just) (optional; for workflow recipe shortcuts)
 
 ## Development
 
