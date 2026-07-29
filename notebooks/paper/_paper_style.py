@@ -44,7 +44,9 @@ NETWORK: dict[str, str] = {
     "ET+CE": "#F0E442",
 }
 
-TRUTH: dict[str, object] = {"color": "0.15", "linestyle": "-", "linewidth": 1.0}
+# linewidth matches matplotlib's default lines.linewidth (and corner's truth
+# bars, which only accept truth_color and inherit the rcParam).
+TRUTH: dict[str, object] = {"color": "0.15", "linestyle": "-", "linewidth": 1.5}
 
 CORNER_LEVELS: tuple[float, ...] = (0.6827, 0.9545)
 

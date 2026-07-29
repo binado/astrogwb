@@ -73,7 +73,7 @@ from astrogwb.waveform import polarization_power as compute_polarization_power
 from pluscross import load_catalog
 from astrogwb.utils import repo_root, years_to_seconds
 
-from _paper_style import use_paper_style
+from _paper_style import TRUTH, use_paper_style
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
 # mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
@@ -419,6 +419,7 @@ ax.plot(
     color="black",
     lw=2.0,
 )
+ax.axvline(amplitude_fiducial, **TRUTH)
 ax.set_xlabel("Amplitude")
 ax.set_ylabel("Posterior density")
 ax.legend(loc="upper right")
