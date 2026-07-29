@@ -92,7 +92,7 @@ jax.config.update("jax_enable_x64", True)
 # paths as declared inputs.
 
 # %%
-_CHAIN_DIR = Path("chains/bns-n16384-df1/modified-propagation")
+_CHAIN_DIR = Path("chains/bns-n16384-df1/modified-propagation-all-detectors")
 _NETWORK = "ET-2L-aligned-CE-Hanford"
 
 DEFAULT_XI0_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0__baseline.nc"
@@ -162,9 +162,8 @@ DEFAULT_DETECTOR_LABELS = [
     "ET-2L",
     r"ET-2L $+$ CE",
 ]
-_DETECTOR_CHAIN_DIR = Path("chains/bns-n16384-df1/modified-propagation-all-detectors")
 DEFAULT_DETECTOR_XI0_N_CHAINS = [
-    _DETECTOR_CHAIN_DIR / f"{name}__Xi_0-n__baseline.nc" for name in DEFAULT_NETWORKS
+    _CHAIN_DIR / f"{name}__Xi_0-n__baseline.nc" for name in DEFAULT_NETWORKS
 ]
 
 # %% [markdown]

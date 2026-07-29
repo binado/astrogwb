@@ -137,14 +137,6 @@ networks = [
 analyses = ["H0", "H0-Omega_m", "H0-merger-rate", "H0-merger-rate-gauss"]
 observations = ["baseline"]
 
-[runs.modified-propagation]
-networks = [
-    "ET-2L-aligned",
-    "ET-2L-aligned-CE-Hanford",
-]
-analyses = ["Xi_0", "Xi_0-n", "Xi_0-H0-gauss"]
-observations = ["baseline"]
-
 [runs.modified-propagation-all-detectors]
 networks = [
     "ET-triangular",
