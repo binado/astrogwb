@@ -144,7 +144,7 @@ rule amplitude_toy:
         f_min=PAPER_ANALYSIS["f_min"],
         f_max=PAPER_ANALYSIS["f_max"],
     shell:
-        "uv run python notebooks/amplitude_toy_model.py"
+        "uv run python notebooks/paper/amplitude_toy_model.py"
         " --catalog {input.catalog:q}"
         " --chains-dir {params.chains_dir:q}"
         " --observation-time {params.observation_time}"

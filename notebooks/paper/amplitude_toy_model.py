@@ -27,7 +27,8 @@
 # `merger_rate_and_log_weights_fn` interface without any real astrophysics.
 #
 # It is a smoke/sanity test: can NUTS recover a known injected amplitude from
-# a fiducial catalog?
+# a fiducial catalog? The paper workflow builds its Fisher-overlay figure from
+# this notebook via ``workflow/paper.smk``.
 #
 # To run the notebook end-to-end, use the editable defaults in the configuration
 # cell below or override them with command-line flags. Snakemake supplies the
@@ -72,29 +73,14 @@ from astrogwb.waveform import polarization_power as compute_polarization_power
 from pluscross import load_catalog
 from astrogwb.utils import repo_root, years_to_seconds
 
+from _paper_style import use_paper_style
+
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
 # mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
 register_projection(MplAxes)
-
-plt.style.library["paper-figures"] = {
-    # "figure.figsize": (colwidth, colwidth),
-    "figure.dpi": 200,
-    "text.usetex": True,
-    "font.family": "sans-serif",
-    "font.size": 14,
-    "axes.labelsize": "medium",
-    "axes.titlesize": "medium",
-    "figure.labelsize": "medium",
-    "figure.titlesize": "medium",
-    # Make the legend/label fonts a little smaller
-    "legend.fontsize": "small",
-    "legend.title_fontsize": "small",
-    "xtick.labelsize": "small",
-    "ytick.labelsize": "small",
-}
 
 jax.config.update("jax_enable_x64", True)
 # %config InlineBackend.figure_format = 'retina'
@@ -418,23 +404,24 @@ pdf = np.exp(-0.5 * ((x - mu) / sigma_fisher) ** 2) / (
     sigma_fisher * np.sqrt(2 * np.pi)
 )
 
-# Scoped reset: `azp.style.use` above mutated the global matplotlib rcParams,
-# which would otherwise leak arviz's styling into this hand-built figure too.
-with plt.style.context("paper-figures", after_reset=True):
-    fig, ax = plt.subplots()
-    ax.plot(x_kde, y_kde, label="MCMC posterior", color="black")
-    ax.fill_between(x_kde, y_kde, alpha=0.2, color="black")
-    ax.plot(
-        x,
-        pdf,
-        linestyle="--",
-        label=r"$\mathcal{N}(A_\mathrm{fid}, 1/\rho_0^2)$",
-        color="black",
-        lw=2.0,
-    )
-    ax.set_xlabel("Amplitude")
-    ax.set_ylabel("Posterior density")
-    ax.legend(loc="upper right")
+# Apply paper.mplstyle after arviz diagnostics so the Fisher overlay uses the
+# shared serif + usetex settings (same as the other notebooks under paper/).
+use_paper_style()
+
+fig, ax = plt.subplots()
+ax.plot(x_kde, y_kde, label="MCMC posterior", color="black")
+ax.fill_between(x_kde, y_kde, alpha=0.2, color="black")
+ax.plot(
+    x,
+    pdf,
+    linestyle="--",
+    label=r"$\mathcal{N}(A_\mathrm{fid}, 1/\rho_0^2)$",
+    color="black",
+    lw=2.0,
+)
+ax.set_xlabel("Amplitude")
+ax.set_ylabel("Posterior density")
+ax.legend(loc="upper right")
 
 output_path.parent.mkdir(parents=True, exist_ok=True)
 fig.savefig(output_path, bbox_inches="tight")
