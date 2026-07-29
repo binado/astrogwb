@@ -8,6 +8,8 @@ package imports this.
 Convention:
 - category accents are the default color for single-posterior figures;
 - the network palette colors the detector-network comparison figures;
+- ``SPECTRUM`` colors the fiducial dual-axis spectrum figure
+  (Tol muted indigo + ColorBrewer Greens);
 - ``combo_colors`` orders the per-parameter-combination marginal overlay;
 - truth / fiducial markers are always neutral solid (``TRUTH``), everywhere.
 """
@@ -26,6 +28,13 @@ CATEGORY: dict[str, str] = {
     "cosmology": "#0072B2",
     "modified_propagation": "#D55E00",
     "astrophysical": "#009E73",
+}
+
+# Dual-axis accents for the fiducial spectrum figure: Paul Tol muted indigo
+# and a darker ColorBrewer Greens step for S_h.
+SPECTRUM: dict[str, str] = {
+    "omega_gw": "#332288",
+    "sh": "#006D2C",
 }
 
 NETWORK: dict[str, str] = {

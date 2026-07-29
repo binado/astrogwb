@@ -36,7 +36,7 @@ from matplotlib.figure import Figure
 from matplotlib.projections import register_projection
 from pluscross import load_catalog
 
-from _paper_style import CATEGORY, use_paper_style
+from _paper_style import SPECTRUM, use_paper_style
 from astrogwb.gwb import (
     frequency_mask as make_frequency_mask,
     hubble_constant_si,
@@ -167,9 +167,9 @@ def plot_omega_and_sh(
 ) -> Figure:
     """Plot $\\Omega_{\\mathrm{GW}}(f)$ and $S_h(f)$ on dual $y$-axes."""
     if omega_color is None:
-        omega_color = CATEGORY["cosmology"]
+        omega_color = SPECTRUM["omega_gw"]
     if sh_color is None:
-        sh_color = CATEGORY["astrophysical"]
+        sh_color = SPECTRUM["sh"]
 
     omega_gw = omega_gw_from_spectral_density(
         spectral_density_arr,
