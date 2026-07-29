@@ -197,6 +197,9 @@ def plot_omega_and_sh(
     ax_omega.tick_params(axis="y", colors=omega_color)
     ax_sh.set_ylim(sh_ymin, None)
     ax_omega.set_ylim(omega_gw_min, None)
+    ax_sh.set_axisbelow(True)
+    ax_sh.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+    ax_omega.grid(False)
     ax_sh.legend(
         handles=[line_sh, line_omega],
         loc="upper right",
