@@ -4,7 +4,6 @@ import pytest
 
 from astrogwb.config.catalogs import load_catalog_recipe
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 

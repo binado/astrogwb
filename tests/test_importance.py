@@ -5,8 +5,10 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
-from gwmock_pop.distributions.madau_dickinson import madau_dickinson_redshift_pdf
+from gwmock_pop.distributions.madau_dickinson import (
+    madau_dickinson_rate,
+    madau_dickinson_redshift_pdf,
+)
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
