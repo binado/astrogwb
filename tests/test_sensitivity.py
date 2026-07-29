@@ -11,9 +11,9 @@ from astrogwb.detector import (
     Sensitivity,
     effective_psd,
     evaluate_psd,
+    load_sensitivities_for_network,
     load_sensitivity,
     load_sensitivity_map,
-    load_sensitivities_for_network,
     overlap_reduction_function,
 )
 

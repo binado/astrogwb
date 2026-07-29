@@ -8,9 +8,9 @@ from .overlap import (
 from .sensitivity import (
     Sensitivity,
     evaluate_psd,
+    load_sensitivities_for_network,
     load_sensitivity,
     load_sensitivity_map,
-    load_sensitivities_for_network,
 )
 
 __all__ = [
@@ -19,10 +19,10 @@ __all__ = [
     "effective_psd",
     "evaluate_psd",
     "load_detector",
+    "load_sensitivities_for_network",
     "load_sensitivity",
     "load_sensitivity_map",
-    "load_sensitivities_for_network",
-    "resolve_detector",
     "overlap_reduction_function",
     "pairwise_overlap_reduction_function",
+    "resolve_detector",
 ]
