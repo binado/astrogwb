@@ -488,7 +488,6 @@ def plot_corner(
             **dict(legend_kwargs or {}),
         }
         fig.legend(handles=handles, **resolved_legend_kwargs)
-    fig.tight_layout()
     return fig
 
 
