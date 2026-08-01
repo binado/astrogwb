@@ -48,6 +48,7 @@ loc = "lower center"
 bbox_to_anchor = [0.5, 1.02]
 frameon = false
 borderaxespad = 0
+handlelength = 2.5
 
 [figures.mcmc_cosmological_parameters.prior_ax_kwargs]
 xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'
@@ -101,14 +102,13 @@ label = '$H_0 + \mathcal{R}_0$ (broad prior)'
 # Snakemake resolves these logical modified-propagation runs to concrete chain
 # inputs. Direct notebook runs can replace both ordered path lists and their
 # labels through CLI.
-campaign = "modified-propagation"
+campaign = "modified-propagation-all-detectors"
 network = "ET-2L-aligned-CE-Hanford"
 xi0_analysis = "Xi_0"
 xi0_n_analysis = "Xi_0-n"
 h0_analysis = "Xi_0-H0-gauss"
 marginal_labels = ['$\Xi_0$', '$\Xi_0 + n$', '$\Xi_0 + H_0$']
 h0_labels = ['$\Xi_0 + H_0$']
-detector_campaign = "modified-propagation-all-detectors"
 
 [[figures.mcmc_modified_propagation.detector_posteriors]]
 network = "ET-triangular"

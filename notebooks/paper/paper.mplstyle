@@ -21,6 +21,10 @@ xtick.top: True
 ytick.direction: in
 ytick.minor.visible: True
 ytick.right: True
+# Explicitly restore a closed frame. ArviZ styles (e.g. arviz-variat) turn
+# these off; paper.mplstyle must override them so density plots match.
+axes.spines.top: True
+axes.spines.right: True
 
 savefig.dpi: 300
 savefig.bbox: tight

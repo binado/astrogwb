@@ -51,6 +51,7 @@ from pluscross import load_catalog
 from _paper_style import (
     CATEGORY,
     CORNER_LEVELS,
+    TRUTH,
     combo_colors,
     get_corner_kwargs,
     use_paper_style,
@@ -348,6 +349,7 @@ def plot_h0_posteriors(
     colors: Sequence[str] | None = None,
     linestyles: Sequence[str] | None = None,
     group: str = "posterior",
+    fiducial: float | None = None,
     ax_kwargs: Mapping[str, Any] | None = None,
     legend_kwargs: Mapping[str, Any] | None = None,
 ) -> plt.Figure:
@@ -376,13 +378,26 @@ def plot_h0_posteriors(
             linestyle=linestyle,
         )
 
+    if fiducial is not None:
+        ax.axvline(fiducial, **TRUTH)
+
     resolved_ax_kwargs = {
         "xlabel": H0_LABEL,
         "ylabel": "Posterior density",
         **dict(ax_kwargs or {}),
     }
     ax.set(**resolved_ax_kwargs)
-    ax.legend(**dict(legend_kwargs or {}))
+    handles = [
+        Line2D([], [], color=color, linestyle=linestyle, label=label)
+        for label, color, linestyle in zip(
+            labels, resolved_colors, resolved_linestyles, strict=True
+        )
+    ]
+    resolved_legend_kwargs = {
+        "handlelength": 2.5,
+        **dict(legend_kwargs or {}),
+    }
+    ax.legend(handles=handles, **resolved_legend_kwargs)
     fig.tight_layout()
     return fig
 
@@ -473,7 +488,6 @@ def plot_corner(
             **dict(legend_kwargs or {}),
         }
         fig.legend(handles=handles, **resolved_legend_kwargs)
-    fig.tight_layout()
     return fig
 
 
@@ -959,6 +973,7 @@ detector_figure = plot_h0_posteriors(
     colors=detector_colors,
     linestyles=detector_linestyles,
     group=args.group,
+    fiducial=fiducials["H0"],
     ax_kwargs=figure_config.get("detector_ax_kwargs"),
     legend_kwargs=figure_config.get("detector_legend_kwargs"),
 )
@@ -977,6 +992,7 @@ prior_figure = plot_h0_posteriors(
     colors=prior_density_colors,
     linestyles=prior_density_linestyles,
     group=args.group,
+    fiducial=fiducials["H0"],
     ax_kwargs=figure_config.get("prior_ax_kwargs"),
     legend_kwargs=figure_config.get("prior_legend_kwargs"),
 )

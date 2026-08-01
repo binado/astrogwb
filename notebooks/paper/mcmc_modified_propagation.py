@@ -92,7 +92,7 @@ jax.config.update("jax_enable_x64", True)
 # paths as declared inputs.
 
 # %%
-_CHAIN_DIR = Path("chains/bns-n16384-df1/modified-propagation")
+_CHAIN_DIR = Path("chains/bns-n16384-df1/modified-propagation-all-detectors")
 _NETWORK = "ET-2L-aligned-CE-Hanford"
 
 DEFAULT_XI0_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0__baseline.nc"
@@ -162,9 +162,8 @@ DEFAULT_DETECTOR_LABELS = [
     "ET-2L",
     r"ET-2L $+$ CE",
 ]
-_DETECTOR_CHAIN_DIR = Path("chains/bns-n16384-df1/modified-propagation-all-detectors")
 DEFAULT_DETECTOR_XI0_N_CHAINS = [
-    _DETECTOR_CHAIN_DIR / f"{name}__Xi_0-n__baseline.nc" for name in DEFAULT_NETWORKS
+    _CHAIN_DIR / f"{name}__Xi_0-n__baseline.nc" for name in DEFAULT_NETWORKS
 ]
 
 # %% [markdown]
@@ -306,6 +305,7 @@ def plot_marginal_posteriors(
     colors: Sequence[str] | None = None,
     linestyles: Sequence[str] | None = None,
     group: str = "posterior",
+    fiducial: float | None = None,
     ax_kwargs: Mapping[str, Any] | None = None,
     legend_kwargs: Mapping[str, Any] | None = None,
 ) -> plt.Figure:
@@ -329,6 +329,9 @@ def plot_marginal_posteriors(
         x = kde.sel(plot_axis="x").to_numpy()
         probability = kde.sel(plot_axis="y").to_numpy()
         ax.plot(x, probability, label=label, color=color, linestyle=linestyle)
+
+    if fiducial is not None:
+        ax.axvline(fiducial, **TRUTH)
 
     resolved_ax_kwargs = {
         "xlabel": VAR_LABELS.get(var_name, var_name),
@@ -425,7 +428,6 @@ def plot_corner(
             **dict(legend_kwargs or {}),
         }
         fig.legend(handles=handles, **resolved_legend_kwargs)
-    fig.tight_layout()
     return fig
 
 
@@ -835,6 +837,7 @@ xi0_marginal_figure = plot_marginal_posteriors(
     var_name="xi_0",
     group=args.group,
     colors=combo_colors(len(inference_data)),
+    fiducial=fiducials["xi_0"],
 )
 
 # %% [markdown]

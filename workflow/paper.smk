@@ -81,14 +81,11 @@ MODIFIED_PROPAGATION_H0_CHAIN = (
 )
 MODIFIED_PROPAGATION_MARGINAL_LABELS = MODIFIED_PROPAGATION_FIGURE["marginal_labels"]
 MODIFIED_PROPAGATION_H0_LABELS = MODIFIED_PROPAGATION_FIGURE["h0_labels"]
-MODIFIED_PROPAGATION_DETECTOR_CAMPAIGN = MODIFIED_PROPAGATION_FIGURE[
-    "detector_campaign"
-]
 MODIFIED_PROPAGATION_DETECTOR_POSTERIORS = MODIFIED_PROPAGATION_FIGURE[
     "detector_posteriors"
 ]
 MODIFIED_PROPAGATION_XI0_N_DETECTOR_CHAINS = [
-    f"{CHAINS_DIR}/{CATALOG_ID}/{MODIFIED_PROPAGATION_DETECTOR_CAMPAIGN}/"
+    f"{CHAINS_DIR}/{CATALOG_ID}/{MODIFIED_PROPAGATION_CAMPAIGN}/"
     f"{entry['network']}__{MODIFIED_PROPAGATION_FIGURE['xi0_n_analysis']}__baseline.nc"
     for entry in MODIFIED_PROPAGATION_DETECTOR_POSTERIORS
 ]
@@ -147,7 +144,7 @@ rule amplitude_toy:
         f_min=PAPER_ANALYSIS["f_min"],
         f_max=PAPER_ANALYSIS["f_max"],
     shell:
-        "uv run python notebooks/amplitude_toy_model.py"
+        "uv run python notebooks/paper/amplitude_toy_model.py"
         " --catalog {input.catalog:q}"
         " --chains-dir {params.chains_dir:q}"
         " --observation-time {params.observation_time}"

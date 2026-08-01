@@ -34,7 +34,7 @@ Generate sweep configs as described in
 [Generating sweep configs](./running-inference.md#generating-sweep-configs).
 Add `--write-manifests` to also (re)generate a full-sweep batch manifest per
 campaign —
-`configs/mcmc/manifests/mcmc.batch.{cosmology,cosmology-all-detectors,astrophysical,astrophysical-all-detectors,modified-propagation,modified-propagation-all-detectors}.json`
+`configs/mcmc/manifests/mcmc.batch.{cosmology,cosmology-all-detectors,astrophysical,astrophysical-all-detectors,modified-propagation-all-detectors}.json`
 — each holding only `chains_dir` and every config just written for that
 campaign; manifests carry no catalog field (see below). Existing manifests
 are skipped unless `--force` is supplied, same as the JSON configs. Like the

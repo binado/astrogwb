@@ -1,15 +1,17 @@
 """Shared paper-figure styling for the notebooks in this directory.
 
 Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
-style, and a loader for ``paper.mplstyle``. This module is independent of the
-``astrogwb`` package: it imports nothing from it, and nothing in the package
-imports this.
+style (solid), and a loader for ``paper.mplstyle``. This module is independent
+of the ``astrogwb`` package: it imports nothing from it, and nothing in the
+package imports this.
 
 Convention:
 - category accents are the default color for single-posterior figures;
 - the network palette colors the detector-network comparison figures;
+- ``SPECTRUM`` colors the fiducial dual-axis spectrum figure
+  (Tol muted indigo + ColorBrewer Greens);
 - ``combo_colors`` orders the per-parameter-combination marginal overlay;
-- truth / fiducial markers are always neutral dashed (``TRUTH``), everywhere.
+- truth / fiducial markers are always neutral solid (``TRUTH``), everywhere.
 """
 
 from __future__ import annotations
@@ -28,6 +30,13 @@ CATEGORY: dict[str, str] = {
     "astrophysical": "#009E73",
 }
 
+# Dual-axis accents for the fiducial spectrum figure: Paul Tol muted indigo
+# and a darker ColorBrewer Greens step for S_h.
+SPECTRUM: dict[str, str] = {
+    "omega_gw": "#332288",
+    "sh": "#006D2C",
+}
+
 NETWORK: dict[str, str] = {
     "ET": "#E69F00",
     "CE": "#56B4E9",
@@ -35,7 +44,9 @@ NETWORK: dict[str, str] = {
     "ET+CE": "#F0E442",
 }
 
-TRUTH: dict[str, object] = {"color": "0.15", "linestyle": "--", "linewidth": 1.0}
+# linewidth matches matplotlib's default lines.linewidth (and corner's truth
+# bars, which only accept truth_color and inherit the rcParam).
+TRUTH: dict[str, object] = {"color": "0.15", "linestyle": "-", "linewidth": 1.5}
 
 CORNER_LEVELS: tuple[float, ...] = (0.6827, 0.9545)
 

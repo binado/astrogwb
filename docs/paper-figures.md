@@ -1,7 +1,7 @@
 # Paper figures
 
 The analysis notebooks
-[`amplitude_toy_model.py`](../notebooks/amplitude_toy_model.py),
+[`amplitude_toy_model.py`](../notebooks/paper/amplitude_toy_model.py),
 [`mcmc_cosmological_parameters.py`](../notebooks/paper/mcmc_cosmological_parameters.py),
 and [`fiducial_spectrum.py`](../notebooks/paper/fiducial_spectrum.py)
 hold editable scientific defaults and expose command-line overrides for scientific
