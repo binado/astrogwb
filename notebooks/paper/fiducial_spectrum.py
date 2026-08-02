@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -38,6 +39,7 @@ from matplotlib.lines import Line2D
 from matplotlib.projections import register_projection
 from pluscross import load_catalog
 
+from astrogwb.config.loading import load_mapping
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.gwb import frequency_mask as make_frequency_mask
 from astrogwb.gwb import (
@@ -66,6 +68,7 @@ jax.config.update("jax_enable_x64", True)
 # with flags when running headless.
 
 # %%
+DEFAULT_CONFIG_PATH = Path("configs/paper.toml")
 DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
 DEFAULT_F_MIN = 2.0
 DEFAULT_F_MAX = 4096.0
@@ -87,27 +90,36 @@ DEFAULT_OUTPUT_EFFECTIVE_PSD_PDF = Path(
 )
 DEFAULT_FIGURE_DPI = 300
 
-DEFAULT_DETECTOR_NETWORKS = {
-    "ET-triangular": ("E1", "E2", "E3"),
-    "ET-triangular-CE-Hanford": ("E1", "E2", "E3", "C1"),
-    "ET-2L-aligned": ("S1", "R1"),
-    "ET-2L-aligned-CE-Hanford": ("S1", "R1", "C1"),
-    "ET-2L-misaligned": ("S2", "R2"),
-    "ET-2L-misaligned-CE-Hanford": ("S2", "R2", "C1"),
-}
-DEFAULT_DETECTOR_LABELS = [
-    r"ET-$\Delta$",
-    r"ET-$\Delta +$ CE",
-    "ET-2L-par",
-    r"ET-2L-par $+$ CE",
-    "ET-2L",
-    r"ET-2L $+$ CE",
-]
-
 
 # %%
 def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
+
+
+def detector_networks_from_config(
+    config: Mapping[str, Any],
+) -> dict[str, tuple[str, ...]]:
+    """Return detector networks from ``configs/paper.toml``."""
+    raw = config["detector_networks"]
+    return {name: tuple(detectors) for name, detectors in raw.items()}
+
+
+def detector_labels_from_config(
+    config: Mapping[str, Any],
+    networks: Mapping[str, tuple[str, ...]],
+) -> list[str]:
+    """Return display labels for ``networks`` from cosmology detector posteriors."""
+    posteriors = config["figures"]["mcmc_cosmological_parameters"][
+        "detector_posteriors"
+    ]
+    label_by_network = {entry["network"]: entry["label"] for entry in posteriors}
+    missing = [name for name in networks if name not in label_by_network]
+    if missing:
+        raise ValueError(
+            "missing detector labels in paper config for network(s): "
+            + ", ".join(missing)
+        )
+    return [label_by_network[name] for name in networks]
 
 
 def compute_fiducial_spectral_density(
@@ -308,6 +320,7 @@ def plot_effective_psds(
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
     parser.add_argument("--f-min", type=float, default=DEFAULT_F_MIN)
     parser.add_argument("--f-max", type=float, default=DEFAULT_F_MAX)
@@ -347,6 +360,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 # %%
 args = _parse_args()
 root = repo_root()
+config = load_mapping(_resolve_path(args.config, root))
 
 fiducials = {
     "H0": args.h0,
@@ -393,14 +407,15 @@ figure = plot_omega_and_sh(
 # %% [markdown]
 # ## Effective PSD by detector network
 #
-# Network effective noise PSDs for the same detector combinations used in the
-# cosmological-parameter notebook, overlaid on a shared log–log frequency
-# axis. Colors and linestyles match the $H_0$ density comparison (shared
-# color per ET / ET+CE pair; dashed for CE companions).
+# Network effective noise PSDs for the detector combinations in
+# ``configs/paper.toml``, overlaid on a shared log–log frequency axis. Colors
+# and linestyles match the $H_0$ density comparison (shared color per ET /
+# ET+CE pair; dashed for CE companions). Labels come from the cosmology
+# ``detector_posteriors`` entries in the same config.
 
 # %%
-networks = DEFAULT_DETECTOR_NETWORKS
-detector_labels = DEFAULT_DETECTOR_LABELS
+networks = detector_networks_from_config(config)
+detector_labels = detector_labels_from_config(config, networks)
 detector_colors, detector_linestyles = detector_network_styles(networks)
 
 effective_psds = {}

@@ -180,6 +180,7 @@ rule fiducial_spectrum:
     shell:
         "uv run --group plotting"
         " python notebooks/paper/fiducial_spectrum.py"
+        " --config {input.config:q}"
         " --catalog {input.catalog:q}"
         " --f-min {params.f_min}"
         " --f-max {params.f_max}"
