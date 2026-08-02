@@ -7,7 +7,8 @@ and [`fiducial_spectrum.py`](../notebooks/paper/fiducial_spectrum.py)
 hold editable scientific defaults and expose command-line overrides for scientific
 inputs, paths, and labels. They can therefore run directly in Jupyter or from the shell.
 The spectrum notebook plots fiducial $\Omega_{\mathrm{GW}}(f)$ and $S_h(f)$ on dual
-$y$-axes. Configure the $\Omega_{\mathrm{GW}}$ floor via `omega_gw_min` in
+$y$-axes, and overlays network effective PSDs for the detector combinations used
+in the cosmology notebook. Configure the $\Omega_{\mathrm{GW}}$ floor via `omega_gw_min` in
 `workflow.yaml` (or `--omega-gw-min`); $S_h$'s floor is inferred at the matching
 frequency so both curves show the same band.
 The cosmology notebook reads paper plot styling from `configs/paper.toml`;
@@ -30,7 +31,9 @@ Snakemake reads [`configs/workflow.yaml`](../configs/workflow.yaml) for the pape
 config path, selected catalog, and declared output paths. It translates
 `paper.toml` into explicit analysis, cosmology, fiducial, detector-network, chain,
 label, and styling inputs. The `fiducial_spectrum` rule builds
-`figures/fiducial_spectrum.pdf` from the shared catalog and fiducials. The unified
+`figures/fiducial_spectrum.pdf` and
+`figures/fiducial_effective_psd_by_detector.pdf` from the shared catalog and
+fiducials. The unified
 cosmology rule produces two marginalized $H_0$ comparisons, separate
 $H_0$--$\mathcal{R}_0$ corner plots for the narrow and broad merger-rate priors,
 an $H_0$--$\Omega_m$ corner plot, and a CSV/LaTeX SNR-and-constraint table.
@@ -51,6 +54,11 @@ Build one configured target:
 
 ```bash
 uv run python scripts/workflow.py paper figures/fiducial_spectrum.pdf --submit
+```
+
+```bash
+uv run python scripts/workflow.py paper \
+  figures/fiducial_effective_psd_by_detector.pdf --submit
 ```
 
 ```bash

@@ -8,6 +8,7 @@ amplitude_toy:
 
 fiducial_spectrum:
   output_pdf: figures/fiducial_spectrum.pdf
+  output_effective_psd_pdf: figures/fiducial_effective_psd_by_detector.pdf
   omega_gw_min: 1.0e-15
 
 mcmc_cosmological_parameters:
