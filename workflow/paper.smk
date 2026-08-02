@@ -29,6 +29,7 @@ CHAINS_DIR = PAPER_CONFIG["paths"]["chains_dir"]
 AMPLITUDE_TOY_PDF = config["amplitude_toy"]["output_pdf"]
 FIDUCIAL_SPECTRUM = config["fiducial_spectrum"]
 FIDUCIAL_SPECTRUM_PDF = FIDUCIAL_SPECTRUM["output_pdf"]
+FIDUCIAL_SPECTRUM_EFFECTIVE_PSD_PDF = FIDUCIAL_SPECTRUM["output_effective_psd_pdf"]
 FIDUCIAL_SPECTRUM_OMEGA_GW_MIN = FIDUCIAL_SPECTRUM["omega_gw_min"]
 COSMOLOGY_OUTPUTS = config["mcmc_cosmological_parameters"]
 COSMOLOGY_DETECTOR_PDF = COSMOLOGY_OUTPUTS["output_detector_pdf"]
@@ -118,6 +119,7 @@ rule paper_figures:
     input:
         AMPLITUDE_TOY_PDF,
         FIDUCIAL_SPECTRUM_PDF,
+        FIDUCIAL_SPECTRUM_EFFECTIVE_PSD_PDF,
         COSMOLOGY_DETECTOR_PDF,
         COSMOLOGY_PRIOR_PDF,
         COSMOLOGY_NARROW_CORNER_PDF,
@@ -158,7 +160,8 @@ rule fiducial_spectrum:
         catalog=CATALOG_PATH,
         config=str(PAPER_CONFIG_PATH),
     output:
-        FIDUCIAL_SPECTRUM_PDF,
+        spectrum_pdf=FIDUCIAL_SPECTRUM_PDF,
+        effective_psd_pdf=FIDUCIAL_SPECTRUM_EFFECTIVE_PSD_PDF,
     params:
         f_min=PAPER_ANALYSIS["f_min"],
         f_max=PAPER_ANALYSIS["f_max"],
@@ -192,7 +195,8 @@ rule fiducial_spectrum:
         " --z-peak {params.z_peak}"
         " --local-merger-rate {params.local_merger_rate}"
         " --omega-gw-min {params.omega_gw_min}"
-        " --output-pdf {output:q}"
+        " --output-pdf {output.spectrum_pdf:q}"
+        " --output-effective-psd-pdf {output.effective_psd_pdf:q}"
 
 
 rule mcmc_cosmological_parameters:

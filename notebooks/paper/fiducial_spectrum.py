@@ -31,14 +31,16 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+from _paper_style import SPECTRUM, combo_colors, use_paper_style
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 from matplotlib.projections import register_projection
 from pluscross import load_catalog
 
-from _paper_style import SPECTRUM, use_paper_style
+from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.gwb import frequency_mask as make_frequency_mask
 from astrogwb.gwb import (
-    frequency_mask as make_frequency_mask,
     hubble_constant_si,
     omega_gw_from_spectral_density,
     spectral_density,
@@ -80,7 +82,27 @@ DEFAULT_Z_PEAK = 1.84
 DEFAULT_LOCAL_MERGER_RATE = 161.0
 DEFAULT_OMEGA_GW_MIN = 1e-15
 DEFAULT_OUTPUT_PDF = Path("figures/fiducial_spectrum.pdf")
+DEFAULT_OUTPUT_EFFECTIVE_PSD_PDF = Path(
+    "figures/fiducial_effective_psd_by_detector.pdf"
+)
 DEFAULT_FIGURE_DPI = 300
+
+DEFAULT_DETECTOR_NETWORKS = {
+    "ET-triangular": ("E1", "E2", "E3"),
+    "ET-triangular-CE-Hanford": ("E1", "E2", "E3", "C1"),
+    "ET-2L-aligned": ("S1", "R1"),
+    "ET-2L-aligned-CE-Hanford": ("S1", "R1", "C1"),
+    "ET-2L-misaligned": ("S2", "R2"),
+    "ET-2L-misaligned-CE-Hanford": ("S2", "R2", "C1"),
+}
+DEFAULT_DETECTOR_LABELS = [
+    r"ET-$\Delta$",
+    r"ET-$\Delta +$ CE",
+    "ET-2L-par",
+    r"ET-2L-par $+$ CE",
+    "ET-2L",
+    r"ET-2L $+$ CE",
+]
 
 
 # %%
@@ -208,6 +230,82 @@ def plot_omega_and_sh(
     return fig
 
 
+def _base_network_name(name: str) -> str:
+    """Map an ET+CE network name onto its ET-only counterpart."""
+    suffix = "-CE-Hanford"
+    return name.removesuffix(suffix)
+
+
+def detector_network_styles(
+    networks: Mapping[str, tuple[str, ...]],
+) -> tuple[list[str], list[str]]:
+    """Shared color per ET / ET+CE pair; dashed linestyle for CE companions."""
+    names = list(networks)
+    bases: list[str] = []
+    for name in names:
+        base = _base_network_name(name)
+        if base not in bases:
+            bases.append(base)
+    palette = combo_colors(len(bases))
+    color_by_base = dict(zip(bases, palette, strict=True))
+    colors = [color_by_base[_base_network_name(name)] for name in names]
+    linestyles = ["--" if name.endswith("-CE-Hanford") else "-" for name in names]
+    return colors, linestyles
+
+
+def plot_effective_psds(
+    frequencies: jax.Array,
+    psds_by_network: Mapping[str, jax.Array | np.ndarray],
+    labels: Sequence[str],
+    *,
+    colors: Sequence[str],
+    linestyles: Sequence[str],
+    mask: jax.Array,
+) -> Figure:
+    """Overlay network effective PSDs on shared log–log axes."""
+    names = list(psds_by_network)
+    if len(names) != len(labels):
+        raise ValueError("network count must match label count")
+    if len(names) != len(colors) or len(names) != len(linestyles):
+        raise ValueError("color and linestyle counts must match the networks")
+
+    fig, ax = plt.subplots()
+    freq = np.asarray(frequencies)
+    band = np.asarray(mask, dtype=bool)
+    for name, label, color, linestyle in zip(
+        names, labels, colors, linestyles, strict=True
+    ):
+        psd = np.asarray(psds_by_network[name])
+        pos = band & np.isfinite(psd) & (psd > 0.0) & (freq > 0.0)
+        ax.loglog(
+            freq[pos],
+            psd[pos],
+            color=color,
+            linestyle=linestyle,
+            label=label,
+        )
+
+    ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax.set_ylabel(r"$S_{\mathrm{eff}}(f)\ \mathrm{[Hz^{-1}]}$")
+    ax.set_axisbelow(True)
+    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+    handles = [
+        Line2D([], [], color=color, linestyle=linestyle, label=label)
+        for label, color, linestyle in zip(labels, colors, linestyles, strict=True)
+    ]
+    ax.legend(
+        handles=handles,
+        ncol=3,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 1.02),
+        frameon=False,
+        borderaxespad=0,
+        handlelength=2.5,
+    )
+    fig.tight_layout()
+    return fig
+
+
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
@@ -236,6 +334,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--output-pdf", type=Path, default=DEFAULT_OUTPUT_PDF)
+    parser.add_argument(
+        "--output-effective-psd-pdf",
+        type=Path,
+        default=DEFAULT_OUTPUT_EFFECTIVE_PSD_PDF,
+    )
     parser.add_argument("--figure-dpi", type=int, default=DEFAULT_FIGURE_DPI)
     args, _ = parser.parse_known_args(argv)
     return args
@@ -288,10 +391,46 @@ figure = plot_omega_and_sh(
 )
 
 # %% [markdown]
-# ## Save figure
+# ## Effective PSD by detector network
+#
+# Network effective noise PSDs for the same detector combinations used in the
+# cosmological-parameter notebook, overlaid on a shared log–log frequency
+# axis. Colors and linestyles match the $H_0$ density comparison (shared
+# color per ET / ET+CE pair; dashed for CE companions).
+
+# %%
+networks = DEFAULT_DETECTOR_NETWORKS
+detector_labels = DEFAULT_DETECTOR_LABELS
+detector_colors, detector_linestyles = detector_network_styles(networks)
+
+effective_psds = {}
+for network, detectors in networks.items():
+    sensitivities = load_sensitivity_map(detectors)
+    effective_psds[network] = jnp.asarray(
+        effective_psd(frequencies, list(detectors), sensitivities)
+    )
+
+effective_psd_figure = plot_effective_psds(
+    frequencies,
+    effective_psds,
+    detector_labels,
+    colors=detector_colors,
+    linestyles=detector_linestyles,
+    mask=mask,
+)
+
+# %% [markdown]
+# ## Save figures
 
 # %%
 output_path = _resolve_path(args.output_pdf, root)
 output_path.parent.mkdir(parents=True, exist_ok=True)
 figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
 print("saved figure:", output_path)
+
+effective_psd_output_path = _resolve_path(args.output_effective_psd_pdf, root)
+effective_psd_output_path.parent.mkdir(parents=True, exist_ok=True)
+effective_psd_figure.savefig(
+    effective_psd_output_path, dpi=args.figure_dpi, bbox_inches="tight"
+)
+print("saved figure:", effective_psd_output_path)
