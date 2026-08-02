@@ -5,19 +5,10 @@ from typing import Literal
 import jax
 import jax.numpy as jnp
 
+from astrogwb.cosmology import H0_SI
 from astrogwb.utils import years_to_seconds
 
 AverageMode = Literal["analytic_inclination", "catalog_inclination"]
-
-_MPC_IN_METERS: float = 3.0856775814913673e22
-
-
-def hubble_constant_si(h0_km_s_mpc: float) -> float:
-    """Convert $H_0$ from $\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}$ to SI ($\\mathrm{s^{-1}}$)."""
-    return h0_km_s_mpc * 1000.0 / _MPC_IN_METERS
-
-
-H0_SI: float = hubble_constant_si(67.74)
 
 
 def spectral_density(

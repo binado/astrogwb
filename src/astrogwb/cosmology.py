@@ -25,6 +25,16 @@ from gwmock_pop.cosmology.flat_lambda_cdm import (
     compute_normalized_hubble_parameter,
 )
 
+MPC_IN_METERS: float = 3.0856775814913673e22
+
+
+def hubble_constant_si(h0_km_s_mpc: float) -> float:
+    """Convert $H_0$ from $\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}$ to SI ($\\mathrm{s^{-1}}$)."""
+    return h0_km_s_mpc * 1000.0 / MPC_IN_METERS
+
+
+H0_SI: float = hubble_constant_si(67.74)
+
 
 def log_gw_em_ratio(
     z: jax.Array,
