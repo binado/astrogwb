@@ -35,30 +35,21 @@
 
 # %%
 import json
-import multiprocessing
 import time
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-
-# Setting JAX to use all available CPU cores for parallelization
-num_cpus = multiprocessing.cpu_count()
-import numpyro
-
-numpyro.set_host_device_count(num_cpus)
 
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
-
-# gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
-# matplotlib axes so plotting behaves as expected after importing detector utilities.
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.colors import LinearSegmentedColormap, colorConverter
 from matplotlib.projections import register_projection
 from numpyro.infer.util import log_density
+from pluscross import load_catalog
 from scipy.ndimage import gaussian_filter
 
 from astrogwb.detector import effective_psd, load_sensitivity_map
@@ -70,14 +61,15 @@ from astrogwb.gwb import (
     spectral_density,
 )
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_proposal_logpdf,
+    compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.utils import repo_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from pluscross import load_catalog
 
+# gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
+# matplotlib axes so plotting behaves as expected after importing detector utilities.
 register_projection(MplAxes)
 
 jax.config.update("jax_enable_x64", True)
@@ -169,7 +161,9 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 catalog = load_catalog(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
-polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)
+polarization_power = jnp.asarray(
+    compute_polarization_power(catalog)
+)  # (nfreq, nsamples)
 samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
 del catalog
 
@@ -223,24 +217,23 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 # ## Modelling the astrophysical SGWB
 #
 # The importance-weighted spectral-density model is identical to `mcmc.py`. The
-# proposal log-density `log p_proposal(z)` depends only on the fixed fiducial point,
-# so we evaluate it once here and reuse it inside the weight callback.
+# proposal log-density depends only on the fixed fiducial point, so we evaluate
+# `compute_merger_rate_distance_and_logprob` once here and reuse it inside the
+# weight callback.
 
 # %%
-z_samples = jnp.asarray(samples["redshift"])
 z_grid = jnp.linspace(z_min, z_max, n_grid)
 
-log_p_proposal = compute_proposal_logpdf(
-    z_samples, z_grid=z_grid, fiducials=fiducials
+_, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
+    fiducials, samples, z_grid=z_grid
 )
 
 
 # %%
 merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
+    fiducials=fiducials,
     z_grid=z_grid,
-    proposal_log_pdf=log_p_proposal,
-    fiducial_xi_0=fiducials["xi_0"],
-    fiducial_xi_n=fiducials["xi_n"],
+    proposal_logprob=proposal_logprob,
 )
 
 

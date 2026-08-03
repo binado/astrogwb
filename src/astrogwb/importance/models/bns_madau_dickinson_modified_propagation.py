@@ -14,6 +14,13 @@ Factory contract: :func:`make_merger_rate_and_log_weights_fn` must be called
 with a concrete ``z_grid`` (not a tracer); it extracts ``max_redshift`` /
 ``n_grid`` eagerly so the returned closure is safe to trace inside ``jax.jit``
 during NUTS.
+
+The proposal and target share
+:func:`compute_merger_rate_distance_and_logprob`. Precompute
+``proposal_logprob`` by evaluating that function at the fiducials (third
+return value); the callback returns importance log-weights via
+:func:`log_weights`, which reweights the redshift PDF against the catalog
+fiducial luminosity distances and the GW/EM ratio correction.
 """
 
 from __future__ import annotations
@@ -21,68 +28,125 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import jax
 import jax.numpy as jnp
-from gwmock_pop.distributions.madau_dickinson import (
-    madau_dickinson_rate,
-    madau_dickinson_redshift_pdf,
-)
+from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.utils import SECONDS_PER_YEAR
 
 
-def compute_proposal_logpdf(
-    redshifts: jnp.ndarray,
+def compute_merger_rate_distance_and_logprob(
+    params: Mapping[str, Any],
+    samples: Mapping[str, jax.Array],
     *,
-    z_grid: jnp.ndarray,
-    fiducials: Mapping[str, float],
-) -> jnp.ndarray:
-    """Log of the fiducial Madau-Dickinson proposal redshift PDF at `redshifts`.
+    z_grid: jax.Array,
+    max_redshift: float | None = None,
+    n_grid: int | None = None,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    r"""Merger rate, luminosity distance, and redshift log-pdf at catalog samples.
 
-    Mirrors the factory's ``z_grid`` convention: ``z_min`` / ``z_max`` /
-    ``n_grid`` are read from the grid ends and length.
+    Builds cosmology tables on ``z_grid`` via
+    :func:`~astrogwb.cosmology.distance_and_volume_grid`, normalizes the
+    Madau-Dickinson redshift weight by trapezoidal integration on that grid,
+    and evaluates the redshift PDF
+
+    :math:`\mathrm{logpdf} = \log p(z|\theta)`
+
+    at ``samples["redshift"]`` by linearly interpolating the complete
+    unnormalized redshift density. This makes the interpolated density's
+    integral exactly equal to its trapezoidal normalization and avoids
+    reevaluating the Madau-Dickinson rate at every catalog sample. Also returns
+    the interpolated luminosity distance ``d_L(z|\theta)``. The same function
+    is used for the proposal (at fiducials) and the target (at sampled
+    ``params``); :func:`log_weights` combines these with the catalog fiducial
+    distances and the GW/EM ratio correction.
 
     Parameters
     ----------
-    redshifts:
-        Catalog redshifts at which to evaluate the proposal PDF, shape ``(N,)``.
+    params:
+        Hyperparameters. Must include ``H0``, ``Omega_m``, ``gamma``,
+        ``kappa``, ``z_peak``, ``xi_0``, ``xi_n``, and ``local_merger_rate``
+        (in ``Gpc^-3 yr^-1``).
+    samples:
+        Catalog arrays; must include ``redshift`` with leading dimension
+        ``N``.
     z_grid:
-        Redshift grid used for Madau-Dickinson normalization. ``z_min``,
-        ``z_max``, and ``n_grid`` are inferred from the first element, last
-        element, and length of this array.
-    fiducials:
-        Fiducial hyperparameters for the proposal distribution. Must contain
-        ``gamma``, ``kappa``, ``z_peak``, ``H0``, and ``Omega_m``.
+        Concrete redshift grid for cosmology integrals and MD normalization.
+    max_redshift, n_grid:
+        Optional static Python scalars for the cosmology lookup. When omitted
+        they are read from ``z_grid``. Callers under ``jax.jit`` should pass
+        them explicitly so ``float(z_grid[-1])`` is never applied to a tracer.
 
     Returns
     -------
-    jnp.ndarray
-        ``log`` of the normalized Madau-Dickinson redshift PDF evaluated at
-        ``redshifts``, shape ``(N,)``. Ready to pass as ``proposal_log_pdf`` to
-        :func:`make_merger_rate_and_log_weights_fn`.
+    tuple[jax.Array, jax.Array, jax.Array]
+        ``(total_merger_rate, luminosity_distance, logpdf)``. Rate is in
+        mergers per second; ``luminosity_distance`` and ``logpdf`` have shape
+        ``(N,)``.
     """
-    return jnp.log(
-        madau_dickinson_redshift_pdf(
-            redshifts,
-            z_min=float(z_grid[0]),
-            z_max=float(z_grid[-1]),
-            gamma=fiducials["gamma"],
-            kappa=fiducials["kappa"],
-            z_peak=fiducials["z_peak"],
-            hubble_constant=fiducials["H0"],
-            omega_m=fiducials["Omega_m"],
-            n_grid=int(z_grid.shape[0]),
-        )
+    z = samples["redshift"]
+    if max_redshift is None:
+        max_redshift = float(z_grid[-1])
+    if n_grid is None:
+        n_grid = int(z_grid.shape[0])
+
+    luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(
+        params, max_redshift, n_grid
     )
+    rate_shape_grid = madau_dickinson_rate(
+        z_grid, params["gamma"], params["kappa"], params["z_peak"]
+    )
+    unnormalized_pdf_grid = rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid
+    integral_mpc3 = jnp.trapezoid(unnormalized_pdf_grid, z_grid)
+
+    unnormalized_pdf = jnp.interp(
+        z,
+        z_grid,
+        unnormalized_pdf_grid,
+        left=0.0,
+        right=0.0,
+    )
+    luminosity_distance = jnp.interp(
+        z,
+        z_grid,
+        luminosity_distance_grid,
+        left=luminosity_distance_grid[0],
+        right=luminosity_distance_grid[-1],
+    )
+    logpdf = jnp.log(unnormalized_pdf) - jnp.log(integral_mpc3)
+    total_merger_rate = (
+        1e-9 * params["local_merger_rate"] * integral_mpc3 / SECONDS_PER_YEAR
+    )
+    return total_merger_rate, luminosity_distance, logpdf
+
+
+def log_weights(
+    logprob: jax.Array,
+    proposal_logprob: jax.Array,
+    luminosity_distance: jax.Array,
+    parameters: Mapping[str, Any],
+    samples: Mapping[str, jax.Array],
+    fiducials: Mapping[str, Any],
+) -> jax.Array:
+    redshift = samples["redshift"]
+    xi, n = parameters["xi_0"], parameters["xi_n"]
+    xi_fid, n_fid = fiducials["xi_0"], fiducials["xi_n"]
+    luminosity_distance_fid = samples["luminosity_distance"]
+    logdiff_dl_em = jnp.log(luminosity_distance) - jnp.log(luminosity_distance_fid)
+    logdiff_gw_em_ratio = log_gw_em_ratio(redshift, xi, n) - log_gw_em_ratio(
+        redshift, xi_fid, n_fid
+    )
+    logdiff_dl_gw = logdiff_dl_em + logdiff_gw_em_ratio
+    return logprob - proposal_logprob - logdiff_dl_gw * 2.0
 
 
 def make_merger_rate_and_log_weights_fn(
     *,
-    z_grid: jnp.ndarray,
-    proposal_log_pdf: jnp.ndarray,
-    fiducial_xi_0: float,
-    fiducial_xi_n: float,
+    fiducials: Mapping[str, Any],
+    z_grid: jax.Array,
+    proposal_logprob: jax.Array,
 ) -> MergerRateAndLogWeightsFn:
     """Build the merger-rate + importance-log-weights callback.
 
@@ -90,28 +154,35 @@ def make_merger_rate_and_log_weights_fn(
     fiducial parameter point) to arbitrary sampled hyperparameters. It is
     JAX-traceable and intended to be passed (pre-built) to
     :func:`~astrogwb.sampling.numpyro_model.numpyro_model`.
-    The callback's ``params`` mapping must include ``local_merger_rate`` in
-    ``Gpc^-3 yr^-1`` alongside the cosmology and population parameters.
+
+    Precompute ``proposal_logprob`` with
+    :func:`compute_merger_rate_distance_and_logprob` at the fiducials::
+
+        _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
+            fiducials, samples, z_grid=z_grid
+        )
 
     Parameters
     ----------
+    fiducials:
+        Fiducial hyperparameters used for the GW/EM ratio correction inside
+        :func:`log_weights`. Must include ``xi_0`` and ``xi_n``.
     z_grid:
         Redshift grid used for the cosmology integrals and MD normalization.
         **Must be a concrete array** -- its extent and size are extracted
         eagerly below so the closure never calls ``float()`` on a tracer.
-    proposal_log_pdf:
-        Precomputed ``log`` of the proposal redshift PDF evaluated at the
-        catalog redshifts, shape ``(N,)``.
-    fiducial_xi_0, fiducial_xi_n:
-        Modified-propagation parameters of the *proposal* catalog; the weight
-        Jacobian includes their ratio against the sampled ``xi_0`` / ``xi_n``.
+    proposal_logprob:
+        Precomputed redshift log-pdf at the fiducials for the catalog
+        redshifts, shape ``(N,)``. Typically the third return value of
+        :func:`compute_merger_rate_distance_and_logprob`.
 
     Returns
     -------
     MergerRateAndLogWeightsFn
         Callable ``(params, samples) -> (total_merger_rate, log_weights)``.
         ``total_merger_rate`` is in mergers per second; ``log_weights`` has
-        shape ``(N,)``.
+        shape ``(N,)``. ``samples`` must include ``redshift`` and
+        ``luminosity_distance`` (fiducial EM distances from the catalog).
     """
     # Extract the cosmology grid extent eagerly (z_grid is concrete here at
     # factory-build time) so the jitted closure never calls float() on a tracer.
@@ -120,54 +191,20 @@ def make_merger_rate_and_log_weights_fn(
 
     def merger_rate_and_log_weights_fn(
         params: Mapping[str, Any],
-        samples: Mapping[str, jnp.ndarray],
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        z = samples["redshift"]
-        d_l_fid = samples["luminosity_distance"]
-
-        luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(
-            params, max_redshift, n_grid
+        samples: Mapping[str, jax.Array],
+    ) -> tuple[jax.Array, jax.Array]:
+        total_merger_rate, luminosity_distance, logprob = (
+            compute_merger_rate_distance_and_logprob(
+                params,
+                samples,
+                z_grid=z_grid,
+                max_redshift=max_redshift,
+                n_grid=n_grid,
+            )
         )
-        d_l_theta = jnp.interp(
-            z,
-            z_grid,
-            luminosity_distance_grid,
-            left=luminosity_distance_grid[0],
-            right=luminosity_distance_grid[-1],
+        logw = log_weights(
+            logprob, proposal_logprob, luminosity_distance, params, samples, fiducials
         )
-
-        rate_shape_grid = madau_dickinson_rate(
-            z_grid, params["gamma"], params["kappa"], params["z_peak"]
-        )
-        unnormalized_pdf_grid = rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid
-        integral_Mpc3 = jnp.trapezoid(unnormalized_pdf_grid, z_grid)
-
-        rate_shape_samples = madau_dickinson_rate(
-            z, params["gamma"], params["kappa"], params["z_peak"]
-        )
-        dvc_dz_samples = jnp.interp(
-            z,
-            z_grid,
-            dvc_dz_grid,
-            left=dvc_dz_grid[0],
-            right=dvc_dz_grid[-1],
-        )
-        target_pdf = rate_shape_samples / (1.0 + z) * dvc_dz_samples / integral_Mpc3
-
-        log_fiducial_gw_em_ratio = log_gw_em_ratio(z, fiducial_xi_0, fiducial_xi_n)
-        log_target_gw_em_ratio = log_gw_em_ratio(z, params["xi_0"], params["xi_n"])
-        log_weights = (
-            jnp.log(target_pdf)
-            - proposal_log_pdf
-            + 2.0 * jnp.log(d_l_fid)
-            - 2.0 * jnp.log(d_l_theta)
-            + 2.0 * log_fiducial_gw_em_ratio
-            - 2.0 * log_target_gw_em_ratio
-        )
-
-        total_merger_rate = (
-            1e-9 * params["local_merger_rate"] * integral_Mpc3 / SECONDS_PER_YEAR
-        )
-        return total_merger_rate, log_weights
+        return total_merger_rate, logw
 
     return merger_rate_and_log_weights_fn

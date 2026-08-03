@@ -145,6 +145,10 @@ from astrogwb.gwb import (
     frequency_mask as make_frequency_mask,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    compute_merger_rate_distance_and_logprob,
+    make_merger_rate_and_log_weights_fn,
+)
 from astrogwb.utils import repo_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from pluscross import load_catalog
@@ -231,7 +235,9 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 catalog = load_catalog(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
-polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)
+polarization_power = jnp.asarray(
+    compute_polarization_power(catalog)
+)  # (nfreq, nsamples)
 samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
 del catalog
 
@@ -337,22 +343,16 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 #
 # which returns a tuple of (merger rate, log importance weights). While it would be conceptually simpler to pass separate functions for each quantity, encapsulating all the logic in a single function allows the caller to efficiently implement the cosmology integrals which are used in both calculations.
 #
-# The proposal log-density `log p_proposal(z)` depends only on the fixed fiducial point,
-# so we evaluate it **once** here. The NUTS-time weight function then reuses this array
-# and evaluates one shared redshift grid per proposed $\Lambda$ for target distances,
-# target redshift density, and total merger-rate normalization.
+# The proposal log-density depends only on the fixed fiducial point, so we
+# evaluate `compute_merger_rate_distance_and_logprob` **once** here. The NUTS-time
+# weight function reuses this array and evaluates the same density at each
+# proposed $\Lambda$.
 
 # %%
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_proposal_logpdf,
-    make_merger_rate_and_log_weights_fn,
-)
-
-z_samples = jnp.asarray(samples["redshift"])
 z_grid = jnp.linspace(z_min, z_max, n_grid)
 
-log_p_proposal = compute_proposal_logpdf(
-    z_samples, z_grid=z_grid, fiducials=fiducials
+_, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
+    fiducials, samples, z_grid=z_grid
 )
 
 
@@ -364,10 +364,9 @@ log_p_proposal = compute_proposal_logpdf(
 
 # %%
 merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
+    fiducials=fiducials,
     z_grid=z_grid,
-    proposal_log_pdf=log_p_proposal,
-    fiducial_xi_0=fiducials["xi_0"],
-    fiducial_xi_n=fiducials["xi_n"],
+    proposal_logprob=proposal_logprob,
 )
 
 
