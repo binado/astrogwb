@@ -114,7 +114,7 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     from astrogwb.gwb import frequency_mask as make_frequency_mask
     from astrogwb.gwb import spectral_density
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-        compute_proposal_logpdf,
+        compute_merger_rate_and_log_density,
         make_merger_rate_and_log_weights_fn,
     )
     from astrogwb.sampling.numpyro_model import numpyro_model
@@ -174,17 +174,14 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     )
 
     # --- Precompute fiducial proposal log-density ----------------------------
-    z_samples = jnp.asarray(samples["redshift"])
     z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
-    log_p_proposal = compute_proposal_logpdf(
-        z_samples, z_grid=z_grid, fiducials=config.fiducials
+    _, proposal_logprob = compute_merger_rate_and_log_density(
+        config.fiducials, samples, z_grid=z_grid
     )
 
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         z_grid=z_grid,
-        proposal_log_pdf=log_p_proposal,
-        fiducial_xi_0=config.fiducials["xi_0"],
-        fiducial_xi_n=config.fiducials["xi_n"],
+        proposal_logprob=proposal_logprob,
     )
 
     # --- Inject the fiducial spectrum as observed data (no plot) -------------

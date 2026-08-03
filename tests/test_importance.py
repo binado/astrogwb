@@ -5,13 +5,11 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from gwmock_pop.distributions.madau_dickinson import (
-    madau_dickinson_rate,
-    madau_dickinson_redshift_pdf,
-)
+from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    compute_merger_rate_and_log_density,
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.utils import SECONDS_PER_YEAR
@@ -90,35 +88,14 @@ def test_flat_lcdm_grid_accepts_jax_scalar_max_redshift() -> None:
 def _build_synthetic_callback(n_samples: int = 16):
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
     z_samples = jnp.linspace(0.01, Z_MAX - 0.01, n_samples)
+    samples = {"redshift": z_samples}
 
-    proposal_pdf = madau_dickinson_redshift_pdf(
-        z_samples,
-        z_max=Z_MAX,
-        z_min=Z_MIN,
-        gamma=FIDUCIALS["gamma"],
-        kappa=FIDUCIALS["kappa"],
-        z_peak=FIDUCIALS["z_peak"],
-        hubble_constant=FIDUCIALS["H0"],
-        omega_m=FIDUCIALS["Omega_m"],
-        n_grid=N_GRID,
+    _, proposal_logprob = compute_merger_rate_and_log_density(
+        FIDUCIALS, samples, z_grid=z_grid
     )
-    proposal_log_pdf = jnp.log(proposal_pdf)
-
-    # Luminosity distances consistent with the fiducial cosmology, evaluated on
-    # the same grid so the closure interpolates sensible values.
-    d_l_grid, _ = distance_and_volume_grid(FIDUCIALS, max_redshift=Z_MAX, n_grid=N_GRID)
-    d_l_samples = jnp.interp(z_samples, z_grid, d_l_grid)
-
-    samples = {
-        "redshift": z_samples,
-        "luminosity_distance": d_l_samples,
-    }
-
     fn = make_merger_rate_and_log_weights_fn(
         z_grid=z_grid,
-        proposal_log_pdf=proposal_log_pdf,
-        fiducial_xi_0=FIDUCIALS["xi_0"],
-        fiducial_xi_n=FIDUCIALS["xi_n"],
+        proposal_logprob=proposal_logprob,
     )
     return fn, samples
 
@@ -168,19 +145,14 @@ def test_fiducial_local_merger_rate_preserves_rate_calculation() -> None:
     assert float(total_rate) == pytest.approx(expected)
 
 
-def test_make_merger_rate_and_log_weights_fn_fiducial_weights_finite_and_healthy() -> (
-    None
-):
-    # At the fiducial point the GW/EM-ratio and luminosity-distance Jacobian
-    # terms vanish, but the target PDF (which carries the dVc/dz comoving-volume
-    # factor and a grid-integral normalization) does not match the plain proposal
-    # redshift PDF, so the weights are non-trivial. We assert they stay finite
-    # and the relative ESS is in a healthy range (well above 0, well below the
-    # degenerate-weights value of 1).
+def test_make_merger_rate_and_log_weights_fn_fiducial_weights_cancel() -> None:
+    # Proposal and target share compute_merger_rate_and_log_density, so at the
+    # fiducial point log_weights are identically zero and relative ESS is 1.
     fn, samples = _build_synthetic_callback()
     _, log_weights = fn(FIDUCIALS, samples)
-    weights = np.exp(np.asarray(log_weights))
+    log_weights = np.asarray(log_weights)
+    weights = np.exp(log_weights)
+    np.testing.assert_allclose(log_weights, 0.0, atol=1e-12)
     assert np.all(np.isfinite(weights))
-    assert np.all(weights > 0)
     rel_ess = float(weights.sum() ** 2 / (weights.size * (weights**2).sum()))
-    assert 0.05 < rel_ess < 1.0
+    assert rel_ess == pytest.approx(1.0)
