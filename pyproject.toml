@@ -50,9 +50,9 @@ dev = [
     "jupyter>=1.1.1",
     "matplotlib>=3.11.1",
     "pytest>=9.0.2",
-    "ruff>=0.16.0",
-    "snakemake>=9.13.4",
-    "ty>=0.0.64",
+    "ruff>=0.16.1",
+    "snakemake>=9.24.0",
+    "ty>=0.0.65",
 ]
 slurm = [
     { include-group = "dev" },
