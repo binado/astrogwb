@@ -68,7 +68,7 @@ label = 'ET-$\Delta$'
 
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-triangular-CE-Hanford"
-label = 'ET-$\Delta +$ CE'
+label = 'ET-$\Delta$ $+$ CE'
 
 [[figures.mcmc_cosmological_parameters.detector_posteriors]]
 network = "ET-2L-aligned"
