@@ -42,14 +42,15 @@ def compute_merger_rate_and_log_density(
     max_redshift: float | None = None,
     n_grid: int | None = None,
 ) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Merger rate and params-dependent log-density at catalog redshifts.
+    r"""Merger rate and params-dependent log-density at catalog redshifts.
 
     Builds cosmology tables on ``z_grid`` via
     :func:`~astrogwb.cosmology.distance_and_volume_grid`, normalizes the
     Madau-Dickinson redshift weight by trapezoidal integration on that grid,
     and evaluates
 
-    ``log_density = log p(z|θ) - 2 log d_L(z|θ) - 2 log Ξ(z; ξ₀, ξₙ)``
+    :math:`\mathrm{log\_density} = \log p(z|\theta) - 2 \log d_L(z|\theta)
+    - 2 \log \Xi(z; \xi_0, \xi_n)`
 
     at ``samples["redshift"]`` by linearly interpolating ``dV_c/dz`` and
     ``d_L``. The same function is used for the proposal (at fiducials) and
