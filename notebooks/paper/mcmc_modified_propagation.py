@@ -628,8 +628,8 @@ def xi0_n_constraint_table_latex(table: pd.DataFrame) -> str:
         escape=False,
         float_format="%.3g",
         caption=(
-            r"Matched-filter SNR and $\Xi_0$/$n$ constraints by detector network. "
-            "Posterior constraints are half-widths of the 68.27\\% HDI."
+            "Matched-filter SNR and $1\\sigma$ credible intervals for $\\Xi_0$ and $n$ "
+            "for each detector network."
         ),
         label="tab:mcmc_modified_propagation_xi0_n_by_detector",
     )

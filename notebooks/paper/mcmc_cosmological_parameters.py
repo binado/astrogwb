@@ -748,8 +748,8 @@ def constraint_table_latex(table: pd.DataFrame) -> str:
         escape=False,
         float_format="%.3g",
         caption=(
-            "Matched-filter SNR and $H_0$ constraints by detector network. "
-            "Posterior constraints are half-widths of the 68.27\\% HDI."
+            "Matched-filter SNR and $1\\sigma$ credible intervals for $H_0$ "
+            "for each detector network."
         ),
         label="tab:mcmc_cosmological_parameters_h0_by_detector",
     )
