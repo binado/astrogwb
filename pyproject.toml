@@ -62,10 +62,9 @@ slurm = [
 [tool.ruff]
 include = ["src/**/*.py", "tests/**/*.py"]
 
-# py:percent notebooks intentionally import after config cells; pre-commit still
-# passes notebook paths to ruff even though include excludes them by default.
+# Colab bootstrap + configure_runtime must run before JAX-touching imports.
 [tool.ruff.lint.per-file-ignores]
-"notebooks/**" = ["E402"]
+"notebooks/mcmc.py" = ["E402"]
 
 [tool.ty.src]
 include = ["src", "tests"]

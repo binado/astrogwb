@@ -35,30 +35,21 @@
 
 # %%
 import json
-import multiprocessing
 import time
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-
-# Setting JAX to use all available CPU cores for parallelization
-num_cpus = multiprocessing.cpu_count()
-import numpyro
-
-numpyro.set_host_device_count(num_cpus)
 
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
-
-# gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
-# matplotlib axes so plotting behaves as expected after importing detector utilities.
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.colors import LinearSegmentedColormap, colorConverter
 from matplotlib.projections import register_projection
 from numpyro.infer.util import log_density
+from pluscross import load_catalog
 from scipy.ndimage import gaussian_filter
 
 from astrogwb.detector import effective_psd, load_sensitivity_map
@@ -76,8 +67,9 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb.sampling.numpyro_model import numpyro_model
 from astrogwb.utils import repo_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from pluscross import load_catalog
 
+# gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
+# matplotlib axes so plotting behaves as expected after importing detector utilities.
 register_projection(MplAxes)
 
 jax.config.update("jax_enable_x64", True)

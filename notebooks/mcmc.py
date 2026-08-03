@@ -145,6 +145,10 @@ from astrogwb.gwb import (
     frequency_mask as make_frequency_mask,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    compute_merger_rate_distance_and_logprob,
+    make_merger_rate_and_log_weights_fn,
+)
 from astrogwb.utils import repo_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from pluscross import load_catalog
@@ -345,11 +349,6 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 # proposed $\Lambda$.
 
 # %%
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_distance_and_logprob,
-    make_merger_rate_and_log_weights_fn,
-)
-
 z_grid = jnp.linspace(z_min, z_max, n_grid)
 
 _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
