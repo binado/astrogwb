@@ -97,6 +97,7 @@ DEFAULT_GAMMA = 1.42
 DEFAULT_KAPPA = 4.62
 DEFAULT_Z_PEAK = 1.84
 DEFAULT_LOCAL_MERGER_RATE = 161.0
+DEFAULT_IMPORTANCE_RELATIVE_ESS = 1.0
 
 DEFAULT_DETECTOR_NETWORKS = {
     "ET-triangular": ("E1", "E2", "E3"),
@@ -170,13 +171,16 @@ DEFAULT_OMEGA_M_LABEL = r"$H_0 + \Omega_m$"
 H0_LABEL = r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
 LOCAL_MERGER_RATE_LABEL = r"$\mathcal{R}_0\,[\mathrm{Gpc^{-3}\,yr^{-1}}]$"
 OMEGA_M_LABEL = r"$\Omega_m$"
+IMPORTANCE_RELATIVE_ESS_LABEL = r"$N_{\mathrm{eff}} / N_{\mathrm{inj}}$"
 VAR_LABELS = {
     "H0": H0_LABEL,
     "local_merger_rate": LOCAL_MERGER_RATE_LABEL,
     "Omega_m": OMEGA_M_LABEL,
+    "importance_relative_ess": IMPORTANCE_RELATIVE_ESS_LABEL,
 }
 MERGER_RATE_VAR_NAMES = ("H0", "local_merger_rate")
 OMEGA_M_VAR_NAMES = ("H0", "Omega_m")
+OMEGA_M_ESS_VAR_NAMES = ("H0", "Omega_m", "importance_relative_ess")
 # Kept for select_corner_inference_data / older call sites.
 CORNER_VAR_NAMES = MERGER_RATE_VAR_NAMES
 
@@ -422,6 +426,49 @@ def _pooled_corner_range(
     return ranges
 
 
+def _expand_corner_range_with_truths(
+    plot_range: Sequence[tuple[float, float]],
+    var_names: Sequence[str],
+    truths: Mapping[str, float] | None,
+    *,
+    padding_fraction: float = 0.02,
+) -> list[tuple[float, float]]:
+    """Ensure corner axis limits include configured truth markers."""
+    if truths is None:
+        return list(plot_range)
+    expanded: list[tuple[float, float]] = []
+    for (lower, upper), name in zip(plot_range, var_names, strict=True):
+        if name not in truths:
+            expanded.append((lower, upper))
+            continue
+        lower = min(lower, float(truths[name]))
+        upper = max(upper, float(truths[name]))
+        width = upper - lower
+        padding = padding_fraction * width if width > 0 else 0.0
+        expanded.append((lower - padding, upper + padding))
+    return expanded
+
+
+def _disable_relative_ess_axis_offsets(
+    fig: plt.Figure, var_names: Sequence[str]
+) -> None:
+    """Avoid matplotlib offset ticks that look like relative ESS > 1."""
+    if "importance_relative_ess" not in var_names:
+        return
+    n_vars = len(var_names)
+    ess_index = list(var_names).index("importance_relative_ess")
+    axes = np.asarray(fig.axes).reshape(n_vars, n_vars)
+
+    def _disable_offset(axis: object) -> None:
+        formatter = axis.get_major_formatter()  # type: ignore[attr-defined]
+        if hasattr(formatter, "set_useOffset"):
+            formatter.set_useOffset(False)
+
+    for index in range(n_vars):
+        _disable_offset(axes[ess_index, index].yaxis)
+        _disable_offset(axes[index, ess_index].xaxis)
+
+
 def plot_corner(
     inference_data: Sequence[xr.DataTree],
     labels: Sequence[str],
@@ -452,7 +499,11 @@ def plot_corner(
         truths = {name: fiducials[name] for name in var_names}
 
     fig: plt.Figure | None = None
-    plot_range = _pooled_corner_range(inference_data, var_names, group=group)
+    plot_range = _expand_corner_range_with_truths(
+        _pooled_corner_range(inference_data, var_names, group=group),
+        var_names,
+        truths,
+    )
     for index, (tree, color, linestyle) in enumerate(
         zip(inference_data, resolved_colors, resolved_linestyles, strict=True)
     ):
@@ -475,6 +526,7 @@ def plot_corner(
 
     if fig is None:  # pragma: no cover - guarded by validation
         raise RuntimeError("corner did not create a figure")
+    _disable_relative_ess_axis_offsets(fig, var_names)
     if len(inference_data) > 1:
         handles = [
             Line2D([], [], color=color, linestyle=linestyle, label=label)
@@ -820,6 +872,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=Path("figures/mcmc_cosmological_parameters_H0_Omega_m_corner.pdf"),
     )
     parser.add_argument(
+        "--output-omega-m-ess-corner-pdf",
+        type=Path,
+        default=Path("figures/mcmc_cosmological_parameters_H0_Omega_m_ess_corner.pdf"),
+    )
+    parser.add_argument(
         "--output-csv",
         type=Path,
         default=Path("figures/mcmc_cosmological_parameters_H0_by_detector.csv"),
@@ -848,6 +905,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--z-peak", type=float, default=DEFAULT_Z_PEAK)
     parser.add_argument(
         "--local-merger-rate", type=float, default=DEFAULT_LOCAL_MERGER_RATE
+    )
+    parser.add_argument(
+        "--importance-relative-ess",
+        type=float,
+        default=DEFAULT_IMPORTANCE_RELATIVE_ESS,
     )
     parser.add_argument(
         "--network",
@@ -955,6 +1017,7 @@ fiducials = {
     "kappa": args.kappa,
     "z_peak": args.z_peak,
     "local_merger_rate": args.local_merger_rate,
+    "importance_relative_ess": args.importance_relative_ess,
 }
 
 use_paper_style()
@@ -1067,6 +1130,22 @@ omega_m_corner_figure = plot_corner(
 )
 
 # %% [markdown]
+# ## Figure (vi): $H_0$--$\Omega_m$--relative-ESS corner
+#
+# Mirror of the $H_0$--$\Omega_m$ corner that also shows the importance-sampling
+# relative effective sample size $N_{\mathrm{eff}} / N_{\mathrm{inj}}$.
+
+# %%
+omega_m_ess_corner_figure = plot_corner(
+    omega_m_data,
+    omega_m_labels,
+    OMEGA_M_ESS_VAR_NAMES,
+    colors=[CATEGORY["cosmology"]],
+    group=args.group,
+    fiducials=fiducials,
+)
+
+# %% [markdown]
 # ## Fiducial SNR and $H_0$ constraint table
 #
 # Evaluate the fiducial SGWB once, compute the matched-filter SNR for each
@@ -1115,6 +1194,7 @@ outputs = {
     _resolve_path(args.output_narrow_corner_pdf, root): narrow_corner_figure,
     _resolve_path(args.output_broad_corner_pdf, root): broad_corner_figure,
     _resolve_path(args.output_omega_m_corner_pdf, root): omega_m_corner_figure,
+    _resolve_path(args.output_omega_m_ess_corner_pdf, root): omega_m_ess_corner_figure,
 }
 for output_path, figure in outputs.items():
     output_path.parent.mkdir(parents=True, exist_ok=True)

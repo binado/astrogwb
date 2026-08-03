@@ -78,6 +78,16 @@ Append the appropriate `--config` argument after `--` on
 `scripts/workflow.py mcmc …` (or directly on snakemake). Use the nested
 dictionary syntax shown here rather than a flat `catalog.id=...` key.
 
+Snakemake replaces a profile's entire `config:` list when you pass any CLI
+`--config`, and repeated `--config` flags do not merge (the last one wins).
+That is why a bare `--config "catalog=…"` against `profiles/slurm-cpu` used to
+drop `jax_platforms=cpu` and fall back to the Snakefile's `cuda` default on
+CPU nodes. `scripts/workflow.py mcmc` coalesces every `--config` KEY=VALUE
+into one flag and re-injects `jax_platforms=cpu` for the `local` and
+`slurm-cpu` profiles. If you invoke snakemake directly, pass both keys in one
+`--config` group, e.g.
+`--config jax_platforms=cpu "catalog={'id':'my-catalog'}"`.
+
 Note the manifest schema has no `jax_platforms` field: which JAX backend to
 initialize is a runtime concern owned by the Snakemake profile you run with
 (`profiles/local`, `profiles/slurm`, `profiles/slurm-cpu`), not a property of
@@ -104,11 +114,11 @@ the repo:
 
 Both batch compatible `run_mcmc` jobs into a SLURM array. The GPU profile
 requests one GPU and ties four CPUs to it via `cpus_per_gpu` (plugin-native
-`gpu` / `cpus_per_gpu` resources, not `--gres`). The CPU profile sets
-`jax_platforms=cpu` (passed through as `--platform cpu`) so JAX does not try
-to initialize CUDA on a CPU node, and spends rule threads on
-`--host-device-count` (one logical device per concurrent chain, with
-`--cpu-threads` pinned to 1).
+`gpu` / `cpus_per_gpu` resources, not `--gres`). The CPU profile (and
+`scripts/workflow.py` for `local` / `slurm-cpu`) sets `jax_platforms=cpu`
+(passed through as `--platform cpu`) so JAX does not try to initialize CUDA
+on a CPU node, and spends rule threads on `--host-device-count` (one logical
+device per concurrent chain, with `--cpu-threads` pinned to 1).
 
 1. **Install the executor plugin on the submit host.** The `slurm` group pulls
    in `snakemake-executor-plugin-slurm`. Add `--extra cuda` for the GPU

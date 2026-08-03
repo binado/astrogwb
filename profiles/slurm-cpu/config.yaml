@@ -15,6 +15,10 @@ jobs: 32
 # successfully. Submitting run_mcmc jobs individually avoids this.
 # Force the JAX backend to CPU so run_mcmc does not try to init CUDA on a
 # CPU node. Overrides the "cuda" default in workflow/mcmc.smk.
+# Caveat: any CLI ``--config …`` replaces this whole list (Snakemake does not
+# merge). Prefer ``scripts/workflow.py``, which re-emits ``jax_platforms=cpu``
+# in the same ``--config`` group as catalog overrides; if invoking snakemake
+# directly, pass ``jax_platforms=cpu`` alongside any other ``--config`` keys.
 config:
   - jax_platforms=cpu
 # workflow/mcmc.smk passes rule threads as --host-device-count on CPU jobs

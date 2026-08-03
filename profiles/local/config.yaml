@@ -15,6 +15,10 @@
 
 # Force JAX onto CPU so run_mcmc does not try to initialize CUDA on a machine
 # with no GPU (overrides the "cuda" default in workflow/mcmc.smk).
+# Caveat: any CLI ``--config …`` replaces this whole list (Snakemake does not
+# merge). Prefer ``scripts/workflow.py``, which re-emits ``jax_platforms=cpu``
+# in the same ``--config`` group as catalog overrides; if invoking snakemake
+# directly, pass ``jax_platforms=cpu`` alongside any other ``--config`` keys.
 config:
   - jax_platforms=cpu
 

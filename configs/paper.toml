@@ -21,6 +21,7 @@ gamma = 1.42
 kappa = 4.62
 z_peak = 1.84
 local_merger_rate = 161.0
+importance_relative_ess = 1.0
 
 [detector_networks]
 "ET-triangular" = ["E1", "E2", "E3"]

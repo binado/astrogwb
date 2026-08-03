@@ -27,11 +27,51 @@ MCMC_SMK = "workflow/mcmc.smk"
 PAPER_SMK = "workflow/paper.smk"
 
 PROFILE_CHOICES = ("local", "slurm", "slurm-cpu")
+# Profiles that must force JAX onto CPU. Emitted as a CLI ``--config`` entry
+# (not only via the profile YAML ``config:`` key) so a caller's catalog
+# ``--config`` override cannot wipe ``jax_platforms`` — Snakemake replaces the
+# entire profile ``config:`` list when any CLI ``--config`` is present, and
+# repeated ``--config`` flags do not merge (last flag wins).
+CPU_JAX_PROFILES = frozenset({"local", "slurm-cpu"})
 DEFAULT_LOCAL_CORES = 8
 
 
 def profile_dir(name: str) -> Path:
     return Path("profiles") / name
+
+
+def split_config_from_extra(extra: list[str]) -> tuple[list[str], list[str]]:
+    """Split ``extra`` into ``--config``/``-C`` KEY=VALUE entries and the rest.
+
+    Snakemake's ``--config`` uses ``nargs='*'`` without ``action='append'``, so
+    each ``--config`` occurrence replaces the previous one. Collecting every
+    KEY=VALUE into a single group lets callers merge safely.
+    """
+    config_entries: list[str] = []
+    other: list[str] = []
+    i = 0
+    while i < len(extra):
+        if extra[i] in ("--config", "-C"):
+            i += 1
+            while i < len(extra) and not extra[i].startswith("-"):
+                config_entries.append(extra[i])
+                i += 1
+            continue
+        other.append(extra[i])
+        i += 1
+    return config_entries, other
+
+
+def coalesce_mcmc_extra(extra: list[str] | None, profile: str) -> list[str]:
+    """Merge ``--config`` groups and inject ``jax_platforms=cpu`` for CPU profiles."""
+    config_entries, other = split_config_from_extra(list(extra or []))
+    if profile in CPU_JAX_PROFILES:
+        keys = {entry.split("=", 1)[0] for entry in config_entries if "=" in entry}
+        if "jax_platforms" not in keys:
+            config_entries.insert(0, "jax_platforms=cpu")
+    if not config_entries:
+        return other
+    return ["--config", *config_entries, *other]
 
 
 def _add_run_mode(parser: argparse.ArgumentParser) -> None:
@@ -125,8 +165,7 @@ def build_mcmc_argv(
     if dry_run:
         cmd.append("--dry-run")
     cmd.append("mcmc")
-    if extra:
-        cmd.extend(extra)
+    cmd.extend(coalesce_mcmc_extra(extra, profile))
     return cmd
 
 
