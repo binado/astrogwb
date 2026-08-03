@@ -571,7 +571,6 @@ def build_snr_xi0_n_constraint_table(
     labels: Sequence[str],
     snr_table: pd.DataFrame,
     *,
-    xi_0_fiducial: float,
     group: str = "posterior",
     probability: float = CORNER_LEVELS[0],
 ) -> pd.DataFrame:
@@ -606,7 +605,6 @@ def build_snr_xi0_n_constraint_table(
                 "label": label,
                 "snr": snr,
                 "sigma_xi0_hdi": sigma_xi0_hdi,
-                "rel_sigma_xi0_hdi": sigma_xi0_hdi / xi_0_fiducial,
                 "sigma_n_hdi": sigma_n_hdi,
                 "rel_sigma_xi0_snr": 1.0 / snr,
             }
@@ -621,7 +619,6 @@ def xi0_n_constraint_table_latex(table: pd.DataFrame) -> str:
             "label": "Detector Network",
             "snr": "SNR",
             "sigma_xi0_hdi": r"$\sigma_{\Xi_0}^{\rm HDI}$",
-            "rel_sigma_xi0_hdi": r"$\sigma_{\Xi_0}^{\rm HDI}/\Xi_0$",
             "sigma_n_hdi": r"$\sigma_n^{\rm HDI}$",
             "rel_sigma_xi0_snr": r"$1/{\rm SNR}$",
         }
@@ -631,8 +628,8 @@ def xi0_n_constraint_table_latex(table: pd.DataFrame) -> str:
         escape=False,
         float_format="%.3g",
         caption=(
-            r"Matched-filter SNR and $\Xi_0$/$n$ constraints by detector network. "
-            "Posterior constraints are half-widths of the 68.27\\% HDI."
+            "Matched-filter SNR and $1\\sigma$ credible intervals for $\\Xi_0$ and $n$ "
+            "for each detector network."
         ),
         label="tab:mcmc_modified_propagation_xi0_n_by_detector",
     )
@@ -891,7 +888,6 @@ xi0_n_constraint_table = build_snr_xi0_n_constraint_table(
     detector_xi0_n_data,
     args.detector_labels,
     snr_table,
-    xi_0_fiducial=args.xi_0,
     group=args.group,
 )
 xi0_n_constraint_table

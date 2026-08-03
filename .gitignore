@@ -16,6 +16,7 @@ logs/
 # Generated paper-figure workflow state/artifacts.
 .snakemake/
 figures/*.csv
+figures/*.tex
 
 *.md
 !README.md
