@@ -54,11 +54,14 @@ def compute_merger_rate_distance_and_logprob(
 
     :math:`\mathrm{logpdf} = \log p(z|\theta)`
 
-    at ``samples["redshift"]`` by linearly interpolating ``dV_c/dz``. Also
-    returns the interpolated luminosity distance ``d_L(z|\theta)``. The same
-    function is used for the proposal (at fiducials) and the target (at
-    sampled ``params``); :func:`log_weights` combines these with the catalog
-    fiducial distances and the GW/EM ratio correction.
+    at ``samples["redshift"]`` by linearly interpolating the complete
+    unnormalized redshift density. This makes the interpolated density's
+    integral exactly equal to its trapezoidal normalization and avoids
+    reevaluating the Madau-Dickinson rate at every catalog sample. Also returns
+    the interpolated luminosity distance ``d_L(z|\theta)``. The same function
+    is used for the proposal (at fiducials) and the target (at sampled
+    ``params``); :func:`log_weights` combines these with the catalog fiducial
+    distances and the GW/EM ratio correction.
 
     Parameters
     ----------
@@ -98,15 +101,12 @@ def compute_merger_rate_distance_and_logprob(
     unnormalized_pdf_grid = rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid
     integral_mpc3 = jnp.trapezoid(unnormalized_pdf_grid, z_grid)
 
-    rate_shape = madau_dickinson_rate(
-        z, params["gamma"], params["kappa"], params["z_peak"]
-    )
-    dvc_dz = jnp.interp(
+    unnormalized_pdf = jnp.interp(
         z,
         z_grid,
-        dvc_dz_grid,
-        left=dvc_dz_grid[0],
-        right=dvc_dz_grid[-1],
+        unnormalized_pdf_grid,
+        left=0.0,
+        right=0.0,
     )
     luminosity_distance = jnp.interp(
         z,
@@ -115,8 +115,7 @@ def compute_merger_rate_distance_and_logprob(
         left=luminosity_distance_grid[0],
         right=luminosity_distance_grid[-1],
     )
-    pdf = rate_shape / (1.0 + z) * dvc_dz / integral_mpc3
-    logpdf = jnp.log(pdf)
+    logpdf = jnp.log(unnormalized_pdf) - jnp.log(integral_mpc3)
     total_merger_rate = (
         1e-9 * params["local_merger_rate"] * integral_mpc3 / SECONDS_PER_YEAR
     )
