@@ -26,6 +26,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+import jax
 import jax.numpy as jnp
 from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
@@ -34,14 +35,14 @@ from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.utils import SECONDS_PER_YEAR
 
 
-def compute_merger_rate_and_log_density(
+def compute_merger_rate_distance_and_logprob(
     params: Mapping[str, Any],
-    samples: Mapping[str, jnp.ndarray],
+    samples: Mapping[str, jax.Array],
     *,
-    z_grid: jnp.ndarray,
+    z_grid: jax.Array,
     max_redshift: float | None = None,
     n_grid: int | None = None,
-) -> tuple[jnp.ndarray, jnp.ndarray]:
+) -> tuple[jax.Array, jax.Array, jax.Array]:
     r"""Merger rate and params-dependent log-density at catalog redshifts.
 
     Builds cosmology tables on ``z_grid`` via
@@ -75,7 +76,7 @@ def compute_merger_rate_and_log_density(
 
     Returns
     -------
-    tuple[jnp.ndarray, jnp.ndarray]
+    tuple[jax.Array, jax.Array]
         ``(total_merger_rate, log_density)``. Rate is in mergers per second;
         ``log_density`` has shape ``(N,)``.
     """
@@ -104,7 +105,7 @@ def compute_merger_rate_and_log_density(
         left=dvc_dz_grid[0],
         right=dvc_dz_grid[-1],
     )
-    d_l = jnp.interp(
+    luminosity_distance = jnp.interp(
         z,
         z_grid,
         luminosity_distance_grid,
@@ -112,21 +113,38 @@ def compute_merger_rate_and_log_density(
         right=luminosity_distance_grid[-1],
     )
     pdf = rate_shape / (1.0 + z) * dvc_dz / integral_mpc3
-    log_density = (
-        jnp.log(pdf)
-        - 2.0 * jnp.log(d_l)
-        - 2.0 * log_gw_em_ratio(z, params["xi_0"], params["xi_n"])
-    )
+    logpdf = jnp.log(pdf)
     total_merger_rate = (
         1e-9 * params["local_merger_rate"] * integral_mpc3 / SECONDS_PER_YEAR
     )
-    return total_merger_rate, log_density
+    return total_merger_rate, luminosity_distance, logpdf
+
+
+def log_weights(
+    logprob: jax.Array,
+    proposal_logprob: jax.Array,
+    luminosity_distance: jax.Array,
+    parameters: Mapping[str, Any],
+    samples: Mapping[str, jax.Array],
+    fiducials: Mapping[str, Any],
+) -> jax.Array:
+    redshift = samples["redshift"]
+    xi, n = parameters["xi_0"], parameters["xi_n"]
+    xi_fid, n_fid = fiducials["xi_0"], fiducials["xi_n"]
+    luminosity_distance_fid = samples["luminosity_distance"]
+    logdiff_dl_em = jnp.log(luminosity_distance) - jnp.log(luminosity_distance_fid)
+    logdiff_gw_em_ratio = log_gw_em_ratio(redshift, xi, n) - log_gw_em_ratio(
+        redshift, xi_fid, n_fid
+    )
+    logdiff_dl_gw = logdiff_dl_em + logdiff_gw_em_ratio
+    return logprob - proposal_logprob - logdiff_dl_gw * 2.0
 
 
 def make_merger_rate_and_log_weights_fn(
     *,
-    z_grid: jnp.ndarray,
-    proposal_logprob: jnp.ndarray,
+    fiducials: Mapping[str, Any],
+    z_grid: jax.Array,
+    proposal_logprob: jax.Array,
 ) -> MergerRateAndLogWeightsFn:
     """Build the merger-rate + importance-log-weights callback.
 
@@ -167,15 +185,20 @@ def make_merger_rate_and_log_weights_fn(
 
     def merger_rate_and_log_weights_fn(
         params: Mapping[str, Any],
-        samples: Mapping[str, jnp.ndarray],
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        total_merger_rate, log_density = compute_merger_rate_and_log_density(
-            params,
-            samples,
-            z_grid=z_grid,
-            max_redshift=max_redshift,
-            n_grid=n_grid,
+        samples: Mapping[str, jax.Array],
+    ) -> tuple[jax.Array, jax.Array]:
+        total_merger_rate, luminosity_distance, logprob = (
+            compute_merger_rate_distance_and_logprob(
+                params,
+                samples,
+                z_grid=z_grid,
+                max_redshift=max_redshift,
+                n_grid=n_grid,
+            )
         )
-        return total_merger_rate, log_density - proposal_logprob
+        logw = log_weights(
+            logprob, proposal_logprob, luminosity_distance, params, samples, fiducials
+        )
+        return total_merger_rate, logw
 
     return merger_rate_and_log_weights_fn
