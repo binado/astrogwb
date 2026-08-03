@@ -99,7 +99,7 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     from astrogwb.gwb import frequency_mask as make_frequency_mask
     from astrogwb.gwb import spectral_density
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-        compute_merger_rate_and_log_density,
+        compute_merger_rate_distance_and_logprob,
         make_merger_rate_and_log_weights_fn,
     )
     from astrogwb.sampling.numpyro_model import numpyro_model
@@ -131,11 +131,12 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     )
 
     z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
-    _, proposal_logprob = compute_merger_rate_and_log_density(
+    _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
         config.fiducials, samples, z_grid=z_grid
     )
 
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
+        fiducials=config.fiducials,
         z_grid=z_grid,
         proposal_logprob=proposal_logprob,
     )

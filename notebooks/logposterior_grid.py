@@ -70,7 +70,7 @@ from astrogwb.gwb import (
     spectral_density,
 )
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_and_log_density,
+    compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.sampling.numpyro_model import numpyro_model
@@ -169,7 +169,9 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 catalog = load_catalog(CATALOG_PATH)
 
 frequencies = jnp.asarray(catalog.frequencies)
-polarization_power = jnp.asarray(compute_polarization_power(catalog))  # (nfreq, nsamples)
+polarization_power = jnp.asarray(
+    compute_polarization_power(catalog)
+)  # (nfreq, nsamples)
 samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
 del catalog
 
@@ -224,19 +226,20 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 #
 # The importance-weighted spectral-density model is identical to `mcmc.py`. The
 # proposal log-density depends only on the fixed fiducial point, so we evaluate
-# `compute_merger_rate_and_log_density` once here and reuse it inside the weight
-# callback.
+# `compute_merger_rate_distance_and_logprob` once here and reuse it inside the
+# weight callback.
 
 # %%
 z_grid = jnp.linspace(z_min, z_max, n_grid)
 
-_, proposal_logprob = compute_merger_rate_and_log_density(
+_, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
     fiducials, samples, z_grid=z_grid
 )
 
 
 # %%
 merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
+    fiducials=fiducials,
     z_grid=z_grid,
     proposal_logprob=proposal_logprob,
 )

@@ -9,7 +9,7 @@ from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_and_log_density,
+    compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.utils import SECONDS_PER_YEAR
@@ -90,10 +90,12 @@ def _build_synthetic_callback(n_samples: int = 16):
     z_samples = jnp.linspace(0.01, Z_MAX - 0.01, n_samples)
     samples = {"redshift": z_samples}
 
-    _, proposal_logprob = compute_merger_rate_and_log_density(
+    _, luminosity_distance, proposal_logprob = compute_merger_rate_distance_and_logprob(
         FIDUCIALS, samples, z_grid=z_grid
     )
+    samples = {**samples, "luminosity_distance": luminosity_distance}
     fn = make_merger_rate_and_log_weights_fn(
+        fiducials=FIDUCIALS,
         z_grid=z_grid,
         proposal_logprob=proposal_logprob,
     )
@@ -146,8 +148,8 @@ def test_fiducial_local_merger_rate_preserves_rate_calculation() -> None:
 
 
 def test_make_merger_rate_and_log_weights_fn_fiducial_weights_cancel() -> None:
-    # Proposal and target share compute_merger_rate_and_log_density, so at the
-    # fiducial point log_weights are identically zero and relative ESS is 1.
+    # Proposal and target share compute_merger_rate_distance_and_logprob, so at
+    # the fiducial point log_weights are identically zero and relative ESS is 1.
     fn, samples = _build_synthetic_callback()
     _, log_weights = fn(FIDUCIALS, samples)
     log_weights = np.asarray(log_weights)

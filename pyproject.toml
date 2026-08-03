@@ -62,6 +62,11 @@ slurm = [
 [tool.ruff]
 include = ["src/**/*.py", "tests/**/*.py"]
 
+# py:percent notebooks intentionally import after config cells; pre-commit still
+# passes notebook paths to ruff even though include excludes them by default.
+[tool.ruff.lint.per-file-ignores]
+"notebooks/**" = ["E402"]
+
 [tool.ty.src]
 include = ["src", "tests"]
 

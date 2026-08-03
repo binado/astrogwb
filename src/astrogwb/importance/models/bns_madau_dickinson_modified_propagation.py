@@ -16,9 +16,11 @@ with a concrete ``z_grid`` (not a tracer); it extracts ``max_redshift`` /
 during NUTS.
 
 The proposal and target share
-:func:`compute_merger_rate_and_log_density`. Precompute
-``proposal_logprob`` by evaluating that function at the fiducials; the
-callback returns ``log_density(theta) - proposal_logprob``.
+:func:`compute_merger_rate_distance_and_logprob`. Precompute
+``proposal_logprob`` by evaluating that function at the fiducials (third
+return value); the callback returns importance log-weights via
+:func:`log_weights`, which reweights the redshift PDF against the catalog
+fiducial luminosity distances and the GW/EM ratio correction.
 """
 
 from __future__ import annotations
@@ -43,20 +45,20 @@ def compute_merger_rate_distance_and_logprob(
     max_redshift: float | None = None,
     n_grid: int | None = None,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    r"""Merger rate and params-dependent log-density at catalog redshifts.
+    r"""Merger rate, luminosity distance, and redshift log-pdf at catalog samples.
 
     Builds cosmology tables on ``z_grid`` via
     :func:`~astrogwb.cosmology.distance_and_volume_grid`, normalizes the
     Madau-Dickinson redshift weight by trapezoidal integration on that grid,
-    and evaluates
+    and evaluates the redshift PDF
 
-    :math:`\mathrm{log\_density} = \log p(z|\theta) - 2 \log d_L(z|\theta)
-    - 2 \log \Xi(z; \xi_0, \xi_n)`
+    :math:`\mathrm{logpdf} = \log p(z|\theta)`
 
-    at ``samples["redshift"]`` by linearly interpolating ``dV_c/dz`` and
-    ``d_L``. The same function is used for the proposal (at fiducials) and
-    the target (at sampled ``params``), so their difference is identically
-    zero at the fiducial point.
+    at ``samples["redshift"]`` by linearly interpolating ``dV_c/dz``. Also
+    returns the interpolated luminosity distance ``d_L(z|\theta)``. The same
+    function is used for the proposal (at fiducials) and the target (at
+    sampled ``params``); :func:`log_weights` combines these with the catalog
+    fiducial distances and the GW/EM ratio correction.
 
     Parameters
     ----------
@@ -76,9 +78,10 @@ def compute_merger_rate_distance_and_logprob(
 
     Returns
     -------
-    tuple[jax.Array, jax.Array]
-        ``(total_merger_rate, log_density)``. Rate is in mergers per second;
-        ``log_density`` has shape ``(N,)``.
+    tuple[jax.Array, jax.Array, jax.Array]
+        ``(total_merger_rate, luminosity_distance, logpdf)``. Rate is in
+        mergers per second; ``luminosity_distance`` and ``logpdf`` have shape
+        ``(N,)``.
     """
     z = samples["redshift"]
     if max_redshift is None:
@@ -154,29 +157,33 @@ def make_merger_rate_and_log_weights_fn(
     :func:`~astrogwb.sampling.numpyro_model.numpyro_model`.
 
     Precompute ``proposal_logprob`` with
-    :func:`compute_merger_rate_and_log_density` at the fiducials::
+    :func:`compute_merger_rate_distance_and_logprob` at the fiducials::
 
-        _, proposal_logprob = compute_merger_rate_and_log_density(
+        _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
             fiducials, samples, z_grid=z_grid
         )
 
     Parameters
     ----------
+    fiducials:
+        Fiducial hyperparameters used for the GW/EM ratio correction inside
+        :func:`log_weights`. Must include ``xi_0`` and ``xi_n``.
     z_grid:
         Redshift grid used for the cosmology integrals and MD normalization.
         **Must be a concrete array** -- its extent and size are extracted
         eagerly below so the closure never calls ``float()`` on a tracer.
     proposal_logprob:
-        Precomputed log-density at the fiducials for the catalog redshifts,
-        shape ``(N,)``. Typically the second return value of
-        :func:`compute_merger_rate_and_log_density`.
+        Precomputed redshift log-pdf at the fiducials for the catalog
+        redshifts, shape ``(N,)``. Typically the third return value of
+        :func:`compute_merger_rate_distance_and_logprob`.
 
     Returns
     -------
     MergerRateAndLogWeightsFn
         Callable ``(params, samples) -> (total_merger_rate, log_weights)``.
         ``total_merger_rate`` is in mergers per second; ``log_weights`` has
-        shape ``(N,)`` and equals ``log_density(params) - proposal_logprob``.
+        shape ``(N,)``. ``samples`` must include ``redshift`` and
+        ``luminosity_distance`` (fiducial EM distances from the catalog).
     """
     # Extract the cosmology grid extent eagerly (z_grid is concrete here at
     # factory-build time) so the jitted closure never calls float() on a tracer.

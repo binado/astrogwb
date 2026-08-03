@@ -48,7 +48,7 @@ from astrogwb.gwb import (
     spectral_density,
 )
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_and_log_density,
+    compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.utils import repo_root
@@ -150,10 +150,11 @@ def compute_fiducial_spectral_density(
         )
 
     z_grid = jnp.linspace(z_min, z_max, n_grid)
-    _, proposal_logprob = compute_merger_rate_and_log_density(
+    _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
         fiducials, samples, z_grid=z_grid
     )
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
+        fiducials=fiducials,
         z_grid=z_grid,
         proposal_logprob=proposal_logprob,
     )
