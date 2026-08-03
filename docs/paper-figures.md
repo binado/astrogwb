@@ -36,7 +36,9 @@ label, and styling inputs. The `fiducial_spectrum` rule builds
 fiducials. The unified
 cosmology rule produces two marginalized $H_0$ comparisons, separate
 $H_0$--$\mathcal{R}_0$ corner plots for the narrow and broad merger-rate priors,
-an $H_0$--$\Omega_m$ corner plot, and a CSV/LaTeX SNR-and-constraint table.
+an $H_0$--$\Omega_m$ corner plot, a matching $H_0$--$\Omega_m$--relative-ESS
+mirror corner, and a CSV/LaTeX SNR-and-constraint table. The modified-propagation
+rule likewise emits a $\Xi_0$--$n$ corner and its relative-ESS mirror.
 
 Preview the declared workflow (`scripts/workflow.py` defaults to `--dry-run`):
 

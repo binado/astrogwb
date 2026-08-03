@@ -37,6 +37,7 @@ COSMOLOGY_PRIOR_PDF = COSMOLOGY_OUTPUTS["output_prior_pdf"]
 COSMOLOGY_NARROW_CORNER_PDF = COSMOLOGY_OUTPUTS["output_narrow_corner_pdf"]
 COSMOLOGY_BROAD_CORNER_PDF = COSMOLOGY_OUTPUTS["output_broad_corner_pdf"]
 COSMOLOGY_OMEGA_M_CORNER_PDF = COSMOLOGY_OUTPUTS["output_omega_m_corner_pdf"]
+COSMOLOGY_OMEGA_M_ESS_CORNER_PDF = COSMOLOGY_OUTPUTS["output_omega_m_ess_corner_pdf"]
 COSMOLOGY_CSV = COSMOLOGY_OUTPUTS["output_csv"]
 COSMOLOGY_TEX = COSMOLOGY_OUTPUTS["output_tex"]
 COSMOLOGY_FIGURE = PAPER_CONFIG["figures"]["mcmc_cosmological_parameters"]
@@ -97,6 +98,9 @@ MODIFIED_PROPAGATION_OUTPUTS = config["mcmc_modified_propagation"]
 MODIFIED_PROPAGATION_XI_N_CORNER_PDF = MODIFIED_PROPAGATION_OUTPUTS[
     "output_xi_n_corner_pdf"
 ]
+MODIFIED_PROPAGATION_XI_N_ESS_CORNER_PDF = MODIFIED_PROPAGATION_OUTPUTS[
+    "output_xi_n_ess_corner_pdf"
+]
 MODIFIED_PROPAGATION_XI0_MARGINAL_PDF = MODIFIED_PROPAGATION_OUTPUTS[
     "output_xi0_marginal_pdf"
 ]
@@ -125,9 +129,11 @@ rule paper_figures:
         COSMOLOGY_NARROW_CORNER_PDF,
         COSMOLOGY_BROAD_CORNER_PDF,
         COSMOLOGY_OMEGA_M_CORNER_PDF,
+        COSMOLOGY_OMEGA_M_ESS_CORNER_PDF,
         COSMOLOGY_CSV,
         COSMOLOGY_TEX,
         MODIFIED_PROPAGATION_XI_N_CORNER_PDF,
+        MODIFIED_PROPAGATION_XI_N_ESS_CORNER_PDF,
         MODIFIED_PROPAGATION_XI0_MARGINAL_PDF,
         MODIFIED_PROPAGATION_H0_CORNER_PDF,
         MODIFIED_PROPAGATION_XI0_N_CSV,
@@ -213,6 +219,7 @@ rule mcmc_cosmological_parameters:
         narrow_corner_pdf=COSMOLOGY_NARROW_CORNER_PDF,
         broad_corner_pdf=COSMOLOGY_BROAD_CORNER_PDF,
         omega_m_corner_pdf=COSMOLOGY_OMEGA_M_CORNER_PDF,
+        omega_m_ess_corner_pdf=COSMOLOGY_OMEGA_M_ESS_CORNER_PDF,
         csv=COSMOLOGY_CSV,
         tex=COSMOLOGY_TEX,
     params:
@@ -230,6 +237,7 @@ rule mcmc_cosmological_parameters:
         kappa=PAPER_FIDUCIALS["kappa"],
         z_peak=PAPER_FIDUCIALS["z_peak"],
         local_merger_rate=PAPER_FIDUCIALS["local_merger_rate"],
+        importance_relative_ess=PAPER_FIDUCIALS["importance_relative_ess"],
         network_args=PAPER_NETWORK_ARGS,
         network_names=PAPER_NETWORK_NAMES,
         detector_labels=lambda wildcards: DETECTOR_LABELS,
@@ -260,6 +268,7 @@ rule mcmc_cosmological_parameters:
         " --kappa {params.kappa}"
         " --z-peak {params.z_peak}"
         " --local-merger-rate {params.local_merger_rate}"
+        " --importance-relative-ess {params.importance_relative_ess}"
         " {params.network_args:q}"
         " --networks {params.network_names:q}"
         " --output-detector-pdf {output.detector_pdf:q}"
@@ -267,6 +276,7 @@ rule mcmc_cosmological_parameters:
         " --output-narrow-corner-pdf {output.narrow_corner_pdf:q}"
         " --output-broad-corner-pdf {output.broad_corner_pdf:q}"
         " --output-omega-m-corner-pdf {output.omega_m_corner_pdf:q}"
+        " --output-omega-m-ess-corner-pdf {output.omega_m_ess_corner_pdf:q}"
         " --output-csv {output.csv:q}"
         " --output-tex {output.tex:q}"
 
@@ -281,6 +291,7 @@ rule mcmc_modified_propagation:
         xi0_n_detector_chains=MODIFIED_PROPAGATION_XI0_N_DETECTOR_CHAINS,
     output:
         xi_n_corner_pdf=MODIFIED_PROPAGATION_XI_N_CORNER_PDF,
+        xi_n_ess_corner_pdf=MODIFIED_PROPAGATION_XI_N_ESS_CORNER_PDF,
         xi0_marginal_pdf=MODIFIED_PROPAGATION_XI0_MARGINAL_PDF,
         h0_corner_pdf=MODIFIED_PROPAGATION_H0_CORNER_PDF,
         xi0_n_csv=MODIFIED_PROPAGATION_XI0_N_CSV,
@@ -296,6 +307,7 @@ rule mcmc_modified_propagation:
         kappa=PAPER_FIDUCIALS["kappa"],
         z_peak=PAPER_FIDUCIALS["z_peak"],
         local_merger_rate=PAPER_FIDUCIALS["local_merger_rate"],
+        importance_relative_ess=PAPER_FIDUCIALS["importance_relative_ess"],
         observation_time=PAPER_ANALYSIS["observation_time"],
         f_min=PAPER_ANALYSIS["f_min"],
         f_max=PAPER_ANALYSIS["f_max"],
@@ -316,7 +328,9 @@ rule mcmc_modified_propagation:
         " --xi-0 {params.xi_0}"
         " --xi-n {params.xi_n}"
         " --h0 {params.h0}"
+        " --importance-relative-ess {params.importance_relative_ess}"
         " --output-xi-n-corner-pdf {output.xi_n_corner_pdf:q}"
+        " --output-xi-n-ess-corner-pdf {output.xi_n_ess_corner_pdf:q}"
         " --output-xi0-marginal-pdf {output.xi0_marginal_pdf:q}"
         " --output-h0-corner-pdf {output.h0_corner_pdf:q}"
         " --catalog {input.catalog:q}"

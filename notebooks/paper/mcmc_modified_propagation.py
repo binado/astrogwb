@@ -103,19 +103,23 @@ DEFAULT_H0_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0-H0-gauss__baseline.nc"
 DEFAULT_XI_0 = 1.0
 DEFAULT_XI_N = 1.91
 DEFAULT_H0 = 67.66
+DEFAULT_IMPORTANCE_RELATIVE_ESS = 1.0
 
 XI_0_LABEL = r"$\Xi_0$"
 XI_N_LABEL = r"$n$"
 H0_LABEL = r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
+IMPORTANCE_RELATIVE_ESS_LABEL = r"$N_{\mathrm{eff}} / N_{\mathrm{inj}}$"
 
 VAR_LABELS = {
     "xi_0": XI_0_LABEL,
     "xi_n": XI_N_LABEL,
     "H0": H0_LABEL,
+    "importance_relative_ess": IMPORTANCE_RELATIVE_ESS_LABEL,
 }
 
 # Variable groups for each corner plot.
 XI_N_VAR_NAMES = ("xi_0", "xi_n")
+XI_N_ESS_VAR_NAMES = ("xi_0", "xi_n", "importance_relative_ess")
 H0_VAR_NAMES = ("xi_0", "H0")
 
 # Labels for the three-chain marginal overlay, in chain order.
@@ -364,6 +368,49 @@ def _pooled_corner_range(
     return ranges
 
 
+def _expand_corner_range_with_truths(
+    plot_range: Sequence[tuple[float, float]],
+    var_names: Sequence[str],
+    truths: Mapping[str, float] | None,
+    *,
+    padding_fraction: float = 0.02,
+) -> list[tuple[float, float]]:
+    """Ensure corner axis limits include configured truth markers."""
+    if truths is None:
+        return list(plot_range)
+    expanded: list[tuple[float, float]] = []
+    for (lower, upper), name in zip(plot_range, var_names, strict=True):
+        if name not in truths:
+            expanded.append((lower, upper))
+            continue
+        lower = min(lower, float(truths[name]))
+        upper = max(upper, float(truths[name]))
+        width = upper - lower
+        padding = padding_fraction * width if width > 0 else 0.0
+        expanded.append((lower - padding, upper + padding))
+    return expanded
+
+
+def _disable_relative_ess_axis_offsets(
+    fig: plt.Figure, var_names: Sequence[str]
+) -> None:
+    """Avoid matplotlib offset ticks that look like relative ESS > 1."""
+    if "importance_relative_ess" not in var_names:
+        return
+    n_vars = len(var_names)
+    ess_index = list(var_names).index("importance_relative_ess")
+    axes = np.asarray(fig.axes).reshape(n_vars, n_vars)
+
+    def _disable_offset(axis: object) -> None:
+        formatter = axis.get_major_formatter()  # type: ignore[attr-defined]
+        if hasattr(formatter, "set_useOffset"):
+            formatter.set_useOffset(False)
+
+    for index in range(n_vars):
+        _disable_offset(axes[ess_index, index].yaxis)
+        _disable_offset(axes[index, ess_index].xaxis)
+
+
 def plot_corner(
     inference_data: Sequence[xr.DataTree],
     labels: Sequence[str],
@@ -392,7 +439,11 @@ def plot_corner(
         truths = {name: fiducials[name] for name in var_names}
 
     fig: plt.Figure | None = None
-    plot_range = _pooled_corner_range(inference_data, var_names, group=group)
+    plot_range = _expand_corner_range_with_truths(
+        _pooled_corner_range(inference_data, var_names, group=group),
+        var_names,
+        truths,
+    )
     for index, (tree, color, linestyle) in enumerate(
         zip(inference_data, resolved_colors, resolved_linestyles, strict=True)
     ):
@@ -415,6 +466,7 @@ def plot_corner(
 
     if fig is None:  # pragma: no cover - guarded by validation
         raise RuntimeError("corner did not create a figure")
+    _disable_relative_ess_axis_offsets(fig, var_names)
     if len(inference_data) > 1:
         handles = [
             Line2D([], [], color=color, linestyle=linestyle, label=label)
@@ -669,6 +721,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=Path("figures/mcmc_modified_propagation_Xi0_n_corner.pdf"),
     )
     parser.add_argument(
+        "--output-xi-n-ess-corner-pdf",
+        type=Path,
+        default=Path("figures/mcmc_modified_propagation_Xi0_n_ess_corner.pdf"),
+    )
+    parser.add_argument(
         "--output-xi0-marginal-pdf",
         type=Path,
         default=Path("figures/mcmc_modified_propagation_Xi0_marginal.pdf"),
@@ -729,6 +786,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--xi-0", type=float, default=DEFAULT_XI_0)
     parser.add_argument("--xi-n", type=float, default=DEFAULT_XI_N)
     parser.add_argument("--h0", type=float, default=DEFAULT_H0)
+    parser.add_argument(
+        "--importance-relative-ess",
+        type=float,
+        default=DEFAULT_IMPORTANCE_RELATIVE_ESS,
+    )
     args, _ = parser.parse_known_args(argv)
     try:
         args.resolved_networks = _resolve_networks(
@@ -777,6 +839,7 @@ fiducials = {
     "kappa": args.kappa,
     "z_peak": args.z_peak,
     "local_merger_rate": args.local_merger_rate,
+    "importance_relative_ess": args.importance_relative_ess,
 }
 
 networks = args.resolved_networks
@@ -814,6 +877,22 @@ xi_n_corner_figure = plot_corner(
     xi_n_data,
     xi_n_labels,
     XI_N_VAR_NAMES,
+    group=args.group,
+    fiducials=fiducials,
+    colors=[CATEGORY["modified_propagation"]],
+)
+
+# %% [markdown]
+# ## Figure (i-b): $\Xi_0$--$n$--relative-ESS corner
+#
+# Mirror of the $\Xi_0$--$n$ corner that also shows the importance-sampling
+# relative effective sample size $N_{\mathrm{eff}} / N_{\mathrm{inj}}$.
+
+# %%
+xi_n_ess_corner_figure = plot_corner(
+    xi_n_data,
+    xi_n_labels,
+    XI_N_ESS_VAR_NAMES,
     group=args.group,
     fiducials=fiducials,
     colors=[CATEGORY["modified_propagation"]],
@@ -908,6 +987,7 @@ print(xi0_n_constraint_table_latex(xi0_n_constraint_table))
 # %%
 outputs = {
     _resolve_path(args.output_xi_n_corner_pdf, root): xi_n_corner_figure,
+    _resolve_path(args.output_xi_n_ess_corner_pdf, root): xi_n_ess_corner_figure,
     _resolve_path(args.output_xi0_marginal_pdf, root): xi0_marginal_figure,
     _resolve_path(args.output_h0_corner_pdf, root): h0_corner_figure,
 }
