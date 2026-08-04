@@ -8,7 +8,8 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 
-from astrogwb.gwb import AverageMode, gaussian_bin_scale, spectral_density
+from astrogwb.detector import gaussian_bin_scale
+from astrogwb.gwb import AverageMode, spectral_density
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 
 
@@ -64,7 +65,7 @@ def numpyro_model(
         ``frequency_mask`` is set.
     observation_time:
         Observation time in years, used only in the likelihood noise scale via
-        :func:`astrogwb.gwb.gaussian_bin_scale`.
+        :func:`astrogwb.detector.gaussian_bin_scale`.
     average_mode:
         How inclination is averaged when contracting polarization power:
         ``"analytic_inclination"`` applies the usual 0.4 factor;

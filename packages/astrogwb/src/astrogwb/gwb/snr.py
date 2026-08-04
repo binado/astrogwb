@@ -40,7 +40,7 @@ def spectral_snr_squared(
     where :math:`\sigma_i = \mathrm{effective\_psd}_i / \sqrt{2 T \Delta f}` with
     observation time :math:`T` in seconds and bin width :math:`\Delta f =` ``df`` in Hz.
 
-    The per-bin :math:`\sigma` matches :func:`astrogwb.gwb.gaussian_bin_scale` when
+    The per-bin :math:`\sigma` matches :func:`astrogwb.detector.gaussian_bin_scale` when
     ``df`` is the same width used there and ``observation_time_sec`` is the
     corresponding value in seconds.
     """
