@@ -19,8 +19,8 @@
 # workflow. It evaluates the fiducial SGWB once, computes the matched-filter SNR
 # for each detector network, and compares those estimates with sampled $H_0$
 # posteriors. It also compares fixed and narrow priors on the local merger
-# rate $\mathcal{R}_0$, shows separate joint $H_0$--$\mathcal{R}_0$ corners
-# for the narrow and broad merger-rate priors, and an $H_0$--$\Omega_m$ corner.
+# rate $\mathcal{R}_0$, shows the joint $H_0$--$\mathcal{R}_0$ corner for the
+# narrow merger-rate prior, and an $H_0$--$\Omega_m$ corner.
 #
 # Chain paths and labels are separate inputs. This keeps chain loading outside the
 # plotting helpers and makes it possible to select different inference runs without
@@ -152,15 +152,10 @@ DEFAULT_PRIOR_CHAINS = [
         "chains/bns-n16384-df1/cosmology-all-detectors/"
         "ET-2L-aligned-CE-Hanford__H0-merger-rate-gauss__baseline.nc"
     ),
-    Path(
-        "chains/bns-n16384-df1/cosmology-all-detectors/"
-        "ET-2L-aligned-CE-Hanford__H0-merger-rate__baseline.nc"
-    ),
 ]
 DEFAULT_PRIOR_LABELS = [
     r"$H_0$ (fixed $\mathcal{R}_0$)",
     r"$H_0 + \mathcal{R}_0$ (narrow prior)",
-    r"$H_0 + \mathcal{R}_0$ (broad prior)",
 ]
 
 DEFAULT_OMEGA_M_CHAIN = Path(
@@ -281,17 +276,17 @@ def select_corner_inference_data(
     *,
     group: str = "posterior",
 ) -> tuple[list[xr.DataTree], list[str], list[int]]:
-    """Select the two H0--local-merger-rate trees from the prior comparison."""
+    """Select the H0--local-merger-rate trees from the prior comparison."""
     validate_inference_data(inference_data, labels, group=group)
     indices = [
         index
         for index, tree in enumerate(inference_data)
         if "local_merger_rate" in tree[group].data_vars
     ]
-    if len(indices) != 2:
+    if not indices:
         raise ValueError(
-            "expected exactly two prior-comparison chains containing "
-            f"local_merger_rate, found {len(indices)}"
+            "expected at least one prior-comparison chain containing "
+            "local_merger_rate"
         )
     selected_data = [inference_data[index] for index in indices]
     selected_labels = [labels[index] for index in indices]
@@ -300,7 +295,7 @@ def select_corner_inference_data(
         selected_labels,
         required_vars=CORNER_VAR_NAMES,
         group=group,
-        expected_count=2,
+        expected_count=len(selected_data),
     )
     return selected_data, selected_labels, indices
 
@@ -861,13 +856,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--output-broad-corner-pdf",
-        type=Path,
-        default=Path(
-            "figures/mcmc_cosmological_parameters_H0_merger_rate_broad_corner.pdf"
-        ),
-    )
-    parser.add_argument(
         "--output-omega-m-corner-pdf",
         type=Path,
         default=Path("figures/mcmc_cosmological_parameters_H0_Omega_m_corner.pdf"),
@@ -958,8 +946,8 @@ if len(args.detector_chains) != len(networks):
     )
 if len(args.prior_chains) != len(args.prior_labels):
     raise ValueError("--prior-chains and --prior-labels must have equal length")
-if len(args.prior_chains) != 3:
-    raise ValueError("the prior comparison requires exactly three chains")
+if len(args.prior_chains) != 2:
+    raise ValueError("the prior comparison requires exactly two chains")
 
 detector_paths = [_resolve_path(path, root) for path in args.detector_chains]
 prior_paths = [_resolve_path(path, root) for path in args.prior_chains]
@@ -979,7 +967,7 @@ validate_inference_data(
     prior_data,
     args.prior_labels,
     group=args.group,
-    expected_count=3,
+    expected_count=2,
 )
 validate_inference_data(
     omega_m_data,
@@ -993,11 +981,9 @@ corner_data, corner_labels, corner_indices = select_corner_inference_data(
 )
 narrow_data = [corner_data[0]]
 narrow_labels = [corner_labels[0]]
-broad_data = [corner_data[1]]
-broad_labels = [corner_labels[1]]
 
-# Density overlay excludes the broad prior: its H0 mass is too diffuse to
-# compare usefully with the fixed and narrow-prior posteriors.
+# Density overlay compares the fixed H0-only posterior with the narrow-prior
+# posterior on the local merger rate.
 prior_density_data = [prior_data[0], prior_data[1]]
 prior_density_labels = [args.prior_labels[0], args.prior_labels[1]]
 
@@ -1045,8 +1031,7 @@ detector_figure = plot_h0_posteriors(
 # ## Figure (ii): $H_0$ prior comparison
 #
 # Compares fixed and narrow priors on the local merger rate $\mathcal{R}_0$
-# for a single network. The broad-prior posterior is omitted here and shown
-# only in its own corner plot below.
+# for a single network.
 
 # %%
 prior_figure = plot_h0_posteriors(
@@ -1077,23 +1062,6 @@ narrow_corner_figure = plot_corner(
 )
 
 # %% [markdown]
-# ## Figure (iv): Broad-prior $H_0$--$\mathcal{R}_0$ corner
-#
-# Joint constraint when the local merger rate carries a broad prior. Plotted
-# separately from the narrow-prior corner because the posterior masses differ
-# enough that a shared axis range is unhelpful.
-
-# %%
-broad_corner_figure = plot_corner(
-    broad_data,
-    broad_labels,
-    MERGER_RATE_VAR_NAMES,
-    colors=[corner_colors[1]],
-    linestyles=[corner_linestyles[1]],
-    group=args.group,
-    fiducials=fiducials,
-)
-
 # %% [markdown]
 # ## Table: $H_0$ vs $H_0+\mathcal{R}_0$ uncertainties
 #
@@ -1115,7 +1083,7 @@ h0_r0_uncertainty_table
 print(h0_r0_uncertainty_table_latex(h0_r0_uncertainty_table))
 
 # %% [markdown]
-# ## Figure (v): $H_0$--$\Omega_m$ corner
+# ## Figure (iv): $H_0$--$\Omega_m$ corner
 #
 # Joint constraint when both the Hubble constant and the matter density
 # parameter are sampled together.
@@ -1131,7 +1099,7 @@ omega_m_corner_figure = plot_corner(
 )
 
 # %% [markdown]
-# ## Figure (vi): $H_0$--$\Omega_m$--relative-ESS corner
+# ## Figure (v): $H_0$--$\Omega_m$--relative-ESS corner
 #
 # Mirror of the $H_0$--$\Omega_m$ corner that also shows the importance-sampling
 # relative effective sample size $N_{\mathrm{eff}} / N_{\mathrm{inj}}$.
@@ -1193,7 +1161,6 @@ outputs = {
     _resolve_path(args.output_detector_pdf, root): detector_figure,
     _resolve_path(args.output_prior_pdf, root): prior_figure,
     _resolve_path(args.output_narrow_corner_pdf, root): narrow_corner_figure,
-    _resolve_path(args.output_broad_corner_pdf, root): broad_corner_figure,
     _resolve_path(args.output_omega_m_corner_pdf, root): omega_m_corner_figure,
     _resolve_path(args.output_omega_m_ess_corner_pdf, root): omega_m_ess_corner_figure,
 }

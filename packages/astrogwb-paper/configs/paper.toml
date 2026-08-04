@@ -95,10 +95,6 @@ label = '$H_0$ (fixed $\mathcal{R}_0$)'
 analysis = "H0-merger-rate-gauss"
 label = '$H_0 + \mathcal{R}_0$ (narrow prior)'
 
-[[figures.mcmc_cosmological_parameters.prior_posteriors]]
-analysis = "H0-merger-rate"
-label = '$H_0 + \mathcal{R}_0$ (broad prior)'
-
 [figures.mcmc_modified_propagation]
 # Snakemake resolves these logical modified-propagation runs to concrete chain
 # inputs. Direct notebook runs can replace both ordered path lists and their

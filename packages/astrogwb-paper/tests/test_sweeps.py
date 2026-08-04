@@ -52,10 +52,10 @@ def test_canonical_sweep_preserves_campaign_coverage() -> None:
     points = list(iter_sweep_points(sweep))
 
     assert sweep.base_config == (PAPER_ROOT / "configs" / "mcmc.base.toml").resolve()
-    assert len(points) == 66
+    assert len(points) == 58
     assert Counter(point.campaign for point in points) == {
-        "cosmology": 8,
-        "cosmology-all-detectors": 24,
+        "cosmology": 6,
+        "cosmology-all-detectors": 18,
         "modified-propagation-all-detectors": 18,
         "astrophysical": 4,
         "astrophysical-all-detectors": 12,
