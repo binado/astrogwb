@@ -2,7 +2,7 @@ from pathlib import Path
 import tomllib
 
 
-configfile: "packages/astrogwb-paper/configs/workflow.yaml"
+configfile: "configs/workflow.yaml"
 
 
 PAPER_CONFIG_PATH = Path(config["paper_config"])
@@ -153,7 +153,7 @@ rule amplitude_toy:
         f_max=PAPER_ANALYSIS["f_max"],
     shell:
         "uv run --package astrogwb-paper --group plotting"
-        " python packages/astrogwb-paper/notebooks/paper/amplitude_toy_model.py"
+        " python notebooks/paper/amplitude_toy_model.py"
         " --catalog {input.catalog:q}"
         " --chains-dir {params.chains_dir:q}"
         " --observation-time {params.observation_time}"
@@ -187,7 +187,7 @@ rule fiducial_spectrum:
     shell:
         "uv run --group plotting"
         " --package astrogwb-paper"
-        " python packages/astrogwb-paper/notebooks/paper/fiducial_spectrum.py"
+        " python notebooks/paper/fiducial_spectrum.py"
         " --config {input.config:q}"
         " --catalog {input.catalog:q}"
         " --f-min {params.f_min}"
@@ -248,7 +248,7 @@ rule mcmc_cosmological_parameters:
     shell:
         "uv run --group plotting"
         " --package astrogwb-paper"
-        " python packages/astrogwb-paper/notebooks/paper/mcmc_cosmological_parameters.py"
+        " python notebooks/paper/mcmc_cosmological_parameters.py"
         " --config {input.config:q}"
         " --catalog {input.catalog:q}"
         " --detector-chains {input.detector_chains:q}"
@@ -323,7 +323,7 @@ rule mcmc_modified_propagation:
     shell:
         "uv run --group plotting"
         " --package astrogwb-paper"
-        " python packages/astrogwb-paper/notebooks/paper/mcmc_modified_propagation.py"
+        " python notebooks/paper/mcmc_modified_propagation.py"
         " --xi0-chain {input.xi0_chain:q}"
         " --xi0-n-chain {input.xi0_n_chain:q}"
         " --h0-chain {input.h0_chain:q}"

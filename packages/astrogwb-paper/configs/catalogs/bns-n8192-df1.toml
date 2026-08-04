@@ -1,5 +1,5 @@
 [population]
-config = "packages/astrogwb-paper/examples/bns_population.yaml"
+config = "examples/bns_population.yaml"
 n_samples = 8192
 seed = 42
 

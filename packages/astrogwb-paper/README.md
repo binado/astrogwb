@@ -27,9 +27,10 @@ uv sync --package astrogwb-paper --extra notebook
 uvx jupytext --to ipynb packages/astrogwb-paper/notebooks/mcmc.py
 ```
 
-All user paths are resolved from the workspace root. Generated populations and
-catalogs remain under `out/`, chains under `chains/`, figures under `figures/`,
-and scheduler/runtime logs under `logs/`; none are written inside this member.
+All user paths are resolved from this package's root. Generated populations
+and catalogs remain under `out/`, chains under `chains/`, figures under
+`figures/`, and scheduler/runtime logs under `logs/`; all of these live
+inside this member.
 
 See [`docs/`](docs/) for catalog generation, inference, paper figures, and
 Snakemake/SLURM workflows.

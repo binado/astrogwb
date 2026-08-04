@@ -15,6 +15,10 @@ The `astrogwb-workflow` CLI wraps common invocations
 `--dry-run`; pass `--submit` for a real run. The CLI expands to the same
 `uv run snakemake …` commands shown below.
 
+Manual `snakemake` / `gwmock-pop` / `astrogwb-run-mcmc` invocations shown on
+this page and the docs it links to assume `cwd = packages/astrogwb-paper/`;
+`astrogwb-workflow` itself works from any directory regardless.
+
 ## Catalog workflow
 
 Requesting a waveform catalog builds its missing or stale population first:
@@ -23,7 +27,7 @@ Requesting a waveform catalog builds its missing or stale population first:
 uv run astrogwb-workflow catalog out/catalogs/bns-n16384-df1.h5 --submit
 # expands to:
 # uv run --package astrogwb-paper --group workflow snakemake \
-#   --snakefile packages/astrogwb-paper/workflow/catalog.smk --cores 1 \
+#   --snakefile workflow/catalog.smk --cores 1 \
 #   out/catalogs/bns-n16384-df1.h5
 ```
 
@@ -98,7 +102,7 @@ itself defaults to `cuda` when a manifest doesn't set it.
 Dry-run the selected batch (default; omit `--submit`):
 
 ```bash
-uv run astrogwb-workflow mcmc packages/astrogwb-paper/configs/mcmc.batch.example.json --profile local
+uv run astrogwb-workflow mcmc configs/mcmc.batch.example.json --profile local
 ```
 
 ### Deploying on a SLURM cluster
@@ -167,8 +171,8 @@ device per concurrent chain, with `--cpu-threads` pinned to 1).
 
    ```bash
    uv run --package astrogwb-paper --group workflow snakemake \
-     --snakefile packages/astrogwb-paper/workflow/mcmc.smk \
-     --profile packages/astrogwb-paper/profiles/slurm \
+     --snakefile workflow/mcmc.smk \
+     --profile profiles/slurm \
      --configfile /home/user/batches/paper-h0.json \
      mcmc
    ```
@@ -210,8 +214,8 @@ and trim the `runs` list rather than editing the generated file in place (the
 next `--write-manifests --force` run overwrites it):
 
 ```bash
-cp packages/astrogwb-paper/configs/mcmc/manifests/mcmc.batch.cosmology.json \
-  packages/astrogwb-paper/configs/mcmc.batch.cosmology-local.json
+cp configs/mcmc/manifests/mcmc.batch.cosmology.json \
+  configs/mcmc.batch.cosmology-local.json
 # then trim the copied manifest to the runs you want
 ```
 
@@ -219,8 +223,8 @@ Dry-run, then submit on (say) 8 cores. With the profile's `run_mcmc=4` thread
 override, Snakemake runs `floor(8 / 4) = 2` sweep points at a time:
 
 ```bash
-uv run astrogwb-workflow mcmc packages/astrogwb-paper/configs/mcmc.batch.cosmology-local.json --profile local
-uv run astrogwb-workflow mcmc packages/astrogwb-paper/configs/mcmc.batch.cosmology-local.json \
+uv run astrogwb-workflow mcmc configs/mcmc.batch.cosmology-local.json --profile local
+uv run astrogwb-workflow mcmc configs/mcmc.batch.cosmology-local.json \
   --profile local --submit
 ```
 

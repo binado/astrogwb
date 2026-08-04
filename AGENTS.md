@@ -8,8 +8,10 @@
 - `packages/astrogwb-paper/`: private reproducibility application. It owns
   configuration, runtime setup, prior adaptation, console commands, notebooks,
   Snakemake workflows, profiles, examples, and paper documentation.
-- Root `out/`, `chains/`, `figures/`, and `logs/` are generated artifacts and
-  must not be moved into either package.
+- `out/`, `chains/`, `figures/`, and `logs/` are generated artifacts that
+  live under `packages/astrogwb-paper/` (Snakemake's execution `cwd` is
+  anchored there); they must not be committed or duplicated elsewhere in
+  the workspace.
 
 The dependency direction is `astrogwb-paper -> astrogwb`. Core must never
 import `astrogwb_paper` or know the repository checkout layout.

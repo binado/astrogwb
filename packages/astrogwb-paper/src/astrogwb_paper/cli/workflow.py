@@ -21,7 +21,7 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
-from astrogwb_paper.paths import paper_project_root, workspace_root
+from astrogwb_paper.paths import paper_project_root
 
 PROFILE_CHOICES = ("local", "slurm", "slurm-cpu")
 # Profiles that must force JAX onto CPU. Emitted as a CLI ``--config`` entry
@@ -31,11 +31,6 @@ PROFILE_CHOICES = ("local", "slurm", "slurm-cpu")
 # repeated ``--config`` flags do not merge (last flag wins).
 CPU_JAX_PROFILES = frozenset({"local", "slurm-cpu"})
 DEFAULT_LOCAL_CORES = 8
-
-
-@lru_cache(maxsize=1)
-def _workspace_root() -> Path:
-    return workspace_root()
 
 
 @lru_cache(maxsize=1)
@@ -304,7 +299,7 @@ def _validate(args: argparse.Namespace) -> None:
         _require_path(_mcmc_smk(), kind="snakefile")
         config = args.configfile
         if not config.is_absolute():
-            config = _workspace_root() / config
+            config = _paper_root() / config
         _require_path(config, kind="configfile")
         _require_path(profile_dir(args.profile), kind="profile")
         return
@@ -337,7 +332,7 @@ def main(argv: list[str] | None = None) -> int:
     _validate(args)
     cmd = build_command(args)
     print("+", shlex.join(cmd), flush=True)
-    completed = subprocess.run(cmd, cwd=_workspace_root(), check=False)
+    completed = subprocess.run(cmd, cwd=_paper_root(), check=False)
     return int(completed.returncode)
 
 

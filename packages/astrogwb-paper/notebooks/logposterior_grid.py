@@ -65,7 +65,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.sampling.numpyro_model import numpyro_model
-from astrogwb_paper.paths import workspace_root
+from astrogwb_paper.paths import paper_project_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
@@ -86,7 +86,7 @@ DEBUG = False  # small smoke settings for first runs; set False for the producti
 # No working polarization-power catalog exists yet; set this once one is produced.
 
 
-ROOT_DIR = workspace_root()
+ROOT_DIR = paper_project_root()
 CATALOG_PATH = ROOT_DIR / "out/catalogs/bns-n16384-df1.h5"
 
 # Detector settings

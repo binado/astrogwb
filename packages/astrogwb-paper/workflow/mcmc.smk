@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 
 
-configfile: "packages/astrogwb-paper/configs/workflow.yaml"
+configfile: "configs/workflow.yaml"
 
 
 try:
@@ -11,7 +11,7 @@ try:
 except KeyError as exc:
     raise KeyError(
         "missing 'catalog' config: define catalog.id (and optionally "
-        "catalog.path) in packages/astrogwb-paper/configs/workflow.yaml, "
+        "catalog.path) in configs/workflow.yaml, "
         "or pass a --configfile "
         "that sets it"
     ) from exc

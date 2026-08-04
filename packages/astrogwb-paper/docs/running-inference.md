@@ -9,7 +9,7 @@ Both examples assume a population of binary neutron star (BNS) mergers following
 
 ```bash
 uv run astrogwb-run-mcmc \
-  --config packages/astrogwb-paper/configs/mcmc.example.toml \
+  --config configs/mcmc.example.toml \
   --catalog out/catalogs/bns-n16384-df1.h5
 ```
 
@@ -30,7 +30,7 @@ the headless runner:
 
 ```bash
 uv run --package astrogwb-paper --extra tpu astrogwb-run-mcmc \
-  --config packages/astrogwb-paper/configs/mcmc.example.toml \
+  --config configs/mcmc.example.toml \
   --catalog out/catalogs/bns-n16384-df1.h5 \
   --platform tpu
 ```

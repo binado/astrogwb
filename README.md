@@ -42,6 +42,7 @@ overrides:
 uv build --package astrogwb --no-sources
 ```
 
-Generated catalogs, chains, figures, and logs remain in root-level `out/`,
-`chains/`, `figures/`, and `logs/` directories. Detailed workflow documentation
-lives under [`packages/astrogwb-paper/docs`](packages/astrogwb-paper/docs/).
+Generated catalogs, chains, figures, and logs remain in
+`packages/astrogwb-paper/`'s `out/`, `chains/`, `figures/`, and `logs/`
+directories. Detailed workflow documentation lives under
+[`packages/astrogwb-paper/docs`](packages/astrogwb-paper/docs/).

@@ -11,7 +11,7 @@ Its equivalent explicit population command is:
 
 ```bash
 uv run gwmock-pop simulate \
-  --config packages/astrogwb-paper/examples/bns_population.yaml \
+  --config examples/bns_population.yaml \
   --n 16384 \
   --output out/populations/bns-n16384-df1.h5 \
   --seed 42

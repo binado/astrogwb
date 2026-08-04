@@ -6,9 +6,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from astrogwb_paper.paths import paper_project_root, workspace_root
+from astrogwb_paper.paths import paper_project_root
 
-WORKSPACE_ROOT = workspace_root()
 PAPER_ROOT = paper_project_root()
 
 
@@ -16,7 +15,7 @@ def _snakemake(*args: str) -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory(prefix="astrogwb-snakemake-") as cache:
         return subprocess.run(
             ["snakemake", *args],
-            cwd=WORKSPACE_ROOT,
+            cwd=PAPER_ROOT,
             check=False,
             capture_output=True,
             text=True,
@@ -90,7 +89,7 @@ def test_mcmc_workflow_expands_multiple_manifest_runs(tmp_path: Path) -> None:
 
 def test_mcmc_catalog_id_override_uses_derived_path(tmp_path: Path) -> None:
     catalog_id = f"test-{tmp_path.name}"
-    catalog = WORKSPACE_ROOT / "out" / "catalogs" / f"{catalog_id}.h5"
+    catalog = PAPER_ROOT / "out" / "catalogs" / f"{catalog_id}.h5"
     run_config = tmp_path / "selected-run.json"
     run_config.write_text("{}\n", encoding="utf-8")
     manifest = _write_manifest(

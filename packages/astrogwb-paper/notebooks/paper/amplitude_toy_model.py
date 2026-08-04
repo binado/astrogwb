@@ -72,7 +72,7 @@ from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from pluscross import load_catalog
 from astrogwb.utils import years_to_seconds
-from astrogwb_paper.paths import workspace_root
+from astrogwb_paper.paths import paper_project_root
 
 from _paper_style import TRUTH, use_paper_style
 
@@ -157,7 +157,7 @@ def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
 
 
-ROOT_DIR = workspace_root()
+ROOT_DIR = paper_project_root()
 args = _parse_args()
 
 CATALOG_PATH = _resolve_path(args.catalog, ROOT_DIR)

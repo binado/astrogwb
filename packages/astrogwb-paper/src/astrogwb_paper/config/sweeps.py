@@ -42,11 +42,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import RunConfig, build_run_config, save_config
-from astrogwb_paper.paths import paper_project_root, workspace_root
+from astrogwb_paper.paths import paper_project_root
 
 logger = logging.getLogger("generate_mcmc_configs")
 
-WORKSPACE_ROOT = workspace_root()
 PAPER_ROOT = paper_project_root()
 DEFAULT_OUTPUT_DIR = PAPER_ROOT / "configs/mcmc"
 DEFAULT_SWEEP_SPEC = PAPER_ROOT / "configs/mcmc.sweeps.toml"
@@ -295,10 +294,10 @@ def materialize_run_config(
     return build_run_config(raw)
 
 
-def _resolve_workspace_path(path: str | Path) -> Path:
+def _resolve_paper_path(path: str | Path) -> Path:
     resolved = Path(path)
     if not resolved.is_absolute():
-        resolved = WORKSPACE_ROOT / resolved
+        resolved = PAPER_ROOT / resolved
     return resolved.resolve()
 
 
@@ -348,8 +347,8 @@ def generate_configs(
 
     Returns ``(output_dir, written, skipped, written_manifests, skipped_manifests)``.
     """
-    resolved_output_dir = _resolve_workspace_path(output_dir)
-    resolved_manifest_dir = _resolve_workspace_path(manifest_dir)
+    resolved_output_dir = _resolve_paper_path(output_dir)
+    resolved_manifest_dir = _resolve_paper_path(manifest_dir)
     sweep_spec = sweep_spec or load_sweep_config(DEFAULT_SWEEP_SPEC)
     base = load_sweep_base(sweep_spec)
 
@@ -363,7 +362,7 @@ def generate_configs(
         if path in generated_paths:
             raise ValueError(f"duplicate generated config path: {path}")
         generated_paths.add(path)
-        relative_path = Path(os.path.relpath(path, WORKSPACE_ROOT))
+        relative_path = Path(os.path.relpath(path, PAPER_ROOT))
         campaign_runs[point.campaign].append(relative_path)
         config = materialize_run_config(base, sweep_spec, point)
         planned.append((point, path, config))

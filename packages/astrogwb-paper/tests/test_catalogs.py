@@ -14,9 +14,7 @@ def test_catalog_recipe_loads_default_recipe() -> None:
 
     assert recipe.n_samples == 16384
     assert recipe.frequency_resolution == 1.0
-    assert recipe.population_config == Path(
-        "packages/astrogwb-paper/examples/bns_population.yaml"
-    )
+    assert recipe.population_config == Path("examples/bns_population.yaml")
 
 
 def test_catalog_recipe_rejects_missing_settings(tmp_path: Path) -> None:

@@ -174,7 +174,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb_paper.paths import workspace_root
+from astrogwb_paper.paths import paper_project_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from pluscross import load_catalog
 
@@ -198,7 +198,7 @@ azp.style.use("arviz-variat")
 if IN_COLAB:
     CATALOG_PATH = Path("/content/drive/MyDrive/asgwb/bns_waveform_catalog.h5")
 else:
-    ROOT_DIR = workspace_root()
+    ROOT_DIR = paper_project_root()
     CATALOG_PATH = ROOT_DIR / "out/catalogs/bns-n16384-df1.h5"
 
 # Detector settings
@@ -485,7 +485,10 @@ mcmc.print_summary()
 # %%
 
 
-out_dir = Path("chains")
+if IN_COLAB:
+    out_dir = Path("chains")
+else:
+    out_dir = ROOT_DIR / "chains"
 out_dir.mkdir(exist_ok=True)
 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 params_suffix = "-".join(sampled_params)

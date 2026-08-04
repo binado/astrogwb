@@ -3,7 +3,7 @@ from pathlib import Path
 from astrogwb_paper.config.catalogs import load_catalog_recipe
 
 
-RECIPE_DIR = Path("packages/astrogwb-paper/configs/catalogs")
+RECIPE_DIR = Path("configs/catalogs")
 _RECIPE_CACHE = {}
 
 

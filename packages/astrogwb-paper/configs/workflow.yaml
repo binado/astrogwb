@@ -1,4 +1,4 @@
-paper_config: packages/astrogwb-paper/configs/paper.toml
+paper_config: configs/paper.toml
 
 catalog:
   id: bns-n16384-df1

@@ -5,6 +5,7 @@ data
 
 # Generated MCMC run artifacts and frozen manifests.
 /out/
+packages/astrogwb-paper/out/
 configs/mcmc/astrophysical/
 configs/mcmc/cosmology/
 configs/mcmc/*-all-detectors/
@@ -22,6 +23,8 @@ logs/
 .snakemake/
 figures/*.csv
 figures/*.tex
+packages/astrogwb-paper/figures/*.csv
+packages/astrogwb-paper/figures/*.tex
 
 *.md
 !README.md

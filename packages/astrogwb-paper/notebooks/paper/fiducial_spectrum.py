@@ -51,7 +51,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb_paper.paths import workspace_root
+from astrogwb_paper.paths import paper_project_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
 
 # gwpy (via gwmock-signal) replaces matplotlib's rectilinear axes. Restore the
@@ -358,7 +358,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 # %%
 args = _parse_args()
-root = workspace_root()
+root = paper_project_root()
 config = load_mapping(_resolve_path(args.config, root))
 
 fiducials = {
