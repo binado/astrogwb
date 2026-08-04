@@ -15,6 +15,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+      - run: uv lock --check
       - run: uv run --group dev ruff check
       - run: uv run --group dev ruff format --check
 
@@ -26,10 +27,10 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - run: uv run --extra mcmc --group dev ty check
+      - run: uv run --group dev ty check
 
-  test:
-    name: Test (Python 3.12)
+  test-core:
+    name: Core tests (Python 3.12)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -38,9 +39,25 @@ jobs:
           python-version: "3.12"
       - name: Verify ORF reference fixtures are present
         run: |
-          test -f tests/fixtures/gwfast_orf_reference.npz
-          test -f tests/fixtures/gwfast_orf_reference_et_triangle.npz
-      - run: uv run --extra mcmc --group dev pytest -m "not integration"
+          test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference.npz
+          test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference_et_triangle.npz
+      - run: >-
+          uv run --frozen --isolated --no-default-groups
+          --package astrogwb --group test
+          pytest packages/astrogwb/tests -m "not integration"
+
+  test-paper:
+    name: Paper tests (Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: >-
+          uv run --frozen --isolated --no-default-groups
+          --package astrogwb-paper --group test --group workflow
+          pytest packages/astrogwb-paper/tests -m "not integration"
 
   test-integration:
     name: Test integration (Python 3.12)
@@ -52,6 +69,34 @@ jobs:
           python-version: "3.12"
       - name: Verify ORF reference fixtures are present
         run: |
-          test -f tests/fixtures/gwfast_orf_reference.npz
-          test -f tests/fixtures/gwfast_orf_reference_et_triangle.npz
-      - run: uv run --extra mcmc --group dev pytest -m integration
+          test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference.npz
+          test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference_et_triangle.npz
+      - run: >-
+          uv run --frozen --isolated --no-default-groups
+          --package astrogwb --group test
+          pytest packages/astrogwb/tests -m integration
+
+  build-core:
+    name: Build publishable core distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: uv build --package astrogwb --no-sources
+      - run: uv venv .wheel-venv
+      - run: uv pip install --python .wheel-venv/bin/python dist/*.whl
+      - name: Smoke-test installed wheel and bundled detector data
+        run: >-
+          .wheel-venv/bin/python -c
+          "import importlib.util; import astrogwb;
+          from importlib.metadata import requires;
+          from astrogwb.detector import load_detector, load_sensitivity;
+          load_detector('H1'); load_sensitivity('H1');
+          assert importlib.util.find_spec('astrogwb_paper') is None;
+          assert importlib.util.find_spec('astrogwb.config') is None;
+          assert importlib.util.find_spec('astrogwb.runtime') is None;
+          assert not any(name in requirement.lower()
+          for requirement in requires('astrogwb') or []
+          for name in ('arviz', 'pydantic', 'astrogwb-paper'))"

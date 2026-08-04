@@ -1,0 +1,5 @@
+# Commits that only reorganize the repository or move files; ignored by
+# `git blame --ignore-revs-file` (and GitHub/GitLab web blame).
+#
+# refactor: split project into uv workspace
+afd800120a6e007422816807f08ea027d038df65

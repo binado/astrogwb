@@ -16,6 +16,13 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "astrogwb",
+    "astrogwb-paper",
+    "astrogwb-workspace",
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -196,7 +203,7 @@ xarray = [
 [[package]]
 name = "astrogwb"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "packages/astrogwb" }
 dependencies = [
     { name = "gwmock-noise" },
     { name = "gwmock-pop" },
@@ -212,52 +219,17 @@ dependencies = [
 cuda = [
     { name = "jax", extra = ["cuda12"] },
 ]
-mcmc = [
-    { name = "arviz", extra = ["h5netcdf"] },
-    { name = "pydantic" },
-]
 tpu = [
     { name = "jax", extra = ["tpu"] },
 ]
 
 [package.dev-dependencies]
-dev = [
-    { name = "arviz" },
-    { name = "corner" },
-    { name = "h5netcdf" },
-    { name = "ipykernel" },
-    { name = "jinja2" },
-    { name = "jupyter" },
-    { name = "matplotlib" },
+test = [
     { name = "pytest" },
-    { name = "ruff" },
-    { name = "snakemake" },
-    { name = "ty" },
-]
-plotting = [
-    { name = "arviz" },
-    { name = "corner" },
-    { name = "h5netcdf" },
-    { name = "jinja2" },
-]
-slurm = [
-    { name = "arviz" },
-    { name = "corner" },
-    { name = "h5netcdf" },
-    { name = "ipykernel" },
-    { name = "jinja2" },
-    { name = "jupyter" },
-    { name = "matplotlib" },
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "snakemake" },
-    { name = "snakemake-executor-plugin-slurm" },
-    { name = "ty" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "arviz", extras = ["h5netcdf"], marker = "extra == 'mcmc'", specifier = ">=1.2.0" },
     { name = "gwmock-noise", specifier = ">=0.10.0" },
     { name = "gwmock-pop", specifier = ">=0.11.4" },
     { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.12.0" },
@@ -268,42 +240,220 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "numpyro", specifier = ">=0.21.0" },
     { name = "pluscross", specifier = ">=0.2.0,<0.3.0" },
-    { name = "pydantic", marker = "extra == 'mcmc'", specifier = ">=2.0" },
 ]
-provides-extras = ["mcmc", "cuda", "tpu"]
+provides-extras = ["cuda", "tpu"]
+
+[package.metadata.requires-dev]
+test = [{ name = "pytest", specifier = ">=9.0.2" }]
+
+[[package]]
+name = "astrogwb-paper"
+version = "0.1.0"
+source = { editable = "packages/astrogwb-paper" }
+dependencies = [
+    { name = "arviz", extra = ["h5netcdf"] },
+    { name = "astrogwb" },
+    { name = "gwmock-pop" },
+    { name = "gwmock-signal", extra = ["jax"] },
+    { name = "jax" },
+    { name = "jax", marker = "sys_platform != 'linux'" },
+    { name = "numpy" },
+    { name = "numpyro" },
+    { name = "pluscross" },
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+cuda = [
+    { name = "astrogwb", extra = ["cuda"] },
+]
+notebook = [
+    { name = "arviz" },
+    { name = "arviz-base" },
+    { name = "arviz-plots" },
+    { name = "arviz-stats", extra = ["xarray"] },
+    { name = "corner" },
+    { name = "h5netcdf" },
+    { name = "ipykernel" },
+    { name = "jinja2" },
+    { name = "jupyter" },
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "scipy" },
+    { name = "xarray" },
+]
+tpu = [
+    { name = "astrogwb", extra = ["tpu"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "arviz" },
+    { name = "arviz-base" },
+    { name = "arviz-plots" },
+    { name = "arviz-stats", extra = ["xarray"] },
+    { name = "corner" },
+    { name = "h5netcdf" },
+    { name = "ipykernel" },
+    { name = "jinja2" },
+    { name = "jupyter" },
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "scipy" },
+    { name = "snakemake" },
+    { name = "ty" },
+    { name = "xarray" },
+]
+plotting = [
+    { name = "arviz" },
+    { name = "arviz-base" },
+    { name = "arviz-plots" },
+    { name = "arviz-stats", extra = ["xarray"] },
+    { name = "corner" },
+    { name = "h5netcdf" },
+    { name = "jinja2" },
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "scipy" },
+    { name = "xarray" },
+]
+slurm = [
+    { name = "arviz" },
+    { name = "arviz-base" },
+    { name = "arviz-plots" },
+    { name = "arviz-stats", extra = ["xarray"] },
+    { name = "corner" },
+    { name = "h5netcdf" },
+    { name = "ipykernel" },
+    { name = "jinja2" },
+    { name = "jupyter" },
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "scipy" },
+    { name = "snakemake" },
+    { name = "snakemake-executor-plugin-slurm" },
+    { name = "ty" },
+    { name = "xarray" },
+]
+test = [
+    { name = "pytest" },
+]
+workflow = [
+    { name = "snakemake" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arviz", marker = "extra == 'notebook'", specifier = ">=1.2.0" },
+    { name = "arviz", extras = ["h5netcdf"], specifier = ">=1.2.0" },
+    { name = "arviz-base", marker = "extra == 'notebook'", specifier = ">=1.2.0" },
+    { name = "arviz-plots", marker = "extra == 'notebook'", specifier = ">=1.2.0" },
+    { name = "arviz-stats", extras = ["xarray"], marker = "extra == 'notebook'", specifier = ">=1.2.0" },
+    { name = "astrogwb", editable = "packages/astrogwb" },
+    { name = "astrogwb", extras = ["cuda"], marker = "extra == 'cuda'", editable = "packages/astrogwb" },
+    { name = "astrogwb", extras = ["tpu"], marker = "extra == 'tpu'", editable = "packages/astrogwb" },
+    { name = "corner", marker = "extra == 'notebook'", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
+    { name = "gwmock-pop", specifier = ">=0.11.4" },
+    { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.12.0" },
+    { name = "h5netcdf", marker = "extra == 'notebook'", specifier = ">=1.8.1" },
+    { name = "ipykernel", marker = "extra == 'notebook'", specifier = ">=7.3.0" },
+    { name = "jax", marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
+    { name = "jax", extras = ["cpu"], marker = "sys_platform != 'linux'", specifier = ">=0.11.0" },
+    { name = "jinja2", marker = "extra == 'notebook'", specifier = ">=3.1" },
+    { name = "jupyter", marker = "extra == 'notebook'", specifier = ">=1.1.1" },
+    { name = "matplotlib", marker = "extra == 'notebook'", specifier = ">=3.11.1" },
+    { name = "numpy", specifier = ">=2.5.1" },
+    { name = "numpyro", specifier = ">=0.21.0" },
+    { name = "pandas", marker = "extra == 'notebook'", specifier = ">=2.0" },
+    { name = "pluscross", specifier = ">=0.2.0,<0.3.0" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "scipy", marker = "extra == 'notebook'", specifier = ">=1.10" },
+    { name = "xarray", marker = "extra == 'notebook'", specifier = ">=2025.1" },
+]
+provides-extras = ["cuda", "tpu", "notebook"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "arviz", specifier = ">=1.2.0" },
+    { name = "arviz-base", specifier = ">=1.2.0" },
+    { name = "arviz-plots", specifier = ">=1.2.0" },
+    { name = "arviz-stats", extras = ["xarray"], specifier = ">=1.2.0" },
     { name = "corner", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
     { name = "h5netcdf", specifier = ">=1.8.1" },
     { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.11.1" },
+    { name = "pandas", specifier = ">=2.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "ruff", specifier = ">=0.16.1" },
+    { name = "scipy", specifier = ">=1.10" },
     { name = "snakemake", specifier = ">=9.24.0" },
     { name = "ty", specifier = ">=0.0.65" },
+    { name = "xarray", specifier = ">=2025.1" },
 ]
 plotting = [
     { name = "arviz", specifier = ">=1.2.0" },
+    { name = "arviz-base", specifier = ">=1.2.0" },
+    { name = "arviz-plots", specifier = ">=1.2.0" },
+    { name = "arviz-stats", extras = ["xarray"], specifier = ">=1.2.0" },
     { name = "corner", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
     { name = "h5netcdf", specifier = ">=1.8.1" },
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "matplotlib", specifier = ">=3.11.1" },
+    { name = "pandas", specifier = ">=2.0" },
+    { name = "scipy", specifier = ">=1.10" },
+    { name = "xarray", specifier = ">=2025.1" },
 ]
 slurm = [
     { name = "arviz", specifier = ">=1.2.0" },
+    { name = "arviz-base", specifier = ">=1.2.0" },
+    { name = "arviz-plots", specifier = ">=1.2.0" },
+    { name = "arviz-stats", extras = ["xarray"], specifier = ">=1.2.0" },
     { name = "corner", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
     { name = "h5netcdf", specifier = ">=1.8.1" },
     { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.11.1" },
+    { name = "pandas", specifier = ">=2.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "ruff", specifier = ">=0.16.1" },
+    { name = "scipy", specifier = ">=1.10" },
     { name = "snakemake", specifier = ">=9.24.0" },
     { name = "snakemake-executor-plugin-slurm", specifier = ">=1.5" },
+    { name = "ty", specifier = ">=0.0.65" },
+    { name = "xarray", specifier = ">=2025.1" },
+]
+test = [{ name = "pytest", specifier = ">=9.0.2" }]
+workflow = [{ name = "snakemake", specifier = ">=9.24.0" }]
+
+[[package]]
+name = "astrogwb-workspace"
+version = "0.0.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "astrogwb-paper" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "ty" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "astrogwb-paper", editable = "packages/astrogwb-paper" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "ruff", specifier = ">=0.16.1" },
     { name = "ty", specifier = ">=0.0.65" },
 ]
 
@@ -2346,7 +2496,7 @@ name = "nvidia-cublas-cu12"
 version = "12.9.2.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cuda-nvrtc-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cuda-nvrtc-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f7/a2/c96163a0fff1839c0c9548bbdeae7b853b867009e33b9b9264adc238b1cf/nvidia_cublas_cu12-12.9.2.10-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:5572131a59c3eebeeb1c4c8144f772d49372c20124916e072a0e3fc30df421d5", size = 575012079, upload-time = "2026-04-08T18:51:47.303Z" },
@@ -2403,7 +2553,7 @@ name = "nvidia-cudnn-cu12"
 version = "9.23.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cublas-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a4/19/e70f60a82986f65111d30ffd1744ed3478a3f8cd67bcdac38bf00d57d9da/nvidia_cudnn_cu12-9.23.2.1-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:3adf706a93367d400b4e7668fc14834c7551c9122eeb22f8aec6435b18da5b6f", size = 778221490, upload-time = "2026-06-16T03:36:51.086Z" },
@@ -2415,7 +2565,7 @@ name = "nvidia-cufft-cu12"
 version = "11.4.1.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9b/2b/76445b0af890da61b501fde30650a1a4bd910607261b209cccb5235d3daa/nvidia_cufft_cu12-11.4.1.4-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:1a28c9b12260a1aa7a8fd12f5ebd82d027963d635ba82ff39a1acfa7c4c0fbcf", size = 200822453, upload-time = "2025-06-05T20:05:27.889Z" },
@@ -2427,9 +2577,9 @@ name = "nvidia-cusolver-cu12"
 version = "11.7.5.82"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu12", marker = "sys_platform == 'linux'" },
-    { name = "nvidia-cusparse-cu12", marker = "sys_platform == 'linux'" },
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cusparse-cu12" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/03/99/686ff9bf3a82a531c62b1a5c614476e8dfa24a9d89067aeedf3592ee4538/nvidia_cusolver_cu12-11.7.5.82-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:62efa83e4ace59a4c734d052bb72158e888aa7b770e1a5f601682f16fe5b4fd2", size = 337869834, upload-time = "2025-06-05T20:06:53.125Z" },
@@ -2441,7 +2591,7 @@ name = "nvidia-cusparse-cu12"
 version = "12.5.10.65"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-nvjitlink-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-nvjitlink-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5e/6f/8710fbd17cdd1d0fc3fea7d36d5b65ce1933611c31e1861da330206b253a/nvidia_cusparse_cu12-12.5.10.65-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:221c73e7482dd93eda44e65ce567c031c07e2f93f6fa0ecd3ba876a195023e83", size = 366359408, upload-time = "2025-06-05T20:07:42.501Z" },
@@ -2471,7 +2621,7 @@ name = "nvidia-nvshmem-cu12"
 version = "3.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cuda-cccl-cu12", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cuda-cccl-cu12" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/29/4f/2d705ab9a090fe946dc2be0a3c30f9241e99c49058d2f9c269459b445edc/nvidia_nvshmem_cu12-3.7.0-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:06426cd421093a63529d90a95e57ddf884c9ca43f93016d7a27b903f0a0acaed", size = 230116748, upload-time = "2026-06-11T12:40:27.683Z" },
@@ -2571,7 +2721,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "ptyprocess" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
