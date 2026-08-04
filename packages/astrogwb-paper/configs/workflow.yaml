@@ -15,7 +15,6 @@ mcmc_cosmological_parameters:
   output_detector_pdf: figures/mcmc_cosmological_parameters_H0_by_detector.pdf
   output_prior_pdf: figures/mcmc_cosmological_parameters_H0_merger_rate_priors.pdf
   output_narrow_corner_pdf: figures/mcmc_cosmological_parameters_H0_merger_rate_narrow_corner.pdf
-  output_broad_corner_pdf: figures/mcmc_cosmological_parameters_H0_merger_rate_broad_corner.pdf
   output_omega_m_corner_pdf: figures/mcmc_cosmological_parameters_H0_Omega_m_corner.pdf
   output_omega_m_ess_corner_pdf: figures/mcmc_cosmological_parameters_H0_Omega_m_ess_corner.pdf
   output_csv: figures/mcmc_cosmological_parameters_H0_by_detector.csv
