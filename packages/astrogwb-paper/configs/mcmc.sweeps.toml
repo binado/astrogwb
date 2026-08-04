@@ -34,10 +34,6 @@ priors = { H0 = "uniform" }
 sampled_params = ["H0", "Omega_m"]
 priors = { H0 = "uniform", Omega_m = "normal" }
 
-[analyses.H0-merger-rate]
-sampled_params = ["H0", "local_merger_rate"]
-priors = { H0 = "uniform", local_merger_rate = "uniform" }
-
 [analyses.H0-merger-rate-gauss]
 sampled_params = ["H0", "local_merger_rate"]
 priors = { H0 = "uniform", local_merger_rate = "normal" }
@@ -107,11 +103,6 @@ type = "uniform"
 low = 0.05
 high = 10.0
 
-[priors.local_merger_rate.uniform]
-type = "uniform"
-low = 7.6
-high = 250.0
-
 [priors.local_merger_rate.normal]
 type = "normal"
 loc = 161.0
@@ -122,7 +113,7 @@ networks = [
     "ET-2L-aligned",
     "ET-2L-aligned-CE-Hanford",
 ]
-analyses = ["H0", "H0-Omega_m", "H0-merger-rate", "H0-merger-rate-gauss"]
+analyses = ["H0", "H0-Omega_m", "H0-merger-rate-gauss"]
 observations = ["baseline"]
 
 [runs.cosmology-all-detectors]
@@ -134,7 +125,7 @@ networks = [
     "ET-2L-misaligned",
     "ET-2L-misaligned-CE-Hanford",
 ]
-analyses = ["H0", "H0-Omega_m", "H0-merger-rate", "H0-merger-rate-gauss"]
+analyses = ["H0", "H0-Omega_m", "H0-merger-rate-gauss"]
 observations = ["baseline"]
 
 [runs.modified-propagation-all-detectors]
