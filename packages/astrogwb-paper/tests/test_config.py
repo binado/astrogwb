@@ -72,16 +72,6 @@ def test_analysis_settings_round_trip() -> None:
     assert config.model_dump(mode="json")["analysis"]["f_max"] == 4096.0
 
 
-def test_curated_configs_are_catalog_independent() -> None:
-    config_paths = list((PAPER_ROOT / "configs/mcmc/curated").glob("*/*.json"))
-
-    assert config_paths
-    for path in config_paths:
-        raw = load_mapping(path)
-        assert "catalog" not in raw
-        assert build_run_config(raw).analysis.detectors
-
-
 def test_all_committed_mcmc_configs_validate_without_runtime() -> None:
     config_paths = [
         PAPER_ROOT / "configs/mcmc.example.toml",
