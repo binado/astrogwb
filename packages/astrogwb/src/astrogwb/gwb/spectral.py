@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 
 from astrogwb.cosmology import H0_SI
-from astrogwb.utils import years_to_seconds
 
 AverageMode = Literal["analytic_inclination", "catalog_inclination"]
 
@@ -25,27 +24,6 @@ def spectral_density(
         * jnp.dot(polarization_power, weights)
         / weights.shape[0]
     )
-
-
-def gaussian_bin_scale(
-    effective_psd: jax.Array,
-    frequencies: jax.Array,
-    observation_time: float,
-    *,
-    df: float | jax.Array | None = None,
-) -> jax.Array:
-    """Per-bin Gaussian noise scale for a stochastic background search.
-
-    Parameters
-    ----------
-    observation_time:
-        Observation time in years. Converted to seconds internally because
-        ``df`` is inferred from ``frequencies`` in Hz.
-    """
-    if df is None:
-        df = jnp.mean(jnp.diff(frequencies))
-    observation_time_sec = years_to_seconds(observation_time)
-    return effective_psd / jnp.sqrt(2.0 * observation_time_sec * df)
 
 
 def frequency_mask(

@@ -1,7 +1,7 @@
 from ._types import DetectorSpec
+from .effective_psd import effective_psd, gaussian_bin_scale
 from .geometry import load_detector, resolve_detector
 from .overlap import (
-    effective_psd,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
 )
@@ -18,6 +18,7 @@ __all__ = [
     "Sensitivity",
     "effective_psd",
     "evaluate_psd",
+    "gaussian_bin_scale",
     "load_detector",
     "load_sensitivities_for_network",
     "load_sensitivity",

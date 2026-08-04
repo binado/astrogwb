@@ -9,21 +9,18 @@ contribution: gwmock ships only the long-wavelength, co-located limit
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 import numpy as np
-from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
 
 from ._types import DetectorSpec
 from .geometry import resolve_detector
-from .sensitivity import Sensitivity, evaluate_psd
 
 R_EARTH = 6371.0  # km
 C_LIGHT = 299792.458  # km/s
 
 _LOW_ALPHA_THRESHOLD = 2e-3
-_NETWORK_SENSITIVITY_FACTOR = 0.16
 
 
 def _chord_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -218,39 +215,3 @@ def pairwise_overlap_reduction_function(
             out[i, j, :] = orf
             out[j, i, :] = orf
     return out
-
-
-def effective_psd(
-    frequencies: ArrayLike,
-    detectors: Sequence[DetectorSpec],
-    sensitivities: Mapping[str, Sensitivity],
-) -> NDArray[np.float64]:
-    """Network effective PSD from an inverse-variance cross-correlation sum.
-
-    ``detectors`` are matched to ``sensitivities`` by their public name
-    (gwmock ``detector_names``): plain str codes match directly, while
-    preset ``CustomDetector`` objects match on their ``name`` (e.g.
-    ``ET1_SARD``). The contraction and ``_NETWORK_SENSITIVITY_FACTOR``
-    are unchanged from the pre-refactor implementation.
-    """
-    frequencies = np.asarray(frequencies, dtype=float)
-    det_list = list(detectors)
-    if len(det_list) < 2:
-        return np.full(frequencies.shape, np.inf, dtype=float)
-
-    names = detector_names(det_list)
-    psds = [
-        evaluate_psd(sensitivities[name].psd_reference, frequencies) for name in names
-    ]
-
-    inverse_variance = np.zeros(frequencies.shape, dtype=float)
-    for i, det1 in enumerate(det_list):
-        for j in range(i + 1, len(det_list)):
-            gamma = overlap_reduction_function(frequencies, det1, det_list[j])
-            with np.errstate(invalid="ignore", divide="ignore"):
-                contribution = gamma**2 / (psds[i] * psds[j])
-            inverse_variance += np.where(np.isfinite(contribution), contribution, 0.0)
-
-    with np.errstate(invalid="ignore", divide="ignore"):
-        result = 1.0 / (_NETWORK_SENSITIVITY_FACTOR * np.sqrt(inverse_variance))
-    return np.where(inverse_variance > 0.0, result, np.inf)
