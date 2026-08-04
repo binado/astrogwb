@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
-from pluscross import WaveformCatalog
-
 from astrogwb.waveform import polarization_power
+from pluscross import WaveformCatalog
 
 
 def test_polarization_power_reduces_catalog() -> None:

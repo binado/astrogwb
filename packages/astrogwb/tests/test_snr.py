@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-from astrogwb.utils import SECONDS_PER_YEAR, years_to_seconds
-
 from astrogwb.gwb import (
     gaussian_bin_scale,
     spectral_snr_squared,
 )
+from astrogwb.utils import SECONDS_PER_YEAR, years_to_seconds
 
 
 def test_spectral_snr_squared_matches_gaussian_bin_scale() -> None:

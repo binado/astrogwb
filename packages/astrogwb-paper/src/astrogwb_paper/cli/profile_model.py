@@ -92,19 +92,19 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     extracts the potential-energy function via NumPyro's public ``initialize_model``.
     """
     import jax.numpy as jnp
+    from astrogwb.detector import effective_psd, load_sensitivity_map
+    from astrogwb.gwb import frequency_mask as make_frequency_mask
+    from astrogwb.gwb import spectral_density
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
         compute_merger_rate_distance_and_logprob,
         make_merger_rate_and_log_weights_fn,
     )
     from astrogwb.sampling.numpyro_model import numpyro_model
+    from astrogwb.waveform import polarization_power as compute_polarization_power
     from numpyro.infer.initialization import init_to_value
     from numpyro.infer.util import initialize_model
     from pluscross import load_catalog
 
-    from astrogwb.detector import effective_psd, load_sensitivity_map
-    from astrogwb.gwb import frequency_mask as make_frequency_mask
-    from astrogwb.gwb import spectral_density
-    from astrogwb.waveform import polarization_power as compute_polarization_power
     from astrogwb_paper.priors import build_prior
 
     analysis = config.analysis

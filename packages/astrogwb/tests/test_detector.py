@@ -5,16 +5,15 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
-from astrogwb.detector.overlap import R_EARTH
-from gwmock_signal.detector import CustomDetector
-from gwmock_signal.network import Network
-
 from astrogwb.detector import (
     load_detector,
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
     resolve_detector,
 )
+from astrogwb.detector.overlap import R_EARTH
+from gwmock_signal.detector import CustomDetector
+from gwmock_signal.network import Network
 
 
 @pytest.mark.parametrize("loader", [resolve_detector, load_detector])

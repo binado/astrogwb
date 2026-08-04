@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-from numpyro import handlers
-
 from astrogwb.sampling import numpyro_model
+from numpyro import handlers
 
 
 def test_numpyro_model_smoke_trace() -> None:

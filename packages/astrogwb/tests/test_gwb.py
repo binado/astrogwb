@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-from astrogwb.utils import SECONDS_PER_YEAR
-
 from astrogwb.gwb import (
     frequency_mask,
     gaussian_bin_scale,
@@ -11,6 +9,7 @@ from astrogwb.gwb import (
     spectral_density,
     spectral_density_from_omega_gw,
 )
+from astrogwb.utils import SECONDS_PER_YEAR
 
 
 def test_spectral_density_uses_average_mode_factor() -> None:

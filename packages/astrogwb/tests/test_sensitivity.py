@@ -4,9 +4,6 @@ from typing import Literal
 
 import numpy as np
 import pytest
-from gwmock_signal.detector import CustomDetector
-from gwmock_signal.network import Network
-
 from astrogwb.detector import (
     Sensitivity,
     effective_psd,
@@ -16,6 +13,8 @@ from astrogwb.detector import (
     load_sensitivity_map,
     overlap_reduction_function,
 )
+from gwmock_signal.detector import CustomDetector
+from gwmock_signal.network import Network
 
 
 def test_evaluate_psd_in_band_is_finite_and_positive() -> None:
