@@ -18,15 +18,10 @@ import argparse
 import shlex
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 from astrogwb_paper.paths import paper_project_root, workspace_root
-
-WORKSPACE_ROOT = workspace_root()
-PAPER_ROOT = paper_project_root()
-CATALOG_SMK = PAPER_ROOT / "workflow/catalog.smk"
-MCMC_SMK = PAPER_ROOT / "workflow/mcmc.smk"
-PAPER_SMK = PAPER_ROOT / "workflow/paper.smk"
 
 PROFILE_CHOICES = ("local", "slurm", "slurm-cpu")
 # Profiles that must force JAX onto CPU. Emitted as a CLI ``--config`` entry
@@ -38,8 +33,33 @@ CPU_JAX_PROFILES = frozenset({"local", "slurm-cpu"})
 DEFAULT_LOCAL_CORES = 8
 
 
+@lru_cache(maxsize=1)
+def _workspace_root() -> Path:
+    return workspace_root()
+
+
+@lru_cache(maxsize=1)
+def _paper_root() -> Path:
+    return paper_project_root()
+
+
+@lru_cache(maxsize=1)
+def _catalog_smk() -> Path:
+    return _paper_root() / "workflow/catalog.smk"
+
+
+@lru_cache(maxsize=1)
+def _mcmc_smk() -> Path:
+    return _paper_root() / "workflow/mcmc.smk"
+
+
+@lru_cache(maxsize=1)
+def _paper_smk() -> Path:
+    return _paper_root() / "workflow/paper.smk"
+
+
 def profile_dir(name: str) -> Path:
-    return PAPER_ROOT / "profiles" / name
+    return _paper_root() / "profiles" / name
 
 
 def split_config_from_extra(extra: list[str]) -> tuple[list[str], list[str]]:
@@ -127,7 +147,7 @@ def build_catalog_argv(
         "workflow",
         "snakemake",
         "--snakefile",
-        str(CATALOG_SMK),
+        str(_catalog_smk()),
         "--cores",
         "1",
     ]
@@ -163,7 +183,7 @@ def build_mcmc_argv(
         "workflow",
         "snakemake",
         "--snakefile",
-        str(MCMC_SMK),
+        str(_mcmc_smk()),
         "--profile",
         str(profile_dir(profile)),
         "--configfile",
@@ -193,7 +213,7 @@ def build_paper_argv(
         "workflow",
         "snakemake",
         "--snakefile",
-        str(PAPER_SMK),
+        str(_paper_smk()),
         "--cores",
         "1",
     ]
@@ -278,18 +298,18 @@ def _validate(args: argparse.Namespace) -> None:
     if args.command == "gen-configs":
         return
     if args.command == "catalog":
-        _require_path(CATALOG_SMK, kind="snakefile")
+        _require_path(_catalog_smk(), kind="snakefile")
         return
     if args.command == "mcmc":
-        _require_path(MCMC_SMK, kind="snakefile")
+        _require_path(_mcmc_smk(), kind="snakefile")
         config = args.configfile
         if not config.is_absolute():
-            config = WORKSPACE_ROOT / config
+            config = _workspace_root() / config
         _require_path(config, kind="configfile")
         _require_path(profile_dir(args.profile), kind="profile")
         return
     if args.command == "paper":
-        _require_path(PAPER_SMK, kind="snakefile")
+        _require_path(_paper_smk(), kind="snakefile")
         return
 
 
@@ -317,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     _validate(args)
     cmd = build_command(args)
     print("+", shlex.join(cmd), flush=True)
-    completed = subprocess.run(cmd, cwd=WORKSPACE_ROOT, check=False)
+    completed = subprocess.run(cmd, cwd=_workspace_root(), check=False)
     return int(completed.returncode)
 
 

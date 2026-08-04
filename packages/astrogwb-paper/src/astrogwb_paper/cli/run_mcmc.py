@@ -37,12 +37,9 @@ from pathlib import Path
 from astrogwb_paper.config.hashing import file_sha256
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import RunConfig, build_run_config, config_sha256
-from astrogwb_paper.paths import resolve_workspace_path, workspace_root
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
 
 logger = logging.getLogger("run_mcmc")
-
-WORKSPACE_ROOT = workspace_root()
 
 
 # --------------------------------------------------------------------------- #
@@ -270,7 +267,7 @@ def _git_revision() -> str | None:
         return (
             subprocess.check_output(
                 ["git", "rev-parse", "HEAD"],
-                cwd=WORKSPACE_ROOT,
+                cwd=Path(__file__).resolve().parent,
                 stderr=subprocess.DEVNULL,
             )
             .decode()
@@ -386,8 +383,8 @@ def save(
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    config_path = resolve_workspace_path(args.config)
-    catalog_path = resolve_workspace_path(args.catalog)
+    config_path = args.config.resolve()
+    catalog_path = args.catalog.resolve()
     raw = load_mapping(config_path)
     configured_outdir = args.outdir
     if configured_outdir is None:
@@ -395,7 +392,7 @@ def main(argv: list[str] | None = None) -> None:
     config = build_run_config(
         raw,
         seed=args.seed,
-        outdir=resolve_workspace_path(configured_outdir),
+        outdir=configured_outdir.resolve(),
         label=args.label,
     )
 

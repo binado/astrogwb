@@ -40,9 +40,3 @@ def workspace_root(*, start: Path | None = None) -> Path:
 def paper_project_root() -> Path:
     """Return the root of the ``astrogwb-paper`` workspace member."""
     return workspace_root() / _PAPER_PROJECT
-
-
-def resolve_workspace_path(path: str | Path) -> Path:
-    """Resolve a user-facing path relative to the workspace root."""
-    path = Path(path)
-    return path if path.is_absolute() else workspace_root() / path

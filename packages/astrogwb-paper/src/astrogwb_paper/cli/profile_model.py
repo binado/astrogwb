@@ -34,7 +34,6 @@ from pathlib import Path
 
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import RunConfig, build_run_config
-from astrogwb_paper.paths import resolve_workspace_path
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
 
 logger = logging.getLogger("profile_model")
@@ -197,9 +196,9 @@ def _bench(fn, x, iters: int) -> float:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    config_path = resolve_workspace_path(args.config)
-    catalog_path = resolve_workspace_path(args.catalog)
-    outdir = resolve_workspace_path(args.outdir)
+    config_path = args.config.resolve()
+    catalog_path = args.catalog.resolve()
+    outdir = args.outdir.resolve()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",

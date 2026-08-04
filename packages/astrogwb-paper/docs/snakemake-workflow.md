@@ -22,7 +22,8 @@ Requesting a waveform catalog builds its missing or stale population first:
 ```bash
 uv run astrogwb-workflow catalog out/catalogs/bns-n16384-df1.h5 --submit
 # expands to:
-# uv run snakemake --snakefile packages/astrogwb-paper/workflow/catalog.smk --cores 1 \
+# uv run --package astrogwb-paper --group workflow snakemake \
+#   --snakefile packages/astrogwb-paper/workflow/catalog.smk --cores 1 \
 #   out/catalogs/bns-n16384-df1.h5
 ```
 
@@ -165,7 +166,7 @@ device per concurrent chain, with `--cpu-threads` pinned to 1).
    Equivalent expanded form for the GPU path:
 
    ```bash
-   uv run snakemake \
+   uv run --package astrogwb-paper --group workflow snakemake \
      --snakefile packages/astrogwb-paper/workflow/mcmc.smk \
      --profile packages/astrogwb-paper/profiles/slurm \
      --configfile /home/user/batches/paper-h0.json \

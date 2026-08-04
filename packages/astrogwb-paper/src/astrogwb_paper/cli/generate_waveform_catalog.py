@@ -10,8 +10,6 @@ from gwmock_pop.loaders.file_loader import read_population_catalogue
 from gwmock_signal.waveform import RippleBackend
 from pluscross import WaveformCatalog, save_catalog
 
-from astrogwb_paper.paths import resolve_workspace_path
-
 logger = logging.getLogger(__name__)
 
 #: Default frequency resolution in Hz (segment_duration = 1 / DEFAULT_FREQUENCY_RESOLUTION).
@@ -208,8 +206,8 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
     args = parse_args()
-    population_path = resolve_workspace_path(args.population)
-    output_path = resolve_workspace_path(args.output)
+    population_path = args.population.resolve()
+    output_path = args.output.resolve()
 
     logger.info("Loading population from %s", population_path)
     population = read_population_catalogue(population_path)

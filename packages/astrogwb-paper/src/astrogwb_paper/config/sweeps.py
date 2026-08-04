@@ -11,15 +11,16 @@ analyses, and prior variants. Each campaign expands its selected components as
 ``RunConfig``.
 
 Pass ``--write-manifests`` to also (re)generate the Snakemake batch manifest
-for each campaign (under ``packages/astrogwb-paper/configs/mcmc/manifests``),
+for each campaign (under
+``packages/astrogwb-paper/configs/mcmc/manifests/mcmc.batch.{campaign}.json``),
 listing every selected config for that campaign for use with
-the paper MCMC workflow. A manifest is catalog-free: it holds only
-``{"chains_dir": ..., "runs": [...]}``. The workflow sources the
-catalog separately from the paper project's ``configs/workflow.yaml``
-workflow), so the same manifest can be run against any catalog without
-regenerating it. Like the JSON configs, generated manifests are gitignored
--- they are fully reproducible from ``configs/mcmc.sweeps.toml``, so there is
-nothing to commit::
+``packages/astrogwb-paper/workflow/mcmc.smk``. A manifest is catalog-free: it
+holds only ``{"chains_dir": ..., "runs": [...]}``. ``workflow/mcmc.smk``
+sources the catalog separately from the paper project's
+``configs/workflow.yaml``, so the same manifest can be run against any
+catalog without regenerating it. Like the JSON configs, generated manifests
+are gitignored -- they are fully reproducible from
+``configs/mcmc.sweeps.toml``, so there is nothing to commit::
 
     uv run astrogwb-generate-mcmc-configs --write-manifests --force
 """
@@ -454,11 +455,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Also (re)generate a Snakemake batch manifest per campaign "
-            "(configs/mcmc/manifests/mcmc.batch.{campaign}.json), holding only "
-            "chains_dir and the campaign's runs -- no catalog field. "
-            "workflow/mcmc.smk sources the catalog separately from "
-            "configs/workflow.yaml. Gitignored, like the JSON configs: fully "
-            "reproducible from mcmc.sweeps.toml."
+            "(packages/astrogwb-paper/configs/mcmc/manifests/"
+            "mcmc.batch.{campaign}.json), holding only chains_dir and the "
+            "campaign's runs -- no catalog field. "
+            "packages/astrogwb-paper/workflow/mcmc.smk sources the catalog "
+            "separately from packages/astrogwb-paper/configs/workflow.yaml. "
+            "Gitignored, like the JSON configs: fully reproducible from "
+            "mcmc.sweeps.toml."
         ),
     )
     parser.add_argument(
