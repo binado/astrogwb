@@ -30,7 +30,7 @@ def spectral_density(
 def gaussian_bin_scale(
     effective_psd: jax.Array,
     frequencies: jax.Array,
-    observation_time: float | jax.Array,
+    observation_time: float,
     *,
     df: float | jax.Array | None = None,
 ) -> jax.Array:
