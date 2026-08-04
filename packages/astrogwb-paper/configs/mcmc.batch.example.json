@@ -1,0 +1,13 @@
+{
+  "chains_dir": "chains",
+  "runs": [
+    {
+      "campaign": "paper-h0",
+      "config": "packages/astrogwb-paper/configs/mcmc/curated/paper-h0/et-triangular.json"
+    },
+    {
+      "campaign": "paper-h0",
+      "config": "packages/astrogwb-paper/configs/mcmc/curated/paper-h0/et-triangular-ce-hanford.json"
+    }
+  ]
+}

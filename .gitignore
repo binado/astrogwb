@@ -10,6 +10,11 @@ configs/mcmc/cosmology/
 configs/mcmc/*-all-detectors/
 configs/mcmc/frozen/
 configs/mcmc/manifests/
+packages/astrogwb-paper/configs/mcmc/astrophysical/
+packages/astrogwb-paper/configs/mcmc/cosmology/
+packages/astrogwb-paper/configs/mcmc/*-all-detectors/
+packages/astrogwb-paper/configs/mcmc/frozen/
+packages/astrogwb-paper/configs/mcmc/manifests/
 chains/
 logs/
 
@@ -23,6 +28,9 @@ figures/*.tex
 !AGENTS.md
 !CLAUDE.md
 !docs/**/*.md
+!packages/*/README.md
+!packages/astrogwb-paper/docs/**/*.md
+!packages/astrogwb-paper/notebooks/README.md
 
 ## Core latex/pdflatex auxiliary files:
 *.aux
@@ -351,7 +359,7 @@ TSWLatexianTemp*
 #*Notes.bib
 __pycache__
 config
-!src/astrogwb/config/
-!src/astrogwb/config/**
-src/astrogwb/config/__pycache__/
+!packages/astrogwb-paper/src/astrogwb_paper/config/
+!packages/astrogwb-paper/src/astrogwb_paper/config/**
+packages/astrogwb-paper/src/astrogwb_paper/config/__pycache__/
 .DS_Store

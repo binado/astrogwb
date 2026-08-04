@@ -1,76 +1,47 @@
 [project]
-name = "astrogwb"
-version = "0.1.0"
-description = "Constraining cosmology with the SGWB from compact binary coalescences"
-readme = "README.md"
-authors = [
-    { name = "Bernardo Veronese", email = "bernardopveronese@gmail.com" }
-]
-license = { file = "LICENSE" }
+name = "astrogwb-workspace"
+version = "0.0.0"
 requires-python = ">=3.12"
-dependencies = [
-    "gwmock-noise>=0.10.0",
-    "gwmock-pop>=0.11.4",
-    "gwmock-signal[jax]>=0.12.0",
-    # Bare/CPU JAX in the base install; pair the mcmc extra with cuda or tpu.
-    "jax>=0.10.2; sys_platform == 'linux'",
-    "jax[cpu]>=0.11.0; sys_platform != 'linux'",
-    "numpy>=2.5.1",
-    "numpyro>=0.21.0",
-    "pluscross>=0.2.0,<0.3.0",
-]
+dependencies = ["astrogwb-paper"]
 
-[project.optional-dependencies]
-mcmc = [
-    "arviz[h5netcdf]>=1.2.0",
-    "pydantic>=2.0",
-]
-cuda = [
-    "jax[cuda12]>=0.11.0",
-]
-tpu = [
-    "jax[tpu]>=0.11.0",
-]
+[tool.uv]
+package = false
 
-[build-system]
-requires = ["uv_build>=0.12.0,<0.13.0"]
-build-backend = "uv_build"
+[tool.uv.sources]
+astrogwb = { workspace = true }
+astrogwb-paper = { workspace = true }
+
+[tool.uv.workspace]
+members = ["packages/*"]
 
 [dependency-groups]
-plotting = [
-    "arviz>=1.2.0",
-    "corner @ git+https://github.com/dfm/corner.py@d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4",
-    "h5netcdf>=1.8.1",
-    # pandas' DataFrame.style (used in the paper-table notebooks) requires jinja2.
-    "jinja2>=3.1",
-]
 dev = [
-    { include-group = "plotting" },
-    "ipykernel>=7.3.0",
-    "jupyter>=1.1.1",
-    "matplotlib>=3.11.1",
     "pytest>=9.0.2",
     "ruff>=0.16.1",
-    "snakemake>=9.24.0",
     "ty>=0.0.65",
-]
-slurm = [
-    { include-group = "dev" },
-    "snakemake-executor-plugin-slurm>=1.5",
 ]
 
 [tool.ruff]
-include = ["src/**/*.py", "tests/**/*.py"]
+extend-exclude = [".antigravitycli", ".cache", ".claude", ".cursor"]
+include = [
+    "packages/*/src/**/*.py",
+    "packages/*/tests/**/*.py",
+]
 
 # Colab bootstrap + configure_runtime must run before JAX-touching imports.
 [tool.ruff.lint.per-file-ignores]
-"notebooks/mcmc.py" = ["E402"]
+"packages/astrogwb-paper/notebooks/mcmc.py" = ["E402"]
 
 [tool.ty.src]
-include = ["src", "tests"]
+include = [
+    "packages/astrogwb/src",
+    "packages/astrogwb/tests",
+    "packages/astrogwb-paper/src",
+    "packages/astrogwb-paper/tests",
+]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+testpaths = ["packages/astrogwb/tests", "packages/astrogwb-paper/tests"]
 markers = [
     "integration: tests that call external libraries or services (deselect with -m 'not integration')",
 ]
