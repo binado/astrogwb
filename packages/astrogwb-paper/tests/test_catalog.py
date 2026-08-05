@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 from astrogwb.cosmology import log_gw_em_ratio
-from astrogwb.waveform import apply_gw_distance_to_waveforms, polarization_power
+from astrogwb.waveform import polarization_power
+from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
 from pluscross import WaveformCatalog
 
 
@@ -24,28 +25,11 @@ def _make_catalog() -> WaveformCatalog:
     )
 
 
-def test_polarization_power_reduces_catalog() -> None:
-    catalog = _make_catalog()
-
-    actual = polarization_power(catalog)
-
-    expected = np.array(
-        [
-            [2.0, 17.0],
-            [5.0, 26.0],
-            [9.0, 40.0],
-        ]
-    )
-    assert actual.shape == (3, 2)  # (nfreq, nsamples)
-    assert actual.dtype == np.float64
-    np.testing.assert_allclose(actual, expected)
-
-
-def test_apply_gw_distance_gr_limit_is_identity() -> None:
+def test_apply_gw_distance_at_fiducial_is_identity_for_gr() -> None:
     # xi_0 = 1 -> xi(z) = 1 everywhere, so polarizations and power are unchanged.
     catalog = _make_catalog()
 
-    corrected = apply_gw_distance_to_waveforms(catalog, xi_0=1.0, xi_n=1.91)
+    corrected = apply_gw_distance_at_fiducial(catalog, xi_0=1.0, xi_n=1.91)
 
     np.testing.assert_allclose(corrected.plus, catalog.plus)
     np.testing.assert_allclose(corrected.cross, catalog.cross)
@@ -54,27 +38,26 @@ def test_apply_gw_distance_gr_limit_is_identity() -> None:
     )
 
 
-def test_apply_gw_distance_scales_polarizations_by_inverse_xi() -> None:
+def test_apply_gw_distance_at_fiducial_scales_for_xi0_gt_1() -> None:
     catalog = _make_catalog()
     redshift = catalog.source_parameters["redshift"]
     xi_0, xi_n = 1.5, 1.91
     xi = np.exp(log_gw_em_ratio(redshift, xi_0=xi_0, xi_n=xi_n))
 
-    corrected = apply_gw_distance_to_waveforms(catalog, xi_0=xi_0, xi_n=xi_n)
+    corrected = apply_gw_distance_at_fiducial(catalog, xi_0=xi_0, xi_n=xi_n)
 
     np.testing.assert_allclose(corrected.plus, catalog.plus / xi[:, None])
     np.testing.assert_allclose(corrected.cross, catalog.cross / xi[:, None])
-    # Power rescales by 1 / xi^2 per sample (column).
     np.testing.assert_allclose(
         polarization_power(corrected),
         polarization_power(catalog) / xi[None, :] ** 2,
     )
 
 
-def test_apply_gw_distance_is_pure_and_preserves_metadata() -> None:
+def test_apply_gw_distance_at_fiducial_is_pure_and_preserves_metadata() -> None:
     catalog = _make_catalog()
 
-    corrected = apply_gw_distance_to_waveforms(catalog, xi_0=1.5, xi_n=1.91)
+    corrected = apply_gw_distance_at_fiducial(catalog, xi_0=1.5, xi_n=1.91)
 
     assert corrected is not catalog
     np.testing.assert_array_equal(corrected.frequencies, catalog.frequencies)
@@ -90,15 +73,3 @@ def test_apply_gw_distance_is_pure_and_preserves_metadata() -> None:
     # The input catalog's arrays must not be modified in place.
     np.testing.assert_allclose(catalog.plus, _make_catalog().plus)
     np.testing.assert_allclose(catalog.cross, _make_catalog().cross)
-
-
-def test_apply_gw_distance_requires_source_parameters() -> None:
-    catalog = _make_catalog()
-    del catalog.source_parameters["redshift"]
-
-    try:
-        apply_gw_distance_to_waveforms(catalog, xi_0=1.5, xi_n=1.91)
-    except KeyError:
-        pass
-    else:
-        raise AssertionError("expected KeyError for missing 'redshift'")

@@ -53,12 +53,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
-from arviz_base.labels import MapLabeller
-from matplotlib.axes import Axes as MplAxes
-from matplotlib.lines import Line2D
-from matplotlib.projections import register_projection
-from pluscross import load_catalog
-
 from _paper_style import (
     CATEGORY,
     CORNER_LEVELS,
@@ -67,6 +61,7 @@ from _paper_style import (
     get_corner_kwargs,
     use_paper_style,
 )
+from arviz_base.labels import MapLabeller
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.gwb import frequency_mask as make_frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
@@ -75,8 +70,13 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.utils import years_to_seconds
-from astrogwb_paper.paths import paper_project_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
+from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
+from astrogwb_paper.paths import paper_project_root
+from matplotlib.axes import Axes as MplAxes
+from matplotlib.lines import Line2D
+from matplotlib.projections import register_projection
+from pluscross import load_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's rectilinear axes. ArviZ can then
 # mis-detect the backend, so restore the standard matplotlib projection.
@@ -219,7 +219,7 @@ def _resolve_networks(
 def _base_network_name(name: str) -> str:
     """Map an ET+CE network name onto its ET-only counterpart."""
     suffix = "-CE-Hanford"
-    return name[: -len(suffix)] if name.endswith(suffix) else name
+    return name.removesuffix(suffix)
 
 
 def detector_network_styles(
@@ -531,6 +531,13 @@ def compute_network_snrs(
 ) -> pd.DataFrame:
     """Compute the fiducial matched-filter SNR for each detector network."""
     catalog = load_catalog(catalog_path)
+    # Rescale to live-GW distances at the fiducial modified-propagation
+    # parameters before reducing to polarization power.
+    catalog = apply_gw_distance_at_fiducial(
+        catalog,
+        xi_0=float(fiducials["xi_0"]),
+        xi_n=float(fiducials["xi_n"]),
+    )
     frequencies = jnp.asarray(catalog.frequencies)
     polarization_power = jnp.asarray(compute_polarization_power(catalog))
     samples = {
