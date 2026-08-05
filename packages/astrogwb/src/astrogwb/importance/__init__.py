@@ -9,6 +9,8 @@ Import from explicit submodules rather than this package root:
 
 - :mod:`astrogwb.cosmology` — shared cosmology helpers
 - :mod:`astrogwb.importance.protocol` — the callback protocol
+- :mod:`astrogwb.importance.diagnostics` — effective sample size and
+  prior-reweighting helpers
 - :mod:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation` —
   the BNS + Madau-Dickinson reference callback factory
 """

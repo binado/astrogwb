@@ -10,7 +10,77 @@ import numpyro.distributions as dist
 
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import AverageMode, spectral_density
+from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
+from astrogwb.sampling.amplitude import (
+    AmplitudePrior,
+    amplitude_log_evidence,
+    amplitude_statistics,
+    best_fit_residual,
+    gaussian_log_norm,
+)
+
+
+def _predicted_spectral_density(
+    *,
+    frequencies: jax.Array,
+    polarization_power: jax.Array,
+    samples: Mapping[str, jax.Array],
+    observed_spectral_density: jax.Array,
+    effective_psd: jax.Array,
+    observation_time: float,
+    average_mode: AverageMode,
+    merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
+    priors: Mapping[str, dist.Distribution],
+    constants: Mapping[str, Any],
+    frequency_mask: jax.Array | None,
+    overrides: Mapping[str, Any] | None = None,
+) -> tuple[jax.Array, jax.Array, jax.Array, float | jax.Array, jax.Array]:
+    """Sample the priors and contract the catalog into a predicted spectrum.
+
+    The body shared by every model in this module: it registers one
+    ``numpyro.sample`` site per prior, invokes the catalog callback, and applies
+    ``frequency_mask``. Callers register whichever deterministics and likelihood
+    they need on top. ``overrides`` is merged last into ``params``, which is how
+    the amplitude-marginalized model pins its amplitude parameter to the
+    reference value.
+
+    Returns
+    -------
+    tuple[jax.Array, jax.Array, jax.Array, float | jax.Array, jax.Array]
+        ``(model_spectral_density, observed_spectral_density, scale,
+        total_merger_rate, log_weights)``. The first three are masked; the last
+        two are as returned by the callback.
+    """
+    sampled_params = {
+        name: numpyro.sample(name, prior) for name, prior in priors.items()
+    }
+    params = {**constants, **sampled_params, **(overrides or {})}
+
+    total_merger_rate, log_weights = merger_rate_and_log_weights_fn(
+        params,
+        samples,
+    )
+    model_spectral_density = spectral_density(
+        polarization_power,
+        jnp.exp(log_weights),
+        total_merger_rate,
+        average_mode=average_mode,
+    )
+
+    scale = gaussian_bin_scale(effective_psd, frequencies, observation_time)
+    if frequency_mask is not None:
+        model_spectral_density = model_spectral_density[frequency_mask]
+        observed_spectral_density = observed_spectral_density[frequency_mask]
+        scale = scale[frequency_mask]
+
+    return (
+        model_spectral_density,
+        observed_spectral_density,
+        scale,
+        total_merger_rate,
+        log_weights,
+    )
 
 
 def spectral_density_model(
@@ -38,6 +108,10 @@ def spectral_density_model(
     powers and importance weights ``exp(log_weights)``; waveform generation is
     not part of this model. ``constants`` are merged with sampled parameters
     before the callback is invoked.
+
+    This is the fully general model: every hyperparameter is sampled. See
+    :func:`amplitude_marginalized_model` for the variant that integrates a
+    multiplicative parameter out analytically.
 
     Registered sites:
 
@@ -84,38 +158,161 @@ def spectral_density_model(
         Optional boolean mask of shape ``(F,)``. When provided, only masked
         bins from the full-length arrays above enter the likelihood.
     """
-    priors = priors or {}
-    constants = constants or {}
-
-    sampled_params = {
-        name: numpyro.sample(name, prior) for name, prior in priors.items()
-    }
-    params = {**constants, **sampled_params}
-
-    total_merger_rate, log_weights = merger_rate_and_log_weights_fn(
-        params,
-        samples,
-    )
-    weights = jnp.exp(log_weights)
-    model_spectral_density = spectral_density(
-        polarization_power,
-        weights,
+    (
+        model_spectral_density,
+        observed_spectral_density,
+        scale,
         total_merger_rate,
+        log_weights,
+    ) = _predicted_spectral_density(
+        frequencies=frequencies,
+        polarization_power=polarization_power,
+        samples=samples,
+        observed_spectral_density=observed_spectral_density,
+        effective_psd=effective_psd,
+        observation_time=observation_time,
         average_mode=average_mode,
+        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+        priors=priors or {},
+        constants=constants or {},
+        frequency_mask=frequency_mask,
     )
 
-    relative_ess = jnp.sum(weights) ** 2 / (weights.shape[0] * jnp.sum(weights**2))
     numpyro.deterministic("total_merger_rate", total_merger_rate)
-    numpyro.deterministic("importance_relative_ess", relative_ess)
-
-    scale = gaussian_bin_scale(effective_psd, frequencies, observation_time)
-    if frequency_mask is not None:
-        model_spectral_density = model_spectral_density[frequency_mask]
-        observed_spectral_density = observed_spectral_density[frequency_mask]
-        scale = scale[frequency_mask]
+    numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))
 
     numpyro.sample(
         "spectral_density_obs",
         dist.Normal(model_spectral_density, scale).to_event(1),
         obs=observed_spectral_density,
     )
+
+
+def amplitude_marginalized_model(
+    *,
+    frequencies: jax.Array,
+    polarization_power: jax.Array,
+    samples: Mapping[str, jax.Array],
+    observed_spectral_density: jax.Array,
+    effective_psd: jax.Array,
+    observation_time: float,
+    average_mode: AverageMode,
+    merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
+    amplitude_parameter: str,
+    fiducials: Mapping[str, Any],
+    amplitude_prior: AmplitudePrior,
+    priors: Mapping[str, dist.Distribution] | None = None,
+    constants: Mapping[str, Any] | None = None,
+    frequency_mask: jax.Array | None = None,
+) -> None:
+    r"""SGWB model with a multiplicative amplitude marginalized analytically.
+
+    Identical to :func:`spectral_density_model` except that one strictly
+    multiplicative parameter is integrated out in closed form instead of being
+    sampled, which removes the long, curved amplitude--shape degeneracy that
+    NUTS handles worst. The marginalization is essentially free here: the
+    amplitude never touches the importance weights, and ``polarization_power``
+    is a fixed precomputed catalog.
+
+    The callback is invoked with ``amplitude_parameter`` pinned to
+    ``fiducials[amplitude_parameter]``, so the predicted spectrum it returns is
+    the *template* :math:`\mathbf{m}(\theta)` and the marginalized amplitude
+    :math:`A` is the dimensionless ratio to that reference. For a parameter the
+    spectrum is linear in -- ``local_merger_rate``, say -- the physical value is
+    recovered as :math:`A \times` ``fiducials[amplitude_parameter]``, and the
+    existing reference callback works unchanged. A parameter that enters
+    inversely, such as :math:`H_0` with :math:`S_h \propto H_0^{-1}`, needs a
+    callback that declares its own synthetic amplitude key, because the inverse
+    map cannot reuse a physical parameter name.
+
+    Registered sites:
+
+    - one ``numpyro.sample`` per entry in ``priors``;
+    - ``amplitude_ml``, ``template_optimal_snr``, and
+      ``importance_relative_ess`` as deterministics;
+    - ``amplitude_marginalized_log_likelihood`` as a ``numpyro.factor``.
+
+    ``total_merger_rate`` is deliberately *not* registered: at a pinned
+    amplitude it would be the rate at unit amplitude, a different quantity under
+    the same name. Use :func:`spectral_density_model` when it is needed.
+
+    The two amplitude statistics are what post-processing needs to reconstruct
+    joint :math:`(A, \theta)` samples via
+    :func:`astrogwb.sampling.amplitude.draw_amplitude` -- ``factor`` sites do
+    not appear in ArviZ's posterior group, so they must be carried explicitly.
+
+    Parameters
+    ----------
+    amplitude_parameter:
+        Name of the parameter to marginalize over. Must be understood by
+        ``merger_rate_and_log_weights_fn`` and must not appear in ``priors``.
+    fiducials:
+        Fiducial hyperparameters; ``fiducials[amplitude_parameter]`` is the
+        reference value that defines the template.
+    amplitude_prior:
+        Prior on the dimensionless amplitude :math:`A`, either a
+        ``dist.Normal`` or a ``dist.Uniform``. Required -- both physical
+        candidates are positive, so the caller must state a support. Treat it as
+        a *proposal* when the physical parameter is a nonlinear function of
+        :math:`A`, and apply the scientific prior by reweighting afterwards (see
+        :func:`astrogwb.importance.diagnostics.log_prior_reweighting`).
+
+    Other parameters are as in :func:`spectral_density_model`.
+
+    Raises
+    ------
+    ValueError
+        If ``amplitude_parameter`` also appears in ``priors``. Sampling and
+        marginalizing the same parameter is a silent double-counting with no
+        visible symptom.
+    """
+    priors = priors or {}
+    if amplitude_parameter in priors:
+        raise ValueError(
+            f"{amplitude_parameter!r} is marginalized analytically and cannot "
+            "also be sampled; remove it from priors"
+        )
+
+    (
+        model_spectral_density,
+        observed_spectral_density,
+        scale,
+        _,
+        log_weights,
+    ) = _predicted_spectral_density(
+        frequencies=frequencies,
+        polarization_power=polarization_power,
+        samples=samples,
+        observed_spectral_density=observed_spectral_density,
+        effective_psd=effective_psd,
+        observation_time=observation_time,
+        average_mode=average_mode,
+        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+        priors=priors,
+        constants=constants or {},
+        frequency_mask=frequency_mask,
+        overrides={amplitude_parameter: fiducials[amplitude_parameter]},
+    )
+
+    amplitude_ml, template_optimal_snr = amplitude_statistics(
+        model_spectral_density,
+        observed_spectral_density,
+        scale,
+    )
+    numpyro.deterministic("amplitude_ml", amplitude_ml)
+    numpyro.deterministic("template_optimal_snr", template_optimal_snr)
+    numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))
+
+    log_evidence = amplitude_log_evidence(
+        amplitude_ml,
+        template_optimal_snr,
+        prior=amplitude_prior,
+        residual=best_fit_residual(
+            model_spectral_density,
+            observed_spectral_density,
+            scale,
+            amplitude_ml=amplitude_ml,
+        ),
+        log_norm=gaussian_log_norm(scale),
+    )
+    numpyro.factor("amplitude_marginalized_log_likelihood", log_evidence)
