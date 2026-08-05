@@ -46,7 +46,7 @@ def omega_gw_from_spectral_density(
     *,
     hubble_constant_si: float = H0_SI,
 ) -> jax.Array:
-    coefficient = 10.0 * jnp.pi**2 / (3.0 * hubble_constant_si**2)
+    coefficient = 4.0 * jnp.pi**2 / (3.0 * hubble_constant_si**2)
     return coefficient * frequencies**3 * spectral_density
 
 
@@ -56,5 +56,5 @@ def spectral_density_from_omega_gw(
     *,
     hubble_constant_si: float = H0_SI,
 ) -> jax.Array:
-    coefficient = 3.0 * hubble_constant_si**2 / (10.0 * jnp.pi**2)
+    coefficient = 3.0 * hubble_constant_si**2 / (4.0 * jnp.pi**2)
     return coefficient * omega_gw / frequencies**3
