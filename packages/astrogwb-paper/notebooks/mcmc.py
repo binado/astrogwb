@@ -376,7 +376,7 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 z_grid = jnp.linspace(z_min, z_max, n_grid)
 
 _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-    fiducials, samples, z_grid=z_grid
+    fiducials, samples, redshift_grid=z_grid
 )
 
 
@@ -389,7 +389,7 @@ _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
 # %%
 merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
     fiducials=fiducials,
-    z_grid=z_grid,
+    redshift_grid=z_grid,
     proposal_logprob=proposal_logprob,
 )
 

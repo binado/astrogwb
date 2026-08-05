@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -58,7 +59,8 @@ def test_log_gw_em_ratio_increases_with_redshift() -> None:
 # flat_lcdm_grid
 # --------------------------------------------------------------------------- #
 def test_flat_lcdm_grid_shapes_and_finiteness() -> None:
-    d_l, dvc_dz = distance_and_volume_grid(FIDUCIALS, max_redshift=Z_MAX, n_grid=N_GRID)
+    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
+    d_l, dvc_dz = distance_and_volume_grid(FIDUCIALS, z_grid)
     d_l = np.asarray(d_l)
     dvc_dz = np.asarray(dvc_dz)
     assert d_l.shape == (N_GRID,)
@@ -70,15 +72,30 @@ def test_flat_lcdm_grid_shapes_and_finiteness() -> None:
     assert np.all(dvc_dz >= 0)
 
 
-def test_flat_lcdm_grid_accepts_jax_scalar_max_redshift() -> None:
-    # Documents the static-scalar contract: a concrete (non-traced) jnp scalar
-    # for max_redshift must not crash the build -- gwmock_pop accepts it.
-    d_l, _ = distance_and_volume_grid(
-        FIDUCIALS,
-        max_redshift=jnp.asarray(Z_MAX),  # ty: ignore[invalid-argument-type]
-        n_grid=N_GRID,
-    )
+def test_flat_lcdm_grid_evaluates_on_passed_grid() -> None:
+    # D4 regression: the function must evaluate on the caller's grid, so
+    # rate_shape_grid and dvc_dz_grid can never land on two different grids.
+    z_grid = jnp.array([0.0, 0.3, 1.0, 2.7, 8.0, Z_MAX])
+    d_l, dvc_dz = distance_and_volume_grid(FIDUCIALS, z_grid)
+    d_l = np.asarray(d_l)
+    dvc_dz = np.asarray(dvc_dz)
+    assert d_l.shape == z_grid.shape
+    assert dvc_dz.shape == z_grid.shape
+    assert np.all(np.isfinite(d_l))
+    assert np.all(np.isfinite(dvc_dz))
+    # Luminosity distance grows monotonically on an ascending grid.
+    assert np.all(np.diff(d_l) > 0)
+    assert np.all(d_l >= 0)
+    assert np.all(dvc_dz >= 0)
+
+
+def test_flat_lcdm_grid_is_jit_traceable() -> None:
+    # The function must run under jax.jit with traced params and a concrete
+    # grid: no static Python scalars (max_redshift / n_grid) are extracted.
+    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
+    d_l, dvc_dz = jax.jit(distance_and_volume_grid)(FIDUCIALS, z_grid)
     assert np.asarray(d_l).shape == (N_GRID,)
+    assert np.asarray(dvc_dz).shape == (N_GRID,)
 
 
 # --------------------------------------------------------------------------- #
@@ -90,12 +107,12 @@ def _build_synthetic_callback(n_samples: int = 16):
     samples = {"redshift": z_samples}
 
     _, luminosity_distance, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, samples, z_grid=z_grid
+        FIDUCIALS, samples, redshift_grid=z_grid
     )
     samples = {**samples, "luminosity_distance": luminosity_distance}
     fn = make_merger_rate_and_log_weights_fn(
         fiducials=FIDUCIALS,
-        z_grid=z_grid,
+        redshift_grid=z_grid,
         proposal_logprob=proposal_logprob,
     )
     return fn, samples
@@ -128,9 +145,7 @@ def test_fiducial_local_merger_rate_preserves_rate_calculation() -> None:
     total_rate, _ = fn(FIDUCIALS, samples)
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    _, dvc_dz_grid = distance_and_volume_grid(
-        FIDUCIALS, max_redshift=Z_MAX, n_grid=N_GRID
-    )
+    _, dvc_dz_grid = distance_and_volume_grid(FIDUCIALS, z_grid)
     rate_shape_grid = madau_dickinson_rate(
         z_grid,
         FIDUCIALS["gamma"],
