@@ -133,12 +133,12 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
 
     z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
     _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        config.fiducials, samples, z_grid=z_grid
+        config.fiducials, samples, redshift_grid=z_grid
     )
 
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=config.fiducials,
-        z_grid=z_grid,
+        redshift_grid=z_grid,
         proposal_logprob=proposal_logprob,
     )
 

@@ -107,12 +107,12 @@ def _build_synthetic_callback(n_samples: int = 16):
     samples = {"redshift": z_samples}
 
     _, luminosity_distance, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, samples, z_grid=z_grid
+        FIDUCIALS, samples, redshift_grid=z_grid
     )
     samples = {**samples, "luminosity_distance": luminosity_distance}
     fn = make_merger_rate_and_log_weights_fn(
         fiducials=FIDUCIALS,
-        z_grid=z_grid,
+        redshift_grid=z_grid,
         proposal_logprob=proposal_logprob,
     )
     return fn, samples

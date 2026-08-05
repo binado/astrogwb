@@ -11,7 +11,7 @@ It is a *reference implementation* -- the NumPyro model itself accepts any
 callback satisfying the protocol, so callers may substitute their own.
 
 Factory contract: :func:`make_merger_rate_and_log_weights_fn` takes a
-``z_grid`` array that is captured by the returned closure, so the closure
+``redshift_grid`` array that is captured by the returned closure, so the closure
 never needs to extract static Python scalars from traced values and is safe
 to trace inside ``jax.jit`` during NUTS.
 
@@ -41,11 +41,11 @@ def compute_merger_rate_distance_and_logprob(
     params: Mapping[str, Any],
     samples: Mapping[str, jax.Array],
     *,
-    z_grid: jax.Array,
+    redshift_grid: jax.Array,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     r"""Merger rate, luminosity distance, and redshift log-pdf at catalog samples.
 
-    Builds cosmology tables on ``z_grid`` via
+    Builds cosmology tables on ``redshift_grid`` via
     :func:`~astrogwb.cosmology.distance_and_volume_grid`, normalizes the
     Madau-Dickinson redshift weight by trapezoidal integration on that grid,
     and evaluates the redshift PDF
@@ -70,7 +70,7 @@ def compute_merger_rate_distance_and_logprob(
     samples:
         Catalog arrays; must include ``redshift`` with leading dimension
         ``N``.
-    z_grid:
+    redshift_grid:
         Redshift grid for the cosmology integrals and MD normalization.
         ``rate_shape_grid`` and ``dvc_dz_grid`` are evaluated on this exact
         grid, so the two can never fall out of alignment.
@@ -82,25 +82,27 @@ def compute_merger_rate_distance_and_logprob(
         mergers per second; ``luminosity_distance`` and ``logpdf`` have shape
         ``(N,)``.
     """
-    z = samples["redshift"]
+    redshift = samples["redshift"]
 
-    luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(params, z_grid)
-    rate_shape_grid = madau_dickinson_rate(
-        z_grid, params["gamma"], params["kappa"], params["z_peak"]
+    luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(
+        params, redshift_grid
     )
-    unnormalized_pdf_grid = rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid
-    integral_mpc3 = jnp.trapezoid(unnormalized_pdf_grid, z_grid)
+    rate_shape_grid = madau_dickinson_rate(
+        redshift_grid, params["gamma"], params["kappa"], params["z_peak"]
+    )
+    unnormalized_pdf_grid = rate_shape_grid / (1.0 + redshift_grid) * dvc_dz_grid
+    integral_mpc3 = jnp.trapezoid(unnormalized_pdf_grid, redshift_grid)
 
     unnormalized_pdf = jnp.interp(
-        z,
-        z_grid,
+        redshift,
+        redshift_grid,
         unnormalized_pdf_grid,
         left=0.0,
         right=0.0,
     )
     luminosity_distance = jnp.interp(
-        z,
-        z_grid,
+        redshift,
+        redshift_grid,
         luminosity_distance_grid,
         left=luminosity_distance_grid[0],
         right=luminosity_distance_grid[-1],
@@ -135,7 +137,7 @@ def log_weights(
 def make_merger_rate_and_log_weights_fn(
     *,
     fiducials: Mapping[str, Any],
-    z_grid: jax.Array,
+    redshift_grid: jax.Array,
     proposal_logprob: jax.Array,
 ) -> MergerRateAndLogWeightsFn:
     """Build the merger-rate + importance-log-weights callback.
@@ -149,7 +151,7 @@ def make_merger_rate_and_log_weights_fn(
     :func:`compute_merger_rate_distance_and_logprob` at the fiducials::
 
         _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-            fiducials, samples, z_grid=z_grid
+            fiducials, samples, redshift_grid=redshift_grid
         )
 
     Parameters
@@ -157,7 +159,7 @@ def make_merger_rate_and_log_weights_fn(
     fiducials:
         Fiducial hyperparameters used for the GW/EM ratio correction inside
         :func:`log_weights`. Must include ``xi_0`` and ``xi_n``.
-    z_grid:
+    redshift_grid:
         Redshift grid used for the cosmology integrals and MD normalization.
         Captured by the returned closure as a constant array.
     proposal_logprob:
@@ -182,7 +184,7 @@ def make_merger_rate_and_log_weights_fn(
             compute_merger_rate_distance_and_logprob(
                 params,
                 samples,
-                z_grid=z_grid,
+                redshift_grid=redshift_grid,
             )
         )
         logw = log_weights(
