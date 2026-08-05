@@ -117,13 +117,22 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     from numpyro.infer.initialization import init_to_value
     from pluscross import load_catalog
 
+    from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
     from astrogwb_paper.priors import build_prior
 
     analysis = config.analysis
     cosmo = config.cosmology
 
     # --- Load proposal catalog ------------------------------------------------
+    # Rescale the catalog to live-GW distances at the fiducial modified-
+    # propagation parameters before reducing to polarization power, so the
+    # importance weights below carry only the EM-distance ratio.
     catalog = load_catalog(catalog_path)
+    catalog = apply_gw_distance_at_fiducial(
+        catalog,
+        xi_0=float(config.fiducials["xi_0"]),
+        xi_n=float(config.fiducials["xi_n"]),
+    )
     frequencies = jnp.asarray(catalog.frequencies)
     polarization_power = jnp.asarray(compute_polarization_power(catalog))
     samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
