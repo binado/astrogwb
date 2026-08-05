@@ -15,14 +15,16 @@ closure; see
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, overload
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from gwmock_pop.cosmology.flat_lambda_cdm import (
     SPEED_OF_LIGHT,
     compute_normalized_hubble_parameter,
 )
+from numpy.typing import NDArray
 
 MPC_IN_METERS: float = 3.0856775814913673e22
 
@@ -35,11 +37,27 @@ def hubble_constant_si(h0_km_s_mpc: float) -> float:
 H0_SI: float = hubble_constant_si(67.74)
 
 
+@overload
+def log_gw_em_ratio(
+    z: NDArray[np.float64],
+    xi_0: float | jax.Array,
+    xi_n: float | jax.Array,
+) -> NDArray[np.float64]: ...
+
+
+@overload
 def log_gw_em_ratio(
     z: jax.Array,
     xi_0: float | jax.Array,
     xi_n: float | jax.Array,
-) -> jax.Array:
+) -> jax.Array: ...
+
+
+def log_gw_em_ratio(
+    z: jax.Array | NDArray[np.float64],
+    xi_0: float | jax.Array,
+    xi_n: float | jax.Array,
+) -> jax.Array | NDArray[np.float64]:
     """Log of the modified-propagation GW-to-EM luminosity-distance ratio.
 
     Models a departure from the standard ``d_GW = d_EM`` propagation as
@@ -50,16 +68,21 @@ def log_gw_em_ratio(
     Parameters
     ----------
     z:
-        Redshift array (JAX-traceable).
+        Redshift array. Accepts either a JAX array (JAX-traceable, for use
+        inside jitted models) or a NumPy array (returned as NumPy).
     xi_0, xi_n:
         Modified-propagation parameters.
 
     Returns
     -------
-    jax.Array
-        ``log(xi_0 + (1 - xi_0) * exp(-xi_n * log1p(z)))``, same shape as ``z``.
+    jax.Array or numpy.ndarray
+        ``log(xi_0 + (1 - xi_0) * exp(-xi_n * log1p(z)))``, same shape as ``z``
+        and matching the input array type.
     """
-    return jnp.log(xi_0 + (1.0 - xi_0) * jnp.exp(-xi_n * jnp.log1p(z)))
+    value = jnp.log(xi_0 + (1.0 - xi_0) * jnp.exp(-xi_n * jnp.log1p(z)))
+    if isinstance(z, np.ndarray):
+        return np.asarray(value)
+    return value
 
 
 def distance_and_volume_grid(
