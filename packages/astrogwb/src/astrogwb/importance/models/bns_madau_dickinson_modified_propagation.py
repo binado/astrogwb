@@ -10,10 +10,10 @@ capturing a modified-gravity propagation effect.
 It is a *reference implementation* -- the NumPyro model itself accepts any
 callback satisfying the protocol, so callers may substitute their own.
 
-Factory contract: :func:`make_merger_rate_and_log_weights_fn` must be called
-with a concrete ``z_grid`` (not a tracer); it extracts ``max_redshift`` /
-``n_grid`` eagerly so the returned closure is safe to trace inside ``jax.jit``
-during NUTS.
+Factory contract: :func:`make_merger_rate_and_log_weights_fn` takes a
+``z_grid`` array that is captured by the returned closure, so the closure
+never needs to extract static Python scalars from traced values and is safe
+to trace inside ``jax.jit`` during NUTS.
 
 The proposal and target share
 :func:`compute_merger_rate_distance_and_logprob`. Precompute
@@ -42,8 +42,6 @@ def compute_merger_rate_distance_and_logprob(
     samples: Mapping[str, jax.Array],
     *,
     z_grid: jax.Array,
-    max_redshift: float | None = None,
-    n_grid: int | None = None,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     r"""Merger rate, luminosity distance, and redshift log-pdf at catalog samples.
 
@@ -73,11 +71,9 @@ def compute_merger_rate_distance_and_logprob(
         Catalog arrays; must include ``redshift`` with leading dimension
         ``N``.
     z_grid:
-        Concrete redshift grid for cosmology integrals and MD normalization.
-    max_redshift, n_grid:
-        Optional static Python scalars for the cosmology lookup. When omitted
-        they are read from ``z_grid``. Callers under ``jax.jit`` should pass
-        them explicitly so ``float(z_grid[-1])`` is never applied to a tracer.
+        Redshift grid for the cosmology integrals and MD normalization.
+        ``rate_shape_grid`` and ``dvc_dz_grid`` are evaluated on this exact
+        grid, so the two can never fall out of alignment.
 
     Returns
     -------
@@ -87,14 +83,8 @@ def compute_merger_rate_distance_and_logprob(
         ``(N,)``.
     """
     z = samples["redshift"]
-    if max_redshift is None:
-        max_redshift = float(z_grid[-1])
-    if n_grid is None:
-        n_grid = int(z_grid.shape[0])
 
-    luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(
-        params, max_redshift, n_grid
-    )
+    luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(params, z_grid)
     rate_shape_grid = madau_dickinson_rate(
         z_grid, params["gamma"], params["kappa"], params["z_peak"]
     )
@@ -169,8 +159,7 @@ def make_merger_rate_and_log_weights_fn(
         :func:`log_weights`. Must include ``xi_0`` and ``xi_n``.
     z_grid:
         Redshift grid used for the cosmology integrals and MD normalization.
-        **Must be a concrete array** -- its extent and size are extracted
-        eagerly below so the closure never calls ``float()`` on a tracer.
+        Captured by the returned closure as a constant array.
     proposal_logprob:
         Precomputed redshift log-pdf at the fiducials for the catalog
         redshifts, shape ``(N,)``. Typically the third return value of
@@ -184,10 +173,6 @@ def make_merger_rate_and_log_weights_fn(
         shape ``(N,)``. ``samples`` must include ``redshift`` and
         ``luminosity_distance`` (fiducial EM distances from the catalog).
     """
-    # Extract the cosmology grid extent eagerly (z_grid is concrete here at
-    # factory-build time) so the jitted closure never calls float() on a tracer.
-    max_redshift = float(z_grid[-1])
-    n_grid = int(z_grid.shape[0])
 
     def merger_rate_and_log_weights_fn(
         params: Mapping[str, Any],
@@ -198,8 +183,6 @@ def make_merger_rate_and_log_weights_fn(
                 params,
                 samples,
                 z_grid=z_grid,
-                max_redshift=max_redshift,
-                n_grid=n_grid,
             )
         )
         logw = log_weights(

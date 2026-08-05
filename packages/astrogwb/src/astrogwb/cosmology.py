@@ -4,11 +4,11 @@ These functions are pure and JAX-traceable so they may run both at
 catalog-build time (concrete arrays) and inside the jitted NUTS model
 (traced arrays). They wrap ``gwmock_pop.cosmology.flat_lambda_cdm``.
 
-A load-bearing contract: :func:`flat_lcdm_grid` takes ``max_redshift`` and
-``n_grid`` as *static Python scalars*, never as tracers. Concretizing a tracer
-(e.g. ``float(z_grid[-1])``) would raise ``ConcretizationTypeError`` once the
-function runs under ``jax.jit`` inside the NUTS model. Callers must extract
-these scalars eagerly at factory-build time; see
+The grid-based helpers are traceable because they evaluate on the exact
+``z_grid`` array they are given: no static Python scalars (``max_redshift`` /
+``n_grid``) need to be extracted from traced values inside the jitted NUTS
+model. Callers build ``z_grid`` once at factory time and capture it in the
+closure; see
 :func:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation.make_merger_rate_and_log_weights_fn`.
 """
 
@@ -21,7 +21,6 @@ import jax
 import jax.numpy as jnp
 from gwmock_pop.cosmology.flat_lambda_cdm import (
     SPEED_OF_LIGHT,
-    build_distance_lookup,
     compute_normalized_hubble_parameter,
 )
 
@@ -65,45 +64,48 @@ def log_gw_em_ratio(
 
 def distance_and_volume_grid(
     params: Mapping[str, Any],
-    max_redshift: float,
-    n_grid: int,
+    z_grid: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     """Luminosity distance and differential comoving volume on a redshift grid.
 
-    Currently only supports flat LCDM cosmology.
+    Evaluates both quantities on the exact ``z_grid`` passed by the caller, so
+    arrays that are combined element-wise with the outputs (e.g.
+    ``rate_shape_grid`` and ``dvc_dz_grid``) are guaranteed to share the same
+    grid. Currently only supports flat LCDM cosmology.
+
+    The grid must be sorted ascending and start at ``0.0``; the comoving
+    distance is accumulated by trapezoidal integration along ``z_grid``
+    assuming ``d_c(0) = 0``.
 
     Parameters
     ----------
     params:
         Mapping with keys ``"H0"`` (dimensionless Hubble constant) and
         ``"Omega_m"`` (matter density). May contain tracers during NUTS.
-    max_redshift:
-        Upper edge of the redshift grid. **Must be a static Python float** --
-        not a tracer -- to avoid concretization errors under ``jax.jit``.
-    n_grid:
-        Number of grid points. **Must be a static Python int.**
+    z_grid:
+        Redshift grid on which both arrays are evaluated, shape ``(n_grid,)``.
+        JAX-traceable; no static Python scalars are required.
 
     Returns
     -------
     tuple[jax.Array, jax.Array]
         ``(luminosity_distance, differential_comoving_volume)`` on the grid,
-        each of shape ``(n_grid,)``. The differential comoving volume is in
-        ``Mpc^3 / sr`` (``SPEED_OF_LIGHT / 1000`` factor in the lookup).
+        each of shape ``(n_grid,)``. The differential comoving volume is the
+        full-sky value in ``Mpc^3`` (includes the ``4 pi`` factor and the
+        ``SPEED_OF_LIGHT / 1000`` factor).
     """
     h0 = params["H0"]
     omega_m = params["Omega_m"]
 
-    # ``max_redshift`` / ``n_grid`` are passed as static Python scalars, not read
-    # from a (possibly traced) ``z_grid`` -- ``float(tracer)`` would raise a
-    # ConcretizationTypeError once this runs inside the jitted NUTS model.
-    z, comoving_distance, luminosity_distance = build_distance_lookup(
-        hubble_constant=h0,
-        omega_m=omega_m,
-        max_redshift=max_redshift,
-        n_grid=n_grid,
+    inv_e = 1.0 / compute_normalized_hubble_parameter(redshift=z_grid, omega_m=omega_m)
+    delta_z = jnp.diff(z_grid)
+    trapezoids = 0.5 * (inv_e[1:] + inv_e[:-1]) * delta_z
+    integral = jnp.concatenate(
+        [jnp.zeros(1, dtype=trapezoids.dtype), jnp.cumsum(trapezoids)]
     )
-    e_z = compute_normalized_hubble_parameter(redshift=z, omega_m=omega_m)
+    comoving_distance = SPEED_OF_LIGHT / 1000 / h0 * integral
+    luminosity_distance = (1.0 + z_grid) * comoving_distance
     differential_comoving_volume = (
-        4.0 * jnp.pi * comoving_distance**2 / (h0 * e_z) * SPEED_OF_LIGHT / 1000
+        4.0 * jnp.pi * comoving_distance**2 * inv_e / h0 * SPEED_OF_LIGHT / 1000
     )
     return luminosity_distance, differential_comoving_volume
