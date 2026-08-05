@@ -64,17 +64,17 @@ def log_gw_em_ratio(
 
 def distance_and_volume_grid(
     params: Mapping[str, Any],
-    z_grid: jax.Array,
+    redshift: jax.Array,
 ) -> tuple[jax.Array, jax.Array]:
     """Luminosity distance and differential comoving volume on a redshift grid.
 
-    Evaluates both quantities on the exact ``z_grid`` passed by the caller, so
+    Evaluates both quantities on the exact ``redshift`` grid passed by the caller, so
     arrays that are combined element-wise with the outputs (e.g.
     ``rate_shape_grid`` and ``dvc_dz_grid``) are guaranteed to share the same
     grid. Currently only supports flat LCDM cosmology.
 
     The grid must be sorted ascending and start at ``0.0``; the comoving
-    distance is accumulated by trapezoidal integration along ``z_grid``
+    distance is accumulated by trapezoidal integration along ``redshift``
     assuming ``d_c(0) = 0``.
 
     Parameters
@@ -82,7 +82,7 @@ def distance_and_volume_grid(
     params:
         Mapping with keys ``"H0"`` (dimensionless Hubble constant) and
         ``"Omega_m"`` (matter density). May contain tracers during NUTS.
-    z_grid:
+    redshift:
         Redshift grid on which both arrays are evaluated, shape ``(n_grid,)``.
         JAX-traceable; no static Python scalars are required.
 
@@ -97,14 +97,16 @@ def distance_and_volume_grid(
     h0 = params["H0"]
     omega_m = params["Omega_m"]
 
-    inv_e = 1.0 / compute_normalized_hubble_parameter(redshift=z_grid, omega_m=omega_m)
-    delta_z = jnp.diff(z_grid)
+    inv_e = 1.0 / compute_normalized_hubble_parameter(
+        redshift=redshift, omega_m=omega_m
+    )
+    delta_z = jnp.diff(redshift)
     trapezoids = 0.5 * (inv_e[1:] + inv_e[:-1]) * delta_z
     integral = jnp.concatenate(
         [jnp.zeros(1, dtype=trapezoids.dtype), jnp.cumsum(trapezoids)]
     )
     comoving_distance = SPEED_OF_LIGHT / 1000 / h0 * integral
-    luminosity_distance = (1.0 + z_grid) * comoving_distance
+    luminosity_distance = (1.0 + redshift) * comoving_distance
     differential_comoving_volume = (
         4.0 * jnp.pi * comoving_distance**2 * inv_e / h0 * SPEED_OF_LIGHT / 1000
     )
