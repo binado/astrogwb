@@ -20,6 +20,7 @@ from typing import Any, overload
 import jax
 import jax.numpy as jnp
 import numpy as np
+from array_api_compat import array_namespace
 from gwmock_pop.cosmology.flat_lambda_cdm import (
     SPEED_OF_LIGHT,
     compute_normalized_hubble_parameter,
@@ -79,10 +80,8 @@ def log_gw_em_ratio(
         ``log(xi_0 + (1 - xi_0) * exp(-xi_n * log1p(z)))``, same shape as ``z``
         and matching the input array type.
     """
-    value = jnp.log(xi_0 + (1.0 - xi_0) * jnp.exp(-xi_n * jnp.log1p(z)))
-    if isinstance(z, np.ndarray):
-        return np.asarray(value)
-    return value
+    xp = array_namespace(z)
+    return xp.log(xi_0 + (1.0 - xi_0) * xp.exp(-xi_n * xp.log1p(z)))
 
 
 def distance_and_volume_grid(
