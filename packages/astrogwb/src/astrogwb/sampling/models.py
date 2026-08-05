@@ -13,12 +13,11 @@ from astrogwb.gwb import AverageMode, spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.sampling.amplitude import (
-    AmplitudePrior,
-    amplitude_log_evidence,
     amplitude_statistics,
     best_fit_residual,
     gaussian_log_norm,
 )
+from astrogwb.sampling.protocol import LogEvidenceFn
 
 
 def _predicted_spectral_density(
@@ -200,19 +199,46 @@ def amplitude_marginalized_model(
     merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     amplitude_parameter: str,
     fiducials: Mapping[str, Any],
-    amplitude_prior: AmplitudePrior,
+    log_evidence_fn: LogEvidenceFn,
     priors: Mapping[str, dist.Distribution] | None = None,
     constants: Mapping[str, Any] | None = None,
     frequency_mask: jax.Array | None = None,
 ) -> None:
-    r"""SGWB model with a multiplicative amplitude marginalized analytically.
+    r"""SGWB model with a multiplicative amplitude marginalized out of the likelihood.
 
     Identical to :func:`spectral_density_model` except that one strictly
-    multiplicative parameter is integrated out in closed form instead of being
-    sampled, which removes the long, curved amplitude--shape degeneracy that
-    NUTS handles worst. The marginalization is essentially free here: the
-    amplitude never touches the importance weights, and ``polarization_power``
-    is a fixed precomputed catalog.
+    multiplicative parameter is integrated out instead of being sampled, which
+    removes the long, curved amplitude--shape degeneracy that NUTS handles
+    worst. The marginalization is essentially free here: the amplitude never
+    touches the importance weights, and ``polarization_power`` is a fixed
+    precomputed catalog.
+
+    ``log_evidence_fn`` picks *how* the amplitude direction is marginalized,
+    and is where the two available routes differ:
+
+    - :func:`~astrogwb.sampling.amplitude.amplitude_log_evidence`
+      (bind ``prior`` via :func:`functools.partial`) marginalizes the
+      multiplicative amplitude :math:`A` itself in closed form. This requires
+      the prior to be stated on :math:`A`; when the physical parameter enters
+      inversely (:math:`H_0`, with :math:`A = H_{0,\mathrm{fid}}/H_0`), a prior
+      on :math:`A` is *not* the prior on :math:`H_0`, and the mismatch must be
+      corrected afterwards by reweighting (see the caveat below).
+    - :func:`~astrogwb.sampling.amplitude_quadrature.quadrature_log_evidence`
+      (bind ``quadrature`` via :func:`functools.partial`, built by
+      :func:`~astrogwb.sampling.amplitude_quadrature.make_amplitude_quadrature`)
+      marginalizes the physical parameter :math:`\varphi` numerically on a
+      fixed grid under its *actual* prior :math:`\pi(\varphi)`, for an
+      arbitrary scaling :math:`A = f(\varphi)`. No reparametrization, no
+      reweighting; what
+      :func:`~astrogwb.sampling.amplitude_quadrature.draw_marginalized_parameter`
+      returns in post-processing is :math:`\varphi` itself (e.g. :math:`H_0`),
+      not :math:`A`, and the reweighting caveat below does not apply. The only
+      error is quadrature error, so grid resolution should be checked with
+      :func:`~astrogwb.sampling.amplitude_quadrature.quadrature_effective_nodes`.
+
+    Both routes are drop-in interchangeable here because they share the same
+    sufficient statistics -- ``amplitude_ml`` and ``template_optimal_snr`` --
+    and the same ``LogEvidenceFn`` signature.
 
     The callback is invoked with ``amplitude_parameter`` pinned to
     ``fiducials[amplitude_parameter]``, so the predicted spectrum it returns is
@@ -237,9 +263,11 @@ def amplitude_marginalized_model(
     the same name. Use :func:`spectral_density_model` when it is needed.
 
     The two amplitude statistics are what post-processing needs to reconstruct
-    joint :math:`(A, \theta)` samples via
-    :func:`astrogwb.sampling.amplitude.draw_amplitude` -- ``factor`` sites do
-    not appear in ArviZ's posterior group, so they must be carried explicitly.
+    joint :math:`(A, \theta)` (or :math:`(\varphi, \theta)`) samples via
+    :func:`astrogwb.sampling.amplitude.draw_amplitude` or
+    :func:`astrogwb.sampling.amplitude_quadrature.draw_marginalized_parameter`
+    -- ``factor`` sites do not appear in ArviZ's posterior group, so they must
+    be carried explicitly.
 
     Parameters
     ----------
@@ -249,13 +277,10 @@ def amplitude_marginalized_model(
     fiducials:
         Fiducial hyperparameters; ``fiducials[amplitude_parameter]`` is the
         reference value that defines the template.
-    amplitude_prior:
-        Prior on the dimensionless amplitude :math:`A`, either a
-        ``dist.Normal`` or a ``dist.Uniform``. Required -- both physical
-        candidates are positive, so the caller must state a support. Treat it as
-        a *proposal* when the physical parameter is a nonlinear function of
-        :math:`A`, and apply the scientific prior by reweighting afterwards (see
-        :func:`astrogwb.importance.diagnostics.log_prior_reweighting`).
+    log_evidence_fn:
+        Callable that marginalizes the amplitude direction out of the Gaussian
+        likelihood given ``amplitude_ml`` and ``template_optimal_snr``; see
+        above for the two available routes.
 
     Other parameters are as in :func:`spectral_density_model`.
 
@@ -303,10 +328,9 @@ def amplitude_marginalized_model(
     numpyro.deterministic("template_optimal_snr", template_optimal_snr)
     numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))
 
-    log_evidence = amplitude_log_evidence(
+    log_evidence = log_evidence_fn(
         amplitude_ml,
         template_optimal_snr,
-        prior=amplitude_prior,
         residual=best_fit_residual(
             model_spectral_density,
             observed_spectral_density,

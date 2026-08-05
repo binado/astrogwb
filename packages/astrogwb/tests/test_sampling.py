@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import partial
 from typing import Any
 
 import jax
@@ -11,7 +12,10 @@ import pytest
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.sampling import (
     AmplitudePrior,
+    amplitude_log_evidence,
     amplitude_marginalized_model,
+    make_amplitude_quadrature,
+    quadrature_log_evidence,
     spectral_density_model,
 )
 from numpyro import handlers
@@ -131,12 +135,41 @@ _MARGINALIZED_KWARGS: dict[str, Any] = {
 }
 
 
+_UNIFORM_LOG_EVIDENCE_FN = partial(amplitude_log_evidence, prior=dist.Uniform(0.5, 1.5))
+
+
 def test_amplitude_marginalized_model_registers_expected_sites() -> None:
     trace = handlers.trace(
         handlers.seed(amplitude_marginalized_model, rng_seed=0)
     ).get_trace(
         **_MARGINALIZED_KWARGS,
-        amplitude_prior=dist.Uniform(0.5, 1.5),
+        log_evidence_fn=_UNIFORM_LOG_EVIDENCE_FN,
+        priors={"tilt": dist.Normal(0.0, 1.0)},
+    )
+
+    assert "amplitude_ml" in trace
+    assert "template_optimal_snr" in trace
+    assert "importance_relative_ess" in trace
+    factor_site = trace["amplitude_marginalized_log_likelihood"]
+    assert isinstance(factor_site["fn"], dist.Unit)
+    assert np.isfinite(float(factor_site["fn"].log_factor))
+    assert "spectral_density_obs" not in trace
+    assert "total_merger_rate" not in trace
+
+
+def test_amplitude_marginalized_model_quadrature_registers_expected_sites() -> None:
+    """The quadrature marginalizer is drop-in interchangeable with the analytic one."""
+    quadrature = make_amplitude_quadrature(
+        grid=jnp.linspace(0.1, 2.5, 2001),
+        log_prior=jnp.zeros(2001),
+        scaling=lambda marginalized_parameter: marginalized_parameter,
+    )
+
+    trace = handlers.trace(
+        handlers.seed(amplitude_marginalized_model, rng_seed=0)
+    ).get_trace(
+        **_MARGINALIZED_KWARGS,
+        log_evidence_fn=partial(quadrature_log_evidence, quadrature=quadrature),
         priors={"tilt": dist.Normal(0.0, 1.0)},
     )
 
@@ -162,7 +195,7 @@ def test_amplitude_marginalized_model_pins_the_amplitude_to_its_fiducial() -> No
             **_MARGINALIZED_KWARGS,
             "merger_rate_and_log_weights_fn": recording_callback,
         },
-        amplitude_prior=dist.Uniform(0.5, 1.5),
+        log_evidence_fn=_UNIFORM_LOG_EVIDENCE_FN,
         priors={"tilt": dist.Normal(0.0, 1.0)},
         constants={"local_merger_rate": 99.0},
     )
@@ -174,7 +207,7 @@ def test_amplitude_marginalized_model_rejects_a_sampled_amplitude() -> None:
     with pytest.raises(ValueError, match="cannot also be sampled"):
         handlers.seed(amplitude_marginalized_model, rng_seed=0)(
             **_MARGINALIZED_KWARGS,
-            amplitude_prior=dist.Uniform(0.5, 1.5),
+            log_evidence_fn=_UNIFORM_LOG_EVIDENCE_FN,
             priors={
                 "tilt": dist.Normal(0.0, 1.0),
                 "local_merger_rate": dist.Uniform(1.0, 3.0),
@@ -190,7 +223,7 @@ def test_amplitude_marginalized_model_honors_the_frequency_mask() -> None:
         handlers.seed(amplitude_marginalized_model, rng_seed=0)
     ).get_trace(
         **kwargs,
-        amplitude_prior=dist.Uniform(0.5, 1.5),
+        log_evidence_fn=_UNIFORM_LOG_EVIDENCE_FN,
         priors={},
         constants={"tilt": 0.3},
     )
@@ -201,7 +234,7 @@ def test_amplitude_marginalized_model_honors_the_frequency_mask() -> None:
             **kwargs,
             "observed_spectral_density": jnp.array([2.4, 999.0, 5.9, -999.0]),
         },
-        amplitude_prior=dist.Uniform(0.5, 1.5),
+        log_evidence_fn=_UNIFORM_LOG_EVIDENCE_FN,
         priors={},
         constants={"tilt": 0.3},
     )
@@ -269,7 +302,7 @@ def test_amplitude_marginalized_model_matches_the_general_model(
         (),
         {
             **_MARGINALIZED_KWARGS,
-            "amplitude_prior": amplitude_prior,
+            "log_evidence_fn": partial(amplitude_log_evidence, prior=amplitude_prior),
             "priors": {"tilt": dist.Normal(0.0, 1.0)},
         },
         {"tilt": jnp.asarray(tilt)},
