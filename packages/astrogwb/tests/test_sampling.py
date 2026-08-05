@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-from astrogwb.sampling import numpyro_model
+from astrogwb.sampling import spectral_density_model
 from numpyro import handlers
 
 
-def test_numpyro_model_smoke_trace() -> None:
+def test_spectral_density_model_smoke_trace() -> None:
     frequencies = jnp.array([10.0, 20.0, 30.0])
     polarization_power = jnp.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
     samples = {"mass_1": jnp.array([20.0, 30.0])}
@@ -16,7 +16,7 @@ def test_numpyro_model_smoke_trace() -> None:
 
     trace = handlers.trace(
         handlers.seed(
-            numpyro_model,
+            spectral_density_model,
             rng_seed=0,
         )
     ).get_trace(
@@ -34,7 +34,7 @@ def test_numpyro_model_smoke_trace() -> None:
     assert trace["spectral_density_obs"]["fn"].event_shape == (2,)
 
 
-def test_numpyro_model_uses_combined_merger_rate_and_log_weights_callback() -> None:
+def test_spectral_density_model_uses_combined_callback() -> None:
     frequencies = jnp.array([10.0, 20.0])
     polarization_power = jnp.array([[1.0, 2.0], [3.0, 4.0]])
     samples = {"sentinel": jnp.array([4.0, 6.0])}
@@ -47,7 +47,7 @@ def test_numpyro_model_uses_combined_merger_rate_and_log_weights_callback() -> N
 
     trace = handlers.trace(
         handlers.seed(
-            numpyro_model,
+            spectral_density_model,
             rng_seed=0,
         )
     ).get_trace(

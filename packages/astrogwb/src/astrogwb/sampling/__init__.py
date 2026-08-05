@@ -1,3 +1,3 @@
-from .numpyro_model import numpyro_model
+from .models import spectral_density_model
 
-__all__ = ["numpyro_model"]
+__all__ = ["spectral_density_model"]

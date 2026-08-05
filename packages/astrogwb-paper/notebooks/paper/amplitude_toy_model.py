@@ -62,7 +62,7 @@ import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
 
 from astrogwb_paper.config.hashing import file_sha256
-from astrogwb.sampling.numpyro_model import numpyro_model
+from astrogwb.sampling.models import spectral_density_model
 from astrogwb.gwb import (
     spectral_density,
     spectral_snr_squared,
@@ -276,7 +276,7 @@ observed_spectral_density = spectral_density(
 
 # %%
 model = partial(
-    numpyro_model,
+    spectral_density_model,
     observation_time=observation_time,
     average_mode="analytic_inclination",
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,

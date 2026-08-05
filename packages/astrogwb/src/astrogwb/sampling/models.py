@@ -13,7 +13,7 @@ from astrogwb.gwb import AverageMode, spectral_density
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 
 
-def numpyro_model(
+def spectral_density_model(
     *,
     frequencies: jax.Array,
     polarization_power: jax.Array,

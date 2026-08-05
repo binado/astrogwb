@@ -145,7 +145,7 @@ def make_merger_rate_and_log_weights_fn(
     The returned closure reweights a fixed proposal catalog (drawn at the
     fiducial parameter point) to arbitrary sampled hyperparameters. It is
     JAX-traceable and intended to be passed (pre-built) to
-    :func:`~astrogwb.sampling.numpyro_model.numpyro_model`.
+    :func:`~astrogwb.sampling.models.spectral_density_model`.
 
     Precompute ``proposal_logprob`` with
     :func:`compute_merger_rate_distance_and_logprob` at the fiducials::

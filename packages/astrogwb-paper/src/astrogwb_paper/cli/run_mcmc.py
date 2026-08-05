@@ -111,7 +111,7 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
         compute_merger_rate_distance_and_logprob,
         make_merger_rate_and_log_weights_fn,
     )
-    from astrogwb.sampling.numpyro_model import numpyro_model
+    from astrogwb.sampling.models import spectral_density_model
     from astrogwb.waveform import polarization_power as compute_polarization_power
     from numpyro.infer import MCMC, NUTS
     from numpyro.infer.initialization import init_to_value
@@ -206,7 +206,7 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     # --- Build the model and sampler -----------------------------------------
     priors = {name: build_prior(spec) for name, spec in config.priors.items()}
     model = partial(
-        numpyro_model,
+        spectral_density_model,
         observation_time=config.observation_time,
         average_mode="analytic_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,

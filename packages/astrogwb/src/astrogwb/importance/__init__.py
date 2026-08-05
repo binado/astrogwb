@@ -1,6 +1,6 @@
 """Importance-sampling reference models and cosmology helpers for the SGWB.
 
-The :mod:`astrogwb.sampling.numpyro_model` is callback-driven: it accepts any
+The :mod:`astrogwb.sampling.models` models are callback-driven: they accept any
 ``(params, samples) -> (total_merger_rate, log_weights)`` callable. This
 subpackage packages reference realizations of that callback together with the
 cosmology primitives they share.

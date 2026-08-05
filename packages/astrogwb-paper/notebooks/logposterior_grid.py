@@ -64,7 +64,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb.sampling.numpyro_model import numpyro_model
+from astrogwb.sampling.models import spectral_density_model
 from astrogwb_paper.paths import paper_project_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
 
@@ -280,12 +280,12 @@ plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1
 # %% [markdown]
 # ## Building the model
 #
-# We assemble the same `numpyro_model` used by the NUTS run. Rather than sampling
-# it, we evaluate its log joint density on a grid below.
+# We assemble the same `spectral_density_model` used by the NUTS run. Rather than
+# sampling it, we evaluate its log joint density on a grid below.
 
 # %%
 model = partial(
-    numpyro_model,
+    spectral_density_model,
     observation_time=observation_time,
     average_mode="analytic_inclination",
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,

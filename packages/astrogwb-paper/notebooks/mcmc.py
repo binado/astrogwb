@@ -163,7 +163,7 @@ from numpyro.infer import MCMC, NUTS
 
 import matplotlib.pyplot as plt
 
-from astrogwb.sampling.numpyro_model import numpyro_model
+from astrogwb.sampling.models import spectral_density_model
 from astrogwb.gwb import (
     spectral_density,
     omega_gw_from_spectral_density,
@@ -440,7 +440,7 @@ plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1
 
 # %%
 model = partial(
-    numpyro_model,
+    spectral_density_model,
     observation_time=observation_time,
     average_mode="analytic_inclination",
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,

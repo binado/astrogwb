@@ -1,7 +1,7 @@
 """Profile the production NumPyro model's log-density under ``jax.profiler.trace``.
 
 This runs the exact model used by ``astrogwb-run-mcmc`` (the
-``astrogwb.sampling.numpyro_model`` compared against a fiducial injection), but
+``astrogwb.sampling.models`` compared against a fiducial injection), but
 instead of sampling it isolates the model's potential-energy function and traces
 its forward pass + gradient in a hot loop. The result is a Perfetto trace that
 shows which XLA ops dominate the model math (the cosmology grid integrals,
@@ -99,7 +99,7 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
         compute_merger_rate_distance_and_logprob,
         make_merger_rate_and_log_weights_fn,
     )
-    from astrogwb.sampling.numpyro_model import numpyro_model
+    from astrogwb.sampling.models import spectral_density_model
     from astrogwb.waveform import polarization_power as compute_polarization_power
     from numpyro.infer.initialization import init_to_value
     from numpyro.infer.util import initialize_model
@@ -153,7 +153,7 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
 
     priors = {name: build_prior(spec) for name, spec in config.priors.items()}
     model = partial(
-        numpyro_model,
+        spectral_density_model,
         observation_time=config.observation_time,
         average_mode="analytic_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
