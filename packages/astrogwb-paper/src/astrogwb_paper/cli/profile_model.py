@@ -104,12 +104,16 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
         compute_merger_rate_distance_and_logprob,
         make_merger_rate_and_log_weights_fn,
     )
-    from astrogwb.sampling.models import spectral_density_model
+    from astrogwb.sampling.models import (
+        amplitude_marginalized_model,
+        spectral_density_model,
+    )
     from astrogwb.waveform import polarization_power as compute_polarization_power
     from numpyro.infer.initialization import init_to_value
     from numpyro.infer.util import initialize_model
     from pluscross import load_catalog
 
+    from astrogwb_paper.amplitude import build_amplitude_quadrature
     from astrogwb_paper.priors import build_prior
 
     analysis = config.analysis
@@ -170,14 +174,28 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     )
 
     priors = {name: build_prior(spec) for name, spec in config.priors.items()}
-    model = partial(
-        spectral_density_model,
-        observation_time=config.observation_time,
-        average_mode="analytic_inclination",
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-        priors=priors,
-        constants=config.constants,
-    )
+    if analysis.likelihood == "amplitude_marginalized":
+        assert analysis.amplitude_parameter is not None
+        model = partial(
+            amplitude_marginalized_model,
+            observation_time=config.observation_time,
+            average_mode="analytic_inclination",
+            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+            amplitude_parameter=analysis.amplitude_parameter,
+            fiducials=config.fiducials,
+            quadrature=build_amplitude_quadrature(config),
+            priors=priors,
+            constants=config.constants,
+        )
+    else:
+        model = partial(
+            spectral_density_model,
+            observation_time=config.observation_time,
+            average_mode="analytic_inclination",
+            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+            priors=priors,
+            constants=config.constants,
+        )
 
     model_kwargs = {
         "frequencies": frequencies,

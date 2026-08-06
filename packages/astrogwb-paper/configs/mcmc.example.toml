@@ -15,6 +15,22 @@ detectors = ["S1", "R1", "C1"]   # resolved via bundled geometry.toml / sensitiv
 f_min = 2.0                 # analysis band low edge [Hz]
 f_max = 4096.0                # analysis band high edge [Hz]
 
+# Default likelihood samples every entry in [priors] with NUTS. To instead
+# integrate one strictly multiplicative parameter out analytically (removes
+# the amplitude--shape degeneracy NUTS handles worst), switch to:
+#
+#   likelihood = "amplitude_marginalized"
+#   amplitude_parameter = "H0"          # or "local_merger_rate"
+#   amplitude_num_nodes = 4001          # quadrature grid resolution
+#   amplitude_prior_span_sigma = 10.0   # Normal-prior grid half-width, in sigma
+#
+# `amplitude_parameter` still needs a [priors.<name>] table and a
+# [fiducials] entry (below), but must NOT also appear in `sampled_params` --
+# it is marginalized, not sampled. The resulting chain carries no
+# `log_likelihood` group (so az.loo/az.waic do not apply), but gains the
+# physical parameter itself, `total_merger_rate`, and
+# `quadrature_effective_nodes`; see docs/running-inference.md.
+
 [cosmology]
 z_min = 0.0
 z_max = 20.0                 # must bracket all catalog redshifts (importance-weight requirement)

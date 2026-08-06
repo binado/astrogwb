@@ -33,11 +33,15 @@ import logging
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from astrogwb_paper.config.hashing import file_sha256
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import RunConfig, build_run_config, config_sha256
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
+
+if TYPE_CHECKING:
+    from astrogwb.sampling.amplitude import AmplitudeQuadrature
 
 logger = logging.getLogger("run_mcmc")
 
@@ -100,7 +104,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # Inference
 # --------------------------------------------------------------------------- #
 def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
-    """Replicate the notebook inference cells headlessly and return the MCMC object."""
+    """Replicate the notebook inference cells headlessly and return the MCMC object.
+
+    Returns ``(mcmc, quadrature)``, where ``quadrature`` is the
+    :class:`~astrogwb.sampling.amplitude.AmplitudeQuadrature` built for an
+    amplitude-marginalized run, or ``None`` for the default likelihood.
+    """
     from functools import partial
 
     import jax.numpy as jnp
@@ -116,12 +125,16 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
         compute_merger_rate_distance_and_logprob,
         make_merger_rate_and_log_weights_fn,
     )
-    from astrogwb.sampling.models import spectral_density_model
+    from astrogwb.sampling.models import (
+        amplitude_marginalized_model,
+        spectral_density_model,
+    )
     from astrogwb.waveform import polarization_power as compute_polarization_power
     from numpyro.infer import MCMC, NUTS
     from numpyro.infer.initialization import init_to_value
     from pluscross import load_catalog
 
+    from astrogwb_paper.amplitude import build_amplitude_quadrature
     from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
     from astrogwb_paper.priors import build_prior
 
@@ -223,14 +236,30 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
 
     # --- Build the model and sampler -----------------------------------------
     priors = {name: build_prior(spec) for name, spec in config.priors.items()}
-    model = partial(
-        spectral_density_model,
-        observation_time=config.observation_time,
-        average_mode="analytic_inclination",
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-        priors=priors,
-        constants=config.constants,
-    )
+    quadrature = None
+    if analysis.likelihood == "amplitude_marginalized":
+        assert analysis.amplitude_parameter is not None
+        quadrature = build_amplitude_quadrature(config)
+        model = partial(
+            amplitude_marginalized_model,
+            observation_time=config.observation_time,
+            average_mode="analytic_inclination",
+            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+            amplitude_parameter=analysis.amplitude_parameter,
+            fiducials=config.fiducials,
+            quadrature=quadrature,
+            priors=priors,
+            constants=config.constants,
+        )
+    else:
+        model = partial(
+            spectral_density_model,
+            observation_time=config.observation_time,
+            average_mode="analytic_inclination",
+            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+            priors=priors,
+            constants=config.constants,
+        )
 
     sampler = config.sampler
     init_strategy = init_to_value(
@@ -278,7 +307,7 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     # numpyro prints the summary to stdout; route it through logging for SLURM logs.
     logger.info("Sampling complete; summary follows")
     mcmc.print_summary()
-    return mcmc
+    return mcmc, quadrature
 
 
 def verify_catalog(path: Path) -> str:
@@ -345,13 +374,14 @@ def build_run_record(
     catalog_sha256: str | None,
 ) -> dict:
     """Assemble the JSON sidecar recording the run's inputs and provenance."""
-    return {
+    record: dict[str, Any] = {
         "catalog_path": str(catalog_path),
         "catalog_sha256": catalog_sha256,
         "config_sha256": config_sha256(config),
         "detectors": list(config.analysis.detectors),
         "seed": config.seed,
         "observation_time": config.observation_time,
+        "likelihood": config.analysis.likelihood,
         "sampled_params": list(config.sampled_params),
         "fiducials": config.fiducials,
         "constants": config.constants,
@@ -365,6 +395,14 @@ def build_run_record(
         "git_revision": _git_revision(),
         "timestamp": timestamp,
     }
+    if config.analysis.likelihood == "amplitude_marginalized":
+        record["amplitude_parameter"] = config.analysis.amplitude_parameter
+        record["amplitude_prior"] = config.amplitude_prior
+        record["amplitude_num_nodes"] = config.analysis.amplitude_num_nodes
+        record["amplitude_prior_span_sigma"] = (
+            config.analysis.amplitude_prior_span_sigma
+        )
+    return record
 
 
 def save(
@@ -375,9 +413,11 @@ def save(
     timestamp: str | None = None,
     force: bool = False,
     catalog_sha256: str | None = None,
+    quadrature: AmplitudeQuadrature | None = None,
 ) -> Path:
     """Write the ArviZ NetCDF + JSON run record, and log the IS health check."""
     import arviz as az
+    import numpy as np
 
     config.outdir.mkdir(parents=True, exist_ok=True)
     timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
@@ -386,6 +426,44 @@ def save(
     )
 
     idata = az.from_numpyro(mcmc)
+
+    if quadrature is not None:
+        import jax
+        from astrogwb.sampling.amplitude import merger_rate_amplitude_at
+
+        from astrogwb_paper.amplitude import draw_amplitude_posterior
+
+        amplitude_parameter = config.analysis.amplitude_parameter
+        assert amplitude_parameter is not None
+
+        rng_key = jax.random.fold_in(jax.random.PRNGKey(config.seed), 1)
+        phi, effective_nodes = draw_amplitude_posterior(
+            idata.posterior, quadrature=quadrature, rng_key=rng_key
+        )
+        template_merger_rate = idata.posterior["template_merger_rate"].to_numpy()
+        total_merger_rate = np.asarray(template_merger_rate) * np.asarray(
+            merger_rate_amplitude_at(phi, quadrature=quadrature)
+        )
+
+        idata.posterior[amplitude_parameter] = (("chain", "draw"), np.asarray(phi))
+        idata.posterior["total_merger_rate"] = (
+            ("chain", "draw"),
+            total_merger_rate,
+        )
+        idata.posterior["quadrature_effective_nodes"] = (
+            ("chain", "draw"),
+            np.asarray(effective_nodes),
+        )
+
+        min_effective_nodes = float(np.min(effective_nodes))
+        if min_effective_nodes < 30:
+            logger.warning(
+                "quadrature_effective_nodes min=%.1f is below 30; the amplitude "
+                "grid may not resolve the conditional posterior. Consider "
+                "raising analysis.amplitude_num_nodes.",
+                min_effective_nodes,
+            )
+
     idata.to_netcdf(nc_path)
 
     run_record = build_run_record(
@@ -450,7 +528,7 @@ def main(argv: list[str] | None = None) -> None:
         cpu_threads=args.cpu_threads,
         chain_method=args.chain_method,
     )
-    mcmc = run(config, catalog_path, jax, chain_method)
+    mcmc, quadrature = run(config, catalog_path, jax, chain_method)
     save(
         mcmc,
         config,
@@ -458,6 +536,7 @@ def main(argv: list[str] | None = None) -> None:
         timestamp=timestamp,
         force=args.force,
         catalog_sha256=catalog_sha256,
+        quadrature=quadrature,
     )
 
 
