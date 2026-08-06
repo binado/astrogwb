@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from astrogwb.gwb.snr import inner_product, spectral_snr, spectral_snr_squared
+from astrogwb.gwb.snr import (
+    noise_weighted_inner_product,
+    spectral_snr,
+    spectral_snr_squared,
+)
 from astrogwb.gwb.spectral import (
     AverageMode,
     frequency_mask,
@@ -12,7 +16,7 @@ from astrogwb.gwb.spectral import (
 __all__ = [
     "AverageMode",
     "frequency_mask",
-    "inner_product",
+    "noise_weighted_inner_product",
     "omega_gw_from_spectral_density",
     "spectral_density",
     "spectral_density_from_omega_gw",

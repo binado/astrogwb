@@ -83,29 +83,6 @@ class AmplitudeScalingFn(Protocol):
     def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
 
 
-def noise_weighted_inner_product(
-    x: jax.Array,
-    y: jax.Array,
-    scale: jax.Array,
-) -> jax.Array:
-    r"""Noise-weighted inner product :math:`(x|y) = \sum_i x_i y_i / \sigma_i^2`.
-
-    Parameters
-    ----------
-    x, y:
-        Arrays whose trailing axis runs over frequency bins.
-    scale:
-        Per-bin Gaussian noise scale :math:`\sigma_i`, same trailing axis.
-
-    Returns
-    -------
-    jax.Array
-        The contraction over the trailing axis; leading batch dimensions
-        broadcast.
-    """
-    return jnp.sum(x * y / scale**2, axis=-1)
-
-
 def amplitude_statistics(
     model_spectral_density: jax.Array,
     observed_spectral_density: jax.Array,
@@ -120,6 +97,11 @@ def amplitude_statistics(
     conditioned, directly interpretable (:math:`\sigma_A = 1/\rho`), and
     invertible by multiplication alone: :math:`(m|m) = \rho^2` and
     :math:`(d|m) = \hat{A}\rho^2`.
+
+    The contraction here is deliberately :math:`\sigma`-space,
+    :math:`\sum_i x_i y_i / \sigma_i^2`, and distinct from
+    :func:`astrogwb.gwb.noise_weighted_inner_product`: routing it through the
+    PSD-space function would make :math:`\rho^2` too small by :math:`2T`.
 
     Parameters
     ----------
@@ -136,11 +118,9 @@ def amplitude_statistics(
     tuple[jax.Array, jax.Array]
         ``(amplitude_ml, template_optimal_snr)``.
     """
-    template_norm = noise_weighted_inner_product(
-        model_spectral_density, model_spectral_density, scale
-    )
-    data_template = noise_weighted_inner_product(
-        observed_spectral_density, model_spectral_density, scale
+    template_norm = jnp.sum(model_spectral_density**2 / scale**2, axis=-1)
+    data_template = jnp.sum(
+        observed_spectral_density * model_spectral_density / scale**2, axis=-1
     )
     return data_template / template_norm, jnp.sqrt(template_norm)
 

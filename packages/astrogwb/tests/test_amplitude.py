@@ -20,7 +20,6 @@ from astrogwb.sampling.amplitude import (
     draw_marginalized_parameter,
     gaussian_log_norm,
     make_amplitude_quadrature,
-    noise_weighted_inner_product,
     quadrature_effective_nodes,
 )
 from jax.scipy.special import logsumexp
@@ -112,16 +111,6 @@ def test_amplitude_statistics_at_perfect_match() -> None:
         float(template_optimal_snr),
         np.sqrt(np.sum((TEMPLATE / SCALE) ** 2)),
         rtol=1e-5,
-    )
-
-
-def test_inner_product_matches_explicit_sum() -> None:
-    result = noise_weighted_inner_product(
-        jnp.asarray(DATA), jnp.asarray(TEMPLATE), jnp.asarray(SCALE)
-    )
-
-    np.testing.assert_allclose(
-        float(result), np.sum(DATA * TEMPLATE / SCALE**2), rtol=1e-5
     )
 
 
