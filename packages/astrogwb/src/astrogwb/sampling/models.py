@@ -9,7 +9,11 @@ import numpyro
 import numpyro.distributions as dist
 
 from astrogwb.detector import gaussian_bin_scale
-from astrogwb.gwb import AverageMode, spectral_density
+from astrogwb.gwb import (
+    AverageMode,
+    noise_weighted_inner_product,
+    spectral_density,
+)
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.sampling.amplitude import (
@@ -18,6 +22,7 @@ from astrogwb.sampling.amplitude import (
     gaussian_log_norm,
     log_trapezoid,
 )
+from astrogwb.utils import years_to_seconds
 
 
 def _predicted_spectral_density(
@@ -34,7 +39,14 @@ def _predicted_spectral_density(
     constants: Mapping[str, Any],
     frequency_mask: jax.Array | None,
     overrides: Mapping[str, Any] | None = None,
-) -> tuple[jax.Array, jax.Array, jax.Array, float | jax.Array, jax.Array]:
+) -> tuple[
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    jax.Array,
+    float | jax.Array,
+    jax.Array,
+]:
     """Sample the priors and contract the catalog into a predicted spectrum.
 
     The body shared by every model in this module: it registers one
@@ -48,8 +60,8 @@ def _predicted_spectral_density(
     -------
     tuple[jax.Array, jax.Array, jax.Array, float | jax.Array, jax.Array]
         ``(model_spectral_density, observed_spectral_density, scale,
-        total_merger_rate, log_weights)``. The first three are masked; the last
-        two are as returned by the callback.
+        effective_psd, total_merger_rate, log_weights)``. The first four are
+        masked; the last two are as returned by the callback.
     """
     sampled_params = {
         name: numpyro.sample(name, prior) for name, prior in priors.items()
@@ -72,11 +84,13 @@ def _predicted_spectral_density(
         model_spectral_density = model_spectral_density[frequency_mask]
         observed_spectral_density = observed_spectral_density[frequency_mask]
         scale = scale[frequency_mask]
+        effective_psd = effective_psd[frequency_mask]
 
     return (
         model_spectral_density,
         observed_spectral_density,
         scale,
+        effective_psd,
         total_merger_rate,
         log_weights,
     )
@@ -161,6 +175,7 @@ def spectral_density_model(
         model_spectral_density,
         observed_spectral_density,
         scale,
+        _,
         total_merger_rate,
         log_weights,
     ) = _predicted_spectral_density(
@@ -291,6 +306,7 @@ def amplitude_marginalized_model(
         model_spectral_density,
         observed_spectral_density,
         scale,
+        effective_psd,
         _,
         log_weights,
     ) = _predicted_spectral_density(
@@ -308,9 +324,23 @@ def amplitude_marginalized_model(
         overrides={amplitude_parameter: fiducials[amplitude_parameter]},
     )
 
-    template_norm = jnp.sum(model_spectral_density**2 / scale**2, axis=-1)
-    data_template = jnp.sum(
-        observed_spectral_density * model_spectral_density / scale**2, axis=-1
+    observation_time_sec = years_to_seconds(observation_time)
+    df = jnp.mean(jnp.diff(frequencies))
+    # scale = effective_psd / sqrt(2 T_sec df), so
+    # sum(x * y / scale**2) = 2 T_sec * (x|y).
+    template_norm = (
+        2.0
+        * observation_time_sec
+        * noise_weighted_inner_product(
+            model_spectral_density, model_spectral_density, effective_psd, df
+        )
+    )
+    data_template = (
+        2.0
+        * observation_time_sec
+        * noise_weighted_inner_product(
+            observed_spectral_density, model_spectral_density, effective_psd, df
+        )
     )
     amplitude_mle = data_template / template_norm
     template_optimal_snr = jnp.sqrt(template_norm)
