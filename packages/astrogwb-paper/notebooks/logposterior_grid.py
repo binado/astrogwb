@@ -53,7 +53,10 @@ from pluscross import load_catalog
 from scipy.ndimage import gaussian_filter
 
 from astrogwb.detector import effective_psd, load_sensitivity_map
-from astrogwb.frequency import frequency_mask as make_frequency_mask
+from astrogwb.frequency import (
+    apply_frequency_mask,
+    frequency_mask as make_frequency_mask,
+)
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
     spectral_density,
@@ -275,6 +278,19 @@ observed_spectral_density = spectral_density(
 )
 plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-15)
 
+(
+    frequencies,
+    polarization_power,
+    observed_spectral_density,
+    effective_psd_arr,
+) = apply_frequency_mask(
+    mask,
+    frequencies,
+    polarization_power,
+    observed_spectral_density,
+    effective_psd_arr,
+)
+
 # %% [markdown]
 # ## Building the model
 #
@@ -289,7 +305,6 @@ model = partial(
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     priors=priors,
     constants=constants,
-    frequency_mask=mask,
 )
 
 model_kwargs = {

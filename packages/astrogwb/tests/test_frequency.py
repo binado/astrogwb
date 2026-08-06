@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-from astrogwb.frequency import frequency_mask, noise_weighted_inner_product
+from astrogwb.frequency import (
+    apply_frequency_mask,
+    frequency_mask,
+    noise_weighted_inner_product,
+)
 
 
 def test_frequency_mask_bounds() -> None:
@@ -13,6 +17,32 @@ def test_frequency_mask_bounds() -> None:
     np.testing.assert_array_equal(
         np.asarray(mask), np.array([False, True, True, False])
     )
+
+
+def test_apply_frequency_mask_slices_multiple_1d_arrays() -> None:
+    mask = jnp.array([False, True, True, False])
+    freqs = jnp.array([5.0, 10.0, 20.0, 30.0])
+    spectrum = jnp.array([1.0, 2.0, 3.0, 4.0])
+
+    masked_freqs, masked_spectrum = apply_frequency_mask(mask, freqs, spectrum)
+
+    np.testing.assert_array_equal(np.asarray(masked_freqs), np.array([10.0, 20.0]))
+    np.testing.assert_array_equal(np.asarray(masked_spectrum), np.array([2.0, 3.0]))
+
+
+def test_apply_frequency_mask_honors_leading_frequency_axis() -> None:
+    mask = jnp.array([True, False, True])
+    power = jnp.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+
+    (masked_power,) = apply_frequency_mask(mask, power)
+
+    np.testing.assert_array_equal(
+        np.asarray(masked_power), np.array([[1.0, 2.0], [5.0, 6.0]])
+    )
+
+
+def test_apply_frequency_mask_returns_empty_tuple_without_arrays() -> None:
+    assert apply_frequency_mask(jnp.array([True, False])) == ()
 
 
 def test_noise_weighted_inner_product_matches_explicit_sum() -> None:

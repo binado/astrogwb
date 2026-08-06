@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 
 __all__ = [
+    "apply_frequency_mask",
     "frequency_mask",
     "noise_weighted_inner_product",
 ]
@@ -21,6 +22,19 @@ def frequency_mask(
     if fmax is not None:
         mask = mask & (frequencies <= fmax)
     return mask
+
+
+def apply_frequency_mask(
+    mask: jax.Array,
+    *arrays: jax.Array,
+    axis: int = 0,
+) -> tuple[jax.Array, ...]:
+    """Apply a boolean frequency mask along ``axis`` of every array.
+
+    Defaults to ``axis=0`` to match this package's ``(F, ...)`` layout
+    (e.g. polarization power of shape ``(F, N)``).
+    """
+    return tuple(jnp.compress(mask, array, axis=axis) for array in arrays)
 
 
 def noise_weighted_inner_product(

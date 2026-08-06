@@ -105,7 +105,12 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
 
     import jax.numpy as jnp
     from astrogwb.detector import effective_psd, load_sensitivity_map
-    from astrogwb.frequency import frequency_mask as make_frequency_mask
+    from astrogwb.frequency import (
+        apply_frequency_mask,
+    )
+    from astrogwb.frequency import (
+        frequency_mask as make_frequency_mask,
+    )
     from astrogwb.gwb import spectral_density
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
         compute_merger_rate_distance_and_logprob,
@@ -203,6 +208,19 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     )
     logger.info("Injected fiducial spectrum as observed data (rate0=%.4e /s)", rate0)
 
+    (
+        frequencies,
+        polarization_power,
+        observed_spectral_density,
+        effective_psd_arr,
+    ) = apply_frequency_mask(
+        freq_mask,
+        frequencies,
+        polarization_power,
+        observed_spectral_density,
+        effective_psd_arr,
+    )
+
     # --- Build the model and sampler -----------------------------------------
     priors = {name: build_prior(spec) for name, spec in config.priors.items()}
     model = partial(
@@ -212,7 +230,6 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
         priors=priors,
         constants=config.constants,
-        frequency_mask=freq_mask,
     )
 
     sampler = config.sampler

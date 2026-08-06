@@ -36,7 +36,6 @@ def _predicted_spectral_density(
     merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     priors: Mapping[str, dist.Distribution],
     constants: Mapping[str, Any],
-    frequency_mask: jax.Array | None,
     overrides: Mapping[str, Any] | None = None,
 ) -> tuple[
     jax.Array,
@@ -49,18 +48,20 @@ def _predicted_spectral_density(
     """Sample the priors and contract the catalog into a predicted spectrum.
 
     The body shared by every model in this module: it registers one
-    ``numpyro.sample`` site per prior, invokes the catalog callback, and applies
-    ``frequency_mask``. Callers register whichever deterministics and likelihood
-    they need on top. ``overrides`` is merged last into ``params``, which is how
-    the amplitude-marginalized model pins its amplitude parameter to the
-    reference value.
+    ``numpyro.sample`` site per prior and invokes the catalog callback.
+    Callers register whichever deterministics and likelihood they need on top.
+    ``overrides`` is merged last into ``params``, which is how the
+    amplitude-marginalized model pins its amplitude parameter to the reference
+    value.
+
+    All frequency-axis inputs must already share one analysis grid; band
+    selection is the caller's responsibility.
 
     Returns
     -------
-    tuple[jax.Array, jax.Array, jax.Array, float | jax.Array, jax.Array]
+    tuple[jax.Array, jax.Array, jax.Array, jax.Array, float | jax.Array, jax.Array]
         ``(model_spectral_density, observed_spectral_density, scale,
-        effective_psd, total_merger_rate, log_weights)``. The first four are
-        masked; the last two are as returned by the callback.
+        effective_psd, total_merger_rate, log_weights)``.
     """
     sampled_params = {
         name: numpyro.sample(name, prior) for name, prior in priors.items()
@@ -79,11 +80,6 @@ def _predicted_spectral_density(
     )
 
     scale = gaussian_bin_scale(effective_psd, frequencies, observation_time)
-    if frequency_mask is not None:
-        model_spectral_density = model_spectral_density[frequency_mask]
-        observed_spectral_density = observed_spectral_density[frequency_mask]
-        scale = scale[frequency_mask]
-        effective_psd = effective_psd[frequency_mask]
 
     return (
         model_spectral_density,
@@ -107,7 +103,6 @@ def spectral_density_model(
     merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     priors: Mapping[str, dist.Distribution] | None = None,
     constants: Mapping[str, Any] | None = None,
-    frequency_mask: jax.Array | None = None,
 ) -> None:
     """NumPyro model for importance-weighted SGWB inference.
 
@@ -134,21 +129,19 @@ def spectral_density_model(
     Parameters
     ----------
     frequencies:
-        Frequency grid in Hz, shape ``(F,)``.
+        Frequency grid in Hz, shape ``(F,)``. Must already be the analysis
+        band; callers apply any frequency mask before invoking the model.
     polarization_power:
         Per-source polarization power at each frequency, shape ``(F, N)`` where
-        ``N`` is the catalog size.
+        ``N`` is the catalog size. Must share ``frequencies``.
     samples:
         Catalog arrays passed to ``merger_rate_and_log_weights_fn``. Each value
         should have leading dimension ``N``.
     observed_spectral_density:
         Observed SGWB spectral density at ``frequencies``, shape ``(F,)``.
-        Must be the full frequency grid even when ``frequency_mask`` is set;
-        masking is applied inside the model.
     effective_psd:
         Network effective power spectral density at ``frequencies``, shape
-        ``(F,)``. Must match ``frequencies``; masked internally when
-        ``frequency_mask`` is set.
+        ``(F,)``.
     observation_time:
         Observation time in years, used only in the likelihood noise scale via
         :func:`astrogwb.detector.gaussian_bin_scale`.
@@ -166,9 +159,6 @@ def spectral_density_model(
     constants:
         Fixed parameter values merged into ``params`` for the callback. Defaults
         to an empty mapping.
-    frequency_mask:
-        Optional boolean mask of shape ``(F,)``. When provided, only masked
-        bins from the full-length arrays above enter the likelihood.
     """
     (
         model_spectral_density,
@@ -188,7 +178,6 @@ def spectral_density_model(
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
         priors=priors or {},
         constants=constants or {},
-        frequency_mask=frequency_mask,
     )
 
     numpyro.deterministic("total_merger_rate", total_merger_rate)
@@ -216,7 +205,6 @@ def amplitude_marginalized_model(
     quadrature: AmplitudeQuadrature,
     priors: Mapping[str, dist.Distribution] | None = None,
     constants: Mapping[str, Any] | None = None,
-    frequency_mask: jax.Array | None = None,
 ) -> None:
     r"""SGWB model with a multiplicative amplitude marginalized out of the likelihood.
 
@@ -319,7 +307,6 @@ def amplitude_marginalized_model(
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
         priors=priors,
         constants=constants or {},
-        frequency_mask=frequency_mask,
         overrides={amplitude_parameter: fiducials[amplitude_parameter]},
     )
 

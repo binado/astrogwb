@@ -22,8 +22,8 @@ type _AmplitudePrior = dist.Normal | dist.Uniform
 
 
 def test_spectral_density_model_smoke_trace() -> None:
-    frequencies = jnp.array([10.0, 20.0, 30.0])
-    polarization_power = jnp.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+    frequencies = jnp.array([10.0, 30.0])
+    polarization_power = jnp.array([[1.0, 2.0], [5.0, 6.0]])
     samples = {"mass_1": jnp.array([20.0, 30.0])}
 
     def merger_rate_and_log_weights_fn(params, samples):
@@ -38,12 +38,11 @@ def test_spectral_density_model_smoke_trace() -> None:
         frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
-        observed_spectral_density=jnp.array([16.0, 32.0, 48.0]),
-        effective_psd=jnp.ones(3),
+        observed_spectral_density=jnp.array([16.0, 48.0]),
+        effective_psd=jnp.ones(2),
         observation_time=2.0,
         average_mode="catalog_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-        frequency_mask=jnp.array([True, False, True]),
     )
 
     assert trace["spectral_density_obs"]["fn"].event_shape == (2,)
@@ -192,11 +191,17 @@ def test_amplitude_marginalized_model_rejects_a_sampled_amplitude() -> None:
         )
 
 
-def test_amplitude_marginalized_model_honors_the_frequency_mask() -> None:
-    mask = jnp.array([True, False, True, False])
-    kwargs = {**_MARGINALIZED_KWARGS, "frequency_mask": mask}
+def test_amplitude_marginalized_model_accepts_a_pre_sliced_frequency_grid() -> None:
+    frequencies = jnp.array([10.0, 30.0])
+    kwargs = {
+        **_MARGINALIZED_KWARGS,
+        "frequencies": frequencies,
+        "polarization_power": jnp.array([[1.0, 2.0], [2.0, 4.0]]),
+        "observed_spectral_density": jnp.array([2.4, 5.9]),
+        "effective_psd": EFFECTIVE_PSD[jnp.array([True, False, True, False])],
+    }
 
-    masked = handlers.trace(
+    trace = handlers.trace(
         handlers.seed(amplitude_marginalized_model, rng_seed=0)
     ).get_trace(
         **kwargs,
@@ -204,22 +209,9 @@ def test_amplitude_marginalized_model_honors_the_frequency_mask() -> None:
         priors={},
         constants={"tilt": 0.3},
     )
-    dropped = handlers.trace(
-        handlers.seed(amplitude_marginalized_model, rng_seed=0)
-    ).get_trace(
-        **{
-            **kwargs,
-            "observed_spectral_density": jnp.array([2.4, 999.0, 5.9, -999.0]),
-        },
-        quadrature=_QUADRATURE,
-        priors={},
-        constants={"tilt": 0.3},
-    )
 
-    for site in ("amplitude_mle", "template_optimal_snr"):
-        np.testing.assert_allclose(
-            float(masked[site]["value"]), float(dropped[site]["value"]), rtol=1e-6
-        )
+    assert np.isfinite(float(trace["amplitude_mle"]["value"]))
+    assert np.isfinite(float(trace["template_optimal_snr"]["value"]))
 
 
 def _quadrature_from_amplitude_prior(

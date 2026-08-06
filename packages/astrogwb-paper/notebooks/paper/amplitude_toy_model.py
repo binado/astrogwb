@@ -63,7 +63,10 @@ from numpyro.infer import MCMC, NUTS
 
 from astrogwb_paper.config.hashing import file_sha256
 from astrogwb.sampling.models import spectral_density_model
-from astrogwb.frequency import frequency_mask as make_frequency_mask
+from astrogwb.frequency import (
+    apply_frequency_mask,
+    frequency_mask as make_frequency_mask,
+)
 from astrogwb.gwb import (
     spectral_density,
     spectral_snr_squared,
@@ -269,6 +272,19 @@ observed_spectral_density = spectral_density(
     polarization_power, weights_fid, rate_fid, average_mode="analytic_inclination"
 )
 
+(
+    frequencies,
+    polarization_power,
+    observed_spectral_density,
+    effective_psd_arr,
+) = apply_frequency_mask(
+    mask,
+    frequencies,
+    polarization_power,
+    observed_spectral_density,
+    effective_psd_arr,
+)
+
 # %% [markdown]
 # ## Running the MCMC
 #
@@ -282,7 +298,6 @@ model = partial(
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     priors=priors,
     constants=constants,
-    frequency_mask=mask,
 )
 
 kernel = NUTS(

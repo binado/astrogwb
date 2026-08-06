@@ -93,7 +93,12 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     """
     import jax.numpy as jnp
     from astrogwb.detector import effective_psd, load_sensitivity_map
-    from astrogwb.frequency import frequency_mask as make_frequency_mask
+    from astrogwb.frequency import (
+        apply_frequency_mask,
+    )
+    from astrogwb.frequency import (
+        frequency_mask as make_frequency_mask,
+    )
     from astrogwb.gwb import spectral_density
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
         compute_merger_rate_distance_and_logprob,
@@ -151,6 +156,19 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
         average_mode="analytic_inclination",
     )
 
+    (
+        frequencies,
+        polarization_power,
+        observed_spectral_density,
+        effective_psd_arr,
+    ) = apply_frequency_mask(
+        freq_mask,
+        frequencies,
+        polarization_power,
+        observed_spectral_density,
+        effective_psd_arr,
+    )
+
     priors = {name: build_prior(spec) for name, spec in config.priors.items()}
     model = partial(
         spectral_density_model,
@@ -159,7 +177,6 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
         priors=priors,
         constants=config.constants,
-        frequency_mask=freq_mask,
     )
 
     model_kwargs = {
