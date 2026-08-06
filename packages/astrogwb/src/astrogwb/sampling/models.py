@@ -29,7 +29,6 @@ def _predicted_spectral_density(
     frequencies: jax.Array,
     polarization_power: jax.Array,
     samples: Mapping[str, jax.Array],
-    observed_spectral_density: jax.Array,
     effective_psd: jax.Array,
     observation_time: float,
     average_mode: AverageMode,
@@ -37,14 +36,7 @@ def _predicted_spectral_density(
     priors: Mapping[str, dist.Distribution],
     constants: Mapping[str, Any],
     overrides: Mapping[str, Any] | None = None,
-) -> tuple[
-    jax.Array,
-    jax.Array,
-    jax.Array,
-    jax.Array,
-    float | jax.Array,
-    jax.Array,
-]:
+) -> tuple[jax.Array, jax.Array, float | jax.Array, jax.Array]:
     """Sample the priors and contract the catalog into a predicted spectrum.
 
     The body shared by every model in this module: it registers one
@@ -59,9 +51,8 @@ def _predicted_spectral_density(
 
     Returns
     -------
-    tuple[jax.Array, jax.Array, jax.Array, jax.Array, float | jax.Array, jax.Array]
-        ``(model_spectral_density, observed_spectral_density, scale,
-        effective_psd, total_merger_rate, log_weights)``.
+    tuple[jax.Array, jax.Array, float | jax.Array, jax.Array]
+        ``(model_spectral_density, scale, total_merger_rate, log_weights)``.
     """
     sampled_params = {
         name: numpyro.sample(name, prior) for name, prior in priors.items()
@@ -81,14 +72,7 @@ def _predicted_spectral_density(
 
     scale = gaussian_bin_scale(effective_psd, frequencies, observation_time)
 
-    return (
-        model_spectral_density,
-        observed_spectral_density,
-        scale,
-        effective_psd,
-        total_merger_rate,
-        log_weights,
-    )
+    return model_spectral_density, scale, total_merger_rate, log_weights
 
 
 def spectral_density_model(
@@ -162,16 +146,13 @@ def spectral_density_model(
     """
     (
         model_spectral_density,
-        observed_spectral_density,
         scale,
-        _,
         total_merger_rate,
         log_weights,
     ) = _predicted_spectral_density(
         frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
-        observed_spectral_density=observed_spectral_density,
         effective_psd=effective_psd,
         observation_time=observation_time,
         average_mode=average_mode,
@@ -291,16 +272,13 @@ def amplitude_marginalized_model(
 
     (
         model_spectral_density,
-        observed_spectral_density,
         scale,
-        effective_psd,
         _,
         log_weights,
     ) = _predicted_spectral_density(
         frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
-        observed_spectral_density=observed_spectral_density,
         effective_psd=effective_psd,
         observation_time=observation_time,
         average_mode=average_mode,
