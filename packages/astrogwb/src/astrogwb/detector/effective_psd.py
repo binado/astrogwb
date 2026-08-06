@@ -16,6 +16,7 @@ import numpy as np
 from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
 
+from astrogwb.frequency import frequency_spacing
 from astrogwb.utils import years_to_seconds
 
 from ._types import DetectorSpec
@@ -77,6 +78,6 @@ def gaussian_bin_scale(
         ``df`` is inferred from ``frequencies`` in Hz.
     """
     if df is None:
-        df = jnp.mean(jnp.diff(frequencies))
+        df = frequency_spacing(frequencies)
     observation_time_sec = years_to_seconds(observation_time)
     return effective_psd / jnp.sqrt(2.0 * observation_time_sec * df)

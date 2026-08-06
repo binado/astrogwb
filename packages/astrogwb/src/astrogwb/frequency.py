@@ -6,8 +6,14 @@ import jax.numpy as jnp
 __all__ = [
     "apply_frequency_mask",
     "frequency_mask",
+    "frequency_spacing",
     "noise_weighted_inner_product",
 ]
+
+
+def frequency_spacing(frequencies: jax.Array) -> jax.Array:
+    """Mean consecutive spacing Δf from a frequency grid (Hz)."""
+    return jnp.mean(jnp.diff(frequencies))
 
 
 def frequency_mask(

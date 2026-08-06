@@ -9,7 +9,7 @@ import numpyro
 import numpyro.distributions as dist
 
 from astrogwb.detector import gaussian_bin_scale
-from astrogwb.frequency import noise_weighted_inner_product
+from astrogwb.frequency import frequency_spacing, noise_weighted_inner_product
 from astrogwb.gwb import (
     AverageMode,
     spectral_density,
@@ -290,7 +290,7 @@ def amplitude_marginalized_model(
     )
 
     observation_time_sec = years_to_seconds(observation_time)
-    df = jnp.mean(jnp.diff(frequencies))
+    df = frequency_spacing(frequencies)
     # scale = effective_psd / sqrt(2 T_sec df), so
     # sum(x * y / scale**2) = 2 T_sec * (x|y).
     template_norm = (

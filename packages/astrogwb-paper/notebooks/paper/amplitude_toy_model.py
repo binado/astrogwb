@@ -66,6 +66,7 @@ from astrogwb.sampling.models import spectral_density_model
 from astrogwb.frequency import (
     apply_frequency_mask,
     frequency_mask as make_frequency_mask,
+    frequency_spacing,
 )
 from astrogwb.gwb import (
     spectral_density,
@@ -400,7 +401,7 @@ azp.plot_autocorr(inference_data, var_names=list(sampled_params))
 # sanity check.
 
 # %%
-df = float(jnp.mean(jnp.diff(frequencies)))
+df = float(frequency_spacing(frequencies))
 T_sec = float(years_to_seconds(observation_time))
 snr_sq = spectral_snr_squared(
     observed_spectral_density[mask], effective_psd_arr[mask], T_sec, df

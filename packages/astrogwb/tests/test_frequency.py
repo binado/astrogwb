@@ -5,8 +5,21 @@ import numpy as np
 from astrogwb.frequency import (
     apply_frequency_mask,
     frequency_mask,
+    frequency_spacing,
     noise_weighted_inner_product,
 )
+
+
+def test_frequency_spacing_uniform_grid() -> None:
+    freqs = jnp.array([10.0, 20.0, 30.0])
+
+    np.testing.assert_allclose(np.asarray(frequency_spacing(freqs)), 10.0)
+
+
+def test_frequency_spacing_nonuniform_grid() -> None:
+    freqs = jnp.array([10.0, 20.0, 40.0])
+
+    np.testing.assert_allclose(np.asarray(frequency_spacing(freqs)), 15.0)
 
 
 def test_frequency_mask_bounds() -> None:
