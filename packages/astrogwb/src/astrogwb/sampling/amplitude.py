@@ -36,22 +36,21 @@ grid node :math:`\varphi_k`,
 .. math::
 
     \ln Z = \ln \mathcal{N}_d - R
-        + \operatorname{logsumexp}_k\!\left[\ell_k - \tfrac{1}{2}\bigl(\rho(f_k - \hat{A})\bigr)^2\right]
-        - \ln \Pi,
+        + \operatorname{logsumexp}_k\!\left[\ell_k - \tfrac{1}{2}\bigl(\rho(f_k - \hat{A})\bigr)^2\right],
 
 .. math::
 
-    \ell_k = \ln\pi(\varphi_k) + \ln w_k, \qquad
-    \ln \Pi = \operatorname{logsumexp}_k\, \ell_k,
+    \ell_k = \ln\pi(\varphi_k) + \ln w_k,
 
-where :math:`f_k = f(\varphi_k)`, :math:`\ln \mathcal{N}_d` is the Gaussian
-normalization, and :math:`\ln \Pi` normalizes the prior mass on the grid, so
-``log_prior`` may be passed unnormalized. Squaring :math:`\rho(f_k - \hat{A})`
-rather than forming :math:`\rho^2(f_k-\hat A)^2` avoids overflowing
-:math:`\rho^2` at very high SNR, and :math:`R` is computed from residuals
-directly rather than as :math:`\tfrac{1}{2}(d|d) - \tfrac{1}{2}\hat{A}^2\rho^2`
--- those two terms are each :math:`\sim \mathrm{SNR}^2/2` and nearly cancel at
-high SNR.
+where :math:`f_k = f(\varphi_k)` and :math:`\ln \mathcal{N}_d` is the Gaussian
+normalization. The caller must supply a prior density that is already
+normalized on the grid
+(:math:`\sum_k \pi(\varphi_k)\, w_k \approx 1`); this module does not
+renormalize. Squaring :math:`\rho(f_k - \hat{A})` rather than forming
+:math:`\rho^2(f_k-\hat A)^2` avoids overflowing :math:`\rho^2` at very high
+SNR, and :math:`R` is computed from residuals directly rather than as
+:math:`\tfrac{1}{2}(d|d) - \tfrac{1}{2}\hat{A}^2\rho^2` -- those two terms
+are each :math:`\sim \mathrm{SNR}^2/2` and nearly cancel at high SNR.
 
 "Exact up to quadrature error" only holds if the grid resolves the conditional
 posterior, whose width in :math:`\varphi` is :math:`\sigma_A/|f'(\varphi)|`.
@@ -70,7 +69,6 @@ from typing import NamedTuple, Protocol
 
 import jax
 import jax.numpy as jnp
-from jax.scipy.special import logsumexp
 
 from astrogwb.importance.diagnostics import relative_ess
 
@@ -112,11 +110,6 @@ class AmplitudeQuadrature(NamedTuple):
     log_measure: jax.Array
     """``(K,)`` :math:`\\ln\\pi(\\varphi_k) + \\ln w_k`, trapezoid-weighted log prior."""
 
-    log_prior_mass: jax.Array
-    """Scalar ``logsumexp(log_measure)``, the normalization for the prior mass
-    on the grid; :func:`~astrogwb.sampling.models.amplitude_marginalized_model`
-    subtracts it from the assembled log evidence."""
-
 
 def make_amplitude_quadrature(
     *,
@@ -137,8 +130,10 @@ def make_amplitude_quadrature(
         least 2.
     log_prior:
         :math:`\\ln\\pi(\\varphi_k)` at each grid node, same shape as ``grid``.
-        May be unnormalized; ``log_prior_mass`` reports the resulting offset
-        and the model normalizes it away.
+        Must already be normalized on the grid
+        (:math:`\\sum_k \\pi(\\varphi_k)\\, w_k \\approx 1`); typical source is
+        a NumPyro ``Distribution.log_prob`` evaluated on a grid that covers
+        the prior support. This factory does not renormalize.
     scaling:
         Maps the grid to the multiplicative amplitude, :math:`f(\\varphi_k)`.
 
@@ -163,12 +158,10 @@ def make_amplitude_quadrature(
         raise ValueError("grid must be strictly increasing")
 
     weights = 0.5 * jnp.concatenate([dx[:1], dx[1:] + dx[:-1], dx[-1:]])
-    log_measure = log_prior + jnp.log(weights)
     return AmplitudeQuadrature(
         grid=grid,
         amplitude=scaling(grid),
-        log_measure=log_measure,
-        log_prior_mass=logsumexp(log_measure),
+        log_measure=log_prior + jnp.log(weights),
     )
 
 

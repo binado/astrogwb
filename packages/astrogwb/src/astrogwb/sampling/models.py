@@ -336,6 +336,5 @@ def amplitude_marginalized_model(
         "amplitude_marginalized_log_likelihood",
         gaussian_log_norm(scale)
         - best_fit_residual
-        + logsumexp(log_integrand, axis=-1)
-        - quadrature.log_prior_mass,
+        + logsumexp(log_integrand, axis=-1),
     )

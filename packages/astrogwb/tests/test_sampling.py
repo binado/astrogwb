@@ -136,7 +136,7 @@ _MARGINALIZED_KWARGS: dict[str, Any] = {
 
 _QUADRATURE = make_amplitude_quadrature(
     grid=jnp.linspace(0.1, 2.5, 2001),
-    log_prior=jnp.zeros(2001),
+    log_prior=jnp.full(2001, -jnp.log(2.4)),
     scaling=lambda marginalized_parameter: marginalized_parameter,
 )
 
@@ -227,13 +227,13 @@ def _quadrature_from_amplitude_prior(
 ) -> AmplitudeQuadrature:
     """Build the physical-parameter grid an amplitude prior would induce.
 
-    Identity scaling, so the marginalized parameter is the amplitude itself;
-    ``log_prior`` may be left unnormalized since the model subtracts
-    ``quadrature.log_prior_mass``.
+    Identity scaling, so the marginalized parameter is the amplitude itself.
+    ``log_prior`` is a normalized density on the grid (caller's contract).
     """
     if isinstance(prior, dist.Uniform):
-        grid = jnp.linspace(float(prior.low), float(prior.high), num)
-        log_prior = jnp.zeros_like(grid)
+        low, high = float(prior.low), float(prior.high)
+        grid = jnp.linspace(low, high, num)
+        log_prior = jnp.full_like(grid, -jnp.log(high - low))
     else:
         loc, scale = float(prior.loc), float(prior.scale)
         grid = jnp.linspace(loc - 40.0 * scale, loc + 40.0 * scale, num)

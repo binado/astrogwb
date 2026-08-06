@@ -64,10 +64,7 @@ def _quadrature_log_evidence(
         amplitude_ml, template_optimal_snr, quadrature=quadrature
     )
     return float(
-        gaussian_log_norm(scale)
-        - residual
-        + logsumexp(log_integrand, axis=-1)
-        - quadrature.log_prior_mass
+        gaussian_log_norm(scale) - residual + logsumexp(log_integrand, axis=-1)
     )
 
 
@@ -133,33 +130,6 @@ def test_quadrature_matches_brute_force_integration_normal_prior() -> None:
     )
 
 
-def test_unnormalized_log_prior_gives_the_same_evidence() -> None:
-    low, high = 0.2, 3.0
-    grid = jnp.linspace(low, high, 4001)
-    normalized_log_prior = jnp.full_like(grid, -jnp.log(high - low))
-    offset = 4.7
-    unnormalized_log_prior = normalized_log_prior + offset
-
-    normalized = make_amplitude_quadrature(
-        grid=grid, log_prior=normalized_log_prior, scaling=_identity_scaling
-    )
-    unnormalized = make_amplitude_quadrature(
-        grid=grid, log_prior=unnormalized_log_prior, scaling=_identity_scaling
-    )
-
-    np.testing.assert_allclose(
-        float(unnormalized.log_prior_mass),
-        float(normalized.log_prior_mass) + offset,
-        rtol=1e-6,
-    )
-
-    np.testing.assert_allclose(
-        _quadrature_log_evidence(grid, normalized_log_prior),
-        _quadrature_log_evidence(grid, unnormalized_log_prior),
-        rtol=1e-6,
-    )
-
-
 # --------------------------------------------------------------------------- #
 # Nonlinear scaling: f(H0) = H0_fid / H0
 # --------------------------------------------------------------------------- #
@@ -204,7 +174,7 @@ def test_numerical_h0_marginalization_matches_brute_force_integration() -> None:
     h0_grid = jnp.linspace(h0_low, h0_high, 1001)
     quadrature = make_amplitude_quadrature(
         grid=h0_grid,
-        log_prior=jnp.zeros_like(h0_grid),
+        log_prior=jnp.full_like(h0_grid, -jnp.log(h0_high - h0_low)),
         scaling=lambda marginalized_parameter: h0_fid / marginalized_parameter,
     )
     h0_draws = draw_marginalized_parameter(
