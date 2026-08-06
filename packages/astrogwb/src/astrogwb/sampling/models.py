@@ -24,52 +24,6 @@ from astrogwb.sampling.amplitude import (
 from astrogwb.utils import years_to_seconds
 
 
-def _predicted_spectral_density(
-    *,
-    polarization_power: jax.Array,
-    samples: Mapping[str, jax.Array],
-    average_mode: AverageMode,
-    merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
-    priors: Mapping[str, dist.Distribution],
-    constants: Mapping[str, Any],
-    overrides: Mapping[str, Any] | None = None,
-) -> tuple[jax.Array, float | jax.Array, jax.Array]:
-    """Sample the priors and contract the catalog into a predicted spectrum.
-
-    The body shared by every model in this module: it registers one
-    ``numpyro.sample`` site per prior and invokes the catalog callback.
-    Callers register whichever deterministics and likelihood they need on top.
-    ``overrides`` is merged last into ``params``, which is how the
-    amplitude-marginalized model pins its amplitude parameter to the reference
-    value.
-
-    All frequency-axis inputs must already share one analysis grid; band
-    selection is the caller's responsibility.
-
-    Returns
-    -------
-    tuple[jax.Array, float | jax.Array, jax.Array]
-        ``(model_spectral_density, total_merger_rate, log_weights)``.
-    """
-    sampled_params = {
-        name: numpyro.sample(name, prior) for name, prior in priors.items()
-    }
-    params = {**constants, **sampled_params, **(overrides or {})}
-
-    total_merger_rate, log_weights = merger_rate_and_log_weights_fn(
-        params,
-        samples,
-    )
-    model_spectral_density = spectral_density(
-        polarization_power,
-        jnp.exp(log_weights),
-        total_merger_rate,
-        average_mode=average_mode,
-    )
-
-    return model_spectral_density, total_merger_rate, log_weights
-
-
 def spectral_density_model(
     *,
     frequencies: jax.Array,
@@ -139,17 +93,20 @@ def spectral_density_model(
         Fixed parameter values merged into ``params`` for the callback. Defaults
         to an empty mapping.
     """
-    (
-        model_spectral_density,
+    sampled_params = {
+        name: numpyro.sample(name, prior) for name, prior in (priors or {}).items()
+    }
+    params = {**(constants or {}), **sampled_params}
+
+    total_merger_rate, log_weights = merger_rate_and_log_weights_fn(
+        params,
+        samples,
+    )
+    model_spectral_density = spectral_density(
+        polarization_power,
+        jnp.exp(log_weights),
         total_merger_rate,
-        log_weights,
-    ) = _predicted_spectral_density(
-        polarization_power=polarization_power,
-        samples=samples,
         average_mode=average_mode,
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-        priors=priors or {},
-        constants=constants or {},
     )
 
     numpyro.deterministic("total_merger_rate", total_merger_rate)
@@ -263,18 +220,24 @@ def amplitude_marginalized_model(
             "also be sampled; remove it from priors"
         )
 
-    (
-        model_spectral_density,
+    sampled_params = {
+        name: numpyro.sample(name, prior) for name, prior in priors.items()
+    }
+    params = {
+        **(constants or {}),
+        **sampled_params,
+        amplitude_parameter: fiducials[amplitude_parameter],
+    }
+
+    total_merger_rate, log_weights = merger_rate_and_log_weights_fn(
+        params,
+        samples,
+    )
+    model_spectral_density = spectral_density(
+        polarization_power,
+        jnp.exp(log_weights),
         total_merger_rate,
-        log_weights,
-    ) = _predicted_spectral_density(
-        polarization_power=polarization_power,
-        samples=samples,
         average_mode=average_mode,
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-        priors=priors,
-        constants=constants or {},
-        overrides={amplitude_parameter: fiducials[amplitude_parameter]},
     )
 
     observation_time_sec = years_to_seconds(observation_time)
