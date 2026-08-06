@@ -4,6 +4,7 @@ from .amplitude import (
     amplitude_log_integrand,
     draw_marginalized_parameter,
     gaussian_log_norm,
+    log_trapezoid,
     make_amplitude_quadrature,
     quadrature_effective_nodes,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "amplitude_marginalized_model",
     "draw_marginalized_parameter",
     "gaussian_log_norm",
+    "log_trapezoid",
     "make_amplitude_quadrature",
     "quadrature_effective_nodes",
     "spectral_density_model",

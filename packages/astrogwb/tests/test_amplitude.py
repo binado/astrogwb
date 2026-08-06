@@ -17,10 +17,10 @@ from astrogwb.sampling.amplitude import (
     amplitude_log_integrand,
     draw_marginalized_parameter,
     gaussian_log_norm,
+    log_trapezoid,
     make_amplitude_quadrature,
     quadrature_effective_nodes,
 )
-from jax.scipy.special import logsumexp
 
 type _AmplitudePrior = dist.Normal | dist.Uniform
 
@@ -64,7 +64,9 @@ def _quadrature_log_evidence(
         amplitude_ml, template_optimal_snr, quadrature=quadrature
     )
     return float(
-        gaussian_log_norm(scale) - residual + logsumexp(log_integrand, axis=-1)
+        gaussian_log_norm(scale)
+        - residual
+        + log_trapezoid(log_integrand, quadrature.grid)
     )
 
 

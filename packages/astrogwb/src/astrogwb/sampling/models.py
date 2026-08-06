@@ -7,7 +7,6 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from jax.scipy.special import logsumexp
 
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import AverageMode, spectral_density
@@ -17,6 +16,7 @@ from astrogwb.sampling.amplitude import (
     AmplitudeQuadrature,
     amplitude_log_integrand,
     gaussian_log_norm,
+    log_trapezoid,
 )
 
 
@@ -336,5 +336,5 @@ def amplitude_marginalized_model(
         "amplitude_marginalized_log_likelihood",
         gaussian_log_norm(scale)
         - best_fit_residual
-        + logsumexp(log_integrand, axis=-1),
+        + log_trapezoid(log_integrand, quadrature.grid),
     )

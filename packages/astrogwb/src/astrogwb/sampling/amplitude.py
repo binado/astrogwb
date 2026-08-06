@@ -28,26 +28,28 @@ completing the square in :math:`A` gives
 with :math:`R = \tfrac{1}{2}\sum_i((d_i - \hat{A}m_i)/\sigma_i)^2` the
 best-fit residual. This module marginalizes :math:`\varphi` numerically on a
 fixed 1D grid under the caller's actual prior :math:`\pi(\varphi)`, rather
-than requiring the prior to be stated on :math:`A` itself. Folding the
-trapezoid weights into a precomputed log-measure turns the integral over the
-grid into a single ``logsumexp``. With :math:`w_k` the trapezoid weights at
-grid node :math:`\varphi_k`,
+than requiring the prior to be stated on :math:`A` itself. The log-integrand
+on the grid is
+
+.. math::
+
+    \ell(\varphi) = \ln\pi(\varphi) - \tfrac{1}{2}\bigl(\rho\bigl(f(\varphi) - \hat{A}\bigr)\bigr)^2,
+
+and the amplitude direction is integrated with the trapezoid rule after a
+stable max-shift:
 
 .. math::
 
     \ln Z = \ln \mathcal{N}_d - R
-        + \operatorname{logsumexp}_k\!\left[\ell_k - \tfrac{1}{2}\bigl(\rho(f_k - \hat{A})\bigr)^2\right],
+        + \ell_{\max}
+        + \ln\!\int \exp\bigl(\ell(\varphi) - \ell_{\max}\bigr)\, d\varphi,
 
-.. math::
-
-    \ell_k = \ln\pi(\varphi_k) + \ln w_k,
-
-where :math:`f_k = f(\varphi_k)` and :math:`\ln \mathcal{N}_d` is the Gaussian
-normalization. The caller must supply a prior density that is already
-normalized on the grid
-(:math:`\sum_k \pi(\varphi_k)\, w_k \approx 1`); this module does not
-renormalize. Squaring :math:`\rho(f_k - \hat{A})` rather than forming
-:math:`\rho^2(f_k-\hat A)^2` avoids overflowing :math:`\rho^2` at very high
+where :math:`\ln \mathcal{N}_d` is the Gaussian normalization. The caller must
+supply a prior density that is already normalized on the grid
+(:math:`\int \pi(\varphi)\, d\varphi \approx 1` under the same trapezoid
+rule); this module does not renormalize. Squaring
+:math:`\rho(f(\varphi) - \hat{A})` rather than forming
+:math:`\rho^2(f-\hat A)^2` avoids overflowing :math:`\rho^2` at very high
 SNR, and :math:`R` is computed from residuals directly rather than as
 :math:`\tfrac{1}{2}(d|d) - \tfrac{1}{2}\hat{A}^2\rho^2` -- those two terms
 are each :math:`\sim \mathrm{SNR}^2/2` and nearly cancel at high SNR.
@@ -93,7 +95,7 @@ def gaussian_log_norm(scale: jax.Array) -> jax.Array:
 
 
 class AmplitudeQuadrature(NamedTuple):
-    """Precomputed grid, scaling, and prior measure for numerical marginalization.
+    """Precomputed grid, scaling, and prior for numerical marginalization.
 
     Built once by :func:`make_amplitude_quadrature` and then reused every MCMC
     step; a plain ``NamedTuple`` keeps it a JAX pytree without needing to be
@@ -107,8 +109,8 @@ class AmplitudeQuadrature(NamedTuple):
     amplitude: jax.Array
     """``(K,)`` :math:`f(\\varphi_k)`, the multiplicative factor at each node."""
 
-    log_measure: jax.Array
-    """``(K,)`` :math:`\\ln\\pi(\\varphi_k) + \\ln w_k`, trapezoid-weighted log prior."""
+    log_prior: jax.Array
+    """``(K,)`` :math:`\\ln\\pi(\\varphi_k)`, the caller's prior density on the grid."""
 
 
 def make_amplitude_quadrature(
@@ -131,9 +133,10 @@ def make_amplitude_quadrature(
     log_prior:
         :math:`\\ln\\pi(\\varphi_k)` at each grid node, same shape as ``grid``.
         Must already be normalized on the grid
-        (:math:`\\sum_k \\pi(\\varphi_k)\\, w_k \\approx 1`); typical source is
-        a NumPyro ``Distribution.log_prob`` evaluated on a grid that covers
-        the prior support. This factory does not renormalize.
+        (:math:`\\int \\pi(\\varphi)\\, d\\varphi \\approx 1` under the
+        trapezoid rule); typical source is a NumPyro
+        ``Distribution.log_prob`` evaluated on a grid that covers the prior
+        support. This factory does not renormalize.
     scaling:
         Maps the grid to the multiplicative amplitude, :math:`f(\\varphi_k)`.
 
@@ -153,15 +156,13 @@ def make_amplitude_quadrature(
         raise ValueError(
             f"log_prior shape {log_prior.shape} must match grid shape {grid.shape}"
         )
-    dx = jnp.diff(grid)
-    if not bool(jnp.all(dx > 0)):
+    if not bool(jnp.all(jnp.diff(grid) > 0)):
         raise ValueError("grid must be strictly increasing")
 
-    weights = 0.5 * jnp.concatenate([dx[:1], dx[1:] + dx[:-1], dx[-1:]])
     return AmplitudeQuadrature(
         grid=grid,
         amplitude=scaling(grid),
-        log_measure=log_prior + jnp.log(weights),
+        log_prior=log_prior,
     )
 
 
@@ -171,8 +172,11 @@ def amplitude_log_integrand(
     *,
     quadrature: AmplitudeQuadrature,
 ) -> jax.Array:
-    """Shared ``(..., K)`` log-integrand behind the model factor and the two
+    r"""Shared ``(..., K)`` log-integrand behind the model factor and the two
     functions below.
+
+    Returns :math:`\ln\pi(\varphi_k) - \tfrac12[\rho(f_k - \hat A)]^2` -- the
+    continuous density on the grid, before trapezoid integration.
 
     Routing :func:`~astrogwb.sampling.models.amplitude_marginalized_model`,
     :func:`draw_marginalized_parameter`, and :func:`quadrature_effective_nodes`
@@ -184,7 +188,26 @@ def amplitude_log_integrand(
     scaled_residual = jnp.expand_dims(template_optimal_snr, -1) * (
         quadrature.amplitude - jnp.expand_dims(amplitude_ml, -1)
     )
-    return quadrature.log_measure - 0.5 * scaled_residual**2
+    return quadrature.log_prior - 0.5 * scaled_residual**2
+
+
+def log_trapezoid(log_y: jax.Array, x: jax.Array) -> jax.Array:
+    r"""Stable :math:`\ln\int \exp(\log y)\, dx` via a shifted trapezoid rule.
+
+    Broadcasts over leading dimensions of ``log_y`` and integrates along the
+    trailing axis against the 1D abscissa ``x``.
+    """
+    log_y_max = jnp.max(log_y, axis=-1, keepdims=True)
+    integral = jnp.trapezoid(jnp.exp(log_y - log_y_max), x, axis=-1)
+    return jnp.squeeze(log_y_max, axis=-1) + jnp.log(integral)
+
+
+def _cumulative_trapezoid(y: jax.Array, x: jax.Array) -> jax.Array:
+    """Cumulative trapezoid integral of ``y`` vs ``x``, starting at 0."""
+    dx = jnp.diff(x)
+    segments = 0.5 * (y[..., :-1] + y[..., 1:]) * dx
+    zeros = jnp.zeros(y.shape[:-1] + (1,), dtype=y.dtype)
+    return jnp.concatenate([zeros, jnp.cumsum(segments, axis=-1)], axis=-1)
 
 
 def draw_marginalized_parameter(
@@ -196,12 +219,9 @@ def draw_marginalized_parameter(
 ) -> jax.Array:
     r"""Draw one value of :math:`\varphi` per posterior sample of :math:`\theta`.
 
-    Inverse-transform sampling on the grid: the CDF is the cumulative sum of
-    the same ``log_measure``-weighted nodes that
-    :func:`amplitude_log_integrand` integrates, *not* a separately-computed
-    cumulative trapezoid, so it terminates at exactly the :math:`Z` that was
-    marginalized and the draws follow precisely that density rather than an
-    :math:`O(\Delta^2)`-nearby one.
+    Inverse-transform sampling on the grid: the CDF is the cumulative trapezoid
+    of the same integrand that :func:`log_trapezoid` integrates in the model
+    factor, so the draws follow precisely the density that was marginalized.
 
     Leading ``(chain, draw)`` dimensions of the statistics are preserved and
     the function is fully broadcast (no ``vmap``), so it is shape-preserving
@@ -232,7 +252,7 @@ def draw_marginalized_parameter(
         amplitude_ml, template_optimal_snr, quadrature=quadrature
     )
     shifted = jnp.exp(log_integrand - jnp.max(log_integrand, axis=-1, keepdims=True))
-    cdf = jnp.cumsum(shifted, axis=-1)
+    cdf = _cumulative_trapezoid(shifted, quadrature.grid)
     cdf = cdf / cdf[..., -1:]
 
     grid = quadrature.grid
