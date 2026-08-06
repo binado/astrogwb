@@ -15,7 +15,6 @@ import numpyro.distributions as dist
 import pytest
 from astrogwb.sampling.amplitude import (
     amplitude_log_integrand,
-    amplitude_statistics,
     best_fit_residual,
     draw_marginalized_parameter,
     gaussian_log_norm,
@@ -38,9 +37,12 @@ def _identity_scaling(marginalized_parameter: jax.Array) -> jax.Array:
 
 
 def _statistics() -> tuple[jax.Array, jax.Array]:
-    return amplitude_statistics(
-        jnp.asarray(TEMPLATE), jnp.asarray(DATA), jnp.asarray(SCALE)
-    )
+    """The two amplitude sufficient statistics, as ``amplitude_marginalized_model`` computes them."""
+    template = jnp.asarray(TEMPLATE)
+    scale = jnp.asarray(SCALE)
+    template_norm = jnp.sum(template**2 / scale**2, axis=-1)
+    data_template = jnp.sum(jnp.asarray(DATA) * template / scale**2, axis=-1)
+    return data_template / template_norm, jnp.sqrt(template_norm)
 
 
 def _quadrature_log_evidence(
@@ -98,20 +100,6 @@ def _numerical_log_evidence(prior: _AmplitudePrior, num: int = 200_001) -> float
     amplitudes = np.linspace(low, high, num)
     joint = np.exp(_log_joint(amplitudes, prior))
     return float(np.log(np.trapezoid(joint, amplitudes)))
-
-
-def test_amplitude_statistics_at_perfect_match() -> None:
-    template = jnp.asarray(TEMPLATE)
-    scale = jnp.asarray(SCALE)
-
-    amplitude_ml, template_optimal_snr = amplitude_statistics(template, template, scale)
-
-    assert float(amplitude_ml) == 1.0
-    np.testing.assert_allclose(
-        float(template_optimal_snr),
-        np.sqrt(np.sum((TEMPLATE / SCALE) ** 2)),
-        rtol=1e-5,
-    )
 
 
 # --------------------------------------------------------------------------- #

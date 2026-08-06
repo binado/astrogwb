@@ -16,7 +16,6 @@ from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.sampling.amplitude import (
     AmplitudeQuadrature,
     amplitude_log_integrand,
-    amplitude_statistics,
     best_fit_residual,
     gaussian_log_norm,
 )
@@ -251,7 +250,14 @@ def amplitude_marginalized_model(
     joint :math:`(\varphi, \theta)` samples via
     :func:`astrogwb.sampling.amplitude.draw_marginalized_parameter` --
     ``factor`` sites do not appear in ArviZ's posterior group, so they must be
-    carried explicitly.
+    carried explicitly. They are preferred over the raw inner products because
+    they are better conditioned, directly interpretable
+    (:math:`\sigma_A = 1/\rho`), and invertible by multiplication alone:
+    :math:`(m|m) = \rho^2` and :math:`(d|m) = \hat{A}\rho^2`. The contraction
+    is deliberately :math:`\sigma`-space, :math:`\sum_i x_i y_i/\sigma_i^2`,
+    and distinct from :func:`astrogwb.gwb.noise_weighted_inner_product`:
+    routing it through the PSD-space function would make :math:`\rho^2` too
+    small by :math:`2T`.
 
     Parameters
     ----------
@@ -303,11 +309,12 @@ def amplitude_marginalized_model(
         overrides={amplitude_parameter: fiducials[amplitude_parameter]},
     )
 
-    amplitude_ml, template_optimal_snr = amplitude_statistics(
-        model_spectral_density,
-        observed_spectral_density,
-        scale,
+    template_norm = jnp.sum(model_spectral_density**2 / scale**2, axis=-1)
+    data_template = jnp.sum(
+        observed_spectral_density * model_spectral_density / scale**2, axis=-1
     )
+    amplitude_ml = data_template / template_norm
+    template_optimal_snr = jnp.sqrt(template_norm)
     numpyro.deterministic("amplitude_ml", amplitude_ml)
     numpyro.deterministic("template_optimal_snr", template_optimal_snr)
     numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))

@@ -83,48 +83,6 @@ class AmplitudeScalingFn(Protocol):
     def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
 
 
-def amplitude_statistics(
-    model_spectral_density: jax.Array,
-    observed_spectral_density: jax.Array,
-    scale: jax.Array,
-) -> tuple[jax.Array, jax.Array]:
-    r"""Maximum-likelihood amplitude and template optimal SNR.
-
-    These are the sufficient statistics of the amplitude-marginalized
-    likelihood: everything downstream depends on the data and the template only
-    through :math:`\hat{A} = (d|m)/(m|m)` and :math:`\rho = \sqrt{(m|m)}`. They
-    are preferred over the raw inner products because they are better
-    conditioned, directly interpretable (:math:`\sigma_A = 1/\rho`), and
-    invertible by multiplication alone: :math:`(m|m) = \rho^2` and
-    :math:`(d|m) = \hat{A}\rho^2`.
-
-    The contraction here is deliberately :math:`\sigma`-space,
-    :math:`\sum_i x_i y_i / \sigma_i^2`, and distinct from
-    :func:`astrogwb.gwb.noise_weighted_inner_product`: routing it through the
-    PSD-space function would make :math:`\rho^2` too small by :math:`2T`.
-
-    Parameters
-    ----------
-    model_spectral_density:
-        Template :math:`\mathbf{m}(\theta)`, i.e. the predicted spectrum at the
-        reference amplitude.
-    observed_spectral_density:
-        Observed spectrum :math:`\mathbf{d}`.
-    scale:
-        Per-bin Gaussian noise scale.
-
-    Returns
-    -------
-    tuple[jax.Array, jax.Array]
-        ``(amplitude_ml, template_optimal_snr)``.
-    """
-    template_norm = jnp.sum(model_spectral_density**2 / scale**2, axis=-1)
-    data_template = jnp.sum(
-        observed_spectral_density * model_spectral_density / scale**2, axis=-1
-    )
-    return data_template / template_norm, jnp.sqrt(template_norm)
-
-
 def gaussian_log_norm(scale: jax.Array) -> jax.Array:
     r"""Normalization :math:`-\sum_i \ln \sigma_i - \frac{n}{2}\ln 2\pi`.
 
@@ -285,7 +243,8 @@ def draw_marginalized_parameter(
     Parameters
     ----------
     amplitude_ml, template_optimal_snr:
-        Sufficient statistics from :func:`amplitude_statistics`.
+        The amplitude sufficient statistics, as computed by
+        :func:`~astrogwb.sampling.models.amplitude_marginalized_model`.
     quadrature:
         Precomputed grid from :func:`make_amplitude_quadrature`.
     rng_key:
