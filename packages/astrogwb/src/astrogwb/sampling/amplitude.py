@@ -1,59 +1,62 @@
-r"""Analytic marginalization of a strictly multiplicative amplitude.
+r"""Numerical marginalization of a multiplicative amplitude direction.
 
 Under the per-frequency Gaussian likelihood used by
-:func:`~astrogwb.sampling.models.spectral_density_model`, a parameter that
-enters the predicted spectrum as a pure multiplicative factor can be integrated
-out exactly. Write the prediction as
+:func:`~astrogwb.sampling.models.spectral_density_model`, one parameter can
+enter the predicted spectrum as a pure multiplicative factor,
 
-.. math:: \boldsymbol{\mu}(A, \theta) = A\, \mathbf{m}(\theta)
+.. math:: \boldsymbol{\mu}(\varphi, \theta) = f(\varphi)\, \mathbf{m}(\theta)
 
 with :math:`\mathbf{m}(\theta)` the *template* -- the spectrum evaluated at a
-fixed reference value of the amplitude parameter -- so that :math:`A` is the
-dimensionless ratio to that reference. Define the noise-weighted inner product
-:math:`(x|y) = \sum_i x_i y_i / \sigma_i^2`. Then
+fixed reference value of the marginalized parameter -- and :math:`f` an
+arbitrary scaling from the physical parameter :math:`\varphi` (e.g. a merger
+rate, or :math:`H_0` through :math:`f(H_0) = H_{0,\mathrm{fid}}/H_0`) to the
+dimensionless multiplicative amplitude :math:`A = f(\varphi)`. Define the
+noise-weighted inner product :math:`(x|y) = \sum_i x_i y_i / \sigma_i^2`. Then
 
 .. math::
 
     \hat{A} = \frac{(d|m)}{(m|m)}, \qquad \rho = \sqrt{(m|m)},
 
-are the maximum-likelihood amplitude and the template optimal SNR, and the
-conditional amplitude uncertainty at fixed :math:`\theta` is
-:math:`\sigma_A = 1/\rho`.
-
-For a prior with precision :math:`\tau_0` (``1/scale**2`` for a Normal, ``0``
-for a Uniform), location :math:`\mu_0`, and support :math:`[\ell, h]`
-(:math:`\pm\infty` for a Normal), completing the square gives
+are the maximum-likelihood amplitude and the template optimal SNR, and
+completing the square in :math:`A` gives
 
 .. math::
 
-    \tau = \rho^2 + \tau_0, \qquad
-    \tilde{m} = \frac{\rho^2 \hat{A} + \tau_0 \mu_0}{\tau}, \qquad
-    Q = \rho^2 \hat{A}^2 + \tau_0 \mu_0^2 - \tau \tilde{m}^2,
+    -\tfrac{1}{2}\sum_i \left(\frac{d_i - A\, m_i}{\sigma_i}\right)^2
+    = -R - \tfrac{1}{2}\rho^2 (A - \hat{A})^2,
 
-so that the conditional posterior is :math:`\mathcal{N}(\tilde{m}, \tau^{-1})`
-truncated to the prior support, and the log marginal likelihood is
+with :math:`R = \tfrac{1}{2}\sum_i((d_i - \hat{A}m_i)/\sigma_i)^2` the
+best-fit residual. This module marginalizes :math:`\varphi` numerically on a
+fixed 1D grid under the caller's actual prior :math:`\pi(\varphi)`, rather
+than requiring the prior to be stated on :math:`A` itself. Folding the
+trapezoid weights into a precomputed log-measure turns the integral over the
+grid into a single ``logsumexp``. With :math:`w_k` the trapezoid weights at
+grid node :math:`\varphi_k`,
 
 .. math::
 
-    \ln Z = \ln \mathcal{N}_d - R - \tfrac{1}{2} Q + \ln \mathcal{N}_\pi
-            + \tfrac{1}{2}\ln\frac{2\pi}{\tau}
-            + \ln\left[\Phi(\beta) - \Phi(\alpha)\right],
+    \ln Z = \ln \mathcal{N}_d - R
+        + \operatorname{logsumexp}_k\!\left[\ell_k - \tfrac{1}{2}\bigl(\rho(f_k - \hat{A})\bigr)^2\right]
+        - \ln \Pi,
 
-with :math:`R = \tfrac{1}{2}\sum_i ((d_i - \hat{A} m_i)/\sigma_i)^2` the
-best-fit residual, :math:`\ln \mathcal{N}_d` and :math:`\ln \mathcal{N}_\pi` the
-Gaussian and prior normalizations, and
-:math:`\alpha, \beta = (\ell - \tilde{m})\sqrt{\tau}, (h - \tilde{m})\sqrt{\tau}`.
+.. math::
 
-Two deliberate choices about how this is evaluated:
+    \ell_k = \ln\pi(\varphi_k) + \ln w_k, \qquad
+    \ln \Pi = \operatorname{logsumexp}_k\, \ell_k,
 
-- :math:`R` is computed as the residual sum of squares, *not* as
-  :math:`\tfrac{1}{2}(d|d) - \tfrac{1}{2}\hat{A}^2\rho^2`. Those two terms are
-  each :math:`\sim \mathrm{SNR}^2/2` and nearly cancel at high SNR.
-- the truncation term is evaluated in log space in whichever Gaussian tail is
-  smaller. The naive ``log(Phi(beta) - Phi(alpha))`` underflows to ``-inf`` when
-  warmup wanders somewhere :math:`\hat{A}` sits many :math:`\sigma` outside the
-  prior support, which poisons the whole chain rather than just rejecting the
-  step.
+where :math:`f_k = f(\varphi_k)`, :math:`\ln \mathcal{N}_d` is the Gaussian
+normalization, and :math:`\ln \Pi` normalizes the prior mass on the grid, so
+``log_prior`` may be passed unnormalized. Squaring :math:`\rho(f_k - \hat{A})`
+rather than forming :math:`\rho^2(f_k-\hat A)^2` avoids overflowing
+:math:`\rho^2` at very high SNR, and :math:`R` is computed from residuals
+directly rather than as :math:`\tfrac{1}{2}(d|d) - \tfrac{1}{2}\hat{A}^2\rho^2`
+-- those two terms are each :math:`\sim \mathrm{SNR}^2/2` and nearly cancel at
+high SNR.
+
+"Exact up to quadrature error" only holds if the grid resolves the conditional
+posterior, whose width in :math:`\varphi` is :math:`\sigma_A/|f'(\varphi)|`.
+No quadrature rule rescues a Gaussian bump spanning three nodes, so grid
+adequacy must be checked with :func:`quadrature_effective_nodes`, not assumed.
 
 All functions broadcast over leading batch dimensions and contract over the
 trailing frequency axis, so post-processing can feed them ``(chain, draw)``
@@ -63,17 +66,21 @@ shaped arrays directly.
 from __future__ import annotations
 
 import math
-from typing import NamedTuple
+from typing import NamedTuple, Protocol
 
 import jax
 import jax.numpy as jnp
-import numpyro.distributions as dist
-from jax.scipy.special import log_ndtr
+from jax.scipy.special import logsumexp
 
-# Priors on the amplitude that admit a closed-form marginalization.
-type AmplitudePrior = dist.Normal | dist.Uniform
+from astrogwb.importance.diagnostics import relative_ess
 
 _LOG_TWO_PI = math.log(2.0 * math.pi)
+
+
+class AmplitudeScalingFn(Protocol):
+    """Map the marginalized parameter to the multiplicative amplitude :math:`A = f(\\varphi)`."""
+
+    def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
 
 
 def noise_weighted_inner_product(
@@ -141,8 +148,10 @@ def amplitude_statistics(
 def gaussian_log_norm(scale: jax.Array) -> jax.Array:
     r"""Normalization :math:`-\sum_i \ln \sigma_i - \frac{n}{2}\ln 2\pi`.
 
-    The constant that makes :func:`amplitude_log_evidence` a genuine log
-    marginal likelihood rather than a log density up to an additive constant.
+    The constant that makes the log evidence assembled in
+    :func:`~astrogwb.sampling.models.amplitude_marginalized_model` a genuine
+    log marginal likelihood rather than a log density up to an additive
+    constant.
     """
     return -jnp.sum(jnp.log(scale), axis=-1) - 0.5 * scale.shape[-1] * _LOG_TWO_PI
 
@@ -168,181 +177,188 @@ def best_fit_residual(
     return 0.5 * jnp.sum(residual**2, axis=-1)
 
 
-class _ConditionalTerms(NamedTuple):
-    """Completed-square terms shared by the conditional and the evidence."""
+class AmplitudeQuadrature(NamedTuple):
+    """Precomputed grid, scaling, and prior measure for numerical marginalization.
 
-    precision: jax.Array
-    mean: jax.Array
-    quadratic_leftover: jax.Array
-    low: jax.Array
-    high: jax.Array
-    log_prior_norm: jax.Array
-    truncated: bool
-
-
-def _conditional_terms(
-    amplitude_ml: jax.Array,
-    template_optimal_snr: jax.Array,
-    prior: AmplitudePrior,
-) -> _ConditionalTerms:
-    """Derive ``(tau, m_tilde, Q)`` and the prior support in one place.
-
-    Both :func:`amplitude_conditional` and :func:`amplitude_log_evidence` go
-    through here, so a sign fixed in one is fixed in the other.
+    Built once by :func:`make_amplitude_quadrature` and then reused every MCMC
+    step; a plain ``NamedTuple`` keeps it a JAX pytree without needing to be
+    stored as model state, since the callable that built it is only consumed
+    at construction time.
     """
-    if isinstance(prior, dist.Normal):
-        prior_scale = jnp.asarray(prior.scale)
-        prior_loc = jnp.asarray(prior.loc)
-        prior_precision = 1.0 / prior_scale**2
-        low = jnp.asarray(-jnp.inf)
-        high = jnp.asarray(jnp.inf)
-        log_prior_norm = -jnp.log(prior_scale) - 0.5 * _LOG_TWO_PI
-        truncated = False
-    elif isinstance(prior, dist.Uniform):
-        low = jnp.asarray(prior.low)
-        high = jnp.asarray(prior.high)
-        prior_precision = jnp.asarray(0.0)
-        prior_loc = jnp.asarray(0.0)
-        log_prior_norm = -jnp.log(high - low)
-        truncated = True
-    else:
-        raise TypeError(
-            "amplitude prior must be a numpyro Normal or Uniform distribution, "
-            f"got {type(prior).__name__}"
-        )
 
-    data_precision = template_optimal_snr**2
-    precision = data_precision + prior_precision
-    mean = (data_precision * amplitude_ml + prior_precision * prior_loc) / precision
-    quadratic_leftover = (
-        data_precision * amplitude_ml**2
-        + prior_precision * prior_loc**2
-        - precision * mean**2
-    )
-    return _ConditionalTerms(
-        precision=precision,
-        mean=mean,
-        quadratic_leftover=quadratic_leftover,
-        low=low,
-        high=high,
-        log_prior_norm=log_prior_norm,
-        truncated=truncated,
-    )
+    grid: jax.Array
+    """``(K,)`` values of the marginalized parameter :math:`\\varphi`."""
+
+    amplitude: jax.Array
+    """``(K,)`` :math:`f(\\varphi_k)`, the multiplicative factor at each node."""
+
+    log_measure: jax.Array
+    """``(K,)`` :math:`\\ln\\pi(\\varphi_k) + \\ln w_k`, trapezoid-weighted log prior."""
+
+    log_prior_mass: jax.Array
+    """Scalar ``logsumexp(log_measure)``, the normalization for the prior mass
+    on the grid; :func:`~astrogwb.sampling.models.amplitude_marginalized_model`
+    subtracts it from the assembled log evidence."""
 
 
-def _log_sub_exp(larger: jax.Array, smaller: jax.Array) -> jax.Array:
-    """``log(exp(larger) - exp(smaller))`` for ``smaller <= larger``.
-
-    The guard keeps the result NaN-free (and hence differentiable) when the two
-    arguments coincide, which would otherwise produce ``log`` of a negative
-    rounding residual.
-    """
-    delta = smaller - larger
-    safe_delta = jnp.where(delta < 0.0, delta, -jnp.inf)
-    return larger + jnp.log1p(-jnp.exp(safe_delta))
-
-
-def _log_gauss_mass(a: jax.Array, b: jax.Array) -> jax.Array:
-    r"""``log(Phi(b) - Phi(a))`` evaluated in the smaller tail.
-
-    Both forms below are mathematically exact for any ``a <= b``; the choice
-    only decides which one avoids subtracting two numbers close to 1.
-    """
-    lower_tail = _log_sub_exp(log_ndtr(b), log_ndtr(a))
-    upper_tail = _log_sub_exp(log_ndtr(-a), log_ndtr(-b))
-    return jnp.where(b <= 0.0, lower_tail, upper_tail)
-
-
-def amplitude_conditional(
-    amplitude_ml: jax.Array,
-    template_optimal_snr: jax.Array,
+def make_amplitude_quadrature(
     *,
-    prior: AmplitudePrior,
-) -> dist.Distribution:
-    r"""Conditional posterior :math:`p(A \mid \theta, \mathbf{d})`.
+    grid: jax.Array,
+    log_prior: jax.Array,
+    scaling: AmplitudeScalingFn,
+) -> AmplitudeQuadrature:
+    """Build the fixed quadrature grid consumed by every MCMC step.
 
-    A Normal :math:`\mathcal{N}(\tilde{m}, \tau^{-1})`, truncated to the prior
-    support when ``prior`` is Uniform. Its batch shape follows the leading
-    dimensions of ``amplitude_ml``.
+    Called once, before sampling starts, with concrete (non-traced) arrays --
+    like :func:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation.make_merger_rate_and_log_weights_fn`,
+    this is a factory, not something invoked inside ``jax.jit``.
 
     Parameters
     ----------
-    amplitude_ml:
-        Maximum-likelihood amplitude :math:`\hat{A}` from
-        :func:`amplitude_statistics`.
-    template_optimal_snr:
-        Template optimal SNR :math:`\rho` from :func:`amplitude_statistics`.
-    prior:
-        The amplitude prior the chain was run under.
+    grid:
+        Strictly increasing 1D array of :math:`\\varphi` values, length at
+        least 2.
+    log_prior:
+        :math:`\\ln\\pi(\\varphi_k)` at each grid node, same shape as ``grid``.
+        May be unnormalized; ``log_prior_mass`` reports the resulting offset
+        and the model normalizes it away.
+    scaling:
+        Maps the grid to the multiplicative amplitude, :math:`f(\\varphi_k)`.
+
+    Raises
+    ------
+    ValueError
+        If ``grid`` is not 1D, has fewer than 2 points, is not strictly
+        increasing, or does not match the shape of ``log_prior``.
     """
-    terms = _conditional_terms(amplitude_ml, template_optimal_snr, prior)
-    scale = 1.0 / jnp.sqrt(terms.precision)
-    if terms.truncated:
-        return dist.TruncatedNormal(terms.mean, scale, low=terms.low, high=terms.high)
-    return dist.Normal(terms.mean, scale)
+    grid = jnp.asarray(grid)
+    log_prior = jnp.asarray(log_prior)
+    if grid.ndim != 1:
+        raise ValueError(f"grid must be 1D, got shape {grid.shape}")
+    if grid.shape[0] < 2:
+        raise ValueError(f"grid must have at least 2 points, got {grid.shape[0]}")
+    if log_prior.shape != grid.shape:
+        raise ValueError(
+            f"log_prior shape {log_prior.shape} must match grid shape {grid.shape}"
+        )
+    dx = jnp.diff(grid)
+    if not bool(jnp.all(dx > 0)):
+        raise ValueError("grid must be strictly increasing")
+
+    weights = 0.5 * jnp.concatenate([dx[:1], dx[1:] + dx[:-1], dx[-1:]])
+    log_measure = log_prior + jnp.log(weights)
+    return AmplitudeQuadrature(
+        grid=grid,
+        amplitude=scaling(grid),
+        log_measure=log_measure,
+        log_prior_mass=logsumexp(log_measure),
+    )
 
 
-def amplitude_log_evidence(
+def amplitude_log_integrand(
     amplitude_ml: jax.Array,
     template_optimal_snr: jax.Array,
     *,
-    prior: AmplitudePrior,
-    residual: jax.Array,
-    log_norm: jax.Array,
+    quadrature: AmplitudeQuadrature,
 ) -> jax.Array:
-    r"""Log marginal likelihood :math:`\ln \int p(\mathbf{d} \mid A, \theta) \pi(A)\,dA`.
+    """Shared ``(..., K)`` log-integrand behind the model factor and the two
+    functions below.
 
-    Includes the full Gaussian and prior normalizations, so the result is a real
-    log marginal likelihood and is directly comparable against the potential
-    energy of :func:`~astrogwb.sampling.models.spectral_density_model`.
+    Routing :func:`~astrogwb.sampling.models.amplitude_marginalized_model`,
+    :func:`draw_marginalized_parameter`, and :func:`quadrature_effective_nodes`
+    through one implementation is what keeps them from drifting apart -- in
+    particular, it guarantees the inverse-transform sampler in
+    :func:`draw_marginalized_parameter` draws from exactly the density the
+    model factor integrated.
+    """
+    scaled_residual = jnp.expand_dims(template_optimal_snr, -1) * (
+        quadrature.amplitude - jnp.expand_dims(amplitude_ml, -1)
+    )
+    return quadrature.log_measure - 0.5 * scaled_residual**2
+
+
+def draw_marginalized_parameter(
+    amplitude_ml: jax.Array,
+    template_optimal_snr: jax.Array,
+    *,
+    quadrature: AmplitudeQuadrature,
+    rng_key: jax.Array,
+) -> jax.Array:
+    r"""Draw one value of :math:`\varphi` per posterior sample of :math:`\theta`.
+
+    Inverse-transform sampling on the grid: the CDF is the cumulative sum of
+    the same ``log_measure``-weighted nodes that
+    :func:`amplitude_log_integrand` integrates, *not* a separately-computed
+    cumulative trapezoid, so it terminates at exactly the :math:`Z` that was
+    marginalized and the draws follow precisely that density rather than an
+    :math:`O(\Delta^2)`-nearby one.
+
+    Leading ``(chain, draw)`` dimensions of the statistics are preserved and
+    the function is fully broadcast (no ``vmap``), so it is shape-preserving
+    and un-chunked by default. That materializes an ``(..., K)`` array: at
+    ``K=4000`` grid nodes and 20k posterior samples that is already ~640 MB in
+    float64. Because this runs in post-processing, outside ``jax.jit``, chunk
+    it in plain Python if memory is tight -- loop over the chain axis, or
+    reshape the leading dimensions and slice, calling this function once per
+    chunk and concatenating the results.
 
     Parameters
     ----------
     amplitude_ml, template_optimal_snr:
         Sufficient statistics from :func:`amplitude_statistics`.
-    prior:
-        Amplitude prior. Normal marginalizes over the whole real line; Uniform
-        contributes the truncation term.
-    residual:
-        Best-fit residual :math:`R` from :func:`best_fit_residual`.
-    log_norm:
-        Gaussian normalization from :func:`gaussian_log_norm`.
+    quadrature:
+        Precomputed grid from :func:`make_amplitude_quadrature`.
+    rng_key:
+        PRNG key; one uniform draw is consumed per leading-dimension element.
+
+    Returns
+    -------
+    jax.Array
+        :math:`\varphi` draws, same leading shape as ``amplitude_ml``, clipped
+        to ``[grid[0], grid[-1]]``.
     """
-    terms = _conditional_terms(amplitude_ml, template_optimal_snr, prior)
-    log_evidence = (
-        log_norm
-        + terms.log_prior_norm
-        - residual
-        - 0.5 * terms.quadratic_leftover
-        + 0.5 * (_LOG_TWO_PI - jnp.log(terms.precision))
+    log_integrand = amplitude_log_integrand(
+        amplitude_ml, template_optimal_snr, quadrature=quadrature
     )
-    if terms.truncated:
-        sqrt_precision = jnp.sqrt(terms.precision)
-        alpha = (terms.low - terms.mean) * sqrt_precision
-        beta = (terms.high - terms.mean) * sqrt_precision
-        log_evidence = log_evidence + _log_gauss_mass(alpha, beta)
-    return log_evidence
+    shifted = jnp.exp(log_integrand - jnp.max(log_integrand, axis=-1, keepdims=True))
+    cdf = jnp.cumsum(shifted, axis=-1)
+    cdf = cdf / cdf[..., -1:]
+
+    grid = quadrature.grid
+    num_nodes = grid.shape[0]
+    u = jax.random.uniform(rng_key, shape=amplitude_ml.shape)
+    idx = jnp.clip(jnp.sum(cdf < u[..., None], axis=-1), 1, num_nodes - 1)
+
+    cdf_hi = jnp.take_along_axis(cdf, idx[..., None], axis=-1)[..., 0]
+    cdf_lo = jnp.take_along_axis(cdf, (idx - 1)[..., None], axis=-1)[..., 0]
+    grid_hi = grid[idx]
+    grid_lo = grid[idx - 1]
+
+    # Deep in the tails `shifted` underflows to 0, so the CDF has long flat
+    # plateaus; guard the division so those draws land at `grid_lo` instead of
+    # NaN from 0/0.
+    span = jnp.where(cdf_hi > cdf_lo, cdf_hi - cdf_lo, 1.0)
+    fraction = jnp.where(cdf_hi > cdf_lo, (u - cdf_lo) / span, 0.0)
+    return grid_lo + fraction * (grid_hi - grid_lo)
 
 
-def draw_amplitude(
+def quadrature_effective_nodes(
     amplitude_ml: jax.Array,
     template_optimal_snr: jax.Array,
     *,
-    prior: AmplitudePrior,
-    rng_key: jax.Array,
+    quadrature: AmplitudeQuadrature,
 ) -> jax.Array:
-    r"""Draw one amplitude per posterior sample of :math:`\theta`.
+    r"""Grid-adequacy diagnostic: how many nodes actually carry the conditional posterior.
 
-    Pairing each draw with its :math:`\theta` reconstructs samples from the full
-    joint posterior :math:`p(A, \theta \mid \mathbf{d})` that the marginalized
-    chain never explored directly. Leading ``(chain, draw)`` dimensions of the
-    statistics are preserved, so an ``InferenceData`` posterior group can be fed
-    in as-is.
-
-    Note that the amplitude prior used at run time acts as a *proposal*: if the
-    physical parameter is a nonlinear function of :math:`A`, the scientific
-    prior must be applied afterwards by reweighting (see
-    :func:`astrogwb.importance.diagnostics.log_prior_reweighting`).
+    Reuses :func:`~astrogwb.importance.diagnostics.relative_ess` on the
+    log-integrand -- the same Kish effective-sample-size construction used for
+    importance weights -- and rescales it by :math:`K` so the result is a node
+    count rather than a fraction. A Gaussian conditional posterior spanning
+    only a handful of grid nodes will report a small value here even though
+    the assembled log evidence looks finite and plausible; this should be
+    comfortably above approximately 30.
     """
-    conditional = amplitude_conditional(amplitude_ml, template_optimal_snr, prior=prior)
-    return jnp.asarray(conditional.sample(rng_key))
+    log_integrand = amplitude_log_integrand(
+        amplitude_ml, template_optimal_snr, quadrature=quadrature
+    )
+    return relative_ess(log_integrand) * quadrature.grid.shape[0]

@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-import numpyro.distributions as dist
 import pytest
-from astrogwb.importance.diagnostics import log_prior_reweighting, relative_ess
+from astrogwb.importance.diagnostics import relative_ess
 
 
 def test_relative_ess_is_one_for_equal_weights() -> None:
@@ -42,26 +41,3 @@ def test_relative_ess_reduces_over_the_trailing_axis_only() -> None:
 
     assert result.shape == (2,)
     np.testing.assert_allclose(np.asarray(result), [1.0, 0.125], rtol=1e-6)
-
-
-def test_log_prior_reweighting_is_zero_for_identical_priors() -> None:
-    prior = dist.Uniform(0.5, 2.0)
-    amplitude = jnp.array([0.6, 1.0, 1.9])
-
-    weights = log_prior_reweighting(amplitude, used=prior, target=prior)
-
-    np.testing.assert_array_equal(np.asarray(weights), np.zeros(3))
-
-
-def test_log_prior_reweighting_matches_the_log_density_ratio() -> None:
-    used = dist.Uniform(0.5, 2.0)
-    target = dist.Normal(1.0, 0.2)
-    amplitude = jnp.array([0.8, 1.1])
-
-    weights = log_prior_reweighting(amplitude, used=used, target=target)
-
-    np.testing.assert_allclose(
-        np.asarray(weights),
-        np.asarray(target.log_prob(amplitude) - used.log_prob(amplitude)),
-        rtol=1e-6,
-    )

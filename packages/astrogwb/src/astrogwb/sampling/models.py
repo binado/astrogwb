@@ -7,17 +7,19 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
+from jax.scipy.special import logsumexp
 
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import AverageMode, spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.sampling.amplitude import (
+    AmplitudeQuadrature,
+    amplitude_log_integrand,
     amplitude_statistics,
     best_fit_residual,
     gaussian_log_norm,
 )
-from astrogwb.sampling.protocol import LogEvidenceFn
 
 
 def _predicted_spectral_density(
@@ -199,7 +201,7 @@ def amplitude_marginalized_model(
     merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     amplitude_parameter: str,
     fiducials: Mapping[str, Any],
-    log_evidence_fn: LogEvidenceFn,
+    quadrature: AmplitudeQuadrature,
     priors: Mapping[str, dist.Distribution] | None = None,
     constants: Mapping[str, Any] | None = None,
     frequency_mask: jax.Array | None = None,
@@ -213,32 +215,15 @@ def amplitude_marginalized_model(
     touches the importance weights, and ``polarization_power`` is a fixed
     precomputed catalog.
 
-    ``log_evidence_fn`` picks *how* the amplitude direction is marginalized,
-    and is where the two available routes differ:
-
-    - :func:`~astrogwb.sampling.amplitude.amplitude_log_evidence`
-      (bind ``prior`` via :func:`functools.partial`) marginalizes the
-      multiplicative amplitude :math:`A` itself in closed form. This requires
-      the prior to be stated on :math:`A`; when the physical parameter enters
-      inversely (:math:`H_0`, with :math:`A = H_{0,\mathrm{fid}}/H_0`), a prior
-      on :math:`A` is *not* the prior on :math:`H_0`, and the mismatch must be
-      corrected afterwards by reweighting (see the caveat below).
-    - :func:`~astrogwb.sampling.amplitude_quadrature.quadrature_log_evidence`
-      (bind ``quadrature`` via :func:`functools.partial`, built by
-      :func:`~astrogwb.sampling.amplitude_quadrature.make_amplitude_quadrature`)
-      marginalizes the physical parameter :math:`\varphi` numerically on a
-      fixed grid under its *actual* prior :math:`\pi(\varphi)`, for an
-      arbitrary scaling :math:`A = f(\varphi)`. No reparametrization, no
-      reweighting; what
-      :func:`~astrogwb.sampling.amplitude_quadrature.draw_marginalized_parameter`
-      returns in post-processing is :math:`\varphi` itself (e.g. :math:`H_0`),
-      not :math:`A`, and the reweighting caveat below does not apply. The only
-      error is quadrature error, so grid resolution should be checked with
-      :func:`~astrogwb.sampling.amplitude_quadrature.quadrature_effective_nodes`.
-
-    Both routes are drop-in interchangeable here because they share the same
-    sufficient statistics -- ``amplitude_ml`` and ``template_optimal_snr`` --
-    and the same ``LogEvidenceFn`` signature.
+    The physical parameter :math:`\varphi` is marginalized numerically on the
+    fixed grid in ``quadrature`` (built by
+    :func:`~astrogwb.sampling.amplitude.make_amplitude_quadrature`) under its
+    own prior :math:`\pi(\varphi)`, for an arbitrary scaling
+    :math:`A = f(\varphi)` to the multiplicative amplitude. What
+    :func:`~astrogwb.sampling.amplitude.draw_marginalized_parameter` returns in
+    post-processing is :math:`\varphi` itself (e.g. :math:`H_0`), not
+    :math:`A`. The only error is quadrature error, so grid resolution should be
+    checked with :func:`~astrogwb.sampling.amplitude.quadrature_effective_nodes`.
 
     The callback is invoked with ``amplitude_parameter`` pinned to
     ``fiducials[amplitude_parameter]``, so the predicted spectrum it returns is
@@ -263,11 +248,10 @@ def amplitude_marginalized_model(
     the same name. Use :func:`spectral_density_model` when it is needed.
 
     The two amplitude statistics are what post-processing needs to reconstruct
-    joint :math:`(A, \theta)` (or :math:`(\varphi, \theta)`) samples via
-    :func:`astrogwb.sampling.amplitude.draw_amplitude` or
-    :func:`astrogwb.sampling.amplitude_quadrature.draw_marginalized_parameter`
-    -- ``factor`` sites do not appear in ArviZ's posterior group, so they must
-    be carried explicitly.
+    joint :math:`(\varphi, \theta)` samples via
+    :func:`astrogwb.sampling.amplitude.draw_marginalized_parameter` --
+    ``factor`` sites do not appear in ArviZ's posterior group, so they must be
+    carried explicitly.
 
     Parameters
     ----------
@@ -277,10 +261,10 @@ def amplitude_marginalized_model(
     fiducials:
         Fiducial hyperparameters; ``fiducials[amplitude_parameter]`` is the
         reference value that defines the template.
-    log_evidence_fn:
-        Callable that marginalizes the amplitude direction out of the Gaussian
-        likelihood given ``amplitude_ml`` and ``template_optimal_snr``; see
-        above for the two available routes.
+    quadrature:
+        Precomputed grid from
+        :func:`~astrogwb.sampling.amplitude.make_amplitude_quadrature` that
+        marginalizes the amplitude direction out of the Gaussian likelihood.
 
     Other parameters are as in :func:`spectral_density_model`.
 
@@ -328,15 +312,18 @@ def amplitude_marginalized_model(
     numpyro.deterministic("template_optimal_snr", template_optimal_snr)
     numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))
 
-    log_evidence = log_evidence_fn(
-        amplitude_ml,
-        template_optimal_snr,
-        residual=best_fit_residual(
+    log_integrand = amplitude_log_integrand(
+        amplitude_ml, template_optimal_snr, quadrature=quadrature
+    )
+    numpyro.factor(
+        "amplitude_marginalized_log_likelihood",
+        gaussian_log_norm(scale)
+        - best_fit_residual(
             model_spectral_density,
             observed_spectral_density,
             scale,
             amplitude_ml=amplitude_ml,
-        ),
-        log_norm=gaussian_log_norm(scale),
+        )
+        + logsumexp(log_integrand, axis=-1)
+        - quadrature.log_prior_mass,
     )
-    numpyro.factor("amplitude_marginalized_log_likelihood", log_evidence)
