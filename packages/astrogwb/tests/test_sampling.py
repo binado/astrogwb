@@ -150,7 +150,7 @@ def test_amplitude_marginalized_model_registers_expected_sites() -> None:
         priors={"tilt": dist.Normal(0.0, 1.0)},
     )
 
-    assert "amplitude_ml" in trace
+    assert "amplitude_mle" in trace
     assert "template_optimal_snr" in trace
     assert "importance_relative_ess" in trace
     factor_site = trace["amplitude_marginalized_log_likelihood"]
@@ -216,7 +216,7 @@ def test_amplitude_marginalized_model_honors_the_frequency_mask() -> None:
         constants={"tilt": 0.3},
     )
 
-    for site in ("amplitude_ml", "template_optimal_snr"):
+    for site in ("amplitude_mle", "template_optimal_snr"):
         np.testing.assert_allclose(
             float(masked[site]["value"]), float(dropped[site]["value"]), rtol=1e-6
         )

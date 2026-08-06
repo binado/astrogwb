@@ -167,7 +167,7 @@ def make_amplitude_quadrature(
 
 
 def amplitude_log_integrand(
-    amplitude_ml: jax.Array,
+    amplitude_mle: jax.Array,
     template_optimal_snr: jax.Array,
     *,
     quadrature: AmplitudeQuadrature,
@@ -186,7 +186,7 @@ def amplitude_log_integrand(
     model factor integrated.
     """
     scaled_residual = jnp.expand_dims(template_optimal_snr, -1) * (
-        quadrature.amplitude - jnp.expand_dims(amplitude_ml, -1)
+        quadrature.amplitude - jnp.expand_dims(amplitude_mle, -1)
     )
     return quadrature.log_prior - 0.5 * scaled_residual**2
 
@@ -211,7 +211,7 @@ def _cumulative_trapezoid(y: jax.Array, x: jax.Array) -> jax.Array:
 
 
 def draw_marginalized_parameter(
-    amplitude_ml: jax.Array,
+    amplitude_mle: jax.Array,
     template_optimal_snr: jax.Array,
     *,
     quadrature: AmplitudeQuadrature,
@@ -234,7 +234,7 @@ def draw_marginalized_parameter(
 
     Parameters
     ----------
-    amplitude_ml, template_optimal_snr:
+    amplitude_mle, template_optimal_snr:
         The amplitude sufficient statistics, as computed by
         :func:`~astrogwb.sampling.models.amplitude_marginalized_model`.
     quadrature:
@@ -245,11 +245,11 @@ def draw_marginalized_parameter(
     Returns
     -------
     jax.Array
-        :math:`\varphi` draws, same leading shape as ``amplitude_ml``, clipped
+        :math:`\varphi` draws, same leading shape as ``amplitude_mle``, clipped
         to ``[grid[0], grid[-1]]``.
     """
     log_integrand = amplitude_log_integrand(
-        amplitude_ml, template_optimal_snr, quadrature=quadrature
+        amplitude_mle, template_optimal_snr, quadrature=quadrature
     )
     shifted = jnp.exp(log_integrand - jnp.max(log_integrand, axis=-1, keepdims=True))
     cdf = _cumulative_trapezoid(shifted, quadrature.grid)
@@ -257,7 +257,7 @@ def draw_marginalized_parameter(
 
     grid = quadrature.grid
     num_nodes = grid.shape[0]
-    u = jax.random.uniform(rng_key, shape=amplitude_ml.shape)
+    u = jax.random.uniform(rng_key, shape=amplitude_mle.shape)
     idx = jnp.clip(jnp.sum(cdf < u[..., None], axis=-1), 1, num_nodes - 1)
 
     cdf_hi = jnp.take_along_axis(cdf, idx[..., None], axis=-1)[..., 0]
@@ -274,7 +274,7 @@ def draw_marginalized_parameter(
 
 
 def quadrature_effective_nodes(
-    amplitude_ml: jax.Array,
+    amplitude_mle: jax.Array,
     template_optimal_snr: jax.Array,
     *,
     quadrature: AmplitudeQuadrature,
@@ -290,6 +290,6 @@ def quadrature_effective_nodes(
     comfortably above approximately 30.
     """
     log_integrand = amplitude_log_integrand(
-        amplitude_ml, template_optimal_snr, quadrature=quadrature
+        amplitude_mle, template_optimal_snr, quadrature=quadrature
     )
     return relative_ess(log_integrand) * quadrature.grid.shape[0]

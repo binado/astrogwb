@@ -51,17 +51,17 @@ def _quadrature_log_evidence(
     scaling=_identity_scaling,
 ) -> float:
     """Assemble the evidence the same way ``amplitude_marginalized_model`` does."""
-    amplitude_ml, template_optimal_snr = _statistics()
+    amplitude_mle, template_optimal_snr = _statistics()
     scale = jnp.asarray(SCALE)
     residual = 0.5 * jnp.sum(
-        ((jnp.asarray(DATA) - amplitude_ml * jnp.asarray(TEMPLATE)) / scale) ** 2,
+        ((jnp.asarray(DATA) - amplitude_mle * jnp.asarray(TEMPLATE)) / scale) ** 2,
         axis=-1,
     )
     quadrature = make_amplitude_quadrature(
         grid=grid, log_prior=log_prior, scaling=scaling
     )
     log_integrand = amplitude_log_integrand(
-        amplitude_ml, template_optimal_snr, quadrature=quadrature
+        amplitude_mle, template_optimal_snr, quadrature=quadrature
     )
     return float(
         gaussian_log_norm(scale)
@@ -172,7 +172,7 @@ def test_numerical_h0_marginalization_matches_brute_force_integration() -> None:
     h0_low, h0_high = 50.0, 90.0
     count = 20_000
 
-    amplitude_ml, template_optimal_snr = _statistics()
+    amplitude_mle, template_optimal_snr = _statistics()
     h0_grid = jnp.linspace(h0_low, h0_high, 1001)
     quadrature = make_amplitude_quadrature(
         grid=h0_grid,
@@ -180,7 +180,7 @@ def test_numerical_h0_marginalization_matches_brute_force_integration() -> None:
         scaling=lambda marginalized_parameter: h0_fid / marginalized_parameter,
     )
     h0_draws = draw_marginalized_parameter(
-        jnp.broadcast_to(amplitude_ml, (count,)),
+        jnp.broadcast_to(amplitude_mle, (count,)),
         jnp.broadcast_to(template_optimal_snr, (count,)),
         quadrature=quadrature,
         rng_key=jax.random.key(3),
@@ -208,20 +208,20 @@ def test_draw_marginalized_parameter_recovers_conditional_moments() -> None:
     quadrature = make_amplitude_quadrature(
         grid=grid, log_prior=log_prior, scaling=_identity_scaling
     )
-    amplitude_ml, template_optimal_snr = _statistics()
+    amplitude_mle, template_optimal_snr = _statistics()
     count = 20_000
 
     draws = draw_marginalized_parameter(
-        jnp.broadcast_to(amplitude_ml, (count,)),
+        jnp.broadcast_to(amplitude_mle, (count,)),
         jnp.broadcast_to(template_optimal_snr, (count,)),
         quadrature=quadrature,
         rng_key=jax.random.key(1),
     )
 
-    # ``amplitude_ml`` sits ~7 sigma inside [low, high], so the untruncated
+    # ``amplitude_mle`` sits ~7 sigma inside [low, high], so the untruncated
     # Normal moments are an adequate reference; numpyro's ``TruncatedNormal``
     # does not implement ``.variance``.
-    conditional_mean = amplitude_ml
+    conditional_mean = amplitude_mle
     conditional_variance = 1.0 / template_optimal_snr**2
     standard_error = float(jnp.sqrt(conditional_variance / count))
     np.testing.assert_allclose(
@@ -237,8 +237,8 @@ def test_draw_marginalized_parameter_broadcasts_and_is_reproducible() -> None:
     quadrature = make_amplitude_quadrature(
         grid=grid, log_prior=log_prior, scaling=_identity_scaling
     )
-    amplitude_ml, template_optimal_snr = _statistics()
-    batched_ml = jnp.broadcast_to(amplitude_ml, (2, 5))
+    amplitude_mle, template_optimal_snr = _statistics()
+    batched_ml = jnp.broadcast_to(amplitude_mle, (2, 5))
     batched_snr = jnp.broadcast_to(template_optimal_snr, (2, 5))
 
     draws = draw_marginalized_parameter(
@@ -261,10 +261,10 @@ def test_draw_marginalized_parameter_is_nan_free_far_outside_the_grid() -> None:
     quadrature = make_amplitude_quadrature(
         grid=grid, log_prior=log_prior, scaling=_identity_scaling
     )
-    amplitude_ml, template_optimal_snr = _statistics()
+    amplitude_mle, template_optimal_snr = _statistics()
 
     draws = draw_marginalized_parameter(
-        jnp.broadcast_to(amplitude_ml, (100,)),
+        jnp.broadcast_to(amplitude_mle, (100,)),
         jnp.broadcast_to(template_optimal_snr, (100,)),
         quadrature=quadrature,
         rng_key=jax.random.key(2),
@@ -281,7 +281,7 @@ def test_draw_marginalized_parameter_is_nan_free_far_outside_the_grid() -> None:
 
 def test_quadrature_effective_nodes_falls_with_fewer_grid_points() -> None:
     low, high = 0.2, 3.0
-    amplitude_ml, template_optimal_snr = _statistics()
+    amplitude_mle, template_optimal_snr = _statistics()
 
     fine_grid = jnp.linspace(low, high, 4001)
     coarse_grid = jnp.linspace(low, high, 21)
@@ -297,11 +297,11 @@ def test_quadrature_effective_nodes_falls_with_fewer_grid_points() -> None:
     )
 
     fine_nodes = float(
-        quadrature_effective_nodes(amplitude_ml, template_optimal_snr, quadrature=fine)
+        quadrature_effective_nodes(amplitude_mle, template_optimal_snr, quadrature=fine)
     )
     coarse_nodes = float(
         quadrature_effective_nodes(
-            amplitude_ml, template_optimal_snr, quadrature=coarse
+            amplitude_mle, template_optimal_snr, quadrature=coarse
         )
     )
 

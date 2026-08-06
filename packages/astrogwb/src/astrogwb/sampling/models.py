@@ -237,7 +237,7 @@ def amplitude_marginalized_model(
     Registered sites:
 
     - one ``numpyro.sample`` per entry in ``priors``;
-    - ``amplitude_ml``, ``template_optimal_snr``, and
+    - ``amplitude_mle``, ``template_optimal_snr``, and
       ``importance_relative_ess`` as deterministics;
     - ``amplitude_marginalized_log_likelihood`` as a ``numpyro.factor``.
 
@@ -312,20 +312,20 @@ def amplitude_marginalized_model(
     data_template = jnp.sum(
         observed_spectral_density * model_spectral_density / scale**2, axis=-1
     )
-    amplitude_ml = data_template / template_norm
+    amplitude_mle = data_template / template_norm
     template_optimal_snr = jnp.sqrt(template_norm)
-    numpyro.deterministic("amplitude_ml", amplitude_ml)
+    numpyro.deterministic("amplitude_mle", amplitude_mle)
     numpyro.deterministic("template_optimal_snr", template_optimal_snr)
     numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))
 
     log_integrand = amplitude_log_integrand(
-        amplitude_ml, template_optimal_snr, quadrature=quadrature
+        amplitude_mle, template_optimal_snr, quadrature=quadrature
     )
     best_fit_residual = 0.5 * jnp.sum(
         (
             (
                 observed_spectral_density
-                - amplitude_ml[..., None] * model_spectral_density
+                - amplitude_mle[..., None] * model_spectral_density
             )
             / scale
         )
