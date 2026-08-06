@@ -220,13 +220,14 @@ def amplitude_marginalized_model(
     Registered sites:
 
     - one ``numpyro.sample`` per entry in ``priors``;
-    - ``amplitude_mle``, ``template_optimal_snr``, and
+    - ``total_merger_rate``, ``amplitude_mle``, ``template_optimal_snr``, and
       ``importance_relative_ess`` as deterministics;
     - ``amplitude_marginalized_log_likelihood`` as a ``numpyro.factor``.
 
-    ``total_merger_rate`` is deliberately *not* registered: at a pinned
-    amplitude it would be the rate at unit amplitude, a different quantity under
-    the same name. Use :func:`spectral_density_model` when it is needed.
+    ``total_merger_rate`` is the rate at the pinned fiducial amplitude (the
+    template), not the marginalized physical rate. Recover the latter in
+    post-processing from the drawn amplitude and this template value when the
+    spectrum is linear in the marginalized parameter.
 
     The two amplitude statistics are what post-processing needs to reconstruct
     joint :math:`(\varphi, \theta)` samples via
@@ -273,7 +274,7 @@ def amplitude_marginalized_model(
     (
         model_spectral_density,
         scale,
-        _,
+        total_merger_rate,
         log_weights,
     ) = _predicted_spectral_density(
         frequencies=frequencies,
@@ -308,6 +309,7 @@ def amplitude_marginalized_model(
     )
     amplitude_mle = data_template / template_norm
     template_optimal_snr = jnp.sqrt(template_norm)
+    numpyro.deterministic("total_merger_rate", total_merger_rate)
     numpyro.deterministic("amplitude_mle", amplitude_mle)
     numpyro.deterministic("template_optimal_snr", template_optimal_snr)
     numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))

@@ -152,11 +152,14 @@ def test_amplitude_marginalized_model_registers_expected_sites() -> None:
     assert "amplitude_mle" in trace
     assert "template_optimal_snr" in trace
     assert "importance_relative_ess" in trace
+    assert "total_merger_rate" in trace
+    np.testing.assert_allclose(
+        np.asarray(trace["total_merger_rate"]["value"]), FIDUCIAL_RATE
+    )
     factor_site = trace["amplitude_marginalized_log_likelihood"]
     assert isinstance(factor_site["fn"], dist.Unit)
     assert np.isfinite(float(factor_site["fn"].log_factor))
     assert "spectral_density_obs" not in trace
-    assert "total_merger_rate" not in trace
 
 
 def test_amplitude_marginalized_model_pins_the_amplitude_to_its_fiducial() -> None:
