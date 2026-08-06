@@ -63,10 +63,10 @@ from numpyro.infer import MCMC, NUTS
 
 from astrogwb_paper.config.hashing import file_sha256
 from astrogwb.sampling.models import spectral_density_model
+from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import (
     spectral_density,
     spectral_snr_squared,
-    frequency_mask as make_frequency_mask,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power

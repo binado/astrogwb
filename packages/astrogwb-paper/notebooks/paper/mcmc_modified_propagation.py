@@ -63,7 +63,7 @@ from _paper_style import (
 )
 from arviz_base.labels import MapLabeller
 from astrogwb.detector import effective_psd, load_sensitivity_map
-from astrogwb.gwb import frequency_mask as make_frequency_mask
+from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,

@@ -9,9 +9,9 @@ import numpyro
 import numpyro.distributions as dist
 
 from astrogwb.detector import gaussian_bin_scale
+from astrogwb.frequency import noise_weighted_inner_product
 from astrogwb.gwb import (
     AverageMode,
-    noise_weighted_inner_product,
     spectral_density,
 )
 from astrogwb.importance.diagnostics import relative_ess
@@ -268,7 +268,7 @@ def amplitude_marginalized_model(
     (:math:`\sigma_A = 1/\rho`), and invertible by multiplication alone:
     :math:`(m|m) = \rho^2` and :math:`(d|m) = \hat{A}\rho^2`. The contraction
     is deliberately :math:`\sigma`-space, :math:`\sum_i x_i y_i/\sigma_i^2`,
-    and distinct from :func:`astrogwb.gwb.noise_weighted_inner_product`:
+    and distinct from :func:`astrogwb.frequency.noise_weighted_inner_product`:
     routing it through the PSD-space function would make :math:`\rho^2` too
     small by :math:`2T`.
 

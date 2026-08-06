@@ -42,7 +42,7 @@ from pluscross import load_catalog
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.cosmology import hubble_constant_si
-from astrogwb.gwb import frequency_mask as make_frequency_mask
+from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
     spectral_density,

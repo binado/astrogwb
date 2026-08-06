@@ -53,9 +53,7 @@ from pluscross import load_catalog
 from scipy.ndimage import gaussian_filter
 
 from astrogwb.detector import effective_psd, load_sensitivity_map
-from astrogwb.gwb import (
-    frequency_mask as make_frequency_mask,
-)
+from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
     spectral_density,

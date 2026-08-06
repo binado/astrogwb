@@ -164,10 +164,10 @@ from numpyro.infer import MCMC, NUTS
 import matplotlib.pyplot as plt
 
 from astrogwb.sampling.models import spectral_density_model
+from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import (
     spectral_density,
     omega_gw_from_spectral_density,
-    frequency_mask as make_frequency_mask,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
