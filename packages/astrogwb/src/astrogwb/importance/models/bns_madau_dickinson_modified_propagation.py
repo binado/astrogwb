@@ -26,7 +26,7 @@ fiducial luminosity distances and the GW/EM ratio correction.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -34,7 +34,86 @@ from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
+from astrogwb.sampling.amplitude import MeanEnergyFluxAmplitudeFn, MergerRateAmplitudeFn
 from astrogwb.utils import SECONDS_PER_YEAR
+
+AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
+"""Parameters this callback supports marginalizing analytically."""
+
+
+class AmplitudeScalings(NamedTuple):
+    """The two independently-scaling factors that make up the amplitude, :math:`f = g_R \\cdot g_F`."""
+
+    merger_rate: MergerRateAmplitudeFn
+    mean_energy_flux: MeanEnergyFluxAmplitudeFn
+
+
+def amplitude_scalings(parameter: str, fiducial: float) -> AmplitudeScalings:
+    r"""Merger-rate and mean-energy-flux scalings for one amplitude parameter.
+
+    ``local_merger_rate`` enters :func:`compute_merger_rate_distance_and_logprob`
+    only through ``total_merger_rate = 1e-9 * local_merger_rate * integral_mpc3
+    / SECONDS_PER_YEAR`` -- linear in the parameter and absent from
+    ``logpdf`` and hence from :func:`log_weights` -- so
+    :math:`g_R(\varphi) = \varphi/\varphi_{\mathrm{fid}}` and
+    :math:`g_F(\varphi) = 1`.
+
+    ``H0`` enters the same rate integral only through
+    :func:`~astrogwb.cosmology.distance_and_volume_grid`'s differential
+    comoving volume, ``4 pi * comoving_distance**2 * inv_e / h0 * c``, with
+    ``comoving_distance = c/h0 * integral(inv_e)`` itself :math:`\propto 1/h_0`
+    (:mod:`astrogwb.cosmology`, ``distance_and_volume_grid``): two powers from
+    the squared distance plus one explicit ``1/h0`` give
+    :math:`\mathrm{d}V_c/\mathrm{d}z \propto h_0^{-3}`, and since that factor
+    divides out of the normalized redshift ``logpdf``, it is the only
+    ``H0``-dependence of ``total_merger_rate``, so
+    :math:`g_R(\varphi) = (\varphi_{\mathrm{fid}}/\varphi)^3`. The mean energy
+    flux -- ``exp(log_weights)`` in the spectral density contraction -- picks
+    up ``H0`` only through the ``-2 * logdiff_dl_gw`` term in
+    :func:`log_weights`, via the target luminosity distance
+    :math:`d_L \propto 1/h_0` against the fixed fiducial catalog distance:
+    :math:`\exp(-2\log d_L(h_0)) \propto h_0^2`, so
+    :math:`g_F(\varphi) = (\varphi/\varphi_{\mathrm{fid}})^2`.
+
+    Parameters
+    ----------
+    parameter:
+        One of :data:`AMPLITUDE_PARAMETERS`.
+    fiducial:
+        Reference value :math:`\varphi_{\mathrm{fid}}` that defines the
+        template.
+
+    Returns
+    -------
+    AmplitudeScalings
+        The ``(merger_rate, mean_energy_flux)`` pair of scaling functions.
+
+    Raises
+    ------
+    ValueError
+        If ``parameter`` is not one of :data:`AMPLITUDE_PARAMETERS`.
+    """
+    if parameter == "local_merger_rate":
+        return AmplitudeScalings(
+            merger_rate=lambda marginalized_parameter: (
+                marginalized_parameter / fiducial
+            ),
+            mean_energy_flux=lambda marginalized_parameter: jnp.ones_like(
+                marginalized_parameter
+            ),
+        )
+    if parameter == "H0":
+        return AmplitudeScalings(
+            merger_rate=lambda marginalized_parameter: (
+                (fiducial / marginalized_parameter) ** 3
+            ),
+            mean_energy_flux=lambda marginalized_parameter: (
+                (marginalized_parameter / fiducial) ** 2
+            ),
+        )
+    raise ValueError(
+        f"{parameter!r} is not one of the amplitude parameters {AMPLITUDE_PARAMETERS}"
+    )
 
 
 def compute_merger_rate_distance_and_logprob(

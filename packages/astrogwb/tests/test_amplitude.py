@@ -34,6 +34,10 @@ def _identity_scaling(marginalized_parameter: jax.Array) -> jax.Array:
     return marginalized_parameter
 
 
+def _ones_scaling(marginalized_parameter: jax.Array) -> jax.Array:
+    return jnp.ones_like(marginalized_parameter)
+
+
 def _statistics() -> tuple[jax.Array, jax.Array]:
     """The two amplitude sufficient statistics, as ``amplitude_marginalized_model`` computes them."""
     template = jnp.asarray(TEMPLATE)
@@ -47,12 +51,16 @@ def _quadrature_log_evidence(
     grid: jax.Array,
     log_prior: jax.Array,
     *,
-    scaling=_identity_scaling,
+    merger_rate_amplitude=_identity_scaling,
+    mean_energy_flux_amplitude=_ones_scaling,
 ) -> float:
     """Assemble the evidence the same way ``amplitude_marginalized_model`` does."""
     amplitude_mle, template_optimal_snr = _statistics()
     quadrature = make_amplitude_quadrature(
-        grid=grid, log_prior=log_prior, scaling=scaling
+        grid=grid,
+        log_prior=log_prior,
+        merger_rate_amplitude=merger_rate_amplitude,
+        mean_energy_flux_amplitude=mean_energy_flux_amplitude,
     )
     log_integrand = amplitude_log_integrand(
         amplitude_mle, template_optimal_snr, quadrature=quadrature
@@ -128,12 +136,18 @@ def test_quadrature_matches_brute_force_integration_normal_prior() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Nonlinear scaling: f(H0) = H0_fid / H0
+# Nonlinear scaling: the real H0 pair, g_R = (H0_fid/H0)**3, g_F = (H0/H0_fid)**2
 # --------------------------------------------------------------------------- #
 
 
 def _h0_log_likelihood(h0: np.ndarray, h0_fid: float) -> np.ndarray:
-    """``log p(d | A = h0_fid / h0)`` written out from the Gaussian definition."""
+    """``log p(d | A = f(h0))`` written out from the Gaussian definition.
+
+    ``f(h0) = g_R(h0) * g_F(h0) = (h0_fid/h0)**3 * (h0/h0_fid)**2 = h0_fid/h0``,
+    the same net amplitude as the single-scaling formula this test used to
+    exercise -- the product of the two real exponents collapses to the
+    original inverse relation, so the brute-force reference is unchanged.
+    """
     amplitude = h0_fid / h0
     residual = (DATA - amplitude[:, None] * TEMPLATE) / SCALE
     return np.sum(-0.5 * residual**2 - np.log(SCALE) - 0.5 * _LOG_TWO_PI, axis=-1)
@@ -156,7 +170,7 @@ def _h0_brute_force_moments(
 
 
 def test_numerical_h0_marginalization_matches_brute_force_integration() -> None:
-    """The only coverage of the nonlinear scaling path, f(H0) = H0_fid / H0.
+    """The only coverage of the nonlinear scaling path, ``f(H0) = H0_fid / H0``.
 
     ``draw_marginalized_parameter`` materializes an ``(count, K)`` array, so
     this is the one test in the module where fixture size directly drives
@@ -172,7 +186,12 @@ def test_numerical_h0_marginalization_matches_brute_force_integration() -> None:
     quadrature = make_amplitude_quadrature(
         grid=h0_grid,
         log_prior=jnp.full_like(h0_grid, -jnp.log(h0_high - h0_low)),
-        scaling=lambda marginalized_parameter: h0_fid / marginalized_parameter,
+        merger_rate_amplitude=lambda marginalized_parameter: (
+            (h0_fid / marginalized_parameter) ** 3
+        ),
+        mean_energy_flux_amplitude=lambda marginalized_parameter: (
+            (marginalized_parameter / h0_fid) ** 2
+        ),
     )
     h0_draws = draw_marginalized_parameter(
         jnp.broadcast_to(amplitude_mle, (count,)),
@@ -201,7 +220,10 @@ def test_draw_marginalized_parameter_recovers_conditional_moments() -> None:
     grid = jnp.linspace(low, high, 4001)
     log_prior = jnp.full_like(grid, -jnp.log(high - low))
     quadrature = make_amplitude_quadrature(
-        grid=grid, log_prior=log_prior, scaling=_identity_scaling
+        grid=grid,
+        log_prior=log_prior,
+        merger_rate_amplitude=_identity_scaling,
+        mean_energy_flux_amplitude=_ones_scaling,
     )
     amplitude_mle, template_optimal_snr = _statistics()
     count = 20_000
@@ -230,7 +252,10 @@ def test_draw_marginalized_parameter_broadcasts_and_is_reproducible() -> None:
     grid = jnp.linspace(low, high, 2001)
     log_prior = jnp.full_like(grid, -jnp.log(high - low))
     quadrature = make_amplitude_quadrature(
-        grid=grid, log_prior=log_prior, scaling=_identity_scaling
+        grid=grid,
+        log_prior=log_prior,
+        merger_rate_amplitude=_identity_scaling,
+        mean_energy_flux_amplitude=_ones_scaling,
     )
     amplitude_mle, template_optimal_snr = _statistics()
     batched_ml = jnp.broadcast_to(amplitude_mle, (2, 5))
@@ -254,7 +279,10 @@ def test_draw_marginalized_parameter_is_nan_free_far_outside_the_grid() -> None:
     grid = jnp.linspace(low, high, 2001)
     log_prior = jnp.full_like(grid, -jnp.log(high - low))
     quadrature = make_amplitude_quadrature(
-        grid=grid, log_prior=log_prior, scaling=_identity_scaling
+        grid=grid,
+        log_prior=log_prior,
+        merger_rate_amplitude=_identity_scaling,
+        mean_energy_flux_amplitude=_ones_scaling,
     )
     amplitude_mle, template_optimal_snr = _statistics()
 
@@ -283,12 +311,14 @@ def test_quadrature_effective_nodes_falls_with_fewer_grid_points() -> None:
     fine = make_amplitude_quadrature(
         grid=fine_grid,
         log_prior=jnp.full_like(fine_grid, -jnp.log(high - low)),
-        scaling=_identity_scaling,
+        merger_rate_amplitude=_identity_scaling,
+        mean_energy_flux_amplitude=_ones_scaling,
     )
     coarse = make_amplitude_quadrature(
         grid=coarse_grid,
         log_prior=jnp.full_like(coarse_grid, -jnp.log(high - low)),
-        scaling=_identity_scaling,
+        merger_rate_amplitude=_identity_scaling,
+        mean_energy_flux_amplitude=_ones_scaling,
     )
 
     fine_nodes = float(
@@ -305,6 +335,26 @@ def test_quadrature_effective_nodes_falls_with_fewer_grid_points() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# amplitude property
+# --------------------------------------------------------------------------- #
+
+
+def test_amplitude_property_is_the_product_of_the_two_factors() -> None:
+    grid = jnp.linspace(0.2, 3.0, 11)
+    quadrature = make_amplitude_quadrature(
+        grid=grid,
+        log_prior=jnp.zeros_like(grid),
+        merger_rate_amplitude=lambda marginalized_parameter: marginalized_parameter,
+        mean_energy_flux_amplitude=lambda marginalized_parameter: (
+            2.0 * marginalized_parameter
+        ),
+    )
+    np.testing.assert_allclose(
+        np.asarray(quadrature.amplitude), np.asarray(2.0 * grid**2)
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Malformed grids
 # --------------------------------------------------------------------------- #
 
@@ -313,7 +363,10 @@ def test_make_amplitude_quadrature_rejects_non_monotonic_grid() -> None:
     grid = jnp.array([0.0, 1.0, 0.5, 2.0])
     with pytest.raises(ValueError, match="strictly increasing"):
         make_amplitude_quadrature(
-            grid=grid, log_prior=jnp.zeros_like(grid), scaling=_identity_scaling
+            grid=grid,
+            log_prior=jnp.zeros_like(grid),
+            merger_rate_amplitude=_identity_scaling,
+            mean_energy_flux_amplitude=_ones_scaling,
         )
 
 
@@ -321,7 +374,10 @@ def test_make_amplitude_quadrature_rejects_length_one_grid() -> None:
     grid = jnp.array([1.0])
     with pytest.raises(ValueError, match="at least 2 points"):
         make_amplitude_quadrature(
-            grid=grid, log_prior=jnp.zeros_like(grid), scaling=_identity_scaling
+            grid=grid,
+            log_prior=jnp.zeros_like(grid),
+            merger_rate_amplitude=_identity_scaling,
+            mean_energy_flux_amplitude=_ones_scaling,
         )
 
 
@@ -330,7 +386,10 @@ def test_make_amplitude_quadrature_rejects_shape_mismatch() -> None:
     log_prior = jnp.zeros(9)
     with pytest.raises(ValueError, match="must match grid shape"):
         make_amplitude_quadrature(
-            grid=grid, log_prior=log_prior, scaling=_identity_scaling
+            grid=grid,
+            log_prior=log_prior,
+            merger_rate_amplitude=_identity_scaling,
+            mean_energy_flux_amplitude=_ones_scaling,
         )
 
 
@@ -338,5 +397,8 @@ def test_make_amplitude_quadrature_rejects_non_1d_grid() -> None:
     grid = jnp.ones((3, 3))
     with pytest.raises(ValueError, match="must be 1D"):
         make_amplitude_quadrature(
-            grid=grid, log_prior=jnp.zeros_like(grid), scaling=_identity_scaling
+            grid=grid,
+            log_prior=jnp.zeros_like(grid),
+            merger_rate_amplitude=_identity_scaling,
+            mean_energy_flux_amplitude=_ones_scaling,
         )

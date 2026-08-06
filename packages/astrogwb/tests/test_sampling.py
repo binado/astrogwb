@@ -136,7 +136,10 @@ _MARGINALIZED_KWARGS: dict[str, Any] = {
 _QUADRATURE = make_amplitude_quadrature(
     grid=jnp.linspace(0.1, 2.5, 2001),
     log_prior=jnp.full(2001, -jnp.log(2.4)),
-    scaling=lambda marginalized_parameter: marginalized_parameter,
+    merger_rate_amplitude=lambda marginalized_parameter: marginalized_parameter,
+    mean_energy_flux_amplitude=lambda marginalized_parameter: jnp.ones_like(
+        marginalized_parameter
+    ),
 )
 
 
@@ -152,9 +155,9 @@ def test_amplitude_marginalized_model_registers_expected_sites() -> None:
     assert "amplitude_mle" in trace
     assert "template_optimal_snr" in trace
     assert "importance_relative_ess" in trace
-    assert "total_merger_rate" in trace
+    assert "template_merger_rate" in trace
     np.testing.assert_allclose(
-        np.asarray(trace["total_merger_rate"]["value"]), FIDUCIAL_RATE
+        np.asarray(trace["template_merger_rate"]["value"]), FIDUCIAL_RATE
     )
     factor_site = trace["amplitude_marginalized_log_likelihood"]
     assert isinstance(factor_site["fn"], dist.Unit)
@@ -236,7 +239,10 @@ def _quadrature_from_amplitude_prior(
     return make_amplitude_quadrature(
         grid=grid,
         log_prior=log_prior,
-        scaling=lambda marginalized_parameter: marginalized_parameter,
+        merger_rate_amplitude=lambda marginalized_parameter: marginalized_parameter,
+        mean_energy_flux_amplitude=lambda marginalized_parameter: jnp.ones_like(
+            marginalized_parameter
+        ),
     )
 
 

@@ -8,10 +8,15 @@ enter the predicted spectrum as a pure multiplicative factor,
 
 with :math:`\mathbf{m}(\theta)` the *template* -- the spectrum evaluated at a
 fixed reference value of the marginalized parameter -- and :math:`f` an
-arbitrary scaling from the physical parameter :math:`\varphi` (e.g. a merger
-rate, or :math:`H_0` through :math:`f(H_0) = H_{0,\mathrm{fid}}/H_0`) to the
-dimensionless multiplicative amplitude :math:`A = f(\varphi)`. Define the
-noise-weighted inner product :math:`(x|y) = \sum_i x_i y_i / \sigma_i^2`. Then
+arbitrary scaling from the physical parameter :math:`\varphi` to the
+dimensionless multiplicative amplitude :math:`A = f(\varphi)`. The predicted
+spectrum factorizes into two independently-scaling pieces, a total merger
+rate and a mean energy flux (the importance-weighted polarization-power
+contraction), so :math:`f = g_R \cdot g_F`; see
+:func:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation.amplitude_scalings`
+for the concrete pair of exponents for :math:`H_0` and
+``local_merger_rate``. Define the noise-weighted inner product
+:math:`(x|y) = \sum_i x_i y_i / \sigma_i^2`. Then
 
 .. math::
 
@@ -73,36 +78,54 @@ import jax.numpy as jnp
 from astrogwb.importance.diagnostics import relative_ess
 
 
-class AmplitudeScalingFn(Protocol):
-    """Map the marginalized parameter to the multiplicative amplitude :math:`A = f(\\varphi)`."""
+class MergerRateAmplitudeFn(Protocol):
+    """Ratio of the total merger rate at :math:`\\varphi` to its value at the
+    fiducial template, :math:`g_R(\\varphi)`."""
+
+    def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
+
+
+class MeanEnergyFluxAmplitudeFn(Protocol):
+    """Ratio of the importance-weighted polarization-power contraction at
+    :math:`\\varphi` to its value at the fiducial template,
+    :math:`g_F(\\varphi)`."""
 
     def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
 
 
 class AmplitudeQuadrature(NamedTuple):
-    """Precomputed grid, scaling, and prior for numerical marginalization.
+    """Precomputed grid, scalings, and prior for numerical marginalization.
 
     Built once by :func:`make_amplitude_quadrature` and then reused every MCMC
     step; a plain ``NamedTuple`` keeps it a JAX pytree without needing to be
-    stored as model state, since the callable that built it is only consumed
-    at construction time.
+    stored as model state, since the callables that built it are only
+    consumed at construction time.
     """
 
     grid: jax.Array
     """``(K,)`` values of the marginalized parameter :math:`\\varphi`."""
 
-    amplitude: jax.Array
-    """``(K,)`` :math:`f(\\varphi_k)`, the multiplicative factor at each node."""
+    merger_rate_amplitude: jax.Array
+    """``(K,)`` :math:`g_R(\\varphi_k)`, the merger-rate ratio at each node."""
+
+    mean_energy_flux_amplitude: jax.Array
+    """``(K,)`` :math:`g_F(\\varphi_k)`, the mean-energy-flux ratio at each node."""
 
     log_prior: jax.Array
     """``(K,)`` :math:`\\ln\\pi(\\varphi_k)`, the caller's prior density on the grid."""
+
+    @property
+    def amplitude(self) -> jax.Array:
+        """``(K,)`` :math:`f(\\varphi_k) = g_R(\\varphi_k) \\cdot g_F(\\varphi_k)`, by construction."""
+        return self.merger_rate_amplitude * self.mean_energy_flux_amplitude
 
 
 def make_amplitude_quadrature(
     *,
     grid: jax.Array,
     log_prior: jax.Array,
-    scaling: AmplitudeScalingFn,
+    merger_rate_amplitude: MergerRateAmplitudeFn,
+    mean_energy_flux_amplitude: MeanEnergyFluxAmplitudeFn,
 ) -> AmplitudeQuadrature:
     """Build the fixed quadrature grid consumed by every MCMC step.
 
@@ -122,8 +145,10 @@ def make_amplitude_quadrature(
         trapezoid rule); typical source is a NumPyro
         ``Distribution.log_prob`` evaluated on a grid that covers the prior
         support. This factory does not renormalize.
-    scaling:
-        Maps the grid to the multiplicative amplitude, :math:`f(\\varphi_k)`.
+    merger_rate_amplitude:
+        Maps the grid to :math:`g_R(\\varphi_k)`, the merger-rate ratio.
+    mean_energy_flux_amplitude:
+        Maps the grid to :math:`g_F(\\varphi_k)`, the mean-energy-flux ratio.
 
     Raises
     ------
@@ -146,8 +171,24 @@ def make_amplitude_quadrature(
 
     return AmplitudeQuadrature(
         grid=grid,
-        amplitude=scaling(grid),
+        merger_rate_amplitude=merger_rate_amplitude(grid),
+        mean_energy_flux_amplitude=mean_energy_flux_amplitude(grid),
         log_prior=log_prior,
+    )
+
+
+def merger_rate_amplitude_at(
+    marginalized_parameter: jax.Array, *, quadrature: AmplitudeQuadrature
+) -> jax.Array:
+    """:math:`g_R(\\varphi)` at arbitrary :math:`\\varphi`, linearly interpolated on the quadrature grid.
+
+    Self-consistent with :func:`draw_marginalized_parameter`, which already
+    returns a linear interpolant between adjacent grid nodes: the same
+    piecewise-linear model is reused here to recover the physical merger rate
+    in post-processing, :math:`R(\\varphi) = g_R(\\varphi) \\cdot R_{\\mathrm{fid}}`.
+    """
+    return jnp.interp(
+        marginalized_parameter, quadrature.grid, quadrature.merger_rate_amplitude
     )
 
 

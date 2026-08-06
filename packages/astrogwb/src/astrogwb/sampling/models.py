@@ -158,25 +158,31 @@ def amplitude_marginalized_model(
     The callback is invoked with ``amplitude_parameter`` pinned to
     ``fiducials[amplitude_parameter]``, so the predicted spectrum it returns is
     the *template* :math:`\mathbf{m}(\theta)` and the marginalized amplitude
-    :math:`A` is the dimensionless ratio to that reference. For a parameter the
-    spectrum is linear in -- ``local_merger_rate``, say -- the physical value is
-    recovered as :math:`A \times` ``fiducials[amplitude_parameter]``, and the
-    existing reference callback works unchanged. A parameter that enters
-    inversely, such as :math:`H_0` with :math:`S_h \propto H_0^{-1}`, needs a
-    callback that declares its own synthetic amplitude key, because the inverse
-    map cannot reuse a physical parameter name.
+    :math:`A = f(\varphi) = g_R(\varphi) \cdot g_F(\varphi)` is the
+    dimensionless ratio to that reference, factored into an independently
+    scaling merger-rate piece and mean-energy-flux piece (see
+    :class:`~astrogwb.sampling.amplitude.AmplitudeQuadrature`). This covers a
+    parameter entering directly, such as ``local_merger_rate`` with
+    :math:`g_R = \varphi/\varphi_{\mathrm{fid}}`, :math:`g_F = 1`, and one
+    entering inversely, such as :math:`H_0` with
+    :math:`g_R = (H_{0,\mathrm{fid}}/H_0)^3`, :math:`g_F = (H_0/H_{0,\mathrm{fid}})^2`
+    -- both work directly with the physical parameter name, no synthetic
+    amplitude key required.
 
     Registered sites:
 
     - one ``numpyro.sample`` per entry in ``priors``;
-    - ``total_merger_rate``, ``amplitude_mle``, ``template_optimal_snr``, and
-      ``importance_relative_ess`` as deterministics;
+    - ``template_merger_rate``, ``amplitude_mle``, ``template_optimal_snr``,
+      and ``importance_relative_ess`` as deterministics;
     - ``amplitude_marginalized_log_likelihood`` as a ``numpyro.factor``.
 
-    ``total_merger_rate`` is the rate at the pinned fiducial amplitude (the
-    template), not the marginalized physical rate. Recover the latter in
-    post-processing from the drawn amplitude and this template value when the
-    spectrum is linear in the marginalized parameter.
+    ``template_merger_rate`` is the rate at the pinned fiducial amplitude (the
+    template), not the marginalized physical rate: the model never publishes
+    a number that would be mistaken for the real merger rate at an
+    unmarginalized :math:`\varphi`. Post-processing recovers the physical rate
+    as ``template_merger_rate * merger_rate_amplitude_at(varphi,
+    quadrature=quadrature)`` (see
+    :func:`~astrogwb.sampling.amplitude.merger_rate_amplitude_at`).
 
     The two amplitude statistics are what post-processing needs to reconstruct
     joint :math:`(\varphi, \theta)` samples via
@@ -260,7 +266,7 @@ def amplitude_marginalized_model(
     )
     amplitude_mle = data_template / template_norm
     template_optimal_snr = jnp.sqrt(template_norm)
-    numpyro.deterministic("total_merger_rate", total_merger_rate)
+    numpyro.deterministic("template_merger_rate", total_merger_rate)
     numpyro.deterministic("amplitude_mle", amplitude_mle)
     numpyro.deterministic("template_optimal_snr", template_optimal_snr)
     numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))
