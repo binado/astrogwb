@@ -26,17 +26,14 @@ from astrogwb.utils import years_to_seconds
 
 def _predicted_spectral_density(
     *,
-    frequencies: jax.Array,
     polarization_power: jax.Array,
     samples: Mapping[str, jax.Array],
-    effective_psd: jax.Array,
-    observation_time: float,
     average_mode: AverageMode,
     merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     priors: Mapping[str, dist.Distribution],
     constants: Mapping[str, Any],
     overrides: Mapping[str, Any] | None = None,
-) -> tuple[jax.Array, jax.Array, float | jax.Array, jax.Array]:
+) -> tuple[jax.Array, float | jax.Array, jax.Array]:
     """Sample the priors and contract the catalog into a predicted spectrum.
 
     The body shared by every model in this module: it registers one
@@ -51,8 +48,8 @@ def _predicted_spectral_density(
 
     Returns
     -------
-    tuple[jax.Array, jax.Array, float | jax.Array, jax.Array]
-        ``(model_spectral_density, scale, total_merger_rate, log_weights)``.
+    tuple[jax.Array, float | jax.Array, jax.Array]
+        ``(model_spectral_density, total_merger_rate, log_weights)``.
     """
     sampled_params = {
         name: numpyro.sample(name, prior) for name, prior in priors.items()
@@ -70,9 +67,7 @@ def _predicted_spectral_density(
         average_mode=average_mode,
     )
 
-    scale = gaussian_bin_scale(effective_psd, frequencies, observation_time)
-
-    return model_spectral_density, scale, total_merger_rate, log_weights
+    return model_spectral_density, total_merger_rate, log_weights
 
 
 def spectral_density_model(
@@ -146,15 +141,11 @@ def spectral_density_model(
     """
     (
         model_spectral_density,
-        scale,
         total_merger_rate,
         log_weights,
     ) = _predicted_spectral_density(
-        frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
-        effective_psd=effective_psd,
-        observation_time=observation_time,
         average_mode=average_mode,
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
         priors=priors or {},
@@ -164,6 +155,7 @@ def spectral_density_model(
     numpyro.deterministic("total_merger_rate", total_merger_rate)
     numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))
 
+    scale = gaussian_bin_scale(effective_psd, frequencies, observation_time)
     numpyro.sample(
         "spectral_density_obs",
         dist.Normal(model_spectral_density, scale).to_event(1),
@@ -273,15 +265,11 @@ def amplitude_marginalized_model(
 
     (
         model_spectral_density,
-        scale,
         total_merger_rate,
         log_weights,
     ) = _predicted_spectral_density(
-        frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
-        effective_psd=effective_psd,
-        observation_time=observation_time,
         average_mode=average_mode,
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
         priors=priors,
@@ -314,6 +302,7 @@ def amplitude_marginalized_model(
     numpyro.deterministic("template_optimal_snr", template_optimal_snr)
     numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))
 
+    scale = gaussian_bin_scale(effective_psd, frequencies, observation_time)
     log_integrand = amplitude_log_integrand(
         amplitude_mle, template_optimal_snr, quadrature=quadrature
     )
