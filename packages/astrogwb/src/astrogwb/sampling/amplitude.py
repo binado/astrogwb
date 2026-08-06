@@ -40,19 +40,18 @@ stable max-shift:
 
 .. math::
 
-    \ln Z = \ln \mathcal{N}_d - R
+    \ln Z = \ln p(d \mid \hat{A})
         + \ell_{\max}
         + \ln\!\int \exp\bigl(\ell(\varphi) - \ell_{\max}\bigr)\, d\varphi,
 
-where :math:`\ln \mathcal{N}_d` is the Gaussian normalization. The caller must
-supply a prior density that is already normalized on the grid
+where :math:`\ln p(d \mid \hat{A}) = \ln\mathcal{N}_d - R` is the Gaussian
+log-likelihood at the MLE amplitude. The caller must supply a prior density
+that is already normalized on the grid
 (:math:`\int \pi(\varphi)\, d\varphi \approx 1` under the same trapezoid
 rule); this module does not renormalize. Squaring
 :math:`\rho(f(\varphi) - \hat{A})` rather than forming
 :math:`\rho^2(f-\hat A)^2` avoids overflowing :math:`\rho^2` at very high
-SNR, and :math:`R` is computed from residuals directly rather than as
-:math:`\tfrac{1}{2}(d|d) - \tfrac{1}{2}\hat{A}^2\rho^2` -- those two terms
-are each :math:`\sim \mathrm{SNR}^2/2` and nearly cancel at high SNR.
+SNR.
 
 "Exact up to quadrature error" only holds if the grid resolves the conditional
 posterior, whose width in :math:`\varphi` is :math:`\sigma_A/|f'(\varphi)|`.
@@ -66,7 +65,6 @@ shaped arrays directly.
 
 from __future__ import annotations
 
-import math
 from typing import NamedTuple, Protocol
 
 import jax
@@ -74,24 +72,11 @@ import jax.numpy as jnp
 
 from astrogwb.importance.diagnostics import relative_ess
 
-_LOG_TWO_PI = math.log(2.0 * math.pi)
-
 
 class AmplitudeScalingFn(Protocol):
     """Map the marginalized parameter to the multiplicative amplitude :math:`A = f(\\varphi)`."""
 
     def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
-
-
-def gaussian_log_norm(scale: jax.Array) -> jax.Array:
-    r"""Normalization :math:`-\sum_i \ln \sigma_i - \frac{n}{2}\ln 2\pi`.
-
-    The constant that makes the log evidence assembled in
-    :func:`~astrogwb.sampling.models.amplitude_marginalized_model` a genuine
-    log marginal likelihood rather than a log density up to an additive
-    constant.
-    """
-    return -jnp.sum(jnp.log(scale), axis=-1) - 0.5 * scale.shape[-1] * _LOG_TWO_PI
 
 
 class AmplitudeQuadrature(NamedTuple):

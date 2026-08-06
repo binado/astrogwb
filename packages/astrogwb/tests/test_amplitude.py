@@ -16,7 +16,6 @@ import pytest
 from astrogwb.sampling.amplitude import (
     amplitude_log_integrand,
     draw_marginalized_parameter,
-    gaussian_log_norm,
     log_trapezoid,
     make_amplitude_quadrature,
     quadrature_effective_nodes,
@@ -52,22 +51,18 @@ def _quadrature_log_evidence(
 ) -> float:
     """Assemble the evidence the same way ``amplitude_marginalized_model`` does."""
     amplitude_mle, template_optimal_snr = _statistics()
-    scale = jnp.asarray(SCALE)
-    residual = 0.5 * jnp.sum(
-        ((jnp.asarray(DATA) - amplitude_mle * jnp.asarray(TEMPLATE)) / scale) ** 2,
-        axis=-1,
-    )
     quadrature = make_amplitude_quadrature(
         grid=grid, log_prior=log_prior, scaling=scaling
     )
     log_integrand = amplitude_log_integrand(
         amplitude_mle, template_optimal_snr, quadrature=quadrature
     )
-    return float(
-        gaussian_log_norm(scale)
-        - residual
-        + log_trapezoid(log_integrand, quadrature.grid)
+    log_likelihood_at_mle = (
+        dist.Normal(amplitude_mle * jnp.asarray(TEMPLATE), jnp.asarray(SCALE))
+        .to_event(1)
+        .log_prob(jnp.asarray(DATA))
     )
+    return float(log_likelihood_at_mle + log_trapezoid(log_integrand, quadrature.grid))
 
 
 def _prior_support(prior: _AmplitudePrior) -> tuple[float, float]:

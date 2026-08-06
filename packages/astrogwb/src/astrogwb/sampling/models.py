@@ -19,7 +19,6 @@ from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.sampling.amplitude import (
     AmplitudeQuadrature,
     amplitude_log_integrand,
-    gaussian_log_norm,
     log_trapezoid,
 )
 from astrogwb.utils import years_to_seconds
@@ -351,20 +350,15 @@ def amplitude_marginalized_model(
     log_integrand = amplitude_log_integrand(
         amplitude_mle, template_optimal_snr, quadrature=quadrature
     )
-    best_fit_residual = 0.5 * jnp.sum(
-        (
-            (
-                observed_spectral_density
-                - amplitude_mle[..., None] * model_spectral_density
-            )
-            / scale
+    log_likelihood_at_mle = (
+        dist.Normal(
+            amplitude_mle[..., None] * model_spectral_density,
+            scale,
         )
-        ** 2,
-        axis=-1,
+        .to_event(1)
+        .log_prob(observed_spectral_density)
     )
     numpyro.factor(
         "amplitude_marginalized_log_likelihood",
-        gaussian_log_norm(scale)
-        - best_fit_residual
-        + log_trapezoid(log_integrand, quadrature.grid),
+        log_likelihood_at_mle + log_trapezoid(log_integrand, quadrature.grid),
     )
