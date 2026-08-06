@@ -15,6 +15,7 @@ import numpyro.distributions as dist
 import pytest
 from astrogwb.sampling.amplitude import (
     amplitude_log_integrand,
+    draw_amplitude_posterior,
     draw_marginalized_parameter,
     log_trapezoid,
     make_amplitude_quadrature,
@@ -332,6 +333,59 @@ def test_quadrature_effective_nodes_falls_with_fewer_grid_points() -> None:
 
     assert coarse_nodes < fine_nodes
     assert coarse_nodes <= coarse_grid.shape[0]
+
+
+# --------------------------------------------------------------------------- #
+# draw_amplitude_posterior
+# --------------------------------------------------------------------------- #
+
+
+def _synthetic_samples(
+    n_chain: int, n_draw: int, seed: int = 0
+) -> dict[str, jax.Array]:
+    rng = np.random.default_rng(seed)
+    return {
+        "amplitude_mle": jnp.asarray(rng.uniform(0.8, 1.2, size=(n_chain, n_draw))),
+        "template_optimal_snr": jnp.asarray(
+            rng.uniform(50.0, 150.0, size=(n_chain, n_draw))
+        ),
+    }
+
+
+def _toy_quadrature():
+    grid = jnp.linspace(0.5, 1.5, 2001)
+    log_prior = jnp.zeros_like(grid)
+    return make_amplitude_quadrature(
+        grid=grid,
+        log_prior=log_prior,
+        merger_rate_amplitude=lambda marginalized_parameter: marginalized_parameter,
+        mean_energy_flux_amplitude=lambda marginalized_parameter: jnp.ones_like(
+            marginalized_parameter
+        ),
+    )
+
+
+def test_draw_amplitude_posterior_is_chunk_size_invariant() -> None:
+    """Chunking is purely a memory knob: results must not depend on chunk_size."""
+    samples = _synthetic_samples(4, 37)
+    quadrature = _toy_quadrature()
+    key = jax.random.key(0)
+
+    phi_unchunked, nodes_unchunked = draw_amplitude_posterior(
+        samples, quadrature=quadrature, rng_key=key, chunk_size=10_000
+    )
+    phi_chunked, nodes_chunked = draw_amplitude_posterior(
+        samples, quadrature=quadrature, rng_key=key, chunk_size=7
+    )
+
+    assert phi_unchunked.shape == (4, 37)
+    np.testing.assert_array_equal(np.asarray(phi_unchunked), np.asarray(phi_chunked))
+    # quadrature_effective_nodes reduces over K=2001 grid points; XLA may pick a
+    # different summation order for a different vmap batch size, so allow for
+    # floating-point reduction-order noise rather than requiring bit-equality.
+    np.testing.assert_allclose(
+        np.asarray(nodes_unchunked), np.asarray(nodes_chunked), rtol=1e-10
+    )
 
 
 # --------------------------------------------------------------------------- #

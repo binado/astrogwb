@@ -429,18 +429,20 @@ def save(
 
     if quadrature is not None:
         import jax
-        from astrogwb.sampling.amplitude import merger_rate_amplitude_at
-
-        from astrogwb_paper.amplitude import draw_amplitude_posterior
+        from astrogwb.sampling.amplitude import (
+            draw_amplitude_posterior,
+            merger_rate_amplitude_at,
+        )
 
         amplitude_parameter = config.analysis.amplitude_parameter
         assert amplitude_parameter is not None
 
+        posterior_samples = mcmc.get_samples(group_by_chain=True)
         rng_key = jax.random.fold_in(jax.random.PRNGKey(config.seed), 1)
         phi, effective_nodes = draw_amplitude_posterior(
-            idata.posterior, quadrature=quadrature, rng_key=rng_key
+            posterior_samples, quadrature=quadrature, rng_key=rng_key
         )
-        template_merger_rate = idata.posterior["template_merger_rate"].to_numpy()
+        template_merger_rate = posterior_samples["template_merger_rate"]
         total_merger_rate = np.asarray(template_merger_rate) * np.asarray(
             merger_rate_amplitude_at(phi, quadrature=quadrature)
         )

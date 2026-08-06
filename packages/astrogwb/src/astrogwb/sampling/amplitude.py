@@ -70,6 +70,7 @@ shaped arrays directly.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import NamedTuple, Protocol
 
 import jax
@@ -319,3 +320,74 @@ def quadrature_effective_nodes(
         amplitude_mle, template_optimal_snr, quadrature=quadrature
     )
     return relative_ess(log_integrand) * quadrature.grid.shape[0]
+
+
+def draw_amplitude_posterior(
+    samples: Mapping[str, jax.Array],
+    *,
+    quadrature: AmplitudeQuadrature,
+    rng_key: jax.Array,
+    chunk_size: int = 512,
+) -> tuple[jax.Array, jax.Array]:
+    """Draw one :math:`\\varphi` per posterior sample, chunked to bound memory.
+
+    ``draw_marginalized_parameter`` materializes an ``(..., K)`` array over
+    its entire input; for a full chain x draw posterior against a grid with
+    enough nodes to resolve a narrow conditional posterior, that is a
+    multi-GB intermediate. This loops over flattened ``(chain, draw)``
+    elements in blocks of ``chunk_size`` and concatenates, bounding the
+    intermediate to ``chunk_size * K`` regardless of the total posterior
+    size.
+
+    ``rng_key`` is split into one subkey per posterior sample *before*
+    chunking, so which chunk a sample falls into never changes its subkey:
+    the result for a given ``rng_key`` is identical for every choice of
+    ``chunk_size`` (this is what makes ``chunk_size`` a pure memory/speed
+    knob rather than part of the result), verified in
+    ``test_amplitude.py``.
+
+    Parameters
+    ----------
+    samples:
+        The dict-like returned by ``numpyro.infer.MCMC.get_samples(group_by_chain=True)``
+        (or any mapping with the same keys/shapes), carrying ``amplitude_mle``
+        and ``template_optimal_snr``, both shape ``(chain, draw)``.
+    quadrature:
+        The grid built by :func:`make_amplitude_quadrature`.
+    rng_key:
+        PRNG key; one uniform draw is consumed per posterior sample.
+    chunk_size:
+        Number of flattened ``(chain, draw)`` elements to draw per block.
+
+    Returns
+    -------
+    tuple[jax.Array, jax.Array]
+        ``(phi, effective_nodes)``, both shaped like ``amplitude_mle``.
+    """
+    amplitude_mle = jnp.asarray(samples["amplitude_mle"])
+    template_optimal_snr = jnp.asarray(samples["template_optimal_snr"])
+    shape = amplitude_mle.shape
+    flat_mle = amplitude_mle.reshape(-1)
+    flat_snr = template_optimal_snr.reshape(-1)
+    n = flat_mle.shape[0]
+    subkeys = jax.random.split(rng_key, n)
+
+    draw_one = jax.vmap(
+        lambda mle, snr, key: draw_marginalized_parameter(
+            mle, snr, quadrature=quadrature, rng_key=key
+        )
+    )
+
+    phi_chunks = []
+    nodes_chunks = []
+    for start in range(0, n, chunk_size):
+        stop = min(start + chunk_size, n)
+        mle_chunk = flat_mle[start:stop]
+        snr_chunk = flat_snr[start:stop]
+        phi_chunks.append(draw_one(mle_chunk, snr_chunk, subkeys[start:stop]))
+        nodes_chunks.append(
+            quadrature_effective_nodes(mle_chunk, snr_chunk, quadrature=quadrature)
+        )
+    phi = jnp.concatenate(phi_chunks).reshape(shape)
+    effective_nodes = jnp.concatenate(nodes_chunks).reshape(shape)
+    return phi, effective_nodes
