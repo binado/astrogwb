@@ -50,7 +50,7 @@ def test_amplitude_grid_rejects_unsupported_prior_type() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _marginalized_config():
+def _marginalized_config(**kwargs):
     raw = load_mapping(PAPER_ROOT / "configs/mcmc.example.toml")
     raw["analysis"] = {
         **raw["analysis"],
@@ -58,7 +58,7 @@ def _marginalized_config():
         "amplitude_parameter": "H0",
     }
     raw["sampled_params"] = []
-    return build_run_config(raw)
+    return build_run_config(raw, **kwargs)
 
 
 def test_build_amplitude_quadrature_matches_config_grid_settings() -> None:
@@ -80,6 +80,74 @@ def test_build_amplitude_quadrature_rejects_a_non_marginalized_config() -> None:
 
     with pytest.raises(ValueError, match="amplitude-marginalized config"):
         build_amplitude_quadrature(config)
+
+
+# --------------------------------------------------------------------------- #
+# save() for an amplitude-marginalized run
+# --------------------------------------------------------------------------- #
+
+
+def _toy_marginalized_mcmc():
+    """A minimal MCMC publishing the deterministics ``save()`` consumes.
+
+    The reconstruction only needs the amplitude sufficient statistics, so this
+    skips the catalog entirely: it exercises the save path, not the physics.
+    """
+    import jax
+    import numpyro
+    from numpyro.infer import MCMC, NUTS
+
+    def model() -> None:
+        x = numpyro.sample("x", dist.Normal(0.0, 1.0))
+        numpyro.deterministic("template_merger_rate", 1e-8 * jnp.exp(0.01 * x))
+        numpyro.deterministic("amplitude_mle", 1.0 + 0.01 * x)
+        numpyro.deterministic("template_optimal_snr", 30.0 + 0.0 * x)
+        numpyro.deterministic("importance_relative_ess", 0.9 + 0.0 * x)
+
+    mcmc = MCMC(
+        NUTS(model),
+        num_warmup=20,
+        num_samples=10,
+        num_chains=2,
+        chain_method="sequential",
+        progress_bar=False,
+    )
+    mcmc.run(jax.random.PRNGKey(0))
+    return mcmc
+
+
+@pytest.mark.integration
+def test_save_writes_reconstructed_amplitude_and_quadrature(tmp_path) -> None:
+    """``save()`` must produce a readable NetCDF carrying phi and its grid.
+
+    Regression guard: ``az.from_numpyro`` returns an xarray ``DataTree``, whose
+    ``__setitem__`` silently accepts a Dataset-style ``(dims, values)`` tuple as
+    an object scalar and then fails at ``to_netcdf``.
+    """
+    import xarray as xr
+    from astrogwb_paper.cli.run_mcmc import save
+
+    config = _marginalized_config(outdir=tmp_path)
+    quadrature = build_amplitude_quadrature(config)
+
+    nc_path = save(
+        _toy_marginalized_mcmc(),
+        config,
+        catalog_path=tmp_path / "catalog.h5",
+        quadrature=quadrature,
+    )
+
+    tree = xr.open_datatree(nc_path)
+    posterior = tree["posterior"].dataset
+    for name in ("H0", "total_merger_rate", "quadrature_effective_nodes"):
+        assert posterior[name].dims == ("chain", "draw"), name
+        assert posterior[name].shape == (2, 10), name
+        assert np.all(np.isfinite(posterior[name].values)), name
+
+    # H0 must land inside the prior grid it was drawn against.
+    h0 = posterior["H0"].values
+    assert np.all(h0 >= float(quadrature.grid[0]))
+    assert np.all(h0 <= float(quadrature.grid[-1]))
 
 
 # --------------------------------------------------------------------------- #

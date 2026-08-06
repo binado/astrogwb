@@ -418,6 +418,7 @@ def save(
     """Write the ArviZ NetCDF + JSON run record, and log the IS health check."""
     import arviz as az
     import numpy as np
+    import xarray as xr
 
     config.outdir.mkdir(parents=True, exist_ok=True)
     timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
@@ -447,15 +448,17 @@ def save(
             merger_rate_amplitude_at(phi, quadrature=quadrature)
         )
 
-        idata.posterior[amplitude_parameter] = (("chain", "draw"), np.asarray(phi))
-        idata.posterior["total_merger_rate"] = (
-            ("chain", "draw"),
-            total_merger_rate,
-        )
-        idata.posterior["quadrature_effective_nodes"] = (
-            ("chain", "draw"),
-            np.asarray(effective_nodes),
-        )
+        # `az.from_numpyro` returns an xarray DataTree, whose __setitem__ does
+        # not accept a Dataset-style `(dims, values)` tuple: it would store the
+        # tuple as an object scalar and fail at `to_netcdf`. Assign DataArrays.
+        for name, values in (
+            (amplitude_parameter, phi),
+            ("total_merger_rate", total_merger_rate),
+            ("quadrature_effective_nodes", effective_nodes),
+        ):
+            idata.posterior[name] = xr.DataArray(
+                np.asarray(values), dims=("chain", "draw")
+            )
 
         min_effective_nodes = float(np.min(effective_nodes))
         if min_effective_nodes < 30:
