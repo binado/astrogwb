@@ -94,27 +94,6 @@ def gaussian_log_norm(scale: jax.Array) -> jax.Array:
     return -jnp.sum(jnp.log(scale), axis=-1) - 0.5 * scale.shape[-1] * _LOG_TWO_PI
 
 
-def best_fit_residual(
-    model_spectral_density: jax.Array,
-    observed_spectral_density: jax.Array,
-    scale: jax.Array,
-    *,
-    amplitude_ml: jax.Array,
-) -> jax.Array:
-    r"""Half the chi-square at the best-fit amplitude.
-
-    :math:`R = \frac{1}{2}\sum_i ((d_i - \hat{A} m_i)/\sigma_i)^2`, computed
-    directly from the residuals to avoid the catastrophic cancellation of the
-    algebraically equivalent :math:`\frac{1}{2}(d|d) - \frac{1}{2}\hat{A}^2
-    \rho^2` at high SNR.
-    """
-    residual = (
-        observed_spectral_density
-        - jnp.expand_dims(amplitude_ml, -1) * model_spectral_density
-    ) / scale
-    return 0.5 * jnp.sum(residual**2, axis=-1)
-
-
 class AmplitudeQuadrature(NamedTuple):
     """Precomputed grid, scaling, and prior measure for numerical marginalization.
 

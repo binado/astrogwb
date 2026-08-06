@@ -15,7 +15,6 @@ import numpyro.distributions as dist
 import pytest
 from astrogwb.sampling.amplitude import (
     amplitude_log_integrand,
-    best_fit_residual,
     draw_marginalized_parameter,
     gaussian_log_norm,
     make_amplitude_quadrature,
@@ -54,8 +53,9 @@ def _quadrature_log_evidence(
     """Assemble the evidence the same way ``amplitude_marginalized_model`` does."""
     amplitude_ml, template_optimal_snr = _statistics()
     scale = jnp.asarray(SCALE)
-    residual = best_fit_residual(
-        jnp.asarray(TEMPLATE), jnp.asarray(DATA), scale, amplitude_ml=amplitude_ml
+    residual = 0.5 * jnp.sum(
+        ((jnp.asarray(DATA) - amplitude_ml * jnp.asarray(TEMPLATE)) / scale) ** 2,
+        axis=-1,
     )
     quadrature = make_amplitude_quadrature(
         grid=grid, log_prior=log_prior, scaling=scaling
