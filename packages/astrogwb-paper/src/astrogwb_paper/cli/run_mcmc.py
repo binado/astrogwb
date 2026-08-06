@@ -420,13 +420,23 @@ def save(
     import numpy as np
     import xarray as xr
 
+    from astrogwb_paper.amplitude import quadrature_constant_data, quadrature_dims
+
     config.outdir.mkdir(parents=True, exist_ok=True)
     timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     nc_path, json_path = ensure_output_paths_available(
         config, timestamp=timestamp, force=force
     )
 
-    idata = az.from_numpyro(mcmc)
+    # Persist the grid the chain was actually marginalized against, so
+    # re-analysis reads it back instead of rebuilding it from config.
+    idata = az.from_numpyro(
+        mcmc,
+        constant_data=(
+            None if quadrature is None else quadrature_constant_data(quadrature)
+        ),
+        dims=None if quadrature is None else quadrature_dims(),
+    )
 
     if quadrature is not None:
         import jax

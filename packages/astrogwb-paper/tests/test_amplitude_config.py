@@ -14,7 +14,14 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
-from astrogwb_paper.amplitude import amplitude_grid, build_amplitude_quadrature
+from astrogwb_paper.amplitude import (
+    QUADRATURE_FIELDS,
+    amplitude_grid,
+    build_amplitude_quadrature,
+    load_amplitude_quadrature,
+    quadrature_constant_data,
+    quadrature_dims,
+)
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import AmplitudeParameter, build_run_config
 from astrogwb_paper.paths import paper_project_root
@@ -83,6 +90,62 @@ def test_build_amplitude_quadrature_rejects_a_non_marginalized_config() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Quadrature persistence
+# --------------------------------------------------------------------------- #
+
+
+def test_quadrature_constant_data_covers_every_field_on_the_grid_axis() -> None:
+    quadrature = build_amplitude_quadrature(_marginalized_config())
+    constant_data = quadrature_constant_data(quadrature)
+
+    assert set(constant_data) == set(QUADRATURE_FIELDS)
+    for name, values in constant_data.items():
+        assert values.shape == quadrature.grid.shape, name
+    assert set(quadrature_dims()) == set(QUADRATURE_FIELDS)
+
+
+def test_load_amplitude_quadrature_round_trips_through_netcdf(tmp_path) -> None:
+    """The reconstruction step must read back the grid it was integrated on.
+
+    Rebuilding from config instead would make a config drift silently produce a
+    wrong marginalized posterior, so this asserts exact equality, not closeness.
+    """
+    import xarray as xr
+
+    quadrature = build_amplitude_quadrature(_marginalized_config())
+    constant_data = quadrature_constant_data(quadrature)
+    dims = quadrature_dims()
+
+    tree = xr.DataTree.from_dict(
+        {
+            "constant_data": xr.Dataset(
+                {name: (dims[name], values) for name, values in constant_data.items()}
+            )
+        }
+    )
+    path = tmp_path / "run.nc"
+    tree.to_netcdf(path)
+
+    loaded = load_amplitude_quadrature(xr.open_datatree(path))
+
+    for field in QUADRATURE_FIELDS.values():
+        np.testing.assert_array_equal(
+            np.asarray(getattr(loaded, field)),
+            np.asarray(getattr(quadrature, field)),
+            err_msg=field,
+        )
+
+
+def test_load_amplitude_quadrature_rejects_data_without_the_group() -> None:
+    import xarray as xr
+
+    tree = xr.DataTree.from_dict({"posterior": xr.Dataset({"H0": ("draw", [70.0])})})
+
+    with pytest.raises(KeyError, match="no constant_data group"):
+        load_amplitude_quadrature(tree)
+
+
+# --------------------------------------------------------------------------- #
 # save() for an amplitude-marginalized run
 # --------------------------------------------------------------------------- #
 
@@ -144,10 +207,15 @@ def test_save_writes_reconstructed_amplitude_and_quadrature(tmp_path) -> None:
         assert posterior[name].shape == (2, 10), name
         assert np.all(np.isfinite(posterior[name].values)), name
 
-    # H0 must land inside the prior grid it was drawn against.
+    # H0 must land inside the prior grid, and the persisted grid must be the one
+    # the draws were actually made against.
     h0 = posterior["H0"].values
     assert np.all(h0 >= float(quadrature.grid[0]))
     assert np.all(h0 <= float(quadrature.grid[-1]))
+    np.testing.assert_array_equal(
+        np.asarray(load_amplitude_quadrature(tree).grid),
+        np.asarray(quadrature.grid),
+    )
 
 
 # --------------------------------------------------------------------------- #

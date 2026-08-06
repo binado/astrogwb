@@ -13,10 +13,28 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import jax
+    import numpy as np
+    import xarray as xr
     from astrogwb.sampling.amplitude import AmplitudeQuadrature
     from numpyro.distributions import Distribution
 
     from astrogwb_paper.config.mcmc import RunConfig
+
+AMPLITUDE_NODE_DIM = "amplitude_node"
+"""Dimension name shared by every persisted quadrature array."""
+
+QUADRATURE_FIELDS: dict[str, str] = {
+    "amplitude_grid": "grid",
+    "amplitude_log_prior": "log_prior",
+    "amplitude_merger_rate_scaling": "merger_rate_amplitude",
+    "amplitude_mean_energy_flux_scaling": "mean_energy_flux_amplitude",
+}
+"""Persisted ``constant_data`` name -> :class:`AmplitudeQuadrature` field.
+
+The writer (:func:`quadrature_constant_data`) and the reader
+(:func:`load_amplitude_quadrature`) both iterate this single mapping, so they
+cannot drift apart as fields are added.
+"""
 
 
 def amplitude_grid(
@@ -86,4 +104,86 @@ def build_amplitude_quadrature(config: RunConfig) -> AmplitudeQuadrature:
         log_prior=log_prior,
         merger_rate_amplitude=scalings.merger_rate,
         mean_energy_flux_amplitude=scalings.mean_energy_flux,
+    )
+
+
+def quadrature_constant_data(quadrature: AmplitudeQuadrature) -> dict[str, np.ndarray]:
+    """The quadrature arrays to persist alongside a run's posterior.
+
+    Saved into the ``constant_data`` group so re-analysis can recover the grid
+    that a chain was actually marginalized against, instead of rebuilding it
+    from the config and hoping every input reproduces. The reconstruction step
+    (``draw_amplitude_posterior``) is only exact for *the* grid the model
+    integrated; a silently different one yields a wrong marginalized posterior
+    with no visible symptom, because the sufficient statistics stay finite and
+    plausible whatever grid you pair them with.
+    """
+    import numpy as np
+
+    return {
+        name: np.asarray(getattr(quadrature, field))
+        for name, field in QUADRATURE_FIELDS.items()
+    }
+
+
+def quadrature_dims() -> dict[str, list[str]]:
+    """ArviZ ``dims`` entries putting every persisted array on one shared axis."""
+    return {name: [AMPLITUDE_NODE_DIM] for name in QUADRATURE_FIELDS}
+
+
+def load_amplitude_quadrature(idata: xr.DataTree) -> AmplitudeQuadrature:
+    """Recover the exact quadrature a saved run used.
+
+    Prefer this over calling :func:`build_amplitude_quadrature` on the run's
+    config: it reads the grid that was integrated rather than deriving one that
+    merely ought to match.
+
+    Raises
+    ------
+    KeyError
+        If ``idata`` predates quadrature persistence, or came from a run that
+        was not amplitude-marginalized.
+    """
+    import jax.numpy as jnp
+    from astrogwb.sampling.amplitude import make_amplitude_quadrature
+
+    if "constant_data" not in idata:
+        raise KeyError(
+            "InferenceData has no constant_data group; it is either not from an "
+            "amplitude-marginalized run or predates quadrature persistence"
+        )
+    constant_data = idata["constant_data"].dataset
+    missing = [name for name in QUADRATURE_FIELDS if name not in constant_data]
+    if missing:
+        raise KeyError(
+            f"constant_data is missing persisted quadrature arrays {missing}; "
+            "it is either not from an amplitude-marginalized run or predates "
+            "quadrature persistence"
+        )
+
+    arrays = {
+        field: jnp.asarray(constant_data[name].values)
+        for name, field in QUADRATURE_FIELDS.items()
+    }
+    grid = arrays["grid"]
+    for field in ("merger_rate_amplitude", "mean_energy_flux_amplitude"):
+        if arrays[field].shape != grid.shape:
+            raise ValueError(
+                f"persisted {field} shape {arrays[field].shape} does not match "
+                f"grid shape {grid.shape}"
+            )
+    # The scaling callables are only consumed at construction time, so replaying
+    # the stored values through constant functions reuses the same grid
+    # validation (1D, increasing, matching shapes) that the original build got.
+    # They ignore their argument because the scalings are already tabulated on
+    # exactly the grid being passed in.
+    return make_amplitude_quadrature(
+        grid=grid,
+        log_prior=arrays["log_prior"],
+        merger_rate_amplitude=lambda marginalized_parameter: arrays[
+            "merger_rate_amplitude"
+        ],
+        mean_energy_flux_amplitude=lambda marginalized_parameter: arrays[
+            "mean_energy_flux_amplitude"
+        ],
     )
