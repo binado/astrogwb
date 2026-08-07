@@ -19,8 +19,10 @@
 # prior-support grid via the inverse CDF of each parameter's prior, evaluates
 # the BNS Madau–Dickinson modified-propagation
 # `merger_rate_and_log_weights` callback on that 2D grid, and plots a heatmap
-# of the mean importance weights $\langle w\rangle=\mathrm{mean}(\mathrm{e}^{\log w})$
-# (not the log-weights).
+# of the relative effective sample size
+# $N_{\mathrm{eff}}/N = (\sum_i w_i)^2 / (N\sum_i w_i^2)$ from the
+# non-log importance weights $w_i=\mathrm{e}^{\log w_i}$ (same definition as
+# `importance_relative_ess` in the NumPyro model).
 #
 # Combinations (for now hard-coded):
 #
@@ -91,7 +93,7 @@ H0_LABEL = r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
 OMEGA_M_LABEL = r"$\Omega_m$"
 XI_0_LABEL = r"$\Xi_0$"
 XI_N_LABEL = r"$n$"
-WEIGHT_LABEL = r"$\langle w\rangle$"
+RELATIVE_ESS_LABEL = r"$N_{\mathrm{eff}} / N_{\mathrm{inj}}$"
 
 PARAM_LABELS = {
     "H0": H0_LABEL,
@@ -165,7 +167,7 @@ merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
 #
 # For a prior $p$, the 1D grid is the quantile interval $[F^{-1}(\varepsilon),
 # F^{-1}(1-\varepsilon)]$ sampled uniformly with `npoints` nodes. On the 2D
-# mesh we evaluate $\langle w\rangle$ at each node (chunked to bound peak
+# mesh we evaluate the relative ESS at each node (chunked to bound peak
 # memory).
 
 
@@ -176,54 +178,60 @@ def prior_grid(prior: dist.Distribution, *, eps: float, npoints: int) -> jax.Arr
     return jnp.linspace(low, high, npoints)
 
 
+def relative_ess(log_weights: jax.Array) -> jax.Array:
+    """Relative ESS $(\\sum w)^2 / (N \\sum w^2)$ from log-importance weights."""
+    weights = jnp.exp(log_weights)
+    return jnp.sum(weights) ** 2 / (weights.shape[0] * jnp.sum(weights**2))
+
+
 def _category_cmap(category: str) -> LinearSegmentedColormap:
     return LinearSegmentedColormap.from_list(
-        f"{category}_weights",
+        f"{category}_relative_ess",
         ["#ffffff", CATEGORY[category]],
     )
 
 
-def evaluate_mean_weight_grid(
+def evaluate_relative_ess_grid(
     axis0: tuple[str, jax.Array],
     axis1: tuple[str, jax.Array],
     *,
     constants: Mapping[str, float],
     chunk_size: int,
 ) -> jax.Array:
-    """Return mean importance weights on the Cartesian product of ``axis0/1``."""
+    """Return relative ESS on the Cartesian product of ``axis0/1``."""
     name0, grid0 = axis0
     name1, grid1 = axis1
     mesh0, mesh1 = jnp.meshgrid(grid0, grid1, indexing="ij")
     points = jnp.stack([mesh0.ravel(), mesh1.ravel()], axis=-1)
 
-    def _mean_weight_at_point(point: jax.Array) -> jax.Array:
+    def _relative_ess_at_point(point: jax.Array) -> jax.Array:
         params = {**constants, name0: point[0], name1: point[1]}
         _, log_weights = merger_rate_and_log_weights_fn(params, samples)
-        return jnp.mean(jnp.exp(log_weights))
+        return relative_ess(log_weights)
 
-    mean_weights = jax.lax.map(
-        _mean_weight_at_point, points, batch_size=chunk_size
-    ).reshape(mesh0.shape)
-    return jax.block_until_ready(mean_weights)
+    ess = jax.lax.map(_relative_ess_at_point, points, batch_size=chunk_size).reshape(
+        mesh0.shape
+    )
+    return jax.block_until_ready(ess)
 
 
-def plot_weight_heatmap(
+def plot_relative_ess_heatmap(
     axis0: tuple[str, jax.Array],
     axis1: tuple[str, jax.Array],
-    mean_weights: jax.Array,
+    relative_ess_grid: jax.Array,
     *,
     category: str,
     fiducials: Mapping[str, float],
 ) -> Figure:
-    """Heatmap of mean importance weights over a two-parameter grid."""
+    """Heatmap of relative ESS over a two-parameter grid."""
     name0, grid0 = axis0
     name1, grid1 = axis1
     grid0_np = np.asarray(grid0, dtype=np.float64)
     grid1_np = np.asarray(grid1, dtype=np.float64)
-    weights_np = np.asarray(mean_weights, dtype=np.float64)
+    ess_np = np.asarray(relative_ess_grid, dtype=np.float64)
 
     # ``matshow`` uses image indexing (row, col) = (y, x); transpose so that
-    # ``weights[i, j]`` at ``(grid0[i], grid1[j])`` lands on the correct axes.
+    # ``ess[i, j]`` at ``(grid0[i], grid1[j])`` lands on the correct axes.
     dx = 0.5 * (grid0_np[1] - grid0_np[0]) if grid0_np.size > 1 else 0.5
     dy = 0.5 * (grid1_np[1] - grid1_np[0]) if grid1_np.size > 1 else 0.5
     extent = (
@@ -235,7 +243,7 @@ def plot_weight_heatmap(
 
     fig, ax = plt.subplots()
     image = ax.matshow(
-        weights_np.T,
+        ess_np.T,
         origin="lower",
         extent=extent,
         aspect="auto",
@@ -248,7 +256,7 @@ def plot_weight_heatmap(
     ax.set_xlabel(PARAM_LABELS.get(name0, name0))
     ax.set_ylabel(PARAM_LABELS.get(name1, name1))
     cbar = fig.colorbar(image, ax=ax, pad=0.02)
-    cbar.set_label(WEIGHT_LABEL)
+    cbar.set_label(RELATIVE_ESS_LABEL)
     return fig
 
 
@@ -275,16 +283,16 @@ print(
 )
 
 # %%
-mean_weights_h0_om = evaluate_mean_weight_grid(
+relative_ess_h0_om = evaluate_relative_ess_grid(
     (name_h0, grid_h0),
     (name_om, grid_om),
     constants=constants_h0_om,
     chunk_size=chunk_size,
 )
 print(
-    f"H0–Omega_m mean weights: "
-    f"min={float(mean_weights_h0_om.min()):.4g} "
-    f"max={float(mean_weights_h0_om.max()):.4g}"
+    f"H0–Omega_m relative ESS: "
+    f"min={float(relative_ess_h0_om.min()):.4g} "
+    f"max={float(relative_ess_h0_om.max()):.4g}"
 )
 
 # %% [markdown]
@@ -303,38 +311,38 @@ print(
 )
 
 # %%
-mean_weights_xi = evaluate_mean_weight_grid(
+relative_ess_xi = evaluate_relative_ess_grid(
     (name_xi0, grid_xi0),
     (name_xin, grid_xin),
     constants=constants_xi,
     chunk_size=chunk_size,
 )
 print(
-    f"Xi0–n mean weights: "
-    f"min={float(mean_weights_xi.min()):.4g} "
-    f"max={float(mean_weights_xi.max()):.4g}"
+    f"Xi0–n relative ESS: "
+    f"min={float(relative_ess_xi.min()):.4g} "
+    f"max={float(relative_ess_xi.max()):.4g}"
 )
 
 # %% [markdown]
-# ## Plot: $H_0$–$\Omega_m$ weight heatmap
+# ## Plot: $H_0$–$\Omega_m$ relative-ESS heatmap
 
 # %%
-plot_weight_heatmap(
+plot_relative_ess_heatmap(
     (name_h0, grid_h0),
     (name_om, grid_om),
-    mean_weights_h0_om,
+    relative_ess_h0_om,
     category=category_cosmo,
     fiducials=fiducials,
 )
 
 # %% [markdown]
-# ## Plot: $\Xi_0$–$n$ weight heatmap
+# ## Plot: $\Xi_0$–$n$ relative-ESS heatmap
 
 # %%
-plot_weight_heatmap(
+plot_relative_ess_heatmap(
     (name_xi0, grid_xi0),
     (name_xin, grid_xin),
-    mean_weights_xi,
+    relative_ess_xi,
     category=category_xi,
     fiducials=fiducials,
 )
