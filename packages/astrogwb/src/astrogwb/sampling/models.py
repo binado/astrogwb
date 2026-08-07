@@ -280,7 +280,9 @@ def amplitude_marginalized_model(
     dimensionless ratio to that reference, with
     :math:`f = g_R \cdot g_F` factored into an independently scaling
     merger-rate piece and mean-energy-flux piece (see
-    :func:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation.amplitude_scalings`).
+    :func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.amplitude_H0_fn`
+    and
+    :func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.amplitude_local_merger_rate_fn`).
     This covers a parameter entering directly, such as ``local_merger_rate``
     with :math:`g_R = \varphi`, :math:`g_F = 1`, and one entering inversely,
     such as :math:`H_0` with :math:`g_R = H_0^{-3}`, :math:`g_F = H_0^{2}`

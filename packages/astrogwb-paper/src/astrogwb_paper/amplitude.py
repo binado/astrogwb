@@ -57,7 +57,10 @@ def build_amplitude_marginalization(config: RunConfig) -> AmplitudeMarginalizati
     :class:`~astrogwb_paper.config.mcmc.AnalysisConfig`.
     """
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-        amplitude_scalings,
+        amplitude_H0_fn,
+        amplitude_local_merger_rate_fn,
+        merger_rate_H0_fn,
+        merger_rate_local_merger_rate_fn,
     )
     from astrogwb.sampling.amplitude import quadrature_grid
 
@@ -71,14 +74,23 @@ def build_amplitude_marginalization(config: RunConfig) -> AmplitudeMarginalizati
             "config (analysis.likelihood == 'amplitude_marginalized')"
         )
 
+    if parameter == "H0":
+        amplitude_fn, merger_rate_fn = amplitude_H0_fn, merger_rate_H0_fn
+    elif parameter == "local_merger_rate":
+        amplitude_fn, merger_rate_fn = (
+            amplitude_local_merger_rate_fn,
+            merger_rate_local_merger_rate_fn,
+        )
+    else:
+        raise ValueError(f"unsupported amplitude parameter {parameter!r}")
+
     prior = build_prior(config.amplitude_prior)
-    scalings = amplitude_scalings(parameter)
     return AmplitudeMarginalization(
         parameter=parameter,
         fiducial=float(config.fiducials[parameter]),
         prior=prior,
-        amplitude_fn=scalings.amplitude,
-        merger_rate_fn=scalings.merger_rate,
+        amplitude_fn=amplitude_fn,
+        merger_rate_fn=merger_rate_fn,
         grid=quadrature_grid(
             prior,
             num_nodes=analysis.amplitude_num_nodes,

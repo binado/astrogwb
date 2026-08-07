@@ -26,7 +26,7 @@ fiducial luminosity distances and the GW/EM ratio correction.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, NamedTuple
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -34,119 +34,47 @@ from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
-from astrogwb.sampling.amplitude import AmplitudeFn, MergerRateAmplitudeFn
 from astrogwb.utils import SECONDS_PER_YEAR
 
 AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
 """Parameters this callback supports marginalizing analytically."""
 
 
-# The scalings are module-level `def`s rather than closures over the fiducial so
-# that they are singletons: `AmplitudeConditional` carries the amplitude
+# Absolute scalings as module-level ``def``s (not closures over the fiducial)
+# so they are singletons: ``AmplitudeConditional`` carries the amplitude
 # function as pytree *aux* data, which JAX hashes into the jit cache key. A
-# lambda (or a `functools.partial` over a float) is identity-hashed, so a fresh
-# one per call would retrace the model on every construction. They are absolute
-# -- `f(varphi)`, not `f(varphi)/f(varphi_fid)` -- and the consumer forms the
-# ratio itself, which is why they need no fiducial to close over.
-def _identity(marginalized_parameter: jax.Array) -> jax.Array:
-    return marginalized_parameter
-
-
-def _inverse_cube(marginalized_parameter: jax.Array) -> jax.Array:
+# lambda (or a ``functools.partial`` over a float) is identity-hashed, so a
+# fresh one per call would retrace the model on every construction. The
+# consumer forms the ratio ``f(varphi)/f(varphi_fid)`` itself.
+#
+# The predicted spectrum factorizes as ``f = g_R * g_F``. ``local_merger_rate``
+# enters only through ``total_merger_rate`` (linear; absent from ``log_weights``),
+# so ``g_R = varphi``, ``g_F = 1``, ``f = varphi``. ``H0`` enters the rate via
+# ``dV_c/dz ∝ h0^{-3}`` and the mean energy flux via
+# ``exp(-2 log d_L) ∝ h0^2``, so ``g_R = varphi^{-3}``, ``g_F = varphi^2``,
+# and ``f = varphi^{-1}``.
+def merger_rate_H0_fn(marginalized_parameter: jax.Array) -> jax.Array:
+    """Merger-rate scaling :math:`g_R(H_0) = H_0^{-3}`."""
     return marginalized_parameter**-3
 
 
-def _inverse(marginalized_parameter: jax.Array) -> jax.Array:
+def amplitude_H0_fn(marginalized_parameter: jax.Array) -> jax.Array:
+    """Total amplitude scaling :math:`f(H_0) = H_0^{-1}` (:math:`g_R g_F`)."""
     return 1.0 / marginalized_parameter
 
 
-class AmplitudeScalings(NamedTuple):
-    """The scalings a marginalized amplitude parameter needs.
-
-    Both fields are *absolute* functions of :math:`\\varphi`; the ratio to the
-    fiducial template is formed by the consumer (see
-    :class:`~astrogwb.sampling.amplitude.AmplitudeConditional`), so anchoring
-    :math:`f(\\varphi_{\\mathrm{fid}}) = 1` cannot be forgotten here.
-
-    The mean-energy-flux factor :math:`g_F` is deliberately *not* a field: no
-    consumer needs it alone, and it is recoverable as
-    :math:`f/g_R` whenever it is wanted. See :func:`amplitude_scalings` for
-    where it comes from physically.
-    """
-
-    merger_rate: MergerRateAmplitudeFn
-    """:math:`g_R(\\varphi)`, needed on its own to recover the physical merger rate."""
-
-    amplitude: AmplitudeFn
-    """:math:`f(\\varphi) = g_R(\\varphi)\\, g_F(\\varphi)`, written out in closed form.
-
-    Spelled directly rather than composed from two factors so it stays a
-    single hashable module-level function: for ``H0`` the product
-    :math:`\\varphi^{-3}\\varphi^{2}` collapses to :math:`1/\\varphi`, and for
-    ``local_merger_rate`` to :math:`\\varphi`.
-    """
+def merger_rate_local_merger_rate_fn(
+    marginalized_parameter: jax.Array,
+) -> jax.Array:
+    """Merger-rate scaling :math:`g_R(\\mathcal{R}_0) = \\mathcal{R}_0`."""
+    return marginalized_parameter
 
 
-def amplitude_scalings(parameter: str) -> AmplitudeScalings:
-    r"""Merger-rate and total amplitude scalings for one amplitude parameter.
-
-    The predicted spectrum factorizes into a total merger rate and a mean
-    energy flux (the importance-weighted polarization-power contraction), each
-    scaling independently with :math:`\varphi`, so
-    :math:`f = g_R \cdot g_F`. Only :math:`g_R` and the product are returned;
-    the derivations of both factors are below because that is what justifies
-    the product.
-
-    ``local_merger_rate`` enters :func:`compute_merger_rate_distance_and_logprob`
-    only through ``total_merger_rate = 1e-9 * local_merger_rate * integral_mpc3
-    / SECONDS_PER_YEAR`` -- linear in the parameter and absent from
-    ``logpdf`` and hence from :func:`log_weights` -- so
-    :math:`g_R(\varphi) = \varphi` and :math:`g_F(\varphi) = 1`, giving
-    :math:`f(\varphi) = \varphi`.
-
-    ``H0`` enters the same rate integral only through
-    :func:`~astrogwb.cosmology.distance_and_volume_grid`'s differential
-    comoving volume, ``4 pi * comoving_distance**2 * inv_e / h0 * c``, with
-    ``comoving_distance = c/h0 * integral(inv_e)`` itself :math:`\propto 1/h_0`
-    (:mod:`astrogwb.cosmology`, ``distance_and_volume_grid``): two powers from
-    the squared distance plus one explicit ``1/h0`` give
-    :math:`\mathrm{d}V_c/\mathrm{d}z \propto h_0^{-3}`, and since that factor
-    divides out of the normalized redshift ``logpdf``, it is the only
-    ``H0``-dependence of ``total_merger_rate``, so
-    :math:`g_R(\varphi) = \varphi^{-3}`. The mean energy flux --
-    ``exp(log_weights)`` in the spectral density contraction -- picks up ``H0``
-    only through the ``-2 * logdiff_dl_gw`` term in :func:`log_weights`, via
-    the target luminosity distance :math:`d_L \propto 1/h_0` against the fixed
-    fiducial catalog distance: :math:`\exp(-2\log d_L(h_0)) \propto h_0^2`, so
-    :math:`g_F(\varphi) = \varphi^{2}` and the product collapses to
-    :math:`f(\varphi) = \varphi^{-1}`.
-
-    Only the *ratios* to the fiducial are physically meaningful; each function
-    here carries an arbitrary constant that cancels once the consumer forms
-    :math:`g(\varphi)/g(\varphi_{\mathrm{fid}})`.
-
-    Parameters
-    ----------
-    parameter:
-        One of :data:`AMPLITUDE_PARAMETERS`.
-
-    Returns
-    -------
-    AmplitudeScalings
-        The ``(merger_rate, amplitude)`` scaling functions.
-
-    Raises
-    ------
-    ValueError
-        If ``parameter`` is not one of :data:`AMPLITUDE_PARAMETERS`.
-    """
-    if parameter == "local_merger_rate":
-        return AmplitudeScalings(merger_rate=_identity, amplitude=_identity)
-    if parameter == "H0":
-        return AmplitudeScalings(merger_rate=_inverse_cube, amplitude=_inverse)
-    raise ValueError(
-        f"{parameter!r} is not one of the amplitude parameters {AMPLITUDE_PARAMETERS}"
-    )
+def amplitude_local_merger_rate_fn(
+    marginalized_parameter: jax.Array,
+) -> jax.Array:
+    """Total amplitude scaling :math:`f(\\mathcal{R}_0) = \\mathcal{R}_0`."""
+    return marginalized_parameter
 
 
 def compute_merger_rate_distance_and_logprob(

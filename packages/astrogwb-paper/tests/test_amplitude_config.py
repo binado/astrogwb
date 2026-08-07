@@ -2,8 +2,8 @@
 
 ``build_amplitude_marginalization`` is the only JAX-touching bridge between the
 validated config and astrogwb's numerical marginalization; the physics itself
-(the H0^3/H0^2 split) is covered in core's ``test_amplitude_scalings.py``, not
-here.
+(the H0^{-3}/H0^{-1} named scalings) is covered in core's
+``test_amplitude_scalings.py``, not here.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
 """Validate the H0^3/H0^2 and local_merger_rate amplitude scalings against the
 real merger-rate + importance-weights callback.
 
-Every other test in the module trusts :func:`amplitude_scalings`' exponents;
-this is the one that checks them against
+Every other test in the module trusts the named amplitude / merger-rate
+scaling functions' exponents; this is the one that checks them against
 :func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.make_merger_rate_and_log_weights_fn`
 on a synthetic catalog, rather than against a restatement of the same
 formulas. If the cosmology or the importance weights ever change, this test
@@ -15,11 +15,15 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astrogwb.gwb import spectral_density
+from astrogwb.importance.models import bns_madau_dickinson_modified_propagation as mod
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     AMPLITUDE_PARAMETERS,
-    amplitude_scalings,
+    amplitude_H0_fn,
+    amplitude_local_merger_rate_fn,
     compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
+    merger_rate_H0_fn,
+    merger_rate_local_merger_rate_fn,
 )
 
 FIDUCIALS = {
@@ -37,6 +41,14 @@ Z_MIN = 0.0
 Z_MAX = 20.0
 N_GRID = 256
 N_SAMPLES = 16
+
+_SCALINGS = {
+    "H0": (amplitude_H0_fn, merger_rate_H0_fn),
+    "local_merger_rate": (
+        amplitude_local_merger_rate_fn,
+        merger_rate_local_merger_rate_fn,
+    ),
+}
 
 
 def _build_synthetic_callback():
@@ -60,7 +72,7 @@ def _build_synthetic_callback():
 def test_merger_rate_amplitude_matches_the_real_callback(parameter: str) -> None:
     fn, samples = _build_synthetic_callback()
     fiducial = FIDUCIALS[parameter]
-    scalings = amplitude_scalings(parameter)
+    _amplitude_fn, merger_rate_fn = _SCALINGS[parameter]
 
     fiducial_rate, _ = fn(FIDUCIALS, samples)
 
@@ -69,8 +81,8 @@ def test_merger_rate_amplitude_matches_the_real_callback(parameter: str) -> None
         rate, _ = fn(params, samples)
         # The scalings are absolute, so the physical claim is about the ratio
         # to the fiducial -- exactly what AmplitudeConditional forms.
-        ratio = float(scalings.merger_rate(jnp.asarray(phi))) / float(
-            scalings.merger_rate(jnp.asarray(fiducial))
+        ratio = float(merger_rate_fn(jnp.asarray(phi))) / float(
+            merger_rate_fn(jnp.asarray(fiducial))
         )
         np.testing.assert_allclose(
             float(rate), ratio * float(fiducial_rate), rtol=1e-10
@@ -83,7 +95,7 @@ def test_amplitude_factorization_matches_the_real_spectral_density(
 ) -> None:
     fn, samples = _build_synthetic_callback()
     fiducial = FIDUCIALS[parameter]
-    scalings = amplitude_scalings(parameter)
+    amplitude_fn, _merger_rate_fn = _SCALINGS[parameter]
 
     rng = np.random.default_rng(0)
     polarization_power = jnp.asarray(rng.uniform(0.5, 1.5, size=(5, N_SAMPLES)))
@@ -106,8 +118,8 @@ def test_amplitude_factorization_matches_the_real_spectral_density(
             average_mode="catalog_inclination",
         )
 
-        amplitude = float(scalings.amplitude(jnp.asarray(phi))) / float(
-            scalings.amplitude(jnp.asarray(fiducial))
+        amplitude = float(amplitude_fn(jnp.asarray(phi))) / float(
+            amplitude_fn(jnp.asarray(fiducial))
         )
         np.testing.assert_allclose(
             np.asarray(actual_spectral_density),
@@ -116,23 +128,19 @@ def test_amplitude_factorization_matches_the_real_spectral_density(
         )
 
 
-@pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
-def test_amplitude_scalings_are_hashable_singletons(parameter: str) -> None:
+def test_amplitude_scalings_are_hashable_singletons() -> None:
     """``AmplitudeConditional`` carries the scaling as pytree *aux* data.
 
     JAX hashes aux data into the jit cache key, so a scaling that is not
     identity-stable across calls silently retraces the model every step. A
     lambda or a ``functools.partial`` over the fiducial would fail this.
     """
-    first = amplitude_scalings(parameter)
-    second = amplitude_scalings(parameter)
-
-    for field in first._fields:
-        this, that = getattr(first, field), getattr(second, field)
-        assert this is that, field
-        assert hash(this) == hash(that), field
-
-
-def test_amplitude_scalings_rejects_unknown_parameter() -> None:
-    with pytest.raises(ValueError, match="not one of the amplitude parameters"):
-        amplitude_scalings("xi_0")
+    pairs = (
+        (amplitude_H0_fn, mod.amplitude_H0_fn),
+        (merger_rate_H0_fn, mod.merger_rate_H0_fn),
+        (amplitude_local_merger_rate_fn, mod.amplitude_local_merger_rate_fn),
+        (merger_rate_local_merger_rate_fn, mod.merger_rate_local_merger_rate_fn),
+    )
+    for imported, via_module in pairs:
+        assert imported is via_module
+        assert hash(imported) == hash(via_module)
