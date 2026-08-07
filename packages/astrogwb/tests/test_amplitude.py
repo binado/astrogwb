@@ -13,13 +13,10 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
+from astrogwb.sampling import AmplitudeQuadrature
 from astrogwb.sampling.amplitude import (
-    amplitude_log_integrand,
-    draw_amplitude_posterior,
-    draw_marginalized_parameter,
-    log_trapezoid,
+    AmplitudeConditional,
     make_amplitude_quadrature,
-    quadrature_effective_nodes,
 )
 
 type _AmplitudePrior = dist.Normal | dist.Uniform
@@ -48,6 +45,16 @@ def _statistics() -> tuple[jax.Array, jax.Array]:
     return data_template / template_norm, jnp.sqrt(template_norm)
 
 
+def _uniform_quadrature(low: float, high: float, num_nodes: int) -> AmplitudeQuadrature:
+    grid = jnp.linspace(low, high, num_nodes)
+    return make_amplitude_quadrature(
+        grid=grid,
+        log_prior=jnp.full_like(grid, -jnp.log(high - low)),
+        merger_rate_amplitude=_identity_scaling,
+        mean_energy_flux_amplitude=_ones_scaling,
+    )
+
+
 def _quadrature_log_evidence(
     grid: jax.Array,
     log_prior: jax.Array,
@@ -63,7 +70,7 @@ def _quadrature_log_evidence(
         merger_rate_amplitude=merger_rate_amplitude,
         mean_energy_flux_amplitude=mean_energy_flux_amplitude,
     )
-    log_integrand = amplitude_log_integrand(
+    conditional = AmplitudeConditional(
         amplitude_mle, template_optimal_snr, quadrature=quadrature
     )
     log_likelihood_at_mle = (
@@ -71,7 +78,7 @@ def _quadrature_log_evidence(
         .to_event(1)
         .log_prob(jnp.asarray(DATA))
     )
-    return float(log_likelihood_at_mle + log_trapezoid(log_integrand, quadrature.grid))
+    return float(log_likelihood_at_mle + conditional.log_normalizer)
 
 
 def _prior_support(prior: _AmplitudePrior) -> tuple[float, float]:
@@ -173,10 +180,9 @@ def _h0_brute_force_moments(
 def test_numerical_h0_marginalization_matches_brute_force_integration() -> None:
     """The only coverage of the nonlinear scaling path, ``f(H0) = H0_fid / H0``.
 
-    ``draw_marginalized_parameter`` materializes an ``(count, K)`` array, so
+    ``AmplitudeConditional.icdf`` materializes a ``batch_shape + (K,)`` CDF, so
     this is the one test in the module where fixture size directly drives
-    memory, not just wall time -- see the footprint note on that function's
-    docstring.
+    memory, not just wall time.
     """
     h0_fid = 70.0
     h0_low, h0_high = 50.0, 90.0
@@ -194,12 +200,12 @@ def test_numerical_h0_marginalization_matches_brute_force_integration() -> None:
             (marginalized_parameter / h0_fid) ** 2
         ),
     )
-    h0_draws = draw_marginalized_parameter(
+    conditional = AmplitudeConditional(
         jnp.broadcast_to(amplitude_mle, (count,)),
         jnp.broadcast_to(template_optimal_snr, (count,)),
         quadrature=quadrature,
-        rng_key=jax.random.key(3),
     )
+    h0_draws = conditional.sample(jax.random.key(3))
     numeric_mean = float(jnp.mean(h0_draws))
     numeric_variance = float(jnp.var(h0_draws))
 
@@ -212,29 +218,22 @@ def test_numerical_h0_marginalization_matches_brute_force_integration() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# draw_marginalized_parameter
+# AmplitudeConditional.sample
 # --------------------------------------------------------------------------- #
 
 
-def test_draw_marginalized_parameter_recovers_conditional_moments() -> None:
+def test_sample_recovers_conditional_moments() -> None:
     low, high = 0.2, 3.0
-    grid = jnp.linspace(low, high, 4001)
-    log_prior = jnp.full_like(grid, -jnp.log(high - low))
-    quadrature = make_amplitude_quadrature(
-        grid=grid,
-        log_prior=log_prior,
-        merger_rate_amplitude=_identity_scaling,
-        mean_energy_flux_amplitude=_ones_scaling,
-    )
+    quadrature = _uniform_quadrature(low, high, 4001)
     amplitude_mle, template_optimal_snr = _statistics()
     count = 20_000
 
-    draws = draw_marginalized_parameter(
+    conditional = AmplitudeConditional(
         jnp.broadcast_to(amplitude_mle, (count,)),
         jnp.broadcast_to(template_optimal_snr, (count,)),
         quadrature=quadrature,
-        rng_key=jax.random.key(1),
     )
+    draws = conditional.sample(jax.random.key(1))
 
     # ``amplitude_mle`` sits ~7 sigma inside [low, high], so the untruncated
     # Normal moments are an adequate reference; numpyro's ``TruncatedNormal``
@@ -248,144 +247,160 @@ def test_draw_marginalized_parameter_recovers_conditional_moments() -> None:
     assert bool(jnp.all((draws >= low) & (draws <= high)))
 
 
-def test_draw_marginalized_parameter_broadcasts_and_is_reproducible() -> None:
+def test_sample_broadcasts_is_reproducible_and_honors_sample_shape() -> None:
     low, high = 0.2, 3.0
-    grid = jnp.linspace(low, high, 2001)
-    log_prior = jnp.full_like(grid, -jnp.log(high - low))
-    quadrature = make_amplitude_quadrature(
-        grid=grid,
-        log_prior=log_prior,
-        merger_rate_amplitude=_identity_scaling,
-        mean_energy_flux_amplitude=_ones_scaling,
-    )
+    quadrature = _uniform_quadrature(low, high, 2001)
     amplitude_mle, template_optimal_snr = _statistics()
-    batched_ml = jnp.broadcast_to(amplitude_mle, (2, 5))
+    batched_mle = jnp.broadcast_to(amplitude_mle, (2, 5))
     batched_snr = jnp.broadcast_to(template_optimal_snr, (2, 5))
 
-    draws = draw_marginalized_parameter(
-        batched_ml, batched_snr, quadrature=quadrature, rng_key=jax.random.key(0)
-    )
-    repeat = draw_marginalized_parameter(
-        batched_ml, batched_snr, quadrature=quadrature, rng_key=jax.random.key(0)
-    )
+    conditional = AmplitudeConditional(batched_mle, batched_snr, quadrature=quadrature)
+    draws = conditional.sample(jax.random.key(0))
+    repeat = conditional.sample(jax.random.key(0))
 
     assert draws.shape == (2, 5)
     np.testing.assert_array_equal(np.asarray(draws), np.asarray(repeat))
     assert bool(jnp.all((draws >= low) & (draws <= high)))
 
+    with_sample_shape = conditional.sample(jax.random.key(0), sample_shape=(3,))
+    assert with_sample_shape.shape == (3, 2, 5)
+    assert bool(jnp.all((with_sample_shape >= low) & (with_sample_shape <= high)))
 
-def test_draw_marginalized_parameter_is_nan_free_far_outside_the_grid() -> None:
+    scalar = AmplitudeConditional(
+        amplitude_mle, template_optimal_snr, quadrature=quadrature
+    )
+    assert scalar.sample(jax.random.key(0), sample_shape=(7,)).shape == (7,)
+
+
+def test_sample_is_nan_free_far_outside_the_grid() -> None:
     """Deep tails underflow to a flat CDF; the guard must not produce NaNs."""
     low, high = 0.2, 0.4
-    grid = jnp.linspace(low, high, 2001)
-    log_prior = jnp.full_like(grid, -jnp.log(high - low))
-    quadrature = make_amplitude_quadrature(
-        grid=grid,
-        log_prior=log_prior,
-        merger_rate_amplitude=_identity_scaling,
-        mean_energy_flux_amplitude=_ones_scaling,
-    )
+    quadrature = _uniform_quadrature(low, high, 2001)
     amplitude_mle, template_optimal_snr = _statistics()
 
-    draws = draw_marginalized_parameter(
+    conditional = AmplitudeConditional(
         jnp.broadcast_to(amplitude_mle, (100,)),
         jnp.broadcast_to(template_optimal_snr, (100,)),
         quadrature=quadrature,
-        rng_key=jax.random.key(2),
     )
+    draws = conditional.sample(jax.random.key(2))
 
     assert bool(jnp.all(jnp.isfinite(draws)))
     assert bool(jnp.all((draws >= low) & (draws <= high)))
 
 
 # --------------------------------------------------------------------------- #
-# quadrature_effective_nodes
+# AmplitudeConditional.log_prob and support
 # --------------------------------------------------------------------------- #
 
 
-def test_quadrature_effective_nodes_falls_with_fewer_grid_points() -> None:
+def test_log_prob_integrates_to_one_on_the_grid() -> None:
+    """The trapezoid rule is exact for the piecewise-linear density ``log_prob`` exposes.
+
+    Evaluating on a finer sub-grid exercises the linear interpolation between
+    nodes, not just the node values: the trapezoid of a piecewise-linear
+    function is its exact integral, which is ``log_normalizer`` by
+    construction.
+    """
+    low, high = 0.2, 3.0
+    quadrature = _uniform_quadrature(low, high, 101)
+    amplitude_mle, template_optimal_snr = _statistics()
+    conditional = AmplitudeConditional(
+        amplitude_mle, template_optimal_snr, quadrature=quadrature
+    )
+
+    fine = jnp.linspace(low, high, 4 * quadrature.grid.shape[0] - 3)
+    integral = jnp.trapezoid(jnp.exp(conditional.log_prob(fine)), fine)
+    np.testing.assert_allclose(float(integral), 1.0, rtol=1e-5, atol=1e-6)
+
+
+def test_log_prob_is_minus_inf_outside_the_grid() -> None:
+    quadrature = _uniform_quadrature(0.2, 3.0, 101)
+    amplitude_mle, template_optimal_snr = _statistics()
+    conditional = AmplitudeConditional(
+        amplitude_mle, template_optimal_snr, quadrature=quadrature
+    )
+
+    outside = jnp.array([0.2 - 0.5, 3.0 + 0.5])
+    assert bool(jnp.all(jnp.isneginf(conditional.log_prob(outside))))
+
+
+def test_support_matches_the_grid_bounds() -> None:
+    quadrature = _uniform_quadrature(0.2, 3.0, 101)
+    amplitude_mle, template_optimal_snr = _statistics()
+    conditional = AmplitudeConditional(
+        amplitude_mle, template_optimal_snr, quadrature=quadrature
+    )
+
+    support = conditional.support
+    np.testing.assert_allclose(
+        float(support.lower_bound), float(quadrature.grid[0]), rtol=1e-6
+    )
+    np.testing.assert_allclose(
+        float(support.upper_bound), float(quadrature.grid[-1]), rtol=1e-6
+    )
+
+
+# --------------------------------------------------------------------------- #
+# AmplitudeConditional as a pytree
+# --------------------------------------------------------------------------- #
+
+
+def test_distribution_survives_jit_and_vmap_as_a_pytree_argument() -> None:
+    """``pytree_data_fields`` must carry statistics and quadrature through transforms."""
+    quadrature = _uniform_quadrature(0.2, 3.0, 2001)
+    amplitude_mle, template_optimal_snr = _statistics()
+    conditional = AmplitudeConditional(
+        jnp.broadcast_to(amplitude_mle, (4,)),
+        jnp.broadcast_to(template_optimal_snr, (4,)),
+        quadrature=quadrature,
+    )
+    quantiles = 0.5 * jnp.ones(4)
+
+    median = jax.jit(lambda c: c.icdf(quantiles))(conditional)
+    assert median.shape == (4,)
+
+    # vmap over the statistics batch while keeping the quadrature unmapped:
+    # the in_axes specimen mirrors the distribution's pytree, with 0 on the
+    # two statistics and None covering the whole quadrature subtree. The
+    # gathered field order is a set iteration order, so build the values by
+    # field name rather than positionally.
+    _aux = AmplitudeConditional.tree_flatten(conditional)[1]
+    _fields = AmplitudeConditional.gather_pytree_data_fields()
+    in_axes = AmplitudeConditional.tree_unflatten(
+        _aux, tuple(None if field == "quadrature" else 0 for field in _fields)
+    )
+    medians = jax.vmap(lambda c: c.icdf(jnp.array(0.5)), in_axes=(in_axes,))(
+        conditional
+    )
+    assert medians.shape == (4,)
+    np.testing.assert_allclose(np.asarray(medians), np.asarray(median), rtol=1e-6)
+
+
+# --------------------------------------------------------------------------- #
+# AmplitudeConditional.effective_nodes
+# --------------------------------------------------------------------------- #
+
+
+def test_effective_nodes_falls_with_fewer_grid_points() -> None:
     low, high = 0.2, 3.0
     amplitude_mle, template_optimal_snr = _statistics()
-
-    fine_grid = jnp.linspace(low, high, 4001)
-    coarse_grid = jnp.linspace(low, high, 21)
-    fine = make_amplitude_quadrature(
-        grid=fine_grid,
-        log_prior=jnp.full_like(fine_grid, -jnp.log(high - low)),
-        merger_rate_amplitude=_identity_scaling,
-        mean_energy_flux_amplitude=_ones_scaling,
-    )
-    coarse = make_amplitude_quadrature(
-        grid=coarse_grid,
-        log_prior=jnp.full_like(coarse_grid, -jnp.log(high - low)),
-        merger_rate_amplitude=_identity_scaling,
-        mean_energy_flux_amplitude=_ones_scaling,
-    )
+    fine = _uniform_quadrature(low, high, 4001)
+    coarse = _uniform_quadrature(low, high, 21)
 
     fine_nodes = float(
-        quadrature_effective_nodes(amplitude_mle, template_optimal_snr, quadrature=fine)
+        AmplitudeConditional(
+            amplitude_mle, template_optimal_snr, quadrature=fine
+        ).effective_nodes
     )
     coarse_nodes = float(
-        quadrature_effective_nodes(
+        AmplitudeConditional(
             amplitude_mle, template_optimal_snr, quadrature=coarse
-        )
+        ).effective_nodes
     )
 
     assert coarse_nodes < fine_nodes
-    assert coarse_nodes <= coarse_grid.shape[0]
-
-
-# --------------------------------------------------------------------------- #
-# draw_amplitude_posterior
-# --------------------------------------------------------------------------- #
-
-
-def _synthetic_samples(
-    n_chain: int, n_draw: int, seed: int = 0
-) -> dict[str, jax.Array]:
-    rng = np.random.default_rng(seed)
-    return {
-        "amplitude_mle": jnp.asarray(rng.uniform(0.8, 1.2, size=(n_chain, n_draw))),
-        "template_optimal_snr": jnp.asarray(
-            rng.uniform(50.0, 150.0, size=(n_chain, n_draw))
-        ),
-    }
-
-
-def _toy_quadrature():
-    grid = jnp.linspace(0.5, 1.5, 2001)
-    log_prior = jnp.zeros_like(grid)
-    return make_amplitude_quadrature(
-        grid=grid,
-        log_prior=log_prior,
-        merger_rate_amplitude=lambda marginalized_parameter: marginalized_parameter,
-        mean_energy_flux_amplitude=lambda marginalized_parameter: jnp.ones_like(
-            marginalized_parameter
-        ),
-    )
-
-
-def test_draw_amplitude_posterior_is_chunk_size_invariant() -> None:
-    """Chunking is purely a memory knob: results must not depend on chunk_size."""
-    samples = _synthetic_samples(4, 37)
-    quadrature = _toy_quadrature()
-    key = jax.random.key(0)
-
-    phi_unchunked, nodes_unchunked = draw_amplitude_posterior(
-        samples, quadrature=quadrature, rng_key=key, chunk_size=10_000
-    )
-    phi_chunked, nodes_chunked = draw_amplitude_posterior(
-        samples, quadrature=quadrature, rng_key=key, chunk_size=7
-    )
-
-    assert phi_unchunked.shape == (4, 37)
-    np.testing.assert_array_equal(np.asarray(phi_unchunked), np.asarray(phi_chunked))
-    # quadrature_effective_nodes reduces over K=2001 grid points; XLA may pick a
-    # different summation order for a different vmap batch size, so allow for
-    # floating-point reduction-order noise rather than requiring bit-equality.
-    np.testing.assert_allclose(
-        np.asarray(nodes_unchunked), np.asarray(nodes_chunked), rtol=1e-10
-    )
+    assert coarse_nodes <= coarse.grid.shape[0]
 
 
 # --------------------------------------------------------------------------- #

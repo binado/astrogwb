@@ -113,10 +113,11 @@ def quadrature_constant_data(quadrature: AmplitudeQuadrature) -> dict[str, np.nd
     Saved into the ``constant_data`` group so re-analysis can recover the grid
     that a chain was actually marginalized against, instead of rebuilding it
     from the config and hoping every input reproduces. The reconstruction step
-    (``draw_amplitude_posterior``) is only exact for *the* grid the model
-    integrated; a silently different one yields a wrong marginalized posterior
-    with no visible symptom, because the sufficient statistics stay finite and
-    plausible whatever grid you pair them with.
+    (:func:`~astrogwb.sampling.models.amplitude_reconstruction_model`) is only
+    exact for *the* grid the model integrated; a silently different one yields
+    a wrong marginalized posterior with no visible symptom, because the
+    sufficient statistics stay finite and plausible whatever grid you pair
+    them with.
     """
     import numpy as np
 

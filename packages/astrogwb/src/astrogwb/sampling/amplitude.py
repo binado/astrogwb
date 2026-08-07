@@ -61,20 +61,34 @@ SNR.
 "Exact up to quadrature error" only holds if the grid resolves the conditional
 posterior, whose width in :math:`\varphi` is :math:`\sigma_A/|f'(\varphi)|`.
 No quadrature rule rescues a Gaussian bump spanning three nodes, so grid
-adequacy must be checked with :func:`quadrature_effective_nodes`, not assumed.
+adequacy must be checked with :attr:`AmplitudeConditional.effective_nodes`,
+not assumed.
 
-All functions broadcast over leading batch dimensions and contract over the
-trailing frequency axis, so post-processing can feed them ``(chain, draw)``
-shaped arrays directly.
+The conditional posterior of :math:`\varphi` given the two statistics is
+exposed as :class:`AmplitudeConditional`, a NumPyro ``Distribution``: the
+marginalization factor in the model is its :attr:`log_normalizer`, and
+post-processing reconstructs :math:`\varphi` by drawing from it. Two
+approximations of the same grid density live in one object on purpose:
+:meth:`~AmplitudeConditional.log_prob` is the piecewise-linear interpolation
+of the density the normalizer integrates (the trapezoid rule is exact for
+it), while :meth:`~AmplitudeConditional.icdf` inverts the trapezoid CDF, a
+piecewise-constant density. They agree at node resolution and differ
+sub-cell; the ``icdf`` path is what the reconstruction draws use.
+
+Everything broadcasts over leading batch dimensions and contracts over the
+trailing grid axis, so post-processing can feed ``(chain, draw)`` shaped
+statistics directly.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import NamedTuple, Protocol
 
 import jax
 import jax.numpy as jnp
+import numpyro.distributions as dist
+from jax.typing import ArrayLike
+from numpyro.distributions import constraints
 
 from astrogwb.importance.diagnostics import relative_ess
 
@@ -179,11 +193,11 @@ def make_amplitude_quadrature(
 
 
 def merger_rate_amplitude_at(
-    marginalized_parameter: jax.Array, *, quadrature: AmplitudeQuadrature
+    marginalized_parameter: ArrayLike, *, quadrature: AmplitudeQuadrature
 ) -> jax.Array:
     """:math:`g_R(\\varphi)` at arbitrary :math:`\\varphi`, linearly interpolated on the quadrature grid.
 
-    Self-consistent with :func:`draw_marginalized_parameter`, which already
+    Self-consistent with :meth:`AmplitudeConditional.icdf`, which already
     returns a linear interpolant between adjacent grid nodes: the same
     piecewise-linear model is reused here to recover the physical merger rate
     in post-processing, :math:`R(\\varphi) = g_R(\\varphi) \\cdot R_{\\mathrm{fid}}`.
@@ -193,24 +207,18 @@ def merger_rate_amplitude_at(
     )
 
 
-def amplitude_log_integrand(
+def _amplitude_log_integrand(
     amplitude_mle: jax.Array,
     template_optimal_snr: jax.Array,
     *,
     quadrature: AmplitudeQuadrature,
 ) -> jax.Array:
-    r"""Shared ``(..., K)`` log-integrand behind the model factor and the two
-    functions below.
+    r"""Shared ``(..., K)`` log-integrand behind every ``AmplitudeConditional`` computation.
 
     Returns :math:`\ln\pi(\varphi_k) - \tfrac12[\rho(f_k - \hat A)]^2` -- the
-    continuous density on the grid, before trapezoid integration.
-
-    Routing :func:`~astrogwb.sampling.models.amplitude_marginalized_model`,
-    :func:`draw_marginalized_parameter`, and :func:`quadrature_effective_nodes`
-    through one implementation is what keeps them from drifting apart -- in
-    particular, it guarantees the inverse-transform sampler in
-    :func:`draw_marginalized_parameter` draws from exactly the density the
-    model factor integrated.
+    continuous density on the grid, before trapezoid integration. Routing the
+    normalizer, the density evaluation, and the inverse-CDF draw through this
+    one implementation is what keeps them from drifting apart.
     """
     scaled_residual = jnp.expand_dims(template_optimal_snr, -1) * (
         quadrature.amplitude - jnp.expand_dims(amplitude_mle, -1)
@@ -218,7 +226,7 @@ def amplitude_log_integrand(
     return quadrature.log_prior - 0.5 * scaled_residual**2
 
 
-def log_trapezoid(log_y: jax.Array, x: jax.Array) -> jax.Array:
+def _log_trapezoid(log_y: jax.Array, x: jax.Array) -> jax.Array:
     r"""Stable :math:`\ln\int \exp(\log y)\, dx` via a shifted trapezoid rule.
 
     Broadcasts over leading dimensions of ``log_y`` and integrates along the
@@ -237,157 +245,196 @@ def _cumulative_trapezoid(y: jax.Array, x: jax.Array) -> jax.Array:
     return jnp.concatenate([zeros, jnp.cumsum(segments, axis=-1)], axis=-1)
 
 
-def draw_marginalized_parameter(
-    amplitude_mle: jax.Array,
-    template_optimal_snr: jax.Array,
-    *,
-    quadrature: AmplitudeQuadrature,
-    rng_key: jax.Array,
-) -> jax.Array:
-    r"""Draw one value of :math:`\varphi` per posterior sample of :math:`\theta`.
+class AmplitudeConditional(dist.Distribution):
+    r"""Conditional posterior of the marginalized parameter on the quadrature grid.
 
-    Inverse-transform sampling on the grid: the CDF is the cumulative trapezoid
-    of the same integrand that :func:`log_trapezoid` integrates in the model
-    factor, so the draws follow precisely the density that was marginalized.
+    Given the amplitude sufficient statistics :math:`\hat A` and :math:`\rho`
+    published by
+    :func:`~astrogwb.sampling.models.amplitude_marginalized_model`, this is
+    the density
 
-    Leading ``(chain, draw)`` dimensions of the statistics are preserved and
-    the function is fully broadcast (no ``vmap``), so it is shape-preserving
-    and un-chunked by default. That materializes an ``(..., K)`` array: at
-    ``K=4000`` grid nodes and 20k posterior samples that is already ~640 MB in
-    float64. Because this runs in post-processing, outside ``jax.jit``, chunk
-    it in plain Python if memory is tight -- loop over the chain axis, or
-    reshape the leading dimensions and slice, calling this function once per
-    chunk and concatenating the results.
+    .. math::
+
+        p(\varphi \mid d, \theta) \propto
+        \pi(\varphi)\,
+        \exp\!\left[-\tfrac12\bigl(\rho\,(f(\varphi) - \hat A)\bigr)^2\right]
+
+    tabulated on the fixed grid in ``quadrature``. One object owns everything
+    derived from that integrand, so the pieces cannot drift apart:
+
+    - :attr:`log_normalizer` -- :math:`\ln Z` of the conditional under the
+      trapezoid rule; this *is* the marginalization factor the model adds to
+      its ``numpyro.factor`` site.
+    - :meth:`sample` / :meth:`icdf` -- inverse-transform draws of
+      :math:`\varphi` for post-processing reconstruction.
+    - :attr:`effective_nodes` -- grid-adequacy diagnostic.
+
+    Two approximations of the grid density are exposed deliberately.
+    :meth:`log_prob` is the log of the piecewise-*linear* interpolation of the
+    density on the grid -- exactly what :attr:`log_normalizer` integrates, so
+    the trapezoid rule integrates the normalized density to exactly 1.
+    :meth:`icdf` inverts the cumulative trapezoid of that density, i.e. a
+    piecewise-*constant* density; the two agree at node resolution and differ
+    sub-cell. ``icdf`` is byte-for-byte the pre-Distribution implementation,
+    so reconstructed draws are bit-identical across the refactor.
+
+    The ``batch_shape`` is the broadcast of the two statistics' shapes, so a
+    ``(chain, draw)`` posterior feeds in directly. This distribution is meant
+    for :class:`~numpyro.infer.Predictive` (generative-only use in
+    :func:`~astrogwb.sampling.models.amplitude_reconstruction_model`); its
+    ``support`` is a
+    :class:`~numpyro.distributions.constraints.dependent_property`, which
+    routes any use as a *latent* site through NumPyro's dynamic-support path
+    -- do not ``numpyro.sample`` it inside a NUTS model without revisiting
+    that choice.
 
     Parameters
     ----------
     amplitude_mle, template_optimal_snr:
-        The amplitude sufficient statistics, as computed by
-        :func:`~astrogwb.sampling.models.amplitude_marginalized_model`.
+        The amplitude sufficient statistics :math:`\hat A` and :math:`\rho`,
+        broadcast against each other.
     quadrature:
         Precomputed grid from :func:`make_amplitude_quadrature`.
-    rng_key:
-        PRNG key; one uniform draw is consumed per leading-dimension element.
-
-    Returns
-    -------
-    jax.Array
-        :math:`\varphi` draws, same leading shape as ``amplitude_mle``, clipped
-        to ``[grid[0], grid[-1]]``.
+    validate_args:
+        Forwarded to :class:`~numpyro.distributions.Distribution`.
     """
-    log_integrand = amplitude_log_integrand(
-        amplitude_mle, template_optimal_snr, quadrature=quadrature
-    )
-    shifted = jnp.exp(log_integrand - jnp.max(log_integrand, axis=-1, keepdims=True))
-    cdf = _cumulative_trapezoid(shifted, quadrature.grid)
-    cdf = cdf / cdf[..., -1:]
 
-    grid = quadrature.grid
-    num_nodes = grid.shape[0]
-    u = jax.random.uniform(rng_key, shape=amplitude_mle.shape)
-    idx = jnp.clip(jnp.sum(cdf < u[..., None], axis=-1), 1, num_nodes - 1)
+    # Plain dict like every NumPyro distribution: annotating ClassVar would
+    # violate ty's override rules against Distribution's instance annotation.
+    arg_constraints = {  # noqa: RUF012
+        "amplitude_mle": constraints.real,
+        "template_optimal_snr": constraints.positive,
+    }
+    pytree_data_fields = ("amplitude_mle", "template_optimal_snr", "quadrature")
 
-    cdf_hi = jnp.take_along_axis(cdf, idx[..., None], axis=-1)[..., 0]
-    cdf_lo = jnp.take_along_axis(cdf, (idx - 1)[..., None], axis=-1)[..., 0]
-    grid_hi = grid[idx]
-    grid_lo = grid[idx - 1]
-
-    # Deep in the tails `shifted` underflows to 0, so the CDF has long flat
-    # plateaus; guard the division so those draws land at `grid_lo` instead of
-    # NaN from 0/0.
-    span = jnp.where(cdf_hi > cdf_lo, cdf_hi - cdf_lo, 1.0)
-    fraction = jnp.where(cdf_hi > cdf_lo, (u - cdf_lo) / span, 0.0)
-    return grid_lo + fraction * (grid_hi - grid_lo)
-
-
-def quadrature_effective_nodes(
-    amplitude_mle: jax.Array,
-    template_optimal_snr: jax.Array,
-    *,
-    quadrature: AmplitudeQuadrature,
-) -> jax.Array:
-    r"""Grid-adequacy diagnostic: how many nodes actually carry the conditional posterior.
-
-    Reuses :func:`~astrogwb.importance.diagnostics.relative_ess` on the
-    log-integrand -- the same Kish effective-sample-size construction used for
-    importance weights -- and rescales it by :math:`K` so the result is a node
-    count rather than a fraction. A Gaussian conditional posterior spanning
-    only a handful of grid nodes will report a small value here even though
-    the assembled log evidence looks finite and plausible; this should be
-    comfortably above approximately 30.
-    """
-    log_integrand = amplitude_log_integrand(
-        amplitude_mle, template_optimal_snr, quadrature=quadrature
-    )
-    return relative_ess(log_integrand) * quadrature.grid.shape[0]
-
-
-def draw_amplitude_posterior(
-    samples: Mapping[str, jax.Array],
-    *,
-    quadrature: AmplitudeQuadrature,
-    rng_key: jax.Array,
-    chunk_size: int = 512,
-) -> tuple[jax.Array, jax.Array]:
-    """Draw one :math:`\\varphi` per posterior sample, chunked to bound memory.
-
-    ``draw_marginalized_parameter`` materializes an ``(..., K)`` array over
-    its entire input; for a full chain x draw posterior against a grid with
-    enough nodes to resolve a narrow conditional posterior, that is a
-    multi-GB intermediate. This loops over flattened ``(chain, draw)``
-    elements in blocks of ``chunk_size`` and concatenates, bounding the
-    intermediate to ``chunk_size * K`` regardless of the total posterior
-    size.
-
-    ``rng_key`` is split into one subkey per posterior sample *before*
-    chunking, so which chunk a sample falls into never changes its subkey:
-    the result for a given ``rng_key`` is identical for every choice of
-    ``chunk_size`` (this is what makes ``chunk_size`` a pure memory/speed
-    knob rather than part of the result), verified in
-    ``test_amplitude.py``.
-
-    Parameters
-    ----------
-    samples:
-        The dict-like returned by ``numpyro.infer.MCMC.get_samples(group_by_chain=True)``
-        (or any mapping with the same keys/shapes), carrying ``amplitude_mle``
-        and ``template_optimal_snr``, both shape ``(chain, draw)``.
-    quadrature:
-        The grid built by :func:`make_amplitude_quadrature`.
-    rng_key:
-        PRNG key; one uniform draw is consumed per posterior sample.
-    chunk_size:
-        Number of flattened ``(chain, draw)`` elements to draw per block.
-
-    Returns
-    -------
-    tuple[jax.Array, jax.Array]
-        ``(phi, effective_nodes)``, both shaped like ``amplitude_mle``.
-    """
-    amplitude_mle = jnp.asarray(samples["amplitude_mle"])
-    template_optimal_snr = jnp.asarray(samples["template_optimal_snr"])
-    shape = amplitude_mle.shape
-    flat_mle = amplitude_mle.reshape(-1)
-    flat_snr = template_optimal_snr.reshape(-1)
-    n = flat_mle.shape[0]
-    subkeys = jax.random.split(rng_key, n)
-
-    draw_one = jax.vmap(
-        lambda mle, snr, key: draw_marginalized_parameter(
-            mle, snr, quadrature=quadrature, rng_key=key
+    def __init__(
+        self,
+        amplitude_mle: jax.Array,
+        template_optimal_snr: jax.Array,
+        *,
+        quadrature: AmplitudeQuadrature,
+        validate_args: bool | None = None,
+    ) -> None:
+        self.amplitude_mle = amplitude_mle
+        self.template_optimal_snr = template_optimal_snr
+        self.quadrature = quadrature
+        batch_shape = jnp.broadcast_shapes(
+            jnp.shape(amplitude_mle), jnp.shape(template_optimal_snr)
         )
-    )
-
-    phi_chunks = []
-    nodes_chunks = []
-    for start in range(0, n, chunk_size):
-        stop = min(start + chunk_size, n)
-        mle_chunk = flat_mle[start:stop]
-        snr_chunk = flat_snr[start:stop]
-        phi_chunks.append(draw_one(mle_chunk, snr_chunk, subkeys[start:stop]))
-        nodes_chunks.append(
-            quadrature_effective_nodes(mle_chunk, snr_chunk, quadrature=quadrature)
+        super().__init__(
+            batch_shape=batch_shape, event_shape=(), validate_args=validate_args
         )
-    phi = jnp.concatenate(phi_chunks).reshape(shape)
-    effective_nodes = jnp.concatenate(nodes_chunks).reshape(shape)
-    return phi, effective_nodes
+
+    @constraints.dependent_property(is_discrete=False, event_dim=0)
+    def support(self) -> constraints.Constraint:
+        """The closed grid interval ``[grid[0], grid[-1]]``."""
+        return constraints.interval(self.quadrature.grid[0], self.quadrature.grid[-1])
+
+    @property
+    def _log_integrand(self) -> jax.Array:
+        """``batch_shape + (K,)`` log-integrand on the grid."""
+        return _amplitude_log_integrand(
+            self.amplitude_mle, self.template_optimal_snr, quadrature=self.quadrature
+        )
+
+    @property
+    def log_normalizer(self) -> jax.Array:
+        r""":math:`\ln Z` of the conditional -- the marginalization factor itself.
+
+        Stable :math:`\ln\int\exp(\ell)\,d\varphi` over the grid via
+        :func:`_log_trapezoid`. The amplitude-marginalized model adds exactly
+        this to the log-likelihood at the MLE: the factor *is* the normalizing
+        constant of the conditional that post-processing later samples.
+        """
+        return _log_trapezoid(self._log_integrand, self.quadrature.grid)
+
+    @property
+    def effective_nodes(self) -> jax.Array:
+        r"""Grid-adequacy diagnostic: how many nodes carry the conditional posterior.
+
+        Reuses :func:`~astrogwb.importance.diagnostics.relative_ess` on the
+        log-integrand -- the same Kish effective-sample-size construction used
+        for importance weights -- and rescales it by :math:`K` so the result
+        is a node count rather than a fraction. A Gaussian conditional
+        posterior spanning only a handful of grid nodes reports a small value
+        here even though the assembled log evidence looks finite and
+        plausible; this should be comfortably above approximately 30.
+        """
+        return relative_ess(self._log_integrand) * self.quadrature.grid.shape[0]
+
+    def log_prob(self, value: ArrayLike) -> ArrayLike:
+        """Log of the piecewise-linear density on the grid, normalized.
+
+        ``jnp.interp`` only takes a 1D ``fp``, so the batched integrand is
+        interpolated manually with the same linear rule. Values outside the
+        grid interval return ``-inf``, matching :attr:`support`.
+        """
+        grid = self.quadrature.grid
+        value = jnp.asarray(value)
+        integrand = jnp.broadcast_to(
+            jnp.exp(self._log_integrand), value.shape + grid.shape
+        )
+        idx = jnp.clip(
+            jnp.searchsorted(grid, value, side="right"), 1, grid.shape[0] - 1
+        )
+        x_lo = grid[idx - 1]
+        x_hi = grid[idx]
+        y_lo = jnp.take_along_axis(integrand, (idx - 1)[..., None], axis=-1)[..., 0]
+        y_hi = jnp.take_along_axis(integrand, idx[..., None], axis=-1)[..., 0]
+        density = y_lo + (y_hi - y_lo) * ((value - x_lo) / (x_hi - x_lo))
+        log_density = jnp.log(density) - self.log_normalizer
+        in_support = (value >= grid[0]) & (value <= grid[-1])
+        return jnp.where(in_support, log_density, -jnp.inf)
+
+    def icdf(self, q: ArrayLike) -> ArrayLike:
+        r"""Inverse CDF by linear-in-CDF inversion on the trapezoid CDF.
+
+        The CDF is the cumulative trapezoid of the same integrand that
+        :attr:`log_normalizer` integrates, so draws follow precisely the
+        density that was marginalized. Kept byte-for-byte compatible with the
+        pre-Distribution implementation: same shifted integrand, same CDF,
+        same flat-plateau guard.
+
+        Parameters
+        ----------
+        q:
+            Quantiles in ``[0, 1]``, shaped ``sample_shape + batch_shape``.
+
+        Returns
+        -------
+        jax.Array
+            :math:`\varphi` values, clipped to ``[grid[0], grid[-1]]``.
+        """
+        q = jnp.asarray(q)
+        log_integrand = self._log_integrand
+        shifted = jnp.exp(
+            log_integrand - jnp.max(log_integrand, axis=-1, keepdims=True)
+        )
+        cdf = _cumulative_trapezoid(shifted, self.quadrature.grid)
+        cdf = cdf / cdf[..., -1:]
+
+        grid = self.quadrature.grid
+        num_nodes = grid.shape[0]
+        cdf = jnp.broadcast_to(cdf, jnp.shape(q) + (num_nodes,))
+        idx = jnp.clip(jnp.sum(cdf < q[..., None], axis=-1), 1, num_nodes - 1)
+
+        cdf_hi = jnp.take_along_axis(cdf, idx[..., None], axis=-1)[..., 0]
+        cdf_lo = jnp.take_along_axis(cdf, (idx - 1)[..., None], axis=-1)[..., 0]
+        grid_hi = grid[idx]
+        grid_lo = grid[idx - 1]
+
+        # Deep in the tails `shifted` underflows to 0, so the CDF has long flat
+        # plateaus; guard the division so those draws land at `grid_lo` instead of
+        # NaN from 0/0.
+        span = jnp.where(cdf_hi > cdf_lo, cdf_hi - cdf_lo, 1.0)
+        fraction = jnp.where(cdf_hi > cdf_lo, (q - cdf_lo) / span, 0.0)
+        return grid_lo + fraction * (grid_hi - grid_lo)
+
+    def sample(
+        self, key: jax.Array | None, sample_shape: tuple[int, ...] = ()
+    ) -> ArrayLike:
+        """Inverse-transform draw: one uniform per element, through :meth:`icdf`."""
+        # `None` only exists to match the base-class signature; handlers
+        # always pass a real key.
+        assert key is not None
+        return self.icdf(jax.random.uniform(key, sample_shape + self.batch_shape))

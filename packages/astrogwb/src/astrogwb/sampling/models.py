@@ -1,3 +1,111 @@
+r"""NumPyro models for importance-weighted SGWB inference.
+
+Two models share one amplitude marginalization. The inference model,
+:func:`amplitude_marginalized_model`, integrates a multiplicative amplitude
+direction out of the Gaussian likelihood and runs under NUTS; the
+reconstruction model, :func:`amplitude_reconstruction_model`, is
+*generative-only* and replays the chain's sufficient statistics through
+:class:`~astrogwb.sampling.amplitude.AmplitudeConditional` under
+:class:`~numpyro.infer.Predictive` to recover joint
+:math:`(\varphi, \theta)` posterior draws.
+
+They are two models, not one, for two reasons. First, the reconstruction must
+never enter the inference potential: the amplitude direction is already
+marginalized in the ``numpyro.factor`` site, so letting its sample site
+contribute a ``log_prob`` would double-count it. Running it as a separate,
+predictive-only model makes that impossible by construction. Second, the
+reconstruction needs only the chain's three published statistics
+(``amplitude_mle``, ``template_optimal_snr``, ``template_merger_rate``) plus
+the quadrature -- never the catalog or the :math:`(F, N)` contraction -- so
+post-processing stays ``O(K)`` per draw and self-contained against a saved
+chain.
+
+End-to-end sketch (toy data; runnable as-is):
+
+.. code-block:: python
+
+    from functools import partial
+
+    import jax
+    import jax.numpy as jnp
+    import numpy as np
+    import numpyro.distributions as dist
+    import xarray as xr
+    from numpyro.infer import MCMC, NUTS, Predictive
+
+    from astrogwb.gwb import spectral_density
+    from astrogwb.sampling import (
+        amplitude_marginalized_model,
+        amplitude_reconstruction_model,
+        make_amplitude_quadrature,
+    )
+
+    # --- One-time setup: the grid the amplitude direction is marginalized on.
+    h0_fid = 70.0
+    grid = jnp.linspace(20.0, 140.0, 2001)
+    amplitude_prior = dist.Uniform(20.0, 140.0)
+    quadrature = make_amplitude_quadrature(
+        grid=grid,
+        log_prior=amplitude_prior.log_prob(grid),
+        merger_rate_amplitude=lambda h0: (h0_fid / h0) ** 3,
+        mean_energy_flux_amplitude=lambda h0: (h0 / h0_fid) ** 2,
+    )
+
+    frequencies = jnp.array([10.0, 30.0, 100.0])
+    polarization_power = jnp.ones((3, 4))  # (F, N) toy catalog
+    samples = {"redshift": jnp.linspace(0.1, 1.0, 4)}
+
+    def toy_merger_rate_and_log_weights_fn(params, samples):
+        rate = 10.0 ** params["log10_rate"] * (h0_fid / params["H0"]) ** 3
+        return rate, jnp.zeros(samples["redshift"].shape[0])
+
+    fiducials = {"H0": h0_fid, "log10_rate": -7.0}
+    rate0, logw0 = toy_merger_rate_and_log_weights_fn(fiducials, samples)
+    observed = spectral_density(
+        polarization_power, jnp.exp(logw0), rate0,
+        average_mode="analytic_inclination",
+    )
+
+    # --- Inference: NUTS on the amplitude-marginalized model.
+    model = partial(
+        amplitude_marginalized_model,
+        frequencies=frequencies,
+        polarization_power=polarization_power,
+        samples=samples,
+        observed_spectral_density=observed,
+        effective_psd=jnp.ones_like(frequencies),
+        observation_time=1.0,
+        average_mode="analytic_inclination",
+        merger_rate_and_log_weights_fn=toy_merger_rate_and_log_weights_fn,
+        amplitude_parameter="H0",
+        fiducials=fiducials,
+        quadrature=quadrature,
+        priors={"log10_rate": dist.Uniform(-8.0, -6.0)},
+    )
+    mcmc = MCMC(NUTS(model), num_warmup=50, num_samples=50, num_chains=1,
+                progress_bar=False)
+    mcmc.run(jax.random.PRNGKey(0))
+
+    # --- Reconstruction: Predictive substitutes the chain's statistics into
+    # the placeholder sites and draws H0 from AmplitudeConditional.
+    draws = Predictive(
+        partial(amplitude_reconstruction_model,
+                amplitude_parameter="H0", quadrature=quadrature),
+        posterior_samples=mcmc.get_samples(group_by_chain=True),
+        batch_ndims=2,
+        return_sites=["H0", "total_merger_rate", "quadrature_effective_nodes"],
+    )(jax.random.fold_in(jax.random.PRNGKey(0), 1))
+
+    # --- Merge: every returned site is (chain, draw); assign DataArrays.
+    import arviz as az
+
+    idata = az.from_numpyro(mcmc)
+    for name, values in draws.items():
+        idata.posterior[name] = xr.DataArray(
+            np.asarray(values), dims=("chain", "draw")
+        )
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -7,6 +115,7 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
+from numpyro.distributions import constraints
 
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.frequency import frequency_spacing, noise_weighted_inner_product
@@ -17,9 +126,9 @@ from astrogwb.gwb import (
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.sampling.amplitude import (
+    AmplitudeConditional,
     AmplitudeQuadrature,
-    amplitude_log_integrand,
-    log_trapezoid,
+    merger_rate_amplitude_at,
 )
 from astrogwb.utils import years_to_seconds
 
@@ -150,10 +259,11 @@ def amplitude_marginalized_model(
     :func:`~astrogwb.sampling.amplitude.make_amplitude_quadrature`) under its
     own prior :math:`\pi(\varphi)`, for an arbitrary scaling
     :math:`A = f(\varphi)` to the multiplicative amplitude. What
-    :func:`~astrogwb.sampling.amplitude.draw_marginalized_parameter` returns in
+    :meth:`~astrogwb.sampling.amplitude.AmplitudeConditional.sample` returns in
     post-processing is :math:`\varphi` itself (e.g. :math:`H_0`), not
     :math:`A`. The only error is quadrature error, so grid resolution should be
-    checked with :func:`~astrogwb.sampling.amplitude.quadrature_effective_nodes`.
+    checked with
+    :attr:`~astrogwb.sampling.amplitude.AmplitudeConditional.effective_nodes`.
 
     The callback is invoked with ``amplitude_parameter`` pinned to
     ``fiducials[amplitude_parameter]``, so the predicted spectrum it returns is
@@ -186,9 +296,8 @@ def amplitude_marginalized_model(
 
     The two amplitude statistics are what post-processing needs to reconstruct
     joint :math:`(\varphi, \theta)` samples via
-    :func:`astrogwb.sampling.amplitude.draw_marginalized_parameter` --
-    ``factor`` sites do not appear in ArviZ's posterior group, so they must be
-    carried explicitly. They are preferred over the raw inner products because
+    :func:`amplitude_reconstruction_model` -- ``factor`` sites do not appear in
+    ArviZ's posterior group, so they must be carried explicitly. They are preferred over the raw inner products because
     they are better conditioned, directly interpretable
     (:math:`\sigma_A = 1/\rho`), and invertible by multiplication alone:
     :math:`(m|m) = \rho^2` and :math:`(d|m) = \hat{A}\rho^2`. The contraction
@@ -272,7 +381,7 @@ def amplitude_marginalized_model(
     numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))
 
     scale = gaussian_bin_scale(effective_psd, frequencies, observation_time)
-    log_integrand = amplitude_log_integrand(
+    conditional = AmplitudeConditional(
         amplitude_mle, template_optimal_snr, quadrature=quadrature
     )
     log_likelihood_at_mle = (
@@ -283,7 +392,67 @@ def amplitude_marginalized_model(
         .to_event(1)
         .log_prob(observed_spectral_density)
     )
+    # The marginalization factor *is* the normalizing constant of the
+    # conditional that post-processing later samples.
     numpyro.factor(
         "amplitude_marginalized_log_likelihood",
-        log_likelihood_at_mle + log_trapezoid(log_integrand, quadrature.grid),
+        log_likelihood_at_mle + conditional.log_normalizer,
     )
+
+
+def amplitude_reconstruction_model(
+    *,
+    amplitude_parameter: str,
+    quadrature: AmplitudeQuadrature,
+) -> None:
+    r"""Generative-only reconstruction of joint :math:`(\varphi, \theta)` posterior draws.
+
+    Consumed via :class:`~numpyro.infer.Predictive` with the posterior samples
+    of :func:`amplitude_marginalized_model`; see this module's docstring for
+    the end-to-end sketch. ``Predictive`` substitutes the chain's statistics
+    into the placeholder sites below, draws the marginalized parameter from
+    :class:`~astrogwb.sampling.amplitude.AmplitudeConditional` with a fresh key
+    per posterior sample, and computes the deterministics from the substituted
+    values. There is no forward physics here -- no catalog, no :math:`(F, N)`
+    contraction -- so the cost is ``O(K)`` per draw and the model runs against
+    a saved chain alone.
+
+    Registered sites:
+
+    - placeholder ``sample`` sites ``amplitude_mle``, ``template_optimal_snr``,
+      and ``template_merger_rate`` -- never actually sampled, see below;
+    - ``amplitude_parameter`` as a ``sample`` site from
+      :class:`~astrogwb.sampling.amplitude.AmplitudeConditional`;
+    - ``total_merger_rate`` and ``quadrature_effective_nodes`` as
+      deterministics, the same names and definitions the reconstruction has
+      always published.
+
+    Parameters
+    ----------
+    amplitude_parameter:
+        Name of the marginalized parameter; becomes the sample-site name of
+        the reconstructed draws (e.g. ``"H0"``).
+    quadrature:
+        The same precomputed grid the inference model marginalized against.
+        Reconstruction is only exact for *that* grid -- read it back from the
+        chain's persisted ``constant_data`` rather than rebuilding it.
+    """
+    # The placeholder distributions are never sampled from
+    # (ImproperUniform.sample raises NotImplementedError): they exist so
+    # Predictive's substitution has a target. A missing or renamed statistic
+    # therefore fails loudly instead of silently drawing from an improper
+    # prior.
+    placeholder = dist.ImproperUniform(constraints.real, (), ())
+    amplitude_mle = numpyro.sample("amplitude_mle", placeholder)
+    template_optimal_snr = numpyro.sample("template_optimal_snr", placeholder)
+    template_merger_rate = numpyro.sample("template_merger_rate", placeholder)
+
+    conditional = AmplitudeConditional(
+        amplitude_mle, template_optimal_snr, quadrature=quadrature
+    )
+    phi = numpyro.sample(amplitude_parameter, conditional)
+    numpyro.deterministic(
+        "total_merger_rate",
+        template_merger_rate * merger_rate_amplitude_at(phi, quadrature=quadrature),
+    )
+    numpyro.deterministic("quadrature_effective_nodes", conditional.effective_nodes)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import partial
 from typing import Any
 
 import jax
@@ -10,12 +11,16 @@ import numpyro.distributions as dist
 import pytest
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.sampling import (
+    AmplitudeConditional,
     AmplitudeQuadrature,
     amplitude_marginalized_model,
+    amplitude_reconstruction_model,
     make_amplitude_quadrature,
+    merger_rate_amplitude_at,
     spectral_density_model,
 )
 from numpyro import handlers
+from numpyro.infer import Predictive
 from numpyro.infer.util import log_density
 
 type _AmplitudePrior = dist.Normal | dist.Uniform
@@ -310,3 +315,89 @@ def test_amplitude_marginalized_model_matches_the_general_model(
     )
 
     np.testing.assert_allclose(float(marginalized), numerical, rtol=1e-3, atol=1e-3)
+
+
+# --------------------------------------------------------------------------- #
+# Amplitude reconstruction model
+# --------------------------------------------------------------------------- #
+
+
+def _reconstruction_samples() -> dict[str, jax.Array]:
+    """Statistics shaped ``(chain, draw)``, as ``mcmc.get_samples(group_by_chain=True)``."""
+    return {
+        "amplitude_mle": jnp.array([[0.9, 1.0, 1.1], [1.2, 0.8, 1.0]]),
+        "template_optimal_snr": jnp.array([[25.0, 30.0, 35.0], [40.0, 45.0, 50.0]]),
+        "template_merger_rate": jnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+    }
+
+
+def _reconstruction_predictive(
+    posterior_samples: dict[str, jax.Array],
+) -> Predictive:
+    return Predictive(
+        partial(
+            amplitude_reconstruction_model,
+            amplitude_parameter="local_merger_rate",
+            quadrature=_QUADRATURE,
+        ),
+        posterior_samples=posterior_samples,
+        batch_ndims=2,
+        return_sites=[
+            "local_merger_rate",
+            "total_merger_rate",
+            "quadrature_effective_nodes",
+        ],
+    )
+
+
+def test_amplitude_reconstruction_model_returns_chain_draw_sites() -> None:
+    draws = _reconstruction_predictive(_reconstruction_samples())(jax.random.key(0))
+
+    for name in (
+        "local_merger_rate",
+        "total_merger_rate",
+        "quadrature_effective_nodes",
+    ):
+        assert draws[name].shape == (2, 3), name
+        assert bool(jnp.all(jnp.isfinite(draws[name]))), name
+
+    phi = draws["local_merger_rate"]
+    assert bool(jnp.all(phi >= float(_QUADRATURE.grid[0])))
+    assert bool(jnp.all(phi <= float(_QUADRATURE.grid[-1])))
+
+
+def test_amplitude_reconstruction_model_computes_deterministics_from_substituted_statistics() -> (
+    None
+):
+    samples = _reconstruction_samples()
+    draws = _reconstruction_predictive(samples)(jax.random.key(0))
+
+    # total_merger_rate must be template_merger_rate * g_R(phi) with the
+    # *input* template_merger_rate, elementwise -- a resampled (rather than
+    # substituted) statistic would break this identity.
+    expected_rate = np.asarray(samples["template_merger_rate"]) * np.asarray(
+        merger_rate_amplitude_at(draws["local_merger_rate"], quadrature=_QUADRATURE)
+    )
+    np.testing.assert_allclose(
+        np.asarray(draws["total_merger_rate"]), expected_rate, rtol=1e-6
+    )
+
+    expected_nodes = np.asarray(
+        AmplitudeConditional(
+            samples["amplitude_mle"],
+            samples["template_optimal_snr"],
+            quadrature=_QUADRATURE,
+        ).effective_nodes
+    )
+    np.testing.assert_allclose(
+        np.asarray(draws["quadrature_effective_nodes"]), expected_nodes, rtol=1e-6
+    )
+
+
+def test_amplitude_reconstruction_model_raises_on_a_missing_statistic() -> None:
+    """An unsubstituted placeholder must fail loudly, never draw silently."""
+    samples = _reconstruction_samples()
+    del samples["template_optimal_snr"]
+
+    with pytest.raises(NotImplementedError):
+        _reconstruction_predictive(samples)(jax.random.key(0))

@@ -416,6 +416,8 @@ def save(
     quadrature: AmplitudeQuadrature | None = None,
 ) -> Path:
     """Write the ArviZ NetCDF + JSON run record, and log the IS health check."""
+    from functools import partial
+
     import arviz as az
     import numpy as np
     import xarray as xr
@@ -440,35 +442,38 @@ def save(
 
     if quadrature is not None:
         import jax
-        from astrogwb.sampling.amplitude import (
-            draw_amplitude_posterior,
-            merger_rate_amplitude_at,
-        )
+        from astrogwb.sampling.models import amplitude_reconstruction_model
+        from numpyro.infer import Predictive
 
         amplitude_parameter = config.analysis.amplitude_parameter
         assert amplitude_parameter is not None
 
-        posterior_samples = mcmc.get_samples(group_by_chain=True)
-        rng_key = jax.random.fold_in(jax.random.PRNGKey(config.seed), 1)
-        phi, effective_nodes = draw_amplitude_posterior(
-            posterior_samples, quadrature=quadrature, rng_key=rng_key
-        )
-        template_merger_rate = posterior_samples["template_merger_rate"]
-        total_merger_rate = np.asarray(template_merger_rate) * np.asarray(
-            merger_rate_amplitude_at(phi, quadrature=quadrature)
-        )
+        # NumPyro marks Predictive as experimental; it is load-bearing here,
+        # so re-check its substitution semantics on any NumPyro upgrade.
+        draws = Predictive(
+            partial(
+                amplitude_reconstruction_model,
+                amplitude_parameter=amplitude_parameter,
+                quadrature=quadrature,
+            ),
+            posterior_samples=mcmc.get_samples(group_by_chain=True),
+            batch_ndims=2,
+            return_sites=[
+                amplitude_parameter,
+                "total_merger_rate",
+                "quadrature_effective_nodes",
+            ],
+        )(jax.random.fold_in(jax.random.PRNGKey(config.seed), 1))
 
         # `az.from_numpyro` returns an xarray DataTree, whose __setitem__ does
         # not accept a Dataset-style `(dims, values)` tuple: it would store the
         # tuple as an object scalar and fail at `to_netcdf`. Assign DataArrays.
-        for name, values in (
-            (amplitude_parameter, phi),
-            ("total_merger_rate", total_merger_rate),
-            ("quadrature_effective_nodes", effective_nodes),
-        ):
+        for name, values in draws.items():
             idata.posterior[name] = xr.DataArray(
                 np.asarray(values), dims=("chain", "draw")
             )
+
+        effective_nodes = draws["quadrature_effective_nodes"]
 
         min_effective_nodes = float(np.min(effective_nodes))
         if min_effective_nodes < 30:
