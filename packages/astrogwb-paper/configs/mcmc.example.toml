@@ -21,7 +21,7 @@ f_max = 4096.0                # analysis band high edge [Hz]
 #
 #   likelihood = "amplitude_marginalized"
 #   amplitude_parameter = "H0"          # or "local_merger_rate"
-#   amplitude_num_nodes = 4001          # quadrature grid resolution
+#   amplitude_num_nodes = 1024          # quadrature grid resolution
 #   amplitude_prior_span_sigma = 10.0   # Normal-prior grid half-width, in sigma
 #
 # `amplitude_parameter` still needs a [priors.<name>] table and a

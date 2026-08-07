@@ -32,7 +32,7 @@ class AnalysisConfig(BaseModel):
     f_max: float
     likelihood: Literal["default", "amplitude_marginalized"] = "default"
     amplitude_parameter: AmplitudeParameter | None = None
-    amplitude_num_nodes: Annotated[int, Field(gt=1)] = 4001
+    amplitude_num_nodes: Annotated[int, Field(gt=1)] = 1024
     amplitude_prior_span_sigma: Annotated[float, Field(gt=0.0)] = 10.0
 
     @model_validator(mode="after")

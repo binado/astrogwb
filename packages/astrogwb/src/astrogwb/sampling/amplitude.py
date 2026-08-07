@@ -131,7 +131,7 @@ class AmplitudeFn(Protocol):
 def quadrature_grid(
     prior: dist.Distribution,
     *,
-    num_nodes: int = 4001,
+    num_nodes: int = 1024,
     span_sigma: float = 10.0,
 ) -> jax.Array:
     r"""A quadrature grid covering essentially all of ``prior``'s mass.
@@ -299,7 +299,7 @@ class AmplitudeConditional(dist.Distribution):
         prior: dist.Distribution,
         fiducial: ArrayLike,
         grid: jax.Array | None = None,
-        num_nodes: int = 4001,
+        num_nodes: int = 1024,
         span_sigma: float = 10.0,
         validate_args: bool | None = None,
     ) -> None:
