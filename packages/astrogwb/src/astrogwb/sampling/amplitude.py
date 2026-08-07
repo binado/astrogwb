@@ -365,23 +365,19 @@ class AmplitudeConditional(dist.Distribution):
     def log_prob(self, value: ArrayLike) -> ArrayLike:
         """Log of the piecewise-linear density on the grid, normalized.
 
-        ``jnp.interp`` only takes a 1D ``fp``, so the batched integrand is
-        interpolated manually with the same linear rule. Values outside the
-        grid interval return ``-inf``, matching :attr:`support`.
+        ``jnp.interp`` only accepts a 1D ``fp``, so the batched integrand is
+        flattened and evaluated under ``jax.vmap``. Values outside the grid
+        interval return ``-inf``, matching :attr:`support`.
         """
         grid = self.quadrature.grid
         value = jnp.asarray(value)
         integrand = jnp.broadcast_to(
             jnp.exp(self._log_integrand), value.shape + grid.shape
         )
-        idx = jnp.clip(
-            jnp.searchsorted(grid, value, side="right"), 1, grid.shape[0] - 1
-        )
-        x_lo = grid[idx - 1]
-        x_hi = grid[idx]
-        y_lo = jnp.take_along_axis(integrand, (idx - 1)[..., None], axis=-1)[..., 0]
-        y_hi = jnp.take_along_axis(integrand, idx[..., None], axis=-1)[..., 0]
-        density = y_lo + (y_hi - y_lo) * ((value - x_lo) / (x_hi - x_lo))
+        density = jax.vmap(lambda x, fp: jnp.interp(x, grid, fp))(
+            value.reshape(-1),
+            integrand.reshape(-1, grid.shape[0]),
+        ).reshape(value.shape)
         log_density = jnp.log(density) - self.log_normalizer
         in_support = (value >= grid[0]) & (value <= grid[-1])
         return jnp.where(in_support, log_density, -jnp.inf)
