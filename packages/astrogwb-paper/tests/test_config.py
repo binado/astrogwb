@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from astrogwb_paper.config.loading import deep_merge, load_mapping
-from astrogwb_paper.config.mcmc import build_run_config, config_sha256
+from astrogwb_paper.config.mcmc import build_run_config, config_sha256, save_config
 from astrogwb_paper.paths import paper_project_root
 from pydantic import ValidationError
 
@@ -153,6 +153,39 @@ def test_marginalized_config_extracts_amplitude_prior_and_preserves_invariant() 
     assert set(config.priors) == set(config.sampled_params)
     # H0 is not sampled, but it is still a fiducial constant the model pins to.
     assert config.constants["H0"] == 67.66
+
+
+def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
+    """generate_configs() writes normalized configs; run_mcmc must reload them.
+
+    Regression guard: the validator pops the amplitude prior out of ``priors``,
+    so a saved JSON carries it only under ``amplitude_prior`` and used to be
+    rejected on reload as "needs a [priors.*] table".
+    """
+    config = build_run_config(_marginalized_raw())
+    path = tmp_path / "run.json"
+    save_config(config, path)
+
+    reloaded = build_run_config(load_mapping(path))
+
+    assert reloaded.amplitude_prior == config.amplitude_prior
+    assert reloaded.priors == config.priors
+    assert reloaded.sampled_params == config.sampled_params
+    assert reloaded.constants == config.constants
+    assert config_sha256(reloaded) == config_sha256(config)
+
+
+def test_reloaded_marginalized_config_still_rejects_amplitude_parameter_sampled(
+    tmp_path,
+) -> None:
+    config = build_run_config(_marginalized_raw())
+    path = tmp_path / "run.json"
+    save_config(config, path)
+    raw = load_mapping(path)
+    raw["sampled_params"] = [*raw["sampled_params"], "H0"]
+
+    with pytest.raises(ValidationError, match="cannot also appear in sampled_params"):
+        build_run_config(raw)
 
 
 def test_marginalized_config_rejects_amplitude_parameter_also_sampled() -> None:

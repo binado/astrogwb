@@ -96,25 +96,21 @@ class RunConfig(BaseModel):
     # Derived in the validator (every fiducial not sampled).
     constants: dict[str, float] = Field(default_factory=dict)
     # Derived in the validator: the amplitude parameter's prior spec, held out
-    # of `priors` so `set(priors) == set(sampled_params)` keeps holding.
+    # of `priors` so `set(priors) == set(sampled_params)` keeps holding. Also
+    # accepted as input so configs written by save_config reload unchanged.
     amplitude_prior: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _resolve_sampled_and_constants(self) -> RunConfig:
         if not self.fiducials:
             raise ValueError("config must define a non-empty [fiducials] table")
-        if not self.priors:
+        if not self.priors and self.amplitude_prior is None:
             raise ValueError("config must define at least one [priors.<param>] table")
 
         priors = dict(self.priors)
         amplitude_prior: dict[str, Any] | None = None
         amplitude_parameter = self.analysis.amplitude_parameter
         if amplitude_parameter is not None:
-            if amplitude_parameter not in priors:
-                raise ValueError(
-                    f"analysis.amplitude_parameter {amplitude_parameter!r} needs "
-                    "a [priors.*] table"
-                )
             if amplitude_parameter in self.sampled_params:
                 raise ValueError(
                     f"analysis.amplitude_parameter {amplitude_parameter!r} "
@@ -125,7 +121,18 @@ class RunConfig(BaseModel):
                     f"analysis.amplitude_parameter {amplitude_parameter!r} "
                     "missing from [fiducials]"
                 )
-            amplitude_prior = priors.pop(amplitude_parameter)
+            if amplitude_parameter in priors:
+                amplitude_prior = priors.pop(amplitude_parameter)
+            elif self.amplitude_prior is not None:
+                # Reloaded save_config output: the pop above already happened
+                # at generation time, so the prior arrives in `amplitude_prior`.
+                amplitude_prior = dict(self.amplitude_prior)
+            else:
+                raise ValueError(
+                    f"analysis.amplitude_parameter {amplitude_parameter!r} needs "
+                    "a [priors.*] table (or an `amplitude_prior` entry in a "
+                    "config previously written by save_config)"
+                )
 
         sampled = self.sampled_params or tuple(priors)
         missing_priors = [p for p in sampled if p not in priors]
