@@ -118,5 +118,11 @@ Two things are different from a sampled chain, though:
   per-draw diagnostic for how many quadrature grid points actually resolve
   the conditional posterior (should be comfortably above ~30; the runner logs
   a warning otherwise). If it is low, raise `analysis.amplitude_num_nodes`.
+- **`sampled_params` no longer describes the chain.** It means "parameters
+  NUTS has a latent for", and the marginalized parameter deliberately is not
+  one: it must stay out of `sampled_params`, which drives `init_to_value` and
+  the `set(priors) == set(sampled_params)` invariant. Use
+  `RunConfig.posterior_params` for anything describing the saved chain --
+  plot `var_names`, summaries, run records. The JSON sidecar records both.
 
 See the [plotting notebook](../notebooks/mcmc_plotting.py) for examples of how to visualize the results.

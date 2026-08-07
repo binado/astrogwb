@@ -384,7 +384,11 @@ def build_run_record(
         "seed": config.seed,
         "observation_time": config.observation_time,
         "likelihood": config.analysis.likelihood,
+        # `sampled_params` is the sampler's latents; `posterior_params` is what
+        # the saved chain actually carries. They differ by the reconstructed
+        # amplitude parameter under a marginalized likelihood.
         "sampled_params": list(config.sampled_params),
+        "posterior_params": list(config.posterior_params),
         "fiducials": config.fiducials,
         "constants": config.constants,
         "priors": config.priors,

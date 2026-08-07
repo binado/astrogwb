@@ -147,6 +147,24 @@ class RunConfig(BaseModel):
         return self
 
     @property
+    def posterior_params(self) -> tuple[str, ...]:
+        """Parameters present in the saved posterior group.
+
+        A superset of `sampled_params`, which means strictly "parameters NUTS
+        has a latent for". Under an amplitude-marginalized likelihood the two
+        sets differ: the amplitude parameter is integrated out of the potential
+        and has no latent, so it must stay out of `sampled_params` (it drives
+        `init_to_value` and the `set(priors) == set(sampled_params)`
+        invariant), yet post-processing reconstructs it into the posterior via
+        `amplitude_reconstruction_model`. Use this for anything describing the
+        saved chain -- plot `var_names`, run records, summaries.
+        """
+        amplitude_parameter = self.analysis.amplitude_parameter
+        if amplitude_parameter is None:
+            return self.sampled_params
+        return (*self.sampled_params, amplitude_parameter)
+
+    @property
     def outdir(self) -> Path:
         return self.output.outdir
 
