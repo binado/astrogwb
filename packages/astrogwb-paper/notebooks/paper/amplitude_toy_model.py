@@ -404,7 +404,7 @@ azp.plot_autocorr(inference_data, var_names=list(sampled_params))
 df = float(frequency_spacing(frequencies))
 T_sec = float(years_to_seconds(observation_time))
 snr_sq = spectral_snr_squared(
-    observed_spectral_density[mask], effective_psd_arr[mask], T_sec, df
+    observed_spectral_density, effective_psd_arr, T_sec, df
 )
 snr = float(jnp.sqrt(snr_sq))
 sigma_fisher = float(amplitude_fiducial / snr)
