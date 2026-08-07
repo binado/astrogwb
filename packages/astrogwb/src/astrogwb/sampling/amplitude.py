@@ -112,13 +112,6 @@ class MergerRateAmplitudeFn(Protocol):
     def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
 
 
-class MeanEnergyFluxAmplitudeFn(Protocol):
-    """Importance-weighted polarization-power contraction at :math:`\\varphi` up
-    to a constant, :math:`g_F(\\varphi)`."""
-
-    def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
-
-
 class AmplitudeFn(Protocol):
     """Full multiplicative scaling :math:`f(\\varphi) = g_R(\\varphi)\\, g_F(\\varphi)`.
 

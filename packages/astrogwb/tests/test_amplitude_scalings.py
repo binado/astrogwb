@@ -117,19 +117,6 @@ def test_amplitude_factorization_matches_the_real_spectral_density(
 
 
 @pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
-def test_amplitude_is_the_product_of_the_two_factors(parameter: str) -> None:
-    """``amplitude`` is spelled in closed form, so it needs checking against the pair."""
-    scalings = amplitude_scalings(parameter)
-    grid = jnp.linspace(0.5 * FIDUCIALS[parameter], 2.0 * FIDUCIALS[parameter], 32)
-
-    np.testing.assert_allclose(
-        np.asarray(scalings.amplitude(grid)),
-        np.asarray(scalings.merger_rate(grid) * scalings.mean_energy_flux(grid)),
-        rtol=1e-12,
-    )
-
-
-@pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
 def test_amplitude_scalings_are_hashable_singletons(parameter: str) -> None:
     """``AmplitudeConditional`` carries the scaling as pytree *aux* data.
 

@@ -34,11 +34,7 @@ from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
-from astrogwb.sampling.amplitude import (
-    AmplitudeFn,
-    MeanEnergyFluxAmplitudeFn,
-    MergerRateAmplitudeFn,
-)
+from astrogwb.sampling.amplitude import AmplitudeFn, MergerRateAmplitudeFn
 from astrogwb.utils import SECONDS_PER_YEAR
 
 AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
@@ -56,16 +52,8 @@ def _identity(marginalized_parameter: jax.Array) -> jax.Array:
     return marginalized_parameter
 
 
-def _unit(marginalized_parameter: jax.Array) -> jax.Array:
-    return jnp.ones_like(marginalized_parameter)
-
-
 def _inverse_cube(marginalized_parameter: jax.Array) -> jax.Array:
     return marginalized_parameter**-3
-
-
-def _square(marginalized_parameter: jax.Array) -> jax.Array:
-    return marginalized_parameter**2
 
 
 def _inverse(marginalized_parameter: jax.Array) -> jax.Array:
@@ -73,24 +61,26 @@ def _inverse(marginalized_parameter: jax.Array) -> jax.Array:
 
 
 class AmplitudeScalings(NamedTuple):
-    """The two independently-scaling factors that make up the amplitude, :math:`f = g_R \\cdot g_F`.
+    """The scalings a marginalized amplitude parameter needs.
 
-    Every field is an *absolute* function of :math:`\\varphi`; the ratio to the
+    Both fields are *absolute* functions of :math:`\\varphi`; the ratio to the
     fiducial template is formed by the consumer (see
     :class:`~astrogwb.sampling.amplitude.AmplitudeConditional`), so anchoring
     :math:`f(\\varphi_{\\mathrm{fid}}) = 1` cannot be forgotten here.
+
+    The mean-energy-flux factor :math:`g_F` is deliberately *not* a field: no
+    consumer needs it alone, and it is recoverable as
+    :math:`f/g_R` whenever it is wanted. See :func:`amplitude_scalings` for
+    where it comes from physically.
     """
 
     merger_rate: MergerRateAmplitudeFn
     """:math:`g_R(\\varphi)`, needed on its own to recover the physical merger rate."""
 
-    mean_energy_flux: MeanEnergyFluxAmplitudeFn
-    """:math:`g_F(\\varphi)`, validated against the real spectral density in the tests."""
-
     amplitude: AmplitudeFn
     """:math:`f(\\varphi) = g_R(\\varphi)\\, g_F(\\varphi)`, written out in closed form.
 
-    Spelled directly rather than composed from the other two so it stays a
+    Spelled directly rather than composed from two factors so it stays a
     single hashable module-level function: for ``H0`` the product
     :math:`\\varphi^{-3}\\varphi^{2}` collapses to :math:`1/\\varphi`, and for
     ``local_merger_rate`` to :math:`\\varphi`.
@@ -98,13 +88,21 @@ class AmplitudeScalings(NamedTuple):
 
 
 def amplitude_scalings(parameter: str) -> AmplitudeScalings:
-    r"""Merger-rate and mean-energy-flux scalings for one amplitude parameter.
+    r"""Merger-rate and total amplitude scalings for one amplitude parameter.
+
+    The predicted spectrum factorizes into a total merger rate and a mean
+    energy flux (the importance-weighted polarization-power contraction), each
+    scaling independently with :math:`\varphi`, so
+    :math:`f = g_R \cdot g_F`. Only :math:`g_R` and the product are returned;
+    the derivations of both factors are below because that is what justifies
+    the product.
 
     ``local_merger_rate`` enters :func:`compute_merger_rate_distance_and_logprob`
     only through ``total_merger_rate = 1e-9 * local_merger_rate * integral_mpc3
     / SECONDS_PER_YEAR`` -- linear in the parameter and absent from
     ``logpdf`` and hence from :func:`log_weights` -- so
-    :math:`g_R(\varphi) = \varphi` and :math:`g_F(\varphi) = 1`.
+    :math:`g_R(\varphi) = \varphi` and :math:`g_F(\varphi) = 1`, giving
+    :math:`f(\varphi) = \varphi`.
 
     ``H0`` enters the same rate integral only through
     :func:`~astrogwb.cosmology.distance_and_volume_grid`'s differential
@@ -120,7 +118,8 @@ def amplitude_scalings(parameter: str) -> AmplitudeScalings:
     only through the ``-2 * logdiff_dl_gw`` term in :func:`log_weights`, via
     the target luminosity distance :math:`d_L \propto 1/h_0` against the fixed
     fiducial catalog distance: :math:`\exp(-2\log d_L(h_0)) \propto h_0^2`, so
-    :math:`g_F(\varphi) = \varphi^{2}`.
+    :math:`g_F(\varphi) = \varphi^{2}` and the product collapses to
+    :math:`f(\varphi) = \varphi^{-1}`.
 
     Only the *ratios* to the fiducial are physically meaningful; each function
     here carries an arbitrary constant that cancels once the consumer forms
@@ -134,7 +133,7 @@ def amplitude_scalings(parameter: str) -> AmplitudeScalings:
     Returns
     -------
     AmplitudeScalings
-        The ``(merger_rate, mean_energy_flux, amplitude)`` scaling functions.
+        The ``(merger_rate, amplitude)`` scaling functions.
 
     Raises
     ------
@@ -142,17 +141,9 @@ def amplitude_scalings(parameter: str) -> AmplitudeScalings:
         If ``parameter`` is not one of :data:`AMPLITUDE_PARAMETERS`.
     """
     if parameter == "local_merger_rate":
-        return AmplitudeScalings(
-            merger_rate=_identity,
-            mean_energy_flux=_unit,
-            amplitude=_identity,
-        )
+        return AmplitudeScalings(merger_rate=_identity, amplitude=_identity)
     if parameter == "H0":
-        return AmplitudeScalings(
-            merger_rate=_inverse_cube,
-            mean_energy_flux=_square,
-            amplitude=_inverse,
-        )
+        return AmplitudeScalings(merger_rate=_inverse_cube, amplitude=_inverse)
     raise ValueError(
         f"{parameter!r} is not one of the amplitude parameters {AMPLITUDE_PARAMETERS}"
     )
