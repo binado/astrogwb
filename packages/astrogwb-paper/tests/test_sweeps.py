@@ -8,9 +8,11 @@ from astrogwb_paper.config.sweeps import (
     ObservationSpec,
     RunSpec,
     SweepConfig,
+    SweepPoint,
     iter_sweep_points,
     load_sweep_base,
     load_sweep_config,
+    materialize_run_config,
 )
 from astrogwb_paper.paths import paper_project_root
 from pydantic import ValidationError
@@ -91,6 +93,94 @@ def test_analysis_priors_must_exactly_match_sampled_params() -> None:
             sampled_params=("H0", "Omega_m"),
             priors={"H0": "uniform"},
         )
+
+
+def test_analysis_marginalized_requires_amplitude_parameter() -> None:
+    with pytest.raises(ValidationError, match="amplitude_parameter is required"):
+        AnalysisSpec(
+            sampled_params=("Omega_m",),
+            priors={"H0": "uniform", "Omega_m": "normal"},
+            likelihood="amplitude_marginalized",
+        )
+
+
+def test_analysis_default_rejects_amplitude_parameter() -> None:
+    with pytest.raises(ValidationError, match="amplitude_parameter is only valid"):
+        AnalysisSpec(
+            sampled_params=("H0", "Omega_m"),
+            priors={"H0": "uniform", "Omega_m": "normal"},
+            amplitude_parameter="H0",
+        )
+
+
+def test_analysis_amplitude_parameter_cannot_be_sampled() -> None:
+    with pytest.raises(ValidationError, match="cannot also appear in sampled_params"):
+        AnalysisSpec(
+            sampled_params=("H0", "Omega_m"),
+            priors={"H0": "uniform", "Omega_m": "normal"},
+            likelihood="amplitude_marginalized",
+            amplitude_parameter="H0",
+        )
+
+
+def test_analysis_marginalized_priors_must_include_amplitude_parameter() -> None:
+    with pytest.raises(ValidationError, match="exactly match sampled_params"):
+        AnalysisSpec(
+            sampled_params=("Omega_m",),
+            priors={"Omega_m": "normal"},
+            likelihood="amplitude_marginalized",
+            amplitude_parameter="H0",
+        )
+
+
+def test_materialize_run_config_amplitude_marginalized() -> None:
+    sweep = SweepConfig.model_validate(
+        {
+            **_raw_sweep(),
+            "analyses": {
+                "H0-Omega_m": {
+                    "sampled_params": ["Omega_m"],
+                    "priors": {"H0": "uniform", "Omega_m": "normal"},
+                    "likelihood": "amplitude_marginalized",
+                    "amplitude_parameter": "H0",
+                    "amplitude_num_nodes": 512,
+                }
+            },
+            "priors": {
+                "H0": {"uniform": {"type": "uniform", "low": 20.0, "high": 140.0}},
+                "Omega_m": {
+                    "normal": {"type": "normal", "loc": 0.3096, "scale": 0.006}
+                },
+            },
+            "runs": {
+                "campaign": {
+                    "networks": ["network"],
+                    "analyses": ["H0-Omega_m"],
+                    "observations": ["baseline"],
+                }
+            },
+        }
+    )
+    base = load_sweep_base(sweep)
+    point = SweepPoint(
+        campaign="campaign",
+        network="network",
+        analysis="H0-Omega_m",
+        observation="baseline",
+    )
+
+    config = materialize_run_config(base, sweep, point)
+
+    assert config.analysis.likelihood == "amplitude_marginalized"
+    assert config.analysis.amplitude_parameter == "H0"
+    assert config.analysis.amplitude_num_nodes == 512
+    assert "H0" not in config.sampled_params
+    assert config.amplitude_prior == {
+        "type": "uniform",
+        "low": 20.0,
+        "high": 140.0,
+    }
+    assert "H0" in config.posterior_params
 
 
 @pytest.mark.parametrize(
