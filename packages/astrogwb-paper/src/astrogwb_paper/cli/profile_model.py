@@ -113,7 +113,7 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     from numpyro.infer.util import initialize_model
     from pluscross import load_catalog
 
-    from astrogwb_paper.amplitude import build_amplitude_quadrature
+    from astrogwb_paper.amplitude import build_amplitude_marginalization
     from astrogwb_paper.priors import build_prior
 
     analysis = config.analysis
@@ -176,6 +176,7 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     priors = {name: build_prior(spec) for name, spec in config.priors.items()}
     if analysis.likelihood == "amplitude_marginalized":
         assert analysis.amplitude_parameter is not None
+        marginalization = build_amplitude_marginalization(config)
         model = partial(
             amplitude_marginalized_model,
             observation_time=config.observation_time,
@@ -183,7 +184,9 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
             merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
             amplitude_parameter=analysis.amplitude_parameter,
             fiducials=config.fiducials,
-            quadrature=build_amplitude_quadrature(config),
+            amplitude_fn=marginalization.amplitude_fn,
+            amplitude_prior=marginalization.prior,
+            amplitude_grid=marginalization.grid,
             priors=priors,
             constants=config.constants,
         )

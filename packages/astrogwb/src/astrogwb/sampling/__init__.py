@@ -1,10 +1,9 @@
 from .amplitude import (
     AmplitudeConditional,
-    AmplitudeQuadrature,
+    AmplitudeFn,
     MeanEnergyFluxAmplitudeFn,
     MergerRateAmplitudeFn,
-    make_amplitude_quadrature,
-    merger_rate_amplitude_at,
+    quadrature_grid,
 )
 from .models import (
     amplitude_marginalized_model,
@@ -14,12 +13,11 @@ from .models import (
 
 __all__ = [
     "AmplitudeConditional",
-    "AmplitudeQuadrature",
+    "AmplitudeFn",
     "MeanEnergyFluxAmplitudeFn",
     "MergerRateAmplitudeFn",
     "amplitude_marginalized_model",
     "amplitude_reconstruction_model",
-    "make_amplitude_quadrature",
-    "merger_rate_amplitude_at",
+    "quadrature_grid",
     "spectral_density_model",
 ]

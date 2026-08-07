@@ -12,11 +12,8 @@ import pytest
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.sampling import (
     AmplitudeConditional,
-    AmplitudeQuadrature,
     amplitude_marginalized_model,
     amplitude_reconstruction_model,
-    make_amplitude_quadrature,
-    merger_rate_amplitude_at,
     spectral_density_model,
 )
 from numpyro import handlers
@@ -138,14 +135,32 @@ _MARGINALIZED_KWARGS: dict[str, Any] = {
 }
 
 
-_QUADRATURE = make_amplitude_quadrature(
-    grid=jnp.linspace(0.1, 2.5, 2001),
-    log_prior=jnp.full(2001, -jnp.log(2.4)),
-    merger_rate_amplitude=lambda marginalized_parameter: marginalized_parameter,
-    mean_energy_flux_amplitude=lambda marginalized_parameter: jnp.ones_like(
-        marginalized_parameter
-    ),
-)
+def _identity_scaling(marginalized_parameter: jax.Array) -> jax.Array:
+    """``g_R`` for ``local_merger_rate``; ``g_F`` is 1, so this is also ``f``."""
+    return marginalized_parameter
+
+
+# The marginalized parameter is `local_merger_rate` itself, so the prior and
+# the grid live on rates. The fiducial rate is 2.0, so this covers amplitudes
+# A = rate / 2 in [0.1, 2.5].
+_AMPLITUDE_PRIOR = dist.Uniform(0.2, 5.0)
+_AMPLITUDE_GRID = jnp.linspace(0.2, 5.0, 2001)
+
+_MARGINALIZATION_KWARGS: dict[str, Any] = {
+    "amplitude_fn": _identity_scaling,
+    "amplitude_prior": _AMPLITUDE_PRIOR,
+    "amplitude_grid": _AMPLITUDE_GRID,
+}
+"""What the inference model needs to define the marginalized direction."""
+
+_RECONSTRUCTION_KWARGS: dict[str, Any] = {
+    "amplitude_fn": _identity_scaling,
+    "merger_rate_amplitude_fn": _identity_scaling,
+    "prior": _AMPLITUDE_PRIOR,
+    "fiducial": FIDUCIAL_RATE,
+    "grid": _AMPLITUDE_GRID,
+}
+"""The same direction, spelled the way the reconstruction model takes it."""
 
 
 def test_amplitude_marginalized_model_registers_expected_sites() -> None:
@@ -153,7 +168,7 @@ def test_amplitude_marginalized_model_registers_expected_sites() -> None:
         handlers.seed(amplitude_marginalized_model, rng_seed=0)
     ).get_trace(
         **_MARGINALIZED_KWARGS,
-        quadrature=_QUADRATURE,
+        **_MARGINALIZATION_KWARGS,
         priors={"tilt": dist.Normal(0.0, 1.0)},
     )
 
@@ -182,7 +197,7 @@ def test_amplitude_marginalized_model_pins_the_amplitude_to_its_fiducial() -> No
             **_MARGINALIZED_KWARGS,
             "merger_rate_and_log_weights_fn": recording_callback,
         },
-        quadrature=_QUADRATURE,
+        **_MARGINALIZATION_KWARGS,
         priors={"tilt": dist.Normal(0.0, 1.0)},
         constants={"local_merger_rate": 99.0},
     )
@@ -194,7 +209,7 @@ def test_amplitude_marginalized_model_rejects_a_sampled_amplitude() -> None:
     with pytest.raises(ValueError, match="cannot also be sampled"):
         handlers.seed(amplitude_marginalized_model, rng_seed=0)(
             **_MARGINALIZED_KWARGS,
-            quadrature=_QUADRATURE,
+            **_MARGINALIZATION_KWARGS,
             priors={
                 "tilt": dist.Normal(0.0, 1.0),
                 "local_merger_rate": dist.Uniform(1.0, 3.0),
@@ -216,7 +231,7 @@ def test_amplitude_marginalized_model_accepts_a_pre_sliced_frequency_grid() -> N
         handlers.seed(amplitude_marginalized_model, rng_seed=0)
     ).get_trace(
         **kwargs,
-        quadrature=_QUADRATURE,
+        **_MARGINALIZATION_KWARGS,
         priors={},
         constants={"tilt": 0.3},
     )
@@ -225,52 +240,48 @@ def test_amplitude_marginalized_model_accepts_a_pre_sliced_frequency_grid() -> N
     assert np.isfinite(float(trace["template_optimal_snr"]["value"]))
 
 
-def _quadrature_from_amplitude_prior(
+def _marginalization_from_rate_prior(
     prior: _AmplitudePrior, num: int = 40_001
-) -> AmplitudeQuadrature:
-    """Build the physical-parameter grid an amplitude prior would induce.
+) -> dict[str, Any]:
+    """The marginalized direction induced by a prior on the rate.
 
-    Identity scaling, so the marginalized parameter is the amplitude itself.
-    ``log_prior`` is a normalized density on the grid (caller's contract).
+    Identity scaling anchored at ``FIDUCIAL_RATE`` makes the amplitude
+    ``A = rate / FIDUCIAL_RATE``, so the marginalized parameter is the rate
+    itself -- exactly the variable the general model is integrated over below,
+    which is what cancels the Jacobian.
     """
     if isinstance(prior, dist.Uniform):
         low, high = float(prior.low), float(prior.high)
         grid = jnp.linspace(low, high, num)
-        log_prior = jnp.full_like(grid, -jnp.log(high - low))
     else:
         loc, scale = float(prior.loc), float(prior.scale)
         grid = jnp.linspace(loc - 40.0 * scale, loc + 40.0 * scale, num)
-        log_prior = dist.Normal(loc, scale).log_prob(grid)
-    return make_amplitude_quadrature(
-        grid=grid,
-        log_prior=log_prior,
-        merger_rate_amplitude=lambda marginalized_parameter: marginalized_parameter,
-        mean_energy_flux_amplitude=lambda marginalized_parameter: jnp.ones_like(
-            marginalized_parameter
-        ),
-    )
+    return {
+        "amplitude_fn": _identity_scaling,
+        "amplitude_prior": prior,
+        "amplitude_grid": grid,
+    }
 
 
 @pytest.mark.parametrize(
-    ("amplitude_prior", "rate_prior"),
-    [
-        (dist.Uniform(0.5, 1.5), dist.Uniform(1.0, 3.0)),
-        (dist.Normal(1.0, 0.4), dist.Normal(2.0, 0.8)),
-    ],
+    "rate_prior",
+    [dist.Uniform(1.0, 3.0), dist.Normal(2.0, 0.8)],
     ids=["uniform", "normal"],
 )
 def test_amplitude_marginalized_model_matches_the_general_model(
-    amplitude_prior: _AmplitudePrior,
     rate_prior: _AmplitudePrior,
 ) -> None:
     """Numerically marginalize the general model and compare the log densities.
 
-    ``rate_prior`` is the pushforward of ``amplitude_prior`` under
-    ``rate = FIDUCIAL_RATE * amplitude``. Integrating the general model over
-    ``rate`` rather than ``amplitude`` cancels the Jacobian exactly, so the two
-    log densities must agree without any leftover constant -- which is what
-    makes this a joint check on the factor term, the normalizations, and the
-    reference injection.
+    Both models are given the *same* prior on the same variable, the rate --
+    the marginalized model states it on the marginalized parameter, the
+    general model on its sample site. (Equivalently: ``rate_prior`` is the
+    pushforward under ``rate = FIDUCIAL_RATE * amplitude`` of a
+    ``Uniform(0.5, 1.5)`` / ``Normal(1.0, 0.4)`` prior on the amplitude.)
+    Integrating the general model over ``rate`` rather than ``amplitude``
+    cancels the Jacobian exactly, so the two log densities must agree without
+    any leftover constant -- which is what makes this a joint check on the
+    factor term, the normalizations, and the reference injection.
     """
     tilt = 0.35
     general_kwargs = {
@@ -308,7 +319,7 @@ def test_amplitude_marginalized_model_matches_the_general_model(
         (),
         {
             **_MARGINALIZED_KWARGS,
-            "quadrature": _quadrature_from_amplitude_prior(amplitude_prior),
+            **_marginalization_from_rate_prior(rate_prior),
             "priors": {"tilt": dist.Normal(0.0, 1.0)},
         },
         {"tilt": jnp.asarray(tilt)},
@@ -338,7 +349,7 @@ def _reconstruction_predictive(
         partial(
             amplitude_reconstruction_model,
             amplitude_parameter="local_merger_rate",
-            quadrature=_QUADRATURE,
+            **_RECONSTRUCTION_KWARGS,
         ),
         posterior_samples=posterior_samples,
         batch_ndims=2,
@@ -362,8 +373,8 @@ def test_amplitude_reconstruction_model_returns_chain_draw_sites() -> None:
         assert bool(jnp.all(jnp.isfinite(draws[name]))), name
 
     phi = draws["local_merger_rate"]
-    assert bool(jnp.all(phi >= float(_QUADRATURE.grid[0])))
-    assert bool(jnp.all(phi <= float(_QUADRATURE.grid[-1])))
+    assert bool(jnp.all(phi >= float(_AMPLITUDE_GRID[0])))
+    assert bool(jnp.all(phi <= float(_AMPLITUDE_GRID[-1])))
 
 
 def test_amplitude_reconstruction_model_computes_deterministics_from_substituted_statistics() -> (
@@ -375,8 +386,10 @@ def test_amplitude_reconstruction_model_computes_deterministics_from_substituted
     # total_merger_rate must be template_merger_rate * g_R(phi) with the
     # *input* template_merger_rate, elementwise -- a resampled (rather than
     # substituted) statistic would break this identity.
-    expected_rate = np.asarray(samples["template_merger_rate"]) * np.asarray(
-        merger_rate_amplitude_at(draws["local_merger_rate"], quadrature=_QUADRATURE)
+    expected_rate = (
+        np.asarray(samples["template_merger_rate"])
+        * np.asarray(draws["local_merger_rate"])
+        / FIDUCIAL_RATE
     )
     np.testing.assert_allclose(
         np.asarray(draws["total_merger_rate"]), expected_rate, rtol=1e-6
@@ -386,7 +399,10 @@ def test_amplitude_reconstruction_model_computes_deterministics_from_substituted
         AmplitudeConditional(
             samples["amplitude_mle"],
             samples["template_optimal_snr"],
-            quadrature=_QUADRATURE,
+            amplitude_fn=_identity_scaling,
+            prior=_AMPLITUDE_PRIOR,
+            fiducial=FIDUCIAL_RATE,
+            grid=_AMPLITUDE_GRID,
         ).effective_nodes
     )
     np.testing.assert_allclose(

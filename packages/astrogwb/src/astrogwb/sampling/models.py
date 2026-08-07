@@ -16,9 +16,9 @@ contribute a ``log_prob`` would double-count it. Running it as a separate,
 predictive-only model makes that impossible by construction. Second, the
 reconstruction needs only the chain's three published statistics
 (``amplitude_mle``, ``template_optimal_snr``, ``template_merger_rate``) plus
-the quadrature -- never the catalog or the :math:`(F, N)` contraction -- so
-post-processing stays ``O(K)`` per draw and self-contained against a saved
-chain.
+the prior and the scalings -- never the catalog or the :math:`(F, N)`
+contraction -- so post-processing stays ``O(K)`` per draw and self-contained
+against a saved chain.
 
 End-to-end sketch (toy data; runnable as-is):
 
@@ -37,19 +37,21 @@ End-to-end sketch (toy data; runnable as-is):
     from astrogwb.sampling import (
         amplitude_marginalized_model,
         amplitude_reconstruction_model,
-        make_amplitude_quadrature,
+        quadrature_grid,
     )
 
-    # --- One-time setup: the grid the amplitude direction is marginalized on.
+    # --- One-time setup: the prior and the grid the amplitude direction is
+    # marginalized on. The scalings are absolute functions of H0; the model
+    # anchors them at the fiducial itself.
     h0_fid = 70.0
-    grid = jnp.linspace(20.0, 140.0, 2001)
     amplitude_prior = dist.Uniform(20.0, 140.0)
-    quadrature = make_amplitude_quadrature(
-        grid=grid,
-        log_prior=amplitude_prior.log_prob(grid),
-        merger_rate_amplitude=lambda h0: (h0_fid / h0) ** 3,
-        mean_energy_flux_amplitude=lambda h0: (h0 / h0_fid) ** 2,
-    )
+    grid = quadrature_grid(amplitude_prior, num_nodes=2001)
+
+    def h0_merger_rate_amplitude(h0):
+        return h0**-3
+
+    def h0_amplitude(h0):
+        return 1.0 / h0  # h0**-3 * h0**2
 
     frequencies = jnp.array([10.0, 30.0, 100.0])
     polarization_power = jnp.ones((3, 4))  # (F, N) toy catalog
@@ -79,7 +81,9 @@ End-to-end sketch (toy data; runnable as-is):
         merger_rate_and_log_weights_fn=toy_merger_rate_and_log_weights_fn,
         amplitude_parameter="H0",
         fiducials=fiducials,
-        quadrature=quadrature,
+        amplitude_fn=h0_amplitude,
+        amplitude_prior=amplitude_prior,
+        amplitude_grid=grid,
         priors={"log10_rate": dist.Uniform(-8.0, -6.0)},
     )
     mcmc = MCMC(NUTS(model), num_warmup=50, num_samples=50, num_chains=1,
@@ -90,7 +94,10 @@ End-to-end sketch (toy data; runnable as-is):
     # the placeholder sites and draws H0 from AmplitudeConditional.
     draws = Predictive(
         partial(amplitude_reconstruction_model,
-                amplitude_parameter="H0", quadrature=quadrature),
+                amplitude_parameter="H0",
+                amplitude_fn=h0_amplitude,
+                merger_rate_amplitude_fn=h0_merger_rate_amplitude,
+                prior=amplitude_prior, fiducial=h0_fid, grid=grid),
         posterior_samples=mcmc.get_samples(group_by_chain=True),
         batch_ndims=2,
         return_sites=["H0", "total_merger_rate", "quadrature_effective_nodes"],
@@ -127,8 +134,8 @@ from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.sampling.amplitude import (
     AmplitudeConditional,
-    AmplitudeQuadrature,
-    merger_rate_amplitude_at,
+    AmplitudeFn,
+    MergerRateAmplitudeFn,
 )
 from astrogwb.utils import years_to_seconds
 
@@ -241,7 +248,9 @@ def amplitude_marginalized_model(
     merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     amplitude_parameter: str,
     fiducials: Mapping[str, Any],
-    quadrature: AmplitudeQuadrature,
+    amplitude_fn: AmplitudeFn,
+    amplitude_prior: dist.Distribution,
+    amplitude_grid: jax.Array | None = None,
     priors: Mapping[str, dist.Distribution] | None = None,
     constants: Mapping[str, Any] | None = None,
 ) -> None:
@@ -254,28 +263,27 @@ def amplitude_marginalized_model(
     touches the importance weights, and ``polarization_power`` is a fixed
     precomputed catalog.
 
-    The physical parameter :math:`\varphi` is marginalized numerically on the
-    fixed grid in ``quadrature`` (built by
-    :func:`~astrogwb.sampling.amplitude.make_amplitude_quadrature`) under its
-    own prior :math:`\pi(\varphi)`, for an arbitrary scaling
-    :math:`A = f(\varphi)` to the multiplicative amplitude. What
+    The physical parameter :math:`\varphi` is marginalized numerically under
+    its own prior ``amplitude_prior``, for an arbitrary scaling
+    :math:`f(\varphi)` to the multiplicative amplitude, with the integral
+    evaluated by trapezoid quadrature on ``amplitude_grid``. What
     :meth:`~astrogwb.sampling.amplitude.AmplitudeConditional.sample` returns in
-    post-processing is :math:`\varphi` itself (e.g. :math:`H_0`), not
-    :math:`A`. The only error is quadrature error, so grid resolution should be
+    post-processing is :math:`\varphi` itself (e.g. :math:`H_0`), not the
+    amplitude. The only error is quadrature error, so grid resolution should be
     checked with
     :attr:`~astrogwb.sampling.amplitude.AmplitudeConditional.effective_nodes`.
 
     The callback is invoked with ``amplitude_parameter`` pinned to
     ``fiducials[amplitude_parameter]``, so the predicted spectrum it returns is
     the *template* :math:`\mathbf{m}(\theta)` and the marginalized amplitude
-    :math:`A = f(\varphi) = g_R(\varphi) \cdot g_F(\varphi)` is the
-    dimensionless ratio to that reference, factored into an independently
-    scaling merger-rate piece and mean-energy-flux piece (see
-    :class:`~astrogwb.sampling.amplitude.AmplitudeQuadrature`). This covers a
-    parameter entering directly, such as ``local_merger_rate`` with
-    :math:`g_R = \varphi/\varphi_{\mathrm{fid}}`, :math:`g_F = 1`, and one
-    entering inversely, such as :math:`H_0` with
-    :math:`g_R = (H_{0,\mathrm{fid}}/H_0)^3`, :math:`g_F = (H_0/H_{0,\mathrm{fid}})^2`
+    :math:`A(\varphi) = f(\varphi)/f(\varphi_{\mathrm{fid}})` is the
+    dimensionless ratio to that reference, with
+    :math:`f = g_R \cdot g_F` factored into an independently scaling
+    merger-rate piece and mean-energy-flux piece (see
+    :func:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation.amplitude_scalings`).
+    This covers a parameter entering directly, such as ``local_merger_rate``
+    with :math:`g_R = \varphi`, :math:`g_F = 1`, and one entering inversely,
+    such as :math:`H_0` with :math:`g_R = H_0^{-3}`, :math:`g_F = H_0^{2}`
     -- both work directly with the physical parameter name, no synthetic
     amplitude key required.
 
@@ -290,9 +298,8 @@ def amplitude_marginalized_model(
     template), not the marginalized physical rate: the model never publishes
     a number that would be mistaken for the real merger rate at an
     unmarginalized :math:`\varphi`. Post-processing recovers the physical rate
-    as ``template_merger_rate * merger_rate_amplitude_at(varphi,
-    quadrature=quadrature)`` (see
-    :func:`~astrogwb.sampling.amplitude.merger_rate_amplitude_at`).
+    as ``template_merger_rate * g_R(varphi) / g_R(varphi_fid)``; see
+    :func:`amplitude_reconstruction_model`.
 
     The two amplitude statistics are what post-processing needs to reconstruct
     joint :math:`(\varphi, \theta)` samples via
@@ -314,10 +321,17 @@ def amplitude_marginalized_model(
     fiducials:
         Fiducial hyperparameters; ``fiducials[amplitude_parameter]`` is the
         reference value that defines the template.
-    quadrature:
-        Precomputed grid from
-        :func:`~astrogwb.sampling.amplitude.make_amplitude_quadrature` that
-        marginalizes the amplitude direction out of the Gaussian likelihood.
+    amplitude_fn:
+        The absolute scaling :math:`f(\varphi) = g_R(\varphi) g_F(\varphi)`;
+        the model anchors it at ``fiducials[amplitude_parameter]`` itself. Must
+        be hashable by value -- see
+        :class:`~astrogwb.sampling.amplitude.AmplitudeFn`.
+    amplitude_prior:
+        Prior :math:`\pi(\varphi)` on the marginalized parameter.
+    amplitude_grid:
+        Quadrature nodes for the marginalization integral. Defaults to
+        :func:`~astrogwb.sampling.amplitude.quadrature_grid` of
+        ``amplitude_prior``.
 
     Other parameters are as in :func:`spectral_density_model`.
 
@@ -382,7 +396,12 @@ def amplitude_marginalized_model(
 
     scale = gaussian_bin_scale(effective_psd, frequencies, observation_time)
     conditional = AmplitudeConditional(
-        amplitude_mle, template_optimal_snr, quadrature=quadrature
+        amplitude_mle,
+        template_optimal_snr,
+        amplitude_fn=amplitude_fn,
+        prior=amplitude_prior,
+        fiducial=fiducials[amplitude_parameter],
+        grid=amplitude_grid,
     )
     log_likelihood_at_mle = (
         dist.Normal(
@@ -403,7 +422,11 @@ def amplitude_marginalized_model(
 def amplitude_reconstruction_model(
     *,
     amplitude_parameter: str,
-    quadrature: AmplitudeQuadrature,
+    amplitude_fn: AmplitudeFn,
+    merger_rate_amplitude_fn: MergerRateAmplitudeFn,
+    prior: dist.Distribution,
+    fiducial: Any,
+    grid: jax.Array | None = None,
 ) -> None:
     r"""Generative-only reconstruction of joint :math:`(\varphi, \theta)` posterior draws.
 
@@ -432,10 +455,16 @@ def amplitude_reconstruction_model(
     amplitude_parameter:
         Name of the marginalized parameter; becomes the sample-site name of
         the reconstructed draws (e.g. ``"H0"``).
-    quadrature:
-        The same precomputed grid the inference model marginalized against.
-        Reconstruction is only exact for *that* grid -- read it back from the
-        chain's persisted ``constant_data`` rather than rebuilding it.
+    amplitude_fn, prior, fiducial, grid:
+        Must be exactly what :func:`amplitude_marginalized_model` was given.
+        Reconstruction is only exact against the density the chain's factor
+        site actually integrated; a silently different one yields a wrong
+        marginalized posterior with no visible symptom, because the sufficient
+        statistics stay finite and plausible whatever conditional you pair
+        them with.
+    merger_rate_amplitude_fn:
+        The absolute merger-rate scaling :math:`g_R(\varphi)` alone, used to
+        turn ``template_merger_rate`` back into the physical rate.
     """
     # The placeholder distributions are never sampled from
     # (ImproperUniform.sample raises NotImplementedError): they exist so
@@ -448,11 +477,21 @@ def amplitude_reconstruction_model(
     template_merger_rate = numpyro.sample("template_merger_rate", placeholder)
 
     conditional = AmplitudeConditional(
-        amplitude_mle, template_optimal_snr, quadrature=quadrature
+        amplitude_mle,
+        template_optimal_snr,
+        amplitude_fn=amplitude_fn,
+        prior=prior,
+        fiducial=fiducial,
+        grid=grid,
     )
-    phi = numpyro.sample(amplitude_parameter, conditional)
+    phi = jnp.asarray(numpyro.sample(amplitude_parameter, conditional))
     numpyro.deterministic(
         "total_merger_rate",
-        template_merger_rate * merger_rate_amplitude_at(phi, quadrature=quadrature),
+        template_merger_rate
+        * merger_rate_amplitude_fn(phi)
+        / merger_rate_amplitude_fn(jnp.asarray(fiducial)),
     )
+    # `quadrature_effective_nodes` keeps its name even though the quadrature
+    # object is gone: it is written into the posterior group and read back by
+    # the paper's `run_mcmc.save`, so renaming it would break existing NetCDFs.
     numpyro.deterministic("quadrature_effective_nodes", conditional.effective_nodes)

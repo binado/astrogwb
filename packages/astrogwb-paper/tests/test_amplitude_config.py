@@ -1,6 +1,6 @@
 """Tests for the paper's amplitude-marginalization glue.
 
-``build_amplitude_quadrature`` is the only JAX-touching bridge between the
+``build_amplitude_marginalization`` is the only JAX-touching bridge between the
 validated config and astrogwb's numerical marginalization; the physics itself
 (the H0^3/H0^2 split) is covered in core's ``test_amplitude_scalings.py``, not
 here.
@@ -12,16 +12,8 @@ import typing
 
 import jax.numpy as jnp
 import numpy as np
-import numpyro.distributions as dist
 import pytest
-from astrogwb_paper.amplitude import (
-    QUADRATURE_FIELDS,
-    amplitude_grid,
-    build_amplitude_quadrature,
-    load_amplitude_quadrature,
-    quadrature_constant_data,
-    quadrature_dims,
-)
+from astrogwb_paper.amplitude import build_amplitude_marginalization
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import AmplitudeParameter, build_run_config
 from astrogwb_paper.paths import paper_project_root
@@ -30,30 +22,7 @@ PAPER_ROOT = paper_project_root()
 
 
 # --------------------------------------------------------------------------- #
-# amplitude_grid
-# --------------------------------------------------------------------------- #
-
-
-def test_amplitude_grid_uniform_prior_spans_low_to_high() -> None:
-    prior = dist.Uniform(20.0, 140.0)
-    grid = amplitude_grid(prior, num_nodes=101, span_sigma=10.0)
-    np.testing.assert_allclose(np.asarray(grid), np.linspace(20.0, 140.0, 101))
-
-
-def test_amplitude_grid_normal_prior_spans_span_sigma() -> None:
-    prior = dist.Normal(70.0, 5.0)
-    grid = amplitude_grid(prior, num_nodes=101, span_sigma=10.0)
-    np.testing.assert_allclose(np.asarray(grid), np.linspace(20.0, 120.0, 101))
-
-
-def test_amplitude_grid_rejects_unsupported_prior_type() -> None:
-    prior = dist.Exponential(1.0)
-    with pytest.raises(TypeError, match="unsupported amplitude prior type"):
-        amplitude_grid(prior, num_nodes=101, span_sigma=10.0)
-
-
-# --------------------------------------------------------------------------- #
-# build_amplitude_quadrature
+# build_amplitude_marginalization
 # --------------------------------------------------------------------------- #
 
 
@@ -68,81 +37,53 @@ def _marginalized_config(**kwargs):
     return build_run_config(raw, **kwargs)
 
 
-def test_build_amplitude_quadrature_matches_config_grid_settings() -> None:
+def test_build_amplitude_marginalization_matches_config_grid_settings() -> None:
     config = _marginalized_config()
-    quadrature = build_amplitude_quadrature(config)
+    marginalization = build_amplitude_marginalization(config)
 
-    assert quadrature.grid.shape == (config.analysis.amplitude_num_nodes,)
-    np.testing.assert_allclose(float(quadrature.grid[0]), 20.0)
-    np.testing.assert_allclose(float(quadrature.grid[-1]), 140.0)
+    assert marginalization.parameter == "H0"
+    assert marginalization.fiducial == float(config.fiducials["H0"])
+    assert marginalization.grid.shape == (config.analysis.amplitude_num_nodes,)
+    np.testing.assert_allclose(float(marginalization.grid[0]), 20.0)
+    np.testing.assert_allclose(float(marginalization.grid[-1]), 140.0)
 
     # A uniform prior's log density is already normalized on its own support.
-    integral = float(jnp.trapezoid(jnp.exp(quadrature.log_prior), quadrature.grid))
+    integral = float(
+        jnp.trapezoid(
+            jnp.exp(marginalization.prior.log_prob(marginalization.grid)),
+            marginalization.grid,
+        )
+    )
     np.testing.assert_allclose(integral, 1.0, rtol=1e-6)
 
 
-def test_build_amplitude_quadrature_rejects_a_non_marginalized_config() -> None:
+def test_build_amplitude_marginalization_anchors_the_amplitude_at_the_fiducial() -> (
+    None
+):
+    """The scalings are absolute; the run is only correct if the ratio is 1 at phi_fid."""
+    marginalization = build_amplitude_marginalization(_marginalized_config())
+    fiducial = jnp.asarray(marginalization.fiducial)
+
+    for fn in (marginalization.amplitude_fn, marginalization.merger_rate_fn):
+        np.testing.assert_allclose(float(fn(fiducial) / fn(fiducial)), 1.0)
+
+    # H0: f = g_R * g_F = H0**-3 * H0**2, so f(phi)/f(phi_fid) = phi_fid/phi.
+    phi = jnp.asarray(2.0) * fiducial
+    np.testing.assert_allclose(
+        float(
+            marginalization.amplitude_fn(phi) / marginalization.amplitude_fn(fiducial)
+        ),
+        0.5,
+        rtol=1e-12,
+    )
+
+
+def test_build_amplitude_marginalization_rejects_a_non_marginalized_config() -> None:
     raw = load_mapping(PAPER_ROOT / "configs/mcmc.example.toml")
     config = build_run_config(raw)
 
     with pytest.raises(ValueError, match="amplitude-marginalized config"):
-        build_amplitude_quadrature(config)
-
-
-# --------------------------------------------------------------------------- #
-# Quadrature persistence
-# --------------------------------------------------------------------------- #
-
-
-def test_quadrature_constant_data_covers_every_field_on_the_grid_axis() -> None:
-    quadrature = build_amplitude_quadrature(_marginalized_config())
-    constant_data = quadrature_constant_data(quadrature)
-
-    assert set(constant_data) == set(QUADRATURE_FIELDS)
-    for name, values in constant_data.items():
-        assert values.shape == quadrature.grid.shape, name
-    assert set(quadrature_dims()) == set(QUADRATURE_FIELDS)
-
-
-def test_load_amplitude_quadrature_round_trips_through_netcdf(tmp_path) -> None:
-    """The reconstruction step must read back the grid it was integrated on.
-
-    Rebuilding from config instead would make a config drift silently produce a
-    wrong marginalized posterior, so this asserts exact equality, not closeness.
-    """
-    import xarray as xr
-
-    quadrature = build_amplitude_quadrature(_marginalized_config())
-    constant_data = quadrature_constant_data(quadrature)
-    dims = quadrature_dims()
-
-    tree = xr.DataTree.from_dict(
-        {
-            "constant_data": xr.Dataset(
-                {name: (dims[name], values) for name, values in constant_data.items()}
-            )
-        }
-    )
-    path = tmp_path / "run.nc"
-    tree.to_netcdf(path)
-
-    loaded = load_amplitude_quadrature(xr.open_datatree(path))
-
-    for field in QUADRATURE_FIELDS.values():
-        np.testing.assert_array_equal(
-            np.asarray(getattr(loaded, field)),
-            np.asarray(getattr(quadrature, field)),
-            err_msg=field,
-        )
-
-
-def test_load_amplitude_quadrature_rejects_data_without_the_group() -> None:
-    import xarray as xr
-
-    tree = xr.DataTree.from_dict({"posterior": xr.Dataset({"H0": ("draw", [70.0])})})
-
-    with pytest.raises(KeyError, match="no constant_data group"):
-        load_amplitude_quadrature(tree)
+        build_amplitude_marginalization(config)
 
 
 # --------------------------------------------------------------------------- #
@@ -158,6 +99,7 @@ def _toy_marginalized_mcmc():
     """
     import jax
     import numpyro
+    import numpyro.distributions as dist
     from numpyro.infer import MCMC, NUTS
 
     def model() -> None:
@@ -180,8 +122,8 @@ def _toy_marginalized_mcmc():
 
 
 @pytest.mark.integration
-def test_save_writes_reconstructed_amplitude_and_quadrature(tmp_path) -> None:
-    """``save()`` must produce a readable NetCDF carrying phi and its grid.
+def test_save_writes_the_reconstructed_amplitude(tmp_path) -> None:
+    """``save()`` must produce a readable NetCDF carrying the reconstructed phi.
 
     Regression guard: ``az.from_numpyro`` returns an xarray ``DataTree``, whose
     ``__setitem__`` silently accepts a Dataset-style ``(dims, values)`` tuple as
@@ -191,13 +133,13 @@ def test_save_writes_reconstructed_amplitude_and_quadrature(tmp_path) -> None:
     from astrogwb_paper.cli.run_mcmc import save
 
     config = _marginalized_config(outdir=tmp_path)
-    quadrature = build_amplitude_quadrature(config)
+    marginalization = build_amplitude_marginalization(config)
 
     nc_path = save(
         _toy_marginalized_mcmc(),
         config,
         catalog_path=tmp_path / "catalog.h5",
-        quadrature=quadrature,
+        marginalization=marginalization,
     )
 
     tree = xr.open_datatree(nc_path)
@@ -207,15 +149,11 @@ def test_save_writes_reconstructed_amplitude_and_quadrature(tmp_path) -> None:
         assert posterior[name].shape == (2, 10), name
         assert np.all(np.isfinite(posterior[name].values)), name
 
-    # H0 must land inside the prior grid, and the persisted grid must be the one
-    # the draws were actually made against.
+    # Draws come from an inverse CDF tabulated on the grid, so they land inside
+    # it -- slightly tighter than the declared (prior) support.
     h0 = posterior["H0"].values
-    assert np.all(h0 >= float(quadrature.grid[0]))
-    assert np.all(h0 <= float(quadrature.grid[-1]))
-    np.testing.assert_array_equal(
-        np.asarray(load_amplitude_quadrature(tree).grid),
-        np.asarray(quadrature.grid),
-    )
+    assert np.all(h0 >= float(marginalization.grid[0]))
+    assert np.all(h0 <= float(marginalization.grid[-1]))
 
 
 # --------------------------------------------------------------------------- #

@@ -41,7 +41,7 @@ from astrogwb_paper.config.mcmc import RunConfig, build_run_config, config_sha25
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
-    from astrogwb.sampling.amplitude import AmplitudeQuadrature
+    from astrogwb_paper.amplitude import AmplitudeMarginalization
 
 logger = logging.getLogger("run_mcmc")
 
@@ -106,8 +106,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     """Replicate the notebook inference cells headlessly and return the MCMC object.
 
-    Returns ``(mcmc, quadrature)``, where ``quadrature`` is the
-    :class:`~astrogwb.sampling.amplitude.AmplitudeQuadrature` built for an
+    Returns ``(mcmc, marginalization)``, where ``marginalization`` is the
+    :class:`~astrogwb_paper.amplitude.AmplitudeMarginalization` built for an
     amplitude-marginalized run, or ``None`` for the default likelihood.
     """
     from functools import partial
@@ -134,7 +134,7 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     from numpyro.infer.initialization import init_to_value
     from pluscross import load_catalog
 
-    from astrogwb_paper.amplitude import build_amplitude_quadrature
+    from astrogwb_paper.amplitude import build_amplitude_marginalization
     from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
     from astrogwb_paper.priors import build_prior
 
@@ -236,10 +236,10 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
 
     # --- Build the model and sampler -----------------------------------------
     priors = {name: build_prior(spec) for name, spec in config.priors.items()}
-    quadrature = None
+    marginalization = None
     if analysis.likelihood == "amplitude_marginalized":
         assert analysis.amplitude_parameter is not None
-        quadrature = build_amplitude_quadrature(config)
+        marginalization = build_amplitude_marginalization(config)
         model = partial(
             amplitude_marginalized_model,
             observation_time=config.observation_time,
@@ -247,7 +247,9 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
             merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
             amplitude_parameter=analysis.amplitude_parameter,
             fiducials=config.fiducials,
-            quadrature=quadrature,
+            amplitude_fn=marginalization.amplitude_fn,
+            amplitude_prior=marginalization.prior,
+            amplitude_grid=marginalization.grid,
             priors=priors,
             constants=config.constants,
         )
@@ -307,7 +309,7 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     # numpyro prints the summary to stdout; route it through logging for SLURM logs.
     logger.info("Sampling complete; summary follows")
     mcmc.print_summary()
-    return mcmc, quadrature
+    return mcmc, marginalization
 
 
 def verify_catalog(path: Path) -> str:
@@ -413,7 +415,7 @@ def save(
     timestamp: str | None = None,
     force: bool = False,
     catalog_sha256: str | None = None,
-    quadrature: AmplitudeQuadrature | None = None,
+    marginalization: AmplitudeMarginalization | None = None,
 ) -> Path:
     """Write the ArviZ NetCDF + JSON run record, and log the IS health check."""
     from functools import partial
@@ -422,39 +424,35 @@ def save(
     import numpy as np
     import xarray as xr
 
-    from astrogwb_paper.amplitude import quadrature_constant_data, quadrature_dims
-
     config.outdir.mkdir(parents=True, exist_ok=True)
     timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     nc_path, json_path = ensure_output_paths_available(
         config, timestamp=timestamp, force=force
     )
 
-    # Persist the grid the chain was actually marginalized against, so
-    # re-analysis reads it back instead of rebuilding it from config.
-    idata = az.from_numpyro(
-        mcmc,
-        constant_data=(
-            None if quadrature is None else quadrature_constant_data(quadrature)
-        ),
-        dims=None if quadrature is None else quadrature_dims(),
-    )
+    idata = az.from_numpyro(mcmc)
 
-    if quadrature is not None:
+    if marginalization is not None:
         import jax
         from astrogwb.sampling.models import amplitude_reconstruction_model
         from numpyro.infer import Predictive
 
-        amplitude_parameter = config.analysis.amplitude_parameter
-        assert amplitude_parameter is not None
+        amplitude_parameter = marginalization.parameter
 
+        # Reconstruction runs here, in-process, against the very objects the
+        # chain was marginalized with -- which is why nothing about the
+        # quadrature needs persisting to the NetCDF.
         # NumPyro marks Predictive as experimental; it is load-bearing here,
         # so re-check its substitution semantics on any NumPyro upgrade.
         draws = Predictive(
             partial(
                 amplitude_reconstruction_model,
                 amplitude_parameter=amplitude_parameter,
-                quadrature=quadrature,
+                amplitude_fn=marginalization.amplitude_fn,
+                merger_rate_amplitude_fn=marginalization.merger_rate_fn,
+                prior=marginalization.prior,
+                fiducial=marginalization.fiducial,
+                grid=marginalization.grid,
             ),
             posterior_samples=mcmc.get_samples(group_by_chain=True),
             batch_ndims=2,
@@ -548,7 +546,7 @@ def main(argv: list[str] | None = None) -> None:
         cpu_threads=args.cpu_threads,
         chain_method=args.chain_method,
     )
-    mcmc, quadrature = run(config, catalog_path, jax, chain_method)
+    mcmc, marginalization = run(config, catalog_path, jax, chain_method)
     save(
         mcmc,
         config,
@@ -556,7 +554,7 @@ def main(argv: list[str] | None = None) -> None:
         timestamp=timestamp,
         force=args.force,
         catalog_sha256=catalog_sha256,
-        quadrature=quadrature,
+        marginalization=marginalization,
     )
 
 

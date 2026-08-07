@@ -60,17 +60,21 @@ def _build_synthetic_callback():
 def test_merger_rate_amplitude_matches_the_real_callback(parameter: str) -> None:
     fn, samples = _build_synthetic_callback()
     fiducial = FIDUCIALS[parameter]
-    scalings = amplitude_scalings(parameter, fiducial)
+    scalings = amplitude_scalings(parameter)
 
     fiducial_rate, _ = fn(FIDUCIALS, samples)
 
     for phi in [0.5 * fiducial, 0.8 * fiducial, 1.3 * fiducial, 2.0 * fiducial]:
         params = {**FIDUCIALS, parameter: phi}
         rate, _ = fn(params, samples)
-        expected_rate = float(scalings.merger_rate(jnp.asarray(phi))) * float(
-            fiducial_rate
+        # The scalings are absolute, so the physical claim is about the ratio
+        # to the fiducial -- exactly what AmplitudeConditional forms.
+        ratio = float(scalings.merger_rate(jnp.asarray(phi))) / float(
+            scalings.merger_rate(jnp.asarray(fiducial))
         )
-        np.testing.assert_allclose(float(rate), expected_rate, rtol=1e-10)
+        np.testing.assert_allclose(
+            float(rate), ratio * float(fiducial_rate), rtol=1e-10
+        )
 
 
 @pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
@@ -79,7 +83,7 @@ def test_amplitude_factorization_matches_the_real_spectral_density(
 ) -> None:
     fn, samples = _build_synthetic_callback()
     fiducial = FIDUCIALS[parameter]
-    scalings = amplitude_scalings(parameter, fiducial)
+    scalings = amplitude_scalings(parameter)
 
     rng = np.random.default_rng(0)
     polarization_power = jnp.asarray(rng.uniform(0.5, 1.5, size=(5, N_SAMPLES)))
@@ -102,8 +106,8 @@ def test_amplitude_factorization_matches_the_real_spectral_density(
             average_mode="catalog_inclination",
         )
 
-        amplitude = float(scalings.merger_rate(jnp.asarray(phi))) * float(
-            scalings.mean_energy_flux(jnp.asarray(phi))
+        amplitude = float(scalings.amplitude(jnp.asarray(phi))) / float(
+            scalings.amplitude(jnp.asarray(fiducial))
         )
         np.testing.assert_allclose(
             np.asarray(actual_spectral_density),
@@ -112,6 +116,36 @@ def test_amplitude_factorization_matches_the_real_spectral_density(
         )
 
 
+@pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
+def test_amplitude_is_the_product_of_the_two_factors(parameter: str) -> None:
+    """``amplitude`` is spelled in closed form, so it needs checking against the pair."""
+    scalings = amplitude_scalings(parameter)
+    grid = jnp.linspace(0.5 * FIDUCIALS[parameter], 2.0 * FIDUCIALS[parameter], 32)
+
+    np.testing.assert_allclose(
+        np.asarray(scalings.amplitude(grid)),
+        np.asarray(scalings.merger_rate(grid) * scalings.mean_energy_flux(grid)),
+        rtol=1e-12,
+    )
+
+
+@pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
+def test_amplitude_scalings_are_hashable_singletons(parameter: str) -> None:
+    """``AmplitudeConditional`` carries the scaling as pytree *aux* data.
+
+    JAX hashes aux data into the jit cache key, so a scaling that is not
+    identity-stable across calls silently retraces the model every step. A
+    lambda or a ``functools.partial`` over the fiducial would fail this.
+    """
+    first = amplitude_scalings(parameter)
+    second = amplitude_scalings(parameter)
+
+    for field in first._fields:
+        this, that = getattr(first, field), getattr(second, field)
+        assert this is that, field
+        assert hash(this) == hash(that), field
+
+
 def test_amplitude_scalings_rejects_unknown_parameter() -> None:
     with pytest.raises(ValueError, match="not one of the amplitude parameters"):
-        amplitude_scalings("xi_0", 1.0)
+        amplitude_scalings("xi_0")
