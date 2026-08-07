@@ -3,7 +3,6 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 from astrogwb.gwb import (
-    frequency_mask,
     omega_gw_from_spectral_density,
     spectral_density,
     spectral_density_from_omega_gw,
@@ -31,16 +30,6 @@ def test_spectral_density_uses_average_mode_factor() -> None:
     np.testing.assert_allclose(np.asarray(catalog), np.array([60.0, 140.0 / 3.0]))
 
 
-def test_frequency_mask_bounds() -> None:
-    freqs = jnp.array([5.0, 10.0, 20.0, 30.0])
-
-    mask = frequency_mask(freqs, fmin=10.0, fmax=20.0)
-
-    np.testing.assert_array_equal(
-        np.asarray(mask), np.array([False, True, True, False])
-    )
-
-
 def test_omega_gw_round_trip() -> None:
     freqs = jnp.array([10.0, 20.0, 40.0])
     strain = jnp.array([1e-8, 2e-9, 3e-10])
@@ -48,4 +37,4 @@ def test_omega_gw_round_trip() -> None:
     omega = omega_gw_from_spectral_density(strain, freqs, hubble_constant_si=1.0)
     actual = spectral_density_from_omega_gw(omega, freqs, hubble_constant_si=1.0)
 
-    np.testing.assert_allclose(np.asarray(actual), np.asarray(strain), rtol=1e-6)
+    np.testing.assert_allclose(np.asarray(actual), np.asarray(strain))

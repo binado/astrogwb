@@ -26,20 +26,6 @@ def spectral_density(
     )
 
 
-def frequency_mask(
-    frequencies: jax.Array,
-    *,
-    fmin: float | None = None,
-    fmax: float | None = None,
-) -> jax.Array:
-    mask = jnp.ones_like(frequencies, dtype=bool)
-    if fmin is not None:
-        mask = mask & (frequencies >= fmin)
-    if fmax is not None:
-        mask = mask & (frequencies <= fmax)
-    return mask
-
-
 def omega_gw_from_spectral_density(
     spectral_density: jax.Array,
     frequencies: jax.Array,

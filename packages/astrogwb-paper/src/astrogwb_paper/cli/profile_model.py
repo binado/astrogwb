@@ -1,7 +1,7 @@
 """Profile the production NumPyro model's log-density under ``jax.profiler.trace``.
 
 This runs the exact model used by ``astrogwb-run-mcmc`` (the
-``astrogwb.sampling.numpyro_model`` compared against a fiducial injection), but
+``astrogwb.sampling.models`` compared against a fiducial injection), but
 instead of sampling it isolates the model's potential-energy function and traces
 its forward pass + gradient in a hot loop. The result is a Perfetto trace that
 shows which XLA ops dominate the model math (the cosmology grid integrals,
@@ -93,18 +93,27 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     """
     import jax.numpy as jnp
     from astrogwb.detector import effective_psd, load_sensitivity_map
-    from astrogwb.gwb import frequency_mask as make_frequency_mask
+    from astrogwb.frequency import (
+        apply_frequency_mask,
+    )
+    from astrogwb.frequency import (
+        frequency_mask as make_frequency_mask,
+    )
     from astrogwb.gwb import spectral_density
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
         compute_merger_rate_distance_and_logprob,
         make_merger_rate_and_log_weights_fn,
     )
-    from astrogwb.sampling.numpyro_model import numpyro_model
+    from astrogwb.sampling.models import (
+        amplitude_marginalized_model,
+        spectral_density_model,
+    )
     from astrogwb.waveform import polarization_power as compute_polarization_power
     from numpyro.infer.initialization import init_to_value
     from numpyro.infer.util import initialize_model
     from pluscross import load_catalog
 
+    from astrogwb_paper.amplitude import build_amplitude_marginalization
     from astrogwb_paper.priors import build_prior
 
     analysis = config.analysis
@@ -151,16 +160,45 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
         average_mode="analytic_inclination",
     )
 
-    priors = {name: build_prior(spec) for name, spec in config.priors.items()}
-    model = partial(
-        numpyro_model,
-        observation_time=config.observation_time,
-        average_mode="analytic_inclination",
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-        priors=priors,
-        constants=config.constants,
-        frequency_mask=freq_mask,
+    (
+        frequencies,
+        polarization_power,
+        observed_spectral_density,
+        effective_psd_arr,
+    ) = apply_frequency_mask(
+        freq_mask,
+        frequencies,
+        polarization_power,
+        observed_spectral_density,
+        effective_psd_arr,
     )
+
+    priors = {name: build_prior(spec) for name, spec in config.priors.items()}
+    if analysis.likelihood == "amplitude_marginalized":
+        assert analysis.amplitude_parameter is not None
+        marginalization = build_amplitude_marginalization(config)
+        model = partial(
+            amplitude_marginalized_model,
+            observation_time=config.observation_time,
+            average_mode="analytic_inclination",
+            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+            amplitude_parameter=analysis.amplitude_parameter,
+            fiducials=config.fiducials,
+            amplitude_fn=marginalization.amplitude_fn,
+            amplitude_prior=marginalization.prior,
+            amplitude_grid=marginalization.grid,
+            priors=priors,
+            constants=config.constants,
+        )
+    else:
+        model = partial(
+            spectral_density_model,
+            observation_time=config.observation_time,
+            average_mode="analytic_inclination",
+            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+            priors=priors,
+            constants=config.constants,
+        )
 
     model_kwargs = {
         "frequencies": frequencies,

@@ -95,4 +95,34 @@ its scientific result, so they are not recorded.
 Diagnostics surface the model's `importance_relative_ess` (the key proposal
 health check — should stay close to 1) and `total_merger_rate`.
 
+### Amplitude-marginalized runs
+
+Setting `analysis.likelihood = "amplitude_marginalized"` (see the commented
+block in [`configs/mcmc.example.toml`](../configs/mcmc.example.toml))
+integrates one multiplicative parameter -- `H0` or `local_merger_rate` -- out
+of the likelihood analytically instead of sampling it with NUTS. The
+resulting `.nc` is a drop-in replacement for a sampled chain: post-processing
+draws the marginalized parameter and writes it into the `posterior` group
+under its own physical name (e.g. `H0`), alongside the real
+`total_merger_rate` (rescaled from the model's `template_merger_rate` by the
+drawn amplitude), so every figure script and `paper.smk` path that reads
+`total_merger_rate` or a sampled parameter by name works unchanged.
+
+Two things are different from a sampled chain, though:
+
+- There is **no `log_likelihood` group**. `az.from_numpyro` builds that group
+  from observed sample sites, and the marginalized model has none -- the
+  likelihood is a single `numpyro.factor`. `az.loo` and `az.waic` do not
+  apply to these chains.
+- The posterior additionally carries `quadrature_effective_nodes`, a
+  per-draw diagnostic for how many quadrature grid points actually resolve
+  the conditional posterior (should be comfortably above ~30; the runner logs
+  a warning otherwise). If it is low, raise `analysis.amplitude_num_nodes`.
+- **`sampled_params` no longer describes the chain.** It means "parameters
+  NUTS has a latent for", and the marginalized parameter deliberately is not
+  one: it must stay out of `sampled_params`, which drives `init_to_value` and
+  the `set(priors) == set(sampled_params)` invariant. Use
+  `RunConfig.posterior_params` for anything describing the saved chain --
+  plot `var_names`, summaries, run records. The JSON sidecar records both.
+
 See the [plotting notebook](../notebooks/mcmc_plotting.py) for examples of how to visualize the results.

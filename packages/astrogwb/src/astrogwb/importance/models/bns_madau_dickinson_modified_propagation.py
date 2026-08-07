@@ -36,6 +36,46 @@ from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.utils import SECONDS_PER_YEAR
 
+AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
+"""Parameters this callback supports marginalizing analytically."""
+
+
+# Absolute scalings as module-level ``def``s (not closures over the fiducial)
+# so they are singletons: ``AmplitudeConditional`` carries the amplitude
+# function as pytree *aux* data, which JAX hashes into the jit cache key. A
+# lambda (or a ``functools.partial`` over a float) is identity-hashed, so a
+# fresh one per call would retrace the model on every construction. The
+# consumer forms the ratio ``f(varphi)/f(varphi_fid)`` itself.
+#
+# The predicted spectrum factorizes as ``f = g_R * g_F``. ``local_merger_rate``
+# enters only through ``total_merger_rate`` (linear; absent from ``log_weights``),
+# so ``g_R = varphi``, ``g_F = 1``, ``f = varphi``. ``H0`` enters the rate via
+# ``dV_c/dz ∝ h0^{-3}`` and the mean energy flux via
+# ``exp(-2 log d_L) ∝ h0^2``, so ``g_R = varphi^{-3}``, ``g_F = varphi^2``,
+# and ``f = varphi^{-1}``.
+def merger_rate_H0_fn(marginalized_parameter: jax.Array) -> jax.Array:
+    """Merger-rate scaling :math:`g_R(H_0) = H_0^{-3}`."""
+    return marginalized_parameter**-3
+
+
+def amplitude_H0_fn(marginalized_parameter: jax.Array) -> jax.Array:
+    """Total amplitude scaling :math:`f(H_0) = H_0^{-1}` (:math:`g_R g_F`)."""
+    return 1.0 / marginalized_parameter
+
+
+def merger_rate_local_merger_rate_fn(
+    marginalized_parameter: jax.Array,
+) -> jax.Array:
+    """Merger-rate scaling :math:`g_R(\\mathcal{R}_0) = \\mathcal{R}_0`."""
+    return marginalized_parameter
+
+
+def amplitude_local_merger_rate_fn(
+    marginalized_parameter: jax.Array,
+) -> jax.Array:
+    """Total amplitude scaling :math:`f(\\mathcal{R}_0) = \\mathcal{R}_0`."""
+    return marginalized_parameter
+
 
 def compute_merger_rate_distance_and_logprob(
     params: Mapping[str, Any],
@@ -145,7 +185,7 @@ def make_merger_rate_and_log_weights_fn(
     The returned closure reweights a fixed proposal catalog (drawn at the
     fiducial parameter point) to arbitrary sampled hyperparameters. It is
     JAX-traceable and intended to be passed (pre-built) to
-    :func:`~astrogwb.sampling.numpyro_model.numpyro_model`.
+    :func:`~astrogwb.sampling.models.spectral_density_model`.
 
     Precompute ``proposal_logprob`` with
     :func:`compute_merger_rate_distance_and_logprob` at the fiducials::

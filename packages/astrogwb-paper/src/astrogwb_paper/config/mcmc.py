@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -17,6 +17,12 @@ from astrogwb_paper.config.loading import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
+# Restates astrogwb.importance.models.bns_madau_dickinson_modified_propagation
+# .AMPLITUDE_PARAMETERS rather than importing it: this module must stay
+# stdlib+pydantic only (see module docstring), so a
+# @pytest.mark.integration paper test cross-checks the two lists instead.
+AmplitudeParameter = Literal["H0", "local_merger_rate"]
+
 
 class AnalysisConfig(BaseModel):
     model_config = _STRICT
@@ -24,6 +30,25 @@ class AnalysisConfig(BaseModel):
     detectors: tuple[str, ...]
     f_min: float
     f_max: float
+    likelihood: Literal["default", "amplitude_marginalized"] = "default"
+    amplitude_parameter: AmplitudeParameter | None = None
+    amplitude_num_nodes: Annotated[int, Field(gt=1)] = 1024
+    amplitude_prior_span_sigma: Annotated[float, Field(gt=0.0)] = 10.0
+
+    @model_validator(mode="after")
+    def _validate_amplitude_parameter(self) -> AnalysisConfig:
+        marginalized = self.likelihood == "amplitude_marginalized"
+        if marginalized and self.amplitude_parameter is None:
+            raise ValueError(
+                "analysis.amplitude_parameter is required when "
+                "likelihood == 'amplitude_marginalized'"
+            )
+        if not marginalized and self.amplitude_parameter is not None:
+            raise ValueError(
+                "analysis.amplitude_parameter is only valid when "
+                "likelihood == 'amplitude_marginalized'"
+            )
+        return self
 
 
 class CosmoConfig(BaseModel):
@@ -70,16 +95,47 @@ class RunConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     # Derived in the validator (every fiducial not sampled).
     constants: dict[str, float] = Field(default_factory=dict)
+    # Derived in the validator: the amplitude parameter's prior spec, held out
+    # of `priors` so `set(priors) == set(sampled_params)` keeps holding. Also
+    # accepted as input so configs written by save_config reload unchanged.
+    amplitude_prior: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _resolve_sampled_and_constants(self) -> RunConfig:
         if not self.fiducials:
             raise ValueError("config must define a non-empty [fiducials] table")
-        if not self.priors:
+        if not self.priors and self.amplitude_prior is None:
             raise ValueError("config must define at least one [priors.<param>] table")
 
-        sampled = self.sampled_params or tuple(self.priors)
-        missing_priors = [p for p in sampled if p not in self.priors]
+        priors = dict(self.priors)
+        amplitude_prior: dict[str, Any] | None = None
+        amplitude_parameter = self.analysis.amplitude_parameter
+        if amplitude_parameter is not None:
+            if amplitude_parameter in self.sampled_params:
+                raise ValueError(
+                    f"analysis.amplitude_parameter {amplitude_parameter!r} "
+                    "cannot also appear in sampled_params"
+                )
+            if amplitude_parameter not in self.fiducials:
+                raise ValueError(
+                    f"analysis.amplitude_parameter {amplitude_parameter!r} "
+                    "missing from [fiducials]"
+                )
+            if amplitude_parameter in priors:
+                amplitude_prior = priors.pop(amplitude_parameter)
+            elif self.amplitude_prior is not None:
+                # Reloaded save_config output: the pop above already happened
+                # at generation time, so the prior arrives in `amplitude_prior`.
+                amplitude_prior = dict(self.amplitude_prior)
+            else:
+                raise ValueError(
+                    f"analysis.amplitude_parameter {amplitude_parameter!r} needs "
+                    "a [priors.*] table (or an `amplitude_prior` entry in a "
+                    "config previously written by save_config)"
+                )
+
+        sampled = self.sampled_params or tuple(priors)
+        missing_priors = [p for p in sampled if p not in priors]
         if missing_priors:
             raise ValueError(
                 f"sampled_params without a [priors.*] table: {missing_priors}"
@@ -88,13 +144,32 @@ class RunConfig(BaseModel):
         if missing_fid:
             raise ValueError(f"sampled_params missing from [fiducials]: {missing_fid}")
 
-        aligned_priors = {name: self.priors[name] for name in sampled}
+        aligned_priors = {name: priors[name] for name in sampled}
         constants = {k: v for k, v in self.fiducials.items() if k not in sampled}
 
         object.__setattr__(self, "sampled_params", sampled)
         object.__setattr__(self, "priors", aligned_priors)
         object.__setattr__(self, "constants", constants)
+        object.__setattr__(self, "amplitude_prior", amplitude_prior)
         return self
+
+    @property
+    def posterior_params(self) -> tuple[str, ...]:
+        """Parameters present in the saved posterior group.
+
+        A superset of `sampled_params`, which means strictly "parameters NUTS
+        has a latent for". Under an amplitude-marginalized likelihood the two
+        sets differ: the amplitude parameter is integrated out of the potential
+        and has no latent, so it must stay out of `sampled_params` (it drives
+        `init_to_value` and the `set(priors) == set(sampled_params)`
+        invariant), yet post-processing reconstructs it into the posterior via
+        `amplitude_reconstruction_model`. Use this for anything describing the
+        saved chain -- plot `var_names`, run records, summaries.
+        """
+        amplitude_parameter = self.analysis.amplitude_parameter
+        if amplitude_parameter is None:
+            return self.sampled_params
+        return (*self.sampled_params, amplitude_parameter)
 
     @property
     def outdir(self) -> Path:

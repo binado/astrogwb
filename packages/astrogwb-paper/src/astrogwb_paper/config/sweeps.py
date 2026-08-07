@@ -36,12 +36,17 @@ from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb_paper.config.loading import load_mapping
-from astrogwb_paper.config.mcmc import RunConfig, build_run_config, save_config
+from astrogwb_paper.config.mcmc import (
+    AmplitudeParameter,
+    RunConfig,
+    build_run_config,
+    save_config,
+)
 from astrogwb_paper.paths import paper_project_root
 
 logger = logging.getLogger("generate_mcmc_configs")
@@ -106,6 +111,10 @@ class AnalysisSpec(BaseModel):
     sampled_params: _NonEmptyStrings
     priors: dict[str, str]
     fiducials: dict[str, float] = Field(default_factory=dict)
+    likelihood: Literal["default", "amplitude_marginalized"] = "default"
+    amplitude_parameter: AmplitudeParameter | None = None
+    amplitude_num_nodes: Annotated[int, Field(gt=1)] | None = None
+    amplitude_prior_span_sigma: Annotated[float, Field(gt=0.0)] | None = None
 
     @model_validator(mode="after")
     def _priors_match_sampled_params(self) -> AnalysisSpec:
@@ -113,11 +122,36 @@ class AnalysisSpec(BaseModel):
         if duplicates:
             raise ValueError(f"duplicate sampled_params: {duplicates}")
 
+        marginalized = self.likelihood == "amplitude_marginalized"
+        if marginalized and self.amplitude_parameter is None:
+            raise ValueError(
+                "amplitude_parameter is required when "
+                "likelihood == 'amplitude_marginalized'"
+            )
+        if not marginalized and self.amplitude_parameter is not None:
+            raise ValueError(
+                "amplitude_parameter is only valid when "
+                "likelihood == 'amplitude_marginalized'"
+            )
+
         sampled = set(self.sampled_params)
+        if self.amplitude_parameter is not None and (
+            self.amplitude_parameter in sampled
+        ):
+            raise ValueError(
+                f"amplitude_parameter {self.amplitude_parameter!r} cannot also "
+                "appear in sampled_params"
+            )
+
+        expected = sampled | (
+            {self.amplitude_parameter}
+            if self.amplitude_parameter is not None
+            else set()
+        )
         prior_parameters = set(self.priors)
-        if sampled != prior_parameters:
-            missing = sorted(sampled - prior_parameters)
-            extra = sorted(prior_parameters - sampled)
+        if expected != prior_parameters:
+            missing = sorted(expected - prior_parameters)
+            extra = sorted(prior_parameters - expected)
             raise ValueError(
                 "priors must exactly match sampled_params "
                 f"(missing={missing}, extra={extra})"
@@ -281,11 +315,21 @@ def materialize_run_config(
         **analysis.fiducials,
     }
     raw["observation_time"] = observation.observation_time
-    raw["analysis"] = {
+    analysis_raw: dict[str, Any] = {
         "detectors": list(network.detectors),
         "f_min": observation.f_min,
         "f_max": observation.f_max,
+        "likelihood": analysis.likelihood,
     }
+    if analysis.likelihood == "amplitude_marginalized":
+        analysis_raw["amplitude_parameter"] = analysis.amplitude_parameter
+        if analysis.amplitude_num_nodes is not None:
+            analysis_raw["amplitude_num_nodes"] = analysis.amplitude_num_nodes
+        if analysis.amplitude_prior_span_sigma is not None:
+            analysis_raw["amplitude_prior_span_sigma"] = (
+                analysis.amplitude_prior_span_sigma
+            )
+    raw["analysis"] = analysis_raw
     raw["sampled_params"] = list(analysis.sampled_params)
     raw["priors"] = {
         parameter: deepcopy(sweep.priors[parameter][prior_name])

@@ -33,11 +33,15 @@ import logging
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from astrogwb_paper.config.hashing import file_sha256
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import RunConfig, build_run_config, config_sha256
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
+
+if TYPE_CHECKING:
+    from astrogwb_paper.amplitude import AmplitudeMarginalization
 
 logger = logging.getLogger("run_mcmc")
 
@@ -100,23 +104,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # Inference
 # --------------------------------------------------------------------------- #
 def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
-    """Replicate the notebook inference cells headlessly and return the MCMC object."""
+    """Replicate the notebook inference cells headlessly and return the MCMC object.
+
+    Returns ``(mcmc, marginalization)``, where ``marginalization`` is the
+    :class:`~astrogwb_paper.amplitude.AmplitudeMarginalization` built for an
+    amplitude-marginalized run, or ``None`` for the default likelihood.
+    """
     from functools import partial
 
     import jax.numpy as jnp
     from astrogwb.detector import effective_psd, load_sensitivity_map
-    from astrogwb.gwb import frequency_mask as make_frequency_mask
+    from astrogwb.frequency import (
+        apply_frequency_mask,
+    )
+    from astrogwb.frequency import (
+        frequency_mask as make_frequency_mask,
+    )
     from astrogwb.gwb import spectral_density
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
         compute_merger_rate_distance_and_logprob,
         make_merger_rate_and_log_weights_fn,
     )
-    from astrogwb.sampling.numpyro_model import numpyro_model
+    from astrogwb.sampling.models import (
+        amplitude_marginalized_model,
+        spectral_density_model,
+    )
     from astrogwb.waveform import polarization_power as compute_polarization_power
     from numpyro.infer import MCMC, NUTS
     from numpyro.infer.initialization import init_to_value
     from pluscross import load_catalog
 
+    from astrogwb_paper.amplitude import build_amplitude_marginalization
     from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
     from astrogwb_paper.priors import build_prior
 
@@ -203,17 +221,47 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     )
     logger.info("Injected fiducial spectrum as observed data (rate0=%.4e /s)", rate0)
 
+    (
+        frequencies,
+        polarization_power,
+        observed_spectral_density,
+        effective_psd_arr,
+    ) = apply_frequency_mask(
+        freq_mask,
+        frequencies,
+        polarization_power,
+        observed_spectral_density,
+        effective_psd_arr,
+    )
+
     # --- Build the model and sampler -----------------------------------------
     priors = {name: build_prior(spec) for name, spec in config.priors.items()}
-    model = partial(
-        numpyro_model,
-        observation_time=config.observation_time,
-        average_mode="analytic_inclination",
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-        priors=priors,
-        constants=config.constants,
-        frequency_mask=freq_mask,
-    )
+    marginalization = None
+    if analysis.likelihood == "amplitude_marginalized":
+        assert analysis.amplitude_parameter is not None
+        marginalization = build_amplitude_marginalization(config)
+        model = partial(
+            amplitude_marginalized_model,
+            observation_time=config.observation_time,
+            average_mode="analytic_inclination",
+            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+            amplitude_parameter=analysis.amplitude_parameter,
+            fiducials=config.fiducials,
+            amplitude_fn=marginalization.amplitude_fn,
+            amplitude_prior=marginalization.prior,
+            amplitude_grid=marginalization.grid,
+            priors=priors,
+            constants=config.constants,
+        )
+    else:
+        model = partial(
+            spectral_density_model,
+            observation_time=config.observation_time,
+            average_mode="analytic_inclination",
+            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+            priors=priors,
+            constants=config.constants,
+        )
 
     sampler = config.sampler
     init_strategy = init_to_value(
@@ -261,7 +309,7 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     # numpyro prints the summary to stdout; route it through logging for SLURM logs.
     logger.info("Sampling complete; summary follows")
     mcmc.print_summary()
-    return mcmc
+    return mcmc, marginalization
 
 
 def verify_catalog(path: Path) -> str:
@@ -328,14 +376,19 @@ def build_run_record(
     catalog_sha256: str | None,
 ) -> dict:
     """Assemble the JSON sidecar recording the run's inputs and provenance."""
-    return {
+    record: dict[str, Any] = {
         "catalog_path": str(catalog_path),
         "catalog_sha256": catalog_sha256,
         "config_sha256": config_sha256(config),
         "detectors": list(config.analysis.detectors),
         "seed": config.seed,
         "observation_time": config.observation_time,
+        "likelihood": config.analysis.likelihood,
+        # `sampled_params` is the sampler's latents; `posterior_params` is what
+        # the saved chain actually carries. They differ by the reconstructed
+        # amplitude parameter under a marginalized likelihood.
         "sampled_params": list(config.sampled_params),
+        "posterior_params": list(config.posterior_params),
         "fiducials": config.fiducials,
         "constants": config.constants,
         "priors": config.priors,
@@ -348,6 +401,14 @@ def build_run_record(
         "git_revision": _git_revision(),
         "timestamp": timestamp,
     }
+    if config.analysis.likelihood == "amplitude_marginalized":
+        record["amplitude_parameter"] = config.analysis.amplitude_parameter
+        record["amplitude_prior"] = config.amplitude_prior
+        record["amplitude_num_nodes"] = config.analysis.amplitude_num_nodes
+        record["amplitude_prior_span_sigma"] = (
+            config.analysis.amplitude_prior_span_sigma
+        )
+    return record
 
 
 def save(
@@ -358,9 +419,14 @@ def save(
     timestamp: str | None = None,
     force: bool = False,
     catalog_sha256: str | None = None,
+    marginalization: AmplitudeMarginalization | None = None,
 ) -> Path:
     """Write the ArviZ NetCDF + JSON run record, and log the IS health check."""
+    from functools import partial
+
     import arviz as az
+    import numpy as np
+    import xarray as xr
 
     config.outdir.mkdir(parents=True, exist_ok=True)
     timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
@@ -369,6 +435,57 @@ def save(
     )
 
     idata = az.from_numpyro(mcmc)
+
+    if marginalization is not None:
+        import jax
+        from astrogwb.sampling.models import amplitude_reconstruction_model
+        from numpyro.infer import Predictive
+
+        amplitude_parameter = marginalization.parameter
+
+        # Reconstruction runs here, in-process, against the very objects the
+        # chain was marginalized with -- which is why nothing about the
+        # quadrature needs persisting to the NetCDF.
+        # NumPyro marks Predictive as experimental; it is load-bearing here,
+        # so re-check its substitution semantics on any NumPyro upgrade.
+        draws = Predictive(
+            partial(
+                amplitude_reconstruction_model,
+                amplitude_parameter=amplitude_parameter,
+                amplitude_fn=marginalization.amplitude_fn,
+                merger_rate_amplitude_fn=marginalization.merger_rate_fn,
+                prior=marginalization.prior,
+                fiducial=marginalization.fiducial,
+                grid=marginalization.grid,
+            ),
+            posterior_samples=mcmc.get_samples(group_by_chain=True),
+            batch_ndims=2,
+            return_sites=[
+                amplitude_parameter,
+                "total_merger_rate",
+                "quadrature_effective_nodes",
+            ],
+        )(jax.random.fold_in(jax.random.PRNGKey(config.seed), 1))
+
+        # `az.from_numpyro` returns an xarray DataTree, whose __setitem__ does
+        # not accept a Dataset-style `(dims, values)` tuple: it would store the
+        # tuple as an object scalar and fail at `to_netcdf`. Assign DataArrays.
+        for name, values in draws.items():
+            idata.posterior[name] = xr.DataArray(
+                np.asarray(values), dims=("chain", "draw")
+            )
+
+        effective_nodes = draws["quadrature_effective_nodes"]
+
+        min_effective_nodes = float(np.min(effective_nodes))
+        if min_effective_nodes < 30:
+            logger.warning(
+                "quadrature_effective_nodes min=%.1f is below 30; the amplitude "
+                "grid may not resolve the conditional posterior. Consider "
+                "raising analysis.amplitude_num_nodes.",
+                min_effective_nodes,
+            )
+
     idata.to_netcdf(nc_path)
 
     run_record = build_run_record(
@@ -433,7 +550,7 @@ def main(argv: list[str] | None = None) -> None:
         cpu_threads=args.cpu_threads,
         chain_method=args.chain_method,
     )
-    mcmc = run(config, catalog_path, jax, chain_method)
+    mcmc, marginalization = run(config, catalog_path, jax, chain_method)
     save(
         mcmc,
         config,
@@ -441,6 +558,7 @@ def main(argv: list[str] | None = None) -> None:
         timestamp=timestamp,
         force=args.force,
         catalog_sha256=catalog_sha256,
+        marginalization=marginalization,
     )
 
 

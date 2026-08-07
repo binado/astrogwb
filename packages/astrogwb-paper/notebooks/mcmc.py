@@ -163,11 +163,14 @@ from numpyro.infer import MCMC, NUTS
 
 import matplotlib.pyplot as plt
 
-from astrogwb.sampling.numpyro_model import numpyro_model
+from astrogwb.sampling.models import spectral_density_model
+from astrogwb.frequency import (
+    apply_frequency_mask,
+    frequency_mask as make_frequency_mask,
+)
 from astrogwb.gwb import (
     spectral_density,
     omega_gw_from_spectral_density,
-    frequency_mask as make_frequency_mask,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
@@ -433,6 +436,19 @@ observed_spectral_density = spectral_density(
 )
 plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-15)
 
+(
+    frequencies,
+    polarization_power,
+    observed_spectral_density,
+    effective_psd_arr,
+) = apply_frequency_mask(
+    mask,
+    frequencies,
+    polarization_power,
+    observed_spectral_density,
+    effective_psd_arr,
+)
+
 # %% [markdown]
 # ## Running the MCMC
 #
@@ -440,13 +456,12 @@ plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1
 
 # %%
 model = partial(
-    numpyro_model,
+    spectral_density_model,
     observation_time=observation_time,
     average_mode="analytic_inclination",
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     priors=priors,
     constants=constants,
-    frequency_mask=mask,
 )
 
 kernel = NUTS(

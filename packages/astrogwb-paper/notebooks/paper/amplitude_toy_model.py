@@ -62,11 +62,15 @@ import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
 
 from astrogwb_paper.config.hashing import file_sha256
-from astrogwb.sampling.numpyro_model import numpyro_model
+from astrogwb.sampling.models import spectral_density_model
+from astrogwb.frequency import (
+    apply_frequency_mask,
+    frequency_mask as make_frequency_mask,
+    frequency_spacing,
+)
 from astrogwb.gwb import (
     spectral_density,
     spectral_snr_squared,
-    frequency_mask as make_frequency_mask,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.waveform import polarization_power as compute_polarization_power
@@ -269,6 +273,19 @@ observed_spectral_density = spectral_density(
     polarization_power, weights_fid, rate_fid, average_mode="analytic_inclination"
 )
 
+(
+    frequencies,
+    polarization_power,
+    observed_spectral_density,
+    effective_psd_arr,
+) = apply_frequency_mask(
+    mask,
+    frequencies,
+    polarization_power,
+    observed_spectral_density,
+    effective_psd_arr,
+)
+
 # %% [markdown]
 # ## Running the MCMC
 #
@@ -276,13 +293,12 @@ observed_spectral_density = spectral_density(
 
 # %%
 model = partial(
-    numpyro_model,
+    spectral_density_model,
     observation_time=observation_time,
     average_mode="analytic_inclination",
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     priors=priors,
     constants=constants,
-    frequency_mask=mask,
 )
 
 kernel = NUTS(
@@ -385,10 +401,10 @@ azp.plot_autocorr(inference_data, var_names=list(sampled_params))
 # sanity check.
 
 # %%
-df = float(jnp.mean(jnp.diff(frequencies)))
+df = float(frequency_spacing(frequencies))
 T_sec = float(years_to_seconds(observation_time))
 snr_sq = spectral_snr_squared(
-    observed_spectral_density[mask], effective_psd_arr[mask], T_sec, df
+    observed_spectral_density, effective_psd_arr, T_sec, df
 )
 snr = float(jnp.sqrt(snr_sq))
 sigma_fisher = float(amplitude_fiducial / snr)

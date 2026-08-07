@@ -31,8 +31,11 @@ sampled_params = ["H0"]
 priors = { H0 = "uniform" }
 
 [analyses.H0-Omega_m]
-sampled_params = ["H0", "Omega_m"]
+sampled_params = ["Omega_m"]
 priors = { H0 = "uniform", Omega_m = "normal" }
+likelihood = "amplitude_marginalized"
+amplitude_parameter = "H0"
+amplitude_num_nodes = 1024
 
 [analyses.H0-merger-rate-gauss]
 sampled_params = ["H0", "local_merger_rate"]
@@ -51,12 +54,18 @@ sampled_params = ["xi_0", "H0"]
 priors = { xi_0 = "uniform", H0 = "normal" }
 
 [analyses.H0-peak]
-sampled_params = ["H0", "z_peak"]
+sampled_params = ["z_peak"]
 priors = { H0 = "uniform", z_peak = "uniform" }
+likelihood = "amplitude_marginalized"
+amplitude_parameter = "H0"
+amplitude_num_nodes = 1024
 
 [analyses.H0-MD]
-sampled_params = ["H0", "gamma", "kappa", "z_peak"]
+sampled_params = ["gamma", "kappa", "z_peak"]
 priors = { H0 = "uniform", gamma = "uniform", kappa = "uniform", z_peak = "uniform" }
+likelihood = "amplitude_marginalized"
+amplitude_parameter = "H0"
+amplitude_num_nodes = 1024
 
 [priors.H0.uniform]
 type = "uniform"

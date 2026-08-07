@@ -3,7 +3,7 @@
 This module is the bridge between the validated, JSON-serializable prior tables
 in :mod:`astrogwb_paper.config.mcmc` (plain dicts like ``{"type": "uniform",
 "low": 0.0, "high": 1.0}``) and live ``numpyro.distributions`` objects handed
-to :func:`astrogwb.sampling.numpyro_model.numpyro_model`.
+to :func:`astrogwb.sampling.models.spectral_density_model`.
 
 NumPyro/JAX are imported lazily inside :func:`build_prior` so that importing
 this module does not itself initialize the JAX backend; callers must run their
