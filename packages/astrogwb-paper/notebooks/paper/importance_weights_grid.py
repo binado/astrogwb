@@ -40,16 +40,17 @@
 # %%
 from __future__ import annotations
 
+import argparse
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
-from _paper_style import CATEGORY, TRUTH, use_paper_style
+from _paper_style import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
-from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
 from matplotlib.projections import register_projection
 from pluscross import load_catalog
@@ -73,13 +74,41 @@ jax.config.update("jax_enable_x64", True)
 # ## Top-level configuration
 #
 # `eps` insets each prior grid from the extreme quantiles via `Distribution.icdf`;
-# `npoints` is the number of samples along each axis.
+# `npoints` is the number of samples along each axis. Paths and presentation
+# settings have editable defaults below and command-line overrides; the paper
+# workflow passes its declared catalog and output paths explicitly.
 
 # %%
+DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
+DEFAULT_OUTPUT_H0_OMEGA_M_PDF = Path("figures/importance_weights_grid_H0_Omega_m.pdf")
+DEFAULT_OUTPUT_XI0_N_PDF = Path("figures/importance_weights_grid_Xi0_n.pdf")
+DEFAULT_FIGURE_DPI = 300
+
+
+def _resolve_path(path: Path, root: Path) -> Path:
+    return path if path.is_absolute() else root / path
+
+
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
+    parser.add_argument(
+        "--output-h0-omega-m-pdf", type=Path, default=DEFAULT_OUTPUT_H0_OMEGA_M_PDF
+    )
+    parser.add_argument(
+        "--output-xi0-n-pdf", type=Path, default=DEFAULT_OUTPUT_XI0_N_PDF
+    )
+    parser.add_argument("--figure-dpi", type=int, default=DEFAULT_FIGURE_DPI)
+    args, _ = parser.parse_known_args(argv)
+    return args
+
+
+args = _parse_args()
+
 ROOT = paper_project_root()
 SWEEP_CONFIG_PATH = ROOT / "configs/mcmc.sweeps.toml"
 BASE_CONFIG_PATH = ROOT / "configs/mcmc.base.toml"
-CATALOG_PATH = ROOT / "out/catalogs/bns-n16384-df1.h5"
+CATALOG_PATH = _resolve_path(args.catalog, ROOT)
 
 eps = 1e-3
 npoints = 64
@@ -123,10 +152,10 @@ xi_0_prior = build_prior(sweep["priors"]["xi_0"]["uniform"])
 xi_n_prior = build_prior(sweep["priors"]["xi_n"]["uniform"])
 
 COMBOS: tuple[
-    tuple[tuple[str, dist.Distribution], tuple[str, dist.Distribution], str], ...
+    tuple[tuple[str, dist.Distribution], tuple[str, dist.Distribution]], ...
 ] = (
-    (("H0", h0_prior), ("Omega_m", omega_m_prior), "cosmology"),
-    (("xi_0", xi_0_prior), ("xi_n", xi_n_prior), "modified_propagation"),
+    (("H0", h0_prior), ("Omega_m", omega_m_prior)),
+    (("xi_0", xi_0_prior), ("xi_n", xi_n_prior)),
 )
 
 # %% [markdown]
@@ -184,13 +213,6 @@ def relative_ess(log_weights: jax.Array) -> jax.Array:
     return jnp.sum(weights) ** 2 / (weights.shape[0] * jnp.sum(weights**2))
 
 
-def _category_cmap(category: str) -> LinearSegmentedColormap:
-    return LinearSegmentedColormap.from_list(
-        f"{category}_relative_ess",
-        ["#ffffff", CATEGORY[category]],
-    )
-
-
 def evaluate_relative_ess_grid(
     axis0: tuple[str, jax.Array],
     axis1: tuple[str, jax.Array],
@@ -220,7 +242,6 @@ def plot_relative_ess_heatmap(
     axis1: tuple[str, jax.Array],
     relative_ess_grid: jax.Array,
     *,
-    category: str,
     fiducials: Mapping[str, float],
 ) -> Figure:
     """Heatmap of relative ESS over a two-parameter grid."""
@@ -247,7 +268,7 @@ def plot_relative_ess_heatmap(
         origin="lower",
         extent=extent,
         aspect="auto",
-        cmap=_category_cmap(category),
+        cmap="viridis",
     )
     ax.xaxis.set_ticks_position("bottom")
     ax.axvline(fiducials[name0], **TRUTH)
@@ -271,7 +292,7 @@ def combo_constants(
 # ## Combination 1: $H_0$–$\Omega_m$ grid
 
 # %%
-(name_h0, prior_h0), (name_om, prior_om), category_cosmo = COMBOS[0]
+(name_h0, prior_h0), (name_om, prior_om) = COMBOS[0]
 grid_h0 = prior_grid(prior_h0, eps=eps, npoints=npoints)
 grid_om = prior_grid(prior_om, eps=eps, npoints=npoints)
 constants_h0_om = combo_constants((name_h0, name_om), fiducials)
@@ -299,7 +320,7 @@ print(
 # ## Combination 2: $\Xi_0$–$n$ grid
 
 # %%
-(name_xi0, prior_xi0), (name_xin, prior_xin), category_xi = COMBOS[1]
+(name_xi0, prior_xi0), (name_xin, prior_xin) = COMBOS[1]
 grid_xi0 = prior_grid(prior_xi0, eps=eps, npoints=npoints)
 grid_xin = prior_grid(prior_xin, eps=eps, npoints=npoints)
 constants_xi = combo_constants((name_xi0, name_xin), fiducials)
@@ -327,11 +348,10 @@ print(
 # ## Plot: $H_0$–$\Omega_m$ relative-ESS heatmap
 
 # %%
-plot_relative_ess_heatmap(
+figure_h0_om = plot_relative_ess_heatmap(
     (name_h0, grid_h0),
     (name_om, grid_om),
     relative_ess_h0_om,
-    category=category_cosmo,
     fiducials=fiducials,
 )
 
@@ -339,10 +359,22 @@ plot_relative_ess_heatmap(
 # ## Plot: $\Xi_0$–$n$ relative-ESS heatmap
 
 # %%
-plot_relative_ess_heatmap(
+figure_xi0_n = plot_relative_ess_heatmap(
     (name_xi0, grid_xi0),
     (name_xin, grid_xin),
     relative_ess_xi,
-    category=category_xi,
     fiducials=fiducials,
 )
+
+# %% [markdown]
+# ## Save figures
+
+# %%
+for figure, output in (
+    (figure_h0_om, args.output_h0_omega_m_pdf),
+    (figure_xi0_n, args.output_xi0_n_pdf),
+):
+    output_path = _resolve_path(output, ROOT)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
+    print("saved figure:", output_path)

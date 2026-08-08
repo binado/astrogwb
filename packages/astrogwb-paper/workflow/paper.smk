@@ -31,6 +31,14 @@ FIDUCIAL_SPECTRUM = config["fiducial_spectrum"]
 FIDUCIAL_SPECTRUM_PDF = FIDUCIAL_SPECTRUM["output_pdf"]
 FIDUCIAL_SPECTRUM_EFFECTIVE_PSD_PDF = FIDUCIAL_SPECTRUM["output_effective_psd_pdf"]
 FIDUCIAL_SPECTRUM_OMEGA_GW_MIN = FIDUCIAL_SPECTRUM["omega_gw_min"]
+IMPORTANCE_WEIGHTS_GRID_OUTPUTS = config["importance_weights_grid"]
+IMPORTANCE_WEIGHTS_GRID_H0_OMEGA_M_PDF = IMPORTANCE_WEIGHTS_GRID_OUTPUTS[
+    "output_h0_omega_m_pdf"
+]
+IMPORTANCE_WEIGHTS_GRID_XI0_N_PDF = IMPORTANCE_WEIGHTS_GRID_OUTPUTS[
+    "output_xi0_n_pdf"
+]
+
 COSMOLOGY_OUTPUTS = config["mcmc_cosmological_parameters"]
 COSMOLOGY_DETECTOR_PDF = COSMOLOGY_OUTPUTS["output_detector_pdf"]
 COSMOLOGY_PRIOR_PDF = COSMOLOGY_OUTPUTS["output_prior_pdf"]
@@ -114,6 +122,7 @@ localrules:
     paper_figures,
     amplitude_toy,
     fiducial_spectrum,
+    importance_weights_grid,
     mcmc_cosmological_parameters,
     mcmc_modified_propagation,
 
@@ -123,6 +132,8 @@ rule paper_figures:
         AMPLITUDE_TOY_PDF,
         FIDUCIAL_SPECTRUM_PDF,
         FIDUCIAL_SPECTRUM_EFFECTIVE_PSD_PDF,
+        IMPORTANCE_WEIGHTS_GRID_H0_OMEGA_M_PDF,
+        IMPORTANCE_WEIGHTS_GRID_XI0_N_PDF,
         COSMOLOGY_DETECTOR_PDF,
         COSMOLOGY_PRIOR_PDF,
         COSMOLOGY_NARROW_CORNER_PDF,
@@ -204,6 +215,23 @@ rule fiducial_spectrum:
         " --omega-gw-min {params.omega_gw_min}"
         " --output-pdf {output.spectrum_pdf:q}"
         " --output-effective-psd-pdf {output.effective_psd_pdf:q}"
+
+
+rule importance_weights_grid:
+    input:
+        catalog=CATALOG_PATH,
+        sweep_config="configs/mcmc.sweeps.toml",
+        base_config="configs/mcmc.base.toml",
+    output:
+        h0_omega_m_pdf=IMPORTANCE_WEIGHTS_GRID_H0_OMEGA_M_PDF,
+        xi0_n_pdf=IMPORTANCE_WEIGHTS_GRID_XI0_N_PDF,
+    shell:
+        "uv run --group plotting"
+        " --package astrogwb-paper"
+        " python notebooks/paper/importance_weights_grid.py"
+        " --catalog {input.catalog:q}"
+        " --output-h0-omega-m-pdf {output.h0_omega_m_pdf:q}"
+        " --output-xi0-n-pdf {output.xi0_n_pdf:q}"
 
 
 rule mcmc_cosmological_parameters:
