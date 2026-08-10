@@ -411,13 +411,22 @@ def amplitude_marginalized_model(
         fiducial=fiducials[amplitude_parameter],
         grid=amplitude_grid,
     )
-    log_likelihood_at_mle = (
-        dist.Normal(
-            amplitude_mle[..., None] * model_spectral_density,
-            scale,
+    # log p(d | A_mle) = -1/2 chi^2(A_mle, theta) + normalization, with
+    # chi^2(A_mle, theta) = data_norm - A_mle * data_template (the completed
+    # square, eq. rearranged-amplitude-joint-likelihood in the paper). This
+    # reuses amplitude_mle and data_template instead of re-forming the (F,)
+    # residual d - A_mle * m through a second Normal.log_prob evaluation;
+    # data_norm depends only on fixed inputs, never on theta or phi.
+    data_norm = (
+        2.0
+        * observation_time_sec
+        * noise_weighted_inner_product(
+            observed_spectral_density, observed_spectral_density, effective_psd, df
         )
-        .to_event(1)
-        .log_prob(observed_spectral_density)
+    )
+    normalization = -jnp.sum(jnp.log(scale) + 0.5 * jnp.log(2.0 * jnp.pi))
+    log_likelihood_at_mle = normalization - 0.5 * (
+        data_norm - amplitude_mle * data_template
     )
     # The marginalization factor *is* the normalizing constant of the
     # conditional that post-processing later samples.
