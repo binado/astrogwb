@@ -84,6 +84,23 @@ def log_gw_em_ratio(
     return xp.log(xi_0 + (1.0 - xi_0) * xp.exp(-xi_n * xp.log1p(z)))
 
 
+@overload
+def hubble_distance(h0: float) -> float: ...
+
+
+@overload
+def hubble_distance(h0: jax.Array) -> jax.Array: ...
+
+
+def hubble_distance(h0: float | jax.Array) -> float | jax.Array:
+    r"""Hubble distance $c / H_0$ in Mpc.
+
+    With $H_0$ given in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$ and the speed of light
+    in $\mathrm{km\,s^{-1}}$, the result is the Hubble distance in Mpc.
+    """
+    return SPEED_OF_LIGHT / 1000 / h0
+
+
 def distance_and_volume_grid(
     params: Mapping[str, Any],
     redshift: jax.Array,
@@ -127,9 +144,9 @@ def distance_and_volume_grid(
     integral = jnp.concatenate(
         [jnp.zeros(1, dtype=trapezoids.dtype), jnp.cumsum(trapezoids)]
     )
-    comoving_distance = SPEED_OF_LIGHT / 1000 / h0 * integral
+    comoving_distance = hubble_distance(h0) * integral
     luminosity_distance = (1.0 + redshift) * comoving_distance
     differential_comoving_volume = (
-        4.0 * jnp.pi * comoving_distance**2 * inv_e / h0 * SPEED_OF_LIGHT / 1000
+        4.0 * jnp.pi * comoving_distance**2 * inv_e * hubble_distance(h0)
     )
     return luminosity_distance, differential_comoving_volume
