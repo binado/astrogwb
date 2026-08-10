@@ -446,8 +446,9 @@ def save(
         # Reconstruction runs here, in-process, against the very objects the
         # chain was marginalized with -- which is why nothing about the
         # quadrature needs persisting to the NetCDF.
-        # NumPyro marks Predictive as experimental; it is load-bearing here,
-        # so re-check its substitution semantics on any NumPyro upgrade.
+        # The sufficient statistics form the AmplitudeConditional batch shape;
+        # one Predictive invocation draws one amplitude per (chain, draw).
+        posterior_samples = mcmc.get_samples(group_by_chain=True)
         draws = Predictive(
             partial(
                 amplitude_reconstruction_model,
@@ -458,14 +459,19 @@ def save(
                 fiducial=marginalization.fiducial,
                 grid=marginalization.grid,
             ),
-            posterior_samples=mcmc.get_samples(group_by_chain=True),
-            batch_ndims=2,
+            num_samples=1,
             return_sites=[
                 amplitude_parameter,
                 "total_merger_rate",
                 "quadrature_effective_nodes",
             ],
-        )(jax.random.fold_in(jax.random.PRNGKey(config.seed), 1))
+        )(
+            jax.random.fold_in(jax.random.PRNGKey(config.seed), 1),
+            amplitude_mle=posterior_samples["amplitude_mle"],
+            template_optimal_snr=posterior_samples["template_optimal_snr"],
+            template_merger_rate=posterior_samples["template_merger_rate"],
+        )
+        draws = {name: values[0] for name, values in draws.items()}
 
         # `az.from_numpyro` returns an xarray DataTree, whose __setitem__ does
         # not accept a Dataset-style `(dims, values)` tuple: it would store the

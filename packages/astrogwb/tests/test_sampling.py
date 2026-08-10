@@ -342,27 +342,27 @@ def _reconstruction_samples() -> dict[str, jax.Array]:
     }
 
 
-def _reconstruction_predictive(
-    posterior_samples: dict[str, jax.Array],
-) -> Predictive:
-    return Predictive(
+def _reconstruction_draws(
+    statistics: dict[str, jax.Array],
+) -> dict[str, jax.Array]:
+    draws = Predictive(
         partial(
             amplitude_reconstruction_model,
             amplitude_parameter="local_merger_rate",
             **_RECONSTRUCTION_KWARGS,
         ),
-        posterior_samples=posterior_samples,
-        batch_ndims=2,
+        num_samples=1,
         return_sites=[
             "local_merger_rate",
             "total_merger_rate",
             "quadrature_effective_nodes",
         ],
-    )
+    )(jax.random.key(0), **statistics)
+    return {name: values[0] for name, values in draws.items()}
 
 
 def test_amplitude_reconstruction_model_returns_chain_draw_sites() -> None:
-    draws = _reconstruction_predictive(_reconstruction_samples())(jax.random.key(0))
+    draws = _reconstruction_draws(_reconstruction_samples())
 
     for name in (
         "local_merger_rate",
@@ -377,15 +377,12 @@ def test_amplitude_reconstruction_model_returns_chain_draw_sites() -> None:
     assert bool(jnp.all(phi <= float(_AMPLITUDE_GRID[-1])))
 
 
-def test_amplitude_reconstruction_model_computes_deterministics_from_substituted_statistics() -> (
-    None
-):
+def test_amplitude_reconstruction_model_computes_deterministics_from_inputs() -> None:
     samples = _reconstruction_samples()
-    draws = _reconstruction_predictive(samples)(jax.random.key(0))
+    draws = _reconstruction_draws(samples)
 
     # total_merger_rate must be template_merger_rate * g_R(phi) with the
-    # *input* template_merger_rate, elementwise -- a resampled (rather than
-    # substituted) statistic would break this identity.
+    # input template_merger_rate, elementwise.
     expected_rate = (
         np.asarray(samples["template_merger_rate"])
         * np.asarray(draws["local_merger_rate"])
@@ -410,10 +407,28 @@ def test_amplitude_reconstruction_model_computes_deterministics_from_substituted
     )
 
 
+def test_amplitude_reconstruction_model_registers_only_generated_sites() -> None:
+    trace = handlers.trace(
+        handlers.seed(
+            partial(
+                amplitude_reconstruction_model,
+                amplitude_parameter="local_merger_rate",
+                **_RECONSTRUCTION_KWARGS,
+            ),
+            rng_seed=0,
+        )
+    ).get_trace(**_reconstruction_samples())
+
+    for statistic in _reconstruction_samples():
+        assert statistic not in trace
+    assert trace["local_merger_rate"]["type"] == "sample"
+    assert trace["total_merger_rate"]["type"] == "deterministic"
+    assert trace["quadrature_effective_nodes"]["type"] == "deterministic"
+
+
 def test_amplitude_reconstruction_model_raises_on_a_missing_statistic() -> None:
-    """An unsubstituted placeholder must fail loudly, never draw silently."""
     samples = _reconstruction_samples()
     del samples["template_optimal_snr"]
 
-    with pytest.raises(NotImplementedError):
-        _reconstruction_predictive(samples)(jax.random.key(0))
+    with pytest.raises(TypeError, match="template_optimal_snr"):
+        _reconstruction_draws(samples)
