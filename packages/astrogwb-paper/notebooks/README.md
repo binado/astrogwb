@@ -22,5 +22,6 @@ uv sync --package astrogwb-paper --group dev
 
 - **`mcmc.py`** — importance-weighted NUTS inference (NumPyro port of ASGWB.jl)
 - **`paper/amplitude_toy_model.py`** — smoke-test sibling of `mcmc.py` used by the paper workflow: same pipeline scaffolding, but the cosmology/population callback is replaced by a trivial single-parameter amplitude model, to sanity-check that NUTS recovers a known injection
+- **`paper/importance_weights_grid.py`** — evaluate relative ESS from importance weights on prior-support grids for the hard-coded $H_0$–$\Omega_m$ and $\Xi_0$–$n$ combinations, and plot heatmaps with the paper style
 - **`mcmc_plotting.py`** — load saved chains and produce diagnostic and corner plots
 - **`logposterior_grid.py`** — evaluate the log-posterior on a parameter grid

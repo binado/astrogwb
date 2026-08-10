@@ -11,6 +11,10 @@ fiducial_spectrum:
   output_effective_psd_pdf: figures/fiducial_effective_psd_by_detector.pdf
   omega_gw_min: 1.0e-15
 
+importance_weights_grid:
+  output_h0_omega_m_pdf: figures/importance_weights_grid_H0_Omega_m.pdf
+  output_xi0_n_pdf: figures/importance_weights_grid_Xi0_n.pdf
+
 mcmc_cosmological_parameters:
   output_detector_pdf: figures/mcmc_cosmological_parameters_H0_by_detector.pdf
   output_prior_pdf: figures/mcmc_cosmological_parameters_H0_merger_rate_priors.pdf

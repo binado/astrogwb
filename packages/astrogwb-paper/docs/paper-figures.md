@@ -3,7 +3,8 @@
 The analysis notebooks
 [`amplitude_toy_model.py`](../notebooks/paper/amplitude_toy_model.py),
 [`mcmc_cosmological_parameters.py`](../notebooks/paper/mcmc_cosmological_parameters.py),
-and [`fiducial_spectrum.py`](../notebooks/paper/fiducial_spectrum.py)
+[`fiducial_spectrum.py`](../notebooks/paper/fiducial_spectrum.py),
+and [`importance_weights_grid.py`](../notebooks/paper/importance_weights_grid.py)
 hold editable scientific defaults and expose command-line overrides for scientific
 inputs, paths, and labels. They can therefore run directly in Jupyter or from the shell.
 The spectrum notebook plots fiducial $\Omega_{\mathrm{GW}}(f)$ and $S_h(f)$ on dual
@@ -33,7 +34,11 @@ config path, selected catalog, and declared output paths. It translates
 label, and styling inputs. The `fiducial_spectrum` rule builds
 `figures/fiducial_spectrum.pdf` and
 `figures/fiducial_effective_psd_by_detector.pdf` from the shared catalog and
-fiducials. The unified
+fiducials. The `importance_weights_grid` rule builds
+`figures/importance_weights_grid_H0_Omega_m.pdf` and
+`figures/importance_weights_grid_Xi0_n.pdf`: relative-ESS heatmaps over the
+two-parameter prior-support grids defined by the `configs/mcmc.sweeps.toml`
+uniform priors and the `configs/mcmc.base.toml` fiducials. The unified
 cosmology rule produces two marginalized $H_0$ comparisons, separate
 $H_0$--$\mathcal{R}_0$ corner plot for the narrow merger-rate prior, an
 $H_0$--$\Omega_m$ corner plot, a matching $H_0$--$\Omega_m$--relative-ESS mirror
