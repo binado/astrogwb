@@ -4,7 +4,8 @@ Two models share one amplitude marginalization. The inference model,
 :func:`amplitude_marginalized_model`, integrates a multiplicative amplitude
 direction out of the Gaussian likelihood and runs under NUTS; the
 reconstruction model, :func:`amplitude_reconstruction_model`, is
-*generative-only* and replays the chain's sufficient statistics through
+*generative-only* and accepts the chain's sufficient statistics as explicit
+batched inputs to
 :class:`~astrogwb.sampling.amplitude.AmplitudeConditional` under
 :class:`~numpyro.infer.Predictive` to recover joint
 :math:`(\varphi, \theta)` posterior draws.
@@ -90,18 +91,24 @@ End-to-end sketch (toy data; runnable as-is):
                 progress_bar=False)
     mcmc.run(jax.random.PRNGKey(0))
 
-    # --- Reconstruction: Predictive substitutes the chain's statistics into
-    # the placeholder sites and draws H0 from AmplitudeConditional.
+    # --- Reconstruction: pass the chain's statistics as a (chain, draw)
+    # batch and draw one H0 for every element.
+    chain_samples = mcmc.get_samples(group_by_chain=True)
     draws = Predictive(
         partial(amplitude_reconstruction_model,
                 amplitude_parameter="H0",
                 amplitude_fn=h0_amplitude,
                 merger_rate_amplitude_fn=h0_merger_rate_amplitude,
                 prior=amplitude_prior, fiducial=h0_fid, grid=grid),
-        posterior_samples=mcmc.get_samples(group_by_chain=True),
-        batch_ndims=2,
+        num_samples=1,
         return_sites=["H0", "total_merger_rate", "quadrature_effective_nodes"],
-    )(jax.random.fold_in(jax.random.PRNGKey(0), 1))
+    )(
+        jax.random.fold_in(jax.random.PRNGKey(0), 1),
+        amplitude_mle=chain_samples["amplitude_mle"],
+        template_optimal_snr=chain_samples["template_optimal_snr"],
+        template_merger_rate=chain_samples["template_merger_rate"],
+    )
+    draws = {name: values[0] for name, values in draws.items()}
 
     # --- Merge: every returned site is (chain, draw); assign DataArrays.
     import arviz as az
@@ -122,7 +129,6 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from numpyro.distributions import constraints
 
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.frequency import frequency_spacing, noise_weighted_inner_product
@@ -422,6 +428,9 @@ def amplitude_marginalized_model(
 
 
 def amplitude_reconstruction_model(
+    amplitude_mle: jax.Array,
+    template_optimal_snr: jax.Array,
+    template_merger_rate: jax.Array,
     *,
     amplitude_parameter: str,
     amplitude_fn: AmplitudeFn,
@@ -432,20 +441,18 @@ def amplitude_reconstruction_model(
 ) -> None:
     r"""Generative-only reconstruction of joint :math:`(\varphi, \theta)` posterior draws.
 
-    Consumed via :class:`~numpyro.infer.Predictive` with the posterior samples
-    of :func:`amplitude_marginalized_model`; see this module's docstring for
-    the end-to-end sketch. ``Predictive`` substitutes the chain's statistics
-    into the placeholder sites below, draws the marginalized parameter from
-    :class:`~astrogwb.sampling.amplitude.AmplitudeConditional` with a fresh key
-    per posterior sample, and computes the deterministics from the substituted
-    values. There is no forward physics here -- no catalog, no :math:`(F, N)`
-    contraction -- so the cost is ``O(K)`` per draw and the model runs against
-    a saved chain alone.
+    Consumed via :class:`~numpyro.infer.Predictive` with the sufficient
+    statistics published by :func:`amplitude_marginalized_model`; see this
+    module's docstring for the end-to-end sketch. The statistics' broadcast
+    shape is the batch shape of
+    :class:`~astrogwb.sampling.amplitude.AmplitudeConditional`, so a
+    ``(chain, draw)`` input batch yields one independent marginalized-parameter
+    draw for every chain element. There is no forward physics here -- no
+    catalog, no :math:`(F, N)` contraction -- so the cost is ``O(K)`` per draw
+    and the model runs against a saved chain alone.
 
     Registered sites:
 
-    - placeholder ``sample`` sites ``amplitude_mle``, ``template_optimal_snr``,
-      and ``template_merger_rate`` -- never actually sampled, see below;
     - ``amplitude_parameter`` as a ``sample`` site from
       :class:`~astrogwb.sampling.amplitude.AmplitudeConditional`;
     - ``total_merger_rate`` and ``quadrature_effective_nodes`` as
@@ -454,6 +461,11 @@ def amplitude_reconstruction_model(
 
     Parameters
     ----------
+    amplitude_mle, template_optimal_snr, template_merger_rate:
+        Sufficient statistics published by
+        :func:`amplitude_marginalized_model`. Their shapes must broadcast to a
+        common batch shape; production reconstruction passes ``(chain, draw)``
+        arrays.
     amplitude_parameter:
         Name of the marginalized parameter; becomes the sample-site name of
         the reconstructed draws (e.g. ``"H0"``).
@@ -468,16 +480,6 @@ def amplitude_reconstruction_model(
         The absolute merger-rate scaling :math:`g_R(\varphi)` alone, used to
         turn ``template_merger_rate`` back into the physical rate.
     """
-    # The placeholder distributions are never sampled from
-    # (ImproperUniform.sample raises NotImplementedError): they exist so
-    # Predictive's substitution has a target. A missing or renamed statistic
-    # therefore fails loudly instead of silently drawing from an improper
-    # prior.
-    placeholder = dist.ImproperUniform(constraints.real, (), ())
-    amplitude_mle = numpyro.sample("amplitude_mle", placeholder)
-    template_optimal_snr = numpyro.sample("template_optimal_snr", placeholder)
-    template_merger_rate = numpyro.sample("template_merger_rate", placeholder)
-
     conditional = AmplitudeConditional(
         amplitude_mle,
         template_optimal_snr,
