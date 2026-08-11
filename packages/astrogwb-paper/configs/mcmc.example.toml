@@ -60,7 +60,7 @@ xi_n = 1.91
 gamma = 1.42
 kappa = 4.62
 z_peak = 1.84
-local_merger_rate = 161.0    # [Gpc^-3 yr^-1], matches COBA simulations
+local_merger_rate = 770.0    # [Gpc^-3 yr^-1]
 
 # Priors: one [priors.<param>] table per sampled parameter.
 # Supported types: uniform (low/high), normal (loc/scale).

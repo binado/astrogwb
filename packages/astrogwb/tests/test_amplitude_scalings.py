@@ -34,7 +34,7 @@ FIDUCIALS = {
     "gamma": 1.42,
     "kappa": 4.62,
     "z_peak": 1.84,
-    "local_merger_rate": 161.0,
+    "local_merger_rate": 770.0,
 }
 
 Z_MIN = 0.0

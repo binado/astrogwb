@@ -114,8 +114,8 @@ high = 10.0
 
 [priors.local_merger_rate.normal]
 type = "normal"
-loc = 161.0
-scale = 1.61
+loc = 770.0
+scale = 7.7
 
 [runs.cosmology]
 networks = [
