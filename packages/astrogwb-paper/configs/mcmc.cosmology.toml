@@ -35,7 +35,7 @@ xi_n = 1.91
 gamma = 1.42
 kappa = 4.62
 z_peak = 1.84
-local_merger_rate = 161.0
+local_merger_rate = 770.0
 
 [priors.H0]
 type = "uniform"

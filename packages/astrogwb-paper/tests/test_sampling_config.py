@@ -40,9 +40,9 @@ def test_shipped_mcmc_configs_fix_local_merger_rate(relative_path: str) -> None:
     config = build_run_config(load_mapping(PAPER_ROOT / relative_path))
 
     assert "local_merger_rate" not in config.sampled_params
-    assert config.fiducials["local_merger_rate"] == 161.0
+    assert config.fiducials["local_merger_rate"] == 770.0
     assert "local_merger_rate" not in config.priors
-    assert config.constants["local_merger_rate"] == 161.0
+    assert config.constants["local_merger_rate"] == 770.0
 
 
 def test_posterior_params_adds_the_marginalized_amplitude_parameter() -> None:
