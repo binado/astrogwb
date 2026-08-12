@@ -21,7 +21,7 @@ dependencies = [
     "array-api-compat>=1.15.0",
     "gwmock-noise>=0.10.1",
     "gwmock-pop>=0.11.4",
-    "gwmock-signal[jax]>=0.12.0",
+    "gwmock-signal[jax]>=0.15.0",
     "jax>=0.10.2; sys_platform == 'linux'",
     "jax[cpu]>=0.11.0; sys_platform != 'linux'",
     "numpy>=2.5.1",

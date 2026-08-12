@@ -243,7 +243,7 @@ requires-dist = [
     { name = "array-api-compat", specifier = ">=1.15.0" },
     { name = "gwmock-noise", specifier = ">=0.10.1" },
     { name = "gwmock-pop", specifier = ">=0.11.4" },
-    { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.12.0" },
+    { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.15.0" },
     { name = "jax", marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
     { name = "jax", extras = ["cpu"], marker = "sys_platform != 'linux'", specifier = ">=0.11.0" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda'", specifier = ">=0.11.0" },
@@ -369,7 +369,7 @@ requires-dist = [
     { name = "astrogwb", extras = ["tpu"], marker = "extra == 'tpu'", editable = "packages/astrogwb" },
     { name = "corner", marker = "extra == 'notebook'", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
     { name = "gwmock-pop", specifier = ">=0.11.4" },
-    { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.12.0" },
+    { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.15.0" },
     { name = "h5netcdf", marker = "extra == 'notebook'", specifier = ">=1.8.1" },
     { name = "ipykernel", marker = "extra == 'notebook'", specifier = ">=7.3.0" },
     { name = "jax", marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
@@ -1187,7 +1187,7 @@ wheels = [
 
 [[package]]
 name = "gwmock-signal"
-version = "0.12.0"
+version = "0.15.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "gwpy" },
@@ -1195,9 +1195,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/86/c2/fffef0b3ecc721e59c4de9a470e3dc334189c3f53980229c7e8056a9c877/gwmock_signal-0.12.0.tar.gz", hash = "sha256:0c9e4500ef52b5e0c39e4ae237ee2847cf70ba8f965d871f7c3b935c8bdf4fab", size = 409193, upload-time = "2026-07-30T21:53:27.212Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/8e/4d8161a3d06de6a972f3507be3ae35a25aa1335d517df363f49498c013a0/gwmock_signal-0.15.0.tar.gz", hash = "sha256:9e90af755e80f1555a6bb8e6a66602cff34c77f9dfbdf5894b58a053c3d5c8f1", size = 445527, upload-time = "2026-08-04T09:40:44.488Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/aa/ea/bd09fd9ba83dc230955fa43ca27055c290df37b3c1c7412567f97cd5f8df/gwmock_signal-0.12.0-py3-none-any.whl", hash = "sha256:82803a04d4e3f3a8819ed7fa34391ff323f0273758fd97750050133fd198da53", size = 147684, upload-time = "2026-07-30T21:53:25.799Z" },
+    { url = "https://files.pythonhosted.org/packages/50/2b/1a42e19fc7f8c458e2c5a8e889559499111d0dfd5d963c34f816cc2828da/gwmock_signal-0.15.0-py3-none-any.whl", hash = "sha256:7d39b5c576c1d5ae2b63cb631f97cb209f024edde71fa45fcd1fa46e2c91be73", size = 165891, upload-time = "2026-08-04T09:40:43.308Z" },
 ]
 
 [package.optional-dependencies]
@@ -3386,15 +3386,15 @@ wheels = [
 
 [[package]]
 name = "ripplegw"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jax" },
     { name = "jaxtyping" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ee/4b/0497feefa9e502e717be8ac797a401eac2c9eb916bc682d98aeef3a97d91/ripplegw-0.3.0.tar.gz", hash = "sha256:9e2a415a94bf4aaa3d90a2426298cda4c0c1feaaecd8468745dcabc54abfb3d2", size = 479776, upload-time = "2026-07-29T10:33:36.347Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e0/b7/d6da3e3adcd03d5490638a1f73c743e22b9d002ea06c8ebf8c2725905727/ripplegw-0.3.1.tar.gz", hash = "sha256:c9435c9266125b645d38636a42947acad93cf841ce635e55a1a3a5d765990f2e", size = 481899, upload-time = "2026-08-03T20:28:19.215Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/cb/b9573f0ceae67274946ab633060053d7509d0d2f833f5f306aa593c13d4b/ripplegw-0.3.0-py3-none-any.whl", hash = "sha256:2aa86258b3b1714a92602d02c5edb58e7305b73bcd4136f5121345414cb7e302", size = 224968, upload-time = "2026-07-29T10:33:34.881Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/33/fc079529e3a796da9f4bb1b2cd17a77ba70ff3ae9e821380bdcf46714134/ripplegw-0.3.1-py3-none-any.whl", hash = "sha256:0bd8f1bb8235ae59d9bfa3938ca1ee49bf91f4b38bd313a25620f087539cfeaf", size = 225512, upload-time = "2026-08-03T20:28:17.909Z" },
 ]
 
 [[package]]
