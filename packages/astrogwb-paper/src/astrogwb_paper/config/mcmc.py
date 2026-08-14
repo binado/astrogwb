@@ -24,6 +24,33 @@ _STRICT = ConfigDict(frozen=True, extra="forbid")
 AmplitudeParameter = Literal["H0", "local_merger_rate"]
 
 
+class _PriorBase(BaseModel):
+    # `extra="ignore"` is deliberate, and the one place in this module where
+    # extras are tolerated. Prior tables are layered key by key when configs are
+    # assembled from fragments (see configs/mcmc/fragments/), so overriding a
+    # uniform prior with a normal one leaves `low`/`high` behind. Dropping them
+    # here keeps `config_sha256` and the run record describing the prior that is
+    # actually sampled. Missing *required* keys still raise, so typos are caught.
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+
+class UniformPrior(_PriorBase):
+    type: Literal["uniform"]
+    low: float
+    high: float
+
+
+class NormalPrior(_PriorBase):
+    type: Literal["normal"]
+    loc: float
+    scale: float
+
+
+# Discriminated on `type`, so an unsupported prior kind fails here -- before
+# `configure_runtime` initializes JAX -- rather than inside `build_prior`.
+PriorSpec = Annotated[UniformPrior | NormalPrior, Field(discriminator="type")]
+
+
 class AnalysisConfig(BaseModel):
     model_config = _STRICT
 
@@ -86,7 +113,7 @@ class RunConfig(BaseModel):
     seed: int = 42
     observation_time: float = 1.0
     fiducials: dict[str, float]
-    priors: dict[str, dict[str, Any]]  # prior name -> spec table
+    priors: dict[str, PriorSpec]  # parameter name -> prior spec
     # Unset (empty) -> default to the keys present in [priors]; resolved below.
     sampled_params: tuple[str, ...] = ()
     analysis: AnalysisConfig
@@ -98,7 +125,7 @@ class RunConfig(BaseModel):
     # Derived in the validator: the amplitude parameter's prior spec, held out
     # of `priors` so `set(priors) == set(sampled_params)` keeps holding. Also
     # accepted as input so configs written by save_config reload unchanged.
-    amplitude_prior: dict[str, Any] | None = None
+    amplitude_prior: PriorSpec | None = None
 
     @model_validator(mode="after")
     def _resolve_sampled_and_constants(self) -> RunConfig:
@@ -108,7 +135,7 @@ class RunConfig(BaseModel):
             raise ValueError("config must define at least one [priors.<param>] table")
 
         priors = dict(self.priors)
-        amplitude_prior: dict[str, Any] | None = None
+        amplitude_prior: UniformPrior | NormalPrior | None = None
         amplitude_parameter = self.analysis.amplitude_parameter
         if amplitude_parameter is not None:
             if amplitude_parameter in self.sampled_params:
@@ -126,7 +153,7 @@ class RunConfig(BaseModel):
             elif self.amplitude_prior is not None:
                 # Reloaded save_config output: the pop above already happened
                 # at generation time, so the prior arrives in `amplitude_prior`.
-                amplitude_prior = dict(self.amplitude_prior)
+                amplitude_prior = self.amplitude_prior
             else:
                 raise ValueError(
                     f"analysis.amplitude_parameter {amplitude_parameter!r} needs "

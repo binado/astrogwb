@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from astrogwb_paper.config.loading import load_mapping
-from astrogwb_paper.config.mcmc import build_run_config
+from astrogwb_paper.config.mcmc import NormalPrior, build_run_config
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.priors import build_prior
 from pydantic import ValidationError
@@ -28,8 +28,16 @@ def test_build_prior_happy_path(
 
 
 def test_build_prior_rejects_unknown_type() -> None:
-    with pytest.raises(ValueError, match="unsupported prior type"):
+    with pytest.raises(ValidationError, match="does not match any of the expected"):
         build_prior({"type": "mystery", "low": 0.0, "high": 1.0})
+
+
+def test_build_prior_accepts_a_validated_spec() -> None:
+    """Configs hand `build_prior` a PriorSpec; notebooks hand it a raw mapping."""
+    distribution = build_prior(NormalPrior(type="normal", loc=1.0, scale=0.5))
+
+    np.testing.assert_allclose(distribution.loc, 1.0)
+    np.testing.assert_allclose(distribution.scale, 0.5)
 
 
 @pytest.mark.parametrize(

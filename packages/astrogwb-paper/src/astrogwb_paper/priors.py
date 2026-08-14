@@ -1,9 +1,9 @@
 """Materialize NumPyro prior distributions from serializable config specs.
 
-This module is the bridge between the validated, JSON-serializable prior tables
-in :mod:`astrogwb_paper.config.mcmc` (plain dicts like ``{"type": "uniform",
-"low": 0.0, "high": 1.0}``) and live ``numpyro.distributions`` objects handed
-to :func:`astrogwb.sampling.models.spectral_density_model`.
+This module is the bridge between the validated prior specs in
+:mod:`astrogwb_paper.config.mcmc` (:data:`~astrogwb_paper.config.mcmc.PriorSpec`)
+and live ``numpyro.distributions`` objects handed to
+:func:`astrogwb.sampling.models.spectral_density_model`.
 
 NumPyro/JAX are imported lazily inside :func:`build_prior` so that importing
 this module does not itself initialize the JAX backend; callers must run their
@@ -13,13 +13,20 @@ invoking it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, assert_never
+
+from pydantic import TypeAdapter
+
+from astrogwb_paper.config.mcmc import NormalPrior, PriorSpec, UniformPrior
 
 if TYPE_CHECKING:
     from numpyro.distributions import Distribution
 
+_PRIOR_ADAPTER: TypeAdapter[PriorSpec] = TypeAdapter(PriorSpec)
 
-def build_prior(spec: dict[str, Any]) -> Distribution:
+
+def build_prior(spec: PriorSpec | Mapping[str, Any]) -> Distribution:
     """Materialize a single prior spec into a ``numpyro`` distribution.
 
     Supported ``type`` values:
@@ -30,7 +37,10 @@ def build_prior(spec: dict[str, Any]) -> Distribution:
     Parameters
     ----------
     spec:
-        Prior spec mapping, e.g. ``{"type": "uniform", "low": 0.0, "high": 1.0}``.
+        A validated :data:`~astrogwb_paper.config.mcmc.PriorSpec`, or a raw
+        mapping such as ``{"type": "uniform", "low": 0.0, "high": 1.0}`` read
+        straight from a config file. Mappings are validated before use, so an
+        unsupported ``type`` raises here rather than producing a bad prior.
 
     Returns
     -------
@@ -39,9 +49,13 @@ def build_prior(spec: dict[str, Any]) -> Distribution:
     """
     import numpyro.distributions as dist
 
-    kind = str(spec["type"]).lower()
-    if kind == "uniform":
-        return dist.Uniform(low=float(spec["low"]), high=float(spec["high"]))
-    if kind == "normal":
-        return dist.Normal(loc=float(spec["loc"]), scale=float(spec["scale"]))
-    raise ValueError(f"unsupported prior type: {spec['type']!r}")
+    if isinstance(spec, Mapping):
+        spec = _PRIOR_ADAPTER.validate_python(spec)
+
+    match spec:
+        case UniformPrior():
+            return dist.Uniform(low=spec.low, high=spec.high)
+        case NormalPrior():
+            return dist.Normal(loc=spec.loc, scale=spec.scale)
+        case _:  # pragma: no cover - exhaustive over PriorSpec
+            assert_never(spec)

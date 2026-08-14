@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 
 import pytest
+from astrogwb_paper.config.mcmc import UniformPrior
 from astrogwb_paper.config.sweeps import (
     AnalysisSpec,
     ObservationSpec,
@@ -175,11 +176,7 @@ def test_materialize_run_config_amplitude_marginalized() -> None:
     assert config.analysis.amplitude_parameter == "H0"
     assert config.analysis.amplitude_num_nodes == 512
     assert "H0" not in config.sampled_params
-    assert config.amplitude_prior == {
-        "type": "uniform",
-        "low": 20.0,
-        "high": 140.0,
-    }
+    assert config.amplitude_prior == UniformPrior(type="uniform", low=20.0, high=140.0)
     assert "H0" in config.posterior_params
 
 

@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 from astrogwb_paper.config.loading import deep_merge, load_mapping
-from astrogwb_paper.config.mcmc import build_run_config, config_sha256, save_config
+from astrogwb_paper.config.mcmc import (
+    UniformPrior,
+    build_run_config,
+    config_sha256,
+    save_config,
+)
 from astrogwb_paper.paths import paper_project_root
 from pydantic import ValidationError
 
@@ -148,7 +153,7 @@ def test_marginalized_config_extracts_amplitude_prior_and_preserves_invariant() 
     config = build_run_config(_marginalized_raw())
 
     assert config.analysis.amplitude_parameter == "H0"
-    assert config.amplitude_prior == {"type": "uniform", "low": 20.0, "high": 140.0}
+    assert config.amplitude_prior == UniformPrior(type="uniform", low=20.0, high=140.0)
     assert "H0" not in config.priors
     assert set(config.priors) == set(config.sampled_params)
     # H0 is not sampled, but it is still a fiducial constant the model pins to.
@@ -234,4 +239,54 @@ def test_default_likelihood_rejects_amplitude_parameter() -> None:
     raw["analysis"] = {**raw["analysis"], "amplitude_parameter": "H0"}
 
     with pytest.raises(ValidationError, match="only valid when"):
+        build_run_config(raw)
+
+
+# --------------------------------------------------------------------------- #
+# Prior specs
+# --------------------------------------------------------------------------- #
+def test_prior_spec_drops_keys_left_by_a_cross_type_override() -> None:
+    """Fragment layers merge prior tables key by key, not wholesale.
+
+    Overriding a uniform prior with a normal one leaves ``low``/``high``
+    behind. They must not reach the run record or ``config_sha256``, or two
+    configs sampling the same prior would carry different digests.
+    """
+    raw = load_mapping(PAPER_ROOT / "configs/mcmc.example.toml")
+    polluted = deep_merge(
+        raw,
+        {"priors": {"H0": {"type": "normal", "loc": 67.66, "scale": 0.6766}}},
+    )
+    assert polluted["priors"]["H0"]["low"] == 20.0  # the stale key knf leaves
+
+    config = build_run_config(polluted)
+
+    assert config.priors["H0"].model_dump() == {
+        "type": "normal",
+        "loc": 67.66,
+        "scale": 0.6766,
+    }
+    clean = {
+        **raw,
+        "priors": {
+            **raw["priors"],
+            "H0": {"type": "normal", "loc": 67.66, "scale": 0.6766},
+        },
+    }
+    assert config_sha256(config) == config_sha256(build_run_config(clean))
+
+
+def test_prior_spec_rejects_unsupported_type_before_jax_starts() -> None:
+    raw = load_mapping(PAPER_ROOT / "configs/mcmc.example.toml")
+    raw["priors"]["H0"] = {"type": "lognormal", "loc": 1.0, "scale": 1.0}
+
+    with pytest.raises(ValidationError, match="does not match any of the expected"):
+        build_run_config(raw)
+
+
+def test_prior_spec_rejects_missing_required_key() -> None:
+    raw = load_mapping(PAPER_ROOT / "configs/mcmc.example.toml")
+    raw["priors"]["H0"] = {"type": "normal", "loc": 67.66, "scal": 0.6766}
+
+    with pytest.raises(ValidationError, match="scale"):
         build_run_config(raw)
