@@ -220,8 +220,8 @@ rule fiducial_spectrum:
 rule importance_weights_grid:
     input:
         catalog=CATALOG_PATH,
-        sweep_config="configs/mcmc.sweeps.toml",
-        base_config="configs/mcmc.base.toml",
+        priors="configs/mcmc/fragments/priors.toml",
+        base_config="configs/mcmc/fragments/base.toml",
     output:
         h0_omega_m_pdf=IMPORTANCE_WEIGHTS_GRID_H0_OMEGA_M_PDF,
         xi0_n_pdf=IMPORTANCE_WEIGHTS_GRID_XI0_N_PDF,

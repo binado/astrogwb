@@ -37,8 +37,9 @@ label, and styling inputs. The `fiducial_spectrum` rule builds
 fiducials. The `importance_weights_grid` rule builds
 `figures/importance_weights_grid_H0_Omega_m.pdf` and
 `figures/importance_weights_grid_Xi0_n.pdf`: relative-ESS heatmaps over the
-two-parameter prior-support grids defined by the `configs/mcmc.sweeps.toml`
-uniform priors and the `configs/mcmc.base.toml` fiducials. The unified
+two-parameter prior-support grids defined by the
+`configs/mcmc/fragments/priors.toml` uniform priors and the
+`configs/mcmc/fragments/base.toml` fiducials. The unified
 cosmology rule produces two marginalized $H_0$ comparisons, separate
 $H_0$--$\mathcal{R}_0$ corner plot for the narrow merger-rate prior, an
 $H_0$--$\Omega_m$ corner plot, a matching $H_0$--$\Omega_m$--relative-ESS mirror

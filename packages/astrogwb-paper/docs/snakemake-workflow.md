@@ -33,39 +33,42 @@ uv run astrogwb-workflow catalog out/catalogs/bns-n16384-df1.h5 --submit
 
 ## MCMC workflow
 
-### Batch manifests
+### Campaign selection
 
-Generate sweep configs as described in
-[Generating sweep configs](./running-inference.md#generating-sweep-configs).
-Add `--write-manifests` to also (re)generate a full-sweep batch manifest per
-campaign —
-`configs/mcmc/manifests/mcmc.batch.{cosmology,cosmology-all-detectors,astrophysical,astrophysical-all-detectors,modified-propagation-all-detectors}.json`
-— each holding only `chains_dir` and every config just written for that
-campaign; manifests carry no catalog field (see below). Existing manifests
-are skipped unless `--force` is supplied, same as the JSON configs. Like the
-JSON configs, generated manifests are gitignored (`configs/mcmc/manifests/`):
-they are fully reproducible from `configs/mcmc.sweeps.toml`, so there is
-nothing to commit.
+There is no manifest and no separate config-generation step. `workflow/mcmc.smk`
+reads [`configs/mcmc.sweeps.toml`](../configs/mcmc.sweeps.toml) at parse time,
+expands each campaign's `networks x analyses x observations` product, and adds
+a `mcmc_config` rule that merges every run's fragments with `knf` and validates
+the result. Config assembly and sampling are one DAG, so editing a fragment
+rebuilds exactly the configs that depend on it.
+
+By default every campaign in the spec is built. Name campaigns to narrow it:
 
 ```bash
-uv run astrogwb-workflow gen-configs
+uv run astrogwb-workflow mcmc cosmology --profile local
+uv run astrogwb-workflow mcmc                       --profile slurm --submit
 ```
 
-Batch submission uses an explicit manifest such as
-[`packages/astrogwb-paper/configs/mcmc.batch.example.json`](../configs/mcmc.batch.example.json) — plain
-JSON, since Snakemake's `--configfile` loader tries JSON before YAML
-regardless of extension. The manifest lists `chains_dir` and every MCMC
-config to submit; it carries no catalog field. `packages/astrogwb-paper/workflow/mcmc.smk` sources
-the catalog separately from [`configs/workflow.yaml`](../configs/workflow.yaml)
-(shared with the paper workflow) via a `configfile:` directive, deriving
-`out/catalogs/<id>.h5` from `catalog.id` unless `catalog.path` is set
-explicitly. This decouples which runs make up a campaign (the manifest, fully
-reproducible from `configs/mcmc.sweeps.toml`) from which data file to
-reweight (the catalog) — the same manifest runs against any catalog by
-editing `configs/workflow.yaml` or passing an extra `--configfile` that
-overrides `catalog`, with no manifest regeneration required. Chains remain
-namespaced by catalog ID. A missing catalog or config stops the workflow
-instead of triggering preprocessing.
+Equivalently, set `campaigns:` in
+[`configs/workflow.yaml`](../configs/workflow.yaml) (empty list = all).
+
+`mcmc_config` is a **local rule**: `knf` is a standalone binary that need not
+exist on a compute node, and merging costs milliseconds. It must be on `PATH`
+of whichever host runs the Snakemake process.
+
+`run_mcmc` takes its config as `ancient()`, so a rebuilt config never
+invalidates a chain that already cost GPU-hours. Staleness is judged by
+content, not mtime: every sidecar records `config_sha256`. Delete a chain to
+force a resample.
+
+Which catalog to reweight is a separate concern from which runs make up a
+campaign. `workflow/mcmc.smk` sources the catalog from
+[`configs/workflow.yaml`](../configs/workflow.yaml) (shared with the paper
+workflow) via a `configfile:` directive, deriving `out/catalogs/<id>.h5` from
+`catalog.id` unless `catalog.path` is set explicitly. The same campaign runs
+against any catalog by editing that file or passing an extra `--configfile`
+that overrides `catalog`. Chains remain namespaced by catalog ID. A missing
+catalog stops the workflow instead of triggering preprocessing.
 
 To select a catalog in the standard `out/catalogs/<id>.h5` location, override
 only its ID. For a catalog stored elsewhere, provide both the ID used to
@@ -93,16 +96,16 @@ into one flag and re-injects `jax_platforms=cpu` for the `local` and
 `--config` group, e.g.
 `--config jax_platforms=cpu "catalog={'id':'my-catalog'}"`.
 
-Note the manifest schema has no `jax_platforms` field: which JAX backend to
+Note the sweep spec has no `jax_platforms` field: which JAX backend to
 initialize is a runtime concern owned by the Snakemake profile you run with
 (`packages/astrogwb-paper/profiles/local`, `packages/astrogwb-paper/profiles/slurm`, `packages/astrogwb-paper/profiles/slurm-cpu`), not a property of
-an MCMC campaign, so it is never written by the generator. `packages/astrogwb-paper/workflow/mcmc.smk`
-itself defaults to `cuda` when a manifest doesn't set it.
+an MCMC campaign. `packages/astrogwb-paper/workflow/mcmc.smk` defaults it to
+`cuda` when nothing sets it.
 
 Dry-run the selected batch (default; omit `--submit`):
 
 ```bash
-uv run astrogwb-workflow mcmc configs/mcmc.batch.example.json --profile local
+uv run astrogwb-workflow mcmc cosmology --profile local
 ```
 
 ### Deploying on a SLURM cluster
@@ -134,18 +137,16 @@ device per concurrent chain, with `--cpu-threads` pinned to 1).
    uv sync --package astrogwb-paper --group slurm              # CPU profile
    ```
 
-2. **Prepare the batch manifest.** Generate sweep configs and their manifests
-   with `uv run astrogwb-workflow gen-configs` if you haven't already —
-   this writes one gitignored manifest per campaign under
-   `configs/mcmc/manifests/` (regenerate them on whichever host needs them),
-   including the quick ET-2L campaigns and the `*-all-detectors` campaigns.
-   Copy the one you want (or
-   [`packages/astrogwb-paper/configs/mcmc.batch.example.json`](../configs/mcmc.batch.example.json) for a
-   hand-picked selection). Manifests carry no catalog field, so which catalog
-   to use is set separately: `packages/astrogwb-paper/workflow/mcmc.smk` sources it from
-   [`configs/workflow.yaml`](../configs/workflow.yaml). Point that file's
+2. **Pick the campaign and catalog.** Campaign names come from
+   [`configs/mcmc.sweeps.toml`](../configs/mcmc.sweeps.toml) — the quick ET-2L
+   campaigns and the `*-all-detectors` campaigns. Pass them as arguments, or
+   set `campaigns:` in [`configs/workflow.yaml`](../configs/workflow.yaml).
+   Configs are built by the workflow itself, so there is nothing to generate
+   first. Which catalog to use is set separately in that same file: point
    `catalog.id` (and `catalog.path`, if the catalog doesn't live at the
    default `out/catalogs/<id>.h5`) at one existing catalog before submitting.
+   `knf` must be on `PATH` of the submit host, which runs the local
+   `mcmc_config` rule.
 
 3. **Dry-run before every real submission** to see the job graph without touching
    the scheduler (`astrogwb-workflow` defaults to `--dry-run`):
@@ -197,35 +198,27 @@ oversubscribing BLAS/XLA. The core budget lives only in the profile; it never
 enters a run's config hash. Keep `set-threads.run_mcmc` ≥ the run config's
 `[sampler] num_chains`.
 
-As a worked example, run the **cosmology** (quick ET-2L) sweep locally. First
-generate the sweep configs and their batch manifest (writes
+As a worked example, run the **cosmology** (quick ET-2L) sweep locally. The
+`mcmc_config` rule writes
 `packages/astrogwb-paper/configs/mcmc/cosmology/<network>__<analysis>__<observation>.json`
-and `packages/astrogwb-paper/configs/mcmc/manifests/mcmc.batch.cosmology.json`):
+as part of the run, so there is nothing to prepare.
+
+The `cosmology` campaign covers 6 sweep points (2 networks × 3 analyses × 1
+observation); `cosmology-all-detectors` covers the full six-network grid (18
+points). To run only a subset locally, use Snakemake's own targeting rather
+than editing configs — name the chains you want:
 
 ```bash
-uv run astrogwb-workflow gen-configs
-```
-
-The generated `mcmc.batch.cosmology.json` now lists all 8 cosmology
-sweep points (2 networks × 4 analyses × 1 observation). For the full six-network
-grid use `mcmc.batch.cosmology-all-detectors.json` (24 points). To run only a
-subset locally — e.g. a few ET-2L `H0` analyses — copy the manifest somewhere
-and trim the `runs` list rather than editing the generated file in place (the
-next `--write-manifests --force` run overwrites it):
-
-```bash
-cp configs/mcmc/manifests/mcmc.batch.cosmology.json \
-  configs/mcmc.batch.cosmology-local.json
-# then trim the copied manifest to the runs you want
+uv run astrogwb-workflow mcmc cosmology --profile local -- \
+  chains/bns-n16384-df1/cosmology/ET-2L-aligned__H0__baseline.nc
 ```
 
 Dry-run, then submit on (say) 8 cores. With the profile's `run_mcmc=4` thread
 override, Snakemake runs `floor(8 / 4) = 2` sweep points at a time:
 
 ```bash
-uv run astrogwb-workflow mcmc configs/mcmc.batch.cosmology-local.json --profile local
-uv run astrogwb-workflow mcmc configs/mcmc.batch.cosmology-local.json \
-  --profile local --submit
+uv run astrogwb-workflow mcmc cosmology --profile local
+uv run astrogwb-workflow mcmc cosmology --profile local --submit
 ```
 
 To trade per-run speed for more concurrency, lower the `set-threads` value in

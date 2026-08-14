@@ -5,11 +5,15 @@ Snakemake subcommands default to ``--dry-run``; pass ``--submit`` to run for rea
 
 Usage::
 
-    uv run astrogwb-workflow gen-configs
     uv run astrogwb-workflow catalog out/catalogs/bns-n16384-df1.h5 --submit
-    uv run astrogwb-workflow mcmc batch.json --profile local
-    uv run astrogwb-workflow mcmc batch.json --profile slurm --submit
+    uv run astrogwb-workflow mcmc --profile local
+    uv run astrogwb-workflow mcmc cosmology --profile slurm --submit
     uv run astrogwb-workflow paper --submit
+
+MCMC runs take campaign names from ``configs/mcmc.sweeps.toml`` (all of them
+if none are named). There is no separate config-generation step: the
+``mcmc_config`` rule in ``workflow/mcmc.smk`` builds each run's config from
+its fragments as part of the same DAG.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
+from astrogwb_paper.config.sweeps import SWEEP_SPEC
 from astrogwb_paper.paths import paper_project_root
 
 PROFILE_CHOICES = ("local", "slurm", "slurm-cpu")
@@ -113,20 +118,6 @@ def _passthrough(args: argparse.Namespace) -> list[str]:
     return list(getattr(args, "extra", None) or [])
 
 
-def build_gen_configs_argv(extra: list[str] | None = None) -> list[str]:
-    cmd = [
-        "uv",
-        "run",
-        "--package",
-        "astrogwb-paper",
-        "astrogwb-generate-mcmc-configs",
-        "--write-manifests",
-    ]
-    if extra:
-        cmd.extend(extra)
-    return cmd
-
-
 def build_catalog_argv(
     target: str,
     *,
@@ -155,13 +146,20 @@ def build_catalog_argv(
 
 
 def build_mcmc_argv(
-    configfile: str | Path,
+    campaigns: list[str] | None,
     profile: str,
     *,
     dry_run: bool = True,
     cores: int | None = None,
     extra: list[str] | None = None,
 ) -> list[str]:
+    """Build the snakemake argv for an MCMC batch.
+
+    ``campaigns`` selects a subset of ``configs/mcmc.sweeps.toml``; ``None``
+    (or empty) builds every campaign it defines. This replaces the generated
+    batch manifests -- the sweep spec is now the only input, and Snakemake
+    expands it.
+    """
     if profile not in PROFILE_CHOICES:
         raise ValueError(f"unknown profile {profile!r}; choose from {PROFILE_CHOICES}")
 
@@ -181,15 +179,17 @@ def build_mcmc_argv(
         str(_mcmc_smk()),
         "--profile",
         str(profile_dir(profile)),
-        "--configfile",
-        str(configfile),
     ]
     if resolved_cores is not None:
         cmd.extend(["--cores", str(resolved_cores)])
     if dry_run:
         cmd.append("--dry-run")
     cmd.append("mcmc")
-    cmd.extend(coalesce_mcmc_extra(extra, profile))
+    # `campaigns` must join the single coalesced --config group: Snakemake's
+    # --config uses nargs='*' without action='append', so a second occurrence
+    # (e.g. the CPU profiles' jax_platforms) would replace it outright.
+    selection = ["--config", f"campaigns={list(campaigns)!r}"] if campaigns else []
+    cmd.extend(coalesce_mcmc_extra([*selection, *(extra or [])], profile))
     return cmd
 
 
@@ -229,11 +229,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser(
-        "gen-configs",
-        help="Generate sweep JSON configs and gitignored batch manifests.",
-    )
-
     catalog = sub.add_parser(
         "catalog",
         help="Build a catalog target (population first if stale).",
@@ -245,7 +240,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "mcmc",
         help="Run or dry-run an MCMC batch with a committed profile.",
     )
-    mcmc.add_argument("configfile", type=Path, help="Batch manifest JSON.")
+    mcmc.add_argument(
+        "campaigns",
+        nargs="*",
+        help=(
+            "Campaign names from configs/mcmc.sweeps.toml. Omit to run every "
+            "campaign the spec defines."
+        ),
+    )
     mcmc.add_argument(
         "--profile",
         required=True,
@@ -290,17 +292,12 @@ def _require_path(path: Path, *, kind: str) -> None:
 
 
 def _validate(args: argparse.Namespace) -> None:
-    if args.command == "gen-configs":
-        return
     if args.command == "catalog":
         _require_path(_catalog_smk(), kind="snakefile")
         return
     if args.command == "mcmc":
         _require_path(_mcmc_smk(), kind="snakefile")
-        config = args.configfile
-        if not config.is_absolute():
-            config = _paper_root() / config
-        _require_path(config, kind="configfile")
+        _require_path(_paper_root() / SWEEP_SPEC, kind="sweep spec")
         _require_path(profile_dir(args.profile), kind="profile")
         return
     if args.command == "paper":
@@ -310,13 +307,11 @@ def _validate(args: argparse.Namespace) -> None:
 
 def build_command(args: argparse.Namespace) -> list[str]:
     extra = _passthrough(args)
-    if args.command == "gen-configs":
-        return build_gen_configs_argv(extra)
     if args.command == "catalog":
         return build_catalog_argv(args.target, dry_run=_is_dry_run(args), extra=extra)
     if args.command == "mcmc":
         return build_mcmc_argv(
-            args.configfile,
+            args.campaigns,
             args.profile,
             dry_run=_is_dry_run(args),
             cores=args.cores,

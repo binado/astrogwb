@@ -1,0 +1,4 @@
+# Detector network: ET-2L-misaligned
+
+[analysis]
+detectors = ["S2", "R2"]

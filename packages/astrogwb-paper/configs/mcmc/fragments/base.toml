@@ -1,5 +1,9 @@
-# Invariant template for packages/astrogwb-paper/configs/mcmc.sweeps.toml. The sweep compiler supplies
-# observation_time, [analysis], sampled_params, and [priors] for every run.
+# Broadest fragment layer: settings shared by every MCMC run.
+#
+# Fragments are partial RunConfigs, merged left to right by `knf` in the order
+# base -> priors -> network -> observation -> analysis (see workflow/mcmc.smk).
+# Later layers add or replace keys; nothing here is required to be complete on
+# its own. Every merged result is validated by `astrogwb-validate-config`.
 
 seed = 42
 

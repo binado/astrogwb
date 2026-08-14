@@ -45,40 +45,63 @@ installs plotting dependencies and mounts Google Drive for the waveform
 catalog. Point `CATALOG_PATH`'s Colab branch at wherever you upload the
 catalog on Drive. Off Colab the bootstrap cell is a no-op.
 
-## Generating sweep configs
+## Sweep configs
 
-Generate sweep configs explicitly on the local machine or cluster submit host;
-existing configs are skipped unless `--force` is supplied:
+Run configs are assembled from *fragments* — partial `RunConfig` files under
+[`configs/mcmc/fragments/`](../configs/mcmc/fragments) — merged left to right
+by [`knf`](https://github.com/binado/knf):
 
-```bash
-uv run astrogwb-generate-mcmc-configs
+```
+base.toml -> priors.toml -> networks/<n>.toml -> observations/<o>.toml -> analyses/<a>.toml
 ```
 
-The committed [`configs/mcmc.sweeps.toml`](../configs/mcmc.sweeps.toml) is a
-declarative product of named detector `[networks]`, likelihood
-`[observations]`, inference `[analyses]`, and prior variants. Each `[runs.*]`
-table selects lists from those collections and expands
-`networks × analyses × observations`. Invariant cosmology, sampler, fiducial,
-and output settings come from the sweep's explicitly declared
-[`configs/mcmc.base.toml`](../configs/mcmc.base.toml).
+Layer order is the contract: broadest first, narrowest last, so an analysis
+fragment has the last word on its own priors and sampled parameters. There is
+no separate generation step — the `mcmc_config` rule in
+[`workflow/mcmc.smk`](../workflow/mcmc.smk) builds each config as part of the
+same DAG that runs the chains, so editing a fragment rebuilds exactly the
+configs that depend on it.
 
-An observation supplies a complete `observation_time`, `f_min`, and `f_max`.
-An analysis selects a named prior variant for every sampled parameter and may
-optionally override existing base fiducials inline:
+`base.toml` holds the invariant seed, cosmology, sampler, fiducials, and
+output settings. `priors.toml` gives every parameter a default prior; an
+analysis overrides only what it changes:
 
 ```toml
-[analyses.H0]
-sampled_params = ["H0"]
-priors = { H0 = "uniform" }
-fiducials = { H0 = 67.66 }
+# analyses/Xi_0-H0-gauss.toml
+sampled_params = ["xi_0", "H0"]
+
+[priors.H0]                 # narrows the base uniform H0 prior to a normal
+type = "normal"
+loc = 67.66
+scale = 0.6766
 ```
 
-Overrides affect the injected spectrum, proposal density, fixed constants,
-and sampler initialization. They cannot introduce parameters absent from the
-base fiducial table. Generated run IDs contain every product dimension:
-`<network>__<analysis>__<observation>`.
+An analysis fragment may also override base fiducials inline, and may set
+`[analysis]` keys such as `likelihood` and `amplitude_parameter`. An
+observation fragment supplies `observation_time`, `f_min`, and `f_max`; a
+network fragment supplies `[analysis] detectors`.
 
-To submit generated sweep configs as a batch (locally or on SLURM), see
+The committed [`configs/mcmc.sweeps.toml`](../configs/mcmc.sweeps.toml) is
+then nothing but product structure: each `[runs.*]` table names networks,
+analyses, and observations and expands
+`networks x analyses x observations`. Generated run IDs carry every product
+dimension: `<network>__<analysis>__<observation>`.
+
+Every merged config is validated as a `RunConfig` by `astrogwb-validate-config`
+before it lands on disk, so a fragment typo or an inconsistent combination
+fails before any sampling is scheduled. To build one config by hand:
+
+```bash
+cd packages/astrogwb-paper
+knf configs/mcmc/fragments/{base.toml,priors.toml} \
+    configs/mcmc/fragments/networks/ET-2L-aligned.toml \
+    configs/mcmc/fragments/observations/baseline.toml \
+    configs/mcmc/fragments/analyses/H0.toml \
+    --strict -f json \
+  | uv run astrogwb-validate-config - --output /tmp/my-run.json
+```
+
+To submit sweep configs as a batch (locally or on SLURM), see
 [Snakemake workflow](./snakemake-workflow.md#mcmc-workflow).
 
 ## Outputs

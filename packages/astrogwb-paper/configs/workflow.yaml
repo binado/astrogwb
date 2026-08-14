@@ -3,6 +3,11 @@ paper_config: configs/paper.toml
 catalog:
   id: bns-n16384-df1
 
+# MCMC batches. `campaigns` selects a subset of configs/mcmc.sweeps.toml;
+# omit or leave empty to build every campaign it defines.
+chains_dir: chains
+campaigns: []
+
 amplitude_toy:
   output_pdf: figures/amplitude_toy_fisher_overlay.pdf
 

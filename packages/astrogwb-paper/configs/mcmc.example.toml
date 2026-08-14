@@ -1,6 +1,6 @@
 # Concrete example for astrogwb-run-mcmc -- the headless NumPyro MCMC runner.
 # This file is independently runnable and is not the sweep generator's base;
-# declarative sweeps use packages/astrogwb-paper/configs/mcmc.base.toml instead.
+# declarative sweeps use packages/astrogwb-paper/configs/mcmc/fragments/ instead.
 
 seed = 42
 observation_time = 1.0       # [yr]; cancels in S_h, kept for the likelihood scale

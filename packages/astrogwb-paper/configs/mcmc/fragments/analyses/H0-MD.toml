@@ -1,0 +1,8 @@
+# Analysis: H0-MD
+
+sampled_params = ["gamma", "kappa", "z_peak"]
+
+[analysis]
+likelihood = "amplitude_marginalized"
+amplitude_parameter = "H0"
+amplitude_num_nodes = 1024

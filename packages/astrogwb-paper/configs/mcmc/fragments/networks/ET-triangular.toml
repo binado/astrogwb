@@ -1,0 +1,4 @@
+# Detector network: ET-triangular
+
+[analysis]
+detectors = ["E1", "E2", "E3"]

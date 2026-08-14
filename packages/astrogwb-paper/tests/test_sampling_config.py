@@ -16,10 +16,12 @@ PAPER_ROOT = paper_project_root()
     [
         ({"type": "uniform", "low": 0.0, "high": 2.0}, {"low": 0.0, "high": 2.0}),
         ({"type": "normal", "loc": 1.0, "scale": 0.5}, {"loc": 1.0, "scale": 0.5}),
+        # Configs hand `build_prior` a PriorSpec; notebooks hand it a mapping.
+        (NormalPrior(type="normal", loc=1.0, scale=0.5), {"loc": 1.0, "scale": 0.5}),
     ],
 )
 def test_build_prior_happy_path(
-    spec: dict[str, object], expected_attrs: dict[str, float]
+    spec: dict[str, object] | NormalPrior, expected_attrs: dict[str, float]
 ) -> None:
     distribution = build_prior(spec)
 
@@ -30,14 +32,6 @@ def test_build_prior_happy_path(
 def test_build_prior_rejects_unknown_type() -> None:
     with pytest.raises(ValidationError, match="does not match any of the expected"):
         build_prior({"type": "mystery", "low": 0.0, "high": 1.0})
-
-
-def test_build_prior_accepts_a_validated_spec() -> None:
-    """Configs hand `build_prior` a PriorSpec; notebooks hand it a raw mapping."""
-    distribution = build_prior(NormalPrior(type="normal", loc=1.0, scale=0.5))
-
-    np.testing.assert_allclose(distribution.loc, 1.0)
-    np.testing.assert_allclose(distribution.scale, 0.5)
 
 
 @pytest.mark.parametrize(

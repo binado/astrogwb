@@ -1,0 +1,4 @@
+# Detector network: ET-2L-aligned-CE-Hanford
+
+[analysis]
+detectors = ["S1", "R1", "C1"]

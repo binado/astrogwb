@@ -106,8 +106,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 args = _parse_args()
 
 ROOT = paper_project_root()
-SWEEP_CONFIG_PATH = ROOT / "configs/mcmc.sweeps.toml"
-BASE_CONFIG_PATH = ROOT / "configs/mcmc.base.toml"
+FRAGMENTS_PATH = ROOT / "configs/mcmc/fragments"
+PRIORS_PATH = FRAGMENTS_PATH / "priors.toml"
+BASE_CONFIG_PATH = FRAGMENTS_PATH / "base.toml"
 CATALOG_PATH = _resolve_path(args.catalog, ROOT)
 
 eps = 1e-3
@@ -136,20 +137,20 @@ use_paper_style()
 # %% [markdown]
 # ## Priors and fiducials
 #
-# Read the uniform $H_0$, $\Xi_0$, and $n$ priors from the sweep library.
-# $\Omega_m$ uses an explicit $\mathrm{Uniform}(0.05, 0.95)$ as requested
-# (matching `[priors.Omega_m.uniform]` in the sweep file, rather than the
-# narrow normal used by the $H_0$–$\Omega_m$ MCMC analysis).
+# Read the uniform $H_0$, $\Xi_0$, and $n$ priors from the shared prior
+# fragment, so this grid always spans the same support the sweeps sample.
+# $\Omega_m$ uses an explicit $\mathrm{Uniform}(0.05, 0.95)$ as requested,
+# rather than the narrow normal the $H_0$–$\Omega_m$ MCMC analysis uses.
 
 # %%
-sweep = load_mapping(SWEEP_CONFIG_PATH)
+priors = load_mapping(PRIORS_PATH)["priors"]
 base = load_mapping(BASE_CONFIG_PATH)
 fiducials: dict[str, float] = dict(base["fiducials"])
 
-h0_prior = build_prior(sweep["priors"]["H0"]["uniform"])
+h0_prior = build_prior(priors["H0"])
 omega_m_prior = dist.Uniform(0.05, 0.95)
-xi_0_prior = build_prior(sweep["priors"]["xi_0"]["uniform"])
-xi_n_prior = build_prior(sweep["priors"]["xi_n"]["uniform"])
+xi_0_prior = build_prior(priors["xi_0"])
+xi_n_prior = build_prior(priors["xi_n"])
 
 COMBOS: tuple[
     tuple[tuple[str, dist.Distribution], tuple[str, dist.Distribution]], ...

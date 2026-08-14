@@ -41,28 +41,19 @@ def test_catalog_workflow_dry_run_contains_both_local_stages() -> None:
     assert "configs/catalogs/bns-n16384-df1.toml" not in result.stdout
 
 
-def test_mcmc_workflow_expands_multiple_manifest_runs(tmp_path: Path) -> None:
+def test_mcmc_workflow_expands_a_campaign_into_config_and_chain_rules(
+    tmp_path: Path,
+) -> None:
+    """Config assembly and sampling are one DAG: no manifest, no generator."""
     catalog = tmp_path / "catalog.h5"
-    run_config = tmp_path / "selected-run.json"
-    second_run_config = tmp_path / "second-run.toml"
     catalog.touch()
-    run_config.write_text("{}\n", encoding="utf-8")
-    second_run_config.write_text("", encoding="utf-8")
-    manifest = _write_manifest(
-        tmp_path,
-        [
-            {"campaign": "first-campaign", "config": str(run_config)},
-            {"campaign": "second-campaign", "config": str(second_run_config)},
-        ],
-    )
-    catalog_config = _write_catalog_config(tmp_path, catalog)
+    workflow_config = _write_workflow_config(tmp_path, catalog, ["cosmology"])
 
     result = _snakemake(
         "--snakefile",
         str(PAPER_ROOT / "workflow/mcmc.smk"),
         "--configfile",
-        str(catalog_config),
-        str(manifest),
+        str(workflow_config),
         "--dry-run",
         "--forceall",
         "--cores",
@@ -71,34 +62,100 @@ def test_mcmc_workflow_expands_multiple_manifest_runs(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule run_mcmc:") == 2
+    # cosmology: 2 networks x 3 analyses x 1 observation.
+    assert result.stdout.count("rule run_mcmc:") == 6
+    assert result.stdout.count("rule mcmc_config:") == 6
     assert str(catalog) in result.stdout
-    assert str(run_config) in result.stdout
-    assert str(second_run_config) in result.stdout
     assert (
-        str(tmp_path / "chains/test-catalog/first-campaign/selected-run.nc")
-        in result.stdout
-    )
-    assert (
-        str(tmp_path / "chains/test-catalog/second-campaign/second-run.nc")
+        str(tmp_path / "chains/test-catalog/cosmology/ET-2L-aligned__H0__baseline.nc")
         in result.stdout
     )
     assert "rule bns_population:" not in result.stdout
     assert "rule bns_waveform_catalog:" not in result.stdout
 
 
+def test_mcmc_config_rule_merges_fragments_through_the_validator(
+    tmp_path: Path,
+) -> None:
+    catalog = tmp_path / "catalog.h5"
+    catalog.touch()
+    workflow_config = _write_workflow_config(tmp_path, catalog, ["cosmology"])
+
+    result = _snakemake(
+        "--snakefile",
+        str(PAPER_ROOT / "workflow/mcmc.smk"),
+        "--configfile",
+        str(workflow_config),
+        "--dry-run",
+        "--forceall",
+        "--printshellcmds",
+        "--cores",
+        "1",
+        "mcmc",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "knf configs/mcmc/fragments/base.toml" in result.stdout
+    assert "configs/mcmc/fragments/priors.toml" in result.stdout
+    assert "configs/mcmc/fragments/analyses/H0.toml" in result.stdout
+    assert "--strict -f json" in result.stdout
+    assert "astrogwb-validate-config -" in result.stdout
+
+
+def test_mcmc_workflow_defaults_to_every_campaign(tmp_path: Path) -> None:
+    catalog = tmp_path / "catalog.h5"
+    catalog.touch()
+    workflow_config = _write_workflow_config(tmp_path, catalog, [])
+
+    result = _snakemake(
+        "--snakefile",
+        str(PAPER_ROOT / "workflow/mcmc.smk"),
+        "--configfile",
+        str(workflow_config),
+        "--dry-run",
+        "--forceall",
+        "--cores",
+        "1",
+        "mcmc",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("rule run_mcmc:") == 58
+
+
+def test_mcmc_workflow_rejects_unknown_campaign(tmp_path: Path) -> None:
+    catalog = tmp_path / "catalog.h5"
+    catalog.touch()
+    workflow_config = _write_workflow_config(tmp_path, catalog, ["not-a-campaign"])
+
+    result = _snakemake(
+        "--snakefile",
+        str(PAPER_ROOT / "workflow/mcmc.smk"),
+        "--configfile",
+        str(workflow_config),
+        "--dry-run",
+        "--cores",
+        "1",
+        "mcmc",
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "unknown campaigns ['not-a-campaign']" in output
+
+
 def test_mcmc_catalog_id_override_uses_derived_path(tmp_path: Path) -> None:
     catalog_id = f"test-{tmp_path.name}"
     catalog = PAPER_ROOT / "out" / "catalogs" / f"{catalog_id}.h5"
-    run_config = tmp_path / "selected-run.json"
-    run_config.write_text("{}\n", encoding="utf-8")
-    manifest = _write_manifest(
-        tmp_path,
-        [{"campaign": "test-campaign", "config": str(run_config)}],
-    )
-    catalog_config = tmp_path / "catalog-config.json"
-    catalog_config.write_text(
-        json.dumps({"catalog": {"id": catalog_id}}),
+    workflow_config = tmp_path / "workflow-config.json"
+    workflow_config.write_text(
+        json.dumps(
+            {
+                "catalog": {"id": catalog_id},
+                "chains_dir": str(tmp_path / "chains"),
+                "campaigns": ["cosmology"],
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -109,8 +166,7 @@ def test_mcmc_catalog_id_override_uses_derived_path(tmp_path: Path) -> None:
             "--snakefile",
             str(PAPER_ROOT / "workflow/mcmc.smk"),
             "--configfile",
-            str(catalog_config),
-            str(manifest),
+            str(workflow_config),
             "--dry-run",
             "--forceall",
             "--cores",
@@ -123,28 +179,19 @@ def test_mcmc_catalog_id_override_uses_derived_path(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert f"out/catalogs/{catalog_id}.h5" in result.stdout
     assert "out/catalogs/bns-n16384-df1.h5" not in result.stdout
-    assert str(tmp_path / f"chains/{catalog_id}/test-campaign/selected-run.nc") in (
-        result.stdout
-    )
+    assert str(tmp_path / f"chains/{catalog_id}/cosmology") in result.stdout
 
 
 def test_mcmc_thread_override_controls_runner_cpu_budget(tmp_path: Path) -> None:
     catalog = tmp_path / "catalog.h5"
-    run_config = tmp_path / "selected-run.json"
     catalog.touch()
-    run_config.write_text("{}\n", encoding="utf-8")
-    manifest = _write_manifest(
-        tmp_path,
-        [{"campaign": "test-campaign", "config": str(run_config)}],
-    )
-    catalog_config = _write_catalog_config(tmp_path, catalog)
+    workflow_config = _write_workflow_config(tmp_path, catalog, ["cosmology"])
 
     result = _snakemake(
         "--snakefile",
         str(PAPER_ROOT / "workflow/mcmc.smk"),
         "--configfile",
-        str(catalog_config),
-        str(manifest),
+        str(workflow_config),
         "--dry-run",
         "--forceall",
         "--printshellcmds",
@@ -166,58 +213,16 @@ def test_mcmc_thread_override_controls_runner_cpu_budget(tmp_path: Path) -> None
     assert "XLA_FLAGS" not in result.stdout
 
 
-def test_mcmc_workflow_rejects_duplicate_campaign_and_config_stem(
-    tmp_path: Path,
-) -> None:
-    catalog = tmp_path / "catalog.h5"
-    first_config = tmp_path / "first" / "selected-run.json"
-    second_config = tmp_path / "second" / "selected-run.toml"
-    catalog.touch()
-    first_config.parent.mkdir()
-    second_config.parent.mkdir()
-    first_config.write_text("{}\n", encoding="utf-8")
-    second_config.write_text("", encoding="utf-8")
-    manifest = _write_manifest(
-        tmp_path,
-        [
-            {"campaign": "test-campaign", "config": str(first_config)},
-            {"campaign": "test-campaign", "config": str(second_config)},
-        ],
-    )
-    catalog_config = _write_catalog_config(tmp_path, catalog)
-
-    result = _snakemake(
-        "--snakefile",
-        str(PAPER_ROOT / "workflow/mcmc.smk"),
-        "--configfile",
-        str(catalog_config),
-        str(manifest),
-        "--dry-run",
-        "--cores",
-        "1",
-        "mcmc",
-    )
-
-    output = result.stdout + result.stderr
-    assert result.returncode != 0
-    assert "duplicate MCMC run test-campaign/selected-run" in output
-
-
 def test_mcmc_workflow_does_not_generate_missing_catalog(tmp_path: Path) -> None:
-    run_config = tmp_path / "selected-run.json"
-    run_config.write_text("{}\n", encoding="utf-8")
-    manifest = _write_manifest(
-        tmp_path,
-        [{"campaign": "test-campaign", "config": str(run_config)}],
+    workflow_config = _write_workflow_config(
+        tmp_path, tmp_path / "missing.h5", ["cosmology"]
     )
-    catalog_config = _write_catalog_config(tmp_path, tmp_path / "missing.h5")
 
     result = _snakemake(
         "--snakefile",
         str(PAPER_ROOT / "workflow/mcmc.smk"),
         "--configfile",
-        str(catalog_config),
-        str(manifest),
+        str(workflow_config),
         "--dry-run",
         "--cores",
         "1",
@@ -249,24 +254,16 @@ def test_paper_workflow_exposes_only_figure_rules() -> None:
     }
 
 
-def _write_manifest(tmp_path: Path, runs: list[dict[str, str]]) -> Path:
-    manifest = tmp_path / "batch.json"
-    manifest.write_text(
+def _write_workflow_config(tmp_path: Path, catalog: Path, campaigns: list[str]) -> Path:
+    workflow_config = tmp_path / "workflow-config.json"
+    workflow_config.write_text(
         json.dumps(
             {
+                "catalog": {"id": "test-catalog", "path": str(catalog)},
                 "chains_dir": str(tmp_path / "chains"),
-                "runs": runs,
+                "campaigns": campaigns,
             }
         ),
         encoding="utf-8",
     )
-    return manifest
-
-
-def _write_catalog_config(tmp_path: Path, catalog: Path) -> Path:
-    catalog_config = tmp_path / "catalog-config.json"
-    catalog_config.write_text(
-        json.dumps({"catalog": {"id": "test-catalog", "path": str(catalog)}}),
-        encoding="utf-8",
-    )
-    return catalog_config
+    return workflow_config

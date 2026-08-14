@@ -10,12 +10,10 @@ configs/mcmc/astrophysical/
 configs/mcmc/cosmology/
 configs/mcmc/*-all-detectors/
 configs/mcmc/frozen/
-configs/mcmc/manifests/
 packages/astrogwb-paper/configs/mcmc/astrophysical/
 packages/astrogwb-paper/configs/mcmc/cosmology/
 packages/astrogwb-paper/configs/mcmc/*-all-detectors/
 packages/astrogwb-paper/configs/mcmc/frozen/
-packages/astrogwb-paper/configs/mcmc/manifests/
 chains/
 logs/
 

@@ -1,127 +1,13 @@
-# Declarative MCMC sweep campaigns. Each [runs.*] table expands the Cartesian
-# product of its named networks, analyses, and observations.
-
-base_config = "mcmc.base.toml"
-
-[networks.ET-triangular]
-detectors = ["E1", "E2", "E3"]
-
-[networks.ET-triangular-CE-Hanford]
-detectors = ["E1", "E2", "E3", "C1"]
-
-[networks.ET-2L-aligned]
-detectors = ["S1", "R1"]
-
-[networks.ET-2L-aligned-CE-Hanford]
-detectors = ["S1", "R1", "C1"]
-
-[networks.ET-2L-misaligned]
-detectors = ["S2", "R2"]
-
-[networks.ET-2L-misaligned-CE-Hanford]
-detectors = ["S2", "R2", "C1"]
-
-[observations.baseline]
-observation_time = 1.0
-f_min = 2.0
-f_max = 4096.0
-
-[analyses.H0]
-sampled_params = ["H0"]
-priors = { H0 = "uniform" }
-
-[analyses.H0-Omega_m]
-sampled_params = ["Omega_m"]
-priors = { H0 = "uniform", Omega_m = "normal" }
-likelihood = "amplitude_marginalized"
-amplitude_parameter = "H0"
-amplitude_num_nodes = 1024
-
-[analyses.H0-merger-rate-gauss]
-sampled_params = ["H0", "local_merger_rate"]
-priors = { H0 = "uniform", local_merger_rate = "normal" }
-
-[analyses.Xi_0]
-sampled_params = ["xi_0"]
-priors = { xi_0 = "uniform" }
-
-[analyses.Xi_0-n]
-sampled_params = ["xi_0", "xi_n"]
-priors = { xi_0 = "uniform", xi_n = "uniform" }
-
-[analyses.Xi_0-H0-gauss]
-sampled_params = ["xi_0", "H0"]
-priors = { xi_0 = "uniform", H0 = "normal" }
-
-[analyses.H0-peak]
-sampled_params = ["z_peak"]
-priors = { H0 = "uniform", z_peak = "uniform" }
-likelihood = "amplitude_marginalized"
-amplitude_parameter = "H0"
-amplitude_num_nodes = 1024
-
-[analyses.H0-MD]
-sampled_params = ["gamma", "kappa", "z_peak"]
-priors = { H0 = "uniform", gamma = "uniform", kappa = "uniform", z_peak = "uniform" }
-likelihood = "amplitude_marginalized"
-amplitude_parameter = "H0"
-amplitude_num_nodes = 1024
-
-[priors.H0.uniform]
-type = "uniform"
-low = 20.0
-high = 140.0
-
-[priors.H0.normal]
-type = "normal"
-loc = 67.66
-scale = 0.6766
-
-[priors.Omega_m.uniform]
-type = "uniform"
-low = 0.05
-high = 0.95
-
-[priors.Omega_m.normal]
-type = "normal"
-loc = 0.3096
-scale = 0.006
-
-[priors.xi_0.uniform]
-type = "uniform"
-low = 0.5
-high = 5.0
-
-[priors.xi_n.uniform]
-type = "uniform"
-low = 0.3
-high = 3.0
-
-[priors.gamma.uniform]
-type = "uniform"
-low = 0.5
-high = 10.0
-
-[priors.kappa.uniform]
-type = "uniform"
-low = 0.05
-high = 10.0
-
-[priors.z_peak.uniform]
-type = "uniform"
-low = 0.05
-high = 10.0
-
-[priors.local_merger_rate.normal]
-type = "normal"
-loc = 161.0
-scale = 1.61
+# Declarative MCMC sweep campaigns.
+#
+# Each [runs.*] table expands the Cartesian product of its named networks,
+# analyses, and observations into one run per point. The names refer to
+# fragment files under configs/mcmc/fragments/; workflow/mcmc.smk merges
+# them with `knf` and validates the result, so a name with no matching
+# fragment fails as a missing input rather than a dangling reference.
 
 [runs.cosmology]
-networks = [
-    "ET-2L-aligned",
-    "ET-2L-aligned-CE-Hanford",
-]
+networks = ["ET-2L-aligned", "ET-2L-aligned-CE-Hanford"]
 analyses = ["H0", "H0-Omega_m", "H0-merger-rate-gauss"]
 observations = ["baseline"]
 
@@ -150,10 +36,7 @@ analyses = ["Xi_0", "Xi_0-n", "Xi_0-H0-gauss"]
 observations = ["baseline"]
 
 [runs.astrophysical]
-networks = [
-    "ET-2L-aligned",
-    "ET-2L-aligned-CE-Hanford",
-]
+networks = ["ET-2L-aligned", "ET-2L-aligned-CE-Hanford"]
 analyses = ["H0-peak", "H0-MD"]
 observations = ["baseline"]
 
