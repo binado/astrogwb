@@ -1,8 +1,0 @@
-# Analysis: H0-Omega_m
-
-sampled_params = ["Omega_m"]
-
-[analysis]
-likelihood = "amplitude_marginalized"
-amplitude_parameter = "H0"
-amplitude_num_nodes = 1024

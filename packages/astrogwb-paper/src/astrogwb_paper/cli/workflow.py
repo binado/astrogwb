@@ -5,15 +5,14 @@ Snakemake subcommands default to ``--dry-run``; pass ``--submit`` to run for rea
 
 Usage::
 
-    uv run astrogwb-workflow catalog out/catalogs/bns-n16384-df1.h5 --submit
-    uv run astrogwb-workflow mcmc --profile local
-    uv run astrogwb-workflow mcmc cosmology --profile slurm --submit
+    uv run astrogwb-workflow catalog outputs/catalogs/bns-n16384-df1.h5 --submit
+    uv run astrogwb-workflow mcmc H0-all-detectors --profile local
+    uv run astrogwb-workflow mcmc H0-all-detectors --profile slurm --submit
     uv run astrogwb-workflow paper --submit
 
-MCMC runs take campaign names from ``configs/mcmc.sweeps.toml`` (all of them
-if none are named). There is no separate config-generation step: the
-``mcmc_config`` rule in ``workflow/mcmc.smk`` builds each run's config from
-its fragments as part of the same DAG.
+MCMC runs take committed experiment names. Each experiment owns explicit
+``mcmc.<run>.toml`` files; ``assemble_config`` merges each one with the shared
+base as part of the same DAG that samples chains and builds local figures.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
-from astrogwb_paper.config.sweeps import SWEEP_SPEC
+from astrogwb_paper.config.experiments import EXPERIMENTS, experiment
 from astrogwb_paper.paths import paper_project_root
 
 PROFILE_CHOICES = ("local", "slurm", "slurm-cpu")
@@ -51,11 +50,6 @@ def _catalog_smk() -> Path:
 @lru_cache(maxsize=1)
 def _mcmc_smk() -> Path:
     return _paper_root() / "workflow/mcmc.smk"
-
-
-@lru_cache(maxsize=1)
-def _paper_smk() -> Path:
-    return _paper_root() / "workflow/paper.smk"
 
 
 def profile_dir(name: str) -> Path:
@@ -146,20 +140,15 @@ def build_catalog_argv(
 
 
 def build_mcmc_argv(
-    campaigns: list[str] | None,
+    experiments: list[str] | None,
     profile: str,
     *,
     dry_run: bool = True,
     cores: int | None = None,
+    chains_only: bool = False,
     extra: list[str] | None = None,
 ) -> list[str]:
-    """Build the snakemake argv for an MCMC batch.
-
-    ``campaigns`` selects a subset of ``configs/mcmc.sweeps.toml``; ``None``
-    (or empty) builds every campaign it defines. This replaces the generated
-    batch manifests -- the sweep spec is now the only input, and Snakemake
-    expands it.
-    """
+    """Build the Snakemake argv for one or more committed experiments."""
     if profile not in PROFILE_CHOICES:
         raise ValueError(f"unknown profile {profile!r}; choose from {PROFILE_CHOICES}")
 
@@ -184,12 +173,13 @@ def build_mcmc_argv(
         cmd.extend(["--cores", str(resolved_cores)])
     if dry_run:
         cmd.append("--dry-run")
-    cmd.append("mcmc")
-    # `campaigns` must join the single coalesced --config group: Snakemake's
-    # --config uses nargs='*' without action='append', so a second occurrence
-    # (e.g. the CPU profiles' jax_platforms) would replace it outright.
-    selection = ["--config", f"campaigns={list(campaigns)!r}"] if campaigns else []
-    cmd.extend(coalesce_mcmc_extra([*selection, *(extra or [])], profile))
+    selected = list(experiments or [])
+    targets = [
+        (experiment(name).chains_target if chains_only else experiment(name).target)
+        for name in selected
+    ]
+    cmd.extend(targets or ["experiments"])
+    cmd.extend(coalesce_mcmc_extra(extra, profile))
     return cmd
 
 
@@ -208,13 +198,13 @@ def build_paper_argv(
         "workflow",
         "snakemake",
         "--snakefile",
-        str(_paper_smk()),
+        str(_mcmc_smk()),
         "--cores",
         "1",
     ]
     if dry_run:
         cmd.append("--dry-run")
-    cmd.append(target if target else "paper_figures")
+    cmd.append(target if target else "standalone_figures")
     if extra:
         cmd.extend(extra)
     return cmd
@@ -233,20 +223,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "catalog",
         help="Build a catalog target (population first if stale).",
     )
-    catalog.add_argument("target", help="Catalog output path, e.g. out/catalogs/….h5")
+    catalog.add_argument(
+        "target", help="Catalog output path, e.g. outputs/catalogs/….h5"
+    )
     _add_run_mode(catalog)
 
     mcmc = sub.add_parser(
         "mcmc",
-        help="Run or dry-run an MCMC batch with a committed profile.",
+        help="Run or dry-run committed experiments with a profile.",
     )
     mcmc.add_argument(
-        "campaigns",
+        "experiments",
         nargs="*",
-        help=(
-            "Campaign names from configs/mcmc.sweeps.toml. Omit to run every "
-            "campaign the spec defines."
-        ),
+        choices=tuple(EXPERIMENTS),
+        help=("Committed experiment names. Omit to run every experiment."),
+    )
+    mcmc.add_argument(
+        "--chains-only",
+        action="store_true",
+        help="Build chains without the experiment's local figure rules.",
     )
     mcmc.add_argument(
         "--profile",
@@ -267,13 +262,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     paper = sub.add_parser(
         "paper",
-        help="Build paper figures (default target: paper_figures).",
+        help="Build standalone paper figures from the unified workflow.",
     )
     paper.add_argument(
         "target",
         nargs="?",
         default=None,
-        help="Optional figure path; default paper_figures.",
+        help="Optional figure path; default standalone_figures.",
     )
     _add_run_mode(paper)
 
@@ -282,6 +277,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args, extras = parser.parse_known_args(argv)
     if extras and extras[0] == "--":
         extras = extras[1:]
+    if (
+        args.command == "paper"
+        and args.target is not None
+        and args.target.startswith("-")
+    ):
+        # After ``--`` argparse stops option parsing, so a forwarded flag such
+        # as ``--config KEY=VALUE`` lands in the optional positional target.
+        # Reclassify it as an extra so it reaches Snakemake's CLI.
+        extras.insert(0, args.target)
+        args.target = None
     args.extra = extras
     return args
 
@@ -297,11 +302,10 @@ def _validate(args: argparse.Namespace) -> None:
         return
     if args.command == "mcmc":
         _require_path(_mcmc_smk(), kind="snakefile")
-        _require_path(_paper_root() / SWEEP_SPEC, kind="sweep spec")
         _require_path(profile_dir(args.profile), kind="profile")
         return
     if args.command == "paper":
-        _require_path(_paper_smk(), kind="snakefile")
+        _require_path(_mcmc_smk(), kind="snakefile")
         return
 
 
@@ -311,10 +315,11 @@ def build_command(args: argparse.Namespace) -> list[str]:
         return build_catalog_argv(args.target, dry_run=_is_dry_run(args), extra=extra)
     if args.command == "mcmc":
         return build_mcmc_argv(
-            args.campaigns,
+            args.experiments,
             args.profile,
             dry_run=_is_dry_run(args),
             cores=args.cores,
+            chains_only=args.chains_only,
             extra=extra,
         )
     if args.command == "paper":

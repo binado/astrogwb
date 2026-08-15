@@ -9,7 +9,7 @@ PAPER_ROOT = paper_project_root()
 
 def test_catalog_recipe_loads_default_recipe() -> None:
     recipe = load_catalog_recipe(
-        PAPER_ROOT / "configs" / "catalogs" / "bns-n16384-df1.toml"
+        PAPER_ROOT / "inputs" / "catalogs" / "bns-n16384-df1.toml"
     )
 
     assert recipe.n_samples == 16384

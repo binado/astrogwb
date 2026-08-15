@@ -33,15 +33,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 from _paper_style import SPECTRUM, combo_colors, use_paper_style
-from matplotlib.axes import Axes as MplAxes
-from matplotlib.figure import Figure
-from matplotlib.lines import Line2D
-from matplotlib.projections import register_projection
-from pluscross import load_catalog
-
-from astrogwb_paper.config.loading import load_mapping
-from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.cosmology import hubble_constant_si
+from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
@@ -51,8 +44,14 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb_paper.paths import paper_project_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
+from astrogwb_paper.config.loading import load_mapping
+from astrogwb_paper.paths import paper_project_root
+from matplotlib.axes import Axes as MplAxes
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.projections import register_projection
+from pluscross import load_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's rectilinear axes. Restore the
 # standard matplotlib projection for consistent notebook plotting.
@@ -68,8 +67,8 @@ jax.config.update("jax_enable_x64", True)
 # with flags when running headless.
 
 # %%
-DEFAULT_CONFIG_PATH = Path("packages/astrogwb-paper/configs/paper.toml")
-DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
+DEFAULT_CONFIG_PATH = Path("inputs/figures/standalone.toml")
+DEFAULT_CATALOG_PATH = Path("outputs/catalogs/bns-n16384-df1.h5")
 DEFAULT_F_MIN = 2.0
 DEFAULT_F_MAX = 4096.0
 DEFAULT_Z_MIN = 0.0
@@ -84,9 +83,9 @@ DEFAULT_KAPPA = 4.62
 DEFAULT_Z_PEAK = 1.84
 DEFAULT_LOCAL_MERGER_RATE = 161.0
 DEFAULT_OMEGA_GW_MIN = 1e-15
-DEFAULT_OUTPUT_PDF = Path("figures/fiducial_spectrum.pdf")
+DEFAULT_OUTPUT_PDF = Path("outputs/figures/standalone/fiducial_spectrum.pdf")
 DEFAULT_OUTPUT_EFFECTIVE_PSD_PDF = Path(
-    "figures/fiducial_effective_psd_by_detector.pdf"
+    "outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf"
 )
 DEFAULT_FIGURE_DPI = 300
 
@@ -99,8 +98,8 @@ def _resolve_path(path: Path, root: Path) -> Path:
 def detector_networks_from_config(
     config: Mapping[str, Any],
 ) -> dict[str, tuple[str, ...]]:
-    """Return detector networks from ``configs/paper.toml``."""
-    raw = config["detector_networks"]
+    """Return detector networks from the standalone figure config."""
+    raw = config["fiducial_spectrum"]["detector_networks"]
     return {name: tuple(detectors) for name, detectors in raw.items()}
 
 
@@ -108,18 +107,11 @@ def detector_labels_from_config(
     config: Mapping[str, Any],
     networks: Mapping[str, tuple[str, ...]],
 ) -> list[str]:
-    """Return display labels for ``networks`` from cosmology detector posteriors."""
-    posteriors = config["figures"]["mcmc_cosmological_parameters"][
-        "detector_posteriors"
-    ]
-    label_by_network = {entry["network"]: entry["label"] for entry in posteriors}
-    missing = [name for name in networks if name not in label_by_network]
-    if missing:
-        raise ValueError(
-            "missing detector labels in paper config for network(s): "
-            + ", ".join(missing)
-        )
-    return [label_by_network[name] for name in networks]
+    """Return display labels in detector-network declaration order."""
+    labels = config["fiducial_spectrum"]["detector_labels"]
+    if len(labels) != len(networks):
+        raise ValueError("detector label count must match configured networks")
+    return list(labels)
 
 
 def compute_fiducial_spectral_density(
@@ -407,10 +399,11 @@ figure = plot_omega_and_sh(
 # ## Effective PSD by detector network
 #
 # Network effective noise PSDs for the detector combinations in
-# ``configs/paper.toml``, overlaid on a shared log–log frequency axis. Colors
+# ``inputs/figures/standalone.toml``, overlaid on a shared log–log frequency axis.
+# Colors
 # and linestyles match the $H_0$ density comparison (shared color per ET /
 # ET+CE pair; dashed for CE companions). Labels come from the cosmology
-# ``detector_posteriors`` entries in the same config.
+# the detector label entries in the same config.
 
 # %%
 networks = detector_networks_from_config(config)

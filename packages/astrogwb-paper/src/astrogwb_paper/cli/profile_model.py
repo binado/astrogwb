@@ -17,7 +17,7 @@ Usage::
 
     uv run astrogwb-profile-model \
         --config packages/astrogwb-paper/configs/mcmc.example.toml \
-        --catalog out/catalogs/bns-n16384-df1.h5
+        --catalog outputs/catalogs/bns-n16384-df1.h5
 
 Open the generated ``perfetto_trace.json.gz`` at https://ui.perfetto.dev
 (no TensorBoard install required).

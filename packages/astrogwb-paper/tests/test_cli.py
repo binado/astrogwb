@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from astrogwb_paper.cli.workflow import build_mcmc_argv
+from astrogwb_paper.cli.workflow import build_mcmc_argv, build_paper_argv, parse_args
 from astrogwb_paper.paths import paper_project_root
 
 COMMANDS = (
@@ -78,18 +78,23 @@ def _config_groups(argv: list[str]) -> list[list[str]]:
     return groups
 
 
-def test_mcmc_argv_keeps_campaigns_in_a_single_config_group() -> None:
-    """Snakemake's --config is nargs='*' without append: a second one wins.
-
-    The CPU profiles inject `jax_platforms=cpu`, so a separately emitted
-    campaign selection would be silently dropped and the whole sweep would run.
-    """
-    argv = build_mcmc_argv(["cosmology"], "slurm-cpu")
+def test_mcmc_argv_maps_experiment_to_complete_target() -> None:
+    argv = build_mcmc_argv(["H0-all-detectors"], "slurm-cpu")
 
     groups = _config_groups(argv)
     assert len(groups) == 1
-    assert "campaigns=['cosmology']" in groups[0]
     assert "jax_platforms=cpu" in groups[0]
+    assert "H0_all_detectors" in argv
+
+
+def test_mcmc_argv_maps_chains_only_target() -> None:
+    argv = build_mcmc_argv(
+        ["modified-propagation-all-detectors"],
+        "slurm",
+        chains_only=True,
+    )
+
+    assert "modified_propagation_all_detectors_chains" in argv
 
 
 def test_mcmc_argv_omits_config_when_nothing_needs_setting() -> None:
@@ -98,15 +103,26 @@ def test_mcmc_argv_omits_config_when_nothing_needs_setting() -> None:
 
 def test_mcmc_argv_merges_caller_supplied_config_entries() -> None:
     argv = build_mcmc_argv(
-        ["cosmology"],
+        ["H0-all-detectors"],
         "slurm-cpu",
-        extra=["--config", "catalog={'id':'other'}"],
+        extra=["--config", "catalogs_dir=/tmp/catalogs"],
     )
 
     groups = _config_groups(argv)
     assert len(groups) == 1
     assert set(groups[0]) == {
         "jax_platforms=cpu",
-        "campaigns=['cosmology']",
-        "catalog={'id':'other'}",
+        "catalogs_dir=/tmp/catalogs",
     }
+
+
+def test_paper_argv_forwards_config_after_double_hyphen() -> None:
+    args = parse_args(["paper", "--", "--config", "catalogs_dir=/tmp/catalogs"])
+
+    argv = build_paper_argv(args.target, dry_run=True, extra=args.extra)
+
+    assert args.target is None
+    assert argv[argv.index("standalone_figures") + 1 :] == [
+        "--config",
+        "catalogs_dir=/tmp/catalogs",
+    ]

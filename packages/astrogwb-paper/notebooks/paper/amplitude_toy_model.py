@@ -28,7 +28,7 @@
 #
 # It is a smoke/sanity test: can NUTS recover a known injected amplitude from
 # a fiducial catalog? The paper workflow builds its Fisher-overlay figure from
-# this notebook via ``workflow/paper.smk``.
+# this notebook through the unified experiment workflow.
 #
 # To run the notebook end-to-end, use the editable defaults in the configuration
 # cell below or override them with command-line flags. Snakemake supplies the
@@ -97,13 +97,13 @@ azp.style.use("arviz-variat")
 #
 # Every setting consumed by this notebook has an editable default below. These
 # defaults make direct Jupyter and command-line runs self-contained; the paper
-# workflow passes its authoritative values from `configs/paper.toml` explicitly.
+# workflow passes its authoritative values from `inputs/mcmc.base.toml`.
 # Use `--debug` for a short smoke run (100 warmup / 100 samples / 1 chain).
 
 
 # %%
-DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
-DEFAULT_CHAINS_DIR = "chains"
+DEFAULT_CATALOG_PATH = Path("outputs/catalogs/bns-n16384-df1.h5")
+DEFAULT_CHAINS_DIR = "outputs/chains/amplitude-toy"
 DEFAULT_OBSERVATION_TIME = 1.0
 DEFAULT_F_MIN = 2.0
 DEFAULT_F_MAX = 4096.0
@@ -120,7 +120,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-pdf",
         type=Path,
-        default=Path("figures/amplitude_toy_fisher_overlay.pdf"),
+        default=Path("outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf"),
     )
     parser.add_argument("--chains-dir", type=Path, default=Path(DEFAULT_CHAINS_DIR))
     parser.add_argument(

@@ -1,0 +1,39 @@
+output_pdf = "outputs/figures/H0-all-detectors/H0-by-detector.pdf"
+output_csv = "outputs/figures/H0-all-detectors/H0-by-detector.csv"
+output_tex = "outputs/figures/H0-all-detectors/H0-by-detector.tex"
+
+[[posteriors]]
+run = "ET-triangular"
+label = 'ET-$\Delta$'
+
+[[posteriors]]
+run = "ET-triangular-CE-Hanford"
+label = 'ET-$\Delta$ $+$ CE'
+
+[[posteriors]]
+run = "ET-2L-aligned"
+label = "ET-2L-par"
+
+[[posteriors]]
+run = "ET-2L-aligned-CE-Hanford"
+label = 'ET-2L-par $+$ CE'
+
+[[posteriors]]
+run = "ET-2L-misaligned"
+label = "ET-2L"
+
+[[posteriors]]
+run = "ET-2L-misaligned-CE-Hanford"
+label = 'ET-2L $+$ CE'
+
+[axis]
+xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'
+ylabel = "Posterior density"
+
+[legend]
+ncol = 3
+loc = "lower center"
+bbox_to_anchor = [0.5, 1.02]
+frameon = false
+borderaxespad = 0
+handlelength = 2.5

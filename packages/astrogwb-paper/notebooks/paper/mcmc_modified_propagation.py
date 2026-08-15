@@ -65,6 +65,8 @@ from arviz_base.labels import MapLabeller
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import (
     frequency_mask as make_frequency_mask,
+)
+from astrogwb.frequency import (
     frequency_spacing as compute_frequency_spacing,
 )
 from astrogwb.gwb import spectral_density, spectral_snr
@@ -75,6 +77,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
+from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.paths import paper_project_root
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.lines import Line2D
@@ -96,12 +99,12 @@ jax.config.update("jax_enable_x64", True)
 # paths as declared inputs.
 
 # %%
-_CHAIN_DIR = Path("chains/bns-n16384-df1/modified-propagation-all-detectors")
-_NETWORK = "ET-2L-aligned-CE-Hanford"
+_CHAIN_DIR = Path("outputs/chains/modified-propagation-all-detectors")
 
-DEFAULT_XI0_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0__baseline.nc"
-DEFAULT_XI0_N_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0-n__baseline.nc"
-DEFAULT_H0_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0-H0-gauss__baseline.nc"
+DEFAULT_XI0_CHAIN = _CHAIN_DIR / "Xi_0.nc"
+DEFAULT_XI0_N_CHAIN = _CHAIN_DIR / "ET-2L-aligned-CE-Hanford.nc"
+DEFAULT_H0_CHAIN = _CHAIN_DIR / "Xi_0-H0.nc"
+DEFAULT_BASE_CONFIG_PATH = Path("inputs/mcmc.base.toml")
 
 # Fiducial (injected) values marked as truths on the corner plots.
 DEFAULT_XI_0 = 1.0
@@ -145,7 +148,7 @@ DEFAULT_KAPPA = 4.62
 DEFAULT_Z_PEAK = 1.84
 DEFAULT_LOCAL_MERGER_RATE = 161.0
 
-DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
+DEFAULT_CATALOG_PATH = Path("outputs/catalogs/bns-n16384-df1.h5")
 DEFAULT_OBSERVATION_TIME = 1.0
 DEFAULT_F_MIN = 2.0
 DEFAULT_F_MAX = 4096.0
@@ -171,7 +174,7 @@ DEFAULT_DETECTOR_LABELS = [
     r"ET-2L $+$ CE",
 ]
 DEFAULT_DETECTOR_XI0_N_CHAINS = [
-    _CHAIN_DIR / f"{name}__Xi_0-n__baseline.nc" for name in DEFAULT_NETWORKS
+    _CHAIN_DIR / f"{name}.nc" for name in DEFAULT_NETWORKS
 ]
 
 # %% [markdown]
@@ -721,6 +724,7 @@ def write_xi0_n_constraint_table(
 # %%
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--base-config", type=Path, default=DEFAULT_BASE_CONFIG_PATH)
     parser.add_argument("--xi0-chain", type=Path, default=DEFAULT_XI0_CHAIN)
     parser.add_argument("--xi0-n-chain", type=Path, default=DEFAULT_XI0_N_CHAIN)
     parser.add_argument("--h0-chain", type=Path, default=DEFAULT_H0_CHAIN)
@@ -814,6 +818,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 args = _parse_args()
 root = paper_project_root()
+base_config = load_mapping(_resolve_path(args.base_config, root))
 
 # %% [markdown]
 # ## Load the chains
@@ -842,14 +847,7 @@ xi_n_labels = [args.marginal_labels[1]]
 h0_data = [inference_data[2]]
 
 fiducials = {
-    "xi_0": args.xi_0,
-    "xi_n": args.xi_n,
-    "H0": args.h0,
-    "Omega_m": args.omega_m,
-    "gamma": args.gamma,
-    "kappa": args.kappa,
-    "z_peak": args.z_peak,
-    "local_merger_rate": args.local_merger_rate,
+    **base_config["fiducials"],
     "importance_relative_ess": args.importance_relative_ess,
 }
 
@@ -935,7 +933,6 @@ xi0_marginal_figure = plot_marginal_posteriors(
 
 # %%
 xi0_hdi = xi0_hdi_table(inference_data, args.marginal_labels, group=args.group)
-xi0_hdi
 
 # %% [markdown]
 # ## Figure (iii): $\Xi_0$--$H_0$ corner
@@ -965,12 +962,12 @@ snr_table = compute_network_snrs(
     _resolve_path(args.catalog, root),
     networks,
     fiducials,
-    observation_time=args.observation_time,
-    f_min=args.f_min,
-    f_max=args.f_max,
-    z_min=args.z_min,
-    z_max=args.z_max,
-    n_grid=args.n_grid,
+    observation_time=base_config["observation_time"],
+    f_min=base_config["analysis"]["f_min"],
+    f_max=base_config["analysis"]["f_max"],
+    z_min=base_config["cosmology"]["z_min"],
+    z_max=base_config["cosmology"]["z_max"],
+    n_grid=base_config["cosmology"]["n_grid"],
 )
 xi0_n_constraint_table = build_snr_xi0_n_constraint_table(
     networks,
@@ -979,7 +976,6 @@ xi0_n_constraint_table = build_snr_xi0_n_constraint_table(
     snr_table,
     group=args.group,
 )
-xi0_n_constraint_table
 
 # %% [markdown]
 # ## LaTeX $\Xi_0$/$n$ constraint table

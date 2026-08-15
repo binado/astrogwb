@@ -1,0 +1,27 @@
+[amplitude_toy]
+output_pdf = "outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf"
+
+[fiducial_spectrum]
+output_pdf = "outputs/figures/standalone/fiducial_spectrum.pdf"
+output_effective_psd_pdf = "outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf"
+omega_gw_min = 1.0e-15
+detector_labels = [
+    'ET-$\Delta$',
+    'ET-$\Delta$ $+$ CE',
+    "ET-2L-par",
+    'ET-2L-par $+$ CE',
+    "ET-2L",
+    'ET-2L $+$ CE',
+]
+
+[fiducial_spectrum.detector_networks]
+"ET-triangular" = ["E1", "E2", "E3"]
+"ET-triangular-CE-Hanford" = ["E1", "E2", "E3", "C1"]
+"ET-2L-aligned" = ["S1", "R1"]
+"ET-2L-aligned-CE-Hanford" = ["S1", "R1", "C1"]
+"ET-2L-misaligned" = ["S2", "R2"]
+"ET-2L-misaligned-CE-Hanford" = ["S2", "R2", "C1"]
+
+[importance_weights_grid]
+output_h0_omega_m_pdf = "outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf"
+output_xi0_n_pdf = "outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf"

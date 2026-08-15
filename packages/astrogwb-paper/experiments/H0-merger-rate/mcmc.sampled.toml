@@ -1,0 +1,4 @@
+sampled_params = ["H0", "local_merger_rate"]
+
+[analysis]
+detectors = ["S1", "R1", "C1"]

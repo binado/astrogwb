@@ -1,151 +1,109 @@
 # Running inference
 
-There are two inference entry points in the repository:
+## Ad-hoc runs
 
-- The `astrogwb-run-mcmc` command accepts a TOML or JSON configuration file and is suitable for running MCMC on a cluster.
-- The [`mcmc.py` notebook](../notebooks/mcmc.py) provides the same functionality interactively. Convert it locally with `uvx jupytext --to ipynb packages/astrogwb-paper/notebooks/mcmc.py`.
-
-Both examples assume a population of binary neutron star (BNS) mergers following the example described in [Generating catalogs](./catalog-generation.md). The headless runner takes the proposal catalog explicitly:
+`astrogwb-run-mcmc` accepts a complete validated configuration and a prebuilt
+waveform catalog:
 
 ```bash
 uv run astrogwb-run-mcmc \
   --config configs/mcmc.example.toml \
-  --catalog out/catalogs/bns-n16384-df1.h5
+  --catalog outputs/catalogs/bns-n16384-df1.h5
 ```
 
-Select an accelerator while syncing and running the paper member with
-`--package astrogwb-paper --extra cuda` (or `--extra tpu`).
+The standalone examples under `configs/` remain useful for direct runner and
+profiling work.
 
-## Running on an accelerator (GPU/TPU, incl. Google Colab)
+## Curated experiment runs
 
-Both entrypoints resolve their JAX platform and chain method through
-[`astrogwb_paper.runtime.configure_runtime`](../src/astrogwb_paper/runtime.py), which must
-run before `jax`/`numpyro` are otherwise imported. `--platform` accepts
-`auto` (default), `cpu`, `cuda`, or `tpu`. The chain method auto-resolves to
-`"parallel"` whenever at least one visible device is available per chain,
-including multi-device GPU/TPU runs. With fewer accelerator devices than
-chains it uses `"vectorized"`; with too few CPU devices it uses
-`"sequential"`. Explicit `--chain-method` values always take precedence. For
-the headless runner:
+Production runs use a one-file/one-chain model:
 
-```bash
-uv run --package astrogwb-paper --extra tpu astrogwb-run-mcmc \
-  --config configs/mcmc.example.toml \
-  --catalog out/catalogs/bns-n16384-df1.h5 \
-  --platform tpu
+```text
+inputs/mcmc.base.toml
+  + experiments/<experiment>/mcmc.<run>.toml
+  -> outputs/configs/<experiment>/<run>.json
+  -> outputs/chains/<experiment>/<run>.nc
+  -> outputs/chains/<experiment>/<run>.json
 ```
 
-The `mcmc.py` notebook detects Google Colab automatically and uses four chains
-for every Colab hardware type. It probes for TPU hardware with a stdlib-only
-check *before* installing dependencies, then clones the workspace and installs
-the core member editably with `astrogwb[tpu]` or `astrogwb[cuda]` plus the
-paper member's `notebook` extra. TPU runs pass
-`platform="tpu"`; CPU and GPU retain `platform="auto"`. The bootstrap also
-installs plotting dependencies and mounts Google Drive for the waveform
-catalog. Point `CATALOG_PATH`'s Colab branch at wherever you upload the
-catalog on Drive. Off Colab the bootstrap cell is a no-op.
+The base owns settings shared across all experiments:
 
-## Sweep configs
+- random seed and observing time;
+- frequency and cosmology grids;
+- sampler settings;
+- fiducial values;
+- default priors;
+- output defaults.
 
-Run configs are assembled from *fragments* — partial `RunConfig` files under
-[`configs/mcmc/fragments/`](../configs/mcmc/fragments) — merged left to right
-by [`knf`](https://github.com/binado/knf):
+Each run TOML owns every scientific difference from the base:
 
-```
-base.toml -> priors.toml -> networks/<n>.toml -> observations/<o>.toml -> analyses/<a>.toml
-```
+- `sampled_params`;
+- detector names;
+- likelihood and amplitude-marginalization settings;
+- run-specific prior overrides.
 
-Layer order is the contract: broadest first, narrowest last, so an analysis
-fragment has the last word on its own priors and sampled parameters. There is
-no separate generation step — the `mcmc_config` rule in
-[`workflow/mcmc.smk`](../workflow/mcmc.smk) builds each config as part of the
-same DAG that runs the chains, so editing a fragment rebuilds exactly the
-configs that depend on it.
-
-`base.toml` holds the invariant seed, cosmology, sampler, fiducials, and
-output settings. `priors.toml` gives every parameter a default prior; an
-analysis overrides only what it changes:
+For example:
 
 ```toml
-# analyses/Xi_0-H0-gauss.toml
-sampled_params = ["xi_0", "H0"]
+# experiments/H0-omega-m/mcmc.H0-Omega_m.toml
+sampled_params = ["Omega_m"]
 
-[priors.H0]                 # narrows the base uniform H0 prior to a normal
-type = "normal"
-loc = 67.66
-scale = 0.6766
+[analysis]
+detectors = ["S1", "R1", "C1"]
+likelihood = "amplitude_marginalized"
+amplitude_parameter = "H0"
+amplitude_num_nodes = 1024
 ```
 
-An analysis fragment may also override base fiducials inline, and may set
-`[analysis]` keys such as `likelihood` and `amplitude_parameter`. An
-observation fragment supplies `observation_time`, `f_min`, and `f_max`; a
-network fragment supplies `[analysis] detectors`.
+There is no network/analysis/observation product and no fragment lookup.
+Adding a chain means adding one run TOML and declaring its stable run ID in
+`astrogwb_paper.config.experiments`.
 
-The committed [`configs/mcmc.sweeps.toml`](../configs/mcmc.sweeps.toml) is
-then nothing but product structure: each `[runs.*]` table names networks,
-analyses, and observations and expands
-`networks x analyses x observations`. Generated run IDs carry every product
-dimension: `<network>__<analysis>__<observation>`.
-
-Every merged config is validated as a `RunConfig` by `astrogwb-validate-config`
-before it lands on disk, so a fragment typo or an inconsistent combination
-fails before any sampling is scheduled. To build one config by hand:
+To assemble one config manually:
 
 ```bash
-cd packages/astrogwb-paper
-knf configs/mcmc/fragments/{base.toml,priors.toml} \
-    configs/mcmc/fragments/networks/ET-2L-aligned.toml \
-    configs/mcmc/fragments/observations/baseline.toml \
-    configs/mcmc/fragments/analyses/H0.toml \
+knf inputs/mcmc.base.toml \
+    experiments/H0-all-detectors/mcmc.ET-2L-aligned.toml \
     --strict -f json \
-  | uv run astrogwb-validate-config - --output /tmp/my-run.json
+  | uv run astrogwb-validate-config - \
+      --output /tmp/ET-2L-aligned.json
 ```
 
-To submit sweep configs as a batch (locally or on SLURM), see
-[Snakemake workflow](./snakemake-workflow.md#mcmc-workflow).
+The validator checks that every sampled parameter has a prior and fiducial and
+that amplitude-marginalized runs define a valid amplitude parameter.
 
-## Outputs
+Run the corresponding experiment through Snakemake:
 
-Each workflow run writes an ArviZ `InferenceData` to
-`chains/<catalog-id>/<campaign>/<run>.nc`
-(ad-hoc unlabelled runs keep the timestamped
-`chains/mcmc-<params>-det=<det>-seed<n>-<ts>.nc` convention) alongside a
-sibling `.json` sidecar recording the run's provenance: catalog path and
-`catalog_sha256`, the resolved `config_sha256`, detectors, seed, fiducials,
-priors, sampler settings, and the git revision. Runtime controls
-(`--platform`, `--chain-method`, etc.) affect only how a run executes, not
-its scientific result, so they are not recorded.
-Diagnostics surface the model's `importance_relative_ess` (the key proposal
-health check — should stay close to 1) and `total_merger_rate`.
+```bash
+uv run astrogwb-workflow mcmc H0-all-detectors --profile local
+uv run astrogwb-workflow mcmc H0-all-detectors \
+  --profile slurm --submit
+```
 
-### Amplitude-marginalized runs
+Use `--chains-only` to omit local post-processing.
 
-Setting `analysis.likelihood = "amplitude_marginalized"` (see the commented
-block in [`configs/mcmc.example.toml`](../configs/mcmc.example.toml))
-integrates one multiplicative parameter -- `H0` or `local_merger_rate` -- out
-of the likelihood analytically instead of sampling it with NUTS. The
-resulting `.nc` is a drop-in replacement for a sampled chain: post-processing
-draws the marginalized parameter and writes it into the `posterior` group
-under its own physical name (e.g. `H0`), alongside the real
-`total_merger_rate` (rescaled from the model's `template_merger_rate` by the
-drawn amplitude), so every figure script and `paper.smk` path that reads
-`total_merger_rate` or a sampled parameter by name works unchanged.
+## Outputs and provenance
 
-Two things are different from a sampled chain, though:
+Every labelled experiment run has deterministic `.nc` and `.json` paths under
+`outputs/chains/<experiment>/`. The JSON sidecar records the catalog path and
+SHA-256, canonical config SHA-256, detectors, seed, fiducials, priors, sampler
+settings, and git revision.
 
-- There is **no `log_likelihood` group**. `az.from_numpyro` builds that group
-  from observed sample sites, and the marginalized model has none -- the
-  likelihood is a single `numpyro.factor`. `az.loo` and `az.waic` do not
-  apply to these chains.
-- The posterior additionally carries `quadrature_effective_nodes`, a
-  per-draw diagnostic for how many quadrature grid points actually resolve
-  the conditional posterior (should be comfortably above ~30; the runner logs
-  a warning otherwise). If it is low, raise `analysis.amplitude_num_nodes`.
-- **`sampled_params` no longer describes the chain.** It means "parameters
-  NUTS has a latent for", and the marginalized parameter deliberately is not
-  one: it must stay out of `sampled_params`, which drives `init_to_value` and
-  the `set(priors) == set(sampled_params)` invariant. Use
-  `RunConfig.posterior_params` for anything describing the saved chain --
-  plot `var_names`, summaries, run records. The JSON sidecar records both.
+Runtime controls such as platform and chain method affect execution rather than
+the scientific result and are not included in the config hash.
 
-See the [plotting notebook](../notebooks/mcmc_plotting.py) for examples of how to visualize the results.
+Ad-hoc unlabelled runs retain the timestamped
+`mcmc-<params>-det=<detectors>-seed<n>-<timestamp>` convention.
+
+## Catalog prerequisite
+
+Experiments consume existing catalogs and never generate them implicitly.
+Build the required catalogs first:
+
+```bash
+uv run astrogwb-workflow \
+  catalog outputs/catalogs/bns-n16384-df1.h5 --submit
+```
+
+The variable-injection-size experiment additionally requires the 8192 and
+32768 catalogs.

@@ -1,8 +1,0 @@
-# Analysis: H0-peak
-
-sampled_params = ["z_peak"]
-
-[analysis]
-likelihood = "amplitude_marginalized"
-amplitude_parameter = "H0"
-amplitude_num_nodes = 1024

@@ -26,11 +26,11 @@ AmplitudeParameter = Literal["H0", "local_merger_rate"]
 
 class _PriorBase(BaseModel):
     # `extra="ignore"` is deliberate, and the one place in this module where
-    # extras are tolerated. Prior tables are layered key by key when configs are
-    # assembled from fragments (see configs/mcmc/fragments/), so overriding a
-    # uniform prior with a normal one leaves `low`/`high` behind. Dropping them
-    # here keeps `config_sha256` and the run record describing the prior that is
-    # actually sampled. Missing *required* keys still raise, so typos are caught.
+    # extras are tolerated. `knf` merges tables key by key when an experiment run
+    # overrides the shared MCMC base, so replacing a uniform prior with a normal
+    # one leaves `low`/`high` behind. Dropping them here keeps `config_sha256` and
+    # the run record describing the prior that is actually sampled. Missing
+    # *required* keys still raise, so typos are caught.
     model_config = ConfigDict(frozen=True, extra="ignore")
 
 

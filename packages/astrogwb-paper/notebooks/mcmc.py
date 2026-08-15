@@ -202,7 +202,7 @@ if IN_COLAB:
     CATALOG_PATH = Path("/content/drive/MyDrive/asgwb/bns_waveform_catalog.h5")
 else:
     ROOT_DIR = paper_project_root()
-    CATALOG_PATH = ROOT_DIR / "out/catalogs/bns-n16384-df1.h5"
+    CATALOG_PATH = ROOT_DIR / "outputs/catalogs/bns-n16384-df1.h5"
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -235,9 +235,9 @@ hyperprior_dists = {
     "Omega_m": dist.Uniform(0.05, 0.95),
     "xi_0": dist.Uniform(0.5, 5.0),
     "xi_n": dist.Uniform(0.3, 3.0),
-    "gamma": dist.Uniform(0.5, 10.0),
-    "kappa": dist.Uniform(0.05, 10.0),
-    "z_peak": dist.Uniform(0.05, 10.0),
+    "gamma": dist.Uniform(-10.0, 10.0),
+    "kappa": dist.Uniform(-10.0, 10.0),
+    "z_peak": dist.Uniform(0.0, 2.5),
     "local_merger_rate": dist.Uniform(7.6, 250.0),
 }
 

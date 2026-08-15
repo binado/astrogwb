@@ -1,78 +1,65 @@
 # Paper figures
 
-The analysis notebooks
-[`amplitude_toy_model.py`](../notebooks/paper/amplitude_toy_model.py),
-[`mcmc_cosmological_parameters.py`](../notebooks/paper/mcmc_cosmological_parameters.py),
-[`fiducial_spectrum.py`](../notebooks/paper/fiducial_spectrum.py),
-and [`importance_weights_grid.py`](../notebooks/paper/importance_weights_grid.py)
-hold editable scientific defaults and expose command-line overrides for scientific
-inputs, paths, and labels. They can therefore run directly in Jupyter or from the shell.
-The spectrum notebook plots fiducial $\Omega_{\mathrm{GW}}(f)$ and $S_h(f)$ on dual
-$y$-axes, and overlays network effective PSDs for the detector combinations used
-in the cosmology notebook. Configure the $\Omega_{\mathrm{GW}}$ floor via `omega_gw_min` in
-`workflow.yaml` (or `--omega-gw-min`); $S_h$'s floor is inferred at the matching
-frequency so both curves show the same band.
-The cosmology notebook reads paper plot styling from `configs/paper.toml`;
-its two ordered chain groups and their labels can be replaced independently with
-`--detector-chains`/`--detector-labels` and
-`--prior-chains`/`--prior-labels`.
+Experiment figures are part of the same DAG as their chains. Their ordered run
+IDs, labels, styles, and output paths live in:
 
-For reproducible paper builds, scientific and presentation settings (fiducials,
-detector networks, nested posterior plot entries) live in
-[`configs/paper.toml`](../configs/paper.toml).
-Reusable catalog recipes live in [`configs/catalogs/`](../configs/catalogs/),
-while the catalog selected for the paper workflow lives in
-[`configs/workflow.yaml`](../configs/workflow.yaml).
-Figure-local knobs (output paths, dpi, sampler settings, which networks to plot),
-catalog paths, and posterior chain paths are argparse defaults in each Jupytext
-notebook. Edit them in Jupyter or override them with CLI flags headless. Keep the
-analysis-notebook defaults aligned with `paper.toml` when promoting paper values.
+```text
+experiments/<experiment>/figure.toml
+```
 
-Snakemake reads [`configs/workflow.yaml`](../configs/workflow.yaml) for the paper
-config path, selected catalog, and declared output paths. It translates
-`paper.toml` into explicit analysis, cosmology, fiducial, detector-network, chain,
-label, and styling inputs. The `fiducial_spectrum` rule builds
-`figures/fiducial_spectrum.pdf` and
-`figures/fiducial_effective_psd_by_detector.pdf` from the shared catalog and
-fiducials. The `importance_weights_grid` rule builds
-`figures/importance_weights_grid_H0_Omega_m.pdf` and
-`figures/importance_weights_grid_Xi0_n.pdf`: relative-ESS heatmaps over the
-two-parameter prior-support grids defined by the
-`configs/mcmc/fragments/priors.toml` uniform priors and the
-`configs/mcmc/fragments/base.toml` fiducials. The unified
-cosmology rule produces two marginalized $H_0$ comparisons, separate
-$H_0$--$\mathcal{R}_0$ corner plot for the narrow merger-rate prior, an
-$H_0$--$\Omega_m$ corner plot, a matching $H_0$--$\Omega_m$--relative-ESS mirror
-corner, and a CSV/LaTeX SNR-and-constraint table. The modified-propagation rule
-likewise emits a $\Xi_0$--$n$ corner and its relative-ESS mirror.
+Shared scientific values such as fiducials, frequency bounds, and cosmology
+grid settings come from `inputs/mcmc.base.toml`.
 
-Preview the declared workflow (`astrogwb-workflow` defaults to `--dry-run`):
+## Experiment figures
+
+These complete experiment targets include local post-processing:
+
+- `H0-all-detectors`: detector posterior comparison and CSV/LaTeX constraint
+  table;
+- `modified-propagation-all-detectors`: propagation corners, marginal
+  comparison, and CSV/LaTeX tables;
+- `H0-merger-rate`: fixed-versus-sampled merger-rate comparison, corner, and
+  table;
+- `H0-omega-m`: standard and relative-ESS corner figures.
+
+Preview or build one:
+
+```bash
+uv run astrogwb-workflow mcmc H0-all-detectors --profile local
+uv run astrogwb-workflow mcmc H0-all-detectors \
+  --profile slurm --submit
+```
+
+With a SLURM profile, sampling runs remotely and figure rules run locally on the
+submit host after their chains finish. The submit host must remain attached,
+share the output filesystem, and provide plotting dependencies.
+
+Use `--chains-only` when post-processing should happen in a later invocation.
+
+## Standalone figures
+
+The amplitude toy model, fiducial spectrum, effective detector PSD comparison,
+and importance-weight grids are explicit standalone rules in the unified
+workflow. Their settings live in
+[`inputs/figures/standalone.toml`](../inputs/figures/standalone.toml).
 
 ```bash
 uv run astrogwb-workflow paper
-```
-
-Build all declared paper figures:
-
-```bash
 uv run astrogwb-workflow paper --submit
 ```
 
-Build one configured target:
-
-```bash
-uv run astrogwb-workflow paper figures/fiducial_spectrum.pdf --submit
-```
+Build one declared output directly:
 
 ```bash
 uv run astrogwb-workflow paper \
-  figures/fiducial_effective_psd_by_detector.pdf --submit
+  outputs/figures/standalone/fiducial_spectrum.pdf --submit
 ```
 
-```bash
-uv run astrogwb-workflow paper \
-  figures/mcmc_cosmological_parameters_H0_by_detector.pdf --submit
-```
+All new figure products are written under `outputs/figures/`.
 
-See [Snakemake workflow](./snakemake-workflow.md#paper-workflow) for a pipeline
-overview of how the Snakefiles source catalogs, chains, and configuration.
+## Notebook use
+
+The Jupytext sources under `notebooks/paper/` remain directly executable.
+Their command-line interfaces accept explicit chains, labels, catalogs, base
+configuration, and output paths. Snakemake passes those inputs rather than
+asking notebooks to reconstruct chain names.

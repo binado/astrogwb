@@ -1,0 +1,9 @@
+sampled_params = ["xi_0", "H0"]
+
+[analysis]
+detectors = ["S1", "R1", "C1"]
+
+[priors.H0]
+type = "normal"
+loc = 67.66
+scale = 0.6766

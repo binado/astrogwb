@@ -42,12 +42,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
-from arviz_base.labels import MapLabeller
-from matplotlib.axes import Axes as MplAxes
-from matplotlib.lines import Line2D
-from matplotlib.projections import register_projection
-from pluscross import load_catalog
-
 from _paper_style import (
     CATEGORY,
     CORNER_LEVELS,
@@ -56,10 +50,12 @@ from _paper_style import (
     get_corner_kwargs,
     use_paper_style,
 )
-from astrogwb_paper.config.loading import load_mapping
+from arviz_base.labels import MapLabeller
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import (
     frequency_mask as make_frequency_mask,
+)
+from astrogwb.frequency import (
     frequency_spacing as compute_frequency_spacing,
 )
 from astrogwb.gwb import spectral_density, spectral_snr
@@ -68,8 +64,13 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.utils import years_to_seconds
-from astrogwb_paper.paths import paper_project_root
 from astrogwb.waveform import polarization_power as compute_polarization_power
+from astrogwb_paper.config.loading import load_mapping
+from astrogwb_paper.paths import paper_project_root
+from matplotlib.axes import Axes as MplAxes
+from matplotlib.lines import Line2D
+from matplotlib.projections import register_projection
+from pluscross import load_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's rectilinear axes. ArviZ can then
 # mis-detect the backend, so restore the standard matplotlib projection.
@@ -82,11 +83,12 @@ jax.config.update("jax_enable_x64", True)
 # ## Defaults
 #
 # Direct notebook runs use the defaults below. The paper workflow passes the same
-# values explicitly from `configs/paper.toml` and `configs/workflow.yaml`.
+# values explicitly from the selected experiment and shared MCMC base config.
 
 # %%
-DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
-DEFAULT_CONFIG_PATH = Path("packages/astrogwb-paper/configs/paper.toml")
+DEFAULT_CATALOG_PATH = Path("outputs/catalogs/bns-n16384-df1.h5")
+DEFAULT_CONFIG_PATH = Path("experiments/H0-all-detectors/figure.toml")
+DEFAULT_BASE_CONFIG_PATH = Path("inputs/mcmc.base.toml")
 DEFAULT_OBSERVATION_TIME = 1.0
 DEFAULT_F_MIN = 2.0
 DEFAULT_F_MAX = 4096.0
@@ -115,26 +117,22 @@ DEFAULT_NETWORKS = list(DEFAULT_DETECTOR_NETWORKS)
 
 DEFAULT_DETECTOR_CHAINS = [
     Path(
-        "chains/bns-n16384-df1/cosmology-all-detectors/ET-triangular__H0__baseline.nc"
+        "outputs/chains/H0-all-detectors/ET-triangular.nc"
     ),
     Path(
-        "chains/bns-n16384-df1/cosmology-all-detectors/"
-        "ET-triangular-CE-Hanford__H0__baseline.nc"
+        "outputs/chains/H0-all-detectors/ET-triangular-CE-Hanford.nc"
     ),
     Path(
-        "chains/bns-n16384-df1/cosmology-all-detectors/ET-2L-aligned__H0__baseline.nc"
+        "outputs/chains/H0-all-detectors/ET-2L-aligned.nc"
     ),
     Path(
-        "chains/bns-n16384-df1/cosmology-all-detectors/"
-        "ET-2L-aligned-CE-Hanford__H0__baseline.nc"
+        "outputs/chains/H0-all-detectors/ET-2L-aligned-CE-Hanford.nc"
     ),
     Path(
-        "chains/bns-n16384-df1/cosmology-all-detectors/"
-        "ET-2L-misaligned__H0__baseline.nc"
+        "outputs/chains/H0-all-detectors/ET-2L-misaligned.nc"
     ),
     Path(
-        "chains/bns-n16384-df1/cosmology-all-detectors/"
-        "ET-2L-misaligned-CE-Hanford__H0__baseline.nc"
+        "outputs/chains/H0-all-detectors/ET-2L-misaligned-CE-Hanford.nc"
     ),
 ]
 DEFAULT_DETECTOR_LABELS = [
@@ -148,12 +146,10 @@ DEFAULT_DETECTOR_LABELS = [
 
 DEFAULT_PRIOR_CHAINS = [
     Path(
-        "chains/bns-n16384-df1/cosmology-all-detectors/"
-        "ET-2L-aligned-CE-Hanford__H0__baseline.nc"
+        "outputs/chains/H0-merger-rate/fixed.nc"
     ),
     Path(
-        "chains/bns-n16384-df1/cosmology-all-detectors/"
-        "ET-2L-aligned-CE-Hanford__H0-merger-rate-gauss__baseline.nc"
+        "outputs/chains/H0-merger-rate/sampled.nc"
     ),
 ]
 DEFAULT_PRIOR_LABELS = [
@@ -162,8 +158,7 @@ DEFAULT_PRIOR_LABELS = [
 ]
 
 DEFAULT_OMEGA_M_CHAIN = Path(
-    "chains/bns-n16384-df1/cosmology-all-detectors/"
-    "ET-2L-aligned-CE-Hanford__H0-Omega_m__baseline.nc"
+    "outputs/chains/H0-omega-m/H0-Omega_m.nc"
 )
 DEFAULT_OMEGA_M_LABEL = r"$H_0 + \Omega_m$"
 
@@ -319,7 +314,7 @@ def _validate_styles(
 def _base_network_name(name: str) -> str:
     """Map an ET+CE network name onto its ET-only counterpart."""
     suffix = "-CE-Hanford"
-    return name[: -len(suffix)] if name.endswith(suffix) else name
+    return name.removesuffix(suffix)
 
 
 def detector_network_styles(
@@ -828,7 +823,13 @@ def write_constraint_table(
 # %%
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--section",
+        choices=("detectors", "merger-rate", "omega-m"),
+        default="detectors",
+    )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
+    parser.add_argument("--base-config", type=Path, default=DEFAULT_BASE_CONFIG_PATH)
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
     parser.add_argument(
         "--detector-chains", type=Path, nargs="+", default=DEFAULT_DETECTOR_CHAINS
@@ -843,39 +844,39 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-detector-pdf",
         type=Path,
-        default=Path("figures/mcmc_cosmological_parameters_H0_by_detector.pdf"),
+        default=Path("outputs/figures/H0-all-detectors/H0-by-detector.pdf"),
     )
     parser.add_argument(
         "--output-prior-pdf",
         type=Path,
-        default=Path("figures/mcmc_cosmological_parameters_H0_merger_rate_priors.pdf"),
+        default=Path("outputs/figures/H0-merger-rate/H0-merger-rate-priors.pdf"),
     )
     parser.add_argument(
         "--output-narrow-corner-pdf",
         type=Path,
         default=Path(
-            "figures/mcmc_cosmological_parameters_H0_merger_rate_narrow_corner.pdf"
+            "outputs/figures/H0-merger-rate/H0-merger-rate-corner.pdf"
         ),
     )
     parser.add_argument(
         "--output-omega-m-corner-pdf",
         type=Path,
-        default=Path("figures/mcmc_cosmological_parameters_H0_Omega_m_corner.pdf"),
+        default=Path("outputs/figures/H0-omega-m/H0-Omega_m-corner.pdf"),
     )
     parser.add_argument(
         "--output-omega-m-ess-corner-pdf",
         type=Path,
-        default=Path("figures/mcmc_cosmological_parameters_H0_Omega_m_ess_corner.pdf"),
+        default=Path("outputs/figures/H0-omega-m/H0-Omega_m-ess-corner.pdf"),
     )
     parser.add_argument(
         "--output-csv",
         type=Path,
-        default=Path("figures/mcmc_cosmological_parameters_H0_by_detector.csv"),
+        default=Path("outputs/figures/H0-all-detectors/H0-by-detector.csv"),
     )
     parser.add_argument(
         "--output-tex",
         type=Path,
-        default=Path("figures/mcmc_cosmological_parameters_H0_by_detector.tex"),
+        default=Path("outputs/figures/H0-all-detectors/H0-by-detector.tex"),
     )
     parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument("--group", default="posterior")
@@ -931,251 +932,153 @@ root = paper_project_root()
 # %% [markdown]
 # ## Load the chains
 #
-# Read the detector-network and prior-comparison inference runs from disk and
-# check that each one carries the posterior variables the figures below need.
+# Read only the chains owned by the selected experiment-facing section.
 
 # %%
-config = load_mapping(_resolve_path(args.config, root))
-figure_config = config["figures"]["mcmc_cosmological_parameters"]
+figure_config = load_mapping(_resolve_path(args.config, root))
+base_config = load_mapping(_resolve_path(args.base_config, root))
 networks = args.resolved_networks
-
-if len(args.detector_chains) != len(args.detector_labels):
-    raise ValueError("--detector-chains and --detector-labels must have equal length")
-if len(args.detector_chains) != len(networks):
-    raise ValueError(
-        "detector chain count must match --networks: "
-        f"received {len(args.detector_chains)} chains for {len(networks)} networks"
-    )
-if len(args.prior_chains) != len(args.prior_labels):
-    raise ValueError("--prior-chains and --prior-labels must have equal length")
-if len(args.prior_chains) != 2:
-    raise ValueError("the prior comparison requires exactly two chains")
-
-detector_paths = [_resolve_path(path, root) for path in args.detector_chains]
-prior_paths = [_resolve_path(path, root) for path in args.prior_chains]
-omega_m_path = _resolve_path(args.omega_m_chain, root)
-detector_data = [load_inference_data(path) for path in detector_paths]
-prior_data = [load_inference_data(path) for path in prior_paths]
-omega_m_data = [load_inference_data(omega_m_path)]
-omega_m_labels = [args.omega_m_label]
-
-validate_inference_data(
-    detector_data,
-    args.detector_labels,
-    group=args.group,
-    expected_count=len(networks),
-)
-validate_inference_data(
-    prior_data,
-    args.prior_labels,
-    group=args.group,
-    expected_count=2,
-)
-validate_inference_data(
-    omega_m_data,
-    omega_m_labels,
-    required_vars=OMEGA_M_VAR_NAMES,
-    group=args.group,
-    expected_count=1,
-)
-corner_data, corner_labels, corner_indices = select_corner_inference_data(
-    prior_data, args.prior_labels, group=args.group
-)
-narrow_data = [corner_data[0]]
-narrow_labels = [corner_labels[0]]
-
-# Density overlay compares the fixed H0-only posterior with the narrow-prior
-# posterior on the local merger rate.
-prior_density_data = [prior_data[0], prior_data[1]]
-prior_density_labels = [args.prior_labels[0], args.prior_labels[1]]
-
-detector_colors, detector_linestyles = detector_network_styles(networks)
-prior_density_colors = combo_colors(len(prior_density_data))
-prior_density_linestyles = ["-"] * len(prior_density_data)
-prior_colors = combo_colors(len(prior_data))
-prior_linestyles = ["-"] * len(prior_data)
-corner_colors = [prior_colors[index] for index in corner_indices]
-corner_linestyles = [prior_linestyles[index] for index in corner_indices]
-
 fiducials = {
-    "H0": args.h0,
-    "Omega_m": args.omega_m,
-    "xi_0": args.xi_0,
-    "xi_n": args.xi_n,
-    "gamma": args.gamma,
-    "kappa": args.kappa,
-    "z_peak": args.z_peak,
-    "local_merger_rate": args.local_merger_rate,
+    **base_config["fiducials"],
     "importance_relative_ess": args.importance_relative_ess,
 }
-
 use_paper_style()
+outputs = {}
+opened_data = []
 
-# %% [markdown]
-# ## Figure (i): $H_0$ by detector network
-#
-# Marginalized $H_0$ posteriors for each configured detector network under the
-# baseline cosmology analysis.
+if args.section == "detectors":
+    if len(args.detector_chains) != len(args.detector_labels):
+        raise ValueError(
+            "--detector-chains and --detector-labels must have equal length"
+        )
+    if len(args.detector_chains) != len(networks):
+        raise ValueError(
+            "detector chain count must match --networks: "
+            f"received {len(args.detector_chains)} chains for {len(networks)} networks"
+        )
+    detector_data = [
+        load_inference_data(_resolve_path(path, root))
+        for path in args.detector_chains
+    ]
+    opened_data.extend(detector_data)
+    validate_inference_data(
+        detector_data,
+        args.detector_labels,
+        group=args.group,
+        expected_count=len(networks),
+    )
+    detector_colors, detector_linestyles = detector_network_styles(networks)
+    outputs[_resolve_path(args.output_detector_pdf, root)] = plot_h0_posteriors(
+        detector_data,
+        args.detector_labels,
+        colors=detector_colors,
+        linestyles=detector_linestyles,
+        group=args.group,
+        fiducial=fiducials["H0"],
+        ax_kwargs=figure_config.get("axis"),
+        legend_kwargs=figure_config.get("legend"),
+    )
+    snr_table = compute_network_snrs(
+        _resolve_path(args.catalog, root),
+        networks,
+        fiducials,
+        observation_time=base_config["observation_time"],
+        f_min=base_config["analysis"]["f_min"],
+        f_max=base_config["analysis"]["f_max"],
+        z_min=base_config["cosmology"]["z_min"],
+        z_max=base_config["cosmology"]["z_max"],
+        n_grid=base_config["cosmology"]["n_grid"],
+    )
+    table = build_snr_h0_constraint_table(
+        networks,
+        detector_data,
+        args.detector_labels,
+        snr_table,
+        h0_fiducial=fiducials["H0"],
+        group=args.group,
+    )
+    csv_path = _resolve_path(args.output_csv, root)
+    tex_path = _resolve_path(args.output_tex, root)
+    write_constraint_table(table, csv_path, tex_path)
 
-# %%
-detector_figure = plot_h0_posteriors(
-    detector_data,
-    args.detector_labels,
-    colors=detector_colors,
-    linestyles=detector_linestyles,
-    group=args.group,
-    fiducial=fiducials["H0"],
-    ax_kwargs=figure_config.get("detector_ax_kwargs"),
-    legend_kwargs=figure_config.get("detector_legend_kwargs"),
-)
+elif args.section == "merger-rate":
+    if len(args.prior_chains) != len(args.prior_labels) or len(args.prior_chains) != 2:
+        raise ValueError("the merger-rate comparison requires two chains and labels")
+    prior_data = [
+        load_inference_data(_resolve_path(path, root)) for path in args.prior_chains
+    ]
+    opened_data.extend(prior_data)
+    validate_inference_data(
+        prior_data,
+        args.prior_labels,
+        group=args.group,
+        expected_count=2,
+    )
+    corner_data, corner_labels, _ = select_corner_inference_data(
+        prior_data, args.prior_labels, group=args.group
+    )
+    colors = combo_colors(len(prior_data))
+    outputs[_resolve_path(args.output_prior_pdf, root)] = plot_h0_posteriors(
+        prior_data,
+        args.prior_labels,
+        colors=colors,
+        linestyles=["-"] * len(prior_data),
+        group=args.group,
+        fiducial=fiducials["H0"],
+        ax_kwargs=figure_config.get("axis"),
+        legend_kwargs=figure_config.get("legend"),
+    )
+    outputs[_resolve_path(args.output_narrow_corner_pdf, root)] = plot_corner(
+        [corner_data[0]],
+        [corner_labels[0]],
+        MERGER_RATE_VAR_NAMES,
+        colors=[colors[1]],
+        linestyles=["-"],
+        group=args.group,
+        fiducials=fiducials,
+    )
+    table = build_h0_r0_uncertainty_table(
+        prior_data, args.prior_labels, group=args.group
+    )
+    csv_path = _resolve_path(args.output_csv, root)
+    tex_path = _resolve_path(args.output_tex, root)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    tex_path.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(csv_path)
+    tex_path.write_text(h0_r0_uncertainty_table_latex(table), encoding="utf-8")
 
-# %% [markdown]
-# ## Figure (ii): $H_0$ prior comparison
-#
-# Compares fixed and narrow priors on the local merger rate $\mathcal{R}_0$
-# for a single network.
+else:
+    omega_m_data = [load_inference_data(_resolve_path(args.omega_m_chain, root))]
+    opened_data.extend(omega_m_data)
+    omega_m_labels = [args.omega_m_label]
+    validate_inference_data(
+        omega_m_data,
+        omega_m_labels,
+        required_vars=OMEGA_M_VAR_NAMES,
+        group=args.group,
+        expected_count=1,
+    )
+    outputs[_resolve_path(args.output_omega_m_corner_pdf, root)] = plot_corner(
+        omega_m_data,
+        omega_m_labels,
+        OMEGA_M_VAR_NAMES,
+        colors=[CATEGORY["cosmology"]],
+        group=args.group,
+        fiducials=fiducials,
+    )
+    outputs[_resolve_path(args.output_omega_m_ess_corner_pdf, root)] = plot_corner(
+        omega_m_data,
+        omega_m_labels,
+        OMEGA_M_ESS_VAR_NAMES,
+        colors=[CATEGORY["cosmology"]],
+        group=args.group,
+        fiducials=fiducials,
+    )
 
-# %%
-prior_figure = plot_h0_posteriors(
-    prior_density_data,
-    prior_density_labels,
-    colors=prior_density_colors,
-    linestyles=prior_density_linestyles,
-    group=args.group,
-    fiducial=fiducials["H0"],
-    ax_kwargs=figure_config.get("prior_ax_kwargs"),
-    legend_kwargs=figure_config.get("prior_legend_kwargs"),
-)
-
-# %% [markdown]
-# ## Figure (iii): Narrow-prior $H_0$--$\mathcal{R}_0$ corner
-#
-# Joint constraint when the local merger rate carries a narrow Gaussian prior.
-
-# %%
-narrow_corner_figure = plot_corner(
-    narrow_data,
-    narrow_labels,
-    MERGER_RATE_VAR_NAMES,
-    colors=[corner_colors[0]],
-    linestyles=[corner_linestyles[0]],
-    group=args.group,
-    fiducials=fiducials,
-)
-
-# %% [markdown]
-# %% [markdown]
-# ## Table: $H_0$ vs $H_0+\mathcal{R}_0$ uncertainties
-#
-# Compact journal-style comparison of the prior-comparison runs. Analyses are
-# rows (clearer than a one-row nested header when $\mathcal{R}_0$ is absent from
-# the fixed-rate case). Each entry is the posterior median with the 68.27% HDI
-# written as $x_{-l}^{+u}$.
-
-# %%
-h0_r0_uncertainty_table = build_h0_r0_uncertainty_table(
-    prior_data, args.prior_labels, group=args.group
-)
-h0_r0_uncertainty_table
-
-# %% [markdown]
-# ## LaTeX: $H_0$ vs $H_0+\mathcal{R}_0$ uncertainties
-
-# %%
-print(h0_r0_uncertainty_table_latex(h0_r0_uncertainty_table))
-
-# %% [markdown]
-# ## Figure (iv): $H_0$--$\Omega_m$ corner
-#
-# Joint constraint when both the Hubble constant and the matter density
-# parameter are sampled together.
-
-# %%
-omega_m_corner_figure = plot_corner(
-    omega_m_data,
-    omega_m_labels,
-    OMEGA_M_VAR_NAMES,
-    colors=[CATEGORY["cosmology"]],
-    group=args.group,
-    fiducials=fiducials,
-)
-
-# %% [markdown]
-# ## Figure (v): $H_0$--$\Omega_m$--relative-ESS corner
-#
-# Mirror of the $H_0$--$\Omega_m$ corner that also shows the importance-sampling
-# relative effective sample size $N_{\mathrm{eff}} / N_{\mathrm{inj}}$.
-
-# %%
-omega_m_ess_corner_figure = plot_corner(
-    omega_m_data,
-    omega_m_labels,
-    OMEGA_M_ESS_VAR_NAMES,
-    colors=[CATEGORY["cosmology"]],
-    group=args.group,
-    fiducials=fiducials,
-)
-
-# %% [markdown]
-# ## Fiducial SNR and $H_0$ constraint table
-#
-# Evaluate the fiducial SGWB once, compute the matched-filter SNR for each
-# detector network, and combine those estimates with sampled $H_0$ HDI widths.
-
-# %%
-snr_table = compute_network_snrs(
-    _resolve_path(args.catalog, root),
-    networks,
-    fiducials,
-    observation_time=args.observation_time,
-    f_min=args.f_min,
-    f_max=args.f_max,
-    z_min=args.z_min,
-    z_max=args.z_max,
-    n_grid=args.n_grid,
-)
-constraint_table = build_snr_h0_constraint_table(
-    networks,
-    detector_data,
-    args.detector_labels,
-    snr_table,
-    h0_fiducial=args.h0,
-    group=args.group,
-)
-constraint_table
-
-# %% [markdown]
-# ## LaTeX constraint table
-#
-# Publication-formatted version of the table above.
-
-# %%
-print(constraint_table_latex(constraint_table))
-
-# %% [markdown]
-# ## Save figures and table
-#
-# Write the figures and machine-readable / LaTeX constraint tables to the
-# configured output paths.
-
-# %%
-outputs = {
-    _resolve_path(args.output_detector_pdf, root): detector_figure,
-    _resolve_path(args.output_prior_pdf, root): prior_figure,
-    _resolve_path(args.output_narrow_corner_pdf, root): narrow_corner_figure,
-    _resolve_path(args.output_omega_m_corner_pdf, root): omega_m_corner_figure,
-    _resolve_path(args.output_omega_m_ess_corner_pdf, root): omega_m_ess_corner_figure,
-}
 for output_path, figure in outputs.items():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
     print("saved figure:", output_path)
 
-csv_path = _resolve_path(args.output_csv, root)
-tex_path = _resolve_path(args.output_tex, root)
-write_constraint_table(constraint_table, csv_path, tex_path)
-print("saved constraint table:", csv_path)
-print("saved LaTeX table:", tex_path)
-
-for tree in [*detector_data, *prior_data, *omega_m_data]:
+for tree in opened_data:
     tree.close()

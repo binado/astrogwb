@@ -1,14 +1,14 @@
 """Validate a merged MCMC config and write it back in canonical form.
 
-This is the gate at the end of fragment assembly. ``workflow/mcmc.smk`` pipes
-``knf``'s merge straight into it::
+This is the gate after a run override is merged with the shared MCMC base.
+``workflow/mcmc.smk`` pipes ``knf``'s merge straight into it::
 
-    knf <fragments> --strict -f json | astrogwb-validate-config - --output run.json
+    knf <base> <run> --strict -f json | astrogwb-validate-config - --output run.json
 
 Writing ``save_config(RunConfig)`` rather than the raw merge is what keeps
 :func:`~astrogwb_paper.config.mcmc.config_sha256` a stable identity for "same
 inference settings": the file on disk always carries every default filled in,
-so a fragment that omits ``target_accept`` and one that spells it out produce
+so a run that inherits ``target_accept`` and one that spells it out produce
 identical configs and identical digests.
 
 Like :mod:`astrogwb_paper.config.mcmc`, this module is stdlib + pydantic only,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import tempfile
@@ -9,6 +8,8 @@ from pathlib import Path
 from astrogwb_paper.paths import paper_project_root
 
 PAPER_ROOT = paper_project_root()
+MCMC_SNAKEFILE = PAPER_ROOT / "workflow/mcmc.smk"
+CATALOG_SNAKEFILE = PAPER_ROOT / "workflow/catalog.smk"
 
 
 def _snakemake(*args: str) -> subprocess.CompletedProcess[str]:
@@ -23,210 +24,144 @@ def _snakemake(*args: str) -> subprocess.CompletedProcess[str]:
         )
 
 
-def test_catalog_workflow_dry_run_contains_both_local_stages() -> None:
+def _catalogs(tmp_path: Path, *names: str) -> Path:
+    directory = tmp_path / "catalogs"
+    directory.mkdir()
+    for name in names:
+        (directory / name).touch()
+    return directory
+
+
+def test_catalog_workflow_uses_input_recipes_and_output_tree() -> None:
     result = _snakemake(
         "--snakefile",
-        str(PAPER_ROOT / "workflow/catalog.smk"),
+        str(CATALOG_SNAKEFILE),
         "--dry-run",
         "--forceall",
         "--cores",
         "1",
-        "out/catalogs/bns-n8192-df1.h5",
+        "outputs/catalogs/bns-n8192-df1.h5",
     )
 
     assert result.returncode == 0, result.stderr
-    assert "rule bns_population:" in result.stdout
-    assert "rule bns_waveform_catalog:" in result.stdout
-    assert "rule run_mcmc:" not in result.stdout
-    assert "configs/catalogs/bns-n16384-df1.toml" not in result.stdout
+    assert "inputs/catalogs/bns-n8192-df1.toml" in result.stdout
+    assert "outputs/populations/bns-n8192-df1.h5" in result.stdout
+    assert "outputs/catalogs/bns-n8192-df1.h5" in result.stdout
 
 
-def test_mcmc_workflow_expands_a_campaign_into_config_and_chain_rules(
+def test_complete_experiment_expands_chains_and_local_figure(
     tmp_path: Path,
 ) -> None:
-    """Config assembly and sampling are one DAG: no manifest, no generator."""
-    catalog = tmp_path / "catalog.h5"
-    catalog.touch()
-    workflow_config = _write_workflow_config(tmp_path, catalog, ["cosmology"])
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
     result = _snakemake(
         "--snakefile",
-        str(PAPER_ROOT / "workflow/mcmc.smk"),
-        "--configfile",
-        str(workflow_config),
+        str(MCMC_SNAKEFILE),
         "--dry-run",
         "--forceall",
         "--cores",
-        "1",
-        "mcmc",
+        "8",
+        "H0_all_detectors",
+        "--config",
+        f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
-    # cosmology: 2 networks x 3 analyses x 1 observation.
+    assert result.stdout.count("rule assemble_config:") == 6
     assert result.stdout.count("rule run_mcmc:") == 6
-    assert result.stdout.count("rule mcmc_config:") == 6
-    assert str(catalog) in result.stdout
-    assert (
-        str(tmp_path / "chains/test-catalog/cosmology/ET-2L-aligned__H0__baseline.nc")
-        in result.stdout
-    )
-    assert "rule bns_population:" not in result.stdout
-    assert "rule bns_waveform_catalog:" not in result.stdout
+    assert result.stdout.count("rule plot_H0_all_detectors:") == 1
+    assert "outputs/figures/H0-all-detectors/H0-by-detector.pdf" in result.stdout
 
 
-def test_mcmc_config_rule_merges_fragments_through_the_validator(
-    tmp_path: Path,
-) -> None:
-    catalog = tmp_path / "catalog.h5"
-    catalog.touch()
-    workflow_config = _write_workflow_config(tmp_path, catalog, ["cosmology"])
+def test_chains_only_target_excludes_figure_rule(tmp_path: Path) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
     result = _snakemake(
         "--snakefile",
-        str(PAPER_ROOT / "workflow/mcmc.smk"),
-        "--configfile",
-        str(workflow_config),
+        str(MCMC_SNAKEFILE),
+        "--dry-run",
+        "--forceall",
+        "--cores",
+        "8",
+        "H0_all_detectors_chains",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("rule run_mcmc:") == 6
+    assert "rule plot_H0_all_detectors:" not in result.stdout
+
+
+def test_config_assembly_merges_only_base_and_explicit_run(
+    tmp_path: Path,
+) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
+
+    result = _snakemake(
+        "--snakefile",
+        str(MCMC_SNAKEFILE),
         "--dry-run",
         "--forceall",
         "--printshellcmds",
         "--cores",
-        "1",
-        "mcmc",
+        "4",
+        "outputs/chains/H0-omega-m/H0-Omega_m.nc",
+        "--config",
+        f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
-    assert "knf configs/mcmc/fragments/base.toml" in result.stdout
-    assert "configs/mcmc/fragments/priors.toml" in result.stdout
-    assert "configs/mcmc/fragments/analyses/H0.toml" in result.stdout
+    assert (
+        "knf inputs/mcmc.base.toml "
+        "experiments/H0-omega-m/mcmc.H0-Omega_m.toml" in result.stdout
+    )
     assert "--strict -f json" in result.stdout
     assert "astrogwb-validate-config -" in result.stdout
 
 
-def test_mcmc_workflow_defaults_to_every_campaign(tmp_path: Path) -> None:
-    catalog = tmp_path / "catalog.h5"
-    catalog.touch()
-    workflow_config = _write_workflow_config(tmp_path, catalog, [])
+def test_variable_injection_size_uses_three_catalogs(tmp_path: Path) -> None:
+    catalogs = _catalogs(
+        tmp_path,
+        "bns-n8192-df1.h5",
+        "bns-n16384-df1.h5",
+        "bns-n32768-df1.h5",
+    )
 
     result = _snakemake(
         "--snakefile",
-        str(PAPER_ROOT / "workflow/mcmc.smk"),
-        "--configfile",
-        str(workflow_config),
+        str(MCMC_SNAKEFILE),
         "--dry-run",
         "--forceall",
         "--cores",
-        "1",
-        "mcmc",
+        "8",
+        "variable_injection_size",
+        "--config",
+        f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule run_mcmc:") == 58
+    assert result.stdout.count("rule run_mcmc:") == 3
+    for name in (
+        "bns-n8192-df1.h5",
+        "bns-n16384-df1.h5",
+        "bns-n32768-df1.h5",
+    ):
+        assert str(catalogs / name) in result.stdout
 
 
-def test_mcmc_workflow_rejects_unknown_campaign(tmp_path: Path) -> None:
-    catalog = tmp_path / "catalog.h5"
-    catalog.touch()
-    workflow_config = _write_workflow_config(tmp_path, catalog, ["not-a-campaign"])
-
-    result = _snakemake(
-        "--snakefile",
-        str(PAPER_ROOT / "workflow/mcmc.smk"),
-        "--configfile",
-        str(workflow_config),
-        "--dry-run",
-        "--cores",
-        "1",
-        "mcmc",
-    )
-
-    output = result.stdout + result.stderr
-    assert result.returncode != 0
-    assert "unknown campaigns ['not-a-campaign']" in output
-
-
-def test_mcmc_catalog_id_override_uses_derived_path(tmp_path: Path) -> None:
-    catalog_id = f"test-{tmp_path.name}"
-    catalog = PAPER_ROOT / "out" / "catalogs" / f"{catalog_id}.h5"
-    workflow_config = tmp_path / "workflow-config.json"
-    workflow_config.write_text(
-        json.dumps(
-            {
-                "catalog": {"id": catalog_id},
-                "chains_dir": str(tmp_path / "chains"),
-                "campaigns": ["cosmology"],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    catalog.parent.mkdir(parents=True, exist_ok=True)
-    catalog.touch()
-    try:
-        result = _snakemake(
-            "--snakefile",
-            str(PAPER_ROOT / "workflow/mcmc.smk"),
-            "--configfile",
-            str(workflow_config),
-            "--dry-run",
-            "--forceall",
-            "--cores",
-            "1",
-            "mcmc",
-        )
-    finally:
-        catalog.unlink()
-
-    assert result.returncode == 0, result.stderr
-    assert f"out/catalogs/{catalog_id}.h5" in result.stdout
-    assert "out/catalogs/bns-n16384-df1.h5" not in result.stdout
-    assert str(tmp_path / f"chains/{catalog_id}/cosmology") in result.stdout
-
-
-def test_mcmc_thread_override_controls_runner_cpu_budget(tmp_path: Path) -> None:
-    catalog = tmp_path / "catalog.h5"
-    catalog.touch()
-    workflow_config = _write_workflow_config(tmp_path, catalog, ["cosmology"])
+def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
+    catalogs = tmp_path / "missing-catalogs"
 
     result = _snakemake(
         "--snakefile",
-        str(PAPER_ROOT / "workflow/mcmc.smk"),
-        "--configfile",
-        str(workflow_config),
-        "--dry-run",
-        "--forceall",
-        "--printshellcmds",
-        "--cores",
-        "2",
-        "mcmc",
-        "--set-threads",
-        "run_mcmc=2",
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "threads: 2" in result.stdout
-    assert "--cpu-threads 2" in result.stdout
-    assert "--platform cuda" in result.stdout
-    assert "cpus_per_task" not in result.stdout
-    assert "OMP_NUM_THREADS" not in result.stdout
-    assert "OPENBLAS_NUM_THREADS" not in result.stdout
-    assert "MKL_NUM_THREADS" not in result.stdout
-    assert "XLA_FLAGS" not in result.stdout
-
-
-def test_mcmc_workflow_does_not_generate_missing_catalog(tmp_path: Path) -> None:
-    workflow_config = _write_workflow_config(
-        tmp_path, tmp_path / "missing.h5", ["cosmology"]
-    )
-
-    result = _snakemake(
-        "--snakefile",
-        str(PAPER_ROOT / "workflow/mcmc.smk"),
-        "--configfile",
-        str(workflow_config),
+        str(MCMC_SNAKEFILE),
         "--dry-run",
         "--cores",
-        "1",
-        "mcmc",
+        "4",
+        "H0_omega_m_chains",
+        "--config",
+        f"catalogs_dir={catalogs}",
     )
 
     output = result.stdout + result.stderr
@@ -236,34 +171,108 @@ def test_mcmc_workflow_does_not_generate_missing_catalog(tmp_path: Path) -> None
     assert "bns_waveform_catalog" not in output
 
 
-def test_paper_workflow_exposes_only_figure_rules() -> None:
+def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
+    result = _snakemake("--snakefile", str(MCMC_SNAKEFILE), "--list-rules")
+
+    assert result.returncode == 0, result.stderr
+    rules = set(result.stdout.split())
+    assert {
+        "H0_all_detectors",
+        "H0_all_detectors_chains",
+        "modified_propagation_all_detectors",
+        "H0_merger_rate",
+        "H0_omega_m",
+        "astrophysical_parameters",
+        "star_formation_peak",
+        "variable_injection_size",
+        "standalone_figures",
+        "assemble_config",
+        "run_mcmc",
+    } <= rules
+
+
+def test_merger_rate_figure_accepts_braced_latex_labels(
+    tmp_path: Path,
+) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
+
     result = _snakemake(
         "--snakefile",
-        str(PAPER_ROOT / "workflow/paper.smk"),
-        "--list-rules",
+        str(MCMC_SNAKEFILE),
+        "--dry-run",
+        "--forceall",
+        "--printshellcmds",
+        "--cores",
+        "8",
+        "H0_merger_rate",
+        "--config",
+        f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
-    assert set(result.stdout.split()) == {
-        "amplitude_toy",
-        "fiducial_spectrum",
-        "importance_weights_grid",
-        "mcmc_cosmological_parameters",
-        "mcmc_modified_propagation",
-        "paper_figures",
-    }
+    assert "\\mathcal{R}_0$" in result.stdout
+    assert "--prior-labels" in result.stdout
 
 
-def _write_workflow_config(tmp_path: Path, catalog: Path, campaigns: list[str]) -> Path:
-    workflow_config = tmp_path / "workflow-config.json"
-    workflow_config.write_text(
-        json.dumps(
-            {
-                "catalog": {"id": "test-catalog", "path": str(catalog)},
-                "chains_dir": str(tmp_path / "chains"),
-                "campaigns": campaigns,
-            }
-        ),
-        encoding="utf-8",
+def test_standalone_figures_expand_parameterized_shell_commands(
+    tmp_path: Path,
+) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
+
+    result = _snakemake(
+        "--snakefile",
+        str(MCMC_SNAKEFILE),
+        "--dry-run",
+        "--forceall",
+        "--printshellcmds",
+        "--cores",
+        "4",
+        "standalone_figures",
+        "--config",
+        f"catalogs_dir={catalogs}",
     )
-    return workflow_config
+
+    assert result.returncode == 0, result.stderr
+    for script in (
+        "amplitude_toy_model.py",
+        "fiducial_spectrum.py",
+        "importance_weights_grid.py",
+    ):
+        assert script in result.stdout
+    # Shared base and analysis values are injected at shell-expansion time.
+    assert "--observation-time 1.0" in result.stdout
+    assert "--f-min 2.0" in result.stdout
+    assert "--h0 67.66" in result.stdout
+    assert "--omega-gw-min 1e-15" in result.stdout
+
+
+def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
+
+    result = _snakemake(
+        "--snakefile",
+        str(MCMC_SNAKEFILE),
+        "--dry-run",
+        "--forceall",
+        "--printshellcmds",
+        "--cores",
+        "8",
+        "H0_all_detectors",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    command = result.stdout[result.stdout.index(" --detector-chains ") :]
+    positions = [
+        command.index(f"outputs/chains/H0-all-detectors/{run}.nc")
+        for run in (
+            "ET-triangular",
+            "ET-triangular-CE-Hanford",
+            "ET-2L-aligned",
+            "ET-2L-aligned-CE-Hanford",
+            "ET-2L-misaligned",
+            "ET-2L-misaligned-CE-Hanford",
+        )
+    ]
+    assert positions == sorted(positions)

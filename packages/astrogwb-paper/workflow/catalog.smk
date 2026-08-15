@@ -3,7 +3,7 @@ from pathlib import Path
 from astrogwb_paper.config.catalogs import load_catalog_recipe
 
 
-RECIPE_DIR = Path("configs/catalogs")
+RECIPE_DIR = Path("inputs/catalogs")
 _RECIPE_CACHE = {}
 
 
@@ -32,11 +32,11 @@ rule bns_population:
         recipe=recipe_path,
         population_config=lambda wc: recipe(wc).population_config,
     output:
-        "out/populations/{catalog}.h5",
+        "outputs/populations/{catalog}.h5",
     params:
         n_samples=lambda wc: recipe(wc).n_samples,
         seed=lambda wc: recipe(wc).seed,
-        outdir=lambda wc: str(Path("out/populations")),
+        outdir=lambda wc: str(Path("outputs/populations")),
     shell:
         "mkdir -p {params.outdir:q}\n"
         "uv run --package astrogwb-paper gwmock-pop simulate"
@@ -48,10 +48,10 @@ rule bns_population:
 
 rule bns_waveform_catalog:
     input:
-        population="out/populations/{catalog}.h5",
+        population="outputs/populations/{catalog}.h5",
         recipe=recipe_path,
     output:
-        "out/catalogs/{catalog}.h5",
+        "outputs/catalogs/{catalog}.h5",
     params:
         approximant=lambda wc: recipe(wc).approximant,
         sampling_frequency=lambda wc: recipe(wc).sampling_frequency,

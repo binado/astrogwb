@@ -1,0 +1,4 @@
+sampled_params = ["xi_0", "xi_n"]
+
+[analysis]
+detectors = ["E1", "E2", "E3"]

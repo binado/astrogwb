@@ -1,10 +1,13 @@
-# CPU MCMC profile: uv run astrogwb-workflow mcmc <batch.json> --profile slurm-cpu --submit
+# CPU MCMC profile:
+#   uv run astrogwb-workflow mcmc H0-all-detectors --profile slurm-cpu --submit
 #   snakemake --snakefile workflow/mcmc.smk \
-#     --profile profiles/slurm-cpu --configfile <batch.json> mcmc
+#     --profile profiles/slurm-cpu H0_all_detectors
 # Requires `uv sync --package astrogwb-paper --group slurm`.
 # Job logs land under .snakemake/slurm_logs/.
 executor: slurm
 jobs: 32
+# Config assembly and figures are local rules on the submit host.
+local-cores: 2
 # NOTE: run_mcmc jobs were previously batched into one SLURM job array via
 # `slurm-array-jobs: run_mcmc` (parity with the retired sbatch --array flow).
 # Disabled: with heterogeneous wildcards per run, the SLURM array executor

@@ -26,9 +26,9 @@
 #
 # Combinations (for now hard-coded):
 #
-# 1. $H_0$ + $\Omega_m$ — uniform $H_0$ prior from `mcmc.sweeps.toml`;
+# 1. $H_0$ + $\Omega_m$ — uniform $H_0$ prior from `inputs/mcmc.base.toml`;
 #    $\Omega_m\sim\mathrm{Uniform}(0.05, 0.95)$;
-# 2. $\Xi_0$ + $n$ — uniform priors from `mcmc.sweeps.toml`.
+# 2. $\Xi_0$ + $n$ — uniform priors from `inputs/mcmc.base.toml`.
 #
 # Point `CATALOG_PATH` at a polarization-power catalog that provides
 # `redshift` and `luminosity_distance` source parameters (same schema as the
@@ -50,11 +50,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
 from _paper_style import TRUTH, use_paper_style
-from matplotlib.axes import Axes as MplAxes
-from matplotlib.figure import Figure
-from matplotlib.projections import register_projection
-from pluscross import load_catalog
-
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
@@ -62,6 +57,10 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.priors import build_prior
+from matplotlib.axes import Axes as MplAxes
+from matplotlib.figure import Figure
+from matplotlib.projections import register_projection
+from pluscross import load_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
 # Restore the standard projection for consistent notebook plotting.
@@ -79,9 +78,14 @@ jax.config.update("jax_enable_x64", True)
 # workflow passes its declared catalog and output paths explicitly.
 
 # %%
-DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
-DEFAULT_OUTPUT_H0_OMEGA_M_PDF = Path("figures/importance_weights_grid_H0_Omega_m.pdf")
-DEFAULT_OUTPUT_XI0_N_PDF = Path("figures/importance_weights_grid_Xi0_n.pdf")
+DEFAULT_CATALOG_PATH = Path("outputs/catalogs/bns-n16384-df1.h5")
+DEFAULT_CONFIG_PATH = Path("inputs/mcmc.base.toml")
+DEFAULT_OUTPUT_H0_OMEGA_M_PDF = Path(
+    "outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf"
+)
+DEFAULT_OUTPUT_XI0_N_PDF = Path(
+    "outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf"
+)
 DEFAULT_FIGURE_DPI = 300
 
 
@@ -91,6 +95,7 @@ def _resolve_path(path: Path, root: Path) -> Path:
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
     parser.add_argument(
         "--output-h0-omega-m-pdf", type=Path, default=DEFAULT_OUTPUT_H0_OMEGA_M_PDF
@@ -106,9 +111,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 args = _parse_args()
 
 ROOT = paper_project_root()
-FRAGMENTS_PATH = ROOT / "configs/mcmc/fragments"
-PRIORS_PATH = FRAGMENTS_PATH / "priors.toml"
-BASE_CONFIG_PATH = FRAGMENTS_PATH / "base.toml"
+BASE_CONFIG_PATH = _resolve_path(args.config, ROOT)
 CATALOG_PATH = _resolve_path(args.catalog, ROOT)
 
 eps = 1e-3
@@ -137,14 +140,14 @@ use_paper_style()
 # %% [markdown]
 # ## Priors and fiducials
 #
-# Read the uniform $H_0$, $\Xi_0$, and $n$ priors from the shared prior
-# fragment, so this grid always spans the same support the sweeps sample.
+# Read the uniform $H_0$, $\Xi_0$, and $n$ priors from the shared MCMC base,
+# so this grid always spans the same support the curated experiments sample.
 # $\Omega_m$ uses an explicit $\mathrm{Uniform}(0.05, 0.95)$ as requested,
 # rather than the narrow normal the $H_0$–$\Omega_m$ MCMC analysis uses.
 
 # %%
-priors = load_mapping(PRIORS_PATH)["priors"]
 base = load_mapping(BASE_CONFIG_PATH)
+priors = base["priors"]
 fiducials: dict[str, float] = dict(base["fiducials"])
 
 h0_prior = build_prior(priors["H0"])

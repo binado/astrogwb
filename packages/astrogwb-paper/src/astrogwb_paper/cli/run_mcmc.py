@@ -17,7 +17,7 @@ Usage::
 
     uv run astrogwb-run-mcmc \
         --config packages/astrogwb-paper/configs/mcmc.example.toml \
-        --catalog out/catalogs/bns-n16384-df1.h5
+        --catalog outputs/catalogs/bns-n16384-df1.h5
 
 Use ``uv run --package astrogwb-paper --extra cuda`` (or ``--extra tpu``) for
 the matching JAX accelerator plugin.
@@ -546,7 +546,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     # Pick a single timestamp now and check both artifacts before JAX starts.
-    # Labelled campaign runs are deterministic; auto-labelled runs preserve the
+    # Labelled experiment runs are deterministic; auto-labelled runs preserve the
     # existing timestamp convention.
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_output_paths_available(config, timestamp=timestamp, force=args.force)
