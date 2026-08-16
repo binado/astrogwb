@@ -1,0 +1,13 @@
+sampled_params = ["H0"]
+
+[analysis]
+detectors = ["S1", "R1", "C1"]
+
+[runs.n8192]
+catalog = "outputs/catalogs/bns-n8192-df1.h5"
+
+[runs.n16384]
+catalog = "outputs/catalogs/bns-n16384-df1.h5"
+
+[runs.n32768]
+catalog = "outputs/catalogs/bns-n32768-df1.h5"

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from astrogwb_paper.config.loading import deep_merge, load_mapping
+from astrogwb_paper.config.loading import deep_merge, load_mapping, merge_run_overlay
 from astrogwb_paper.config.mcmc import (
     UniformPrior,
     build_run_config,
@@ -245,35 +245,32 @@ def test_default_likelihood_rejects_amplitude_parameter() -> None:
 # --------------------------------------------------------------------------- #
 # Prior specs
 # --------------------------------------------------------------------------- #
-def test_prior_spec_drops_keys_left_by_a_cross_type_override() -> None:
-    """Fragment layers merge prior tables key by key, not wholesale.
+def test_merge_run_overlay_replaces_named_priors_wholesale() -> None:
+    raw = load_mapping(PAPER_ROOT / "configs/mcmc.example.toml")
+    merged = merge_run_overlay(
+        raw,
+        {"priors": {"H0": {"type": "normal", "loc": 67.66, "scale": 0.6766}}},
+    )
 
-    Overriding a uniform prior with a normal one leaves ``low``/``high``
-    behind. They must not reach the run record or ``config_sha256``, or two
-    configs sampling the same prior would carry different digests.
-    """
+    assert merged["priors"]["H0"] == {
+        "type": "normal",
+        "loc": 67.66,
+        "scale": 0.6766,
+    }
+    config = build_run_config(merged)
+    assert config.priors["H0"].model_dump() == merged["priors"]["H0"]
+
+
+def test_prior_spec_rejects_stale_keys_from_a_cross_type_override() -> None:
     raw = load_mapping(PAPER_ROOT / "configs/mcmc.example.toml")
     polluted = deep_merge(
         raw,
         {"priors": {"H0": {"type": "normal", "loc": 67.66, "scale": 0.6766}}},
     )
-    assert polluted["priors"]["H0"]["low"] == 20.0  # the stale key knf leaves
+    assert polluted["priors"]["H0"]["low"] == 20.0
 
-    config = build_run_config(polluted)
-
-    assert config.priors["H0"].model_dump() == {
-        "type": "normal",
-        "loc": 67.66,
-        "scale": 0.6766,
-    }
-    clean = {
-        **raw,
-        "priors": {
-            **raw["priors"],
-            "H0": {"type": "normal", "loc": 67.66, "scale": 0.6766},
-        },
-    }
-    assert config_sha256(config) == config_sha256(build_run_config(clean))
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        build_run_config(polluted)
 
 
 def test_prior_spec_rejects_unsupported_type_before_jax_starts() -> None:

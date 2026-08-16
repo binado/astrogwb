@@ -1,3 +1,14 @@
+sampled_params = ["Omega_m"]
+
+[analysis]
+detectors = ["S1", "R1", "C1"]
+likelihood = "amplitude_marginalized"
+amplitude_parameter = "H0"
+amplitude_num_nodes = 1024
+
+[runs.H0-Omega_m]
+
+[figure]
 run = "H0-Omega_m"
 label = '$H_0 + \Omega_m$'
 output_corner_pdf = "outputs/figures/H0-omega-m/H0-Omega_m-corner.pdf"

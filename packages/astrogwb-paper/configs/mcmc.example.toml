@@ -1,6 +1,6 @@
 # Concrete example for astrogwb-run-mcmc -- the headless NumPyro MCMC runner.
 # This file is independently runnable. Curated experiment runs instead merge
-# packages/astrogwb-paper/inputs/mcmc.base.toml with one explicit run TOML.
+# packages/astrogwb-paper/inputs/mcmc.base.toml with one [runs.<id>] overlay.
 
 seed = 42
 observation_time = 1.0       # [yr]; cancels in S_h, kept for the likelihood scale

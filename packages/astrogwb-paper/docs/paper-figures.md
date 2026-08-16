@@ -1,14 +1,15 @@
 # Paper figures
 
-Experiment figures are part of the same DAG as their chains. Their ordered run
-IDs, labels, styles, and output paths live in:
+Experiment figures are part of the same DAG as their chains. Ordered run IDs,
+labels, styles, and output paths live in the optional `[figure]` table of:
 
 ```text
-experiments/<experiment>/figure.toml
+experiments/<experiment>.toml
 ```
 
-Shared scientific values such as fiducials, frequency bounds, and cosmology
-grid settings come from `inputs/mcmc.base.toml`.
+Those `output_*` paths are valid Snakemake targets. Shared scientific values
+such as fiducials, frequency bounds, and cosmology grid settings come from
+`inputs/mcmc.base.toml`.
 
 ## Experiment figures
 
@@ -28,6 +29,13 @@ Preview or build one:
 uv run astrogwb-workflow mcmc H0-all-detectors --profile local
 uv run astrogwb-workflow mcmc H0-all-detectors \
   --profile slurm --submit
+```
+
+Rebuild a single figure by its output path:
+
+```bash
+uv run astrogwb-workflow mcmc H0-all-detectors --profile local -- \
+  outputs/figures/H0-all-detectors/H0-by-detector.pdf
 ```
 
 With a SLURM profile, sampling runs remotely and figure rules run locally on the
@@ -60,6 +68,6 @@ All new figure products are written under `outputs/figures/`.
 ## Notebook use
 
 The Jupytext sources under `notebooks/paper/` remain directly executable.
-Their command-line interfaces accept explicit chains, labels, catalogs, base
-configuration, and output paths. Snakemake passes those inputs rather than
-asking notebooks to reconstruct chain names.
+Snakemake passes the experiment TOML, the shared MCMC base, and the chain files
+the DAG must declare. Labels, detector lists, and output paths come from the
+experiment file.

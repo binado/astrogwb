@@ -1,36 +1,57 @@
+sampled_params = ["H0"]
+
+[runs.ET-triangular.analysis]
+detectors = ["E1", "E2", "E3"]
+
+[runs.ET-triangular-CE-Hanford.analysis]
+detectors = ["E1", "E2", "E3", "C1"]
+
+[runs.ET-2L-aligned.analysis]
+detectors = ["S1", "R1"]
+
+[runs.ET-2L-aligned-CE-Hanford.analysis]
+detectors = ["S1", "R1", "C1"]
+
+[runs.ET-2L-misaligned.analysis]
+detectors = ["S2", "R2"]
+
+[runs.ET-2L-misaligned-CE-Hanford.analysis]
+detectors = ["S2", "R2", "C1"]
+
+[figure]
 output_pdf = "outputs/figures/H0-all-detectors/H0-by-detector.pdf"
 output_csv = "outputs/figures/H0-all-detectors/H0-by-detector.csv"
 output_tex = "outputs/figures/H0-all-detectors/H0-by-detector.tex"
 
-[[posteriors]]
+[[figure.posteriors]]
 run = "ET-triangular"
 label = 'ET-$\Delta$'
 
-[[posteriors]]
+[[figure.posteriors]]
 run = "ET-triangular-CE-Hanford"
 label = 'ET-$\Delta$ $+$ CE'
 
-[[posteriors]]
+[[figure.posteriors]]
 run = "ET-2L-aligned"
 label = "ET-2L-par"
 
-[[posteriors]]
+[[figure.posteriors]]
 run = "ET-2L-aligned-CE-Hanford"
 label = 'ET-2L-par $+$ CE'
 
-[[posteriors]]
+[[figure.posteriors]]
 run = "ET-2L-misaligned"
 label = "ET-2L"
 
-[[posteriors]]
+[[figure.posteriors]]
 run = "ET-2L-misaligned-CE-Hanford"
 label = 'ET-2L $+$ CE'
 
-[axis]
+[figure.axis]
 xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'
 ylabel = "Posterior density"
 
-[legend]
+[figure.legend]
 ncol = 3
 loc = "lower center"
 bbox_to_anchor = [0.5, 1.02]

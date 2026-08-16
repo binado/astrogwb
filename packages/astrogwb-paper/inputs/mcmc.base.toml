@@ -1,6 +1,6 @@
 # Settings shared by every curated experiment run. Each
-# experiments/<experiment>/mcmc.<run>.toml file supplies the detector network,
-# sampled parameters, and any run-specific likelihood or prior overrides.
+# experiments/<experiment>.toml file supplies detector networks, sampled
+# parameters, and any run-specific likelihood or prior overrides.
 
 seed = 42
 observation_time = 1.0

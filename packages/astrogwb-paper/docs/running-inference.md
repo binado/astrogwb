@@ -16,11 +16,12 @@ profiling work.
 
 ## Curated experiment runs
 
-Production runs use a one-file/one-chain model:
+Production runs use one TOML per experiment. Each `[runs.<id>]` table is one
+chain overlay on the shared base:
 
 ```text
 inputs/mcmc.base.toml
-  + experiments/<experiment>/mcmc.<run>.toml
+  + experiments/<experiment>.toml  [runs.<run>]
   -> outputs/configs/<experiment>/<run>.json
   -> outputs/chains/<experiment>/<run>.nc
   -> outputs/chains/<experiment>/<run>.json
@@ -35,17 +36,14 @@ The base owns settings shared across all experiments:
 - default priors;
 - output defaults.
 
-Each run TOML owns every scientific difference from the base:
-
-- `sampled_params`;
-- detector names;
-- likelihood and amplitude-marginalization settings;
-- run-specific prior overrides.
+Top-level keys in the experiment file (except `runs` and `figure`) overlay the
+base for every run. Each `[runs.<id>]` table then overlays detector names,
+`sampled_params`, likelihood settings, catalog path, and run-specific priors.
 
 For example:
 
 ```toml
-# experiments/H0-omega-m/mcmc.H0-Omega_m.toml
+# experiments/H0-omega-m.toml
 sampled_params = ["Omega_m"]
 
 [analysis]
@@ -53,20 +51,21 @@ detectors = ["S1", "R1", "C1"]
 likelihood = "amplitude_marginalized"
 amplitude_parameter = "H0"
 amplitude_num_nodes = 1024
+
+[runs.H0-Omega_m]
 ```
 
 There is no network/analysis/observation product and no fragment lookup.
-Adding a chain means adding one run TOML and declaring its stable run ID in
-`astrogwb_paper.config.experiments`.
+Adding a chain means adding one `[runs.<id>]` table to the experiment file.
 
 To assemble one config manually:
 
 ```bash
-knf inputs/mcmc.base.toml \
-    experiments/H0-all-detectors/mcmc.ET-2L-aligned.toml \
-    --strict -f json \
-  | uv run astrogwb-validate-config - \
-      --output /tmp/ET-2L-aligned.json
+uv run astrogwb-validate-config \
+    --base inputs/mcmc.base.toml \
+    --run ET-2L-aligned \
+    experiments/H0-all-detectors.toml \
+    --output /tmp/ET-2L-aligned.json
 ```
 
 The validator checks that every sampled parameter has a prior and fiducial and

@@ -65,7 +65,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 )
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from astrogwb_paper.config.loading import load_mapping
+from astrogwb_paper.config.loading import load_mapping, merge_run_overlay
 from astrogwb_paper.paths import paper_project_root
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.lines import Line2D
@@ -87,7 +87,7 @@ jax.config.update("jax_enable_x64", True)
 
 # %%
 DEFAULT_CATALOG_PATH = Path("outputs/catalogs/bns-n16384-df1.h5")
-DEFAULT_CONFIG_PATH = Path("experiments/H0-all-detectors/figure.toml")
+DEFAULT_CONFIG_PATH = Path("experiments/H0-all-detectors.toml")
 DEFAULT_BASE_CONFIG_PATH = Path("inputs/mcmc.base.toml")
 DEFAULT_OBSERVATION_TIME = 1.0
 DEFAULT_F_MIN = 2.0
@@ -116,24 +116,12 @@ DEFAULT_DETECTOR_NETWORKS = {
 DEFAULT_NETWORKS = list(DEFAULT_DETECTOR_NETWORKS)
 
 DEFAULT_DETECTOR_CHAINS = [
-    Path(
-        "outputs/chains/H0-all-detectors/ET-triangular.nc"
-    ),
-    Path(
-        "outputs/chains/H0-all-detectors/ET-triangular-CE-Hanford.nc"
-    ),
-    Path(
-        "outputs/chains/H0-all-detectors/ET-2L-aligned.nc"
-    ),
-    Path(
-        "outputs/chains/H0-all-detectors/ET-2L-aligned-CE-Hanford.nc"
-    ),
-    Path(
-        "outputs/chains/H0-all-detectors/ET-2L-misaligned.nc"
-    ),
-    Path(
-        "outputs/chains/H0-all-detectors/ET-2L-misaligned-CE-Hanford.nc"
-    ),
+    Path("outputs/chains/H0-all-detectors/ET-triangular.nc"),
+    Path("outputs/chains/H0-all-detectors/ET-triangular-CE-Hanford.nc"),
+    Path("outputs/chains/H0-all-detectors/ET-2L-aligned.nc"),
+    Path("outputs/chains/H0-all-detectors/ET-2L-aligned-CE-Hanford.nc"),
+    Path("outputs/chains/H0-all-detectors/ET-2L-misaligned.nc"),
+    Path("outputs/chains/H0-all-detectors/ET-2L-misaligned-CE-Hanford.nc"),
 ]
 DEFAULT_DETECTOR_LABELS = [
     r"ET-$\Delta$",
@@ -145,21 +133,15 @@ DEFAULT_DETECTOR_LABELS = [
 ]
 
 DEFAULT_PRIOR_CHAINS = [
-    Path(
-        "outputs/chains/H0-merger-rate/fixed.nc"
-    ),
-    Path(
-        "outputs/chains/H0-merger-rate/sampled.nc"
-    ),
+    Path("outputs/chains/H0-merger-rate/fixed.nc"),
+    Path("outputs/chains/H0-merger-rate/sampled.nc"),
 ]
 DEFAULT_PRIOR_LABELS = [
     r"$H_0$ (fixed $\mathcal{R}_0$)",
     r"$H_0 + \mathcal{R}_0$ (narrow prior)",
 ]
 
-DEFAULT_OMEGA_M_CHAIN = Path(
-    "outputs/chains/H0-omega-m/H0-Omega_m.nc"
-)
+DEFAULT_OMEGA_M_CHAIN = Path("outputs/chains/H0-omega-m/H0-Omega_m.nc")
 DEFAULT_OMEGA_M_LABEL = r"$H_0 + \Omega_m$"
 
 H0_LABEL = r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
@@ -186,6 +168,15 @@ CORNER_VAR_NAMES = MERGER_RATE_VAR_NAMES
 # %%
 def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
+
+
+def _run_detectors(config: Mapping[str, Any], run: str) -> tuple[str, ...]:
+    """Return the detector list for ``run`` after experiment defaults merge."""
+    defaults = {
+        key: value for key, value in config.items() if key not in {"runs", "figure"}
+    }
+    overlay = merge_run_overlay(defaults, config["runs"][run])
+    return tuple(overlay["analysis"]["detectors"])
 
 
 def _parse_network_definition(value: str) -> tuple[str, tuple[str, ...]]:
@@ -854,9 +845,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-narrow-corner-pdf",
         type=Path,
-        default=Path(
-            "outputs/figures/H0-merger-rate/H0-merger-rate-corner.pdf"
-        ),
+        default=Path("outputs/figures/H0-merger-rate/H0-merger-rate-corner.pdf"),
     )
     parser.add_argument(
         "--output-omega-m-corner-pdf",
@@ -935,9 +924,9 @@ root = paper_project_root()
 # Read only the chains owned by the selected experiment-facing section.
 
 # %%
-figure_config = load_mapping(_resolve_path(args.config, root))
+experiment_config = load_mapping(_resolve_path(args.config, root))
+figure_config = experiment_config["figure"]
 base_config = load_mapping(_resolve_path(args.base_config, root))
-networks = args.resolved_networks
 fiducials = {
     **base_config["fiducials"],
     "importance_relative_ess": args.importance_relative_ess,
@@ -947,36 +936,35 @@ outputs = {}
 opened_data = []
 
 if args.section == "detectors":
-    if len(args.detector_chains) != len(args.detector_labels):
-        raise ValueError(
-            "--detector-chains and --detector-labels must have equal length"
-        )
-    if len(args.detector_chains) != len(networks):
-        raise ValueError(
-            "detector chain count must match --networks: "
-            f"received {len(args.detector_chains)} chains for {len(networks)} networks"
-        )
+    detector_labels = [entry["label"] for entry in figure_config["posteriors"]]
+    networks = {
+        entry["run"]: _run_detectors(experiment_config, entry["run"])
+        for entry in figure_config["posteriors"]
+    }
+    if len(args.detector_chains) != len(detector_labels):
+        raise ValueError("--detector-chains length must match [figure.posteriors]")
     detector_data = [
-        load_inference_data(_resolve_path(path, root))
-        for path in args.detector_chains
+        load_inference_data(_resolve_path(path, root)) for path in args.detector_chains
     ]
     opened_data.extend(detector_data)
     validate_inference_data(
         detector_data,
-        args.detector_labels,
+        detector_labels,
         group=args.group,
         expected_count=len(networks),
     )
     detector_colors, detector_linestyles = detector_network_styles(networks)
-    outputs[_resolve_path(args.output_detector_pdf, root)] = plot_h0_posteriors(
-        detector_data,
-        args.detector_labels,
-        colors=detector_colors,
-        linestyles=detector_linestyles,
-        group=args.group,
-        fiducial=fiducials["H0"],
-        ax_kwargs=figure_config.get("axis"),
-        legend_kwargs=figure_config.get("legend"),
+    outputs[_resolve_path(Path(figure_config["output_pdf"]), root)] = (
+        plot_h0_posteriors(
+            detector_data,
+            detector_labels,
+            colors=detector_colors,
+            linestyles=detector_linestyles,
+            group=args.group,
+            fiducial=fiducials["H0"],
+            ax_kwargs=figure_config.get("axis"),
+            legend_kwargs=figure_config.get("legend"),
+        )
     )
     snr_table = compute_network_snrs(
         _resolve_path(args.catalog, root),
@@ -992,17 +980,20 @@ if args.section == "detectors":
     table = build_snr_h0_constraint_table(
         networks,
         detector_data,
-        args.detector_labels,
+        detector_labels,
         snr_table,
         h0_fiducial=fiducials["H0"],
         group=args.group,
     )
-    csv_path = _resolve_path(args.output_csv, root)
-    tex_path = _resolve_path(args.output_tex, root)
-    write_constraint_table(table, csv_path, tex_path)
+    write_constraint_table(
+        table,
+        _resolve_path(Path(figure_config["output_csv"]), root),
+        _resolve_path(Path(figure_config["output_tex"]), root),
+    )
 
 elif args.section == "merger-rate":
-    if len(args.prior_chains) != len(args.prior_labels) or len(args.prior_chains) != 2:
+    prior_labels = list(figure_config["labels"])
+    if len(args.prior_chains) != len(prior_labels) or len(args.prior_chains) != 2:
         raise ValueError("the merger-rate comparison requires two chains and labels")
     prior_data = [
         load_inference_data(_resolve_path(path, root)) for path in args.prior_chains
@@ -1010,38 +1001,40 @@ elif args.section == "merger-rate":
     opened_data.extend(prior_data)
     validate_inference_data(
         prior_data,
-        args.prior_labels,
+        prior_labels,
         group=args.group,
         expected_count=2,
     )
     corner_data, corner_labels, _ = select_corner_inference_data(
-        prior_data, args.prior_labels, group=args.group
+        prior_data, prior_labels, group=args.group
     )
     colors = combo_colors(len(prior_data))
-    outputs[_resolve_path(args.output_prior_pdf, root)] = plot_h0_posteriors(
-        prior_data,
-        args.prior_labels,
-        colors=colors,
-        linestyles=["-"] * len(prior_data),
-        group=args.group,
-        fiducial=fiducials["H0"],
-        ax_kwargs=figure_config.get("axis"),
-        legend_kwargs=figure_config.get("legend"),
+    outputs[_resolve_path(Path(figure_config["output_prior_pdf"]), root)] = (
+        plot_h0_posteriors(
+            prior_data,
+            prior_labels,
+            colors=colors,
+            linestyles=["-"] * len(prior_data),
+            group=args.group,
+            fiducial=fiducials["H0"],
+            ax_kwargs=figure_config.get("axis"),
+            legend_kwargs=figure_config.get("legend"),
+        )
     )
-    outputs[_resolve_path(args.output_narrow_corner_pdf, root)] = plot_corner(
-        [corner_data[0]],
-        [corner_labels[0]],
-        MERGER_RATE_VAR_NAMES,
-        colors=[colors[1]],
-        linestyles=["-"],
-        group=args.group,
-        fiducials=fiducials,
+    outputs[_resolve_path(Path(figure_config["output_corner_pdf"]), root)] = (
+        plot_corner(
+            [corner_data[0]],
+            [corner_labels[0]],
+            MERGER_RATE_VAR_NAMES,
+            colors=[colors[1]],
+            linestyles=["-"],
+            group=args.group,
+            fiducials=fiducials,
+        )
     )
-    table = build_h0_r0_uncertainty_table(
-        prior_data, args.prior_labels, group=args.group
-    )
-    csv_path = _resolve_path(args.output_csv, root)
-    tex_path = _resolve_path(args.output_tex, root)
+    table = build_h0_r0_uncertainty_table(prior_data, prior_labels, group=args.group)
+    csv_path = _resolve_path(Path(figure_config["output_csv"]), root)
+    tex_path = _resolve_path(Path(figure_config["output_tex"]), root)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     tex_path.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(csv_path)
@@ -1050,7 +1043,7 @@ elif args.section == "merger-rate":
 else:
     omega_m_data = [load_inference_data(_resolve_path(args.omega_m_chain, root))]
     opened_data.extend(omega_m_data)
-    omega_m_labels = [args.omega_m_label]
+    omega_m_labels = [figure_config["label"]]
     validate_inference_data(
         omega_m_data,
         omega_m_labels,
@@ -1058,21 +1051,25 @@ else:
         group=args.group,
         expected_count=1,
     )
-    outputs[_resolve_path(args.output_omega_m_corner_pdf, root)] = plot_corner(
-        omega_m_data,
-        omega_m_labels,
-        OMEGA_M_VAR_NAMES,
-        colors=[CATEGORY["cosmology"]],
-        group=args.group,
-        fiducials=fiducials,
+    outputs[_resolve_path(Path(figure_config["output_corner_pdf"]), root)] = (
+        plot_corner(
+            omega_m_data,
+            omega_m_labels,
+            OMEGA_M_VAR_NAMES,
+            colors=[CATEGORY["cosmology"]],
+            group=args.group,
+            fiducials=fiducials,
+        )
     )
-    outputs[_resolve_path(args.output_omega_m_ess_corner_pdf, root)] = plot_corner(
-        omega_m_data,
-        omega_m_labels,
-        OMEGA_M_ESS_VAR_NAMES,
-        colors=[CATEGORY["cosmology"]],
-        group=args.group,
-        fiducials=fiducials,
+    outputs[_resolve_path(Path(figure_config["output_ess_corner_pdf"]), root)] = (
+        plot_corner(
+            omega_m_data,
+            omega_m_labels,
+            OMEGA_M_ESS_VAR_NAMES,
+            colors=[CATEGORY["cosmology"]],
+            group=args.group,
+            fiducials=fiducials,
+        )
     )
 
 for output_path, figure in outputs.items():

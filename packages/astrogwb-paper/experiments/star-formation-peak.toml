@@ -5,3 +5,5 @@ detectors = ["S1", "R1", "C1"]
 likelihood = "amplitude_marginalized"
 amplitude_parameter = "H0"
 amplitude_num_nodes = 1024
+
+[runs.z_peak]

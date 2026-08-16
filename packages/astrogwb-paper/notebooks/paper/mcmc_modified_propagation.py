@@ -77,7 +77,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
-from astrogwb_paper.config.loading import load_mapping
+from astrogwb_paper.config.loading import load_mapping, merge_run_overlay
 from astrogwb_paper.paths import paper_project_root
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.lines import Line2D
@@ -104,6 +104,7 @@ _CHAIN_DIR = Path("outputs/chains/modified-propagation-all-detectors")
 DEFAULT_XI0_CHAIN = _CHAIN_DIR / "Xi_0.nc"
 DEFAULT_XI0_N_CHAIN = _CHAIN_DIR / "ET-2L-aligned-CE-Hanford.nc"
 DEFAULT_H0_CHAIN = _CHAIN_DIR / "Xi_0-H0.nc"
+DEFAULT_CONFIG_PATH = Path("experiments/modified-propagation-all-detectors.toml")
 DEFAULT_BASE_CONFIG_PATH = Path("inputs/mcmc.base.toml")
 
 # Fiducial (injected) values marked as truths on the corner plots.
@@ -173,9 +174,7 @@ DEFAULT_DETECTOR_LABELS = [
     "ET-2L",
     r"ET-2L $+$ CE",
 ]
-DEFAULT_DETECTOR_XI0_N_CHAINS = [
-    _CHAIN_DIR / f"{name}.nc" for name in DEFAULT_NETWORKS
-]
+DEFAULT_DETECTOR_XI0_N_CHAINS = [_CHAIN_DIR / f"{name}.nc" for name in DEFAULT_NETWORKS]
 
 # %% [markdown]
 # ## Input and validation helpers
@@ -184,6 +183,15 @@ DEFAULT_DETECTOR_XI0_N_CHAINS = [
 # %%
 def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
+
+
+def _run_detectors(config: Mapping[str, Any], run: str) -> tuple[str, ...]:
+    """Return the detector list for ``run`` after experiment defaults merge."""
+    defaults = {
+        key: value for key, value in config.items() if key not in {"runs", "figure"}
+    }
+    overlay = merge_run_overlay(defaults, config["runs"][run])
+    return tuple(overlay["analysis"]["detectors"])
 
 
 def _parse_network_definition(value: str) -> tuple[str, tuple[str, ...]]:
@@ -724,6 +732,7 @@ def write_xi0_n_constraint_table(
 # %%
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--base-config", type=Path, default=DEFAULT_BASE_CONFIG_PATH)
     parser.add_argument("--xi0-chain", type=Path, default=DEFAULT_XI0_CHAIN)
     parser.add_argument("--xi0-n-chain", type=Path, default=DEFAULT_XI0_N_CHAIN)
@@ -818,7 +827,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 args = _parse_args()
 root = paper_project_root()
+experiment_config = load_mapping(_resolve_path(args.config, root))
+figure_config = experiment_config["figure"]
 base_config = load_mapping(_resolve_path(args.base_config, root))
+marginal_labels = list(figure_config["marginal_labels"])
+h0_labels = list(figure_config["h0_labels"])
+detector_labels = [entry["label"] for entry in figure_config["detector_posteriors"]]
 
 # %% [markdown]
 # ## Load the chains
@@ -837,13 +851,13 @@ chain_paths = [
 inference_data: list[xr.DataTree] = [load_inference_data(path) for path in chain_paths]
 validate_inference_data(
     inference_data,
-    args.marginal_labels,
+    marginal_labels,
     group=args.group,
     expected_count=3,
 )
 
 xi_n_data = [inference_data[1]]
-xi_n_labels = [args.marginal_labels[1]]
+xi_n_labels = [marginal_labels[1]]
 h0_data = [inference_data[2]]
 
 fiducials = {
@@ -851,15 +865,13 @@ fiducials = {
     "importance_relative_ess": args.importance_relative_ess,
 }
 
-networks = args.resolved_networks
-if len(args.detector_xi0_n_chains) != len(args.detector_labels):
+networks = {
+    entry["run"]: _run_detectors(experiment_config, entry["run"])
+    for entry in figure_config["detector_posteriors"]
+}
+if len(args.detector_xi0_n_chains) != len(detector_labels):
     raise ValueError(
-        "--detector-xi0-n-chains and --detector-labels must have equal length"
-    )
-if len(args.detector_xi0_n_chains) != len(networks):
-    raise ValueError(
-        "detector chain count must match --networks: "
-        f"received {len(args.detector_xi0_n_chains)} chains for {len(networks)} networks"
+        "--detector-xi0-n-chains length must match [figure.detector_posteriors]"
     )
 detector_xi0_n_paths = [
     _resolve_path(path, root) for path in args.detector_xi0_n_chains
@@ -867,7 +879,7 @@ detector_xi0_n_paths = [
 detector_xi0_n_data = [load_inference_data(path) for path in detector_xi0_n_paths]
 validate_inference_data(
     detector_xi0_n_data,
-    args.detector_labels,
+    detector_labels,
     required_vars=XI_N_VAR_NAMES,
     group=args.group,
     expected_count=len(networks),
@@ -917,7 +929,7 @@ xi_n_ess_corner_figure = plot_corner(
 # %%
 xi0_marginal_figure = plot_marginal_posteriors(
     inference_data,
-    args.marginal_labels,
+    marginal_labels,
     var_name="xi_0",
     group=args.group,
     colors=combo_colors(len(inference_data)),
@@ -932,7 +944,7 @@ xi0_marginal_figure = plot_marginal_posteriors(
 # \mathrm{left}) / 2$.
 
 # %%
-xi0_hdi = xi0_hdi_table(inference_data, args.marginal_labels, group=args.group)
+xi0_hdi = xi0_hdi_table(inference_data, marginal_labels, group=args.group)
 
 # %% [markdown]
 # ## Figure (iii): $\Xi_0$--$H_0$ corner
@@ -943,7 +955,7 @@ xi0_hdi = xi0_hdi_table(inference_data, args.marginal_labels, group=args.group)
 # %%
 h0_corner_figure = plot_corner(
     h0_data,
-    args.h0_labels,
+    h0_labels,
     H0_VAR_NAMES,
     group=args.group,
     fiducials=fiducials,
@@ -972,7 +984,7 @@ snr_table = compute_network_snrs(
 xi0_n_constraint_table = build_snr_xi0_n_constraint_table(
     networks,
     detector_xi0_n_data,
-    args.detector_labels,
+    detector_labels,
     snr_table,
     group=args.group,
 )
@@ -993,18 +1005,24 @@ print(xi0_n_constraint_table_latex(xi0_n_constraint_table))
 
 # %%
 outputs = {
-    _resolve_path(args.output_xi_n_corner_pdf, root): xi_n_corner_figure,
-    _resolve_path(args.output_xi_n_ess_corner_pdf, root): xi_n_ess_corner_figure,
-    _resolve_path(args.output_xi0_marginal_pdf, root): xi0_marginal_figure,
-    _resolve_path(args.output_h0_corner_pdf, root): h0_corner_figure,
+    _resolve_path(
+        Path(figure_config["output_xi_n_corner_pdf"]), root
+    ): xi_n_corner_figure,
+    _resolve_path(
+        Path(figure_config["output_xi_n_ess_corner_pdf"]), root
+    ): xi_n_ess_corner_figure,
+    _resolve_path(
+        Path(figure_config["output_xi0_marginal_pdf"]), root
+    ): xi0_marginal_figure,
+    _resolve_path(Path(figure_config["output_h0_corner_pdf"]), root): h0_corner_figure,
 }
 for output_path, figure in outputs.items():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
     print("saved figure:", output_path)
 
-xi0_n_csv_path = _resolve_path(args.output_xi0_n_csv, root)
-xi0_n_tex_path = _resolve_path(args.output_xi0_n_tex, root)
+xi0_n_csv_path = _resolve_path(Path(figure_config["output_csv"]), root)
+xi0_n_tex_path = _resolve_path(Path(figure_config["output_tex"]), root)
 write_xi0_n_constraint_table(xi0_n_constraint_table, xi0_n_csv_path, xi0_n_tex_path)
 print("saved constraint table:", xi0_n_csv_path)
 print("saved LaTeX table:", xi0_n_tex_path)

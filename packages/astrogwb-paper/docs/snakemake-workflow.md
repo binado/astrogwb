@@ -33,8 +33,8 @@ include these rules. A missing catalog therefore stops MCMC with a
 
 ## Experiment workflow
 
-Each committed `experiments/<experiment>/mcmc.<run>.toml` describes exactly one
-chain. The local `assemble_config` rule merges that file with
+Each committed `experiments/<experiment>.toml` describes one experiment. The
+local `assemble_config` rule merges `[runs.<run>]` with
 [`inputs/mcmc.base.toml`](../inputs/mcmc.base.toml), validates the result, and
 writes:
 

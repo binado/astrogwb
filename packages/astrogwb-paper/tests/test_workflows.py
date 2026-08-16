@@ -113,11 +113,9 @@ def test_config_assembly_merges_only_base_and_explicit_run(
 
     assert result.returncode == 0, result.stderr
     assert (
-        "knf inputs/mcmc.base.toml "
-        "experiments/H0-omega-m/mcmc.H0-Omega_m.toml" in result.stdout
+        "astrogwb-validate-config --base inputs/mcmc.base.toml "
+        "--run H0-Omega_m experiments/H0-omega-m.toml" in result.stdout
     )
-    assert "--strict -f json" in result.stdout
-    assert "astrogwb-validate-config -" in result.stdout
 
 
 def test_variable_injection_size_uses_three_catalogs(tmp_path: Path) -> None:
@@ -191,7 +189,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
     } <= rules
 
 
-def test_merger_rate_figure_accepts_braced_latex_labels(
+def test_merger_rate_figure_does_not_interpolate_latex_labels(
     tmp_path: Path,
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
@@ -210,8 +208,8 @@ def test_merger_rate_figure_accepts_braced_latex_labels(
     )
 
     assert result.returncode == 0, result.stderr
-    assert "\\mathcal{R}_0$" in result.stdout
-    assert "--prior-labels" in result.stdout
+    assert "rule plot_H0_merger_rate:" in result.stdout
+    assert "--prior-labels" not in result.stdout
 
 
 def test_standalone_figures_expand_parameterized_shell_commands(
@@ -244,6 +242,28 @@ def test_standalone_figures_expand_parameterized_shell_commands(
     assert "--f-min 2.0" in result.stdout
     assert "--h0 67.66" in result.stdout
     assert "--omega-gw-min 1e-15" in result.stdout
+
+
+def test_figure_path_is_a_valid_snakemake_target(
+    tmp_path: Path,
+) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
+
+    result = _snakemake(
+        "--snakefile",
+        str(MCMC_SNAKEFILE),
+        "--dry-run",
+        "--forceall",
+        "--cores",
+        "8",
+        "outputs/figures/H0-all-detectors/H0-by-detector.pdf",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rule plot_H0_all_detectors:" in result.stdout
+    assert result.stdout.count("rule run_mcmc:") == 6
 
 
 def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:

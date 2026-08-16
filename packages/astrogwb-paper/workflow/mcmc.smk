@@ -1,15 +1,13 @@
 import re
-import tomllib
 from pathlib import Path
 
 from astrogwb_paper.config.experiments import (
     DEFAULT_CATALOG,
-    DETECTOR_NETWORKS,
-    EXPERIMENTS,
     chain_path,
     chain_paths,
     config_path,
     experiment,
+    load_experiments,
 )
 from astrogwb_paper.config.loading import load_mapping
 
@@ -23,18 +21,14 @@ CONFIG_PATTERN = "outputs/configs/{experiment}/{run}.json"
 CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 SIDECAR_PATTERN = "outputs/chains/{experiment}/{run}.json"
 
-EXPERIMENT_PATTERN = "|".join(re.escape(name) for name in EXPERIMENTS)
+experiments = load_experiments()
+EXPERIMENT_PATTERN = "|".join(re.escape(name) for name in experiments)
 RUN_PATTERN = "|".join(
     re.escape(run)
     for run in dict.fromkeys(
-        run for specification in EXPERIMENTS.values() for run in specification.runs
+        run for specification in experiments.values() for run in specification.runs
     )
 )
-
-
-def _load_toml(path):
-    with Path(path).open("rb") as handle:
-        return tomllib.load(handle)
 
 
 def _run_spec(wildcards):
@@ -58,14 +52,6 @@ def run_outdir(wildcards):
     return str(Path("outputs/chains") / wildcards.experiment)
 
 
-def network_args():
-    return [
-        argument
-        for name, detectors in DETECTOR_NETWORKS.items()
-        for argument in ("--network", f"{name}={','.join(detectors)}")
-    ]
-
-
 def _chain(experiment_name, run):
     return str(chain_path(experiment_name, run))
 
@@ -74,62 +60,40 @@ def _catalog(name):
     return str(CATALOGS_DIR / name)
 
 
-def _figure_config(experiment_name):
-    return _load_toml(Path("experiments") / experiment_name / "figure.toml")
+def _figure(experiment_name):
+    specification = experiment(experiment_name)
+    if specification.figure is None:
+        raise ValueError(f"{experiment_name} has no [figure] table")
+    return specification.figure
 
 
-H0_DETECTOR_CONFIG = _figure_config("H0-all-detectors")
+H0_DETECTOR_CONFIG = _figure("H0-all-detectors")
 H0_DETECTOR_CHAINS = [
     _chain("H0-all-detectors", entry["run"])
     for entry in H0_DETECTOR_CONFIG["posteriors"]
 ]
-H0_DETECTOR_LABELS = [
-    entry["label"] for entry in H0_DETECTOR_CONFIG["posteriors"]
-]
-H0_DETECTOR_OUTPUTS = [
-    H0_DETECTOR_CONFIG["output_pdf"],
-    H0_DETECTOR_CONFIG["output_csv"],
-    H0_DETECTOR_CONFIG["output_tex"],
-]
+H0_DETECTOR_OUTPUTS = experiment("H0-all-detectors").figure_outputs()
 
-H0_RATE_CONFIG = _figure_config("H0-merger-rate")
+H0_RATE_CONFIG = _figure("H0-merger-rate")
 H0_RATE_CHAINS = [
     _chain("H0-merger-rate", H0_RATE_CONFIG["fixed_run"]),
     _chain("H0-merger-rate", H0_RATE_CONFIG["sampled_run"]),
 ]
-H0_RATE_OUTPUTS = [
-    H0_RATE_CONFIG["output_prior_pdf"],
-    H0_RATE_CONFIG["output_corner_pdf"],
-    H0_RATE_CONFIG["output_csv"],
-    H0_RATE_CONFIG["output_tex"],
-]
+H0_RATE_OUTPUTS = experiment("H0-merger-rate").figure_outputs()
 
-H0_OMEGA_CONFIG = _figure_config("H0-omega-m")
+H0_OMEGA_CONFIG = _figure("H0-omega-m")
 H0_OMEGA_CHAIN = _chain("H0-omega-m", H0_OMEGA_CONFIG["run"])
-H0_OMEGA_OUTPUTS = [
-    H0_OMEGA_CONFIG["output_corner_pdf"],
-    H0_OMEGA_CONFIG["output_ess_corner_pdf"],
-]
+H0_OMEGA_OUTPUTS = experiment("H0-omega-m").figure_outputs()
 
-PROPAGATION_CONFIG = _figure_config("modified-propagation-all-detectors")
+PROPAGATION_CONFIG = _figure("modified-propagation-all-detectors")
 PROPAGATION_DETECTOR_CHAINS = [
     _chain("modified-propagation-all-detectors", entry["run"])
     for entry in PROPAGATION_CONFIG["detector_posteriors"]
 ]
-PROPAGATION_DETECTOR_LABELS = [
-    entry["label"] for entry in PROPAGATION_CONFIG["detector_posteriors"]
-]
-PROPAGATION_OUTPUTS = [
-    PROPAGATION_CONFIG["output_xi_n_corner_pdf"],
-    PROPAGATION_CONFIG["output_xi_n_ess_corner_pdf"],
-    PROPAGATION_CONFIG["output_xi0_marginal_pdf"],
-    PROPAGATION_CONFIG["output_h0_corner_pdf"],
-    PROPAGATION_CONFIG["output_csv"],
-    PROPAGATION_CONFIG["output_tex"],
-]
+PROPAGATION_OUTPUTS = experiment("modified-propagation-all-detectors").figure_outputs()
 
 STANDALONE_CONFIG_PATH = Path("inputs/figures/standalone.toml")
-STANDALONE_CONFIG = _load_toml(STANDALONE_CONFIG_PATH)
+STANDALONE_CONFIG = load_mapping(STANDALONE_CONFIG_PATH)
 AMPLITUDE_TOY_PDF = STANDALONE_CONFIG["amplitude_toy"]["output_pdf"]
 FIDUCIAL_SPECTRUM = STANDALONE_CONFIG["fiducial_spectrum"]
 FIDUCIAL_SPECTRUM_OUTPUTS = [
@@ -150,8 +114,11 @@ STANDALONE_OUTPUTS = [
 FIDUCIALS = BASE["fiducials"]
 COSMOLOGY = BASE["cosmology"]
 ANALYSIS = BASE["analysis"]
-NETWORK_ARGS = network_args()
-NETWORK_NAMES = list(DETECTOR_NETWORKS)
+EXPERIMENT_TARGET_INPUTS = [
+    path
+    for specification in experiments.values()
+    for path in (specification.figure_outputs() or chain_paths(specification.name))
+]
 
 
 wildcard_constraints:
@@ -162,20 +129,6 @@ wildcard_constraints:
 localrules:
     experiments,
     standalone_figures,
-    H0_all_detectors,
-    H0_all_detectors_chains,
-    modified_propagation_all_detectors,
-    modified_propagation_all_detectors_chains,
-    H0_merger_rate,
-    H0_merger_rate_chains,
-    H0_omega_m,
-    H0_omega_m_chains,
-    astrophysical_parameters,
-    astrophysical_parameters_chains,
-    star_formation_peak,
-    star_formation_peak_chains,
-    variable_injection_size,
-    variable_injection_size_chains,
     assemble_config,
     plot_H0_all_detectors,
     plot_H0_merger_rate,
@@ -188,13 +141,7 @@ localrules:
 
 rule experiments:
     input:
-        H0_DETECTOR_OUTPUTS,
-        PROPAGATION_OUTPUTS,
-        H0_RATE_OUTPUTS,
-        H0_OMEGA_OUTPUTS,
-        chain_paths("astrophysical-parameters"),
-        chain_paths("star-formation-peak"),
-        chain_paths("variable-injection-size"),
+        EXPERIMENT_TARGET_INPUTS,
 
 
 rule standalone_figures:
@@ -202,86 +149,31 @@ rule standalone_figures:
         STANDALONE_OUTPUTS,
 
 
-rule H0_all_detectors:
-    input:
-        H0_DETECTOR_OUTPUTS,
+for specification in experiments.values():
 
+    rule:
+        name: specification.chains_target
+        localrule: True
+        input:
+            chain_paths(specification.name),
 
-rule H0_all_detectors_chains:
-    input:
-        chain_paths("H0-all-detectors"),
-
-
-rule modified_propagation_all_detectors:
-    input:
-        PROPAGATION_OUTPUTS,
-
-
-rule modified_propagation_all_detectors_chains:
-    input:
-        chain_paths("modified-propagation-all-detectors"),
-
-
-rule H0_merger_rate:
-    input:
-        H0_RATE_OUTPUTS,
-
-
-rule H0_merger_rate_chains:
-    input:
-        chain_paths("H0-merger-rate"),
-
-
-rule H0_omega_m:
-    input:
-        H0_OMEGA_OUTPUTS,
-
-
-rule H0_omega_m_chains:
-    input:
-        chain_paths("H0-omega-m"),
-
-
-rule astrophysical_parameters:
-    input:
-        chain_paths("astrophysical-parameters"),
-
-
-rule astrophysical_parameters_chains:
-    input:
-        chain_paths("astrophysical-parameters"),
-
-
-rule star_formation_peak:
-    input:
-        chain_paths("star-formation-peak"),
-
-
-rule star_formation_peak_chains:
-    input:
-        chain_paths("star-formation-peak"),
-
-
-rule variable_injection_size:
-    input:
-        chain_paths("variable-injection-size"),
-
-
-rule variable_injection_size_chains:
-    input:
-        chain_paths("variable-injection-size"),
+    rule:
+        name: specification.target
+        localrule: True
+        input:
+            specification.figure_outputs() or chain_paths(specification.name),
 
 
 rule assemble_config:
     input:
         base=str(BASE_CONFIG),
-        run=run_config_path,
+        experiment=run_config_path,
     output:
         config=CONFIG_PATTERN,
     shell:
-        "knf {input.base:q} {input.run:q} --strict -f json"
-        " | uv run --package astrogwb-paper astrogwb-validate-config -"
-        " --output {output.config:q}"
+        "uv run --package astrogwb-paper astrogwb-validate-config"
+        " --base {input.base:q} --run {wildcards.run:q}"
+        " {input.experiment:q} --output {output.config:q}"
 
 
 rule run_mcmc:
@@ -324,71 +216,52 @@ rule plot_H0_all_detectors:
     input:
         chains=H0_DETECTOR_CHAINS,
         catalog=_catalog(DEFAULT_CATALOG.name),
-        config="experiments/H0-all-detectors/figure.toml",
+        config="experiments/H0-all-detectors.toml",
         base=str(BASE_CONFIG),
     output:
         pdf=H0_DETECTOR_CONFIG["output_pdf"],
         csv=H0_DETECTOR_CONFIG["output_csv"],
         tex=H0_DETECTOR_CONFIG["output_tex"],
-    params:
-        labels=H0_DETECTOR_LABELS,
-        network_args=NETWORK_ARGS,
-        networks=NETWORK_NAMES,
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python notebooks/paper/mcmc_cosmological_parameters.py"
         " --section detectors --config {input.config:q}"
         " --base-config {input.base:q}"
         " --catalog {input.catalog:q} --detector-chains {input.chains:q}"
-        " --detector-labels {params.labels:q}"
-        " {params.network_args:q} --networks {params.networks:q}"
-        " --output-detector-pdf {output.pdf:q}"
-        " --output-csv {output.csv:q} --output-tex {output.tex:q}"
 
 
 rule plot_H0_merger_rate:
     input:
         chains=H0_RATE_CHAINS,
-        config="experiments/H0-merger-rate/figure.toml",
+        config="experiments/H0-merger-rate.toml",
         base=str(BASE_CONFIG),
     output:
         prior_pdf=H0_RATE_CONFIG["output_prior_pdf"],
         corner_pdf=H0_RATE_CONFIG["output_corner_pdf"],
         csv=H0_RATE_CONFIG["output_csv"],
         tex=H0_RATE_CONFIG["output_tex"],
-    params:
-        # Callable so snakemake does not treat LaTeX argument braces (e.g. the
-        # ``{R}`` in ``\mathcal{R}``) inside label strings as wildcards.
-        labels=lambda wildcards: H0_RATE_CONFIG["labels"],
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python notebooks/paper/mcmc_cosmological_parameters.py"
         " --section merger-rate --config {input.config:q}"
         " --base-config {input.base:q}"
-        " --prior-chains {input.chains:q} --prior-labels {params.labels:q}"
-        " --output-prior-pdf {output.prior_pdf:q}"
-        " --output-narrow-corner-pdf {output.corner_pdf:q}"
-        " --output-csv {output.csv:q} --output-tex {output.tex:q}"
+        " --prior-chains {input.chains:q}"
 
 
 rule plot_H0_omega_m:
     input:
         chain=H0_OMEGA_CHAIN,
-        config="experiments/H0-omega-m/figure.toml",
+        config="experiments/H0-omega-m.toml",
         base=str(BASE_CONFIG),
     output:
         corner_pdf=H0_OMEGA_CONFIG["output_corner_pdf"],
         ess_corner_pdf=H0_OMEGA_CONFIG["output_ess_corner_pdf"],
-    params:
-        label=H0_OMEGA_CONFIG["label"],
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python notebooks/paper/mcmc_cosmological_parameters.py"
         " --section omega-m --config {input.config:q}"
         " --base-config {input.base:q}"
-        " --omega-m-chain {input.chain:q} --omega-m-label {params.label:q}"
-        " --output-omega-m-corner-pdf {output.corner_pdf:q}"
-        " --output-omega-m-ess-corner-pdf {output.ess_corner_pdf:q}"
+        " --omega-m-chain {input.chain:q}"
 
 
 rule plot_modified_propagation:
@@ -404,7 +277,7 @@ rule plot_modified_propagation:
         ),
         detector_chains=PROPAGATION_DETECTOR_CHAINS,
         catalog=_catalog(DEFAULT_CATALOG.name),
-        config="experiments/modified-propagation-all-detectors/figure.toml",
+        config="experiments/modified-propagation-all-detectors.toml",
         base=str(BASE_CONFIG),
     output:
         xi_n_corner_pdf=PROPAGATION_CONFIG["output_xi_n_corner_pdf"],
@@ -413,29 +286,14 @@ rule plot_modified_propagation:
         h0_corner_pdf=PROPAGATION_CONFIG["output_h0_corner_pdf"],
         csv=PROPAGATION_CONFIG["output_csv"],
         tex=PROPAGATION_CONFIG["output_tex"],
-    params:
-        marginal_labels=PROPAGATION_CONFIG["marginal_labels"],
-        h0_labels=PROPAGATION_CONFIG["h0_labels"],
-        detector_labels=PROPAGATION_DETECTOR_LABELS,
-        network_args=NETWORK_ARGS,
-        networks=NETWORK_NAMES,
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python notebooks/paper/mcmc_modified_propagation.py"
-        " --base-config {input.base:q}"
+        " --config {input.config:q} --base-config {input.base:q}"
         " --xi0-chain {input.xi0_chain:q} --xi0-n-chain {input.xi0_n_chain:q}"
         " --h0-chain {input.h0_chain:q}"
-        " --marginal-labels {params.marginal_labels:q}"
-        " --h0-labels {params.h0_labels:q}"
         " --detector-xi0-n-chains {input.detector_chains:q}"
-        " --detector-labels {params.detector_labels:q}"
-        " {params.network_args:q} --networks {params.networks:q}"
         " --catalog {input.catalog:q}"
-        " --output-xi-n-corner-pdf {output.xi_n_corner_pdf:q}"
-        " --output-xi-n-ess-corner-pdf {output.xi_n_ess_corner_pdf:q}"
-        " --output-xi0-marginal-pdf {output.xi0_marginal_pdf:q}"
-        " --output-h0-corner-pdf {output.h0_corner_pdf:q}"
-        " --output-xi0-n-csv {output.csv:q} --output-xi0-n-tex {output.tex:q}"
 
 
 rule amplitude_toy:
@@ -462,9 +320,6 @@ rule fiducial_spectrum:
     output:
         spectrum_pdf=FIDUCIAL_SPECTRUM["output_pdf"],
         effective_psd_pdf=FIDUCIAL_SPECTRUM["output_effective_psd_pdf"],
-    params:
-        network_args=NETWORK_ARGS,
-        networks=NETWORK_NAMES,
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python notebooks/paper/fiducial_spectrum.py"

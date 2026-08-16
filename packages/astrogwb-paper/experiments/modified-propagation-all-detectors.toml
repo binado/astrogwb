@@ -1,3 +1,41 @@
+sampled_params = ["xi_0", "xi_n"]
+
+[runs.ET-triangular.analysis]
+detectors = ["E1", "E2", "E3"]
+
+[runs.ET-triangular-CE-Hanford.analysis]
+detectors = ["E1", "E2", "E3", "C1"]
+
+[runs.ET-2L-aligned.analysis]
+detectors = ["S1", "R1"]
+
+[runs.ET-2L-aligned-CE-Hanford.analysis]
+detectors = ["S1", "R1", "C1"]
+
+[runs.ET-2L-misaligned.analysis]
+detectors = ["S2", "R2"]
+
+[runs.ET-2L-misaligned-CE-Hanford.analysis]
+detectors = ["S2", "R2", "C1"]
+
+[runs.Xi_0]
+sampled_params = ["xi_0"]
+
+[runs.Xi_0.analysis]
+detectors = ["S1", "R1", "C1"]
+
+[runs.Xi_0-H0]
+sampled_params = ["xi_0", "H0"]
+
+[runs.Xi_0-H0.analysis]
+detectors = ["S1", "R1", "C1"]
+
+[runs.Xi_0-H0.priors.H0]
+type = "normal"
+loc = 67.66
+scale = 0.6766
+
+[figure]
 xi0_run = "Xi_0"
 xi0_n_run = "ET-2L-aligned-CE-Hanford"
 h0_run = "Xi_0-H0"
@@ -10,26 +48,26 @@ output_h0_corner_pdf = "outputs/figures/modified-propagation-all-detectors/Xi0-H
 output_csv = "outputs/figures/modified-propagation-all-detectors/Xi0-n-by-detector.csv"
 output_tex = "outputs/figures/modified-propagation-all-detectors/Xi0-n-by-detector.tex"
 
-[[detector_posteriors]]
+[[figure.detector_posteriors]]
 run = "ET-triangular"
 label = 'ET-$\Delta$'
 
-[[detector_posteriors]]
+[[figure.detector_posteriors]]
 run = "ET-triangular-CE-Hanford"
 label = 'ET-$\Delta$ $+$ CE'
 
-[[detector_posteriors]]
+[[figure.detector_posteriors]]
 run = "ET-2L-aligned"
 label = "ET-2L-par"
 
-[[detector_posteriors]]
+[[figure.detector_posteriors]]
 run = "ET-2L-aligned-CE-Hanford"
 label = 'ET-2L-par $+$ CE'
 
-[[detector_posteriors]]
+[[figure.detector_posteriors]]
 run = "ET-2L-misaligned"
 label = "ET-2L"
 
-[[detector_posteriors]]
+[[figure.detector_posteriors]]
 run = "ET-2L-misaligned-CE-Hanford"
 label = 'ET-2L $+$ CE'

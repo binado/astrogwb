@@ -2,29 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from astrogwb_paper.config.loading import load_mapping, merge_run_overlay
+from astrogwb_paper.paths import paper_project_root
 
 DEFAULT_CATALOG = Path("outputs/catalogs/bns-n16384-df1.h5")
-
-DETECTOR_NETWORKS: dict[str, tuple[str, ...]] = {
-    "ET-triangular": ("E1", "E2", "E3"),
-    "ET-triangular-CE-Hanford": ("E1", "E2", "E3", "C1"),
-    "ET-2L-aligned": ("S1", "R1"),
-    "ET-2L-aligned-CE-Hanford": ("S1", "R1", "C1"),
-    "ET-2L-misaligned": ("S2", "R2"),
-    "ET-2L-misaligned-CE-Hanford": ("S2", "R2", "C1"),
-}
+_EXPERIMENT_ONLY_KEYS = frozenset({"runs", "figure"})
 
 
 @dataclass(frozen=True)
 class Experiment:
-    """One explicit experiment and the runs it owns."""
+    """One explicit experiment loaded from ``experiments/<name>.toml``."""
 
     name: str
+    path: Path
     runs: tuple[str, ...]
-    has_figures: bool = False
-    catalogs: tuple[tuple[str, Path], ...] = ()
+    run_overlays: dict[str, dict[str, Any]]
+    defaults: dict[str, Any]
+    figure: dict[str, Any] | None
 
     @property
     def target(self) -> str:
@@ -40,68 +39,93 @@ class Experiment:
         """Return the prebuilt catalog consumed by ``run``."""
         if run not in self.runs:
             raise ValueError(f"unknown run {self.name}/{run}")
-        return dict(self.catalogs).get(run, DEFAULT_CATALOG)
+        catalog = self.run_overlays[run].get("catalog")
+        return Path(catalog) if catalog else DEFAULT_CATALOG
+
+    def figure_outputs(self) -> list[str]:
+        """Return declared figure output paths, or an empty list."""
+        if self.figure is None:
+            return []
+        return [
+            str(value)
+            for key, value in self.figure.items()
+            if key.startswith("output_")
+        ]
 
 
-EXPERIMENTS: dict[str, Experiment] = {
-    experiment.name: experiment
-    for experiment in (
-        Experiment(
-            name="H0-all-detectors",
-            runs=tuple(DETECTOR_NETWORKS),
-            has_figures=True,
-        ),
-        Experiment(
-            name="modified-propagation-all-detectors",
-            runs=(*DETECTOR_NETWORKS, "Xi_0", "Xi_0-H0"),
-            has_figures=True,
-        ),
-        Experiment(
-            name="H0-merger-rate",
-            runs=("fixed", "sampled"),
-            has_figures=True,
-        ),
-        Experiment(
-            name="H0-omega-m",
-            runs=("H0-Omega_m",),
-            has_figures=True,
-        ),
-        Experiment(
-            name="astrophysical-parameters",
-            runs=("Madau-Dickinson",),
-        ),
-        Experiment(
-            name="star-formation-peak",
-            runs=("z_peak",),
-        ),
-        Experiment(
-            name="variable-injection-size",
-            runs=("n8192", "n16384", "n32768"),
-            catalogs=(
-                ("n8192", Path("outputs/catalogs/bns-n8192-df1.h5")),
-                ("n16384", Path("outputs/catalogs/bns-n16384-df1.h5")),
-                ("n32768", Path("outputs/catalogs/bns-n32768-df1.h5")),
-            ),
-        ),
+def load_experiment(path: Path) -> Experiment:
+    """Load one experiment TOML into an :class:`Experiment`."""
+    raw = load_mapping(path)
+    runs_raw = raw.get("runs")
+    if not isinstance(runs_raw, Mapping) or not runs_raw:
+        raise ValueError(f"{path} must define a non-empty [runs] table")
+    run_overlays = {
+        name: dict(overlay) if isinstance(overlay, Mapping) else {}
+        for name, overlay in runs_raw.items()
+    }
+    figure = raw.get("figure")
+    return Experiment(
+        name=path.stem,
+        path=path,
+        runs=tuple(run_overlays),
+        run_overlays=run_overlays,
+        defaults={
+            key: value for key, value in raw.items() if key not in _EXPERIMENT_ONLY_KEYS
+        },
+        figure=dict(figure) if isinstance(figure, Mapping) else None,
     )
-}
+
+
+def load_experiments(root: str | None = None) -> dict[str, Experiment]:
+    """Discover committed experiments from ``experiments/*.toml``."""
+    directory = Path(root) if root is not None else paper_project_root() / "experiments"
+    leftovers = sorted(path for path in directory.glob("*/*.toml"))
+    if leftovers:
+        nested = ", ".join(str(path.relative_to(directory)) for path in leftovers)
+        raise ValueError(
+            f"experiment inventory must be flat *.toml files; found nested {nested}"
+        )
+    return {
+        spec.name: spec
+        for spec in (load_experiment(path) for path in sorted(directory.glob("*.toml")))
+    }
 
 
 def experiment(name: str) -> Experiment:
     """Return a named experiment or raise a user-facing error."""
+    experiments = load_experiments()
     try:
-        return EXPERIMENTS[name]
+        return experiments[name]
     except KeyError:
-        choices = ", ".join(EXPERIMENTS)
+        choices = ", ".join(experiments)
         raise ValueError(
             f"unknown experiment {name!r}; choose from {choices}"
         ) from None
 
 
+def overlay_for(
+    spec: Experiment,
+    run: str,
+    *,
+    base: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Merge base, experiment defaults, and one run overlay into a raw config."""
+    if run not in spec.runs:
+        raise ValueError(f"unknown run {spec.name}/{run}")
+    run_overlay = {
+        key: value for key, value in spec.run_overlays[run].items() if key != "catalog"
+    }
+    merged = merge_run_overlay(spec.defaults, run_overlay)
+    if base is None:
+        return merged
+    return merge_run_overlay(base, merged)
+
+
 def config_path(experiment_name: str, run: str) -> Path:
-    """Return the committed one-run TOML path."""
-    experiment(experiment_name).catalog_for(run)
-    return Path("experiments") / experiment_name / f"mcmc.{run}.toml"
+    """Return the committed experiment TOML path."""
+    spec = experiment(experiment_name)
+    spec.catalog_for(run)
+    return Path("experiments") / f"{spec.name}.toml"
 
 
 def merged_config_path(experiment_name: str, run: str) -> Path:

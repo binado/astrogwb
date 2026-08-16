@@ -10,9 +10,10 @@ Usage::
     uv run astrogwb-workflow mcmc H0-all-detectors --profile slurm --submit
     uv run astrogwb-workflow paper --submit
 
-MCMC runs take committed experiment names. Each experiment owns explicit
-``mcmc.<run>.toml`` files; ``assemble_config`` merges each one with the shared
-base as part of the same DAG that samples chains and builds local figures.
+MCMC runs take committed experiment names. Each experiment is one TOML with
+explicit ``[runs.<id>]`` overlays; ``assemble_config`` merges the selected run
+with the shared base as part of the same DAG that samples chains and builds
+local figures.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
-from astrogwb_paper.config.experiments import EXPERIMENTS, experiment
+from astrogwb_paper.config.experiments import experiment, load_experiments
 from astrogwb_paper.paths import paper_project_root
 
 PROFILE_CHOICES = ("local", "slurm", "slurm-cpu")
@@ -235,7 +236,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     mcmc.add_argument(
         "experiments",
         nargs="*",
-        choices=tuple(EXPERIMENTS),
+        choices=tuple(load_experiments()),
         help=("Committed experiment names. Omit to run every experiment."),
     )
     mcmc.add_argument(

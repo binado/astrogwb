@@ -1,3 +1,16 @@
+[runs.fixed]
+sampled_params = ["H0"]
+
+[runs.fixed.analysis]
+detectors = ["S1", "R1", "C1"]
+
+[runs.sampled]
+sampled_params = ["H0", "local_merger_rate"]
+
+[runs.sampled.analysis]
+detectors = ["S1", "R1", "C1"]
+
+[figure]
 fixed_run = "fixed"
 sampled_run = "sampled"
 labels = ['$H_0$ (fixed $\mathcal{R}_0$)', '$H_0 + \mathcal{R}_0$ (narrow prior)']
@@ -6,10 +19,10 @@ output_corner_pdf = "outputs/figures/H0-merger-rate/H0-merger-rate-corner.pdf"
 output_csv = "outputs/figures/H0-merger-rate/H0-merger-rate.csv"
 output_tex = "outputs/figures/H0-merger-rate/H0-merger-rate.tex"
 
-[axis]
+[figure.axis]
 xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'
 ylabel = "Posterior density"
 
-[legend]
+[figure.legend]
 loc = "best"
 frameon = false
