@@ -129,13 +129,17 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
         amplitude_marginalized_model,
         spectral_density_model,
     )
-    from astrogwb.waveform import polarization_power as compute_polarization_power
+    from astrogwb.waveform import (
+        apply_gw_distance_to_waveforms,
+    )
+    from astrogwb.waveform import (
+        polarization_power as compute_polarization_power,
+    )
     from numpyro.infer import MCMC, NUTS
     from numpyro.infer.initialization import init_to_value
     from pluscross import load_catalog
 
     from astrogwb_paper.amplitude import build_amplitude_marginalization
-    from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
     from astrogwb_paper.priors import build_prior
 
     analysis = config.analysis
@@ -146,7 +150,7 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     # propagation parameters before reducing to polarization power, so the
     # importance weights below carry only the EM-distance ratio.
     catalog = load_catalog(catalog_path)
-    catalog = apply_gw_distance_at_fiducial(
+    catalog = apply_gw_distance_to_waveforms(
         catalog,
         xi_0=float(config.fiducials["xi_0"]),
         xi_n=float(config.fiducials["xi_n"]),

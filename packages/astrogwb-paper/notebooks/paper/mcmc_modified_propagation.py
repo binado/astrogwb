@@ -75,8 +75,12 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.utils import years_to_seconds
-from astrogwb.waveform import polarization_power as compute_polarization_power
-from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
+from astrogwb.waveform import (
+    apply_gw_distance_to_waveforms,
+)
+from astrogwb.waveform import (
+    polarization_power as compute_polarization_power,
+)
 from astrogwb_paper.config.loading import load_mapping, merge_run_overlay
 from astrogwb_paper.paths import paper_project_root
 from matplotlib.axes import Axes as MplAxes
@@ -547,7 +551,7 @@ def compute_network_snrs(
     catalog = load_catalog(catalog_path)
     # Rescale to live-GW distances at the fiducial modified-propagation
     # parameters before reducing to polarization power.
-    catalog = apply_gw_distance_at_fiducial(
+    catalog = apply_gw_distance_to_waveforms(
         catalog,
         xi_0=float(fiducials["xi_0"]),
         xi_n=float(fiducials["xi_n"]),
