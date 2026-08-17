@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 from astrogwb_paper.config.loading import deep_merge, load_mapping, merge_run_overlay
 from astrogwb_paper.config.mcmc import (
-    UniformPrior,
     build_run_config,
     config_sha256,
     prior_to_spec,
@@ -155,9 +154,11 @@ def test_marginalized_config_extracts_amplitude_prior_and_preserves_invariant() 
 
     assert config.analysis.amplitude_parameter == "H0"
     assert config.amplitude_prior is not None
-    assert prior_to_spec(config.amplitude_prior) == UniformPrior(
-        type="uniform", low=20.0, high=140.0
-    )
+    assert prior_to_spec(config.amplitude_prior) == {
+        "type": "uniform",
+        "low": 20.0,
+        "high": 140.0,
+    }
     assert "H0" not in config.priors
     assert set(config.priors) == set(config.sampled_params)
     # H0 is not sampled, but it is still a fiducial constant the model pins to.
@@ -269,7 +270,7 @@ def test_merge_run_overlay_replaces_named_priors_wholesale() -> None:
         "scale": 0.6766,
     }
     config = build_run_config(merged)
-    assert prior_to_spec(config.priors["H0"]).model_dump() == merged["priors"]["H0"]
+    assert prior_to_spec(config.priors["H0"]) == merged["priors"]["H0"]
 
 
 def test_prior_spec_rejects_stale_keys_from_a_cross_type_override() -> None:

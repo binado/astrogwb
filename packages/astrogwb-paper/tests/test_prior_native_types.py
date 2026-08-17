@@ -91,7 +91,6 @@ from pathlib import Path
 
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import (
-    UniformPrior,
     build_run_config,
     prior_to_spec,
 )
@@ -99,11 +98,10 @@ from astrogwb_paper.config.mcmc import (
 config = build_run_config(load_mapping(Path(sys.argv[1])))
 
 # Dists are materialized and round-trip to specs -- all pre-JAX.
-assert isinstance(prior_to_spec(config.priors["H0"]), UniformPrior)
 specs = {
-    name: prior_to_spec(prior).model_dump(mode="json")
-    for name, prior in config.priors.items()
+    name: prior_to_spec(prior) for name, prior in config.priors.items()
 }
+assert specs["H0"]["type"] == "uniform"
 json.dumps(config.model_dump(mode="json"))
 
 # Only now touch JAX. Surviving set_host_device_count proves the backend was

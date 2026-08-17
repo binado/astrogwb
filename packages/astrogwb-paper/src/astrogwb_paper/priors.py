@@ -14,13 +14,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from astrogwb_paper.config.mcmc import PriorSpec, materialize_prior
+from astrogwb_paper.config.mcmc import materialize_prior
 
 if TYPE_CHECKING:
     from numpyro.distributions import Distribution
 
 
-def build_prior(spec: PriorSpec | Mapping[str, Any]) -> Distribution:
+def build_prior(spec: Mapping[str, Any] | Distribution) -> Distribution:
     """Materialize a single prior spec into a ``numpyro`` distribution.
 
     Supported ``type`` values:
@@ -31,10 +31,10 @@ def build_prior(spec: PriorSpec | Mapping[str, Any]) -> Distribution:
     Parameters
     ----------
     spec:
-        A validated :data:`~astrogwb_paper.config.mcmc.PriorSpec`, or a raw
-        mapping such as ``{"type": "uniform", "low": 0.0, "high": 1.0}`` read
-        straight from a config file (the form notebooks hold). Unsupported
-        ``type`` values raise a ``pydantic.ValidationError``.
+        A raw mapping such as ``{"type": "uniform", "low": 0.0, "high": 1.0}``
+        read straight from a config file (the form notebooks hold), or an
+        already-built distribution, passed through unchanged. Unsupported
+        ``type`` values raise a ``ValueError``.
 
     Returns
     -------

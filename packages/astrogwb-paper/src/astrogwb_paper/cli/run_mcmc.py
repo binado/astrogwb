@@ -402,10 +402,7 @@ def build_run_record(
         "posterior_params": list(config.posterior_params),
         "fiducials": config.fiducials,
         "constants": config.constants,
-        "priors": {
-            name: prior_to_spec(prior).model_dump(mode="json")
-            for name, prior in config.priors.items()
-        },
+        "priors": {name: prior_to_spec(prior) for name, prior in config.priors.items()},
         "cosmology": config.cosmology.model_dump(mode="json"),
         "band": {
             "f_min": config.analysis.f_min,
@@ -418,7 +415,7 @@ def build_run_record(
     if config.analysis.likelihood == "amplitude_marginalized":
         record["amplitude_parameter"] = config.analysis.amplitude_parameter
         record["amplitude_prior"] = (
-            prior_to_spec(config.amplitude_prior).model_dump(mode="json")
+            prior_to_spec(config.amplitude_prior)
             if config.amplitude_prior is not None
             else None
         )

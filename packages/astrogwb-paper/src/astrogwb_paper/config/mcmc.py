@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -24,7 +24,6 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
-    TypeAdapter,
     model_validator,
 )
 
@@ -40,50 +39,47 @@ _STRICT = ConfigDict(frozen=True, extra="forbid")
 AmplitudeParameter = Literal["H0", "local_merger_rate"]
 
 
-class _PriorBase(BaseModel):
-    model_config = _STRICT
-
-
-class UniformPrior(_PriorBase):
-    type: Literal["uniform"]
-    low: float
-    high: float
-
-
-class NormalPrior(_PriorBase):
-    type: Literal["normal"]
-    loc: float
-    scale: float
-
-
-# Discriminated on `type`, so an unsupported prior kind fails here -- before
-# anything numpyro is even imported.
-PriorSpec = Annotated[UniformPrior | NormalPrior, Field(discriminator="type")]
-
-_SPEC_ADAPTER: TypeAdapter[PriorSpec] = TypeAdapter(PriorSpec)
+# Wire protocol for the priors tables: tag name -> ordered parameter keys.
+# Hand-rolled inside materialize_prior (no pydantic spec models): pydantic
+# could never construct distributions from raw config dicts natively anyway
+# (they are not models), so the mapping validation lives here, next to the
+# construction it guards. Unsupported tags fail before numpyro is imported.
+_PRIOR_PARAMS: dict[str, tuple[str, ...]] = {
+    "uniform": ("low", "high"),
+    "normal": ("loc", "scale"),
+}
 
 
 def materialize_prior(value: Any) -> Distribution:
     """Materialize a prior spec into a live ``numpyro`` distribution.
 
-    Accepts a raw mapping (``{"type": "uniform", "low": ..., ...}``), a
-    validated :data:`PriorSpec` model, or an already-built distribution
-    (passed through unchanged, so re-validation is idempotent). Spec
-    validation happens *before* numpyro is imported, so an unsupported
-    ``type`` fails fast and cheap; construction itself only wraps Python
-    floats and never evaluates a JAX op.
+    Accepts a raw mapping (``{"type": "uniform", "low": ..., ...}``) or an
+    already-built distribution (passed through unchanged, so re-validation is
+    idempotent). Spec validation happens *before* numpyro is imported, so an
+    unsupported ``type`` fails fast and cheap; construction itself only wraps
+    Python floats and never evaluates a JAX op.
     """
-    if isinstance(value, (UniformPrior, NormalPrior, Mapping)):
-        spec = _SPEC_ADAPTER.validate_python(value)
+    if isinstance(value, Mapping):
+        kind = value.get("type")
+        if kind not in _PRIOR_PARAMS:
+            raise ValueError(
+                f"prior type {kind!r} does not match any of the expected tags: "
+                f"{sorted(_PRIOR_PARAMS)}"
+            )
+        params = _PRIOR_PARAMS[kind]
+        missing = [p for p in params if p not in value]
+        if missing:
+            raise ValueError(f"missing required key(s) {missing} for a {kind} prior")
+        extra = sorted({str(k) for k in value} - {"type", *params})
+        if extra:
+            raise ValueError(
+                f"Extra inputs are not permitted for a {kind} prior: {extra}"
+            )
+
         import numpyro.distributions as dist
 
-        match spec:
-            case UniformPrior():
-                return dist.Uniform(low=spec.low, high=spec.high)
-            case NormalPrior():
-                return dist.Normal(loc=spec.loc, scale=spec.scale)
-            case _:  # pragma: no cover - exhaustive over PriorSpec
-                assert_never(spec)
+        cls = dist.Uniform if kind == "uniform" else dist.Normal
+        return cls(**{name: float(value[name]) for name in params})
 
     import numpyro.distributions as dist
 
@@ -91,11 +87,11 @@ def materialize_prior(value: Any) -> Distribution:
         return value  # already materialized
     raise ValueError(
         f"cannot materialize a prior from {type(value).__name__!r}; expected a "
-        "spec mapping, a UniformPrior/NormalPrior, or a numpyro Distribution"
+        "spec mapping or a numpyro Distribution"
     )
 
 
-def prior_to_spec(prior: Distribution) -> PriorSpec:
+def prior_to_spec(prior: Distribution) -> dict[str, str | float]:
     """Serialize a materialized prior back to its wire-format spec.
 
     Inverse of :func:`materialize_prior` for the spec-constructed
@@ -106,13 +102,17 @@ def prior_to_spec(prior: Distribution) -> PriorSpec:
 
     match prior:
         case dist.Uniform():
-            return UniformPrior(
-                type="uniform", low=float(prior.low), high=float(prior.high)
-            )
+            return {
+                "type": "uniform",
+                "low": float(prior.low),
+                "high": float(prior.high),
+            }
         case dist.Normal():
-            return NormalPrior(
-                type="normal", loc=float(prior.loc), scale=float(prior.scale)
-            )
+            return {
+                "type": "normal",
+                "loc": float(prior.loc),
+                "scale": float(prior.scale),
+            }
         case _:
             raise TypeError(
                 f"cannot serialize {type(prior).__name__!r} as a prior spec"
@@ -127,14 +127,14 @@ else:
     _PriorDists = Any
 
 # Native pydantic wire for live prior distributions: validate from spec
-# mappings/models/dists, serialize back to the discriminated spec so
-# `model_dump(mode="json")`, `save_config`, and `config_sha256` stay
-# canonical. Numpyro types deliberately stay out of the runtime annotation
-# (hence `Any`) so schema building never imports numpyro at module load.
+# mappings/dists, serialize back to the spec dict so `model_dump(mode="json")`,
+# `save_config`, and `config_sha256` stay canonical. Numpyro types deliberately
+# stay out of the runtime annotation (hence `Any`) so schema building never
+# imports numpyro at module load.
 PriorDistribution = Annotated[
     _PriorDists,
     BeforeValidator(materialize_prior),
-    PlainSerializer(prior_to_spec, return_type=PriorSpec),
+    PlainSerializer(prior_to_spec),
 ]
 
 
