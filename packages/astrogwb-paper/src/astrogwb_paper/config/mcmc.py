@@ -200,8 +200,12 @@ class RunConfig(BaseModel):
     seed: int = 42
     observation_time: float = 1.0
     fiducials: dict[str, float]
-    priors: dict[str, PriorDistribution]  # parameter name -> prior distribution
-    # Unset (empty) -> default to the keys present in [priors]; resolved below.
+    # parameter name -> prior distribution. Includes the amplitude parameter
+    # when marginalized (it needs a prior but is not sampled); the sampler
+    # consumes only `{priors[name] for name in sampled_params}`.
+    priors: dict[str, PriorDistribution]
+    # Unset (empty) -> default to every key in [priors] except a marginalized
+    # amplitude parameter; resolved below.
     sampled_params: tuple[str, ...] = ()
     analysis: AnalysisConfig
     cosmology: CosmoConfig
@@ -209,20 +213,15 @@ class RunConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     # Derived in the validator (every fiducial not sampled).
     constants: dict[str, float] = Field(default_factory=dict)
-    # Derived in the validator: the amplitude parameter's prior, held out
-    # of `priors` so `set(priors) == set(sampled_params)` keeps holding. Also
-    # accepted as input so configs written by save_config reload unchanged.
-    amplitude_prior: PriorDistribution | None = None
 
     @model_validator(mode="after")
     def _resolve_sampled_and_constants(self) -> RunConfig:
         if not self.fiducials:
             raise ValueError("config must define a non-empty [fiducials] table")
-        if not self.priors and self.amplitude_prior is None:
+        if not self.priors:
             raise ValueError("config must define at least one [priors.<param>] table")
 
         priors = dict(self.priors)
-        amplitude_prior: Distribution | None = None
         amplitude_parameter = self.analysis.amplitude_parameter
         if amplitude_parameter is not None:
             if amplitude_parameter in self.sampled_params:
@@ -235,20 +234,15 @@ class RunConfig(BaseModel):
                     f"analysis.amplitude_parameter {amplitude_parameter!r} "
                     "missing from [fiducials]"
                 )
-            if amplitude_parameter in priors:
-                amplitude_prior = priors.pop(amplitude_parameter)
-            elif self.amplitude_prior is not None:
-                # Reloaded save_config output: the pop above already happened
-                # at generation time, so the prior arrives in `amplitude_prior`.
-                amplitude_prior = self.amplitude_prior
-            else:
+            if amplitude_parameter not in priors:
                 raise ValueError(
                     f"analysis.amplitude_parameter {amplitude_parameter!r} needs "
-                    "a [priors.*] table (or an `amplitude_prior` entry in a "
-                    "config previously written by save_config)"
+                    "a [priors.*] table"
                 )
 
-        sampled = self.sampled_params or tuple(priors)
+        sampled = self.sampled_params or tuple(
+            p for p in priors if p != amplitude_parameter
+        )
         missing_priors = [p for p in sampled if p not in priors]
         if missing_priors:
             raise ValueError(
@@ -258,13 +252,15 @@ class RunConfig(BaseModel):
         if missing_fid:
             raise ValueError(f"sampled_params missing from [fiducials]: {missing_fid}")
 
+        # set(priors) == set(sampled_params) | ({amplitude_parameter} or empty).
         aligned_priors = {name: priors[name] for name in sampled}
+        if amplitude_parameter is not None:
+            aligned_priors[amplitude_parameter] = priors[amplitude_parameter]
         constants = {k: v for k, v in self.fiducials.items() if k not in sampled}
 
         object.__setattr__(self, "sampled_params", sampled)
         object.__setattr__(self, "priors", aligned_priors)
         object.__setattr__(self, "constants", constants)
-        object.__setattr__(self, "amplitude_prior", amplitude_prior)
         return self
 
     @property
@@ -274,9 +270,9 @@ class RunConfig(BaseModel):
         A superset of `sampled_params`, which means strictly "parameters NUTS
         has a latent for". Under an amplitude-marginalized likelihood the two
         sets differ: the amplitude parameter is integrated out of the potential
-        and has no latent, so it must stay out of `sampled_params` (it drives
-        `init_to_value` and the `set(priors) == set(sampled_params)`
-        invariant), yet post-processing reconstructs it into the posterior via
+        and has no latent, so it must stay out of `sampled_params` (its prior
+        still lives in `priors`, driving `init_to_value` only via
+        `fiducials`), yet post-processing reconstructs it into the posterior via
         `amplitude_reconstruction_model`. Use this for anything describing the
         saved chain -- plot `var_names`, run records, summaries.
         """

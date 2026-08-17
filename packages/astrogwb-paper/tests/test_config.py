@@ -146,31 +146,29 @@ def test_default_likelihood_configs_still_validate() -> None:
 
     assert config.analysis.likelihood == "default"
     assert config.analysis.amplitude_parameter is None
-    assert config.amplitude_prior is None
 
 
-def test_marginalized_config_extracts_amplitude_prior_and_preserves_invariant() -> None:
+def test_marginalized_config_keeps_amplitude_prior_in_priors() -> None:
     config = build_run_config(_marginalized_raw())
 
     assert config.analysis.amplitude_parameter == "H0"
-    assert config.amplitude_prior is not None
-    assert prior_to_spec(config.amplitude_prior) == {
+    assert "H0" not in config.sampled_params
+    assert prior_to_spec(config.priors["H0"]) == {
         "type": "uniform",
         "low": 20.0,
         "high": 140.0,
     }
-    assert "H0" not in config.priors
-    assert set(config.priors) == set(config.sampled_params)
+    # Invariant: priors = sampled params + the marginalized amplitude parameter.
+    assert set(config.priors) == set(config.sampled_params) | {"H0"}
     # H0 is not sampled, but it is still a fiducial constant the model pins to.
     assert config.constants["H0"] == 67.66
 
 
 def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
-    """generate_configs() writes normalized configs; run_mcmc must reload them.
+    """assemble_config writes normalized configs; run_mcmc must reload them.
 
-    Regression guard: the validator pops the amplitude prior out of ``priors``,
-    so a saved JSON carries it only under ``amplitude_prior`` and used to be
-    rejected on reload as "needs a [priors.*] table".
+    The amplitude prior lives in ``priors``, so the round trip is symmetric:
+    a saved JSON reloads unchanged without any dedicated amplitude field.
     """
     config = build_run_config(_marginalized_raw())
     path = tmp_path / "run.json"
@@ -179,11 +177,6 @@ def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
     reloaded = build_run_config(load_mapping(path))
 
     # Distributions have no value equality; compare their wire-format specs.
-    assert config.amplitude_prior is not None
-    assert reloaded.amplitude_prior is not None
-    assert prior_to_spec(reloaded.amplitude_prior) == prior_to_spec(
-        config.amplitude_prior
-    )
     assert {name: prior_to_spec(prior) for name, prior in reloaded.priors.items()} == {
         name: prior_to_spec(prior) for name, prior in config.priors.items()
     }

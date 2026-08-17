@@ -55,11 +55,12 @@ def test_every_base_and_run_merge_is_a_valid_run_config() -> None:
         for run in specification.runs:
             config = build_run_config(overlay_for(specification, run, base=base))
 
-            assert set(config.priors) == set(config.sampled_params)
+            amplitude_parameter = config.analysis.amplitude_parameter
+            amplitude_priors = {amplitude_parameter} if amplitude_parameter else set()
+            assert set(config.priors) == set(config.sampled_params) | amplitude_priors
             assert set(config.sampled_params) <= set(config.fiducials)
             if config.analysis.likelihood == "amplitude_marginalized":
-                assert config.analysis.amplitude_parameter is not None
-                assert config.amplitude_prior is not None
+                assert amplitude_parameter is not None
 
 
 def test_run_paths_are_one_to_one_with_the_source_toml() -> None:

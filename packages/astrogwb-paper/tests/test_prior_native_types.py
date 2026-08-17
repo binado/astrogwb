@@ -1,7 +1,7 @@
 """Tests for the native ``PriorDistribution`` fields on ``RunConfig``.
 
-``RunConfig.priors`` and ``RunConfig.amplitude_prior`` hold live numpyro
-``Uniform``/``Normal`` distributions via a ``BeforeValidator`` +
+``RunConfig.priors`` (including the marginalized amplitude parameter) holds
+live numpyro ``Uniform``/``Normal`` distributions via a ``BeforeValidator`` +
 ``PlainSerializer`` pair (see ``astrogwb_paper.config.mcmc.PriorDistribution``).
 These tests pin the two properties that make that safe to do at config-parse
 time:

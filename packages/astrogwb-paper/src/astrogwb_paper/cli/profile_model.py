@@ -173,7 +173,9 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     )
 
     # `config.priors` already holds live distributions (see PriorDistribution).
-    priors = config.priors
+    # Project to the sampled parameters: when marginalized, `priors` also
+    # carries the amplitude parameter, which must NOT get a NUTS latent.
+    priors = {name: config.priors[name] for name in config.sampled_params}
     if analysis.likelihood == "amplitude_marginalized":
         assert analysis.amplitude_parameter is not None
         marginalization = build_amplitude_marginalization(config)

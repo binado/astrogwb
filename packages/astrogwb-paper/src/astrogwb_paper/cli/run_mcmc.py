@@ -246,7 +246,9 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
 
     # --- Build the model and sampler -----------------------------------------
     # `config.priors` already holds live distributions (see PriorDistribution).
-    priors = config.priors
+    # Project to the sampled parameters: when marginalized, `priors` also
+    # carries the amplitude parameter, which must NOT get a NUTS latent.
+    priors = {name: config.priors[name] for name in config.sampled_params}
     marginalization = None
     if analysis.likelihood == "amplitude_marginalized":
         assert analysis.amplitude_parameter is not None
@@ -414,11 +416,6 @@ def build_run_record(
     }
     if config.analysis.likelihood == "amplitude_marginalized":
         record["amplitude_parameter"] = config.analysis.amplitude_parameter
-        record["amplitude_prior"] = (
-            prior_to_spec(config.amplitude_prior)
-            if config.amplitude_prior is not None
-            else None
-        )
         record["amplitude_num_nodes"] = config.analysis.amplitude_num_nodes
         record["amplitude_prior_span_sigma"] = (
             config.analysis.amplitude_prior_span_sigma

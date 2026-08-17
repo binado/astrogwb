@@ -59,8 +59,9 @@ def test_posterior_params_adds_the_marginalized_amplitude_parameter() -> None:
 
     # H0 has no NUTS latent, so it must stay out of sampled_params...
     assert "H0" not in config.sampled_params
-    assert "H0" not in config.priors
-    # ...but the reconstruction writes it into the saved posterior group.
+    # ...while its prior still lives in priors for the marginalization...
+    assert "H0" in config.priors
+    # ...and the reconstruction writes it into the saved posterior group.
     assert config.posterior_params == (*config.sampled_params, "H0")
 
 
