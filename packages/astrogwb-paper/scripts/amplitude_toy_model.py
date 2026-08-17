@@ -32,7 +32,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
-from _paper_style import TRUTH, use_paper_style
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import (
     apply_frequency_mask,
@@ -45,6 +44,7 @@ from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.config.hashing import file_sha256
 from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 from numpyro.infer import MCMC, NUTS

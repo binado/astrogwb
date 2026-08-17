@@ -1,9 +1,8 @@
-"""Shared paper-figure styling for the scripts in this directory.
+"""Shared paper-figure styling for ``astrogwb-paper``.
 
 Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
 style (solid), and a loader for ``paper.mplstyle``. This module is independent
-of the ``astrogwb`` package: it imports nothing from it, and nothing in the
-package imports this.
+of the ``astrogwb`` package: it imports nothing from it.
 
 Convention:
 - category accents are the default color for single-posterior figures;

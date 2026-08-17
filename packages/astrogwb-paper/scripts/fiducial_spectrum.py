@@ -14,12 +14,6 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from _paper_style import (
-    DETECTOR_COMPARISON_LEGEND,
-    SPECTRUM,
-    combo_colors,
-    use_paper_style,
-)
 from astrogwb.cosmology import hubble_constant_si
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import frequency_mask as make_frequency_mask
@@ -33,6 +27,12 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 )
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.plotting import (
+    DETECTOR_COMPARISON_LEGEND,
+    SPECTRUM,
+    combo_colors,
+    use_paper_style,
+)
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
