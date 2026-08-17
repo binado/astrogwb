@@ -1,4 +1,4 @@
-"""Shared paper-figure styling for the notebooks in this directory.
+"""Shared paper-figure styling for the scripts in this directory.
 
 Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
 style (solid), and a loader for ``paper.mplstyle``. This module is independent
@@ -49,6 +49,20 @@ NETWORK: dict[str, str] = {
 TRUTH: dict[str, object] = {"color": "0.15", "linestyle": "-", "linewidth": 1.5}
 
 CORNER_LEVELS: tuple[float, ...] = (0.6827, 0.9545)
+
+DETECTOR_COMPARISON_LEGEND: dict[str, object] = {
+    "ncol": 3,
+    "loc": "lower center",
+    "bbox_to_anchor": (0.5, 1.02),
+    "frameon": False,
+    "borderaxespad": 0,
+    "handlelength": 2.5,
+}
+
+MERGER_RATE_LEGEND: dict[str, object] = {
+    "loc": "best",
+    "frameon": False,
+}
 
 
 def use_paper_style() -> None:

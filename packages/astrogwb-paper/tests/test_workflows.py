@@ -189,7 +189,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
     } <= rules
 
 
-def test_merger_rate_figure_does_not_interpolate_latex_labels(
+def test_merger_rate_figure_quotes_latex_labels(
     tmp_path: Path,
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
@@ -209,7 +209,9 @@ def test_merger_rate_figure_does_not_interpolate_latex_labels(
 
     assert result.returncode == 0, result.stderr
     assert "rule plot_H0_merger_rate:" in result.stdout
-    assert "--prior-labels" not in result.stdout
+    assert "--prior-labels" in result.stdout
+    assert r"$H_0$ (fixed $\mathcal{R}_0$)" in result.stdout
+    assert r"$H_0 + \mathcal{R}_0$ (narrow prior)" in result.stdout
 
 
 def test_standalone_figures_expand_parameterized_shell_commands(
@@ -232,9 +234,9 @@ def test_standalone_figures_expand_parameterized_shell_commands(
 
     assert result.returncode == 0, result.stderr
     for script in (
-        "amplitude_toy_model.py",
-        "fiducial_spectrum.py",
-        "importance_weights_grid.py",
+        "scripts/amplitude_toy_model.py",
+        "scripts/fiducial_spectrum.py",
+        "scripts/importance_weights_grid.py",
     ):
         assert script in result.stdout
     # Shared base and analysis values are injected at shell-expansion time.

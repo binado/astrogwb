@@ -1,38 +1,25 @@
-# ---
-# jupyter:
-#   jupytext:
-#     text_representation:
-#       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.19.4
-#   kernelspec:
-#     display_name: astrogwb (3.12.9)
-#     language: python
-#     name: python3
-# ---
+"""Plot the fiducial SGWB spectrum and network effective PSDs.
 
-# %% [markdown]
-# # Fiducial $\Omega_{\mathrm{GW}}$ and $S_h$ spectrum
-#
-# Plot the fiducial astrophysical SGWB spectral density $S_h(f, \Lambda_0)$ and
-# the equivalent energy-density spectrum $\Omega_{\mathrm{GW}}(f, \Lambda_0)$ on
-# a shared frequency axis with dual $y$-scales. The fiducial $S_h$ is computed
-# with the same importance-weighted contraction used by the MCMC notebooks.
+The fiducial $S_h$ uses the same importance-weighted contraction as the MCMC
+runs. $\\Omega_{\\mathrm{GW}}(f)$ shares the frequency axis on a dual $y$-scale.
+"""
 
-# %%
 from __future__ import annotations
 
 import argparse
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from _paper_style import SPECTRUM, combo_colors, use_paper_style
+from _paper_style import (
+    DETECTOR_COMPARISON_LEGEND,
+    SPECTRUM,
+    combo_colors,
+    use_paper_style,
+)
 from astrogwb.cosmology import hubble_constant_si
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import frequency_mask as make_frequency_mask
@@ -45,7 +32,6 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.paths import paper_project_root
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.figure import Figure
@@ -54,64 +40,41 @@ from matplotlib.projections import register_projection
 from pluscross import load_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's rectilinear axes. Restore the
-# standard matplotlib projection for consistent notebook plotting.
+# standard matplotlib projection for consistent plotting.
 register_projection(MplAxes)
 jax.config.update("jax_enable_x64", True)
 
-# %config InlineBackend.figure_format = "retina"
 
-# %% [markdown]
-# ## Defaults
-#
-# Direct notebook runs use the defaults below. Edit them in Jupyter or override
-# with flags when running headless.
-
-# %%
-DEFAULT_CONFIG_PATH = Path("inputs/figures/standalone.toml")
-DEFAULT_CATALOG_PATH = Path("outputs/catalogs/bns-n16384-df1.h5")
-DEFAULT_F_MIN = 2.0
-DEFAULT_F_MAX = 4096.0
-DEFAULT_Z_MIN = 0.0
-DEFAULT_Z_MAX = 20.0
-DEFAULT_N_GRID = 256
-DEFAULT_H0 = 67.66
-DEFAULT_OMEGA_M = 0.3096
-DEFAULT_XI_0 = 1.0
-DEFAULT_XI_N = 1.91
-DEFAULT_GAMMA = 1.42
-DEFAULT_KAPPA = 4.62
-DEFAULT_Z_PEAK = 1.84
-DEFAULT_LOCAL_MERGER_RATE = 161.0
-DEFAULT_OMEGA_GW_MIN = 1e-15
-DEFAULT_OUTPUT_PDF = Path("outputs/figures/standalone/fiducial_spectrum.pdf")
-DEFAULT_OUTPUT_EFFECTIVE_PSD_PDF = Path(
-    "outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf"
-)
-DEFAULT_FIGURE_DPI = 300
-
-
-# %%
 def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
 
 
-def detector_networks_from_config(
-    config: Mapping[str, Any],
-) -> dict[str, tuple[str, ...]]:
-    """Return detector networks from the standalone figure config."""
-    raw = config["fiducial_spectrum"]["detector_networks"]
-    return {name: tuple(detectors) for name, detectors in raw.items()}
+def _parse_network_definition(value: str) -> tuple[str, tuple[str, ...]]:
+    if "=" not in value:
+        raise ValueError(
+            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
+        )
+    name, detector_list = value.split("=", 1)
+    name = name.strip()
+    detectors = tuple(detector.strip() for detector in detector_list.split(","))
+    if not name or not detectors or any(not detector for detector in detectors):
+        raise ValueError(
+            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
+        )
+    return name, detectors
 
 
-def detector_labels_from_config(
-    config: Mapping[str, Any],
-    networks: Mapping[str, tuple[str, ...]],
-) -> list[str]:
-    """Return display labels in detector-network declaration order."""
-    labels = config["fiducial_spectrum"]["detector_labels"]
-    if len(labels) != len(networks):
-        raise ValueError("detector label count must match configured networks")
-    return list(labels)
+def parse_networks(definitions: Sequence[str]) -> dict[str, tuple[str, ...]]:
+    """Parse repeatable ``--network NAME=DET1,DET2`` flags in declaration order."""
+    if not definitions:
+        raise ValueError("at least one --network NAME=DET1,DET2,... is required")
+    networks: dict[str, tuple[str, ...]] = {}
+    for definition in definitions:
+        name, detectors = _parse_network_definition(definition)
+        if name in networks:
+            raise ValueError(f"duplicate --network definition for {name!r}")
+        networks[name] = detectors
+    return networks
 
 
 def compute_fiducial_spectral_density(
@@ -186,7 +149,7 @@ def plot_omega_and_sh(
     mask: jax.Array,
     *,
     h0: float,
-    omega_gw_min: float = DEFAULT_OMEGA_GW_MIN,
+    omega_gw_min: float,
     omega_color: str | None = None,
     sh_color: str | None = None,
 ) -> Figure:
@@ -296,148 +259,118 @@ def plot_effective_psds(
         Line2D([], [], color=color, linestyle=linestyle, label=label)
         for label, color, linestyle in zip(labels, colors, linestyles, strict=True)
     ]
-    ax.legend(
-        handles=handles,
-        ncol=3,
-        loc="lower center",
-        bbox_to_anchor=(0.5, 1.02),
-        frameon=False,
-        borderaxespad=0,
-        handlelength=2.5,
-    )
+    ax.legend(handles=handles, **DETECTOR_COMPARISON_LEGEND)
     fig.tight_layout()
     return fig
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
-    parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
-    parser.add_argument("--f-min", type=float, default=DEFAULT_F_MIN)
-    parser.add_argument("--f-max", type=float, default=DEFAULT_F_MAX)
-    parser.add_argument("--z-min", type=float, default=DEFAULT_Z_MIN)
-    parser.add_argument("--z-max", type=float, default=DEFAULT_Z_MAX)
-    parser.add_argument("--n-grid", type=int, default=DEFAULT_N_GRID)
-    parser.add_argument("--h0", type=float, default=DEFAULT_H0)
-    parser.add_argument("--omega-m", type=float, default=DEFAULT_OMEGA_M)
-    parser.add_argument("--xi-0", type=float, default=DEFAULT_XI_0)
-    parser.add_argument("--xi-n", type=float, default=DEFAULT_XI_N)
-    parser.add_argument("--gamma", type=float, default=DEFAULT_GAMMA)
-    parser.add_argument("--kappa", type=float, default=DEFAULT_KAPPA)
-    parser.add_argument("--z-peak", type=float, default=DEFAULT_Z_PEAK)
+    parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument(
-        "--local-merger-rate", type=float, default=DEFAULT_LOCAL_MERGER_RATE
+        "--network",
+        action="append",
+        required=True,
+        metavar="NAME=DET1,DET2,...",
+        help="Detector-network definition (repeatable, declaration order).",
     )
+    parser.add_argument("--detector-labels", nargs="+", required=True)
+    parser.add_argument("--f-min", type=float, required=True)
+    parser.add_argument("--f-max", type=float, required=True)
+    parser.add_argument("--z-min", type=float, required=True)
+    parser.add_argument("--z-max", type=float, required=True)
+    parser.add_argument("--n-grid", type=int, required=True)
+    parser.add_argument("--h0", type=float, required=True)
+    parser.add_argument("--omega-m", type=float, required=True)
+    parser.add_argument("--xi-0", type=float, required=True)
+    parser.add_argument("--xi-n", type=float, required=True)
+    parser.add_argument("--gamma", type=float, required=True)
+    parser.add_argument("--kappa", type=float, required=True)
+    parser.add_argument("--z-peak", type=float, required=True)
+    parser.add_argument("--local-merger-rate", type=float, required=True)
     parser.add_argument(
         "--omega-gw-min",
         type=float,
-        default=DEFAULT_OMEGA_GW_MIN,
+        required=True,
         help=(
             "Lower y-limit for Omega_GW; S_h ymin is taken from S_h at the "
             "frequency where Omega_GW is closest to this floor."
         ),
     )
-    parser.add_argument("--output-pdf", type=Path, default=DEFAULT_OUTPUT_PDF)
-    parser.add_argument(
-        "--output-effective-psd-pdf",
-        type=Path,
-        default=DEFAULT_OUTPUT_EFFECTIVE_PSD_PDF,
+    parser.add_argument("--output-pdf", type=Path, required=True)
+    parser.add_argument("--output-effective-psd-pdf", type=Path, required=True)
+    parser.add_argument("--figure-dpi", type=int, default=300)
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    args = _parse_args(argv)
+    root = paper_project_root()
+    try:
+        networks = parse_networks(args.network)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
+    if len(args.detector_labels) != len(networks):
+        raise SystemExit("detector label count must match --network count")
+
+    fiducials = {
+        "H0": args.h0,
+        "Omega_m": args.omega_m,
+        "xi_0": args.xi_0,
+        "xi_n": args.xi_n,
+        "gamma": args.gamma,
+        "kappa": args.kappa,
+        "z_peak": args.z_peak,
+        "local_merger_rate": args.local_merger_rate,
+    }
+    use_paper_style()
+
+    catalog_path = _resolve_path(args.catalog, root)
+    frequencies, observed_spectral_density, mask = compute_fiducial_spectral_density(
+        catalog_path,
+        fiducials,
+        f_min=args.f_min,
+        f_max=args.f_max,
+        z_min=args.z_min,
+        z_max=args.z_max,
+        n_grid=args.n_grid,
     )
-    parser.add_argument("--figure-dpi", type=int, default=DEFAULT_FIGURE_DPI)
-    args, _ = parser.parse_known_args(argv)
-    return args
-
-
-# %%
-args = _parse_args()
-root = paper_project_root()
-config = load_mapping(_resolve_path(args.config, root))
-
-fiducials = {
-    "H0": args.h0,
-    "Omega_m": args.omega_m,
-    "xi_0": args.xi_0,
-    "xi_n": args.xi_n,
-    "gamma": args.gamma,
-    "kappa": args.kappa,
-    "z_peak": args.z_peak,
-    "local_merger_rate": args.local_merger_rate,
-}
-
-use_paper_style()
-
-# %% [markdown]
-# ## Fiducial spectrum
-#
-# Load the waveform catalog, evaluate importance weights at $\Lambda_0$, and
-# form $S_h(f, \Lambda_0)$. Convert to $\Omega_{\mathrm{GW}}(f)$ for the right
-# axis using the configured fiducial $H_0$ (not the package $H_0$ default).
-# The $S_h$ floor is inferred from the frequency where $\Omega_{\mathrm{GW}}$
-# meets `--omega-gw-min`, so both curves show the same frequency band.
-
-# %%
-catalog_path = _resolve_path(args.catalog, root)
-frequencies, observed_spectral_density, mask = compute_fiducial_spectral_density(
-    catalog_path,
-    fiducials,
-    f_min=args.f_min,
-    f_max=args.f_max,
-    z_min=args.z_min,
-    z_max=args.z_max,
-    n_grid=args.n_grid,
-)
-
-figure = plot_omega_and_sh(
-    frequencies,
-    observed_spectral_density,
-    mask,
-    h0=args.h0,
-    omega_gw_min=args.omega_gw_min,
-)
-
-# %% [markdown]
-# ## Effective PSD by detector network
-#
-# Network effective noise PSDs for the detector combinations in
-# ``inputs/figures/standalone.toml``, overlaid on a shared log–log frequency axis.
-# Colors
-# and linestyles match the $H_0$ density comparison (shared color per ET /
-# ET+CE pair; dashed for CE companions). Labels come from the cosmology
-# the detector label entries in the same config.
-
-# %%
-networks = detector_networks_from_config(config)
-detector_labels = detector_labels_from_config(config, networks)
-detector_colors, detector_linestyles = detector_network_styles(networks)
-
-effective_psds = {}
-for network, detectors in networks.items():
-    sensitivities = load_sensitivity_map(detectors)
-    effective_psds[network] = jnp.asarray(
-        effective_psd(frequencies, list(detectors), sensitivities)
+    figure = plot_omega_and_sh(
+        frequencies,
+        observed_spectral_density,
+        mask,
+        h0=args.h0,
+        omega_gw_min=args.omega_gw_min,
     )
 
-effective_psd_figure = plot_effective_psds(
-    frequencies,
-    effective_psds,
-    detector_labels,
-    colors=detector_colors,
-    linestyles=detector_linestyles,
-    mask=mask,
-)
+    detector_colors, detector_linestyles = detector_network_styles(networks)
+    effective_psds = {}
+    for network, detectors in networks.items():
+        sensitivities = load_sensitivity_map(detectors)
+        effective_psds[network] = jnp.asarray(
+            effective_psd(frequencies, list(detectors), sensitivities)
+        )
+    effective_psd_figure = plot_effective_psds(
+        frequencies,
+        effective_psds,
+        args.detector_labels,
+        colors=detector_colors,
+        linestyles=detector_linestyles,
+        mask=mask,
+    )
 
-# %% [markdown]
-# ## Save figures
+    output_path = _resolve_path(args.output_pdf, root)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
+    print("saved figure:", output_path)
 
-# %%
-output_path = _resolve_path(args.output_pdf, root)
-output_path.parent.mkdir(parents=True, exist_ok=True)
-figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
-print("saved figure:", output_path)
+    effective_psd_output_path = _resolve_path(args.output_effective_psd_pdf, root)
+    effective_psd_output_path.parent.mkdir(parents=True, exist_ok=True)
+    effective_psd_figure.savefig(
+        effective_psd_output_path, dpi=args.figure_dpi, bbox_inches="tight"
+    )
+    print("saved figure:", effective_psd_output_path)
 
-effective_psd_output_path = _resolve_path(args.output_effective_psd_pdf, root)
-effective_psd_output_path.parent.mkdir(parents=True, exist_ok=True)
-effective_psd_figure.savefig(
-    effective_psd_output_path, dpi=args.figure_dpi, bbox_inches="tight"
-)
-print("saved figure:", effective_psd_output_path)
+
+if __name__ == "__main__":
+    main()

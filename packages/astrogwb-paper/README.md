@@ -2,7 +2,7 @@
 
 Private reproducibility application for the `astrogwb` research project. It
 owns the MCMC runners, experiment configuration, Snakemake workflows, cluster
-profiles, and paper notebooks.
+profiles, paper figure scripts, and exploratory notebooks.
 
 The application intentionally runs only from a monorepo checkout. Install its
 local development and workflow dependencies from the workspace root:

@@ -128,8 +128,10 @@ snakemake --snakefile workflow/mcmc.smk --cores 1 standalone_figures
 ```
 
 The aggregate includes the amplitude toy model, fiducial spectrum, effective
-detector PSDs, and importance-weight grids. Their configuration lives under
-[`inputs/figures/`](../inputs/figures).
+detector PSDs, and importance-weight grids. Output paths, detector networks,
+and labels live under
+[`inputs/figures/`](../inputs/figures); Snakemake passes those values to the
+scripts in [`scripts/`](../scripts/).
 
 ## Re-running protected results
 

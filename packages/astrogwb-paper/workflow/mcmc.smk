@@ -1,4 +1,5 @@
 import re
+import shlex
 from pathlib import Path
 
 from astrogwb_paper.config.experiments import (
@@ -8,6 +9,7 @@ from astrogwb_paper.config.experiments import (
     config_path,
     experiment,
     load_experiments,
+    overlay_for,
 )
 from astrogwb_paper.config.loading import load_mapping
 
@@ -67,6 +69,31 @@ def _figure(experiment_name):
     return specification.figure
 
 
+def _quote_join(values):
+    return " ".join(shlex.quote(str(value)) for value in values)
+
+
+def _const(value):
+    """Disable Snakemake wildcard expansion in params that contain LaTeX braces."""
+    return lambda wildcards: value
+
+
+def _network_cli(experiment_name, runs):
+    specification = experiment(experiment_name)
+    parts = []
+    for run in runs:
+        detectors = overlay_for(specification, run)["analysis"]["detectors"]
+        parts.append("--network " + shlex.quote(f"{run}={','.join(detectors)}"))
+    return " ".join(parts)
+
+
+def _standalone_network_cli():
+    parts = []
+    for name, detectors in FIDUCIAL_SPECTRUM["detector_networks"].items():
+        parts.append("--network " + shlex.quote(f"{name}={','.join(detectors)}"))
+    return " ".join(parts)
+
+
 H0_DETECTOR_CONFIG = _figure("H0-all-detectors")
 H0_DETECTOR_CHAINS = [
     _chain("H0-all-detectors", entry["run"])
@@ -114,6 +141,43 @@ STANDALONE_OUTPUTS = [
 FIDUCIALS = BASE["fiducials"]
 COSMOLOGY = BASE["cosmology"]
 ANALYSIS = BASE["analysis"]
+FIDUCIAL_CLI = (
+    f"--h0 {FIDUCIALS['H0']} --omega-m {FIDUCIALS['Omega_m']}"
+    f" --xi-0 {FIDUCIALS['xi_0']} --xi-n {FIDUCIALS['xi_n']}"
+    f" --gamma {FIDUCIALS['gamma']} --kappa {FIDUCIALS['kappa']}"
+    f" --z-peak {FIDUCIALS['z_peak']}"
+    f" --local-merger-rate {FIDUCIALS['local_merger_rate']}"
+)
+ANALYSIS_CLI = (
+    f"--observation-time {BASE['observation_time']}"
+    f" --f-min {ANALYSIS['f_min']} --f-max {ANALYSIS['f_max']}"
+    f" --z-min {COSMOLOGY['z_min']} --z-max {COSMOLOGY['z_max']}"
+    f" --n-grid {COSMOLOGY['n_grid']}"
+)
+H0_DETECTOR_LABELS_CLI = "--detector-labels " + _quote_join(
+    entry["label"] for entry in H0_DETECTOR_CONFIG["posteriors"]
+)
+H0_DETECTOR_NETWORK_CLI = _network_cli(
+    "H0-all-detectors",
+    [entry["run"] for entry in H0_DETECTOR_CONFIG["posteriors"]],
+)
+H0_RATE_LABELS_CLI = "--prior-labels " + _quote_join(H0_RATE_CONFIG["labels"])
+H0_OMEGA_LABEL_CLI = "--omega-m-label " + _quote_join([H0_OMEGA_CONFIG["label"]])
+PROPAGATION_MARGINAL_LABELS_CLI = "--marginal-labels " + _quote_join(
+    PROPAGATION_CONFIG["marginal_labels"]
+)
+PROPAGATION_H0_LABELS_CLI = "--h0-labels " + _quote_join(PROPAGATION_CONFIG["h0_labels"])
+PROPAGATION_DETECTOR_LABELS_CLI = "--detector-labels " + _quote_join(
+    entry["label"] for entry in PROPAGATION_CONFIG["detector_posteriors"]
+)
+PROPAGATION_NETWORK_CLI = _network_cli(
+    "modified-propagation-all-detectors",
+    [entry["run"] for entry in PROPAGATION_CONFIG["detector_posteriors"]],
+)
+STANDALONE_NETWORK_CLI = _standalone_network_cli()
+STANDALONE_LABELS_CLI = "--detector-labels " + _quote_join(
+    FIDUCIAL_SPECTRUM["detector_labels"]
+)
 EXPERIMENT_TARGET_INPUTS = [
     path
     for specification in experiments.values()
@@ -222,12 +286,20 @@ rule plot_H0_all_detectors:
         pdf=H0_DETECTOR_CONFIG["output_pdf"],
         csv=H0_DETECTOR_CONFIG["output_csv"],
         tex=H0_DETECTOR_CONFIG["output_tex"],
+    params:
+        labels=_const(H0_DETECTOR_LABELS_CLI),
+        networks=_const(H0_DETECTOR_NETWORK_CLI),
+        fiducials=FIDUCIAL_CLI,
+        analysis=ANALYSIS_CLI,
     shell:
         "uv run --package astrogwb-paper --group plotting"
-        " python notebooks/paper/mcmc_cosmological_parameters.py"
-        " --section detectors --config {input.config:q}"
-        " --base-config {input.base:q}"
+        " python scripts/mcmc_cosmological_parameters.py"
+        " --section detectors"
         " --catalog {input.catalog:q} --detector-chains {input.chains:q}"
+        " {params.labels} {params.networks}"
+        " --output-detector-pdf {output.pdf:q}"
+        " --output-csv {output.csv:q} --output-tex {output.tex:q}"
+        " {params.fiducials} {params.analysis}"
 
 
 rule plot_H0_merger_rate:
@@ -240,12 +312,18 @@ rule plot_H0_merger_rate:
         corner_pdf=H0_RATE_CONFIG["output_corner_pdf"],
         csv=H0_RATE_CONFIG["output_csv"],
         tex=H0_RATE_CONFIG["output_tex"],
+    params:
+        labels=_const(H0_RATE_LABELS_CLI),
+        fiducials=FIDUCIAL_CLI,
     shell:
         "uv run --package astrogwb-paper --group plotting"
-        " python notebooks/paper/mcmc_cosmological_parameters.py"
-        " --section merger-rate --config {input.config:q}"
-        " --base-config {input.base:q}"
-        " --prior-chains {input.chains:q}"
+        " python scripts/mcmc_cosmological_parameters.py"
+        " --section merger-rate"
+        " --prior-chains {input.chains:q} {params.labels}"
+        " --output-prior-pdf {output.prior_pdf:q}"
+        " --output-narrow-corner-pdf {output.corner_pdf:q}"
+        " --output-csv {output.csv:q} --output-tex {output.tex:q}"
+        " {params.fiducials}"
 
 
 rule plot_H0_omega_m:
@@ -256,12 +334,17 @@ rule plot_H0_omega_m:
     output:
         corner_pdf=H0_OMEGA_CONFIG["output_corner_pdf"],
         ess_corner_pdf=H0_OMEGA_CONFIG["output_ess_corner_pdf"],
+    params:
+        label=_const(H0_OMEGA_LABEL_CLI),
+        fiducials=FIDUCIAL_CLI,
     shell:
         "uv run --package astrogwb-paper --group plotting"
-        " python notebooks/paper/mcmc_cosmological_parameters.py"
-        " --section omega-m --config {input.config:q}"
-        " --base-config {input.base:q}"
-        " --omega-m-chain {input.chain:q}"
+        " python scripts/mcmc_cosmological_parameters.py"
+        " --section omega-m"
+        " --omega-m-chain {input.chain:q} {params.label}"
+        " --output-omega-m-corner-pdf {output.corner_pdf:q}"
+        " --output-omega-m-ess-corner-pdf {output.ess_corner_pdf:q}"
+        " {params.fiducials}"
 
 
 rule plot_modified_propagation:
@@ -286,14 +369,28 @@ rule plot_modified_propagation:
         h0_corner_pdf=PROPAGATION_CONFIG["output_h0_corner_pdf"],
         csv=PROPAGATION_CONFIG["output_csv"],
         tex=PROPAGATION_CONFIG["output_tex"],
+    params:
+        marginal_labels=_const(PROPAGATION_MARGINAL_LABELS_CLI),
+        h0_labels=_const(PROPAGATION_H0_LABELS_CLI),
+        detector_labels=_const(PROPAGATION_DETECTOR_LABELS_CLI),
+        networks=_const(PROPAGATION_NETWORK_CLI),
+        fiducials=FIDUCIAL_CLI,
+        analysis=ANALYSIS_CLI,
     shell:
         "uv run --package astrogwb-paper --group plotting"
-        " python notebooks/paper/mcmc_modified_propagation.py"
-        " --config {input.config:q} --base-config {input.base:q}"
+        " python scripts/mcmc_modified_propagation.py"
         " --xi0-chain {input.xi0_chain:q} --xi0-n-chain {input.xi0_n_chain:q}"
         " --h0-chain {input.h0_chain:q}"
         " --detector-xi0-n-chains {input.detector_chains:q}"
         " --catalog {input.catalog:q}"
+        " {params.marginal_labels} {params.h0_labels} {params.detector_labels}"
+        " {params.networks}"
+        " --output-xi-n-corner-pdf {output.xi_n_corner_pdf:q}"
+        " --output-xi-n-ess-corner-pdf {output.xi_n_ess_corner_pdf:q}"
+        " --output-xi0-marginal-pdf {output.xi0_marginal_pdf:q}"
+        " --output-h0-corner-pdf {output.h0_corner_pdf:q}"
+        " --output-xi0-n-csv {output.csv:q} --output-xi0-n-tex {output.tex:q}"
+        " {params.fiducials} {params.analysis}"
 
 
 rule amplitude_toy:
@@ -304,7 +401,7 @@ rule amplitude_toy:
         AMPLITUDE_TOY_PDF,
     shell:
         "uv run --package astrogwb-paper --group plotting"
-        " python notebooks/paper/amplitude_toy_model.py"
+        " python scripts/amplitude_toy_model.py"
         " --catalog {input.catalog:q}"
         " --chains-dir outputs/chains/amplitude-toy"
         " --observation-time {BASE[observation_time]}"
@@ -320,18 +417,16 @@ rule fiducial_spectrum:
     output:
         spectrum_pdf=FIDUCIAL_SPECTRUM["output_pdf"],
         effective_psd_pdf=FIDUCIAL_SPECTRUM["output_effective_psd_pdf"],
+    params:
+        networks=_const(STANDALONE_NETWORK_CLI),
+        labels=_const(STANDALONE_LABELS_CLI),
+        fiducials=FIDUCIAL_CLI,
+        analysis=ANALYSIS_CLI,
     shell:
         "uv run --package astrogwb-paper --group plotting"
-        " python notebooks/paper/fiducial_spectrum.py"
-        " --config {input.config:q} --catalog {input.catalog:q}"
-        " --f-min {ANALYSIS[f_min]} --f-max {ANALYSIS[f_max]}"
-        " --z-min {COSMOLOGY[z_min]} --z-max {COSMOLOGY[z_max]}"
-        " --n-grid {COSMOLOGY[n_grid]}"
-        " --h0 {FIDUCIALS[H0]} --omega-m {FIDUCIALS[Omega_m]}"
-        " --xi-0 {FIDUCIALS[xi_0]} --xi-n {FIDUCIALS[xi_n]}"
-        " --gamma {FIDUCIALS[gamma]} --kappa {FIDUCIALS[kappa]}"
-        " --z-peak {FIDUCIALS[z_peak]}"
-        " --local-merger-rate {FIDUCIALS[local_merger_rate]}"
+        " python scripts/fiducial_spectrum.py"
+        " --catalog {input.catalog:q} {params.networks} {params.labels}"
+        " {params.analysis} {params.fiducials}"
         " --omega-gw-min {FIDUCIAL_SPECTRUM[omega_gw_min]}"
         " --output-pdf {output.spectrum_pdf:q}"
         " --output-effective-psd-pdf {output.effective_psd_pdf:q}"
@@ -344,9 +439,11 @@ rule importance_weights_grid:
     output:
         h0_omega_m_pdf=IMPORTANCE_GRID["output_h0_omega_m_pdf"],
         xi0_n_pdf=IMPORTANCE_GRID["output_xi0_n_pdf"],
+    params:
+        fiducials=FIDUCIAL_CLI,
     shell:
         "uv run --package astrogwb-paper --group plotting"
-        " python notebooks/paper/importance_weights_grid.py"
-        " --config {input.base:q} --catalog {input.catalog:q}"
+        " python scripts/importance_weights_grid.py"
+        " --catalog {input.catalog:q} {params.fiducials}"
         " --output-h0-omega-m-pdf {output.h0_omega_m_pdf:q}"
         " --output-xi0-n-pdf {output.xi0_n_pdf:q}"

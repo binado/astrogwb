@@ -1,7 +1,7 @@
 # Paper figures
 
 Experiment figures are part of the same DAG as their chains. Ordered run IDs,
-labels, styles, and output paths live in the optional `[figure]` table of:
+labels, and output paths live in the optional `[figure]` table of:
 
 ```text
 experiments/<experiment>.toml
@@ -9,7 +9,8 @@ experiments/<experiment>.toml
 
 Those `output_*` paths are valid Snakemake targets. Shared scientific values
 such as fiducials, frequency bounds, and cosmology grid settings come from
-`inputs/mcmc.base.toml`.
+`inputs/mcmc.base.toml`. Snakemake reads those files and feeds argparse flags
+to the figure scripts under [`scripts/`](../scripts/).
 
 ## Experiment figures
 
@@ -68,9 +69,9 @@ snakemake --snakefile workflow/mcmc.smk --cores 1 \
 
 All new figure products are written under `outputs/figures/`.
 
-## Notebook use
+## Scripts
 
-The Jupytext sources under `notebooks/paper/` remain directly executable.
-Snakemake passes the experiment TOML, the shared MCMC base, and the chain files
-the DAG must declare. Labels, detector lists, and output paths come from the
-experiment file.
+Figure entry points are plain Python scripts under `scripts/`. Snakemake reads
+the experiment `[figure]` table or `inputs/figures/standalone.toml` and passes
+chains, labels, detector networks, fiducials, and output paths on the CLI.
+The scripts do not load those TOML files themselves.

@@ -1,4 +1,4 @@
-# Paper-figure matplotlib style for the notebooks in this directory.
+# Paper-figure matplotlib style for the scripts in this directory.
 # Load via: from _paper_style import use_paper_style; use_paper_style()
 
 text.usetex: True

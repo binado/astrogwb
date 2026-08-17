@@ -46,15 +46,3 @@ label = "ET-2L"
 [[figure.posteriors]]
 run = "ET-2L-misaligned-CE-Hanford"
 label = 'ET-2L $+$ CE'
-
-[figure.axis]
-xlabel = '$H_0 \ [\mathrm{km \ s^{-1} \ Mpc^{-1}}]$'
-ylabel = "Posterior density"
-
-[figure.legend]
-ncol = 3
-loc = "lower center"
-bbox_to_anchor = [0.5, 1.02]
-frameon = false
-borderaxespad = 0
-handlelength = 2.5
