@@ -114,7 +114,6 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     from pluscross import load_catalog
 
     from astrogwb_paper.amplitude import build_amplitude_marginalization
-    from astrogwb_paper.priors import build_prior
 
     analysis = config.analysis
     cosmo = config.cosmology
@@ -173,7 +172,8 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
         effective_psd_arr,
     )
 
-    priors = {name: build_prior(spec) for name, spec in config.priors.items()}
+    # `config.priors` already holds live distributions (see PriorDistribution).
+    priors = config.priors
     if analysis.likelihood == "amplitude_marginalized":
         assert analysis.amplitude_parameter is not None
         marginalization = build_amplitude_marginalization(config)

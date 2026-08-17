@@ -1,29 +1,23 @@
-"""Materialize NumPyro prior distributions from serializable config specs.
+"""Thin compatibility shim over the config module's native prior field types.
 
-This module is the bridge between the validated prior specs in
-:mod:`astrogwb_paper.config.mcmc` (:data:`~astrogwb_paper.config.mcmc.PriorSpec`)
-and live ``numpyro.distributions`` objects handed to
-:func:`astrogwb.sampling.models.spectral_density_model`.
-
-NumPyro/JAX are imported lazily inside :func:`build_prior` so that importing
-this module does not itself initialize the JAX backend; callers must run their
-runtime configuration (see :func:`astrogwb_paper.runtime.configure_runtime`) before
-invoking it.
+``RunConfig.priors`` now holds live ``numpyro`` distributions directly --
+see :data:`~astrogwb_paper.config.mcmc.PriorDistribution` for the validating /
+serializing ``Annotated`` type. This module keeps
+:func:`build_prior` for callers (notebooks) that hold raw spec mappings and
+want to materialize them ad hoc. NumPyro/JAX are imported lazily inside
+:func:`~astrogwb_paper.config.mcmc.materialize_prior`, so importing this
+module does not itself initialize the JAX backend.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter
-
-from astrogwb_paper.config.mcmc import NormalPrior, PriorSpec, UniformPrior
+from astrogwb_paper.config.mcmc import PriorSpec, materialize_prior
 
 if TYPE_CHECKING:
     from numpyro.distributions import Distribution
-
-_PRIOR_ADAPTER: TypeAdapter[PriorSpec] = TypeAdapter(PriorSpec)
 
 
 def build_prior(spec: PriorSpec | Mapping[str, Any]) -> Distribution:
@@ -39,23 +33,12 @@ def build_prior(spec: PriorSpec | Mapping[str, Any]) -> Distribution:
     spec:
         A validated :data:`~astrogwb_paper.config.mcmc.PriorSpec`, or a raw
         mapping such as ``{"type": "uniform", "low": 0.0, "high": 1.0}`` read
-        straight from a config file. Mappings are validated before use, so an
-        unsupported ``type`` raises here rather than producing a bad prior.
+        straight from a config file (the form notebooks hold). Unsupported
+        ``type`` values raise a ``pydantic.ValidationError``.
 
     Returns
     -------
     numpyro.distributions.Distribution
         The constructed prior distribution.
     """
-    import numpyro.distributions as dist
-
-    if isinstance(spec, Mapping):
-        spec = _PRIOR_ADAPTER.validate_python(spec)
-
-    match spec:
-        case UniformPrior():
-            return dist.Uniform(low=spec.low, high=spec.high)
-        case NormalPrior():
-            return dist.Normal(loc=spec.loc, scale=spec.scale)
-        case _:  # pragma: no cover - exhaustive over PriorSpec
-            assert_never(spec)
+    return materialize_prior(spec)

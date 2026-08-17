@@ -1,16 +1,32 @@
 """Pydantic models and I/O for headless MCMC run configs.
 
-This module imports only stdlib and pydantic so callers can parse and validate
-configs before JAX initializes.
+Importing this module requires only stdlib and pydantic: ``numpyro`` is
+imported lazily inside :func:`materialize_prior` / :func:`prior_to_spec`, so
+parsing and validating a config stays cheap and -- because the constructed
+distributions hold plain Python floats and no JAX op is ever evaluated --
+does not initialize the XLA backend. That last property is what
+:func:`astrogwb_paper.runtime.configure_runtime` relies on to set host device
+count / platform after config validation; it is guarded by a subprocess test
+in ``tests/test_prior_native_types.py`` (re-running ``set_host_device_count``
+after a backend init is a silent no-op, hence the subprocess).
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, assert_never
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    TypeAdapter,
+    model_validator,
+)
 
 from astrogwb_paper.config.hashing import canonical_sha256
 from astrogwb_paper.config.loading import deep_merge
@@ -41,8 +57,85 @@ class NormalPrior(_PriorBase):
 
 
 # Discriminated on `type`, so an unsupported prior kind fails here -- before
-# `configure_runtime` initializes JAX -- rather than inside `build_prior`.
+# anything numpyro is even imported.
 PriorSpec = Annotated[UniformPrior | NormalPrior, Field(discriminator="type")]
+
+_SPEC_ADAPTER: TypeAdapter[PriorSpec] = TypeAdapter(PriorSpec)
+
+
+def materialize_prior(value: Any) -> Distribution:
+    """Materialize a prior spec into a live ``numpyro`` distribution.
+
+    Accepts a raw mapping (``{"type": "uniform", "low": ..., ...}``), a
+    validated :data:`PriorSpec` model, or an already-built distribution
+    (passed through unchanged, so re-validation is idempotent). Spec
+    validation happens *before* numpyro is imported, so an unsupported
+    ``type`` fails fast and cheap; construction itself only wraps Python
+    floats and never evaluates a JAX op.
+    """
+    if isinstance(value, (UniformPrior, NormalPrior, Mapping)):
+        spec = _SPEC_ADAPTER.validate_python(value)
+        import numpyro.distributions as dist
+
+        match spec:
+            case UniformPrior():
+                return dist.Uniform(low=spec.low, high=spec.high)
+            case NormalPrior():
+                return dist.Normal(loc=spec.loc, scale=spec.scale)
+            case _:  # pragma: no cover - exhaustive over PriorSpec
+                assert_never(spec)
+
+    import numpyro.distributions as dist
+
+    if isinstance(value, dist.Distribution):
+        return value  # already materialized
+    raise ValueError(
+        f"cannot materialize a prior from {type(value).__name__!r}; expected a "
+        "spec mapping, a UniformPrior/NormalPrior, or a numpyro Distribution"
+    )
+
+
+def prior_to_spec(prior: Distribution) -> PriorSpec:
+    """Serialize a materialized prior back to its wire-format spec.
+
+    Inverse of :func:`materialize_prior` for the spec-constructed
+    distributions this module produces: their parameters are plain Python
+    floats, so ``float(...)`` never touches JAX.
+    """
+    import numpyro.distributions as dist
+
+    match prior:
+        case dist.Uniform():
+            return UniformPrior(
+                type="uniform", low=float(prior.low), high=float(prior.high)
+            )
+        case dist.Normal():
+            return NormalPrior(
+                type="normal", loc=float(prior.loc), scale=float(prior.scale)
+            )
+        case _:
+            raise TypeError(
+                f"cannot serialize {type(prior).__name__!r} as a prior spec"
+            )
+
+
+if TYPE_CHECKING:
+    from numpyro.distributions import Distribution, Normal, Uniform
+
+    _PriorDists = Uniform | Normal
+else:
+    _PriorDists = Any
+
+# Native pydantic wire for live prior distributions: validate from spec
+# mappings/models/dists, serialize back to the discriminated spec so
+# `model_dump(mode="json")`, `save_config`, and `config_sha256` stay
+# canonical. Numpyro types deliberately stay out of the runtime annotation
+# (hence `Any`) so schema building never imports numpyro at module load.
+PriorDistribution = Annotated[
+    _PriorDists,
+    BeforeValidator(materialize_prior),
+    PlainSerializer(prior_to_spec, return_type=PriorSpec),
+]
 
 
 class AnalysisConfig(BaseModel):
@@ -107,7 +200,7 @@ class RunConfig(BaseModel):
     seed: int = 42
     observation_time: float = 1.0
     fiducials: dict[str, float]
-    priors: dict[str, PriorSpec]  # parameter name -> prior spec
+    priors: dict[str, PriorDistribution]  # parameter name -> prior distribution
     # Unset (empty) -> default to the keys present in [priors]; resolved below.
     sampled_params: tuple[str, ...] = ()
     analysis: AnalysisConfig
@@ -116,10 +209,10 @@ class RunConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     # Derived in the validator (every fiducial not sampled).
     constants: dict[str, float] = Field(default_factory=dict)
-    # Derived in the validator: the amplitude parameter's prior spec, held out
+    # Derived in the validator: the amplitude parameter's prior, held out
     # of `priors` so `set(priors) == set(sampled_params)` keeps holding. Also
     # accepted as input so configs written by save_config reload unchanged.
-    amplitude_prior: PriorSpec | None = None
+    amplitude_prior: PriorDistribution | None = None
 
     @model_validator(mode="after")
     def _resolve_sampled_and_constants(self) -> RunConfig:
@@ -129,7 +222,7 @@ class RunConfig(BaseModel):
             raise ValueError("config must define at least one [priors.<param>] table")
 
         priors = dict(self.priors)
-        amplitude_prior: UniformPrior | NormalPrior | None = None
+        amplitude_prior: Distribution | None = None
         amplitude_parameter = self.analysis.amplitude_parameter
         if amplitude_parameter is not None:
             if amplitude_parameter in self.sampled_params:

@@ -10,6 +10,7 @@ from astrogwb_paper.config.mcmc import (
     UniformPrior,
     build_run_config,
     config_sha256,
+    prior_to_spec,
     save_config,
 )
 from astrogwb_paper.paths import paper_project_root
@@ -153,7 +154,10 @@ def test_marginalized_config_extracts_amplitude_prior_and_preserves_invariant() 
     config = build_run_config(_marginalized_raw())
 
     assert config.analysis.amplitude_parameter == "H0"
-    assert config.amplitude_prior == UniformPrior(type="uniform", low=20.0, high=140.0)
+    assert config.amplitude_prior is not None
+    assert prior_to_spec(config.amplitude_prior) == UniformPrior(
+        type="uniform", low=20.0, high=140.0
+    )
     assert "H0" not in config.priors
     assert set(config.priors) == set(config.sampled_params)
     # H0 is not sampled, but it is still a fiducial constant the model pins to.
@@ -173,8 +177,15 @@ def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
 
     reloaded = build_run_config(load_mapping(path))
 
-    assert reloaded.amplitude_prior == config.amplitude_prior
-    assert reloaded.priors == config.priors
+    # Distributions have no value equality; compare their wire-format specs.
+    assert config.amplitude_prior is not None
+    assert reloaded.amplitude_prior is not None
+    assert prior_to_spec(reloaded.amplitude_prior) == prior_to_spec(
+        config.amplitude_prior
+    )
+    assert {name: prior_to_spec(prior) for name, prior in reloaded.priors.items()} == {
+        name: prior_to_spec(prior) for name, prior in config.priors.items()
+    }
     assert reloaded.sampled_params == config.sampled_params
     assert reloaded.constants == config.constants
     assert config_sha256(reloaded) == config_sha256(config)
@@ -258,7 +269,7 @@ def test_merge_run_overlay_replaces_named_priors_wholesale() -> None:
         "scale": 0.6766,
     }
     config = build_run_config(merged)
-    assert config.priors["H0"].model_dump() == merged["priors"]["H0"]
+    assert prior_to_spec(config.priors["H0"]).model_dump() == merged["priors"]["H0"]
 
 
 def test_prior_spec_rejects_stale_keys_from_a_cross_type_override() -> None:

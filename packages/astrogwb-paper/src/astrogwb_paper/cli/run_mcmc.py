@@ -7,9 +7,11 @@ only ``logging`` progress (no plots). It saves an ArviZ ``InferenceData`` NetCDF
 a JSON run-config record, exactly like the notebook.
 
 Design constraint (do not "tidy" away): config parsing lives in
-``astrogwb_paper.config.mcmc`` (stdlib + pydantic only). ``OMP_NUM_THREADS`` /
+``astrogwb_paper.config.mcmc``, which imports only stdlib + pydantic at module
+load and materializes priors without evaluating any JAX op ("is the backend
+still uninitialized?" is guarded by a subprocess test). ``OMP_NUM_THREADS`` /
 ``XLA_FLAGS`` and ``numpyro.set_host_device_count(...)`` must be set *before* JAX
-initializes its backend, so the heavy imports (jax, numpyro, astrogwb, gwmock_pop)
+initializes its backend, so the heavy imports (jax, astrogwb, gwmock_pop)
 happen inside functions that run only after
 :func:`astrogwb_paper.runtime.configure_runtime`. See that function for the ordering.
 
@@ -37,7 +39,12 @@ from typing import TYPE_CHECKING, Any
 
 from astrogwb_paper.config.hashing import file_sha256
 from astrogwb_paper.config.loading import load_mapping
-from astrogwb_paper.config.mcmc import RunConfig, build_run_config, config_sha256
+from astrogwb_paper.config.mcmc import (
+    RunConfig,
+    build_run_config,
+    config_sha256,
+    prior_to_spec,
+)
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
@@ -140,7 +147,6 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     from pluscross import load_catalog
 
     from astrogwb_paper.amplitude import build_amplitude_marginalization
-    from astrogwb_paper.priors import build_prior
 
     analysis = config.analysis
     cosmo = config.cosmology
@@ -239,7 +245,8 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     )
 
     # --- Build the model and sampler -----------------------------------------
-    priors = {name: build_prior(spec) for name, spec in config.priors.items()}
+    # `config.priors` already holds live distributions (see PriorDistribution).
+    priors = config.priors
     marginalization = None
     if analysis.likelihood == "amplitude_marginalized":
         assert analysis.amplitude_parameter is not None
@@ -396,7 +403,8 @@ def build_run_record(
         "fiducials": config.fiducials,
         "constants": config.constants,
         "priors": {
-            name: spec.model_dump(mode="json") for name, spec in config.priors.items()
+            name: prior_to_spec(prior).model_dump(mode="json")
+            for name, prior in config.priors.items()
         },
         "cosmology": config.cosmology.model_dump(mode="json"),
         "band": {
@@ -410,7 +418,7 @@ def build_run_record(
     if config.analysis.likelihood == "amplitude_marginalized":
         record["amplitude_parameter"] = config.analysis.amplitude_parameter
         record["amplitude_prior"] = (
-            config.amplitude_prior.model_dump(mode="json")
+            prior_to_spec(config.amplitude_prior).model_dump(mode="json")
             if config.amplitude_prior is not None
             else None
         )

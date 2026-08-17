@@ -2,9 +2,10 @@
 and astrogwb's amplitude marginalization.
 
 Assembles everything an amplitude-marginalized run needs from a ``RunConfig``.
-Imported only from inside functions, the same discipline as
-:func:`astrogwb_paper.priors.build_prior`, so importing this module does not
-itself initialize the JAX backend.
+Imported only from inside functions, so importing this module does not itself
+initialize the JAX backend. The amplitude prior arrives already materialized
+(``config.amplitude_prior`` is a live distribution; see
+:data:`~astrogwb_paper.config.mcmc.PriorDistribution`).
 """
 
 from __future__ import annotations
@@ -64,8 +65,6 @@ def build_amplitude_marginalization(config: RunConfig) -> AmplitudeMarginalizati
     )
     from astrogwb.sampling.amplitude import quadrature_grid
 
-    from astrogwb_paper.priors import build_prior
-
     analysis = config.analysis
     parameter = analysis.amplitude_parameter
     if parameter is None or config.amplitude_prior is None:
@@ -84,7 +83,7 @@ def build_amplitude_marginalization(config: RunConfig) -> AmplitudeMarginalizati
     else:
         raise ValueError(f"unsupported amplitude parameter {parameter!r}")
 
-    prior = build_prior(config.amplitude_prior)
+    prior = config.amplitude_prior
     return AmplitudeMarginalization(
         parameter=parameter,
         fiducial=float(config.fiducials[parameter]),
