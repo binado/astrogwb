@@ -23,18 +23,20 @@ These complete experiment targets include local post-processing:
   table;
 - `H0-omega-m`: standard and relative-ESS corner figures.
 
-Preview or build one:
+Preview or build one (from `packages/astrogwb-paper/`):
 
 ```bash
-uv run astrogwb-workflow mcmc H0-all-detectors --profile local
-uv run astrogwb-workflow mcmc H0-all-detectors \
-  --profile slurm --submit
+snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/local --cores 8 --dry-run H0_all_detectors
+snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/slurm H0_all_detectors
 ```
 
 Rebuild a single figure by its output path:
 
 ```bash
-uv run astrogwb-workflow mcmc H0-all-detectors --profile local -- \
+snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/local --cores 8 \
   outputs/figures/H0-all-detectors/H0-by-detector.pdf
 ```
 
@@ -42,7 +44,8 @@ With a SLURM profile, sampling runs remotely and figure rules run locally on the
 submit host after their chains finish. The submit host must remain attached,
 share the output filesystem, and provide plotting dependencies.
 
-Use `--chains-only` when post-processing should happen in a later invocation.
+Use the `<experiment>_chains` target when post-processing should happen in a
+later invocation.
 
 ## Standalone figures
 
@@ -52,15 +55,15 @@ workflow. Their settings live in
 [`inputs/figures/standalone.toml`](../inputs/figures/standalone.toml).
 
 ```bash
-uv run astrogwb-workflow paper
-uv run astrogwb-workflow paper --submit
+snakemake --snakefile workflow/mcmc.smk --cores 1 --dry-run standalone_figures
+snakemake --snakefile workflow/mcmc.smk --cores 1 standalone_figures
 ```
 
 Build one declared output directly:
 
 ```bash
-uv run astrogwb-workflow paper \
-  outputs/figures/standalone/fiducial_spectrum.pdf --submit
+snakemake --snakefile workflow/mcmc.smk --cores 1 \
+  outputs/figures/standalone/fiducial_spectrum.pdf
 ```
 
 All new figure products are written under `outputs/figures/`.

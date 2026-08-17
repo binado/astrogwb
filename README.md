@@ -31,8 +31,9 @@ uv run --package astrogwb --group test pytest packages/astrogwb/tests
 
 ```bash
 uv sync --package astrogwb-paper --group dev
-uv run astrogwb-workflow --help
-uv run astrogwb-workflow paper
+cd packages/astrogwb-paper
+uv run --group workflow snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/local --cores 8 --dry-run standalone_figures
 ```
 
 Build the library exactly as it will be published, without workspace source

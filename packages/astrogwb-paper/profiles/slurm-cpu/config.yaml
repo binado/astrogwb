@@ -1,7 +1,6 @@
 # CPU MCMC profile:
-#   uv run astrogwb-workflow mcmc H0-all-detectors --profile slurm-cpu --submit
 #   snakemake --snakefile workflow/mcmc.smk \
-#     --profile profiles/slurm-cpu H0_all_detectors
+#     --profile profiles/slurm-cpu H0_all_detectors --dry-run
 # Requires `uv sync --package astrogwb-paper --group slurm`.
 # Job logs land under .snakemake/slurm_logs/.
 executor: slurm
@@ -19,9 +18,7 @@ local-cores: 2
 # Force the JAX backend to CPU so run_mcmc does not try to init CUDA on a
 # CPU node. Overrides the "cuda" default in packages/astrogwb-paper/workflow/mcmc.smk.
 # Caveat: any CLI ``--config …`` replaces this whole list (Snakemake does not
-# merge). Prefer ``astrogwb-workflow``, which re-emits ``jax_platforms=cpu``
-# in the same ``--config`` group as catalog overrides; if invoking snakemake
-# directly, pass ``jax_platforms=cpu`` alongside any other ``--config`` keys.
+# merge), so pass ``jax_platforms=cpu`` alongside any other ``--config`` keys.
 config:
   - jax_platforms=cpu
 # packages/astrogwb-paper/workflow/mcmc.smk passes rule threads as --host-device-count on CPU jobs

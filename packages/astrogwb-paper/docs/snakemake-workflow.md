@@ -7,8 +7,8 @@ The paper application has two Snakefiles:
 - [`workflow/mcmc.smk`](../workflow/mcmc.smk) assembles explicit experiment
   configs, samples chains, and builds experiment and standalone figures.
 
-`astrogwb-workflow` wraps both workflows and defaults to `--dry-run`. Add
-`--submit` to execute.
+`snakemake` is invoked directly; preview with `--dry-run` (Snakemake executes
+for real unless it is passed).
 
 All commands run with `packages/astrogwb-paper/` as their working directory.
 Source inputs live under `inputs/` and `experiments/`; generated artifacts live
@@ -20,10 +20,10 @@ Catalog recipes are committed under [`inputs/catalogs/`](../inputs/catalogs).
 Build a catalog explicitly before running an experiment:
 
 ```bash
-uv run astrogwb-workflow \
-  catalog outputs/catalogs/bns-n16384-df1.h5
-uv run astrogwb-workflow \
-  catalog outputs/catalogs/bns-n16384-df1.h5 --submit
+snakemake --snakefile workflow/catalog.smk --cores 1 \
+  --dry-run outputs/catalogs/bns-n16384-df1.h5
+snakemake --snakefile workflow/catalog.smk --cores 1 \
+  outputs/catalogs/bns-n16384-df1.h5
 ```
 
 The DAG first creates `outputs/populations/<catalog>.h5`, then creates
@@ -67,21 +67,26 @@ The curated inventory is:
 Run one complete experiment:
 
 ```bash
-uv run astrogwb-workflow mcmc H0-all-detectors --profile local
-uv run astrogwb-workflow mcmc H0-all-detectors \
-  --profile slurm --submit
+snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/local --cores 8 --dry-run H0_all_detectors
+snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/slurm H0_all_detectors
 ```
 
 The default target includes experiment figures where they exist. Request only
-the chains with:
+the chains with the `_chains` target:
 
 ```bash
-uv run astrogwb-workflow mcmc H0-all-detectors \
-  --profile slurm --chains-only --submit
+snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/slurm H0_all_detectors_chains
 ```
 
-Multiple experiment names may be supplied. Omitting them targets every
-experiment.
+Multiple experiment targets may be supplied. The `experiments` target builds
+every experiment.
+
+When passing CLI `--config` overrides to a CPU profile (`local`, `slurm-cpu`),
+repeat `jax_platforms=cpu` in the same `--config` group: Snakemake replaces
+the profile's whole `config:` list rather than merging.
 
 ## SLURM chains and local figures
 
@@ -118,8 +123,8 @@ Figures without an MCMC experiment remain explicit local rules in the unified
 Snakefile:
 
 ```bash
-uv run astrogwb-workflow paper
-uv run astrogwb-workflow paper --submit
+snakemake --snakefile workflow/mcmc.smk --cores 1 --dry-run standalone_figures
+snakemake --snakefile workflow/mcmc.smk --cores 1 standalone_figures
 ```
 
 The aggregate includes the amplitude toy model, fiducial spectrum, effective

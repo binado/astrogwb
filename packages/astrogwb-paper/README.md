@@ -9,12 +9,20 @@ local development and workflow dependencies from the workspace root:
 
 ```bash
 uv sync --package astrogwb-paper --group dev
-uv run astrogwb-workflow --help
 uv run astrogwb-run-mcmc --help
 ```
 
-Use `uv run astrogwb-workflow catalog ...`, `mcmc ...`, and `paper` for local
-dry-runs; add `--submit` to execute. The committed `local`, `slurm`, and
+Run the Snakemake workflows directly from this package's root (`uv run --group
+workflow snakemake` from the workspace root also works); preview with
+`--dry-run`, omit it to execute:
+
+```bash
+cd packages/astrogwb-paper
+snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/local --cores 8 --dry-run H0_all_detectors
+```
+
+The committed `local`, `slurm`, and
 `slurm-cpu` profiles live under `profiles/`. Install the SLURM executor with
 `uv sync --package astrogwb-paper --group slurm`, adding `--extra cuda` for
 GPU jobs.

@@ -71,15 +71,17 @@ uv run astrogwb-validate-config \
 The validator checks that every sampled parameter has a prior and fiducial and
 that amplitude-marginalized runs define a valid amplitude parameter.
 
-Run the corresponding experiment through Snakemake:
+Run the corresponding experiment through Snakemake (from
+`packages/astrogwb-paper/`, adding `--dry-run` to preview):
 
 ```bash
-uv run astrogwb-workflow mcmc H0-all-detectors --profile local
-uv run astrogwb-workflow mcmc H0-all-detectors \
-  --profile slurm --submit
+snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/local --cores 8 H0_all_detectors
+snakemake --snakefile workflow/mcmc.smk \
+  --profile profiles/slurm H0_all_detectors
 ```
 
-Use `--chains-only` to omit local post-processing.
+Use the `H0_all_detectors_chains` target to omit local post-processing.
 
 ## Outputs and provenance
 
@@ -100,8 +102,8 @@ Experiments consume existing catalogs and never generate them implicitly.
 Build the required catalogs first:
 
 ```bash
-uv run astrogwb-workflow \
-  catalog outputs/catalogs/bns-n16384-df1.h5 --submit
+snakemake --snakefile workflow/catalog.smk --cores 1 \
+  outputs/catalogs/bns-n16384-df1.h5
 ```
 
 The variable-injection-size experiment additionally requires the 8192 and
