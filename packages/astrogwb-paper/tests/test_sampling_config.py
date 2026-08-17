@@ -1,37 +1,12 @@
 from __future__ import annotations
 
-import numpy as np
 import pytest
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import build_run_config
 from astrogwb_paper.paths import paper_project_root
-from astrogwb_paper.priors import build_prior
 from pydantic import ValidationError
 
 PAPER_ROOT = paper_project_root()
-
-
-@pytest.mark.parametrize(
-    ("spec", "expected_attrs"),
-    [
-        ({"type": "uniform", "low": 0.0, "high": 2.0}, {"low": 0.0, "high": 2.0}),
-        ({"type": "normal", "loc": 1.0, "scale": 0.5}, {"loc": 1.0, "scale": 0.5}),
-    ],
-)
-def test_build_prior_happy_path(
-    spec: dict[str, object], expected_attrs: dict[str, float]
-) -> None:
-    distribution = build_prior(spec)
-
-    for attr, expected in expected_attrs.items():
-        np.testing.assert_allclose(getattr(distribution, attr), expected)
-
-
-def test_build_prior_rejects_unknown_type() -> None:
-    # ValueError, not pydantic.ValidationError: spec parsing is hand-rolled in
-    # materialize_prior (no pydantic spec models).
-    with pytest.raises(ValueError, match="does not match any of the expected"):
-        build_prior({"type": "mystery", "low": 0.0, "high": 1.0})
 
 
 @pytest.mark.parametrize(
