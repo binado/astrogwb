@@ -23,14 +23,14 @@ base:
     jit_model_args: true
 
   fiducials:
-    H0: 67.66
-    Omega_m: 0.3096
+    H0: &fiducials_H0 67.66
+    Omega_m: &fiducials_Omega_m 0.3096
     xi_0: 1.0
     xi_n: 1.91
     gamma: 1.42
     kappa: 4.62
     z_peak: 1.84
-    local_merger_rate: 769.0
+    local_merger_rate: &fiducials_local_merger_rate 769.0
 
   priors:
     H0:
@@ -39,7 +39,7 @@ base:
       high: 140.0
     Omega_m:
       type: normal
-      loc: 0.3096
+      loc: *fiducials_Omega_m
       scale: 0.006
     xi_0:
       type: uniform
@@ -63,8 +63,8 @@ base:
       high: 2.5
     local_merger_rate:
       type: normal
-      loc: 161.0
-      scale: 1.61
+      loc: *fiducials_local_merger_rate
+      scale: 7.69
 
   output:
     outdir: outputs/chains
@@ -141,7 +141,7 @@ experiments:
         priors:
           H0:
             type: normal
-            loc: 67.66
+            loc: *fiducials_H0
             scale: 0.6766
 
   variable-injection-size:
