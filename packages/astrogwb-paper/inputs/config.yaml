@@ -12,7 +12,7 @@ base:
     n_grid: 256
 
   sampler:
-    num_warmup: 2000
+    num_warmup: 1000
     num_samples: 2000
     num_chains: 4
     target_accept: 0.9
