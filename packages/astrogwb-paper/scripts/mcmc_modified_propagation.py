@@ -44,7 +44,7 @@ from astrogwb_paper.config.figures import (
     load_fiducials,
     load_figure_config,
 )
-from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import (
     CATEGORY,
     CORNER_LEVELS,
@@ -79,32 +79,6 @@ VAR_LABELS = {
 XI_N_VAR_NAMES = ("xi_0", "xi_n")
 XI_N_ESS_VAR_NAMES = ("xi_0", "xi_n", "importance_relative_ess")
 H0_VAR_NAMES = ("xi_0", "H0")
-
-
-def _resolve_path(path: Path, root: Path) -> Path:
-    return path if path.is_absolute() else root / path
-
-
-def _base_network_name(name: str) -> str:
-    """Map an ET+CE network name onto its ET-only counterpart."""
-    suffix = "-CE-Hanford"
-    return name.removesuffix(suffix)
-
-
-def detector_network_styles(
-    networks: Sequence[Network],
-) -> tuple[list[str], list[str]]:
-    """Shared color per ET / ET+CE pair; dashed linestyle for CE companions."""
-    bases: list[str] = []
-    for network in networks:
-        base = _base_network_name(network.name)
-        if base not in bases:
-            bases.append(base)
-    palette = combo_colors(len(bases))
-    color_by_base = dict(zip(bases, palette, strict=True))
-    colors = [color_by_base[_base_network_name(n.name)] for n in networks]
-    linestyles = ["--" if n.name.endswith("-CE-Hanford") else "-" for n in networks]
-    return colors, linestyles
 
 
 def load_inference_data(path: Path) -> xr.DataTree:
@@ -624,9 +598,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
 
     chain_paths = [
-        _resolve_path(args.xi0_chain, root),
-        _resolve_path(args.xi0_n_chain, root),
-        _resolve_path(args.h0_chain, root),
+        resolve_paper_path(args.xi0_chain, root),
+        resolve_paper_path(args.xi0_n_chain, root),
+        resolve_paper_path(args.h0_chain, root),
     ]
     inference_data = [load_inference_data(path) for path in chain_paths]
     validate_inference_data(
@@ -639,7 +613,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     xi_n_labels = [marginal_labels[1]]
     h0_data = [inference_data[2]]
     detector_xi0_n_data = [
-        load_inference_data(_resolve_path(path, root))
+        load_inference_data(resolve_paper_path(path, root))
         for path in args.detector_xi0_n_chains
     ]
     validate_inference_data(
@@ -684,7 +658,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         colors=[CATEGORY["modified_propagation"]],
     )
     snr_table = compute_network_snrs(
-        _resolve_path(args.catalog, root),
+        resolve_paper_path(args.catalog, root),
         networks,
         fiducials,
         observation_time=grid.observation_time,
@@ -703,18 +677,20 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(xi0_n_constraint_table_latex(xi0_n_constraint_table))
 
     outputs = {
-        _resolve_path(args.output_xi_n_corner_pdf, root): xi_n_corner_figure,
-        _resolve_path(args.output_xi_n_ess_corner_pdf, root): xi_n_ess_corner_figure,
-        _resolve_path(args.output_xi0_marginal_pdf, root): xi0_marginal_figure,
-        _resolve_path(args.output_h0_corner_pdf, root): h0_corner_figure,
+        resolve_paper_path(args.output_xi_n_corner_pdf, root): xi_n_corner_figure,
+        resolve_paper_path(
+            args.output_xi_n_ess_corner_pdf, root
+        ): xi_n_ess_corner_figure,
+        resolve_paper_path(args.output_xi0_marginal_pdf, root): xi0_marginal_figure,
+        resolve_paper_path(args.output_h0_corner_pdf, root): h0_corner_figure,
     }
     for output_path, figure in outputs.items():
         output_path.parent.mkdir(parents=True, exist_ok=True)
         figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
         print("saved figure:", output_path)
 
-    csv_path = _resolve_path(args.output_xi0_n_csv, root)
-    tex_path = _resolve_path(args.output_xi0_n_tex, root)
+    csv_path = resolve_paper_path(args.output_xi0_n_csv, root)
+    tex_path = resolve_paper_path(args.output_xi0_n_tex, root)
     write_xi0_n_constraint_table(xi0_n_constraint_table, csv_path, tex_path)
     print("saved constraint table:", csv_path)
     print("saved LaTeX table:", tex_path)

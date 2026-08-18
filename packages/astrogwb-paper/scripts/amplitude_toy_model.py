@@ -44,7 +44,7 @@ from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.config.hashing import file_sha256
 from astrogwb_paper.config.figures import load_analysis_grid
-from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
@@ -57,10 +57,6 @@ register_projection(MplAxes)
 
 jax.config.update("jax_enable_x64", True)
 azp.style.use("arviz-variat")
-
-
-def _resolve_path(path: Path, root: Path) -> Path:
-    return path if path.is_absolute() else root / path
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -112,9 +108,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    catalog_path = _resolve_path(args.catalog, root)
-    output_path = _resolve_path(args.output_pdf, root)
-    out_dir = _resolve_path(args.chains_dir, root)
+    catalog_path = resolve_paper_path(args.catalog, root)
+    output_path = resolve_paper_path(args.output_pdf, root)
+    out_dir = resolve_paper_path(args.chains_dir, root)
 
     grid = load_analysis_grid(args.base_config, root)
     detnames = tuple(args.detectors)

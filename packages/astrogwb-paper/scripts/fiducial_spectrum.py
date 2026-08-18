@@ -33,11 +33,11 @@ from astrogwb_paper.config.figures import (
     load_fiducials,
     load_figure_config,
 )
-from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
     SPECTRUM,
-    combo_colors,
+    detector_network_styles,
     use_paper_style,
 )
 from matplotlib.axes import Axes as MplAxes
@@ -50,10 +50,6 @@ from pluscross import load_catalog
 # standard matplotlib projection for consistent plotting.
 register_projection(MplAxes)
 jax.config.update("jax_enable_x64", True)
-
-
-def _resolve_path(path: Path, root: Path) -> Path:
-    return path if path.is_absolute() else root / path
 
 
 def compute_fiducial_spectral_density(
@@ -175,28 +171,6 @@ def plot_omega_and_sh(
     return fig
 
 
-def _base_network_name(name: str) -> str:
-    """Map an ET+CE network name onto its ET-only counterpart."""
-    suffix = "-CE-Hanford"
-    return name.removesuffix(suffix)
-
-
-def detector_network_styles(
-    networks: Sequence[Network],
-) -> tuple[list[str], list[str]]:
-    """Shared color per ET / ET+CE pair; dashed linestyle for CE companions."""
-    bases: list[str] = []
-    for network in networks:
-        base = _base_network_name(network.name)
-        if base not in bases:
-            bases.append(base)
-    palette = combo_colors(len(bases))
-    color_by_base = dict(zip(bases, palette, strict=True))
-    colors = [color_by_base[_base_network_name(n.name)] for n in networks]
-    linestyles = ["--" if n.name.endswith("-CE-Hanford") else "-" for n in networks]
-    return colors, linestyles
-
-
 def plot_effective_psds(
     frequencies: jax.Array,
     networks: Sequence[Network],
@@ -271,7 +245,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     omega_gw_min = float(figure_config["omega_gw_min"])
     use_paper_style()
 
-    catalog_path = _resolve_path(args.catalog, root)
+    catalog_path = resolve_paper_path(args.catalog, root)
     frequencies, observed_spectral_density, mask = compute_fiducial_spectral_density(
         catalog_path,
         fiducials,
@@ -305,12 +279,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         mask=mask,
     )
 
-    output_path = _resolve_path(args.output_pdf, root)
+    output_path = resolve_paper_path(args.output_pdf, root)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
     print("saved figure:", output_path)
 
-    effective_psd_output_path = _resolve_path(args.output_effective_psd_pdf, root)
+    effective_psd_output_path = resolve_paper_path(args.output_effective_psd_pdf, root)
     effective_psd_output_path.parent.mkdir(parents=True, exist_ok=True)
     effective_psd_figure.savefig(
         effective_psd_output_path, dpi=args.figure_dpi, bbox_inches="tight"

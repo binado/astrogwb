@@ -44,7 +44,7 @@ from astrogwb_paper.config.figures import (
     load_fiducials,
     load_figure_config,
 )
-from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import (
     CATEGORY,
     CORNER_LEVELS,
@@ -52,6 +52,7 @@ from astrogwb_paper.plotting import (
     MERGER_RATE_LEGEND,
     TRUTH,
     combo_colors,
+    detector_network_styles,
     get_corner_kwargs,
     use_paper_style,
 )
@@ -80,10 +81,6 @@ OMEGA_M_VAR_NAMES = ("H0", "Omega_m")
 OMEGA_M_ESS_VAR_NAMES = ("H0", "Omega_m", "importance_relative_ess")
 # Kept for select_corner_inference_data / older call sites.
 CORNER_VAR_NAMES = MERGER_RATE_VAR_NAMES
-
-
-def _resolve_path(path: Path, root: Path) -> Path:
-    return path if path.is_absolute() else root / path
 
 
 def load_inference_data(path: Path) -> xr.DataTree:
@@ -171,28 +168,6 @@ def _validate_styles(
     if len(resolved_colors) != count or len(resolved_linestyles) != count:
         raise ValueError("color and linestyle counts must match the inference data")
     return resolved_colors, resolved_linestyles
-
-
-def _base_network_name(name: str) -> str:
-    """Map an ET+CE network name onto its ET-only counterpart."""
-    suffix = "-CE-Hanford"
-    return name.removesuffix(suffix)
-
-
-def detector_network_styles(
-    networks: Sequence[Network],
-) -> tuple[list[str], list[str]]:
-    """Shared color per ET / ET+CE pair; dashed linestyle for CE companions."""
-    bases: list[str] = []
-    for network in networks:
-        base = _base_network_name(network.name)
-        if base not in bases:
-            bases.append(base)
-    palette = combo_colors(len(bases))
-    color_by_base = dict(zip(bases, palette, strict=True))
-    colors = [color_by_base[_base_network_name(n.name)] for n in networks]
-    linestyles = ["--" if n.name.endswith("-CE-Hanford") else "-" for n in networks]
-    return colors, linestyles
 
 
 def plot_h0_posteriors(
@@ -735,7 +710,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 f"{figure_config['experiment']} declares {len(networks)} networks"
             )
         detector_data = [
-            load_inference_data(_resolve_path(path, root))
+            load_inference_data(resolve_paper_path(path, root))
             for path in args.detector_chains
         ]
         opened_data.extend(detector_data)
@@ -746,17 +721,19 @@ def main(argv: Sequence[str] | None = None) -> None:
             expected_count=len(networks),
         )
         detector_colors, detector_linestyles = detector_network_styles(networks)
-        outputs[_resolve_path(args.output_detector_pdf, root)] = plot_h0_posteriors(
-            detector_data,
-            detector_labels,
-            colors=detector_colors,
-            linestyles=detector_linestyles,
-            group=args.group,
-            fiducial=fiducials["H0"],
-            legend_kwargs=DETECTOR_COMPARISON_LEGEND,
+        outputs[resolve_paper_path(args.output_detector_pdf, root)] = (
+            plot_h0_posteriors(
+                detector_data,
+                detector_labels,
+                colors=detector_colors,
+                linestyles=detector_linestyles,
+                group=args.group,
+                fiducial=fiducials["H0"],
+                legend_kwargs=DETECTOR_COMPARISON_LEGEND,
+            )
         )
         snr_table = compute_network_snrs(
-            _resolve_path(args.catalog, root),
+            resolve_paper_path(args.catalog, root),
             networks,
             fiducials,
             observation_time=grid.observation_time,
@@ -775,8 +752,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         write_constraint_table(
             table,
-            _resolve_path(args.output_csv, root),
-            _resolve_path(args.output_tex, root),
+            resolve_paper_path(args.output_csv, root),
+            resolve_paper_path(args.output_tex, root),
         )
 
     elif args.section == "merger-rate":
@@ -794,7 +771,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "the merger-rate comparison requires two chains and labels"
             )
         prior_data = [
-            load_inference_data(_resolve_path(path, root)) for path in args.prior_chains
+            load_inference_data(resolve_paper_path(path, root))
+            for path in args.prior_chains
         ]
         opened_data.extend(prior_data)
         validate_inference_data(
@@ -807,7 +785,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             prior_data, prior_labels, group=args.group
         )
         colors = combo_colors(len(prior_data))
-        outputs[_resolve_path(args.output_prior_pdf, root)] = plot_h0_posteriors(
+        outputs[resolve_paper_path(args.output_prior_pdf, root)] = plot_h0_posteriors(
             prior_data,
             prior_labels,
             colors=colors,
@@ -816,7 +794,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             fiducial=fiducials["H0"],
             legend_kwargs=MERGER_RATE_LEGEND,
         )
-        outputs[_resolve_path(args.output_narrow_corner_pdf, root)] = plot_corner(
+        outputs[resolve_paper_path(args.output_narrow_corner_pdf, root)] = plot_corner(
             [corner_data[0]],
             [corner_labels[0]],
             MERGER_RATE_VAR_NAMES,
@@ -828,8 +806,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         table = build_h0_r0_uncertainty_table(
             prior_data, prior_labels, group=args.group
         )
-        csv_path = _resolve_path(args.output_csv, root)
-        tex_path = _resolve_path(args.output_tex, root)
+        csv_path = resolve_paper_path(args.output_csv, root)
+        tex_path = resolve_paper_path(args.output_tex, root)
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         tex_path.parent.mkdir(parents=True, exist_ok=True)
         table.to_csv(csv_path)
@@ -842,7 +820,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             raise SystemExit("--output-omega-m-corner-pdf is required")
         if args.output_omega_m_ess_corner_pdf is None:
             raise SystemExit("--output-omega-m-ess-corner-pdf is required")
-        omega_m_data = [load_inference_data(_resolve_path(args.omega_m_chain, root))]
+        omega_m_data = [
+            load_inference_data(resolve_paper_path(args.omega_m_chain, root))
+        ]
         opened_data.extend(omega_m_data)
         omega_m_labels = [figure_config["label"]]
         validate_inference_data(
@@ -852,7 +832,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             group=args.group,
             expected_count=1,
         )
-        outputs[_resolve_path(args.output_omega_m_corner_pdf, root)] = plot_corner(
+        outputs[resolve_paper_path(args.output_omega_m_corner_pdf, root)] = plot_corner(
             omega_m_data,
             omega_m_labels,
             OMEGA_M_VAR_NAMES,
@@ -860,13 +840,15 @@ def main(argv: Sequence[str] | None = None) -> None:
             group=args.group,
             fiducials=fiducials,
         )
-        outputs[_resolve_path(args.output_omega_m_ess_corner_pdf, root)] = plot_corner(
-            omega_m_data,
-            omega_m_labels,
-            OMEGA_M_ESS_VAR_NAMES,
-            colors=[CATEGORY["cosmology"]],
-            group=args.group,
-            fiducials=fiducials,
+        outputs[resolve_paper_path(args.output_omega_m_ess_corner_pdf, root)] = (
+            plot_corner(
+                omega_m_data,
+                omega_m_labels,
+                OMEGA_M_ESS_VAR_NAMES,
+                colors=[CATEGORY["cosmology"]],
+                group=args.group,
+                fiducials=fiducials,
+            )
         )
 
     for output_path, figure in outputs.items():

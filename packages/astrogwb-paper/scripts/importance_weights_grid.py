@@ -30,7 +30,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb_paper.config.figures import load_fiducials
-from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.figure import Figure
@@ -67,10 +67,6 @@ GRID_PRIORS: tuple[
     (("H0", dist.Uniform(20.0, 140.0)), ("Omega_m", dist.Uniform(0.05, 0.95))),
     (("xi_0", dist.Uniform(0.5, 5.0)), ("xi_n", dist.Uniform(0.3, 3.0))),
 )
-
-
-def _resolve_path(path: Path, root: Path) -> Path:
-    return path if path.is_absolute() else root / path
 
 
 def prior_grid(prior: dist.Distribution, *, eps: float, npoints: int) -> jax.Array:
@@ -180,7 +176,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    catalog_path = _resolve_path(args.catalog, root)
+    catalog_path = resolve_paper_path(args.catalog, root)
     fiducials = load_fiducials(args.base_config, root)
     use_paper_style()
 
@@ -243,7 +239,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         figures.append((figure, output))
 
     for figure, output in figures:
-        output_path = _resolve_path(output, root)
+        output_path = resolve_paper_path(output, root)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
         print("saved figure:", output_path)

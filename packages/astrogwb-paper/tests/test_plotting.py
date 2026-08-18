@@ -28,3 +28,24 @@ def test_get_corner_kwargs_and_combo_colors() -> None:
     colors = plotting.combo_colors(4)
     assert len(colors) == 4
     assert all(color.startswith("#") for color in colors)
+
+
+def test_detector_network_styles_pairs_et_and_et_plus_ce() -> None:
+    from astrogwb_paper.config.figures import figure_networks, load_figure_config
+    from astrogwb_paper.paths import paper_project_root
+
+    networks = figure_networks(
+        load_figure_config(
+            paper_project_root() / "inputs/figures/H0-all-detectors.toml"
+        ),
+        "posteriors",
+    )
+    colors, linestyles = plotting.detector_network_styles(networks)
+
+    assert len(colors) == len(linestyles) == len(networks)
+    # Each ET-only network shares its color with its CE companion, and the
+    # companion is the dashed one.
+    for base, companion in zip(colors[::2], colors[1::2], strict=True):
+        assert base == companion
+    assert linestyles == ["-", "--"] * 3
+    assert len(set(colors)) == 3
