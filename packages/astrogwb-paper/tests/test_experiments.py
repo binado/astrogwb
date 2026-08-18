@@ -28,14 +28,14 @@ def declared_runs() -> set[tuple[str, str]]:
     }
 
 
-def test_inventory_contains_four_experiments_and_22_runs() -> None:
+def test_inventory_contains_four_experiments_and_21_runs() -> None:
     assert set(load_experiments()) == {
         "cosmological-parameters",
         "astrophysical-parameters",
         "modified-propagation",
         "variable-injection-size",
     }
-    assert len(declared_runs()) == 22
+    assert len(declared_runs()) == 21
 
 
 def test_single_yaml_is_the_only_mcmc_inventory() -> None:
@@ -69,8 +69,9 @@ def test_all_run_configs_are_assembled_together(tmp_path: Path) -> None:
     )
 
     generated = list(tmp_path.glob("*/*.json"))
-    assert len(generated) == 22
+    assert len(generated) == 21
     assert (tmp_path / "cosmological-parameters/H0-Omega_m.json").is_file()
+    assert (tmp_path / "cosmological-parameters/H0-merger-rate.json").is_file()
     assert (tmp_path / "astrophysical-parameters/z_peak.json").is_file()
     assert (tmp_path / "modified-propagation/Xi_0-H0.json").is_file()
     assert (tmp_path / "variable-injection-size/n32768.json").is_file()

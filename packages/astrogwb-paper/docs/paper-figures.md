@@ -32,7 +32,7 @@ chains=expand("outputs/chains/cosmological-parameters/{run}.nc",
 ## Experiment figures
 
 The detector-network, merger-rate, and Omega-m analyses form one paper section.
-The `plot_cosmological_parameters` rule consumes all nine chains and produces their
+The `plot_cosmological_parameters` rule consumes all eight chains and produces their
 five figures and two CSV/LaTeX table pairs in one script invocation. All
 artifacts live under `outputs/figures/cosmological-parameters/`.
 

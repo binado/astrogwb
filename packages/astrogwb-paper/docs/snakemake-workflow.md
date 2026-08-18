@@ -36,7 +36,7 @@ starting catalog generation.
 [`inputs/config.yaml`](../inputs/config.yaml) contains the shared base and all
 four experiment groups. YAML aliases reuse common detector and likelihood
 mappings, while experiment and run mappings override inherited values. The
-local `assemble_config` rule validates all 22 runs in one job and writes:
+local `assemble_config` rule validates all 21 runs in one job and writes:
 
 ```text
 outputs/configs/<experiment>/<run>.json
@@ -56,7 +56,7 @@ The curated inventory is:
 
 | Experiment | Runs | Figures |
 | --- | ---: | --- |
-| `cosmological-parameters` | 6 detector runs plus `fixed`, `sampled`, and `H0-Omega_m` | input to `plot_cosmological_parameters` |
+| `cosmological-parameters` | 6 detector runs plus `H0-Omega_m` and `H0-merger-rate` | input to `plot_cosmological_parameters` |
 | `modified-propagation` | 6 detector runs plus `Xi_0` and `Xi_0-H0` | corners, marginal comparison, and tables |
 | `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` | chains only |
 | `variable-injection-size` | 8192, 16384, and 32768 injections | chains only |
@@ -80,7 +80,7 @@ snakemake --snakefile Snakefile \
   --profile profiles/slurm plot_cosmological_parameters
 ```
 
-This single local post-processing rule consumes all nine chains from
+This single local post-processing rule consumes all eight chains from
 `cosmological-parameters`, then writes five figures and two CSV/LaTeX table
 pairs. Requesting any one cosmological-parameter output path schedules the full
 section.
@@ -100,8 +100,8 @@ Snakemake's `localrules`, so they execute on the submit host.
 
 For the `plot_cosmological_parameters` target, Snakemake:
 
-1. assembles and validates all 22 configs in one local job;
-2. submits the nine missing chains to SLURM;
+1. assembles and validates all 21 configs in one local job;
+2. submits the eight missing chains to SLURM;
 3. waits for chain and sidecar outputs;
 4. executes the one figure-and-table rule locally.
 

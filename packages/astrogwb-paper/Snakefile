@@ -186,9 +186,12 @@ rule plot_cosmological_parameters:
             "outputs/chains/cosmological-parameters/{run}.nc",
             run=DETECTOR_NETWORK_RUNS,
         ),
+        # The fixed-R0 reference reuses the ET-2L-aligned-CE-Hanford chain,
+        # whose run pins local_merger_rate to its fiducial; the comparison
+        # chain samples local_merger_rate with H0 amplitude-marginalized.
         prior_chains=expand(
             "outputs/chains/cosmological-parameters/{run}.nc",
-            run=["fixed", "sampled"],
+            run=["ET-2L-aligned-CE-Hanford", "H0-merger-rate"],
         ),
         omega_m_chain="outputs/chains/cosmological-parameters/H0-Omega_m.nc",
         catalog=_catalog(DEFAULT_CATALOG.name),

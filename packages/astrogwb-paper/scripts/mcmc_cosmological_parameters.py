@@ -2,8 +2,8 @@ r"""Cosmological-parameter constraints by detector network.
 
 Evaluates the fiducial SGWB once, computes matched-filter SNR for each
 detector network, and compares those estimates with sampled $H_0$ posteriors.
-Also compares fixed and narrow priors on the local merger rate
-$\mathcal{R}_0$, the joint $H_0$--$\mathcal{R}_0$ corner, and an
+Also compares a fixed local merger rate $\mathcal{R}_0$ against the
+amplitude-marginalized $H_0$--$\mathcal{R}_0$ run, its joint corner, and an
 $H_0$--$\Omega_m$ corner.
 """
 
@@ -91,7 +91,7 @@ CORNER_VAR_NAMES = MERGER_RATE_VAR_NAMES
 DETECTOR_EXPERIMENT = "cosmological-parameters"
 MERGER_RATE_LABELS = (
     r"$H_0$ (fixed $\mathcal{R}_0$)",
-    r"$H_0 + \mathcal{R}_0$ (narrow prior)",
+    r"$H_0-\mathcal{R}_0$",
 )
 OMEGA_M_POSTERIOR_LABEL = r"$H_0 + \Omega_m$"
 
@@ -528,9 +528,9 @@ def build_h0_r0_uncertainty_table(
 ) -> pd.DataFrame:
     """Compare $H_0$ and $\\mathcal{R}_0$ constraints across prior-comparison runs.
 
-    Rows are analyses (fixed $\\mathcal{R}_0$, then joint $H_0+\\mathcal{R}_0$
-    runs). Cells are median with 68% HDI as $x_{-l}^{+u}$; missing parameters
-    are shown as an em dash.
+    Rows are analyses (fixed $\\mathcal{R}_0$, then the amplitude-marginalized
+    $H_0-\\mathcal{R}_0$ run). Cells are median with 68% HDI as $x_{-l}^{+u}$;
+    missing parameters are shown as an em dash.
     """
     validate_inference_data(inference_data, labels, group=group)
     rows: list[dict[str, str]] = []
@@ -568,7 +568,8 @@ def h0_r0_uncertainty_table_latex(table: pd.DataFrame) -> str:
         escape=False,
         caption=(
             "Median and 68.27\\% HDI constraints on $H_0$ and "
-            r"$\mathcal{R}_0$ for fixed versus joint local-merger-rate analyses. "
+            r"$\mathcal{R}_0$ for fixed versus amplitude-marginalized "
+            "local-merger-rate analyses. "
             "Entries are $x_{-l}^{+u}$."
         ),
         label="tab:mcmc_cosmological_parameters_h0_r0",
@@ -703,7 +704,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     prior_labels = list(MERGER_RATE_LABELS)
     if len(args.prior_chains) != len(prior_labels):
         raise SystemExit(
-            "the merger-rate comparison requires two chains, fixed then sampled"
+            "the merger-rate comparison requires two chains, fixed-rate "
+            "reference then H0-merger-rate"
         )
 
     use_paper_style()

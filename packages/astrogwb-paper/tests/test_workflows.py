@@ -95,7 +95,7 @@ def test_plot_cosmological_parameters_expands_all_chains_and_figures(
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule assemble_config:") == 1
-    assert result.stdout.count("rule run_mcmc:") == 9
+    assert result.stdout.count("rule run_mcmc:") == 8
     assert result.stdout.count("rule plot_cosmological_parameters:") == 1
     for path in (
         "outputs/figures/cosmological-parameters/H0-by-detector.pdf",
@@ -121,7 +121,7 @@ def test_chains_only_target_excludes_figure_rule(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule run_mcmc:") == 9
+    assert result.stdout.count("rule run_mcmc:") == 8
     assert "rule plot_cosmological_parameters:" not in result.stdout
 
 
@@ -229,7 +229,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
     }.isdisjoint(rules)
 
 
-def test_experiments_target_builds_all_22_chains(tmp_path: Path) -> None:
+def test_experiments_target_builds_all_21_chains(tmp_path: Path) -> None:
     catalogs = _catalogs(
         tmp_path,
         "bns-n8192-df1.h5",
@@ -249,7 +249,7 @@ def test_experiments_target_builds_all_22_chains(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule assemble_config:") == 1
-    assert result.stdout.count("rule run_mcmc:") == 22
+    assert result.stdout.count("rule run_mcmc:") == 21
     assert result.stdout.count("rule plot_cosmological_parameters:") == 1
     assert result.stdout.count("rule plot_modified_propagation:") == 1
 
@@ -347,7 +347,7 @@ def test_figure_path_is_a_valid_snakemake_target(
 
     assert result.returncode == 0, result.stderr
     assert "rule plot_cosmological_parameters:" in result.stdout
-    assert result.stdout.count("rule run_mcmc:") == 9
+    assert result.stdout.count("rule run_mcmc:") == 8
 
 
 def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
@@ -378,6 +378,11 @@ def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
         )
     ]
     assert positions == sorted(positions)
+    prior_start = command.index(" --prior-chains ")
     assert command.index(
-        "outputs/chains/cosmological-parameters/fixed.nc"
-    ) < command.index("outputs/chains/cosmological-parameters/sampled.nc")
+        "outputs/chains/cosmological-parameters/ET-2L-aligned-CE-Hanford.nc",
+        prior_start,
+    ) < command.index(
+        "outputs/chains/cosmological-parameters/H0-merger-rate.nc",
+        prior_start,
+    )

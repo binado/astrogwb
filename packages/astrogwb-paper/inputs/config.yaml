@@ -97,12 +97,6 @@ experiments:
         sampled_params: [H0]
         analysis: &et_2l_misaligned_ce
           detectors: [S2, R2, C1]
-      fixed:
-        sampled_params: [H0]
-        analysis: *et_2l_aligned_ce
-      sampled:
-        sampled_params: [H0, local_merger_rate]
-        analysis: *et_2l_aligned_ce
       H0-Omega_m:
         sampled_params: [Omega_m]
         analysis: &amplitude_marginalized
@@ -110,6 +104,9 @@ experiments:
           likelihood: amplitude_marginalized
           amplitude_parameter: H0
           amplitude_num_nodes: 1024
+      H0-merger-rate:
+        sampled_params: [local_merger_rate]
+        analysis: *amplitude_marginalized
 
   astrophysical-parameters:
     runs:

@@ -31,7 +31,7 @@ source. Its `base` mapping owns settings shared by all runs:
 - default priors;
 - output defaults.
 
-Its `experiments` mapping declares four groups and all 22 runs:
+Its `experiments` mapping declares four groups and all 21 runs:
 
 ```text
 inputs/config.yaml
@@ -52,13 +52,13 @@ The groups are:
 
 | Experiment | Runs |
 | --- | ---: |
-| `cosmological-parameters` | six detector networks, `fixed`, `sampled`, and `H0-Omega_m` |
+| `cosmological-parameters` | six detector networks, `H0-Omega_m`, and `H0-merger-rate` |
 | `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` |
 | `modified-propagation` | six detector networks, `Xi_0`, and `Xi_0-H0` |
 | `variable-injection-size` | `n8192`, `n16384`, and `n32768` |
 
 `assemble_config` is one local Snakemake job. A change to
-`inputs/config.yaml` validates the complete inventory and regenerates all 22
+`inputs/config.yaml` validates the complete inventory and regenerates all 21
 canonical JSON files together. Each MCMC job then consumes its own JSON.
 
 Run one experiment's chains through Snakemake from
