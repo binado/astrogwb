@@ -36,8 +36,8 @@ The base owns settings shared across all experiments:
 - default priors;
 - output defaults.
 
-Top-level keys in the experiment file (except `runs` and `figure`) overlay the
-base for every run. Each `[runs.<id>]` table then overlays detector names,
+Top-level keys in the experiment file (except `runs`) overlay the base for
+every run. Each `[runs.<id>]` table then overlays detector names,
 `sampled_params`, likelihood settings, catalog path, and run-specific priors.
 
 For example:

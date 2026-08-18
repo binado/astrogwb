@@ -1,16 +1,23 @@
 # Paper figures
 
-Experiment figures are part of the same DAG as their chains. Ordered run IDs,
-labels, and output paths live in the optional `[figure]` table of:
+Experiment figures are part of the same DAG as their chains. Each figure's
+presentation -- the ordered run IDs it compares and its LaTeX labels -- lives
+in [`inputs/figures/`](../inputs/figures), one file per figure group:
 
 ```text
-experiments/<experiment>.toml
+inputs/figures/<figure>.toml
+inputs/figures/detector-networks.toml   # shared network label registry
 ```
 
-Those `output_*` paths are valid Snakemake targets. Shared scientific values
-such as fiducials, frequency bounds, and cosmology grid settings come from
-`inputs/mcmc.base.toml`. Snakemake reads those files and feeds argparse flags
-to the figure scripts under [`scripts/`](../scripts/).
+Output paths are named literally in the rules' `output:` blocks in
+[`workflow/mcmc.smk`](../workflow/mcmc.smk), and each is a valid Snakemake
+target. Shared scientific values -- fiducials, frequency bounds, cosmology grid
+settings -- stay in `inputs/mcmc.base.toml`.
+
+Detector *lists* are never duplicated into a figure config: a figure names its
+experiment and the runs it compares, and `astrogwb_paper.config.figures`
+resolves each run's detectors from `experiments/<experiment>.toml`. Name, label,
+and detectors therefore always travel together.
 
 ## Experiment figures
 
@@ -52,8 +59,10 @@ later invocation.
 
 The amplitude toy model, fiducial spectrum, effective detector PSD comparison,
 and importance-weight grids are explicit standalone rules in the unified
-workflow. Their settings live in
-[`inputs/figures/standalone.toml`](../inputs/figures/standalone.toml).
+workflow. Only the fiducial spectrum needs presentation settings of its own, in
+[`inputs/figures/fiducial-spectrum.toml`](../inputs/figures/fiducial-spectrum.toml);
+it borrows the six detector networks of the `H0-all-detectors` experiment
+rather than restating them. The rest read `inputs/mcmc.base.toml` directly.
 
 ```bash
 snakemake --snakefile workflow/mcmc.smk --cores 1 --dry-run standalone_figures
@@ -71,7 +80,13 @@ All new figure products are written under `outputs/figures/`.
 
 ## Scripts
 
-Figure entry points are plain Python scripts under `scripts/`. Snakemake reads
-the experiment `[figure]` table or `inputs/figures/standalone.toml` and passes
-chains, labels, detector networks, fiducials, and output paths on the CLI.
-The scripts do not load those TOML files themselves.
+Figure entry points are plain Python scripts under `scripts/`. Each takes
+`--base-config` and, where it has one, `--figure-config`, and reads its own
+fiducials, analysis grid, labels, and detector networks from them. Snakemake
+passes only what it owns: the chain and catalog paths it built, and the output
+paths it declared.
+
+Both config files are declared inputs of the rule, so editing a label or a
+fiducial rebuilds the figure. Config parsing stays free of JAX --
+`astrogwb_paper.config.figures` is a stdlib-only leaf, guarded by a subprocess
+test -- so `--help` and config errors stay cheap.

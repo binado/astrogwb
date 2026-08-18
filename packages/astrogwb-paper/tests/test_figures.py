@@ -26,8 +26,9 @@ FIGURES_DIR = PAPER_ROOT / "inputs/figures"
 BASE_CONFIG = PAPER_ROOT / "inputs/mcmc.base.toml"
 
 # Committed inventory. ``inputs/figures/`` is never globbed: the registry is
-# not a figure config, and ``standalone.toml`` borrows another experiment's
-# name, so filename and ``experiment`` key do not correspond one-to-one.
+# not a figure config, and ``fiducial-spectrum.toml`` borrows another
+# experiment's networks, so filename and ``experiment`` key do not correspond
+# one-to-one.
 FIGURE_CONFIGS = (
     "H0-all-detectors",
     "H0-merger-rate",
