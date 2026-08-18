@@ -37,6 +37,13 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 )
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import polarization_power as compute_polarization_power
+from astrogwb_paper.config.figures import (
+    Network,
+    figure_networks,
+    load_analysis_grid,
+    load_fiducials,
+    load_figure_config,
+)
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.plotting import (
     CATEGORY,
@@ -77,34 +84,6 @@ CORNER_VAR_NAMES = MERGER_RATE_VAR_NAMES
 
 def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
-
-
-def _parse_network_definition(value: str) -> tuple[str, tuple[str, ...]]:
-    if "=" not in value:
-        raise ValueError(
-            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
-        )
-    name, detector_list = value.split("=", 1)
-    name = name.strip()
-    detectors = tuple(detector.strip() for detector in detector_list.split(","))
-    if not name or not detectors or any(not detector for detector in detectors):
-        raise ValueError(
-            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
-        )
-    return name, detectors
-
-
-def parse_networks(definitions: Sequence[str]) -> dict[str, tuple[str, ...]]:
-    """Parse repeatable ``--network NAME=DET1,DET2`` flags in declaration order."""
-    if not definitions:
-        raise ValueError("at least one --network NAME=DET1,DET2,... is required")
-    networks: dict[str, tuple[str, ...]] = {}
-    for definition in definitions:
-        name, detectors = _parse_network_definition(definition)
-        if name in networks:
-            raise ValueError(f"duplicate --network definition for {name!r}")
-        networks[name] = detectors
-    return networks
 
 
 def load_inference_data(path: Path) -> xr.DataTree:
@@ -201,19 +180,18 @@ def _base_network_name(name: str) -> str:
 
 
 def detector_network_styles(
-    networks: Mapping[str, tuple[str, ...]],
+    networks: Sequence[Network],
 ) -> tuple[list[str], list[str]]:
     """Shared color per ET / ET+CE pair; dashed linestyle for CE companions."""
-    names = list(networks)
     bases: list[str] = []
-    for name in names:
-        base = _base_network_name(name)
+    for network in networks:
+        base = _base_network_name(network.name)
         if base not in bases:
             bases.append(base)
     palette = combo_colors(len(bases))
     color_by_base = dict(zip(bases, palette, strict=True))
-    colors = [color_by_base[_base_network_name(name)] for name in names]
-    linestyles = ["--" if name.endswith("-CE-Hanford") else "-" for name in names]
+    colors = [color_by_base[_base_network_name(n.name)] for n in networks]
+    linestyles = ["--" if n.name.endswith("-CE-Hanford") else "-" for n in networks]
     return colors, linestyles
 
 
@@ -439,7 +417,7 @@ def plot_h0_merger_rate_corner(
 
 def compute_network_snrs(
     catalog_path: Path,
-    networks: Mapping[str, tuple[str, ...]],
+    networks: Sequence[Network],
     fiducials: Mapping[str, float],
     *,
     observation_time: float,
@@ -488,7 +466,8 @@ def compute_network_snrs(
     observation_seconds = years_to_seconds(observation_time)
 
     rows: list[dict[str, Any]] = []
-    for network, detectors in networks.items():
+    for network in networks:
+        detectors = network.detectors
         sensitivities = load_sensitivity_map(detectors)
         effective_noise = jnp.asarray(
             effective_psd(frequencies, list(detectors), sensitivities)
@@ -503,7 +482,7 @@ def compute_network_snrs(
         )
         rows.append(
             {
-                "network": network,
+                "network": network.name,
                 "detectors": ",".join(detectors),
                 "n_detectors": len(detectors),
                 "snr": snr,
@@ -609,9 +588,8 @@ def h0_r0_uncertainty_table_latex(table: pd.DataFrame) -> str:
 
 
 def build_snr_h0_constraint_table(
-    networks: Mapping[str, tuple[str, ...]],
+    networks: Sequence[Network],
     inference_data: Sequence[xr.DataTree],
-    labels: Sequence[str],
     snr_table: pd.DataFrame,
     *,
     h0_fiducial: float,
@@ -621,25 +599,27 @@ def build_snr_h0_constraint_table(
     """Combine SNR scaling and sampled H0 HDI constraints by network."""
     validate_inference_data(
         inference_data,
-        labels,
+        [network.label for network in networks],
         group=group,
         expected_count=len(networks),
     )
     snr_by_network = snr_table.set_index("network")
-    missing_networks = [name for name in networks if name not in snr_by_network.index]
+    missing_networks = [
+        network.name for network in networks if network.name not in snr_by_network.index
+    ]
     if missing_networks:
         raise KeyError(
             "SNR table is missing configured network(s): " + ", ".join(missing_networks)
         )
 
     rows: list[dict[str, Any]] = []
-    for network, tree, label in zip(networks, inference_data, labels, strict=True):
-        snr = float(snr_by_network.loc[network, "snr"])
+    for network, tree in zip(networks, inference_data, strict=True):
+        snr = float(snr_by_network.loc[network.name, "snr"])
         lower, upper = _hdi(tree, "H0", group=group, probability=probability)
         sigma_hdi = (upper - lower) / 2
         rows.append(
             {
-                "label": label,
+                "label": network.label,
                 "snr": snr,
                 "sigma_h0_hdi": sigma_hdi,
                 "rel_sigma_h0_hdi": sigma_hdi / h0_fiducial,
@@ -686,18 +666,6 @@ def write_constraint_table(
     return latex
 
 
-def _add_fiducial_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--h0", type=float, required=True)
-    parser.add_argument("--omega-m", type=float, required=True)
-    parser.add_argument("--xi-0", type=float, required=True)
-    parser.add_argument("--xi-n", type=float, required=True)
-    parser.add_argument("--gamma", type=float, required=True)
-    parser.add_argument("--kappa", type=float, required=True)
-    parser.add_argument("--z-peak", type=float, required=True)
-    parser.add_argument("--local-merger-rate", type=float, required=True)
-    parser.add_argument("--importance-relative-ess", type=float, default=1.0)
-
-
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -705,13 +673,22 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         choices=("detectors", "merger-rate", "omega-m"),
         required=True,
     )
+    parser.add_argument(
+        "--base-config",
+        type=Path,
+        required=True,
+        help="Base MCMC config supplying fiducials and the analysis grid.",
+    )
+    parser.add_argument(
+        "--figure-config",
+        type=Path,
+        required=True,
+        help="Figure presentation config under inputs/figures/.",
+    )
     parser.add_argument("--catalog", type=Path)
     parser.add_argument("--detector-chains", type=Path, nargs="+")
-    parser.add_argument("--detector-labels", nargs="+")
     parser.add_argument("--prior-chains", type=Path, nargs="+")
-    parser.add_argument("--prior-labels", nargs="+")
     parser.add_argument("--omega-m-chain", type=Path)
-    parser.add_argument("--omega-m-label")
     parser.add_argument("--output-detector-pdf", type=Path)
     parser.add_argument("--output-prior-pdf", type=Path)
     parser.add_argument("--output-narrow-corner-pdf", type=Path)
@@ -721,75 +698,42 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-tex", type=Path)
     parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument("--group", default="posterior")
-    parser.add_argument("--observation-time", type=float)
-    parser.add_argument("--f-min", type=float)
-    parser.add_argument("--f-max", type=float)
-    parser.add_argument("--z-min", type=float)
-    parser.add_argument("--z-max", type=float)
-    parser.add_argument("--n-grid", type=int)
-    parser.add_argument(
-        "--network",
-        action="append",
-        default=None,
-        metavar="NAME=DET1,DET2,...",
-        help="Detector-network definition (repeatable, declaration order).",
-    )
-    _add_fiducial_arguments(parser)
+    # Not a fiducial: N_eff/N_inj is a plotting truth line at its definitional
+    # maximum. Adding it to [fiducials] would change every run's config_sha256
+    # and inject a spurious constant into the sampled model.
+    parser.add_argument("--importance-relative-ess", type=float, default=1.0)
     return parser.parse_args(argv)
-
-
-def _fiducials(args: argparse.Namespace) -> dict[str, float]:
-    return {
-        "H0": args.h0,
-        "Omega_m": args.omega_m,
-        "xi_0": args.xi_0,
-        "xi_n": args.xi_n,
-        "gamma": args.gamma,
-        "kappa": args.kappa,
-        "z_peak": args.z_peak,
-        "local_merger_rate": args.local_merger_rate,
-        "importance_relative_ess": args.importance_relative_ess,
-    }
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    fiducials = _fiducials(args)
+    figure_config = load_figure_config(args.figure_config, root)
+    fiducials = {
+        **load_fiducials(args.base_config, root),
+        "importance_relative_ess": args.importance_relative_ess,
+    }
     use_paper_style()
     outputs: dict[Path, plt.Figure] = {}
     opened_data: list[xr.DataTree] = []
 
     if args.section == "detectors":
-        if args.detector_chains is None or args.detector_labels is None:
-            raise SystemExit("--detector-chains and --detector-labels are required")
+        if args.detector_chains is None:
+            raise SystemExit("--detector-chains is required")
         if args.catalog is None or args.output_detector_pdf is None:
             raise SystemExit("--catalog and --output-detector-pdf are required")
         if args.output_csv is None or args.output_tex is None:
             raise SystemExit("--output-csv and --output-tex are required")
-        missing = [
-            name
-            for name in (
-                "observation_time",
-                "f_min",
-                "f_max",
-                "z_min",
-                "z_max",
-                "n_grid",
-            )
-            if getattr(args, name) is None
-        ]
-        if missing:
-            raise SystemExit("missing required analysis flags: " + ", ".join(missing))
-        try:
-            networks = parse_networks(args.network or [])
-        except ValueError as error:
-            raise SystemExit(str(error)) from error
-        detector_labels = list(args.detector_labels)
-        if len(args.detector_chains) != len(detector_labels):
-            raise SystemExit("--detector-chains length must match --detector-labels")
+        grid = load_analysis_grid(args.base_config, root)
+        networks = figure_networks(figure_config, "posteriors", root)
+        detector_labels = [network.label for network in networks]
+        # Name and label are paired inside Network; only the chain paths still
+        # arrive separately, on argv.
         if len(args.detector_chains) != len(networks):
-            raise SystemExit("--detector-chains length must match --network count")
+            raise SystemExit(
+                f"--detector-chains has {len(args.detector_chains)} paths but "
+                f"{figure_config['experiment']} declares {len(networks)} networks"
+            )
         detector_data = [
             load_inference_data(_resolve_path(path, root))
             for path in args.detector_chains
@@ -815,17 +759,16 @@ def main(argv: Sequence[str] | None = None) -> None:
             _resolve_path(args.catalog, root),
             networks,
             fiducials,
-            observation_time=args.observation_time,
-            f_min=args.f_min,
-            f_max=args.f_max,
-            z_min=args.z_min,
-            z_max=args.z_max,
-            n_grid=args.n_grid,
+            observation_time=grid.observation_time,
+            f_min=grid.f_min,
+            f_max=grid.f_max,
+            z_min=grid.z_min,
+            z_max=grid.z_max,
+            n_grid=grid.n_grid,
         )
         table = build_snr_h0_constraint_table(
             networks,
             detector_data,
-            detector_labels,
             snr_table,
             h0_fiducial=fiducials["H0"],
             group=args.group,
@@ -837,15 +780,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
 
     elif args.section == "merger-rate":
-        if args.prior_chains is None or args.prior_labels is None:
-            raise SystemExit("--prior-chains and --prior-labels are required")
+        if args.prior_chains is None:
+            raise SystemExit("--prior-chains is required")
         if args.output_prior_pdf is None or args.output_narrow_corner_pdf is None:
             raise SystemExit(
                 "--output-prior-pdf and --output-narrow-corner-pdf are required"
             )
         if args.output_csv is None or args.output_tex is None:
             raise SystemExit("--output-csv and --output-tex are required")
-        prior_labels = list(args.prior_labels)
+        prior_labels = list(figure_config["labels"])
         if len(args.prior_chains) != len(prior_labels) or len(args.prior_chains) != 2:
             raise SystemExit(
                 "the merger-rate comparison requires two chains and labels"
@@ -893,15 +836,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         tex_path.write_text(h0_r0_uncertainty_table_latex(table), encoding="utf-8")
 
     else:
-        if args.omega_m_chain is None or args.omega_m_label is None:
-            raise SystemExit("--omega-m-chain and --omega-m-label are required")
+        if args.omega_m_chain is None:
+            raise SystemExit("--omega-m-chain is required")
         if args.output_omega_m_corner_pdf is None:
             raise SystemExit("--output-omega-m-corner-pdf is required")
         if args.output_omega_m_ess_corner_pdf is None:
             raise SystemExit("--output-omega-m-ess-corner-pdf is required")
         omega_m_data = [load_inference_data(_resolve_path(args.omega_m_chain, root))]
         opened_data.extend(omega_m_data)
-        omega_m_labels = [args.omega_m_label]
+        omega_m_labels = [figure_config["label"]]
         validate_inference_data(
             omega_m_data,
             omega_m_labels,

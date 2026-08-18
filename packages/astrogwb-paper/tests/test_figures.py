@@ -33,6 +33,7 @@ FIGURE_CONFIGS = (
     "H0-merger-rate",
     "H0-omega-m",
     "modified-propagation-all-detectors",
+    "fiducial-spectrum",
     "standalone",
 )
 
@@ -80,8 +81,8 @@ def test_every_figure_run_name_is_a_declared_run() -> None:
         assert declared <= runs, f"{name} names runs outside its experiment"
 
 
-def test_standalone_fiducial_spectrum_borrows_h0_all_detectors_networks() -> None:
-    spectrum = figure("standalone")["fiducial_spectrum"]
+def test_fiducial_spectrum_borrows_h0_all_detectors_networks() -> None:
+    spectrum = figure("fiducial-spectrum")
 
     assert spectrum["experiment"] == "H0-all-detectors"
     assert tuple(spectrum["networks"]) == DETECTOR_NETWORKS
@@ -92,7 +93,7 @@ def test_every_referenced_network_resolves_to_a_registry_label() -> None:
     referenced = {
         *figure("H0-all-detectors")["posteriors"],
         *figure("modified-propagation-all-detectors")["detector_posteriors"],
-        *figure("standalone")["fiducial_spectrum"]["networks"],
+        *figure("fiducial-spectrum")["networks"],
     }
 
     assert referenced <= set(labels)
@@ -118,7 +119,7 @@ def test_the_three_network_figures_resolve_to_identical_networks() -> None:
     propagation = figure_networks(
         figure("modified-propagation-all-detectors"), "detector_posteriors"
     )
-    spectrum = figure_networks(figure("standalone")["fiducial_spectrum"], "networks")
+    spectrum = figure_networks(figure("fiducial-spectrum"), "networks")
 
     assert h0 == propagation == spectrum
 

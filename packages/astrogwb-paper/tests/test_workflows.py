@@ -189,7 +189,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
     } <= rules
 
 
-def test_merger_rate_figure_quotes_latex_labels(
+def test_figure_rules_pass_config_paths_not_labels(
     tmp_path: Path,
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
@@ -209,12 +209,15 @@ def test_merger_rate_figure_quotes_latex_labels(
 
     assert result.returncode == 0, result.stderr
     assert "rule plot_H0_merger_rate:" in result.stdout
-    assert "--prior-labels" in result.stdout
-    assert r"$H_0$ (fixed $\mathcal{R}_0$)" in result.stdout
-    assert r"$H_0 + \mathcal{R}_0$ (narrow prior)" in result.stdout
+    assert "--figure-config inputs/figures/H0-merger-rate.toml" in result.stdout
+    assert "--base-config inputs/mcmc.base.toml" in result.stdout
+    # The script reads its own labels, so no LaTeX crosses the shell boundary
+    # (which is what used to force the `_const` wildcard-expansion shim).
+    assert "--prior-labels" not in result.stdout
+    assert r"\mathcal" not in result.stdout
 
 
-def test_standalone_figures_expand_parameterized_shell_commands(
+def test_standalone_figures_receive_config_paths(
     tmp_path: Path,
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
@@ -239,11 +242,12 @@ def test_standalone_figures_expand_parameterized_shell_commands(
         "scripts/importance_weights_grid.py",
     ):
         assert script in result.stdout
-    # Shared base and analysis values are injected at shell-expansion time.
-    assert "--observation-time 1.0" in result.stdout
-    assert "--f-min 2.0" in result.stdout
-    assert "--h0 67.66" in result.stdout
-    assert "--omega-gw-min 1e-15" in result.stdout
+    # Every standalone script reads the base config for itself instead of
+    # receiving fiducials and analysis bounds as reconstructed flags.
+    assert result.stdout.count("--base-config inputs/mcmc.base.toml") == 3
+    assert "--figure-config inputs/figures/fiducial-spectrum.toml" in result.stdout
+    for flag in ("--observation-time", "--f-min", "--h0", "--omega-gw-min"):
+        assert flag not in result.stdout
 
 
 def test_figure_path_is_a_valid_snakemake_target(

@@ -29,6 +29,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
+from astrogwb_paper.config.figures import load_fiducials
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
@@ -166,14 +167,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--output-h0-omega-m-pdf", type=Path, required=True)
     parser.add_argument("--output-xi0-n-pdf", type=Path, required=True)
-    parser.add_argument("--h0", type=float, required=True)
-    parser.add_argument("--omega-m", type=float, required=True)
-    parser.add_argument("--xi-0", type=float, required=True)
-    parser.add_argument("--xi-n", type=float, required=True)
-    parser.add_argument("--gamma", type=float, required=True)
-    parser.add_argument("--kappa", type=float, required=True)
-    parser.add_argument("--z-peak", type=float, required=True)
-    parser.add_argument("--local-merger-rate", type=float, required=True)
+    parser.add_argument(
+        "--base-config",
+        type=Path,
+        required=True,
+        help="Base MCMC config supplying the fiducial parameter point.",
+    )
     parser.add_argument("--figure-dpi", type=int, default=300)
     return parser.parse_args(argv)
 
@@ -182,16 +181,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
     catalog_path = _resolve_path(args.catalog, root)
-    fiducials = {
-        "H0": args.h0,
-        "Omega_m": args.omega_m,
-        "xi_0": args.xi_0,
-        "xi_n": args.xi_n,
-        "gamma": args.gamma,
-        "kappa": args.kappa,
-        "z_peak": args.z_peak,
-        "local_merger_rate": args.local_merger_rate,
-    }
+    fiducials = load_fiducials(args.base_config, root)
     use_paper_style()
 
     catalog = load_catalog(catalog_path)

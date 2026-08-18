@@ -26,6 +26,13 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.waveform import polarization_power as compute_polarization_power
+from astrogwb_paper.config.figures import (
+    Network,
+    figure_networks,
+    load_analysis_grid,
+    load_fiducials,
+    load_figure_config,
+)
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
@@ -47,34 +54,6 @@ jax.config.update("jax_enable_x64", True)
 
 def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
-
-
-def _parse_network_definition(value: str) -> tuple[str, tuple[str, ...]]:
-    if "=" not in value:
-        raise ValueError(
-            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
-        )
-    name, detector_list = value.split("=", 1)
-    name = name.strip()
-    detectors = tuple(detector.strip() for detector in detector_list.split(","))
-    if not name or not detectors or any(not detector for detector in detectors):
-        raise ValueError(
-            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
-        )
-    return name, detectors
-
-
-def parse_networks(definitions: Sequence[str]) -> dict[str, tuple[str, ...]]:
-    """Parse repeatable ``--network NAME=DET1,DET2`` flags in declaration order."""
-    if not definitions:
-        raise ValueError("at least one --network NAME=DET1,DET2,... is required")
-    networks: dict[str, tuple[str, ...]] = {}
-    for definition in definitions:
-        name, detectors = _parse_network_definition(definition)
-        if name in networks:
-            raise ValueError(f"duplicate --network definition for {name!r}")
-        networks[name] = detectors
-    return networks
 
 
 def compute_fiducial_spectral_density(
@@ -203,45 +182,42 @@ def _base_network_name(name: str) -> str:
 
 
 def detector_network_styles(
-    networks: Mapping[str, tuple[str, ...]],
+    networks: Sequence[Network],
 ) -> tuple[list[str], list[str]]:
     """Shared color per ET / ET+CE pair; dashed linestyle for CE companions."""
-    names = list(networks)
     bases: list[str] = []
-    for name in names:
-        base = _base_network_name(name)
+    for network in networks:
+        base = _base_network_name(network.name)
         if base not in bases:
             bases.append(base)
     palette = combo_colors(len(bases))
     color_by_base = dict(zip(bases, palette, strict=True))
-    colors = [color_by_base[_base_network_name(name)] for name in names]
-    linestyles = ["--" if name.endswith("-CE-Hanford") else "-" for name in names]
+    colors = [color_by_base[_base_network_name(n.name)] for n in networks]
+    linestyles = ["--" if n.name.endswith("-CE-Hanford") else "-" for n in networks]
     return colors, linestyles
 
 
 def plot_effective_psds(
     frequencies: jax.Array,
+    networks: Sequence[Network],
     psds_by_network: Mapping[str, jax.Array | np.ndarray],
-    labels: Sequence[str],
     *,
     colors: Sequence[str],
     linestyles: Sequence[str],
     mask: jax.Array,
 ) -> Figure:
     """Overlay network effective PSDs on shared log–log axes."""
-    names = list(psds_by_network)
-    if len(names) != len(labels):
-        raise ValueError("network count must match label count")
-    if len(names) != len(colors) or len(names) != len(linestyles):
+    if len(networks) != len(colors) or len(networks) != len(linestyles):
         raise ValueError("color and linestyle counts must match the networks")
 
+    labels = [network.label for network in networks]
     fig, ax = plt.subplots()
     freq = np.asarray(frequencies)
     band = np.asarray(mask, dtype=bool)
-    for name, label, color, linestyle in zip(
-        names, labels, colors, linestyles, strict=True
+    for network, label, color, linestyle in zip(
+        networks, labels, colors, linestyles, strict=True
     ):
-        psd = np.asarray(psds_by_network[name])
+        psd = np.asarray(psds_by_network[network.name])
         pos = band & np.isfinite(psd) & (psd > 0.0) & (freq > 0.0)
         ax.loglog(
             freq[pos],
@@ -268,34 +244,16 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument(
-        "--network",
-        action="append",
+        "--base-config",
+        type=Path,
         required=True,
-        metavar="NAME=DET1,DET2,...",
-        help="Detector-network definition (repeatable, declaration order).",
+        help="Base MCMC config supplying fiducials and the analysis grid.",
     )
-    parser.add_argument("--detector-labels", nargs="+", required=True)
-    parser.add_argument("--f-min", type=float, required=True)
-    parser.add_argument("--f-max", type=float, required=True)
-    parser.add_argument("--z-min", type=float, required=True)
-    parser.add_argument("--z-max", type=float, required=True)
-    parser.add_argument("--n-grid", type=int, required=True)
-    parser.add_argument("--h0", type=float, required=True)
-    parser.add_argument("--omega-m", type=float, required=True)
-    parser.add_argument("--xi-0", type=float, required=True)
-    parser.add_argument("--xi-n", type=float, required=True)
-    parser.add_argument("--gamma", type=float, required=True)
-    parser.add_argument("--kappa", type=float, required=True)
-    parser.add_argument("--z-peak", type=float, required=True)
-    parser.add_argument("--local-merger-rate", type=float, required=True)
     parser.add_argument(
-        "--omega-gw-min",
-        type=float,
+        "--figure-config",
+        type=Path,
         required=True,
-        help=(
-            "Lower y-limit for Omega_GW; S_h ymin is taken from S_h at the "
-            "frequency where Omega_GW is closest to this floor."
-        ),
+        help="Figure presentation config under inputs/figures/.",
     )
     parser.add_argument("--output-pdf", type=Path, required=True)
     parser.add_argument("--output-effective-psd-pdf", type=Path, required=True)
@@ -306,54 +264,42 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    try:
-        networks = parse_networks(args.network)
-    except ValueError as error:
-        raise SystemExit(str(error)) from error
-    if len(args.detector_labels) != len(networks):
-        raise SystemExit("detector label count must match --network count")
-
-    fiducials = {
-        "H0": args.h0,
-        "Omega_m": args.omega_m,
-        "xi_0": args.xi_0,
-        "xi_n": args.xi_n,
-        "gamma": args.gamma,
-        "kappa": args.kappa,
-        "z_peak": args.z_peak,
-        "local_merger_rate": args.local_merger_rate,
-    }
+    figure_config = load_figure_config(args.figure_config, root)
+    fiducials = load_fiducials(args.base_config, root)
+    grid = load_analysis_grid(args.base_config, root)
+    networks = figure_networks(figure_config, "networks", root)
+    omega_gw_min = float(figure_config["omega_gw_min"])
     use_paper_style()
 
     catalog_path = _resolve_path(args.catalog, root)
     frequencies, observed_spectral_density, mask = compute_fiducial_spectral_density(
         catalog_path,
         fiducials,
-        f_min=args.f_min,
-        f_max=args.f_max,
-        z_min=args.z_min,
-        z_max=args.z_max,
-        n_grid=args.n_grid,
+        f_min=grid.f_min,
+        f_max=grid.f_max,
+        z_min=grid.z_min,
+        z_max=grid.z_max,
+        n_grid=grid.n_grid,
     )
     figure = plot_omega_and_sh(
         frequencies,
         observed_spectral_density,
         mask,
-        h0=args.h0,
-        omega_gw_min=args.omega_gw_min,
+        h0=fiducials["H0"],
+        omega_gw_min=omega_gw_min,
     )
 
     detector_colors, detector_linestyles = detector_network_styles(networks)
     effective_psds = {}
-    for network, detectors in networks.items():
-        sensitivities = load_sensitivity_map(detectors)
-        effective_psds[network] = jnp.asarray(
-            effective_psd(frequencies, list(detectors), sensitivities)
+    for network in networks:
+        sensitivities = load_sensitivity_map(network.detectors)
+        effective_psds[network.name] = jnp.asarray(
+            effective_psd(frequencies, list(network.detectors), sensitivities)
         )
     effective_psd_figure = plot_effective_psds(
         frequencies,
+        networks,
         effective_psds,
-        args.detector_labels,
         colors=detector_colors,
         linestyles=detector_linestyles,
         mask=mask,

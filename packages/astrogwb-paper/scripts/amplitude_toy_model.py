@@ -43,6 +43,7 @@ from astrogwb.sampling.models import spectral_density_model
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.config.hashing import file_sha256
+from astrogwb_paper.config.figures import load_analysis_grid
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
@@ -74,9 +75,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--chains-dir", type=Path, default=Path("outputs/chains/amplitude-toy")
     )
-    parser.add_argument("--observation-time", type=float, required=True)
-    parser.add_argument("--f-min", type=float, required=True)
-    parser.add_argument("--f-max", type=float, required=True)
+    parser.add_argument(
+        "--base-config",
+        type=Path,
+        required=True,
+        help="Base MCMC config supplying the observing time and frequency band.",
+    )
     parser.add_argument(
         "--detectors",
         nargs="*",
@@ -112,8 +116,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     output_path = _resolve_path(args.output_pdf, root)
     out_dir = _resolve_path(args.chains_dir, root)
 
+    grid = load_analysis_grid(args.base_config, root)
     detnames = tuple(args.detectors)
-    observation_time = args.observation_time
+    observation_time = grid.observation_time
     seed = args.seed
     num_chains = num_cpus if args.num_chains == "auto" else int(args.num_chains)
     num_warmup = args.num_warmup
@@ -122,8 +127,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.debug:
         num_warmup, num_samples, num_chains, target_accept = 100, 100, 1, 0.9
 
-    f_min = args.f_min
-    f_max = args.f_max
+    f_min = grid.f_min
+    f_max = grid.f_max
     merger_rate_norm = args.merger_rate_norm
     amplitude_fiducial = args.amplitude_fiducial
     fiducials = {"amplitude": amplitude_fiducial}

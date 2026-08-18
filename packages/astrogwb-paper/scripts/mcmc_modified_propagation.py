@@ -37,6 +37,13 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import apply_gw_distance_to_waveforms
 from astrogwb.waveform import polarization_power as compute_polarization_power
+from astrogwb_paper.config.figures import (
+    Network,
+    figure_networks,
+    load_analysis_grid,
+    load_fiducials,
+    load_figure_config,
+)
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.plotting import (
     CATEGORY,
@@ -78,34 +85,6 @@ def _resolve_path(path: Path, root: Path) -> Path:
     return path if path.is_absolute() else root / path
 
 
-def _parse_network_definition(value: str) -> tuple[str, tuple[str, ...]]:
-    if "=" not in value:
-        raise ValueError(
-            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
-        )
-    name, detector_list = value.split("=", 1)
-    name = name.strip()
-    detectors = tuple(detector.strip() for detector in detector_list.split(","))
-    if not name or not detectors or any(not detector for detector in detectors):
-        raise ValueError(
-            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
-        )
-    return name, detectors
-
-
-def parse_networks(definitions: Sequence[str]) -> dict[str, tuple[str, ...]]:
-    """Parse repeatable ``--network NAME=DET1,DET2`` flags in declaration order."""
-    if not definitions:
-        raise ValueError("at least one --network NAME=DET1,DET2,... is required")
-    networks: dict[str, tuple[str, ...]] = {}
-    for definition in definitions:
-        name, detectors = _parse_network_definition(definition)
-        if name in networks:
-            raise ValueError(f"duplicate --network definition for {name!r}")
-        networks[name] = detectors
-    return networks
-
-
 def _base_network_name(name: str) -> str:
     """Map an ET+CE network name onto its ET-only counterpart."""
     suffix = "-CE-Hanford"
@@ -113,19 +92,18 @@ def _base_network_name(name: str) -> str:
 
 
 def detector_network_styles(
-    networks: Mapping[str, tuple[str, ...]],
+    networks: Sequence[Network],
 ) -> tuple[list[str], list[str]]:
     """Shared color per ET / ET+CE pair; dashed linestyle for CE companions."""
-    names = list(networks)
     bases: list[str] = []
-    for name in names:
-        base = _base_network_name(name)
+    for network in networks:
+        base = _base_network_name(network.name)
         if base not in bases:
             bases.append(base)
     palette = combo_colors(len(bases))
     color_by_base = dict(zip(bases, palette, strict=True))
-    colors = [color_by_base[_base_network_name(name)] for name in names]
-    linestyles = ["--" if name.endswith("-CE-Hanford") else "-" for name in names]
+    colors = [color_by_base[_base_network_name(n.name)] for n in networks]
+    linestyles = ["--" if n.name.endswith("-CE-Hanford") else "-" for n in networks]
     return colors, linestyles
 
 
@@ -399,7 +377,7 @@ def xi0_hdi_table(
 
 def compute_network_snrs(
     catalog_path: Path,
-    networks: Mapping[str, tuple[str, ...]],
+    networks: Sequence[Network],
     fiducials: Mapping[str, float],
     *,
     observation_time: float,
@@ -455,7 +433,8 @@ def compute_network_snrs(
     observation_seconds = years_to_seconds(observation_time)
 
     rows: list[dict[str, Any]] = []
-    for network, detectors in networks.items():
+    for network in networks:
+        detectors = network.detectors
         sensitivities = load_sensitivity_map(detectors)
         effective_noise = jnp.asarray(
             effective_psd(frequencies, list(detectors), sensitivities)
@@ -470,7 +449,7 @@ def compute_network_snrs(
         )
         rows.append(
             {
-                "network": network,
+                "network": network.name,
                 "detectors": ",".join(detectors),
                 "n_detectors": len(detectors),
                 "snr": snr,
@@ -505,9 +484,8 @@ def _posterior_median(
 
 
 def build_snr_xi0_n_constraint_table(
-    networks: Mapping[str, tuple[str, ...]],
+    networks: Sequence[Network],
     inference_data: Sequence[xr.DataTree],
-    labels: Sequence[str],
     snr_table: pd.DataFrame,
     *,
     group: str = "posterior",
@@ -520,28 +498,30 @@ def build_snr_xi0_n_constraint_table(
     """
     validate_inference_data(
         inference_data,
-        labels,
+        [network.label for network in networks],
         required_vars=XI_N_VAR_NAMES,
         group=group,
         expected_count=len(networks),
     )
     snr_by_network = snr_table.set_index("network")
-    missing_networks = [name for name in networks if name not in snr_by_network.index]
+    missing_networks = [
+        network.name for network in networks if network.name not in snr_by_network.index
+    ]
     if missing_networks:
         raise KeyError(
             "SNR table is missing configured network(s): " + ", ".join(missing_networks)
         )
 
     rows: list[dict[str, Any]] = []
-    for network, tree, label in zip(networks, inference_data, labels, strict=True):
-        snr = float(snr_by_network.loc[network, "snr"])
+    for network, tree in zip(networks, inference_data, strict=True):
+        snr = float(snr_by_network.loc[network.name, "snr"])
         xi0_lower, xi0_upper = _hdi(tree, "xi_0", group=group, probability=probability)
         n_lower, n_upper = _hdi(tree, "xi_n", group=group, probability=probability)
         sigma_xi0_hdi = (xi0_upper - xi0_lower) / 2
         sigma_n_hdi = (n_upper - n_lower) / 2
         rows.append(
             {
-                "label": label,
+                "label": network.label,
                 "snr": snr,
                 "sigma_xi0_hdi": sigma_xi0_hdi,
                 "sigma_n_hdi": sigma_n_hdi,
@@ -590,62 +570,58 @@ def write_xi0_n_constraint_table(
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--base-config",
+        type=Path,
+        required=True,
+        help="Base MCMC config supplying fiducials and the analysis grid.",
+    )
+    parser.add_argument(
+        "--figure-config",
+        type=Path,
+        required=True,
+        help="Figure presentation config under inputs/figures/.",
+    )
+    parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--xi0-chain", type=Path, required=True)
     parser.add_argument("--xi0-n-chain", type=Path, required=True)
     parser.add_argument("--h0-chain", type=Path, required=True)
-    parser.add_argument("--marginal-labels", nargs=3, required=True)
-    parser.add_argument("--h0-labels", nargs=1, required=True)
+    parser.add_argument("--detector-xi0-n-chains", type=Path, nargs="+", required=True)
     parser.add_argument("--output-xi-n-corner-pdf", type=Path, required=True)
     parser.add_argument("--output-xi-n-ess-corner-pdf", type=Path, required=True)
     parser.add_argument("--output-xi0-marginal-pdf", type=Path, required=True)
     parser.add_argument("--output-h0-corner-pdf", type=Path, required=True)
-    parser.add_argument("--detector-xi0-n-chains", type=Path, nargs="+", required=True)
-    parser.add_argument("--detector-labels", nargs="+", required=True)
     parser.add_argument("--output-xi0-n-csv", type=Path, required=True)
     parser.add_argument("--output-xi0-n-tex", type=Path, required=True)
-    parser.add_argument("--catalog", type=Path, required=True)
-    parser.add_argument(
-        "--network",
-        action="append",
-        required=True,
-        metavar="NAME=DET1,DET2,...",
-        help="Detector-network definition (repeatable, declaration order).",
-    )
-    parser.add_argument("--observation-time", type=float, required=True)
-    parser.add_argument("--f-min", type=float, required=True)
-    parser.add_argument("--f-max", type=float, required=True)
-    parser.add_argument("--z-min", type=float, required=True)
-    parser.add_argument("--z-max", type=float, required=True)
-    parser.add_argument("--n-grid", type=int, required=True)
-    parser.add_argument("--omega-m", type=float, required=True)
-    parser.add_argument("--gamma", type=float, required=True)
-    parser.add_argument("--kappa", type=float, required=True)
-    parser.add_argument("--z-peak", type=float, required=True)
-    parser.add_argument("--local-merger-rate", type=float, required=True)
-    parser.add_argument("--xi-0", type=float, required=True)
-    parser.add_argument("--xi-n", type=float, required=True)
-    parser.add_argument("--h0", type=float, required=True)
-    parser.add_argument("--importance-relative-ess", type=float, default=1.0)
     parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument("--group", default="posterior")
+    # Not a fiducial: N_eff/N_inj is a plotting truth line at its definitional
+    # maximum. Adding it to [fiducials] would change every run's config_sha256
+    # and inject a spurious constant into the sampled model.
+    parser.add_argument("--importance-relative-ess", type=float, default=1.0)
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    try:
-        networks = parse_networks(args.network)
-    except ValueError as error:
-        raise SystemExit(str(error)) from error
-
-    marginal_labels = list(args.marginal_labels)
-    h0_labels = list(args.h0_labels)
-    detector_labels = list(args.detector_labels)
-    if len(args.detector_xi0_n_chains) != len(detector_labels):
-        raise SystemExit("--detector-xi0-n-chains length must match --detector-labels")
+    figure_config = load_figure_config(args.figure_config, root)
+    grid = load_analysis_grid(args.base_config, root)
+    fiducials = {
+        **load_fiducials(args.base_config, root),
+        "importance_relative_ess": args.importance_relative_ess,
+    }
+    networks = figure_networks(figure_config, "detector_posteriors", root)
+    marginal_labels = list(figure_config["marginal_labels"])
+    h0_labels = list(figure_config["h0_labels"])
+    detector_labels = [network.label for network in networks]
+    # Name and label are paired inside Network; only the chain paths still
+    # arrive separately, on argv.
     if len(args.detector_xi0_n_chains) != len(networks):
-        raise SystemExit("--detector-xi0-n-chains length must match --network count")
+        raise SystemExit(
+            f"--detector-xi0-n-chains has {len(args.detector_xi0_n_chains)} paths "
+            f"but {figure_config['experiment']} declares {len(networks)} networks"
+        )
 
     chain_paths = [
         _resolve_path(args.xi0_chain, root),
@@ -662,17 +638,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     xi_n_data = [inference_data[1]]
     xi_n_labels = [marginal_labels[1]]
     h0_data = [inference_data[2]]
-    fiducials = {
-        "H0": args.h0,
-        "Omega_m": args.omega_m,
-        "xi_0": args.xi_0,
-        "xi_n": args.xi_n,
-        "gamma": args.gamma,
-        "kappa": args.kappa,
-        "z_peak": args.z_peak,
-        "local_merger_rate": args.local_merger_rate,
-        "importance_relative_ess": args.importance_relative_ess,
-    }
     detector_xi0_n_data = [
         load_inference_data(_resolve_path(path, root))
         for path in args.detector_xi0_n_chains
@@ -722,17 +687,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         _resolve_path(args.catalog, root),
         networks,
         fiducials,
-        observation_time=args.observation_time,
-        f_min=args.f_min,
-        f_max=args.f_max,
-        z_min=args.z_min,
-        z_max=args.z_max,
-        n_grid=args.n_grid,
+        observation_time=grid.observation_time,
+        f_min=grid.f_min,
+        f_max=grid.f_max,
+        z_min=grid.z_min,
+        z_max=grid.z_max,
+        n_grid=grid.n_grid,
     )
     xi0_n_constraint_table = build_snr_xi0_n_constraint_table(
         networks,
         detector_xi0_n_data,
-        detector_labels,
         snr_table,
         group=args.group,
     )
