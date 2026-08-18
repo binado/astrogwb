@@ -190,7 +190,9 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "astrophysical_parameters",
         "star_formation_peak",
         "variable_injection_size",
-        "standalone_figures",
+        "amplitude_toy",
+        "fiducial_spectrum",
+        "importance_weights_grid",
         "assemble_config",
         "run_mcmc",
     } <= rules
@@ -201,6 +203,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "plot_H0_all_detectors",
         "plot_H0_merger_rate",
         "plot_H0_omega_m",
+        "standalone_figures",
     }.isdisjoint(rules)
 
 
@@ -262,7 +265,9 @@ def test_standalone_figures_receive_config_paths(
         "--printshellcmds",
         "--cores",
         "4",
-        "standalone_figures",
+        "amplitude_toy",
+        "fiducial_spectrum",
+        "importance_weights_grid",
         "--config",
         f"catalogs_dir={catalogs}",
     )

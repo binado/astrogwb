@@ -75,11 +75,15 @@ workflow. The fiducial spectrum borrows the six detector networks of the
 `inputs/mcmc.base.toml` directly.
 
 ```bash
-snakemake --snakefile workflow/mcmc.smk --cores 1 --dry-run standalone_figures
-snakemake --snakefile workflow/mcmc.smk --cores 1 standalone_figures
+snakemake --snakefile workflow/mcmc.smk --cores 1 \
+  outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf \
+  outputs/figures/standalone/fiducial_spectrum.pdf \
+  outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf \
+  outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf \
+  outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf
 ```
 
-Build one declared output directly:
+Or build any one of them directly:
 
 ```bash
 snakemake --snakefile workflow/mcmc.smk --cores 1 \

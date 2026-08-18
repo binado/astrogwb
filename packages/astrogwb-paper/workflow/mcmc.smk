@@ -61,7 +61,6 @@ wildcard_constraints:
 
 localrules:
     experiments,
-    standalone_figures,
     assemble_config,
     plot_cosmological_parameters,
     plot_modified_propagation,
@@ -277,21 +276,9 @@ EXPERIMENT_OUTPUTS = [
         for path in (FIGURE_OUTPUTS.get(name) or chain_paths(name))
     ],
 ]
-STANDALONE_OUTPUTS = [
-    *rules.amplitude_toy.output,
-    *rules.fiducial_spectrum.output,
-    *rules.importance_weights_grid.output,
-]
 
 
 rule experiments:
-    input:
-        EXPERIMENT_OUTPUTS,
-
-
-rule standalone_figures:
-    input:
-        STANDALONE_OUTPUTS,
 
 
 for specification in experiments.values():

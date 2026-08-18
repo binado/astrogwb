@@ -125,14 +125,15 @@ enter the scientific config hash.
 ## Standalone figures
 
 Figures without an MCMC experiment remain explicit local rules in the unified
-Snakefile:
+Snakefile -- there is no aggregate target, so request the rules or their
+outputs directly:
 
 ```bash
-snakemake --snakefile workflow/mcmc.smk --cores 1 --dry-run standalone_figures
-snakemake --snakefile workflow/mcmc.smk --cores 1 standalone_figures
+snakemake --snakefile workflow/mcmc.smk --cores 1 amplitude_toy \
+  fiducial_spectrum importance_weights_grid
 ```
 
-The aggregate includes the amplitude toy model, fiducial spectrum, effective
+These cover the amplitude toy model, fiducial spectrum, effective
 detector PSDs, and importance-weight grids. Input and output paths are both
 named literally in each rule. Presentation -- labels, run order, plot limits --
 is hard-coded in the scripts in [`scripts/`](../scripts/) rather than passed on

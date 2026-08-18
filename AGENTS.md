@@ -27,7 +27,7 @@ import `astrogwb_paper` or know the repository checkout layout.
   lint and format.
 - `uv run --group dev ty check`: type check.
 - `uv build --package astrogwb --no-sources`: publication build.
-- `cd packages/astrogwb-paper && uv run --group workflow snakemake --snakefile workflow/mcmc.smk --dry-run --cores 1 standalone_figures`:
+- `cd packages/astrogwb-paper && uv run --group workflow snakemake --snakefile workflow/mcmc.smk --dry-run --cores 1 experiments`:
   production workflow entrypoint (Snakemake invoked directly; omit
   `--dry-run` to execute).
 

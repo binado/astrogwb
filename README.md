@@ -33,7 +33,7 @@ uv run --package astrogwb --group test pytest packages/astrogwb/tests
 uv sync --package astrogwb-paper --group dev
 cd packages/astrogwb-paper
 uv run --group workflow snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/local --cores 8 --dry-run standalone_figures
+  --profile profiles/local --cores 8 --dry-run amplitude_toy
 ```
 
 Build the library exactly as it will be published, without workspace source
