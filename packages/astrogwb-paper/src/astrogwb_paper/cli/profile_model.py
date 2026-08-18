@@ -16,8 +16,12 @@ setup matches production exactly.
 Usage::
 
     uv run astrogwb-profile-model \
-        --config packages/astrogwb-paper/configs/mcmc.example.toml \
+        --config outputs/configs/H0-all-detectors/ET-2L-aligned-CE-Hanford.json \
         --catalog outputs/catalogs/bns-n16384-df1.h5
+
+Configs are assembled from ``inputs/mcmc.base.toml`` plus one
+``experiments/<name>.toml`` run overlay, by the ``assemble_config`` workflow
+rule or by ``astrogwb-validate-config``; see docs/running-inference.md.
 
 Open the generated ``perfetto_trace.json.gz`` at https://ui.perfetto.dev
 (no TensorBoard install required).

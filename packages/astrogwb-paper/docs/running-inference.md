@@ -3,16 +3,25 @@
 ## Ad-hoc runs
 
 `astrogwb-run-mcmc` accepts a complete validated configuration and a prebuilt
-waveform catalog:
+waveform catalog. The project ships no standalone example config: assemble one
+first with `astrogwb-validate-config` (see [Curated experiment
+runs](#curated-experiment-runs) for what it merges), then run it.
 
 ```bash
+uv run astrogwb-validate-config \
+  --base inputs/mcmc.base.toml \
+  --run ET-2L-aligned-CE-Hanford \
+  experiments/H0-all-detectors.toml \
+  --output /tmp/adhoc.json
+
 uv run astrogwb-run-mcmc \
-  --config configs/mcmc.example.toml \
+  --config /tmp/adhoc.json \
   --catalog outputs/catalogs/bns-n16384-df1.h5
 ```
 
-The standalone examples under `configs/` remain useful for direct runner and
-profiling work.
+Any config the workflow has already assembled under
+`outputs/configs/<experiment>/<run>.json` works the same way, which is the
+usual choice for direct runner and profiling work.
 
 ## Curated experiment runs
 

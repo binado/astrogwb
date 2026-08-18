@@ -17,26 +17,24 @@ time:
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import (
     build_run_config,
     materialize_prior,
     prior_to_spec,
 )
-from astrogwb_paper.paths import paper_project_root
-
-PAPER_ROOT = paper_project_root()
-EXAMPLE_CONFIG = PAPER_ROOT / "configs/mcmc.example.toml"
+from config_fixtures import example_raw
 
 
 def test_priors_materialize_to_live_distributions() -> None:
     import numpyro.distributions as dist
 
-    config = build_run_config(load_mapping(EXAMPLE_CONFIG))
+    config = build_run_config(example_raw())
 
     prior = config.priors["H0"]
     assert isinstance(prior, dist.Uniform)
@@ -45,7 +43,7 @@ def test_priors_materialize_to_live_distributions() -> None:
 
 
 def test_prior_field_json_dump_round_trips_the_spec() -> None:
-    raw = load_mapping(EXAMPLE_CONFIG)
+    raw = example_raw()
     config = build_run_config(raw)
 
     dumped = config.model_dump(mode="json")["priors"]
@@ -57,7 +55,7 @@ def test_prior_field_json_dump_round_trips_the_spec() -> None:
 def test_python_dump_serializes_priors_back_to_specs() -> None:
     """``model_dump()`` also runs the serializer (when_used="always"): revalidating
     a python dump rebuilds equal distributions from their specs."""
-    config = build_run_config(load_mapping(EXAMPLE_CONFIG))
+    config = build_run_config(example_raw())
 
     revalidated = build_run_config(config.model_dump())
 
@@ -66,7 +64,7 @@ def test_python_dump_serializes_priors_back_to_specs() -> None:
 
 def test_materialize_prior_passes_live_distributions_through() -> None:
     """An already-built distribution validates to itself (idempotent)."""
-    config = build_run_config(load_mapping(EXAMPLE_CONFIG))
+    config = build_run_config(example_raw())
 
     prior = config.priors["H0"]
 
@@ -74,7 +72,9 @@ def test_materialize_prior_passes_live_distributions_through() -> None:
 
 
 @pytest.mark.integration
-def test_config_build_and_dump_leave_the_xla_backend_uninitialized() -> None:
+def test_config_build_and_dump_leave_the_xla_backend_uninitialized(
+    tmp_path: Path,
+) -> None:
     """Config parse -> dump must not consume JAX's one-shot backend config.
 
     ``configure_runtime`` sets ``JAX_PLATFORMS`` / ``XLA_FLAGS`` and calls
@@ -114,8 +114,13 @@ import jax
 assert jax.device_count() == 2, f"backend initialized early: {jax.devices()}"
 print("backend-safe:", specs["H0"])
 """
+    # The subprocess needs a config on disk; there is no committed one to point
+    # at, so write the assembled run config out as JSON.
+    config_path = tmp_path / "run.json"
+    config_path.write_text(json.dumps(example_raw()), encoding="utf-8")
+
     result = subprocess.run(
-        [sys.executable, "-c", script, str(EXAMPLE_CONFIG)],
+        [sys.executable, "-c", script, str(config_path)],
         capture_output=True,
         text=True,
         timeout=300,
