@@ -18,7 +18,8 @@ workflow snakemake` from the workspace root also works); preview with
 
 ```bash
 cd packages/astrogwb-paper
-snakemake --snakefile workflow/mcmc.smk \
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
   --profile profiles/local --cores 8 --dry-run plot_cosmological_parameters
 ```
 

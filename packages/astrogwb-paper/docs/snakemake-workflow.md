@@ -1,11 +1,9 @@
 # Snakemake workflows
 
-The paper application has two Snakefiles:
-
-- [`workflow/catalog.smk`](../workflow/catalog.smk) generates populations and
-  waveform catalogs from committed recipes.
-- [`workflow/mcmc.smk`](../workflow/mcmc.smk) assembles explicit experiment
-  configs, samples chains, and builds experiment and standalone figures.
+The paper application has one top-level [`Snakefile`](../Snakefile). It
+contains both the catalog rules that generate populations and waveform
+catalogs, and the experiment rules that assemble configs, sample chains, and
+build figures.
 
 `snakemake` is invoked directly; preview with `--dry-run` (Snakemake executes
 for real unless it is passed).
@@ -19,16 +17,19 @@ Catalog recipes are committed under [`inputs/catalogs/`](../inputs/catalogs).
 Build a catalog explicitly before running an experiment:
 
 ```bash
-snakemake --snakefile workflow/catalog.smk --cores 1 \
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules bns_population bns_waveform_catalog \
   --dry-run outputs/catalogs/bns-n16384-df1.h5
-snakemake --snakefile workflow/catalog.smk --cores 1 \
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules bns_population bns_waveform_catalog \
   outputs/catalogs/bns-n16384-df1.h5
 ```
 
 The DAG first creates `outputs/populations/<catalog>.h5`, then creates
-`outputs/catalogs/<catalog>.h5`. The experiment workflow deliberately does not
-include these rules. A missing catalog therefore stops MCMC with a
-`MissingInputException`.
+`outputs/catalogs/<catalog>.h5`. The `--allowed-rules` filter deliberately
+keeps catalog generation explicit. MCMC commands omit the two catalog rules,
+so a missing catalog stops MCMC with a `MissingInputException` instead of
+starting catalog generation.
 
 ## Experiment workflow
 
@@ -63,16 +64,19 @@ The curated inventory is:
 Run one experiment's chains:
 
 ```bash
-snakemake --snakefile workflow/mcmc.smk \
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc cosmological_parameters_chains \
   --profile profiles/local --cores 8 --dry-run cosmological_parameters_chains
-snakemake --snakefile workflow/mcmc.smk \
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc cosmological_parameters_chains \
   --profile profiles/slurm cosmological_parameters_chains
 ```
 
 Build the paper's complete cosmological-parameter section:
 
 ```bash
-snakemake --snakefile workflow/mcmc.smk \
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
   --profile profiles/slurm plot_cosmological_parameters
 ```
 
@@ -124,7 +128,8 @@ Snakefile -- there is no aggregate target, so request the rules or their
 outputs directly:
 
 ```bash
-snakemake --snakefile workflow/mcmc.smk --cores 1 amplitude_toy \
+snakemake --snakefile Snakefile --cores 1 amplitude_toy \
+  --allowed-rules amplitude_toy fiducial_spectrum importance_weights_grid \
   fiducial_spectrum importance_weights_grid
 ```
 

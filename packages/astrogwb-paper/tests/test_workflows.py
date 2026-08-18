@@ -8,8 +8,25 @@ from pathlib import Path
 from astrogwb_paper.paths import paper_project_root
 
 PAPER_ROOT = paper_project_root()
-MCMC_SNAKEFILE = PAPER_ROOT / "workflow/mcmc.smk"
-CATALOG_SNAKEFILE = PAPER_ROOT / "workflow/catalog.smk"
+SNAKEFILE = PAPER_ROOT / "Snakefile"
+CATALOG_RULES = ("bns_population", "bns_waveform_catalog")
+MCMC_RULES = (
+    "assemble_config",
+    "run_mcmc",
+    "plot_cosmological_parameters",
+    "plot_modified_propagation",
+    "amplitude_toy",
+    "fiducial_spectrum",
+    "importance_weights_grid",
+    "experiments",
+    "cosmological_parameters_chains",
+    "modified_propagation",
+    "modified_propagation_chains",
+    "astrophysical_parameters",
+    "astrophysical_parameters_chains",
+    "variable_injection_size",
+    "variable_injection_size_chains",
+)
 
 
 def _snakemake(*args: str) -> subprocess.CompletedProcess[str]:
@@ -24,6 +41,16 @@ def _snakemake(*args: str) -> subprocess.CompletedProcess[str]:
         )
 
 
+def _mcmc(*args: str) -> subprocess.CompletedProcess[str]:
+    return _snakemake(
+        "--snakefile",
+        str(SNAKEFILE),
+        "--allowed-rules",
+        *MCMC_RULES,
+        *args,
+    )
+
+
 def _catalogs(tmp_path: Path, *names: str) -> Path:
     directory = tmp_path / "catalogs"
     directory.mkdir()
@@ -35,7 +62,9 @@ def _catalogs(tmp_path: Path, *names: str) -> Path:
 def test_catalog_workflow_uses_input_recipes_and_output_tree() -> None:
     result = _snakemake(
         "--snakefile",
-        str(CATALOG_SNAKEFILE),
+        str(SNAKEFILE),
+        "--allowed-rules",
+        *CATALOG_RULES,
         "--dry-run",
         "--forceall",
         "--cores",
@@ -54,9 +83,7 @@ def test_plot_cosmological_parameters_expands_all_chains_and_figures(
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
-    result = _snakemake(
-        "--snakefile",
-        str(MCMC_SNAKEFILE),
+    result = _mcmc(
         "--dry-run",
         "--forceall",
         "--cores",
@@ -83,9 +110,7 @@ def test_plot_cosmological_parameters_expands_all_chains_and_figures(
 def test_chains_only_target_excludes_figure_rule(tmp_path: Path) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
-    result = _snakemake(
-        "--snakefile",
-        str(MCMC_SNAKEFILE),
+    result = _mcmc(
         "--dry-run",
         "--forceall",
         "--cores",
@@ -105,9 +130,7 @@ def test_config_assembly_reads_the_single_inventory(
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
-    result = _snakemake(
-        "--snakefile",
-        str(MCMC_SNAKEFILE),
+    result = _mcmc(
         "--dry-run",
         "--forceall",
         "--printshellcmds",
@@ -134,9 +157,7 @@ def test_variable_injection_size_uses_three_catalogs(tmp_path: Path) -> None:
         "bns-n32768-df1.h5",
     )
 
-    result = _snakemake(
-        "--snakefile",
-        str(MCMC_SNAKEFILE),
+    result = _mcmc(
         "--dry-run",
         "--forceall",
         "--cores",
@@ -159,9 +180,7 @@ def test_variable_injection_size_uses_three_catalogs(tmp_path: Path) -> None:
 def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
     catalogs = tmp_path / "missing-catalogs"
 
-    result = _snakemake(
-        "--snakefile",
-        str(MCMC_SNAKEFILE),
+    result = _mcmc(
         "--dry-run",
         "--cores",
         "4",
@@ -178,7 +197,7 @@ def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
 
 
 def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
-    result = _snakemake("--snakefile", str(MCMC_SNAKEFILE), "--list-rules")
+    result = _snakemake("--snakefile", str(SNAKEFILE), "--list-rules")
 
     assert result.returncode == 0, result.stderr
     rules = set(result.stdout.split())
@@ -218,9 +237,7 @@ def test_experiments_target_builds_all_22_chains(tmp_path: Path) -> None:
         "bns-n32768-df1.h5",
     )
 
-    result = _snakemake(
-        "--snakefile",
-        str(MCMC_SNAKEFILE),
+    result = _mcmc(
         "--dry-run",
         "--forceall",
         "--cores",
@@ -242,9 +259,7 @@ def test_plot_cosmological_parameters_passes_all_paths_not_labels(
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
-    result = _snakemake(
-        "--snakefile",
-        str(MCMC_SNAKEFILE),
+    result = _mcmc(
         "--dry-run",
         "--forceall",
         "--printshellcmds",
@@ -287,9 +302,7 @@ def test_standalone_figures_receive_config_paths(
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
-    result = _snakemake(
-        "--snakefile",
-        str(MCMC_SNAKEFILE),
+    result = _mcmc(
         "--dry-run",
         "--forceall",
         "--printshellcmds",
@@ -322,9 +335,7 @@ def test_figure_path_is_a_valid_snakemake_target(
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
-    result = _snakemake(
-        "--snakefile",
-        str(MCMC_SNAKEFILE),
+    result = _mcmc(
         "--dry-run",
         "--forceall",
         "--cores",
@@ -342,9 +353,7 @@ def test_figure_path_is_a_valid_snakemake_target(
 def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
-    result = _snakemake(
-        "--snakefile",
-        str(MCMC_SNAKEFILE),
+    result = _mcmc(
         "--dry-run",
         "--forceall",
         "--printshellcmds",

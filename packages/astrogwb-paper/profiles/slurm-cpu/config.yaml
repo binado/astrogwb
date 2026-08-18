@@ -1,5 +1,6 @@
 # CPU MCMC profile:
-#   snakemake --snakefile workflow/mcmc.smk \
+#   snakemake --snakefile Snakefile \
+#     --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
 #     --profile profiles/slurm-cpu plot_cosmological_parameters --dry-run
 # Requires `uv sync --package astrogwb-paper --group slurm`.
 # Job logs land under .snakemake/slurm_logs/.
@@ -16,12 +17,12 @@ local-cores: 2
 # MissingOutputException, even though the run actually completed
 # successfully. Submitting run_mcmc jobs individually avoids this.
 # Force the JAX backend to CPU so run_mcmc does not try to init CUDA on a
-# CPU node. Overrides the "cuda" default in packages/astrogwb-paper/workflow/mcmc.smk.
+# CPU node. Overrides the "cuda" default in packages/astrogwb-paper/Snakefile.
 # Caveat: any CLI ``--config …`` replaces this whole list (Snakemake does not
 # merge), so pass ``jax_platforms=cpu`` alongside any other ``--config`` keys.
 config:
   - jax_platforms=cpu
-# packages/astrogwb-paper/workflow/mcmc.smk passes rule threads as --host-device-count on CPU jobs
+# packages/astrogwb-paper/Snakefile passes rule threads as --host-device-count on CPU jobs
 # (one logical device per concurrent chain, --cpu-threads pinned to 1), and
 # threads also sets --cpus-per-task via Snakemake's SLURM resource mapping,
 # so this must be >= the run config's [sampler] num_chains.

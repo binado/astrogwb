@@ -1,7 +1,7 @@
 """Assemble canonical MCMC run configs from the shared YAML inventory.
 
 This is the JAX-free gate after each run overlay is merged with the shared
-``base`` mapping. ``workflow/mcmc.smk`` calls it as::
+``base`` mapping. ``Snakefile`` calls it as::
 
     astrogwb-validate-config inputs/config.yaml --output-dir outputs/configs
 

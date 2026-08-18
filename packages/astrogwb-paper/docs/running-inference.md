@@ -65,9 +65,11 @@ Run one experiment's chains through Snakemake from
 `packages/astrogwb-paper/`:
 
 ```bash
-snakemake --snakefile workflow/mcmc.smk \
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc cosmological_parameters_chains \
   --profile profiles/local --cores 8 cosmological_parameters_chains
-snakemake --snakefile workflow/mcmc.smk \
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc modified_propagation_chains \
   --profile profiles/slurm modified_propagation_chains
 ```
 
@@ -93,8 +95,10 @@ Experiments consume existing catalogs and never generate them implicitly.
 Build the required catalogs first:
 
 ```bash
-snakemake --snakefile workflow/catalog.smk \
-  --profile profiles/local --cores 8 catalogs
+snakemake --snakefile Snakefile \
+  --allowed-rules bns_population bns_waveform_catalog \
+  --profile profiles/local --cores 8 \
+  outputs/catalogs/bns-n16384-df1.h5
 ```
 
 If a required catalog is absent, the MCMC workflow fails with a

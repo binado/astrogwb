@@ -32,7 +32,8 @@ uv run --package astrogwb --group test pytest packages/astrogwb/tests
 ```bash
 uv sync --package astrogwb-paper --group dev
 cd packages/astrogwb-paper
-uv run --group workflow snakemake --snakefile workflow/mcmc.smk \
+uv run --group workflow snakemake --snakefile Snakefile \
+  --allowed-rules amplitude_toy \
   --profile profiles/local --cores 8 --dry-run amplitude_toy
 ```
 

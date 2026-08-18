@@ -28,7 +28,7 @@ by the ``assemble_config`` workflow rule or by
 Use ``uv run --package astrogwb-paper --extra cuda`` (or ``--extra tpu``) for
 the matching JAX accelerator plugin.
 Batch runs are dispatched by the Snakemake ``run_mcmc`` rule (one config per
-job); see the paper project's ``workflow/mcmc.smk`` and SLURM profiles.
+job); see the paper project's ``Snakefile`` and SLURM profiles.
 """
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ shared piece, and they live in `astrogwb_paper.plotting.DETECTOR_NETWORKS` as
 ordered `(run name, LaTeX label)` pairs.
 
 Input and output paths are both named literally in
-[`workflow/mcmc.smk`](../workflow/mcmc.smk), and every output is a valid
+[`Snakefile`](../Snakefile), and every output is a valid
 Snakemake target. Shared scientific values -- fiducials, frequency bounds,
 cosmology grid settings -- stay in `inputs/config.yaml`.
 
@@ -39,9 +39,11 @@ artifacts live under `outputs/figures/cosmological-parameters/`.
 Preview or build the section (from `packages/astrogwb-paper/`):
 
 ```bash
-snakemake --snakefile workflow/mcmc.smk \
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
   --profile profiles/local --cores 8 --dry-run plot_cosmological_parameters
-snakemake --snakefile workflow/mcmc.smk \
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
   --profile profiles/slurm plot_cosmological_parameters
 ```
 
@@ -49,7 +51,8 @@ Every artifact remains a valid Snakemake target, but because the rule has
 multiple outputs, requesting one builds the complete section:
 
 ```bash
-snakemake --snakefile workflow/mcmc.smk \
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
   --profile profiles/local --cores 8 \
   outputs/figures/cosmological-parameters/H0-by-detector.pdf
 ```
@@ -74,7 +77,8 @@ workflow. The fiducial spectrum borrows the six detector networks of the
 `inputs/config.yaml` directly.
 
 ```bash
-snakemake --snakefile workflow/mcmc.smk --cores 1 \
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules amplitude_toy fiducial_spectrum importance_weights_grid \
   outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf \
   outputs/figures/standalone/fiducial_spectrum.pdf \
   outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf \
@@ -85,7 +89,8 @@ snakemake --snakefile workflow/mcmc.smk --cores 1 \
 Or build any one of them directly:
 
 ```bash
-snakemake --snakefile workflow/mcmc.smk --cores 1 \
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules fiducial_spectrum \
   outputs/figures/standalone/fiducial_spectrum.pdf
 ```
 
