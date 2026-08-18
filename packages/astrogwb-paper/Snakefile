@@ -1,10 +1,40 @@
+import re
 from pathlib import Path
 
 from astrogwb_paper.config.catalogs import load_catalog_recipe
+from astrogwb_paper.config.experiments import (
+    DEFAULT_CATALOG,
+    chain_paths,
+    experiment,
+    load_experiments,
+    merged_config_path,
+)
+from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS
 
 
+SOURCE_CONFIG = Path("inputs/config.yaml")
+JAX_PLATFORM = config.get("jax_platforms", "cuda")
+CATALOGS_DIR = Path(config.get("catalogs_dir", "outputs/catalogs"))
 RECIPE_DIR = Path("inputs/catalogs")
+
+CONFIG_PATTERN = "outputs/configs/{experiment}/{run}.json"
+CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
+SIDECAR_PATTERN = "outputs/chains/{experiment}/{run}.json"
+
+experiments = load_experiments()
 _RECIPE_CACHE = {}
+CONFIG_OUTPUTS = [
+    str(merged_config_path(specification.name, run))
+    for specification in experiments.values()
+    for run in specification.runs
+]
+EXPERIMENT_PATTERN = "|".join(re.escape(name) for name in experiments)
+RUN_PATTERN = "|".join(
+    re.escape(run)
+    for run in dict.fromkeys(
+        run for specification in experiments.values() for run in specification.runs
+    )
+)
 
 
 def recipe_path(wildcards):
@@ -18,13 +48,42 @@ def recipe(wildcards):
     return _RECIPE_CACHE[catalog]
 
 
+def _run_spec(wildcards):
+    specification = experiment(wildcards.experiment)
+    if wildcards.run not in specification.runs:
+        raise ValueError(f"unknown run {wildcards.experiment}/{wildcards.run}")
+    return specification
+
+
+def run_catalog_path(wildcards):
+    catalog = _run_spec(wildcards).catalog_for(wildcards.run)
+    return str(CATALOGS_DIR / catalog.name)
+
+
+def run_outdir(wildcards):
+    return str(Path("outputs/chains") / wildcards.experiment)
+
+
+def _catalog(name):
+    return str(CATALOGS_DIR / name)
+
+
 wildcard_constraints:
     catalog="[A-Za-z0-9][A-Za-z0-9._-]*",
+    experiment=EXPERIMENT_PATTERN,
+    run=RUN_PATTERN,
 
 
 localrules:
     bns_population,
     bns_waveform_catalog,
+    assemble_config,
+    plot_cosmological_parameters,
+    plot_modified_propagation,
+    amplitude_toy,
+    fiducial_spectrum,
+    importance_weights_grid,
+    experiments,
 
 
 rule bns_population:
@@ -71,75 +130,6 @@ rule bns_waveform_catalog:
         " --reference-frequency {params.reference_frequency}"
         " --frequency-resolution {params.frequency_resolution}"
         " --chunk-size {params.chunk_size}"
-import re
-from pathlib import Path
-
-from astrogwb_paper.config.experiments import (
-    DEFAULT_CATALOG,
-    chain_paths,
-    experiment,
-    load_experiments,
-    merged_config_path,
-)
-from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS
-
-
-SOURCE_CONFIG = Path("inputs/config.yaml")
-JAX_PLATFORM = config.get("jax_platforms", "cuda")
-CATALOGS_DIR = Path(config.get("catalogs_dir", "outputs/catalogs"))
-
-CONFIG_PATTERN = "outputs/configs/{experiment}/{run}.json"
-CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
-SIDECAR_PATTERN = "outputs/chains/{experiment}/{run}.json"
-
-experiments = load_experiments()
-CONFIG_OUTPUTS = [
-    str(merged_config_path(specification.name, run))
-    for specification in experiments.values()
-    for run in specification.runs
-]
-EXPERIMENT_PATTERN = "|".join(re.escape(name) for name in experiments)
-RUN_PATTERN = "|".join(
-    re.escape(run)
-    for run in dict.fromkeys(
-        run for specification in experiments.values() for run in specification.runs
-    )
-)
-
-
-def _run_spec(wildcards):
-    specification = experiment(wildcards.experiment)
-    if wildcards.run not in specification.runs:
-        raise ValueError(f"unknown run {wildcards.experiment}/{wildcards.run}")
-    return specification
-
-
-def run_catalog_path(wildcards):
-    catalog = _run_spec(wildcards).catalog_for(wildcards.run)
-    return str(CATALOGS_DIR / catalog.name)
-
-
-def run_outdir(wildcards):
-    return str(Path("outputs/chains") / wildcards.experiment)
-
-
-def _catalog(name):
-    return str(CATALOGS_DIR / name)
-
-
-wildcard_constraints:
-    experiment=EXPERIMENT_PATTERN,
-    run=RUN_PATTERN,
-
-
-localrules:
-    experiments,
-    assemble_config,
-    plot_cosmological_parameters,
-    plot_modified_propagation,
-    amplitude_toy,
-    fiducial_spectrum,
-    importance_weights_grid,
 
 
 rule assemble_config:
@@ -324,8 +314,9 @@ rule importance_weights_grid:
         " --output-xi0-n-pdf {output.xi0_n_pdf:q}"
 
 
-# The cosmological experiment feeds one paper section. Its chains-only target
-# remains separate from the complete plotting target.
+# These aggregate targets read rules.* outputs, so they must follow the rules
+# they reference. The cosmological experiment feeds one paper section; its
+# chains-only target remains separate from the complete plotting target.
 COSMOLOGICAL_PARAMETER_EXPERIMENT = "cosmological-parameters"
 FIGURE_OUTPUTS = {
     "modified-propagation": list(rules.plot_modified_propagation.output),
