@@ -19,6 +19,7 @@ dependencies = [
     "numpyro>=0.21.0",
     "pluscross>=0.2.0,<0.3.0",
     "pydantic>=2.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

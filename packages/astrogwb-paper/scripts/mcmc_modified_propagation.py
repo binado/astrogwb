@@ -85,7 +85,7 @@ H0_VAR_NAMES = ("xi_0", "H0")
 # follow the order the rule passes --xi0-chain, --xi0-n-chain, --h0-chain. The
 # by-detector table borrows the shared network legend (`DETECTOR_NETWORKS`),
 # which the workflow also expands its chain paths from.
-PROPAGATION_EXPERIMENT = "modified-propagation-all-detectors"
+PROPAGATION_EXPERIMENT = "modified-propagation"
 MARGINAL_LABELS = (r"$\Xi_0$", r"$\Xi_0 + n$", r"$\Xi_0 + H_0$")
 H0_LABELS = (r"$\Xi_0 + H_0$",)
 

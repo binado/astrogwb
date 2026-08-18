@@ -1,4 +1,4 @@
-"""Scientific inputs the paper figure scripts read for themselves (stdlib only).
+"""Scientific inputs the paper figure scripts read for themselves (JAX-free).
 
 Presentation -- which runs a figure shows, in what order, under which LaTeX
 label -- is hard-coded in the figure scripts and in
@@ -6,12 +6,11 @@ label -- is hard-coded in the figure scripts and in
 label is a code change, reviewed with the plot it labels.
 
 What stays here is the part with scientific consequences. Detector *lists* are
-never restated alongside a label: they live in ``experiments/<name>.toml``
-under ``[runs.<run>.analysis].detectors`` and are attached by
+never restated alongside a label: they live in ``inputs/config.yaml`` under
+``experiments.<name>.runs.<run>.analysis.detectors`` and are attached by
 :func:`resolve_networks`, so the detectors a figure computes an SNR for are
 always the ones its chain was sampled with. Fiducials, the frequency band, and
-the redshift grid are read straight from ``inputs/mcmc.base.toml``, the same
-file the MCMC runs are assembled from.
+the redshift grid are read from that inventory's ``base`` mapping.
 
 Like :mod:`astrogwb_paper.config.loading`, this module imports neither JAX nor
 ``astrogwb``, so a figure script can resolve and validate its inputs before
@@ -77,18 +76,25 @@ def resolve_networks(
 
 
 def load_fiducials(path: Path, root: Path | None = None) -> dict[str, float]:
-    """Load the shared ``[fiducials]`` table from the base MCMC config."""
+    """Load the shared ``fiducials`` mapping from the MCMC inventory."""
     resolved = resolve_paper_path(path, root)
-    fiducials = load_mapping(resolved).get("fiducials")
+    inventory = load_mapping(resolved)
+    base = inventory.get("base")
+    if not isinstance(base, Mapping):
+        raise TypeError(f"{resolved} must define a base mapping")
+    fiducials = base.get("fiducials")
     if not isinstance(fiducials, Mapping) or not fiducials:
         raise ValueError(f"{resolved} must define a non-empty [fiducials] table")
     return {str(name): float(value) for name, value in fiducials.items()}
 
 
 def load_analysis_grid(path: Path, root: Path | None = None) -> AnalysisGrid:
-    """Load the shared frequency band and redshift grid from the base config."""
+    """Load the shared frequency band and redshift grid from the inventory."""
     resolved = resolve_paper_path(path, root)
-    base = load_mapping(resolved)
+    inventory = load_mapping(resolved)
+    base = inventory.get("base")
+    if not isinstance(base, Mapping):
+        raise TypeError(f"{resolved} must define a base mapping")
     analysis = base.get("analysis") or {}
     cosmology = base.get("cosmology") or {}
     try:

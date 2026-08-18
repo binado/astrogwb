@@ -33,7 +33,7 @@ def test_get_corner_kwargs_and_combo_colors() -> None:
 def test_detector_network_styles_pairs_et_and_et_plus_ce() -> None:
     from astrogwb_paper.config.figures import resolve_networks
 
-    networks = resolve_networks("H0-all-detectors", plotting.DETECTOR_NETWORKS)
+    networks = resolve_networks("cosmological-parameters", plotting.DETECTOR_NETWORKS)
     colors, linestyles = plotting.detector_network_styles(networks)
 
     assert len(colors) == len(linestyles) == len(networks)

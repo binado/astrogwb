@@ -2,22 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from astrogwb_paper.cli.validate_config import main as assemble_configs
 from astrogwb_paper.config.experiments import (
+    CONFIG_PATH,
     DEFAULT_CATALOG,
     chain_path,
     config_path,
+    load_base,
     load_experiments,
     merged_config_path,
     overlay_for,
     sidecar_path,
 )
-from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import build_run_config
 from astrogwb_paper.paths import paper_project_root
 
 PAPER_ROOT = paper_project_root()
-BASE_CONFIG = PAPER_ROOT / "inputs/mcmc.base.toml"
-EXPERIMENTS_DIR = PAPER_ROOT / "experiments"
 
 
 def declared_runs() -> set[tuple[str, str]]:
@@ -28,28 +28,24 @@ def declared_runs() -> set[tuple[str, str]]:
     }
 
 
-def test_inventory_contains_seven_experiments_and_22_runs() -> None:
+def test_inventory_contains_four_experiments_and_22_runs() -> None:
     assert set(load_experiments()) == {
-        "H0-all-detectors",
-        "modified-propagation-all-detectors",
-        "H0-merger-rate",
-        "H0-omega-m",
+        "cosmological-parameters",
         "astrophysical-parameters",
-        "star-formation-peak",
+        "modified-propagation",
         "variable-injection-size",
     }
     assert len(declared_runs()) == 22
 
 
-def test_declared_run_files_exactly_match_the_inventory() -> None:
-    discovered = {path.stem for path in EXPERIMENTS_DIR.glob("*.toml")}
-
-    assert discovered == set(load_experiments())
-    assert list(EXPERIMENTS_DIR.glob("*/*.toml")) == []
+def test_single_yaml_is_the_only_mcmc_inventory() -> None:
+    assert (PAPER_ROOT / CONFIG_PATH).is_file()
+    assert not (PAPER_ROOT / "inputs/mcmc.base.toml").exists()
+    assert list((PAPER_ROOT / "experiments").glob("**/*.toml")) == []
 
 
 def test_every_base_and_run_merge_is_a_valid_run_config() -> None:
-    base = load_mapping(BASE_CONFIG)
+    base = load_base()
 
     for specification in load_experiments().values():
         for run in specification.runs:
@@ -63,18 +59,33 @@ def test_every_base_and_run_merge_is_a_valid_run_config() -> None:
                 assert amplitude_parameter is not None
 
 
-def test_run_paths_are_one_to_one_with_the_source_toml() -> None:
-    assert config_path("H0-all-detectors", "ET-triangular") == Path(
-        "experiments/H0-all-detectors.toml"
+def test_all_run_configs_are_assembled_together(tmp_path: Path) -> None:
+    assemble_configs(
+        [
+            str(PAPER_ROOT / CONFIG_PATH),
+            "--output-dir",
+            str(tmp_path),
+        ]
     )
-    assert merged_config_path("H0-all-detectors", "ET-triangular") == Path(
-        "outputs/configs/H0-all-detectors/ET-triangular.json"
+
+    generated = list(tmp_path.glob("*/*.json"))
+    assert len(generated) == 22
+    assert (tmp_path / "cosmological-parameters/H0-Omega_m.json").is_file()
+    assert (tmp_path / "astrophysical-parameters/z_peak.json").is_file()
+    assert (tmp_path / "modified-propagation/Xi_0-H0.json").is_file()
+    assert (tmp_path / "variable-injection-size/n32768.json").is_file()
+
+
+def test_run_paths_are_one_to_one_with_the_source_yaml() -> None:
+    assert config_path("cosmological-parameters", "ET-triangular") == CONFIG_PATH
+    assert merged_config_path("cosmological-parameters", "ET-triangular") == Path(
+        "outputs/configs/cosmological-parameters/ET-triangular.json"
     )
-    assert chain_path("H0-all-detectors", "ET-triangular") == Path(
-        "outputs/chains/H0-all-detectors/ET-triangular.nc"
+    assert chain_path("cosmological-parameters", "ET-triangular") == Path(
+        "outputs/chains/cosmological-parameters/ET-triangular.nc"
     )
-    assert sidecar_path("H0-all-detectors", "ET-triangular") == Path(
-        "outputs/chains/H0-all-detectors/ET-triangular.json"
+    assert sidecar_path("cosmological-parameters", "ET-triangular") == Path(
+        "outputs/chains/cosmological-parameters/ET-triangular.json"
     )
 
 
@@ -96,8 +107,8 @@ def test_catalog_selection_is_fixed_except_for_injection_size() -> None:
 
 
 def test_cross_type_prior_override_replaces_the_table() -> None:
-    spec = load_experiments()["modified-propagation-all-detectors"]
-    base = load_mapping(BASE_CONFIG)
+    spec = load_experiments()["modified-propagation"]
+    base = load_base()
     merged = overlay_for(spec, "Xi_0-H0", base=base)
 
     assert merged["priors"]["H0"] == {

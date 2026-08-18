@@ -21,11 +21,11 @@ from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS, DETECTOR_NETWORKS
 
 PAPER_ROOT = paper_project_root()
-BASE_CONFIG = PAPER_ROOT / "inputs/mcmc.base.toml"
+BASE_CONFIG = PAPER_ROOT / "inputs/config.yaml"
 
 # The experiments whose runs the network legend is resolved against. The
-# fiducial-spectrum figure borrows H0-all-detectors' detector lists.
-NETWORK_EXPERIMENTS = ("H0-all-detectors", "modified-propagation-all-detectors")
+# fiducial-spectrum figure borrows cosmological-parameters' detector lists.
+NETWORK_EXPERIMENTS = ("cosmological-parameters", "modified-propagation")
 
 
 def test_the_figure_config_directory_is_gone() -> None:
@@ -57,8 +57,8 @@ def test_committed_latex_labels_survive_the_move_out_of_toml() -> None:
 
 
 def test_resolve_networks_preserves_order_and_attaches_detectors() -> None:
-    spec = experiment("H0-all-detectors")
-    networks = resolve_networks("H0-all-detectors", DETECTOR_NETWORKS)
+    spec = experiment("cosmological-parameters")
+    networks = resolve_networks("cosmological-parameters", DETECTOR_NETWORKS)
 
     assert [network.name for network in networks] == list(DETECTOR_NETWORK_RUNS)
     for network in networks:
@@ -78,13 +78,14 @@ def test_both_network_experiments_resolve_to_identical_networks() -> None:
 
 def test_resolve_networks_rejects_empty_duplicate_and_unknown_runs() -> None:
     with pytest.raises(ValueError, match="no detector networks"):
-        resolve_networks("H0-all-detectors", [])
+        resolve_networks("cosmological-parameters", [])
     with pytest.raises(ValueError, match="duplicate"):
         resolve_networks(
-            "H0-all-detectors", [("ET-triangular", "a"), ("ET-triangular", "b")]
+            "cosmological-parameters",
+            [("ET-triangular", "a"), ("ET-triangular", "b")],
         )
     with pytest.raises(ValueError, match="unknown run"):
-        resolve_networks("H0-all-detectors", [("nope", "label")])
+        resolve_networks("cosmological-parameters", [("nope", "label")])
 
 
 def test_base_fiducials_and_analysis_grid_are_read_from_the_base_config() -> None:
@@ -110,11 +111,10 @@ def test_base_fiducials_and_analysis_grid_are_read_from_the_base_config() -> Non
 
 
 def test_experiments_without_figures_are_chains_only() -> None:
-    with_figures = {*NETWORK_EXPERIMENTS, "H0-merger-rate", "H0-omega-m"}
+    with_figures = set(NETWORK_EXPERIMENTS)
     chains_only = set(load_experiments()) - with_figures
 
     assert chains_only == {
         "astrophysical-parameters",
-        "star-formation-peak",
         "variable-injection-size",
     }

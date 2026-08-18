@@ -18,12 +18,12 @@ happen inside functions that run only after
 Usage::
 
     uv run astrogwb-run-mcmc \
-        --config outputs/configs/H0-all-detectors/ET-2L-aligned-CE-Hanford.json \
+        --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
         --catalog outputs/catalogs/bns-n16384-df1.h5
 
-Configs are assembled from ``inputs/mcmc.base.toml`` plus one
-``experiments/<name>.toml`` run overlay, by the ``assemble_config`` workflow
-rule or by ``astrogwb-validate-config``; see docs/running-inference.md.
+Configs are assembled from the base and run overlays in ``inputs/config.yaml``
+by the ``assemble_config`` workflow rule or by
+``astrogwb-validate-config``; see docs/running-inference.md.
 
 Use ``uv run --package astrogwb-paper --extra cuda`` (or ``--extra tpu``) for
 the matching JAX accelerator plugin.

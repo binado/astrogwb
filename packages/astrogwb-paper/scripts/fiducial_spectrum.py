@@ -51,10 +51,10 @@ from pluscross import load_catalog
 register_projection(MplAxes)
 jax.config.update("jax_enable_x64", True)
 
-# These panels compare the same six networks as the H0-all-detectors
+# These panels compare the same six networks as the cosmological-parameters
 # experiment, so they borrow its detector lists rather than restating them.
 # This figure reads no chains, so there is no argv order to keep in step.
-SPECTRUM_EXPERIMENT = "H0-all-detectors"
+SPECTRUM_EXPERIMENT = "cosmological-parameters"
 # Lower y-limit for Omega_GW; the S_h ymin is taken from S_h at the frequency
 # where Omega_GW is closest to this floor.
 OMEGA_GW_MIN = 1.0e-15

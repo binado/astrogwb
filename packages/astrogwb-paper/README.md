@@ -38,6 +38,8 @@ uvx jupytext --to ipynb packages/astrogwb-paper/notebooks/mcmc.py
 All user paths are resolved from this package's root. Generated populations,
 catalogs, canonical configs, chains, and figures live under `outputs/`;
 scheduler/runtime logs remain under `logs/`. All live inside this member.
+The shared MCMC base and all curated experiment runs are declared in
+`inputs/config.yaml`.
 
 See [`docs/`](docs/) for catalog generation, inference, paper figures, and
 Snakemake/SLURM workflows.

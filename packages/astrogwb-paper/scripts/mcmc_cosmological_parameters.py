@@ -88,7 +88,7 @@ CORNER_VAR_NAMES = MERGER_RATE_VAR_NAMES
 # Omega_m labels name parameter combinations rather than networks and stay
 # local; their order matches the chain order declared by the rule that calls
 # this script.
-DETECTOR_EXPERIMENT = "H0-all-detectors"
+DETECTOR_EXPERIMENT = "cosmological-parameters"
 MERGER_RATE_LABELS = (
     r"$H_0$ (fixed $\mathcal{R}_0$)",
     r"$H_0 + \mathcal{R}_0$ (narrow prior)",

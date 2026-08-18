@@ -67,15 +67,15 @@ def test_plot_cosmological_parameters_expands_all_chains_and_figures(
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule assemble_config:") == 9
+    assert result.stdout.count("rule assemble_config:") == 1
     assert result.stdout.count("rule run_mcmc:") == 9
     assert result.stdout.count("rule plot_cosmological_parameters:") == 1
     for path in (
-        "outputs/figures/H0-all-detectors/H0-by-detector.pdf",
-        "outputs/figures/H0-merger-rate/H0-merger-rate-priors.pdf",
-        "outputs/figures/H0-merger-rate/H0-merger-rate-corner.pdf",
-        "outputs/figures/H0-omega-m/H0-Omega_m-corner.pdf",
-        "outputs/figures/H0-omega-m/H0-Omega_m-ess-corner.pdf",
+        "outputs/figures/cosmological-parameters/H0-by-detector.pdf",
+        "outputs/figures/cosmological-parameters/H0-merger-rate-priors.pdf",
+        "outputs/figures/cosmological-parameters/H0-merger-rate-corner.pdf",
+        "outputs/figures/cosmological-parameters/H0-Omega_m-corner.pdf",
+        "outputs/figures/cosmological-parameters/H0-Omega_m-ess-corner.pdf",
     ):
         assert path in result.stdout
 
@@ -90,17 +90,17 @@ def test_chains_only_target_excludes_figure_rule(tmp_path: Path) -> None:
         "--forceall",
         "--cores",
         "8",
-        "H0_all_detectors_chains",
+        "cosmological_parameters_chains",
         "--config",
         f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule run_mcmc:") == 6
+    assert result.stdout.count("rule run_mcmc:") == 9
     assert "rule plot_cosmological_parameters:" not in result.stdout
 
 
-def test_config_assembly_merges_only_base_and_explicit_run(
+def test_config_assembly_reads_the_single_inventory(
     tmp_path: Path,
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
@@ -113,16 +113,17 @@ def test_config_assembly_merges_only_base_and_explicit_run(
         "--printshellcmds",
         "--cores",
         "4",
-        "outputs/chains/H0-omega-m/H0-Omega_m.nc",
+        "outputs/chains/cosmological-parameters/H0-Omega_m.nc",
         "--config",
         f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
     assert (
-        "astrogwb-validate-config --base inputs/mcmc.base.toml "
-        "--run H0-Omega_m experiments/H0-omega-m.toml" in result.stdout
+        "astrogwb-validate-config inputs/config.yaml "
+        "--output-dir outputs/configs" in result.stdout
     )
+    assert result.stdout.count("rule assemble_config:") == 1
 
 
 def test_variable_injection_size_uses_three_catalogs(tmp_path: Path) -> None:
@@ -164,7 +165,7 @@ def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
         "--dry-run",
         "--cores",
         "4",
-        "H0_omega_m_chains",
+        "cosmological_parameters_chains",
         "--config",
         f"catalogs_dir={catalogs}",
     )
@@ -182,13 +183,10 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
     assert result.returncode == 0, result.stderr
     rules = set(result.stdout.split())
     assert {
-        "H0_all_detectors_chains",
-        "H0_merger_rate_chains",
-        "H0_omega_m_chains",
+        "cosmological_parameters_chains",
         "plot_cosmological_parameters",
-        "modified_propagation_all_detectors",
+        "modified_propagation",
         "astrophysical_parameters",
-        "star_formation_peak",
         "variable_injection_size",
         "amplitude_toy",
         "fiducial_spectrum",
@@ -197,6 +195,11 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "run_mcmc",
     } <= rules
     assert {
+        "H0_all_detectors_chains",
+        "H0_merger_rate_chains",
+        "H0_omega_m_chains",
+        "modified_propagation_all_detectors",
+        "star_formation_peak",
         "H0_all_detectors",
         "H0_merger_rate",
         "H0_omega_m",
@@ -205,6 +208,33 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "plot_H0_omega_m",
         "standalone_figures",
     }.isdisjoint(rules)
+
+
+def test_experiments_target_builds_all_22_chains(tmp_path: Path) -> None:
+    catalogs = _catalogs(
+        tmp_path,
+        "bns-n8192-df1.h5",
+        "bns-n16384-df1.h5",
+        "bns-n32768-df1.h5",
+    )
+
+    result = _snakemake(
+        "--snakefile",
+        str(MCMC_SNAKEFILE),
+        "--dry-run",
+        "--forceall",
+        "--cores",
+        "8",
+        "experiments",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("rule assemble_config:") == 1
+    assert result.stdout.count("rule run_mcmc:") == 22
+    assert result.stdout.count("rule plot_cosmological_parameters:") == 1
+    assert result.stdout.count("rule plot_modified_propagation:") == 1
 
 
 def test_plot_cosmological_parameters_passes_all_paths_not_labels(
@@ -227,7 +257,7 @@ def test_plot_cosmological_parameters_passes_all_paths_not_labels(
 
     assert result.returncode == 0, result.stderr
     assert "rule plot_cosmological_parameters:" in result.stdout
-    assert "--base-config inputs/mcmc.base.toml" in result.stdout
+    assert "--base-config inputs/config.yaml" in result.stdout
     for flag in (
         "--catalog",
         "--detector-chains",
@@ -281,7 +311,7 @@ def test_standalone_figures_receive_config_paths(
         assert script in result.stdout
     # Every standalone script reads the base config for itself instead of
     # receiving fiducials and analysis bounds as reconstructed flags.
-    assert result.stdout.count("--base-config inputs/mcmc.base.toml") == 3
+    assert result.stdout.count("--base-config inputs/config.yaml") == 3
     assert "--figure-config" not in result.stdout
     for flag in ("--observation-time", "--f-min", "--h0", "--omega-gw-min"):
         assert flag not in result.stdout
@@ -299,7 +329,7 @@ def test_figure_path_is_a_valid_snakemake_target(
         "--forceall",
         "--cores",
         "8",
-        "outputs/figures/H0-all-detectors/H0-by-detector.pdf",
+        "outputs/figures/cosmological-parameters/H0-by-detector.pdf",
         "--config",
         f"catalogs_dir={catalogs}",
     )
@@ -328,7 +358,7 @@ def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     command = result.stdout[result.stdout.index(" --detector-chains ") :]
     positions = [
-        command.index(f"outputs/chains/H0-all-detectors/{run}.nc")
+        command.index(f"outputs/chains/cosmological-parameters/{run}.nc")
         for run in (
             "ET-triangular",
             "ET-triangular-CE-Hanford",
@@ -339,6 +369,6 @@ def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
         )
     ]
     assert positions == sorted(positions)
-    assert command.index("outputs/chains/H0-merger-rate/fixed.nc") < command.index(
-        "outputs/chains/H0-merger-rate/sampled.nc"
-    )
+    assert command.index(
+        "outputs/chains/cosmological-parameters/fixed.nc"
+    ) < command.index("outputs/chains/cosmological-parameters/sampled.nc")

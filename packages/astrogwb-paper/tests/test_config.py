@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from astrogwb_paper.config.experiments import load_experiments, overlay_for
+from astrogwb_paper.config.experiments import load_base, load_experiments, overlay_for
 from astrogwb_paper.config.loading import deep_merge, load_mapping, merge_run_overlay
 from astrogwb_paper.config.mcmc import (
     build_run_config,
@@ -47,12 +47,17 @@ def test_deep_merge_nested_dicts_and_list_replacement() -> None:
     assert base["networks"] == ["A", "B"]
 
 
-def test_load_mapping_rejects_unsupported_extension(tmp_path: Path) -> None:
+def test_load_mapping_resolves_yaml_aliases(tmp_path: Path) -> None:
     path = tmp_path / "config.yaml"
-    path.write_text("seed: 1\n", encoding="utf-8")
+    path.write_text(
+        "shared: &shared\n  detectors: [S1, R1]\nrun:\n  analysis: *shared\n",
+        encoding="utf-8",
+    )
 
-    with pytest.raises(ValueError, match="unsupported config extension"):
-        load_mapping(path)
+    assert load_mapping(path) == {
+        "shared": {"detectors": ["S1", "R1"]},
+        "run": {"analysis": {"detectors": ["S1", "R1"]}},
+    }
 
 
 def test_build_run_config_deep_merges_extra_overrides() -> None:
@@ -85,7 +90,7 @@ def test_every_experiment_run_assembles_into_a_valid_config() -> None:
     This replaces a check over two committed example configs. Assembling each
     experiment run is both wider coverage and the thing that actually ships.
     """
-    base = load_mapping(PAPER_ROOT / "inputs/mcmc.base.toml")
+    base = load_base()
     assert "runtime" not in base
 
     specs = load_experiments()

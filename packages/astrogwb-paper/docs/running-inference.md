@@ -3,40 +3,26 @@
 ## Ad-hoc runs
 
 `astrogwb-run-mcmc` accepts a complete validated configuration and a prebuilt
-waveform catalog. The project ships no standalone example config: assemble one
-first with `astrogwb-validate-config` (see [Curated experiment
-runs](#curated-experiment-runs) for what it merges), then run it.
+waveform catalog. The project ships no standalone example config. Assemble the
+curated inventory first:
 
 ```bash
 uv run astrogwb-validate-config \
-  --base inputs/mcmc.base.toml \
-  --run ET-2L-aligned-CE-Hanford \
-  experiments/H0-all-detectors.toml \
-  --output /tmp/adhoc.json
+  inputs/config.yaml \
+  --output-dir outputs/configs
 
 uv run astrogwb-run-mcmc \
-  --config /tmp/adhoc.json \
+  --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
   --catalog outputs/catalogs/bns-n16384-df1.h5
 ```
 
-Any config the workflow has already assembled under
-`outputs/configs/<experiment>/<run>.json` works the same way, which is the
-usual choice for direct runner and profiling work.
+Any generated config under `outputs/configs/<experiment>/<run>.json` works for
+direct runner and profiling work.
 
 ## Curated experiment runs
 
-Production runs use one TOML per experiment. Each `[runs.<id>]` table is one
-chain overlay on the shared base:
-
-```text
-inputs/mcmc.base.toml
-  + experiments/<experiment>.toml  [runs.<run>]
-  -> outputs/configs/<experiment>/<run>.json
-  -> outputs/chains/<experiment>/<run>.nc
-  -> outputs/chains/<experiment>/<run>.json
-```
-
-The base owns settings shared across all experiments:
+[`inputs/config.yaml`](../inputs/config.yaml) is the sole MCMC configuration
+source. Its `base` mapping owns settings shared by all runs:
 
 - random seed and observing time;
 - frequency and cosmology grids;
@@ -45,58 +31,52 @@ The base owns settings shared across all experiments:
 - default priors;
 - output defaults.
 
-Top-level keys in the experiment file (except `runs`) overlay the base for
-every run. Each `[runs.<id>]` table then overlays detector names,
-`sampled_params`, likelihood settings, catalog path, and run-specific priors.
+Its `experiments` mapping declares four groups and all 22 runs:
 
-For example:
-
-```toml
-# experiments/H0-omega-m.toml
-sampled_params = ["Omega_m"]
-
-[analysis]
-detectors = ["S1", "R1", "C1"]
-likelihood = "amplitude_marginalized"
-amplitude_parameter = "H0"
-amplitude_num_nodes = 1024
-
-[runs.H0-Omega_m]
+```text
+inputs/config.yaml
+  base + experiments.<experiment> + runs.<run>
+  -> outputs/configs/<experiment>/<run>.json
+  -> outputs/chains/<experiment>/<run>.nc
+  -> outputs/chains/<experiment>/<run>.json
 ```
 
-There is no network/analysis/observation product and no fragment lookup.
-Adding a chain means adding one `[runs.<id>]` table to the experiment file.
+YAML anchors and aliases remove repeated detector and likelihood mappings.
+Experiment-level settings overlay `base`, then a run mapping overlays both.
+Nested mappings are merged, lists replace inherited lists, and each overridden
+prior specification replaces that parameter's inherited prior table wholesale.
+The optional `catalog` run key routes the prebuilt catalog and is not written
+into the scientific run config.
 
-To assemble one config manually:
+The groups are:
 
-```bash
-uv run astrogwb-validate-config \
-    --base inputs/mcmc.base.toml \
-    --run ET-2L-aligned \
-    experiments/H0-all-detectors.toml \
-    --output /tmp/ET-2L-aligned.json
-```
+| Experiment | Runs |
+| --- | ---: |
+| `cosmological-parameters` | six detector networks, `fixed`, `sampled`, and `H0-Omega_m` |
+| `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` |
+| `modified-propagation` | six detector networks, `Xi_0`, and `Xi_0-H0` |
+| `variable-injection-size` | `n8192`, `n16384`, and `n32768` |
 
-The validator checks that every sampled parameter has a prior and fiducial and
-that amplitude-marginalized runs define a valid amplitude parameter.
+`assemble_config` is one local Snakemake job. A change to
+`inputs/config.yaml` validates the complete inventory and regenerates all 22
+canonical JSON files together. Each MCMC job then consumes its own JSON.
 
-Run one experiment's chains through Snakemake (from
-`packages/astrogwb-paper/`, adding `--dry-run` to preview):
+Run one experiment's chains through Snakemake from
+`packages/astrogwb-paper/`:
 
 ```bash
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/local --cores 8 H0_all_detectors_chains
+  --profile profiles/local --cores 8 cosmological_parameters_chains
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/slurm H0_all_detectors_chains
+  --profile profiles/slurm modified_propagation_chains
 ```
 
-The `H0-all-detectors`, `H0-merger-rate`, and `H0-omega-m` chains feed one
-paper section. Build all of its figures and tables together with the
-`plot_cosmological_parameters` target.
+Build all cosmological chains, figures, and tables with
+`plot_cosmological_parameters`.
 
 ## Outputs and provenance
 
-Every labelled experiment run has deterministic `.nc` and `.json` paths under
+Every labelled run has deterministic `.nc` and `.json` paths under
 `outputs/chains/<experiment>/`. The JSON sidecar records the catalog path and
 SHA-256, canonical config SHA-256, detectors, seed, fiducials, priors, sampler
 settings, and git revision.
@@ -113,9 +93,9 @@ Experiments consume existing catalogs and never generate them implicitly.
 Build the required catalogs first:
 
 ```bash
-snakemake --snakefile workflow/catalog.smk --cores 1 \
-  outputs/catalogs/bns-n16384-df1.h5
+snakemake --snakefile workflow/catalog.smk \
+  --profile profiles/local --cores 8 catalogs
 ```
 
-The variable-injection-size experiment additionally requires the 8192 and
-32768 catalogs.
+If a required catalog is absent, the MCMC workflow fails with a
+`MissingInputException` instead of silently scheduling catalog generation.

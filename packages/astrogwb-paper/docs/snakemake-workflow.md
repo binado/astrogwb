@@ -11,8 +11,7 @@ The paper application has two Snakefiles:
 for real unless it is passed).
 
 All commands run with `packages/astrogwb-paper/` as their working directory.
-Source inputs live under `inputs/` and `experiments/`; generated artifacts live
-under `outputs/`.
+Source inputs live under `inputs/`; generated artifacts live under `outputs/`.
 
 ## Catalog workflow
 
@@ -33,10 +32,10 @@ include these rules. A missing catalog therefore stops MCMC with a
 
 ## Experiment workflow
 
-Each committed `experiments/<experiment>.toml` describes one experiment. The
-local `assemble_config` rule merges `[runs.<run>]` with
-[`inputs/mcmc.base.toml`](../inputs/mcmc.base.toml), validates the result, and
-writes:
+[`inputs/config.yaml`](../inputs/config.yaml) contains the shared base and all
+four experiment groups. YAML aliases reuse common detector and likelihood
+mappings, while experiment and run mappings override inherited values. The
+local `assemble_config` rule validates all 22 runs in one job and writes:
 
 ```text
 outputs/configs/<experiment>/<run>.json
@@ -56,21 +55,18 @@ The curated inventory is:
 
 | Experiment | Runs | Figures |
 | --- | ---: | --- |
-| `H0-all-detectors` | 6 detector networks | input to `plot_cosmological_parameters` |
-| `modified-propagation-all-detectors` | 6 detector runs plus `Xi_0` and `Xi_0-H0` | corners, marginal comparison, and tables |
-| `H0-merger-rate` | fixed and sampled merger rate | input to `plot_cosmological_parameters` |
-| `H0-omega-m` | one amplitude-marginalized run | input to `plot_cosmological_parameters` |
-| `astrophysical-parameters` | one Madau-Dickinson run | chains only |
-| `star-formation-peak` | one `z_peak` run | chains only |
+| `cosmological-parameters` | 6 detector runs plus `fixed`, `sampled`, and `H0-Omega_m` | input to `plot_cosmological_parameters` |
+| `modified-propagation` | 6 detector runs plus `Xi_0` and `Xi_0-H0` | corners, marginal comparison, and tables |
+| `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` | chains only |
 | `variable-injection-size` | 8192, 16384, and 32768 injections | chains only |
 
 Run one experiment's chains:
 
 ```bash
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/local --cores 8 --dry-run H0_all_detectors_chains
+  --profile profiles/local --cores 8 --dry-run cosmological_parameters_chains
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/slurm H0_all_detectors_chains
+  --profile profiles/slurm cosmological_parameters_chains
 ```
 
 Build the paper's complete cosmological-parameter section:
@@ -81,10 +77,9 @@ snakemake --snakefile workflow/mcmc.smk \
 ```
 
 This single local post-processing rule consumes all nine chains from
-`H0-all-detectors`, `H0-merger-rate`, and `H0-omega-m`, then writes their five
-figures and two CSV/LaTeX table pairs. These three experiments expose only
-their `_chains` targets; their former complete targets were removed. Requesting
-any one cosmological-parameter output path schedules the full section.
+`cosmological-parameters`, then writes five figures and two CSV/LaTeX table
+pairs. Requesting any one cosmological-parameter output path schedules the full
+section.
 
 Multiple chain targets may be supplied. The `experiments` target builds every
 experiment and the combined cosmological-parameter products.
@@ -101,7 +96,7 @@ Snakemake's `localrules`, so they execute on the submit host.
 
 For the `plot_cosmological_parameters` target, Snakemake:
 
-1. assembles and validates configs locally;
+1. assembles and validates all 22 configs in one local job;
 2. submits the nine missing chains to SLURM;
 3. waits for chain and sidecar outputs;
 4. executes the one figure-and-table rule locally.
@@ -119,8 +114,8 @@ Profile summary:
 | `slurm` | SLURM GPU | 1 GPU, 4 CPUs, 8 GB, 12 h | CUDA |
 | `slurm-cpu` | SLURM CPU | 4 CPUs, 16 GB, 24 h | CPU |
 
-Runtime platform settings belong to profiles, not experiment TOMLs, and do not
-enter the scientific config hash.
+Runtime platform settings belong to profiles, not the experiment inventory, and
+do not enter the scientific config hash.
 
 ## Standalone figures
 

@@ -1,7 +1,7 @@
-"""Shared config loading helpers (stdlib only).
+"""Shared config loading helpers.
 
-Load TOML/JSON into a dict and deep-merge optional overrides. Kept free of JAX
-so scripts can parse configs before runtime initialization.
+Load YAML/TOML/JSON into a dict and deep-merge optional overrides. Kept free of
+JAX so scripts can parse configs before runtime initialization.
 """
 
 from __future__ import annotations
@@ -11,6 +11,8 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 
 def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
@@ -52,11 +54,16 @@ def merge_run_overlay(
 
 
 def load_mapping(path: Path) -> dict[str, Any]:
-    """Parse a TOML or JSON config file into a plain dict."""
+    """Parse a YAML, TOML, or JSON config file into a plain dict."""
     suffix = path.suffix.lower()
     with path.open("rb") as handle:
         if suffix == ".toml":
             return tomllib.load(handle)
         if suffix == ".json":
             return json.load(handle)
+        if suffix in {".yaml", ".yml"}:
+            raw = yaml.safe_load(handle)
+            if not isinstance(raw, Mapping):
+                raise ValueError(f"{path} must contain a mapping")
+            return dict(raw)
     raise ValueError(f"unsupported config extension: {path.suffix!r}")
