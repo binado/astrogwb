@@ -12,6 +12,9 @@ Convention:
 - ``combo_colors`` orders the per-parameter-combination marginal overlay;
 - ``detector_network_styles`` pairs each ET network with its ET+CE companion;
 - truth / fiducial markers are always neutral solid (``TRUTH``), everywhere.
+
+``DETECTOR_NETWORKS`` lives here for the same reason: it is the ordered legend
+of the three network-comparison figures, and order is presentation.
 """
 
 from __future__ import annotations
@@ -66,6 +69,26 @@ MERGER_RATE_LEGEND: dict[str, object] = {
     "loc": "best",
     "frameon": False,
 }
+
+# The detector networks compared in every network figure, as (run name, LaTeX
+# label) in legend order. Declaration order is load-bearing: it drives chain
+# order on argv, legend order, and the color/linestyle assignment made by
+# `detector_network_styles`.
+#
+# Only the label is owned here. Each run's *detector list* stays in
+# experiments/<experiment>.toml and is attached by
+# `astrogwb_paper.config.figures.resolve_networks`, so the detectors a figure
+# reports an SNR for are always the ones its chain was sampled with.
+DETECTOR_NETWORKS: tuple[tuple[str, str], ...] = (
+    ("ET-triangular", r"ET-$\Delta$"),
+    ("ET-triangular-CE-Hanford", r"ET-$\Delta$ $+$ CE"),
+    ("ET-2L-aligned", "ET-2L-par"),
+    ("ET-2L-aligned-CE-Hanford", r"ET-2L-par $+$ CE"),
+    ("ET-2L-misaligned", "ET-2L"),
+    ("ET-2L-misaligned-CE-Hanford", r"ET-2L $+$ CE"),
+)
+
+DETECTOR_NETWORK_RUNS: tuple[str, ...] = tuple(name for name, _ in DETECTOR_NETWORKS)
 
 
 def use_paper_style() -> None:

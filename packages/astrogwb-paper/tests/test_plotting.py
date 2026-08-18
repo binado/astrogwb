@@ -31,15 +31,9 @@ def test_get_corner_kwargs_and_combo_colors() -> None:
 
 
 def test_detector_network_styles_pairs_et_and_et_plus_ce() -> None:
-    from astrogwb_paper.config.figures import figure_networks, load_figure_config
-    from astrogwb_paper.paths import paper_project_root
+    from astrogwb_paper.config.figures import resolve_networks
 
-    networks = figure_networks(
-        load_figure_config(
-            paper_project_root() / "inputs/figures/H0-all-detectors.toml"
-        ),
-        "posteriors",
-    )
+    networks = resolve_networks("H0-all-detectors", plotting.DETECTOR_NETWORKS)
     colors, linestyles = plotting.detector_network_styles(networks)
 
     assert len(colors) == len(linestyles) == len(networks)

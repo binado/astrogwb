@@ -209,10 +209,10 @@ def test_figure_rules_pass_config_paths_not_labels(
 
     assert result.returncode == 0, result.stderr
     assert "rule plot_H0_merger_rate:" in result.stdout
-    assert "--figure-config inputs/figures/H0-merger-rate.toml" in result.stdout
     assert "--base-config inputs/mcmc.base.toml" in result.stdout
-    # The script reads its own labels, so no LaTeX crosses the shell boundary
-    # (which is what used to force the `_const` wildcard-expansion shim).
+    # The script hard-codes its own labels and run order, so neither a
+    # figure config nor any LaTeX crosses the shell boundary.
+    assert "--figure-config" not in result.stdout
     assert "--prior-labels" not in result.stdout
     assert r"\mathcal" not in result.stdout
 
@@ -245,7 +245,7 @@ def test_standalone_figures_receive_config_paths(
     # Every standalone script reads the base config for itself instead of
     # receiving fiducials and analysis bounds as reconstructed flags.
     assert result.stdout.count("--base-config inputs/mcmc.base.toml") == 3
-    assert "--figure-config inputs/figures/fiducial-spectrum.toml" in result.stdout
+    assert "--figure-config" not in result.stdout
     for flag in ("--observation-time", "--f-min", "--h0", "--omega-gw-min"):
         assert flag not in result.stdout
 

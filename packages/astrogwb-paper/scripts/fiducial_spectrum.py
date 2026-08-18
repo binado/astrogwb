@@ -28,14 +28,14 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.config.figures import (
     Network,
-    figure_networks,
     load_analysis_grid,
     load_fiducials,
-    load_figure_config,
+    resolve_networks,
 )
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
+    DETECTOR_NETWORKS,
     SPECTRUM,
     detector_network_styles,
     use_paper_style,
@@ -50,6 +50,14 @@ from pluscross import load_catalog
 # standard matplotlib projection for consistent plotting.
 register_projection(MplAxes)
 jax.config.update("jax_enable_x64", True)
+
+# These panels compare the same six networks as the H0-all-detectors
+# experiment, so they borrow its detector lists rather than restating them.
+# This figure reads no chains, so there is no argv order to keep in step.
+SPECTRUM_EXPERIMENT = "H0-all-detectors"
+# Lower y-limit for Omega_GW; the S_h ymin is taken from S_h at the frequency
+# where Omega_GW is closest to this floor.
+OMEGA_GW_MIN = 1.0e-15
 
 
 def compute_fiducial_spectral_density(
@@ -223,12 +231,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         required=True,
         help="Base MCMC config supplying fiducials and the analysis grid.",
     )
-    parser.add_argument(
-        "--figure-config",
-        type=Path,
-        required=True,
-        help="Figure presentation config under inputs/figures/.",
-    )
     parser.add_argument("--output-pdf", type=Path, required=True)
     parser.add_argument("--output-effective-psd-pdf", type=Path, required=True)
     parser.add_argument("--figure-dpi", type=int, default=300)
@@ -238,11 +240,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    figure_config = load_figure_config(args.figure_config, root)
     fiducials = load_fiducials(args.base_config, root)
     grid = load_analysis_grid(args.base_config, root)
-    networks = figure_networks(figure_config, "networks", root)
-    omega_gw_min = float(figure_config["omega_gw_min"])
+    networks = resolve_networks(SPECTRUM_EXPERIMENT, DETECTOR_NETWORKS)
     use_paper_style()
 
     catalog_path = resolve_paper_path(args.catalog, root)
@@ -260,7 +260,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         observed_spectral_density,
         mask,
         h0=fiducials["H0"],
-        omega_gw_min=omega_gw_min,
+        omega_gw_min=OMEGA_GW_MIN,
     )
 
     detector_colors, detector_linestyles = detector_network_styles(networks)

@@ -39,15 +39,15 @@ from astrogwb.waveform import apply_gw_distance_to_waveforms
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.config.figures import (
     Network,
-    figure_networks,
     load_analysis_grid,
     load_fiducials,
-    load_figure_config,
+    resolve_networks,
 )
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import (
     CATEGORY,
     CORNER_LEVELS,
+    DETECTOR_NETWORKS,
     TRUTH,
     combo_colors,
     get_corner_kwargs,
@@ -79,6 +79,15 @@ VAR_LABELS = {
 XI_N_VAR_NAMES = ("xi_0", "xi_n")
 XI_N_ESS_VAR_NAMES = ("xi_0", "xi_n", "importance_relative_ess")
 H0_VAR_NAMES = ("xi_0", "H0")
+
+# Labels for this figure, in legend order. The marginal overlay compares three
+# parameter combinations of one network, so its labels name the combinations and
+# follow the order the rule passes --xi0-chain, --xi0-n-chain, --h0-chain. The
+# by-detector table borrows the shared network legend (`DETECTOR_NETWORKS`),
+# which the workflow also expands its chain paths from.
+PROPAGATION_EXPERIMENT = "modified-propagation-all-detectors"
+MARGINAL_LABELS = (r"$\Xi_0$", r"$\Xi_0 + n$", r"$\Xi_0 + H_0$")
+H0_LABELS = (r"$\Xi_0 + H_0$",)
 
 
 def load_inference_data(path: Path) -> xr.DataTree:
@@ -550,12 +559,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         required=True,
         help="Base MCMC config supplying fiducials and the analysis grid.",
     )
-    parser.add_argument(
-        "--figure-config",
-        type=Path,
-        required=True,
-        help="Figure presentation config under inputs/figures/.",
-    )
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--xi0-chain", type=Path, required=True)
     parser.add_argument("--xi0-n-chain", type=Path, required=True)
@@ -579,22 +582,19 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    figure_config = load_figure_config(args.figure_config, root)
     grid = load_analysis_grid(args.base_config, root)
     fiducials = {
         **load_fiducials(args.base_config, root),
         "importance_relative_ess": args.importance_relative_ess,
     }
-    networks = figure_networks(figure_config, "detector_posteriors", root)
-    marginal_labels = list(figure_config["marginal_labels"])
-    h0_labels = list(figure_config["h0_labels"])
+    networks = resolve_networks(PROPAGATION_EXPERIMENT, DETECTOR_NETWORKS)
+    marginal_labels = list(MARGINAL_LABELS)
+    h0_labels = list(H0_LABELS)
     detector_labels = [network.label for network in networks]
-    # Name and label are paired inside Network; only the chain paths still
-    # arrive separately, on argv.
     if len(args.detector_xi0_n_chains) != len(networks):
         raise SystemExit(
             f"--detector-xi0-n-chains has {len(args.detector_xi0_n_chains)} paths "
-            f"but {figure_config['experiment']} declares {len(networks)} networks"
+            f"but {PROPAGATION_EXPERIMENT} declares {len(networks)} networks"
         )
 
     chain_paths = [

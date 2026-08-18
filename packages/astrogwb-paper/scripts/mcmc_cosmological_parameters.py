@@ -39,16 +39,16 @@ from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.config.figures import (
     Network,
-    figure_networks,
     load_analysis_grid,
     load_fiducials,
-    load_figure_config,
+    resolve_networks,
 )
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import (
     CATEGORY,
     CORNER_LEVELS,
     DETECTOR_COMPARISON_LEGEND,
+    DETECTOR_NETWORKS,
     MERGER_RATE_LEGEND,
     TRUTH,
     combo_colors,
@@ -81,6 +81,19 @@ OMEGA_M_VAR_NAMES = ("H0", "Omega_m")
 OMEGA_M_ESS_VAR_NAMES = ("H0", "Omega_m", "importance_relative_ess")
 # Kept for select_corner_inference_data / older call sites.
 CORNER_VAR_NAMES = MERGER_RATE_VAR_NAMES
+
+# Labels for each section, in legend order. The detector comparison borrows the
+# shared network legend (`DETECTOR_NETWORKS`), which the workflow also expands
+# its chain paths from, so those two orders are one list. The merger-rate and
+# Omega_m labels name parameter combinations rather than networks and stay
+# local; their order matches the chain order declared by the rule that calls
+# this script.
+DETECTOR_EXPERIMENT = "H0-all-detectors"
+MERGER_RATE_LABELS = (
+    r"$H_0$ (fixed $\mathcal{R}_0$)",
+    r"$H_0 + \mathcal{R}_0$ (narrow prior)",
+)
+OMEGA_M_POSTERIOR_LABEL = r"$H_0 + \Omega_m$"
 
 
 def load_inference_data(path: Path) -> xr.DataTree:
@@ -654,12 +667,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         required=True,
         help="Base MCMC config supplying fiducials and the analysis grid.",
     )
-    parser.add_argument(
-        "--figure-config",
-        type=Path,
-        required=True,
-        help="Figure presentation config under inputs/figures/.",
-    )
     parser.add_argument("--catalog", type=Path)
     parser.add_argument("--detector-chains", type=Path, nargs="+")
     parser.add_argument("--prior-chains", type=Path, nargs="+")
@@ -683,7 +690,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    figure_config = load_figure_config(args.figure_config, root)
     fiducials = {
         **load_fiducials(args.base_config, root),
         "importance_relative_ess": args.importance_relative_ess,
@@ -700,14 +706,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         if args.output_csv is None or args.output_tex is None:
             raise SystemExit("--output-csv and --output-tex are required")
         grid = load_analysis_grid(args.base_config, root)
-        networks = figure_networks(figure_config, "posteriors", root)
+        networks = resolve_networks(DETECTOR_EXPERIMENT, DETECTOR_NETWORKS)
         detector_labels = [network.label for network in networks]
-        # Name and label are paired inside Network; only the chain paths still
-        # arrive separately, on argv.
         if len(args.detector_chains) != len(networks):
             raise SystemExit(
                 f"--detector-chains has {len(args.detector_chains)} paths but "
-                f"{figure_config['experiment']} declares {len(networks)} networks"
+                f"{DETECTOR_EXPERIMENT} declares {len(networks)} networks"
             )
         detector_data = [
             load_inference_data(resolve_paper_path(path, root))
@@ -765,10 +769,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         if args.output_csv is None or args.output_tex is None:
             raise SystemExit("--output-csv and --output-tex are required")
-        prior_labels = list(figure_config["labels"])
-        if len(args.prior_chains) != len(prior_labels) or len(args.prior_chains) != 2:
+        prior_labels = list(MERGER_RATE_LABELS)
+        if len(args.prior_chains) != len(prior_labels):
             raise SystemExit(
-                "the merger-rate comparison requires two chains and labels"
+                "the merger-rate comparison requires two chains, fixed then sampled"
             )
         prior_data = [
             load_inference_data(resolve_paper_path(path, root))
@@ -824,7 +828,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             load_inference_data(resolve_paper_path(args.omega_m_chain, root))
         ]
         opened_data.extend(omega_m_data)
-        omega_m_labels = [figure_config["label"]]
+        omega_m_labels = [OMEGA_M_POSTERIOR_LABEL]
         validate_inference_data(
             omega_m_data,
             omega_m_labels,

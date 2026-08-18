@@ -1,7 +1,0 @@
-# Fixed-versus-sampled local merger rate comparison. The labels describe the
-# two priors, not detector networks, so they stay local to this figure.
-
-experiment = "H0-merger-rate"
-fixed_run = "fixed"
-sampled_run = "sampled"
-labels = ['$H_0$ (fixed $\mathcal{R}_0$)', '$H_0 + \mathcal{R}_0$ (narrow prior)']
