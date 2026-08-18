@@ -9,13 +9,15 @@ from astrogwb_paper.config.experiments import (
     config_path,
     experiment,
     load_experiments,
-    overlay_for,
 )
+from astrogwb_paper.config.figures import figure_networks, load_figure_config
 from astrogwb_paper.config.loading import load_mapping
 
 
 BASE_CONFIG = Path("inputs/mcmc.base.toml")
 BASE = load_mapping(BASE_CONFIG)
+FIGURES_DIR = Path("inputs/figures")
+NETWORK_LABELS = FIGURES_DIR / "detector-networks.toml"
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
 CATALOGS_DIR = Path(config.get("catalogs_dir", "outputs/catalogs"))
 
@@ -62,11 +64,16 @@ def _catalog(name):
     return str(CATALOGS_DIR / name)
 
 
-def _figure(experiment_name):
-    specification = experiment(experiment_name)
-    if specification.figure is None:
-        raise ValueError(f"{experiment_name} has no [figure] table")
-    return specification.figure
+def _figure(name):
+    return load_figure_config(FIGURES_DIR / f"{name}.toml")
+
+
+def _figure_path(name):
+    return str(FIGURES_DIR / f"{name}.toml")
+
+
+def _outputs(figure):
+    return [str(value) for key, value in figure.items() if key.startswith("output_")]
 
 
 def _quote_join(values):
@@ -78,65 +85,65 @@ def _const(value):
     return lambda wildcards: value
 
 
-def _network_cli(experiment_name, runs):
-    specification = experiment(experiment_name)
-    parts = []
-    for run in runs:
-        detectors = overlay_for(specification, run)["analysis"]["detectors"]
-        parts.append("--network " + shlex.quote(f"{run}={','.join(detectors)}"))
-    return " ".join(parts)
+def _network_cli(networks):
+    return " ".join(
+        "--network " + shlex.quote(f"{network.name}={','.join(network.detectors)}")
+        for network in networks
+    )
 
 
-def _standalone_network_cli():
-    parts = []
-    for name, detectors in FIDUCIAL_SPECTRUM["detector_networks"].items():
-        parts.append("--network " + shlex.quote(f"{name}={','.join(detectors)}"))
-    return " ".join(parts)
+def _labels_cli(flag, labels):
+    return f"{flag} " + _quote_join(labels)
 
 
 H0_DETECTOR_CONFIG = _figure("H0-all-detectors")
+H0_DETECTOR_NETWORKS = figure_networks(H0_DETECTOR_CONFIG, "posteriors")
 H0_DETECTOR_CHAINS = [
-    _chain("H0-all-detectors", entry["run"])
-    for entry in H0_DETECTOR_CONFIG["posteriors"]
+    _chain("H0-all-detectors", network.name) for network in H0_DETECTOR_NETWORKS
 ]
-H0_DETECTOR_OUTPUTS = experiment("H0-all-detectors").figure_outputs()
+H0_DETECTOR_OUTPUTS = _outputs(H0_DETECTOR_CONFIG)
 
 H0_RATE_CONFIG = _figure("H0-merger-rate")
 H0_RATE_CHAINS = [
     _chain("H0-merger-rate", H0_RATE_CONFIG["fixed_run"]),
     _chain("H0-merger-rate", H0_RATE_CONFIG["sampled_run"]),
 ]
-H0_RATE_OUTPUTS = experiment("H0-merger-rate").figure_outputs()
+H0_RATE_OUTPUTS = _outputs(H0_RATE_CONFIG)
 
 H0_OMEGA_CONFIG = _figure("H0-omega-m")
 H0_OMEGA_CHAIN = _chain("H0-omega-m", H0_OMEGA_CONFIG["run"])
-H0_OMEGA_OUTPUTS = experiment("H0-omega-m").figure_outputs()
+H0_OMEGA_OUTPUTS = _outputs(H0_OMEGA_CONFIG)
 
 PROPAGATION_CONFIG = _figure("modified-propagation-all-detectors")
+PROPAGATION_NETWORKS = figure_networks(PROPAGATION_CONFIG, "detector_posteriors")
 PROPAGATION_DETECTOR_CHAINS = [
-    _chain("modified-propagation-all-detectors", entry["run"])
-    for entry in PROPAGATION_CONFIG["detector_posteriors"]
+    _chain("modified-propagation-all-detectors", network.name)
+    for network in PROPAGATION_NETWORKS
 ]
-PROPAGATION_OUTPUTS = experiment("modified-propagation-all-detectors").figure_outputs()
+PROPAGATION_OUTPUTS = _outputs(PROPAGATION_CONFIG)
 
-STANDALONE_CONFIG_PATH = Path("inputs/figures/standalone.toml")
+STANDALONE_CONFIG_PATH = FIGURES_DIR / "standalone.toml"
 STANDALONE_CONFIG = load_mapping(STANDALONE_CONFIG_PATH)
 AMPLITUDE_TOY_PDF = STANDALONE_CONFIG["amplitude_toy"]["output_pdf"]
 FIDUCIAL_SPECTRUM = STANDALONE_CONFIG["fiducial_spectrum"]
-FIDUCIAL_SPECTRUM_OUTPUTS = [
-    FIDUCIAL_SPECTRUM["output_pdf"],
-    FIDUCIAL_SPECTRUM["output_effective_psd_pdf"],
-]
+FIDUCIAL_SPECTRUM_NETWORKS = figure_networks(FIDUCIAL_SPECTRUM, "networks")
+FIDUCIAL_SPECTRUM_EXPERIMENT = "experiments/{}.toml".format(
+    FIDUCIAL_SPECTRUM["experiment"]
+)
+FIDUCIAL_SPECTRUM_OUTPUTS = _outputs(FIDUCIAL_SPECTRUM)
 IMPORTANCE_GRID = STANDALONE_CONFIG["importance_weights_grid"]
-IMPORTANCE_GRID_OUTPUTS = [
-    IMPORTANCE_GRID["output_h0_omega_m_pdf"],
-    IMPORTANCE_GRID["output_xi0_n_pdf"],
-]
+IMPORTANCE_GRID_OUTPUTS = _outputs(IMPORTANCE_GRID)
 STANDALONE_OUTPUTS = [
     AMPLITUDE_TOY_PDF,
     *FIDUCIAL_SPECTRUM_OUTPUTS,
     *IMPORTANCE_GRID_OUTPUTS,
 ]
+FIGURE_OUTPUTS = {
+    "H0-all-detectors": H0_DETECTOR_OUTPUTS,
+    "H0-merger-rate": H0_RATE_OUTPUTS,
+    "H0-omega-m": H0_OMEGA_OUTPUTS,
+    "modified-propagation-all-detectors": PROPAGATION_OUTPUTS,
+}
 
 FIDUCIALS = BASE["fiducials"]
 COSMOLOGY = BASE["cosmology"]
@@ -154,34 +161,28 @@ ANALYSIS_CLI = (
     f" --z-min {COSMOLOGY['z_min']} --z-max {COSMOLOGY['z_max']}"
     f" --n-grid {COSMOLOGY['n_grid']}"
 )
-H0_DETECTOR_LABELS_CLI = "--detector-labels " + _quote_join(
-    entry["label"] for entry in H0_DETECTOR_CONFIG["posteriors"]
+H0_DETECTOR_LABELS_CLI = _labels_cli(
+    "--detector-labels", [network.label for network in H0_DETECTOR_NETWORKS]
 )
-H0_DETECTOR_NETWORK_CLI = _network_cli(
-    "H0-all-detectors",
-    [entry["run"] for entry in H0_DETECTOR_CONFIG["posteriors"]],
+H0_DETECTOR_NETWORK_CLI = _network_cli(H0_DETECTOR_NETWORKS)
+H0_RATE_LABELS_CLI = _labels_cli("--prior-labels", H0_RATE_CONFIG["labels"])
+H0_OMEGA_LABEL_CLI = _labels_cli("--omega-m-label", [H0_OMEGA_CONFIG["label"]])
+PROPAGATION_MARGINAL_LABELS_CLI = _labels_cli(
+    "--marginal-labels", PROPAGATION_CONFIG["marginal_labels"]
 )
-H0_RATE_LABELS_CLI = "--prior-labels " + _quote_join(H0_RATE_CONFIG["labels"])
-H0_OMEGA_LABEL_CLI = "--omega-m-label " + _quote_join([H0_OMEGA_CONFIG["label"]])
-PROPAGATION_MARGINAL_LABELS_CLI = "--marginal-labels " + _quote_join(
-    PROPAGATION_CONFIG["marginal_labels"]
+PROPAGATION_H0_LABELS_CLI = _labels_cli("--h0-labels", PROPAGATION_CONFIG["h0_labels"])
+PROPAGATION_DETECTOR_LABELS_CLI = _labels_cli(
+    "--detector-labels", [network.label for network in PROPAGATION_NETWORKS]
 )
-PROPAGATION_H0_LABELS_CLI = "--h0-labels " + _quote_join(PROPAGATION_CONFIG["h0_labels"])
-PROPAGATION_DETECTOR_LABELS_CLI = "--detector-labels " + _quote_join(
-    entry["label"] for entry in PROPAGATION_CONFIG["detector_posteriors"]
-)
-PROPAGATION_NETWORK_CLI = _network_cli(
-    "modified-propagation-all-detectors",
-    [entry["run"] for entry in PROPAGATION_CONFIG["detector_posteriors"]],
-)
-STANDALONE_NETWORK_CLI = _standalone_network_cli()
-STANDALONE_LABELS_CLI = "--detector-labels " + _quote_join(
-    FIDUCIAL_SPECTRUM["detector_labels"]
+PROPAGATION_NETWORK_CLI = _network_cli(PROPAGATION_NETWORKS)
+STANDALONE_NETWORK_CLI = _network_cli(FIDUCIAL_SPECTRUM_NETWORKS)
+STANDALONE_LABELS_CLI = _labels_cli(
+    "--detector-labels", [network.label for network in FIDUCIAL_SPECTRUM_NETWORKS]
 )
 EXPERIMENT_TARGET_INPUTS = [
     path
-    for specification in experiments.values()
-    for path in (specification.figure_outputs() or chain_paths(specification.name))
+    for name in experiments
+    for path in (FIGURE_OUTPUTS.get(name) or chain_paths(name))
 ]
 
 
@@ -225,7 +226,7 @@ for specification in experiments.values():
         name: specification.target
         localrule: True
         input:
-            specification.figure_outputs() or chain_paths(specification.name),
+            FIGURE_OUTPUTS.get(specification.name) or chain_paths(specification.name),
 
 
 rule assemble_config:
@@ -281,6 +282,8 @@ rule plot_H0_all_detectors:
         chains=H0_DETECTOR_CHAINS,
         catalog=_catalog(DEFAULT_CATALOG.name),
         config="experiments/H0-all-detectors.toml",
+        figure=_figure_path("H0-all-detectors"),
+        network_labels=str(NETWORK_LABELS),
         base=str(BASE_CONFIG),
     output:
         pdf=H0_DETECTOR_CONFIG["output_pdf"],
@@ -306,6 +309,7 @@ rule plot_H0_merger_rate:
     input:
         chains=H0_RATE_CHAINS,
         config="experiments/H0-merger-rate.toml",
+        figure=_figure_path("H0-merger-rate"),
         base=str(BASE_CONFIG),
     output:
         prior_pdf=H0_RATE_CONFIG["output_prior_pdf"],
@@ -330,6 +334,7 @@ rule plot_H0_omega_m:
     input:
         chain=H0_OMEGA_CHAIN,
         config="experiments/H0-omega-m.toml",
+        figure=_figure_path("H0-omega-m"),
         base=str(BASE_CONFIG),
     output:
         corner_pdf=H0_OMEGA_CONFIG["output_corner_pdf"],
@@ -361,6 +366,8 @@ rule plot_modified_propagation:
         detector_chains=PROPAGATION_DETECTOR_CHAINS,
         catalog=_catalog(DEFAULT_CATALOG.name),
         config="experiments/modified-propagation-all-detectors.toml",
+        figure=_figure_path("modified-propagation-all-detectors"),
+        network_labels=str(NETWORK_LABELS),
         base=str(BASE_CONFIG),
     output:
         xi_n_corner_pdf=PROPAGATION_CONFIG["output_xi_n_corner_pdf"],
@@ -413,6 +420,8 @@ rule fiducial_spectrum:
     input:
         catalog=_catalog(DEFAULT_CATALOG.name),
         config=str(STANDALONE_CONFIG_PATH),
+        experiment_config=FIDUCIAL_SPECTRUM_EXPERIMENT,
+        network_labels=str(NETWORK_LABELS),
         base=str(BASE_CONFIG),
     output:
         spectrum_pdf=FIDUCIAL_SPECTRUM["output_pdf"],

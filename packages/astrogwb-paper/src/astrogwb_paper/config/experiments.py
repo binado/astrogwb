@@ -11,7 +11,7 @@ from astrogwb_paper.config.loading import load_mapping, merge_run_overlay
 from astrogwb_paper.paths import paper_project_root
 
 DEFAULT_CATALOG = Path("outputs/catalogs/bns-n16384-df1.h5")
-_EXPERIMENT_ONLY_KEYS = frozenset({"runs", "figure"})
+_EXPERIMENT_ONLY_KEYS = frozenset({"runs"})
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,6 @@ class Experiment:
     runs: tuple[str, ...]
     run_overlays: dict[str, dict[str, Any]]
     defaults: dict[str, Any]
-    figure: dict[str, Any] | None
 
     @property
     def target(self) -> str:
@@ -42,16 +41,6 @@ class Experiment:
         catalog = self.run_overlays[run].get("catalog")
         return Path(catalog) if catalog else DEFAULT_CATALOG
 
-    def figure_outputs(self) -> list[str]:
-        """Return declared figure output paths, or an empty list."""
-        if self.figure is None:
-            return []
-        return [
-            str(value)
-            for key, value in self.figure.items()
-            if key.startswith("output_")
-        ]
-
 
 def load_experiment(path: Path) -> Experiment:
     """Load one experiment TOML into an :class:`Experiment`."""
@@ -63,7 +52,6 @@ def load_experiment(path: Path) -> Experiment:
         name: dict(overlay) if isinstance(overlay, Mapping) else {}
         for name, overlay in runs_raw.items()
     }
-    figure = raw.get("figure")
     return Experiment(
         name=path.stem,
         path=path,
@@ -72,7 +60,6 @@ def load_experiment(path: Path) -> Experiment:
         defaults={
             key: value for key, value in raw.items() if key not in _EXPERIMENT_ONLY_KEYS
         },
-        figure=dict(figure) if isinstance(figure, Mapping) else None,
     )
 
 

@@ -1,0 +1,16 @@
+# Detector-network comparison for the H0-all-detectors experiment.
+# Labels come from detector-networks.toml; detectors from the experiment.
+
+experiment = "H0-all-detectors"
+posteriors = [
+    "ET-triangular",
+    "ET-triangular-CE-Hanford",
+    "ET-2L-aligned",
+    "ET-2L-aligned-CE-Hanford",
+    "ET-2L-misaligned",
+    "ET-2L-misaligned-CE-Hanford",
+]
+
+output_pdf = "outputs/figures/H0-all-detectors/H0-by-detector.pdf"
+output_csv = "outputs/figures/H0-all-detectors/H0-by-detector.csv"
+output_tex = "outputs/figures/H0-all-detectors/H0-by-detector.tex"

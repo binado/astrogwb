@@ -17,32 +17,3 @@ detectors = ["S2", "R2"]
 
 [runs.ET-2L-misaligned-CE-Hanford.analysis]
 detectors = ["S2", "R2", "C1"]
-
-[figure]
-output_pdf = "outputs/figures/H0-all-detectors/H0-by-detector.pdf"
-output_csv = "outputs/figures/H0-all-detectors/H0-by-detector.csv"
-output_tex = "outputs/figures/H0-all-detectors/H0-by-detector.tex"
-
-[[figure.posteriors]]
-run = "ET-triangular"
-label = 'ET-$\Delta$'
-
-[[figure.posteriors]]
-run = "ET-triangular-CE-Hanford"
-label = 'ET-$\Delta$ $+$ CE'
-
-[[figure.posteriors]]
-run = "ET-2L-aligned"
-label = "ET-2L-par"
-
-[[figure.posteriors]]
-run = "ET-2L-aligned-CE-Hanford"
-label = 'ET-2L-par $+$ CE'
-
-[[figure.posteriors]]
-run = "ET-2L-misaligned"
-label = "ET-2L"
-
-[[figure.posteriors]]
-run = "ET-2L-misaligned-CE-Hanford"
-label = 'ET-2L $+$ CE'
