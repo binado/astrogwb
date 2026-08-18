@@ -4,6 +4,3 @@
 experiment = "H0-omega-m"
 run = "H0-Omega_m"
 label = '$H_0 + \Omega_m$'
-
-output_corner_pdf = "outputs/figures/H0-omega-m/H0-Omega_m-corner.pdf"
-output_ess_corner_pdf = "outputs/figures/H0-omega-m/H0-Omega_m-ess-corner.pdf"

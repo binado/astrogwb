@@ -1,8 +1,0 @@
-# Output paths for the standalone figures that need no other configuration.
-
-[amplitude_toy]
-output_pdf = "outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf"
-
-[importance_weights_grid]
-output_h0_omega_m_pdf = "outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf"
-output_xi0_n_pdf = "outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf"

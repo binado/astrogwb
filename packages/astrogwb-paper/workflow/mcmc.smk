@@ -10,7 +10,6 @@ from astrogwb_paper.config.experiments import (
     load_experiments,
 )
 from astrogwb_paper.config.figures import load_figure_config
-from astrogwb_paper.config.loading import load_mapping
 
 
 BASE_CONFIG = Path("inputs/mcmc.base.toml")
@@ -70,67 +69,32 @@ def _figure(name):
     return load_figure_config(FIGURES_DIR / f"{name}.toml")
 
 
-def _outputs(figure):
-    return [str(value) for key, value in figure.items() if key.startswith("output_")]
-
-
-def _experiment_config(figure):
-    return "experiments/{}.toml".format(figure["experiment"])
-
-
 # Chain order follows each figure config's ordered run array: it is what pairs
 # a chain with its network, label, color, and linestyle inside the scripts.
 H0_DETECTOR_CONFIG = _figure("H0-all-detectors")
 H0_DETECTOR_CHAINS = [
     _chain("H0-all-detectors", run) for run in H0_DETECTOR_CONFIG["posteriors"]
 ]
-H0_DETECTOR_OUTPUTS = _outputs(H0_DETECTOR_CONFIG)
 
 H0_RATE_CONFIG = _figure("H0-merger-rate")
 H0_RATE_CHAINS = [
     _chain("H0-merger-rate", H0_RATE_CONFIG["fixed_run"]),
     _chain("H0-merger-rate", H0_RATE_CONFIG["sampled_run"]),
 ]
-H0_RATE_OUTPUTS = _outputs(H0_RATE_CONFIG)
 
 H0_OMEGA_CONFIG = _figure("H0-omega-m")
 H0_OMEGA_CHAIN = _chain("H0-omega-m", H0_OMEGA_CONFIG["run"])
-H0_OMEGA_OUTPUTS = _outputs(H0_OMEGA_CONFIG)
 
 PROPAGATION_CONFIG = _figure("modified-propagation-all-detectors")
 PROPAGATION_DETECTOR_CHAINS = [
     _chain("modified-propagation-all-detectors", run)
     for run in PROPAGATION_CONFIG["detector_posteriors"]
 ]
-PROPAGATION_OUTPUTS = _outputs(PROPAGATION_CONFIG)
 
-STANDALONE_CONFIG_PATH = FIGURES_DIR / "standalone.toml"
-STANDALONE_CONFIG = load_mapping(STANDALONE_CONFIG_PATH)
-AMPLITUDE_TOY_PDF = STANDALONE_CONFIG["amplitude_toy"]["output_pdf"]
-IMPORTANCE_GRID = STANDALONE_CONFIG["importance_weights_grid"]
-IMPORTANCE_GRID_OUTPUTS = _outputs(IMPORTANCE_GRID)
-
-FIDUCIAL_SPECTRUM_CONFIG_PATH = FIGURES_DIR / "fiducial-spectrum.toml"
-FIDUCIAL_SPECTRUM = _figure("fiducial-spectrum")
-FIDUCIAL_SPECTRUM_EXPERIMENT = _experiment_config(FIDUCIAL_SPECTRUM)
-FIDUCIAL_SPECTRUM_OUTPUTS = _outputs(FIDUCIAL_SPECTRUM)
-
-STANDALONE_OUTPUTS = [
-    AMPLITUDE_TOY_PDF,
-    *FIDUCIAL_SPECTRUM_OUTPUTS,
-    *IMPORTANCE_GRID_OUTPUTS,
-]
-FIGURE_OUTPUTS = {
-    "H0-all-detectors": H0_DETECTOR_OUTPUTS,
-    "H0-merger-rate": H0_RATE_OUTPUTS,
-    "H0-omega-m": H0_OMEGA_OUTPUTS,
-    "modified-propagation-all-detectors": PROPAGATION_OUTPUTS,
-}
-EXPERIMENT_TARGET_INPUTS = [
-    path
-    for name in experiments
-    for path in (FIGURE_OUTPUTS.get(name) or chain_paths(name))
-]
+FIDUCIAL_SPECTRUM_CONFIG = FIGURES_DIR / "fiducial-spectrum.toml"
+FIDUCIAL_SPECTRUM_EXPERIMENT = "experiments/{}.toml".format(
+    _figure("fiducial-spectrum")["experiment"]
+)
 
 
 wildcard_constraints:
@@ -149,31 +113,6 @@ localrules:
     amplitude_toy,
     fiducial_spectrum,
     importance_weights_grid,
-
-
-rule experiments:
-    input:
-        EXPERIMENT_TARGET_INPUTS,
-
-
-rule standalone_figures:
-    input:
-        STANDALONE_OUTPUTS,
-
-
-for specification in experiments.values():
-
-    rule:
-        name: specification.chains_target
-        localrule: True
-        input:
-            chain_paths(specification.name),
-
-    rule:
-        name: specification.target
-        localrule: True
-        input:
-            FIGURE_OUTPUTS.get(specification.name) or chain_paths(specification.name),
 
 
 rule assemble_config:
@@ -233,9 +172,9 @@ rule plot_H0_all_detectors:
         network_labels=str(NETWORK_LABELS),
         base=str(BASE_CONFIG),
     output:
-        pdf=H0_DETECTOR_CONFIG["output_pdf"],
-        csv=H0_DETECTOR_CONFIG["output_csv"],
-        tex=H0_DETECTOR_CONFIG["output_tex"],
+        pdf="outputs/figures/H0-all-detectors/H0-by-detector.pdf",
+        csv="outputs/figures/H0-all-detectors/H0-by-detector.csv",
+        tex="outputs/figures/H0-all-detectors/H0-by-detector.tex",
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/mcmc_cosmological_parameters.py"
@@ -253,10 +192,10 @@ rule plot_H0_merger_rate:
         figure=_figure_path("H0-merger-rate"),
         base=str(BASE_CONFIG),
     output:
-        prior_pdf=H0_RATE_CONFIG["output_prior_pdf"],
-        corner_pdf=H0_RATE_CONFIG["output_corner_pdf"],
-        csv=H0_RATE_CONFIG["output_csv"],
-        tex=H0_RATE_CONFIG["output_tex"],
+        prior_pdf="outputs/figures/H0-merger-rate/H0-merger-rate-priors.pdf",
+        corner_pdf="outputs/figures/H0-merger-rate/H0-merger-rate-corner.pdf",
+        csv="outputs/figures/H0-merger-rate/H0-merger-rate.csv",
+        tex="outputs/figures/H0-merger-rate/H0-merger-rate.tex",
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/mcmc_cosmological_parameters.py"
@@ -275,8 +214,8 @@ rule plot_H0_omega_m:
         figure=_figure_path("H0-omega-m"),
         base=str(BASE_CONFIG),
     output:
-        corner_pdf=H0_OMEGA_CONFIG["output_corner_pdf"],
-        ess_corner_pdf=H0_OMEGA_CONFIG["output_ess_corner_pdf"],
+        corner_pdf="outputs/figures/H0-omega-m/H0-Omega_m-corner.pdf",
+        ess_corner_pdf="outputs/figures/H0-omega-m/H0-Omega_m-ess-corner.pdf",
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/mcmc_cosmological_parameters.py"
@@ -305,12 +244,12 @@ rule plot_modified_propagation:
         network_labels=str(NETWORK_LABELS),
         base=str(BASE_CONFIG),
     output:
-        xi_n_corner_pdf=PROPAGATION_CONFIG["output_xi_n_corner_pdf"],
-        xi_n_ess_corner_pdf=PROPAGATION_CONFIG["output_xi_n_ess_corner_pdf"],
-        xi0_marginal_pdf=PROPAGATION_CONFIG["output_xi0_marginal_pdf"],
-        h0_corner_pdf=PROPAGATION_CONFIG["output_h0_corner_pdf"],
-        csv=PROPAGATION_CONFIG["output_csv"],
-        tex=PROPAGATION_CONFIG["output_tex"],
+        xi_n_corner_pdf="outputs/figures/modified-propagation-all-detectors/Xi0-n-corner.pdf",
+        xi_n_ess_corner_pdf="outputs/figures/modified-propagation-all-detectors/Xi0-n-ess-corner.pdf",
+        xi0_marginal_pdf="outputs/figures/modified-propagation-all-detectors/Xi0-marginal.pdf",
+        h0_corner_pdf="outputs/figures/modified-propagation-all-detectors/Xi0-H0-corner.pdf",
+        csv="outputs/figures/modified-propagation-all-detectors/Xi0-n-by-detector.csv",
+        tex="outputs/figures/modified-propagation-all-detectors/Xi0-n-by-detector.tex",
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/mcmc_modified_propagation.py"
@@ -331,7 +270,7 @@ rule amplitude_toy:
         catalog=_catalog(DEFAULT_CATALOG.name),
         base=str(BASE_CONFIG),
     output:
-        AMPLITUDE_TOY_PDF,
+        "outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf",
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/amplitude_toy_model.py"
@@ -344,13 +283,15 @@ rule amplitude_toy:
 rule fiducial_spectrum:
     input:
         catalog=_catalog(DEFAULT_CATALOG.name),
-        figure=str(FIDUCIAL_SPECTRUM_CONFIG_PATH),
+        figure=str(FIDUCIAL_SPECTRUM_CONFIG),
         experiment_config=FIDUCIAL_SPECTRUM_EXPERIMENT,
         network_labels=str(NETWORK_LABELS),
         base=str(BASE_CONFIG),
     output:
-        spectrum_pdf=FIDUCIAL_SPECTRUM["output_pdf"],
-        effective_psd_pdf=FIDUCIAL_SPECTRUM["output_effective_psd_pdf"],
+        spectrum_pdf="outputs/figures/standalone/fiducial_spectrum.pdf",
+        effective_psd_pdf=(
+            "outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf"
+        ),
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/fiducial_spectrum.py"
@@ -365,8 +306,10 @@ rule importance_weights_grid:
         catalog=_catalog(DEFAULT_CATALOG.name),
         base=str(BASE_CONFIG),
     output:
-        h0_omega_m_pdf=IMPORTANCE_GRID["output_h0_omega_m_pdf"],
-        xi0_n_pdf=IMPORTANCE_GRID["output_xi0_n_pdf"],
+        h0_omega_m_pdf=(
+            "outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf"
+        ),
+        xi0_n_pdf="outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf",
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/importance_weights_grid.py"
@@ -374,3 +317,48 @@ rule importance_weights_grid:
         " --catalog {input.catalog:q}"
         " --output-h0-omega-m-pdf {output.h0_omega_m_pdf:q}"
         " --output-xi0-n-pdf {output.xi0_n_pdf:q}"
+
+
+# Declared after the rules that produce them so each experiment target and the
+# standalone aggregate read their inputs off the rules themselves; the figure
+# paths are written once, in the `output:` block that builds them.
+FIGURE_OUTPUTS = {
+    "H0-all-detectors": list(rules.plot_H0_all_detectors.output),
+    "H0-merger-rate": list(rules.plot_H0_merger_rate.output),
+    "H0-omega-m": list(rules.plot_H0_omega_m.output),
+    "modified-propagation-all-detectors": list(rules.plot_modified_propagation.output),
+}
+STANDALONE_OUTPUTS = [
+    *rules.amplitude_toy.output,
+    *rules.fiducial_spectrum.output,
+    *rules.importance_weights_grid.output,
+]
+
+
+rule experiments:
+    input:
+        [
+            path
+            for name in experiments
+            for path in (FIGURE_OUTPUTS.get(name) or chain_paths(name))
+        ],
+
+
+rule standalone_figures:
+    input:
+        STANDALONE_OUTPUTS,
+
+
+for specification in experiments.values():
+
+    rule:
+        name: specification.chains_target
+        localrule: True
+        input:
+            chain_paths(specification.name),
+
+    rule:
+        name: specification.target
+        localrule: True
+        input:
+            FIGURE_OUTPUTS.get(specification.name) or chain_paths(specification.name),

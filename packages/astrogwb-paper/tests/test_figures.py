@@ -34,7 +34,6 @@ FIGURE_CONFIGS = (
     "H0-omega-m",
     "modified-propagation-all-detectors",
     "fiducial-spectrum",
-    "standalone",
 )
 
 # figure config -> keys holding a single run name, keys holding ordered

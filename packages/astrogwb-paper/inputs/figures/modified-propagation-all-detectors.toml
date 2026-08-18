@@ -16,10 +16,3 @@ detector_posteriors = [
     "ET-2L-misaligned",
     "ET-2L-misaligned-CE-Hanford",
 ]
-
-output_xi_n_corner_pdf = "outputs/figures/modified-propagation-all-detectors/Xi0-n-corner.pdf"
-output_xi_n_ess_corner_pdf = "outputs/figures/modified-propagation-all-detectors/Xi0-n-ess-corner.pdf"
-output_xi0_marginal_pdf = "outputs/figures/modified-propagation-all-detectors/Xi0-marginal.pdf"
-output_h0_corner_pdf = "outputs/figures/modified-propagation-all-detectors/Xi0-H0-corner.pdf"
-output_csv = "outputs/figures/modified-propagation-all-detectors/Xi0-n-by-detector.csv"
-output_tex = "outputs/figures/modified-propagation-all-detectors/Xi0-n-by-detector.tex"

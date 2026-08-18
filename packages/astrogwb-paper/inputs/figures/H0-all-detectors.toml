@@ -10,7 +10,3 @@ posteriors = [
     "ET-2L-misaligned",
     "ET-2L-misaligned-CE-Hanford",
 ]
-
-output_pdf = "outputs/figures/H0-all-detectors/H0-by-detector.pdf"
-output_csv = "outputs/figures/H0-all-detectors/H0-by-detector.csv"
-output_tex = "outputs/figures/H0-all-detectors/H0-by-detector.tex"
