@@ -56,10 +56,10 @@ The curated inventory is:
 
 | Experiment | Runs | Figures |
 | --- | ---: | --- |
-| `H0-all-detectors` | 6 detector networks | input to `cosmological_parameters` |
+| `H0-all-detectors` | 6 detector networks | input to `plot_cosmological_parameters` |
 | `modified-propagation-all-detectors` | 6 detector runs plus `Xi_0` and `Xi_0-H0` | corners, marginal comparison, and tables |
-| `H0-merger-rate` | fixed and sampled merger rate | input to `cosmological_parameters` |
-| `H0-omega-m` | one amplitude-marginalized run | input to `cosmological_parameters` |
+| `H0-merger-rate` | fixed and sampled merger rate | input to `plot_cosmological_parameters` |
+| `H0-omega-m` | one amplitude-marginalized run | input to `plot_cosmological_parameters` |
 | `astrophysical-parameters` | one Madau-Dickinson run | chains only |
 | `star-formation-peak` | one `z_peak` run | chains only |
 | `variable-injection-size` | 8192, 16384, and 32768 injections | chains only |
@@ -77,7 +77,7 @@ Build the paper's complete cosmological-parameter section:
 
 ```bash
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/slurm cosmological_parameters
+  --profile profiles/slurm plot_cosmological_parameters
 ```
 
 This single local post-processing rule consumes all nine chains from
@@ -99,7 +99,7 @@ The committed `slurm` and `slurm-cpu` profiles use the SLURM executor for
 `run_mcmc`. Config assembly and all plotting/table rules are declared with
 Snakemake's `localrules`, so they execute on the submit host.
 
-For the `cosmological_parameters` target, Snakemake:
+For the `plot_cosmological_parameters` target, Snakemake:
 
 1. assembles and validates configs locally;
 2. submits the nine missing chains to SLURM;

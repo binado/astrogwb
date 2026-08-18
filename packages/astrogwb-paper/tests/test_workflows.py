@@ -49,7 +49,7 @@ def test_catalog_workflow_uses_input_recipes_and_output_tree() -> None:
     assert "outputs/catalogs/bns-n8192-df1.h5" in result.stdout
 
 
-def test_cosmological_parameters_expands_all_chains_and_figures(
+def test_plot_cosmological_parameters_expands_all_chains_and_figures(
     tmp_path: Path,
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
@@ -61,7 +61,7 @@ def test_cosmological_parameters_expands_all_chains_and_figures(
         "--forceall",
         "--cores",
         "8",
-        "cosmological_parameters",
+        "plot_cosmological_parameters",
         "--config",
         f"catalogs_dir={catalogs}",
     )
@@ -69,7 +69,7 @@ def test_cosmological_parameters_expands_all_chains_and_figures(
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule assemble_config:") == 9
     assert result.stdout.count("rule run_mcmc:") == 9
-    assert result.stdout.count("rule cosmological_parameters:") == 1
+    assert result.stdout.count("rule plot_cosmological_parameters:") == 1
     for path in (
         "outputs/figures/H0-all-detectors/H0-by-detector.pdf",
         "outputs/figures/H0-merger-rate/H0-merger-rate-priors.pdf",
@@ -97,7 +97,7 @@ def test_chains_only_target_excludes_figure_rule(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule run_mcmc:") == 6
-    assert "rule cosmological_parameters:" not in result.stdout
+    assert "rule plot_cosmological_parameters:" not in result.stdout
 
 
 def test_config_assembly_merges_only_base_and_explicit_run(
@@ -185,7 +185,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "H0_all_detectors_chains",
         "H0_merger_rate_chains",
         "H0_omega_m_chains",
-        "cosmological_parameters",
+        "plot_cosmological_parameters",
         "modified_propagation_all_detectors",
         "astrophysical_parameters",
         "star_formation_peak",
@@ -204,7 +204,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
     }.isdisjoint(rules)
 
 
-def test_cosmological_parameters_passes_all_paths_not_labels(
+def test_plot_cosmological_parameters_passes_all_paths_not_labels(
     tmp_path: Path,
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
@@ -217,13 +217,13 @@ def test_cosmological_parameters_passes_all_paths_not_labels(
         "--printshellcmds",
         "--cores",
         "8",
-        "cosmological_parameters",
+        "plot_cosmological_parameters",
         "--config",
         f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
-    assert "rule cosmological_parameters:" in result.stdout
+    assert "rule plot_cosmological_parameters:" in result.stdout
     assert "--base-config inputs/mcmc.base.toml" in result.stdout
     for flag in (
         "--catalog",
@@ -300,7 +300,7 @@ def test_figure_path_is_a_valid_snakemake_target(
     )
 
     assert result.returncode == 0, result.stderr
-    assert "rule cosmological_parameters:" in result.stdout
+    assert "rule plot_cosmological_parameters:" in result.stdout
     assert result.stdout.count("rule run_mcmc:") == 9
 
 
@@ -315,7 +315,7 @@ def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
         "--printshellcmds",
         "--cores",
         "8",
-        "cosmological_parameters",
+        "plot_cosmological_parameters",
         "--config",
         f"catalogs_dir={catalogs}",
     )

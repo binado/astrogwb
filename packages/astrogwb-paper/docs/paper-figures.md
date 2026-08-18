@@ -32,7 +32,7 @@ chains=expand("outputs/chains/H0-all-detectors/{run}.nc",
 ## Experiment figures
 
 The detector-network, merger-rate, and Omega-m analyses form one paper section.
-The `cosmological_parameters` rule consumes all nine chains and produces their
+The `plot_cosmological_parameters` rule consumes all nine chains and produces their
 five figures and two CSV/LaTeX table pairs in one script invocation. The
 existing artifact paths remain grouped by their source experiment.
 
@@ -40,9 +40,9 @@ Preview or build the section (from `packages/astrogwb-paper/`):
 
 ```bash
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/local --cores 8 --dry-run cosmological_parameters
+  --profile profiles/local --cores 8 --dry-run plot_cosmological_parameters
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/slurm cosmological_parameters
+  --profile profiles/slurm plot_cosmological_parameters
 ```
 
 Every artifact remains a valid Snakemake target, but because the rule has

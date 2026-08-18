@@ -92,7 +92,7 @@ snakemake --snakefile workflow/mcmc.smk \
 
 The `H0-all-detectors`, `H0-merger-rate`, and `H0-omega-m` chains feed one
 paper section. Build all of its figures and tables together with the
-`cosmological_parameters` target.
+`plot_cosmological_parameters` target.
 
 ## Outputs and provenance
 

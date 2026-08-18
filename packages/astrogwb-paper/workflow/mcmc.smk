@@ -63,7 +63,7 @@ localrules:
     experiments,
     standalone_figures,
     assemble_config,
-    cosmological_parameters,
+    plot_cosmological_parameters,
     plot_modified_propagation,
     amplitude_toy,
     fiducial_spectrum,
@@ -118,7 +118,7 @@ rule run_mcmc:
         """
 
 
-rule cosmological_parameters:
+rule plot_cosmological_parameters:
     input:
         # Legend order comes from plotting.DETECTOR_NETWORKS, which the
         # script reads too -- one list, so chain and label order cannot drift.
@@ -269,7 +269,7 @@ FIGURE_OUTPUTS = {
     "modified-propagation-all-detectors": list(rules.plot_modified_propagation.output),
 }
 EXPERIMENT_OUTPUTS = [
-    *rules.cosmological_parameters.output,
+    *rules.plot_cosmological_parameters.output,
     *[
         path
         for name in experiments

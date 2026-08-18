@@ -19,7 +19,7 @@ workflow snakemake` from the workspace root also works); preview with
 ```bash
 cd packages/astrogwb-paper
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/local --cores 8 --dry-run cosmological_parameters
+  --profile profiles/local --cores 8 --dry-run plot_cosmological_parameters
 ```
 
 The committed `local`, `slurm`, and

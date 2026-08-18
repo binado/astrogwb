@@ -1,6 +1,6 @@
 # CPU MCMC profile:
 #   snakemake --snakefile workflow/mcmc.smk \
-#     --profile profiles/slurm-cpu cosmological_parameters --dry-run
+#     --profile profiles/slurm-cpu plot_cosmological_parameters --dry-run
 # Requires `uv sync --package astrogwb-paper --group slurm`.
 # Job logs land under .snakemake/slurm_logs/.
 executor: slurm
