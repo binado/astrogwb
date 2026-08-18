@@ -78,10 +78,12 @@ def test_analysis_settings_round_trip() -> None:
 
 
 def test_all_committed_mcmc_configs_validate_without_runtime() -> None:
+    # The standalone runner examples are the only committed configs: production
+    # runs are assembled from inputs/mcmc.base.toml + experiments/<name>.toml
+    # into outputs/configs/, which is generated and never committed.
     config_paths = [
         PAPER_ROOT / "configs/mcmc.example.toml",
         PAPER_ROOT / "configs/mcmc.cosmology.toml",
-        *(PAPER_ROOT / "configs/mcmc/curated").glob("*/*.json"),
     ]
 
     for path in config_paths:
