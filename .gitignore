@@ -6,10 +6,6 @@ data
 # Generated MCMC run artifacts and frozen manifests.
 /out/
 packages/astrogwb-paper/out/
-configs/mcmc/astrophysical/
-configs/mcmc/cosmology/
-configs/mcmc/*-all-detectors/
-configs/mcmc/frozen/
 packages/astrogwb-paper/configs/mcmc/astrophysical/
 packages/astrogwb-paper/configs/mcmc/cosmology/
 packages/astrogwb-paper/configs/mcmc/*-all-detectors/
