@@ -80,17 +80,19 @@ uv run astrogwb-validate-config \
 The validator checks that every sampled parameter has a prior and fiducial and
 that amplitude-marginalized runs define a valid amplitude parameter.
 
-Run the corresponding experiment through Snakemake (from
+Run one experiment's chains through Snakemake (from
 `packages/astrogwb-paper/`, adding `--dry-run` to preview):
 
 ```bash
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/local --cores 8 H0_all_detectors
+  --profile profiles/local --cores 8 H0_all_detectors_chains
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/slurm H0_all_detectors
+  --profile profiles/slurm H0_all_detectors_chains
 ```
 
-Use the `H0_all_detectors_chains` target to omit local post-processing.
+The `H0-all-detectors`, `H0-merger-rate`, and `H0-omega-m` chains feed one
+paper section. Build all of its figures and tables together with the
+`cosmological_parameters` target.
 
 ## Outputs and provenance
 

@@ -657,27 +657,24 @@ def write_constraint_table(
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--section",
-        choices=("detectors", "merger-rate", "omega-m"),
-        required=True,
-    )
-    parser.add_argument(
         "--base-config",
         type=Path,
         required=True,
         help="Base MCMC config supplying fiducials and the analysis grid.",
     )
-    parser.add_argument("--catalog", type=Path)
-    parser.add_argument("--detector-chains", type=Path, nargs="+")
-    parser.add_argument("--prior-chains", type=Path, nargs="+")
-    parser.add_argument("--omega-m-chain", type=Path)
-    parser.add_argument("--output-detector-pdf", type=Path)
-    parser.add_argument("--output-prior-pdf", type=Path)
-    parser.add_argument("--output-narrow-corner-pdf", type=Path)
-    parser.add_argument("--output-omega-m-corner-pdf", type=Path)
-    parser.add_argument("--output-omega-m-ess-corner-pdf", type=Path)
-    parser.add_argument("--output-csv", type=Path)
-    parser.add_argument("--output-tex", type=Path)
+    parser.add_argument("--catalog", type=Path, required=True)
+    parser.add_argument("--detector-chains", type=Path, nargs="+", required=True)
+    parser.add_argument("--prior-chains", type=Path, nargs="+", required=True)
+    parser.add_argument("--omega-m-chain", type=Path, required=True)
+    parser.add_argument("--output-detector-pdf", type=Path, required=True)
+    parser.add_argument("--output-detector-csv", type=Path, required=True)
+    parser.add_argument("--output-detector-tex", type=Path, required=True)
+    parser.add_argument("--output-prior-pdf", type=Path, required=True)
+    parser.add_argument("--output-narrow-corner-pdf", type=Path, required=True)
+    parser.add_argument("--output-merger-rate-csv", type=Path, required=True)
+    parser.add_argument("--output-merger-rate-tex", type=Path, required=True)
+    parser.add_argument("--output-omega-m-corner-pdf", type=Path, required=True)
+    parser.add_argument("--output-omega-m-ess-corner-pdf", type=Path, required=True)
     parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument("--group", default="posterior")
     # Not a fiducial: N_eff/N_inj is a plotting truth line at its definitional
@@ -694,36 +691,59 @@ def main(argv: Sequence[str] | None = None) -> None:
         **load_fiducials(args.base_config, root),
         "importance_relative_ess": args.importance_relative_ess,
     }
+    grid = load_analysis_grid(args.base_config, root)
+    networks = resolve_networks(DETECTOR_EXPERIMENT, DETECTOR_NETWORKS)
+    detector_labels = [network.label for network in networks]
+    if len(args.detector_chains) != len(networks):
+        raise SystemExit(
+            f"--detector-chains has {len(args.detector_chains)} paths but "
+            f"{DETECTOR_EXPERIMENT} declares {len(networks)} networks"
+        )
+
+    prior_labels = list(MERGER_RATE_LABELS)
+    if len(args.prior_chains) != len(prior_labels):
+        raise SystemExit(
+            "the merger-rate comparison requires two chains, fixed then sampled"
+        )
+
     use_paper_style()
     outputs: dict[Path, plt.Figure] = {}
     opened_data: list[xr.DataTree] = []
 
-    if args.section == "detectors":
-        if args.detector_chains is None:
-            raise SystemExit("--detector-chains is required")
-        if args.catalog is None or args.output_detector_pdf is None:
-            raise SystemExit("--catalog and --output-detector-pdf are required")
-        if args.output_csv is None or args.output_tex is None:
-            raise SystemExit("--output-csv and --output-tex are required")
-        grid = load_analysis_grid(args.base_config, root)
-        networks = resolve_networks(DETECTOR_EXPERIMENT, DETECTOR_NETWORKS)
-        detector_labels = [network.label for network in networks]
-        if len(args.detector_chains) != len(networks):
-            raise SystemExit(
-                f"--detector-chains has {len(args.detector_chains)} paths but "
-                f"{DETECTOR_EXPERIMENT} declares {len(networks)} networks"
-            )
-        detector_data = [
-            load_inference_data(resolve_paper_path(path, root))
-            for path in args.detector_chains
-        ]
-        opened_data.extend(detector_data)
+    def load_all(paths: Sequence[Path]) -> list[xr.DataTree]:
+        loaded: list[xr.DataTree] = []
+        for path in paths:
+            tree = load_inference_data(resolve_paper_path(path, root))
+            loaded.append(tree)
+            opened_data.append(tree)
+        return loaded
+
+    try:
+        detector_data = load_all(args.detector_chains)
+        prior_data = load_all(args.prior_chains)
+        omega_m_data = load_all([args.omega_m_chain])
+
+        omega_m_labels = [OMEGA_M_POSTERIOR_LABEL]
         validate_inference_data(
             detector_data,
             detector_labels,
             group=args.group,
             expected_count=len(networks),
         )
+        validate_inference_data(
+            prior_data,
+            prior_labels,
+            group=args.group,
+            expected_count=len(prior_labels),
+        )
+        validate_inference_data(
+            omega_m_data,
+            omega_m_labels,
+            required_vars=OMEGA_M_VAR_NAMES,
+            group=args.group,
+            expected_count=1,
+        )
+
         detector_colors, detector_linestyles = detector_network_styles(networks)
         outputs[resolve_paper_path(args.output_detector_pdf, root)] = (
             plot_h0_posteriors(
@@ -756,35 +776,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         write_constraint_table(
             table,
-            resolve_paper_path(args.output_csv, root),
-            resolve_paper_path(args.output_tex, root),
+            resolve_paper_path(args.output_detector_csv, root),
+            resolve_paper_path(args.output_detector_tex, root),
         )
 
-    elif args.section == "merger-rate":
-        if args.prior_chains is None:
-            raise SystemExit("--prior-chains is required")
-        if args.output_prior_pdf is None or args.output_narrow_corner_pdf is None:
-            raise SystemExit(
-                "--output-prior-pdf and --output-narrow-corner-pdf are required"
-            )
-        if args.output_csv is None or args.output_tex is None:
-            raise SystemExit("--output-csv and --output-tex are required")
-        prior_labels = list(MERGER_RATE_LABELS)
-        if len(args.prior_chains) != len(prior_labels):
-            raise SystemExit(
-                "the merger-rate comparison requires two chains, fixed then sampled"
-            )
-        prior_data = [
-            load_inference_data(resolve_paper_path(path, root))
-            for path in args.prior_chains
-        ]
-        opened_data.extend(prior_data)
-        validate_inference_data(
-            prior_data,
-            prior_labels,
-            group=args.group,
-            expected_count=2,
-        )
         corner_data, corner_labels, _ = select_corner_inference_data(
             prior_data, prior_labels, group=args.group
         )
@@ -810,32 +805,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         table = build_h0_r0_uncertainty_table(
             prior_data, prior_labels, group=args.group
         )
-        csv_path = resolve_paper_path(args.output_csv, root)
-        tex_path = resolve_paper_path(args.output_tex, root)
+        csv_path = resolve_paper_path(args.output_merger_rate_csv, root)
+        tex_path = resolve_paper_path(args.output_merger_rate_tex, root)
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         tex_path.parent.mkdir(parents=True, exist_ok=True)
         table.to_csv(csv_path)
         tex_path.write_text(h0_r0_uncertainty_table_latex(table), encoding="utf-8")
 
-    else:
-        if args.omega_m_chain is None:
-            raise SystemExit("--omega-m-chain is required")
-        if args.output_omega_m_corner_pdf is None:
-            raise SystemExit("--output-omega-m-corner-pdf is required")
-        if args.output_omega_m_ess_corner_pdf is None:
-            raise SystemExit("--output-omega-m-ess-corner-pdf is required")
-        omega_m_data = [
-            load_inference_data(resolve_paper_path(args.omega_m_chain, root))
-        ]
-        opened_data.extend(omega_m_data)
-        omega_m_labels = [OMEGA_M_POSTERIOR_LABEL]
-        validate_inference_data(
-            omega_m_data,
-            omega_m_labels,
-            required_vars=OMEGA_M_VAR_NAMES,
-            group=args.group,
-            expected_count=1,
-        )
         outputs[resolve_paper_path(args.output_omega_m_corner_pdf, root)] = plot_corner(
             omega_m_data,
             omega_m_labels,
@@ -855,13 +831,13 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         )
 
-    for output_path, figure in outputs.items():
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
-        print("saved figure:", output_path)
-
-    for tree in opened_data:
-        tree.close()
+        for output_path, figure in outputs.items():
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
+            print("saved figure:", output_path)
+    finally:
+        for tree in opened_data:
+            tree.close()
 
 
 if __name__ == "__main__":

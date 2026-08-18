@@ -63,9 +63,7 @@ localrules:
     experiments,
     standalone_figures,
     assemble_config,
-    plot_H0_all_detectors,
-    plot_H0_merger_rate,
-    plot_H0_omega_m,
+    cosmological_parameters,
     plot_modified_propagation,
     amplitude_toy,
     fiducial_spectrum,
@@ -120,69 +118,53 @@ rule run_mcmc:
         """
 
 
-rule plot_H0_all_detectors:
+rule cosmological_parameters:
     input:
         # Legend order comes from plotting.DETECTOR_NETWORKS, which the
         # script reads too -- one list, so chain and label order cannot drift.
-        chains=expand(
+        detector_chains=expand(
             "outputs/chains/H0-all-detectors/{run}.nc", run=DETECTOR_NETWORK_RUNS
         ),
-        catalog=_catalog(DEFAULT_CATALOG.name),
-        experiment_config="experiments/H0-all-detectors.toml",
-        base=str(BASE_CONFIG),
-    output:
-        pdf="outputs/figures/H0-all-detectors/H0-by-detector.pdf",
-        csv="outputs/figures/H0-all-detectors/H0-by-detector.csv",
-        tex="outputs/figures/H0-all-detectors/H0-by-detector.tex",
-    shell:
-        "uv run --package astrogwb-paper --group plotting"
-        " python scripts/mcmc_cosmological_parameters.py"
-        " --section detectors"
-        " --base-config {input.base:q}"
-        " --catalog {input.catalog:q} --detector-chains {input.chains:q}"
-        " --output-detector-pdf {output.pdf:q}"
-        " --output-csv {output.csv:q} --output-tex {output.tex:q}"
-
-
-rule plot_H0_merger_rate:
-    input:
-        chains=expand(
+        prior_chains=expand(
             "outputs/chains/H0-merger-rate/{run}.nc", run=["fixed", "sampled"]
         ),
-        experiment_config="experiments/H0-merger-rate.toml",
+        omega_m_chain="outputs/chains/H0-omega-m/H0-Omega_m.nc",
+        catalog=_catalog(DEFAULT_CATALOG.name),
+        detector_config="experiments/H0-all-detectors.toml",
+        merger_rate_config="experiments/H0-merger-rate.toml",
+        omega_m_config="experiments/H0-omega-m.toml",
         base=str(BASE_CONFIG),
     output:
+        detector_pdf="outputs/figures/H0-all-detectors/H0-by-detector.pdf",
+        detector_csv="outputs/figures/H0-all-detectors/H0-by-detector.csv",
+        detector_tex="outputs/figures/H0-all-detectors/H0-by-detector.tex",
         prior_pdf="outputs/figures/H0-merger-rate/H0-merger-rate-priors.pdf",
-        corner_pdf="outputs/figures/H0-merger-rate/H0-merger-rate-corner.pdf",
-        csv="outputs/figures/H0-merger-rate/H0-merger-rate.csv",
-        tex="outputs/figures/H0-merger-rate/H0-merger-rate.tex",
+        merger_rate_corner_pdf=(
+            "outputs/figures/H0-merger-rate/H0-merger-rate-corner.pdf"
+        ),
+        merger_rate_csv="outputs/figures/H0-merger-rate/H0-merger-rate.csv",
+        merger_rate_tex="outputs/figures/H0-merger-rate/H0-merger-rate.tex",
+        omega_m_corner_pdf="outputs/figures/H0-omega-m/H0-Omega_m-corner.pdf",
+        omega_m_ess_corner_pdf=(
+            "outputs/figures/H0-omega-m/H0-Omega_m-ess-corner.pdf"
+        ),
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/mcmc_cosmological_parameters.py"
-        " --section merger-rate"
         " --base-config {input.base:q}"
-        " --prior-chains {input.chains:q}"
+        " --catalog {input.catalog:q}"
+        " --detector-chains {input.detector_chains:q}"
+        " --prior-chains {input.prior_chains:q}"
+        " --omega-m-chain {input.omega_m_chain:q}"
+        " --output-detector-pdf {output.detector_pdf:q}"
+        " --output-detector-csv {output.detector_csv:q}"
+        " --output-detector-tex {output.detector_tex:q}"
         " --output-prior-pdf {output.prior_pdf:q}"
-        " --output-narrow-corner-pdf {output.corner_pdf:q}"
-        " --output-csv {output.csv:q} --output-tex {output.tex:q}"
-
-
-rule plot_H0_omega_m:
-    input:
-        chain="outputs/chains/H0-omega-m/H0-Omega_m.nc",
-        experiment_config="experiments/H0-omega-m.toml",
-        base=str(BASE_CONFIG),
-    output:
-        corner_pdf="outputs/figures/H0-omega-m/H0-Omega_m-corner.pdf",
-        ess_corner_pdf="outputs/figures/H0-omega-m/H0-Omega_m-ess-corner.pdf",
-    shell:
-        "uv run --package astrogwb-paper --group plotting"
-        " python scripts/mcmc_cosmological_parameters.py"
-        " --section omega-m"
-        " --base-config {input.base:q}"
-        " --omega-m-chain {input.chain:q}"
-        " --output-omega-m-corner-pdf {output.corner_pdf:q}"
-        " --output-omega-m-ess-corner-pdf {output.ess_corner_pdf:q}"
+        " --output-narrow-corner-pdf {output.merger_rate_corner_pdf:q}"
+        " --output-merger-rate-csv {output.merger_rate_csv:q}"
+        " --output-merger-rate-tex {output.merger_rate_tex:q}"
+        " --output-omega-m-corner-pdf {output.omega_m_corner_pdf:q}"
+        " --output-omega-m-ess-corner-pdf {output.omega_m_ess_corner_pdf:q}"
 
 
 rule plot_modified_propagation:
@@ -275,15 +257,26 @@ rule importance_weights_grid:
         " --output-xi0-n-pdf {output.xi0_n_pdf:q}"
 
 
-# Declared after the rules that produce them so each experiment target and the
-# standalone aggregate read their inputs off the rules themselves; the figure
-# paths are written once, in the `output:` block that builds them.
+# The three H0 experiments feed one paper section and are post-processed
+# together. Only their individual `_chains` targets remain; requesting any
+# cosmological-parameter figure builds the complete section dependency set.
+COSMOLOGICAL_PARAMETER_EXPERIMENTS = {
+    "H0-all-detectors",
+    "H0-merger-rate",
+    "H0-omega-m",
+}
 FIGURE_OUTPUTS = {
-    "H0-all-detectors": list(rules.plot_H0_all_detectors.output),
-    "H0-merger-rate": list(rules.plot_H0_merger_rate.output),
-    "H0-omega-m": list(rules.plot_H0_omega_m.output),
     "modified-propagation-all-detectors": list(rules.plot_modified_propagation.output),
 }
+EXPERIMENT_OUTPUTS = [
+    *rules.cosmological_parameters.output,
+    *[
+        path
+        for name in experiments
+        if name not in COSMOLOGICAL_PARAMETER_EXPERIMENTS
+        for path in (FIGURE_OUTPUTS.get(name) or chain_paths(name))
+    ],
+]
 STANDALONE_OUTPUTS = [
     *rules.amplitude_toy.output,
     *rules.fiducial_spectrum.output,
@@ -293,11 +286,7 @@ STANDALONE_OUTPUTS = [
 
 rule experiments:
     input:
-        [
-            path
-            for name in experiments
-            for path in (FIGURE_OUTPUTS.get(name) or chain_paths(name))
-        ],
+        EXPERIMENT_OUTPUTS,
 
 
 rule standalone_figures:
@@ -312,6 +301,9 @@ for specification in experiments.values():
         localrule: True
         input:
             chain_paths(specification.name),
+
+    if specification.name in COSMOLOGICAL_PARAMETER_EXPERIMENTS:
+        continue
 
     rule:
         name: specification.target

@@ -49,7 +49,7 @@ def test_catalog_workflow_uses_input_recipes_and_output_tree() -> None:
     assert "outputs/catalogs/bns-n8192-df1.h5" in result.stdout
 
 
-def test_complete_experiment_expands_chains_and_local_figure(
+def test_cosmological_parameters_expands_all_chains_and_figures(
     tmp_path: Path,
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
@@ -61,16 +61,23 @@ def test_complete_experiment_expands_chains_and_local_figure(
         "--forceall",
         "--cores",
         "8",
-        "H0_all_detectors",
+        "cosmological_parameters",
         "--config",
         f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule assemble_config:") == 6
-    assert result.stdout.count("rule run_mcmc:") == 6
-    assert result.stdout.count("rule plot_H0_all_detectors:") == 1
-    assert "outputs/figures/H0-all-detectors/H0-by-detector.pdf" in result.stdout
+    assert result.stdout.count("rule assemble_config:") == 9
+    assert result.stdout.count("rule run_mcmc:") == 9
+    assert result.stdout.count("rule cosmological_parameters:") == 1
+    for path in (
+        "outputs/figures/H0-all-detectors/H0-by-detector.pdf",
+        "outputs/figures/H0-merger-rate/H0-merger-rate-priors.pdf",
+        "outputs/figures/H0-merger-rate/H0-merger-rate-corner.pdf",
+        "outputs/figures/H0-omega-m/H0-Omega_m-corner.pdf",
+        "outputs/figures/H0-omega-m/H0-Omega_m-ess-corner.pdf",
+    ):
+        assert path in result.stdout
 
 
 def test_chains_only_target_excludes_figure_rule(tmp_path: Path) -> None:
@@ -90,7 +97,7 @@ def test_chains_only_target_excludes_figure_rule(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule run_mcmc:") == 6
-    assert "rule plot_H0_all_detectors:" not in result.stdout
+    assert "rule cosmological_parameters:" not in result.stdout
 
 
 def test_config_assembly_merges_only_base_and_explicit_run(
@@ -175,11 +182,11 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
     assert result.returncode == 0, result.stderr
     rules = set(result.stdout.split())
     assert {
-        "H0_all_detectors",
         "H0_all_detectors_chains",
+        "H0_merger_rate_chains",
+        "H0_omega_m_chains",
+        "cosmological_parameters",
         "modified_propagation_all_detectors",
-        "H0_merger_rate",
-        "H0_omega_m",
         "astrophysical_parameters",
         "star_formation_peak",
         "variable_injection_size",
@@ -187,9 +194,17 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "assemble_config",
         "run_mcmc",
     } <= rules
+    assert {
+        "H0_all_detectors",
+        "H0_merger_rate",
+        "H0_omega_m",
+        "plot_H0_all_detectors",
+        "plot_H0_merger_rate",
+        "plot_H0_omega_m",
+    }.isdisjoint(rules)
 
 
-def test_figure_rules_pass_config_paths_not_labels(
+def test_cosmological_parameters_passes_all_paths_not_labels(
     tmp_path: Path,
 ) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
@@ -202,14 +217,31 @@ def test_figure_rules_pass_config_paths_not_labels(
         "--printshellcmds",
         "--cores",
         "8",
-        "H0_merger_rate",
+        "cosmological_parameters",
         "--config",
         f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
-    assert "rule plot_H0_merger_rate:" in result.stdout
+    assert "rule cosmological_parameters:" in result.stdout
     assert "--base-config inputs/mcmc.base.toml" in result.stdout
+    for flag in (
+        "--catalog",
+        "--detector-chains",
+        "--prior-chains",
+        "--omega-m-chain",
+        "--output-detector-pdf",
+        "--output-detector-csv",
+        "--output-detector-tex",
+        "--output-prior-pdf",
+        "--output-narrow-corner-pdf",
+        "--output-merger-rate-csv",
+        "--output-merger-rate-tex",
+        "--output-omega-m-corner-pdf",
+        "--output-omega-m-ess-corner-pdf",
+    ):
+        assert flag in result.stdout
+    assert "--section" not in result.stdout
     # The script hard-codes its own labels and run order, so neither a
     # figure config nor any LaTeX crosses the shell boundary.
     assert "--figure-config" not in result.stdout
@@ -268,8 +300,8 @@ def test_figure_path_is_a_valid_snakemake_target(
     )
 
     assert result.returncode == 0, result.stderr
-    assert "rule plot_H0_all_detectors:" in result.stdout
-    assert result.stdout.count("rule run_mcmc:") == 6
+    assert "rule cosmological_parameters:" in result.stdout
+    assert result.stdout.count("rule run_mcmc:") == 9
 
 
 def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
@@ -283,7 +315,7 @@ def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
         "--printshellcmds",
         "--cores",
         "8",
-        "H0_all_detectors",
+        "cosmological_parameters",
         "--config",
         f"catalogs_dir={catalogs}",
     )
@@ -302,3 +334,6 @@ def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
         )
     ]
     assert positions == sorted(positions)
+    assert command.index("outputs/chains/H0-merger-rate/fixed.nc") < command.index(
+        "outputs/chains/H0-merger-rate/sampled.nc"
+    )

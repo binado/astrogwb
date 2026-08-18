@@ -31,26 +31,22 @@ chains=expand("outputs/chains/H0-all-detectors/{run}.nc",
 
 ## Experiment figures
 
-These complete experiment targets include local post-processing:
+The detector-network, merger-rate, and Omega-m analyses form one paper section.
+The `cosmological_parameters` rule consumes all nine chains and produces their
+five figures and two CSV/LaTeX table pairs in one script invocation. The
+existing artifact paths remain grouped by their source experiment.
 
-- `H0-all-detectors`: detector posterior comparison and CSV/LaTeX constraint
-  table;
-- `modified-propagation-all-detectors`: propagation corners, marginal
-  comparison, and CSV/LaTeX tables;
-- `H0-merger-rate`: fixed-versus-sampled merger-rate comparison, corner, and
-  table;
-- `H0-omega-m`: standard and relative-ESS corner figures.
-
-Preview or build one (from `packages/astrogwb-paper/`):
+Preview or build the section (from `packages/astrogwb-paper/`):
 
 ```bash
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/local --cores 8 --dry-run H0_all_detectors
+  --profile profiles/local --cores 8 --dry-run cosmological_parameters
 snakemake --snakefile workflow/mcmc.smk \
-  --profile profiles/slurm H0_all_detectors
+  --profile profiles/slurm cosmological_parameters
 ```
 
-Rebuild a single figure by its output path:
+Every artifact remains a valid Snakemake target, but because the rule has
+multiple outputs, requesting one builds the complete section:
 
 ```bash
 snakemake --snakefile workflow/mcmc.smk \
@@ -62,8 +58,12 @@ With a SLURM profile, sampling runs remotely and figure rules run locally on the
 submit host after their chains finish. The submit host must remain attached,
 share the output filesystem, and provide plotting dependencies.
 
-Use the `<experiment>_chains` target when post-processing should happen in a
-later invocation.
+Use `H0_all_detectors_chains`, `H0_merger_rate_chains`, or
+`H0_omega_m_chains` to sample one constituent experiment without running
+post-processing. The three former complete experiment targets are not exposed.
+
+`modified_propagation_all_detectors` remains a complete experiment target with
+its own propagation figures and tables.
 
 ## Standalone figures
 
