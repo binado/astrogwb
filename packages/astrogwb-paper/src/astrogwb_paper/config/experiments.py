@@ -37,10 +37,25 @@ class Experiment:
 
     def catalog_for(self, run: str) -> Path:
         """Return the prebuilt catalog consumed by ``run``."""
+        catalog = self.run_overlays[self._require_run(run)].get("catalog")
+        return Path(catalog) if catalog else DEFAULT_CATALOG
+
+    def merged_config_path(self, run: str) -> Path:
+        """Return the generated canonical JSON config path for ``run``."""
+        return Path("outputs/configs") / self.name / f"{self._require_run(run)}.json"
+
+    def chain_path(self, run: str) -> Path:
+        """Return the generated NetCDF chain path for ``run``."""
+        return Path("outputs/chains") / self.name / f"{self._require_run(run)}.nc"
+
+    def chain_paths(self) -> list[str]:
+        """Return every chain path owned by this experiment."""
+        return [str(self.chain_path(run)) for run in self.runs]
+
+    def _require_run(self, run: str) -> str:
         if run not in self.runs:
             raise ValueError(f"unknown run {self.name}/{run}")
-        catalog = self.run_overlays[run].get("catalog")
-        return Path(catalog) if catalog else DEFAULT_CATALOG
+        return run
 
 
 def load_experiment(name: str, raw: Mapping[str, Any], path: Path) -> Experiment:
@@ -134,21 +149,3 @@ def overlay_for(
     if base is None:
         return merged
     return merge_run_overlay(base, merged)
-
-
-def merged_config_path(experiment_name: str, run: str) -> Path:
-    """Return the generated canonical JSON path."""
-    experiment(experiment_name).catalog_for(run)
-    return Path("outputs/configs") / experiment_name / f"{run}.json"
-
-
-def chain_path(experiment_name: str, run: str) -> Path:
-    """Return the generated NetCDF chain path."""
-    experiment(experiment_name).catalog_for(run)
-    return Path("outputs/chains") / experiment_name / f"{run}.nc"
-
-
-def chain_paths(experiment_name: str) -> list[str]:
-    """Return every chain path owned by an experiment."""
-    spec = experiment(experiment_name)
-    return [str(chain_path(spec.name, run)) for run in spec.runs]

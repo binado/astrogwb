@@ -4,10 +4,7 @@ from pathlib import Path
 from astrogwb_paper.config.catalogs import load_catalogs
 from astrogwb_paper.config.experiments import (
     DEFAULT_CATALOG,
-    chain_paths,
-    experiment,
     load_experiments,
-    merged_config_path,
 )
 from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS
 
@@ -23,7 +20,7 @@ CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 experiments = load_experiments()
 catalogs = load_catalogs()
 CONFIG_OUTPUTS = [
-    str(merged_config_path(specification.name, run))
+    str(specification.merged_config_path(run))
     for specification in experiments.values()
     for run in specification.runs
 ]
@@ -41,15 +38,8 @@ def recipe(wildcards):
     return catalogs[wildcards.catalog]
 
 
-def _run_spec(wildcards):
-    specification = experiment(wildcards.experiment)
-    if wildcards.run not in specification.runs:
-        raise ValueError(f"unknown run {wildcards.experiment}/{wildcards.run}")
-    return specification
-
-
 def run_catalog_path(wildcards):
-    catalog = _run_spec(wildcards).catalog_for(wildcards.run)
+    catalog = experiments[wildcards.experiment].catalog_for(wildcards.run)
     return str(CATALOGS_DIR / catalog.name)
 
 
@@ -322,7 +312,7 @@ EXPERIMENT_OUTPUTS = [
         path
         for name in experiments
         if name != COSMOLOGICAL_PARAMETER_EXPERIMENT
-        for path in (FIGURE_OUTPUTS.get(name) or chain_paths(name))
+        for path in (FIGURE_OUTPUTS.get(name) or experiments[name].chain_paths())
     ],
 ]
 
@@ -338,7 +328,7 @@ for specification in experiments.values():
         name: specification.chains_target
         localrule: True
         input:
-            chain_paths(specification.name),
+            specification.chain_paths(),
 
     if specification.name == COSMOLOGICAL_PARAMETER_EXPERIMENT:
         continue
@@ -347,4 +337,4 @@ for specification in experiments.values():
         name: specification.target
         localrule: True
         input:
-            FIGURE_OUTPUTS.get(specification.name) or chain_paths(specification.name),
+            FIGURE_OUTPUTS.get(specification.name) or specification.chain_paths(),

@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from astrogwb_paper.cli.validate_config import main as assemble_configs
 from astrogwb_paper.config.experiments import (
     DEFAULT_CATALOG,
     EXPERIMENTS_PATH,
-    chain_path,
     load_base,
     load_experiments,
-    merged_config_path,
     overlay_for,
 )
 from astrogwb_paper.config.mcmc import build_run_config
@@ -77,12 +76,19 @@ def test_all_run_configs_are_assembled_together(tmp_path: Path) -> None:
 
 
 def test_run_paths_are_one_to_one_with_the_source_yaml() -> None:
-    assert merged_config_path("cosmological-parameters", "ET-triangular") == Path(
+    spec = load_experiments()["cosmological-parameters"]
+
+    assert spec.merged_config_path("ET-triangular") == Path(
         "outputs/configs/cosmological-parameters/ET-triangular.json"
     )
-    assert chain_path("cosmological-parameters", "ET-triangular") == Path(
+    assert spec.chain_path("ET-triangular") == Path(
         "outputs/chains/cosmological-parameters/ET-triangular.nc"
     )
+    assert spec.chain_paths() == [
+        f"outputs/chains/cosmological-parameters/{run}.nc" for run in spec.runs
+    ]
+    with pytest.raises(ValueError, match="unknown run cosmological-parameters/nope"):
+        spec.chain_path("nope")
 
 
 def test_catalog_selection_is_fixed_except_for_injection_size() -> None:
