@@ -20,16 +20,16 @@
 # stellar-mass compact binary coalescences (CBCs), such as binary neutron stars or
 # black holes.
 #
-# The strategy is **importance sampling over a fixed proposal catalog**: a one-off catalog
-# of CBC sources (drawn at a *fiducial* parameter point) provides the per-source
+# The strategy is **importance sampling over a fixed guarded proposal catalog**:
+# a mixture of fiducial and uniform-redshift sources provides the per-source
 # polarization powers $|\tilde{h}_+ (f, \theta)|^2 + |\tilde{h}_\times (f, \theta)|^2$. During NUTS we never regenerate waveforms;
 # instead we reweight the catalog with analytic, JAX-traceable importance weights so the
 # likelihood depends on the sampled parameters $\Lambda$ through them and the
 # total merger rate only.
 #
-# To run the notebook end-to-end you must point `CATALOG_PATH` at a `pluscross`
-# HDF5 waveform catalog (schema documented below). The data-dependent cells are written
-# to be correct by construction but will only execute once such a catalog exists.
+# To run the notebook end-to-end, point `INJECTION_CATALOG_PATH` and
+# `PROPOSAL_CATALOG_PATH` at the independent `pluscross` HDF5 catalogs generated
+# by the catalog workflow.
 
 # %% [markdown]
 # ## Environment bootstrap (Colab vs. local)
@@ -169,17 +169,20 @@ from astrogwb.frequency import (
     frequency_mask as make_frequency_mask,
 )
 from astrogwb.gwb import (
-    spectral_density,
     omega_gw_from_spectral_density,
 )
 from astrogwb.detector import load_sensitivity_map, effective_psd
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
+from astrogwb_paper.catalogs import (
+    PROPOSAL_REDSHIFT_LOGPDF,
+    compute_fiducial_injection_spectrum,
+    load_catalog_arrays,
+    validate_catalog_samples,
+    validate_matching_frequency_grids,
+)
 from astrogwb_paper.paths import paper_project_root
-from astrogwb.waveform import polarization_power as compute_polarization_power
-from pluscross import load_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
 # mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
@@ -199,10 +202,20 @@ azp.style.use("arviz-variat")
 # --- Catalog input ----------------------------------------------------------
 
 if IN_COLAB:
-    CATALOG_PATH = Path("/content/drive/MyDrive/asgwb/bns_waveform_catalog.h5")
+    INJECTION_CATALOG_PATH = Path(
+        "/content/drive/MyDrive/asgwb/injection-bns-n32768.h5"
+    )
+    PROPOSAL_CATALOG_PATH = Path(
+        "/content/drive/MyDrive/asgwb/bns-n16384-df1.h5"
+    )
 else:
     ROOT_DIR = paper_project_root()
-    CATALOG_PATH = ROOT_DIR / "outputs/catalogs/bns-n16384-df1.h5"
+    INJECTION_CATALOG_PATH = (
+        ROOT_DIR / "outputs/catalogs/injection-bns-n32768.h5"
+    )
+    PROPOSAL_CATALOG_PATH = (
+        ROOT_DIR / "outputs/catalogs/proposals/bns-n16384-df1.h5"
+    )
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -247,9 +260,11 @@ priors = {k: hyperprior_dists[k] for k in sampled_params}
 constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 
 # %% [markdown]
-# ## Loading the waveform catalog
+# ## Loading the waveform catalogs
 #
-# Our method requires a waveform catalog computed for a fiducial population of CBCs. Generate it with `astrogwb-generate-waveform-catalog` or the catalog workflow.
+# The synthetic observation uses an independent fiducial injection catalog.
+# The model uses a guarded proposal catalog carrying its analytic proposal
+# redshift log-density.
 #
 # The catalog is a `pluscross` HDF5 file containing:
 #
@@ -259,22 +274,34 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # - source parameters, exposed as `catalog.source_parameters`.
 
 # %%
-catalog = load_catalog(CATALOG_PATH)
-
-frequencies = jnp.asarray(catalog.frequencies)
-polarization_power = jnp.asarray(
-    compute_polarization_power(catalog)
-)  # (nfreq, nsamples)
-samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
-del catalog
-
-assert "redshift" in samples, "catalog samples must include 'redshift' for the weights"
-assert "luminosity_distance" in samples, (
-    "catalog samples must include 'luminosity_distance' for the weights"
+injection = load_catalog_arrays(
+    INJECTION_CATALOG_PATH, fiducials=fiducials, jnp=jnp
 )
+proposal = load_catalog_arrays(
+    PROPOSAL_CATALOG_PATH, fiducials=fiducials, jnp=jnp
+)
+validate_catalog_samples(
+    injection,
+    label="injection",
+    z_min=z_min,
+    z_max=z_max,
+    require_proposal_density=False,
+)
+validate_catalog_samples(
+    proposal,
+    label="proposal",
+    z_min=z_min,
+    z_max=z_max,
+    require_proposal_density=True,
+)
+validate_matching_frequency_grids(injection, proposal)
 
+frequencies = proposal.frequencies
+polarization_power = proposal.polarization_power
+samples = proposal.samples
 n_freq, n_samples = polarization_power.shape
-print(f"loaded catalog: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
+print(f"loaded proposal: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
+print("loaded injection:", injection.polarization_power.shape[1], "samples")
 
 # %% [markdown]
 # ## Effective PSD and analysis band
@@ -323,13 +350,16 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 # S_h(f, \Lambda) = \frac{1}{T} \left \langle \sum_{i=1}^{N(\Lambda)} |\tilde{h}_+(f, \theta_i)|^2 + |\tilde{h}_\times (f, \theta_i)|^2  \right \rangle_{\theta \sim p(\theta | \Lambda)}
 # $$
 #
-# In our implementation, we calculate $S_h(f, \Lambda)$ with an importance sampling estimator over a fiducial proposal distribution $p(\theta | \Lambda_0)$:
+# In our implementation, we calculate $S_h(f, \Lambda)$ with an importance
+# sampling estimator over a guarded proposal distribution $q(\theta)$:
 #
 # $$
 # S_h(f, \Lambda) = \frac{N(\Lambda)}{T}\frac{1}{N_{\mathrm{inj}}} \sum_{i=1}^{N_{\mathrm{inj}}} \omega_i \left [ |\tilde{h}_+(f, \theta_i)|^2 + |\tilde{h}_\times (f, \theta_i)|^2 \right ],
 # $$
 #
-# The waveforms are thus pre-computed for the fiducial population $\Lambda_0$, and the astrophysical + cosmological model specify two things:
+# The proposal waveforms are pre-computed once, while an independent fiducial
+# catalog generates the synthetic observation. The astrophysical +
+# cosmological model specifies two things:
 #
 # - The volume-integrated merger rate $N(\Lambda)/T$;
 # - The importance weights $\omega_i$.
@@ -339,13 +369,13 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 # The importance weights are proportional to the ratio of probabilities at the particular sample points,
 #
 # $$
-# \omega_i \propto \frac{p(\theta_i | \Lambda)}{p(\theta_i | \Lambda_0)}.
+# \omega_i \propto \frac{p(\theta_i | \Lambda)}{q(\theta_i)}.
 # $$
 #
 # While the single-event parameter samples are fixed, a different cosmology will change the amplitude of the waveforms due to the $\propto 1 / d_L$ dependence. Therefore, the importance weights must be rescaled by the inverse-squared distance ratio:
 #
 # $$
-# \omega_i = \frac{p(\theta_i | \Lambda)}{p(\theta_i | \Lambda_0)} \frac{d_L(z, \Lambda_0)^2}{d_L(z, \Lambda)^2}
+# \omega_i = \frac{p(\theta_i | \Lambda)}{q(\theta_i)} \frac{d_L(z, \Lambda_0)^2}{d_L(z, \Lambda)^2}
 # $$
 #
 # ### Taking into account modified propagation
@@ -353,7 +383,7 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 # When considering effects of deviation from GR on the propagation of gravitational-waves, we can generalize the above relation to
 #
 # $$
-# \omega_i = \frac{p(\theta_i | \Lambda)}{p(\theta_i | \Lambda_0)} \frac{d_{GW}(z, \Lambda_0)^2}{d_{GW}(z, \Lambda)^2}
+# \omega_i = \frac{p(\theta_i | \Lambda)}{q(\theta_i)} \frac{d_{GW}(z, \Lambda_0)^2}{d_{GW}(z, \Lambda)^2}
 # $$
 #
 # which now also encodes the effect of modified propagation.
@@ -370,17 +400,13 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 #
 # which returns a tuple of (merger rate, log importance weights). While it would be conceptually simpler to pass separate functions for each quantity, encapsulating all the logic in a single function allows the caller to efficiently implement the cosmology integrals which are used in both calculations.
 #
-# The proposal log-density depends only on the fixed fiducial point, so we
-# evaluate `compute_merger_rate_distance_and_logprob` **once** here. The NUTS-time
-# weight function reuses this array and evaluates the same density at each
-# proposed $\Lambda$.
+# The proposal log-density was evaluated when the production population was
+# assembled and persisted with every proposal sample.
 
 # %%
 z_grid = jnp.linspace(z_min, z_max, n_grid)
 
-_, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-    fiducials, samples, redshift_grid=z_grid
-)
+proposal_logprob = samples[PROPOSAL_REDSHIFT_LOGPDF]
 
 
 # %% [markdown]
@@ -426,13 +452,11 @@ def plot_omegagw(
     return fig
 
 
-rate0, log_weights0 = merger_rate_and_log_weights_fn(
-    fiducials,
-    samples,
-)
-weights0 = jnp.exp(log_weights0)
-observed_spectral_density = spectral_density(
-    polarization_power, weights0, rate0, average_mode="analytic_inclination"
+rate0, observed_spectral_density = compute_fiducial_injection_spectrum(
+    injection,
+    fiducials=fiducials,
+    redshift_grid=z_grid,
+    jnp=jnp,
 )
 plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-15)
 
@@ -514,7 +538,8 @@ inference_data = azb.from_numpyro(mcmc)
 inference_data.to_netcdf(out_dir / f"{base}.nc")
 
 run_config = {
-    "catalog_path": str(CATALOG_PATH),
+    "injection_catalog_path": str(INJECTION_CATALOG_PATH),
+    "proposal_catalog_path": str(PROPOSAL_CATALOG_PATH),
     "detectors": list(detnames),
     "seed": seed,
     "observation_time": observation_time,

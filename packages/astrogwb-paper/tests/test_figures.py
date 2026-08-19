@@ -115,5 +115,5 @@ def test_experiments_without_figures_are_chains_only() -> None:
 
     assert chains_only == {
         "astrophysical-parameters",
-        "variable-injection-size",
+        "variable-proposal-size",
     }

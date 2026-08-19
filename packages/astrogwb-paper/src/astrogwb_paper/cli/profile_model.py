@@ -17,7 +17,8 @@ Usage::
 
     uv run astrogwb-profile-model \
         --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
-        --catalog outputs/catalogs/bns-n16384-df1.h5
+        --injection-catalog outputs/catalogs/injection-bns-n32768.h5 \
+        --proposal-catalog outputs/catalogs/proposals/bns-n16384-df1.h5
 
 Configs are assembled from the base and run overlays in ``inputs/experiments.yaml``
 by the ``assemble_config`` workflow rule or by
@@ -57,10 +58,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to the TOML or JSON config file used by astrogwb-run-mcmc.",
     )
     parser.add_argument(
-        "--catalog",
+        "--injection-catalog",
         type=Path,
         required=True,
-        help="Waveform catalog to profile against the configured inference model.",
+        help="Independent fiducial waveform catalog used to construct observed data.",
+    )
+    parser.add_argument(
+        "--proposal-catalog",
+        type=Path,
+        required=True,
+        help="Waveform catalog and proposal density used by the profiled model.",
     )
     parser.add_argument(
         "--seed",
@@ -89,7 +96,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def build_potential(config: RunConfig, catalog_path: Path, jax):
+def build_potential(
+    config: RunConfig,
+    injection_catalog_path: Path,
+    proposal_catalog_path: Path,
+    jax,
+):
     """Rebuild the production model inputs and return (potential_fn, init_params).
 
     Mirrors the production runner up to (but excluding) the NUTS/MCMC step, then
@@ -103,34 +115,56 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     from astrogwb.frequency import (
         frequency_mask as make_frequency_mask,
     )
-    from astrogwb.gwb import spectral_density
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-        compute_merger_rate_distance_and_logprob,
         make_merger_rate_and_log_weights_fn,
     )
     from astrogwb.sampling.models import (
         amplitude_marginalized_model,
         spectral_density_model,
     )
-    from astrogwb.waveform import polarization_power as compute_polarization_power
     from numpyro.infer.initialization import init_to_value
     from numpyro.infer.util import initialize_model
-    from pluscross import load_catalog
 
     from astrogwb_paper.amplitude import build_amplitude_marginalization
+    from astrogwb_paper.catalogs import (
+        PROPOSAL_REDSHIFT_LOGPDF,
+        compute_fiducial_injection_spectrum,
+        load_catalog_arrays,
+        validate_catalog_samples,
+        validate_matching_frequency_grids,
+    )
 
     analysis = config.analysis
     cosmo = config.cosmology
 
-    catalog = load_catalog(catalog_path)
-    frequencies = jnp.asarray(catalog.frequencies)
-    polarization_power = jnp.asarray(compute_polarization_power(catalog))
-    samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
-    del catalog
+    injection = load_catalog_arrays(
+        injection_catalog_path, fiducials=config.fiducials, jnp=jnp
+    )
+    proposal = load_catalog_arrays(
+        proposal_catalog_path, fiducials=config.fiducials, jnp=jnp
+    )
+    validate_catalog_samples(
+        injection,
+        label="injection",
+        z_min=cosmo.z_min,
+        z_max=cosmo.z_max,
+        require_proposal_density=False,
+    )
+    validate_catalog_samples(
+        proposal,
+        label="proposal",
+        z_min=cosmo.z_min,
+        z_max=cosmo.z_max,
+        require_proposal_density=True,
+    )
+    validate_matching_frequency_grids(injection, proposal)
+    frequencies = proposal.frequencies
+    polarization_power = proposal.polarization_power
+    samples = proposal.samples
     n_freq, n_samples = polarization_power.shape
     logger.info(
-        "Loaded catalog %s: n_frequency_bins=%d n_proposal_samples=%d",
-        catalog_path,
+        "Loaded proposal catalog %s: n_frequency_bins=%d n_proposal_samples=%d",
+        proposal_catalog_path,
         n_freq,
         n_samples,
     )
@@ -144,23 +178,17 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     )
 
     z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
-    _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        config.fiducials, samples, redshift_grid=z_grid
-    )
-
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=config.fiducials,
         redshift_grid=z_grid,
-        proposal_logprob=proposal_logprob,
+        proposal_logprob=samples[PROPOSAL_REDSHIFT_LOGPDF],
     )
 
-    rate0, log_weights0 = merger_rate_and_log_weights_fn(config.fiducials, samples)
-    weights0 = jnp.exp(log_weights0)
-    observed_spectral_density = spectral_density(
-        polarization_power,
-        weights0,
-        rate0,
-        average_mode="analytic_inclination",
+    _, observed_spectral_density = compute_fiducial_injection_spectrum(
+        injection,
+        fiducials=config.fiducials,
+        redshift_grid=z_grid,
+        jnp=jnp,
     )
 
     (
@@ -241,7 +269,8 @@ def _bench(fn, x, iters: int) -> float:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     config_path = args.config.resolve()
-    catalog_path = args.catalog.resolve()
+    injection_catalog_path = args.injection_catalog.resolve()
+    proposal_catalog_path = args.proposal_catalog.resolve()
     outdir = args.outdir.resolve()
     logging.basicConfig(
         level=logging.INFO,
@@ -260,7 +289,9 @@ def main(argv: list[str] | None = None) -> None:
         chain_method=args.chain_method,
     )
 
-    potential_fn, init_params = build_potential(config, catalog_path, jax)
+    potential_fn, init_params = build_potential(
+        config, injection_catalog_path, proposal_catalog_path, jax
+    )
 
     forward_mode = config.sampler.forward_mode_differentiation and not args.reverse_ad
     ad_mode = "forward" if forward_mode else "reverse"

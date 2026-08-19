@@ -1,7 +1,13 @@
 base:
-  population:
-    config: examples/bns_population.yaml
-    seed: 42
+  production:
+    operation: mixture
+    seed: 142
+    components:
+      - source: proposal-fiducial
+        weight: 0.8
+      - source: proposal-uniform-redshift
+        weight: 0.2
+    uniform_redshift_fraction: 0.2
   waveform:
     approximant: IMRPhenomXAS_NRTidalv3
     sampling_frequency: 8192.0
@@ -11,13 +17,36 @@ base:
     frequency_resolution: 1.0
     chunk_size: 2048
 
+sources:
+  injection-fiducial:
+    config: examples/bns_population.yaml
+    num_samples: 32768
+    seed: 41
+  proposal-fiducial:
+    config: examples/bns_population.yaml
+    num_samples: 32768
+    seed: 42
+  proposal-uniform-redshift:
+    config: examples/bns_population_uniform_redshift.yaml
+    num_samples: 32768
+    seed: 43
+
+injection:
+  production:
+    operation: identity
+    num_samples: 32768
+    seed: 141
+    uniform_redshift_fraction: null
+    components:
+      - source: injection-fiducial
+
 catalogs:
   bns-n8192-df1:
-    population:
+    production:
       num_samples: 8192
   bns-n16384-df1:
-    population:
+    production:
       num_samples: 16384
   bns-n32768-df1:
-    population:
+    production:
       num_samples: 32768

@@ -1,7 +1,11 @@
 import re
+import shlex
 from pathlib import Path
 
-from astrogwb_paper.config.catalogs import load_catalogs
+from astrogwb_paper.config.catalogs import (
+    INJECTION_CATALOG_NAME,
+    load_catalog_inventory,
+)
 from astrogwb_paper.config.experiments import (
     DEFAULT_CATALOG,
     load_experiments,
@@ -18,7 +22,10 @@ CONFIG_PATTERN = "outputs/configs/{experiment}/{run}.json"
 CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 
 experiments = load_experiments()
-catalogs = load_catalogs()
+catalog_inventory = load_catalog_inventory()
+sources = catalog_inventory.sources
+injection = catalog_inventory.injection
+catalogs = catalog_inventory.catalogs
 CONFIG_OUTPUTS = [
     str(specification.merged_config_path(run))
     for specification in experiments.values()
@@ -26,6 +33,7 @@ CONFIG_OUTPUTS = [
 ]
 EXPERIMENT_PATTERN = "|".join(re.escape(name) for name in experiments)
 CATALOG_PATTERN = "|".join(re.escape(name) for name in catalogs)
+SOURCE_PATTERN = "|".join(re.escape(name) for name in sources)
 RUN_PATTERN = "|".join(
     re.escape(run)
     for run in dict.fromkeys(
@@ -38,12 +46,50 @@ def recipe(wildcards):
     return catalogs[wildcards.catalog]
 
 
-def _catalog(name):
-    return str(CATALOGS_DIR / f"{name}.h5")
+def source_recipe(wildcards):
+    return sources[wildcards.source]
+
+
+def _source_population(name):
+    return f"outputs/populations/sources/{name}.h5"
+
+
+def _production_population(name):
+    return f"outputs/populations/production/proposals/{name}.h5"
+
+
+def _proposal_catalog(name):
+    return str(CATALOGS_DIR / "proposals" / f"{name}.h5")
+
+
+def _injection_catalog():
+    return str(CATALOGS_DIR / f"{INJECTION_CATALOG_NAME}.h5")
 
 
 def run_catalog_path(wildcards):
-    return _catalog(experiments[wildcards.experiment].catalog_for(wildcards.run))
+    return _proposal_catalog(
+        experiments[wildcards.experiment].catalog_for(wildcards.run)
+    )
+
+
+def _source_flags(production):
+    return " ".join(
+        f"--source {shlex.quote(_source_population(component.source))}"
+        for component in production.components
+    )
+
+
+def _weight_flags(production):
+    return " ".join(
+        f"--weight {component.weight}" for component in production.components
+    )
+
+
+def _source_config_flags(production):
+    return " ".join(
+        f"--source-config {shlex.quote(str(sources[component.source].population_config))}"
+        for component in production.components
+    )
 
 
 def run_outdir(wildcards):
@@ -52,13 +98,17 @@ def run_outdir(wildcards):
 
 wildcard_constraints:
     catalog=CATALOG_PATTERN,
+    source=SOURCE_PATTERN,
     experiment=EXPERIMENT_PATTERN,
     run=RUN_PATTERN,
 
 
 localrules:
-    bns_population,
-    bns_waveform_catalog,
+    source_population,
+    assemble_injection_population,
+    assemble_proposal_population,
+    injection_waveform_catalog,
+    proposal_waveform_catalog,
     assemble_config,
     plot_cosmological_parameters,
     plot_modified_propagation,
@@ -68,16 +118,16 @@ localrules:
     experiments,
 
 
-rule bns_population:
+rule source_population:
     input:
         recipe=ancient(str(SOURCE_CATALOGS)),
-        population_config=lambda wc: recipe(wc).population_config,
+        population_config=lambda wc: source_recipe(wc).population_config,
     output:
-        "outputs/populations/{catalog}.h5",
+        "outputs/populations/sources/{source}.h5",
     params:
-        num_samples=lambda wc: recipe(wc).num_samples,
-        seed=lambda wc: recipe(wc).seed,
-        outdir="outputs/populations",
+        num_samples=lambda wc: source_recipe(wc).num_samples,
+        seed=lambda wc: source_recipe(wc).seed,
+        outdir="outputs/populations/sources",
     shell:
         "mkdir -p {params.outdir:q}\n"
         "uv run --package astrogwb-paper gwmock-pop simulate"
@@ -87,20 +137,97 @@ rule bns_population:
         " --seed {params.seed}"
 
 
-rule bns_waveform_catalog:
+rule assemble_injection_population:
     input:
-        population="outputs/populations/{catalog}.h5",
+        recipe=ancient(str(SOURCE_CATALOGS)),
+        sources=lambda wc: [
+            _source_population(component.source)
+            for component in injection.production.components
+        ],
+    output:
+        f"outputs/populations/production/{INJECTION_CATALOG_NAME}.h5",
+    params:
+        operation=injection.production.operation,
+        num_samples=injection.production.num_samples,
+        seed=injection.production.seed,
+        source_flags=_source_flags(injection.production),
+    shell:
+        "uv run --package astrogwb-paper astrogwb-assemble-population"
+        " --operation {params.operation:q} {params.source_flags}"
+        " --num-samples {params.num_samples} --seed {params.seed}"
+        " --output {output:q}"
+
+
+rule assemble_proposal_population:
+    input:
+        recipe=ancient(str(SOURCE_CATALOGS)),
+        sources=lambda wc: [
+            _source_population(component.source)
+            for component in recipe(wc).production.components
+        ],
+        configs=lambda wc: [
+            sources[component.source].population_config
+            for component in recipe(wc).production.components
+        ],
+    output:
+        "outputs/populations/production/proposals/{catalog}.h5",
+    params:
+        operation=lambda wc: recipe(wc).production.operation,
+        num_samples=lambda wc: recipe(wc).production.num_samples,
+        seed=lambda wc: recipe(wc).production.seed,
+        epsilon=lambda wc: recipe(wc).production.uniform_redshift_fraction,
+        source_flags=lambda wc: _source_flags(recipe(wc).production),
+        weight_flags=lambda wc: _weight_flags(recipe(wc).production),
+        config_flags=lambda wc: _source_config_flags(recipe(wc).production),
+    shell:
+        "uv run --package astrogwb-paper astrogwb-assemble-population"
+        " --operation {params.operation:q} {params.source_flags} {params.weight_flags}"
+        " --num-samples {params.num_samples} --seed {params.seed}"
+        " {params.config_flags} --uniform-redshift-fraction {params.epsilon}"
+        " --output {output:q}"
+
+
+rule injection_waveform_catalog:
+    input:
+        population=f"outputs/populations/production/{INJECTION_CATALOG_NAME}.h5",
         recipe=ancient(str(SOURCE_CATALOGS)),
     output:
-        "outputs/catalogs/{catalog}.h5",
+        f"outputs/catalogs/{INJECTION_CATALOG_NAME}.h5",
     params:
-        approximant=lambda wc: recipe(wc).approximant,
-        sampling_frequency=lambda wc: recipe(wc).sampling_frequency,
-        minimum_frequency=lambda wc: recipe(wc).minimum_frequency,
-        maximum_frequency=lambda wc: recipe(wc).maximum_frequency,
-        reference_frequency=lambda wc: recipe(wc).reference_frequency,
-        frequency_resolution=lambda wc: recipe(wc).frequency_resolution,
-        chunk_size=lambda wc: recipe(wc).chunk_size,
+        approximant=injection.waveform.approximant,
+        sampling_frequency=injection.waveform.sampling_frequency,
+        minimum_frequency=injection.waveform.minimum_frequency,
+        maximum_frequency=injection.waveform.maximum_frequency,
+        reference_frequency=injection.waveform.reference_frequency,
+        frequency_resolution=injection.waveform.frequency_resolution,
+        chunk_size=injection.waveform.chunk_size,
+    shell:
+        "uv run --package astrogwb-paper astrogwb-generate-waveform-catalog"
+        " --population {input.population:q}"
+        " --output {output:q}"
+        " --approximant {params.approximant:q}"
+        " --sampling-frequency {params.sampling_frequency}"
+        " --minimum-frequency {params.minimum_frequency}"
+        " --maximum-frequency {params.maximum_frequency}"
+        " --reference-frequency {params.reference_frequency}"
+        " --frequency-resolution {params.frequency_resolution}"
+        " --chunk-size {params.chunk_size}"
+
+
+rule proposal_waveform_catalog:
+    input:
+        population="outputs/populations/production/proposals/{catalog}.h5",
+        recipe=ancient(str(SOURCE_CATALOGS)),
+    output:
+        "outputs/catalogs/proposals/{catalog}.h5",
+    params:
+        approximant=lambda wc: recipe(wc).waveform.approximant,
+        sampling_frequency=lambda wc: recipe(wc).waveform.sampling_frequency,
+        minimum_frequency=lambda wc: recipe(wc).waveform.minimum_frequency,
+        maximum_frequency=lambda wc: recipe(wc).waveform.maximum_frequency,
+        reference_frequency=lambda wc: recipe(wc).waveform.reference_frequency,
+        frequency_resolution=lambda wc: recipe(wc).waveform.frequency_resolution,
+        chunk_size=lambda wc: recipe(wc).waveform.chunk_size,
     shell:
         "uv run --package astrogwb-paper astrogwb-generate-waveform-catalog"
         " --population {input.population:q}"
@@ -127,7 +254,8 @@ rule assemble_config:
 rule run_mcmc:
     input:
         config=ancient(CONFIG_PATTERN),
-        catalog=run_catalog_path,
+        injection_catalog=_injection_catalog(),
+        proposal_catalog=run_catalog_path,
     output:
         chain=protected(CHAIN_PATTERN),
     params:
@@ -154,7 +282,9 @@ rule run_mcmc:
         fi
         $NANNY uv run $UV_EXTRAS astrogwb-run-mcmc \
             --config {input.config:q} --outdir {params.outdir:q} \
-            --label {wildcards.run:q} --catalog {input.catalog:q} \
+            --label {wildcards.run:q} \
+            --injection-catalog {input.injection_catalog:q} \
+            --proposal-catalog {input.proposal_catalog:q} \
             --platform {params.platform:q} $RUNTIME_FLAGS --force
         """
 
@@ -175,7 +305,7 @@ rule plot_cosmological_parameters:
             run=["ET-2L-aligned-CE-Hanford", "H0-merger-rate"],
         ),
         omega_m_chain="outputs/chains/cosmological-parameters/H0-Omega_m.nc",
-        catalog=_catalog(DEFAULT_CATALOG),
+        catalog=_injection_catalog(),
         config=str(SOURCE_EXPERIMENTS),
     output:
         detector_pdf="outputs/figures/cosmological-parameters/H0-by-detector.pdf",
@@ -221,7 +351,7 @@ rule plot_modified_propagation:
             "outputs/chains/modified-propagation/{run}.nc",
             run=DETECTOR_NETWORK_RUNS,
         ),
-        catalog=_catalog(DEFAULT_CATALOG),
+        catalog=_injection_catalog(),
         config=str(SOURCE_EXPERIMENTS),
     output:
         xi_n_corner_pdf="outputs/figures/modified-propagation/Xi0-n-corner.pdf",
@@ -246,7 +376,7 @@ rule plot_modified_propagation:
 
 rule amplitude_toy:
     input:
-        catalog=_catalog(DEFAULT_CATALOG),
+        catalog=_injection_catalog(),
         config=str(SOURCE_EXPERIMENTS),
     output:
         "outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf",
@@ -260,7 +390,7 @@ rule amplitude_toy:
 
 rule fiducial_spectrum:
     input:
-        catalog=_catalog(DEFAULT_CATALOG),
+        catalog=_injection_catalog(),
         # Borrows the cosmological-parameters networks; reads no chains.
         config=str(SOURCE_EXPERIMENTS),
     output:
@@ -278,7 +408,7 @@ rule fiducial_spectrum:
 
 rule importance_weights_grid:
     input:
-        catalog=_catalog(DEFAULT_CATALOG),
+        catalog=_proposal_catalog(DEFAULT_CATALOG),
         config=str(SOURCE_EXPERIMENTS),
     output:
         h0_omega_m_pdf=(

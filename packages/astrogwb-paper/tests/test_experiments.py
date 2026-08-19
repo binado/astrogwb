@@ -30,7 +30,7 @@ def test_inventory_contains_four_experiments_and_21_runs() -> None:
         "cosmological-parameters",
         "astrophysical-parameters",
         "modified-propagation",
-        "variable-injection-size",
+        "variable-proposal-size",
     }
     assert len(declared_runs()) == 21
 
@@ -72,7 +72,7 @@ def test_all_run_configs_are_assembled_together(tmp_path: Path) -> None:
     assert (tmp_path / "cosmological-parameters/H0-merger-rate.json").is_file()
     assert (tmp_path / "astrophysical-parameters/z_peak.json").is_file()
     assert (tmp_path / "modified-propagation/Xi_0-H0.json").is_file()
-    assert (tmp_path / "variable-injection-size/n32768.json").is_file()
+    assert (tmp_path / "variable-proposal-size/n32768.json").is_file()
 
 
 def test_run_paths_are_one_to_one_with_the_source_yaml() -> None:
@@ -91,17 +91,17 @@ def test_run_paths_are_one_to_one_with_the_source_yaml() -> None:
         spec.chain_path("nope")
 
 
-def test_catalog_selection_is_fixed_except_for_injection_size() -> None:
+def test_catalog_selection_is_fixed_except_for_proposal_size() -> None:
     experiments = load_experiments()
     for name, specification in experiments.items():
-        if name == "variable-injection-size":
+        if name == "variable-proposal-size":
             continue
         assert {specification.catalog_for(run) for run in specification.runs} == {
             DEFAULT_CATALOG
         }
 
-    injection = experiments["variable-injection-size"]
-    assert {run: injection.catalog_for(run) for run in injection.runs} == {
+    proposal = experiments["variable-proposal-size"]
+    assert {run: proposal.catalog_for(run) for run in proposal.runs} == {
         "n8192": "bns-n8192-df1",
         "n16384": "bns-n16384-df1",
         "n32768": "bns-n32768-df1",

@@ -9,7 +9,13 @@ from astrogwb_paper.paths import paper_project_root
 
 PAPER_ROOT = paper_project_root()
 SNAKEFILE = PAPER_ROOT / "Snakefile"
-CATALOG_RULES = ("bns_population", "bns_waveform_catalog")
+CATALOG_RULES = (
+    "source_population",
+    "assemble_injection_population",
+    "assemble_proposal_population",
+    "injection_waveform_catalog",
+    "proposal_waveform_catalog",
+)
 MCMC_RULES = (
     "assemble_config",
     "run_mcmc",
@@ -25,8 +31,8 @@ MCMC_RULES = (
     "modified_propagation_chains",
     "astrophysical_parameters",
     "astrophysical_parameters_chains",
-    "variable_injection_size",
-    "variable_injection_size_chains",
+    "variable_proposal_size",
+    "variable_proposal_size_chains",
 )
 
 
@@ -64,12 +70,15 @@ def _rule_inputs(stdout: str) -> list[str]:
 def _catalogs(tmp_path: Path, *names: str) -> Path:
     directory = tmp_path / "catalogs"
     directory.mkdir()
+    (directory / "injection-bns-n32768.h5").touch()
+    proposals = directory / "proposals"
+    proposals.mkdir()
     for name in names:
-        (directory / name).touch()
+        (proposals / name).touch()
     return directory
 
 
-def test_catalog_workflow_uses_input_recipes_and_output_tree() -> None:
+def test_catalog_workflow_builds_sources_production_and_waveforms() -> None:
     result = _snakemake(
         "--snakefile",
         str(SNAKEFILE),
@@ -77,15 +86,23 @@ def test_catalog_workflow_uses_input_recipes_and_output_tree() -> None:
         *CATALOG_RULES,
         "--dry-run",
         "--forceall",
+        "--printshellcmds",
         "--cores",
         "1",
-        "outputs/catalogs/bns-n8192-df1.h5",
+        "outputs/catalogs/injection-bns-n32768.h5",
+        "outputs/catalogs/proposals/bns-n8192-df1.h5",
     )
 
     assert result.returncode == 0, result.stderr
     assert "inputs/catalogs.yaml" in result.stdout
-    assert "outputs/populations/bns-n8192-df1.h5" in result.stdout
-    assert "outputs/catalogs/bns-n8192-df1.h5" in result.stdout
+    assert "outputs/populations/sources/injection-fiducial.h5" in result.stdout
+    assert "outputs/populations/sources/proposal-fiducial.h5" in result.stdout
+    assert "outputs/populations/sources/proposal-uniform-redshift.h5" in result.stdout
+    assert "outputs/populations/production/injection-bns-n32768.h5" in result.stdout
+    assert "outputs/populations/production/proposals/bns-n8192-df1.h5" in result.stdout
+    assert "outputs/catalogs/injection-bns-n32768.h5" in result.stdout
+    assert "outputs/catalogs/proposals/bns-n8192-df1.h5" in result.stdout
+    assert "--uniform-redshift-fraction 0.2" in result.stdout
 
 
 def test_plot_cosmological_parameters_expands_all_chains_and_figures(
@@ -156,10 +173,14 @@ def test_config_assembly_reads_the_single_inventory(
         "astrogwb-validate-config inputs/experiments.yaml "
         "--output-dir outputs/configs" in result.stdout
     )
+    assert "--injection-catalog" in result.stdout
+    assert "--proposal-catalog" in result.stdout
+    assert str(catalogs / "injection-bns-n32768.h5") in result.stdout
+    assert str(catalogs / "proposals" / "bns-n16384-df1.h5") in result.stdout
     assert result.stdout.count("rule assemble_config:") == 1
 
 
-def test_variable_injection_size_uses_three_catalogs(tmp_path: Path) -> None:
+def test_variable_proposal_size_uses_three_catalogs(tmp_path: Path) -> None:
     catalogs = _catalogs(
         tmp_path,
         "bns-n8192-df1.h5",
@@ -172,7 +193,7 @@ def test_variable_injection_size_uses_three_catalogs(tmp_path: Path) -> None:
         "--forceall",
         "--cores",
         "8",
-        "variable_injection_size",
+        "variable_proposal_size",
         "--config",
         f"catalogs_dir={catalogs}",
     )
@@ -184,7 +205,7 @@ def test_variable_injection_size_uses_three_catalogs(tmp_path: Path) -> None:
         "bns-n16384-df1.h5",
         "bns-n32768-df1.h5",
     ):
-        assert str(catalogs / name) in result.stdout
+        assert str(catalogs / "proposals" / name) in result.stdout
 
 
 def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
@@ -202,8 +223,9 @@ def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
     output = result.stdout + result.stderr
     assert result.returncode != 0
     assert "MissingInputException" in output
-    assert "bns_population" not in output
-    assert "bns_waveform_catalog" not in output
+    assert "source_population" not in output
+    assert "assemble_proposal_population" not in output
+    assert "proposal_waveform_catalog" not in output
 
 
 def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
@@ -216,7 +238,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "plot_cosmological_parameters",
         "modified_propagation",
         "astrophysical_parameters",
-        "variable_injection_size",
+        "variable_proposal_size",
         "amplitude_toy",
         "fiducial_spectrum",
         "importance_weights_grid",

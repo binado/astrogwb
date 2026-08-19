@@ -15,12 +15,11 @@ Factory contract: :func:`make_merger_rate_and_log_weights_fn` takes a
 never needs to extract static Python scalars from traced values and is safe
 to trace inside ``jax.jit`` during NUTS.
 
-The proposal and target share
-:func:`compute_merger_rate_distance_and_logprob`. Precompute
-``proposal_logprob`` by evaluating that function at the fiducials (third
-return value); the callback returns importance log-weights via
-:func:`log_weights`, which reweights the redshift PDF against the catalog
-fiducial luminosity distances and the GW/EM ratio correction.
+The callback accepts a precomputed ``proposal_logprob`` array, so the proposal
+need not equal the target at its fiducial parameters. The callback returns
+importance log-weights via :func:`log_weights`, which reweights the target
+redshift PDF against that proposal density, the catalog fiducial luminosity
+distances, and the GW/EM ratio correction.
 """
 
 from __future__ import annotations
@@ -182,13 +181,12 @@ def make_merger_rate_and_log_weights_fn(
 ) -> MergerRateAndLogWeightsFn:
     """Build the merger-rate + importance-log-weights callback.
 
-    The returned closure reweights a fixed proposal catalog (drawn at the
-    fiducial parameter point) to arbitrary sampled hyperparameters. It is
-    JAX-traceable and intended to be passed (pre-built) to
+    The returned closure reweights a fixed proposal catalog to arbitrary
+    sampled hyperparameters. It is JAX-traceable and intended to be passed (pre-built) to
     :func:`~astrogwb.sampling.models.spectral_density_model`.
 
-    Precompute ``proposal_logprob`` with
-    :func:`compute_merger_rate_distance_and_logprob` at the fiducials::
+    For a fiducial proposal, ``proposal_logprob`` can be precomputed with
+    :func:`compute_merger_rate_distance_and_logprob`::
 
         _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
             fiducials, samples, redshift_grid=redshift_grid
@@ -203,9 +201,8 @@ def make_merger_rate_and_log_weights_fn(
         Redshift grid used for the cosmology integrals and MD normalization.
         Captured by the returned closure as a constant array.
     proposal_logprob:
-        Precomputed redshift log-pdf at the fiducials for the catalog
-        redshifts, shape ``(N,)``. Typically the third return value of
-        :func:`compute_merger_rate_distance_and_logprob`.
+        Precomputed proposal redshift log-pdf at the catalog redshifts, shape
+        ``(N,)``. It may describe any proposal with support over the target.
 
     Returns
     -------

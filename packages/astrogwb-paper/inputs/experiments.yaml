@@ -148,7 +148,7 @@ experiments:
             loc: *fiducials_H0
             scale: 0.6766
 
-  variable-injection-size:
+  variable-proposal-size:
     sampled_params: [H0]
     analysis: *et_2l_aligned_ce
     runs:

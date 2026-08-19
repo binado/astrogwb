@@ -9,6 +9,7 @@ import pytest
 from astrogwb_paper.paths import paper_project_root
 
 COMMANDS = (
+    "astrogwb-assemble-population",
     "astrogwb-run-mcmc",
     "astrogwb-validate-config",
     "astrogwb-generate-waveform-catalog",

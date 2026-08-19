@@ -27,8 +27,8 @@
 # via `numpyro.infer.util.log_density`, which gives the correct unnormalized
 # log-posterior (`log prior + log likelihood`) and is robust at the prior bounds.
 #
-# To run the notebook end-to-end you must point `CATALOG_PATH` at an `.npz`
-# polarization-power catalog (same schema as `mcmc.py`).
+# To run the notebook end-to-end, point `INJECTION_CATALOG_PATH` and
+# `PROPOSAL_CATALOG_PATH` at the two waveform catalogs used by `mcmc.py`.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -49,7 +49,6 @@ from matplotlib.axes import Axes as MplAxes
 from matplotlib.colors import LinearSegmentedColormap, colorConverter
 from matplotlib.projections import register_projection
 from numpyro.infer.util import log_density
-from pluscross import load_catalog
 from scipy.ndimage import gaussian_filter
 
 from astrogwb.detector import effective_psd, load_sensitivity_map
@@ -59,15 +58,19 @@ from astrogwb.frequency import (
 )
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
-    spectral_density,
 )
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.sampling.models import spectral_density_model
+from astrogwb_paper.catalogs import (
+    PROPOSAL_REDSHIFT_LOGPDF,
+    compute_fiducial_injection_spectrum,
+    load_catalog_arrays,
+    validate_catalog_samples,
+    validate_matching_frequency_grids,
+)
 from astrogwb_paper.paths import paper_project_root
-from astrogwb.waveform import polarization_power as compute_polarization_power
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
 # matplotlib axes so plotting behaves as expected after importing detector utilities.
@@ -83,12 +86,11 @@ jax.config.update("jax_enable_x64", True)
 # %%
 DEBUG = False  # small smoke settings for first runs; set False for the production run
 
-# --- Catalog input (placeholder — see schema markdown in mcmc.py) -----------
-# No working polarization-power catalog exists yet; set this once one is produced.
-
-
 ROOT_DIR = paper_project_root()
-CATALOG_PATH = ROOT_DIR / "outputs/catalogs/bns-n16384-df1.h5"
+INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/injection-bns-n32768.h5"
+PROPOSAL_CATALOG_PATH = (
+    ROOT_DIR / "outputs/catalogs/proposals/bns-n16384-df1.h5"
+)
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -152,29 +154,39 @@ priors = {k: hyperprior_dists[k] for k in sampled_params}
 constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 
 # %% [markdown]
-# ## Loading the waveform catalog
+# ## Loading the waveform catalogs
 #
-# See `mcmc.py` for the full catalog schema. The `.npz` file stores the FFT
-# frequency grid, the per-source polarization power `(nfreq, nsamples)`, and the
-# per-source parameter samples.
+# See `mcmc.py` for the injection/proposal split and full catalog schema.
 
 # %%
-catalog = load_catalog(CATALOG_PATH)
-
-frequencies = jnp.asarray(catalog.frequencies)
-polarization_power = jnp.asarray(
-    compute_polarization_power(catalog)
-)  # (nfreq, nsamples)
-samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
-del catalog
-
-assert "redshift" in samples, "catalog samples must include 'redshift' for the weights"
-assert "luminosity_distance" in samples, (
-    "catalog samples must include 'luminosity_distance' for the weights"
+injection = load_catalog_arrays(
+    INJECTION_CATALOG_PATH, fiducials=fiducials, jnp=jnp
 )
+proposal = load_catalog_arrays(
+    PROPOSAL_CATALOG_PATH, fiducials=fiducials, jnp=jnp
+)
+validate_catalog_samples(
+    injection,
+    label="injection",
+    z_min=z_min,
+    z_max=z_max,
+    require_proposal_density=False,
+)
+validate_catalog_samples(
+    proposal,
+    label="proposal",
+    z_min=z_min,
+    z_max=z_max,
+    require_proposal_density=True,
+)
+validate_matching_frequency_grids(injection, proposal)
 
+frequencies = proposal.frequencies
+polarization_power = proposal.polarization_power
+samples = proposal.samples
 n_freq, n_samples = polarization_power.shape
-print(f"loaded catalog: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
+print(f"loaded proposal: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
+print("loaded injection:", injection.polarization_power.shape[1], "samples")
 
 # %% [markdown]
 # ## Effective PSD and analysis band
@@ -218,16 +230,12 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 # ## Modelling the astrophysical SGWB
 #
 # The importance-weighted spectral-density model is identical to `mcmc.py`. The
-# proposal log-density depends only on the fixed fiducial point, so we evaluate
-# `compute_merger_rate_distance_and_logprob` once here and reuse it inside the
-# weight callback.
+# proposal log-density is persisted with the assembled production population.
 
 # %%
 z_grid = jnp.linspace(z_min, z_max, n_grid)
 
-_, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-    fiducials, samples, redshift_grid=z_grid
-)
+proposal_logprob = samples[PROPOSAL_REDSHIFT_LOGPDF]
 
 
 # %%
@@ -268,13 +276,11 @@ def plot_omegagw(
     return fig
 
 
-rate0, log_weights0 = merger_rate_and_log_weights_fn(
-    fiducials,
-    samples,
-)
-weights0 = jnp.exp(log_weights0)
-observed_spectral_density = spectral_density(
-    polarization_power, weights0, rate0, average_mode="analytic_inclination"
+rate0, observed_spectral_density = compute_fiducial_injection_spectrum(
+    injection,
+    fiducials=fiducials,
+    redshift_grid=z_grid,
+    jnp=jnp,
 )
 plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-15)
 
@@ -753,7 +759,8 @@ else:
     )
 
 run_config = {
-    "catalog_path": str(CATALOG_PATH),
+    "injection_catalog_path": str(INJECTION_CATALOG_PATH),
+    "proposal_catalog_path": str(PROPOSAL_CATALOG_PATH),
     "detectors": list(detnames),
     "seed": seed,
     "observation_time": observation_time,

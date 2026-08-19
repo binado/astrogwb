@@ -18,18 +18,26 @@ Build a catalog explicitly before running an experiment:
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules bns_population bns_waveform_catalog \
-  --dry-run outputs/catalogs/bns-n16384-df1.h5
+  --allowed-rules source_population assemble_injection_population \
+    assemble_proposal_population injection_waveform_catalog \
+    proposal_waveform_catalog \
+  --dry-run \
+  outputs/catalogs/injection-bns-n32768.h5 \
+  outputs/catalogs/proposals/bns-n16384-df1.h5
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules bns_population bns_waveform_catalog \
-  outputs/catalogs/bns-n16384-df1.h5
+  --allowed-rules source_population assemble_injection_population \
+    assemble_proposal_population injection_waveform_catalog \
+    proposal_waveform_catalog \
+  outputs/catalogs/injection-bns-n32768.h5 \
+  outputs/catalogs/proposals/bns-n16384-df1.h5
 ```
 
-The DAG first creates `outputs/populations/<catalog>.h5`, then creates
-`outputs/catalogs/<catalog>.h5`. The `--allowed-rules` filter deliberately
-keeps catalog generation explicit. MCMC commands omit the two catalog rules,
-so a missing catalog stops MCMC with a `MissingInputException` instead of
-starting catalog generation.
+The DAG creates finite source pools with `gwmock-pop`, assembles production
+populations, and generates waveforms only for production rows. Proposals live
+under `outputs/catalogs/proposals/`; the independent injection is
+`outputs/catalogs/injection-bns-n32768.h5`. The `--allowed-rules` filter
+deliberately keeps all three stages explicit. MCMC commands omit these rules,
+so a missing input stops MCMC with a `MissingInputException`.
 
 ## Experiment workflow
 
@@ -59,7 +67,7 @@ The curated inventory is:
 | `cosmological-parameters` | 6 detector runs plus `H0-Omega_m` and `H0-merger-rate` | input to `plot_cosmological_parameters` |
 | `modified-propagation` | 6 detector runs plus `Xi_0` and `Xi_0-H0` | corners, marginal comparison, and tables |
 | `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` | chains only |
-| `variable-injection-size` | 8192, 16384, and 32768 injections | chains only |
+| `variable-proposal-size` | 8192, 16384, and 32768 proposal catalogs | chains only |
 
 Run one experiment's chains:
 
