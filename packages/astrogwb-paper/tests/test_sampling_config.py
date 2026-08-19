@@ -18,6 +18,7 @@ def test_assembled_configs_fix_local_merger_rate() -> None:
     # not sample it, so it must survive as a fixed constant rather than a
     # sampled parameter.
     assert "local_merger_rate" not in config.sampled_params
+    assert expected == 770.0
     assert config.fiducials["local_merger_rate"] == expected
     assert "local_merger_rate" not in config.priors
     assert config.constants["local_merger_rate"] == expected

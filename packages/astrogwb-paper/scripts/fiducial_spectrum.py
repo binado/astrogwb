@@ -37,6 +37,7 @@ from astrogwb_paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
     DETECTOR_NETWORKS,
     SPECTRUM,
+    SPECTRUM_LINESTYLES,
     detector_network_styles,
     use_paper_style,
 )
@@ -135,12 +136,19 @@ def plot_omega_and_sh(
     omega_gw_min: float,
     omega_color: str | None = None,
     sh_color: str | None = None,
+    omega_linestyle: str | None = None,
+    sh_linestyle: str | None = None,
 ) -> Figure:
     """Plot $\\Omega_{\\mathrm{GW}}(f)$ and $S_h(f)$ on dual $y$-axes."""
+    axis_color = "k"
     if omega_color is None:
         omega_color = SPECTRUM["omega_gw"]
     if sh_color is None:
         sh_color = SPECTRUM["sh"]
+    if omega_linestyle is None:
+        omega_linestyle = SPECTRUM_LINESTYLES["omega_gw"]
+    if sh_linestyle is None:
+        sh_linestyle = SPECTRUM_LINESTYLES["sh"]
 
     omega_gw = omega_gw_from_spectral_density(
         spectral_density_arr,
@@ -156,16 +164,26 @@ def plot_omega_and_sh(
     fig, ax_sh = plt.subplots()
     ax_omega = ax_sh.twinx()
 
-    (line_sh,) = ax_sh.loglog(freq, sh, color=sh_color, label=r"$S_h$")
+    (line_sh,) = ax_sh.loglog(
+        freq, sh, color=sh_color, linestyle=sh_linestyle, label=r"$S_h$"
+    )
     (line_omega,) = ax_omega.loglog(
-        freq, omega, color=omega_color, label=r"$\Omega_{\mathrm{GW}}$"
+        freq,
+        omega,
+        color=omega_color,
+        linestyle=omega_linestyle,
+        label=r"$\Omega_{\mathrm{GW}}$",
     )
 
-    ax_sh.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-    ax_sh.set_ylabel(r"$S_h(f)\ \mathrm{[Hz^{-1}]}$", color=sh_color)
-    ax_omega.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$", color=omega_color)
-    ax_sh.tick_params(axis="y", colors=sh_color)
-    ax_omega.tick_params(axis="y", colors=omega_color)
+    ax_sh.set_xlabel(r"$f\ \mathrm{(Hz)}$", color=axis_color)
+    ax_sh.set_ylabel(r"$S_h(f)\ \mathrm{[Hz^{-1}]}$", color=axis_color)
+    ax_omega.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$", color=axis_color)
+    ax_sh.tick_params(axis="x", colors=axis_color)
+    ax_sh.tick_params(axis="y", colors=axis_color)
+    ax_omega.tick_params(axis="y", colors=axis_color)
+    for axis in (ax_sh, ax_omega):
+        for spine in axis.spines.values():
+            spine.set_color(axis_color)
     ax_sh.set_ylim(sh_ymin, None)
     ax_omega.set_ylim(omega_gw_min, None)
     ax_sh.set_axisbelow(True)
@@ -175,6 +193,7 @@ def plot_omega_and_sh(
         handles=[line_sh, line_omega],
         loc="upper right",
         frameon=False,
+        handlelength=2.5,
     )
     return fig
 

@@ -18,7 +18,7 @@ members = ["packages/*"]
 dev = [
     "pytest>=9.0.2",
     "ruff>=0.16.1",
-    "ty>=0.0.65",
+    "ty>=0.0.69",
 ]
 
 [tool.ruff]

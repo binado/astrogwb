@@ -7,8 +7,8 @@ of the ``astrogwb`` package: it imports nothing from it.
 Convention:
 - category accents are the default color for single-posterior figures;
 - the network palette colors the detector-network comparison figures;
-- ``SPECTRUM`` colors the fiducial dual-axis spectrum figure
-  (Tol muted indigo + ColorBrewer Greens);
+- ``SPECTRUM`` / ``SPECTRUM_LINESTYLES`` style the fiducial dual-axis
+  spectrum figure (black curves; dotted $S_h$, solid $\\Omega_{\\mathrm{GW}}$);
 - ``combo_colors`` orders the per-parameter-combination marginal overlay;
 - ``detector_network_styles`` pairs each ET network with its ET+CE companion;
 - truth / fiducial markers are always neutral solid (``TRUTH``), everywhere.
@@ -36,11 +36,15 @@ CATEGORY: dict[str, str] = {
     "astrophysical": "#009E73",
 }
 
-# Dual-axis accents for the fiducial spectrum figure: Paul Tol muted indigo
-# and a darker ColorBrewer Greens step for S_h.
+# Dual-axis style for the fiducial spectrum figure: both curves and axes
+# are black, with dotted $S_h$ against solid $\Omega_{\mathrm{GW}}$.
 SPECTRUM: dict[str, str] = {
-    "omega_gw": "#332288",
-    "sh": "#006D2C",
+    "omega_gw": "k",
+    "sh": "k",
+}
+SPECTRUM_LINESTYLES: dict[str, str] = {
+    "omega_gw": "-",
+    "sh": ":",
 }
 
 NETWORK: dict[str, str] = {

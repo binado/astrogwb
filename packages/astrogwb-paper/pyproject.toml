@@ -12,7 +12,7 @@ dependencies = [
     "arviz[h5netcdf]>=1.2.0",
     "astrogwb>=0.1.0",
     "gwmock-pop>=0.11.4",
-    "gwmock-signal[jax]>=0.12.0",
+    "gwmock-signal[jax]>=0.15.0",
     "jax>=0.10.2; sys_platform == 'linux'",
     "jax[cpu]>=0.11.0; sys_platform != 'linux'",
     "numpy>=2.5.1",
@@ -48,7 +48,7 @@ astrogwb-generate-waveform-catalog = "astrogwb_paper.cli.generate_waveform_catal
 astrogwb-profile-model = "astrogwb_paper.cli.profile_model:main"
 
 [build-system]
-requires = ["uv_build>=0.12.0,<0.13.0"]
+requires = ["uv_build>=0.12.2,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
@@ -74,7 +74,7 @@ dev = [
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
     "ruff>=0.16.1",
-    "ty>=0.0.65",
+    "ty>=0.0.69",
 ]
 slurm = [
     { include-group = "dev" },

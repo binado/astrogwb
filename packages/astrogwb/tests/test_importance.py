@@ -23,7 +23,7 @@ FIDUCIALS = {
     "gamma": 1.42,
     "kappa": 4.62,
     "z_peak": 1.84,
-    "local_merger_rate": 161.0,
+    "local_merger_rate": 770.0,
 }
 
 Z_MIN = 0.0
@@ -133,7 +133,7 @@ def test_local_merger_rate_scales_total_rate_without_changing_weights() -> None:
     fn, samples = _build_synthetic_callback()
     fiducial_rate, fiducial_log_weights = fn(FIDUCIALS, samples)
 
-    scaled_params = {**FIDUCIALS, "local_merger_rate": 2.5 * 161.0}
+    scaled_params = {**FIDUCIALS, "local_merger_rate": 2.5 * 770.0}
     scaled_rate, scaled_log_weights = fn(scaled_params, samples)
 
     assert float(scaled_rate) == pytest.approx(2.5 * float(fiducial_rate))
@@ -156,7 +156,7 @@ def test_fiducial_local_merger_rate_preserves_rate_calculation() -> None:
         rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid,
         z_grid,
     )
-    expected = 1e-9 * 161.0 * float(integral_mpc3) / SECONDS_PER_YEAR
+    expected = 1e-9 * 770.0 * float(integral_mpc3) / SECONDS_PER_YEAR
 
     assert float(total_rate) == pytest.approx(expected)
 

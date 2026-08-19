@@ -30,7 +30,7 @@ base:
     gamma: 1.42
     kappa: 4.62
     z_peak: 1.84
-    local_merger_rate: &fiducials_local_merger_rate 769.0
+    local_merger_rate: &fiducials_local_merger_rate 770.0
 
   priors:
     H0:
@@ -64,7 +64,7 @@ base:
     local_merger_rate:
       type: normal
       loc: *fiducials_local_merger_rate
-      scale: 7.69
+      scale: 7.7
 
 networks:
   ET-triangular: &et_triangular
