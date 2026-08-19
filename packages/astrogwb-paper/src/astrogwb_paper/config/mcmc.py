@@ -28,7 +28,6 @@ from pydantic import (
     model_validator,
 )
 
-from astrogwb_paper.config.hashing import canonical_sha256
 from astrogwb_paper.config.loading import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
@@ -129,7 +128,7 @@ else:
 
 # Native pydantic wire for live prior distributions: validate from spec
 # mappings/dists, serialize back to the spec dict so `model_dump(mode="json")`,
-# `save_config`, and `config_sha256` stay canonical. Numpyro types deliberately
+# `save_config` stay canonical. Numpyro types deliberately
 # stay out of the runtime annotation (hence `Any`) so schema building never
 # imports numpyro at module load.
 PriorDistribution = Annotated[
@@ -267,7 +266,7 @@ class RunConfig(BaseModel):
 
         Includes the marginalized amplitude parameter when present: it has no
         NUTS latent, but its fiducial value is still what the model pins it
-        to. Serialized (save_config / config_sha256) but not settable: input
+        to. Serialized (save_config) but not settable: input
         is stripped in `build_run_config` because `extra="forbid"` rejects
         the serialized form on reload.
         """
@@ -298,11 +297,6 @@ class RunConfig(BaseModel):
     @property
     def label(self) -> str:
         return self.output.label
-
-
-def config_sha256(config: RunConfig) -> str:
-    """Digest inference settings, excluding output routing."""
-    return canonical_sha256(config.model_dump(mode="json", exclude={"output"}))
 
 
 def save_config(config: RunConfig, path: Path) -> None:

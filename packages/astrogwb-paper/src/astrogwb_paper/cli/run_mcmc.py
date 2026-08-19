@@ -41,12 +41,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrogwb_paper.config.hashing import file_sha256
 from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import (
     RunConfig,
     build_run_config,
-    config_sha256,
     prior_to_spec,
 )
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
@@ -329,13 +327,6 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     return mcmc, marginalization
 
 
-def verify_catalog(path: Path) -> str:
-    """Hash a catalog before JAX starts, returning its content digest."""
-    if not path.is_file():
-        raise FileNotFoundError(f"catalog not found: {path}")
-    return file_sha256(path)
-
-
 def _git_revision() -> str | None:
     try:
         return (
@@ -390,13 +381,10 @@ def build_run_record(
     *,
     catalog_path: Path,
     timestamp: str,
-    catalog_sha256: str | None,
 ) -> dict:
     """Assemble the JSON sidecar recording the run's inputs and provenance."""
     record: dict[str, Any] = {
         "catalog_path": str(catalog_path),
-        "catalog_sha256": catalog_sha256,
-        "config_sha256": config_sha256(config),
         "detectors": list(config.analysis.detectors),
         "seed": config.seed,
         "observation_time": config.observation_time,
@@ -434,7 +422,6 @@ def save(
     catalog_path: Path,
     timestamp: str | None = None,
     force: bool = False,
-    catalog_sha256: str | None = None,
     marginalization: AmplitudeMarginalization | None = None,
 ) -> Path:
     """Write the ArviZ NetCDF + JSON run record, and log the IS health check."""
@@ -514,7 +501,6 @@ def save(
         config,
         catalog_path=catalog_path,
         timestamp=timestamp,
-        catalog_sha256=catalog_sha256,
     )
     json_path.write_text(json.dumps(run_record, indent=2, default=str))
 
@@ -561,9 +547,9 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_output_paths_available(config, timestamp=timestamp, force=args.force)
 
-    # Hash the catalog before JAX claims a device.
-    catalog_sha256 = verify_catalog(catalog_path)
-    logger.info("Catalog SHA-256: %s", catalog_sha256)
+    # Fail on a missing catalog before JAX claims a device.
+    if not catalog_path.is_file():
+        raise FileNotFoundError(f"catalog not found: {catalog_path}")
 
     jax, chain_method = configure_runtime(
         num_chains=config.sampler.num_chains,
@@ -579,7 +565,6 @@ def main(argv: list[str] | None = None) -> None:
         catalog_path=catalog_path,
         timestamp=timestamp,
         force=args.force,
-        catalog_sha256=catalog_sha256,
         marginalization=marginalization,
     )
 

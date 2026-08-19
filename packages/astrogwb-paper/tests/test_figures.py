@@ -93,8 +93,7 @@ def test_base_fiducials_and_analysis_grid_are_read_from_the_base_config() -> Non
     grid = load_analysis_grid(BASE_CONFIG)
 
     # `importance_relative_ess` is a plotting truth line, not a fiducial: adding
-    # it here would change every run's config_sha256 and inject a spurious
-    # constant into the sampled model.
+    # it here would inject a spurious constant into the sampled model.
     assert set(fiducials) == {
         "H0",
         "Omega_m",

@@ -42,7 +42,6 @@ from astrogwb.gwb import spectral_density, spectral_snr_squared
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from astrogwb_paper.config.hashing import file_sha256
 from astrogwb_paper.config.figures import load_analysis_grid
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import TRUTH, use_paper_style
@@ -135,7 +134,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     }
 
     catalog = load_catalog(catalog_path)
-    catalog_sha256 = file_sha256(catalog_path)
     frequencies = jnp.asarray(catalog.frequencies)
     polarization_power = jnp.asarray(compute_polarization_power(catalog))
     samples = {
@@ -221,7 +219,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     run_config = {
         "chains_dir": str(out_dir),
         "catalog_path": str(catalog_path),
-        "catalog_sha256": catalog_sha256,
         "detectors": list(detnames),
         "output_path": str(output_path),
         "seed": seed,

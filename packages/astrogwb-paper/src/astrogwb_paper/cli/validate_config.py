@@ -5,11 +5,10 @@ This is the JAX-free gate after each run overlay is merged with the shared
 
     astrogwb-validate-config inputs/config.yaml --output-dir outputs/configs
 
-Writing ``save_config(RunConfig)`` rather than the raw merge is what keeps
-:func:`~astrogwb_paper.config.mcmc.config_sha256` a stable identity for "same
-inference settings": the file on disk always carries every default filled in,
-so a run that inherits ``target_accept`` and one that spells it out produce
-identical configs and identical digests.
+Writing ``save_config(RunConfig)`` rather than the raw merge keeps each run
+config self-contained and diff-able: the file on disk always carries every
+default filled in, so a run that inherits ``target_accept`` and one that
+spells it out produce identical configs.
 
 Like :mod:`astrogwb_paper.config.mcmc`, this module stays lightweight and
 JAX-free, so a bad config fails before anything can initialize JAX.

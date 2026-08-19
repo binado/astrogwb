@@ -573,8 +573,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument("--group", default="posterior")
     # Not a fiducial: N_eff/N_inj is a plotting truth line at its definitional
-    # maximum. Adding it to [fiducials] would change every run's config_sha256
-    # and inject a spurious constant into the sampled model.
+    # maximum. Adding it to [fiducials] would inject a spurious constant into
+    # the sampled model.
     parser.add_argument("--importance-relative-ess", type=float, default=1.0)
     return parser.parse_args(argv)
 

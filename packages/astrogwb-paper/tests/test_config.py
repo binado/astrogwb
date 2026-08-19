@@ -9,7 +9,6 @@ from astrogwb_paper.config.experiments import load_base, load_experiments, overl
 from astrogwb_paper.config.loading import deep_merge, load_mapping, merge_run_overlay
 from astrogwb_paper.config.mcmc import (
     build_run_config,
-    config_sha256,
     prior_to_spec,
     save_config,
 )
@@ -110,31 +109,6 @@ def test_build_run_config_rejects_legacy_runtime_section() -> None:
         build_run_config(raw)
 
 
-def test_config_sha256_stable_across_key_order_and_sensitive_to_values() -> None:
-    raw = example_raw()
-    reordered = dict(reversed(list(raw.items())))
-
-    assert config_sha256(build_run_config(raw)) == config_sha256(
-        build_run_config(reordered)
-    )
-    assert config_sha256(build_run_config(raw)) != config_sha256(
-        build_run_config(raw, seed=99)
-    )
-
-
-def test_config_sha256_excludes_output_routing() -> None:
-    raw = example_raw()
-
-    baseline = build_run_config(raw)
-    routed = build_run_config(
-        raw,
-        outdir=Path("chains/another-catalog/campaign"),
-        label="another-run",
-    )
-
-    assert config_sha256(baseline) == config_sha256(routed)
-
-
 # --------------------------------------------------------------------------- #
 # Amplitude-marginalized likelihood
 # --------------------------------------------------------------------------- #
@@ -187,7 +161,7 @@ def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
     save_config(config, path)
 
     # `constants` is a computed field: present in the dump (keep save_config
-    # and config_sha256 stable), stripped on input by build_run_config.
+    # canonical), stripped on input by build_run_config.
     assert "constants" in load_mapping(path)
 
     reloaded = build_run_config(load_mapping(path))
@@ -198,7 +172,7 @@ def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
     }
     assert reloaded.sampled_params == config.sampled_params
     assert reloaded.constants == config.constants
-    assert config_sha256(reloaded) == config_sha256(config)
+    assert reloaded.model_dump(mode="json") == config.model_dump(mode="json")
 
 
 def test_reloaded_marginalized_config_still_rejects_amplitude_parameter_sampled(

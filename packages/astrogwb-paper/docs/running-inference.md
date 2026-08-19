@@ -79,12 +79,8 @@ Build all cosmological chains, figures, and tables with
 ## Outputs and provenance
 
 Every labelled run has deterministic `.nc` and `.json` paths under
-`outputs/chains/<experiment>/`. The JSON sidecar records the catalog path and
-SHA-256, canonical config SHA-256, detectors, seed, fiducials, priors, sampler
-settings, and git revision.
-
-Runtime controls such as platform and chain method affect execution rather than
-the scientific result and are not included in the config hash.
+`outputs/chains/<experiment>/`. The JSON sidecar records the catalog path,
+detectors, seed, fiducials, priors, sampler settings, and git revision.
 
 Ad-hoc unlabelled runs retain the timestamped
 `mcmc-<params>-det=<detectors>-seed<n>-<timestamp>` convention.
