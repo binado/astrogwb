@@ -158,3 +158,14 @@ experiments:
         catalog: bns-n16384-df1
       n32768:
         catalog: bns-n32768-df1
+
+  variable-proposal-guard:
+    sampled_params: [H0]
+    analysis: *et_2l_aligned_ce
+    runs:
+      eps1e-1:
+        catalog: bns-n16384-df1
+      eps1e-2:
+        catalog: bns-n16384-eps1e-2-df1
+      eps1e-3:
+        catalog: bns-n16384-eps1e-3-df1

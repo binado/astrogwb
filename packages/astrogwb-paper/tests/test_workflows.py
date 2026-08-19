@@ -33,6 +33,8 @@ MCMC_RULES = (
     "astrophysical_parameters_chains",
     "variable_proposal_size",
     "variable_proposal_size_chains",
+    "variable_proposal_guard",
+    "variable_proposal_guard_chains",
 )
 
 
@@ -102,7 +104,7 @@ def test_catalog_workflow_builds_sources_production_and_waveforms() -> None:
     assert "outputs/populations/production/proposals/bns-n8192-df1.h5" in result.stdout
     assert "outputs/catalogs/injection-bns-n32768.h5" in result.stdout
     assert "outputs/catalogs/proposals/bns-n8192-df1.h5" in result.stdout
-    assert "--uniform-redshift-fraction 0.2" in result.stdout
+    assert "--uniform-redshift-fraction 0.1" in result.stdout
 
 
 def test_plot_cosmological_parameters_expands_all_chains_and_figures(
@@ -208,6 +210,34 @@ def test_variable_proposal_size_uses_three_catalogs(tmp_path: Path) -> None:
         assert str(catalogs / "proposals" / name) in result.stdout
 
 
+def test_variable_proposal_guard_uses_three_catalogs(tmp_path: Path) -> None:
+    catalogs = _catalogs(
+        tmp_path,
+        "bns-n16384-df1.h5",
+        "bns-n16384-eps1e-2-df1.h5",
+        "bns-n16384-eps1e-3-df1.h5",
+    )
+
+    result = _mcmc(
+        "--dry-run",
+        "--forceall",
+        "--cores",
+        "8",
+        "variable_proposal_guard",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("rule run_mcmc:") == 3
+    for name in (
+        "bns-n16384-df1.h5",
+        "bns-n16384-eps1e-2-df1.h5",
+        "bns-n16384-eps1e-3-df1.h5",
+    ):
+        assert str(catalogs / "proposals" / name) in result.stdout
+
+
 def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
     catalogs = tmp_path / "missing-catalogs"
 
@@ -239,6 +269,9 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "modified_propagation",
         "astrophysical_parameters",
         "variable_proposal_size",
+        "variable_proposal_size_chains",
+        "variable_proposal_guard",
+        "variable_proposal_guard_chains",
         "amplitude_toy",
         "fiducial_spectrum",
         "importance_weights_grid",
@@ -261,12 +294,14 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
     }.isdisjoint(rules)
 
 
-def test_experiments_target_builds_all_21_chains(tmp_path: Path) -> None:
+def test_experiments_target_builds_all_24_chains(tmp_path: Path) -> None:
     catalogs = _catalogs(
         tmp_path,
         "bns-n8192-df1.h5",
         "bns-n16384-df1.h5",
         "bns-n32768-df1.h5",
+        "bns-n16384-eps1e-2-df1.h5",
+        "bns-n16384-eps1e-3-df1.h5",
     )
 
     result = _mcmc(
@@ -281,7 +316,7 @@ def test_experiments_target_builds_all_21_chains(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule assemble_config:") == 1
-    assert result.stdout.count("rule run_mcmc:") == 21
+    assert result.stdout.count("rule run_mcmc:") == 24
     assert result.stdout.count("rule plot_cosmological_parameters:") == 1
     assert result.stdout.count("rule plot_modified_propagation:") == 1
 

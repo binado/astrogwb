@@ -54,7 +54,7 @@ The committed proposal is
 $$
 q(z)=(1-\epsilon)p_{\rm fid}(z)
      +\epsilon\,\mathcal{U}(z_{\min},z_{\max}),
-\qquad \epsilon=0.20.
+\qquad \epsilon=0.10.
 $$
 
 Its explicit assembly command is:
@@ -62,11 +62,11 @@ Its explicit assembly command is:
 ```bash
 uv run astrogwb-assemble-population \
   --operation mixture \
-  --source outputs/populations/sources/proposal-fiducial.h5 --weight 0.8 \
-  --source outputs/populations/sources/proposal-uniform-redshift.h5 --weight 0.2 \
+  --source outputs/populations/sources/proposal-fiducial.h5 --weight 0.9 \
+  --source outputs/populations/sources/proposal-uniform-redshift.h5 --weight 0.1 \
   --source-config inputs/populations/bns_population.yaml \
   --source-config inputs/populations/bns_population_uniform_redshift.yaml \
-  --uniform-redshift-fraction 0.2 \
+  --uniform-redshift-fraction 0.1 \
   --num-samples 16384 --seed 142 \
   --output outputs/populations/production/proposals/bns-n16384-df1.h5
 ```

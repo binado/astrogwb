@@ -32,7 +32,7 @@ def test_single_yaml_is_the_only_catalog_inventory() -> None:
     assert not catalogs_dir.exists()
 
 
-def test_inventory_declares_source_pools_injection_and_three_proposals() -> None:
+def test_inventory_declares_source_pools_injection_and_five_proposals() -> None:
     inventory = load_catalog_inventory()
 
     assert set(inventory.sources) == {
@@ -54,6 +54,8 @@ def test_inventory_declares_source_pools_injection_and_three_proposals() -> None
         "bns-n8192-df1",
         "bns-n16384-df1",
         "bns-n32768-df1",
+        "bns-n16384-eps1e-2-df1",
+        "bns-n16384-eps1e-3-df1",
     }
     assert {
         name: recipe.production.num_samples
@@ -62,16 +64,40 @@ def test_inventory_declares_source_pools_injection_and_three_proposals() -> None
         "bns-n8192-df1": 8192,
         "bns-n16384-df1": 16384,
         "bns-n32768-df1": 32768,
+        "bns-n16384-eps1e-2-df1": 16384,
+        "bns-n16384-eps1e-3-df1": 16384,
     }
     for recipe in inventory.catalogs.values():
         assert recipe.production.operation == "mixture"
-        assert recipe.production.uniform_redshift_fraction == 0.2
-        assert [component.weight for component in recipe.production.components] == [
-            0.8,
-            0.2,
-        ]
         assert recipe.waveform.frequency_resolution == 1.0
         assert recipe.waveform.approximant == "IMRPhenomXAS_NRTidalv3"
+
+    assert (
+        inventory.catalogs["bns-n16384-df1"].production.uniform_redshift_fraction == 0.1
+    )
+    assert [
+        c.weight for c in inventory.catalogs["bns-n16384-df1"].production.components
+    ] == [0.9, 0.1]
+    assert (
+        inventory.catalogs[
+            "bns-n16384-eps1e-2-df1"
+        ].production.uniform_redshift_fraction
+        == 0.01
+    )
+    assert [
+        c.weight
+        for c in inventory.catalogs["bns-n16384-eps1e-2-df1"].production.components
+    ] == [0.99, 0.01]
+    assert (
+        inventory.catalogs[
+            "bns-n16384-eps1e-3-df1"
+        ].production.uniform_redshift_fraction
+        == 0.001
+    )
+    assert [
+        c.weight
+        for c in inventory.catalogs["bns-n16384-eps1e-3-df1"].production.components
+    ] == [0.999, 0.001]
 
 
 def test_catalog_accessors_return_named_recipes() -> None:
@@ -110,7 +136,7 @@ def test_proposal_recipe_requires_explicit_uniform_fraction(tmp_path: Path) -> N
 
 def test_proposal_weights_must_match_uniform_fraction(tmp_path: Path) -> None:
     raw = _inventory_copy()
-    raw["catalogs"]["bns-n8192-df1"]["production"]["uniform_redshift_fraction"] = 0.1
+    raw["catalogs"]["bns-n8192-df1"]["production"]["uniform_redshift_fraction"] = 0.2
     inventory = tmp_path / "catalogs.yaml"
     _write_inventory(inventory, raw)
 
