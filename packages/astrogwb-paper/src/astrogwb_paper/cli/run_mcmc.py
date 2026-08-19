@@ -446,13 +446,10 @@ def main(argv: list[str] | None = None) -> None:
     config_path = args.config.resolve()
     catalog_path = args.catalog.resolve()
     raw = load_mapping(config_path)
-    configured_outdir = args.outdir
-    if configured_outdir is None:
-        configured_outdir = Path(raw.get("output", {}).get("outdir", "chains"))
     config = build_run_config(
         raw,
         seed=args.seed,
-        outdir=configured_outdir.resolve(),
+        outdir=args.outdir.resolve() if args.outdir else None,
         label=args.label,
     )
 

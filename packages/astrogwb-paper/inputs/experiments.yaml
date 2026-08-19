@@ -66,10 +66,6 @@ base:
       loc: *fiducials_local_merger_rate
       scale: 7.69
 
-  output:
-    outdir: outputs/chains
-    label: ""
-
 networks:
   ET-triangular: &et_triangular
     detectors: [E1, E2, E3]

@@ -190,7 +190,7 @@ class SamplerConfig(BaseModel):
 class OutputConfig(BaseModel):
     model_config = _STRICT
 
-    outdir: Path = Path("chains")
+    outdir: Path = Path("outputs/chains")
     label: str = ""
 
 
