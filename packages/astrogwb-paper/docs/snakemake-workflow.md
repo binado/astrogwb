@@ -46,11 +46,10 @@ The generic `run_mcmc` rule then writes:
 
 ```text
 outputs/chains/<experiment>/<run>.nc
-outputs/chains/<experiment>/<run>.json
 ```
 
-The chain is protected, and the sidecar records catalog and config hashes plus
-the resolved scientific configuration.
+The chain is protected. Its assembled config under `outputs/configs/` is the
+record of the resolved scientific configuration.
 
 The curated inventory is:
 
@@ -102,7 +101,7 @@ For the `plot_cosmological_parameters` target, Snakemake:
 
 1. assembles and validates all 21 configs in one local job;
 2. submits the eight missing chains to SLURM;
-3. waits for chain and sidecar outputs;
+3. waits for the chain outputs;
 4. executes the one figure-and-table rule locally.
 
 Keep the Snakemake controller alive for the whole run. The submit host must
@@ -141,9 +140,10 @@ argv or loaded from a config the workflow has to parse first.
 
 ## Re-running protected results
 
-Config mtimes do not invalidate expensive chains; sidecar content hashes record
-their actual inputs. To intentionally resample, make the protected chain and
-sidecar writable and use Snakemake's force controls. Always dry-run first.
+Config mtimes do not invalidate expensive chains; the assembled config under
+`outputs/configs/` records their actual inputs. To intentionally resample, make
+the protected chain writable and use Snakemake's force controls. Always dry-run
+first.
 
 The old `out/`, `chains/`, and `figures/` trees are not migrated automatically;
 the refactored workflow writes only beneath `outputs/`.

@@ -76,11 +76,12 @@ snakemake --snakefile Snakefile \
 Build all cosmological chains, figures, and tables with
 `plot_cosmological_parameters`.
 
-## Outputs and provenance
+## Outputs
 
-Every labelled run has deterministic `.nc` and `.json` paths under
-`outputs/chains/<experiment>/`. The JSON sidecar records the catalog path,
-detectors, seed, fiducials, priors, sampler settings, and git revision.
+Every labelled run has a deterministic `.nc` path under
+`outputs/chains/<experiment>/`. The assembled config at
+`outputs/configs/<experiment>/<run>.json` is the record of the settings that
+produced it; the run itself writes no provenance sidecar.
 
 Ad-hoc unlabelled runs retain the timestamped
 `mcmc-<params>-det=<detectors>-seed<n>-<timestamp>` convention.

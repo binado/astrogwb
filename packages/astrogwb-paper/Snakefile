@@ -19,7 +19,6 @@ CATALOGS_DIR = Path(config.get("catalogs_dir", "outputs/catalogs"))
 
 CONFIG_PATTERN = "outputs/configs/{experiment}/{run}.json"
 CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
-SIDECAR_PATTERN = "outputs/chains/{experiment}/{run}.json"
 
 experiments = load_experiments()
 catalogs = load_catalogs()
@@ -142,7 +141,6 @@ rule run_mcmc:
         catalog=run_catalog_path,
     output:
         chain=protected(CHAIN_PATTERN),
-        sidecar=protected(SIDECAR_PATTERN),
     params:
         platform=JAX_PLATFORM,
         outdir=run_outdir,

@@ -134,7 +134,6 @@ def test_save_writes_the_reconstructed_amplitude(tmp_path) -> None:
     nc_path = save(
         _toy_marginalized_mcmc(),
         config,
-        catalog_path=tmp_path / "catalog.h5",
         marginalization=marginalization,
     )
 
