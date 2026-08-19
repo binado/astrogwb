@@ -9,6 +9,9 @@ from typing import Any
 import jax.numpy as jnp
 import numpy as np
 from astrogwb.gwb import spectral_density
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    compute_merger_rate_distance_and_logprob,
+)
 from astrogwb.waveform import apply_gw_distance_to_waveforms
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from pluscross import load_catalog
@@ -107,11 +110,6 @@ def compute_fiducial_injection_spectrum(
     redshift_grid: Any,
 ) -> tuple[Any, Any]:
     """Return the fiducial total rate and independently estimated spectrum."""
-    # gwmock_pop's Madau-Dickinson import initializes the XLA backend.
-    from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-        compute_merger_rate_distance_and_logprob,
-    )
-
     total_rate, _, _ = compute_merger_rate_distance_and_logprob(
         fiducials,
         injection.samples,

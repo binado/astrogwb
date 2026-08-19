@@ -29,7 +29,6 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
-from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
@@ -37,6 +36,35 @@ from astrogwb.utils import SECONDS_PER_YEAR
 
 AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
 """Parameters this callback supports marginalizing analytically."""
+
+
+def madau_dickinson_rate(
+    redshift: jax.Array,
+    gamma: float | jax.Array,
+    kappa: float | jax.Array,
+    z_peak: float | jax.Array,
+) -> jax.Array:
+    r"""Dimensionless Madau-like rate shape :math:`\psi(z)` with :math:`\psi(0) = 1`.
+
+    .. math::
+
+        \psi(z) = \mathcal{C}\,
+            \frac{(1+z)^{\gamma}}{1 + \left(\frac{1+z}{1+z_p}\right)^{\gamma+\kappa}},
+        \qquad
+        \mathcal{C} = 1 + (1+z_p)^{-(\gamma+\kappa)}.
+
+    Same parametrization as ``gwmock_pop.distributions.madau_dickinson``
+    (Leuven Gravity Institute, BSD-3-Clause), kept here so importing this
+    module does not initialize the XLA backend.
+    """
+    one_plus_z = 1.0 + jnp.asarray(redshift)
+    exponent = gamma + kappa
+    normalization = 1.0 + (1.0 + z_peak) ** (-exponent)
+    return (
+        normalization
+        * one_plus_z**gamma
+        / (1.0 + (one_plus_z / (1.0 + z_peak)) ** exponent)
+    )
 
 
 # Absolute scalings as module-level ``def``s (not closures over the fiducial)

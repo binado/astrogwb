@@ -11,6 +11,12 @@ from __future__ import annotations
 from typing import NamedTuple
 
 import jax
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    amplitude_H0_fn,
+    amplitude_local_merger_rate_fn,
+    merger_rate_H0_fn,
+    merger_rate_local_merger_rate_fn,
+)
 from astrogwb.sampling.amplitude import (
     AmplitudeFn,
     MergerRateAmplitudeFn,
@@ -58,14 +64,6 @@ def build_amplitude_marginalization(config: RunConfig) -> AmplitudeMarginalizati
     == "amplitude_marginalized"``); see
     :class:`~astrogwb_paper.config.mcmc.AnalysisConfig`.
     """
-    # gwmock_pop's Madau-Dickinson import initializes the XLA backend.
-    from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-        amplitude_H0_fn,
-        amplitude_local_merger_rate_fn,
-        merger_rate_H0_fn,
-        merger_rate_local_merger_rate_fn,
-    )
-
     analysis = config.analysis
     parameter = analysis.amplitude_parameter
     if parameter is None or parameter not in config.priors:

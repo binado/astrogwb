@@ -9,8 +9,7 @@ down to the model-building block.
 
 JAX ops run only inside functions, after ``runtime.configure_runtime``. Importing
 this module loads ``jax`` but does not initialize the XLA backend; a subprocess
-test in ``tests/test_cli.py`` guards that. The Madau-Dickinson model import stays
-function-local because ``gwmock_pop`` initializes the backend at import.
+test in ``tests/test_cli.py`` guards that.
 
 Arrays on :class:`Observation` are *pre*-mask, with the mask carried alongside,
 because the notebooks plot the unmasked PSD and spectrum before restricting to
@@ -31,6 +30,9 @@ from astrogwb.detector import effective_psd as compute_effective_psd
 from astrogwb.detector import load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask
 from astrogwb.frequency import frequency_mask as make_frequency_mask
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    make_merger_rate_and_log_weights_fn,
+)
 from astrogwb.sampling.models import (
     amplitude_marginalized_model,
     spectral_density_model,
@@ -170,11 +172,6 @@ def prepare_inference_inputs(
     detectors: Sequence[str],
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs."""
-    # gwmock_pop's Madau-Dickinson import initializes the XLA backend.
-    from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-        make_merger_rate_and_log_weights_fn,
-    )
-
     observation = prepare_observation(injection_path, fiducials=fiducials, grid=grid)
     proposal = load_catalog_arrays(proposal_path, fiducials=dict(fiducials))
     validate_catalog_samples(

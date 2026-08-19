@@ -9,11 +9,11 @@ import pytest
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
+    madau_dickinson_rate,
     make_merger_rate_and_log_weights_fn,
     redshift_logpdf,
 )
 from astrogwb.utils import SECONDS_PER_YEAR
-from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
 # Standard cosmology + population hyperparameters used across the tests.
 FIDUCIALS = {
@@ -30,6 +30,15 @@ FIDUCIALS = {
 Z_MIN = 0.0
 Z_MAX = 20.0
 N_GRID = 256
+
+
+# --------------------------------------------------------------------------- #
+# madau_dickinson_rate
+# --------------------------------------------------------------------------- #
+def test_madau_dickinson_rate_is_unity_at_redshift_zero() -> None:
+    z = jnp.asarray(0.0)
+    assert float(madau_dickinson_rate(z, 1.42, 4.62, 1.84)) == pytest.approx(1.0)
+    assert float(madau_dickinson_rate(z, 2.7, 2.9, 1.9)) == pytest.approx(1.0)
 
 
 # --------------------------------------------------------------------------- #
