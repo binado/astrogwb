@@ -23,8 +23,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from astrogwb_paper.config.experiments import experiment, overlay_for
-from astrogwb_paper.config.loading import load_mapping
+from astrogwb_paper.config.experiments import experiment, load_base, overlay_for
 from astrogwb_paper.paths import resolve_paper_path
 
 
@@ -78,11 +77,7 @@ def resolve_networks(
 def load_fiducials(path: Path, root: Path | None = None) -> dict[str, float]:
     """Load the shared ``fiducials`` mapping from the MCMC inventory."""
     resolved = resolve_paper_path(path, root)
-    inventory = load_mapping(resolved)
-    base = inventory.get("base")
-    if not isinstance(base, Mapping):
-        raise TypeError(f"{resolved} must define a base mapping")
-    fiducials = base.get("fiducials")
+    fiducials = load_base(resolved).get("fiducials")
     if not isinstance(fiducials, Mapping) or not fiducials:
         raise ValueError(f"{resolved} must define a non-empty [fiducials] table")
     return {str(name): float(value) for name, value in fiducials.items()}
@@ -91,10 +86,7 @@ def load_fiducials(path: Path, root: Path | None = None) -> dict[str, float]:
 def load_analysis_grid(path: Path, root: Path | None = None) -> AnalysisGrid:
     """Load the shared frequency band and redshift grid from the inventory."""
     resolved = resolve_paper_path(path, root)
-    inventory = load_mapping(resolved)
-    base = inventory.get("base")
-    if not isinstance(base, Mapping):
-        raise TypeError(f"{resolved} must define a base mapping")
+    base = load_base(resolved)
     analysis = base.get("analysis") or {}
     cosmology = base.get("cosmology") or {}
     try:
