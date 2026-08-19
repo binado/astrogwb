@@ -12,14 +12,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from astrogwb.cosmology import hubble_constant_si
 from astrogwb.detector import effective_psd, load_sensitivity_map
-from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
-)
-from astrogwb_paper.catalogs import (
-    compute_fiducial_injection_spectrum,
-    load_catalog_arrays,
-    validate_catalog_samples,
 )
 from astrogwb_paper.config.figures import (
     Network,
@@ -27,6 +21,7 @@ from astrogwb_paper.config.figures import (
     load_fiducials,
     resolve_networks,
 )
+from astrogwb_paper.inference import prepare_observation
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
@@ -53,37 +48,6 @@ SPECTRUM_EXPERIMENT = "cosmological-parameters"
 # Lower y-limit for Omega_GW; the S_h ymin is taken from S_h at the frequency
 # where Omega_GW is closest to this floor.
 OMEGA_GW_MIN = 1.0e-15
-
-
-def compute_fiducial_spectral_density(
-    catalog_path: Path,
-    fiducials: Mapping[str, float],
-    *,
-    f_min: float,
-    f_max: float,
-    z_min: float,
-    z_max: float,
-    n_grid: int,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Return ``(frequencies, S_h, frequency_mask)`` at the fiducial point."""
-    fiducial_values = dict(fiducials)
-    injection = load_catalog_arrays(catalog_path, fiducials=fiducial_values, jnp=jnp)
-    validate_catalog_samples(
-        injection,
-        label="injection",
-        z_min=z_min,
-        z_max=z_max,
-        require_proposal_density=False,
-    )
-    z_grid = jnp.linspace(z_min, z_max, n_grid)
-    _, observed_spectral_density = compute_fiducial_injection_spectrum(
-        injection,
-        fiducials=fiducial_values,
-        redshift_grid=z_grid,
-        jnp=jnp,
-    )
-    mask = make_frequency_mask(injection.frequencies, fmin=f_min, fmax=f_max)
-    return injection.frequencies, observed_spectral_density, mask
 
 
 def sh_ymin_matching_omega_floor(
@@ -237,18 +201,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     use_paper_style()
 
     catalog_path = resolve_paper_path(args.catalog, root)
-    frequencies, observed_spectral_density, mask = compute_fiducial_spectral_density(
-        catalog_path,
-        fiducials,
-        f_min=grid.f_min,
-        f_max=grid.f_max,
-        z_min=grid.z_min,
-        z_max=grid.z_max,
-        n_grid=grid.n_grid,
+    observation = prepare_observation(
+        catalog_path, fiducials=fiducials, grid=grid, jnp=jnp
     )
+    frequencies = observation.frequencies
+    mask = observation.frequency_mask
     figure = plot_omega_and_sh(
         frequencies,
-        observed_spectral_density,
+        observation.spectral_density,
         mask,
         h0=fiducials["H0"],
         omega_gw_min=OMEGA_GW_MIN,

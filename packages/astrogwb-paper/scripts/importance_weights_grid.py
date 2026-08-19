@@ -174,6 +174,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     fiducials = load_fiducials()
     use_paper_style()
 
+    # Deliberately bypasses astrogwb_paper.inference / load_catalog_arrays: this
+    # figure only ever touches source_parameters, so the shared path would
+    # materialize an (F, N) polarization-power array it never uses and call
+    # apply_gw_distance_to_waveforms, which at the fiducial xi_0 = 1.0 is
+    # numerically the identity. All cost, no benefit.
     catalog = load_catalog(catalog_path)
     samples = {
         name: jnp.asarray(values) for name, values in catalog.source_parameters.items()

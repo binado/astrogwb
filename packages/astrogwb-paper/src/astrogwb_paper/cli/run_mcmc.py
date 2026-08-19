@@ -126,157 +126,31 @@ def run(
     :class:`~astrogwb_paper.amplitude.AmplitudeMarginalization` built for an
     amplitude-marginalized run, or ``None`` for the default likelihood.
     """
-    from functools import partial
-
     import jax.numpy as jnp
-    from astrogwb.detector import effective_psd, load_sensitivity_map
-    from astrogwb.frequency import (
-        apply_frequency_mask,
-    )
-    from astrogwb.frequency import (
-        frequency_mask as make_frequency_mask,
-    )
-    from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-        make_merger_rate_and_log_weights_fn,
-    )
-    from astrogwb.sampling.models import (
-        amplitude_marginalized_model,
-        spectral_density_model,
-    )
     from numpyro.infer import MCMC, NUTS
     from numpyro.infer.initialization import init_to_value
 
-    from astrogwb_paper.amplitude import build_amplitude_marginalization
-    from astrogwb_paper.catalogs import (
-        PROPOSAL_REDSHIFT_LOGPDF,
-        compute_fiducial_injection_spectrum,
-        load_catalog_arrays,
-        validate_catalog_samples,
-        validate_matching_frequency_grids,
+    from astrogwb_paper.inference import (
+        build_model,
+        initial_values,
+        prepare_inference_inputs,
     )
 
-    analysis = config.analysis
-    cosmo = config.cosmology
-
-    injection = load_catalog_arrays(
-        injection_catalog_path, fiducials=config.fiducials, jnp=jnp
-    )
-    proposal = load_catalog_arrays(
-        proposal_catalog_path, fiducials=config.fiducials, jnp=jnp
-    )
-    validate_catalog_samples(
-        injection,
-        label="injection",
-        z_min=cosmo.z_min,
-        z_max=cosmo.z_max,
-        require_proposal_density=False,
-    )
-    validate_catalog_samples(
-        proposal,
-        label="proposal",
-        z_min=cosmo.z_min,
-        z_max=cosmo.z_max,
-        require_proposal_density=True,
-    )
-    validate_matching_frequency_grids(injection, proposal)
-    frequencies = proposal.frequencies
-    polarization_power = proposal.polarization_power
-    samples = proposal.samples
-    n_freq, n_samples = polarization_power.shape
-    logger.info(
-        "Loaded proposal catalog %s: n_frequency_bins=%d n_proposal_samples=%d",
-        proposal_catalog_path,
-        n_freq,
-        n_samples,
-    )
-    logger.info(
-        "Loaded independent injection catalog %s: n_injection_samples=%d",
+    inputs = prepare_inference_inputs(
         injection_catalog_path,
-        injection.polarization_power.shape[1],
-    )
-
-    # --- Effective PSD and analysis band -------------------------------------
-    sensitivities = load_sensitivity_map(analysis.detectors)
-    effective_psd_arr = jnp.asarray(
-        effective_psd(frequencies, list(analysis.detectors), sensitivities)
-    )
-    freq_mask = make_frequency_mask(
-        frequencies, fmin=analysis.f_min, fmax=analysis.f_max
-    )
-    logger.info(
-        "Analysis band: %d of %d bins (%.1f-%.1f Hz)",
-        int(jnp.sum(freq_mask)),
-        frequencies.shape[0],
-        analysis.f_min,
-        analysis.f_max,
-    )
-
-    z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
-    merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
+        proposal_catalog_path,
         fiducials=config.fiducials,
-        redshift_grid=z_grid,
-        proposal_logprob=samples[PROPOSAL_REDSHIFT_LOGPDF],
-    )
-
-    rate0, observed_spectral_density = compute_fiducial_injection_spectrum(
-        injection,
-        fiducials=config.fiducials,
-        redshift_grid=z_grid,
+        grid=config.analysis_grid,
+        detectors=config.analysis.detectors,
         jnp=jnp,
     )
-    logger.info(
-        "Constructed independent fiducial observed spectrum (rate0=%.4e /s)", rate0
+    model, marginalization = build_model(
+        config,
+        merger_rate_and_log_weights_fn=inputs.merger_rate_and_log_weights_fn,
     )
-
-    (
-        frequencies,
-        polarization_power,
-        observed_spectral_density,
-        effective_psd_arr,
-    ) = apply_frequency_mask(
-        freq_mask,
-        frequencies,
-        polarization_power,
-        observed_spectral_density,
-        effective_psd_arr,
-    )
-
-    # --- Build the model and sampler -----------------------------------------
-    # `config.priors` already holds live distributions (see PriorDistribution).
-    # Project to the sampled parameters: when marginalized, `priors` also
-    # carries the amplitude parameter, which must NOT get a NUTS latent.
-    priors = {name: config.priors[name] for name in config.sampled_params}
-    marginalization = None
-    if analysis.likelihood == "amplitude_marginalized":
-        assert analysis.amplitude_parameter is not None
-        marginalization = build_amplitude_marginalization(config)
-        model = partial(
-            amplitude_marginalized_model,
-            observation_time=config.observation_time,
-            average_mode="analytic_inclination",
-            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-            amplitude_parameter=analysis.amplitude_parameter,
-            fiducials=config.fiducials,
-            amplitude_fn=marginalization.amplitude_fn,
-            amplitude_prior=marginalization.prior,
-            amplitude_grid=marginalization.grid,
-            priors=priors,
-            constants=config.constants,
-        )
-    else:
-        model = partial(
-            spectral_density_model,
-            observation_time=config.observation_time,
-            average_mode="analytic_inclination",
-            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-            priors=priors,
-            constants=config.constants,
-        )
 
     sampler = config.sampler
-    init_strategy = init_to_value(
-        values={name: config.fiducials[name] for name in config.sampled_params}
-    )
+    init_strategy = init_to_value(values=initial_values(config))
     kernel = NUTS(
         model,
         target_accept_prob=sampler.target_accept,
@@ -308,11 +182,7 @@ def run(
     rng_key = jax.random.PRNGKey(config.seed)
     mcmc.run(
         rng_key,
-        frequencies=frequencies,
-        polarization_power=polarization_power,
-        samples=samples,
-        observed_spectral_density=observed_spectral_density,
-        effective_psd=effective_psd_arr,
+        **inputs.masked_model_kwargs(),
         extra_fields=("num_steps", "accept_prob", "diverging"),
     )
 

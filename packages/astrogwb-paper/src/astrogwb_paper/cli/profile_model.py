@@ -8,10 +8,11 @@ shows which XLA ops dominate the model math (the cosmology grid integrals,
 ``jnp.interp`` / ``jnp.trapezoid``, ``madau_dickinson_rate``, and the ``(F, N)``
 ``spectral_density`` contraction).
 
-The model inputs are rebuilt here (not imported from ``run_mcmc``) so this stays
-a self-contained profiling entrypoint; only
-:func:`astrogwb_paper.runtime.configure_runtime` is reused so the JAX device / x64
-setup matches production exactly.
+The model inputs come from :mod:`astrogwb_paper.inference`, the same pipeline
+``astrogwb-run-mcmc`` feeds NUTS, and the runtime from
+:func:`astrogwb_paper.runtime.configure_runtime` -- so what is profiled here is
+the production model on production inputs, with the JAX device / x64 setup
+matching production exactly.
 
 Usage::
 
@@ -34,7 +35,6 @@ import argparse
 import logging
 import time
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 
 from astrogwb_paper.config.loading import load_mapping
@@ -102,154 +102,41 @@ def build_potential(
     proposal_catalog_path: Path,
     jax,
 ):
-    """Rebuild the production model inputs and return (potential_fn, init_params).
+    """Build the production model inputs and return (potential_fn, init_params).
 
-    Mirrors the production runner up to (but excluding) the NUTS/MCMC step, then
-    extracts the potential-energy function via NumPyro's public ``initialize_model``.
+    Shares the inference-input pipeline with ``astrogwb-run-mcmc`` and stops
+    just short of the NUTS/MCMC step, extracting the potential-energy function
+    via NumPyro's public ``initialize_model``.
     """
     import jax.numpy as jnp
-    from astrogwb.detector import effective_psd, load_sensitivity_map
-    from astrogwb.frequency import (
-        apply_frequency_mask,
-    )
-    from astrogwb.frequency import (
-        frequency_mask as make_frequency_mask,
-    )
-    from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-        make_merger_rate_and_log_weights_fn,
-    )
-    from astrogwb.sampling.models import (
-        amplitude_marginalized_model,
-        spectral_density_model,
-    )
     from numpyro.infer.initialization import init_to_value
     from numpyro.infer.util import initialize_model
 
-    from astrogwb_paper.amplitude import build_amplitude_marginalization
-    from astrogwb_paper.catalogs import (
-        PROPOSAL_REDSHIFT_LOGPDF,
-        compute_fiducial_injection_spectrum,
-        load_catalog_arrays,
-        validate_catalog_samples,
-        validate_matching_frequency_grids,
+    from astrogwb_paper.inference import (
+        build_model,
+        initial_values,
+        prepare_inference_inputs,
     )
 
-    analysis = config.analysis
-    cosmo = config.cosmology
-
-    injection = load_catalog_arrays(
-        injection_catalog_path, fiducials=config.fiducials, jnp=jnp
-    )
-    proposal = load_catalog_arrays(
-        proposal_catalog_path, fiducials=config.fiducials, jnp=jnp
-    )
-    validate_catalog_samples(
-        injection,
-        label="injection",
-        z_min=cosmo.z_min,
-        z_max=cosmo.z_max,
-        require_proposal_density=False,
-    )
-    validate_catalog_samples(
-        proposal,
-        label="proposal",
-        z_min=cosmo.z_min,
-        z_max=cosmo.z_max,
-        require_proposal_density=True,
-    )
-    validate_matching_frequency_grids(injection, proposal)
-    frequencies = proposal.frequencies
-    polarization_power = proposal.polarization_power
-    samples = proposal.samples
-    n_freq, n_samples = polarization_power.shape
-    logger.info(
-        "Loaded proposal catalog %s: n_frequency_bins=%d n_proposal_samples=%d",
+    inputs = prepare_inference_inputs(
+        injection_catalog_path,
         proposal_catalog_path,
-        n_freq,
-        n_samples,
-    )
-
-    sensitivities = load_sensitivity_map(analysis.detectors)
-    effective_psd_arr = jnp.asarray(
-        effective_psd(frequencies, list(analysis.detectors), sensitivities)
-    )
-    freq_mask = make_frequency_mask(
-        frequencies, fmin=analysis.f_min, fmax=analysis.f_max
-    )
-
-    z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
-    merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=config.fiducials,
-        redshift_grid=z_grid,
-        proposal_logprob=samples[PROPOSAL_REDSHIFT_LOGPDF],
-    )
-
-    _, observed_spectral_density = compute_fiducial_injection_spectrum(
-        injection,
-        fiducials=config.fiducials,
-        redshift_grid=z_grid,
+        grid=config.analysis_grid,
+        detectors=config.analysis.detectors,
         jnp=jnp,
     )
-
-    (
-        frequencies,
-        polarization_power,
-        observed_spectral_density,
-        effective_psd_arr,
-    ) = apply_frequency_mask(
-        freq_mask,
-        frequencies,
-        polarization_power,
-        observed_spectral_density,
-        effective_psd_arr,
+    model, _ = build_model(
+        config,
+        merger_rate_and_log_weights_fn=inputs.merger_rate_and_log_weights_fn,
     )
 
-    # `config.priors` already holds live distributions (see PriorDistribution).
-    # Project to the sampled parameters: when marginalized, `priors` also
-    # carries the amplitude parameter, which must NOT get a NUTS latent.
-    priors = {name: config.priors[name] for name in config.sampled_params}
-    if analysis.likelihood == "amplitude_marginalized":
-        assert analysis.amplitude_parameter is not None
-        marginalization = build_amplitude_marginalization(config)
-        model = partial(
-            amplitude_marginalized_model,
-            observation_time=config.observation_time,
-            average_mode="analytic_inclination",
-            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-            amplitude_parameter=analysis.amplitude_parameter,
-            fiducials=config.fiducials,
-            amplitude_fn=marginalization.amplitude_fn,
-            amplitude_prior=marginalization.prior,
-            amplitude_grid=marginalization.grid,
-            priors=priors,
-            constants=config.constants,
-        )
-    else:
-        model = partial(
-            spectral_density_model,
-            observation_time=config.observation_time,
-            average_mode="analytic_inclination",
-            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-            priors=priors,
-            constants=config.constants,
-        )
-
-    model_kwargs = {
-        "frequencies": frequencies,
-        "polarization_power": polarization_power,
-        "samples": samples,
-        "observed_spectral_density": observed_spectral_density,
-        "effective_psd": effective_psd_arr,
-    }
-
-    init_strategy = init_to_value(
-        values={name: config.fiducials[name] for name in config.sampled_params}
-    )
+    init_strategy = init_to_value(values=initial_values(config))
     info = initialize_model(
         jax.random.PRNGKey(config.seed),
         model,
         init_strategy=init_strategy,
-        model_kwargs=model_kwargs,
+        model_kwargs=inputs.masked_model_kwargs(),
         forward_mode_differentiation=config.sampler.forward_mode_differentiation,
         dynamic_args=False,
     )

@@ -42,9 +42,13 @@ def test_config_and_runtime_imports_do_not_initialize_jax() -> None:
     code = """
 import sys
 import astrogwb_paper
+import astrogwb_paper.catalogs
+import astrogwb_paper.config.analysis
 import astrogwb_paper.config.mcmc
 import astrogwb_paper.config.figures
+import astrogwb_paper.inference
 import astrogwb_paper.runtime
+import astrogwb_paper.snr
 assert 'jax' not in sys.modules
 """
     result = subprocess.run(
