@@ -73,7 +73,7 @@ def test_catalog_workflow_uses_input_recipes_and_output_tree() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "inputs/catalogs/bns-n8192-df1.toml" in result.stdout
+    assert "inputs/catalogs.yaml" in result.stdout
     assert "outputs/populations/bns-n8192-df1.h5" in result.stdout
     assert "outputs/catalogs/bns-n8192-df1.h5" in result.stdout
 

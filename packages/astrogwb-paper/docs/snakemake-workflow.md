@@ -13,7 +13,7 @@ Source inputs live under `inputs/`; generated artifacts live under `outputs/`.
 
 ## Catalog workflow
 
-Catalog recipes are committed under [`inputs/catalogs/`](../inputs/catalogs).
+Catalog recipes are committed in [`inputs/catalogs.yaml`](../inputs/catalogs.yaml).
 Build a catalog explicitly before running an experiment:
 
 ```bash

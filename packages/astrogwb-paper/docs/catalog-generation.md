@@ -6,7 +6,7 @@ Our inference framework uses an importance sampling scheme to calculate the spec
 
 An example BNS population is defined declaratively in [`packages/astrogwb-paper/examples/bns_population.yaml`](../examples/bns_population.yaml).
 The complete default recipe lives in
-[`inputs/catalogs/bns-n16384-df1.toml`](../inputs/catalogs/bns-n16384-df1.toml).
+[`inputs/catalogs.yaml`](../inputs/catalogs.yaml) under `bns-n16384-df1`.
 Its equivalent explicit population command is:
 
 ```bash
@@ -50,8 +50,10 @@ uv run astrogwb-generate-waveform-catalog \
 --chunk-size 2048
 ```
 
-Each catalog has an independent `inputs/catalogs/<catalog-id>.toml` recipe, so
-editing one recipe cannot invalidate another catalog. Catalog generation is not
+[`inputs/catalogs.yaml`](../inputs/catalogs.yaml) holds the shared base and
+named catalog overlays, matching [`inputs/config.yaml`](../inputs/config.yaml).
+Snakemake rebuilds a catalog when that catalog's resolved settings change, so
+editing one overlay does not rebuild the others. Catalog generation is not
 part of the MCMC submission workflow.
 
 To run the population and waveform steps together as a single reproducible
