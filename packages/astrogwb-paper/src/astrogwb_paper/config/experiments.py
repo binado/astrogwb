@@ -136,13 +136,6 @@ def overlay_for(
     return merge_run_overlay(base, merged)
 
 
-def config_path(experiment_name: str, run: str) -> Path:
-    """Return the committed inventory path for one declared run."""
-    spec = experiment(experiment_name)
-    spec.catalog_for(run)
-    return EXPERIMENTS_PATH
-
-
 def merged_config_path(experiment_name: str, run: str) -> Path:
     """Return the generated canonical JSON path."""
     experiment(experiment_name).catalog_for(run)
@@ -153,11 +146,6 @@ def chain_path(experiment_name: str, run: str) -> Path:
     """Return the generated NetCDF chain path."""
     experiment(experiment_name).catalog_for(run)
     return Path("outputs/chains") / experiment_name / f"{run}.nc"
-
-
-def sidecar_path(experiment_name: str, run: str) -> Path:
-    """Return the generated provenance sidecar path."""
-    return chain_path(experiment_name, run).with_suffix(".json")
 
 
 def chain_paths(experiment_name: str) -> list[str]:

@@ -7,12 +7,10 @@ from astrogwb_paper.config.experiments import (
     DEFAULT_CATALOG,
     EXPERIMENTS_PATH,
     chain_path,
-    config_path,
     load_base,
     load_experiments,
     merged_config_path,
     overlay_for,
-    sidecar_path,
 )
 from astrogwb_paper.config.mcmc import build_run_config
 from astrogwb_paper.paths import paper_project_root
@@ -79,15 +77,11 @@ def test_all_run_configs_are_assembled_together(tmp_path: Path) -> None:
 
 
 def test_run_paths_are_one_to_one_with_the_source_yaml() -> None:
-    assert config_path("cosmological-parameters", "ET-triangular") == EXPERIMENTS_PATH
     assert merged_config_path("cosmological-parameters", "ET-triangular") == Path(
         "outputs/configs/cosmological-parameters/ET-triangular.json"
     )
     assert chain_path("cosmological-parameters", "ET-triangular") == Path(
         "outputs/chains/cosmological-parameters/ET-triangular.nc"
-    )
-    assert sidecar_path("cosmological-parameters", "ET-triangular") == Path(
-        "outputs/chains/cosmological-parameters/ET-triangular.json"
     )
 
 
