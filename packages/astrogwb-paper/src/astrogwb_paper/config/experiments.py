@@ -11,7 +11,7 @@ from astrogwb_paper.config.loading import load_mapping, merge_run_overlay
 from astrogwb_paper.paths import paper_project_root
 
 DEFAULT_CATALOG = Path("outputs/catalogs/bns-n16384-df1.h5")
-CONFIG_PATH = Path("inputs/config.yaml")
+EXPERIMENTS_PATH = Path("inputs/experiments.yaml")
 _INVENTORY_KEYS = frozenset({"base", "experiments"})
 
 
@@ -66,7 +66,7 @@ def load_experiment(name: str, raw: Mapping[str, Any], path: Path) -> Experiment
 
 def inventory_path(root: Path | None = None) -> Path:
     """Return the committed MCMC inventory path."""
-    return (root or paper_project_root()) / CONFIG_PATH
+    return (root or paper_project_root()) / EXPERIMENTS_PATH
 
 
 def load_inventory(path: Path | None = None) -> dict[str, Any]:
@@ -140,7 +140,7 @@ def config_path(experiment_name: str, run: str) -> Path:
     """Return the committed inventory path for one declared run."""
     spec = experiment(experiment_name)
     spec.catalog_for(run)
-    return CONFIG_PATH
+    return EXPERIMENTS_PATH
 
 
 def merged_config_path(experiment_name: str, run: str) -> Path:

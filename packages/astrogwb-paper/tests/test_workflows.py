@@ -143,7 +143,7 @@ def test_config_assembly_reads_the_single_inventory(
 
     assert result.returncode == 0, result.stderr
     assert (
-        "astrogwb-validate-config inputs/config.yaml "
+        "astrogwb-validate-config inputs/experiments.yaml "
         "--output-dir outputs/configs" in result.stdout
     )
     assert result.stdout.count("rule assemble_config:") == 1
@@ -272,7 +272,7 @@ def test_plot_cosmological_parameters_passes_all_paths_not_labels(
 
     assert result.returncode == 0, result.stderr
     assert "rule plot_cosmological_parameters:" in result.stdout
-    assert "--base-config inputs/config.yaml" in result.stdout
+    assert "--base-config inputs/experiments.yaml" in result.stdout
     for flag in (
         "--catalog",
         "--detector-chains",
@@ -324,7 +324,7 @@ def test_standalone_figures_receive_config_paths(
         assert script in result.stdout
     # Every standalone script reads the base config for itself instead of
     # receiving fiducials and analysis bounds as reconstructed flags.
-    assert result.stdout.count("--base-config inputs/config.yaml") == 3
+    assert result.stdout.count("--base-config inputs/experiments.yaml") == 3
     assert "--figure-config" not in result.stdout
     for flag in ("--observation-time", "--f-min", "--h0", "--omega-gw-min"):
         assert flag not in result.stdout

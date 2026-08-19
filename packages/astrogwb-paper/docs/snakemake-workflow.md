@@ -33,7 +33,7 @@ starting catalog generation.
 
 ## Experiment workflow
 
-[`inputs/config.yaml`](../inputs/config.yaml) contains the shared base and all
+[`inputs/experiments.yaml`](../inputs/experiments.yaml) contains the shared base and all
 four experiment groups. YAML aliases reuse common detector and likelihood
 mappings, while experiment and run mappings override inherited values. The
 local `assemble_config` rule validates all 21 runs in one job and writes:

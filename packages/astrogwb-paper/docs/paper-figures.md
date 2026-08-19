@@ -11,11 +11,11 @@ ordered `(run name, LaTeX label)` pairs.
 Input and output paths are both named literally in
 [`Snakefile`](../Snakefile), and every output is a valid
 Snakemake target. Shared scientific values -- fiducials, frequency bounds,
-cosmology grid settings -- stay in `inputs/config.yaml`.
+cosmology grid settings -- stay in `inputs/experiments.yaml`.
 
 Detector *lists* are never hard-coded next to a label: the script names its
 experiment, and `astrogwb_paper.config.figures.resolve_networks` resolves each
-run's detectors from `inputs/config.yaml`. The detectors a figure
+run's detectors from `inputs/experiments.yaml`. The detectors a figure
 reports an SNR for are therefore always the ones its chain was sampled with.
 
 The workflow imports that same tuple and expands its chain paths from it, so
@@ -74,7 +74,7 @@ and importance-weight grids are explicit standalone rules in the unified
 workflow. The fiducial spectrum borrows the six detector networks of the
 `cosmological-parameters` experiment rather than restating them, and keeps its
 `OMEGA_GW_MIN` y-limit next to the axis it sets. All of them read
-`inputs/config.yaml` directly.
+`inputs/experiments.yaml` directly.
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \

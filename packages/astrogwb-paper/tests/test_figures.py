@@ -21,7 +21,7 @@ from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS, DETECTOR_NETWORKS
 
 PAPER_ROOT = paper_project_root()
-BASE_CONFIG = PAPER_ROOT / "inputs/config.yaml"
+BASE_CONFIG = PAPER_ROOT / "inputs/experiments.yaml"
 
 # The experiments whose runs the network legend is resolved against. The
 # fiducial-spectrum figure borrows cosmological-parameters' detector lists.

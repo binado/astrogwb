@@ -4,8 +4,8 @@ from pathlib import Path
 
 from astrogwb_paper.cli.validate_config import main as assemble_configs
 from astrogwb_paper.config.experiments import (
-    CONFIG_PATH,
     DEFAULT_CATALOG,
+    EXPERIMENTS_PATH,
     chain_path,
     config_path,
     load_base,
@@ -39,7 +39,8 @@ def test_inventory_contains_four_experiments_and_21_runs() -> None:
 
 
 def test_single_yaml_is_the_only_mcmc_inventory() -> None:
-    assert (PAPER_ROOT / CONFIG_PATH).is_file()
+    assert (PAPER_ROOT / EXPERIMENTS_PATH).is_file()
+    assert not (PAPER_ROOT / "inputs/config.yaml").exists()
     assert not (PAPER_ROOT / "inputs/mcmc.base.toml").exists()
     assert list((PAPER_ROOT / "experiments").glob("**/*.toml")) == []
 
@@ -62,7 +63,7 @@ def test_every_base_and_run_merge_is_a_valid_run_config() -> None:
 def test_all_run_configs_are_assembled_together(tmp_path: Path) -> None:
     assemble_configs(
         [
-            str(PAPER_ROOT / CONFIG_PATH),
+            str(PAPER_ROOT / EXPERIMENTS_PATH),
             "--output-dir",
             str(tmp_path),
         ]
@@ -78,7 +79,7 @@ def test_all_run_configs_are_assembled_together(tmp_path: Path) -> None:
 
 
 def test_run_paths_are_one_to_one_with_the_source_yaml() -> None:
-    assert config_path("cosmological-parameters", "ET-triangular") == CONFIG_PATH
+    assert config_path("cosmological-parameters", "ET-triangular") == EXPERIMENTS_PATH
     assert merged_config_path("cosmological-parameters", "ET-triangular") == Path(
         "outputs/configs/cosmological-parameters/ET-triangular.json"
     )

@@ -19,7 +19,7 @@ Usage::
         --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
         --catalog outputs/catalogs/bns-n16384-df1.h5
 
-Configs are assembled from the base and run overlays in ``inputs/config.yaml``
+Configs are assembled from the base and run overlays in ``inputs/experiments.yaml``
 by the ``assemble_config`` workflow rule or by
 ``astrogwb-validate-config``; see docs/running-inference.md.
 

@@ -8,7 +8,7 @@ curated inventory first:
 
 ```bash
 uv run astrogwb-validate-config \
-  inputs/config.yaml \
+  inputs/experiments.yaml \
   --output-dir outputs/configs
 
 uv run astrogwb-run-mcmc \
@@ -21,7 +21,7 @@ direct runner and profiling work.
 
 ## Curated experiment runs
 
-[`inputs/config.yaml`](../inputs/config.yaml) is the sole MCMC configuration
+[`inputs/experiments.yaml`](../inputs/experiments.yaml) is the sole MCMC configuration
 source. Its `base` mapping owns settings shared by all runs:
 
 - random seed and observing time;
@@ -34,7 +34,7 @@ source. Its `base` mapping owns settings shared by all runs:
 Its `experiments` mapping declares four groups and all 21 runs:
 
 ```text
-inputs/config.yaml
+inputs/experiments.yaml
   base + experiments.<experiment> + runs.<run>
   -> outputs/configs/<experiment>/<run>.json
   -> outputs/chains/<experiment>/<run>.nc
@@ -58,7 +58,7 @@ The groups are:
 | `variable-injection-size` | `n8192`, `n16384`, and `n32768` |
 
 `assemble_config` is one local Snakemake job. A change to
-`inputs/config.yaml` validates the complete inventory and regenerates all 21
+`inputs/experiments.yaml` validates the complete inventory and regenerates all 21
 canonical JSON files together. Each MCMC job then consumes its own JSON.
 
 Run one experiment's chains through Snakemake from

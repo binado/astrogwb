@@ -3,7 +3,7 @@
 This is the JAX-free gate after each run overlay is merged with the shared
 ``base`` mapping. ``Snakefile`` calls it as::
 
-    astrogwb-validate-config inputs/config.yaml --output-dir outputs/configs
+    astrogwb-validate-config inputs/experiments.yaml --output-dir outputs/configs
 
 Writing ``save_config(RunConfig)`` rather than the raw merge keeps each run
 config self-contained and diff-able: the file on disk always carries every

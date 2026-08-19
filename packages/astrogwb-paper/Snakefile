@@ -12,7 +12,7 @@ from astrogwb_paper.config.experiments import (
 from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS
 
 
-SOURCE_CONFIG = Path("inputs/config.yaml")
+SOURCE_EXPERIMENTS = Path("inputs/experiments.yaml")
 SOURCE_CATALOGS = Path("inputs/catalogs.yaml")
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
 CATALOGS_DIR = Path(config.get("catalogs_dir", "outputs/catalogs"))
@@ -128,7 +128,7 @@ rule bns_waveform_catalog:
 
 rule assemble_config:
     input:
-        config=str(SOURCE_CONFIG),
+        config=str(SOURCE_EXPERIMENTS),
     output:
         CONFIG_OUTPUTS,
     shell:
@@ -189,7 +189,7 @@ rule plot_cosmological_parameters:
         ),
         omega_m_chain="outputs/chains/cosmological-parameters/H0-Omega_m.nc",
         catalog=_catalog(DEFAULT_CATALOG.name),
-        config=str(SOURCE_CONFIG),
+        config=str(SOURCE_EXPERIMENTS),
     output:
         detector_pdf="outputs/figures/cosmological-parameters/H0-by-detector.pdf",
         detector_csv="outputs/figures/cosmological-parameters/H0-by-detector.csv",
@@ -236,7 +236,7 @@ rule plot_modified_propagation:
             run=DETECTOR_NETWORK_RUNS,
         ),
         catalog=_catalog(DEFAULT_CATALOG.name),
-        config=str(SOURCE_CONFIG),
+        config=str(SOURCE_EXPERIMENTS),
     output:
         xi_n_corner_pdf="outputs/figures/modified-propagation/Xi0-n-corner.pdf",
         xi_n_ess_corner_pdf="outputs/figures/modified-propagation/Xi0-n-ess-corner.pdf",
@@ -262,7 +262,7 @@ rule plot_modified_propagation:
 rule amplitude_toy:
     input:
         catalog=_catalog(DEFAULT_CATALOG.name),
-        config=str(SOURCE_CONFIG),
+        config=str(SOURCE_EXPERIMENTS),
     output:
         "outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf",
     shell:
@@ -278,7 +278,7 @@ rule fiducial_spectrum:
     input:
         catalog=_catalog(DEFAULT_CATALOG.name),
         # Borrows the cosmological-parameters networks; reads no chains.
-        config=str(SOURCE_CONFIG),
+        config=str(SOURCE_EXPERIMENTS),
     output:
         spectrum_pdf="outputs/figures/standalone/fiducial_spectrum.pdf",
         effective_psd_pdf=(
@@ -296,7 +296,7 @@ rule fiducial_spectrum:
 rule importance_weights_grid:
     input:
         catalog=_catalog(DEFAULT_CATALOG.name),
-        config=str(SOURCE_CONFIG),
+        config=str(SOURCE_EXPERIMENTS),
     output:
         h0_omega_m_pdf=(
             "outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf"

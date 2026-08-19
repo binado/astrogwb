@@ -1,7 +1,7 @@
 """A complete raw run config for tests, assembled the way production assembles one.
 
 These tests build the same base-plus-run merge that ``assemble_config`` writes
-from ``inputs/config.yaml``. They therefore exercise the configuration path
+from ``inputs/experiments.yaml``. They therefore exercise the configuration path
 that ships instead of maintaining a parallel standalone example.
 
 One difference from the old example is worth knowing when reading these tests:

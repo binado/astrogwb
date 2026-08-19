@@ -6,7 +6,7 @@ label -- is hard-coded in the figure scripts and in
 label is a code change, reviewed with the plot it labels.
 
 What stays here is the part with scientific consequences. Detector *lists* are
-never restated alongside a label: they live in ``inputs/config.yaml`` under
+never restated alongside a label: they live in ``inputs/experiments.yaml`` under
 ``experiments.<name>.runs.<run>.analysis.detectors`` and are attached by
 :func:`resolve_networks`, so the detectors a figure computes an SNR for are
 always the ones its chain was sampled with. Fiducials, the frequency band, and
