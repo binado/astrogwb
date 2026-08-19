@@ -14,10 +14,10 @@ base:
 catalogs:
   bns-n8192-df1:
     population:
-      n_samples: 8192
+      num_samples: 8192
   bns-n16384-df1:
     population:
-      n_samples: 16384
+      num_samples: 16384
   bns-n32768-df1:
     population:
-      n_samples: 32768
+      num_samples: 32768

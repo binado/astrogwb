@@ -19,7 +19,7 @@ class CatalogRecipe:
     """Inputs required to build one reusable waveform catalog."""
 
     population_config: Path
-    n_samples: int
+    num_samples: int
     seed: int
     approximant: str
     sampling_frequency: float
@@ -85,7 +85,7 @@ def _recipe_from_mapping(name: str, raw: Mapping[str, Any]) -> CatalogRecipe:
         waveform = raw["waveform"]
         return CatalogRecipe(
             population_config=Path(population["config"]),
-            n_samples=int(population["n_samples"]),
+            num_samples=int(population["num_samples"]),
             seed=int(population["seed"]),
             approximant=str(waveform["approximant"]),
             sampling_frequency=float(waveform["sampling_frequency"]),

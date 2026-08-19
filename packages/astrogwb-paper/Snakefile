@@ -87,14 +87,14 @@ rule bns_population:
     output:
         "outputs/populations/{catalog}.h5",
     params:
-        n_samples=lambda wc: recipe(wc).n_samples,
+        num_samples=lambda wc: recipe(wc).num_samples,
         seed=lambda wc: recipe(wc).seed,
         outdir="outputs/populations",
     shell:
         "mkdir -p {params.outdir:q}\n"
         "uv run --package astrogwb-paper gwmock-pop simulate"
         " --config {input.population_config:q}"
-        " --n {params.n_samples}"
+        " --n {params.num_samples}"
         " --output {output:q}"
         " --seed {params.seed}"
 

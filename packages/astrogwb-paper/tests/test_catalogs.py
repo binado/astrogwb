@@ -22,8 +22,8 @@ def test_catalog_inventory_loads_three_shared_recipes() -> None:
     catalogs = load_catalogs()
 
     assert set(catalogs) == {"bns-n8192-df1", "bns-n16384-df1", "bns-n32768-df1"}
-    assert catalog_recipe("bns-n16384-df1").n_samples == 16384
-    assert {name: recipe.n_samples for name, recipe in catalogs.items()} == {
+    assert catalog_recipe("bns-n16384-df1").num_samples == 16384
+    assert {name: recipe.num_samples for name, recipe in catalogs.items()} == {
         "bns-n8192-df1": 8192,
         "bns-n16384-df1": 16384,
         "bns-n32768-df1": 32768,
