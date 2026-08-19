@@ -5,7 +5,6 @@ from astrogwb_paper.config.catalogs import (
     CATALOGS_PATH,
     catalog_recipe,
     load_catalogs,
-    load_inventory,
 )
 from astrogwb_paper.paths import paper_project_root
 
@@ -46,7 +45,7 @@ def test_catalog_inventory_rejects_unknown_top_level_keys(tmp_path: Path) -> Non
     )
 
     with pytest.raises(ValueError, match="unknown top-level keys: extra"):
-        load_inventory(inventory)
+        load_catalogs(inventory)
 
 
 def test_catalog_recipe_rejects_missing_settings(tmp_path: Path) -> None:

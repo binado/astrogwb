@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrogwb_paper.config.loading import deep_merge, load_mapping
+from astrogwb_paper.config.loading import deep_merge, load_inventory
 from astrogwb_paper.paths import paper_project_root
 
 CATALOGS_PATH = Path("inputs/catalogs.yaml")
-_INVENTORY_KEYS = frozenset({"base", "catalogs"})
+_INVENTORY_SECTIONS = ("base", "catalogs")
 
 
 @dataclass(frozen=True)
@@ -35,26 +35,10 @@ def inventory_path(root: Path | None = None) -> Path:
     return (root or paper_project_root()) / CATALOGS_PATH
 
 
-def load_inventory(path: Path | None = None) -> dict[str, Any]:
-    """Load and validate the top-level catalog YAML inventory."""
-    resolved = path or inventory_path()
-    raw = load_mapping(resolved)
-    unknown = sorted(set(raw) - _INVENTORY_KEYS)
-    if unknown:
-        raise ValueError(f"{resolved} has unknown top-level keys: {', '.join(unknown)}")
-    base = raw.get("base")
-    catalogs = raw.get("catalogs")
-    if not isinstance(base, Mapping) or not base:
-        raise ValueError(f"{resolved} must define a non-empty base mapping")
-    if not isinstance(catalogs, Mapping) or not catalogs:
-        raise ValueError(f"{resolved} must define non-empty catalogs")
-    return raw
-
-
 def load_catalogs(path: Path | None = None) -> dict[str, CatalogRecipe]:
     """Load every committed catalog recipe from the YAML inventory."""
     resolved = path or inventory_path()
-    raw = load_inventory(resolved)
+    raw = load_inventory(resolved, required=_INVENTORY_SECTIONS)
     base = raw["base"]
     catalogs_raw = raw["catalogs"]
     assert isinstance(base, Mapping)

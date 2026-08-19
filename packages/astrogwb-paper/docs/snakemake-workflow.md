@@ -33,9 +33,10 @@ starting catalog generation.
 
 ## Experiment workflow
 
-[`inputs/experiments.yaml`](../inputs/experiments.yaml) contains the shared base and all
-four experiment groups. YAML aliases reuse common detector and likelihood
-mappings, while experiment and run mappings override inherited values. The
+[`inputs/experiments.yaml`](../inputs/experiments.yaml) contains the shared base, a
+`networks` block naming each detector network once, and all four experiment
+groups. Runs alias a network rather than restating its detector list, while
+experiment and run mappings override inherited values. The
 local `assemble_config` rule validates all 21 runs in one job and writes:
 
 ```text

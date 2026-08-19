@@ -7,12 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrogwb_paper.config.loading import load_mapping, merge_run_overlay
+from astrogwb_paper.config.loading import load_inventory, merge_run_overlay
 from astrogwb_paper.paths import paper_project_root
 
 DEFAULT_CATALOG = Path("outputs/catalogs/bns-n16384-df1.h5")
 EXPERIMENTS_PATH = Path("inputs/experiments.yaml")
-_INVENTORY_KEYS = frozenset({"base", "experiments"})
+_REQUIRED_SECTIONS = ("base", "experiments")
+# `networks` exists purely to anchor detector lists for the runs to alias.
+_OPTIONAL_SECTIONS = ("networks",)
 
 
 @dataclass(frozen=True)
@@ -84,31 +86,21 @@ def inventory_path(root: Path | None = None) -> Path:
     return (root or paper_project_root()) / EXPERIMENTS_PATH
 
 
-def load_inventory(path: Path | None = None) -> dict[str, Any]:
-    """Load and validate the top-level YAML inventory."""
-    resolved = path or inventory_path()
-    raw = load_mapping(resolved)
-    unknown = sorted(set(raw) - _INVENTORY_KEYS)
-    if unknown:
-        raise ValueError(f"{resolved} has unknown top-level keys: {', '.join(unknown)}")
-    base = raw.get("base")
-    experiments = raw.get("experiments")
-    if not isinstance(base, Mapping) or not base:
-        raise ValueError(f"{resolved} must define a non-empty base mapping")
-    if not isinstance(experiments, Mapping) or not experiments:
-        raise ValueError(f"{resolved} must define non-empty experiments")
-    return raw
+def _load_inventory(path: Path) -> dict[str, Any]:
+    return load_inventory(
+        path, required=_REQUIRED_SECTIONS, optional=_OPTIONAL_SECTIONS
+    )
 
 
 def load_base(path: Path | None = None) -> dict[str, Any]:
     """Load the shared run configuration from the YAML inventory."""
-    return dict(load_inventory(path)["base"])
+    return dict(_load_inventory(path or inventory_path())["base"])
 
 
 def load_experiments(path: Path | None = None) -> dict[str, Experiment]:
     """Load every committed experiment from the YAML inventory."""
     resolved = path or inventory_path()
-    raw = load_inventory(resolved)
+    raw = _load_inventory(resolved)
     experiments_raw = raw["experiments"]
     assert isinstance(experiments_raw, Mapping)
     experiments: dict[str, Experiment] = {}

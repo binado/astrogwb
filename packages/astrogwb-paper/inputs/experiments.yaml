@@ -70,33 +70,41 @@ base:
     outdir: outputs/chains
     label: ""
 
+networks:
+  ET-triangular: &et_triangular
+    detectors: [E1, E2, E3]
+  ET-triangular-CE-Hanford: &et_triangular_ce
+    detectors: [E1, E2, E3, C1]
+  ET-2L-aligned: &et_2l_aligned
+    detectors: [S1, R1]
+  ET-2L-aligned-CE-Hanford: &et_2l_aligned_ce
+    detectors: [S1, R1, C1]
+  ET-2L-misaligned: &et_2l_misaligned
+    detectors: [S2, R2]
+  ET-2L-misaligned-CE-Hanford: &et_2l_misaligned_ce
+    detectors: [S2, R2, C1]
+
 experiments:
   cosmological-parameters:
     runs:
       ET-triangular:
         sampled_params: [H0]
-        analysis: &et_triangular
-          detectors: [E1, E2, E3]
+        analysis: *et_triangular
       ET-triangular-CE-Hanford:
         sampled_params: [H0]
-        analysis: &et_triangular_ce
-          detectors: [E1, E2, E3, C1]
+        analysis: *et_triangular_ce
       ET-2L-aligned:
         sampled_params: [H0]
-        analysis: &et_2l_aligned
-          detectors: [S1, R1]
+        analysis: *et_2l_aligned
       ET-2L-aligned-CE-Hanford:
         sampled_params: [H0]
-        analysis: &et_2l_aligned_ce
-          detectors: [S1, R1, C1]
+        analysis: *et_2l_aligned_ce
       ET-2L-misaligned:
         sampled_params: [H0]
-        analysis: &et_2l_misaligned
-          detectors: [S2, R2]
+        analysis: *et_2l_misaligned
       ET-2L-misaligned-CE-Hanford:
         sampled_params: [H0]
-        analysis: &et_2l_misaligned_ce
-          detectors: [S2, R2, C1]
+        analysis: *et_2l_misaligned_ce
       H0-Omega_m:
         sampled_params: [Omega_m]
         analysis: &amplitude_marginalized
