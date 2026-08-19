@@ -15,9 +15,9 @@ from expensive waveform generation.
 ## Source populations
 
 The fiducial source graph is
-[`examples/bns_population.yaml`](../examples/bns_population.yaml). The uniform
+[`inputs/populations/bns_population.yaml`](../inputs/populations/bns_population.yaml). The uniform
 guard graph is
-[`examples/bns_population_uniform_redshift.yaml`](../examples/bns_population_uniform_redshift.yaml).
+[`inputs/populations/bns_population_uniform_redshift.yaml`](../inputs/populations/bns_population_uniform_redshift.yaml).
 They must differ only in the redshift sampler. All other distributions and
 redshift-dependent transforms are identical, because the current importance
 ratio explicitly contains only the redshift proposal density.
@@ -26,13 +26,13 @@ Source pools are ordinary `gwmock-pop` outputs:
 
 ```bash
 uv run gwmock-pop simulate \
-  --config examples/bns_population.yaml \
+  --config inputs/populations/bns_population.yaml \
   --n 32768 \
   --output outputs/populations/sources/proposal-fiducial.h5 \
   --seed 42
 
 uv run gwmock-pop simulate \
-  --config examples/bns_population_uniform_redshift.yaml \
+  --config inputs/populations/bns_population_uniform_redshift.yaml \
   --n 32768 \
   --output outputs/populations/sources/proposal-uniform-redshift.h5 \
   --seed 43
@@ -64,8 +64,8 @@ uv run astrogwb-assemble-population \
   --operation mixture \
   --source outputs/populations/sources/proposal-fiducial.h5 --weight 0.8 \
   --source outputs/populations/sources/proposal-uniform-redshift.h5 --weight 0.2 \
-  --source-config examples/bns_population.yaml \
-  --source-config examples/bns_population_uniform_redshift.yaml \
+  --source-config inputs/populations/bns_population.yaml \
+  --source-config inputs/populations/bns_population_uniform_redshift.yaml \
   --uniform-redshift-fraction 0.2 \
   --num-samples 16384 --seed 142 \
   --output outputs/populations/production/proposals/bns-n16384-df1.h5

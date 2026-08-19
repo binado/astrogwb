@@ -19,15 +19,15 @@ base:
 
 sources:
   injection-fiducial:
-    config: examples/bns_population.yaml
+    config: inputs/populations/bns_population.yaml
     num_samples: 32768
     seed: 41
   proposal-fiducial:
-    config: examples/bns_population.yaml
+    config: inputs/populations/bns_population.yaml
     num_samples: 32768
     seed: 42
   proposal-uniform-redshift:
-    config: examples/bns_population_uniform_redshift.yaml
+    config: inputs/populations/bns_population_uniform_redshift.yaml
     num_samples: 32768
     seed: 43
 

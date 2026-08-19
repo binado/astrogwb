@@ -82,9 +82,11 @@ def test_guarded_logpdf_is_finite_in_fiducial_tail() -> None:
     redshift = np.array([0.0, 1.0, 10.0, 20.0])
     actual = guarded_proposal_logpdf(
         redshift,
-        fiducial_config=load_mapping(PAPER_ROOT / "examples/bns_population.yaml"),
+        fiducial_config=load_mapping(
+            PAPER_ROOT / "inputs/populations/bns_population.yaml"
+        ),
         uniform_config=load_mapping(
-            PAPER_ROOT / "examples/bns_population_uniform_redshift.yaml"
+            PAPER_ROOT / "inputs/populations/bns_population_uniform_redshift.yaml"
         ),
         epsilon=0.2,
     )
@@ -95,8 +97,10 @@ def test_guarded_logpdf_is_finite_in_fiducial_tail() -> None:
 
 
 def test_guarded_components_may_differ_only_in_redshift() -> None:
-    fiducial = load_mapping(PAPER_ROOT / "examples/bns_population.yaml")
-    uniform = load_mapping(PAPER_ROOT / "examples/bns_population_uniform_redshift.yaml")
+    fiducial = load_mapping(PAPER_ROOT / "inputs/populations/bns_population.yaml")
+    uniform = load_mapping(
+        PAPER_ROOT / "inputs/populations/bns_population_uniform_redshift.yaml"
+    )
     uniform["parameters"]["spin_1z"]["sampler"]["arguments"]["minimum"] = -0.1
 
     with pytest.raises(ValueError, match="may differ only in redshift"):
