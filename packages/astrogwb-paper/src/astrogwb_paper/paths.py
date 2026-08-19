@@ -40,3 +40,14 @@ def workspace_root(*, start: Path | None = None) -> Path:
 def paper_project_root() -> Path:
     """Return the root of the ``astrogwb-paper`` workspace member."""
     return workspace_root() / _PAPER_PROJECT
+
+
+def resolve_paper_path(path: Path, root: Path | None = None) -> Path:
+    """Resolve a possibly relative path against the paper workspace member.
+
+    Absolute paths pass through unchanged. Callers that resolve several paths
+    should look ``root`` up once and pass it in.
+    """
+    if path.is_absolute():
+        return path
+    return (root if root is not None else paper_project_root()) / path

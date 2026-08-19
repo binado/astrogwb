@@ -1,0 +1,23 @@
+base:
+  population:
+    config: examples/bns_population.yaml
+    seed: 42
+  waveform:
+    approximant: IMRPhenomXAS_NRTidalv3
+    sampling_frequency: 8192.0
+    minimum_frequency: 2.0
+    maximum_frequency: 4096.0
+    reference_frequency: 20.0
+    frequency_resolution: 1.0
+    chunk_size: 2048
+
+catalogs:
+  bns-n8192-df1:
+    population:
+      num_samples: 8192
+  bns-n16384-df1:
+    population:
+      num_samples: 16384
+  bns-n32768-df1:
+    population:
+      num_samples: 32768

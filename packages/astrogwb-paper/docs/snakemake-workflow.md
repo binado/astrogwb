@@ -1,256 +1,152 @@
-# Snakemake workflow
+# Snakemake workflows
 
-Three Snakefiles orchestrate the pipeline stages, each backend-agnostic and
-driven by a committed Snakemake *profile* that decides where jobs run:
+The paper application has one top-level [`Snakefile`](../Snakefile). It
+contains both the catalog rules that generate populations and waveform
+catalogs, and the experiment rules that assemble configs, sample chains, and
+build figures.
 
-- [`workflow/catalog.smk`](../workflow/catalog.smk): joins population and
-  waveform generation (see [Generating catalogs](./catalog-generation.md)).
-- [`workflow/mcmc.smk`](../workflow/mcmc.smk): submits MCMC sweep configs
-  (see [Running inference](./running-inference.md)).
-- [`workflow/paper.smk`](../workflow/paper.smk): builds paper figures
-  (see [Paper figures](./paper-figures.md)).
+`snakemake` is invoked directly; preview with `--dry-run` (Snakemake executes
+for real unless it is passed).
 
-The `astrogwb-workflow` CLI wraps common invocations
-(`uv run astrogwb-workflow --help`). Snakemake subcommands default to
-`--dry-run`; pass `--submit` for a real run. The CLI expands to the same
-`uv run snakemake …` commands shown below.
-
-Manual `snakemake` / `gwmock-pop` / `astrogwb-run-mcmc` invocations shown on
-this page and the docs it links to assume `cwd = packages/astrogwb-paper/`;
-`astrogwb-workflow` itself works from any directory regardless.
+All commands run with `packages/astrogwb-paper/` as their working directory.
+Source inputs live under `inputs/`; generated artifacts live under `outputs/`.
 
 ## Catalog workflow
 
-Requesting a waveform catalog builds its missing or stale population first:
+Catalog recipes are committed in [`inputs/catalogs.yaml`](../inputs/catalogs.yaml).
+Build a catalog explicitly before running an experiment:
 
 ```bash
-uv run astrogwb-workflow catalog out/catalogs/bns-n16384-df1.h5 --submit
-# expands to:
-# uv run --package astrogwb-paper --group workflow snakemake \
-#   --snakefile workflow/catalog.smk --cores 1 \
-#   out/catalogs/bns-n16384-df1.h5
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules bns_population bns_waveform_catalog \
+  --dry-run outputs/catalogs/bns-n16384-df1.h5
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules bns_population bns_waveform_catalog \
+  outputs/catalogs/bns-n16384-df1.h5
 ```
 
-## MCMC workflow
+The DAG first creates `outputs/populations/<catalog>.h5`, then creates
+`outputs/catalogs/<catalog>.h5`. The `--allowed-rules` filter deliberately
+keeps catalog generation explicit. MCMC commands omit the two catalog rules,
+so a missing catalog stops MCMC with a `MissingInputException` instead of
+starting catalog generation.
 
-### Batch manifests
+## Experiment workflow
 
-Generate sweep configs as described in
-[Generating sweep configs](./running-inference.md#generating-sweep-configs).
-Add `--write-manifests` to also (re)generate a full-sweep batch manifest per
-campaign —
-`configs/mcmc/manifests/mcmc.batch.{cosmology,cosmology-all-detectors,astrophysical,astrophysical-all-detectors,modified-propagation-all-detectors}.json`
-— each holding only `chains_dir` and every config just written for that
-campaign; manifests carry no catalog field (see below). Existing manifests
-are skipped unless `--force` is supplied, same as the JSON configs. Like the
-JSON configs, generated manifests are gitignored (`configs/mcmc/manifests/`):
-they are fully reproducible from `configs/mcmc.sweeps.toml`, so there is
-nothing to commit.
+[`inputs/experiments.yaml`](../inputs/experiments.yaml) contains the shared base, a
+`networks` block naming each detector network once, and all four experiment
+groups. Runs alias a network rather than restating its detector list, while
+experiment and run mappings override inherited values. The
+local `assemble_config` rule validates all 21 runs in one job and writes:
+
+```text
+outputs/configs/<experiment>/<run>.json
+```
+
+The generic `run_mcmc` rule then writes:
+
+```text
+outputs/chains/<experiment>/<run>.nc
+```
+
+The chain is protected. Its assembled config under `outputs/configs/` is the
+record of the resolved scientific configuration.
+
+The curated inventory is:
+
+| Experiment | Runs | Figures |
+| --- | ---: | --- |
+| `cosmological-parameters` | 6 detector runs plus `H0-Omega_m` and `H0-merger-rate` | input to `plot_cosmological_parameters` |
+| `modified-propagation` | 6 detector runs plus `Xi_0` and `Xi_0-H0` | corners, marginal comparison, and tables |
+| `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` | chains only |
+| `variable-injection-size` | 8192, 16384, and 32768 injections | chains only |
+
+Run one experiment's chains:
 
 ```bash
-uv run astrogwb-workflow gen-configs
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc cosmological_parameters_chains \
+  --profile profiles/local --cores 8 --dry-run cosmological_parameters_chains
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc cosmological_parameters_chains \
+  --profile profiles/slurm cosmological_parameters_chains
 ```
 
-Batch submission uses an explicit manifest such as
-[`packages/astrogwb-paper/configs/mcmc.batch.example.json`](../configs/mcmc.batch.example.json) — plain
-JSON, since Snakemake's `--configfile` loader tries JSON before YAML
-regardless of extension. The manifest lists `chains_dir` and every MCMC
-config to submit; it carries no catalog field. `packages/astrogwb-paper/workflow/mcmc.smk` sources
-the catalog separately from [`configs/workflow.yaml`](../configs/workflow.yaml)
-(shared with the paper workflow) via a `configfile:` directive, deriving
-`out/catalogs/<id>.h5` from `catalog.id` unless `catalog.path` is set
-explicitly. This decouples which runs make up a campaign (the manifest, fully
-reproducible from `configs/mcmc.sweeps.toml`) from which data file to
-reweight (the catalog) — the same manifest runs against any catalog by
-editing `configs/workflow.yaml` or passing an extra `--configfile` that
-overrides `catalog`, with no manifest regeneration required. Chains remain
-namespaced by catalog ID. A missing catalog or config stops the workflow
-instead of triggering preprocessing.
-
-To select a catalog in the standard `out/catalogs/<id>.h5` location, override
-only its ID. For a catalog stored elsewhere, provide both the ID used to
-namespace chains and the catalog path:
+Build the paper's complete cosmological-parameter section:
 
 ```bash
-# Uses out/catalogs/my-catalog.h5.
---config "catalog={'id':'my-catalog'}"
-
-# Uses an externally stored catalog.
---config "catalog={'id':'my-catalog','path':'/data/catalogs/my-catalog.h5'}"
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
+  --profile profiles/slurm plot_cosmological_parameters
 ```
 
-Append the appropriate `--config` argument after `--` on
-`astrogwb-workflow mcmc …` (or directly on snakemake). Use the nested
-dictionary syntax shown here rather than a flat `catalog.id=...` key.
+This single local post-processing rule consumes all eight chains from
+`cosmological-parameters`, then writes five figures and two CSV/LaTeX table
+pairs. Requesting any one cosmological-parameter output path schedules the full
+section.
 
-Snakemake replaces a profile's entire `config:` list when you pass any CLI
-`--config`, and repeated `--config` flags do not merge (the last one wins).
-That is why a bare `--config "catalog=…"` against `packages/astrogwb-paper/profiles/slurm-cpu` used to
-drop `jax_platforms=cpu` and fall back to the Snakefile's `cuda` default on
-CPU nodes. `astrogwb-workflow mcmc` coalesces every `--config` KEY=VALUE
-into one flag and re-injects `jax_platforms=cpu` for the `local` and
-`slurm-cpu` profiles. If you invoke snakemake directly, pass both keys in one
-`--config` group, e.g.
-`--config jax_platforms=cpu "catalog={'id':'my-catalog'}"`.
+Multiple chain targets may be supplied. Each experiment also has a complete
+target named after it (`cosmological_parameters`, `modified_propagation`, ...),
+which builds its figures where it has a figure rule and its chains otherwise.
+The `experiments` target builds all four.
 
-Note the manifest schema has no `jax_platforms` field: which JAX backend to
-initialize is a runtime concern owned by the Snakemake profile you run with
-(`packages/astrogwb-paper/profiles/local`, `packages/astrogwb-paper/profiles/slurm`, `packages/astrogwb-paper/profiles/slurm-cpu`), not a property of
-an MCMC campaign, so it is never written by the generator. `packages/astrogwb-paper/workflow/mcmc.smk`
-itself defaults to `cuda` when a manifest doesn't set it.
+When passing CLI `--config` overrides to a CPU profile (`local`, `slurm-cpu`),
+repeat `jax_platforms=cpu` in the same `--config` group: Snakemake replaces
+the profile's whole `config:` list rather than merging.
 
-Dry-run the selected batch (default; omit `--submit`):
+## SLURM chains and local figures
+
+The committed `slurm` and `slurm-cpu` profiles use the SLURM executor for
+`run_mcmc`. Config assembly and all plotting/table rules are declared with
+Snakemake's `localrules`, so they execute on the submit host.
+
+For the `plot_cosmological_parameters` target, Snakemake:
+
+1. assembles and validates all 21 configs in one local job;
+2. submits the eight missing chains to SLURM;
+3. waits for the chain outputs;
+4. executes the one figure-and-table rule locally.
+
+Keep the Snakemake controller alive for the whole run. The submit host must
+share the output filesystem with the compute nodes and have the `plotting`
+dependency group installed. Both SLURM profiles set a two-core local-rule
+budget.
+
+Profile summary:
+
+| Profile | Executor | MCMC resources | JAX backend |
+| --- | --- | --- | --- |
+| `local` | local | 4 threads per run | CPU |
+| `slurm` | SLURM GPU | 1 GPU, 4 CPUs, 8 GB, 12 h | CUDA |
+| `slurm-cpu` | SLURM CPU | 4 CPUs, 16 GB, 24 h | CPU |
+
+Runtime platform settings belong to profiles, not the experiment inventory, and
+do not enter the scientific config hash.
+
+## Standalone figures
+
+Figures without an MCMC experiment remain explicit local rules in the unified
+Snakefile -- there is no aggregate target, so request the rules or their
+outputs directly:
 
 ```bash
-uv run astrogwb-workflow mcmc configs/mcmc.batch.example.json --profile local
+snakemake --snakefile Snakefile --cores 1 amplitude_toy \
+  --allowed-rules amplitude_toy fiducial_spectrum importance_weights_grid \
+  fiducial_spectrum importance_weights_grid
 ```
 
-### Deploying on a SLURM cluster
+These cover the amplitude toy model, fiducial spectrum, effective
+detector PSDs, and importance-weight grids. Input and output paths are both
+named literally in each rule. Presentation -- labels, run order, plot limits --
+is hard-coded in the scripts in [`scripts/`](../scripts/) rather than passed on
+argv or loaded from a config the workflow has to parse first.
 
-The workflow submits to SLURM through a committed Snakemake *profile* — a bundle
-of executor flags and rule-specific resource overrides. The Snakefile itself is
-backend-agnostic; the profile decides *where* jobs land. Two profiles ship with
-the repo:
+## Re-running protected results
 
-| Profile | Partition | GPU / CPUs | Mem / walltime | JAX backend |
-| --- | --- | --- | --- | --- |
-| `packages/astrogwb-paper/profiles/slurm` | `gpu` | `gpu: 1`, `cpus_per_gpu: 4` | 8 GB / 12 h (`runtime: 720`) | `cuda` |
-| `packages/astrogwb-paper/profiles/slurm-cpu` | `cpu` | 4 CPUs via `set-threads` | 16 GB / 24 h (`runtime: 1440`) | `cpu` |
+Config mtimes do not invalidate expensive chains; the assembled config under
+`outputs/configs/` records their actual inputs. To intentionally resample, make
+the protected chain writable and use Snakemake's force controls. Always dry-run
+first.
 
-Both batch compatible `run_mcmc` jobs into a SLURM array. The GPU profile
-requests one GPU and ties four CPUs to it via `cpus_per_gpu` (plugin-native
-`gpu` / `cpus_per_gpu` resources, not `--gres`). The CPU profile (and
-`astrogwb-workflow` for `local` / `slurm-cpu`) sets `jax_platforms=cpu`
-(passed through as `--platform cpu`) so JAX does not try to initialize CUDA
-on a CPU node, and spends rule threads on `--host-device-count` (one logical
-device per concurrent chain, with `--cpu-threads` pinned to 1).
-
-1. **Install the executor plugin on the submit host.** The `slurm` group pulls
-   in `snakemake-executor-plugin-slurm`. Add `--extra cuda` for the GPU
-   profile (omit it for CPU-only):
-
-   ```bash
-   uv sync --package astrogwb-paper --extra cuda --group slurm # GPU profile
-   uv sync --package astrogwb-paper --group slurm              # CPU profile
-   ```
-
-2. **Prepare the batch manifest.** Generate sweep configs and their manifests
-   with `uv run astrogwb-workflow gen-configs` if you haven't already —
-   this writes one gitignored manifest per campaign under
-   `configs/mcmc/manifests/` (regenerate them on whichever host needs them),
-   including the quick ET-2L campaigns and the `*-all-detectors` campaigns.
-   Copy the one you want (or
-   [`packages/astrogwb-paper/configs/mcmc.batch.example.json`](../configs/mcmc.batch.example.json) for a
-   hand-picked selection). Manifests carry no catalog field, so which catalog
-   to use is set separately: `packages/astrogwb-paper/workflow/mcmc.smk` sources it from
-   [`configs/workflow.yaml`](../configs/workflow.yaml). Point that file's
-   `catalog.id` (and `catalog.path`, if the catalog doesn't live at the
-   default `out/catalogs/<id>.h5`) at one existing catalog before submitting.
-
-3. **Dry-run before every real submission** to see the job graph without touching
-   the scheduler (`astrogwb-workflow` defaults to `--dry-run`):
-
-   ```bash
-   uv run astrogwb-workflow mcmc /home/user/batches/paper-h0.json --profile slurm
-   ```
-
-4. **Submit.** Pass `--submit` and pick `--profile` for your target partition —
-   this is the only change needed to switch between GPU and CPU:
-
-   ```bash
-   # GPU nodes
-   uv run astrogwb-workflow mcmc /home/user/batches/paper-h0.json \
-     --profile slurm --submit
-
-   # CPU nodes
-   uv run astrogwb-workflow mcmc /home/user/batches/paper-h0.json \
-     --profile slurm-cpu --submit
-   ```
-
-   Equivalent expanded form for the GPU path:
-
-   ```bash
-   uv run --package astrogwb-paper --group workflow snakemake \
-     --snakefile workflow/mcmc.smk \
-     --profile profiles/slurm \
-     --configfile /home/user/batches/paper-h0.json \
-     mcmc
-   ```
-
-   Keep the Snakemake process alive for the duration of the run (submit inside
-   `tmux`/`screen` or as a lightweight batch job); it stays up submitting and
-   polling the array. Per-job SLURM logs land under `.snakemake/slurm_logs/`.
-
-The partition names (`gpu`, `cpu`) are cluster-specific — verify them with
-`sinfo -s` and edit the `slurm_partition` in the relevant profile if they
-differ. Adjust `set-threads` for the CPU allocation, and `mem_mb` / `runtime`
-under the profile's `set-resources.run_mcmc` entry.
-
-### Running a batch locally on multiple cores
-
-For smaller sweeps you can skip SLURM entirely and let Snakemake pack
-independent `run_mcmc` jobs across the cores of your own machine with
-[`profiles/local`](../profiles/local/config.yaml). It forces the CPU JAX backend
-and passes rule threads as `--host-device-count` (with `--cpu-threads` pinned to
-1) so each job gets one logical device per concurrent chain without
-oversubscribing BLAS/XLA. The core budget lives only in the profile; it never
-enters a run's config hash. Keep `set-threads.run_mcmc` ≥ the run config's
-`[sampler] num_chains`.
-
-As a worked example, run the **cosmology** (quick ET-2L) sweep locally. First
-generate the sweep configs and their batch manifest (writes
-`packages/astrogwb-paper/configs/mcmc/cosmology/<network>__<analysis>__<observation>.json`
-and `packages/astrogwb-paper/configs/mcmc/manifests/mcmc.batch.cosmology.json`):
-
-```bash
-uv run astrogwb-workflow gen-configs
-```
-
-The generated `mcmc.batch.cosmology.json` now lists all 8 cosmology
-sweep points (2 networks × 4 analyses × 1 observation). For the full six-network
-grid use `mcmc.batch.cosmology-all-detectors.json` (24 points). To run only a
-subset locally — e.g. a few ET-2L `H0` analyses — copy the manifest somewhere
-and trim the `runs` list rather than editing the generated file in place (the
-next `--write-manifests --force` run overwrites it):
-
-```bash
-cp configs/mcmc/manifests/mcmc.batch.cosmology.json \
-  configs/mcmc.batch.cosmology-local.json
-# then trim the copied manifest to the runs you want
-```
-
-Dry-run, then submit on (say) 8 cores. With the profile's `run_mcmc=4` thread
-override, Snakemake runs `floor(8 / 4) = 2` sweep points at a time:
-
-```bash
-uv run astrogwb-workflow mcmc configs/mcmc.batch.cosmology-local.json --profile local
-uv run astrogwb-workflow mcmc configs/mcmc.batch.cosmology-local.json \
-  --profile local --submit
-```
-
-To trade per-run speed for more concurrency, lower the `set-threads` value in
-`packages/astrogwb-paper/profiles/local`: `run_mcmc=2` runs four sweep points at once on the same 8
-cores (and must still be ≥ each run's `num_chains`). For a large sweep, prefer
-single-chain configs (`num_chains = 1`) and let the job level do the work.
-
-## Paper workflow
-
-[`workflow/paper.smk`](../workflow/paper.smk) builds paper figures from
-[`configs/paper.toml`](../configs/paper.toml) and the catalog selected in
-[`configs/workflow.yaml`](../configs/workflow.yaml). Dry-run and build commands
-live in [Paper figures](./paper-figures.md); this page covers only how the
-Snakefiles source catalogs, chains, and configuration.
-
-## Reproducibility
-
-Reproducibility is layered on committed catalog recipes, fixed population seeds,
-and content hashes instead of lock files. Each chain sidecar records the exact
-catalog path and SHA-256 used; its MCMC config hash excludes output routing and
-is independent of catalog selection. Snakemake reruns selected chains after
-their catalog or config changes.
-Chains and sidecars are written `protected()` (read-only); before intentionally
-redoing a run, `chmod +w` its outputs and rerun with `--forcerun`.
-
-Existing non-namespaced chains are left untouched. Always dry-run before real
-cluster submissions. The MCMC workflow cannot generate catalogs, and the paper
-workflow cannot generate catalogs or chains.
+The old `out/`, `chains/`, and `figures/` trees are not migrated automatically;
+the refactored workflow writes only beneath `outputs/`.

@@ -10,10 +10,9 @@ from astrogwb_paper.paths import paper_project_root
 
 COMMANDS = (
     "astrogwb-run-mcmc",
-    "astrogwb-generate-mcmc-configs",
+    "astrogwb-validate-config",
     "astrogwb-generate-waveform-catalog",
     "astrogwb-profile-model",
-    "astrogwb-workflow",
 )
 
 
@@ -43,6 +42,7 @@ def test_config_and_runtime_imports_do_not_initialize_jax() -> None:
 import sys
 import astrogwb_paper
 import astrogwb_paper.config.mcmc
+import astrogwb_paper.config.figures
 import astrogwb_paper.runtime
 assert 'jax' not in sys.modules
 """

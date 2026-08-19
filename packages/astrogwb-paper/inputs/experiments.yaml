@@ -1,0 +1,160 @@
+base:
+  seed: 42
+  observation_time: 1.0
+
+  analysis:
+    f_min: 2.0
+    f_max: 4096.0
+
+  cosmology:
+    z_min: 0.0
+    z_max: 20.0
+    n_grid: 256
+
+  sampler:
+    num_warmup: 1000
+    num_samples: 2000
+    num_chains: 4
+    target_accept: 0.9
+    dense_mass: true
+    max_tree_depth: 10
+    forward_mode_differentiation: false
+    progress_bar: true
+    jit_model_args: true
+
+  fiducials:
+    H0: &fiducials_H0 67.66
+    Omega_m: &fiducials_Omega_m 0.3096
+    xi_0: 1.0
+    xi_n: 1.91
+    gamma: 1.42
+    kappa: 4.62
+    z_peak: 1.84
+    local_merger_rate: &fiducials_local_merger_rate 770.0
+
+  priors:
+    H0:
+      type: uniform
+      low: 20.0
+      high: 140.0
+    Omega_m:
+      type: normal
+      loc: *fiducials_Omega_m
+      scale: 0.006
+    xi_0:
+      type: uniform
+      low: 0.5
+      high: 5.0
+    xi_n:
+      type: uniform
+      low: 0.3
+      high: 3.0
+    gamma:
+      type: uniform
+      low: -10.0
+      high: 10.0
+    kappa:
+      type: uniform
+      low: -10.0
+      high: 10.0
+    z_peak:
+      type: uniform
+      low: 0.0
+      high: 2.5
+    local_merger_rate:
+      type: normal
+      loc: *fiducials_local_merger_rate
+      scale: 7.7
+
+networks:
+  ET-triangular: &et_triangular
+    detectors: [E1, E2, E3]
+  ET-triangular-CE-Hanford: &et_triangular_ce
+    detectors: [E1, E2, E3, C1]
+  ET-2L-aligned: &et_2l_aligned
+    detectors: [S1, R1]
+  ET-2L-aligned-CE-Hanford: &et_2l_aligned_ce
+    detectors: [S1, R1, C1]
+  ET-2L-misaligned: &et_2l_misaligned
+    detectors: [S2, R2]
+  ET-2L-misaligned-CE-Hanford: &et_2l_misaligned_ce
+    detectors: [S2, R2, C1]
+
+experiments:
+  cosmological-parameters:
+    runs:
+      ET-triangular:
+        sampled_params: [H0]
+        analysis: *et_triangular
+      ET-triangular-CE-Hanford:
+        sampled_params: [H0]
+        analysis: *et_triangular_ce
+      ET-2L-aligned:
+        sampled_params: [H0]
+        analysis: *et_2l_aligned
+      ET-2L-aligned-CE-Hanford:
+        sampled_params: [H0]
+        analysis: *et_2l_aligned_ce
+      ET-2L-misaligned:
+        sampled_params: [H0]
+        analysis: *et_2l_misaligned
+      ET-2L-misaligned-CE-Hanford:
+        sampled_params: [H0]
+        analysis: *et_2l_misaligned_ce
+      H0-Omega_m:
+        sampled_params: [Omega_m]
+        analysis: &amplitude_marginalized
+          <<: *et_2l_aligned_ce
+          likelihood: amplitude_marginalized
+          amplitude_parameter: H0
+          amplitude_num_nodes: 1024
+      H0-merger-rate:
+        sampled_params: [local_merger_rate]
+        analysis: *amplitude_marginalized
+
+  astrophysical-parameters:
+    runs:
+      Madau-Dickinson:
+        sampled_params: [gamma, kappa, z_peak]
+        analysis: *amplitude_marginalized
+      z_peak:
+        sampled_params: [z_peak]
+        analysis: *amplitude_marginalized
+
+  modified-propagation:
+    sampled_params: [xi_0, xi_n]
+    runs:
+      ET-triangular:
+        analysis: *et_triangular
+      ET-triangular-CE-Hanford:
+        analysis: *et_triangular_ce
+      ET-2L-aligned:
+        analysis: *et_2l_aligned
+      ET-2L-aligned-CE-Hanford:
+        analysis: *et_2l_aligned_ce
+      ET-2L-misaligned:
+        analysis: *et_2l_misaligned
+      ET-2L-misaligned-CE-Hanford:
+        analysis: *et_2l_misaligned_ce
+      Xi_0:
+        sampled_params: [xi_0]
+        analysis: *et_2l_aligned_ce
+      Xi_0-H0:
+        sampled_params: [xi_0, H0]
+        analysis: *et_2l_aligned_ce
+        priors:
+          H0:
+            type: normal
+            loc: *fiducials_H0
+            scale: 0.6766
+
+  variable-injection-size:
+    sampled_params: [H0]
+    analysis: *et_2l_aligned_ce
+    runs:
+      n8192:
+        catalog: bns-n8192-df1
+      n16384:
+        catalog: bns-n16384-df1
+      n32768:
+        catalog: bns-n32768-df1

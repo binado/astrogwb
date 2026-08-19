@@ -16,8 +16,12 @@ setup matches production exactly.
 Usage::
 
     uv run astrogwb-profile-model \
-        --config packages/astrogwb-paper/configs/mcmc.example.toml \
-        --catalog out/catalogs/bns-n16384-df1.h5
+        --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
+        --catalog outputs/catalogs/bns-n16384-df1.h5
+
+Configs are assembled from the base and run overlays in ``inputs/experiments.yaml``
+by the ``assemble_config`` workflow rule or by
+``astrogwb-validate-config``; see docs/running-inference.md.
 
 Open the generated ``perfetto_trace.json.gz`` at https://ui.perfetto.dev
 (no TensorBoard install required).
@@ -114,7 +118,6 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
     from pluscross import load_catalog
 
     from astrogwb_paper.amplitude import build_amplitude_marginalization
-    from astrogwb_paper.priors import build_prior
 
     analysis = config.analysis
     cosmo = config.cosmology
@@ -173,7 +176,10 @@ def build_potential(config: RunConfig, catalog_path: Path, jax):
         effective_psd_arr,
     )
 
-    priors = {name: build_prior(spec) for name, spec in config.priors.items()}
+    # `config.priors` already holds live distributions (see PriorDistribution).
+    # Project to the sampled parameters: when marginalized, `priors` also
+    # carries the amplitude parameter, which must NOT get a NUTS latent.
+    priors = {name: config.priors[name] for name in config.sampled_params}
     if analysis.likelihood == "amplitude_marginalized":
         assert analysis.amplitude_parameter is not None
         marginalization = build_amplitude_marginalization(config)

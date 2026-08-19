@@ -272,6 +272,7 @@ dependencies = [
     { name = "numpyro" },
     { name = "pluscross" },
     { name = "pydantic" },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -382,6 +383,7 @@ requires-dist = [
     { name = "pandas", marker = "extra == 'notebook'", specifier = ">=2.0" },
     { name = "pluscross", specifier = ">=0.2.0,<0.3.0" },
     { name = "pydantic", specifier = ">=2.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "scipy", marker = "extra == 'notebook'", specifier = ">=1.10" },
     { name = "xarray", marker = "extra == 'notebook'", specifier = ">=2025.1" },
 ]

@@ -2,9 +2,10 @@
 and astrogwb's amplitude marginalization.
 
 Assembles everything an amplitude-marginalized run needs from a ``RunConfig``.
-Imported only from inside functions, the same discipline as
-:func:`astrogwb_paper.priors.build_prior`, so importing this module does not
-itself initialize the JAX backend.
+Imported only from inside functions, so importing this module does not itself
+initialize the JAX backend. Priors arrive already materialized (``RunConfig``
+carries live distributions; see
+:data:`~astrogwb_paper.config.mcmc.PriorDistribution`).
 """
 
 from __future__ import annotations
@@ -51,8 +52,8 @@ class AmplitudeMarginalization(NamedTuple):
 def build_amplitude_marginalization(config: RunConfig) -> AmplitudeMarginalization:
     """Assemble the amplitude marginalization for a marginalized-likelihood config.
 
-    Requires ``config.analysis.amplitude_parameter`` and
-    ``config.amplitude_prior`` to be set (i.e. ``config.analysis.likelihood
+    Requires ``config.analysis.amplitude_parameter`` to be set and its prior to
+    live in ``config.priors`` (i.e. ``config.analysis.likelihood
     == "amplitude_marginalized"``); see
     :class:`~astrogwb_paper.config.mcmc.AnalysisConfig`.
     """
@@ -64,11 +65,9 @@ def build_amplitude_marginalization(config: RunConfig) -> AmplitudeMarginalizati
     )
     from astrogwb.sampling.amplitude import quadrature_grid
 
-    from astrogwb_paper.priors import build_prior
-
     analysis = config.analysis
     parameter = analysis.amplitude_parameter
-    if parameter is None or config.amplitude_prior is None:
+    if parameter is None or parameter not in config.priors:
         raise ValueError(
             "build_amplitude_marginalization requires an amplitude-marginalized "
             "config (analysis.likelihood == 'amplitude_marginalized')"
@@ -84,7 +83,7 @@ def build_amplitude_marginalization(config: RunConfig) -> AmplitudeMarginalizati
     else:
         raise ValueError(f"unsupported amplitude parameter {parameter!r}")
 
-    prior = build_prior(config.amplitude_prior)
+    prior = config.priors[parameter]
     return AmplitudeMarginalization(
         parameter=parameter,
         fiducial=float(config.fiducials[parameter]),

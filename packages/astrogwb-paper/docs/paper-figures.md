@@ -1,77 +1,110 @@
 # Paper figures
 
-The analysis notebooks
-[`amplitude_toy_model.py`](../notebooks/paper/amplitude_toy_model.py),
-[`mcmc_cosmological_parameters.py`](../notebooks/paper/mcmc_cosmological_parameters.py),
-[`fiducial_spectrum.py`](../notebooks/paper/fiducial_spectrum.py),
-and [`importance_weights_grid.py`](../notebooks/paper/importance_weights_grid.py)
-hold editable scientific defaults and expose command-line overrides for scientific
-inputs, paths, and labels. They can therefore run directly in Jupyter or from the shell.
-The spectrum notebook plots fiducial $\Omega_{\mathrm{GW}}(f)$ and $S_h(f)$ on dual
-$y$-axes, and overlays network effective PSDs for the detector combinations used
-in the cosmology notebook. Configure the $\Omega_{\mathrm{GW}}$ floor via `omega_gw_min` in
-`workflow.yaml` (or `--omega-gw-min`); $S_h$'s floor is inferred at the matching
-frequency so both curves show the same band.
-The cosmology notebook reads paper plot styling from `configs/paper.toml`;
-its two ordered chain groups and their labels can be replaced independently with
-`--detector-chains`/`--detector-labels` and
-`--prior-chains`/`--prior-labels`.
+Experiment figures are part of the same DAG as their chains. Each figure's
+presentation -- the ordered run IDs it compares and its LaTeX labels -- is
+hard-coded in the script that draws it. There is no figure config to load:
+changing a legend label is a code change, reviewed alongside the plot it
+labels. The six detector networks compared by more than one figure are the one
+shared piece, and they live in `astrogwb_paper.plotting.DETECTOR_NETWORKS` as
+ordered `(run name, LaTeX label)` pairs.
 
-For reproducible paper builds, scientific and presentation settings (fiducials,
-detector networks, nested posterior plot entries) live in
-[`configs/paper.toml`](../configs/paper.toml).
-Reusable catalog recipes live in [`configs/catalogs/`](../configs/catalogs/),
-while the catalog selected for the paper workflow lives in
-[`configs/workflow.yaml`](../configs/workflow.yaml).
-Figure-local knobs (output paths, dpi, sampler settings, which networks to plot),
-catalog paths, and posterior chain paths are argparse defaults in each Jupytext
-notebook. Edit them in Jupyter or override them with CLI flags headless. Keep the
-analysis-notebook defaults aligned with `paper.toml` when promoting paper values.
+Input and output paths are both named literally in
+[`Snakefile`](../Snakefile), and every output is a valid
+Snakemake target. Shared scientific values -- fiducials, frequency bounds,
+cosmology grid settings -- stay in `inputs/experiments.yaml`.
 
-Snakemake reads [`configs/workflow.yaml`](../configs/workflow.yaml) for the paper
-config path, selected catalog, and declared output paths. It translates
-`paper.toml` into explicit analysis, cosmology, fiducial, detector-network, chain,
-label, and styling inputs. The `fiducial_spectrum` rule builds
-`figures/fiducial_spectrum.pdf` and
-`figures/fiducial_effective_psd_by_detector.pdf` from the shared catalog and
-fiducials. The `importance_weights_grid` rule builds
-`figures/importance_weights_grid_H0_Omega_m.pdf` and
-`figures/importance_weights_grid_Xi0_n.pdf`: relative-ESS heatmaps over the
-two-parameter prior-support grids defined by the `configs/mcmc.sweeps.toml`
-uniform priors and the `configs/mcmc.base.toml` fiducials. The unified
-cosmology rule produces two marginalized $H_0$ comparisons, separate
-$H_0$--$\mathcal{R}_0$ corner plot for the narrow merger-rate prior, an
-$H_0$--$\Omega_m$ corner plot, a matching $H_0$--$\Omega_m$--relative-ESS mirror
-corner, and a CSV/LaTeX SNR-and-constraint table. The modified-propagation rule
-likewise emits a $\Xi_0$--$n$ corner and its relative-ESS mirror.
+Detector *lists* are never hard-coded next to a label: the script names its
+experiment, and `astrogwb_paper.config.figures.resolve_networks` resolves each
+run's detectors from `inputs/experiments.yaml`. The detectors a figure
+reports an SNR for are therefore always the ones its chain was sampled with.
 
-Preview the declared workflow (`astrogwb-workflow` defaults to `--dry-run`):
+The workflow imports that same tuple and expands its chain paths from it, so
+chain order and legend order are one list rather than two that have to be kept
+in step:
 
-```bash
-uv run astrogwb-workflow paper
+```python
+from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS
+
+chains=expand("outputs/chains/cosmological-parameters/{run}.nc",
+              run=DETECTOR_NETWORK_RUNS),
 ```
 
-Build all declared paper figures:
+## Experiment figures
+
+The detector-network, merger-rate, and Omega-m analyses form one paper section.
+The `plot_cosmological_parameters` rule consumes all eight chains and produces their
+five figures and two CSV/LaTeX table pairs in one script invocation. All
+artifacts live under `outputs/figures/cosmological-parameters/`.
+
+Preview or build the section (from `packages/astrogwb-paper/`):
 
 ```bash
-uv run astrogwb-workflow paper --submit
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
+  --profile profiles/local --cores 8 --dry-run plot_cosmological_parameters
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
+  --profile profiles/slurm plot_cosmological_parameters
 ```
 
-Build one configured target:
+Every artifact remains a valid Snakemake target, but because the rule has
+multiple outputs, requesting one builds the complete section:
 
 ```bash
-uv run astrogwb-workflow paper figures/fiducial_spectrum.pdf --submit
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
+  --profile profiles/local --cores 8 \
+  outputs/figures/cosmological-parameters/H0-by-detector.pdf
 ```
+
+With a SLURM profile, sampling runs remotely and figure rules run locally on the
+submit host after their chains finish. The submit host must remain attached,
+share the output filesystem, and provide plotting dependencies.
+
+Use `cosmological_parameters_chains` to sample the constituent experiment
+without running post-processing.
+
+`modified_propagation` is a complete experiment target with its own propagation
+figures and tables.
+
+## Standalone figures
+
+The amplitude toy model, fiducial spectrum, effective detector PSD comparison,
+and importance-weight grids are explicit standalone rules in the unified
+workflow. The fiducial spectrum borrows the six detector networks of the
+`cosmological-parameters` experiment rather than restating them, and keeps its
+`OMEGA_GW_MIN` y-limit next to the axis it sets. All of them read
+`inputs/experiments.yaml` directly.
 
 ```bash
-uv run astrogwb-workflow paper \
-  figures/fiducial_effective_psd_by_detector.pdf --submit
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules amplitude_toy fiducial_spectrum importance_weights_grid \
+  outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf \
+  outputs/figures/standalone/fiducial_spectrum.pdf \
+  outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf \
+  outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf \
+  outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf
 ```
+
+Or build any one of them directly:
 
 ```bash
-uv run astrogwb-workflow paper \
-  figures/mcmc_cosmological_parameters_H0_by_detector.pdf --submit
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules fiducial_spectrum \
+  outputs/figures/standalone/fiducial_spectrum.pdf
 ```
 
-See [Snakemake workflow](./snakemake-workflow.md#paper-workflow) for a pipeline
-overview of how the Snakefiles source catalogs, chains, and configuration.
+All new figure products are written under `outputs/figures/`.
+
+## Scripts
+
+Figure entry points are plain Python scripts under `scripts/`. Each reads its
+own fiducials and analysis grid from the committed inventory, whose path the
+library owns, and hard-codes its own labels and run order. Snakemake passes only
+what it owns: the chain and catalog paths it built, and the output paths it
+declared.
+
+The YAML inventory is a declared input of each rule, so editing a fiducial or a
+detector list rebuilds the figure; editing a label is a code change and rebuilds
+it the same way. Config parsing stays free of JAX, so `--help` and config errors
+stay cheap.

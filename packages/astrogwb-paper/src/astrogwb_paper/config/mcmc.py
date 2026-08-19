@@ -1,18 +1,33 @@
 """Pydantic models and I/O for headless MCMC run configs.
 
-This module imports only stdlib and pydantic so callers can parse and validate
-configs before JAX initializes.
+Importing this module requires only stdlib and pydantic: ``numpyro`` is
+imported lazily inside :func:`materialize_prior` / :func:`prior_to_spec`, so
+parsing and validating a config stays cheap and -- because the constructed
+distributions hold plain Python floats and no JAX op is ever evaluated --
+does not initialize the XLA backend. That last property is what
+:func:`astrogwb_paper.runtime.configure_runtime` relies on to set host device
+count / platform after config validation; it is guarded by a subprocess test
+in ``tests/test_prior_native_types.py`` (re-running ``set_host_device_count``
+after a backend init is a silent no-op, hence the subprocess).
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    computed_field,
+    model_validator,
+)
 
-from astrogwb_paper.config.hashing import canonical_sha256
 from astrogwb_paper.config.loading import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
@@ -22,6 +37,105 @@ _STRICT = ConfigDict(frozen=True, extra="forbid")
 # stdlib+pydantic only (see module docstring), so a
 # @pytest.mark.integration paper test cross-checks the two lists instead.
 AmplitudeParameter = Literal["H0", "local_merger_rate"]
+
+
+# Wire protocol for the priors tables: tag name -> ordered parameter keys.
+# Hand-rolled inside materialize_prior (no pydantic spec models): pydantic
+# could never construct distributions from raw config dicts natively anyway
+# (they are not models), so the mapping validation lives here, next to the
+# construction it guards. Unsupported tags fail before numpyro is imported.
+_PRIOR_PARAMS: dict[str, tuple[str, ...]] = {
+    "uniform": ("low", "high"),
+    "normal": ("loc", "scale"),
+}
+
+
+def materialize_prior(value: Any) -> Distribution:
+    """Materialize a prior spec into a live ``numpyro`` distribution.
+
+    Accepts a raw mapping (``{"type": "uniform", "low": ..., ...}``) or an
+    already-built distribution (passed through unchanged, so re-validation is
+    idempotent). Spec validation happens *before* numpyro is imported, so an
+    unsupported ``type`` fails fast and cheap; construction itself only wraps
+    Python floats and never evaluates a JAX op.
+    """
+    if isinstance(value, Mapping):
+        kind = value.get("type")
+        if kind not in _PRIOR_PARAMS:
+            raise ValueError(
+                f"prior type {kind!r} does not match any of the expected tags: "
+                f"{sorted(_PRIOR_PARAMS)}"
+            )
+        params = _PRIOR_PARAMS[kind]
+        missing = [p for p in params if p not in value]
+        if missing:
+            raise ValueError(f"missing required key(s) {missing} for a {kind} prior")
+        extra = sorted({str(k) for k in value} - {"type", *params})
+        if extra:
+            raise ValueError(
+                f"Extra inputs are not permitted for a {kind} prior: {extra}"
+            )
+
+        import numpyro.distributions as dist
+
+        cls = dist.Uniform if kind == "uniform" else dist.Normal
+        return cls(**{name: float(value[name]) for name in params})
+
+    import numpyro.distributions as dist
+
+    if isinstance(value, dist.Distribution):
+        return value  # already materialized
+    raise ValueError(
+        f"cannot materialize a prior from {type(value).__name__!r}; expected a "
+        "spec mapping or a numpyro Distribution"
+    )
+
+
+def prior_to_spec(prior: Distribution) -> dict[str, str | float]:
+    """Serialize a materialized prior back to its wire-format spec.
+
+    Inverse of :func:`materialize_prior` for the spec-constructed
+    distributions this module produces: their parameters are plain Python
+    floats, so ``float(...)`` never touches JAX.
+    """
+    import numpyro.distributions as dist
+
+    match prior:
+        case dist.Uniform():
+            return {
+                "type": "uniform",
+                "low": float(prior.low),
+                "high": float(prior.high),
+            }
+        case dist.Normal():
+            return {
+                "type": "normal",
+                "loc": float(prior.loc),
+                "scale": float(prior.scale),
+            }
+        case _:
+            raise TypeError(
+                f"cannot serialize {type(prior).__name__!r} as a prior spec"
+            )
+
+
+if TYPE_CHECKING:
+    from numpyro.distributions import Distribution, Normal, Uniform
+
+    _PriorDists = Uniform | Normal
+else:
+    _PriorDists = Any
+
+# Native pydantic wire for live prior distributions: validate from spec
+# mappings/dists, serialize back to the spec dict so `model_dump(mode="json")`,
+# `save_config` stay canonical. Numpyro types deliberately
+# stay out of the runtime annotation (hence `Any`) so schema building never
+# imports numpyro at module load.
+PriorDistribution = Annotated[
+    _PriorDists,
+    BeforeValidator(materialize_prior),
+    PlainSerializer(prior_to_spec),
+]
 
 
 class AnalysisConfig(BaseModel):
@@ -76,7 +190,7 @@ class SamplerConfig(BaseModel):
 class OutputConfig(BaseModel):
     model_config = _STRICT
 
-    outdir: Path = Path("chains")
+    outdir: Path = Path("outputs/chains")
     label: str = ""
 
 
@@ -86,29 +200,26 @@ class RunConfig(BaseModel):
     seed: int = 42
     observation_time: float = 1.0
     fiducials: dict[str, float]
-    priors: dict[str, dict[str, Any]]  # prior name -> spec table
-    # Unset (empty) -> default to the keys present in [priors]; resolved below.
+    # parameter name -> prior distribution. Includes the amplitude parameter
+    # when marginalized (it needs a prior but is not sampled); the sampler
+    # consumes only `{priors[name] for name in sampled_params}`.
+    priors: dict[str, PriorDistribution]
+    # Unset (empty) -> default to every key in [priors] except a marginalized
+    # amplitude parameter; resolved below.
     sampled_params: tuple[str, ...] = ()
     analysis: AnalysisConfig
     cosmology: CosmoConfig
     sampler: SamplerConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
-    # Derived in the validator (every fiducial not sampled).
-    constants: dict[str, float] = Field(default_factory=dict)
-    # Derived in the validator: the amplitude parameter's prior spec, held out
-    # of `priors` so `set(priors) == set(sampled_params)` keeps holding. Also
-    # accepted as input so configs written by save_config reload unchanged.
-    amplitude_prior: dict[str, Any] | None = None
 
     @model_validator(mode="after")
-    def _resolve_sampled_and_constants(self) -> RunConfig:
+    def _resolve_sampled_params(self) -> RunConfig:
         if not self.fiducials:
             raise ValueError("config must define a non-empty [fiducials] table")
-        if not self.priors and self.amplitude_prior is None:
+        if not self.priors:
             raise ValueError("config must define at least one [priors.<param>] table")
 
         priors = dict(self.priors)
-        amplitude_prior: dict[str, Any] | None = None
         amplitude_parameter = self.analysis.amplitude_parameter
         if amplitude_parameter is not None:
             if amplitude_parameter in self.sampled_params:
@@ -121,20 +232,15 @@ class RunConfig(BaseModel):
                     f"analysis.amplitude_parameter {amplitude_parameter!r} "
                     "missing from [fiducials]"
                 )
-            if amplitude_parameter in priors:
-                amplitude_prior = priors.pop(amplitude_parameter)
-            elif self.amplitude_prior is not None:
-                # Reloaded save_config output: the pop above already happened
-                # at generation time, so the prior arrives in `amplitude_prior`.
-                amplitude_prior = dict(self.amplitude_prior)
-            else:
+            if amplitude_parameter not in priors:
                 raise ValueError(
                     f"analysis.amplitude_parameter {amplitude_parameter!r} needs "
-                    "a [priors.*] table (or an `amplitude_prior` entry in a "
-                    "config previously written by save_config)"
+                    "a [priors.*] table"
                 )
 
-        sampled = self.sampled_params or tuple(priors)
+        sampled = self.sampled_params or tuple(
+            p for p in priors if p != amplitude_parameter
+        )
         missing_priors = [p for p in sampled if p not in priors]
         if missing_priors:
             raise ValueError(
@@ -144,14 +250,27 @@ class RunConfig(BaseModel):
         if missing_fid:
             raise ValueError(f"sampled_params missing from [fiducials]: {missing_fid}")
 
+        # set(priors) == set(sampled_params) | ({amplitude_parameter} or empty).
         aligned_priors = {name: priors[name] for name in sampled}
-        constants = {k: v for k, v in self.fiducials.items() if k not in sampled}
+        if amplitude_parameter is not None:
+            aligned_priors[amplitude_parameter] = priors[amplitude_parameter]
 
         object.__setattr__(self, "sampled_params", sampled)
         object.__setattr__(self, "priors", aligned_priors)
-        object.__setattr__(self, "constants", constants)
-        object.__setattr__(self, "amplitude_prior", amplitude_prior)
         return self
+
+    @computed_field
+    @property
+    def constants(self) -> dict[str, float]:
+        """Every fiducial not sampled: values the model pins as constants.
+
+        Includes the marginalized amplitude parameter when present: it has no
+        NUTS latent, but its fiducial value is still what the model pins it
+        to. Serialized (save_config) but not settable: input
+        is stripped in `build_run_config` because `extra="forbid"` rejects
+        the serialized form on reload.
+        """
+        return {k: v for k, v in self.fiducials.items() if k not in self.sampled_params}
 
     @property
     def posterior_params(self) -> tuple[str, ...]:
@@ -160,9 +279,9 @@ class RunConfig(BaseModel):
         A superset of `sampled_params`, which means strictly "parameters NUTS
         has a latent for". Under an amplitude-marginalized likelihood the two
         sets differ: the amplitude parameter is integrated out of the potential
-        and has no latent, so it must stay out of `sampled_params` (it drives
-        `init_to_value` and the `set(priors) == set(sampled_params)`
-        invariant), yet post-processing reconstructs it into the posterior via
+        and has no latent, so it must stay out of `sampled_params` (its prior
+        still lives in `priors`, driving `init_to_value` only via
+        `fiducials`), yet post-processing reconstructs it into the posterior via
         `amplitude_reconstruction_model`. Use this for anything describing the
         saved chain -- plot `var_names`, run records, summaries.
         """
@@ -178,11 +297,6 @@ class RunConfig(BaseModel):
     @property
     def label(self) -> str:
         return self.output.label
-
-
-def config_sha256(config: RunConfig) -> str:
-    """Digest inference settings, excluding output routing."""
-    return canonical_sha256(config.model_dump(mode="json", exclude={"output"}))
 
 
 def save_config(config: RunConfig, path: Path) -> None:
@@ -220,4 +334,8 @@ def build_run_config(
         cli_overrides["output"] = output
 
     merged = deep_merge(raw, deep_merge(overrides, cli_overrides))
+    # `constants` is derived on the model (a computed field), so the key is
+    # serialization-only: strip it from saved configs and `model_dump()`
+    # round trips, which extra="forbid" would otherwise reject.
+    merged.pop("constants", None)
     return RunConfig.model_validate(merged)

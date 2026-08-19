@@ -26,6 +26,7 @@ extend-exclude = [".antigravitycli", ".cache", ".claude", ".cursor"]
 include = [
     "packages/*/src/**/*.py",
     "packages/*/tests/**/*.py",
+    "packages/astrogwb-paper/scripts/**/*.py",
 ]
 
 # Colab bootstrap + configure_runtime must run before JAX-touching imports.

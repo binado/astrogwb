@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import tempfile
@@ -9,6 +8,26 @@ from pathlib import Path
 from astrogwb_paper.paths import paper_project_root
 
 PAPER_ROOT = paper_project_root()
+SNAKEFILE = PAPER_ROOT / "Snakefile"
+CATALOG_RULES = ("bns_population", "bns_waveform_catalog")
+MCMC_RULES = (
+    "assemble_config",
+    "run_mcmc",
+    "plot_cosmological_parameters",
+    "plot_modified_propagation",
+    "amplitude_toy",
+    "fiducial_spectrum",
+    "importance_weights_grid",
+    "experiments",
+    "cosmological_parameters",
+    "cosmological_parameters_chains",
+    "modified_propagation",
+    "modified_propagation_chains",
+    "astrophysical_parameters",
+    "astrophysical_parameters_chains",
+    "variable_injection_size",
+    "variable_injection_size_chains",
+)
 
 
 def _snakemake(*args: str) -> subprocess.CompletedProcess[str]:
@@ -23,205 +42,161 @@ def _snakemake(*args: str) -> subprocess.CompletedProcess[str]:
         )
 
 
-def test_catalog_workflow_dry_run_contains_both_local_stages() -> None:
+def _mcmc(*args: str) -> subprocess.CompletedProcess[str]:
+    return _snakemake(
+        "--snakefile",
+        str(SNAKEFILE),
+        "--allowed-rules",
+        *MCMC_RULES,
+        *args,
+    )
+
+
+def _rule_inputs(stdout: str) -> list[str]:
+    """Return the ``input:`` line of every job in a dry-run report."""
+    return [
+        line.strip()
+        for line in stdout.splitlines()
+        if line.strip().startswith("input:")
+    ]
+
+
+def _catalogs(tmp_path: Path, *names: str) -> Path:
+    directory = tmp_path / "catalogs"
+    directory.mkdir()
+    for name in names:
+        (directory / name).touch()
+    return directory
+
+
+def test_catalog_workflow_uses_input_recipes_and_output_tree() -> None:
     result = _snakemake(
         "--snakefile",
-        str(PAPER_ROOT / "workflow/catalog.smk"),
+        str(SNAKEFILE),
+        "--allowed-rules",
+        *CATALOG_RULES,
         "--dry-run",
         "--forceall",
         "--cores",
         "1",
-        "out/catalogs/bns-n8192-df1.h5",
+        "outputs/catalogs/bns-n8192-df1.h5",
     )
 
     assert result.returncode == 0, result.stderr
-    assert "rule bns_population:" in result.stdout
-    assert "rule bns_waveform_catalog:" in result.stdout
-    assert "rule run_mcmc:" not in result.stdout
-    assert "configs/catalogs/bns-n16384-df1.toml" not in result.stdout
+    assert "inputs/catalogs.yaml" in result.stdout
+    assert "outputs/populations/bns-n8192-df1.h5" in result.stdout
+    assert "outputs/catalogs/bns-n8192-df1.h5" in result.stdout
 
 
-def test_mcmc_workflow_expands_multiple_manifest_runs(tmp_path: Path) -> None:
-    catalog = tmp_path / "catalog.h5"
-    run_config = tmp_path / "selected-run.json"
-    second_run_config = tmp_path / "second-run.toml"
-    catalog.touch()
-    run_config.write_text("{}\n", encoding="utf-8")
-    second_run_config.write_text("", encoding="utf-8")
-    manifest = _write_manifest(
-        tmp_path,
-        [
-            {"campaign": "first-campaign", "config": str(run_config)},
-            {"campaign": "second-campaign", "config": str(second_run_config)},
-        ],
-    )
-    catalog_config = _write_catalog_config(tmp_path, catalog)
+def test_plot_cosmological_parameters_expands_all_chains_and_figures(
+    tmp_path: Path,
+) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
-    result = _snakemake(
-        "--snakefile",
-        str(PAPER_ROOT / "workflow/mcmc.smk"),
-        "--configfile",
-        str(catalog_config),
-        str(manifest),
+    result = _mcmc(
         "--dry-run",
         "--forceall",
         "--cores",
-        "1",
-        "mcmc",
+        "8",
+        "plot_cosmological_parameters",
+        "--config",
+        f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule run_mcmc:") == 2
-    assert str(catalog) in result.stdout
-    assert str(run_config) in result.stdout
-    assert str(second_run_config) in result.stdout
-    assert (
-        str(tmp_path / "chains/test-catalog/first-campaign/selected-run.nc")
-        in result.stdout
-    )
-    assert (
-        str(tmp_path / "chains/test-catalog/second-campaign/second-run.nc")
-        in result.stdout
-    )
-    assert "rule bns_population:" not in result.stdout
-    assert "rule bns_waveform_catalog:" not in result.stdout
+    assert result.stdout.count("rule assemble_config:") == 1
+    assert result.stdout.count("rule run_mcmc:") == 8
+    assert result.stdout.count("rule plot_cosmological_parameters:") == 1
+    for path in (
+        "outputs/figures/cosmological-parameters/H0-by-detector.pdf",
+        "outputs/figures/cosmological-parameters/H0-merger-rate-priors.pdf",
+        "outputs/figures/cosmological-parameters/H0-merger-rate-corner.pdf",
+        "outputs/figures/cosmological-parameters/H0-Omega_m-corner.pdf",
+        "outputs/figures/cosmological-parameters/H0-Omega_m-ess-corner.pdf",
+    ):
+        assert path in result.stdout
 
 
-def test_mcmc_catalog_id_override_uses_derived_path(tmp_path: Path) -> None:
-    catalog_id = f"test-{tmp_path.name}"
-    catalog = PAPER_ROOT / "out" / "catalogs" / f"{catalog_id}.h5"
-    run_config = tmp_path / "selected-run.json"
-    run_config.write_text("{}\n", encoding="utf-8")
-    manifest = _write_manifest(
-        tmp_path,
-        [{"campaign": "test-campaign", "config": str(run_config)}],
-    )
-    catalog_config = tmp_path / "catalog-config.json"
-    catalog_config.write_text(
-        json.dumps({"catalog": {"id": catalog_id}}),
-        encoding="utf-8",
-    )
+def test_chains_only_target_excludes_figure_rule(tmp_path: Path) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
-    catalog.parent.mkdir(parents=True, exist_ok=True)
-    catalog.touch()
-    try:
-        result = _snakemake(
-            "--snakefile",
-            str(PAPER_ROOT / "workflow/mcmc.smk"),
-            "--configfile",
-            str(catalog_config),
-            str(manifest),
-            "--dry-run",
-            "--forceall",
-            "--cores",
-            "1",
-            "mcmc",
-        )
-    finally:
-        catalog.unlink()
+    result = _mcmc(
+        "--dry-run",
+        "--forceall",
+        "--cores",
+        "8",
+        "cosmological_parameters_chains",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
 
     assert result.returncode == 0, result.stderr
-    assert f"out/catalogs/{catalog_id}.h5" in result.stdout
-    assert "out/catalogs/bns-n16384-df1.h5" not in result.stdout
-    assert str(tmp_path / f"chains/{catalog_id}/test-campaign/selected-run.nc") in (
-        result.stdout
-    )
+    assert result.stdout.count("rule run_mcmc:") == 8
+    assert "rule plot_cosmological_parameters:" not in result.stdout
 
 
-def test_mcmc_thread_override_controls_runner_cpu_budget(tmp_path: Path) -> None:
-    catalog = tmp_path / "catalog.h5"
-    run_config = tmp_path / "selected-run.json"
-    catalog.touch()
-    run_config.write_text("{}\n", encoding="utf-8")
-    manifest = _write_manifest(
-        tmp_path,
-        [{"campaign": "test-campaign", "config": str(run_config)}],
-    )
-    catalog_config = _write_catalog_config(tmp_path, catalog)
+def test_config_assembly_reads_the_single_inventory(
+    tmp_path: Path,
+) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
 
-    result = _snakemake(
-        "--snakefile",
-        str(PAPER_ROOT / "workflow/mcmc.smk"),
-        "--configfile",
-        str(catalog_config),
-        str(manifest),
+    result = _mcmc(
         "--dry-run",
         "--forceall",
         "--printshellcmds",
         "--cores",
-        "2",
-        "mcmc",
-        "--set-threads",
-        "run_mcmc=2",
+        "4",
+        "outputs/chains/cosmological-parameters/H0-Omega_m.nc",
+        "--config",
+        f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
-    assert "threads: 2" in result.stdout
-    assert "--cpu-threads 2" in result.stdout
-    assert "--platform cuda" in result.stdout
-    assert "cpus_per_task" not in result.stdout
-    assert "OMP_NUM_THREADS" not in result.stdout
-    assert "OPENBLAS_NUM_THREADS" not in result.stdout
-    assert "MKL_NUM_THREADS" not in result.stdout
-    assert "XLA_FLAGS" not in result.stdout
-
-
-def test_mcmc_workflow_rejects_duplicate_campaign_and_config_stem(
-    tmp_path: Path,
-) -> None:
-    catalog = tmp_path / "catalog.h5"
-    first_config = tmp_path / "first" / "selected-run.json"
-    second_config = tmp_path / "second" / "selected-run.toml"
-    catalog.touch()
-    first_config.parent.mkdir()
-    second_config.parent.mkdir()
-    first_config.write_text("{}\n", encoding="utf-8")
-    second_config.write_text("", encoding="utf-8")
-    manifest = _write_manifest(
-        tmp_path,
-        [
-            {"campaign": "test-campaign", "config": str(first_config)},
-            {"campaign": "test-campaign", "config": str(second_config)},
-        ],
+    assert (
+        "astrogwb-validate-config inputs/experiments.yaml "
+        "--output-dir outputs/configs" in result.stdout
     )
-    catalog_config = _write_catalog_config(tmp_path, catalog)
+    assert result.stdout.count("rule assemble_config:") == 1
 
-    result = _snakemake(
-        "--snakefile",
-        str(PAPER_ROOT / "workflow/mcmc.smk"),
-        "--configfile",
-        str(catalog_config),
-        str(manifest),
+
+def test_variable_injection_size_uses_three_catalogs(tmp_path: Path) -> None:
+    catalogs = _catalogs(
+        tmp_path,
+        "bns-n8192-df1.h5",
+        "bns-n16384-df1.h5",
+        "bns-n32768-df1.h5",
+    )
+
+    result = _mcmc(
+        "--dry-run",
+        "--forceall",
+        "--cores",
+        "8",
+        "variable_injection_size",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("rule run_mcmc:") == 3
+    for name in (
+        "bns-n8192-df1.h5",
+        "bns-n16384-df1.h5",
+        "bns-n32768-df1.h5",
+    ):
+        assert str(catalogs / name) in result.stdout
+
+
+def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
+    catalogs = tmp_path / "missing-catalogs"
+
+    result = _mcmc(
         "--dry-run",
         "--cores",
-        "1",
-        "mcmc",
-    )
-
-    output = result.stdout + result.stderr
-    assert result.returncode != 0
-    assert "duplicate MCMC run test-campaign/selected-run" in output
-
-
-def test_mcmc_workflow_does_not_generate_missing_catalog(tmp_path: Path) -> None:
-    run_config = tmp_path / "selected-run.json"
-    run_config.write_text("{}\n", encoding="utf-8")
-    manifest = _write_manifest(
-        tmp_path,
-        [{"campaign": "test-campaign", "config": str(run_config)}],
-    )
-    catalog_config = _write_catalog_config(tmp_path, tmp_path / "missing.h5")
-
-    result = _snakemake(
-        "--snakefile",
-        str(PAPER_ROOT / "workflow/mcmc.smk"),
-        "--configfile",
-        str(catalog_config),
-        str(manifest),
-        "--dry-run",
-        "--cores",
-        "1",
-        "mcmc",
+        "4",
+        "cosmological_parameters_chains",
+        "--config",
+        f"catalogs_dir={catalogs}",
     )
 
     output = result.stdout + result.stderr
@@ -231,42 +206,203 @@ def test_mcmc_workflow_does_not_generate_missing_catalog(tmp_path: Path) -> None
     assert "bns_waveform_catalog" not in output
 
 
-def test_paper_workflow_exposes_only_figure_rules() -> None:
-    result = _snakemake(
-        "--snakefile",
-        str(PAPER_ROOT / "workflow/paper.smk"),
-        "--list-rules",
-    )
+def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
+    result = _snakemake("--snakefile", str(SNAKEFILE), "--list-rules")
 
     assert result.returncode == 0, result.stderr
-    assert set(result.stdout.split()) == {
+    rules = set(result.stdout.split())
+    assert {
+        "cosmological_parameters_chains",
+        "plot_cosmological_parameters",
+        "modified_propagation",
+        "astrophysical_parameters",
+        "variable_injection_size",
         "amplitude_toy",
         "fiducial_spectrum",
         "importance_weights_grid",
-        "mcmc_cosmological_parameters",
-        "mcmc_modified_propagation",
-        "paper_figures",
-    }
+        "assemble_config",
+        "run_mcmc",
+    } <= rules
+    assert {
+        "H0_all_detectors_chains",
+        "H0_merger_rate_chains",
+        "H0_omega_m_chains",
+        "modified_propagation_all_detectors",
+        "star_formation_peak",
+        "H0_all_detectors",
+        "H0_merger_rate",
+        "H0_omega_m",
+        "plot_H0_all_detectors",
+        "plot_H0_merger_rate",
+        "plot_H0_omega_m",
+        "standalone_figures",
+    }.isdisjoint(rules)
 
 
-def _write_manifest(tmp_path: Path, runs: list[dict[str, str]]) -> Path:
-    manifest = tmp_path / "batch.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "chains_dir": str(tmp_path / "chains"),
-                "runs": runs,
-            }
-        ),
-        encoding="utf-8",
+def test_experiments_target_builds_all_21_chains(tmp_path: Path) -> None:
+    catalogs = _catalogs(
+        tmp_path,
+        "bns-n8192-df1.h5",
+        "bns-n16384-df1.h5",
+        "bns-n32768-df1.h5",
     )
-    return manifest
 
-
-def _write_catalog_config(tmp_path: Path, catalog: Path) -> Path:
-    catalog_config = tmp_path / "catalog-config.json"
-    catalog_config.write_text(
-        json.dumps({"catalog": {"id": "test-catalog", "path": str(catalog)}}),
-        encoding="utf-8",
+    result = _mcmc(
+        "--dry-run",
+        "--forceall",
+        "--cores",
+        "8",
+        "experiments",
+        "--config",
+        f"catalogs_dir={catalogs}",
     )
-    return catalog_config
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("rule assemble_config:") == 1
+    assert result.stdout.count("rule run_mcmc:") == 21
+    assert result.stdout.count("rule plot_cosmological_parameters:") == 1
+    assert result.stdout.count("rule plot_modified_propagation:") == 1
+
+
+def test_plot_cosmological_parameters_passes_all_paths_not_labels(
+    tmp_path: Path,
+) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
+
+    result = _mcmc(
+        "--dry-run",
+        "--forceall",
+        "--printshellcmds",
+        "--cores",
+        "8",
+        "plot_cosmological_parameters",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rule plot_cosmological_parameters:" in result.stdout
+    # The script resolves the inventory path itself, so no flag carries it --
+    # but the rule still declares the file, so editing it retriggers the figure.
+    assert "--base-config" not in result.stdout
+    assert any(
+        "inputs/experiments.yaml" in line for line in _rule_inputs(result.stdout)
+    )
+    for flag in (
+        "--catalog",
+        "--detector-chains",
+        "--prior-chains",
+        "--omega-m-chain",
+        "--output-detector-pdf",
+        "--output-detector-csv",
+        "--output-detector-tex",
+        "--output-prior-pdf",
+        "--output-narrow-corner-pdf",
+        "--output-merger-rate-csv",
+        "--output-merger-rate-tex",
+        "--output-omega-m-corner-pdf",
+        "--output-omega-m-ess-corner-pdf",
+    ):
+        assert flag in result.stdout
+    assert "--section" not in result.stdout
+    # The script hard-codes its own labels and run order, so neither a
+    # figure config nor any LaTeX crosses the shell boundary.
+    assert "--figure-config" not in result.stdout
+    assert "--prior-labels" not in result.stdout
+    assert r"\mathcal" not in result.stdout
+
+
+def test_standalone_figures_receive_config_paths(
+    tmp_path: Path,
+) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
+
+    result = _mcmc(
+        "--dry-run",
+        "--forceall",
+        "--printshellcmds",
+        "--cores",
+        "4",
+        "amplitude_toy",
+        "fiducial_spectrum",
+        "importance_weights_grid",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    for script in (
+        "scripts/amplitude_toy_model.py",
+        "scripts/fiducial_spectrum.py",
+        "scripts/importance_weights_grid.py",
+    ):
+        assert script in result.stdout
+    # Every standalone script reads the base config for itself instead of
+    # receiving fiducials and analysis bounds as reconstructed flags -- or even
+    # the inventory path, which the library already owns.
+    assert "--base-config" not in result.stdout
+    assert (
+        sum("inputs/experiments.yaml" in line for line in _rule_inputs(result.stdout))
+        == 3
+    )
+    assert "--figure-config" not in result.stdout
+    for flag in ("--observation-time", "--f-min", "--h0", "--omega-gw-min"):
+        assert flag not in result.stdout
+
+
+def test_figure_path_is_a_valid_snakemake_target(
+    tmp_path: Path,
+) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
+
+    result = _mcmc(
+        "--dry-run",
+        "--forceall",
+        "--cores",
+        "8",
+        "outputs/figures/cosmological-parameters/H0-by-detector.pdf",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "rule plot_cosmological_parameters:" in result.stdout
+    assert result.stdout.count("rule run_mcmc:") == 8
+
+
+def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n16384-df1.h5")
+
+    result = _mcmc(
+        "--dry-run",
+        "--forceall",
+        "--printshellcmds",
+        "--cores",
+        "8",
+        "plot_cosmological_parameters",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    command = result.stdout[result.stdout.index(" --detector-chains ") :]
+    positions = [
+        command.index(f"outputs/chains/cosmological-parameters/{run}.nc")
+        for run in (
+            "ET-triangular",
+            "ET-triangular-CE-Hanford",
+            "ET-2L-aligned",
+            "ET-2L-aligned-CE-Hanford",
+            "ET-2L-misaligned",
+            "ET-2L-misaligned-CE-Hanford",
+        )
+    ]
+    assert positions == sorted(positions)
+    prior_start = command.index(" --prior-chains ")
+    assert command.index(
+        "outputs/chains/cosmological-parameters/ET-2L-aligned-CE-Hanford.nc",
+        prior_start,
+    ) < command.index(
+        "outputs/chains/cosmological-parameters/H0-merger-rate.nc",
+        prior_start,
+    )

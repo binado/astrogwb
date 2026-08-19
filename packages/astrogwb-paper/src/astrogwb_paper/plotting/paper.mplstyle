@@ -1,5 +1,5 @@
-# Paper-figure matplotlib style for the notebooks in this directory.
-# Load via: from _paper_style import use_paper_style; use_paper_style()
+# Paper-figure matplotlib style for astrogwb-paper.
+# Load via: from astrogwb_paper.plotting import use_paper_style; use_paper_style()
 
 text.usetex: True
 font.family: serif
@@ -31,5 +31,6 @@ savefig.bbox: tight
 savefig.format: pdf
 
 # Colorblind-safe fallback cycle (Okabe-Ito). Comparison figures pass explicit
-# colors from the palettes in _paper_style.py; this cycle is only the default.
+# colors from the palettes in astrogwb_paper.plotting; this cycle is only the
+# default.
 axes.prop_cycle: cycler('color', ['0072B2', 'E69F00', '009E73', 'CC79A7', '56B4E9', 'D55E00', 'F0E442'])

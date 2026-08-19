@@ -31,8 +31,10 @@ uv run --package astrogwb --group test pytest packages/astrogwb/tests
 
 ```bash
 uv sync --package astrogwb-paper --group dev
-uv run astrogwb-workflow --help
-uv run astrogwb-workflow paper
+cd packages/astrogwb-paper
+uv run --group workflow snakemake --snakefile Snakefile \
+  --allowed-rules amplitude_toy \
+  --profile profiles/local --cores 8 --dry-run amplitude_toy
 ```
 
 Build the library exactly as it will be published, without workspace source

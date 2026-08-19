@@ -14,7 +14,7 @@
 parameters:
   # 1) Madau-Dickinson redshift distribution.
   #    Cosmology (flat-LambdaCDM) matches the MCMC fiducials in
-  #    packages/astrogwb-paper/configs/mcmc.base.toml and configs/paper.toml: H0 = 67.66 km/s/Mpc,
+  #    packages/astrogwb-paper/inputs/experiments.yaml: H0 = 67.66 km/s/Mpc,
   #    Omega_m = 0.3096. The values are anchored here and reused by the
   #    distance transform below (via YAML aliases) so the two stages cannot
   #    drift apart.

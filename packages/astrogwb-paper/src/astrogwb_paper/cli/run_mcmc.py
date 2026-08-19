@@ -3,41 +3,44 @@
 This is the SLURM-friendly port of ``notebooks/mcmc.py``: it importance-reweights a
 fixed polarization-power catalog through NUTS to infer cosmological / population
 hyperparameters, reading every setting from a TOML or JSON config file and emitting
-only ``logging`` progress (no plots). It saves an ArviZ ``InferenceData`` NetCDF plus
-a JSON run-config record, exactly like the notebook.
+only ``logging`` progress (no plots). It saves an ArviZ ``InferenceData`` NetCDF;
+the assembled config it was given is the record of the run's settings.
 
 Design constraint (do not "tidy" away): config parsing lives in
-``astrogwb_paper.config.mcmc`` (stdlib + pydantic only). ``OMP_NUM_THREADS`` /
+``astrogwb_paper.config.mcmc``, which imports only stdlib + pydantic at module
+load and materializes priors without evaluating any JAX op ("is the backend
+still uninitialized?" is guarded by a subprocess test). ``OMP_NUM_THREADS`` /
 ``XLA_FLAGS`` and ``numpyro.set_host_device_count(...)`` must be set *before* JAX
-initializes its backend, so the heavy imports (jax, numpyro, astrogwb, gwmock_pop)
+initializes its backend, so the heavy imports (jax, astrogwb, gwmock_pop)
 happen inside functions that run only after
 :func:`astrogwb_paper.runtime.configure_runtime`. See that function for the ordering.
 
 Usage::
 
     uv run astrogwb-run-mcmc \
-        --config packages/astrogwb-paper/configs/mcmc.example.toml \
-        --catalog out/catalogs/bns-n16384-df1.h5
+        --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
+        --catalog outputs/catalogs/bns-n16384-df1.h5
+
+Configs are assembled from the base and run overlays in ``inputs/experiments.yaml``
+by the ``assemble_config`` workflow rule or by
+``astrogwb-validate-config``; see docs/running-inference.md.
 
 Use ``uv run --package astrogwb-paper --extra cuda`` (or ``--extra tpu``) for
 the matching JAX accelerator plugin.
 Batch runs are dispatched by the Snakemake ``run_mcmc`` rule (one config per
-job); see the paper project's ``workflow/mcmc.smk`` and SLURM profiles.
+job); see the paper project's ``Snakefile`` and SLURM profiles.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from astrogwb_paper.config.hashing import file_sha256
 from astrogwb_paper.config.loading import load_mapping
-from astrogwb_paper.config.mcmc import RunConfig, build_run_config, config_sha256
+from astrogwb_paper.config.mcmc import RunConfig, build_run_config
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
@@ -53,7 +56,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Headless NumPyro MCMC runner for the astrophysical GWB. Reads all "
-            "settings from a TOML or JSON config; saves an ArviZ NetCDF + JSON record."
+            "settings from a TOML or JSON config; saves an ArviZ NetCDF."
         )
     )
     parser.add_argument(
@@ -94,7 +97,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Replace an existing NetCDF chain and/or JSON sidecar for this run.",
+        help="Replace an existing NetCDF chain for this run.",
     )
     add_runtime_arguments(parser)
     return parser.parse_args(argv)
@@ -129,14 +132,17 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
         amplitude_marginalized_model,
         spectral_density_model,
     )
-    from astrogwb.waveform import polarization_power as compute_polarization_power
+    from astrogwb.waveform import (
+        apply_gw_distance_to_waveforms,
+    )
+    from astrogwb.waveform import (
+        polarization_power as compute_polarization_power,
+    )
     from numpyro.infer import MCMC, NUTS
     from numpyro.infer.initialization import init_to_value
     from pluscross import load_catalog
 
     from astrogwb_paper.amplitude import build_amplitude_marginalization
-    from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
-    from astrogwb_paper.priors import build_prior
 
     analysis = config.analysis
     cosmo = config.cosmology
@@ -146,7 +152,7 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     # propagation parameters before reducing to polarization power, so the
     # importance weights below carry only the EM-distance ratio.
     catalog = load_catalog(catalog_path)
-    catalog = apply_gw_distance_at_fiducial(
+    catalog = apply_gw_distance_to_waveforms(
         catalog,
         xi_0=float(config.fiducials["xi_0"]),
         xi_n=float(config.fiducials["xi_n"]),
@@ -235,7 +241,10 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     )
 
     # --- Build the model and sampler -----------------------------------------
-    priors = {name: build_prior(spec) for name, spec in config.priors.items()}
+    # `config.priors` already holds live distributions (see PriorDistribution).
+    # Project to the sampled parameters: when marginalized, `priors` also
+    # carries the amplitude parameter, which must NOT get a NUTS latent.
+    priors = {name: config.priors[name] for name in config.sampled_params}
     marginalization = None
     if analysis.likelihood == "amplitude_marginalized":
         assert analysis.amplitude_parameter is not None
@@ -312,32 +321,8 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     return mcmc, marginalization
 
 
-def verify_catalog(path: Path) -> str:
-    """Hash a catalog before JAX starts, returning its content digest."""
-    if not path.is_file():
-        raise FileNotFoundError(f"catalog not found: {path}")
-    return file_sha256(path)
-
-
-def _git_revision() -> str | None:
-    try:
-        return (
-            subprocess.check_output(
-                ["git", "rev-parse", "HEAD"],
-                cwd=Path(__file__).resolve().parent,
-                stderr=subprocess.DEVNULL,
-            )
-            .decode()
-            .strip()
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return None
-
-
-def output_paths(
-    config: RunConfig, *, timestamp: str | None = None
-) -> tuple[Path, Path]:
-    """Return the chain and sidecar paths a run will write.
+def chain_output_path(config: RunConfig, *, timestamp: str | None = None) -> Path:
+    """Return the NetCDF chain path a run will write.
 
     Campaign configs always have a label.  Auto-labelled ad-hoc runs retain the
     timestamped naming convention, while still allowing a collision check before
@@ -350,78 +335,31 @@ def output_paths(
         params_suffix = "-".join(config.sampled_params)
         det_suffix = ",".join(config.analysis.detectors)
         base = f"mcmc-{params_suffix}-det={det_suffix}-seed{config.seed}-{timestamp}"
-    return config.outdir / f"{base}.nc", config.outdir / f"{base}.json"
+    return config.outdir / f"{base}.nc"
 
 
-def ensure_output_paths_available(
+def ensure_chain_path_available(
     config: RunConfig, *, timestamp: str | None = None, force: bool = False
-) -> tuple[Path, Path]:
-    """Fail before sampling if either output artifact already exists."""
-    nc_path, json_path = output_paths(config, timestamp=timestamp)
-    existing = [path for path in (nc_path, json_path) if path.exists()]
-    if existing and not force:
-        names = ", ".join(str(path) for path in existing)
+) -> Path:
+    """Fail before sampling if the chain already exists."""
+    nc_path = chain_output_path(config, timestamp=timestamp)
+    if nc_path.exists() and not force:
         raise FileExistsError(
-            f"refusing to replace existing MCMC output(s): {names}. "
+            f"refusing to replace existing MCMC output: {nc_path}. "
             "Pass --force only for an intentional replacement."
         )
-    return nc_path, json_path
-
-
-def build_run_record(
-    config: RunConfig,
-    *,
-    catalog_path: Path,
-    timestamp: str,
-    catalog_sha256: str | None,
-) -> dict:
-    """Assemble the JSON sidecar recording the run's inputs and provenance."""
-    record: dict[str, Any] = {
-        "catalog_path": str(catalog_path),
-        "catalog_sha256": catalog_sha256,
-        "config_sha256": config_sha256(config),
-        "detectors": list(config.analysis.detectors),
-        "seed": config.seed,
-        "observation_time": config.observation_time,
-        "likelihood": config.analysis.likelihood,
-        # `sampled_params` is the sampler's latents; `posterior_params` is what
-        # the saved chain actually carries. They differ by the reconstructed
-        # amplitude parameter under a marginalized likelihood.
-        "sampled_params": list(config.sampled_params),
-        "posterior_params": list(config.posterior_params),
-        "fiducials": config.fiducials,
-        "constants": config.constants,
-        "priors": config.priors,
-        "cosmology": config.cosmology.model_dump(mode="json"),
-        "band": {
-            "f_min": config.analysis.f_min,
-            "f_max": config.analysis.f_max,
-        },
-        "sampler": config.sampler.model_dump(mode="json"),
-        "git_revision": _git_revision(),
-        "timestamp": timestamp,
-    }
-    if config.analysis.likelihood == "amplitude_marginalized":
-        record["amplitude_parameter"] = config.analysis.amplitude_parameter
-        record["amplitude_prior"] = config.amplitude_prior
-        record["amplitude_num_nodes"] = config.analysis.amplitude_num_nodes
-        record["amplitude_prior_span_sigma"] = (
-            config.analysis.amplitude_prior_span_sigma
-        )
-    return record
+    return nc_path
 
 
 def save(
     mcmc,
     config: RunConfig,
     *,
-    catalog_path: Path,
     timestamp: str | None = None,
     force: bool = False,
-    catalog_sha256: str | None = None,
     marginalization: AmplitudeMarginalization | None = None,
 ) -> Path:
-    """Write the ArviZ NetCDF + JSON run record, and log the IS health check."""
+    """Write the ArviZ NetCDF chain, and log the IS health check."""
     from functools import partial
 
     import arviz as az
@@ -430,9 +368,7 @@ def save(
 
     config.outdir.mkdir(parents=True, exist_ok=True)
     timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
-    nc_path, json_path = ensure_output_paths_available(
-        config, timestamp=timestamp, force=force
-    )
+    nc_path = ensure_chain_path_available(config, timestamp=timestamp, force=force)
 
     idata = az.from_numpyro(mcmc)
 
@@ -494,14 +430,6 @@ def save(
 
     idata.to_netcdf(nc_path)
 
-    run_record = build_run_record(
-        config,
-        catalog_path=catalog_path,
-        timestamp=timestamp,
-        catalog_sha256=catalog_sha256,
-    )
-    json_path.write_text(json.dumps(run_record, indent=2, default=str))
-
     # Importance-sampling health: relative ESS near 1 means the proposal catalog
     # still reweights well at the posterior.
     post = idata.posterior
@@ -509,7 +437,7 @@ def save(
     rate = post["total_merger_rate"].values.ravel()
     logger.info("importance_relative_ess: mean=%.3f min=%.3f", ress.mean(), ress.min())
     logger.info("total_merger_rate [/s]: mean=%.4e", rate.mean())
-    logger.info("Saved %s and %s", nc_path, json_path)
+    logger.info("Saved %s", nc_path)
     return nc_path
 
 
@@ -518,13 +446,10 @@ def main(argv: list[str] | None = None) -> None:
     config_path = args.config.resolve()
     catalog_path = args.catalog.resolve()
     raw = load_mapping(config_path)
-    configured_outdir = args.outdir
-    if configured_outdir is None:
-        configured_outdir = Path(raw.get("output", {}).get("outdir", "chains"))
     config = build_run_config(
         raw,
         seed=args.seed,
-        outdir=configured_outdir.resolve(),
+        outdir=args.outdir.resolve() if args.outdir else None,
         label=args.label,
     )
 
@@ -539,15 +464,15 @@ def main(argv: list[str] | None = None) -> None:
         tuple(config.constants),
     )
 
-    # Pick a single timestamp now and check both artifacts before JAX starts.
-    # Labelled campaign runs are deterministic; auto-labelled runs preserve the
+    # Pick a single timestamp now and check the artifact before JAX starts.
+    # Labelled experiment runs are deterministic; auto-labelled runs preserve the
     # existing timestamp convention.
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
-    ensure_output_paths_available(config, timestamp=timestamp, force=args.force)
+    ensure_chain_path_available(config, timestamp=timestamp, force=args.force)
 
-    # Hash the catalog before JAX claims a device.
-    catalog_sha256 = verify_catalog(catalog_path)
-    logger.info("Catalog SHA-256: %s", catalog_sha256)
+    # Fail on a missing catalog before JAX claims a device.
+    if not catalog_path.is_file():
+        raise FileNotFoundError(f"catalog not found: {catalog_path}")
 
     jax, chain_method = configure_runtime(
         num_chains=config.sampler.num_chains,
@@ -560,10 +485,8 @@ def main(argv: list[str] | None = None) -> None:
     save(
         mcmc,
         config,
-        catalog_path=catalog_path,
         timestamp=timestamp,
         force=args.force,
-        catalog_sha256=catalog_sha256,
         marginalization=marginalization,
     )
 

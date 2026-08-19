@@ -14,12 +14,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astrogwb_paper.amplitude import build_amplitude_marginalization
-from astrogwb_paper.config.loading import load_mapping
 from astrogwb_paper.config.mcmc import AmplitudeParameter, build_run_config
-from astrogwb_paper.paths import paper_project_root
-
-PAPER_ROOT = paper_project_root()
-
+from config_fixtures import example_raw
 
 # --------------------------------------------------------------------------- #
 # build_amplitude_marginalization
@@ -27,7 +23,7 @@ PAPER_ROOT = paper_project_root()
 
 
 def _marginalized_config(**kwargs):
-    raw = load_mapping(PAPER_ROOT / "configs/mcmc.example.toml")
+    raw = example_raw()
     raw["analysis"] = {
         **raw["analysis"],
         "likelihood": "amplitude_marginalized",
@@ -79,7 +75,7 @@ def test_build_amplitude_marginalization_anchors_the_amplitude_at_the_fiducial()
 
 
 def test_build_amplitude_marginalization_rejects_a_non_marginalized_config() -> None:
-    raw = load_mapping(PAPER_ROOT / "configs/mcmc.example.toml")
+    raw = example_raw()
     config = build_run_config(raw)
 
     with pytest.raises(ValueError, match="amplitude-marginalized config"):
@@ -138,7 +134,6 @@ def test_save_writes_the_reconstructed_amplitude(tmp_path) -> None:
     nc_path = save(
         _toy_marginalized_mcmc(),
         config,
-        catalog_path=tmp_path / "catalog.h5",
         marginalization=marginalization,
     )
 

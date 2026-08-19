@@ -1,128 +1,102 @@
 # Running inference
 
-There are two inference entry points in the repository:
+## Ad-hoc runs
 
-- The `astrogwb-run-mcmc` command accepts a TOML or JSON configuration file and is suitable for running MCMC on a cluster.
-- The [`mcmc.py` notebook](../notebooks/mcmc.py) provides the same functionality interactively. Convert it locally with `uvx jupytext --to ipynb packages/astrogwb-paper/notebooks/mcmc.py`.
-
-Both examples assume a population of binary neutron star (BNS) mergers following the example described in [Generating catalogs](./catalog-generation.md). The headless runner takes the proposal catalog explicitly:
+`astrogwb-run-mcmc` accepts a complete validated configuration and a prebuilt
+waveform catalog. The project ships no standalone example config. Assemble the
+curated inventory first:
 
 ```bash
+uv run astrogwb-validate-config \
+  inputs/experiments.yaml \
+  --output-dir outputs/configs
+
 uv run astrogwb-run-mcmc \
-  --config configs/mcmc.example.toml \
-  --catalog out/catalogs/bns-n16384-df1.h5
+  --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
+  --catalog outputs/catalogs/bns-n16384-df1.h5
 ```
 
-Select an accelerator while syncing and running the paper member with
-`--package astrogwb-paper --extra cuda` (or `--extra tpu`).
+Any generated config under `outputs/configs/<experiment>/<run>.json` works for
+direct runner and profiling work.
 
-## Running on an accelerator (GPU/TPU, incl. Google Colab)
+## Curated experiment runs
 
-Both entrypoints resolve their JAX platform and chain method through
-[`astrogwb_paper.runtime.configure_runtime`](../src/astrogwb_paper/runtime.py), which must
-run before `jax`/`numpyro` are otherwise imported. `--platform` accepts
-`auto` (default), `cpu`, `cuda`, or `tpu`. The chain method auto-resolves to
-`"parallel"` whenever at least one visible device is available per chain,
-including multi-device GPU/TPU runs. With fewer accelerator devices than
-chains it uses `"vectorized"`; with too few CPU devices it uses
-`"sequential"`. Explicit `--chain-method` values always take precedence. For
-the headless runner:
+[`inputs/experiments.yaml`](../inputs/experiments.yaml) is the sole MCMC configuration
+source. Its `base` mapping owns settings shared by all runs:
+
+- random seed and observing time;
+- frequency and cosmology grids;
+- sampler settings;
+- fiducial values;
+- default priors;
+- output defaults.
+
+Its `experiments` mapping declares four groups and all 21 runs:
+
+```text
+inputs/experiments.yaml
+  base + experiments.<experiment> + runs.<run>
+  -> outputs/configs/<experiment>/<run>.json
+  -> outputs/chains/<experiment>/<run>.nc
+  -> outputs/chains/<experiment>/<run>.json
+```
+
+YAML anchors and aliases remove repeated detector and likelihood mappings.
+Experiment-level settings overlay `base`, then a run mapping overlays both.
+Nested mappings are merged, lists replace inherited lists, and each overridden
+prior specification replaces that parameter's inherited prior table wholesale.
+The optional `catalog` run key routes the prebuilt catalog and is not written
+into the scientific run config.
+
+The groups are:
+
+| Experiment | Runs |
+| --- | ---: |
+| `cosmological-parameters` | six detector networks, `H0-Omega_m`, and `H0-merger-rate` |
+| `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` |
+| `modified-propagation` | six detector networks, `Xi_0`, and `Xi_0-H0` |
+| `variable-injection-size` | `n8192`, `n16384`, and `n32768` |
+
+`assemble_config` is one local Snakemake job. A change to
+`inputs/experiments.yaml` validates the complete inventory and regenerates all 21
+canonical JSON files together. Each MCMC job then consumes its own JSON.
+
+Run one experiment's chains through Snakemake from
+`packages/astrogwb-paper/`:
 
 ```bash
-uv run --package astrogwb-paper --extra tpu astrogwb-run-mcmc \
-  --config configs/mcmc.example.toml \
-  --catalog out/catalogs/bns-n16384-df1.h5 \
-  --platform tpu
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc cosmological_parameters_chains \
+  --profile profiles/local --cores 8 cosmological_parameters_chains
+snakemake --snakefile Snakefile \
+  --allowed-rules assemble_config run_mcmc modified_propagation_chains \
+  --profile profiles/slurm modified_propagation_chains
 ```
 
-The `mcmc.py` notebook detects Google Colab automatically and uses four chains
-for every Colab hardware type. It probes for TPU hardware with a stdlib-only
-check *before* installing dependencies, then clones the workspace and installs
-the core member editably with `astrogwb[tpu]` or `astrogwb[cuda]` plus the
-paper member's `notebook` extra. TPU runs pass
-`platform="tpu"`; CPU and GPU retain `platform="auto"`. The bootstrap also
-installs plotting dependencies and mounts Google Drive for the waveform
-catalog. Point `CATALOG_PATH`'s Colab branch at wherever you upload the
-catalog on Drive. Off Colab the bootstrap cell is a no-op.
-
-## Generating sweep configs
-
-Generate sweep configs explicitly on the local machine or cluster submit host;
-existing configs are skipped unless `--force` is supplied:
-
-```bash
-uv run astrogwb-generate-mcmc-configs
-```
-
-The committed [`configs/mcmc.sweeps.toml`](../configs/mcmc.sweeps.toml) is a
-declarative product of named detector `[networks]`, likelihood
-`[observations]`, inference `[analyses]`, and prior variants. Each `[runs.*]`
-table selects lists from those collections and expands
-`networks × analyses × observations`. Invariant cosmology, sampler, fiducial,
-and output settings come from the sweep's explicitly declared
-[`configs/mcmc.base.toml`](../configs/mcmc.base.toml).
-
-An observation supplies a complete `observation_time`, `f_min`, and `f_max`.
-An analysis selects a named prior variant for every sampled parameter and may
-optionally override existing base fiducials inline:
-
-```toml
-[analyses.H0]
-sampled_params = ["H0"]
-priors = { H0 = "uniform" }
-fiducials = { H0 = 67.66 }
-```
-
-Overrides affect the injected spectrum, proposal density, fixed constants,
-and sampler initialization. They cannot introduce parameters absent from the
-base fiducial table. Generated run IDs contain every product dimension:
-`<network>__<analysis>__<observation>`.
-
-To submit generated sweep configs as a batch (locally or on SLURM), see
-[Snakemake workflow](./snakemake-workflow.md#mcmc-workflow).
+Build all cosmological chains, figures, and tables with
+`plot_cosmological_parameters`.
 
 ## Outputs
 
-Each workflow run writes an ArviZ `InferenceData` to
-`chains/<catalog-id>/<campaign>/<run>.nc`
-(ad-hoc unlabelled runs keep the timestamped
-`chains/mcmc-<params>-det=<det>-seed<n>-<ts>.nc` convention) alongside a
-sibling `.json` sidecar recording the run's provenance: catalog path and
-`catalog_sha256`, the resolved `config_sha256`, detectors, seed, fiducials,
-priors, sampler settings, and the git revision. Runtime controls
-(`--platform`, `--chain-method`, etc.) affect only how a run executes, not
-its scientific result, so they are not recorded.
-Diagnostics surface the model's `importance_relative_ess` (the key proposal
-health check — should stay close to 1) and `total_merger_rate`.
+Every labelled run has a deterministic `.nc` path under
+`outputs/chains/<experiment>/`. The assembled config at
+`outputs/configs/<experiment>/<run>.json` is the record of the settings that
+produced it; the run itself writes no provenance sidecar.
 
-### Amplitude-marginalized runs
+Ad-hoc unlabelled runs retain the timestamped
+`mcmc-<params>-det=<detectors>-seed<n>-<timestamp>` convention.
 
-Setting `analysis.likelihood = "amplitude_marginalized"` (see the commented
-block in [`configs/mcmc.example.toml`](../configs/mcmc.example.toml))
-integrates one multiplicative parameter -- `H0` or `local_merger_rate` -- out
-of the likelihood analytically instead of sampling it with NUTS. The
-resulting `.nc` is a drop-in replacement for a sampled chain: post-processing
-draws the marginalized parameter and writes it into the `posterior` group
-under its own physical name (e.g. `H0`), alongside the real
-`total_merger_rate` (rescaled from the model's `template_merger_rate` by the
-drawn amplitude), so every figure script and `paper.smk` path that reads
-`total_merger_rate` or a sampled parameter by name works unchanged.
+## Catalog prerequisite
 
-Two things are different from a sampled chain, though:
+Experiments consume existing catalogs and never generate them implicitly.
+Build the required catalogs first:
 
-- There is **no `log_likelihood` group**. `az.from_numpyro` builds that group
-  from observed sample sites, and the marginalized model has none -- the
-  likelihood is a single `numpyro.factor`. `az.loo` and `az.waic` do not
-  apply to these chains.
-- The posterior additionally carries `quadrature_effective_nodes`, a
-  per-draw diagnostic for how many quadrature grid points actually resolve
-  the conditional posterior (should be comfortably above ~30; the runner logs
-  a warning otherwise). If it is low, raise `analysis.amplitude_num_nodes`.
-- **`sampled_params` no longer describes the chain.** It means "parameters
-  NUTS has a latent for", and the marginalized parameter deliberately is not
-  one: it must stay out of `sampled_params`, which drives `init_to_value` and
-  the `set(priors) == set(sampled_params)` invariant. Use
-  `RunConfig.posterior_params` for anything describing the saved chain --
-  plot `var_names`, summaries, run records. The JSON sidecar records both.
+```bash
+snakemake --snakefile Snakefile \
+  --allowed-rules bns_population bns_waveform_catalog \
+  --profile profiles/local --cores 8 \
+  outputs/catalogs/bns-n16384-df1.h5
+```
 
-See the [plotting notebook](../notebooks/mcmc_plotting.py) for examples of how to visualize the results.
+If a required catalog is absent, the MCMC workflow fails with a
+`MissingInputException` instead of silently scheduling catalog generation.

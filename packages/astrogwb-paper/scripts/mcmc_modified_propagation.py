@@ -1,43 +1,11 @@
-# ---
-# jupyter:
-#   jupytext:
-#     text_representation:
-#       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.19.4
-#   kernelspec:
-#     display_name: astrogwb (3.12.9)
-#     language: python
-#     name: python3
-# ---
+r"""Modified-GW-propagation figures and constraint tables.
 
-# %% [markdown]
-# # Modified-propagation constraints
-#
-# This notebook assembles the modified-GW-propagation figures used by the paper
-# workflow. The propagation effect is parameterized by the phenomenological
-# GW-to-EM luminosity-distance ratio $(\Xi_0, n)$ of Belgacem et al. It compares
-# three inference runs on the same detector network:
-#
-# 1. $\Xi_0$ only (population and cosmology fixed at their fiducial values),
-# 2. $\Xi_0 + n$ (both propagation parameters sampled), and
-# 3. $\Xi_0 + H_0$ with a Gaussian prior on the Hubble constant.
-#
-# It produces three figures and two tables:
-#
-# - a corner plot of the $\Xi_0$--$n$ posterior (chain 2),
-# - an overlay of the marginal $\Xi_0$ posterior across all three chains,
-# - a $\Xi_0$--$H_0$ corner plot (chain 3),
-# - a $\Xi_0$ 1$\sigma$ HDI table across the three chains, and
-# - a matched-filter-SNR / $\Xi_0$-$n$ HDI constraint table across detector
-#   networks, using the joint $\Xi_0 + n$ chain for each network.
-#
-# Chain paths and labels are separate inputs. This keeps chain loading outside the
-# plotting helpers and makes it possible to select different inference runs without
-# changing the plotting code.
+Compares three inference runs on the same detector network: $\Xi_0$ only,
+$\Xi_0 + n$, and $\Xi_0 + H_0$ with a Gaussian prior on the Hubble constant.
+Produces corners, a marginal overlay, and a matched-filter SNR /
+$\Xi_0$--$n$ HDI table across detector networks.
+"""
 
-# %%
 from __future__ import annotations
 
 import argparse
@@ -53,18 +21,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
-from _paper_style import (
-    CATEGORY,
-    CORNER_LEVELS,
-    TRUTH,
-    combo_colors,
-    get_corner_kwargs,
-    use_paper_style,
-)
 from arviz_base.labels import MapLabeller
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import (
     frequency_mask as make_frequency_mask,
+)
+from astrogwb.frequency import (
     frequency_spacing as compute_frequency_spacing,
 )
 from astrogwb.gwb import spectral_density, spectral_snr
@@ -73,9 +35,24 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.utils import years_to_seconds
+from astrogwb.waveform import apply_gw_distance_to_waveforms
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from astrogwb_paper.catalog import apply_gw_distance_at_fiducial
-from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.config.figures import (
+    Network,
+    load_analysis_grid,
+    load_fiducials,
+    resolve_networks,
+)
+from astrogwb_paper.paths import paper_project_root, resolve_paper_path
+from astrogwb_paper.plotting import (
+    CATEGORY,
+    CORNER_LEVELS,
+    DETECTOR_NETWORKS,
+    TRUTH,
+    combo_colors,
+    get_corner_kwargs,
+    use_paper_style,
+)
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.lines import Line2D
 from matplotlib.projections import register_projection
@@ -85,29 +62,6 @@ from pluscross import load_catalog
 # mis-detect the backend, so restore the standard matplotlib projection.
 register_projection(MplAxes)
 jax.config.update("jax_enable_x64", True)
-
-# %config InlineBackend.figure_format = "retina"
-
-# %% [markdown]
-# ## Defaults
-#
-# Direct notebook runs use the defaults below. Edit them in Jupyter or override
-# with flags when running headless; the paper workflow passes the ordered chain
-# paths as declared inputs.
-
-# %%
-_CHAIN_DIR = Path("chains/bns-n16384-df1/modified-propagation-all-detectors")
-_NETWORK = "ET-2L-aligned-CE-Hanford"
-
-DEFAULT_XI0_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0__baseline.nc"
-DEFAULT_XI0_N_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0-n__baseline.nc"
-DEFAULT_H0_CHAIN = _CHAIN_DIR / f"{_NETWORK}__Xi_0-H0-gauss__baseline.nc"
-
-# Fiducial (injected) values marked as truths on the corner plots.
-DEFAULT_XI_0 = 1.0
-DEFAULT_XI_N = 1.91
-DEFAULT_H0 = 67.66
-DEFAULT_IMPORTANCE_RELATIVE_ESS = 1.0
 
 XI_0_LABEL = r"$\Xi_0$"
 XI_N_LABEL = r"$n$"
@@ -126,120 +80,14 @@ XI_N_VAR_NAMES = ("xi_0", "xi_n")
 XI_N_ESS_VAR_NAMES = ("xi_0", "xi_n", "importance_relative_ess")
 H0_VAR_NAMES = ("xi_0", "H0")
 
-# Labels for the three-chain marginal overlay, in chain order.
-DEFAULT_MARGINAL_LABELS = [
-    r"$\Xi_0$",
-    r"$\Xi_0 + n$",
-    r"$\Xi_0 + H_0$",
-]
-# Label for the single-chain Xi_0-H0 corner plot.
-DEFAULT_H0_LABELS = [
-    r"$\Xi_0 + H_0$",
-]
-
-# Fiducial population/cosmology hyperparameters needed to evaluate the SGWB and
-# its matched-filter SNR for the by-detector constraint table below.
-DEFAULT_OMEGA_M = 0.3096
-DEFAULT_GAMMA = 1.42
-DEFAULT_KAPPA = 4.62
-DEFAULT_Z_PEAK = 1.84
-DEFAULT_LOCAL_MERGER_RATE = 770.0
-
-DEFAULT_CATALOG_PATH = Path("out/catalogs/bns-n16384-df1.h5")
-DEFAULT_OBSERVATION_TIME = 1.0
-DEFAULT_F_MIN = 2.0
-DEFAULT_F_MAX = 4096.0
-DEFAULT_Z_MIN = 0.0
-DEFAULT_Z_MAX = 20.0
-DEFAULT_N_GRID = 256
-
-DEFAULT_DETECTOR_NETWORKS = {
-    "ET-triangular": ("E1", "E2", "E3"),
-    "ET-triangular-CE-Hanford": ("E1", "E2", "E3", "C1"),
-    "ET-2L-aligned": ("S1", "R1"),
-    "ET-2L-aligned-CE-Hanford": ("S1", "R1", "C1"),
-    "ET-2L-misaligned": ("S2", "R2"),
-    "ET-2L-misaligned-CE-Hanford": ("S2", "R2", "C1"),
-}
-DEFAULT_NETWORKS = list(DEFAULT_DETECTOR_NETWORKS)
-DEFAULT_DETECTOR_LABELS = [
-    r"ET-$\Delta$",
-    r"ET-$\Delta +$ CE",
-    "ET-2L-par",
-    r"ET-2L-par $+$ CE",
-    "ET-2L",
-    r"ET-2L $+$ CE",
-]
-DEFAULT_DETECTOR_XI0_N_CHAINS = [
-    _CHAIN_DIR / f"{name}__Xi_0-n__baseline.nc" for name in DEFAULT_NETWORKS
-]
-
-# %% [markdown]
-# ## Input and validation helpers
-
-
-# %%
-def _resolve_path(path: Path, root: Path) -> Path:
-    return path if path.is_absolute() else root / path
-
-
-def _parse_network_definition(value: str) -> tuple[str, tuple[str, ...]]:
-    if "=" not in value:
-        raise ValueError(
-            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
-        )
-    name, detector_list = value.split("=", 1)
-    name = name.strip()
-    detectors = tuple(detector.strip() for detector in detector_list.split(","))
-    if not name or not detectors or any(not detector for detector in detectors):
-        raise ValueError(
-            f"invalid network definition {value!r}; expected NAME=DET1,DET2,..."
-        )
-    return name, detectors
-
-
-def _resolve_networks(
-    defaults: Mapping[str, tuple[str, ...]],
-    definitions: Sequence[str],
-    selected: Sequence[str],
-) -> dict[str, tuple[str, ...]]:
-    networks = dict(defaults)
-    cli_names: set[str] = set()
-    for definition in definitions:
-        name, detectors = _parse_network_definition(definition)
-        if name in cli_names:
-            raise ValueError(f"duplicate --network definition for {name!r}")
-        cli_names.add(name)
-        networks[name] = detectors
-
-    names = list(selected) or list(networks)
-    unknown = [name for name in names if name not in networks]
-    if unknown:
-        raise ValueError(f"unknown selected network(s): {', '.join(unknown)}")
-    return {name: networks[name] for name in names}
-
-
-def _base_network_name(name: str) -> str:
-    """Map an ET+CE network name onto its ET-only counterpart."""
-    suffix = "-CE-Hanford"
-    return name.removesuffix(suffix)
-
-
-def detector_network_styles(
-    networks: Mapping[str, tuple[str, ...]],
-) -> tuple[list[str], list[str]]:
-    """Shared color per ET / ET+CE pair; dashed linestyle for CE companions."""
-    names = list(networks)
-    bases: list[str] = []
-    for name in names:
-        base = _base_network_name(name)
-        if base not in bases:
-            bases.append(base)
-    palette = combo_colors(len(bases))
-    color_by_base = dict(zip(bases, palette, strict=True))
-    colors = [color_by_base[_base_network_name(name)] for name in names]
-    linestyles = ["--" if name.endswith("-CE-Hanford") else "-" for name in names]
-    return colors, linestyles
+# Labels for this figure, in legend order. The marginal overlay compares three
+# parameter combinations of one network, so its labels name the combinations and
+# follow the order the rule passes --xi0-chain, --xi0-n-chain, --h0-chain. The
+# by-detector table borrows the shared network legend (`DETECTOR_NETWORKS`),
+# which the workflow also expands its chain paths from.
+PROPAGATION_EXPERIMENT = "modified-propagation"
+MARGINAL_LABELS = (r"$\Xi_0$", r"$\Xi_0 + n$", r"$\Xi_0 + H_0$")
+H0_LABELS = (r"$\Xi_0 + H_0$",)
 
 
 def load_inference_data(path: Path) -> xr.DataTree:
@@ -300,11 +148,6 @@ def _validate_styles(
     return resolved_colors, resolved_linestyles
 
 
-# %% [markdown]
-# ## Posterior plotting helpers
-
-
-# %%
 def plot_marginal_posteriors(
     inference_data: Sequence[xr.DataTree],
     labels: Sequence[str],
@@ -515,14 +358,9 @@ def xi0_hdi_table(
     return pd.DataFrame(rows).set_index("chain")
 
 
-# %% [markdown]
-# ## Fiducial SNR and $\Xi_0$/$n$ constraint table by detector
-
-
-# %%
 def compute_network_snrs(
     catalog_path: Path,
-    networks: Mapping[str, tuple[str, ...]],
+    networks: Sequence[Network],
     fiducials: Mapping[str, float],
     *,
     observation_time: float,
@@ -536,7 +374,7 @@ def compute_network_snrs(
     catalog = load_catalog(catalog_path)
     # Rescale to live-GW distances at the fiducial modified-propagation
     # parameters before reducing to polarization power.
-    catalog = apply_gw_distance_at_fiducial(
+    catalog = apply_gw_distance_to_waveforms(
         catalog,
         xi_0=float(fiducials["xi_0"]),
         xi_n=float(fiducials["xi_n"]),
@@ -578,7 +416,8 @@ def compute_network_snrs(
     observation_seconds = years_to_seconds(observation_time)
 
     rows: list[dict[str, Any]] = []
-    for network, detectors in networks.items():
+    for network in networks:
+        detectors = network.detectors
         sensitivities = load_sensitivity_map(detectors)
         effective_noise = jnp.asarray(
             effective_psd(frequencies, list(detectors), sensitivities)
@@ -593,7 +432,7 @@ def compute_network_snrs(
         )
         rows.append(
             {
-                "network": network,
+                "network": network.name,
                 "detectors": ",".join(detectors),
                 "n_detectors": len(detectors),
                 "snr": snr,
@@ -628,9 +467,8 @@ def _posterior_median(
 
 
 def build_snr_xi0_n_constraint_table(
-    networks: Mapping[str, tuple[str, ...]],
+    networks: Sequence[Network],
     inference_data: Sequence[xr.DataTree],
-    labels: Sequence[str],
     snr_table: pd.DataFrame,
     *,
     group: str = "posterior",
@@ -643,28 +481,30 @@ def build_snr_xi0_n_constraint_table(
     """
     validate_inference_data(
         inference_data,
-        labels,
+        [network.label for network in networks],
         required_vars=XI_N_VAR_NAMES,
         group=group,
         expected_count=len(networks),
     )
     snr_by_network = snr_table.set_index("network")
-    missing_networks = [name for name in networks if name not in snr_by_network.index]
+    missing_networks = [
+        network.name for network in networks if network.name not in snr_by_network.index
+    ]
     if missing_networks:
         raise KeyError(
             "SNR table is missing configured network(s): " + ", ".join(missing_networks)
         )
 
     rows: list[dict[str, Any]] = []
-    for network, tree, label in zip(networks, inference_data, labels, strict=True):
-        snr = float(snr_by_network.loc[network, "snr"])
+    for network, tree in zip(networks, inference_data, strict=True):
+        snr = float(snr_by_network.loc[network.name, "snr"])
         xi0_lower, xi0_upper = _hdi(tree, "xi_0", group=group, probability=probability)
         n_lower, n_upper = _hdi(tree, "xi_n", group=group, probability=probability)
         sigma_xi0_hdi = (xi0_upper - xi0_lower) / 2
         sigma_n_hdi = (n_upper - n_lower) / 2
         rows.append(
             {
-                "label": label,
+                "label": network.label,
                 "snr": snr,
                 "sigma_xi0_hdi": sigma_xi0_hdi,
                 "sigma_n_hdi": sigma_n_hdi,
@@ -711,304 +551,147 @@ def write_xi0_n_constraint_table(
     return latex
 
 
-# %% [markdown]
-# ## Command-line configuration
-#
-# Every setting below can be overridden with a CLI flag when running this
-# notebook headless; otherwise the defaults above are used.
-
-
-# %%
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--xi0-chain", type=Path, default=DEFAULT_XI0_CHAIN)
-    parser.add_argument("--xi0-n-chain", type=Path, default=DEFAULT_XI0_N_CHAIN)
-    parser.add_argument("--h0-chain", type=Path, default=DEFAULT_H0_CHAIN)
-    parser.add_argument("--marginal-labels", nargs=3, default=DEFAULT_MARGINAL_LABELS)
-    parser.add_argument("--h0-labels", nargs=1, default=DEFAULT_H0_LABELS)
-    parser.add_argument(
-        "--output-xi-n-corner-pdf",
-        type=Path,
-        default=Path("figures/mcmc_modified_propagation_Xi0_n_corner.pdf"),
-    )
-    parser.add_argument(
-        "--output-xi-n-ess-corner-pdf",
-        type=Path,
-        default=Path("figures/mcmc_modified_propagation_Xi0_n_ess_corner.pdf"),
-    )
-    parser.add_argument(
-        "--output-xi0-marginal-pdf",
-        type=Path,
-        default=Path("figures/mcmc_modified_propagation_Xi0_marginal.pdf"),
-    )
-    parser.add_argument(
-        "--output-h0-corner-pdf",
-        type=Path,
-        default=Path("figures/mcmc_modified_propagation_Xi0_H0_corner.pdf"),
-    )
-    parser.add_argument(
-        "--detector-xi0-n-chains",
-        type=Path,
-        nargs="+",
-        default=DEFAULT_DETECTOR_XI0_N_CHAINS,
-    )
-    parser.add_argument("--detector-labels", nargs="+", default=DEFAULT_DETECTOR_LABELS)
-    parser.add_argument(
-        "--output-xi0-n-csv",
-        type=Path,
-        default=Path("figures/mcmc_modified_propagation_Xi0_n_by_detector.csv"),
-    )
-    parser.add_argument(
-        "--output-xi0-n-tex",
-        type=Path,
-        default=Path("figures/mcmc_modified_propagation_Xi0_n_by_detector.tex"),
-    )
-    parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
-    parser.add_argument(
-        "--network",
-        action="append",
-        default=[],
-        metavar="NAME=DET1,DET2,...",
-        help="Add or override a detector-network definition (repeatable).",
-    )
-    parser.add_argument(
-        "--networks",
-        nargs="*",
-        default=DEFAULT_NETWORKS,
-        help="Defined network names to include in detector-chain order.",
-    )
-    parser.add_argument(
-        "--observation-time", type=float, default=DEFAULT_OBSERVATION_TIME
-    )
-    parser.add_argument("--f-min", type=float, default=DEFAULT_F_MIN)
-    parser.add_argument("--f-max", type=float, default=DEFAULT_F_MAX)
-    parser.add_argument("--z-min", type=float, default=DEFAULT_Z_MIN)
-    parser.add_argument("--z-max", type=float, default=DEFAULT_Z_MAX)
-    parser.add_argument("--n-grid", type=int, default=DEFAULT_N_GRID)
-    parser.add_argument("--omega-m", type=float, default=DEFAULT_OMEGA_M)
-    parser.add_argument("--gamma", type=float, default=DEFAULT_GAMMA)
-    parser.add_argument("--kappa", type=float, default=DEFAULT_KAPPA)
-    parser.add_argument("--z-peak", type=float, default=DEFAULT_Z_PEAK)
-    parser.add_argument(
-        "--local-merger-rate", type=float, default=DEFAULT_LOCAL_MERGER_RATE
-    )
+    parser.add_argument("--catalog", type=Path, required=True)
+    parser.add_argument("--xi0-chain", type=Path, required=True)
+    parser.add_argument("--xi0-n-chain", type=Path, required=True)
+    parser.add_argument("--h0-chain", type=Path, required=True)
+    parser.add_argument("--detector-xi0-n-chains", type=Path, nargs="+", required=True)
+    parser.add_argument("--output-xi-n-corner-pdf", type=Path, required=True)
+    parser.add_argument("--output-xi-n-ess-corner-pdf", type=Path, required=True)
+    parser.add_argument("--output-xi0-marginal-pdf", type=Path, required=True)
+    parser.add_argument("--output-h0-corner-pdf", type=Path, required=True)
+    parser.add_argument("--output-xi0-n-csv", type=Path, required=True)
+    parser.add_argument("--output-xi0-n-tex", type=Path, required=True)
     parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument("--group", default="posterior")
-    parser.add_argument("--xi-0", type=float, default=DEFAULT_XI_0)
-    parser.add_argument("--xi-n", type=float, default=DEFAULT_XI_N)
-    parser.add_argument("--h0", type=float, default=DEFAULT_H0)
-    parser.add_argument(
-        "--importance-relative-ess",
-        type=float,
-        default=DEFAULT_IMPORTANCE_RELATIVE_ESS,
-    )
-    args, _ = parser.parse_known_args(argv)
-    try:
-        args.resolved_networks = _resolve_networks(
-            DEFAULT_DETECTOR_NETWORKS, args.network, args.networks
+    # Not a fiducial: N_eff/N_inj is a plotting truth line at its definitional
+    # maximum. Adding it to [fiducials] would inject a spurious constant into
+    # the sampled model.
+    parser.add_argument("--importance-relative-ess", type=float, default=1.0)
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    args = _parse_args(argv)
+    root = paper_project_root()
+    grid = load_analysis_grid()
+    fiducials = {
+        **load_fiducials(),
+        "importance_relative_ess": args.importance_relative_ess,
+    }
+    networks = resolve_networks(PROPAGATION_EXPERIMENT, DETECTOR_NETWORKS)
+    marginal_labels = list(MARGINAL_LABELS)
+    h0_labels = list(H0_LABELS)
+    detector_labels = [network.label for network in networks]
+    if len(args.detector_xi0_n_chains) != len(networks):
+        raise SystemExit(
+            f"--detector-xi0-n-chains has {len(args.detector_xi0_n_chains)} paths "
+            f"but {PROPAGATION_EXPERIMENT} declares {len(networks)} networks"
         )
-    except ValueError as error:
-        parser.error(str(error))
-    return args
 
-
-args = _parse_args()
-root = paper_project_root()
-
-# %% [markdown]
-# ## Load the chains
-#
-# Read the three inference runs from disk and check that each one carries the
-# posterior variables the figures below need.
-
-# %%
-# Chain order: [xi_0 only, xi_0 + n, xi_0 + H0].
-chain_paths = [
-    _resolve_path(args.xi0_chain, root),
-    _resolve_path(args.xi0_n_chain, root),
-    _resolve_path(args.h0_chain, root),
-]
-
-inference_data: list[xr.DataTree] = [load_inference_data(path) for path in chain_paths]
-validate_inference_data(
-    inference_data,
-    args.marginal_labels,
-    group=args.group,
-    expected_count=3,
-)
-
-xi_n_data = [inference_data[1]]
-xi_n_labels = [args.marginal_labels[1]]
-h0_data = [inference_data[2]]
-
-fiducials = {
-    "xi_0": args.xi_0,
-    "xi_n": args.xi_n,
-    "H0": args.h0,
-    "Omega_m": args.omega_m,
-    "gamma": args.gamma,
-    "kappa": args.kappa,
-    "z_peak": args.z_peak,
-    "local_merger_rate": args.local_merger_rate,
-    "importance_relative_ess": args.importance_relative_ess,
-}
-
-networks = args.resolved_networks
-if len(args.detector_xi0_n_chains) != len(args.detector_labels):
-    raise ValueError(
-        "--detector-xi0-n-chains and --detector-labels must have equal length"
+    chain_paths = [
+        resolve_paper_path(args.xi0_chain, root),
+        resolve_paper_path(args.xi0_n_chain, root),
+        resolve_paper_path(args.h0_chain, root),
+    ]
+    inference_data = [load_inference_data(path) for path in chain_paths]
+    validate_inference_data(
+        inference_data,
+        marginal_labels,
+        group=args.group,
+        expected_count=3,
     )
-if len(args.detector_xi0_n_chains) != len(networks):
-    raise ValueError(
-        "detector chain count must match --networks: "
-        f"received {len(args.detector_xi0_n_chains)} chains for {len(networks)} networks"
+    xi_n_data = [inference_data[1]]
+    xi_n_labels = [marginal_labels[1]]
+    h0_data = [inference_data[2]]
+    detector_xi0_n_data = [
+        load_inference_data(resolve_paper_path(path, root))
+        for path in args.detector_xi0_n_chains
+    ]
+    validate_inference_data(
+        detector_xi0_n_data,
+        detector_labels,
+        required_vars=XI_N_VAR_NAMES,
+        group=args.group,
+        expected_count=len(networks),
     )
-detector_xi0_n_paths = [
-    _resolve_path(path, root) for path in args.detector_xi0_n_chains
-]
-detector_xi0_n_data = [load_inference_data(path) for path in detector_xi0_n_paths]
-validate_inference_data(
-    detector_xi0_n_data,
-    args.detector_labels,
-    required_vars=XI_N_VAR_NAMES,
-    group=args.group,
-    expected_count=len(networks),
-)
+    use_paper_style()
 
-use_paper_style()
+    xi_n_corner_figure = plot_corner(
+        xi_n_data,
+        xi_n_labels,
+        XI_N_VAR_NAMES,
+        group=args.group,
+        fiducials=fiducials,
+        colors=[CATEGORY["modified_propagation"]],
+    )
+    xi_n_ess_corner_figure = plot_corner(
+        xi_n_data,
+        xi_n_labels,
+        XI_N_ESS_VAR_NAMES,
+        group=args.group,
+        fiducials=fiducials,
+        colors=[CATEGORY["modified_propagation"]],
+    )
+    xi0_marginal_figure = plot_marginal_posteriors(
+        inference_data,
+        marginal_labels,
+        var_name="xi_0",
+        group=args.group,
+        colors=combo_colors(len(inference_data)),
+        fiducial=fiducials["xi_0"],
+    )
+    h0_corner_figure = plot_corner(
+        h0_data,
+        h0_labels,
+        H0_VAR_NAMES,
+        group=args.group,
+        fiducials=fiducials,
+        colors=[CATEGORY["modified_propagation"]],
+    )
+    snr_table = compute_network_snrs(
+        resolve_paper_path(args.catalog, root),
+        networks,
+        fiducials,
+        observation_time=grid.observation_time,
+        f_min=grid.f_min,
+        f_max=grid.f_max,
+        z_min=grid.z_min,
+        z_max=grid.z_max,
+        n_grid=grid.n_grid,
+    )
+    xi0_n_constraint_table = build_snr_xi0_n_constraint_table(
+        networks,
+        detector_xi0_n_data,
+        snr_table,
+        group=args.group,
+    )
+    print(xi0_n_constraint_table_latex(xi0_n_constraint_table))
 
-# %% [markdown]
-# ## Figure (i): $\Xi_0$--$n$ corner
-#
-# Both propagation parameters are sampled together in this chain, so this
-# corner plot shows how well they can be told apart from each other.
+    outputs = {
+        resolve_paper_path(args.output_xi_n_corner_pdf, root): xi_n_corner_figure,
+        resolve_paper_path(
+            args.output_xi_n_ess_corner_pdf, root
+        ): xi_n_ess_corner_figure,
+        resolve_paper_path(args.output_xi0_marginal_pdf, root): xi0_marginal_figure,
+        resolve_paper_path(args.output_h0_corner_pdf, root): h0_corner_figure,
+    }
+    for output_path, figure in outputs.items():
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
+        print("saved figure:", output_path)
 
-# %%
-xi_n_corner_figure = plot_corner(
-    xi_n_data,
-    xi_n_labels,
-    XI_N_VAR_NAMES,
-    group=args.group,
-    fiducials=fiducials,
-    colors=[CATEGORY["modified_propagation"]],
-)
+    csv_path = resolve_paper_path(args.output_xi0_n_csv, root)
+    tex_path = resolve_paper_path(args.output_xi0_n_tex, root)
+    write_xi0_n_constraint_table(xi0_n_constraint_table, csv_path, tex_path)
+    print("saved constraint table:", csv_path)
+    print("saved LaTeX table:", tex_path)
 
-# %% [markdown]
-# ## Figure (i-b): $\Xi_0$--$n$--relative-ESS corner
-#
-# Mirror of the $\Xi_0$--$n$ corner that also shows the importance-sampling
-# relative effective sample size $N_{\mathrm{eff}} / N_{\mathrm{inj}}$.
+    for tree in [*inference_data, *detector_xi0_n_data]:
+        tree.close()
 
-# %%
-xi_n_ess_corner_figure = plot_corner(
-    xi_n_data,
-    xi_n_labels,
-    XI_N_ESS_VAR_NAMES,
-    group=args.group,
-    fiducials=fiducials,
-    colors=[CATEGORY["modified_propagation"]],
-)
 
-# %% [markdown]
-# ## Figure (ii): $\Xi_0$ marginal posterior overlay
-#
-# Compares how tightly $\Xi_0$ is constrained across all three inference
-# setups, from the simplest (fixed cosmology and population) to the most
-# flexible.
-
-# %%
-xi0_marginal_figure = plot_marginal_posteriors(
-    inference_data,
-    args.marginal_labels,
-    var_name="xi_0",
-    group=args.group,
-    colors=combo_colors(len(inference_data)),
-    fiducial=fiducials["xi_0"],
-)
-
-# %% [markdown]
-# ## Table: $\Xi_0$ 1$\sigma$ HDI per chain
-#
-# Reports the 68.27% highest-density interval of $\Xi_0$ for each chain, with
-# the left/right bounds and the half-width $\sigma = (\mathrm{right} -
-# \mathrm{left}) / 2$.
-
-# %%
-xi0_hdi = xi0_hdi_table(inference_data, args.marginal_labels, group=args.group)
-xi0_hdi
-
-# %% [markdown]
-# ## Figure (iii): $\Xi_0$--$H_0$ corner
-#
-# Shows the joint constraint on $\Xi_0$ and the Hubble constant $H_0$ when
-# $H_0$ is sampled under a Gaussian prior.
-
-# %%
-h0_corner_figure = plot_corner(
-    h0_data,
-    args.h0_labels,
-    H0_VAR_NAMES,
-    group=args.group,
-    fiducials=fiducials,
-    colors=[CATEGORY["modified_propagation"]],
-)
-
-# %% [markdown]
-# ## Fiducial SNR and $\Xi_0$/$n$ constraint table by detector
-#
-# Evaluate the fiducial SGWB once, compute the matched-filter SNR for each
-# detector network, and combine those estimates with the sampled $\Xi_0$/$n$
-# HDI widths from the joint $\Xi_0 + n$ chain for that network.
-
-# %%
-snr_table = compute_network_snrs(
-    _resolve_path(args.catalog, root),
-    networks,
-    fiducials,
-    observation_time=args.observation_time,
-    f_min=args.f_min,
-    f_max=args.f_max,
-    z_min=args.z_min,
-    z_max=args.z_max,
-    n_grid=args.n_grid,
-)
-xi0_n_constraint_table = build_snr_xi0_n_constraint_table(
-    networks,
-    detector_xi0_n_data,
-    args.detector_labels,
-    snr_table,
-    group=args.group,
-)
-xi0_n_constraint_table
-
-# %% [markdown]
-# ## LaTeX $\Xi_0$/$n$ constraint table
-#
-# Publication-formatted version of the table above.
-
-# %%
-print(xi0_n_constraint_table_latex(xi0_n_constraint_table))
-
-# %% [markdown]
-# ## Save figures and table
-#
-# Write the three figures above, and the machine-readable / LaTeX constraint
-# tables, to the configured output paths.
-
-# %%
-outputs = {
-    _resolve_path(args.output_xi_n_corner_pdf, root): xi_n_corner_figure,
-    _resolve_path(args.output_xi_n_ess_corner_pdf, root): xi_n_ess_corner_figure,
-    _resolve_path(args.output_xi0_marginal_pdf, root): xi0_marginal_figure,
-    _resolve_path(args.output_h0_corner_pdf, root): h0_corner_figure,
-}
-for output_path, figure in outputs.items():
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
-    print("saved figure:", output_path)
-
-xi0_n_csv_path = _resolve_path(args.output_xi0_n_csv, root)
-xi0_n_tex_path = _resolve_path(args.output_xi0_n_tex, root)
-write_xi0_n_constraint_table(xi0_n_constraint_table, xi0_n_csv_path, xi0_n_tex_path)
-print("saved constraint table:", xi0_n_csv_path)
-print("saved LaTeX table:", xi0_n_tex_path)
+if __name__ == "__main__":
+    main()

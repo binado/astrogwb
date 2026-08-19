@@ -1,6 +1,7 @@
-# MCMC profile: uv run astrogwb-workflow mcmc <batch.json> --profile slurm --submit
-#   snakemake --snakefile workflow/mcmc.smk \
-#     --profile profiles/slurm --configfile <batch.json> mcmc
+# MCMC profile:
+#   snakemake --snakefile Snakefile \
+#     --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
+#     --profile profiles/slurm plot_cosmological_parameters --dry-run
 # Requires `uv sync --package astrogwb-paper --extra cuda --group slurm`.
 # Job logs land under .snakemake/slurm_logs/.
 executor: slurm
@@ -9,6 +10,8 @@ executor: slurm
 # cap, since --jobs bounds how many DAG-eligible instances the array-jobs
 # batcher can bundle into a single sbatch array submission at once.
 jobs: 12
+# Config assembly and figures are local rules on the submit host.
+local-cores: 2
 # Batch run_mcmc jobs into one SLURM job array per resource footprint
 # (parity with the retired sbatch --array flow).
 slurm-array-jobs: run_mcmc

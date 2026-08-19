@@ -6,14 +6,14 @@ Our inference framework uses an importance sampling scheme to calculate the spec
 
 An example BNS population is defined declaratively in [`packages/astrogwb-paper/examples/bns_population.yaml`](../examples/bns_population.yaml).
 The complete default recipe lives in
-[`configs/catalogs/bns-n16384-df1.toml`](../configs/catalogs/bns-n16384-df1.toml).
+[`inputs/catalogs.yaml`](../inputs/catalogs.yaml) under `bns-n16384-df1`.
 Its equivalent explicit population command is:
 
 ```bash
 uv run gwmock-pop simulate \
   --config examples/bns_population.yaml \
   --n 16384 \
-  --output out/populations/bns-n16384-df1.h5 \
+  --output outputs/populations/bns-n16384-df1.h5 \
   --seed 42
 ```
 
@@ -39,8 +39,8 @@ The corresponding explicit waveform command is:
 
 ```bash
 uv run astrogwb-generate-waveform-catalog \
---population out/populations/bns-n16384-df1.h5 \
---output out/catalogs/bns-n16384-df1.h5 \
+--population outputs/populations/bns-n16384-df1.h5 \
+--output outputs/catalogs/bns-n16384-df1.h5 \
 --approximant IMRPhenomXAS_NRTidalv3 \
 --sampling-frequency 8192 \
 --minimum-frequency 2 \
@@ -50,8 +50,14 @@ uv run astrogwb-generate-waveform-catalog \
 --chunk-size 2048
 ```
 
-Each catalog has an independent `configs/catalogs/<catalog-id>.toml` recipe, so
-editing one recipe cannot invalidate another catalog. Catalog generation is not
+[`inputs/catalogs.yaml`](../inputs/catalogs.yaml) holds the shared base and
+named catalog overlays, matching [`inputs/experiments.yaml`](../inputs/experiments.yaml).
+A catalog's name is its key here; a run in the experiment inventory selects one
+by that name (`catalog: bns-n8192-df1`), and the workflow builds the path
+`outputs/catalogs/<name>.h5`. A run naming a catalog this file does not declare
+fails in `astrogwb-validate-config`. Snakemake rebuilds a catalog when that
+catalog's resolved settings change, so editing one overlay does not rebuild the
+others. Catalog generation is not
 part of the MCMC submission workflow.
 
 To run the population and waveform steps together as a single reproducible

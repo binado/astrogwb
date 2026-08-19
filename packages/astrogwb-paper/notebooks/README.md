@@ -2,6 +2,9 @@
 
 Workflows in this directory are stored as plain `.py` files in [Jupytext](https://jupytext.readthedocs.io/) **py:percent** format — a way to represent Jupyter notebooks as Python source instead of `.ipynb` JSON. That keeps diffs readable and lets normal Python tooling (e.g. Ruff) work on notebook code.
 
+Paper figures are not notebooks. Their CLI entry points live under
+[`scripts/`](../scripts/) and are invoked by Snakemake.
+
 ## Opening in Jupyter
 
 To use the classic notebook UI, convert a `.py` file to `.ipynb`:
@@ -21,7 +24,5 @@ uv sync --package astrogwb-paper --group dev
 ## Notebooks
 
 - **`mcmc.py`** — importance-weighted NUTS inference (NumPyro port of ASGWB.jl)
-- **`paper/amplitude_toy_model.py`** — smoke-test sibling of `mcmc.py` used by the paper workflow: same pipeline scaffolding, but the cosmology/population callback is replaced by a trivial single-parameter amplitude model, to sanity-check that NUTS recovers a known injection
-- **`paper/importance_weights_grid.py`** — evaluate relative ESS from importance weights on prior-support grids for the hard-coded $H_0$–$\Omega_m$ and $\Xi_0$–$n$ combinations, and plot heatmaps with the paper style
 - **`mcmc_plotting.py`** — load saved chains and produce diagnostic and corner plots
 - **`logposterior_grid.py`** — evaluate the log-posterior on a parameter grid
