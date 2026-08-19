@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    redshift_logpdf,
+    compute_merger_rate_distance_and_logprob,
 )
 from gwmock_pop.cosmology.flat_lambda_cdm import DEFAULT_LOOKUP_GRID_SIZE
 from gwmock_pop.loaders.file_loader import (
@@ -199,11 +199,17 @@ def guarded_proposal_logpdf(
     # gwmock-pop's), not the coarser grid the model integrates on: this is the
     # density the catalog was actually drawn from, so it must mirror the
     # generator rather than the target. Only the formula is shared with the
-    # model, via ``redshift_logpdf``.
+    # model, via ``compute_merger_rate_distance_and_logprob``. The
+    # ``local_merger_rate`` placeholder is arbitrary: it only feeds the
+    # discarded ``total_merger_rate`` output -- the normalized density is
+    # amplitude-independent, so the rate is normalized away here.
     redshift_grid = jnp.linspace(z_min, z_max, n_grid)
-    fiducial_logpdf = np.asarray(
-        redshift_logpdf(params, jnp.asarray(redshift), redshift_grid=redshift_grid)
+    _, _, logpdf = compute_merger_rate_distance_and_logprob(
+        {**params, "local_merger_rate": 1.0},
+        {"redshift": jnp.asarray(redshift)},
+        redshift_grid=redshift_grid,
     )
+    fiducial_logpdf = np.asarray(logpdf)
     in_support = (redshift >= z_min) & (redshift <= z_max)
     uniform_logpdf = np.where(in_support, -np.log(z_max - z_min), -np.inf)
     return np.logaddexp(

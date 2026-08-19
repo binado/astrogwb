@@ -156,48 +156,6 @@ def _interpolate_logpdf(
     return jnp.log(unnormalized_pdf) - jnp.log(integral_mpc3)
 
 
-def redshift_logpdf(
-    params: Mapping[str, Any],
-    redshift: jax.Array,
-    *,
-    redshift_grid: jax.Array,
-) -> jax.Array:
-    r"""Normalized Madau-Dickinson redshift log-pdf :math:`\log p(z|\theta)`.
-
-    The standalone counterpart of the ``logpdf`` returned by
-    :func:`compute_merger_rate_distance_and_logprob`, for callers that want the
-    density without the merger rate or luminosity distance -- notably offline
-    construction of a proposal density for a precomputed catalog. Both share
-    one implementation of the density and its normalization.
-
-    ``redshift_grid`` is the caller's choice and need not match the grid used
-    during inference: a proposal density should be evaluated on the grid the
-    catalog was actually *sampled* from, which is a property of the generator,
-    not of the model.
-
-    Parameters
-    ----------
-    params:
-        Hyperparameters. Must include ``H0``, ``Omega_m``, ``gamma``,
-        ``kappa``, and ``z_peak``.
-    redshift:
-        Redshifts at which to evaluate the log-pdf, shape ``(N,)``.
-    redshift_grid:
-        Redshift grid for the cosmology integrals and MD normalization.
-
-    Returns
-    -------
-    jax.Array
-        Log-density of shape ``(N,)``; ``-inf`` outside ``redshift_grid``.
-    """
-    _, unnormalized_pdf_grid, integral_mpc3 = _redshift_density_grids(
-        params, redshift_grid
-    )
-    return _interpolate_logpdf(
-        redshift, redshift_grid, unnormalized_pdf_grid, integral_mpc3
-    )
-
-
 def compute_merger_rate_distance_and_logprob(
     params: Mapping[str, Any],
     samples: Mapping[str, jax.Array],
@@ -211,13 +169,14 @@ def compute_merger_rate_distance_and_logprob(
 
     :math:`\mathrm{logpdf} = \log p(z|\theta)`
 
-    at ``samples["redshift"]``. One grid pass serves all three outputs, and the
-    density itself is shared with :func:`redshift_logpdf` so an offline
-    proposal density can never drift from the target it is divided into. Also
+    at ``samples["redshift"]``. One grid pass serves all three outputs. Also
     returns the interpolated luminosity distance ``d_L(z|\theta)``. The same
     function is used for the proposal (at fiducials) and the target (at sampled
     ``params``); :func:`log_weights` combines these with the catalog fiducial
-    distances and the GW/EM ratio correction.
+    distances and the GW/EM ratio correction. Offline construction of a
+    proposal density for a precomputed catalog must call this same function
+    (on the grid the catalog was actually *sampled* from) so the proposal and
+    target densities can never drift apart.
 
     Parameters
     ----------
