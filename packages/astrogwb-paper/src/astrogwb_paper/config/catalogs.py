@@ -1,12 +1,26 @@
-"""Typed source, production-population, and waveform-catalog recipes."""
+"""Typed source, production-population, and waveform-catalog recipes.
+
+Like :mod:`astrogwb_paper.config.loading`, this module imports neither JAX nor
+``astrogwb``: only stdlib, PyYAML, and pydantic. That is load-bearing rather
+than tidy. ``Snakefile`` imports it and calls :func:`load_catalog_inventory` at
+*workflow-parse* time -- on every dry run and every job dispatch -- and
+:mod:`astrogwb_paper.config.experiments` reaches it from the JAX-free
+``astrogwb-validate-config`` path, so a heavy import here would be paid many
+times over and would defeat the runtime-before-JAX ordering the CLIs rely on.
+
+Recipes are validated declaratively (``extra="forbid"``): a mistyped key fails
+at parse time instead of silently falling back to a default and generating a
+catalog nobody asked for.
+"""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast, get_args
+from typing import Annotated, Any, Literal, get_args
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb_paper.config.loading import deep_merge, load_inventory
 from astrogwb_paper.paths import paper_project_root
@@ -22,39 +36,46 @@ Derived from the type rather than restated, so the CLI, the recipe validator,
 and the assembly dispatch can never disagree about the supported operations.
 """
 
+_STRICT = ConfigDict(frozen=True, extra="forbid")
+_ALIASED: ConfigDict = {**_STRICT, "validate_by_name": True}
 
-@dataclass(frozen=True)
-class SourcePopulationRecipe:
+
+class SourcePopulationRecipe(BaseModel):
     """One finite population pool generated directly by ``gwmock-pop``."""
 
+    model_config = _ALIASED
+
     name: str
-    population_config: Path
-    num_samples: int
+    population_config: Path = Field(alias="config")
+    num_samples: Annotated[int, Field(gt=0)]
     seed: int
 
 
-@dataclass(frozen=True)
-class AssemblyComponent:
+class AssemblyComponent(BaseModel):
     """One weighted source pool used to assemble a production population."""
 
+    model_config = _STRICT
+
     source: str
-    weight: float
+    weight: Annotated[float, Field(ge=0.0, allow_inf_nan=False)] = 1.0
 
 
-@dataclass(frozen=True)
-class ProductionPopulationRecipe:
+class ProductionPopulationRecipe(BaseModel):
     """A production population assembled from one or more source pools."""
 
+    model_config = _STRICT
+
     operation: AssemblyOperation
-    num_samples: int
+    num_samples: Annotated[int, Field(gt=0)]
     seed: int
-    components: tuple[AssemblyComponent, ...]
-    uniform_redshift_fraction: float | None = None
+    components: Annotated[tuple[AssemblyComponent, ...], Field(min_length=1)]
+    uniform_redshift_fraction: Annotated[float, Field(gt=0.0, lt=1.0)] | None = None
 
 
-@dataclass(frozen=True)
-class WaveformRecipe:
+class WaveformRecipe(BaseModel):
     """Waveform settings shared by injection and proposal production populations."""
+
+    model_config = _STRICT
 
     approximant: str
     sampling_frequency: float
@@ -65,22 +86,76 @@ class WaveformRecipe:
     chunk_size: int
 
 
-@dataclass(frozen=True)
-class CatalogRecipe:
+class CatalogRecipe(BaseModel):
     """One production population and the waveform catalog generated from it."""
+
+    model_config = _STRICT
 
     name: str
     production: ProductionPopulationRecipe
     waveform: WaveformRecipe
 
+    @model_validator(mode="after")
+    def _validate_components(self) -> CatalogRecipe:
+        production = self.production
+        if production.operation != "mixture" and len(production.components) != 1:
+            raise ValueError(
+                f"{self.name} {production.operation} production requires "
+                "exactly one component"
+            )
+        # Pydantic collects validators in MRO order, so this runs before the
+        # subclass ones: ProposalCatalogRecipe can normalize by the weight
+        # total without guarding against a zero divisor.
+        if sum(component.weight for component in production.components) <= 0.0:
+            raise ValueError(
+                f"{self.name} production component weights must sum to > 0"
+            )
+        return self
 
-@dataclass(frozen=True)
-class CatalogInventory:
+
+class InjectionCatalogRecipe(CatalogRecipe):
+    """The independent injection catalog, drawn from the true population."""
+
+    @model_validator(mode="after")
+    def _reject_proposal_density(self) -> InjectionCatalogRecipe:
+        if self.production.uniform_redshift_fraction is not None:
+            raise ValueError(
+                f"{self.name} injection production cannot define "
+                "uniform_redshift_fraction"
+            )
+        return self
+
+
+class ProposalCatalogRecipe(CatalogRecipe):
+    """A proposal catalog: a guarded mixture with a known proposal density."""
+
+    @model_validator(mode="after")
+    def _require_proposal_density(self) -> ProposalCatalogRecipe:
+        epsilon = self.production.uniform_redshift_fraction
+        if epsilon is None:
+            raise ValueError(
+                f"{self.name} production must define uniform_redshift_fraction"
+            )
+        weights = [component.weight for component in self.production.components]
+        total = sum(weights)
+        normalized = [weight / total for weight in weights]
+        if len(normalized) != 2 or not math.isclose(
+            normalized[1], epsilon, rel_tol=0.0, abs_tol=1e-12
+        ):
+            raise ValueError(
+                f"{self.name} component weights must match uniform_redshift_fraction"
+            )
+        return self
+
+
+class CatalogInventory(BaseModel):
     """Complete catalog DAG declared by the committed inventory."""
 
+    model_config = _STRICT
+
     sources: dict[str, SourcePopulationRecipe]
-    injection: CatalogRecipe
-    catalogs: dict[str, CatalogRecipe]
+    injection: InjectionCatalogRecipe
+    catalogs: dict[str, ProposalCatalogRecipe]
 
 
 def inventory_path(root: Path | None = None) -> Path:
@@ -101,31 +176,29 @@ def load_catalog_inventory(path: Path | None = None) -> CatalogInventory:
     assert isinstance(injection_raw, Mapping)
     assert isinstance(catalogs_raw, Mapping)
 
-    sources = {
-        _require_name(name, resolved, "source"): _source_from_mapping(
-            str(name), value, resolved
-        )
-        for name, value in sources_raw.items()
-    }
-    injection = _catalog_from_mapping(
-        "injection",
-        deep_merge(base, injection_raw),
-        sources=sources,
-        path=resolved,
-        allow_proposal_density=False,
+    sources: dict[str, SourcePopulationRecipe] = {}
+    for name, value in sources_raw.items():
+        source = SourcePopulationRecipe.model_validate(_named(name, value))
+        sources[source.name] = source
+
+    # `base` is an overlay template, not a recipe of its own (it declares no
+    # `num_samples`), so merging happens on raw mappings and validation runs
+    # once, afterwards -- mirroring `build_run_config` in config.mcmc.
+    injection = InjectionCatalogRecipe.model_validate(
+        _named("injection", deep_merge(base, injection_raw))
     )
-    catalogs: dict[str, CatalogRecipe] = {}
+    _require_known_sources(injection, sources)
+
+    catalogs: dict[str, ProposalCatalogRecipe] = {}
     for name, overlay in catalogs_raw.items():
-        catalog_name = _require_name(name, resolved, "catalog")
+        # Guard before deep_merge, which would AttributeError on a scalar.
         if overlay is not None and not isinstance(overlay, Mapping):
-            raise TypeError(f"{resolved} catalog {catalog_name!r} must be a mapping")
-        catalogs[catalog_name] = _catalog_from_mapping(
-            catalog_name,
-            deep_merge(base, overlay or {}),
-            sources=sources,
-            path=resolved,
-            allow_proposal_density=True,
+            raise TypeError(f"{resolved} catalog {name!r} must be a mapping")
+        catalog = ProposalCatalogRecipe.model_validate(
+            _named(name, deep_merge(base, overlay or {}))
         )
+        _require_known_sources(catalog, sources)
+        catalogs[catalog.name] = catalog
     return CatalogInventory(sources=sources, injection=injection, catalogs=catalogs)
 
 
@@ -134,17 +207,17 @@ def load_sources(path: Path | None = None) -> dict[str, SourcePopulationRecipe]:
     return load_catalog_inventory(path).sources
 
 
-def injection_recipe(path: Path | None = None) -> CatalogRecipe:
+def injection_recipe(path: Path | None = None) -> InjectionCatalogRecipe:
     """Load the shared independent injection recipe."""
     return load_catalog_inventory(path).injection
 
 
-def load_catalogs(path: Path | None = None) -> dict[str, CatalogRecipe]:
+def load_catalogs(path: Path | None = None) -> dict[str, ProposalCatalogRecipe]:
     """Load every named proposal waveform-catalog recipe."""
     return load_catalog_inventory(path).catalogs
 
 
-def catalog_recipe(name: str) -> CatalogRecipe:
+def catalog_recipe(name: str) -> ProposalCatalogRecipe:
     """Return a named proposal recipe or raise a user-facing error."""
     catalogs = load_catalogs()
     try:
@@ -154,142 +227,29 @@ def catalog_recipe(name: str) -> CatalogRecipe:
         raise ValueError(f"unknown catalog {name!r}; choose from {choices}") from None
 
 
-def _require_name(name: object, path: Path, kind: str) -> str:
-    if not isinstance(name, str) or not name:
-        raise ValueError(f"{path} has an invalid {kind} name")
-    return name
+def _named(name: Any, raw: Any) -> Any:
+    """Prepend the inventory key as the recipe's ``name`` field.
+
+    Non-mappings pass through untouched so pydantic reports the type error
+    against the recipe itself rather than raising a different one here.
+    """
+    if isinstance(raw, Mapping):
+        return {"name": name, **raw}
+    return raw
 
 
-def _require_operation(value: object, name: str) -> AssemblyOperation:
-    """Narrow a raw recipe value to a supported assembly operation."""
-    if value not in ASSEMBLY_OPERATIONS:
-        raise ValueError(f"{name} has unsupported production operation {value!r}")
-    return cast(AssemblyOperation, value)
+def _require_known_sources(
+    recipe: CatalogRecipe, sources: Mapping[str, SourcePopulationRecipe]
+) -> None:
+    """Check every component against the declared source pools.
 
-
-def _require_mapping(value: object, *, label: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise TypeError(f"{label} must be a mapping")
-    return value
-
-
-def _source_from_mapping(name: str, raw: object, path: Path) -> SourcePopulationRecipe:
-    mapping = _require_mapping(raw, label=f"{path} source {name!r}")
-    try:
-        recipe = SourcePopulationRecipe(
-            name=name,
-            population_config=Path(mapping["config"]),
-            num_samples=int(mapping["num_samples"]),
-            seed=int(mapping["seed"]),
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"invalid source recipe {name!r}") from exc
-    if recipe.num_samples <= 0:
-        raise ValueError(f"source recipe {name!r} num_samples must be > 0")
-    return recipe
-
-
-def _catalog_from_mapping(
-    name: str,
-    raw: Mapping[str, Any],
-    *,
-    sources: Mapping[str, SourcePopulationRecipe],
-    path: Path,
-    allow_proposal_density: bool,
-) -> CatalogRecipe:
-    try:
-        production = _production_from_mapping(
-            name,
-            _require_mapping(raw["production"], label=f"{name}.production"),
-            sources=sources,
-            allow_proposal_density=allow_proposal_density,
-        )
-        waveform = _waveform_from_mapping(
-            _require_mapping(raw["waveform"], label=f"{name}.waveform")
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        if isinstance(exc, ValueError) and str(exc).startswith(name):
-            raise
-        raise ValueError(f"invalid catalog recipe {name!r} in {path}") from exc
-    return CatalogRecipe(name=name, production=production, waveform=waveform)
-
-
-def _production_from_mapping(
-    name: str,
-    raw: Mapping[str, Any],
-    *,
-    sources: Mapping[str, SourcePopulationRecipe],
-    allow_proposal_density: bool,
-) -> ProductionPopulationRecipe:
-    operation = _require_operation(raw["operation"], name)
-    components_raw = raw["components"]
-    if not isinstance(components_raw, list) or not components_raw:
-        raise ValueError(f"{name} production components must be a non-empty list")
-    components: list[AssemblyComponent] = []
-    for component_raw in components_raw:
-        component = _require_mapping(
-            component_raw, label=f"{name} production component"
-        )
-        source = str(component["source"])
-        if source not in sources:
+    Genuinely inter-model -- a recipe cannot see its siblings -- so this stays
+    in the loader rather than becoming a field validator.
+    """
+    for component in recipe.production.components:
+        if component.source not in sources:
             choices = ", ".join(sources)
             raise ValueError(
-                f"{name} production names unknown source {source!r}; "
-                f"choose from {choices}"
+                f"{recipe.name} production names unknown source "
+                f"{component.source!r}; choose from {choices}"
             )
-        components.append(
-            AssemblyComponent(source=source, weight=float(component.get("weight", 1.0)))
-        )
-    if operation != "mixture" and len(components) != 1:
-        raise ValueError(
-            f"{name} {operation} production requires exactly one component"
-        )
-    weights = [component.weight for component in components]
-    if any(not math.isfinite(weight) or weight < 0.0 for weight in weights):
-        raise ValueError(f"{name} production component weights must be finite and >= 0")
-    if sum(weights) <= 0.0:
-        raise ValueError(f"{name} production component weights must sum to > 0")
-
-    epsilon_raw = raw.get("uniform_redshift_fraction")
-    epsilon = None if epsilon_raw is None else float(epsilon_raw)
-    if allow_proposal_density:
-        if epsilon is None:
-            raise ValueError(f"{name} production must define uniform_redshift_fraction")
-        if not 0.0 < epsilon < 1.0:
-            raise ValueError(
-                f"{name} uniform_redshift_fraction must satisfy 0 < epsilon < 1"
-            )
-        normalized = [weight / sum(weights) for weight in weights]
-        if len(normalized) != 2 or not math.isclose(
-            normalized[1], epsilon, rel_tol=0.0, abs_tol=1e-12
-        ):
-            raise ValueError(
-                f"{name} component weights must match uniform_redshift_fraction"
-            )
-    elif epsilon is not None:
-        raise ValueError(
-            f"{name} injection production cannot define uniform_redshift_fraction"
-        )
-
-    num_samples = int(raw["num_samples"])
-    if num_samples <= 0:
-        raise ValueError(f"{name} production num_samples must be > 0")
-    return ProductionPopulationRecipe(
-        operation=operation,
-        num_samples=num_samples,
-        seed=int(raw["seed"]),
-        components=tuple(components),
-        uniform_redshift_fraction=epsilon,
-    )
-
-
-def _waveform_from_mapping(raw: Mapping[str, Any]) -> WaveformRecipe:
-    return WaveformRecipe(
-        approximant=str(raw["approximant"]),
-        sampling_frequency=float(raw["sampling_frequency"]),
-        minimum_frequency=float(raw["minimum_frequency"]),
-        maximum_frequency=float(raw["maximum_frequency"]),
-        reference_frequency=float(raw["reference_frequency"]),
-        frequency_resolution=float(raw["frequency_resolution"]),
-        chunk_size=int(raw["chunk_size"]),
-    )
