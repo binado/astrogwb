@@ -24,6 +24,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
+    computed_field,
     model_validator,
 )
 
@@ -211,11 +212,9 @@ class RunConfig(BaseModel):
     cosmology: CosmoConfig
     sampler: SamplerConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
-    # Derived in the validator (every fiducial not sampled).
-    constants: dict[str, float] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _resolve_sampled_and_constants(self) -> RunConfig:
+    def _resolve_sampled_params(self) -> RunConfig:
         if not self.fiducials:
             raise ValueError("config must define a non-empty [fiducials] table")
         if not self.priors:
@@ -256,12 +255,23 @@ class RunConfig(BaseModel):
         aligned_priors = {name: priors[name] for name in sampled}
         if amplitude_parameter is not None:
             aligned_priors[amplitude_parameter] = priors[amplitude_parameter]
-        constants = {k: v for k, v in self.fiducials.items() if k not in sampled}
 
         object.__setattr__(self, "sampled_params", sampled)
         object.__setattr__(self, "priors", aligned_priors)
-        object.__setattr__(self, "constants", constants)
         return self
+
+    @computed_field
+    @property
+    def constants(self) -> dict[str, float]:
+        """Every fiducial not sampled: values the model pins as constants.
+
+        Includes the marginalized amplitude parameter when present: it has no
+        NUTS latent, but its fiducial value is still what the model pins it
+        to. Serialized (save_config / config_sha256) but not settable: input
+        is stripped in `build_run_config` because `extra="forbid"` rejects
+        the serialized form on reload.
+        """
+        return {k: v for k, v in self.fiducials.items() if k not in self.sampled_params}
 
     @property
     def posterior_params(self) -> tuple[str, ...]:
@@ -330,4 +340,8 @@ def build_run_config(
         cli_overrides["output"] = output
 
     merged = deep_merge(raw, deep_merge(overrides, cli_overrides))
+    # `constants` is derived on the model (a computed field), so the key is
+    # serialization-only: strip it from saved configs and `model_dump()`
+    # round trips, which extra="forbid" would otherwise reject.
+    merged.pop("constants", None)
     return RunConfig.model_validate(merged)

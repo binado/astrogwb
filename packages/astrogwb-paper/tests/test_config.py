@@ -186,6 +186,10 @@ def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
     path = tmp_path / "run.json"
     save_config(config, path)
 
+    # `constants` is a computed field: present in the dump (keep save_config
+    # and config_sha256 stable), stripped on input by build_run_config.
+    assert "constants" in load_mapping(path)
+
     reloaded = build_run_config(load_mapping(path))
 
     # Distributions have no value equality; compare their wire-format specs.
