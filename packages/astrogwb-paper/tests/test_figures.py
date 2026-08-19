@@ -21,7 +21,6 @@ from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS, DETECTOR_NETWORKS
 
 PAPER_ROOT = paper_project_root()
-BASE_CONFIG = PAPER_ROOT / "inputs/experiments.yaml"
 
 # The experiments whose runs the network legend is resolved against. The
 # fiducial-spectrum figure borrows cosmological-parameters' detector lists.
@@ -89,8 +88,8 @@ def test_resolve_networks_rejects_empty_duplicate_and_unknown_runs() -> None:
 
 
 def test_base_fiducials_and_analysis_grid_are_read_from_the_base_config() -> None:
-    fiducials = load_fiducials(BASE_CONFIG)
-    grid = load_analysis_grid(BASE_CONFIG)
+    fiducials = load_fiducials()
+    grid = load_analysis_grid()
 
     # `importance_relative_ess` is a plotting truth line, not a fiducial: adding
     # it here would inject a spurious constant into the sampled model.

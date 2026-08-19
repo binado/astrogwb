@@ -52,6 +52,15 @@ def _mcmc(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _rule_inputs(stdout: str) -> list[str]:
+    """Return the ``input:`` line of every job in a dry-run report."""
+    return [
+        line.strip()
+        for line in stdout.splitlines()
+        if line.strip().startswith("input:")
+    ]
+
+
 def _catalogs(tmp_path: Path, *names: str) -> Path:
     directory = tmp_path / "catalogs"
     directory.mkdir()
@@ -273,7 +282,12 @@ def test_plot_cosmological_parameters_passes_all_paths_not_labels(
 
     assert result.returncode == 0, result.stderr
     assert "rule plot_cosmological_parameters:" in result.stdout
-    assert "--base-config inputs/experiments.yaml" in result.stdout
+    # The script resolves the inventory path itself, so no flag carries it --
+    # but the rule still declares the file, so editing it retriggers the figure.
+    assert "--base-config" not in result.stdout
+    assert any(
+        "inputs/experiments.yaml" in line for line in _rule_inputs(result.stdout)
+    )
     for flag in (
         "--catalog",
         "--detector-chains",
@@ -324,8 +338,13 @@ def test_standalone_figures_receive_config_paths(
     ):
         assert script in result.stdout
     # Every standalone script reads the base config for itself instead of
-    # receiving fiducials and analysis bounds as reconstructed flags.
-    assert result.stdout.count("--base-config inputs/experiments.yaml") == 3
+    # receiving fiducials and analysis bounds as reconstructed flags -- or even
+    # the inventory path, which the library already owns.
+    assert "--base-config" not in result.stdout
+    assert (
+        sum("inputs/experiments.yaml" in line for line in _rule_inputs(result.stdout))
+        == 3
+    )
     assert "--figure-config" not in result.stdout
     for flag in ("--observation-time", "--f-min", "--h0", "--omega-gw-min"):
         assert flag not in result.stdout

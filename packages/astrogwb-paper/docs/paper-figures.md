@@ -98,10 +98,11 @@ All new figure products are written under `outputs/figures/`.
 
 ## Scripts
 
-Figure entry points are plain Python scripts under `scripts/`. Each takes
-`--base-config`, from which it reads its own fiducials and analysis grid, and
-hard-codes its own labels and run order. Snakemake passes only what it owns:
-the chain and catalog paths it built, and the output paths it declared.
+Figure entry points are plain Python scripts under `scripts/`. Each reads its
+own fiducials and analysis grid from the committed inventory, whose path the
+library owns, and hard-codes its own labels and run order. Snakemake passes only
+what it owns: the chain and catalog paths it built, and the output paths it
+declared.
 
 The YAML inventory is a declared input of each rule, so editing a fiducial or a
 detector list rebuilds the figure; editing a label is a code change and rebuilds

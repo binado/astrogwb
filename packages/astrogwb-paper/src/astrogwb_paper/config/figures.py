@@ -21,10 +21,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
-from astrogwb_paper.config.experiments import experiment, load_base, overlay_for
-from astrogwb_paper.paths import resolve_paper_path
+from astrogwb_paper.config.experiments import (
+    experiment,
+    inventory_path,
+    load_base,
+    overlay_for,
+)
 
 
 @dataclass(frozen=True)
@@ -74,19 +77,19 @@ def resolve_networks(
     return tuple(resolved)
 
 
-def load_fiducials(path: Path, root: Path | None = None) -> dict[str, float]:
+def load_fiducials() -> dict[str, float]:
     """Load the shared ``fiducials`` mapping from the MCMC inventory."""
-    resolved = resolve_paper_path(path, root)
-    fiducials = load_base(resolved).get("fiducials")
+    fiducials = load_base().get("fiducials")
     if not isinstance(fiducials, Mapping) or not fiducials:
-        raise ValueError(f"{resolved} must define a non-empty [fiducials] table")
+        raise ValueError(
+            f"{inventory_path()} must define a non-empty [fiducials] table"
+        )
     return {str(name): float(value) for name, value in fiducials.items()}
 
 
-def load_analysis_grid(path: Path, root: Path | None = None) -> AnalysisGrid:
+def load_analysis_grid() -> AnalysisGrid:
     """Load the shared frequency band and redshift grid from the inventory."""
-    resolved = resolve_paper_path(path, root)
-    base = load_base(resolved)
+    base = load_base()
     analysis = base.get("analysis") or {}
     cosmology = base.get("cosmology") or {}
     try:
@@ -99,4 +102,6 @@ def load_analysis_grid(path: Path, root: Path | None = None) -> AnalysisGrid:
             n_grid=int(cosmology["n_grid"]),
         )
     except KeyError as error:
-        raise ValueError(f"{resolved} is missing analysis setting {error}") from None
+        raise ValueError(
+            f"{inventory_path()} is missing analysis setting {error}"
+        ) from None

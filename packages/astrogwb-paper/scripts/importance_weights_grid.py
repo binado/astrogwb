@@ -163,12 +163,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--output-h0-omega-m-pdf", type=Path, required=True)
     parser.add_argument("--output-xi0-n-pdf", type=Path, required=True)
-    parser.add_argument(
-        "--base-config",
-        type=Path,
-        required=True,
-        help="Base MCMC config supplying the fiducial parameter point.",
-    )
     parser.add_argument("--figure-dpi", type=int, default=300)
     return parser.parse_args(argv)
 
@@ -177,7 +171,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
     catalog_path = resolve_paper_path(args.catalog, root)
-    fiducials = load_fiducials(args.base_config, root)
+    fiducials = load_fiducials()
     use_paper_style()
 
     catalog = load_catalog(catalog_path)

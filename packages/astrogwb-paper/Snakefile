@@ -194,7 +194,6 @@ rule plot_cosmological_parameters:
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/mcmc_cosmological_parameters.py"
-        " --base-config {input.config:q}"
         " --catalog {input.catalog:q}"
         " --detector-chains {input.detector_chains:q}"
         " --prior-chains {input.prior_chains:q}"
@@ -234,7 +233,6 @@ rule plot_modified_propagation:
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/mcmc_modified_propagation.py"
-        " --base-config {input.config:q}"
         " --xi0-chain {input.xi0_chain:q} --xi0-n-chain {input.xi0_n_chain:q}"
         " --h0-chain {input.h0_chain:q}"
         " --detector-xi0-n-chains {input.detector_chains:q}"
@@ -255,7 +253,6 @@ rule amplitude_toy:
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/amplitude_toy_model.py"
-        " --base-config {input.config:q}"
         " --catalog {input.catalog:q}"
         " --chains-dir outputs/chains/amplitude-toy"
         " --output-pdf {output:q}"
@@ -274,7 +271,6 @@ rule fiducial_spectrum:
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/fiducial_spectrum.py"
-        " --base-config {input.config:q}"
         " --catalog {input.catalog:q}"
         " --output-pdf {output.spectrum_pdf:q}"
         " --output-effective-psd-pdf {output.effective_psd_pdf:q}"
@@ -292,7 +288,6 @@ rule importance_weights_grid:
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/importance_weights_grid.py"
-        " --base-config {input.config:q}"
         " --catalog {input.catalog:q}"
         " --output-h0-omega-m-pdf {output.h0_omega_m_pdf:q}"
         " --output-xi0-n-pdf {output.xi0_n_pdf:q}"

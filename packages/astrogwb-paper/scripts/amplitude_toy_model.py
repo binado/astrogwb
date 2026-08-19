@@ -71,12 +71,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--chains-dir", type=Path, default=Path("outputs/chains/amplitude-toy")
     )
     parser.add_argument(
-        "--base-config",
-        type=Path,
-        required=True,
-        help="Base MCMC config supplying the observing time and frequency band.",
-    )
-    parser.add_argument(
         "--detectors",
         nargs="*",
         default=["S1", "R1"],
@@ -111,7 +105,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     output_path = resolve_paper_path(args.output_pdf, root)
     out_dir = resolve_paper_path(args.chains_dir, root)
 
-    grid = load_analysis_grid(args.base_config, root)
+    grid = load_analysis_grid()
     detnames = tuple(args.detectors)
     observation_time = grid.observation_time
     seed = args.seed

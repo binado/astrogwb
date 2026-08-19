@@ -657,12 +657,6 @@ def write_constraint_table(
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--base-config",
-        type=Path,
-        required=True,
-        help="Base MCMC config supplying fiducials and the analysis grid.",
-    )
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--detector-chains", type=Path, nargs="+", required=True)
     parser.add_argument("--prior-chains", type=Path, nargs="+", required=True)
@@ -689,10 +683,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
     fiducials = {
-        **load_fiducials(args.base_config, root),
+        **load_fiducials(),
         "importance_relative_ess": args.importance_relative_ess,
     }
-    grid = load_analysis_grid(args.base_config, root)
+    grid = load_analysis_grid()
     networks = resolve_networks(DETECTOR_EXPERIMENT, DETECTOR_NETWORKS)
     detector_labels = [network.label for network in networks]
     if len(args.detector_chains) != len(networks):

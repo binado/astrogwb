@@ -553,12 +553,6 @@ def write_xi0_n_constraint_table(
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--base-config",
-        type=Path,
-        required=True,
-        help="Base MCMC config supplying fiducials and the analysis grid.",
-    )
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--xi0-chain", type=Path, required=True)
     parser.add_argument("--xi0-n-chain", type=Path, required=True)
@@ -582,9 +576,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    grid = load_analysis_grid(args.base_config, root)
+    grid = load_analysis_grid()
     fiducials = {
-        **load_fiducials(args.base_config, root),
+        **load_fiducials(),
         "importance_relative_ess": args.importance_relative_ess,
     }
     networks = resolve_networks(PROPAGATION_EXPERIMENT, DETECTOR_NETWORKS)

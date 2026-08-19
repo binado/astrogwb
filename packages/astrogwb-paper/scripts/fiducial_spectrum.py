@@ -225,12 +225,6 @@ def plot_effective_psds(
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", type=Path, required=True)
-    parser.add_argument(
-        "--base-config",
-        type=Path,
-        required=True,
-        help="Base MCMC config supplying fiducials and the analysis grid.",
-    )
     parser.add_argument("--output-pdf", type=Path, required=True)
     parser.add_argument("--output-effective-psd-pdf", type=Path, required=True)
     parser.add_argument("--figure-dpi", type=int, default=300)
@@ -240,8 +234,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    fiducials = load_fiducials(args.base_config, root)
-    grid = load_analysis_grid(args.base_config, root)
+    fiducials = load_fiducials()
+    grid = load_analysis_grid()
     networks = resolve_networks(SPECTRUM_EXPERIMENT, DETECTOR_NETWORKS)
     use_paper_style()
 
