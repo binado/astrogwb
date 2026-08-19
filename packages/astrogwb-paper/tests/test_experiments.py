@@ -101,11 +101,34 @@ def test_catalog_selection_is_fixed_except_for_injection_size() -> None:
         }
 
     injection = experiments["variable-injection-size"]
-    assert {run: injection.catalog_for(run).name for run in injection.runs} == {
-        "n8192": "bns-n8192-df1.h5",
-        "n16384": "bns-n16384-df1.h5",
-        "n32768": "bns-n32768-df1.h5",
+    assert {run: injection.catalog_for(run) for run in injection.runs} == {
+        "n8192": "bns-n8192-df1",
+        "n16384": "bns-n16384-df1",
+        "n32768": "bns-n32768-df1",
     }
+
+
+def test_a_run_naming_an_undeclared_catalog_is_rejected_at_load(
+    tmp_path: Path,
+) -> None:
+    inventory = tmp_path / "experiments.yaml"
+    inventory.write_text(
+        "base: {seed: 1}\n"
+        "experiments:\n"
+        "  demo:\n"
+        "    runs:\n"
+        "      only: {catalog: bns-does-not-exist}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "run demo/only names unknown catalog 'bns-does-not-exist'; "
+            "choose from bns-n8192-df1"
+        ),
+    ):
+        load_experiments(inventory)
 
 
 def test_cross_type_prior_override_replaces_the_table() -> None:

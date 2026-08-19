@@ -52,8 +52,12 @@ uv run astrogwb-generate-waveform-catalog \
 
 [`inputs/catalogs.yaml`](../inputs/catalogs.yaml) holds the shared base and
 named catalog overlays, matching [`inputs/experiments.yaml`](../inputs/experiments.yaml).
-Snakemake rebuilds a catalog when that catalog's resolved settings change, so
-editing one overlay does not rebuild the others. Catalog generation is not
+A catalog's name is its key here; a run in the experiment inventory selects one
+by that name (`catalog: bns-n8192-df1`), and the workflow builds the path
+`outputs/catalogs/<name>.h5`. A run naming a catalog this file does not declare
+fails in `astrogwb-validate-config`. Snakemake rebuilds a catalog when that
+catalog's resolved settings change, so editing one overlay does not rebuild the
+others. Catalog generation is not
 part of the MCMC submission workflow.
 
 To run the population and waveform steps together as a single reproducible

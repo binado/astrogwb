@@ -38,17 +38,16 @@ def recipe(wildcards):
     return catalogs[wildcards.catalog]
 
 
+def _catalog(name):
+    return str(CATALOGS_DIR / f"{name}.h5")
+
+
 def run_catalog_path(wildcards):
-    catalog = experiments[wildcards.experiment].catalog_for(wildcards.run)
-    return str(CATALOGS_DIR / catalog.name)
+    return _catalog(experiments[wildcards.experiment].catalog_for(wildcards.run))
 
 
 def run_outdir(wildcards):
     return str(Path("outputs/chains") / wildcards.experiment)
-
-
-def _catalog(name):
-    return str(CATALOGS_DIR / name)
 
 
 wildcard_constraints:
@@ -176,7 +175,7 @@ rule plot_cosmological_parameters:
             run=["ET-2L-aligned-CE-Hanford", "H0-merger-rate"],
         ),
         omega_m_chain="outputs/chains/cosmological-parameters/H0-Omega_m.nc",
-        catalog=_catalog(DEFAULT_CATALOG.name),
+        catalog=_catalog(DEFAULT_CATALOG),
         config=str(SOURCE_EXPERIMENTS),
     output:
         detector_pdf="outputs/figures/cosmological-parameters/H0-by-detector.pdf",
@@ -223,7 +222,7 @@ rule plot_modified_propagation:
             "outputs/chains/modified-propagation/{run}.nc",
             run=DETECTOR_NETWORK_RUNS,
         ),
-        catalog=_catalog(DEFAULT_CATALOG.name),
+        catalog=_catalog(DEFAULT_CATALOG),
         config=str(SOURCE_EXPERIMENTS),
     output:
         xi_n_corner_pdf="outputs/figures/modified-propagation/Xi0-n-corner.pdf",
@@ -249,7 +248,7 @@ rule plot_modified_propagation:
 
 rule amplitude_toy:
     input:
-        catalog=_catalog(DEFAULT_CATALOG.name),
+        catalog=_catalog(DEFAULT_CATALOG),
         config=str(SOURCE_EXPERIMENTS),
     output:
         "outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf",
@@ -264,7 +263,7 @@ rule amplitude_toy:
 
 rule fiducial_spectrum:
     input:
-        catalog=_catalog(DEFAULT_CATALOG.name),
+        catalog=_catalog(DEFAULT_CATALOG),
         # Borrows the cosmological-parameters networks; reads no chains.
         config=str(SOURCE_EXPERIMENTS),
     output:
@@ -283,7 +282,7 @@ rule fiducial_spectrum:
 
 rule importance_weights_grid:
     input:
-        catalog=_catalog(DEFAULT_CATALOG.name),
+        catalog=_catalog(DEFAULT_CATALOG),
         config=str(SOURCE_EXPERIMENTS),
     output:
         h0_omega_m_pdf=(

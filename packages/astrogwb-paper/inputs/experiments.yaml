@@ -157,8 +157,8 @@ experiments:
     analysis: *et_2l_aligned_ce
     runs:
       n8192:
-        catalog: outputs/catalogs/bns-n8192-df1.h5
+        catalog: bns-n8192-df1
       n16384:
-        catalog: outputs/catalogs/bns-n16384-df1.h5
+        catalog: bns-n16384-df1
       n32768:
-        catalog: outputs/catalogs/bns-n32768-df1.h5
+        catalog: bns-n32768-df1
