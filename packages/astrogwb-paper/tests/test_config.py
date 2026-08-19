@@ -83,6 +83,39 @@ def test_analysis_settings_round_trip() -> None:
     assert config.model_dump(mode="json")["analysis"]["f_max"] == 4096.0
 
 
+def test_analysis_grid_mirrors_the_config() -> None:
+    config = build_run_config(example_raw())
+    grid = config.analysis_grid
+
+    assert grid.observation_time == config.observation_time
+    assert (grid.f_min, grid.f_max) == (config.analysis.f_min, config.analysis.f_max)
+    assert (grid.z_min, grid.z_max, grid.n_grid) == (
+        config.cosmology.z_min,
+        config.cosmology.z_max,
+        config.cosmology.n_grid,
+    )
+
+
+def test_analysis_grid_is_not_serialized(tmp_path) -> None:
+    """`analysis_grid` is a plain property, never a computed field.
+
+    A computed field would be written into every ``outputs/configs/*.json``
+    that ``save_config`` produces, and ``extra="forbid"`` would then reject
+    those files on reload -- breaking every workflow job. ``constants`` needs
+    an explicit strip in ``build_run_config`` for exactly that reason; this
+    guards against `analysis_grid` acquiring the same problem.
+    """
+    config = build_run_config(example_raw())
+    assert "analysis_grid" not in config.model_dump(mode="json")
+
+    path = tmp_path / "run.json"
+    save_config(config, path)
+    assert "analysis_grid" not in load_mapping(path)
+
+    reloaded = build_run_config(load_mapping(path))
+    assert reloaded.analysis_grid == config.analysis_grid
+
+
 def test_every_experiment_run_assembles_into_a_valid_config() -> None:
     """Every run the workflow can build must validate without a runtime.
 

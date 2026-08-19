@@ -22,6 +22,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from astrogwb_paper.config.analysis import AnalysisGrid
 from astrogwb_paper.config.experiments import (
     experiment,
     inventory_path,
@@ -37,18 +38,6 @@ class Network:
     name: str
     label: str
     detectors: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class AnalysisGrid:
-    """Frequency band and redshift grid shared by every experiment run."""
-
-    observation_time: float
-    f_min: float
-    f_max: float
-    z_min: float
-    z_max: float
-    n_grid: int
 
 
 def resolve_networks(
