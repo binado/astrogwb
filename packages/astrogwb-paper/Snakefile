@@ -300,20 +300,16 @@ rule importance_weights_grid:
 
 
 # These aggregate targets read rules.* outputs, so they must follow the rules
-# they reference. The cosmological experiment feeds one paper section; its
-# chains-only target remains separate from the complete plotting target.
-COSMOLOGICAL_PARAMETER_EXPERIMENT = "cosmological-parameters"
+# they reference. An experiment with a figure rule is complete when that rule
+# has run; one without is complete when its chains exist.
 FIGURE_OUTPUTS = {
+    "cosmological-parameters": list(rules.plot_cosmological_parameters.output),
     "modified-propagation": list(rules.plot_modified_propagation.output),
 }
 EXPERIMENT_OUTPUTS = [
-    *rules.plot_cosmological_parameters.output,
-    *[
-        path
-        for name in experiments
-        if name != COSMOLOGICAL_PARAMETER_EXPERIMENT
-        for path in (FIGURE_OUTPUTS.get(name) or experiments[name].chain_paths())
-    ],
+    path
+    for specification in experiments.values()
+    for path in (FIGURE_OUTPUTS.get(specification.name) or specification.chain_paths())
 ]
 
 
@@ -329,9 +325,6 @@ for specification in experiments.values():
         localrule: True
         input:
             specification.chain_paths(),
-
-    if specification.name == COSMOLOGICAL_PARAMETER_EXPERIMENT:
-        continue
 
     rule:
         name: specification.target

@@ -84,8 +84,10 @@ This single local post-processing rule consumes all eight chains from
 pairs. Requesting any one cosmological-parameter output path schedules the full
 section.
 
-Multiple chain targets may be supplied. The `experiments` target builds every
-experiment and the combined cosmological-parameter products.
+Multiple chain targets may be supplied. Each experiment also has a complete
+target named after it (`cosmological_parameters`, `modified_propagation`, ...),
+which builds its figures where it has a figure rule and its chains otherwise.
+The `experiments` target builds all four.
 
 When passing CLI `--config` overrides to a CPU profile (`local`, `slurm-cpu`),
 repeat `jax_platforms=cpu` in the same `--config` group: Snakemake replaces

@@ -19,6 +19,7 @@ MCMC_RULES = (
     "fiducial_spectrum",
     "importance_weights_grid",
     "experiments",
+    "cosmological_parameters",
     "cosmological_parameters_chains",
     "modified_propagation",
     "modified_propagation_chains",
