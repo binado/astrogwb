@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import jax.numpy as jnp
 import numpy as np
+from astrogwb.gwb import spectral_density
+from astrogwb.waveform import apply_gw_distance_to_waveforms
+from astrogwb.waveform import polarization_power as compute_polarization_power
+from pluscross import load_catalog
 
 PROPOSAL_REDSHIFT_LOGPDF = "proposal_redshift_logpdf"
 
@@ -24,13 +29,8 @@ def load_catalog_arrays(
     path: Path,
     *,
     fiducials: dict[str, float],
-    jnp: Any,
 ) -> CatalogArrays:
     """Load a catalog, apply fiducial GW propagation, and reduce its waveforms."""
-    from astrogwb.waveform import apply_gw_distance_to_waveforms
-    from astrogwb.waveform import polarization_power as compute_polarization_power
-    from pluscross import load_catalog
-
     catalog = load_catalog(path)
     catalog = apply_gw_distance_to_waveforms(
         catalog,
@@ -105,10 +105,9 @@ def compute_fiducial_injection_spectrum(
     *,
     fiducials: dict[str, float],
     redshift_grid: Any,
-    jnp: Any,
 ) -> tuple[Any, Any]:
     """Return the fiducial total rate and independently estimated spectrum."""
-    from astrogwb.gwb import spectral_density
+    # gwmock_pop's Madau-Dickinson import initializes the XLA backend.
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
         compute_merger_rate_distance_and_logprob,
     )

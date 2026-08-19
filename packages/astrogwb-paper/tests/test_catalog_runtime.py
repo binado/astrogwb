@@ -77,7 +77,6 @@ def test_fiducial_injection_spectrum_uses_unit_weights() -> None:
         injection,
         fiducials=fiducials,
         redshift_grid=grid,
-        jnp=jnp,
     )
     expected_rate, _, _ = compute_merger_rate_distance_and_logprob(
         fiducials,

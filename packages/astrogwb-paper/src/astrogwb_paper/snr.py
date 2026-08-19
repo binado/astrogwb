@@ -13,6 +13,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import jax.numpy as jnp
+from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.frequency import frequency_spacing as compute_frequency_spacing
+from astrogwb.gwb import spectral_snr
+from astrogwb.utils import years_to_seconds
+
 from astrogwb_paper.config.analysis import AnalysisGrid
 from astrogwb_paper.inference import prepare_observation
 
@@ -28,18 +34,11 @@ def compute_network_snrs(
     fiducials: Mapping[str, float],
     *,
     grid: AnalysisGrid,
-    jnp: Any,
 ) -> pd.DataFrame:
     """Compute the fiducial matched-filter SNR for each detector network."""
     import pandas as pd
-    from astrogwb.detector import effective_psd, load_sensitivity_map
-    from astrogwb.frequency import frequency_spacing as compute_frequency_spacing
-    from astrogwb.gwb import spectral_snr
-    from astrogwb.utils import years_to_seconds
 
-    observation = prepare_observation(
-        catalog_path, fiducials=fiducials, grid=grid, jnp=jnp
-    )
+    observation = prepare_observation(catalog_path, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies
     mask = observation.frequency_mask
     observed_spectral_density = observation.spectral_density

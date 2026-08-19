@@ -108,7 +108,6 @@ def build_potential(
     just short of the NUTS/MCMC step, extracting the potential-energy function
     via NumPyro's public ``initialize_model``.
     """
-    import jax.numpy as jnp
     from numpyro.infer.initialization import init_to_value
     from numpyro.infer.util import initialize_model
 
@@ -124,7 +123,6 @@ def build_potential(
         fiducials=config.fiducials,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
-        jnp=jnp,
     )
     model, _ = build_model(
         config,

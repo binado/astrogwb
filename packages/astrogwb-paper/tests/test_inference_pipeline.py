@@ -111,7 +111,6 @@ def test_prepare_observation_keeps_arrays_unmasked(injection_catalog: Path) -> N
         injection_catalog,
         fiducials=config.fiducials,
         grid=config.analysis_grid,
-        jnp=jnp,
     )
 
     assert observation.frequencies.shape == FREQUENCIES.shape
@@ -137,7 +136,6 @@ def test_masked_model_kwargs_masks_frequencies_but_not_samples(
         fiducials=config.fiducials,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
-        jnp=jnp,
     )
     kwargs = inputs.masked_model_kwargs()
 
@@ -170,7 +168,6 @@ def test_mismatched_frequency_grids_are_rejected(
             fiducials=config.fiducials,
             grid=config.analysis_grid,
             detectors=config.analysis.detectors,
-            jnp=jnp,
         )
 
 
@@ -186,7 +183,6 @@ def test_proposal_without_a_proposal_density_is_rejected(
             fiducials=config.fiducials,
             grid=config.analysis_grid,
             detectors=config.analysis.detectors,
-            jnp=jnp,
         )
 
 

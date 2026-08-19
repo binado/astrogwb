@@ -126,7 +126,6 @@ def run(
     :class:`~astrogwb_paper.amplitude.AmplitudeMarginalization` built for an
     amplitude-marginalized run, or ``None`` for the default likelihood.
     """
-    import jax.numpy as jnp
     from numpyro.infer import MCMC, NUTS
     from numpyro.infer.initialization import init_to_value
 
@@ -142,7 +141,6 @@ def run(
         fiducials=config.fiducials,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
-        jnp=jnp,
     )
     model, marginalization = build_model(
         config,

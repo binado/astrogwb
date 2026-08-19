@@ -558,7 +558,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         networks,
         fiducials,
         grid=grid,
-        jnp=jnp,
     )
     xi0_n_constraint_table = build_snr_xi0_n_constraint_table(
         networks,

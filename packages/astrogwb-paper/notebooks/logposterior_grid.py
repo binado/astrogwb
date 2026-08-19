@@ -88,9 +88,7 @@ DEBUG = False  # small smoke settings for first runs; set False for the producti
 
 ROOT_DIR = paper_project_root()
 INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/injection-bns-n32768.h5"
-PROPOSAL_CATALOG_PATH = (
-    ROOT_DIR / "outputs/catalogs/proposals/bns-n16384-df1.h5"
-)
+PROPOSAL_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/proposals/bns-n16384-df1.h5"
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -159,12 +157,8 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # See `mcmc.py` for the injection/proposal split and full catalog schema.
 
 # %%
-injection = load_catalog_arrays(
-    INJECTION_CATALOG_PATH, fiducials=fiducials, jnp=jnp
-)
-proposal = load_catalog_arrays(
-    PROPOSAL_CATALOG_PATH, fiducials=fiducials, jnp=jnp
-)
+injection = load_catalog_arrays(INJECTION_CATALOG_PATH, fiducials=fiducials)
+proposal = load_catalog_arrays(PROPOSAL_CATALOG_PATH, fiducials=fiducials)
 validate_catalog_samples(
     injection,
     label="injection",
@@ -280,7 +274,6 @@ rate0, observed_spectral_density = compute_fiducial_injection_spectrum(
     injection,
     fiducials=fiducials,
     redshift_grid=z_grid,
-    jnp=jnp,
 )
 plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-15)
 

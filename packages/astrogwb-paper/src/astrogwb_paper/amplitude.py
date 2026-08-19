@@ -2,22 +2,23 @@
 and astrogwb's amplitude marginalization.
 
 Assembles everything an amplitude-marginalized run needs from a ``RunConfig``.
-Imported only from inside functions, so importing this module does not itself
-initialize the JAX backend. Priors arrive already materialized (``RunConfig``
-carries live distributions; see
+Priors arrive already materialized (``RunConfig`` carries live distributions; see
 :data:`~astrogwb_paper.config.mcmc.PriorDistribution`).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
-if TYPE_CHECKING:
-    import jax
-    from astrogwb.sampling.amplitude import AmplitudeFn, MergerRateAmplitudeFn
-    from numpyro.distributions import Distribution
+import jax
+from astrogwb.sampling.amplitude import (
+    AmplitudeFn,
+    MergerRateAmplitudeFn,
+    quadrature_grid,
+)
+from numpyro.distributions import Distribution
 
-    from astrogwb_paper.config.mcmc import RunConfig
+from astrogwb_paper.config.mcmc import RunConfig
 
 
 class AmplitudeMarginalization(NamedTuple):
@@ -57,13 +58,13 @@ def build_amplitude_marginalization(config: RunConfig) -> AmplitudeMarginalizati
     == "amplitude_marginalized"``); see
     :class:`~astrogwb_paper.config.mcmc.AnalysisConfig`.
     """
+    # gwmock_pop's Madau-Dickinson import initializes the XLA backend.
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
         amplitude_H0_fn,
         amplitude_local_merger_rate_fn,
         merger_rate_H0_fn,
         merger_rate_local_merger_rate_fn,
     )
-    from astrogwb.sampling.amplitude import quadrature_grid
 
     analysis = config.analysis
     parameter = analysis.amplitude_parameter

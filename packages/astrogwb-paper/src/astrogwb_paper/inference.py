@@ -7,14 +7,10 @@ build the importance-weight closure, build the model. It used to be spelled
 out at eight call sites, two of which were near-verbatim clones of each other
 down to the model-building block.
 
-Ordering contract (do not "tidy" away): every ``jax`` / ``astrogwb`` /
-``numpyro`` import here is function-local, exactly as
-:mod:`astrogwb_paper.catalogs` does it, so importing this module does not
-initialize a JAX backend -- ``runtime.configure_runtime`` must run first, and a
-subprocess test in ``tests/test_cli.py`` guards it. The explicit ``jnp``
-parameter (matching ``load_catalog_arrays`` and
-``compute_fiducial_injection_spectrum``) keeps that ordering visible at the
-call site; every caller already has ``jnp`` in scope.
+JAX ops run only inside functions, after ``runtime.configure_runtime``. Importing
+this module loads ``jax`` but does not initialize the XLA backend; a subprocess
+test in ``tests/test_cli.py`` guards that. The Madau-Dickinson model import stays
+function-local because ``gwmock_pop`` initializes the backend at import.
 
 Arrays on :class:`Observation` are *pre*-mask, with the mask carried alongside,
 because the notebooks plot the unmasked PSD and spectrum before restricting to
@@ -26,15 +22,34 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from astrogwb_paper.catalogs import CatalogArrays
+import jax.numpy as jnp
+from astrogwb.detector import effective_psd as compute_effective_psd
+from astrogwb.detector import load_sensitivity_map
+from astrogwb.frequency import apply_frequency_mask
+from astrogwb.frequency import frequency_mask as make_frequency_mask
+from astrogwb.sampling.models import (
+    amplitude_marginalized_model,
+    spectral_density_model,
+)
+
+from astrogwb_paper.amplitude import (
+    AmplitudeMarginalization,
+    build_amplitude_marginalization,
+)
+from astrogwb_paper.catalogs import (
+    PROPOSAL_REDSHIFT_LOGPDF,
+    CatalogArrays,
+    compute_fiducial_injection_spectrum,
+    load_catalog_arrays,
+    validate_catalog_samples,
+    validate_matching_frequency_grids,
+)
 from astrogwb_paper.config.analysis import AnalysisGrid
 from astrogwb_paper.config.mcmc import RunConfig
-
-if TYPE_CHECKING:
-    from astrogwb_paper.amplitude import AmplitudeMarginalization
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +84,6 @@ class InferenceInputs:
 
     def masked_model_kwargs(self) -> dict[str, Any]:
         """Restrict to the analysis band and return the model's keyword inputs."""
-        from astrogwb.frequency import apply_frequency_mask
-
         observation = self.observation
         (
             frequencies,
@@ -101,19 +114,10 @@ def prepare_observation(
     *,
     fiducials: Mapping[str, float],
     grid: AnalysisGrid,
-    jnp: Any,
 ) -> Observation:
     """Load the injection catalog and build the fiducial observed spectrum."""
-    from astrogwb.frequency import frequency_mask as make_frequency_mask
-
-    from astrogwb_paper.catalogs import (
-        compute_fiducial_injection_spectrum,
-        load_catalog_arrays,
-        validate_catalog_samples,
-    )
-
     fiducial_values = dict(fiducials)
-    injection = load_catalog_arrays(injection_path, fiducials=fiducial_values, jnp=jnp)
+    injection = load_catalog_arrays(injection_path, fiducials=fiducial_values)
     validate_catalog_samples(
         injection,
         label="injection",
@@ -132,7 +136,6 @@ def prepare_observation(
         injection,
         fiducials=fiducial_values,
         redshift_grid=redshift_grid,
-        jnp=jnp,
     )
     logger.info(
         "Constructed independent fiducial observed spectrum (rate0=%.4e /s)",
@@ -165,26 +168,15 @@ def prepare_inference_inputs(
     fiducials: Mapping[str, float],
     grid: AnalysisGrid,
     detectors: Sequence[str],
-    jnp: Any,
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs."""
-    from astrogwb.detector import effective_psd as compute_effective_psd
-    from astrogwb.detector import load_sensitivity_map
+    # gwmock_pop's Madau-Dickinson import initializes the XLA backend.
     from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
         make_merger_rate_and_log_weights_fn,
     )
 
-    from astrogwb_paper.catalogs import (
-        PROPOSAL_REDSHIFT_LOGPDF,
-        load_catalog_arrays,
-        validate_catalog_samples,
-        validate_matching_frequency_grids,
-    )
-
-    observation = prepare_observation(
-        injection_path, fiducials=fiducials, grid=grid, jnp=jnp
-    )
-    proposal = load_catalog_arrays(proposal_path, fiducials=dict(fiducials), jnp=jnp)
+    observation = prepare_observation(injection_path, fiducials=fiducials, grid=grid)
+    proposal = load_catalog_arrays(proposal_path, fiducials=dict(fiducials))
     validate_catalog_samples(
         proposal,
         label="proposal",
@@ -244,15 +236,6 @@ def build_model(
     Depends only on the config and the weights closure -- no catalog array --
     so it is exercisable without generating one.
     """
-    from functools import partial
-
-    from astrogwb.sampling.models import (
-        amplitude_marginalized_model,
-        spectral_density_model,
-    )
-
-    from astrogwb_paper.amplitude import build_amplitude_marginalization
-
     analysis = config.analysis
     # `config.priors` already holds live distributions (see PriorDistribution).
     # Project to the sampled parameters: when marginalized, `priors` also
