@@ -95,7 +95,7 @@ rule bns_population:
     params:
         n_samples=lambda wc: recipe(wc).n_samples,
         seed=lambda wc: recipe(wc).seed,
-        outdir=lambda wc: str(Path("outputs/populations")),
+        outdir="outputs/populations",
     shell:
         "mkdir -p {params.outdir:q}\n"
         "uv run --package astrogwb-paper gwmock-pop simulate"
