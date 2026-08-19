@@ -10,6 +10,7 @@ from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
+    redshift_logpdf,
 )
 from astrogwb.utils import SECONDS_PER_YEAR
 from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
@@ -96,6 +97,60 @@ def test_flat_lcdm_grid_is_jit_traceable() -> None:
     d_l, dvc_dz = jax.jit(distance_and_volume_grid)(FIDUCIALS, z_grid)
     assert np.asarray(d_l).shape == (N_GRID,)
     assert np.asarray(dvc_dz).shape == (N_GRID,)
+
+
+# --------------------------------------------------------------------------- #
+# redshift_logpdf
+# --------------------------------------------------------------------------- #
+def test_redshift_logpdf_matches_the_model_target_density() -> None:
+    # The standalone density is what offline tooling stamps onto a proposal
+    # catalog, while the model evaluates its own target density during NUTS.
+    # The importance weight is the ratio of the two, so any drift between them
+    # biases every weight while leaving each side self-consistent. Pin them.
+    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
+    z_samples = jnp.linspace(0.01, Z_MAX - 0.01, 64)
+
+    _, _, model_logpdf = compute_merger_rate_distance_and_logprob(
+        FIDUCIALS, {"redshift": z_samples}, redshift_grid=z_grid
+    )
+    standalone = redshift_logpdf(FIDUCIALS, z_samples, redshift_grid=z_grid)
+
+    np.testing.assert_array_equal(np.asarray(standalone), np.asarray(model_logpdf))
+
+
+def test_redshift_logpdf_normalizes_on_its_own_grid() -> None:
+    # Interpolating the unnormalized density and dividing by its trapezoidal
+    # integral makes the interpolant integrate to exactly that normalization.
+    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
+    logpdf = np.asarray(redshift_logpdf(FIDUCIALS, z_grid, redshift_grid=z_grid))
+
+    assert np.trapezoid(np.exp(logpdf), np.asarray(z_grid)) == pytest.approx(1.0)
+
+
+def test_redshift_logpdf_is_negative_infinite_outside_the_grid() -> None:
+    # Samples off the grid interpolate to zero density; callers rely on the
+    # -inf (rather than a clamped edge value) to zero out such rows.
+    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
+    outside = jnp.asarray([Z_MAX + 0.5, Z_MIN - 0.5])
+
+    logpdf = np.asarray(redshift_logpdf(FIDUCIALS, outside, redshift_grid=z_grid))
+
+    assert np.all(np.isneginf(logpdf))
+
+
+def test_redshift_logpdf_is_independent_of_the_amplitude_parameters() -> None:
+    # local_merger_rate scales the rate, not the shape: the normalized density
+    # must not move with it (and must not be required at all).
+    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
+    z_samples = jnp.linspace(0.01, Z_MAX - 0.01, 32)
+    shape_only = {k: v for k, v in FIDUCIALS.items() if k != "local_merger_rate"}
+
+    baseline = redshift_logpdf(shape_only, z_samples, redshift_grid=z_grid)
+    scaled = redshift_logpdf(
+        {**shape_only, "local_merger_rate": 7.0}, z_samples, redshift_grid=z_grid
+    )
+
+    np.testing.assert_array_equal(np.asarray(baseline), np.asarray(scaled))
 
 
 # --------------------------------------------------------------------------- #

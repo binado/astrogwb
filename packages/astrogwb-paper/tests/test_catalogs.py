@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 import yaml
+from astrogwb_paper.cli.assemble_population import parse_args
 from astrogwb_paper.config.catalogs import (
+    ASSEMBLY_OPERATIONS,
     CATALOGS_PATH,
     INJECTION_CATALOG_NAME,
     catalog_recipe,
@@ -145,3 +147,56 @@ def test_proposal_weights_must_match_uniform_fraction(tmp_path: Path) -> None:
         match="component weights must match uniform_redshift_fraction",
     ):
         load_catalog_inventory(inventory)
+
+
+def test_inventory_rejects_an_unsupported_assembly_operation(tmp_path: Path) -> None:
+    raw = _inventory_copy()
+    raw["catalogs"]["bns-n8192-df1"]["production"]["operation"] = "interleave"
+    inventory = tmp_path / "catalogs.yaml"
+    _write_inventory(inventory, raw)
+
+    with pytest.raises(
+        ValueError,
+        match="unsupported production operation 'interleave'",
+    ):
+        load_catalog_inventory(inventory)
+
+
+def test_cli_accepts_exactly_the_declared_assembly_operations(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The CLI derives --operation choices from ASSEMBLY_OPERATIONS, so the
+    # recipe validator and the command line can never drift apart.
+    for operation in ASSEMBLY_OPERATIONS:
+        args = parse_args(
+            [
+                "--operation",
+                operation,
+                "--source",
+                "a.h5",
+                "--num-samples",
+                "4",
+                "--seed",
+                "1",
+                "--output",
+                "out.h5",
+            ]
+        )
+        assert args.operation == operation
+
+    with pytest.raises(SystemExit):
+        parse_args(
+            [
+                "--operation",
+                "interleave",
+                "--source",
+                "a.h5",
+                "--num-samples",
+                "4",
+                "--seed",
+                "1",
+                "--output",
+                "out.h5",
+            ]
+        )
+    assert "interleave" in capsys.readouterr().err

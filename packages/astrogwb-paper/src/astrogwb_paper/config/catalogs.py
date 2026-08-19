@@ -6,7 +6,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast, get_args
 
 from astrogwb_paper.config.loading import deep_merge, load_inventory
 from astrogwb_paper.paths import paper_project_root
@@ -15,6 +15,12 @@ CATALOGS_PATH = Path("inputs/catalogs.yaml")
 INJECTION_CATALOG_NAME = "injection-bns-n32768"
 _INVENTORY_SECTIONS = ("base", "sources", "injection", "catalogs")
 AssemblyOperation = Literal["identity", "subsample", "mixture"]
+ASSEMBLY_OPERATIONS: tuple[AssemblyOperation, ...] = get_args(AssemblyOperation)
+"""Runtime view of :data:`AssemblyOperation`, for argparse choices and checks.
+
+Derived from the type rather than restated, so the CLI, the recipe validator,
+and the assembly dispatch can never disagree about the supported operations.
+"""
 
 
 @dataclass(frozen=True)
@@ -154,6 +160,13 @@ def _require_name(name: object, path: Path, kind: str) -> str:
     return name
 
 
+def _require_operation(value: object, name: str) -> AssemblyOperation:
+    """Narrow a raw recipe value to a supported assembly operation."""
+    if value not in ASSEMBLY_OPERATIONS:
+        raise ValueError(f"{name} has unsupported production operation {value!r}")
+    return cast(AssemblyOperation, value)
+
+
 def _require_mapping(value: object, *, label: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise TypeError(f"{label} must be a mapping")
@@ -208,9 +221,7 @@ def _production_from_mapping(
     sources: Mapping[str, SourcePopulationRecipe],
     allow_proposal_density: bool,
 ) -> ProductionPopulationRecipe:
-    operation = str(raw["operation"])
-    if operation not in {"identity", "subsample", "mixture"}:
-        raise ValueError(f"{name} has unsupported production operation {operation!r}")
+    operation = _require_operation(raw["operation"], name)
     components_raw = raw["components"]
     if not isinstance(components_raw, list) or not components_raw:
         raise ValueError(f"{name} production components must be a non-empty list")
@@ -264,7 +275,7 @@ def _production_from_mapping(
     if num_samples <= 0:
         raise ValueError(f"{name} production num_samples must be > 0")
     return ProductionPopulationRecipe(
-        operation=operation,  # type: ignore[arg-type]
+        operation=operation,
         num_samples=num_samples,
         seed=int(raw["seed"]),
         components=tuple(components),

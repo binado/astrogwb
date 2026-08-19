@@ -76,6 +76,100 @@ def amplitude_local_merger_rate_fn(
     return marginalized_parameter
 
 
+def _redshift_density_grids(
+    params: Mapping[str, Any], redshift_grid: jax.Array
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    r"""Cosmology and Madau-Dickinson density tables on ``redshift_grid``.
+
+    Single source of truth for the fiducial redshift density
+    :math:`p(z) \propto \psi(z) / (1 + z) \times dV_c/dz` and its trapezoidal
+    normalization. Both the target density evaluated during inference
+    (:func:`compute_merger_rate_distance_and_logprob`) and any offline proposal
+    density must come through here: the importance weight is a *ratio* of the
+    two, so a second copy of this formula would bias every weight the moment
+    either copy changed.
+
+    Returns ``(luminosity_distance_grid, unnormalized_pdf_grid, integral_mpc3)``,
+    each evaluated on the exact ``redshift_grid`` passed in. ``integral_mpc3``
+    is a scalar in ``Mpc^3`` and normalizes ``unnormalized_pdf_grid``; it is
+    also the comoving volume factor of the total merger rate.
+    """
+    luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(
+        params, redshift_grid
+    )
+    rate_shape_grid = madau_dickinson_rate(
+        redshift_grid, params["gamma"], params["kappa"], params["z_peak"]
+    )
+    unnormalized_pdf_grid = rate_shape_grid / (1.0 + redshift_grid) * dvc_dz_grid
+    integral_mpc3 = jnp.trapezoid(unnormalized_pdf_grid, redshift_grid)
+    return luminosity_distance_grid, unnormalized_pdf_grid, integral_mpc3
+
+
+def _interpolate_logpdf(
+    redshift: jax.Array,
+    redshift_grid: jax.Array,
+    unnormalized_pdf_grid: jax.Array,
+    integral_mpc3: jax.Array,
+) -> jax.Array:
+    """Interpolate the normalized redshift log-pdf onto ``redshift``.
+
+    Interpolating the *complete unnormalized* density and dividing by its
+    trapezoidal integral makes the interpolant's own integral exactly equal to
+    that normalization. Samples outside ``redshift_grid`` interpolate to zero
+    density, hence ``-inf`` log-density.
+    """
+    unnormalized_pdf = jnp.interp(
+        redshift,
+        redshift_grid,
+        unnormalized_pdf_grid,
+        left=0.0,
+        right=0.0,
+    )
+    return jnp.log(unnormalized_pdf) - jnp.log(integral_mpc3)
+
+
+def redshift_logpdf(
+    params: Mapping[str, Any],
+    redshift: jax.Array,
+    *,
+    redshift_grid: jax.Array,
+) -> jax.Array:
+    r"""Normalized Madau-Dickinson redshift log-pdf :math:`\log p(z|\theta)`.
+
+    The standalone counterpart of the ``logpdf`` returned by
+    :func:`compute_merger_rate_distance_and_logprob`, for callers that want the
+    density without the merger rate or luminosity distance -- notably offline
+    construction of a proposal density for a precomputed catalog. Both share
+    one implementation of the density and its normalization.
+
+    ``redshift_grid`` is the caller's choice and need not match the grid used
+    during inference: a proposal density should be evaluated on the grid the
+    catalog was actually *sampled* from, which is a property of the generator,
+    not of the model.
+
+    Parameters
+    ----------
+    params:
+        Hyperparameters. Must include ``H0``, ``Omega_m``, ``gamma``,
+        ``kappa``, and ``z_peak``.
+    redshift:
+        Redshifts at which to evaluate the log-pdf, shape ``(N,)``.
+    redshift_grid:
+        Redshift grid for the cosmology integrals and MD normalization.
+
+    Returns
+    -------
+    jax.Array
+        Log-density of shape ``(N,)``; ``-inf`` outside ``redshift_grid``.
+    """
+    _, unnormalized_pdf_grid, integral_mpc3 = _redshift_density_grids(
+        params, redshift_grid
+    )
+    return _interpolate_logpdf(
+        redshift, redshift_grid, unnormalized_pdf_grid, integral_mpc3
+    )
+
+
 def compute_merger_rate_distance_and_logprob(
     params: Mapping[str, Any],
     samples: Mapping[str, jax.Array],
@@ -84,19 +178,16 @@ def compute_merger_rate_distance_and_logprob(
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     r"""Merger rate, luminosity distance, and redshift log-pdf at catalog samples.
 
-    Builds cosmology tables on ``redshift_grid`` via
-    :func:`~astrogwb.cosmology.distance_and_volume_grid`, normalizes the
-    Madau-Dickinson redshift weight by trapezoidal integration on that grid,
-    and evaluates the redshift PDF
+    Builds the cosmology and density tables on ``redshift_grid`` via
+    :func:`_redshift_density_grids`, then evaluates the redshift PDF
 
     :math:`\mathrm{logpdf} = \log p(z|\theta)`
 
-    at ``samples["redshift"]`` by linearly interpolating the complete
-    unnormalized redshift density. This makes the interpolated density's
-    integral exactly equal to its trapezoidal normalization and avoids
-    reevaluating the Madau-Dickinson rate at every catalog sample. Also returns
-    the interpolated luminosity distance ``d_L(z|\theta)``. The same function
-    is used for the proposal (at fiducials) and the target (at sampled
+    at ``samples["redshift"]``. One grid pass serves all three outputs, and the
+    density itself is shared with :func:`redshift_logpdf` so an offline
+    proposal density can never drift from the target it is divided into. Also
+    returns the interpolated luminosity distance ``d_L(z|\theta)``. The same
+    function is used for the proposal (at fiducials) and the target (at sampled
     ``params``); :func:`log_weights` combines these with the catalog fiducial
     distances and the GW/EM ratio correction.
 
@@ -123,21 +214,11 @@ def compute_merger_rate_distance_and_logprob(
     """
     redshift = samples["redshift"]
 
-    luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(
-        params, redshift_grid
+    luminosity_distance_grid, unnormalized_pdf_grid, integral_mpc3 = (
+        _redshift_density_grids(params, redshift_grid)
     )
-    rate_shape_grid = madau_dickinson_rate(
-        redshift_grid, params["gamma"], params["kappa"], params["z_peak"]
-    )
-    unnormalized_pdf_grid = rate_shape_grid / (1.0 + redshift_grid) * dvc_dz_grid
-    integral_mpc3 = jnp.trapezoid(unnormalized_pdf_grid, redshift_grid)
-
-    unnormalized_pdf = jnp.interp(
-        redshift,
-        redshift_grid,
-        unnormalized_pdf_grid,
-        left=0.0,
-        right=0.0,
+    logpdf = _interpolate_logpdf(
+        redshift, redshift_grid, unnormalized_pdf_grid, integral_mpc3
     )
     luminosity_distance = jnp.interp(
         redshift,
@@ -146,7 +227,6 @@ def compute_merger_rate_distance_and_logprob(
         left=luminosity_distance_grid[0],
         right=luminosity_distance_grid[-1],
     )
-    logpdf = jnp.log(unnormalized_pdf) - jnp.log(integral_mpc3)
     total_merger_rate = (
         1e-9 * params["local_merger_rate"] * integral_mpc3 / SECONDS_PER_YEAR
     )

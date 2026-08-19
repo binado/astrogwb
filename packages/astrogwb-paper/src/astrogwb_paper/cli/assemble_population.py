@@ -12,15 +12,17 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 import numpy as np
-from astrogwb.cosmology import distance_and_volume_grid
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    redshift_logpdf,
+)
 from gwmock_pop.cosmology.flat_lambda_cdm import DEFAULT_LOOKUP_GRID_SIZE
-from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 from gwmock_pop.loaders.file_loader import (
     read_population_catalogue,
     write_population_catalogue,
 )
 
 from astrogwb_paper.catalogs import PROPOSAL_REDSHIFT_LOGPDF
+from astrogwb_paper.config.catalogs import ASSEMBLY_OPERATIONS, AssemblyOperation
 from astrogwb_paper.config.loading import load_mapping
 
 PROPOSAL_COMPONENT = "proposal_component"
@@ -38,7 +40,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--operation",
-        choices=("identity", "subsample", "mixture"),
+        choices=ASSEMBLY_OPERATIONS,
         required=True,
     )
     parser.add_argument(
@@ -73,7 +75,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def assemble_population(
     sources: Sequence[Mapping[str, np.ndarray]],
     *,
-    operation: str,
+    operation: AssemblyOperation,
     num_samples: int,
     seed: int,
     weights: Sequence[float] | None = None,
@@ -193,35 +195,21 @@ def guarded_proposal_logpdf(
             "unsupported fiducial redshift sampler argument(s): " + ", ".join(unknown)
         )
 
+    # Evaluated on the sampler's own lookup grid (``n_grid``, defaulting to
+    # gwmock-pop's), not the coarser grid the model integrates on: this is the
+    # density the catalog was actually drawn from, so it must mirror the
+    # generator rather than the target. Only the formula is shared with the
+    # model, via ``redshift_logpdf``.
     redshift_grid = jnp.linspace(z_min, z_max, n_grid)
-    _, dvc_dz_grid = distance_and_volume_grid(params, redshift_grid)
-    unnormalized_grid = (
-        madau_dickinson_rate(
-            redshift_grid,
-            params["gamma"],
-            params["kappa"],
-            params["z_peak"],
-        )
-        / (1.0 + redshift_grid)
-        * dvc_dz_grid
-    )
-    normalization = jnp.trapezoid(unnormalized_grid, redshift_grid)
-    fiducial_pdf = np.asarray(
-        jnp.interp(
-            jnp.asarray(redshift),
-            redshift_grid,
-            unnormalized_grid / normalization,
-            left=0.0,
-            right=0.0,
-        )
+    fiducial_logpdf = np.asarray(
+        redshift_logpdf(params, jnp.asarray(redshift), redshift_grid=redshift_grid)
     )
     in_support = (redshift >= z_min) & (redshift <= z_max)
-    uniform_pdf = np.where(in_support, 1.0 / (z_max - z_min), 0.0)
-    with np.errstate(divide="ignore"):
-        return np.logaddexp(
-            np.log1p(-epsilon) + np.log(fiducial_pdf),
-            np.log(epsilon) + np.log(uniform_pdf),
-        )
+    uniform_logpdf = np.where(in_support, -np.log(z_max - z_min), -np.inf)
+    return np.logaddexp(
+        np.log1p(-epsilon) + fiducial_logpdf,
+        np.log(epsilon) + uniform_logpdf,
+    )
 
 
 def _parameters(config: Mapping[str, Any]) -> Mapping[str, Any]:
