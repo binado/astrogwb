@@ -94,10 +94,9 @@ rule population_config:
     output:
         "outputs/population-configs/{component}.yaml",
     run:
-        merged = deep_merge(
-            load_mapping(Path(input.base)), load_mapping(Path(input.overlay))
-        )
+        merged = deep_merge(load_mapping(input.base), load_mapping(input.overlay))
         destination = Path(output[0])
+
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(
             yaml.safe_dump(merged, sort_keys=False),

@@ -59,6 +59,13 @@ def test_load_mapping_resolves_yaml_aliases(tmp_path: Path) -> None:
     }
 
 
+def test_load_mapping_accepts_str_paths(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text('{"seed": 7}', encoding="utf-8")
+
+    assert load_mapping(str(path)) == {"seed": 7}
+
+
 def test_build_run_config_deep_merges_extra_overrides() -> None:
     raw = example_raw()
     config = build_run_config(

@@ -73,8 +73,9 @@ def load_inventory(
     return raw
 
 
-def load_mapping(path: Path) -> dict[str, Any]:
+def load_mapping(path: Path | str) -> dict[str, Any]:
     """Parse a YAML, TOML, or JSON config file into a plain dict."""
+    path = Path(path)
     suffix = path.suffix.lower()
     with path.open("rb") as handle:
         if suffix == ".toml":
