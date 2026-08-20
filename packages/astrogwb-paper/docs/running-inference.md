@@ -14,7 +14,7 @@ uv run astrogwb-validate-config \
 uv run astrogwb-run-mcmc \
   --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
   --injection-catalog outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
-  --proposal-catalog outputs/catalogs/bns-n16384-eps=0.1-df1.h5
+  --proposal-catalog outputs/catalogs/bns-n16384-eps=0-df1.h5
 ```
 
 Any generated config under `outputs/configs/<experiment>/<run>.json` works for
@@ -99,7 +99,7 @@ snakemake --snakefile Snakefile \
   --allowed-rules population_config population waveform_catalog \
   --profile profiles/local --cores 8 \
   outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
-  outputs/catalogs/bns-n16384-eps=0.1-df1.h5
+  outputs/catalogs/bns-n16384-eps=0-df1.h5
 ```
 
 If a required catalog is absent, the MCMC workflow fails with a

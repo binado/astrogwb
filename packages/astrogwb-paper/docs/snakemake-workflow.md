@@ -14,18 +14,30 @@ Source inputs live under `inputs/`; generated artifacts live under `outputs/`.
 ## Catalog workflow
 
 Catalog recipes are committed in [`inputs/catalogs.yaml`](../inputs/catalogs.yaml).
-Build a catalog explicitly before running an experiment:
+Build all catalogs before running experiments:
+
+```bash
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules population_config population waveform_catalog catalogs \
+  --dry-run \
+  catalogs
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules population_config population waveform_catalog catalogs \
+  catalogs
+```
+
+Or build individual catalogs:
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
   --allowed-rules population_config population waveform_catalog \
   --dry-run \
   outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
-  outputs/catalogs/bns-n16384-eps=0.1-df1.h5
+  outputs/catalogs/bns-n16384-eps=0-df1.h5
 snakemake --snakefile Snakefile --cores 1 \
   --allowed-rules population_config population waveform_catalog \
   outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
-  outputs/catalogs/bns-n16384-eps=0.1-df1.h5
+  outputs/catalogs/bns-n16384-eps=0-df1.h5
 ```
 
 The DAG deep-merges the two population graph variants, draws a fresh temporary

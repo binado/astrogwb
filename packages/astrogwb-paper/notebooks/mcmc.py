@@ -206,17 +206,13 @@ if IN_COLAB:
     INJECTION_CATALOG_PATH = Path(
         "/content/drive/MyDrive/asgwb/injection-bns-n32768-eps=0-df1.h5"
     )
-    PROPOSAL_CATALOG_PATH = Path(
-        "/content/drive/MyDrive/asgwb/bns-n16384-eps=0.1-df1.h5"
-    )
+    PROPOSAL_CATALOG_PATH = Path("/content/drive/MyDrive/asgwb/bns-n16384-eps=0-df1.h5")
 else:
     ROOT_DIR = paper_project_root()
     INJECTION_CATALOG_PATH = (
         ROOT_DIR / "outputs/catalogs/injection-bns-n32768-eps=0-df1.h5"
     )
-    PROPOSAL_CATALOG_PATH = (
-        ROOT_DIR / "outputs/catalogs/bns-n16384-eps=0.1-df1.h5"
-    )
+    PROPOSAL_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/bns-n16384-eps=0-df1.h5"
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml

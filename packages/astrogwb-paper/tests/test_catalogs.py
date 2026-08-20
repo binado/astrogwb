@@ -26,21 +26,23 @@ def _write_inventory(path: Path, raw: dict) -> None:
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
-def test_inventory_declares_injection_and_six_proposals() -> None:
+def test_inventory_declares_injection_and_proposal_catalogs() -> None:
     catalogs = load_catalogs()
 
     assert list(catalogs) == [
         "injection-bns-n32768-eps=0-df1",
         "bns-n32768-eps=0-df1-taylorf2",
-        "bns-n8192-eps=0.1-df1",
+        "bns-n8192-eps=0-df1",
+        "bns-n16384-eps=0-df1",
+        "bns-n32768-eps=0-df1",
         "bns-n16384-eps=0.1-df1",
-        "bns-n32768-eps=0.1-df1",
         "bns-n16384-eps=0.01-df1",
         "bns-n16384-eps=0.001-df1",
     ]
     assert INJECTION_CATALOG_NAME == "injection-bns-n32768-eps=0-df1"
     assert catalogs[INJECTION_CATALOG_NAME].population.uniform_mixing_fraction == 0
-    assert catalogs["bns-n16384-eps=0.1-df1"].population.num_samples == 16384
+    assert catalogs["bns-n16384-eps=0-df1"].population.num_samples == 16384
+    assert catalogs["bns-n16384-eps=0-df1"].population.uniform_mixing_fraction == 0
     assert (
         catalogs["bns-n16384-eps=0.01-df1"].population.uniform_mixing_fraction == 0.01
     )
@@ -123,7 +125,7 @@ def test_catalog_inventory_rejects_unknown_top_level_keys(tmp_path: Path) -> Non
 
 def test_catalog_recipe_rejects_unknown_keys(tmp_path: Path) -> None:
     raw = _inventory_copy()
-    raw["catalogs"]["bns-n8192-eps=0.1-df1"]["population"]["num_sample"] = 1
+    raw["catalogs"]["bns-n16384-eps=0.1-df1"]["population"]["num_sample"] = 1
     inventory = tmp_path / "catalogs.yaml"
     _write_inventory(inventory, raw)
 
@@ -134,7 +136,7 @@ def test_catalog_recipe_rejects_unknown_keys(tmp_path: Path) -> None:
 @pytest.mark.parametrize("epsilon", [0.0, 1.0])
 def test_uniform_fraction_accepts_endpoints(tmp_path: Path, epsilon: float) -> None:
     raw = _inventory_copy()
-    raw["catalogs"]["bns-n8192-eps=0.1-df1"]["population"][
+    raw["catalogs"]["bns-n16384-eps=0.1-df1"]["population"][
         "uniform_mixing_fraction"
     ] = epsilon
     inventory = tmp_path / "catalogs.yaml"
@@ -142,7 +144,7 @@ def test_uniform_fraction_accepts_endpoints(tmp_path: Path, epsilon: float) -> N
 
     assert (
         load_catalogs(inventory)[
-            "bns-n8192-eps=0.1-df1"
+            "bns-n16384-eps=0.1-df1"
         ].population.uniform_mixing_fraction
         == epsilon
     )
@@ -153,7 +155,7 @@ def test_uniform_fraction_rejects_values_outside_unit_interval(
     tmp_path: Path, epsilon: float
 ) -> None:
     raw = _inventory_copy()
-    raw["catalogs"]["bns-n8192-eps=0.1-df1"]["population"][
+    raw["catalogs"]["bns-n16384-eps=0.1-df1"]["population"][
         "uniform_mixing_fraction"
     ] = epsilon
     inventory = tmp_path / "catalogs.yaml"

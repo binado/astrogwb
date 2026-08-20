@@ -15,7 +15,7 @@ from astrogwb_paper.config.catalogs import (
 from astrogwb_paper.config.loading import load_inventory, merge_run_overlay
 from astrogwb_paper.paths import paper_project_root
 
-DEFAULT_CATALOG = "bns-n16384-eps=0.1-df1"
+DEFAULT_CATALOG = "bns-n16384-eps=0-df1"
 EXPERIMENTS_PATH = Path("inputs/experiments.yaml")
 _REQUIRED_SECTIONS = ("base", "experiments")
 # `networks` exists purely to anchor detector lists for the runs to alias.

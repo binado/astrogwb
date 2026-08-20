@@ -13,6 +13,7 @@ CATALOG_RULES = (
     "population_config",
     "population",
     "waveform_catalog",
+    "catalogs",
 )
 MCMC_RULES = (
     "assemble_config",
@@ -84,7 +85,7 @@ def test_catalog_workflow_builds_fresh_populations_and_waveforms() -> None:
         "--cores",
         "1",
         "outputs/catalogs/injection-bns-n32768-eps=0-df1.h5",
-        "outputs/catalogs/bns-n8192-eps=0.1-df1.h5",
+        "outputs/catalogs/bns-n16384-eps=0.1-df1.h5",
     )
 
     assert result.returncode == 0, result.stderr
@@ -92,16 +93,45 @@ def test_catalog_workflow_builds_fresh_populations_and_waveforms() -> None:
     assert "outputs/population-configs/md.yaml" in result.stdout
     assert "outputs/population-configs/uniform-redshift.yaml" in result.stdout
     assert "outputs/populations/injection-bns-n32768-eps=0-df1.h5" in result.stdout
-    assert "outputs/populations/bns-n8192-eps=0.1-df1.h5" in result.stdout
+    assert "outputs/populations/bns-n16384-eps=0.1-df1.h5" in result.stdout
     assert "outputs/catalogs/injection-bns-n32768-eps=0-df1.h5" in result.stdout
-    assert "outputs/catalogs/bns-n8192-eps=0.1-df1.h5" in result.stdout
+    assert "outputs/catalogs/bns-n16384-eps=0.1-df1.h5" in result.stdout
     assert "--uniform-mixing-fraction 0.1" in result.stdout
+
+
+def test_catalogs_target_builds_all_8_catalogs() -> None:
+    result = _snakemake(
+        "--snakefile",
+        str(SNAKEFILE),
+        "--allowed-rules",
+        *CATALOG_RULES,
+        "--dry-run",
+        "--forceall",
+        "--cores",
+        "8",
+        "catalogs",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("rule population_config:") == 2
+    assert result.stdout.count("rule waveform_catalog:") == 8
+    for name in (
+        "injection-bns-n32768-eps=0-df1",
+        "bns-n32768-eps=0-df1-taylorf2",
+        "bns-n8192-eps=0-df1",
+        "bns-n16384-eps=0-df1",
+        "bns-n32768-eps=0-df1",
+        "bns-n16384-eps=0.1-df1",
+        "bns-n16384-eps=0.01-df1",
+        "bns-n16384-eps=0.001-df1",
+    ):
+        assert f"outputs/catalogs/{name}.h5" in result.stdout
 
 
 def test_plot_cosmological_parameters_expands_all_chains_and_figures(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0.1-df1.h5")
+    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -128,7 +158,7 @@ def test_plot_cosmological_parameters_expands_all_chains_and_figures(
 
 
 def test_run_experiment_target_excludes_figure_rule(tmp_path: Path) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0.1-df1.h5")
+    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -148,7 +178,7 @@ def test_run_experiment_target_excludes_figure_rule(tmp_path: Path) -> None:
 def test_config_assembly_reads_the_single_inventory(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0.1-df1.h5")
+    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -169,16 +199,16 @@ def test_config_assembly_reads_the_single_inventory(
     assert "--injection-catalog" in result.stdout
     assert "--proposal-catalog" in result.stdout
     assert str(catalogs / "injection-bns-n32768-eps=0-df1.h5") in result.stdout
-    assert str(catalogs / "bns-n16384-eps=0.1-df1.h5") in result.stdout
+    assert str(catalogs / "bns-n16384-eps=0-df1.h5") in result.stdout
     assert result.stdout.count("rule assemble_config:") == 1
 
 
 def test_variable_proposal_size_uses_three_catalogs(tmp_path: Path) -> None:
     catalogs = _catalogs(
         tmp_path,
-        "bns-n8192-eps=0.1-df1.h5",
-        "bns-n16384-eps=0.1-df1.h5",
-        "bns-n32768-eps=0.1-df1.h5",
+        "bns-n8192-eps=0-df1.h5",
+        "bns-n16384-eps=0-df1.h5",
+        "bns-n32768-eps=0-df1.h5",
     )
 
     result = _mcmc(
@@ -194,9 +224,9 @@ def test_variable_proposal_size_uses_three_catalogs(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule run_mcmc:") == 3
     for name in (
-        "bns-n8192-eps=0.1-df1.h5",
-        "bns-n16384-eps=0.1-df1.h5",
-        "bns-n32768-eps=0.1-df1.h5",
+        "bns-n8192-eps=0-df1.h5",
+        "bns-n16384-eps=0-df1.h5",
+        "bns-n32768-eps=0-df1.h5",
     ):
         assert str(catalogs / name) in result.stdout
 
@@ -285,6 +315,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "run_experiment_variable_proposal_size",
         "run_experiment_variable_proposal_guard",
         "run_experiment_waveform_approximant",
+        "catalogs",
         "plot_cosmological_parameters",
         "amplitude_toy",
         "fiducial_spectrum",
@@ -325,9 +356,10 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
 def test_experiments_target_builds_all_26_chains(tmp_path: Path) -> None:
     catalogs = _catalogs(
         tmp_path,
-        "bns-n8192-eps=0.1-df1.h5",
+        "bns-n8192-eps=0-df1.h5",
+        "bns-n16384-eps=0-df1.h5",
+        "bns-n32768-eps=0-df1.h5",
         "bns-n16384-eps=0.1-df1.h5",
-        "bns-n32768-eps=0.1-df1.h5",
         "bns-n16384-eps=0.01-df1.h5",
         "bns-n16384-eps=0.001-df1.h5",
         "bns-n32768-eps=0-df1-taylorf2.h5",
@@ -354,7 +386,7 @@ def test_experiments_target_builds_all_26_chains(tmp_path: Path) -> None:
 def test_plot_cosmological_parameters_passes_all_paths_not_labels(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0.1-df1.h5")
+    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -402,7 +434,7 @@ def test_plot_cosmological_parameters_passes_all_paths_not_labels(
 def test_standalone_figures_receive_config_paths(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0.1-df1.h5")
+    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -440,7 +472,7 @@ def test_standalone_figures_receive_config_paths(
 def test_figure_path_is_a_valid_snakemake_target(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0.1-df1.h5")
+    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -458,7 +490,7 @@ def test_figure_path_is_a_valid_snakemake_target(
 
 
 def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0.1-df1.h5")
+    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
 
     result = _mcmc(
         "--dry-run",
