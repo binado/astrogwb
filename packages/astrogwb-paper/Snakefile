@@ -204,7 +204,12 @@ rule run_mcmc:
             RUNTIME_FLAGS="--cpu-threads {threads}"
             UV_EXTRAS="--package astrogwb-paper --extra cuda"
         fi
-        $NANNY uv run $UV_EXTRAS astrogwb-run-mcmc \
+        # --active --no-sync: with storage-local-copies the cwd is a node-local
+        # staged copy without the uv workspace (astrogwb is a workspace source),
+        # so plain `uv run` ignores VIRTUAL_ENV and fails to re-resolve deps.
+        # The shared-FS venv is already synced (GPU profile requires
+        # --extra cuda), so run directly from it.
+        $NANNY uv run --active --no-sync $UV_EXTRAS astrogwb-run-mcmc \
             --config {input.config:q} --outdir {params.outdir:q} \
             --label {wildcards.run:q} \
             --injection-catalog {input.injection_catalog:q} \
