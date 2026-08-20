@@ -33,6 +33,8 @@ MCMC_RULES = (
     "variable_proposal_size_chains",
     "variable_proposal_guard",
     "variable_proposal_guard_chains",
+    "waveform_approximant",
+    "waveform_approximant_chains",
 )
 
 
@@ -233,6 +235,31 @@ def test_variable_proposal_guard_uses_three_catalogs(tmp_path: Path) -> None:
         assert str(catalogs / name) in result.stdout
 
 
+def test_waveform_approximant_uses_imr_data_and_two_proposals(
+    tmp_path: Path,
+) -> None:
+    catalogs = _catalogs(tmp_path, "bns-n32768-eps=0-df1-taylorf2.h5")
+    imr = catalogs / "injection-bns-n32768-eps=0-df1.h5"
+    taylorf2 = catalogs / "bns-n32768-eps=0-df1-taylorf2.h5"
+
+    result = _mcmc(
+        "--dry-run",
+        "--forceall",
+        "--printshellcmds",
+        "--cores",
+        "8",
+        "waveform_approximant",
+        "--config",
+        f"catalogs_dir={catalogs}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("rule run_mcmc:") == 2
+    assert result.stdout.count(f"--injection-catalog {imr}") == 2
+    assert result.stdout.count(f"--proposal-catalog {imr}") == 1
+    assert result.stdout.count(f"--proposal-catalog {taylorf2}") == 1
+
+
 def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
     catalogs = tmp_path / "missing-catalogs"
 
@@ -266,6 +293,8 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "variable_proposal_size_chains",
         "variable_proposal_guard",
         "variable_proposal_guard_chains",
+        "waveform_approximant",
+        "waveform_approximant_chains",
         "amplitude_toy",
         "fiducial_spectrum",
         "importance_weights_grid",
@@ -288,7 +317,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
     }.isdisjoint(rules)
 
 
-def test_experiments_target_builds_all_24_chains(tmp_path: Path) -> None:
+def test_experiments_target_builds_all_26_chains(tmp_path: Path) -> None:
     catalogs = _catalogs(
         tmp_path,
         "bns-n8192-eps=0.1-df1.h5",
@@ -296,6 +325,7 @@ def test_experiments_target_builds_all_24_chains(tmp_path: Path) -> None:
         "bns-n32768-eps=0.1-df1.h5",
         "bns-n16384-eps=0.01-df1.h5",
         "bns-n16384-eps=0.001-df1.h5",
+        "bns-n32768-eps=0-df1-taylorf2.h5",
     )
 
     result = _mcmc(
@@ -310,7 +340,7 @@ def test_experiments_target_builds_all_24_chains(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule assemble_config:") == 1
-    assert result.stdout.count("rule run_mcmc:") == 24
+    assert result.stdout.count("rule run_mcmc:") == 26
     assert result.stdout.count("rule plot_cosmological_parameters:") == 1
     assert result.stdout.count("rule plot_modified_propagation:") == 1
 

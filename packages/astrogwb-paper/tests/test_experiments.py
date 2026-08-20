@@ -27,15 +27,16 @@ def declared_runs() -> set[tuple[str, str]]:
     }
 
 
-def test_inventory_contains_five_experiments_and_24_runs() -> None:
+def test_inventory_contains_six_experiments_and_26_runs() -> None:
     assert set(load_experiments()) == {
         "cosmological-parameters",
         "astrophysical-parameters",
         "modified-propagation",
         "variable-proposal-size",
         "variable-proposal-guard",
+        "waveform-approximant",
     }
-    assert len(declared_runs()) == 24
+    assert len(declared_runs()) == 26
 
 
 def test_single_yaml_is_the_only_mcmc_inventory() -> None:
@@ -70,13 +71,15 @@ def test_all_run_configs_are_assembled_together(tmp_path: Path) -> None:
     )
 
     generated = list(tmp_path.glob("*/*.json"))
-    assert len(generated) == 24
+    assert len(generated) == 26
     assert (tmp_path / "cosmological-parameters/H0-Omega_m.json").is_file()
     assert (tmp_path / "cosmological-parameters/H0-merger-rate.json").is_file()
     assert (tmp_path / "astrophysical-parameters/z_peak.json").is_file()
     assert (tmp_path / "modified-propagation/Xi_0-H0.json").is_file()
     assert (tmp_path / "variable-proposal-size/n32768.json").is_file()
     assert (tmp_path / "variable-proposal-guard/eps1e-3.json").is_file()
+    assert (tmp_path / "waveform-approximant/IMRPhenom.json").is_file()
+    assert (tmp_path / "waveform-approximant/TaylorF2.json").is_file()
     guard = load_mapping(tmp_path / "variable-proposal-guard/eps1e-3.json")
     assert guard["proposal"]["uniform_mixing_fraction"] == 0.001
     assert guard["proposal"]["n_grid"] == 4096
@@ -98,10 +101,14 @@ def test_run_paths_are_one_to_one_with_the_source_yaml() -> None:
         spec.chain_path("nope")
 
 
-def test_catalog_selection_is_fixed_except_for_proposal_sweeps() -> None:
+def test_catalog_selection_is_fixed_except_for_proposal_comparisons() -> None:
     experiments = load_experiments()
     for name, specification in experiments.items():
-        if name in {"variable-proposal-size", "variable-proposal-guard"}:
+        if name in {
+            "variable-proposal-size",
+            "variable-proposal-guard",
+            "waveform-approximant",
+        }:
             continue
         assert {specification.catalog_for(run) for run in specification.runs} == {
             DEFAULT_CATALOG
@@ -119,6 +126,12 @@ def test_catalog_selection_is_fixed_except_for_proposal_sweeps() -> None:
         "eps1e-1": "bns-n16384-eps=0.1-df1",
         "eps1e-2": "bns-n16384-eps=0.01-df1",
         "eps1e-3": "bns-n16384-eps=0.001-df1",
+    }
+
+    approximants = experiments["waveform-approximant"]
+    assert {run: approximants.catalog_for(run) for run in approximants.runs} == {
+        "IMRPhenom": "injection-bns-n32768-eps=0-df1",
+        "TaylorF2": "bns-n32768-eps=0-df1-taylorf2",
     }
 
 

@@ -169,3 +169,12 @@ experiments:
         catalog: bns-n16384-eps=0.01-df1
       eps1e-3:
         catalog: bns-n16384-eps=0.001-df1
+
+  waveform-approximant:
+    sampled_params: [H0]
+    analysis: *et_2l_aligned_ce
+    runs:
+      IMRPhenom:
+        catalog: injection-bns-n32768-eps=0-df1
+      TaylorF2:
+        catalog: bns-n32768-eps=0-df1-taylorf2
