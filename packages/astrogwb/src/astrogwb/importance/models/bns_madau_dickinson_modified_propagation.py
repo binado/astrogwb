@@ -104,58 +104,6 @@ def amplitude_local_merger_rate_fn(
     return marginalized_parameter
 
 
-def _redshift_density_grids(
-    params: Mapping[str, Any], redshift_grid: jax.Array
-) -> tuple[jax.Array, jax.Array, jax.Array]:
-    r"""Cosmology and Madau-Dickinson density tables on ``redshift_grid``.
-
-    Single source of truth for the fiducial redshift density
-    :math:`p(z) \propto \psi(z) / (1 + z) \times dV_c/dz` and its trapezoidal
-    normalization. Both the target density evaluated during inference
-    (:func:`compute_merger_rate_distance_and_logprob`) and any fixed proposal
-    density must come through here: the importance weight is a *ratio* of the
-    two, so a second copy of this formula would bias every weight the moment
-    either copy changed.
-
-    Returns ``(luminosity_distance_grid, unnormalized_pdf_grid, integral_mpc3)``,
-    each evaluated on the exact ``redshift_grid`` passed in. ``integral_mpc3``
-    is a scalar in ``Mpc^3`` and normalizes ``unnormalized_pdf_grid``; it is
-    also the comoving volume factor of the total merger rate.
-    """
-    luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(
-        params, redshift_grid
-    )
-    rate_shape_grid = madau_dickinson_rate(
-        redshift_grid, params["gamma"], params["kappa"], params["z_peak"]
-    )
-    unnormalized_pdf_grid = rate_shape_grid / (1.0 + redshift_grid) * dvc_dz_grid
-    integral_mpc3 = jnp.trapezoid(unnormalized_pdf_grid, redshift_grid)
-    return luminosity_distance_grid, unnormalized_pdf_grid, integral_mpc3
-
-
-def _interpolate_logpdf(
-    redshift: jax.Array,
-    redshift_grid: jax.Array,
-    unnormalized_pdf_grid: jax.Array,
-    integral_mpc3: jax.Array,
-) -> jax.Array:
-    """Interpolate the normalized redshift log-pdf onto ``redshift``.
-
-    Interpolating the *complete unnormalized* density and dividing by its
-    trapezoidal integral makes the interpolant's own integral exactly equal to
-    that normalization. Samples outside ``redshift_grid`` interpolate to zero
-    density, hence ``-inf`` log-density.
-    """
-    unnormalized_pdf = jnp.interp(
-        redshift,
-        redshift_grid,
-        unnormalized_pdf_grid,
-        left=0.0,
-        right=0.0,
-    )
-    return jnp.log(unnormalized_pdf) - jnp.log(integral_mpc3)
-
-
 def compute_merger_rate_distance_and_logprob(
     params: Mapping[str, Any],
     samples: Mapping[str, jax.Array],
@@ -164,19 +112,26 @@ def compute_merger_rate_distance_and_logprob(
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     r"""Merger rate, luminosity distance, and redshift log-pdf at catalog samples.
 
-    Builds the cosmology and density tables on ``redshift_grid`` via
-    :func:`_redshift_density_grids`, then evaluates the redshift PDF
+    Builds the cosmology and density tables on ``redshift_grid``, then evaluates
+    the redshift PDF
 
     :math:`\mathrm{logpdf} = \log p(z|\theta)`
 
-    at ``samples["redshift"]``. One grid pass serves all three outputs. Also
-    returns the interpolated luminosity distance ``d_L(z|\theta)``. The same
-    function is used for the proposal (at fiducials) and the target (at sampled
-    ``params``); :func:`log_weights` combines these with the catalog fiducial
-    distances and the GW/EM ratio correction. Construction of a
-    proposal density for a precomputed catalog must call this same function
-    (on the grid the catalog was actually *sampled* from) so the proposal and
-    target densities can never drift apart.
+    at ``samples["redshift"]``. One grid pass serves all three outputs. The
+    density :math:`p(z) \propto \psi(z) / (1 + z) \times dV_c/dz` is normalized
+    by its trapezoidal integral; interpolating the *complete unnormalized*
+    density and dividing by that integral makes the interpolant's own integral
+    exactly equal to the normalization. Samples outside ``redshift_grid``
+    interpolate to zero density, hence ``-inf`` log-density. Also returns the
+    interpolated luminosity distance ``d_L(z|\theta)``. This function is the
+    single source of truth for the density formula: the same function is used
+    for the proposal (at fiducials) and the target (at sampled ``params``), so
+    the two densities can never drift apart; the importance weight is a *ratio*
+    of them, and a second copy of the formula would bias every weight the
+    moment either copy changed. :func:`log_weights` combines these with the
+    catalog fiducial distances and the GW/EM ratio correction. Construction of
+    a proposal density for a precomputed catalog must call this same function
+    (on the grid the catalog was actually *sampled* from).
 
     Parameters
     ----------
@@ -201,12 +156,23 @@ def compute_merger_rate_distance_and_logprob(
     """
     redshift = samples["redshift"]
 
-    luminosity_distance_grid, unnormalized_pdf_grid, integral_mpc3 = (
-        _redshift_density_grids(params, redshift_grid)
+    luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(
+        params, redshift_grid
     )
-    logpdf = _interpolate_logpdf(
-        redshift, redshift_grid, unnormalized_pdf_grid, integral_mpc3
+    rate_shape_grid = madau_dickinson_rate(
+        redshift_grid, params["gamma"], params["kappa"], params["z_peak"]
     )
+    unnormalized_pdf_grid = rate_shape_grid / (1.0 + redshift_grid) * dvc_dz_grid
+    integral_mpc3 = jnp.trapezoid(unnormalized_pdf_grid, redshift_grid)
+
+    unnormalized_pdf = jnp.interp(
+        redshift,
+        redshift_grid,
+        unnormalized_pdf_grid,
+        left=0.0,
+        right=0.0,
+    )
+    logpdf = jnp.log(unnormalized_pdf) - jnp.log(integral_mpc3)
     luminosity_distance = jnp.interp(
         redshift,
         redshift_grid,
