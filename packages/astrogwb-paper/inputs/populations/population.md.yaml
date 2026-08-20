@@ -1,0 +1,14 @@
+# Madau-Dickinson redshift overlay for population.base.yaml.
+parameters:
+  redshift:
+    sampler:
+      function: madau_dickinson_redshift
+      arguments:
+        z_min: 0.0
+        z_max: 20.0
+        gamma: 1.42
+        kappa: 4.62
+        z_peak: 1.84
+        hubble_constant: 67.66
+        omega_m: 0.3096
+        n_grid: 4096

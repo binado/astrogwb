@@ -1,8 +1,4 @@
-"""Plot the fiducial SGWB spectrum and network effective PSDs.
-
-The fiducial $S_h$ uses the same importance-weighted contraction as the MCMC
-runs. $\\Omega_{\\mathrm{GW}}(f)$ shares the frequency axis on a dual $y$-scale.
-"""
+"""Plot the independent fiducial-injection SGWB spectrum and effective PSDs."""
 
 from __future__ import annotations
 
@@ -16,22 +12,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from astrogwb.cosmology import hubble_constant_si
 from astrogwb.detector import effective_psd, load_sensitivity_map
-from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
-    spectral_density,
 )
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_distance_and_logprob,
-    make_merger_rate_and_log_weights_fn,
-)
-from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.config.figures import (
     Network,
     load_analysis_grid,
     load_fiducials,
     resolve_networks,
 )
+from astrogwb_paper.inference import prepare_observation
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
@@ -45,7 +35,6 @@ from matplotlib.axes import Axes as MplAxes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.projections import register_projection
-from pluscross import load_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's rectilinear axes. Restore the
 # standard matplotlib projection for consistent plotting.
@@ -59,53 +48,6 @@ SPECTRUM_EXPERIMENT = "cosmological-parameters"
 # Lower y-limit for Omega_GW; the S_h ymin is taken from S_h at the frequency
 # where Omega_GW is closest to this floor.
 OMEGA_GW_MIN = 1.0e-15
-
-
-def compute_fiducial_spectral_density(
-    catalog_path: Path,
-    fiducials: Mapping[str, float],
-    *,
-    f_min: float,
-    f_max: float,
-    z_min: float,
-    z_max: float,
-    n_grid: int,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Return ``(frequencies, S_h, frequency_mask)`` at the fiducial point."""
-    catalog = load_catalog(catalog_path)
-    frequencies = jnp.asarray(catalog.frequencies)
-    polarization_power = jnp.asarray(compute_polarization_power(catalog))
-    samples = {
-        name: jnp.asarray(values) for name, values in catalog.source_parameters.items()
-    }
-    del catalog
-
-    missing = [
-        name for name in ("redshift", "luminosity_distance") if name not in samples
-    ]
-    if missing:
-        raise ValueError(
-            "catalog samples are missing required parameter(s): " + ", ".join(missing)
-        )
-
-    z_grid = jnp.linspace(z_min, z_max, n_grid)
-    _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        fiducials, samples, redshift_grid=z_grid
-    )
-    merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
-        fiducials=fiducials,
-        redshift_grid=z_grid,
-        proposal_logprob=proposal_logprob,
-    )
-    total_rate, log_weights = merger_rate_and_log_weights_fn(fiducials, samples)
-    observed_spectral_density = spectral_density(
-        polarization_power,
-        jnp.exp(log_weights),
-        total_rate,
-        average_mode="analytic_inclination",
-    )
-    mask = make_frequency_mask(frequencies, fmin=f_min, fmax=f_max)
-    return frequencies, observed_spectral_density, mask
 
 
 def sh_ymin_matching_omega_floor(
@@ -259,18 +201,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     use_paper_style()
 
     catalog_path = resolve_paper_path(args.catalog, root)
-    frequencies, observed_spectral_density, mask = compute_fiducial_spectral_density(
-        catalog_path,
-        fiducials,
-        f_min=grid.f_min,
-        f_max=grid.f_max,
-        z_min=grid.z_min,
-        z_max=grid.z_max,
-        n_grid=grid.n_grid,
-    )
+    observation = prepare_observation(catalog_path, fiducials=fiducials, grid=grid)
+    frequencies = observation.frequencies
+    mask = observation.frequency_mask
     figure = plot_omega_and_sh(
         frequencies,
-        observed_spectral_density,
+        observation.spectral_density,
         mask,
         h0=fiducials["H0"],
         omega_gw_min=OMEGA_GW_MIN,

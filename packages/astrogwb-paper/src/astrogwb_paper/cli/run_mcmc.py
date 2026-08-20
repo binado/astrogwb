@@ -19,7 +19,8 @@ Usage::
 
     uv run astrogwb-run-mcmc \
         --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
-        --catalog outputs/catalogs/bns-n16384-df1.h5
+        --injection-catalog outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
+        --proposal-catalog outputs/catalogs/bns-n16384-eps=0.1-df1.h5
 
 Configs are assembled from the base and run overlays in ``inputs/experiments.yaml``
 by the ``assemble_config`` workflow rule or by
@@ -66,10 +67,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to the TOML or JSON config file for this run / array task.",
     )
     parser.add_argument(
-        "--catalog",
+        "--injection-catalog",
         type=Path,
         required=True,
-        help="Waveform catalog to reweight for this run.",
+        help="Independent fiducial waveform catalog used to construct observed data.",
+    )
+    parser.add_argument(
+        "--proposal-catalog",
+        type=Path,
+        required=True,
+        help="Waveform catalog used by the importance estimator.",
     )
     parser.add_argument(
         "--seed",
@@ -106,176 +113,43 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # --------------------------------------------------------------------------- #
 # Inference
 # --------------------------------------------------------------------------- #
-def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
+def run(
+    config: RunConfig,
+    injection_catalog_path: Path,
+    proposal_catalog_path: Path,
+    jax,
+    chain_method: str,
+):
     """Replicate the notebook inference cells headlessly and return the MCMC object.
 
     Returns ``(mcmc, marginalization)``, where ``marginalization`` is the
     :class:`~astrogwb_paper.amplitude.AmplitudeMarginalization` built for an
     amplitude-marginalized run, or ``None`` for the default likelihood.
     """
-    from functools import partial
-
-    import jax.numpy as jnp
-    from astrogwb.detector import effective_psd, load_sensitivity_map
-    from astrogwb.frequency import (
-        apply_frequency_mask,
-    )
-    from astrogwb.frequency import (
-        frequency_mask as make_frequency_mask,
-    )
-    from astrogwb.gwb import spectral_density
-    from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-        compute_merger_rate_distance_and_logprob,
-        make_merger_rate_and_log_weights_fn,
-    )
-    from astrogwb.sampling.models import (
-        amplitude_marginalized_model,
-        spectral_density_model,
-    )
-    from astrogwb.waveform import (
-        apply_gw_distance_to_waveforms,
-    )
-    from astrogwb.waveform import (
-        polarization_power as compute_polarization_power,
-    )
     from numpyro.infer import MCMC, NUTS
     from numpyro.infer.initialization import init_to_value
-    from pluscross import load_catalog
 
-    from astrogwb_paper.amplitude import build_amplitude_marginalization
-
-    analysis = config.analysis
-    cosmo = config.cosmology
-
-    # --- Load proposal catalog ------------------------------------------------
-    # Rescale the catalog to live-GW distances at the fiducial modified-
-    # propagation parameters before reducing to polarization power, so the
-    # importance weights below carry only the EM-distance ratio.
-    catalog = load_catalog(catalog_path)
-    catalog = apply_gw_distance_to_waveforms(
-        catalog,
-        xi_0=float(config.fiducials["xi_0"]),
-        xi_n=float(config.fiducials["xi_n"]),
-    )
-    frequencies = jnp.asarray(catalog.frequencies)
-    polarization_power = jnp.asarray(compute_polarization_power(catalog))
-    samples = {name: jnp.asarray(v) for name, v in catalog.source_parameters.items()}
-    del catalog
-    assert "redshift" in samples, (
-        "catalog samples must include 'redshift' for the weights"
-    )
-    assert "luminosity_distance" in samples, (
-        "catalog samples must include 'luminosity_distance' for the weights"
-    )
-    n_freq, n_samples = polarization_power.shape
-    logger.info(
-        "Loaded catalog %s: n_frequency_bins=%d n_proposal_samples=%d",
-        catalog_path,
-        n_freq,
-        n_samples,
+    from astrogwb_paper.inference import (
+        build_model,
+        initial_values,
+        prepare_inference_inputs,
     )
 
-    # Importance weights divide by the proposal redshift PDF, which is normalized on
-    # [z_min, z_max] and is exactly zero outside it. Any catalog sample beyond the
-    # range gives log(0) = -inf weights (a cryptic "invalid loc" downstream), so guard
-    # it here with a clear message instead.
-    z_lo = float(jnp.min(samples["redshift"]))
-    z_hi = float(jnp.max(samples["redshift"]))
-    if z_lo < cosmo.z_min or z_hi > cosmo.z_max:
-        raise ValueError(
-            f"catalog redshifts span [{z_lo:.4g}, {z_hi:.4g}] but [z_min, z_max] is "
-            f"[{cosmo.z_min:.4g}, {cosmo.z_max:.4g}]; widen the cosmology range to "
-            "bracket all catalog samples (the proposal PDF is zero outside it)."
-        )
-
-    # --- Effective PSD and analysis band -------------------------------------
-    sensitivities = load_sensitivity_map(analysis.detectors)
-    effective_psd_arr = jnp.asarray(
-        effective_psd(frequencies, list(analysis.detectors), sensitivities)
-    )
-    freq_mask = make_frequency_mask(
-        frequencies, fmin=analysis.f_min, fmax=analysis.f_max
-    )
-    logger.info(
-        "Analysis band: %d of %d bins (%.1f-%.1f Hz)",
-        int(jnp.sum(freq_mask)),
-        frequencies.shape[0],
-        analysis.f_min,
-        analysis.f_max,
-    )
-
-    # --- Precompute fiducial proposal log-density ----------------------------
-    z_grid = jnp.linspace(cosmo.z_min, cosmo.z_max, cosmo.n_grid)
-    _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        config.fiducials, samples, redshift_grid=z_grid
-    )
-
-    merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
+    inputs = prepare_inference_inputs(
+        injection_catalog_path,
+        proposal_catalog_path,
         fiducials=config.fiducials,
-        redshift_grid=z_grid,
-        proposal_logprob=proposal_logprob,
+        proposal_config=config.proposal,
+        grid=config.analysis_grid,
+        detectors=config.analysis.detectors,
     )
-
-    # --- Inject the fiducial spectrum as observed data (no plot) -------------
-    rate0, log_weights0 = merger_rate_and_log_weights_fn(config.fiducials, samples)
-    weights0 = jnp.exp(log_weights0)
-    observed_spectral_density = spectral_density(
-        polarization_power,
-        weights0,
-        rate0,
-        average_mode="analytic_inclination",
+    model, marginalization = build_model(
+        config,
+        merger_rate_and_log_weights_fn=inputs.merger_rate_and_log_weights_fn,
     )
-    logger.info("Injected fiducial spectrum as observed data (rate0=%.4e /s)", rate0)
-
-    (
-        frequencies,
-        polarization_power,
-        observed_spectral_density,
-        effective_psd_arr,
-    ) = apply_frequency_mask(
-        freq_mask,
-        frequencies,
-        polarization_power,
-        observed_spectral_density,
-        effective_psd_arr,
-    )
-
-    # --- Build the model and sampler -----------------------------------------
-    # `config.priors` already holds live distributions (see PriorDistribution).
-    # Project to the sampled parameters: when marginalized, `priors` also
-    # carries the amplitude parameter, which must NOT get a NUTS latent.
-    priors = {name: config.priors[name] for name in config.sampled_params}
-    marginalization = None
-    if analysis.likelihood == "amplitude_marginalized":
-        assert analysis.amplitude_parameter is not None
-        marginalization = build_amplitude_marginalization(config)
-        model = partial(
-            amplitude_marginalized_model,
-            observation_time=config.observation_time,
-            average_mode="analytic_inclination",
-            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-            amplitude_parameter=analysis.amplitude_parameter,
-            fiducials=config.fiducials,
-            amplitude_fn=marginalization.amplitude_fn,
-            amplitude_prior=marginalization.prior,
-            amplitude_grid=marginalization.grid,
-            priors=priors,
-            constants=config.constants,
-        )
-    else:
-        model = partial(
-            spectral_density_model,
-            observation_time=config.observation_time,
-            average_mode="analytic_inclination",
-            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-            priors=priors,
-            constants=config.constants,
-        )
 
     sampler = config.sampler
-    init_strategy = init_to_value(
-        values={name: config.fiducials[name] for name in config.sampled_params}
-    )
+    init_strategy = init_to_value(values=initial_values(config))
     kernel = NUTS(
         model,
         target_accept_prob=sampler.target_accept,
@@ -307,11 +181,7 @@ def run(config: RunConfig, catalog_path: Path, jax, chain_method: str):
     rng_key = jax.random.PRNGKey(config.seed)
     mcmc.run(
         rng_key,
-        frequencies=frequencies,
-        polarization_power=polarization_power,
-        samples=samples,
-        observed_spectral_density=observed_spectral_density,
-        effective_psd=effective_psd_arr,
+        **inputs.masked_model_kwargs(),
         extra_fields=("num_steps", "accept_prob", "diverging"),
     )
 
@@ -444,7 +314,8 @@ def save(
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     config_path = args.config.resolve()
-    catalog_path = args.catalog.resolve()
+    injection_catalog_path = args.injection_catalog.resolve()
+    proposal_catalog_path = args.proposal_catalog.resolve()
     raw = load_mapping(config_path)
     config = build_run_config(
         raw,
@@ -470,9 +341,13 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_chain_path_available(config, timestamp=timestamp, force=args.force)
 
-    # Fail on a missing catalog before JAX claims a device.
-    if not catalog_path.is_file():
-        raise FileNotFoundError(f"catalog not found: {catalog_path}")
+    # Fail on missing catalogs before JAX claims a device.
+    for label, path in (
+        ("injection", injection_catalog_path),
+        ("proposal", proposal_catalog_path),
+    ):
+        if not path.is_file():
+            raise FileNotFoundError(f"{label} catalog not found: {path}")
 
     jax, chain_method = configure_runtime(
         num_chains=config.sampler.num_chains,
@@ -481,7 +356,13 @@ def main(argv: list[str] | None = None) -> None:
         cpu_threads=args.cpu_threads,
         chain_method=args.chain_method,
     )
-    mcmc, marginalization = run(config, catalog_path, jax, chain_method)
+    mcmc, marginalization = run(
+        config,
+        injection_catalog_path,
+        proposal_catalog_path,
+        jax,
+        chain_method,
+    )
     save(
         mcmc,
         config,

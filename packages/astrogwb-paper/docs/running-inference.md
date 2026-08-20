@@ -13,7 +13,8 @@ uv run astrogwb-validate-config \
 
 uv run astrogwb-run-mcmc \
   --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
-  --catalog outputs/catalogs/bns-n16384-df1.h5
+  --injection-catalog outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
+  --proposal-catalog outputs/catalogs/bns-n16384-eps=0.1-df1.h5
 ```
 
 Any generated config under `outputs/configs/<experiment>/<run>.json` works for
@@ -45,8 +46,9 @@ YAML anchors and aliases remove repeated detector and likelihood mappings.
 Experiment-level settings overlay `base`, then a run mapping overlays both.
 Nested mappings are merged, lists replace inherited lists, and each overridden
 prior specification replaces that parameter's inherited prior table wholesale.
-The optional `catalog` run key routes the prebuilt catalog and is not written
-into the scientific run config.
+The optional `catalog` run key routes the prebuilt proposal catalog and is not
+written into the scientific run config. Every run separately consumes the
+shared independent fiducial injection catalog.
 
 The groups are:
 
@@ -55,10 +57,11 @@ The groups are:
 | `cosmological-parameters` | six detector networks, `H0-Omega_m`, and `H0-merger-rate` |
 | `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` |
 | `modified-propagation` | six detector networks, `Xi_0`, and `Xi_0-H0` |
-| `variable-injection-size` | `n8192`, `n16384`, and `n32768` |
+| `variable-proposal-size` | `n8192`, `n16384`, and `n32768` |
+| `variable-proposal-guard` | `eps1e-1`, `eps1e-2`, and `eps1e-3` |
 
 `assemble_config` is one local Snakemake job. A change to
-`inputs/experiments.yaml` validates the complete inventory and regenerates all 21
+`inputs/experiments.yaml` validates the complete inventory and regenerates all 24
 canonical JSON files together. Each MCMC job then consumes its own JSON.
 
 Run one experiment's chains through Snakemake from
@@ -93,9 +96,10 @@ Build the required catalogs first:
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules bns_population bns_waveform_catalog \
+  --allowed-rules population_config population waveform_catalog \
   --profile profiles/local --cores 8 \
-  outputs/catalogs/bns-n16384-df1.h5
+  outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
+  outputs/catalogs/bns-n16384-eps=0.1-df1.h5
 ```
 
 If a required catalog is absent, the MCMC workflow fails with a

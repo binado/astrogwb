@@ -26,10 +26,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
+from astrogwb_paper.catalogs import compute_proposal_logprob
+from astrogwb_paper.config.catalogs import catalog_recipe, proposal_config
+from astrogwb_paper.config.experiments import DEFAULT_CATALOG
 from astrogwb_paper.config.figures import load_fiducials
+from astrogwb_paper.config.mcmc import ProposalConfig
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
@@ -174,6 +177,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     fiducials = load_fiducials()
     use_paper_style()
 
+    # Deliberately bypasses astrogwb_paper.inference / load_catalog_arrays: this
+    # figure only ever touches source_parameters, so the shared path would
+    # materialize an (F, N) polarization-power array it never uses and call
+    # apply_gw_distance_to_waveforms, which at the fiducial xi_0 = 1.0 is
+    # numerically the identity. All cost, no benefit.
     catalog = load_catalog(catalog_path)
     samples = {
         name: jnp.asarray(values) for name, values in catalog.source_parameters.items()
@@ -190,13 +198,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_REDSHIFT_GRID)
-    _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        fiducials, samples, redshift_grid=z_grid
+    proposal = ProposalConfig.model_validate(
+        proposal_config(catalog_recipe(DEFAULT_CATALOG))
     )
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=fiducials,
         redshift_grid=z_grid,
-        proposal_logprob=proposal_logprob,
+        proposal_logprob=compute_proposal_logprob(samples, proposal),
     )
 
     figures: list[tuple[Figure, Path]] = []

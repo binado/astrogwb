@@ -1,65 +1,85 @@
-# Generating catalogs
+# Catalog generation
 
-## Generating a population of CBCs
+Catalog generation has two stages:
 
-Our inference framework uses an importance sampling scheme to calculate the spectral density of the astrophysical SGWB with a fixed population of CBCs. To generate the population, we suggest using the excellent [`gwmock-pop`](https://leuven-gravity-institute.github.io/gwmock-pop/) package.
+1. draw a fresh population from an MD/uniform-redshift mixture;
+2. generate and persist its frequency-domain waveform polarizations.
 
-An example BNS population is defined declaratively in [`packages/astrogwb-paper/examples/bns_population.yaml`](../examples/bns_population.yaml).
-The complete default recipe lives in
-[`inputs/catalogs.yaml`](../inputs/catalogs.yaml) under `bns-n16384-df1`.
-Its equivalent explicit population command is:
+The intermediate population is a Snakemake `temp()` output. The waveform
+catalog under `outputs/catalogs/` is the durable artifact.
+
+## Population graphs
+
+The population definition is split into three fragments:
+
+- [`population.base.yaml`](../inputs/populations/population.base.yaml) contains
+  every non-redshift sampler and transform;
+- [`population.md.yaml`](../inputs/populations/population.md.yaml) contains only
+  the Madau-Dickinson redshift sampler;
+- [`population.uniform-redshift.yaml`](../inputs/populations/population.uniform-redshift.yaml)
+  contains only the uniform-redshift sampler.
+
+The workflow recursively merges the base with each redshift fragment. The two
+complete graphs therefore differ only in redshift by construction.
+
+## Generate a population
+
+`astrogwb-generate-population` loads the two complete graph configurations with
+`GraphSimulator`. For an interior mixing fraction it draws directly from
+`MixtureSimulator` with weights `[1 - epsilon, epsilon]`. The endpoints invoke
+only the selected graph.
 
 ```bash
-uv run gwmock-pop simulate \
-  --config examples/bns_population.yaml \
-  --n 16384 \
-  --output outputs/populations/bns-n16384-df1.h5 \
-  --seed 42
+uv run astrogwb-generate-population \
+  --md-config outputs/population-configs/md.yaml \
+  --uniform-redshift-config outputs/population-configs/uniform-redshift.yaml \
+  --uniform-mixing-fraction 0.1 \
+  --num-samples 16384 \
+  --seed 42 \
+  --output outputs/populations/bns-n16384-eps=0.1-df1.h5
 ```
 
-`--output` accepts `.csv`, `.h5`, or `.hdf5`; use `.h5` for the structured
-output the downstream catalog step consumes. The result is a table of `n`
-intrinsic samples — one column per parameter, using gwmock-pop canonical
-names (`source_frame_mass_1/2`, `luminosity_distance`, `spin_1z/2z`,
-`lambda_1/2`, `inclination`, `coa_phase`, `coa_time`).
+The command refuses to overwrite an existing output unless `--force` is
+provided. It stores only physical population columns, not component labels or
+proposal-density columns.
 
-The committed config encodes a BNS population with a Madau–Dickinson-like redshift
-distribution (converted to luminosity distance), uniform source-frame component
-masses ordered so `mass_1 >= mass_2`, aligned spins (in-plane components zero),
-uniform tidal deformabilities, and inclination/coalescence phase/time fixed at
-zero. Edit the `arguments` blocks to retune ranges. The aligned-spin + tidal
-parameters suit a non-precessing NRTidal approximant downstream.
-The mass priors are defined in the source frame.
-
-## Generating waveforms for the population catalog
-
-The `astrogwb-generate-waveform-catalog` command wraps the [`gwmock-signal`](https://github.com/Leuven-Gravity-Institute/gwmock-signal) package to generate the frequency-domain polarizations used in the spectral-density calculation. The output is a [`pluscross`](https://pypi.org/project/pluscross/) HDF5 catalog of complex polarizations, which inference consumers reduce to polarization power at load time.
-
-The corresponding explicit waveform command is:
+## Generate waveforms
 
 ```bash
 uv run astrogwb-generate-waveform-catalog \
---population outputs/populations/bns-n16384-df1.h5 \
---output outputs/catalogs/bns-n16384-df1.h5 \
---approximant IMRPhenomXAS_NRTidalv3 \
---sampling-frequency 8192 \
---minimum-frequency 2 \
---maximum-frequency 4096 \
---reference-frequency 20 \
---frequency-resolution 1 \
---chunk-size 2048
+  --population outputs/populations/bns-n16384-eps=0.1-df1.h5 \
+  --output outputs/catalogs/bns-n16384-eps=0.1-df1.h5 \
+  --approximant IMRPhenomXAS_NRTidalv3 \
+  --sampling-frequency 8192 \
+  --minimum-frequency 2 \
+  --maximum-frequency 4096 \
+  --reference-frequency 20 \
+  --frequency-resolution 1 \
+  --chunk-size 2048
 ```
 
-[`inputs/catalogs.yaml`](../inputs/catalogs.yaml) holds the shared base and
-named catalog overlays, matching [`inputs/experiments.yaml`](../inputs/experiments.yaml).
-A catalog's name is its key here; a run in the experiment inventory selects one
-by that name (`catalog: bns-n8192-df1`), and the workflow builds the path
-`outputs/catalogs/<name>.h5`. A run naming a catalog this file does not declare
-fails in `astrogwb-validate-config`. Snakemake rebuilds a catalog when that
-catalog's resolved settings change, so editing one overlay does not rebuild the
-others. Catalog generation is not
-part of the MCMC submission workflow.
+Source-frame masses are converted to detector-frame masses by multiplying by
+`1 + z` immediately before waveform generation.
 
-To run the population and waveform steps together as a single reproducible
-pipeline (rebuilding the population automatically if it's missing or stale),
-see the local catalog workflow in [Snakemake workflow](./snakemake-workflow.md#catalog-workflow).
+## Catalog inventory
+
+[`inputs/catalogs.yaml`](../inputs/catalogs.yaml) contains one catalog list.
+Each entry specifies a sample count, seed, and inclusive
+`uniform_mixing_fraction`. Injection and proposal are inference roles rather
+than different catalog types.
+
+Names include the fraction for readable provenance, for example
+`bns-n16384-eps=0.1-df1`, but inference never parses scientific settings from
+the filename. Config assembly expands the selected catalog's complete proposal
+definition into the canonical run JSON. Inference computes the analytic
+proposal density in memory from that definition.
+
+Build catalogs explicitly:
+
+```bash
+cd packages/astrogwb-paper
+uv run --group workflow snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules population_config population waveform_catalog \
+  outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
+  outputs/catalogs/bns-n16384-eps=0.1-df1.h5
+```

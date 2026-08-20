@@ -17,26 +17,11 @@ from typing import Any
 import arviz_stats as azs
 import corner
 import jax
-import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
 from arviz_base.labels import MapLabeller
-from astrogwb.detector import effective_psd, load_sensitivity_map
-from astrogwb.frequency import (
-    frequency_mask as make_frequency_mask,
-)
-from astrogwb.frequency import (
-    frequency_spacing as compute_frequency_spacing,
-)
-from astrogwb.gwb import spectral_density, spectral_snr
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_distance_and_logprob,
-    make_merger_rate_and_log_weights_fn,
-)
-from astrogwb.utils import years_to_seconds
-from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.config.figures import (
     Network,
     load_analysis_grid,
@@ -56,10 +41,10 @@ from astrogwb_paper.plotting import (
     get_corner_kwargs,
     use_paper_style,
 )
+from astrogwb_paper.snr import compute_network_snrs
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.lines import Line2D
 from matplotlib.projections import register_projection
-from pluscross import load_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's rectilinear axes. ArviZ can then
 # mis-detect the backend, so restore the standard matplotlib projection.
@@ -403,82 +388,6 @@ def plot_h0_merger_rate_corner(
     )
 
 
-def compute_network_snrs(
-    catalog_path: Path,
-    networks: Sequence[Network],
-    fiducials: Mapping[str, float],
-    *,
-    observation_time: float,
-    f_min: float,
-    f_max: float,
-    z_min: float,
-    z_max: float,
-    n_grid: int,
-) -> pd.DataFrame:
-    """Compute the fiducial matched-filter SNR for each detector network."""
-    catalog = load_catalog(catalog_path)
-    frequencies = jnp.asarray(catalog.frequencies)
-    polarization_power = jnp.asarray(compute_polarization_power(catalog))
-    samples = {
-        name: jnp.asarray(values) for name, values in catalog.source_parameters.items()
-    }
-    del catalog
-
-    missing = [
-        name for name in ("redshift", "luminosity_distance") if name not in samples
-    ]
-    if missing:
-        raise ValueError(
-            "catalog samples are missing required parameter(s): " + ", ".join(missing)
-        )
-
-    z_grid = jnp.linspace(z_min, z_max, n_grid)
-    _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        fiducials, samples, redshift_grid=z_grid
-    )
-    merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
-        fiducials=fiducials,
-        redshift_grid=z_grid,
-        proposal_logprob=proposal_logprob,
-    )
-    total_rate, log_weights = merger_rate_and_log_weights_fn(fiducials, samples)
-    observed_spectral_density = spectral_density(
-        polarization_power,
-        jnp.exp(log_weights),
-        total_rate,
-        average_mode="analytic_inclination",
-    )
-
-    mask = make_frequency_mask(frequencies, fmin=f_min, fmax=f_max)
-    frequency_spacing = compute_frequency_spacing(frequencies)
-    observation_seconds = years_to_seconds(observation_time)
-
-    rows: list[dict[str, Any]] = []
-    for network in networks:
-        detectors = network.detectors
-        sensitivities = load_sensitivity_map(detectors)
-        effective_noise = jnp.asarray(
-            effective_psd(frequencies, list(detectors), sensitivities)
-        )
-        snr = float(
-            spectral_snr(
-                observed_spectral_density[mask],
-                effective_noise[mask],
-                observation_seconds,
-                frequency_spacing,
-            )
-        )
-        rows.append(
-            {
-                "network": network.name,
-                "detectors": ",".join(detectors),
-                "n_detectors": len(detectors),
-                "snr": snr,
-            }
-        )
-    return pd.DataFrame(rows)
-
-
 def _hdi(
     tree: xr.DataTree,
     var_name: str = "H0",
@@ -756,12 +665,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             resolve_paper_path(args.catalog, root),
             networks,
             fiducials,
-            observation_time=grid.observation_time,
-            f_min=grid.f_min,
-            f_max=grid.f_max,
-            z_min=grid.z_min,
-            z_max=grid.z_max,
-            n_grid=grid.n_grid,
+            grid=grid,
         )
         table = build_snr_h0_constraint_table(
             networks,

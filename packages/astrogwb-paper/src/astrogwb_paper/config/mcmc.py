@@ -28,6 +28,7 @@ from pydantic import (
     model_validator,
 )
 
+from astrogwb_paper.config.analysis import AnalysisGrid
 from astrogwb_paper.config.loading import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
@@ -194,6 +195,30 @@ class OutputConfig(BaseModel):
     label: str = ""
 
 
+class ProposalConfig(BaseModel):
+    """Fixed redshift proposal used to generate the importance catalog."""
+
+    model_config = _STRICT
+
+    uniform_mixing_fraction: Annotated[
+        float, Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    ]
+    z_min: float
+    z_max: float
+    n_grid: Annotated[int, Field(gt=1)]
+    H0: float
+    Omega_m: float
+    gamma: float
+    kappa: float
+    z_peak: float
+
+    @model_validator(mode="after")
+    def _validate_support(self) -> ProposalConfig:
+        if self.z_max <= self.z_min:
+            raise ValueError("proposal z_max must be greater than z_min")
+        return self
+
+
 class RunConfig(BaseModel):
     model_config = _STRICT
 
@@ -209,6 +234,7 @@ class RunConfig(BaseModel):
     sampled_params: tuple[str, ...] = ()
     analysis: AnalysisConfig
     cosmology: CosmoConfig
+    proposal: ProposalConfig
     sampler: SamplerConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
 
@@ -289,6 +315,26 @@ class RunConfig(BaseModel):
         if amplitude_parameter is None:
             return self.sampled_params
         return (*self.sampled_params, amplitude_parameter)
+
+    @property
+    def analysis_grid(self) -> AnalysisGrid:
+        """The frequency band and redshift grid this run's inputs are built on.
+
+        A plain property, deliberately not a `@computed_field`: computed
+        fields are serialized, so `save_config` would write an `analysis_grid`
+        key into every `outputs/configs/*.json` that `extra="forbid"` then
+        rejects on reload, breaking every workflow job. That is the same trap
+        `constants` is worked around for in `build_run_config`; here there is
+        nothing to work around because nothing derived needs saving.
+        """
+        return AnalysisGrid(
+            observation_time=self.observation_time,
+            f_min=self.analysis.f_min,
+            f_max=self.analysis.f_max,
+            z_min=self.cosmology.z_min,
+            z_max=self.cosmology.z_max,
+            n_grid=self.cosmology.n_grid,
+        )
 
     @property
     def outdir(self) -> Path:

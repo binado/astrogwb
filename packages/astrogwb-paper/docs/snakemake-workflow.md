@@ -18,18 +18,21 @@ Build a catalog explicitly before running an experiment:
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules bns_population bns_waveform_catalog \
-  --dry-run outputs/catalogs/bns-n16384-df1.h5
+  --allowed-rules population_config population waveform_catalog \
+  --dry-run \
+  outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
+  outputs/catalogs/bns-n16384-eps=0.1-df1.h5
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules bns_population bns_waveform_catalog \
-  outputs/catalogs/bns-n16384-df1.h5
+  --allowed-rules population_config population waveform_catalog \
+  outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
+  outputs/catalogs/bns-n16384-eps=0.1-df1.h5
 ```
 
-The DAG first creates `outputs/populations/<catalog>.h5`, then creates
-`outputs/catalogs/<catalog>.h5`. The `--allowed-rules` filter deliberately
-keeps catalog generation explicit. MCMC commands omit the two catalog rules,
-so a missing catalog stops MCMC with a `MissingInputException` instead of
-starting catalog generation.
+The DAG deep-merges the two population graph variants, draws a fresh temporary
+population for each catalog, and generates waveforms for those rows. All
+durable catalogs live directly under `outputs/catalogs/`. The
+`--allowed-rules` filter keeps catalog generation explicit. MCMC commands omit
+these rules, so a missing input stops MCMC with a `MissingInputException`.
 
 ## Experiment workflow
 
@@ -59,7 +62,8 @@ The curated inventory is:
 | `cosmological-parameters` | 6 detector runs plus `H0-Omega_m` and `H0-merger-rate` | input to `plot_cosmological_parameters` |
 | `modified-propagation` | 6 detector runs plus `Xi_0` and `Xi_0-H0` | corners, marginal comparison, and tables |
 | `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` | chains only |
-| `variable-injection-size` | 8192, 16384, and 32768 injections | chains only |
+| `variable-proposal-size` | 8192, 16384, and 32768 proposal catalogs | chains only |
+| `variable-proposal-guard` | 1e-1, 1e-2, and 1e-3 proposal guard fractions | chains only |
 
 Run one experiment's chains:
 

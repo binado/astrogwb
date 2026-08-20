@@ -15,12 +15,11 @@ Factory contract: :func:`make_merger_rate_and_log_weights_fn` takes a
 never needs to extract static Python scalars from traced values and is safe
 to trace inside ``jax.jit`` during NUTS.
 
-The proposal and target share
-:func:`compute_merger_rate_distance_and_logprob`. Precompute
-``proposal_logprob`` by evaluating that function at the fiducials (third
-return value); the callback returns importance log-weights via
-:func:`log_weights`, which reweights the redshift PDF against the catalog
-fiducial luminosity distances and the GW/EM ratio correction.
+The callback accepts a precomputed ``proposal_logprob`` array, so the proposal
+need not equal the target at its fiducial parameters. The callback returns
+importance log-weights via :func:`log_weights`, which reweights the target
+redshift PDF against that proposal density, the catalog fiducial luminosity
+distances, and the GW/EM ratio correction.
 """
 
 from __future__ import annotations
@@ -30,7 +29,6 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
-from gwmock_pop.distributions.madau_dickinson import madau_dickinson_rate
 
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
@@ -38,6 +36,35 @@ from astrogwb.utils import SECONDS_PER_YEAR
 
 AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
 """Parameters this callback supports marginalizing analytically."""
+
+
+def madau_dickinson_rate(
+    redshift: jax.Array,
+    gamma: float | jax.Array,
+    kappa: float | jax.Array,
+    z_peak: float | jax.Array,
+) -> jax.Array:
+    r"""Dimensionless Madau-like rate shape :math:`\psi(z)` with :math:`\psi(0) = 1`.
+
+    .. math::
+
+        \psi(z) = \mathcal{C}\,
+            \frac{(1+z)^{\gamma}}{1 + \left(\frac{1+z}{1+z_p}\right)^{\gamma+\kappa}},
+        \qquad
+        \mathcal{C} = 1 + (1+z_p)^{-(\gamma+\kappa)}.
+
+    Same parametrization as ``gwmock_pop.distributions.madau_dickinson``
+    (Leuven Gravity Institute, BSD-3-Clause), kept here so importing this
+    module does not initialize the XLA backend.
+    """
+    one_plus_z = 1.0 + jnp.asarray(redshift)
+    exponent = gamma + kappa
+    normalization = 1.0 + (1.0 + z_peak) ** (-exponent)
+    return (
+        normalization
+        * one_plus_z**gamma
+        / (1.0 + (one_plus_z / (1.0 + z_peak)) ** exponent)
+    )
 
 
 # Absolute scalings as module-level ``def``s (not closures over the fiducial)
@@ -85,21 +112,26 @@ def compute_merger_rate_distance_and_logprob(
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     r"""Merger rate, luminosity distance, and redshift log-pdf at catalog samples.
 
-    Builds cosmology tables on ``redshift_grid`` via
-    :func:`~astrogwb.cosmology.distance_and_volume_grid`, normalizes the
-    Madau-Dickinson redshift weight by trapezoidal integration on that grid,
-    and evaluates the redshift PDF
+    Builds the cosmology and density tables on ``redshift_grid``, then evaluates
+    the redshift PDF
 
     :math:`\mathrm{logpdf} = \log p(z|\theta)`
 
-    at ``samples["redshift"]`` by linearly interpolating the complete
-    unnormalized redshift density. This makes the interpolated density's
-    integral exactly equal to its trapezoidal normalization and avoids
-    reevaluating the Madau-Dickinson rate at every catalog sample. Also returns
-    the interpolated luminosity distance ``d_L(z|\theta)``. The same function
-    is used for the proposal (at fiducials) and the target (at sampled
-    ``params``); :func:`log_weights` combines these with the catalog fiducial
-    distances and the GW/EM ratio correction.
+    at ``samples["redshift"]``. One grid pass serves all three outputs. The
+    density :math:`p(z) \propto \psi(z) / (1 + z) \times dV_c/dz` is normalized
+    by its trapezoidal integral; interpolating the *complete unnormalized*
+    density and dividing by that integral makes the interpolant's own integral
+    exactly equal to the normalization. Samples outside ``redshift_grid``
+    interpolate to zero density, hence ``-inf`` log-density. Also returns the
+    interpolated luminosity distance ``d_L(z|\theta)``. This function is the
+    single source of truth for the density formula: the same function is used
+    for the proposal (at fiducials) and the target (at sampled ``params``), so
+    the two densities can never drift apart; the importance weight is a *ratio*
+    of them, and a second copy of the formula would bias every weight the
+    moment either copy changed. :func:`log_weights` combines these with the
+    catalog fiducial distances and the GW/EM ratio correction. Construction of
+    a proposal density for a precomputed catalog must call this same function
+    (on the grid the catalog was actually *sampled* from).
 
     Parameters
     ----------
@@ -140,6 +172,7 @@ def compute_merger_rate_distance_and_logprob(
         left=0.0,
         right=0.0,
     )
+    logpdf = jnp.log(unnormalized_pdf) - jnp.log(integral_mpc3)
     luminosity_distance = jnp.interp(
         redshift,
         redshift_grid,
@@ -147,7 +180,6 @@ def compute_merger_rate_distance_and_logprob(
         left=luminosity_distance_grid[0],
         right=luminosity_distance_grid[-1],
     )
-    logpdf = jnp.log(unnormalized_pdf) - jnp.log(integral_mpc3)
     total_merger_rate = (
         1e-9 * params["local_merger_rate"] * integral_mpc3 / SECONDS_PER_YEAR
     )
@@ -182,13 +214,12 @@ def make_merger_rate_and_log_weights_fn(
 ) -> MergerRateAndLogWeightsFn:
     """Build the merger-rate + importance-log-weights callback.
 
-    The returned closure reweights a fixed proposal catalog (drawn at the
-    fiducial parameter point) to arbitrary sampled hyperparameters. It is
-    JAX-traceable and intended to be passed (pre-built) to
+    The returned closure reweights a fixed proposal catalog to arbitrary
+    sampled hyperparameters. It is JAX-traceable and intended to be passed (pre-built) to
     :func:`~astrogwb.sampling.models.spectral_density_model`.
 
-    Precompute ``proposal_logprob`` with
-    :func:`compute_merger_rate_distance_and_logprob` at the fiducials::
+    For a fiducial proposal, ``proposal_logprob`` can be precomputed with
+    :func:`compute_merger_rate_distance_and_logprob`::
 
         _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
             fiducials, samples, redshift_grid=redshift_grid
@@ -203,9 +234,8 @@ def make_merger_rate_and_log_weights_fn(
         Redshift grid used for the cosmology integrals and MD normalization.
         Captured by the returned closure as a constant array.
     proposal_logprob:
-        Precomputed redshift log-pdf at the fiducials for the catalog
-        redshifts, shape ``(N,)``. Typically the third return value of
-        :func:`compute_merger_rate_distance_and_logprob`.
+        Precomputed proposal redshift log-pdf at the catalog redshifts, shape
+        ``(N,)``. It may describe any proposal with support over the target.
 
     Returns
     -------

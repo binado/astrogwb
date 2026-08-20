@@ -18,7 +18,7 @@ dependencies = [
     "numpy>=2.5.1",
     "numpyro>=0.21.0",
     "pluscross>=0.2.0,<0.3.0",
-    "pydantic>=2.0",
+    "pydantic>=2.11",
     "pyyaml>=6.0",
 ]
 
@@ -44,6 +44,7 @@ notebook = [
 [project.scripts]
 astrogwb-run-mcmc = "astrogwb_paper.cli.run_mcmc:main"
 astrogwb-validate-config = "astrogwb_paper.cli.validate_config:main"
+astrogwb-generate-population = "astrogwb_paper.cli.generate_population:main"
 astrogwb-generate-waveform-catalog = "astrogwb_paper.cli.generate_waveform_catalog:main"
 astrogwb-profile-model = "astrogwb_paper.cli.profile_model:main"
 
