@@ -163,7 +163,7 @@ experiments:
             loc: *fiducials_H0
             scale: 0.6766
 
-  variable-proposal-size:
+  variable-catalog-size:
     sampled_params: [H0]
     analysis: *et_2l_aligned_ce
     # 1D problem: diagonal mass matrix, shorter warmup.

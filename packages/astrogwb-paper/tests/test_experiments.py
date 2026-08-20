@@ -32,7 +32,7 @@ def test_inventory_contains_six_experiments_and_26_runs() -> None:
         "cosmological-parameters",
         "astrophysical-parameters",
         "modified-propagation",
-        "variable-proposal-size",
+        "variable-catalog-size",
         "variable-proposal-guard",
         "waveform-approximant",
     }
@@ -90,7 +90,7 @@ def test_all_run_configs_are_assembled_together(tmp_path: Path) -> None:
     assert (tmp_path / "cosmological-parameters/H0-merger-rate.json").is_file()
     assert (tmp_path / "astrophysical-parameters/z_peak.json").is_file()
     assert (tmp_path / "modified-propagation/Xi_0-H0.json").is_file()
-    assert (tmp_path / "variable-proposal-size/n32768.json").is_file()
+    assert (tmp_path / "variable-catalog-size/n32768.json").is_file()
     assert (tmp_path / "variable-proposal-guard/eps1e-3.json").is_file()
     assert (tmp_path / "waveform-approximant/IMRPhenom.json").is_file()
     assert (tmp_path / "waveform-approximant/TaylorF2.json").is_file()
@@ -131,8 +131,8 @@ def test_catalog_selection_is_fixed_except_for_proposal_comparisons() -> None:
         "bns-n16384-eps=0.1-df1"
     }
 
-    proposal = experiments["variable-proposal-size"]
-    assert {run: proposal.catalog_for(run) for run in proposal.runs} == {
+    catalog_size = experiments["variable-catalog-size"]
+    assert {run: catalog_size.catalog_for(run) for run in catalog_size.runs} == {
         "n8192": "bns-n8192-eps=0-df1",
         "n16384": "bns-n16384-eps=0-df1",
         "n32768": "bns-n32768-eps=0-df1",

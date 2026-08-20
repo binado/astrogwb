@@ -27,7 +27,7 @@ MCMC_RULES = (
     "run_experiment_cosmological_parameters",
     "run_experiment_modified_propagation",
     "run_experiment_astrophysical_parameters",
-    "run_experiment_variable_proposal_size",
+    "run_experiment_variable_catalog_size",
     "run_experiment_variable_proposal_guard",
     "run_experiment_waveform_approximant",
 )
@@ -203,7 +203,7 @@ def test_config_assembly_reads_the_single_inventory(
     assert result.stdout.count("rule assemble_config:") == 1
 
 
-def test_variable_proposal_size_uses_three_catalogs(tmp_path: Path) -> None:
+def test_variable_catalog_size_uses_three_catalogs(tmp_path: Path) -> None:
     catalogs = _catalogs(
         tmp_path,
         "bns-n8192-eps=0-df1.h5",
@@ -216,7 +216,7 @@ def test_variable_proposal_size_uses_three_catalogs(tmp_path: Path) -> None:
         "--forceall",
         "--cores",
         "8",
-        "run_experiment_variable_proposal_size",
+        "run_experiment_variable_catalog_size",
         "--config",
         f"catalogs_dir={catalogs}",
     )
@@ -312,7 +312,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "run_experiment_cosmological_parameters",
         "run_experiment_modified_propagation",
         "run_experiment_astrophysical_parameters",
-        "run_experiment_variable_proposal_size",
+        "run_experiment_variable_catalog_size",
         "run_experiment_variable_proposal_guard",
         "run_experiment_waveform_approximant",
         "catalogs",
@@ -334,6 +334,8 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "astrophysical_parameters_chains",
         "variable_proposal_size",
         "variable_proposal_size_chains",
+        "variable_catalog_size",
+        "variable_catalog_size_chains",
         "variable_proposal_guard",
         "variable_proposal_guard_chains",
         "waveform_approximant",
