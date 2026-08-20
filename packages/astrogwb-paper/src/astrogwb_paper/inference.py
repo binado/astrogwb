@@ -25,6 +25,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import jax
 import jax.numpy as jnp
 from astrogwb.detector import effective_psd as compute_effective_psd
 from astrogwb.detector import load_sensitivity_map
@@ -64,13 +65,13 @@ class Observation:
     """
 
     injection: CatalogArrays
-    redshift_grid: Any
-    total_merger_rate: Any
-    spectral_density: Any
-    frequency_mask: Any
+    redshift_grid: jax.Array
+    total_merger_rate: jax.Array
+    spectral_density: jax.Array
+    frequency_mask: jax.Array
 
     @property
-    def frequencies(self) -> Any:
+    def frequencies(self) -> jax.Array:
         """The injection catalog's frequency grid (shared with the proposal)."""
         return self.injection.frequencies
 
@@ -81,7 +82,7 @@ class InferenceInputs:
 
     observation: Observation
     proposal: CatalogArrays
-    effective_psd: Any
+    effective_psd: jax.Array
     merger_rate_and_log_weights_fn: Any
 
     def masked_model_kwargs(self) -> dict[str, Any]:
