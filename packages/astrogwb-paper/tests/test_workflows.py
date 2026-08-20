@@ -23,18 +23,12 @@ MCMC_RULES = (
     "fiducial_spectrum",
     "importance_weights_grid",
     "experiments",
-    "cosmological_parameters",
-    "cosmological_parameters_chains",
-    "modified_propagation",
-    "modified_propagation_chains",
-    "astrophysical_parameters",
-    "astrophysical_parameters_chains",
-    "variable_proposal_size",
-    "variable_proposal_size_chains",
-    "variable_proposal_guard",
-    "variable_proposal_guard_chains",
-    "waveform_approximant",
-    "waveform_approximant_chains",
+    "run_experiment_cosmological_parameters",
+    "run_experiment_modified_propagation",
+    "run_experiment_astrophysical_parameters",
+    "run_experiment_variable_proposal_size",
+    "run_experiment_variable_proposal_guard",
+    "run_experiment_waveform_approximant",
 )
 
 
@@ -133,7 +127,7 @@ def test_plot_cosmological_parameters_expands_all_chains_and_figures(
         assert path in result.stdout
 
 
-def test_chains_only_target_excludes_figure_rule(tmp_path: Path) -> None:
+def test_run_experiment_target_excludes_figure_rule(tmp_path: Path) -> None:
     catalogs = _catalogs(tmp_path, "bns-n16384-eps=0.1-df1.h5")
 
     result = _mcmc(
@@ -141,7 +135,7 @@ def test_chains_only_target_excludes_figure_rule(tmp_path: Path) -> None:
         "--forceall",
         "--cores",
         "8",
-        "cosmological_parameters_chains",
+        "run_experiment_cosmological_parameters",
         "--config",
         f"catalogs_dir={catalogs}",
     )
@@ -192,7 +186,7 @@ def test_variable_proposal_size_uses_three_catalogs(tmp_path: Path) -> None:
         "--forceall",
         "--cores",
         "8",
-        "variable_proposal_size",
+        "run_experiment_variable_proposal_size",
         "--config",
         f"catalogs_dir={catalogs}",
     )
@@ -220,7 +214,7 @@ def test_variable_proposal_guard_uses_three_catalogs(tmp_path: Path) -> None:
         "--forceall",
         "--cores",
         "8",
-        "variable_proposal_guard",
+        "run_experiment_variable_proposal_guard",
         "--config",
         f"catalogs_dir={catalogs}",
     )
@@ -248,7 +242,7 @@ def test_waveform_approximant_uses_imr_data_and_two_proposals(
         "--printshellcmds",
         "--cores",
         "8",
-        "waveform_approximant",
+        "run_experiment_waveform_approximant",
         "--config",
         f"catalogs_dir={catalogs}",
     )
@@ -267,7 +261,7 @@ def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
         "--dry-run",
         "--cores",
         "4",
-        "cosmological_parameters_chains",
+        "run_experiment_cosmological_parameters",
         "--config",
         f"catalogs_dir={catalogs}",
     )
@@ -285,16 +279,13 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
     assert result.returncode == 0, result.stderr
     rules = set(result.stdout.split())
     assert {
-        "cosmological_parameters_chains",
+        "run_experiment_cosmological_parameters",
+        "run_experiment_modified_propagation",
+        "run_experiment_astrophysical_parameters",
+        "run_experiment_variable_proposal_size",
+        "run_experiment_variable_proposal_guard",
+        "run_experiment_waveform_approximant",
         "plot_cosmological_parameters",
-        "modified_propagation",
-        "astrophysical_parameters",
-        "variable_proposal_size",
-        "variable_proposal_size_chains",
-        "variable_proposal_guard",
-        "variable_proposal_guard_chains",
-        "waveform_approximant",
-        "waveform_approximant_chains",
         "amplitude_toy",
         "fiducial_spectrum",
         "importance_weights_grid",
@@ -302,6 +293,20 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "run_mcmc",
     } <= rules
     assert {
+        # The figure outputs used to hide behind the bare experiment target;
+        # with them gone the bare names must not come back either.
+        "cosmological_parameters",
+        "cosmological_parameters_chains",
+        "modified_propagation",
+        "modified_propagation_chains",
+        "astrophysical_parameters",
+        "astrophysical_parameters_chains",
+        "variable_proposal_size",
+        "variable_proposal_size_chains",
+        "variable_proposal_guard",
+        "variable_proposal_guard_chains",
+        "waveform_approximant",
+        "waveform_approximant_chains",
         "H0_all_detectors_chains",
         "H0_merger_rate_chains",
         "H0_omega_m_chains",
@@ -341,8 +346,9 @@ def test_experiments_target_builds_all_26_chains(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule assemble_config:") == 1
     assert result.stdout.count("rule run_mcmc:") == 26
-    assert result.stdout.count("rule plot_cosmological_parameters:") == 1
-    assert result.stdout.count("rule plot_modified_propagation:") == 1
+    # `experiments` is chains-only now; figures are opt-in via the plot rules.
+    assert "rule plot_cosmological_parameters:" not in result.stdout
+    assert "rule plot_modified_propagation:" not in result.stdout
 
 
 def test_plot_cosmological_parameters_passes_all_paths_not_labels(

@@ -109,7 +109,9 @@ def test_base_fiducials_and_analysis_grid_are_read_from_the_base_config() -> Non
     assert (grid.z_min, grid.z_max, grid.n_grid) == (0.0, 20.0, 256)
 
 
-def test_experiments_without_figures_are_chains_only() -> None:
+def test_only_the_network_experiments_have_figure_rules() -> None:
+    # The remaining experiments have no figure script, so the workflow offers
+    # only their run_experiment_* targets.
     with_figures = set(NETWORK_EXPERIMENTS)
     chains_only = set(load_experiments()) - with_figures
 

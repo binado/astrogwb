@@ -69,11 +69,11 @@ Run one experiment's chains through Snakemake from
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc cosmological_parameters_chains \
-  --profile profiles/local --cores 8 cosmological_parameters_chains
+  --allowed-rules assemble_config run_mcmc run_experiment_cosmological_parameters \
+  --profile profiles/local --cores 8 run_experiment_cosmological_parameters
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc modified_propagation_chains \
-  --profile profiles/slurm modified_propagation_chains
+  --allowed-rules assemble_config run_mcmc run_experiment_modified_propagation \
+  --profile profiles/slurm run_experiment_modified_propagation
 ```
 
 Build all cosmological chains, figures, and tables with
