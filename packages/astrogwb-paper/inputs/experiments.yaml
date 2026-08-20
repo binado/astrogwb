@@ -82,6 +82,11 @@ networks:
 
 experiments:
   cosmological-parameters:
+    # Every run samples one scalar (H0, or one parameter with H0 marginalized
+    # out), so NUTS uses a diagonal mass matrix and a shorter warmup.
+    sampler:
+      num_warmup: 500
+      dense_mass: false
     runs:
       ET-triangular:
         sampled_params: [H0]
@@ -120,6 +125,10 @@ experiments:
       z_peak:
         sampled_params: [z_peak]
         analysis: *amplitude_marginalized
+        # 1D problem: diagonal mass matrix, shorter warmup.
+        sampler:
+          num_warmup: 500
+          dense_mass: false
 
   modified-propagation:
     sampled_params: [xi_0, xi_n]
@@ -139,6 +148,10 @@ experiments:
       Xi_0:
         sampled_params: [xi_0]
         analysis: *et_2l_aligned_ce
+        # 1D problem: diagonal mass matrix, shorter warmup.
+        sampler:
+          num_warmup: 500
+          dense_mass: false
       Xi_0-H0:
         sampled_params: [xi_0, H0]
         analysis: *et_2l_aligned_ce
@@ -151,6 +164,10 @@ experiments:
   variable-proposal-size:
     sampled_params: [H0]
     analysis: *et_2l_aligned_ce
+    # 1D problem: diagonal mass matrix, shorter warmup.
+    sampler:
+      num_warmup: 500
+      dense_mass: false
     runs:
       n8192:
         catalog: bns-n8192-eps=0.1-df1
@@ -162,6 +179,10 @@ experiments:
   variable-proposal-guard:
     sampled_params: [H0]
     analysis: *et_2l_aligned_ce
+    # 1D problem: diagonal mass matrix, shorter warmup.
+    sampler:
+      num_warmup: 500
+      dense_mass: false
     runs:
       eps1e-1:
         catalog: bns-n16384-eps=0.1-df1
@@ -173,6 +194,10 @@ experiments:
   waveform-approximant:
     sampled_params: [H0]
     analysis: *et_2l_aligned_ce
+    # 1D problem: diagonal mass matrix, shorter warmup.
+    sampler:
+      num_warmup: 500
+      dense_mass: false
     runs:
       IMRPhenom:
         catalog: injection-bns-n32768-eps=0-df1
