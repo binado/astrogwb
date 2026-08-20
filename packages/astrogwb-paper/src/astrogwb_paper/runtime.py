@@ -15,6 +15,19 @@ from types import ModuleType
 
 logger = logging.getLogger(__name__)
 
+# Every env var that can fan out a BLAS/vector thread pool per chain worker.
+# This matches the set Snakemake injects per job (snakemake/shell.py), which is
+# why a partial override under a Snakemake launch leaks job ``threads`` into
+# pools this flag is meant to pin (see --cpu-threads).
+CPU_THREAD_ENV_VARS = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "GOTO_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
+
 
 def colab_tpu_available() -> bool:
     """Return whether a Colab runtime exposes TPU hardware.
@@ -81,7 +94,7 @@ def configure_runtime(
     #    thread policy: set BLAS/OMP caps and replace XLA_FLAGS outright.
     if cpu_threads is not None:
         n = str(cpu_threads)
-        for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+        for var in CPU_THREAD_ENV_VARS:
             os.environ[var] = n
         os.environ["XLA_FLAGS"] = (
             f"--xla_cpu_multi_thread_eigen=true "

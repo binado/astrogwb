@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from astrogwb_paper.runtime import colab_tpu_available, configure_runtime
+from astrogwb_paper.runtime import (
+    CPU_THREAD_ENV_VARS,
+    colab_tpu_available,
+    configure_runtime,
+)
 
 
 @dataclass
@@ -57,6 +61,32 @@ def test_configure_runtime_explicit_chain_method_not_overridden(
     )
 
     assert chain_method == explicit_chain_method
+
+
+def test_configure_runtime_cpu_threads_pins_all_thread_env_vars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--cpu-threads must own every BLAS/vector thread env var.
+
+    Snakemake injects OMP/GOTO/OPENBLAS/MKL/VECLIB/NUMEXPR thread counts equal
+    to the job's ``threads`` into every job environment. A partial override
+    leaves those pools at the job thread count, oversubscribing the host when
+    several single-threaded chains run concurrently.
+    """
+    import jax
+
+    for var in CPU_THREAD_ENV_VARS:
+        monkeypatch.setenv(var, "4")
+    monkeypatch.delenv("XLA_FLAGS", raising=False)
+    monkeypatch.setattr(jax, "devices", lambda: [_FakeDevice("cpu")])
+
+    configure_runtime(num_chains=1, platform="cpu", cpu_threads=1)
+
+    import os
+
+    for var in CPU_THREAD_ENV_VARS:
+        assert os.environ[var] == "1"
+    assert "intra_op_parallelism_threads=1" in os.environ["XLA_FLAGS"]
 
 
 def test_colab_tpu_available_from_device(
