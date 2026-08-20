@@ -69,11 +69,11 @@ Run one experiment's chains:
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc cosmological_parameters_chains \
-  --profile profiles/local --cores 8 --dry-run cosmological_parameters_chains
+  --allowed-rules assemble_config run_mcmc run_experiment_cosmological_parameters \
+  --profile profiles/local --cores 8 --dry-run run_experiment_cosmological_parameters
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc cosmological_parameters_chains \
-  --profile profiles/slurm cosmological_parameters_chains
+  --allowed-rules assemble_config run_mcmc run_experiment_cosmological_parameters \
+  --profile profiles/slurm run_experiment_cosmological_parameters
 ```
 
 Build the paper's complete cosmological-parameter section:
@@ -89,10 +89,11 @@ This single local post-processing rule consumes all eight chains from
 pairs. Requesting any one cosmological-parameter output path schedules the full
 section.
 
-Multiple chain targets may be supplied. Each experiment also has a complete
-target named after it (`cosmological_parameters`, `modified_propagation`, ...),
-which builds its figures where it has a figure rule and its chains otherwise.
-The `experiments` target builds all four.
+Multiple chain targets may be supplied. Each experiment exposes a
+`run_experiment_<name>` target (`run_experiment_cosmological_parameters`,
+`run_experiment_modified_propagation`, ...) that builds its chains only;
+figures are opt-in via the plot rules above. The `experiments` target
+builds every experiment's chains.
 
 When passing CLI `--config` overrides to a CPU profile (`local`, `slurm-cpu`),
 repeat `jax_platforms=cpu` in the same `--config` group: Snakemake replaces

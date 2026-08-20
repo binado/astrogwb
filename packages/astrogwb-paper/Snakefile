@@ -336,35 +336,19 @@ rule importance_weights_grid:
         " --output-xi0-n-pdf {output.xi0_n_pdf:q}"
 
 
-# These aggregate targets read rules.* outputs, so they must follow the rules
-# they reference. An experiment with a figure rule is complete when that rule
-# has run; one without is complete when its chains exist.
-FIGURE_OUTPUTS = {
-    "cosmological-parameters": list(rules.plot_cosmological_parameters.output),
-    "modified-propagation": list(rules.plot_modified_propagation.output),
-}
-EXPERIMENT_OUTPUTS = [
-    path
-    for specification in experiments.values()
-    for path in (FIGURE_OUTPUTS.get(specification.name) or specification.chain_paths())
-]
-
-
 rule experiments:
     input:
-        EXPERIMENT_OUTPUTS,
+        [
+            path
+            for specification in experiments.values()
+            for path in specification.chain_paths()
+        ],
 
 
 for specification in experiments.values():
 
     rule:
-        name: specification.chains_target
+        name: specification.run_target
         localrule: True
         input:
             specification.chain_paths(),
-
-    rule:
-        name: specification.target
-        localrule: True
-        input:
-            FIGURE_OUTPUTS.get(specification.name) or specification.chain_paths(),

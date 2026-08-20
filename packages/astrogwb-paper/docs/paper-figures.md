@@ -61,11 +61,12 @@ With a SLURM profile, sampling runs remotely and figure rules run locally on the
 submit host after their chains finish. The submit host must remain attached,
 share the output filesystem, and provide plotting dependencies.
 
-Use `cosmological_parameters_chains` to sample the constituent experiment
-without running post-processing.
+Use `run_experiment_cosmological_parameters` to sample the constituent
+experiment without running post-processing.
 
-`modified_propagation` is a complete experiment target with its own propagation
-figures and tables.
+The modified-propagation section works the same way:
+`plot_modified_propagation` builds its propagation figures and tables from the
+chains of `run_experiment_modified_propagation`.
 
 ## Standalone figures
 

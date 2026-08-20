@@ -33,14 +33,9 @@ class Experiment:
     defaults: dict[str, Any]
 
     @property
-    def target(self) -> str:
-        """Return the complete Snakemake target name."""
-        return self.name.replace("-", "_")
-
-    @property
-    def chains_target(self) -> str:
-        """Return the chains-only Snakemake target name."""
-        return f"{self.target}_chains"
+    def run_target(self) -> str:
+        """Return the Snakemake target that runs this experiment's MCMCs."""
+        return f"run_experiment_{self.name.replace('-', '_')}"
 
     def catalog_for(self, run: str) -> str:
         """Return the name of the prebuilt catalog consumed by ``run``."""
