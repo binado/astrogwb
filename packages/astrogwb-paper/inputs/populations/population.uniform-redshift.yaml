@@ -1,0 +1,8 @@
+# Uniform-redshift overlay for population.base.yaml.
+parameters:
+  redshift:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: 0.0
+        maximum: 20.0

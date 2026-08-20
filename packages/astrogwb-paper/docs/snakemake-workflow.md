@@ -18,26 +18,21 @@ Build a catalog explicitly before running an experiment:
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules source_population assemble_injection_population \
-    assemble_proposal_population injection_waveform_catalog \
-    proposal_waveform_catalog \
+  --allowed-rules population_config population waveform_catalog \
   --dry-run \
-  outputs/catalogs/injection-bns-n32768.h5 \
-  outputs/catalogs/proposals/bns-n16384-df1.h5
+  outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
+  outputs/catalogs/bns-n16384-eps=0.1-df1.h5
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules source_population assemble_injection_population \
-    assemble_proposal_population injection_waveform_catalog \
-    proposal_waveform_catalog \
-  outputs/catalogs/injection-bns-n32768.h5 \
-  outputs/catalogs/proposals/bns-n16384-df1.h5
+  --allowed-rules population_config population waveform_catalog \
+  outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
+  outputs/catalogs/bns-n16384-eps=0.1-df1.h5
 ```
 
-The DAG creates finite source pools with `gwmock-pop`, assembles production
-populations, and generates waveforms only for production rows. Proposals live
-under `outputs/catalogs/proposals/`; the independent injection is
-`outputs/catalogs/injection-bns-n32768.h5`. The `--allowed-rules` filter
-deliberately keeps all three stages explicit. MCMC commands omit these rules,
-so a missing input stops MCMC with a `MissingInputException`.
+The DAG deep-merges the two population graph variants, draws a fresh temporary
+population for each catalog, and generates waveforms for those rows. All
+durable catalogs live directly under `outputs/catalogs/`. The
+`--allowed-rules` filter keeps catalog generation explicit. MCMC commands omit
+these rules, so a missing input stops MCMC with a `MissingInputException`.
 
 ## Experiment workflow
 

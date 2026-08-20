@@ -16,7 +16,7 @@ from astrogwb.waveform import apply_gw_distance_to_waveforms
 from astrogwb.waveform import polarization_power as compute_polarization_power
 from pluscross import load_catalog
 
-PROPOSAL_REDSHIFT_LOGPDF = "proposal_redshift_logpdf"
+from astrogwb_paper.config.mcmc import ProposalConfig
 
 
 @dataclass(frozen=True)
@@ -57,12 +57,9 @@ def validate_catalog_samples(
     label: str,
     z_min: float,
     z_max: float,
-    require_proposal_density: bool,
 ) -> None:
-    """Validate required columns, finite proposal density, and redshift support."""
+    """Validate required columns and redshift support."""
     required = {"redshift", "luminosity_distance"}
-    if require_proposal_density:
-        required.add(PROPOSAL_REDSHIFT_LOGPDF)
     missing = sorted(required - set(catalog.samples))
     if missing:
         raise ValueError(
@@ -78,17 +75,43 @@ def validate_catalog_samples(
             f"{label} catalog redshifts span [{z_lo:.4g}, {z_hi:.4g}] but "
             f"[z_min, z_max] is [{z_min:.4g}, {z_max:.4g}]"
         )
-    if require_proposal_density:
-        logpdf = np.asarray(catalog.samples[PROPOSAL_REDSHIFT_LOGPDF])
-        if logpdf.shape != redshift.shape:
-            raise ValueError(
-                f"{label} catalog {PROPOSAL_REDSHIFT_LOGPDF} shape "
-                f"{logpdf.shape} does not match redshift shape {redshift.shape}"
-            )
-        if not np.all(np.isfinite(logpdf)):
-            raise ValueError(
-                f"{label} catalog {PROPOSAL_REDSHIFT_LOGPDF} must be finite"
-            )
+
+
+def compute_proposal_logprob(
+    samples: dict[str, Any],
+    proposal: ProposalConfig,
+) -> Any:
+    """Evaluate the fixed MD/uniform proposal at catalog redshifts."""
+    redshift = jnp.asarray(samples["redshift"])
+    proposal_grid = jnp.linspace(proposal.z_min, proposal.z_max, proposal.n_grid)
+    _, _, md_logprob = compute_merger_rate_distance_and_logprob(
+        {
+            "H0": proposal.H0,
+            "Omega_m": proposal.Omega_m,
+            "gamma": proposal.gamma,
+            "kappa": proposal.kappa,
+            "z_peak": proposal.z_peak,
+            "local_merger_rate": 1.0,
+        },
+        {"redshift": redshift},
+        redshift_grid=proposal_grid,
+    )
+    epsilon = proposal.uniform_mixing_fraction
+    if epsilon == 0.0:
+        return md_logprob
+
+    in_support = (redshift >= proposal.z_min) & (redshift <= proposal.z_max)
+    uniform_logprob = jnp.where(
+        in_support,
+        -jnp.log(proposal.z_max - proposal.z_min),
+        -jnp.inf,
+    )
+    if epsilon == 1.0:
+        return uniform_logprob
+    return jnp.logaddexp(
+        jnp.log1p(-epsilon) + md_logprob,
+        jnp.log(epsilon) + uniform_logprob,
+    )
 
 
 def validate_matching_frequency_grids(

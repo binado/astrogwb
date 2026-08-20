@@ -7,11 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrogwb_paper.config.catalogs import load_catalogs
+from astrogwb_paper.config.catalogs import (
+    catalog_recipe,
+    load_catalogs,
+    proposal_config,
+)
 from astrogwb_paper.config.loading import load_inventory, merge_run_overlay
 from astrogwb_paper.paths import paper_project_root
 
-DEFAULT_CATALOG = "bns-n16384-df1"
+DEFAULT_CATALOG = "bns-n16384-eps=0.1-df1"
 EXPERIMENTS_PATH = Path("inputs/experiments.yaml")
 _REQUIRED_SECTIONS = ("base", "experiments")
 # `networks` exists purely to anchor detector lists for the runs to alias.
@@ -160,4 +164,35 @@ def overlay_for(
     merged = merge_run_overlay(spec.defaults, run_overlay)
     if base is None:
         return merged
-    return merge_run_overlay(base, merged)
+    assembled = merge_run_overlay(base, merged)
+    proposal = proposal_config(catalog_recipe(spec.catalog_for(run)))
+    _validate_proposal_matches_run(spec, run, assembled, proposal)
+    assembled["proposal"] = proposal
+    return assembled
+
+
+def _validate_proposal_matches_run(
+    spec: Experiment,
+    run: str,
+    assembled: Mapping[str, Any],
+    proposal: Mapping[str, float | int],
+) -> None:
+    """Keep generation-time proposal constants aligned with run fiducials."""
+    fiducials = assembled.get("fiducials")
+    cosmology = assembled.get("cosmology")
+    if not isinstance(fiducials, Mapping) or not isinstance(cosmology, Mapping):
+        raise TypeError(f"{spec.name}/{run} must define fiducials and cosmology")
+    mismatches = [
+        name
+        for name in ("H0", "Omega_m", "gamma", "kappa", "z_peak")
+        if float(fiducials[name]) != float(proposal[name])
+    ]
+    if float(cosmology["z_min"]) != float(proposal["z_min"]) or float(
+        cosmology["z_max"]
+    ) != float(proposal["z_max"]):
+        mismatches.append("redshift support")
+    if mismatches:
+        raise ValueError(
+            f"{spec.name}/{run} proposal does not match run settings: "
+            + ", ".join(mismatches)
+        )

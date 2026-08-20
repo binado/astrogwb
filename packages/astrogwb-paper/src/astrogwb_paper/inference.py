@@ -43,15 +43,15 @@ from astrogwb_paper.amplitude import (
     build_amplitude_marginalization,
 )
 from astrogwb_paper.catalogs import (
-    PROPOSAL_REDSHIFT_LOGPDF,
     CatalogArrays,
     compute_fiducial_injection_spectrum,
+    compute_proposal_logprob,
     load_catalog_arrays,
     validate_catalog_samples,
     validate_matching_frequency_grids,
 )
 from astrogwb_paper.config.analysis import AnalysisGrid
-from astrogwb_paper.config.mcmc import RunConfig
+from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,6 @@ def prepare_observation(
         label="injection",
         z_min=grid.z_min,
         z_max=grid.z_max,
-        require_proposal_density=False,
     )
     logger.info(
         "Loaded independent injection catalog %s: n_injection_samples=%d",
@@ -168,6 +167,7 @@ def prepare_inference_inputs(
     proposal_path: Path,
     *,
     fiducials: Mapping[str, float],
+    proposal_config: ProposalConfig,
     grid: AnalysisGrid,
     detectors: Sequence[str],
 ) -> InferenceInputs:
@@ -179,7 +179,6 @@ def prepare_inference_inputs(
         label="proposal",
         z_min=grid.z_min,
         z_max=grid.z_max,
-        require_proposal_density=True,
     )
     validate_matching_frequency_grids(observation.injection, proposal)
     n_freq, n_samples = proposal.polarization_power.shape
@@ -204,7 +203,7 @@ def prepare_inference_inputs(
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=dict(fiducials),
         redshift_grid=observation.redshift_grid,
-        proposal_logprob=proposal.samples[PROPOSAL_REDSHIFT_LOGPDF],
+        proposal_logprob=compute_proposal_logprob(proposal.samples, proposal_config),
     )
     return InferenceInputs(
         observation=observation,

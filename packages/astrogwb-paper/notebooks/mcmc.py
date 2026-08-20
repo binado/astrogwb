@@ -176,12 +176,13 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb_paper.catalogs import (
-    PROPOSAL_REDSHIFT_LOGPDF,
+    compute_proposal_logprob,
     compute_fiducial_injection_spectrum,
     load_catalog_arrays,
     validate_catalog_samples,
     validate_matching_frequency_grids,
 )
+from astrogwb_paper.config.mcmc import ProposalConfig
 from astrogwb_paper.paths import paper_project_root
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
@@ -203,13 +204,19 @@ azp.style.use("arviz-variat")
 
 if IN_COLAB:
     INJECTION_CATALOG_PATH = Path(
-        "/content/drive/MyDrive/asgwb/injection-bns-n32768.h5"
+        "/content/drive/MyDrive/asgwb/injection-bns-n32768-eps=0-df1.h5"
     )
-    PROPOSAL_CATALOG_PATH = Path("/content/drive/MyDrive/asgwb/bns-n16384-df1.h5")
+    PROPOSAL_CATALOG_PATH = Path(
+        "/content/drive/MyDrive/asgwb/bns-n16384-eps=0.1-df1.h5"
+    )
 else:
     ROOT_DIR = paper_project_root()
-    INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/injection-bns-n32768.h5"
-    PROPOSAL_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/proposals/bns-n16384-df1.h5"
+    INJECTION_CATALOG_PATH = (
+        ROOT_DIR / "outputs/catalogs/injection-bns-n32768-eps=0-df1.h5"
+    )
+    PROPOSAL_CATALOG_PATH = (
+        ROOT_DIR / "outputs/catalogs/bns-n16384-eps=0.1-df1.h5"
+    )
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -275,14 +282,12 @@ validate_catalog_samples(
     label="injection",
     z_min=z_min,
     z_max=z_max,
-    require_proposal_density=False,
 )
 validate_catalog_samples(
     proposal,
     label="proposal",
     z_min=z_min,
     z_max=z_max,
-    require_proposal_density=True,
 )
 validate_matching_frequency_grids(injection, proposal)
 
@@ -390,13 +395,25 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 #
 # which returns a tuple of (merger rate, log importance weights). While it would be conceptually simpler to pass separate functions for each quantity, encapsulating all the logic in a single function allows the caller to efficiently implement the cosmology integrals which are used in both calculations.
 #
-# The proposal log-density was evaluated when the production population was
-# assembled and persisted with every proposal sample.
+# Evaluate the fixed catalog proposal density in memory.
 
 # %%
 z_grid = jnp.linspace(z_min, z_max, n_grid)
 
-proposal_logprob = samples[PROPOSAL_REDSHIFT_LOGPDF]
+proposal_logprob = compute_proposal_logprob(
+    samples,
+    ProposalConfig(
+        uniform_mixing_fraction=0.1,
+        z_min=0.0,
+        z_max=20.0,
+        n_grid=4096,
+        H0=67.66,
+        Omega_m=0.3096,
+        gamma=1.42,
+        kappa=4.62,
+        z_peak=1.84,
+    ),
+)
 
 
 # %% [markdown]

@@ -64,12 +64,13 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 )
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb_paper.catalogs import (
-    PROPOSAL_REDSHIFT_LOGPDF,
+    compute_proposal_logprob,
     compute_fiducial_injection_spectrum,
     load_catalog_arrays,
     validate_catalog_samples,
     validate_matching_frequency_grids,
 )
+from astrogwb_paper.config.mcmc import ProposalConfig
 from astrogwb_paper.paths import paper_project_root
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
@@ -87,8 +88,10 @@ jax.config.update("jax_enable_x64", True)
 DEBUG = False  # small smoke settings for first runs; set False for the production run
 
 ROOT_DIR = paper_project_root()
-INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/injection-bns-n32768.h5"
-PROPOSAL_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/proposals/bns-n16384-df1.h5"
+INJECTION_CATALOG_PATH = (
+    ROOT_DIR / "outputs/catalogs/injection-bns-n32768-eps=0-df1.h5"
+)
+PROPOSAL_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/bns-n16384-eps=0.1-df1.h5"
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -164,14 +167,12 @@ validate_catalog_samples(
     label="injection",
     z_min=z_min,
     z_max=z_max,
-    require_proposal_density=False,
 )
 validate_catalog_samples(
     proposal,
     label="proposal",
     z_min=z_min,
     z_max=z_max,
-    require_proposal_density=True,
 )
 validate_matching_frequency_grids(injection, proposal)
 
@@ -229,7 +230,20 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 # %%
 z_grid = jnp.linspace(z_min, z_max, n_grid)
 
-proposal_logprob = samples[PROPOSAL_REDSHIFT_LOGPDF]
+proposal_logprob = compute_proposal_logprob(
+    samples,
+    ProposalConfig(
+        uniform_mixing_fraction=0.1,
+        z_min=0.0,
+        z_max=20.0,
+        n_grid=4096,
+        H0=67.66,
+        Omega_m=0.3096,
+        gamma=1.42,
+        kappa=4.62,
+        z_peak=1.84,
+    ),
+)
 
 
 # %%

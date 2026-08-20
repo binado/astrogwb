@@ -28,8 +28,11 @@ import numpyro.distributions as dist
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb_paper.catalogs import PROPOSAL_REDSHIFT_LOGPDF
+from astrogwb_paper.catalogs import compute_proposal_logprob
+from astrogwb_paper.config.catalogs import catalog_recipe, proposal_config
+from astrogwb_paper.config.experiments import DEFAULT_CATALOG
 from astrogwb_paper.config.figures import load_fiducials
+from astrogwb_paper.config.mcmc import ProposalConfig
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
@@ -185,9 +188,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     }
     del catalog
     missing = [
-        name
-        for name in ("redshift", "luminosity_distance", PROPOSAL_REDSHIFT_LOGPDF)
-        if name not in samples
+        name for name in ("redshift", "luminosity_distance") if name not in samples
     ]
     if missing:
         raise ValueError(
@@ -197,10 +198,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_REDSHIFT_GRID)
+    proposal = ProposalConfig.model_validate(
+        proposal_config(catalog_recipe(DEFAULT_CATALOG))
+    )
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=fiducials,
         redshift_grid=z_grid,
-        proposal_logprob=samples[PROPOSAL_REDSHIFT_LOGPDF],
+        proposal_logprob=compute_proposal_logprob(samples, proposal),
     )
 
     figures: list[tuple[Figure, Path]] = []

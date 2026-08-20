@@ -1,24 +1,17 @@
-# Uniform-redshift guard component for the importance-sampling proposal.
+# Shared BNS population graph.
 #
-# This graph intentionally differs from bns_population.yaml only in the
-# redshift sampler. Keep every other source distribution and transform
-# identical so those factors cancel in the redshift-only importance ratio.
+# The catalog workflow deep-merges this graph with exactly one redshift
+# overlay. Keeping every other parameter here makes the MD and uniform
+# proposal components identical by construction.
 parameters:
-  redshift:
-    sampler:
-      function: uniform
-      arguments:
-        minimum: 0.0
-        maximum: &z_max 20.0
-
   luminosity_distance:
     transform:
       function: redshift_to_luminosity_distance
       arguments:
         redshift: "@redshift"
-        hubble_constant: &hubble_constant 67.66
-        omega_m: &omega_m 0.3096
-        max_redshift: *z_max
+        hubble_constant: 67.66
+        omega_m: 0.3096
+        max_redshift: 20.0
 
   mass_pair:
     intermediate: true

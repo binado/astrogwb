@@ -8,52 +8,73 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     compute_merger_rate_distance_and_logprob,
 )
 from astrogwb_paper.catalogs import (
-    PROPOSAL_REDSHIFT_LOGPDF,
     CatalogArrays,
     compute_fiducial_injection_spectrum,
-    validate_catalog_samples,
+    compute_proposal_logprob,
     validate_matching_frequency_grids,
 )
 from astrogwb_paper.config.figures import load_fiducials
+from astrogwb_paper.config.mcmc import ProposalConfig
 
 
-def _catalog(*, with_logpdf: bool = True) -> CatalogArrays:
-    samples = {
-        "redshift": jnp.array([0.1, 1.0, 2.0]),
-        "luminosity_distance": jnp.array([450.0, 6800.0, 16_000.0]),
-    }
-    if with_logpdf:
-        samples[PROPOSAL_REDSHIFT_LOGPDF] = jnp.array([-2.0, -1.0, -3.0])
+def _catalog() -> CatalogArrays:
     return CatalogArrays(
         frequencies=jnp.array([2.0, 3.0]),
         polarization_power=jnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
-        samples=samples,
+        samples={
+            "redshift": jnp.array([0.1, 1.0, 2.0]),
+            "luminosity_distance": jnp.array([450.0, 6800.0, 16_000.0]),
+        },
     )
 
 
-def test_proposal_catalog_requires_stored_density() -> None:
-    with pytest.raises(ValueError, match=PROPOSAL_REDSHIFT_LOGPDF):
-        validate_catalog_samples(
-            _catalog(with_logpdf=False),
-            label="proposal",
-            z_min=0.0,
-            z_max=20.0,
-            require_proposal_density=True,
-        )
+def _proposal(epsilon: float) -> ProposalConfig:
+    return ProposalConfig(
+        uniform_mixing_fraction=epsilon,
+        z_min=0.0,
+        z_max=20.0,
+        n_grid=256,
+        H0=67.66,
+        Omega_m=0.3096,
+        gamma=1.42,
+        kappa=4.62,
+        z_peak=1.84,
+    )
 
 
-def test_catalog_validation_rejects_nonfinite_density() -> None:
+def test_zero_fraction_proposal_is_the_md_density() -> None:
     catalog = _catalog()
-    catalog.samples[PROPOSAL_REDSHIFT_LOGPDF] = jnp.array([-2.0, -jnp.inf, -3.0])
+    proposal = _proposal(0.0)
 
-    with pytest.raises(ValueError, match="must be finite"):
-        validate_catalog_samples(
-            catalog,
-            label="proposal",
-            z_min=0.0,
-            z_max=20.0,
-            require_proposal_density=True,
-        )
+    actual = compute_proposal_logprob(catalog.samples, proposal)
+    _, _, expected = compute_merger_rate_distance_and_logprob(
+        {**proposal.model_dump(), "local_merger_rate": 1.0},
+        catalog.samples,
+        redshift_grid=jnp.linspace(0.0, 20.0, 256),
+    )
+
+    np.testing.assert_allclose(actual, expected)
+
+
+def test_one_fraction_proposal_is_uniform_density() -> None:
+    actual = compute_proposal_logprob(_catalog().samples, _proposal(1.0))
+
+    np.testing.assert_allclose(actual, -np.log(20.0))
+
+
+def test_interior_fraction_uses_stable_mixture_density() -> None:
+    catalog = _catalog()
+    proposal = _proposal(0.2)
+    md = compute_proposal_logprob(catalog.samples, _proposal(0.0))
+
+    actual = compute_proposal_logprob(catalog.samples, proposal)
+    expected = np.logaddexp(
+        np.log(0.8) + np.asarray(md),
+        np.log(0.2 / 20.0),
+    )
+
+    np.testing.assert_allclose(actual, expected)
+    assert np.all(np.isfinite(actual))
 
 
 def test_injection_and_proposal_frequency_grids_must_match() -> None:
@@ -69,7 +90,7 @@ def test_injection_and_proposal_frequency_grids_must_match() -> None:
 
 
 def test_fiducial_injection_spectrum_uses_unit_weights() -> None:
-    injection = _catalog(with_logpdf=False)
+    injection = _catalog()
     fiducials = load_fiducials()
     grid = jnp.linspace(0.0, 20.0, 256)
 

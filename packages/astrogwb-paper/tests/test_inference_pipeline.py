@@ -55,9 +55,6 @@ def _write_catalog(
         "mass_1": np.full(N_SOURCES, 1.4),
         "mass_2": np.full(N_SOURCES, 1.4),
     }
-    if proposal:
-        # A finite, correctly-shaped stand-in for the offline proposal density.
-        source_parameters["proposal_redshift_logpdf"] = np.full(N_SOURCES, -0.5)
     catalog = WaveformCatalog(
         frequencies=frequencies,
         plus=rng.normal(size=shape) + 1j * rng.normal(size=shape),
@@ -134,6 +131,7 @@ def test_masked_model_kwargs_masks_frequencies_but_not_samples(
         injection_catalog,
         proposal_catalog,
         fiducials=config.fiducials,
+        proposal_config=config.proposal,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
     )
@@ -166,24 +164,27 @@ def test_mismatched_frequency_grids_are_rejected(
             injection_catalog,
             shifted,
             fiducials=config.fiducials,
+            proposal_config=config.proposal,
             grid=config.analysis_grid,
             detectors=config.analysis.detectors,
         )
 
 
-def test_proposal_without_a_proposal_density_is_rejected(
+def test_catalog_without_stored_proposal_density_is_accepted(
     injection_catalog: Path,
 ) -> None:
     config = _config()
 
-    with pytest.raises(ValueError, match="proposal_redshift_logpdf"):
-        prepare_inference_inputs(
-            injection_catalog,
-            injection_catalog,
-            fiducials=config.fiducials,
-            grid=config.analysis_grid,
-            detectors=config.analysis.detectors,
-        )
+    inputs = prepare_inference_inputs(
+        injection_catalog,
+        injection_catalog,
+        fiducials=config.fiducials,
+        proposal_config=config.proposal,
+        grid=config.analysis_grid,
+        detectors=config.analysis.detectors,
+    )
+
+    assert "proposal_redshift_logpdf" not in inputs.proposal.samples
 
 
 # --------------------------------------------------------------------------- #

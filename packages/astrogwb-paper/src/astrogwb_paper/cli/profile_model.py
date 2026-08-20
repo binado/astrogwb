@@ -18,8 +18,8 @@ Usage::
 
     uv run astrogwb-profile-model \
         --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
-        --injection-catalog outputs/catalogs/injection-bns-n32768.h5 \
-        --proposal-catalog outputs/catalogs/proposals/bns-n16384-df1.h5
+        --injection-catalog outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
+        --proposal-catalog outputs/catalogs/bns-n16384-eps=0.1-df1.h5
 
 Configs are assembled from the base and run overlays in ``inputs/experiments.yaml``
 by the ``assemble_config`` workflow rule or by
@@ -67,7 +67,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--proposal-catalog",
         type=Path,
         required=True,
-        help="Waveform catalog and proposal density used by the profiled model.",
+        help="Waveform catalog used by the profiled model.",
     )
     parser.add_argument(
         "--seed",
@@ -121,6 +121,7 @@ def build_potential(
         injection_catalog_path,
         proposal_catalog_path,
         fiducials=config.fiducials,
+        proposal_config=config.proposal,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
     )

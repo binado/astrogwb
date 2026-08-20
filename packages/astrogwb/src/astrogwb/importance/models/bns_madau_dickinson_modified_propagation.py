@@ -112,7 +112,7 @@ def _redshift_density_grids(
     Single source of truth for the fiducial redshift density
     :math:`p(z) \propto \psi(z) / (1 + z) \times dV_c/dz` and its trapezoidal
     normalization. Both the target density evaluated during inference
-    (:func:`compute_merger_rate_distance_and_logprob`) and any offline proposal
+    (:func:`compute_merger_rate_distance_and_logprob`) and any fixed proposal
     density must come through here: the importance weight is a *ratio* of the
     two, so a second copy of this formula would bias every weight the moment
     either copy changed.
@@ -173,7 +173,7 @@ def compute_merger_rate_distance_and_logprob(
     returns the interpolated luminosity distance ``d_L(z|\theta)``. The same
     function is used for the proposal (at fiducials) and the target (at sampled
     ``params``); :func:`log_weights` combines these with the catalog fiducial
-    distances and the GW/EM ratio correction. Offline construction of a
+    distances and the GW/EM ratio correction. Construction of a
     proposal density for a precomputed catalog must call this same function
     (on the grid the catalog was actually *sampled* from) so the proposal and
     target densities can never drift apart.
