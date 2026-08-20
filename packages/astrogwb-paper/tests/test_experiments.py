@@ -61,6 +61,20 @@ def test_every_base_and_run_merge_is_a_valid_run_config() -> None:
                 assert amplitude_parameter is not None
 
 
+def test_1d_runs_use_diagonal_mass_matrix_and_short_warmup() -> None:
+    """1D problems (one latent, marginalized amplitude included) need no dense
+    mass matrix and converge faster: NUTS is configured accordingly."""
+    base = load_base()
+
+    for specification in load_experiments().values():
+        for run in specification.runs:
+            config = build_run_config(overlay_for(specification, run, base=base))
+            if len(config.sampled_params) != 1:
+                continue
+            assert config.sampler.num_warmup == 500, f"{specification.name}/{run}"
+            assert config.sampler.dense_mass is False, f"{specification.name}/{run}"
+
+
 def test_all_run_configs_are_assembled_together(tmp_path: Path) -> None:
     assemble_configs(
         [
