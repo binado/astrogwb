@@ -117,4 +117,5 @@ def test_experiments_without_figures_are_chains_only() -> None:
         "astrophysical-parameters",
         "variable-proposal-size",
         "variable-proposal-guard",
+        "waveform-approximant",
     }

@@ -26,11 +26,12 @@ def _write_inventory(path: Path, raw: dict) -> None:
     path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
-def test_inventory_declares_injection_and_five_proposals() -> None:
+def test_inventory_declares_injection_and_six_proposals() -> None:
     catalogs = load_catalogs()
 
     assert list(catalogs) == [
         "injection-bns-n32768-eps=0-df1",
+        "bns-n32768-eps=0-df1-taylorf2",
         "bns-n8192-eps=0.1-df1",
         "bns-n16384-eps=0.1-df1",
         "bns-n32768-eps=0.1-df1",
@@ -46,6 +47,18 @@ def test_inventory_declares_injection_and_five_proposals() -> None:
     assert all(
         recipe.waveform.frequency_resolution == 1.0 for recipe in catalogs.values()
     )
+
+
+def test_taylorf2_catalog_only_changes_the_fiducial_waveform_approximant() -> None:
+    catalogs = load_catalogs()
+    fiducial = catalogs[INJECTION_CATALOG_NAME].model_dump()
+    taylorf2 = catalogs["bns-n32768-eps=0-df1-taylorf2"].model_dump()
+
+    assert fiducial["waveform"]["approximant"] == "IMRPhenomXAS_NRTidalv3"
+    assert taylorf2["waveform"]["approximant"] == "TaylorF2"
+    taylorf2["name"] = fiducial["name"]
+    taylorf2["waveform"]["approximant"] = fiducial["waveform"]["approximant"]
+    assert taylorf2 == fiducial
 
 
 def test_population_config_paths_are_shared_by_catalogs() -> None:

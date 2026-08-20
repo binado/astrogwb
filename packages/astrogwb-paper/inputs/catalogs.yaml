@@ -18,6 +18,13 @@ catalogs:
       num_samples: 32768
       seed: 41
       uniform_mixing_fraction: 0.0
+  bns-n32768-eps=0-df1-taylorf2:
+    population:
+      num_samples: 32768
+      seed: 41
+      uniform_mixing_fraction: 0.0
+    waveform:
+      approximant: TaylorF2
   bns-n8192-eps=0.1-df1:
     population:
       num_samples: 8192
