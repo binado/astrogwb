@@ -74,7 +74,7 @@ The curated inventory is:
 | `cosmological-parameters` | 6 detector runs plus `H0-Omega_m` and `H0-merger-rate` | input to `plot_cosmological_parameters` |
 | `modified-propagation` | 6 detector runs plus `Xi_0` and `Xi_0-H0` | corners, marginal comparison, and tables |
 | `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` | chains only |
-| `variable-proposal-size` | 8192, 16384, and 32768 proposal catalogs | chains only |
+| `variable-catalog-size` | 8192, 16384, and 32768 catalogs | chains only |
 | `variable-proposal-guard` | 1e-1, 1e-2, and 1e-3 proposal guard fractions | chains only |
 
 Run one experiment's chains:

@@ -57,7 +57,7 @@ The groups are:
 | `cosmological-parameters` | six detector networks, `H0-Omega_m`, and `H0-merger-rate` |
 | `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` |
 | `modified-propagation` | six detector networks, `Xi_0`, and `Xi_0-H0` |
-| `variable-proposal-size` | `n8192`, `n16384`, and `n32768` |
+| `variable-catalog-size` | `n8192`, `n16384`, and `n32768` |
 | `variable-proposal-guard` | `eps1e-1`, `eps1e-2`, and `eps1e-3` |
 
 `assemble_config` is one local Snakemake job. A change to

@@ -27,7 +27,7 @@ import `astrogwb_paper` or know the repository checkout layout.
   lint and format.
 - `uv run --group dev ty check`: type check.
 - `uv build --package astrogwb --no-sources`: publication build.
-- `cd packages/astrogwb-paper && uv run --group workflow snakemake --snakefile   Snakefile --allowed-rules assemble_config run_mcmc experiments run_experiment_cosmological_parameters run_experiment_modified_propagation run_experiment_astrophysical_parameters run_experiment_variable_proposal_size run_experiment_variable_proposal_guard --dry-run --cores 1 experiments`:
+- `cd packages/astrogwb-paper && uv run --group workflow snakemake --snakefile   Snakefile --allowed-rules assemble_config run_mcmc experiments run_experiment_cosmological_parameters run_experiment_modified_propagation run_experiment_astrophysical_parameters run_experiment_variable_catalog_size run_experiment_variable_proposal_guard --dry-run --cores 1 experiments`:
   production workflow entrypoint (Snakemake invoked directly; omit
   `--dry-run` to execute). Chains come from `run_experiment_<name>` targets;
   figures are opt-in via the `plot_*` rules.

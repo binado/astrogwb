@@ -163,7 +163,7 @@ experiments:
             loc: *fiducials_H0
             scale: 0.6766
 
-  variable-proposal-size:
+  variable-catalog-size:
     sampled_params: [H0]
     analysis: *et_2l_aligned_ce
     # 1D problem: diagonal mass matrix, shorter warmup.
@@ -179,12 +179,10 @@ experiments:
         catalog: bns-n32768-eps=0-df1
 
   variable-proposal-guard:
-    sampled_params: [H0]
-    analysis: *et_2l_aligned_ce
-    # 1D problem: diagonal mass matrix, shorter warmup.
-    sampler:
-      num_warmup: 500
-      dense_mass: false
+    # Same H0-MD problem as astrophysical-parameters/Madau-Dickinson: H0 is
+    # the marginalized amplitude, and NUTS samples the redshift-rate shape.
+    sampled_params: [gamma, kappa, z_peak]
+    analysis: *amplitude_marginalized
     runs:
       eps1e-1:
         catalog: bns-n16384-eps=0.1-df1

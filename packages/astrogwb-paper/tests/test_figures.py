@@ -117,7 +117,7 @@ def test_only_the_network_experiments_have_figure_rules() -> None:
 
     assert chains_only == {
         "astrophysical-parameters",
-        "variable-proposal-size",
+        "variable-catalog-size",
         "variable-proposal-guard",
         "waveform-approximant",
     }
