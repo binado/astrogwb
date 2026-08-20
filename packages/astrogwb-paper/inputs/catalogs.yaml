@@ -25,19 +25,24 @@ catalogs:
       uniform_mixing_fraction: 0.0
     waveform:
       approximant: TaylorF2
-  bns-n8192-eps=0.1-df1:
+  bns-n8192-eps=0-df1:
     population:
       num_samples: 8192
       seed: 42
-      uniform_mixing_fraction: 0.1
-  bns-n16384-eps=0.1-df1:
+      uniform_mixing_fraction: 0.0
+  bns-n16384-eps=0-df1:
     population:
       num_samples: 16384
       seed: 42
-      uniform_mixing_fraction: 0.1
-  bns-n32768-eps=0.1-df1:
+      uniform_mixing_fraction: 0.0
+  bns-n32768-eps=0-df1:
     population:
       num_samples: 32768
+      seed: 42
+      uniform_mixing_fraction: 0.0
+  bns-n16384-eps=0.1-df1:
+    population:
+      num_samples: 16384
       seed: 42
       uniform_mixing_fraction: 0.1
   bns-n16384-eps=0.01-df1:

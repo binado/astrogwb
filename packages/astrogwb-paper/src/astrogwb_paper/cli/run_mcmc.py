@@ -20,7 +20,7 @@ Usage::
     uv run astrogwb-run-mcmc \
         --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
         --injection-catalog outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
-        --proposal-catalog outputs/catalogs/bns-n16384-eps=0.1-df1.h5
+        --proposal-catalog outputs/catalogs/bns-n16384-eps=0-df1.h5
 
 Configs are assembled from the base and run overlays in ``inputs/experiments.yaml``
 by the ``assemble_config`` workflow rule or by

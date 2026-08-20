@@ -48,6 +48,9 @@ def _catalog(name):
     return str(CATALOGS_DIR / f"{name}.h5")
 
 
+CATALOG_OUTPUTS = [_catalog(name) for name in catalogs]
+
+
 def _injection_catalog():
     return _catalog(INJECTION_CATALOG_NAME)
 
@@ -83,6 +86,7 @@ localrules:
     amplitude_toy,
     fiducial_spectrum,
     importance_weights_grid,
+    catalogs,
     experiments,
 
 
@@ -150,6 +154,11 @@ rule waveform_catalog:
         " --reference-frequency {params.reference_frequency}"
         " --frequency-resolution {params.frequency_resolution}"
         " --chunk-size {params.chunk_size}"
+
+
+rule catalogs:
+    input:
+        CATALOG_OUTPUTS,
 
 
 rule assemble_config:

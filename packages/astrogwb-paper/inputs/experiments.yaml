@@ -122,9 +122,11 @@ experiments:
       Madau-Dickinson:
         sampled_params: [gamma, kappa, z_peak]
         analysis: *amplitude_marginalized
+        catalog: bns-n16384-eps=0.1-df1
       z_peak:
         sampled_params: [z_peak]
         analysis: *amplitude_marginalized
+        catalog: bns-n16384-eps=0.1-df1
         # 1D problem: diagonal mass matrix, shorter warmup.
         sampler:
           num_warmup: 500
@@ -170,11 +172,11 @@ experiments:
       dense_mass: false
     runs:
       n8192:
-        catalog: bns-n8192-eps=0.1-df1
+        catalog: bns-n8192-eps=0-df1
       n16384:
-        catalog: bns-n16384-eps=0.1-df1
+        catalog: bns-n16384-eps=0-df1
       n32768:
-        catalog: bns-n32768-eps=0.1-df1
+        catalog: bns-n32768-eps=0-df1
 
   variable-proposal-guard:
     sampled_params: [H0]

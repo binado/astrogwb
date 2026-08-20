@@ -79,7 +79,16 @@ Build catalogs explicitly:
 ```bash
 cd packages/astrogwb-paper
 uv run --group workflow snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules population_config population waveform_catalog catalogs \
+  catalogs
+```
+
+Or build individual catalogs:
+
+```bash
+cd packages/astrogwb-paper
+uv run --group workflow snakemake --snakefile Snakefile --cores 1 \
   --allowed-rules population_config population waveform_catalog \
   outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
-  outputs/catalogs/bns-n16384-eps=0.1-df1.h5
+  outputs/catalogs/bns-n16384-eps=0-df1.h5
 ```

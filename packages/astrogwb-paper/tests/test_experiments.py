@@ -117,22 +117,22 @@ def test_run_paths_are_one_to_one_with_the_source_yaml() -> None:
 
 def test_catalog_selection_is_fixed_except_for_proposal_comparisons() -> None:
     experiments = load_experiments()
-    for name, specification in experiments.items():
-        if name in {
-            "variable-proposal-size",
-            "variable-proposal-guard",
-            "waveform-approximant",
-        }:
-            continue
+    for name in ("cosmological-parameters", "modified-propagation"):
+        specification = experiments[name]
         assert {specification.catalog_for(run) for run in specification.runs} == {
             DEFAULT_CATALOG
         }
 
+    astrophysical = experiments["astrophysical-parameters"]
+    assert {astrophysical.catalog_for(run) for run in astrophysical.runs} == {
+        "bns-n16384-eps=0.1-df1"
+    }
+
     proposal = experiments["variable-proposal-size"]
     assert {run: proposal.catalog_for(run) for run in proposal.runs} == {
-        "n8192": "bns-n8192-eps=0.1-df1",
-        "n16384": "bns-n16384-eps=0.1-df1",
-        "n32768": "bns-n32768-eps=0.1-df1",
+        "n8192": "bns-n8192-eps=0-df1",
+        "n16384": "bns-n16384-eps=0-df1",
+        "n32768": "bns-n32768-eps=0-df1",
     }
 
     guard = experiments["variable-proposal-guard"]
@@ -147,6 +147,20 @@ def test_catalog_selection_is_fixed_except_for_proposal_comparisons() -> None:
         "IMRPhenom": "injection-bns-n32768-eps=0-df1",
         "TaylorF2": "bns-n32768-eps=0-df1-taylorf2",
     }
+
+
+def test_only_astrophysical_and_guard_runs_use_a_mixed_proposal() -> None:
+    base = load_base()
+    mixed = {"astrophysical-parameters", "variable-proposal-guard"}
+
+    for specification in load_experiments().values():
+        for run in specification.runs:
+            config = build_run_config(overlay_for(specification, run, base=base))
+            epsilon = config.proposal.uniform_mixing_fraction
+            if specification.name in mixed:
+                assert epsilon > 0.0, f"{specification.name}/{run}"
+            else:
+                assert epsilon == 0.0, f"{specification.name}/{run}"
 
 
 def test_a_run_naming_an_undeclared_catalog_is_rejected_at_load(
