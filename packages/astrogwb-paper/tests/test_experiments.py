@@ -97,6 +97,9 @@ def test_all_run_configs_are_assembled_together(tmp_path: Path) -> None:
     guard = load_mapping(tmp_path / "variable-proposal-guard/eps1e-3.json")
     assert guard["proposal"]["uniform_mixing_fraction"] == 0.001
     assert guard["proposal"]["n_grid"] == 4096
+    assert guard["sampled_params"] == ["gamma", "kappa", "z_peak"]
+    assert guard["analysis"]["likelihood"] == "amplitude_marginalized"
+    assert guard["analysis"]["amplitude_parameter"] == "H0"
 
 
 def test_run_paths_are_one_to_one_with_the_source_yaml() -> None:
@@ -147,6 +150,21 @@ def test_catalog_selection_is_fixed_except_for_proposal_comparisons() -> None:
         "IMRPhenom": "injection-bns-n32768-eps=0-df1",
         "TaylorF2": "bns-n32768-eps=0-df1-taylorf2",
     }
+
+
+def test_variable_proposal_guard_samples_h0_md() -> None:
+    """Guard sweeps epsilon on the H0-marginalized Madau–Dickinson problem."""
+    base = load_base()
+    spec = load_experiments()["variable-proposal-guard"]
+
+    for run in spec.runs:
+        config = build_run_config(overlay_for(spec, run, base=base))
+        assert config.sampled_params == ("gamma", "kappa", "z_peak"), run
+        assert config.analysis.likelihood == "amplitude_marginalized"
+        assert config.analysis.amplitude_parameter == "H0"
+        assert config.posterior_params == ("gamma", "kappa", "z_peak", "H0")
+        assert config.sampler.dense_mass is True
+        assert config.sampler.num_warmup == 1000
 
 
 def test_only_astrophysical_and_guard_runs_use_a_mixed_proposal() -> None:
