@@ -106,15 +106,15 @@ def proposal_config(
         sampler.get("arguments"), label="MD redshift sampler arguments"
     )
 
-    z_min = float(md_sampler.get("z_min", 0.0))
-    z_max = float(md_sampler["z_max"])
+    minimum_redshift = float(md_sampler.get("z_min", 0.0))
+    maximum_redshift = float(md_sampler["z_max"])
     h0 = float(md_sampler["hubble_constant"])
     omega_m = float(md_sampler["omega_m"])
 
     return {
         "uniform_mixing_fraction": population.uniform_mixing_fraction,
-        "z_min": z_min,
-        "z_max": z_max,
+        "minimum_redshift": minimum_redshift,
+        "maximum_redshift": maximum_redshift,
         "n_grid": int(md_sampler.get("n_grid", 4096)),
         "H0": h0,
         "Omega_m": omega_m,

@@ -22,6 +22,6 @@ class AnalysisGrid:
     observation_time: float
     f_min: float
     f_max: float
-    z_min: float
-    z_max: float
+    minimum_redshift: float
+    maximum_redshift: float
     n_grid: int

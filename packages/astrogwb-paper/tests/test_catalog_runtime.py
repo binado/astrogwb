@@ -31,8 +31,8 @@ def _catalog() -> CatalogArrays:
 def _proposal(epsilon: float) -> ProposalConfig:
     return ProposalConfig(
         uniform_mixing_fraction=epsilon,
-        z_min=0.0,
-        z_max=20.0,
+        minimum_redshift=0.0,
+        maximum_redshift=20.0,
         n_grid=256,
         H0=67.66,
         Omega_m=0.3096,

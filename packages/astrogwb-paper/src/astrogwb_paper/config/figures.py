@@ -86,8 +86,8 @@ def load_analysis_grid() -> AnalysisGrid:
             observation_time=float(base["observation_time"]),
             f_min=float(analysis["f_min"]),
             f_max=float(analysis["f_max"]),
-            z_min=float(cosmology["z_min"]),
-            z_max=float(cosmology["z_max"]),
+            minimum_redshift=float(cosmology["minimum_redshift"]),
+            maximum_redshift=float(cosmology["maximum_redshift"]),
             n_grid=int(cosmology["n_grid"]),
         )
     except KeyError as error:

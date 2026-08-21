@@ -169,8 +169,8 @@ class AnalysisConfig(BaseModel):
 class CosmoConfig(BaseModel):
     model_config = _STRICT
 
-    z_min: float
-    z_max: float
+    minimum_redshift: float
+    maximum_redshift: float
     n_grid: int
 
 
@@ -203,8 +203,8 @@ class ProposalConfig(BaseModel):
     uniform_mixing_fraction: Annotated[
         float, Field(ge=0.0, le=1.0, allow_inf_nan=False)
     ]
-    z_min: float
-    z_max: float
+    minimum_redshift: float
+    maximum_redshift: float
     n_grid: Annotated[int, Field(gt=1)]
     H0: float
     Omega_m: float
@@ -214,8 +214,10 @@ class ProposalConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_support(self) -> ProposalConfig:
-        if self.z_max <= self.z_min:
-            raise ValueError("proposal z_max must be greater than z_min")
+        if self.maximum_redshift <= self.minimum_redshift:
+            raise ValueError(
+                "proposal maximum_redshift must be greater than minimum_redshift"
+            )
         return self
 
 
@@ -331,8 +333,8 @@ class RunConfig(BaseModel):
             observation_time=self.observation_time,
             f_min=self.analysis.f_min,
             f_max=self.analysis.f_max,
-            z_min=self.cosmology.z_min,
-            z_max=self.cosmology.z_max,
+            minimum_redshift=self.cosmology.minimum_redshift,
+            maximum_redshift=self.cosmology.maximum_redshift,
             n_grid=self.cosmology.n_grid,
         )
 
