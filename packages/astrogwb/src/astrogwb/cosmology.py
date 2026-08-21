@@ -146,7 +146,7 @@ def distance_and_volume_grid(
     )
     delta_z = jnp.diff(extended)
     trapezoids = 0.5 * (inv_e_extended[1:] + inv_e_extended[:-1]) * delta_z
-    integral = jnp.cumsum(trapezoids)[redshift.size - 1 :]
+    integral = jnp.cumsum(trapezoids)
     comoving_distance = hubble_distance(h0) * integral
     luminosity_distance = (1.0 + redshift) * comoving_distance
     differential_comoving_volume = (
