@@ -106,7 +106,7 @@ def proposal_config(
         sampler.get("arguments"), label="MD redshift sampler arguments"
     )
 
-    minimum_redshift = float(md_sampler.get("z_min", 0.0))
+    minimum_redshift = float(md_sampler["z_min"])
     maximum_redshift = float(md_sampler["z_max"])
     h0 = float(md_sampler["hubble_constant"])
     omega_m = float(md_sampler["omega_m"])
