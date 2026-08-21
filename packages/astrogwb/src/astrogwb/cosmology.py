@@ -112,9 +112,10 @@ def distance_and_volume_grid(
     ``rate_shape_grid`` and ``dvc_dz_grid``) are guaranteed to share the same
     grid. Currently only supports flat LCDM cosmology.
 
-    The grid must be sorted ascending and start at ``0.0``; the comoving
+    The grid must be sorted ascending and nonnegative; the comoving
     distance is accumulated by trapezoidal integration along ``redshift``
-    assuming ``d_c(0) = 0``.
+    extended by a virtual point at ``z = 0`` where ``d_c(0) = 0``, so grids
+    starting above zero remain physically correct.
 
     Parameters
     ----------
@@ -139,11 +140,13 @@ def distance_and_volume_grid(
     inv_e = 1.0 / compute_normalized_hubble_parameter(
         redshift=redshift, omega_m=omega_m
     )
-    delta_z = jnp.diff(redshift)
-    trapezoids = 0.5 * (inv_e[1:] + inv_e[:-1]) * delta_z
-    integral = jnp.concatenate(
-        [jnp.zeros(1, dtype=trapezoids.dtype), jnp.cumsum(trapezoids)]
+    extended = jnp.concatenate([jnp.zeros(1, dtype=redshift.dtype), redshift])
+    inv_e_extended = 1.0 / compute_normalized_hubble_parameter(
+        redshift=extended, omega_m=omega_m
     )
+    delta_z = jnp.diff(extended)
+    trapezoids = 0.5 * (inv_e_extended[1:] + inv_e_extended[:-1]) * delta_z
+    integral = jnp.cumsum(trapezoids)[redshift.size - 1 :]
     comoving_distance = hubble_distance(h0) * integral
     luminosity_distance = (1.0 + redshift) * comoving_distance
     differential_comoving_volume = (
