@@ -89,9 +89,9 @@ def test_analysis_grid_mirrors_the_config() -> None:
 
     assert grid.observation_time == config.observation_time
     assert (grid.f_min, grid.f_max) == (config.analysis.f_min, config.analysis.f_max)
-    assert (grid.z_min, grid.z_max, grid.n_grid) == (
-        config.cosmology.z_min,
-        config.cosmology.z_max,
+    assert (grid.minimum_redshift, grid.maximum_redshift, grid.n_grid) == (
+        config.cosmology.minimum_redshift,
+        config.cosmology.maximum_redshift,
         config.cosmology.n_grid,
     )
 

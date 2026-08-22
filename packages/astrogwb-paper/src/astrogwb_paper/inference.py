@@ -124,8 +124,8 @@ def prepare_observation(
     validate_catalog_samples(
         injection,
         label="injection",
-        z_min=grid.z_min,
-        z_max=grid.z_max,
+        minimum_redshift=grid.minimum_redshift,
+        maximum_redshift=grid.maximum_redshift,
     )
     logger.info(
         "Loaded independent injection catalog %s: n_injection_samples=%d",
@@ -133,7 +133,9 @@ def prepare_observation(
         injection.polarization_power.shape[1],
     )
 
-    redshift_grid = jnp.linspace(grid.z_min, grid.z_max, grid.n_grid)
+    redshift_grid = jnp.linspace(
+        grid.minimum_redshift, grid.maximum_redshift, grid.n_grid
+    )
     total_merger_rate, spectral_density = compute_fiducial_injection_spectrum(
         injection,
         fiducials=fiducial_values,
@@ -178,8 +180,8 @@ def prepare_inference_inputs(
     validate_catalog_samples(
         proposal,
         label="proposal",
-        z_min=grid.z_min,
-        z_max=grid.z_max,
+        minimum_redshift=grid.minimum_redshift,
+        maximum_redshift=grid.maximum_redshift,
     )
     validate_matching_frequency_grids(observation.injection, proposal)
     n_freq, n_samples = proposal.polarization_power.shape

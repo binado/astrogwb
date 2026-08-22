@@ -55,8 +55,8 @@ def validate_catalog_samples(
     catalog: CatalogArrays,
     *,
     label: str,
-    z_min: float,
-    z_max: float,
+    minimum_redshift: float,
+    maximum_redshift: float,
 ) -> None:
     """Validate required columns and redshift support."""
     required = {"redshift", "luminosity_distance"}
@@ -70,10 +70,11 @@ def validate_catalog_samples(
     redshift = np.asarray(catalog.samples["redshift"])
     z_lo = float(np.min(redshift))
     z_hi = float(np.max(redshift))
-    if z_lo < z_min or z_hi > z_max:
+    if z_lo < minimum_redshift or z_hi > maximum_redshift:
         raise ValueError(
             f"{label} catalog redshifts span [{z_lo:.4g}, {z_hi:.4g}] but "
-            f"[z_min, z_max] is [{z_min:.4g}, {z_max:.4g}]"
+            f"[minimum_redshift, maximum_redshift] is "
+            f"[{minimum_redshift:.4g}, {maximum_redshift:.4g}]"
         )
 
 
@@ -83,7 +84,9 @@ def compute_proposal_logprob(
 ) -> Any:
     """Evaluate the fixed MD/uniform proposal at catalog redshifts."""
     redshift = jnp.asarray(samples["redshift"])
-    proposal_grid = jnp.linspace(proposal.z_min, proposal.z_max, proposal.n_grid)
+    proposal_grid = jnp.linspace(
+        proposal.minimum_redshift, proposal.maximum_redshift, proposal.n_grid
+    )
     _, _, md_logprob = compute_merger_rate_distance_and_logprob(
         {
             "H0": proposal.H0,
@@ -100,10 +103,12 @@ def compute_proposal_logprob(
     if epsilon == 0.0:
         return md_logprob
 
-    in_support = (redshift >= proposal.z_min) & (redshift <= proposal.z_max)
+    in_support = (redshift >= proposal.minimum_redshift) & (
+        redshift <= proposal.maximum_redshift
+    )
     uniform_logprob = jnp.where(
         in_support,
-        -jnp.log(proposal.z_max - proposal.z_min),
+        -jnp.log(proposal.maximum_redshift - proposal.minimum_redshift),
         -jnp.inf,
     )
     if epsilon == 1.0:

@@ -107,8 +107,8 @@ if DEBUG:
 
 
 # Redshift grid for the cosmology integrals (and MD normalization)
-z_min = 0.0
-z_max = 20.0
+minimum_redshift = 0.0
+maximum_redshift = 20.0
 n_grid = 256  # grid points for cosmology integrals / MD normalization
 
 # Frequency band for the analysis
@@ -165,14 +165,14 @@ proposal = load_catalog_arrays(PROPOSAL_CATALOG_PATH, fiducials=fiducials)
 validate_catalog_samples(
     injection,
     label="injection",
-    z_min=z_min,
-    z_max=z_max,
+    minimum_redshift=minimum_redshift,
+    maximum_redshift=maximum_redshift,
 )
 validate_catalog_samples(
     proposal,
     label="proposal",
-    z_min=z_min,
-    z_max=z_max,
+    minimum_redshift=minimum_redshift,
+    maximum_redshift=maximum_redshift,
 )
 validate_matching_frequency_grids(injection, proposal)
 
@@ -228,14 +228,14 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 # proposal log-density is persisted with the assembled production population.
 
 # %%
-z_grid = jnp.linspace(z_min, z_max, n_grid)
+z_grid = jnp.linspace(minimum_redshift, maximum_redshift, n_grid)
 
 proposal_logprob = compute_proposal_logprob(
     samples,
     ProposalConfig(
         uniform_mixing_fraction=0.1,
-        z_min=0.0,
-        z_max=20.0,
+        minimum_redshift=0.0,
+        maximum_redshift=20.0,
         n_grid=4096,
         H0=67.66,
         Omega_m=0.3096,

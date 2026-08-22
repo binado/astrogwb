@@ -182,9 +182,9 @@ def _validate_proposal_matches_run(
         for name in ("H0", "Omega_m", "gamma", "kappa", "z_peak")
         if float(fiducials[name]) != float(proposal[name])
     ]
-    if float(cosmology["z_min"]) != float(proposal["z_min"]) or float(
-        cosmology["z_max"]
-    ) != float(proposal["z_max"]):
+    if float(cosmology["minimum_redshift"]) != float(
+        proposal["minimum_redshift"]
+    ) or float(cosmology["maximum_redshift"]) != float(proposal["maximum_redshift"]):
         mismatches.append("redshift support")
     if mismatches:
         raise ValueError(
