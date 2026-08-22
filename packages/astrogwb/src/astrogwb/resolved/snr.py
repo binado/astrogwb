@@ -35,11 +35,32 @@ from astrogwb.detector import Sensitivity
 WaveformBackend = Literal["auto", "ripple", "lal"]
 
 #: Parameters consumed by this module itself (segment placement and sky
-#: position); everything else is forwarded to the waveform backend. Names are
-#: the gwmock-pop canonical vocabulary.
+#: position). Names are the gwmock-pop canonical vocabulary.
 _RESERVED_PARAMETER_KEYS = frozenset(
     {"coa_time", "right_ascension", "declination", "polarization_angle"}
 )
+
+#: Canonical keys forwarded to the waveform backend. Catalog metadata
+#: (``redshift``, ``source_frame_mass_*``, ...) is dropped.
+_WAVEFORM_PARAMETER_KEYS = frozenset(
+    {
+        "detector_frame_mass_1",
+        "detector_frame_mass_2",
+        "luminosity_distance",
+        "spin_1x",
+        "spin_1y",
+        "spin_1z",
+        "spin_2x",
+        "spin_2y",
+        "spin_2z",
+        "inclination",
+        "coa_phase",
+        "lambda_1",
+        "lambda_2",
+    }
+)
+
+_KEEP_PARAMETER_KEYS = _RESERVED_PARAMETER_KEYS | _WAVEFORM_PARAMETER_KEYS
 
 #: Parameters every event must carry: coalescence time and sky/polarization
 #: angles for the projection, plus the backend's required intrinsic set.
@@ -57,11 +78,12 @@ REQUIRED_SOURCE_PARAMETERS = (
 def _normalize_parameters(
     source_parameters: Mapping[str, ArrayLike],
 ) -> tuple[dict[str, NDArray[np.float64]], int]:
-    """Coerce event parameters to 1-D float64 arrays of one shared length.
+    """Coerce kept event parameters to 1-D float64 arrays of one shared length.
 
-    Returns ``(event_arrays, n_events)``. Every value must be a
-    non-empty 1-dimensional array of the same length, so downstream code
-    sees one consistent event count.
+    Returns ``(event_arrays, n_events)``. Only reserved projection keys and
+    the waveform allow-list are retained; other columns are ignored without
+    rank or length checks. Every kept value must be a non-empty
+    1-dimensional array of the same length.
     """
     if not source_parameters:
         raise ValueError("source_parameters must not be empty.")
@@ -75,6 +97,8 @@ def _normalize_parameters(
     event_arrays: dict[str, NDArray[np.float64]] = {}
     n_events: int | None = None
     for key, value in source_parameters.items():
+        if key not in _KEEP_PARAMETER_KEYS:
+            continue
         array = np.asarray(value, dtype=np.float64)
         if array.ndim != 1:
             raise ValueError(f"Source parameter {key!r} must be 1-dimensional.")
@@ -188,9 +212,10 @@ def optimal_snr(
     source_parameters:
         Per-event parameters as 1-dimensional arrays, all of equal length,
         named in the gwmock-pop canonical vocabulary. Required keys are
-        :data:`REQUIRED_SOURCE_PARAMETERS`. Remaining keys (spins,
+        :data:`REQUIRED_SOURCE_PARAMETERS`. Optional waveform keys (spins,
         ``inclination``, ``coa_phase``, ``lambda_1``, ``lambda_2``) are
-        forwarded to the waveform backend, which rejects unknown ones.
+        forwarded to the waveform backend. Other columns (catalog metadata
+        such as ``redshift``) are ignored.
     detectors:
         Resolved detector geometries (gwmock ``CustomDetector`` instances,
         e.g. from :func:`astrogwb.detector.resolve_detector`). Names must
@@ -411,19 +436,20 @@ def _optimal_snr_lal(
     progress_callback: Callable[[int, int], None] | None,
 ) -> NDArray[np.float64]:
     """Per-event LALSimulation path; peak memory is one event's strain."""
-    # One common segment: size it from the largest chirp mass in the catalog,
-    # rounded up to a power-of-two seconds exactly as the backend would.
+    # One common segment: size it from the longest inspiral in the catalog
+    # (lightest chirp mass at 0PN), rounded up to a power-of-two seconds
+    # exactly as the backend would.
     mass_1 = event_arrays["detector_frame_mass_1"]
     mass_2 = event_arrays["detector_frame_mass_2"]
     chirp_masses = _chirp_mass(mass_1, mass_2)
-    heaviest = int(np.argmax(chirp_masses))
+    lightest = int(np.argmin(chirp_masses))
     sizing_backend = LALSimulationBackend()
     pre_coalescence_seconds = sizing_backend.pre_coalescence_duration(
         waveform_model,
         sampling_frequency,
         minimum_frequency,
-        detector_frame_mass_1=float(mass_1[heaviest]),
-        detector_frame_mass_2=float(mass_2[heaviest]),
+        detector_frame_mass_1=float(mass_1[lightest]),
+        detector_frame_mass_2=float(mass_2[lightest]),
         luminosity_distance=1.0,
     )
     if pre_coalescence_seconds is None:
@@ -435,7 +461,7 @@ def _optimal_snr_lal(
     backend = LALSimulationBackend(segment_duration=segment_duration)
 
     n_samples = segment_sample_count(
-        float(chirp_masses[heaviest]),
+        float(chirp_masses[lightest]),
         minimum_frequency,
         sampling_frequency,
         segment_duration=segment_duration,

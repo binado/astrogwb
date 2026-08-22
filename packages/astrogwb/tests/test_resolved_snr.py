@@ -25,6 +25,18 @@ def _h1_setup() -> tuple[list[CustomDetector], Mapping[str, Sensitivity]]:
     return [load_detector("H1")], load_sensitivity_map(["H1"])
 
 
+def _event(**overrides: float) -> dict[str, np.ndarray]:
+    parameters = {key: value.copy() for key, value in BASE_PARAMETERS.items()}
+    for key, value in overrides.items():
+        parameters[key] = np.array([value])
+    return parameters
+
+
+def _stack_events(*events: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
+    keys = events[0].keys()
+    return {key: np.concatenate([event[key] for event in events]) for key in keys}
+
+
 def test_missing_required_parameter_is_reported() -> None:
     incomplete = {
         key: value for key, value in BASE_PARAMETERS.items() if key != "coa_time"
@@ -236,6 +248,39 @@ def test_invalid_backend_rejected() -> None:
         )
 
 
+def test_normalize_parameters_drops_catalog_metadata() -> None:
+    extras = {
+        **BASE_PARAMETERS,
+        "redshift": np.array([0.1]),
+        "source_frame_mass_1": np.array([1.2]),
+        "inclination": np.array([0.3]),
+        "lambda_1": np.array([400.0]),
+    }
+
+    event_arrays, n_events = snr_module._normalize_parameters(extras)
+
+    assert n_events == 1
+    assert "redshift" not in event_arrays
+    assert "source_frame_mass_1" not in event_arrays
+    np.testing.assert_array_equal(event_arrays["inclination"], [0.3])
+    np.testing.assert_array_equal(event_arrays["lambda_1"], [400.0])
+    for key in REQUIRED_SOURCE_PARAMETERS:
+        np.testing.assert_array_equal(event_arrays[key], BASE_PARAMETERS[key])
+
+
+def test_normalize_parameters_ignores_malformed_catalog_metadata() -> None:
+    extras = {
+        **BASE_PARAMETERS,
+        "redshift": np.ones((2, 2)),
+        "source_frame_mass_1": 0.0,
+    }
+
+    event_arrays, n_events = snr_module._normalize_parameters(extras)
+
+    assert n_events == 1
+    assert set(event_arrays) == set(REQUIRED_SOURCE_PARAMETERS)
+
+
 def test_matched_filter_snr_sinusoid_in_white_noise() -> None:
     sampling_frequency = 256.0
     n_samples = 256
@@ -317,3 +362,44 @@ def test_two_detector_snr_aligns_with_detector_order() -> None:
     assert np.all(np.isfinite(hv))
     assert np.all(hv >= 0.0)
     assert np.allclose(hv, vh[:, ::-1])
+
+
+@pytest.mark.integration
+def test_lal_path_ignores_catalog_metadata() -> None:
+    kwargs: dict[str, Any] = {
+        "waveform_model": "IMRPhenomXAS_NRTidalv3",
+        "sampling_frequency": 512.0,
+        "minimum_frequency": 20.0,
+        "backend": "lal",
+    }
+    extras = {
+        **BASE_PARAMETERS,
+        "redshift": np.array([0.5]),
+        "source_frame_mass_1": np.array([1.1]),
+    }
+
+    baseline = optimal_snr(BASE_PARAMETERS, *_h1_setup(), **kwargs)
+    with_extras = optimal_snr(extras, *_h1_setup(), **kwargs)
+
+    np.testing.assert_allclose(with_extras, baseline)
+
+
+@pytest.mark.integration
+def test_lal_mixed_mass_catalog_matches_single_event_snrs() -> None:
+    kwargs: dict[str, Any] = {
+        "waveform_model": "IMRPhenomXAS_NRTidalv3",
+        "sampling_frequency": 512.0,
+        "minimum_frequency": 20.0,
+        "backend": "lal",
+    }
+    light = _event(detector_frame_mass_1=1.0, detector_frame_mass_2=1.0)
+    heavy = _event(detector_frame_mass_1=2.5, detector_frame_mass_2=2.5)
+    mixed = _stack_events(light, heavy)
+
+    light_snr = optimal_snr(light, *_h1_setup(), **kwargs)
+    heavy_snr = optimal_snr(heavy, *_h1_setup(), **kwargs)
+    mixed_snr = optimal_snr(mixed, *_h1_setup(), **kwargs)
+
+    assert mixed_snr.shape == (2, 1)
+    np.testing.assert_allclose(mixed_snr[0], light_snr[0], rtol=0.02)
+    np.testing.assert_allclose(mixed_snr[1], heavy_snr[0], rtol=0.02)
