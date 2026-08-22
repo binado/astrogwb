@@ -1,13 +1,13 @@
-"""Network optimal SNR for resolved compact-binary events.
+"""Per-detector optimal SNR for resolved compact-binary events.
 
 Composes gwmock building blocks into one batched entry point: time-domain
 waveform generation (gwmock's LALSimulation backend), projection onto a
 detector network with Earth rotation, and a Whittle inner-product
-contraction against the network noise. The inverse spectral noise matrix is
-built once per call and reused across events; only the waveform generation,
-projection, and the final quadratic form run per event. Progress is reported
-through an optional caller-provided callback; the package performs no
-logging.
+contraction of each projected strain against that detector's PSD. Inverse
+PSDs are built once per call and reused across events; only the waveform
+generation, projection, and the final inner product run per event.
+Progress is reported through an optional caller-provided callback; the
+package performs no logging.
 
 Like the rest of astrogwb, the API consumes materialized objects:
 ``CustomDetector`` instances carrying geometry (see
@@ -81,54 +81,7 @@ def _normalize_parameters(
     return event_arrays, n_events
 
 
-def _noise_inverse(
-    psds: dict[str, NDArray[np.float64]],
-    names: Sequence[str],
-    mask: NDArray[np.bool_],
-    *,
-    cross_psds: Mapping[tuple[str, str], ArrayLike] | None = None,
-) -> NDArray[np.complex128]:
-    """Build the masked inverse spectral noise matrix ``S_n^{-1}(f)``.
-
-    With ``cross_psds=None`` the covariance is diagonal, so the inverse is
-    the multiplicative inverse of the PSDs and no matrix inversion is
-    performed. Otherwise the full Hermitian matrix (diagonal one-sided
-    PSDs, Hermitian cross-PSDs, as in ``gwmock_signal.snr._network``) is
-    inverted on the in-band bins only. Out-of-band bins are excluded before
-    inversion, so zero-valued PSD entries there cannot cause singular
-    matrices.
-    """
-    n_det = len(names)
-    psd_stack = np.stack([psds[name] for name in names])
-    diagonal = np.arange(n_det)
-
-    if cross_psds is None:
-        n_inband = int(mask.sum())
-        inverse = np.zeros((n_inband, n_det, n_det), dtype=np.complex128)
-        inverse[:, diagonal, diagonal] = (1.0 / psd_stack[:, mask]).T
-        return inverse
-
-    n_freq = mask.shape[0]
-    index = {name: i for i, name in enumerate(names)}
-    noise = np.zeros((n_det, n_det, n_freq), dtype=np.complex128)
-    noise[diagonal, diagonal, :] = psd_stack
-    for (name_a, name_b), spectrum in cross_psds.items():
-        if name_a == name_b:
-            raise ValueError(
-                f"cross_psds key ({name_a!r}, {name_b!r}) is diagonal; "
-                "diagonal entries come from the PSDs."
-            )
-        if name_a not in index or name_b not in index:
-            unknown = sorted({name_a, name_b} - index.keys())
-            raise ValueError(f"cross_psds references unknown detectors: {unknown}")
-        i, j = index[name_a], index[name_b]
-        noise[i, j, :] = np.asarray(spectrum, dtype=np.complex128)
-        noise[j, i, :] = np.conj(noise[i, j, :])
-
-    return np.linalg.inv(noise.transpose(2, 0, 1)[mask])
-
-
-def network_optimal_snr(
+def optimal_snr(
     source_parameters: Mapping[str, ArrayLike],
     detectors: Sequence[CustomDetector],
     sensitivities: Mapping[str, Sensitivity],
@@ -137,25 +90,25 @@ def network_optimal_snr(
     sampling_frequency: float,
     minimum_frequency: float,
     maximum_frequency: float | None = None,
-    cross_psds: Mapping[tuple[str, str], ArrayLike] | None = None,
     earth_rotation: bool = True,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> NDArray[np.float64]:
-    """Network optimal SNR ``sqrt((s|s))`` for every event in a catalog.
+    """Single-detector optimal SNR ``sqrt((s|s))`` for every event and detector.
 
     For each event the pipeline is: generate time-domain plus/cross
     polarizations with gwmock's LALSimulation backend, project them onto
     the detectors (antenna patterns and delays evaluated at time-dependent
-    GPS times when ``earth_rotation`` is on), then contract the projected
-    strains against the network noise via the frequency-domain inner
+    GPS times when ``earth_rotation`` is on), then contract each projected
+    strain against that detector's PSD via the frequency-domain inner
     product of Equations 9 and 18 of Cireddu et al. 2025
-    (arXiv:2312.14614).
+    (arXiv:2312.14614). Detectors are treated as uncorrelated; the
+    uncorrelated network SNR is ``np.sqrt((rho ** 2).sum(axis=1))``.
 
     All events share one analysis segment sized from the longest inspiral
     in the catalog (rounded up to a power-of-two seconds), so the
-    frequency grid -- and with it the inverted spectral noise matrix -- is
-    computed once and reused. Events are processed one at a time, so peak
-    memory is one event's strain regardless of catalog size.
+    frequency grid -- and with it the inverse PSDs -- is computed once and
+    reused. Events are processed one at a time, so peak memory is one
+    event's strain regardless of catalog size.
 
     Parameters
     ----------
@@ -169,7 +122,8 @@ def network_optimal_snr(
     detectors:
         Resolved detector geometries (gwmock ``CustomDetector`` instances,
         e.g. from :func:`astrogwb.detector.resolve_detector`). Names must
-        be unique.
+        be unique. Column ``j`` of the returned array corresponds to
+        ``detectors[j]``.
     sensitivities:
         Noise curves keyed by detector name (e.g. from
         :func:`astrogwb.detector.load_sensitivity_map`); must contain an
@@ -184,11 +138,6 @@ def network_optimal_snr(
     maximum_frequency:
         Upper bound of the SNR integral in Hz; defaults to the Nyquist
         frequency.
-    cross_psds:
-        Optional off-diagonal cross-PSDs keyed by ordered detector-name
-        tuples; Hermitian symmetry is applied automatically. ``None``
-        (default) gives the uncorrelated limit, where the inverse noise
-        matrix is diagonal and no matrix inversion is performed.
     earth_rotation:
         Evaluate antenna patterns and delays at per-sample GPS times
         (recommended); ``False`` evaluates them once at the segment
@@ -201,8 +150,9 @@ def network_optimal_snr(
     Returns
     -------
     numpy.ndarray
-        Network optimal SNR per event, shape ``(n_events,)``,
-        non-negative.
+        Optimal SNR per event and detector, shape
+        ``(n_events, n_detectors)``, non-negative. Column ``j`` is
+        ``detectors[j]``.
     """
     if sampling_frequency <= 0:
         raise ValueError("sampling_frequency must be > 0")
@@ -269,14 +219,16 @@ def network_optimal_snr(
     )
     mask = (frequencies >= minimum_frequency) & (frequencies <= f_high)
 
-    psds = {
-        name: sensitivities[name].evaluate(frequencies, out_of_band="zero")
-        for name in names
-    }
-    noise_inverse = _noise_inverse(psds, names, mask, cross_psds=cross_psds)
+    psd_stack = np.stack(
+        [
+            sensitivities[name].evaluate(frequencies, out_of_band="zero")
+            for name in names
+        ]
+    )
+    inv_psd = 1.0 / psd_stack[:, mask]
 
     waveform_keys = [key for key in event_arrays if key not in _RESERVED_PARAMETER_KEYS]
-    snrs = np.empty(n_events, dtype=np.float64)
+    snrs = np.empty((n_events, len(names)), dtype=np.float64)
     for event in range(n_events):
         params = {key: float(event_arrays[key][event]) for key in waveform_keys}
         polarizations = backend.generate_td_waveform(
@@ -298,10 +250,8 @@ def network_optimal_snr(
 
         strains = np.array([np.fft.rfft(projected[name].value) * dt for name in names])
         in_band = strains[:, mask]
-        integrand = np.einsum(
-            "ik,kij,jk->", in_band.conj(), noise_inverse, in_band
-        ).real
-        snrs[event] = np.sqrt(max(4.0 * delta_f * integrand, 0.0))
+        integrand = (np.abs(in_band) ** 2 * inv_psd).sum(axis=1).real
+        snrs[event] = np.sqrt(np.maximum(4.0 * delta_f * integrand, 0.0))
 
         if progress_callback is not None:
             progress_callback(event + 1, n_events)
