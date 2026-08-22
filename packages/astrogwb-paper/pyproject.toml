@@ -13,6 +13,7 @@ dependencies = [
     "astrogwb>=0.1.0",
     "gwmock-pop>=0.11.4",
     "gwmock-signal[jax]>=0.15.0",
+    "h5py>=3.0",
     "jax>=0.10.2; sys_platform == 'linux'",
     "jax[cpu]>=0.11.0; sys_platform != 'linux'",
     "numpy>=2.5.1",
@@ -45,6 +46,7 @@ astrogwb-run-mcmc = "astrogwb_paper.cli.run_mcmc:main"
 astrogwb-validate-config = "astrogwb_paper.cli.validate_config:main"
 astrogwb-generate-population = "astrogwb_paper.cli.generate_population:main"
 astrogwb-generate-waveform-catalog = "astrogwb_paper.cli.generate_waveform_catalog:main"
+astrogwb-compute-snr = "astrogwb_paper.cli.compute_snr:main"
 astrogwb-profile-model = "astrogwb_paper.cli.profile_model:main"
 
 [build-system]
