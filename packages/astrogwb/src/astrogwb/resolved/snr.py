@@ -8,10 +8,6 @@ detector's PSD. Two generation backends are supported; see
 per call and reused across events. Progress is reported through an
 optional caller-provided callback; the package performs no logging.
 
-Optional waveform backends (ripple/JAX and LALSimulation) are imported
-lazily through :func:`_select_ripple_backend`, :func:`_ripple_batch_imports`,
-and :func:`_lal_imports` so ``import astrogwb.resolved.snr`` stays cheap.
-
 Like the rest of astrogwb, the API consumes materialized objects:
 ``CustomDetector`` instances carrying geometry (see
 :func:`astrogwb.detector.resolve_detector`) and a name-keyed
@@ -23,16 +19,18 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import numpy as np
 from gwmock_signal.detector import CustomDetector
+from gwmock_signal.jax_batch import recommend_chunk_size, simulate_cbc_batch
+from gwmock_signal.projection.network import project_polarizations_to_network
+from gwmock_signal.waveform.backends.conditioning import segment_sample_count
+from gwmock_signal.waveform.backends.lal import LALSimulationBackend
+from gwmock_signal.waveform.backends.ripple import RippleBackend
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.detector import Sensitivity
-
-if TYPE_CHECKING:
-    from gwmock_signal.waveform.backends.ripple import RippleBackend
 
 WaveformBackend = Literal["auto", "ripple", "lal"]
 
@@ -307,28 +305,12 @@ def _select_ripple_backend(waveform_model: str) -> RippleBackend | None:
     backend's own guard rather than being silently skipped.
     """
     try:
-        from gwmock_signal.waveform.backends.ripple import RippleBackend
-
         backend = RippleBackend()
     except ImportError:
         return None
     if waveform_model not in backend.available_approximants():
         return None
     return backend
-
-
-def _ripple_batch_imports():
-    from gwmock_signal.jax_batch import recommend_chunk_size, simulate_cbc_batch
-
-    return recommend_chunk_size, simulate_cbc_batch
-
-
-def _lal_imports():
-    from gwmock_signal.projection.network import project_polarizations_to_network
-    from gwmock_signal.waveform.backends.conditioning import segment_sample_count
-    from gwmock_signal.waveform.backends.lal import LALSimulationBackend
-
-    return project_polarizations_to_network, segment_sample_count, LALSimulationBackend
 
 
 def _optimal_snr_ripple_batch(
@@ -354,8 +336,6 @@ def _optimal_snr_ripple_batch(
     device-memory limit gwmock reports; when no limit is reported (e.g.
     CPU) the whole catalog is processed as one batch.
     """
-    recommend_chunk_size, simulate_cbc_batch = _ripple_batch_imports()
-
     mass_1 = event_arrays["detector_frame_mass_1"]
     mass_2 = event_arrays["detector_frame_mass_2"]
     chirp_masses = _chirp_mass(mass_1, mass_2)
@@ -431,17 +411,13 @@ def _optimal_snr_lal(
     progress_callback: Callable[[int, int], None] | None,
 ) -> NDArray[np.float64]:
     """Per-event LALSimulation path; peak memory is one event's strain."""
-    project_polarizations_to_network, segment_sample_count, lal_backend_cls = (
-        _lal_imports()
-    )
-
     # One common segment: size it from the largest chirp mass in the catalog,
     # rounded up to a power-of-two seconds exactly as the backend would.
     mass_1 = event_arrays["detector_frame_mass_1"]
     mass_2 = event_arrays["detector_frame_mass_2"]
     chirp_masses = _chirp_mass(mass_1, mass_2)
     heaviest = int(np.argmax(chirp_masses))
-    sizing_backend = lal_backend_cls()
+    sizing_backend = LALSimulationBackend()
     pre_coalescence_seconds = sizing_backend.pre_coalescence_duration(
         waveform_model,
         sampling_frequency,
@@ -456,7 +432,7 @@ def _optimal_snr_lal(
             "duration; cannot size the shared analysis segment."
         )
     segment_duration = float(2.0 ** math.ceil(math.log2(pre_coalescence_seconds)))
-    backend = lal_backend_cls(segment_duration=segment_duration)
+    backend = LALSimulationBackend(segment_duration=segment_duration)
 
     n_samples = segment_sample_count(
         float(chirp_masses[heaviest]),
