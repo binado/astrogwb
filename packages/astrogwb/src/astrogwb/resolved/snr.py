@@ -1,13 +1,12 @@
 """Per-detector optimal SNR for resolved compact-binary events.
 
-Composes gwmock building blocks into one batched entry point: time-domain
-waveform generation (gwmock's LALSimulation backend), projection onto a
-detector network with Earth rotation, and a Whittle inner-product
-contraction of each projected strain against that detector's PSD. Inverse
-PSDs are built once per call and reused across events; only the waveform
-generation, projection, and the final inner product run per event.
-Progress is reported through an optional caller-provided callback; the
-package performs no logging.
+Composes gwmock building blocks into one batched entry point: waveform
+generation, projection onto a detector network with Earth rotation, and a
+Whittle inner-product contraction of each projected strain against that
+detector's PSD. Two generation backends are supported; see
+:func:`optimal_snr` for the selection rule. Inverse PSDs are built once
+per call and reused across events. Progress is reported through an
+optional caller-provided callback; the package performs no logging.
 
 Like the rest of astrogwb, the API consumes materialized objects:
 ``CustomDetector`` instances carrying geometry (see
@@ -20,12 +19,16 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 from gwmock_signal.detector import CustomDetector
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.detector import Sensitivity
+
+if TYPE_CHECKING:
+    from gwmock_signal.waveform.backends.ripple import RippleBackend
 
 #: Parameters consumed by this module itself (segment placement and sky
 #: position); everything else is forwarded to the waveform backend. Names are
@@ -98,20 +101,24 @@ def optimal_snr(
 ) -> NDArray[np.float64]:
     """Single-detector optimal SNR ``sqrt((s|s))`` for every event and detector.
 
-    For each event the pipeline is: generate time-domain plus/cross
-    polarizations with gwmock's LALSimulation backend, project them onto
-    the detectors (antenna patterns and delays evaluated at time-dependent
-    GPS times when ``earth_rotation`` is on), then contract each projected
-    strain against that detector's PSD via the frequency-domain inner
-    product of Equations 9 and 18 of Cireddu et al. 2025
-    (arXiv:2312.14614). Detectors are treated as uncorrelated; the
-    uncorrelated network SNR is ``np.sqrt((rho ** 2).sum(axis=1))``.
+    Two generation backends are tried in order. The ripple (JAX) backend
+    is used when it is installed and supports ``waveform_model``: the
+    whole catalog is generated under ``jax.vmap`` and projected on device
+    in memory-sized chunks. Otherwise the LALSimulation backend is used as
+    a per-event, time-domain fallback. Either way each event/detector
+    strain is contracted against that detector's PSD via the
+    frequency-domain inner product of Equations 9 and 18 of Cireddu et
+    al. 2025 (arXiv:2312.14614). Detector antenna patterns and delays are
+    evaluated at time-dependent GPS times when ``earth_rotation`` is on.
+    Detectors are treated as uncorrelated; the uncorrelated network SNR is
+    ``np.sqrt((rho ** 2).sum(axis=1))``.
 
     All events share one analysis segment sized from the longest inspiral
-    in the catalog (rounded up to a power-of-two seconds), so the
-    frequency grid -- and with it the inverse PSDs -- is computed once and
-    reused. Events are processed one at a time, so peak memory is one
-    event's strain regardless of catalog size.
+    in the catalog, so the frequency grid -- and with it the inverse
+    PSDs -- is computed once and reused. Peak memory is one batch chunk on
+    the ripple path, sized from the device-memory limit gwmock reports
+    (the whole catalog when no limit is reported, e.g. on CPU); the LAL
+    path holds one event's strain regardless of catalog size.
 
     Parameters
     ----------
@@ -133,7 +140,9 @@ def optimal_snr(
         :func:`astrogwb.detector.load_sensitivity_map`); must contain an
         entry for every detector in ``detectors``.
     waveform_model:
-        LAL approximant name, e.g. ``"IMRPhenomXAS_NRTidalv3"``.
+        Approximant name, e.g. ``"IMRPhenomXAS_NRTidalv3"``. Determines the
+        backend: ripple is used when it is installed and supports the
+        approximant, otherwise LALSimulation is the fallback.
     sampling_frequency:
         Sample rate in Hz; sets the Nyquist frequency.
     minimum_frequency:
@@ -165,7 +174,7 @@ def optimal_snr(
     if maximum_frequency is not None and maximum_frequency <= minimum_frequency:
         raise ValueError("maximum_frequency must be > minimum_frequency")
 
-    event_arrays, n_events = _normalize_parameters(source_parameters)
+    event_arrays, _ = _normalize_parameters(source_parameters)
 
     if not detectors:
         raise ValueError("At least one detector is required.")
@@ -180,6 +189,166 @@ def optimal_snr(
             "detector must have an entry in the sensitivities mapping."
         )
 
+    ripple_backend = _select_ripple_backend(waveform_model)
+    if ripple_backend is not None:
+        return _optimal_snr_ripple_batch(
+            ripple_backend,
+            event_arrays,
+            detectors,
+            names,
+            sensitivities,
+            waveform_model,
+            sampling_frequency=sampling_frequency,
+            minimum_frequency=minimum_frequency,
+            maximum_frequency=maximum_frequency,
+            earth_rotation=earth_rotation,
+            progress_callback=progress_callback,
+        )
+    return _optimal_snr_lal(
+        event_arrays,
+        detectors,
+        names,
+        sensitivities,
+        waveform_model,
+        sampling_frequency=sampling_frequency,
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
+        earth_rotation=earth_rotation,
+        progress_callback=progress_callback,
+    )
+
+
+def _select_ripple_backend(waveform_model: str) -> RippleBackend | None:
+    """Return a ripple backend able to generate ``waveform_model``, else ``None``.
+
+    ``None`` covers both "ripple/JAX is not installed" and "ripple has no
+    such approximant"; callers then fall back to the LAL path. An
+    installed ripple whose interface is incompatible raises from the
+    backend's own guard rather than being silently skipped.
+    """
+    try:
+        from gwmock_signal.waveform.backends.ripple import RippleBackend
+
+        backend = RippleBackend()
+    except ImportError:
+        return None
+    if waveform_model not in backend.available_approximants():
+        return None
+    return backend
+
+
+def _optimal_snr_ripple_batch(
+    backend: RippleBackend,
+    event_arrays: Mapping[str, NDArray[np.float64]],
+    detectors: Sequence[CustomDetector],
+    names: Sequence[str],
+    sensitivities: Mapping[str, Sensitivity],
+    waveform_model: str,
+    *,
+    sampling_frequency: float,
+    minimum_frequency: float,
+    maximum_frequency: float | None,
+    earth_rotation: bool,
+    progress_callback: Callable[[int, int], None] | None,
+) -> NDArray[np.float64]:
+    """Batched ripple (JAX) path: vmapped generation, on-device projection.
+
+    The segment duration is pinned once for the whole catalog, so every
+    chunk lands on the same frequency grid and the inverse PSDs built from
+    the first chunk's grid serve all chunks. Chunk size follows the
+    device-memory limit gwmock reports; when no limit is reported (e.g.
+    CPU) the whole catalog is processed as one batch.
+    """
+    from gwmock_signal.jax_batch import recommend_chunk_size, simulate_cbc_batch
+
+    mass_1 = event_arrays["detector_frame_mass_1"]
+    mass_2 = event_arrays["detector_frame_mass_2"]
+    chirp_masses = (mass_1 * mass_2) ** 0.6 / (mass_1 + mass_2) ** 0.2
+    eta = mass_1 * mass_2 / (mass_1 + mass_2) ** 2
+    segment_duration = backend.segment_duration_for(
+        chirp_masses, minimum_frequency, sampling_frequency, eta=eta
+    )
+    backend = backend.with_segment_duration(segment_duration)
+
+    # Conservative overestimate of the shared grid length (the exact
+    # 5-smooth even length is at most twice), used only to size the
+    # memory-limited chunk: overestimating costs a smaller chunk,
+    # underestimating costs an out-of-memory abort.
+    n_samples_bound = 2 * math.ceil(segment_duration * sampling_frequency) + 2
+    n_events = next(iter(event_arrays.values())).shape[0]
+    chunk_size = recommend_chunk_size(
+        len(names), n_samples_bound, earth_rotation=earth_rotation
+    )
+    if chunk_size is None:
+        chunk_size = n_events
+
+    snrs = np.empty((n_events, len(names)), dtype=np.float64)
+    dt = 1.0 / sampling_frequency
+    # Lazily built from the first chunk's grid; identical for later chunks
+    # because the segment duration is pinned.
+    inverse_psd: NDArray[np.float64] | None = None
+    in_band_mask: NDArray[np.bool_] | None = None
+    delta_f = 0.0
+    for start in range(0, n_events, chunk_size):
+        stop = min(start + chunk_size, n_events)
+        batch = simulate_cbc_batch(
+            waveform_model,
+            list(detectors),
+            sampling_frequency=sampling_frequency,
+            minimum_frequency=minimum_frequency,
+            parameters={
+                key: values[start:stop] for key, values in event_arrays.items()
+            },
+            backend=backend,
+            earth_rotation=earth_rotation,
+        )
+        strain = np.asarray(batch.strain)
+        if inverse_psd is None:
+            delta_f = sampling_frequency / strain.shape[-1]
+            frequencies = (
+                np.arange(strain.shape[-1] // 2 + 1, dtype=np.float64) * delta_f
+            )
+            f_high = (
+                maximum_frequency
+                if maximum_frequency is not None
+                else float(frequencies[-1])
+            )
+            in_band_mask = (frequencies >= minimum_frequency) & (frequencies <= f_high)
+            psd_stack = np.stack(
+                [
+                    sensitivities[name].evaluate(frequencies, out_of_band="zero")
+                    for name in names
+                ]
+            )
+            inverse_psd = 1.0 / psd_stack[:, in_band_mask]
+        assert inverse_psd is not None and in_band_mask is not None  # set together
+
+        spectra = np.fft.rfft(strain, axis=-1) * dt
+        in_band = spectra[:, :, in_band_mask]
+        integrand = (np.abs(in_band) ** 2 * inverse_psd[None, :, :]).sum(axis=-1).real
+        snrs[start:stop] = np.sqrt(np.maximum(4.0 * delta_f * integrand, 0.0))
+
+        if progress_callback is not None:
+            for event in range(stop - start):
+                progress_callback(start + event + 1, n_events)
+
+    return snrs
+
+
+def _optimal_snr_lal(
+    event_arrays: Mapping[str, NDArray[np.float64]],
+    detectors: Sequence[CustomDetector],
+    names: Sequence[str],
+    sensitivities: Mapping[str, Sensitivity],
+    waveform_model: str,
+    *,
+    sampling_frequency: float,
+    minimum_frequency: float,
+    maximum_frequency: float | None,
+    earth_rotation: bool,
+    progress_callback: Callable[[int, int], None] | None,
+) -> NDArray[np.float64]:
+    """Per-event LALSimulation path; peak memory is one event's strain."""
     # Heavy imports stay inside the function so importing this module stays cheap.
     from gwmock_signal.projection.network import project_polarizations_to_network
     from gwmock_signal.waveform.backends.conditioning import segment_sample_count
@@ -231,6 +400,7 @@ def optimal_snr(
     )
     inv_psd = 1.0 / psd_stack[:, mask]
 
+    n_events = next(iter(event_arrays.values())).shape[0]
     waveform_keys = [key for key in event_arrays if key not in _RESERVED_PARAMETER_KEYS]
     snrs = np.empty((n_events, len(names)), dtype=np.float64)
     for event in range(n_events):

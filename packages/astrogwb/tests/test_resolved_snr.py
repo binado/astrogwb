@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from astrogwb.detector import Sensitivity, load_detector, load_sensitivity_map
 from astrogwb.resolved import optimal_snr
+from astrogwb.resolved import snr as snr_module
 from gwmock_signal.detector import CustomDetector
 
 BASE_PARAMETERS: dict[str, np.ndarray] = {
@@ -214,6 +215,28 @@ def test_missing_sensitivity_is_reported() -> None:
             sampling_frequency=512.0,
             minimum_frequency=20.0,
         )
+
+
+@pytest.mark.integration
+def test_backend_selection_falls_back_for_unsupported_approximant() -> None:
+    assert snr_module._select_ripple_backend("SpinTaylorT4") is None
+    assert snr_module._select_ripple_backend("IMRPhenomXAS_NRTidalv3") is not None
+
+
+@pytest.mark.integration
+def test_ripple_and_lal_paths_agree(monkeypatch: pytest.MonkeyPatch) -> None:
+    kwargs: dict[str, Any] = {
+        "waveform_model": "IMRPhenomXAS_NRTidalv3",
+        "sampling_frequency": 512.0,
+        "minimum_frequency": 20.0,
+    }
+
+    ripple_snrs = optimal_snr(BASE_PARAMETERS, *_h1_setup(), **kwargs)
+    monkeypatch.setattr(snr_module, "_select_ripple_backend", lambda model: None)
+    lal_snrs = optimal_snr(BASE_PARAMETERS, *_h1_setup(), **kwargs)
+
+    assert lal_snrs.shape == ripple_snrs.shape
+    np.testing.assert_allclose(lal_snrs, ripple_snrs, rtol=0.10)
 
 
 @pytest.mark.integration
