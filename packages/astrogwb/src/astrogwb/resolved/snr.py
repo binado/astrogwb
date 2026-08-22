@@ -5,27 +5,27 @@ waveform generation (gwmock's LALSimulation backend), projection onto a
 detector network with Earth rotation, and a Whittle inner-product
 contraction against the network noise. The inverse spectral noise matrix is
 built once per call and reused across events; only the waveform generation,
-projection, and the final quadratic form run per event.
+projection, and the final quadratic form run per event. Progress is reported
+through an optional caller-provided callback; the package performs no
+logging.
+
+Like the rest of astrogwb, the API consumes materialized objects:
+``CustomDetector`` instances carrying geometry (see
+:func:`astrogwb.detector.resolve_detector`) and a name-keyed
+:class:`astrogwb.detector.Sensitivity` mapping (see
+:func:`astrogwb.detector.load_sensitivity_map`).
 """
 
 from __future__ import annotations
 
-import logging
 import math
-from collections.abc import Mapping, Sequence
-from pathlib import Path
+from collections.abc import Callable, Mapping, Sequence
 
 import numpy as np
+from gwmock_signal.detector import CustomDetector
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.detector import (
-    DetectorSpec,
-    evaluate_psd,
-    load_sensitivity,
-    resolve_detector,
-)
-
-logger = logging.getLogger(__name__)
+from astrogwb.detector import Sensitivity
 
 #: Parameters consumed by this module itself (segment placement and sky
 #: position); everything else is forwarded to the waveform backend.
@@ -46,14 +46,12 @@ _REQUIRED_PARAMETER_KEYS = (
 
 def _normalize_parameters(
     source_parameters: Mapping[str, ArrayLike],
-) -> tuple[dict[str, NDArray[np.float64]], dict[str, float], int]:
-    """Split event parameters into per-event arrays and broadcastable scalars.
+) -> tuple[dict[str, NDArray[np.float64]], int]:
+    """Coerce event parameters to 1-D float64 arrays of one shared length.
 
-    Returns ``(event_arrays, scalars, n_events)`` where ``event_arrays``
-    holds every parameter given as an array of shape ``(n_events,)`` and
-    ``scalars`` holds parameters given as Python floats (broadcast across
-    events). Mixed lengths are rejected here so downstream code sees one
-    consistent event count.
+    Returns ``(event_arrays, n_events)``. Every value must be a
+    non-empty 1-dimensional array of the same length, so downstream code
+    sees one consistent event count.
     """
     if not source_parameters:
         raise ValueError("source_parameters must not be empty.")
@@ -63,170 +61,146 @@ def _normalize_parameters(
         raise ValueError(f"Missing required source parameters: {missing}")
 
     event_arrays: dict[str, NDArray[np.float64]] = {}
-    scalars: dict[str, float] = {}
     n_events: int | None = None
     for key, value in source_parameters.items():
-        array = np.atleast_1d(np.asarray(value, dtype=np.float64))
+        array = np.asarray(value, dtype=np.float64)
         if array.ndim != 1:
+            raise ValueError(f"Source parameter {key!r} must be 1-dimensional.")
+        if n_events is None:
+            n_events = array.shape[0]
+            if n_events == 0:
+                raise ValueError("Source parameter arrays must be non-empty.")
+        elif array.shape[0] != n_events:
             raise ValueError(
-                f"Source parameter {key!r} must be scalar or 1-dimensional."
+                f"Source parameter {key!r} has length {array.shape[0]}, "
+                f"expected {n_events} to match the other per-event arrays."
             )
-        if array.shape[0] > 1:
-            if n_events is None:
-                n_events = array.shape[0]
-            elif array.shape[0] != n_events:
-                raise ValueError(
-                    f"Source parameter {key!r} has length {array.shape[0]}, "
-                    f"expected {n_events} to match the other per-event arrays."
-                )
-            event_arrays[key] = array
-        else:
-            scalars[key] = float(array[0])
+        event_arrays[key] = array
 
-    return event_arrays, scalars, n_events if n_events is not None else 1
-
-
-def _resolve_network(
-    detectors: Sequence[DetectorSpec],
-) -> list[tuple[str, DetectorSpec]]:
-    """Resolve detector specs to unique ``(name, spec)`` pairs in input order."""
-    if not detectors:
-        raise ValueError("At least one detector is required.")
-    resolved: list[tuple[str, DetectorSpec]] = []
-    seen: set[str] = set()
-    for spec in detectors:
-        custom = resolve_detector(spec)
-        name = custom.name
-        if name in seen:
-            raise ValueError(f"Duplicate detector name {name!r}.")
-        seen.add(name)
-        resolved.append((name, custom))
-    return resolved
-
-
-def _psd_references_for(
-    names: Sequence[str],
-    overrides: Mapping[str, str | Path] | None,
-) -> dict[str, str | Path]:
-    """Resolve per-detector PSD references: explicit overrides first, then TOML defaults."""
-    references: dict[str, str | Path] = {}
-    for name in names:
-        if overrides is not None and name in overrides:
-            references[name] = overrides[name]
-            continue
-        try:
-            references[name] = load_sensitivity(name).psd_reference
-        except KeyError as exc:
-            raise KeyError(
-                f"No PSD reference for detector {name!r}: not in sensitivity.toml and "
-                "not given in psd_references. Pass psd_references={"
-                f"'{name}': <reference>}} explicitly."
-            ) from exc
-    return references
+    assert n_events is not None  # non-empty input guarantees it was set
+    return event_arrays, n_events
 
 
 def _noise_inverse(
     psds: dict[str, NDArray[np.float64]],
-    cross_psds: Mapping[tuple[str, str], ArrayLike] | None,
     names: Sequence[str],
-    frequencies: NDArray[np.float64],
     mask: NDArray[np.bool_],
+    *,
+    cross_psds: Mapping[tuple[str, str], ArrayLike] | None = None,
 ) -> NDArray[np.complex128]:
     """Build the masked inverse spectral noise matrix ``S_n^{-1}(f)``.
 
-    Follows the construction in ``gwmock_signal.snr._network`` (diagonal
-    one-sided PSDs, Hermitian cross-PSDs), but inverts only the in-band bins
-    once so the result can be shared across events. Out-of-band bins are
-    excluded before inversion, so zero-valued PSD entries there cannot cause
-    singular matrices.
+    With ``cross_psds=None`` the covariance is diagonal, so the inverse is
+    the multiplicative inverse of the PSDs and no matrix inversion is
+    performed. Otherwise the full Hermitian matrix (diagonal one-sided
+    PSDs, Hermitian cross-PSDs, as in ``gwmock_signal.snr._network``) is
+    inverted on the in-band bins only. Out-of-band bins are excluded before
+    inversion, so zero-valued PSD entries there cannot cause singular
+    matrices.
     """
     n_det = len(names)
-    n_freq = frequencies.shape[0]
+    psd_stack = np.stack([psds[name] for name in names])
+    diagonal = np.arange(n_det)
+
+    if cross_psds is None:
+        n_inband = int(mask.sum())
+        inverse = np.zeros((n_inband, n_det, n_det), dtype=np.complex128)
+        inverse[:, diagonal, diagonal] = (1.0 / psd_stack[:, mask]).T
+        return inverse
+
+    n_freq = mask.shape[0]
     index = {name: i for i, name in enumerate(names)}
-
     noise = np.zeros((n_det, n_det, n_freq), dtype=np.complex128)
-    for name in names:
-        i = index[name]
-        noise[i, i, :] = psds[name]
-
-    if cross_psds is not None:
-        for (name_a, name_b), spectrum in cross_psds.items():
-            if name_a == name_b:
-                raise ValueError(
-                    f"cross_psds key ({name_a!r}, {name_b!r}) is diagonal; "
-                    "diagonal entries come from the PSDs."
-                )
-            if name_a not in index or name_b not in index:
-                unknown = sorted({name_a, name_b} - index.keys())
-                raise ValueError(f"cross_psds references unknown detectors: {unknown}")
-            i, j = index[name_a], index[name_b]
-            noise[i, j, :] = np.asarray(spectrum, dtype=np.complex128)
-            noise[j, i, :] = np.conj(noise[i, j, :])
+    noise[diagonal, diagonal, :] = psd_stack
+    for (name_a, name_b), spectrum in cross_psds.items():
+        if name_a == name_b:
+            raise ValueError(
+                f"cross_psds key ({name_a!r}, {name_b!r}) is diagonal; "
+                "diagonal entries come from the PSDs."
+            )
+        if name_a not in index or name_b not in index:
+            unknown = sorted({name_a, name_b} - index.keys())
+            raise ValueError(f"cross_psds references unknown detectors: {unknown}")
+        i, j = index[name_a], index[name_b]
+        noise[i, j, :] = np.asarray(spectrum, dtype=np.complex128)
+        noise[j, i, :] = np.conj(noise[i, j, :])
 
     return np.linalg.inv(noise.transpose(2, 0, 1)[mask])
 
 
 def network_optimal_snr(
     source_parameters: Mapping[str, ArrayLike],
-    detectors: Sequence[DetectorSpec],
+    detectors: Sequence[CustomDetector],
+    sensitivities: Mapping[str, Sensitivity],
     *,
     waveform_model: str,
     sampling_frequency: float,
     minimum_frequency: float,
     maximum_frequency: float | None = None,
-    psd_references: Mapping[str, str | Path] | None = None,
     cross_psds: Mapping[tuple[str, str], ArrayLike] | None = None,
     earth_rotation: bool = True,
-    chunk_size: int = 0,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> NDArray[np.float64]:
     """Network optimal SNR ``sqrt((s|s))`` for every event in a catalog.
 
     For each event the pipeline is: generate time-domain plus/cross
-    polarizations with gwmock's LALSimulation backend, project them onto the
-    detectors (antenna patterns and delays evaluated at time-dependent GPS
-    times when ``earth_rotation`` is on), then contract the projected strains
-    against the network noise via the frequency-domain inner product of
-    Equations 9 and 18 of Cireddu et al. 2025 (arXiv:2312.14614).
+    polarizations with gwmock's LALSimulation backend, project them onto
+    the detectors (antenna patterns and delays evaluated at time-dependent
+    GPS times when ``earth_rotation`` is on), then contract the projected
+    strains against the network noise via the frequency-domain inner
+    product of Equations 9 and 18 of Cireddu et al. 2025
+    (arXiv:2312.14614).
 
-    All events share one analysis segment sized from the longest inspiral in
-    the catalog (rounded up to a power-of-two seconds), so the frequency grid
-    -- and with it the inverted spectral noise matrix -- is computed once and
-    reused. Events are processed one at a time, so peak memory is one
-    event's strain regardless of catalog size; ``chunk_size`` only controls
-    how often progress is logged.
+    All events share one analysis segment sized from the longest inspiral
+    in the catalog (rounded up to a power-of-two seconds), so the
+    frequency grid -- and with it the inverted spectral noise matrix -- is
+    computed once and reused. Events are processed one at a time, so peak
+    memory is one event's strain regardless of catalog size.
 
-    Args:
-        source_parameters: Per-event parameters as 1-dimensional arrays of
-            equal length, or broadcastable scalars. Required keys: ``tc``,
-            ``ra``, ``dec``, ``psi``, ``detector_frame_mass_1``,
-            ``detector_frame_mass_2``, ``luminosity_distance``. Remaining
-            keys (spins, ``inclination``, ``coa_phase``, ``lambda_1``,
-            ``lambda_2``) are forwarded to the waveform backend, which
-            rejects unknown ones.
-        detectors: Detector specifications -- plain LAL site codes
-            (resolved through astrogwb's ``geometry.toml``) and/or gwmock
-            ``CustomDetector`` instances.
-        waveform_model: LAL approximant name, e.g.
-            ``"IMRPhenomXAS_NRTidalv3"``.
-        sampling_frequency: Sample rate in Hz; sets the Nyquist frequency.
-        minimum_frequency: Lower frequency bound of the SNR integral in Hz;
-            also the waveform generation cutoff.
-        maximum_frequency: Upper bound of the SNR integral in Hz; defaults
-            to the Nyquist frequency.
-        psd_references: Optional per-detector PSD references keyed by
-            detector name (anything :func:`~astrogwb.detector.evaluate_psd`
-            accepts). Defaults to each detector's entry in astrogwb's
-            ``sensitivity.toml``.
-        cross_psds: Optional off-diagonal cross-PSDs keyed by ordered
-            detector-name tuples; Hermitian symmetry is applied
-            automatically. ``None`` gives the uncorrelated limit.
-        earth_rotation: Evaluate antenna patterns and delays at per-sample
-            GPS times (recommended); ``False`` evaluates them once at the
-            segment midpoint.
-        chunk_size: Number of events between progress log records; ``0``
-            logs once per call.
+    Parameters
+    ----------
+    source_parameters:
+        Per-event parameters as 1-dimensional arrays, all of equal length.
+        Required keys: ``tc``, ``ra``, ``dec``, ``psi``,
+        ``detector_frame_mass_1``, ``detector_frame_mass_2``,
+        ``luminosity_distance``. Remaining keys (spins, ``inclination``,
+        ``coa_phase``, ``lambda_1``, ``lambda_2``) are forwarded to the
+        waveform backend, which rejects unknown ones.
+    detectors:
+        Resolved detector geometries (gwmock ``CustomDetector`` instances,
+        e.g. from :func:`astrogwb.detector.resolve_detector`). Names must
+        be unique.
+    sensitivities:
+        Noise curves keyed by detector name (e.g. from
+        :func:`astrogwb.detector.load_sensitivity_map`); must contain an
+        entry for every detector in ``detectors``.
+    waveform_model:
+        LAL approximant name, e.g. ``"IMRPhenomXAS_NRTidalv3"``.
+    sampling_frequency:
+        Sample rate in Hz; sets the Nyquist frequency.
+    minimum_frequency:
+        Lower frequency bound of the SNR integral in Hz; also the waveform
+        generation cutoff.
+    maximum_frequency:
+        Upper bound of the SNR integral in Hz; defaults to the Nyquist
+        frequency.
+    cross_psds:
+        Optional off-diagonal cross-PSDs keyed by ordered detector-name
+        tuples; Hermitian symmetry is applied automatically. ``None``
+        (default) gives the uncorrelated limit, where the inverse noise
+        matrix is diagonal and no matrix inversion is performed.
+    earth_rotation:
+        Evaluate antenna patterns and delays at per-sample GPS times
+        (recommended); ``False`` evaluates them once at the segment
+        midpoint.
+    progress_callback:
+        Optional callable invoked as ``(done, total)`` after each event.
+        The package itself performs no logging; callers may log from the
+        callback (throttling there if desired).
 
-    Returns:
+    Returns
+    -------
+    numpy.ndarray
         Network optimal SNR per event, shape ``(n_events,)``,
         non-negative.
     """
@@ -236,13 +210,21 @@ def network_optimal_snr(
         raise ValueError("minimum_frequency must be > 0")
     if maximum_frequency is not None and maximum_frequency <= minimum_frequency:
         raise ValueError("maximum_frequency must be > minimum_frequency")
-    if chunk_size < 0:
-        raise ValueError("chunk_size must be >= 0")
 
-    event_arrays, scalars, n_events = _normalize_parameters(source_parameters)
+    event_arrays, n_events = _normalize_parameters(source_parameters)
 
-    network = _resolve_network(detectors)
-    names = [name for name, _ in network]
+    if not detectors:
+        raise ValueError("At least one detector is required.")
+    names = [detector.name for detector in detectors]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"Duplicate detector name(s): {duplicates}")
+    missing_sensitivities = [name for name in names if name not in sensitivities]
+    if missing_sensitivities:
+        raise KeyError(
+            f"No sensitivity for detector(s) {missing_sensitivities}: every "
+            "detector must have an entry in the sensitivities mapping."
+        )
 
     # Heavy imports stay inside the function so importing this module stays cheap.
     from gwmock_signal.projection.network import project_polarizations_to_network
@@ -251,12 +233,8 @@ def network_optimal_snr(
 
     # One common segment: size it from the largest chirp mass in the catalog,
     # rounded up to a power-of-two seconds exactly as the backend would.
-    mass_1 = event_arrays.get(
-        "detector_frame_mass_1", np.array([scalars["detector_frame_mass_1"]])
-    )
-    mass_2 = event_arrays.get(
-        "detector_frame_mass_2", np.array([scalars["detector_frame_mass_2"]])
-    )
+    mass_1 = event_arrays["detector_frame_mass_1"]
+    mass_2 = event_arrays["detector_frame_mass_2"]
     chirp_masses = (mass_1 * mass_2) ** 0.6 / (mass_1 + mass_2) ** 0.2
     heaviest = int(np.argmax(chirp_masses))
     sizing_backend = LALSimulationBackend()
@@ -292,48 +270,28 @@ def network_optimal_snr(
     mask = (frequencies >= minimum_frequency) & (frequencies <= f_high)
 
     psds = {
-        name: evaluate_psd(reference, frequencies, out_of_band="zero")
-        for name, reference in _psd_references_for(names, psd_references).items()
+        name: sensitivities[name].evaluate(frequencies, out_of_band="zero")
+        for name in names
     }
-    noise_inverse = _noise_inverse(psds, cross_psds, names, frequencies, mask)
+    noise_inverse = _noise_inverse(psds, names, mask, cross_psds=cross_psds)
 
     waveform_keys = [key for key in event_arrays if key not in _RESERVED_PARAMETER_KEYS]
     snrs = np.empty(n_events, dtype=np.float64)
-    log_every = chunk_size if chunk_size > 0 else n_events
     for event in range(n_events):
-        params = {
-            key: float(event_arrays[key][event])
-            if key in event_arrays
-            else scalars[key]
-            for key in waveform_keys
-        }
+        params = {key: float(event_arrays[key][event]) for key in waveform_keys}
         polarizations = backend.generate_td_waveform(
             waveform_model,
-            tc=float(event_arrays["tc"][event])
-            if "tc" in event_arrays
-            else scalars["tc"],
+            tc=float(event_arrays["tc"][event]),
             sampling_frequency=sampling_frequency,
             minimum_frequency=minimum_frequency,
             **params,
         )
         projected = project_polarizations_to_network(
             polarizations,
-            [spec for _, spec in network],
-            right_ascension=(
-                float(event_arrays["ra"][event])
-                if "ra" in event_arrays
-                else scalars["ra"]
-            ),
-            declination=(
-                float(event_arrays["dec"][event])
-                if "dec" in event_arrays
-                else scalars["dec"]
-            ),
-            polarization_angle=(
-                float(event_arrays["psi"][event])
-                if "psi" in event_arrays
-                else scalars["psi"]
-            ),
+            list(detectors),
+            right_ascension=float(event_arrays["ra"][event]),
+            declination=float(event_arrays["dec"][event]),
+            polarization_angle=float(event_arrays["psi"][event]),
             earth_rotation=earth_rotation,
             backend="numpy",
         )
@@ -345,7 +303,7 @@ def network_optimal_snr(
         ).real
         snrs[event] = np.sqrt(max(4.0 * delta_f * integrand, 0.0))
 
-        if (event + 1) % log_every == 0 or event + 1 == n_events:
-            logger.info("Computed SNR for %d / %d events", event + 1, n_events)
+        if progress_callback is not None:
+            progress_callback(event + 1, n_events)
 
     return snrs
