@@ -6,6 +6,6 @@ it generates time-domain waveforms, projects them onto a detector network,
 and contracts each projected strain against that detector's noise.
 """
 
-from .snr import optimal_snr
+from .snr import REQUIRED_SOURCE_PARAMETERS, optimal_snr
 
-__all__ = ["optimal_snr"]
+__all__ = ["REQUIRED_SOURCE_PARAMETERS", "optimal_snr"]

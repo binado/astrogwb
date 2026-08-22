@@ -8,27 +8,16 @@ from typing import Any
 import h5py
 import numpy as np
 from astrogwb.detector import load_sensitivity_map, resolve_detector
-from astrogwb.resolved.snr import optimal_snr
+from astrogwb.resolved import REQUIRED_SOURCE_PARAMETERS, optimal_snr
 from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
-#: Source-parameter keys the SNR pipeline itself requires (mirrors
-#: astrogwb.resolved.snr._REQUIRED_PARAMETER_KEYS, the gwmock-pop canonical
-#: vocabulary); the check lives here so the CLI can report a clearer error
-#: naming the input catalog.
-REQUIRED_SOURCE_PARAMETERS = (
-    "coa_time",
-    "right_ascension",
-    "declination",
-    "polarization_angle",
-    "detector_frame_mass_1",
-    "detector_frame_mass_2",
-    "luminosity_distance",
-)
-
 #: Logging cadence for the progress callback, in events.
 PROGRESS_LOG_EVERY = 100
+
+_DEFAULT_SAMPLING_FREQUENCY = 2048.0
+_DEFAULT_MINIMUM_FREQUENCY = 20.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -82,7 +71,7 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Sample rate in Hz; sets the Nyquist frequency. Defaults to the "
             "catalog's 'sampling_frequency' root attribute when present, "
-            "otherwise 2048 Hz."
+            f"otherwise {_DEFAULT_SAMPLING_FREQUENCY:g} Hz."
         ),
     )
     parser.add_argument(
@@ -92,7 +81,7 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Lower bound of the SNR integral and waveform-generation cutoff in "
             "Hz. Defaults to the catalog's 'minimum_frequency' root attribute "
-            "when present, otherwise 20 Hz."
+            f"when present, otherwise {_DEFAULT_MINIMUM_FREQUENCY:g} Hz."
         ),
     )
     parser.add_argument(
@@ -100,6 +89,15 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=None,
         help="Optional upper bound of the SNR integral in Hz; defaults to Nyquist.",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("auto", "ripple", "lal"),
+        default="auto",
+        help=(
+            "Waveform generation backend. 'auto' uses ripple when it supports "
+            "the approximant, otherwise LALSimulation."
+        ),
     )
     parser.add_argument(
         "--no-earth-rotation",
@@ -169,7 +167,7 @@ def main() -> None:
     sensitivities = load_sensitivity_map(detector_names)
 
     source_parameters, catalog_attributes = load_source_parameters(catalog_path)
-    n_events = len(source_parameters[REQUIRED_SOURCE_PARAMETERS[0]])
+    n_events = next(iter(source_parameters.values())).shape[0]
     logger.info("Loaded %d events from %s", n_events, catalog_path)
 
     waveform_model = args.waveform_model or catalog_attributes.get("approximant")
@@ -179,10 +177,14 @@ def main() -> None:
             "'approximant' attribute)."
         )
     sampling_frequency = float(
-        args.sampling_frequency or catalog_attributes.get("sampling_frequency", 2048.0)
+        args.sampling_frequency
+        if args.sampling_frequency is not None
+        else catalog_attributes.get("sampling_frequency", _DEFAULT_SAMPLING_FREQUENCY)
     )
     minimum_frequency = float(
-        args.minimum_frequency or catalog_attributes.get("minimum_frequency", 20.0)
+        args.minimum_frequency
+        if args.minimum_frequency is not None
+        else catalog_attributes.get("minimum_frequency", _DEFAULT_MINIMUM_FREQUENCY)
     )
     logger.info(
         "Waveform model %s, sampling %.1f Hz, band [%.1f, %s] Hz",
@@ -201,6 +203,7 @@ def main() -> None:
         minimum_frequency=minimum_frequency,
         maximum_frequency=args.maximum_frequency,
         earth_rotation=not args.no_earth_rotation,
+        backend=args.backend,
         progress_callback=_progress,
     )
 

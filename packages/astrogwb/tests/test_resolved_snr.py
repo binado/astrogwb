@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pytest
 from astrogwb.detector import Sensitivity, load_detector, load_sensitivity_map
-from astrogwb.resolved import optimal_snr
+from astrogwb.resolved import REQUIRED_SOURCE_PARAMETERS, optimal_snr
 from astrogwb.resolved import snr as snr_module
 from gwmock_signal.detector import CustomDetector
 
@@ -217,14 +217,58 @@ def test_missing_sensitivity_is_reported() -> None:
         )
 
 
-@pytest.mark.integration
-def test_backend_selection_falls_back_for_unsupported_approximant() -> None:
-    assert snr_module._select_ripple_backend("SpinTaylorT4") is None
-    assert snr_module._select_ripple_backend("IMRPhenomXAS_NRTidalv3") is not None
+def test_required_source_parameters_are_exported() -> None:
+    assert REQUIRED_SOURCE_PARAMETERS == snr_module.REQUIRED_SOURCE_PARAMETERS
+    for key in REQUIRED_SOURCE_PARAMETERS:
+        assert key in BASE_PARAMETERS
+
+
+def test_invalid_backend_rejected() -> None:
+    invalid_backend: Any = "numpy"
+    with pytest.raises(ValueError, match="backend"):
+        optimal_snr(
+            BASE_PARAMETERS,
+            *_h1_setup(),
+            waveform_model="IMRPhenomXAS_NRTidalv3",
+            sampling_frequency=512.0,
+            minimum_frequency=20.0,
+            backend=invalid_backend,
+        )
+
+
+def test_matched_filter_snr_sinusoid_in_white_noise() -> None:
+    sampling_frequency = 256.0
+    n_samples = 256
+    duration = n_samples / sampling_frequency
+    dt = 1.0 / sampling_frequency
+    time = np.arange(n_samples) * dt
+    amplitude = 2.0
+    psd_level = 4.0
+    strain = (amplitude * np.cos(2.0 * np.pi * 32.0 * time)).reshape(1, 1, -1)
+    frequencies, delta_f, grid_dt = snr_module._rfft_grid(n_samples, sampling_frequency)
+    assert grid_dt == dt
+    mask = np.ones(frequencies.size, dtype=bool)
+    inv_psd = np.full((1, frequencies.size), 1.0 / psd_level)
+    snr = snr_module.matched_filter_snr(strain, inv_psd, mask, delta_f, dt)
+    expected = amplitude * np.sqrt(duration / psd_level)
+    np.testing.assert_allclose(snr, [[expected]], rtol=0.02)
 
 
 @pytest.mark.integration
-def test_ripple_and_lal_paths_agree(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ripple_backend_rejects_unsupported_approximant() -> None:
+    with pytest.raises(ValueError, match="Ripple backend is not available"):
+        optimal_snr(
+            BASE_PARAMETERS,
+            *_h1_setup(),
+            waveform_model="SpinTaylorT4",
+            sampling_frequency=512.0,
+            minimum_frequency=20.0,
+            backend="ripple",
+        )
+
+
+@pytest.mark.integration
+def test_ripple_and_lal_paths_agree() -> None:
     kwargs: dict[str, Any] = {
         "waveform_model": "IMRPhenomXAS_NRTidalv3",
         "sampling_frequency": 512.0,
@@ -232,8 +276,7 @@ def test_ripple_and_lal_paths_agree(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
     ripple_snrs = optimal_snr(BASE_PARAMETERS, *_h1_setup(), **kwargs)
-    monkeypatch.setattr(snr_module, "_select_ripple_backend", lambda model: None)
-    lal_snrs = optimal_snr(BASE_PARAMETERS, *_h1_setup(), **kwargs)
+    lal_snrs = optimal_snr(BASE_PARAMETERS, *_h1_setup(), backend="lal", **kwargs)
 
     assert lal_snrs.shape == ripple_snrs.shape
     np.testing.assert_allclose(lal_snrs, ripple_snrs, rtol=0.10)
