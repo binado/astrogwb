@@ -14,13 +14,14 @@ from numpy.typing import NDArray
 logger = logging.getLogger(__name__)
 
 #: Source-parameter keys the SNR pipeline itself requires (mirrors
-#: astrogwb.resolved.snr._REQUIRED_PARAMETER_KEYS); the check lives here so the
-#: CLI can report a clearer error naming the input catalog.
+#: astrogwb.resolved.snr._REQUIRED_PARAMETER_KEYS, the gwmock-pop canonical
+#: vocabulary); the check lives here so the CLI can report a clearer error
+#: naming the input catalog.
 REQUIRED_SOURCE_PARAMETERS = (
-    "tc",
-    "ra",
-    "dec",
-    "psi",
+    "coa_time",
+    "right_ascension",
+    "declination",
+    "polarization_angle",
     "detector_frame_mass_1",
     "detector_frame_mass_2",
     "luminosity_distance",
@@ -46,8 +47,9 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         required=True,
         help=(
-            "Path to the catalog .h5 file. Only its /source_parameters group is "
-            "read; it must contain tc, ra, dec, psi (no values are drawn)."
+            "Path to the catalog .h5 file. Only its /source_parameters group "
+            "is read; it must contain coa_time, right_ascension, declination, "
+            "polarization_angle (no values are drawn)."
         ),
     )
     parser.add_argument(
@@ -139,7 +141,8 @@ def load_source_parameters(
         raise SystemExit(
             f"{catalog_path} is missing required source parameters "
             f"{missing}: this CLI does not draw sky position or polarization "
-            "angle, so the catalog itself must carry tc, ra, dec, and psi."
+            "angle, so the catalog itself must carry coa_time, "
+            "right_ascension, declination, and polarization_angle."
         )
     return source_parameters, root_attributes
 

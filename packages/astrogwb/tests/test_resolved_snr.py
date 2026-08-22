@@ -10,10 +10,10 @@ from astrogwb.resolved import optimal_snr
 from gwmock_signal.detector import CustomDetector
 
 BASE_PARAMETERS: dict[str, np.ndarray] = {
-    "tc": np.array([0.0]),
-    "ra": np.array([0.0]),
-    "dec": np.array([0.0]),
-    "psi": np.array([0.0]),
+    "coa_time": np.array([0.0]),
+    "right_ascension": np.array([0.0]),
+    "declination": np.array([0.0]),
+    "polarization_angle": np.array([0.0]),
     "detector_frame_mass_1": np.array([1.4]),
     "detector_frame_mass_2": np.array([1.4]),
     "luminosity_distance": np.array([100.0]),
@@ -25,9 +25,11 @@ def _h1_setup() -> tuple[list[CustomDetector], Mapping[str, Sensitivity]]:
 
 
 def test_missing_required_parameter_is_reported() -> None:
-    incomplete = {key: value for key, value in BASE_PARAMETERS.items() if key != "tc"}
+    incomplete = {
+        key: value for key, value in BASE_PARAMETERS.items() if key != "coa_time"
+    }
 
-    with pytest.raises(ValueError, match="tc"):
+    with pytest.raises(ValueError, match="coa_time"):
         optimal_snr(
             incomplete,
             *_h1_setup(),
@@ -41,7 +43,8 @@ def test_missing_required_parameters_are_reported_together() -> None:
     incomplete = {
         key: value
         for key, value in BASE_PARAMETERS.items()
-        if key not in {"tc", "ra", "dec", "psi"}
+        if key
+        not in {"coa_time", "right_ascension", "declination", "polarization_angle"}
     }
 
     with pytest.raises(ValueError) as excinfo:
@@ -53,7 +56,12 @@ def test_missing_required_parameters_are_reported_together() -> None:
             minimum_frequency=20.0,
         )
 
-    for key in ("tc", "ra", "dec", "psi"):
+    for key in (
+        "coa_time",
+        "right_ascension",
+        "declination",
+        "polarization_angle",
+    ):
         assert key in str(excinfo.value)
 
 

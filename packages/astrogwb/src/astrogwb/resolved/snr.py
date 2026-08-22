@@ -28,16 +28,19 @@ from numpy.typing import ArrayLike, NDArray
 from astrogwb.detector import Sensitivity
 
 #: Parameters consumed by this module itself (segment placement and sky
-#: position); everything else is forwarded to the waveform backend.
-_RESERVED_PARAMETER_KEYS = frozenset({"tc", "ra", "dec", "psi"})
+#: position); everything else is forwarded to the waveform backend. Names are
+#: the gwmock-pop canonical vocabulary.
+_RESERVED_PARAMETER_KEYS = frozenset(
+    {"coa_time", "right_ascension", "declination", "polarization_angle"}
+)
 
 #: Parameters every event must carry: coalescence time and sky/polarization
 #: angles for the projection, plus the backend's required intrinsic set.
 _REQUIRED_PARAMETER_KEYS = (
-    "tc",
-    "ra",
-    "dec",
-    "psi",
+    "coa_time",
+    "right_ascension",
+    "declination",
+    "polarization_angle",
     "detector_frame_mass_1",
     "detector_frame_mass_2",
     "luminosity_distance",
@@ -113,10 +116,11 @@ def optimal_snr(
     Parameters
     ----------
     source_parameters:
-        Per-event parameters as 1-dimensional arrays, all of equal length.
-        Required keys: ``tc``, ``ra``, ``dec``, ``psi``,
-        ``detector_frame_mass_1``, ``detector_frame_mass_2``,
-        ``luminosity_distance``. Remaining keys (spins, ``inclination``,
+        Per-event parameters as 1-dimensional arrays, all of equal length,
+        named in the gwmock-pop canonical vocabulary. Required keys:
+        ``coa_time``, ``right_ascension``, ``declination``,
+        ``polarization_angle``, ``detector_frame_mass_1``,
+        ``detector_frame_mass_2``, ``luminosity_distance``. Remaining keys (spins, ``inclination``,
         ``coa_phase``, ``lambda_1``, ``lambda_2``) are forwarded to the
         waveform backend, which rejects unknown ones.
     detectors:
@@ -233,7 +237,7 @@ def optimal_snr(
         params = {key: float(event_arrays[key][event]) for key in waveform_keys}
         polarizations = backend.generate_td_waveform(
             waveform_model,
-            tc=float(event_arrays["tc"][event]),
+            tc=float(event_arrays["coa_time"][event]),
             sampling_frequency=sampling_frequency,
             minimum_frequency=minimum_frequency,
             **params,
@@ -241,9 +245,9 @@ def optimal_snr(
         projected = project_polarizations_to_network(
             polarizations,
             list(detectors),
-            right_ascension=float(event_arrays["ra"][event]),
-            declination=float(event_arrays["dec"][event]),
-            polarization_angle=float(event_arrays["psi"][event]),
+            right_ascension=float(event_arrays["right_ascension"][event]),
+            declination=float(event_arrays["declination"][event]),
+            polarization_angle=float(event_arrays["polarization_angle"][event]),
             earth_rotation=earth_rotation,
             backend="numpy",
         )
