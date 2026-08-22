@@ -62,18 +62,6 @@ _WAVEFORM_PARAMETER_KEYS = frozenset(
 
 _KEEP_PARAMETER_KEYS = _RESERVED_PARAMETER_KEYS | _WAVEFORM_PARAMETER_KEYS
 
-#: Parameters every event must carry: coalescence time and sky/polarization
-#: angles for the projection, plus the backend's required intrinsic set.
-REQUIRED_SOURCE_PARAMETERS = (
-    "coa_time",
-    "right_ascension",
-    "declination",
-    "polarization_angle",
-    "detector_frame_mass_1",
-    "detector_frame_mass_2",
-    "luminosity_distance",
-)
-
 
 def _normalize_parameters(
     source_parameters: Mapping[str, ArrayLike],
@@ -81,24 +69,15 @@ def _normalize_parameters(
     """Coerce kept event parameters to 1-D float64 arrays of one shared length.
 
     Returns ``(event_arrays, n_events)``. Only reserved projection keys and
-    the waveform allow-list are retained; other columns are ignored without
-    rank or length checks. Every kept value must be a non-empty
-    1-dimensional array of the same length.
+    the waveform allow-list are retained, but every input value must be a
+    non-empty 1-dimensional array of the same length.
     """
     if not source_parameters:
         raise ValueError("source_parameters must not be empty.")
 
-    missing = [
-        key for key in REQUIRED_SOURCE_PARAMETERS if key not in source_parameters
-    ]
-    if missing:
-        raise ValueError(f"Missing required source parameters: {missing}")
-
     event_arrays: dict[str, NDArray[np.float64]] = {}
     n_events: int | None = None
     for key, value in source_parameters.items():
-        if key not in _KEEP_PARAMETER_KEYS:
-            continue
         array = np.asarray(value, dtype=np.float64)
         if array.ndim != 1:
             raise ValueError(f"Source parameter {key!r} must be 1-dimensional.")
@@ -111,7 +90,8 @@ def _normalize_parameters(
                 f"Source parameter {key!r} has length {array.shape[0]}, "
                 f"expected {n_events} to match the other per-event arrays."
             )
-        event_arrays[key] = array
+        if key in _KEEP_PARAMETER_KEYS:
+            event_arrays[key] = array
 
     assert n_events is not None  # non-empty input guarantees it was set
     return event_arrays, n_events
@@ -211,11 +191,11 @@ def optimal_snr(
     ----------
     source_parameters:
         Per-event parameters as 1-dimensional arrays, all of equal length,
-        named in the gwmock-pop canonical vocabulary. Required keys are
-        :data:`REQUIRED_SOURCE_PARAMETERS`. Optional waveform keys (spins,
-        ``inclination``, ``coa_phase``, ``lambda_1``, ``lambda_2``) are
-        forwarded to the waveform backend. Other columns (catalog metadata
-        such as ``redshift``) are ignored.
+        named in the gwmock-pop canonical vocabulary. Waveform keys (masses,
+        distance, spins, ``inclination``, ``coa_phase``, ``lambda_1``, and
+        ``lambda_2``) are forwarded to gwmock, which validates its required
+        inputs. Other columns (catalog metadata such as ``redshift``) are
+        validated for shape and then ignored.
     detectors:
         Resolved detector geometries (gwmock ``CustomDetector`` instances,
         e.g. from :func:`astrogwb.detector.resolve_detector`). Names must
