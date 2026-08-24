@@ -13,6 +13,7 @@ CATALOG_RULES = (
     "population_config",
     "population",
     "waveform_catalog",
+    "catalog_snr",
     "catalogs",
 )
 MCMC_RULES = (
@@ -94,9 +95,16 @@ def test_catalog_workflow_builds_fresh_populations_and_waveforms() -> None:
     assert "outputs/population-configs/uniform-redshift.yaml" in result.stdout
     assert "outputs/populations/injection-bns-n32768-eps=0-df1.h5" in result.stdout
     assert "outputs/populations/bns-n16384-eps=0.1-df1.h5" in result.stdout
+    assert "outputs/waveforms/injection-bns-n32768-eps=0-df1.h5" in result.stdout
+    assert "outputs/waveforms/bns-n16384-eps=0.1-df1.h5" in result.stdout
     assert "outputs/catalogs/injection-bns-n32768-eps=0-df1.h5" in result.stdout
     assert "outputs/catalogs/bns-n16384-eps=0.1-df1.h5" in result.stdout
     assert "--uniform-mixing-fraction 0.1" in result.stdout
+    # SNR enrichment covers the union of every network's detectors, so each
+    # run finds its columns whatever network it aliases.
+    assert "astrogwb-compute-snr" in result.stdout
+    assert "--detectors E1,E2,E3,C1,S1,R1,S2,R2" in result.stdout
+    assert "--batch-size 512" in result.stdout
 
 
 def test_catalogs_target_builds_all_8_catalogs() -> None:
@@ -115,6 +123,7 @@ def test_catalogs_target_builds_all_8_catalogs() -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule population_config:") == 2
     assert result.stdout.count("rule waveform_catalog:") == 8
+    assert result.stdout.count("rule catalog_snr:") == 8
     for name in (
         "injection-bns-n32768-eps=0-df1",
         "bns-n32768-eps=0-df1-taylorf2",
@@ -301,6 +310,7 @@ def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
     assert "MissingInputException" in output
     assert "population_config" not in output
     assert "waveform_catalog" not in output
+    assert "catalog_snr" not in output
 
 
 def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
@@ -316,6 +326,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "run_experiment_variable_proposal_guard",
         "run_experiment_waveform_approximant",
         "catalogs",
+        "catalog_snr",
         "plot_cosmological_parameters",
         "amplitude_toy",
         "fiducial_spectrum",

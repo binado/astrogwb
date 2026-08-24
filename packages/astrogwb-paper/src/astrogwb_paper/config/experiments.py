@@ -97,6 +97,30 @@ def load_base(path: Path | None = None) -> dict[str, Any]:
     return dict(_load_inventory(path or inventory_path())["base"])
 
 
+def network_detectors(path: Path | None = None) -> tuple[str, ...]:
+    """Return every detector named by a ``networks`` anchor, first-seen order.
+
+    The union is what a catalog needs so that every run, whatever network it
+    aliases, finds its SNR columns.
+    """
+    resolved = path or inventory_path()
+    networks = _load_inventory(resolved).get("networks", {})
+    if not isinstance(networks, Mapping):
+        raise TypeError(f"{resolved} networks section must be a mapping")
+    detectors: list[str] = []
+    for name, network in networks.items():
+        if not isinstance(network, Mapping):
+            raise TypeError(f"{resolved} network {name!r} must be a mapping")
+        for detector in network.get("detectors", ()):
+            if not isinstance(detector, str) or not detector:
+                raise ValueError(
+                    f"{resolved} network {name!r} must name non-empty detectors"
+                )
+            if detector not in detectors:
+                detectors.append(detector)
+    return tuple(detectors)
+
+
 def load_experiments(path: Path | None = None) -> dict[str, Experiment]:
     """Load every committed experiment from the YAML inventory."""
     resolved = path or inventory_path()
