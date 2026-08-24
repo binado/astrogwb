@@ -8,6 +8,7 @@ from astrogwb.detector import (
     Sensitivity,
     effective_psd,
     evaluate_psd,
+    in_band_inverse_psd,
     load_sensitivities_for_network,
     load_sensitivity,
     load_sensitivity_map,
@@ -54,6 +55,33 @@ def test_evaluate_psd_bundled_preset_runs() -> None:
 def test_evaluate_psd_unknown_reference_raises() -> None:
     with pytest.raises(FileNotFoundError):
         evaluate_psd("does_not_exist_anywhere.txt", np.array([100.0]))
+
+
+def test_in_band_inverse_psd_matches_per_detector_evaluation(
+    frequencies: np.ndarray,
+) -> None:
+    names = ["H1", "V1"]
+    sensitivities = load_sensitivity_map(names)
+
+    mask, inverse_psd = in_band_inverse_psd(
+        frequencies, names, sensitivities, f_min=30.0, f_max=1000.0
+    )
+
+    np.testing.assert_array_equal(mask, (frequencies >= 30.0) & (frequencies <= 1000.0))
+    assert inverse_psd.shape == (len(names), int(mask.sum()))
+    for row, name in enumerate(names):
+        psd = sensitivities[name].evaluate(frequencies[mask], out_of_band="zero")
+        np.testing.assert_allclose(inverse_psd[row], 1.0 / psd)
+
+
+def test_in_band_inverse_psd_default_f_max_is_last_frequency(
+    frequencies: np.ndarray,
+) -> None:
+    sensitivities = load_sensitivity_map(["H1"])
+
+    mask, _ = in_band_inverse_psd(frequencies, ["H1"], sensitivities, f_min=100.0)
+
+    np.testing.assert_array_equal(mask, frequencies >= 100.0)
 
 
 def test_sensitivity_evaluate_delegates() -> None:

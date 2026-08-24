@@ -108,6 +108,37 @@ def evaluate_psd(
     return np.where(out_of_band_mask, np.inf, values)
 
 
+def in_band_inverse_psd(
+    frequencies: ArrayLike,
+    names: Sequence[str],
+    sensitivities: Mapping[str, Sensitivity],
+    *,
+    f_min: float,
+    f_max: float | None = None,
+) -> tuple[NDArray[np.bool_], NDArray[np.float64]]:
+    """Boolean in-band mask and per-detector ``1/S(f)`` restricted to it.
+
+    Returns ``(mask, inverse_psd)`` where ``mask`` selects the
+    ``[f_min, f_max]`` bins of ``frequencies`` (``f_max=None`` uses the last
+    grid frequency) and ``inverse_psd`` has shape ``(len(names), n_in_band)``
+    with row ``i`` corresponding to ``names[i]``. PSDs are interpolated with
+    ``out_of_band="zero"``: the mask already restricts the contraction to
+    the analysis band, so the ``"inf"`` policy is not needed. Bins inside
+    the analysis band but outside a curve's grid interpolate to PSD ``0``
+    and therefore yield an infinite inverse weight.
+    """
+    frequencies = np.asarray(frequencies, dtype=np.float64)
+    f_high = f_max if f_max is not None else float(frequencies[-1])
+    mask = (frequencies >= f_min) & (frequencies <= f_high)
+    psd_stack = np.stack(
+        [
+            sensitivities[name].evaluate(frequencies, out_of_band="zero")
+            for name in names
+        ]
+    )
+    return mask, 1.0 / psd_stack[:, mask]
+
+
 def load_sensitivity(name: str, *, path: str | Path | None = None) -> Sensitivity:
     """Load a single detector's :class:`Sensitivity` from a TOML table."""
     table = _load_sensitivity_table(path)

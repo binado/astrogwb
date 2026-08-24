@@ -29,7 +29,7 @@ from gwmock_signal.waveform.backends.lal import LALSimulationBackend
 from gwmock_signal.waveform.backends.ripple import RippleBackend
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.detector import Sensitivity
+from astrogwb.detector import Sensitivity, in_band_inverse_psd
 
 WaveformBackend = Literal["auto", "ripple", "lal"]
 
@@ -110,25 +110,6 @@ def _rfft_grid(
     frequencies = np.arange(n_samples // 2 + 1, dtype=np.float64) * delta_f
     dt = 1.0 / sampling_frequency
     return frequencies, delta_f, dt
-
-
-def _in_band_inverse_psd(
-    frequencies: NDArray[np.float64],
-    names: Sequence[str],
-    sensitivities: Mapping[str, Sensitivity],
-    f_min: float,
-    f_max: float | None,
-) -> tuple[NDArray[np.bool_], NDArray[np.float64]]:
-    """Boolean in-band mask and ``1/S(f)`` with shape ``(n_detectors, n_in_band)``."""
-    f_high = f_max if f_max is not None else float(frequencies[-1])
-    mask = (frequencies >= f_min) & (frequencies <= f_high)
-    psd_stack = np.stack(
-        [
-            sensitivities[name].evaluate(frequencies, out_of_band="zero")
-            for name in names
-        ]
-    )
-    return mask, 1.0 / psd_stack[:, mask]
 
 
 def matched_filter_snr(
@@ -388,12 +369,12 @@ def _optimal_snr_ripple_batch(
         )
         strain = np.asarray(batch.strain)
         frequencies, delta_f, dt = _rfft_grid(strain.shape[-1], sampling_frequency)
-        in_band_mask, inverse_psd = _in_band_inverse_psd(
+        in_band_mask, inverse_psd = in_band_inverse_psd(
             frequencies,
             names,
             sensitivities,
-            minimum_frequency,
-            maximum_frequency,
+            f_min=minimum_frequency,
+            f_max=maximum_frequency,
         )
         snrs[indices] = matched_filter_snr(
             strain, inverse_psd, in_band_mask, delta_f, dt
@@ -443,8 +424,12 @@ def _optimal_snr_lal(
         backend = LALSimulationBackend(segment_duration=segment_duration)
         n_samples = round(segment_duration * sampling_frequency)
         frequencies, delta_f, dt = _rfft_grid(n_samples, sampling_frequency)
-        mask, inv_psd = _in_band_inverse_psd(
-            frequencies, names, sensitivities, minimum_frequency, maximum_frequency
+        mask, inv_psd = in_band_inverse_psd(
+            frequencies,
+            names,
+            sensitivities,
+            f_min=minimum_frequency,
+            f_max=maximum_frequency,
         )
 
         for event in indices:
