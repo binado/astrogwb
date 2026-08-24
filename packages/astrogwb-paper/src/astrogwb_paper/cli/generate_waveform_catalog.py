@@ -6,9 +6,9 @@ import math
 from pathlib import Path
 
 import numpy as np
+from astrogwb.waveform import make_catalog, save_catalog
 from gwmock_pop.loaders.file_loader import read_population_catalogue
 from gwmock_signal.waveform import RippleBackend
-from pluscross import WaveformCatalog, save_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,8 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Load a gwmock-pop population file, convert source-frame masses to the "
             "detector frame, generate frequency-domain waveforms with the Ripple "
-            "backend, and persist the complex polarizations as a pluscross "
-            "HDF5 catalog (see the pluscross repo's SPEC.md)."
+            "backend, and persist the complex polarizations as a waveform_catalog "
+            "HDF5 file."
         )
     )
     parser.add_argument(
@@ -266,9 +266,9 @@ def main() -> None:
         if args.maximum_frequency is not None
         else args.sampling_frequency / 2.0
     )
-    # The backend returns (n_events, n_freq), matching pluscross's
+    # The backend returns (n_events, n_freq), matching make_catalog's
     # (nsamples, nfreq) in-memory convention.
-    catalog = WaveformCatalog(
+    catalog = make_catalog(
         frequencies=frequencies,
         plus=plus,
         cross=cross,
@@ -288,8 +288,8 @@ def main() -> None:
 
     logger.info(
         "Saved catalog: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",
-        catalog.nsamples,
-        catalog.nfreq,
+        catalog.sizes["sample"],
+        catalog.sizes["frequency"],
         float(frequencies[0]),
         float(frequencies[-1]),
         args.approximant,

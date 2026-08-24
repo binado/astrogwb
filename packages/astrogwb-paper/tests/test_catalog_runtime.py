@@ -8,7 +8,6 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     compute_merger_rate_distance_and_logprob,
 )
 from astrogwb_paper.catalogs import (
-    CatalogArrays,
     compute_fiducial_injection_spectrum,
     compute_proposal_logprob,
     validate_matching_frequency_grids,
@@ -16,16 +15,10 @@ from astrogwb_paper.catalogs import (
 from astrogwb_paper.config.figures import load_fiducials
 from astrogwb_paper.config.mcmc import ProposalConfig
 
-
-def _catalog() -> CatalogArrays:
-    return CatalogArrays(
-        frequencies=jnp.array([2.0, 3.0]),
-        polarization_power=jnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
-        samples={
-            "redshift": jnp.array([0.1, 1.0, 2.0]),
-            "luminosity_distance": jnp.array([450.0, 6800.0, 16_000.0]),
-        },
-    )
+_REDSHIFT = jnp.array([0.1, 1.0, 2.0])
+_LUMINOSITY_DISTANCE = jnp.array([450.0, 6800.0, 16_000.0])
+_POLARIZATION_POWER = jnp.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+_SAMPLES = {"redshift": _REDSHIFT, "luminosity_distance": _LUMINOSITY_DISTANCE}
 
 
 def _proposal(epsilon: float) -> ProposalConfig:
@@ -43,13 +36,12 @@ def _proposal(epsilon: float) -> ProposalConfig:
 
 
 def test_zero_fraction_proposal_is_the_md_density() -> None:
-    catalog = _catalog()
     proposal = _proposal(0.0)
 
-    actual = compute_proposal_logprob(catalog.samples, proposal)
+    actual = compute_proposal_logprob(_REDSHIFT, proposal)
     _, _, expected = compute_merger_rate_distance_and_logprob(
         {**proposal.model_dump(), "local_merger_rate": 1.0},
-        catalog.samples,
+        {"redshift": _REDSHIFT},
         redshift_grid=jnp.linspace(0.0, 20.0, 256),
     )
 
@@ -57,17 +49,16 @@ def test_zero_fraction_proposal_is_the_md_density() -> None:
 
 
 def test_one_fraction_proposal_is_uniform_density() -> None:
-    actual = compute_proposal_logprob(_catalog().samples, _proposal(1.0))
+    actual = compute_proposal_logprob(_REDSHIFT, _proposal(1.0))
 
     np.testing.assert_allclose(actual, -np.log(20.0))
 
 
 def test_interior_fraction_uses_stable_mixture_density() -> None:
-    catalog = _catalog()
     proposal = _proposal(0.2)
-    md = compute_proposal_logprob(catalog.samples, _proposal(0.0))
+    md = compute_proposal_logprob(_REDSHIFT, _proposal(0.0))
 
-    actual = compute_proposal_logprob(catalog.samples, proposal)
+    actual = compute_proposal_logprob(_REDSHIFT, proposal)
     expected = np.logaddexp(
         np.log(0.8) + np.asarray(md),
         np.log(0.2 / 20.0),
@@ -78,34 +69,27 @@ def test_interior_fraction_uses_stable_mixture_density() -> None:
 
 
 def test_injection_and_proposal_frequency_grids_must_match() -> None:
-    proposal = _catalog()
-    proposal = CatalogArrays(
-        frequencies=jnp.array([2.0, 4.0]),
-        polarization_power=proposal.polarization_power,
-        samples=proposal.samples,
-    )
-
     with pytest.raises(ValueError, match="identical frequency grids"):
-        validate_matching_frequency_grids(_catalog(), proposal)
+        validate_matching_frequency_grids(jnp.array([2.0, 3.0]), jnp.array([2.0, 4.0]))
 
 
 def test_fiducial_injection_spectrum_uses_unit_weights() -> None:
-    injection = _catalog()
     fiducials = load_fiducials()
     grid = jnp.linspace(0.0, 20.0, 256)
 
     rate, actual = compute_fiducial_injection_spectrum(
-        injection,
+        _POLARIZATION_POWER,
+        _SAMPLES,
         fiducials=fiducials,
         redshift_grid=grid,
     )
     expected_rate, _, _ = compute_merger_rate_distance_and_logprob(
         fiducials,
-        injection.samples,
+        _SAMPLES,
         redshift_grid=grid,
     )
     expected = spectral_density(
-        injection.polarization_power,
+        _POLARIZATION_POWER,
         jnp.ones(3),
         expected_rate,
         average_mode="analytic_inclination",

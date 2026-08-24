@@ -41,14 +41,15 @@ from astrogwb.frequency import (
 from astrogwb.gwb import spectral_density, spectral_snr_squared
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb.utils import years_to_seconds
+from astrogwb.waveform import open_catalog
 from astrogwb.waveform import polarization_power as compute_polarization_power
+from astrogwb_paper.catalogs import samples_from_catalog
 from astrogwb_paper.config.figures import load_analysis_grid
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 from numpyro.infer import MCMC, NUTS
-from pluscross import load_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
 # mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
@@ -127,12 +128,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         key: value for key, value in fiducials.items() if key not in sampled_params
     }
 
-    catalog = load_catalog(catalog_path)
-    frequencies = jnp.asarray(catalog.frequencies)
-    polarization_power = jnp.asarray(compute_polarization_power(catalog))
-    samples = {
-        name: jnp.asarray(value) for name, value in catalog.source_parameters.items()
-    }
+    catalog = open_catalog(catalog_path)
+    frequencies = jnp.asarray(catalog.frequency.values)
+    polarization_power = jnp.asarray(compute_polarization_power(catalog).values)
+    samples = samples_from_catalog(catalog)
     del catalog
     n_freq, n_samples = polarization_power.shape
     print(f"loaded catalog: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")

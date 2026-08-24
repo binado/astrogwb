@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import NDArray
-from pluscross import WaveformCatalog
+import xarray as xr
 
 
-def polarization_power(catalog: WaveformCatalog) -> NDArray[np.float64]:
+def polarization_power(catalog: xr.Dataset) -> xr.DataArray:
     """Reduce a loaded waveform catalog to polarization power ``|h+|^2 + |hx|^2``.
 
-    Returns a ``(nfreq, nsamples)`` float64 array for the inference stack.
+    Returns a ``(frequency, sample)`` float64 DataArray for the inference stack.
     """
-    power = np.abs(catalog.plus) ** 2 + np.abs(catalog.cross) ** 2
-    return np.asarray(power.T, dtype=np.float64)
+    power = (np.abs(catalog.polarizations) ** 2).sum("polarization")
+    return power.transpose("frequency", "sample").astype(np.float64)

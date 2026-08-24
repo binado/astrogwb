@@ -2,57 +2,61 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
+import jax
 import jax.numpy as jnp
 import numpy as np
+import xarray as xr
 from astrogwb.gwb import spectral_density
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
 )
-from astrogwb.waveform import apply_gw_distance_to_waveforms
+from astrogwb.waveform import apply_gw_distance_to_waveforms, open_catalog
 from astrogwb.waveform import polarization_power as compute_polarization_power
-from pluscross import load_catalog
+from numpy.typing import ArrayLike
 
 from astrogwb_paper.config.mcmc import ProposalConfig
 
 
-@dataclass(frozen=True)
-class CatalogArrays:
-    """JAX arrays reduced from one waveform catalog."""
-
-    frequencies: Any
-    polarization_power: Any
-    samples: dict[str, Any]
-
-
-def load_catalog_arrays(
+def load_reduced_catalog(
     path: Path,
     *,
     fiducials: dict[str, float],
-) -> CatalogArrays:
-    """Load a catalog, apply fiducial GW propagation, and reduce its waveforms."""
-    catalog = load_catalog(path)
+) -> xr.Dataset:
+    """Load a catalog, apply fiducial GW propagation, and reduce it to power.
+
+    Numpy-backed: no JAX conversion happens here. Returns a Dataset with
+    ``polarization_power (frequency, sample)`` and ``source_parameters
+    (sample, parameter)``, carrying the source file's attrs.
+    """
+    catalog = open_catalog(path)
     catalog = apply_gw_distance_to_waveforms(
         catalog,
         xi_0=float(fiducials["xi_0"]),
         xi_n=float(fiducials["xi_n"]),
     )
-    arrays = CatalogArrays(
-        frequencies=jnp.asarray(catalog.frequencies),
-        polarization_power=jnp.asarray(compute_polarization_power(catalog)),
-        samples={
-            name: jnp.asarray(values)
-            for name, values in catalog.source_parameters.items()
+    power = compute_polarization_power(catalog).load()
+    return xr.Dataset(
+        {
+            "polarization_power": power,
+            "source_parameters": catalog.source_parameters.load(),
         },
+        attrs=catalog.attrs,
     )
-    return arrays
+
+
+def samples_from_catalog(catalog: xr.Dataset) -> dict[str, jax.Array]:
+    """Unstack ``source_parameters`` into the dict shape the model expects."""
+    return {
+        str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
+        for name in catalog.parameter.values
+    }
 
 
 def validate_catalog_samples(
-    catalog: CatalogArrays,
+    catalog: xr.Dataset,
     *,
     label: str,
     minimum_redshift: float,
@@ -60,14 +64,14 @@ def validate_catalog_samples(
 ) -> None:
     """Validate required columns and redshift support."""
     required = {"redshift", "luminosity_distance"}
-    missing = sorted(required - set(catalog.samples))
+    missing = sorted(required - set(catalog.parameter.values))
     if missing:
         raise ValueError(
             f"{label} catalog samples are missing required parameter(s): "
             + ", ".join(missing)
         )
 
-    redshift = np.asarray(catalog.samples["redshift"])
+    redshift = catalog.source_parameters.sel(parameter="redshift").values
     z_lo = float(np.min(redshift))
     z_hi = float(np.max(redshift))
     if z_lo < minimum_redshift or z_hi > maximum_redshift:
@@ -79,11 +83,11 @@ def validate_catalog_samples(
 
 
 def compute_proposal_logprob(
-    samples: dict[str, Any],
+    redshift: jax.typing.ArrayLike,
     proposal: ProposalConfig,
-) -> Any:
+) -> jax.Array:
     """Evaluate the fixed MD/uniform proposal at catalog redshifts."""
-    redshift = jnp.asarray(samples["redshift"])
+    redshift = jnp.asarray(redshift)
     proposal_grid = jnp.linspace(
         proposal.minimum_redshift, proposal.maximum_redshift, proposal.n_grid
     )
@@ -120,11 +124,11 @@ def compute_proposal_logprob(
 
 
 def validate_matching_frequency_grids(
-    injection: CatalogArrays, proposal: CatalogArrays
+    injection_frequencies: ArrayLike, proposal_frequencies: ArrayLike
 ) -> None:
     """Require injection and proposal waveforms to share the exact frequency grid."""
-    injection_frequencies = np.asarray(injection.frequencies)
-    proposal_frequencies = np.asarray(proposal.frequencies)
+    injection_frequencies = np.asarray(injection_frequencies)
+    proposal_frequencies = np.asarray(proposal_frequencies)
     if not np.array_equal(injection_frequencies, proposal_frequencies):
         raise ValueError(
             "injection and proposal catalogs must have identical frequency grids"
@@ -132,20 +136,24 @@ def validate_matching_frequency_grids(
 
 
 def compute_fiducial_injection_spectrum(
-    injection: CatalogArrays,
+    polarization_power: ArrayLike,
+    samples: Mapping[str, ArrayLike],
     *,
     fiducials: dict[str, float],
-    redshift_grid: Any,
-) -> tuple[Any, Any]:
+    redshift_grid: ArrayLike,
+) -> tuple[jax.Array, jax.Array]:
     """Return the fiducial total rate and independently estimated spectrum."""
+    polarization_power = jnp.asarray(polarization_power)
+    samples_jax = {name: jnp.asarray(value) for name, value in samples.items()}
+    redshift_grid = jnp.asarray(redshift_grid)
     total_rate, _, _ = compute_merger_rate_distance_and_logprob(
         fiducials,
-        injection.samples,
+        samples_jax,
         redshift_grid=redshift_grid,
     )
-    weights = jnp.ones(injection.polarization_power.shape[1])
+    weights = jnp.ones(polarization_power.shape[1])
     spectrum = spectral_density(
-        injection.polarization_power,
+        polarization_power,
         weights,
         total_rate,
         average_mode="analytic_inclination",

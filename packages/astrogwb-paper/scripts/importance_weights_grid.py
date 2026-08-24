@@ -28,7 +28,8 @@ import numpyro.distributions as dist
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb_paper.catalogs import compute_proposal_logprob
+from astrogwb.waveform import open_catalog
+from astrogwb_paper.catalogs import compute_proposal_logprob, samples_from_catalog
 from astrogwb_paper.config.catalogs import catalog_recipe, proposal_config
 from astrogwb_paper.config.experiments import DEFAULT_CATALOG
 from astrogwb_paper.config.figures import load_fiducials
@@ -38,7 +39,6 @@ from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.figure import Figure
 from matplotlib.projections import register_projection
-from pluscross import load_catalog
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
 # Restore the standard projection for consistent plotting.
@@ -177,16 +177,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     fiducials = load_fiducials()
     use_paper_style()
 
-    # Deliberately bypasses astrogwb_paper.inference / load_catalog_arrays: this
-    # figure only ever touches source_parameters, so the shared path would
-    # materialize an (F, N) polarization-power array it never uses and call
-    # apply_gw_distance_to_waveforms, which at the fiducial xi_0 = 1.0 is
-    # numerically the identity. All cost, no benefit.
-    catalog = load_catalog(catalog_path)
-    samples = {
-        name: jnp.asarray(values) for name, values in catalog.source_parameters.items()
-    }
-    del catalog
+    catalog = open_catalog(catalog_path)
+    samples = samples_from_catalog(catalog)
     missing = [
         name for name in ("redshift", "luminosity_distance") if name not in samples
     ]
@@ -204,7 +196,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=fiducials,
         redshift_grid=z_grid,
-        proposal_logprob=compute_proposal_logprob(samples, proposal),
+        proposal_logprob=compute_proposal_logprob(samples["redshift"], proposal),
     )
 
     figures: list[tuple[Figure, Path]] = []

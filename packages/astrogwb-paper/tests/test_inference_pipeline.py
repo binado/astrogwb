@@ -20,12 +20,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from astrogwb.waveform import make_catalog, save_catalog
 from astrogwb_paper.cli.profile_model import build_potential
 from astrogwb_paper.cli.run_mcmc import run
 from astrogwb_paper.config.mcmc import RunConfig, build_run_config
 from astrogwb_paper.inference import prepare_inference_inputs, prepare_observation
 from config_fixtures import example_raw
-from pluscross import WaveformCatalog, save_catalog
 
 pytestmark = pytest.mark.integration
 
@@ -55,7 +55,7 @@ def _write_catalog(
         "mass_1": np.full(N_SOURCES, 1.4),
         "mass_2": np.full(N_SOURCES, 1.4),
     }
-    catalog = WaveformCatalog(
+    catalog = make_catalog(
         frequencies=frequencies,
         plus=rng.normal(size=shape) + 1j * rng.normal(size=shape),
         cross=rng.normal(size=shape) + 1j * rng.normal(size=shape),
@@ -143,7 +143,6 @@ def test_masked_model_kwargs_masks_frequencies_but_not_samples(
     assert kwargs["polarization_power"].shape == (N_BAND, N_SOURCES)
     # `samples` is per-source, not per-frequency. Masking it would silently
     # truncate the population and change every posterior without erroring.
-    assert kwargs["samples"] is inputs.proposal.samples
     for name, values in kwargs["samples"].items():
         assert values.shape == (N_SOURCES,), name
 
@@ -184,7 +183,7 @@ def test_catalog_without_stored_proposal_density_is_accepted(
         detectors=config.analysis.detectors,
     )
 
-    assert "proposal_redshift_logpdf" not in inputs.proposal.samples
+    assert "proposal_redshift_logpdf" not in inputs.proposal.parameter.values
 
 
 # --------------------------------------------------------------------------- #
