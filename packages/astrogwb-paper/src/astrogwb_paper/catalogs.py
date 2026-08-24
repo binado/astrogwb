@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import xarray as xr
@@ -14,6 +15,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 )
 from astrogwb.waveform import apply_gw_distance_to_waveforms, open_catalog
 from astrogwb.waveform import polarization_power as compute_polarization_power
+from numpy.typing import ArrayLike
 
 from astrogwb_paper.config.mcmc import ProposalConfig
 
@@ -45,7 +47,7 @@ def load_reduced_catalog(
     )
 
 
-def samples_from_catalog(catalog: xr.Dataset) -> dict[str, Any]:
+def samples_from_catalog(catalog: xr.Dataset) -> dict[str, jax.Array]:
     """Unstack ``source_parameters`` into the dict shape the model expects."""
     return {
         str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
@@ -81,9 +83,9 @@ def validate_catalog_samples(
 
 
 def compute_proposal_logprob(
-    redshift: Any,
+    redshift: jax.typing.ArrayLike,
     proposal: ProposalConfig,
-) -> Any:
+) -> jax.Array:
     """Evaluate the fixed MD/uniform proposal at catalog redshifts."""
     redshift = jnp.asarray(redshift)
     proposal_grid = jnp.linspace(
@@ -122,7 +124,7 @@ def compute_proposal_logprob(
 
 
 def validate_matching_frequency_grids(
-    injection_frequencies: Any, proposal_frequencies: Any
+    injection_frequencies: ArrayLike, proposal_frequencies: ArrayLike
 ) -> None:
     """Require injection and proposal waveforms to share the exact frequency grid."""
     injection_frequencies = np.asarray(injection_frequencies)
@@ -134,16 +136,19 @@ def validate_matching_frequency_grids(
 
 
 def compute_fiducial_injection_spectrum(
-    polarization_power: Any,
-    samples: dict[str, Any],
+    polarization_power: ArrayLike,
+    samples: Mapping[str, ArrayLike],
     *,
     fiducials: dict[str, float],
-    redshift_grid: Any,
-) -> tuple[Any, Any]:
+    redshift_grid: ArrayLike,
+) -> tuple[jax.Array, jax.Array]:
     """Return the fiducial total rate and independently estimated spectrum."""
+    polarization_power = jnp.asarray(polarization_power)
+    samples_jax = {name: jnp.asarray(value) for name, value in samples.items()}
+    redshift_grid = jnp.asarray(redshift_grid)
     total_rate, _, _ = compute_merger_rate_distance_and_logprob(
         fiducials,
-        samples,
+        samples_jax,
         redshift_grid=redshift_grid,
     )
     weights = jnp.ones(polarization_power.shape[1])

@@ -66,14 +66,18 @@ def test_round_trip_preserves_values_and_attrs(tmp_path: Path) -> None:
     }
 
 
-def test_save_writes_requested_chunksizes(tmp_path: Path) -> None:
-    catalog = _catalog(nsamples=6, nfreq=4)
+def test_save_with_compression_round_trips(tmp_path: Path) -> None:
+    catalog = _catalog()
     path = tmp_path / "catalog.h5"
 
-    save_catalog(path, catalog)
+    save_catalog(path, catalog, compression="gzip")
 
     with h5py.File(path) as f:
-        assert f["polarizations"].chunks == (1, 6, 4)
+        assert f["polarizations"].compression == "gzip"
+    loaded = load_catalog(path)
+    np.testing.assert_allclose(
+        loaded.polarizations.values, catalog.polarizations.values
+    )
 
 
 def test_open_catalog_leaves_polarizations_lazy(tmp_path: Path) -> None:

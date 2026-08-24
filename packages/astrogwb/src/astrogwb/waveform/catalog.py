@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import warnings
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -55,9 +54,6 @@ WaveformCatalog = xr.Dataset
 FORMAT_NAME = "waveform_catalog"
 FORMAT_VERSION = 2
 DOMAIN_FREQUENCY = "frequency"
-
-#: Target uncompressed chunk size in complex128 elements (~64 MiB).
-_CHUNK_ELEMENTS = 2**22
 
 _POLARIZATIONS = ("plus", "cross")
 
@@ -124,12 +120,6 @@ def make_catalog(
     return catalog
 
 
-def _chunks(nsamples: int, nfreq: int) -> tuple[int, int, int]:
-    """On-disk chunk shape: a leading ``1`` keeps plus and cross in separate chunks."""
-    per_chunk = min(nsamples, max(1, _CHUNK_ELEMENTS // max(nfreq, 1)))
-    return (1, per_chunk, nfreq)
-
-
 def save_catalog(
     path: str | Path,
     catalog: xr.Dataset,
@@ -139,15 +129,15 @@ def save_catalog(
     """Write ``catalog`` to ``path`` in waveform_catalog format v2.
 
     Polarization data is uncompressed by default. Pass ``compression`` (for
-    example ``"gzip"``) to opt into an HDF5 compression filter.
+    example ``"gzip"``) to opt into an HDF5 compression filter; HDF5 then
+    picks the on-disk chunking automatically.
     """
     validate_catalog(catalog, label="waveform_catalog")
-    nsamples = catalog.sizes["sample"]
-    nfreq = catalog.sizes["frequency"]
-    polarizations_encoding: dict[str, Any] = {"chunksizes": _chunks(nsamples, nfreq)}
-    if compression is not None:
-        polarizations_encoding["compression"] = compression
-    encoding = {"polarizations": polarizations_encoding}
+    encoding = (
+        {"polarizations": {"compression": compression}}
+        if compression is not None
+        else None
+    )
 
     with warnings.catch_warnings():
         # invalid_netcdf=True stores complex128 as an HDF5 compound {r, i}
