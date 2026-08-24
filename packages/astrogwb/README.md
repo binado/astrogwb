@@ -22,7 +22,8 @@ Optional accelerator builds are available as `astrogwb[cuda]` and
 - `astrogwb.importance` defines the reusable importance-weighting protocol and
   compact-binary population model.
 - `astrogwb.sampling` exposes the caller-prepared NumPyro model.
-- `astrogwb.waveform` reduces `pluscross` catalogs to polarization power.
+- `astrogwb.waveform` owns the `waveform_catalog` HDF5 format (IO via
+  `astrogwb.waveform.catalog`) and reduces catalogs to polarization power.
 
 For example:
 

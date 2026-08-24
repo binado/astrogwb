@@ -27,9 +27,10 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
+import numpy as np
+import xarray as xr
 from astrogwb.detector import effective_psd as compute_effective_psd
 from astrogwb.detector import load_sensitivity_map
-from astrogwb.frequency import apply_frequency_mask
 from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
@@ -44,10 +45,10 @@ from astrogwb_paper.amplitude import (
     build_amplitude_marginalization,
 )
 from astrogwb_paper.catalogs import (
-    CatalogArrays,
     compute_fiducial_injection_spectrum,
     compute_proposal_logprob,
-    load_catalog_arrays,
+    load_reduced_catalog,
+    samples_from_catalog,
     validate_catalog_samples,
     validate_matching_frequency_grids,
 )
@@ -64,16 +65,11 @@ class Observation:
     Arrays are pre-mask; ``frequency_mask`` selects the analysis band.
     """
 
-    injection: CatalogArrays
+    frequencies: jax.Array
     redshift_grid: jax.Array
     total_merger_rate: jax.Array
     spectral_density: jax.Array
     frequency_mask: jax.Array
-
-    @property
-    def frequencies(self) -> jax.Array:
-        """The injection catalog's frequency grid (shared with the proposal)."""
-        return self.injection.frequencies
 
 
 @dataclass(frozen=True)
@@ -81,34 +77,23 @@ class InferenceInputs:
     """Everything the NumPyro model is evaluated against, for one run."""
 
     observation: Observation
-    proposal: CatalogArrays
+    proposal: xr.Dataset
     effective_psd: jax.Array
     merger_rate_and_log_weights_fn: Any
 
     def masked_model_kwargs(self) -> dict[str, Any]:
         """Restrict to the analysis band and return the model's keyword inputs."""
         observation = self.observation
-        (
-            frequencies,
-            polarization_power,
-            observed_spectral_density,
-            effective_psd,
-        ) = apply_frequency_mask(
-            observation.frequency_mask,
-            self.proposal.frequencies,
-            self.proposal.polarization_power,
-            observation.spectral_density,
-            self.effective_psd,
-        )
+        mask = np.asarray(observation.frequency_mask)
+        # `source_parameters` has no `frequency` dim, so `isel` cannot touch it --
+        # the old "NOT masked" hazard is now structurally enforced.
+        band = self.proposal.isel(frequency=mask)
         return {
-            "frequencies": frequencies,
-            "polarization_power": polarization_power,
-            # NOT masked: `samples` is per-source `(N,)`, while the other four
-            # arrays are per-frequency. Masking it would silently truncate the
-            # population and change every posterior without raising.
-            "samples": self.proposal.samples,
-            "observed_spectral_density": observed_spectral_density,
-            "effective_psd": effective_psd,
+            "frequencies": jnp.asarray(band.frequency.values),
+            "polarization_power": jnp.asarray(band.polarization_power.values),
+            "samples": samples_from_catalog(band),
+            "observed_spectral_density": observation.spectral_density[mask],
+            "effective_psd": self.effective_psd[mask],
         }
 
 
@@ -120,7 +105,7 @@ def prepare_observation(
 ) -> Observation:
     """Load the injection catalog and build the fiducial observed spectrum."""
     fiducial_values = dict(fiducials)
-    injection = load_catalog_arrays(injection_path, fiducials=fiducial_values)
+    injection = load_reduced_catalog(injection_path, fiducials=fiducial_values)
     validate_catalog_samples(
         injection,
         label="injection",
@@ -136,8 +121,10 @@ def prepare_observation(
     redshift_grid = jnp.linspace(
         grid.minimum_redshift, grid.maximum_redshift, grid.n_grid
     )
+    injection_frequencies = jnp.asarray(injection.frequency.values)
     total_merger_rate, spectral_density = compute_fiducial_injection_spectrum(
-        injection,
+        jnp.asarray(injection.polarization_power.values),
+        samples_from_catalog(injection),
         fiducials=fiducial_values,
         redshift_grid=redshift_grid,
     )
@@ -147,17 +134,17 @@ def prepare_observation(
     )
 
     frequency_mask = make_frequency_mask(
-        injection.frequencies, fmin=grid.f_min, fmax=grid.f_max
+        injection_frequencies, fmin=grid.f_min, fmax=grid.f_max
     )
     logger.info(
         "Analysis band: %d of %d bins (%.1f-%.1f Hz)",
         int(jnp.sum(frequency_mask)),
-        injection.frequencies.shape[0],
+        injection_frequencies.shape[0],
         grid.f_min,
         grid.f_max,
     )
     return Observation(
-        injection=injection,
+        frequencies=injection_frequencies,
         redshift_grid=redshift_grid,
         total_merger_rate=total_merger_rate,
         spectral_density=spectral_density,
@@ -176,14 +163,15 @@ def prepare_inference_inputs(
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs."""
     observation = prepare_observation(injection_path, fiducials=fiducials, grid=grid)
-    proposal = load_catalog_arrays(proposal_path, fiducials=dict(fiducials))
+    proposal = load_reduced_catalog(proposal_path, fiducials=dict(fiducials))
     validate_catalog_samples(
         proposal,
         label="proposal",
         minimum_redshift=grid.minimum_redshift,
         maximum_redshift=grid.maximum_redshift,
     )
-    validate_matching_frequency_grids(observation.injection, proposal)
+    proposal_frequencies = proposal.frequency.values
+    validate_matching_frequency_grids(observation.frequencies, proposal_frequencies)
     n_freq, n_samples = proposal.polarization_power.shape
     logger.info(
         "Loaded proposal catalog %s: n_frequency_bins=%d n_proposal_samples=%d",
@@ -200,13 +188,14 @@ def prepare_inference_inputs(
     # do not "tidy" either one to match the other.
     sensitivities = load_sensitivity_map(detectors)
     effective_psd_arr = jnp.asarray(
-        compute_effective_psd(proposal.frequencies, list(detectors), sensitivities)
+        compute_effective_psd(proposal_frequencies, list(detectors), sensitivities)
     )
 
+    proposal_redshift = proposal.source_parameters.sel(parameter="redshift").values
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=dict(fiducials),
         redshift_grid=observation.redshift_grid,
-        proposal_logprob=compute_proposal_logprob(proposal.samples, proposal_config),
+        proposal_logprob=compute_proposal_logprob(proposal_redshift, proposal_config),
     )
     return InferenceInputs(
         observation=observation,

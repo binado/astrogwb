@@ -66,7 +66,8 @@ from astrogwb.sampling.models import spectral_density_model
 from astrogwb_paper.catalogs import (
     compute_proposal_logprob,
     compute_fiducial_injection_spectrum,
-    load_catalog_arrays,
+    load_reduced_catalog,
+    samples_from_catalog,
     validate_catalog_samples,
     validate_matching_frequency_grids,
 )
@@ -160,8 +161,8 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # See `mcmc.py` for the injection/proposal split and full catalog schema.
 
 # %%
-injection = load_catalog_arrays(INJECTION_CATALOG_PATH, fiducials=fiducials)
-proposal = load_catalog_arrays(PROPOSAL_CATALOG_PATH, fiducials=fiducials)
+injection = load_reduced_catalog(INJECTION_CATALOG_PATH, fiducials=fiducials)
+proposal = load_reduced_catalog(PROPOSAL_CATALOG_PATH, fiducials=fiducials)
 validate_catalog_samples(
     injection,
     label="injection",
@@ -174,11 +175,11 @@ validate_catalog_samples(
     minimum_redshift=minimum_redshift,
     maximum_redshift=maximum_redshift,
 )
-validate_matching_frequency_grids(injection, proposal)
+validate_matching_frequency_grids(injection.frequency.values, proposal.frequency.values)
 
-frequencies = proposal.frequencies
-polarization_power = proposal.polarization_power
-samples = proposal.samples
+frequencies = jnp.asarray(proposal.frequency.values)
+polarization_power = jnp.asarray(proposal.polarization_power.values)
+samples = samples_from_catalog(proposal)
 n_freq, n_samples = polarization_power.shape
 print(f"loaded proposal: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
 print("loaded injection:", injection.polarization_power.shape[1], "samples")
@@ -231,7 +232,7 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 z_grid = jnp.linspace(minimum_redshift, maximum_redshift, n_grid)
 
 proposal_logprob = compute_proposal_logprob(
-    samples,
+    samples["redshift"],
     ProposalConfig(
         uniform_mixing_fraction=0.1,
         minimum_redshift=0.0,
@@ -285,7 +286,8 @@ def plot_omegagw(
 
 
 rate0, observed_spectral_density = compute_fiducial_injection_spectrum(
-    injection,
+    jnp.asarray(injection.polarization_power.values),
+    samples_from_catalog(injection),
     fiducials=fiducials,
     redshift_grid=z_grid,
 )
