@@ -75,6 +75,24 @@ def test_network_detectors_rejects_malformed_network_entries(
         network_detectors(inventory)
 
 
+def test_network_detectors_rejects_scalar_detectors(tmp_path: Path) -> None:
+    inventory = tmp_path / "experiments.yaml"
+    inventory.write_text(
+        "base: {seed: 1}\n"
+        "networks:\n"
+        "  bad:\n"
+        "    detectors: E1\n"
+        "experiments:\n"
+        "  demo:\n"
+        "    runs:\n"
+        "      only: {}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TypeError, match="network 'bad' detectors must be a list"):
+        network_detectors(inventory)
+
+
 def test_single_yaml_is_the_only_mcmc_inventory() -> None:
     assert (PAPER_ROOT / EXPERIMENTS_PATH).is_file()
     assert not (PAPER_ROOT / "inputs/config.yaml").exists()
