@@ -8,7 +8,6 @@ import pytest
 from astrogwb.waveform.catalog import (
     DOMAIN_FREQUENCY,
     FORMAT_NAME,
-    FORMAT_VERSION,
     load_catalog,
     make_catalog,
     open_catalog,
@@ -54,7 +53,6 @@ def test_round_trip_preserves_values_and_attrs(tmp_path: Path) -> None:
     )
     assert dict(loaded.attrs) == {
         "format_name": FORMAT_NAME,
-        "format_version": FORMAT_VERSION,
         "domain": DOMAIN_FREQUENCY,
         "approximant": "Toy",
         "minimum_frequency": 10.0,
@@ -96,19 +94,6 @@ def test_load_catalog_rejects_wrong_format_name(tmp_path: Path) -> None:
         f.attrs["format_name"] = "something_else"
 
     with pytest.raises(ValueError, match="format_name"):
-        load_catalog(path)
-
-
-def test_load_catalog_rejects_wrong_format_version(tmp_path: Path) -> None:
-    catalog = _catalog()
-    path = tmp_path / "catalog.h5"
-    save_catalog(path, catalog)
-    with h5py.File(path, "r+") as f:
-        f.attrs["format_version"] = np.int64(2)
-
-    with pytest.raises(
-        ValueError, match="v2 \\(complex polarizations\\) catalogs must be regenerated"
-    ):
         load_catalog(path)
 
 

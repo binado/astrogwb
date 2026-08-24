@@ -17,7 +17,7 @@ for documentation value only) with the layout::
         polarization_power (frequency, sample) float64   # |h+|^2 + |hx|^2
         source_parameters  (sample, parameter) float64
     Attributes:
-        format_name, format_version, domain, approximant,
+        format_name, domain, approximant,
         minimum_frequency, maximum_frequency, reference_frequency, sampling_frequency
 
 ``sample`` deliberately has no coordinate.
@@ -40,7 +40,6 @@ from numpy.typing import NDArray
 __all__ = [
     "DOMAIN_FREQUENCY",
     "FORMAT_NAME",
-    "FORMAT_VERSION",
     "WaveformCatalog",
     "load_catalog",
     "make_catalog",
@@ -53,7 +52,6 @@ __all__ = [
 WaveformCatalog = xr.Dataset
 
 FORMAT_NAME = "waveform_catalog"
-FORMAT_VERSION = 3
 DOMAIN_FREQUENCY = "frequency"
 
 
@@ -101,7 +99,6 @@ def make_catalog(
         },
         attrs={
             "format_name": FORMAT_NAME,
-            "format_version": FORMAT_VERSION,
             "domain": DOMAIN_FREQUENCY,
             "approximant": approximant,
             "minimum_frequency": float(minimum_frequency),
@@ -120,7 +117,7 @@ def save_catalog(
     *,
     compression: str | None = None,
 ) -> None:
-    """Write ``catalog`` to ``path`` in waveform_catalog format v3.
+    """Write ``catalog`` to ``path`` in waveform_catalog format.
 
     Polarization power is uncompressed by default. Pass ``compression`` (for
     example ``"gzip"``) to opt into an HDF5 compression filter; HDF5 then
@@ -147,12 +144,6 @@ def _check_format(catalog: xr.Dataset, *, label: str) -> None:
         raise ValueError(
             f"{label}: format_name is {format_name!r}, expected {FORMAT_NAME!r}"
         )
-    version = catalog.attrs.get("format_version")
-    if version is None or int(version) != FORMAT_VERSION:
-        raise ValueError(
-            f"{label}: format_version is {version!r}, expected {FORMAT_VERSION} "
-            "-- v2 (complex polarizations) catalogs must be regenerated"
-        )
     domain = catalog.attrs.get("domain")
     if domain != DOMAIN_FREQUENCY:
         raise ValueError(
@@ -161,7 +152,7 @@ def _check_format(catalog: xr.Dataset, *, label: str) -> None:
 
 
 def load_catalog(path: str | Path) -> xr.Dataset:
-    """Read a waveform_catalog v3 file eagerly into memory."""
+    """Read a waveform_catalog file eagerly into memory."""
     label = Path(path).name
     catalog = xr.load_dataset(path, engine="h5netcdf")
     _check_format(catalog, label=label)
@@ -170,7 +161,7 @@ def load_catalog(path: str | Path) -> xr.Dataset:
 
 
 def open_catalog(path: str | Path) -> xr.Dataset:
-    """Open a waveform_catalog v3 file lazily; polarization power is read on demand."""
+    """Open a waveform_catalog file lazily; polarization power is read on demand."""
     label = Path(path).name
     catalog = xr.open_dataset(path, engine="h5netcdf")
     _check_format(catalog, label=label)
