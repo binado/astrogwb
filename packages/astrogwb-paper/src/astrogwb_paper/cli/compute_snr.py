@@ -108,14 +108,6 @@ def _source_parameters(catalog: xr.Dataset) -> dict[str, np.ndarray]:
     }
 
 
-def _without_old_snr(catalog: xr.Dataset) -> xr.Dataset:
-    if "detector" in catalog.dims:
-        return catalog.drop_dims("detector")
-    if "snr" in catalog:
-        return catalog.drop_vars("snr")
-    return catalog
-
-
 def _temporary_path(destination: Path) -> Path:
     descriptor, raw_path = tempfile.mkstemp(
         dir=destination.parent,
@@ -185,13 +177,15 @@ def main() -> None:
                 progress_callback=_progress_callback(args.progress_log_every),
             )
             network_snr = np.sqrt(np.sum(snrs**2, axis=1))
-            order = np.argsort(-network_snr, kind="stable")
 
-            enriched = _without_old_snr(catalog).assign_coords(
+            enriched = (
+                catalog.drop_dims("detector") if "detector" in catalog.dims else catalog
+            )
+            enriched = enriched.drop_vars("snr", errors="ignore").assign_coords(
                 detector=np.asarray(detector_names, dtype=str)
             )
             enriched = enriched.assign(snr=(("sample", "detector"), snrs))
-            enriched = enriched.isel(sample=order)
+            enriched = enriched.sortby(xr.DataArray(-network_snr, dims="sample"))
             enriched.attrs.update(
                 {
                     "snr_backend": args.backend,
@@ -204,9 +198,11 @@ def main() -> None:
             save_catalog(temporary_path, enriched)
             with open_catalog(temporary_path):
                 pass
-            os.chmod(temporary_path, stat.S_IMODE(catalog_path.stat().st_mode))
+            # mkstemp creates the scratch file 0600; carry over the original
+            # catalog's mode so the in-place replace preserves it.
+            temporary_path.chmod(stat.S_IMODE(catalog_path.stat().st_mode))
 
-        os.replace(temporary_path, catalog_path)
+        temporary_path.replace(catalog_path)
         temporary_path = None
     finally:
         if temporary_path is not None:
