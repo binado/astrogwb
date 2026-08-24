@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 
 import numpy as np
-from astrogwb.waveform import make_catalog, save_catalog
+from astrogwb.waveform import make_catalog, polarization_power, save_catalog
 from gwmock_pop.loaders.file_loader import read_population_catalogue
 from gwmock_signal.waveform import RippleBackend
 
@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Load a gwmock-pop population file, convert source-frame masses to the "
             "detector frame, generate frequency-domain waveforms with the Ripple "
-            "backend, and persist the complex polarizations as a waveform_catalog "
+            "backend, and persist the polarization power as a waveform_catalog "
             "HDF5 file."
         )
     )
@@ -139,6 +139,7 @@ def _truncate(
     """Restrict the frequency axis (and matching polarization columns) to f <= f_max.
 
     ``plus`` and ``cross`` are in the backend's ``(n_events, n_freq)`` orientation.
+    Truncation happens here, before the polarization-power reduction.
     """
     if maximum_frequency is None:
         return frequencies, plus, cross
@@ -146,7 +147,7 @@ def _truncate(
     return frequencies[mask], plus[:, mask], cross[:, mask]
 
 
-def _generate_polarizations(
+def _generate_polarization_power(
     samples: dict[str, np.ndarray],
     *,
     approximant: str,
@@ -155,20 +156,21 @@ def _generate_polarizations(
     backend: RippleBackend,
     maximum_frequency: float | None,
     chunk_size: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Generate polarizations chunk by chunk, reusing one fixed-grid backend.
+) -> tuple[np.ndarray, np.ndarray]:
+    """Generate polarization power chunk by chunk, reusing one fixed-grid backend.
 
     The backend already carries a fixed ``segment_duration``, so every chunk lands on
-    the same frequency axis and the chunks concatenate directly along the event axis.
-    Each chunk is truncated to ``maximum_frequency`` before being accumulated, so the
-    running polarization arrays stay bounded too. Returns ``frequencies`` plus
-    ``(n_events, n_freq)`` complex ``plus``/``cross`` arrays.
+    the same frequency axis. Each chunk is truncated to ``maximum_frequency`` and then
+    reduced to power immediately, so the running accumulator holds float64 power
+    instead of two complex polarization arrays -- a 4x cut in peak memory -- and the
+    chunks concatenate directly into a C-contiguous ``(n_freq, n_events)`` array with
+    no full-size transpose ever materialized. Returns ``frequencies`` plus that power
+    array.
     """
     n_events = samples["detector_frame_mass_1"].shape[0]
     step = chunk_size if 0 < chunk_size < n_events else n_events
     frequencies: np.ndarray | None = None
-    plus_chunks: list[np.ndarray] = []
-    cross_chunks: list[np.ndarray] = []
+    power_chunks: list[np.ndarray] = []
     for start in range(0, n_events, step):
         stop = min(start + step, n_events)
         chunk_samples = {
@@ -188,16 +190,12 @@ def _generate_polarizations(
         )
         if frequencies is None:
             frequencies = chunk_frequencies
-        plus_chunks.append(chunk_plus)
-        cross_chunks.append(chunk_cross)
+        chunk_power = polarization_power(chunk_plus, chunk_cross)  # (F, n_chunk)
+        power_chunks.append(chunk_power)
         logger.info("Generated chunk %d:%d of %d events", start, stop, n_events)
 
     assert frequencies is not None  # n_events > 0 guaranteed by the population loader
-    return (
-        frequencies,
-        np.concatenate(plus_chunks, axis=0),
-        np.concatenate(cross_chunks, axis=0),
-    )
+    return frequencies, np.concatenate(power_chunks, axis=1)
 
 
 def main() -> None:
@@ -249,7 +247,7 @@ def main() -> None:
         effective_df,
     )
 
-    frequencies, plus, cross = _generate_polarizations(
+    frequencies, power = _generate_polarization_power(
         samples,
         approximant=args.approximant,
         sampling_frequency=args.sampling_frequency,
@@ -266,12 +264,11 @@ def main() -> None:
         if args.maximum_frequency is not None
         else args.sampling_frequency / 2.0
     )
-    # The backend returns (n_events, n_freq), matching make_catalog's
-    # (nsamples, nfreq) in-memory convention.
+    # power is (n_freq, n_events), matching make_catalog's (nfreq, nsamples)
+    # in-memory convention.
     catalog = make_catalog(
         frequencies=frequencies,
-        plus=plus,
-        cross=cross,
+        polarization_power=power,
         source_parameters={
             name: np.asarray(values, dtype=np.float64)
             for name, values in samples.items()

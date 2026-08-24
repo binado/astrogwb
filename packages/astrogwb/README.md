@@ -23,7 +23,8 @@ Optional accelerator builds are available as `astrogwb[cuda]` and
   compact-binary population model.
 - `astrogwb.sampling` exposes the caller-prepared NumPyro model.
 - `astrogwb.waveform` owns the `waveform_catalog` HDF5 format (IO via
-  `astrogwb.waveform.catalog`) and reduces catalogs to polarization power.
+  `astrogwb.waveform.catalog`), which stores per-sample polarization power,
+  and reduces raw plus/cross polarizations to that power at generation time.
 
 For example:
 

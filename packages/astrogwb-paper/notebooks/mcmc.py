@@ -178,7 +178,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb_paper.catalogs import (
     compute_proposal_logprob,
     compute_fiducial_injection_spectrum,
-    load_reduced_catalog,
+    load_propagated_catalog,
     samples_from_catalog,
     validate_catalog_samples,
     validate_matching_frequency_grids,
@@ -267,13 +267,13 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # The catalog is a `waveform_catalog` HDF5 file containing:
 #
 # - `frequencies` — shape `(nfreq,)`, the FFT frequency grid (Hz).
-# - complex plus/cross polarizations, reduced below to shape
-#   `(nfreq, nsamples)` power;
+# - `polarization_power` — shape `(nfreq, nsamples)`, the on-disk
+#   $|\tilde{h}_+|^2 + |\tilde{h}_\times|^2$ power;
 # - source parameters, exposed as `catalog.source_parameters`.
 
 # %%
-injection = load_reduced_catalog(INJECTION_CATALOG_PATH, fiducials=fiducials)
-proposal = load_reduced_catalog(PROPOSAL_CATALOG_PATH, fiducials=fiducials)
+injection = load_propagated_catalog(INJECTION_CATALOG_PATH, fiducials=fiducials)
+proposal = load_propagated_catalog(PROPOSAL_CATALOG_PATH, fiducials=fiducials)
 validate_catalog_samples(
     injection,
     label="injection",

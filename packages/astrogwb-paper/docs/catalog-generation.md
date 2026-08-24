@@ -3,7 +3,8 @@
 Catalog generation has two stages:
 
 1. draw a fresh population from an MD/uniform-redshift mixture;
-2. generate and persist its frequency-domain waveform polarizations.
+2. generate its frequency-domain waveform polarizations and persist their
+   reduced polarization power.
 
 The intermediate population is a Snakemake `temp()` output. The waveform
 catalog under `outputs/catalogs/` is the durable artifact.

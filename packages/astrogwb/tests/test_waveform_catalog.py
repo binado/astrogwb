@@ -8,7 +8,6 @@ import pytest
 from astrogwb.waveform.catalog import (
     DOMAIN_FREQUENCY,
     FORMAT_NAME,
-    FORMAT_VERSION,
     load_catalog,
     make_catalog,
     open_catalog,
@@ -20,16 +19,14 @@ from astrogwb.waveform.catalog import (
 def _catalog(nsamples: int = 6, nfreq: int = 4):
     rng = np.random.default_rng(0)
     frequencies = np.linspace(10.0, 40.0, nfreq)
-    plus = rng.normal(size=(nsamples, nfreq)) + 1j * rng.normal(size=(nsamples, nfreq))
-    cross = rng.normal(size=(nsamples, nfreq)) + 1j * rng.normal(size=(nsamples, nfreq))
+    power = rng.uniform(0.0, 1.0, size=(nfreq, nsamples))
     source_parameters = {
         "redshift": rng.uniform(0.0, 2.0, nsamples),
         "luminosity_distance": rng.uniform(100.0, 1000.0, nsamples),
     }
     return make_catalog(
         frequencies=frequencies,
-        plus=plus,
-        cross=cross,
+        polarization_power=power,
         source_parameters=source_parameters,
         approximant="Toy",
         minimum_frequency=float(frequencies[0]),
@@ -48,15 +45,14 @@ def test_round_trip_preserves_values_and_attrs(tmp_path: Path) -> None:
 
     np.testing.assert_array_equal(loaded.frequency.values, catalog.frequency.values)
     np.testing.assert_allclose(
-        loaded.polarizations.values, catalog.polarizations.values
+        loaded.polarization_power.values, catalog.polarization_power.values
     )
-    assert loaded.polarizations.dtype == np.complex128
+    assert loaded.polarization_power.dtype == np.float64
     np.testing.assert_allclose(
         loaded.source_parameters.values, catalog.source_parameters.values
     )
     assert dict(loaded.attrs) == {
         "format_name": FORMAT_NAME,
-        "format_version": FORMAT_VERSION,
         "domain": DOMAIN_FREQUENCY,
         "approximant": "Toy",
         "minimum_frequency": 10.0,
@@ -73,21 +69,21 @@ def test_save_with_compression_round_trips(tmp_path: Path) -> None:
     save_catalog(path, catalog, compression="gzip")
 
     with h5py.File(path) as f:
-        assert f["polarizations"].compression == "gzip"
+        assert f["polarization_power"].compression == "gzip"
     loaded = load_catalog(path)
     np.testing.assert_allclose(
-        loaded.polarizations.values, catalog.polarizations.values
+        loaded.polarization_power.values, catalog.polarization_power.values
     )
 
 
-def test_open_catalog_leaves_polarizations_lazy(tmp_path: Path) -> None:
+def test_open_catalog_leaves_polarization_power_lazy(tmp_path: Path) -> None:
     catalog = _catalog()
     path = tmp_path / "catalog.h5"
     save_catalog(path, catalog)
 
     opened = open_catalog(path)
 
-    assert opened.polarizations._in_memory is False
+    assert opened.polarization_power._in_memory is False
 
 
 def test_load_catalog_rejects_wrong_format_name(tmp_path: Path) -> None:
@@ -98,19 +94,6 @@ def test_load_catalog_rejects_wrong_format_name(tmp_path: Path) -> None:
         f.attrs["format_name"] = "something_else"
 
     with pytest.raises(ValueError, match="format_name"):
-        load_catalog(path)
-
-
-def test_load_catalog_rejects_wrong_format_version(tmp_path: Path) -> None:
-    catalog = _catalog()
-    path = tmp_path / "catalog.h5"
-    save_catalog(path, catalog)
-    with h5py.File(path, "r+") as f:
-        f.attrs["format_version"] = np.int64(1)
-
-    with pytest.raises(
-        ValueError, match="v1 \\(pluscross\\) catalogs must be regenerated"
-    ):
         load_catalog(path)
 
 
@@ -133,17 +116,35 @@ def test_validate_catalog_rejects_non_monotonic_frequencies() -> None:
         validate_catalog(bad, label="test")
 
 
-def test_validate_catalog_rejects_missing_polarizations() -> None:
+def test_validate_catalog_rejects_missing_polarization_power() -> None:
     catalog = _catalog()
-    bad = catalog.drop_vars("polarizations")
+    bad = catalog.drop_vars("polarization_power")
 
-    with pytest.raises(ValueError, match="polarizations"):
+    with pytest.raises(ValueError, match="polarization_power"):
         validate_catalog(bad, label="test")
 
 
-def test_validate_catalog_rejects_wrong_polarization_axis_size() -> None:
+def test_validate_catalog_rejects_wrong_dims() -> None:
     catalog = _catalog()
-    bad = catalog.isel(polarization=slice(0, 1))
+    bad = catalog.rename_dims({"sample": "event"})
 
-    with pytest.raises(ValueError, match="polarization"):
+    with pytest.raises(ValueError, match="frequency, sample"):
         validate_catalog(bad, label="test")
+
+
+def test_make_catalog_rejects_complex_polarization_power() -> None:
+    frequencies = np.linspace(10.0, 40.0, 4)
+    power = np.zeros((4, 3), dtype=np.complex128)
+    source_parameters = {"redshift": np.array([0.1, 0.5, 1.0])}
+
+    with pytest.raises(ValueError, match="real-valued"):
+        make_catalog(
+            frequencies=frequencies,
+            polarization_power=power,  # ty: ignore[invalid-argument-type]
+            source_parameters=source_parameters,
+            approximant="Toy",
+            minimum_frequency=10.0,
+            maximum_frequency=40.0,
+            reference_frequency=20.0,
+            sampling_frequency=128.0,
+        )

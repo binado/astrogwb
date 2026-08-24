@@ -66,7 +66,7 @@ from astrogwb.sampling.models import spectral_density_model
 from astrogwb_paper.catalogs import (
     compute_proposal_logprob,
     compute_fiducial_injection_spectrum,
-    load_reduced_catalog,
+    load_propagated_catalog,
     samples_from_catalog,
     validate_catalog_samples,
     validate_matching_frequency_grids,
@@ -161,8 +161,8 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # See `mcmc.py` for the injection/proposal split and full catalog schema.
 
 # %%
-injection = load_reduced_catalog(INJECTION_CATALOG_PATH, fiducials=fiducials)
-proposal = load_reduced_catalog(PROPOSAL_CATALOG_PATH, fiducials=fiducials)
+injection = load_propagated_catalog(INJECTION_CATALOG_PATH, fiducials=fiducials)
+proposal = load_propagated_catalog(PROPOSAL_CATALOG_PATH, fiducials=fiducials)
 validate_catalog_samples(
     injection,
     label="injection",
