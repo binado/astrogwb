@@ -88,7 +88,6 @@ def test_main_enriches_and_reorders_catalog_in_place(
         [0.1, 0.3, 0.2],
     )
     assert "sample_index" not in loaded
-    assert loaded.attrs["sample_order"] == "descending_all_detector_network_snr"
     assert loaded.attrs["snr_batch_size"] == 2
     assert captured["batch_size"] == 2
     assert captured["earth_rotation"] is True

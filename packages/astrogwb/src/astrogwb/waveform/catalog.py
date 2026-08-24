@@ -31,17 +31,12 @@ is kept regardless; dropping it is a separate, unrelated change.
 
 from __future__ import annotations
 
-import math
 import warnings
-from collections.abc import Hashable, Mapping
 from pathlib import Path
-from typing import Any
 
-import h5netcdf
-import h5py
 import numpy as np
 import xarray as xr
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 
 __all__ = [
     "DOMAIN_FREQUENCY",
@@ -59,7 +54,6 @@ WaveformCatalog = xr.Dataset
 
 FORMAT_NAME = "waveform_catalog"
 DOMAIN_FREQUENCY = "frequency"
-_SAMPLE_WRITE_TARGET_BYTES = 64 * 1024**2
 
 
 def make_catalog(
@@ -123,23 +117,13 @@ def save_catalog(
     catalog: xr.Dataset,
     *,
     compression: str | None = None,
-    sample_order: ArrayLike | None = None,
 ) -> None:
     """Write ``catalog`` to ``path`` in waveform_catalog format.
 
     Polarization power is uncompressed by default. Pass ``compression`` (for
-    example ``"gzip"``) to opt into an HDF5 compression filter. When
-    ``sample_order`` is supplied, it must be a complete permutation of the
-    sample axis; sample-dependent variables are written in bounded blocks so
-    lazy waveform power is never fully materialized.
+    example ``"gzip"``) to opt into an HDF5 compression filter.
     """
     validate_catalog(catalog, label="waveform_catalog")
-    if sample_order is not None:
-        order = _validate_sample_order(sample_order, catalog.sizes["sample"])
-        _save_catalog_in_sample_order(
-            Path(path), catalog, order=order, compression=compression
-        )
-        return
 
     encoding = (
         {"polarization_power": {"compression": compression}}
@@ -152,109 +136,6 @@ def save_catalog(
         catalog.to_netcdf(
             path, engine="h5netcdf", invalid_netcdf=True, encoding=encoding
         )
-
-
-def _validate_sample_order(order: ArrayLike, n_samples: int) -> NDArray[np.intp]:
-    array = np.asarray(order)
-    if array.ndim != 1 or array.shape[0] != n_samples:
-        raise ValueError(
-            "sample_order must be one-dimensional with one entry per sample"
-        )
-    if not np.issubdtype(array.dtype, np.integer):
-        raise ValueError("sample_order must contain integer indices")
-    indices = array.astype(np.intp, copy=False)
-    if not np.array_equal(np.sort(indices), np.arange(n_samples, dtype=np.intp)):
-        raise ValueError("sample_order must be a complete permutation")
-    return indices
-
-
-def _save_catalog_in_sample_order(
-    path: Path,
-    catalog: xr.Dataset,
-    *,
-    order: NDArray[np.intp],
-    compression: str | None,
-) -> None:
-    """Write a sample permutation without loading any full sample-sized variable."""
-    with h5netcdf.File(path, "w", invalid_netcdf=True) as output:
-        output.dimensions = dict(catalog.sizes)
-        for name, value in catalog.attrs.items():
-            output.attrs[name] = value
-
-        for name, variable in catalog.variables.items():
-            variable_name = str(name)
-            dtype = _storage_dtype(variable.dtype)
-            options = _storage_options(
-                variable, name=variable_name, compression=compression
-            )
-            fillvalue = variable.encoding.get("_FillValue")
-            destination = output.create_variable(
-                variable_name,
-                variable.dims,
-                dtype=dtype,
-                fillvalue=fillvalue,
-                **options,
-            )
-            for attribute, value in variable.attrs.items():
-                destination.attrs[attribute] = value
-
-            if "sample" not in variable.dims:
-                _write_variable(destination, Ellipsis, variable.values)
-                continue
-
-            sample_axis = variable.dims.index("sample")
-            block_size = _sample_block_size(variable, catalog.sizes)
-            for start in range(0, order.size, block_size):
-                stop = min(start + block_size, order.size)
-                values = variable.isel(sample=order[start:stop]).values
-                target = [slice(None)] * variable.ndim
-                target[sample_axis] = slice(start, stop)
-                _write_variable(destination, tuple(target), values)
-
-
-def _storage_dtype(dtype: np.dtype) -> np.dtype | str:
-    if np.issubdtype(dtype, np.str_) or np.issubdtype(dtype, np.object_):
-        return h5py.string_dtype(encoding="utf-8")
-    return dtype
-
-
-def _storage_options(
-    variable: xr.Variable, *, name: str, compression: str | None
-) -> dict[str, object]:
-    encoding = variable.encoding
-    options: dict[str, object] = {}
-    chunks = encoding.get("chunksizes")
-    if chunks is not None:
-        options["chunks"] = tuple(
-            min(int(chunk), int(size))
-            for chunk, size in zip(chunks, variable.shape, strict=True)
-        )
-    for key in ("compression", "compression_opts", "shuffle", "fletcher32"):
-        value = encoding.get(key)
-        if value not in (None, False):
-            options[key] = value
-    if encoding.get("zlib"):
-        options["compression"] = "gzip"
-        options["compression_opts"] = int(encoding.get("complevel", 4))
-    if name == "polarization_power" and compression is not None:
-        options["compression"] = compression
-    return options
-
-
-def _sample_block_size(variable: xr.Variable, sizes: Mapping[Hashable, int]) -> int:
-    other_elements = math.prod(
-        sizes[dimension] for dimension in variable.dims if dimension != "sample"
-    )
-    itemsize = max(1, variable.dtype.itemsize)
-    bytes_per_sample = max(1, other_elements * itemsize)
-    return max(1, _SAMPLE_WRITE_TARGET_BYTES // bytes_per_sample)
-
-
-def _write_variable(destination: h5netcdf.Variable, key: Any, values: object) -> None:
-    array = np.asarray(values)
-    if np.issubdtype(array.dtype, np.str_):
-        array = array.astype(object)
-    destination[key] = array
 
 
 def _check_format(catalog: xr.Dataset, *, label: str) -> None:

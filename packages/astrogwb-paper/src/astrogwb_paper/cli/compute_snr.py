@@ -185,23 +185,23 @@ def main() -> None:
                 progress_callback=_progress_callback(args.progress_log_every),
             )
             network_snr = np.sqrt(np.sum(snrs**2, axis=1))
-            sample_order = np.argsort(-network_snr, kind="stable")
+            order = np.argsort(-network_snr, kind="stable")
 
             enriched = _without_old_snr(catalog).assign_coords(
                 detector=np.asarray(detector_names, dtype=str)
             )
             enriched = enriched.assign(snr=(("sample", "detector"), snrs))
+            enriched = enriched.isel(sample=order)
             enriched.attrs.update(
                 {
                     "snr_backend": args.backend,
                     "snr_earth_rotation": int(earth_rotation),
                     "snr_batch_size": args.batch_size,
-                    "sample_order": "descending_all_detector_network_snr",
                 }
             )
 
             temporary_path = _temporary_path(catalog_path)
-            save_catalog(temporary_path, enriched, sample_order=sample_order)
+            save_catalog(temporary_path, enriched)
             with open_catalog(temporary_path):
                 pass
             os.chmod(temporary_path, stat.S_IMODE(catalog_path.stat().st_mode))
