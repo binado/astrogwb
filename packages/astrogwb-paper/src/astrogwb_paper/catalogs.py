@@ -13,37 +13,18 @@ from astrogwb.gwb import spectral_density
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
 )
-from astrogwb.waveform import apply_gw_distance_to_waveforms, open_catalog
-from astrogwb.waveform import polarization_power as compute_polarization_power
+from astrogwb.waveform import apply_gw_distance_to_power, load_catalog
 from numpy.typing import ArrayLike
 
 from astrogwb_paper.config.mcmc import ProposalConfig
 
 
-def load_reduced_catalog(
-    path: Path,
-    *,
-    fiducials: dict[str, float],
-) -> xr.Dataset:
-    """Load a catalog, apply fiducial GW propagation, and reduce it to power.
-
-    Numpy-backed: no JAX conversion happens here. Returns a Dataset with
-    ``polarization_power (frequency, sample)`` and ``source_parameters
-    (sample, parameter)``, carrying the source file's attrs.
-    """
-    catalog = open_catalog(path)
-    catalog = apply_gw_distance_to_waveforms(
-        catalog,
+def load_propagated_catalog(path: Path, *, fiducials: dict[str, float]) -> xr.Dataset:
+    """Load a catalog and apply fiducial GW propagation. Numpy-backed."""
+    return apply_gw_distance_to_power(
+        load_catalog(path),
         xi_0=float(fiducials["xi_0"]),
         xi_n=float(fiducials["xi_n"]),
-    )
-    power = compute_polarization_power(catalog).load()
-    return xr.Dataset(
-        {
-            "polarization_power": power,
-            "source_parameters": catalog.source_parameters.load(),
-        },
-        attrs=catalog.attrs,
     )
 
 

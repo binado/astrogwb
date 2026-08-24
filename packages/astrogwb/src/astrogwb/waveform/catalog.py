@@ -1,30 +1,31 @@
 """IO for the ``waveform_catalog`` xarray/HDF5 format.
 
-Stores catalogs of frequency-domain waveform polarizations: complex ``plus`` /
-``cross`` stacked over a ``polarization`` dimension, per-sample source
-parameters stacked over a ``parameter`` dimension, and the waveform-generation
-attributes. Pure IO: no derived quantities are computed here.
+Stores catalogs of frequency-domain polarization power ``|h+|^2 + |hx|^2``,
+per-sample source parameters stacked over a ``parameter`` dimension, and the
+waveform-generation attributes. Pure IO: no derived quantities are computed
+here -- the power reduction happens at generation time, before the catalog
+is built.
 
 Catalogs are plain ``xr.Dataset`` objects (``WaveformCatalog`` is a type alias
 for documentation value only) with the layout::
 
-    Dimensions:           (polarization: 2, sample: N, frequency: F, parameter: P)
+    Dimensions:            (frequency: F, sample: N, parameter: P)
     Coordinates:
-      * polarization      (polarization) <U5      'plus' 'cross'
-      * frequency         (frequency)    float64  strictly increasing, Hz
-      * parameter         (parameter)    <U..     'redshift' 'luminosity_distance' ...
+      * frequency          (frequency) float64  strictly increasing, Hz
+      * parameter          (parameter) <U..     'redshift' 'luminosity_distance' ...
     Data variables:
-        polarizations     (polarization, sample, frequency) complex128
-        source_parameters (sample, parameter)               float64
+        polarization_power (frequency, sample) float64   # |h+|^2 + |hx|^2
+        source_parameters  (sample, parameter) float64
     Attributes:
         format_name, format_version, domain, approximant,
         minimum_frequency, maximum_frequency, reference_frequency, sampling_frequency
 
 ``sample`` deliberately has no coordinate.
 
-Files are written with ``to_netcdf(engine="h5netcdf", invalid_netcdf=True)``,
-which stores complex128 as an HDF5 compound type with members named ``r`` and
-``i`` -- the same on-disk representation the retired ``pluscross`` package used.
+Files are written with ``to_netcdf(engine="h5netcdf", invalid_netcdf=True)``.
+The data itself no longer needs ``invalid_netcdf`` -- there is no complex
+compound type, so the format is now plain-netCDF compatible -- but the flag
+is kept regardless; dropping it is a separate, unrelated change.
 """
 
 from __future__ import annotations
@@ -52,17 +53,14 @@ __all__ = [
 WaveformCatalog = xr.Dataset
 
 FORMAT_NAME = "waveform_catalog"
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 DOMAIN_FREQUENCY = "frequency"
-
-_POLARIZATIONS = ("plus", "cross")
 
 
 def make_catalog(
     *,
     frequencies: NDArray[np.float64],
-    plus: NDArray[np.complex128],
-    cross: NDArray[np.complex128],
+    polarization_power: NDArray[np.float64],
     source_parameters: dict[str, NDArray[np.float64]],
     approximant: str,
     minimum_frequency: float,
@@ -72,17 +70,14 @@ def make_catalog(
 ) -> xr.Dataset:
     """Build a waveform catalog Dataset from plain arrays.
 
-    ``plus`` and ``cross`` have shape ``(nsamples, nfreq)`` -- sample axis
-    first, matching the on-disk C-order layout of ``polarizations``.
+    ``polarization_power`` has shape ``(nfreq, nsamples)`` -- frequency axis
+    first, matching the on-disk layout. Not cast to float64 up front: a
+    complex array is passed through as-is so ``validate_catalog`` can reject
+    it below, instead of silently discarding the imaginary part.
     """
     frequencies = np.asarray(frequencies, dtype=np.float64)
-    plus = np.asarray(plus, dtype=np.complex128)
-    cross = np.asarray(cross, dtype=np.complex128)
-    if plus.shape != cross.shape:
-        raise ValueError(
-            f"waveform_catalog: plus {plus.shape} and cross {cross.shape} shapes differ"
-        )
-    nsamples = plus.shape[0]
+    polarization_power = np.asarray(polarization_power)
+    nsamples = polarization_power.shape[1]
     names = list(source_parameters)
     if names:
         parameters = np.stack(
@@ -94,14 +89,13 @@ def make_catalog(
 
     catalog = xr.Dataset(
         {
-            "polarizations": (
-                ("polarization", "sample", "frequency"),
-                np.stack([plus, cross], axis=0),
+            "polarization_power": (
+                ("frequency", "sample"),
+                polarization_power,
             ),
             "source_parameters": (("sample", "parameter"), parameters),
         },
         coords={
-            "polarization": list(_POLARIZATIONS),
             "frequency": frequencies,
             "parameter": names,
         },
@@ -126,23 +120,20 @@ def save_catalog(
     *,
     compression: str | None = None,
 ) -> None:
-    """Write ``catalog`` to ``path`` in waveform_catalog format v2.
+    """Write ``catalog`` to ``path`` in waveform_catalog format v3.
 
-    Polarization data is uncompressed by default. Pass ``compression`` (for
+    Polarization power is uncompressed by default. Pass ``compression`` (for
     example ``"gzip"``) to opt into an HDF5 compression filter; HDF5 then
     picks the on-disk chunking automatically.
     """
     validate_catalog(catalog, label="waveform_catalog")
     encoding = (
-        {"polarizations": {"compression": compression}}
+        {"polarization_power": {"compression": compression}}
         if compression is not None
         else None
     )
 
     with warnings.catch_warnings():
-        # invalid_netcdf=True stores complex128 as an HDF5 compound {r, i}
-        # type, which is exactly what we want -- not valid CF-netCDF, but a
-        # deliberate, documented on-disk format.
         warnings.filterwarnings("ignore", category=UserWarning)
         catalog.to_netcdf(
             path, engine="h5netcdf", invalid_netcdf=True, encoding=encoding
@@ -160,7 +151,7 @@ def _check_format(catalog: xr.Dataset, *, label: str) -> None:
     if version is None or int(version) != FORMAT_VERSION:
         raise ValueError(
             f"{label}: format_version is {version!r}, expected {FORMAT_VERSION} "
-            "-- v1 (pluscross) catalogs must be regenerated"
+            "-- v2 (complex polarizations) catalogs must be regenerated"
         )
     domain = catalog.attrs.get("domain")
     if domain != DOMAIN_FREQUENCY:
@@ -170,7 +161,7 @@ def _check_format(catalog: xr.Dataset, *, label: str) -> None:
 
 
 def load_catalog(path: str | Path) -> xr.Dataset:
-    """Read a waveform_catalog v2 file eagerly into memory."""
+    """Read a waveform_catalog v3 file eagerly into memory."""
     label = Path(path).name
     catalog = xr.load_dataset(path, engine="h5netcdf")
     _check_format(catalog, label=label)
@@ -179,7 +170,7 @@ def load_catalog(path: str | Path) -> xr.Dataset:
 
 
 def open_catalog(path: str | Path) -> xr.Dataset:
-    """Open a waveform_catalog v2 file lazily; polarizations are read on demand."""
+    """Open a waveform_catalog v3 file lazily; polarization power is read on demand."""
     label = Path(path).name
     catalog = xr.open_dataset(path, engine="h5netcdf")
     _check_format(catalog, label=label)
@@ -197,22 +188,23 @@ def validate_catalog(catalog: xr.Dataset, *, label: str) -> None:
     if frequencies.shape[0] > 1 and not np.all(np.diff(frequencies) > 0.0):
         raise ValueError(f"{label}: frequencies must be strictly increasing")
 
-    if "polarizations" not in catalog:
-        raise ValueError(f"{label}: missing 'polarizations' data variable")
-    polarizations = catalog["polarizations"]
-    if set(polarizations.dims) != {"polarization", "sample", "frequency"}:
+    if "polarization_power" not in catalog:
+        raise ValueError(f"{label}: missing 'polarization_power' data variable")
+    polarization_power = catalog["polarization_power"]
+    if set(polarization_power.dims) != {"frequency", "sample"}:
         raise ValueError(
-            f"{label}: 'polarizations' must have dims "
-            f"(polarization, sample, frequency), got {polarizations.dims}"
+            f"{label}: 'polarization_power' must have dims "
+            f"(frequency, sample), got {polarization_power.dims}"
         )
-    if catalog.sizes["polarization"] != 2:
+    if np.issubdtype(polarization_power.dtype, np.complexfloating):
         raise ValueError(
-            f"{label}: 'polarization' dim must have size 2, got "
-            f"{catalog.sizes['polarization']}"
+            f"{label}: 'polarization_power' must be real-valued, got "
+            f"{polarization_power.dtype} -- pass |h+|^2 + |hx|^2, not raw "
+            "complex polarizations"
         )
     if catalog.sizes["frequency"] != frequencies.shape[0]:
         raise ValueError(
-            f"{label}: 'polarizations' frequency axis "
+            f"{label}: 'polarization_power' frequency axis "
             f"({catalog.sizes['frequency']}) does not match the frequency "
             f"coordinate ({frequencies.shape[0]})"
         )
@@ -224,9 +216,10 @@ def validate_catalog(catalog: xr.Dataset, *, label: str) -> None:
                 f"{label}: 'source_parameters' must have dims "
                 f"(sample, parameter), got {source_parameters.dims}"
             )
-        if source_parameters.sizes["sample"] != polarizations.sizes["sample"]:
+        if source_parameters.sizes["sample"] != polarization_power.sizes["sample"]:
             raise ValueError(
                 f"{label}: 'source_parameters' sample axis "
                 f"({source_parameters.sizes['sample']}) does not match "
-                f"'polarizations' sample axis ({polarizations.sizes['sample']})"
+                f"'polarization_power' sample axis "
+                f"({polarization_power.sizes['sample']})"
             )

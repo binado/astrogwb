@@ -45,7 +45,7 @@ def _write_catalog(
 ) -> Path:
     rng = np.random.default_rng(seed)
     n_freq = frequencies.size
-    shape = (N_SOURCES, n_freq)
+    shape = (n_freq, N_SOURCES)
     redshift = np.linspace(0.05, 1.5, N_SOURCES)
     source_parameters: dict[str, Any] = {
         "redshift": redshift,
@@ -57,8 +57,7 @@ def _write_catalog(
     }
     catalog = make_catalog(
         frequencies=frequencies,
-        plus=rng.normal(size=shape) + 1j * rng.normal(size=shape),
-        cross=rng.normal(size=shape) + 1j * rng.normal(size=shape),
+        polarization_power=rng.uniform(0.0, 1.0, size=shape),
         source_parameters=source_parameters,
         approximant="Toy",
         minimum_frequency=float(frequencies[0]),

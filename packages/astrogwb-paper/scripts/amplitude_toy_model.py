@@ -42,7 +42,6 @@ from astrogwb.gwb import spectral_density, spectral_snr_squared
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import open_catalog
-from astrogwb.waveform import polarization_power as compute_polarization_power
 from astrogwb_paper.catalogs import samples_from_catalog
 from astrogwb_paper.config.figures import load_analysis_grid
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
@@ -130,7 +129,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     catalog = open_catalog(catalog_path)
     frequencies = jnp.asarray(catalog.frequency.values)
-    polarization_power = jnp.asarray(compute_polarization_power(catalog).values)
+    polarization_power = jnp.asarray(catalog.polarization_power.values)
     samples = samples_from_catalog(catalog)
     del catalog
     n_freq, n_samples = polarization_power.shape

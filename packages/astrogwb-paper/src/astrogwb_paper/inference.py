@@ -47,7 +47,7 @@ from astrogwb_paper.amplitude import (
 from astrogwb_paper.catalogs import (
     compute_fiducial_injection_spectrum,
     compute_proposal_logprob,
-    load_reduced_catalog,
+    load_propagated_catalog,
     samples_from_catalog,
     validate_catalog_samples,
     validate_matching_frequency_grids,
@@ -105,7 +105,7 @@ def prepare_observation(
 ) -> Observation:
     """Load the injection catalog and build the fiducial observed spectrum."""
     fiducial_values = dict(fiducials)
-    injection = load_reduced_catalog(injection_path, fiducials=fiducial_values)
+    injection = load_propagated_catalog(injection_path, fiducials=fiducial_values)
     validate_catalog_samples(
         injection,
         label="injection",
@@ -163,7 +163,7 @@ def prepare_inference_inputs(
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs."""
     observation = prepare_observation(injection_path, fiducials=fiducials, grid=grid)
-    proposal = load_reduced_catalog(proposal_path, fiducials=dict(fiducials))
+    proposal = load_propagated_catalog(proposal_path, fiducials=dict(fiducials))
     validate_catalog_samples(
         proposal,
         label="proposal",

@@ -12,12 +12,12 @@ from astrogwb.waveform.catalog import (
     save_catalog,
     validate_catalog,
 )
-from astrogwb.waveform.distance import apply_gw_distance_to_waveforms
+from astrogwb.waveform.distance import apply_gw_distance_to_power
 from astrogwb.waveform.polarization_power import polarization_power
 
 __all__ = [
     "WaveformCatalog",
-    "apply_gw_distance_to_waveforms",
+    "apply_gw_distance_to_power",
     "load_catalog",
     "make_catalog",
     "open_catalog",
