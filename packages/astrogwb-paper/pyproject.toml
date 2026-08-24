@@ -45,6 +45,7 @@ astrogwb-run-mcmc = "astrogwb_paper.cli.run_mcmc:main"
 astrogwb-validate-config = "astrogwb_paper.cli.validate_config:main"
 astrogwb-generate-population = "astrogwb_paper.cli.generate_population:main"
 astrogwb-generate-waveform-catalog = "astrogwb_paper.cli.generate_waveform_catalog:main"
+astrogwb-compute-snr = "astrogwb_paper.cli.compute_snr:main"
 astrogwb-profile-model = "astrogwb_paper.cli.profile_model:main"
 
 [build-system]

@@ -8,6 +8,7 @@ from .overlap import (
 from .sensitivity import (
     Sensitivity,
     evaluate_psd,
+    in_band_inverse_psd,
     load_sensitivities_for_network,
     load_sensitivity,
     load_sensitivity_map,
@@ -19,6 +20,7 @@ __all__ = [
     "effective_psd",
     "evaluate_psd",
     "gaussian_bin_scale",
+    "in_band_inverse_psd",
     "load_detector",
     "load_sensitivities_for_network",
     "load_sensitivity",

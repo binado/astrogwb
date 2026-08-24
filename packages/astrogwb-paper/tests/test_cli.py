@@ -13,6 +13,7 @@ COMMANDS = (
     "astrogwb-run-mcmc",
     "astrogwb-validate-config",
     "astrogwb-generate-waveform-catalog",
+    "astrogwb-compute-snr",
     "astrogwb-profile-model",
 )
 

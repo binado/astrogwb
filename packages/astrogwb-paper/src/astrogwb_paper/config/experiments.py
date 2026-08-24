@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -95,6 +95,35 @@ def _load_inventory(path: Path) -> dict[str, Any]:
 def load_base(path: Path | None = None) -> dict[str, Any]:
     """Load the shared run configuration from the YAML inventory."""
     return dict(_load_inventory(path or inventory_path())["base"])
+
+
+def network_detectors(path: Path | None = None) -> tuple[str, ...]:
+    """Return every detector named by a ``networks`` anchor, first-seen order.
+
+    The union is what a catalog needs so that every run, whatever network it
+    aliases, finds its SNR columns.
+    """
+    resolved = path or inventory_path()
+    networks = _load_inventory(resolved).get("networks", {})
+    if not isinstance(networks, Mapping):
+        raise TypeError(f"{resolved} networks section must be a mapping")
+    detectors: list[str] = []
+    for name, network in networks.items():
+        if not isinstance(network, Mapping):
+            raise TypeError(f"{resolved} network {name!r} must be a mapping")
+        detector_names = network.get("detectors", ())
+        if isinstance(detector_names, str) or not isinstance(detector_names, Sequence):
+            raise TypeError(
+                f"{resolved} network {name!r} detectors must be a list of names"
+            )
+        for detector in detector_names:
+            if not isinstance(detector, str) or not detector:
+                raise ValueError(
+                    f"{resolved} network {name!r} must name non-empty detectors"
+                )
+            if detector not in detectors:
+                detectors.append(detector)
+    return tuple(detectors)
 
 
 def load_experiments(path: Path | None = None) -> dict[str, Experiment]:

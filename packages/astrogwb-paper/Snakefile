@@ -9,6 +9,7 @@ from astrogwb_paper.config.catalogs import (
 from astrogwb_paper.config.experiments import (
     DEFAULT_CATALOG,
     load_experiments,
+    network_detectors,
 )
 from astrogwb_paper.config.loading import deep_merge, load_mapping
 from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS
@@ -18,6 +19,7 @@ SOURCE_EXPERIMENTS = Path("inputs/experiments.yaml")
 SOURCE_CATALOGS = Path("inputs/catalogs.yaml")
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
 CATALOGS_DIR = Path(config.get("catalogs_dir", "outputs/catalogs"))
+SNR_BATCH_SIZE = config.get("snr_batch_size", 512)
 
 CONFIG_PATTERN = "outputs/configs/{experiment}/{run}.json"
 CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
@@ -25,6 +27,7 @@ CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 experiments = load_experiments()
 catalogs = load_catalogs()
 catalog_base = next(iter(catalogs.values())).population
+SNR_DETECTORS = ",".join(network_detectors())
 CONFIG_OUTPUTS = [
     str(specification.merged_config_path(run))
     for specification in experiments.values()
@@ -80,6 +83,7 @@ localrules:
     population_config,
     population,
     waveform_catalog,
+    catalog_snr,
     assemble_config,
     plot_cosmological_parameters,
     plot_modified_propagation,
@@ -134,7 +138,7 @@ rule waveform_catalog:
         population="outputs/populations/{catalog}.h5",
         recipe=ancient(str(SOURCE_CATALOGS)),
     output:
-        "outputs/catalogs/{catalog}.h5",
+        temp("outputs/waveforms/{catalog}.h5"),
     params:
         approximant=lambda wc: recipe(wc).waveform.approximant,
         sampling_frequency=lambda wc: recipe(wc).waveform.sampling_frequency,
@@ -154,6 +158,23 @@ rule waveform_catalog:
         " --reference-frequency {params.reference_frequency}"
         " --frequency-resolution {params.frequency_resolution}"
         " --chunk-size {params.chunk_size}"
+
+
+rule catalog_snr:
+    input:
+        waveforms="outputs/waveforms/{catalog}.h5",
+        recipe=ancient(str(SOURCE_CATALOGS)),
+    output:
+        "outputs/catalogs/{catalog}.h5",
+    params:
+        detectors=SNR_DETECTORS,
+        batch_size=SNR_BATCH_SIZE,
+    shell:
+        "cp {input.waveforms:q} {output:q}"
+        " && uv run --package astrogwb-paper astrogwb-compute-snr"
+        " --catalog {output:q}"
+        " --detectors {params.detectors:q}"
+        " --batch-size {params.batch_size}"
 
 
 rule catalogs:

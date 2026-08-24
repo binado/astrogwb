@@ -10,6 +10,7 @@ from astrogwb_paper.config.experiments import (
     EXPERIMENTS_PATH,
     load_base,
     load_experiments,
+    network_detectors,
     overlay_for,
 )
 from astrogwb_paper.config.loading import load_mapping
@@ -37,6 +38,59 @@ def test_inventory_contains_six_experiments_and_26_runs() -> None:
         "waveform-approximant",
     }
     assert len(declared_runs()) == 26
+
+
+def test_network_detectors_is_the_first_seen_union() -> None:
+    assert network_detectors() == ("E1", "E2", "E3", "C1", "S1", "R1", "S2", "R2")
+
+
+def test_network_detectors_handles_inventories_without_networks(
+    tmp_path: Path,
+) -> None:
+    inventory = tmp_path / "experiments.yaml"
+    inventory.write_text(
+        "base: {seed: 1}\nexperiments:\n  demo:\n    runs:\n      only: {}\n",
+        encoding="utf-8",
+    )
+
+    assert network_detectors(inventory) == ()
+
+
+def test_network_detectors_rejects_malformed_network_entries(
+    tmp_path: Path,
+) -> None:
+    inventory = tmp_path / "experiments.yaml"
+    inventory.write_text(
+        "base: {seed: 1}\n"
+        "networks:\n"
+        "  bad: [not, a, mapping]\n"
+        "experiments:\n"
+        "  demo:\n"
+        "    runs:\n"
+        "      only: {}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TypeError, match="network 'bad' must be a mapping"):
+        network_detectors(inventory)
+
+
+def test_network_detectors_rejects_scalar_detectors(tmp_path: Path) -> None:
+    inventory = tmp_path / "experiments.yaml"
+    inventory.write_text(
+        "base: {seed: 1}\n"
+        "networks:\n"
+        "  bad:\n"
+        "    detectors: E1\n"
+        "experiments:\n"
+        "  demo:\n"
+        "    runs:\n"
+        "      only: {}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TypeError, match="network 'bad' detectors must be a list"):
+        network_detectors(inventory)
 
 
 def test_single_yaml_is_the_only_mcmc_inventory() -> None:

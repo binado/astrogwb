@@ -16,6 +16,7 @@ for documentation value only) with the layout::
     Data variables:
         polarization_power (frequency, sample) float64   # |h+|^2 + |hx|^2
         source_parameters  (sample, parameter) float64
+        snr                (sample, detector) float64   # optional
     Attributes:
         format_name, domain, approximant,
         minimum_frequency, maximum_frequency, reference_frequency, sampling_frequency
@@ -120,10 +121,10 @@ def save_catalog(
     """Write ``catalog`` to ``path`` in waveform_catalog format.
 
     Polarization power is uncompressed by default. Pass ``compression`` (for
-    example ``"gzip"``) to opt into an HDF5 compression filter; HDF5 then
-    picks the on-disk chunking automatically.
+    example ``"gzip"``) to opt into an HDF5 compression filter.
     """
     validate_catalog(catalog, label="waveform_catalog")
+
     encoding = (
         {"polarization_power": {"compression": compression}}
         if compression is not None
@@ -214,3 +215,30 @@ def validate_catalog(catalog: xr.Dataset, *, label: str) -> None:
                 f"'polarization_power' sample axis "
                 f"({polarization_power.sizes['sample']})"
             )
+
+    if "snr" in catalog:
+        if "detector" not in catalog.coords:
+            raise ValueError(f"{label}: 'snr' requires a 'detector' coordinate")
+        snr = catalog["snr"]
+        if snr.dims != ("sample", "detector"):
+            raise ValueError(
+                f"{label}: 'snr' must have dims (sample, detector), got {snr.dims}"
+            )
+        if not np.issubdtype(snr.dtype, np.floating):
+            raise ValueError(f"{label}: 'snr' must be floating-point")
+        if snr.sizes["sample"] != polarization_power.sizes["sample"]:
+            raise ValueError(
+                f"{label}: 'snr' sample axis ({snr.sizes['sample']}) does not "
+                f"match 'polarization_power' ({polarization_power.sizes['sample']})"
+            )
+        detector = np.asarray(catalog.coords["detector"].values)
+        if detector.ndim != 1 or detector.shape[0] != snr.sizes["detector"]:
+            raise ValueError(f"{label}: 'detector' must be one-dimensional")
+        detector_names = [str(name) for name in detector]
+        if any(not name for name in detector_names) or len(set(detector_names)) != len(
+            detector_names
+        ):
+            raise ValueError(f"{label}: detector names must be non-empty and unique")
+        snr_values = np.asarray(snr.values)
+        if not np.all(np.isfinite(snr_values)) or np.any(snr_values < 0.0):
+            raise ValueError(f"{label}: 'snr' values must be finite and non-negative")

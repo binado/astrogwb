@@ -76,6 +76,16 @@ def test_save_with_compression_round_trips(tmp_path: Path) -> None:
     )
 
 
+def test_validate_catalog_rejects_invalid_snr() -> None:
+    catalog = _catalog(nsamples=2).assign_coords(detector=["H1", "H1"])
+    bad = catalog.assign(
+        snr=(("sample", "detector"), np.array([[1.0, 2.0], [3.0, -1.0]]))
+    )
+
+    with pytest.raises(ValueError, match="detector names"):
+        validate_catalog(bad, label="test")
+
+
 def test_open_catalog_leaves_polarization_power_lazy(tmp_path: Path) -> None:
     catalog = _catalog()
     path = tmp_path / "catalog.h5"
