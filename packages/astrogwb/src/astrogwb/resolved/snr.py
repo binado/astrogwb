@@ -22,7 +22,7 @@ from typing import Literal
 
 import numpy as np
 from gwmock_signal.detector import CustomDetector
-from gwmock_signal.jax_batch import recommend_chunk_size, simulate_cbc_batch
+from gwmock_signal.jax_batch import simulate_cbc_batch
 from gwmock_signal.projection.network import project_polarizations_to_network
 from gwmock_signal.waveform.backends.conditioning import segment_sample_count
 from gwmock_signal.waveform.backends.lal import LALSimulationBackend
@@ -183,9 +183,9 @@ def optimal_snr(
     Events are stably sorted by their backend-specific required duration,
     longest first. Each group of at most ``batch_size`` adjacent events is
     both a waveform batch and a duration bucket, sharing the shortest grid
-    that contains that bucket's longest signal. Ripple device-memory advice
-    may reduce a bucket further. Results are restored to input order before
-    return. The LAL path still holds only one event's strain at a time.
+    that contains that bucket's longest signal. Results are restored to
+    input order before return. The LAL path still holds only one event's
+    strain at a time.
 
     Parameters
     ----------
@@ -214,7 +214,6 @@ def optimal_snr(
         generation cutoff.
     batch_size:
         Maximum events sharing one duration-sized grid. Must be positive.
-        Ripple may use fewer events when its device-memory estimate requires it.
     maximum_frequency:
         Upper bound of the SNR integral in Hz; defaults to the Nyquist
         frequency.
@@ -326,10 +325,7 @@ def _select_ripple_backend(waveform_model: str) -> RippleBackend | None:
 
 
 def _duration_sorted_batches(
-    durations: NDArray[np.float64],
-    batch_size: int,
-    *,
-    limit_for_duration: Callable[[float], int | None] | None = None,
+    durations: NDArray[np.float64], batch_size: int
 ) -> list[tuple[NDArray[np.intp], float]]:
     """Plan longest-first batches; each batch is its own duration bucket."""
     order = np.argsort(-durations, kind="stable")
@@ -337,12 +333,7 @@ def _duration_sorted_batches(
     start = 0
     while start < order.size:
         duration = float(durations[order[start]])
-        effective_size = batch_size
-        if limit_for_duration is not None:
-            advised = limit_for_duration(duration)
-            if advised is not None:
-                effective_size = min(effective_size, advised)
-        stop = min(start + effective_size, order.size)
+        stop = min(start + batch_size, order.size)
         batches.append((order[start:stop].astype(np.intp, copy=False), duration))
         start = stop
     return batches
@@ -382,17 +373,9 @@ def _optimal_snr_ripple_batch(
         dtype=np.float64,
     )
 
-    def memory_limit(duration: float) -> int | None:
-        n_samples = max(2, round(duration * sampling_frequency))
-        return recommend_chunk_size(
-            len(names), n_samples, earth_rotation=earth_rotation
-        )
-
     snrs = np.empty((n_events, len(names)), dtype=np.float64)
     done = 0
-    for indices, segment_duration in _duration_sorted_batches(
-        durations, batch_size, limit_for_duration=memory_limit
-    ):
+    for indices, segment_duration in _duration_sorted_batches(durations, batch_size):
         batch_backend = backend.with_segment_duration(segment_duration)
         batch = simulate_cbc_batch(
             waveform_model,

@@ -281,19 +281,6 @@ def test_duration_batches_are_stable_longest_first() -> None:
     assert [duration for _, duration in batches] == [8.0, 4.0]
 
 
-def test_duration_batch_memory_limit_shortens_the_same_batch() -> None:
-    durations = np.array([8.0, 7.0, 6.0, 5.0])
-
-    batches = snr_module._duration_sorted_batches(
-        durations,
-        batch_size=3,
-        limit_for_duration=lambda duration: 1 if duration == 8.0 else None,
-    )
-
-    assert [indices.tolist() for indices, _ in batches] == [[0], [1, 2, 3]]
-    assert [duration for _, duration in batches] == [8.0, 7.0]
-
-
 def test_normalize_parameters_drops_catalog_metadata(
     base_parameters: SourceParameters,
 ) -> None:
