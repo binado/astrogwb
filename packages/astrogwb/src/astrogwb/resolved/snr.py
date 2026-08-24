@@ -5,7 +5,7 @@ generation, projection onto a detector network with Earth rotation, and a
 Whittle inner-product contraction of each projected strain against that
 detector's PSD. Two generation backends are supported; see
 :func:`optimal_snr` for the selection rule. Inverse PSDs are built once
-per call and reused across events. Progress is reported through an
+per duration batch and reused across its events. Progress is reported through an
 optional caller-provided callback; the package performs no logging.
 
 Like the rest of astrogwb, the API consumes materialized objects:
@@ -17,7 +17,6 @@ Like the rest of astrogwb, the API consumes materialized objects:
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable, Mapping, Sequence
 from typing import Literal
 
@@ -159,6 +158,7 @@ def optimal_snr(
     waveform_model: str,
     sampling_frequency: float,
     minimum_frequency: float,
+    batch_size: int,
     maximum_frequency: float | None = None,
     earth_rotation: bool = True,
     backend: WaveformBackend = "auto",
@@ -168,8 +168,8 @@ def optimal_snr(
 
     Two generation backends are available. With ``backend="auto"`` (the
     default) the ripple (JAX) backend is used when it is installed and
-    supports ``waveform_model``: the whole catalog is generated under
-    ``jax.vmap`` and projected on device in memory-sized chunks. Otherwise
+    supports ``waveform_model``: each duration batch is generated under
+    ``jax.vmap`` and projected on device. Otherwise
     the LALSimulation backend is used as a per-event, time-domain fallback.
     ``backend="ripple"`` requires a usable ripple backend;
     ``backend="lal"`` skips ripple. Either way each event/detector strain
@@ -180,12 +180,12 @@ def optimal_snr(
     uncorrelated; the uncorrelated network SNR is
     ``np.sqrt((rho ** 2).sum(axis=1))``.
 
-    All events share one analysis segment sized from the longest inspiral
-    in the catalog, so the frequency grid -- and with it the inverse
-    PSDs -- is computed once and reused. Peak memory is one batch chunk on
-    the ripple path, sized from the device-memory limit gwmock reports
-    (the whole catalog when no limit is reported, e.g. on CPU); the LAL
-    path holds one event's strain regardless of catalog size.
+    Events are stably sorted by their backend-specific required duration,
+    longest first. Each group of at most ``batch_size`` adjacent events is
+    both a waveform batch and a duration bucket, sharing the shortest grid
+    that contains that bucket's longest signal. Ripple device-memory advice
+    may reduce a bucket further. Results are restored to input order before
+    return. The LAL path still holds only one event's strain at a time.
 
     Parameters
     ----------
@@ -212,6 +212,9 @@ def optimal_snr(
     minimum_frequency:
         Lower frequency bound of the SNR integral in Hz; also the waveform
         generation cutoff.
+    batch_size:
+        Maximum events sharing one duration-sized grid. Must be positive.
+        Ripple may use fewer events when its device-memory estimate requires it.
     maximum_frequency:
         Upper bound of the SNR integral in Hz; defaults to the Nyquist
         frequency.
@@ -225,7 +228,7 @@ def optimal_snr(
         ``"lal"`` always uses LALSimulation.
     progress_callback:
         Optional callable invoked as ``(done, total)`` after each completed
-        work unit (one ripple chunk, or one LAL event). ``done`` is the
+        duration batch. ``done`` is the
         number of events finished so far. The package itself performs no
         logging; callers may log from the callback (throttling there if
         desired).
@@ -245,6 +248,8 @@ def optimal_snr(
         raise ValueError("sampling_frequency must be > 0")
     if minimum_frequency <= 0:
         raise ValueError("minimum_frequency must be > 0")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
     if maximum_frequency is not None and maximum_frequency <= minimum_frequency:
         raise ValueError("maximum_frequency must be > minimum_frequency")
 
@@ -280,6 +285,7 @@ def optimal_snr(
             names,
             sensitivities,
             waveform_model,
+            batch_size=batch_size,
             sampling_frequency=sampling_frequency,
             minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,
@@ -293,6 +299,7 @@ def optimal_snr(
         names,
         sensitivities,
         waveform_model,
+        batch_size=batch_size,
         sampling_frequency=sampling_frequency,
         minimum_frequency=minimum_frequency,
         maximum_frequency=maximum_frequency,
@@ -318,6 +325,29 @@ def _select_ripple_backend(waveform_model: str) -> RippleBackend | None:
     return backend
 
 
+def _duration_sorted_batches(
+    durations: NDArray[np.float64],
+    batch_size: int,
+    *,
+    limit_for_duration: Callable[[float], int | None] | None = None,
+) -> list[tuple[NDArray[np.intp], float]]:
+    """Plan longest-first batches; each batch is its own duration bucket."""
+    order = np.argsort(-durations, kind="stable")
+    batches: list[tuple[NDArray[np.intp], float]] = []
+    start = 0
+    while start < order.size:
+        duration = float(durations[order[start]])
+        effective_size = batch_size
+        if limit_for_duration is not None:
+            advised = limit_for_duration(duration)
+            if advised is not None:
+                effective_size = min(effective_size, advised)
+        stop = min(start + effective_size, order.size)
+        batches.append((order[start:stop].astype(np.intp, copy=False), duration))
+        start = stop
+    return batches
+
+
 def _optimal_snr_ripple_batch(
     backend: RippleBackend,
     event_arrays: Mapping[str, NDArray[np.float64]],
@@ -327,76 +357,68 @@ def _optimal_snr_ripple_batch(
     sensitivities: Mapping[str, Sensitivity],
     waveform_model: str,
     *,
+    batch_size: int,
     sampling_frequency: float,
     minimum_frequency: float,
     maximum_frequency: float | None,
     earth_rotation: bool,
     progress_callback: Callable[[int, int], None] | None,
 ) -> NDArray[np.float64]:
-    """Batched ripple (JAX) path: vmapped generation, on-device projection.
-
-    The segment duration is pinned once for the whole catalog, so every
-    chunk lands on the same frequency grid and the inverse PSDs built from
-    the first chunk's grid serve all chunks. Chunk size follows the
-    device-memory limit gwmock reports; when no limit is reported (e.g.
-    CPU) the whole catalog is processed as one batch.
-    """
+    """Ripple path with one duration-sized grid per vmapped batch."""
     mass_1 = event_arrays["detector_frame_mass_1"]
     mass_2 = event_arrays["detector_frame_mass_2"]
     chirp_masses = _chirp_mass(mass_1, mass_2)
     eta = mass_1 * mass_2 / (mass_1 + mass_2) ** 2
-    segment_duration = backend.segment_duration_for(
-        chirp_masses, minimum_frequency, sampling_frequency, eta=eta
+    durations = np.asarray(
+        [
+            backend.segment_duration_for(
+                float(chirp_mass),
+                minimum_frequency,
+                sampling_frequency,
+                eta=float(symmetric_mass_ratio),
+            )
+            for chirp_mass, symmetric_mass_ratio in zip(chirp_masses, eta, strict=True)
+        ],
+        dtype=np.float64,
     )
-    backend = backend.with_segment_duration(segment_duration)
 
-    # Conservative overestimate of the shared grid length (the exact
-    # 5-smooth even length is at most twice), used only to size the
-    # memory-limited chunk: overestimating costs a smaller chunk,
-    # underestimating costs an out-of-memory abort.
-    n_samples_bound = 2 * math.ceil(segment_duration * sampling_frequency) + 2
-    chunk_size = recommend_chunk_size(
-        len(names), n_samples_bound, earth_rotation=earth_rotation
-    )
-    if chunk_size is None:
-        chunk_size = n_events
+    def memory_limit(duration: float) -> int | None:
+        n_samples = max(2, round(duration * sampling_frequency))
+        return recommend_chunk_size(
+            len(names), n_samples, earth_rotation=earth_rotation
+        )
 
     snrs = np.empty((n_events, len(names)), dtype=np.float64)
-    inverse_psd: NDArray[np.float64] | None = None
-    in_band_mask: NDArray[np.bool_] | None = None
-    delta_f = 0.0
-    dt = 0.0
-    for start in range(0, n_events, chunk_size):
-        stop = min(start + chunk_size, n_events)
+    done = 0
+    for indices, segment_duration in _duration_sorted_batches(
+        durations, batch_size, limit_for_duration=memory_limit
+    ):
+        batch_backend = backend.with_segment_duration(segment_duration)
         batch = simulate_cbc_batch(
             waveform_model,
             list(detectors),
             sampling_frequency=sampling_frequency,
             minimum_frequency=minimum_frequency,
-            parameters={
-                key: values[start:stop] for key, values in event_arrays.items()
-            },
-            backend=backend,
+            parameters={key: values[indices] for key, values in event_arrays.items()},
+            backend=batch_backend,
             earth_rotation=earth_rotation,
         )
         strain = np.asarray(batch.strain)
-        if inverse_psd is None:
-            frequencies, delta_f, dt = _rfft_grid(strain.shape[-1], sampling_frequency)
-            in_band_mask, inverse_psd = _in_band_inverse_psd(
-                frequencies,
-                names,
-                sensitivities,
-                minimum_frequency,
-                maximum_frequency,
-            )
-        assert inverse_psd is not None and in_band_mask is not None  # set together
-
-        snrs[start:stop] = matched_filter_snr(
+        frequencies, delta_f, dt = _rfft_grid(strain.shape[-1], sampling_frequency)
+        in_band_mask, inverse_psd = _in_band_inverse_psd(
+            frequencies,
+            names,
+            sensitivities,
+            minimum_frequency,
+            maximum_frequency,
+        )
+        snrs[indices] = matched_filter_snr(
             strain, inverse_psd, in_band_mask, delta_f, dt
         )
 
+        done += indices.size
         if progress_callback is not None:
-            progress_callback(stop, n_events)
+            progress_callback(done, n_events)
 
     return snrs
 
@@ -409,74 +431,64 @@ def _optimal_snr_lal(
     sensitivities: Mapping[str, Sensitivity],
     waveform_model: str,
     *,
+    batch_size: int,
     sampling_frequency: float,
     minimum_frequency: float,
     maximum_frequency: float | None,
     earth_rotation: bool,
     progress_callback: Callable[[int, int], None] | None,
 ) -> NDArray[np.float64]:
-    """Per-event LALSimulation path; peak memory is one event's strain."""
-    # One common segment: size it from the longest inspiral in the catalog
-    # (lightest chirp mass at 0PN), rounded up to a power-of-two seconds
-    # exactly as the backend would.
+    """LAL path with sequential generation inside duration-sized batches."""
     mass_1 = event_arrays["detector_frame_mass_1"]
     mass_2 = event_arrays["detector_frame_mass_2"]
     chirp_masses = _chirp_mass(mass_1, mass_2)
-    lightest = int(np.argmin(chirp_masses))
-    sizing_backend = LALSimulationBackend()
-    pre_coalescence_seconds = sizing_backend.pre_coalescence_duration(
-        waveform_model,
-        sampling_frequency,
-        minimum_frequency,
-        detector_frame_mass_1=float(mass_1[lightest]),
-        detector_frame_mass_2=float(mass_2[lightest]),
-        luminosity_distance=1.0,
-    )
-    if pre_coalescence_seconds is None:
-        raise ValueError(
-            f"Waveform model {waveform_model!r} cannot report its pre-coalescence "
-            "duration; cannot size the shared analysis segment."
-        )
-    segment_duration = float(2.0 ** math.ceil(math.log2(pre_coalescence_seconds)))
-    backend = LALSimulationBackend(segment_duration=segment_duration)
-
-    n_samples = segment_sample_count(
-        float(chirp_masses[lightest]),
-        minimum_frequency,
-        sampling_frequency,
-        segment_duration=segment_duration,
-    )
-    frequencies, delta_f, dt = _rfft_grid(n_samples, sampling_frequency)
-    mask, inv_psd = _in_band_inverse_psd(
-        frequencies, names, sensitivities, minimum_frequency, maximum_frequency
+    durations = np.asarray(
+        [
+            segment_sample_count(
+                float(chirp_mass), minimum_frequency, sampling_frequency
+            )
+            / sampling_frequency
+            for chirp_mass in chirp_masses
+        ],
+        dtype=np.float64,
     )
 
     waveform_keys = [key for key in event_arrays if key not in _RESERVED_PARAMETER_KEYS]
     snrs = np.empty((n_events, len(names)), dtype=np.float64)
-    for event in range(n_events):
-        params = {key: float(event_arrays[key][event]) for key in waveform_keys}
-        polarizations = backend.generate_td_waveform(
-            waveform_model,
-            tc=float(event_arrays["coa_time"][event]),
-            sampling_frequency=sampling_frequency,
-            minimum_frequency=minimum_frequency,
-            **params,
+    done = 0
+    for indices, segment_duration in _duration_sorted_batches(durations, batch_size):
+        backend = LALSimulationBackend(segment_duration=segment_duration)
+        n_samples = round(segment_duration * sampling_frequency)
+        frequencies, delta_f, dt = _rfft_grid(n_samples, sampling_frequency)
+        mask, inv_psd = _in_band_inverse_psd(
+            frequencies, names, sensitivities, minimum_frequency, maximum_frequency
         )
-        projected = project_polarizations_to_network(
-            polarizations,
-            list(detectors),
-            right_ascension=float(event_arrays["right_ascension"][event]),
-            declination=float(event_arrays["declination"][event]),
-            polarization_angle=float(event_arrays["polarization_angle"][event]),
-            earth_rotation=earth_rotation,
-            backend="numpy",
-        )
-        strain = np.stack(
-            [np.asarray(projected[name].value, dtype=np.float64) for name in names]
-        )[None, ...]
-        snrs[event] = matched_filter_snr(strain, inv_psd, mask, delta_f, dt)[0]
 
+        for event in indices:
+            params = {key: float(event_arrays[key][event]) for key in waveform_keys}
+            polarizations = backend.generate_td_waveform(
+                waveform_model,
+                tc=float(event_arrays["coa_time"][event]),
+                sampling_frequency=sampling_frequency,
+                minimum_frequency=minimum_frequency,
+                **params,
+            )
+            projected = project_polarizations_to_network(
+                polarizations,
+                list(detectors),
+                right_ascension=float(event_arrays["right_ascension"][event]),
+                declination=float(event_arrays["declination"][event]),
+                polarization_angle=float(event_arrays["polarization_angle"][event]),
+                earth_rotation=earth_rotation,
+                backend="numpy",
+            )
+            strain = np.stack(
+                [np.asarray(projected[name].value, dtype=np.float64) for name in names]
+            )[None, ...]
+            snrs[event] = matched_filter_snr(strain, inv_psd, mask, delta_f, dt)[0]
+
+        done += indices.size
         if progress_callback is not None:
-            progress_callback(event + 1, n_events)
+            progress_callback(done, n_events)
 
     return snrs

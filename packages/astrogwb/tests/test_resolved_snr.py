@@ -65,6 +65,7 @@ def test_empty_source_parameters_rejected(
             waveform_model="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=512.0,
             minimum_frequency=20.0,
+            batch_size=1,
         )
 
 
@@ -81,6 +82,7 @@ def test_empty_parameter_arrays_rejected(
             waveform_model="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=512.0,
             minimum_frequency=20.0,
+            batch_size=1,
         )
 
 
@@ -97,6 +99,7 @@ def test_scalar_parameter_rejected(
             waveform_model="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=512.0,
             minimum_frequency=20.0,
+            batch_size=1,
         )
 
 
@@ -117,6 +120,7 @@ def test_mismatched_parameter_lengths_rejected(
             waveform_model="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=512.0,
             minimum_frequency=20.0,
+            batch_size=1,
         )
 
 
@@ -136,6 +140,7 @@ def test_multidimensional_parameter_rejected(
             waveform_model="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=512.0,
             minimum_frequency=20.0,
+            batch_size=1,
         )
 
 
@@ -159,6 +164,7 @@ def test_invalid_scalar_arguments_rejected(
         "waveform_model": "IMRPhenomXAS_NRTidalv3",
         "sampling_frequency": 512.0,
         "minimum_frequency": 20.0,
+        "batch_size": 1,
         field: value,
     }
 
@@ -176,6 +182,7 @@ def test_maximum_frequency_below_minimum_rejected(
             waveform_model="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=512.0,
             minimum_frequency=20.0,
+            batch_size=1,
             maximum_frequency=10.0,
         )
 
@@ -189,6 +196,7 @@ def test_empty_detector_list_rejected(base_parameters: SourceParameters) -> None
             waveform_model="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=512.0,
             minimum_frequency=20.0,
+            batch_size=1,
         )
 
 
@@ -213,6 +221,7 @@ def test_duplicate_detector_names_rejected(
             waveform_model="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=512.0,
             minimum_frequency=20.0,
+            batch_size=1,
         )
 
 
@@ -227,6 +236,7 @@ def test_missing_sensitivity_is_reported(
             waveform_model="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=512.0,
             minimum_frequency=20.0,
+            batch_size=1,
         )
 
 
@@ -241,8 +251,47 @@ def test_invalid_backend_rejected(
             waveform_model="IMRPhenomXAS_NRTidalv3",
             sampling_frequency=512.0,
             minimum_frequency=20.0,
+            batch_size=1,
             backend=invalid_backend,
         )
+
+
+def test_non_positive_batch_size_rejected(
+    base_parameters: SourceParameters, h1_setup: DetectorSetup
+) -> None:
+    with pytest.raises(ValueError, match="batch_size"):
+        optimal_snr(
+            base_parameters,
+            *h1_setup,
+            waveform_model="IMRPhenomXAS_NRTidalv3",
+            sampling_frequency=512.0,
+            minimum_frequency=20.0,
+            batch_size=0,
+        )
+
+
+def test_duration_batches_are_stable_longest_first() -> None:
+    durations = np.array([4.0, 8.0, 8.0, 2.0])
+
+    batches = snr_module._duration_sorted_batches(durations, batch_size=2)
+
+    assert len(batches) == 2
+    np.testing.assert_array_equal(batches[0][0], [1, 2])
+    np.testing.assert_array_equal(batches[1][0], [0, 3])
+    assert [duration for _, duration in batches] == [8.0, 4.0]
+
+
+def test_duration_batch_memory_limit_shortens_the_same_batch() -> None:
+    durations = np.array([8.0, 7.0, 6.0, 5.0])
+
+    batches = snr_module._duration_sorted_batches(
+        durations,
+        batch_size=3,
+        limit_for_duration=lambda duration: 1 if duration == 8.0 else None,
+    )
+
+    assert [indices.tolist() for indices, _ in batches] == [[0], [1, 2, 3]]
+    assert [duration for _, duration in batches] == [8.0, 7.0]
 
 
 def test_normalize_parameters_drops_catalog_metadata(
@@ -291,6 +340,7 @@ def test_ripple_backend_rejects_unsupported_approximant(
             waveform_model="SpinTaylorT4",
             sampling_frequency=512.0,
             minimum_frequency=20.0,
+            batch_size=1,
             backend="ripple",
         )
 
@@ -303,6 +353,7 @@ def test_ripple_and_lal_paths_agree(
         "waveform_model": "IMRPhenomXAS_NRTidalv3",
         "sampling_frequency": 512.0,
         "minimum_frequency": 20.0,
+        "batch_size": 1,
     }
 
     ripple_snrs = optimal_snr(base_parameters, *h1_setup, **kwargs)
@@ -324,6 +375,7 @@ def test_progress_callback_reports_completion(
         waveform_model="IMRPhenomXAS_NRTidalv3",
         sampling_frequency=512.0,
         minimum_frequency=20.0,
+        batch_size=1,
         progress_callback=lambda done, total: calls.append((done, total)),
     )
 
@@ -342,6 +394,7 @@ def test_two_detector_snr_aligns_with_detector_order(
         "waveform_model": "IMRPhenomXAS_NRTidalv3",
         "sampling_frequency": 512.0,
         "minimum_frequency": 20.0,
+        "batch_size": 1,
     }
 
     hv = optimal_snr(base_parameters, detectors_hv, sensitivities, **kwargs)
@@ -361,6 +414,7 @@ def test_lal_path_ignores_catalog_metadata(
         "waveform_model": "IMRPhenomXAS_NRTidalv3",
         "sampling_frequency": 512.0,
         "minimum_frequency": 20.0,
+        "batch_size": 1,
         "backend": "lal",
     }
     extras = {
@@ -385,6 +439,7 @@ def test_lal_mixed_mass_catalog_matches_single_event_snrs(
         "waveform_model": "IMRPhenomXAS_NRTidalv3",
         "sampling_frequency": 512.0,
         "minimum_frequency": 20.0,
+        "batch_size": 1,
         "backend": "lal",
     }
     light = event_factory(detector_frame_mass_1=1.0, detector_frame_mass_2=1.0)

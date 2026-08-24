@@ -76,6 +76,57 @@ def test_save_with_compression_round_trips(tmp_path: Path) -> None:
     )
 
 
+def test_save_catalog_reorders_all_sample_variables_in_blocks(tmp_path: Path) -> None:
+    catalog = _catalog(nsamples=4).assign_coords(detector=["H1", "L1"])
+    snr = np.arange(8.0).reshape(4, 2)
+    catalog = catalog.assign(snr=(("sample", "detector"), snr))
+    order = np.array([2, 0, 3, 1])
+    path = tmp_path / "catalog.h5"
+
+    save_catalog(path, catalog, sample_order=order)
+    loaded = load_catalog(path)
+
+    np.testing.assert_array_equal(loaded.detector.values, ["H1", "L1"])
+    np.testing.assert_allclose(
+        loaded.polarization_power.values,
+        catalog.polarization_power.values[:, order],
+    )
+    np.testing.assert_allclose(
+        loaded.source_parameters.values,
+        catalog.source_parameters.values[order],
+    )
+    np.testing.assert_allclose(loaded.snr.values, snr[order])
+
+
+def test_reordered_save_preserves_existing_compression(tmp_path: Path) -> None:
+    source = tmp_path / "source.h5"
+    destination = tmp_path / "destination.h5"
+    save_catalog(source, _catalog(nsamples=3), compression="gzip")
+
+    with open_catalog(source) as catalog:
+        save_catalog(destination, catalog, sample_order=[2, 1, 0])
+
+    with h5py.File(destination) as output:
+        assert output["polarization_power"].compression == "gzip"
+
+
+def test_save_catalog_rejects_incomplete_sample_permutation(tmp_path: Path) -> None:
+    catalog = _catalog(nsamples=3)
+
+    with pytest.raises(ValueError, match="complete permutation"):
+        save_catalog(tmp_path / "catalog.h5", catalog, sample_order=[0, 0, 2])
+
+
+def test_validate_catalog_rejects_invalid_snr() -> None:
+    catalog = _catalog(nsamples=2).assign_coords(detector=["H1", "H1"])
+    bad = catalog.assign(
+        snr=(("sample", "detector"), np.array([[1.0, 2.0], [3.0, -1.0]]))
+    )
+
+    with pytest.raises(ValueError, match="detector names"):
+        validate_catalog(bad, label="test")
+
+
 def test_open_catalog_leaves_polarization_power_lazy(tmp_path: Path) -> None:
     catalog = _catalog()
     path = tmp_path / "catalog.h5"
