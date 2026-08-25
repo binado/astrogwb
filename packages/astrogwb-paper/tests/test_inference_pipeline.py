@@ -46,7 +46,7 @@ def _write_catalog(
     rng = np.random.default_rng(seed)
     n_freq = frequencies.size
     shape = (n_freq, N_SOURCES)
-    redshift = np.linspace(0.05, 1.5, N_SOURCES)
+    redshift = np.linspace(0.4, 1.5, N_SOURCES)
     source_parameters: dict[str, Any] = {
         "redshift": redshift,
         # Only needs to be positive and finite: the model divides by the

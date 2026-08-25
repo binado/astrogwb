@@ -97,7 +97,7 @@ def test_proposal_config_is_expanded_from_population_fragments() -> None:
 
     assert proposal == {
         "uniform_mixing_fraction": 0.1,
-        "minimum_redshift": 0.0,
+        "minimum_redshift": 0.3,
         "maximum_redshift": 20.0,
         "n_grid": 4096,
         "H0": 67.66,

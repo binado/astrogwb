@@ -7,7 +7,7 @@ base:
     f_max: 4096.0
 
   cosmology:
-    minimum_redshift: 0.0
+    minimum_redshift: 0.3
     maximum_redshift: 20.0
     n_grid: 256
 

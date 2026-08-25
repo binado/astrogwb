@@ -48,7 +48,7 @@ jax.config.update("jax_enable_x64", True)
 EPS = 1e-3
 NPOINTS = 64
 CHUNK_SIZE = 64
-Z_MIN = 0.0
+Z_MIN = 0.3
 Z_MAX = 20.0
 N_REDSHIFT_GRID = 256
 

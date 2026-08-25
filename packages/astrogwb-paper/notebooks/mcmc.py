@@ -220,7 +220,7 @@ detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity
 observation_time = 1.0  # [yr]; cancels in S_h, kept for the likelihood scale
 
 # Redshift grid for the cosmology integrals (and MD normalization)
-minimum_redshift = 0.0
+minimum_redshift = 0.3
 maximum_redshift = 20.0
 n_grid = 256  # grid points for cosmology integrals / MD normalization
 
@@ -401,7 +401,7 @@ proposal_logprob = compute_proposal_logprob(
     samples["redshift"],
     ProposalConfig(
         uniform_mixing_fraction=0.1,
-        minimum_redshift=0.0,
+        minimum_redshift=0.3,
         maximum_redshift=20.0,
         n_grid=4096,
         H0=67.66,

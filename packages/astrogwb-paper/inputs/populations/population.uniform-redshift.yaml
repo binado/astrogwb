@@ -4,5 +4,5 @@ parameters:
     sampler:
       function: uniform
       arguments:
-        minimum: 0.0
+        minimum: 0.3
         maximum: 20.0

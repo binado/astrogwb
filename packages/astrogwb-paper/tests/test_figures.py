@@ -107,7 +107,7 @@ def test_base_fiducials_and_analysis_grid_are_read_from_the_base_config() -> Non
     assert fiducials["local_merger_rate"] == 770.0
     assert (grid.observation_time, grid.f_min, grid.f_max) == (1.0, 2.0, 4096.0)
     assert (grid.minimum_redshift, grid.maximum_redshift, grid.n_grid) == (
-        0.0,
+        0.3,
         20.0,
         256,
     )
