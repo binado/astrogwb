@@ -67,12 +67,16 @@ def simulate_population(
             uniform_redshift_config, source_type="bns", seed=seed
         )
     else:
-        # MixtureSimulator seeds component calls, but GraphSimulator currently
-        # draws from its construction-time RNG. Seed both components explicitly
-        # so the complete mixture, not only its assignments, is reproducible.
-        md = GraphSimulator.from_config_file(md_config, source_type="bns", seed=seed)
+        # MixtureSimulator seeds component calls, but GraphSimulator draws
+        # from its construction-time RNG, so the components must be seeded
+        # here for the mixture to be reproducible. All three seeds must
+        # differ: RNGManager starts from jax.random.key(seed), so a shared
+        # seed means identical key streams across simulators.
+        md = GraphSimulator.from_config_file(
+            md_config, source_type="bns", seed=seed + 1
+        )
         uniform = GraphSimulator.from_config_file(
-            uniform_redshift_config, source_type="bns", seed=seed + 1
+            uniform_redshift_config, source_type="bns", seed=seed + 2
         )
         simulator = MixtureSimulator(
             [md, uniform],

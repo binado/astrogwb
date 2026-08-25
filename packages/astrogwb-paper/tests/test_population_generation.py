@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pytest
 import yaml
+from astrogwb_paper.cli import generate_population
 from astrogwb_paper.cli.generate_population import main, simulate_population
 from gwmock_pop.loaders.file_loader import read_population_catalogue
 
@@ -64,6 +66,33 @@ def test_seeded_mixture_is_reproducible_and_uses_both_components(
 
     np.testing.assert_array_equal(first["redshift"], second["redshift"])
     assert np.mean(np.asarray(first["marker"]) == 10.0) == pytest.approx(0.2, abs=0.04)
+
+
+def test_mixture_gives_each_stream_a_distinct_seed(tmp_path: Path) -> None:
+    md = _write_graph(tmp_path / "md.yaml", 0.0, 1.0)
+    uniform = _write_graph(tmp_path / "uniform.yaml", 10.0, 11.0)
+
+    with (
+        mock.patch.object(
+            generate_population.GraphSimulator,
+            "from_config_file",
+            wraps=generate_population.GraphSimulator.from_config_file,
+        ) as graph_spy,
+        mock.patch.object(generate_population, "MixtureSimulator") as mixture_factory,
+    ):
+        simulate_population(
+            md,
+            uniform,
+            uniform_mixing_fraction=0.2,
+            num_samples=8,
+            seed=7,
+        )
+
+    graph_seeds = [call.kwargs["seed"] for call in graph_spy.call_args_list]
+    assert graph_seeds == [8, 9]
+    mixture_seeds = [call.kwargs["seed"] for call in mixture_factory.call_args_list]
+    assert mixture_seeds == [7]
+    assert len({*mixture_seeds, *graph_seeds}) == 3
 
 
 @pytest.mark.parametrize(
