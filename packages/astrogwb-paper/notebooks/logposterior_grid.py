@@ -27,8 +27,8 @@
 # via `numpyro.infer.util.log_density`, which gives the correct unnormalized
 # log-posterior (`log prior + log likelihood`) and is robust at the prior bounds.
 #
-# To run the notebook end-to-end, point `INJECTION_CATALOG_PATH` and
-# `PROPOSAL_CATALOG_PATH` at the two waveform catalogs used by `mcmc.py`.
+# To run the notebook end-to-end, point `INJECTION_BANK_PATH` and
+# `PROPOSAL_BANK_PATH` at the two waveform banks used by `mcmc.py`.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -64,13 +64,16 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 )
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb_paper.catalogs import (
+    CatalogSource,
     compute_proposal_logprob,
     compute_fiducial_injection_spectrum,
-    load_propagated_catalog,
+    propagate_catalog,
     samples_from_catalog,
     truncate_catalog_samples,
     validate_matching_frequency_grids,
 )
+from astrogwb_paper.config.catalogs import INJECTION_CATALOG_NAME, catalog_recipe
+from astrogwb_paper.config.experiments import DEFAULT_CATALOG
 from astrogwb_paper.config.mcmc import ProposalConfig
 from astrogwb_paper.paths import paper_project_root
 
@@ -89,10 +92,8 @@ jax.config.update("jax_enable_x64", True)
 DEBUG = False  # small smoke settings for first runs; set False for the production run
 
 ROOT_DIR = paper_project_root()
-INJECTION_CATALOG_PATH = (
-    ROOT_DIR / "outputs/catalogs/injection-bns-n32768-eps=0-df1.h5"
-)
-PROPOSAL_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/bns-n16384-eps=0-df1.h5"
+INJECTION_BANK_PATH = ROOT_DIR / "outputs/banks/md-imrphenom-s41.h5"
+PROPOSAL_BANK_PATH = ROOT_DIR / "outputs/banks/md-imrphenom-s42.h5"
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -161,8 +162,12 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # See `mcmc.py` for the injection/proposal split and full catalog schema.
 
 # %%
-injection = load_propagated_catalog(INJECTION_CATALOG_PATH, fiducials=fiducials)
-proposal = load_propagated_catalog(PROPOSAL_CATALOG_PATH, fiducials=fiducials)
+injection_source = CatalogSource(
+    INJECTION_BANK_PATH, None, catalog_recipe(INJECTION_CATALOG_NAME)
+)
+proposal_source = CatalogSource(PROPOSAL_BANK_PATH, None, catalog_recipe(DEFAULT_CATALOG))
+injection = propagate_catalog(injection_source.compose(), fiducials=fiducials)
+proposal = propagate_catalog(proposal_source.compose(), fiducials=fiducials)
 injection = truncate_catalog_samples(
     injection,
     label="injection",
@@ -768,8 +773,8 @@ else:
     )
 
 run_config = {
-    "injection_catalog_path": str(INJECTION_CATALOG_PATH),
-    "proposal_catalog_path": str(PROPOSAL_CATALOG_PATH),
+    "injection_bank_path": str(INJECTION_BANK_PATH),
+    "proposal_bank_path": str(PROPOSAL_BANK_PATH),
     "detectors": list(detnames),
     "seed": seed,
     "observation_time": observation_time,

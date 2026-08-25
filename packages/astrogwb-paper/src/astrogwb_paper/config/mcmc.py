@@ -29,6 +29,7 @@ from pydantic import (
 )
 
 from astrogwb_paper.config.analysis import AnalysisGrid
+from astrogwb_paper.config.catalogs import CatalogComposition
 from astrogwb_paper.config.loading import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
@@ -221,6 +222,22 @@ class ProposalConfig(BaseModel):
         return self
 
 
+class CatalogConfig(BaseModel):
+    """The bank/composition identity behind this run's two catalogs.
+
+    ``proposal.uniform_mixing_fraction`` (the numeric proposal density
+    fields) already lives on :class:`ProposalConfig`; this block instead
+    records *which bank(s) and composition parameters* produced each
+    catalog, so a saved run config is self-describing without the composed
+    catalog ever existing as a file.
+    """
+
+    model_config = _STRICT
+
+    injection: CatalogComposition
+    proposal: CatalogComposition
+
+
 class RunConfig(BaseModel):
     model_config = _STRICT
 
@@ -237,6 +254,7 @@ class RunConfig(BaseModel):
     analysis: AnalysisConfig
     cosmology: CosmoConfig
     proposal: ProposalConfig
+    catalog: CatalogConfig
     sampler: SamplerConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
 

@@ -19,8 +19,12 @@ Usage::
 
     uv run astrogwb-run-mcmc \
         --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
-        --injection-catalog outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
-        --proposal-catalog outputs/catalogs/bns-n16384-eps=0-df1.h5
+        --bank md-imrphenom-s41=outputs/banks/md-imrphenom-s41.h5 \
+        --bank md-imrphenom-s42=outputs/banks/md-imrphenom-s42.h5
+
+The run config (its ``catalog.injection`` / ``catalog.proposal`` blocks) names
+which bank(s) each role composes from; every bank it names must be supplied
+via a ``--bank NAME=PATH`` flag, repeated once per distinct bank.
 
 Configs are assembled from the base and run overlays in ``inputs/experiments.yaml``
 by the ``assemble_config`` workflow rule or by
@@ -46,6 +50,7 @@ from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
     from astrogwb_paper.amplitude import AmplitudeMarginalization
+    from astrogwb_paper.catalogs import CatalogSource
 
 logger = logging.getLogger("run_mcmc")
 
@@ -67,16 +72,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to the TOML or JSON config file for this run / array task.",
     )
     parser.add_argument(
-        "--injection-catalog",
-        type=Path,
-        required=True,
-        help="Independent fiducial waveform catalog used to construct observed data.",
-    )
-    parser.add_argument(
-        "--proposal-catalog",
-        type=Path,
-        required=True,
-        help="Waveform catalog used by the importance estimator.",
+        "--bank",
+        dest="banks",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help=(
+            "One waveform bank file, as NAME=PATH; repeat once per distinct "
+            "bank the run config's [catalog.injection] / [catalog.proposal] "
+            "names."
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -115,8 +120,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # --------------------------------------------------------------------------- #
 def run(
     config: RunConfig,
-    injection_catalog_path: Path,
-    proposal_catalog_path: Path,
+    injection_source: CatalogSource,
+    proposal_source: CatalogSource,
     jax,
     chain_method: str,
 ):
@@ -136,8 +141,8 @@ def run(
     )
 
     inputs = prepare_inference_inputs(
-        injection_catalog_path,
-        proposal_catalog_path,
+        injection_source,
+        proposal_source,
         fiducials=config.fiducials,
         proposal_config=config.proposal,
         grid=config.analysis_grid,
@@ -311,11 +316,21 @@ def save(
     return nc_path
 
 
+def _parse_bank_args(values: list[str]) -> dict[str, Path]:
+    """Parse repeated ``NAME=PATH`` flags into a bank-name -> path mapping."""
+    banks: dict[str, Path] = {}
+    for item in values:
+        name, sep, raw_path = item.partition("=")
+        if not sep or not name:
+            raise ValueError(f"--bank must be NAME=PATH, got {item!r}")
+        banks[name] = Path(raw_path).resolve()
+    return banks
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     config_path = args.config.resolve()
-    injection_catalog_path = args.injection_catalog.resolve()
-    proposal_catalog_path = args.proposal_catalog.resolve()
+    bank_paths = _parse_bank_args(args.banks)
     raw = load_mapping(config_path)
     config = build_run_config(
         raw,
@@ -341,13 +356,19 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_chain_path_available(config, timestamp=timestamp, force=args.force)
 
-    # Fail on missing catalogs before JAX claims a device.
-    for label, path in (
-        ("injection", injection_catalog_path),
-        ("proposal", proposal_catalog_path),
-    ):
-        if not path.is_file():
-            raise FileNotFoundError(f"{label} catalog not found: {path}")
+    from astrogwb_paper.catalogs import catalog_source
+
+    injection_source = catalog_source(config.catalog.injection, bank_paths)
+    proposal_source = catalog_source(config.catalog.proposal, bank_paths)
+
+    # Fail on missing bank files before JAX claims a device.
+    for source in (injection_source, proposal_source):
+        for label, path in (
+            ("md", source.md_bank_path),
+            ("uniform", source.uniform_bank_path),
+        ):
+            if path is not None and not path.is_file():
+                raise FileNotFoundError(f"{label} bank not found: {path}")
 
     jax, chain_method = configure_runtime(
         num_chains=config.sampler.num_chains,
@@ -358,8 +379,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     mcmc, marginalization = run(
         config,
-        injection_catalog_path,
-        proposal_catalog_path,
+        injection_source,
+        proposal_source,
         jax,
         chain_method,
     )

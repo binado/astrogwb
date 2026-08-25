@@ -28,8 +28,8 @@ import numpyro.distributions as dist
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb.waveform import open_catalog
 from astrogwb_paper.catalogs import (
+    CatalogSource,
     compute_proposal_logprob,
     samples_from_catalog,
     truncate_catalog_samples,
@@ -181,8 +181,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     fiducials = load_fiducials()
     use_paper_style()
 
+    composition = catalog_recipe(DEFAULT_CATALOG)
+    source = CatalogSource(catalog_path, None, composition)
     catalog = truncate_catalog_samples(
-        open_catalog(catalog_path),
+        source.compose(),
         label="proposal",
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
@@ -194,7 +196,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_REDSHIFT_GRID)
     proposal = ProposalConfig.model_validate(
         analysis_proposal_config(
-            catalog_recipe(DEFAULT_CATALOG),
+            composition,
             minimum_redshift=Z_MIN,
             maximum_redshift=Z_MAX,
         )

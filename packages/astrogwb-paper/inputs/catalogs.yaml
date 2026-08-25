@@ -12,46 +12,57 @@ base:
     frequency_resolution: 1.0
     chunk_size: 2048
 
-catalogs:
-  injection-bns-n32768-eps=0-df1:
-    population:
-      num_samples: 32768
-      seed: 41
-      uniform_mixing_fraction: 0.0
-  bns-n32768-eps=0-df1-taylorf2:
-    population:
-      num_samples: 32768
-      seed: 41
-      uniform_mixing_fraction: 0.0
+banks:
+  md-imrphenom-s41:
+    component: md
+    num_samples: 32768
+    seed: 41
+  md-imrphenom-s42:
+    component: md
+    num_samples: 32768
+    seed: 42
+  md-taylorf2-s41:
+    component: md
+    num_samples: 32768
+    seed: 41
     waveform:
       approximant: TaylorF2
+  uniform-imrphenom-s51:
+    component: uniform-redshift
+    num_samples: 8192
+    seed: 51
+
+catalogs:
+  injection-bns-n32768-eps=0-df1:
+    md_bank: md-imrphenom-s41
+    num_samples: 32768
+  bns-n32768-eps=0-df1-taylorf2:
+    md_bank: md-taylorf2-s41
+    num_samples: 32768
   bns-n8192-eps=0-df1:
-    population:
-      num_samples: 8192
-      seed: 42
-      uniform_mixing_fraction: 0.0
+    md_bank: md-imrphenom-s42
+    num_samples: 8192
   bns-n16384-eps=0-df1:
-    population:
-      num_samples: 16384
-      seed: 42
-      uniform_mixing_fraction: 0.0
+    md_bank: md-imrphenom-s42
+    num_samples: 16384
   bns-n32768-eps=0-df1:
-    population:
-      num_samples: 32768
-      seed: 42
-      uniform_mixing_fraction: 0.0
+    md_bank: md-imrphenom-s42
+    num_samples: 32768
   bns-n16384-eps=0.1-df1:
-    population:
-      num_samples: 16384
-      seed: 42
-      uniform_mixing_fraction: 0.1
+    md_bank: md-imrphenom-s42
+    uniform_bank: uniform-imrphenom-s51
+    num_samples: 16384
+    uniform_mixing_fraction: 0.1
+    mixture_seed: 61
   bns-n16384-eps=0.01-df1:
-    population:
-      num_samples: 16384
-      seed: 42
-      uniform_mixing_fraction: 0.01
+    md_bank: md-imrphenom-s42
+    uniform_bank: uniform-imrphenom-s51
+    num_samples: 16384
+    uniform_mixing_fraction: 0.01
+    mixture_seed: 62
   bns-n16384-eps=0.001-df1:
-    population:
-      num_samples: 16384
-      seed: 42
-      uniform_mixing_fraction: 0.001
+    md_bank: md-imrphenom-s42
+    uniform_bank: uniform-imrphenom-s51
+    num_samples: 16384
+    uniform_mixing_fraction: 0.001
+    mixture_seed: 63

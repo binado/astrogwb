@@ -21,8 +21,10 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astrogwb.waveform import make_catalog, save_catalog
+from astrogwb_paper.catalogs import CatalogSource
 from astrogwb_paper.cli.profile_model import build_potential
 from astrogwb_paper.cli.run_mcmc import run
+from astrogwb_paper.config.catalogs import CatalogComposition
 from astrogwb_paper.config.mcmc import RunConfig, build_run_config
 from astrogwb_paper.inference import prepare_inference_inputs, prepare_observation
 from config_fixtures import example_raw
@@ -72,14 +74,21 @@ def _write_catalog(
     return path
 
 
-@pytest.fixture
-def injection_catalog(tmp_path: Path) -> Path:
-    return _write_catalog(tmp_path / "injection.h5", proposal=False, seed=0)
+def _source(bank_path: Path, *, num_samples: int = N_SOURCES) -> CatalogSource:
+    composition = CatalogComposition(
+        name="test", md_bank="test-bank", num_samples=num_samples
+    )
+    return CatalogSource(bank_path, None, composition)
 
 
 @pytest.fixture
-def proposal_catalog(tmp_path: Path) -> Path:
-    return _write_catalog(tmp_path / "proposal.h5", proposal=True, seed=1)
+def injection_catalog(tmp_path: Path) -> CatalogSource:
+    return _source(_write_catalog(tmp_path / "injection.h5", proposal=False, seed=0))
+
+
+@pytest.fixture
+def proposal_catalog(tmp_path: Path) -> CatalogSource:
+    return _source(_write_catalog(tmp_path / "proposal.h5", proposal=True, seed=1))
 
 
 def _config(**overrides: Any) -> RunConfig:
@@ -103,7 +112,9 @@ def _config(**overrides: Any) -> RunConfig:
 # --------------------------------------------------------------------------- #
 # prepare_observation / prepare_inference_inputs
 # --------------------------------------------------------------------------- #
-def test_prepare_observation_keeps_arrays_unmasked(injection_catalog: Path) -> None:
+def test_prepare_observation_keeps_arrays_unmasked(
+    injection_catalog: CatalogSource,
+) -> None:
     config = _config()
 
     observation = prepare_observation(
@@ -125,7 +136,7 @@ def test_prepare_observation_keeps_arrays_unmasked(injection_catalog: Path) -> N
 
 
 def test_masked_model_kwargs_masks_frequencies_but_not_samples(
-    injection_catalog: Path, proposal_catalog: Path
+    injection_catalog: CatalogSource, proposal_catalog: CatalogSource
 ) -> None:
     config = _config()
 
@@ -150,7 +161,7 @@ def test_masked_model_kwargs_masks_frequencies_but_not_samples(
 
 
 def test_mismatched_frequency_grids_are_rejected(
-    injection_catalog: Path, proposal_catalog: Path, tmp_path: Path
+    injection_catalog: CatalogSource, proposal_catalog: CatalogSource, tmp_path: Path
 ) -> None:
     shifted = _write_catalog(
         tmp_path / "shifted.h5",
@@ -163,7 +174,7 @@ def test_mismatched_frequency_grids_are_rejected(
     with pytest.raises(ValueError, match="identical frequency grids"):
         prepare_inference_inputs(
             injection_catalog,
-            shifted,
+            _source(shifted),
             fiducials=config.fiducials,
             proposal_config=config.proposal,
             grid=config.analysis_grid,
@@ -172,7 +183,7 @@ def test_mismatched_frequency_grids_are_rejected(
 
 
 def test_catalog_without_stored_proposal_density_is_accepted(
-    injection_catalog: Path,
+    injection_catalog: CatalogSource,
 ) -> None:
     config = _config()
 
@@ -192,7 +203,7 @@ def test_catalog_without_stored_proposal_density_is_accepted(
 # The two runner entrypoints
 # --------------------------------------------------------------------------- #
 def test_build_potential_returns_a_finite_potential(
-    injection_catalog: Path, proposal_catalog: Path
+    injection_catalog: CatalogSource, proposal_catalog: CatalogSource
 ) -> None:
     config = _config()
 
@@ -205,7 +216,7 @@ def test_build_potential_returns_a_finite_potential(
 
 
 def test_run_samples_every_sampled_parameter(
-    injection_catalog: Path, proposal_catalog: Path
+    injection_catalog: CatalogSource, proposal_catalog: CatalogSource
 ) -> None:
     config = _config()
 

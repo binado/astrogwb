@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import jax
@@ -13,19 +14,129 @@ from astrogwb.gwb import spectral_density
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
 )
-from astrogwb.waveform import apply_gw_distance_to_power, load_catalog
+from astrogwb.waveform import apply_gw_distance_to_power, load_catalog, open_catalog
 from numpy.typing import ArrayLike
 
+from astrogwb_paper.config.catalogs import CatalogComposition
 from astrogwb_paper.config.mcmc import ProposalConfig
+
+
+@dataclass(frozen=True)
+class CatalogSource:
+    """Bank file location(s) plus the composition to draw them into a catalog."""
+
+    md_bank_path: Path
+    uniform_bank_path: Path | None
+    composition: CatalogComposition
+
+    def compose(self) -> xr.Dataset:
+        return compose_catalog(
+            self.md_bank_path, self.uniform_bank_path, self.composition
+        )
+
+
+def catalog_source(
+    composition: CatalogComposition, bank_paths: Mapping[str, Path]
+) -> CatalogSource:
+    """Resolve a composition's bank names against supplied bank file paths.
+
+    Used by the CLI entrypoints, which receive banks as a flat ``NAME=PATH``
+    mapping (from repeated ``--bank`` flags) and must match them against the
+    bank names a run config's :class:`~astrogwb_paper.config.mcmc.CatalogConfig`
+    names for each role.
+    """
+    md_bank_path = _require_bank_path(composition.md_bank, bank_paths)
+    uniform_bank_path = (
+        _require_bank_path(composition.uniform_bank, bank_paths)
+        if composition.uniform_bank is not None
+        else None
+    )
+    return CatalogSource(md_bank_path, uniform_bank_path, composition)
+
+
+def _require_bank_path(name: str, bank_paths: Mapping[str, Path]) -> Path:
+    try:
+        return bank_paths[name]
+    except KeyError:
+        raise ValueError(
+            f"bank {name!r} is required but was not supplied via --bank"
+        ) from None
+
+
+def compose_catalog(
+    md_bank_path: Path,
+    uniform_bank_path: Path | None,
+    composition: CatalogComposition,
+) -> xr.Dataset:
+    """Compose an in-memory catalog from bank files, per ``composition``.
+
+    Reproduces ``MixtureSimulator``'s law directly with ``jax.random`` instead
+    of through ``gwmock_pop``: per-sample component assignments are drawn once
+    from ``mixture_seed`` (multinomial with probabilities
+    ``[1 - eps, eps]``), then each component contributes its next-in-sequence
+    bank samples. Because bank draws are prefix-stable (the same
+    construction-time RNG stream regardless of how many samples are later
+    requested), this is bit-identical to drawing directly from the
+    corresponding single larger mixture population -- so a prefix of the
+    result is itself a valid mixture sample.
+
+    ``eps == 0`` short-circuits to a bank prefix with no RNG draw at all,
+    which is what makes every existing eps=0 catalog file bit-identical to
+    its composed replacement.
+    """
+    n = composition.num_samples
+    epsilon = composition.uniform_mixing_fraction
+    if epsilon == 0.0:
+        return _bank_prefix(md_bank_path, n, label=composition.md_bank)
+
+    if uniform_bank_path is None or composition.mixture_seed is None:
+        raise ValueError(
+            f"composition {composition.name!r}: uniform_mixing_fraction > 0 "
+            "requires both uniform_bank_path and mixture_seed"
+        )
+
+    key = jax.random.key(composition.mixture_seed)
+    log_probs = jnp.log(jnp.asarray([1.0 - epsilon, epsilon]))
+    assignments = jax.random.categorical(key, log_probs, shape=(n,))
+    counts = [int((assignments == component).sum()) for component in (0, 1)]
+
+    md_part = _bank_prefix(md_bank_path, counts[0], label=composition.md_bank)
+    uniform_part = _bank_prefix(
+        uniform_bank_path, counts[1], label=composition.uniform_bank or ""
+    )
+    combined = xr.concat([md_part, uniform_part], dim="sample")
+
+    order = jnp.argsort(assignments, stable=True)
+    inverse = np.asarray(jnp.argsort(order))
+    return combined.isel(sample=inverse)
+
+
+def _bank_prefix(path: Path, count: int, *, label: str) -> xr.Dataset:
+    """Load the first ``count`` samples of a bank, eagerly."""
+    catalog = open_catalog(path)
+    available = catalog.sizes["sample"]
+    if count > available:
+        raise ValueError(
+            f"bank {label!r} at {path} holds {available} samples, but the "
+            f"composition needs {count}"
+        )
+    return catalog.isel(sample=slice(0, count)).load()
+
+
+def propagate_catalog(
+    catalog: xr.Dataset, *, fiducials: dict[str, float]
+) -> xr.Dataset:
+    """Apply fiducial GW propagation to an in-memory catalog. Numpy-backed."""
+    return apply_gw_distance_to_power(
+        catalog,
+        xi_0=float(fiducials["xi_0"]),
+        xi_n=float(fiducials["xi_n"]),
+    )
 
 
 def load_propagated_catalog(path: Path, *, fiducials: dict[str, float]) -> xr.Dataset:
     """Load a catalog and apply fiducial GW propagation. Numpy-backed."""
-    return apply_gw_distance_to_power(
-        load_catalog(path),
-        xi_0=float(fiducials["xi_0"]),
-        xi_n=float(fiducials["xi_n"]),
-    )
+    return propagate_catalog(load_catalog(path), fiducials=fiducials)
 
 
 def samples_from_catalog(catalog: xr.Dataset) -> dict[str, jax.Array]:

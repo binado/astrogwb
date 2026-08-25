@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from astrogwb_paper.config.catalogs import (
+    INJECTION_CATALOG_NAME,
     analysis_proposal_config,
     catalog_recipe,
     generation_redshift_support,
@@ -172,6 +173,10 @@ def overlay_for(
     )
     _validate_proposal_matches_run(spec, run, assembled, proposal)
     assembled["proposal"] = proposal
+    assembled["catalog"] = {
+        "injection": catalog_recipe(INJECTION_CATALOG_NAME).model_dump(),
+        "proposal": recipe.model_dump(),
+    }
     return assembled
 
 

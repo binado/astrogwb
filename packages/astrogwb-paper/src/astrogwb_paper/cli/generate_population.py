@@ -1,4 +1,10 @@
-"""Generate a BNS population from an MD/uniform-redshift mixture."""
+"""Generate a single-component BNS population bank from one graph config.
+
+Mixing MD and uniform-redshift components no longer happens here: each bank
+is one component, generated once at one seed. Mixture composition happens
+in-memory at catalog-load time -- see
+:func:`astrogwb_paper.catalogs.compose_catalog`.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from gwmock_pop import GraphSimulator, MixtureSimulator
+from gwmock_pop import GraphSimulator
 from gwmock_pop.loaders.file_loader import (
     infer_population_file_format,
     write_population_catalogue,
@@ -19,19 +25,9 @@ logger = logging.getLogger(__name__)
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Simulate a BNS population from Madau-Dickinson and "
-            "uniform-redshift graph configurations."
-        )
+        description="Simulate a single-component BNS population bank from a graph config."
     )
-    parser.add_argument("--md-config", type=Path, required=True)
-    parser.add_argument("--uniform-redshift-config", type=Path, required=True)
-    parser.add_argument(
-        "--uniform-mixing-fraction",
-        type=float,
-        required=True,
-        help="Uniform-redshift mixture probability, inclusive in [0, 1].",
-    )
+    parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--num-samples", type=int, required=True)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -44,45 +40,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def simulate_population(
-    md_config: Path,
-    uniform_redshift_config: Path,
+    config: Path,
     *,
-    uniform_mixing_fraction: float,
     num_samples: int,
     seed: int,
 ) -> Mapping[str, Any]:
-    """Draw a fresh population from the requested redshift mixture."""
-    epsilon = float(uniform_mixing_fraction)
-    if not 0.0 <= epsilon <= 1.0:
-        raise ValueError("uniform_mixing_fraction must satisfy 0 <= epsilon <= 1")
+    """Draw a fresh single-component population."""
     if num_samples <= 0:
         raise ValueError("num_samples must be > 0")
-
-    if epsilon == 0.0:
-        simulator = GraphSimulator.from_config_file(
-            md_config, source_type="bns", seed=seed
-        )
-    elif epsilon == 1.0:
-        simulator = GraphSimulator.from_config_file(
-            uniform_redshift_config, source_type="bns", seed=seed
-        )
-    else:
-        # MixtureSimulator seeds component calls, but GraphSimulator draws
-        # from its construction-time RNG, so the components must be seeded
-        # here for the mixture to be reproducible. All three seeds must
-        # differ: RNGManager starts from jax.random.key(seed), so a shared
-        # seed means identical key streams across simulators.
-        md = GraphSimulator.from_config_file(
-            md_config, source_type="bns", seed=seed + 1
-        )
-        uniform = GraphSimulator.from_config_file(
-            uniform_redshift_config, source_type="bns", seed=seed + 2
-        )
-        simulator = MixtureSimulator(
-            [md, uniform],
-            [1.0 - epsilon, epsilon],
-            seed=seed,
-        )
+    simulator = GraphSimulator.from_config_file(config, source_type="bns", seed=seed)
     return simulator.simulate(num_samples)
 
 
@@ -101,9 +67,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
 
     population = simulate_population(
-        args.md_config.expanduser(),
-        args.uniform_redshift_config.expanduser(),
-        uniform_mixing_fraction=args.uniform_mixing_fraction,
+        args.config.expanduser(),
         num_samples=args.num_samples,
         seed=args.seed,
     )

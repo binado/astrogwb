@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest import mock
 
 import numpy as np
 import pytest
 import yaml
-from astrogwb_paper.cli import generate_population
 from astrogwb_paper.cli.generate_population import main, simulate_population
+from gwmock_pop import GraphSimulator
 from gwmock_pop.loaders.file_loader import read_population_catalogue
 
 
@@ -43,90 +42,41 @@ def _write_graph(path: Path, minimum: float, maximum: float) -> Path:
     return path
 
 
-def test_seeded_mixture_is_reproducible_and_uses_both_components(
-    tmp_path: Path,
-) -> None:
-    md = _write_graph(tmp_path / "md.yaml", 0.0, 1.0)
-    uniform = _write_graph(tmp_path / "uniform.yaml", 10.0, 11.0)
+def test_seeded_generation_is_reproducible(tmp_path: Path) -> None:
+    config = _write_graph(tmp_path / "md.yaml", 0.0, 1.0)
 
-    first = simulate_population(
-        md,
-        uniform,
-        uniform_mixing_fraction=0.2,
-        num_samples=1000,
-        seed=12,
-    )
-    second = simulate_population(
-        md,
-        uniform,
-        uniform_mixing_fraction=0.2,
-        num_samples=1000,
-        seed=12,
-    )
+    first = simulate_population(config, num_samples=1000, seed=12)
+    second = simulate_population(config, num_samples=1000, seed=12)
 
     np.testing.assert_array_equal(first["redshift"], second["redshift"])
-    assert np.mean(np.asarray(first["marker"]) == 10.0) == pytest.approx(0.2, abs=0.04)
 
 
-def test_mixture_gives_each_stream_a_distinct_seed(tmp_path: Path) -> None:
-    md = _write_graph(tmp_path / "md.yaml", 0.0, 1.0)
-    uniform = _write_graph(tmp_path / "uniform.yaml", 10.0, 11.0)
+def test_generation_draws_are_a_prefix_stable_stream(tmp_path: Path) -> None:
+    """A smaller draw is a bit-identical prefix of a larger one, same seed.
 
-    with (
-        mock.patch.object(
-            generate_population.GraphSimulator,
-            "from_config_file",
-            wraps=generate_population.GraphSimulator.from_config_file,
-        ) as graph_spy,
-        mock.patch.object(generate_population, "MixtureSimulator") as mixture_factory,
-    ):
-        simulate_population(
-            md,
-            uniform,
-            uniform_mixing_fraction=0.2,
-            num_samples=8,
-            seed=7,
-        )
+    This pins the property banks and composition prefixes depend on:
+    ``GraphSimulator`` draws from its construction-time RNG (``del kwargs`` in
+    ``_simulate_impl``), so requesting fewer samples never perturbs the
+    stream. A ``gwmock_pop`` upgrade that broke this would silently corrupt
+    every bank-prefix / composition-prefix guarantee in
+    ``astrogwb_paper.catalogs.compose_catalog`` without touching this file.
+    """
+    config = _write_graph(tmp_path / "md.yaml", 0.0, 1.0)
 
-    graph_seeds = [call.kwargs["seed"] for call in graph_spy.call_args_list]
-    assert graph_seeds == [8, 9]
-    mixture_seeds = [call.kwargs["seed"] for call in mixture_factory.call_args_list]
-    assert mixture_seeds == [7]
-    assert len({*mixture_seeds, *graph_seeds}) == 3
+    small = simulate_population(config, num_samples=8, seed=5)
+    large = simulate_population(config, num_samples=32, seed=5)
 
-
-@pytest.mark.parametrize(
-    ("epsilon", "expected_marker"),
-    [(0.0, 0.0), (1.0, 10.0)],
-)
-def test_endpoint_fraction_uses_only_selected_graph(
-    tmp_path: Path, epsilon: float, expected_marker: float
-) -> None:
-    md = _write_graph(tmp_path / "md.yaml", 0.0, 1.0)
-    uniform = _write_graph(tmp_path / "uniform.yaml", 10.0, 11.0)
-
-    population = simulate_population(
-        md,
-        uniform,
-        uniform_mixing_fraction=epsilon,
-        num_samples=16,
-        seed=4,
+    np.testing.assert_array_equal(
+        np.asarray(large["redshift"])[:8], np.asarray(small["redshift"])
     )
-
-    np.testing.assert_array_equal(population["marker"], expected_marker)
 
 
 def test_generate_population_refuses_overwrite_without_force(tmp_path: Path) -> None:
-    md = _write_graph(tmp_path / "md.yaml", 0.0, 1.0)
-    uniform = _write_graph(tmp_path / "uniform.yaml", 10.0, 11.0)
+    config = _write_graph(tmp_path / "md.yaml", 0.0, 1.0)
     output = tmp_path / "population.h5"
     arguments = [
-        "--md-config",
-        str(md),
-        "--uniform-redshift-config",
-        str(uniform),
-        "--uniform-mixing-fraction",
-        "0.2",
+        "--config",
+        str(config),
         "--num-samples",
         "8",
         "--seed",
@@ -142,19 +92,18 @@ def test_generate_population_refuses_overwrite_without_force(tmp_path: Path) -> 
     main([*arguments, "--force"])
     population = read_population_catalogue(output)
     assert len(population["redshift"]) == 8
-    assert "proposal_component" not in population
-    assert "proposal_redshift_logpdf" not in population
 
 
-@pytest.mark.parametrize("epsilon", [-0.1, 1.1])
-def test_generate_population_rejects_invalid_fraction(
-    tmp_path: Path, epsilon: float
-) -> None:
-    with pytest.raises(ValueError, match="0 <= epsilon <= 1"):
-        simulate_population(
-            tmp_path / "md.yaml",
-            tmp_path / "uniform.yaml",
-            uniform_mixing_fraction=epsilon,
-            num_samples=1,
-            seed=1,
-        )
+def test_generate_population_rejects_non_positive_num_samples(tmp_path: Path) -> None:
+    config = _write_graph(tmp_path / "md.yaml", 0.0, 1.0)
+
+    with pytest.raises(ValueError, match="num_samples must be > 0"):
+        simulate_population(config, num_samples=0, seed=1)
+
+
+def test_generate_population_no_longer_imports_mixture_simulator() -> None:
+    """Mixing moved to compose_catalog; this CLI generates one component."""
+    import astrogwb_paper.cli.generate_population as module
+
+    assert module.GraphSimulator is GraphSimulator
+    assert not hasattr(module, "MixtureSimulator")

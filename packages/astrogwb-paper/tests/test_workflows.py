@@ -11,9 +11,9 @@ PAPER_ROOT = paper_project_root()
 SNAKEFILE = PAPER_ROOT / "Snakefile"
 CATALOG_RULES = (
     "population_config",
-    "population",
-    "waveform_catalog",
-    "catalogs",
+    "population_bank",
+    "waveform_bank",
+    "banks",
 )
 MCMC_RULES = (
     "assemble_config",
@@ -64,16 +64,17 @@ def _rule_inputs(stdout: str) -> list[str]:
     ]
 
 
-def _catalogs(tmp_path: Path, *names: str) -> Path:
-    directory = tmp_path / "catalogs"
+def _banks(tmp_path: Path, *names: str) -> Path:
+    """A fake banks directory: the fixed injection bank plus any ``names``."""
+    directory = tmp_path / "banks"
     directory.mkdir()
-    (directory / "injection-bns-n32768-eps=0-df1.h5").touch()
+    (directory / "md-imrphenom-s41.h5").touch()
     for name in names:
         (directory / name).touch()
     return directory
 
 
-def test_catalog_workflow_builds_fresh_populations_and_waveforms() -> None:
+def test_bank_workflow_builds_fresh_populations_and_waveforms() -> None:
     result = _snakemake(
         "--snakefile",
         str(SNAKEFILE),
@@ -84,22 +85,23 @@ def test_catalog_workflow_builds_fresh_populations_and_waveforms() -> None:
         "--printshellcmds",
         "--cores",
         "1",
-        "outputs/catalogs/injection-bns-n32768-eps=0-df1.h5",
-        "outputs/catalogs/bns-n16384-eps=0.1-df1.h5",
+        "outputs/banks/md-imrphenom-s41.h5",
+        "outputs/banks/uniform-imrphenom-s51.h5",
     )
 
     assert result.returncode == 0, result.stderr
     assert "inputs/catalogs.yaml" in result.stdout
     assert "outputs/population-configs/md.yaml" in result.stdout
     assert "outputs/population-configs/uniform-redshift.yaml" in result.stdout
-    assert "outputs/populations/injection-bns-n32768-eps=0-df1.h5" in result.stdout
-    assert "outputs/populations/bns-n16384-eps=0.1-df1.h5" in result.stdout
-    assert "outputs/catalogs/injection-bns-n32768-eps=0-df1.h5" in result.stdout
-    assert "outputs/catalogs/bns-n16384-eps=0.1-df1.h5" in result.stdout
-    assert "--uniform-mixing-fraction 0.1" in result.stdout
+    assert "outputs/populations/md-imrphenom-s41.h5" in result.stdout
+    assert "outputs/populations/uniform-imrphenom-s51.h5" in result.stdout
+    assert "outputs/banks/md-imrphenom-s41.h5" in result.stdout
+    assert "outputs/banks/uniform-imrphenom-s51.h5" in result.stdout
+    # Mixing moved to compose_catalog; generation is single-component now.
+    assert "--uniform-mixing-fraction" not in result.stdout
 
 
-def test_catalogs_target_builds_all_8_catalogs() -> None:
+def test_banks_target_builds_all_4_banks() -> None:
     result = _snakemake(
         "--snakefile",
         str(SNAKEFILE),
@@ -109,29 +111,25 @@ def test_catalogs_target_builds_all_8_catalogs() -> None:
         "--forceall",
         "--cores",
         "8",
-        "catalogs",
+        "banks",
     )
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule population_config:") == 2
-    assert result.stdout.count("rule waveform_catalog:") == 8
+    assert result.stdout.count("rule waveform_bank:") == 4
     for name in (
-        "injection-bns-n32768-eps=0-df1",
-        "bns-n32768-eps=0-df1-taylorf2",
-        "bns-n8192-eps=0-df1",
-        "bns-n16384-eps=0-df1",
-        "bns-n32768-eps=0-df1",
-        "bns-n16384-eps=0.1-df1",
-        "bns-n16384-eps=0.01-df1",
-        "bns-n16384-eps=0.001-df1",
+        "md-imrphenom-s41",
+        "md-imrphenom-s42",
+        "md-taylorf2-s41",
+        "uniform-imrphenom-s51",
     ):
-        assert f"outputs/catalogs/{name}.h5" in result.stdout
+        assert f"outputs/banks/{name}.h5" in result.stdout
 
 
 def test_plot_cosmological_parameters_expands_all_chains_and_figures(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
+    banks = _banks(tmp_path, "md-imrphenom-s42.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -140,7 +138,7 @@ def test_plot_cosmological_parameters_expands_all_chains_and_figures(
         "8",
         "plot_cosmological_parameters",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     assert result.returncode == 0, result.stderr
@@ -158,7 +156,7 @@ def test_plot_cosmological_parameters_expands_all_chains_and_figures(
 
 
 def test_run_experiment_target_excludes_figure_rule(tmp_path: Path) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
+    banks = _banks(tmp_path, "md-imrphenom-s42.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -167,7 +165,7 @@ def test_run_experiment_target_excludes_figure_rule(tmp_path: Path) -> None:
         "8",
         "run_experiment_cosmological_parameters",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     assert result.returncode == 0, result.stderr
@@ -178,7 +176,7 @@ def test_run_experiment_target_excludes_figure_rule(tmp_path: Path) -> None:
 def test_config_assembly_reads_the_single_inventory(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
+    banks = _banks(tmp_path, "md-imrphenom-s42.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -188,7 +186,7 @@ def test_config_assembly_reads_the_single_inventory(
         "4",
         "outputs/chains/cosmological-parameters/H0-Omega_m.nc",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     assert result.returncode == 0, result.stderr
@@ -196,48 +194,38 @@ def test_config_assembly_reads_the_single_inventory(
         "astrogwb-validate-config inputs/experiments.yaml "
         "--output-dir outputs/configs" in result.stdout
     )
-    assert "--injection-catalog" in result.stdout
-    assert "--proposal-catalog" in result.stdout
-    assert str(catalogs / "injection-bns-n32768-eps=0-df1.h5") in result.stdout
-    assert str(catalogs / "bns-n16384-eps=0-df1.h5") in result.stdout
+    assert "--bank" in result.stdout
+    assert f"md-imrphenom-s41={banks / 'md-imrphenom-s41.h5'}" in result.stdout
+    assert f"md-imrphenom-s42={banks / 'md-imrphenom-s42.h5'}" in result.stdout
     assert result.stdout.count("rule assemble_config:") == 1
 
 
-def test_variable_catalog_size_uses_three_catalogs(tmp_path: Path) -> None:
-    catalogs = _catalogs(
-        tmp_path,
-        "bns-n8192-eps=0-df1.h5",
-        "bns-n16384-eps=0-df1.h5",
-        "bns-n32768-eps=0-df1.h5",
-    )
+def test_variable_catalog_size_shares_one_bank_across_all_sizes(
+    tmp_path: Path,
+) -> None:
+    """n8192/n16384/n32768 are prefixes of the same bank -- one file, not three."""
+    banks = _banks(tmp_path, "md-imrphenom-s42.h5")
 
     result = _mcmc(
         "--dry-run",
         "--forceall",
+        "--printshellcmds",
         "--cores",
         "8",
         "run_experiment_variable_catalog_size",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule run_mcmc:") == 3
-    for name in (
-        "bns-n8192-eps=0-df1.h5",
-        "bns-n16384-eps=0-df1.h5",
-        "bns-n32768-eps=0-df1.h5",
-    ):
-        assert str(catalogs / name) in result.stdout
+    assert result.stdout.count(str(banks / "md-imrphenom-s42.h5")) >= 3
 
 
-def test_variable_proposal_guard_uses_three_catalogs(tmp_path: Path) -> None:
-    catalogs = _catalogs(
-        tmp_path,
-        "bns-n16384-eps=0.1-df1.h5",
-        "bns-n16384-eps=0.01-df1.h5",
-        "bns-n16384-eps=0.001-df1.h5",
-    )
+def test_variable_proposal_guard_shares_md_and_uniform_banks(
+    tmp_path: Path,
+) -> None:
+    banks = _banks(tmp_path, "md-imrphenom-s42.h5", "uniform-imrphenom-s51.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -246,25 +234,21 @@ def test_variable_proposal_guard_uses_three_catalogs(tmp_path: Path) -> None:
         "8",
         "run_experiment_variable_proposal_guard",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule run_mcmc:") == 3
-    for name in (
-        "bns-n16384-eps=0.1-df1.h5",
-        "bns-n16384-eps=0.01-df1.h5",
-        "bns-n16384-eps=0.001-df1.h5",
-    ):
-        assert str(catalogs / name) in result.stdout
+    for name in ("md-imrphenom-s42.h5", "uniform-imrphenom-s51.h5"):
+        assert str(banks / name) in result.stdout
 
 
-def test_waveform_approximant_uses_imr_data_and_two_proposals(
+def test_waveform_approximant_uses_imr_and_taylorf2_banks(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n32768-eps=0-df1-taylorf2.h5")
-    imr = catalogs / "injection-bns-n32768-eps=0-df1.h5"
-    taylorf2 = catalogs / "bns-n32768-eps=0-df1-taylorf2.h5"
+    banks = _banks(tmp_path, "md-taylorf2-s41.h5")
+    imr = banks / "md-imrphenom-s41.h5"
+    taylorf2 = banks / "md-taylorf2-s41.h5"
 
     result = _mcmc(
         "--dry-run",
@@ -274,18 +258,19 @@ def test_waveform_approximant_uses_imr_data_and_two_proposals(
         "8",
         "run_experiment_waveform_approximant",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule run_mcmc:") == 2
-    assert result.stdout.count(f"--injection-catalog {imr}") == 2
-    assert result.stdout.count(f"--proposal-catalog {imr}") == 1
-    assert result.stdout.count(f"--proposal-catalog {taylorf2}") == 1
+    # IMRPhenom run: injection and proposal share one bank (one job's worth);
+    # TaylorF2 run: injection still needs the IMR bank -- two jobs use it.
+    assert result.stdout.count(f"md-imrphenom-s41={imr}") == 2
+    assert result.stdout.count(f"md-taylorf2-s41={taylorf2}") == 1
 
 
-def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
-    catalogs = tmp_path / "missing-catalogs"
+def test_missing_bank_does_not_acquire_a_producer(tmp_path: Path) -> None:
+    banks = tmp_path / "missing-banks"
 
     result = _mcmc(
         "--dry-run",
@@ -293,14 +278,14 @@ def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:
         "4",
         "run_experiment_cosmological_parameters",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     output = result.stdout + result.stderr
     assert result.returncode != 0
     assert "MissingInputException" in output
     assert "population_config" not in output
-    assert "waveform_catalog" not in output
+    assert "waveform_bank" not in output
 
 
 def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
@@ -315,7 +300,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "run_experiment_variable_catalog_size",
         "run_experiment_variable_proposal_guard",
         "run_experiment_waveform_approximant",
-        "catalogs",
+        "banks",
         "plot_cosmological_parameters",
         "amplitude_toy",
         "fiducial_spectrum",
@@ -352,19 +337,19 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "plot_H0_merger_rate",
         "plot_H0_omega_m",
         "standalone_figures",
+        # The old per-composition catalog rules are gone entirely.
+        "catalogs",
+        "population",
+        "waveform_catalog",
     }.isdisjoint(rules)
 
 
 def test_experiments_target_builds_all_26_chains(tmp_path: Path) -> None:
-    catalogs = _catalogs(
+    banks = _banks(
         tmp_path,
-        "bns-n8192-eps=0-df1.h5",
-        "bns-n16384-eps=0-df1.h5",
-        "bns-n32768-eps=0-df1.h5",
-        "bns-n16384-eps=0.1-df1.h5",
-        "bns-n16384-eps=0.01-df1.h5",
-        "bns-n16384-eps=0.001-df1.h5",
-        "bns-n32768-eps=0-df1-taylorf2.h5",
+        "md-imrphenom-s42.h5",
+        "md-taylorf2-s41.h5",
+        "uniform-imrphenom-s51.h5",
     )
 
     result = _mcmc(
@@ -374,7 +359,7 @@ def test_experiments_target_builds_all_26_chains(tmp_path: Path) -> None:
         "8",
         "experiments",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     assert result.returncode == 0, result.stderr
@@ -388,7 +373,7 @@ def test_experiments_target_builds_all_26_chains(tmp_path: Path) -> None:
 def test_plot_cosmological_parameters_passes_all_paths_not_labels(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
+    banks = _banks(tmp_path, "md-imrphenom-s42.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -398,7 +383,7 @@ def test_plot_cosmological_parameters_passes_all_paths_not_labels(
         "8",
         "plot_cosmological_parameters",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     assert result.returncode == 0, result.stderr
@@ -436,7 +421,7 @@ def test_plot_cosmological_parameters_passes_all_paths_not_labels(
 def test_standalone_figures_receive_config_paths(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
+    banks = _banks(tmp_path, "md-imrphenom-s42.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -448,7 +433,7 @@ def test_standalone_figures_receive_config_paths(
         "fiducial_spectrum",
         "importance_weights_grid",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     assert result.returncode == 0, result.stderr
@@ -474,7 +459,7 @@ def test_standalone_figures_receive_config_paths(
 def test_figure_path_is_a_valid_snakemake_target(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
+    banks = _banks(tmp_path, "md-imrphenom-s42.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -483,7 +468,7 @@ def test_figure_path_is_a_valid_snakemake_target(
         "8",
         "outputs/figures/cosmological-parameters/H0-by-detector.pdf",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     assert result.returncode == 0, result.stderr
@@ -492,7 +477,7 @@ def test_figure_path_is_a_valid_snakemake_target(
 
 
 def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
-    catalogs = _catalogs(tmp_path, "bns-n16384-eps=0-df1.h5")
+    banks = _banks(tmp_path, "md-imrphenom-s42.h5")
 
     result = _mcmc(
         "--dry-run",
@@ -502,7 +487,7 @@ def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
         "8",
         "plot_cosmological_parameters",
         "--config",
-        f"catalogs_dir={catalogs}",
+        f"banks_dir={banks}",
     )
 
     assert result.returncode == 0, result.stderr

@@ -29,16 +29,27 @@ if TYPE_CHECKING:
 
 
 def compute_network_snrs(
-    catalog_path: Path,
+    injection_bank_path: Path,
     networks: Sequence[Network],
     fiducials: Mapping[str, float],
     *,
     grid: AnalysisGrid,
 ) -> pd.DataFrame:
-    """Compute the fiducial matched-filter SNR for each detector network."""
+    """Compute the fiducial matched-filter SNR for each detector network.
+
+    ``injection_bank_path`` is the MD bank file the fixed injection
+    composition (``INJECTION_CATALOG_NAME``) draws from -- it requests every
+    sample the bank holds, so no uniform-redshift bank is needed here.
+    """
     import pandas as pd
 
-    observation = prepare_observation(catalog_path, fiducials=fiducials, grid=grid)
+    from astrogwb_paper.catalogs import CatalogSource
+    from astrogwb_paper.config.catalogs import INJECTION_CATALOG_NAME, catalog_recipe
+
+    source = CatalogSource(
+        injection_bank_path, None, catalog_recipe(INJECTION_CATALOG_NAME)
+    )
+    observation = prepare_observation(source, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies
     mask = observation.frequency_mask
     observed_spectral_density = observation.spectral_density
