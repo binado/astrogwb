@@ -29,7 +29,6 @@ from pydantic import (
 )
 
 from astrogwb_paper.config.analysis import AnalysisGrid
-from astrogwb_paper.config.catalogs import CatalogComposition
 from astrogwb_paper.config.loading import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
@@ -197,7 +196,17 @@ class OutputConfig(BaseModel):
 
 
 class ProposalConfig(BaseModel):
-    """Fixed redshift proposal used to generate the importance catalog."""
+    """The fixed redshift density the importance weights divide by.
+
+    Not a config *input*: it is derived at run time from the proposal bank's
+    recorded provenance plus the run's mixing fraction and analysis window (see
+    :func:`astrogwb_paper.banks.resolve_proposal`). Scripts and notebooks that
+    reweight outside the sampler construct one directly.
+
+    Note the name collision with ``RunConfig.catalog.proposal``, which is kept
+    deliberately: that block names the *catalog* -- which banks and how many
+    samples -- while this one is the *density* those samples follow.
+    """
 
     model_config = _STRICT
 
@@ -222,20 +231,55 @@ class ProposalConfig(BaseModel):
         return self
 
 
-class CatalogConfig(BaseModel):
-    """The bank/composition identity behind this run's two catalogs.
+class CatalogSpec(BaseModel):
+    """A cheap, in-memory mixture over up to two persisted banks.
 
-    ``proposal.uniform_mixing_fraction`` (the numeric proposal density
-    fields) already lives on :class:`ProposalConfig`; this block instead
-    records *which bank(s) and composition parameters* produced each
-    catalog, so a saved run config is self-describing without the composed
-    catalog ever existing as a file.
+    Declared inline by each run rather than looked up in a registry: there is
+    no composition *name* any more, only the bank(s) and the mixture
+    parameters. Composing is cheap and never written to disk -- see
+    :func:`astrogwb_paper.catalogs.compose_catalog`.
     """
 
     model_config = _STRICT
 
-    injection: CatalogComposition
-    proposal: CatalogComposition
+    md_bank: str
+    uniform_bank: str | None = None
+    num_samples: Annotated[int, Field(gt=0)]
+    uniform_mixing_fraction: Annotated[
+        float, Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    ] = 0.0
+    mixture_seed: int | None = None
+
+    @model_validator(mode="after")
+    def _validate_mixture_fields(self) -> CatalogSpec:
+        mixed = self.uniform_mixing_fraction > 0.0
+        if mixed and (self.uniform_bank is None or self.mixture_seed is None):
+            raise ValueError(
+                "uniform_mixing_fraction > 0 requires both uniform_bank and "
+                "mixture_seed"
+            )
+        if not mixed and (
+            self.uniform_bank is not None or self.mixture_seed is not None
+        ):
+            raise ValueError(
+                "uniform_mixing_fraction == 0 forbids uniform_bank and mixture_seed"
+            )
+        return self
+
+
+class CatalogConfig(BaseModel):
+    """The two catalogs this run composes: the injection and the proposal.
+
+    Records *which bank(s) and mixture parameters* produced each, so a saved
+    run config is self-describing without the composed catalog ever existing as
+    a file. The proposal *density* is not here: it comes from the bank's own
+    provenance at run time.
+    """
+
+    model_config = _STRICT
+
+    injection: CatalogSpec
+    proposal: CatalogSpec
 
 
 class RunConfig(BaseModel):
@@ -253,7 +297,6 @@ class RunConfig(BaseModel):
     sampled_params: tuple[str, ...] = ()
     analysis: AnalysisConfig
     cosmology: CosmoConfig
-    proposal: ProposalConfig
     catalog: CatalogConfig
     sampler: SamplerConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
@@ -303,22 +346,6 @@ class RunConfig(BaseModel):
 
         object.__setattr__(self, "sampled_params", sampled)
         object.__setattr__(self, "priors", aligned_priors)
-        return self
-
-    @model_validator(mode="after")
-    def _validate_proposal_support(self) -> RunConfig:
-        if (
-            self.proposal.minimum_redshift != self.cosmology.minimum_redshift
-            or self.proposal.maximum_redshift != self.cosmology.maximum_redshift
-        ):
-            raise ValueError(
-                "proposal redshift support must equal cosmology redshift "
-                "support: proposal "
-                f"[{self.proposal.minimum_redshift:g}, "
-                f"{self.proposal.maximum_redshift:g}] vs cosmology "
-                f"[{self.cosmology.minimum_redshift:g}, "
-                f"{self.cosmology.maximum_redshift:g}]"
-            )
         return self
 
     @computed_field

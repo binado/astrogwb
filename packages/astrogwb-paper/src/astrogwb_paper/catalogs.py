@@ -17,41 +17,45 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb.waveform import apply_gw_distance_to_power, load_catalog, open_catalog
 from numpy.typing import ArrayLike
 
-from astrogwb_paper.config.catalogs import CatalogComposition
-from astrogwb_paper.config.mcmc import ProposalConfig
+from astrogwb_paper.config.mcmc import CatalogSpec, ProposalConfig
 
 
 @dataclass(frozen=True)
 class CatalogSource:
-    """Bank file location(s) plus the composition to draw them into a catalog."""
+    """Bank file location(s) plus the spec to draw them into a catalog.
+
+    ``role`` is ``"injection"`` or ``"proposal"``. Inline catalog specs carry no
+    registry name any more, so the role is what identifies a source in logs.
+    """
 
     md_bank_path: Path
     uniform_bank_path: Path | None
-    composition: CatalogComposition
+    spec: CatalogSpec
+    role: str
 
     def compose(self) -> xr.Dataset:
         return compose_catalog(
-            self.md_bank_path, self.uniform_bank_path, self.composition
+            self.md_bank_path, self.uniform_bank_path, self.spec, label=self.role
         )
 
 
 def catalog_source(
-    composition: CatalogComposition, bank_paths: Mapping[str, Path]
+    spec: CatalogSpec, bank_paths: Mapping[str, Path], *, role: str
 ) -> CatalogSource:
-    """Resolve a composition's bank names against supplied bank file paths.
+    """Resolve a spec's bank names against supplied bank file paths.
 
     Used by the CLI entrypoints, which receive banks as a flat ``NAME=PATH``
     mapping (from repeated ``--bank`` flags) and must match them against the
     bank names a run config's :class:`~astrogwb_paper.config.mcmc.CatalogConfig`
     names for each role.
     """
-    md_bank_path = _require_bank_path(composition.md_bank, bank_paths)
+    md_bank_path = _require_bank_path(spec.md_bank, bank_paths)
     uniform_bank_path = (
-        _require_bank_path(composition.uniform_bank, bank_paths)
-        if composition.uniform_bank is not None
+        _require_bank_path(spec.uniform_bank, bank_paths)
+        if spec.uniform_bank is not None
         else None
     )
-    return CatalogSource(md_bank_path, uniform_bank_path, composition)
+    return CatalogSource(md_bank_path, uniform_bank_path, spec, role)
 
 
 def _require_bank_path(name: str, bank_paths: Mapping[str, Path]) -> Path:
@@ -66,9 +70,11 @@ def _require_bank_path(name: str, bank_paths: Mapping[str, Path]) -> Path:
 def compose_catalog(
     md_bank_path: Path,
     uniform_bank_path: Path | None,
-    composition: CatalogComposition,
+    spec: CatalogSpec,
+    *,
+    label: str = "catalog",
 ) -> xr.Dataset:
-    """Compose an in-memory catalog from bank files, per ``composition``.
+    """Compose an in-memory catalog from bank files, per ``spec``.
 
     Reproduces ``MixtureSimulator``'s law directly with ``jax.random`` instead
     of through ``gwmock_pop``: per-sample component assignments are drawn once
@@ -84,31 +90,64 @@ def compose_catalog(
     which is what makes every existing eps=0 catalog file bit-identical to
     its composed replacement.
     """
-    n = composition.num_samples
-    epsilon = composition.uniform_mixing_fraction
+    n = spec.num_samples
+    epsilon = spec.uniform_mixing_fraction
     if epsilon == 0.0:
-        return _bank_prefix(md_bank_path, n, label=composition.md_bank)
+        return _bank_prefix(md_bank_path, n, label=spec.md_bank)
 
-    if uniform_bank_path is None or composition.mixture_seed is None:
+    if uniform_bank_path is None or spec.mixture_seed is None:
         raise ValueError(
-            f"composition {composition.name!r}: uniform_mixing_fraction > 0 "
-            "requires both uniform_bank_path and mixture_seed"
+            f"{label} catalog: uniform_mixing_fraction > 0 requires both "
+            "uniform_bank_path and mixture_seed"
         )
 
-    key = jax.random.key(composition.mixture_seed)
+    key = jax.random.key(spec.mixture_seed)
     log_probs = jnp.log(jnp.asarray([1.0 - epsilon, epsilon]))
     assignments = jax.random.categorical(key, log_probs, shape=(n,))
     counts = [int((assignments == component).sum()) for component in (0, 1)]
 
-    md_part = _bank_prefix(md_bank_path, counts[0], label=composition.md_bank)
+    md_part = _bank_prefix(md_bank_path, counts[0], label=spec.md_bank)
     uniform_part = _bank_prefix(
-        uniform_bank_path, counts[1], label=composition.uniform_bank or ""
+        uniform_bank_path, counts[1], label=spec.uniform_bank or ""
     )
+    _check_waveform_settings_agree(md_part, uniform_part, label=label)
     combined = xr.concat([md_part, uniform_part], dim="sample")
 
     order = jnp.argsort(assignments, stable=True)
     inverse = np.asarray(jnp.argsort(order))
     return combined.isel(sample=inverse)
+
+
+#: Bank attributes both components of a mixture must agree on. Concatenating
+#: banks generated with different waveform settings would silently mix two
+#: incompatible frequency grids into one catalog.
+_SHARED_BANK_ATTRS = (
+    "approximant",
+    "minimum_frequency",
+    "maximum_frequency",
+    "reference_frequency",
+    "sampling_frequency",
+)
+
+
+def _check_waveform_settings_agree(
+    md: xr.Dataset, uniform: xr.Dataset, *, label: str
+) -> None:
+    """Require both mixture components to carry identical waveform settings.
+
+    Read off the bank files themselves rather than off a config: the banks are
+    what will actually be concatenated.
+    """
+    mismatches = [
+        f"{name} ({md.attrs.get(name)!r} vs {uniform.attrs.get(name)!r})"
+        for name in _SHARED_BANK_ATTRS
+        if md.attrs.get(name) != uniform.attrs.get(name)
+    ]
+    if mismatches:
+        raise ValueError(
+            f"{label} catalog mixes banks with different waveform settings: "
+            + ", ".join(mismatches)
+        )
 
 
 def _bank_prefix(path: Path, count: int, *, label: str) -> xr.Dataset:

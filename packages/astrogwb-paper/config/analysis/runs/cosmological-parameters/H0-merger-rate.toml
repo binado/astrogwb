@@ -1,0 +1,10 @@
+# The local merger rate with H0 marginalized out: the reference the
+# fixed-R0 H0 posterior is compared against.
+
+sampled_params = ["local_merger_rate"]
+
+[analysis]
+detectors = ["S1", "R1", "C1"]
+likelihood = "amplitude_marginalized"
+amplitude_parameter = "H0"
+amplitude_num_nodes = 1024

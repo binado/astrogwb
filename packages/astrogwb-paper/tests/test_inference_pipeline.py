@@ -21,11 +21,16 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astrogwb.waveform import make_catalog, save_catalog
+from astrogwb_paper.banks import MadauDickinsonProposal, resolve_proposal
 from astrogwb_paper.catalogs import CatalogSource
 from astrogwb_paper.cli.profile_model import build_potential
 from astrogwb_paper.cli.run_mcmc import run
-from astrogwb_paper.config.catalogs import CatalogComposition
-from astrogwb_paper.config.mcmc import RunConfig, build_run_config
+from astrogwb_paper.config.mcmc import (
+    CatalogSpec,
+    ProposalConfig,
+    RunConfig,
+    build_run_config,
+)
 from astrogwb_paper.inference import prepare_inference_inputs, prepare_observation
 from config_fixtures import example_raw
 
@@ -74,16 +79,44 @@ def _write_catalog(
     return path
 
 
-def _source(bank_path: Path, *, num_samples: int = N_SOURCES) -> CatalogSource:
-    composition = CatalogComposition(
-        name="test", md_bank="test-bank", num_samples=num_samples
+def _source(
+    bank_path: Path, *, num_samples: int = N_SOURCES, role: str = "proposal"
+) -> CatalogSource:
+    spec = CatalogSpec(md_bank="test-bank", num_samples=num_samples)
+    return CatalogSource(bank_path, None, spec, role)
+
+
+def _proposal(config: RunConfig) -> ProposalConfig:
+    """The density production derives from bank provenance, built inline here.
+
+    These tests write synthetic banks with no provenance attrs, so the
+    descriptor is constructed from the run's own fiducials -- the same values a
+    real bank would have recorded, since check_fiducials_match requires them to
+    agree.
+    """
+    return resolve_proposal(
+        MadauDickinsonProposal(
+            z_min=0.0,
+            z_max=20.0,
+            gamma=config.fiducials["gamma"],
+            kappa=config.fiducials["kappa"],
+            z_peak=config.fiducials["z_peak"],
+            H0=config.fiducials["H0"],
+            Omega_m=config.fiducials["Omega_m"],
+        ),
+        None,
+        uniform_mixing_fraction=0.0,
+        minimum_redshift=config.cosmology.minimum_redshift,
+        maximum_redshift=config.cosmology.maximum_redshift,
     )
-    return CatalogSource(bank_path, None, composition)
 
 
 @pytest.fixture
 def injection_catalog(tmp_path: Path) -> CatalogSource:
-    return _source(_write_catalog(tmp_path / "injection.h5", proposal=False, seed=0))
+    return _source(
+        _write_catalog(tmp_path / "injection.h5", proposal=False, seed=0),
+        role="injection",
+    )
 
 
 @pytest.fixture
@@ -144,7 +177,7 @@ def test_masked_model_kwargs_masks_frequencies_but_not_samples(
         injection_catalog,
         proposal_catalog,
         fiducials=config.fiducials,
-        proposal_config=config.proposal,
+        proposal_config=_proposal(config),
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
     )
@@ -176,7 +209,7 @@ def test_mismatched_frequency_grids_are_rejected(
             injection_catalog,
             _source(shifted),
             fiducials=config.fiducials,
-            proposal_config=config.proposal,
+            proposal_config=_proposal(config),
             grid=config.analysis_grid,
             detectors=config.analysis.detectors,
         )
@@ -191,7 +224,7 @@ def test_catalog_without_stored_proposal_density_is_accepted(
         injection_catalog,
         injection_catalog,
         fiducials=config.fiducials,
-        proposal_config=config.proposal,
+        proposal_config=_proposal(config),
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
     )
@@ -208,7 +241,7 @@ def test_build_potential_returns_a_finite_potential(
     config = _config()
 
     potential_fn, init_params = build_potential(
-        config, injection_catalog, proposal_catalog, jax
+        config, injection_catalog, proposal_catalog, _proposal(config), jax
     )
 
     assert set(init_params) == set(config.sampled_params)
@@ -221,7 +254,12 @@ def test_run_samples_every_sampled_parameter(
     config = _config()
 
     mcmc, marginalization = run(
-        config, injection_catalog, proposal_catalog, jax, "sequential"
+        config,
+        injection_catalog,
+        proposal_catalog,
+        _proposal(config),
+        jax,
+        "sequential",
     )
 
     assert marginalization is None

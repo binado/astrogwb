@@ -16,11 +16,11 @@ from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
 from astrogwb_paper.catalogs import CatalogSource
-from astrogwb_paper.config.catalogs import INJECTION_CATALOG_NAME, catalog_recipe
 from astrogwb_paper.config.figures import (
     Network,
     load_analysis_grid,
     load_fiducials,
+    load_injection_spec,
     resolve_networks,
 )
 from astrogwb_paper.inference import prepare_observation
@@ -203,7 +203,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     use_paper_style()
 
     catalog_path = resolve_paper_path(args.catalog, root)
-    source = CatalogSource(catalog_path, None, catalog_recipe(INJECTION_CATALOG_NAME))
+    source = CatalogSource(catalog_path, None, load_injection_spec(), "injection")
     observation = prepare_observation(source, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies
     mask = observation.frequency_mask

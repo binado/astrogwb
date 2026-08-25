@@ -37,17 +37,19 @@ def compute_network_snrs(
 ) -> pd.DataFrame:
     """Compute the fiducial matched-filter SNR for each detector network.
 
-    ``injection_bank_path`` is the MD bank file the fixed injection
-    composition (``INJECTION_CATALOG_NAME``) draws from -- it requests every
-    sample the bank holds, so no uniform-redshift bank is needed here.
+    ``injection_bank_path`` is the MD bank file the shared injection catalog
+    draws from -- it requests every sample the bank holds, so no
+    uniform-redshift bank is needed here. The composition itself is read from
+    an assembled run config, so a figure's SNR is computed over the same
+    catalog the chains were sampled against.
     """
     import pandas as pd
 
     from astrogwb_paper.catalogs import CatalogSource
-    from astrogwb_paper.config.catalogs import INJECTION_CATALOG_NAME, catalog_recipe
+    from astrogwb_paper.config.figures import load_injection_spec
 
     source = CatalogSource(
-        injection_bank_path, None, catalog_recipe(INJECTION_CATALOG_NAME)
+        injection_bank_path, None, load_injection_spec(), "injection"
     )
     observation = prepare_observation(source, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies

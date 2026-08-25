@@ -28,16 +28,18 @@ import numpyro.distributions as dist
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
+from astrogwb_paper.banks import (
+    madau_dickinson_proposal,
+    read_bank_provenance,
+    resolve_proposal,
+)
 from astrogwb_paper.catalogs import (
     CatalogSource,
     compute_proposal_logprob,
     samples_from_catalog,
     truncate_catalog_samples,
 )
-from astrogwb_paper.config.catalogs import analysis_proposal_config, catalog_recipe
-from astrogwb_paper.config.experiments import DEFAULT_CATALOG
-from astrogwb_paper.config.figures import load_fiducials
-from astrogwb_paper.config.mcmc import ProposalConfig
+from astrogwb_paper.config.figures import load_fiducials, load_proposal_spec
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
@@ -181,8 +183,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     fiducials = load_fiducials()
     use_paper_style()
 
-    composition = catalog_recipe(DEFAULT_CATALOG)
-    source = CatalogSource(catalog_path, None, composition)
+    spec = load_proposal_spec()
+    source = CatalogSource(catalog_path, None, spec, "proposal")
     catalog = truncate_catalog_samples(
         source.compose(),
         label="proposal",
@@ -194,12 +196,16 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_REDSHIFT_GRID)
-    proposal = ProposalConfig.model_validate(
-        analysis_proposal_config(
-            composition,
-            minimum_redshift=Z_MIN,
-            maximum_redshift=Z_MAX,
-        )
+    # The proposal density comes from the bank's own provenance, exactly as
+    # astrogwb-run-mcmc resolves it -- so this figure reweights against the
+    # same denominator the chains did.
+    provenance = read_bank_provenance(catalog_path)
+    proposal = resolve_proposal(
+        madau_dickinson_proposal(provenance, label=str(catalog_path)),
+        None,
+        uniform_mixing_fraction=spec.uniform_mixing_fraction,
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
     )
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=fiducials,

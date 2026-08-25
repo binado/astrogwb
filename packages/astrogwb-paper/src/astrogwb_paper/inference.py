@@ -115,9 +115,9 @@ def prepare_observation(
     )
     n_kept = composed.polarization_power.shape[1]
     logger.info(
-        "Composed independent injection catalog %s: n_injection_samples=%d "
+        "Composed independent %s catalog: n_injection_samples=%d "
         "(%d outside the analysis window dropped)",
-        injection.composition.name,
+        injection.role,
         n_kept,
         n_loaded - n_kept,
     )
@@ -179,9 +179,9 @@ def prepare_inference_inputs(
     validate_matching_frequency_grids(observation.frequencies, proposal_frequencies)
     n_freq, n_samples = proposal_catalog.polarization_power.shape
     logger.info(
-        "Composed proposal catalog %s: n_frequency_bins=%d n_proposal_samples=%d "
+        "Composed %s catalog: n_frequency_bins=%d n_proposal_samples=%d "
         "(%d outside the analysis window dropped)",
-        proposal.composition.name,
+        proposal.role,
         n_freq,
         n_samples,
         n_loaded - n_samples,

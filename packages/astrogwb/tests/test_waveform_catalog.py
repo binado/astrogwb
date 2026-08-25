@@ -8,6 +8,7 @@ import pytest
 from astrogwb.waveform.catalog import (
     DOMAIN_FREQUENCY,
     FORMAT_NAME,
+    RESERVED_ATTRS,
     load_catalog,
     make_catalog,
     open_catalog,
@@ -16,7 +17,7 @@ from astrogwb.waveform.catalog import (
 )
 
 
-def _catalog(nsamples: int = 6, nfreq: int = 4):
+def _catalog(nsamples: int = 6, nfreq: int = 4, **kwargs):
     rng = np.random.default_rng(0)
     frequencies = np.linspace(10.0, 40.0, nfreq)
     power = rng.uniform(0.0, 1.0, size=(nfreq, nsamples))
@@ -33,6 +34,7 @@ def _catalog(nsamples: int = 6, nfreq: int = 4):
         maximum_frequency=float(frequencies[-1]),
         reference_frequency=20.0,
         sampling_frequency=128.0,
+        **kwargs,
     )
 
 
@@ -60,6 +62,46 @@ def test_round_trip_preserves_values_and_attrs(tmp_path: Path) -> None:
         "reference_frequency": 20.0,
         "sampling_frequency": 128.0,
     }
+
+
+def test_extra_attrs_survive_a_round_trip(tmp_path: Path) -> None:
+    """Provenance a producer stamps on must come back byte-for-byte."""
+    extra = {
+        "population_name": "madau-dickinson",
+        "population_seed": 41,
+        "population_samples": 32768,
+        "redshift_proposal": '{"kind": "uniform_redshift", "z_min": 0.0}',
+    }
+    catalog = _catalog(extra_attrs=extra)
+    path = tmp_path / "catalog.h5"
+
+    save_catalog(path, catalog)
+    loaded = load_catalog(path)
+
+    for name, value in extra.items():
+        assert loaded.attrs[name] == value
+    # The built-ins are untouched by the merge.
+    assert loaded.attrs["format_name"] == FORMAT_NAME
+    assert loaded.attrs["approximant"] == "Toy"
+
+
+@pytest.mark.parametrize("reserved", sorted(RESERVED_ATTRS))
+def test_extra_attrs_rejects_reserved_names(reserved: str) -> None:
+    with pytest.raises(ValueError, match="reserved catalog attribute"):
+        _catalog(extra_attrs={reserved: "hijacked"})
+
+
+@pytest.mark.parametrize("value", [{"nested": 1}, [1, 2, 3], np.arange(3), None, True])
+def test_extra_attrs_rejects_non_scalars(value: object) -> None:
+    """netCDF attributes are flat scalars; anything else must fail at build time."""
+    with pytest.raises(TypeError, match="must be a str, int, or float scalar"):
+        _catalog(extra_attrs={"provenance": value})
+
+
+def test_extra_attrs_none_and_empty_leave_attrs_untouched() -> None:
+    baseline = dict(_catalog().attrs)
+    assert dict(_catalog(extra_attrs=None).attrs) == baseline
+    assert dict(_catalog(extra_attrs={}).attrs) == baseline
 
 
 def test_save_with_compression_round_trips(tmp_path: Path) -> None:

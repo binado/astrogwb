@@ -72,8 +72,7 @@ from astrogwb_paper.catalogs import (
     truncate_catalog_samples,
     validate_matching_frequency_grids,
 )
-from astrogwb_paper.config.catalogs import INJECTION_CATALOG_NAME, catalog_recipe
-from astrogwb_paper.config.experiments import DEFAULT_CATALOG
+from astrogwb_paper.config.figures import load_injection_spec, load_proposal_spec
 from astrogwb_paper.config.mcmc import ProposalConfig
 from astrogwb_paper.paths import paper_project_root
 
@@ -162,10 +161,14 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # See `mcmc.py` for the injection/proposal split and full catalog schema.
 
 # %%
+# The two catalogs are read off an assembled run config, so the notebook
+# composes exactly what the workflow's runs compose.
 injection_source = CatalogSource(
-    INJECTION_BANK_PATH, None, catalog_recipe(INJECTION_CATALOG_NAME)
+    INJECTION_BANK_PATH, None, load_injection_spec(), "injection"
 )
-proposal_source = CatalogSource(PROPOSAL_BANK_PATH, None, catalog_recipe(DEFAULT_CATALOG))
+proposal_source = CatalogSource(
+    PROPOSAL_BANK_PATH, None, load_proposal_spec(), "proposal"
+)
 injection = propagate_catalog(injection_source.compose(), fiducials=fiducials)
 proposal = propagate_catalog(proposal_source.compose(), fiducials=fiducials)
 injection = truncate_catalog_samples(

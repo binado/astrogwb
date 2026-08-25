@@ -1,0 +1,13 @@
+# How the H0 posterior tightens with proposal catalog size.
+#
+# The runs differ only in catalog.proposal.num_samples; every other
+# setting is pinned here so the comparison is clean.
+
+sampled_params = ["H0"]
+
+[analysis]
+detectors = ["S1", "R1", "C1"]
+
+[sampler]
+num_warmup = 500
+dense_mass = false

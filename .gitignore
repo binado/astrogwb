@@ -353,7 +353,11 @@ TSWLatexianTemp*
 #*Notes.bib
 .ruff_cache
 __pycache__
+# A bare `config` (a stray local scratch directory) would also swallow the
+# committed paper config tree and the config package, so both are re-included.
 config
+!packages/astrogwb-paper/config/
+!packages/astrogwb-paper/config/**
 !packages/astrogwb-paper/src/astrogwb_paper/config/
 !packages/astrogwb-paper/src/astrogwb_paper/config/**
 packages/astrogwb-paper/src/astrogwb_paper/config/__pycache__/

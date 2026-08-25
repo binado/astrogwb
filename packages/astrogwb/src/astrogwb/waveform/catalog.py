@@ -18,7 +18,8 @@ for documentation value only) with the layout::
         source_parameters  (sample, parameter) float64
     Attributes:
         format_name, domain, approximant,
-        minimum_frequency, maximum_frequency, reference_frequency, sampling_frequency
+        minimum_frequency, maximum_frequency, reference_frequency, sampling_frequency,
+        plus any scalar ``extra_attrs`` the producer stamped on (provenance)
 
 ``sample`` deliberately has no coordinate.
 
@@ -31,6 +32,7 @@ is kept regardless; dropping it is a separate, unrelated change.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +42,7 @@ from numpy.typing import NDArray
 __all__ = [
     "DOMAIN_FREQUENCY",
     "FORMAT_NAME",
+    "RESERVED_ATTRS",
     "WaveformCatalog",
     "load_catalog",
     "make_catalog",
@@ -54,6 +57,19 @@ WaveformCatalog = xr.Dataset
 FORMAT_NAME = "waveform_catalog"
 DOMAIN_FREQUENCY = "frequency"
 
+#: Attribute names ``make_catalog`` owns; ``extra_attrs`` may not shadow them.
+RESERVED_ATTRS = frozenset(
+    {
+        "format_name",
+        "domain",
+        "approximant",
+        "minimum_frequency",
+        "maximum_frequency",
+        "reference_frequency",
+        "sampling_frequency",
+    }
+)
+
 
 def make_catalog(
     *,
@@ -65,6 +81,7 @@ def make_catalog(
     maximum_frequency: float,
     reference_frequency: float,
     sampling_frequency: float,
+    extra_attrs: Mapping[str, str | float | int] | None = None,
 ) -> xr.Dataset:
     """Build a waveform catalog Dataset from plain arrays.
 
@@ -72,6 +89,12 @@ def make_catalog(
     first, matching the on-disk layout. Not cast to float64 up front: a
     complex array is passed through as-is so ``validate_catalog`` can reject
     it below, instead of silently discarding the imaginary part.
+
+    ``extra_attrs`` stamps producer-defined provenance onto the file. netCDF
+    attributes are flat, so values must be str/int/float scalars -- encode
+    anything structured (JSON, for instance) into a single string. Names in
+    :data:`RESERVED_ATTRS` are rejected rather than overwritten: ``format_name``
+    and ``domain`` are what makes a file readable at all.
     """
     frequencies = np.asarray(frequencies, dtype=np.float64)
     polarization_power = np.asarray(polarization_power)
@@ -105,10 +128,35 @@ def make_catalog(
             "maximum_frequency": float(maximum_frequency),
             "reference_frequency": float(reference_frequency),
             "sampling_frequency": float(sampling_frequency),
+            **_validated_extra_attrs(extra_attrs),
         },
     )
     validate_catalog(catalog, label="waveform_catalog")
     return catalog
+
+
+def _validated_extra_attrs(
+    extra_attrs: Mapping[str, str | float | int] | None,
+) -> dict[str, str | float | int]:
+    """Reject reserved names and non-scalar values before they reach ``attrs``."""
+    if not extra_attrs:
+        return {}
+    collisions = sorted(RESERVED_ATTRS.intersection(extra_attrs))
+    if collisions:
+        raise ValueError(
+            "extra_attrs may not override reserved catalog attribute(s): "
+            + ", ".join(collisions)
+        )
+    validated: dict[str, str | float | int] = {}
+    for name, value in extra_attrs.items():
+        # bool is an int subclass but netCDF has no boolean attribute type.
+        if isinstance(value, bool) or not isinstance(value, str | int | float):
+            raise TypeError(
+                f"extra_attrs[{name!r}] must be a str, int, or float scalar, got "
+                f"{type(value).__name__}"
+            )
+        validated[name] = value
+    return validated
 
 
 def save_catalog(

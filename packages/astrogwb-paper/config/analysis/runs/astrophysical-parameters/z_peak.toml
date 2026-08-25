@@ -1,0 +1,5 @@
+sampled_params = ["z_peak"]
+
+[sampler]
+num_warmup = 500
+dense_mass = false

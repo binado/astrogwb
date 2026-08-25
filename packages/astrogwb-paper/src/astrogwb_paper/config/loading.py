@@ -53,26 +53,6 @@ def merge_run_overlay(
     return merged
 
 
-def load_inventory(
-    path: Path, *, required: tuple[str, ...], optional: tuple[str, ...] = ()
-) -> dict[str, Any]:
-    """Load a committed inventory file and validate its top-level sections.
-
-    Unknown top-level keys are rejected so a typo fails at load instead of
-    being silently ignored, and every ``required`` section must be a non-empty
-    mapping.
-    """
-    raw = load_mapping(path)
-    unknown = sorted(set(raw) - set(required) - set(optional))
-    if unknown:
-        raise ValueError(f"{path} has unknown top-level keys: {', '.join(unknown)}")
-    for key in required:
-        section = raw.get(key)
-        if not isinstance(section, Mapping) or not section:
-            raise ValueError(f"{path} must define a non-empty {key} mapping")
-    return raw
-
-
 def load_mapping(path: Path) -> dict[str, Any]:
     """Parse a YAML, TOML, or JSON config file into a plain dict."""
     suffix = path.suffix.lower()

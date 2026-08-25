@@ -2,12 +2,12 @@
 
 A stdlib-only leaf so both sides of the config graph can depend on it. The
 figure path reaches it through :mod:`astrogwb_paper.config.figures` (which
-reads it from the experiment inventory) and the sampling path through
-:attr:`astrogwb_paper.config.mcmc.RunConfig.analysis_grid` (which assembles
-one from an already-validated run config). ``config.mcmc`` must not import
-``config.figures``: the graph runs figures -> experiments -> catalogs ->
-loading, so that edge would drag the YAML inventory readers into the
-``RunConfig`` path and break its stdlib+pydantic-only guarantee.
+reads it back out of an assembled run config) and the sampling path through
+:attr:`astrogwb_paper.config.mcmc.RunConfig.analysis_grid` (which assembles one
+from an already-validated run config). ``config.mcmc`` must not import
+``config.figures``: the graph runs figures -> runs -> mcmc -> loading, so that
+edge would be a cycle and would drag the filesystem-reading discovery layer
+into the ``RunConfig`` path.
 """
 
 from __future__ import annotations

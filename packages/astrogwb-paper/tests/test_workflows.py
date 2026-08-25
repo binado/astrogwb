@@ -1,3 +1,12 @@
+"""Workflow-shape tests: what the DAG builds, and what each rule is handed.
+
+Every dry run happens in a scratch directory holding symlinks to the committed
+inputs (``Snakefile``, ``config/``, ``scripts/``) and nothing else. Running them
+against the real checkout instead would make them depend on whichever chains
+and banks a developer happens to have built -- and existing chains are
+``protected()``, so a ``--forceall`` dry run against them fails outright.
+"""
+
 from __future__ import annotations
 
 import os
@@ -5,18 +14,23 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import pytest
+from astrogwb_paper.config.figures import reference_config_path
 from astrogwb_paper.paths import paper_project_root
 
 PAPER_ROOT = paper_project_root()
 SNAKEFILE = PAPER_ROOT / "Snakefile"
-CATALOG_RULES = (
-    "population_config",
-    "population_bank",
-    "waveform_bank",
-    "banks",
-)
+#: The assembled run config every figure rule declares as an input.
+FIGURE_CONFIG = str(reference_config_path())
+#: Set by the session fixture below; the cwd every snakemake run uses.
+WORKFLOW_DIR = PAPER_ROOT
+
+#: Committed inputs the workflow reads. Everything else it touches is output.
+LINKED = ("Snakefile", "config", "scripts")
+BANK_RULES = ("waveform_bank", "banks")
 MCMC_RULES = (
     "assemble_config",
+    "configs",
     "run_mcmc",
     "plot_cosmological_parameters",
     "plot_modified_propagation",
@@ -33,11 +47,20 @@ MCMC_RULES = (
 )
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_workflow_dir(tmp_path_factory: pytest.TempPathFactory) -> None:
+    """Point every dry run at a scratch tree with no outputs in it."""
+    global WORKFLOW_DIR
+    WORKFLOW_DIR = tmp_path_factory.mktemp("workflow")
+    for name in LINKED:
+        (WORKFLOW_DIR / name).symlink_to(PAPER_ROOT / name)
+
+
 def _snakemake(*args: str) -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory(prefix="astrogwb-snakemake-") as cache:
         return subprocess.run(
             ["snakemake", *args],
-            cwd=PAPER_ROOT,
+            cwd=WORKFLOW_DIR,
             check=False,
             capture_output=True,
             text=True,
@@ -53,6 +76,20 @@ def _mcmc(*args: str) -> subprocess.CompletedProcess[str]:
         *MCMC_RULES,
         *args,
     )
+
+
+def _rule_names(stdout: str) -> set[str]:
+    """Parse ``--list-rules`` output.
+
+    Each rule is printed as ``name`` or ``name (docstring...)``, with docstring
+    continuation lines indented -- so a rule name is the first token of any
+    unindented, non-empty line.
+    """
+    return {
+        line.split()[0]
+        for line in stdout.splitlines()
+        if line.strip() and not line[0].isspace()
+    }
 
 
 def _rule_inputs(stdout: str) -> list[str]:
@@ -74,12 +111,13 @@ def _banks(tmp_path: Path, *names: str) -> Path:
     return directory
 
 
-def test_bank_workflow_builds_fresh_populations_and_waveforms() -> None:
+def test_bank_rule_reads_its_config_and_population_directly() -> None:
+    """One rule per bank; the population is no longer a workflow node."""
     result = _snakemake(
         "--snakefile",
         str(SNAKEFILE),
         "--allowed-rules",
-        *CATALOG_RULES,
+        *BANK_RULES,
         "--dry-run",
         "--forceall",
         "--printshellcmds",
@@ -90,15 +128,28 @@ def test_bank_workflow_builds_fresh_populations_and_waveforms() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "inputs/catalogs.yaml" in result.stdout
-    assert "outputs/population-configs/md.yaml" in result.stdout
-    assert "outputs/population-configs/uniform-redshift.yaml" in result.stdout
-    assert "outputs/populations/md-imrphenom-s41.h5" in result.stdout
-    assert "outputs/populations/uniform-imrphenom-s51.h5" in result.stdout
+    assert "config/banks/md-imrphenom-s41.toml" in result.stdout
+    assert "config/banks/uniform-imrphenom-s51.toml" in result.stdout
+    assert "config/populations/madau-dickinson.yaml" in result.stdout
+    assert "config/populations/uniform-redshift.yaml" in result.stdout
     assert "outputs/banks/md-imrphenom-s41.h5" in result.stdout
     assert "outputs/banks/uniform-imrphenom-s51.h5" in result.stdout
+    assert "astrogwb-generate-bank" in result.stdout
+    # The population intermediate and its merge rule are both gone.
+    assert "outputs/populations/" not in result.stdout
+    assert "outputs/population-configs/" not in result.stdout
     # Mixing moved to compose_catalog; generation is single-component now.
     assert "--uniform-mixing-fraction" not in result.stdout
+
+
+def test_the_snakefile_no_longer_needs_ancient() -> None:
+    """Per-run configs restore real change tracking.
+
+    ``ancient()`` existed only because one rule emitted all 26 configs, so any
+    edit invalidated every chain. It also meant a config change never
+    retriggered sampling at all.
+    """
+    assert "ancient(" not in SNAKEFILE.read_text()
 
 
 def test_banks_target_builds_all_4_banks() -> None:
@@ -106,7 +157,7 @@ def test_banks_target_builds_all_4_banks() -> None:
         "--snakefile",
         str(SNAKEFILE),
         "--allowed-rules",
-        *CATALOG_RULES,
+        *BANK_RULES,
         "--dry-run",
         "--forceall",
         "--cores",
@@ -115,8 +166,8 @@ def test_banks_target_builds_all_4_banks() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule population_config:") == 2
     assert result.stdout.count("rule waveform_bank:") == 4
+    assert "rule population_config:" not in result.stdout
     for name in (
         "md-imrphenom-s41",
         "md-imrphenom-s42",
@@ -142,7 +193,7 @@ def test_plot_cosmological_parameters_expands_all_chains_and_figures(
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule assemble_config:") == 1
+    assert result.stdout.count("rule assemble_config:") == 8
     assert result.stdout.count("rule run_mcmc:") == 8
     assert result.stdout.count("rule plot_cosmological_parameters:") == 1
     for path in (
@@ -173,9 +224,7 @@ def test_run_experiment_target_excludes_figure_rule(tmp_path: Path) -> None:
     assert "rule plot_cosmological_parameters:" not in result.stdout
 
 
-def test_config_assembly_reads_the_single_inventory(
-    tmp_path: Path,
-) -> None:
+def test_config_assembly_is_per_run(tmp_path: Path) -> None:
     banks = _banks(tmp_path, "md-imrphenom-s42.h5")
 
     result = _mcmc(
@@ -191,8 +240,16 @@ def test_config_assembly_reads_the_single_inventory(
 
     assert result.returncode == 0, result.stderr
     assert (
-        "astrogwb-validate-config inputs/experiments.yaml "
-        "--output-dir outputs/configs" in result.stdout
+        "astrogwb-assemble-config --experiment cosmological-parameters "
+        "--run H0-Omega_m "
+        "--output outputs/configs/cosmological-parameters/H0-Omega_m.json"
+        in result.stdout
+    )
+    # Three layers, all declared, so any of them retriggers this run alone.
+    assert "config/analysis/base/parameters.toml" in result.stdout
+    assert "config/analysis/runs/cosmological-parameters/_base.toml" in result.stdout
+    assert "config/analysis/runs/cosmological-parameters/H0-Omega_m.toml" in (
+        result.stdout
     )
     assert "--bank" in result.stdout
     assert f"md-imrphenom-s41={banks / 'md-imrphenom-s41.h5'}" in result.stdout
@@ -284,7 +341,6 @@ def test_missing_bank_does_not_acquire_a_producer(tmp_path: Path) -> None:
     output = result.stdout + result.stderr
     assert result.returncode != 0
     assert "MissingInputException" in output
-    assert "population_config" not in output
     assert "waveform_bank" not in output
 
 
@@ -292,7 +348,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
     result = _snakemake("--snakefile", str(SNAKEFILE), "--list-rules")
 
     assert result.returncode == 0, result.stderr
-    rules = set(result.stdout.split())
+    rules = _rule_names(result.stdout)
     assert {
         "run_experiment_cosmological_parameters",
         "run_experiment_modified_propagation",
@@ -306,6 +362,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "fiducial_spectrum",
         "importance_weights_grid",
         "assemble_config",
+        "configs",
         "run_mcmc",
     } <= rules
     assert {
@@ -341,6 +398,9 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "catalogs",
         "population",
         "waveform_catalog",
+        # The population left the DAG: it was a temp() node with one consumer.
+        "population_config",
+        "population_bank",
     }.isdisjoint(rules)
 
 
@@ -363,7 +423,7 @@ def test_experiments_target_builds_all_26_chains(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule assemble_config:") == 1
+    assert result.stdout.count("rule assemble_config:") == 26
     assert result.stdout.count("rule run_mcmc:") == 26
     # `experiments` is chains-only now; figures are opt-in via the plot rules.
     assert "rule plot_cosmological_parameters:" not in result.stdout
@@ -388,12 +448,11 @@ def test_plot_cosmological_parameters_passes_all_paths_not_labels(
 
     assert result.returncode == 0, result.stderr
     assert "rule plot_cosmological_parameters:" in result.stdout
-    # The script resolves the inventory path itself, so no flag carries it --
-    # but the rule still declares the file, so editing it retriggers the figure.
+    # The script resolves the assembled config path itself, so no flag carries
+    # it -- but the rule still declares the file, so a config change retriggers
+    # the figure. Figures therefore report what was actually sampled.
     assert "--base-config" not in result.stdout
-    assert any(
-        "inputs/experiments.yaml" in line for line in _rule_inputs(result.stdout)
-    )
+    assert any(FIGURE_CONFIG in line for line in _rule_inputs(result.stdout))
     for flag in (
         "--catalog",
         "--detector-chains",
@@ -443,14 +502,11 @@ def test_standalone_figures_receive_config_paths(
         "scripts/importance_weights_grid.py",
     ):
         assert script in result.stdout
-    # Every standalone script reads the base config for itself instead of
-    # receiving fiducials and analysis bounds as reconstructed flags -- or even
-    # the inventory path, which the library already owns.
+    # Every standalone script reads the assembled run config for itself instead
+    # of receiving fiducials and analysis bounds as reconstructed flags -- or
+    # even the config path, which the library already owns.
     assert "--base-config" not in result.stdout
-    assert (
-        sum("inputs/experiments.yaml" in line for line in _rule_inputs(result.stdout))
-        == 3
-    )
+    assert sum(FIGURE_CONFIG in line for line in _rule_inputs(result.stdout)) == 3
     assert "--figure-config" not in result.stdout
     for flag in ("--observation-time", "--f-min", "--h0", "--omega-gw-min"):
         assert flag not in result.stdout

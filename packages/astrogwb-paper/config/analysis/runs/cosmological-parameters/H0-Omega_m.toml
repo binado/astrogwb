@@ -1,0 +1,9 @@
+# Omega_m with H0 marginalized out analytically.
+
+sampled_params = ["Omega_m"]
+
+[analysis]
+detectors = ["S1", "R1", "C1"]
+likelihood = "amplitude_marginalized"
+amplitude_parameter = "H0"
+amplitude_num_nodes = 1024

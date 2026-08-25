@@ -21,9 +21,8 @@ Usage::
         --bank md-imrphenom-s41=outputs/banks/md-imrphenom-s41.h5 \
         --bank md-imrphenom-s42=outputs/banks/md-imrphenom-s42.h5
 
-Configs are assembled from the base and run overlays in ``inputs/experiments.yaml``
-by the ``assemble_config`` workflow rule or by
-``astrogwb-validate-config``; see docs/running-inference.md.
+Configs are assembled from ``config/analysis/`` by the ``assemble_config``
+workflow rule or by ``astrogwb-assemble-config``; see docs/running-inference.md.
 
 Open the generated ``perfetto_trace.json.gz`` at https://ui.perfetto.dev
 (no TensorBoard install required).
@@ -38,8 +37,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from astrogwb_paper.cli.run_mcmc import resolve_run_proposal
 from astrogwb_paper.config.loading import load_mapping
-from astrogwb_paper.config.mcmc import RunConfig, build_run_config
+from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig, build_run_config
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
@@ -104,6 +104,7 @@ def build_potential(
     config: RunConfig,
     injection_source: CatalogSource,
     proposal_source: CatalogSource,
+    proposal: ProposalConfig,
     jax,
 ):
     """Build the production model inputs and return (potential_fn, init_params).
@@ -125,7 +126,7 @@ def build_potential(
         injection_source,
         proposal_source,
         fiducials=config.fiducials,
-        proposal_config=config.proposal,
+        proposal_config=proposal,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
     )
@@ -181,6 +182,19 @@ def main(argv: list[str] | None = None) -> None:
     config = build_run_config(raw, seed=args.seed)
     logger.info("Config: %s", config_path)
 
+    # Resolve the proposal density from bank provenance before JAX starts, the
+    # same way astrogwb-run-mcmc does -- what is profiled must be the
+    # production model on production inputs.
+    from astrogwb_paper.catalogs import catalog_source
+
+    injection_source = catalog_source(
+        config.catalog.injection, bank_paths, role="injection"
+    )
+    proposal_source = catalog_source(
+        config.catalog.proposal, bank_paths, role="proposal"
+    )
+    proposal = resolve_run_proposal(config, proposal_source)
+
     jax, _ = configure_runtime(
         num_chains=config.sampler.num_chains,
         platform=args.platform,
@@ -189,12 +203,8 @@ def main(argv: list[str] | None = None) -> None:
         chain_method=args.chain_method,
     )
 
-    from astrogwb_paper.catalogs import catalog_source
-
-    injection_source = catalog_source(config.catalog.injection, bank_paths)
-    proposal_source = catalog_source(config.catalog.proposal, bank_paths)
     potential_fn, init_params = build_potential(
-        config, injection_source, proposal_source, jax
+        config, injection_source, proposal_source, proposal, jax
     )
 
     forward_mode = config.sampler.forward_mode_differentiation and not args.reverse_ad

@@ -1,0 +1,18 @@
+# The Madau-Dickinson rate shape with H0 amplitude-marginalized out.
+#
+# Both runs need the guarded (eps = 0.1) proposal: sampling the rate
+# shape moves the posterior away from the proposal, and the uniform
+# component keeps the importance weights from degenerating.
+
+[analysis]
+detectors = ["S1", "R1", "C1"]
+likelihood = "amplitude_marginalized"
+amplitude_parameter = "H0"
+amplitude_num_nodes = 1024
+
+[catalog.proposal]
+md_bank = "md-imrphenom-s42"
+uniform_bank = "uniform-imrphenom-s51"
+num_samples = 16384
+uniform_mixing_fraction = 0.1
+mixture_seed = 61
