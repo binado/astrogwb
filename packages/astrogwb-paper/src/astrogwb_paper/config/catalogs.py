@@ -95,7 +95,7 @@ def catalog_recipe(name: str, path: Path | None = None) -> CatalogRecipe:
 def proposal_config(
     recipe: CatalogRecipe, *, root: Path | None = None
 ) -> dict[str, float | int]:
-    """Expand the fixed redshift proposal represented by ``recipe``."""
+    """Expand the generation-time redshift proposal represented by ``recipe``."""
     project_root = root or paper_project_root()
     population = recipe.population
     md = load_mapping(project_root / population.md_redshift_config)
@@ -121,6 +121,33 @@ def proposal_config(
         "gamma": float(md_sampler["gamma"]),
         "kappa": float(md_sampler["kappa"]),
         "z_peak": float(md_sampler["z_peak"]),
+    }
+
+
+def generation_redshift_support(
+    recipe: CatalogRecipe, *, root: Path | None = None
+) -> tuple[float, float]:
+    """Return the redshift span catalog generation draws from for ``recipe``."""
+    proposal = proposal_config(recipe, root=root)
+    return float(proposal["minimum_redshift"]), float(proposal["maximum_redshift"])
+
+
+def analysis_proposal_config(
+    recipe: CatalogRecipe,
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    root: Path | None = None,
+) -> dict[str, float | int]:
+    """Restrict the generation proposal to the analysis redshift window.
+
+    Generation draws truncated to the window follow the same law as drawing
+    directly from it, so only the support fields change.
+    """
+    return {
+        **proposal_config(recipe, root=root),
+        "minimum_redshift": float(minimum_redshift),
+        "maximum_redshift": float(maximum_redshift),
     }
 
 

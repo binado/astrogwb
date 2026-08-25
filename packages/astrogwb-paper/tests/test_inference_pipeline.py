@@ -34,6 +34,9 @@ FREQUENCIES = np.linspace(10.0, 50.0, 5)
 BAND = (20.0, 40.0)
 N_BAND = 3
 N_SOURCES = 8
+# Catalogs span below the assembled analysis window (minimum_redshift 0.3):
+# linspace(0.05, 1.5, 8) keeps 6 samples after truncation.
+N_RETAINED = 6
 
 
 def _write_catalog(
@@ -46,7 +49,7 @@ def _write_catalog(
     rng = np.random.default_rng(seed)
     n_freq = frequencies.size
     shape = (n_freq, N_SOURCES)
-    redshift = np.linspace(0.4, 1.5, N_SOURCES)
+    redshift = np.linspace(0.05, 1.5, N_SOURCES)
     source_parameters: dict[str, Any] = {
         "redshift": redshift,
         # Only needs to be positive and finite: the model divides by the
@@ -139,11 +142,11 @@ def test_masked_model_kwargs_masks_frequencies_but_not_samples(
     assert kwargs["frequencies"].shape == (N_BAND,)
     assert kwargs["observed_spectral_density"].shape == (N_BAND,)
     assert kwargs["effective_psd"].shape == (N_BAND,)
-    assert kwargs["polarization_power"].shape == (N_BAND, N_SOURCES)
+    assert kwargs["polarization_power"].shape == (N_BAND, N_RETAINED)
     # `samples` is per-source, not per-frequency. Masking it would silently
     # truncate the population and change every posterior without erroring.
     for name, values in kwargs["samples"].items():
-        assert values.shape == (N_SOURCES,), name
+        assert values.shape == (N_RETAINED,), name
 
 
 def test_mismatched_frequency_grids_are_rejected(

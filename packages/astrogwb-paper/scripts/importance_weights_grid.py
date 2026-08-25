@@ -29,8 +29,12 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.waveform import open_catalog
-from astrogwb_paper.catalogs import compute_proposal_logprob, samples_from_catalog
-from astrogwb_paper.config.catalogs import catalog_recipe, proposal_config
+from astrogwb_paper.catalogs import (
+    compute_proposal_logprob,
+    samples_from_catalog,
+    truncate_catalog_samples,
+)
+from astrogwb_paper.config.catalogs import analysis_proposal_config, catalog_recipe
 from astrogwb_paper.config.experiments import DEFAULT_CATALOG
 from astrogwb_paper.config.figures import load_fiducials
 from astrogwb_paper.config.mcmc import ProposalConfig
@@ -177,21 +181,23 @@ def main(argv: Sequence[str] | None = None) -> None:
     fiducials = load_fiducials()
     use_paper_style()
 
-    catalog = open_catalog(catalog_path)
+    catalog = truncate_catalog_samples(
+        open_catalog(catalog_path),
+        label="proposal",
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+    )
     samples = samples_from_catalog(catalog)
-    missing = [
-        name for name in ("redshift", "luminosity_distance") if name not in samples
-    ]
-    if missing:
-        raise ValueError(
-            "catalog samples are missing required parameter(s): " + ", ".join(missing)
-        )
     n_samples = int(np.asarray(samples["redshift"]).shape[0])
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_REDSHIFT_GRID)
     proposal = ProposalConfig.model_validate(
-        proposal_config(catalog_recipe(DEFAULT_CATALOG))
+        analysis_proposal_config(
+            catalog_recipe(DEFAULT_CATALOG),
+            minimum_redshift=Z_MIN,
+            maximum_redshift=Z_MAX,
+        )
     )
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=fiducials,

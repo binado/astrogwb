@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
+import xarray as xr
 import yaml
+from astrogwb.waveform import make_catalog
+from astrogwb_paper.catalogs import truncate_catalog_samples
 from astrogwb_paper.config.catalogs import (
     CATALOGS_PATH,
     INJECTION_CATALOG_NAME,
+    analysis_proposal_config,
     catalog_recipe,
+    generation_redshift_support,
     load_catalogs,
     proposal_config,
 )
@@ -97,7 +103,7 @@ def test_proposal_config_is_expanded_from_population_fragments() -> None:
 
     assert proposal == {
         "uniform_mixing_fraction": 0.1,
-        "minimum_redshift": 0.3,
+        "minimum_redshift": 0.0,
         "maximum_redshift": 20.0,
         "n_grid": 4096,
         "H0": 67.66,
@@ -106,6 +112,81 @@ def test_proposal_config_is_expanded_from_population_fragments() -> None:
         "kappa": 4.62,
         "z_peak": 1.84,
     }
+
+
+def test_analysis_proposal_config_replaces_only_the_support() -> None:
+    recipe = catalog_recipe("bns-n16384-eps=0.1-df1")
+    generation = proposal_config(recipe)
+
+    analysis = analysis_proposal_config(
+        recipe, minimum_redshift=0.3, maximum_redshift=20.0
+    )
+
+    assert analysis == {**generation, "minimum_redshift": 0.3, "maximum_redshift": 20.0}
+    assert generation_redshift_support(recipe) == (0.0, 20.0)
+
+
+def _catalog(redshift: np.ndarray) -> xr.Dataset:
+    return make_catalog(
+        frequencies=np.linspace(10.0, 50.0, 5),
+        polarization_power=np.arange(5 * redshift.size, dtype=float).reshape(
+            5, redshift.size
+        ),
+        source_parameters={
+            "redshift": redshift,
+            "luminosity_distance": 1.0e3 * (1.0 + redshift),
+        },
+        approximant="Toy",
+        minimum_frequency=10.0,
+        maximum_frequency=50.0,
+        reference_frequency=20.0,
+        sampling_frequency=128.0,
+    )
+
+
+def test_truncate_catalog_samples_keeps_only_window_samples() -> None:
+    catalog = _catalog(np.array([0.05, 0.25, 0.4, 1.5, 21.0]))
+
+    truncated = truncate_catalog_samples(
+        catalog, label="proposal", minimum_redshift=0.3, maximum_redshift=20.0
+    )
+
+    kept = truncated.source_parameters.sel(parameter="redshift").values
+    np.testing.assert_allclose(kept, [0.4, 1.5])
+    # Rows stay consistent across every variable sharing the sample dim.
+    assert truncated.polarization_power.shape == (5, 2)
+    np.testing.assert_allclose(
+        truncated.polarization_power.values,
+        catalog.polarization_power.isel(sample=[2, 3]).values,
+    )
+
+
+def test_truncate_catalog_samples_rejects_empty_window() -> None:
+    catalog = _catalog(np.array([0.05, 0.25]))
+
+    with pytest.raises(ValueError, match="no samples in the analysis redshift window"):
+        truncate_catalog_samples(
+            catalog, label="injection", minimum_redshift=0.3, maximum_redshift=20.0
+        )
+
+
+def test_truncate_catalog_samples_requires_distance_column() -> None:
+    redshift = np.array([0.4, 1.5])
+    catalog = make_catalog(
+        frequencies=np.linspace(10.0, 50.0, 5),
+        polarization_power=np.ones((5, redshift.size)),
+        source_parameters={"redshift": redshift},
+        approximant="Toy",
+        minimum_frequency=10.0,
+        maximum_frequency=50.0,
+        reference_frequency=20.0,
+        sampling_frequency=128.0,
+    )
+
+    with pytest.raises(ValueError, match="missing required parameter"):
+        truncate_catalog_samples(
+            catalog, label="injection", minimum_redshift=0.3, maximum_redshift=20.0
+        )
 
 
 def test_unknown_catalog_name_lists_choices() -> None:

@@ -49,7 +49,7 @@ from astrogwb_paper.catalogs import (
     compute_proposal_logprob,
     load_propagated_catalog,
     samples_from_catalog,
-    validate_catalog_samples,
+    truncate_catalog_samples,
     validate_matching_frequency_grids,
 )
 from astrogwb_paper.config.analysis import AnalysisGrid
@@ -106,16 +106,20 @@ def prepare_observation(
     """Load the injection catalog and build the fiducial observed spectrum."""
     fiducial_values = dict(fiducials)
     injection = load_propagated_catalog(injection_path, fiducials=fiducial_values)
-    validate_catalog_samples(
+    n_loaded = injection.polarization_power.shape[1]
+    injection = truncate_catalog_samples(
         injection,
         label="injection",
         minimum_redshift=grid.minimum_redshift,
         maximum_redshift=grid.maximum_redshift,
     )
+    n_kept = injection.polarization_power.shape[1]
     logger.info(
-        "Loaded independent injection catalog %s: n_injection_samples=%d",
+        "Loaded independent injection catalog %s: n_injection_samples=%d "
+        "(%d outside the analysis window dropped)",
         injection_path,
-        injection.polarization_power.shape[1],
+        n_kept,
+        n_loaded - n_kept,
     )
 
     redshift_grid = jnp.linspace(
@@ -164,7 +168,8 @@ def prepare_inference_inputs(
     """Build every array the model is evaluated against, from the two catalogs."""
     observation = prepare_observation(injection_path, fiducials=fiducials, grid=grid)
     proposal = load_propagated_catalog(proposal_path, fiducials=dict(fiducials))
-    validate_catalog_samples(
+    n_loaded = proposal.polarization_power.shape[1]
+    proposal = truncate_catalog_samples(
         proposal,
         label="proposal",
         minimum_redshift=grid.minimum_redshift,
@@ -174,10 +179,12 @@ def prepare_inference_inputs(
     validate_matching_frequency_grids(observation.frequencies, proposal_frequencies)
     n_freq, n_samples = proposal.polarization_power.shape
     logger.info(
-        "Loaded proposal catalog %s: n_frequency_bins=%d n_proposal_samples=%d",
+        "Loaded proposal catalog %s: n_frequency_bins=%d n_proposal_samples=%d "
+        "(%d outside the analysis window dropped)",
         proposal_path,
         n_freq,
         n_samples,
+        n_loaded - n_samples,
     )
 
     # Two frequency grids are in play and they are deliberately spelled

@@ -207,16 +207,48 @@ def test_a_run_naming_an_undeclared_catalog_is_rejected_at_load(
 def test_run_config_rejects_proposal_that_disagrees_with_fiducials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original = experiments_module.proposal_config
+    original = experiments_module.analysis_proposal_config
 
-    def mismatched(recipe):
-        return {**original(recipe), "H0": 70.0}
+    def mismatched(recipe, *, minimum_redshift, maximum_redshift):
+        return {
+            **original(
+                recipe,
+                minimum_redshift=minimum_redshift,
+                maximum_redshift=maximum_redshift,
+            ),
+            "H0": 70.0,
+        }
 
-    monkeypatch.setattr(experiments_module, "proposal_config", mismatched)
+    monkeypatch.setattr(experiments_module, "analysis_proposal_config", mismatched)
     spec = load_experiments()["cosmological-parameters"]
 
     with pytest.raises(ValueError, match="proposal does not match run settings: H0"):
         overlay_for(spec, "ET-triangular", base=load_base())
+
+
+def test_analysis_window_outside_generation_support_is_rejected() -> None:
+    spec = load_experiments()["cosmological-parameters"]
+
+    below = load_base()
+    below["cosmology"]["minimum_redshift"] = -0.1
+    with pytest.raises(ValueError, match="must lie within the catalog generation"):
+        overlay_for(spec, "ET-triangular", base=below)
+
+    above = load_base()
+    above["cosmology"]["maximum_redshift"] = 21.0
+    with pytest.raises(ValueError, match="must lie within the catalog generation"):
+        overlay_for(spec, "ET-triangular", base=above)
+
+
+def test_analysis_window_equal_to_generation_support_is_accepted() -> None:
+    base = load_base()
+    base["cosmology"]["minimum_redshift"] = 0.0
+    spec = load_experiments()["cosmological-parameters"]
+
+    raw = overlay_for(spec, "ET-triangular", base=base)
+
+    assert raw["cosmology"]["minimum_redshift"] == 0.0
+    assert raw["proposal"]["minimum_redshift"] == 0.0
 
 
 def test_cross_type_prior_override_replaces_the_table() -> None:

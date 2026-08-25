@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from astrogwb_paper.config.catalogs import (
+    analysis_proposal_config,
     catalog_recipe,
+    generation_redshift_support,
     load_catalogs,
-    proposal_config,
 )
 from astrogwb_paper.config.loading import load_inventory, merge_run_overlay
 from astrogwb_paper.paths import paper_project_root
@@ -160,7 +161,15 @@ def overlay_for(
     if base is None:
         return merged
     assembled = merge_run_overlay(base, merged)
-    proposal = proposal_config(catalog_recipe(spec.catalog_for(run)))
+    cosmology = assembled.get("cosmology")
+    if not isinstance(cosmology, Mapping):
+        raise TypeError(f"{spec.name}/{run} must define cosmology")
+    recipe = catalog_recipe(spec.catalog_for(run))
+    proposal = analysis_proposal_config(
+        recipe,
+        minimum_redshift=cosmology["minimum_redshift"],
+        maximum_redshift=cosmology["maximum_redshift"],
+    )
     _validate_proposal_matches_run(spec, run, assembled, proposal)
     assembled["proposal"] = proposal
     return assembled
@@ -172,7 +181,7 @@ def _validate_proposal_matches_run(
     assembled: Mapping[str, Any],
     proposal: Mapping[str, float | int],
 ) -> None:
-    """Keep generation-time proposal constants aligned with run fiducials."""
+    """Keep generation-time proposal constants aligned with run settings."""
     fiducials = assembled.get("fiducials")
     cosmology = assembled.get("cosmology")
     if not isinstance(fiducials, Mapping) or not isinstance(cosmology, Mapping):
@@ -182,12 +191,23 @@ def _validate_proposal_matches_run(
         for name in ("H0", "Omega_m", "gamma", "kappa", "z_peak")
         if float(fiducials[name]) != float(proposal[name])
     ]
-    if float(cosmology["minimum_redshift"]) != float(
-        proposal["minimum_redshift"]
-    ) or float(cosmology["maximum_redshift"]) != float(proposal["maximum_redshift"]):
-        mismatches.append("redshift support")
     if mismatches:
         raise ValueError(
             f"{spec.name}/{run} proposal does not match run settings: "
             + ", ".join(mismatches)
+        )
+
+    minimum_redshift = float(cosmology["minimum_redshift"])
+    maximum_redshift = float(cosmology["maximum_redshift"])
+    generation_z_min, generation_z_max = generation_redshift_support(
+        catalog_recipe(spec.catalog_for(run))
+    )
+    if not (
+        generation_z_min <= minimum_redshift < maximum_redshift <= generation_z_max
+    ):
+        raise ValueError(
+            f"{spec.name}/{run} analysis redshift support "
+            f"[{minimum_redshift:.4g}, {maximum_redshift:.4g}] must lie within "
+            f"the catalog generation support "
+            f"[{generation_z_min:.4g}, {generation_z_max:.4g}]"
         )

@@ -36,14 +36,19 @@ def samples_from_catalog(catalog: xr.Dataset) -> dict[str, jax.Array]:
     }
 
 
-def validate_catalog_samples(
+def truncate_catalog_samples(
     catalog: xr.Dataset,
     *,
     label: str,
     minimum_redshift: float,
     maximum_redshift: float,
-) -> None:
-    """Validate required columns and redshift support."""
+) -> xr.Dataset:
+    """Restrict a catalog to samples inside the analysis redshift window.
+
+    Generation draws truncated to the window follow the same law as drawing
+    directly from it, so this is how a full-range catalog meets the analysis
+    support instead of being rejected for spanning below it.
+    """
     required = {"redshift", "luminosity_distance"}
     missing = sorted(required - set(catalog.parameter.values))
     if missing:
@@ -53,14 +58,13 @@ def validate_catalog_samples(
         )
 
     redshift = catalog.source_parameters.sel(parameter="redshift").values
-    z_lo = float(np.min(redshift))
-    z_hi = float(np.max(redshift))
-    if z_lo < minimum_redshift or z_hi > maximum_redshift:
+    window = (redshift >= minimum_redshift) & (redshift <= maximum_redshift)
+    if not window.any():
         raise ValueError(
-            f"{label} catalog redshifts span [{z_lo:.4g}, {z_hi:.4g}] but "
-            f"[minimum_redshift, maximum_redshift] is "
+            f"{label} catalog has no samples in the analysis redshift window "
             f"[{minimum_redshift:.4g}, {maximum_redshift:.4g}]"
         )
+    return catalog.isel(sample=window)
 
 
 def compute_proposal_logprob(

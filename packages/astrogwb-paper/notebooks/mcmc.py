@@ -180,7 +180,7 @@ from astrogwb_paper.catalogs import (
     compute_fiducial_injection_spectrum,
     load_propagated_catalog,
     samples_from_catalog,
-    validate_catalog_samples,
+    truncate_catalog_samples,
     validate_matching_frequency_grids,
 )
 from astrogwb_paper.config.mcmc import ProposalConfig
@@ -274,13 +274,13 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # %%
 injection = load_propagated_catalog(INJECTION_CATALOG_PATH, fiducials=fiducials)
 proposal = load_propagated_catalog(PROPOSAL_CATALOG_PATH, fiducials=fiducials)
-validate_catalog_samples(
+injection = truncate_catalog_samples(
     injection,
     label="injection",
     minimum_redshift=minimum_redshift,
     maximum_redshift=maximum_redshift,
 )
-validate_catalog_samples(
+proposal = truncate_catalog_samples(
     proposal,
     label="proposal",
     minimum_redshift=minimum_redshift,

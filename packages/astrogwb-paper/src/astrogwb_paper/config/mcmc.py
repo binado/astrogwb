@@ -287,6 +287,22 @@ class RunConfig(BaseModel):
         object.__setattr__(self, "priors", aligned_priors)
         return self
 
+    @model_validator(mode="after")
+    def _validate_proposal_support(self) -> RunConfig:
+        if (
+            self.proposal.minimum_redshift != self.cosmology.minimum_redshift
+            or self.proposal.maximum_redshift != self.cosmology.maximum_redshift
+        ):
+            raise ValueError(
+                "proposal redshift support must equal cosmology redshift "
+                "support: proposal "
+                f"[{self.proposal.minimum_redshift:g}, "
+                f"{self.proposal.maximum_redshift:g}] vs cosmology "
+                f"[{self.cosmology.minimum_redshift:g}, "
+                f"{self.cosmology.maximum_redshift:g}]"
+            )
+        return self
+
     @computed_field
     @property
     def constants(self) -> dict[str, float]:

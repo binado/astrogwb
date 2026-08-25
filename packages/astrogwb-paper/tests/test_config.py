@@ -96,6 +96,16 @@ def test_analysis_grid_mirrors_the_config() -> None:
     )
 
 
+def test_run_config_requires_proposal_support_to_match_cosmology() -> None:
+    raw = example_raw()
+    raw["proposal"]["minimum_redshift"] = 0.0
+
+    with pytest.raises(
+        ValidationError, match="proposal redshift support must equal cosmology"
+    ):
+        build_run_config(raw)
+
+
 def test_analysis_grid_is_not_serialized(tmp_path) -> None:
     """`analysis_grid` is a plain property, never a computed field.
 
