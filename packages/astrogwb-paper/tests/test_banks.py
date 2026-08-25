@@ -21,7 +21,7 @@ from astrogwb_paper.banks import (
     resolve_proposal,
 )
 from astrogwb_paper.config.banks import discover_banks
-from astrogwb_paper.config.loading import load_mapping
+from astrogwb_paper.config.mcmc import load_mapping
 
 MD_GRAPH: dict[str, Any] = {
     "parameters": {

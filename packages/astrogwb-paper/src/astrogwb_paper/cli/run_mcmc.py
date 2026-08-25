@@ -56,8 +56,12 @@ from astrogwb_paper.banks import (
     read_bank_provenance,
     resolve_proposal,
 )
-from astrogwb_paper.config.loading import load_mapping
-from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig, build_run_config
+from astrogwb_paper.config.mcmc import (
+    ProposalConfig,
+    RunConfig,
+    build_run_config,
+    load_mapping,
+)
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:

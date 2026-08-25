@@ -22,7 +22,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from astrogwb_paper.config.loading import load_mapping
+from astrogwb_paper.config.mcmc import load_mapping
 from astrogwb_paper.paths import paper_project_root
 
 BANKS_DIR = Path("config/banks")

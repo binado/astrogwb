@@ -51,7 +51,6 @@ def test_help_path_imports_do_not_import_jax() -> None:
     code = """
 import sys
 import astrogwb_paper
-import astrogwb_paper.config.analysis
 import astrogwb_paper.config.mcmc
 import astrogwb_paper.config.figures
 import astrogwb_paper.config.runs

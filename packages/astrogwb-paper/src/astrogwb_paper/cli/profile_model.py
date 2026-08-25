@@ -38,8 +38,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from astrogwb_paper.cli.run_mcmc import resolve_run_proposal
-from astrogwb_paper.config.loading import load_mapping
-from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig, build_run_config
+from astrogwb_paper.config.mcmc import (
+    ProposalConfig,
+    RunConfig,
+    build_run_config,
+    load_mapping,
+)
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:

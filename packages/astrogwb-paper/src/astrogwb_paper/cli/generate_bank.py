@@ -43,7 +43,7 @@ from astrogwb_paper.banks import (
     provenance_attrs,
 )
 from astrogwb_paper.config.banks import BankConfig, load_bank_config
-from astrogwb_paper.config.loading import load_mapping
+from astrogwb_paper.config.mcmc import load_mapping
 
 logger = logging.getLogger(__name__)
 

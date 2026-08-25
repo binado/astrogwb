@@ -28,8 +28,12 @@ from pathlib import Path
 from typing import Any
 
 from astrogwb_paper.config.banks import BankConfig, discover_banks
-from astrogwb_paper.config.loading import deep_merge, load_mapping, merge_run_overlay
-from astrogwb_paper.config.mcmc import RunConfig
+from astrogwb_paper.config.mcmc import (
+    RunConfig,
+    deep_merge,
+    load_mapping,
+    merge_run_overlay,
+)
 from astrogwb_paper.paths import paper_project_root
 
 ANALYSIS_DIR = Path("config/analysis")
@@ -46,13 +50,18 @@ def analysis_root(root: Path | None = None) -> Path:
     return (root or paper_project_root()) / ANALYSIS_DIR
 
 
-def discover_experiments(root: Path | None = None) -> tuple[str, ...]:
+def _discover_experiments(root: Path | None = None) -> tuple[str, ...]:
     """Return every experiment directory name, sorted."""
     runs_dir = (root or paper_project_root()) / RUNS_DIR
     names = tuple(sorted(path.name for path in runs_dir.iterdir() if path.is_dir()))
     if not names:
         raise ValueError(f"{runs_dir} declares no experiments")
     return names
+
+
+def discover_experiments(root: Path | None = None) -> tuple[str, ...]:
+    """Backward-compat alias for :func:`_discover_experiments`."""
+    return _discover_experiments(root)
 
 
 def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
@@ -62,7 +71,7 @@ def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
     """
     resolved = root or paper_project_root()
     runs: dict[str, tuple[str, ...]] = {}
-    for experiment in discover_experiments(resolved):
+    for experiment in _discover_experiments(resolved):
         directory = resolved / RUNS_DIR / experiment
         if not (directory / EXPERIMENT_BASE).is_file():
             raise ValueError(f"{directory} is missing a required {EXPERIMENT_BASE}")
@@ -100,7 +109,7 @@ def assemble_run(
 ) -> dict[str, Any]:
     """Merge base, experiment, and run layers into one raw run config.
 
-    Uses :func:`~astrogwb_paper.config.loading.merge_run_overlay` rather than a
+    Uses :func:`~astrogwb_paper.config.mcmc.merge_run_overlay` rather than a
     plain deep merge: each ``[priors.<param>]`` table replaces the layer below
     it wholesale. That is load-bearing, not incidental -- key-merging a normal
     prior onto a uniform one would leave stale ``low`` / ``high`` behind.

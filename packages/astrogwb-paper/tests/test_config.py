@@ -5,9 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from astrogwb_paper.config.loading import deep_merge, load_mapping, merge_run_overlay
 from astrogwb_paper.config.mcmc import (
     build_run_config,
+    deep_merge,
+    load_mapping,
+    merge_run_overlay,
     prior_to_spec,
     save_config,
 )

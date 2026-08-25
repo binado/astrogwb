@@ -52,8 +52,7 @@ from astrogwb_paper.catalogs import (
     truncate_catalog_samples,
     validate_matching_frequency_grids,
 )
-from astrogwb_paper.config.analysis import AnalysisGrid
-from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig
+from astrogwb_paper.config.mcmc import AnalysisGrid, ProposalConfig, RunConfig
 
 logger = logging.getLogger(__name__)
 

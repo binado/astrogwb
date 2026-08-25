@@ -12,7 +12,7 @@ sampled with: the detector list attached to a network is the one that run's
 config carried, and the fiducials and analysis grid come from a run rather than
 from a shared ``base`` mapping that nothing guaranteed the run inherited.
 
-Like :mod:`astrogwb_paper.config.loading`, this module imports neither JAX nor
+Like :mod:`astrogwb_paper.config.mcmc`, this module imports neither JAX nor
 ``astrogwb``, so a figure script can resolve and validate its inputs before
 touching a runtime.
 """
@@ -24,9 +24,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrogwb_paper.config.analysis import AnalysisGrid
-from astrogwb_paper.config.loading import load_mapping
-from astrogwb_paper.config.mcmc import CatalogSpec
+from astrogwb_paper.config.mcmc import (
+    AnalysisGrid,
+    CatalogSpec,
+    build_run_config,
+    load_mapping,
+)
 from astrogwb_paper.config.runs import CONFIGS_ROOT, config_path
 from astrogwb_paper.paths import paper_project_root
 
@@ -58,6 +61,21 @@ def load_run_config(experiment: str, run: str) -> dict[str, Any]:
     return load_mapping(path)
 
 
+def _reference_raw(run: tuple[str, str] = REFERENCE_RUN) -> dict[str, Any]:
+    """Raw mapping for the reference run — single load, shared by all helpers."""
+    return load_run_config(*run)
+
+
+def load_reference_config(run: tuple[str, str] = REFERENCE_RUN):
+    """Validated :class:`~astrogwb_paper.config.mcmc.RunConfig` for a run.
+
+    Single validation point for the figure helpers below; keeps the
+    ``load_fiducials`` / ``load_analysis_grid`` / ``load_*_spec`` wrappers
+    from each re-parsing the same JSON and each re-implementing extraction.
+    """
+    return build_run_config(_reference_raw(run))
+
+
 def resolve_networks(
     experiment_name: str,
     networks: Sequence[tuple[str, str]],
@@ -86,55 +104,22 @@ def resolve_networks(
 
 def load_fiducials(run: tuple[str, str] = REFERENCE_RUN) -> dict[str, float]:
     """Load the ``fiducials`` mapping an assembled run was sampled at."""
-    fiducials = load_run_config(*run).get("fiducials")
-    if not fiducials:
-        raise ValueError(f"{_label(run)} must define a non-empty [fiducials] table")
-    return {str(name): float(value) for name, value in fiducials.items()}
+    return dict(load_reference_config(run).fiducials)
 
 
 def load_analysis_grid(run: tuple[str, str] = REFERENCE_RUN) -> AnalysisGrid:
     """Load the frequency band and redshift grid an assembled run was built on."""
-    raw = load_run_config(*run)
-    analysis = raw.get("analysis") or {}
-    cosmology = raw.get("cosmology") or {}
-    try:
-        return AnalysisGrid(
-            observation_time=float(raw["observation_time"]),
-            f_min=float(analysis["f_min"]),
-            f_max=float(analysis["f_max"]),
-            minimum_redshift=float(cosmology["minimum_redshift"]),
-            maximum_redshift=float(cosmology["maximum_redshift"]),
-            n_grid=int(cosmology["n_grid"]),
-        )
-    except KeyError as error:
-        raise ValueError(f"{_label(run)} is missing analysis setting {error}") from None
+    return load_reference_config(run).analysis_grid
 
 
 def load_injection_spec(run: tuple[str, str] = REFERENCE_RUN) -> CatalogSpec:
-    """The injection catalog an assembled run composes.
-
-    Every run shares one injection catalog -- it is the "observed" data -- so
-    any run reports the same spec. Figures that recompute the fiducial spectrum
-    need it to know how many samples of the bank the injection actually draws.
-    """
-    catalog = load_run_config(*run).get("catalog") or {}
-    injection = catalog.get("injection")
-    if not injection:
-        raise ValueError(f"{_label(run)} must define a [catalog.injection] table")
-    return CatalogSpec.model_validate(injection)
+    """The injection catalog an assembled run composes."""
+    return load_reference_config(run).catalog.injection
 
 
 def load_proposal_spec(run: tuple[str, str] = REFERENCE_RUN) -> CatalogSpec:
-    """The proposal catalog an assembled run composes.
-
-    Unlike the injection, this one differs between experiments -- the default
-    is what the reference run uses.
-    """
-    catalog = load_run_config(*run).get("catalog") or {}
-    proposal = catalog.get("proposal")
-    if not proposal:
-        raise ValueError(f"{_label(run)} must define a [catalog.proposal] table")
-    return CatalogSpec.model_validate(proposal)
+    """The proposal catalog an assembled run composes."""
+    return load_reference_config(run).catalog.proposal
 
 
 def reference_config_path(run: tuple[str, str] = REFERENCE_RUN) -> Path:

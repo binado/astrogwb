@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from astrogwb_paper.cli.assemble_config import main as assemble_configs
 from astrogwb_paper.config.banks import discover_banks
-from astrogwb_paper.config.loading import load_mapping
+from astrogwb_paper.config.mcmc import load_mapping
 from astrogwb_paper.config.mcmc import build_run_config
 from astrogwb_paper.config.runs import (
     EXPERIMENT_BASE,

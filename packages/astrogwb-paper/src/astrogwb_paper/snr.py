@@ -19,7 +19,7 @@ from astrogwb.frequency import frequency_spacing as compute_frequency_spacing
 from astrogwb.gwb import spectral_snr
 from astrogwb.utils import years_to_seconds
 
-from astrogwb_paper.config.analysis import AnalysisGrid
+from astrogwb_paper.config.mcmc import AnalysisGrid
 from astrogwb_paper.inference import prepare_observation
 
 if TYPE_CHECKING:
