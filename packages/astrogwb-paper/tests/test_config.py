@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from astrogwb_paper.config.mcmc import (
-    build_run_config,
+from astrogwb_paper.config.mcmc import build_run_config, prior_to_spec, save_config
+from astrogwb_paper.config.runs import (
+    assemble_run,
+    discover_runs,
+    load_base,
     merge_run_overlay,
-    prior_to_spec,
-    save_config,
 )
-from astrogwb_paper.config.runs import assemble_run, discover_runs, load_base
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.utils import deep_merge, load_mapping
 from config_fixtures import example_raw

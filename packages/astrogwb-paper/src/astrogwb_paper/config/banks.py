@@ -120,16 +120,6 @@ def discover_banks(root: Path | None = None) -> dict[str, BankGenerationConfig]:
     return {path.stem: load_bank_config(path) for path in paths}
 
 
-def bank_config(name: str, root: Path | None = None) -> BankGenerationConfig:
-    """Return a named bank config or raise a user-facing error."""
-    banks = discover_banks(root)
-    try:
-        return banks[name]
-    except KeyError:
-        choices = ", ".join(banks)
-        raise ValueError(f"unknown bank {name!r}; choose from {choices}") from None
-
-
 # --------------------------------------------------------------------------- #
 # Redshift proposal descriptors
 # --------------------------------------------------------------------------- #

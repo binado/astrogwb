@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from astrogwb_paper.config.banks import BankGenerationConfig, discover_banks
-from astrogwb_paper.config.mcmc import RunConfig, merge_run_overlay
+from astrogwb_paper.config.mcmc import RunConfig
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.utils import deep_merge, load_mapping
 
@@ -41,18 +41,26 @@ CONFIGS_ROOT = Path("outputs/configs")
 CHAINS_ROOT = Path("outputs/chains")
 
 
-def analysis_root(root: Path | None = None) -> Path:
-    """Return the committed analysis-config tree."""
-    return (root or paper_project_root()) / ANALYSIS_DIR
+def merge_run_overlay(
+    base: Mapping[str, Any], override: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Merge a run overlay, replacing named prior tables wholesale.
 
-
-def _discover_experiments(root: Path | None = None) -> tuple[str, ...]:
-    """Return every experiment directory name, sorted."""
-    runs_dir = (root or paper_project_root()) / RUNS_DIR
-    names = tuple(sorted(path.name for path in runs_dir.iterdir() if path.is_dir()))
-    if not names:
-        raise ValueError(f"{runs_dir} declares no experiments")
-    return names
+    ``deep_merge`` key-merges nested mappings, which leaves stale ``low`` /
+    ``high`` behind when a uniform prior is replaced by a normal one. Each
+    ``[priors.<param>]`` table in ``override`` replaces the base spec instead.
+    """
+    overlay_priors = override.get("priors")
+    merged = deep_merge(
+        base, {key: value for key, value in override.items() if key != "priors"}
+    )
+    if not isinstance(overlay_priors, Mapping):
+        return merged
+    priors = dict(merged.get("priors") or {})
+    for name, spec in overlay_priors.items():
+        priors[name] = dict(spec) if isinstance(spec, Mapping) else spec
+    merged["priors"] = priors
+    return merged
 
 
 def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
@@ -61,8 +69,14 @@ def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
     ``_base.toml`` is the experiment override, not a run, so it is excluded.
     """
     resolved = root or paper_project_root()
+    runs_dir = resolved / RUNS_DIR
+    experiments = tuple(
+        sorted(path.name for path in runs_dir.iterdir() if path.is_dir())
+    )
+    if not experiments:
+        raise ValueError(f"{runs_dir} declares no experiments")
     runs: dict[str, tuple[str, ...]] = {}
-    for experiment in _discover_experiments(resolved):
+    for experiment in experiments:
         directory = resolved / RUNS_DIR / experiment
         if not (directory / EXPERIMENT_BASE).is_file():
             raise ValueError(f"{directory} is missing a required {EXPERIMENT_BASE}")
@@ -100,10 +114,10 @@ def assemble_run(
 ) -> dict[str, Any]:
     """Merge base, experiment, and run layers into one raw run config.
 
-    Uses :func:`~astrogwb_paper.config.mcmc.merge_run_overlay` rather than a
-    plain deep merge: each ``[priors.<param>]`` table replaces the layer below
-    it wholesale. That is load-bearing, not incidental -- key-merging a normal
-    prior onto a uniform one would leave stale ``low`` / ``high`` behind.
+    Uses :func:`merge_run_overlay` rather than a plain deep merge: each
+    ``[priors.<param>]`` table replaces the layer below it wholesale. That is
+    load-bearing, not incidental -- key-merging a normal prior onto a uniform
+    one would leave stale ``low`` / ``high`` behind.
     """
     resolved = root or paper_project_root()
     directory = resolved / RUNS_DIR / experiment

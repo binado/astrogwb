@@ -11,8 +11,9 @@ in ``tests/test_prior_native_types.py`` (re-running ``set_host_device_count``
 after a backend init is a silent no-op, hence the subprocess).
 
 The generic merge/load helpers (``deep_merge``, ``load_mapping``) live in
-:mod:`astrogwb_paper.utils`; only the run-specific ``merge_run_overlay`` and
-the ``AnalysisGrid`` shared by every experiment run live here.
+:mod:`astrogwb_paper.utils`, and the run-assembly merge semantics
+(``merge_run_overlay``) in :mod:`astrogwb_paper.config.runs`; only the
+``AnalysisGrid`` shared by every experiment run lives here next to the models.
 """
 
 from __future__ import annotations
@@ -53,37 +54,9 @@ class AnalysisGrid:
     n_grid: int
 
 
-def merge_run_overlay(
-    base: Mapping[str, Any], override: Mapping[str, Any]
-) -> dict[str, Any]:
-    """Merge a run overlay, replacing named prior tables wholesale.
-
-    ``deep_merge`` key-merges nested mappings, which leaves stale ``low`` /
-    ``high`` behind when a uniform prior is replaced by a normal one. Each
-    ``[priors.<param>]`` table in ``override`` replaces the base spec instead.
-    """
-    overlay_priors = override.get("priors")
-    merged = deep_merge(
-        base, {key: value for key, value in override.items() if key != "priors"}
-    )
-    if not isinstance(overlay_priors, Mapping):
-        return merged
-    priors = dict(merged.get("priors") or {})
-    for name, spec in overlay_priors.items():
-        priors[name] = dict(spec) if isinstance(spec, Mapping) else spec
-    merged["priors"] = priors
-    return merged
-
-
 # --------------------------------------------------------------------------- #
 # Pydantic models
 # --------------------------------------------------------------------------- #
-# Restates astrogwb.importance.models.bns_madau_dickinson_modified_propagation
-# .AMPLITUDE_PARAMETERS rather than importing it: this module must stay
-# stdlib+pydantic only (see module docstring), so a
-# @pytest.mark.integration paper test cross-checks the two lists instead.
-AmplitudeParameter = Literal["H0", "local_merger_rate"]
-
 # Restates astrogwb.importance.models.bns_madau_dickinson_modified_propagation
 # .AMPLITUDE_PARAMETERS rather than importing it: this module must stay
 # stdlib+pydantic only (see module docstring), so a

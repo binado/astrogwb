@@ -21,10 +21,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any
 
-from astrogwb_paper.config.mcmc import AnalysisGrid, CatalogSpec, build_run_config
+from astrogwb_paper.config.mcmc import (
+    AnalysisGrid,
+    CatalogSpec,
+    RunConfig,
+    build_run_config,
+)
 from astrogwb_paper.config.runs import CONFIGS_ROOT, config_path
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.utils import load_mapping
@@ -57,19 +63,16 @@ def load_run_config(experiment: str, run: str) -> dict[str, Any]:
     return load_mapping(path)
 
 
-def _reference_raw(run: tuple[str, str] = REFERENCE_RUN) -> dict[str, Any]:
-    """Raw mapping for the reference run — single load, shared by all helpers."""
-    return load_run_config(*run)
-
-
-def load_reference_config(run: tuple[str, str] = REFERENCE_RUN):
+@cache
+def load_reference_config(run: tuple[str, str] = REFERENCE_RUN) -> RunConfig:
     """Validated :class:`~astrogwb_paper.config.mcmc.RunConfig` for a run.
 
-    Single validation point for the figure helpers below; keeps the
+    Single validation point for the figure helpers below; cached, so the
     ``load_fiducials`` / ``load_analysis_grid`` / ``load_*_spec`` wrappers
-    from each re-parsing the same JSON and each re-implementing extraction.
+    share one parse-and-validate of the same JSON instead of each paying
+    for their own.
     """
-    return build_run_config(_reference_raw(run))
+    return build_run_config(load_run_config(*run))
 
 
 def resolve_networks(
@@ -121,7 +124,3 @@ def load_proposal_spec(run: tuple[str, str] = REFERENCE_RUN) -> CatalogSpec:
 def reference_config_path(run: tuple[str, str] = REFERENCE_RUN) -> Path:
     """The assembled config a figure rule should declare as an input."""
     return config_path(*run)
-
-
-def _label(run: tuple[str, str]) -> str:
-    return f"{run[0]}/{run[1]}"

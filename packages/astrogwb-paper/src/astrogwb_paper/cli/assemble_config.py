@@ -32,6 +32,7 @@ from pathlib import Path
 from astrogwb_paper.config.banks import BankGenerationConfig, discover_banks
 from astrogwb_paper.config.mcmc import build_run_config, save_config
 from astrogwb_paper.config.runs import (
+    CONFIGS_ROOT,
     assemble_run,
     check_bank_references,
     discover_runs,
@@ -63,7 +64,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("outputs/configs"),
+        default=CONFIGS_ROOT,
         help="Root directory for <experiment>/<run>.json under --all.",
     )
     args = parser.parse_args(argv)
