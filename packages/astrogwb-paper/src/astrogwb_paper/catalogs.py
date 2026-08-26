@@ -112,7 +112,12 @@ class CatalogSource:
             self.uniform_bank_path, counts[1], label=spec.uniform_bank or ""
         )
         _check_waveform_settings_agree(md_part, uniform_part, label=self.role)
-        combined = xr.concat([md_part, uniform_part], dim="sample")
+        validate_matching_frequency_grids(
+            md_part.coords["frequency"].values,
+            uniform_part.coords["frequency"].values,
+            label=f"{self.role} mixture",
+        )
+        combined = xr.concat([md_part, uniform_part], dim="sample", join="exact")
 
         order = jnp.argsort(assignments, stable=True)
         inverse = np.asarray(jnp.argsort(order))
@@ -246,15 +251,16 @@ def compute_proposal_logprob(
 
 
 def validate_matching_frequency_grids(
-    injection_frequencies: ArrayLike, proposal_frequencies: ArrayLike
+    injection_frequencies: ArrayLike,
+    proposal_frequencies: ArrayLike,
+    *,
+    label: str = "injection and proposal",
 ) -> None:
-    """Require injection and proposal waveforms to share the exact frequency grid."""
+    """Require two waveform catalogs to share the exact frequency grid."""
     injection_frequencies = np.asarray(injection_frequencies)
     proposal_frequencies = np.asarray(proposal_frequencies)
     if not np.array_equal(injection_frequencies, proposal_frequencies):
-        raise ValueError(
-            "injection and proposal catalogs must have identical frequency grids"
-        )
+        raise ValueError(f"{label} catalogs must have identical frequency grids")
 
 
 def compute_fiducial_injection_spectrum(

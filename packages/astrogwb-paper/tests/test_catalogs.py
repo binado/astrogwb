@@ -208,6 +208,38 @@ def test_compose_catalog_rejects_banks_with_different_waveform_settings(
         CatalogSource(md_path, uniform_path, spec, "proposal").compose()
 
 
+def test_compose_catalog_rejects_banks_with_different_frequency_grids(
+    tmp_path: Path,
+) -> None:
+    md_path = _bank_file(tmp_path / "md.h5", 100)
+    uniform_path = tmp_path / "uniform.h5"
+    redshift = np.arange(100, dtype=float) + 1_000_000.0
+    other = make_catalog(
+        frequencies=np.linspace(10.0, 60.0, 5),
+        polarization_power=np.ones((5, redshift.size)),
+        source_parameters={
+            "redshift": redshift,
+            "luminosity_distance": 1.0e3 * (1.0 + redshift),
+        },
+        approximant="Toy",
+        minimum_frequency=10.0,
+        maximum_frequency=50.0,
+        reference_frequency=20.0,
+        sampling_frequency=128.0,
+    )
+    save_catalog(uniform_path, other)
+    spec = CatalogSpec(
+        md_bank="md",
+        uniform_bank="uniform",
+        num_samples=50,
+        uniform_mixing_fraction=0.2,
+        mixture_seed=11,
+    )
+
+    with pytest.raises(ValueError, match="identical frequency grids"):
+        CatalogSource(md_path, uniform_path, spec, "proposal").compose()
+
+
 # --------------------------------------------------------------------------- #
 # CatalogSpec: the mixture invariants the retired registry used to enforce
 # --------------------------------------------------------------------------- #
