@@ -12,8 +12,8 @@ from astrogwb_paper.catalogs import (
     compute_proposal_logprob,
     validate_matching_frequency_grids,
 )
-from astrogwb_paper.config.figures import load_fiducials
-from astrogwb_paper.config.mcmc import ProposalConfig
+from astrogwb_paper.config.mcmc import ProposalConfig, build_run_config
+from config_fixtures import example_raw
 
 _REDSHIFT = jnp.array([0.1, 1.0, 2.0])
 _LUMINOSITY_DISTANCE = jnp.array([450.0, 6800.0, 16_000.0])
@@ -74,7 +74,7 @@ def test_injection_and_proposal_frequency_grids_must_match() -> None:
 
 
 def test_fiducial_injection_spectrum_uses_unit_weights() -> None:
-    fiducials = load_fiducials()
+    fiducials = dict(build_run_config(example_raw()).fiducials)
     grid = jnp.linspace(0.0, 20.0, 256)
 
     rate, actual = compute_fiducial_injection_spectrum(
