@@ -3,8 +3,9 @@
 # the proposal bank was generated at; astrogwb_paper.banks.
 # check_fiducials_match enforces that against the bank file itself.
 #
-# Every fiducial carries a prior here; build_run_config filters the table
-# down to sampled_params plus any marginalized amplitude parameter.
+# Every fiducial carries a prior here. RunConfig retains the complete table;
+# sampled_params selects the NUTS latents and the remaining sites are fixed by
+# NumPyro effect handlers.
 
 [fiducials]
 H0 = 67.66

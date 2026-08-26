@@ -14,14 +14,13 @@ def test_assembled_configs_fix_local_merger_rate() -> None:
     expected = raw["fiducials"]["local_merger_rate"]
     config = build_run_config(raw)
 
-    # The base declares a [priors.local_merger_rate] table, but this run does
-    # not sample it, so it must survive as a fixed constant rather than a
-    # sampled parameter.
+    # The complete prior table declares the site; sampled_params decides that
+    # production conditions it rather than giving NUTS a latent.
     assert "local_merger_rate" not in config.sampled_params
     assert expected == 770.0
     assert config.fiducials["local_merger_rate"] == expected
-    assert "local_merger_rate" not in config.priors
-    assert config.constants["local_merger_rate"] == expected
+    assert "local_merger_rate" in config.priors
+    assert config.fixed_params["local_merger_rate"] == expected
 
 
 def test_posterior_params_adds_the_marginalized_amplitude_parameter() -> None:

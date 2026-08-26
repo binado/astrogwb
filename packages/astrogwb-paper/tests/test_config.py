@@ -112,16 +112,10 @@ def test_run_config_carries_no_proposal_density() -> None:
 
 
 def test_analysis_grid_is_not_serialized(tmp_path) -> None:
-    """`analysis_grid` is a plain property, never a computed field.
-
-    A computed field would be written into every ``outputs/configs/*.json``
-    that ``save_config`` produces, and ``extra="forbid"`` would then reject
-    those files on reload -- breaking every workflow job. ``constants`` needs
-    an explicit strip in ``build_run_config`` for exactly that reason; this
-    guards against `analysis_grid` acquiring the same problem.
-    """
+    """Derived properties stay out of normalized workflow configurations."""
     config = build_run_config(example_raw())
     assert "analysis_grid" not in config.model_dump(mode="json")
+    assert "fixed_params" not in config.model_dump(mode="json")
 
     path = tmp_path / "run.json"
     save_config(config, path)
@@ -193,10 +187,9 @@ def test_marginalized_config_keeps_amplitude_prior_in_priors() -> None:
         "low": 20.0,
         "high": 140.0,
     }
-    # Invariant: priors = sampled params + the marginalized amplitude parameter.
-    assert set(config.priors) == set(config.sampled_params) | {"H0"}
-    # H0 is not sampled, but it is still a fiducial constant the model pins to.
-    assert config.constants["H0"] == 67.66
+    assert set(config.priors) == set(config.fiducials)
+    # H0 is not sampled, but the model still pins its template to the fiducial.
+    assert config.fixed_params["H0"] == 67.66
 
 
 def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
@@ -209,9 +202,7 @@ def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
     path = tmp_path / "run.json"
     save_config(config, path)
 
-    # `constants` is a computed field: present in the dump (keep save_config
-    # canonical), stripped on input by build_run_config.
-    assert "constants" in load_mapping(path)
+    assert "fixed_params" not in load_mapping(path)
 
     reloaded = build_run_config(load_mapping(path))
 
@@ -220,7 +211,7 @@ def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
         name: prior_to_spec(prior) for name, prior in config.priors.items()
     }
     assert reloaded.sampled_params == config.sampled_params
-    assert reloaded.constants == config.constants
+    assert reloaded.fixed_params == config.fixed_params
     assert reloaded.model_dump(mode="json") == config.model_dump(mode="json")
 
 
@@ -292,6 +283,22 @@ def test_default_likelihood_rejects_amplitude_parameter() -> None:
 # --------------------------------------------------------------------------- #
 # Prior specs
 # --------------------------------------------------------------------------- #
+def test_config_rejects_a_fiducial_without_a_prior() -> None:
+    raw = example_raw()
+    del raw["priors"]["gamma"]
+
+    with pytest.raises(ValidationError, match="fiducials without"):
+        build_run_config(raw)
+
+
+def test_config_rejects_a_prior_without_a_fiducial() -> None:
+    raw = example_raw()
+    raw["priors"]["unused"] = {"type": "normal", "loc": 0.0, "scale": 1.0}
+
+    with pytest.raises(ValidationError, match="priors missing from"):
+        build_run_config(raw)
+
+
 def test_merge_run_overlay_replaces_named_priors_wholesale() -> None:
     raw = example_raw()
     merged = merge_run_overlay(

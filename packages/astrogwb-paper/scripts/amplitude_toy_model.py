@@ -123,9 +123,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     fiducials = {"amplitude": amplitude_fiducial}
     sampled_params = ("amplitude",)
     priors = {"amplitude": dist.Uniform(args.prior_low, args.prior_high)}
-    constants = {
-        key: value for key, value in fiducials.items() if key not in sampled_params
-    }
 
     catalog = open_catalog(catalog_path)
     frequencies = jnp.asarray(catalog.frequency.values)
@@ -171,7 +168,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         average_mode="analytic_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
         priors=priors,
-        constants=constants,
     )
     kernel = NUTS(
         model,

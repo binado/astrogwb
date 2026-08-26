@@ -5,10 +5,9 @@ These tests run the same three-layer ``config/analysis/`` merge that
 ships instead of maintaining a parallel standalone example.
 
 One difference from the old example is worth knowing when reading these tests:
-the base declares a prior for *every* fiducial parameter, and
-``build_run_config`` filters ``priors`` down to ``sampled_params`` (plus any
-marginalized amplitude parameter). A test that needs a parameter with no prior
-table must therefore delete one explicitly.
+the base declares and ``build_run_config`` retains a prior for *every* fiducial
+parameter. A test that needs a parameter with no prior table must therefore
+delete one explicitly.
 """
 
 from __future__ import annotations
