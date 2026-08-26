@@ -207,6 +207,20 @@ def compute_proposal_logprob(
 ) -> jax.Array:
     """Evaluate the fixed MD/uniform proposal at catalog redshifts."""
     redshift = jnp.asarray(redshift)
+    epsilon = proposal.uniform_mixing_fraction
+
+    in_support = (redshift >= proposal.minimum_redshift) & (
+        redshift <= proposal.maximum_redshift
+    )
+    uniform_logprob = jnp.where(
+        in_support,
+        -jnp.log(proposal.maximum_redshift - proposal.minimum_redshift),
+        -jnp.inf,
+    )
+
+    if epsilon == 1.0:
+        return uniform_logprob
+
     proposal_grid = jnp.linspace(
         proposal.minimum_redshift, proposal.maximum_redshift, proposal.n_grid
     )
@@ -222,20 +236,9 @@ def compute_proposal_logprob(
         {"redshift": redshift},
         redshift_grid=proposal_grid,
     )
-    epsilon = proposal.uniform_mixing_fraction
+
     if epsilon == 0.0:
         return md_logprob
-
-    in_support = (redshift >= proposal.minimum_redshift) & (
-        redshift <= proposal.maximum_redshift
-    )
-    uniform_logprob = jnp.where(
-        in_support,
-        -jnp.log(proposal.maximum_redshift - proposal.minimum_redshift),
-        -jnp.inf,
-    )
-    if epsilon == 1.0:
-        return uniform_logprob
     return jnp.logaddexp(
         jnp.log1p(-epsilon) + md_logprob,
         jnp.log(epsilon) + uniform_logprob,
