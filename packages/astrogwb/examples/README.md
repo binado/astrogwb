@@ -84,3 +84,90 @@ print(chains.H0.mean(), chains.attrs["fiducial_H0"])
 
 The layout is what `arviz.from_dict` expects, so it loads directly into arviz
 if you have it — the example itself never imports it.
+
+## `h0_omega_m_mcmc.py` — infer (H₀, Ω_m) with H₀ marginalized
+
+The same setup, but using the other half of `astrogwb.sampling`: H₀ is
+integrated out of the likelihood analytically, NUTS samples Ω_m alone, and a
+post-processing pass draws H₀ back to give a joint (H₀, Ω_m) posterior. This
+mirrors the `cosmological-parameters/H0-Omega_m` run shipped with
+`astrogwb-paper`, and it is how every production analysis is set up.
+
+```bash
+python h0_omega_m_mcmc.py CATALOG.h5 -o chains.nc
+```
+
+Every flag from `h0_mcmc.py` still applies — `--h0-min` / `--h0-max` now bound
+the *marginalized* H₀ prior rather than a sampled one. The new ones:
+
+| Flag | Default | Why you would change it |
+|---|---|---|
+| `--omega-m-loc` | `0.3096` | Mean of the `Normal` prior on Ω_m, matching the paper's `[priors.Omega_m]`. |
+| `--omega-m-scale` | `0.006` | Its standard deviation. Widening it is the quickest way to see how little the spectrum alone constrains Ω_m. |
+| `--amplitude-num-nodes` | `1024` | Nodes in the H₀ quadrature grid. Raise it if the run reports a low `quadrature_effective_nodes`. |
+
+### H₀ is not in the chain
+
+The marginalization enters the model as a `numpyro.factor`, and a factor site
+publishes no draws. There is no `H0` in the NUTS chain at all — only Ω_m, plus
+the three sufficient statistics `amplitude_mle`, `template_optimal_snr`, and
+`template_merger_rate`. The script's second, mandatory pass feeds those to
+`amplitude_reconstruction_model` under `Predictive`, drawing one H₀ per
+`(chain, draw)` element, and merges the result back into the posterior. Swapping
+in the marginalized model and stopping there would leave you with chains that
+are structurally valid and contain no H₀.
+
+The reconstruction must use the *same* prior, grid, and scaling function the
+chain marginalized against — which is why the script builds them once, above the
+model, and passes the identical objects to both. A mismatched conditional
+produces a silently wrong posterior: the sufficient statistics stay finite and
+plausible whatever conditional you pair them with.
+
+Why the marginalization is exact rather than an approximation: the normalized
+redshift PDF's H₀ dependence cancels, leaving `total_merger_rate ∝ H₀⁻³` and
+`exp(−2 Δlog d_L) ∝ H₀²`, so the total amplitude scaling is `f(H₀) = H₀⁻¹` —
+exactly `amplitude_H0_fn`. That factorization holds at any Ω_m, so marginalizing
+one parameter while sampling the other costs nothing beyond quadrature error.
+
+### Reading the diagnostics
+
+`mcmc.print_summary()` covers Ω_m only, so the script prints the reconstructed
+H₀ mean ± std next to the fiducial itself, along with two numbers to check:
+
+- `importance_relative_ess`, as in `h0_mcmc.py` — very close to 1 here, since
+  the catalog is its own proposal.
+- `quadrature_effective_nodes`, the number of grid nodes carrying appreciable
+  weight in the marginalization integral. It should sit above ~30; below that
+  the grid is too coarse to resolve the conditional posterior and you should
+  raise `--amplitude-num-nodes`. The script warns when it does.
+
+Expect that warning to fire at the default `--amplitude-num-nodes 1024` on a
+realistic catalog. Because the injection is noiseless and the catalog is its own
+proposal, the H₀ conditional is unusually sharp — σ ≈ 1 across a prior 120 wide,
+which the default grid resolves with only ~28 nodes. The number is a resolution
+measure, roughly the posterior width divided by the grid spacing, so it scales
+linearly with the node count: 4096 nodes take it to ~110. Quadrature error is
+already negligible either way (the recovered H₀ is unchanged to three decimal
+places), but raising the count is the right response to the warning rather than
+ignoring it — on a run where the conditional is genuinely under-resolved, the
+posterior *would* be wrong.
+
+Expect the Ω_m posterior to land close to its `Normal(0.3096, 0.006)` prior.
+That is not a bug: the spectrum's sensitivity to Ω_m is largely absorbed by the
+marginalized amplitude, so the data adds little beyond what the prior already
+says. H₀ is the parameter this configuration actually measures.
+
+### Output
+
+Chains carry the same `(chain, draw)` layout as `h0_mcmc.py`, holding `Omega_m`
+and the reconstructed `H0` and `total_merger_rate`, plus
+`quadrature_effective_nodes`, `importance_relative_ess`, and the three
+sufficient statistics the reconstruction consumed:
+
+```python
+import xarray as xr
+
+chains = xr.open_dataset("chains.nc", engine="h5netcdf")
+print(chains.H0.mean(), chains.attrs["fiducial_H0"])
+print(float(chains.quadrature_effective_nodes.min()))
+```

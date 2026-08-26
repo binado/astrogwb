@@ -1,9 +1,10 @@
-"""Smoke test for the standalone H0 MCMC example.
+"""Smoke test for the amplitude-marginalized (H0, Omega_m) example.
 
-The example lives in ``examples/``, which is outside the installed package, so
-it is loaded by path. The failure modes it guards are all silent ones: an
-empty analysis band, a catalog missing ``redshift``/``luminosity_distance``,
-and importance weights that collapse to ``-inf``.
+Like its sibling, the example lives outside the installed package and is loaded
+by path. The failure mode specific to this one is the marginalization
+bookkeeping: ``H0`` is a ``numpyro.factor``, not a chain site, so a run that
+skipped the reconstruction pass would write chains that are structurally valid
+and simply have no ``H0`` in them.
 """
 
 from __future__ import annotations
@@ -20,18 +21,23 @@ import pytest
 import xarray as xr
 from astrogwb.waveform import make_catalog, save_catalog
 
-# The `toy_catalog` fixture builds luminosity distances the example later
-# recomputes in float64; a float32 fixture would disagree just enough to bias
-# the weights. Safe here because importing jax creates no arrays -- only the
-# first array commits the backend.
+# See the note in `test_example_h0_mcmc.py`: the `toy_catalog` fixture's
+# distances must be float64 to match what the example recomputes.
 jax.config.update("jax_enable_x64", True)
 
-EXAMPLE_PATH = Path(__file__).parents[1] / "examples" / "h0_mcmc.py"
+EXAMPLE_PATH = Path(__file__).parents[1] / "examples" / "h0_omega_m_mcmc.py"
+
+#: Prior bounds the reconstructed H0 must fall inside, matching the example's
+#: `--h0-min` / `--h0-max` defaults.
+H0_MIN = 20.0
+H0_MAX = 140.0
 
 
 def load_example() -> ModuleType:
-    """Import ``examples/h0_mcmc.py`` by path; it is not an installed module."""
-    spec = importlib.util.spec_from_file_location("h0_mcmc_example", EXAMPLE_PATH)
+    """Import the example by path; it is not an installed module."""
+    spec = importlib.util.spec_from_file_location(
+        "h0_omega_m_mcmc_example", EXAMPLE_PATH
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -88,7 +94,7 @@ def test_runs_end_to_end_and_writes_chains(
     tmp_path: Path, toy_catalog: Callable[..., None]
 ) -> None:
     catalog_path = tmp_path / "catalog.h5"
-    output_path = tmp_path / "chains" / "h0.nc"
+    output_path = tmp_path / "chains" / "h0_omega_m.nc"
     toy_catalog(catalog_path, EXAMPLE.FIDUCIALS)
 
     EXAMPLE.main(
@@ -113,16 +119,31 @@ def test_runs_end_to_end_and_writes_chains(
     assert output_path.is_file()
     chains = xr.open_dataset(output_path, engine="h5netcdf")
     try:
-        assert chains["H0"].shape == (1, 20)
+        # H0 is not a chain site; its presence here is the reconstruction pass
+        # having run and merged back into the posterior.
         assert set(chains.data_vars) >= {
             "H0",
+            "Omega_m",
             "total_merger_rate",
             "importance_relative_ess",
+            "quadrature_effective_nodes",
         }
-        assert np.all(np.isfinite(chains["H0"].values))
+        assert chains["H0"].shape == (1, 20)
+        assert chains["Omega_m"].shape == (1, 20)
+
+        h0 = chains["H0"].values
+        assert np.all(np.isfinite(h0))
+        # Drawn from AmplitudeConditional, whose support is the prior's. The
+        # value is not asserted tightly: with Omega_m free and 20 draws on a toy
+        # catalog, a point check would be flaky.
+        assert np.all((h0 > H0_MIN) & (h0 < H0_MAX))
+
         # The catalog is its own proposal, so every weight is 1 by construction
         # at the fiducial and stays close to it across a short chain.
         assert float(chains["importance_relative_ess"].min()) > 0.5
+        assert np.all(np.isfinite(chains["quadrature_effective_nodes"].values))
+
+        assert chains.attrs["amplitude_parameter"] == "H0"
         assert chains.attrs["fiducial_H0"] == pytest.approx(EXAMPLE.FIDUCIALS["H0"])
         assert chains.attrs["detectors"] == "E1 E2 E3"
     finally:
