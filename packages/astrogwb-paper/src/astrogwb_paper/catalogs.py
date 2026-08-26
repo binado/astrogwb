@@ -198,7 +198,7 @@ def truncate_catalog_samples(
             f"{label} catalog has no samples in the analysis redshift window "
             f"[{minimum_redshift:.4g}, {maximum_redshift:.4g}]"
         )
-    return catalog.where(xr.DataArray(window, dims="sample"), drop=True)
+    return catalog.isel(sample=np.flatnonzero(np.asarray(window)))
 
 
 def compute_proposal_logprob(
