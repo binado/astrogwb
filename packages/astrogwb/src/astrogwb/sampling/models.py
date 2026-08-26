@@ -157,7 +157,6 @@ def spectral_density_model(
     average_mode: AverageMode,
     merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     priors: Mapping[str, dist.Distribution] | None = None,
-    constants: Mapping[str, Any] | None = None,
 ) -> None:
     """NumPyro model for importance-weighted SGWB inference.
 
@@ -168,8 +167,20 @@ def spectral_density_model(
 
     The predicted spectrum is built from precomputed per-source polarization
     powers and importance weights ``exp(log_weights)``; waveform generation is
-    not part of this model. ``constants`` are merged with sampled parameters
-    before the callback is invoked.
+    not part of this model. Callers can fix any prior-backed parameter with
+    :class:`numpyro.handlers.condition`. To reproduce the former constant
+    semantics exactly, wrap the conditioned model in
+    :class:`numpyro.handlers.block` so the fixed sites do not contribute their
+    prior densities or appear in inference traces.
+
+    .. code-block:: python
+
+        conditioned = numpyro.handlers.condition(
+            spectral_density_model, data=fixed_params
+        )
+        model = numpyro.handlers.block(
+            conditioned, hide=list(fixed_params)
+        )
 
     This is the fully general model: every hyperparameter is sampled. See
     :func:`amplitude_marginalized_model` for the variant that integrates a
@@ -206,19 +217,16 @@ def spectral_density_model(
         ``"catalog_inclination"`` uses the catalog weights directly.
     merger_rate_and_log_weights_fn:
         Callable ``(params, samples) -> (total_merger_rate, log_weights)``.
-        ``params`` merges ``constants`` with sampled values; ``log_weights``
-        has shape ``(N,)``. ``total_merger_rate`` is in mergers per second.
+        ``params`` contains the values of every site declared by ``priors``;
+        callers may condition any of those sites. ``log_weights`` has shape
+        ``(N,)``. ``total_merger_rate`` is in mergers per second.
     priors:
         Mapping from parameter name to NumPyro prior distribution. Keys become
         sampled sites; defaults to an empty mapping (likelihood-only model).
-    constants:
-        Fixed parameter values merged into ``params`` for the callback. Defaults
-        to an empty mapping.
     """
-    sampled_params = {
+    params = {
         name: numpyro.sample(name, prior) for name, prior in (priors or {}).items()
     }
-    params = {**(constants or {}), **sampled_params}
 
     total_merger_rate, log_weights = merger_rate_and_log_weights_fn(
         params,
@@ -258,7 +266,6 @@ def amplitude_marginalized_model(
     amplitude_prior: dist.Distribution,
     amplitude_grid: jax.Array | None = None,
     priors: Mapping[str, dist.Distribution] | None = None,
-    constants: Mapping[str, Any] | None = None,
 ) -> None:
     r"""SGWB model with a multiplicative amplitude marginalized out of the likelihood.
 
@@ -357,14 +364,8 @@ def amplitude_marginalized_model(
             "also be sampled; remove it from priors"
         )
 
-    sampled_params = {
-        name: numpyro.sample(name, prior) for name, prior in priors.items()
-    }
-    params = {
-        **(constants or {}),
-        **sampled_params,
-        amplitude_parameter: fiducials[amplitude_parameter],
-    }
+    params = {name: numpyro.sample(name, prior) for name, prior in priors.items()}
+    params[amplitude_parameter] = fiducials[amplitude_parameter]
 
     total_merger_rate, log_weights = merger_rate_and_log_weights_fn(
         params,

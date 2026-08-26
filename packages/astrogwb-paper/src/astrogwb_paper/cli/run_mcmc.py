@@ -412,7 +412,7 @@ def main(argv: list[str] | None = None) -> None:
     logger.info(
         "Sampling %s | fixed %s",
         tuple(config.sampled_params),
-        tuple(config.constants),
+        tuple(config.fixed_params),
     )
 
     # Pick a single timestamp now and check the artifact before JAX starts.

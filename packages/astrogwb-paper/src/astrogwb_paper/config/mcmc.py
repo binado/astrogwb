@@ -30,7 +30,6 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
-    computed_field,
     model_validator,
 )
 
@@ -313,9 +312,8 @@ class RunConfig(BaseModel):
     seed: int = 42
     observation_time: float = 1.0
     fiducials: dict[str, float]
-    # parameter name -> prior distribution. Includes the amplitude parameter
-    # when marginalized (it needs a prior but is not sampled); the sampler
-    # consumes only `{priors[name] for name in sampled_params}`.
+    # Complete parameter name -> prior distribution table. `sampled_params`
+    # selects the NUTS latents; every other non-marginalized site is conditioned.
     priors: dict[str, PriorDistribution]
     # Unset (empty) -> default to every key in [priors] except a marginalized
     # amplitude parameter; resolved below.
@@ -352,6 +350,13 @@ class RunConfig(BaseModel):
                     "a [priors.*] table"
                 )
 
+        missing_priors = [name for name in self.fiducials if name not in priors]
+        if missing_priors:
+            raise ValueError(f"fiducials without a [priors.*] table: {missing_priors}")
+        missing_fiducials = [name for name in priors if name not in self.fiducials]
+        if missing_fiducials:
+            raise ValueError(f"priors missing from [fiducials]: {missing_fiducials}")
+
         sampled = self.sampled_params or tuple(
             p for p in priors if p != amplitude_parameter
         )
@@ -364,25 +369,16 @@ class RunConfig(BaseModel):
         if missing_fid:
             raise ValueError(f"sampled_params missing from [fiducials]: {missing_fid}")
 
-        # set(priors) == set(sampled_params) | ({amplitude_parameter} or empty).
-        aligned_priors = {name: priors[name] for name in sampled}
-        if amplitude_parameter is not None:
-            aligned_priors[amplitude_parameter] = priors[amplitude_parameter]
-
         object.__setattr__(self, "sampled_params", sampled)
-        object.__setattr__(self, "priors", aligned_priors)
         return self
 
-    @computed_field
     @property
-    def constants(self) -> dict[str, float]:
-        """Every fiducial not sampled: values the model pins as constants.
+    def fixed_params(self) -> dict[str, float]:
+        """Every fiducial not sampled: values supplied by effect handlers.
 
         Includes the marginalized amplitude parameter when present: it has no
         NUTS latent, but its fiducial value is still what the model pins it
-        to. Serialized (save_config) but not settable: input
-        is stripped in `build_run_config` because `extra="forbid"` rejects
-        the serialized form on reload.
+        to. This is a plain property and is not serialized.
         """
         return {k: v for k, v in self.fiducials.items() if k not in self.sampled_params}
 
@@ -394,8 +390,8 @@ class RunConfig(BaseModel):
         has a latent for". Under an amplitude-marginalized likelihood the two
         sets differ: the amplitude parameter is integrated out of the potential
         and has no latent, so it must stay out of `sampled_params` (its prior
-        still lives in `priors`, driving `init_to_value` only via
-        `fiducials`), yet post-processing reconstructs it into the posterior via
+        drives the numerical marginalization), yet post-processing reconstructs
+        it into the posterior via
         `amplitude_reconstruction_model`. Use this for anything describing the
         saved chain -- plot `var_names`, run records, summaries.
         """
@@ -408,12 +404,8 @@ class RunConfig(BaseModel):
     def analysis_grid(self) -> AnalysisGrid:
         """The frequency band and redshift grid this run's inputs are built on.
 
-        A plain property, deliberately not a `@computed_field`: computed
-        fields are serialized, so `save_config` would write an `analysis_grid`
-        key into every `outputs/configs/*.json` that `extra="forbid"` then
-        rejects on reload, breaking every workflow job. That is the same trap
-        `constants` is worked around for in `build_run_config`; here there is
-        nothing to work around because nothing derived needs saving.
+        A plain property, deliberately not serialized: `save_config` writes
+        only inputs needed to reconstruct the validated run configuration.
         """
         return AnalysisGrid(
             observation_time=self.observation_time,
@@ -468,8 +460,4 @@ def build_run_config(
         cli_overrides["output"] = output
 
     merged = deep_merge(raw, deep_merge(overrides, cli_overrides))
-    # `constants` is derived on the model (a computed field), so the key is
-    # serialization-only: strip it from saved configs and `model_dump()`
-    # round trips, which extra="forbid" would otherwise reject.
-    merged.pop("constants", None)
     return RunConfig.model_validate(merged)

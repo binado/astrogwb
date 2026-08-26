@@ -48,6 +48,7 @@ import numpyro.distributions as dist
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.colors import LinearSegmentedColormap, colorConverter
 from matplotlib.projections import register_projection
+from numpyro import handlers
 from numpyro.infer.util import log_density
 from scipy.ndimage import gaussian_filter
 
@@ -137,6 +138,7 @@ hyperprior_dists = {
     "gamma": dist.Uniform(-10.0, 10.0),
     "kappa": dist.Uniform(-10.0, 10.0),
     "z_peak": dist.Uniform(0.0, 2.5),
+    "local_merger_rate": dist.Normal(770.0, 7.7),
 }
 
 # Optional custom per-parameter grid ranges as {name: (low, high)}. When a sampled
@@ -152,8 +154,8 @@ assert 1 <= len(sampled_params) <= 2, (
     "the log-posterior grid supports only 1 or 2 sampled parameters"
 )
 
-priors = {k: hyperprior_dists[k] for k in sampled_params}
-constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
+priors = dict(hyperprior_dists)
+fixed_params = {k: v for k, v in fiducials.items() if k not in sampled_params}
 
 # %% [markdown]
 # ## Loading the waveform catalogs
@@ -321,13 +323,16 @@ plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1
 # sampling it, we evaluate its log joint density on a grid below.
 
 # %%
-model = partial(
+base_model = partial(
     spectral_density_model,
     observation_time=observation_time,
     average_mode="analytic_inclination",
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     priors=priors,
-    constants=constants,
+)
+model = handlers.block(
+    handlers.condition(base_model, data=fixed_params),
+    hide=list(fixed_params),
 )
 
 model_kwargs = {

@@ -159,6 +159,7 @@ import arviz_stats as azs
 import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
+from numpyro import handlers
 from numpyro.infer import MCMC, NUTS
 
 import matplotlib.pyplot as plt
@@ -252,8 +253,8 @@ hyperprior_dists = {
 
 sampled_params = set(("H0",))
 
-priors = {k: hyperprior_dists[k] for k in sampled_params}
-constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
+priors = dict(hyperprior_dists)
+fixed_params = {k: v for k, v in fiducials.items() if k not in sampled_params}
 
 # %% [markdown]
 # ## Loading the waveform catalogs
@@ -489,13 +490,16 @@ plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1
 # We run the NUTS sampler as implemented in the `numpyro` python package.
 
 # %%
-model = partial(
+base_model = partial(
     spectral_density_model,
     observation_time=observation_time,
     average_mode="analytic_inclination",
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     priors=priors,
-    constants=constants,
+)
+model = handlers.block(
+    handlers.condition(base_model, data=fixed_params),
+    hide=list(fixed_params),
 )
 
 kernel = NUTS(

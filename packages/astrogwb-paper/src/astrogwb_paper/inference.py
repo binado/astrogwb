@@ -38,6 +38,7 @@ from astrogwb.sampling.models import (
     amplitude_marginalized_model,
     spectral_density_model,
 )
+from numpyro import handlers
 
 from astrogwb_paper.amplitude import (
     AmplitudeMarginalization,
@@ -218,6 +219,17 @@ def initial_values(config: RunConfig) -> dict[str, float]:
     return {name: config.fiducials[name] for name in config.sampled_params}
 
 
+def _fix_model_params(model: Any, fixed_params: Mapping[str, Any]) -> Any:
+    """Condition fixed sites, then hide their values and prior densities."""
+    if not fixed_params:
+        return model
+    names = list(fixed_params)
+    return handlers.block(
+        handlers.condition(model, data=dict(fixed_params)),
+        hide=names,
+    )
+
+
 def build_model(
     config: RunConfig,
     *,
@@ -233,34 +245,42 @@ def build_model(
     so it is exercisable without generating one.
     """
     analysis = config.analysis
-    # `config.priors` already holds live distributions (see PriorDistribution).
-    # Project to the sampled parameters: when marginalized, `priors` also
-    # carries the amplitude parameter, which must NOT get a NUTS latent.
-    priors = {name: config.priors[name] for name in config.sampled_params}
+    # `config.priors` holds every live parameter distribution. Fixed sites are
+    # conditioned and hidden below; a marginalized amplitude is the sole site
+    # omitted because its prior is already integrated into the likelihood.
+    priors = dict(config.priors)
     if analysis.likelihood == "amplitude_marginalized":
         assert analysis.amplitude_parameter is not None
+        priors.pop(analysis.amplitude_parameter)
+        fixed_params = {
+            name: value for name, value in config.fixed_params.items() if name in priors
+        }
         marginalization = build_amplitude_marginalization(config)
-        model = partial(
-            amplitude_marginalized_model,
-            observation_time=config.observation_time,
-            average_mode="analytic_inclination",
-            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-            amplitude_parameter=analysis.amplitude_parameter,
-            fiducials=config.fiducials,
-            amplitude_fn=marginalization.amplitude_fn,
-            amplitude_prior=marginalization.prior,
-            amplitude_grid=marginalization.grid,
-            priors=priors,
-            constants=config.constants,
+        model = _fix_model_params(
+            partial(
+                amplitude_marginalized_model,
+                observation_time=config.observation_time,
+                average_mode="analytic_inclination",
+                merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+                amplitude_parameter=analysis.amplitude_parameter,
+                fiducials=config.fiducials,
+                amplitude_fn=marginalization.amplitude_fn,
+                amplitude_prior=marginalization.prior,
+                amplitude_grid=marginalization.grid,
+                priors=priors,
+            ),
+            fixed_params,
         )
         return model, marginalization
 
-    model = partial(
-        spectral_density_model,
-        observation_time=config.observation_time,
-        average_mode="analytic_inclination",
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-        priors=priors,
-        constants=config.constants,
+    model = _fix_model_params(
+        partial(
+            spectral_density_model,
+            observation_time=config.observation_time,
+            average_mode="analytic_inclination",
+            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+            priors=priors,
+        ),
+        config.fixed_params,
     )
     return model, None

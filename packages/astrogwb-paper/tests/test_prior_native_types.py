@@ -47,7 +47,7 @@ def test_prior_field_json_dump_round_trips_the_spec() -> None:
     config = build_run_config(raw)
 
     dumped = config.model_dump(mode="json")["priors"]
-    expected = {p: raw["priors"][p] for p in config.sampled_params}
+    expected = raw["priors"]
 
     assert dumped == expected
 

@@ -23,6 +23,15 @@ from numpyro.infer.util import log_density
 type _AmplitudePrior = dist.Normal | dist.Uniform
 
 
+def _condition_without_density(model, fixed_params):
+    """Supply fixed sample values without exposing their prior sites."""
+    names = list(fixed_params)
+    return handlers.block(
+        handlers.condition(model, data=fixed_params),
+        hide=names,
+    )
+
+
 def test_spectral_density_model_smoke_trace() -> None:
     frequencies = jnp.array([10.0, 30.0])
     polarization_power = jnp.array([[1.0, 2.0], [5.0, 6.0]])
@@ -61,12 +70,11 @@ def test_spectral_density_model_uses_combined_callback() -> None:
         log_weights = jnp.log(jnp.array([shared, shared + 2.0]))
         return total_merger_rate, log_weights
 
-    trace = handlers.trace(
-        handlers.seed(
-            spectral_density_model,
-            rng_seed=0,
-        )
-    ).get_trace(
+    model = _condition_without_density(
+        spectral_density_model,
+        {"scale": jnp.array(2.0)},
+    )
+    trace = handlers.trace(handlers.seed(model, rng_seed=0)).get_trace(
         frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
@@ -75,9 +83,10 @@ def test_spectral_density_model_uses_combined_callback() -> None:
         observation_time=3.0,
         average_mode="catalog_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-        constants={"scale": jnp.array(2.0)},
+        priors={"scale": dist.Normal(10.0, 0.5)},
     )
 
+    assert "scale" not in trace
     np.testing.assert_allclose(np.asarray(trace["total_merger_rate"]["value"]), 6.0)
     np.testing.assert_allclose(
         np.asarray(trace["importance_relative_ess"]["value"]),
@@ -199,7 +208,6 @@ def test_amplitude_marginalized_model_pins_the_amplitude_to_its_fiducial() -> No
         },
         **_MARGINALIZATION_KWARGS,
         priors={"tilt": dist.Normal(0.0, 1.0)},
-        constants={"local_merger_rate": 99.0},
     )
 
     assert float(seen[0]["local_merger_rate"]) == FIDUCIAL_RATE
@@ -227,13 +235,14 @@ def test_amplitude_marginalized_model_accepts_a_pre_sliced_frequency_grid() -> N
         "effective_psd": EFFECTIVE_PSD[jnp.array([True, False, True, False])],
     }
 
-    trace = handlers.trace(
-        handlers.seed(amplitude_marginalized_model, rng_seed=0)
-    ).get_trace(
+    model = _condition_without_density(
+        amplitude_marginalized_model,
+        {"tilt": jnp.array(0.3)},
+    )
+    trace = handlers.trace(handlers.seed(model, rng_seed=0)).get_trace(
         **kwargs,
         **_MARGINALIZATION_KWARGS,
-        priors={},
-        constants={"tilt": 0.3},
+        priors={"tilt": dist.Normal(0.0, 1.0)},
     )
 
     assert np.isfinite(float(trace["amplitude_mle"]["value"]))
