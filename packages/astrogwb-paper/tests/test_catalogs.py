@@ -106,11 +106,11 @@ def test_compose_catalog_eps0_is_a_bit_identical_bank_prefix(tmp_path: Path) -> 
         composed.source_parameters.sel(parameter="redshift").values,
         [0.0, 1.0, 2.0, 3.0],
     )
-    full = xr.open_dataset(md_path, engine="h5netcdf")
-    np.testing.assert_array_equal(
-        composed.polarization_power.values,
-        full.polarization_power.isel(sample=slice(0, 4)).values,
-    )
+    with xr.open_dataset(md_path, engine="h5netcdf") as full:
+        np.testing.assert_array_equal(
+            composed.polarization_power.values,
+            full.polarization_power.isel(sample=slice(0, 4)).values,
+        )
 
 
 def test_compose_catalog_rejects_oversized_request(tmp_path: Path) -> None:
