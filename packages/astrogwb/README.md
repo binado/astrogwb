@@ -35,5 +35,18 @@ hanford = load_detector("H1")
 sensitivity = load_sensitivity("H1")
 ```
 
+## Examples
+
+`examples/` holds runnable end-to-end scripts that depend only on `astrogwb`.
+`examples/h0_mcmc.py` takes a waveform catalog, builds the observed spectral
+density from it, and infers `H0` with a NumPyro NUTS chain:
+
+```bash
+python examples/h0_mcmc.py CATALOG.h5 -o chains.nc
+```
+
+See `examples/README.md` for the options and for how the catalog serves as its
+own importance-sampling proposal.
+
 The manuscript workflows, configurations, and notebooks live in the separate
 `astrogwb-paper` workspace project in the source repository.
