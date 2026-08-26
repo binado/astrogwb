@@ -37,12 +37,13 @@ def load_mapping(path: Path) -> dict[str, Any]:
     suffix = path.suffix.lower()
     with path.open("rb") as handle:
         if suffix == ".toml":
-            return tomllib.load(handle)
-        if suffix == ".json":
-            return json.load(handle)
-        if suffix in {".yaml", ".yml"}:
+            raw = tomllib.load(handle)
+        elif suffix == ".json":
+            raw = json.load(handle)
+        elif suffix in {".yaml", ".yml"}:
             raw = yaml.safe_load(handle)
-            if not isinstance(raw, Mapping):
-                raise ValueError(f"{path} must contain a mapping")
-            return dict(raw)
-    raise ValueError(f"unsupported config extension: {path.suffix!r}")
+        else:
+            raise ValueError(f"unsupported config extension: {path.suffix!r}")
+    if not isinstance(raw, Mapping):
+        raise TypeError(f"{path} must contain a mapping")
+    return dict(raw)
