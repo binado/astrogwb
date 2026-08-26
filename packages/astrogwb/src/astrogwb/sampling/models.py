@@ -166,21 +166,8 @@ def spectral_density_model(
     ``observed_spectral_density`` under a per-frequency Gaussian likelihood.
 
     The predicted spectrum is built from precomputed per-source polarization
-    powers and importance weights ``exp(log_weights)``; waveform generation is
-    not part of this model. Callers can fix any prior-backed parameter with
-    :class:`numpyro.handlers.condition`. To reproduce the former constant
-    semantics exactly, wrap the conditioned model in
-    :class:`numpyro.handlers.block` so the fixed sites do not contribute their
-    prior densities or appear in inference traces.
-
-    .. code-block:: python
-
-        conditioned = numpyro.handlers.condition(
-            spectral_density_model, data=fixed_params
-        )
-        model = numpyro.handlers.block(
-            conditioned, hide=list(fixed_params)
-        )
+    powers and importance weights; waveform generation is
+    not part of this model.
 
     This is the fully general model: every hyperparameter is sampled. See
     :func:`amplitude_marginalized_model` for the variant that integrates a
