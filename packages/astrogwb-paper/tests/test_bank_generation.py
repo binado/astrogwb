@@ -12,8 +12,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 import yaml
-from astrogwb_paper.banks import read_bank_provenance
 from astrogwb_paper.cli.generate_bank import main, simulate_population
+from astrogwb_paper.config.banks import read_bank_provenance
 from gwmock_pop import GraphSimulator
 
 BNS_GRAPH = {
@@ -169,7 +169,7 @@ def test_generation_draws_are_a_prefix_stable_stream(tmp_path: Path) -> None:
     ``_simulate_impl``), so requesting fewer samples never perturbs the
     stream. A ``gwmock_pop`` upgrade that broke this would silently corrupt
     every bank-prefix / composition-prefix guarantee in
-    ``astrogwb_paper.catalogs.compose_catalog`` without touching this file.
+    ``CatalogSource.compose`` without touching this file.
     """
     config = _simple_graph(tmp_path / "md.yaml", 0.0, 1.0)
 
@@ -182,7 +182,7 @@ def test_generation_draws_are_a_prefix_stable_stream(tmp_path: Path) -> None:
 
 
 def test_bank_generation_no_longer_mixes_components() -> None:
-    """Mixing moved to compose_catalog; one bank is one component."""
+    """Mixing moved to CatalogSource.compose; one bank is one component."""
     import astrogwb_paper.cli.generate_bank as module
 
     assert module.GraphSimulator is GraphSimulator

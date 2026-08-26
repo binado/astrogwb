@@ -50,19 +50,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from astrogwb_paper.banks import (
+from astrogwb_paper.config.banks import (
+    UniformRedshiftProposal,
     check_fiducials_match,
     madau_dickinson_proposal,
     read_bank_provenance,
     resolve_proposal,
 )
-from astrogwb_paper.config.mcmc import (
-    ProposalConfig,
-    RunConfig,
-    build_run_config,
-    load_mapping,
-)
+from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig, build_run_config
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
+from astrogwb_paper.utils import load_mapping
 
 if TYPE_CHECKING:
     from astrogwb_paper.amplitude import AmplitudeMarginalization
@@ -372,7 +369,6 @@ def _uniform_proposal(provenance, proposal_source: CatalogSource):
     """Narrow the uniform bank's recorded density, or return None."""
     if provenance is None:
         return None
-    from astrogwb_paper.banks import UniformRedshiftProposal
 
     match provenance.redshift_proposal:
         case UniformRedshiftProposal() as density:
@@ -425,12 +421,12 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_chain_path_available(config, timestamp=timestamp, force=args.force)
 
-    from astrogwb_paper.catalogs import catalog_source
+    from astrogwb_paper.catalogs import CatalogSource
 
-    injection_source = catalog_source(
+    injection_source = CatalogSource.resolve(
         config.catalog.injection, bank_paths, role="injection"
     )
-    proposal_source = catalog_source(
+    proposal_source = CatalogSource.resolve(
         config.catalog.proposal, bank_paths, role="proposal"
     )
 

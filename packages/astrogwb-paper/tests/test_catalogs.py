@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 import xarray as xr
 from astrogwb.waveform import make_catalog, save_catalog
-from astrogwb_paper.catalogs import compose_catalog, truncate_catalog_samples
+from astrogwb_paper.catalogs import CatalogSource, truncate_catalog_samples
 from astrogwb_paper.config.mcmc import CatalogSpec
 from pydantic import ValidationError
 
@@ -87,7 +87,7 @@ def test_truncate_catalog_samples_requires_distance_column() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# compose_catalog
+# CatalogSource.compose
 # --------------------------------------------------------------------------- #
 def _bank_file(path: Path, n: int, *, offset: float = 0.0) -> Path:
     """A synthetic bank whose redshift encodes sample identity: offset + index."""
@@ -100,7 +100,7 @@ def test_compose_catalog_eps0_is_a_bit_identical_bank_prefix(tmp_path: Path) -> 
     md_path = _bank_file(tmp_path / "md.h5", 10)
     composition = CatalogSpec(md_bank="md", num_samples=4)
 
-    composed = compose_catalog(md_path, None, composition)
+    composed = CatalogSource(md_path, None, composition, "catalog").compose()
 
     np.testing.assert_array_equal(
         composed.source_parameters.sel(parameter="redshift").values,
@@ -120,7 +120,7 @@ def test_compose_catalog_rejects_oversized_request(tmp_path: Path) -> None:
     with pytest.raises(
         ValueError, match="holds 4 samples, but the composition needs 8"
     ):
-        compose_catalog(md_path, None, composition)
+        CatalogSource(md_path, None, composition, "catalog").compose()
 
 
 def test_compose_catalog_requires_uniform_bank_and_mixture_seed_when_mixing() -> None:
@@ -133,7 +133,7 @@ def test_compose_catalog_requires_uniform_bank_and_mixture_seed_when_mixing() ->
     )
 
     with pytest.raises(ValueError, match="requires both uniform_bank_path"):
-        compose_catalog(Path("unused.h5"), None, composition)
+        CatalogSource(Path("unused.h5"), None, composition, "catalog").compose()
 
 
 def test_compose_catalog_mixture_component_counts_are_binomial(tmp_path: Path) -> None:
@@ -147,7 +147,7 @@ def test_compose_catalog_mixture_component_counts_are_binomial(tmp_path: Path) -
         mixture_seed=7,
     )
 
-    composed = compose_catalog(md_path, uniform_path, composition)
+    composed = CatalogSource(md_path, uniform_path, composition, "catalog").compose()
 
     assert composed.sizes["sample"] == 1000
     redshift = np.asarray(composed.source_parameters.sel(parameter="redshift").values)
@@ -177,8 +177,8 @@ def test_compose_catalog_prefix_is_itself_a_valid_mixture_sample(
             mixture_seed=11,
         )
 
-    big = compose_catalog(md_path, uniform_path, _composition(50))
-    small = compose_catalog(md_path, uniform_path, _composition(20))
+    big = CatalogSource(md_path, uniform_path, _composition(50), "catalog").compose()
+    small = CatalogSource(md_path, uniform_path, _composition(20), "catalog").compose()
 
     big_redshift = np.asarray(big.source_parameters.sel(parameter="redshift").values)
     small_redshift = np.asarray(
@@ -205,7 +205,7 @@ def test_compose_catalog_rejects_banks_with_different_waveform_settings(
     )
 
     with pytest.raises(ValueError, match="different waveform settings: approximant"):
-        compose_catalog(md_path, uniform_path, spec, label="proposal")
+        CatalogSource(md_path, uniform_path, spec, "proposal").compose()
 
 
 # --------------------------------------------------------------------------- #

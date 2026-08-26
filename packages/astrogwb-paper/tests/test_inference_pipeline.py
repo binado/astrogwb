@@ -21,10 +21,10 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astrogwb.waveform import make_catalog, save_catalog
-from astrogwb_paper.banks import MadauDickinsonProposal, resolve_proposal
 from astrogwb_paper.catalogs import CatalogSource
 from astrogwb_paper.cli.profile_model import build_potential
 from astrogwb_paper.cli.run_mcmc import run
+from astrogwb_paper.config.banks import MadauDickinsonProposal, resolve_proposal
 from astrogwb_paper.config.mcmc import (
     CatalogSpec,
     ProposalConfig,

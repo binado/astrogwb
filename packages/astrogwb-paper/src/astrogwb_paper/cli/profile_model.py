@@ -38,13 +38,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from astrogwb_paper.cli.run_mcmc import resolve_run_proposal
-from astrogwb_paper.config.mcmc import (
-    ProposalConfig,
-    RunConfig,
-    build_run_config,
-    load_mapping,
-)
+from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig, build_run_config
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
+from astrogwb_paper.utils import load_mapping
 
 if TYPE_CHECKING:
     from astrogwb_paper.catalogs import CatalogSource
@@ -189,12 +185,12 @@ def main(argv: list[str] | None = None) -> None:
     # Resolve the proposal density from bank provenance before JAX starts, the
     # same way astrogwb-run-mcmc does -- what is profiled must be the
     # production model on production inputs.
-    from astrogwb_paper.catalogs import catalog_source
+    from astrogwb_paper.catalogs import CatalogSource
 
-    injection_source = catalog_source(
+    injection_source = CatalogSource.resolve(
         config.catalog.injection, bank_paths, role="injection"
     )
-    proposal_source = catalog_source(
+    proposal_source = CatalogSource.resolve(
         config.catalog.proposal, bank_paths, role="proposal"
     )
     proposal = resolve_run_proposal(config, proposal_source)

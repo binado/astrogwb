@@ -27,14 +27,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from astrogwb_paper.config.banks import BankConfig, discover_banks
-from astrogwb_paper.config.mcmc import (
-    RunConfig,
-    deep_merge,
-    load_mapping,
-    merge_run_overlay,
-)
+from astrogwb_paper.config.banks import BankGenerationConfig, discover_banks
+from astrogwb_paper.config.mcmc import RunConfig, merge_run_overlay
 from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.utils import deep_merge, load_mapping
 
 ANALYSIS_DIR = Path("config/analysis")
 BASE_DIR = ANALYSIS_DIR / "base"
@@ -57,11 +53,6 @@ def _discover_experiments(root: Path | None = None) -> tuple[str, ...]:
     if not names:
         raise ValueError(f"{runs_dir} declares no experiments")
     return names
-
-
-def discover_experiments(root: Path | None = None) -> tuple[str, ...]:
-    """Backward-compat alias for :func:`_discover_experiments`."""
-    return _discover_experiments(root)
 
 
 def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
@@ -159,7 +150,7 @@ def check_bank_references(
     config: RunConfig,
     *,
     label: str,
-    banks: Mapping[str, BankConfig] | None = None,
+    banks: Mapping[str, BankGenerationConfig] | None = None,
 ) -> None:
     """Reject a run naming an unknown bank, or a self-correlated mixture.
 
@@ -189,8 +180,8 @@ def check_bank_references(
 
 
 def _require_bank(
-    name: str, banks: Mapping[str, BankConfig], *, label: str
-) -> BankConfig:
+    name: str, banks: Mapping[str, BankGenerationConfig], *, label: str
+) -> BankGenerationConfig:
     try:
         return banks[name]
     except KeyError:

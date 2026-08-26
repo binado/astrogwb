@@ -89,7 +89,7 @@ import json
 import sys
 from pathlib import Path
 
-from astrogwb_paper.config.mcmc import load_mapping
+from astrogwb_paper.utils import load_mapping
 from astrogwb_paper.config.mcmc import (
     build_run_config,
     prior_to_spec,

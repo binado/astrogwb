@@ -13,8 +13,9 @@ and shared, and removes a node from the DAG.
 
 The bank also records how it was made: population name, seed, sample count, and
 the redshift proposal density its samples follow (see
-:mod:`astrogwb_paper.banks`). The graph YAML is interpreted as a density here,
-once, and never again -- the analysis reads the recorded descriptor.
+:mod:`astrogwb_paper.config.banks`). The graph YAML is interpreted as a
+density here, once, and never again -- the analysis reads the recorded
+descriptor.
 
 Usage::
 
@@ -37,13 +38,13 @@ from astrogwb.waveform import make_catalog, polarization_power, save_catalog
 from gwmock_pop import GraphSimulator
 from gwmock_signal.waveform import RippleBackend
 
-from astrogwb_paper.banks import (
-    BankProvenance,
+from astrogwb_paper.config.banks import (
+    BankConfig,
+    BankGenerationConfig,
     extract_redshift_proposal,
-    provenance_attrs,
+    load_bank_config,
 )
-from astrogwb_paper.config.banks import BankConfig, load_bank_config
-from astrogwb_paper.config.mcmc import load_mapping
+from astrogwb_paper.utils import load_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +161,7 @@ def _generate_polarization_power(
         power_chunks.append(chunk_power)
         logger.info("Generated chunk %d:%d of %d events", start, stop, n_events)
 
-    assert frequencies is not None  # n_events > 0 guaranteed by BankConfig
+    assert frequencies is not None  # n_events > 0 guaranteed by BankGenerationConfig
     return frequencies, np.concatenate(power_chunks, axis=1)
 
 
@@ -174,7 +175,7 @@ def simulate_population(
     return dict(simulator.simulate(num_samples))
 
 
-def _resolve_population(bank: BankConfig, config_path: Path) -> Path:
+def _resolve_population(bank: BankGenerationConfig, config_path: Path) -> Path:
     """Locate a bank's population graph.
 
     Prefers the tree the bank config itself sits in (``<root>/config/banks/*``),
@@ -188,9 +189,9 @@ def _resolve_population(bank: BankConfig, config_path: Path) -> Path:
     return bank.population_path()
 
 
-def bank_provenance(bank: BankConfig, population_path: Path) -> BankProvenance:
+def bank_provenance(bank: BankGenerationConfig, population_path: Path) -> BankConfig:
     """Derive what this bank will record about its own generation."""
-    return BankProvenance(
+    return BankConfig(
         population=bank.population,
         seed=bank.seed,
         num_samples=bank.num_samples,
@@ -287,7 +288,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         maximum_frequency=waveform.maximum_frequency,
         reference_frequency=waveform.reference_frequency,
         sampling_frequency=waveform.sampling_frequency,
-        extra_attrs=provenance_attrs(provenance),
+        extra_attrs=provenance.to_dict(),
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

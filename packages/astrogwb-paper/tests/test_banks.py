@@ -8,20 +8,19 @@ from typing import Any
 import numpy as np
 import pytest
 from astrogwb.waveform import make_catalog, save_catalog
-from astrogwb_paper.banks import (
+from astrogwb_paper.config.banks import (
     MD_FIDUCIAL_NAMES,
-    BankProvenance,
+    BankConfig,
     MadauDickinsonProposal,
     UniformRedshiftProposal,
     check_fiducials_match,
+    discover_banks,
     extract_redshift_proposal,
     madau_dickinson_proposal,
-    provenance_attrs,
     read_bank_provenance,
     resolve_proposal,
 )
-from astrogwb_paper.config.banks import discover_banks
-from astrogwb_paper.config.mcmc import load_mapping
+from astrogwb_paper.utils import load_mapping
 
 MD_GRAPH: dict[str, Any] = {
     "parameters": {
@@ -54,14 +53,14 @@ UNIFORM_GRAPH: dict[str, Any] = {
 }
 
 
-def _provenance(**overrides: Any) -> BankProvenance:
+def _provenance(**overrides: Any) -> BankConfig:
     fields: dict[str, Any] = {
         "population": "madau-dickinson",
         "seed": 41,
         "num_samples": 32768,
         "redshift_proposal": extract_redshift_proposal(MD_GRAPH),
     }
-    return BankProvenance(**{**fields, **overrides})
+    return BankConfig(**{**fields, **overrides})
 
 
 def _bank_file(path: Path, extra_attrs: dict[str, Any] | None) -> Path:
@@ -148,7 +147,7 @@ def test_committed_populations_agree_on_generation_support() -> None:
 # --------------------------------------------------------------------------- #
 def test_provenance_round_trips_through_a_real_bank_file(tmp_path: Path) -> None:
     provenance = _provenance()
-    path = _bank_file(tmp_path / "bank.h5", provenance_attrs(provenance))
+    path = _bank_file(tmp_path / "bank.h5", provenance.to_dict())
 
     assert read_bank_provenance(path) == provenance
 
@@ -160,7 +159,7 @@ def test_uniform_provenance_round_trips(tmp_path: Path) -> None:
         num_samples=8192,
         redshift_proposal=extract_redshift_proposal(UNIFORM_GRAPH),
     )
-    path = _bank_file(tmp_path / "bank.h5", provenance_attrs(provenance))
+    path = _bank_file(tmp_path / "bank.h5", provenance.to_dict())
 
     assert read_bank_provenance(path) == provenance
 
@@ -175,7 +174,7 @@ def test_bank_without_proposal_metadata_is_rejected_not_reparsed(
 
 
 def test_bank_missing_only_the_proposal_attr_is_rejected(tmp_path: Path) -> None:
-    attrs = provenance_attrs(_provenance())
+    attrs = _provenance().to_dict()
     attrs.pop("redshift_proposal")
     path = _bank_file(tmp_path / "partial.h5", attrs)
 

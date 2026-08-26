@@ -28,16 +28,16 @@ import numpyro.distributions as dist
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb_paper.banks import (
-    madau_dickinson_proposal,
-    read_bank_provenance,
-    resolve_proposal,
-)
 from astrogwb_paper.catalogs import (
     CatalogSource,
     compute_proposal_logprob,
     samples_from_catalog,
     truncate_catalog_samples,
+)
+from astrogwb_paper.config.banks import (
+    madau_dickinson_proposal,
+    read_bank_provenance,
+    resolve_proposal,
 )
 from astrogwb_paper.config.figures import load_fiducials, load_proposal_spec
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path

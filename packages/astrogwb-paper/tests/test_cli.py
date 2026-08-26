@@ -44,9 +44,10 @@ def test_help_path_imports_do_not_import_jax() -> None:
     load. Importing jax is slow; it is not needed to parse flags. Catalogs,
     inference, and snr are allowed to import jax -- they are not on this graph.
 
-    ``astrogwb_paper.banks`` is on this graph deliberately: run_mcmc resolves the
-    proposal density from bank attributes *before* configure_runtime, so that
-    module must stay JAX-free (xarray/h5netcdf and pydantic only).
+    ``astrogwb_paper.config.banks`` is on this graph deliberately: run_mcmc
+    resolves the proposal density from bank attributes *before*
+    configure_runtime, so that module must stay JAX-free (xarray/h5netcdf and
+    pydantic only).
     """
     code = """
 import sys
@@ -54,7 +55,7 @@ import astrogwb_paper
 import astrogwb_paper.config.mcmc
 import astrogwb_paper.config.figures
 import astrogwb_paper.config.runs
-import astrogwb_paper.banks
+import astrogwb_paper.config.banks
 import astrogwb_paper.runtime
 assert 'jax' not in sys.modules
 """

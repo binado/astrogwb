@@ -29,7 +29,7 @@ import logging
 from collections.abc import Mapping
 from pathlib import Path
 
-from astrogwb_paper.config.banks import BankConfig, discover_banks
+from astrogwb_paper.config.banks import BankGenerationConfig, discover_banks
 from astrogwb_paper.config.mcmc import build_run_config, save_config
 from astrogwb_paper.config.runs import (
     assemble_run,
@@ -79,7 +79,7 @@ def assemble(
     experiment: str,
     run: str,
     destination: Path,
-    banks: Mapping[str, BankConfig] | None = None,
+    banks: Mapping[str, BankGenerationConfig] | None = None,
 ) -> None:
     """Merge, validate, and write one run config."""
     config = build_run_config(assemble_run(experiment, run))

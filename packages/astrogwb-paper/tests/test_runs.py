@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 from astrogwb_paper.cli.assemble_config import main as assemble_configs
 from astrogwb_paper.config.banks import discover_banks
-from astrogwb_paper.config.mcmc import load_mapping
 from astrogwb_paper.config.mcmc import build_run_config
 from astrogwb_paper.config.runs import (
     EXPERIMENT_BASE,
@@ -28,6 +27,7 @@ from astrogwb_paper.config.runs import (
     run_target,
 )
 from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.utils import load_mapping
 
 PAPER_ROOT = paper_project_root()
 

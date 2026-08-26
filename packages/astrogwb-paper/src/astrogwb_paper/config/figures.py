@@ -24,14 +24,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrogwb_paper.config.mcmc import (
-    AnalysisGrid,
-    CatalogSpec,
-    build_run_config,
-    load_mapping,
-)
+from astrogwb_paper.config.mcmc import AnalysisGrid, CatalogSpec, build_run_config
 from astrogwb_paper.config.runs import CONFIGS_ROOT, config_path
 from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.utils import load_mapping
 
 #: The run every figure reads shared settings from when it is not about one
 #: specific run. Fiducials and the analysis grid come from ``base/`` for all 26

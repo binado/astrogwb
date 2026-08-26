@@ -138,7 +138,7 @@ def test_bank_rule_reads_its_config_and_population_directly() -> None:
     # The population intermediate and its merge rule are both gone.
     assert "outputs/populations/" not in result.stdout
     assert "outputs/population-configs/" not in result.stdout
-    # Mixing moved to compose_catalog; generation is single-component now.
+    # Mixing moved to CatalogSource.compose; generation is single-component now.
     assert "--uniform-mixing-fraction" not in result.stdout
 
 
