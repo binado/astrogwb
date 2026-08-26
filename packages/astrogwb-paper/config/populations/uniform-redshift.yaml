@@ -1,0 +1,84 @@
+# Complete BNS population graph with a uniform redshift rate.
+#
+# The mixture component that guards importance-sampling tails. Identical to
+# madau-dickinson.yaml except for `parameters.redshift`; see that file's
+# note on why parameter order must stay in sync.
+parameters:
+  luminosity_distance:
+    transform:
+      function: redshift_to_luminosity_distance
+      arguments:
+        redshift: '@redshift'
+        hubble_constant: 67.66
+        omega_m: 0.3096
+        max_redshift: 20.0
+  mass_pair:
+    intermediate: true
+    sampler:
+      function: joint_uniform_mass_pair
+      arguments:
+        m1_min: 1.0
+        m1_max: 2.5
+        m2_min: 1.0
+        m2_max: 2.5
+        ordered: true
+  source_frame_mass_1:
+    transform:
+      function: take_row
+      arguments:
+        matrix: '@mass_pair'
+        index: 0
+  source_frame_mass_2:
+    transform:
+      function: take_row
+      arguments:
+        matrix: '@mass_pair'
+        index: 1
+  spin_1z:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: -0.05
+        maximum: 0.05
+  spin_2z:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: -0.05
+        maximum: 0.05
+  lambda_1:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: 0.0
+        maximum: 2000.0
+  lambda_2:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: 0.0
+        maximum: 2000.0
+  inclination:
+    transform:
+      function: constant_like
+      arguments:
+        reference: '@redshift'
+        value: 0.0
+  coa_phase:
+    transform:
+      function: constant_like
+      arguments:
+        reference: '@redshift'
+        value: 0.0
+  coa_time:
+    transform:
+      function: constant_like
+      arguments:
+        reference: '@redshift'
+        value: 0.0
+  redshift:
+    sampler:
+      function: uniform
+      arguments:
+        minimum: 0.0
+        maximum: 20.0

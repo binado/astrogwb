@@ -1,0 +1,13 @@
+# Waveform-systematics bank: md-imrphenom-s41's population under TaylorF2.
+population = "madau-dickinson"
+seed = 41
+num_samples = 32768
+
+[waveform]
+approximant = "TaylorF2"
+sampling_frequency = 8192.0
+minimum_frequency = 2.0
+maximum_frequency = 4096.0
+reference_frequency = 20.0
+frequency_resolution = 1.0
+chunk_size = 2048

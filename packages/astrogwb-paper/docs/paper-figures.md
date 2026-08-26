@@ -9,14 +9,18 @@ shared piece, and they live in `astrogwb_paper.plotting.DETECTOR_NETWORKS` as
 ordered `(run name, LaTeX label)` pairs.
 
 Input and output paths are both named literally in
-[`Snakefile`](../Snakefile), and every output is a valid
-Snakemake target. Shared scientific values -- fiducials, frequency bounds,
-cosmology grid settings -- stay in `inputs/experiments.yaml`.
+[`Snakefile`](../Snakefile), and every output is a valid Snakemake target.
+Shared scientific values -- fiducials, frequency bounds, cosmology grid settings
+-- are read from an *assembled* run config under
+`outputs/configs/<experiment>/<run>.json`, not from a source inventory, so a
+figure reports exactly what was sampled.
 
 Detector *lists* are never hard-coded next to a label: the script names its
-experiment, and `astrogwb_paper.config.figures.resolve_networks` resolves each
-run's detectors from `inputs/experiments.yaml`. The detectors a figure
+experiment, and `astrogwb_paper.config.figures.resolve_networks` reads each
+run's detectors out of that run's own assembled config. The detectors a figure
 reports an SNR for are therefore always the ones its chain was sampled with.
+The catalog composition behind the fiducial spectrum comes from the same place,
+via `load_injection_spec`.
 
 The workflow imports that same tuple and expands its chain paths from it, so
 chain order and legend order are one list rather than two that have to be kept
@@ -74,8 +78,10 @@ The amplitude toy model, fiducial spectrum, effective detector PSD comparison,
 and importance-weight grids are explicit standalone rules in the unified
 workflow. The fiducial spectrum borrows the six detector networks of the
 `cosmological-parameters` experiment rather than restating them, and keeps its
-`OMEGA_GW_MIN` y-limit next to the axis it sets. All of them read
-`inputs/experiments.yaml` directly.
+`OMEGA_GW_MIN` y-limit next to the axis it sets. All of them read an assembled
+run config directly. `importance_weights_grid` additionally reads its proposal
+*density* from the bank file it is handed, the same way `astrogwb-run-mcmc`
+does -- so the weights it plots divide by the same denominator the chains did.
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
@@ -100,12 +106,12 @@ All new figure products are written under `outputs/figures/`.
 ## Scripts
 
 Figure entry points are plain Python scripts under `scripts/`. Each reads its
-own fiducials and analysis grid from the committed inventory, whose path the
+own fiducials and analysis grid from an assembled run config, whose path the
 library owns, and hard-codes its own labels and run order. Snakemake passes only
-what it owns: the chain and catalog paths it built, and the output paths it
+what it owns: the chain and bank paths it built, and the output paths it
 declared.
 
-The YAML inventory is a declared input of each rule, so editing a fiducial or a
-detector list rebuilds the figure; editing a label is a code change and rebuilds
-it the same way. Config parsing stays free of JAX, so `--help` and config errors
-stay cheap.
+The assembled config is a declared input of each rule, so editing a fiducial or
+a detector list rebuilds the figure; editing a label is a code change and
+rebuilds it the same way. Config parsing stays free of JAX, so `--help` and
+config errors stay cheap.

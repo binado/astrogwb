@@ -22,7 +22,6 @@ import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
-from pathlib import Path
 from typing import Any
 
 import jax
@@ -45,15 +44,15 @@ from astrogwb_paper.amplitude import (
     build_amplitude_marginalization,
 )
 from astrogwb_paper.catalogs import (
+    CatalogSource,
     compute_fiducial_injection_spectrum,
     compute_proposal_logprob,
-    load_propagated_catalog,
+    propagate_catalog,
     samples_from_catalog,
-    validate_catalog_samples,
+    truncate_catalog_samples,
     validate_matching_frequency_grids,
 )
-from astrogwb_paper.config.analysis import AnalysisGrid
-from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig
+from astrogwb_paper.config.mcmc import AnalysisGrid, ProposalConfig, RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -98,33 +97,37 @@ class InferenceInputs:
 
 
 def prepare_observation(
-    injection_path: Path,
+    injection: CatalogSource,
     *,
     fiducials: Mapping[str, float],
     grid: AnalysisGrid,
 ) -> Observation:
-    """Load the injection catalog and build the fiducial observed spectrum."""
+    """Compose the injection catalog and build the fiducial observed spectrum."""
     fiducial_values = dict(fiducials)
-    injection = load_propagated_catalog(injection_path, fiducials=fiducial_values)
-    validate_catalog_samples(
-        injection,
+    composed = propagate_catalog(injection.compose(), fiducials=fiducial_values)
+    n_loaded = composed.polarization_power.shape[1]
+    composed = truncate_catalog_samples(
+        composed,
         label="injection",
         minimum_redshift=grid.minimum_redshift,
         maximum_redshift=grid.maximum_redshift,
     )
+    n_kept = composed.polarization_power.shape[1]
     logger.info(
-        "Loaded independent injection catalog %s: n_injection_samples=%d",
-        injection_path,
-        injection.polarization_power.shape[1],
+        "Composed independent %s catalog: n_injection_samples=%d "
+        "(%d outside the analysis window dropped)",
+        injection.role,
+        n_kept,
+        n_loaded - n_kept,
     )
 
     redshift_grid = jnp.linspace(
         grid.minimum_redshift, grid.maximum_redshift, grid.n_grid
     )
-    injection_frequencies = jnp.asarray(injection.frequency.values)
+    injection_frequencies = jnp.asarray(composed.frequency.values)
     total_merger_rate, spectral_density = compute_fiducial_injection_spectrum(
-        jnp.asarray(injection.polarization_power.values),
-        samples_from_catalog(injection),
+        jnp.asarray(composed.polarization_power.values),
+        samples_from_catalog(composed),
         fiducials=fiducial_values,
         redshift_grid=redshift_grid,
     )
@@ -153,8 +156,8 @@ def prepare_observation(
 
 
 def prepare_inference_inputs(
-    injection_path: Path,
-    proposal_path: Path,
+    injection: CatalogSource,
+    proposal: CatalogSource,
     *,
     fiducials: Mapping[str, float],
     proposal_config: ProposalConfig,
@@ -162,22 +165,25 @@ def prepare_inference_inputs(
     detectors: Sequence[str],
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs."""
-    observation = prepare_observation(injection_path, fiducials=fiducials, grid=grid)
-    proposal = load_propagated_catalog(proposal_path, fiducials=dict(fiducials))
-    validate_catalog_samples(
-        proposal,
+    observation = prepare_observation(injection, fiducials=fiducials, grid=grid)
+    proposal_catalog = propagate_catalog(proposal.compose(), fiducials=dict(fiducials))
+    n_loaded = proposal_catalog.polarization_power.shape[1]
+    proposal_catalog = truncate_catalog_samples(
+        proposal_catalog,
         label="proposal",
         minimum_redshift=grid.minimum_redshift,
         maximum_redshift=grid.maximum_redshift,
     )
-    proposal_frequencies = proposal.frequency.values
+    proposal_frequencies = proposal_catalog.frequency.values
     validate_matching_frequency_grids(observation.frequencies, proposal_frequencies)
-    n_freq, n_samples = proposal.polarization_power.shape
+    n_freq, n_samples = proposal_catalog.polarization_power.shape
     logger.info(
-        "Loaded proposal catalog %s: n_frequency_bins=%d n_proposal_samples=%d",
-        proposal_path,
+        "Composed %s catalog: n_frequency_bins=%d n_proposal_samples=%d "
+        "(%d outside the analysis window dropped)",
+        proposal.role,
         n_freq,
         n_samples,
+        n_loaded - n_samples,
     )
 
     # Two frequency grids are in play and they are deliberately spelled
@@ -191,7 +197,9 @@ def prepare_inference_inputs(
         compute_effective_psd(proposal_frequencies, list(detectors), sensitivities)
     )
 
-    proposal_redshift = proposal.source_parameters.sel(parameter="redshift").values
+    proposal_redshift = proposal_catalog.source_parameters.sel(
+        parameter="redshift"
+    ).values
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=dict(fiducials),
         redshift_grid=observation.redshift_grid,
@@ -199,7 +207,7 @@ def prepare_inference_inputs(
     )
     return InferenceInputs(
         observation=observation,
-        proposal=proposal,
+        proposal=proposal_catalog,
         effective_psd=effective_psd_arr,
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     )

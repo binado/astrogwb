@@ -36,12 +36,22 @@ uv sync --package astrogwb-paper --extra notebook
 uvx jupytext --to ipynb packages/astrogwb-paper/notebooks/mcmc.py
 ```
 
-All user paths are resolved from this package's root. Generated populations,
-catalogs, canonical configs, chains, and figures live under `outputs/`;
-scheduler/runtime logs remain under `logs/`. All live inside this member.
-The shared MCMC base and all curated experiment runs are declared in
-`inputs/experiments.yaml`. The shared catalog base and named recipes are declared
-in `inputs/catalogs.yaml`.
+All user paths are resolved from this package's root. Committed configuration
+lives under `config/`; generated banks, canonical configs, chains, and figures
+live under `outputs/`; scheduler/runtime logs remain under `logs/`. All live
+inside this member.
 
-See [`docs/`](docs/) for catalog generation, inference, paper figures, and
+Filenames are the mapping, so there is no registry file:
+
+```text
+config/populations/<population>.yaml            one complete population graph
+config/banks/<bank>.toml         -> outputs/banks/<bank>.h5
+config/analysis/base/*.toml                     settings every run shares
+config/analysis/runs/<experiment>/_base.toml    the experiment override
+config/analysis/runs/<experiment>/<run>.toml
+  -> outputs/configs/<experiment>/<run>.json    assembled, defaults filled in
+  -> outputs/chains/<experiment>/<run>.nc
+```
+
+See [`docs/`](docs/) for bank generation, inference, paper figures, and
 Snakemake/SLURM workflows.

@@ -9,12 +9,18 @@ does not initialize the XLA backend. That last property is what
 count / platform after config validation; it is guarded by a subprocess test
 in ``tests/test_prior_native_types.py`` (re-running ``set_host_device_count``
 after a backend init is a silent no-op, hence the subprocess).
+
+The generic merge/load helpers (``deep_merge``, ``load_mapping``) live in
+:mod:`astrogwb_paper.utils`, and the run-assembly merge semantics
+(``merge_run_overlay``) in :mod:`astrogwb_paper.config.runs`; only the
+``AnalysisGrid`` shared by every experiment run lives here next to the models.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -28,11 +34,29 @@ from pydantic import (
     model_validator,
 )
 
-from astrogwb_paper.config.analysis import AnalysisGrid
-from astrogwb_paper.config.loading import deep_merge
+from astrogwb_paper.utils import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
+
+# --------------------------------------------------------------------------- #
+# Shared helpers
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class AnalysisGrid:
+    """Frequency band and redshift grid shared by every experiment run."""
+
+    observation_time: float
+    f_min: float
+    f_max: float
+    minimum_redshift: float
+    maximum_redshift: float
+    n_grid: int
+
+
+# --------------------------------------------------------------------------- #
+# Pydantic models
+# --------------------------------------------------------------------------- #
 # Restates astrogwb.importance.models.bns_madau_dickinson_modified_propagation
 # .AMPLITUDE_PARAMETERS rather than importing it: this module must stay
 # stdlib+pydantic only (see module docstring), so a
@@ -196,7 +220,18 @@ class OutputConfig(BaseModel):
 
 
 class ProposalConfig(BaseModel):
-    """Fixed redshift proposal used to generate the importance catalog."""
+    """The fixed redshift density the importance weights divide by.
+
+    Not a config *input*: it is derived at run time from the proposal bank's
+    recorded provenance plus the run's mixing fraction and analysis window (see
+    :func:`astrogwb_paper.config.banks.resolve_proposal`). Scripts and
+    notebooks that
+    reweight outside the sampler construct one directly.
+
+    Note the name collision with ``RunConfig.catalog.proposal``, which is kept
+    deliberately: that block names the *catalog* -- which banks and how many
+    samples -- while this one is the *density* those samples follow.
+    """
 
     model_config = _STRICT
 
@@ -221,6 +256,57 @@ class ProposalConfig(BaseModel):
         return self
 
 
+class CatalogSpec(BaseModel):
+    """A cheap, in-memory mixture over up to two persisted banks.
+
+    Declared inline by each run rather than looked up in a registry: there is
+    no composition *name* any more, only the bank(s) and the mixture
+    parameters. Composing is cheap and never written to disk -- see
+    :meth:`astrogwb_paper.catalogs.CatalogSource.compose`.
+    """
+
+    model_config = _STRICT
+
+    md_bank: str
+    uniform_bank: str | None = None
+    num_samples: Annotated[int, Field(gt=0)]
+    uniform_mixing_fraction: Annotated[
+        float, Field(ge=0.0, le=1.0, allow_inf_nan=False)
+    ] = 0.0
+    mixture_seed: int | None = None
+
+    @model_validator(mode="after")
+    def _validate_mixture_fields(self) -> CatalogSpec:
+        mixed = self.uniform_mixing_fraction > 0.0
+        if mixed and (self.uniform_bank is None or self.mixture_seed is None):
+            raise ValueError(
+                "uniform_mixing_fraction > 0 requires both uniform_bank and "
+                "mixture_seed"
+            )
+        if not mixed and (
+            self.uniform_bank is not None or self.mixture_seed is not None
+        ):
+            raise ValueError(
+                "uniform_mixing_fraction == 0 forbids uniform_bank and mixture_seed"
+            )
+        return self
+
+
+class CatalogConfig(BaseModel):
+    """The two catalogs this run composes: the injection and the proposal.
+
+    Records *which bank(s) and mixture parameters* produced each, so a saved
+    run config is self-describing without the composed catalog ever existing as
+    a file. The proposal *density* is not here: it comes from the bank's own
+    provenance at run time.
+    """
+
+    model_config = _STRICT
+
+    injection: CatalogSpec
+    proposal: CatalogSpec
+
+
 class RunConfig(BaseModel):
     model_config = _STRICT
 
@@ -236,7 +322,7 @@ class RunConfig(BaseModel):
     sampled_params: tuple[str, ...] = ()
     analysis: AnalysisConfig
     cosmology: CosmoConfig
-    proposal: ProposalConfig
+    catalog: CatalogConfig
     sampler: SamplerConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
 

@@ -19,12 +19,22 @@ Usage::
 
     uv run astrogwb-run-mcmc \
         --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
-        --injection-catalog outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
-        --proposal-catalog outputs/catalogs/bns-n16384-eps=0-df1.h5
+        --bank md-imrphenom-s41=outputs/banks/md-imrphenom-s41.h5 \
+        --bank md-imrphenom-s42=outputs/banks/md-imrphenom-s42.h5
 
-Configs are assembled from the base and run overlays in ``inputs/experiments.yaml``
-by the ``assemble_config`` workflow rule or by
-``astrogwb-validate-config``; see docs/running-inference.md.
+The run config (its ``catalog.injection`` / ``catalog.proposal`` blocks) names
+which bank(s) each role composes from; every bank it names must be supplied
+via a ``--bank NAME=PATH`` flag, repeated once per distinct bank.
+
+The importance-sampling *proposal density* is not in the config: it is read
+back from the proposal bank's own provenance attributes here, restricted to the
+run's analysis redshift window, and checked against the run's fiducials -- so
+the weights are always divided by what was actually generated. The resolved
+density is stamped into the saved chain, which stays the self-describing record
+of what was sampled.
+
+Configs are assembled from ``config/analysis/`` by the ``assemble_config``
+workflow rule or by ``astrogwb-assemble-config``; see docs/running-inference.md.
 
 Use ``uv run --package astrogwb-paper --extra cuda`` (or ``--extra tpu``) for
 the matching JAX accelerator plugin.
@@ -40,12 +50,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from astrogwb_paper.config.loading import load_mapping
-from astrogwb_paper.config.mcmc import RunConfig, build_run_config
+from astrogwb_paper.config.banks import (
+    UniformRedshiftProposal,
+    check_fiducials_match,
+    madau_dickinson_proposal,
+    read_bank_provenance,
+    resolve_proposal,
+)
+from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig, build_run_config
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
+from astrogwb_paper.utils import load_mapping
 
 if TYPE_CHECKING:
     from astrogwb_paper.amplitude import AmplitudeMarginalization
+    from astrogwb_paper.catalogs import CatalogSource
 
 logger = logging.getLogger("run_mcmc")
 
@@ -67,16 +85,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to the TOML or JSON config file for this run / array task.",
     )
     parser.add_argument(
-        "--injection-catalog",
-        type=Path,
-        required=True,
-        help="Independent fiducial waveform catalog used to construct observed data.",
-    )
-    parser.add_argument(
-        "--proposal-catalog",
-        type=Path,
-        required=True,
-        help="Waveform catalog used by the importance estimator.",
+        "--bank",
+        dest="banks",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help=(
+            "One waveform bank file, as NAME=PATH; repeat once per distinct "
+            "bank the run config's [catalog.injection] / [catalog.proposal] "
+            "names."
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -115,8 +133,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # --------------------------------------------------------------------------- #
 def run(
     config: RunConfig,
-    injection_catalog_path: Path,
-    proposal_catalog_path: Path,
+    injection_source: CatalogSource,
+    proposal_source: CatalogSource,
+    proposal: ProposalConfig,
     jax,
     chain_method: str,
 ):
@@ -136,10 +155,10 @@ def run(
     )
 
     inputs = prepare_inference_inputs(
-        injection_catalog_path,
-        proposal_catalog_path,
+        injection_source,
+        proposal_source,
         fiducials=config.fiducials,
-        proposal_config=config.proposal,
+        proposal_config=proposal,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
     )
@@ -225,11 +244,13 @@ def save(
     mcmc,
     config: RunConfig,
     *,
+    proposal: ProposalConfig | None = None,
     timestamp: str | None = None,
     force: bool = False,
     marginalization: AmplitudeMarginalization | None = None,
 ) -> Path:
     """Write the ArviZ NetCDF chain, and log the IS health check."""
+    import json
     from functools import partial
 
     import arviz as az
@@ -241,6 +262,14 @@ def save(
     nc_path = ensure_chain_path_available(config, timestamp=timestamp, force=force)
 
     idata = az.from_numpyro(mcmc)
+
+    # The proposal density is derived, not configured, so the assembled JSON
+    # config does not carry it. Stamping it here keeps the chain the complete,
+    # self-describing record of what was sampled.
+    if proposal is not None:
+        idata.posterior.attrs["proposal"] = json.dumps(
+            proposal.model_dump(mode="json"), sort_keys=True
+        )
 
     if marginalization is not None:
         import jax
@@ -311,11 +340,62 @@ def save(
     return nc_path
 
 
+def resolve_run_proposal(
+    config: RunConfig, proposal_source: CatalogSource
+) -> ProposalConfig:
+    """Derive the importance-sampling density from the proposal bank itself.
+
+    Runs before ``configure_runtime`` -- reading HDF5 attributes needs no JAX --
+    so a fiducial/bank mismatch fails before a device is claimed. The bank is
+    the authority here, not the population config it was drawn from: that file
+    may have drifted since the bank was built.
+    """
+    md_path = proposal_source.md_bank_path
+    md_provenance = read_bank_provenance(md_path)
+    check_fiducials_match(md_provenance, config.fiducials, label=str(md_path))
+    uniform = None
+    if proposal_source.uniform_bank_path is not None:
+        uniform = read_bank_provenance(proposal_source.uniform_bank_path)
+    return resolve_proposal(
+        madau_dickinson_proposal(md_provenance, label=str(md_path)),
+        _uniform_proposal(uniform, proposal_source),
+        uniform_mixing_fraction=proposal_source.spec.uniform_mixing_fraction,
+        minimum_redshift=config.cosmology.minimum_redshift,
+        maximum_redshift=config.cosmology.maximum_redshift,
+    )
+
+
+def _uniform_proposal(provenance, proposal_source: CatalogSource):
+    """Narrow the uniform bank's recorded density, or return None."""
+    if provenance is None:
+        return None
+
+    match provenance.redshift_proposal:
+        case UniformRedshiftProposal() as density:
+            return density
+        case other:
+            raise ValueError(
+                f"bank {proposal_source.uniform_bank_path} was drawn from a "
+                f"{other.kind!r} redshift density; the uniform_bank role "
+                "requires a uniform-redshift bank"
+            )
+
+
+def _parse_bank_args(values: list[str]) -> dict[str, Path]:
+    """Parse repeated ``NAME=PATH`` flags into a bank-name -> path mapping."""
+    banks: dict[str, Path] = {}
+    for item in values:
+        name, sep, raw_path = item.partition("=")
+        if not sep or not name:
+            raise ValueError(f"--bank must be NAME=PATH, got {item!r}")
+        banks[name] = Path(raw_path).resolve()
+    return banks
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     config_path = args.config.resolve()
-    injection_catalog_path = args.injection_catalog.resolve()
-    proposal_catalog_path = args.proposal_catalog.resolve()
+    bank_paths = _parse_bank_args(args.banks)
     raw = load_mapping(config_path)
     config = build_run_config(
         raw,
@@ -341,13 +421,37 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_chain_path_available(config, timestamp=timestamp, force=args.force)
 
-    # Fail on missing catalogs before JAX claims a device.
-    for label, path in (
-        ("injection", injection_catalog_path),
-        ("proposal", proposal_catalog_path),
-    ):
-        if not path.is_file():
-            raise FileNotFoundError(f"{label} catalog not found: {path}")
+    from astrogwb_paper.catalogs import CatalogSource
+
+    injection_source = CatalogSource.resolve(
+        config.catalog.injection, bank_paths, role="injection"
+    )
+    proposal_source = CatalogSource.resolve(
+        config.catalog.proposal, bank_paths, role="proposal"
+    )
+
+    # Fail on missing bank files before JAX claims a device.
+    for source in (injection_source, proposal_source):
+        for label, path in (
+            ("md", source.md_bank_path),
+            ("uniform", source.uniform_bank_path),
+        ):
+            if path is not None and not path.is_file():
+                raise FileNotFoundError(f"{label} bank not found: {path}")
+
+    proposal = resolve_run_proposal(config, proposal_source)
+    logger.info(
+        "Proposal density from bank provenance: eps=%.4g z=[%.4g, %.4g] "
+        "H0=%.4g Omega_m=%.4g gamma=%.4g kappa=%.4g z_peak=%.4g",
+        proposal.uniform_mixing_fraction,
+        proposal.minimum_redshift,
+        proposal.maximum_redshift,
+        proposal.H0,
+        proposal.Omega_m,
+        proposal.gamma,
+        proposal.kappa,
+        proposal.z_peak,
+    )
 
     jax, chain_method = configure_runtime(
         num_chains=config.sampler.num_chains,
@@ -358,14 +462,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     mcmc, marginalization = run(
         config,
-        injection_catalog_path,
-        proposal_catalog_path,
+        injection_source,
+        proposal_source,
+        proposal,
         jax,
         chain_method,
     )
     save(
         mcmc,
         config,
+        proposal=proposal,
         timestamp=timestamp,
         force=args.force,
         marginalization=marginalization,

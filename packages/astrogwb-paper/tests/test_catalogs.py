@@ -1,165 +1,278 @@
+"""Runtime catalog composition: truncation and the in-memory bank mixture.
+
+The registry-validation half of this file went with ``inputs/catalogs.yaml``.
+What a composition *is* now lives on
+:class:`~astrogwb_paper.config.mcmc.CatalogSpec`, declared inline by each run;
+what remains testable here is the composition law itself.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
-import yaml
-from astrogwb_paper.config.catalogs import (
-    CATALOGS_PATH,
-    INJECTION_CATALOG_NAME,
-    catalog_recipe,
-    load_catalogs,
-    proposal_config,
-)
-from astrogwb_paper.config.loading import deep_merge, load_mapping
-from astrogwb_paper.paths import paper_project_root
+import xarray as xr
+from astrogwb.waveform import make_catalog, save_catalog
+from astrogwb_paper.catalogs import CatalogSource, truncate_catalog_samples
+from astrogwb_paper.config.mcmc import CatalogSpec
 from pydantic import ValidationError
 
-PAPER_ROOT = paper_project_root()
 
-
-def _inventory_copy() -> dict:
-    return load_mapping(PAPER_ROOT / CATALOGS_PATH)
-
-
-def _write_inventory(path: Path, raw: dict) -> None:
-    path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
-
-
-def test_inventory_declares_injection_and_proposal_catalogs() -> None:
-    catalogs = load_catalogs()
-
-    assert list(catalogs) == [
-        "injection-bns-n32768-eps=0-df1",
-        "bns-n32768-eps=0-df1-taylorf2",
-        "bns-n8192-eps=0-df1",
-        "bns-n16384-eps=0-df1",
-        "bns-n32768-eps=0-df1",
-        "bns-n16384-eps=0.1-df1",
-        "bns-n16384-eps=0.01-df1",
-        "bns-n16384-eps=0.001-df1",
-    ]
-    assert INJECTION_CATALOG_NAME == "injection-bns-n32768-eps=0-df1"
-    assert catalogs[INJECTION_CATALOG_NAME].population.uniform_mixing_fraction == 0
-    assert catalogs["bns-n16384-eps=0-df1"].population.num_samples == 16384
-    assert catalogs["bns-n16384-eps=0-df1"].population.uniform_mixing_fraction == 0
-    assert (
-        catalogs["bns-n16384-eps=0.01-df1"].population.uniform_mixing_fraction == 0.01
-    )
-    assert all(
-        recipe.waveform.frequency_resolution == 1.0 for recipe in catalogs.values()
+# --------------------------------------------------------------------------- #
+# truncate_catalog_samples (unaffected by the registry removal)
+# --------------------------------------------------------------------------- #
+def _catalog(redshift: np.ndarray, *, offset: float = 0.0) -> xr.Dataset:
+    return make_catalog(
+        frequencies=np.linspace(10.0, 50.0, 5),
+        polarization_power=np.arange(5 * redshift.size, dtype=float).reshape(
+            5, redshift.size
+        )
+        + offset,
+        source_parameters={
+            "redshift": redshift,
+            "luminosity_distance": 1.0e3 * (1.0 + redshift),
+        },
+        approximant="Toy",
+        minimum_frequency=10.0,
+        maximum_frequency=50.0,
+        reference_frequency=20.0,
+        sampling_frequency=128.0,
     )
 
 
-def test_taylorf2_catalog_only_changes_the_fiducial_waveform_approximant() -> None:
-    catalogs = load_catalogs()
-    fiducial = catalogs[INJECTION_CATALOG_NAME].model_dump()
-    taylorf2 = catalogs["bns-n32768-eps=0-df1-taylorf2"].model_dump()
+def test_truncate_catalog_samples_keeps_only_window_samples() -> None:
+    catalog = _catalog(np.array([0.05, 0.25, 0.4, 1.5, 21.0]))
 
-    assert fiducial["waveform"]["approximant"] == "IMRPhenomXAS_NRTidalv3"
-    assert taylorf2["waveform"]["approximant"] == "TaylorF2"
-    taylorf2["name"] = fiducial["name"]
-    taylorf2["waveform"]["approximant"] = fiducial["waveform"]["approximant"]
-    assert taylorf2 == fiducial
-
-
-def test_population_config_paths_are_shared_by_catalogs() -> None:
-    populations = [recipe.population for recipe in load_catalogs().values()]
-
-    assert {population.base_config for population in populations} == {
-        Path("inputs/populations/population.base.yaml")
-    }
-    assert {population.md_redshift_config for population in populations} == {
-        Path("inputs/populations/population.md.yaml")
-    }
-    assert {population.uniform_redshift_config for population in populations} == {
-        Path("inputs/populations/population.uniform-redshift.yaml")
-    }
-
-
-def test_population_overlays_differ_only_in_redshift() -> None:
-    population = next(iter(load_catalogs().values())).population
-    base = load_mapping(PAPER_ROOT / population.base_config)
-    md = deep_merge(base, load_mapping(PAPER_ROOT / population.md_redshift_config))
-    uniform = deep_merge(
-        base, load_mapping(PAPER_ROOT / population.uniform_redshift_config)
+    truncated = truncate_catalog_samples(
+        catalog, label="proposal", minimum_redshift=0.3, maximum_redshift=20.0
     )
 
-    md_parameters = dict(md["parameters"])
-    uniform_parameters = dict(uniform["parameters"])
-    md_parameters.pop("redshift")
-    uniform_parameters.pop("redshift")
-    assert md_parameters == uniform_parameters
+    kept = truncated.source_parameters.sel(parameter="redshift").values
+    np.testing.assert_allclose(kept, [0.4, 1.5])
+    # Rows stay consistent across every variable sharing the sample dim.
+    assert truncated.polarization_power.shape == (5, 2)
+    np.testing.assert_allclose(
+        truncated.polarization_power.values,
+        catalog.polarization_power.isel(sample=[2, 3]).values,
+    )
 
 
-def test_proposal_config_is_expanded_from_population_fragments() -> None:
-    proposal = proposal_config(catalog_recipe("bns-n16384-eps=0.1-df1"))
+def test_truncate_catalog_samples_rejects_empty_window() -> None:
+    catalog = _catalog(np.array([0.05, 0.25]))
 
-    assert proposal == {
-        "uniform_mixing_fraction": 0.1,
-        "minimum_redshift": 0.0,
-        "maximum_redshift": 20.0,
-        "n_grid": 4096,
-        "H0": 67.66,
-        "Omega_m": 0.3096,
-        "gamma": 1.42,
-        "kappa": 4.62,
-        "z_peak": 1.84,
-    }
+    with pytest.raises(ValueError, match="no samples in the analysis redshift window"):
+        truncate_catalog_samples(
+            catalog, label="injection", minimum_redshift=0.3, maximum_redshift=20.0
+        )
 
 
-def test_unknown_catalog_name_lists_choices() -> None:
-    with pytest.raises(ValueError, match="unknown catalog 'missing'"):
-        catalog_recipe("missing")
+def test_truncate_catalog_samples_requires_distance_column() -> None:
+    redshift = np.array([0.4, 1.5])
+    catalog = make_catalog(
+        frequencies=np.linspace(10.0, 50.0, 5),
+        polarization_power=np.ones((5, redshift.size)),
+        source_parameters={"redshift": redshift},
+        approximant="Toy",
+        minimum_frequency=10.0,
+        maximum_frequency=50.0,
+        reference_frequency=20.0,
+        sampling_frequency=128.0,
+    )
+
+    with pytest.raises(ValueError, match="missing required parameter"):
+        truncate_catalog_samples(
+            catalog, label="injection", minimum_redshift=0.3, maximum_redshift=20.0
+        )
 
 
-def test_catalog_inventory_rejects_unknown_top_level_keys(tmp_path: Path) -> None:
-    raw = _inventory_copy()
-    raw["extra"] = 1
-    inventory = tmp_path / "catalogs.yaml"
-    _write_inventory(inventory, raw)
-
-    with pytest.raises(ValueError, match="unknown top-level keys: extra"):
-        load_catalogs(inventory)
-
-
-def test_catalog_recipe_rejects_unknown_keys(tmp_path: Path) -> None:
-    raw = _inventory_copy()
-    raw["catalogs"]["bns-n16384-eps=0.1-df1"]["population"]["num_sample"] = 1
-    inventory = tmp_path / "catalogs.yaml"
-    _write_inventory(inventory, raw)
-
-    with pytest.raises(ValidationError, match="num_sample"):
-        load_catalogs(inventory)
+# --------------------------------------------------------------------------- #
+# CatalogSource.compose
+# --------------------------------------------------------------------------- #
+def _bank_file(path: Path, n: int, *, offset: float = 0.0) -> Path:
+    """A synthetic bank whose redshift encodes sample identity: offset + index."""
+    redshift = offset + np.arange(n, dtype=float)
+    save_catalog(path, _catalog(redshift))
+    return path
 
 
+def test_compose_catalog_eps0_is_a_bit_identical_bank_prefix(tmp_path: Path) -> None:
+    md_path = _bank_file(tmp_path / "md.h5", 10)
+    composition = CatalogSpec(md_bank="md", num_samples=4)
+
+    composed = CatalogSource(md_path, None, composition, "catalog").compose()
+
+    np.testing.assert_array_equal(
+        composed.source_parameters.sel(parameter="redshift").values,
+        [0.0, 1.0, 2.0, 3.0],
+    )
+    with xr.open_dataset(md_path, engine="h5netcdf") as full:
+        np.testing.assert_array_equal(
+            composed.polarization_power.values,
+            full.polarization_power.isel(sample=slice(0, 4)).values,
+        )
+
+
+def test_compose_catalog_rejects_oversized_request(tmp_path: Path) -> None:
+    md_path = _bank_file(tmp_path / "md.h5", 4)
+    composition = CatalogSpec(md_bank="md", num_samples=8)
+
+    with pytest.raises(
+        ValueError, match="holds 4 samples, but the composition needs 8"
+    ):
+        CatalogSource(md_path, None, composition, "catalog").compose()
+
+
+def test_compose_catalog_requires_uniform_bank_and_mixture_seed_when_mixing() -> None:
+    composition = CatalogSpec.model_construct(
+        md_bank="md",
+        uniform_bank=None,
+        num_samples=4,
+        uniform_mixing_fraction=0.2,
+        mixture_seed=None,
+    )
+
+    with pytest.raises(ValueError, match="requires both uniform_bank_path"):
+        CatalogSource(Path("unused.h5"), None, composition, "catalog").compose()
+
+
+def test_compose_catalog_mixture_component_counts_are_binomial(tmp_path: Path) -> None:
+    md_path = _bank_file(tmp_path / "md.h5", 2000, offset=0.0)
+    uniform_path = _bank_file(tmp_path / "uniform.h5", 2000, offset=1_000_000.0)
+    composition = CatalogSpec(
+        md_bank="md",
+        uniform_bank="uniform",
+        num_samples=1000,
+        uniform_mixing_fraction=0.2,
+        mixture_seed=7,
+    )
+
+    composed = CatalogSource(md_path, uniform_path, composition, "catalog").compose()
+
+    assert composed.sizes["sample"] == 1000
+    redshift = np.asarray(composed.source_parameters.sel(parameter="redshift").values)
+    n_uniform = int(np.sum(redshift >= 1_000_000.0))
+    # Binomial(1000, 0.2): mean 200, std ~12.6 -- generous tolerance for a fixed seed.
+    assert 130 < n_uniform < 270
+
+
+def test_compose_catalog_prefix_is_itself_a_valid_mixture_sample(
+    tmp_path: Path,
+) -> None:
+    """A prefix of a composed catalog reproduces the smaller composition exactly.
+
+    This is what makes `num_samples`, like `uniform_mixing_fraction`, a free
+    composition parameter with no extra generation cost: the RNG stream is
+    the same regardless of how many samples are ultimately requested.
+    """
+    md_path = _bank_file(tmp_path / "md.h5", 200, offset=0.0)
+    uniform_path = _bank_file(tmp_path / "uniform.h5", 200, offset=1_000_000.0)
+
+    def _composition(n: int) -> CatalogSpec:
+        return CatalogSpec(
+            md_bank="md",
+            uniform_bank="uniform",
+            num_samples=n,
+            uniform_mixing_fraction=0.3,
+            mixture_seed=11,
+        )
+
+    big = CatalogSource(md_path, uniform_path, _composition(50), "catalog").compose()
+    small = CatalogSource(md_path, uniform_path, _composition(20), "catalog").compose()
+
+    big_redshift = np.asarray(big.source_parameters.sel(parameter="redshift").values)
+    small_redshift = np.asarray(
+        small.source_parameters.sel(parameter="redshift").values
+    )
+    np.testing.assert_array_equal(big_redshift[:20], small_redshift)
+
+
+def test_compose_catalog_rejects_banks_with_different_waveform_settings(
+    tmp_path: Path,
+) -> None:
+    """The registry used to compare bank recipes; the banks now speak for themselves."""
+    md_path = _bank_file(tmp_path / "md.h5", 100)
+    uniform_path = tmp_path / "uniform.h5"
+    other = _catalog(np.arange(100, dtype=float) + 1_000_000.0)
+    other.attrs["approximant"] = "SomethingElse"
+    save_catalog(uniform_path, other)
+    spec = CatalogSpec(
+        md_bank="md",
+        uniform_bank="uniform",
+        num_samples=50,
+        uniform_mixing_fraction=0.2,
+        mixture_seed=11,
+    )
+
+    with pytest.raises(ValueError, match="different waveform settings: approximant"):
+        CatalogSource(md_path, uniform_path, spec, "proposal").compose()
+
+
+def test_compose_catalog_rejects_banks_with_different_frequency_grids(
+    tmp_path: Path,
+) -> None:
+    md_path = _bank_file(tmp_path / "md.h5", 100)
+    uniform_path = tmp_path / "uniform.h5"
+    redshift = np.arange(100, dtype=float) + 1_000_000.0
+    other = make_catalog(
+        frequencies=np.linspace(10.0, 60.0, 5),
+        polarization_power=np.ones((5, redshift.size)),
+        source_parameters={
+            "redshift": redshift,
+            "luminosity_distance": 1.0e3 * (1.0 + redshift),
+        },
+        approximant="Toy",
+        minimum_frequency=10.0,
+        maximum_frequency=50.0,
+        reference_frequency=20.0,
+        sampling_frequency=128.0,
+    )
+    save_catalog(uniform_path, other)
+    spec = CatalogSpec(
+        md_bank="md",
+        uniform_bank="uniform",
+        num_samples=50,
+        uniform_mixing_fraction=0.2,
+        mixture_seed=11,
+    )
+
+    with pytest.raises(ValueError, match="identical frequency grids"):
+        CatalogSource(md_path, uniform_path, spec, "proposal").compose()
+
+
+# --------------------------------------------------------------------------- #
+# CatalogSpec: the mixture invariants the retired registry used to enforce
+# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("epsilon", [0.0, 1.0])
-def test_uniform_fraction_accepts_endpoints(tmp_path: Path, epsilon: float) -> None:
-    raw = _inventory_copy()
-    raw["catalogs"]["bns-n16384-eps=0.1-df1"]["population"][
-        "uniform_mixing_fraction"
-    ] = epsilon
-    inventory = tmp_path / "catalogs.yaml"
-    _write_inventory(inventory, raw)
-
-    assert (
-        load_catalogs(inventory)[
-            "bns-n16384-eps=0.1-df1"
-        ].population.uniform_mixing_fraction
-        == epsilon
-    )
+def test_uniform_fraction_accepts_endpoints(epsilon: float) -> None:
+    kwargs = {"md_bank": "m", "num_samples": 1, "uniform_mixing_fraction": epsilon}
+    if epsilon > 0.0:
+        kwargs |= {"uniform_bank": "u", "mixture_seed": 3}
+    assert CatalogSpec.model_validate(kwargs).uniform_mixing_fraction == epsilon
 
 
 @pytest.mark.parametrize("epsilon", [-0.1, 1.1])
-def test_uniform_fraction_rejects_values_outside_unit_interval(
-    tmp_path: Path, epsilon: float
-) -> None:
-    raw = _inventory_copy()
-    raw["catalogs"]["bns-n16384-eps=0.1-df1"]["population"][
-        "uniform_mixing_fraction"
-    ] = epsilon
-    inventory = tmp_path / "catalogs.yaml"
-    _write_inventory(inventory, raw)
-
+def test_uniform_fraction_rejects_values_outside_unit_interval(epsilon: float) -> None:
     with pytest.raises(ValidationError):
-        load_catalogs(inventory)
+        CatalogSpec.model_validate(
+            {"md_bank": "m", "num_samples": 1, "uniform_mixing_fraction": epsilon}
+        )
+
+
+def test_positive_fraction_requires_uniform_bank_and_mixture_seed() -> None:
+    with pytest.raises(ValidationError, match="requires both"):
+        CatalogSpec.model_validate(
+            {"md_bank": "m", "num_samples": 1, "uniform_mixing_fraction": 0.1}
+        )
+
+
+def test_zero_fraction_forbids_uniform_bank_and_mixture_seed() -> None:
+    with pytest.raises(ValidationError, match="forbids"):
+        CatalogSpec.model_validate(
+            {
+                "md_bank": "m",
+                "num_samples": 1,
+                "uniform_bank": "u",
+                "mixture_seed": 3,
+            }
+        )

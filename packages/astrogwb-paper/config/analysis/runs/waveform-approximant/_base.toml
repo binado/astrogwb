@@ -1,0 +1,11 @@
+# Waveform systematics: the same H0 measurement against an IMRPhenom
+# proposal and a TaylorF2 one, both drawn from the seed-41 population.
+
+sampled_params = ["H0"]
+
+[analysis]
+detectors = ["S1", "R1", "C1"]
+
+[sampler]
+num_warmup = 500
+dense_mass = false

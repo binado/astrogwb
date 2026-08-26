@@ -18,12 +18,11 @@ Usage::
 
     uv run astrogwb-profile-model \
         --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
-        --injection-catalog outputs/catalogs/injection-bns-n32768-eps=0-df1.h5 \
-        --proposal-catalog outputs/catalogs/bns-n16384-eps=0-df1.h5
+        --bank md-imrphenom-s41=outputs/banks/md-imrphenom-s41.h5 \
+        --bank md-imrphenom-s42=outputs/banks/md-imrphenom-s42.h5
 
-Configs are assembled from the base and run overlays in ``inputs/experiments.yaml``
-by the ``assemble_config`` workflow rule or by
-``astrogwb-validate-config``; see docs/running-inference.md.
+Configs are assembled from ``config/analysis/`` by the ``assemble_config``
+workflow rule or by ``astrogwb-assemble-config``; see docs/running-inference.md.
 
 Open the generated ``perfetto_trace.json.gz`` at https://ui.perfetto.dev
 (no TensorBoard install required).
@@ -36,10 +35,15 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from astrogwb_paper.config.loading import load_mapping
-from astrogwb_paper.config.mcmc import RunConfig, build_run_config
+from astrogwb_paper.cli.run_mcmc import resolve_run_proposal
+from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig, build_run_config
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
+from astrogwb_paper.utils import load_mapping
+
+if TYPE_CHECKING:
+    from astrogwb_paper.catalogs import CatalogSource
 
 logger = logging.getLogger("profile_model")
 
@@ -58,16 +62,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to the TOML or JSON config file used by astrogwb-run-mcmc.",
     )
     parser.add_argument(
-        "--injection-catalog",
-        type=Path,
-        required=True,
-        help="Independent fiducial waveform catalog used to construct observed data.",
-    )
-    parser.add_argument(
-        "--proposal-catalog",
-        type=Path,
-        required=True,
-        help="Waveform catalog used by the profiled model.",
+        "--bank",
+        dest="banks",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help=(
+            "One waveform bank file, as NAME=PATH; repeat once per distinct "
+            "bank the run config's [catalog.injection] / [catalog.proposal] "
+            "names."
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -98,8 +102,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_potential(
     config: RunConfig,
-    injection_catalog_path: Path,
-    proposal_catalog_path: Path,
+    injection_source: CatalogSource,
+    proposal_source: CatalogSource,
+    proposal: ProposalConfig,
     jax,
 ):
     """Build the production model inputs and return (potential_fn, init_params).
@@ -118,10 +123,10 @@ def build_potential(
     )
 
     inputs = prepare_inference_inputs(
-        injection_catalog_path,
-        proposal_catalog_path,
+        injection_source,
+        proposal_source,
         fiducials=config.fiducials,
-        proposal_config=config.proposal,
+        proposal_config=proposal,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
     )
@@ -152,11 +157,21 @@ def _bench(fn, x, iters: int) -> float:
     return 1e3 * (time.perf_counter() - t0) / iters
 
 
+def _parse_bank_args(values: list[str]) -> dict[str, Path]:
+    """Parse repeated ``NAME=PATH`` flags into a bank-name -> path mapping."""
+    banks: dict[str, Path] = {}
+    for item in values:
+        name, sep, raw_path = item.partition("=")
+        if not sep or not name:
+            raise ValueError(f"--bank must be NAME=PATH, got {item!r}")
+        banks[name] = Path(raw_path).resolve()
+    return banks
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     config_path = args.config.resolve()
-    injection_catalog_path = args.injection_catalog.resolve()
-    proposal_catalog_path = args.proposal_catalog.resolve()
+    bank_paths = _parse_bank_args(args.banks)
     outdir = args.outdir.resolve()
     logging.basicConfig(
         level=logging.INFO,
@@ -167,6 +182,19 @@ def main(argv: list[str] | None = None) -> None:
     config = build_run_config(raw, seed=args.seed)
     logger.info("Config: %s", config_path)
 
+    # Resolve the proposal density from bank provenance before JAX starts, the
+    # same way astrogwb-run-mcmc does -- what is profiled must be the
+    # production model on production inputs.
+    from astrogwb_paper.catalogs import CatalogSource
+
+    injection_source = CatalogSource.resolve(
+        config.catalog.injection, bank_paths, role="injection"
+    )
+    proposal_source = CatalogSource.resolve(
+        config.catalog.proposal, bank_paths, role="proposal"
+    )
+    proposal = resolve_run_proposal(config, proposal_source)
+
     jax, _ = configure_runtime(
         num_chains=config.sampler.num_chains,
         platform=args.platform,
@@ -176,7 +204,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     potential_fn, init_params = build_potential(
-        config, injection_catalog_path, proposal_catalog_path, jax
+        config, injection_source, proposal_source, proposal, jax
     )
 
     forward_mode = config.sampler.forward_mode_differentiation and not args.reverse_ad

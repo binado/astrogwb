@@ -1,0 +1,10 @@
+# Xi_0 alone (n pinned): a 1D problem.
+
+sampled_params = ["xi_0"]
+
+[analysis]
+detectors = ["S1", "R1", "C1"]
+
+[sampler]
+num_warmup = 500
+dense_mass = false

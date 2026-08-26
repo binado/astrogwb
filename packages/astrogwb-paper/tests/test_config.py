@@ -5,14 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from astrogwb_paper.config.experiments import load_base, load_experiments, overlay_for
-from astrogwb_paper.config.loading import deep_merge, load_mapping, merge_run_overlay
-from astrogwb_paper.config.mcmc import (
-    build_run_config,
-    prior_to_spec,
-    save_config,
+from astrogwb_paper.config.mcmc import build_run_config, prior_to_spec, save_config
+from astrogwb_paper.config.runs import (
+    assemble_run,
+    discover_runs,
+    load_base,
+    merge_run_overlay,
 )
 from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.utils import deep_merge, load_mapping
 from config_fixtures import example_raw
 from pydantic import ValidationError
 
@@ -96,6 +97,20 @@ def test_analysis_grid_mirrors_the_config() -> None:
     )
 
 
+def test_run_config_carries_no_proposal_density() -> None:
+    """The density is derived from bank provenance, so it is not an input.
+
+    Window equality with [cosmology] used to need a validator; it now holds by
+    construction, because `resolve_proposal` is handed the run's own window.
+    """
+    config = build_run_config(example_raw())
+
+    assert not hasattr(config, "proposal")
+    assert "proposal" not in config.model_dump(mode="json")
+    # `catalog.proposal` is the catalog, not the density -- it stays.
+    assert config.catalog.proposal.md_bank
+
+
 def test_analysis_grid_is_not_serialized(tmp_path) -> None:
     """`analysis_grid` is a plain property, never a computed field.
 
@@ -122,15 +137,16 @@ def test_every_experiment_run_assembles_into_a_valid_config() -> None:
     This replaces a check over two committed example configs. Assembling each
     experiment run is both wider coverage and the thing that actually ships.
     """
-    base = load_base()
-    assert "runtime" not in base
+    assert "runtime" not in load_base()
 
-    specs = load_experiments()
-    assert specs, "no experiments discovered"
-    for spec in specs.values():
-        for run in spec.runs:
-            raw = overlay_for(spec, run, base=base)
-            assert "runtime" not in raw, f"{spec.name}/{run} declares a runtime section"
+    runs = discover_runs()
+    assert runs, "no experiments discovered"
+    for experiment, names in runs.items():
+        for run in names:
+            raw = assemble_run(experiment, run)
+            assert "runtime" not in raw, (
+                f"{experiment}/{run} declares a runtime section"
+            )
             build_run_config(raw)
 
 

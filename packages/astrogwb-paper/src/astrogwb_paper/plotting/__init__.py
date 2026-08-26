@@ -79,8 +79,8 @@ MERGER_RATE_LEGEND: dict[str, object] = {
 # order on argv, legend order, and the color/linestyle assignment made by
 # `detector_network_styles`.
 #
-# Only the label is owned here. Each run's *detector list* stays in
-# inputs/experiments.yaml and is attached by
+# Only the label is owned here. Each run's *detector list* is read back out of
+# that run's assembled config by
 # `astrogwb_paper.config.figures.resolve_networks`, so the detectors a figure
 # reports an SNR for are always the ones its chain was sampled with.
 DETECTOR_NETWORKS: tuple[tuple[str, str], ...] = (

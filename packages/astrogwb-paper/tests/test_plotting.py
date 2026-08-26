@@ -7,7 +7,7 @@ import pytest
 matplotlib = pytest.importorskip("matplotlib")
 
 from astrogwb_paper import plotting
-from astrogwb_paper.config.figures import resolve_networks
+from astrogwb_paper.config.figures import Network
 
 
 def test_paper_mplstyle_sits_next_to_the_module() -> None:
@@ -39,7 +39,9 @@ def test_get_corner_kwargs_and_combo_colors() -> None:
 
 
 def test_detector_network_styles_pairs_et_and_et_plus_ce() -> None:
-    networks = resolve_networks("cosmological-parameters", plotting.DETECTOR_NETWORKS)
+    # `detector_network_styles` reads only `Network.name`, so the detectors are
+    # irrelevant here; hard-code them instead of resolving gitignored configs.
+    networks = [Network(name, label, ()) for name, label in plotting.DETECTOR_NETWORKS]
     colors, linestyles = plotting.detector_network_styles(networks)
 
     assert len(colors) == len(linestyles) == len(networks)

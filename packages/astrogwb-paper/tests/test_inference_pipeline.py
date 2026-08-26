@@ -21,9 +21,16 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astrogwb.waveform import make_catalog, save_catalog
+from astrogwb_paper.catalogs import CatalogSource
 from astrogwb_paper.cli.profile_model import build_potential
 from astrogwb_paper.cli.run_mcmc import run
-from astrogwb_paper.config.mcmc import RunConfig, build_run_config
+from astrogwb_paper.config.banks import MadauDickinsonProposal, resolve_proposal
+from astrogwb_paper.config.mcmc import (
+    CatalogSpec,
+    ProposalConfig,
+    RunConfig,
+    build_run_config,
+)
 from astrogwb_paper.inference import prepare_inference_inputs, prepare_observation
 from config_fixtures import example_raw
 
@@ -34,6 +41,9 @@ FREQUENCIES = np.linspace(10.0, 50.0, 5)
 BAND = (20.0, 40.0)
 N_BAND = 3
 N_SOURCES = 8
+# Catalogs span below the assembled analysis window (minimum_redshift 0.3):
+# linspace(0.05, 1.5, 8) keeps 6 samples after truncation.
+N_RETAINED = 6
 
 
 def _write_catalog(
@@ -69,14 +79,49 @@ def _write_catalog(
     return path
 
 
-@pytest.fixture
-def injection_catalog(tmp_path: Path) -> Path:
-    return _write_catalog(tmp_path / "injection.h5", proposal=False, seed=0)
+def _source(
+    bank_path: Path, *, num_samples: int = N_SOURCES, role: str = "proposal"
+) -> CatalogSource:
+    spec = CatalogSpec(md_bank="test-bank", num_samples=num_samples)
+    return CatalogSource(bank_path, None, spec, role)
+
+
+def _proposal(config: RunConfig) -> ProposalConfig:
+    """The density production derives from bank provenance, built inline here.
+
+    These tests write synthetic banks with no provenance attrs, so the
+    descriptor is constructed from the run's own fiducials -- the same values a
+    real bank would have recorded, since check_fiducials_match requires them to
+    agree.
+    """
+    return resolve_proposal(
+        MadauDickinsonProposal(
+            z_min=0.0,
+            z_max=20.0,
+            gamma=config.fiducials["gamma"],
+            kappa=config.fiducials["kappa"],
+            z_peak=config.fiducials["z_peak"],
+            H0=config.fiducials["H0"],
+            Omega_m=config.fiducials["Omega_m"],
+        ),
+        None,
+        uniform_mixing_fraction=0.0,
+        minimum_redshift=config.cosmology.minimum_redshift,
+        maximum_redshift=config.cosmology.maximum_redshift,
+    )
 
 
 @pytest.fixture
-def proposal_catalog(tmp_path: Path) -> Path:
-    return _write_catalog(tmp_path / "proposal.h5", proposal=True, seed=1)
+def injection_catalog(tmp_path: Path) -> CatalogSource:
+    return _source(
+        _write_catalog(tmp_path / "injection.h5", proposal=False, seed=0),
+        role="injection",
+    )
+
+
+@pytest.fixture
+def proposal_catalog(tmp_path: Path) -> CatalogSource:
+    return _source(_write_catalog(tmp_path / "proposal.h5", proposal=True, seed=1))
 
 
 def _config(**overrides: Any) -> RunConfig:
@@ -100,7 +145,9 @@ def _config(**overrides: Any) -> RunConfig:
 # --------------------------------------------------------------------------- #
 # prepare_observation / prepare_inference_inputs
 # --------------------------------------------------------------------------- #
-def test_prepare_observation_keeps_arrays_unmasked(injection_catalog: Path) -> None:
+def test_prepare_observation_keeps_arrays_unmasked(
+    injection_catalog: CatalogSource,
+) -> None:
     config = _config()
 
     observation = prepare_observation(
@@ -122,7 +169,7 @@ def test_prepare_observation_keeps_arrays_unmasked(injection_catalog: Path) -> N
 
 
 def test_masked_model_kwargs_masks_frequencies_but_not_samples(
-    injection_catalog: Path, proposal_catalog: Path
+    injection_catalog: CatalogSource, proposal_catalog: CatalogSource
 ) -> None:
     config = _config()
 
@@ -130,7 +177,7 @@ def test_masked_model_kwargs_masks_frequencies_but_not_samples(
         injection_catalog,
         proposal_catalog,
         fiducials=config.fiducials,
-        proposal_config=config.proposal,
+        proposal_config=_proposal(config),
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
     )
@@ -139,15 +186,15 @@ def test_masked_model_kwargs_masks_frequencies_but_not_samples(
     assert kwargs["frequencies"].shape == (N_BAND,)
     assert kwargs["observed_spectral_density"].shape == (N_BAND,)
     assert kwargs["effective_psd"].shape == (N_BAND,)
-    assert kwargs["polarization_power"].shape == (N_BAND, N_SOURCES)
+    assert kwargs["polarization_power"].shape == (N_BAND, N_RETAINED)
     # `samples` is per-source, not per-frequency. Masking it would silently
     # truncate the population and change every posterior without erroring.
     for name, values in kwargs["samples"].items():
-        assert values.shape == (N_SOURCES,), name
+        assert values.shape == (N_RETAINED,), name
 
 
 def test_mismatched_frequency_grids_are_rejected(
-    injection_catalog: Path, proposal_catalog: Path, tmp_path: Path
+    injection_catalog: CatalogSource, proposal_catalog: CatalogSource, tmp_path: Path
 ) -> None:
     shifted = _write_catalog(
         tmp_path / "shifted.h5",
@@ -160,16 +207,16 @@ def test_mismatched_frequency_grids_are_rejected(
     with pytest.raises(ValueError, match="identical frequency grids"):
         prepare_inference_inputs(
             injection_catalog,
-            shifted,
+            _source(shifted),
             fiducials=config.fiducials,
-            proposal_config=config.proposal,
+            proposal_config=_proposal(config),
             grid=config.analysis_grid,
             detectors=config.analysis.detectors,
         )
 
 
 def test_catalog_without_stored_proposal_density_is_accepted(
-    injection_catalog: Path,
+    injection_catalog: CatalogSource,
 ) -> None:
     config = _config()
 
@@ -177,7 +224,7 @@ def test_catalog_without_stored_proposal_density_is_accepted(
         injection_catalog,
         injection_catalog,
         fiducials=config.fiducials,
-        proposal_config=config.proposal,
+        proposal_config=_proposal(config),
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
     )
@@ -189,12 +236,12 @@ def test_catalog_without_stored_proposal_density_is_accepted(
 # The two runner entrypoints
 # --------------------------------------------------------------------------- #
 def test_build_potential_returns_a_finite_potential(
-    injection_catalog: Path, proposal_catalog: Path
+    injection_catalog: CatalogSource, proposal_catalog: CatalogSource
 ) -> None:
     config = _config()
 
     potential_fn, init_params = build_potential(
-        config, injection_catalog, proposal_catalog, jax
+        config, injection_catalog, proposal_catalog, _proposal(config), jax
     )
 
     assert set(init_params) == set(config.sampled_params)
@@ -202,12 +249,17 @@ def test_build_potential_returns_a_finite_potential(
 
 
 def test_run_samples_every_sampled_parameter(
-    injection_catalog: Path, proposal_catalog: Path
+    injection_catalog: CatalogSource, proposal_catalog: CatalogSource
 ) -> None:
     config = _config()
 
     mcmc, marginalization = run(
-        config, injection_catalog, proposal_catalog, jax, "sequential"
+        config,
+        injection_catalog,
+        proposal_catalog,
+        _proposal(config),
+        jax,
+        "sequential",
     )
 
     assert marginalization is None

@@ -27,8 +27,8 @@
 # via `numpyro.infer.util.log_density`, which gives the correct unnormalized
 # log-posterior (`log prior + log likelihood`) and is robust at the prior bounds.
 #
-# To run the notebook end-to-end, point `INJECTION_CATALOG_PATH` and
-# `PROPOSAL_CATALOG_PATH` at the two waveform catalogs used by `mcmc.py`.
+# To run the notebook end-to-end, point `INJECTION_BANK_PATH` and
+# `PROPOSAL_BANK_PATH` at the two waveform banks used by `mcmc.py`.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -64,13 +64,15 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 )
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb_paper.catalogs import (
+    CatalogSource,
     compute_proposal_logprob,
     compute_fiducial_injection_spectrum,
-    load_propagated_catalog,
+    propagate_catalog,
     samples_from_catalog,
-    validate_catalog_samples,
+    truncate_catalog_samples,
     validate_matching_frequency_grids,
 )
+from astrogwb_paper.config.figures import load_injection_spec, load_proposal_spec
 from astrogwb_paper.config.mcmc import ProposalConfig
 from astrogwb_paper.paths import paper_project_root
 
@@ -89,10 +91,8 @@ jax.config.update("jax_enable_x64", True)
 DEBUG = False  # small smoke settings for first runs; set False for the production run
 
 ROOT_DIR = paper_project_root()
-INJECTION_CATALOG_PATH = (
-    ROOT_DIR / "outputs/catalogs/injection-bns-n32768-eps=0-df1.h5"
-)
-PROPOSAL_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/bns-n16384-eps=0-df1.h5"
+INJECTION_BANK_PATH = ROOT_DIR / "outputs/banks/md-imrphenom-s41.h5"
+PROPOSAL_BANK_PATH = ROOT_DIR / "outputs/banks/md-imrphenom-s42.h5"
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -108,7 +108,7 @@ if DEBUG:
 
 
 # Redshift grid for the cosmology integrals (and MD normalization)
-minimum_redshift = 0.0
+minimum_redshift = 0.3
 maximum_redshift = 20.0
 n_grid = 256  # grid points for cosmology integrals / MD normalization
 
@@ -161,15 +161,23 @@ constants = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # See `mcmc.py` for the injection/proposal split and full catalog schema.
 
 # %%
-injection = load_propagated_catalog(INJECTION_CATALOG_PATH, fiducials=fiducials)
-proposal = load_propagated_catalog(PROPOSAL_CATALOG_PATH, fiducials=fiducials)
-validate_catalog_samples(
+# The two catalogs are read off an assembled run config, so the notebook
+# composes exactly what the workflow's runs compose.
+injection_source = CatalogSource(
+    INJECTION_BANK_PATH, None, load_injection_spec(), "injection"
+)
+proposal_source = CatalogSource(
+    PROPOSAL_BANK_PATH, None, load_proposal_spec(), "proposal"
+)
+injection = propagate_catalog(injection_source.compose(), fiducials=fiducials)
+proposal = propagate_catalog(proposal_source.compose(), fiducials=fiducials)
+injection = truncate_catalog_samples(
     injection,
     label="injection",
     minimum_redshift=minimum_redshift,
     maximum_redshift=maximum_redshift,
 )
-validate_catalog_samples(
+proposal = truncate_catalog_samples(
     proposal,
     label="proposal",
     minimum_redshift=minimum_redshift,
@@ -235,7 +243,7 @@ proposal_logprob = compute_proposal_logprob(
     samples["redshift"],
     ProposalConfig(
         uniform_mixing_fraction=0.1,
-        minimum_redshift=0.0,
+        minimum_redshift=0.3,
         maximum_redshift=20.0,
         n_grid=4096,
         H0=67.66,
@@ -768,8 +776,8 @@ else:
     )
 
 run_config = {
-    "injection_catalog_path": str(INJECTION_CATALOG_PATH),
-    "proposal_catalog_path": str(PROPOSAL_CATALOG_PATH),
+    "injection_bank_path": str(INJECTION_BANK_PATH),
+    "proposal_bank_path": str(PROPOSAL_BANK_PATH),
     "detectors": list(detnames),
     "seed": seed,
     "observation_time": observation_time,

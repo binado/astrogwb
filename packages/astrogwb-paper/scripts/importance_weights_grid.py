@@ -28,12 +28,18 @@ import numpyro.distributions as dist
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb.waveform import open_catalog
-from astrogwb_paper.catalogs import compute_proposal_logprob, samples_from_catalog
-from astrogwb_paper.config.catalogs import catalog_recipe, proposal_config
-from astrogwb_paper.config.experiments import DEFAULT_CATALOG
-from astrogwb_paper.config.figures import load_fiducials
-from astrogwb_paper.config.mcmc import ProposalConfig
+from astrogwb_paper.catalogs import (
+    CatalogSource,
+    compute_proposal_logprob,
+    samples_from_catalog,
+    truncate_catalog_samples,
+)
+from astrogwb_paper.config.banks import (
+    madau_dickinson_proposal,
+    read_bank_provenance,
+    resolve_proposal,
+)
+from astrogwb_paper.config.figures import load_fiducials, load_proposal_spec
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
@@ -48,7 +54,7 @@ jax.config.update("jax_enable_x64", True)
 EPS = 1e-3
 NPOINTS = 64
 CHUNK_SIZE = 64
-Z_MIN = 0.0
+Z_MIN = 0.3
 Z_MAX = 20.0
 N_REDSHIFT_GRID = 256
 
@@ -177,21 +183,29 @@ def main(argv: Sequence[str] | None = None) -> None:
     fiducials = load_fiducials()
     use_paper_style()
 
-    catalog = open_catalog(catalog_path)
+    spec = load_proposal_spec()
+    source = CatalogSource(catalog_path, None, spec, "proposal")
+    catalog = truncate_catalog_samples(
+        source.compose(),
+        label="proposal",
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+    )
     samples = samples_from_catalog(catalog)
-    missing = [
-        name for name in ("redshift", "luminosity_distance") if name not in samples
-    ]
-    if missing:
-        raise ValueError(
-            "catalog samples are missing required parameter(s): " + ", ".join(missing)
-        )
     n_samples = int(np.asarray(samples["redshift"]).shape[0])
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_REDSHIFT_GRID)
-    proposal = ProposalConfig.model_validate(
-        proposal_config(catalog_recipe(DEFAULT_CATALOG))
+    # The proposal density comes from the bank's own provenance, exactly as
+    # astrogwb-run-mcmc resolves it -- so this figure reweights against the
+    # same denominator the chains did.
+    provenance = read_bank_provenance(catalog_path)
+    proposal = resolve_proposal(
+        madau_dickinson_proposal(provenance, label=str(catalog_path)),
+        None,
+        uniform_mixing_fraction=spec.uniform_mixing_fraction,
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
     )
     merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=fiducials,
