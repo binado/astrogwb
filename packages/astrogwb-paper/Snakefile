@@ -131,6 +131,7 @@ rule waveform_bank:
 
 
 rule banks:
+    """Aggregate target: build every bank declared in config/banks/."""
     input:
         BANK_OUTPUTS,
 
@@ -157,11 +158,13 @@ rule assemble_config:
 
 
 rule configs:
+    """Aggregate target: assemble every run config without sampling."""
     input:
         CONFIG_OUTPUTS,
 
 
 rule run_mcmc:
+    """Sample one run into outputs/chains/<experiment>/<run>.nc."""
     input:
         config=CONFIG_PATTERN,
         banks=run_bank_inputs,
@@ -204,6 +207,7 @@ rule run_mcmc:
 
 
 rule plot_cosmological_parameters:
+    """Cosmological-parameter section: five figures and two table pairs."""
     input:
         # Legend order comes from plotting.DETECTOR_NETWORKS, which the
         # script reads too -- one list, so chain and label order cannot drift.
@@ -254,6 +258,7 @@ rule plot_cosmological_parameters:
 
 
 rule plot_modified_propagation:
+    """Modified-propagation section: corners, marginal overlay, and tables."""
     input:
         xi0_chain="outputs/chains/modified-propagation/Xi_0.nc",
         xi0_n_chain=(
@@ -289,6 +294,7 @@ rule plot_modified_propagation:
 
 
 rule amplitude_toy:
+    """Single-amplitude toy MCMC and its Fisher-overlay figure."""
     input:
         catalog=INJECTION_BANK,
         config=FIGURE_CONFIG,
@@ -303,6 +309,7 @@ rule amplitude_toy:
 
 
 rule fiducial_spectrum:
+    """Fiducial injection spectrum and per-network effective PSDs."""
     input:
         catalog=INJECTION_BANK,
         # Borrows the cosmological-parameters networks; reads no chains.
@@ -321,6 +328,7 @@ rule fiducial_spectrum:
 
 
 rule importance_weights_grid:
+    """Relative-ESS heatmaps over the H0-Omega_m and Xi0-n prior grids."""
     input:
         catalog=DEFAULT_PROPOSAL_BANK,
         config=FIGURE_CONFIG,
@@ -338,6 +346,7 @@ rule importance_weights_grid:
 
 
 rule experiments:
+    """Aggregate target: every chain of every experiment, no figures."""
     input:
         CHAIN_OUTPUTS,
 
@@ -345,6 +354,7 @@ rule experiments:
 for _experiment in runs:
 
     rule:
+        """Aggregate target: every chain of one experiment."""
         name: run_target(_experiment)
         localrule: True
         input:
