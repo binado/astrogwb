@@ -114,12 +114,7 @@ localrules:
 
 
 rule waveform_bank:
-    """Population draw + waveform generation, in one process.
-
-    The population never lands on disk: it was a temp() node with exactly one
-    consumer, and two banks share one graph at different seeds, so keying an
-    intermediate by bank made no sense. See cli/generate_bank.py.
-    """
+    """Population draw + waveform generation, in one process."""
     input:
         config=BANK_CONFIG_PATTERN,
         population=bank_population,
@@ -137,14 +132,7 @@ rule banks:
 
 
 rule assemble_config:
-    """One config per run, so a config edit retriggers exactly its own chain.
-
-    This is what removed the stale-input wrapper on run_mcmc's config input:
-    the previous single rule emitted all 26 configs at once, so any edit
-    invalidated every one of them, and the wrapper was the only way to keep
-    sampling from re-running wholesale. It also meant config changes never
-    retriggered anything.
-    """
+    """One config per run, so a config edit retriggers exactly its own chain."""
     input:
         base=sorted(str(path) for path in Path("config/analysis/base").glob("*.toml")),
         experiment_base="config/analysis/runs/{experiment}/_base.toml",
