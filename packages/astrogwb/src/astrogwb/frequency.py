@@ -2,45 +2,45 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
+from numpy.typing import ArrayLike
 
 __all__ = [
-    "apply_frequency_mask",
-    "frequency_mask",
-    "frequency_spacing",
+    "frequency_slice",
     "noise_weighted_inner_product",
 ]
 
 
-def frequency_spacing(frequencies: jax.Array) -> jax.Array:
-    """Mean consecutive spacing Δf from a frequency grid (Hz)."""
-    return jnp.mean(jnp.diff(frequencies))
-
-
-def frequency_mask(
-    frequencies: jax.Array,
+def frequency_slice(
+    frequencies: ArrayLike,
     *,
     fmin: float | None = None,
     fmax: float | None = None,
-) -> jax.Array:
-    mask = jnp.ones_like(frequencies, dtype=bool)
-    if fmin is not None:
-        mask = mask & (frequencies >= fmin)
-    if fmax is not None:
-        mask = mask & (frequencies <= fmax)
-    return mask
+) -> slice:
+    """Return the contiguous slice inside the inclusive frequency bounds."""
+    values = np.asarray(frequencies)
+    if values.ndim != 1:
+        raise ValueError("frequencies must be one-dimensional")
+    if values.size == 0:
+        raise ValueError("frequencies must contain at least one bin")
+    if values.size > 1 and not np.all(np.diff(values) > 0.0):
+        raise ValueError("frequencies must be strictly increasing")
+    if fmin is not None and fmax is not None and fmin > fmax:
+        raise ValueError(f"fmin ({fmin}) must be <= fmax ({fmax})")
 
-
-def apply_frequency_mask(
-    mask: jax.Array,
-    *arrays: jax.Array,
-    axis: int = 0,
-) -> tuple[jax.Array, ...]:
-    """Apply a boolean frequency mask along ``axis`` of every array.
-
-    Defaults to ``axis=0`` to match this package's ``(F, ...)`` layout
-    (e.g. polarization power of shape ``(F, N)``).
-    """
-    return tuple(jnp.compress(mask, array, axis=axis) for array in arrays)
+    start = 0 if fmin is None else int(np.searchsorted(values, fmin, side="left"))
+    stop = (
+        values.shape[0]
+        if fmax is None
+        else int(np.searchsorted(values, fmax, side="right"))
+    )
+    if start >= stop:
+        bounds = (
+            f"[{fmin if fmin is not None else '-inf'}, "
+            f"{fmax if fmax is not None else 'inf'}]"
+        )
+        raise ValueError(f"frequency band {bounds} contains no bins")
+    return slice(start, stop)
 
 
 def noise_weighted_inner_product(

@@ -34,11 +34,10 @@ def _marginalized_raw() -> dict:
 
 
 _MODEL_KWARGS: dict[str, Any] = {
-    "frequencies": jnp.array([10.0, 20.0]),
     "polarization_power": jnp.ones((2, 2)),
     "samples": {"sentinel": jnp.ones(2)},
     "observed_spectral_density": jnp.ones(2),
-    "effective_psd": jnp.ones(2),
+    "noise_scale": jnp.ones(2),
 }
 
 

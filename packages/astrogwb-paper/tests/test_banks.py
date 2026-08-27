@@ -75,6 +75,7 @@ def _bank_file(path: Path, extra_attrs: dict[str, Any] | None) -> Path:
             maximum_frequency=50.0,
             reference_frequency=20.0,
             sampling_frequency=128.0,
+            df=40.0 / 3.0,
             extra_attrs=extra_attrs,
         ),
     )

@@ -29,6 +29,7 @@ _SHARED_BANK_ATTRS = (
     "maximum_frequency",
     "reference_frequency",
     "sampling_frequency",
+    "df",
 )
 
 

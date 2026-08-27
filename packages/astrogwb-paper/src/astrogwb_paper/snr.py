@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 
 import jax.numpy as jnp
 from astrogwb.detector import effective_psd, load_sensitivity_map
-from astrogwb.frequency import frequency_spacing as compute_frequency_spacing
 from astrogwb.gwb import spectral_snr
 from astrogwb.utils import years_to_seconds
 
@@ -53,9 +52,8 @@ def compute_network_snrs(
     )
     observation = prepare_observation(source, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies
-    mask = observation.frequency_mask
+    frequency_slice = observation.frequency_slice
     observed_spectral_density = observation.spectral_density
-    frequency_spacing = compute_frequency_spacing(frequencies)
     observation_seconds = years_to_seconds(grid.observation_time)
 
     rows: list[dict[str, Any]] = []
@@ -67,10 +65,10 @@ def compute_network_snrs(
         )
         snr = float(
             spectral_snr(
-                observed_spectral_density[mask],
-                effective_noise[mask],
+                observed_spectral_density[frequency_slice],
+                effective_noise[frequency_slice],
                 observation_seconds,
-                frequency_spacing,
+                observation.df,
             )
         )
         rows.append(

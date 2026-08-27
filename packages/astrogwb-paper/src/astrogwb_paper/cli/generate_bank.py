@@ -288,6 +288,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         maximum_frequency=waveform.maximum_frequency,
         reference_frequency=waveform.reference_frequency,
         sampling_frequency=waveform.sampling_frequency,
+        df=effective_df,
         extra_attrs=provenance.to_dict(),
     )
 

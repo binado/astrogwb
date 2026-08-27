@@ -55,8 +55,8 @@ import numpy as np
 import numpyro
 import numpyro.distributions as dist
 import xarray as xr
-from astrogwb.detector import effective_psd, load_sensitivity_map
-from astrogwb.frequency import apply_frequency_mask, frequency_mask
+from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
+from astrogwb.frequency import frequency_slice
 from astrogwb.gwb import spectral_density
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     amplitude_H0_fn,
@@ -271,6 +271,7 @@ def main(argv: list[str] | None = None) -> None:
     # needed here; a run that varies the propagation parameters would apply
     # astrogwb.waveform.apply_gw_distance_to_power first.
     frequencies = jnp.asarray(catalog.frequency.values)
+    df = float(catalog.attrs["df"])
     polarization_power = jnp.asarray(catalog.polarization_power.values)
     samples = {
         str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
@@ -320,13 +321,19 @@ def main(argv: list[str] | None = None) -> None:
 
     sensitivities = load_sensitivity_map(args.detectors)
     network_psd = jnp.asarray(effective_psd(frequencies, args.detectors, sensitivities))
-    # effective_psd returns inf wherever no detector pair contributes, and
-    # Normal(loc, inf).log_prob is -inf -- a constant that kills NUTS with no
-    # usable diagnostic. Drop those bins along with the out-of-band ones.
-    mask = frequency_mask(frequencies, fmin=args.f_min, fmax=args.f_max) & jnp.isfinite(
-        network_psd
-    )
-    num_bins = int(jnp.sum(mask))
+    analysis_slice = frequency_slice(frequencies, fmin=args.f_min, fmax=args.f_max)
+    frequencies = frequencies[analysis_slice]
+    polarization_power = polarization_power[analysis_slice]
+    observed_spectral_density = observed_spectral_density[analysis_slice]
+    network_psd = network_psd[analysis_slice]
+    noise_scale = gaussian_bin_scale(network_psd, args.observation_time, df)
+    valid_noise = jnp.isfinite(noise_scale) & (noise_scale > 0.0)
+    num_bins = frequencies.shape[0]
+    if not bool(jnp.all(valid_noise)):
+        raise ValueError(
+            "analysis band contains non-finite or non-positive noise values; "
+            "narrow the band or pick a network whose noise curves cover it"
+        )
     if num_bins < 2:
         raise ValueError(
             f"only {num_bins} usable frequency bin(s) in "
@@ -334,16 +341,7 @@ def main(argv: list[str] | None = None) -> None:
             f"{' '.join(args.detectors)}; widen the band or pick a network "
             "whose noise curves cover it"
         )
-    # `samples` is deliberately not masked: it has no frequency dimension.
-    frequencies, polarization_power, observed_spectral_density, network_psd = (
-        apply_frequency_mask(
-            mask,
-            frequencies,
-            polarization_power,
-            observed_spectral_density,
-            network_psd,
-        )
-    )
+    # `samples` is deliberately not sliced: it has no frequency dimension.
     logger.info(
         "Analysis band: %d bins, detectors %s, %s yr",
         num_bins,
@@ -362,12 +360,10 @@ def main(argv: list[str] | None = None) -> None:
 
     model = partial(
         amplitude_marginalized_model,
-        frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
         observed_spectral_density=observed_spectral_density,
-        effective_psd=network_psd,
-        observation_time=args.observation_time,
+        noise_scale=noise_scale,
         average_mode="analytic_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights,
         amplitude_parameter="H0",

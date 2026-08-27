@@ -18,7 +18,7 @@ for documentation value only) with the layout::
         source_parameters  (sample, parameter) float64
     Attributes:
         format_name, domain, approximant,
-        minimum_frequency, maximum_frequency, reference_frequency, sampling_frequency,
+        minimum_frequency, maximum_frequency, reference_frequency, sampling_frequency, df,
         plus any scalar ``extra_attrs`` the producer stamped on (provenance)
 
 ``sample`` deliberately has no coordinate.
@@ -67,6 +67,7 @@ RESERVED_ATTRS = frozenset(
         "maximum_frequency",
         "reference_frequency",
         "sampling_frequency",
+        "df",
     }
 )
 
@@ -81,6 +82,7 @@ def make_catalog(
     maximum_frequency: float,
     reference_frequency: float,
     sampling_frequency: float,
+    df: float,
     extra_attrs: Mapping[str, str | float | int] | None = None,
 ) -> xr.Dataset:
     """Build a waveform catalog Dataset from plain arrays.
@@ -128,6 +130,7 @@ def make_catalog(
             "maximum_frequency": float(maximum_frequency),
             "reference_frequency": float(reference_frequency),
             "sampling_frequency": float(sampling_frequency),
+            "df": float(df),
             **_validated_extra_attrs(extra_attrs),
         },
     )
@@ -218,14 +221,42 @@ def open_catalog(path: str | Path) -> xr.Dataset:
 
 
 def validate_catalog(catalog: xr.Dataset, *, label: str) -> None:
-    """Validate dimension names, shapes, and frequency monotonicity."""
+    """Validate dimensions, shapes, and the uniform frequency grid."""
     if "frequency" not in catalog.coords:
         raise ValueError(f"{label}: missing 'frequency' coordinate")
     frequencies = catalog.coords["frequency"].values
     if frequencies.ndim != 1:
         raise ValueError(f"{label}: frequency coordinate must be one-dimensional")
-    if frequencies.shape[0] > 1 and not np.all(np.diff(frequencies) > 0.0):
-        raise ValueError(f"{label}: frequencies must be strictly increasing")
+    if frequencies.size == 0:
+        raise ValueError(f"{label}: frequency coordinate must contain at least one bin")
+    if not np.all(np.isfinite(frequencies)):
+        raise ValueError(f"{label}: frequencies must be finite")
+
+    if "df" not in catalog.attrs:
+        raise ValueError(
+            f"{label}: missing required 'df' attribute; regenerate this catalog"
+        )
+    raw_df = catalog.attrs["df"]
+    if isinstance(raw_df, bool | np.bool_):
+        raise TypeError(f"{label}: df must be a finite positive scalar")
+    try:
+        df = float(raw_df)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label}: df must be a finite positive scalar") from None
+    if not np.isfinite(df) or df <= 0.0:
+        raise ValueError(f"{label}: df must be a finite positive scalar")
+
+    if frequencies.size > 1:
+        differences = np.diff(frequencies)
+        tolerance = (
+            64.0
+            * np.finfo(np.float64).eps
+            * max(1.0, float(np.max(np.abs(frequencies))))
+        )
+        if not np.all(np.abs(differences - df) <= tolerance):
+            raise ValueError(
+                f"{label}: frequencies must be uniformly spaced by df={df} Hz"
+            )
 
     if "polarization_power" not in catalog:
         raise ValueError(f"{label}: missing 'polarization_power' data variable")

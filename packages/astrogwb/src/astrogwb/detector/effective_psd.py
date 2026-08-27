@@ -16,7 +16,6 @@ import numpy as np
 from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.frequency import frequency_spacing
 from astrogwb.utils import years_to_seconds
 
 from ._types import DetectorSpec
@@ -64,20 +63,17 @@ def effective_psd(
 
 def gaussian_bin_scale(
     effective_psd: jax.Array,
-    frequencies: jax.Array,
     observation_time: float,
-    *,
-    df: float | jax.Array | None = None,
+    df: float | jax.Array,
 ) -> jax.Array:
     """Per-bin Gaussian noise scale for a stochastic background search.
 
     Parameters
     ----------
     observation_time:
-        Observation time in years. Converted to seconds internally because
-        ``df`` is inferred from ``frequencies`` in Hz.
+        Observation time in years. Converted to seconds internally.
+    df:
+        Frequency-bin width in Hz.
     """
-    if df is None:
-        df = frequency_spacing(frequencies)
     observation_time_sec = years_to_seconds(observation_time)
     return effective_psd / jnp.sqrt(2.0 * observation_time_sec * df)

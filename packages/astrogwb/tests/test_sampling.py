@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
-from astrogwb.detector import gaussian_bin_scale
+from astrogwb.gwb import spectral_density
 from astrogwb.sampling import (
     AmplitudeConditional,
     amplitude_marginalized_model,
@@ -33,7 +33,6 @@ def _condition_without_density(model, fixed_params):
 
 
 def test_spectral_density_model_smoke_trace() -> None:
-    frequencies = jnp.array([10.0, 30.0])
     polarization_power = jnp.array([[1.0, 2.0], [5.0, 6.0]])
     samples = {"mass_1": jnp.array([20.0, 30.0])}
 
@@ -46,12 +45,10 @@ def test_spectral_density_model_smoke_trace() -> None:
             rng_seed=0,
         )
     ).get_trace(
-        frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
         observed_spectral_density=jnp.array([16.0, 48.0]),
-        effective_psd=jnp.ones(2),
-        observation_time=2.0,
+        noise_scale=jnp.ones(2),
         average_mode="catalog_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     )
@@ -60,7 +57,6 @@ def test_spectral_density_model_smoke_trace() -> None:
 
 
 def test_spectral_density_model_uses_combined_callback() -> None:
-    frequencies = jnp.array([10.0, 20.0])
     polarization_power = jnp.array([[1.0, 2.0], [3.0, 4.0]])
     samples = {"sentinel": jnp.array([4.0, 6.0])}
 
@@ -75,12 +71,10 @@ def test_spectral_density_model_uses_combined_callback() -> None:
         {"scale": jnp.array(2.0)},
     )
     trace = handlers.trace(handlers.seed(model, rng_seed=0)).get_trace(
-        frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
         observed_spectral_density=jnp.array([1.0, 2.0]),
-        effective_psd=jnp.ones(2),
-        observation_time=3.0,
+        noise_scale=jnp.ones(2),
         average_mode="catalog_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
         priors={"scale": dist.Normal(10.0, 0.5)},
@@ -101,19 +95,7 @@ def test_spectral_density_model_uses_combined_callback() -> None:
 FIDUCIAL_RATE = 2.0
 """Reference value of the marginalized parameter; the amplitude is its ratio."""
 
-FREQUENCIES = jnp.array([10.0, 20.0, 30.0, 40.0])
-OBSERVATION_TIME = 2.0
 NOISE_SCALE = jnp.array([1.0, 1.4, 0.8, 1.2])
-
-EFFECTIVE_PSD = NOISE_SCALE / gaussian_bin_scale(
-    jnp.ones(4), FREQUENCIES, OBSERVATION_TIME
-)
-"""PSD chosen so the per-bin likelihood scale is exactly ``NOISE_SCALE``.
-
-``gaussian_bin_scale`` is linear in the PSD, so dividing by its response to a
-unit PSD inverts it. Keeping sigma of order the signal makes the amplitude
-posterior broad enough to integrate on a modest numerical grid.
-"""
 
 
 def _linear_callback(
@@ -131,12 +113,10 @@ def _linear_callback(
 
 
 _MARGINALIZED_KWARGS: dict[str, Any] = {
-    "frequencies": FREQUENCIES,
     "polarization_power": jnp.array([[1.0, 2.0], [3.0, 1.5], [2.0, 4.0], [1.0, 1.0]]),
     "samples": {"sentinel": jnp.array([0.2, -0.4])},
     "observed_spectral_density": jnp.array([2.4, 4.1, 5.9, 1.8]),
-    "effective_psd": EFFECTIVE_PSD,
-    "observation_time": OBSERVATION_TIME,
+    "noise_scale": NOISE_SCALE,
     "average_mode": "catalog_inclination",
     "merger_rate_and_log_weights_fn": _linear_callback,
     "amplitude_parameter": "local_merger_rate",
@@ -194,6 +174,38 @@ def test_amplitude_marginalized_model_registers_expected_sites() -> None:
     assert "spectral_density_obs" not in trace
 
 
+def test_amplitude_statistics_match_explicit_sigma_weighted_sums() -> None:
+    tilt = jnp.array(0.3)
+    model = _condition_without_density(amplitude_marginalized_model, {"tilt": tilt})
+    trace = handlers.trace(handlers.seed(model, rng_seed=0)).get_trace(
+        **_MARGINALIZED_KWARGS,
+        **_MARGINALIZATION_KWARGS,
+        priors={"tilt": dist.Normal(0.0, 1.0)},
+    )
+    rate, log_weights = _linear_callback(
+        {"local_merger_rate": FIDUCIAL_RATE, "tilt": tilt},
+        _MARGINALIZED_KWARGS["samples"],
+    )
+    template = spectral_density(
+        _MARGINALIZED_KWARGS["polarization_power"],
+        jnp.exp(log_weights),
+        rate,
+        average_mode="catalog_inclination",
+    )
+    observed = _MARGINALIZED_KWARGS["observed_spectral_density"]
+    template_norm = jnp.sum((template / NOISE_SCALE) ** 2)
+    data_template = jnp.sum(observed * template / NOISE_SCALE**2)
+
+    np.testing.assert_allclose(
+        np.asarray(trace["amplitude_mle"]["value"]),
+        np.asarray(data_template / template_norm),
+    )
+    np.testing.assert_allclose(
+        np.asarray(trace["template_optimal_snr"]["value"]),
+        np.asarray(jnp.sqrt(template_norm)),
+    )
+
+
 def test_amplitude_marginalized_model_pins_the_amplitude_to_its_fiducial() -> None:
     seen: list[Mapping[str, Any]] = []
 
@@ -225,14 +237,12 @@ def test_amplitude_marginalized_model_rejects_a_sampled_amplitude() -> None:
         )
 
 
-def test_amplitude_marginalized_model_accepts_a_pre_sliced_frequency_grid() -> None:
-    frequencies = jnp.array([10.0, 30.0])
+def test_amplitude_marginalized_model_accepts_pre_sliced_noise_scale() -> None:
     kwargs = {
         **_MARGINALIZED_KWARGS,
-        "frequencies": frequencies,
         "polarization_power": jnp.array([[1.0, 2.0], [2.0, 4.0]]),
         "observed_spectral_density": jnp.array([2.4, 5.9]),
-        "effective_psd": EFFECTIVE_PSD[jnp.array([True, False, True, False])],
+        "noise_scale": NOISE_SCALE[jnp.array([True, False, True, False])],
     }
 
     model = _condition_without_density(

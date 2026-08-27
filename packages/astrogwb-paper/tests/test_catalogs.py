@@ -38,6 +38,7 @@ def _catalog(redshift: np.ndarray, *, offset: float = 0.0) -> xr.Dataset:
         maximum_frequency=50.0,
         reference_frequency=20.0,
         sampling_frequency=128.0,
+        df=10.0,
     )
 
 
@@ -78,6 +79,7 @@ def test_truncate_catalog_samples_requires_distance_column() -> None:
         maximum_frequency=50.0,
         reference_frequency=20.0,
         sampling_frequency=128.0,
+        df=10.0,
     )
 
     with pytest.raises(ValueError, match="missing required parameter"):
@@ -215,7 +217,7 @@ def test_compose_catalog_rejects_banks_with_different_frequency_grids(
     uniform_path = tmp_path / "uniform.h5"
     redshift = np.arange(100, dtype=float) + 1_000_000.0
     other = make_catalog(
-        frequencies=np.linspace(10.0, 60.0, 5),
+        frequencies=np.linspace(20.0, 60.0, 5),
         polarization_power=np.ones((5, redshift.size)),
         source_parameters={
             "redshift": redshift,
@@ -226,6 +228,7 @@ def test_compose_catalog_rejects_banks_with_different_frequency_grids(
         maximum_frequency=50.0,
         reference_frequency=20.0,
         sampling_frequency=128.0,
+        df=10.0,
     )
     save_catalog(uniform_path, other)
     spec = CatalogSpec(

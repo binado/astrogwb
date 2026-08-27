@@ -34,6 +34,7 @@ def _catalog(nsamples: int = 6, nfreq: int = 4, **kwargs):
         maximum_frequency=float(frequencies[-1]),
         reference_frequency=20.0,
         sampling_frequency=128.0,
+        df=10.0 if nfreq == 1 else float(frequencies[1] - frequencies[0]),
         **kwargs,
     )
 
@@ -61,6 +62,7 @@ def test_round_trip_preserves_values_and_attrs(tmp_path: Path) -> None:
         "maximum_frequency": 40.0,
         "reference_frequency": 20.0,
         "sampling_frequency": 128.0,
+        "df": 10.0,
     }
 
 
@@ -150,11 +152,59 @@ def test_load_catalog_rejects_wrong_domain(tmp_path: Path) -> None:
         load_catalog(path)
 
 
-def test_validate_catalog_rejects_non_monotonic_frequencies() -> None:
+def test_validate_catalog_rejects_missing_df() -> None:
     catalog = _catalog()
-    bad = catalog.assign_coords(frequency=catalog.frequency.values[::-1])
+    bad = catalog.copy()
+    del bad.attrs["df"]
 
-    with pytest.raises(ValueError, match="strictly increasing"):
+    with pytest.raises(ValueError, match="missing required 'df'.*regenerate"):
+        validate_catalog(bad, label="test")
+
+
+@pytest.mark.parametrize("df", [0.0, -1.0, np.inf, np.nan, "invalid"])
+def test_validate_catalog_rejects_invalid_df(df: object) -> None:
+    bad = _catalog().assign_attrs(df=df)
+
+    with pytest.raises(ValueError, match="df must be a finite positive scalar"):
+        validate_catalog(bad, label="test")
+
+
+def test_validate_catalog_rejects_boolean_df() -> None:
+    with pytest.raises(TypeError, match="df must be a finite positive scalar"):
+        validate_catalog(_catalog().assign_attrs(df=True), label="test")
+
+
+def test_validate_catalog_rejects_empty_or_nonfinite_frequencies() -> None:
+    catalog = _catalog()
+    empty = catalog.isel(frequency=slice(0, 0))
+    nonfinite = catalog.assign_coords(frequency=[10.0, 20.0, np.inf, 40.0])
+
+    with pytest.raises(ValueError, match="at least one bin"):
+        validate_catalog(empty, label="test")
+    with pytest.raises(ValueError, match="frequencies must be finite"):
+        validate_catalog(nonfinite, label="test")
+
+
+def test_validate_catalog_rejects_nonuniform_frequencies() -> None:
+    catalog = _catalog()
+    bad = catalog.assign_coords(frequency=[10.0, 20.0, 31.0, 40.0])
+
+    with pytest.raises(ValueError, match="uniformly spaced by df"):
+        validate_catalog(bad, label="test")
+
+
+def test_validate_catalog_accepts_float64_fft_roundoff() -> None:
+    catalog = _catalog()
+    frequencies = catalog.frequency.values.copy()
+    frequencies[2] += 32.0 * np.finfo(np.float64).eps * frequencies[-1]
+
+    validate_catalog(catalog.assign_coords(frequency=frequencies), label="test")
+
+
+def test_validate_catalog_rejects_df_inconsistent_with_coordinates() -> None:
+    bad = _catalog().assign_attrs(df=5.0)
+
+    with pytest.raises(ValueError, match="uniformly spaced by df=5.0"):
         validate_catalog(bad, label="test")
 
 
@@ -189,4 +239,5 @@ def test_make_catalog_rejects_complex_polarization_power() -> None:
             maximum_frequency=40.0,
             reference_frequency=20.0,
             sampling_frequency=128.0,
+            df=10.0,
         )

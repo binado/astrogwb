@@ -2,60 +2,51 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-from astrogwb.frequency import (
-    apply_frequency_mask,
-    frequency_mask,
-    frequency_spacing,
-    noise_weighted_inner_product,
+import pytest
+from astrogwb.frequency import frequency_slice, noise_weighted_inner_product
+
+
+def test_frequency_slice_includes_both_bounds() -> None:
+    frequencies = np.array([5.0, 10.0, 20.0, 30.0])
+
+    actual = frequency_slice(frequencies, fmin=10.0, fmax=20.0)
+
+    assert actual == slice(1, 3)
+    np.testing.assert_array_equal(frequencies[actual], [10.0, 20.0])
+
+
+@pytest.mark.parametrize(
+    ("fmin", "fmax", "expected"),
+    [
+        (None, 20.0, slice(0, 3)),
+        (10.0, None, slice(1, 4)),
+        (None, None, slice(0, 4)),
+        (11.0, 29.0, slice(2, 3)),
+    ],
 )
+def test_frequency_slice_handles_open_and_off_bin_bounds(
+    fmin: float | None, fmax: float | None, expected: slice
+) -> None:
+    frequencies = np.array([5.0, 10.0, 20.0, 30.0])
+
+    assert frequency_slice(frequencies, fmin=fmin, fmax=fmax) == expected
 
 
-def test_frequency_spacing_uniform_grid() -> None:
-    freqs = jnp.array([10.0, 20.0, 30.0])
-
-    np.testing.assert_allclose(np.asarray(frequency_spacing(freqs)), 10.0)
-
-
-def test_frequency_spacing_nonuniform_grid() -> None:
-    freqs = jnp.array([10.0, 20.0, 40.0])
-
-    np.testing.assert_allclose(np.asarray(frequency_spacing(freqs)), 15.0)
+def test_frequency_slice_rejects_reversed_bounds() -> None:
+    with pytest.raises(ValueError, match="fmin .* must be <= fmax"):
+        frequency_slice(np.array([10.0, 20.0]), fmin=20.0, fmax=10.0)
 
 
-def test_frequency_mask_bounds() -> None:
-    freqs = jnp.array([5.0, 10.0, 20.0, 30.0])
-
-    mask = frequency_mask(freqs, fmin=10.0, fmax=20.0)
-
-    np.testing.assert_array_equal(
-        np.asarray(mask), np.array([False, True, True, False])
-    )
+def test_frequency_slice_rejects_empty_band() -> None:
+    with pytest.raises(ValueError, match="contains no bins"):
+        frequency_slice(np.array([10.0, 20.0]), fmin=30.0, fmax=40.0)
 
 
-def test_apply_frequency_mask_slices_multiple_1d_arrays() -> None:
-    mask = jnp.array([False, True, True, False])
-    freqs = jnp.array([5.0, 10.0, 20.0, 30.0])
-    spectrum = jnp.array([1.0, 2.0, 3.0, 4.0])
-
-    masked_freqs, masked_spectrum = apply_frequency_mask(mask, freqs, spectrum)
-
-    np.testing.assert_array_equal(np.asarray(masked_freqs), np.array([10.0, 20.0]))
-    np.testing.assert_array_equal(np.asarray(masked_spectrum), np.array([2.0, 3.0]))
-
-
-def test_apply_frequency_mask_honors_leading_frequency_axis() -> None:
-    mask = jnp.array([True, False, True])
-    power = jnp.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
-
-    (masked_power,) = apply_frequency_mask(mask, power)
-
-    np.testing.assert_array_equal(
-        np.asarray(masked_power), np.array([[1.0, 2.0], [5.0, 6.0]])
-    )
-
-
-def test_apply_frequency_mask_returns_empty_tuple_without_arrays() -> None:
-    assert apply_frequency_mask(jnp.array([True, False])) == ()
+def test_frequency_slice_rejects_empty_or_nonmonotonic_grid() -> None:
+    with pytest.raises(ValueError, match="at least one bin"):
+        frequency_slice(np.array([]))
+    with pytest.raises(ValueError, match="strictly increasing"):
+        frequency_slice(np.array([10.0, 30.0, 20.0]))
 
 
 def test_noise_weighted_inner_product_matches_explicit_sum() -> None:

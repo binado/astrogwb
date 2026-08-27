@@ -11,13 +11,12 @@ from astrogwb.utils import SECONDS_PER_YEAR, years_to_seconds
 
 
 def test_spectral_snr_squared_matches_gaussian_bin_scale() -> None:
-    freqs = jnp.array([10.0, 20.0, 30.0])
     eff = jnp.array([2.0, 4.0, 6.0])
     sd = jnp.array([0.1, 0.2, 0.3])
     observation_time_yr = 5.0 / SECONDS_PER_YEAR
     df = 10.0
 
-    scale = gaussian_bin_scale(eff, freqs, observation_time_yr, df=df)
+    scale = gaussian_bin_scale(eff, observation_time_yr, df)
     observation_time_sec = years_to_seconds(observation_time_yr)
 
     expected = jnp.sum((sd / scale) ** 2)
