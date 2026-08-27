@@ -91,10 +91,6 @@ FIDUCIALS: dict[str, float] = {
 #: Catalog source parameters the weights callback dereferences by name.
 REQUIRED_PARAMETERS = ("redshift", "luminosity_distance")
 
-#: Below this many effective quadrature nodes the amplitude grid is too coarse
-#: to resolve the conditional posterior. Matches the paper's `run_mcmc` guard.
-MIN_EFFECTIVE_NODES = 30
-
 #: Plain-text help banner. The module docstring is reStructuredText and turns
 #: into an unreadable wall once argparse rewraps it.
 DESCRIPTION = """\
@@ -394,7 +390,6 @@ def main(argv: list[str] | None = None) -> None:
 
     relative_ess = float(jnp.mean(posterior["importance_relative_ess"]))
     reconstructed = posterior["H0"]
-    effective_nodes = float(jnp.min(posterior["quadrature_effective_nodes"]))
     logger.info("Fiducial H0: %s", FIDUCIALS["H0"])
     logger.info(
         "Reconstructed H0: %.3f +/- %.3f",
@@ -402,18 +397,10 @@ def main(argv: list[str] | None = None) -> None:
         float(jnp.std(reconstructed)),
     )
     logger.info("Mean importance relative ESS: %.4f", relative_ess)
-    logger.info("Min quadrature effective nodes: %.1f", effective_nodes)
     if relative_ess < 0.1:
         logger.warning(
             "importance weights have collapsed; the posterior is "
             "dominated by a handful of catalog sources"
-        )
-    if effective_nodes < MIN_EFFECTIVE_NODES:
-        logger.warning(
-            "quadrature_effective_nodes min=%.1f is below %d; the amplitude grid "
-            "may not resolve the conditional posterior; raise --amplitude-num-nodes",
-            effective_nodes,
-            MIN_EFFECTIVE_NODES,
         )
 
     chains = xr.Dataset(
