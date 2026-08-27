@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
+from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import spectral_density
 from astrogwb.sampling import (
     AmplitudeConditional,
@@ -16,11 +17,20 @@ from astrogwb.sampling import (
     amplitude_reconstruction_model,
     spectral_density_model,
 )
+from astrogwb.utils import SECONDS_PER_YEAR
 from numpyro import handlers
 from numpyro.infer import Predictive
 from numpyro.infer.util import log_density
 
 type _AmplitudePrior = dist.Normal | dist.Uniform
+
+#: The models derive their per-bin sigma as ``S_eff / sqrt(2 T_sec df)``. This
+#: pair makes the radical exactly 1, so sigma *is* the effective PSD passed in
+#: and the expected values below stay readable.
+UNIT_SCALE_NOISE_KWARGS: dict[str, Any] = {
+    "observation_time": 1.0 / SECONDS_PER_YEAR,
+    "df": 0.5,
+}
 
 
 def _condition_without_density(model, fixed_params):
@@ -48,12 +58,44 @@ def test_spectral_density_model_smoke_trace() -> None:
         polarization_power=polarization_power,
         samples=samples,
         observed_spectral_density=jnp.array([16.0, 48.0]),
-        noise_scale=jnp.ones(2),
+        effective_psd=jnp.ones(2),
+        **UNIT_SCALE_NOISE_KWARGS,
         average_mode="catalog_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     )
 
     assert trace["spectral_density_obs"]["fn"].event_shape == (2,)
+
+
+def test_spectral_density_model_derives_the_gaussian_bin_scale() -> None:
+    """The likelihood sigma must be exactly ``gaussian_bin_scale`` of the inputs.
+
+    The model takes the physical quantities (effective PSD, observation time,
+    bin width) rather than a precomputed sigma, so this pins the derivation the
+    callers used to do by hand.
+    """
+    effective_psd = jnp.array([2.0, 4.0])
+    observation_time = 3.0
+    df = 0.25
+
+    trace = handlers.trace(handlers.seed(spectral_density_model, rng_seed=0)).get_trace(
+        polarization_power=jnp.array([[1.0, 2.0], [5.0, 6.0]]),
+        samples={"mass_1": jnp.array([20.0, 30.0])},
+        observed_spectral_density=jnp.array([16.0, 48.0]),
+        effective_psd=effective_psd,
+        observation_time=observation_time,
+        df=df,
+        average_mode="catalog_inclination",
+        merger_rate_and_log_weights_fn=lambda params, samples: (
+            jnp.array(1.0),
+            jnp.zeros(2),
+        ),
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(trace["spectral_density_obs"]["fn"].base_dist.scale),
+        np.asarray(gaussian_bin_scale(effective_psd, observation_time, df)),
+    )
 
 
 def test_spectral_density_model_uses_combined_callback() -> None:
@@ -74,7 +116,8 @@ def test_spectral_density_model_uses_combined_callback() -> None:
         polarization_power=polarization_power,
         samples=samples,
         observed_spectral_density=jnp.array([1.0, 2.0]),
-        noise_scale=jnp.ones(2),
+        effective_psd=jnp.ones(2),
+        **UNIT_SCALE_NOISE_KWARGS,
         average_mode="catalog_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
         priors={"scale": dist.Normal(10.0, 0.5)},
@@ -116,7 +159,8 @@ _MARGINALIZED_KWARGS: dict[str, Any] = {
     "polarization_power": jnp.array([[1.0, 2.0], [3.0, 1.5], [2.0, 4.0], [1.0, 1.0]]),
     "samples": {"sentinel": jnp.array([0.2, -0.4])},
     "observed_spectral_density": jnp.array([2.4, 4.1, 5.9, 1.8]),
-    "noise_scale": NOISE_SCALE,
+    "effective_psd": NOISE_SCALE,
+    **UNIT_SCALE_NOISE_KWARGS,
     "average_mode": "catalog_inclination",
     "merger_rate_and_log_weights_fn": _linear_callback,
     "amplitude_parameter": "local_merger_rate",
@@ -237,12 +281,13 @@ def test_amplitude_marginalized_model_rejects_a_sampled_amplitude() -> None:
         )
 
 
-def test_amplitude_marginalized_model_accepts_pre_sliced_noise_scale() -> None:
+def test_amplitude_marginalized_model_accepts_a_masked_band() -> None:
+    """A gappy band is legal: `df` is the catalog's, not the band's spacing."""
     kwargs = {
         **_MARGINALIZED_KWARGS,
         "polarization_power": jnp.array([[1.0, 2.0], [2.0, 4.0]]),
         "observed_spectral_density": jnp.array([2.4, 5.9]),
-        "noise_scale": NOISE_SCALE[jnp.array([True, False, True, False])],
+        "effective_psd": NOISE_SCALE[jnp.array([True, False, True, False])],
     }
 
     model = _condition_without_density(

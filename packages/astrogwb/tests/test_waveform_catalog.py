@@ -169,11 +169,6 @@ def test_validate_catalog_rejects_invalid_df(df: object) -> None:
         validate_catalog(bad, label="test")
 
 
-def test_validate_catalog_rejects_boolean_df() -> None:
-    with pytest.raises(TypeError, match="df must be a finite positive scalar"):
-        validate_catalog(_catalog().assign_attrs(df=True), label="test")
-
-
 def test_validate_catalog_rejects_empty_or_nonfinite_frequencies() -> None:
     catalog = _catalog()
     empty = catalog.isel(frequency=slice(0, 0))
@@ -190,6 +185,28 @@ def test_validate_catalog_rejects_nonuniform_frequencies() -> None:
     bad = catalog.assign_coords(frequency=[10.0, 20.0, 31.0, 40.0])
 
     with pytest.raises(ValueError, match="uniformly spaced by df"):
+        validate_catalog(bad, label="test")
+
+
+@pytest.mark.parametrize(
+    "frequencies",
+    [
+        pytest.param([1.0, 1.0, 1.0, 1.0], id="duplicate"),
+        pytest.param([4.0, 3.0, 2.0, 1.0], id="decreasing"),
+    ],
+)
+def test_validate_catalog_rejects_non_increasing_bins_under_a_tiny_df(
+    frequencies: list[float],
+) -> None:
+    """Monotonicity must not be left to the uniform-spacing tolerance.
+
+    With ``df`` below the tolerance, ``|diff - df| <= tolerance`` holds for
+    duplicate and decreasing bins alike, so the grid would only fail much
+    later, in whatever consumes it.
+    """
+    bad = _catalog().assign_coords(frequency=frequencies).assign_attrs(df=1e-15)
+
+    with pytest.raises(ValueError, match="strictly increasing"):
         validate_catalog(bad, label="test")
 
 

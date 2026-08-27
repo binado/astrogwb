@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from typing import Any
 
@@ -29,8 +29,8 @@ import jax.numpy as jnp
 import numpy as np
 import xarray as xr
 from astrogwb.detector import effective_psd as compute_effective_psd
-from astrogwb.detector import gaussian_bin_scale, load_sensitivity_map
-from astrogwb.frequency import frequency_slice as make_frequency_slice
+from astrogwb.detector import load_sensitivity_map
+from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
@@ -62,7 +62,9 @@ logger = logging.getLogger(__name__)
 class Observation:
     """The observed-data side of a run: the fiducial injection spectrum.
 
-    Arrays are pre-slice; ``frequency_slice`` selects the analysis band.
+    Arrays are pre-mask; ``frequency_mask`` selects the analysis band. ``df``
+    is the catalog's bin width and stays valid under the mask, which is why it
+    is carried here rather than measured off the masked grid.
     """
 
     frequencies: jax.Array
@@ -70,7 +72,7 @@ class Observation:
     redshift_grid: jax.Array
     total_merger_rate: jax.Array
     spectral_density: jax.Array
-    frequency_slice: slice
+    frequency_mask: jax.Array
 
 
 @dataclass(frozen=True)
@@ -79,21 +81,24 @@ class InferenceInputs:
 
     observation: Observation
     proposal: xr.Dataset
-    noise_scale: jax.Array
+    effective_psd: jax.Array
+    observation_time: float
     merger_rate_and_log_weights_fn: Any
 
     def masked_model_kwargs(self) -> dict[str, Any]:
         """Restrict to the analysis band and return the model's keyword inputs."""
         observation = self.observation
-        frequency_slice = observation.frequency_slice
+        mask = np.asarray(observation.frequency_mask)
         # `source_parameters` has no `frequency` dim, so `isel` cannot touch it --
         # the old "NOT masked" hazard is now structurally enforced.
-        band = self.proposal.isel(frequency=frequency_slice)
+        band = self.proposal.isel(frequency=mask)
         return {
             "polarization_power": jnp.asarray(band.polarization_power.values),
             "samples": samples_from_catalog(band),
-            "observed_spectral_density": observation.spectral_density[frequency_slice],
-            "noise_scale": self.noise_scale[frequency_slice],
+            "observed_spectral_density": observation.spectral_density[mask],
+            "effective_psd": self.effective_psd[mask],
+            "observation_time": self.observation_time,
+            "df": observation.df,
         }
 
 
@@ -138,14 +143,14 @@ def prepare_observation(
         total_merger_rate,
     )
 
-    analysis_frequency_slice = make_frequency_slice(
+    # Band bounds only: this function never sees a detector network, so bins
+    # the network cannot measure are dropped later, in prepare_inference_inputs.
+    analysis_frequency_mask = make_frequency_mask(
         injection_frequencies, fmin=grid.f_min, fmax=grid.f_max
     )
-    start = analysis_frequency_slice.start or 0
-    stop = analysis_frequency_slice.stop or injection_frequencies.shape[0]
     logger.info(
         "Analysis band: %d of %d bins (%.1f-%.1f Hz)",
-        stop - start,
+        int(jnp.sum(analysis_frequency_mask)),
         injection_frequencies.shape[0],
         grid.f_min,
         grid.f_max,
@@ -156,7 +161,7 @@ def prepare_observation(
         redshift_grid=redshift_grid,
         total_merger_rate=total_merger_rate,
         spectral_density=spectral_density,
-        frequency_slice=analysis_frequency_slice,
+        frequency_mask=analysis_frequency_mask,
     )
 
 
@@ -192,7 +197,7 @@ def prepare_inference_inputs(
     )
 
     # Two frequency grids are in play and they are deliberately spelled
-    # differently: the band slice comes from the *injection* grid (inside
+    # differently: the band mask comes from the *injection* grid (inside
     # prepare_observation, which never sees a proposal) while the effective PSD
     # comes from the *proposal* grid. validate_matching_frequency_grids has
     # already proved the two arrays equal, so both results are bit-identical --
@@ -201,17 +206,30 @@ def prepare_inference_inputs(
     effective_psd_arr = jnp.asarray(
         compute_effective_psd(proposal_frequencies, list(detectors), sensitivities)
     )
-    noise_scale = gaussian_bin_scale(
-        effective_psd_arr, grid.observation_time, observation.df
+    # `compute_effective_psd` returns inf wherever no detector pair contributes,
+    # and Normal(loc, inf).log_prob is -inf -- a constant that kills NUTS with no
+    # usable diagnostic. Drop those bins along with the out-of-band ones. This is
+    # safe precisely because `df` is the catalog's attribute: the surviving bins
+    # need not be contiguous, and each still has width `df`.
+    band_mask = (
+        observation.frequency_mask
+        & jnp.isfinite(effective_psd_arr)
+        & (effective_psd_arr > 0.0)
     )
-    selected_noise_scale = np.asarray(noise_scale[observation.frequency_slice])
-    if not np.all(np.isfinite(selected_noise_scale)) or not np.all(
-        selected_noise_scale > 0.0
-    ):
+    num_bins = int(jnp.sum(band_mask))
+    if num_bins < 2:
         raise ValueError(
-            "analysis band contains non-finite or non-positive noise scale values; "
-            "narrow the band or choose a detector network with full coverage"
+            f"only {num_bins} usable frequency bin(s) in "
+            f"[{grid.f_min}, {grid.f_max}] Hz for detectors "
+            f"{' '.join(detectors)}; widen the band or choose a detector "
+            "network with full coverage"
         )
+    dropped = int(jnp.sum(observation.frequency_mask)) - num_bins
+    if dropped:
+        logger.info(
+            "Dropped %d in-band bin(s) with no detector-network coverage", dropped
+        )
+    observation = replace(observation, frequency_mask=band_mask)
 
     proposal_redshift = proposal_catalog.source_parameters.sel(
         parameter="redshift"
@@ -224,7 +242,8 @@ def prepare_inference_inputs(
     return InferenceInputs(
         observation=observation,
         proposal=proposal_catalog,
-        noise_scale=noise_scale,
+        effective_psd=effective_psd_arr,
+        observation_time=grid.observation_time,
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     )
 

@@ -52,8 +52,8 @@ from numpyro import handlers
 from numpyro.infer.util import log_density
 from scipy.ndimage import gaussian_filter
 
-from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
-from astrogwb.frequency import frequency_slice
+from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
@@ -207,33 +207,32 @@ sensitivities = load_sensitivity_map(detnames)
 effective_psd_arr = jnp.asarray(
     effective_psd(frequencies, list(detnames), sensitivities)
 )
-analysis_slice = frequency_slice(frequencies, fmin=f_min, fmax=f_max)
-print(
-    "band bins:",
-    analysis_slice.stop - analysis_slice.start,
-    "of",
-    frequencies.shape[0],
+# Uncovered bins have an infinite effective PSD and would contribute a constant
+# -inf to the log-density; drop them along with the out-of-band ones.
+mask = frequency_mask(frequencies, fmin=f_min, fmax=f_max) & jnp.isfinite(
+    effective_psd_arr
 )
+print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 
 
 # %%
 def plot_effective_psd(
     frequencies: jax.Array,
     effective_psd: jax.Array,
-    analysis_slice: slice,
+    band_mask: jax.Array,
     *,
     color: str = "black",
 ):
     fig, ax = plt.subplots()
     ax.loglog(frequencies, effective_psd, color=color, ls="--")
-    ax.loglog(frequencies[analysis_slice], effective_psd[analysis_slice], color=color)
+    ax.loglog(frequencies[band_mask], effective_psd[band_mask], color=color)
     ax.set(
         xlabel=r"$f$ [Hz]", ylabel=r"$S_{\text{eff}}(f)$ [1/Hz]", title="Effective PSD"
     )
     return fig
 
 
-plot_effective_psd(frequencies, effective_psd_arr, analysis_slice)
+plot_effective_psd(frequencies, effective_psd_arr, mask)
 
 # %% [markdown]
 # ## Modelling the astrophysical SGWB
@@ -279,14 +278,14 @@ merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
 def plot_omegagw(
     spectral_density: jax.Array,
     frequencies: jax.Array,
-    analysis_slice: slice,
+    band_mask: jax.Array,
     *,
     color: str = "black",
     ymin: float = 1e-15,
 ):
     omega_gw = omega_gw_from_spectral_density(spectral_density, frequencies)
-    band_frequencies = frequencies[analysis_slice]
-    band_omega_gw = omega_gw[analysis_slice]
+    band_frequencies = frequencies[band_mask]
+    band_omega_gw = omega_gw[band_mask]
     pos = band_omega_gw > 0.0
     fig, ax = plt.subplots()
     ax.loglog(
@@ -309,18 +308,20 @@ rate0, observed_spectral_density = compute_fiducial_injection_spectrum(
 plot_omegagw(
     observed_spectral_density,
     frequencies,
-    analysis_slice,
+    mask,
     color="black",
     ymin=1e-15,
 )
 
-frequencies = frequencies[analysis_slice]
-polarization_power = polarization_power[analysis_slice]
-observed_spectral_density = observed_spectral_density[analysis_slice]
-effective_psd_arr = effective_psd_arr[analysis_slice]
-noise_scale = gaussian_bin_scale(effective_psd_arr, observation_time, df)
-if not bool(jnp.all(jnp.isfinite(noise_scale) & (noise_scale > 0.0))):
-    raise ValueError("analysis band contains non-finite or non-positive noise values")
+frequencies, polarization_power, observed_spectral_density, effective_psd_arr = (
+    apply_frequency_mask(
+        mask,
+        frequencies,
+        polarization_power,
+        observed_spectral_density,
+        effective_psd_arr,
+    )
+)
 
 # %% [markdown]
 # ## Building the model
@@ -344,7 +345,9 @@ model_kwargs = {
     "polarization_power": polarization_power,
     "samples": samples,
     "observed_spectral_density": observed_spectral_density,
-    "noise_scale": noise_scale,
+    "effective_psd": effective_psd_arr,
+    "observation_time": observation_time,
+    "df": df,
 }
 
 # %% [markdown]

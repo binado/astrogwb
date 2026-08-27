@@ -74,7 +74,9 @@ End-to-end sketch (toy data; runnable as-is):
         polarization_power=polarization_power,
         samples=samples,
         observed_spectral_density=observed,
-        noise_scale=jnp.ones(3),
+        effective_psd=jnp.ones(3),
+        observation_time=1.0,
+        df=0.25,
         average_mode="analytic_inclination",
         merger_rate_and_log_weights_fn=toy_merger_rate_and_log_weights_fn,
         amplitude_parameter="H0",
@@ -127,6 +129,7 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 
+from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import (
     AverageMode,
     spectral_density,
@@ -145,7 +148,9 @@ def spectral_density_model(
     polarization_power: jax.Array,
     samples: Mapping[str, jax.Array],
     observed_spectral_density: jax.Array,
-    noise_scale: jax.Array,
+    effective_psd: jax.Array,
+    observation_time: float,
+    df: float | jax.Array,
     average_mode: AverageMode,
     merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     priors: Mapping[str, dist.Distribution] | None = None,
@@ -181,8 +186,16 @@ def spectral_density_model(
         should have leading dimension ``N``.
     observed_spectral_density:
         Observed SGWB spectral density, shape ``(F,)``.
-    noise_scale:
-        Per-bin Gaussian standard deviation, shape ``(F,)``.
+    effective_psd:
+        Network effective power spectral density over the analysis band, shape
+        ``(F,)``.
+    observation_time:
+        Observation time in years, used only in the likelihood noise scale via
+        :func:`astrogwb.detector.gaussian_bin_scale`.
+    df:
+        Frequency bin width in Hz -- the catalog's ``df`` attribute. Never
+        measure it off the analysis band: a mask may drop interior bins, and
+        the mean spacing of what survives is not the bin width.
     average_mode:
         How inclination is averaged when contracting polarization power:
         ``"analytic_inclination"`` applies the usual 0.4 factor;
@@ -196,6 +209,8 @@ def spectral_density_model(
         Mapping from parameter name to NumPyro prior distribution. Keys become
         sampled sites; defaults to an empty mapping (likelihood-only model).
     """
+    noise_scale = gaussian_bin_scale(effective_psd, observation_time, df)
+
     params = {
         name: numpyro.sample(name, prior) for name, prior in (priors or {}).items()
     }
@@ -226,7 +241,9 @@ def amplitude_marginalized_model(
     polarization_power: jax.Array,
     samples: Mapping[str, jax.Array],
     observed_spectral_density: jax.Array,
-    noise_scale: jax.Array,
+    effective_psd: jax.Array,
+    observation_time: float,
+    df: float | jax.Array,
     average_mode: AverageMode,
     merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     amplitude_parameter: str,
@@ -326,6 +343,8 @@ def amplitude_marginalized_model(
         marginalizing the same parameter is a silent double-counting with no
         visible symptom.
     """
+    noise_scale = gaussian_bin_scale(effective_psd, observation_time, df)
+
     priors = priors or {}
     if amplitude_parameter in priors:
         raise ValueError(

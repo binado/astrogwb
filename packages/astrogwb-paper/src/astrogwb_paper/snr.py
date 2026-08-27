@@ -52,7 +52,7 @@ def compute_network_snrs(
     )
     observation = prepare_observation(source, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies
-    frequency_slice = observation.frequency_slice
+    band = observation.frequency_mask
     observed_spectral_density = observation.spectral_density
     observation_seconds = years_to_seconds(grid.observation_time)
 
@@ -65,8 +65,8 @@ def compute_network_snrs(
         )
         snr = float(
             spectral_snr(
-                observed_spectral_density[frequency_slice],
-                effective_noise[frequency_slice],
+                observed_spectral_density[band],
+                effective_noise[band],
                 observation_seconds,
                 observation.df,
             )

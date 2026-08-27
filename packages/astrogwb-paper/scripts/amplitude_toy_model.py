@@ -30,8 +30,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
-from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
-from astrogwb.frequency import frequency_slice
+from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr_squared
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb.utils import years_to_seconds
@@ -131,13 +131,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     effective_psd_arr = jnp.asarray(
         effective_psd(frequencies, list(detnames), sensitivities)
     )
-    analysis_slice = frequency_slice(frequencies, fmin=f_min, fmax=f_max)
-    print(
-        "band bins:",
-        analysis_slice.stop - analysis_slice.start,
-        "of",
-        frequencies.shape[0],
+    # Uncovered bins have an infinite effective PSD and would contribute a
+    # constant -inf to the log-density; drop them with the out-of-band ones.
+    mask = frequency_mask(frequencies, fmin=f_min, fmax=f_max) & jnp.isfinite(
+        effective_psd_arr
     )
+    print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 
     def merger_rate_and_log_weights_fn(params, _samples):
         total_merger_rate = params["amplitude"] * merger_rate_norm
@@ -149,15 +148,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     observed_spectral_density = spectral_density(
         polarization_power, weights_fid, rate_fid, average_mode="analytic_inclination"
     )
-    frequencies = frequencies[analysis_slice]
-    polarization_power = polarization_power[analysis_slice]
-    observed_spectral_density = observed_spectral_density[analysis_slice]
-    effective_psd_arr = effective_psd_arr[analysis_slice]
-    noise_scale = gaussian_bin_scale(effective_psd_arr, observation_time, df)
-    if not bool(jnp.all(jnp.isfinite(noise_scale) & (noise_scale > 0.0))):
-        raise ValueError(
-            "analysis band contains non-finite or non-positive noise scale values"
+    frequencies, polarization_power, observed_spectral_density, effective_psd_arr = (
+        apply_frequency_mask(
+            mask,
+            frequencies,
+            polarization_power,
+            observed_spectral_density,
+            effective_psd_arr,
         )
+    )
 
     model = partial(
         spectral_density_model,
@@ -185,7 +184,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         polarization_power=polarization_power,
         samples=samples,
         observed_spectral_density=observed_spectral_density,
-        noise_scale=noise_scale,
+        effective_psd=effective_psd_arr,
+        observation_time=observation_time,
+        df=df,
         extra_fields=("num_steps", "accept_prob", "diverging"),
     )
     mcmc.print_summary()

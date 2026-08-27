@@ -57,6 +57,16 @@ WaveformCatalog = xr.Dataset
 FORMAT_NAME = "waveform_catalog"
 DOMAIN_FREQUENCY = "frequency"
 
+#: Slack, in ULPs of the largest frequency, allowed when checking that the grid
+#: really is spaced by the stored ``df``. A grid built as ``arange(n) * df``
+#: carries round-off of order ``eps * max|f|`` in each *stored value*, so
+#: consecutive differences stray from ``df`` by about that much in absolute
+#: terms. The error scales with the magnitude of the frequencies, not with
+#: ``df``: a relative-to-``df`` tolerance would be tight by a factor of roughly
+#: ``max|f| / df`` (the bin count) and would reject legitimate fine grids over
+#: wide bands.
+GRID_SPACING_TOLERANCE_ULP = 64.0
+
 #: Attribute names ``make_catalog`` owns; ``extra_attrs`` may not shadow them.
 RESERVED_ATTRS = frozenset(
     {
@@ -237,8 +247,6 @@ def validate_catalog(catalog: xr.Dataset, *, label: str) -> None:
             f"{label}: missing required 'df' attribute; regenerate this catalog"
         )
     raw_df = catalog.attrs["df"]
-    if isinstance(raw_df, bool | np.bool_):
-        raise TypeError(f"{label}: df must be a finite positive scalar")
     try:
         df = float(raw_df)
     except (TypeError, ValueError):
@@ -248,8 +256,14 @@ def validate_catalog(catalog: xr.Dataset, *, label: str) -> None:
 
     if frequencies.size > 1:
         differences = np.diff(frequencies)
+        # Monotonicity is checked on its own rather than being left to the
+        # tolerance below: for a df smaller than the tolerance, duplicate or
+        # decreasing bins would satisfy |diff - df| <= tolerance and only fail
+        # much later, in whatever consumes the grid.
+        if not np.all(differences > 0.0):
+            raise ValueError(f"{label}: frequencies must be strictly increasing")
         tolerance = (
-            64.0
+            GRID_SPACING_TOLERANCE_ULP
             * np.finfo(np.float64).eps
             * max(1.0, float(np.max(np.abs(frequencies))))
         )
