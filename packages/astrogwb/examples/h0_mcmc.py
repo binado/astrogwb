@@ -35,6 +35,7 @@ arviz installed, ``arviz.from_dict``.
 from __future__ import annotations
 
 import argparse
+import logging
 from functools import partial
 from pathlib import Path
 
@@ -54,6 +55,8 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb.waveform import load_catalog
 from numpyro.infer import MCMC, NUTS, init_to_value
+
+logger = logging.getLogger(__name__)
 
 #: Hyperparameters the injection is built at and every non-sampled site is
 #: pinned to. ``local_merger_rate`` is in Gpc^-3 yr^-1; the rest feed the
@@ -165,6 +168,10 @@ def load_samples(path: Path, max_samples: int | None) -> xr.Dataset:
 
 
 def main(argv: list[str] | None = None) -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
     args = build_parser().parse_args(argv)
 
     # Runtime configuration must precede the first array: set_host_device_count
@@ -192,9 +199,11 @@ def main(argv: list[str] | None = None) -> None:
         for name in catalog.parameter.values
     }
     num_sources = polarization_power.shape[1]
-    print(
-        f"Loaded {args.catalog}: {frequencies.shape[0]} frequency bins, "
-        f"{num_sources} sources"
+    logger.info(
+        "Loaded %s: %d frequency bins, %d sources",
+        args.catalog,
+        frequencies.shape[0],
+        num_sources,
     )
 
     # The grid spans the catalog's own redshift support, so every source lands
@@ -217,7 +226,7 @@ def main(argv: list[str] | None = None) -> None:
         total_merger_rate,
         average_mode="analytic_inclination",
     )
-    print(f"Fiducial injection: total merger rate {total_merger_rate:.4e} /s")
+    logger.info("Fiducial injection: total merger rate %.4e /s", total_merger_rate)
 
     weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=FIDUCIALS,
@@ -255,9 +264,11 @@ def main(argv: list[str] | None = None) -> None:
             network_psd,
         )
     )
-    print(
-        f"Analysis band: {num_bins} bins, detectors {' '.join(args.detectors)}, "
-        f"{args.observation_time} yr"
+    logger.info(
+        "Analysis band: %d bins, detectors %s, %s yr",
+        num_bins,
+        " ".join(args.detectors),
+        args.observation_time,
     )
 
     model = partial(
@@ -295,11 +306,11 @@ def main(argv: list[str] | None = None) -> None:
 
     posterior = mcmc.get_samples(group_by_chain=True)
     relative_ess = float(jnp.mean(posterior["importance_relative_ess"]))
-    print(f"Fiducial H0: {FIDUCIALS['H0']}")
-    print(f"Mean importance relative ESS: {relative_ess:.4f}")
+    logger.info("Fiducial H0: %s", FIDUCIALS["H0"])
+    logger.info("Mean importance relative ESS: %.4f", relative_ess)
     if relative_ess < 0.1:
-        print(
-            "WARNING: importance weights have collapsed; the posterior is "
+        logger.warning(
+            "importance weights have collapsed; the posterior is "
             "dominated by a handful of catalog sources"
         )
 
@@ -322,7 +333,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     chains.to_netcdf(args.output, engine="h5netcdf")
-    print(f"Wrote chains to {args.output}")
+    logger.info("Wrote chains to %s", args.output)
 
 
 if __name__ == "__main__":

@@ -45,6 +45,7 @@ arviz installed, ``arviz.from_dict``.
 from __future__ import annotations
 
 import argparse
+import logging
 from functools import partial
 from pathlib import Path
 
@@ -70,6 +71,8 @@ from astrogwb.sampling import (
 )
 from astrogwb.waveform import load_catalog
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
+
+logger = logging.getLogger(__name__)
 
 #: Hyperparameters the injection is built at and every non-sampled site is
 #: pinned to. ``local_merger_rate`` is in Gpc^-3 yr^-1; the rest feed the
@@ -204,6 +207,10 @@ def load_samples(path: Path, max_samples: int | None) -> xr.Dataset:
 
 
 def main(argv: list[str] | None = None) -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
     args = build_parser().parse_args(argv)
 
     # Runtime configuration must precede the first array: set_host_device_count
@@ -231,9 +238,11 @@ def main(argv: list[str] | None = None) -> None:
         for name in catalog.parameter.values
     }
     num_sources = polarization_power.shape[1]
-    print(
-        f"Loaded {args.catalog}: {frequencies.shape[0]} frequency bins, "
-        f"{num_sources} sources"
+    logger.info(
+        "Loaded %s: %d frequency bins, %d sources",
+        args.catalog,
+        frequencies.shape[0],
+        num_sources,
     )
 
     # The grid spans the catalog's own redshift support, so every source lands
@@ -256,7 +265,7 @@ def main(argv: list[str] | None = None) -> None:
         total_merger_rate,
         average_mode="analytic_inclination",
     )
-    print(f"Fiducial injection: total merger rate {total_merger_rate:.4e} /s")
+    logger.info("Fiducial injection: total merger rate %.4e /s", total_merger_rate)
 
     weights_fn = make_merger_rate_and_log_weights_fn(
         fiducials=FIDUCIALS,
@@ -299,9 +308,11 @@ def main(argv: list[str] | None = None) -> None:
             network_psd,
         )
     )
-    print(
-        f"Analysis band: {num_bins} bins, detectors {' '.join(args.detectors)}, "
-        f"{args.observation_time} yr"
+    logger.info(
+        "Analysis band: %d bins, detectors %s, %s yr",
+        num_bins,
+        " ".join(args.detectors),
+        args.observation_time,
     )
 
     # Built once, referenced by both the chain and the reconstruction: the
@@ -384,23 +395,25 @@ def main(argv: list[str] | None = None) -> None:
     relative_ess = float(jnp.mean(posterior["importance_relative_ess"]))
     reconstructed = posterior["H0"]
     effective_nodes = float(jnp.min(posterior["quadrature_effective_nodes"]))
-    print(f"Fiducial H0: {FIDUCIALS['H0']}")
-    print(
-        f"Reconstructed H0: {float(jnp.mean(reconstructed)):.3f} "
-        f"+/- {float(jnp.std(reconstructed)):.3f}"
+    logger.info("Fiducial H0: %s", FIDUCIALS["H0"])
+    logger.info(
+        "Reconstructed H0: %.3f +/- %.3f",
+        float(jnp.mean(reconstructed)),
+        float(jnp.std(reconstructed)),
     )
-    print(f"Mean importance relative ESS: {relative_ess:.4f}")
-    print(f"Min quadrature effective nodes: {effective_nodes:.1f}")
+    logger.info("Mean importance relative ESS: %.4f", relative_ess)
+    logger.info("Min quadrature effective nodes: %.1f", effective_nodes)
     if relative_ess < 0.1:
-        print(
-            "WARNING: importance weights have collapsed; the posterior is "
+        logger.warning(
+            "importance weights have collapsed; the posterior is "
             "dominated by a handful of catalog sources"
         )
     if effective_nodes < MIN_EFFECTIVE_NODES:
-        print(
-            f"WARNING: quadrature_effective_nodes min={effective_nodes:.1f} is "
-            f"below {MIN_EFFECTIVE_NODES}; the amplitude grid may not resolve "
-            "the conditional posterior; raise --amplitude-num-nodes"
+        logger.warning(
+            "quadrature_effective_nodes min=%.1f is below %d; the amplitude grid "
+            "may not resolve the conditional posterior; raise --amplitude-num-nodes",
+            effective_nodes,
+            MIN_EFFECTIVE_NODES,
         )
 
     chains = xr.Dataset(
@@ -426,7 +439,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     chains.to_netcdf(args.output, engine="h5netcdf")
-    print(f"Wrote chains to {args.output}")
+    logger.info("Wrote chains to %s", args.output)
 
 
 if __name__ == "__main__":
