@@ -27,6 +27,7 @@ python h0_mcmc.py CATALOG.h5 -o chains.nc \
 |---|---|---|
 | `--detectors` | `E1 E2 E3` | Any names from `astrogwb.detector`'s sensitivity table. Needs at least two — the effective PSD is a cross-correlation sum. A 2G network such as `H1 L1 V1` will not constrain H₀: the background is far below its noise, so the posterior just returns the prior. |
 | `--max-catalog-samples` | all | Production banks hold 16k–32k sources across 4097 frequency bins. Each NUTS step contracts that whole `(F, N)` array, so subsampling is the main runtime knob. |
+| `--zmin` / `--zmax` | `0` / `20` | Redshift range for analysis and integration grid. Catalog sources outside this window are discarded. |
 | `--f-min` / `--f-max` | `10` / `2048` Hz | Bins where no detector pair contributes are dropped automatically, so widening the band is safe. |
 | `--num-chains` | `1` | More than one chain gives you an `r_hat` in the summary. |
 
@@ -85,7 +86,7 @@ print(chains.H0.mean(), chains.attrs["fiducial_H0"])
 The layout is what `arviz.from_dict` expects, so it loads directly into arviz
 if you have it — the example itself never imports it.
 
-## `h0_omega_m_mcmc.py` — infer (H₀, Ω_m) with H₀ marginalized
+## `amplitude_marginalized_model.py` — infer (H₀, Ω_m) with H₀ marginalized
 
 The same setup, but using the other half of `astrogwb.sampling`: H₀ is
 integrated out of the likelihood analytically, NUTS samples Ω_m alone, and a
@@ -94,7 +95,7 @@ mirrors the `cosmological-parameters/H0-Omega_m` run shipped with
 `astrogwb-paper`, and it is how every production analysis is set up.
 
 ```bash
-python h0_omega_m_mcmc.py CATALOG.h5 -o chains.nc
+python amplitude_marginalized_model.py CATALOG.h5 -o chains.nc
 ```
 
 Every flag from `h0_mcmc.py` still applies — `--h0-min` / `--h0-max` now bound

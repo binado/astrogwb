@@ -34,7 +34,7 @@ injection and the importance-sampling proposal, so every weight is exactly 1 at
 
 Usage::
 
-    python h0_omega_m_mcmc.py CATALOG.h5 -o chains.nc \
+    python amplitude_marginalized_model.py CATALOG.h5 -o chains.nc \
         --detectors E1 E2 E3 --num-warmup 500 --num-samples 1000
 
 Chains are written as an xarray netCDF file with ``(chain, draw)`` dimensions,
@@ -151,6 +151,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="use only the first N catalog sources (production banks hold 16k+)",
     )
     parser.add_argument(
+        "--zmin",
+        "--z-min",
+        type=float,
+        default=0.0,
+        dest="zmin",
+        help="minimum redshift for analysis window and grid",
+    )
+    parser.add_argument(
+        "--zmax",
+        "--z-max",
+        type=float,
+        default=20.0,
+        dest="zmax",
+        help="maximum redshift for analysis window and grid",
+    )
+    parser.add_argument(
         "--n-grid",
         type=int,
         default=256,
@@ -186,12 +202,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def load_samples(path: Path, max_samples: int | None) -> xr.Dataset:
-    """Load a catalog and check it carries what the weights callback needs."""
+def load_samples(
+    path: Path,
+    max_samples: int | None,
+    *,
+    zmin: float = 0.0,
+    zmax: float = 20.0,
+) -> xr.Dataset:
+    """Load a catalog, filter by redshift, and check required source parameters."""
     catalog = load_catalog(path)
-    if max_samples is not None:
-        catalog = catalog.isel(sample=slice(0, max_samples))
-
     available = {str(name) for name in catalog.parameter.values}
     missing = [name for name in REQUIRED_PARAMETERS if name not in available]
     if missing:
@@ -199,6 +218,18 @@ def load_samples(path: Path, max_samples: int | None) -> xr.Dataset:
             f"{path}: catalog is missing required source parameter(s) "
             f"{', '.join(missing)}; it has {', '.join(sorted(available))}"
         )
+
+    redshift = catalog.source_parameters.sel(parameter="redshift").values
+    in_window = (redshift >= zmin) & (redshift <= zmax)
+    if not np.any(in_window):
+        raise ValueError(
+            f"{path}: catalog has no samples in the redshift window [{zmin}, {zmax}]"
+        )
+    catalog = catalog.isel(sample=np.flatnonzero(in_window))
+
+    if max_samples is not None:
+        catalog = catalog.isel(sample=slice(0, max_samples))
+
     return catalog
 
 
@@ -208,6 +239,13 @@ def main(argv: list[str] | None = None) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
     args = build_parser().parse_args(argv)
+
+    if args.zmin < 0.0:
+        raise ValueError(f"--zmin must be non-negative, got {args.zmin}")
+    if args.zmin >= args.zmax:
+        raise ValueError(
+            f"--zmin ({args.zmin}) must be strictly less than --zmax ({args.zmax})"
+        )
 
     # Runtime configuration must precede the first array: set_host_device_count
     # mutates XLA_FLAGS, and x64 must be on before any array is created. The
@@ -222,7 +260,12 @@ def main(argv: list[str] | None = None) -> None:
             f"two detectors, got {args.detectors}"
         )
 
-    catalog = load_samples(args.catalog, args.max_catalog_samples)
+    catalog = load_samples(
+        args.catalog,
+        args.max_catalog_samples,
+        zmin=args.zmin,
+        zmax=args.zmax,
+    )
     # Catalog power is generated at the fiducial *electromagnetic* distance.
     # At xi_0 = 1.0 the GW/EM ratio is identically 1, so no correction is
     # needed here; a run that varies the propagation parameters would apply
@@ -241,13 +284,10 @@ def main(argv: list[str] | None = None) -> None:
         num_sources,
     )
 
-    # The grid spans the catalog's own redshift support, so every source lands
-    # inside it. Outside the grid the density interpolates to zero and the
-    # log-pdf to -inf, which would poison every weight.
-    redshift = samples["redshift"]
-    redshift_grid = jnp.linspace(
-        float(jnp.min(redshift)), float(jnp.max(redshift)), args.n_grid
-    )
+    # The grid spans the analysis redshift window [zmin, zmax]. Catalog samples
+    # outside this range have been discarded, so every retained source lands
+    # inside the grid without interpolating out of bounds.
+    redshift_grid = jnp.linspace(args.zmin, args.zmax, args.n_grid)
 
     # One call yields both the fiducial rate (for the injection) and the
     # proposal log-density (for the weights). Sharing the function is what
@@ -414,6 +454,8 @@ def main(argv: list[str] | None = None) -> None:
             "seed": args.seed,
             "f_min": args.f_min,
             "f_max": args.f_max,
+            "zmin": args.zmin,
+            "zmax": args.zmax,
             "num_frequency_bins": num_bins,
             "observation_time": args.observation_time,
             "num_catalog_samples": num_sources,

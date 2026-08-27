@@ -45,7 +45,7 @@ density from it, and infers `H0` with a NumPyro NUTS chain:
 python examples/h0_mcmc.py CATALOG.h5 -o chains.nc
 ```
 
-`examples/h0_omega_m_mcmc.py` is the same run with `H0` marginalized out of the
+`examples/amplitude_marginalized_model.py` is the same run with `H0` marginalized out of the
 likelihood analytically and reconstructed afterwards, giving a joint
 `(H0, Omega_m)` posterior -- the setup every production analysis uses.
 
