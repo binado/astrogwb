@@ -1,11 +1,9 @@
 """Cosmology helpers for the importance-weighting reference models.
 
 These functions are pure, backend-agnostic, and JAX-traceable: array inputs
-are dispatched through the Python array API
-(:func:`array_api_compat.array_namespace`), so the same code runs at
-catalog-build time (NumPy arrays, returned as NumPy) and inside the jitted
-NUTS model (JAX arrays, concrete or traced, returned as JAX). Only the
-``SPEED_OF_LIGHT`` constant is taken from ``gwmock_pop``.
+are dispatched through :func:`array_api_compat.array_namespace`, so the same
+code runs at catalog-build time (NumPy arrays, returned as NumPy) and inside
+the jitted NUTS model (JAX arrays, concrete or traced, returned as JAX).
 
 The grid-based helpers are traceable because they evaluate on the exact
 ``z_grid`` array they are given: no static Python scalars (``max_redshift`` /
@@ -23,9 +21,9 @@ from typing import Any, overload
 import jax
 import numpy as np
 from array_api_compat import array_namespace
-from gwmock_pop.cosmology.flat_lambda_cdm import SPEED_OF_LIGHT
 from numpy.typing import NDArray
 
+SPEED_OF_LIGHT: float = 299792458.0
 MPC_IN_METERS: float = 3.0856775814913673e22
 
 
