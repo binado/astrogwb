@@ -98,6 +98,12 @@ class TestNormalizedHubbleParameter:
     ) -> None:
         _test_array_backend_array_input(normalized_hubble_parameter, redshift, omega_m)
 
+    def test_jittable(self, redshift: npt.NDArray, omega_m: npt.NDArray) -> None:
+        _z, _om = _as_jnp(redshift, omega_m)
+        jitted_fn = jax.jit(normalized_hubble_parameter)
+        res = jitted_fn(_z, _om)
+        res.block_until_ready()
+
     def test_matches_gwmockpop(
         self, redshift: npt.NDArray, omega_m: npt.NDArray
     ) -> None:
@@ -144,6 +150,14 @@ class TestDistanceAndVolumeGrid:
         res = distance_and_volume_grid(redshift, hubble_constant=_h, omega_m=_om)
         shape = np.broadcast(redshift, _h, _om).shape
         assert all(r.shape == shape for r in res)
+
+    def test_jittable(
+        self, redshift: npt.NDArray, hubble_constant: npt.NDArray, omega_m: npt.NDArray
+    ) -> None:
+        _z, _h, _om = _as_jnp(redshift, hubble_constant, omega_m)
+        jitted_fn = jax.jit(distance_and_volume_grid)
+        (d, _) = jitted_fn(redshift, hubble_constant=_h, omega_m=_om)
+        d.block_until_ready()
 
     @pytest.mark.parametrize("hubble_constant,omega_m", [(70, 0.3)])
     def test_matches_gwmock_pop(
