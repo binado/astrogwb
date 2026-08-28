@@ -1,8 +1,11 @@
 """Cosmology helpers for the importance-weighting reference models.
 
-These functions are pure and JAX-traceable so they may run both at
-catalog-build time (concrete arrays) and inside the jitted NUTS model
-(traced arrays). They wrap ``gwmock_pop.cosmology.flat_lambda_cdm``.
+These functions are pure, backend-agnostic, and JAX-traceable: array inputs
+are dispatched through the Python array API
+(:func:`array_api_compat.array_namespace`), so the same code runs at
+catalog-build time (NumPy arrays, returned as NumPy) and inside the jitted
+NUTS model (JAX arrays, concrete or traced, returned as JAX). Only the
+``SPEED_OF_LIGHT`` constant is taken from ``gwmock_pop``.
 
 The grid-based helpers are traceable because they evaluate on the exact
 ``z_grid`` array they are given: no static Python scalars (``max_redshift`` /
@@ -18,20 +21,35 @@ from collections.abc import Mapping
 from typing import Any, overload
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 from array_api_compat import array_namespace
-from gwmock_pop.cosmology.flat_lambda_cdm import (
-    SPEED_OF_LIGHT,
-    compute_normalized_hubble_parameter,
-)
+from gwmock_pop.cosmology.flat_lambda_cdm import SPEED_OF_LIGHT
 from numpy.typing import NDArray
 
 MPC_IN_METERS: float = 3.0856775814913673e22
 
 
-def hubble_constant_si(h0_km_s_mpc: float) -> float:
-    """Convert $H_0$ from $\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}$ to SI ($\\mathrm{s^{-1}}$)."""
+@overload
+def hubble_constant_si(h0_km_s_mpc: float) -> float: ...
+
+
+@overload
+def hubble_constant_si(h0_km_s_mpc: NDArray[np.float64]) -> NDArray[np.float64]: ...
+
+
+@overload
+def hubble_constant_si(h0_km_s_mpc: jax.Array) -> jax.Array: ...
+
+
+def hubble_constant_si(
+    h0_km_s_mpc: float | jax.Array | NDArray[np.float64],
+) -> float | jax.Array | NDArray[np.float64]:
+    """Convert $H_0$ from $\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}$ to SI ($\\mathrm{s^{-1}}$).
+
+    Pure scalar arithmetic, so it is backend-agnostic without needing the
+    array namespace: array inputs of any backend work through operator
+    overloading and preserve their array type.
+    """
     return h0_km_s_mpc * 1000.0 / MPC_IN_METERS
 
 
@@ -85,26 +103,97 @@ def log_gw_em_ratio(
 
 
 @overload
+def normalized_hubble_parameter(
+    redshift: NDArray[np.float64],
+    omega_m: float | NDArray[np.float64],
+) -> NDArray[np.float64]: ...
+
+
+@overload
+def normalized_hubble_parameter(
+    redshift: jax.Array,
+    omega_m: float | jax.Array,
+) -> jax.Array: ...
+
+
+def normalized_hubble_parameter(
+    redshift: jax.Array | NDArray[np.float64],
+    omega_m: float | jax.Array | NDArray[np.float64],
+) -> jax.Array | NDArray[np.float64]:
+    r"""Normalized Hubble parameter $E(z) = H(z)/H_0$ for flat $\Lambda$CDM.
+
+    .. math::
+
+        E(z) = \sqrt{\Omega_m (1 + z)^3 + (1 - \Omega_m)}
+
+    Array-API equivalent of
+    ``gwmock_pop.cosmology.flat_lambda_cdm.compute_normalized_hubble_parameter``
+    (Leuven Gravity Institute, BSD-3-Clause): identical formula, but
+    dispatched through :func:`array_api_compat.array_namespace` so NumPy
+    inputs stay NumPy and JAX inputs stay JAX-traceable.
+
+    Parameters
+    ----------
+    redshift:
+        Redshift array. Accepts either a JAX array (JAX-traceable, for use
+        inside jitted models) or a NumPy array (returned as NumPy).
+    omega_m:
+        Matter density parameter.
+
+    Returns
+    -------
+    jax.Array or numpy.ndarray
+        ``E(z)``, same shape as ``redshift`` and matching its array type.
+    """
+    xp = array_namespace(redshift)
+    return xp.sqrt(omega_m * (1.0 + redshift) ** 3 + (1.0 - omega_m))
+
+
+@overload
 def hubble_distance(h0: float) -> float: ...
+
+
+@overload
+def hubble_distance(h0: NDArray[np.float64]) -> NDArray[np.float64]: ...
 
 
 @overload
 def hubble_distance(h0: jax.Array) -> jax.Array: ...
 
 
-def hubble_distance(h0: float | jax.Array) -> float | jax.Array:
+def hubble_distance(
+    h0: float | jax.Array | NDArray[np.float64],
+) -> float | jax.Array | NDArray[np.float64]:
     r"""Hubble distance $c / H_0$ in Mpc.
 
     With $H_0$ given in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$ and the speed of light
     in $\mathrm{km\,s^{-1}}$, the result is the Hubble distance in Mpc.
+
+    Pure scalar arithmetic, so it is backend-agnostic without needing the
+    array namespace: array inputs of any backend work through operator
+    overloading and preserve their array type.
     """
     return SPEED_OF_LIGHT / 1000 / h0
 
 
+@overload
+def distance_and_volume_grid(
+    params: Mapping[str, Any],
+    redshift: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]: ...
+
+
+@overload
 def distance_and_volume_grid(
     params: Mapping[str, Any],
     redshift: jax.Array,
-) -> tuple[jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array]: ...
+
+
+def distance_and_volume_grid(
+    params: Mapping[str, Any],
+    redshift: jax.Array | NDArray[np.float64],
+) -> tuple[jax.Array | NDArray[np.float64], jax.Array | NDArray[np.float64]]:
     """Luminosity distance and differential comoving volume on a redshift grid.
 
     Evaluates both quantities on the exact ``redshift`` grid passed by the caller, so
@@ -124,32 +213,33 @@ def distance_and_volume_grid(
         ``"Omega_m"`` (matter density). May contain tracers during NUTS.
     redshift:
         Redshift grid on which both arrays are evaluated, shape ``(n_grid,)``.
-        JAX-traceable; no static Python scalars are required.
+        Accepts either a JAX array (JAX-traceable; no static Python scalars
+        are required) or a NumPy array (outputs returned as NumPy).
 
     Returns
     -------
-    tuple[jax.Array, jax.Array]
+    tuple[jax.Array, jax.Array] or tuple[numpy.ndarray, numpy.ndarray]
         ``(luminosity_distance, differential_comoving_volume)`` on the grid,
-        each of shape ``(n_grid,)``. The differential comoving volume is the
-        full-sky value in ``Mpc^3`` (includes the ``4 pi`` factor and the
-        ``SPEED_OF_LIGHT / 1000`` factor).
+        each of shape ``(n_grid,)`` and matching the input array type. The
+        differential comoving volume is the full-sky value in ``Mpc^3``
+        (includes the ``4 pi`` factor and the ``SPEED_OF_LIGHT / 1000``
+        factor).
     """
+    xp = array_namespace(redshift)
     h0 = params["H0"]
     omega_m = params["Omega_m"]
 
-    inv_e = 1.0 / compute_normalized_hubble_parameter(
-        redshift=redshift, omega_m=omega_m
-    )
-    extended = jnp.concatenate([jnp.zeros(1, dtype=redshift.dtype), redshift])
-    inv_e_extended = 1.0 / compute_normalized_hubble_parameter(
+    inv_e = 1.0 / normalized_hubble_parameter(redshift=redshift, omega_m=omega_m)
+    extended = xp.concat([xp.zeros(1, dtype=redshift.dtype), redshift])
+    inv_e_extended = 1.0 / normalized_hubble_parameter(
         redshift=extended, omega_m=omega_m
     )
-    delta_z = jnp.diff(extended)
+    delta_z = xp.diff(extended)
     trapezoids = 0.5 * (inv_e_extended[1:] + inv_e_extended[:-1]) * delta_z
-    integral = jnp.cumsum(trapezoids)
+    integral = xp.cumsum(trapezoids)
     comoving_distance = hubble_distance(h0) * integral
     luminosity_distance = (1.0 + redshift) * comoving_distance
     differential_comoving_volume = (
-        4.0 * jnp.pi * comoving_distance**2 * inv_e * hubble_distance(h0)
+        4.0 * xp.pi * comoving_distance**2 * inv_e * hubble_distance(h0)
     )
     return luminosity_distance, differential_comoving_volume
