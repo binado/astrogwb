@@ -15,6 +15,7 @@ closure; see
 
 from __future__ import annotations
 
+import numbers
 from typing import overload
 
 import jax
@@ -144,11 +145,16 @@ def hubble_distance(
     With $H_0$ given in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$ and the speed of light
     in $\mathrm{km\,s^{-1}}$, the result is the Hubble distance in Mpc.
 
-    Pure scalar arithmetic, so it is backend-agnostic without needing the
-    array namespace: array inputs of any backend work through operator
-    overloading and preserve their array type.
+    The input array type is preserved by materializing the result through
+    the input's array namespace: NumPy demotes scalar/0-d-array arithmetic to
+    a NumPy scalar, which would otherwise leak ``np.float64`` instead of an
+    ``ndarray``.
     """
-    return SPEED_OF_LIGHT / 1000 / h0
+    result = SPEED_OF_LIGHT / 1000 / h0
+    if isinstance(h0, numbers.Number):
+        return result
+    xp = array_namespace(h0)
+    return xp.asarray(result)
 
 
 @overload
