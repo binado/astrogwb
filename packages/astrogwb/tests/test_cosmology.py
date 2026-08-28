@@ -65,9 +65,6 @@ def test_normalized_hubble_parameter_matches_gwmock_pop() -> None:
 
 
 def test_distance_and_volume_grid_vanishes_at_redshift_zero() -> None:
-    # Slicing cumsum(trapezoids)[redshift.size - 1:] keeps only the last
-    # comoving distance and broadcasts it onto every grid point, so d_L(0)
-    # would equal d_c(z_max) instead of 0.
     redshift = jnp.array([0.0, 0.3, 1.0, 2.7, 8.0, 20.0])
     luminosity_distance, differential_comoving_volume = distance_and_volume_grid(
         _FIDUCIALS, redshift
@@ -80,6 +77,97 @@ def test_distance_and_volume_grid_vanishes_at_redshift_zero() -> None:
     comoving_distance = luminosity_distance / (1.0 + np.asarray(redshift))
     assert np.all(np.diff(comoving_distance) > 0)
     assert not np.allclose(comoving_distance, comoving_distance[-1])
+
+
+def test_distance_and_volume_grid_broadcasts_batched_parameters() -> None:
+    redshift = np.linspace(0.0, 3.0, 128)
+    params = {
+        "H0": np.array([[67.66], [70.0]]),
+        "Omega_m": np.array([[0.3096], [0.27]]),
+    }
+
+    luminosity_distance, differential_comoving_volume = distance_and_volume_grid(
+        params, redshift
+    )
+
+    assert luminosity_distance.shape == (2, redshift.size)
+    assert differential_comoving_volume.shape == (2, redshift.size)
+    for batch_index in range(2):
+        expected_luminosity_distance, expected_differential_comoving_volume = (
+            distance_and_volume_grid(
+                {
+                    "H0": float(params["H0"][batch_index, 0]),
+                    "Omega_m": float(params["Omega_m"][batch_index, 0]),
+                },
+                redshift,
+            )
+        )
+        np.testing.assert_allclose(
+            luminosity_distance[batch_index], expected_luminosity_distance
+        )
+        np.testing.assert_allclose(
+            differential_comoving_volume[batch_index],
+            expected_differential_comoving_volume,
+        )
+
+
+def test_distance_and_volume_grid_integrates_along_last_axis() -> None:
+    redshift = np.stack(
+        [
+            np.linspace(0.0, 3.0, 128),
+            np.linspace(0.0, 2.0, 128),
+        ]
+    )
+    params = {
+        "H0": np.array([[67.66], [70.0]]),
+        "Omega_m": np.array([[0.3096], [0.27]]),
+    }
+
+    luminosity_distance, differential_comoving_volume = distance_and_volume_grid(
+        params, redshift
+    )
+
+    assert luminosity_distance.shape == redshift.shape
+    assert differential_comoving_volume.shape == redshift.shape
+    for batch_index in range(redshift.shape[0]):
+        expected_luminosity_distance, expected_differential_comoving_volume = (
+            distance_and_volume_grid(
+                {
+                    "H0": float(params["H0"][batch_index, 0]),
+                    "Omega_m": float(params["Omega_m"][batch_index, 0]),
+                },
+                redshift[batch_index],
+            )
+        )
+        np.testing.assert_allclose(
+            luminosity_distance[batch_index], expected_luminosity_distance
+        )
+        np.testing.assert_allclose(
+            differential_comoving_volume[batch_index],
+            expected_differential_comoving_volume,
+        )
+
+
+def test_distance_and_volume_grid_batched_numpy_matches_jax() -> None:
+    redshift = np.stack(
+        [
+            np.linspace(0.0, 3.0, 128),
+            np.linspace(0.0, 2.0, 128),
+        ]
+    )
+    params = {
+        "H0": np.array([[67.66], [70.0]]),
+        "Omega_m": np.array([[0.3096], [0.27]]),
+    }
+
+    d_l_np, dvc_np = distance_and_volume_grid(params, redshift)
+    d_l_jax, dvc_jax = distance_and_volume_grid(
+        {name: jnp.asarray(value) for name, value in params.items()},
+        jnp.asarray(redshift),
+    )
+
+    np.testing.assert_allclose(d_l_np, np.asarray(d_l_jax), rtol=1e-12)
+    np.testing.assert_allclose(dvc_np, np.asarray(dvc_jax), rtol=1e-12)
 
 
 def test_distance_and_volume_grid_matches_low_redshift_limit() -> None:

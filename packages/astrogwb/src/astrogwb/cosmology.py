@@ -105,24 +105,21 @@ def normalized_hubble_parameter(
 
         E(z) = \sqrt{\Omega_m (1 + z)^3 + (1 - \Omega_m)}
 
-    Array-API equivalent of
-    ``gwmock_pop.cosmology.flat_lambda_cdm.compute_normalized_hubble_parameter``
-    (Leuven Gravity Institute, BSD-3-Clause): identical formula, but
-    dispatched through :func:`array_api_compat.array_namespace` so NumPy
-    inputs stay NumPy and JAX inputs stay JAX-traceable.
-
     Parameters
     ----------
     redshift:
         Redshift array. Accepts either a JAX array (JAX-traceable, for use
-        inside jitted models) or a NumPy array (returned as NumPy).
+        inside jitted models) or a NumPy array (returned as NumPy). It must be
+        broadcastable with ``omega_m`` according to the backend's usual
+        broadcasting rules.
     omega_m:
-        Matter density parameter.
+        Matter density parameter, broadcastable with ``redshift``.
 
     Returns
     -------
     jax.Array or numpy.ndarray
-        ``E(z)``, same shape as ``redshift`` and matching its array type.
+        ``E(z)``, with the broadcasted shape of ``redshift`` and ``omega_m``
+        and matching the input array type.
     """
     xp = array_namespace(redshift)
     return xp.sqrt(omega_m * (1.0 + redshift) ** 3 + (1.0 - omega_m))
@@ -189,33 +186,39 @@ def distance_and_volume_grid(
     ----------
     params:
         Mapping with keys ``"H0"`` (dimensionless Hubble constant) and
-        ``"Omega_m"`` (matter density). May contain tracers during NUTS.
+        ``"Omega_m"`` (matter density). Values may be arrays and must be
+        broadcastable with the redshift-dependent terms. May contain tracers
+        during NUTS.
     redshift:
-        Redshift grid on which both arrays are evaluated, shape ``(n_grid,)``.
-        Accepts either a JAX array (JAX-traceable; no static Python scalars
-        are required) or a NumPy array (outputs returned as NumPy).
+        Redshift grid on which both arrays are evaluated. The final axis is
+        the grid axis, with shape ``(..., n_grid)``. Accepts either a JAX
+        array (JAX-traceable; no static Python scalars are required) or a
+        NumPy array (outputs returned as NumPy).
 
     Returns
     -------
     tuple[jax.Array, jax.Array] or tuple[numpy.ndarray, numpy.ndarray]
         ``(luminosity_distance, differential_comoving_volume)`` on the grid,
-        each of shape ``(n_grid,)`` and matching the input array type. The
-        differential comoving volume is the full-sky value in ``Mpc^3``
-        (includes the ``4 pi`` factor and the ``SPEED_OF_LIGHT / 1000``
-        factor).
+        with the final axis corresponding to ``n_grid`` and any leading axes
+        determined by backend broadcasting. The differential comoving volume
+        is the full-sky value in ``Mpc^3`` (includes the ``4 pi`` factor and
+        the ``SPEED_OF_LIGHT / 1000`` factor).
     """
     xp = array_namespace(redshift)
     h0 = params["H0"]
     omega_m = params["Omega_m"]
 
-    inv_e = 1.0 / normalized_hubble_parameter(redshift=redshift, omega_m=omega_m)
-    extended = xp.concat([xp.zeros(1, dtype=redshift.dtype), redshift])
+    extended = xp.concat(
+        [xp.zeros_like(redshift[..., :1]), redshift],
+        axis=-1,
+    )
     inv_e_extended = 1.0 / normalized_hubble_parameter(
         redshift=extended, omega_m=omega_m
     )
-    delta_z = xp.diff(extended)
-    trapezoids = 0.5 * (inv_e_extended[1:] + inv_e_extended[:-1]) * delta_z
-    integral = xp.cumsum(trapezoids)
+    inv_e = inv_e_extended[..., 1:]
+    delta_z = xp.diff(extended, axis=-1)
+    trapezoids = 0.5 * (inv_e_extended[..., 1:] + inv_e_extended[..., :-1]) * delta_z
+    integral = xp.cumsum(trapezoids, axis=-1)
     comoving_distance = hubble_distance(h0) * integral
     luminosity_distance = (1.0 + redshift) * comoving_distance
     differential_comoving_volume = (
