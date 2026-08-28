@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
+import pytest
 from astrogwb.frequency import (
     apply_frequency_mask,
     frequency_mask,
+    frequency_spacing,
     noise_weighted_inner_product,
 )
 
@@ -94,6 +99,53 @@ def test_noise_weighted_inner_product_broadcasts_over_leading_axes() -> None:
 
     expected = df * np.sum(np.asarray(a) ** 2 / np.asarray(psd) ** 2, axis=-1)
     assert actual.shape == (2,)
+    np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-6)
+
+
+@pytest.mark.parametrize("asarray", [np.asarray, jnp.asarray])
+def test_frequency_spacing_is_namespace_neutral(asarray: Callable[[Any], Any]) -> None:
+    freqs = asarray([10.0, 20.0, 40.0])
+
+    np.testing.assert_allclose(np.asarray(frequency_spacing(freqs)), 15.0)
+
+
+@pytest.mark.parametrize("asarray", [np.asarray, jnp.asarray])
+def test_frequency_mask_is_namespace_neutral(asarray: Callable[[Any], Any]) -> None:
+    freqs = asarray([5.0, 10.0, 20.0, 30.0])
+
+    mask = frequency_mask(freqs, fmin=10.0, fmax=20.0)
+
+    np.testing.assert_array_equal(
+        np.asarray(mask), np.array([False, True, True, False])
+    )
+
+
+@pytest.mark.parametrize("asarray", [np.asarray, jnp.asarray])
+def test_apply_frequency_mask_is_namespace_neutral(
+    asarray: Callable[[Any], Any],
+) -> None:
+    mask = asarray([False, True, True, False])
+    freqs = asarray([5.0, 10.0, 20.0, 30.0])
+    spectrum = asarray([1.0, 2.0, 3.0, 4.0])
+
+    masked_freqs, masked_spectrum = apply_frequency_mask(mask, freqs, spectrum)
+
+    np.testing.assert_array_equal(np.asarray(masked_freqs), np.array([10.0, 20.0]))
+    np.testing.assert_array_equal(np.asarray(masked_spectrum), np.array([2.0, 3.0]))
+
+
+@pytest.mark.parametrize("asarray", [np.asarray, jnp.asarray])
+def test_noise_weighted_inner_product_is_namespace_neutral(
+    asarray: Callable[[Any], Any],
+) -> None:
+    a = asarray([1.3, 1.7, 4.6, 2.8])
+    b = asarray([1.0, 2.0, 4.0, 3.0])
+    psd = asarray([0.5, 0.4, 0.8, 0.6])
+    df = 2.5
+
+    actual = noise_weighted_inner_product(a, b, psd, df)
+
+    expected = df * np.sum(np.asarray(a) * np.asarray(b) / np.asarray(psd) ** 2)
     np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-6)
 
 

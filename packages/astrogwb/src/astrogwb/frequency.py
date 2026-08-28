@@ -1,23 +1,63 @@
 from __future__ import annotations
 
-import jax
-import jax.numpy as jnp
+from typing import TYPE_CHECKING, Any, overload
+
+from array_api_compat import array_namespace
+
+if TYPE_CHECKING:
+    import jax
+    from numpy.typing import NDArray
 
 __all__ = [
     "apply_frequency_mask",
     "frequency_mask",
+    "frequency_spacing",
     "noise_weighted_inner_product",
 ]
 
 
+@overload
+def frequency_spacing(frequencies: jax.Array) -> jax.Array: ...
+
+
+@overload
+def frequency_spacing(frequencies: NDArray[Any]) -> NDArray[Any]: ...
+
+
+def frequency_spacing(
+    frequencies: jax.Array | NDArray[Any],
+) -> jax.Array | NDArray[Any]:
+    """Mean consecutive spacing Δf from a frequency grid (Hz)."""
+    xp = array_namespace(frequencies)
+    return xp.mean(xp.diff(frequencies))
+
+
+@overload
 def frequency_mask(
     frequencies: jax.Array,
     *,
     fmin: float | None = None,
     fmax: float | None = None,
-) -> jax.Array:
-    """Boolean mask selecting the bins inside the inclusive band."""
-    mask = jnp.ones_like(frequencies, dtype=bool)
+) -> jax.Array: ...
+
+
+@overload
+def frequency_mask(
+    frequencies: NDArray[Any],
+    *,
+    fmin: float | None = None,
+    fmax: float | None = None,
+) -> NDArray[Any]: ...
+
+
+def frequency_mask(
+    frequencies: jax.Array | NDArray[Any],
+    *,
+    fmin: float | None = None,
+    fmax: float | None = None,
+) -> jax.Array | NDArray[Any]:
+    xp = array_namespace(frequencies)
+    mask = xp.ones_like(frequencies, dtype=xp.bool)
     if fmin is not None:
         mask = mask & (frequencies >= fmin)
     if fmax is not None:
@@ -25,32 +65,71 @@ def frequency_mask(
     return mask
 
 
+@overload
 def apply_frequency_mask(
     mask: jax.Array,
     *arrays: jax.Array,
     axis: int = 0,
-) -> tuple[jax.Array, ...]:
+) -> tuple[jax.Array, ...]: ...
+
+
+@overload
+def apply_frequency_mask(
+    mask: NDArray[Any],
+    *arrays: NDArray[Any],
+    axis: int = 0,
+) -> tuple[NDArray[Any], ...]: ...
+
+
+def apply_frequency_mask(
+    mask: jax.Array | NDArray[Any],
+    *arrays: jax.Array | NDArray[Any],
+    axis: int = 0,
+) -> tuple[jax.Array | NDArray[Any], ...]:
     """Apply a boolean frequency mask along ``axis`` of every array.
 
     Defaults to ``axis=0`` to match this package's ``(F, ...)`` layout
     (e.g. polarization power of shape ``(F, N)``).
 
-    The mask need not select a contiguous run: every surviving bin keeps its
-    own width, which is the catalog's ``df`` attribute. Nothing downstream
-    measures the spacing of the masked grid -- ``df`` is always passed
-    explicitly, never derived from the analysis band.
+    Selection uses ``take`` with ``nonzero`` indices because ``compress``
+    is not part of the array API standard; the result is identical for a
+    boolean mask and keeps the helpers namespace-neutral.
     """
-    return tuple(jnp.compress(mask, array, axis=axis) for array in arrays)
+    xp = array_namespace(mask)
+    indices = xp.nonzero(mask)[0]
+    return tuple(xp.take(array, indices, axis=axis) for array in arrays)
+
+
+@overload
+def noise_weighted_inner_product(
+    a: jax.Array,
+    b: jax.Array | NDArray[Any],
+    psd: jax.Array | NDArray[Any],
+    df: float | jax.Array | NDArray[Any],
+    *,
+    axis: int = -1,
+) -> jax.Array: ...
+
+
+@overload
+def noise_weighted_inner_product(
+    a: NDArray[Any],
+    b: jax.Array | NDArray[Any],
+    psd: jax.Array | NDArray[Any],
+    df: float | jax.Array | NDArray[Any],
+    *,
+    axis: int = -1,
+) -> NDArray[Any]: ...
 
 
 def noise_weighted_inner_product(
-    a: jax.Array,
-    b: jax.Array,
-    psd: jax.Array,
-    df: float | jax.Array,
+    a: jax.Array | NDArray[Any],
+    b: jax.Array | NDArray[Any],
+    psd: jax.Array | NDArray[Any],
+    df: float | jax.Array | NDArray[Any],
     *,
     axis: int = -1,
-) -> jax.Array:
+) -> jax.Array | NDArray[Any]:
     r"""Discrete noise-weighted inner product for a diagonal Gaussian noise model.
 
     .. math::
@@ -78,4 +157,5 @@ def noise_weighted_inner_product(
         Axis to contract over. Defaults to the trailing axis, so leading batch
         dimensions broadcast.
     """
-    return df * jnp.sum(a * b / psd**2, axis=axis)
+    xp = array_namespace(a)
+    return df * xp.sum(a * b / psd**2, axis=axis)
