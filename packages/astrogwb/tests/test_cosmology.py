@@ -125,6 +125,7 @@ class TestNormalizedHubbleParameter:
             lambda z, om: normalized_hubble_parameter(z, om).sum(), 1, _z, _om
         )
 
+    @pytest.mark.integration
     def test_matches_gwmockpop(
         self, redshift: npt.NDArray, omega_m: npt.NDArray
     ) -> None:
@@ -213,6 +214,7 @@ class TestDistanceAndVolumeGrid:
         )
         grad_fn(_z, _h, _om).block_until_ready()
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("hubble_constant,omega_m", [(70, 0.3)])
     def test_matches_gwmock_pop(
         self, redshift: npt.NDArray, hubble_constant: npt.NDArray, omega_m: npt.NDArray
