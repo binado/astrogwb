@@ -1,10 +1,11 @@
 r"""Analytic Newtonian-inspiral stochastic-background spectrum.
 
 This module evaluates the one-sided strain spectral density implied by
-Eqs. 2, 3, and 9 of Cousins et al., *The Stochastic Siren* (2026), for a
-population separable in source-frame total mass ``M`` and ordered mass ratio
-``q = m2 / m1 <= 1``. The mass-ratio moment factors out, while the upper total
-mass depends on source-frame frequency through ``f_s = f * (1 + z)``.
+Eqs. 2, 3, and 9 of Cousins et al., *The Stochastic Siren* (2026), for an
+ordered joint source-frame component-mass population ``p(m1, m2)`` with
+``m1 >= m2``. Integration is performed in total mass ``M = m1 + m2`` and mass
+ratio ``q = m2 / m1`` so that the source-frequency cutoff remains an upper
+bound on ``M``.
 
 All integrations use a fixed Gauss-Legendre rule. ``quadrature_order`` is
 therefore static and JAX-friendly; double it until the result is stable to the
@@ -59,7 +60,10 @@ ISCO_ALPHA: float = SPEED_OF_LIGHT**3 / (
 """Schwarzschild-ISCO cutoff coefficient in Hz solar-mass."""
 
 PopulationFunction = Callable[[jax.Array, Mapping[str, Any]], jax.Array]
-"""Vectorized population rate or probability-density callback."""
+"""Vectorized one-dimensional population callback."""
+
+JointMassFunction = Callable[[jax.Array, jax.Array, Mapping[str, Any]], jax.Array]
+"""Vectorized ordered joint component-mass probability-density callback."""
 
 
 @cache
@@ -93,9 +97,8 @@ def _validate_static_inputs(
     *,
     z_min: float,
     z_max: float,
-    total_mass_min: float,
-    total_mass_max: float,
-    q_min: float,
+    component_mass_min: float,
+    component_mass_max: float,
     alpha: float,
     quadrature_order: int,
 ) -> None:
@@ -109,15 +112,14 @@ def _validate_static_inputs(
     if z_min < 0.0 or z_max <= z_min:
         raise ValueError("redshift bounds must satisfy 0 <= z_min < z_max")
 
-    if not math.isfinite(total_mass_min) or not math.isfinite(total_mass_max):
-        raise ValueError("total-mass bounds must be finite")
-    if total_mass_min <= 0.0 or total_mass_max <= total_mass_min:
+    if not math.isfinite(component_mass_min) or not math.isfinite(component_mass_max):
+        raise ValueError("component-mass bounds must be finite")
+    if component_mass_min <= 0.0 or component_mass_max <= component_mass_min:
         raise ValueError(
-            "total-mass bounds must satisfy 0 < total_mass_min < total_mass_max"
+            "component-mass bounds must satisfy "
+            "0 < component_mass_min < component_mass_max"
         )
 
-    if not math.isfinite(q_min) or not 0.0 <= q_min < 1.0:
-        raise ValueError("q_min must satisfy 0 <= q_min < 1")
     if math.isnan(alpha) or alpha <= 0.0:
         raise ValueError("alpha must be positive")
     if (
@@ -145,14 +147,12 @@ def analytic_spectral_density(
     frequencies: jax.Array,
     hyperparameters: Mapping[str, Any],
     merger_rate_fn: PopulationFunction,
-    total_mass_prior_fn: PopulationFunction,
-    mass_ratio_prior_fn: PopulationFunction,
+    joint_mass_prior_fn: JointMassFunction,
     *,
     z_min: float,
     z_max: float,
-    total_mass_min: float,
-    total_mass_max: float,
-    q_min: float = 0.0,
+    component_mass_min: float,
+    component_mass_max: float,
     alpha: float = ISCO_ALPHA,
     quadrature_order: int = 64,
 ) -> jax.Array:
@@ -170,24 +170,20 @@ def analytic_spectral_density(
     merger_rate_fn:
         ``fn(redshift, hyperparameters)`` returning the absolute source-frame
         merger-rate density in Gpc^-3 yr^-1.
-    total_mass_prior_fn:
-        ``fn(total_mass, hyperparameters)`` returning a normalized density in
-        inverse solar masses. Its support must lie within the mass bounds.
-    mass_ratio_prior_fn:
-        ``fn(q, hyperparameters)`` returning a normalized density with respect
-        to ``dq``. Its support must lie within ``[q_min, 1]``.
+    joint_mass_prior_fn:
+        ``fn(mass_1, mass_2, hyperparameters)`` returning a normalized ordered
+        joint density with respect to ``dmass_1 dmass_2``. Its support must lie
+        within ``component_mass_min <= mass_2 <= mass_1 <= component_mass_max``.
     z_min, z_max:
         Redshift integration bounds.
-    total_mass_min, total_mass_max:
-        Source-frame total-mass bounds in solar masses.
-    q_min:
-        Lower ordered mass-ratio bound; the upper bound is one.
+    component_mass_min, component_mass_max:
+        Shared source-frame component-mass bounds in solar masses.
     alpha:
         Source-frame cutoff coefficient in Hz solar-mass, defining
         ``f_max = alpha / M``. Defaults to :data:`ISCO_ALPHA`; use ``inf`` for
         no cutoff.
     quadrature_order:
-        Shared Gauss-Legendre order for the redshift, mass, and mass-ratio
+        Shared Gauss-Legendre order for the redshift, total-mass, and mass-ratio
         integrations. This is a static configuration value. For convergence
         testing, compare against a run with twice the order.
 
@@ -199,9 +195,11 @@ def analytic_spectral_density(
 
     Notes
     -----
-    The priors are densities in ``dM dq``. No ``(m1, m2) -> (M, q)`` Jacobian
-    is applied: including ``M / (1 + q)^2`` would double-count a transformation
-    already encoded by this public density contract.
+    The mass prior is a density in ``dm1 dm2`` on the ordered component-mass
+    triangle. For example, sorting two independent uniform draws on
+    ``[component_mass_min, component_mass_max]`` gives the constant density
+    ``2 / (component_mass_max - component_mass_min)**2``. The implementation
+    applies the ``(M, q) -> (m1, m2)`` Jacobian ``M / (1 + q)**2``.
 
     Direct calls validate frequency values. Under :func:`jax.jit`, frequency
     values are traced and therefore must be validated by the caller before the
@@ -218,9 +216,8 @@ def analytic_spectral_density(
         hyperparameters,
         z_min=z_min,
         z_max=z_max,
-        total_mass_min=total_mass_min,
-        total_mass_max=total_mass_max,
-        q_min=q_min,
+        component_mass_min=component_mass_min,
+        component_mass_max=component_mass_max,
         alpha=alpha,
         quadrature_order=quadrature_order,
     )
@@ -233,43 +230,11 @@ def analytic_spectral_density(
     weights = jnp.asarray(host_weights, dtype=jnp.float64)
 
     redshift, redshift_weights = _mapped_rule(nodes, weights, z_min, z_max)
+    q_min = component_mass_min / component_mass_max
     mass_ratio, mass_ratio_weights = _mapped_rule(nodes, weights, q_min, 1.0)
 
-    mass_ratio_density = jnp.broadcast_to(
-        jnp.asarray(
-            mass_ratio_prior_fn(mass_ratio, hyperparameters), dtype=jnp.float64
-        ),
-        mass_ratio.shape,
-    )
-    mass_ratio_moment = jnp.sum(
-        mass_ratio_weights * mass_ratio_density * mass_ratio / (1.0 + mass_ratio) ** 2
-    )
-
-    # The cutoff is a bound, not a mask over a fixed mass grid. Inactive
-    # intervals are evaluated on the ordinary full support (which keeps prior
-    # callbacks away from a potentially singular boundary) and selected to
-    # zero afterwards.
-    source_frequency = frequencies[:, None] * (1.0 + redshift[None, :])
-    mass_upper = jnp.minimum(total_mass_max, alpha / source_frequency)
-    mass_interval_active = mass_upper > total_mass_min
-    safe_mass_upper = jnp.where(mass_interval_active, mass_upper, total_mass_max)
-    total_mass, total_mass_weights = _mapped_rule(
-        nodes,
-        weights,
-        total_mass_min,
-        safe_mass_upper,
-    )
-    total_mass_density = jnp.broadcast_to(
-        jnp.asarray(
-            total_mass_prior_fn(total_mass, hyperparameters), dtype=jnp.float64
-        ),
-        total_mass.shape,
-    )
-    total_mass_moment = jnp.sum(
-        total_mass_weights * total_mass_density * total_mass ** (5.0 / 3.0),
-        axis=-1,
-    )
-    total_mass_moment = jnp.where(mass_interval_active, total_mass_moment, 0.0)
+    total_mass_lower = component_mass_min * (1.0 + 1.0 / mass_ratio)
+    support_total_mass_upper = component_mass_max * (1.0 + mass_ratio)
 
     merger_rate = jnp.broadcast_to(
         jnp.asarray(merger_rate_fn(redshift, hyperparameters), dtype=jnp.float64),
@@ -277,17 +242,65 @@ def analytic_spectral_density(
     )
     expansion = normalized_hubble_parameter(redshift, hyperparameters["Omega_m"])
     redshift_integrand = merger_rate / (expansion * (1.0 + redshift) ** (4.0 / 3.0))
-    redshift_mass_moment = jnp.sum(
-        redshift_weights[None, :] * redshift_integrand[None, :] * total_mass_moment,
-        axis=-1,
-    )
+
+    def redshift_mass_moment(frequency: jax.Array) -> jax.Array:
+        source_frequency = frequency * (1.0 + redshift)
+        cutoff_total_mass_upper = alpha / source_frequency
+        total_mass_upper = jnp.minimum(
+            cutoff_total_mass_upper[:, None], support_total_mass_upper[None, :]
+        )
+        interval_active = total_mass_upper > total_mass_lower[None, :]
+
+        # Evaluate inactive intervals over the ordinary physical support and
+        # select them to zero afterwards. This keeps arbitrary prior callbacks
+        # away from invalid or degenerate component masses.
+        safe_total_mass_upper = jnp.where(
+            interval_active,
+            total_mass_upper,
+            support_total_mass_upper[None, :],
+        )
+        total_mass, total_mass_weights = _mapped_rule(
+            nodes,
+            weights,
+            total_mass_lower[None, :],
+            safe_total_mass_upper,
+        )
+
+        mass_ratio_grid = mass_ratio[None, :, None]
+        one_plus_mass_ratio = 1.0 + mass_ratio_grid
+        mass_1 = total_mass / one_plus_mass_ratio
+        mass_2 = total_mass * mass_ratio_grid / one_plus_mass_ratio
+        joint_mass_density = jnp.broadcast_to(
+            jnp.asarray(
+                joint_mass_prior_fn(mass_1, mass_2, hyperparameters),
+                dtype=jnp.float64,
+            ),
+            total_mass.shape,
+        )
+
+        chirp_mass_power = (
+            total_mass ** (5.0 / 3.0) * mass_ratio_grid / one_plus_mass_ratio**2
+        )
+        coordinate_jacobian = total_mass / one_plus_mass_ratio**2
+        total_mass_moment = jnp.sum(
+            total_mass_weights
+            * joint_mass_density
+            * chirp_mass_power
+            * coordinate_jacobian,
+            axis=-1,
+        )
+        total_mass_moment = jnp.where(interval_active, total_mass_moment, 0.0)
+        mass_moment = jnp.sum(
+            mass_ratio_weights[None, :] * total_mass_moment,
+            axis=-1,
+        )
+        return jnp.sum(redshift_weights * redshift_integrand * mass_moment)
+
+    # Mapping one frequency at a time bounds intermediate storage at
+    # O(quadrature_order**3), rather than adding a full frequency dimension.
+    redshift_mass_moments = jax.lax.map(redshift_mass_moment, frequencies)
 
     coefficient = _ASTROPHYSICAL_STRAIN_COEFFICIENT / hubble_constant_si(
         hyperparameters["H0"]
     )
-    return (
-        coefficient
-        * frequencies ** (-7.0 / 3.0)
-        * mass_ratio_moment
-        * redshift_mass_moment
-    )
+    return coefficient * frequencies ** (-7.0 / 3.0) * redshift_mass_moments
