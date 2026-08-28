@@ -1,8 +1,9 @@
 """Cosmology helpers for the importance-weighting reference models.
 
-These functions are pure and JAX-traceable so they may run both at
-catalog-build time (concrete arrays) and inside the jitted NUTS model
-(traced arrays). They wrap ``gwmock_pop.cosmology.flat_lambda_cdm``.
+These functions are pure, backend-agnostic, and JAX-traceable: array inputs
+are dispatched through :func:`array_api_compat.array_namespace`, so the same
+code runs at catalog-build time (NumPy arrays, returned as NumPy) and inside
+the jitted NUTS model (JAX arrays, concrete or traced, returned as JAX).
 
 The grid-based helpers are traceable because they evaluate on the exact
 ``z_grid`` array they are given: no static Python scalars (``max_redshift`` /
@@ -14,20 +15,22 @@ closure; see
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, overload
+import numbers
+from typing import overload
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 from array_api_compat import array_namespace
-from gwmock_pop.cosmology.flat_lambda_cdm import (
-    SPEED_OF_LIGHT,
-    compute_normalized_hubble_parameter,
-)
+from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
 
+SPEED_OF_LIGHT: float = 299792458.0
 MPC_IN_METERS: float = 3.0856775814913673e22
+
+#: Fixed Gauss-Legendre quadrature rule (host-side constants, converted to the
+#: active array backend/dtype inside the grid helpers). 4 nodes per interval
+#: reach near machine precision for the smooth flat-LCDM integrand 1/E(z).
+GAUSS_LEGENDRE_NODES, GAUSS_LEGENDRE_WEIGHTS = leggauss(4)
 
 
 def hubble_constant_si(h0_km_s_mpc: float) -> float:
@@ -35,7 +38,7 @@ def hubble_constant_si(h0_km_s_mpc: float) -> float:
     return h0_km_s_mpc * 1000.0 / MPC_IN_METERS
 
 
-H0_SI: float = hubble_constant_si(67.74)
+H0: float = 67.74  # km/s/Mpc
 
 
 @overload
@@ -85,71 +88,160 @@ def log_gw_em_ratio(
 
 
 @overload
+def normalized_hubble_parameter(
+    redshift: NDArray[np.float64],
+    omega_m: float | NDArray[np.float64],
+) -> NDArray[np.float64]: ...
+
+
+@overload
+def normalized_hubble_parameter(
+    redshift: jax.Array,
+    omega_m: float | jax.Array,
+) -> jax.Array: ...
+
+
+def normalized_hubble_parameter(
+    redshift: jax.Array | NDArray[np.float64],
+    omega_m: float | jax.Array | NDArray[np.float64],
+) -> jax.Array | NDArray[np.float64]:
+    r"""Normalized Hubble parameter $E(z) = H(z)/H_0$ for flat $\Lambda$CDM.
+
+    .. math::
+
+        E(z) = \sqrt{\Omega_m (1 + z)^3 + (1 - \Omega_m)}
+
+    Parameters
+    ----------
+    redshift:
+        Redshift array. Accepts either a JAX array (JAX-traceable, for use
+        inside jitted models) or a NumPy array (returned as NumPy). It must be
+        broadcastable with ``omega_m`` according to the backend's usual
+        broadcasting rules.
+    omega_m:
+        Matter density parameter, broadcastable with ``redshift``.
+
+    Returns
+    -------
+    jax.Array or numpy.ndarray
+        ``E(z)``, with the broadcasted shape of ``redshift`` and ``omega_m``
+        and matching the input array type.
+    """
+    xp = array_namespace(redshift, omega_m)
+    return xp.sqrt(omega_m * (1.0 + redshift) ** 3 + (1.0 - omega_m))
+
+
+@overload
 def hubble_distance(h0: float) -> float: ...
+
+
+@overload
+def hubble_distance(h0: NDArray[np.float64]) -> NDArray[np.float64]: ...
 
 
 @overload
 def hubble_distance(h0: jax.Array) -> jax.Array: ...
 
 
-def hubble_distance(h0: float | jax.Array) -> float | jax.Array:
+def hubble_distance(
+    h0: float | jax.Array | NDArray[np.float64],
+) -> float | jax.Array | NDArray[np.float64]:
     r"""Hubble distance $c / H_0$ in Mpc.
 
     With $H_0$ given in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$ and the speed of light
     in $\mathrm{km\,s^{-1}}$, the result is the Hubble distance in Mpc.
+
+    The input array type is preserved by materializing the result through
+    the input's array namespace: NumPy demotes scalar/0-d-array arithmetic to
+    a NumPy scalar, which would otherwise leak ``np.float64`` instead of an
+    ``ndarray``.
     """
-    return SPEED_OF_LIGHT / 1000 / h0
+    result = SPEED_OF_LIGHT / 1000 / h0
+    if isinstance(h0, numbers.Number):
+        return result
+    xp = array_namespace(h0)
+    return xp.asarray(result)
+
+
+@overload
+def distance_and_volume_grid(
+    redshift: NDArray[np.float64],
+    hubble_constant: float | NDArray[np.float64],
+    omega_m: float | NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]: ...
+
+
+@overload
+def distance_and_volume_grid(
+    redshift: jax.Array,
+    hubble_constant: float | jax.Array,
+    omega_m: float | jax.Array,
+) -> tuple[jax.Array, jax.Array]: ...
 
 
 def distance_and_volume_grid(
-    params: Mapping[str, Any],
-    redshift: jax.Array,
-) -> tuple[jax.Array, jax.Array]:
-    """Luminosity distance and differential comoving volume on a redshift grid.
+    redshift: jax.Array | NDArray[np.float64],
+    hubble_constant: float | jax.Array | NDArray[np.float64],
+    omega_m: float | jax.Array | NDArray[np.float64],
+) -> tuple[jax.Array | NDArray[np.float64], jax.Array | NDArray[np.float64]]:
+    r"""Luminosity distance and differential comoving volume on a redshift grid.
 
-    Evaluates both quantities on the exact ``redshift`` grid passed by the caller, so
-    arrays that are combined element-wise with the outputs (e.g.
-    ``rate_shape_grid`` and ``dvc_dz_grid``) are guaranteed to share the same
-    grid. Currently only supports flat LCDM cosmology.
+    Evaluates both quantities on the exact ``redshift`` grid.
+    Currently only supports a flat LCDM cosmology.
 
-    The grid must be sorted ascending and nonnegative; the comoving
-    distance is accumulated by trapezoidal integration along ``redshift``
-    extended by a virtual point at ``z = 0`` where ``d_c(0) = 0``, so grids
-    starting above zero remain physically correct.
+    The grid must be sorted ascending and nonnegative.
 
     Parameters
     ----------
-    params:
-        Mapping with keys ``"H0"`` (dimensionless Hubble constant) and
-        ``"Omega_m"`` (matter density). May contain tracers during NUTS.
     redshift:
-        Redshift grid on which both arrays are evaluated, shape ``(n_grid,)``.
-        JAX-traceable; no static Python scalars are required.
+        Redshift grid on which both arrays are evaluated. The final axis is
+        the grid axis, with shape ``(..., n_grid)``. Accepts either a JAX
+        array (JAX-traceable; no static Python scalars are required) or a
+        NumPy array (outputs returned as NumPy).
+    hubble_constant:
+        Hubble constant $H_0$ in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$. May be an
+        array and must be broadcastable with the redshift-dependent terms.
+    omega_m:
+        Matter density parameter. May be an array and must be broadcastable
+        with the redshift-dependent terms.
 
     Returns
     -------
-    tuple[jax.Array, jax.Array]
+    tuple[jax.Array, jax.Array] or tuple[numpy.ndarray, numpy.ndarray]
         ``(luminosity_distance, differential_comoving_volume)`` on the grid,
-        each of shape ``(n_grid,)``. The differential comoving volume is the
-        full-sky value in ``Mpc^3`` (includes the ``4 pi`` factor and the
-        ``SPEED_OF_LIGHT / 1000`` factor).
-    """
-    h0 = params["H0"]
-    omega_m = params["Omega_m"]
+        with the final axis corresponding to ``n_grid`` and any leading axes
+        determined by backend broadcasting. The differential comoving volume
+        is integrated over the full sky to give a value in ``Mpc^3``.
 
-    inv_e = 1.0 / compute_normalized_hubble_parameter(
-        redshift=redshift, omega_m=omega_m
+    The redshift integral is evaluated with a fixed 4-point Gauss-Legendre
+    rule within each grid interval (nodes/weights are the module-level
+    :data:`GAUSS_LEGENDRE_NODES` / :data:`GAUSS_LEGENDRE_WEIGHTS` constants,
+    so no static scalars are extracted from traced values). For the smooth
+    flat-LCDM integrand :math:`1/E(z)` this reaches near machine precision
+    while keeping the computation a single cumulative pass over the grid.
+    """
+    xp = array_namespace(redshift, hubble_constant, omega_m)
+
+    nodes = xp.asarray(GAUSS_LEGENDRE_NODES, dtype=redshift.dtype)
+    weights = xp.asarray(GAUSS_LEGENDRE_WEIGHTS, dtype=redshift.dtype)
+    omega_m = xp.asarray(omega_m)
+
+    extended = xp.concat(
+        [xp.zeros_like(redshift[..., :1]), redshift],
+        axis=-1,
     )
-    extended = jnp.concatenate([jnp.zeros(1, dtype=redshift.dtype), redshift])
-    inv_e_extended = 1.0 / compute_normalized_hubble_parameter(
-        redshift=extended, omega_m=omega_m
+    lower, upper = extended[..., :-1], extended[..., 1:]
+    midpoint, half_width = 0.5 * (lower + upper), 0.5 * (upper - lower)
+    quadrature_points = midpoint[..., None] + half_width[..., None] * nodes
+    e_quadrature = normalized_hubble_parameter(
+        redshift=quadrature_points, omega_m=omega_m[..., None]
     )
-    delta_z = jnp.diff(extended)
-    trapezoids = 0.5 * (inv_e_extended[1:] + inv_e_extended[:-1]) * delta_z
-    integral = jnp.cumsum(trapezoids)
-    comoving_distance = hubble_distance(h0) * integral
+    interval_integrals = (half_width[..., None] / e_quadrature) @ weights
+    integral = xp.cumsum(interval_integrals, axis=-1)
+    inv_e = 1.0 / normalized_hubble_parameter(redshift=redshift, omega_m=omega_m)
+    comoving_distance = hubble_distance(hubble_constant) * integral
     luminosity_distance = (1.0 + redshift) * comoving_distance
     differential_comoving_volume = (
-        4.0 * jnp.pi * comoving_distance**2 * inv_e * hubble_distance(h0)
+        4.0 * xp.pi * comoving_distance**2 * inv_e * hubble_distance(hubble_constant)
     )
     return luminosity_distance, differential_comoving_volume
