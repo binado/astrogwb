@@ -229,9 +229,9 @@ class TestDistanceAndVolumeGrid:
             omega_m=_om,
         )
         # Reference values from gwmock-pop, which integrates on its own fine
-        # internal grid. distance_and_volume_grid integrates on the coarse
-        # input grid (trapezoid rule), so agreement is expected only up to the
-        # grid's quadrature error (~5e-4 relative for these 128 points).
+        # internal grid. distance_and_volume_grid uses a 4-point Gauss-Legendre
+        # rule per interval, so the residual difference (~1e-9 relative) is the
+        # reference's own trapezoid error at this n_grid.
         n_grid = 100_000
         luminosity_distance_theirs = compute_luminosity_distance(
             _z, _h, _om, n_grid=n_grid
@@ -239,7 +239,9 @@ class TestDistanceAndVolumeGrid:
         differential_comoving_volume_theirs = compute_differential_comoving_volume(
             _z, _h, _om, n_grid=n_grid
         )
-        np.testing.assert_allclose(luminosity_distance, luminosity_distance_theirs, rtol=3e-3)
         np.testing.assert_allclose(
-            differential_comoving_volume, differential_comoving_volume_theirs, rtol=3e-3
+            luminosity_distance, luminosity_distance_theirs, rtol=1e-8
+        )
+        np.testing.assert_allclose(
+            differential_comoving_volume, differential_comoving_volume_theirs, rtol=1e-8
         )

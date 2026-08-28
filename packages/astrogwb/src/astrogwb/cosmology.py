@@ -21,10 +21,16 @@ from typing import overload
 import jax
 import numpy as np
 from array_api_compat import array_namespace
+from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
 
 SPEED_OF_LIGHT: float = 299792458.0
 MPC_IN_METERS: float = 3.0856775814913673e22
+
+#: Fixed Gauss-Legendre quadrature rule (host-side constants, converted to the
+#: active array backend/dtype inside the grid helpers). 4 nodes per interval
+#: reach near machine precision for the smooth flat-LCDM integrand 1/E(z).
+GAUSS_LEGENDRE_NODES, GAUSS_LEGENDRE_WEIGHTS = leggauss(4)
 
 
 def hubble_constant_si(h0_km_s_mpc: float) -> float:
@@ -206,20 +212,33 @@ def distance_and_volume_grid(
         with the final axis corresponding to ``n_grid`` and any leading axes
         determined by backend broadcasting. The differential comoving volume
         is integrated over the full sky to give a value in ``Mpc^3``.
+
+    The redshift integral is evaluated with a fixed 4-point Gauss-Legendre
+    rule within each grid interval (nodes/weights are the module-level
+    :data:`GAUSS_LEGENDRE_NODES` / :data:`GAUSS_LEGENDRE_WEIGHTS` constants,
+    so no static scalars are extracted from traced values). For the smooth
+    flat-LCDM integrand :math:`1/E(z)` this reaches near machine precision
+    while keeping the computation a single cumulative pass over the grid.
     """
     xp = array_namespace(redshift)
+
+    nodes = xp.asarray(GAUSS_LEGENDRE_NODES, dtype=redshift.dtype)
+    weights = xp.asarray(GAUSS_LEGENDRE_WEIGHTS, dtype=redshift.dtype)
+    omega_m = xp.asarray(omega_m)
 
     extended = xp.concat(
         [xp.zeros_like(redshift[..., :1]), redshift],
         axis=-1,
     )
-    inv_e_extended = 1.0 / normalized_hubble_parameter(
-        redshift=extended, omega_m=omega_m
+    lower, upper = extended[..., :-1], extended[..., 1:]
+    midpoint, half_width = 0.5 * (lower + upper), 0.5 * (upper - lower)
+    quadrature_points = midpoint[..., None] + half_width[..., None] * nodes
+    e_quadrature = normalized_hubble_parameter(
+        redshift=quadrature_points, omega_m=omega_m[..., None]
     )
-    inv_e = inv_e_extended[..., 1:]
-    delta_z = xp.diff(extended, axis=-1)
-    trapezoids = 0.5 * (inv_e_extended[..., 1:] + inv_e_extended[..., :-1]) * delta_z
-    integral = xp.cumsum(trapezoids, axis=-1)
+    interval_integrals = xp.sum(half_width[..., None] * weights / e_quadrature, axis=-1)
+    integral = xp.cumsum(interval_integrals, axis=-1)
+    inv_e = 1.0 / normalized_hubble_parameter(redshift=redshift, omega_m=omega_m)
     comoving_distance = hubble_distance(hubble_constant) * integral
     luminosity_distance = (1.0 + redshift) * comoving_distance
     differential_comoving_volume = (
