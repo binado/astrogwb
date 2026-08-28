@@ -202,8 +202,7 @@ def distance_and_volume_grid(
         ``(luminosity_distance, differential_comoving_volume)`` on the grid,
         with the final axis corresponding to ``n_grid`` and any leading axes
         determined by backend broadcasting. The differential comoving volume
-        is the full-sky value in ``Mpc^3`` (includes the ``4 pi`` factor and
-        the ``SPEED_OF_LIGHT / 1000`` factor).
+        is integrated over the full sky to give a value in ``Mpc^3``.
     """
     xp = array_namespace(redshift)
 
