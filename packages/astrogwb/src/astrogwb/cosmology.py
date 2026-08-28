@@ -236,7 +236,7 @@ def distance_and_volume_grid(
     e_quadrature = normalized_hubble_parameter(
         redshift=quadrature_points, omega_m=omega_m[..., None]
     )
-    interval_integrals = xp.sum(half_width[..., None] * weights / e_quadrature, axis=-1)
+    interval_integrals = (half_width[..., None] / e_quadrature) @ weights
     integral = xp.cumsum(interval_integrals, axis=-1)
     inv_e = 1.0 / normalized_hubble_parameter(redshift=redshift, omega_m=omega_m)
     comoving_distance = hubble_distance(hubble_constant) * integral
