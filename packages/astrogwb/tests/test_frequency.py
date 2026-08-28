@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -147,6 +148,34 @@ def test_noise_weighted_inner_product_is_namespace_neutral(
 
     expected = df * np.sum(np.asarray(a) * np.asarray(b) / np.asarray(psd) ** 2)
     np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-6)
+    if asarray is jnp.asarray:
+        assert isinstance(actual, jax.Array)
+    else:
+        assert not isinstance(actual, jax.Array)
+        assert isinstance(actual, np.generic | np.ndarray)
+
+
+@pytest.mark.parametrize("a_asarray", [np.asarray, jnp.asarray])
+@pytest.mark.parametrize("b_asarray", [np.asarray, jnp.asarray])
+def test_noise_weighted_inner_product_follows_a_namespace_with_mixed_operands(
+    a_asarray: Callable[[Any], Any],
+    b_asarray: Callable[[Any], Any],
+) -> None:
+    """b, psd, and df are coerced into a's namespace, never the reverse."""
+    a = a_asarray([1.3, 1.7, 4.6, 2.8])
+    b = b_asarray([1.0, 2.0, 4.0, 3.0])
+    psd = b_asarray([0.5, 0.4, 0.8, 0.6])
+    df = b_asarray(2.5)
+
+    actual = noise_weighted_inner_product(a, b, psd, df)
+
+    expected = 2.5 * np.sum(np.asarray(a) * np.asarray(b) / np.asarray(psd) ** 2)
+    np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-6)
+    if a_asarray is jnp.asarray:
+        assert isinstance(actual, jax.Array)
+    else:
+        assert not isinstance(actual, jax.Array)
+        assert isinstance(actual, np.generic | np.ndarray)
 
 
 def test_noise_weighted_inner_product_honors_the_axis_keyword() -> None:

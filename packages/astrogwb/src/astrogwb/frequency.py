@@ -158,4 +158,9 @@ def noise_weighted_inner_product(
         dimensions broadcast.
     """
     xp = array_namespace(a)
-    return df * xp.sum(a * b / psd**2, axis=axis)
+    # Coerce the other operands into a's namespace so mixed inputs (e.g. a
+    # NumPy ``a`` with JAX ``b``/``psd``/``df``) cannot hijack the arithmetic
+    # and change the result's namespace.
+    if not isinstance(df, float):
+        df = xp.asarray(df)
+    return df * xp.sum(a * xp.asarray(b) / xp.asarray(psd) ** 2, axis=axis)
