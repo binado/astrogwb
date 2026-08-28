@@ -127,7 +127,7 @@ def normalized_hubble_parameter(
         ``E(z)``, with the broadcasted shape of ``redshift`` and ``omega_m``
         and matching the input array type.
     """
-    xp = array_namespace(redshift)
+    xp = array_namespace(redshift, omega_m)
     return xp.sqrt(omega_m * (1.0 + redshift) ** 3 + (1.0 - omega_m))
 
 
@@ -220,7 +220,7 @@ def distance_and_volume_grid(
     flat-LCDM integrand :math:`1/E(z)` this reaches near machine precision
     while keeping the computation a single cumulative pass over the grid.
     """
-    xp = array_namespace(redshift)
+    xp = array_namespace(redshift, hubble_constant, omega_m)
 
     nodes = xp.asarray(GAUSS_LEGENDRE_NODES, dtype=redshift.dtype)
     weights = xp.asarray(GAUSS_LEGENDRE_WEIGHTS, dtype=redshift.dtype)
