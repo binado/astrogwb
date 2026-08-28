@@ -5,7 +5,7 @@ from typing import Literal
 import jax
 import jax.numpy as jnp
 
-from astrogwb.cosmology import H0_SI
+from astrogwb.cosmology import H0, hubble_constant_si
 
 AverageMode = Literal["analytic_inclination", "catalog_inclination"]
 
@@ -30,9 +30,9 @@ def omega_gw_from_spectral_density(
     spectral_density: jax.Array,
     frequencies: jax.Array,
     *,
-    hubble_constant_si: float = H0_SI,
+    hubble_constant: float = H0,
 ) -> jax.Array:
-    coefficient = 4.0 * jnp.pi**2 / (3.0 * hubble_constant_si**2)
+    coefficient = 4.0 * jnp.pi**2 / (3.0 * hubble_constant_si(hubble_constant) ** 2)
     return coefficient * frequencies**3 * spectral_density
 
 
@@ -40,7 +40,7 @@ def spectral_density_from_omega_gw(
     omega_gw: jax.Array,
     frequencies: jax.Array,
     *,
-    hubble_constant_si: float = H0_SI,
+    hubble_constant: float = H0,
 ) -> jax.Array:
-    coefficient = 3.0 * hubble_constant_si**2 / (4.0 * jnp.pi**2)
+    coefficient = 3.0 * hubble_constant_si(hubble_constant) ** 2 / (4.0 * jnp.pi**2)
     return coefficient * omega_gw / frequencies**3

@@ -27,31 +27,12 @@ SPEED_OF_LIGHT: float = 299792458.0
 MPC_IN_METERS: float = 3.0856775814913673e22
 
 
-@overload
-def hubble_constant_si(h0_km_s_mpc: float) -> float: ...
-
-
-@overload
-def hubble_constant_si(h0_km_s_mpc: NDArray[np.float64]) -> NDArray[np.float64]: ...
-
-
-@overload
-def hubble_constant_si(h0_km_s_mpc: jax.Array) -> jax.Array: ...
-
-
-def hubble_constant_si(
-    h0_km_s_mpc: float | jax.Array | NDArray[np.float64],
-) -> float | jax.Array | NDArray[np.float64]:
-    """Convert $H_0$ from $\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}$ to SI ($\\mathrm{s^{-1}}$).
-
-    Pure scalar arithmetic, so it is backend-agnostic without needing the
-    array namespace: array inputs of any backend work through operator
-    overloading and preserve their array type.
-    """
+def hubble_constant_si(h0_km_s_mpc: float) -> float:
+    """Convert $H_0$ from $\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}$ to SI ($\\mathrm{s^{-1}}$)."""
     return h0_km_s_mpc * 1000.0 / MPC_IN_METERS
 
 
-H0_SI: float = hubble_constant_si(67.74)
+H0: float = 67.74  # km/s/Mpc
 
 
 @overload

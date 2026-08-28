@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from astrogwb.cosmology import (
-    H0_SI,
+    MPC_IN_METERS,
     distance_and_volume_grid,
     hubble_constant_si,
     hubble_distance,
@@ -22,21 +22,19 @@ jax.config.update("jax_enable_x64", True)
 _FIDUCIALS = {"H0": 67.66, "Omega_m": 0.3096}
 
 
-def test_hubble_constant_si_matches_h0_si_default() -> None:
-    np.testing.assert_allclose(hubble_constant_si(67.74), H0_SI)
+def test_hubble_constant_si_converts_km_s_mpc_to_si() -> None:
+    np.testing.assert_allclose(
+        hubble_constant_si(67.74),
+        67.74 * 1000.0 / MPC_IN_METERS,
+    )
     np.testing.assert_allclose(
         hubble_constant_si(67.66),
-        H0_SI * (67.66 / 67.74),
+        67.66 * 1000.0 / MPC_IN_METERS,
     )
 
 
-def test_scalar_helpers_preserve_array_backend() -> None:
+def test_hubble_distance_preserves_array_backend() -> None:
     h0 = np.array([67.66, 67.74])
-
-    si = hubble_constant_si(h0)
-    assert isinstance(si, np.ndarray)
-    np.testing.assert_allclose(si, [hubble_constant_si(float(x)) for x in h0])
-    assert isinstance(hubble_constant_si(jnp.asarray(h0)), jax.Array)
 
     distance = hubble_distance(h0)
     assert isinstance(distance, np.ndarray)

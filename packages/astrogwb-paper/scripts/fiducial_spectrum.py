@@ -10,7 +10,6 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from astrogwb.cosmology import hubble_constant_si
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
@@ -97,7 +96,7 @@ def plot_omega_and_sh(
     omega_gw = omega_gw_from_spectral_density(
         spectral_density_arr,
         frequencies,
-        hubble_constant_si=hubble_constant_si(h0),
+        hubble_constant=h0,
     )
     pos = (omega_gw > 0.0) & (spectral_density_arr > 0.0) & mask
     freq = np.asarray(frequencies[pos])
