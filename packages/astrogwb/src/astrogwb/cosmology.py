@@ -177,15 +177,10 @@ def distance_and_volume_grid(
 ) -> tuple[jax.Array | NDArray[np.float64], jax.Array | NDArray[np.float64]]:
     r"""Luminosity distance and differential comoving volume on a redshift grid.
 
-    Evaluates both quantities on the exact ``redshift`` grid passed by the caller, so
-    arrays that are combined element-wise with the outputs (e.g.
-    ``rate_shape_grid`` and ``dvc_dz_grid``) are guaranteed to share the same
-    grid. Currently only supports flat LCDM cosmology.
+    Evaluates both quantities on the exact ``redshift`` grid.
+    Currently only supports a flat LCDM cosmology.
 
-    The grid must be sorted ascending and nonnegative; the comoving
-    distance is accumulated by trapezoidal integration along ``redshift``
-    extended by a virtual point at ``z = 0`` where ``d_c(0) = 0``, so grids
-    starting above zero remain physically correct.
+    The grid must be sorted ascending and nonnegative.
 
     Parameters
     ----------
@@ -197,10 +192,9 @@ def distance_and_volume_grid(
     hubble_constant:
         Hubble constant $H_0$ in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$. May be an
         array and must be broadcastable with the redshift-dependent terms.
-        May contain tracers during NUTS.
     omega_m:
         Matter density parameter. May be an array and must be broadcastable
-        with the redshift-dependent terms. May contain tracers during NUTS.
+        with the redshift-dependent terms.
 
     Returns
     -------
