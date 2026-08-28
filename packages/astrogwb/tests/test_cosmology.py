@@ -44,10 +44,12 @@ def _as_jnp(*arrs: npt.ArrayLike) -> tuple[jax.Array, ...]:
     return tuple(jnp.asarray(arr) for arr in arrs)
 
 
-def _assert_finite_grad(fn: Callable[[jax.Array], jax.Array], x: jax.Array) -> None:
-    grad_jnp = jax.grad(fn)(x)
+def _assert_finite_grad(
+    fn: Callable[..., jax.Array], argnums: int, *args: jax.Array
+) -> None:
+    grad_jnp = jax.grad(fn, argnums=argnums)(*args)
     assert isinstance(grad_jnp, jax.Array)
-    assert grad_jnp.shape == x.shape
+    assert grad_jnp.shape == args[argnums].shape
     assert jnp.all(jnp.isfinite(grad_jnp))
 
 
@@ -86,7 +88,7 @@ def test_hubble_distance_preserves_array_backend(h0: float) -> None:
 
 
 def test_hubble_distance_grad_wrt_hubble_constant() -> None:
-    _assert_finite_grad(hubble_distance, jnp.asarray(70.0))
+    _assert_finite_grad(hubble_distance, 0, jnp.asarray(70.0))
 
 
 class TestNormalizedHubbleParameter:
@@ -119,7 +121,9 @@ class TestNormalizedHubbleParameter:
         self, redshift: npt.NDArray, omega_m: npt.NDArray
     ) -> None:
         _z, _om = _as_jnp(redshift, omega_m)
-        _assert_finite_grad(lambda om: normalized_hubble_parameter(_z, om).sum(), _om)
+        _assert_finite_grad(
+            lambda z, om: normalized_hubble_parameter(z, om).sum(), 1, _z, _om
+        )
 
     def test_matches_gwmockpop(
         self, redshift: npt.NDArray, omega_m: npt.NDArray
@@ -139,7 +143,7 @@ class TestDistanceAndVolumeGrid:
         self, redshift: npt.NDArray, hubble_constant, omega_m: npt.NDArray
     ) -> None:
         _test_array_backend_array_input(
-            lambda z, h, om: distance_and_volume_grid(z, hubble_constant=h, omega_m=om),
+            distance_and_volume_grid,
             redshift,
             hubble_constant,
             omega_m,
@@ -181,16 +185,10 @@ class TestDistanceAndVolumeGrid:
     ) -> None:
         _z, _h, _om = _as_jnp(redshift, hubble_constant, omega_m)
         _assert_finite_grad(
-            lambda h: distance_and_volume_grid(_z, hubble_constant=h, omega_m=_om)[
-                0
-            ].sum(),
-            _h,
+            lambda z, h, om: distance_and_volume_grid(z, h, om)[0].sum(), 1, _z, _h, _om
         )
         _assert_finite_grad(
-            lambda h: distance_and_volume_grid(_z, hubble_constant=h, omega_m=_om)[
-                1
-            ].sum(),
-            _h,
+            lambda z, h, om: distance_and_volume_grid(z, h, om)[1].sum(), 1, _z, _h, _om
         )
 
     def test_grad_wrt_omega_m(
@@ -198,16 +196,10 @@ class TestDistanceAndVolumeGrid:
     ) -> None:
         _z, _h, _om = _as_jnp(redshift, hubble_constant, omega_m)
         _assert_finite_grad(
-            lambda om: distance_and_volume_grid(_z, hubble_constant=_h, omega_m=om)[
-                0
-            ].sum(),
-            _om,
+            lambda z, h, om: distance_and_volume_grid(z, h, om)[0].sum(), 2, _z, _h, _om
         )
         _assert_finite_grad(
-            lambda om: distance_and_volume_grid(_z, hubble_constant=_h, omega_m=om)[
-                1
-            ].sum(),
-            _om,
+            lambda z, h, om: distance_and_volume_grid(z, h, om)[1].sum(), 2, _z, _h, _om
         )
 
     def test_grad_jittable(
@@ -216,12 +208,10 @@ class TestDistanceAndVolumeGrid:
         _z, _h, _om = _as_jnp(redshift, hubble_constant, omega_m)
         grad_fn = jax.jit(
             jax.grad(
-                lambda om: distance_and_volume_grid(_z, hubble_constant=_h, omega_m=om)[
-                    0
-                ].sum()
+                lambda z, h, om: distance_and_volume_grid(z, h, om)[0].sum(), argnums=2
             )
         )
-        grad_fn(_om).block_until_ready()
+        grad_fn(_z, _h, _om).block_until_ready()
 
     @pytest.mark.parametrize("hubble_constant,omega_m", [(70, 0.3)])
     def test_matches_gwmock_pop(

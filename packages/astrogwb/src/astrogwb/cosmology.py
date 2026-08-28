@@ -154,7 +154,6 @@ def hubble_distance(
 @overload
 def distance_and_volume_grid(
     redshift: NDArray[np.float64],
-    *,
     hubble_constant: float | NDArray[np.float64],
     omega_m: float | NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]: ...
@@ -163,7 +162,6 @@ def distance_and_volume_grid(
 @overload
 def distance_and_volume_grid(
     redshift: jax.Array,
-    *,
     hubble_constant: float | jax.Array,
     omega_m: float | jax.Array,
 ) -> tuple[jax.Array, jax.Array]: ...
@@ -171,7 +169,6 @@ def distance_and_volume_grid(
 
 def distance_and_volume_grid(
     redshift: jax.Array | NDArray[np.float64],
-    *,
     hubble_constant: float | jax.Array | NDArray[np.float64],
     omega_m: float | jax.Array | NDArray[np.float64],
 ) -> tuple[jax.Array | NDArray[np.float64], jax.Array | NDArray[np.float64]]:
