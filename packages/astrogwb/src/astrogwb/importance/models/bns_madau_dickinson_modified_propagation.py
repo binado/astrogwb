@@ -157,7 +157,9 @@ def compute_merger_rate_distance_and_logprob(
     redshift = samples["redshift"]
 
     luminosity_distance_grid, dvc_dz_grid = distance_and_volume_grid(
-        params, redshift_grid
+        redshift_grid,
+        hubble_constant=params["H0"],
+        omega_m=params["Omega_m"],
     )
     rate_shape_grid = madau_dickinson_rate(
         redshift_grid, params["gamma"], params["kappa"], params["z_peak"]

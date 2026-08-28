@@ -15,8 +15,7 @@ closure; see
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, overload
+from typing import overload
 
 import jax
 import numpy as np
@@ -154,23 +153,29 @@ def hubble_distance(
 
 @overload
 def distance_and_volume_grid(
-    params: Mapping[str, Any],
     redshift: NDArray[np.float64],
+    *,
+    hubble_constant: float | NDArray[np.float64],
+    omega_m: float | NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]: ...
 
 
 @overload
 def distance_and_volume_grid(
-    params: Mapping[str, Any],
     redshift: jax.Array,
+    *,
+    hubble_constant: float | jax.Array,
+    omega_m: float | jax.Array,
 ) -> tuple[jax.Array, jax.Array]: ...
 
 
 def distance_and_volume_grid(
-    params: Mapping[str, Any],
     redshift: jax.Array | NDArray[np.float64],
+    *,
+    hubble_constant: float | jax.Array | NDArray[np.float64],
+    omega_m: float | jax.Array | NDArray[np.float64],
 ) -> tuple[jax.Array | NDArray[np.float64], jax.Array | NDArray[np.float64]]:
-    """Luminosity distance and differential comoving volume on a redshift grid.
+    r"""Luminosity distance and differential comoving volume on a redshift grid.
 
     Evaluates both quantities on the exact ``redshift`` grid passed by the caller, so
     arrays that are combined element-wise with the outputs (e.g.
@@ -184,16 +189,18 @@ def distance_and_volume_grid(
 
     Parameters
     ----------
-    params:
-        Mapping with keys ``"H0"`` (dimensionless Hubble constant) and
-        ``"Omega_m"`` (matter density). Values may be arrays and must be
-        broadcastable with the redshift-dependent terms. May contain tracers
-        during NUTS.
     redshift:
         Redshift grid on which both arrays are evaluated. The final axis is
         the grid axis, with shape ``(..., n_grid)``. Accepts either a JAX
         array (JAX-traceable; no static Python scalars are required) or a
         NumPy array (outputs returned as NumPy).
+    hubble_constant:
+        Hubble constant $H_0$ in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$. May be an
+        array and must be broadcastable with the redshift-dependent terms.
+        May contain tracers during NUTS.
+    omega_m:
+        Matter density parameter. May be an array and must be broadcastable
+        with the redshift-dependent terms. May contain tracers during NUTS.
 
     Returns
     -------
@@ -205,8 +212,6 @@ def distance_and_volume_grid(
         the ``SPEED_OF_LIGHT / 1000`` factor).
     """
     xp = array_namespace(redshift)
-    h0 = params["H0"]
-    omega_m = params["Omega_m"]
 
     extended = xp.concat(
         [xp.zeros_like(redshift[..., :1]), redshift],
@@ -219,9 +224,9 @@ def distance_and_volume_grid(
     delta_z = xp.diff(extended, axis=-1)
     trapezoids = 0.5 * (inv_e_extended[..., 1:] + inv_e_extended[..., :-1]) * delta_z
     integral = xp.cumsum(trapezoids, axis=-1)
-    comoving_distance = hubble_distance(h0) * integral
+    comoving_distance = hubble_distance(hubble_constant) * integral
     luminosity_distance = (1.0 + redshift) * comoving_distance
     differential_comoving_volume = (
-        4.0 * xp.pi * comoving_distance**2 * inv_e * hubble_distance(h0)
+        4.0 * xp.pi * comoving_distance**2 * inv_e * hubble_distance(hubble_constant)
     )
     return luminosity_distance, differential_comoving_volume

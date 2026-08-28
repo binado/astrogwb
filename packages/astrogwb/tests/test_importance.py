@@ -69,7 +69,11 @@ def test_log_gw_em_ratio_increases_with_redshift() -> None:
 # --------------------------------------------------------------------------- #
 def test_flat_lcdm_grid_shapes_and_finiteness() -> None:
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    d_l, dvc_dz = distance_and_volume_grid(FIDUCIALS, z_grid)
+    d_l, dvc_dz = distance_and_volume_grid(
+        z_grid,
+        hubble_constant=FIDUCIALS["H0"],
+        omega_m=FIDUCIALS["Omega_m"],
+    )
     d_l = np.asarray(d_l)
     dvc_dz = np.asarray(dvc_dz)
     assert d_l.shape == (N_GRID,)
@@ -85,7 +89,11 @@ def test_flat_lcdm_grid_evaluates_on_passed_grid() -> None:
     # D4 regression: the function must evaluate on the caller's grid, so
     # rate_shape_grid and dvc_dz_grid can never land on two different grids.
     z_grid = jnp.array([0.0, 0.3, 1.0, 2.7, 8.0, Z_MAX])
-    d_l, dvc_dz = distance_and_volume_grid(FIDUCIALS, z_grid)
+    d_l, dvc_dz = distance_and_volume_grid(
+        z_grid,
+        hubble_constant=FIDUCIALS["H0"],
+        omega_m=FIDUCIALS["Omega_m"],
+    )
     d_l = np.asarray(d_l)
     dvc_dz = np.asarray(dvc_dz)
     assert d_l.shape == z_grid.shape
@@ -102,7 +110,11 @@ def test_flat_lcdm_grid_is_jit_traceable() -> None:
     # The function must run under jax.jit with traced params and a concrete
     # grid: no static Python scalars (max_redshift / n_grid) are extracted.
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    d_l, dvc_dz = jax.jit(distance_and_volume_grid)(FIDUCIALS, z_grid)
+    d_l, dvc_dz = jax.jit(distance_and_volume_grid)(
+        z_grid,
+        hubble_constant=FIDUCIALS["H0"],
+        omega_m=FIDUCIALS["Omega_m"],
+    )
     assert np.asarray(d_l).shape == (N_GRID,)
     assert np.asarray(dvc_dz).shape == (N_GRID,)
 
@@ -183,7 +195,11 @@ def test_fiducial_local_merger_rate_preserves_rate_calculation() -> None:
     total_rate, _ = fn(FIDUCIALS, samples)
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    _, dvc_dz_grid = distance_and_volume_grid(FIDUCIALS, z_grid)
+    _, dvc_dz_grid = distance_and_volume_grid(
+        z_grid,
+        hubble_constant=FIDUCIALS["H0"],
+        omega_m=FIDUCIALS["Omega_m"],
+    )
     rate_shape_grid = madau_dickinson_rate(
         z_grid,
         FIDUCIALS["gamma"],
