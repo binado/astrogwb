@@ -53,10 +53,7 @@ from numpyro.infer.util import log_density
 from scipy.ndimage import gaussian_filter
 
 from astrogwb.detector import effective_psd, load_sensitivity_map
-from astrogwb.frequency import (
-    apply_frequency_mask,
-    frequency_mask as make_frequency_mask,
-)
+from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
@@ -188,6 +185,7 @@ proposal = truncate_catalog_samples(
 validate_matching_frequency_grids(injection.frequency.values, proposal.frequency.values)
 
 frequencies = jnp.asarray(proposal.frequency.values)
+df = float(proposal.attrs["df"])
 polarization_power = jnp.asarray(proposal.polarization_power.values)
 samples = samples_from_catalog(proposal)
 n_freq, n_samples = polarization_power.shape
@@ -209,7 +207,11 @@ sensitivities = load_sensitivity_map(detnames)
 effective_psd_arr = jnp.asarray(
     effective_psd(frequencies, list(detnames), sensitivities)
 )
-mask = make_frequency_mask(frequencies, fmin=f_min, fmax=f_max)
+# Uncovered bins have an infinite effective PSD and would contribute a constant
+# -inf to the log-density; drop them along with the out-of-band ones.
+mask = frequency_mask(frequencies, fmin=f_min, fmax=f_max) & jnp.isfinite(
+    effective_psd_arr
+)
 print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 
 
@@ -217,13 +219,13 @@ print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 def plot_effective_psd(
     frequencies: jax.Array,
     effective_psd: jax.Array,
-    mask: jax.Array,
+    band_mask: jax.Array,
     *,
     color: str = "black",
 ):
     fig, ax = plt.subplots()
     ax.loglog(frequencies, effective_psd, color=color, ls="--")
-    ax.loglog(frequencies[mask], effective_psd[mask], color=color)
+    ax.loglog(frequencies[band_mask], effective_psd[band_mask], color=color)
     ax.set(
         xlabel=r"$f$ [Hz]", ylabel=r"$S_{\text{eff}}(f)$ [1/Hz]", title="Effective PSD"
     )
@@ -276,17 +278,19 @@ merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
 def plot_omegagw(
     spectral_density: jax.Array,
     frequencies: jax.Array,
-    mask: jax.Array,
+    band_mask: jax.Array,
     *,
     color: str = "black",
     ymin: float = 1e-15,
 ):
     omega_gw = omega_gw_from_spectral_density(spectral_density, frequencies)
-    pos = omega_gw > 0.0
+    band_frequencies = frequencies[band_mask]
+    band_omega_gw = omega_gw[band_mask]
+    pos = band_omega_gw > 0.0
     fig, ax = plt.subplots()
     ax.loglog(
-        np.asarray(frequencies[mask & pos]),
-        np.asarray(omega_gw[mask & pos]),
+        np.asarray(band_frequencies[pos]),
+        np.asarray(band_omega_gw[pos]),
         color=color,
     )
     ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
@@ -301,19 +305,22 @@ rate0, observed_spectral_density = compute_fiducial_injection_spectrum(
     fiducials=fiducials,
     redshift_grid=z_grid,
 )
-plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1e-15)
-
-(
-    frequencies,
-    polarization_power,
+plot_omegagw(
     observed_spectral_density,
-    effective_psd_arr,
-) = apply_frequency_mask(
+    frequencies,
     mask,
-    frequencies,
-    polarization_power,
-    observed_spectral_density,
-    effective_psd_arr,
+    color="black",
+    ymin=1e-15,
+)
+
+frequencies, polarization_power, observed_spectral_density, effective_psd_arr = (
+    apply_frequency_mask(
+        mask,
+        frequencies,
+        polarization_power,
+        observed_spectral_density,
+        effective_psd_arr,
+    )
 )
 
 # %% [markdown]
@@ -325,7 +332,6 @@ plot_omegagw(observed_spectral_density, frequencies, mask, color="black", ymin=1
 # %%
 base_model = partial(
     spectral_density_model,
-    observation_time=observation_time,
     average_mode="analytic_inclination",
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     priors=priors,
@@ -336,11 +342,12 @@ model = handlers.block(
 )
 
 model_kwargs = {
-    "frequencies": frequencies,
     "polarization_power": polarization_power,
     "samples": samples,
     "observed_spectral_density": observed_spectral_density,
     "effective_psd": effective_psd_arr,
+    "observation_time": observation_time,
+    "df": df,
 }
 
 # %% [markdown]

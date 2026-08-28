@@ -236,6 +236,7 @@ def main(argv: list[str] | None = None) -> None:
     # needed here; a run that varies the propagation parameters would apply
     # astrogwb.waveform.apply_gw_distance_to_power first.
     frequencies = jnp.asarray(catalog.frequency.values)
+    df = float(catalog.attrs["df"])
     polarization_power = jnp.asarray(catalog.polarization_power.values)
     samples = {
         str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
@@ -282,7 +283,9 @@ def main(argv: list[str] | None = None) -> None:
     network_psd = jnp.asarray(effective_psd(frequencies, args.detectors, sensitivities))
     # effective_psd returns inf wherever no detector pair contributes, and
     # Normal(loc, inf).log_prob is -inf -- a constant that kills NUTS with no
-    # usable diagnostic. Drop those bins along with the out-of-band ones.
+    # usable diagnostic. Drop those bins along with the out-of-band ones. The
+    # surviving bins need not be contiguous: each still has width `df`, which
+    # comes from the catalog rather than from the masked grid.
     mask = frequency_mask(frequencies, fmin=args.f_min, fmax=args.f_max) & jnp.isfinite(
         network_psd
     )
@@ -313,12 +316,12 @@ def main(argv: list[str] | None = None) -> None:
 
     model = partial(
         spectral_density_model,
-        frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
         observed_spectral_density=observed_spectral_density,
         effective_psd=network_psd,
         observation_time=args.observation_time,
+        df=df,
         average_mode="analytic_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights,
         priors={"H0": dist.Uniform(args.h0_min, args.h0_max)},

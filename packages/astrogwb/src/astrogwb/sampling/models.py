@@ -54,7 +54,6 @@ End-to-end sketch (toy data; runnable as-is):
     def h0_amplitude(h0):
         return 1.0 / h0  # h0**-3 * h0**2
 
-    frequencies = jnp.array([10.0, 30.0, 100.0])
     polarization_power = jnp.ones((3, 4))  # (F, N) toy catalog
     samples = {"redshift": jnp.linspace(0.1, 1.0, 4)}
 
@@ -72,12 +71,12 @@ End-to-end sketch (toy data; runnable as-is):
     # --- Inference: NUTS on the amplitude-marginalized model.
     model = partial(
         amplitude_marginalized_model,
-        frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
         observed_spectral_density=observed,
-        effective_psd=jnp.ones_like(frequencies),
+        effective_psd=jnp.ones(3),
         observation_time=1.0,
+        df=0.25,
         average_mode="analytic_inclination",
         merger_rate_and_log_weights_fn=toy_merger_rate_and_log_weights_fn,
         amplitude_parameter="H0",
@@ -131,7 +130,6 @@ import numpyro
 import numpyro.distributions as dist
 
 from astrogwb.detector import gaussian_bin_scale
-from astrogwb.frequency import frequency_spacing, noise_weighted_inner_product
 from astrogwb.gwb import (
     AverageMode,
     spectral_density,
@@ -143,17 +141,16 @@ from astrogwb.sampling.amplitude import (
     AmplitudeFn,
     MergerRateAmplitudeFn,
 )
-from astrogwb.utils import years_to_seconds
 
 
 def spectral_density_model(
     *,
-    frequencies: jax.Array,
     polarization_power: jax.Array,
     samples: Mapping[str, jax.Array],
     observed_spectral_density: jax.Array,
     effective_psd: jax.Array,
     observation_time: float,
+    df: float | jax.Array,
     average_mode: AverageMode,
     merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     priors: Mapping[str, dist.Distribution] | None = None,
@@ -181,23 +178,24 @@ def spectral_density_model(
 
     Parameters
     ----------
-    frequencies:
-        Frequency grid in Hz, shape ``(F,)``. Must already be the analysis
-        band; callers apply any frequency mask before invoking the model.
     polarization_power:
         Per-source polarization power at each frequency, shape ``(F, N)`` where
-        ``N`` is the catalog size. Must share ``frequencies``.
+        ``N`` is the catalog size.
     samples:
         Catalog arrays passed to ``merger_rate_and_log_weights_fn``. Each value
         should have leading dimension ``N``.
     observed_spectral_density:
-        Observed SGWB spectral density at ``frequencies``, shape ``(F,)``.
+        Observed SGWB spectral density, shape ``(F,)``.
     effective_psd:
-        Network effective power spectral density at ``frequencies``, shape
+        Network effective power spectral density over the analysis band, shape
         ``(F,)``.
     observation_time:
         Observation time in years, used only in the likelihood noise scale via
         :func:`astrogwb.detector.gaussian_bin_scale`.
+    df:
+        Frequency bin width in Hz -- the catalog's ``df`` attribute. Never
+        measure it off the analysis band: a mask may drop interior bins, and
+        the mean spacing of what survives is not the bin width.
     average_mode:
         How inclination is averaged when contracting polarization power:
         ``"analytic_inclination"`` applies the usual 0.4 factor;
@@ -211,6 +209,8 @@ def spectral_density_model(
         Mapping from parameter name to NumPyro prior distribution. Keys become
         sampled sites; defaults to an empty mapping (likelihood-only model).
     """
+    noise_scale = gaussian_bin_scale(effective_psd, observation_time, df)
+
     params = {
         name: numpyro.sample(name, prior) for name, prior in (priors or {}).items()
     }
@@ -229,22 +229,21 @@ def spectral_density_model(
     numpyro.deterministic("total_merger_rate", total_merger_rate)
     numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))
 
-    scale = gaussian_bin_scale(effective_psd, frequencies, observation_time)
     numpyro.sample(
         "spectral_density_obs",
-        dist.Normal(model_spectral_density, scale).to_event(1),
+        dist.Normal(model_spectral_density, noise_scale).to_event(1),
         obs=observed_spectral_density,
     )
 
 
 def amplitude_marginalized_model(
     *,
-    frequencies: jax.Array,
     polarization_power: jax.Array,
     samples: Mapping[str, jax.Array],
     observed_spectral_density: jax.Array,
     effective_psd: jax.Array,
     observation_time: float,
+    df: float | jax.Array,
     average_mode: AverageMode,
     merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
     amplitude_parameter: str,
@@ -344,6 +343,8 @@ def amplitude_marginalized_model(
         marginalizing the same parameter is a silent double-counting with no
         visible symptom.
     """
+    noise_scale = gaussian_bin_scale(effective_psd, observation_time, df)
+
     priors = priors or {}
     if amplitude_parameter in priors:
         raise ValueError(
@@ -365,23 +366,12 @@ def amplitude_marginalized_model(
         average_mode=average_mode,
     )
 
-    observation_time_sec = years_to_seconds(observation_time)
-    df = frequency_spacing(frequencies)
-    # scale = effective_psd / sqrt(2 T_sec df), so
-    # sum(x * y / scale**2) = 2 T_sec * (x|y).
-    template_norm = (
-        2.0
-        * observation_time_sec
-        * noise_weighted_inner_product(
-            model_spectral_density, model_spectral_density, effective_psd, df
-        )
+    inverse_variance = noise_scale**-2
+    template_norm = jnp.sum(
+        model_spectral_density * model_spectral_density * inverse_variance
     )
-    data_template = (
-        2.0
-        * observation_time_sec
-        * noise_weighted_inner_product(
-            observed_spectral_density, model_spectral_density, effective_psd, df
-        )
+    data_template = jnp.sum(
+        observed_spectral_density * model_spectral_density * inverse_variance
     )
     amplitude_mle = data_template / template_norm
     template_optimal_snr = jnp.sqrt(template_norm)
@@ -390,7 +380,6 @@ def amplitude_marginalized_model(
     numpyro.deterministic("template_optimal_snr", template_optimal_snr)
     numpyro.deterministic("importance_relative_ess", relative_ess(log_weights))
 
-    scale = gaussian_bin_scale(effective_psd, frequencies, observation_time)
     conditional = AmplitudeConditional(
         amplitude_mle,
         template_optimal_snr,
@@ -405,14 +394,10 @@ def amplitude_marginalized_model(
     # reuses amplitude_mle and data_template instead of re-forming the (F,)
     # residual d - A_mle * m through a second Normal.log_prob evaluation;
     # data_norm depends only on fixed inputs, never on theta or phi.
-    data_norm = (
-        2.0
-        * observation_time_sec
-        * noise_weighted_inner_product(
-            observed_spectral_density, observed_spectral_density, effective_psd, df
-        )
+    data_norm = jnp.sum(
+        observed_spectral_density * observed_spectral_density * inverse_variance
     )
-    normalization = -jnp.sum(jnp.log(scale) + 0.5 * jnp.log(2.0 * jnp.pi))
+    normalization = -jnp.sum(jnp.log(noise_scale) + 0.5 * jnp.log(2.0 * jnp.pi))
     log_likelihood_at_mle = normalization - 0.5 * (
         data_norm - amplitude_mle * data_template
     )

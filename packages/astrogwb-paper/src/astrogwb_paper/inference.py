@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from typing import Any
 
@@ -62,10 +62,13 @@ logger = logging.getLogger(__name__)
 class Observation:
     """The observed-data side of a run: the fiducial injection spectrum.
 
-    Arrays are pre-mask; ``frequency_mask`` selects the analysis band.
+    Arrays are pre-mask; ``frequency_mask`` selects the analysis band. ``df``
+    is the catalog's bin width and stays valid under the mask, which is why it
+    is carried here rather than measured off the masked grid.
     """
 
     frequencies: jax.Array
+    df: float
     redshift_grid: jax.Array
     total_merger_rate: jax.Array
     spectral_density: jax.Array
@@ -79,6 +82,7 @@ class InferenceInputs:
     observation: Observation
     proposal: xr.Dataset
     effective_psd: jax.Array
+    observation_time: float
     merger_rate_and_log_weights_fn: Any
 
     def masked_model_kwargs(self) -> dict[str, Any]:
@@ -89,11 +93,12 @@ class InferenceInputs:
         # the old "NOT masked" hazard is now structurally enforced.
         band = self.proposal.isel(frequency=mask)
         return {
-            "frequencies": jnp.asarray(band.frequency.values),
             "polarization_power": jnp.asarray(band.polarization_power.values),
             "samples": samples_from_catalog(band),
             "observed_spectral_density": observation.spectral_density[mask],
             "effective_psd": self.effective_psd[mask],
+            "observation_time": self.observation_time,
+            "df": observation.df,
         }
 
 
@@ -126,6 +131,7 @@ def prepare_observation(
         grid.minimum_redshift, grid.maximum_redshift, grid.n_grid
     )
     injection_frequencies = jnp.asarray(composed.frequency.values)
+    df = float(composed.attrs["df"])
     total_merger_rate, spectral_density = compute_fiducial_injection_spectrum(
         jnp.asarray(composed.polarization_power.values),
         samples_from_catalog(composed),
@@ -137,22 +143,25 @@ def prepare_observation(
         total_merger_rate,
     )
 
-    frequency_mask = make_frequency_mask(
+    # Band bounds only: this function never sees a detector network, so bins
+    # the network cannot measure are dropped later, in prepare_inference_inputs.
+    analysis_frequency_mask = make_frequency_mask(
         injection_frequencies, fmin=grid.f_min, fmax=grid.f_max
     )
     logger.info(
         "Analysis band: %d of %d bins (%.1f-%.1f Hz)",
-        int(jnp.sum(frequency_mask)),
+        int(jnp.sum(analysis_frequency_mask)),
         injection_frequencies.shape[0],
         grid.f_min,
         grid.f_max,
     )
     return Observation(
         frequencies=injection_frequencies,
+        df=df,
         redshift_grid=redshift_grid,
         total_merger_rate=total_merger_rate,
         spectral_density=spectral_density,
-        frequency_mask=frequency_mask,
+        frequency_mask=analysis_frequency_mask,
     )
 
 
@@ -197,6 +206,30 @@ def prepare_inference_inputs(
     effective_psd_arr = jnp.asarray(
         compute_effective_psd(proposal_frequencies, list(detectors), sensitivities)
     )
+    # `compute_effective_psd` returns inf wherever no detector pair contributes,
+    # and Normal(loc, inf).log_prob is -inf -- a constant that kills NUTS with no
+    # usable diagnostic. Drop those bins along with the out-of-band ones. This is
+    # safe precisely because `df` is the catalog's attribute: the surviving bins
+    # need not be contiguous, and each still has width `df`.
+    band_mask = (
+        observation.frequency_mask
+        & jnp.isfinite(effective_psd_arr)
+        & (effective_psd_arr > 0.0)
+    )
+    num_bins = int(jnp.sum(band_mask))
+    if num_bins < 2:
+        raise ValueError(
+            f"only {num_bins} usable frequency bin(s) in "
+            f"[{grid.f_min}, {grid.f_max}] Hz for detectors "
+            f"{' '.join(detectors)}; widen the band or choose a detector "
+            "network with full coverage"
+        )
+    dropped = int(jnp.sum(observation.frequency_mask)) - num_bins
+    if dropped:
+        logger.info(
+            "Dropped %d in-band bin(s) with no detector-network coverage", dropped
+        )
+    observation = replace(observation, frequency_mask=band_mask)
 
     proposal_redshift = proposal_catalog.source_parameters.sel(
         parameter="redshift"
@@ -210,6 +243,7 @@ def prepare_inference_inputs(
         observation=observation,
         proposal=proposal_catalog,
         effective_psd=effective_psd_arr,
+        observation_time=grid.observation_time,
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
     )
 
@@ -259,7 +293,6 @@ def build_model(
         model = _fix_model_params(
             partial(
                 amplitude_marginalized_model,
-                observation_time=config.observation_time,
                 average_mode="analytic_inclination",
                 merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
                 amplitude_parameter=analysis.amplitude_parameter,
@@ -276,7 +309,6 @@ def build_model(
     model = _fix_model_params(
         partial(
             spectral_density_model,
-            observation_time=config.observation_time,
             average_mode="analytic_inclination",
             merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
             priors=priors,

@@ -74,7 +74,7 @@ def sh_ymin_matching_omega_floor(
 def plot_omega_and_sh(
     frequencies: jax.Array,
     spectral_density_arr: jax.Array,
-    mask: jax.Array,
+    frequency_mask: jax.Array,
     *,
     h0: float,
     omega_gw_min: float,
@@ -99,10 +99,13 @@ def plot_omega_and_sh(
         frequencies,
         hubble_constant_si=hubble_constant_si(h0),
     )
-    pos = (omega_gw > 0.0) & (spectral_density_arr > 0.0) & mask
-    freq = np.asarray(frequencies[pos])
-    omega = np.asarray(omega_gw[pos])
-    sh = np.asarray(spectral_density_arr[pos])
+    band_frequencies = frequencies[frequency_mask]
+    band_omega_gw = omega_gw[frequency_mask]
+    band_spectral_density = spectral_density_arr[frequency_mask]
+    pos = (band_omega_gw > 0.0) & (band_spectral_density > 0.0)
+    freq = np.asarray(band_frequencies[pos])
+    omega = np.asarray(band_omega_gw[pos])
+    sh = np.asarray(band_spectral_density[pos])
     sh_ymin = sh_ymin_matching_omega_floor(omega, sh, omega_gw_min)
 
     fig, ax_sh = plt.subplots()
@@ -149,7 +152,7 @@ def plot_effective_psds(
     *,
     colors: Sequence[str],
     linestyles: Sequence[str],
-    mask: jax.Array,
+    frequency_mask: jax.Array,
 ) -> Figure:
     """Overlay network effective PSDs on shared log–log axes."""
     if len(networks) != len(colors) or len(networks) != len(linestyles):
@@ -157,13 +160,13 @@ def plot_effective_psds(
 
     labels = [network.label for network in networks]
     fig, ax = plt.subplots()
-    freq = np.asarray(frequencies)
-    band = np.asarray(mask, dtype=bool)
+    mask = np.asarray(frequency_mask)
+    freq = np.asarray(frequencies)[mask]
     for network, label, color, linestyle in zip(
         networks, labels, colors, linestyles, strict=True
     ):
-        psd = np.asarray(psds_by_network[network.name])
-        pos = band & np.isfinite(psd) & (psd > 0.0) & (freq > 0.0)
+        psd = np.asarray(psds_by_network[network.name])[mask]
+        pos = np.isfinite(psd) & (psd > 0.0) & (freq > 0.0)
         ax.loglog(
             freq[pos],
             psd[pos],
@@ -206,11 +209,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     source = CatalogSource(catalog_path, None, load_injection_spec(), "injection")
     observation = prepare_observation(source, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies
-    mask = observation.frequency_mask
+    frequency_mask = observation.frequency_mask
     figure = plot_omega_and_sh(
         frequencies,
         observation.spectral_density,
-        mask,
+        frequency_mask,
         h0=fiducials["H0"],
         omega_gw_min=OMEGA_GW_MIN,
     )
@@ -228,7 +231,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         effective_psds,
         colors=detector_colors,
         linestyles=detector_linestyles,
-        mask=mask,
+        frequency_mask=frequency_mask,
     )
 
     output_path = resolve_paper_path(args.output_pdf, root)

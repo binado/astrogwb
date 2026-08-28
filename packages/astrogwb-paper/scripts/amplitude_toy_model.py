@@ -7,8 +7,6 @@ rate; importance weights are unity. Used as a smoke test that NUTS recovers a
 known injection, and to build the paper Fisher-overlay figure.
 """
 
-# ruff: noqa: I001
-
 from __future__ import annotations
 
 import argparse
@@ -33,11 +31,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
 from astrogwb.detector import effective_psd, load_sensitivity_map
-from astrogwb.frequency import (
-    apply_frequency_mask,
-    frequency_mask as make_frequency_mask,
-    frequency_spacing,
-)
+from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr_squared
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb.utils import years_to_seconds
@@ -126,6 +120,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     catalog = open_catalog(catalog_path)
     frequencies = jnp.asarray(catalog.frequency.values)
+    df = float(catalog.attrs["df"])
     polarization_power = jnp.asarray(catalog.polarization_power.values)
     samples = samples_from_catalog(catalog)
     del catalog
@@ -136,7 +131,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     effective_psd_arr = jnp.asarray(
         effective_psd(frequencies, list(detnames), sensitivities)
     )
-    mask = make_frequency_mask(frequencies, fmin=f_min, fmax=f_max)
+    # Uncovered bins have an infinite effective PSD and would contribute a
+    # constant -inf to the log-density; drop them with the out-of-band ones.
+    mask = frequency_mask(frequencies, fmin=f_min, fmax=f_max) & jnp.isfinite(
+        effective_psd_arr
+    )
     print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 
     def merger_rate_and_log_weights_fn(params, _samples):
@@ -149,22 +148,18 @@ def main(argv: Sequence[str] | None = None) -> None:
     observed_spectral_density = spectral_density(
         polarization_power, weights_fid, rate_fid, average_mode="analytic_inclination"
     )
-    (
-        frequencies,
-        polarization_power,
-        observed_spectral_density,
-        effective_psd_arr,
-    ) = apply_frequency_mask(
-        mask,
-        frequencies,
-        polarization_power,
-        observed_spectral_density,
-        effective_psd_arr,
+    frequencies, polarization_power, observed_spectral_density, effective_psd_arr = (
+        apply_frequency_mask(
+            mask,
+            frequencies,
+            polarization_power,
+            observed_spectral_density,
+            effective_psd_arr,
+        )
     )
 
     model = partial(
         spectral_density_model,
-        observation_time=observation_time,
         average_mode="analytic_inclination",
         merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
         priors=priors,
@@ -186,11 +181,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     mcmc.run(
         jax.random.PRNGKey(seed),
-        frequencies=frequencies,
         polarization_power=polarization_power,
         samples=samples,
         observed_spectral_density=observed_spectral_density,
         effective_psd=effective_psd_arr,
+        observation_time=observation_time,
+        df=df,
         extra_fields=("num_steps", "accept_prob", "diverging"),
     )
     mcmc.print_summary()
@@ -229,7 +225,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     azp.plot_trace_dist(inference_data, var_names=list(sampled_params))
     azp.plot_autocorr(inference_data, var_names=list(sampled_params))
 
-    df = float(frequency_spacing(frequencies))
     observation_seconds = float(years_to_seconds(observation_time))
     snr_sq = spectral_snr_squared(
         observed_spectral_density, effective_psd_arr, observation_seconds, df

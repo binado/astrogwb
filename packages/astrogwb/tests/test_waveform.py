@@ -29,6 +29,7 @@ def _make_catalog(*, with_redshift: bool = True) -> xr.Dataset:
         maximum_frequency=30.0,
         reference_frequency=20.0,
         sampling_frequency=128.0,
+        df=10.0,
     )
 
 

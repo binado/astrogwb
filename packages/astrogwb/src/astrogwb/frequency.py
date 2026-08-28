@@ -6,14 +6,8 @@ import jax.numpy as jnp
 __all__ = [
     "apply_frequency_mask",
     "frequency_mask",
-    "frequency_spacing",
     "noise_weighted_inner_product",
 ]
-
-
-def frequency_spacing(frequencies: jax.Array) -> jax.Array:
-    """Mean consecutive spacing Δf from a frequency grid (Hz)."""
-    return jnp.mean(jnp.diff(frequencies))
 
 
 def frequency_mask(
@@ -22,6 +16,7 @@ def frequency_mask(
     fmin: float | None = None,
     fmax: float | None = None,
 ) -> jax.Array:
+    """Boolean mask selecting the bins inside the inclusive band."""
     mask = jnp.ones_like(frequencies, dtype=bool)
     if fmin is not None:
         mask = mask & (frequencies >= fmin)
@@ -39,6 +34,11 @@ def apply_frequency_mask(
 
     Defaults to ``axis=0`` to match this package's ``(F, ...)`` layout
     (e.g. polarization power of shape ``(F, N)``).
+
+    The mask need not select a contiguous run: every surviving bin keeps its
+    own width, which is the catalog's ``df`` attribute. Nothing downstream
+    measures the spacing of the masked grid -- ``df`` is always passed
+    explicitly, never derived from the analysis band.
     """
     return tuple(jnp.compress(mask, array, axis=axis) for array in arrays)
 
