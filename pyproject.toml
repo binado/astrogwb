@@ -17,6 +17,7 @@ members = ["packages/*"]
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.16.1",
     "ty>=0.0.69",
 ]
@@ -44,6 +45,7 @@ include = [
 ]
 
 [tool.pytest.ini_options]
+addopts = "-n auto --dist loadscope"
 testpaths = ["packages/astrogwb/tests", "packages/astrogwb-paper/tests"]
 markers = [
     "integration: tests that call external libraries or services (deselect with -m 'not integration')",

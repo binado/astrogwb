@@ -65,7 +65,7 @@ plotting = [
     "xarray>=2025.1",
 ]
 workflow = ["snakemake>=9.24.0"]
-test = ["pytest>=9.0.2"]
+test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0"]
 dev = [
     { include-group = "plotting" },
     { include-group = "test" },

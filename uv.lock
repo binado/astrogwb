@@ -237,6 +237,7 @@ tpu = [
 [package.dev-dependencies]
 test = [
     { name = "pytest" },
+    { name = "pytest-xdist" },
 ]
 
 [package.metadata]
@@ -257,7 +258,10 @@ requires-dist = [
 provides-extras = ["cuda", "tpu"]
 
 [package.metadata.requires-dev]
-test = [{ name = "pytest", specifier = ">=9.0.2" }]
+test = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
+]
 
 [[package]]
 name = "astrogwb-paper"
@@ -313,6 +317,7 @@ dev = [
     { name = "matplotlib" },
     { name = "pandas" },
     { name = "pytest" },
+    { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "scipy" },
     { name = "snakemake" },
@@ -345,6 +350,7 @@ slurm = [
     { name = "matplotlib" },
     { name = "pandas" },
     { name = "pytest" },
+    { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "scipy" },
     { name = "snakemake" },
@@ -354,6 +360,7 @@ slurm = [
 ]
 test = [
     { name = "pytest" },
+    { name = "pytest-xdist" },
 ]
 workflow = [
     { name = "snakemake" },
@@ -403,6 +410,7 @@ dev = [
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.1" },
     { name = "scipy", specifier = ">=1.10" },
     { name = "snakemake", specifier = ">=9.24.0" },
@@ -435,6 +443,7 @@ slurm = [
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "pandas", specifier = ">=2.0" },
     { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.1" },
     { name = "scipy", specifier = ">=1.10" },
     { name = "snakemake", specifier = ">=9.24.0" },
@@ -442,7 +451,10 @@ slurm = [
     { name = "ty", specifier = ">=0.0.69" },
     { name = "xarray", specifier = ">=2025.1" },
 ]
-test = [{ name = "pytest", specifier = ">=9.0.2" }]
+test = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
+]
 workflow = [{ name = "snakemake", specifier = ">=9.24.0" }]
 
 [[package]]
@@ -456,6 +468,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
+    { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "ty" },
 ]
@@ -466,6 +479,7 @@ requires-dist = [{ name = "astrogwb-paper", editable = "packages/astrogwb-paper"
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.1" },
     { name = "ty", specifier = ">=0.0.69" },
 ]
@@ -990,6 +1004,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c4/37/7874b39abede48fe05c3b5a25092e419e521145e9705c97b711965e5f05d/dqsegdb2-1.3.0.tar.gz", hash = "sha256:4e291899cd395daf5913c48a835d213ef20833d78354871cb848988cc2cc8ae4", size = 33661, upload-time = "2025-01-08T16:36:58.072Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/78/67/c977e7307d432911fe28acf55dba01f84f3a0a4a2a968350195c0f52d23e/dqsegdb2-1.3.0-py3-none-any.whl", hash = "sha256:c93087da332b7d91519a370abed3cfc91b64a6bf393ec64d79c2747c837aeb66", size = 27957, upload-time = "2025-01-08T16:36:56.881Z" },
+]
+
+[[package]]
+name = "execnet"
+version = "2.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/89/780e11f9588d9e7128a3f87788354c7946a9cbb1401ad38a48c4db9a4f07/execnet-2.1.2.tar.gz", hash = "sha256:63d83bfdd9a23e35b9c6a3261412324f964c2ec8dcd8d3c6916ee9373e0befcd", size = 166622, upload-time = "2025-11-12T09:56:37.75Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl", hash = "sha256:67fba928dd5a544b783f6056f449e5e3931a5c378b128bc18501f7ea79e296ec", size = 40708, upload-time = "2025-11-12T09:56:36.333Z" },
 ]
 
 [[package]]
@@ -3071,6 +3094,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e4/47/b9efed96c114afcfa3c9d3fe98a76a1d14c74a9e266d397cf6eb64be5e01/pytest-9.1.1.tar.gz", hash = "sha256:1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313", size = 1636369, upload-time = "2026-06-19T10:58:32.857Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
+]
+
+[[package]]
+name = "pytest-xdist"
+version = "3.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "execnet" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/78/b4/439b179d1ff526791eb921115fca8e44e596a13efeda518b9d845a619450/pytest_xdist-3.8.0.tar.gz", hash = "sha256:7e578125ec9bc6050861aa93f2d59f1d8d085595d6551c2c90b6f4fad8d3a9f1", size = 88069, upload-time = "2025-07-01T13:30:59.346Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl", hash = "sha256:202ca578cfeb7370784a8c33d6d05bc6e13b4f25b5053c30a152269fd10f0b88", size = 46396, upload-time = "2025-07-01T13:30:56.632Z" },
 ]
 
 [[package]]
