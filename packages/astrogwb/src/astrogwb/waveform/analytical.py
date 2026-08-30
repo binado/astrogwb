@@ -33,9 +33,11 @@ so the result comes out in :math:`\mathrm{s}^2 = \mathrm{Hz}^{-2}` with no
 explicit :math:`G` anywhere -- the same units as the Ripple-generated power
 that :func:`astrogwb.waveform.polarization_power` reduces.
 
-These functions are JAX-only and JAX-traceable: they evaluate through
-:mod:`jax.numpy` and return :class:`jax.Array`, so the same code runs at
-catalog-build time and inside a jitted NumPyro model on traced arrays.
+These functions are JAX-only and JAX-traceable: they accept any
+:data:`jax.typing.ArrayLike` input -- NumPy arrays and Python scalars included
+-- evaluate through :mod:`jax.numpy`, and return :class:`jax.Array`, so the
+same code runs at catalog-build time on a NumPy population and inside a jitted
+NumPyro model on traced arrays.
 
 .. warning::
 
@@ -51,6 +53,7 @@ import math
 
 import jax
 import jax.numpy as jnp
+from jax.typing import ArrayLike
 
 from astrogwb.cosmology import MPC_IN_METERS, SPEED_OF_LIGHT
 
@@ -98,7 +101,7 @@ ISCO_ALPHA: float = 1.0 / (math.pi * 6.0**1.5)
 _AMPLITUDE_PREFACTOR: float = (5.0 / 24.0) * math.pi ** (-4.0 / 3.0)
 
 
-def inclination_factor(inclination: jax.Array | float) -> jax.Array:
+def inclination_factor(inclination: ArrayLike) -> jax.Array:
     r"""Quadrupolar inclination factor $g(\iota)$.
 
     .. math::
@@ -118,7 +121,7 @@ def inclination_factor(inclination: jax.Array | float) -> jax.Array:
     return ((1.0 + cos_squared) / 2.0) ** 2 + cos_squared
 
 
-def chirp_mass(mass_1: jax.Array | float, mass_2: jax.Array | float) -> jax.Array:
+def chirp_mass(mass_1: ArrayLike, mass_2: ArrayLike) -> jax.Array:
     r"""Chirp mass $M_c = (m_1 m_2)^{3/5} / (m_1 + m_2)^{1/5}$.
 
     Frame-agnostic and unit-agnostic: the result carries whatever mass unit
@@ -131,11 +134,11 @@ def chirp_mass(mass_1: jax.Array | float, mass_2: jax.Array | float) -> jax.Arra
 
 
 def termination_frequency(
-    mass_1: jax.Array | float,
-    mass_2: jax.Array | float,
-    redshift: jax.Array | float,
+    mass_1: ArrayLike,
+    mass_2: ArrayLike,
+    redshift: ArrayLike,
     *,
-    alpha: jax.Array | float,
+    alpha: ArrayLike,
 ) -> jax.Array:
     r"""Frequency in Hz at which the inspiral is truncated.
 
@@ -164,14 +167,14 @@ def termination_frequency(
 
 
 def inspiral_polarization_power(
-    frequencies: jax.Array,
+    frequencies: ArrayLike,
     *,
-    mass_1: jax.Array,
-    mass_2: jax.Array,
-    redshift: jax.Array,
-    luminosity_distance: jax.Array,
-    inclination: jax.Array | float,
-    alpha: jax.Array | float,
+    mass_1: ArrayLike,
+    mass_2: ArrayLike,
+    redshift: ArrayLike,
+    luminosity_distance: ArrayLike,
+    inclination: ArrayLike,
+    alpha: ArrayLike,
 ) -> jax.Array:
     r"""Polarization power $|\tilde h_+|^2 + |\tilde h_\times|^2$ on an ``(N, F)`` grid.
 
