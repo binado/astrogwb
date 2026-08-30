@@ -4,22 +4,21 @@ This module evaluates the one-sided strain spectral density implied by
 Eqs. 2, 3, and 9 of Cousins et al., *The Stochastic Siren* (2026), for an
 ordered joint source-frame component-mass population ``p(m1, m2)`` with
 ``m1 >= m2``. Integration is performed in total mass ``M = m1 + m2`` and mass
-ratio ``q = m2 / m1``. The mass-ratio integral is evaluated first at fixed
-total mass, then represented by a piecewise Legendre cumulative in ``M``. This
-makes the source-frequency cutoff a cheap cumulative query and allows the mass
-calculation to be precomputed independently of redshift and cosmology.
+ratio ``q = m2 / m1``. The mass-ratio integral is evaluated first on a fixed
+total-mass grid, then cumulatively integrated in ``M``. Linear interpolation of
+that cumulative makes the source-frequency cutoff cheap to evaluate and allows
+the mass calculation to be precomputed independently of redshift and cosmology.
 
-All numerical orders are static and JAX-friendly. Double the relevant order or
-total-mass interval count until the result is stable to the accuracy required
-by the application. Realistic strain spectra require JAX x64 mode because
-their values underflow in float32.
+All numerical orders and grid sizes are static and JAX-friendly. Double the
+relevant order or refine the interpolation grid until the result is stable to
+the accuracy required by the application. Realistic strain spectra require JAX
+x64 mode because their values underflow in float32.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from functools import cache
 from typing import Any
 
@@ -27,7 +26,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import core
-from numpy.polynomial.legendre import leggauss, legvander
+from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
 
 from astrogwb.cosmology import (
@@ -68,21 +67,6 @@ PopulationFunction = Callable[[jax.Array, Mapping[str, Any]], jax.Array]
 JointMassFunction = Callable[[jax.Array, jax.Array, Mapping[str, Any]], jax.Array]
 """Vectorized ordered joint component-mass probability-density callback."""
 
-CumulativeMassMomentFunction = Callable[[jax.Array], jax.Array]
-"""Vectorized cumulative source-frame chirp-mass-moment callback."""
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class _PiecewiseLegendreScheme:
-    """Static host-side geometry for a piecewise Legendre cumulative."""
-
-    edges: NDArray[np.float64]
-    centers: NDArray[np.float64]
-    half_widths: NDArray[np.float64]
-    nodes: NDArray[np.float64]
-    coefficient_transform: NDArray[np.float64]
-    order: int
-
 
 @cache
 def _gauss_legendre_rule(
@@ -107,122 +91,6 @@ def _mapped_rule(
     return (
         midpoint[..., None] + half_width[..., None] * nodes,
         half_width[..., None] * weights,
-    )
-
-
-@cache
-def _piecewise_legendre_scheme(
-    component_mass_min: float,
-    component_mass_max: float,
-    interval_count: int,
-    order: int,
-) -> _PiecewiseLegendreScheme:
-    """Build cached float64 geometry for uniform total-mass intervals."""
-    total_mass_min = 2.0 * component_mass_min
-    total_mass_max = 2.0 * component_mass_max
-    transition = component_mass_min + component_mass_max
-
-    edges = np.linspace(total_mass_min, total_mass_max, interval_count + 1)
-    edges[interval_count // 2] = transition
-    centers = 0.5 * (edges[:-1] + edges[1:])
-    half_widths = 0.5 * (edges[1:] - edges[:-1])
-
-    reference_nodes, reference_weights = _gauss_legendre_rule(order)
-    nodes = centers[:, None] + half_widths[:, None] * reference_nodes
-    basis = legvander(reference_nodes, order - 1).T
-    degrees = np.arange(order, dtype=np.float64)
-    coefficient_transform = (
-        0.5 * (2.0 * degrees[:, None] + 1.0) * basis * reference_weights[None, :]
-    )
-    return _PiecewiseLegendreScheme(
-        edges=edges.astype(np.float64),
-        centers=centers.astype(np.float64),
-        half_widths=half_widths.astype(np.float64),
-        nodes=nodes.astype(np.float64),
-        coefficient_transform=coefficient_transform.astype(np.float64),
-        order=order,
-    )
-
-
-def _piecewise_legendre_coefficients(
-    values: jax.Array,
-    scheme: _PiecewiseLegendreScheme,
-) -> tuple[jax.Array, jax.Array]:
-    """Return interval coefficients and their exclusive cumulative totals."""
-    transform = jnp.asarray(scheme.coefficient_transform, dtype=values.dtype)
-    coefficients = jnp.einsum("ji,ki->kj", transform, values)
-    half_widths = jnp.asarray(scheme.half_widths, dtype=values.dtype)
-    interval_integrals = 2.0 * half_widths * coefficients[:, 0]
-    cumulative = jnp.concatenate(
-        [jnp.zeros((1,), dtype=values.dtype), jnp.cumsum(interval_integrals)]
-    )
-    return coefficients, cumulative
-
-
-def _evaluate_piecewise_cumulative(
-    coefficients: jax.Array,
-    cumulative: jax.Array,
-    scheme: _PiecewiseLegendreScheme,
-    upper: jax.Array,
-) -> jax.Array:
-    r"""Evaluate the piecewise cumulative without a query-by-order temporary.
-
-    Within interval ``k``, the represented integrand is
-
-    .. math::
-
-        H(c_k + h_k x) \approx \sum_{j=0}^{r-1} a_{kj} P_j(x).
-
-    The cumulative is the sum of complete earlier intervals plus
-
-    .. math::
-
-        h_k \sum_j a_{kj} I_j(x), \qquad
-        I_0(x)=x+1, \quad
-        I_j(x)=\frac{P_{j+1}(x)-P_{j-1}(x)}{2j+1}.
-
-    A recurrence gathers one coefficient degree at a time, keeping live query
-    storage independent of the Legendre order.
-    """
-    upper = jnp.asarray(upper, dtype=coefficients.dtype)
-    edges = jnp.asarray(scheme.edges, dtype=coefficients.dtype)
-    centers = jnp.asarray(scheme.centers, dtype=coefficients.dtype)
-    half_widths = jnp.asarray(scheme.half_widths, dtype=coefficients.dtype)
-
-    clipped = jnp.clip(upper, edges[0], edges[-1])
-    interval = jnp.searchsorted(edges, clipped, side="right") - 1
-    interval = jnp.clip(interval, 0, coefficients.shape[0] - 1)
-    x = (clipped - centers[interval]) / half_widths[interval]
-
-    initial_integral = coefficients[interval, 0] * (x + 1.0)
-
-    def add_degree(
-        degree: int,
-        state: tuple[jax.Array, jax.Array, jax.Array],
-    ) -> tuple[jax.Array, jax.Array, jax.Array]:
-        polynomial_previous, polynomial, integral = state
-        degree_value = jnp.asarray(degree, dtype=coefficients.dtype)
-        polynomial_next = (
-            (2.0 * degree_value + 1.0) * x * polynomial
-            - degree_value * polynomial_previous
-        ) / (degree_value + 1.0)
-        antiderivative = (polynomial_next - polynomial_previous) / (
-            2.0 * degree_value + 1.0
-        )
-        integral = integral + coefficients[interval, degree] * antiderivative
-        return polynomial, polynomial_next, integral
-
-    _, _, partial_reference_integral = jax.lax.fori_loop(
-        1,
-        scheme.order,
-        add_degree,
-        (jnp.ones_like(x), x, initial_integral),
-    )
-    result = cumulative[interval] + half_widths[interval] * partial_reference_integral
-    return jnp.where(
-        upper <= edges[0],
-        jnp.zeros_like(result),
-        jnp.where(upper >= edges[-1], cumulative[-1], result),
     )
 
 
@@ -262,10 +130,8 @@ def _validate_mass_construction(
     component_mass_min: float,
     component_mass_max: float,
     mass_ratio_quadrature_order: int,
-    total_mass_interval_count: int,
-    total_mass_legendre_order: int,
+    n_interp_grid: int,
 ) -> None:
-
     if not math.isfinite(component_mass_min) or not math.isfinite(component_mass_max):
         raise ValueError("component-mass bounds must be finite")
     if component_mass_min <= 0.0 or component_mass_max <= component_mass_min:
@@ -277,10 +143,9 @@ def _validate_mass_construction(
     _validate_positive_integer(
         mass_ratio_quadrature_order, "mass_ratio_quadrature_order"
     )
-    _validate_positive_integer(total_mass_interval_count, "total_mass_interval_count")
-    if total_mass_interval_count < 2 or total_mass_interval_count % 2 != 0:
-        raise ValueError("total_mass_interval_count must be an even integer >= 2")
-    _validate_positive_integer(total_mass_legendre_order, "total_mass_legendre_order")
+    _validate_positive_integer(n_interp_grid, "n_interp_grid")
+    if n_interp_grid < 3 or n_interp_grid % 2 == 0:
+        raise ValueError("n_interp_grid must be an odd integer >= 3")
 
 
 def _validate_alpha(alpha: float) -> None:
@@ -306,17 +171,29 @@ def _validate_concrete_frequencies(frequencies: jax.Array) -> None:
         raise ValueError("frequencies must be finite and strictly positive")
 
 
-def make_cumulative_mass_moment_fn(
+def _cumulative_trapezoid(
+    values: jax.Array,
+    coordinates: jax.Array,
+) -> jax.Array:
+    """Cumulatively integrate sampled values with the trapezoid rule."""
+    interval_integrals = (
+        0.5 * (values[:-1] + values[1:]) * (coordinates[1:] - coordinates[:-1])
+    )
+    return jnp.concatenate(
+        [jnp.zeros((1,), dtype=values.dtype), jnp.cumsum(interval_integrals)]
+    )
+
+
+def _cumulative_mass_moment_grid(
     hyperparameters: Mapping[str, Any],
     joint_mass_prior_fn: JointMassFunction,
     *,
     component_mass_min: float,
     component_mass_max: float,
-    mass_ratio_quadrature_order: int = 64,
-    total_mass_interval_count: int = 32,
-    total_mass_legendre_order: int = 16,
-) -> CumulativeMassMomentFunction:
-    r"""Build a cumulative source-frame chirp-mass-moment function.
+    mass_ratio_quadrature_order: int,
+    n_interp_grid: int,
+) -> tuple[jax.Array, jax.Array]:
+    r"""Tabulate the cumulative source-frame chirp-mass moment in total mass.
 
     The ordered component masses are written in total mass and mass ratio,
 
@@ -349,53 +226,22 @@ def make_cumulative_mass_moment_fn(
 
         H(M;\theta)=\int_{q_-(M)}^1 g(M,q;\theta)\,dq,
 
-    and represented on uniform total-mass intervals in a Legendre basis. The
-    returned function evaluates the cumulative
+    and sampled on a uniform total-mass grid. A cumulative trapezoid gives
 
     .. math::
 
         C(u;\theta)=\int_{2m_{\min}}^{
         \operatorname{clip}(u,2m_{\min},2m_{\max})}H(M;\theta)\,dM.
 
-    The closed-form antiderivatives integrate each interval's polynomial
-    exactly; approximating ``H`` by that polynomial is the numerical error.
-    When the mass population is fixed during MCMC, construct this function once
-    outside the model and reuse the same function object.
-
-    Parameters
-    ----------
-    hyperparameters:
-        Parameters supplied unchanged to ``joint_mass_prior_fn``. Cosmological
-        parameters are not required unless the mass callback itself uses them.
-    joint_mass_prior_fn:
-        Normalized ordered joint density with respect to ``dmass_1 dmass_2``.
-    component_mass_min, component_mass_max:
-        Shared source-frame component-mass bounds in solar masses.
-    mass_ratio_quadrature_order:
-        Gauss-Legendre order used for the inner mass-ratio integral.
-    total_mass_interval_count:
-        Even number of uniform total-mass intervals. The central edge is fixed
-        at ``component_mass_min + component_mass_max``.
-    total_mass_legendre_order:
-        Number of nodes and Legendre coefficients within each total-mass
-        interval.
+    The odd grid size places the support transition
+    :math:`M=m_{\min}+m_{\max}` exactly at the central node.
     """
-    _require_x64("make_cumulative_mass_moment_fn")
-    _validate_mass_construction(
-        component_mass_min=component_mass_min,
-        component_mass_max=component_mass_max,
-        mass_ratio_quadrature_order=mass_ratio_quadrature_order,
-        total_mass_interval_count=total_mass_interval_count,
-        total_mass_legendre_order=total_mass_legendre_order,
+    total_mass = jnp.linspace(
+        2.0 * component_mass_min,
+        2.0 * component_mass_max,
+        n_interp_grid,
+        dtype=jnp.float64,
     )
-
-    scheme = _piecewise_legendre_scheme(
-        component_mass_min,
-        component_mass_max,
-        total_mass_interval_count,
-        total_mass_legendre_order,
-    )
-    total_mass = jnp.asarray(scheme.nodes, dtype=jnp.float64)
     transition = component_mass_min + component_mass_max
     mass_ratio_lower = jnp.where(
         total_mass <= transition,
@@ -429,28 +275,21 @@ def make_cumulative_mass_moment_fn(
         mass_ratio_weights * fixed_total_mass_integrand,
         axis=-1,
     )
-    coefficients, cumulative = _piecewise_legendre_coefficients(
-        mass_ratio_integral, scheme
-    )
-
-    def cumulative_mass_moment(total_mass_upper: jax.Array) -> jax.Array:
-        return _evaluate_piecewise_cumulative(
-            coefficients,
-            cumulative,
-            scheme,
-            total_mass_upper,
-        )
-
-    return cumulative_mass_moment
+    return total_mass, _cumulative_trapezoid(mass_ratio_integral, total_mass)
 
 
 def precompute_cumulative_mass_moments(
     frequencies: jax.Array,
-    cumulative_mass_moment_fn: CumulativeMassMomentFunction,
+    hyperparameters: Mapping[str, Any],
+    joint_mass_prior_fn: JointMassFunction,
     *,
     z_min: float,
     z_max: float,
+    component_mass_min: float,
+    component_mass_max: float,
     alpha: float = ISCO_ALPHA,
+    mass_ratio_quadrature_order: int = 64,
+    n_interp_grid: int = 2049,
     redshift_quadrature_order: int = 64,
 ) -> jax.Array:
     r"""Evaluate fixed mass moments at every frequency-redshift cutoff.
@@ -461,10 +300,11 @@ def precompute_cumulative_mass_moments(
 
         U_{fa}=\frac{\alpha}{f_f(1+z_a)}, \qquad M_{fa}=C(U_{fa}),
 
-    and returns ``M`` with shape ``(frequency, redshift_node)``. These are the
-    exact queries required by the later redshift integral, so no interpolation
-    grid is introduced. Frequencies, redshift bounds, quadrature order, and
-    ``alpha`` are consequently encoded in the returned values by convention.
+    and linearly interpolates :math:`C(U_{fa})` from a uniform total-mass grid.
+    The result has shape ``(frequency, redshift_node)`` and can be reused while
+    sampling cosmology or the redshift distribution with a fixed mass
+    population. Values below the physical total-mass support are exactly zero;
+    values above it are exactly the full mass moment.
     """
     _require_x64("precompute_cumulative_mass_moments")
     _validate_redshift_rule(
@@ -472,6 +312,12 @@ def precompute_cumulative_mass_moments(
         z_max=z_max,
         quadrature_order=redshift_quadrature_order,
         order_name="redshift_quadrature_order",
+    )
+    _validate_mass_construction(
+        component_mass_min=component_mass_min,
+        component_mass_max=component_mass_max,
+        mass_ratio_quadrature_order=mass_ratio_quadrature_order,
+        n_interp_grid=n_interp_grid,
     )
     _validate_alpha(alpha)
 
@@ -482,13 +328,15 @@ def precompute_cumulative_mass_moments(
     weights = jnp.asarray(host_weights, dtype=jnp.float64)
     redshift, _ = _mapped_rule(nodes, weights, z_min, z_max)
     total_mass_upper = alpha / (frequencies[:, None] * (1.0 + redshift[None, :]))
-    return jnp.broadcast_to(
-        jnp.asarray(
-            cumulative_mass_moment_fn(total_mass_upper),
-            dtype=jnp.float64,
-        ),
-        total_mass_upper.shape,
+    total_mass, cumulative_mass_moment = _cumulative_mass_moment_grid(
+        hyperparameters,
+        joint_mass_prior_fn,
+        component_mass_min=component_mass_min,
+        component_mass_max=component_mass_max,
+        mass_ratio_quadrature_order=mass_ratio_quadrature_order,
+        n_interp_grid=n_interp_grid,
     )
+    return jnp.interp(total_mass_upper, total_mass, cumulative_mass_moment)
 
 
 def analytic_spectral_density_from_mass_moments(
@@ -568,17 +416,15 @@ def analytic_spectral_density(
     component_mass_max: float,
     alpha: float = ISCO_ALPHA,
     quadrature_order: int = 64,
-    total_mass_interval_count: int = 32,
-    total_mass_legendre_order: int = 16,
+    n_interp_grid: int = 2049,
 ) -> jax.Array:
     r"""Evaluate the analytic inspiral-only one-sided strain PSD ``S_h(f)``.
 
-    This convenience API performs all three stages in one call: it builds the
-    piecewise Legendre mass cumulative, evaluates it at the exact
-    frequency-redshift cutoffs, and contracts those fixed mass moments with the
-    redshift-dependent merger rate and cosmology. When the mass population is
-    fixed during MCMC, use :func:`make_cumulative_mass_moment_fn`,
-    :func:`precompute_cumulative_mass_moments`, and
+    This convenience API performs both stages in one call: it tabulates the
+    cumulative mass moment, interpolates it at the frequency-redshift cutoffs,
+    and contracts those fixed mass moments with the redshift-dependent merger
+    rate and cosmology. When the mass population is fixed during MCMC, use
+    :func:`precompute_cumulative_mass_moments` and
     :func:`analytic_spectral_density_from_mass_moments` separately instead.
 
     Parameters
@@ -604,10 +450,9 @@ def analytic_spectral_density(
         ``f_max = alpha / M``. Use ``inf`` for no cutoff.
     quadrature_order:
         Shared Gauss-Legendre order for redshift and mass ratio.
-    total_mass_interval_count:
-        Even number of uniform intervals in the piecewise mass cumulative.
-    total_mass_legendre_order:
-        Legendre order within each total-mass interval.
+    n_interp_grid:
+        Odd number of uniform total-mass interpolation nodes. The default gives
+        2048 intervals; use 1025, 2049, and 4097 for grid-refinement checks.
 
     Returns
     -------
@@ -633,28 +478,23 @@ def analytic_spectral_density(
         component_mass_min=component_mass_min,
         component_mass_max=component_mass_max,
         mass_ratio_quadrature_order=quadrature_order,
-        total_mass_interval_count=total_mass_interval_count,
-        total_mass_legendre_order=total_mass_legendre_order,
+        n_interp_grid=n_interp_grid,
     )
     _validate_alpha(alpha)
 
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
     _validate_concrete_frequencies(frequencies)
-    cumulative_mass_moment_fn = make_cumulative_mass_moment_fn(
-        hyperparameters,
-        joint_mass_prior_fn,
-        component_mass_min=component_mass_min,
-        component_mass_max=component_mass_max,
-        mass_ratio_quadrature_order=quadrature_order,
-        total_mass_interval_count=total_mass_interval_count,
-        total_mass_legendre_order=total_mass_legendre_order,
-    )
     cumulative_mass_moments = precompute_cumulative_mass_moments(
         frequencies,
-        cumulative_mass_moment_fn,
+        hyperparameters,
+        joint_mass_prior_fn,
         z_min=z_min,
         z_max=z_max,
+        component_mass_min=component_mass_min,
+        component_mass_max=component_mass_max,
         alpha=alpha,
+        mass_ratio_quadrature_order=quadrature_order,
+        n_interp_grid=n_interp_grid,
         redshift_quadrature_order=quadrature_order,
     )
     return analytic_spectral_density_from_mass_moments(

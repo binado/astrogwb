@@ -13,14 +13,12 @@ from astrogwb.gwb import (
     ISCO_ALPHA,
     analytic_spectral_density,
     analytic_spectral_density_from_mass_moments,
-    make_cumulative_mass_moment_fn,
     omega_gw_from_spectral_density,
     precompute_cumulative_mass_moments,
 )
 from astrogwb.gwb.analytic import (
-    _evaluate_piecewise_cumulative,
-    _piecewise_legendre_coefficients,
-    _piecewise_legendre_scheme,
+    _cumulative_mass_moment_grid,
+    _cumulative_trapezoid,
 )
 from astrogwb.utils import SECONDS_PER_YEAR
 from numpy.polynomial.legendre import leggauss
@@ -172,54 +170,39 @@ def _direct_uniform_spectral_density(
     return np.asarray(values)
 
 
-def test_piecewise_legendre_cumulative_is_exact_for_cubic_polynomial() -> None:
-    scheme = _piecewise_legendre_scheme(1.0, 3.0, 4, 4)
-    nodes = jnp.asarray(scheme.nodes)
-    values = nodes**3 - 2.0 * nodes + 1.0
-    coefficients, cumulative = _piecewise_legendre_coefficients(values, scheme)
-    queries = jnp.array([0.0, 2.0, 2.7, 4.0, 5.3, 6.0, 8.0])
+def test_cumulative_trapezoid_is_exact_for_linear_samples() -> None:
+    coordinates = jnp.array([1.0, 2.0, 4.0, 7.0])
+    values = 2.0 * coordinates + 3.0
 
-    actual = _evaluate_piecewise_cumulative(coefficients, cumulative, scheme, queries)
-    clipped = jnp.clip(queries, 2.0, 6.0)
-    antiderivative = 0.25 * clipped**4 - clipped**2 + clipped
-    lower_antiderivative = 0.25 * 2.0**4 - 2.0**2 + 2.0
-    expected = antiderivative - lower_antiderivative
+    actual = _cumulative_trapezoid(values, coordinates)
+    antiderivative = coordinates**2 + 3.0 * coordinates
+    expected = antiderivative - antiderivative[0]
 
-    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), atol=2e-13)
-    assert actual[0] == 0.0
-    assert actual[-1] == cumulative[-1]
+    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), atol=2e-15)
 
 
-def test_piecewise_legendre_cumulative_is_jittable_and_differentiable() -> None:
-    scheme = _piecewise_legendre_scheme(1.0, 3.0, 4, 3)
-    nodes = jnp.asarray(scheme.nodes)
-    queries = jnp.array([2.5, 3.75, 5.5])
+def test_cumulative_trapezoid_is_jittable_and_differentiable() -> None:
+    coordinates = jnp.linspace(1.0, 4.0, 7)
 
     def evaluate(scale: jax.Array) -> jax.Array:
-        coefficients, cumulative = _piecewise_legendre_coefficients(
-            scale * nodes**2, scheme
-        )
-        return jnp.sum(
-            _evaluate_piecewise_cumulative(coefficients, cumulative, scheme, queries)
-        )
+        return jnp.sum(_cumulative_trapezoid(scale * coordinates, coordinates))
 
     actual = jax.jit(evaluate)(jnp.asarray(2.0))
     derivative = jax.grad(evaluate)(jnp.asarray(2.0))
-    expected_derivative = jnp.sum((queries**3 - 2.0**3) / 3.0)
+    expected_derivative = evaluate(jnp.asarray(1.0))
 
-    assert actual == pytest.approx(2.0 * float(expected_derivative), rel=2e-13)
-    assert derivative == pytest.approx(float(expected_derivative), rel=2e-13)
+    assert actual == pytest.approx(2.0 * float(expected_derivative), rel=2e-15)
+    assert derivative == pytest.approx(float(expected_derivative), rel=2e-15)
 
 
 def test_cumulative_mass_moment_matches_direct_component_mass_integral() -> None:
-    cumulative_mass_moment_fn = make_cumulative_mass_moment_fn(
+    total_mass, cumulative = _cumulative_mass_moment_grid(
         {},
         uniform_joint_mass,
         component_mass_min=MASS_MIN,
         component_mass_max=MASS_MAX,
         mass_ratio_quadrature_order=64,
-        total_mass_interval_count=32,
-        total_mass_legendre_order=16,
+        n_interp_grid=2049,
     )
     cutoffs = np.array(
         [
@@ -233,12 +216,12 @@ def test_cumulative_mass_moment_matches_direct_component_mass_integral() -> None
         ]
     )
 
-    actual = np.asarray(cumulative_mass_moment_fn(jnp.asarray(cutoffs)))
+    actual = np.asarray(jnp.interp(jnp.asarray(cutoffs), total_mass, cumulative))
     expected = np.asarray(
         [_direct_uniform_mass_moment(cutoff, order=128) for cutoff in cutoffs]
     )
 
-    np.testing.assert_allclose(actual, expected, rtol=2e-11, atol=2e-11)
+    np.testing.assert_allclose(actual, expected, rtol=1e-4, atol=1e-8)
     assert actual[0] == 0.0
     assert actual[1] == 0.0
     assert actual[-1] == actual[-2]
@@ -257,22 +240,20 @@ def test_mass_prior_is_called_once_only_inside_the_physical_triangle() -> None:
         valid = (mass_2 >= MASS_MIN) & (mass_1 >= mass_2) & (mass_1 <= MASS_MAX)
         return jnp.where(valid, 2.0 / MASS_RANGE**2, jnp.nan)
 
-    cumulative_mass_moment_fn = make_cumulative_mass_moment_fn(
+    _, cumulative = _cumulative_mass_moment_grid(
         {},
         guarded_prior,
         component_mass_min=MASS_MIN,
         component_mass_max=MASS_MAX,
         mass_ratio_quadrature_order=12,
-        total_mass_interval_count=8,
-        total_mass_legendre_order=6,
+        n_interp_grid=9,
     )
-    values = cumulative_mass_moment_fn(jnp.linspace(0.0, 100.0, 17))
 
-    assert calls == [(8, 6, 12)]
-    assert np.all(np.isfinite(np.asarray(values)))
+    assert calls == [(9, 12)]
+    assert np.all(np.isfinite(np.asarray(cumulative)))
 
 
-def test_featured_mass_population_converges_when_doubling_intervals() -> None:
+def test_featured_mass_population_converges_when_refining_grid() -> None:
     normalization_nodes, normalization_weights = _mapped_legendre(
         256, MASS_MIN, MASS_MAX
     )
@@ -290,23 +271,34 @@ def test_featured_mass_population_converges_when_doubling_intervals() -> None:
         primary_feature = 1.0 + 5.0 * jnp.exp(-0.5 * ((mass_1 - 35.0) / 2.5) ** 2)
         return primary_feature / normalization
 
-    def evaluate(interval_count: int) -> jax.Array:
-        cumulative = make_cumulative_mass_moment_fn(
-            {},
+    frequencies = jnp.array([20.0, 40.0, 80.0, 120.0])
+
+    def evaluate(n_interp_grid: int) -> jax.Array:
+        return analytic_spectral_density(
+            frequencies,
+            HYPERPARAMETERS,
+            constant_rate,
             featured_prior,
+            z_min=Z_MIN,
+            z_max=Z_MAX,
             component_mass_min=MASS_MIN,
             component_mass_max=MASS_MAX,
-            mass_ratio_quadrature_order=64,
-            total_mass_interval_count=interval_count,
-            total_mass_legendre_order=16,
+            alpha=ISCO_ALPHA,
+            quadrature_order=64,
+            n_interp_grid=n_interp_grid,
         )
-        return cumulative(jnp.linspace(2.0 * MASS_MIN, 2.0 * MASS_MAX, 101))
 
+    coarse = np.asarray(evaluate(1025))
+    default = np.asarray(evaluate(2049))
+    refined = np.asarray(evaluate(4097))
+
+    assert np.max(np.abs(default / refined - 1.0)) < np.max(
+        np.abs(coarse / refined - 1.0)
+    )
     np.testing.assert_allclose(
-        np.asarray(evaluate(16)),
-        np.asarray(evaluate(32)),
-        rtol=1e-10,
-        atol=1e-11,
+        default,
+        refined,
+        rtol=1e-4,
     )
 
 
@@ -324,16 +316,15 @@ def test_cumulative_mass_parameter_gradient_matches_finite_difference() -> None:
             del hyperparameters
             return (1.0 + tilt * (mass_1 - mass_2)) / normalization
 
-        cumulative = make_cumulative_mass_moment_fn(
+        total_mass, cumulative = _cumulative_mass_moment_grid(
             {},
             tilted_prior,
             component_mass_min=MASS_MIN,
             component_mass_max=MASS_MAX,
             mass_ratio_quadrature_order=32,
-            total_mass_interval_count=16,
-            total_mass_legendre_order=12,
+            n_interp_grid=257,
         )
-        return jnp.sum(cumulative(queries))
+        return jnp.sum(jnp.interp(queries, total_mass, cumulative))
 
     tilt = 0.02
     step = 1e-5
@@ -363,32 +354,36 @@ def test_matches_independent_component_mass_quadrature_without_cutoff() -> None:
     actual = np.asarray(_analytic(jnp.asarray(frequencies)))
     expected = _direct_uniform_spectral_density(frequencies, alpha=math.inf, order=96)
 
-    np.testing.assert_allclose(actual, expected, rtol=2e-12)
+    np.testing.assert_allclose(actual, expected, rtol=1e-6)
     assert actual.dtype == np.float64
 
 
-def test_precomputed_mass_moments_are_exact_cumulative_queries() -> None:
-    cumulative = make_cumulative_mass_moment_fn(
+def test_precomputed_mass_moments_are_interpolated_cumulative_queries() -> None:
+    frequencies = jnp.array([20.0, 40.0, 80.0])
+    actual = precompute_cumulative_mass_moments(
+        frequencies,
+        {},
+        uniform_joint_mass,
+        z_min=Z_MIN,
+        z_max=Z_MAX,
+        component_mass_min=MASS_MIN,
+        component_mass_max=MASS_MAX,
+        alpha=ISCO_ALPHA,
+        mass_ratio_quadrature_order=24,
+        n_interp_grid=257,
+        redshift_quadrature_order=12,
+    )
+    total_mass, cumulative = _cumulative_mass_moment_grid(
         {},
         uniform_joint_mass,
         component_mass_min=MASS_MIN,
         component_mass_max=MASS_MAX,
         mass_ratio_quadrature_order=24,
-        total_mass_interval_count=16,
-        total_mass_legendre_order=10,
-    )
-    frequencies = jnp.array([20.0, 40.0, 80.0])
-    actual = precompute_cumulative_mass_moments(
-        frequencies,
-        cumulative,
-        z_min=Z_MIN,
-        z_max=Z_MAX,
-        alpha=ISCO_ALPHA,
-        redshift_quadrature_order=12,
+        n_interp_grid=257,
     )
     redshift, _ = _mapped_legendre(12, Z_MIN, Z_MAX)
     upper = ISCO_ALPHA / (np.asarray(frequencies)[:, None] * (1.0 + redshift[None, :]))
-    expected = cumulative(jnp.asarray(upper))
+    expected = jnp.interp(jnp.asarray(upper), total_mass, cumulative)
 
     assert actual.shape == (3, 12)
     np.testing.assert_array_equal(np.asarray(actual), np.asarray(expected))
@@ -407,21 +402,17 @@ def test_split_spectrum_matches_combined_wrapper_and_reuses_mass_values() -> Non
         return jnp.full_like(mass_1, 2.0 / MASS_RANGE**2)
 
     frequencies = jnp.array([20.0, 40.0, 80.0])
-    cumulative = make_cumulative_mass_moment_fn(
-        {},
-        counted_prior,
-        component_mass_min=MASS_MIN,
-        component_mass_max=MASS_MAX,
-        mass_ratio_quadrature_order=24,
-        total_mass_interval_count=16,
-        total_mass_legendre_order=10,
-    )
     mass_moments = precompute_cumulative_mass_moments(
         frequencies,
-        cumulative,
+        {},
+        counted_prior,
         z_min=Z_MIN,
         z_max=Z_MAX,
+        component_mass_min=MASS_MIN,
+        component_mass_max=MASS_MAX,
         alpha=ISCO_ALPHA,
+        mass_ratio_quadrature_order=24,
+        n_interp_grid=257,
         redshift_quadrature_order=24,
     )
     split = analytic_spectral_density_from_mass_moments(
@@ -454,32 +445,27 @@ def test_split_spectrum_matches_combined_wrapper_and_reuses_mass_values() -> Non
         component_mass_max=MASS_MAX,
         alpha=ISCO_ALPHA,
         quadrature_order=24,
-        total_mass_interval_count=16,
-        total_mass_legendre_order=10,
+        n_interp_grid=257,
     )
 
     np.testing.assert_allclose(np.asarray(split), np.asarray(combined), rtol=2e-15)
     assert np.all(np.isfinite(np.asarray(changed)))
-    assert calls == [(16, 10, 24)]
+    assert calls == [(257, 24)]
 
 
 def test_split_spectrum_cosmology_gradients_match_combined_wrapper() -> None:
     frequencies = jnp.array([20.0, 40.0])
-    cumulative = make_cumulative_mass_moment_fn(
-        {},
-        uniform_joint_mass,
-        component_mass_min=MASS_MIN,
-        component_mass_max=MASS_MAX,
-        mass_ratio_quadrature_order=16,
-        total_mass_interval_count=8,
-        total_mass_legendre_order=8,
-    )
     mass_moments = precompute_cumulative_mass_moments(
         frequencies,
-        cumulative,
+        {},
+        uniform_joint_mass,
         z_min=Z_MIN,
         z_max=Z_MAX,
+        component_mass_min=MASS_MIN,
+        component_mass_max=MASS_MAX,
         alpha=ISCO_ALPHA,
+        mass_ratio_quadrature_order=16,
+        n_interp_grid=257,
         redshift_quadrature_order=16,
     )
 
@@ -519,8 +505,7 @@ def test_split_spectrum_cosmology_gradients_match_combined_wrapper() -> None:
                 component_mass_max=MASS_MAX,
                 alpha=ISCO_ALPHA,
                 quadrature_order=16,
-                total_mass_interval_count=8,
-                total_mass_legendre_order=8,
+                n_interp_grid=257,
             )
         )
 
@@ -573,7 +558,7 @@ def test_matches_independent_component_mass_quadrature_with_cutoff() -> None:
         frequencies, alpha=ISCO_ALPHA, order=128
     )
 
-    np.testing.assert_allclose(actual, expected, rtol=5e-6)
+    np.testing.assert_allclose(actual, expected, rtol=1e-4)
 
 
 def test_default_isco_alpha_uses_astrophysical_units() -> None:
@@ -699,12 +684,10 @@ def test_split_spectrum_rejects_incompatible_mass_moment_shape(
         ({"quadrature_order": 0}, "quadrature_order"),
         ({"quadrature_order": 1.5}, "quadrature_order"),
         ({"quadrature_order": True}, "quadrature_order"),
-        ({"total_mass_interval_count": 1}, "total_mass_interval_count"),
-        ({"total_mass_interval_count": 3}, "total_mass_interval_count"),
-        ({"total_mass_interval_count": True}, "total_mass_interval_count"),
-        ({"total_mass_legendre_order": 0}, "total_mass_legendre_order"),
-        ({"total_mass_legendre_order": 1.5}, "total_mass_legendre_order"),
-        ({"total_mass_legendre_order": True}, "total_mass_legendre_order"),
+        ({"n_interp_grid": 1}, "n_interp_grid"),
+        ({"n_interp_grid": 4}, "n_interp_grid"),
+        ({"n_interp_grid": 3.5}, "n_interp_grid"),
+        ({"n_interp_grid": True}, "n_interp_grid"),
     ],
 )
 def test_rejects_invalid_static_inputs(overrides: dict[str, Any], message: str) -> None:
