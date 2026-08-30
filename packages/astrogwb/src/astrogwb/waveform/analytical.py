@@ -21,24 +21,6 @@ M_{\rm det})` in Hz -- for a dimensionless :math:`\alpha` that the caller
 chooses. :data:`ISCO_ALPHA` is the value putting :math:`f_{\rm end}` at the
 Schwarzschild test-particle ISCO; nothing here defaults to it.
 
-Everything is reduced to seconds internally. Writing :math:`(G M_c)^{5/3}/c^3
-= (G M_c/c^3)^{5/3} c^2` turns the prefactor into
-
-.. math::
-
-    \frac{5}{24}\,\pi^{-4/3}\,
-    \frac{M_c[\mathrm{s}]^{5/3}}{(r/c)[\mathrm{s}]^2},
-
-so the result comes out in :math:`\mathrm{s}^2 = \mathrm{Hz}^{-2}` with no
-explicit :math:`G` anywhere -- the same units as the Ripple-generated power
-that :func:`astrogwb.waveform.polarization_power` reduces.
-
-These functions are JAX-only and JAX-traceable: they accept any
-:data:`jax.typing.ArrayLike` input -- NumPy arrays and Python scalars included
--- evaluate through :mod:`jax.numpy`, and return :class:`jax.Array`, so the
-same code runs at catalog-build time on a NumPy population and inside a jitted
-NumPyro model on traced arrays.
-
 .. warning::
 
     The power is of order :math:`10^{-47}\,\mathrm{Hz}^{-2}` for a BNS at a
@@ -180,21 +162,13 @@ def inspiral_polarization_power(
 
     Evaluates the module's closed form at every ``(source, frequency)`` pair
     and zeroes the bins above each source's :func:`termination_frequency`.
-    Output is in $\mathrm{Hz}^{-2}$, laid out ``(sample, frequency)`` -- the
-    same orientation the Ripple backend produces before
-    :func:`astrogwb.waveform.polarization_power` transposes it. The on-disk
-    catalog format is ``(frequency, sample)``, so
-    :func:`astrogwb.waveform.make_catalog` takes the transpose::
-
-        make_catalog(..., polarization_power=power.T)
+    Output is in $\mathrm{Hz}^{-2}$, laid out ``(sample, frequency)``
 
     .. warning::
 
         The truncation is a hard mask, so the power is not differentiable in
         ``alpha``: its gradient with respect to ``alpha`` is zero wherever it
-        exists. ``alpha`` is a fixed or grid-scanned choice, not something to
-        put behind a ``numpyro.sample`` site, unless a smooth taper replaces
-        the mask.
+        exists.
 
     Parameters
     ----------
