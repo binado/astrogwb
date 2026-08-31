@@ -18,7 +18,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
-    "gwmock-noise>=0.10.1",
+    "gwmock-noise>=0.11.1",
     "gwmock-pop>=0.11.4",
     "gwmock-signal[jax]>=0.15.0",
     "h5netcdf[h5py]>=1.8.1",
