@@ -116,6 +116,16 @@ def chirp_mass(mass_1: ArrayLike, mass_2: ArrayLike) -> jax.Array:
     return (mass_1 * mass_2) ** 0.6 / (mass_1 + mass_2) ** 0.2
 
 
+def _require_scalar_alpha(alpha: ArrayLike) -> jax.Array:
+    alpha_value = jnp.asarray(alpha)
+    if alpha_value.ndim != 0:
+        msg = (
+            f"alpha must be a scalar; received an array with shape {alpha_value.shape}"
+        )
+        raise ValueError(msg)
+    return alpha_value
+
+
 def termination_frequency(
     mass_1: ArrayLike,
     mass_2: ArrayLike,
@@ -137,8 +147,8 @@ def termination_frequency(
     redshift:
         Source redshift.
     alpha:
-        Dimensionless truncation parameter. See :data:`ISCO_ALPHA` for the
-        value corresponding to the Schwarzschild test-particle ISCO.
+        Scalar dimensionless truncation parameter. See :data:`ISCO_ALPHA` for
+        the value corresponding to the Schwarzschild test-particle ISCO.
 
     Returns
     -------
@@ -146,7 +156,8 @@ def termination_frequency(
         The truncation frequency in Hz.
     """
     total_mass = jnp.asarray(mass_1) + mass_2
-    return alpha / ((1.0 + redshift) * total_mass * SOLAR_MASS_IN_SECONDS)
+    alpha_value = _require_scalar_alpha(alpha)
+    return alpha_value / ((1.0 + redshift) * total_mass * SOLAR_MASS_IN_SECONDS)
 
 
 def _require_frequency_grid(frequencies: ArrayLike) -> jax.Array:
@@ -180,15 +191,13 @@ def _normalize_source_parameters(
     redshift: ArrayLike,
     luminosity_distance: ArrayLike,
     inclination: ArrayLike,
-    alpha: ArrayLike,
-) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     parameters = (
         _normalize_source_parameter("source_frame_mass_1", source_frame_mass_1),
         _normalize_source_parameter("source_frame_mass_2", source_frame_mass_2),
         _normalize_source_parameter("redshift", redshift),
         _normalize_source_parameter("luminosity_distance", luminosity_distance),
         _normalize_source_parameter("inclination", inclination),
-        _normalize_source_parameter("alpha", alpha),
     )
     (
         source_frame_mass_1_array,
@@ -196,7 +205,6 @@ def _normalize_source_parameters(
         redshift_array,
         distance_array,
         iota_array,
-        alpha_array,
     ) = jnp.broadcast_arrays(*parameters)
     return (
         source_frame_mass_1_array,
@@ -204,7 +212,6 @@ def _normalize_source_parameters(
         redshift_array,
         distance_array,
         iota_array,
-        alpha_array,
     )
 
 
@@ -245,7 +252,7 @@ def _single_source_inspiral_power(
 
 _batched_inspiral_power = jax.vmap(
     _single_source_inspiral_power,
-    in_axes=(None, 0, 0, 0, 0, 0, 0),
+    in_axes=(None, 0, 0, 0, 0, 0, None),
 )
 
 
@@ -261,10 +268,9 @@ def inspiral_polarization_power(
     and zeroes the bins above each source's :func:`termination_frequency`.
     Required source parameters are read from a gwmock-compatible mapping.
     Each may be a scalar or a one-dimensional ``(N,)`` array; they are jointly
-    broadcast with ``alpha`` to ``(N,)``. Higher-rank source arrays are
-    rejected, and unrelated mapping entries are ignored. Output is in
-    $\mathrm{Hz}^{-2}$, laid out
-    ``(sample, frequency)``.
+    broadcast to ``(N,)``. Higher-rank source arrays are rejected, and
+    unrelated mapping entries are ignored. Output is in $\mathrm{Hz}^{-2}$,
+    laid out ``(sample, frequency)``.
 
     .. warning::
 
@@ -285,7 +291,7 @@ def inspiral_polarization_power(
         enters only by redshifting the masses -- both the chirp mass in the
         amplitude and the total mass in the cutoff.
     alpha:
-        Dimensionless truncation parameter, scalar or shape ``(N,)``; see
+        Scalar dimensionless truncation parameter shared by every source; see
         :func:`termination_frequency`.
 
     Returns
@@ -294,12 +300,12 @@ def inspiral_polarization_power(
         Polarization power of shape ``(N, F)`` in $\mathrm{Hz}^{-2}$.
     """
     frequency_grid = _require_frequency_grid(frequencies)
+    alpha_value = _require_scalar_alpha(alpha)
     source_parameters = _normalize_source_parameters(
         source_frame_mass_1=parameters["source_frame_mass_1"],
         source_frame_mass_2=parameters["source_frame_mass_2"],
         redshift=parameters["redshift"],
         luminosity_distance=parameters["luminosity_distance"],
         inclination=parameters["inclination"],
-        alpha=alpha,
     )
-    return _batched_inspiral_power(frequency_grid, *source_parameters)
+    return _batched_inspiral_power(frequency_grid, *source_parameters, alpha_value)

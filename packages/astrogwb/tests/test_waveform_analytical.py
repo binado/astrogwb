@@ -193,6 +193,32 @@ def test_larger_alpha_never_removes_a_surviving_bin(
     assert jnp.count_nonzero(wide) > jnp.count_nonzero(narrow)
 
 
+@pytest.mark.parametrize(
+    "alpha",
+    [
+        pytest.param(jnp.array([ISCO_ALPHA]), id="length-one"),
+        pytest.param(jnp.array([ISCO_ALPHA, 2.0 * ISCO_ALPHA]), id="vector"),
+    ],
+)
+def test_termination_frequency_requires_scalar_alpha(alpha: jax.Array) -> None:
+    with pytest.raises(ValueError, match="alpha must be a scalar"):
+        termination_frequency(1.4, 1.3, 0.1, alpha=alpha)
+
+
+@pytest.mark.parametrize(
+    "alpha",
+    [
+        pytest.param(jnp.array([ISCO_ALPHA]), id="length-one"),
+        pytest.param(jnp.array([ISCO_ALPHA, 2.0 * ISCO_ALPHA]), id="vector"),
+    ],
+)
+def test_inspiral_power_requires_scalar_alpha(
+    bns: dict[str, jax.Array], alpha: jax.Array
+) -> None:
+    with pytest.raises(ValueError, match="alpha must be a scalar"):
+        inspiral_polarization_power(jnp.array([100.0]), bns, alpha=alpha)
+
+
 def test_zero_frequency_bin_is_zero_not_nan(
     bns_power: Callable[..., jax.Array],
 ) -> None:
@@ -219,7 +245,7 @@ def test_scalar_source_parameters_match_length_one_arrays() -> None:
         frequencies, scalar_sources, alpha=ISCO_ALPHA
     )
     array_power = inspiral_polarization_power(
-        frequencies, array_sources, alpha=jnp.asarray([ISCO_ALPHA])
+        frequencies, array_sources, alpha=ISCO_ALPHA
     )
 
     assert scalar_power.shape == (1, frequencies.size)
@@ -283,7 +309,7 @@ def test_scalar_and_vector_source_parameters_broadcast_together() -> None:
     expected = inspiral_polarization_power(
         frequencies,
         vector_sources,
-        alpha=jnp.full(3, ISCO_ALPHA),
+        alpha=ISCO_ALPHA,
     )
 
     assert actual.shape == (3, frequencies.size)
@@ -299,15 +325,13 @@ def test_batched_sources_match_stacked_single_source_calls() -> None:
         "luminosity_distance": jnp.array([500.0, 2000.0, 8000.0]),
         "inclination": jnp.array([0.0, 0.5, 1.0]),
     }
-    alpha = jnp.array([ISCO_ALPHA, 1.5 * ISCO_ALPHA, 2.0 * ISCO_ALPHA])
-
-    batched = inspiral_polarization_power(frequencies, sources, alpha=alpha)
+    batched = inspiral_polarization_power(frequencies, sources, alpha=ISCO_ALPHA)
     independent = jnp.concatenate(
         [
             inspiral_polarization_power(
                 frequencies,
                 {name: values[index] for name, values in sources.items()},
-                alpha=alpha[index],
+                alpha=ISCO_ALPHA,
             )
             for index in range(3)
         ],
