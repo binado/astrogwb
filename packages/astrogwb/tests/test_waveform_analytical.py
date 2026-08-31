@@ -160,6 +160,7 @@ def test_redshift_enters_only_through_detector_frame_masses(
     redshifted = bns_power(frequencies, redshift=jnp.array([redshift]))
     rescaled = bns_power(
         frequencies,
+        redshift=jnp.array([0.0]),
         source_frame_mass_1=(1.0 + redshift) * bns["source_frame_mass_1"],
         source_frame_mass_2=(1.0 + redshift) * bns["source_frame_mass_2"],
     )
