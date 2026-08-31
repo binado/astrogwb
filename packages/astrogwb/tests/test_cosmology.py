@@ -153,6 +153,33 @@ class TestDistanceAndVolumeGrid:
             omega_m,
         )
 
+    def test_integer_redshift_grid_matches_float(self, parameters: dict) -> None:
+        """An integer grid must promote through float, not truncate the quadrature.
+
+        The Gauss-Legendre nodes and weights are cast to the working dtype. Cast
+        to an *integer* redshift dtype they all truncate to zero, and the whole
+        integral silently evaluates to zeros -- no warning, no NaN. The same
+        grid spelled as integers and as floats must give the same answer.
+        """
+        integer_grid = np.arange(0, 21)
+        float_grid = integer_grid.astype(np.float64)
+
+        _assert_returns_jax_arrays(
+            distance_and_volume_grid,
+            integer_grid,
+            parameters["hubble_constant"],
+            parameters["omega_m"],
+        )
+
+        from_integers = distance_and_volume_grid(integer_grid, **parameters)
+        from_floats = distance_and_volume_grid(float_grid, **parameters)
+        for got, want in zip(from_integers, from_floats, strict=True):
+            np.testing.assert_allclose(got, want)
+
+        # Pins the specific failure mode: truncated nodes/weights zero the
+        # integral, so every distance past z=0 collapses to exactly 0.
+        assert np.all(np.asarray(from_integers[0][1:]) > 0.0)
+
     @pytest.mark.parametrize(
         "hubble_constant,omega_m",
         [
