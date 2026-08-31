@@ -11,24 +11,13 @@ from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
     madau_dickinson_rate,
-    make_merger_rate_and_log_weights_fn,
 )
 
-# Standard cosmology + population hyperparameters used across the tests.
-FIDUCIALS = {
-    "H0": 67.66,
-    "Omega_m": 0.3096,
-    "xi_0": 1.0,
-    "xi_n": 1.91,
-    "gamma": 1.42,
-    "kappa": 4.62,
-    "z_peak": 1.84,
-    "local_merger_rate": 770.0,
-}
-
-Z_MIN = 0.0
-Z_MAX = 20.0
-N_GRID = 256
+# Standard cosmology + population hyperparameters, and the redshift grid they
+# are integrated on. Shared with `synthetic_weights_callback`, which builds its
+# catalog at exactly these values: a second copy here would let the two drift
+# apart with no visible symptom.
+from mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN
 
 
 # --------------------------------------------------------------------------- #
@@ -151,25 +140,8 @@ def test_redshift_logpdf_is_negative_infinite_outside_the_grid() -> None:
 # --------------------------------------------------------------------------- #
 # make_merger_rate_and_log_weights_fn
 # --------------------------------------------------------------------------- #
-def _build_synthetic_callback(n_samples: int = 16):
-    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    z_samples = jnp.linspace(0.01, Z_MAX - 0.01, n_samples)
-    samples = {"redshift": z_samples}
-
-    _, luminosity_distance, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, samples, redshift_grid=z_grid
-    )
-    samples = {**samples, "luminosity_distance": luminosity_distance}
-    fn = make_merger_rate_and_log_weights_fn(
-        fiducials=FIDUCIALS,
-        redshift_grid=z_grid,
-        proposal_logprob=proposal_logprob,
-    )
-    return fn, samples
-
-
-def test_make_merger_rate_and_log_weights_fn_smoke() -> None:
-    fn, samples = _build_synthetic_callback()
+def test_make_merger_rate_and_log_weights_fn_smoke(synthetic_weights_callback) -> None:
+    fn, samples = synthetic_weights_callback()
     total_rate, log_weights = fn(FIDUCIALS, samples)
 
     total_rate = float(total_rate)
@@ -179,8 +151,10 @@ def test_make_merger_rate_and_log_weights_fn_smoke() -> None:
     assert log_weights.shape == (samples["redshift"].shape[0],)
 
 
-def test_local_merger_rate_scales_total_rate_without_changing_weights() -> None:
-    fn, samples = _build_synthetic_callback()
+def test_local_merger_rate_scales_total_rate_without_changing_weights(
+    synthetic_weights_callback,
+) -> None:
+    fn, samples = synthetic_weights_callback()
     fiducial_rate, fiducial_log_weights = fn(FIDUCIALS, samples)
 
     scaled_params = {**FIDUCIALS, "local_merger_rate": 2.5 * 770.0}
@@ -190,8 +164,10 @@ def test_local_merger_rate_scales_total_rate_without_changing_weights() -> None:
     np.testing.assert_allclose(scaled_log_weights, fiducial_log_weights)
 
 
-def test_fiducial_local_merger_rate_preserves_rate_calculation() -> None:
-    fn, samples = _build_synthetic_callback()
+def test_fiducial_local_merger_rate_preserves_rate_calculation(
+    synthetic_weights_callback,
+) -> None:
+    fn, samples = synthetic_weights_callback()
     total_rate, _ = fn(FIDUCIALS, samples)
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
@@ -215,10 +191,12 @@ def test_fiducial_local_merger_rate_preserves_rate_calculation() -> None:
     assert float(total_rate) == pytest.approx(expected)
 
 
-def test_make_merger_rate_and_log_weights_fn_fiducial_weights_cancel() -> None:
+def test_make_merger_rate_and_log_weights_fn_fiducial_weights_cancel(
+    synthetic_weights_callback,
+) -> None:
     # Proposal and target share compute_merger_rate_distance_and_logprob, so at
     # the fiducial point log_weights are identically zero and relative ESS is 1.
-    fn, samples = _build_synthetic_callback()
+    fn, samples = synthetic_weights_callback()
     _, log_weights = fn(FIDUCIALS, samples)
     log_weights = np.asarray(log_weights)
     weights = np.exp(log_weights)

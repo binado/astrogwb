@@ -37,10 +37,11 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - name: Verify ORF reference fixtures are present
+      - name: Verify reference fixtures are present
         run: |
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference.npz
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference_et_triangle.npz
+          test -f packages/astrogwb/tests/fixtures/mock_bns_population.csv
       - run: >-
           uv run --frozen --isolated --no-default-groups
           --package astrogwb --group test
@@ -67,10 +68,11 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - name: Verify ORF reference fixtures are present
+      - name: Verify reference fixtures are present
         run: |
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference.npz
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference_et_triangle.npz
+          test -f packages/astrogwb/tests/fixtures/mock_bns_population.csv
       - run: >-
           uv run --frozen --isolated --no-default-groups
           --package astrogwb --group test
