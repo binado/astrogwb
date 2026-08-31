@@ -7,6 +7,7 @@ from astrogwb.gwb.analytic import (
     analytic_spectral_density,
     analytic_spectral_density_from_mass_moments,
     precompute_cumulative_mass_moments,
+    uniform_prior_mass_moments,
 )
 from astrogwb.gwb.snr import (
     spectral_snr,
@@ -32,4 +33,5 @@ __all__ = [
     "spectral_density_from_omega_gw",
     "spectral_snr",
     "spectral_snr_squared",
+    "uniform_prior_mass_moments",
 ]

@@ -8,6 +8,9 @@ ratio ``q = m2 / m1``. The mass-ratio integral is evaluated first on a fixed
 total-mass grid, then cumulatively integrated in ``M``. Linear interpolation of
 that cumulative makes the source-frequency cutoff cheap to evaluate and allows
 the mass calculation to be precomputed independently of redshift and cosmology.
+A uniform ordered component-mass density is a closed-form special case: both
+integrals are elementary, so ``uniform_prior_mass_moments`` skips the grid and
+the interpolation entirely.
 
 All numerical orders and grid sizes are static and JAX-friendly. Double the
 relevant order or refine the interpolation grid until the result is stable to
@@ -182,6 +185,153 @@ def _cumulative_mass_moment_grid(
         axis=-1,
     )
     return total_mass, cumulative_trapezoid(mass_ratio_integral, total_mass)
+
+
+def _uniform_phi(total_mass: ArrayLike, component_mass: float) -> jax.Array:
+    r"""Evaluate the shared total-mass antiderivative.
+
+    .. math::
+
+        \phi(M,x)=\frac{M^{11/3}}{44}-\frac{3x^2}{10}M^{5/3}
+            +\frac{x^3}{2}M^{2/3}.
+    """
+    total_mass = jnp.asarray(total_mass, dtype=jnp.float64)
+    return (
+        total_mass ** (11.0 / 3.0) / 44.0
+        - (3.0 / 10.0) * component_mass**2 * total_mass ** (5.0 / 3.0)
+        + 0.5 * component_mass**3 * total_mass ** (2.0 / 3.0)
+    )
+
+
+def _uniform_cumulative_mass_moment(
+    total_mass: ArrayLike,
+    *,
+    component_mass_min: float,
+    component_mass_max: float,
+) -> jax.Array:
+    r"""Evaluate the exact cumulative mass moment of a uniform mass prior.
+
+    For a density that is uniform on the ordered component-mass triangle,
+
+    .. math::
+
+        p(m_1,m_2)=\frac{2}{(m_{\max}-m_{\min})^2},
+        \qquad m_{\min}\le m_2\le m_1\le m_{\max},
+
+    the fixed-total-mass integrand of :func:`_cumulative_mass_moment_grid`
+    reduces to :math:`pM^{8/3}q(1+q)^{-4}`, whose mass-ratio antiderivative is
+    elementary. Substituting the two branches of :math:`q_-(M)`, for which
+    :math:`(1+q_-)^{-1}` is :math:`1-m_{\min}/M` below the support transition
+    :math:`T=m_{\min}+m_{\max}` and :math:`m_{\max}/M` above it, leaves only
+    powers of ``M``, so the total-mass integral closes as well. Both branches
+    share the antiderivative :math:`\phi` of :func:`_uniform_phi`, entering as
+    :math:`+\phi(M,m_{\min})` below :math:`T` and :math:`-\phi(M,m_{\max})`
+    above it. Writing :math:`\tilde M=\operatorname{clip}(M,2m_{\min},
+    2m_{\max})`,
+
+    .. math::
+
+        C(M)/p=
+        \begin{cases}
+        \phi(\tilde M,m_{\min})-\phi(2m_{\min},m_{\min}),
+            & \tilde M\le T,\\
+        \phi(T,m_{\min})-\phi(2m_{\min},m_{\min})
+            +\phi(T,m_{\max})-\phi(\tilde M,m_{\max}),
+            & \tilde M\ge T.
+        \end{cases}
+
+    This is the exact counterpart of the array tabulated by
+    :func:`_cumulative_mass_moment_grid`, evaluated pointwise at arbitrary
+    ``total_mass`` rather than looked up between grid nodes. Clipping before
+    the branch selection keeps both branches finite wherever they are traced,
+    so reverse-mode gradients stay free of ``NaN`` and an infinite cutoff maps
+    onto the full mass moment.
+    """
+    lower = 2.0 * component_mass_min
+    transition = component_mass_min + component_mass_max
+    total_mass = jnp.asarray(total_mass, dtype=jnp.float64)
+    clipped = jnp.clip(total_mass, lower, 2.0 * component_mass_max)
+    origin = _uniform_phi(lower, component_mass_min)
+    below_transition = _uniform_phi(clipped, component_mass_min) - origin
+    above_transition = (
+        _uniform_phi(transition, component_mass_min)
+        - origin
+        + _uniform_phi(transition, component_mass_max)
+        - _uniform_phi(clipped, component_mass_max)
+    )
+    density = 2.0 / (component_mass_max - component_mass_min) ** 2
+    moment = density * jnp.where(
+        clipped <= transition, below_transition, above_transition
+    )
+    # Below the support the cancellation is phi(2 m_min) - phi(2 m_min), which
+    # XLA is free to reassociate into a nonzero rounding residual, so the empty
+    # integral is pinned here rather than left to floating point.
+    return jnp.where(total_mass <= lower, 0.0, moment)
+
+
+@require_x64
+def uniform_prior_mass_moments(
+    frequencies: jax.Array,
+    *,
+    z_min: float,
+    z_max: float,
+    component_mass_min: float,
+    component_mass_max: float,
+    alpha: float = ISCO_ALPHA,
+    redshift_quadrature_order: int = 64,
+) -> jax.Array:
+    r"""Evaluate exact mass moments for a uniform component-mass prior.
+
+    This is the closed-form counterpart of
+    :func:`precompute_cumulative_mass_moments` for a density that is uniform on
+    the ordered component-mass triangle. Both the mass-ratio and the total-mass
+    integrals are elementary there, so the cumulative moment is evaluated
+    directly at every cutoff,
+
+    .. math::
+
+        U_{fa}=\frac{\alpha}{f_f(1+z_a)}, \qquad M_{fa}=C(U_{fa}),
+
+    with no mass-ratio quadrature, no total-mass grid, and no interpolation.
+    The result is exact to floating-point round-off and carries none of the
+    ``n_interp_grid`` discretization error of the generic path.
+
+    The returned array is accepted unchanged by
+    :func:`analytic_spectral_density_from_mass_moments`; pass the same
+    ``redshift_quadrature_order`` to both so the redshift nodes agree.
+
+    Parameters
+    ----------
+    frequencies:
+        One-dimensional observer-frame frequency array in Hz. Values must be
+        finite and strictly positive.
+    z_min, z_max:
+        Redshift integration bounds.
+    component_mass_min, component_mass_max:
+        Shared source-frame component-mass bounds in solar masses. They also fix
+        the normalized density ``2 / (component_mass_max - component_mass_min)**2``.
+    alpha:
+        Source-frame cutoff coefficient in Hz solar-mass, defining
+        ``f_max = alpha / M``. Use ``inf`` for no cutoff.
+    redshift_quadrature_order:
+        Gauss-Legendre order of the redshift nodes.
+
+    Returns
+    -------
+    jax.Array
+        Cumulative mass moments of shape ``(frequency, redshift_node)``. Values
+        are exactly zero where the cutoff falls below ``2 * component_mass_min``
+        and exactly the full mass moment where it lies above
+        ``2 * component_mass_max``.
+    """
+    frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
+    redshift, _ = mapped_gauss_legendre_rule(redshift_quadrature_order, z_min, z_max)
+    total_mass_upper = alpha / (frequencies[:, None] * (1.0 + redshift[None, :]))
+    return _uniform_cumulative_mass_moment(
+        total_mass_upper,
+        component_mass_min=component_mass_min,
+        component_mass_max=component_mass_max,
+    )
 
 
 @require_x64

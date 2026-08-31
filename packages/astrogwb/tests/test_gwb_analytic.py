@@ -15,8 +15,12 @@ from astrogwb.gwb import (
     analytic_spectral_density_from_mass_moments,
     omega_gw_from_spectral_density,
     precompute_cumulative_mass_moments,
+    uniform_prior_mass_moments,
 )
-from astrogwb.gwb.analytic import _cumulative_mass_moment_grid
+from astrogwb.gwb.analytic import (
+    _cumulative_mass_moment_grid,
+    _uniform_cumulative_mass_moment,
+)
 from astrogwb.utils import SECONDS_PER_YEAR
 from numpy.polynomial.legendre import leggauss
 
@@ -603,3 +607,111 @@ def test_order_doubling_converges_for_smooth_nonseparable_population() -> None:
         np.asarray(evaluate(128)),
         rtol=1e-5,
     )
+
+
+def test_uniform_closed_form_matches_direct_component_mass_integral() -> None:
+    cutoffs = np.array(
+        [
+            2.0 * MASS_MIN - 1.0,
+            2.0 * MASS_MIN,
+            37.0,
+            MASS_MIN + MASS_MAX,
+            73.0,
+            2.0 * MASS_MAX,
+            np.inf,
+        ]
+    )
+
+    actual = np.asarray(
+        _uniform_cumulative_mass_moment(
+            jnp.asarray(cutoffs),
+            component_mass_min=MASS_MIN,
+            component_mass_max=MASS_MAX,
+        )
+    )
+    expected = np.asarray(
+        [_direct_uniform_mass_moment(cutoff, order=128) for cutoff in cutoffs]
+    )
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-12)
+    assert actual[0] == 0.0
+    assert actual[1] == 0.0
+    assert actual[-1] == actual[-2]
+
+
+def test_uniform_prior_mass_moments_match_numerical_precompute() -> None:
+    frequencies = jnp.array([20.0, 40.0, 80.0])
+    kwargs = {
+        "z_min": Z_MIN,
+        "z_max": Z_MAX,
+        "component_mass_min": MASS_MIN,
+        "component_mass_max": MASS_MAX,
+        "alpha": ISCO_ALPHA,
+        "redshift_quadrature_order": 24,
+    }
+
+    actual = uniform_prior_mass_moments(frequencies, **kwargs)
+    expected = precompute_cumulative_mass_moments(
+        frequencies,
+        {},
+        uniform_joint_mass,
+        mass_ratio_quadrature_order=64,
+        n_interp_grid=4097,
+        **kwargs,
+    )
+
+    assert actual.shape == (3, 24)
+    assert actual.dtype == jnp.float64
+    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), rtol=1e-5)
+
+
+def test_uniform_spectrum_matches_generic_pipeline() -> None:
+    frequencies = jnp.array([20.0, 40.0, 80.0])
+    mass_moments = uniform_prior_mass_moments(
+        frequencies,
+        z_min=Z_MIN,
+        z_max=Z_MAX,
+        component_mass_min=MASS_MIN,
+        component_mass_max=MASS_MAX,
+        alpha=ISCO_ALPHA,
+        redshift_quadrature_order=64,
+    )
+
+    actual = analytic_spectral_density_from_mass_moments(
+        frequencies,
+        HYPERPARAMETERS,
+        constant_rate,
+        mass_moments,
+        z_min=Z_MIN,
+        z_max=Z_MAX,
+        redshift_quadrature_order=64,
+    )
+    expected = _analytic(frequencies, alpha=ISCO_ALPHA)
+
+    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), rtol=1e-5)
+
+
+def test_uniform_prior_mass_moments_is_jittable_and_differentiable() -> None:
+    above_support = 1.01 * ISCO_ALPHA / (2.0 * MASS_MIN * (1.0 + Z_MIN))
+    frequencies = jnp.array([20.0, 80.0, above_support])
+
+    def evaluate(values: jax.Array) -> jax.Array:
+        return uniform_prior_mass_moments(
+            values,
+            z_min=Z_MIN,
+            z_max=Z_MAX,
+            component_mass_min=MASS_MIN,
+            component_mass_max=MASS_MAX,
+            alpha=ISCO_ALPHA,
+            redshift_quadrature_order=16,
+        )
+
+    jitted = np.asarray(jax.jit(evaluate)(frequencies))
+    gradient = np.asarray(
+        jax.grad(lambda values: jnp.sum(evaluate(values)))(frequencies)
+    )
+
+    np.testing.assert_allclose(jitted, np.asarray(evaluate(frequencies)), rtol=1e-12)
+    assert np.all(jitted[-1] == 0.0)
+    assert np.all(np.isfinite(gradient))
+    assert gradient[-1] == 0.0
