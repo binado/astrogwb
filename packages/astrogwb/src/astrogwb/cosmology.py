@@ -15,6 +15,8 @@ closure; see
 
 from __future__ import annotations
 
+from typing import overload
+
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
