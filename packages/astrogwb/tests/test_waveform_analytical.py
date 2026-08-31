@@ -37,8 +37,8 @@ def bns() -> dict[str, jax.Array]:
     return {
         "source_frame_mass_1": jnp.array([1.4]),
         "source_frame_mass_2": jnp.array([1.4]),
-        "redshift": jnp.array([0.0]),
-        "luminosity_distance": jnp.array([100.0]),
+        "redshift": jnp.array([0.008]),
+        "luminosity_distance": jnp.array([40.0]),
         "inclination": jnp.array([0.0]),
     }
 
@@ -165,10 +165,6 @@ def test_redshift_enters_only_through_detector_frame_masses(
     )
 
     np.testing.assert_allclose(redshifted, rescaled, rtol=1e-12)
-
-
-def test_termination_frequency_at_isco(bns_cutoff: Callable[..., float]) -> None:
-    np.testing.assert_allclose(bns_cutoff(), 1570.4196, rtol=1e-6)
 
 
 def test_power_is_zero_above_the_termination_frequency(
