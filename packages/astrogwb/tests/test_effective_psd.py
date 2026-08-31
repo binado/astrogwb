@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
+from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import gaussian_bin_scale
-from astrogwb.utils import SECONDS_PER_YEAR
 
 
 def test_gaussian_bin_scale_uses_explicit_df() -> None:

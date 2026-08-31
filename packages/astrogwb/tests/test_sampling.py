@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
+from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import spectral_density
 from astrogwb.sampling import (
@@ -17,7 +18,6 @@ from astrogwb.sampling import (
     amplitude_reconstruction_model,
     spectral_density_model,
 )
-from astrogwb.utils import SECONDS_PER_YEAR
 from numpyro import handlers
 from numpyro.infer import Predictive
 from numpyro.infer.util import log_density

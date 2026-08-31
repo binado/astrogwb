@@ -6,13 +6,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
     madau_dickinson_rate,
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb.utils import SECONDS_PER_YEAR
 
 # Standard cosmology + population hyperparameters used across the tests.
 FIDUCIALS = {

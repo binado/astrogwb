@@ -21,10 +21,8 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
+from astrogwb.constants import MPC_IN_METERS, SPEED_OF_LIGHT
 from astrogwb.utils import mapped_gauss_legendre_rule
-
-SPEED_OF_LIGHT: float = 299792458.0
-MPC_IN_METERS: float = 3.0856775814913673e22
 
 #: Fixed Gauss-Legendre quadrature order used by the grid helpers. 4 nodes per
 #: interval reach near machine precision for the smooth flat-LCDM integrand

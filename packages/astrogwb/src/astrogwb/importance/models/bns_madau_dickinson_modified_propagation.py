@@ -30,9 +30,9 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 
+from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
-from astrogwb.utils import SECONDS_PER_YEAR
 
 AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
 """Parameters this callback supports marginalizing analytically."""

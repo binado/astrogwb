@@ -8,7 +8,7 @@ from jax.typing import ArrayLike, DTypeLike
 from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
 
-SECONDS_PER_YEAR: float = 365.25 * 24.0 * 3600.0
+from astrogwb.constants import SECONDS_PER_YEAR
 
 
 def years_to_seconds(observation_time_yr: float) -> float:
