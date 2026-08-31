@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import math
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -8,9 +9,17 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from astrogwb.cosmology import MPC_IN_METERS, SPEED_OF_LIGHT, hubble_constant_si
-from astrogwb.gwb import (
+from astrogwb.constants import (
+    GPC_IN_METERS,
+    GRAVITATIONAL_CONSTANT,
     ISCO_ALPHA,
+    SECONDS_PER_YEAR,
+    SOLAR_MASS_IN_KILOGRAMS,
+    SOLAR_MASS_IN_SECONDS,
+    SPEED_OF_LIGHT,
+)
+from astrogwb.cosmology import hubble_constant_si
+from astrogwb.gwb import (
     analytic_spectral_density,
     analytic_spectral_density_from_mass_moments,
     omega_gw_from_spectral_density,
@@ -21,14 +30,9 @@ from astrogwb.gwb.analytic import (
     _cumulative_mass_moment_grid,
     _uniform_cumulative_mass_moment,
 )
-from astrogwb.utils import SECONDS_PER_YEAR
 from numpy.polynomial.legendre import leggauss
 
 jax.config.update("jax_enable_x64", True)
-
-GRAVITATIONAL_CONSTANT_SI = 6.67430e-11
-SOLAR_MASS_KG = 1.988409870698051e30
-GPC_IN_METERS = 1.0e3 * MPC_IN_METERS
 
 HYPERPARAMETERS = {
     "H0": 70.0,
@@ -79,7 +83,7 @@ def _analytic(
 def _strain_coefficient(h0: float) -> float:
     return (
         2.0
-        * (GRAVITATIONAL_CONSTANT_SI * SOLAR_MASS_KG) ** (5.0 / 3.0)
+        * (GRAVITATIONAL_CONSTANT * SOLAR_MASS_IN_KILOGRAMS) ** (5.0 / 3.0)
         / (
             3.0
             * np.pi ** (1.0 / 3.0)
@@ -153,7 +157,10 @@ def _direct_uniform_spectral_density(
     for frequency in frequencies:
         mass_moments = np.asarray(
             [
-                _direct_uniform_mass_moment(alpha / (frequency * (1.0 + value)), order)
+                _direct_uniform_mass_moment(
+                    alpha / (frequency * (1.0 + value) * SOLAR_MASS_IN_SECONDS),
+                    order,
+                )
                 for value in redshift
             ]
         )
@@ -358,7 +365,11 @@ def test_precomputed_mass_moments_are_interpolated_cumulative_queries() -> None:
         n_interp_grid=257,
     )
     redshift, _ = _mapped_legendre(12, Z_MIN, Z_MAX)
-    upper = ISCO_ALPHA / (np.asarray(frequencies)[:, None] * (1.0 + redshift[None, :]))
+    upper = ISCO_ALPHA / (
+        np.asarray(frequencies)[:, None]
+        * (1.0 + redshift[None, :])
+        * SOLAR_MASS_IN_SECONDS
+    )
     expected = jnp.interp(jnp.asarray(upper), total_mass, cumulative)
 
     assert actual.shape == (3, 12)
@@ -513,7 +524,9 @@ def test_uncut_spectral_slopes_and_omega_conversion() -> None:
 
 
 def test_cutoff_is_an_integration_bound_and_zero_above_support() -> None:
-    maximum_observer_frequency = ISCO_ALPHA / (2.0 * MASS_MIN * (1.0 + Z_MIN))
+    maximum_observer_frequency = ISCO_ALPHA / (
+        2.0 * MASS_MIN * (1.0 + Z_MIN) * SOLAR_MASS_IN_SECONDS
+    )
     frequencies = jnp.array(
         [0.5 * maximum_observer_frequency, 1.01 * maximum_observer_frequency]
     )
@@ -537,13 +550,21 @@ def test_matches_independent_component_mass_quadrature_with_cutoff() -> None:
     np.testing.assert_allclose(actual, expected, rtol=1e-4)
 
 
-def test_default_isco_alpha_uses_astrophysical_units() -> None:
-    expected = SPEED_OF_LIGHT**3 / (
-        6.0 ** (3.0 / 2.0) * np.pi * GRAVITATIONAL_CONSTANT_SI * SOLAR_MASS_KG
-    )
+def test_default_alpha_is_the_shared_dimensionless_isco_constant() -> None:
+    """Every entry point must default to the one shared ``ISCO_ALPHA``.
 
-    assert ISCO_ALPHA == pytest.approx(expected, rel=1e-15)
-    assert 4390.0 < ISCO_ALPHA < 4400.0
+    This module used to export an ``ISCO_ALPHA`` of its own in Hz solar-mass,
+    a factor ``1 / SOLAR_MASS_IN_SECONDS`` away from the dimensionless
+    constant of the same name in :mod:`astrogwb.waveform`. Identity, not
+    equality, is what pins the two together.
+    """
+    for function in (
+        uniform_prior_mass_moments,
+        precompute_cumulative_mass_moments,
+        analytic_spectral_density,
+    ):
+        default = inspect.signature(function).parameters["alpha"].default
+        assert default is ISCO_ALPHA
 
 
 def test_is_jittable_with_traced_hyperparameters() -> None:
@@ -692,7 +713,9 @@ def test_uniform_spectrum_matches_generic_pipeline() -> None:
 
 
 def test_uniform_prior_mass_moments_is_jittable_and_differentiable() -> None:
-    above_support = 1.01 * ISCO_ALPHA / (2.0 * MASS_MIN * (1.0 + Z_MIN))
+    above_support = (
+        1.01 * ISCO_ALPHA / (2.0 * MASS_MIN * (1.0 + Z_MIN) * SOLAR_MASS_IN_SECONDS)
+    )
     frequencies = jnp.array([20.0, 80.0, above_support])
 
     def evaluate(values: jax.Array) -> jax.Array:

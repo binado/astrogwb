@@ -12,6 +12,11 @@ A uniform ordered component-mass density is a closed-form special case: both
 integrals are elementary, so ``uniform_prior_mass_moments`` skips the grid and
 the interpolation entirely.
 
+The cutoff coefficient ``alpha`` is dimensionless and shares the convention of
+:func:`astrogwb.waveform.termination_frequency`: a binary of source-frame total
+mass ``M`` in solar masses stops contributing above the observer frequency
+``alpha / (M (1 + z) t_sun)``, with ``t_sun = G M_sun / c^3``.
+
 All numerical orders and grid sizes are static and JAX-friendly. Double the
 relevant order or refine the interpolation grid until the result is stable to
 the accuracy required by the application. Realistic strain spectra require JAX
@@ -28,42 +33,40 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from astrogwb.cosmology import (
-    MPC_IN_METERS,
-    SPEED_OF_LIGHT,
-    hubble_constant_si,
-    normalized_hubble_parameter,
-)
-from astrogwb.utils import (
+from astrogwb.constants import (
+    GPC_IN_METERS,
+    GRAVITATIONAL_CONSTANT,
+    ISCO_ALPHA,
     SECONDS_PER_YEAR,
+    SOLAR_MASS_IN_KILOGRAMS,
+    SOLAR_MASS_IN_SECONDS,
+    SPEED_OF_LIGHT,
+)
+from astrogwb.cosmology import hubble_constant_si, normalized_hubble_parameter
+from astrogwb.utils import (
     cumulative_trapezoid,
     mapped_gauss_legendre_rule,
     require_x64,
 )
 
-_GRAVITATIONAL_CONSTANT_SI: float = 6.67430e-11
-_SOLAR_MASS_KG: float = 1.988409870698051e30
-_GPC_IN_METERS: float = 1.0e3 * MPC_IN_METERS
-
 # Converts a rate density in Gpc^-3 yr^-1 and a total-mass moment in
 # solar-mass^(5/3) into the SI coefficient of S_h. Combining these scales
-# before entering JAX avoids separately materializing ~1e50 and ~1e-84 terms.
+# here, in Python float64, is deliberate: evaluated separately the pieces are
+# ~3e50 (SOLAR_MASS_IN_KILOGRAMS ** (5/3)) and ~1e-84 (the reciprocal of
+# GPC_IN_METERS**3 * SECONDS_PER_YEAR), which overflow and underflow float32.
+# Only the combined ~1.9e-68 may reach JAX. Grouping the mass and G before
+# the 5/3 power is what keeps the ~3e50 term from being materialized at all.
 _ASTROPHYSICAL_STRAIN_COEFFICIENT: float = (
     2.0
-    * (_GRAVITATIONAL_CONSTANT_SI * _SOLAR_MASS_KG) ** (5.0 / 3.0)
+    * (GRAVITATIONAL_CONSTANT * SOLAR_MASS_IN_KILOGRAMS) ** (5.0 / 3.0)
     / (
         3.0
         * math.pi ** (1.0 / 3.0)
         * SPEED_OF_LIGHT**2
-        * _GPC_IN_METERS**3
+        * GPC_IN_METERS**3
         * SECONDS_PER_YEAR
     )
 )
-
-ISCO_ALPHA: float = SPEED_OF_LIGHT**3 / (
-    6.0 ** (3.0 / 2.0) * math.pi * _GRAVITATIONAL_CONSTANT_SI * _SOLAR_MASS_KG
-)
-"""Schwarzschild-ISCO cutoff coefficient in Hz solar-mass."""
 
 
 class PopulationFunction(Protocol):
@@ -269,6 +272,23 @@ def _uniform_cumulative_mass_moment(
     return jnp.where(total_mass <= lower, 0.0, moment)
 
 
+def _cutoff_total_mass(
+    alpha: ArrayLike, frequencies: jax.Array, redshift: jax.Array
+) -> jax.Array:
+    r"""Source-frame total mass in solar masses at the inspiral cutoff.
+
+    Inverts :math:`f = \alpha / ((1 + z) M t_\odot)` for the source-frame
+    total mass, with :math:`t_\odot` =
+    :data:`~astrogwb.constants.SOLAR_MASS_IN_SECONDS` converting the
+    dimensionless :math:`\alpha` of
+    :func:`astrogwb.waveform.termination_frequency` into solar masses.
+    Returns shape ``(frequency, redshift_node)``.
+    """
+    return alpha / (
+        frequencies[:, None] * (1.0 + redshift[None, :]) * SOLAR_MASS_IN_SECONDS
+    )
+
+
 @require_x64
 def uniform_prior_mass_moments(
     frequencies: jax.Array,
@@ -290,9 +310,11 @@ def uniform_prior_mass_moments(
 
     .. math::
 
-        U_{fa}=\frac{\alpha}{f_f(1+z_a)}, \qquad M_{fa}=C(U_{fa}),
+        U_{fa}=\frac{\alpha}{f_f(1+z_a)\,t_\odot}, \qquad M_{fa}=C(U_{fa}),
 
-    with no mass-ratio quadrature, no total-mass grid, and no interpolation.
+    where :math:`t_\odot=GM_\odot/c^3` converts the dimensionless
+    :math:`\alpha` into a total mass in solar masses. There is no mass-ratio
+    quadrature, no total-mass grid, and no interpolation.
     The result is exact to floating-point round-off and carries none of the
     ``n_interp_grid`` discretization error of the generic path.
 
@@ -311,8 +333,11 @@ def uniform_prior_mass_moments(
         Shared source-frame component-mass bounds in solar masses. They also fix
         the normalized density ``2 / (component_mass_max - component_mass_min)**2``.
     alpha:
-        Source-frame cutoff coefficient in Hz solar-mass, defining
-        ``f_max = alpha / M``. Use ``inf`` for no cutoff.
+        Dimensionless source-frame cutoff coefficient, defining
+        ``f_max = alpha / (M * SOLAR_MASS_IN_SECONDS)`` in Hz for a
+        source-frame total mass ``M`` in solar masses. Shares the convention
+        of :func:`astrogwb.waveform.termination_frequency`. Use ``inf`` for
+        no cutoff.
     redshift_quadrature_order:
         Gauss-Legendre order of the redshift nodes.
 
@@ -328,7 +353,7 @@ def uniform_prior_mass_moments(
     redshift, _ = mapped_gauss_legendre_rule(
         redshift_quadrature_order, minimum_redshift, maximum_redshift
     )
-    total_mass_upper = alpha / (frequencies[:, None] * (1.0 + redshift[None, :]))
+    total_mass_upper = _cutoff_total_mass(alpha, frequencies, redshift)
     return _uniform_cumulative_mass_moment(
         total_mass_upper,
         component_mass_min=component_mass_min,
@@ -357,9 +382,11 @@ def precompute_cumulative_mass_moments(
 
     .. math::
 
-        U_{fa}=\frac{\alpha}{f_f(1+z_a)}, \qquad M_{fa}=C(U_{fa}),
+        U_{fa}=\frac{\alpha}{f_f(1+z_a)\,t_\odot}, \qquad M_{fa}=C(U_{fa}),
 
-    and linearly interpolates :math:`C(U_{fa})` from a uniform total-mass grid.
+    with :math:`t_\odot=GM_\odot/c^3` converting the dimensionless
+    :math:`\alpha` into a total mass in solar masses, and linearly
+    interpolates :math:`C(U_{fa})` from a uniform total-mass grid.
     The result has shape ``(frequency, redshift_node)`` and can be reused while
     sampling cosmology or the redshift distribution with a fixed mass
     population. Values below the physical total-mass support are exactly zero;
@@ -369,7 +396,7 @@ def precompute_cumulative_mass_moments(
     redshift, _ = mapped_gauss_legendre_rule(
         redshift_quadrature_order, minimum_redshift, maximum_redshift
     )
-    total_mass_upper = alpha / (frequencies[:, None] * (1.0 + redshift[None, :]))
+    total_mass_upper = _cutoff_total_mass(alpha, frequencies, redshift)
     total_mass, cumulative_mass_moment = _cumulative_mass_moment_grid(
         hyperparameters,
         joint_mass_prior_fn,
@@ -474,8 +501,11 @@ def analytic_spectral_density(
     component_mass_min, component_mass_max:
         Shared source-frame component-mass bounds in solar masses.
     alpha:
-        Source-frame cutoff coefficient in Hz solar-mass, defining
-        ``f_max = alpha / M``. Use ``inf`` for no cutoff.
+        Dimensionless source-frame cutoff coefficient, defining
+        ``f_max = alpha / (M * SOLAR_MASS_IN_SECONDS)`` in Hz for a
+        source-frame total mass ``M`` in solar masses. Shares the convention
+        of :func:`astrogwb.waveform.termination_frequency`. Use ``inf`` for
+        no cutoff.
     quadrature_order:
         Shared Gauss-Legendre order for redshift and mass ratio.
     n_interp_grid:
