@@ -15,26 +15,32 @@ closure; see
 
 from __future__ import annotations
 
+from typing import overload
+
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
-from numpy.polynomial.legendre import leggauss
 
-SPEED_OF_LIGHT: float = 299792458.0
-MPC_IN_METERS: float = 3.0856775814913673e22
+from astrogwb.constants import MPC_IN_METERS, SPEED_OF_LIGHT
+from astrogwb.utils import mapped_gauss_legendre_rule
 
-#: Fixed Gauss-Legendre quadrature rule (host-side constants, converted to the
-#: working dtype inside the grid helpers). 4 nodes per interval reach near
-#: machine precision for the smooth flat-LCDM integrand 1/E(z).
-GAUSS_LEGENDRE_NODES, GAUSS_LEGENDRE_WEIGHTS = leggauss(4)
+#: Fixed Gauss-Legendre quadrature order used by the grid helpers. 4 nodes per
+#: interval reach near machine precision for the smooth flat-LCDM integrand
+#: 1/E(z).
+GAUSS_LEGENDRE_ORDER: int = 4
 
 
-def hubble_constant_si(h0_km_s_mpc: float) -> float:
+@overload
+def hubble_constant_si(h0_km_s_mpc: float) -> float: ...
+
+
+@overload
+def hubble_constant_si(h0_km_s_mpc: jax.Array) -> jax.Array: ...
+
+
+def hubble_constant_si(h0_km_s_mpc: float | jax.Array) -> float | jax.Array:
     """Convert $H_0$ from $\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}$ to SI ($\\mathrm{s^{-1}}$)."""
     return h0_km_s_mpc * 1000.0 / MPC_IN_METERS
-
-
-H0: float = 67.74  # km/s/Mpc
 
 
 def log_gw_em_ratio(z: ArrayLike, xi_0: ArrayLike, xi_n: ArrayLike) -> jax.Array:
@@ -124,12 +130,13 @@ def distance_and_volume_grid(
         determined by broadcasting. The differential comoving volume is
         integrated over the full sky to give a value in ``Mpc^3``.
 
-    The redshift integral is evaluated with a fixed 4-point Gauss-Legendre
-    rule within each grid interval (nodes/weights are the module-level
-    :data:`GAUSS_LEGENDRE_NODES` / :data:`GAUSS_LEGENDRE_WEIGHTS` constants,
-    so no static scalars are extracted from traced values). For the smooth
-    flat-LCDM integrand :math:`1/E(z)` this reaches near machine precision
-    while keeping the computation a single cumulative pass over the grid.
+    The redshift integral is evaluated with a fixed
+    :data:`GAUSS_LEGENDRE_ORDER`-point Gauss-Legendre rule within each grid
+    interval, via :func:`astrogwb.utils.mapped_gauss_legendre_rule`. The order
+    is a module-level Python constant, so no static scalars are extracted from
+    traced values. For the smooth flat-LCDM integrand :math:`1/E(z)` this
+    reaches near machine precision while keeping the computation a single
+    cumulative pass over the grid.
     """
     redshift = jnp.asarray(redshift)
     omega_m = jnp.asarray(omega_m)
@@ -137,20 +144,21 @@ def distance_and_volume_grid(
     # Promote through float so an integer redshift grid cannot truncate the
     # quadrature nodes to zeros.
     dtype = jnp.result_type(redshift, float)
-    nodes = jnp.asarray(GAUSS_LEGENDRE_NODES, dtype=dtype)
-    weights = jnp.asarray(GAUSS_LEGENDRE_WEIGHTS, dtype=dtype)
 
     extended = jnp.concatenate(
         [jnp.zeros_like(redshift[..., :1]), redshift],
         axis=-1,
     )
-    lower, upper = extended[..., :-1], extended[..., 1:]
-    midpoint, half_width = 0.5 * (lower + upper), 0.5 * (upper - lower)
-    quadrature_points = midpoint[..., None] + half_width[..., None] * nodes
+    quadrature_points, quadrature_weights = mapped_gauss_legendre_rule(
+        GAUSS_LEGENDRE_ORDER,
+        extended[..., :-1],
+        extended[..., 1:],
+        dtype=dtype,
+    )
     e_quadrature = normalized_hubble_parameter(
         redshift=quadrature_points, omega_m=omega_m[..., None]
     )
-    interval_integrals = (half_width[..., None] / e_quadrature) @ weights
+    interval_integrals = jnp.sum(quadrature_weights / e_quadrature, axis=-1)
     integral = jnp.cumsum(interval_integrals, axis=-1)
     inv_e = 1.0 / normalized_hubble_parameter(redshift=redshift, omega_m=omega_m)
     comoving_distance = hubble_distance(hubble_constant) * integral

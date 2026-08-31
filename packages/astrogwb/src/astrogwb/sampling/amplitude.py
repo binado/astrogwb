@@ -102,6 +102,7 @@ from jax.typing import ArrayLike
 from numpyro.distributions import constraints
 
 from astrogwb.importance.diagnostics import relative_ess
+from astrogwb.utils import cumulative_trapezoid
 
 
 class MergerRateAmplitudeFn(Protocol):
@@ -186,14 +187,6 @@ def _log_trapezoid(log_y: jax.Array, x: jax.Array) -> jax.Array:
     log_y_max = jnp.max(log_y, axis=-1, keepdims=True)
     integral = jnp.trapezoid(jnp.exp(log_y - log_y_max), x, axis=-1)
     return jnp.squeeze(log_y_max, axis=-1) + jnp.log(integral)
-
-
-def _cumulative_trapezoid(y: jax.Array, x: jax.Array) -> jax.Array:
-    """Cumulative trapezoid integral of ``y`` vs ``x``, starting at 0."""
-    dx = jnp.diff(x)
-    segments = 0.5 * (y[..., :-1] + y[..., 1:]) * dx
-    zeros = jnp.zeros(y.shape[:-1] + (1,), dtype=y.dtype)
-    return jnp.concatenate([zeros, jnp.cumsum(segments, axis=-1)], axis=-1)
 
 
 class AmplitudeConditional(dist.Distribution):
@@ -429,7 +422,7 @@ class AmplitudeConditional(dist.Distribution):
         shifted = jnp.exp(
             log_integrand - jnp.max(log_integrand, axis=-1, keepdims=True)
         )
-        cdf = _cumulative_trapezoid(shifted, self.grid)
+        cdf = cumulative_trapezoid(shifted, self.grid)
         cdf = cdf / cdf[..., -1:]
 
         grid = self.grid

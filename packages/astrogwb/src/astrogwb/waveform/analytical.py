@@ -18,7 +18,7 @@ distance. The inspiral is terminated at
 
 in geometrized units -- equivalently :math:`f_{\rm end} = \alpha c^3 / (G
 M_{\rm det})` in Hz -- for a dimensionless :math:`\alpha` that the caller
-chooses. :data:`ISCO_ALPHA` is the value putting :math:`f_{\rm end}` at the
+chooses. :data:`~astrogwb.constants.ISCO_ALPHA` is the value putting :math:`f_{\rm end}` at the
 Schwarzschild test-particle ISCO; nothing here defaults to it.
 
 .. warning::
@@ -26,7 +26,9 @@ Schwarzschild test-particle ISCO; nothing here defaults to it.
     The power is of order :math:`10^{-47}\,\mathrm{Hz}^{-2}` for a BNS at a
     few hundred Mpc -- nine orders of magnitude below the smallest normal
     float32 (:math:`1.2\times10^{-38}`). ``jax_enable_x64`` must be on or the
-    result underflows to zeros *silently*, with no warning and no NaN.
+    result underflows to zeros *silently*, with no warning and no NaN;
+    :func:`inspiral_polarization_power` therefore raises
+    :class:`RuntimeError` unless it is.
 """
 
 from __future__ import annotations
@@ -38,47 +40,15 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from astrogwb.cosmology import MPC_IN_METERS, SPEED_OF_LIGHT
+from astrogwb.constants import MPC_IN_SECONDS, SOLAR_MASS_IN_SECONDS
+from astrogwb.utils import require_x64
 
 __all__ = [
-    "FACE_ON_INCLINATION_FACTOR",
-    "ISCO_ALPHA",
-    "MEAN_INCLINATION_FACTOR",
-    "MPC_IN_SECONDS",
-    "SOLAR_MASS_IN_SECONDS",
     "chirp_mass",
     "inclination_factor",
     "inspiral_polarization_power",
     "termination_frequency",
 ]
-
-#: One solar mass in seconds, $G M_\odot / c^3$, from the IAU nominal
-#: $G M_\odot = 1.32712440018 \times 10^{20}\,\mathrm{m^3\,s^{-2}}$. The
-#: product is quoted rather than $G$ and $M_\odot$ separately because it is
-#: known to far better precision than either factor.
-SOLAR_MASS_IN_SECONDS: float = 1.32712440018e20 / SPEED_OF_LIGHT**3
-
-#: One megaparsec in seconds, $\mathrm{Mpc}/c$.
-MPC_IN_SECONDS: float = MPC_IN_METERS / SPEED_OF_LIGHT
-
-#: $g(0) = 2$ -- the face-on inclination factor, the maximum of $g$.
-FACE_ON_INCLINATION_FACTOR: float = 2.0
-
-#: $\langle g(\iota)\rangle = 4/5$ for $\cos\iota$ uniform on $[-1, 1]$:
-#: $\langle((1+\cos^2\iota)/2)^2\rangle = 7/15$ and
-#: $\langle\cos^2\iota\rangle = 1/3$. The ratio to
-#: :data:`FACE_ON_INCLINATION_FACTOR` is exactly the ``0.4`` that
-#: :func:`astrogwb.gwb.spectral_density` applies in ``"analytic_inclination"``
-#: mode, which is what makes that constant correct for the face-on catalogs
-#: the population graphs generate.
-MEAN_INCLINATION_FACTOR: float = 0.8
-
-#: $\alpha = 1/(\pi\,6^{3/2}) \approx 0.02166$, placing $f_{\rm end}$ at the
-#: dominant *gravitational-wave* frequency -- twice the orbital frequency -- of
-#: a test particle at the innermost stable circular orbit of a Schwarzschild
-#: black hole of mass $M$. A physical reference point for $\alpha$, not a
-#: default: callers pass $\alpha$ explicitly.
-ISCO_ALPHA: float = 1.0 / (math.pi * 6.0**1.5)
 
 #: $\tfrac{5}{24}\pi^{-4/3}$, the amplitude-squared prefactor in geometrized units.
 _AMPLITUDE_PREFACTOR: float = (5.0 / 24.0) * math.pi ** (-4.0 / 3.0)
@@ -147,7 +117,8 @@ def termination_frequency(
     redshift:
         Source redshift.
     alpha:
-        Scalar dimensionless truncation parameter. See :data:`ISCO_ALPHA` for
+        Scalar dimensionless truncation parameter. See
+        :data:`~astrogwb.constants.ISCO_ALPHA` for
         the value corresponding to the Schwarzschild test-particle ISCO.
 
     Returns
@@ -256,6 +227,7 @@ _batched_inspiral_power = jax.vmap(
 )
 
 
+@require_x64
 def inspiral_polarization_power(
     frequencies: ArrayLike,
     parameters: Mapping[str, ArrayLike],

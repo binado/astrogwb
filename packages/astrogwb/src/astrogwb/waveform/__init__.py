@@ -8,11 +8,6 @@ generated bank.
 """
 
 from astrogwb.waveform.analytical import (
-    FACE_ON_INCLINATION_FACTOR,
-    ISCO_ALPHA,
-    MEAN_INCLINATION_FACTOR,
-    MPC_IN_SECONDS,
-    SOLAR_MASS_IN_SECONDS,
     chirp_mass,
     inclination_factor,
     inspiral_polarization_power,
@@ -30,11 +25,6 @@ from astrogwb.waveform.distance import apply_gw_distance_to_power
 from astrogwb.waveform.polarization_power import polarization_power
 
 __all__ = [
-    "FACE_ON_INCLINATION_FACTOR",
-    "ISCO_ALPHA",
-    "MEAN_INCLINATION_FACTOR",
-    "MPC_IN_SECONDS",
-    "SOLAR_MASS_IN_SECONDS",
     "WaveformCatalog",
     "apply_gw_distance_to_power",
     "chirp_mass",

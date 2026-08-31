@@ -1,9 +1,10 @@
 """Tests for the closed-form quadrupolar inspiral polarization power.
 
 The scaling tests check exponents, so they are all invariant under a wrong
-overall constant. The absolute scale is pinned only by
-:func:`test_termination_frequency_at_isco`, which covers
-``SOLAR_MASS_IN_SECONDS`` but not the amplitude prefactor.
+overall constant: every assertion here is a ratio with the same constant on
+both sides. The absolute scale is pinned in ``test_constants.py``, by
+:func:`test_gwb_and_waveform_alpha_conventions_agree` for
+``SOLAR_MASS_IN_SECONDS``. Nothing covers the amplitude prefactor.
 """
 
 from __future__ import annotations
@@ -15,10 +16,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from astrogwb.waveform import (
+from astrogwb.constants import (
     FACE_ON_INCLINATION_FACTOR,
     ISCO_ALPHA,
     MEAN_INCLINATION_FACTOR,
+)
+from astrogwb.waveform import (
     inclination_factor,
     inspiral_polarization_power,
     make_catalog,
