@@ -15,10 +15,15 @@ Optional accelerator builds are available as `astrogwb[cuda]` and
 
 ## Library modules
 
+- `astrogwb.constants` holds the SI physical constants and unit conversions
+  every other module shares. The tabulated values are the LALSuite literals,
+  so results are bit-comparable with LALSimulation and ripple.
 - `astrogwb.detector` loads bundled detector geometry and sensitivity data and
   evaluates overlap-reduction functions and effective PSDs.
 - `astrogwb.gwb` provides spectral-density, Omega-GW conversion, and SNR
-  calculations.
+  calculations. `astrogwb.gwb.analytic` evaluates the inspiral-only
+  background in closed form, truncated on the same dimensionless `alpha` as
+  `astrogwb.waveform.analytical`.
 - `astrogwb.importance` defines the reusable importance-weighting protocol and
   compact-binary population model.
 - `astrogwb.sampling` exposes the caller-prepared NumPyro model.
