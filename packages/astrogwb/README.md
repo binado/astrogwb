@@ -25,6 +25,9 @@ Optional accelerator builds are available as `astrogwb[cuda]` and
 - `astrogwb.waveform` owns the `waveform_catalog` HDF5 format (IO via
   `astrogwb.waveform.catalog`), which stores per-sample polarization power,
   and reduces raw plus/cross polarizations to that power at generation time.
+  `astrogwb.waveform.analytical` gives the same power in closed form for a
+  quadrupolar, inspiral-only binary, truncated at `f = alpha / ((1 + z) M)`
+  for a caller-chosen dimensionless `alpha`.
 
 For example:
 
