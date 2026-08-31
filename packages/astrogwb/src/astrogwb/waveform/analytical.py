@@ -148,6 +148,102 @@ def termination_frequency(
     return alpha / ((1.0 + redshift) * total_mass * SOLAR_MASS_IN_SECONDS)
 
 
+def _require_frequency_grid(frequencies: ArrayLike) -> jax.Array:
+    frequency_grid = jnp.asarray(frequencies)
+    if frequency_grid.ndim != 1:
+        msg = (
+            "frequencies must have shape (F,); "
+            f"received an array with shape {frequency_grid.shape}"
+        )
+        raise ValueError(msg)
+    return frequency_grid
+
+
+def _normalize_source_parameter(name: str, value: ArrayLike) -> jax.Array:
+    parameter = jnp.asarray(value)
+    if parameter.ndim > 1:
+        msg = (
+            f"{name} must be a scalar or have shape (N,); "
+            f"received an array with shape {parameter.shape}"
+        )
+        raise ValueError(msg)
+    if parameter.ndim == 0:
+        return jnp.reshape(parameter, (1,))
+    return parameter
+
+
+def _normalize_source_parameters(
+    *,
+    mass_1: ArrayLike,
+    mass_2: ArrayLike,
+    redshift: ArrayLike,
+    luminosity_distance: ArrayLike,
+    inclination: ArrayLike,
+    alpha: ArrayLike,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+    parameters = (
+        _normalize_source_parameter("mass_1", mass_1),
+        _normalize_source_parameter("mass_2", mass_2),
+        _normalize_source_parameter("redshift", redshift),
+        _normalize_source_parameter("luminosity_distance", luminosity_distance),
+        _normalize_source_parameter("inclination", inclination),
+        _normalize_source_parameter("alpha", alpha),
+    )
+    (
+        mass_1_array,
+        mass_2_array,
+        redshift_array,
+        distance_array,
+        iota_array,
+        alpha_array,
+    ) = jnp.broadcast_arrays(*parameters)
+    return (
+        mass_1_array,
+        mass_2_array,
+        redshift_array,
+        distance_array,
+        iota_array,
+        alpha_array,
+    )
+
+
+def _single_source_inspiral_power(
+    frequencies: jax.Array,
+    mass_1: jax.Array,
+    mass_2: jax.Array,
+    redshift: jax.Array,
+    luminosity_distance: jax.Array,
+    inclination: jax.Array,
+    alpha: jax.Array,
+) -> jax.Array:
+    detector_frame_chirp_mass_seconds = (
+        chirp_mass(mass_1, mass_2) * (1.0 + redshift) * SOLAR_MASS_IN_SECONDS
+    )
+    distance_seconds = luminosity_distance * MPC_IN_SECONDS
+    amplitude_squared = (
+        _AMPLITUDE_PREFACTOR
+        * detector_frame_chirp_mass_seconds ** (5.0 / 3.0)
+        / distance_seconds**2
+        * inclination_factor(inclination)
+    )
+    cutoff = termination_frequency(mass_1, mass_2, redshift, alpha=alpha)
+
+    # f = 0 would make f**(-7/3) infinite, and `where` evaluates both branches:
+    # inf * 0 is NaN, and under reverse-mode JAX that NaN propagates into the
+    # gradient even though the bin is masked away. Substitute a safe frequency
+    # before taking the power, then mask.
+    inside_band = (frequencies > 0.0) & (frequencies <= cutoff)
+    safe_frequency = jnp.where(frequencies > 0.0, frequencies, 1.0)
+    power = amplitude_squared * safe_frequency ** (-7.0 / 3.0)
+    return jnp.where(inside_band, power, 0.0)
+
+
+_batched_inspiral_power = jax.vmap(
+    _single_source_inspiral_power,
+    in_axes=(None, 0, 0, 0, 0, 0, 0),
+)
+
+
 def inspiral_polarization_power(
     frequencies: ArrayLike,
     *,
@@ -162,7 +258,10 @@ def inspiral_polarization_power(
 
     Evaluates the module's closed form at every ``(source, frequency)`` pair
     and zeroes the bins above each source's :func:`termination_frequency`.
-    Output is in $\mathrm{Hz}^{-2}$, laid out ``(sample, frequency)``
+    Every source parameter may be a scalar or a one-dimensional ``(N,)``
+    array; they are jointly broadcast to ``(N,)``. Higher-rank source arrays
+    are rejected. Output is in $\mathrm{Hz}^{-2}$, laid out
+    ``(sample, frequency)``.
 
     .. warning::
 
@@ -176,47 +275,34 @@ def inspiral_polarization_power(
         Frequency grid in Hz, shape ``(F,)``. A zero bin returns zero power
         rather than the divergence of $f^{-7/3}$.
     mass_1, mass_2:
-        Source-frame component masses in solar masses, broadcasting to
-        ``(N,)`` against the other source parameters.
+        Source-frame component masses in solar masses. Each must be a scalar
+        or have shape ``(N,)`` and broadcasts against the other source
+        parameters.
     redshift:
-        Source redshift. Enters only by redshifting the masses -- both the
-        chirp mass in the amplitude and the total mass in the cutoff.
+        Source redshift, scalar or shape ``(N,)``. Enters only by redshifting
+        the masses -- both the chirp mass in the amplitude and the total mass
+        in the cutoff.
     luminosity_distance:
-        Luminosity distance in Mpc.
+        Luminosity distance in Mpc, scalar or shape ``(N,)``.
     inclination:
-        Inclination angle in radians; see :func:`inclination_factor`.
+        Inclination angle in radians, scalar or shape ``(N,)``; see
+        :func:`inclination_factor`.
     alpha:
-        Dimensionless truncation parameter; see :func:`termination_frequency`.
+        Dimensionless truncation parameter, scalar or shape ``(N,)``; see
+        :func:`termination_frequency`.
 
     Returns
     -------
     jax.Array
         Polarization power of shape ``(N, F)`` in $\mathrm{Hz}^{-2}$.
     """
-    detector_frame_chirp_mass_seconds = (
-        chirp_mass(mass_1, mass_2) * (1.0 + redshift) * SOLAR_MASS_IN_SECONDS
+    frequency_grid = _require_frequency_grid(frequencies)
+    source_parameters = _normalize_source_parameters(
+        mass_1=mass_1,
+        mass_2=mass_2,
+        redshift=redshift,
+        luminosity_distance=luminosity_distance,
+        inclination=inclination,
+        alpha=alpha,
     )
-    distance_seconds = luminosity_distance * MPC_IN_SECONDS
-    amplitude_squared = (
-        _AMPLITUDE_PREFACTOR
-        * detector_frame_chirp_mass_seconds ** (5.0 / 3.0)
-        / distance_seconds**2
-        * inclination_factor(inclination)
-    )
-    cutoff = termination_frequency(mass_1, mass_2, redshift, alpha=alpha)
-
-    # (N, 1) against (1, F) builds the (N, F) layout directly -- no full-size
-    # transpose is ever materialized. `reshape` rather than `[:, None]` so a
-    # single-source catalog may pass 0-d source parameters.
-    frequency_row = jnp.reshape(frequencies, (1, -1))
-    amplitude_column = jnp.reshape(amplitude_squared, (-1, 1))
-    cutoff_column = jnp.reshape(cutoff, (-1, 1))
-
-    # f = 0 would make f**(-7/3) infinite, and `where` evaluates both branches:
-    # inf * 0 is NaN, and under reverse-mode JAX that NaN propagates into the
-    # gradient even though the bin is masked away. Substitute a safe frequency
-    # before taking the power, then mask.
-    inside_band = (frequency_row > 0.0) & (frequency_row <= cutoff_column)
-    safe_frequency = jnp.where(frequency_row > 0.0, frequency_row, 1.0)
-    power = amplitude_column * safe_frequency ** (-7.0 / 3.0)
-    return jnp.where(inside_band, power, 0.0)
+    return _batched_inspiral_power(frequency_grid, *source_parameters)

@@ -207,6 +207,125 @@ def test_zero_frequency_bin_is_zero_not_nan(
     assert bool(jnp.all(jnp.isfinite(power)))
 
 
+def test_scalar_source_parameters_match_length_one_arrays() -> None:
+    frequencies = jnp.array([20.0, 100.0, 2000.0])
+    scalar_sources = {
+        "mass_1": 1.4,
+        "mass_2": 1.3,
+        "redshift": 0.2,
+        "luminosity_distance": 800.0,
+        "inclination": 0.4,
+        "alpha": ISCO_ALPHA,
+    }
+    array_sources = {
+        name: jnp.asarray([value]) for name, value in scalar_sources.items()
+    }
+
+    scalar_power = inspiral_polarization_power(frequencies, **scalar_sources)
+    array_power = inspiral_polarization_power(frequencies, **array_sources)
+
+    assert scalar_power.shape == (1, frequencies.size)
+    np.testing.assert_allclose(scalar_power, array_power, rtol=1e-12)
+
+
+def test_scalar_and_vector_source_parameters_broadcast_together() -> None:
+    frequencies = jnp.array([50.0, 100.0])
+    mixed_sources = {
+        "mass_1": 1.4,
+        "mass_2": jnp.array([1.1, 1.2, 1.3]),
+        "redshift": 0.1,
+        "luminosity_distance": jnp.array([500.0, 1000.0, 1500.0]),
+        "inclination": 0.0,
+        "alpha": ISCO_ALPHA,
+    }
+    vector_sources = {
+        name: jnp.broadcast_to(jnp.asarray(value), (3,))
+        for name, value in mixed_sources.items()
+    }
+
+    actual = inspiral_polarization_power(frequencies, **mixed_sources)
+    expected = inspiral_polarization_power(frequencies, **vector_sources)
+
+    assert actual.shape == (3, frequencies.size)
+    np.testing.assert_allclose(actual, expected, rtol=1e-12)
+
+
+def test_batched_sources_match_stacked_single_source_calls() -> None:
+    frequencies = jnp.array([0.0, 50.0, 500.0, 5000.0])
+    sources = {
+        "mass_1": jnp.array([1.4, 10.0, 30.0]),
+        "mass_2": jnp.array([1.3, 8.0, 20.0]),
+        "redshift": jnp.array([0.1, 0.5, 1.0]),
+        "luminosity_distance": jnp.array([500.0, 2000.0, 8000.0]),
+        "inclination": jnp.array([0.0, 0.5, 1.0]),
+        "alpha": jnp.array([ISCO_ALPHA, 1.5 * ISCO_ALPHA, 2.0 * ISCO_ALPHA]),
+    }
+
+    batched = inspiral_polarization_power(frequencies, **sources)
+    independent = jnp.concatenate(
+        [
+            inspiral_polarization_power(
+                frequencies, **{name: values[index] for name, values in sources.items()}
+            )
+            for index in range(3)
+        ],
+        axis=0,
+    )
+
+    np.testing.assert_allclose(batched, independent, rtol=1e-12)
+
+
+@pytest.mark.parametrize("frequencies", [jnp.array(100.0), jnp.ones((2, 3))])
+def test_frequency_grid_must_be_one_dimensional(frequencies: jax.Array) -> None:
+    with pytest.raises(ValueError, match=r"frequencies must have shape \(F,\)"):
+        inspiral_polarization_power(
+            frequencies,
+            mass_1=1.4,
+            mass_2=1.4,
+            redshift=0.0,
+            luminosity_distance=100.0,
+            inclination=0.0,
+            alpha=ISCO_ALPHA,
+        )
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        pytest.param("mass_1", jnp.ones((2, 1)), id="column-vector"),
+        pytest.param("inclination", jnp.ones((1, 1, 1)), id="rank-three"),
+    ],
+)
+def test_higher_rank_source_parameters_are_rejected(
+    name: str, value: jax.Array
+) -> None:
+    sources = {
+        "mass_1": 1.4,
+        "mass_2": 1.4,
+        "redshift": 0.0,
+        "luminosity_distance": 100.0,
+        "inclination": 0.0,
+        "alpha": ISCO_ALPHA,
+    }
+    sources[name] = value
+
+    with pytest.raises(ValueError, match=rf"^{name} must be a scalar"):
+        inspiral_polarization_power(jnp.array([100.0]), **sources)
+
+
+def test_incompatible_source_vector_lengths_are_rejected() -> None:
+    with pytest.raises(ValueError, match="broadcast"):
+        inspiral_polarization_power(
+            jnp.array([100.0]),
+            mass_1=jnp.ones(2),
+            mass_2=jnp.ones(3),
+            redshift=0.0,
+            luminosity_distance=100.0,
+            inclination=0.0,
+            alpha=ISCO_ALPHA,
+        )
+
+
 def test_layout_is_catalog_ready() -> None:
     """``(N, F)`` out; ``make_catalog`` takes the transpose to ``(F, N)``."""
     frequencies = np.arange(10.0, 60.0, 10.0)
