@@ -21,14 +21,14 @@ M_{\rm det})` in Hz -- for a dimensionless :math:`\alpha` that the caller
 chooses. :data:`~astrogwb.constants.ISCO_ALPHA` is the value putting :math:`f_{\rm end}` at the
 Schwarzschild test-particle ISCO; nothing here defaults to it.
 
-    .. warning::
+.. warning::
 
-        The power is of order :math:`10^{-47}\,\mathrm{Hz}^{-2}` for a BNS at a
-        few hundred Mpc -- nine orders of magnitude below the smallest normal
-        float32 (:math:`1.2\times10^{-38}`). ``jax_enable_x64`` must be on or the
-        result underflows to zeros *silently*, with no warning and no NaN;
-        :func:`inspiral_polarization_power` therefore raises
-        :class:`RuntimeError` unless it is.
+    The power is of order :math:`10^{-47}\,\mathrm{Hz}^{-2}` for a BNS at a
+    few hundred Mpc -- nine orders of magnitude below the smallest normal
+    float32 (:math:`1.2\times10^{-38}`). ``jax_enable_x64`` must be on or the
+    result underflows to zeros *silently*, with no warning and no NaN;
+    :func:`inspiral_polarization_power` therefore raises
+    :class:`RuntimeError` unless it is.
 """
 
 from __future__ import annotations
