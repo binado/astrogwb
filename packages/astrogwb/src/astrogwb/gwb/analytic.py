@@ -19,15 +19,11 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from functools import cache
 from typing import Protocol
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 from jax.typing import ArrayLike
-from numpy.polynomial.legendre import leggauss
-from numpy.typing import NDArray
 
 from astrogwb.cosmology import (
     MPC_IN_METERS,
@@ -35,7 +31,12 @@ from astrogwb.cosmology import (
     hubble_constant_si,
     normalized_hubble_parameter,
 )
-from astrogwb.utils import SECONDS_PER_YEAR, cumulative_trapezoid, require_x64
+from astrogwb.utils import (
+    SECONDS_PER_YEAR,
+    cumulative_trapezoid,
+    mapped_gauss_legendre_rule,
+    require_x64,
+)
 
 _GRAVITATIONAL_CONSTANT_SI: float = 6.67430e-11
 _SOLAR_MASS_KG: float = 1.988409870698051e30
@@ -88,32 +89,6 @@ class JointMassFunction(Protocol):
         hyperparameters: Mapping[str, ArrayLike],
         /,
     ) -> jax.Array: ...
-
-
-@cache
-def _gauss_legendre_rule(
-    order: int,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Return cached float64 nodes and weights on ``[-1, 1]``."""
-    nodes, weights = leggauss(order)
-    return nodes.astype(np.float64), weights.astype(np.float64)
-
-
-def _mapped_rule(
-    nodes: jax.Array,
-    weights: jax.Array,
-    lower: float | jax.Array,
-    upper: float | jax.Array,
-) -> tuple[jax.Array, jax.Array]:
-    """Map a Gauss-Legendre rule onto one or many intervals."""
-    lower = jnp.asarray(lower, dtype=nodes.dtype)
-    upper = jnp.asarray(upper, dtype=nodes.dtype)
-    midpoint = 0.5 * (lower + upper)
-    half_width = 0.5 * (upper - lower)
-    return (
-        midpoint[..., None] + half_width[..., None] * nodes,
-        half_width[..., None] * weights,
-    )
 
 
 def _cumulative_mass_moment_grid(
@@ -181,10 +156,9 @@ def _cumulative_mass_moment_grid(
         total_mass / component_mass_max - 1.0,
     )
 
-    host_nodes, host_weights = _gauss_legendre_rule(mass_ratio_quadrature_order)
-    nodes = jnp.asarray(host_nodes, dtype=jnp.float64)
-    weights = jnp.asarray(host_weights, dtype=jnp.float64)
-    mass_ratio, mass_ratio_weights = _mapped_rule(nodes, weights, mass_ratio_lower, 1.0)
+    mass_ratio, mass_ratio_weights = mapped_gauss_legendre_rule(
+        mass_ratio_quadrature_order, mass_ratio_lower, 1.0
+    )
 
     total_mass_grid = total_mass[..., None]
     one_plus_mass_ratio = 1.0 + mass_ratio
@@ -240,10 +214,7 @@ def precompute_cumulative_mass_moments(
     values above it are exactly the full mass moment.
     """
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
-    host_nodes, host_weights = _gauss_legendre_rule(redshift_quadrature_order)
-    nodes = jnp.asarray(host_nodes, dtype=jnp.float64)
-    weights = jnp.asarray(host_weights, dtype=jnp.float64)
-    redshift, _ = _mapped_rule(nodes, weights, z_min, z_max)
+    redshift, _ = mapped_gauss_legendre_rule(redshift_quadrature_order, z_min, z_max)
     total_mass_upper = alpha / (frequencies[:, None] * (1.0 + redshift[None, :]))
     total_mass, cumulative_mass_moment = _cumulative_mass_moment_grid(
         hyperparameters,
@@ -285,10 +256,9 @@ def analytic_spectral_density_from_mass_moments(
     """
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
     cumulative_mass_moments = jnp.asarray(cumulative_mass_moments, dtype=jnp.float64)
-    host_nodes, host_weights = _gauss_legendre_rule(redshift_quadrature_order)
-    nodes = jnp.asarray(host_nodes, dtype=jnp.float64)
-    weights = jnp.asarray(host_weights, dtype=jnp.float64)
-    redshift, redshift_weights = _mapped_rule(nodes, weights, z_min, z_max)
+    redshift, redshift_weights = mapped_gauss_legendre_rule(
+        redshift_quadrature_order, z_min, z_max
+    )
     merger_rate = jnp.broadcast_to(
         jnp.asarray(merger_rate_fn(redshift, hyperparameters), dtype=jnp.float64),
         redshift.shape,
