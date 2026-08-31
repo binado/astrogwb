@@ -2,6 +2,7 @@ from collections.abc import Callable
 from functools import wraps
 
 import jax
+import jax.numpy as jnp
 
 SECONDS_PER_YEAR: float = 365.25 * 24.0 * 3600.0
 
@@ -26,3 +27,16 @@ def require_x64[**P, R](function: Callable[P, R]) -> Callable[P, R]:
         return function(*args, **kwargs)
 
     return wrapper
+
+
+def cumulative_trapezoid(y: jax.Array, x: jax.Array) -> jax.Array:
+    """Cumulatively integrate ``y`` against the 1-D abscissa ``x``.
+
+    Integrates along the trailing axis of ``y`` with the trapezoid rule and
+    broadcasts over any leading batch dimensions. The result has the shape
+    of ``y`` and starts at zero along the integrated axis.
+    """
+    dx = jnp.diff(x)
+    segments = 0.5 * (y[..., :-1] + y[..., 1:]) * dx
+    zeros = jnp.zeros(y.shape[:-1] + (1,), dtype=y.dtype)
+    return jnp.concatenate([zeros, jnp.cumsum(segments, axis=-1)], axis=-1)

@@ -36,7 +36,7 @@ from astrogwb.cosmology import (
     hubble_constant_si,
     normalized_hubble_parameter,
 )
-from astrogwb.utils import SECONDS_PER_YEAR, require_x64
+from astrogwb.utils import SECONDS_PER_YEAR, cumulative_trapezoid, require_x64
 
 _GRAVITATIONAL_CONSTANT_SI: float = 6.67430e-11
 _SOLAR_MASS_KG: float = 1.988409870698051e30
@@ -187,17 +187,6 @@ def _validate_concrete_frequencies(frequencies: jax.Array) -> None:
         raise ValueError("frequencies must be finite and strictly positive")
 
 
-def _cumulative_trapezoid(
-    y: jax.Array,
-    x: jax.Array,
-) -> jax.Array:
-    """Cumulatively integrate sampled values with the trapezoid rule."""
-    interval_integrals = 0.5 * (y[:-1] + y[1:]) * (x[1:] - x[:-1])
-    return jnp.concatenate(
-        [jnp.zeros((1,), dtype=y.dtype), jnp.cumsum(interval_integrals)]
-    )
-
-
 def _cumulative_mass_moment_grid(
     hyperparameters: Mapping[str, ArrayLike],
     joint_mass_prior_fn: JointMassFunction,
@@ -289,7 +278,7 @@ def _cumulative_mass_moment_grid(
         mass_ratio_weights * fixed_total_mass_integrand,
         axis=-1,
     )
-    return total_mass, _cumulative_trapezoid(mass_ratio_integral, total_mass)
+    return total_mass, cumulative_trapezoid(mass_ratio_integral, total_mass)
 
 
 @require_x64
