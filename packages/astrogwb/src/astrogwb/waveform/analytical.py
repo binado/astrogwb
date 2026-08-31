@@ -21,12 +21,14 @@ M_{\rm det})` in Hz -- for a dimensionless :math:`\alpha` that the caller
 chooses. :data:`ISCO_ALPHA` is the value putting :math:`f_{\rm end}` at the
 Schwarzschild test-particle ISCO; nothing here defaults to it.
 
-.. warning::
+    .. warning::
 
-    The power is of order :math:`10^{-47}\,\mathrm{Hz}^{-2}` for a BNS at a
-    few hundred Mpc -- nine orders of magnitude below the smallest normal
-    float32 (:math:`1.2\times10^{-38}`). ``jax_enable_x64`` must be on or the
-    result underflows to zeros *silently*, with no warning and no NaN.
+        The power is of order :math:`10^{-47}\,\mathrm{Hz}^{-2}` for a BNS at a
+        few hundred Mpc -- nine orders of magnitude below the smallest normal
+        float32 (:math:`1.2\times10^{-38}`). ``jax_enable_x64`` must be on or the
+        result underflows to zeros *silently*, with no warning and no NaN;
+        :func:`inspiral_polarization_power` therefore raises
+        :class:`RuntimeError` unless it is.
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ import jax.numpy as jnp
 from jax.typing import ArrayLike
 
 from astrogwb.cosmology import MPC_IN_METERS, SPEED_OF_LIGHT
+from astrogwb.utils import require_x64
 
 __all__ = [
     "FACE_ON_INCLINATION_FACTOR",
@@ -256,6 +259,7 @@ _batched_inspiral_power = jax.vmap(
 )
 
 
+@require_x64
 def inspiral_polarization_power(
     frequencies: ArrayLike,
     parameters: Mapping[str, ArrayLike],

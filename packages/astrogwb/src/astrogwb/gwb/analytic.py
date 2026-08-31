@@ -18,8 +18,8 @@ x64 mode because their values underflow in float32.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
-from functools import cache, wraps
+from collections.abc import Mapping
+from functools import cache
 from typing import Protocol
 
 import jax
@@ -36,7 +36,7 @@ from astrogwb.cosmology import (
     hubble_constant_si,
     normalized_hubble_parameter,
 )
-from astrogwb.utils import SECONDS_PER_YEAR
+from astrogwb.utils import SECONDS_PER_YEAR, require_x64
 
 _GRAVITATIONAL_CONSTANT_SI: float = 6.67430e-11
 _SOLAR_MASS_KG: float = 1.988409870698051e30
@@ -115,22 +115,6 @@ def _mapped_rule(
         midpoint[..., None] + half_width[..., None] * nodes,
         half_width[..., None] * weights,
     )
-
-
-def _require_x64[**P](function: Callable[P, jax.Array]) -> Callable[P, jax.Array]:
-    """Raise unless JAX x64 mode is enabled at call time."""
-
-    @wraps(function)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> jax.Array:
-        if not jax.config.x64_enabled:
-            raise RuntimeError(
-                f"{wrapper.__name__} requires JAX x64 mode because realistic "
-                "strain spectral densities underflow in float32; call "
-                "jax.config.update('jax_enable_x64', True) before creating arrays"
-            )
-        return function(*args, **kwargs)
-
-    return wrapper
 
 
 def _validate_cosmology_hyperparameters(
@@ -308,7 +292,7 @@ def _cumulative_mass_moment_grid(
     return total_mass, _cumulative_trapezoid(mass_ratio_integral, total_mass)
 
 
-@_require_x64
+@require_x64
 def precompute_cumulative_mass_moments(
     frequencies: jax.Array,
     hyperparameters: Mapping[str, ArrayLike],
@@ -369,7 +353,7 @@ def precompute_cumulative_mass_moments(
     return jnp.interp(total_mass_upper, total_mass, cumulative_mass_moment)
 
 
-@_require_x64
+@require_x64
 def analytic_spectral_density_from_mass_moments(
     frequencies: jax.Array,
     hyperparameters: Mapping[str, ArrayLike],
@@ -436,7 +420,7 @@ def analytic_spectral_density_from_mass_moments(
     return coefficient * frequencies ** (-7.0 / 3.0) * redshift_mass_moments
 
 
-@_require_x64
+@require_x64
 def analytic_spectral_density(
     frequencies: jax.Array,
     hyperparameters: Mapping[str, ArrayLike],
