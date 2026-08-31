@@ -14,11 +14,17 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from astrogwb.constants import EARTH_MEAN_RADIUS_IN_METERS, SPEED_OF_LIGHT
+
 from ._types import DetectorSpec
 from .geometry import resolve_detector
 
-R_EARTH = 6371.0  # km
-C_LIGHT = 299792.458  # km/s
+# This module works in kilometres throughout: detector chord distances are
+# O(1e4) km and the bundled overlap-reduction fixtures were generated in
+# those units. Both conversions are exact in float64, so these are
+# bit-identical to the literals they replace.
+R_EARTH: float = EARTH_MEAN_RADIUS_IN_METERS / 1000.0  # km
+C_LIGHT: float = SPEED_OF_LIGHT / 1000.0  # km / s
 
 _LOW_ALPHA_THRESHOLD = 2e-3
 
