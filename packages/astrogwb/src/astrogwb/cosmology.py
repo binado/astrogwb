@@ -43,9 +43,6 @@ def hubble_constant_si(h0_km_s_mpc: float | jax.Array) -> float | jax.Array:
     return h0_km_s_mpc * 1000.0 / MPC_IN_METERS
 
 
-H0: float = 67.74  # km/s/Mpc
-
-
 def log_gw_em_ratio(z: ArrayLike, xi_0: ArrayLike, xi_n: ArrayLike) -> jax.Array:
     """Log of the modified-propagation GW-to-EM luminosity-distance ratio.
 

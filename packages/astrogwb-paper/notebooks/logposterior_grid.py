@@ -280,10 +280,13 @@ def plot_omegagw(
     frequencies: jax.Array,
     band_mask: jax.Array,
     *,
+    hubble_constant: float,
     color: str = "black",
     ymin: float = 1e-15,
 ):
-    omega_gw = omega_gw_from_spectral_density(spectral_density, frequencies)
+    omega_gw = omega_gw_from_spectral_density(
+        spectral_density, frequencies, hubble_constant=hubble_constant
+    )
     band_frequencies = frequencies[band_mask]
     band_omega_gw = omega_gw[band_mask]
     pos = band_omega_gw > 0.0
@@ -309,6 +312,8 @@ plot_omegagw(
     observed_spectral_density,
     frequencies,
     mask,
+    # Must match the H0 the ProposalConfig above builds the spectrum with.
+    hubble_constant=67.66,
     color="black",
     ymin=1e-15,
 )
