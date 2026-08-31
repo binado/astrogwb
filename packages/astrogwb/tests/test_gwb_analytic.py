@@ -73,8 +73,8 @@ def _analytic(
         uniform_joint_mass,
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
-        component_mass_min=MASS_MIN,
-        component_mass_max=MASS_MAX,
+        minimum_component_mass=MASS_MIN,
+        maximum_component_mass=MASS_MAX,
         alpha=alpha,
         quadrature_order=quadrature_order,
     )
@@ -182,8 +182,8 @@ def test_cumulative_mass_moment_matches_direct_component_mass_integral() -> None
     total_mass, cumulative = _cumulative_mass_moment_grid(
         {},
         uniform_joint_mass,
-        component_mass_min=MASS_MIN,
-        component_mass_max=MASS_MAX,
+        minimum_component_mass=MASS_MIN,
+        maximum_component_mass=MASS_MAX,
         mass_ratio_quadrature_order=64,
         n_interp_grid=2049,
     )
@@ -226,8 +226,8 @@ def test_mass_prior_is_called_once_only_inside_the_physical_triangle() -> None:
     _, cumulative = _cumulative_mass_moment_grid(
         {},
         guarded_prior,
-        component_mass_min=MASS_MIN,
-        component_mass_max=MASS_MAX,
+        minimum_component_mass=MASS_MIN,
+        maximum_component_mass=MASS_MAX,
         mass_ratio_quadrature_order=12,
         n_interp_grid=9,
     )
@@ -264,8 +264,8 @@ def test_featured_mass_population_converges_when_refining_grid() -> None:
             featured_prior,
             minimum_redshift=Z_MIN,
             maximum_redshift=Z_MAX,
-            component_mass_min=MASS_MIN,
-            component_mass_max=MASS_MAX,
+            minimum_component_mass=MASS_MIN,
+            maximum_component_mass=MASS_MAX,
             alpha=ISCO_ALPHA,
             quadrature_order=64,
             n_interp_grid=n_interp_grid,
@@ -302,8 +302,8 @@ def test_cumulative_mass_parameter_gradient_matches_finite_difference() -> None:
         total_mass, cumulative = _cumulative_mass_moment_grid(
             {},
             tilted_prior,
-            component_mass_min=MASS_MIN,
-            component_mass_max=MASS_MAX,
+            minimum_component_mass=MASS_MIN,
+            maximum_component_mass=MASS_MAX,
             mass_ratio_quadrature_order=32,
             n_interp_grid=257,
         )
@@ -349,8 +349,8 @@ def test_precomputed_mass_moments_are_interpolated_cumulative_queries() -> None:
         uniform_joint_mass,
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
-        component_mass_min=MASS_MIN,
-        component_mass_max=MASS_MAX,
+        minimum_component_mass=MASS_MIN,
+        maximum_component_mass=MASS_MAX,
         alpha=ISCO_ALPHA,
         mass_ratio_quadrature_order=24,
         n_interp_grid=257,
@@ -359,8 +359,8 @@ def test_precomputed_mass_moments_are_interpolated_cumulative_queries() -> None:
     total_mass, cumulative = _cumulative_mass_moment_grid(
         {},
         uniform_joint_mass,
-        component_mass_min=MASS_MIN,
-        component_mass_max=MASS_MAX,
+        minimum_component_mass=MASS_MIN,
+        maximum_component_mass=MASS_MAX,
         mass_ratio_quadrature_order=24,
         n_interp_grid=257,
     )
@@ -395,8 +395,8 @@ def test_split_spectrum_matches_combined_wrapper_and_reuses_mass_values() -> Non
         counted_prior,
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
-        component_mass_min=MASS_MIN,
-        component_mass_max=MASS_MAX,
+        minimum_component_mass=MASS_MIN,
+        maximum_component_mass=MASS_MAX,
         alpha=ISCO_ALPHA,
         mass_ratio_quadrature_order=24,
         n_interp_grid=257,
@@ -428,8 +428,8 @@ def test_split_spectrum_matches_combined_wrapper_and_reuses_mass_values() -> Non
         uniform_joint_mass,
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
-        component_mass_min=MASS_MIN,
-        component_mass_max=MASS_MAX,
+        minimum_component_mass=MASS_MIN,
+        maximum_component_mass=MASS_MAX,
         alpha=ISCO_ALPHA,
         quadrature_order=24,
         n_interp_grid=257,
@@ -448,8 +448,8 @@ def test_split_spectrum_cosmology_gradients_match_combined_wrapper() -> None:
         uniform_joint_mass,
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
-        component_mass_min=MASS_MIN,
-        component_mass_max=MASS_MAX,
+        minimum_component_mass=MASS_MIN,
+        maximum_component_mass=MASS_MAX,
         alpha=ISCO_ALPHA,
         mass_ratio_quadrature_order=16,
         n_interp_grid=257,
@@ -488,8 +488,8 @@ def test_split_spectrum_cosmology_gradients_match_combined_wrapper() -> None:
                 uniform_joint_mass,
                 minimum_redshift=Z_MIN,
                 maximum_redshift=Z_MAX,
-                component_mass_min=MASS_MIN,
-                component_mass_max=MASS_MAX,
+                minimum_component_mass=MASS_MIN,
+                maximum_component_mass=MASS_MAX,
                 alpha=ISCO_ALPHA,
                 quadrature_order=16,
                 n_interp_grid=257,
@@ -618,8 +618,8 @@ def test_order_doubling_converges_for_smooth_nonseparable_population() -> None:
             joint_mass_prior,
             minimum_redshift=0.0,
             maximum_redshift=4.0,
-            component_mass_min=MASS_MIN,
-            component_mass_max=MASS_MAX,
+            minimum_component_mass=MASS_MIN,
+            maximum_component_mass=MASS_MAX,
             quadrature_order=order,
         )
 
@@ -646,8 +646,8 @@ def test_uniform_closed_form_matches_direct_component_mass_integral() -> None:
     actual = np.asarray(
         _uniform_cumulative_mass_moment(
             jnp.asarray(cutoffs),
-            component_mass_min=MASS_MIN,
-            component_mass_max=MASS_MAX,
+            minimum_component_mass=MASS_MIN,
+            maximum_component_mass=MASS_MAX,
         )
     )
     expected = np.asarray(
@@ -665,8 +665,8 @@ def test_uniform_prior_mass_moments_match_numerical_precompute() -> None:
     kwargs = {
         "minimum_redshift": Z_MIN,
         "maximum_redshift": Z_MAX,
-        "component_mass_min": MASS_MIN,
-        "component_mass_max": MASS_MAX,
+        "minimum_component_mass": MASS_MIN,
+        "maximum_component_mass": MASS_MAX,
         "alpha": ISCO_ALPHA,
         "redshift_quadrature_order": 24,
     }
@@ -692,8 +692,8 @@ def test_uniform_spectrum_matches_generic_pipeline() -> None:
         frequencies,
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
-        component_mass_min=MASS_MIN,
-        component_mass_max=MASS_MAX,
+        minimum_component_mass=MASS_MIN,
+        maximum_component_mass=MASS_MAX,
         alpha=ISCO_ALPHA,
         redshift_quadrature_order=64,
     )
@@ -723,8 +723,8 @@ def test_uniform_prior_mass_moments_is_jittable_and_differentiable() -> None:
             values,
             minimum_redshift=Z_MIN,
             maximum_redshift=Z_MAX,
-            component_mass_min=MASS_MIN,
-            component_mass_max=MASS_MAX,
+            minimum_component_mass=MASS_MIN,
+            maximum_component_mass=MASS_MAX,
             alpha=ISCO_ALPHA,
             redshift_quadrature_order=16,
         )

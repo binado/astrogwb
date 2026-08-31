@@ -101,8 +101,8 @@ def _cumulative_mass_moment_grid(
     hyperparameters: Mapping[str, ArrayLike],
     joint_mass_prior_fn: JointMassFunction,
     *,
-    component_mass_min: float,
-    component_mass_max: float,
+    minimum_component_mass: float,
+    maximum_component_mass: float,
     mass_ratio_quadrature_order: int,
     n_interp_grid: int,
 ) -> tuple[jax.Array, jax.Array]:
@@ -150,16 +150,16 @@ def _cumulative_mass_moment_grid(
     :math:`M=m_{\min}+m_{\max}` exactly at the central node.
     """
     total_mass = jnp.linspace(
-        2.0 * component_mass_min,
-        2.0 * component_mass_max,
+        2.0 * minimum_component_mass,
+        2.0 * maximum_component_mass,
         n_interp_grid,
         dtype=jnp.float64,
     )
-    transition = component_mass_min + component_mass_max
+    transition = minimum_component_mass + maximum_component_mass
     mass_ratio_lower = jnp.where(
         total_mass <= transition,
-        component_mass_min / (total_mass - component_mass_min),
-        total_mass / component_mass_max - 1.0,
+        minimum_component_mass / (total_mass - minimum_component_mass),
+        total_mass / maximum_component_mass - 1.0,
     )
 
     mass_ratio, mass_ratio_weights = mapped_gauss_legendre_rule(
@@ -209,8 +209,8 @@ def _uniform_phi(total_mass: ArrayLike, component_mass: float) -> jax.Array:
 def _uniform_cumulative_mass_moment(
     total_mass: ArrayLike,
     *,
-    component_mass_min: float,
-    component_mass_max: float,
+    minimum_component_mass: float,
+    maximum_component_mass: float,
 ) -> jax.Array:
     r"""Evaluate the exact cumulative mass moment of a uniform mass prior.
 
@@ -250,19 +250,19 @@ def _uniform_cumulative_mass_moment(
     so reverse-mode gradients stay free of ``NaN`` and an infinite cutoff maps
     onto the full mass moment.
     """
-    lower = 2.0 * component_mass_min
-    transition = component_mass_min + component_mass_max
+    lower = 2.0 * minimum_component_mass
+    transition = minimum_component_mass + maximum_component_mass
     total_mass = jnp.asarray(total_mass, dtype=jnp.float64)
-    clipped = jnp.clip(total_mass, lower, 2.0 * component_mass_max)
-    origin = _uniform_phi(lower, component_mass_min)
-    below_transition = _uniform_phi(clipped, component_mass_min) - origin
+    clipped = jnp.clip(total_mass, lower, 2.0 * maximum_component_mass)
+    origin = _uniform_phi(lower, minimum_component_mass)
+    below_transition = _uniform_phi(clipped, minimum_component_mass) - origin
     above_transition = (
-        _uniform_phi(transition, component_mass_min)
+        _uniform_phi(transition, minimum_component_mass)
         - origin
-        + _uniform_phi(transition, component_mass_max)
-        - _uniform_phi(clipped, component_mass_max)
+        + _uniform_phi(transition, maximum_component_mass)
+        - _uniform_phi(clipped, maximum_component_mass)
     )
-    density = 2.0 / (component_mass_max - component_mass_min) ** 2
+    density = 2.0 / (maximum_component_mass - minimum_component_mass) ** 2
     moment = density * jnp.where(
         clipped <= transition, below_transition, above_transition
     )
@@ -295,8 +295,8 @@ def uniform_prior_mass_moments(
     *,
     minimum_redshift: float,
     maximum_redshift: float,
-    component_mass_min: float,
-    component_mass_max: float,
+    minimum_component_mass: float,
+    maximum_component_mass: float,
     alpha: float = ISCO_ALPHA,
     redshift_quadrature_order: int = 64,
 ) -> jax.Array:
@@ -329,9 +329,9 @@ def uniform_prior_mass_moments(
         finite and strictly positive.
     minimum_redshift, maximum_redshift:
         Redshift integration bounds.
-    component_mass_min, component_mass_max:
+    minimum_component_mass, maximum_component_mass:
         Shared source-frame component-mass bounds in solar masses. They also fix
-        the normalized density ``2 / (component_mass_max - component_mass_min)**2``.
+        the normalized density ``2 / (maximum_component_mass - minimum_component_mass)**2``.
     alpha:
         Dimensionless source-frame cutoff coefficient, defining
         ``f_max = alpha / (M * SOLAR_MASS_IN_SECONDS)`` in Hz for a
@@ -345,9 +345,9 @@ def uniform_prior_mass_moments(
     -------
     jax.Array
         Cumulative mass moments of shape ``(frequency, redshift_node)``. Values
-        are exactly zero where the cutoff falls below ``2 * component_mass_min``
+        are exactly zero where the cutoff falls below ``2 * minimum_component_mass``
         and exactly the full mass moment where it lies above
-        ``2 * component_mass_max``.
+        ``2 * maximum_component_mass``.
     """
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
     redshift, _ = mapped_gauss_legendre_rule(
@@ -356,8 +356,8 @@ def uniform_prior_mass_moments(
     total_mass_upper = _cutoff_total_mass(alpha, frequencies, redshift)
     return _uniform_cumulative_mass_moment(
         total_mass_upper,
-        component_mass_min=component_mass_min,
-        component_mass_max=component_mass_max,
+        minimum_component_mass=minimum_component_mass,
+        maximum_component_mass=maximum_component_mass,
     )
 
 
@@ -369,8 +369,8 @@ def precompute_cumulative_mass_moments(
     *,
     minimum_redshift: float,
     maximum_redshift: float,
-    component_mass_min: float,
-    component_mass_max: float,
+    minimum_component_mass: float,
+    maximum_component_mass: float,
     alpha: float = ISCO_ALPHA,
     mass_ratio_quadrature_order: int = 64,
     n_interp_grid: int = 2049,
@@ -400,8 +400,8 @@ def precompute_cumulative_mass_moments(
     total_mass, cumulative_mass_moment = _cumulative_mass_moment_grid(
         hyperparameters,
         joint_mass_prior_fn,
-        component_mass_min=component_mass_min,
-        component_mass_max=component_mass_max,
+        minimum_component_mass=minimum_component_mass,
+        maximum_component_mass=maximum_component_mass,
         mass_ratio_quadrature_order=mass_ratio_quadrature_order,
         n_interp_grid=n_interp_grid,
     )
@@ -467,8 +467,8 @@ def analytic_spectral_density(
     *,
     minimum_redshift: float,
     maximum_redshift: float,
-    component_mass_min: float,
-    component_mass_max: float,
+    minimum_component_mass: float,
+    maximum_component_mass: float,
     alpha: float = ISCO_ALPHA,
     quadrature_order: int = 64,
     n_interp_grid: int = 2049,
@@ -498,7 +498,7 @@ def analytic_spectral_density(
         density with respect to ``dmass_1 dmass_2``.
     minimum_redshift, maximum_redshift:
         Redshift integration bounds.
-    component_mass_min, component_mass_max:
+    minimum_component_mass, maximum_component_mass:
         Shared source-frame component-mass bounds in solar masses.
     alpha:
         Dimensionless source-frame cutoff coefficient, defining
@@ -524,8 +524,8 @@ def analytic_spectral_density(
         joint_mass_prior_fn,
         minimum_redshift=minimum_redshift,
         maximum_redshift=maximum_redshift,
-        component_mass_min=component_mass_min,
-        component_mass_max=component_mass_max,
+        minimum_component_mass=minimum_component_mass,
+        maximum_component_mass=maximum_component_mass,
         alpha=alpha,
         mass_ratio_quadrature_order=quadrature_order,
         n_interp_grid=n_interp_grid,
