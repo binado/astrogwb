@@ -273,8 +273,8 @@ def _uniform_cumulative_mass_moment(
 def uniform_prior_mass_moments(
     frequencies: jax.Array,
     *,
-    z_min: float,
-    z_max: float,
+    minimum_redshift: float,
+    maximum_redshift: float,
     component_mass_min: float,
     component_mass_max: float,
     alpha: float = ISCO_ALPHA,
@@ -305,7 +305,7 @@ def uniform_prior_mass_moments(
     frequencies:
         One-dimensional observer-frame frequency array in Hz. Values must be
         finite and strictly positive.
-    z_min, z_max:
+    minimum_redshift, maximum_redshift:
         Redshift integration bounds.
     component_mass_min, component_mass_max:
         Shared source-frame component-mass bounds in solar masses. They also fix
@@ -325,7 +325,9 @@ def uniform_prior_mass_moments(
         ``2 * component_mass_max``.
     """
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
-    redshift, _ = mapped_gauss_legendre_rule(redshift_quadrature_order, z_min, z_max)
+    redshift, _ = mapped_gauss_legendre_rule(
+        redshift_quadrature_order, minimum_redshift, maximum_redshift
+    )
     total_mass_upper = alpha / (frequencies[:, None] * (1.0 + redshift[None, :]))
     return _uniform_cumulative_mass_moment(
         total_mass_upper,
@@ -340,8 +342,8 @@ def precompute_cumulative_mass_moments(
     hyperparameters: Mapping[str, ArrayLike],
     joint_mass_prior_fn: JointMassFunction,
     *,
-    z_min: float,
-    z_max: float,
+    minimum_redshift: float,
+    maximum_redshift: float,
     component_mass_min: float,
     component_mass_max: float,
     alpha: float = ISCO_ALPHA,
@@ -364,7 +366,9 @@ def precompute_cumulative_mass_moments(
     values above it are exactly the full mass moment.
     """
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
-    redshift, _ = mapped_gauss_legendre_rule(redshift_quadrature_order, z_min, z_max)
+    redshift, _ = mapped_gauss_legendre_rule(
+        redshift_quadrature_order, minimum_redshift, maximum_redshift
+    )
     total_mass_upper = alpha / (frequencies[:, None] * (1.0 + redshift[None, :]))
     total_mass, cumulative_mass_moment = _cumulative_mass_moment_grid(
         hyperparameters,
@@ -384,8 +388,8 @@ def analytic_spectral_density_from_mass_moments(
     merger_rate_fn: PopulationFunction,
     cumulative_mass_moments: jax.Array,
     *,
-    z_min: float,
-    z_max: float,
+    minimum_redshift: float,
+    maximum_redshift: float,
     redshift_quadrature_order: int = 64,
 ) -> jax.Array:
     r"""Evaluate the strain PSD from fixed cumulative mass moments.
@@ -407,7 +411,7 @@ def analytic_spectral_density_from_mass_moments(
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
     cumulative_mass_moments = jnp.asarray(cumulative_mass_moments, dtype=jnp.float64)
     redshift, redshift_weights = mapped_gauss_legendre_rule(
-        redshift_quadrature_order, z_min, z_max
+        redshift_quadrature_order, minimum_redshift, maximum_redshift
     )
     merger_rate = jnp.broadcast_to(
         jnp.asarray(merger_rate_fn(redshift, hyperparameters), dtype=jnp.float64),
@@ -434,8 +438,8 @@ def analytic_spectral_density(
     merger_rate_fn: PopulationFunction,
     joint_mass_prior_fn: JointMassFunction,
     *,
-    z_min: float,
-    z_max: float,
+    minimum_redshift: float,
+    maximum_redshift: float,
     component_mass_min: float,
     component_mass_max: float,
     alpha: float = ISCO_ALPHA,
@@ -465,7 +469,7 @@ def analytic_spectral_density(
     joint_mass_prior_fn:
         ``fn(mass_1, mass_2, hyperparameters)`` returning a normalized ordered
         density with respect to ``dmass_1 dmass_2``.
-    z_min, z_max:
+    minimum_redshift, maximum_redshift:
         Redshift integration bounds.
     component_mass_min, component_mass_max:
         Shared source-frame component-mass bounds in solar masses.
@@ -488,8 +492,8 @@ def analytic_spectral_density(
         frequencies,
         hyperparameters,
         joint_mass_prior_fn,
-        z_min=z_min,
-        z_max=z_max,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
         component_mass_min=component_mass_min,
         component_mass_max=component_mass_max,
         alpha=alpha,
@@ -502,7 +506,7 @@ def analytic_spectral_density(
         hyperparameters,
         merger_rate_fn,
         cumulative_mass_moments,
-        z_min=z_min,
-        z_max=z_max,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
         redshift_quadrature_order=quadrature_order,
     )
