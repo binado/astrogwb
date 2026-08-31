@@ -20,8 +20,6 @@ from astrogwb.gwb import (
 )
 from numpyro.distributions import TruncatedNormal
 
-jax.config.update("jax_enable_x64", True)
-
 
 class IntegrationBounds(TypedDict):
     minimum_redshift: float

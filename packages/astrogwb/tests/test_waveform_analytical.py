@@ -28,11 +28,6 @@ from astrogwb.waveform import (
     termination_frequency,
 )
 
-# Polarization power is of order 1e-47 Hz^-2, far below float32's smallest
-# normal (~1.2e-38): without x64 every result here underflows to zeros. Same
-# setup as `test_cosmology.py` and `astrogwb_paper.runtime`.
-jax.config.update("jax_enable_x64", True)
-
 
 @pytest.fixture
 def bns() -> dict[str, jax.Array]:

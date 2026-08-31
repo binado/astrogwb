@@ -13,8 +13,6 @@ from astrogwb.cosmology import (
     normalized_hubble_parameter,
 )
 
-jax.config.update("jax_enable_x64", True)
-
 
 @pytest.fixture
 def parameters():

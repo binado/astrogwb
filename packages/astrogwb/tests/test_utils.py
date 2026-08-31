@@ -13,8 +13,6 @@ from astrogwb.utils import (
     require_x64,
 )
 
-jax.config.update("jax_enable_x64", True)
-
 
 def test_require_x64_raises_when_disabled() -> None:
     @require_x64
