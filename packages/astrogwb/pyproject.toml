@@ -18,7 +18,6 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
-    "array-api-compat>=1.15.0",
     "gwmock-noise>=0.10.1",
     "gwmock-pop>=0.11.4",
     "gwmock-signal[jax]>=0.15.0",

@@ -39,7 +39,9 @@ def apply_gw_distance_to_power(
         preserved as-is.
     """
     redshift = catalog.source_parameters.sel(parameter="redshift")
-    log_xi = log_gw_em_ratio(redshift.values, xi_0=xi_0, xi_n=xi_n)
+    # log_gw_em_ratio is JAX-valued; bring it back to the host so the catalog
+    # stays a plain NumPy-backed xarray.
+    log_xi = np.asarray(log_gw_em_ratio(redshift.values, xi_0=xi_0, xi_n=xi_n))
     inv_xi_sq = xr.DataArray(
         np.exp(-2.0 * log_xi), dims="sample"
     )  # power factor 1/xi(z)^2
