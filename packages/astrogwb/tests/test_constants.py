@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import math
 
-import jax
 import pytest
 from astrogwb.constants import (
     EARTH_MEAN_RADIUS_IN_METERS,
@@ -30,10 +29,6 @@ from astrogwb.constants import (
     SPEED_OF_LIGHT,
 )
 from astrogwb.waveform import termination_frequency
-
-# `termination_frequency` returns a JAX array; the round-trip in
-# `test_gwb_and_waveform_alpha_conventions_agree` is only meaningful in x64.
-jax.config.update("jax_enable_x64", True)
 
 
 def test_lal_solar_mass_triple_is_self_consistent() -> None:
@@ -104,6 +99,8 @@ def test_earth_radius_is_the_mean_not_equatorial_radius() -> None:
     assert EARTH_MEAN_RADIUS_IN_METERS == 6.371e6
 
 
+# `termination_frequency` returns a JAX array; this round-trip is only
+# meaningful in x64.
 def test_gwb_and_waveform_alpha_conventions_agree() -> None:
     """The two modules must invert the same cutoff relation.
 
