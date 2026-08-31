@@ -25,7 +25,6 @@ from typing import Protocol
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import core
 from jax.typing import ArrayLike
 from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
@@ -115,76 +114,6 @@ def _mapped_rule(
         midpoint[..., None] + half_width[..., None] * nodes,
         half_width[..., None] * weights,
     )
-
-
-def _validate_cosmology_hyperparameters(
-    hyperparameters: Mapping[str, ArrayLike],
-) -> None:
-    missing = {"H0", "Omega_m"}.difference(hyperparameters)
-    if missing:
-        names = ", ".join(sorted(missing))
-        raise KeyError(f"hyperparameters missing required key(s): {names}")
-
-
-def _validate_redshift_rule(
-    *,
-    z_min: float,
-    z_max: float,
-    quadrature_order: int,
-    order_name: str,
-) -> None:
-    if not math.isfinite(z_min) or not math.isfinite(z_max):
-        raise ValueError("redshift bounds must be finite")
-    if z_min < 0.0 or z_max <= z_min:
-        raise ValueError("redshift bounds must satisfy 0 <= z_min < z_max")
-
-    _validate_positive_integer(quadrature_order, order_name)
-
-
-def _validate_mass_construction(
-    *,
-    component_mass_min: float,
-    component_mass_max: float,
-    mass_ratio_quadrature_order: int,
-    n_interp_grid: int,
-) -> None:
-    if not math.isfinite(component_mass_min) or not math.isfinite(component_mass_max):
-        raise ValueError("component-mass bounds must be finite")
-    if component_mass_min <= 0.0 or component_mass_max <= component_mass_min:
-        raise ValueError(
-            "component-mass bounds must satisfy "
-            "0 < component_mass_min < component_mass_max"
-        )
-
-    _validate_positive_integer(
-        mass_ratio_quadrature_order, "mass_ratio_quadrature_order"
-    )
-    _validate_positive_integer(n_interp_grid, "n_interp_grid")
-    if n_interp_grid < 3 or n_interp_grid % 2 == 0:
-        raise ValueError("n_interp_grid must be an odd integer >= 3")
-
-
-def _validate_alpha(alpha: float) -> None:
-    if math.isnan(alpha) or alpha <= 0.0:
-        raise ValueError("alpha must be positive")
-
-
-def _validate_positive_integer(value: int, name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError(f"{name} must be a positive integer")
-
-
-def _validate_concrete_frequencies(frequencies: jax.Array) -> None:
-    """Validate values outside tracing; traced callers retain shape checks."""
-    if frequencies.ndim != 1:
-        raise ValueError("frequencies must be a one-dimensional array")
-    if frequencies.shape[0] == 0:
-        raise ValueError("frequencies must contain at least one value")
-    if isinstance(frequencies, core.Tracer):
-        return
-    values = np.asarray(frequencies)
-    if not np.all(np.isfinite(values)) or not np.all(values > 0.0):
-        raise ValueError("frequencies must be finite and strictly positive")
 
 
 def _cumulative_mass_moment_grid(
@@ -310,22 +239,7 @@ def precompute_cumulative_mass_moments(
     population. Values below the physical total-mass support are exactly zero;
     values above it are exactly the full mass moment.
     """
-    _validate_redshift_rule(
-        z_min=z_min,
-        z_max=z_max,
-        quadrature_order=redshift_quadrature_order,
-        order_name="redshift_quadrature_order",
-    )
-    _validate_mass_construction(
-        component_mass_min=component_mass_min,
-        component_mass_max=component_mass_max,
-        mass_ratio_quadrature_order=mass_ratio_quadrature_order,
-        n_interp_grid=n_interp_grid,
-    )
-    _validate_alpha(alpha)
-
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
-    _validate_concrete_frequencies(frequencies)
     host_nodes, host_weights = _gauss_legendre_rule(redshift_quadrature_order)
     nodes = jnp.asarray(host_nodes, dtype=jnp.float64)
     weights = jnp.asarray(host_weights, dtype=jnp.float64)
@@ -369,24 +283,8 @@ def analytic_spectral_density_from_mass_moments(
     a fixed ``(F, Z)`` array can be reused throughout an MCMC over cosmology or
     the redshift distribution.
     """
-    _validate_cosmology_hyperparameters(hyperparameters)
-    _validate_redshift_rule(
-        z_min=z_min,
-        z_max=z_max,
-        quadrature_order=redshift_quadrature_order,
-        order_name="redshift_quadrature_order",
-    )
-
     frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
-    _validate_concrete_frequencies(frequencies)
     cumulative_mass_moments = jnp.asarray(cumulative_mass_moments, dtype=jnp.float64)
-    expected_shape = (frequencies.shape[0], redshift_quadrature_order)
-    if cumulative_mass_moments.shape != expected_shape:
-        raise ValueError(
-            "cumulative_mass_moments must have shape "
-            f"{expected_shape}, got {cumulative_mass_moments.shape}"
-        )
-
     host_nodes, host_weights = _gauss_legendre_rule(redshift_quadrature_order)
     nodes = jnp.asarray(host_nodes, dtype=jnp.float64)
     weights = jnp.asarray(host_weights, dtype=jnp.float64)
@@ -465,30 +363,7 @@ def analytic_spectral_density(
     jax.Array
         One-sided strain spectral density in Hz^-1, with the same shape as
         ``frequencies``.
-
-    Notes
-    -----
-    Direct calls validate frequency values. Under :func:`jax.jit`, frequency
-    values are traced and therefore must be validated by the caller before the
-    compiled invocation; their rank and non-empty shape are still checked.
     """
-    _validate_cosmology_hyperparameters(hyperparameters)
-    _validate_redshift_rule(
-        z_min=z_min,
-        z_max=z_max,
-        quadrature_order=quadrature_order,
-        order_name="quadrature_order",
-    )
-    _validate_mass_construction(
-        component_mass_min=component_mass_min,
-        component_mass_max=component_mass_max,
-        mass_ratio_quadrature_order=quadrature_order,
-        n_interp_grid=n_interp_grid,
-    )
-    _validate_alpha(alpha)
-
-    frequencies = jnp.asarray(frequencies, dtype=jnp.float64)
-    _validate_concrete_frequencies(frequencies)
     cumulative_mass_moments = precompute_cumulative_mass_moments(
         frequencies,
         hyperparameters,
