@@ -5,6 +5,7 @@ from typing import Literal
 import jax
 import jax.numpy as jnp
 
+from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO
 from astrogwb.cosmology import H0, hubble_constant_si
 
 AverageMode = Literal["analytic_inclination", "catalog_inclination"]
@@ -17,7 +18,13 @@ def spectral_density(
     *,
     average_mode: AverageMode,
 ) -> jax.Array:
-    factor = 0.4 if average_mode == "analytic_inclination" else 1.0
+    # Population graphs generate every source face-on; scaling by <g>/g(0)
+    # turns that catalog into an inclination-averaged one.
+    factor = (
+        INCLINATION_AVERAGE_TO_FACE_ON_RATIO
+        if average_mode == "analytic_inclination"
+        else 1.0
+    )
     return (
         factor
         * total_merger_rate
