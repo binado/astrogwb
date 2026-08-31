@@ -171,21 +171,21 @@ def _direct_uniform_spectral_density(
 
 
 def test_cumulative_trapezoid_is_exact_for_linear_samples() -> None:
-    coordinates = jnp.array([1.0, 2.0, 4.0, 7.0])
-    values = 2.0 * coordinates + 3.0
+    x = jnp.array([1.0, 2.0, 4.0, 7.0])
+    y = 2.0 * x + 3.0
 
-    actual = _cumulative_trapezoid(values, coordinates)
-    antiderivative = coordinates**2 + 3.0 * coordinates
+    actual = _cumulative_trapezoid(y, x)
+    antiderivative = x**2 + 3.0 * x
     expected = antiderivative - antiderivative[0]
 
     np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), atol=2e-15)
 
 
 def test_cumulative_trapezoid_is_jittable_and_differentiable() -> None:
-    coordinates = jnp.linspace(1.0, 4.0, 7)
+    x = jnp.linspace(1.0, 4.0, 7)
 
     def evaluate(scale: jax.Array) -> jax.Array:
-        return jnp.sum(_cumulative_trapezoid(scale * coordinates, coordinates))
+        return jnp.sum(_cumulative_trapezoid(scale * x, x))
 
     actual = jax.jit(evaluate)(jnp.asarray(2.0))
     derivative = jax.grad(evaluate)(jnp.asarray(2.0))

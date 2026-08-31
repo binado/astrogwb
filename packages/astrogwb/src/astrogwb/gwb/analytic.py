@@ -19,13 +19,14 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping
-from functools import cache
-from typing import Any
+from functools import cache, wraps
+from typing import Protocol
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax import core
+from jax.typing import ArrayLike
 from numpy.polynomial.legendre import leggauss
 from numpy.typing import NDArray
 
@@ -61,11 +62,33 @@ ISCO_ALPHA: float = SPEED_OF_LIGHT**3 / (
 )
 """Schwarzschild-ISCO cutoff coefficient in Hz solar-mass."""
 
-PopulationFunction = Callable[[jax.Array, Mapping[str, Any]], jax.Array]
-"""Vectorized one-dimensional population callback."""
 
-JointMassFunction = Callable[[jax.Array, jax.Array, Mapping[str, Any]], jax.Array]
-"""Vectorized ordered joint component-mass probability-density callback."""
+class PopulationFunction(Protocol):
+    """Vectorized one-dimensional population callback.
+
+    Callback arguments are positional, so implementations may name their
+    parameters freely.
+    """
+
+    def __call__(
+        self, redshift: jax.Array, hyperparameters: Mapping[str, ArrayLike], /
+    ) -> jax.Array: ...
+
+
+class JointMassFunction(Protocol):
+    """Vectorized ordered joint component-mass probability-density callback.
+
+    Callback arguments are positional, so implementations may name their
+    parameters freely.
+    """
+
+    def __call__(
+        self,
+        mass_1: jax.Array,
+        mass_2: jax.Array,
+        hyperparameters: Mapping[str, ArrayLike],
+        /,
+    ) -> jax.Array: ...
 
 
 @cache
@@ -94,16 +117,25 @@ def _mapped_rule(
     )
 
 
-def _require_x64(function_name: str) -> None:
-    if not jax.config.x64_enabled:
-        raise RuntimeError(
-            f"{function_name} requires JAX x64 mode because realistic strain "
-            "spectral densities underflow in float32; call "
-            "jax.config.update('jax_enable_x64', True) before creating arrays"
-        )
+def _require_x64[**P](function: Callable[P, jax.Array]) -> Callable[P, jax.Array]:
+    """Raise unless JAX x64 mode is enabled at call time."""
+
+    @wraps(function)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> jax.Array:
+        if not jax.config.x64_enabled:
+            raise RuntimeError(
+                f"{wrapper.__name__} requires JAX x64 mode because realistic "
+                "strain spectral densities underflow in float32; call "
+                "jax.config.update('jax_enable_x64', True) before creating arrays"
+            )
+        return function(*args, **kwargs)
+
+    return wrapper
 
 
-def _validate_cosmology_hyperparameters(hyperparameters: Mapping[str, Any]) -> None:
+def _validate_cosmology_hyperparameters(
+    hyperparameters: Mapping[str, ArrayLike],
+) -> None:
     missing = {"H0", "Omega_m"}.difference(hyperparameters)
     if missing:
         names = ", ".join(sorted(missing))
@@ -172,20 +204,18 @@ def _validate_concrete_frequencies(frequencies: jax.Array) -> None:
 
 
 def _cumulative_trapezoid(
-    values: jax.Array,
-    coordinates: jax.Array,
+    y: jax.Array,
+    x: jax.Array,
 ) -> jax.Array:
     """Cumulatively integrate sampled values with the trapezoid rule."""
-    interval_integrals = (
-        0.5 * (values[:-1] + values[1:]) * (coordinates[1:] - coordinates[:-1])
-    )
+    interval_integrals = 0.5 * (y[:-1] + y[1:]) * (x[1:] - x[:-1])
     return jnp.concatenate(
-        [jnp.zeros((1,), dtype=values.dtype), jnp.cumsum(interval_integrals)]
+        [jnp.zeros((1,), dtype=y.dtype), jnp.cumsum(interval_integrals)]
     )
 
 
 def _cumulative_mass_moment_grid(
-    hyperparameters: Mapping[str, Any],
+    hyperparameters: Mapping[str, ArrayLike],
     joint_mass_prior_fn: JointMassFunction,
     *,
     component_mass_min: float,
@@ -278,9 +308,10 @@ def _cumulative_mass_moment_grid(
     return total_mass, _cumulative_trapezoid(mass_ratio_integral, total_mass)
 
 
+@_require_x64
 def precompute_cumulative_mass_moments(
     frequencies: jax.Array,
-    hyperparameters: Mapping[str, Any],
+    hyperparameters: Mapping[str, ArrayLike],
     joint_mass_prior_fn: JointMassFunction,
     *,
     z_min: float,
@@ -306,7 +337,6 @@ def precompute_cumulative_mass_moments(
     population. Values below the physical total-mass support are exactly zero;
     values above it are exactly the full mass moment.
     """
-    _require_x64("precompute_cumulative_mass_moments")
     _validate_redshift_rule(
         z_min=z_min,
         z_max=z_max,
@@ -339,9 +369,10 @@ def precompute_cumulative_mass_moments(
     return jnp.interp(total_mass_upper, total_mass, cumulative_mass_moment)
 
 
+@_require_x64
 def analytic_spectral_density_from_mass_moments(
     frequencies: jax.Array,
-    hyperparameters: Mapping[str, Any],
+    hyperparameters: Mapping[str, ArrayLike],
     merger_rate_fn: PopulationFunction,
     cumulative_mass_moments: jax.Array,
     *,
@@ -365,7 +396,6 @@ def analytic_spectral_density_from_mass_moments(
     a fixed ``(F, Z)`` array can be reused throughout an MCMC over cosmology or
     the redshift distribution.
     """
-    _require_x64("analytic_spectral_density_from_mass_moments")
     _validate_cosmology_hyperparameters(hyperparameters)
     _validate_redshift_rule(
         z_min=z_min,
@@ -392,21 +422,24 @@ def analytic_spectral_density_from_mass_moments(
         jnp.asarray(merger_rate_fn(redshift, hyperparameters), dtype=jnp.float64),
         redshift.shape,
     )
-    expansion = normalized_hubble_parameter(redshift, hyperparameters["Omega_m"])
+    expansion = normalized_hubble_parameter(
+        redshift, jnp.asarray(hyperparameters["Omega_m"], dtype=jnp.float64)
+    )
     redshift_integrand = merger_rate / (expansion * (1.0 + redshift) ** (4.0 / 3.0))
     redshift_mass_moments = cumulative_mass_moments @ (
         redshift_weights * redshift_integrand
     )
 
     coefficient = _ASTROPHYSICAL_STRAIN_COEFFICIENT / hubble_constant_si(
-        hyperparameters["H0"]
+        jnp.asarray(hyperparameters["H0"], dtype=jnp.float64)
     )
     return coefficient * frequencies ** (-7.0 / 3.0) * redshift_mass_moments
 
 
+@_require_x64
 def analytic_spectral_density(
     frequencies: jax.Array,
-    hyperparameters: Mapping[str, Any],
+    hyperparameters: Mapping[str, ArrayLike],
     merger_rate_fn: PopulationFunction,
     joint_mass_prior_fn: JointMassFunction,
     *,
@@ -466,7 +499,6 @@ def analytic_spectral_density(
     values are traced and therefore must be validated by the caller before the
     compiled invocation; their rank and non-empty shape are still checked.
     """
-    _require_x64("analytic_spectral_density")
     _validate_cosmology_hyperparameters(hyperparameters)
     _validate_redshift_rule(
         z_min=z_min,

@@ -29,7 +29,15 @@ MPC_IN_METERS: float = 3.0856775814913673e22
 GAUSS_LEGENDRE_NODES, GAUSS_LEGENDRE_WEIGHTS = leggauss(4)
 
 
-def hubble_constant_si(h0_km_s_mpc: float) -> float:
+@overload
+def hubble_constant_si(h0_km_s_mpc: float) -> float: ...
+
+
+@overload
+def hubble_constant_si(h0_km_s_mpc: jax.Array) -> jax.Array: ...
+
+
+def hubble_constant_si(h0_km_s_mpc: float | jax.Array) -> float | jax.Array:
     """Convert $H_0$ from $\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}$ to SI ($\\mathrm{s^{-1}}$)."""
     return h0_km_s_mpc * 1000.0 / MPC_IN_METERS
 
