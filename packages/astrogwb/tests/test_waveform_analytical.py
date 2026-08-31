@@ -35,8 +35,8 @@ jax.config.update("jax_enable_x64", True)
 def bns() -> dict[str, jax.Array]:
     """The reference source: a face-on 1.4 + 1.4 Msun binary at z = 0, 100 Mpc."""
     return {
-        "mass_1": jnp.array([1.4]),
-        "mass_2": jnp.array([1.4]),
+        "source_frame_mass_1": jnp.array([1.4]),
+        "source_frame_mass_2": jnp.array([1.4]),
         "redshift": jnp.array([0.0]),
         "luminosity_distance": jnp.array([100.0]),
         "inclination": jnp.array([0.0]),
@@ -45,11 +45,7 @@ def bns() -> dict[str, jax.Array]:
 
 @pytest.fixture
 def bns_power(bns: dict[str, jax.Array]) -> Callable[..., jax.Array]:
-    """Power for the reference BNS, with any source parameter overridden by keyword.
-
-    An unknown keyword still raises, since ``inspiral_polarization_power``
-    takes its source parameters keyword-only and by name.
-    """
+    """Power for the reference BNS, with any source parameter overridden."""
 
     def _power(
         frequencies: jax.Array,
@@ -57,9 +53,7 @@ def bns_power(bns: dict[str, jax.Array]) -> Callable[..., jax.Array]:
         alpha: float = ISCO_ALPHA,
         **overrides: jax.Array,
     ) -> jax.Array:
-        return inspiral_polarization_power(
-            frequencies, **(bns | overrides), alpha=alpha
-        )
+        return inspiral_polarization_power(frequencies, bns | overrides, alpha=alpha)
 
     return _power
 
@@ -71,7 +65,10 @@ def bns_cutoff(bns: dict[str, jax.Array]) -> Callable[..., float]:
     def _cutoff(alpha: float = ISCO_ALPHA) -> float:
         return float(
             termination_frequency(
-                bns["mass_1"], bns["mass_2"], bns["redshift"], alpha=alpha
+                bns["source_frame_mass_1"],
+                bns["source_frame_mass_2"],
+                bns["redshift"],
+                alpha=alpha,
             )[0]
         )
 
@@ -120,7 +117,9 @@ def test_scales_as_chirp_mass_to_the_five_thirds(
     # Doubling both components doubles Mc -- and halves the cutoff, so these
     # frequencies stay well inside the band for both.
     heavy = bns_power(
-        frequencies, mass_1=2.0 * bns["mass_1"], mass_2=2.0 * bns["mass_2"]
+        frequencies,
+        source_frame_mass_1=2.0 * bns["source_frame_mass_1"],
+        source_frame_mass_2=2.0 * bns["source_frame_mass_2"],
     )
 
     np.testing.assert_allclose(heavy, light * 2.0 ** (5.0 / 3.0), rtol=1e-12)
@@ -161,8 +160,8 @@ def test_redshift_enters_only_through_detector_frame_masses(
     redshifted = bns_power(frequencies, redshift=jnp.array([redshift]))
     rescaled = bns_power(
         frequencies,
-        mass_1=(1.0 + redshift) * bns["mass_1"],
-        mass_2=(1.0 + redshift) * bns["mass_2"],
+        source_frame_mass_1=(1.0 + redshift) * bns["source_frame_mass_1"],
+        source_frame_mass_2=(1.0 + redshift) * bns["source_frame_mass_2"],
     )
 
     np.testing.assert_allclose(redshifted, rescaled, rtol=1e-12)
@@ -210,41 +209,86 @@ def test_zero_frequency_bin_is_zero_not_nan(
 def test_scalar_source_parameters_match_length_one_arrays() -> None:
     frequencies = jnp.array([20.0, 100.0, 2000.0])
     scalar_sources = {
-        "mass_1": 1.4,
-        "mass_2": 1.3,
+        "source_frame_mass_1": 1.4,
+        "source_frame_mass_2": 1.3,
         "redshift": 0.2,
         "luminosity_distance": 800.0,
         "inclination": 0.4,
-        "alpha": ISCO_ALPHA,
     }
     array_sources = {
         name: jnp.asarray([value]) for name, value in scalar_sources.items()
     }
 
-    scalar_power = inspiral_polarization_power(frequencies, **scalar_sources)
-    array_power = inspiral_polarization_power(frequencies, **array_sources)
+    scalar_power = inspiral_polarization_power(
+        frequencies, scalar_sources, alpha=ISCO_ALPHA
+    )
+    array_power = inspiral_polarization_power(
+        frequencies, array_sources, alpha=jnp.asarray([ISCO_ALPHA])
+    )
 
     assert scalar_power.shape == (1, frequencies.size)
     np.testing.assert_allclose(scalar_power, array_power, rtol=1e-12)
 
 
+def test_extra_gwmock_parameters_are_ignored(bns: dict[str, jax.Array]) -> None:
+    frequencies = jnp.array([50.0, 100.0])
+    complete_population = bns | {
+        "spin_1x": jnp.array([0.1]),
+        "spin_2z": jnp.array([-0.2]),
+        "phase": jnp.array([1.2]),
+    }
+
+    expected = inspiral_polarization_power(frequencies, bns, alpha=ISCO_ALPHA)
+    actual = inspiral_polarization_power(
+        frequencies, complete_population, alpha=ISCO_ALPHA
+    )
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-12)
+
+
+@pytest.mark.parametrize(
+    "missing_key",
+    [
+        "source_frame_mass_1",
+        "source_frame_mass_2",
+        "redshift",
+        "luminosity_distance",
+        "inclination",
+    ],
+)
+def test_missing_required_parameter_raises_named_key_error(
+    bns: dict[str, jax.Array], missing_key: str
+) -> None:
+    incomplete_population = {
+        key: value for key, value in bns.items() if key != missing_key
+    }
+
+    with pytest.raises(KeyError, match=missing_key):
+        inspiral_polarization_power(
+            jnp.array([100.0]), incomplete_population, alpha=ISCO_ALPHA
+        )
+
+
 def test_scalar_and_vector_source_parameters_broadcast_together() -> None:
     frequencies = jnp.array([50.0, 100.0])
     mixed_sources = {
-        "mass_1": 1.4,
-        "mass_2": jnp.array([1.1, 1.2, 1.3]),
+        "source_frame_mass_1": 1.4,
+        "source_frame_mass_2": jnp.array([1.1, 1.2, 1.3]),
         "redshift": 0.1,
         "luminosity_distance": jnp.array([500.0, 1000.0, 1500.0]),
         "inclination": 0.0,
-        "alpha": ISCO_ALPHA,
     }
     vector_sources = {
         name: jnp.broadcast_to(jnp.asarray(value), (3,))
         for name, value in mixed_sources.items()
     }
 
-    actual = inspiral_polarization_power(frequencies, **mixed_sources)
-    expected = inspiral_polarization_power(frequencies, **vector_sources)
+    actual = inspiral_polarization_power(frequencies, mixed_sources, alpha=ISCO_ALPHA)
+    expected = inspiral_polarization_power(
+        frequencies,
+        vector_sources,
+        alpha=jnp.full(3, ISCO_ALPHA),
+    )
 
     assert actual.shape == (3, frequencies.size)
     np.testing.assert_allclose(actual, expected, rtol=1e-12)
@@ -253,19 +297,21 @@ def test_scalar_and_vector_source_parameters_broadcast_together() -> None:
 def test_batched_sources_match_stacked_single_source_calls() -> None:
     frequencies = jnp.array([0.0, 50.0, 500.0, 5000.0])
     sources = {
-        "mass_1": jnp.array([1.4, 10.0, 30.0]),
-        "mass_2": jnp.array([1.3, 8.0, 20.0]),
+        "source_frame_mass_1": jnp.array([1.4, 10.0, 30.0]),
+        "source_frame_mass_2": jnp.array([1.3, 8.0, 20.0]),
         "redshift": jnp.array([0.1, 0.5, 1.0]),
         "luminosity_distance": jnp.array([500.0, 2000.0, 8000.0]),
         "inclination": jnp.array([0.0, 0.5, 1.0]),
-        "alpha": jnp.array([ISCO_ALPHA, 1.5 * ISCO_ALPHA, 2.0 * ISCO_ALPHA]),
     }
+    alpha = jnp.array([ISCO_ALPHA, 1.5 * ISCO_ALPHA, 2.0 * ISCO_ALPHA])
 
-    batched = inspiral_polarization_power(frequencies, **sources)
+    batched = inspiral_polarization_power(frequencies, sources, alpha=alpha)
     independent = jnp.concatenate(
         [
             inspiral_polarization_power(
-                frequencies, **{name: values[index] for name, values in sources.items()}
+                frequencies,
+                {name: values[index] for name, values in sources.items()},
+                alpha=alpha[index],
             )
             for index in range(3)
         ],
@@ -280,11 +326,13 @@ def test_frequency_grid_must_be_one_dimensional(frequencies: jax.Array) -> None:
     with pytest.raises(ValueError, match=r"frequencies must have shape \(F,\)"):
         inspiral_polarization_power(
             frequencies,
-            mass_1=1.4,
-            mass_2=1.4,
-            redshift=0.0,
-            luminosity_distance=100.0,
-            inclination=0.0,
+            {
+                "source_frame_mass_1": 1.4,
+                "source_frame_mass_2": 1.4,
+                "redshift": 0.0,
+                "luminosity_distance": 100.0,
+                "inclination": 0.0,
+            },
             alpha=ISCO_ALPHA,
         )
 
@@ -292,7 +340,7 @@ def test_frequency_grid_must_be_one_dimensional(frequencies: jax.Array) -> None:
 @pytest.mark.parametrize(
     ("name", "value"),
     [
-        pytest.param("mass_1", jnp.ones((2, 1)), id="column-vector"),
+        pytest.param("source_frame_mass_1", jnp.ones((2, 1)), id="column-vector"),
         pytest.param("inclination", jnp.ones((1, 1, 1)), id="rank-three"),
     ],
 )
@@ -300,28 +348,29 @@ def test_higher_rank_source_parameters_are_rejected(
     name: str, value: jax.Array
 ) -> None:
     sources = {
-        "mass_1": 1.4,
-        "mass_2": 1.4,
+        "source_frame_mass_1": 1.4,
+        "source_frame_mass_2": 1.4,
         "redshift": 0.0,
         "luminosity_distance": 100.0,
         "inclination": 0.0,
-        "alpha": ISCO_ALPHA,
     }
     sources[name] = value
 
     with pytest.raises(ValueError, match=rf"^{name} must be a scalar"):
-        inspiral_polarization_power(jnp.array([100.0]), **sources)
+        inspiral_polarization_power(jnp.array([100.0]), sources, alpha=ISCO_ALPHA)
 
 
 def test_incompatible_source_vector_lengths_are_rejected() -> None:
     with pytest.raises(ValueError, match="broadcast"):
         inspiral_polarization_power(
             jnp.array([100.0]),
-            mass_1=jnp.ones(2),
-            mass_2=jnp.ones(3),
-            redshift=0.0,
-            luminosity_distance=100.0,
-            inclination=0.0,
+            {
+                "source_frame_mass_1": jnp.ones(2),
+                "source_frame_mass_2": jnp.ones(3),
+                "redshift": 0.0,
+                "luminosity_distance": 100.0,
+                "inclination": 0.0,
+            },
             alpha=ISCO_ALPHA,
         )
 
@@ -330,8 +379,8 @@ def test_layout_is_catalog_ready() -> None:
     """``(N, F)`` out; ``make_catalog`` takes the transpose to ``(F, N)``."""
     frequencies = np.arange(10.0, 60.0, 10.0)
     sources = {
-        "mass_1": np.array([1.4, 1.6, 2.0]),
-        "mass_2": np.array([1.4, 1.3, 1.1]),
+        "source_frame_mass_1": np.array([1.4, 1.6, 2.0]),
+        "source_frame_mass_2": np.array([1.4, 1.3, 1.1]),
         "redshift": np.array([0.1, 0.5, 1.2]),
         "luminosity_distance": np.array([500.0, 2000.0, 8000.0]),
         "inclination": np.array([0.0, 0.5, 1.2]),
@@ -339,11 +388,7 @@ def test_layout_is_catalog_ready() -> None:
 
     power = inspiral_polarization_power(
         jnp.asarray(frequencies),
-        mass_1=jnp.asarray(sources["mass_1"]),
-        mass_2=jnp.asarray(sources["mass_2"]),
-        redshift=jnp.asarray(sources["redshift"]),
-        luminosity_distance=jnp.asarray(sources["luminosity_distance"]),
-        inclination=jnp.asarray(sources["inclination"]),
+        {name: jnp.asarray(value) for name, value in sources.items()},
         alpha=ISCO_ALPHA,
     )
 
@@ -367,16 +412,16 @@ def test_layout_is_catalog_ready() -> None:
 def test_jit_matches_eager_evaluation() -> None:
     frequencies = jnp.linspace(10.0, 2000.0, 128)
     sources = {
-        "mass_1": jnp.array([1.4, 2.0]),
-        "mass_2": jnp.array([1.4, 1.1]),
+        "source_frame_mass_1": jnp.array([1.4, 2.0]),
+        "source_frame_mass_2": jnp.array([1.4, 1.1]),
         "redshift": jnp.array([0.1, 0.9]),
         "luminosity_distance": jnp.array([500.0, 6000.0]),
         "inclination": jnp.array([0.0, 1.0]),
     }
 
-    expected = inspiral_polarization_power(frequencies, **sources, alpha=ISCO_ALPHA)
+    expected = inspiral_polarization_power(frequencies, sources, alpha=ISCO_ALPHA)
     actual = jax.jit(inspiral_polarization_power)(
-        frequencies, **sources, alpha=ISCO_ALPHA
+        frequencies, sources, alpha=ISCO_ALPHA
     )
 
     assert isinstance(actual, jax.Array)
@@ -392,7 +437,7 @@ def test_gradient_is_finite_across_the_cutoff(bns: dict[str, jax.Array]) -> None
         return jnp.sum(
             inspiral_polarization_power(
                 frequencies,
-                **(bns | {"luminosity_distance": luminosity_distance}),
+                bns | {"luminosity_distance": luminosity_distance},
                 alpha=ISCO_ALPHA,
             )
         )

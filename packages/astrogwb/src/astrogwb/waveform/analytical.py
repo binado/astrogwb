@@ -32,6 +32,7 @@ Schwarzschild test-particle ISCO; nothing here defaults to it.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 
 import jax
 import jax.numpy as jnp
@@ -174,32 +175,32 @@ def _normalize_source_parameter(name: str, value: ArrayLike) -> jax.Array:
 
 def _normalize_source_parameters(
     *,
-    mass_1: ArrayLike,
-    mass_2: ArrayLike,
+    source_frame_mass_1: ArrayLike,
+    source_frame_mass_2: ArrayLike,
     redshift: ArrayLike,
     luminosity_distance: ArrayLike,
     inclination: ArrayLike,
     alpha: ArrayLike,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     parameters = (
-        _normalize_source_parameter("mass_1", mass_1),
-        _normalize_source_parameter("mass_2", mass_2),
+        _normalize_source_parameter("source_frame_mass_1", source_frame_mass_1),
+        _normalize_source_parameter("source_frame_mass_2", source_frame_mass_2),
         _normalize_source_parameter("redshift", redshift),
         _normalize_source_parameter("luminosity_distance", luminosity_distance),
         _normalize_source_parameter("inclination", inclination),
         _normalize_source_parameter("alpha", alpha),
     )
     (
-        mass_1_array,
-        mass_2_array,
+        source_frame_mass_1_array,
+        source_frame_mass_2_array,
         redshift_array,
         distance_array,
         iota_array,
         alpha_array,
     ) = jnp.broadcast_arrays(*parameters)
     return (
-        mass_1_array,
-        mass_2_array,
+        source_frame_mass_1_array,
+        source_frame_mass_2_array,
         redshift_array,
         distance_array,
         iota_array,
@@ -209,15 +210,17 @@ def _normalize_source_parameters(
 
 def _single_source_inspiral_power(
     frequencies: jax.Array,
-    mass_1: jax.Array,
-    mass_2: jax.Array,
+    source_frame_mass_1: jax.Array,
+    source_frame_mass_2: jax.Array,
     redshift: jax.Array,
     luminosity_distance: jax.Array,
     inclination: jax.Array,
     alpha: jax.Array,
 ) -> jax.Array:
     detector_frame_chirp_mass_seconds = (
-        chirp_mass(mass_1, mass_2) * (1.0 + redshift) * SOLAR_MASS_IN_SECONDS
+        chirp_mass(source_frame_mass_1, source_frame_mass_2)
+        * (1.0 + redshift)
+        * SOLAR_MASS_IN_SECONDS
     )
     distance_seconds = luminosity_distance * MPC_IN_SECONDS
     amplitude_squared = (
@@ -226,7 +229,9 @@ def _single_source_inspiral_power(
         / distance_seconds**2
         * inclination_factor(inclination)
     )
-    cutoff = termination_frequency(mass_1, mass_2, redshift, alpha=alpha)
+    cutoff = termination_frequency(
+        source_frame_mass_1, source_frame_mass_2, redshift, alpha=alpha
+    )
 
     # f = 0 would make f**(-7/3) infinite, and `where` evaluates both branches:
     # inf * 0 is NaN, and under reverse-mode JAX that NaN propagates into the
@@ -246,21 +251,19 @@ _batched_inspiral_power = jax.vmap(
 
 def inspiral_polarization_power(
     frequencies: ArrayLike,
+    parameters: Mapping[str, ArrayLike],
     *,
-    mass_1: ArrayLike,
-    mass_2: ArrayLike,
-    redshift: ArrayLike,
-    luminosity_distance: ArrayLike,
-    inclination: ArrayLike,
     alpha: ArrayLike,
 ) -> jax.Array:
     r"""Polarization power $|\tilde h_+|^2 + |\tilde h_\times|^2$ on an ``(N, F)`` grid.
 
     Evaluates the module's closed form at every ``(source, frequency)`` pair
     and zeroes the bins above each source's :func:`termination_frequency`.
-    Every source parameter may be a scalar or a one-dimensional ``(N,)``
-    array; they are jointly broadcast to ``(N,)``. Higher-rank source arrays
-    are rejected. Output is in $\mathrm{Hz}^{-2}$, laid out
+    Required source parameters are read from a gwmock-compatible mapping.
+    Each may be a scalar or a one-dimensional ``(N,)`` array; they are jointly
+    broadcast with ``alpha`` to ``(N,)``. Higher-rank source arrays are
+    rejected, and unrelated mapping entries are ignored. Output is in
+    $\mathrm{Hz}^{-2}$, laid out
     ``(sample, frequency)``.
 
     .. warning::
@@ -274,19 +277,13 @@ def inspiral_polarization_power(
     frequencies:
         Frequency grid in Hz, shape ``(F,)``. A zero bin returns zero power
         rather than the divergence of $f^{-7/3}$.
-    mass_1, mass_2:
-        Source-frame component masses in solar masses. Each must be a scalar
-        or have shape ``(N,)`` and broadcasts against the other source
-        parameters.
-    redshift:
-        Source redshift, scalar or shape ``(N,)``. Enters only by redshifting
-        the masses -- both the chirp mass in the amplitude and the total mass
-        in the cutoff.
-    luminosity_distance:
-        Luminosity distance in Mpc, scalar or shape ``(N,)``.
-    inclination:
-        Inclination angle in radians, scalar or shape ``(N,)``; see
-        :func:`inclination_factor`.
+    parameters:
+        Source population mapping with ``source_frame_mass_1``,
+        ``source_frame_mass_2``, ``redshift``, ``luminosity_distance``, and
+        ``inclination`` entries. The component masses are in solar masses,
+        luminosity distance is in Mpc, and inclination is in radians. Redshift
+        enters only by redshifting the masses -- both the chirp mass in the
+        amplitude and the total mass in the cutoff.
     alpha:
         Dimensionless truncation parameter, scalar or shape ``(N,)``; see
         :func:`termination_frequency`.
@@ -298,11 +295,11 @@ def inspiral_polarization_power(
     """
     frequency_grid = _require_frequency_grid(frequencies)
     source_parameters = _normalize_source_parameters(
-        mass_1=mass_1,
-        mass_2=mass_2,
-        redshift=redshift,
-        luminosity_distance=luminosity_distance,
-        inclination=inclination,
+        source_frame_mass_1=parameters["source_frame_mass_1"],
+        source_frame_mass_2=parameters["source_frame_mass_2"],
+        redshift=parameters["redshift"],
+        luminosity_distance=parameters["luminosity_distance"],
+        inclination=parameters["inclination"],
         alpha=alpha,
     )
     return _batched_inspiral_power(frequency_grid, *source_parameters)
