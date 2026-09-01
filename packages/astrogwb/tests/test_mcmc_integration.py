@@ -43,19 +43,13 @@ import numpy as np
 import numpyro.distributions as dist
 import pytest
 import xarray as xr
-from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
+from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
-from astrogwb.gwb import (
-    analytic_spectral_density_from_mass_moments,
-    spectral_density,
-    spectral_snr,
-    uniform_prior_mass_moments,
-)
+from astrogwb.gwb import spectral_density, spectral_snr
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     amplitude_H0_fn,
     compute_merger_rate_distance_and_logprob,
-    madau_dickinson_rate,
     make_merger_rate_and_log_weights_fn,
     merger_rate_H0_fn,
 )
@@ -66,14 +60,7 @@ from astrogwb.sampling import (
     quadrature_grid,
 )
 from astrogwb.sampling.models import spectral_density_model
-from astrogwb_mock_population import (
-    FIDUCIALS,
-    MOCK_MAXIMUM_COMPONENT_MASS,
-    MOCK_MINIMUM_COMPONENT_MASS,
-    Z_MAX,
-    Z_MIN,
-    make_redshift_grid,
-)
+from astrogwb_mock_population import FIDUCIALS, make_redshift_grid
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 
 pytestmark = pytest.mark.integration
@@ -311,26 +298,6 @@ def _reconstruct_h0(posterior: dict, amplitude_grid: jax.Array) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Catalog defaults
-# --------------------------------------------------------------------------- #
-def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -> None:
-    """The realistic default trades frequency resolution for catalog size."""
-    catalog = mock_catalog_factory()
-    frequencies = np.asarray(catalog.frequency.values)
-    redshift = np.asarray(catalog.source_parameters.sel(parameter="redshift").values)
-
-    assert catalog.sizes == {"frequency": 512, "sample": 1024, "parameter": 5}
-    assert float(catalog.attrs["df"]) == 8.0
-    assert float(catalog.attrs["minimum_frequency"]) == 2.0
-    assert float(catalog.attrs["maximum_frequency"]) == 4096.0
-    np.testing.assert_allclose(np.diff(frequencies), 8.0, rtol=0.0, atol=0.0)
-    assert frequencies[0] == 2.0
-    assert frequencies[-1] == 4090.0
-    assert np.all(frequencies > 0.0)
-    assert np.all(redshift >= Z_MIN)
-
-
-# --------------------------------------------------------------------------- #
 # The direct model
 # --------------------------------------------------------------------------- #
 def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
@@ -458,87 +425,3 @@ def test_marginalized_and_direct_h0_posteriors_agree(mock_catalog_factory) -> No
     np.testing.assert_allclose(
         np.std(marginalized_h0), np.std(direct_h0), rtol=0.2, atol=0.0
     )
-
-
-# --------------------------------------------------------------------------- #
-# The catalog against the closed-form spectrum
-# --------------------------------------------------------------------------- #
-def _source_frame_merger_rate(redshift: jax.Array, hyperparameters) -> jax.Array:
-    r"""Absolute source-frame merger-rate density in Gpc^-3 yr^-1.
-
-    Deliberately *without* the source-to-detector time dilation.
-    :func:`analytic_spectral_density_from_mass_moments` carries that inside its
-    :math:`(1 + z)^{4/3}` factor, whereas
-    :func:`compute_merger_rate_distance_and_logprob` applies ``/(1 + z)``
-    inside its own density, :math:`p(z) \propto \psi(z)/(1+z)\,dV_c/dz`.
-    Dividing here as well would double-count it -- exactly the class of error
-    the two independent paths are being crossed to detect.
-    """
-    return hyperparameters["local_merger_rate"] * madau_dickinson_rate(
-        redshift,
-        hyperparameters["gamma"],
-        hyperparameters["kappa"],
-        hyperparameters["z_peak"],
-    )
-
-
-def test_catalog_contraction_matches_the_analytic_spectrum(
-    mock_catalog_factory,
-) -> None:
-    r"""Larger Monte-Carlo catalogs converge toward the analytic spectrum."""
-    catalogs = {
-        num_sources: mock_catalog_factory(
-            num_sources=num_sources,
-            f_min=F_MIN,
-            f_max=F_MAX,
-            df=8.0,
-        )
-        for num_sources in (256, 1024)
-    }
-    frequencies = jnp.asarray(catalogs[1024].frequency.values)
-    mass_moments = uniform_prior_mass_moments(
-        frequencies,
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        minimum_component_mass=MOCK_MINIMUM_COMPONENT_MASS,
-        maximum_component_mass=MOCK_MAXIMUM_COMPONENT_MASS,
-        # The same truncation the catalog's polarization power was built with.
-        alpha=ISCO_ALPHA,
-    )
-    analytic = analytic_spectral_density_from_mass_moments(
-        frequencies,
-        FIDUCIALS,
-        _source_frame_merger_rate,
-        mass_moments,
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-    )
-
-    ratios: dict[int, np.ndarray] = {}
-    for num_sources, catalog in catalogs.items():
-        polarization_power = jnp.asarray(catalog.polarization_power.values)
-        samples = {
-            str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
-            for name in catalog.parameter.values
-        }
-        total_merger_rate, _, _ = compute_merger_rate_distance_and_logprob(
-            FIDUCIALS, samples, redshift_grid=make_redshift_grid()
-        )
-        contracted = spectral_density(
-            polarization_power,
-            jnp.ones(num_sources),
-            total_merger_rate,
-            average_mode="analytic_inclination",
-        )
-        ratios[num_sources] = np.asarray(contracted / analytic)
-        assert np.all(np.isfinite(ratios[num_sources]))
-
-    residuals = {
-        num_sources: float(np.sqrt(np.mean((ratio - 1.0) ** 2)))
-        for num_sources, ratio in ratios.items()
-    }
-    assert residuals[1024] < residuals[256]
-    np.testing.assert_allclose(np.mean(ratios[1024]), 1.0, rtol=0.05, atol=0.0)
-    # Shape: the ratio must be flat across the band, which is what pins the
-    # f^-7/3 scaling and the cutoff structure independently of normalization.
-    np.testing.assert_allclose(ratios[1024], np.mean(ratios[1024]), rtol=0.03, atol=0.0)

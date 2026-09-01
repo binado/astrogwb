@@ -113,6 +113,13 @@ def build_mock_catalog(
     ``INCLINATION_AVERAGE_TO_FACE_ON_RATIO = <g>/g(0) = 0.4`` converts face-on
     power into the inclination average.
     """
+    available_sources = min(values.shape[0] for values in population.values())
+    if num_sources > available_sources:
+        raise ValueError(
+            f"requested {num_sources} sources, but the population contains only "
+            f"{available_sources}"
+        )
+
     # A prefix, not a random subsample, so catalog construction is deterministic.
     parameters = {name: values[:num_sources] for name, values in population.items()}
     # Form every bin from its integer index rather than accumulating ``df``.
