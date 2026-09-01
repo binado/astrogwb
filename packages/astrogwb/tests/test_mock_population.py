@@ -24,9 +24,8 @@ from astrogwb_mock_population import (
     Z_MIN,
     make_redshift_grid,
 )
+from conftest import F_MAX, F_MIN
 
-ANALYSIS_F_MIN = 10.0
-ANALYSIS_F_MAX = 512.0
 CATALOG_DF = 8.0
 SMALL_CATALOG_SIZE = 256
 LARGE_CATALOG_SIZE = 1024
@@ -86,8 +85,8 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
     catalogs = {
         num_sources: mock_catalog_factory(
             num_sources=num_sources,
-            f_min=ANALYSIS_F_MIN,
-            f_max=ANALYSIS_F_MAX,
+            f_min=F_MIN,
+            f_max=F_MAX,
             df=CATALOG_DF,
         )
         for num_sources in catalog_sizes
