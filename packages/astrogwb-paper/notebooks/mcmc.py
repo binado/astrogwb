@@ -42,9 +42,9 @@
 
 # %%
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 try:
     import google.colab  # noqa: F401
@@ -145,9 +145,9 @@ if DEBUG:
 # helper is used by `astrogwb-run-mcmc` for the headless runner.
 
 # %%
+import json
 from datetime import datetime
 from functools import partial
-import json
 
 from astrogwb_paper.runtime import configure_runtime
 
@@ -157,26 +157,22 @@ import arviz_base as azb
 import arviz_plots as azp
 import arviz_stats as azs
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
-from numpyro import handlers
-from numpyro.infer import MCMC, NUTS
-
-import matplotlib.pyplot as plt
-
-from astrogwb.sampling.models import spectral_density_model
+from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
-from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
+from astrogwb.sampling.models import spectral_density_model
 from astrogwb_paper.catalogs import (
     CatalogSource,
-    compute_proposal_logprob,
     compute_fiducial_injection_spectrum,
+    compute_proposal_logprob,
     propagate_catalog,
     samples_from_catalog,
     truncate_catalog_samples,
@@ -190,6 +186,8 @@ from astrogwb_paper.paths import paper_project_root
 # mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
+from numpyro import handlers
+from numpyro.infer import MCMC, NUTS
 
 register_projection(MplAxes)
 
@@ -248,7 +246,7 @@ hyperprior_dists = {
     "local_merger_rate": dist.Uniform(7.6, 250.0),
 }
 
-sampled_params = set(("H0",))
+sampled_params = {"H0"}
 
 priors = dict(hyperprior_dists)
 fixed_params = {k: v for k, v in fiducials.items() if k not in sampled_params}

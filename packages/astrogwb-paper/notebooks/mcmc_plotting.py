@@ -22,11 +22,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import arviz_plots as azp
 import corner
 import xarray as xr
 from arviz_base.labels import MapLabeller
-import arviz_plots as azp
-
 from astrogwb_paper.paths import paper_project_root
 
 # %config InlineBackend.figure_format = "retina"
@@ -81,8 +80,7 @@ labeller = MapLabeller(var_name_map=VAR_LABELS)
 
 # Default: sample file produced by `analysis_numpyro.ipynb` when `settings.outdir` / `settings.label` match.
 INFERENCE_DATA_PATH = (
-    paper_project_root()
-    / "chains/mcmc-H0-Omega_m-det=S1,R1-seed42-20260630-013127.nc"
+    paper_project_root() / "chains/mcmc-H0-Omega_m-det=S1,R1-seed42-20260630-013127.nc"
 )
 
 # Set to a non-empty list to override automatic detection (e.g. only cosmology parameters).
@@ -125,13 +123,17 @@ azp.plot_trace_dist(inference_data, var_names=var_names, labeller=labeller)
 azp.plot_autocorr(inference_data, var_names=var_names, max_lag=300, labeller=labeller)
 
 # %%
-azp.plot_convergence_dist(inference_data, var_names=var_names, ref_line=True, labeller=labeller)
+azp.plot_convergence_dist(
+    inference_data, var_names=var_names, ref_line=True, labeller=labeller
+)
 
 # %%
 azp.plot_ess(inference_data, var_names=var_names, extra_methods=True, labeller=labeller)
 
 # %%
-azp.plot_ess_evolution(inference_data, var_names=var_names, extra_methods=True, labeller=labeller)
+azp.plot_ess_evolution(
+    inference_data, var_names=var_names, extra_methods=True, labeller=labeller
+)
 
 # %%
 azp.plot_rank(inference_data, var_names=var_names, labeller=labeller)
