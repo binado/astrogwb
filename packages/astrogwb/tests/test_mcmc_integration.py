@@ -61,7 +61,7 @@ from astrogwb.sampling import (
     quadrature_grid,
 )
 from astrogwb.sampling.models import spectral_density_model
-from mock_population import (
+from astrogwb_mock_population import (
     FIDUCIALS,
     MOCK_MAXIMUM_COMPONENT_MASS,
     MOCK_MINIMUM_COMPONENT_MASS,

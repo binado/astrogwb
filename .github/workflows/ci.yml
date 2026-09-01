@@ -41,6 +41,7 @@ jobs:
         run: |
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference.npz
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference_et_triangle.npz
+          test -f packages/astrogwb/tests/fixtures/mock_bns_population.yaml
           test -f packages/astrogwb/tests/fixtures/mock_bns_population.csv
       - run: >-
           uv run --frozen --isolated --no-default-groups
@@ -72,6 +73,7 @@ jobs:
         run: |
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference.npz
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference_et_triangle.npz
+          test -f packages/astrogwb/tests/fixtures/mock_bns_population.yaml
           test -f packages/astrogwb/tests/fixtures/mock_bns_population.csv
       - run: >-
           uv run --frozen --isolated --no-default-groups

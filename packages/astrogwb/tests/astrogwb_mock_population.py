@@ -1,21 +1,16 @@
 """The committed mock BNS population, and what the test suite builds from it.
 
-A plain helper module rather than part of ``conftest.py``, and deliberately
-*not* named ``conftest``: pytest's default ``prepend`` import mode puts every
-rootdir-less test directory on ``sys.path``, so a workspace run collecting both
-``packages/astrogwb/tests`` and ``packages/astrogwb-paper/tests`` has two files
-competing for the single top-level module name ``conftest``. A test module that
-did ``from conftest import ...`` would silently bind whichever was imported
-first. This name is unique across the workspace, mirroring the paper package's
-own ``config_fixtures.py``.
+A plain helper module rather than part of ``conftest.py``. Its
+``astrogwb_mock_population`` name is unique across the workspace, avoiding a
+generic top-level helper name while pytest's default ``prepend`` import mode
+places each unpackaged test directory on ``sys.path``.
 
 ``conftest.py`` re-exports the loaders here as fixtures; test modules may
 import the constants and helpers directly.
 
-The fixture itself is produced by
-``scripts/generate_mock_population_fixture.py`` -- see that script for why the
-draw is a committed file rather than an in-process ``GraphSimulator`` call, and
-for the rule that it is a fixed external oracle, never a target to chase.
+The fixture itself is produced from the population graph committed beside it
+by ``scripts/generate_mock_population_fixture.py``. See that script for why the
+draw is a committed file rather than an in-process ``GraphSimulator`` call.
 """
 
 from __future__ import annotations
@@ -36,7 +31,7 @@ from astrogwb.waveform import inspiral_polarization_power, make_catalog
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
-#: The committed frozen draw from the paper's pinned population graph.
+#: The committed frozen draw from the core test population graph.
 MOCK_POPULATION_PATH = FIXTURES_DIR / "mock_bns_population.csv"
 
 #: Hyperparameters the mock injection is built at, verbatim from
@@ -70,7 +65,7 @@ N_GRID = 256
 MOCK_MINIMUM_COMPONENT_MASS = 1.0
 MOCK_MAXIMUM_COMPONENT_MASS = 2.5
 
-#: Seed the fixture was drawn at; the injection bank's own seed.
+#: Seed used to generate the committed fixture.
 MOCK_POPULATION_SEED = 41
 
 
@@ -118,8 +113,7 @@ def build_mock_catalog(
     ``INCLINATION_AVERAGE_TO_FACE_ON_RATIO = <g>/g(0) = 0.4`` converts face-on
     power into the inclination average.
     """
-    # A prefix, not a random subsample: the fixture is a prefix of the
-    # production injection bank, and slicing from the front preserves that.
+    # A prefix, not a random subsample, so catalog construction is deterministic.
     parameters = {name: values[:num_sources] for name, values in population.items()}
     # Exact multiples of df, so validate_catalog's 64-ULP uniform-spacing check
     # passes on the stored values rather than on however np.arange happens to

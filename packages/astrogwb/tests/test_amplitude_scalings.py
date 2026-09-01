@@ -26,7 +26,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 
 # The `synthetic_weights_callback` fixture builds its catalog at these
 # fiducials; a second copy here would let the two drift apart silently.
-from mock_population import FIDUCIALS
+from astrogwb_mock_population import FIDUCIALS
 
 _SCALINGS = {
     "H0": (amplitude_H0_fn, merger_rate_H0_fn),

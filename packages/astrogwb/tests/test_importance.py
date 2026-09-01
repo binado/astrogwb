@@ -17,7 +17,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 # are integrated on. Shared with `synthetic_weights_callback`, which builds its
 # catalog at exactly these values: a second copy here would let the two drift
 # apart with no visible symptom.
-from mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN
+from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN
 
 
 # --------------------------------------------------------------------------- #
