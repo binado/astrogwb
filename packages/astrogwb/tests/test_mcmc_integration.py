@@ -110,6 +110,13 @@ class AnalysisInputs(NamedTuple):
     snr: float
 
 
+class MarginalizedResult(NamedTuple):
+    """One shared marginalized chain and its reconstructed H0 draws."""
+
+    posterior: dict
+    reconstructed: dict
+
+
 def _build_analysis_inputs(
     catalog: xr.Dataset,
     *,
@@ -209,8 +216,26 @@ def _build_analysis_inputs(
     )
 
 
-def _run_nuts(model, *, init_values: dict[str, float], seed: int = SEED) -> dict:
-    """Run the shared NUTS configuration and return grouped ``(chain, draw)`` draws."""
+def _model_kwargs(inputs: AnalysisInputs) -> dict[str, object]:
+    """Expose same-shaped data as dynamic arguments to NumPyro's JIT cache."""
+    return {
+        "polarization_power": inputs.polarization_power,
+        "samples": inputs.samples,
+        "observed_spectral_density": inputs.observed_spectral_density,
+        "effective_psd": inputs.effective_psd,
+        "observation_time": inputs.observation_time,
+        "df": inputs.df,
+    }
+
+
+def _run_nuts(
+    model,
+    *,
+    model_kwargs: dict[str, object],
+    init_values: dict[str, float],
+    seed: int = SEED,
+) -> dict:
+    """Run NUTS with model data passed dynamically through ``MCMC.run``."""
     # One or two latents against an (F, N) matvec is exactly the case
     # forward-mode AD is built for: reverse mode would tape the contraction.
     kernel = NUTS(
@@ -225,20 +250,15 @@ def _run_nuts(model, *, init_values: dict[str, float], seed: int = SEED) -> dict
         num_samples=NUM_SAMPLES,
         num_chains=1,
         progress_bar=False,
+        jit_model_args=True,
     )
-    mcmc.run(jax.random.PRNGKey(seed))
+    mcmc.run(jax.random.PRNGKey(seed), **model_kwargs)
     return mcmc.get_samples(group_by_chain=True)
 
 
 def _direct_h0_model(inputs: AnalysisInputs, priors: dict[str, dist.Distribution]):
     return partial(
         spectral_density_model,
-        polarization_power=inputs.polarization_power,
-        samples=inputs.samples,
-        observed_spectral_density=inputs.observed_spectral_density,
-        effective_psd=inputs.effective_psd,
-        observation_time=inputs.observation_time,
-        df=inputs.df,
         average_mode="analytic_inclination",
         merger_rate_and_log_weights_fn=inputs.merger_rate_and_log_weights_fn,
         priors=priors,
@@ -252,12 +272,6 @@ def _marginalized_model(
 ):
     return partial(
         amplitude_marginalized_model,
-        polarization_power=inputs.polarization_power,
-        samples=inputs.samples,
-        observed_spectral_density=inputs.observed_spectral_density,
-        effective_psd=inputs.effective_psd,
-        observation_time=inputs.observation_time,
-        df=inputs.df,
         average_mode="analytic_inclination",
         merger_rate_and_log_weights_fn=inputs.merger_rate_and_log_weights_fn,
         amplitude_parameter="H0",
@@ -297,17 +311,41 @@ def _reconstruct_h0(posterior: dict, amplitude_grid: jax.Array) -> dict:
     return {name: values[0] for name, values in draws.items()}
 
 
+@pytest.fixture(scope="module")
+def analysis_inputs(mock_catalog_factory) -> AnalysisInputs:
+    """Build the deterministic masked catalog inputs once for this module."""
+    return _build_analysis_inputs(mock_catalog_factory())
+
+
+@pytest.fixture(scope="module")
+def marginalized_result(analysis_inputs: AnalysisInputs) -> MarginalizedResult:
+    """Run the marginalized chain once for both tests that inspect it."""
+    amplitude_grid = quadrature_grid(H0_PRIOR, num_nodes=AMPLITUDE_NUM_NODES)
+    posterior = _run_nuts(
+        _marginalized_model(
+            analysis_inputs, {"Omega_m": OMEGA_M_PRIOR}, amplitude_grid
+        ),
+        model_kwargs=_model_kwargs(analysis_inputs),
+        init_values={"Omega_m": FIDUCIALS["Omega_m"]},
+    )
+    return MarginalizedResult(
+        posterior=posterior,
+        reconstructed=_reconstruct_h0(posterior, amplitude_grid),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # The direct model
 # --------------------------------------------------------------------------- #
 def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
-    mock_catalog_factory,
+    analysis_inputs: AnalysisInputs,
 ) -> None:
     """NUTS on ``spectral_density_model`` lands on H0_fid with the Fisher width."""
-    inputs = _build_analysis_inputs(mock_catalog_factory())
+    inputs = analysis_inputs
 
     posterior = _run_nuts(
         _direct_h0_model(inputs, {"H0": H0_PRIOR}),
+        model_kwargs=_model_kwargs(inputs),
         init_values={"H0": FIDUCIALS["H0"]},
     )
 
@@ -331,19 +369,13 @@ def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
 # --------------------------------------------------------------------------- #
 # The amplitude-marginalized model
 # --------------------------------------------------------------------------- #
-def test_amplitude_marginalized_model_reconstructs_h0(mock_catalog_factory) -> None:
+def test_amplitude_marginalized_model_reconstructs_h0(
+    analysis_inputs: AnalysisInputs,
+    marginalized_result: MarginalizedResult,
+) -> None:
     """H0 is marginalized out of the chain and drawn back to the same posterior."""
-    inputs = _build_analysis_inputs(mock_catalog_factory())
-    # Built once and shared by the chain and the reconstruction: the
-    # reconstruction is only exact against the very density the factor site
-    # integrated, and a separately-constructed prior or grid is exactly the
-    # mismatch that goes unnoticed.
-    amplitude_grid = quadrature_grid(H0_PRIOR, num_nodes=AMPLITUDE_NUM_NODES)
-
-    posterior = _run_nuts(
-        _marginalized_model(inputs, {"Omega_m": OMEGA_M_PRIOR}, amplitude_grid),
-        init_values={"Omega_m": FIDUCIALS["Omega_m"]},
-    )
+    inputs = analysis_inputs
+    posterior = marginalized_result.posterior
 
     assert set(posterior) >= {
         "Omega_m",
@@ -369,7 +401,7 @@ def test_amplitude_marginalized_model_reconstructs_h0(mock_catalog_factory) -> N
         atol=0.0,
     )
 
-    reconstructed = _reconstruct_h0(posterior, amplitude_grid)
+    reconstructed = marginalized_result.reconstructed
     assert set(reconstructed) == {
         "H0",
         "total_merger_rate",
@@ -390,7 +422,10 @@ def test_amplitude_marginalized_model_reconstructs_h0(mock_catalog_factory) -> N
     assert np.all(np.asarray(reconstructed["quadrature_effective_nodes"]) > 10.0)
 
 
-def test_marginalized_and_direct_h0_posteriors_agree(mock_catalog_factory) -> None:
+def test_marginalized_and_direct_h0_posteriors_agree(
+    analysis_inputs: AnalysisInputs,
+    marginalized_result: MarginalizedResult,
+) -> None:
     """The two models give the same H0 marginal on realistic data.
 
     ``test_sampling.py::test_amplitude_marginalized_model_matches_the_general_model``
@@ -400,18 +435,14 @@ def test_marginalized_and_direct_h0_posteriors_agree(mock_catalog_factory) -> No
     reconstruction conditional -- on realistic data, which is where a
     mismatched conditional would actually bite.
     """
-    inputs = _build_analysis_inputs(mock_catalog_factory())
-    amplitude_grid = quadrature_grid(H0_PRIOR, num_nodes=AMPLITUDE_NUM_NODES)
+    inputs = analysis_inputs
 
     direct = _run_nuts(
         _direct_h0_model(inputs, {"H0": H0_PRIOR, "Omega_m": OMEGA_M_PRIOR}),
+        model_kwargs=_model_kwargs(inputs),
         init_values={"H0": FIDUCIALS["H0"], "Omega_m": FIDUCIALS["Omega_m"]},
     )
-    marginalized = _run_nuts(
-        _marginalized_model(inputs, {"Omega_m": OMEGA_M_PRIOR}, amplitude_grid),
-        init_values={"Omega_m": FIDUCIALS["Omega_m"]},
-    )
-    reconstructed = _reconstruct_h0(marginalized, amplitude_grid)
+    reconstructed = marginalized_result.reconstructed
 
     direct_h0 = np.asarray(direct["H0"])
     marginalized_h0 = np.asarray(reconstructed["H0"])
