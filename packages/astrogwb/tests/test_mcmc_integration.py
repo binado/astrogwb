@@ -352,7 +352,7 @@ def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
     )
 
     h0 = np.asarray(posterior["H0"])
-    assert float(np.mean(h0)) == pytest.approx(FIDUCIALS["H0"], rel=0.01)
+    np.testing.assert_allclose(float(np.mean(h0)), FIDUCIALS["H0"], rtol=0.01)
     np.testing.assert_allclose(
         np.std(h0), FIDUCIALS["H0"] / inputs.snr, rtol=0.15, atol=0.0
     )
@@ -385,7 +385,9 @@ def test_amplitude_marginalized_model_reconstructs_h0(
     # ratio averages to 1 and the template's optimal SNR to the injection's.
     # Per draw they scatter by ~1%: Omega_m is sampled, so an individual
     # template is not the injection.
-    assert float(np.mean(posterior["amplitude_mle"])) == pytest.approx(1.0, rel=5e-3)
+    np.testing.assert_allclose(
+        float(np.mean(posterior["amplitude_mle"])), 1.0, rtol=5e-3
+    )
     np.testing.assert_allclose(
         np.mean(posterior["template_optimal_snr"]),
         inputs.snr,
@@ -403,7 +405,7 @@ def test_amplitude_marginalized_model_reconstructs_h0(
         assert values.shape == (1, NUM_SAMPLES)
 
     h0 = np.asarray(reconstructed["H0"])
-    assert float(np.mean(h0)) == pytest.approx(FIDUCIALS["H0"], rel=0.01)
+    np.testing.assert_allclose(float(np.mean(h0)), FIDUCIALS["H0"], rtol=0.01)
     np.testing.assert_allclose(
         np.std(h0), FIDUCIALS["H0"] / inputs.snr, rtol=0.15, atol=0.0
     )
@@ -442,8 +444,11 @@ def test_marginalized_and_direct_h0_posteriors_agree(
     # hundred, so the Monte-Carlo error on each mean is ~0.1: agreement is
     # asserted at the level MCMC can support, not at the level the log-density
     # comparison already pins.
-    assert float(np.mean(marginalized_h0)) == pytest.approx(
-        float(np.mean(direct_h0)), abs=0.5
+    np.testing.assert_allclose(
+        float(np.mean(marginalized_h0)),
+        float(np.mean(direct_h0)),
+        rtol=0.0,
+        atol=0.5,
     )
     np.testing.assert_allclose(
         np.std(marginalized_h0), np.std(direct_h0), rtol=0.2, atol=0.0
