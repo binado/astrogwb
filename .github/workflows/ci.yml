@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Every `run:` below is a `just` recipe, so the command a contributor runs
+# locally and the command CI runs are the same string. The jobs stay separate
+# rather than collapsing behind one recipe: that keeps them parallel and keeps
+# one independent red/green signal per concern instead of a single verdict.
+
 jobs:
   lint:
     name: Lint
@@ -15,9 +20,8 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - run: uv lock --check
-      - run: uv run --group dev ruff check
-      - run: uv run --group dev ruff format --check
+      - uses: extractions/setup-just@v3
+      - run: just lint
 
   typecheck:
     name: Type check
@@ -27,7 +31,8 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - run: uv run --group dev ty check
+      - uses: extractions/setup-just@v3
+      - run: just typecheck
 
   test-core:
     name: Core tests (Python 3.12)
@@ -37,16 +42,14 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+      - uses: extractions/setup-just@v3
       - name: Verify reference fixtures are present
         run: |
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference.npz
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference_et_triangle.npz
           test -f packages/astrogwb/tests/fixtures/mock_bns_population.yaml
           test -f packages/astrogwb/tests/fixtures/mock_bns_population.csv
-      - run: >-
-          uv run --frozen --isolated --no-default-groups
-          --package astrogwb --group test
-          pytest packages/astrogwb/tests -m "not integration"
+      - run: just test-core
 
   test-paper:
     name: Paper tests (Python 3.12)
@@ -56,10 +59,8 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - run: >-
-          uv run --frozen --isolated --no-default-groups
-          --package astrogwb-paper --group test --group workflow
-          pytest packages/astrogwb-paper/tests -m "not integration"
+      - uses: extractions/setup-just@v3
+      - run: just test-paper
 
   test-integration:
     name: Test integration (Python 3.12)
@@ -69,16 +70,30 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+      - uses: extractions/setup-just@v3
       - name: Verify reference fixtures are present
         run: |
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference.npz
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference_et_triangle.npz
           test -f packages/astrogwb/tests/fixtures/mock_bns_population.yaml
           test -f packages/astrogwb/tests/fixtures/mock_bns_population.csv
-      - run: >-
-          uv run --frozen --isolated --no-default-groups
-          --package astrogwb --group test
-          pytest packages/astrogwb/tests -m integration
+      - run: just test-integration
+
+  test-notebooks:
+    name: Notebooks (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - uses: extractions/setup-just@v3
+      # The notebooks build their own catalogs from an inline population graph,
+      # so this job needs no fixture guard: nothing it reads comes from
+      # packages/astrogwb/tests. Executing them *is* the assertion.
+      - run: just test-notebooks
+        env:
+          ASTROGWB_NOTEBOOK_SMOKE: "1"
 
   build-core:
     name: Build publishable core distribution
@@ -88,7 +103,8 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - run: uv build --package astrogwb --no-sources
+      - uses: extractions/setup-just@v3
+      - run: just build-core
       - run: uv venv .wheel-venv
       - run: uv pip install --python .wheel-venv/bin/python dist/*.whl
       - name: Smoke-test installed wheel and bundled detector data
