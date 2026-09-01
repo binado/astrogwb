@@ -1,19 +1,5 @@
 r"""End-to-end NUTS runs against a realistic, physically consistent mock catalog.
 
-These tests reproduce ``examples/h0_mcmc.py`` and
-``examples/amplitude_marginalized_model.py`` at small sampler settings, on a
-catalog built in-process from the committed population fixture (see
-``conftest.mock_catalog_factory``). Unlike the paper package's
-``test_inference_pipeline.py``, which drives the same models on
-``rng.uniform(0, 1)`` power and ``d_L = 1e3 (1 + z)``, the data here carries
-real physics: a wrong factor of :math:`(1 + z)`, a mis-normalized mass moment,
-or a broken amplitude reconstruction changes the numbers these tests assert.
-
-Everything is deterministic. The seed is fixed, the fixture is frozen, and the
-injection carries **no noise realization** -- a draw would shift the posterior
-by ~1 sigma and make a correct model look broken. So these tests do not flake:
-they either pass or report a real change.
-
 Why the posterior widths are predictable. The catalog serves as both the
 injection and the importance-sampling proposal, so every log-weight is exactly
 zero and the "observed" spectrum is the unweighted catalog contraction. With
@@ -60,14 +46,20 @@ from astrogwb.sampling import (
     quadrature_grid,
 )
 from astrogwb.sampling.models import spectral_density_model
-from astrogwb_mock_population import FIDUCIALS, make_redshift_grid
+from astrogwb_mock_population import (
+    FIDUCIALS,
+    MOCK_MAXIMUM_COMPONENT_MASS,
+    MOCK_MINIMUM_COMPONENT_MASS,
+    Z_MAX,
+    Z_MIN,
+    make_redshift_grid,
+)
+from conftest import F_MAX, F_MIN
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 
 pytestmark = pytest.mark.integration
 
 DETECTORS: tuple[str, ...] = ("E1", "E2", "E3")
-F_MIN = 10.0
-F_MAX = 512.0
 
 #: Target network SNR of the injection. Chosen so ``sigma_H0/H0 == 1/SNR`` is
 #: tested in the clean linear regime, well inside the ``Uniform(20, 140)``

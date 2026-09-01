@@ -37,10 +37,13 @@ from astrogwb_mock_population import (
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
+F_MIN = 2.0
+F_MAX = 2048.0
+
 
 @pytest.fixture
 def frequencies() -> np.ndarray:
-    return np.geomspace(20, 2048, 128)
+    return np.linspace(F_MIN, F_MAX, 128)
 
 
 @pytest.fixture
