@@ -163,7 +163,13 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
             total_merger_rate,
             average_mode="analytic_inclination",
         )
-        ratios[num_sources] = np.asarray(contracted / analytic)
+        analytic_values = np.asarray(analytic)
+        contracted_values = np.asarray(contracted)
+        # Above the smallest sampled cutoff, a finite catalog can be exactly
+        # zero even while the analytic population spectrum remains positive.
+        # Compare only on the common support where every sampled source emits.
+        valid = np.all(np.asarray(polarization_power) > 0.0, axis=1)
+        ratios[num_sources] = contracted_values[valid] / analytic_values[valid]
         assert np.all(np.isfinite(ratios[num_sources]))
 
     residuals = {
