@@ -6,9 +6,8 @@ float32's smallest normal), and the ``require_x64``-guarded entry points are
 only meaningful there. Same setup as ``astrogwb_paper.runtime``.
 
 The mock-population fixtures below are thin wrappers over
-:mod:`astrogwb_mock_population`; the constants and builders live there so test modules
-can import them by a name that is unique across the workspace. See that
-module's docstring for why ``from conftest import ...`` is not an option.
+:mod:`astrogwb_mock_population`. Test modules should import shared constants
+and builders from that module rather than from ``conftest.py``.
 """
 
 from __future__ import annotations
@@ -30,15 +29,14 @@ import xarray as xr
 jax.config.update("jax_enable_x64", True)
 
 from astrogwb_mock_population import (
+    F_MAX,
+    F_MIN,
     build_mock_catalog,
     build_synthetic_weights_callback,
     load_mock_population,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
-
-F_MIN = 2.0
-F_MAX = 2048.0
 
 
 @pytest.fixture

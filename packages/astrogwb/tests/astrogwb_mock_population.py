@@ -68,6 +68,10 @@ MOCK_MAXIMUM_COMPONENT_MASS = 2.5
 #: Seed used to generate the committed fixture.
 MOCK_POPULATION_SEED = 41
 
+#: Frequency band shared by the core test suite's mock-catalog analyses.
+F_MIN = 2.0
+F_MAX = 2048.0
+
 
 def make_redshift_grid(n_grid: int = N_GRID) -> jax.Array:
     """Build the redshift grid the cosmology integrals run on."""

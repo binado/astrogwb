@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+from importlib.metadata import version
 
 import numpy as np
 import yaml
@@ -117,7 +118,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     provenance = (
         f"population={population_name} seed={args.seed} "
-        f"num_samples={args.num_samples} gwmock-pop=0.11.4"
+        f"num_samples={args.num_samples} gwmock-pop={version('gwmock-pop')}"
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     # The provenance line is written first and the column names second, so

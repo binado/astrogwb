@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import yaml
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.gwb import (
     analytic_spectral_density_from_mass_moments,
@@ -17,18 +18,54 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     madau_dickinson_rate,
 )
 from astrogwb_mock_population import (
+    F_MAX,
+    F_MIN,
     FIDUCIALS,
+    FIXTURES_DIR,
     MOCK_MAXIMUM_COMPONENT_MASS,
     MOCK_MINIMUM_COMPONENT_MASS,
+    MOCK_POPULATION_PATH,
+    MOCK_POPULATION_SEED,
     Z_MAX,
     Z_MIN,
     make_redshift_grid,
 )
-from conftest import F_MAX, F_MIN
 
 CATALOG_DF = 8.0
 SMALL_CATALOG_SIZE = 256
 LARGE_CATALOG_SIZE = 1024
+
+
+def test_population_graph_matches_shared_mock_constants() -> None:
+    config = yaml.safe_load(
+        (FIXTURES_DIR / "mock_bns_population.yaml").read_text(encoding="utf-8")
+    )
+    parameters = config["parameters"]
+
+    redshift_arguments = parameters["redshift"]["sampler"]["arguments"]
+    assert redshift_arguments["hubble_constant"] == FIDUCIALS["H0"]
+    assert redshift_arguments["omega_m"] == FIDUCIALS["Omega_m"]
+    assert redshift_arguments["gamma"] == FIDUCIALS["gamma"]
+    assert redshift_arguments["kappa"] == FIDUCIALS["kappa"]
+    assert redshift_arguments["z_peak"] == FIDUCIALS["z_peak"]
+    assert redshift_arguments["z_min"] == Z_MIN
+    assert redshift_arguments["z_max"] == Z_MAX
+
+    mass_arguments = parameters["mass_pair"]["sampler"]["arguments"]
+    assert mass_arguments["m1_min"] == MOCK_MINIMUM_COMPONENT_MASS
+    assert mass_arguments["m1_max"] == MOCK_MAXIMUM_COMPONENT_MASS
+    assert mass_arguments["m2_min"] == MOCK_MINIMUM_COMPONENT_MASS
+    assert mass_arguments["m2_max"] == MOCK_MAXIMUM_COMPONENT_MASS
+
+
+def test_committed_population_provenance_matches_shared_constants() -> None:
+    header = MOCK_POPULATION_PATH.read_text(encoding="utf-8").splitlines()[0]
+    provenance = dict(
+        field.split("=", maxsplit=1) for field in header.removeprefix("# ").split()
+    )
+
+    assert provenance["seed"] == str(MOCK_POPULATION_SEED)
+    assert provenance["num_samples"] == str(LARGE_CATALOG_SIZE)
 
 
 def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -> None:

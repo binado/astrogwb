@@ -47,10 +47,11 @@ from astrogwb.sampling import (
 )
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb_mock_population import (
+    F_MAX,
+    F_MIN,
     FIDUCIALS,
     make_redshift_grid,
 )
-from conftest import F_MAX, F_MIN
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 
 pytestmark = pytest.mark.integration
