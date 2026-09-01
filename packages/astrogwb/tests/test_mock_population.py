@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -10,7 +12,9 @@ import yaml
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.gwb import (
     analytic_spectral_density_from_mass_moments,
+    omega_gw_from_spectral_density,
     spectral_density,
+    spectral_density_from_omega_gw,
     uniform_prior_mass_moments,
 )
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
@@ -184,5 +188,106 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
         ratios[LARGE_CATALOG_SIZE],
         np.mean(ratios[LARGE_CATALOG_SIZE]),
         rtol=0.03,
+        atol=0.0,
+    )
+
+
+def _analytic_spectral_density(frequencies: jax.Array) -> jax.Array:
+    """The population spectrum the catalog contraction estimates.
+
+    The same physics with no sampling anywhere: a uniform ordered mass prior
+    over the pinned graph's component-mass bounds, the same Madau-Dickinson
+    rate, and the same ISCO truncation the catalog's polarization power was
+    built with.
+    """
+    mass_moments = uniform_prior_mass_moments(
+        frequencies,
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        minimum_component_mass=MOCK_MINIMUM_COMPONENT_MASS,
+        maximum_component_mass=MOCK_MAXIMUM_COMPONENT_MASS,
+        alpha=ISCO_ALPHA,
+    )
+    return analytic_spectral_density_from_mass_moments(
+        frequencies,
+        FIDUCIALS,
+        _source_frame_merger_rate,
+        mass_moments,
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+    )
+
+
+def test_catalog_omega_gw_matches_the_analytic_spectrum(mock_catalog_factory) -> None:
+    r"""The same comparison, carried through into :math:`\Omega_{\rm gw}` units.
+
+    ``omega_gw_from_spectral_density`` and its inverse are the units the
+    stochastic-background literature quotes in, and nothing else in this suite
+    exercises them against a realistic spectrum.
+
+    Three things are asserted, and the second is the interesting one:
+
+    1. the catalog's :math:`\Omega_{\rm gw}` matches the analytic population's
+       on the common support, at the tolerance
+       ``test_catalog_contraction_matches_the_analytic_spectrum`` uses for
+       :math:`S_h`;
+    2. the *residual is flat across frequency*. Below the smallest sampled
+       cutoff every source contributes at every bin and both spectra are
+       essentially :math:`\propto f^{-7/3}`, so the whole Monte-Carlo error
+       collapses to a single normalization offset. A frequency-dependent
+       residual there would mean the catalog and the analytic path disagree
+       about the *shape*, which no amount of resampling would fix;
+    3. the pair round-trips. :math:`4\pi^2 f^3/(3H_0^2)` and its reciprocal are
+       one multiplication each, so this holds to round-off or one of them is
+       wrong.
+    """
+    catalog = mock_catalog_factory(
+        num_sources=LARGE_CATALOG_SIZE, f_min=F_MIN, f_max=F_MAX, df=CATALOG_DF
+    )
+    frequencies = jnp.asarray(catalog.frequency.values)
+    polarization_power = jnp.asarray(catalog.polarization_power.values)
+    samples = {
+        str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
+        for name in catalog.parameter.values
+    }
+    total_merger_rate, _, _ = compute_merger_rate_distance_and_logprob(
+        FIDUCIALS, samples, redshift_grid=make_redshift_grid()
+    )
+    contracted = spectral_density(
+        polarization_power,
+        jnp.ones(LARGE_CATALOG_SIZE),
+        total_merger_rate,
+        average_mode="analytic_inclination",
+    )
+    analytic = _analytic_spectral_density(frequencies)
+
+    to_omega = partial(
+        omega_gw_from_spectral_density,
+        frequencies=frequencies,
+        hubble_constant=FIDUCIALS["H0"],
+    )
+    omega_catalog = np.asarray(to_omega(contracted))
+    omega_analytic = np.asarray(to_omega(analytic))
+
+    # The same common-support restriction the S_h comparison uses: above the
+    # smallest sampled cutoff a finite catalog can be exactly zero while the
+    # analytic population spectrum is not.
+    valid = np.all(np.asarray(polarization_power) > 0.0, axis=1)
+    assert int(np.sum(valid)) >= 8, "too few fully-supported bins to compare"
+    ratio = omega_catalog[valid] / omega_analytic[valid]
+    assert np.all(np.isfinite(ratio))
+
+    np.testing.assert_allclose(np.mean(ratio), 1.0, rtol=0.05, atol=0.0)
+    np.testing.assert_allclose(ratio, np.mean(ratio), rtol=0.03, atol=0.0)
+
+    recovered = spectral_density_from_omega_gw(
+        jnp.asarray(omega_catalog),
+        frequencies,
+        hubble_constant=FIDUCIALS["H0"],
+    )
+    np.testing.assert_allclose(
+        np.asarray(recovered)[valid],
+        np.asarray(contracted)[valid],
+        rtol=1e-12,
         atol=0.0,
     )
