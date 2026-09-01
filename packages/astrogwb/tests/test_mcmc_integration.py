@@ -48,10 +48,6 @@ from astrogwb.sampling import (
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb_mock_population import (
     FIDUCIALS,
-    MOCK_MAXIMUM_COMPONENT_MASS,
-    MOCK_MINIMUM_COMPONENT_MASS,
-    Z_MAX,
-    Z_MIN,
     make_redshift_grid,
 )
 from conftest import F_MAX, F_MIN
