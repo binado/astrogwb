@@ -56,7 +56,7 @@ FIDUCIALS: dict[str, float] = {
 #: only when the proposal log-density was evaluated on the *same* grid as the
 #: target, so a test that built its own grid at a different resolution would
 #: silently pick up interpolation-level weights.
-Z_MIN = 0.0
+Z_MIN = 0.3
 Z_MAX = 20.0
 N_GRID = 256
 
@@ -94,10 +94,10 @@ def load_mock_population() -> dict[str, np.ndarray]:
 def build_mock_catalog(
     population: dict[str, np.ndarray],
     *,
-    num_sources: int = 256,
-    f_min: float = 10.0,
-    f_max: float = 512.0,
-    df: float = 2.0,
+    num_sources: int = 1024,
+    f_min: float = 2.0,
+    f_max: float = 4096.0,
+    df: float = 8.0,
 ) -> xr.Dataset:
     """Build a real ``WaveformCatalog`` from the committed population draw.
 
@@ -115,11 +115,13 @@ def build_mock_catalog(
     """
     # A prefix, not a random subsample, so catalog construction is deterministic.
     parameters = {name: values[:num_sources] for name, values in population.items()}
-    # Exact multiples of df, so validate_catalog's 64-ULP uniform-spacing check
-    # passes on the stored values rather than on however np.arange happens to
-    # accumulate float error over the band.
+    # Form every bin from its integer index rather than accumulating ``df``.
+    # The grid starts at ``f_min`` even when it is not an integer multiple of
+    # ``df`` (the default 2 Hz lower bound with df=8 Hz is the motivating case)
+    # and ends at the greatest grid point not exceeding ``f_max``.
+    num_frequency_bins = int(np.floor((f_max - f_min) / df)) + 1
     frequencies = np.asarray(
-        df * np.arange(round(f_min / df), round(f_max / df) + 1), dtype=np.float64
+        f_min + df * np.arange(num_frequency_bins), dtype=np.float64
     )
 
     _, luminosity_distance, _ = compute_merger_rate_distance_and_logprob(
@@ -167,9 +169,7 @@ def build_synthetic_weights_callback(
     parameter under test rather than to the catalog.
     """
     redshift_grid = make_redshift_grid()
-    samples: dict[str, jax.Array] = {
-        "redshift": jnp.linspace(0.01, Z_MAX - 0.01, n_samples)
-    }
+    samples: dict[str, jax.Array] = {"redshift": jnp.linspace(Z_MIN, Z_MAX, n_samples)}
     _, luminosity_distance, proposal_logprob = compute_merger_rate_distance_and_logprob(
         FIDUCIALS, samples, redshift_grid=redshift_grid
     )

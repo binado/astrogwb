@@ -81,7 +81,7 @@ parameters:
     sampler:
       function: madau_dickinson_redshift
       arguments:
-        z_min: 0.0
+        z_min: 0.3
         z_max: 20.0
         gamma: 1.42
         kappa: 4.62

@@ -46,7 +46,12 @@ import xarray as xr
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
-from astrogwb.gwb import analytic_spectral_density, spectral_density, spectral_snr
+from astrogwb.gwb import (
+    analytic_spectral_density_from_mass_moments,
+    spectral_density,
+    spectral_snr,
+    uniform_prior_mass_moments,
+)
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     amplitude_H0_fn,
     compute_merger_rate_distance_and_logprob,
@@ -201,9 +206,7 @@ def _build_analysis_inputs(
             df,
         )
     )
-    # A guard, not a tolerance: it fires only if a noise curve or the band has
-    # moved far enough to invalidate the linear-regime reasoning above.
-    assert 20.0 <= snr <= 200.0, f"injection SNR {snr} is outside the intended regime"
+    np.testing.assert_allclose(snr, target_snr, rtol=1e-12, atol=0.0)
 
     return AnalysisInputs(
         polarization_power=polarization_power,
@@ -308,19 +311,32 @@ def _reconstruct_h0(posterior: dict, amplitude_grid: jax.Array) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Catalog defaults
+# --------------------------------------------------------------------------- #
+def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -> None:
+    """The realistic default trades frequency resolution for catalog size."""
+    catalog = mock_catalog_factory()
+    frequencies = np.asarray(catalog.frequency.values)
+    redshift = np.asarray(catalog.source_parameters.sel(parameter="redshift").values)
+
+    assert catalog.sizes == {"frequency": 512, "sample": 1024, "parameter": 5}
+    assert float(catalog.attrs["df"]) == 8.0
+    assert float(catalog.attrs["minimum_frequency"]) == 2.0
+    assert float(catalog.attrs["maximum_frequency"]) == 4096.0
+    np.testing.assert_allclose(np.diff(frequencies), 8.0, rtol=0.0, atol=0.0)
+    assert frequencies[0] == 2.0
+    assert frequencies[-1] == 4090.0
+    assert np.all(frequencies > 0.0)
+    assert np.all(redshift >= Z_MIN)
+
+
+# --------------------------------------------------------------------------- #
 # The direct model
 # --------------------------------------------------------------------------- #
 def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
     mock_catalog_factory,
 ) -> None:
-    """NUTS on ``spectral_density_model`` lands on H0_fid with the Fisher width.
-
-    Measured on the first green run (256 sources, E1/E2/E3, 10-512 Hz,
-    252 bins, T = 0.4512 yr): realised SNR 50.000, mean H0 67.73, std H0 1.335
-    against the predicted ``67.66 / 50 = 1.353`` -- a ratio of 0.987. The
-    ``rtol`` values below sit several times the chain's Monte-Carlo standard
-    error above that.
-    """
+    """NUTS on ``spectral_density_model`` lands on H0_fid with the Fisher width."""
     inputs = _build_analysis_inputs(mock_catalog_factory())
 
     posterior = _run_nuts(
@@ -340,21 +356,16 @@ def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
 
     h0 = np.asarray(posterior["H0"])
     assert float(np.mean(h0)) == pytest.approx(FIDUCIALS["H0"], rel=0.01)
-    assert float(np.std(h0)) == pytest.approx(FIDUCIALS["H0"] / inputs.snr, rel=0.15)
+    np.testing.assert_allclose(
+        np.std(h0), FIDUCIALS["H0"] / inputs.snr, rtol=0.15, atol=0.0
+    )
 
 
 # --------------------------------------------------------------------------- #
 # The amplitude-marginalized model
 # --------------------------------------------------------------------------- #
 def test_amplitude_marginalized_model_reconstructs_h0(mock_catalog_factory) -> None:
-    """H0 is marginalized out of the chain and drawn back to the same posterior.
-
-    Measured on the first green run: mean ``amplitude_mle`` 0.99973, mean
-    ``template_optimal_snr`` 50.015 against the independently computed
-    ``spectral_snr`` of 50.000 (a relative deviation of 3e-4), reconstructed H0
-    67.78 +/- 1.390 against the predicted width 1.353, and
-    ``quadrature_effective_nodes`` 20.1-21.0 of 512.
-    """
+    """H0 is marginalized out of the chain and drawn back to the same posterior."""
     inputs = _build_analysis_inputs(mock_catalog_factory())
     # Built once and shared by the chain and the reconstruction: the
     # reconstruction is only exact against the very density the factor site
@@ -384,8 +395,11 @@ def test_amplitude_marginalized_model_reconstructs_h0(mock_catalog_factory) -> N
     # Per draw they scatter by ~1%: Omega_m is sampled, so an individual
     # template is not the injection.
     assert float(np.mean(posterior["amplitude_mle"])) == pytest.approx(1.0, rel=5e-3)
-    assert float(np.mean(posterior["template_optimal_snr"])) == pytest.approx(
-        inputs.snr, rel=5e-3
+    np.testing.assert_allclose(
+        np.mean(posterior["template_optimal_snr"]),
+        inputs.snr,
+        rtol=5e-3,
+        atol=0.0,
     )
 
     reconstructed = _reconstruct_h0(posterior, amplitude_grid)
@@ -399,7 +413,9 @@ def test_amplitude_marginalized_model_reconstructs_h0(mock_catalog_factory) -> N
 
     h0 = np.asarray(reconstructed["H0"])
     assert float(np.mean(h0)) == pytest.approx(FIDUCIALS["H0"], rel=0.01)
-    assert float(np.std(h0)) == pytest.approx(FIDUCIALS["H0"] / inputs.snr, rel=0.15)
+    np.testing.assert_allclose(
+        np.std(h0), FIDUCIALS["H0"] / inputs.snr, rtol=0.15, atol=0.0
+    )
 
     # A health check on the amplitude grid: the conditional is ~1/rho wide over
     # a 120-wide prior, so a grid too coarse to resolve it collapses to a
@@ -416,9 +432,6 @@ def test_marginalized_and_direct_h0_posteriors_agree(mock_catalog_factory) -> No
     this adds is coverage of the full pipeline -- NUTS, ``Predictive``, the
     reconstruction conditional -- on realistic data, which is where a
     mismatched conditional would actually bite.
-
-    Measured on the first green run: direct 67.62 +/- 1.430, marginalized
-    67.78 +/- 1.390 -- the means differ by 0.16 and the widths by 2.8%.
     """
     inputs = _build_analysis_inputs(mock_catalog_factory())
     amplitude_grid = quadrature_grid(H0_PRIOR, num_nodes=AMPLITUDE_NUM_NODES)
@@ -442,35 +455,19 @@ def test_marginalized_and_direct_h0_posteriors_agree(mock_catalog_factory) -> No
     assert float(np.mean(marginalized_h0)) == pytest.approx(
         float(np.mean(direct_h0)), abs=0.5
     )
-    assert float(np.std(marginalized_h0)) == pytest.approx(
-        float(np.std(direct_h0)), rel=0.2
+    np.testing.assert_allclose(
+        np.std(marginalized_h0), np.std(direct_h0), rtol=0.2, atol=0.0
     )
 
 
 # --------------------------------------------------------------------------- #
 # The catalog against the closed-form spectrum
 # --------------------------------------------------------------------------- #
-def _uniform_ordered_mass_prior(
-    mass_1: jax.Array, _mass_2: jax.Array, _hyperparameters
-) -> jax.Array:
-    """The graph's ``joint_uniform_mass_pair`` block, as a normalized density.
-
-    Uniform on the ordered component-mass triangle:
-    ``p = 2 / (m_max - m_min)**2`` for ``m_min <= m2 <= m1 <= m_max``. The
-    analytic integrator restricts to that triangle itself, so the density is
-    constant over everything it evaluates.
-    """
-    return jnp.full_like(
-        mass_1,
-        2.0 / (MOCK_MAXIMUM_COMPONENT_MASS - MOCK_MINIMUM_COMPONENT_MASS) ** 2,
-    )
-
-
 def _source_frame_merger_rate(redshift: jax.Array, hyperparameters) -> jax.Array:
     r"""Absolute source-frame merger-rate density in Gpc^-3 yr^-1.
 
     Deliberately *without* the source-to-detector time dilation.
-    :func:`analytic_spectral_density` carries that inside its
+    :func:`analytic_spectral_density_from_mass_moments` carries that inside its
     :math:`(1 + z)^{4/3}` factor, whereas
     :func:`compute_merger_rate_distance_and_logprob` applies ``/(1 + z)``
     inside its own density, :math:`p(z) \propto \psi(z)/(1+z)\,dV_c/dz`.
@@ -488,53 +485,19 @@ def _source_frame_merger_rate(redshift: jax.Array, hyperparameters) -> jax.Array
 def test_catalog_contraction_matches_the_analytic_spectrum(
     mock_catalog_factory,
 ) -> None:
-    r"""The mock catalog reproduces the closed-form spectrum with no free factor.
-
-    Two entirely independent paths to :math:`S_h(f)`: a Monte-Carlo sum over
-    1024 drawn sources with per-source :func:`inspiral_polarization_power`, and
-    the closed-form redshift/mass-moment integral of
-    :func:`analytic_spectral_density`. They share only the population's
-    definition, not a line of code.
-
-    There is no free normalization: the :math:`\iota = 0` catalog times the
-    ``analytic_inclination`` ratio :math:`\langle g\rangle/g(0) = 0.4` gives
-    :math:`\langle g\rangle = 0.8` per source, which is the average already
-    folded into ``_ASTROPHYSICAL_STRAIN_COEFFICIENT``.
-
-    Measured on the first green run: the ratio is **0.894**, flat to 0.9%
-    across the band. The residual 10.6% is Monte-Carlo error in the 1024-source
-    draw, not a systematic -- the measured standard error of the mean per-source
-    power at 10 Hz is 8.2% at this ``N`` (the :math:`M_c^{5/3}/d_L^2`
-    distribution is heavy-tailed, so the effective sample size is well below
-    ``N``), and extending the same draw gives ratios 1.12 at N=16384, 1.030 at
-    N=65536 and 1.008 at N=131072, converging on unity. The flatness assertion
-    is the sharp half: it tests the :math:`f^{-7/3}` scaling and the
-    mass/redshift cutoff structure independently of the normalization.
-    """
-    catalog = mock_catalog_factory(num_sources=1024)
-    frequencies = jnp.asarray(catalog.frequency.values)
-    polarization_power = jnp.asarray(catalog.polarization_power.values)
-    samples = {
-        str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
-        for name in catalog.parameter.values
+    r"""Larger Monte-Carlo catalogs converge toward the analytic spectrum."""
+    catalogs = {
+        num_sources: mock_catalog_factory(
+            num_sources=num_sources,
+            f_min=F_MIN,
+            f_max=F_MAX,
+            df=8.0,
+        )
+        for num_sources in (256, 1024)
     }
-    num_sources = polarization_power.shape[1]
-
-    total_merger_rate, _, _ = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, samples, redshift_grid=make_redshift_grid()
-    )
-    contracted = spectral_density(
-        polarization_power,
-        jnp.ones(num_sources),
-        total_merger_rate,
-        average_mode="analytic_inclination",
-    )
-
-    analytic = analytic_spectral_density(
+    frequencies = jnp.asarray(catalogs[1024].frequency.values)
+    mass_moments = uniform_prior_mass_moments(
         frequencies,
-        FIDUCIALS,
-        _source_frame_merger_rate,
-        _uniform_ordered_mass_prior,
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
         minimum_component_mass=MOCK_MINIMUM_COMPONENT_MASS,
@@ -542,11 +505,40 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
         # The same truncation the catalog's polarization power was built with.
         alpha=ISCO_ALPHA,
     )
+    analytic = analytic_spectral_density_from_mass_moments(
+        frequencies,
+        FIDUCIALS,
+        _source_frame_merger_rate,
+        mass_moments,
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+    )
 
-    ratio = np.asarray(contracted / analytic)
-    assert np.all(np.isfinite(ratio))
-    # Normalization, at the measured Monte-Carlo error of a 1024-source draw.
-    assert float(np.mean(ratio)) == pytest.approx(1.0, rel=0.15)
+    ratios: dict[int, np.ndarray] = {}
+    for num_sources, catalog in catalogs.items():
+        polarization_power = jnp.asarray(catalog.polarization_power.values)
+        samples = {
+            str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
+            for name in catalog.parameter.values
+        }
+        total_merger_rate, _, _ = compute_merger_rate_distance_and_logprob(
+            FIDUCIALS, samples, redshift_grid=make_redshift_grid()
+        )
+        contracted = spectral_density(
+            polarization_power,
+            jnp.ones(num_sources),
+            total_merger_rate,
+            average_mode="analytic_inclination",
+        )
+        ratios[num_sources] = np.asarray(contracted / analytic)
+        assert np.all(np.isfinite(ratios[num_sources]))
+
+    residuals = {
+        num_sources: float(np.sqrt(np.mean((ratio - 1.0) ** 2)))
+        for num_sources, ratio in ratios.items()
+    }
+    assert residuals[1024] < residuals[256]
+    np.testing.assert_allclose(np.mean(ratios[1024]), 1.0, rtol=0.05, atol=0.0)
     # Shape: the ratio must be flat across the band, which is what pins the
     # f^-7/3 scaling and the cutoff structure independently of normalization.
-    assert float(np.std(ratio) / np.mean(ratio)) < 0.03
+    np.testing.assert_allclose(ratios[1024], np.mean(ratios[1024]), rtol=0.03, atol=0.0)
