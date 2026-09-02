@@ -54,6 +54,10 @@ test-notebooks:
     uv run --group notebook jupytext --to notebook --execute \
         notebooks/catalog_convergence.py
 
+# Convert notebook from py:percent format to .ipynb
+convert-notebooks:
+    uv run --group notebook jupytext --to notebook notebooks/*.py
+
 # The publishable core distribution.
 build-core:
     uv build --package astrogwb --no-sources

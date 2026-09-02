@@ -20,6 +20,7 @@ members = ["packages/*"]
 # in through astrogwb-paper's `notebook` extra rather than re-listed here.
 notebook = [
     "astrogwb-paper[notebook]",
+    "ipykernel>=7.3.0",
     "jupytext>=1.19",
 ]
 dev = [

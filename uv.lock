@@ -463,6 +463,7 @@ dev = [
 ]
 notebook = [
     { name = "astrogwb-paper", extra = ["notebook"] },
+    { name = "ipykernel" },
     { name = "jupytext" },
 ]
 
@@ -478,6 +479,7 @@ dev = [
 ]
 notebook = [
     { name = "astrogwb-paper", extras = ["notebook"], editable = "packages/astrogwb-paper" },
+    { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "jupytext", specifier = ">=1.19" },
 ]
 
