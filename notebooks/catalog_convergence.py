@@ -358,6 +358,11 @@ def make_redshift_grid() -> jax.Array:
 # catalog built at a different resolution would invalidate every result below
 # while looking perfectly healthy. The `grid` attribute records which of the two
 # a file holds.
+#
+# Each cell below ends by displaying its dataset: the rendering carries the
+# shape and the grid, the attributes the rest of the provenance -- population,
+# seed, source count, package version, and the total merger rate, which
+# `unpack` derives and stamps because the cache does not store it.
 
 
 # %%
@@ -464,36 +469,29 @@ def unpack(
     return frequencies, power, catalog_samples, merger_rate, logprob
 
 
-def describe(catalog: xr.Dataset, merger_rate: jax.Array) -> None:
-    """Print what was actually built or loaded."""
-    frequencies = np.asarray(catalog.frequency.values)
-    print(f"  shape        {dict(catalog.sizes)}")
-    print(
-        f"  grid         {frequencies[0]:g}-{frequencies[-1]:g} Hz, "
-        f"df = {float(catalog.attrs['df']):g} Hz"
-    )
-    print(f"  sources      {NUM_SOURCES}, seed {POPULATION_SEED}")
-    print(f"  gwmock-pop   {catalog.attrs['gwmock_pop_version']}")
-    print(f"  total merger rate {float(merger_rate):.6e} /s")
-
-
 # The wide, coarse grid: the Omega_gw comparison and the Monte-Carlo
 # convergence below both run on this one.
 wide_catalog = load_or_build_catalog(
     df=OMEGA_DF, f_max=OMEGA_F_MAX, grid="omega", path=OMEGA_CATALOG_PATH
 )
 wide_frequencies, wide_power, wide_samples, wide_merger_rate, _ = unpack(wide_catalog)
-describe(wide_catalog, wide_merger_rate)
+# Derived by unpack from the guarded fiducials and the stored samples, so
+# stamped for the repr below rather than persisted in the cache file.
+wide_catalog.attrs["total_merger_rate_per_s"] = float(wide_merger_rate)
 
+wide_catalog
+
+# %%
 # The narrow, fine grid: everything from the SNR section on.
-
 catalog = load_or_build_catalog(
     df=FINE_DF, f_max=SNR_F_MAX, grid="snr", path=SNR_CATALOG_PATH
 )
 fine_frequencies, fine_power, samples, total_merger_rate, proposal_logprob = unpack(
     catalog
 )
-describe(catalog, total_merger_rate)
+catalog.attrs["total_merger_rate_per_s"] = float(total_merger_rate)
+
+catalog
 
 # %% [markdown]
 # ## Analytic vs sample-mean $\Omega_{\rm gw}$
