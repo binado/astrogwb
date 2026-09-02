@@ -55,9 +55,15 @@
 # %%
 import importlib.metadata
 import os
+import warnings
 from functools import partial
 from pathlib import Path
 from typing import Any
+
+# lal warns about SWIG stdout redirection on import, but only under IPython --
+# so it fires in Jupyter and under `jupytext --execute`, not in a terminal. It
+# is pulled in transitively by astrogwb.detector, so the filter goes first.
+warnings.filterwarnings("ignore", "Wswiglal-redir-stdio")
 
 import jax
 import jax.numpy as jnp
@@ -103,6 +109,13 @@ plt.rcParams.update({"figure.dpi": 120, "figure.constrained_layout.use": True})
 # polarization power is of order 1e-47 Hz^-2 and the likelihood contracts it
 # against 1/S_eff^2 -- both underflow float32.
 jax.config.update("jax_enable_x64", True)
+
+# Imported here, and not with the block above, because either arviz package
+# imported *before* numpyro leaves `numpyro.distributions.distribution` unbound
+# on its parent package -- and `numpyro.factor`, which model C scores through,
+# reaches for exactly that attribute. It fails inside NUTS, far from the cause.
+import arviz_base as azb
+import arviz_plots as azp
 
 # %% [markdown]
 # ## Notebook configuration
@@ -579,12 +592,18 @@ model_kwargs: dict[str, object] = {
 }
 
 
-def run_nuts(model, *, init_values: dict[str, float], seed: int = SEED) -> dict:
+def run_nuts(
+    model, *, init_values: dict[str, float], seed: int = SEED
+) -> tuple[dict, MCMC]:
     """Run NUTS with the model data passed dynamically through `MCMC.run`.
 
     Passing the arrays through `run` rather than baking them into the model
     with `partial` lets the three chains below share one XLA compilation: the
     shapes are identical, so only the traced structure has to match.
+
+    The `MCMC` object comes back alongside the samples because `arviz` builds
+    its `InferenceData` from it, not from the sample dict: the sampler carries
+    the divergences, tree depths, and chain structure a bare dict has lost.
     """
     kernel = NUTS(
         model,
@@ -604,7 +623,7 @@ def run_nuts(model, *, init_values: dict[str, float], seed: int = SEED) -> dict:
         jit_model_args=True,
     )
     mcmc.run(jax.random.PRNGKey(seed), **model_kwargs)
-    return mcmc.get_samples()
+    return mcmc.get_samples(), mcmc
 
 
 # %% [markdown]
@@ -620,7 +639,7 @@ model_a = partial(
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights,
     priors={"H0": H0_PRIOR},
 )
-posterior_a = run_nuts(model_a, init_values={"H0": FIDUCIALS["H0"]})
+posterior_a, mcmc_a = run_nuts(model_a, init_values={"H0": FIDUCIALS["H0"]})
 print(f"H0 = {np.mean(posterior_a['H0']):.4f} +/- {np.std(posterior_a['H0']):.4f}")
 print(
     f"relative ESS = {np.mean(np.asarray(posterior_a['importance_relative_ess'])):.12f}"
@@ -641,7 +660,7 @@ model_b = partial(
     merger_rate_and_log_weights_fn=merger_rate_and_log_weights,
     priors={"H0": H0_PRIOR, "Omega_m": OMEGA_M_PRIOR},
 )
-posterior_b = run_nuts(
+posterior_b, mcmc_b = run_nuts(
     model_b, init_values={"H0": FIDUCIALS["H0"], "Omega_m": FIDUCIALS["Omega_m"]}
 )
 print(f"H0      = {np.mean(posterior_b['H0']):.4f} +/- {np.std(posterior_b['H0']):.4f}")
@@ -676,7 +695,7 @@ model_c = partial(
     amplitude_grid=amplitude_grid,
     priors={"Omega_m": OMEGA_M_PRIOR},
 )
-posterior_c = run_nuts(model_c, init_values={"Omega_m": FIDUCIALS["Omega_m"]})
+posterior_c, mcmc_c = run_nuts(model_c, init_values={"Omega_m": FIDUCIALS["Omega_m"]})
 
 # A numpyro.factor publishes no draws, so H0 is absent from the chain itself.
 print("chain sites:", sorted(posterior_c))
@@ -718,24 +737,59 @@ print(
 # A, B, and C should be indistinguishable up to Monte-Carlo error: adding
 # $\Omega_m$ barely widens $H_0$, and marginalizing analytically is exact up to
 # quadrature error.
+#
+# The plots come from `arviz`, built straight off the `MCMC` objects.
+# `azb.from_numpyro` handles both model shapes here — `numpyro.deterministic`
+# sites become posterior variables, and `numpyro.factor` scoring is fine
+# because nothing below asks for a pointwise log-likelihood (which is why
+# `log_likelihood=False`, the default, is left alone).
+#
+# **Model C needs one repair.** Its $H_0$ is not in its chain at all: the model
+# marginalizes it out by quadrature, so it exists only in the `Predictive`
+# reconstruction above. That array is assigned onto C's posterior group under
+# the `(chain, draw)` dims the rest of the tree uses, after which C is an
+# ordinary `InferenceData` and plots like the others.
 
 # %%
-results = {
-    r"A: $H_0$": np.asarray(posterior_a["H0"]),
-    r"B: $H_0,\ \Omega_m$": np.asarray(posterior_b["H0"]),
-    r"C: $H_0$ marginalized": np.asarray(reconstructed_c["H0"]),
+idata_a = azb.from_numpyro(mcmc_a)
+idata_b = azb.from_numpyro(mcmc_b)
+idata_c = azb.from_numpyro(mcmc_c)
+
+# Reconstructed draws arrive flat; the tree wants them shaped (chain, draw).
+idata_c["posterior"] = idata_c.posterior.dataset.assign(
+    H0=(("chain", "draw"), np.asarray(reconstructed_c["H0"]).reshape(NUM_CHAINS, -1))
+)
+
+posteriors = {
+    r"A: $H_0$": idata_a,
+    r"B: $H_0,\ \Omega_m$": idata_b,
+    r"C: $H_0$ marginalized": idata_c,
 }
 
-fig, ax = plt.subplots(figsize=(7.0, 4.0))
-edges = np.linspace(
-    FIDUCIALS["H0"] - 5.0 * fisher_width, FIDUCIALS["H0"] + 5.0 * fisher_width, 60
+# %% [markdown]
+# ### The $H_0$ marginals
+#
+# `plot_dist` takes the mapping of models directly and colours by it. What it
+# cannot draw is the point of the figure — the analytic Fisher prediction the
+# three posteriors are being held against — so that goes on top of the axes it
+# hands back.
+
+# %%
+pc = azp.plot_dist(
+    posteriors,
+    var_names=["H0"],
+    backend="matplotlib",
+    # The three means coincide, so arviz's per-model annotations land on top of
+    # each other. The interval bars below the curves carry the same information.
+    visuals={"point_estimate_text": False},
 )
-for label, draws in results.items():
-    ax.hist(draws, bins=edges, density=True, histtype="step", lw=1.6, label=label)
-centres = 0.5 * (edges[:-1] + edges[1:])
+pc.add_legend("model")
+ax = pc.get_target("H0", {})
+
+grid = np.linspace(*ax.get_xlim(), 200)
 ax.plot(
-    centres,
-    np.exp(-0.5 * ((centres - FIDUCIALS["H0"]) / fisher_width) ** 2)
+    grid,
+    np.exp(-0.5 * ((grid - FIDUCIALS["H0"]) / fisher_width) ** 2)
     / (fisher_width * np.sqrt(2.0 * np.pi)),
     color="k",
     ls="--",
@@ -744,12 +798,74 @@ ax.plot(
 )
 ax.axvline(FIDUCIALS["H0"], color="k", lw=0.8)
 ax.set_xlabel(r"$H_0$ [km s$^{-1}$ Mpc$^{-1}$]")
-ax.set_ylabel("posterior density")
 ax.set_title(rf"Three routes to $H_0$ at $\rho = {snr:.0f}$")
-ax.legend(fontsize=8)
+# arviz's own legend is attached to the figure, so an axes-level one for the
+# Fisher curve sits alongside it rather than replacing it.
+ax.legend(fontsize=8, loc="upper left")
 plt.show()
 
+# %% [markdown]
+# ### The $(H_0, \Omega_m)$ plane
+#
+# This is the figure a 1-D marginal cannot give. Model C exists *because* $H_0$
+# is strictly multiplicative on the spectrum and so trades against $\Omega_m$
+# along a long curved ridge; B samples that ridge with NUTS, C integrates
+# across it by quadrature. Laying the two on one plane shows they agree on the
+# whole 2-D shape, not merely on the width of a projection.
+#
+# `plot_pair` takes a single model rather than a mapping, so B is drawn first
+# and C is overlaid onto the `PlotMatrix` it returns.
+
+
 # %%
+def pair_style(color: str) -> dict[str, dict[str, Any]]:
+    """One colour for both the scatter and the marginals of one model."""
+    return {"scatter": {"color": color, "alpha": 0.35}, "dist": {"color": color}}
+
+
+pm = azp.plot_pair(
+    idata_b,
+    var_names=["H0", "Omega_m"],
+    backend="matplotlib",
+    visuals=pair_style("tab:blue"),
+)
+azp.plot_pair(
+    idata_c,
+    var_names=["H0", "Omega_m"],
+    plot_matrix=pm,
+    visuals=pair_style("tab:orange"),
+)
+# get_target's second positional argument is the *selection* along x, not the
+# y variable; the off-diagonal panel needs both names given explicitly.
+scatter_ax = pm.get_target("H0", {}, var_name_y="Omega_m", selection_y={})
+scatter_ax.axvline(FIDUCIALS["H0"], color="k", lw=0.8)
+scatter_ax.axhline(FIDUCIALS["Omega_m"], color="k", lw=0.8)
+scatter_ax.set_xlabel(r"$H_0$ [km s$^{-1}$ Mpc$^{-1}$]")
+scatter_ax.set_ylabel(r"$\Omega_m$")
+# The diagonal panels carry arviz's raw variable names; match them to the rest.
+pm.get_target("H0", {}).set_ylabel(r"$H_0$")
+pm.get_target("Omega_m", {}).set_xlabel(r"$\Omega_m$")
+# Two independent plot_pair calls share no aesthetic mapping, so the legend is
+# built from empty proxy artists rather than from either PlotMatrix.
+scatter_ax.scatter([], [], color="tab:blue", label=r"B: $H_0,\ \Omega_m$ sampled")
+scatter_ax.scatter([], [], color="tab:orange", label=r"C: $H_0$ marginalized")
+scatter_ax.legend(fontsize=8, loc="upper right")
+plt.show()
+
+# %% [markdown]
+# ### The numbers
+#
+# The table carries what neither plot does: the posterior width against the
+# Fisher prediction, and the importance-sampling efficiency.
+
+# %%
+# One source of truth for the draws: whatever went into the figures above,
+# flattened back across chains.
+results = {
+    label: np.asarray(idata.posterior.dataset["H0"]).ravel()
+    for label, idata in posteriors.items()
+}
+
 relative_ess = {
     r"A: $H_0$": float(np.mean(np.asarray(posterior_a["importance_relative_ess"]))),
     r"B: $H_0,\ \Omega_m$": float(

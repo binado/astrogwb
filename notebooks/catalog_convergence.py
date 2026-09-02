@@ -47,8 +47,15 @@
 # %%
 import importlib.metadata
 import os
+import warnings
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
+
+# lal warns about SWIG stdout redirection on import, but only under IPython --
+# so it fires in Jupyter and under `jupytext --execute`, not in a terminal. It
+# is pulled in transitively by astrogwb.detector, so the filter goes first.
+warnings.filterwarnings("ignore", "Wswiglal-redir-stdio")
 
 import jax
 import jax.numpy as jnp
@@ -93,7 +100,19 @@ jax.config.update("jax_enable_x64", True)
 # %% [markdown]
 # ## Notebook configuration
 #
-# **Why the band is `[2, 256]` Hz and `FINE_DF` is 0.125 Hz.** With the ET
+# **Two grids, one population.** The notebook's two halves want opposite things
+# from a frequency grid, and no single choice serves both, so the same sources
+# are reduced onto two of them:
+#
+# | section | band | $\Delta f$ | why |
+# |---|---|---|---|
+# | $\Omega_{\rm gw}$, Monte-Carlo convergence | [2, 2048] Hz | 1 Hz | a pointwise ratio of two spectra, integrating nothing |
+# | SNR, $\Delta f$, likelihood | [2, 256] Hz | 0.125 Hz | must resolve the 7 Hz SNR peak |
+#
+# Both catalogs are drawn from the same `POPULATION_SEED` at the same
+# `NUM_SOURCES`, so they describe the *same sources*; only the grid differs.
+#
+# **Why the SNR band is `[2, 256]` Hz and `FINE_DF` is 0.125 Hz.** With the ET
 # effective PSD, the SNR integrand $S_h^2/S_{\rm eff}^2$ is a *narrow peak near
 # 7 Hz*: about 90% of $\rho^2$ accumulates between 5 and 11 Hz, and 99.9% below
 # 150 Hz. A reference grid must resolve that peak or it is not a reference at
@@ -101,7 +120,16 @@ jax.config.update("jax_enable_x64", True)
 # "converged" anchor is itself several parts in $10^3$ off. At
 # $\Delta f = 0.125$ Hz the SNR is stable to $10^{-5}$ under a further halving,
 # which is what makes the residuals below meaningful. Extending the band past
-# 256 Hz would only add bins that contribute nothing.
+# 256 Hz would only add bins that contribute nothing *to the SNR*.
+#
+# **Why the $\Omega_{\rm gw}$ band is `[2, 2048]` Hz and `OMEGA_DF` is 1 Hz.**
+# $\Omega_{\rm gw} \propto f^3 S_h \propto f^{2/3}$ *rises* across the whole SNR
+# band and turns over only where the population starts running out of inspiral:
+# the analytic spectrum peaks near 410 Hz and falls to zero at the ISCO cutoff
+# of the lightest, nearest binary in the population, above 1.6 kHz. A comparison
+# stopped at 256 Hz sees neither. Nothing in that section is integrated, so the
+# coarse grid costs nothing and the wider band is nearly free — 2047 bins by
+# 1024 sources is about 17 MB.
 #
 # `FINE_DF` is a negative power of two on purpose: `k * FINE_DF` is then exact
 # in binary, so the subsampled grids match a directly-built coarse grid to the
@@ -112,10 +140,23 @@ SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
 
 NUM_SOURCES = 256 if SMOKE else 1024
 
-#: Reference frequency resolution, and the analysis band.
+#: Reference frequency resolution, and the band the SNR and likelihood
+#: sections run on.
 FINE_DF = 0.125
 F_MIN = 2.0
-F_MAX = 256.0
+SNR_F_MAX = 256.0
+
+#: The Omega_gw comparison grid. Wide enough to contain the ~410 Hz spectral
+#: peak and the ~1.7 kHz analytic cutoff; df is coarse because that section
+#: compares two spectra pointwise and integrates nothing.
+OMEGA_DF = 1.0
+OMEGA_F_MAX = 2048.0
+
+#: Log-spaced band edges, exact powers of four. The lowest three bands sit
+#: entirely below the ~125 Hz common-support edge; [128, 512) straddles it and
+#: contains the spectral peak.
+BAND_EDGES: tuple[float, ...] = (2.0, 8.0, 32.0, 128.0, 512.0, 2048.0)
+NUM_BANDS = len(BAND_EDGES) - 1
 
 POPULATION_SEED = 41
 
@@ -144,8 +185,11 @@ H0_SCAN = np.linspace(60.0, 76.0, 17 if SMOKE else 33)
 #: The notebook may be executed from the repository root
 #: (`just test-notebooks`) or from its own directory (Jupyter).
 NOTEBOOK_DIR = Path("notebooks") if Path("notebooks").is_dir() else Path()
-CATALOG_PATH = NOTEBOOK_DIR / (
+SNR_CATALOG_PATH = NOTEBOOK_DIR / (
     "convergence_catalog_smoke.h5" if SMOKE else "convergence_catalog.h5"
+)
+OMEGA_CATALOG_PATH = NOTEBOOK_DIR / (
+    "convergence_omega_catalog_smoke.h5" if SMOKE else "convergence_omega_catalog.h5"
 )
 
 # %% [markdown]
@@ -291,27 +335,38 @@ def make_redshift_grid() -> jax.Array:
 
 
 # %% [markdown]
-# ## Building or loading the catalog
+# ## Building or loading the catalogs
 #
-# One catalog, at the finest resolution: every coarser grid below is obtained
-# from it by subsampling, so all of them describe the *same* sources and the
-# only thing that varies is $\Delta f$.
+# Two catalogs, drawn from one population. `build_catalog` re-runs
+# `GraphSimulator` at the same seed for each, so the two files hold the *same*
+# sources reduced onto different frequency grids — the wide 1 Hz grid the
+# $\Omega_{\rm gw}$ comparison needs, and the fine 0.125 Hz grid everything from
+# the SNR section on runs against.
+#
+# Within the fine grid, every coarser grid below is obtained by subsampling, so
+# those all describe the same sources too and the only thing that varies is
+# $\Delta f$.
 #
 # `build_catalog` discards the luminosity distance the graph produced and
 # recomputes it from `compute_merger_rate_distance_and_logprob` at the
 # fiducials, which is what makes the catalog exactly its own importance
 # proposal ($\log w \equiv 0$).
 #
-# The cached file is reused only when its stored attributes still describe the
+# A cached file is reused only when its stored attributes still describe the
 # configuration cell. That guard matters more here than in
 # `mcmc_example_models.py`: `FINE_DF` *is* the subject, so silently reusing a
 # catalog built at a different resolution would invalidate every result below
-# while looking perfectly healthy.
+# while looking perfectly healthy. The `grid` attribute records which of the two
+# a file holds.
 
 
 # %%
-def build_catalog() -> xr.Dataset:
-    """Draw the population and reduce it to a `waveform_catalog` Dataset."""
+def build_catalog(*, df: float, f_max: float, grid: str) -> xr.Dataset:
+    """Draw the population and reduce it onto the `[F_MIN, f_max]` grid.
+
+    `grid` is a label carried into the file's attributes so the two cache
+    files below are self-describing rather than distinguished by filename.
+    """
     simulator = GraphSimulator(
         POPULATION_GRAPH, source_type="bns", seed=POPULATION_SEED
     )
@@ -326,8 +381,8 @@ def build_catalog() -> xr.Dataset:
     )
     parameters["luminosity_distance"] = np.asarray(luminosity_distance)
 
-    num_bins = int(np.floor((F_MAX - F_MIN) / FINE_DF)) + 1
-    frequencies = F_MIN + FINE_DF * np.arange(num_bins, dtype=np.float64)
+    num_bins = int(np.floor((f_max - F_MIN) / df)) + 1
+    frequencies = F_MIN + df * np.arange(num_bins, dtype=np.float64)
     power = np.asarray(
         inspiral_polarization_power(frequencies, parameters, alpha=ISCO_ALPHA)
     ).T
@@ -337,12 +392,13 @@ def build_catalog() -> xr.Dataset:
         source_parameters=parameters,
         approximant="AnalyticInspiral",
         minimum_frequency=F_MIN,
-        maximum_frequency=F_MAX,
+        maximum_frequency=f_max,
         reference_frequency=F_MIN,
-        sampling_frequency=2.0 * F_MAX,
-        df=FINE_DF,
+        sampling_frequency=2.0 * f_max,
+        df=df,
         extra_attrs={
             "notebook": "catalog_convergence",
+            "grid": grid,
             "population": "madau-dickinson",
             "population_seed": POPULATION_SEED,
             "num_sources": NUM_SOURCES,
@@ -353,7 +409,9 @@ def build_catalog() -> xr.Dataset:
     )
 
 
-def catalog_matches_configuration(catalog: xr.Dataset) -> bool:
+def catalog_matches_configuration(
+    catalog: xr.Dataset, *, df: float, f_max: float
+) -> bool:
     """Does a cached catalog still describe the configuration cell?
 
     Attributes survive the netCDF round trip as numpy scalars, so both sides
@@ -361,9 +419,9 @@ def catalog_matches_configuration(catalog: xr.Dataset) -> bool:
     """
     attrs = catalog.attrs
     return (
-        float(attrs["df"]) == FINE_DF
+        float(attrs["df"]) == df
         and float(attrs["minimum_frequency"]) == F_MIN
-        and float(attrs["maximum_frequency"]) == F_MAX
+        and float(attrs["maximum_frequency"]) == f_max
         and int(attrs.get("num_sources", -1)) == NUM_SOURCES
         and int(attrs.get("population_seed", -1)) == POPULATION_SEED
         and all(
@@ -373,42 +431,69 @@ def catalog_matches_configuration(catalog: xr.Dataset) -> bool:
     )
 
 
-def load_or_build_catalog() -> xr.Dataset:
+def load_or_build_catalog(
+    *, df: float, f_max: float, grid: str, path: Path
+) -> xr.Dataset:
     """Return the cached catalog if it is still current, else rebuild it."""
-    if CATALOG_PATH.is_file():
-        cached = load_catalog(CATALOG_PATH)
-        if catalog_matches_configuration(cached):
-            print(f"Loaded {CATALOG_PATH}")
+    if path.is_file():
+        cached = load_catalog(path)
+        if catalog_matches_configuration(cached, df=df, f_max=f_max):
+            print(f"Loaded {path}")
             return cached
-        print(
-            f"{CATALOG_PATH} does not match this notebook's configuration; rebuilding"
-        )
-    catalog = build_catalog()
-    CATALOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    save_catalog(CATALOG_PATH, catalog)
-    print(f"Built and wrote {CATALOG_PATH}")
+        print(f"{path} does not match this notebook's configuration; rebuilding")
+    catalog = build_catalog(df=df, f_max=f_max, grid=grid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save_catalog(path, catalog)
+    print(f"Built and wrote {path}")
     return catalog
 
 
-catalog = load_or_build_catalog()
+def unpack(
+    catalog: xr.Dataset,
+) -> tuple[np.ndarray, np.ndarray, dict[str, jax.Array], jax.Array, jax.Array]:
+    """The five things every section wants out of a catalog."""
+    frequencies = np.asarray(catalog.frequency.values)
+    power = np.asarray(catalog.polarization_power.values)
+    catalog_samples = {
+        str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
+        for name in catalog.parameter.values
+    }
+    merger_rate, _, logprob = compute_merger_rate_distance_and_logprob(
+        FIDUCIALS, catalog_samples, redshift_grid=make_redshift_grid()
+    )
+    return frequencies, power, catalog_samples, merger_rate, logprob
 
-fine_frequencies = np.asarray(catalog.frequency.values)
-fine_power = np.asarray(catalog.polarization_power.values)
-samples = {
-    str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
-    for name in catalog.parameter.values
-}
-total_merger_rate, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-    FIDUCIALS, samples, redshift_grid=make_redshift_grid()
-)
 
-print(f"  shape        {dict(catalog.sizes)}")
-print(
-    f"  grid         {fine_frequencies[0]}-{fine_frequencies[-1]} Hz, df = {FINE_DF} Hz"
+def describe(catalog: xr.Dataset, merger_rate: jax.Array) -> None:
+    """Print what was actually built or loaded."""
+    frequencies = np.asarray(catalog.frequency.values)
+    print(f"  shape        {dict(catalog.sizes)}")
+    print(
+        f"  grid         {frequencies[0]:g}-{frequencies[-1]:g} Hz, "
+        f"df = {float(catalog.attrs['df']):g} Hz"
+    )
+    print(f"  sources      {NUM_SOURCES}, seed {POPULATION_SEED}")
+    print(f"  gwmock-pop   {catalog.attrs['gwmock_pop_version']}")
+    print(f"  total merger rate {float(merger_rate):.6e} /s")
+
+
+# The wide, coarse grid: the Omega_gw comparison and the Monte-Carlo
+# convergence below both run on this one.
+wide_catalog = load_or_build_catalog(
+    df=OMEGA_DF, f_max=OMEGA_F_MAX, grid="omega", path=OMEGA_CATALOG_PATH
 )
-print(f"  sources      {NUM_SOURCES}, seed {POPULATION_SEED}")
-print(f"  gwmock-pop   {catalog.attrs['gwmock_pop_version']}")
-print(f"  total merger rate {float(total_merger_rate):.6e} /s")
+wide_frequencies, wide_power, wide_samples, wide_merger_rate, _ = unpack(wide_catalog)
+describe(wide_catalog, wide_merger_rate)
+
+# The narrow, fine grid: everything from the SNR section on.
+
+catalog = load_or_build_catalog(
+    df=FINE_DF, f_max=SNR_F_MAX, grid="snr", path=SNR_CATALOG_PATH
+)
+fine_frequencies, fine_power, samples, total_merger_rate, proposal_logprob = unpack(
+    catalog
+)
+describe(catalog, total_merger_rate)
 
 # %% [markdown]
 # ## Analytic vs sample-mean $\Omega_{\rm gw}$
@@ -447,7 +532,7 @@ def source_frame_merger_rate(redshift: jax.Array, hyperparameters) -> jax.Array:
 
 
 mass_moments = uniform_prior_mass_moments(
-    jnp.asarray(fine_frequencies),
+    jnp.asarray(wide_frequencies),
     minimum_redshift=Z_MIN,
     maximum_redshift=Z_MAX,
     minimum_component_mass=MINIMUM_COMPONENT_MASS,
@@ -457,7 +542,7 @@ mass_moments = uniform_prior_mass_moments(
 )
 analytic_spectrum = np.asarray(
     analytic_spectral_density_from_mass_moments(
-        jnp.asarray(fine_frequencies),
+        jnp.asarray(wide_frequencies),
         FIDUCIALS,
         source_frame_merger_rate,
         mass_moments,
@@ -483,20 +568,20 @@ def contract(power: np.ndarray, catalog_samples: dict[str, jax.Array]) -> np.nda
     )
 
 
-def to_omega(spectrum: np.ndarray) -> np.ndarray:
-    """Convert a strain spectral density to the dimensionless Omega_gw."""
+def to_omega(spectrum: np.ndarray, frequencies: np.ndarray) -> np.ndarray:
+    """Convert a strain spectral density on `frequencies` to Omega_gw."""
     return np.asarray(
         omega_gw_from_spectral_density(
             jnp.asarray(spectrum),
-            jnp.asarray(fine_frequencies),
+            jnp.asarray(frequencies),
             hubble_constant=FIDUCIALS["H0"],
         )
     )
 
 
-catalog_spectrum = contract(fine_power, samples)
-omega_catalog = to_omega(catalog_spectrum)
-omega_analytic = to_omega(analytic_spectrum)
+catalog_spectrum = contract(wide_power, wide_samples)
+omega_catalog = to_omega(catalog_spectrum, wide_frequencies)
+omega_analytic = to_omega(analytic_spectrum, wide_frequencies)
 
 # Bins where *every* source still emits. Above the smallest sampled cutoff a
 # finite catalog loses sources one at a time while the analytic population
@@ -504,13 +589,26 @@ omega_analytic = to_omega(analytic_spectrum)
 # so the residual there measures the catalog's discreteness, not its Monte-
 # Carlo error. Summary statistics are quoted on the common support; the plot
 # shows the full band so the transition is visible rather than cropped away.
-common_support = np.all(fine_power > 0.0, axis=1)
-nonzero = catalog_spectrum > 0.0
+common_support = np.all(wide_power > 0.0, axis=1)
+# Both sides need guarding now that the band runs past the analytic cutoff:
+# above ~1.7 kHz the analytic spectrum is zero too, and the ratio is undefined
+# rather than merely uninteresting.
+valid = (catalog_spectrum > 0.0) & (analytic_spectrum > 0.0)
 residual = np.full_like(omega_catalog, np.nan)
-residual[nonzero] = omega_catalog[nonzero] / omega_analytic[nonzero] - 1.0
-support_edge = float(fine_frequencies[common_support][-1])
+residual[valid] = omega_catalog[valid] / omega_analytic[valid] - 1.0
+support_edge = float(wide_frequencies[common_support][-1])
+omega_peak = float(wide_frequencies[int(np.argmax(omega_analytic))])
+analytic_edge = float(wide_frequencies[analytic_spectrum > 0.0][-1])
 
 print(f"common support: {int(common_support.sum())} bins, up to {support_edge:g} Hz")
+print(f"analytic Omega_gw peaks at {omega_peak:g} Hz, ends at {analytic_edge:g} Hz")
+for probe in (support_edge, 256.0, omega_peak, 1024.0):
+    emitting = int(
+        np.sum(wide_power[int(np.argmin(np.abs(wide_frequencies - probe)))] > 0.0)
+    )
+    print(
+        f"  sources still emitting at {probe:8.0f} Hz: {emitting:5d} of {NUM_SOURCES}"
+    )
 print(
     "relative residual on the common support: "
     f"mean {np.mean(residual[common_support]):+.4f}, "
@@ -519,32 +617,40 @@ print(
 
 fig, axes = plt.subplots(2, 1, figsize=(7.0, 5.6), sharex=True, height_ratios=(2, 1))
 axes[0].loglog(
-    fine_frequencies, omega_analytic, lw=1.4, color="k", label="analytic population"
+    wide_frequencies, omega_analytic, lw=1.4, color="k", label="analytic population"
 )
 axes[0].loglog(
-    fine_frequencies[nonzero],
-    omega_catalog[nonzero],
+    wide_frequencies[valid],
+    omega_catalog[valid],
     lw=1.2,
     color="tab:blue",
     label=f"catalog, $N = {NUM_SOURCES}$",
 )
 axes[0].set_ylabel(r"$\Omega_{\rm gw}(f)$")
 axes[0].set_title(r"Catalog contraction against the analytic $\Omega_{\rm gw}$")
-axes[0].legend()
+# Both curves fall off a cliff at the cutoff; without a floor the decades of
+# empty axis below it squash the part worth looking at into a sliver.
+axes[0].set_ylim(1.0e-4 * omega_analytic.max(), 2.0 * omega_analytic.max())
+axes[0].legend(loc="lower left")
 
 axes[1].axhline(0.0, color="k", lw=0.8)
-axes[1].plot(fine_frequencies, residual, lw=1.2, color="tab:blue")
+axes[1].plot(wide_frequencies, residual, lw=1.2, color="tab:blue")
 axes[1].set_xscale("log")
 axes[1].set_xlabel("frequency [Hz]")
 axes[1].set_ylabel("relative residual")
 for ax in axes:
-    ax.axvspan(
-        fine_frequencies[0],
-        support_edge,
-        color="0.9",
-        zorder=0,
-        label=None,
-    )
+    ax.axvspan(wide_frequencies[0], support_edge, color="0.9", zorder=0)
+    ax.axvline(omega_peak, color="tab:red", lw=0.9, ls="--")
+axes[0].annotate(
+    f"analytic peak, {omega_peak:g} Hz",
+    xy=(omega_peak, 0.06),
+    xycoords=("data", "axes fraction"),
+    xytext=(-4, 0),
+    textcoords="offset points",
+    ha="right",
+    fontsize=8,
+    color="tab:red",
+)
 axes[1].annotate(
     "shaded: every source still emits",
     xy=(0.03, 0.86),
@@ -554,17 +660,26 @@ axes[1].annotate(
 plt.show()
 
 # %% [markdown]
-# The residual is **flat** across the shaded region, and that is not a
+# **Two regimes, and the plot now shows both.**
+#
+# Across the shaded region the residual is **flat**, and that is not a
 # coincidence. Below the smallest sampled cutoff every source contributes at
 # every bin, and both spectra are exactly $\propto f^{-7/3}$ there, so their
 # ratio cannot depend on frequency: the whole Monte-Carlo error collapses to a
-# single normalization offset. All the frequency *structure* lives above the
-# shaded edge, where the catalog runs out of sources one cutoff at a time and
-# the analytic curve does not.
+# single normalization offset. That is the regime the SNR lives in — the
+# integrand peaks near 7 Hz, two decades below the support edge — and it is why
+# a 1024-source catalog is an excellent estimator of the quantity the rest of
+# this notebook measures.
 #
-# That is worth knowing before reading the next section: "the residual at
-# catalog size $N$" is one number, not a curve.
-
+# Above the edge it is a poor one. The catalog runs out of sources one ISCO
+# cutoff at a time while the analytic curve, which integrates the whole
+# mass-redshift plane, does not; the residual acquires structure, turns
+# systematically negative, and at the spectral peak itself the catalog is
+# missing a third of its emitters. Both curves die by the cutoff of the
+# lightest, nearest binary the population can contain.
+#
+# So "the residual at catalog size $N$" is one number *below* the support edge
+# and a curve above it. The next section measures both, band by band.
 # %% [markdown]
 # ## Monte-Carlo convergence in catalog size
 #
@@ -589,66 +704,193 @@ plt.show()
 # have looked like, which is the question. The error bars are wide because
 # per-source power is heavy-tailed in mass and distance; that is the honest
 # amount of information in 1024 sources.
+#
+# **Resolved by frequency band.** The previous section reduced the residual to
+# a single rms over the common support, which was defensible only because the
+# residual is flat there. It is not flat above the support edge, so the error
+# is measured in each of the five bands of `BAND_EDGES` separately. Two
+# statistics come out of each realization:
+#
+# - the **rms** relative residual, which is what converges, and
+# - the **signed mean** relative residual, which is what *correlates*. An rms
+#   is positive by construction, so a correlation computed from it would report
+#   agreement between bands that share only a magnitude.
+#
+# The bands are fixed constants rather than derived from the catalog's own
+# support on purpose: the support edge *moves with $N$* — a bigger catalog
+# samples further into the tail of light, nearby binaries and so keeps emitting
+# to higher frequency — and bands that moved with it would not be comparable
+# across the sizes being compared.
 
 # %%
 rng = np.random.default_rng(RNG_SEED)
-support_analytic = omega_analytic[common_support]
 
-size_residuals: dict[int, np.ndarray] = {}
+# Bands are half-open, [lo, hi), and restricted to bins the analytic spectrum
+# actually reaches: above ~1.7 kHz there is nothing to take a ratio against.
+positive_analytic = analytic_spectrum > 0.0
+band_masks = [
+    (wide_frequencies >= low) & (wide_frequencies < high) & positive_analytic
+    for low, high in pairwise(BAND_EDGES)
+]
+band_labels = [f"[{low:g}, {high:g}) Hz" for low, high in pairwise(BAND_EDGES)]
+
+band_rms: dict[int, np.ndarray] = {}
+band_mean: dict[int, np.ndarray] = {}
+largest_curves = np.full((NUM_REALIZATIONS, wide_frequencies.size), np.nan)
+
 for size in CATALOG_SIZES:
-    draws = np.empty(NUM_REALIZATIONS)
+    rms = np.empty((NUM_REALIZATIONS, NUM_BANDS))
+    signed = np.empty((NUM_REALIZATIONS, NUM_BANDS))
     for realization in range(NUM_REALIZATIONS):
         columns = rng.integers(0, NUM_SOURCES, size=size)
         subset_omega = to_omega(
             contract(
-                fine_power[:, columns],
-                {name: values[columns] for name, values in samples.items()},
-            )
+                wide_power[:, columns],
+                {name: values[columns] for name, values in wide_samples.items()},
+            ),
+            wide_frequencies,
         )
-        draws[realization] = np.sqrt(
-            np.mean((subset_omega[common_support] / support_analytic - 1.0) ** 2)
+        # Where the subset has no source left emitting the ratio is exactly -1.
+        # That looks like a numerical artifact and is not: it is the
+        # discreteness error itself, and it is the whole content of the top
+        # band, so it is kept rather than masked out.
+        curve = np.full_like(subset_omega, np.nan)
+        curve[positive_analytic] = (
+            subset_omega[positive_analytic] / omega_analytic[positive_analytic] - 1.0
         )
-    size_residuals[size] = draws
-    print(
-        f"N = {size:5d}   rms relative residual = "
-        f"{draws.mean():.5f} +/- {draws.std(ddof=1) / np.sqrt(NUM_REALIZATIONS):.5f}"
-    )
+        for band, mask in enumerate(band_masks):
+            rms[realization, band] = np.sqrt(np.mean(curve[mask] ** 2))
+            signed[realization, band] = np.mean(curve[mask])
+        if size == CATALOG_SIZES[-1]:
+            largest_curves[realization] = curve
+    band_rms[size] = rms
+    band_mean[size] = signed
 
-sizes = np.array(CATALOG_SIZES, dtype=float)
-means = np.array([size_residuals[s].mean() for s in CATALOG_SIZES])
-errors = np.array(
-    [size_residuals[s].std(ddof=1) / np.sqrt(NUM_REALIZATIONS) for s in CATALOG_SIZES]
+header = f"{'N':>6} " + " ".join(f"{label:>16}" for label in band_labels)
+print(header)
+print("-" * len(header))
+for size in CATALOG_SIZES:
+    row = " ".join(f"{value:16.5f}" for value in band_rms[size].mean(axis=0))
+    print(f"{size:6d} {row}")
+print(
+    "\n(rms relative residual, averaged over "
+    f"{NUM_REALIZATIONS} bootstrap realizations)"
 )
 
-fig, ax = plt.subplots(figsize=(7.0, 4.0))
-ax.errorbar(sizes, means, yerr=errors, fmt="o-", lw=1.3, capsize=3, label="measured")
-ax.plot(
+# %%
+sizes = np.array(CATALOG_SIZES, dtype=float)
+colors = plt.get_cmap("viridis")(np.linspace(0.0, 0.85, NUM_BANDS))
+
+band_curves = {
+    band: (
+        np.array([band_rms[s][:, band].mean() for s in CATALOG_SIZES]),
+        np.array(
+            [
+                band_rms[s][:, band].std(ddof=1) / np.sqrt(NUM_REALIZATIONS)
+                for s in CATALOG_SIZES
+            ]
+        ),
+    )
+    for band in range(NUM_BANDS)
+}
+
+fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2))
+
+for band, (label, color) in enumerate(zip(band_labels, colors, strict=True)):
+    means, errors = band_curves[band]
+    axes[0].errorbar(
+        sizes, means, yerr=errors, fmt="o-", lw=1.3, capsize=3, color=color, label=label
+    )
+axes[0].plot(
     sizes,
-    means[0] * np.sqrt(sizes[0] / sizes),
+    band_curves[0][0][0] * np.sqrt(sizes[0] / sizes),
     ls="--",
     color="k",
     lw=1.1,
-    label=r"$\propto N^{-1/2}$, anchored at the first point",
+    label=r"$\propto N^{-1/2}$, anchored on the lowest band",
 )
-ax.set_xscale("log")
-ax.set_yscale("log")
-ax.set_xlabel("catalog size $N$")
-ax.set_ylabel("rms relative residual on the common support")
-ax.set_title("Monte-Carlo convergence of the catalog spectrum")
-ax.legend()
+axes[0].set_xscale("log")
+axes[0].set_yscale("log")
+# Open a decade under the lowest point so the six-entry legend has somewhere to
+# sit that is not on top of the curves.
+floor = min(means.min() for means, _ in band_curves.values())
+axes[0].set_ylim(bottom=0.25 * floor)
+axes[0].set_xlabel("catalog size $N$")
+axes[0].set_ylabel("rms relative residual")
+axes[0].set_title("Monte-Carlo convergence, by band")
+axes[0].legend(fontsize=7, loc="lower left")
+
+axes[1].axhline(0.0, color="k", lw=0.8)
+axes[1].axvspan(wide_frequencies[0], support_edge, color="0.9", zorder=0)
+for realization in range(NUM_REALIZATIONS):
+    axes[1].plot(
+        wide_frequencies,
+        largest_curves[realization],
+        lw=0.7,
+        alpha=0.5,
+        color="tab:blue",
+    )
+for edge in BAND_EDGES[1:-1]:
+    axes[1].axvline(edge, color="0.5", lw=0.8, ls=":")
+axes[1].set_xscale("log")
+axes[1].set_xlim(wide_frequencies[0], BAND_EDGES[-1])
+axes[1].set_xlabel("frequency [Hz]")
+axes[1].set_ylabel("signed relative residual")
+axes[1].set_title(
+    f"{NUM_REALIZATIONS} realizations at $N = {CATALOG_SIZES[-1]}$; "
+    "dotted lines are band edges"
+)
 plt.show()
 
-slope = np.polyfit(np.log(sizes), np.log(means), 1)[0]
-print(f"fitted log-log slope: {slope:+.3f}   (Monte-Carlo prediction: -0.500)")
+print(f"{'band':>16} {'fitted slope':>13}   (Monte-Carlo prediction: -0.500)")
+for band, label in enumerate(band_labels):
+    slope = np.polyfit(np.log(sizes), np.log(band_curves[band][0]), 1)[0]
+    print(f"{label:>16} {slope:+13.3f}")
+
+# %%
+correlation = np.corrcoef(band_mean[CATALOG_SIZES[-1]], rowvar=False)
+print(
+    f"Pearson correlation of the signed mean residual across {NUM_REALIZATIONS} "
+    f"realizations at N = {CATALOG_SIZES[-1]}:\n"
+)
+print(" " * 16 + " ".join(f"{label:>16}" for label in band_labels))
+for band, label in enumerate(band_labels):
+    row = " ".join(f"{value:16.3f}" for value in correlation[band])
+    print(f"{label:>16} {row}")
 
 # %% [markdown]
-# The point at $N = 1024$ sits well above the residual the actual 1024-source
-# catalog achieved a few cells up, and it should: a bootstrap resample of size
-# $N$ from an $N$-source parent contains only about 63% distinct sources, so it
-# is a *different* catalog of the same size. What the curve estimates is the
-# error of a typical size-$N$ catalog, not the error of this particular one --
-# which is a single draw from that distribution, and happens to have landed on
-# the low side.
+# **The lowest three bands are one number, not three.** Their correlation is
+# essentially 1: a realization that runs 3% high at 5 Hz runs 3% high at 100 Hz
+# too, because below the support edge every source contributes to every bin and
+# the residual is a pure normalization offset. The right panel shows the same
+# thing directly — inside the shaded region the realizations are flat, parallel
+# lines, each one a different constant. That is *why* a single rms over the
+# common support was an adequate summary before, and it is the cleanest
+# available demonstration of it.
+#
+# Above the edge the lines fan out and the correlation with the low bands
+# falls away — to about 0.6 for `[512, 2048)`. It does not fall to zero, because
+# that band still inherits the overall normalization offset the bulk of the
+# catalog sets; the missing 0.4 is the part of its error that depends on *which*
+# of the eight-odd sources still emitting at 1 kHz a given bootstrap draw
+# happened to pick up, and that is independent of how the bulk came out.
+#
+# The convergence panel splits the same way. The lowest three bands lie exactly
+# on top of one another there, so one line stands for all three; the coincidence
+# is the result, not a plotting fault. The low bands sit on the
+# $N^{-1/2}$ guide, which is what a sample mean does. The top band sits far
+# above it and barely moves with $N$: its error is not Monte-Carlo noise on a
+# well-sampled mean but the catalog running out of sources, and no amount of
+# $N^{-1/2}$ fixes a residual that is pinned near $-1$ because the estimator
+# has nothing left to average.
+#
+# The point at $N = 1024$ in the low bands sits above the residual the actual
+# 1024-source catalog achieved a few cells up, and it should: a bootstrap
+# resample of size $N$ from an $N$-source parent contains only about 63%
+# distinct sources, so it is a *different* catalog of the same size. What the
+# curve estimates is the error of a typical size-$N$ catalog, not the error of
+# this particular one — which is a single draw from that distribution, and
+# happens to have landed on the low side.
 
 # %% [markdown]
 # ## Frequency-resolution convergence
@@ -679,7 +921,7 @@ def analysis_at(factor: int) -> dict[str, Any]:
     df = factor * FINE_DF
 
     psd = jnp.asarray(effective_psd(np.asarray(frequencies), DETECTORS, sensitivities))
-    mask = frequency_mask(frequencies, fmin=F_MIN, fmax=F_MAX) & jnp.isfinite(psd)
+    mask = frequency_mask(frequencies, fmin=F_MIN, fmax=SNR_F_MAX) & jnp.isfinite(psd)
     frequencies, power, psd = apply_frequency_mask(mask, frequencies, power, psd)
     spectrum = spectral_density(
         power,
@@ -705,7 +947,7 @@ runs = {factor: analysis_at(factor) for factor in SUBSAMPLE_FACTORS}
 
 # The premise, checked rather than asserted.
 for factor in SUBSAMPLE_FACTORS:
-    direct_bins = int(np.floor((F_MAX - F_MIN) / (factor * FINE_DF))) + 1
+    direct_bins = int(np.floor((SNR_F_MAX - F_MIN) / (factor * FINE_DF))) + 1
     direct = F_MIN + factor * FINE_DF * np.arange(direct_bins, dtype=np.float64)
     assert np.array_equal(direct, fine_frequencies[::factor]), factor
 print(
@@ -797,9 +1039,15 @@ for factor in SUBSAMPLE_FACTORS:
 # normalization term $-\tfrac{1}{2}\sum_i \log(2\pi\sigma_i^2)$ therefore
 # scales with the number of bins and **does not converge to anything** — it is
 # a property of the discretization, not of the data. Only differences at fixed
-# resolution, where it cancels, are meaningful.
+# resolution, where it cancels, are meaningful. **Do not "fix" that drift** by
+# normalizing per bin: it is not a defect, and removing it would rescale the
+# ratio that does converge.
 #
-# The second panel exists so that nobody later "fixes" that drift.
+# There is no picture of the drift, because there is nothing to see. The data
+# here *is* the template at the fiducial, so the $\chi^2$ term is identically
+# zero and $\log\mathcal{L}$ **is** the normalization — two curves that
+# coincide by algebra and cannot disagree. The numbers are printed with the
+# closed-form check below instead.
 
 # %%
 weights_fn = make_merger_rate_and_log_weights_fn(
@@ -831,19 +1079,6 @@ at_fiducial = {
 }
 delta = {factor: scans[factor] - at_fiducial[factor] for factor in SUBSAMPLE_FACTORS}
 
-fig, axes = plt.subplots(1, 2, figsize=(10.0, 4.0))
-for factor in SUBSAMPLE_FACTORS:
-    axes[0].plot(
-        H0_SCAN, delta[factor], lw=1.2, label=rf"$\Delta f$ = {runs[factor]['df']:g} Hz"
-    )
-axes[0].axvline(FIDUCIALS["H0"], color="k", lw=0.8)
-axes[0].set_xlabel(r"$H_0$ [km s$^{-1}$ Mpc$^{-1}$]")
-axes[0].set_ylabel(
-    r"$\Delta\log\mathcal{L} = \log\mathcal{L}(H_0) - \log\mathcal{L}(H_0^{\rm fid})$"
-)
-axes[0].set_title("Converges: the ratio")
-axes[0].legend(fontsize=7)
-
 normalization = {
     factor: float(
         -0.5
@@ -858,36 +1093,27 @@ normalization = {
     )
     for factor, run in runs.items()
 }
-widths_all = np.array([runs[f]["df"] for f in SUBSAMPLE_FACTORS])
-axes[1].loglog(
-    widths_all,
-    [abs(at_fiducial[f]) for f in SUBSAMPLE_FACTORS],
-    "o-",
-    lw=1.3,
-    label=r"$|\log\mathcal{L}(H_0^{\rm fid})|$",
+
+fig, ax = plt.subplots(figsize=(7.0, 4.0))
+for factor in SUBSAMPLE_FACTORS:
+    ax.plot(
+        H0_SCAN, delta[factor], lw=1.2, label=rf"$\Delta f$ = {runs[factor]['df']:g} Hz"
+    )
+ax.axvline(FIDUCIALS["H0"], color="k", lw=0.8)
+ax.set_xlabel(r"$H_0$ [km s$^{-1}$ Mpc$^{-1}$]")
+ax.set_ylabel(
+    r"$\Delta\log\mathcal{L} = \log\mathcal{L}(H_0) - \log\mathcal{L}(H_0^{\rm fid})$"
 )
-axes[1].loglog(
-    widths_all,
-    [abs(normalization[f]) for f in SUBSAMPLE_FACTORS],
-    "s--",
-    lw=1.1,
-    label=r"$|-\frac{1}{2}\sum_i\log(2\pi\sigma_i^2)|$",
-)
-axes[1].set_xlabel(r"$\Delta f$ [Hz]")
-axes[1].set_ylabel("absolute log-density")
-axes[1].set_title("Does not converge: the normalization")
-axes[1].legend(fontsize=8)
+ax.set_title("Converges: the log-likelihood ratio")
+ax.legend(fontsize=7)
 plt.show()
 
 # %% [markdown]
-# The left panel's curves lie on top of one another as $\Delta f \to 0$; the
-# right panel's fall like the bin count, straight through every resolution,
-# with $\log\mathcal{L}$ and the normalization term indistinguishable.
+# The curves lie on top of one another as $\Delta f \to 0$.
 #
-# They are indistinguishable because the data here *is* the template at the
-# fiducial, so the $\chi^2$ term is identically zero and $\log\mathcal{L}$ is
-# nothing but the normalization. That also gives the ratio's residual in closed
-# form: with $S_h(H_0) = A\,S_h(H_0^{\rm fid})$ and $A = H_0^{\rm fid}/H_0$,
+# The identity $\log\mathcal{L}(H_0^{\rm fid}) = -\tfrac{1}{2}\sum_i
+# \log(2\pi\sigma_i^2)$ also gives the ratio's residual in closed form: with
+# $S_h(H_0) = A\,S_h(H_0^{\rm fid})$ and $A = H_0^{\rm fid}/H_0$,
 #
 # $$\Delta\log\mathcal{L}(H_0) = -\tfrac{1}{2}(1 - A)^2\rho^2 ,$$
 #
@@ -897,16 +1123,26 @@ plt.show()
 
 # %%
 scan_mask = np.abs(H0_SCAN - FIDUCIALS["H0"]) > 1.0
-print(
-    f"{'df [Hz]':>9} {'from Delta logL':>18} {'from SNR^2':>14} {'spread over H0':>16}"
+header = (
+    f"{'df [Hz]':>9} {'from Delta logL':>18} {'from SNR^2':>14} "
+    f"{'spread over H0':>16} {'logL(H0_fid)':>16} {'normalization':>16}"
 )
+print(header)
+print("-" * len(header))
 for factor in SUBSAMPLE_FACTORS:
     ratio = delta[factor][scan_mask] / delta[SUBSAMPLE_FACTORS[0]][scan_mask] - 1.0
     predicted = (1.0 + snr_residual[factor]) ** 2 - 1.0
     print(
         f"{runs[factor]['df']:9.3f} {ratio.mean():18.6e} {predicted:14.6e} "
-        f"{np.ptp(ratio):16.2e}"
+        f"{np.ptp(ratio):16.2e} {at_fiducial[factor]:16.6e} "
+        f"{normalization[factor]:16.6e}"
     )
+print()
+print(
+    "The last two columns are equal to every printed digit -- the chi^2 term is "
+    "identically zero here -- and both track the bin count rather than "
+    "converging. That is the discretization, not the data."
+)
 
 # %% [markdown]
 # ## Summary
