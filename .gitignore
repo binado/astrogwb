@@ -1,4 +1,5 @@
 data
+.idea/
 
 # Local Jupyter UI only; version-control notebooks/ as Jupytext py:percent .py files.
 *.ipynb
