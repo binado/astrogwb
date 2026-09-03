@@ -33,8 +33,10 @@ pip install astrogwb[simulation]
   compact-binary population model.
 - `astrogwb.sampling` exposes the caller-prepared NumPyro model.
 - `astrogwb.catalog` provides array-native catalog metadata, validation,
-  population simulation, and polarization-power generation. The optional
-  `gwmock-pop` adapter is imported only when `simulate_population` is called.
+  population simulation, and polarization-power generation.
+  `astrogwb.catalog.generator` defines the generator protocol and the
+  closed-form inspiral adapter; the optional `gwmock-pop` adapter is imported
+  only when `simulate_population` is called.
 - `astrogwb.waveform` reduces raw plus/cross polarizations to power, applies
   GW-distance corrections to plain arrays, and provides a closed-form
   quadrupolar inspiral model. Persistence and labelled-array policy stay with
@@ -58,9 +60,9 @@ A prepared population can be reduced through the common generation interface:
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.catalog import (
     AnalyticInspiralGenerator,
+    Catalog,
     FrequencyDomainWaveformMetadata,
     PopulationMetadata,
-    generate_catalog,
 )
 
 waveform_metadata = FrequencyDomainWaveformMetadata.from_bounds(
@@ -77,7 +79,7 @@ population_metadata = PopulationMetadata(
     num_samples=len(source_parameters["redshift"]),
 )
 
-catalog = generate_catalog(
+catalog = Catalog.from_generator(
     source_parameters,
     generator=AnalyticInspiralGenerator(alpha=ISCO_ALPHA),
     waveform_metadata=waveform_metadata,

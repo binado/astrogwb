@@ -13,7 +13,6 @@ from astrogwb.catalog import (
     Catalog,
     FrequencyDomainWaveformMetadata,
     PopulationMetadata,
-    generate_catalog,
     simulate_population,
 )
 from astrogwb.constants import ISCO_ALPHA
@@ -121,7 +120,7 @@ def test_waveform_metadata_accepts_float64_fft_roundoff() -> None:
     )
 
 
-def test_generate_catalog_passes_exact_grid_and_preserves_parameter_dtypes(
+def test_from_generator_passes_exact_grid_and_preserves_parameter_dtypes(
     source_parameters: dict[str, np.ndarray],
 ) -> None:
     expected_power = np.array([[1.0, 2.0], [3.0, 4.0]])
@@ -142,7 +141,7 @@ def test_generate_catalog_passes_exact_grid_and_preserves_parameter_dtypes(
             return expected_power
 
     generator = FakeGenerator()
-    catalog = generate_catalog(
+    catalog = Catalog.from_generator(
         source_parameters,
         generator=generator,
         waveform_metadata=waveform,
