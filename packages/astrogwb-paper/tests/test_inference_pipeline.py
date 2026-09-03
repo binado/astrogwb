@@ -19,7 +19,6 @@ from typing import Any
 import jax
 import numpy as np
 import pytest
-from astrogwb.waveform import make_catalog, save_catalog
 from astrogwb_paper.catalogs import CatalogSource
 from astrogwb_paper.cli.profile_model import build_potential
 from astrogwb_paper.cli.run_mcmc import run
@@ -31,6 +30,7 @@ from astrogwb_paper.config.mcmc import (
     build_run_config,
 )
 from astrogwb_paper.inference import prepare_inference_inputs, prepare_observation
+from catalog_fixtures import make_catalog, save_catalog
 from config_fixtures import example_raw
 
 pytestmark = pytest.mark.integration

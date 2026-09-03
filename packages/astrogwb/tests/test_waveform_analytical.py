@@ -24,7 +24,6 @@ from astrogwb.constants import (
 from astrogwb.waveform import (
     inclination_factor,
     inspiral_polarization_power,
-    make_catalog,
     termination_frequency,
 )
 
@@ -395,7 +394,7 @@ def test_incompatible_source_vector_lengths_are_rejected() -> None:
 
 
 def test_layout_is_catalog_ready() -> None:
-    """``(N, F)`` out; ``make_catalog`` takes the transpose to ``(F, N)``."""
+    """The analytic primitive returns sample first for a cheap final transpose."""
     frequencies = np.arange(10.0, 60.0, 10.0)
     sources = {
         "source_frame_mass_1": np.array([1.4, 1.6, 2.0]),
@@ -413,19 +412,7 @@ def test_layout_is_catalog_ready() -> None:
 
     assert power.shape == (3, frequencies.size)
     assert power.dtype == jnp.float64
-    # make_catalog validates the layout for us; a wrong orientation raises.
-    catalog = make_catalog(
-        frequencies=frequencies,
-        polarization_power=np.asarray(power).T,
-        source_parameters=sources,
-        approximant="analytical-inspiral",
-        minimum_frequency=10.0,
-        maximum_frequency=50.0,
-        reference_frequency=20.0,
-        sampling_frequency=128.0,
-        df=10.0,
-    )
-    assert catalog.sizes["sample"] == 3
+    assert np.asarray(power).T.shape == (frequencies.size, 3)
 
 
 def test_jit_matches_eager_evaluation() -> None:

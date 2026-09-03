@@ -12,9 +12,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 import yaml
-from astrogwb_paper.cli.generate_bank import main, simulate_population
+from astrogwb.catalog import PopulationMetadata, simulate_population
+from astrogwb_paper.cli.generate_bank import main
 from astrogwb_paper.config.banks import read_bank_provenance
-from gwmock_pop import GraphSimulator
 
 BNS_GRAPH = {
     "parameters": {
@@ -154,9 +154,12 @@ def _workspace(tmp_path: Path, *, num_samples: int = 4) -> Path:
 # --------------------------------------------------------------------------- #
 def test_seeded_generation_is_reproducible(tmp_path: Path) -> None:
     config = _simple_graph(tmp_path / "md.yaml", 0.0, 1.0)
+    metadata = PopulationMetadata(
+        name="test", seed=12, num_samples=1000, source_type="bns"
+    )
 
-    first = simulate_population(config, num_samples=1000, seed=12)
-    second = simulate_population(config, num_samples=1000, seed=12)
+    first = simulate_population(config, metadata=metadata)
+    second = simulate_population(config, metadata=metadata)
 
     np.testing.assert_array_equal(first["redshift"], second["redshift"])
 
@@ -172,21 +175,19 @@ def test_generation_draws_are_a_prefix_stable_stream(tmp_path: Path) -> None:
     ``CatalogSource.compose`` without touching this file.
     """
     config = _simple_graph(tmp_path / "md.yaml", 0.0, 1.0)
+    small_metadata = PopulationMetadata(
+        name="test", seed=5, num_samples=8, source_type="bns"
+    )
+    large_metadata = PopulationMetadata(
+        name="test", seed=5, num_samples=32, source_type="bns"
+    )
 
-    small = simulate_population(config, num_samples=8, seed=5)
-    large = simulate_population(config, num_samples=32, seed=5)
+    small = simulate_population(config, metadata=small_metadata)
+    large = simulate_population(config, metadata=large_metadata)
 
     np.testing.assert_array_equal(
         np.asarray(large["redshift"])[:8], np.asarray(small["redshift"])
     )
-
-
-def test_bank_generation_no_longer_mixes_components() -> None:
-    """Mixing moved to CatalogSource.compose; one bank is one component."""
-    import astrogwb_paper.cli.generate_bank as module
-
-    assert module.GraphSimulator is GraphSimulator
-    assert not hasattr(module, "MixtureSimulator")
 
 
 # --------------------------------------------------------------------------- #

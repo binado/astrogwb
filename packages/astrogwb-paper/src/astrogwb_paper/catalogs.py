@@ -15,9 +15,10 @@ from astrogwb.gwb import spectral_density
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
 )
-from astrogwb.waveform import apply_gw_distance_to_power, open_catalog
+from astrogwb.waveform import apply_gw_distance_to_power
 from numpy.typing import ArrayLike
 
+from astrogwb_paper.catalog_io import open_catalog
 from astrogwb_paper.config.mcmc import CatalogSpec, ProposalConfig
 
 #: Bank attributes both components of a mixture must agree on. Concatenating
@@ -161,10 +162,15 @@ def propagate_catalog(
     catalog: xr.Dataset, *, fiducials: dict[str, float]
 ) -> xr.Dataset:
     """Apply fiducial GW propagation to an in-memory catalog. Numpy-backed."""
-    return apply_gw_distance_to_power(
-        catalog,
+    redshift = catalog.source_parameters.sel(parameter="redshift").values
+    corrected_power = apply_gw_distance_to_power(
+        catalog.polarization_power.values,
+        redshift,
         xi_0=float(fiducials["xi_0"]),
         xi_n=float(fiducials["xi_n"]),
+    )
+    return catalog.assign(
+        polarization_power=(catalog.polarization_power.dims, corrected_power)
     )
 
 

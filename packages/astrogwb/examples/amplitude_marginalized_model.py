@@ -69,7 +69,6 @@ from astrogwb.sampling import (
     amplitude_reconstruction_model,
     quadrature_grid,
 )
-from astrogwb.waveform import load_catalog
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 
 logger = logging.getLogger(__name__)
@@ -90,6 +89,37 @@ FIDUCIALS: dict[str, float] = {
 
 #: Catalog source parameters the weights callback dereferences by name.
 REQUIRED_PARAMETERS = ("redshift", "luminosity_distance")
+
+
+def load_catalog(path: Path) -> xr.Dataset:
+    """Load and locally validate the example's external xarray input."""
+    catalog = xr.load_dataset(path, engine="h5netcdf")
+    if catalog.attrs.get("format_name") == "waveform_catalog":
+        raise ValueError(f"{path}: obsolete catalog format; regenerate the catalog")
+    if catalog.attrs.get("format_name") != "astrogwb_catalog":
+        raise ValueError(f"{path}: expected format_name='astrogwb_catalog'")
+    if catalog.attrs.get("domain") != "frequency":
+        raise ValueError(f"{path}: expected domain='frequency'")
+    if "df" not in catalog.attrs:
+        raise ValueError(f"{path}: missing required df attribute")
+    if "frequency" not in catalog.coords or "parameter" not in catalog.coords:
+        raise ValueError(f"{path}: missing frequency or parameter coordinate")
+    if "polarization_power" not in catalog or catalog.polarization_power.dims != (
+        "frequency",
+        "sample",
+    ):
+        raise ValueError(
+            f"{path}: polarization_power must have dims (frequency, sample)"
+        )
+    if "source_parameters" not in catalog or catalog.source_parameters.dims != (
+        "sample",
+        "parameter",
+    ):
+        raise ValueError(
+            f"{path}: source_parameters must have dims (sample, parameter)"
+        )
+    return catalog
+
 
 #: Plain-text help banner. The module docstring is reStructuredText and turns
 #: into an unreadable wall once argparse rewraps it.
@@ -115,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "catalog",
         type=Path,
-        help="path to a waveform_catalog HDF5 file",
+        help="path to an astrogwb_catalog HDF5 file",
     )
     parser.add_argument(
         "-o",

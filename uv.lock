@@ -207,12 +207,10 @@ source = { editable = "packages/astrogwb" }
 dependencies = [
     { name = "gwmock-noise" },
     { name = "gwmock-signal", extra = ["jax"] },
-    { name = "h5netcdf", extra = ["h5py"] },
     { name = "jax" },
     { name = "jax", marker = "sys_platform != 'linux'" },
     { name = "numpy" },
     { name = "numpyro" },
-    { name = "xarray" },
 ]
 
 [package.optional-dependencies]
@@ -238,14 +236,12 @@ requires-dist = [
     { name = "gwmock-noise", specifier = ">=0.10.1" },
     { name = "gwmock-pop", marker = "extra == 'simulation'", specifier = ">=0.11.4" },
     { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.15.0" },
-    { name = "h5netcdf", extras = ["h5py"], specifier = ">=1.8.1" },
     { name = "jax", marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
     { name = "jax", extras = ["cpu"], marker = "sys_platform != 'linux'", specifier = ">=0.11.0" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda'", specifier = ">=0.11.0" },
     { name = "jax", extras = ["tpu"], marker = "extra == 'tpu'", specifier = ">=0.11.0" },
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "numpyro", specifier = ">=0.21.0" },
-    { name = "xarray", specifier = ">=2025.1" },
 ]
 provides-extras = ["cuda", "simulation", "tpu"]
 
@@ -265,12 +261,14 @@ dependencies = [
     { name = "astrogwb" },
     { name = "gwmock-pop" },
     { name = "gwmock-signal", extra = ["jax"] },
+    { name = "h5netcdf", extra = ["h5py"] },
     { name = "jax" },
     { name = "jax", marker = "sys_platform != 'linux'" },
     { name = "numpy" },
     { name = "numpyro" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "xarray" },
 ]
 
 [package.optional-dependencies]
@@ -373,6 +371,7 @@ requires-dist = [
     { name = "gwmock-pop", specifier = ">=0.11.4" },
     { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.15.0" },
     { name = "h5netcdf", marker = "extra == 'notebook'", specifier = ">=1.8.1" },
+    { name = "h5netcdf", extras = ["h5py"], specifier = ">=1.8.1" },
     { name = "ipykernel", marker = "extra == 'notebook'", specifier = ">=7.3.0" },
     { name = "jax", marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
     { name = "jax", extras = ["cpu"], marker = "sys_platform != 'linux'", specifier = ">=0.11.0" },
@@ -385,6 +384,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "scipy", marker = "extra == 'notebook'", specifier = ">=1.10" },
+    { name = "xarray", specifier = ">=2025.1" },
     { name = "xarray", marker = "extra == 'notebook'", specifier = ">=2025.1" },
 ]
 provides-extras = ["cuda", "tpu", "notebook"]

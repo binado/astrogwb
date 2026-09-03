@@ -1,20 +1,21 @@
-"""GW-luminosity-distance correction applied to a waveform catalog."""
+"""GW-luminosity-distance correction for polarization power."""
 
 from __future__ import annotations
 
 import numpy as np
-import xarray as xr
+from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.cosmology import log_gw_em_ratio
 
 
 def apply_gw_distance_to_power(
-    catalog: xr.Dataset,
+    polarization_power: ArrayLike,
+    redshift: ArrayLike,
     *,
     xi_0: float,
     xi_n: float,
-) -> xr.Dataset:
-    """Return a fresh catalog with polarization power rescaled for live GW propagation.
+) -> NDArray[np.floating]:
+    """Return fresh polarization power rescaled for live GW propagation.
 
     Catalog polarization power is generated at the fiducial electromagnetic
     luminosity distance and therefore includes ``1 / d_L,em^4`` (power scales
@@ -25,25 +26,28 @@ def apply_gw_distance_to_power(
 
     Parameters
     ----------
-    catalog:
-        Loaded waveform catalog. ``source_parameters`` must include
-        ``redshift`` and ``luminosity_distance`` (both kept untouched).
+    polarization_power:
+        Real frequency-first array with shape ``(frequency, sample)``.
+    redshift:
+        One redshift per sample.
     xi_0, xi_n:
         Live modified-propagation parameters.
 
     Returns
     -------
-    xr.Dataset
-        New catalog with corrected ``polarization_power``. All other data
-        (``frequency``, ``source_parameters``, waveform metadata) is
-        preserved as-is.
+    numpy.ndarray
+        A new array containing the corrected polarization power.
     """
-    redshift = catalog.source_parameters.sel(parameter="redshift")
-    # log_gw_em_ratio is JAX-valued; bring it back to the host so the catalog
-    # stays a plain NumPy-backed xarray.
-    log_xi = np.asarray(log_gw_em_ratio(redshift.values, xi_0=xi_0, xi_n=xi_n))
-    inv_xi_sq = xr.DataArray(
-        np.exp(-2.0 * log_xi), dims="sample"
-    )  # power factor 1/xi(z)^2
+    power = np.asarray(polarization_power)
+    redshifts = np.asarray(redshift)
+    if power.ndim != 2:
+        raise ValueError("polarization_power must be a two-dimensional array")
+    if redshifts.ndim != 1:
+        raise ValueError("redshift must be a one-dimensional array")
+    if power.shape[1] != redshifts.shape[0]:
+        raise ValueError(
+            "redshift length must match the polarization_power sample axis"
+        )
 
-    return catalog.assign(polarization_power=catalog.polarization_power * inv_xi_sq)
+    log_xi = np.asarray(log_gw_em_ratio(redshifts, xi_0=xi_0, xi_n=xi_n))
+    return np.asarray(power * np.exp(-2.0 * log_xi)[None, :])

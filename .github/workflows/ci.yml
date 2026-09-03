@@ -92,13 +92,15 @@ jobs:
           "import importlib.util; import astrogwb;
           from importlib.metadata import requires;
           from astrogwb.detector import load_detector, load_sensitivity;
-          from astrogwb.simulation import AnalyticInspiralGenerator, generate_catalog;
+          from astrogwb.catalog import AnalyticInspiralGenerator, generate_catalog;
           requirements = requires('astrogwb') or [];
           load_detector('H1'); load_sensitivity('H1');
           assert importlib.util.find_spec('astrogwb_paper') is None;
           assert importlib.util.find_spec('astrogwb.config') is None;
           assert importlib.util.find_spec('astrogwb.runtime') is None;
           assert importlib.util.find_spec('gwmock_pop') is None;
+          assert importlib.util.find_spec('xarray') is None;
+          assert importlib.util.find_spec('h5netcdf') is None;
           assert not any(requirement.lower().startswith('gwmock-pop') and
           'extra ==' not in requirement.lower() for requirement in requirements);
           assert any(requirement.lower().startswith('gwmock-pop') and

@@ -13,9 +13,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 import xarray as xr
-from astrogwb.waveform import make_catalog, save_catalog
 from astrogwb_paper.catalogs import CatalogSource, truncate_catalog_samples
 from astrogwb_paper.config.mcmc import CatalogSpec
+from catalog_fixtures import make_catalog, save_catalog
 from pydantic import ValidationError
 
 

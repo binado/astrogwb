@@ -6,7 +6,7 @@ example works against a plain `pip install astrogwb`.
 
 ## `h0_mcmc.py` — infer H₀ with NUTS
 
-Loads a `waveform_catalog` file, builds the observed stochastic-background
+Loads an `astrogwb_catalog` file, builds the observed stochastic-background
 spectral density from it, and samples H₀ with every other hyperparameter pinned
 at its fiducial value.
 
@@ -59,9 +59,11 @@ the source repository.
 
 ### Getting a catalog
 
-Any file in the `waveform_catalog` format works — see
-`astrogwb.waveform.catalog` for the layout, and `make_catalog` / `save_catalog`
-for building one from arrays. Catalogs must carry `redshift` and
+Any file in the paper application's `astrogwb_catalog` format works. The
+examples use xarray and `h5netcdf` directly to keep persistence outside the
+scientific library. Install those dependencies separately with
+`pip install xarray 'h5netcdf[h5py]'`; `astrogwb` does not install them.
+Catalogs must carry `redshift` and
 `luminosity_distance` in their `source_parameters`, and the distances must come
 from the same cosmology as the fiducials, since the weights compare the two.
 
