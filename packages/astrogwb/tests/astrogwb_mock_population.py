@@ -20,14 +20,18 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import numpy as np
-import xarray as xr
+from astrogwb.catalog import (
+    AnalyticInspiralGenerator,
+    Catalog,
+    FrequencyDomainWaveformMetadata,
+    PopulationMetadata,
+)
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
-from astrogwb.simulation import AnalyticInspiralGenerator, generate_catalog
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -102,13 +106,13 @@ def build_mock_catalog(
     f_min: float = 2.0,
     f_max: float = 4096.0,
     df: float = 8.0,
-) -> xr.Dataset:
-    """Build a real ``WaveformCatalog`` from the committed population draw.
+) -> Catalog:
+    """Build a real ``Catalog`` from the committed population draw.
 
     The polarization power comes from
-    :class:`~astrogwb.simulation.AnalyticInspiralGenerator`, so the catalog is
+    :class:`~astrogwb.catalog.AnalyticInspiralGenerator`, so the catalog is
     a genuine closed-form inspiral bank -- no Ripple backend, no persisted
-    file -- and :func:`~astrogwb.simulation.generate_catalog` self-validates,
+    file -- and :meth:`~astrogwb.catalog.Catalog.from_generator` self-validates,
     so a malformed mock fails at construction rather than deep inside a model.
 
     ``inclination`` is a column of exact zeros: the pinned graph sets
@@ -133,23 +137,41 @@ def build_mock_catalog(
     )
     parameters["luminosity_distance"] = np.asarray(luminosity_distance)
 
-    return generate_catalog(
+    return Catalog.from_generator(
         parameters,
-        generator=AnalyticInspiralGenerator(
+        generator=AnalyticInspiralGenerator(alpha=ISCO_ALPHA),
+        waveform_metadata=FrequencyDomainWaveformMetadata.from_bounds(
+            approximant="AnalyticInspiral",
             minimum_frequency=f_min,
             maximum_frequency=f_max,
+            reference_frequency=f_min,
+            sampling_frequency=2.0 * f_max,
             df=df,
-            alpha=ISCO_ALPHA,
         ),
-        extra_attrs={
-            "fixture": MOCK_POPULATION_PATH.name,
-            "population": "madau-dickinson",
-            "population_seed": MOCK_POPULATION_SEED,
-            "num_sources": num_sources,
-            "termination_alpha": ISCO_ALPHA,
-            **{f"fiducial_{name}": value for name, value in FIDUCIALS.items()},
-        },
+        population_metadata=PopulationMetadata(
+            name="madau-dickinson",
+            seed=MOCK_POPULATION_SEED,
+            num_samples=num_sources,
+            source_type="bns",
+            provenance={
+                "fixture": MOCK_POPULATION_PATH.name,
+                "termination_alpha": ISCO_ALPHA,
+                **{f"fiducial_{name}": value for name, value in FIDUCIALS.items()},
+            },
+        ),
     )
+
+
+def catalog_samples(catalog: Catalog) -> dict[str, jax.Array]:
+    """The catalog's source parameters as JAX arrays, keyed by name.
+
+    ``Catalog.source_parameters`` is already a ``Mapping[str, NDArray]`` keyed by
+    name, so this only crosses into JAX -- which every model in the suite wants
+    and no test should have to restate.
+    """
+    return {
+        name: jnp.asarray(values) for name, values in catalog.source_parameters.items()
+    }
 
 
 def build_synthetic_weights_callback(

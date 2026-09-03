@@ -39,7 +39,7 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
-import xarray as xr
+from astrogwb.catalog import Catalog
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
@@ -51,6 +51,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb_mock_population import (
     FIDUCIALS,
     build_mock_catalog,
+    catalog_samples,
     make_redshift_grid,
 )
 
@@ -80,7 +81,7 @@ FIRST_STEP_TOLERANCE = 5e-3
 
 
 @pytest.fixture(scope="module")
-def fine_catalog(mock_population: dict[str, np.ndarray]) -> xr.Dataset:
+def fine_catalog(mock_population: dict[str, np.ndarray]) -> Catalog:
     """The reference catalog every coarser grid is subsampled from."""
     return build_mock_catalog(
         mock_population,
@@ -93,7 +94,7 @@ def fine_catalog(mock_population: dict[str, np.ndarray]) -> xr.Dataset:
 
 def test_subsampling_a_fine_catalog_matches_a_coarse_one(
     mock_population: dict[str, np.ndarray],
-    fine_catalog: xr.Dataset,
+    fine_catalog: Catalog,
 ) -> None:
     """``[::k]`` of a fine catalog *is* the catalog built at ``k * df``.
 
@@ -103,8 +104,8 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
     power-of-two ``df``, so anything less than bit-for-bit agreement means the
     grid construction changed.
     """
-    fine_frequencies = np.asarray(fine_catalog.frequency.values)
-    fine_power = np.asarray(fine_catalog.polarization_power.values)
+    fine_frequencies = np.asarray(fine_catalog.waveform_metadata.frequencies)
+    fine_power = np.asarray(fine_catalog.polarization_power)
 
     for factor in SUBSAMPLE_FACTORS:
         coarse = build_mock_catalog(
@@ -115,15 +116,16 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
             df=factor * FINE_DF,
         )
         np.testing.assert_array_equal(
-            fine_frequencies[::factor], np.asarray(coarse.frequency.values)
+            fine_frequencies[::factor],
+            np.asarray(coarse.waveform_metadata.frequencies),
         )
         np.testing.assert_array_equal(
-            fine_power[::factor], np.asarray(coarse.polarization_power.values)
+            fine_power[::factor], np.asarray(coarse.polarization_power)
         )
 
 
 def _analysis_at(
-    catalog: xr.Dataset, factor: int, sensitivities: Mapping[str, Any]
+    catalog: Catalog, factor: int, sensitivities: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Re-derive the masked analysis inputs on the grid coarsened by ``factor``.
 
@@ -131,8 +133,8 @@ def _analysis_at(
     subsampled themselves, so nothing about the coarse analysis is inherited
     from the fine one except the sources.
     """
-    frequencies = jnp.asarray(catalog.frequency.values)[::factor]
-    polarization_power = jnp.asarray(catalog.polarization_power.values)[::factor]
+    frequencies = jnp.asarray(catalog.waveform_metadata.frequencies)[::factor]
+    polarization_power = jnp.asarray(catalog.polarization_power)[::factor]
     # The line this module exists to protect: df tracks the subsampling. Leave
     # it at the catalog's stored value and the SNR falls by exactly sqrt(k),
     # which is indistinguishable from convergence by eye.
@@ -156,14 +158,9 @@ def _analysis_at(
 
 
 @pytest.fixture(scope="module")
-def resolutions(fine_catalog: xr.Dataset) -> dict[int, dict[str, Any]]:
+def resolutions(fine_catalog: Catalog) -> dict[int, dict[str, Any]]:
     """Masked analysis inputs, the injection, and SNR^2, at every resolution."""
-    samples = {
-        str(name): jnp.asarray(
-            fine_catalog.source_parameters.sel(parameter=name).values
-        )
-        for name in fine_catalog.parameter.values
-    }
+    samples = catalog_samples(fine_catalog)
     redshift_grid = make_redshift_grid()
     total_merger_rate, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
         FIDUCIALS, samples, redshift_grid=redshift_grid

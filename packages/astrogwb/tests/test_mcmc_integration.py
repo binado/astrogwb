@@ -28,7 +28,7 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
-import xarray as xr
+from astrogwb.catalog import Catalog
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
@@ -50,6 +50,7 @@ from astrogwb_mock_population import (
     F_MAX,
     F_MIN,
     FIDUCIALS,
+    catalog_samples,
     make_redshift_grid,
 )
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
@@ -107,7 +108,7 @@ class MarginalizedResult(NamedTuple):
 
 
 def _build_analysis_inputs(
-    catalog: xr.Dataset,
+    catalog: Catalog,
     *,
     target_snr: float = TARGET_SNR,
 ) -> AnalysisInputs:
@@ -119,13 +120,10 @@ def _build_analysis_inputs(
     weights, load the network effective PSD, and mask out-of-band and
     non-finite bins.
     """
-    frequencies = jnp.asarray(catalog.frequency.values)
-    df = float(catalog.attrs["df"])
-    polarization_power = jnp.asarray(catalog.polarization_power.values)
-    samples = {
-        str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
-        for name in catalog.parameter.values
-    }
+    frequencies = jnp.asarray(catalog.waveform_metadata.frequencies)
+    df = catalog.waveform_metadata.df
+    polarization_power = jnp.asarray(catalog.polarization_power)
+    samples = catalog_samples(catalog)
     num_sources = polarization_power.shape[1]
     redshift_grid = make_redshift_grid()
 

@@ -2,7 +2,7 @@
 
 Draws sources from an explicitly supplied population graph and writes the
 selected columns to an explicitly supplied CSV. The core test suite turns the
-committed draw into a real ``WaveformCatalog`` without touching a Ripple
+committed draw into a real ``Catalog`` without touching a Ripple
 backend or a persisted bank.
 
 The repository's canonical invocation is::
@@ -39,7 +39,7 @@ from importlib.metadata import version
 
 import numpy as np
 import yaml
-from astrogwb.simulation import simulate_population
+from astrogwb.catalog import PopulationMetadata, simulate_population
 
 #: Columns written, in order. ``luminosity_distance`` is deliberately *not*
 #: among them: the test factory recomputes it from
@@ -99,9 +99,12 @@ def main(argv: list[str] | None = None) -> None:
 
     population = simulate_population(
         args.population,
-        num_samples=args.num_samples,
-        source_type="bns",
-        seed=args.seed,
+        metadata=PopulationMetadata(
+            name=population_name,
+            seed=args.seed,
+            num_samples=args.num_samples,
+            source_type="bns",
+        ),
     )
     missing = [name for name in COLUMNS if name not in population]
     if missing:
