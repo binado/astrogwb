@@ -42,10 +42,12 @@ jobs:
         with:
           python-version: "3.12"
       - uses: extractions/setup-just@v3
-      - name: Verify ORF reference fixtures are present
+      - name: Verify reference fixtures are present
         run: |
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference.npz
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference_et_triangle.npz
+          test -f packages/astrogwb/tests/fixtures/mock_bns_population.yaml
+          test -f packages/astrogwb/tests/fixtures/mock_bns_population.csv
       - run: just test-core
 
   test-paper:
@@ -68,10 +70,12 @@ jobs:
         with:
           python-version: "3.12"
       - uses: extractions/setup-just@v3
-      - name: Verify ORF reference fixtures are present
+      - name: Verify reference fixtures are present
         run: |
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference.npz
           test -f packages/astrogwb/tests/fixtures/gwfast_orf_reference_et_triangle.npz
+          test -f packages/astrogwb/tests/fixtures/mock_bns_population.yaml
+          test -f packages/astrogwb/tests/fixtures/mock_bns_population.csv
       - run: just test-integration
 
   build-core:

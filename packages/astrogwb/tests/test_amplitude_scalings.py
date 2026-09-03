@@ -20,27 +20,13 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     AMPLITUDE_PARAMETERS,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
-    compute_merger_rate_distance_and_logprob,
-    make_merger_rate_and_log_weights_fn,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
 
-FIDUCIALS = {
-    "H0": 67.66,
-    "Omega_m": 0.3096,
-    "xi_0": 1.0,
-    "xi_n": 1.91,
-    "gamma": 1.42,
-    "kappa": 4.62,
-    "z_peak": 1.84,
-    "local_merger_rate": 770.0,
-}
-
-Z_MIN = 0.0
-Z_MAX = 20.0
-N_GRID = 256
-N_SAMPLES = 16
+# The `synthetic_weights_callback` fixture builds its catalog at these
+# fiducials; a second copy here would let the two drift apart silently.
+from astrogwb_mock_population import FIDUCIALS
 
 _SCALINGS = {
     "H0": (amplitude_H0_fn, merger_rate_H0_fn),
@@ -51,26 +37,11 @@ _SCALINGS = {
 }
 
 
-def _build_synthetic_callback():
-    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    z_samples = jnp.linspace(0.01, Z_MAX - 0.01, N_SAMPLES)
-    samples = {"redshift": z_samples}
-
-    _, luminosity_distance, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, samples, redshift_grid=z_grid
-    )
-    samples = {**samples, "luminosity_distance": luminosity_distance}
-    fn = make_merger_rate_and_log_weights_fn(
-        fiducials=FIDUCIALS,
-        redshift_grid=z_grid,
-        proposal_logprob=proposal_logprob,
-    )
-    return fn, samples
-
-
 @pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
-def test_merger_rate_amplitude_matches_the_real_callback(parameter: str) -> None:
-    fn, samples = _build_synthetic_callback()
+def test_merger_rate_amplitude_matches_the_real_callback(
+    parameter: str, synthetic_weights_callback
+) -> None:
+    fn, samples = synthetic_weights_callback()
     fiducial = FIDUCIALS[parameter]
     _amplitude_fn, merger_rate_fn = _SCALINGS[parameter]
 
@@ -91,14 +62,17 @@ def test_merger_rate_amplitude_matches_the_real_callback(parameter: str) -> None
 
 @pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
 def test_amplitude_factorization_matches_the_real_spectral_density(
-    parameter: str,
+    parameter: str, synthetic_weights_callback
 ) -> None:
-    fn, samples = _build_synthetic_callback()
+    fn, samples = synthetic_weights_callback()
     fiducial = FIDUCIALS[parameter]
     amplitude_fn, _merger_rate_fn = _SCALINGS[parameter]
 
     rng = np.random.default_rng(0)
-    polarization_power = jnp.asarray(rng.uniform(0.5, 1.5, size=(5, N_SAMPLES)))
+    # Read the catalog size off the callback rather than restating it: the
+    # weights and the power must have the same sample axis.
+    num_sources = samples["redshift"].shape[0]
+    polarization_power = jnp.asarray(rng.uniform(0.5, 1.5, size=(5, num_sources)))
 
     fiducial_rate, fiducial_log_weights = fn(FIDUCIALS, samples)
     fiducial_spectral_density = spectral_density(
