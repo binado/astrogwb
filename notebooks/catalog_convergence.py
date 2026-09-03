@@ -64,6 +64,13 @@ import numpy as np
 import numpyro.distributions as dist
 import pandas as pd
 import xarray as xr
+from astrogwb.catalog import (
+    AnalyticInspiralGenerator,
+    Catalog,
+    FrequencyDomainWaveformMetadata,
+    PopulationMetadata,
+    simulate_population,
+)
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
@@ -79,12 +86,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     madau_dickinson_rate,
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb.simulation import (
-    AnalyticInspiralGenerator,
-    generate_catalog,
-    simulate_population,
-)
-from astrogwb.waveform import load_catalog, save_catalog
+from astrogwb_paper.catalog_io import catalog_to_dataset, load_catalog, save_catalog
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
@@ -366,18 +368,30 @@ def make_redshift_grid() -> jax.Array:
 
 
 # %%
-def build_catalog(*, df: float, f_max: float, grid: str) -> xr.Dataset:
+def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
     """Draw the population and reduce it onto the `[F_MIN, f_max]` grid.
 
-    `grid` is a label carried into the file's attributes so the two cache
-    files below are self-describing rather than distinguished by filename.
+    `grid` is a label carried into the population provenance, and from there
+    into the file's attributes, so the two cache files below are
+    self-describing rather than distinguished by filename.
+
+    One `PopulationMetadata` drives both the draw and the catalog, so the seed
+    and source count recorded in the file are necessarily the ones used.
     """
-    drawn = simulate_population(
-        POPULATION_GRAPH,
+    population_metadata = PopulationMetadata(
+        name="madau-dickinson",
+        seed=POPULATION_SEED,
         num_samples=NUM_SOURCES,
         source_type="bns",
-        seed=POPULATION_SEED,
+        provenance={
+            "notebook": "catalog_convergence",
+            "grid": grid,
+            "termination_alpha": ISCO_ALPHA,
+            "gwmock_pop_version": importlib.metadata.version("gwmock-pop"),
+            **{f"fiducial_{name}": value for name, value in FIDUCIALS.items()},
+        },
     )
+    drawn = simulate_population(POPULATION_GRAPH, metadata=population_metadata)
     parameters = {
         name: np.asarray(drawn[name], dtype=np.float64) for name in CATALOG_PARAMETERS
     }
@@ -388,24 +402,18 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> xr.Dataset:
     )
     parameters["luminosity_distance"] = np.asarray(luminosity_distance)
 
-    return generate_catalog(
+    return Catalog.from_generator(
         parameters,
-        generator=AnalyticInspiralGenerator(
+        generator=AnalyticInspiralGenerator(alpha=ISCO_ALPHA),
+        waveform_metadata=FrequencyDomainWaveformMetadata.from_bounds(
+            approximant="AnalyticInspiral",
             minimum_frequency=F_MIN,
             maximum_frequency=f_max,
+            reference_frequency=F_MIN,
+            sampling_frequency=2.0 * f_max,
             df=df,
-            alpha=ISCO_ALPHA,
         ),
-        extra_attrs={
-            "notebook": "catalog_convergence",
-            "grid": grid,
-            "population": "madau-dickinson",
-            "population_seed": POPULATION_SEED,
-            "num_sources": NUM_SOURCES,
-            "termination_alpha": ISCO_ALPHA,
-            "gwmock_pop_version": importlib.metadata.version("gwmock-pop"),
-            **{f"fiducial_{name}": value for name, value in FIDUCIALS.items()},
-        },
+        population_metadata=population_metadata,
     )
 
 
@@ -422,7 +430,7 @@ def catalog_matches_configuration(
         float(attrs["df"]) == df
         and float(attrs["minimum_frequency"]) == F_MIN
         and float(attrs["maximum_frequency"]) == f_max
-        and int(attrs.get("num_sources", -1)) == NUM_SOURCES
+        and int(attrs.get("population_num_samples", -1)) == NUM_SOURCES
         and int(attrs.get("population_seed", -1)) == POPULATION_SEED
         and all(
             float(attrs.get(f"fiducial_{name}", float("nan"))) == value
@@ -434,18 +442,27 @@ def catalog_matches_configuration(
 def load_or_build_catalog(
     *, df: float, f_max: float, grid: str, path: Path
 ) -> xr.Dataset:
-    """Return the cached catalog if it is still current, else rebuild it."""
+    """Return the cached catalog if it is still current, else rebuild it.
+
+    A file written by an older astrogwb is *rejected* by `load_catalog` rather
+    than merely failing the configuration check below, so the read is guarded:
+    a stale cache is a rebuild, not a crash.
+    """
     if path.is_file():
-        cached = load_catalog(path)
-        if catalog_matches_configuration(cached, df=df, f_max=f_max):
-            print(f"Loaded {path}")
-            return cached
-        print(f"{path} does not match this notebook's configuration; rebuilding")
+        try:
+            cached = load_catalog(path)
+        except (OSError, ValueError) as error:
+            print(f"{path} is not a current astrogwb catalog ({error}); rebuilding")
+        else:
+            if catalog_matches_configuration(cached, df=df, f_max=f_max):
+                print(f"Loaded {path}")
+                return cached
+            print(f"{path} does not match this notebook's configuration; rebuilding")
     catalog = build_catalog(df=df, f_max=f_max, grid=grid)
     path.parent.mkdir(parents=True, exist_ok=True)
     save_catalog(path, catalog)
     print(f"Built and wrote {path}")
-    return catalog
+    return catalog_to_dataset(catalog)
 
 
 def unpack(
