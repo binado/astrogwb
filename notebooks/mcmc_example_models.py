@@ -33,7 +33,7 @@
 #
 # **This notebook needs no external data.** It carries its own population graph
 # inline, draws the sources itself, and builds the catalog from
-# `astrogwb.simulation.AnalyticInspiralGenerator`, which is closed-form. The
+# `astrogwb.catalog.AnalyticInspiralGenerator`, which is closed-form. The
 # result is cached to `notebooks/mcmc_catalog.h5` (gitignored) and rebuilt
 # whenever the configuration below stops matching it.
 #
@@ -71,6 +71,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
 import xarray as xr
+from astrogwb.catalog import (
+    AnalyticInspiralGenerator,
+    Catalog,
+    FrequencyDomainWaveformMetadata,
+    PopulationMetadata,
+    simulate_population,
+)
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
@@ -87,12 +94,7 @@ from astrogwb.sampling import (
     quadrature_grid,
 )
 from astrogwb.sampling.models import spectral_density_model
-from astrogwb.simulation import (
-    AnalyticInspiralGenerator,
-    generate_catalog,
-    simulate_population,
-)
-from astrogwb.waveform import load_catalog, save_catalog
+from astrogwb_paper.catalog_io import catalog_to_dataset, load_catalog, save_catalog
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
@@ -353,14 +355,25 @@ def make_redshift_grid() -> jax.Array:
 
 
 # %%
-def build_catalog() -> xr.Dataset:
-    """Draw the population and reduce it to a `waveform_catalog` Dataset."""
-    drawn = simulate_population(
-        POPULATION_GRAPH,
+def build_catalog() -> Catalog:
+    """Draw the population and reduce it to an array-native `Catalog`.
+
+    One `PopulationMetadata` drives both the draw and the catalog, so the seed
+    and source count recorded in the file are necessarily the ones used.
+    """
+    population_metadata = PopulationMetadata(
+        name="madau-dickinson",
+        seed=POPULATION_SEED,
         num_samples=NUM_SOURCES,
         source_type="bns",
-        seed=POPULATION_SEED,
+        provenance={
+            "notebook": "mcmc_example_models",
+            "termination_alpha": ISCO_ALPHA,
+            "gwmock_pop_version": importlib.metadata.version("gwmock-pop"),
+            **{f"fiducial_{name}": value for name, value in FIDUCIALS.items()},
+        },
     )
+    drawn = simulate_population(POPULATION_GRAPH, metadata=population_metadata)
     parameters = {
         name: np.asarray(drawn[name], dtype=np.float64) for name in CATALOG_PARAMETERS
     }
@@ -374,23 +387,18 @@ def build_catalog() -> xr.Dataset:
     )
     parameters["luminosity_distance"] = np.asarray(luminosity_distance)
 
-    return generate_catalog(
+    return Catalog.from_generator(
         parameters,
-        generator=AnalyticInspiralGenerator(
+        generator=AnalyticInspiralGenerator(alpha=ISCO_ALPHA),
+        waveform_metadata=FrequencyDomainWaveformMetadata.from_bounds(
+            approximant="AnalyticInspiral",
             minimum_frequency=CATALOG_F_MIN,
             maximum_frequency=CATALOG_F_MAX,
+            reference_frequency=CATALOG_F_MIN,
+            sampling_frequency=2.0 * CATALOG_F_MAX,
             df=CATALOG_DF,
-            alpha=ISCO_ALPHA,
         ),
-        extra_attrs={
-            "notebook": "mcmc_example_models",
-            "population": "madau-dickinson",
-            "population_seed": POPULATION_SEED,
-            "num_sources": NUM_SOURCES,
-            "termination_alpha": ISCO_ALPHA,
-            "gwmock_pop_version": importlib.metadata.version("gwmock-pop"),
-            **{f"fiducial_{name}": value for name, value in FIDUCIALS.items()},
-        },
+        population_metadata=population_metadata,
     )
 
 
@@ -405,7 +413,7 @@ def catalog_matches_configuration(catalog: xr.Dataset) -> bool:
         float(attrs["df"]) == CATALOG_DF
         and float(attrs["minimum_frequency"]) == CATALOG_F_MIN
         and float(attrs["maximum_frequency"]) == CATALOG_F_MAX
-        and int(attrs.get("num_sources", -1)) == NUM_SOURCES
+        and int(attrs.get("population_num_samples", -1)) == NUM_SOURCES
         and int(attrs.get("population_seed", -1)) == POPULATION_SEED
         and all(
             float(attrs.get(f"fiducial_{name}", float("nan"))) == value
@@ -415,20 +423,33 @@ def catalog_matches_configuration(catalog: xr.Dataset) -> bool:
 
 
 def load_or_build_catalog() -> xr.Dataset:
-    """Return the cached catalog if it is still current, else rebuild it."""
+    """Return the cached catalog if it is still current, else rebuild it.
+
+    A file written by an older astrogwb is *rejected* by `load_catalog` rather
+    than merely failing the configuration check below, so the read is guarded:
+    a stale cache is a rebuild, not a crash.
+    """
     if CATALOG_PATH.is_file():
-        cached = load_catalog(CATALOG_PATH)
-        if catalog_matches_configuration(cached):
-            print(f"Loaded {CATALOG_PATH}")
-            return cached
-        print(
-            f"{CATALOG_PATH} does not match this notebook's configuration; rebuilding"
-        )
+        try:
+            cached = load_catalog(CATALOG_PATH)
+        except (OSError, ValueError) as error:
+            print(
+                f"{CATALOG_PATH} is not a current astrogwb catalog ({error}); "
+                "rebuilding"
+            )
+        else:
+            if catalog_matches_configuration(cached):
+                print(f"Loaded {CATALOG_PATH}")
+                return cached
+            print(
+                f"{CATALOG_PATH} does not match this notebook's configuration; "
+                "rebuilding"
+            )
     catalog = build_catalog()
     CATALOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     save_catalog(CATALOG_PATH, catalog)
     print(f"Built and wrote {CATALOG_PATH}")
-    return catalog
+    return catalog_to_dataset(catalog)
 
 
 catalog = load_or_build_catalog()
@@ -439,7 +460,8 @@ print(
     f"-{float(catalog.frequency.values[-1])} Hz, df = {catalog.attrs['df']} Hz"
 )
 print(
-    f"  sources      {catalog.attrs['num_sources']}, seed {catalog.attrs['population_seed']}"
+    f"  sources      {catalog.attrs['population_num_samples']}, "
+    f"seed {catalog.attrs['population_seed']}"
 )
 print(f"  gwmock-pop   {catalog.attrs['gwmock_pop_version']}")
 
