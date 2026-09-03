@@ -62,6 +62,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
+import pandas as pd
 import xarray as xr
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
@@ -600,19 +601,29 @@ analytic_edge = float(wide_frequencies[analytic_spectrum > 0.0][-1])
 
 print(f"common support: {int(common_support.sum())} bins, up to {support_edge:g} Hz")
 print(f"analytic Omega_gw peaks at {omega_peak:g} Hz, ends at {analytic_edge:g} Hz")
-for probe in (support_edge, 256.0, omega_peak, 1024.0):
-    emitting = int(
-        np.sum(wide_power[int(np.argmin(np.abs(wide_frequencies - probe)))] > 0.0)
-    )
-    print(
-        f"  sources still emitting at {probe:8.0f} Hz: {emitting:5d} of {NUM_SOURCES}"
-    )
+probes = (support_edge, 256.0, omega_peak, 1024.0)
+emitting_table = pd.DataFrame(
+    {
+        f"sources still emitting (of {NUM_SOURCES})": [
+            int(
+                np.sum(
+                    wide_power[int(np.argmin(np.abs(wide_frequencies - probe)))] > 0.0
+                )
+            )
+            for probe in probes
+        ],
+    },
+    index=pd.Index(probes, name="probe [Hz]"),
+)
 print(
     "relative residual on the common support: "
     f"mean {np.mean(residual[common_support]):+.4f}, "
     f"spread {np.ptp(residual[common_support]):.2e}"
 )
 
+emitting_table.style.format_index("{:.0f}")
+
+# %%
 fig, axes = plt.subplots(2, 1, figsize=(7.0, 5.6), sharex=True, height_ratios=(2, 1))
 axes[0].loglog(
     wide_frequencies, omega_analytic, lw=1.4, color="k", label="analytic population"
@@ -764,15 +775,12 @@ for size in CATALOG_SIZES:
     band_rms[size] = rms
     band_mean[size] = signed
 
-header = f"{'N':>6} " + " ".join(f"{label:>16}" for label in band_labels)
-print(header)
-print("-" * len(header))
-for size in CATALOG_SIZES:
-    row = " ".join(f"{value:16.5f}" for value in band_rms[size].mean(axis=0))
-    print(f"{size:6d} {row}")
-print(
-    "\n(rms relative residual, averaged over "
-    f"{NUM_REALIZATIONS} bootstrap realizations)"
+pd.DataFrame(
+    [band_rms[size].mean(axis=0) for size in CATALOG_SIZES],
+    index=pd.Index(CATALOG_SIZES, name="N"),
+    columns=band_labels,
+).style.format("{:.5f}").set_caption(
+    f"rms relative residual, averaged over {NUM_REALIZATIONS} bootstrap realizations"
 )
 
 # %%
@@ -840,21 +848,26 @@ axes[1].set_title(
 )
 plt.show()
 
-print(f"{'band':>16} {'fitted slope':>13}   (Monte-Carlo prediction: -0.500)")
-for band, label in enumerate(band_labels):
-    slope = np.polyfit(np.log(sizes), np.log(band_curves[band][0]), 1)[0]
-    print(f"{label:>16} {slope:+13.3f}")
+pd.DataFrame(
+    {
+        "fitted slope": [
+            np.polyfit(np.log(sizes), np.log(band_curves[band][0]), 1)[0]
+            for band in range(NUM_BANDS)
+        ],
+    },
+    index=pd.Index(band_labels, name="band"),
+).style.format("{:+.3f}").set_caption("(Monte-Carlo prediction: -0.500)")
 
 # %%
 correlation = np.corrcoef(band_mean[CATALOG_SIZES[-1]], rowvar=False)
-print(
+pd.DataFrame(
+    correlation,
+    index=pd.Index(band_labels, name="band"),
+    columns=band_labels,
+).style.format("{:.3f}").set_caption(
     f"Pearson correlation of the signed mean residual across {NUM_REALIZATIONS} "
-    f"realizations at N = {CATALOG_SIZES[-1]}:\n"
+    f"realizations at N = {CATALOG_SIZES[-1]}"
 )
-print(" " * 16 + " ".join(f"{label:>16}" for label in band_labels))
-for band, label in enumerate(band_labels):
-    row = " ".join(f"{value:16.3f}" for value in correlation[band])
-    print(f"{label:>16} {row}")
 
 # %% [markdown]
 # **The lowest three bands are one number, not three.** Their correlation is
@@ -1000,12 +1013,15 @@ axes[1].set_title("SNR convergence under refinement")
 axes[1].legend()
 plt.show()
 
-for factor in SUBSAMPLE_FACTORS:
-    run = runs[factor]
-    print(
-        f"k = {factor:3d}   df = {run['df']:6.3f} Hz   bins = {run['num_bins']:5d}   "
-        f"SNR = {run['snr']:9.4f}   residual = {snr_residual[factor]:+.4e}"
-    )
+pd.DataFrame(
+    {
+        "df [Hz]": [runs[factor]["df"] for factor in SUBSAMPLE_FACTORS],
+        "bins": [runs[factor]["num_bins"] for factor in SUBSAMPLE_FACTORS],
+        "SNR": [runs[factor]["snr"] for factor in SUBSAMPLE_FACTORS],
+        "residual": [snr_residual[factor] for factor in SUBSAMPLE_FACTORS],
+    },
+    index=pd.Index(SUBSAMPLE_FACTORS, name="k"),
+).style.format({"df [Hz]": "{:.3f}", "SNR": "{:.4f}", "residual": "{:+.4e}"})
 
 # %% [markdown]
 # The residual falls monotonically under refinement, by more than four orders
@@ -1121,49 +1137,69 @@ plt.show()
 
 # %%
 scan_mask = np.abs(H0_SCAN - FIDUCIALS["H0"]) > 1.0
-header = (
-    f"{'df [Hz]':>9} {'from Delta logL':>18} {'from SNR^2':>14} "
-    f"{'spread over H0':>16} {'logL(H0_fid)':>16} {'normalization':>16}"
+ratios = {
+    factor: delta[factor][scan_mask] / delta[SUBSAMPLE_FACTORS[0]][scan_mask] - 1.0
+    for factor in SUBSAMPLE_FACTORS
+}
+pd.DataFrame(
+    {
+        "df [Hz]": [runs[factor]["df"] for factor in SUBSAMPLE_FACTORS],
+        "from Delta logL": [ratios[factor].mean() for factor in SUBSAMPLE_FACTORS],
+        "from SNR^2": [
+            (1.0 + snr_residual[factor]) ** 2 - 1.0 for factor in SUBSAMPLE_FACTORS
+        ],
+        "spread over H0": [np.ptp(ratios[factor]) for factor in SUBSAMPLE_FACTORS],
+        "logL(H0_fid)": [at_fiducial[factor] for factor in SUBSAMPLE_FACTORS],
+        "normalization": [normalization[factor] for factor in SUBSAMPLE_FACTORS],
+    },
+    index=pd.Index(SUBSAMPLE_FACTORS, name="k"),
+).style.format(
+    {
+        "df [Hz]": "{:.3f}",
+        "from Delta logL": "{:.6e}",
+        "from SNR^2": "{:.6e}",
+        "spread over H0": "{:.2e}",
+        "logL(H0_fid)": "{:.6e}",
+        "normalization": "{:.6e}",
+    }
 )
-print(header)
-print("-" * len(header))
-for factor in SUBSAMPLE_FACTORS:
-    ratio = delta[factor][scan_mask] / delta[SUBSAMPLE_FACTORS[0]][scan_mask] - 1.0
-    predicted = (1.0 + snr_residual[factor]) ** 2 - 1.0
-    print(
-        f"{runs[factor]['df']:9.3f} {ratio.mean():18.6e} {predicted:14.6e} "
-        f"{np.ptp(ratio):16.2e} {at_fiducial[factor]:16.6e} "
-        f"{normalization[factor]:16.6e}"
-    )
-print()
-print(
-    "The last two columns are equal to every printed digit -- the chi^2 term is "
-    "identically zero here -- and both track the bin count rather than "
-    "converging. That is the discretization, not the data."
-)
+
+# %% [markdown]
+# The last two columns are equal to every printed digit -- the $\chi^2$ term is
+# identically zero here -- and both track the bin count rather than converging.
+# That is the discretization, not the data.
 
 # %% [markdown]
 # ## Summary
 
 # %%
-header = (
-    f"{'k':>4} {'df [Hz]':>9} {'bins':>6} {'SNR':>10} {'SNR resid':>12} "
-    f"{'sigma_H0':>10} {'width resid':>12}"
+reference_width = FIDUCIALS["H0"] / reference["snr"]
+pd.DataFrame(
+    {
+        "df [Hz]": [runs[factor]["df"] for factor in SUBSAMPLE_FACTORS],
+        "bins": [runs[factor]["num_bins"] for factor in SUBSAMPLE_FACTORS],
+        "SNR": [runs[factor]["snr"] for factor in SUBSAMPLE_FACTORS],
+        "SNR resid": [snr_residual[factor] for factor in SUBSAMPLE_FACTORS],
+        "sigma_H0": [
+            FIDUCIALS["H0"] / runs[factor]["snr"] for factor in SUBSAMPLE_FACTORS
+        ],
+        "width resid": [
+            FIDUCIALS["H0"] / runs[factor]["snr"] / reference_width - 1.0
+            for factor in SUBSAMPLE_FACTORS
+        ],
+    },
+    index=pd.Index(SUBSAMPLE_FACTORS, name="k"),
+).style.format(
+    {
+        "df [Hz]": "{:.3f}",
+        "SNR": "{:.4f}",
+        "SNR resid": "{:+.3e}",
+        "sigma_H0": "{:.4f}",
+        "width resid": "{:+.3e}",
+    }
 )
-print(header)
-print("-" * len(header))
-for factor in SUBSAMPLE_FACTORS:
-    run = runs[factor]
-    width = FIDUCIALS["H0"] / run["snr"]
-    reference_width = FIDUCIALS["H0"] / reference["snr"]
-    print(
-        f"{factor:4d} {run['df']:9.3f} {run['num_bins']:6d} {run['snr']:10.4f} "
-        f"{snr_residual[factor]:+12.3e} {width:10.4f} "
-        f"{width / reference_width - 1.0:+12.3e}"
-    )
-print()
-print(
-    "sigma_H0 = H0_fid / rho is the Fisher width the noiseless linear model "
-    "predicts, so an under-resolved grid does not merely mis-state the SNR: it "
-    "reports a posterior that is too wide by the same factor."
-)
+
+# %% [markdown]
+# $\sigma_{H_0} = H_0^{\rm fid}/\rho$ is the Fisher width the noiseless linear
+# model predicts, so an under-resolved grid does not merely mis-state the SNR:
+# it reports a posterior that is too wide by the same factor.
