@@ -50,6 +50,8 @@ test: test-core test-paper
 # Convert and execute the root notebooks.
 test-notebooks:
     uv run --group notebook jupytext --to notebook --execute \
+        notebooks/mcmc_example_models.py
+    uv run --group notebook jupytext --to notebook --execute \
         notebooks/catalog_convergence.py
 
 # Convert notebook from py:percent format to .ipynb
