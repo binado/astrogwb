@@ -206,7 +206,6 @@ version = "0.1.0"
 source = { editable = "packages/astrogwb" }
 dependencies = [
     { name = "gwmock-noise" },
-    { name = "gwmock-pop" },
     { name = "gwmock-signal", extra = ["jax"] },
     { name = "h5netcdf", extra = ["h5py"] },
     { name = "jax" },
@@ -220,12 +219,20 @@ dependencies = [
 cuda = [
     { name = "jax", extra = ["cuda12"] },
 ]
+simulation = [
+    { name = "gwmock-pop" },
+]
 tpu = [
     { name = "jax", extra = ["tpu"] },
 ]
 
 [package.dev-dependencies]
+fixture = [
+    { name = "gwmock-pop" },
+    { name = "pyyaml" },
+]
 test = [
+    { name = "gwmock-pop" },
     { name = "pytest" },
     { name = "pytest-xdist" },
 ]
@@ -233,7 +240,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "gwmock-noise", specifier = ">=0.10.1" },
-    { name = "gwmock-pop", specifier = ">=0.11.4" },
+    { name = "gwmock-pop", marker = "extra == 'simulation'", specifier = ">=0.11.4" },
     { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.15.0" },
     { name = "h5netcdf", extras = ["h5py"], specifier = ">=1.8.1" },
     { name = "jax", marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
@@ -244,10 +251,15 @@ requires-dist = [
     { name = "numpyro", specifier = ">=0.21.0" },
     { name = "xarray", specifier = ">=2025.1" },
 ]
-provides-extras = ["cuda", "tpu"]
+provides-extras = ["cuda", "simulation", "tpu"]
 
 [package.metadata.requires-dev]
+fixture = [
+    { name = "gwmock-pop", specifier = "==0.11.4" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+]
 test = [
+    { name = "gwmock-pop", specifier = ">=0.11.4" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
 ]
@@ -462,6 +474,7 @@ dev = [
     { name = "ty" },
 ]
 notebook = [
+    { name = "astrogwb", extra = ["simulation"] },
     { name = "astrogwb-paper", extra = ["notebook"] },
     { name = "ipykernel" },
     { name = "jupytext" },
@@ -478,6 +491,7 @@ dev = [
     { name = "ty", specifier = ">=0.0.69" },
 ]
 notebook = [
+    { name = "astrogwb", extras = ["simulation"], editable = "packages/astrogwb" },
     { name = "astrogwb-paper", extras = ["notebook"], editable = "packages/astrogwb-paper" },
     { name = "ipykernel", specifier = ">=7.3.0" },
     { name = "jupytext", specifier = ">=1.19" },

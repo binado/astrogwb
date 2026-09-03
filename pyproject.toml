@@ -19,6 +19,7 @@ members = ["packages/*"]
 # dependency and deliberately stays that way, so the plotting stack is pulled
 # in through astrogwb-paper's `notebook` extra rather than re-listed here.
 notebook = [
+    "astrogwb[simulation]",
     "astrogwb-paper[notebook]",
     "ipykernel>=7.3.0",
     "jupytext>=1.19",

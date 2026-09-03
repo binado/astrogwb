@@ -6,9 +6,10 @@ Workflows in this directory are stored as plain `.py` files in [Jupytext](https:
 
 - **This directory** — self-contained demonstrations of the core `astrogwb`
   library. Each notebook carries its own population graph inline and builds
-  its own catalog, so it runs against a clean checkout with nothing but
-  `astrogwb` and the plotting extra installed. No notebook here reads a file
-  outside itself, and none imports from `packages/astrogwb/tests`.
+  its own catalog through `astrogwb.simulation`, so it runs against a clean
+  checkout with `astrogwb[simulation]` and the plotting extra installed. No
+  notebook here reads a file outside itself, and none imports from
+  `packages/astrogwb/tests`.
 - **[`packages/astrogwb-paper/notebooks/`](../packages/astrogwb-paper/notebooks/)** —
   paper analyses. Those drive real waveform banks through the
   `astrogwb-paper` configuration layer and are not self-contained by design.
@@ -33,6 +34,11 @@ Both convert and execute through the `notebook` dependency group:
 ```bash
 just test-notebooks
 ```
+
+That group explicitly installs `astrogwb[simulation]`. The notebooks keep
+their scientifically significant population graphs and luminosity-distance
+recomputation inline, then pass the prepared parameters through
+`generate_catalog(..., generator=AnalyticInspiralGenerator(...))`.
 
 `ASTROGWB_NOTEBOOK_SMOKE=1` shrinks the chains, the catalog, and the
 convergence sweeps. It changes only how long a notebook runs, never which
@@ -61,7 +67,9 @@ uv sync --group notebook
 
 Each notebook writes the catalog it builds to a `notebooks/*.h5` file
 (gitignored) and reuses it on the next run. The file is a cache, not an input:
-delete it and the notebook rebuilds from its own inline population graph.
+delete it and the notebook rebuilds from its own inline population graph. The
+shared generation interface does not change this cache policy or add its own
+persistence.
 
 The reuse is guarded on more than the file existing. Each notebook compares
 the stored catalog's attributes — `df`, `num_sources`, `population_seed`, the

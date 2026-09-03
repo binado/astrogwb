@@ -27,7 +27,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
-from astrogwb.waveform import inspiral_polarization_power, make_catalog
+from astrogwb.simulation import AnalyticInspiralGenerator, generate_catalog
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -106,10 +106,10 @@ def build_mock_catalog(
     """Build a real ``WaveformCatalog`` from the committed population draw.
 
     The polarization power comes from
-    :func:`~astrogwb.waveform.inspiral_polarization_power`, so the catalog is a
-    genuine closed-form inspiral bank -- no Ripple backend, no persisted file --
-    and :func:`~astrogwb.waveform.make_catalog` self-validates, so a malformed
-    mock fails at construction rather than deep inside a model.
+    :class:`~astrogwb.simulation.AnalyticInspiralGenerator`, so the catalog is
+    a genuine closed-form inspiral bank -- no Ripple backend, no persisted
+    file -- and :func:`~astrogwb.simulation.generate_catalog` self-validates,
+    so a malformed mock fails at construction rather than deep inside a model.
 
     ``inclination`` is a column of exact zeros: the pinned graph sets
     ``constant_like(@redshift, 0.0)``. That is not a defect -- it pairs exactly
@@ -126,15 +126,6 @@ def build_mock_catalog(
 
     # A prefix, not a random subsample, so catalog construction is deterministic.
     parameters = {name: values[:num_sources] for name, values in population.items()}
-    # Form every bin from its integer index rather than accumulating ``df``.
-    # The grid starts at ``f_min`` even when it is not an integer multiple of
-    # ``df`` (the default 2 Hz lower bound with df=8 Hz is the motivating case)
-    # and ends at the greatest grid point not exceeding ``f_max``.
-    num_frequency_bins = int(np.floor((f_max - f_min) / df)) + 1
-    frequencies = np.asarray(
-        f_min + df * np.arange(num_frequency_bins), dtype=np.float64
-    )
-
     _, luminosity_distance, _ = compute_merger_rate_distance_and_logprob(
         FIDUCIALS,
         {"redshift": jnp.asarray(parameters["redshift"])},
@@ -142,22 +133,14 @@ def build_mock_catalog(
     )
     parameters["luminosity_distance"] = np.asarray(luminosity_distance)
 
-    # inspiral_polarization_power lays out (sample, frequency); the catalog
-    # format is frequency-first.
-    power = np.asarray(
-        inspiral_polarization_power(frequencies, parameters, alpha=ISCO_ALPHA)
-    ).T
-
-    return make_catalog(
-        frequencies=frequencies,
-        polarization_power=power,
-        source_parameters=parameters,
-        approximant="AnalyticInspiral",
-        minimum_frequency=f_min,
-        maximum_frequency=f_max,
-        reference_frequency=f_min,
-        sampling_frequency=2.0 * f_max,
-        df=df,
+    return generate_catalog(
+        parameters,
+        generator=AnalyticInspiralGenerator(
+            minimum_frequency=f_min,
+            maximum_frequency=f_max,
+            df=df,
+            alpha=ISCO_ALPHA,
+        ),
         extra_attrs={
             "fixture": MOCK_POPULATION_PATH.name,
             "population": "madau-dickinson",

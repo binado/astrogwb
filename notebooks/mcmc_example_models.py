@@ -33,7 +33,7 @@
 #
 # **This notebook needs no external data.** It carries its own population graph
 # inline, draws the sources itself, and builds the catalog from
-# `astrogwb.waveform.inspiral_polarization_power`, which is closed-form. The
+# `astrogwb.simulation.AnalyticInspiralGenerator`, which is closed-form. The
 # result is cached to `notebooks/mcmc_catalog.h5` (gitignored) and rebuilt
 # whenever the configuration below stops matching it.
 #
@@ -87,13 +87,12 @@ from astrogwb.sampling import (
     quadrature_grid,
 )
 from astrogwb.sampling.models import spectral_density_model
-from astrogwb.waveform import (
-    inspiral_polarization_power,
-    load_catalog,
-    make_catalog,
-    save_catalog,
+from astrogwb.simulation import (
+    AnalyticInspiralGenerator,
+    generate_catalog,
+    simulate_population,
 )
-from gwmock_pop import GraphSimulator
+from astrogwb.waveform import load_catalog, save_catalog
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
@@ -190,8 +189,8 @@ CHAINS_OUT: Path | None = None
 # enforcing it would reintroduce exactly the dependency on
 # `packages/astrogwb/tests/` this notebook exists without.
 #
-# `GraphSimulator` takes the `parameters:` mapping of that file, not its top
-# level. Three details are load-bearing rather than incidental:
+# `simulate_population` takes the `parameters:` mapping of that file, not its
+# top level. Three details are load-bearing rather than incidental:
 #
 # - the component-mass bounds must match any analytic comparison built from
 #   `uniform_prior_mass_moments` (see `catalog_convergence.py`);
@@ -199,8 +198,8 @@ CHAINS_OUT: Path | None = None
 #   `average_mode="analytic_inclination"` and its
 #   $\langle g \rangle / g(0) = 0.4$ conversion from face-on power;
 # - the unused `spin_*`, `lambda_*`, and `coa_*` blocks are kept because the
-#   YAML they mirror declares them. `GraphSimulator` derives RNG keys from the
-#   graph, so the safe assumption is that any edit to it changes the draw.
+#   YAML they mirror declares them. The underlying graph simulator derives RNG
+#   keys from the graph, so the safe assumption is that any edit changes the draw.
 
 # %%
 #: Hyperparameters the injection is built at and every non-sampled site is
@@ -356,10 +355,12 @@ def make_redshift_grid() -> jax.Array:
 # %%
 def build_catalog() -> xr.Dataset:
     """Draw the population and reduce it to a `waveform_catalog` Dataset."""
-    simulator = GraphSimulator(
-        POPULATION_GRAPH, source_type="bns", seed=POPULATION_SEED
+    drawn = simulate_population(
+        POPULATION_GRAPH,
+        num_samples=NUM_SOURCES,
+        source_type="bns",
+        seed=POPULATION_SEED,
     )
-    drawn = dict(simulator.simulate(NUM_SOURCES))
     parameters = {
         name: np.asarray(drawn[name], dtype=np.float64) for name in CATALOG_PARAMETERS
     }
@@ -373,27 +374,14 @@ def build_catalog() -> xr.Dataset:
     )
     parameters["luminosity_distance"] = np.asarray(luminosity_distance)
 
-    # Form every bin from its integer index rather than accumulating df, and
-    # let the grid start at f_min even when that is not a multiple of df.
-    num_bins = int(np.floor((CATALOG_F_MAX - CATALOG_F_MIN) / CATALOG_DF)) + 1
-    frequencies = CATALOG_F_MIN + CATALOG_DF * np.arange(num_bins, dtype=np.float64)
-
-    # inspiral_polarization_power lays out (sample, frequency); the catalog
-    # format is frequency-first.
-    power = np.asarray(
-        inspiral_polarization_power(frequencies, parameters, alpha=ISCO_ALPHA)
-    ).T
-
-    return make_catalog(
-        frequencies=frequencies,
-        polarization_power=power,
-        source_parameters=parameters,
-        approximant="AnalyticInspiral",
-        minimum_frequency=CATALOG_F_MIN,
-        maximum_frequency=CATALOG_F_MAX,
-        reference_frequency=CATALOG_F_MIN,
-        sampling_frequency=2.0 * CATALOG_F_MAX,
-        df=CATALOG_DF,
+    return generate_catalog(
+        parameters,
+        generator=AnalyticInspiralGenerator(
+            minimum_frequency=CATALOG_F_MIN,
+            maximum_frequency=CATALOG_F_MAX,
+            df=CATALOG_DF,
+            alpha=ISCO_ALPHA,
+        ),
         extra_attrs={
             "notebook": "mcmc_example_models",
             "population": "madau-dickinson",

@@ -64,7 +64,9 @@ build-core:
 
 # Regenerate the committed core mock-population fixture.
 generate-mock-population-fixture:
-    uv run --script packages/astrogwb/scripts/generate_mock_population_fixture.py \
+    uv run --frozen --isolated --no-default-groups \
+        --package astrogwb --group fixture \
+        python packages/astrogwb/scripts/generate_mock_population_fixture.py \
         --population packages/astrogwb/tests/fixtures/mock_bns_population.yaml \
         --output packages/astrogwb/tests/fixtures/mock_bns_population.csv \
         --num-samples 1024 \

@@ -11,7 +11,12 @@ pip install astrogwb
 ```
 
 Optional accelerator builds are available as `astrogwb[cuda]` and
-`astrogwb[tpu]`.
+`astrogwb[tpu]`. Install the population-simulation adapter separately when it
+is needed:
+
+```bash
+pip install astrogwb[simulation]
+```
 
 ## Library modules
 
@@ -27,6 +32,12 @@ Optional accelerator builds are available as `astrogwb[cuda]` and
 - `astrogwb.importance` defines the reusable importance-weighting protocol and
   compact-binary population model.
 - `astrogwb.sampling` exposes the caller-prepared NumPyro model.
+- `astrogwb.simulation` provides the shared population-to-catalog generation
+  interface. `simulate_population` draws caller-owned graph configurations,
+  while `generate_catalog` accepts a polarization-power generator such as the
+  bundled closed-form `AnalyticInspiralGenerator`. Population definitions,
+  cosmology-dependent parameter preparation, provenance, persistence, and
+  cache policy remain caller-owned.
 - `astrogwb.waveform` owns the `waveform_catalog` HDF5 format (IO via
   `astrogwb.waveform.catalog`), which stores per-sample polarization power,
   and reduces raw plus/cross polarizations to that power at generation time.
@@ -41,6 +52,24 @@ from astrogwb.detector import load_detector, load_sensitivity
 
 hanford = load_detector("H1")
 sensitivity = load_sensitivity("H1")
+```
+
+A prepared population can be reduced through the common generation interface:
+
+```python
+from astrogwb.constants import ISCO_ALPHA
+from astrogwb.simulation import AnalyticInspiralGenerator, generate_catalog
+
+catalog = generate_catalog(
+    source_parameters,
+    generator=AnalyticInspiralGenerator(
+        minimum_frequency=2.0,
+        maximum_frequency=2048.0,
+        df=1.0,
+        alpha=ISCO_ALPHA,
+    ),
+    extra_attrs={"population": "my-caller-owned-graph"},
+)
 ```
 
 ## Examples

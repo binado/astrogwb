@@ -79,13 +79,12 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     madau_dickinson_rate,
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb.waveform import (
-    inspiral_polarization_power,
-    load_catalog,
-    make_catalog,
-    save_catalog,
+from astrogwb.simulation import (
+    AnalyticInspiralGenerator,
+    generate_catalog,
+    simulate_population,
 )
-from gwmock_pop import GraphSimulator
+from astrogwb.waveform import load_catalog, save_catalog
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
@@ -339,7 +338,7 @@ def make_redshift_grid() -> jax.Array:
 # ## Building or loading the catalogs
 #
 # Two catalogs, drawn from one population. `build_catalog` re-runs
-# `GraphSimulator` at the same seed for each, so the two files hold the *same*
+# `simulate_population` at the same seed for each, so the two files hold the *same*
 # sources reduced onto different frequency grids — the wide 1 Hz grid the
 # $\Omega_{\rm gw}$ comparison needs, and the fine 0.125 Hz grid everything from
 # the SNR section on runs against.
@@ -373,10 +372,12 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> xr.Dataset:
     `grid` is a label carried into the file's attributes so the two cache
     files below are self-describing rather than distinguished by filename.
     """
-    simulator = GraphSimulator(
-        POPULATION_GRAPH, source_type="bns", seed=POPULATION_SEED
+    drawn = simulate_population(
+        POPULATION_GRAPH,
+        num_samples=NUM_SOURCES,
+        source_type="bns",
+        seed=POPULATION_SEED,
     )
-    drawn = dict(simulator.simulate(NUM_SOURCES))
     parameters = {
         name: np.asarray(drawn[name], dtype=np.float64) for name in CATALOG_PARAMETERS
     }
@@ -387,21 +388,14 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> xr.Dataset:
     )
     parameters["luminosity_distance"] = np.asarray(luminosity_distance)
 
-    num_bins = int(np.floor((f_max - F_MIN) / df)) + 1
-    frequencies = F_MIN + df * np.arange(num_bins, dtype=np.float64)
-    power = np.asarray(
-        inspiral_polarization_power(frequencies, parameters, alpha=ISCO_ALPHA)
-    ).T
-    return make_catalog(
-        frequencies=frequencies,
-        polarization_power=power,
-        source_parameters=parameters,
-        approximant="AnalyticInspiral",
-        minimum_frequency=F_MIN,
-        maximum_frequency=f_max,
-        reference_frequency=F_MIN,
-        sampling_frequency=2.0 * f_max,
-        df=df,
+    return generate_catalog(
+        parameters,
+        generator=AnalyticInspiralGenerator(
+            minimum_frequency=F_MIN,
+            maximum_frequency=f_max,
+            df=df,
+            alpha=ISCO_ALPHA,
+        ),
         extra_attrs={
             "notebook": "catalog_convergence",
             "grid": grid,

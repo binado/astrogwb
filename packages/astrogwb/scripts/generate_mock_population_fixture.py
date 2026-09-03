@@ -1,11 +1,3 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#   "gwmock-pop==0.11.4",
-#   "numpy>=2.5.1",
-#   "pyyaml>=6.0.3",
-# ]
-# ///
 """Generate a committed mock BNS population fixture.
 
 Draws sources from an explicitly supplied population graph and writes the
@@ -21,11 +13,13 @@ It uses the self-contained population graph committed beside the CSV under
 ``tests/fixtures``. Direct invocations must pass the population path, output
 path, sample count, and seed explicitly.
 
-``gwmock-pop`` is pinned *exactly* here even though ``astrogwb`` depends on it
-with a floor (``>=0.11.4``): the graph YAML's own header warns that
+``gwmock-pop`` is pinned *exactly* in the core ``fixture`` dependency group,
+even though the ``simulation`` extra has a floor (``>=0.11.4``): the graph
+YAML's own header warns that
 ``GraphSimulator`` draws RNG keys in topological order and breaks ties by
 declaration order, so a patch release that reorders anything would resample the
-population. The fixture has to be reproducible from this script alone.
+population. The fixture has to be reproducible from the canonical isolated
+invocation.
 
 The CSV is committed rather than simulated in ``conftest.py`` so the isolated
 core tests do not regenerate their oracle or depend on generator-version RNG
@@ -45,7 +39,7 @@ from importlib.metadata import version
 
 import numpy as np
 import yaml
-from gwmock_pop import GraphSimulator
+from astrogwb.simulation import simulate_population
 
 #: Columns written, in order. ``luminosity_distance`` is deliberately *not*
 #: among them: the test factory recomputes it from
@@ -103,10 +97,12 @@ def main(argv: list[str] | None = None) -> None:
             f"{args.population}: population graph must declare a non-empty name"
         )
 
-    simulator = GraphSimulator.from_config_file(
-        args.population, source_type="bns", seed=args.seed
+    population = simulate_population(
+        args.population,
+        num_samples=args.num_samples,
+        source_type="bns",
+        seed=args.seed,
     )
-    population = dict(simulator.simulate(args.num_samples))
     missing = [name for name in COLUMNS if name not in population]
     if missing:
         raise SystemExit(
