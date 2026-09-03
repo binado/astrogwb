@@ -221,6 +221,7 @@ def test_population_metadata_rejects_non_scalar_provenance(value: object) -> Non
         )
 
 
+@pytest.mark.integration
 def test_simulate_population_uses_metadata_and_is_prefix_stable(tmp_path: Path) -> None:
     graph = {
         "draw": {
