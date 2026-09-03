@@ -92,9 +92,10 @@ jobs:
           "import importlib.util; import astrogwb;
           from importlib.metadata import requires;
           from astrogwb.detector import load_detector, load_sensitivity;
-          from astrogwb.catalog import AnalyticInspiralGenerator, generate_catalog;
+          from astrogwb.catalog import AnalyticInspiralGenerator, Catalog;
           requirements = requires('astrogwb') or [];
           load_detector('H1'); load_sensitivity('H1');
+          assert callable(Catalog.from_generator);
           assert importlib.util.find_spec('astrogwb_paper') is None;
           assert importlib.util.find_spec('astrogwb.config') is None;
           assert importlib.util.find_spec('astrogwb.runtime') is None;
