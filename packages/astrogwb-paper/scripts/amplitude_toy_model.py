@@ -30,12 +30,12 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
+from astrogwb.catalog.io import open_catalog
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr_squared
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb.utils import years_to_seconds
-from astrogwb_paper.catalog_io import open_catalog
 from astrogwb_paper.catalogs import samples_from_catalog
 from astrogwb_paper.config.figures import load_analysis_grid
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path

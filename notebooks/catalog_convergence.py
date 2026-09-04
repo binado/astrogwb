@@ -71,6 +71,7 @@ from astrogwb.catalog import (
     PopulationMetadata,
     simulate_population,
 )
+from astrogwb.catalog.io import catalog_to_dataset, load_catalog, save_catalog
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
@@ -86,7 +87,6 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     madau_dickinson_rate,
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb_paper.catalog_io import catalog_to_dataset, load_catalog, save_catalog
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 

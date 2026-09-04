@@ -15,14 +15,18 @@ astrogwb-paper = { workspace = true }
 members = ["packages/*"]
 
 [dependency-groups]
-# Converts and executes the root notebooks. matplotlib is not a core
-# dependency and deliberately stays that way, so the plotting stack is pulled
-# in through astrogwb-paper's `notebook` extra rather than re-listed here.
+# Converts and executes the root notebooks. These depend on core alone --
+# simulation to draw a population, io to round-trip it through HDF5 -- so
+# matplotlib is listed directly rather than arriving via astrogwb-paper.
 notebook = [
-    "astrogwb[simulation]",
-    "astrogwb-paper[notebook]",
+    "astrogwb[simulation,io]",
     "ipykernel>=7.3.0",
     "jupytext>=1.19",
+    "matplotlib>=3.10.0",
+    # jupytext --execute drives the kernel through nbconvert. It used to arrive
+    # transitively via astrogwb-paper's jupyter dependency; declare it here so
+    # the notebook environment does not depend on the paper package at all.
+    "nbconvert>=7.16",
 ]
 dev = [
     "pytest>=9.0.2",

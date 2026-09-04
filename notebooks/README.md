@@ -64,9 +64,9 @@ uv sync --group notebook
 The notebook writes the catalog it builds to a `notebooks/*.h5` file
 (gitignored) and reuses it on the next run. The file is a cache, not an input:
 delete it and the notebook rebuilds from its own inline population graph.
-Persistence itself is not part of the core library: `astrogwb` builds an
-array-native `Catalog`, and `astrogwb_paper.catalog_io` is what writes it to
-HDF5, so the notebook reaches for the paper package only for the cache.
+Persistence is not part of the core dependency set: `astrogwb` builds an
+array-native `Catalog`, and `astrogwb.catalog.io` writes it to HDF5 behind the
+`io` extra, so the notebook needs `astrogwb[simulation,io]` and nothing else.
 
 The reuse is guarded on more than the file existing. The notebook compares
 the stored catalog's attributes — `df`, `population_num_samples`,
