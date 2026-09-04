@@ -1,5 +1,5 @@
 # How the uniform-mixing guard fraction eps affects the same H0-MD
-# problem as astrophysical-parameters/Madau-Dickinson: H0 is the
+# problem as astrophysical-parameters/madau-dickinson: H0 is the
 # marginalized amplitude and NUTS samples the redshift-rate shape.
 #
 # The runs differ only in which guarded proposal catalog they name. Each

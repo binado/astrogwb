@@ -78,7 +78,7 @@ The six experiments and their 26 runs:
 | Experiment | Runs |
 | --- | ---: |
 | `cosmological-parameters` | six detector networks, `H0-Omega_m`, and `H0-merger-rate` |
-| `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` |
+| `astrophysical-parameters` | `madau-dickinson` and `redshift-peak` |
 | `modified-propagation` | six detector networks, `Xi_0`, and `Xi_0-H0` |
 | `variable-catalog-size` | `n8192`, `n16384`, and `n32768` |
 | `variable-proposal-guard` | `eps1e-1`, `eps1e-2`, and `eps1e-3` |
