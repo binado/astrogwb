@@ -37,7 +37,8 @@ from astrogwb.gwb import spectral_density, spectral_snr_squared
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb.utils import years_to_seconds
 from astrogwb_paper.catalogs import samples_from_catalog
-from astrogwb_paper.config.figures import load_analysis_grid
+from astrogwb_paper.config.mcmc import build_run_config
+from astrogwb_paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
@@ -89,6 +90,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help='Chain count, or "auto" for one chain per CPU.',
     )
     parser.add_argument("--target-accept", type=float, default=0.9)
+    add_config_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -99,7 +101,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     output_path = resolve_paper_path(args.output_pdf, root)
     out_dir = resolve_paper_path(args.chains_dir, root)
 
-    grid = load_analysis_grid()
+    grid = build_run_config(load_merged_config(args)).analysis_grid
     detnames = tuple(args.detectors)
     observation_time = grid.observation_time
     seed = args.seed

@@ -14,15 +14,19 @@ The model inputs come from :mod:`astrogwb_paper.inference`, the same pipeline
 the production model on production inputs, with the JAX device / x64 setup
 matching production exactly.
 
-Usage::
+Usage -- one ``--config`` per layer, in merge order, exactly as
+``astrogwb-run-mcmc`` takes them::
 
     uv run astrogwb-profile-model \
-        --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
+        --config config/analysis/base/model.toml \
+        --config config/analysis/base/parameters.toml \
+        --config config/analysis/base/sampling.toml \
+        --config config/analysis/runs/cosmological-parameters/_base.toml \
+        --config config/analysis/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
         --bank md-imrphenom-s41=outputs/banks/md-imrphenom-s41.h5 \
         --bank md-imrphenom-s42=outputs/banks/md-imrphenom-s42.h5
 
-Configs are assembled from ``config/analysis/`` by the ``assemble_config``
-workflow rule or by ``astrogwb-assemble-config``; see docs/running-inference.md.
+See docs/running-inference.md for the layer tree.
 
 Open the generated ``perfetto_trace.json.gz`` at https://ui.perfetto.dev
 (no TensorBoard install required).
@@ -39,8 +43,8 @@ from typing import TYPE_CHECKING
 
 from astrogwb_paper.cli.run_mcmc import resolve_run_proposal
 from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig, build_run_config
+from astrogwb_paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
-from astrogwb_paper.utils import load_mapping
 
 if TYPE_CHECKING:
     from astrogwb_paper.catalogs import CatalogSource
@@ -55,12 +59,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "pass and gradient with jax.profiler.trace, emitting a Perfetto trace."
         )
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        required=True,
-        help="Path to the TOML or JSON config file used by astrogwb-run-mcmc.",
-    )
+    add_config_arguments(parser)
     parser.add_argument(
         "--bank",
         dest="banks",
@@ -170,17 +169,13 @@ def _parse_bank_args(values: list[str]) -> dict[str, Path]:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    config_path = args.config.resolve()
-    bank_paths = _parse_bank_args(args.banks)
-    outdir = args.outdir.resolve()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-
-    raw = load_mapping(config_path)
-    config = build_run_config(raw, seed=args.seed)
-    logger.info("Config: %s", config_path)
+    bank_paths = _parse_bank_args(args.banks)
+    outdir = args.outdir.resolve()
+    config = build_run_config(load_merged_config(args), seed=args.seed)
 
     # Resolve the proposal density from bank provenance before JAX starts, the
     # same way astrogwb-run-mcmc does -- what is profiled must be the

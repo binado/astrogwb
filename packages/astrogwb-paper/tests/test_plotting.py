@@ -7,7 +7,7 @@ import pytest
 matplotlib = pytest.importorskip("matplotlib")
 
 from astrogwb_paper import plotting
-from astrogwb_paper.config.figures import Network
+from astrogwb_paper.plotting import Network
 
 
 def test_paper_mplstyle_sits_next_to_the_module() -> None:

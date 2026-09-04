@@ -3,8 +3,9 @@
 This is the SLURM-friendly port of ``notebooks/mcmc.py``: it importance-reweights a
 fixed polarization-power catalog through NUTS to infer cosmological / population
 hyperparameters, reading every setting from a TOML or JSON config file and emitting
-only ``logging`` progress (no plots). It saves an ArviZ ``InferenceData`` NetCDF;
-the assembled config it was given is the record of the run's settings.
+only ``logging`` progress (no plots). It saves an ArviZ ``InferenceData`` NetCDF
+and, beside it, the defaults-filled config that produced it -- so the chain and
+the record of its settings travel together.
 
 Design constraint (do not "tidy" away): config parsing lives in
 ``astrogwb_paper.config.mcmc``, which imports only stdlib + pydantic at module
@@ -15,12 +16,22 @@ initializes its backend, so the heavy imports (jax, astrogwb, gwmock_pop)
 happen inside functions that run only after
 :func:`astrogwb_paper.runtime.configure_runtime`. See that function for the ordering.
 
-Usage::
+Usage -- one ``--config`` per layer, in merge order::
 
     uv run astrogwb-run-mcmc \
-        --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
+        --config config/analysis/base/model.toml \
+        --config config/analysis/base/parameters.toml \
+        --config config/analysis/base/sampling.toml \
+        --config config/analysis/runs/cosmological-parameters/_base.toml \
+        --config config/analysis/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
         --bank md-imrphenom-s41=outputs/banks/md-imrphenom-s41.h5 \
         --bank md-imrphenom-s42=outputs/banks/md-imrphenom-s42.h5
+
+Order is the caller's responsibility -- there is no assembled-config artifact
+and no single function that owns it any more -- so the resolved order is logged
+before the merge and stamped into the chain's ``config_layers`` attribute. The
+``run_mcmc`` workflow rule declares exactly these files as ``input:`` and
+passes them straight back on argv.
 
 The run config (its ``catalog.injection`` / ``catalog.proposal`` blocks) names
 which bank(s) each role composes from; every bank it names must be supplied
@@ -33,8 +44,8 @@ the weights are always divided by what was actually generated. The resolved
 density is stamped into the saved chain, which stays the self-describing record
 of what was sampled.
 
-Configs are assembled from ``config/analysis/`` by the ``assemble_config``
-workflow rule or by ``astrogwb-assemble-config``; see docs/running-inference.md.
+See docs/running-inference.md for the layer tree, and
+``scripts/validate_configs.py`` for the pre-flight gate over every run.
 
 Use ``uv run --package astrogwb-paper --extra cuda`` (or ``--extra tpu``) for
 the matching JAX accelerator plugin.
@@ -46,20 +57,27 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from astrogwb_paper.config.banks import (
     UniformRedshiftProposal,
+    check_bank_references,
     check_fiducials_match,
     madau_dickinson_proposal,
     read_bank_provenance,
     resolve_proposal,
 )
-from astrogwb_paper.config.mcmc import ProposalConfig, RunConfig, build_run_config
+from astrogwb_paper.config.mcmc import (
+    ProposalConfig,
+    RunConfig,
+    build_run_config,
+    save_config,
+)
+from astrogwb_paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb_paper.runtime import add_runtime_arguments, configure_runtime
-from astrogwb_paper.utils import load_mapping
 
 if TYPE_CHECKING:
     from astrogwb_paper.amplitude import AmplitudeMarginalization
@@ -78,12 +96,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "settings from a TOML or JSON config; saves an ArviZ NetCDF."
         )
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        required=True,
-        help="Path to the TOML or JSON config file for this run / array task.",
-    )
+    add_config_arguments(parser)
     parser.add_argument(
         "--bank",
         dest="banks",
@@ -248,8 +261,15 @@ def save(
     timestamp: str | None = None,
     force: bool = False,
     marginalization: AmplitudeMarginalization | None = None,
+    config_layers: Sequence[Path] | None = None,
 ) -> Path:
-    """Write the ArviZ NetCDF chain, and log the IS health check."""
+    """Write the ArviZ NetCDF chain and its config record, and log IS health.
+
+    ``config_layers`` are the ordered ``--config`` files this run was handed.
+    Merge order is caller-controlled and a wrong-but-valid order is silent, so
+    the list is stamped into the chain alongside the resolved config written
+    next to it.
+    """
     import json
     from functools import partial
 
@@ -269,6 +289,14 @@ def save(
     if proposal is not None:
         idata.posterior.attrs["proposal"] = json.dumps(
             proposal.model_dump(mode="json"), sort_keys=True
+        )
+
+    # Which files were merged, in which order, to produce `config`. The
+    # resolved config goes next to the chain below; this is the provenance the
+    # resolved config cannot carry.
+    if config_layers is not None:
+        idata.posterior.attrs["config_layers"] = json.dumps(
+            [str(path) for path in config_layers]
         )
 
     if marginalization is not None:
@@ -328,6 +356,14 @@ def save(
             )
 
     idata.to_netcdf(nc_path)
+
+    # The record of the run's settings, beside the chain rather than in a
+    # parallel tree linked only by filename convention. `save_config` writes
+    # the defaults-filled RunConfig, so two runs that reach the same settings
+    # by different layer overrides produce identical files.
+    config_record = nc_path.with_suffix(".json")
+    save_config(config, config_record)
+    logger.info("Saved %s", config_record)
 
     # Importance-sampling health: relative ESS near 1 means the proposal catalog
     # still reweights well at the posterior.
@@ -394,21 +430,25 @@ def _parse_bank_args(values: list[str]) -> dict[str, Path]:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
-    config_path = args.config.resolve()
-    bank_paths = _parse_bank_args(args.banks)
-    raw = load_mapping(config_path)
-    config = build_run_config(
-        raw,
-        seed=args.seed,
-        outdir=args.outdir.resolve() if args.outdir else None,
-        label=args.label,
-    )
-
     logging.basicConfig(
         level=logging.WARNING if args.quiet else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-    logger.info("Config: %s", config_path)
+
+    config_layers = [path.resolve() for path in args.config]
+    bank_paths = _parse_bank_args(args.banks)
+    config = build_run_config(
+        load_merged_config(args),
+        seed=args.seed,
+        outdir=args.outdir.resolve() if args.outdir else None,
+        label=args.label,
+    )
+    # The pre-flight check `assemble_config` used to run once per run on the
+    # way to every chain: reject an unknown bank or a self-correlated mixture
+    # before JAX claims a device. `scripts/validate_configs.py` runs it over
+    # all runs at once, before any bank is built.
+    check_bank_references(config, label=args.label or str(config_layers[-1]))
+
     logger.info(
         "Sampling %s | fixed %s",
         tuple(config.sampled_params),
@@ -475,6 +515,7 @@ def main(argv: list[str] | None = None) -> None:
         timestamp=timestamp,
         force=args.force,
         marginalization=marginalization,
+        config_layers=config_layers,
     )
 
 
