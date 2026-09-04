@@ -6,7 +6,6 @@ import pytest
 
 from astrogwb.paper.runtime import (
     CPU_THREAD_ENV_VARS,
-    colab_tpu_available,
     configure_runtime,
 )
 
@@ -88,30 +87,3 @@ def test_configure_runtime_cpu_threads_pins_all_thread_env_vars(
     for var in CPU_THREAD_ENV_VARS:
         assert os.environ[var] == "1"
     assert "intra_op_parallelism_threads=1" in os.environ["XLA_FLAGS"]
-
-
-def test_colab_tpu_available_from_device(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("COLAB_TPU_ADDR", raising=False)
-    monkeypatch.setattr(
-        "astrogwb.paper.runtime.os.path.exists", lambda path: path == "/dev/accel0"
-    )
-
-    assert colab_tpu_available()
-
-
-def test_colab_tpu_available_from_legacy_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("astrogwb.paper.runtime.os.path.exists", lambda path: False)
-    monkeypatch.setenv("COLAB_TPU_ADDR", "10.0.0.2:8470")
-
-    assert colab_tpu_available()
-
-
-def test_colab_tpu_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("astrogwb.paper.runtime.os.path.exists", lambda path: False)
-    monkeypatch.delenv("COLAB_TPU_ADDR", raising=False)
-
-    assert not colab_tpu_available()
