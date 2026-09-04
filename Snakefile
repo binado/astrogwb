@@ -9,7 +9,6 @@ from astrogwb.paper.config.runs import (
     load_base,
     resolve_bank_names,
     run_config_paths,
-    run_target,
 )
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
@@ -414,7 +413,7 @@ for _experiment in runs:
 
     rule:
         """Aggregate target: every chain of one experiment."""
-        name: run_target(_experiment)
+        name: f"run_experiment_{_experiment.replace('-', '_')}"
         localrule: True
         input:
             experiment_chains(_experiment),

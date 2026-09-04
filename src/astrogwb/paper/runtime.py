@@ -29,18 +29,7 @@ CPU_THREAD_ENV_VARS = (
 )
 
 
-def colab_tpu_available() -> bool:
-    """Return whether a Colab runtime exposes TPU hardware.
-
-    ``/dev/accel0`` is the current TPU VM device signal.  The environment
-    variable is retained as a fallback for older Colab TPU runtimes.  Keep
-    this check stdlib-only so callers can select a JAX build before importing
-    JAX and initializing a backend.
-    """
-    return os.path.exists("/dev/accel0") or bool(os.environ.get("COLAB_TPU_ADDR"))
-
-
-def positive_int(value: str) -> int:
+def _positive_int(value: str) -> int:
     """Parse a strictly positive integer for runtime CLI controls."""
     parsed = int(value)
     if parsed <= 0:
@@ -58,13 +47,13 @@ def add_runtime_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--host-device-count",
-        type=positive_int,
+        type=_positive_int,
         default=None,
         help="Logical host devices (default: sampler.num_chains).",
     )
     parser.add_argument(
         "--cpu-threads",
-        type=positive_int,
+        type=_positive_int,
         default=None,
         help="Cap OMP/BLAS/XLA CPU threads; omitted leaves inherited settings.",
     )

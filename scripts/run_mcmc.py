@@ -224,14 +224,14 @@ def chain_output_path(config: RunConfig, *, timestamp: str | None = None) -> Pat
     timestamped naming convention, while still allowing a collision check before
     expensive sampling starts.
     """
-    if config.label:
-        base = config.label
+    if config.output.label:
+        base = config.output.label
     else:
         timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
         params_suffix = "-".join(config.sampled_params)
         det_suffix = ",".join(config.analysis.detectors)
         base = f"mcmc-{params_suffix}-det={det_suffix}-seed{config.seed}-{timestamp}"
-    return config.outdir / f"{base}.nc"
+    return config.output.outdir / f"{base}.nc"
 
 
 def ensure_chain_path_available(
@@ -271,7 +271,7 @@ def save(
     import numpy as np
     import xarray as xr
 
-    config.outdir.mkdir(parents=True, exist_ok=True)
+    config.output.outdir.mkdir(parents=True, exist_ok=True)
     timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     nc_path = ensure_chain_path_available(config, timestamp=timestamp, force=force)
 

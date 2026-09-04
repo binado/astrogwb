@@ -49,7 +49,6 @@ class Network:
 CATEGORY: dict[str, str] = {
     "cosmology": "#0072B2",
     "modified_propagation": "#D55E00",
-    "astrophysical": "#009E73",
 }
 
 # Dual-axis style for the fiducial spectrum figure: both curves and axes
@@ -61,13 +60,6 @@ SPECTRUM: dict[str, str] = {
 SPECTRUM_LINESTYLES: dict[str, str] = {
     "omega_gw": "-",
     "sh": ":",
-}
-
-NETWORK: dict[str, str] = {
-    "ET": "#E69F00",
-    "CE": "#56B4E9",
-    "LISA": "#CC79A7",
-    "ET+CE": "#F0E442",
 }
 
 # linewidth matches matplotlib's default lines.linewidth (and corner's truth

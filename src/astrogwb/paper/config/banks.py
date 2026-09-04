@@ -103,11 +103,6 @@ class BankGenerationConfig(BaseModel):
         return base / POPULATIONS_DIR / f"{self.population}.yaml"
 
 
-def banks_dir(root: Path | None = None) -> Path:
-    """Return the committed bank-config directory."""
-    return (root or Path()) / BANKS_DIR
-
-
 def load_bank_config(path: Path) -> BankGenerationConfig:
     """Load and validate one bank config; the filename stem names the bank."""
     return BankGenerationConfig.model_validate(
@@ -117,7 +112,7 @@ def load_bank_config(path: Path) -> BankGenerationConfig:
 
 def discover_banks(root: Path | None = None) -> dict[str, BankGenerationConfig]:
     """Load every committed bank config, keyed by name, in sorted order."""
-    directory = banks_dir(root)
+    directory = (root or Path()) / BANKS_DIR
     paths = sorted(directory.glob("*.toml"))
     if not paths:
         raise ValueError(f"{directory} declares no bank configs")
@@ -194,11 +189,6 @@ class BankConfig(BaseModel):
     seed: int
     num_samples: Annotated[int, Field(gt=0)]
     redshift_proposal: RedshiftProposal
-
-    @property
-    def support(self) -> tuple[float, float]:
-        """The redshift span this bank's samples were drawn over."""
-        return self.redshift_proposal.z_min, self.redshift_proposal.z_max
 
     def to_population_metadata(self) -> PopulationMetadata:
         """Convert bank provenance into the core population metadata model."""

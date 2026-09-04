@@ -14,7 +14,6 @@ from astrogwb.paper.config.runs import (
     assemble_run,
     discover_runs,
     load_base,
-    merge_run_overlay,
 )
 from astrogwb.paper.utils import deep_merge, load_mapping
 
@@ -298,22 +297,6 @@ def test_config_rejects_a_prior_without_a_fiducial() -> None:
 
     with pytest.raises(ValidationError, match="priors missing from"):
         build_run_config(raw)
-
-
-def test_merge_run_overlay_replaces_named_priors_wholesale() -> None:
-    raw = example_raw()
-    merged = merge_run_overlay(
-        raw,
-        {"priors": {"H0": {"type": "normal", "loc": 67.66, "scale": 0.6766}}},
-    )
-
-    assert merged["priors"]["H0"] == {
-        "type": "normal",
-        "loc": 67.66,
-        "scale": 0.6766,
-    }
-    config = build_run_config(merged)
-    assert prior_to_spec(config.priors["H0"]) == merged["priors"]["H0"]
 
 
 def test_prior_spec_rejects_stale_keys_from_a_cross_type_override() -> None:
