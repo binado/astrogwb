@@ -15,13 +15,20 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from astrogwb_paper.config.figures import reference_config_path
+from astrogwb_paper.config.runs import run_config_paths
 from astrogwb_paper.paths import paper_project_root
+from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS
 
 PAPER_ROOT = paper_project_root()
 SNAKEFILE = PAPER_ROOT / "Snakefile"
-#: The assembled run config every figure rule declares as an input.
-FIGURE_CONFIG = str(reference_config_path())
+#: The run whose layer files the chain-free figure rules declare and pass.
+FIGURE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
+#: Those layer files as the workflow sees them, relative to its cwd. Resolved
+#: against the checkout first, because `run_config_paths` checks they exist.
+FIGURE_CONFIG_LAYERS = [
+    str(path.relative_to(PAPER_ROOT))
+    for path in run_config_paths(*FIGURE_RUN, root=PAPER_ROOT)
+]
 #: Set by the session fixture below; the cwd every snakemake run uses.
 WORKFLOW_DIR = PAPER_ROOT
 
@@ -29,8 +36,7 @@ WORKFLOW_DIR = PAPER_ROOT
 LINKED = ("Snakefile", "config", "scripts")
 BANK_RULES = ("waveform_bank", "banks")
 MCMC_RULES = (
-    "assemble_config",
-    "configs",
+    "validate",
     "run_mcmc",
     "plot_cosmological_parameters",
     "plot_modified_propagation",
@@ -193,7 +199,9 @@ def test_plot_cosmological_parameters_expands_all_chains_and_figures(
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule assemble_config:") == 8
+    # Eight chains and no config-assembly jobs: the layers are inputs of
+    # run_mcmc, not outputs of a rule of their own.
+    assert "rule assemble_config:" not in result.stdout
     assert result.stdout.count("rule run_mcmc:") == 8
     assert result.stdout.count("rule plot_cosmological_parameters:") == 1
     for path in (
@@ -224,7 +232,7 @@ def test_run_experiment_target_excludes_figure_rule(tmp_path: Path) -> None:
     assert "rule plot_cosmological_parameters:" not in result.stdout
 
 
-def test_config_assembly_is_per_run(tmp_path: Path) -> None:
+def test_run_mcmc_is_handed_its_layers_on_argv(tmp_path: Path) -> None:
     banks = _banks(tmp_path, "md-imrphenom-s42.h5")
 
     result = _mcmc(
@@ -239,22 +247,31 @@ def test_config_assembly_is_per_run(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert (
-        "astrogwb-assemble-config --experiment cosmological-parameters "
-        "--run H0-Omega_m "
-        "--output outputs/configs/cosmological-parameters/H0-Omega_m.json"
-        in result.stdout
-    )
+    # No intermediate artifact: the layers are the rule's inputs *and* what it
+    # passes on argv, so the dependency edges and the data path are one list.
+    assert "astrogwb-assemble-config" not in result.stdout
+    assert "outputs/configs/" not in result.stdout
+    assert "rule assemble_config:" not in result.stdout
+
+    layers = [
+        str(path.relative_to(PAPER_ROOT))
+        for path in run_config_paths(
+            "cosmological-parameters", "H0-Omega_m", root=PAPER_ROOT
+        )
+    ]
     # Three layers, all declared, so any of them retriggers this run alone.
-    assert "config/analysis/base/parameters.toml" in result.stdout
-    assert "config/analysis/runs/cosmological-parameters/_base.toml" in result.stdout
-    assert "config/analysis/runs/cosmological-parameters/H0-Omega_m.toml" in (
-        result.stdout
-    )
+    assert "config/analysis/base/parameters.toml" in layers
+    assert "config/analysis/runs/cosmological-parameters/_base.toml" in layers
+    assert "config/analysis/runs/cosmological-parameters/H0-Omega_m.toml" in layers
+    for layer in layers:
+        assert f"--config {layer}" in result.stdout
+        assert any(layer in line for line in _rule_inputs(result.stdout))
+    # Repeated, not space-joined: argparse's append action takes one path each.
+    assert result.stdout.count("--config config/analysis/") >= len(layers)
+
     assert "--bank" in result.stdout
     assert f"md-imrphenom-s41={banks / 'md-imrphenom-s41.h5'}" in result.stdout
     assert f"md-imrphenom-s42={banks / 'md-imrphenom-s42.h5'}" in result.stdout
-    assert result.stdout.count("rule assemble_config:") == 1
 
 
 def test_variable_catalog_size_shares_one_bank_across_all_sizes(
@@ -361,8 +378,7 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "amplitude_toy",
         "fiducial_spectrum",
         "importance_weights_grid",
-        "assemble_config",
-        "configs",
+        "validate",
         "run_mcmc",
     } <= rules
     assert {
@@ -401,6 +417,10 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         # The population left the DAG: it was a temp() node with one consumer.
         "population_config",
         "population_bank",
+        # The assembled-config artifact and its aggregate target are gone: each
+        # entrypoint merges the layer files the rule hands it.
+        "assemble_config",
+        "configs",
     }.isdisjoint(rules)
 
 
@@ -423,7 +443,7 @@ def test_experiments_target_builds_all_26_chains(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule assemble_config:") == 26
+    assert "rule assemble_config:" not in result.stdout
     assert result.stdout.count("rule run_mcmc:") == 26
     # `experiments` is chains-only now; figures are opt-in via the plot rules.
     assert "rule plot_cosmological_parameters:" not in result.stdout
@@ -448,11 +468,14 @@ def test_plot_cosmological_parameters_passes_all_paths_not_labels(
 
     assert result.returncode == 0, result.stderr
     assert "rule plot_cosmological_parameters:" in result.stdout
-    # The script resolves the assembled config path itself, so no flag carries
-    # it -- but the rule still declares the file, so a config change retriggers
-    # the figure. Figures therefore report what was actually sampled.
+    # The figure is handed the layer files of a run it actually plots, and the
+    # rule declares those same files -- so the edge that retriggers the figure
+    # and the data path that fills it in are one list, not two.
+    for layer in FIGURE_CONFIG_LAYERS:
+        assert f"--config {layer}" in result.stdout
+        assert any(layer in line for line in _rule_inputs(result.stdout))
     assert "--base-config" not in result.stdout
-    assert any(FIGURE_CONFIG in line for line in _rule_inputs(result.stdout))
+    assert "outputs/configs/" not in result.stdout
     for flag in (
         "--catalog",
         "--detector-chains",
@@ -470,11 +493,41 @@ def test_plot_cosmological_parameters_passes_all_paths_not_labels(
     ):
         assert flag in result.stdout
     assert "--section" not in result.stdout
-    # The script hard-codes its own labels and run order, so neither a
-    # figure config nor any LaTeX crosses the shell boundary.
+    # The script hard-codes its own labels, so no LaTeX crosses the shell
+    # boundary. Run *names* do: detectors are per-run and are read back from
+    # each run's own config.
     assert "--figure-config" not in result.stdout
     assert "--prior-labels" not in result.stdout
     assert r"\mathcal" not in result.stdout
+    for run in DETECTOR_NETWORK_RUNS:
+        assert f"--network-run cosmological-parameters/{run}" in result.stdout
+
+
+def test_network_run_flags_follow_the_legend_order(tmp_path: Path) -> None:
+    # Declaration order drives chain order, legend order, and colour
+    # assignment. `resolve_networks` rejects a mis-ordered list, so this pins
+    # that the workflow emits the order it expects rather than relying on the
+    # figure to still render.
+    banks = _banks(tmp_path, "md-imrphenom-s42.h5")
+
+    result = _mcmc(
+        "--dry-run",
+        "--forceall",
+        "--printshellcmds",
+        "--cores",
+        "8",
+        "plot_cosmological_parameters",
+        "--config",
+        f"banks_dir={banks}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    command = result.stdout[result.stdout.index("--network-run ") :]
+    positions = [
+        command.index(f"--network-run cosmological-parameters/{run}")
+        for run in DETECTOR_NETWORK_RUNS
+    ]
+    assert positions == sorted(positions)
 
 
 def test_standalone_figures_receive_config_paths(
@@ -502,14 +555,21 @@ def test_standalone_figures_receive_config_paths(
         "scripts/importance_weights_grid.py",
     ):
         assert script in result.stdout
-    # Every standalone script reads the assembled run config for itself instead
-    # of receiving fiducials and analysis bounds as reconstructed flags -- or
-    # even the config path, which the library already owns.
+    # Each standalone script is handed config *layers*, never fiducials and
+    # analysis bounds reconstructed into flags, and never an assembled config.
     assert "--base-config" not in result.stdout
-    assert sum(FIGURE_CONFIG in line for line in _rule_inputs(result.stdout)) == 3
     assert "--figure-config" not in result.stdout
+    assert "outputs/configs/" not in result.stdout
+    for layer in FIGURE_CONFIG_LAYERS:
+        assert sum(layer in line for line in _rule_inputs(result.stdout)) == 3
+        assert result.stdout.count(f"--config {layer}") == 3
     for flag in ("--observation-time", "--f-min", "--h0", "--omega-gw-min"):
         assert flag not in result.stdout
+    # fiducial_spectrum borrows the cosmological-parameters networks and reads
+    # no chains; it still declares their TOMLs, so editing one retriggers it.
+    assert result.stdout.count("--network-run cosmological-parameters/") == len(
+        DETECTOR_NETWORK_RUNS
+    )
 
 
 def test_figure_path_is_a_valid_snakemake_target(

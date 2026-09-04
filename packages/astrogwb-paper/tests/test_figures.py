@@ -5,27 +5,17 @@ is hard-coded in the scripts and in :mod:`astrogwb_paper.plotting`. These tests
 pin the contract that survived the move out of TOML: every hard-coded run name
 is a real run of its experiment, and resolved networks carry that experiment's
 detectors in declaration order -- the order the workflow also expands its chain
-paths from.
+paths and its ``--network-run`` flags from.
 
-Detectors, fiducials, and the analysis grid are read from the *assembled*
-configs under ``outputs/configs/``, so these tests assemble into a tmp tree and
-point the figure loader at it. That is the improvement the rework bought: a
-figure reports what was sampled, not what an inventory said.
+Detectors are read from each run's own committed config layers rather than from
+an assembled artifact, so these tests need no build step and no tmp tree: they
+run against the checkout as committed.
 """
 
 from __future__ import annotations
 
-import astrogwb_paper.config.figures as figures_module
 import pytest
-from astrogwb_paper.cli.assemble_config import main as assemble_configs
-from astrogwb_paper.config.figures import (
-    REFERENCE_RUN,
-    load_analysis_grid,
-    load_fiducials,
-    reference_config_path,
-    resolve_networks,
-)
-from astrogwb_paper.config.runs import assemble_run, config_path, discover_runs
+from astrogwb_paper.config.runs import assemble_run, discover_runs, resolve_networks
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS, DETECTOR_NETWORKS
 
@@ -36,23 +26,22 @@ PAPER_ROOT = paper_project_root()
 NETWORK_EXPERIMENTS = ("cosmological-parameters", "modified-propagation")
 
 
-@pytest.fixture(autouse=True)
-def assembled_configs(tmp_path_factory, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Assemble every config into a tmp tree and read figures from there.
-
-    The committed checkout may have no `outputs/configs/` at all (it is a build
-    artifact), so the figure loader is pointed at a freshly assembled one rather
-    than at whatever happens to be lying around.
-    """
-    root = tmp_path_factory.mktemp("paper-root")
-    assemble_configs(["--all", "--output-dir", str(root / "outputs/configs")])
-    monkeypatch.setattr(figures_module, "paper_project_root", lambda: root)
+def network_references(experiment: str) -> list[tuple[str, str]]:
+    """The ``--network-run`` list a figure rule passes, in legend order."""
+    return [(experiment, run) for run in DETECTOR_NETWORK_RUNS]
 
 
 def test_the_figure_config_directory_is_gone() -> None:
     # Presentation moved into the scripts; nothing should reintroduce a
     # parallel TOML copy of it for the scripts or the workflow to reload.
     assert not (PAPER_ROOT / "inputs/figures").exists()
+
+
+def test_no_assembled_config_tree_is_rebuilt() -> None:
+    # Every entrypoint merges its own layers now. A reappearing
+    # `outputs/configs/` would mean something started writing the intermediate
+    # artifact again, and figures could then read a stale copy.
+    assert not (PAPER_ROOT / "outputs/configs").exists()
 
 
 def test_every_hard_coded_network_is_a_declared_run() -> None:
@@ -79,7 +68,9 @@ def test_committed_latex_labels_survive_the_move_out_of_toml() -> None:
 
 
 def test_resolve_networks_preserves_order_and_attaches_detectors() -> None:
-    networks = resolve_networks("cosmological-parameters", DETECTOR_NETWORKS)
+    networks = resolve_networks(
+        network_references("cosmological-parameters"), DETECTOR_NETWORKS
+    )
 
     assert [network.name for network in networks] == list(DETECTOR_NETWORK_RUNS)
     for network in networks:
@@ -93,7 +84,8 @@ def test_resolve_networks_preserves_order_and_attaches_detectors() -> None:
 
 def test_both_network_experiments_resolve_to_identical_networks() -> None:
     resolved = [
-        resolve_networks(name, DETECTOR_NETWORKS) for name in NETWORK_EXPERIMENTS
+        resolve_networks(network_references(name), DETECTOR_NETWORKS)
+        for name in NETWORK_EXPERIMENTS
     ]
 
     assert resolved[0] == resolved[1]
@@ -101,25 +93,46 @@ def test_both_network_experiments_resolve_to_identical_networks() -> None:
 
 def test_resolve_networks_rejects_empty_duplicate_and_unknown_runs() -> None:
     with pytest.raises(ValueError, match="no detector networks"):
-        resolve_networks("cosmological-parameters", [])
+        resolve_networks([], [])
     with pytest.raises(ValueError, match="duplicate"):
         resolve_networks(
-            "cosmological-parameters",
+            [("cosmological-parameters", "ET-triangular")] * 2,
             [("ET-triangular", "a"), ("ET-triangular", "b")],
         )
-    with pytest.raises(FileNotFoundError, match="assembled config not found"):
-        resolve_networks("cosmological-parameters", [("nope", "label")])
+    with pytest.raises(ValueError, match="unknown run"):
+        resolve_networks([("cosmological-parameters", "nope")], [("nope", "label")])
 
 
-def test_the_reference_run_is_a_real_run() -> None:
-    experiment, run = REFERENCE_RUN
-    assert run in discover_runs()[experiment]
-    assert reference_config_path() == config_path(experiment, run)
+def test_resolve_networks_rejects_a_mis_ordered_network_run_list() -> None:
+    # Order drives chain order, legend order, and color assignment, and a
+    # swapped pair renders a perfectly good figure with the wrong labels on the
+    # wrong curves. Positional matching makes that checkable; this is the check.
+    references = network_references("cosmological-parameters")
+    swapped = [references[1], references[0], *references[2:]]
+
+    with pytest.raises(ValueError, match="must match the figure legend order"):
+        resolve_networks(swapped, DETECTOR_NETWORKS)
 
 
-def test_fiducials_and_analysis_grid_come_from_an_assembled_run() -> None:
-    fiducials = load_fiducials()
-    grid = load_analysis_grid()
+def test_resolve_networks_rejects_a_short_or_mixed_network_run_list() -> None:
+    references = network_references("cosmological-parameters")
+
+    with pytest.raises(ValueError, match="legend declares"):
+        resolve_networks(references[:-1], DETECTOR_NETWORKS)
+
+    mixed = [*references[:-1], ("modified-propagation", references[-1][1])]
+    with pytest.raises(ValueError, match="same experiment"):
+        resolve_networks(mixed, DETECTOR_NETWORKS)
+
+
+def test_fiducials_and_analysis_grid_come_from_a_merged_run() -> None:
+    from astrogwb_paper.config.mcmc import build_run_config
+
+    config = build_run_config(
+        assemble_run("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
+    )
+    fiducials = config.fiducials
+    grid = config.analysis_grid
 
     # `importance_relative_ess` is a plotting truth line, not a fiducial: adding
     # it here would inject a spurious constant into the sampled model.

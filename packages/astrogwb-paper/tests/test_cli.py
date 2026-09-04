@@ -11,7 +11,6 @@ from astrogwb_paper.paths import paper_project_root
 COMMANDS = (
     "astrogwb-generate-bank",
     "astrogwb-run-mcmc",
-    "astrogwb-assemble-config",
     "astrogwb-profile-model",
 )
 
@@ -44,19 +43,22 @@ def test_pure_config_imports_do_not_import_jax() -> None:
     and configure the process without touching jax: importing jax is slow, and
     ``runtime`` deliberately imports it only inside ``configure_runtime``.
 
-    ``config.banks`` (and ``config.runs`` / ``config.figures`` through it) now
-    imports jax transitively: it reads ``PopulationMetadata`` from
-    ``astrogwb.catalog``, which re-exports waveform-grid metadata from
-    ``astrogwb.waveform``. That import is accepted -- ``import jax`` only loads
-    the package and does not consume runtime configuration; the sibling test
-    below proves the XLA backend stays uninitialized on that path.
+    ``config.runs`` and ``config.banks`` are in this list rather than excluded
+    from it, and that is the point: the ``Snakefile`` imports both to build the
+    DAG, so every ``--dry-run`` paid for a jax import while ``config.banks``
+    read ``PopulationMetadata`` from ``astrogwb.catalog`` at module scope. It
+    reads it inside the two functions that need it now, and ``config.runs``
+    reaches no further than stdlib.
     """
     code = """
 import sys
 import astrogwb_paper
 import astrogwb_paper.config.mcmc
+import astrogwb_paper.config.runs
+import astrogwb_paper.config.banks
 import astrogwb_paper.runtime
 assert 'jax' not in sys.modules
+assert 'pydantic' not in sys.modules or 'astrogwb_paper.config.mcmc' in sys.modules
 """
     result = subprocess.run(
         [sys.executable, "-c", code],

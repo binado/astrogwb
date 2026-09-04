@@ -44,7 +44,6 @@ notebook = [
 
 [project.scripts]
 astrogwb-run-mcmc = "astrogwb_paper.cli.run_mcmc:main"
-astrogwb-assemble-config = "astrogwb_paper.cli.assemble_config:main"
 astrogwb-generate-bank = "astrogwb_paper.cli.generate_bank:main"
 astrogwb-profile-model = "astrogwb_paper.cli.profile_model:main"
 

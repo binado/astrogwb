@@ -1,7 +1,7 @@
 # Local batch profile: run the MCMC batch on this machine (no SLURM), packing
 # multiple run_mcmc subprocesses across cores.
 #   snakemake --snakefile Snakefile \
-#     --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
+#     --allowed-rules validate run_mcmc plot_cosmological_parameters \
 #     --profile profiles/local --cores 8 plot_cosmological_parameters --dry-run
 # Uses Snakemake's default local executor -- no executor plugin required.
 #

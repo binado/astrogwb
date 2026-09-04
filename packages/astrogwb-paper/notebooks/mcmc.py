@@ -178,8 +178,8 @@ from astrogwb_paper.catalogs import (
     truncate_catalog_samples,
     validate_matching_frequency_grids,
 )
-from astrogwb_paper.config.figures import load_injection_spec, load_proposal_spec
-from astrogwb_paper.config.mcmc import ProposalConfig
+from astrogwb_paper.config.mcmc import ProposalConfig, build_run_config
+from astrogwb_paper.config.runs import assemble_run
 from astrogwb_paper.paths import paper_project_root
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
@@ -208,6 +208,11 @@ else:
     ROOT_DIR = paper_project_root()
     INJECTION_BANK_PATH = ROOT_DIR / "outputs/banks/md-imrphenom-s41.h5"
     PROPOSAL_BANK_PATH = ROOT_DIR / "outputs/banks/md-imrphenom-s42.h5"
+
+# The run whose catalog composition this notebook reproduces. It used to be a
+# default buried in `config.figures.load_injection_spec`; naming it here makes
+# the notebook say which run it is standing in for.
+REFERENCE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
 
 # Detector settings
 detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
@@ -266,13 +271,16 @@ fixed_params = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # - source parameters, exposed as `catalog.source_parameters`.
 
 # %%
-# The two catalogs are read off an assembled run config, so the notebook
-# composes exactly what the workflow's runs compose.
+# The two catalogs come from a run's own config layers, merged here the same
+# way the workflow merges them, so the notebook composes exactly what that run
+# composes. `assemble_run` addresses a run by name -- the workflow passes the
+# same layers on argv instead, but neither reads an intermediate artifact.
+RUN_CONFIG = build_run_config(assemble_run(*REFERENCE_RUN))
 injection_source = CatalogSource(
-    INJECTION_BANK_PATH, None, load_injection_spec(), "injection"
+    INJECTION_BANK_PATH, None, RUN_CONFIG.catalog.injection, "injection"
 )
 proposal_source = CatalogSource(
-    PROPOSAL_BANK_PATH, None, load_proposal_spec(), "proposal"
+    PROPOSAL_BANK_PATH, None, RUN_CONFIG.catalog.proposal, "proposal"
 )
 injection = propagate_catalog(injection_source.compose(), fiducials=fiducials)
 proposal = propagate_catalog(proposal_source.compose(), fiducials=fiducials)

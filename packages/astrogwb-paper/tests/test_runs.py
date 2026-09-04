@@ -10,20 +10,24 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from astrogwb_paper.cli.assemble_config import main as assemble_configs
-from astrogwb_paper.config.banks import discover_banks
+from astrogwb_paper.config.banks import (
+    check_bank_references,
+    discover_banks,
+    validate_all_runs,
+)
 from astrogwb_paper.config.mcmc import build_run_config
 from astrogwb_paper.config.runs import (
+    CHAINS_ROOT,
     EXPERIMENT_BASE,
     RUNS_DIR,
     assemble_run,
+    base_config_paths,
     catalog_bank_names,
-    chain_path,
-    check_bank_references,
-    config_path,
     discover_runs,
     load_base,
-    run_bank_names,
+    merge_config_layers,
+    resolve_bank_names,
+    run_config_paths,
     run_target,
 )
 from astrogwb_paper.paths import paper_project_root
@@ -73,13 +77,39 @@ def test_every_experiment_has_the_required_base_overlay() -> None:
 
 
 def test_output_paths_follow_from_the_run_name() -> None:
-    assert config_path("cosmological-parameters", "ET-triangular") == Path(
-        "outputs/configs/cosmological-parameters/ET-triangular.json"
-    )
-    assert chain_path("cosmological-parameters", "ET-triangular") == Path(
-        "outputs/chains/cosmological-parameters/ET-triangular.nc"
-    )
+    # There is no assembled-config path any more: a run is addressed by its
+    # layer files going in and by its chain coming out.
+    assert CHAINS_ROOT == Path("outputs/chains")
     assert run_target("variable-catalog-size") == "run_experiment_variable_catalog_size"
+
+
+def test_run_config_paths_are_the_three_layers_in_merge_order() -> None:
+    paths = run_config_paths("cosmological-parameters", "ET-triangular")
+    base = base_config_paths()
+
+    assert paths[: len(base)] == base
+    assert [path.name for path in paths[len(base) :]] == [
+        EXPERIMENT_BASE,
+        "ET-triangular.toml",
+    ]
+    assert all(path.is_file() for path in paths)
+
+
+def test_assemble_run_is_merge_config_layers_over_run_config_paths() -> None:
+    # The seam the workflow relies on: the rule declares `run_config_paths` as
+    # its input and passes them on argv, and `assemble_run` -- what the
+    # notebooks and the validation gate call -- must agree with that exactly.
+    for experiment, run in (
+        ("cosmological-parameters", "ET-triangular"),
+        ("variable-proposal-guard", "eps1e-3"),
+    ):
+        layers = run_config_paths(experiment, run)
+        assert merge_config_layers(layers) == assemble_run(experiment, run)
+
+
+def test_merge_config_layers_rejects_an_empty_layer_list() -> None:
+    with pytest.raises(ValueError, match="no config layers"):
+        merge_config_layers([])
 
 
 def test_assembling_an_unknown_run_names_the_missing_file() -> None:
@@ -256,12 +286,12 @@ def test_only_astrophysical_and_guard_runs_use_a_mixed_proposal() -> None:
             assert epsilon == 0.0, f"{experiment}/{run}"
 
 
-def test_run_bank_names_are_the_distinct_banks_both_roles_need() -> None:
-    assert run_bank_names("cosmological-parameters", "ET-triangular") == [
+def test_resolve_bank_names_are_the_distinct_banks_both_roles_need() -> None:
+    assert resolve_bank_names("cosmological-parameters", "ET-triangular") == [
         "md-imrphenom-s41",
         "md-imrphenom-s42",
     ]
-    assert run_bank_names("variable-proposal-guard", "eps1e-1") == [
+    assert resolve_bank_names("variable-proposal-guard", "eps1e-1") == [
         "md-imrphenom-s41",
         "md-imrphenom-s42",
         "uniform-imrphenom-s51",
@@ -300,58 +330,46 @@ def test_a_mixture_seed_colliding_with_a_bank_seed_is_rejected() -> None:
 # --------------------------------------------------------------------------- #
 # The assemble_config CLI
 # --------------------------------------------------------------------------- #
-def test_assemble_all_writes_every_run(tmp_path: Path) -> None:
-    assemble_configs(["--all", "--output-dir", str(tmp_path)])
+# --------------------------------------------------------------------------- #
+# The pre-flight gate that replaced `astrogwb-assemble-config --all`
+# --------------------------------------------------------------------------- #
+def test_the_validation_gate_covers_every_run() -> None:
+    labels = validate_all_runs()
 
-    generated = list(tmp_path.glob("*/*.json"))
-    assert len(generated) == 26
-    for relative in (
-        "cosmological-parameters/H0-Omega_m.json",
-        "cosmological-parameters/H0-merger-rate.json",
-        "astrophysical-parameters/z_peak.json",
-        "modified-propagation/Xi_0-H0.json",
-        "variable-catalog-size/n32768.json",
-        "variable-proposal-guard/eps1e-3.json",
-        "waveform-approximant/IMRPhenom.json",
-        "waveform-approximant/TaylorF2.json",
+    assert len(labels) == 26
+    for label in (
+        "cosmological-parameters/H0-Omega_m",
+        "cosmological-parameters/H0-merger-rate",
+        "astrophysical-parameters/z_peak",
+        "modified-propagation/Xi_0-H0",
+        "variable-catalog-size/n32768",
+        "variable-proposal-guard/eps1e-3",
+        "waveform-approximant/IMRPhenom",
+        "waveform-approximant/TaylorF2",
     ):
-        assert (tmp_path / relative).is_file()
+        assert label in labels
 
-    guard = load_mapping(tmp_path / "variable-proposal-guard/eps1e-3.json")
+
+def test_the_guard_run_merges_to_its_declared_settings() -> None:
+    guard = build_run_config(
+        assemble_run("variable-proposal-guard", "eps1e-3")
+    ).model_dump(mode="json")
+
     assert guard["catalog"]["proposal"]["uniform_mixing_fraction"] == 0.001
     assert guard["sampled_params"] == ["gamma", "kappa", "z_peak"]
     assert guard["analysis"]["likelihood"] == "amplitude_marginalized"
     assert guard["analysis"]["amplitude_parameter"] == "H0"
-    # The proposal *density* is derived at run time, never written here.
+    # The proposal *density* is derived at run time, never carried by a config.
     assert "proposal" not in guard
 
 
-def test_assemble_one_run_writes_only_that_config(tmp_path: Path) -> None:
-    destination = tmp_path / "one.json"
+def test_run_mcmc_writes_its_config_record_beside_the_chain() -> None:
+    # The record moved out of `outputs/configs/` and next to the chain when
+    # `assemble_config` went away; `save_config` still writes the
+    # defaults-filled RunConfig, so the file stays diff-able.
+    config = build_run_config(assemble_run("modified-propagation", "Xi_0"))
 
-    assemble_configs(
-        [
-            "--experiment",
-            "modified-propagation",
-            "--run",
-            "Xi_0",
-            "--output",
-            str(destination),
-        ]
-    )
-
-    assert list(tmp_path.iterdir()) == [destination]
-    assert load_mapping(destination)["sampled_params"] == ["xi_0"]
-
-
-def test_assemble_rejects_mixing_all_with_a_single_run() -> None:
-    with pytest.raises(SystemExit):
-        assemble_configs(["--all", "--experiment", "x", "--run", "y", "-o", "z"])
-
-
-def test_assemble_requires_a_complete_single_run_selection() -> None:
-    with pytest.raises(SystemExit):
-        assemble_configs(["--experiment", "cosmological-parameters"])
+    assert config.model_dump(mode="json")["sampled_params"] == ["xi_0"]
 
 
 # --------------------------------------------------------------------------- #

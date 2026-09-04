@@ -3,21 +3,24 @@ import shlex
 from pathlib import Path
 
 from astrogwb_paper.config.banks import discover_banks
-from astrogwb_paper.config.figures import reference_config_path
 from astrogwb_paper.config.runs import (
-    assemble_run,
-    catalog_bank_names,
+    base_config_paths,
     discover_runs,
     load_base,
+    resolve_bank_names,
+    run_config_paths,
     run_target,
 )
 from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS
+
+# Neither config module imports JAX, pydantic, or matplotlib at module scope,
+# so DAG construction stays cheap: a --dry-run costs ~300 modules rather than
+# the ~1200 it took while `assemble_run` reached `config.banks`.
 
 
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
 BANKS_DIR = Path(config.get("banks_dir", "outputs/banks"))
 BANK_CONFIG_PATTERN = "config/banks/{bank}.toml"
-CONFIG_PATTERN = "outputs/configs/{experiment}/{run}.json"
 CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 
 # Filenames are the mapping: config/banks/<bank>.toml -> outputs/banks/<bank>.h5,
@@ -28,16 +31,19 @@ banks = discover_banks()
 runs = discover_runs()
 
 BANK_OUTPUTS = [str(BANKS_DIR / f"{name}.h5") for name in banks]
-CONFIG_OUTPUTS = [
-    f"outputs/configs/{experiment}/{run}.json"
-    for experiment, names in runs.items()
-    for run in names
-]
 CHAIN_OUTPUTS = [
     f"outputs/chains/{experiment}/{run}.nc"
     for experiment, names in runs.items()
     for run in names
 ]
+RUN_CONFIG_FILES = sorted(
+    {
+        str(path)
+        for experiment, names in runs.items()
+        for run in names
+        for path in run_config_paths(experiment, run, root=Path("."))
+    }
+)
 BANK_PATTERN = "|".join(re.escape(name) for name in banks)
 EXPERIMENT_PATTERN = "|".join(re.escape(name) for name in runs)
 RUN_PATTERN = "|".join(
@@ -51,9 +57,50 @@ RUN_PATTERN = "|".join(
 _BASE_CATALOGS = load_base()["catalog"]
 INJECTION_BANK = str(BANKS_DIR / f"{_BASE_CATALOGS['injection']['md_bank']}.h5")
 DEFAULT_PROPOSAL_BANK = str(BANKS_DIR / f"{_BASE_CATALOGS['proposal']['md_bank']}.h5")
-# Figures report what was sampled, so they read one assembled run config for the
-# shared fiducials and analysis grid (see config/figures.py).
-FIGURE_CONFIG = str(reference_config_path())
+# Figures report what was sampled, so each one is handed a run's own config
+# layers for the shared fiducials and analysis grid. Which run that is used to
+# be a constant buried in the library (config.figures.REFERENCE_RUN); it is an
+# explicit choice here now. The two chain figures read the layers of a run they
+# actually plot; the three chain-free figures fall back to this one.
+FIGURE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
+BASE_CONFIGS = [str(path) for path in base_config_paths(Path("."))]
+
+
+def config_layers(experiment, run):
+    """The ordered layer files one run's config is merged from."""
+    return [str(path) for path in run_config_paths(experiment, run, root=Path("."))]
+
+
+def config_flags(experiment, run):
+    """`config_layers` as repeated --config flags, in merge order.
+
+    Built in `params:` rather than interpolated from `input:`: a list input
+    expands to bare space-separated paths, which argparse's `action="append"`
+    would read as one value plus stray positionals.
+    """
+    return " ".join(
+        f"--config {shlex.quote(path)}" for path in config_layers(experiment, run)
+    )
+
+
+def network_run_flags(experiment):
+    """--network-run flags in DETECTOR_NETWORKS order, which is legend order."""
+    return " ".join(
+        f"--network-run {shlex.quote(f'{experiment}/{run}')}"
+        for run in DETECTOR_NETWORK_RUNS
+    )
+
+
+def network_config_inputs(experiment):
+    """The run TOMLs behind `network_run_flags`, so the DAG edges are real.
+
+    The script re-derives these paths from the run names it is given; declaring
+    them here is what makes editing one network's TOML retrigger the figure.
+    """
+    return [
+        f"config/analysis/runs/{experiment}/{run}.toml"
+        for run in DETECTOR_NETWORK_RUNS
+    ]
 
 
 def bank_path(name):
@@ -68,11 +115,11 @@ def bank_population(wildcards):
 def run_bank_names(wildcards):
     """Every distinct bank a run's injection + proposal catalogs draw from.
 
-    The only place the Snakefile reads a run config: bank names are known only
-    after the three-layer merge, so `run_mcmc` cannot declare its inputs without
-    it. One function, two callers -- down from ten helpers over three registries.
+    Bank names are known only after the three-layer merge, so `run_mcmc` cannot
+    declare its inputs without one. `resolve_bank_names` is the library
+    implementation; this is only the wildcards adapter.
     """
-    return catalog_bank_names(assemble_run(wildcards.experiment, wildcards.run))
+    return resolve_bank_names(wildcards.experiment, wildcards.run, root=Path("."))
 
 
 def run_bank_inputs(wildcards):
@@ -102,8 +149,7 @@ wildcard_constraints:
 
 localrules:
     waveform_bank,
-    assemble_config,
-    configs,
+    validate,
     plot_cosmological_parameters,
     plot_modified_propagation,
     amplitude_toy,
@@ -131,30 +177,29 @@ rule banks:
         BANK_OUTPUTS,
 
 
-rule assemble_config:
-    """One config per run, so a config edit retriggers exactly its own chain."""
+# Replaces `assemble_config --all`, whose real value was failing on the first
+# invalid run *before any bank was built* -- a bank is a GPU job. Deliberately
+# not an input of `run_mcmc`: run it by hand before a campaign. `run_mcmc`
+# re-checks its own run's banks anyway.
+rule validate:
+    """Pre-flight: merge, validate, and bank-check every run, building nothing."""
     input:
-        base=sorted(str(path) for path in Path("config/analysis/base").glob("*.toml")),
-        experiment_base="config/analysis/runs/{experiment}/_base.toml",
-        run="config/analysis/runs/{experiment}/{run}.toml",
+        RUN_CONFIG_FILES,
+        [f"config/banks/{name}.toml" for name in banks],
     output:
-        CONFIG_PATTERN,
+        "outputs/validated-runs.txt",
     shell:
-        "uv run --package astrogwb-paper astrogwb-assemble-config"
-        " --experiment {wildcards.experiment:q} --run {wildcards.run:q}"
+        "uv run --package astrogwb-paper python scripts/validate_configs.py"
         " --output {output:q}"
-
-
-rule configs:
-    """Aggregate target: assemble every run config without sampling."""
-    input:
-        CONFIG_OUTPUTS,
 
 
 rule run_mcmc:
     """Sample one run into outputs/chains/<experiment>/<run>.nc."""
     input:
-        config=CONFIG_PATTERN,
+        # The same three layers `assemble_config` used to declare, so re-run
+        # granularity is unchanged: edit a leaf -> one chain; edit
+        # base/sampling.toml -> all 26.
+        config=lambda w: config_layers(w.experiment, w.run),
         banks=run_bank_inputs,
     output:
         chain=protected(CHAIN_PATTERN),
@@ -162,6 +207,7 @@ rule run_mcmc:
         platform=JAX_PLATFORM,
         outdir=run_outdir,
         bank_flags=run_bank_flags,
+        config_flags=lambda w: config_flags(w.experiment, w.run),
     threads: 4
     resources:
         mem_mb=8000,
@@ -187,7 +233,7 @@ rule run_mcmc:
         # The shared-FS venv is already synced (GPU profile requires
         # --extra cuda), so run directly from it.
         $NANNY uv run --active --no-sync $UV_EXTRAS astrogwb-run-mcmc \
-            --config {input.config:q} --outdir {params.outdir:q} \
+            {params.config_flags} --outdir {params.outdir:q} \
             --label {wildcards.run:q} \
             {params.bank_flags} \
             --platform {params.platform:q} $RUNTIME_FLAGS --force
@@ -212,7 +258,10 @@ rule plot_cosmological_parameters:
         ),
         omega_m_chain="outputs/chains/cosmological-parameters/H0-Omega_m.nc",
         catalog=INJECTION_BANK,
-        config=FIGURE_CONFIG,
+        # The layers of a run this figure actually plots, and the run TOMLs
+        # behind --network-run.
+        config=config_layers("cosmological-parameters", "ET-2L-aligned-CE-Hanford"),
+        network_configs=network_config_inputs("cosmological-parameters"),
     output:
         detector_pdf="outputs/figures/cosmological-parameters/H0-by-detector.pdf",
         detector_csv="outputs/figures/cosmological-parameters/H0-by-detector.csv",
@@ -230,6 +279,8 @@ rule plot_cosmological_parameters:
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/mcmc_cosmological_parameters.py"
+        f" {config_flags('cosmological-parameters', 'ET-2L-aligned-CE-Hanford')}"
+        f" {network_run_flags('cosmological-parameters')}"
         " --catalog {input.catalog:q}"
         " --detector-chains {input.detector_chains:q}"
         " --prior-chains {input.prior_chains:q}"
@@ -259,7 +310,8 @@ rule plot_modified_propagation:
             run=DETECTOR_NETWORK_RUNS,
         ),
         catalog=INJECTION_BANK,
-        config=FIGURE_CONFIG,
+        config=config_layers("modified-propagation", "ET-2L-aligned-CE-Hanford"),
+        network_configs=network_config_inputs("modified-propagation"),
     output:
         xi_n_corner_pdf="outputs/figures/modified-propagation/Xi0-n-corner.pdf",
         xi_n_ess_corner_pdf="outputs/figures/modified-propagation/Xi0-n-ess-corner.pdf",
@@ -270,6 +322,8 @@ rule plot_modified_propagation:
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/mcmc_modified_propagation.py"
+        f" {config_flags('modified-propagation', 'ET-2L-aligned-CE-Hanford')}"
+        f" {network_run_flags('modified-propagation')}"
         " --xi0-chain {input.xi0_chain:q} --xi0-n-chain {input.xi0_n_chain:q}"
         " --h0-chain {input.h0_chain:q}"
         " --detector-xi0-n-chains {input.detector_chains:q}"
@@ -285,12 +339,13 @@ rule amplitude_toy:
     """Single-amplitude toy MCMC and its Fisher-overlay figure."""
     input:
         catalog=INJECTION_BANK,
-        config=FIGURE_CONFIG,
+        config=config_layers(*FIGURE_RUN),
     output:
         "outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf",
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/amplitude_toy_model.py"
+        f" {config_flags(*FIGURE_RUN)}"
         " --catalog {input.catalog:q}"
         " --chains-dir outputs/chains/amplitude-toy"
         " --output-pdf {output:q}"
@@ -300,8 +355,12 @@ rule fiducial_spectrum:
     """Fiducial injection spectrum and per-network effective PSDs."""
     input:
         catalog=INJECTION_BANK,
-        # Borrows the cosmological-parameters networks; reads no chains.
-        config=FIGURE_CONFIG,
+        # Borrows the cosmological-parameters networks; reads no chains. The
+        # network TOMLs are declared even though no chain is, so editing one
+        # network's detector list retriggers this figure -- which it did not do
+        # while the figure resolved everything from one assembled config.
+        config=config_layers(*FIGURE_RUN),
+        network_configs=network_config_inputs("cosmological-parameters"),
     output:
         spectrum_pdf="outputs/figures/standalone/fiducial_spectrum.pdf",
         effective_psd_pdf=(
@@ -310,6 +369,8 @@ rule fiducial_spectrum:
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/fiducial_spectrum.py"
+        f" {config_flags(*FIGURE_RUN)}"
+        f" {network_run_flags('cosmological-parameters')}"
         " --catalog {input.catalog:q}"
         " --output-pdf {output.spectrum_pdf:q}"
         " --output-effective-psd-pdf {output.effective_psd_pdf:q}"
@@ -319,7 +380,7 @@ rule importance_weights_grid:
     """Relative-ESS heatmaps over the H0-Omega_m and Xi0-n prior grids."""
     input:
         catalog=DEFAULT_PROPOSAL_BANK,
-        config=FIGURE_CONFIG,
+        config=config_layers(*FIGURE_RUN),
     output:
         h0_omega_m_pdf=(
             "outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf"
@@ -328,6 +389,7 @@ rule importance_weights_grid:
     shell:
         "uv run --package astrogwb-paper --group plotting"
         " python scripts/importance_weights_grid.py"
+        f" {config_flags(*FIGURE_RUN)}"
         " --catalog {input.catalog:q}"
         " --output-h0-omega-m-pdf {output.h0_omega_m_pdf:q}"
         " --output-xi0-n-pdf {output.xi0_n_pdf:q}"

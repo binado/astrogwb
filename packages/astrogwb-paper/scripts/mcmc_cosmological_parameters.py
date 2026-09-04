@@ -22,10 +22,11 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from arviz_base.labels import MapLabeller
-from astrogwb_paper.config.figures import (
-    Network,
-    load_analysis_grid,
-    load_fiducials,
+from astrogwb_paper.config.mcmc import build_run_config
+from astrogwb_paper.config.runs import (
+    add_config_arguments,
+    add_network_run_arguments,
+    load_merged_config,
     resolve_networks,
 )
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
@@ -36,6 +37,7 @@ from astrogwb_paper.plotting import (
     DETECTOR_NETWORKS,
     MERGER_RATE_LEGEND,
     TRUTH,
+    Network,
     combo_colors,
     detector_network_styles,
     get_corner_kwargs,
@@ -69,11 +71,10 @@ CORNER_VAR_NAMES = MERGER_RATE_VAR_NAMES
 
 # Labels for each section, in legend order. The detector comparison borrows the
 # shared network legend (`DETECTOR_NETWORKS`), which the workflow also expands
-# its chain paths from, so those two orders are one list. The merger-rate and
-# Omega_m labels name parameter combinations rather than networks and stay
-# local; their order matches the chain order declared by the rule that calls
-# this script.
-DETECTOR_EXPERIMENT = "cosmological-parameters"
+# its chain paths and its --network-run flags from, so those orders are one
+# list. The merger-rate and Omega_m labels name parameter combinations rather
+# than networks and stay local; their order matches the chain order declared by
+# the rule that calls this script.
 MERGER_RATE_LABELS = (
     r"$H_0$ (fixed $\mathcal{R}_0$)",
     r"$H_0-\mathcal{R}_0$",
@@ -585,23 +586,26 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     # maximum. Adding it to [fiducials] would inject a spurious constant into
     # the sampled model.
     parser.add_argument("--importance-relative-ess", type=float, default=1.0)
+    add_config_arguments(parser)
+    add_network_run_arguments(parser)
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
+    config = build_run_config(load_merged_config(args))
     fiducials = {
-        **load_fiducials(),
+        **config.fiducials,
         "importance_relative_ess": args.importance_relative_ess,
     }
-    grid = load_analysis_grid()
-    networks = resolve_networks(DETECTOR_EXPERIMENT, DETECTOR_NETWORKS)
+    grid = config.analysis_grid
+    networks = resolve_networks(args.network_runs, DETECTOR_NETWORKS)
     detector_labels = [network.label for network in networks]
     if len(args.detector_chains) != len(networks):
         raise SystemExit(
             f"--detector-chains has {len(args.detector_chains)} paths but "
-            f"{DETECTOR_EXPERIMENT} declares {len(networks)} networks"
+            f"the figure declares {len(networks)} networks"
         )
 
     prior_labels = list(MERGER_RATE_LABELS)
@@ -666,6 +670,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             networks,
             fiducials,
             grid=grid,
+            injection=config.catalog.injection,
         )
         table = build_snr_h0_constraint_table(
             networks,

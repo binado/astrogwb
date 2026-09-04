@@ -15,11 +15,11 @@ from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
 from astrogwb_paper.catalogs import CatalogSource
-from astrogwb_paper.config.figures import (
-    Network,
-    load_analysis_grid,
-    load_fiducials,
-    load_injection_spec,
+from astrogwb_paper.config.mcmc import build_run_config
+from astrogwb_paper.config.runs import (
+    add_config_arguments,
+    add_network_run_arguments,
+    load_merged_config,
     resolve_networks,
 )
 from astrogwb_paper.inference import prepare_observation
@@ -29,6 +29,7 @@ from astrogwb_paper.plotting import (
     DETECTOR_NETWORKS,
     SPECTRUM,
     SPECTRUM_LINESTYLES,
+    Network,
     detector_network_styles,
     use_paper_style,
 )
@@ -43,9 +44,10 @@ register_projection(MplAxes)
 jax.config.update("jax_enable_x64", True)
 
 # These panels compare the same six networks as the cosmological-parameters
-# experiment, so they borrow its detector lists rather than restating them.
-# This figure reads no chains, so there is no argv order to keep in step.
-SPECTRUM_EXPERIMENT = "cosmological-parameters"
+# experiment, so they borrow its detector lists rather than restating them;
+# which experiment that is arrives on --network-run. This figure reads no
+# chains, so there is no chain argv order to keep in step -- but the
+# --network-run order still drives the legend, and resolve_networks checks it.
 # Lower y-limit for Omega_GW; the S_h ymin is taken from S_h at the frequency
 # where Omega_GW is closest to this floor.
 OMEGA_GW_MIN = 1.0e-15
@@ -193,19 +195,22 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-pdf", type=Path, required=True)
     parser.add_argument("--output-effective-psd-pdf", type=Path, required=True)
     parser.add_argument("--figure-dpi", type=int, default=300)
+    add_config_arguments(parser)
+    add_network_run_arguments(parser)
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    fiducials = load_fiducials()
-    grid = load_analysis_grid()
-    networks = resolve_networks(SPECTRUM_EXPERIMENT, DETECTOR_NETWORKS)
+    config = build_run_config(load_merged_config(args))
+    fiducials = dict(config.fiducials)
+    grid = config.analysis_grid
+    networks = resolve_networks(args.network_runs, DETECTOR_NETWORKS)
     use_paper_style()
 
     catalog_path = resolve_paper_path(args.catalog, root)
-    source = CatalogSource(catalog_path, None, load_injection_spec(), "injection")
+    source = CatalogSource(catalog_path, None, config.catalog.injection, "injection")
     observation = prepare_observation(source, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies
     frequency_mask = observation.frequency_mask
