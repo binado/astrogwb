@@ -19,7 +19,6 @@ from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
 BANKS_DIR = Path(config.get("banks_dir", "outputs/banks"))
-BANK_CONFIG_PATTERN = "config/banks/{bank}.toml"
 CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 
 # Filenames are the mapping: config/banks/<bank>.toml -> outputs/banks/<bank>.h5,
@@ -162,7 +161,7 @@ rule waveform_bank:
     """Population draw + waveform generation, in one process."""
     input:
         script="scripts/generate_bank.py",
-        config=BANK_CONFIG_PATTERN,
+        config="config/banks/{bank}.toml",
         population=bank_population,
     output:
         str(BANKS_DIR / "{bank}.h5"),
