@@ -1,7 +1,8 @@
 # How the H0 posterior tightens with proposal catalog size.
 #
-# The runs differ only in catalog.proposal.num_samples; every other
-# setting is pinned here so the comparison is clean.
+# The runs differ only in which proposal catalog they name; every other
+# setting is pinned here so the comparison is clean. The three catalogs are
+# nested prefixes of one seed-42 stream, so the sizes are a clean series.
 
 sampled_params = ["H0"]
 

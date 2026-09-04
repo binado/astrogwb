@@ -221,15 +221,14 @@ class OutputConfig(BaseModel):
 class ProposalConfig(BaseModel):
     """The fixed redshift density the importance weights divide by.
 
-    Not a config *input*: it is derived at run time from the proposal bank's
-    recorded provenance plus the run's mixing fraction and analysis window (see
-    :func:`astrogwb.paper.config.banks.resolve_proposal`). Scripts and
-    notebooks that
-    reweight outside the sampler construct one directly.
+    Not a config *input*: it is derived at run time from the proposal
+    catalog's recorded provenance plus the run's analysis window (see
+    :func:`astrogwb.paper.config.catalogs.resolve_proposal`). Scripts and
+    notebooks that reweight outside the sampler construct one directly.
 
     Note the name collision with ``RunConfig.catalog.proposal``, which is kept
-    deliberately: that block names the *catalog* -- which banks and how many
-    samples -- while this one is the *density* those samples follow.
+    deliberately: that field names the *catalog* while this one is the
+    *density* its samples follow.
     """
 
     model_config = _STRICT
@@ -255,55 +254,21 @@ class ProposalConfig(BaseModel):
         return self
 
 
-class CatalogSpec(BaseModel):
-    """A cheap, in-memory mixture over up to two persisted banks.
-
-    Declared inline by each run rather than looked up in a registry: there is
-    no composition *name* any more, only the bank(s) and the mixture
-    parameters. Composing is cheap and never written to disk -- see
-    :meth:`astrogwb.paper.catalogs.CatalogSource.compose`.
-    """
-
-    model_config = _STRICT
-
-    md_bank: str
-    uniform_bank: str | None = None
-    num_samples: Annotated[int, Field(gt=0)]
-    uniform_mixing_fraction: Annotated[
-        float, Field(ge=0.0, le=1.0, allow_inf_nan=False)
-    ] = 0.0
-    mixture_seed: int | None = None
-
-    @model_validator(mode="after")
-    def _validate_mixture_fields(self) -> CatalogSpec:
-        mixed = self.uniform_mixing_fraction > 0.0
-        if mixed and (self.uniform_bank is None or self.mixture_seed is None):
-            raise ValueError(
-                "uniform_mixing_fraction > 0 requires both uniform_bank and "
-                "mixture_seed"
-            )
-        if not mixed and (
-            self.uniform_bank is not None or self.mixture_seed is not None
-        ):
-            raise ValueError(
-                "uniform_mixing_fraction == 0 forbids uniform_bank and mixture_seed"
-            )
-        return self
-
-
 class CatalogConfig(BaseModel):
-    """The two catalogs this run composes: the injection and the proposal.
+    """The two catalogs this run uses: the injection and the proposal.
 
-    Records *which bank(s) and mixture parameters* produced each, so a saved
-    run config is self-describing without the composed catalog ever existing as
-    a file. The proposal *density* is not here: it comes from the bank's own
-    provenance at run time.
+    Each role names one persisted catalog under ``config/catalogs/defs``, whose
+    stem is both the config filename and the ``outputs/catalogs/<name>.h5`` it
+    produces. The run records the *name* only: everything about how the catalog
+    was drawn -- components, seeds, mixing fractions, and the redshift density
+    that follows from them -- is recorded in the file itself and read back at
+    run time.
     """
 
     model_config = _STRICT
 
-    injection: CatalogSpec
-    proposal: CatalogSpec
+    injection: str
+    proposal: str
 
 
 class RunConfig(BaseModel):

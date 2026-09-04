@@ -16,13 +16,18 @@ from typing import Any
 
 import numpy as np
 import pytest
+import xarray as xr
 from catalog_fixtures import make_catalog, save_catalog
 from config_fixtures import example_raw
 
-from astrogwb.paper.catalogs import CatalogSource
-from astrogwb.paper.config.banks import MadauDickinsonProposal, resolve_proposal
+from astrogwb.paper.catalogs import load_run_catalog
+from astrogwb.paper.config.catalogs import (
+    MadauDickinsonProposal,
+    MixtureProposal,
+    ProposalComponent,
+    resolve_proposal,
+)
 from astrogwb.paper.config.mcmc import (
-    CatalogSpec,
     ProposalConfig,
     RunConfig,
     build_run_config,
@@ -75,49 +80,51 @@ def _write_catalog(
     return path
 
 
-def _source(
-    bank_path: Path, *, num_samples: int = N_SOURCES, role: str = "proposal"
-) -> CatalogSource:
-    spec = CatalogSpec(md_bank="test-bank", num_samples=num_samples)
-    return CatalogSource(bank_path, None, spec, role)
-
-
 def _proposal(config: RunConfig) -> ProposalConfig:
-    """The density production derives from bank provenance, built inline here.
+    """The density production derives from the catalog file, built inline here.
 
-    These tests write synthetic banks with no provenance attrs, so the
+    These tests write synthetic catalogs with no provenance attrs, so the
     descriptor is constructed from the run's own fiducials -- the same values a
-    real bank would have recorded, since check_fiducials_match requires them to
-    agree.
+    real catalog would have recorded, since check_fiducials_match requires them
+    to agree.
     """
     return resolve_proposal(
-        MadauDickinsonProposal(
-            z_min=0.0,
-            z_max=20.0,
-            gamma=config.fiducials["gamma"],
-            kappa=config.fiducials["kappa"],
-            z_peak=config.fiducials["z_peak"],
-            H0=config.fiducials["H0"],
-            Omega_m=config.fiducials["Omega_m"],
+        MixtureProposal(
+            components=(
+                ProposalComponent(
+                    weight=1.0,
+                    density=MadauDickinsonProposal(
+                        z_min=0.0,
+                        z_max=20.0,
+                        gamma=config.fiducials["gamma"],
+                        kappa=config.fiducials["kappa"],
+                        z_peak=config.fiducials["z_peak"],
+                        H0=config.fiducials["H0"],
+                        Omega_m=config.fiducials["Omega_m"],
+                    ),
+                ),
+            )
         ),
-        None,
-        uniform_mixing_fraction=0.0,
         minimum_redshift=config.cosmology.minimum_redshift,
         maximum_redshift=config.cosmology.maximum_redshift,
+        label="test-catalog",
     )
 
 
 @pytest.fixture
-def injection_catalog(tmp_path: Path) -> CatalogSource:
-    return _source(
+def injection_catalog(tmp_path: Path) -> xr.Dataset:
+    return load_run_catalog(
         _write_catalog(tmp_path / "injection.h5", proposal=False, seed=0),
-        role="injection",
+        label="injection",
     )
 
 
 @pytest.fixture
-def proposal_catalog(tmp_path: Path) -> CatalogSource:
-    return _source(_write_catalog(tmp_path / "proposal.h5", proposal=True, seed=1))
+def proposal_catalog(tmp_path: Path) -> xr.Dataset:
+    return load_run_catalog(
+        _write_catalog(tmp_path / "proposal.h5", proposal=True, seed=1),
+        label="proposal",
+    )
 
 
 def _config(**overrides: Any) -> RunConfig:
@@ -142,7 +149,7 @@ def _config(**overrides: Any) -> RunConfig:
 # prepare_observation / prepare_inference_inputs
 # --------------------------------------------------------------------------- #
 def test_prepare_observation_keeps_arrays_unmasked(
-    injection_catalog: CatalogSource,
+    injection_catalog: xr.Dataset,
 ) -> None:
     config = _config()
 
@@ -168,7 +175,7 @@ def test_prepare_observation_keeps_arrays_unmasked(
 
 
 def test_masked_model_kwargs_slices_frequency_arrays_but_not_samples(
-    injection_catalog: CatalogSource, proposal_catalog: CatalogSource
+    injection_catalog: xr.Dataset, proposal_catalog: xr.Dataset
 ) -> None:
     config = _config()
 
@@ -196,7 +203,7 @@ def test_masked_model_kwargs_slices_frequency_arrays_but_not_samples(
 
 
 def test_mismatched_frequency_grids_are_rejected(
-    injection_catalog: CatalogSource, proposal_catalog: CatalogSource, tmp_path: Path
+    injection_catalog: xr.Dataset, proposal_catalog: xr.Dataset, tmp_path: Path
 ) -> None:
     shifted = _write_catalog(
         tmp_path / "shifted.h5",
@@ -209,7 +216,7 @@ def test_mismatched_frequency_grids_are_rejected(
     with pytest.raises(ValueError, match="identical frequency grids"):
         prepare_inference_inputs(
             injection_catalog,
-            _source(shifted),
+            load_run_catalog(shifted, label="proposal"),
             fiducials=config.fiducials,
             proposal_config=_proposal(config),
             grid=config.analysis_grid,
@@ -219,8 +226,8 @@ def test_mismatched_frequency_grids_are_rejected(
 
 @pytest.mark.parametrize("uncovered", [0.0, np.inf])
 def test_bins_without_network_coverage_narrow_the_band(
-    injection_catalog: CatalogSource,
-    proposal_catalog: CatalogSource,
+    injection_catalog: xr.Dataset,
+    proposal_catalog: xr.Dataset,
     monkeypatch: pytest.MonkeyPatch,
     uncovered: float,
 ) -> None:
@@ -255,8 +262,8 @@ def test_bins_without_network_coverage_narrow_the_band(
 
 
 def test_a_band_with_fewer_than_two_usable_bins_is_rejected(
-    injection_catalog: CatalogSource,
-    proposal_catalog: CatalogSource,
+    injection_catalog: xr.Dataset,
+    proposal_catalog: xr.Dataset,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config()
@@ -279,7 +286,7 @@ def test_a_band_with_fewer_than_two_usable_bins_is_rejected(
 
 
 def test_catalog_without_stored_proposal_density_is_accepted(
-    injection_catalog: CatalogSource,
+    injection_catalog: xr.Dataset,
 ) -> None:
     config = _config()
 

@@ -98,7 +98,7 @@ def test_analysis_grid_mirrors_the_config() -> None:
 
 
 def test_run_config_carries_no_proposal_density() -> None:
-    """The density is derived from bank provenance, so it is not an input.
+    """The density is derived from the catalog file's provenance, not an input.
 
     Window equality with [cosmology] used to need a validator; it now holds by
     construction, because `resolve_proposal` is handed the run's own window.
@@ -108,7 +108,7 @@ def test_run_config_carries_no_proposal_density() -> None:
     assert not hasattr(config, "proposal")
     assert "proposal" not in config.model_dump(mode="json")
     # `catalog.proposal` is the catalog, not the density -- it stays.
-    assert config.catalog.proposal.md_bank
+    assert config.catalog.proposal
 
 
 def test_analysis_grid_is_not_serialized(tmp_path) -> None:

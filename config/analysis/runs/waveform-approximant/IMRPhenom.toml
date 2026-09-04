@@ -1,3 +1,2 @@
-[catalog.proposal]
-md_bank = "md-imrphenom-s41"
-num_samples = 32768
+[catalog]
+proposal = "md-imrphenom-s41-n32768"

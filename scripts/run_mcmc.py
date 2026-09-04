@@ -25,8 +25,8 @@ Usage -- one ``--config`` per layer, in merge order::
         --config config/analysis/base/sampling.toml \
         --config config/analysis/runs/cosmological-parameters/_base.toml \
         --config config/analysis/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
-        --bank md-imrphenom-s41=outputs/banks/md-imrphenom-s41.h5 \
-        --bank md-imrphenom-s42=outputs/banks/md-imrphenom-s42.h5
+        --injection-catalog outputs/catalogs/md-imrphenom-s41-n32768.h5 \
+        --proposal-catalog outputs/catalogs/md-imrphenom-s42-n16384.h5
 
 Order is the caller's responsibility -- there is no assembled-config artifact
 and no single function that owns it any more -- so the resolved order is logged
@@ -34,12 +34,12 @@ before the merge and stamped into the chain's ``config_layers`` attribute. The
 ``run_mcmc`` workflow rule declares exactly these files as ``input:`` and
 passes them straight back on argv.
 
-The run config (its ``catalog.injection`` / ``catalog.proposal`` blocks) names
-which bank(s) each role composes from; every bank it names must be supplied
-via a ``--bank NAME=PATH`` flag, repeated once per distinct bank.
+The run config's ``[catalog]`` block names one catalog per role; the two files
+are supplied directly as ``--injection-catalog`` and ``--proposal-catalog``.
+Roles are fixed, so no name-to-path mapping is needed.
 
 The importance-sampling *proposal density* is not in the config: it is read
-back from the proposal bank's own provenance attributes here, restricted to the
+back from the proposal catalog's own provenance attributes here, restricted to the
 run's analysis redshift window, and checked against the run's fiducials -- so
 the weights are always divided by what was actually generated. The resolved
 density is stamped into the saved chain, which stays the self-describing record
@@ -63,7 +63,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from astrogwb.paper.config.banks import check_bank_references
+from astrogwb.paper.config.catalogs import check_catalog_references
 from astrogwb.paper.config.mcmc import (
     ProposalConfig,
     RunConfig,
@@ -74,7 +74,8 @@ from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
-    from astrogwb.paper.catalogs import CatalogSource
+    import xarray as xr
+
     from astrogwb.paper.inference import AmplitudeMarginalization
 
 logger = logging.getLogger("run_mcmc")
@@ -92,16 +93,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     add_config_arguments(parser)
     parser.add_argument(
-        "--bank",
-        dest="banks",
-        action="append",
-        default=[],
-        metavar="NAME=PATH",
-        help=(
-            "One waveform bank file, as NAME=PATH; repeat once per distinct "
-            "bank the run config's [catalog.injection] / [catalog.proposal] "
-            "names."
-        ),
+        "--injection-catalog",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="The catalog file this run's [catalog].injection names.",
+    )
+    parser.add_argument(
+        "--proposal-catalog",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="The catalog file this run's [catalog].proposal names.",
     )
     parser.add_argument(
         "--seed",
@@ -140,8 +143,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # --------------------------------------------------------------------------- #
 def run(
     config: RunConfig,
-    injection_source: CatalogSource,
-    proposal_source: CatalogSource,
+    injection_catalog: xr.Dataset,
+    proposal_catalog: xr.Dataset,
     proposal: ProposalConfig,
     jax,
     chain_method: str,
@@ -162,8 +165,8 @@ def run(
     )
 
     inputs = prepare_inference_inputs(
-        injection_source,
-        proposal_source,
+        injection_catalog,
+        proposal_catalog,
         fiducials=config.fiducials,
         proposal_config=proposal,
         grid=config.analysis_grid,
@@ -371,17 +374,6 @@ def save(
     return nc_path
 
 
-def _parse_bank_args(values: list[str]) -> dict[str, Path]:
-    """Parse repeated ``NAME=PATH`` flags into a bank-name -> path mapping."""
-    banks: dict[str, Path] = {}
-    for item in values:
-        name, sep, raw_path = item.partition("=")
-        if not sep or not name:
-            raise ValueError(f"--bank must be NAME=PATH, got {item!r}")
-        banks[name] = Path(raw_path).resolve()
-    return banks
-
-
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     logging.basicConfig(
@@ -390,7 +382,6 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     config_layers = [path.resolve() for path in args.config]
-    bank_paths = _parse_bank_args(args.banks)
     config = build_run_config(
         load_merged_config(args),
         seed=args.seed,
@@ -398,10 +389,10 @@ def main(argv: list[str] | None = None) -> None:
         label=args.label,
     )
     # The pre-flight check `assemble_config` used to run once per run on the
-    # way to every chain: reject an unknown bank or a self-correlated mixture
-    # before JAX claims a device. `scripts/validate_configs.py` runs it over
-    # all runs at once, before any bank is built.
-    check_bank_references(config, label=args.label or str(config_layers[-1]))
+    # way to every chain: reject an unknown catalog before JAX claims a
+    # device. `scripts/validate_configs.py` runs it over all runs at once,
+    # before any catalog is built.
+    check_catalog_references(config, label=args.label or str(config_layers[-1]))
 
     logger.info(
         "Sampling %s | fixed %s",
@@ -415,28 +406,20 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_chain_path_available(config, timestamp=timestamp, force=args.force)
 
-    from astrogwb.paper.catalogs import CatalogSource, resolve_run_proposal
+    from astrogwb.paper.catalogs import load_run_catalog, resolve_run_proposal
 
-    injection_source = CatalogSource.resolve(
-        config.catalog.injection, bank_paths, role="injection"
-    )
-    proposal_source = CatalogSource.resolve(
-        config.catalog.proposal, bank_paths, role="proposal"
-    )
-
-    # Fail on missing bank files before JAX claims a device.
-    for source in (injection_source, proposal_source):
-        for label, path in (
-            ("md", source.md_bank_path),
-            ("uniform", source.uniform_bank_path),
-        ):
-            if path is not None and not path.is_file():
-                raise FileNotFoundError(f"{label} bank not found: {path}")
-
-    proposal = resolve_run_proposal(config, proposal_source)
+    # Load both catalogs -- and derive the proposal density from the file's own
+    # provenance -- before JAX claims a device, so a missing file, a drifted
+    # fiducial, or an out-of-support analysis window all fail cheaply.
+    injection_path = args.injection_catalog.resolve()
+    proposal_path = args.proposal_catalog.resolve()
+    proposal = resolve_run_proposal(config, proposal_path)
+    injection_catalog = load_run_catalog(injection_path, label="injection")
+    proposal_catalog = load_run_catalog(proposal_path, label="proposal")
     logger.info(
-        "Proposal density from bank provenance: eps=%.4g z=[%.4g, %.4g] "
+        "Proposal density from %s provenance: eps=%.4g z=[%.4g, %.4g] "
         "H0=%.4g Omega_m=%.4g gamma=%.4g kappa=%.4g z_peak=%.4g",
+        config.catalog.proposal,
         proposal.uniform_mixing_fraction,
         proposal.minimum_redshift,
         proposal.maximum_redshift,
@@ -456,8 +439,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     mcmc, marginalization = run(
         config,
-        injection_source,
-        proposal_source,
+        injection_catalog,
+        proposal_catalog,
         proposal,
         jax,
         chain_method,

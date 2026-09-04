@@ -13,7 +13,11 @@ from astrogwb.catalog.generator import (
     AnalyticInspiralGenerator,
     PolarizationPowerGenerator,
 )
-from astrogwb.catalog.population import PopulationMetadata, simulate_population
+from astrogwb.catalog.population import (
+    PopulationMetadata,
+    simulate_population,
+    simulate_population_mixture,
+)
 from astrogwb.waveform.metadata import FrequencyDomainWaveformMetadata
 
 __all__ = [
@@ -23,6 +27,7 @@ __all__ = [
     "PolarizationPowerGenerator",
     "PopulationMetadata",
     "simulate_population",
+    "simulate_population_mixture",
 ]
 
 

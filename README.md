@@ -109,7 +109,7 @@ own importance-sampling proposal.
 
 ## The manuscript application
 
-The reproducibility application -- the MCMC runner, bank generation, campaign
+The reproducibility application -- the MCMC runner, catalog generation, campaign
 configuration, cluster profiles, and the Snakemake workflow that drives them --
 ships inside this package as `astrogwb.paper`, behind an extra:
 
@@ -124,5 +124,5 @@ may import `astrogwb`, never the reverse) is kept honest.
 Its committed assets -- `config/`, `scripts/`, `notebooks/`, `profiles/` and
 the `Snakefile` -- live at the root of the source repository and are not part
 of the wheel; the application is meant to be run from a checkout, with the
-repository root as the working directory. See [`docs/`](docs/) for bank
+repository root as the working directory. See [`docs/`](docs/) for catalog
 generation, running inference, the workflow, and the paper figures.

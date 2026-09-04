@@ -23,8 +23,8 @@ Usage -- one ``--config`` per layer, in merge order, exactly as
         --config config/analysis/base/sampling.toml \
         --config config/analysis/runs/cosmological-parameters/_base.toml \
         --config config/analysis/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
-        --bank md-imrphenom-s41=outputs/banks/md-imrphenom-s41.h5 \
-        --bank md-imrphenom-s42=outputs/banks/md-imrphenom-s42.h5
+        --injection-catalog outputs/catalogs/md-imrphenom-s41-n32768.h5 \
+        --proposal-catalog outputs/catalogs/md-imrphenom-s42-n16384.h5
 
 See docs/running-inference.md for the layer tree.
 
@@ -46,7 +46,7 @@ from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
-    from astrogwb.paper.catalogs import CatalogSource
+    import xarray as xr
 
 logger = logging.getLogger("profile_model")
 
@@ -60,16 +60,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     add_config_arguments(parser)
     parser.add_argument(
-        "--bank",
-        dest="banks",
-        action="append",
-        default=[],
-        metavar="NAME=PATH",
-        help=(
-            "One waveform bank file, as NAME=PATH; repeat once per distinct "
-            "bank the run config's [catalog.injection] / [catalog.proposal] "
-            "names."
-        ),
+        "--injection-catalog",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="The catalog file this run's [catalog].injection names.",
+    )
+    parser.add_argument(
+        "--proposal-catalog",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="The catalog file this run's [catalog].proposal names.",
     )
     parser.add_argument(
         "--seed",
@@ -100,8 +102,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_potential(
     config: RunConfig,
-    injection_source: CatalogSource,
-    proposal_source: CatalogSource,
+    injection_catalog: xr.Dataset,
+    proposal_catalog: xr.Dataset,
     proposal: ProposalConfig,
     jax,
 ):
@@ -121,8 +123,8 @@ def build_potential(
     )
 
     inputs = prepare_inference_inputs(
-        injection_source,
-        proposal_source,
+        injection_catalog,
+        proposal_catalog,
         fiducials=config.fiducials,
         proposal_config=proposal,
         grid=config.analysis_grid,
@@ -155,39 +157,27 @@ def _bench(fn, x, iters: int) -> float:
     return 1e3 * (time.perf_counter() - t0) / iters
 
 
-def _parse_bank_args(values: list[str]) -> dict[str, Path]:
-    """Parse repeated ``NAME=PATH`` flags into a bank-name -> path mapping."""
-    banks: dict[str, Path] = {}
-    for item in values:
-        name, sep, raw_path = item.partition("=")
-        if not sep or not name:
-            raise ValueError(f"--bank must be NAME=PATH, got {item!r}")
-        banks[name] = Path(raw_path).resolve()
-    return banks
-
-
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-    bank_paths = _parse_bank_args(args.banks)
     outdir = args.outdir.resolve()
     config = build_run_config(load_merged_config(args), seed=args.seed)
 
-    # Resolve the proposal density from bank provenance before JAX starts, the
-    # same way scripts/run_mcmc.py does -- what is profiled must be the
-    # production model on production inputs.
-    from astrogwb.paper.catalogs import CatalogSource, resolve_run_proposal
+    # Resolve the proposal density from the catalog's provenance before JAX
+    # starts, the same way scripts/run_mcmc.py does -- what is profiled must be
+    # the production model on production inputs.
+    from astrogwb.paper.catalogs import load_run_catalog, resolve_run_proposal
 
-    injection_source = CatalogSource.resolve(
-        config.catalog.injection, bank_paths, role="injection"
+    proposal = resolve_run_proposal(config, args.proposal_catalog.resolve())
+    injection_catalog = load_run_catalog(
+        args.injection_catalog.resolve(), label="injection"
     )
-    proposal_source = CatalogSource.resolve(
-        config.catalog.proposal, bank_paths, role="proposal"
+    proposal_catalog = load_run_catalog(
+        args.proposal_catalog.resolve(), label="proposal"
     )
-    proposal = resolve_run_proposal(config, proposal_source)
 
     jax, _ = configure_runtime(
         num_chains=config.sampler.num_chains,
@@ -198,7 +188,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     potential_fn, init_params = build_potential(
-        config, injection_source, proposal_source, proposal, jax
+        config, injection_catalog, proposal_catalog, proposal, jax
     )
 
     forward_mode = config.sampler.forward_mode_differentiation and not args.reverse_ad
