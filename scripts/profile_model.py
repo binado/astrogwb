@@ -1,6 +1,6 @@
 """Profile the production NumPyro model's log-density under ``jax.profiler.trace``.
 
-This runs the exact model used by ``astrogwb-run-mcmc`` (the
+This runs the exact model used by ``scripts/run_mcmc.py`` (the
 ``astrogwb.sampling.models`` compared against a fiducial injection), but
 instead of sampling it isolates the model's potential-energy function and traces
 its forward pass + gradient in a hot loop. The result is a Perfetto trace that
@@ -9,15 +9,15 @@ shows which XLA ops dominate the model math (the cosmology grid integrals,
 ``spectral_density`` contraction).
 
 The model inputs come from :mod:`astrogwb.paper.inference`, the same pipeline
-``astrogwb-run-mcmc`` feeds NUTS, and the runtime from
+``scripts/run_mcmc.py`` feeds NUTS, and the runtime from
 :func:`astrogwb.paper.runtime.configure_runtime` -- so what is profiled here is
 the production model on production inputs, with the JAX device / x64 setup
 matching production exactly.
 
 Usage -- one ``--config`` per layer, in merge order, exactly as
-``astrogwb-run-mcmc`` takes them::
+``scripts/run_mcmc.py`` takes them::
 
-    uv run astrogwb-profile-model \
+    uv run --extra paper python scripts/profile_model.py \
         --config config/analysis/base/model.toml \
         --config config/analysis/base/parameters.toml \
         --config config/analysis/base/sampling.toml \
@@ -41,7 +41,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from astrogwb.paper.cli.run_mcmc import resolve_run_proposal
 from astrogwb.paper.config.mcmc import ProposalConfig, RunConfig, build_run_config
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
@@ -108,7 +107,7 @@ def build_potential(
 ):
     """Build the production model inputs and return (potential_fn, init_params).
 
-    Shares the inference-input pipeline with ``astrogwb-run-mcmc`` and stops
+    Shares the inference-input pipeline with ``scripts/run_mcmc.py`` and stops
     just short of the NUTS/MCMC step, extracting the potential-energy function
     via NumPyro's public ``initialize_model``.
     """
@@ -178,9 +177,9 @@ def main(argv: list[str] | None = None) -> None:
     config = build_run_config(load_merged_config(args), seed=args.seed)
 
     # Resolve the proposal density from bank provenance before JAX starts, the
-    # same way astrogwb-run-mcmc does -- what is profiled must be the
+    # same way scripts/run_mcmc.py does -- what is profiled must be the
     # production model on production inputs.
-    from astrogwb.paper.catalogs import CatalogSource
+    from astrogwb.paper.catalogs import CatalogSource, resolve_run_proposal
 
     injection_source = CatalogSource.resolve(
         config.catalog.injection, bank_paths, role="injection"

@@ -2,12 +2,12 @@
 
 ## Ad-hoc runs
 
-`astrogwb-run-mcmc` takes a run's config layers plus the bank files its
+`scripts/run_mcmc.py` takes a run's config layers plus the bank files its
 catalogs draw from. One `--config` per layer, in merge order -- the same list
 the workflow declares as the rule's `input:` and passes straight back on argv:
 
 ```bash
-uv run astrogwb-run-mcmc \
+uv run --extra paper python scripts/run_mcmc.py \
   --config config/analysis/base/catalogs.toml \
   --config config/analysis/base/model.toml \
   --config config/analysis/base/parameters.toml \
@@ -31,7 +31,11 @@ artifact: append one more `--config` to override anything for a single
 invocation -- a shorter chain, a smaller catalog -- without editing a committed
 layer or writing a throwaway config.
 
-`astrogwb-profile-model` takes the same flags.
+`scripts/profile_model.py` takes the same flags and runs as:
+
+```bash
+uv run --extra paper python scripts/profile_model.py --help
+```
 
 ## The configuration tree
 

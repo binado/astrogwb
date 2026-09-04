@@ -7,7 +7,8 @@ reasons:
    TOMLs, which are package data and have been dropped by a packaging change
    before.
 2. The distributions only the application needs are not installed.
-3. The application ships but does not *run*.
+3. The application library ships but does not *run*, and its checkout-only CLI
+   package is absent.
 
 On (3), two things are easy to get wrong and both make the check vacuous:
 
@@ -70,6 +71,9 @@ def check_optional_distributions_are_absent() -> None:
 def check_paper_ships_but_does_not_run() -> None:
     assert importlib.util.find_spec("astrogwb.paper") is not None, (
         "astrogwb.paper is missing from the wheel entirely"
+    )
+    assert importlib.util.find_spec("astrogwb.paper.cli") is None, (
+        "the checkout-only astrogwb.paper.cli package leaked into the wheel"
     )
     try:
         importlib.import_module(PAPER_PROBE)

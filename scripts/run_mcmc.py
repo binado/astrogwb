@@ -12,13 +12,14 @@ Design constraint (do not "tidy" away): config parsing lives in
 load and materializes priors without evaluating any JAX op ("is the backend
 still uninitialized?" is guarded by a subprocess test). ``OMP_NUM_THREADS`` /
 ``XLA_FLAGS`` and ``numpyro.set_host_device_count(...)`` must be set *before* JAX
-initializes its backend, so the heavy imports (jax, astrogwb, gwmock_pop)
-happen inside functions that run only after
-:func:`astrogwb.paper.runtime.configure_runtime`. See that function for the ordering.
+initializes its backend, so backend-claiming work happens only after
+:func:`astrogwb.paper.runtime.configure_runtime`. The pre-flight catalog import
+may load JAX, but is kept free of array creation and device queries; a subprocess
+test guards that distinction. See the runtime helper for the ordering.
 
 Usage -- one ``--config`` per layer, in merge order::
 
-    uv run astrogwb-run-mcmc \
+    uv run --extra paper python scripts/run_mcmc.py \
         --config config/analysis/base/model.toml \
         --config config/analysis/base/parameters.toml \
         --config config/analysis/base/sampling.toml \
@@ -47,8 +48,8 @@ of what was sampled.
 See docs/running-inference.md for the layer tree, and
 ``scripts/validate_configs.py`` for the pre-flight gate over every run.
 
-Use ``uv run --package astrogwb-paper --extra cuda`` (or ``--extra tpu``) for
-the matching JAX accelerator plugin.
+Add ``--extra cuda`` (or ``--extra tpu``) to ``uv run`` for the matching JAX
+accelerator plugin.
 Batch runs are dispatched by the Snakemake ``run_mcmc`` rule (one config per
 job); see the paper project's ``Snakefile`` and SLURM profiles.
 """
@@ -62,14 +63,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from astrogwb.paper.config.banks import (
-    UniformRedshiftProposal,
-    check_bank_references,
-    check_fiducials_match,
-    madau_dickinson_proposal,
-    read_bank_provenance,
-    resolve_proposal,
-)
+from astrogwb.paper.config.banks import check_bank_references
 from astrogwb.paper.config.mcmc import (
     ProposalConfig,
     RunConfig,
@@ -377,47 +371,6 @@ def save(
     return nc_path
 
 
-def resolve_run_proposal(
-    config: RunConfig, proposal_source: CatalogSource
-) -> ProposalConfig:
-    """Derive the importance-sampling density from the proposal bank itself.
-
-    Runs before ``configure_runtime`` -- reading HDF5 attributes needs no JAX --
-    so a fiducial/bank mismatch fails before a device is claimed. The bank is
-    the authority here, not the population config it was drawn from: that file
-    may have drifted since the bank was built.
-    """
-    md_path = proposal_source.md_bank_path
-    md_provenance = read_bank_provenance(md_path)
-    check_fiducials_match(md_provenance, config.fiducials, label=str(md_path))
-    uniform = None
-    if proposal_source.uniform_bank_path is not None:
-        uniform = read_bank_provenance(proposal_source.uniform_bank_path)
-    return resolve_proposal(
-        madau_dickinson_proposal(md_provenance, label=str(md_path)),
-        _uniform_proposal(uniform, proposal_source),
-        uniform_mixing_fraction=proposal_source.spec.uniform_mixing_fraction,
-        minimum_redshift=config.cosmology.minimum_redshift,
-        maximum_redshift=config.cosmology.maximum_redshift,
-    )
-
-
-def _uniform_proposal(provenance, proposal_source: CatalogSource):
-    """Narrow the uniform bank's recorded density, or return None."""
-    if provenance is None:
-        return None
-
-    match provenance.redshift_proposal:
-        case UniformRedshiftProposal() as density:
-            return density
-        case other:
-            raise ValueError(
-                f"bank {proposal_source.uniform_bank_path} was drawn from a "
-                f"{other.kind!r} redshift density; the uniform_bank role "
-                "requires a uniform-redshift bank"
-            )
-
-
 def _parse_bank_args(values: list[str]) -> dict[str, Path]:
     """Parse repeated ``NAME=PATH`` flags into a bank-name -> path mapping."""
     banks: dict[str, Path] = {}
@@ -462,7 +415,7 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_chain_path_available(config, timestamp=timestamp, force=args.force)
 
-    from astrogwb.paper.catalogs import CatalogSource
+    from astrogwb.paper.catalogs import CatalogSource, resolve_run_proposal
 
     injection_source = CatalogSource.resolve(
         config.catalog.injection, bank_paths, role="injection"

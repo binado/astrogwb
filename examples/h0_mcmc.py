@@ -16,7 +16,7 @@ the injection makes every weight exactly 1 at :math:`\theta = \theta_{\rm fid}`.
 The "observed" spectrum is then simply the unweighted catalog contraction, and
 the true :math:`H_0` is known to sit at ``FIDUCIALS["H0"]`` -- so the recovered
 posterior can be checked at a glance. Production runs use two independently
-drawn catalogs instead; see the ``astrogwb-paper`` workspace project.
+drawn catalogs instead; see the paper application in the source repository.
 
 The data is noiseless: no noise realization is added to the injection, because
 a draw would shift the posterior by ~1 sigma and make a correct script look

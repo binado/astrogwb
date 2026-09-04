@@ -35,10 +35,10 @@
 # ## Environment bootstrap (Colab vs. local)
 #
 # Detect whether this notebook is running on Google Colab. On Colab we probe
-# for TPU hardware before installing either workspace member. The checkout is
-# cloned into `/content/astrogwb`; core is installed with the selected
-# accelerator extra and the paper application with its notebook extra. Finally,
-# mount Google Drive for the waveform catalog. Locally this cell is a no-op.
+# for TPU hardware before installing the checkout. The checkout is cloned into
+# `/content/astrogwb` and installed with the selected accelerator and notebook
+# extras. Finally, mount Google Drive for the waveform catalog. Locally this
+# cell is a no-op.
 
 # %%
 import os
@@ -90,17 +90,12 @@ if IN_COLAB:
             "install",
             "--system",
             "--editable",
-            f"{_checkout / 'packages/astrogwb'}[{_accelerator}]",
-            "--editable",
-            f"{_checkout / 'packages/astrogwb-paper'}[notebook]",
+            f"{_checkout}[{_accelerator},notebook]",
         ]
     )
-    # Editable .pth files are processed on interpreter startup. Make both source
-    # trees immediately visible to the already-running Colab kernel as well.
-    sys.path[:0] = [
-        str(_checkout / "packages/astrogwb/src"),
-        str(_checkout / "packages/astrogwb-paper/src"),
-    ]
+    # Editable .pth files are processed on interpreter startup. Make the source
+    # tree immediately visible to the already-running Colab kernel as well.
+    sys.path.insert(0, str(_checkout / "src"))
 
     from google.colab import drive
 
@@ -142,7 +137,7 @@ if DEBUG:
 # resolves `chain_method` from the visible device count: `"parallel"` when
 # every chain has a device, `"vectorized"` when GPU/TPU devices are fewer than
 # chains, and `"sequential"` when CPU devices are insufficient. The same
-# helper is used by `astrogwb-run-mcmc` for the headless runner.
+# helper is used by `scripts/run_mcmc.py` for the headless runner.
 
 # %%
 import json

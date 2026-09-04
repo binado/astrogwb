@@ -51,7 +51,7 @@ reduction, write. The population never lands on disk; it was previously a
 `temp()` node with exactly one consumer.
 
 ```bash
-uv run astrogwb-generate-bank \
+uv run --extra paper python scripts/generate_bank.py \
   --config config/banks/md-imrphenom-s41.toml \
   --output outputs/banks/md-imrphenom-s41.h5
 ```
@@ -98,7 +98,7 @@ This is the density the importance weights divide by. It is extracted from the
 population graph exactly once, by
 `astrogwb.paper.config.banks.extract_redshift_proposal`, and every later
 consumer reads it back with `read_bank_provenance` instead of re-parsing a
-config that may have drifted since. `astrogwb-run-mcmc` also checks the run's `[fiducials]` against
+config that may have drifted since. `scripts/run_mcmc.py` also checks the run's `[fiducials]` against
 what the bank recorded, so a drifted fiducial fails before a device is claimed
 rather than silently reweighting against the wrong denominator.
 

@@ -1,39 +1,9 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
-from pathlib import Path
 
-import pytest
 from repo import REPO_ROOT
-
-COMMANDS = (
-    "astrogwb-generate-bank",
-    "astrogwb-run-mcmc",
-    "astrogwb-profile-model",
-)
-
-
-@pytest.mark.parametrize("command", COMMANDS)
-def test_console_command_help_from_nested_directory(
-    command: str, tmp_path: Path
-) -> None:
-    result = subprocess.run(
-        [command, "--help"],
-        cwd=REPO_ROOT / "notebooks",
-        check=False,
-        capture_output=True,
-        text=True,
-        env={
-            **os.environ,
-            "MPLCONFIGDIR": str(tmp_path / "matplotlib"),
-            "XDG_CACHE_HOME": str(tmp_path / "cache"),
-        },
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "usage:" in result.stdout.lower()
 
 
 def test_pure_config_imports_do_not_import_jax() -> None:
@@ -78,7 +48,7 @@ def test_catalog_inference_snr_imports_leave_the_xla_backend_uninitialized() -> 
     (``jax.devices()``, array creation) is what freezes ``JAX_PLATFORMS`` /
     ``set_host_device_count``. A late ``set_host_device_count(2)`` still yielding
     two devices proves catalogs / inference / snr did not consume that config.
-    ``config.banks`` belongs on this path too: run_mcmc resolves the proposal
+    ``config.banks`` belongs on this path too: the run script resolves the proposal
     density from bank attributes *before* ``configure_runtime``.
     """
     code = """
