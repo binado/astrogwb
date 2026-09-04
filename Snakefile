@@ -21,6 +21,11 @@ JAX_PLATFORM = config.get("jax_platforms", "cuda")
 BANKS_DIR = Path(config.get("banks_dir", "outputs/banks"))
 CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 
+
+def bank_path(name: str) -> str:
+    return str(BANKS_DIR / f"{name}.h5")
+
+
 # Filenames are the mapping: config/banks/<bank>.toml -> outputs/banks/<bank>.h5,
 # config/analysis/runs/<experiment>/<run>.toml -> outputs/chains/<experiment>/<run>.nc.
 # Nothing below translates a registry name into a path; it only globs the config
@@ -28,7 +33,7 @@ CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 banks = discover_banks()
 runs = discover_runs()
 
-BANK_OUTPUTS = [str(BANKS_DIR / f"{name}.h5") for name in banks]
+BANK_OUTPUTS = [bank_path(name) for name in banks]
 CHAIN_OUTPUTS = [
     f"outputs/chains/{experiment}/{run}.nc"
     for experiment, names in runs.items()
@@ -53,8 +58,8 @@ RUN_PATTERN = "|".join(
 # file *is* the composed catalog. Both names are read off the base catalog
 # config so they cannot drift from what the runs actually sample.
 _BASE_CATALOGS = load_base()["catalog"]
-INJECTION_BANK = str(BANKS_DIR / f"{_BASE_CATALOGS['injection']['md_bank']}.h5")
-DEFAULT_PROPOSAL_BANK = str(BANKS_DIR / f"{_BASE_CATALOGS['proposal']['md_bank']}.h5")
+INJECTION_BANK = bank_path(_BASE_CATALOGS["injection"]["md_bank"])
+DEFAULT_PROPOSAL_BANK = bank_path(_BASE_CATALOGS["proposal"]["md_bank"])
 # Figures report what was sampled, so each one is handed a run's own config
 # layers for the shared fiducials and analysis grid. Which run that is used to
 # be a constant buried in the library (config.figures.REFERENCE_RUN); it is an
@@ -99,10 +104,6 @@ def network_config_inputs(experiment):
         f"config/analysis/runs/{experiment}/{run}.toml"
         for run in DETECTOR_NETWORK_RUNS
     ]
-
-
-def bank_path(name):
-    return str(BANKS_DIR / f"{name}.h5")
 
 
 def bank_population(wildcards):
@@ -164,7 +165,7 @@ rule waveform_bank:
         config="config/banks/{bank}.toml",
         population=bank_population,
     output:
-        str(BANKS_DIR / "{bank}.h5"),
+        bank_path("{bank}"),
     shell:
         "uv run --extra paper python {input.script:q}"
         " --config {input.config:q} --output {output:q} --force"
