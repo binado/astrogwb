@@ -23,7 +23,6 @@ from astrogwb.paper.config.banks import (
     UniformRedshiftProposal,
     check_fiducials_match,
     madau_dickinson_proposal,
-    read_bank_provenance,
     resolve_proposal,
 )
 from astrogwb.paper.config.mcmc import CatalogSpec, ProposalConfig, RunConfig
@@ -145,11 +144,11 @@ def resolve_run_proposal(
     population config may have changed since generation.
     """
     md_path = proposal_source.md_bank_path
-    md_provenance = read_bank_provenance(md_path)
+    md_provenance = BankConfig.from_file(md_path)
     check_fiducials_match(md_provenance, config.fiducials, label=str(md_path))
     uniform = None
     if proposal_source.uniform_bank_path is not None:
-        uniform = read_bank_provenance(proposal_source.uniform_bank_path)
+        uniform = BankConfig.from_file(proposal_source.uniform_bank_path)
     return resolve_proposal(
         madau_dickinson_proposal(md_provenance, label=str(md_path)),
         _uniform_proposal(uniform, proposal_source),

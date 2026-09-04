@@ -19,7 +19,6 @@ from astrogwb.paper.config.banks import (
     discover_banks,
     extract_redshift_proposal,
     madau_dickinson_proposal,
-    read_bank_provenance,
     resolve_proposal,
 )
 from astrogwb.paper.utils import load_mapping
@@ -147,13 +146,20 @@ def test_committed_populations_agree_on_generation_support() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# read_bank_provenance (read side)
+# BankConfig.from_file (read side)
 # --------------------------------------------------------------------------- #
 def test_provenance_round_trips_through_a_real_bank_file(tmp_path: Path) -> None:
     provenance = _provenance()
     path = _bank_file(tmp_path / "bank.h5", provenance.to_population_metadata())
 
-    assert read_bank_provenance(path) == provenance
+    assert BankConfig.from_file(path) == provenance
+
+
+def test_provenance_from_file_accepts_str_path(tmp_path: Path) -> None:
+    provenance = _provenance()
+    path = _bank_file(tmp_path / "bank.h5", provenance.to_population_metadata())
+
+    assert BankConfig.from_file(str(path)) == provenance
 
 
 def test_uniform_provenance_round_trips(tmp_path: Path) -> None:
@@ -165,7 +171,7 @@ def test_uniform_provenance_round_trips(tmp_path: Path) -> None:
     )
     path = _bank_file(tmp_path / "bank.h5", provenance.to_population_metadata())
 
-    assert read_bank_provenance(path) == provenance
+    assert BankConfig.from_file(path) == provenance
 
 
 def test_bank_without_proposal_metadata_is_rejected_not_reparsed(
@@ -174,7 +180,7 @@ def test_bank_without_proposal_metadata_is_rejected_not_reparsed(
     path = _bank_file(tmp_path / "old.h5", None)
 
     with pytest.raises(ValueError, match="generated before proposal metadata"):
-        read_bank_provenance(path)
+        BankConfig.from_file(path)
 
 
 def test_bank_missing_only_the_proposal_attr_is_rejected(tmp_path: Path) -> None:
@@ -187,7 +193,7 @@ def test_bank_missing_only_the_proposal_attr_is_rejected(tmp_path: Path) -> None
     path = _bank_file(tmp_path / "partial.h5", metadata)
 
     with pytest.raises(ValueError, match="missing redshift_proposal"):
-        read_bank_provenance(path)
+        BankConfig.from_file(path)
 
 
 def test_md_role_rejects_a_uniform_bank() -> None:

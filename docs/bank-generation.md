@@ -97,7 +97,7 @@ as one JSON string. A uniform bank writes
 This is the density the importance weights divide by. It is extracted from the
 population graph exactly once, by
 `astrogwb.paper.config.banks.extract_redshift_proposal`, and every later
-consumer reads it back with `read_bank_provenance` instead of re-parsing a
+consumer reads it back with `BankConfig.from_file` instead of re-parsing a
 config that may have drifted since. `scripts/run_mcmc.py` also checks the run's `[fiducials]` against
 what the bank recorded, so a drifted fiducial fails before a device is claimed
 rather than silently reweighting against the wrong denominator.

@@ -12,7 +12,7 @@ sample count, and the redshift *proposal density* those draws follow -- as
 a :class:`BankConfig`. That descriptor is extracted from the population graph
 exactly once, at generation time (:func:`extract_redshift_proposal`), and
 every later consumer reads it back from the file
-(:func:`read_bank_provenance`) instead of re-parsing a config that may have
+(:meth:`BankConfig.from_file`) instead of re-parsing a config that may have
 drifted since the bank was built. netCDF attributes are flat scalars, so the
 proposal descriptor travels as a single JSON-encoded string under
 ``redshift_proposal`` in :class:`astrogwb.catalog.PopulationMetadata`.
@@ -22,7 +22,7 @@ or two banks, declared inline by each run. See
 :class:`astrogwb.paper.catalogs.CatalogSource`.
 
 Deliberately JAX-free *at import*: the ``Snakefile`` imports this module to
-build the DAG, so the two functions that reach ``astrogwb.catalog`` -- which
+build the DAG, so the methods that reach ``astrogwb.catalog`` -- which
 pulls in JAX -- import it in their own bodies rather than at module scope. The
 workflow and config layers can therefore inspect provenance without
 initializing JAX or loading polarization power.
@@ -221,20 +221,21 @@ class BankConfig(BaseModel):
             ),
         )
 
+    @classmethod
+    def from_file(cls, path: Path | str) -> Self:
+        """Read one bank's recorded provenance from its HDF5 attributes.
 
-def read_bank_provenance(path: Path) -> BankConfig:
-    """Read one bank's recorded provenance from its HDF5 attributes.
+        A bank written before provenance metadata existed carries no
+        ``redshift_proposal`` attribute. That is an error, never a cue to fall back
+        to parsing the population config: the point of the attribute is that the
+        config may have drifted since the bank was built.
+        """
+        from astrogwb.catalog.io import open_catalog, population_metadata_from_attrs
 
-    A bank written before provenance metadata existed carries no
-    ``redshift_proposal`` attribute. That is an error, never a cue to fall back
-    to parsing the population config: the point of the attribute is that the
-    config may have drifted since the bank was built.
-    """
-    from astrogwb.catalog.io import open_catalog, population_metadata_from_attrs
-
-    with open_catalog(path) as bank:
-        metadata = population_metadata_from_attrs(bank.attrs, label=str(path))
-    return BankConfig.from_population_metadata(metadata, label=str(path))
+        path = Path(path)
+        with open_catalog(path) as bank:
+            metadata = population_metadata_from_attrs(bank.attrs, label=str(path))
+        return cls.from_population_metadata(metadata, label=str(path))
 
 
 # --------------------------------------------------------------------------- #

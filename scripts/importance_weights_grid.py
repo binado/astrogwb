@@ -39,8 +39,8 @@ from astrogwb.paper.catalogs import (
     truncate_catalog_samples,
 )
 from astrogwb.paper.config.banks import (
+    BankConfig,
     madau_dickinson_proposal,
-    read_bank_provenance,
     resolve_proposal,
 )
 from astrogwb.paper.config.mcmc import build_run_config
@@ -200,7 +200,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     # The proposal density comes from the bank's own provenance, exactly as
     # scripts/run_mcmc.py resolves it -- so this figure reweights against the
     # same denominator the chains did.
-    provenance = read_bank_provenance(catalog_path)
+    provenance = BankConfig.from_file(catalog_path)
     proposal = resolve_proposal(
         madau_dickinson_proposal(provenance, label=str(catalog_path)),
         None,
