@@ -148,9 +148,9 @@ def test_base_files_merge_into_one_mapping() -> None:
 
 
 def test_run_layer_overrides_the_experiment_layer() -> None:
-    """astrophysical-parameters/z_peak overrides its experiment's sampler block."""
-    shared = assemble_run("astrophysical-parameters", "Madau-Dickinson")
-    overridden = assemble_run("astrophysical-parameters", "z_peak")
+    """astrophysical-parameters/redshift-peak overrides its experiment's sampler block."""
+    shared = assemble_run("astrophysical-parameters", "madau-dickinson")
+    overridden = assemble_run("astrophysical-parameters", "redshift-peak")
 
     assert shared["sampler"]["num_warmup"] == 1000
     assert shared["sampler"]["dense_mass"] is True
@@ -356,7 +356,7 @@ def test_the_validation_gate_covers_every_run() -> None:
     for label in (
         "cosmological-parameters/H0-Omega_m",
         "cosmological-parameters/H0-merger-rate",
-        "astrophysical-parameters/z_peak",
+        "astrophysical-parameters/redshift-peak",
         "modified-propagation/Xi_0-H0",
         "variable-catalog-size/n32768",
         "variable-proposal-guard/eps1e-3",

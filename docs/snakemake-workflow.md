@@ -84,7 +84,7 @@ The experiments are:
 | --- | ---: | --- |
 | `cosmological-parameters` | 6 detector runs plus `H0-Omega_m` and `H0-merger-rate` | input to `plot_cosmological_parameters` |
 | `modified-propagation` | 6 detector runs plus `Xi_0` and `Xi_0-H0` | corners, marginal comparison, and tables |
-| `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` | chains only |
+| `astrophysical-parameters` | `madau-dickinson` and `redshift-peak` | chains only |
 | `variable-catalog-size` | 8192, 16384, and 32768 proposal samples | chains only |
 | `variable-proposal-guard` | 1e-1, 1e-2, and 1e-3 proposal guard fractions | chains only |
 | `waveform-approximant` | `IMRPhenom` and `TaylorF2` proposals | chains only |
