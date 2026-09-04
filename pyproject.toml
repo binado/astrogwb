@@ -53,7 +53,6 @@ notebook = [
     "arviz-plots>=1.2.0",
     "arviz-stats[xarray]>=1.2.0",
     "corner @ git+https://github.com/dfm/corner.py@d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4",
-    "jinja2>=3.1",
     "matplotlib>=3.11.1",
     "pandas>=2.0",
     "scipy>=1.10",
