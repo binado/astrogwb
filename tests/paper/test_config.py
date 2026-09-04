@@ -9,7 +9,7 @@ from config_fixtures import example_raw
 from pydantic import ValidationError
 from repo import REPO_ROOT
 
-from astrogwb.paper.config.mcmc import build_run_config, prior_to_spec, save_config
+from astrogwb.paper.config.mcmc import build_run_config, prior_to_spec
 from astrogwb.paper.config.runs import (
     assemble_run,
     discover_runs,
@@ -118,7 +118,7 @@ def test_analysis_grid_is_not_serialized(tmp_path) -> None:
     assert "fixed_params" not in config.model_dump(mode="json")
 
     path = tmp_path / "run.json"
-    save_config(config, path)
+    config.save(path)
     assert "analysis_grid" not in load_mapping(path)
 
     reloaded = build_run_config(load_mapping(path))
@@ -192,7 +192,7 @@ def test_marginalized_config_keeps_amplitude_prior_in_priors() -> None:
     assert config.fixed_params["H0"] == 67.66
 
 
-def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
+def test_marginalized_config_round_trips_through_save(tmp_path) -> None:
     """assemble_config writes normalized configs; run_mcmc must reload them.
 
     The amplitude prior lives in ``priors``, so the round trip is symmetric:
@@ -200,7 +200,7 @@ def test_marginalized_config_round_trips_through_save_config(tmp_path) -> None:
     """
     config = build_run_config(_marginalized_raw())
     path = tmp_path / "run.json"
-    save_config(config, path)
+    config.save(path)
 
     assert "fixed_params" not in load_mapping(path)
 
@@ -220,7 +220,7 @@ def test_reloaded_marginalized_config_still_rejects_amplitude_parameter_sampled(
 ) -> None:
     config = build_run_config(_marginalized_raw())
     path = tmp_path / "run.json"
-    save_config(config, path)
+    config.save(path)
     raw = load_mapping(path)
     raw["sampled_params"] = [*raw["sampled_params"], "H0"]
 

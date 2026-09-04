@@ -7,7 +7,7 @@ These tests pin the two properties that make that safe to do at config-parse
 time:
 
 - distributions materialize from spec mappings and serialize back to the exact
-  same spec, so ``save_config`` stays canonical; and
+  same spec, so ``RunConfig.save`` stays canonical; and
 - neither materialization nor serialization evaluates a JAX op -- the XLA
   backend must still be uninitialized afterwards, or
   ``configure_runtime``'s ``set_host_device_count`` silently no-ops. That

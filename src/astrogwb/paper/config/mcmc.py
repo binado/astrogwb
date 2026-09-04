@@ -151,8 +151,8 @@ else:
     _PriorDists = Any
 
 # Native pydantic wire for live prior distributions: validate from spec
-# mappings/dists, serialize back to the spec dict so `model_dump(mode="json")`,
-# `save_config` stay canonical. Numpyro types deliberately
+# mappings/dists, serialize back to the spec dict so `model_dump(mode="json")`
+# and `RunConfig.save` stay canonical. Numpyro types deliberately
 # stay out of the runtime annotation (hence `Any`) so schema building never
 # imports numpyro at module load.
 PriorDistribution = Annotated[
@@ -351,7 +351,7 @@ class RunConfig(BaseModel):
     def analysis_grid(self) -> AnalysisGrid:
         """The frequency band and redshift grid this run's inputs are built on.
 
-        A plain property, deliberately not serialized: `save_config` writes
+        A plain property, deliberately not serialized: `save` writes
         only inputs needed to reconstruct the validated run configuration.
         """
         return AnalysisGrid(
@@ -363,14 +363,13 @@ class RunConfig(BaseModel):
             n_grid=self.cosmology.n_grid,
         )
 
-
-def save_config(config: RunConfig, path: Path) -> None:
-    """Write a validated run config as JSON."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(config.model_dump(mode="json"), indent=2) + "\n",
-        encoding="utf-8",
-    )
+    def save(self, path: Path) -> None:
+        """Write the validated run config as JSON."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(self.model_dump(mode="json"), indent=2) + "\n",
+            encoding="utf-8",
+        )
 
 
 def build_run_config(
