@@ -42,7 +42,6 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     merger_rate_local_merger_rate_fn,
 )
 from astrogwb.paper.catalogs import (
-    CatalogSource,
     compute_fiducial_injection_spectrum,
     compute_proposal_logprob,
     propagate_catalog,
@@ -138,14 +137,14 @@ class AmplitudeMarginalization(NamedTuple):
 
 
 def prepare_observation(
-    injection: CatalogSource,
+    injection: xr.Dataset,
     *,
     fiducials: Mapping[str, float],
     grid: AnalysisGrid,
 ) -> Observation:
-    """Compose the injection catalog and build the fiducial observed spectrum."""
+    """Propagate the injection catalog and build the fiducial observed spectrum."""
     fiducial_values = dict(fiducials)
-    composed = propagate_catalog(injection.compose(), fiducials=fiducial_values)
+    composed = propagate_catalog(injection, fiducials=fiducial_values)
     n_loaded = composed.polarization_power.shape[1]
     composed = truncate_catalog_samples(
         composed,
@@ -155,9 +154,8 @@ def prepare_observation(
     )
     n_kept = composed.polarization_power.shape[1]
     logger.info(
-        "Composed independent %s catalog: n_injection_samples=%d "
+        "Loaded independent injection catalog: n_injection_samples=%d "
         "(%d outside the analysis window dropped)",
-        injection.role,
         n_kept,
         n_loaded - n_kept,
     )
@@ -201,8 +199,8 @@ def prepare_observation(
 
 
 def prepare_inference_inputs(
-    injection: CatalogSource,
-    proposal: CatalogSource,
+    injection: xr.Dataset,
+    proposal: xr.Dataset,
     *,
     fiducials: Mapping[str, float],
     proposal_config: ProposalConfig,
@@ -211,7 +209,7 @@ def prepare_inference_inputs(
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs."""
     observation = prepare_observation(injection, fiducials=fiducials, grid=grid)
-    proposal_catalog = propagate_catalog(proposal.compose(), fiducials=dict(fiducials))
+    proposal_catalog = propagate_catalog(proposal, fiducials=dict(fiducials))
     n_loaded = proposal_catalog.polarization_power.shape[1]
     proposal_catalog = truncate_catalog_samples(
         proposal_catalog,
@@ -223,9 +221,8 @@ def prepare_inference_inputs(
     validate_matching_frequency_grids(observation.frequencies, proposal_frequencies)
     n_freq, n_samples = proposal_catalog.polarization_power.shape
     logger.info(
-        "Composed %s catalog: n_frequency_bins=%d n_proposal_samples=%d "
+        "Loaded proposal catalog: n_frequency_bins=%d n_proposal_samples=%d "
         "(%d outside the analysis window dropped)",
-        proposal.role,
         n_freq,
         n_samples,
         n_loaded - n_samples,

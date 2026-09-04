@@ -45,7 +45,7 @@ Every check is a `just` recipe, and CI runs the same string:
 - `uv run --group workflow snakemake --snakefile Snakefile --dry-run --cores 1 experiments`:
   production workflow entrypoint (omit `--dry-run` to execute). Chains come
   from `run_experiment_<name>` targets; figures are opt-in via the `plot_*`
-  rules. Run `snakemake validate` first: it merges and bank-checks all 26 runs
+  rules. Run `snakemake validate` first: it merges and catalog-checks all 26 runs
   without building anything.
 
 ## Configuration
@@ -61,7 +61,7 @@ config next to the chain and stamps the ordered layer paths into it.
 
 - Target Python `>=3.12`, use explicit public type hints, `pathlib.Path`, Ruff
   formatting, snake_case functions, PascalCase classes, and uppercase constants.
-- `astrogwb.paper.config.runs` is stdlib-only and `astrogwb.paper.config.banks`
+- `astrogwb.paper.config.runs` is stdlib-only and `astrogwb.paper.config.catalogs`
   reaches `astrogwb.catalog` only inside function bodies. The `Snakefile`
   imports both, so keeping them JAX-free is what keeps `--dry-run` cheap;
   `tests/paper/test_cli.py` asserts it.

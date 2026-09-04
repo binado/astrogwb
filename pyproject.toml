@@ -142,7 +142,7 @@ include = [
     "src",
     "tests",
     "examples",
-    "scripts/generate_bank.py",
+    "scripts/generate_catalog.py",
     "scripts/run_mcmc.py",
     "scripts/profile_model.py",
 ]

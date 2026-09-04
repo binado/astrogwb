@@ -85,7 +85,7 @@ workflow. The fiducial spectrum borrows the six detector networks of the
 `cosmological-parameters` experiment rather than restating them, and keeps its
 `OMEGA_GW_MIN` y-limit next to the axis it sets. All of them read an assembled
 run config directly. `importance_weights_grid` additionally reads its proposal
-*density* from the bank file it is handed, the same way `scripts/run_mcmc.py`
+*density* from the catalog file it is handed, the same way `scripts/run_mcmc.py`
 does -- so the weights it plots divide by the same denominator the chains did.
 
 ```bash
@@ -113,7 +113,7 @@ All new figure products are written under `outputs/figures/`.
 Figure entry points are plain Python scripts under `scripts/`. Each reads its
 own fiducials and analysis grid from an assembled run config, whose path the
 library owns, and hard-codes its own labels and run order. Snakemake passes only
-what it owns: the chain and bank paths it built, and the output paths it
+what it owns: the chain and catalog paths it built, and the output paths it
 declared.
 
 The assembled config is a declared input of each rule, so editing a fiducial or

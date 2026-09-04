@@ -1,0 +1,6 @@
+# The default proposal: an independent seed-42 draw, used by 21 of the 26 runs.
+num_samples = 16384
+
+[[components]]
+population = "madau-dickinson"
+seed = 42

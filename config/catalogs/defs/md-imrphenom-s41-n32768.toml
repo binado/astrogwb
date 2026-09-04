@@ -1,0 +1,8 @@
+# The fiducial injection: the "observed" catalog all 26 runs are compared
+# against. Also serves as the proposal for waveform-approximant/IMRPhenom,
+# which measures IMRPhenom against itself as the systematics baseline.
+num_samples = 32768
+
+[[components]]
+population = "madau-dickinson"
+seed = 41

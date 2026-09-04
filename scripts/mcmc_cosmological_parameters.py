@@ -667,7 +667,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             networks,
             fiducials,
             grid=grid,
-            injection=config.catalog.injection,
         )
         table = build_snr_h0_constraint_table(
             networks,

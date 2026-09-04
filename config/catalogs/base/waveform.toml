@@ -1,0 +1,15 @@
+# Waveform-generation settings shared by every catalog.
+#
+# Only config/catalogs/defs/md-taylorf2-s41-n32768.toml overrides anything
+# here (the approximant); the rest of the tree inherits this verbatim. This
+# layer is declared as a Snakemake input of every catalog, so editing it
+# correctly invalidates all of them.
+
+[waveform]
+approximant = "IMRPhenomXAS_NRTidalv3"
+sampling_frequency = 8192.0
+minimum_frequency = 2.0
+maximum_frequency = 4096.0
+reference_frequency = 20.0
+frequency_resolution = 1.0
+chunk_size = 2048

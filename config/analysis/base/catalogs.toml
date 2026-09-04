@@ -1,20 +1,15 @@
-# The two catalogs every run composes in memory from persisted banks.
+# The two catalogs every run uses, by name.
 #
-# The injection catalog is the same for all 26 runs -- it is the
-# "observed" data -- so no run overrides it. The proposal catalog is the
-# importance-sampling draw; only variable-catalog-size,
-# variable-proposal-guard, astrophysical-parameters, and
-# waveform-approximant override it.
+# Each name resolves to config/catalogs/defs/<name>.toml and to the
+# outputs/catalogs/<name>.h5 it produces. How a catalog was drawn -- its
+# components, seeds and mixing fractions -- lives in those files, not here,
+# and the redshift density that follows from them is read back off the
+# generated file at run time.
 #
-# The proposal *density* is not configured here: it is read back from the
-# md_bank's own provenance attributes at run time.
+# The injection is the same for all 26 runs: it is the "observed" data, so no
+# run overrides it. Only variable-catalog-size, variable-proposal-guard,
+# astrophysical-parameters, and waveform-approximant override the proposal.
 
-# The fixed fiducial injection, drawn at seed 41.
-[catalog.injection]
-md_bank = "md-imrphenom-s41"
-num_samples = 32768
-
-# Independent draws at seed 42; eps = 0 by default.
-[catalog.proposal]
-md_bank = "md-imrphenom-s42"
-num_samples = 16384
+[catalog]
+injection = "md-imrphenom-s41-n32768"
+proposal = "md-imrphenom-s42-n16384"

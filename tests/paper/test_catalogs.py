@@ -1,9 +1,10 @@
-"""Runtime catalog composition: truncation and the in-memory bank mixture.
+"""Runtime catalog preparation: loading and analysis-window truncation.
 
-The registry-validation half of this file went with ``inputs/catalogs.yaml``.
-What a composition *is* now lives on
-:class:`~astrogwb.paper.config.mcmc.CatalogSpec`, declared inline by each run;
-what remains testable here is the composition law itself.
+Composition used to live here: a run declared an inline spec and the two
+catalogs were mixed in memory from persisted banks. Every catalog is a file
+now, built by ``scripts/generate_catalog.py``, so loading is just reading one
+and the draw law is pinned in ``test_catalog_generation.py`` instead. What
+remains here is what still happens at run time.
 """
 
 from __future__ import annotations
@@ -14,14 +15,12 @@ import numpy as np
 import pytest
 import xarray as xr
 from catalog_fixtures import make_catalog, save_catalog
-from pydantic import ValidationError
 
-from astrogwb.paper.catalogs import CatalogSource, truncate_catalog_samples
-from astrogwb.paper.config.mcmc import CatalogSpec
+from astrogwb.paper.catalogs import load_run_catalog, truncate_catalog_samples
 
 
 # --------------------------------------------------------------------------- #
-# truncate_catalog_samples (unaffected by the registry removal)
+# truncate_catalog_samples
 # --------------------------------------------------------------------------- #
 def _catalog(redshift: np.ndarray, *, offset: float = 0.0) -> xr.Dataset:
     return make_catalog(
@@ -90,193 +89,34 @@ def test_truncate_catalog_samples_requires_distance_column() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# CatalogSource.compose
+# load_run_catalog
 # --------------------------------------------------------------------------- #
-def _bank_file(path: Path, n: int, *, offset: float = 0.0) -> Path:
-    """A synthetic bank whose redshift encodes sample identity: offset + index."""
-    redshift = offset + np.arange(n, dtype=float)
+def test_load_run_catalog_returns_the_whole_file(tmp_path: Path) -> None:
+    """No prefixing: a catalog file is exactly the catalog a run samples."""
+    redshift = np.arange(6, dtype=float)
+    path = tmp_path / "catalog.h5"
     save_catalog(path, _catalog(redshift))
-    return path
 
+    loaded = load_run_catalog(path, label="proposal")
 
-def test_compose_catalog_eps0_is_a_bit_identical_bank_prefix(tmp_path: Path) -> None:
-    md_path = _bank_file(tmp_path / "md.h5", 10)
-    composition = CatalogSpec(md_bank="md", num_samples=4)
-
-    composed = CatalogSource(md_path, None, composition, "catalog").compose()
-
+    assert loaded.sizes["sample"] == 6
     np.testing.assert_array_equal(
-        composed.source_parameters.sel(parameter="redshift").values,
-        [0.0, 1.0, 2.0, 3.0],
-    )
-    with xr.open_dataset(md_path, engine="h5netcdf") as full:
-        np.testing.assert_array_equal(
-            composed.polarization_power.values,
-            full.polarization_power.isel(sample=slice(0, 4)).values,
-        )
-
-
-def test_compose_catalog_rejects_oversized_request(tmp_path: Path) -> None:
-    md_path = _bank_file(tmp_path / "md.h5", 4)
-    composition = CatalogSpec(md_bank="md", num_samples=8)
-
-    with pytest.raises(
-        ValueError, match="holds 4 samples, but the composition needs 8"
-    ):
-        CatalogSource(md_path, None, composition, "catalog").compose()
-
-
-def test_compose_catalog_requires_uniform_bank_and_mixture_seed_when_mixing() -> None:
-    composition = CatalogSpec.model_construct(
-        md_bank="md",
-        uniform_bank=None,
-        num_samples=4,
-        uniform_mixing_fraction=0.2,
-        mixture_seed=None,
+        loaded.source_parameters.sel(parameter="redshift").values, redshift
     )
 
-    with pytest.raises(ValueError, match="requires both uniform_bank_path"):
-        CatalogSource(Path("unused.h5"), None, composition, "catalog").compose()
+
+def test_load_run_catalog_names_the_role_on_a_missing_file(tmp_path: Path) -> None:
+    """Fails before JAX claims a device, so the message must say which role."""
+    with pytest.raises(FileNotFoundError, match="proposal catalog not found"):
+        load_run_catalog(tmp_path / "absent.h5", label="proposal")
 
 
-def test_compose_catalog_mixture_component_counts_are_binomial(tmp_path: Path) -> None:
-    md_path = _bank_file(tmp_path / "md.h5", 2000, offset=0.0)
-    uniform_path = _bank_file(tmp_path / "uniform.h5", 2000, offset=1_000_000.0)
-    composition = CatalogSpec(
-        md_bank="md",
-        uniform_bank="uniform",
-        num_samples=1000,
-        uniform_mixing_fraction=0.2,
-        mixture_seed=7,
-    )
+def test_load_run_catalog_is_eager(tmp_path: Path) -> None:
+    """Loaded, not lazily opened: the file handle must not outlive the call."""
+    path = tmp_path / "catalog.h5"
+    save_catalog(path, _catalog(np.arange(4, dtype=float)))
 
-    composed = CatalogSource(md_path, uniform_path, composition, "catalog").compose()
+    loaded = load_run_catalog(path, label="injection")
+    path.unlink()
 
-    assert composed.sizes["sample"] == 1000
-    redshift = np.asarray(composed.source_parameters.sel(parameter="redshift").values)
-    n_uniform = int(np.sum(redshift >= 1_000_000.0))
-    # Binomial(1000, 0.2): mean 200, std ~12.6 -- generous tolerance for a fixed seed.
-    assert 130 < n_uniform < 270
-
-
-def test_compose_catalog_prefix_is_itself_a_valid_mixture_sample(
-    tmp_path: Path,
-) -> None:
-    """A prefix of a composed catalog reproduces the smaller composition exactly.
-
-    This is what makes `num_samples`, like `uniform_mixing_fraction`, a free
-    composition parameter with no extra generation cost: the RNG stream is
-    the same regardless of how many samples are ultimately requested.
-    """
-    md_path = _bank_file(tmp_path / "md.h5", 200, offset=0.0)
-    uniform_path = _bank_file(tmp_path / "uniform.h5", 200, offset=1_000_000.0)
-
-    def _composition(n: int) -> CatalogSpec:
-        return CatalogSpec(
-            md_bank="md",
-            uniform_bank="uniform",
-            num_samples=n,
-            uniform_mixing_fraction=0.3,
-            mixture_seed=11,
-        )
-
-    big = CatalogSource(md_path, uniform_path, _composition(50), "catalog").compose()
-    small = CatalogSource(md_path, uniform_path, _composition(20), "catalog").compose()
-
-    big_redshift = np.asarray(big.source_parameters.sel(parameter="redshift").values)
-    small_redshift = np.asarray(
-        small.source_parameters.sel(parameter="redshift").values
-    )
-    np.testing.assert_array_equal(big_redshift[:20], small_redshift)
-
-
-def test_compose_catalog_rejects_banks_with_different_waveform_settings(
-    tmp_path: Path,
-) -> None:
-    """The registry used to compare bank recipes; the banks now speak for themselves."""
-    md_path = _bank_file(tmp_path / "md.h5", 100)
-    uniform_path = tmp_path / "uniform.h5"
-    other = _catalog(np.arange(100, dtype=float) + 1_000_000.0)
-    other.attrs["approximant"] = "SomethingElse"
-    save_catalog(uniform_path, other)
-    spec = CatalogSpec(
-        md_bank="md",
-        uniform_bank="uniform",
-        num_samples=50,
-        uniform_mixing_fraction=0.2,
-        mixture_seed=11,
-    )
-
-    with pytest.raises(ValueError, match="different waveform settings: approximant"):
-        CatalogSource(md_path, uniform_path, spec, "proposal").compose()
-
-
-def test_compose_catalog_rejects_banks_with_different_frequency_grids(
-    tmp_path: Path,
-) -> None:
-    md_path = _bank_file(tmp_path / "md.h5", 100)
-    uniform_path = tmp_path / "uniform.h5"
-    redshift = np.arange(100, dtype=float) + 1_000_000.0
-    other = make_catalog(
-        frequencies=np.linspace(20.0, 60.0, 5),
-        polarization_power=np.ones((5, redshift.size)),
-        source_parameters={
-            "redshift": redshift,
-            "luminosity_distance": 1.0e3 * (1.0 + redshift),
-        },
-        approximant="Toy",
-        minimum_frequency=10.0,
-        maximum_frequency=50.0,
-        reference_frequency=20.0,
-        sampling_frequency=128.0,
-        df=10.0,
-    )
-    save_catalog(uniform_path, other)
-    spec = CatalogSpec(
-        md_bank="md",
-        uniform_bank="uniform",
-        num_samples=50,
-        uniform_mixing_fraction=0.2,
-        mixture_seed=11,
-    )
-
-    with pytest.raises(ValueError, match="identical frequency grids"):
-        CatalogSource(md_path, uniform_path, spec, "proposal").compose()
-
-
-# --------------------------------------------------------------------------- #
-# CatalogSpec: the mixture invariants the retired registry used to enforce
-# --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("epsilon", [0.0, 1.0])
-def test_uniform_fraction_accepts_endpoints(epsilon: float) -> None:
-    kwargs = {"md_bank": "m", "num_samples": 1, "uniform_mixing_fraction": epsilon}
-    if epsilon > 0.0:
-        kwargs |= {"uniform_bank": "u", "mixture_seed": 3}
-    assert CatalogSpec.model_validate(kwargs).uniform_mixing_fraction == epsilon
-
-
-@pytest.mark.parametrize("epsilon", [-0.1, 1.1])
-def test_uniform_fraction_rejects_values_outside_unit_interval(epsilon: float) -> None:
-    with pytest.raises(ValidationError):
-        CatalogSpec.model_validate(
-            {"md_bank": "m", "num_samples": 1, "uniform_mixing_fraction": epsilon}
-        )
-
-
-def test_positive_fraction_requires_uniform_bank_and_mixture_seed() -> None:
-    with pytest.raises(ValidationError, match="requires both"):
-        CatalogSpec.model_validate(
-            {"md_bank": "m", "num_samples": 1, "uniform_mixing_fraction": 0.1}
-        )
-
-
-def test_zero_fraction_forbids_uniform_bank_and_mixture_seed() -> None:
-    with pytest.raises(ValidationError, match="forbids"):
-        CatalogSpec.model_validate(
-            {
-                "md_bank": "m",
-                "num_samples": 1,
-                "uniform_bank": "u",
-                "mixture_seed": 3,
-            }
-        )
+    assert float(loaded.polarization_power.values.sum()) >= 0.0

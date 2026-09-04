@@ -3,15 +3,14 @@
 This is the pre-flight gate ``astrogwb-assemble-config --all`` used to provide.
 There is no assembled-config artifact any more -- each entrypoint merges its
 own layers -- but the gate is worth keeping on its own: it fails on the first
-invalid run *before any bank is built*, and a bank is a GPU job.
+invalid run *before any catalog is built*, and a catalog is a GPU job.
 
 Three checks per run, cheapest first:
 
 1. the three layers merge (a malformed TOML fails here);
 2. the merge validates into a :class:`RunConfig` (a typo'd key, an impossible
    prior, a missing detector list);
-3. every bank the run names exists in ``config/banks/``, and a two-component
-   mixture draws its parts with distinct seeds.
+3. both catalogs the run names exist in ``config/catalogs/defs/``.
 
 JAX-free: nothing here touches a device, so it is cheap enough to run before
 every campaign.
@@ -24,7 +23,7 @@ import logging
 import sys
 from pathlib import Path
 
-from astrogwb.paper.config.banks import validate_all_runs
+from astrogwb.paper.config.catalogs import validate_all_runs
 
 logger = logging.getLogger("validate_configs")
 
@@ -32,8 +31,8 @@ logger = logging.getLogger("validate_configs")
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Merge and validate every config/analysis/ run, and check the banks "
-            "each one names, without building anything."
+            "Merge and validate every config/analysis/ run, and check the "
+            "catalogs each one names, without building anything."
         )
     )
     parser.add_argument(

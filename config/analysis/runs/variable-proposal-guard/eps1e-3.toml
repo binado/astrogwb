@@ -1,6 +1,2 @@
-[catalog.proposal]
-md_bank = "md-imrphenom-s42"
-uniform_bank = "uniform-imrphenom-s51"
-num_samples = 16384
-uniform_mixing_fraction = 0.001
-mixture_seed = 63
+[catalog]
+proposal = "md-uniform-imrphenom-s63-n16384-eps1e-3"

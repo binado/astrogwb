@@ -1,0 +1,7 @@
+# Double-size proposal for variable-catalog-size/n32768. See the n8192 note
+# on prefix stability.
+num_samples = 32768
+
+[[components]]
+population = "madau-dickinson"
+seed = 42
