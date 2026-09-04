@@ -368,3 +368,6 @@ config
 !packages/astrogwb-paper/src/astrogwb_paper/config/**
 packages/astrogwb-paper/src/astrogwb_paper/config/__pycache__/
 .DS_Store
+
+# Scratch venv for the wheel smoke test (just smoke-wheel).
+.wheel-venv/

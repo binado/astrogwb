@@ -96,7 +96,7 @@ as one JSON string. A uniform bank writes
 
 This is the density the importance weights divide by. It is extracted from the
 population graph exactly once, by
-`astrogwb_paper.config.banks.extract_redshift_proposal`, and every later
+`astrogwb.paper.config.banks.extract_redshift_proposal`, and every later
 consumer reads it back with `read_bank_provenance` instead of re-parsing a
 config that may have drifted since. `astrogwb-run-mcmc` also checks the run's `[fiducials]` against
 what the bank recorded, so a drifted fiducial fails before a device is claimed
@@ -108,7 +108,7 @@ regenerate it"* -- deliberately, rather than falling back to parsing.
 
 ## Composition
 
-`astrogwb_paper.catalogs.CatalogSource.compose` draws a run's catalog from its
+`astrogwb.paper.catalogs.CatalogSource.compose` draws a run's catalog from its
 banks:
 
 - `uniform_mixing_fraction == 0` short-circuits to a bank *prefix* with no RNG

@@ -64,6 +64,9 @@ import numpy as np
 import numpyro.distributions as dist
 import pandas as pd
 import xarray as xr
+from matplotlib.axes import Axes as MplAxes
+from matplotlib.projections import register_projection
+
 from astrogwb.catalog import (
     AnalyticInspiralGenerator,
     Catalog,
@@ -87,8 +90,6 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     madau_dickinson_rate,
     make_merger_rate_and_log_weights_fn,
 )
-from matplotlib.axes import Axes as MplAxes
-from matplotlib.projections import register_projection
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces
 # matplotlib's registered rectilinear axes with its own subclass on import.

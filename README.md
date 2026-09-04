@@ -1,50 +1,111 @@
-# astrogwb workspace
+# astrogwb
 
-This repository contains two Python projects managed through one uv workspace:
+`astrogwb` provides reusable scientific modules for modelling the stochastic
+gravitational-wave background from compact-binary populations and performing
+Bayesian inference with detector networks.
 
-- [`astrogwb`](packages/astrogwb/): the publishable scientific library for
-  compact-binary stochastic gravitational-wave background inference.
-- [`astrogwb-paper`](packages/astrogwb-paper/): the private application owning
-  MCMC runners, catalog workflows, campaign configuration, cluster profiles,
-  and manuscript notebooks.
-
-The dependency direction is one-way: `astrogwb-paper` depends on `astrogwb`.
-The workspace uses one lockfile and installs both members editably for local
-development.
-
-## Core library quick start
-
-Install the released scientific library from PyPI:
+## Installation
 
 ```bash
-python -m pip install astrogwb
+pip install astrogwb
 ```
 
-For core development in this checkout:
+Optional accelerator builds are available as `astrogwb[cuda]` and
+`astrogwb[tpu]`. Install the population-simulation adapter separately when it
+is needed:
 
 ```bash
-uv sync --package astrogwb --group test
-uv run --package astrogwb --group test pytest packages/astrogwb/tests
+pip install astrogwb[simulation]
 ```
 
-## Paper workflow quick start
+## Library modules
+
+- `astrogwb.constants` holds the SI physical constants and unit conversions
+  every other module shares. The tabulated values are the LALSuite literals,
+  so results are bit-comparable with LALSimulation and ripple.
+- `astrogwb.detector` loads bundled detector geometry and sensitivity data and
+  evaluates overlap-reduction functions and effective PSDs.
+- `astrogwb.gwb` provides spectral-density, Omega-GW conversion, and SNR
+  calculations. `astrogwb.gwb.analytic` evaluates the inspiral-only
+  background in closed form, truncated on the same dimensionless `alpha` as
+  `astrogwb.waveform.analytical`.
+- `astrogwb.importance` defines the reusable importance-weighting protocol and
+  compact-binary population model.
+- `astrogwb.sampling` exposes the caller-prepared NumPyro model.
+- `astrogwb.catalog` provides array-native catalog metadata, validation,
+  population simulation, and polarization-power generation.
+  `astrogwb.catalog.generator` defines the generator protocol and the
+  closed-form inspiral adapter; the optional `gwmock-pop` adapter is imported
+  only when `simulate_population` is called.
+- `astrogwb.waveform` reduces raw plus/cross polarizations to power, applies
+  GW-distance corrections to plain arrays, and provides a closed-form
+  quadrupolar inspiral model. Persistence and labelled-array policy stay with
+  applications.
+  `astrogwb.waveform.analytical` gives the same power in closed form for a
+  quadrupolar, inspiral-only binary, truncated at `f = alpha / ((1 + z) M)`
+  for a caller-chosen dimensionless `alpha`.
+
+For example:
+
+```python
+from astrogwb.detector import load_detector, load_sensitivity
+
+hanford = load_detector("H1")
+sensitivity = load_sensitivity("H1")
+```
+
+A prepared population can be reduced through the common generation interface:
+
+```python
+from astrogwb.constants import ISCO_ALPHA
+from astrogwb.catalog import (
+    AnalyticInspiralGenerator,
+    Catalog,
+    FrequencyDomainWaveformMetadata,
+    PopulationMetadata,
+)
+
+waveform_metadata = FrequencyDomainWaveformMetadata.from_bounds(
+    approximant="AnalyticInspiral",
+    minimum_frequency=2.0,
+    maximum_frequency=2048.0,
+    reference_frequency=2.0,
+    sampling_frequency=4096.0,
+    df=1.0,
+)
+population_metadata = PopulationMetadata(
+    name="my-caller-owned-graph",
+    seed=42,
+    num_samples=len(source_parameters["redshift"]),
+)
+
+catalog = Catalog.from_generator(
+    source_parameters,
+    generator=AnalyticInspiralGenerator(alpha=ISCO_ALPHA),
+    waveform_metadata=waveform_metadata,
+    population_metadata=population_metadata,
+)
+```
+
+## Examples
+
+`examples/` holds runnable end-to-end scripts that depend only on `astrogwb`.
+The scripts read and write xarray/HDF5 files directly, so install `xarray` and
+`h5netcdf[h5py]` separately before running them; these I/O dependencies are not
+installed by `astrogwb`.
+`examples/h0_mcmc.py` takes a waveform catalog, builds the observed spectral
+density from it, and infers `H0` with a NumPyro NUTS chain:
 
 ```bash
-uv sync --package astrogwb-paper --group dev
-cd packages/astrogwb-paper
-uv run --group workflow snakemake --snakefile Snakefile \
-  --allowed-rules amplitude_toy \
-  --profile profiles/local --cores 8 --dry-run amplitude_toy
+python examples/h0_mcmc.py CATALOG.h5 -o chains.nc
 ```
 
-Build the library exactly as it will be published, without workspace source
-overrides:
+`examples/amplitude_marginalized_model.py` is the same run with `H0` marginalized out of the
+likelihood analytically and reconstructed afterwards, giving a joint
+`(H0, Omega_m)` posterior -- the setup every production analysis uses.
 
-```bash
-uv build --package astrogwb --no-sources
-```
+See `examples/README.md` for the options and for how the catalog serves as its
+own importance-sampling proposal.
 
-Generated catalogs, chains, figures, and logs remain in
-`packages/astrogwb-paper/`'s `out/`, `chains/`, `figures/`, and `logs/`
-directories. Detailed workflow documentation lives under
-[`packages/astrogwb-paper/docs`](packages/astrogwb-paper/docs/).
+The manuscript workflows, configurations, and notebooks live in the separate
+`astrogwb-paper` workspace project in the source repository.

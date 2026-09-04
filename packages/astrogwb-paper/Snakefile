@@ -2,8 +2,8 @@ import re
 import shlex
 from pathlib import Path
 
-from astrogwb_paper.config.banks import discover_banks
-from astrogwb_paper.config.runs import (
+from astrogwb.paper.config.banks import discover_banks
+from astrogwb.paper.config.runs import (
     base_config_paths,
     discover_runs,
     load_base,
@@ -11,7 +11,7 @@ from astrogwb_paper.config.runs import (
     run_config_paths,
     run_target,
 )
-from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS
+from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
 # Neither config module imports JAX, pydantic, or matplotlib at module scope,
 # so DAG construction stays cheap: a --dry-run costs ~300 modules rather than
@@ -167,7 +167,7 @@ rule waveform_bank:
     output:
         str(BANKS_DIR / "{bank}.h5"),
     shell:
-        "uv run --package astrogwb-paper astrogwb-generate-bank"
+        "uv run --extra paper astrogwb-generate-bank"
         " --config {input.config:q} --output {output:q} --force"
 
 
@@ -189,7 +189,7 @@ rule validate:
     output:
         "outputs/validated-runs.txt",
     shell:
-        "uv run --package astrogwb-paper python scripts/validate_configs.py"
+        "uv run --extra paper python scripts/validate_configs.py"
         " --output {output:q}"
 
 
@@ -222,10 +222,10 @@ rule run_mcmc:
         fi
         if [ "{params.platform}" = "cpu" ]; then
             RUNTIME_FLAGS="--host-device-count {threads} --cpu-threads 1"
-            UV_EXTRAS="--package astrogwb-paper"
+            UV_EXTRAS="--extra paper"
         else
             RUNTIME_FLAGS="--cpu-threads {threads}"
-            UV_EXTRAS="--package astrogwb-paper --extra cuda"
+            UV_EXTRAS="--extra paper --extra cuda"
         fi
         # --active --no-sync: with storage-local-copies the cwd is a node-local
         # staged copy without the uv workspace (astrogwb is a workspace source),
@@ -277,7 +277,7 @@ rule plot_cosmological_parameters:
             "outputs/figures/cosmological-parameters/H0-Omega_m-ess-corner.pdf"
         ),
     shell:
-        "uv run --package astrogwb-paper --group plotting"
+        "uv run --extra notebook"
         " python scripts/mcmc_cosmological_parameters.py"
         f" {config_flags('cosmological-parameters', 'ET-2L-aligned-CE-Hanford')}"
         f" {network_run_flags('cosmological-parameters')}"
@@ -320,7 +320,7 @@ rule plot_modified_propagation:
         csv="outputs/figures/modified-propagation/Xi0-n-by-detector.csv",
         tex="outputs/figures/modified-propagation/Xi0-n-by-detector.tex",
     shell:
-        "uv run --package astrogwb-paper --group plotting"
+        "uv run --extra notebook"
         " python scripts/mcmc_modified_propagation.py"
         f" {config_flags('modified-propagation', 'ET-2L-aligned-CE-Hanford')}"
         f" {network_run_flags('modified-propagation')}"
@@ -343,7 +343,7 @@ rule amplitude_toy:
     output:
         "outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf",
     shell:
-        "uv run --package astrogwb-paper --group plotting"
+        "uv run --extra notebook"
         " python scripts/amplitude_toy_model.py"
         f" {config_flags(*FIGURE_RUN)}"
         " --catalog {input.catalog:q}"
@@ -367,7 +367,7 @@ rule fiducial_spectrum:
             "outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf"
         ),
     shell:
-        "uv run --package astrogwb-paper --group plotting"
+        "uv run --extra notebook"
         " python scripts/fiducial_spectrum.py"
         f" {config_flags(*FIGURE_RUN)}"
         f" {network_run_flags('cosmological-parameters')}"
@@ -387,7 +387,7 @@ rule importance_weights_grid:
         ),
         xi0_n_pdf="outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf",
     shell:
-        "uv run --package astrogwb-paper --group plotting"
+        "uv run --extra notebook"
         " python scripts/importance_weights_grid.py"
         f" {config_flags(*FIGURE_RUN)}"
         " --catalog {input.catalog:q}"

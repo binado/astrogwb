@@ -24,7 +24,7 @@ import logging
 import sys
 from pathlib import Path
 
-from astrogwb_paper.config.banks import validate_all_runs
+from astrogwb.paper.config.banks import validate_all_runs
 
 logger = logging.getLogger("validate_configs")
 

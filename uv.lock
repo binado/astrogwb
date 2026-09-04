@@ -16,13 +16,6 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 
-[manifest]
-members = [
-    "astrogwb",
-    "astrogwb-paper",
-    "astrogwb-workspace",
-]
-
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -203,7 +196,7 @@ xarray = [
 [[package]]
 name = "astrogwb"
 version = "0.1.0"
-source = { editable = "packages/astrogwb" }
+source = { editable = "." }
 dependencies = [
     { name = "gwmock-noise" },
     { name = "gwmock-signal", extra = ["jax"] },
@@ -221,6 +214,30 @@ io = [
     { name = "h5netcdf", extra = ["h5py"] },
     { name = "xarray" },
 ]
+notebook = [
+    { name = "arviz", extra = ["h5netcdf"] },
+    { name = "arviz-base" },
+    { name = "arviz-plots" },
+    { name = "arviz-stats", extra = ["xarray"] },
+    { name = "corner" },
+    { name = "gwmock-pop" },
+    { name = "h5netcdf", extra = ["h5py"] },
+    { name = "jinja2" },
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "scipy" },
+    { name = "xarray" },
+]
+paper = [
+    { name = "arviz", extra = ["h5netcdf"] },
+    { name = "gwmock-pop" },
+    { name = "h5netcdf", extra = ["h5py"] },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "xarray" },
+]
 simulation = [
     { name = "gwmock-pop" },
 ]
@@ -229,139 +246,38 @@ tpu = [
 ]
 
 [package.dev-dependencies]
-fixture = [
-    { name = "gwmock-pop" },
-    { name = "pyyaml" },
-]
-test = [
-    { name = "gwmock-pop" },
-    { name = "pytest" },
-    { name = "pytest-xdist" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "gwmock-noise", specifier = ">=0.10.1" },
-    { name = "gwmock-pop", marker = "extra == 'simulation'", specifier = ">=0.11.4" },
-    { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.15.0" },
-    { name = "h5netcdf", extras = ["h5py"], marker = "extra == 'io'", specifier = ">=1.8.1" },
-    { name = "jax", marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
-    { name = "jax", extras = ["cpu"], marker = "sys_platform != 'linux'", specifier = ">=0.11.0" },
-    { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda'", specifier = ">=0.11.0" },
-    { name = "jax", extras = ["tpu"], marker = "extra == 'tpu'", specifier = ">=0.11.0" },
-    { name = "numpy", specifier = ">=2.5.1" },
-    { name = "numpyro", specifier = ">=0.21.0" },
-    { name = "xarray", marker = "extra == 'io'", specifier = ">=2025.1" },
-]
-provides-extras = ["cuda", "io", "simulation", "tpu"]
-
-[package.metadata.requires-dev]
-fixture = [
-    { name = "gwmock-pop", specifier = "==0.11.4" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-]
-test = [
-    { name = "gwmock-pop", specifier = ">=0.11.4" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-xdist", specifier = ">=3.8.0" },
-]
-
-[[package]]
-name = "astrogwb-paper"
-version = "0.1.0"
-source = { editable = "packages/astrogwb-paper" }
-dependencies = [
-    { name = "arviz", extra = ["h5netcdf"] },
-    { name = "astrogwb", extra = ["io"] },
-    { name = "gwmock-pop" },
-    { name = "gwmock-signal", extra = ["jax"] },
-    { name = "h5netcdf", extra = ["h5py"] },
-    { name = "jax" },
-    { name = "jax", marker = "sys_platform != 'linux'" },
-    { name = "numpy" },
-    { name = "numpyro" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "xarray" },
-]
-
-[package.optional-dependencies]
-cuda = [
-    { name = "astrogwb", extra = ["cuda"] },
-]
-notebook = [
-    { name = "arviz" },
-    { name = "arviz-base" },
-    { name = "arviz-plots" },
-    { name = "arviz-stats", extra = ["xarray"] },
-    { name = "corner" },
-    { name = "h5netcdf" },
-    { name = "ipykernel" },
-    { name = "jinja2" },
-    { name = "jupyter" },
-    { name = "matplotlib" },
-    { name = "pandas" },
-    { name = "scipy" },
-    { name = "xarray" },
-]
-tpu = [
-    { name = "astrogwb", extra = ["tpu"] },
-]
-
-[package.dev-dependencies]
 dev = [
-    { name = "arviz" },
-    { name = "arviz-base" },
-    { name = "arviz-plots" },
-    { name = "arviz-stats", extra = ["xarray"] },
-    { name = "corner" },
-    { name = "h5netcdf" },
     { name = "ipykernel" },
-    { name = "jinja2" },
     { name = "jupyter" },
-    { name = "matplotlib" },
-    { name = "pandas" },
+    { name = "jupytext" },
+    { name = "nbconvert" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },
-    { name = "scipy" },
     { name = "snakemake" },
     { name = "ty" },
-    { name = "xarray" },
 ]
-plotting = [
-    { name = "arviz" },
-    { name = "arviz-base" },
-    { name = "arviz-plots" },
-    { name = "arviz-stats", extra = ["xarray"] },
-    { name = "corner" },
-    { name = "h5netcdf" },
-    { name = "jinja2" },
-    { name = "matplotlib" },
-    { name = "pandas" },
-    { name = "scipy" },
-    { name = "xarray" },
+fixture = [
+    { name = "gwmock-pop" },
+    { name = "pyyaml" },
+]
+jupyter = [
+    { name = "ipykernel" },
+    { name = "jupyter" },
+    { name = "jupytext" },
+    { name = "nbconvert" },
 ]
 slurm = [
-    { name = "arviz" },
-    { name = "arviz-base" },
-    { name = "arviz-plots" },
-    { name = "arviz-stats", extra = ["xarray"] },
-    { name = "corner" },
-    { name = "h5netcdf" },
     { name = "ipykernel" },
-    { name = "jinja2" },
     { name = "jupyter" },
-    { name = "matplotlib" },
-    { name = "pandas" },
+    { name = "jupytext" },
+    { name = "nbconvert" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },
-    { name = "scipy" },
     { name = "snakemake" },
     { name = "snakemake-executor-plugin-slurm" },
     { name = "ty" },
-    { name = "xarray" },
 ]
 test = [
     { name = "pytest" },
@@ -373,137 +289,72 @@ workflow = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arviz", marker = "extra == 'notebook'", specifier = ">=1.2.0" },
-    { name = "arviz", extras = ["h5netcdf"], specifier = ">=1.2.0" },
+    { name = "arviz", extras = ["h5netcdf"], marker = "extra == 'paper'", specifier = ">=1.2.0" },
     { name = "arviz-base", marker = "extra == 'notebook'", specifier = ">=1.2.0" },
     { name = "arviz-plots", marker = "extra == 'notebook'", specifier = ">=1.2.0" },
     { name = "arviz-stats", extras = ["xarray"], marker = "extra == 'notebook'", specifier = ">=1.2.0" },
-    { name = "astrogwb", extras = ["cuda"], marker = "extra == 'cuda'", editable = "packages/astrogwb" },
-    { name = "astrogwb", extras = ["io"], editable = "packages/astrogwb" },
-    { name = "astrogwb", extras = ["tpu"], marker = "extra == 'tpu'", editable = "packages/astrogwb" },
+    { name = "astrogwb", extras = ["io", "simulation"], marker = "extra == 'paper'" },
+    { name = "astrogwb", extras = ["paper"], marker = "extra == 'notebook'" },
     { name = "corner", marker = "extra == 'notebook'", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
-    { name = "gwmock-pop", specifier = ">=0.11.4" },
+    { name = "gwmock-noise", specifier = ">=0.10.1" },
+    { name = "gwmock-pop", marker = "extra == 'simulation'", specifier = ">=0.11.4" },
     { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.15.0" },
-    { name = "h5netcdf", marker = "extra == 'notebook'", specifier = ">=1.8.1" },
-    { name = "h5netcdf", extras = ["h5py"], specifier = ">=1.8.1" },
-    { name = "ipykernel", marker = "extra == 'notebook'", specifier = ">=7.3.0" },
+    { name = "h5netcdf", extras = ["h5py"], marker = "extra == 'io'", specifier = ">=1.8.1" },
     { name = "jax", marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
     { name = "jax", extras = ["cpu"], marker = "sys_platform != 'linux'", specifier = ">=0.11.0" },
+    { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda'", specifier = ">=0.11.0" },
+    { name = "jax", extras = ["tpu"], marker = "extra == 'tpu'", specifier = ">=0.11.0" },
     { name = "jinja2", marker = "extra == 'notebook'", specifier = ">=3.1" },
-    { name = "jupyter", marker = "extra == 'notebook'", specifier = ">=1.1.1" },
     { name = "matplotlib", marker = "extra == 'notebook'", specifier = ">=3.11.1" },
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "numpyro", specifier = ">=0.21.0" },
     { name = "pandas", marker = "extra == 'notebook'", specifier = ">=2.0" },
-    { name = "pydantic", specifier = ">=2.11" },
-    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "pydantic", marker = "extra == 'paper'", specifier = ">=2.11" },
+    { name = "pyyaml", marker = "extra == 'paper'", specifier = ">=6.0" },
     { name = "scipy", marker = "extra == 'notebook'", specifier = ">=1.10" },
-    { name = "xarray", specifier = ">=2025.1" },
-    { name = "xarray", marker = "extra == 'notebook'", specifier = ">=2025.1" },
+    { name = "xarray", marker = "extra == 'io'", specifier = ">=2025.1" },
 ]
-provides-extras = ["cuda", "tpu", "notebook"]
+provides-extras = ["cuda", "io", "simulation", "tpu", "paper", "notebook"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "arviz", specifier = ">=1.2.0" },
-    { name = "arviz-base", specifier = ">=1.2.0" },
-    { name = "arviz-plots", specifier = ">=1.2.0" },
-    { name = "arviz-stats", extras = ["xarray"], specifier = ">=1.2.0" },
-    { name = "corner", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
-    { name = "h5netcdf", specifier = ">=1.8.1" },
     { name = "ipykernel", specifier = ">=7.3.0" },
-    { name = "jinja2", specifier = ">=3.1" },
     { name = "jupyter", specifier = ">=1.1.1" },
-    { name = "matplotlib", specifier = ">=3.11.1" },
-    { name = "pandas", specifier = ">=2.0" },
+    { name = "jupytext", specifier = ">=1.19" },
+    { name = "nbconvert", specifier = ">=7.16" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.1" },
-    { name = "scipy", specifier = ">=1.10" },
     { name = "snakemake", specifier = ">=9.24.0" },
     { name = "ty", specifier = ">=0.0.69" },
-    { name = "xarray", specifier = ">=2025.1" },
 ]
-plotting = [
-    { name = "arviz", specifier = ">=1.2.0" },
-    { name = "arviz-base", specifier = ">=1.2.0" },
-    { name = "arviz-plots", specifier = ">=1.2.0" },
-    { name = "arviz-stats", extras = ["xarray"], specifier = ">=1.2.0" },
-    { name = "corner", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
-    { name = "h5netcdf", specifier = ">=1.8.1" },
-    { name = "jinja2", specifier = ">=3.1" },
-    { name = "matplotlib", specifier = ">=3.11.1" },
-    { name = "pandas", specifier = ">=2.0" },
-    { name = "scipy", specifier = ">=1.10" },
-    { name = "xarray", specifier = ">=2025.1" },
+fixture = [
+    { name = "gwmock-pop", specifier = "==0.11.4" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+]
+jupyter = [
+    { name = "ipykernel", specifier = ">=7.3.0" },
+    { name = "jupyter", specifier = ">=1.1.1" },
+    { name = "jupytext", specifier = ">=1.19" },
+    { name = "nbconvert", specifier = ">=7.16" },
 ]
 slurm = [
-    { name = "arviz", specifier = ">=1.2.0" },
-    { name = "arviz-base", specifier = ">=1.2.0" },
-    { name = "arviz-plots", specifier = ">=1.2.0" },
-    { name = "arviz-stats", extras = ["xarray"], specifier = ">=1.2.0" },
-    { name = "corner", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
-    { name = "h5netcdf", specifier = ">=1.8.1" },
     { name = "ipykernel", specifier = ">=7.3.0" },
-    { name = "jinja2", specifier = ">=3.1" },
     { name = "jupyter", specifier = ">=1.1.1" },
-    { name = "matplotlib", specifier = ">=3.11.1" },
-    { name = "pandas", specifier = ">=2.0" },
+    { name = "jupytext", specifier = ">=1.19" },
+    { name = "nbconvert", specifier = ">=7.16" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.1" },
-    { name = "scipy", specifier = ">=1.10" },
     { name = "snakemake", specifier = ">=9.24.0" },
     { name = "snakemake-executor-plugin-slurm", specifier = ">=1.5" },
     { name = "ty", specifier = ">=0.0.69" },
-    { name = "xarray", specifier = ">=2025.1" },
 ]
 test = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
 ]
 workflow = [{ name = "snakemake", specifier = ">=9.24.0" }]
-
-[[package]]
-name = "astrogwb-workspace"
-version = "0.0.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "astrogwb-paper" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-xdist" },
-    { name = "ruff" },
-    { name = "ty" },
-]
-notebook = [
-    { name = "astrogwb", extra = ["io", "simulation"] },
-    { name = "ipykernel" },
-    { name = "jupytext" },
-    { name = "matplotlib" },
-    { name = "nbconvert" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "astrogwb-paper", editable = "packages/astrogwb-paper" }]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-xdist", specifier = ">=3.8.0" },
-    { name = "ruff", specifier = ">=0.16.1" },
-    { name = "ty", specifier = ">=0.0.69" },
-]
-notebook = [
-    { name = "astrogwb", extras = ["simulation", "io"], editable = "packages/astrogwb" },
-    { name = "ipykernel", specifier = ">=7.3.0" },
-    { name = "jupytext", specifier = ">=1.19" },
-    { name = "matplotlib", specifier = ">=3.10.0" },
-    { name = "nbconvert", specifier = ">=7.16" },
-]
 
 [[package]]
 name = "astropy"
