@@ -45,7 +45,6 @@ from astrogwb.paper.config.banks import (
 )
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
-from astrogwb.paper.paths import paper_project_root, resolve_paper_path
 from astrogwb.paper.plotting import TRUTH, use_paper_style
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
@@ -181,8 +180,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
-    root = paper_project_root()
-    catalog_path = resolve_paper_path(args.catalog, root)
+    catalog_path = args.catalog
     config = build_run_config(load_merged_config(args))
     fiducials = dict(config.fiducials)
     use_paper_style()
@@ -250,7 +248,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         figures.append((figure, output))
 
     for figure, output in figures:
-        output_path = resolve_paper_path(output, root)
+        output_path = output
         output_path.parent.mkdir(parents=True, exist_ok=True)
         figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
         print("saved figure:", output_path)

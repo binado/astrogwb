@@ -32,7 +32,6 @@ from astrogwb.paper.config.runs import (
     load_merged_config,
     resolve_networks,
 )
-from astrogwb.paper.paths import paper_project_root, resolve_paper_path
 from astrogwb.paper.plotting import (
     CATEGORY,
     CORNER_LEVELS,
@@ -480,7 +479,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
-    root = paper_project_root()
     config = build_run_config(load_merged_config(args))
     grid = config.analysis_grid
     fiducials = {
@@ -498,9 +496,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
 
     chain_paths = [
-        resolve_paper_path(args.xi0_chain, root),
-        resolve_paper_path(args.xi0_n_chain, root),
-        resolve_paper_path(args.h0_chain, root),
+        args.xi0_chain,
+        args.xi0_n_chain,
+        args.h0_chain,
     ]
     inference_data = [load_inference_data(path) for path in chain_paths]
     validate_inference_data(
@@ -513,8 +511,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     xi_n_labels = [marginal_labels[1]]
     h0_data = [inference_data[2]]
     detector_xi0_n_data = [
-        load_inference_data(resolve_paper_path(path, root))
-        for path in args.detector_xi0_n_chains
+        load_inference_data(path) for path in args.detector_xi0_n_chains
     ]
     validate_inference_data(
         detector_xi0_n_data,
@@ -558,7 +555,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         colors=[CATEGORY["modified_propagation"]],
     )
     snr_table = compute_network_snrs(
-        resolve_paper_path(args.catalog, root),
+        args.catalog,
         networks,
         fiducials,
         grid=grid,
@@ -573,20 +570,18 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(xi0_n_constraint_table_latex(xi0_n_constraint_table))
 
     outputs = {
-        resolve_paper_path(args.output_xi_n_corner_pdf, root): xi_n_corner_figure,
-        resolve_paper_path(
-            args.output_xi_n_ess_corner_pdf, root
-        ): xi_n_ess_corner_figure,
-        resolve_paper_path(args.output_xi0_marginal_pdf, root): xi0_marginal_figure,
-        resolve_paper_path(args.output_h0_corner_pdf, root): h0_corner_figure,
+        args.output_xi_n_corner_pdf: xi_n_corner_figure,
+        args.output_xi_n_ess_corner_pdf: xi_n_ess_corner_figure,
+        args.output_xi0_marginal_pdf: xi0_marginal_figure,
+        args.output_h0_corner_pdf: h0_corner_figure,
     }
     for output_path, figure in outputs.items():
         output_path.parent.mkdir(parents=True, exist_ok=True)
         figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
         print("saved figure:", output_path)
 
-    csv_path = resolve_paper_path(args.output_xi0_n_csv, root)
-    tex_path = resolve_paper_path(args.output_xi0_n_tex, root)
+    csv_path = args.output_xi0_n_csv
+    tex_path = args.output_xi0_n_tex
     write_xi0_n_constraint_table(xi0_n_constraint_table, csv_path, tex_path)
     print("saved constraint table:", csv_path)
     print("saved LaTeX table:", tex_path)

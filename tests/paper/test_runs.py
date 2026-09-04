@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from repo import REPO_ROOT
 
 from astrogwb.paper.config.banks import (
     check_bank_references,
@@ -31,10 +32,9 @@ from astrogwb.paper.config.runs import (
     run_config_paths,
     run_target,
 )
-from astrogwb.paper.paths import paper_project_root
 from astrogwb.paper.utils import load_mapping
 
-PAPER_ROOT = paper_project_root()
+PAPER_ROOT = REPO_ROOT
 
 EXPERIMENTS = {
     "cosmological-parameters",

@@ -11,16 +11,21 @@ ordered `(run name, LaTeX label)` pairs.
 Input and output paths are both named literally in
 [`Snakefile`](../Snakefile), and every output is a valid Snakemake target.
 Shared scientific values -- fiducials, frequency bounds, cosmology grid settings
--- are read from an *assembled* run config under
-`outputs/configs/<experiment>/<run>.json`, not from a source inventory, so a
-figure reports exactly what was sampled.
+-- arrive on argv as repeated `--config` layer files, the same list the rule
+declares as `input:`, so a figure reports exactly what was sampled and a layer
+edit retriggers the figure.
 
-Detector *lists* are never hard-coded next to a label: the script names its
-experiment, and `astrogwb.paper.config.figures.resolve_networks` reads each
-run's detectors out of that run's own assembled config. The detectors a figure
-reports an SNR for are therefore always the ones its chain was sampled with.
-The catalog composition behind the fiducial spectrum comes from the same place,
-via `load_injection_spec`.
+Detector *lists* are never hard-coded next to a label. The rule passes
+`--network-run <experiment>/<run>` once per network, in legend order, and
+`astrogwb.paper.config.runs.resolve_networks` reads each run's detectors out of
+that run's own config layers. The detectors a figure reports an SNR for are
+therefore always the ones its chain was sampled with.
+
+`resolve_networks` matches the `--network-run` list against the legend
+*positionally* and rejects a mismatch. That check matters more than it looks:
+declaration order drives chain order, legend order, and colour assignment, so a
+swapped pair would render a perfectly good figure with the wrong labels on the
+wrong curves rather than failing.
 
 The workflow imports that same tuple and expands its chain paths from it, so
 chain order and legend order are one list rather than two that have to be kept
@@ -40,14 +45,14 @@ The `plot_cosmological_parameters` rule consumes all eight chains and produces t
 five figures and two CSV/LaTeX table pairs in one script invocation. All
 artifacts live under `outputs/figures/cosmological-parameters/`.
 
-Preview or build the section (from `packages/astrogwb-paper/`):
+Preview or build the section (from the repository root):
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
+  --allowed-rules validate run_mcmc plot_cosmological_parameters \
   --profile profiles/local --cores 8 --dry-run plot_cosmological_parameters
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
+  --allowed-rules validate run_mcmc plot_cosmological_parameters \
   --profile profiles/slurm plot_cosmological_parameters
 ```
 
@@ -56,7 +61,7 @@ multiple outputs, requesting one builds the complete section:
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
+  --allowed-rules validate run_mcmc plot_cosmological_parameters \
   --profile profiles/local --cores 8 \
   outputs/figures/cosmological-parameters/H0-by-detector.pdf
 ```

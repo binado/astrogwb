@@ -8,28 +8,23 @@ data
 # from the notebook's own configuration cell, so they are a cache, not an input.
 notebooks/*.h5
 
-# Generated MCMC run artifacts and frozen manifests.
+# Generated MCMC run artifacts. Snakemake's cwd is the repository root, so
+# outputs/ is where every chain, bank, and figure lands.
 /out/
-packages/astrogwb-paper/out/
-packages/astrogwb-paper/outputs/
+/outputs/
 chains/
 logs/
 
 # Generated paper-figure workflow state/artifacts.
 .snakemake/
-figures/*.csv
-figures/*.tex
-packages/astrogwb-paper/figures/*.csv
-packages/astrogwb-paper/figures/*.tex
+figures/
+grids/
 
 *.md
 !README.md
 !AGENTS.md
 !CLAUDE.md
 !docs/**/*.md
-!packages/*/README.md
-!packages/astrogwb-paper/docs/**/*.md
-!packages/astrogwb-paper/notebooks/README.md
 !notebooks/README.md
 
 ## Core latex/pdflatex auxiliary files:

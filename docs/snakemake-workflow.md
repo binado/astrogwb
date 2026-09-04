@@ -7,7 +7,7 @@ assemble configs, sample chains, and build figures.
 `snakemake` is invoked directly; preview with `--dry-run` (Snakemake executes
 for real unless it is passed).
 
-All commands run with `packages/astrogwb-paper/` as their working directory.
+All commands run with the repository root as their working directory.
 Source inputs live under `config/`; generated artifacts live under `outputs/`.
 
 The Snakefile computes its own inputs by globbing that tree -- `discover_banks()`
@@ -50,28 +50,30 @@ See [bank generation](bank-generation.md) for what a bank records about itself.
 ## Experiment workflow
 
 [`config/analysis/`](../config/analysis/) holds the shared base, one `_base.toml`
-per experiment, and one TOML per run. The local `assemble_config` rule merges
-those three layers for **one run** and writes:
+per experiment, and one TOML per run. `run_mcmc` declares those three layers as
+its own `input:` and passes them straight back to the runner as repeated
+`--config` flags, then writes:
 
 ```text
-outputs/configs/<experiment>/<run>.json
+outputs/chains/<experiment>/<run>.nc      the chain (protected)
+outputs/chains/<experiment>/<run>.json    the config it was sampled with
 ```
 
-The generic `run_mcmc` rule then writes:
+There is no intermediate assembled config, and deleting that rule cost nothing:
+its `input:` was already exactly these three files, so it only turned files the
+chain already depended on into a JSON copy of themselves. Re-run granularity is
+unchanged -- the rule is a per-run wildcard on `{experiment}/{run}`, so editing
+a run's TOML retriggers exactly its own chain and editing a `base/` file
+retriggers all 26.
 
-```text
-outputs/chains/<experiment>/<run>.nc
-```
+That granularity is what removed the stale-input wrapper the old workflow
+needed: one rule used to emit all 26 configs at once, so any edit invalidated
+every one of them -- and the wrapper meant config changes never retriggered
+sampling at all.
 
-Both rules are per-run wildcards on `{experiment}/{run}`, so a config edit
-retriggers exactly its own chain. That is what removed the stale-input wrapper
-the old workflow needed on `run_mcmc`'s config input: one rule used to emit all
-26 configs at once, so any edit invalidated every one of them -- and the wrapper
-meant config changes never retriggered sampling at all. The `configs` target
-builds all 26 configs without sampling anything.
-
-The chain is protected. Its assembled config under `outputs/configs/` is the
-record of the resolved scientific configuration.
+The `validate` rule replaces the old `configs` target. It merges, validates,
+and bank-checks all 26 runs without building anything, so a config typo fails
+before any bank is built.
 
 The experiments are:
 
@@ -88,10 +90,10 @@ Run one experiment's chains:
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc run_experiment_cosmological_parameters \
+  --allowed-rules validate run_mcmc run_experiment_cosmological_parameters \
   --profile profiles/local --cores 8 --dry-run run_experiment_cosmological_parameters
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc run_experiment_cosmological_parameters \
+  --allowed-rules validate run_mcmc run_experiment_cosmological_parameters \
   --profile profiles/slurm run_experiment_cosmological_parameters
 ```
 
@@ -99,7 +101,7 @@ Build the paper's complete cosmological-parameter section:
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
+  --allowed-rules validate run_mcmc plot_cosmological_parameters \
   --profile profiles/slurm plot_cosmological_parameters
 ```
 

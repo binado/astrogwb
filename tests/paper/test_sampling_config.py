@@ -3,11 +3,11 @@ from __future__ import annotations
 import pytest
 from config_fixtures import example_raw
 from pydantic import ValidationError
+from repo import REPO_ROOT
 
 from astrogwb.paper.config.mcmc import build_run_config
-from astrogwb.paper.paths import paper_project_root
 
-PAPER_ROOT = paper_project_root()
+PAPER_ROOT = REPO_ROOT
 
 
 def test_assembled_configs_fix_local_merger_rate() -> None:

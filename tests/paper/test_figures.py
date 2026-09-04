@@ -15,12 +15,12 @@ run against the checkout as committed.
 from __future__ import annotations
 
 import pytest
+from repo import REPO_ROOT
 
 from astrogwb.paper.config.runs import assemble_run, discover_runs, resolve_networks
-from astrogwb.paper.paths import paper_project_root
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS, DETECTOR_NETWORKS
 
-PAPER_ROOT = paper_project_root()
+PAPER_ROOT = REPO_ROOT
 
 # The experiments whose runs the network legend is resolved against. The
 # fiducial-spectrum figure borrows cosmological-parameters' detector lists.

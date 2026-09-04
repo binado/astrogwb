@@ -27,8 +27,6 @@ import corner
 import xarray as xr
 from arviz_base.labels import MapLabeller
 
-from astrogwb.paper.paths import paper_project_root
-
 # %config InlineBackend.figure_format = "retina"
 azp.style.use("arviz-variat")
 
@@ -80,9 +78,7 @@ labeller = MapLabeller(var_name_map=VAR_LABELS)
 # FIDUCIALS["omega_m"] = FIDUCIALS["Omega_m"] * (FIDUCIALS["H0"] / 100.0) ** 2
 
 # Default: sample file produced by `analysis_numpyro.ipynb` when `settings.outdir` / `settings.label` match.
-INFERENCE_DATA_PATH = (
-    paper_project_root() / "chains/mcmc-H0-Omega_m-det=S1,R1-seed42-20260630-013127.nc"
-)
+INFERENCE_DATA_PATH = Path("chains/mcmc-H0-Omega_m-det=S1,R1-seed42-20260630-013127.nc")
 
 # Set to a non-empty list to override automatic detection (e.g. only cosmology parameters).
 VAR_NAMES: list[str] | None = None

@@ -41,7 +41,6 @@ from astrogwb.gwb import spectral_density, spectral_snr_squared
 from astrogwb.paper.catalogs import samples_from_catalog
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
-from astrogwb.paper.paths import paper_project_root, resolve_paper_path
 from astrogwb.paper.plotting import TRUTH, use_paper_style
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb.utils import years_to_seconds
@@ -97,10 +96,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
-    root = paper_project_root()
-    catalog_path = resolve_paper_path(args.catalog, root)
-    output_path = resolve_paper_path(args.output_pdf, root)
-    out_dir = resolve_paper_path(args.chains_dir, root)
+    catalog_path = args.catalog
+    output_path = args.output_pdf
+    out_dir = args.chains_dir
 
     grid = build_run_config(load_merged_config(args)).analysis_grid
     detnames = tuple(args.detectors)

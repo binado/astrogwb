@@ -33,7 +33,6 @@ from astrogwb.paper.config.runs import (
     load_merged_config,
     resolve_networks,
 )
-from astrogwb.paper.paths import paper_project_root, resolve_paper_path
 from astrogwb.paper.plotting import (
     CATEGORY,
     CORNER_LEVELS,
@@ -594,7 +593,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
-    root = paper_project_root()
     config = build_run_config(load_merged_config(args))
     fiducials = {
         **config.fiducials,
@@ -623,7 +621,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     def load_all(paths: Sequence[Path]) -> list[xr.DataTree]:
         loaded: list[xr.DataTree] = []
         for path in paths:
-            tree = load_inference_data(resolve_paper_path(path, root))
+            tree = load_inference_data(path)
             loaded.append(tree)
             opened_data.append(tree)
         return loaded
@@ -655,19 +653,17 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
 
         detector_colors, detector_linestyles = detector_network_styles(networks)
-        outputs[resolve_paper_path(args.output_detector_pdf, root)] = (
-            plot_h0_posteriors(
-                detector_data,
-                detector_labels,
-                colors=detector_colors,
-                linestyles=detector_linestyles,
-                group=args.group,
-                fiducial=fiducials["H0"],
-                legend_kwargs=DETECTOR_COMPARISON_LEGEND,
-            )
+        outputs[args.output_detector_pdf] = plot_h0_posteriors(
+            detector_data,
+            detector_labels,
+            colors=detector_colors,
+            linestyles=detector_linestyles,
+            group=args.group,
+            fiducial=fiducials["H0"],
+            legend_kwargs=DETECTOR_COMPARISON_LEGEND,
         )
         snr_table = compute_network_snrs(
-            resolve_paper_path(args.catalog, root),
+            args.catalog,
             networks,
             fiducials,
             grid=grid,
@@ -682,15 +678,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
         write_constraint_table(
             table,
-            resolve_paper_path(args.output_detector_csv, root),
-            resolve_paper_path(args.output_detector_tex, root),
+            args.output_detector_csv,
+            args.output_detector_tex,
         )
 
         corner_data, corner_labels, _ = select_corner_inference_data(
             prior_data, prior_labels, group=args.group
         )
         colors = combo_colors(len(prior_data))
-        outputs[resolve_paper_path(args.output_prior_pdf, root)] = plot_h0_posteriors(
+        outputs[args.output_prior_pdf] = plot_h0_posteriors(
             prior_data,
             prior_labels,
             colors=colors,
@@ -699,7 +695,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             fiducial=fiducials["H0"],
             legend_kwargs=MERGER_RATE_LEGEND,
         )
-        outputs[resolve_paper_path(args.output_narrow_corner_pdf, root)] = plot_corner(
+        outputs[args.output_narrow_corner_pdf] = plot_corner(
             [corner_data[0]],
             [corner_labels[0]],
             MERGER_RATE_VAR_NAMES,
@@ -711,14 +707,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         table = build_h0_r0_uncertainty_table(
             prior_data, prior_labels, group=args.group
         )
-        csv_path = resolve_paper_path(args.output_merger_rate_csv, root)
-        tex_path = resolve_paper_path(args.output_merger_rate_tex, root)
+        csv_path = args.output_merger_rate_csv
+        tex_path = args.output_merger_rate_tex
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         tex_path.parent.mkdir(parents=True, exist_ok=True)
         table.to_csv(csv_path)
         tex_path.write_text(h0_r0_uncertainty_table_latex(table), encoding="utf-8")
 
-        outputs[resolve_paper_path(args.output_omega_m_corner_pdf, root)] = plot_corner(
+        outputs[args.output_omega_m_corner_pdf] = plot_corner(
             omega_m_data,
             omega_m_labels,
             OMEGA_M_VAR_NAMES,
@@ -726,15 +722,13 @@ def main(argv: Sequence[str] | None = None) -> None:
             group=args.group,
             fiducials=fiducials,
         )
-        outputs[resolve_paper_path(args.output_omega_m_ess_corner_pdf, root)] = (
-            plot_corner(
-                omega_m_data,
-                omega_m_labels,
-                OMEGA_M_ESS_VAR_NAMES,
-                colors=[CATEGORY["cosmology"]],
-                group=args.group,
-                fiducials=fiducials,
-            )
+        outputs[args.output_omega_m_ess_corner_pdf] = plot_corner(
+            omega_m_data,
+            omega_m_labels,
+            OMEGA_M_ESS_VAR_NAMES,
+            colors=[CATEGORY["cosmology"]],
+            group=args.group,
+            fiducials=fiducials,
         )
 
         for output_path, figure in outputs.items():

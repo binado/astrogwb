@@ -2,7 +2,7 @@
 #   snakemake --snakefile Snakefile \
 #     --allowed-rules validate run_mcmc plot_cosmological_parameters \
 #     --profile profiles/slurm plot_cosmological_parameters --dry-run
-# Requires `uv sync --package astrogwb-paper --extra cuda --group slurm`.
+# Requires `uv sync --extra paper --extra cuda --group slurm`.
 # Job logs land under .snakemake/slurm_logs/.
 executor: slurm
 # GPUs are scarce relative to CPU cores; size jobs to the actual batch

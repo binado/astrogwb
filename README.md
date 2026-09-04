@@ -107,5 +107,22 @@ likelihood analytically and reconstructed afterwards, giving a joint
 See `examples/README.md` for the options and for how the catalog serves as its
 own importance-sampling proposal.
 
-The manuscript workflows, configurations, and notebooks live in the separate
-`astrogwb-paper` workspace project in the source repository.
+## The manuscript application
+
+The reproducibility application -- the MCMC runner, bank generation, campaign
+configuration, cluster profiles, and the Snakemake workflow that drives them --
+ships inside this package as `astrogwb.paper`, behind an extra:
+
+```bash
+pip install "astrogwb[paper]"
+```
+
+Installing `astrogwb` alone leaves it inert: the subpackage is present but its
+dependencies are not, which is how the one-way dependency (`astrogwb.paper`
+may import `astrogwb`, never the reverse) is kept honest.
+
+Its committed assets -- `config/`, `scripts/`, `notebooks/`, `profiles/` and
+the `Snakefile` -- live at the root of the source repository and are not part
+of the wheel; the application is meant to be run from a checkout, with the
+repository root as the working directory. See [`docs/`](docs/) for bank
+generation, running inference, the workflow, and the paper figures.

@@ -15,12 +15,12 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from repo import REPO_ROOT
 
 from astrogwb.paper.config.runs import run_config_paths
-from astrogwb.paper.paths import paper_project_root
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
-PAPER_ROOT = paper_project_root()
+PAPER_ROOT = REPO_ROOT
 SNAKEFILE = PAPER_ROOT / "Snakefile"
 #: The run whose layer files the chain-free figure rules declare and pass.
 FIGURE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
