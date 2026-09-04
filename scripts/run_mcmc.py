@@ -74,8 +74,8 @@ from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
-    from astrogwb.paper.amplitude import AmplitudeMarginalization
     from astrogwb.paper.catalogs import CatalogSource
+    from astrogwb.paper.inference import AmplitudeMarginalization
 
 logger = logging.getLogger("run_mcmc")
 
@@ -149,7 +149,7 @@ def run(
     """Replicate the notebook inference cells headlessly and return the MCMC object.
 
     Returns ``(mcmc, marginalization)``, where ``marginalization`` is the
-    :class:`~astrogwb.paper.amplitude.AmplitudeMarginalization` built for an
+    :class:`~astrogwb.paper.inference.AmplitudeMarginalization` built for an
     amplitude-marginalized run, or ``None`` for the default likelihood.
     """
     from numpyro.infer import MCMC, NUTS
