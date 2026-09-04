@@ -28,7 +28,6 @@ from astrogwb.paper.config.runs import (
     resolve_networks,
 )
 from astrogwb.paper.inference import prepare_observation
-from astrogwb.paper.paths import paper_project_root, resolve_paper_path
 from astrogwb.paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
     DETECTOR_NETWORKS,
@@ -203,14 +202,13 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
-    root = paper_project_root()
     config = build_run_config(load_merged_config(args))
     fiducials = dict(config.fiducials)
     grid = config.analysis_grid
     networks = resolve_networks(args.network_runs, DETECTOR_NETWORKS)
     use_paper_style()
 
-    catalog_path = resolve_paper_path(args.catalog, root)
+    catalog_path = args.catalog
     source = CatalogSource(catalog_path, None, config.catalog.injection, "injection")
     observation = prepare_observation(source, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies
@@ -239,12 +237,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         frequency_mask=frequency_mask,
     )
 
-    output_path = resolve_paper_path(args.output_pdf, root)
+    output_path = args.output_pdf
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
     print("saved figure:", output_path)
 
-    effective_psd_output_path = resolve_paper_path(args.output_effective_psd_pdf, root)
+    effective_psd_output_path = args.output_effective_psd_pdf
     effective_psd_output_path.parent.mkdir(parents=True, exist_ok=True)
     effective_psd_figure.savefig(
         effective_psd_output_path, dpi=args.figure_dpi, bbox_inches="tight"

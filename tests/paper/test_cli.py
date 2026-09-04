@@ -6,8 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
-
-from astrogwb.paper.paths import paper_project_root
+from repo import REPO_ROOT
 
 COMMANDS = (
     "astrogwb-generate-bank",
@@ -22,7 +21,7 @@ def test_console_command_help_from_nested_directory(
 ) -> None:
     result = subprocess.run(
         [command, "--help"],
-        cwd=paper_project_root() / "notebooks",
+        cwd=REPO_ROOT / "notebooks",
         check=False,
         capture_output=True,
         text=True,
@@ -63,7 +62,7 @@ assert 'pydantic' not in sys.modules or 'astrogwb.paper.config.mcmc' in sys.modu
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
-        cwd=paper_project_root() / "notebooks",
+        cwd=REPO_ROOT / "notebooks",
         check=False,
         capture_output=True,
         text=True,
@@ -96,7 +95,7 @@ assert jax.device_count() == 2, f"backend initialized early: {jax.devices()}"
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
-        cwd=paper_project_root() / "notebooks",
+        cwd=REPO_ROOT / "notebooks",
         check=False,
         capture_output=True,
         text=True,

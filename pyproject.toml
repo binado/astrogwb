@@ -113,8 +113,6 @@ include = [
     "examples/**/*.py",
     "scripts/**/*.py",
     "notebooks/**/*.py",
-    "packages/astrogwb-paper/scripts/**/*.py",
-    "packages/astrogwb-paper/notebooks/**/*.py",
 ]
 
 [tool.ruff.lint]
@@ -136,9 +134,11 @@ extend-select = ["TID"]
 "src/astrogwb/paper/**/*.py" = ["TID251"]
 "tests/paper/**/*.py" = ["TID251"]
 "scripts/**/*.py" = ["TID251"]
-"notebooks/**/*.py" = ["TID251", "B018", "DTZ005"]
-"packages/astrogwb-paper/scripts/**/*.py" = ["TID251"]
-"packages/astrogwb-paper/notebooks/**/*.py" = ["TID251", "B018", "DTZ005", "E402"]
+# B018: a bare name on a cell's last line is how a notebook renders a value,
+# not a useless expression. DTZ005: run-artifact filenames are stamped with
+# local wall-clock time on purpose, so the author recognizes their own runs.
+# E402: the Colab bootstrap and configure_runtime must precede JAX imports.
+"notebooks/**/*.py" = ["TID251", "B018", "DTZ005", "E402"]
 
 [tool.ty.src]
 # `scripts/` is deliberately absent, matching the coverage the two-package

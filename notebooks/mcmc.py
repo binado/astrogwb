@@ -187,7 +187,6 @@ from astrogwb.paper.catalogs import (
 )
 from astrogwb.paper.config.mcmc import ProposalConfig, build_run_config
 from astrogwb.paper.config.runs import assemble_run
-from astrogwb.paper.paths import paper_project_root
 from astrogwb.sampling.models import spectral_density_model
 
 register_projection(MplAxes)
@@ -206,7 +205,7 @@ if IN_COLAB:
     INJECTION_BANK_PATH = Path("/content/drive/MyDrive/asgwb/md-imrphenom-s41.h5")
     PROPOSAL_BANK_PATH = Path("/content/drive/MyDrive/asgwb/md-imrphenom-s42.h5")
 else:
-    ROOT_DIR = paper_project_root()
+    ROOT_DIR = Path()
     INJECTION_BANK_PATH = ROOT_DIR / "outputs/banks/md-imrphenom-s41.h5"
     PROPOSAL_BANK_PATH = ROOT_DIR / "outputs/banks/md-imrphenom-s42.h5"
 

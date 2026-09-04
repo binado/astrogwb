@@ -37,10 +37,12 @@ test-paper:
         --extra notebook --group test --group workflow \
         pytest tests/paper -m "not integration"
 
-# The end-to-end NUTS runs, slow enough to be their own CI job.
+# The end-to-end NUTS runs, slow enough to be their own CI job. These are the
+# tests that cross-check against gwmock-pop, so they need `simulation` -- which
+# test-core deliberately does not have, since core must work without it.
 test-integration:
     uv run --frozen --isolated --no-default-groups \
-        --extra io --group test \
+        --extra io --extra simulation --group test \
         pytest tests/core -m integration
 
 # Both fast suites.

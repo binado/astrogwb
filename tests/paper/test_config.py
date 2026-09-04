@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from config_fixtures import example_raw
 from pydantic import ValidationError
+from repo import REPO_ROOT
 
 from astrogwb.paper.config.mcmc import build_run_config, prior_to_spec, save_config
 from astrogwb.paper.config.runs import (
@@ -15,10 +16,9 @@ from astrogwb.paper.config.runs import (
     load_base,
     merge_run_overlay,
 )
-from astrogwb.paper.paths import paper_project_root
 from astrogwb.paper.utils import deep_merge, load_mapping
 
-PAPER_ROOT = paper_project_root()
+PAPER_ROOT = REPO_ROOT
 
 
 def test_deep_merge_nested_dicts_and_list_replacement() -> None:

@@ -227,11 +227,18 @@ rule run_mcmc:
             RUNTIME_FLAGS="--cpu-threads {threads}"
             UV_EXTRAS="--extra paper --extra cuda"
         fi
-        # --active --no-sync: with storage-local-copies the cwd is a node-local
-        # staged copy without the uv workspace (astrogwb is a workspace source),
-        # so plain `uv run` ignores VIRTUAL_ENV and fails to re-resolve deps.
-        # The shared-FS venv is already synced (GPU profile requires
-        # --extra cuda), so run directly from it.
+        # --active --no-sync: with storage-local-copies the cwd is a
+        # node-local staged copy holding only this job's declared inputs -- no
+        # pyproject.toml -- so plain `uv run` has no project to resolve and
+        # ignores VIRTUAL_ENV. The shared-FS venv is already synced (the GPU
+        # profile requires --extra cuda), so run directly from it.
+        #
+        # The original reason was narrower and is now gone: astrogwb used to be
+        # a uv *workspace source*, which did not survive staging. With one
+        # non-editable package this may no longer be needed at all -- but that
+        # can only be settled by a real submission, not locally, so it stays
+        # until one is run. UV_EXTRAS is inert under --no-sync; it is kept so
+        # the two branches still say which environment each platform wants.
         $NANNY uv run --active --no-sync $UV_EXTRAS astrogwb-run-mcmc \
             {params.config_flags} --outdir {params.outdir:q} \
             --label {wildcards.run:q} \

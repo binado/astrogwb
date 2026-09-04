@@ -2,28 +2,36 @@
 
 ## Ad-hoc runs
 
-`astrogwb-run-mcmc` accepts an assembled run config plus the bank files its
-catalogs draw from. The project ships no standalone example config; assemble one
-first:
+`astrogwb-run-mcmc` takes a run's config layers plus the bank files its
+catalogs draw from. One `--config` per layer, in merge order -- the same list
+the workflow declares as the rule's `input:` and passes straight back on argv:
 
 ```bash
-uv run astrogwb-assemble-config \
-  --experiment cosmological-parameters \
-  --run ET-2L-aligned-CE-Hanford \
-  --output outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json
-
 uv run astrogwb-run-mcmc \
-  --config outputs/configs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
+  --config config/analysis/base/catalogs.toml \
+  --config config/analysis/base/model.toml \
+  --config config/analysis/base/parameters.toml \
+  --config config/analysis/base/sampling.toml \
+  --config config/analysis/runs/cosmological-parameters/_base.toml \
+  --config config/analysis/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
   --bank md-imrphenom-s41=outputs/banks/md-imrphenom-s41.h5 \
   --bank md-imrphenom-s42=outputs/banks/md-imrphenom-s42.h5
 ```
 
-Repeat `--bank NAME=PATH` once per distinct bank the config's
-`[catalog.injection]` and `[catalog.proposal]` tables name. `--all` assembles
-every run in one process instead.
+Repeat `--bank NAME=PATH` once per distinct bank the merged config's
+`[catalog.injection]` and `[catalog.proposal]` tables name.
 
-Any config under `outputs/configs/<experiment>/<run>.json` works for direct
-runner and profiling work.
+Order is yours to get right: nothing owns it any more, and a wrong-but-valid
+order produces a valid-but-wrong run. The resolved order is logged at INFO
+before the merge and stamped into the chain's `config_layers` attribute, so a
+finished chain says which files produced it.
+
+The stack is open-ended, which is the practical gain over a fixed assembled
+artifact: append one more `--config` to override anything for a single
+invocation -- a shorter chain, a smaller catalog -- without editing a committed
+layer or writing a throwaway config.
+
+`astrogwb-profile-model` takes the same flags.
 
 ## The configuration tree
 
@@ -34,8 +42,8 @@ A run config is three layers merged in order:
 config/analysis/base/*.toml                     settings every run shares
 config/analysis/runs/<experiment>/_base.toml    the experiment override
 config/analysis/runs/<experiment>/<run>.toml    the run override
-  -> outputs/configs/<experiment>/<run>.json
-  -> outputs/chains/<experiment>/<run>.nc
+  -> outputs/chains/<experiment>/<run>.nc       the chain
+  -> outputs/chains/<experiment>/<run>.json     the config it was sampled with
 ```
 
 Filenames are the mapping. There is no inventory file: `discover_runs()` globs
@@ -71,9 +79,13 @@ The six experiments and their 26 runs:
 | `variable-proposal-guard` | `eps1e-1`, `eps1e-2`, and `eps1e-3` |
 | `waveform-approximant` | `IMRPhenom` and `TaylorF2` |
 
-`assemble_config` is one local Snakemake job **per run**, so editing a run's
-TOML retriggers exactly that run's config and chain. Editing a `base/` file
-retriggers all of them, which is correct.
+`run_mcmc` declares a run's three layers as its own inputs, so editing a run's
+TOML retriggers exactly that chain. Editing a `base/` file retriggers all 26,
+which is correct.
+
+`snakemake validate` merges and bank-checks every run without building
+anything. Run it before a campaign: it fails on the first invalid run *before
+any bank is built*, and a bank is a GPU job.
 
 ## Catalogs and the proposal density
 
@@ -90,7 +102,7 @@ The importance-sampling *proposal density* is **not** in the config. It is
 derived at run time from the proposal bank's own provenance attributes (see
 [bank generation](bank-generation.md)), restricted to the run's analysis
 redshift window, and checked against the run's `[fiducials]`. Resolution happens
-at run time rather than assemble time so that `astrogwb-assemble-config` stays
+at run time rather than at config time so that `snakemake validate` stays
 cheap: a config typo fails without any bank having to exist.
 
 The resolved density is stamped into the saved chain's posterior attributes, so
@@ -98,14 +110,14 @@ the `.nc` remains the self-describing record of what was sampled.
 
 ## Curated experiment runs
 
-Run one experiment's chains through Snakemake from `packages/astrogwb-paper/`:
+Run one experiment's chains through Snakemake from the repository root:
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc run_experiment_cosmological_parameters \
+  --allowed-rules validate run_mcmc run_experiment_cosmological_parameters \
   --profile profiles/local --cores 8 run_experiment_cosmological_parameters
 snakemake --snakefile Snakefile \
-  --allowed-rules assemble_config run_mcmc run_experiment_modified_propagation \
+  --allowed-rules validate run_mcmc run_experiment_modified_propagation \
   --profile profiles/slurm run_experiment_modified_propagation
 ```
 
@@ -115,9 +127,11 @@ Build all cosmological chains, figures, and tables with
 ## Outputs
 
 Every labelled run has a deterministic `.nc` path under
-`outputs/chains/<experiment>/`. The assembled config at
-`outputs/configs/<experiment>/<run>.json` is the record of the settings that
-produced it; the run itself writes no provenance sidecar.
+`outputs/chains/<experiment>/`, and `run_mcmc` writes the record of its
+settings beside it as `<run>.json` -- the defaults-filled config, so two runs
+that reach the same settings by different overrides produce identical files.
+The ordered layer paths that produced it go into the chain's `config_layers`
+attribute, which is the one thing a merged config cannot carry.
 
 Ad-hoc unlabelled runs retain the timestamped
 `mcmc-<params>-det=<detectors>-seed<n>-<timestamp>` convention.

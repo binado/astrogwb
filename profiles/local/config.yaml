@@ -14,14 +14,14 @@
 # and let the job level do the work.
 
 # Force JAX onto CPU so run_mcmc does not try to initialize CUDA on a machine
-# with no GPU (overrides the "cuda" default in packages/astrogwb-paper/Snakefile).
+# with no GPU (overrides the "cuda" default in the root Snakefile).
 # Caveat: any CLI ``--config …`` replaces this whole list (Snakemake does not
 # merge), so pass ``jax_platforms=cpu`` alongside any other ``--config`` keys.
 config:
   - jax_platforms=cpu
 
 # Account each run_mcmc job at its core footprint so --cores packs jobs
-# correctly. On CPU, packages/astrogwb-paper/Snakefile passes rule threads as
+# correctly. On CPU, the root Snakefile passes rule threads as
 # --host-device-count (one logical device per concurrent chain, with
 # --cpu-threads pinned to 1) rather than a BLAS/XLA thread cap, so this must
 # be >= the run config's [sampler] num_chains.

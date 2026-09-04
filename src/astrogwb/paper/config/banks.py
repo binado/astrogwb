@@ -41,7 +41,6 @@ from astrogwb.paper.config.mcmc import (
     ProposalConfig,
     RunConfig,
 )
-from astrogwb.paper.paths import paper_project_root
 from astrogwb.paper.utils import load_mapping
 
 if TYPE_CHECKING:
@@ -51,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
+#: Relative to the working directory; see astrogwb.paper.config.runs.
 BANKS_DIR = Path("config/banks")
 POPULATIONS_DIR = Path("config/populations")
 
@@ -99,13 +99,13 @@ class BankGenerationConfig(BaseModel):
 
     def population_path(self, root: Path | None = None) -> Path:
         """Return the population graph this bank is drawn from."""
-        base = root if root is not None else paper_project_root()
+        base = root if root is not None else Path()
         return base / POPULATIONS_DIR / f"{self.population}.yaml"
 
 
 def banks_dir(root: Path | None = None) -> Path:
     """Return the committed bank-config directory."""
-    return (root or paper_project_root()) / BANKS_DIR
+    return (root or Path()) / BANKS_DIR
 
 
 def load_bank_config(path: Path) -> BankGenerationConfig:

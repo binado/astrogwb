@@ -60,7 +60,7 @@ It refuses to overwrite an existing bank unless `--force` is passed.
 Source-frame masses are converted to detector-frame masses by multiplying by
 `1 + z` immediately before waveform generation.
 
-Through the workflow, from `packages/astrogwb-paper/`:
+Through the workflow, from the repository root:
 
 ```bash
 # every bank

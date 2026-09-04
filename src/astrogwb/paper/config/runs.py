@@ -35,7 +35,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrogwb.paper.paths import paper_project_root
 from astrogwb.paper.utils import deep_merge, load_mapping
 
 if TYPE_CHECKING:
@@ -43,6 +42,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Relative to the working directory, which for the workflow and every script
+#: is the repository root. Library code names no absolute path and does not go
+#: looking for a checkout: the caller's cwd is the answer.
 ANALYSIS_DIR = Path("config/analysis")
 BASE_DIR = ANALYSIS_DIR / "base"
 RUNS_DIR = ANALYSIS_DIR / "runs"
@@ -100,7 +102,7 @@ def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
 
     ``_base.toml`` is the experiment override, not a run, so it is excluded.
     """
-    resolved = root or paper_project_root()
+    resolved = root or Path()
     runs_dir = resolved / RUNS_DIR
     experiments = tuple(
         sorted(path.name for path in runs_dir.iterdir() if path.is_dir())
@@ -131,7 +133,7 @@ def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
     Sorted for determinism only: the base files partition disjoint top-level
     keys, so the order does not change the outcome.
     """
-    directory = (root or paper_project_root()) / BASE_DIR
+    directory = (root or Path()) / BASE_DIR
     paths = tuple(sorted(directory.glob("*.toml")))
     if not paths:
         raise ValueError(f"{directory} declares no base config files")
@@ -147,7 +149,7 @@ def run_config_paths(
     and passes them back on argv, so the dependency edges and the data path are
     the same list.
     """
-    resolved = root or paper_project_root()
+    resolved = root or Path()
     directory = resolved / RUNS_DIR / experiment
     run_path = directory / f"{run}.toml"
     if not run_path.is_file():
