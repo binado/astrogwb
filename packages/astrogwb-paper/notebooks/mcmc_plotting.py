@@ -26,7 +26,8 @@ import arviz_plots as azp
 import corner
 import xarray as xr
 from arviz_base.labels import MapLabeller
-from astrogwb_paper.paths import paper_project_root
+
+from astrogwb.paper.paths import paper_project_root
 
 # %config InlineBackend.figure_format = "retina"
 azp.style.use("arviz-variat")

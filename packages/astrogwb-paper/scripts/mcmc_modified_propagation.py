@@ -21,15 +21,19 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from arviz_base.labels import MapLabeller
-from astrogwb_paper.config.mcmc import build_run_config
-from astrogwb_paper.config.runs import (
+from matplotlib.axes import Axes as MplAxes
+from matplotlib.lines import Line2D
+from matplotlib.projections import register_projection
+
+from astrogwb.paper.config.mcmc import build_run_config
+from astrogwb.paper.config.runs import (
     add_config_arguments,
     add_network_run_arguments,
     load_merged_config,
     resolve_networks,
 )
-from astrogwb_paper.paths import paper_project_root, resolve_paper_path
-from astrogwb_paper.plotting import (
+from astrogwb.paper.paths import paper_project_root, resolve_paper_path
+from astrogwb.paper.plotting import (
     CATEGORY,
     CORNER_LEVELS,
     DETECTOR_NETWORKS,
@@ -39,10 +43,7 @@ from astrogwb_paper.plotting import (
     get_corner_kwargs,
     use_paper_style,
 )
-from astrogwb_paper.snr import compute_network_snrs
-from matplotlib.axes import Axes as MplAxes
-from matplotlib.lines import Line2D
-from matplotlib.projections import register_projection
+from astrogwb.paper.snr import compute_network_snrs
 
 # gwpy (via gwmock-signal) replaces matplotlib's rectilinear axes. ArviZ can then
 # mis-detect the backend, so restore the standard matplotlib projection.

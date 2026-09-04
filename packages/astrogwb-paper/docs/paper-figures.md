@@ -5,7 +5,7 @@ presentation -- the ordered run IDs it compares and its LaTeX labels -- is
 hard-coded in the script that draws it. There is no figure config to load:
 changing a legend label is a code change, reviewed alongside the plot it
 labels. The six detector networks compared by more than one figure are the one
-shared piece, and they live in `astrogwb_paper.plotting.DETECTOR_NETWORKS` as
+shared piece, and they live in `astrogwb.paper.plotting.DETECTOR_NETWORKS` as
 ordered `(run name, LaTeX label)` pairs.
 
 Input and output paths are both named literally in
@@ -16,7 +16,7 @@ Shared scientific values -- fiducials, frequency bounds, cosmology grid settings
 figure reports exactly what was sampled.
 
 Detector *lists* are never hard-coded next to a label: the script names its
-experiment, and `astrogwb_paper.config.figures.resolve_networks` reads each
+experiment, and `astrogwb.paper.config.figures.resolve_networks` reads each
 run's detectors out of that run's own assembled config. The detectors a figure
 reports an SNR for are therefore always the ones its chain was sampled with.
 The catalog composition behind the fiducial spectrum comes from the same place,
@@ -27,7 +27,7 @@ chain order and legend order are one list rather than two that have to be kept
 in step:
 
 ```python
-from astrogwb_paper.plotting import DETECTOR_NETWORK_RUNS
+from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
 chains=expand("outputs/chains/cosmological-parameters/{run}.nc",
               run=DETECTOR_NETWORK_RUNS),

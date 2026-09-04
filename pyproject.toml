@@ -1,72 +1,154 @@
 [project]
-name = "astrogwb-workspace"
-version = "0.0.0"
+name = "astrogwb"
+version = "0.1.0"
+description = "Bayesian inference for compact-binary stochastic gravitational-wave backgrounds"
+readme = "README.md"
+authors = [
+    { name = "Bernardo Veronese", email = "bernardopveronese@gmail.com" },
+]
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
-dependencies = ["astrogwb-paper"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+# The publishable core. Everything the paper application needs -- pydantic,
+# arviz, xarray -- is an extra, so `pip install astrogwb` stays lean and the
+# wheel smoke test in CI can prove it.
+dependencies = [
+    "gwmock-noise>=0.10.1",
+    "gwmock-signal[jax]>=0.15.0",
+    "jax>=0.10.2; sys_platform == 'linux'",
+    "jax[cpu]>=0.11.0; sys_platform != 'linux'",
+    "numpy>=2.5.1",
+    "numpyro>=0.21.0",
+]
 
-[tool.uv]
-package = false
-
-[tool.uv.sources]
-astrogwb = { workspace = true }
-astrogwb-paper = { workspace = true }
-
-[tool.uv.workspace]
-members = ["packages/*"]
-
-[dependency-groups]
-# Converts and executes the root notebooks. These depend on core alone --
-# simulation to draw a population, io to round-trip it through HDF5 -- so
-# matplotlib is listed directly rather than arriving via astrogwb-paper.
+[project.optional-dependencies]
+cuda = ["jax[cuda12]>=0.11.0"]
+# xarray drags in pandas, so HDF5 catalog serialization is opt-in and the
+# published wheel stays lean. See astrogwb/catalog/io.py.
+io = ["h5netcdf[h5py]>=1.8.1", "xarray>=2025.1"]
+simulation = ["gwmock-pop>=0.11.4"]
+tpu = ["jax[tpu]>=0.11.0"]
+# The reproducibility application: astrogwb.paper and its console scripts. It
+# is shipped in the wheel but unimportable without this extra, which is the
+# one-way dependency made physical -- see the ruff TID251 ban below for the
+# other half.
+paper = [
+    "astrogwb[io,simulation]",
+    "arviz[h5netcdf]>=1.2.0",
+    "pydantic>=2.11",
+    "pyyaml>=6.0",
+]
+# The analysis stack the notebooks and figure scripts import.
 notebook = [
-    "astrogwb[simulation,io]",
+    "astrogwb[paper]",
+    "arviz-base>=1.2.0",
+    "arviz-plots>=1.2.0",
+    "arviz-stats[xarray]>=1.2.0",
+    "corner @ git+https://github.com/dfm/corner.py@d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4",
+    "jinja2>=3.1",
+    "matplotlib>=3.11.1",
+    "pandas>=2.0",
+    "scipy>=1.10",
+]
+
+[project.scripts]
+astrogwb-run-mcmc = "astrogwb.paper.cli.run_mcmc:main"
+astrogwb-generate-bank = "astrogwb.paper.cli.generate_bank:main"
+astrogwb-profile-model = "astrogwb.paper.cli.profile_model:main"
+
+[project.urls]
+Homepage = "https://github.com/binado/astrogwb"
+Repository = "https://github.com/binado/astrogwb"
+Issues = "https://github.com/binado/astrogwb/issues"
+
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13.0"]
+build-backend = "uv_build"
+
+# Groups are tooling: never imported by shipped code, never part of a wheel.
+[dependency-groups]
+fixture = ["gwmock-pop==0.11.4", "pyyaml>=6.0.3"]
+test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0"]
+workflow = ["snakemake>=9.24.0"]
+# Notebook *execution* tooling, as opposed to the `notebook` extra, which is
+# the library stack the notebooks import.
+jupyter = [
     "ipykernel>=7.3.0",
+    "jupyter>=1.1.1",
     "jupytext>=1.19",
-    "matplotlib>=3.10.0",
-    # jupytext --execute drives the kernel through nbconvert. It used to arrive
-    # transitively via astrogwb-paper's jupyter dependency; declare it here so
-    # the notebook environment does not depend on the paper package at all.
     "nbconvert>=7.16",
 ]
 dev = [
-    "pytest>=9.0.2",
-    "pytest-xdist>=3.8.0",
+    { include-group = "jupyter" },
+    { include-group = "test" },
+    { include-group = "workflow" },
     "ruff>=0.16.1",
     "ty>=0.0.69",
 ]
+slurm = [
+    { include-group = "dev" },
+    "snakemake-executor-plugin-slurm>=1.5",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+# No `default-extras`: ruff's bundled uv schema rejects the key and warns on
+# every lint run. Commands that need the application say so -- `uv run --extra
+# paper ...` -- and a checkout is set up once with
+# `uv sync --extra notebook --group dev`.
 
 [tool.ruff]
 extend-exclude = [".antigravitycli", ".cache", ".claude", ".cursor"]
 include = [
-    "packages/*/src/**/*.py",
-    "packages/*/tests/**/*.py",
-    "packages/astrogwb/examples/**/*.py",
+    "src/**/*.py",
+    "tests/**/*.py",
+    "examples/**/*.py",
+    "scripts/**/*.py",
+    "notebooks/**/*.py",
     "packages/astrogwb-paper/scripts/**/*.py",
     "packages/astrogwb-paper/notebooks/**/*.py",
-    "notebooks/**/*.py",
 ]
+
+[tool.ruff.lint]
+# ruff 0.16's default rule set is already broad (E/F/B/I/UP/S/SIM/TRY/PTH/...);
+# `extend-select` adds to it rather than replacing it, which a bare `select`
+# would do.
+extend-select = ["TID"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# The one-way dependency the two-package split used to enforce structurally.
+# The `paper` extra keeps core installable without the application's
+# dependencies; this catches the other case -- a pure-stdlib helper drifting
+# from astrogwb.paper into core, which no packaging check would ever see.
+"astrogwb.paper".msg = "core must not import the paper application; the dependency runs one way (astrogwb.paper -> astrogwb)"
 
 [tool.ruff.lint.per-file-ignores]
-# Colab bootstrap + configure_runtime must run before JAX-touching imports.
-"packages/astrogwb-paper/notebooks/mcmc.py" = ["E402"]
-# B018: a bare name on a cell's last line is how a notebook renders a value,
-# not a useless expression. DTZ005: run-artifact filenames are stamped with
-# local wall-clock time on purpose, so the author recognizes their own runs.
-"notebooks/**/*.py" = ["B018", "DTZ005"]
-"packages/astrogwb-paper/notebooks/**/*.py" = ["B018", "DTZ005"]
+# The application itself, its tests, and the scripts and notebooks that drive
+# it are the intended importers.
+"src/astrogwb/paper/**/*.py" = ["TID251"]
+"tests/paper/**/*.py" = ["TID251"]
+"scripts/**/*.py" = ["TID251"]
+"notebooks/**/*.py" = ["TID251", "B018", "DTZ005"]
+"packages/astrogwb-paper/scripts/**/*.py" = ["TID251"]
+"packages/astrogwb-paper/notebooks/**/*.py" = ["TID251", "B018", "DTZ005", "E402"]
 
 [tool.ty.src]
-include = [
-    "packages/astrogwb/src",
-    "packages/astrogwb/tests",
-    "packages/astrogwb/examples",
-    "packages/astrogwb-paper/src",
-    "packages/astrogwb-paper/tests",
-]
+# `scripts/` is deliberately absent, matching the coverage the two-package
+# layout had: the fixture generators import gwfast, a heavyweight optional
+# dependency nobody installs to run the test suite. Ruff still lints them.
+include = ["src", "tests", "examples"]
 
 [tool.pytest.ini_options]
 addopts = "-n auto --dist loadscope"
-testpaths = ["packages/astrogwb/tests", "packages/astrogwb-paper/tests"]
+testpaths = ["tests"]
 markers = [
     "integration: tests that call external libraries or services (deselect with -m 'not integration')",
 ]

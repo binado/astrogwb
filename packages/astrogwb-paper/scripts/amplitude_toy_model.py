@@ -30,20 +30,21 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
+from matplotlib.axes import Axes as MplAxes
+from matplotlib.projections import register_projection
+from numpyro.infer import MCMC, NUTS
+
 from astrogwb.catalog.io import open_catalog
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr_squared
+from astrogwb.paper.catalogs import samples_from_catalog
+from astrogwb.paper.config.mcmc import build_run_config
+from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
+from astrogwb.paper.paths import paper_project_root, resolve_paper_path
+from astrogwb.paper.plotting import TRUTH, use_paper_style
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb.utils import years_to_seconds
-from astrogwb_paper.catalogs import samples_from_catalog
-from astrogwb_paper.config.mcmc import build_run_config
-from astrogwb_paper.config.runs import add_config_arguments, load_merged_config
-from astrogwb_paper.paths import paper_project_root, resolve_paper_path
-from astrogwb_paper.plotting import TRUTH, use_paper_style
-from matplotlib.axes import Axes as MplAxes
-from matplotlib.projections import register_projection
-from numpyro.infer import MCMC, NUTS
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
 # mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.

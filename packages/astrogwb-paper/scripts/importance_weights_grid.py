@@ -25,27 +25,28 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
+from matplotlib.axes import Axes as MplAxes
+from matplotlib.figure import Figure
+from matplotlib.projections import register_projection
+
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb_paper.catalogs import (
+from astrogwb.paper.catalogs import (
     CatalogSource,
     compute_proposal_logprob,
     samples_from_catalog,
     truncate_catalog_samples,
 )
-from astrogwb_paper.config.banks import (
+from astrogwb.paper.config.banks import (
     madau_dickinson_proposal,
     read_bank_provenance,
     resolve_proposal,
 )
-from astrogwb_paper.config.mcmc import build_run_config
-from astrogwb_paper.config.runs import add_config_arguments, load_merged_config
-from astrogwb_paper.paths import paper_project_root, resolve_paper_path
-from astrogwb_paper.plotting import TRUTH, use_paper_style
-from matplotlib.axes import Axes as MplAxes
-from matplotlib.figure import Figure
-from matplotlib.projections import register_projection
+from astrogwb.paper.config.mcmc import build_run_config
+from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
+from astrogwb.paper.paths import paper_project_root, resolve_paper_path
+from astrogwb.paper.plotting import TRUTH, use_paper_style
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
 # Restore the standard projection for consistent plotting.

@@ -136,7 +136,7 @@ if DEBUG:
 # %% [markdown]
 # ## Imports and JAX/device configuration
 #
-# `configure_runtime` (`astrogwb_paper/runtime.py`) is the single place allowed
+# `configure_runtime` (`astrogwb.paper/runtime.py`) is the single place allowed
 # to set `XLA_FLAGS`/`JAX_PLATFORMS`/`numpyro.set_host_device_count` and import
 # `jax`; it must run before any other cell imports `jax` or `numpyro`. It
 # resolves `chain_method` from the visible device count: `"parallel"` when
@@ -149,7 +149,7 @@ import json
 from datetime import datetime
 from functools import partial
 
-from astrogwb_paper.runtime import configure_runtime
+from astrogwb.paper.runtime import configure_runtime
 
 jax, chain_method = configure_runtime(num_chains=num_chains, platform=platform)
 
@@ -160,6 +160,14 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
+
+# gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
+# mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
+from matplotlib.axes import Axes as MplAxes
+from matplotlib.projections import register_projection
+from numpyro import handlers
+from numpyro.infer import MCMC, NUTS
+
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import (
@@ -168,8 +176,7 @@ from astrogwb.gwb import (
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb.sampling.models import spectral_density_model
-from astrogwb_paper.catalogs import (
+from astrogwb.paper.catalogs import (
     CatalogSource,
     compute_fiducial_injection_spectrum,
     compute_proposal_logprob,
@@ -178,16 +185,10 @@ from astrogwb_paper.catalogs import (
     truncate_catalog_samples,
     validate_matching_frequency_grids,
 )
-from astrogwb_paper.config.mcmc import ProposalConfig, build_run_config
-from astrogwb_paper.config.runs import assemble_run
-from astrogwb_paper.paths import paper_project_root
-
-# gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
-# mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
-from matplotlib.axes import Axes as MplAxes
-from matplotlib.projections import register_projection
-from numpyro import handlers
-from numpyro.infer import MCMC, NUTS
+from astrogwb.paper.config.mcmc import ProposalConfig, build_run_config
+from astrogwb.paper.config.runs import assemble_run
+from astrogwb.paper.paths import paper_project_root
+from astrogwb.sampling.models import spectral_density_model
 
 register_projection(MplAxes)
 

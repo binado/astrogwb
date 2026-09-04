@@ -10,21 +10,26 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes as MplAxes
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.projections import register_projection
+
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
-from astrogwb_paper.catalogs import CatalogSource
-from astrogwb_paper.config.mcmc import build_run_config
-from astrogwb_paper.config.runs import (
+from astrogwb.paper.catalogs import CatalogSource
+from astrogwb.paper.config.mcmc import build_run_config
+from astrogwb.paper.config.runs import (
     add_config_arguments,
     add_network_run_arguments,
     load_merged_config,
     resolve_networks,
 )
-from astrogwb_paper.inference import prepare_observation
-from astrogwb_paper.paths import paper_project_root, resolve_paper_path
-from astrogwb_paper.plotting import (
+from astrogwb.paper.inference import prepare_observation
+from astrogwb.paper.paths import paper_project_root, resolve_paper_path
+from astrogwb.paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
     DETECTOR_NETWORKS,
     SPECTRUM,
@@ -33,10 +38,6 @@ from astrogwb_paper.plotting import (
     detector_network_styles,
     use_paper_style,
 )
-from matplotlib.axes import Axes as MplAxes
-from matplotlib.figure import Figure
-from matplotlib.lines import Line2D
-from matplotlib.projections import register_projection
 
 # gwpy (via gwmock-signal) replaces matplotlib's rectilinear axes. Restore the
 # standard matplotlib projection for consistent plotting.

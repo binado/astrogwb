@@ -1,6 +1,6 @@
 # Fiducial values every run injects at, and the prior for each. The
 # MD-rate fiducials (H0, Omega_m, gamma, kappa, z_peak) must equal what
-# the proposal bank was generated at; astrogwb_paper.banks.
+# the proposal bank was generated at; astrogwb.paper.banks.
 # check_fiducials_match enforces that against the bank file itself.
 #
 # Every fiducial carries a prior here. RunConfig retains the complete table;
