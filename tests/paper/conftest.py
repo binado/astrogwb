@@ -7,9 +7,8 @@ meaningful at the same precision.
 
 Without this, x64 was enabled as a side effect of whichever test happened to
 call ``configure_runtime`` first, making precision depend on collection order:
-``pytest tests/paper`` passed while ``pytest
-tests/paper/test_amplitude_config.py`` failed on float32
-rounding (``72.99999237`` for a grid node of ``73.0``).
+``pytest tests/paper`` passed while a single numerical test file failed on
+float32 rounding (``72.99999237`` for a grid node of ``73.0``).
 """
 
 from __future__ import annotations

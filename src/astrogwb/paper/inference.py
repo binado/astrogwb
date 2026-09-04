@@ -22,23 +22,24 @@ import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import Any
+from typing import Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import xarray as xr
 from numpyro import handlers
+from numpyro.distributions import Distribution
 
 from astrogwb.detector import effective_psd as compute_effective_psd
 from astrogwb.detector import load_sensitivity_map
 from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    amplitude_H0_fn,
+    amplitude_local_merger_rate_fn,
     make_merger_rate_and_log_weights_fn,
-)
-from astrogwb.paper.amplitude import (
-    AmplitudeMarginalization,
-    build_amplitude_marginalization,
+    merger_rate_H0_fn,
+    merger_rate_local_merger_rate_fn,
 )
 from astrogwb.paper.catalogs import (
     CatalogSource,
@@ -50,6 +51,11 @@ from astrogwb.paper.catalogs import (
     validate_matching_frequency_grids,
 )
 from astrogwb.paper.config.mcmc import AnalysisGrid, ProposalConfig, RunConfig
+from astrogwb.sampling.amplitude import (
+    AmplitudeFn,
+    MergerRateAmplitudeFn,
+    quadrature_grid,
+)
 from astrogwb.sampling.models import (
     amplitude_marginalized_model,
     spectral_density_model,
@@ -100,6 +106,35 @@ class InferenceInputs:
             "observation_time": self.observation_time,
             "df": observation.df,
         }
+
+
+class AmplitudeMarginalization(NamedTuple):
+    """Everything an amplitude-marginalized run needs, built once from a ``RunConfig``.
+
+    App-side plumbing, not a core type: unlike the ``AmplitudeQuadrature`` it
+    replaces, it holds *live* objects -- the prior distribution and the scaling
+    callables -- so there is nothing derived in it that could go stale against
+    the config it came from. The one array, ``grid``, is a quadrature scheme
+    rather than a tabulation of the density.
+    """
+
+    parameter: str
+    """Name of the marginalized parameter, e.g. ``"H0"``."""
+
+    fiducial: float
+    """Reference value defining the template; the amplitude is 1 here."""
+
+    prior: Distribution
+    """Prior on the marginalized parameter; also defines the conditional's support."""
+
+    amplitude_fn: AmplitudeFn
+    """Absolute total scaling :math:`f(\\varphi) = g_R(\\varphi)\\, g_F(\\varphi)`."""
+
+    merger_rate_fn: MergerRateAmplitudeFn
+    """Absolute merger-rate scaling :math:`g_R(\\varphi)`, for the reconstructed rate."""
+
+    grid: jax.Array
+    """Quadrature nodes the marginalization integral is evaluated on."""
 
 
 def prepare_observation(
@@ -272,7 +307,7 @@ def build_model(
     """Build the NumPyro model this config describes.
 
     Returns ``(model, marginalization)``, where ``marginalization`` is the
-    :class:`~astrogwb.paper.amplitude.AmplitudeMarginalization` built for an
+    :class:`~astrogwb.paper.inference.AmplitudeMarginalization` built for an
     amplitude-marginalized run, or ``None`` for the default likelihood.
 
     Depends only on the config and the weights closure -- no catalog array --
@@ -284,18 +319,44 @@ def build_model(
     # omitted because its prior is already integrated into the likelihood.
     priors = dict(config.priors)
     if analysis.likelihood == "amplitude_marginalized":
-        assert analysis.amplitude_parameter is not None
-        priors.pop(analysis.amplitude_parameter)
+        parameter = analysis.amplitude_parameter
+        assert parameter is not None
+        # `build_run_config` guarantees the amplitude's prior lives in `priors`
+        # and its fiducial lives in `fiducials` (see
+        # `RunConfig._resolve_sampled_params`), so the marginalization can be
+        # assembled inline: dispatch on the parameter name, then derive the
+        # quadrature grid from the very prior being integrated.
+        prior = priors.pop(parameter)
+        if parameter == "H0":
+            amplitude_fn, merger_rate_fn = amplitude_H0_fn, merger_rate_H0_fn
+        elif parameter == "local_merger_rate":
+            amplitude_fn, merger_rate_fn = (
+                amplitude_local_merger_rate_fn,
+                merger_rate_local_merger_rate_fn,
+            )
+        else:
+            raise ValueError(f"unsupported amplitude parameter {parameter!r}")
+        marginalization = AmplitudeMarginalization(
+            parameter=parameter,
+            fiducial=float(config.fiducials[parameter]),
+            prior=prior,
+            amplitude_fn=amplitude_fn,
+            merger_rate_fn=merger_rate_fn,
+            grid=quadrature_grid(
+                prior,
+                num_nodes=analysis.amplitude_num_nodes,
+                span_sigma=analysis.amplitude_prior_span_sigma,
+            ),
+        )
         fixed_params = {
             name: value for name, value in config.fixed_params.items() if name in priors
         }
-        marginalization = build_amplitude_marginalization(config)
         model = _fix_model_params(
             partial(
                 amplitude_marginalized_model,
                 average_mode="analytic_inclination",
                 merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-                amplitude_parameter=analysis.amplitude_parameter,
+                amplitude_parameter=parameter,
                 fiducials=config.fiducials,
                 amplitude_fn=marginalization.amplitude_fn,
                 amplitude_prior=marginalization.prior,
