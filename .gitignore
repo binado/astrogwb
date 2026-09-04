@@ -354,14 +354,12 @@ TSWLatexianTemp*
 #*Notes.bib
 .ruff_cache
 __pycache__
-# A bare `config` (a stray local scratch directory) would also swallow the
-# committed paper config tree and the config package, so both are re-included.
-config
-!packages/astrogwb-paper/config/
-!packages/astrogwb-paper/config/**
-!packages/astrogwb-paper/src/astrogwb_paper/config/
-!packages/astrogwb-paper/src/astrogwb_paper/config/**
-packages/astrogwb-paper/src/astrogwb_paper/config/__pycache__/
+# A stray local scratch `config` directory, anchored so it cannot swallow the
+# committed campaign config tree at /config/ or the astrogwb.paper.config
+# package. The unanchored form plus per-path re-includes was the old shape;
+# after the move its exceptions named directories that no longer exist, which
+# silently ignored every config/ file that was not already tracked.
+**/config/scratch/
 .DS_Store
 
 # Scratch venv for the wheel smoke test (just smoke-wheel).
