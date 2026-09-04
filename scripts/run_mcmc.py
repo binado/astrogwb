@@ -68,7 +68,6 @@ from astrogwb.paper.config.mcmc import (
     ProposalConfig,
     RunConfig,
     build_run_config,
-    save_config,
 )
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
@@ -356,11 +355,11 @@ def save(
     idata.to_netcdf(nc_path)
 
     # The record of the run's settings, beside the chain rather than in a
-    # parallel tree linked only by filename convention. `save_config` writes
-    # the defaults-filled RunConfig, so two runs that reach the same settings
+    # parallel tree linked only by filename convention. `save` writes the
+    # defaults-filled RunConfig, so two runs that reach the same settings
     # by different layer overrides produce identical files.
     config_record = nc_path.with_suffix(".json")
-    save_config(config, config_record)
+    config.save(config_record)
     logger.info("Saved %s", config_record)
 
     # Importance-sampling health: relative ESS near 1 means the proposal catalog

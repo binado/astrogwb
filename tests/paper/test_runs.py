@@ -381,7 +381,7 @@ def test_the_guard_run_merges_to_its_declared_settings() -> None:
 
 def test_run_mcmc_writes_its_config_record_beside_the_chain() -> None:
     # The record moved out of `outputs/configs/` and next to the chain when
-    # `assemble_config` went away; `save_config` still writes the
+    # `assemble_config` went away; `RunConfig.save` still writes the
     # defaults-filled RunConfig, so the file stays diff-able.
     config = build_run_config(assemble_run("modified-propagation", "Xi_0"))
 
