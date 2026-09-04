@@ -36,10 +36,10 @@ cuda = ["jax[cuda12]>=0.11.0"]
 io = ["h5netcdf[h5py]>=1.8.1", "xarray>=2025.1"]
 simulation = ["gwmock-pop>=0.11.4"]
 tpu = ["jax[tpu]>=0.11.0"]
-# The reproducibility application: astrogwb.paper and its console scripts. It
-# is shipped in the wheel but unimportable without this extra, which is the
-# one-way dependency made physical -- see the ruff TID251 ban below for the
-# other half.
+# The reproducibility application library: astrogwb.paper. It is shipped in the
+# wheel but unimportable without this extra, which is the one-way dependency
+# made physical -- see the ruff TID251 ban below for the other half. Its
+# checkout-only entry points live under scripts/ and are not installed.
 paper = [
     "astrogwb[io,simulation]",
     "arviz[h5netcdf]>=1.2.0",
@@ -58,11 +58,6 @@ notebook = [
     "pandas>=2.0",
     "scipy>=1.10",
 ]
-
-[project.scripts]
-astrogwb-run-mcmc = "astrogwb.paper.cli.run_mcmc:main"
-astrogwb-generate-bank = "astrogwb.paper.cli.generate_bank:main"
-astrogwb-profile-model = "astrogwb.paper.cli.profile_model:main"
 
 [project.urls]
 Homepage = "https://github.com/binado/astrogwb"
@@ -141,10 +136,17 @@ extend-select = ["TID"]
 "notebooks/**/*.py" = ["TID251", "B018", "DTZ005", "E402"]
 
 [tool.ty.src]
-# `scripts/` is deliberately absent, matching the coverage the two-package
-# layout had: the fixture generators import gwfast, a heavyweight optional
-# dependency nobody installs to run the test suite. Ruff still lints them.
-include = ["src", "tests", "examples"]
+# Most of `scripts/` stays absent because fixture generators can import
+# heavyweight optional dependencies. The three paper entry points are checked
+# explicitly; Ruff continues to cover every script.
+include = [
+    "src",
+    "tests",
+    "examples",
+    "scripts/generate_bank.py",
+    "scripts/run_mcmc.py",
+    "scripts/profile_model.py",
+]
 
 [tool.pytest.ini_options]
 addopts = "-n auto --dist loadscope"

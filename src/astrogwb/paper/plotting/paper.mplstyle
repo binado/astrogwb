@@ -1,4 +1,4 @@
-# Paper-figure matplotlib style for astrogwb-paper.
+# Paper-figure matplotlib style for the astrogwb paper application.
 # Load via: from astrogwb.paper.plotting import use_paper_style; use_paper_style()
 
 text.usetex: True

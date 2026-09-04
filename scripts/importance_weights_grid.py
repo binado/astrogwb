@@ -198,7 +198,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_REDSHIFT_GRID)
     # The proposal density comes from the bank's own provenance, exactly as
-    # astrogwb-run-mcmc resolves it -- so this figure reweights against the
+    # scripts/run_mcmc.py resolves it -- so this figure reweights against the
     # same denominator the chains did.
     provenance = read_bank_provenance(catalog_path)
     proposal = resolve_proposal(

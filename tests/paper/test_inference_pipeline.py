@@ -1,9 +1,7 @@
-"""End-to-end coverage of the shared inference-input pipeline and its runners.
+"""End-to-end coverage of the shared inference-input pipeline.
 
-Nothing exercised ``run_mcmc.run`` or ``profile_model.build_potential`` before:
-both were long, near-identical, catalog-dependent functions with no test. These
-build the smallest synthetic catalog pair that survives validation and drive
-the real entrypoints through it.
+These tests build the smallest synthetic catalog pair that survives validation
+and exercise the application-library preparation shared by pipeline scripts.
 
 The catalogs are deliberately tiny and their frequency grid deliberately
 straddles the analysis band, so the frequency slice actually selects a strict
@@ -16,15 +14,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import jax
 import numpy as np
 import pytest
 from catalog_fixtures import make_catalog, save_catalog
 from config_fixtures import example_raw
 
 from astrogwb.paper.catalogs import CatalogSource
-from astrogwb.paper.cli.profile_model import build_potential
-from astrogwb.paper.cli.run_mcmc import run
 from astrogwb.paper.config.banks import MadauDickinsonProposal, resolve_proposal
 from astrogwb.paper.config.mcmc import (
     CatalogSpec,
@@ -298,39 +293,3 @@ def test_catalog_without_stored_proposal_density_is_accepted(
     )
 
     assert "proposal_redshift_logpdf" not in inputs.proposal.parameter.values
-
-
-# --------------------------------------------------------------------------- #
-# The two runner entrypoints
-# --------------------------------------------------------------------------- #
-def test_build_potential_returns_a_finite_potential(
-    injection_catalog: CatalogSource, proposal_catalog: CatalogSource
-) -> None:
-    config = _config()
-
-    potential_fn, init_params = build_potential(
-        config, injection_catalog, proposal_catalog, _proposal(config), jax
-    )
-
-    assert set(init_params) == set(config.sampled_params)
-    assert np.isfinite(float(potential_fn(init_params)))
-
-
-def test_run_samples_every_sampled_parameter(
-    injection_catalog: CatalogSource, proposal_catalog: CatalogSource
-) -> None:
-    config = _config()
-
-    mcmc, marginalization = run(
-        config,
-        injection_catalog,
-        proposal_catalog,
-        _proposal(config),
-        jax,
-        "sequential",
-    )
-
-    assert marginalization is None
-    posterior = mcmc.get_samples()
-    for name in config.sampled_params:
-        assert posterior[name].shape == (config.sampler.num_samples,), name

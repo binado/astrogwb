@@ -11,7 +11,7 @@ only from a checkout, with the repository root as the working directory:
 
 ```bash
 uv sync --extra notebook --group dev
-uv run astrogwb-run-mcmc --help
+uv run --extra paper python scripts/run_mcmc.py --help
 ```
 
 Run the workflow from the repository root; preview with `--dry-run`, omit it to

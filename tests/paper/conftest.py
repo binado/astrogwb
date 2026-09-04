@@ -7,8 +7,8 @@ meaningful at the same precision.
 
 Without this, x64 was enabled as a side effect of whichever test happened to
 call ``configure_runtime`` first, making precision depend on collection order:
-``pytest packages/astrogwb-paper/tests`` passed while ``pytest
-packages/astrogwb-paper/tests/test_amplitude_config.py`` failed on float32
+``pytest tests/paper`` passed while ``pytest
+tests/paper/test_amplitude_config.py`` failed on float32
 rounding (``72.99999237`` for a grid node of ``73.0``).
 """
 

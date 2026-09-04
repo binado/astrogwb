@@ -317,7 +317,7 @@ def _check_format(attrs: Mapping[Any, Any], *, label: str) -> None:
     if format_name == LEGACY_FORMAT_NAME:
         raise ValueError(
             f"{label}: format_name={LEGACY_FORMAT_NAME!r} is obsolete; regenerate "
-            "this catalog with astrogwb-generate-bank"
+            "this catalog with scripts/generate_bank.py"
         )
     if format_name != FORMAT_NAME:
         raise ValueError(

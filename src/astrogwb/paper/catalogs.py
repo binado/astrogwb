@@ -18,7 +18,15 @@ from astrogwb.gwb import spectral_density
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
 )
-from astrogwb.paper.config.mcmc import CatalogSpec, ProposalConfig
+from astrogwb.paper.config.banks import (
+    BankConfig,
+    UniformRedshiftProposal,
+    check_fiducials_match,
+    madau_dickinson_proposal,
+    read_bank_provenance,
+    resolve_proposal,
+)
+from astrogwb.paper.config.mcmc import CatalogSpec, ProposalConfig, RunConfig
 from astrogwb.waveform import apply_gw_distance_to_power
 
 #: Bank attributes both components of a mixture must agree on. Concatenating
@@ -53,7 +61,7 @@ class CatalogSource:
     ) -> Self:
         """Resolve a spec's bank names against supplied bank file paths.
 
-        Used by the CLI entrypoints, which receive banks as a flat
+        Used by the checkout scripts, which receive banks as a flat
         ``NAME=PATH`` mapping (from repeated ``--bank`` flags) and must match
         them against the bank names a run config's
         :class:`~astrogwb.paper.config.mcmc.CatalogConfig` names for each role.
@@ -124,6 +132,49 @@ class CatalogSource:
         order = jnp.argsort(assignments, stable=True)
         inverse = np.asarray(jnp.argsort(order))
         return combined.isel(sample=inverse)
+
+
+def resolve_run_proposal(
+    config: RunConfig, proposal_source: CatalogSource
+) -> ProposalConfig:
+    """Derive a run's importance-sampling density from its proposal bank.
+
+    This is called before runtime configuration. Reading HDF5 attributes does
+    not initialize the JAX backend, so a fiducial or bank mismatch still fails
+    before a device is claimed. The bank is authoritative because its source
+    population config may have changed since generation.
+    """
+    md_path = proposal_source.md_bank_path
+    md_provenance = read_bank_provenance(md_path)
+    check_fiducials_match(md_provenance, config.fiducials, label=str(md_path))
+    uniform = None
+    if proposal_source.uniform_bank_path is not None:
+        uniform = read_bank_provenance(proposal_source.uniform_bank_path)
+    return resolve_proposal(
+        madau_dickinson_proposal(md_provenance, label=str(md_path)),
+        _uniform_proposal(uniform, proposal_source),
+        uniform_mixing_fraction=proposal_source.spec.uniform_mixing_fraction,
+        minimum_redshift=config.cosmology.minimum_redshift,
+        maximum_redshift=config.cosmology.maximum_redshift,
+    )
+
+
+def _uniform_proposal(
+    provenance: BankConfig | None, proposal_source: CatalogSource
+) -> UniformRedshiftProposal | None:
+    """Narrow the uniform bank's recorded density, or return None."""
+    if provenance is None:
+        return None
+
+    match provenance.redshift_proposal:
+        case UniformRedshiftProposal() as density:
+            return density
+        case other:
+            raise ValueError(
+                f"bank {proposal_source.uniform_bank_path} was drawn from a "
+                f"{other.kind!r} redshift density; the uniform_bank role "
+                "requires a uniform-redshift bank"
+            )
 
 
 def _check_waveform_settings_agree(
