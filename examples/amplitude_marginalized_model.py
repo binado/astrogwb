@@ -59,20 +59,23 @@ import xarray as xr
 from jax.typing import ArrayLike
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 
+from astrogwb.catalog import ImportanceCatalog
+from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.distributions.amplitude import quadrature_grid
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density
-from astrogwb.importance.diagnostics import relative_ess
+from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     amplitude_H0_fn,
+    bns_population,
     compute_merger_rate_distance_and_logprob,
-    make_merger_rate_and_log_weights_fn,
     merger_rate_H0_fn,
 )
 from astrogwb.sampling import (
     amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
+    with_renamed_diagnostics,
 )
 
 logger = logging.getLogger(__name__)
@@ -338,21 +341,6 @@ def main(argv: list[str] | None = None) -> None:
     )
     logger.info("Fiducial injection: total merger rate %.4e /s", total_merger_rate)
 
-    weights_fn = make_merger_rate_and_log_weights_fn(
-        fiducials=FIDUCIALS,
-        redshift_grid=redshift_grid,
-        proposal_logprob=proposal_logprob,
-    )
-
-    def merger_rate_and_log_weights(params, samples):
-        """Sample Omega_m; take every other hyperparameter from the fiducials.
-
-        ``params`` carries the NUTS latents *and* ``H0``, which the marginalized
-        model pins at its fiducial before calling this: what comes back is the
-        template spectrum the amplitude ratio multiplies.
-        """
-        return weights_fn({**FIDUCIALS, **params}, samples)
-
     sensitivities = load_sensitivity_map(args.detectors)
     network_psd = jnp.asarray(effective_psd(frequencies, args.detectors, sensitivities))
     # effective_psd returns inf wherever no detector pair contributes, and
@@ -397,26 +385,40 @@ def main(argv: list[str] | None = None) -> None:
         amplitude_prior, num_nodes=args.amplitude_num_nodes
     )
 
-    def spectrum_fn(
-        params: Mapping[str, ArrayLike],
-    ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
-        rate, log_weights = merger_rate_and_log_weights(params, samples)
-        prediction = spectral_density(
-            polarization_power,
-            jnp.exp(log_weights),
-            rate,
-            average_mode="analytic_inclination",
-        )
-        return prediction, {
-            "template_merger_rate": rate,
-            "importance_relative_ess": relative_ess(log_weights),
-        }
+    # Built after masking: the catalog owns the band-restricted power, while
+    # the source samples keep their full length. This catalog was generated at
+    # the fiducials without a propagation correction applied to its power, so
+    # the effective reference distance is the stored one times the fiducial
+    # GW/EM ratio -- applied here, once.
+    catalog = ImportanceCatalog(
+        source_parameters=samples,
+        polarization_power=polarization_power,
+        proposal_log_prob=proposal_logprob,
+        log_reference_distance=jnp.log(samples["luminosity_distance"])
+        + log_gw_em_ratio(samples["redshift"], FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]),
+    )
 
+    def target_population(params: Mapping[str, ArrayLike]):
+        """Sample Omega_m; take every other hyperparameter from the fiducials.
+
+        ``params`` carries the NUTS latents *and* ``H0``, which the marginalized
+        model pins at its fiducial before calling this: what comes back is the
+        template spectrum the amplitude ratio multiplies.
+        """
+        return bns_population({**FIDUCIALS, **params}, redshift_grid=redshift_grid)
+
+    estimator = SpectralDensityImportanceEstimator(
+        catalog, target_population, "analytic_inclination"
+    )
     scale = gaussian_bin_scale(network_psd, args.observation_time, df)
 
     model = partial(
         gwb_amplitude_marginalized_model,
-        spectral_density_fn=spectrum_fn,
+        # The spectrum is evaluated with H0 pinned, so its rate is the
+        # template's: relabel it rather than publish it as the physical rate.
+        spectral_density_fn=with_renamed_diagnostics(
+            estimator, {"total_merger_rate": "template_merger_rate"}
+        ),
         observed_spectral_density=observed_spectral_density,
         scale=scale,
         amplitude_parameter="H0",

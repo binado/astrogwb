@@ -4,9 +4,9 @@ The generic pieces (:class:`Population`, :class:`PopulationTerms`,
 :func:`importance_log_weights`) are checked on toy distributions. The BNS
 realization is checked against
 :func:`compute_merger_rate_distance_and_logprob`, the hand-written grid-level
-formula, which is what licenses rebuilding the reference callback on top of
-it. The mixture test at the end is the viability check for the paper-layer
-follow-up that will express the MD + uniform proposal natively.
+formula -- kept deliberately as an independent restatement, so the class-based
+path cannot drift without a failure here. The mixture test at the end is the
+viability check for expressing an MD + uniform proposal natively.
 """
 
 from __future__ import annotations
@@ -29,9 +29,7 @@ from astrogwb.distributions.redshift.madau_dickinson import (
 )
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     bns_population,
-    bns_population_terms,
     compute_merger_rate_distance_and_logprob,
-    make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.importance.population import (
     CosmologicalPopulation,
@@ -221,10 +219,7 @@ def test_bns_population_matches_the_reference_formula(
 ) -> None:
     population = bns_population(params, redshift_grid=make_redshift_grid())
     samples = {"redshift": SAMPLE_REDSHIFTS}
-    terms = bns_population_terms(population, samples)
-    new_terms = population.compute_population_terms(samples)
-    for actual, expected in zip(new_terms, terms, strict=True):
-        np.testing.assert_allclose(actual, expected, rtol=1e-14, atol=1e-14)
+    terms = population.compute_population_terms(samples)
     np.testing.assert_allclose(
         population.luminosity_distance(SAMPLE_REDSHIFTS),
         jnp.exp(terms.log_luminosity_distance),
@@ -250,22 +245,6 @@ def test_bns_population_matches_the_reference_formula(
     )
 
 
-def test_bns_population_terms_use_the_given_distance_on_the_proposal_side() -> None:
-    """The stored catalog distance wins over the population's own table."""
-    population = bns_population(FIDUCIALS, redshift_grid=make_redshift_grid())
-    stored = jnp.full(SAMPLE_REDSHIFTS.shape, 1234.5)
-
-    terms = bns_population_terms(
-        population, {"redshift": SAMPLE_REDSHIFTS}, luminosity_distance=stored
-    )
-    expected = jnp.log(stored) + log_gw_em_ratio(
-        SAMPLE_REDSHIFTS, FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]
-    )
-    np.testing.assert_allclose(
-        np.asarray(terms.log_luminosity_distance), np.asarray(expected)
-    )
-
-
 def test_bns_population_rebuilds_the_shared_grid_bit_exactly() -> None:
     population = bns_population(FIDUCIALS, redshift_grid=make_redshift_grid())
     redshift = population.distributions["redshift"]
@@ -276,23 +255,36 @@ def test_bns_population_rebuilds_the_shared_grid_bit_exactly() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Regression: the migrated closure reproduces the explicit formula
+# Regression: the class-based weights reproduce the explicit formula
 # --------------------------------------------------------------------------- #
-def test_closure_matches_the_explicit_formula_off_the_fiducials() -> None:
-    """What licenses rewriting `log_weights` and the closure on the new API."""
+def test_population_weights_match_the_explicit_formula_off_the_fiducials() -> None:
+    """The grid-level formula, restated in full, against the class-based path.
+
+    Written out rather than reusing ``compute_population_terms``: an expected
+    value produced by the code under test proves nothing. The catalog here is
+    its own proposal at ``FIDUCIALS``, so the same expression also pins the
+    exactly-zero fiducial weights the rest of the suite depends on.
+    """
     redshift_grid = make_redshift_grid()
     samples = {"redshift": jnp.linspace(Z_MIN, Z_MAX, 16)}
     _, fiducial_distance, proposal_logprob = compute_merger_rate_distance_and_logprob(
         FIDUCIALS, samples, redshift_grid=redshift_grid
     )
-    samples["luminosity_distance"] = fiducial_distance
-
-    weights_fn = make_merger_rate_and_log_weights_fn(
-        fiducials=FIDUCIALS,
-        redshift_grid=redshift_grid,
-        proposal_logprob=proposal_logprob,
+    log_reference_distance = jnp.log(fiducial_distance) + log_gw_em_ratio(
+        samples["redshift"], FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]
     )
-    total_rate, actual = weights_fn(OFF_FIDUCIALS, samples)
+
+    def weights_at(params: dict[str, float]) -> tuple[jax.Array, jax.Array]:
+        terms = bns_population(
+            params, redshift_grid=redshift_grid
+        ).compute_population_terms(samples)
+        return terms.total_merger_rate, importance_log_weights(
+            terms,
+            proposal_log_prob=proposal_logprob,
+            log_reference_distance=log_reference_distance,
+        )
+
+    total_rate, actual = weights_at(OFF_FIDUCIALS)
 
     expected_rate, target_distance, target_logprob = (
         compute_merger_rate_distance_and_logprob(
@@ -312,7 +304,7 @@ def test_closure_matches_the_explicit_formula_off_the_fiducials() -> None:
     np.testing.assert_allclose(float(total_rate), float(expected_rate), rtol=1e-15)
     # And the premise the whole suite rests on: at the fiducials the catalog
     # is its own proposal and every log-weight is *exactly* zero.
-    _, at_fiducials = weights_fn(FIDUCIALS, samples)
+    _, at_fiducials = weights_at(FIDUCIALS)
     np.testing.assert_array_equal(np.asarray(at_fiducials), 0.0)
     # The point is non-trivial: the weights are far from zero here.
     assert np.max(np.abs(np.asarray(actual))) > 0.1
@@ -321,14 +313,14 @@ def test_closure_matches_the_explicit_formula_off_the_fiducials() -> None:
 # --------------------------------------------------------------------------- #
 # JAX transformations
 # --------------------------------------------------------------------------- #
-def test_bns_population_terms_trace_under_jit() -> None:
+def test_bns_population_compute_terms_traces_under_jit() -> None:
     redshift_grid = make_redshift_grid()
     samples = {"redshift": SAMPLE_REDSHIFTS}
 
     def terms_at(params: dict[str, jax.Array]) -> PopulationTerms:
-        return bns_population_terms(
-            bns_population(params, redshift_grid=redshift_grid), samples
-        )
+        return bns_population(
+            params, redshift_grid=redshift_grid
+        ).compute_population_terms(samples)
 
     traced = {name: jnp.asarray(value) for name, value in OFF_FIDUCIALS.items()}
     eager = terms_at(traced)

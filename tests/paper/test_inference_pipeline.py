@@ -15,8 +15,10 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import jax
 import jax.numpy as jnp
 import numpy as np
+import numpyro.distributions as dist
 import pytest
 import xarray as xr
 from catalog_fixtures import make_catalog, save_catalog
@@ -25,8 +27,9 @@ from numpyro.infer.util import log_density
 
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import gaussian_bin_scale
+from astrogwb.gwb import spectral_density
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    make_merger_rate_and_log_weights_fn,
+    compute_merger_rate_distance_and_logprob,
 )
 from astrogwb.paper.catalogs import (
     compute_proposal_logprob,
@@ -46,7 +49,7 @@ from astrogwb.paper.config.mcmc import (
     build_run_config,
 )
 from astrogwb.paper.inference import prepare_inference_inputs, prepare_observation
-from astrogwb.sampling import gwb_spectral_density_model, spectral_density_model
+from astrogwb.sampling import gwb_spectral_density_model
 
 pytestmark = pytest.mark.integration
 
@@ -352,15 +355,15 @@ def test_catalog_without_stored_proposal_density_is_accepted(
 
 
 # --------------------------------------------------------------------------- #
-# Migration parity: the estimator path against the legacy callback path
+# Migration parity: the prepared estimator against the grid-level formula
 #
-# These are the acceptance tests for the estimator migration, and they can only
-# exist while both paths are present. `propagate_catalog` divides the stored
-# power by xi(z)^2 but leaves `source_parameters["luminosity_distance"]` as the
-# *EM* distance; the legacy callback compensated for that internally, whereas
-# `ImportanceCatalog` wants the effective distance the stored power already
-# corresponds to. Getting that conversion wrong biases every weight by xi^2 --
-# silently, since the weights stay finite and plausible either way.
+# `propagate_catalog` divides the stored power by xi(z)^2 but leaves
+# `source_parameters["luminosity_distance"]` as the *EM* distance, so the
+# distance the stored power actually corresponds to is the effective one.
+# `ImportanceCatalog` takes that directly and never corrects it again, which
+# makes the conversion in `prepare_inference_inputs` load-bearing and silent:
+# getting it wrong biases every weight by xi^2 while leaving them finite and
+# plausible. These tests are what make it loud.
 # --------------------------------------------------------------------------- #
 def _non_gr_config() -> RunConfig:
     """A config whose fiducial propagation is deliberately *not* GR.
@@ -434,15 +437,50 @@ def test_log_reference_distance_is_the_effective_distance_of_the_stored_power(
     assert not np.allclose(expected, np.log(em_distance))
 
 
+def _grid_formula_spectrum(
+    inputs: Any, config: RunConfig, proposal_config: ProposalConfig, params: dict
+) -> jax.Array:
+    """The predicted spectrum, restated from the hand-written grid formula.
+
+    Independent of ``Population``, ``ImportanceCatalog``, and the estimator:
+    every step -- the target density, the effective target distance, the
+    reference distance, the weight ratio, the contraction -- is written out
+    here, so an expectation cannot agree with the pipeline by construction.
+    """
+    observation = inputs.observation
+    mask = np.asarray(observation.frequency_mask)
+    samples = samples_from_catalog(inputs.proposal)
+    power = jnp.asarray(inputs.proposal.isel(frequency=mask).polarization_power.values)
+    redshift = samples["redshift"]
+
+    rate, distance, logprob = compute_merger_rate_distance_and_logprob(
+        params, samples, redshift_grid=observation.redshift_grid
+    )
+    log_target_distance = jnp.log(distance) + log_gw_em_ratio(
+        redshift, params["xi_0"], params["xi_n"]
+    )
+    log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
+        redshift, config.fiducials["xi_0"], config.fiducials["xi_n"]
+    )
+    log_weights = (
+        logprob
+        - compute_proposal_logprob(redshift, proposal_config)
+        - 2.0 * (log_target_distance - log_reference_distance)
+    )
+    return spectral_density(
+        power, jnp.exp(log_weights), rate, average_mode="analytic_inclination"
+    )
+
+
 @pytest.mark.parametrize("mixture", [False, True], ids=["ordinary", "mixture"])
 @pytest.mark.parametrize("offset", [0.0, 0.13], ids=["fiducial", "off-fiducial"])
-def test_estimator_reproduces_the_legacy_model_log_density(
+def test_prepared_estimator_reproduces_the_grid_formula(
     injection_catalog: xr.Dataset,
     proposal_catalog: xr.Dataset,
     mixture: bool,
     offset: float,
 ) -> None:
-    """End-to-end: the same log posterior and the same diagnostics."""
+    """End-to-end: the same spectrum, the same rate, the same log posterior."""
     config = _non_gr_config()
     proposal_config = _mixture_proposal(config) if mixture else _proposal(config)
 
@@ -455,56 +493,36 @@ def test_estimator_reproduces_the_legacy_model_log_density(
         detectors=config.analysis.detectors,
     )
 
-    observation = inputs.observation
-    mask = np.asarray(observation.frequency_mask)
-    samples = samples_from_catalog(inputs.proposal)
-    band = inputs.proposal.isel(frequency=mask)
-    legacy_kwargs: dict[str, Any] = {
-        "polarization_power": jnp.asarray(band.polarization_power.values),
-        "samples": samples,
-        "observed_spectral_density": observation.spectral_density[mask],
-        "effective_psd": inputs.effective_psd[mask],
-        "observation_time": inputs.observation_time,
-        "df": observation.df,
-    }
-    legacy_model = partial(
-        spectral_density_model,
-        average_mode="analytic_inclination",
-        merger_rate_and_log_weights_fn=make_merger_rate_and_log_weights_fn(
-            fiducials=dict(config.fiducials),
-            redshift_grid=observation.redshift_grid,
-            proposal_logprob=compute_proposal_logprob(
-                samples["redshift"], proposal_config
-            ),
-        ),
-        priors=config.priors,
-    )
-    migrated_model = partial(
-        gwb_spectral_density_model,
-        spectral_density_fn=inputs.estimator,
-        priors=config.priors,
-    )
-
     params = {
         name: float(value) * (1.0 + offset)
         for name, value in config.fiducials.items()
         if name in config.priors
     }
-    legacy_density, legacy_trace = log_density(legacy_model, (), legacy_kwargs, params)
-    migrated_density, migrated_trace = log_density(
-        migrated_model, (), inputs.masked_model_kwargs(), params
+    expected = _grid_formula_spectrum(inputs, config, proposal_config, params)
+
+    kwargs = inputs.masked_model_kwargs()
+    value, trace = log_density(
+        partial(
+            gwb_spectral_density_model,
+            spectral_density_fn=inputs.estimator,
+            priors=config.priors,
+        ),
+        (),
+        kwargs,
+        params,
     )
 
     # The target side forms the effective distance linearly and then logs it,
-    # where the legacy path added two logs -- so parity is scientific, not
-    # bitwise. The prior terms are identical and cancel.
+    # where the grid formula adds two logs -- so parity is scientific, not
+    # bitwise.
     np.testing.assert_allclose(
-        float(migrated_density), float(legacy_density), rtol=1e-9
+        np.asarray(trace["spectral_density_obs"]["fn"].base_dist.loc),
+        np.asarray(expected),
+        rtol=1e-9,
     )
-    for site in ("total_merger_rate", "importance_relative_ess"):
-        np.testing.assert_allclose(
-            np.asarray(migrated_trace[site]["value"]),
-            np.asarray(legacy_trace[site]["value"]),
-            rtol=1e-9,
-            err_msg=site,
+    expected_density = jnp.sum(
+        dist.Normal(expected, kwargs["scale"]).log_prob(
+            kwargs["observed_spectral_density"]
         )
+    ) + sum(prior.log_prob(params[name]) for name, prior in config.priors.items())
+    np.testing.assert_allclose(float(value), float(expected_density), rtol=1e-9)

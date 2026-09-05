@@ -1,38 +1,38 @@
-"""Reference importance-weights model: BNS + Madau-Dickinson rate + modified propagation.
+"""Reference population: BNS + Madau-Dickinson rate + modified propagation.
 
 This module packages one concrete realization of the
-:mod:`astrogwb.importance.population` API and, on top of it, the
-:class:`~astrogwb.importance.protocol.MergerRateAndLogWeightsFn` callback the
-NumPyro models consume: a binary-neutron-star population whose merger-rate
-density follows the Madau-Dickinson (2017) shape, evolved on a flat-LambdaCDM
-cosmology, with a phenomenological GW-to-EM luminosity-distance ratio
-(``xi_0``, ``xi_n``) capturing a modified-gravity propagation effect.
+:mod:`astrogwb.importance.population` API: a binary-neutron-star population
+whose merger-rate density follows the Madau-Dickinson (2017) shape, evolved on
+a flat-LambdaCDM cosmology, with a phenomenological GW-to-EM
+luminosity-distance ratio (``xi_0``, ``xi_n``) capturing a modified-gravity
+propagation effect.
 
-It is a *reference implementation* -- the NumPyro model itself accepts any
-callback satisfying the protocol, so callers may substitute their own.
+It is a *reference implementation* --
+:class:`~astrogwb.importance.estimator.SpectralDensityImportanceEstimator`
+accepts any :class:`~astrogwb.importance.population.PopulationFn`, so callers
+may substitute their own.
 
 Two routes express the same redshift density here, and
 ``tests/core/test_distributions.py`` pins them together to rounding:
 
 - :func:`bns_population` builds a
   :class:`~astrogwb.distributions.redshift.madau_dickinson.MadauDickinsonRedshiftDistribution`
-  inside a :class:`~astrogwb.importance.population.Population`, and
-  :func:`bns_population_terms` reduces it to the arrays the weights need. This
-  is what :func:`make_merger_rate_and_log_weights_fn` runs.
+  inside a :class:`~astrogwb.importance.population.Population`. Its
+  :meth:`~astrogwb.importance.population.Population.compute_population_terms`
+  reduces it to the arrays the weights need.
 - :func:`compute_merger_rate_distance_and_logprob` is the grid-level formula
-  written out by hand. It is kept as the reference the distribution class and
-  the closure are both tested against, and the paper application still calls
-  it directly for the fiducial injection spectrum and the proposal density.
+  written out by hand. It is kept as the reference the distribution class is
+  tested against, and the paper application still calls it directly for the
+  fiducial injection spectrum and the proposal density.
 
-Factory contract: :func:`make_merger_rate_and_log_weights_fn` takes a
-``redshift_grid`` array that is captured by the returned closure, so the closure
-never needs to extract static Python scalars from traced values and is safe
-to trace inside ``jax.jit`` during NUTS.
+Factory contract: :func:`bns_population` takes a ``redshift_grid`` array that
+must be concrete rather than traced, so the population it builds is safe to
+construct inside ``jax.jit`` during NUTS. Bind it once with
+``functools.partial``; sampled hyperparameters arrive through ``params``.
 
-The callback accepts a precomputed ``proposal_logprob`` array, so the proposal
-need not equal the target at its fiducial parameters. The GW distance on the
-proposal side is read from the catalog's stored fiducial luminosity distances,
-never recomputed; :mod:`astrogwb.importance.population` explains why.
+The reference distance the stored polarization power corresponds to is cached
+on :class:`~astrogwb.catalog.ImportanceCatalog`, never recomputed from a
+cosmology table; :mod:`astrogwb.importance.population` explains why.
 """
 
 from __future__ import annotations
@@ -57,16 +57,10 @@ from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
 )
-from astrogwb.importance.population import (
-    CosmologicalPopulation,
-    Population,
-    PopulationTerms,
-    importance_log_weights,
-)
-from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
+from astrogwb.importance.population import CosmologicalPopulation
 
 AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
-"""Parameters this callback supports marginalizing analytically."""
+"""Parameters this population supports marginalizing analytically."""
 
 
 # Absolute scalings as module-level ``def``s (not closures over the fiducial)
@@ -130,10 +124,11 @@ def compute_merger_rate_distance_and_logprob(
     for the proposal (at fiducials) and the target (at sampled ``params``), so
     the two densities can never drift apart; the importance weight is a *ratio*
     of them, and a second copy of the formula would bias every weight the
-    moment either copy changed. :func:`log_weights` combines these with the
-    catalog fiducial distances and the GW/EM ratio correction. Construction of
-    a proposal density for a precomputed catalog must call this same function
-    (on the grid the catalog was actually *sampled* from).
+    moment either copy changed.
+    :func:`~astrogwb.importance.population.importance_log_weights` combines
+    these with the reference distance cached on the catalog. Construction of a
+    proposal density for a precomputed catalog must call this same function (on
+    the grid the catalog was actually *sampled* from).
 
     Parameters
     ----------
@@ -231,138 +226,3 @@ def bns_population(
     return ModifiedPropagationPopulation(
         distributions={"redshift": redshift}, params=params
     )
-
-
-def bns_population_terms(
-    population: Population,
-    source_parameters: Mapping[str, ArrayLike],
-    *,
-    luminosity_distance: ArrayLike | None = None,
-) -> PopulationTerms:
-    r"""Reduce a :func:`bns_population` to the arrays the weights need.
-
-    ``luminosity_distance`` selects the side being evaluated. Left ``None``
-    (the target), :math:`d_L` is interpolated from the population's own
-    cosmology table. Given (the proposal), it is the catalog's stored fiducial
-    distance -- the one the waveforms were generated at -- and only the GW/EM
-    ratio at ``population.params`` is applied on top.
-    """
-    redshift_distribution = population.redshift_distribution
-    params = population.params
-    redshift = jnp.asarray(source_parameters["redshift"])
-
-    if luminosity_distance is None:
-        luminosity_distance = redshift_distribution.luminosity_distance(redshift)
-    log_gw_distance = jnp.log(jnp.asarray(luminosity_distance)) + log_gw_em_ratio(
-        redshift, params["xi_0"], params["xi_n"]
-    )
-    return PopulationTerms(
-        log_prob=population.log_prob(source_parameters),
-        log_luminosity_distance=log_gw_distance,
-        total_merger_rate=redshift_distribution.total_merger_rate(
-            params["local_merger_rate"]
-        ),
-    )
-
-
-def _log_reference_distance(
-    samples: Mapping[str, jax.Array],
-    fiducials: Mapping[str, Any],
-) -> jax.Array:
-    """Legacy effective reference distance from stored EM distance and propagation.
-
-    Unlike this compatibility path, ``ImportanceCatalog`` accepts the effective
-    reference distance directly; it must not apply propagation a second time.
-    Keep the log-space operation order for exactly neutral fiducial weights.
-    """
-    return jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
-        samples["redshift"], fiducials["xi_0"], fiducials["xi_n"]
-    )
-
-
-def log_weights(
-    logprob: jax.Array,
-    proposal_logprob: jax.Array,
-    luminosity_distance: jax.Array,
-    parameters: Mapping[str, Any],
-    samples: Mapping[str, jax.Array],
-    fiducials: Mapping[str, Any],
-) -> jax.Array:
-    """Log importance weights from grid-level pieces.
-
-    A thin wrapper over
-    :func:`~astrogwb.importance.population.importance_log_weights`: the
-    target side is ``logprob`` and ``luminosity_distance`` at ``parameters``,
-    the proposal side is ``proposal_logprob`` and the catalog's stored
-    ``samples["luminosity_distance"]`` at ``fiducials``. Kept so callers
-    holding :func:`compute_merger_rate_distance_and_logprob` outputs can form
-    weights without building a population.
-    """
-    redshift = samples["redshift"]
-    target = PopulationTerms(
-        log_prob=logprob,
-        log_luminosity_distance=jnp.log(luminosity_distance)
-        + log_gw_em_ratio(redshift, parameters["xi_0"], parameters["xi_n"]),
-        total_merger_rate=jnp.asarray(jnp.nan),
-    )
-    return importance_log_weights(
-        target,
-        proposal_log_prob=proposal_logprob,
-        log_reference_distance=_log_reference_distance(samples, fiducials),
-    )
-
-
-def make_merger_rate_and_log_weights_fn(
-    *,
-    fiducials: Mapping[str, Any],
-    redshift_grid: jax.Array,
-    proposal_logprob: jax.Array,
-) -> MergerRateAndLogWeightsFn:
-    """Build the merger-rate + importance-log-weights callback.
-
-    The returned closure reweights a fixed proposal catalog to arbitrary
-    sampled hyperparameters. It is JAX-traceable and intended to be passed (pre-built) to
-    :func:`~astrogwb.sampling.models.spectral_density_model`.
-
-    For a fiducial proposal, ``proposal_logprob`` can be precomputed with
-    :func:`compute_merger_rate_distance_and_logprob`::
-
-        _, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-            fiducials, samples, redshift_grid=redshift_grid
-        )
-
-    Parameters
-    ----------
-    fiducials:
-        Fiducial hyperparameters used for the GW/EM ratio correction on the
-        proposal side. Must include ``xi_0`` and ``xi_n``.
-    redshift_grid:
-        Redshift grid used for the cosmology integrals and MD normalization.
-        Captured by the returned closure as a constant array.
-    proposal_logprob:
-        Precomputed proposal redshift log-pdf at the catalog redshifts, shape
-        ``(N,)``. It may describe any proposal with support over the target.
-
-    Returns
-    -------
-    MergerRateAndLogWeightsFn
-        Callable ``(params, samples) -> (total_merger_rate, log_weights)``.
-        ``total_merger_rate`` is in mergers per second; ``log_weights`` has
-        shape ``(N,)``. ``samples`` must include ``redshift`` and
-        ``luminosity_distance`` (fiducial EM distances from the catalog).
-    """
-
-    def merger_rate_and_log_weights_fn(
-        params: Mapping[str, Any],
-        samples: Mapping[str, jax.Array],
-    ) -> tuple[jax.Array, jax.Array]:
-        target = bns_population_terms(
-            bns_population(params, redshift_grid=redshift_grid), samples
-        )
-        return target.total_merger_rate, importance_log_weights(
-            target,
-            proposal_log_prob=proposal_logprob,
-            log_reference_distance=_log_reference_distance(samples, fiducials),
-        )
-
-    return merger_rate_and_log_weights_fn

@@ -34,7 +34,7 @@ def _identity_scaling(marginalized_parameter: jax.Array) -> jax.Array:
 
 
 def _statistics() -> tuple[jax.Array, jax.Array]:
-    """The two amplitude sufficient statistics, as ``amplitude_marginalized_model`` computes them."""
+    """The two amplitude sufficient statistics, as ``gwb_amplitude_marginalized_model`` computes them."""
     template = jnp.asarray(TEMPLATE)
     scale = jnp.asarray(SCALE)
     template_norm = jnp.sum(template**2 / scale**2, axis=-1)
@@ -72,7 +72,7 @@ def _conditional_log_evidence(
     prior: _AmplitudePrior,
     grid: jax.Array,
 ) -> float:
-    """Assemble the evidence the same way ``amplitude_marginalized_model`` does."""
+    """Assemble the evidence the same way ``gwb_amplitude_marginalized_model`` does."""
     amplitude_mle, template_optimal_snr = _statistics()
     conditional = AmplitudeConditional(
         amplitude_mle,

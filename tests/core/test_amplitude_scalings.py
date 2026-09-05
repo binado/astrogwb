@@ -1,30 +1,33 @@
 """Validate the H0^3/H0^2 and local_merger_rate amplitude scalings against the
-real merger-rate + importance-weights callback.
+real population-based spectral estimator.
 
 Every other test in the module trusts the named amplitude / merger-rate
 scaling functions' exponents; this is the one that checks them against
-:func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.make_merger_rate_and_log_weights_fn`
-on a synthetic catalog, rather than against a restatement of the same
+:class:`~astrogwb.importance.estimator.SpectralDensityImportanceEstimator`
+over a synthetic catalog, rather than against a restatement of the same
 formulas. If the cosmology or the importance weights ever change, this test
 -- not a documentation comment -- is what catches a drifted exponent.
 """
 
 from __future__ import annotations
 
+from functools import partial
+
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
-# The `synthetic_weights_callback` fixture builds its catalog at these
+# The `synthetic_importance_catalog` fixture builds its catalog at these
 # fiducials; a second copy here would let the two drift apart silently.
-from astrogwb_mock_population import FIDUCIALS
+from astrogwb_mock_population import FIDUCIALS, make_redshift_grid
 
-from astrogwb.gwb import spectral_density
+from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.importance.models import bns_madau_dickinson_modified_propagation as mod
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     AMPLITUDE_PARAMETERS,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
+    bns_population,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
@@ -38,60 +41,65 @@ _SCALINGS = {
 }
 
 
+_PHI_FACTORS = (0.5, 0.8, 1.3, 2.0)
+
+
+def _estimator(synthetic_importance_catalog, n_samples: int = 16):
+    """The real estimator over a synthetic catalog that is its own proposal.
+
+    ``catalog_inclination`` keeps the contraction a plain weighted mean, so a
+    drifted exponent shows up undivided by the 0.4 analytic factor.
+    """
+    rng = np.random.default_rng(0)
+    catalog, _ = synthetic_importance_catalog(
+        n_samples,
+        polarization_power=jnp.asarray(rng.uniform(0.5, 1.5, size=(5, n_samples))),
+    )
+    return SpectralDensityImportanceEstimator(
+        catalog,
+        partial(bns_population, redshift_grid=make_redshift_grid()),
+        "catalog_inclination",
+    )
+
+
 @pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
-def test_merger_rate_amplitude_matches_the_real_callback(
-    parameter: str, synthetic_weights_callback
+def test_merger_rate_amplitude_matches_the_real_estimator(
+    parameter: str, synthetic_importance_catalog
 ) -> None:
-    fn, samples = synthetic_weights_callback()
+    estimator = _estimator(synthetic_importance_catalog)
     fiducial = FIDUCIALS[parameter]
     _amplitude_fn, merger_rate_fn = _SCALINGS[parameter]
 
-    fiducial_rate, _ = fn(FIDUCIALS, samples)
+    _, fiducial_extras = estimator(FIDUCIALS)
 
-    for phi in [0.5 * fiducial, 0.8 * fiducial, 1.3 * fiducial, 2.0 * fiducial]:
-        params = {**FIDUCIALS, parameter: phi}
-        rate, _ = fn(params, samples)
+    for factor in _PHI_FACTORS:
+        phi = factor * fiducial
+        _, extras = estimator({**FIDUCIALS, parameter: phi})
         # The scalings are absolute, so the physical claim is about the ratio
         # to the fiducial -- exactly what AmplitudeConditional forms.
         ratio = float(merger_rate_fn(jnp.asarray(phi))) / float(
             merger_rate_fn(jnp.asarray(fiducial))
         )
         np.testing.assert_allclose(
-            float(rate), ratio * float(fiducial_rate), rtol=1e-10
+            float(extras["total_merger_rate"]),
+            ratio * float(fiducial_extras["total_merger_rate"]),
+            rtol=1e-10,
         )
 
 
 @pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
 def test_amplitude_factorization_matches_the_real_spectral_density(
-    parameter: str, synthetic_weights_callback
+    parameter: str, synthetic_importance_catalog
 ) -> None:
-    fn, samples = synthetic_weights_callback()
+    estimator = _estimator(synthetic_importance_catalog)
     fiducial = FIDUCIALS[parameter]
     amplitude_fn, _merger_rate_fn = _SCALINGS[parameter]
 
-    rng = np.random.default_rng(0)
-    # Read the catalog size off the callback rather than restating it: the
-    # weights and the power must have the same sample axis.
-    num_sources = samples["redshift"].shape[0]
-    polarization_power = jnp.asarray(rng.uniform(0.5, 1.5, size=(5, num_sources)))
+    fiducial_spectral_density, _ = estimator(FIDUCIALS)
 
-    fiducial_rate, fiducial_log_weights = fn(FIDUCIALS, samples)
-    fiducial_spectral_density = spectral_density(
-        polarization_power,
-        jnp.exp(fiducial_log_weights),
-        fiducial_rate,
-        average_mode="catalog_inclination",
-    )
-
-    for phi in [0.5 * fiducial, 0.8 * fiducial, 1.3 * fiducial, 2.0 * fiducial]:
-        params = {**FIDUCIALS, parameter: phi}
-        rate, log_weights = fn(params, samples)
-        actual_spectral_density = spectral_density(
-            polarization_power,
-            jnp.exp(log_weights),
-            rate,
-            average_mode="catalog_inclination",
-        )
+    for factor in _PHI_FACTORS:
+        phi = factor * fiducial
+        actual_spectral_density, _ = estimator({**FIDUCIALS, parameter: phi})
 
         amplitude = float(amplitude_fn(jnp.asarray(phi))) / float(
             amplitude_fn(jnp.asarray(fiducial))
