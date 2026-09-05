@@ -40,7 +40,7 @@ class InterpolatedDistribution(dist.Distribution):
 
     ``x`` is *not* validated to be strictly increasing, nor ``y`` to be
     nonnegative. Neither is checkable inside a traced ``__init__``, the same
-    situation :class:`~astrogwb.sampling.AmplitudeConditional` documents for
+    situation :class:`~astrogwb.distributions.amplitude.AmplitudeConditional` documents for
     its explicit ``grid=``; the caller owns both invariants.
 
     Parameters
@@ -106,7 +106,7 @@ class InterpolatedDistribution(dist.Distribution):
         and dividing by the endpoint makes ``icdf(1.0) == x[-1]`` true by
         construction.
 
-        Do *not* port :meth:`~astrogwb.sampling.AmplitudeConditional.icdf`'s
+        Do *not* port :meth:`~astrogwb.distributions.amplitude.AmplitudeConditional.icdf`'s
         ``searchsorted``/``take_along_axis`` machinery on top of this. That
         exists because its CDF comes from ``exp(log_integrand - max)``, whose
         tails underflow to exact zeros and leave 0/0 plateaus -- a situation a

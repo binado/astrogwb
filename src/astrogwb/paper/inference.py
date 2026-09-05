@@ -33,6 +33,11 @@ from numpyro.distributions import Distribution
 
 from astrogwb.detector import effective_psd as compute_effective_psd
 from astrogwb.detector import load_sensitivity_map
+from astrogwb.distributions.amplitude import (
+    AmplitudeFn,
+    MergerRateAmplitudeFn,
+    quadrature_grid,
+)
 from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     amplitude_H0_fn,
@@ -50,11 +55,6 @@ from astrogwb.paper.catalogs import (
     validate_matching_frequency_grids,
 )
 from astrogwb.paper.config.mcmc import AnalysisGrid, ProposalConfig, RunConfig
-from astrogwb.sampling.amplitude import (
-    AmplitudeFn,
-    MergerRateAmplitudeFn,
-    quadrature_grid,
-)
 from astrogwb.sampling.models import (
     amplitude_marginalized_model,
     spectral_density_model,

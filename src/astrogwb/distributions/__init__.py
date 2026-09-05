@@ -14,6 +14,8 @@ reference callbacks can share it:
 - :mod:`astrogwb.distributions.interpolated` — table-driven univariate density
 - :mod:`astrogwb.distributions.redshift` — redshift densities from merger-rate
   models
+- :mod:`astrogwb.distributions.amplitude` — conditional posterior of a
+  marginalized amplitude parameter
 """
 
 __all__: list[str] = []

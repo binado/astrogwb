@@ -40,6 +40,7 @@ from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 from astrogwb.catalog import Catalog
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.distributions.amplitude import quadrature_grid
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
@@ -52,7 +53,6 @@ from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.sampling import (
     amplitude_marginalized_model,
     amplitude_reconstruction_model,
-    quadrature_grid,
 )
 from astrogwb.sampling.models import spectral_density_model
 

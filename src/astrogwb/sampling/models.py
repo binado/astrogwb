@@ -6,7 +6,7 @@ direction out of the Gaussian likelihood and runs under NUTS; the
 reconstruction model, :func:`amplitude_reconstruction_model`, is
 *generative-only* and accepts the chain's sufficient statistics as explicit
 batched inputs to
-:class:`~astrogwb.sampling.amplitude.AmplitudeConditional` under
+:class:`~astrogwb.distributions.amplitude.AmplitudeConditional` under
 :class:`~numpyro.infer.Predictive` to recover joint
 :math:`(\varphi, \theta)` posterior draws.
 
@@ -34,11 +34,11 @@ End-to-end sketch (toy data; runnable as-is):
     import xarray as xr
     from numpyro.infer import MCMC, NUTS, Predictive
 
+    from astrogwb.distributions.amplitude import quadrature_grid
     from astrogwb.gwb import spectral_density
     from astrogwb.sampling import (
         amplitude_marginalized_model,
         amplitude_reconstruction_model,
-        quadrature_grid,
     )
 
     # --- One-time setup: the prior and the grid the amplitude direction is
@@ -130,17 +130,17 @@ import numpyro
 import numpyro.distributions as dist
 
 from astrogwb.detector import gaussian_bin_scale
+from astrogwb.distributions.amplitude import (
+    AmplitudeConditional,
+    AmplitudeFn,
+    MergerRateAmplitudeFn,
+)
 from astrogwb.gwb import (
     AverageMode,
     spectral_density,
 )
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
-from astrogwb.sampling.amplitude import (
-    AmplitudeConditional,
-    AmplitudeFn,
-    MergerRateAmplitudeFn,
-)
 
 
 def spectral_density_model(
@@ -266,11 +266,11 @@ def amplitude_marginalized_model(
     its own prior ``amplitude_prior``, for an arbitrary scaling
     :math:`f(\varphi)` to the multiplicative amplitude, with the integral
     evaluated by trapezoid quadrature on ``amplitude_grid``. What
-    :meth:`~astrogwb.sampling.amplitude.AmplitudeConditional.sample` returns in
+    :meth:`~astrogwb.distributions.amplitude.AmplitudeConditional.sample` returns in
     post-processing is :math:`\varphi` itself (e.g. :math:`H_0`), not the
     amplitude. The only error is quadrature error, so grid resolution should be
     checked with
-    :attr:`~astrogwb.sampling.amplitude.AmplitudeConditional.effective_nodes`.
+    :attr:`~astrogwb.distributions.amplitude.AmplitudeConditional.effective_nodes`.
 
     The callback is invoked with ``amplitude_parameter`` pinned to
     ``fiducials[amplitude_parameter]``, so the predicted spectrum it returns is
@@ -326,12 +326,12 @@ def amplitude_marginalized_model(
         The absolute scaling :math:`f(\varphi) = g_R(\varphi) g_F(\varphi)`;
         the model anchors it at ``fiducials[amplitude_parameter]`` itself. Must
         be hashable by value -- see
-        :class:`~astrogwb.sampling.amplitude.AmplitudeFn`.
+        :class:`~astrogwb.distributions.amplitude.AmplitudeFn`.
     amplitude_prior:
         Prior :math:`\pi(\varphi)` on the marginalized parameter.
     amplitude_grid:
         Quadrature nodes for the marginalization integral. Defaults to
-        :func:`~astrogwb.sampling.amplitude.quadrature_grid` of
+        :func:`~astrogwb.distributions.amplitude.quadrature_grid` of
         ``amplitude_prior``.
 
     Other parameters are as in :func:`spectral_density_model`.
@@ -427,7 +427,7 @@ def amplitude_reconstruction_model(
     statistics published by :func:`amplitude_marginalized_model`; see this
     module's docstring for the end-to-end sketch. The statistics' broadcast
     shape is the batch shape of
-    :class:`~astrogwb.sampling.amplitude.AmplitudeConditional`, so a
+    :class:`~astrogwb.distributions.amplitude.AmplitudeConditional`, so a
     ``(chain, draw)`` input batch yields one independent marginalized-parameter
     draw for every chain element. There is no forward physics here -- no
     catalog, no :math:`(F, N)` contraction -- so the cost is ``O(K)`` per draw
@@ -436,7 +436,7 @@ def amplitude_reconstruction_model(
     Registered sites:
 
     - ``amplitude_parameter`` as a ``sample`` site from
-      :class:`~astrogwb.sampling.amplitude.AmplitudeConditional`;
+      :class:`~astrogwb.distributions.amplitude.AmplitudeConditional`;
     - ``total_merger_rate`` and ``quadrature_effective_nodes`` as
       deterministics, the same names and definitions the reconstruction has
       always published.
