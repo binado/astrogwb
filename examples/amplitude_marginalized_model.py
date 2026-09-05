@@ -58,6 +58,7 @@ import xarray as xr
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 
 from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.distributions.amplitude import quadrature_grid
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
@@ -69,7 +70,6 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb.sampling import (
     amplitude_marginalized_model,
     amplitude_reconstruction_model,
-    quadrature_grid,
 )
 
 logger = logging.getLogger(__name__)

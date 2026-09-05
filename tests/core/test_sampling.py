@@ -15,9 +15,9 @@ from numpyro.infer.util import log_density
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import gaussian_bin_scale
+from astrogwb.distributions.amplitude import AmplitudeConditional
 from astrogwb.gwb import spectral_density
 from astrogwb.sampling import (
-    AmplitudeConditional,
     amplitude_marginalized_model,
     amplitude_reconstruction_model,
     spectral_density_model,

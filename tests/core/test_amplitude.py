@@ -14,7 +14,10 @@ import numpy as np
 import numpyro.distributions as dist
 import pytest
 
-from astrogwb.sampling import AmplitudeConditional, quadrature_grid
+from astrogwb.distributions.amplitude import (
+    AmplitudeConditional,
+    quadrature_grid,
+)
 
 type _AmplitudePrior = dist.Normal | dist.Uniform
 
@@ -51,7 +54,7 @@ def _uniform_conditional(
     ``_identity_scaling`` anchored at ``fiducial=1.0`` gives
     ``A(phi) = phi / 1.0 = phi``, which is what every brute-force reference in
     this module assumes. The grid is left to default, so this also exercises
-    :func:`~astrogwb.sampling.amplitude.quadrature_grid` clipping a
+    :func:`~astrogwb.distributions.amplitude.quadrature_grid` clipping a
     ten-standard-deviation span down to the uniform bounds.
     """
     amplitude_mle, template_optimal_snr = _statistics()

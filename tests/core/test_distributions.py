@@ -1,0 +1,449 @@
+"""Tests for the NumPyro-native population distributions.
+
+The physics is checked against
+:func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.compute_merger_rate_distance_and_logprob`,
+which is the reference implementation of the same redshift density. The rest
+of the module is about JAX plumbing: these classes are auto-registered as
+pytrees, and a wrong ``pytree_data_fields`` is invisible to ``ruff``, to ``ty``
+and to any test that builds the distribution *inside* a model function.
+"""
+
+from __future__ import annotations
+
+from typing import cast
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+import pytest
+
+# The mock population's fiducials and grid, shared with `test_importance.py`:
+# the two tolerance-tight agreement tests below are only licensed because both
+# implementations run on the *same* grid, so a second copy of these would let
+# them drift apart with no visible symptom.
+from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN, make_redshift_grid
+from numpyro.distributions.transforms import biject_to
+
+from astrogwb.distributions.interpolated import InterpolatedDistribution
+from astrogwb.distributions.rates import madau_dickinson_rate
+from astrogwb.distributions.redshift.base import RedshiftDistribution
+from astrogwb.distributions.redshift.madau_dickinson import (
+    MadauDickinsonRedshiftDistribution,
+)
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    compute_merger_rate_distance_and_logprob,
+)
+from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    madau_dickinson_rate as reference_madau_dickinson_rate,
+)
+
+#: Redshifts to evaluate at: interior to the grid, and not on a node.
+SAMPLE_REDSHIFTS = jnp.array([0.5, 1.234, 3.7, 12.0, 19.5])
+
+
+def _distribution(**overrides: float) -> MadauDickinsonRedshiftDistribution:
+    """The Madau-Dickinson specimen at the mock fiducials, on the mock grid."""
+    return MadauDickinsonRedshiftDistribution(
+        params={**FIDUCIALS, **overrides},
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_GRID,
+    )
+
+
+def _reference(**overrides: float) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """``(total_merger_rate, luminosity_distance, logpdf)`` from the reference model."""
+    return compute_merger_rate_distance_and_logprob(
+        {**FIDUCIALS, **overrides},
+        {"redshift": SAMPLE_REDSHIFTS},
+        redshift_grid=make_redshift_grid(),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# InterpolatedDistribution
+# --------------------------------------------------------------------------- #
+def test_interpolated_support_is_the_table_span() -> None:
+    x = jnp.linspace(-2.0, 5.0, 64)
+    interpolated = InterpolatedDistribution(x, jnp.exp(-(x**2)))
+
+    assert float(interpolated.support.lower_bound) == -2.0
+    assert float(interpolated.support.upper_bound) == 5.0
+
+
+def test_interpolated_normalizes_an_unnormalized_table() -> None:
+    """`norm` is the trapezoid integral, and dividing by it is the whole density."""
+    x = jnp.linspace(0.0, 1.0, 129)
+    interpolated = InterpolatedDistribution(x, 7.5 * (1.0 + x))
+
+    np.testing.assert_allclose(float(interpolated.norm), 7.5 * 1.5, rtol=1e-12)
+    density = np.exp(np.asarray(interpolated.log_prob(x)))
+    np.testing.assert_allclose(
+        float(np.trapezoid(density, np.asarray(x))), 1.0, rtol=1e-12
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The Madau-Dickinson density against the reference model
+# --------------------------------------------------------------------------- #
+def test_grid_is_bit_identical_to_the_shared_redshift_grid() -> None:
+    """What licenses the two tolerance-tight agreement tests below."""
+    np.testing.assert_array_equal(
+        np.asarray(_distribution().x), np.asarray(make_redshift_grid())
+    )
+
+
+def test_log_prob_agrees_with_the_reference_model() -> None:
+    # Not tighter than 1e-13: the reference forms `log(u) - log(Z)` while the
+    # class forms `log(u/Z)`, which round differently. Measured max relative
+    # difference is 2.5e-15.
+    _, _, reference_logpdf = _reference()
+    np.testing.assert_allclose(
+        np.asarray(_distribution().log_prob(SAMPLE_REDSHIFTS)),
+        np.asarray(reference_logpdf),
+        rtol=1e-13,
+    )
+
+
+def test_log_prob_agrees_with_the_reference_model_off_the_fiducials() -> None:
+    """The agreement is in the formula, not in a coincidence at one parameter point."""
+    overrides = {"gamma": 2.7, "kappa": 2.9, "z_peak": 1.9, "H0": 74.0, "Omega_m": 0.27}
+    _, _, reference_logpdf = _reference(**overrides)
+    np.testing.assert_allclose(
+        np.asarray(_distribution(**overrides).log_prob(SAMPLE_REDSHIFTS)),
+        np.asarray(reference_logpdf),
+        rtol=1e-13,
+    )
+
+
+def test_total_merger_rate_is_in_mergers_per_second() -> None:
+    """The `1e-9 / SECONDS_PER_YEAR` conversion, bit-identical given the factor order."""
+    reference_rate, _, _ = _reference()
+    np.testing.assert_allclose(
+        float(_distribution().total_merger_rate(FIDUCIALS["local_merger_rate"])),
+        float(reference_rate),
+        rtol=1e-15,
+    )
+
+
+def test_luminosity_distance_matches_the_reference_model() -> None:
+    _, reference_distance, _ = _reference()
+    np.testing.assert_allclose(
+        np.asarray(_distribution().luminosity_distance(SAMPLE_REDSHIFTS)),
+        np.asarray(reference_distance),
+        rtol=1e-15,
+    )
+
+
+def test_rate_shape_has_one_shared_implementation() -> None:
+    """Two densities, one rate shape: the distribution and the reference callback
+    read `madau_dickinson_rate` from the same module, so it cannot drift."""
+    assert reference_madau_dickinson_rate is madau_dickinson_rate
+
+
+def test_source_frame_distribution_is_the_rate_shape() -> None:
+    distribution = _distribution()
+    np.testing.assert_array_equal(
+        np.asarray(distribution.source_frame_distribution(SAMPLE_REDSHIFTS, FIDUCIALS)),
+        np.asarray(
+            madau_dickinson_rate(
+                SAMPLE_REDSHIFTS,
+                FIDUCIALS["gamma"],
+                FIDUCIALS["kappa"],
+                FIDUCIALS["z_peak"],
+            )
+        ),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Normalization, CDF and sampling
+# --------------------------------------------------------------------------- #
+def test_density_integrates_to_unity_on_its_own_grid() -> None:
+    """Interpolating the *normalized* table makes the interpolant's own integral
+    exactly the normalization."""
+    distribution = _distribution()
+    grid = np.asarray(distribution.x)
+    density = np.exp(np.asarray(distribution.log_prob(distribution.x)))
+    np.testing.assert_allclose(float(np.trapezoid(density, grid)), 1.0, rtol=1e-12)
+
+
+def test_log_prob_is_negative_infinity_off_the_table() -> None:
+    """The `left=0.0, right=0.0` contract: no extrapolation, and no exception --
+    the importance weights depend on `-inf`."""
+    outside = jnp.array([Z_MIN - 0.1, Z_MAX + 0.1])
+    assert bool(jnp.all(jnp.isneginf(_distribution().log_prob(outside))))
+
+
+def test_cdf_grid_spans_zero_to_one_exactly() -> None:
+    """The renormalizing divide: `cumsum`-order and `sum`-order reductions do not
+    agree to the last bit, so the endpoint is made exact by construction."""
+    cdf_grid = _distribution().cdf_grid
+    assert float(cdf_grid[0]) == 0.0
+    assert float(cdf_grid[-1]) == 1.0
+    assert bool(jnp.all(jnp.diff(cdf_grid) > 0.0))
+
+
+def test_icdf_inverts_the_tabulated_cdf() -> None:
+    distribution = _distribution()
+    np.testing.assert_allclose(
+        np.asarray(distribution.icdf(distribution.cdf_grid)),
+        np.asarray(distribution.x),
+        rtol=1e-12,
+    )
+
+
+def test_icdf_endpoints_return_the_table_edges() -> None:
+    distribution = _distribution()
+    assert float(distribution.icdf(jnp.array(0.0))) == float(distribution.x[0])
+    assert float(distribution.icdf(jnp.array(1.0))) == float(distribution.x[-1])
+
+
+def test_sample_is_the_inverse_cdf_of_uniform_draws() -> None:
+    """The sampler contract, pinned exactly -- no statistical tolerance at all."""
+    distribution = _distribution()
+    key = jax.random.PRNGKey(0)
+
+    np.testing.assert_array_equal(
+        np.asarray(distribution.sample(key, (1024,))),
+        np.asarray(distribution.icdf(jax.random.uniform(key, (1024,)))),
+    )
+
+
+def test_sample_mean_matches_the_density_it_reports() -> None:
+    """Inverse-transform draws must follow the density `log_prob` publishes."""
+    distribution = _distribution()
+    grid = np.asarray(distribution.x)
+    density = np.exp(np.asarray(distribution.log_prob(distribution.x)))
+    expected = float(np.trapezoid(grid * density, grid))
+
+    draws = np.asarray(distribution.sample(jax.random.PRNGKey(0), (400_000,)))
+
+    # A fixed `rtol` would be unsound here: the Monte Carlo standard error alone
+    # is ~0.09% of the mean, so `rtol=2e-3` is a 2.3-sigma assertion -- a coin
+    # flip against any change to the grid, the sampler, or the fiducials. Five
+    # standard errors *of these draws* is the honest band, and it scales with
+    # the sample size instead of silently going stale.
+    standard_error = float(draws.std(ddof=1)) / np.sqrt(draws.size)
+    assert abs(float(draws.mean()) - expected) < 5.0 * standard_error
+
+
+def test_support_bijector_round_trips() -> None:
+    """`support` used to be `None`, which fails inside NUTS with
+    `'NoneType' object has no attribute 'is_discrete'`."""
+    transform = biject_to(_distribution().support)
+    unconstrained = jnp.array(0.37)
+    constrained = transform(unconstrained)
+
+    assert Z_MIN < float(constrained) < Z_MAX
+    np.testing.assert_allclose(
+        float(transform.inv(constrained)), float(unconstrained), rtol=1e-10
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The distributions as pytrees
+# --------------------------------------------------------------------------- #
+
+#: The only field that changes when `gamma` moves: the cosmology grids depend on
+#: `H0`/`Omega_m` alone, and `x` is fixed by the window.
+_MAPPED_FIELDS = ("y",)
+
+
+def _stack_over_y(
+    distributions: list[MadauDickinsonRedshiftDistribution],
+) -> MadauDickinsonRedshiftDistribution:
+    """Hand-stack a batch of specimens along `y`, leaving every other leaf shared."""
+    cls = MadauDickinsonRedshiftDistribution
+    fields = cls.gather_pytree_data_fields()
+    children, aux = cls.tree_flatten(distributions[0])
+    stacked = tuple(
+        jnp.stack([cls.tree_flatten(d)[0][index] for d in distributions])
+        if field in _MAPPED_FIELDS
+        else child
+        for index, (field, child) in enumerate(zip(fields, children, strict=True))
+    )
+    # `Distribution.tree_unflatten` is annotated as returning the base class,
+    # but it constructs `cls`; that is what the round-trip test below pins.
+    return cast("MadauDickinsonRedshiftDistribution", cls.tree_unflatten(aux, stacked))
+
+
+def test_distribution_survives_jit_as_a_pytree_argument() -> None:
+    """Without `pytree_data_fields` every array is dropped on flatten and this
+    raises `AttributeError: ... has no attribute 'x'`."""
+    distribution = _distribution()
+    jitted = jax.jit(lambda d, z: d.log_prob(z))(distribution, SAMPLE_REDSHIFTS)
+    np.testing.assert_allclose(
+        np.asarray(jitted),
+        np.asarray(distribution.log_prob(SAMPLE_REDSHIFTS)),
+        rtol=1e-15,
+    )
+
+
+def test_distribution_vmaps_over_a_hand_stacked_pytree() -> None:
+    """Vary `gamma`, never `H0`: the normalized pdf is H0-independent, so a vmap
+    over `H0` returns byte-identical rows and would pass with the pytree broken."""
+    gammas = (1.0, 2.0, 3.0)
+    distributions = [_distribution(gamma=gamma) for gamma in gammas]
+    stacked = _stack_over_y(distributions)
+
+    cls = MadauDickinsonRedshiftDistribution
+    fields = cls.gather_pytree_data_fields()
+    aux = cls.tree_flatten(distributions[0])[1]
+    # The gathered field order is a set iteration order, so build the specimen
+    # by field name rather than positionally.
+    in_axes = cls.tree_unflatten(
+        aux, tuple(0 if field in _MAPPED_FIELDS else None for field in fields)
+    )
+
+    mapped = jax.vmap(lambda d: d.log_prob(SAMPLE_REDSHIFTS), in_axes=(in_axes,))(
+        stacked
+    )
+    assert mapped.shape == (len(gammas), SAMPLE_REDSHIFTS.shape[0])
+
+    for row, distribution in zip(mapped, distributions, strict=True):
+        np.testing.assert_allclose(
+            np.asarray(row),
+            np.asarray(distribution.log_prob(SAMPLE_REDSHIFTS)),
+            rtol=1e-15,
+        )
+    # Three *distinct* rows: identical rows would pass with the pytree broken.
+    assert not np.allclose(np.asarray(mapped[0]), np.asarray(mapped[1]))
+    assert not np.allclose(np.asarray(mapped[1]), np.asarray(mapped[2]))
+
+
+def test_distribution_vmaps_over_the_constructor() -> None:
+    gammas = jnp.array([1.0, 2.0, 3.0])
+    mapped = jax.vmap(
+        lambda gamma: _distribution(gamma=gamma).log_prob(SAMPLE_REDSHIFTS)
+    )(gammas)
+
+    for row, gamma in zip(mapped, gammas, strict=True):
+        np.testing.assert_allclose(
+            np.asarray(row),
+            np.asarray(_distribution(gamma=float(gamma)).log_prob(SAMPLE_REDSHIFTS)),
+            rtol=1e-15,
+        )
+
+
+def test_lazy_fields_are_not_pytree_leaves() -> None:
+    """A lazily-materialized field listed as pytree data flattens to `None` before
+    first access and to an array afterwards, so the treedef would change under
+    the object and every `jax.jit` taking it would retrace."""
+    distribution = _distribution()
+    jitted = jax.jit(lambda d: d.log_prob(SAMPLE_REDSHIFTS))
+
+    assert len(jax.tree.leaves(distribution)) == 4
+    jitted(distribution)
+    assert jitted._cache_size() == 1  # ty: ignore[unresolved-attribute]
+
+    # Force every lazy_property to materialize onto the instance.
+    _ = distribution.norm, distribution.normalized_y, distribution.cdf_grid
+
+    assert len(jax.tree.leaves(distribution)) == 4
+    jitted(distribution)
+    assert jitted._cache_size() == 1  # ty: ignore[unresolved-attribute]
+
+
+def test_aux_data_is_hashable_and_stable() -> None:
+    """Aux data is hashed into the jit cache key, so it must not carry arrays."""
+    distribution = _distribution()
+    cls = MadauDickinsonRedshiftDistribution
+    aux = cls.tree_flatten(distribution)[1]
+
+    assert hash(aux) == hash(cls.tree_flatten(distribution)[1])
+
+
+def test_concrete_subclasses_are_still_registered_as_pytrees() -> None:
+    """The merged metaclass must not shadow `Distribution.__init_subclass__`,
+    which is what registers each concrete subclass as a pytree node."""
+    distribution = _distribution()
+    round_tripped = jax.tree.unflatten(
+        jax.tree.structure(distribution), jax.tree.leaves(distribution)
+    )
+
+    assert type(round_tripped) is MadauDickinsonRedshiftDistribution
+    np.testing.assert_array_equal(
+        np.asarray(round_tripped.log_prob(SAMPLE_REDSHIFTS)),
+        np.asarray(distribution.log_prob(SAMPLE_REDSHIFTS)),
+    )
+
+
+def test_validate_args_constructs_and_round_trips() -> None:
+    """Forwarding works. The flag is otherwise inert here -- no `arg_constraints`
+    and no `@validate_sample` -- and is accepted for API uniformity."""
+    validated = MadauDickinsonRedshiftDistribution(
+        params=FIDUCIALS,
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_GRID,
+        validate_args=True,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(jax.jit(lambda d: d.log_prob(SAMPLE_REDSHIFTS))(validated)),
+        np.asarray(_distribution().log_prob(SAMPLE_REDSHIFTS)),
+        rtol=1e-15,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Window accessors, derived rather than stored
+# --------------------------------------------------------------------------- #
+def test_redshift_grid_aliases_x_rather_than_copying_it() -> None:
+    """One array, one leaf: a second attribute would be a second pytree leaf."""
+    distribution = _distribution()
+    assert distribution.redshift_grid is distribution.x
+
+
+def test_window_is_read_back_off_the_grid() -> None:
+    """The deleted `pytree_aux_fields` named three attributes `__init__` never
+    assigned, so they flattened to `(None, None, None)`."""
+    distribution = _distribution()
+
+    assert float(distribution.minimum_redshift) == Z_MIN
+    assert float(distribution.maximum_redshift) == Z_MAX
+    assert distribution.n_grid == N_GRID
+    assert isinstance(distribution.n_grid, int)
+
+
+# --------------------------------------------------------------------------- #
+# Abstractness under the merged metaclass
+# --------------------------------------------------------------------------- #
+def test_redshift_distribution_cannot_be_instantiated() -> None:
+    """`ABCMeta` enforcement survived being merged with `DistributionMeta`."""
+    with pytest.raises(TypeError, match="abstract"):
+        RedshiftDistribution(params=FIDUCIALS)
+
+
+# --------------------------------------------------------------------------- #
+# Gradients
+# --------------------------------------------------------------------------- #
+def test_normalized_density_is_independent_of_the_hubble_constant() -> None:
+    """`dV_c/dz` is proportional to `H0^-3`, which cancels in the normalization --
+    the fact behind `merger_rate_H0_fn = H0**-3`. Measured -9e-19: float noise,
+    not an exact zero, so this is an `atol` assertion."""
+
+    def log_prob_at(name: str, value: float) -> jax.Array:
+        return _distribution(**{name: value}).log_prob(jnp.array(1.234))
+
+    d_h0 = jax.grad(lambda h0: log_prob_at("H0", h0))(FIDUCIALS["H0"])
+    d_omega_m = jax.grad(lambda om: log_prob_at("Omega_m", om))(FIDUCIALS["Omega_m"])
+
+    assert abs(float(d_h0)) < 1e-12
+    # The scale the H0 derivative is small *relative to*: the same density does
+    # respond to the other cosmology parameter.
+    assert abs(float(d_omega_m)) > 1e-3
+
+
+def test_total_merger_rate_scales_as_the_inverse_cube_of_the_hubble_constant() -> None:
+    """Pins `merger_rate_H0_fn = H0**-3` against the class itself."""
+    local_merger_rate = FIDUCIALS["local_merger_rate"]
+
+    def rate_at(h0: float) -> jax.Array:
+        return _distribution(H0=h0).total_merger_rate(local_merger_rate)
+
+    h0 = FIDUCIALS["H0"]
+    np.testing.assert_allclose(
+        float(jax.grad(rate_at)(h0)), -3.0 * float(rate_at(h0)) / h0, rtol=1e-9
+    )
