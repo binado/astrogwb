@@ -23,8 +23,8 @@ validation gate, which address a run by name rather than by path.
 **stdlib only, and deliberately so.** The ``Snakefile`` imports this module to
 build the DAG, so it must not reach pydantic, JAX, or ``astrogwb``: a
 validation error in any one run would otherwise break DAG construction for
-every target, and every ``--dry-run`` would pay for a JAX import. Bank
-*validation* lives in :mod:`astrogwb.paper.config.banks` for that reason.
+every target, and every ``--dry-run`` would pay for a JAX import. Catalog
+*validation* lives in :mod:`astrogwb.paper.config.catalogs` for that reason.
 """
 
 from __future__ import annotations
@@ -50,7 +50,14 @@ BASE_DIR = ANALYSIS_DIR / "base"
 RUNS_DIR = ANALYSIS_DIR / "runs"
 EXPERIMENT_BASE = "_base.toml"
 
+#: Catalogs follow the same two-layer shape as runs: a shared base and one
+#: file per named catalog, whose stem is the name.
+CATALOGS_DIR = Path("config/catalogs")
+CATALOG_BASE_DIR = CATALOGS_DIR / "base"
+CATALOG_DEFS_DIR = CATALOGS_DIR / "defs"
+
 CHAINS_ROOT = Path("outputs/chains")
+CATALOGS_ROOT = Path("outputs/catalogs")
 
 
 def _merge_run_overlay(
@@ -177,34 +184,66 @@ def assemble_run(
     return merge_config_layers(run_config_paths(experiment, run, root=root))
 
 
-def _catalog_bank_names(raw: Mapping[str, Any]) -> list[str]:
-    """Sorted distinct bank names named by a raw config's ``[catalog]`` block."""
+CATALOG_ROLES = ("injection", "proposal")
+
+
+def catalog_base_paths(root: Path | None = None) -> tuple[Path, ...]:
+    """Every shared ``config/catalogs/base/*.toml`` layer, in merge order."""
+    directory = (root or Path()) / CATALOG_BASE_DIR
+    paths = tuple(sorted(directory.glob("*.toml")))
+    if not paths:
+        raise ValueError(f"{directory} declares no base config files")
+    return paths
+
+
+def catalog_config_paths(name: str, *, root: Path | None = None) -> tuple[Path, ...]:
+    """The ordered layer files that make up one catalog's config.
+
+    Mirrors :func:`run_config_paths`: the ``Snakefile`` declares exactly these
+    as the catalog rule's inputs, so editing the shared ``[waveform]`` block
+    invalidates every catalog.
+    """
+    resolved = root or Path()
+    definition = resolved / CATALOG_DEFS_DIR / f"{name}.toml"
+    if not definition.is_file():
+        raise ValueError(f"unknown catalog {name}: {definition} does not exist")
+    return (*catalog_base_paths(resolved), definition)
+
+
+def discover_catalog_names(root: Path | None = None) -> tuple[str, ...]:
+    """Every declared catalog name, sorted. Stems of ``config/catalogs/defs``."""
+    directory = (root or Path()) / CATALOG_DEFS_DIR
+    names = tuple(sorted(path.stem for path in directory.glob("*.toml")))
+    if not names:
+        raise ValueError(f"{directory} declares no catalog configs")
+    return names
+
+
+def _catalog_names(raw: Mapping[str, Any]) -> dict[str, str]:
+    """The catalog each role names, from a raw config's ``[catalog]`` block."""
     catalog = raw.get("catalog")
     if not isinstance(catalog, Mapping):
         raise TypeError("run config must define a [catalog] table")
-    names: set[str] = set()
-    for role in ("injection", "proposal"):
-        spec = catalog.get(role)
-        if not isinstance(spec, Mapping):
-            raise TypeError(f"run config must define a [catalog.{role}] table")
-        for key in ("md_bank", "uniform_bank"):
-            value = spec.get(key)
-            if value:
-                names.add(str(value))
-    return sorted(names)
+    names: dict[str, str] = {}
+    for role in CATALOG_ROLES:
+        name = catalog.get(role)
+        if not isinstance(name, str) or not name:
+            raise TypeError(f"catalog.{role} must be a catalog name")
+        names[role] = name
+    return names
 
 
-def resolve_bank_names(
+def resolve_catalog_names(
     experiment: str, run: str, *, root: Path | None = None
-) -> list[str]:
-    """Every distinct bank a run's injection and proposal catalogs draw from.
+) -> dict[str, str]:
+    """The injection and proposal catalogs a run names, keyed by role.
 
-    The ``Snakefile`` calls this to declare ``run_mcmc``'s bank inputs, which is
-    why it works off the merged mapping rather than a validated
+    The ``Snakefile`` calls this to declare ``run_mcmc``'s catalog inputs, which
+    is why it works off the merged mapping rather than a validated
     :class:`~astrogwb.paper.config.mcmc.RunConfig`: the DAG must be buildable
     without paying for full validation of all 26 runs.
     """
-    return _catalog_bank_names(assemble_run(experiment, run, root=root))
+    return _catalog_names(assemble_run(experiment, run, root=root))
 
 
 def resolve_networks(

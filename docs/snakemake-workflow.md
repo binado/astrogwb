@@ -1,7 +1,7 @@
 # Snakemake workflows
 
 The paper application has one top-level [`Snakefile`](../Snakefile). It contains
-the bank rules that generate waveform banks, and the experiment rules that
+the catalog rules that generate waveform catalogs, and the experiment rules that
 assemble configs, sample chains, and build figures.
 
 `snakemake` is invoked directly; preview with `--dry-run` (Snakemake executes
@@ -10,42 +10,45 @@ for real unless it is passed).
 All commands run with the repository root as their working directory.
 Source inputs live under `config/`; generated artifacts live under `outputs/`.
 
-The Snakefile computes its own inputs by globbing that tree -- `discover_banks()`
-over `config/banks/*.toml` and `discover_runs()` over
+The Snakefile computes its own inputs by globbing that tree --
+`discover_catalog_names()` over `config/catalogs/defs/*.toml` and `discover_runs()` over
 `config/analysis/runs/*/` -- and imports exactly one config function,
-`assemble_run`, because a run's bank names are known only after the three-layer
+`assemble_run`, because a run's catalog names are known only after the three-layer
 merge. No registry file translates a name into a path.
 
-## Bank workflow
+## Catalog workflow
 
-Bank configs are committed in [`config/banks/`](../config/banks/), one TOML per
-bank. Build all banks before running experiments:
-
-```bash
-snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules waveform_bank banks --dry-run banks
-snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules waveform_bank banks banks
-```
-
-Or build individual banks:
+Catalog configs are committed in [`config/catalogs/`](../config/catalogs/): a
+shared `base/` layer plus one `defs/<name>.toml` per catalog. Build all
+catalogs before running experiments:
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules waveform_bank --dry-run \
-  outputs/banks/md-imrphenom-s41.h5 \
-  outputs/banks/md-imrphenom-s42.h5
+  --allowed-rules waveform_catalog catalogs --dry-run catalogs
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules waveform_catalog catalogs catalogs
 ```
 
-One rule does the whole thing: it reads the bank config, simulates that bank's
+Or build individual catalogs:
+
+```bash
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules waveform_catalog --dry-run \
+  outputs/catalogs/md-imrphenom-s41-n32768.h5 \
+  outputs/catalogs/md-imrphenom-s42-n16384.h5
+```
+
+One rule does the whole thing: it reads the catalog's config layers, simulates its
 population graph in-process, and generates waveforms for those rows. The
 population is not a workflow node -- it was a `temp()` output with exactly one
-consumer, and two banks share one graph at different seeds. All durable banks
-live under `outputs/banks/`. The `--allowed-rules` filter keeps bank generation
-explicit. MCMC commands omit these rules, so a missing bank stops MCMC with a
+consumer, and several catalogs share one graph at different seeds and sizes. All
+durable catalogs live under `outputs/catalogs/`. The `--allowed-rules` filter
+keeps catalog generation explicit. MCMC commands omit these rules, so a missing
+catalog stops MCMC with a
 `MissingInputException`.
 
-See [bank generation](bank-generation.md) for what a bank records about itself.
+See [catalog generation](catalog-generation.md) for what a catalog records about
+itself.
 
 ## Experiment workflow
 
@@ -72,8 +75,8 @@ every one of them -- and the wrapper meant config changes never retriggered
 sampling at all.
 
 The `validate` rule replaces the old `configs` target. It merges, validates,
-and bank-checks all 26 runs without building anything, so a config typo fails
-before any bank is built.
+and catalog-checks all 26 runs without building anything, so a config typo fails
+before any catalog is built.
 
 The experiments are:
 
@@ -81,7 +84,7 @@ The experiments are:
 | --- | ---: | --- |
 | `cosmological-parameters` | 6 detector runs plus `H0-Omega_m` and `H0-merger-rate` | input to `plot_cosmological_parameters` |
 | `modified-propagation` | 6 detector runs plus `Xi_0` and `Xi_0-H0` | corners, marginal comparison, and tables |
-| `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` | chains only |
+| `astrophysical-parameters` | `madau-dickinson` and `redshift-peak` | chains only |
 | `variable-catalog-size` | 8192, 16384, and 32768 proposal samples | chains only |
 | `variable-proposal-guard` | 1e-1, 1e-2, and 1e-3 proposal guard fractions | chains only |
 | `waveform-approximant` | `IMRPhenom` and `TaylorF2` proposals | chains only |

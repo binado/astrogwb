@@ -1,11 +1,16 @@
-"""Shared loading and validation for injection and proposal waveform catalogs."""
+"""Loading, validation, and preparation of injection and proposal catalogs.
+
+A catalog is a file: ``outputs/catalogs/<name>.h5``, built once by
+``scripts/generate_catalog.py`` from ``config/catalogs/defs/<name>.toml``. A
+run names one for each role, so there is nothing to compose here -- loading is
+just reading the file, and the density its samples follow is read back off its
+own recorded provenance rather than reassembled from the run config.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Self
 
 import jax
 import jax.numpy as jnp
@@ -18,195 +23,46 @@ from astrogwb.gwb import spectral_density
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
 )
-from astrogwb.paper.config.banks import (
-    BankConfig,
-    UniformRedshiftProposal,
+from astrogwb.paper.config.catalogs import (
+    CatalogProvenance,
     check_fiducials_match,
-    madau_dickinson_proposal,
-    read_bank_provenance,
     resolve_proposal,
 )
-from astrogwb.paper.config.mcmc import CatalogSpec, ProposalConfig, RunConfig
+from astrogwb.paper.config.mcmc import ProposalConfig, RunConfig
 from astrogwb.waveform import apply_gw_distance_to_power
 
-#: Bank attributes both components of a mixture must agree on. Concatenating
-#: banks generated with different waveform settings would silently mix two
-#: incompatible frequency grids into one catalog.
-_SHARED_BANK_ATTRS = (
-    "approximant",
-    "minimum_frequency",
-    "maximum_frequency",
-    "reference_frequency",
-    "sampling_frequency",
-    "df",
-)
 
+def load_run_catalog(path: Path | str, *, label: str) -> xr.Dataset:
+    """Load one catalog file eagerly, validating its format.
 
-@dataclass(frozen=True)
-class CatalogSource:
-    """Bank file location(s) plus the spec to draw them into a catalog.
-
-    ``role`` is ``"injection"`` or ``"proposal"``. Inline catalog specs carry no
-    registry name any more, so the role is what identifies a source in logs.
+    ``label`` is the role -- ``"injection"`` or ``"proposal"`` -- and is what
+    identifies the catalog in error messages.
     """
-
-    md_bank_path: Path
-    uniform_bank_path: Path | None
-    spec: CatalogSpec
-    role: str
-
-    @classmethod
-    def resolve(
-        cls, spec: CatalogSpec, bank_paths: Mapping[str, Path], *, role: str
-    ) -> Self:
-        """Resolve a spec's bank names against supplied bank file paths.
-
-        Used by the checkout scripts, which receive banks as a flat
-        ``NAME=PATH`` mapping (from repeated ``--bank`` flags) and must match
-        them against the bank names a run config's
-        :class:`~astrogwb.paper.config.mcmc.CatalogConfig` names for each role.
-        """
-        try:
-            md_bank_path = bank_paths[spec.md_bank]
-        except KeyError:
-            raise ValueError(
-                f"bank {spec.md_bank!r} is required but was not supplied via --bank"
-            ) from None
-        uniform_bank_path = None
-        if spec.uniform_bank is not None:
-            try:
-                uniform_bank_path = bank_paths[spec.uniform_bank]
-            except KeyError:
-                raise ValueError(
-                    f"bank {spec.uniform_bank!r} is required but was not supplied "
-                    "via --bank"
-                ) from None
-        return cls(md_bank_path, uniform_bank_path, spec, role)
-
-    def compose(self) -> xr.Dataset:
-        """Compose an in-memory catalog from bank files, per ``spec``.
-
-        Reproduces ``MixtureSimulator``'s law directly with ``jax.random``
-        instead of through ``gwmock_pop``: per-sample component assignments
-        are drawn once from ``mixture_seed`` (multinomial with probabilities
-        ``[1 - eps, eps]``), then each component contributes its
-        next-in-sequence bank samples. Because bank draws are prefix-stable
-        (the same construction-time RNG stream regardless of how many samples
-        are later requested), this is bit-identical to drawing directly from
-        the corresponding single larger mixture population -- so a prefix of
-        the result is itself a valid mixture sample.
-
-        ``eps == 0`` short-circuits to a bank prefix with no RNG draw at all,
-        which is what makes every existing eps=0 catalog file bit-identical to
-        its composed replacement.
-        """
-        spec = self.spec
-        n = spec.num_samples
-        epsilon = spec.uniform_mixing_fraction
-        if epsilon == 0.0:
-            return _bank_prefix(self.md_bank_path, n, label=spec.md_bank)
-
-        if self.uniform_bank_path is None or spec.mixture_seed is None:
-            raise ValueError(
-                f"{self.role} catalog: uniform_mixing_fraction > 0 requires both "
-                "uniform_bank_path and mixture_seed"
-            )
-
-        key = jax.random.key(spec.mixture_seed)
-        log_probs = jnp.log(jnp.asarray([1.0 - epsilon, epsilon]))
-        assignments = jax.random.categorical(key, log_probs, shape=(n,))
-        counts = [int((assignments == component).sum()) for component in (0, 1)]
-
-        md_part = _bank_prefix(self.md_bank_path, counts[0], label=spec.md_bank)
-        uniform_part = _bank_prefix(
-            self.uniform_bank_path, counts[1], label=spec.uniform_bank or ""
-        )
-        _check_waveform_settings_agree(md_part, uniform_part, label=self.role)
-        validate_matching_frequency_grids(
-            md_part.coords["frequency"].values,
-            uniform_part.coords["frequency"].values,
-            label=f"{self.role} mixture",
-        )
-        combined = xr.concat([md_part, uniform_part], dim="sample", join="exact")
-
-        order = jnp.argsort(assignments, stable=True)
-        inverse = np.asarray(jnp.argsort(order))
-        return combined.isel(sample=inverse)
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"{label} catalog not found: {path}")
+    return open_catalog(path).load()
 
 
 def resolve_run_proposal(
-    config: RunConfig, proposal_source: CatalogSource
+    config: RunConfig, proposal_path: Path | str
 ) -> ProposalConfig:
-    """Derive a run's importance-sampling density from its proposal bank.
+    """Derive a run's importance-sampling density from its proposal catalog.
 
     This is called before runtime configuration. Reading HDF5 attributes does
-    not initialize the JAX backend, so a fiducial or bank mismatch still fails
-    before a device is claimed. The bank is authoritative because its source
-    population config may have changed since generation.
+    not initialize the JAX backend, so a fiducial or support mismatch still
+    fails before a device is claimed. The file is authoritative because the
+    population configs it was drawn from may have changed since generation.
     """
-    md_path = proposal_source.md_bank_path
-    md_provenance = read_bank_provenance(md_path)
-    check_fiducials_match(md_provenance, config.fiducials, label=str(md_path))
-    uniform = None
-    if proposal_source.uniform_bank_path is not None:
-        uniform = read_bank_provenance(proposal_source.uniform_bank_path)
+    label = str(proposal_path)
+    provenance = CatalogProvenance.from_file(proposal_path)
+    check_fiducials_match(provenance, config.fiducials, label=label)
     return resolve_proposal(
-        madau_dickinson_proposal(md_provenance, label=str(md_path)),
-        _uniform_proposal(uniform, proposal_source),
-        uniform_mixing_fraction=proposal_source.spec.uniform_mixing_fraction,
+        provenance.redshift_proposal,
         minimum_redshift=config.cosmology.minimum_redshift,
         maximum_redshift=config.cosmology.maximum_redshift,
+        label=label,
     )
-
-
-def _uniform_proposal(
-    provenance: BankConfig | None, proposal_source: CatalogSource
-) -> UniformRedshiftProposal | None:
-    """Narrow the uniform bank's recorded density, or return None."""
-    if provenance is None:
-        return None
-
-    match provenance.redshift_proposal:
-        case UniformRedshiftProposal() as density:
-            return density
-        case other:
-            raise ValueError(
-                f"bank {proposal_source.uniform_bank_path} was drawn from a "
-                f"{other.kind!r} redshift density; the uniform_bank role "
-                "requires a uniform-redshift bank"
-            )
-
-
-def _check_waveform_settings_agree(
-    md: xr.Dataset, uniform: xr.Dataset, *, label: str
-) -> None:
-    """Require both mixture components to carry identical waveform settings.
-
-    Read off the bank files themselves rather than off a config: the banks are
-    what will actually be concatenated.
-    """
-    mismatches = [
-        f"{name} ({md.attrs.get(name)!r} vs {uniform.attrs.get(name)!r})"
-        for name in _SHARED_BANK_ATTRS
-        if md.attrs.get(name) != uniform.attrs.get(name)
-    ]
-    if mismatches:
-        raise ValueError(
-            f"{label} catalog mixes banks with different waveform settings: "
-            + ", ".join(mismatches)
-        )
-
-
-def _bank_prefix(path: Path, count: int, *, label: str) -> xr.Dataset:
-    """Load the first ``count`` samples of a bank, eagerly."""
-    catalog = open_catalog(path)
-    available = catalog.sizes["sample"]
-    if count > available:
-        raise ValueError(
-            f"bank {label!r} at {path} holds {available} samples, but the "
-            f"composition needs {count}"
-        )
-    return catalog.isel(sample=slice(0, count)).load()
 
 
 def propagate_catalog(

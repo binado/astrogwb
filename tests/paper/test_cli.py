@@ -13,9 +13,9 @@ def test_pure_config_imports_do_not_import_jax() -> None:
     and configure the process without touching jax: importing jax is slow, and
     ``runtime`` deliberately imports it only inside ``configure_runtime``.
 
-    ``config.runs`` and ``config.banks`` are in this list rather than excluded
+    ``config.runs`` and ``config.catalogs`` are in this list rather than excluded
     from it, and that is the point: the ``Snakefile`` imports both to build the
-    DAG, so every ``--dry-run`` paid for a jax import while ``config.banks``
+    DAG, so every ``--dry-run`` paid for a jax import while ``config.catalogs``
     read ``PopulationMetadata`` from ``astrogwb.catalog`` at module scope. It
     reads it inside the two functions that need it now, and ``config.runs``
     reaches no further than stdlib.
@@ -25,7 +25,7 @@ import sys
 import astrogwb.paper
 import astrogwb.paper.config.mcmc
 import astrogwb.paper.config.runs
-import astrogwb.paper.config.banks
+import astrogwb.paper.config.catalogs
 import astrogwb.paper.runtime
 assert 'jax' not in sys.modules
 assert 'pydantic' not in sys.modules or 'astrogwb.paper.config.mcmc' in sys.modules
@@ -48,12 +48,12 @@ def test_catalog_inference_snr_imports_leave_the_xla_backend_uninitialized() -> 
     (``jax.devices()``, array creation) is what freezes ``JAX_PLATFORMS`` /
     ``set_host_device_count``. A late ``set_host_device_count(2)`` still yielding
     two devices proves catalogs / inference / snr did not consume that config.
-    ``config.banks`` belongs on this path too: the run script resolves the proposal
-    density from bank attributes *before* ``configure_runtime``.
+    ``config.catalogs`` belongs on this path too: the run script resolves the proposal
+    density from the catalog file's attributes *before* ``configure_runtime``.
     """
     code = """
 import astrogwb.paper.catalogs
-import astrogwb.paper.config.banks
+import astrogwb.paper.config.catalogs
 import astrogwb.paper.inference
 import astrogwb.paper.snr
 import numpyro

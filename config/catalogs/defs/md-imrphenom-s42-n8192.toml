@@ -1,0 +1,10 @@
+# Half-size proposal for variable-catalog-size/n8192.
+#
+# GraphSimulator is a prefix-stable stream, so this is an exact prefix of
+# md-imrphenom-s42-n32768 -- the three sizes are nested draws, which is what
+# makes the experiment a clean comparison rather than three unrelated ones.
+num_samples = 8192
+
+[[components]]
+population = "madau-dickinson"
+seed = 42

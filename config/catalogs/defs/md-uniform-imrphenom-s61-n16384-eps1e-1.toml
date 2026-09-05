@@ -1,0 +1,19 @@
+# Guarded proposal at eps = 1e-1: a Madau-Dickinson draw with a
+# uniform-redshift component mixed in, so the importance weights do not
+# degenerate when NUTS moves the posterior away from the proposal.
+#
+# The component seeds run the two graph streams; mixture_seed seeds only the
+# per-sample component assignment, which MixtureSimulator splits before
+# drawing -- so the three seeds need not be distinct.
+num_samples = 16384
+mixture_seed = 61
+
+[[components]]
+population = "madau-dickinson"
+seed = 42
+weight = 0.9
+
+[[components]]
+population = "uniform-redshift"
+seed = 51
+weight = 0.1

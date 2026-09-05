@@ -20,9 +20,9 @@ themselves and import nothing from `tests/core`.
   `tests/core/test_frequency_resolution.py`, which owns the
   tolerances; the notebook owns the picture.
 
-**Paper analyses** — these drive real waveform banks through the
+**Paper analyses** — these drive real waveform catalogs through the
 `astrogwb.paper` configuration layer and are not self-contained by design. They
-need built banks under `outputs/banks/`, the `notebook` extra, and the
+need built catalogs under `outputs/catalogs/`, the `notebook` extra, and the
 repository root as the working directory.
 
 - **`mcmc.py`** — importance-weighted NUTS inference (NumPyro port of ASGWB.jl)

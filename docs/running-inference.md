@@ -2,8 +2,8 @@
 
 ## Ad-hoc runs
 
-`scripts/run_mcmc.py` takes a run's config layers plus the bank files its
-catalogs draw from. One `--config` per layer, in merge order -- the same list
+`scripts/run_mcmc.py` takes a run's config layers plus the two catalog files
+it samples against. One `--config` per layer, in merge order -- the same list
 the workflow declares as the rule's `input:` and passes straight back on argv:
 
 ```bash
@@ -14,12 +14,13 @@ uv run --extra paper python scripts/run_mcmc.py \
   --config config/analysis/base/sampling.toml \
   --config config/analysis/runs/cosmological-parameters/_base.toml \
   --config config/analysis/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
-  --bank md-imrphenom-s41=outputs/banks/md-imrphenom-s41.h5 \
-  --bank md-imrphenom-s42=outputs/banks/md-imrphenom-s42.h5
+  --injection-catalog outputs/catalogs/md-imrphenom-s41-n32768.h5 \
+  --proposal-catalog outputs/catalogs/md-imrphenom-s42-n16384.h5
 ```
 
-Repeat `--bank NAME=PATH` once per distinct bank the merged config's
-`[catalog.injection]` and `[catalog.proposal]` tables name.
+The two roles are fixed, so the files are named flags rather than a
+name-to-path mapping. They are the catalogs the merged config's `[catalog]`
+block names.
 
 Order is yours to get right: nothing owns it any more, and a wrong-but-valid
 order produces a valid-but-wrong run. The resolved order is logged at INFO
@@ -77,7 +78,7 @@ The six experiments and their 26 runs:
 | Experiment | Runs |
 | --- | ---: |
 | `cosmological-parameters` | six detector networks, `H0-Omega_m`, and `H0-merger-rate` |
-| `astrophysical-parameters` | `Madau-Dickinson` and `z_peak` |
+| `astrophysical-parameters` | `madau-dickinson` and `redshift-peak` |
 | `modified-propagation` | six detector networks, `Xi_0`, and `Xi_0-H0` |
 | `variable-catalog-size` | `n8192`, `n16384`, and `n32768` |
 | `variable-proposal-guard` | `eps1e-1`, `eps1e-2`, and `eps1e-3` |
@@ -87,15 +88,23 @@ The six experiments and their 26 runs:
 TOML retriggers exactly that chain. Editing a `base/` file retriggers all 26,
 which is correct.
 
-`snakemake validate` merges and bank-checks every run without building
+`snakemake validate` merges and catalog-checks every run without building
 anything. Run it before a campaign: it fails on the first invalid run *before
-any bank is built*, and a bank is a GPU job.
+any catalog is built*, and a catalog is a GPU job.
 
 ## Catalogs and the proposal density
 
-Every run states its own two catalogs inline. There is no named-composition
-registry: a catalog is a bank name (or an MD bank plus a uniform bank) and the
-mixture parameters, composed in memory at run time.
+Every run names two catalogs, one per role:
+
+```toml
+[catalog]
+injection = "md-imrphenom-s41-n32768"
+proposal  = "md-imrphenom-s42-n16384"
+```
+
+That is the whole block. How a catalog was drawn -- its components, seeds and
+mixing fractions -- lives in `config/catalogs/defs/<name>.toml` and in the
+generated file's own provenance, never in the run config.
 
 Every run shares one injection catalog -- it is the "observed" data -- so it
 lives in `base/catalogs.toml` and no run overrides it. Only
@@ -103,11 +112,13 @@ lives in `base/catalogs.toml` and no run overrides it. Only
 and `waveform-approximant` override the proposal catalog.
 
 The importance-sampling *proposal density* is **not** in the config. It is
-derived at run time from the proposal bank's own provenance attributes (see
-[bank generation](bank-generation.md)), restricted to the run's analysis
-redshift window, and checked against the run's `[fiducials]`. Resolution happens
-at run time rather than at config time so that `snakemake validate` stays
-cheap: a config typo fails without any bank having to exist.
+derived at run time from the proposal catalog's own provenance attributes (see
+[catalog generation](catalog-generation.md)), restricted to the run's analysis
+redshift window, and checked against the run's `[fiducials]`. That window is
+narrower than what was generated, which is why the density cannot be baked
+into the file. Resolution happens at run time rather than at config time so
+that `snakemake validate` stays cheap: a config typo fails without any catalog
+having to exist.
 
 The resolved density is stamped into the saved chain's posterior attributes, so
 the `.nc` remains the self-describing record of what was sampled.
@@ -140,16 +151,16 @@ attribute, which is the one thing a merged config cannot carry.
 Ad-hoc unlabelled runs retain the timestamped
 `mcmc-<params>-det=<detectors>-seed<n>-<timestamp>` convention.
 
-## Bank prerequisite
+## Catalog prerequisite
 
-Experiments consume existing banks and never generate them implicitly. Build the
-required banks first:
+Experiments consume existing catalogs and never generate them implicitly. Build
+the required catalogs first:
 
 ```bash
-snakemake --snakefile Snakefile --allowed-rules waveform_bank banks \
-  --profile profiles/local --cores 8 banks
+snakemake --snakefile Snakefile --allowed-rules waveform_catalog catalogs \
+  --profile profiles/local --cores 8 catalogs
 ```
 
-If a required bank is absent, the MCMC workflow fails with a
+If a required catalog is absent, the MCMC workflow fails with a
 `MissingInputException` instead of silently scheduling hours of waveform
 generation.

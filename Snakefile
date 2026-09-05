@@ -2,34 +2,40 @@ import re
 import shlex
 from pathlib import Path
 
-from astrogwb.paper.config.banks import discover_banks
 from astrogwb.paper.config.runs import (
     base_config_paths,
+    catalog_config_paths,
+    discover_catalog_names,
     discover_runs,
     load_base,
-    resolve_bank_names,
+    resolve_catalog_names,
     run_config_paths,
 )
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
 # Neither config module imports JAX, pydantic, or matplotlib at module scope,
 # so DAG construction stays cheap: a --dry-run costs ~300 modules rather than
-# the ~1200 it took while `assemble_run` reached `config.banks`.
+# the ~1200 it took while `assemble_run` reached the pydantic layer.
 
 
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
-BANKS_DIR = Path(config.get("banks_dir", "outputs/banks"))
-BANK_CONFIG_PATTERN = "config/banks/{bank}.toml"
+CATALOGS_DIR = Path(config.get("catalogs_dir", "outputs/catalogs"))
 CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 
-# Filenames are the mapping: config/banks/<bank>.toml -> outputs/banks/<bank>.h5,
-# config/analysis/runs/<experiment>/<run>.toml -> outputs/chains/<experiment>/<run>.nc.
-# Nothing below translates a registry name into a path; it only globs the config
-# tree and reads back what a run's own [catalog] block names.
-banks = discover_banks()
+
+def catalog_path(name: str) -> str:
+    return str(CATALOGS_DIR / f"{name}.h5")
+
+
+# Filenames are the mapping: config/catalogs/defs/<name>.toml ->
+# outputs/catalogs/<name>.h5, and config/analysis/runs/<experiment>/<run>.toml
+# -> outputs/chains/<experiment>/<run>.nc. Nothing below translates a registry
+# name into a path; it only globs the config tree and reads back the two names
+# a run's own [catalog] block carries.
+catalogs = discover_catalog_names()
 runs = discover_runs()
 
-BANK_OUTPUTS = [str(BANKS_DIR / f"{name}.h5") for name in banks]
+CATALOG_OUTPUTS = [catalog_path(name) for name in catalogs]
 CHAIN_OUTPUTS = [
     f"outputs/chains/{experiment}/{run}.nc"
     for experiment, names in runs.items()
@@ -43,19 +49,18 @@ RUN_CONFIG_FILES = sorted(
         for path in run_config_paths(experiment, run, root=Path("."))
     }
 )
-BANK_PATTERN = "|".join(re.escape(name) for name in banks)
+CATALOG_PATTERN = "|".join(re.escape(name) for name in catalogs)
 EXPERIMENT_PATTERN = "|".join(re.escape(name) for name in runs)
 RUN_PATTERN = "|".join(
     re.escape(run) for run in dict.fromkeys(r for names in runs.values() for r in names)
 )
 
-# The figures read a bank file directly rather than a composed catalog: the
-# shared injection composition requests every sample its bank holds, so the bank
-# file *is* the composed catalog. Both names are read off the base catalog
-# config so they cannot drift from what the runs actually sample.
+# The figures read the same catalog files the runs sample against. Both names
+# are read off the base catalog config so they cannot drift from what the runs
+# actually use.
 _BASE_CATALOGS = load_base()["catalog"]
-INJECTION_BANK = str(BANKS_DIR / f"{_BASE_CATALOGS['injection']['md_bank']}.h5")
-DEFAULT_PROPOSAL_BANK = str(BANKS_DIR / f"{_BASE_CATALOGS['proposal']['md_bank']}.h5")
+INJECTION_CATALOG = catalog_path(_BASE_CATALOGS["injection"])
+DEFAULT_PROPOSAL_CATALOG = catalog_path(_BASE_CATALOGS["proposal"])
 # Figures report what was sampled, so each one is handed a run's own config
 # layers for the shared fiducials and analysis grid. Which run that is used to
 # be a constant buried in the library (config.figures.REFERENCE_RUN); it is an
@@ -102,34 +107,52 @@ def network_config_inputs(experiment):
     ]
 
 
-def bank_path(name):
-    return str(BANKS_DIR / f"{name}.h5")
+def catalog_layers(wildcards):
+    """One catalog's ordered config layers, relative to this workflow's cwd.
 
-
-def bank_population(wildcards):
-    """The population graph a bank config names, relative to this workflow's cwd."""
-    return str(banks[wildcards.bank].population_path(Path(".")))
-
-
-def run_bank_names(wildcards):
-    """Every distinct bank a run's injection + proposal catalogs draw from.
-
-    Bank names are known only after the three-layer merge, so `run_mcmc` cannot
-    declare its inputs without one. `resolve_bank_names` is the library
-    implementation; this is only the wildcards adapter.
+    Declaring the shared base alongside the def is what makes editing the
+    common [waveform] block invalidate every catalog.
     """
-    return resolve_bank_names(wildcards.experiment, wildcards.run, root=Path("."))
+    return [
+        str(path) for path in catalog_config_paths(wildcards.catalog, root=Path("."))
+    ]
 
 
-def run_bank_inputs(wildcards):
-    return [bank_path(name) for name in run_bank_names(wildcards)]
+def catalog_config_flags(wildcards):
+    """The same layers as repeated --config flags, in merge order.
 
-
-def run_bank_flags(wildcards):
+    Built in `params:` rather than interpolated from `input:` for the same
+    reason `config_flags` is: a list input would space-join into one argument.
+    """
     return " ".join(
-        f"--bank {shlex.quote(f'{name}={bank_path(name)}')}"
-        for name in run_bank_names(wildcards)
+        f"--config {shlex.quote(path)}" for path in catalog_layers(wildcards)
     )
+
+
+def catalog_populations(wildcards):
+    """Every population graph one catalog draws from, in component order."""
+    from astrogwb.paper.config.catalogs import load_catalog_definition
+
+    definition = load_catalog_definition(wildcards.catalog, Path("."))
+    return [str(path) for path in definition.population_paths(Path("."))]
+
+
+def run_catalog_input(role):
+    """The catalog file one role of a run samples against.
+
+    The names are known only after the three-layer merge, so `run_mcmc` cannot
+    declare its inputs without one. `resolve_catalog_names` is the library
+    implementation; this returns the wildcards adapter for a single role, so
+    the two files arrive as named inputs the shell block can reference.
+    """
+
+    def resolve(wildcards):
+        names = resolve_catalog_names(
+            wildcards.experiment, wildcards.run, root=Path(".")
+        )
+        return catalog_path(names[role])
+
+    return resolve
 
 
 def run_outdir(wildcards):
@@ -141,51 +164,53 @@ def experiment_chains(experiment):
 
 
 wildcard_constraints:
-    bank=BANK_PATTERN,
+    catalog=CATALOG_PATTERN,
     experiment=EXPERIMENT_PATTERN,
     run=RUN_PATTERN,
 
 
 localrules:
-    waveform_bank,
+    waveform_catalog,
     validate,
     plot_cosmological_parameters,
     plot_modified_propagation,
     amplitude_toy,
     fiducial_spectrum,
     importance_weights_grid,
-    banks,
+    catalogs,
     experiments,
 
 
-rule waveform_bank:
+rule waveform_catalog:
     """Population draw + waveform generation, in one process."""
     input:
-        script="scripts/generate_bank.py",
-        config=BANK_CONFIG_PATTERN,
-        population=bank_population,
+        script="scripts/generate_catalog.py",
+        config=catalog_layers,
+        population=catalog_populations,
     output:
-        str(BANKS_DIR / "{bank}.h5"),
+        catalog_path("{catalog}"),
+    params:
+        config_flags=catalog_config_flags,
     shell:
         "uv run --extra paper python {input.script:q}"
-        " --config {input.config:q} --output {output:q} --force"
+        " {params.config_flags} --output {output:q} --force"
 
 
-rule banks:
-    """Aggregate target: build every bank declared in config/banks/."""
+rule catalogs:
+    """Aggregate target: build every catalog declared in config/catalogs/defs/."""
     input:
-        BANK_OUTPUTS,
+        CATALOG_OUTPUTS,
 
 
 # Replaces `assemble_config --all`, whose real value was failing on the first
-# invalid run *before any bank was built* -- a bank is a GPU job. Deliberately
-# not an input of `run_mcmc`: run it by hand before a campaign. `run_mcmc`
-# re-checks its own run's banks anyway.
+# invalid run *before any catalog was built* -- a catalog is a GPU job.
+# Deliberately not an input of `run_mcmc`: run it by hand before a campaign.
+# `run_mcmc` re-checks its own run's catalogs anyway.
 rule validate:
-    """Pre-flight: merge, validate, and bank-check every run, building nothing."""
+    """Pre-flight: merge, validate, and catalog-check every run, building nothing."""
     input:
         RUN_CONFIG_FILES,
-        [f"config/banks/{name}.toml" for name in banks],
+        sorted({str(path) for name in catalogs for path in catalog_config_paths(name, root=Path("."))}),
     output:
         "outputs/validated-runs.txt",
     shell:
@@ -201,13 +226,13 @@ rule run_mcmc:
         # granularity is unchanged: edit a leaf -> one chain; edit
         # base/sampling.toml -> all 26.
         config=lambda w: config_layers(w.experiment, w.run),
-        banks=run_bank_inputs,
+        injection=run_catalog_input("injection"),
+        proposal=run_catalog_input("proposal"),
     output:
         chain=protected(CHAIN_PATTERN),
     params:
         platform=JAX_PLATFORM,
         outdir=run_outdir,
-        bank_flags=run_bank_flags,
         config_flags=lambda w: config_flags(w.experiment, w.run),
     threads: 4
     resources:
@@ -243,7 +268,8 @@ rule run_mcmc:
         $NANNY uv run --active --no-sync $UV_EXTRAS python {input.script:q} \
             {params.config_flags} --outdir {params.outdir:q} \
             --label {wildcards.run:q} \
-            {params.bank_flags} \
+            --injection-catalog {input.injection:q} \
+            --proposal-catalog {input.proposal:q} \
             --platform {params.platform:q} $RUNTIME_FLAGS --force
         """
 
@@ -265,7 +291,7 @@ rule plot_cosmological_parameters:
             run=["ET-2L-aligned-CE-Hanford", "H0-merger-rate"],
         ),
         omega_m_chain="outputs/chains/cosmological-parameters/H0-Omega_m.nc",
-        catalog=INJECTION_BANK,
+        catalog=INJECTION_CATALOG,
         # The layers of a run this figure actually plots, and the run TOMLs
         # behind --network-run.
         config=config_layers("cosmological-parameters", "ET-2L-aligned-CE-Hanford"),
@@ -317,7 +343,7 @@ rule plot_modified_propagation:
             "outputs/chains/modified-propagation/{run}.nc",
             run=DETECTOR_NETWORK_RUNS,
         ),
-        catalog=INJECTION_BANK,
+        catalog=INJECTION_CATALOG,
         config=config_layers("modified-propagation", "ET-2L-aligned-CE-Hanford"),
         network_configs=network_config_inputs("modified-propagation"),
     output:
@@ -346,7 +372,7 @@ rule plot_modified_propagation:
 rule amplitude_toy:
     """Single-amplitude toy MCMC and its Fisher-overlay figure."""
     input:
-        catalog=INJECTION_BANK,
+        catalog=INJECTION_CATALOG,
         config=config_layers(*FIGURE_RUN),
     output:
         "outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf",
@@ -362,7 +388,7 @@ rule amplitude_toy:
 rule fiducial_spectrum:
     """Fiducial injection spectrum and per-network effective PSDs."""
     input:
-        catalog=INJECTION_BANK,
+        catalog=INJECTION_CATALOG,
         # Borrows the cosmological-parameters networks; reads no chains. The
         # network TOMLs are declared even though no chain is, so editing one
         # network's detector list retriggers this figure -- which it did not do
@@ -387,7 +413,7 @@ rule fiducial_spectrum:
 rule importance_weights_grid:
     """Relative-ESS heatmaps over the H0-Omega_m and Xi0-n prior grids."""
     input:
-        catalog=DEFAULT_PROPOSAL_BANK,
+        catalog=DEFAULT_PROPOSAL_CATALOG,
         config=config_layers(*FIGURE_RUN),
     output:
         h0_omega_m_pdf=(

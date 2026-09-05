@@ -1,9 +1,10 @@
 # How the uniform-mixing guard fraction eps affects the same H0-MD
-# problem as astrophysical-parameters/Madau-Dickinson: H0 is the
+# problem as astrophysical-parameters/madau-dickinson: H0 is the
 # marginalized amplitude and NUTS samples the redshift-rate shape.
 #
-# The runs differ only in catalog.proposal's mixture fields. Each eps
-# gets its own mixture_seed so the three draws are independent.
+# The runs differ only in which guarded proposal catalog they name. Each
+# eps has its own catalog, drawn at its own mixture seed, so the three
+# draws are independent.
 
 sampled_params = ["gamma", "kappa", "z_peak"]
 

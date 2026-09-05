@@ -19,7 +19,7 @@ from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
-from astrogwb.paper.catalogs import CatalogSource
+from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import (
     add_config_arguments,
@@ -208,9 +208,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     networks = resolve_networks(args.network_runs, DETECTOR_NETWORKS)
     use_paper_style()
 
-    catalog_path = args.catalog
-    source = CatalogSource(catalog_path, None, config.catalog.injection, "injection")
-    observation = prepare_observation(source, fiducials=fiducials, grid=grid)
+    catalog = load_run_catalog(args.catalog, label="injection")
+    observation = prepare_observation(catalog, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies
     frequency_mask = observation.frequency_mask
     figure = plot_omega_and_sh(
