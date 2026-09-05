@@ -1,14 +1,4 @@
-"""The Madau-Dickinson (2017) rate shape, as a redshift ``Distribution``.
-
-.. note::
-
-   The rate shape itself lives in :mod:`astrogwb.distributions.rates`, shared
-   verbatim with
-   :mod:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation`,
-   which remains the reference implementation of the importance-weights
-   callback. The two express the *same* density by different routes, so they
-   are pinned against each other in ``tests/core/test_distributions.py``.
-"""
+"""The Madau-Dickinson (2017) rate shape, as a redshift ``Distribution``."""
 
 from __future__ import annotations
 

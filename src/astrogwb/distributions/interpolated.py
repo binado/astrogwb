@@ -28,20 +28,11 @@ class InterpolatedDistribution(dist.Distribution):
     r"""Density interpolated from an unnormalized table :math:`y(x)`.
 
     The linear interpolant of ``y`` on ``x``, divided by the trapezoidal
-    integral :attr:`norm`, is the density. Interpolating the *normalized*
-    table with ``left=0.0, right=0.0`` is what makes this exact rather than
-    approximate: the interpolant's own integral is then precisely the
-    normalization, and values off the ends of the table get zero density --
-    hence ``-inf`` log-density -- rather than an extrapolation of it.
+    integral :attr:`norm`, is the density.
 
     ``batch_shape`` is ``()``: ``x`` and ``y`` are a single table, and scalar
     parameters are the only thing this describes. Batch over hyperparameters
     with :func:`jax.vmap`, as the reference importance model does.
-
-    ``x`` is *not* validated to be strictly increasing, nor ``y`` to be
-    nonnegative. Neither is checkable inside a traced ``__init__``, the same
-    situation :class:`~astrogwb.distributions.amplitude.AmplitudeConditional` documents for
-    its explicit ``grid=``; the caller owns both invariants.
 
     Parameters
     ----------
@@ -105,12 +96,6 @@ class InterpolatedDistribution(dist.Distribution):
         reduces in a different order than the ``sum`` behind :attr:`norm` --
         and dividing by the endpoint makes ``icdf(1.0) == x[-1]`` true by
         construction.
-
-        Do *not* port :meth:`~astrogwb.distributions.amplitude.AmplitudeConditional.icdf`'s
-        ``searchsorted``/``take_along_axis`` machinery on top of this. That
-        exists because its CDF comes from ``exp(log_integrand - max)``, whose
-        tails underflow to exact zeros and leave 0/0 plateaus -- a situation a
-        physical density table cannot produce.
         """
         cdf = cumulative_trapezoid(self.normalized_y, x=self.x)
         return cdf / cdf[..., -1:]
