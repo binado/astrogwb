@@ -1,7 +1,7 @@
 r"""Infer :math:`(H_0, \Omega_m)` with :math:`H_0` marginalized analytically.
 
 The sibling of ``h0_mcmc.py``, using the *other* half of
-:mod:`astrogwb.sampling`: :func:`~astrogwb.sampling.amplitude_marginalized_model`
+:mod:`astrogwb.sampling`: :func:`~astrogwb.sampling.gwb_amplitude_marginalized_model`
 integrates :math:`H_0` out of the Gaussian likelihood, NUTS samples
 :math:`\Omega_m` alone, and a mandatory post-processing pass through
 :func:`~astrogwb.sampling.amplitude_reconstruction_model` draws :math:`H_0`
@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections.abc import Mapping
 from functools import partial
 from pathlib import Path
 
@@ -55,12 +56,14 @@ import numpy as np
 import numpyro
 import numpyro.distributions as dist
 import xarray as xr
+from jax.typing import ArrayLike
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 
-from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.distributions.amplitude import quadrature_grid
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density
+from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     amplitude_H0_fn,
     compute_merger_rate_distance_and_logprob,
@@ -68,8 +71,8 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     merger_rate_H0_fn,
 )
 from astrogwb.sampling import (
-    amplitude_marginalized_model,
     amplitude_reconstruction_model,
+    gwb_amplitude_marginalized_model,
 )
 
 logger = logging.getLogger(__name__)
@@ -394,18 +397,30 @@ def main(argv: list[str] | None = None) -> None:
         amplitude_prior, num_nodes=args.amplitude_num_nodes
     )
 
+    def spectrum_fn(
+        params: Mapping[str, ArrayLike],
+    ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
+        rate, log_weights = merger_rate_and_log_weights(params, samples)
+        prediction = spectral_density(
+            polarization_power,
+            jnp.exp(log_weights),
+            rate,
+            average_mode="analytic_inclination",
+        )
+        return prediction, {
+            "template_merger_rate": rate,
+            "importance_relative_ess": relative_ess(log_weights),
+        }
+
+    scale = gaussian_bin_scale(network_psd, args.observation_time, df)
+
     model = partial(
-        amplitude_marginalized_model,
-        polarization_power=polarization_power,
-        samples=samples,
+        gwb_amplitude_marginalized_model,
+        spectral_density_fn=spectrum_fn,
         observed_spectral_density=observed_spectral_density,
-        effective_psd=network_psd,
-        observation_time=args.observation_time,
-        df=df,
-        average_mode="analytic_inclination",
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights,
+        scale=scale,
         amplitude_parameter="H0",
-        fiducials=FIDUCIALS,
+        amplitude_fiducial=FIDUCIALS["H0"],
         # Passed by name, never wrapped in a lambda or partial:
         # AmplitudeConditional hashes amplitude_fn into the jit cache key, so a
         # freshly-minted callable retraces the model on every construction.
@@ -462,7 +477,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     posterior.update({name: values[0] for name, values in draws.items()})
 
-    relative_ess = float(jnp.mean(posterior["importance_relative_ess"]))
+    mean_relative_ess = float(jnp.mean(posterior["importance_relative_ess"]))
     reconstructed = posterior["H0"]
     logger.info("Fiducial H0: %s", FIDUCIALS["H0"])
     logger.info(
@@ -470,8 +485,8 @@ def main(argv: list[str] | None = None) -> None:
         float(jnp.mean(reconstructed)),
         float(jnp.std(reconstructed)),
     )
-    logger.info("Mean importance relative ESS: %.4f", relative_ess)
-    if relative_ess < 0.1:
+    logger.info("Mean importance relative ESS: %.4f", mean_relative_ess)
+    if mean_relative_ess < 0.1:
         logger.warning(
             "importance weights have collapsed; the posterior is "
             "dominated by a handful of catalog sources"
