@@ -81,6 +81,19 @@ def test_log_prob_ignores_source_parameters_without_a_distribution() -> None:
     )
 
 
+def test_log_prob_of_empty_distributions_is_zero() -> None:
+    """The empty sum is neutral when only rates or propagation differ."""
+    population = Population(
+        distributions={},
+        params={"local_merger_rate": 1.0, "xi_0": 1.4},
+    )
+
+    log_prob = population.log_prob({"mass": jnp.zeros(3)})
+
+    assert log_prob.shape == ()
+    np.testing.assert_array_equal(np.asarray(log_prob), np.asarray(0.0))
+
+
 def test_log_prob_raises_on_a_missing_source_parameter() -> None:
     population = Population(distributions={"a": dist.Normal(0.0, 1.0)}, params={})
     with pytest.raises(KeyError):

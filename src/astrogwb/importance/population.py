@@ -56,6 +56,7 @@ from collections.abc import Mapping
 from typing import Any, NamedTuple, Protocol
 
 import jax
+import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
@@ -93,7 +94,7 @@ class Population(NamedTuple):
             name: distribution.log_prob(source_parameters[name])
             for name, distribution in self.distributions.items()
         }
-        return jax.tree.reduce(operator.add, log_probs)
+        return jax.tree.reduce(operator.add, log_probs, initializer=jnp.zeros(()))
 
 
 class PopulationTerms(NamedTuple):
