@@ -1,10 +1,10 @@
-"""Discover and assemble MCMC runs from the ``config/analysis/`` tree.
+"""Discover, locate, and merge MCMC run configs from the ``config/analysis/`` tree.
 
 Filenames are the mapping. ``config/analysis/runs/<experiment>/<run>.toml``
-assembles into ``outputs/configs/<experiment>/<run>.json`` and samples into
-``outputs/chains/<experiment>/<run>.nc``; no inventory file translates between
-the two. That convention is what let the previous ``inputs/experiments.yaml``
-registry -- and the ten ``Snakefile`` helpers that read it -- go away.
+samples into ``outputs/chains/<experiment>/<run>.nc``; no inventory file
+translates between the two. That convention is what let the previous
+``inputs/experiments.yaml`` registry -- and the ten ``Snakefile`` helpers that
+read it -- go away.
 
 A run config is three layers merged in order:
 
@@ -15,29 +15,39 @@ A run config is three layers merged in order:
 ``_base.toml`` is required in every experiment directory rather than optional:
 a conditional Snakemake input complicates the DAG for no gain.
 
-stdlib + pydantic only, and the ``Snakefile`` imports :func:`assemble_run`
-directly to resolve each run's bank inputs -- so an error raised here breaks DAG
-construction for *every* target, not just the offending run. Keep it
-dependency-light.
+There is no assembled-config artifact. Every entrypoint is handed its layer
+files on argv (see :func:`add_config_arguments`) and merges them in process;
+:func:`assemble_run` is the convenience wrapper for the notebooks and for the
+validation gate, which address a run by name rather than by path.
+
+**stdlib only, and deliberately so.** The ``Snakefile`` imports this module to
+build the DAG, so it must not reach pydantic, JAX, or ``astrogwb``: a
+validation error in any one run would otherwise break DAG construction for
+every target, and every ``--dry-run`` would pay for a JAX import. Bank
+*validation* lives in :mod:`astrogwb_paper.config.banks` for that reason.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import argparse
+import logging
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from astrogwb_paper.config.banks import BankGenerationConfig, discover_banks
-from astrogwb_paper.config.mcmc import RunConfig
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.utils import deep_merge, load_mapping
+
+if TYPE_CHECKING:
+    from astrogwb_paper.plotting import Network
+
+logger = logging.getLogger(__name__)
 
 ANALYSIS_DIR = Path("config/analysis")
 BASE_DIR = ANALYSIS_DIR / "base"
 RUNS_DIR = ANALYSIS_DIR / "runs"
 EXPERIMENT_BASE = "_base.toml"
 
-CONFIGS_ROOT = Path("outputs/configs")
 CHAINS_ROOT = Path("outputs/chains")
 
 
@@ -60,6 +70,28 @@ def merge_run_overlay(
     for name, spec in overlay_priors.items():
         priors[name] = dict(spec) if isinstance(spec, Mapping) else spec
     merged["priors"] = priors
+    return merged
+
+
+def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
+    """Fold run-config layer files into one raw mapping, in the order given.
+
+    This is a *run-config* parser, not generic config infrastructure: it folds
+    :func:`merge_run_overlay`, whose prior-replacement rule is domain-specific.
+    A run that swaps a uniform prior for a normal one must not inherit the
+    uniform's ``low`` / ``high``, and a plain deep merge would leave them
+    behind.
+
+    Order is the caller's responsibility and it is not recoverable from the
+    result, so it is logged. Applying the same fold to the ``base/`` files is a
+    no-op difference from a plain deep merge -- they partition disjoint
+    top-level keys -- so one function serves every layer.
+    """
+    if not paths:
+        raise ValueError("no config layers given")
+    merged: dict[str, Any] = {}
+    for path in paths:
+        merged = merge_run_overlay(merged, load_mapping(path))
     return merged
 
 
@@ -93,31 +125,27 @@ def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
     return runs
 
 
-def load_base(root: Path | None = None) -> dict[str, Any]:
-    """Merge every ``config/analysis/base/*.toml`` into one mapping.
+def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
+    """Every shared ``config/analysis/base/*.toml`` layer, in merge order.
 
-    The base files partition disjoint top-level keys, so the sorted-glob order
-    only matters for determinism, not for outcome.
+    Sorted for determinism only: the base files partition disjoint top-level
+    keys, so the order does not change the outcome.
     """
     directory = (root or paper_project_root()) / BASE_DIR
-    paths = sorted(directory.glob("*.toml"))
+    paths = tuple(sorted(directory.glob("*.toml")))
     if not paths:
         raise ValueError(f"{directory} declares no base config files")
-    merged: dict[str, Any] = {}
-    for path in paths:
-        merged = deep_merge(merged, load_mapping(path))
-    return merged
+    return paths
 
 
-def assemble_run(
+def run_config_paths(
     experiment: str, run: str, *, root: Path | None = None
-) -> dict[str, Any]:
-    """Merge base, experiment, and run layers into one raw run config.
+) -> tuple[Path, ...]:
+    """The ordered layer files that make up one run's config.
 
-    Uses :func:`merge_run_overlay` rather than a plain deep merge: each
-    ``[priors.<param>]`` table replaces the layer below it wholesale. That is
-    load-bearing, not incidental -- key-merging a normal prior onto a uniform
-    one would leave stale ``low`` / ``high`` behind.
+    The ``Snakefile`` declares exactly these as ``run_mcmc``'s config inputs
+    and passes them back on argv, so the dependency edges and the data path are
+    the same list.
     """
     resolved = root or paper_project_root()
     directory = resolved / RUNS_DIR / experiment
@@ -127,20 +155,24 @@ def assemble_run(
     experiment_base = directory / EXPERIMENT_BASE
     if not experiment_base.is_file():
         raise ValueError(f"{directory} is missing a required {EXPERIMENT_BASE}")
-
-    merged = merge_run_overlay(load_base(resolved), load_mapping(experiment_base))
-    return merge_run_overlay(merged, load_mapping(run_path))
+    return (*base_config_paths(resolved), experiment_base, run_path)
 
 
-def run_bank_names(experiment: str, run: str, *, root: Path | None = None) -> list[str]:
-    """Every distinct bank a run's injection and proposal catalogs draw from.
+def load_base(root: Path | None = None) -> dict[str, Any]:
+    """Merge every ``config/analysis/base/*.toml`` into one mapping."""
+    return merge_config_layers(base_config_paths(root))
 
-    The ``Snakefile`` calls this to declare ``run_mcmc``'s bank inputs, which is
-    why it works off the merged mapping rather than a validated
-    :class:`~astrogwb_paper.config.mcmc.RunConfig`: the DAG must be buildable
-    without paying for full validation of all 26 runs.
+
+def assemble_run(
+    experiment: str, run: str, *, root: Path | None = None
+) -> dict[str, Any]:
+    """Merge one run's three layers into a raw config, addressing it by name.
+
+    The convenience wrapper for callers that hold ``(experiment, run)`` rather
+    than a list of paths: the notebooks, the validation gate, and the figure
+    scripts resolving a ``--network-run``.
     """
-    return catalog_bank_names(assemble_run(experiment, run, root=root))
+    return merge_config_layers(run_config_paths(experiment, run, root=root))
 
 
 def catalog_bank_names(raw: Mapping[str, Any]) -> list[str]:
@@ -160,61 +192,147 @@ def catalog_bank_names(raw: Mapping[str, Any]) -> list[str]:
     return sorted(names)
 
 
-def check_bank_references(
-    config: RunConfig,
-    *,
-    label: str,
-    banks: Mapping[str, BankGenerationConfig] | None = None,
-) -> None:
-    """Reject a run naming an unknown bank, or a self-correlated mixture.
+def resolve_bank_names(
+    experiment: str, run: str, *, root: Path | None = None
+) -> list[str]:
+    """Every distinct bank a run's injection and proposal catalogs draw from.
 
-    Runs at assemble time, against the committed bank configs rather than the
-    built bank files, so a typo fails without building anything expensive.
-    Without it the typo would only surface as a Snakemake wildcard that matches
-    no rule.
+    The ``Snakefile`` calls this to declare ``run_mcmc``'s bank inputs, which is
+    why it works off the merged mapping rather than a validated
+    :class:`~astrogwb_paper.config.mcmc.RunConfig`: the DAG must be buildable
+    without paying for full validation of all 26 runs.
     """
-    known = banks if banks is not None else discover_banks()
-    for role, spec in (
-        ("injection", config.catalog.injection),
-        ("proposal", config.catalog.proposal),
-    ):
-        md = _require_bank(spec.md_bank, known, label=f"{label} catalog.{role}")
-        if spec.uniform_bank is None:
-            continue
-        uniform = _require_bank(
-            spec.uniform_bank, known, label=f"{label} catalog.{role}"
-        )
-        assert spec.mixture_seed is not None  # enforced by CatalogSpec
-        seeds = (md.seed, uniform.seed, spec.mixture_seed)
-        if len(set(seeds)) != len(seeds):
-            raise ValueError(
-                f"{label} catalog.{role}: md_bank seed, uniform_bank seed, and "
-                f"mixture_seed must all be distinct (got {seeds})"
-            )
+    return catalog_bank_names(assemble_run(experiment, run, root=root))
 
 
-def _require_bank(
-    name: str, banks: Mapping[str, BankGenerationConfig], *, label: str
-) -> BankGenerationConfig:
-    try:
-        return banks[name]
-    except KeyError:
-        choices = ", ".join(banks)
+def resolve_networks(
+    references: Sequence[tuple[str, str]],
+    networks: Sequence[tuple[str, str]],
+    *,
+    root: Path | None = None,
+) -> tuple[Network, ...]:
+    """Attach detectors to each ``(run, label)`` pair from that run's own config.
+
+    ``references`` are the ``--network-run <experiment>/<run>`` values a figure
+    rule passed; ``networks`` is the ordered ``(run, label)`` legend, normally
+    :data:`astrogwb_paper.plotting.DETECTOR_NETWORKS`.
+
+    The two lists are matched *positionally* and checked, because declaration
+    order drives chain order, legend order, and the color/linestyle assignment
+    in the detector-comparison figures -- a mis-ordered flag list would render
+    a perfectly good figure with the wrong labels on the wrong curves. The
+    experiment is taken from the references rather than hard-coded, and all of
+    them must name the same one: comparing networks across experiments would
+    silently mix two different models.
+    """
+    # Imported here, not at module scope: `Network` lives in `plotting`, which
+    # imports matplotlib, and this module must stay importable by the Snakefile
+    # without it. Only figure scripts call this.
+    from astrogwb_paper.plotting import Network
+
+    if not networks:
+        raise ValueError("figure declares no detector networks")
+    expected = [name for name, _ in networks]
+    duplicates = sorted({run for run in expected if expected.count(run) > 1})
+    if duplicates:
+        raise ValueError("duplicate detector network(s): " + ", ".join(duplicates))
+
+    if len(references) != len(networks):
         raise ValueError(
-            f"{label} names unknown bank {name!r}; choose from {choices}"
-        ) from None
+            f"--network-run was given {len(references)} runs but the figure "
+            f"legend declares {len(networks)}"
+        )
+    experiments = {experiment for experiment, _ in references}
+    if len(experiments) != 1:
+        raise ValueError(
+            "every --network-run must name the same experiment, got: "
+            + ", ".join(sorted(experiments))
+        )
+    experiment = next(iter(experiments))
+    given = [run for _, run in references]
+    if given != expected:
+        raise ValueError(
+            "--network-run order must match the figure legend order.\n"
+            f"  given:    {', '.join(given)}\n"
+            f"  expected: {', '.join(expected)}"
+        )
+
+    resolved: list[Network] = []
+    for name, label in networks:
+        merged = assemble_run(experiment, name, root=root)
+        analysis = merged.get("analysis") or {}
+        detectors = analysis.get("detectors")
+        if not detectors:
+            raise ValueError(f"{experiment}/{name} declares no analysis.detectors")
+        resolved.append(Network(name, label, tuple(detectors)))
+    return tuple(resolved)
 
 
-def config_path(experiment: str, run: str) -> Path:
-    """Return the assembled JSON config path for one run."""
-    return CONFIGS_ROOT / experiment / f"{run}.json"
+def add_network_run_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the repeated ``--network-run`` flag the network figures take.
+
+    Three layers times eight runs of ``--config`` is unworkable, so the network
+    figures are handed run *names* and re-derive the layer paths themselves.
+    The workflow still declares those TOMLs as ``input:``, so the edges are
+    real.
+    """
+    parser.add_argument(
+        "--network-run",
+        dest="network_runs",
+        action="append",
+        type=parse_run_reference,
+        required=True,
+        metavar="EXPERIMENT/RUN",
+        help=(
+            "One detector-network run, as <experiment>/<run>; repeat once per "
+            "network, in the figure's legend order."
+        ),
+    )
 
 
-def chain_path(experiment: str, run: str) -> Path:
-    """Return the NetCDF chain path for one run."""
-    return CHAINS_ROOT / experiment / f"{run}.nc"
+def parse_run_reference(value: str) -> tuple[str, str]:
+    """Parse an ``<experiment>/<run>`` CLI reference into its two parts."""
+    experiment, sep, run = value.partition("/")
+    if not sep or not experiment or not run or "/" in run:
+        raise argparse.ArgumentTypeError(f"expected <experiment>/<run>, got {value!r}")
+    return experiment, run
 
 
 def run_target(experiment: str) -> str:
     """Return the Snakemake target that samples every run in an experiment."""
     return f"run_experiment_{experiment.replace('-', '_')}"
+
+
+def add_config_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the repeated ``--config`` layer flag shared by every entrypoint.
+
+    Mirrors :func:`astrogwb_paper.runtime.add_runtime_arguments`: one
+    definition, so all entrypoints spell the flag the same way.
+    """
+    parser.add_argument(
+        "--config",
+        dest="config",
+        action="append",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help=(
+            "One run-config layer file, in merge order; repeat once per layer "
+            "(base/*.toml, then the experiment _base.toml, then the run)."
+        ),
+    )
+
+
+def load_merged_config(args: argparse.Namespace) -> dict[str, Any]:
+    """Merge the ``--config`` layers an entrypoint was handed, order preserved.
+
+    Merge order is the caller's to get right now that no single function owns
+    it, and a wrong-but-valid order fails silently, so the resolved order is
+    logged before the merge and recorded next to every chain by
+    :mod:`astrogwb_paper.cli.run_mcmc`.
+    """
+    paths: list[Path] = list(args.config)
+    logger.info(
+        "Config layers (merge order): %s", " -> ".join(str(path) for path in paths)
+    )
+    return merge_config_layers(paths)

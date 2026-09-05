@@ -2,7 +2,8 @@
 
 Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
 style (solid), and a loader for ``paper.mplstyle``. This module is independent
-of the ``astrogwb`` package: it imports nothing from it.
+of the ``astrogwb`` package and of the config layer: it imports nothing from
+either.
 
 Convention:
 - category accents are the default color for single-posterior figures;
@@ -20,15 +21,30 @@ of the three network-comparison figures, and order is presentation.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import to_hex
 
-from astrogwb_paper.config.figures import Network
-
 _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
+
+
+@dataclass(frozen=True)
+class Network:
+    """One detector network: its run name, LaTeX label, and detector list.
+
+    The name and label are presentation, owned here alongside
+    ``DETECTOR_NETWORKS``. The detector list is scientific and is filled in
+    from the run's own config by
+    :func:`astrogwb_paper.config.runs.resolve_networks`.
+    """
+
+    name: str
+    label: str
+    detectors: tuple[str, ...]
+
 
 CATEGORY: dict[str, str] = {
     "cosmology": "#0072B2",
@@ -80,8 +96,8 @@ MERGER_RATE_LEGEND: dict[str, object] = {
 # `detector_network_styles`.
 #
 # Only the label is owned here. Each run's *detector list* is read back out of
-# that run's assembled config by
-# `astrogwb_paper.config.figures.resolve_networks`, so the detectors a figure
+# that run's own config layers by
+# `astrogwb_paper.config.runs.resolve_networks`, so the detectors a figure
 # reports an SNR for are always the ones its chain was sampled with.
 DETECTOR_NETWORKS: tuple[tuple[str, str], ...] = (
     ("ET-triangular", r"ET-$\Delta$"),

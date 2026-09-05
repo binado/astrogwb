@@ -39,7 +39,8 @@ from astrogwb_paper.config.banks import (
     read_bank_provenance,
     resolve_proposal,
 )
-from astrogwb_paper.config.figures import load_fiducials, load_proposal_spec
+from astrogwb_paper.config.mcmc import build_run_config
+from astrogwb_paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
 from astrogwb_paper.plotting import TRUTH, use_paper_style
 from matplotlib.axes import Axes as MplAxes
@@ -173,6 +174,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-h0-omega-m-pdf", type=Path, required=True)
     parser.add_argument("--output-xi0-n-pdf", type=Path, required=True)
     parser.add_argument("--figure-dpi", type=int, default=300)
+    add_config_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -180,11 +182,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
     catalog_path = resolve_paper_path(args.catalog, root)
-    fiducials = load_fiducials()
+    config = build_run_config(load_merged_config(args))
+    fiducials = dict(config.fiducials)
     use_paper_style()
 
-    spec = load_proposal_spec()
-    source = CatalogSource(catalog_path, None, spec, "proposal")
+    source = CatalogSource(catalog_path, None, config.catalog.proposal, "proposal")
     catalog = truncate_catalog_samples(
         source.compose(),
         label="proposal",
@@ -203,7 +205,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     proposal = resolve_proposal(
         madau_dickinson_proposal(provenance, label=str(catalog_path)),
         None,
-        uniform_mixing_fraction=spec.uniform_mixing_fraction,
+        uniform_mixing_fraction=config.catalog.proposal.uniform_mixing_fraction,
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
     )

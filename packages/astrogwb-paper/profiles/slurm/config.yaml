@@ -1,6 +1,6 @@
 # MCMC profile:
 #   snakemake --snakefile Snakefile \
-#     --allowed-rules assemble_config run_mcmc plot_cosmological_parameters \
+#     --allowed-rules validate run_mcmc plot_cosmological_parameters \
 #     --profile profiles/slurm plot_cosmological_parameters --dry-run
 # Requires `uv sync --package astrogwb-paper --extra cuda --group slurm`.
 # Job logs land under .snakemake/slurm_logs/.

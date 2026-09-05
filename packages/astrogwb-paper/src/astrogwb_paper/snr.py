@@ -18,13 +18,13 @@ from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.gwb import spectral_snr
 from astrogwb.utils import years_to_seconds
 
-from astrogwb_paper.config.mcmc import AnalysisGrid
+from astrogwb_paper.config.mcmc import AnalysisGrid, CatalogSpec
 from astrogwb_paper.inference import prepare_observation
 
 if TYPE_CHECKING:
     import pandas as pd
 
-    from astrogwb_paper.config.figures import Network
+    from astrogwb_paper.plotting import Network
 
 
 def compute_network_snrs(
@@ -33,23 +33,22 @@ def compute_network_snrs(
     fiducials: Mapping[str, float],
     *,
     grid: AnalysisGrid,
+    injection: CatalogSpec,
 ) -> pd.DataFrame:
     """Compute the fiducial matched-filter SNR for each detector network.
 
     ``injection_bank_path`` is the MD bank file the shared injection catalog
     draws from -- it requests every sample the bank holds, so no
-    uniform-redshift bank is needed here. The composition itself is read from
-    an assembled run config, so a figure's SNR is computed over the same
-    catalog the chains were sampled against.
+    uniform-redshift bank is needed here. ``injection`` is the composition
+    spec, passed in by the caller from the same merged run config that supplied
+    ``fiducials`` and ``grid``, so a figure's SNR is computed over the catalog
+    its chains were sampled against.
     """
     import pandas as pd
 
     from astrogwb_paper.catalogs import CatalogSource
-    from astrogwb_paper.config.figures import load_injection_spec
 
-    source = CatalogSource(
-        injection_bank_path, None, load_injection_spec(), "injection"
-    )
+    source = CatalogSource(injection_bank_path, None, injection, "injection")
     observation = prepare_observation(source, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies
     band = observation.frequency_mask

@@ -21,23 +21,33 @@ Mixture *compositions* are not banks: they are cheap, in-memory draws over one
 or two banks, declared inline by each run. See
 :class:`astrogwb_paper.catalogs.CatalogSource`.
 
-Deliberately JAX-free: the workflow and config layers can inspect provenance
-without initializing JAX or loading polarization power.
+Deliberately JAX-free *at import*: the ``Snakefile`` imports this module to
+build the DAG, so the two functions that reach ``astrogwb.catalog`` -- which
+pulls in JAX -- import it in their own bodies rather than at module scope. The
+workflow and config layers can therefore inspect provenance without
+initializing JAX or loading polarization power.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
-from astrogwb.catalog import PopulationMetadata
-from astrogwb.catalog.io import open_catalog, population_metadata_from_attrs
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from astrogwb_paper.config.mcmc import ProposalConfig
+from astrogwb_paper.config.mcmc import (
+    ProposalConfig,
+    RunConfig,
+)
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.utils import load_mapping
+
+if TYPE_CHECKING:
+    from astrogwb.catalog import PopulationMetadata
+
+logger = logging.getLogger(__name__)
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
@@ -192,6 +202,8 @@ class BankConfig(BaseModel):
 
     def to_population_metadata(self) -> PopulationMetadata:
         """Convert bank provenance into the core population metadata model."""
+        from astrogwb.catalog import PopulationMetadata
+
         return PopulationMetadata(
             name=self.population,
             seed=self.seed,
@@ -228,6 +240,8 @@ def read_bank_provenance(path: Path) -> BankConfig:
     to parsing the population config: the point of the attribute is that the
     config may have drifted since the bank was built.
     """
+    from astrogwb.catalog.io import open_catalog, population_metadata_from_attrs
+
     with open_catalog(path) as bank:
         metadata = population_metadata_from_attrs(bank.attrs, label=str(path))
     return BankConfig.from_population_metadata(metadata, label=str(path))
@@ -387,3 +401,81 @@ def _mapping(value: Any, *, label: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise TypeError(f"{label} must be a mapping")
     return value
+
+
+# --------------------------------------------------------------------------- #
+# Run-config gate: does a run name banks that exist, and compose them safely?
+# --------------------------------------------------------------------------- #
+def check_bank_references(
+    config: RunConfig,
+    *,
+    label: str,
+    banks: Mapping[str, BankGenerationConfig] | None = None,
+) -> None:
+    """Reject a run naming an unknown bank, or a self-correlated mixture.
+
+    Runs against the committed bank configs rather than the built bank files,
+    so a typo fails without building anything expensive. Without it the typo
+    would only surface as a Snakemake wildcard that matches no rule.
+
+    Lives here rather than in :mod:`astrogwb_paper.config.runs` because it
+    needs both a validated ``RunConfig`` and the bank registry, and that module
+    must stay importable by the ``Snakefile`` without pydantic.
+    """
+    known = banks if banks is not None else discover_banks()
+    for role, spec in (
+        ("injection", config.catalog.injection),
+        ("proposal", config.catalog.proposal),
+    ):
+        md = _require_bank(spec.md_bank, known, label=f"{label} catalog.{role}")
+        if spec.uniform_bank is None:
+            continue
+        uniform = _require_bank(
+            spec.uniform_bank, known, label=f"{label} catalog.{role}"
+        )
+        assert spec.mixture_seed is not None  # enforced by CatalogSpec
+        seeds = (md.seed, uniform.seed, spec.mixture_seed)
+        if len(set(seeds)) != len(seeds):
+            raise ValueError(
+                f"{label} catalog.{role}: md_bank seed, uniform_bank seed, and "
+                f"mixture_seed must all be distinct (got {seeds})"
+            )
+
+
+def _require_bank(
+    name: str, banks: Mapping[str, BankGenerationConfig], *, label: str
+) -> BankGenerationConfig:
+    try:
+        return banks[name]
+    except KeyError:
+        choices = ", ".join(banks)
+        raise ValueError(
+            f"{label} names unknown bank {name!r}; choose from {choices}"
+        ) from None
+
+
+def validate_all_runs(root: Path | None = None) -> list[str]:
+    """Merge, validate, and bank-check every declared run; return their labels.
+
+    The pre-flight gate ``astrogwb-assemble-config --all`` used to provide,
+    kept because its real value was never the JSON it wrote: it fails on the
+    first invalid run *before any bank is built*, and a bank is a GPU job.
+
+    It lives here rather than in :mod:`astrogwb_paper.config.runs` for the same
+    reason :func:`check_bank_references` does -- that module must stay
+    importable by the ``Snakefile`` without pydantic. Bank configs are loaded
+    once: this is one gate over all runs, not a per-run check.
+    """
+    from astrogwb_paper.config.mcmc import build_run_config
+    from astrogwb_paper.config.runs import assemble_run, discover_runs
+
+    banks = discover_banks(root)
+    labels: list[str] = []
+    for experiment, runs in discover_runs(root).items():
+        for run in runs:
+            label = f"{experiment}/{run}"
+            config = build_run_config(assemble_run(experiment, run, root=root))
+            check_bank_references(config, label=label, banks=banks)
+            logger.info("ok %s", label)
+            labels.append(label)
+    return labels

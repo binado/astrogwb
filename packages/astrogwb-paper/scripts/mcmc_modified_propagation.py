@@ -21,10 +21,11 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from arviz_base.labels import MapLabeller
-from astrogwb_paper.config.figures import (
-    Network,
-    load_analysis_grid,
-    load_fiducials,
+from astrogwb_paper.config.mcmc import build_run_config
+from astrogwb_paper.config.runs import (
+    add_config_arguments,
+    add_network_run_arguments,
+    load_merged_config,
     resolve_networks,
 )
 from astrogwb_paper.paths import paper_project_root, resolve_paper_path
@@ -33,6 +34,7 @@ from astrogwb_paper.plotting import (
     CORNER_LEVELS,
     DETECTOR_NETWORKS,
     TRUTH,
+    Network,
     combo_colors,
     get_corner_kwargs,
     use_paper_style,
@@ -68,8 +70,7 @@ H0_VAR_NAMES = ("xi_0", "H0")
 # parameter combinations of one network, so its labels name the combinations and
 # follow the order the rule passes --xi0-chain, --xi0-n-chain, --h0-chain. The
 # by-detector table borrows the shared network legend (`DETECTOR_NETWORKS`),
-# which the workflow also expands its chain paths from.
-PROPAGATION_EXPERIMENT = "modified-propagation"
+# which the workflow also expands its chain paths and --network-run flags from.
 MARGINAL_LABELS = (r"$\Xi_0$", r"$\Xi_0 + n$", r"$\Xi_0 + H_0$")
 H0_LABELS = (r"$\Xi_0 + H_0$",)
 
@@ -471,25 +472,28 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     # maximum. Adding it to [fiducials] would inject a spurious constant into
     # the sampled model.
     parser.add_argument("--importance-relative-ess", type=float, default=1.0)
+    add_config_arguments(parser)
+    add_network_run_arguments(parser)
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     root = paper_project_root()
-    grid = load_analysis_grid()
+    config = build_run_config(load_merged_config(args))
+    grid = config.analysis_grid
     fiducials = {
-        **load_fiducials(),
+        **config.fiducials,
         "importance_relative_ess": args.importance_relative_ess,
     }
-    networks = resolve_networks(PROPAGATION_EXPERIMENT, DETECTOR_NETWORKS)
+    networks = resolve_networks(args.network_runs, DETECTOR_NETWORKS)
     marginal_labels = list(MARGINAL_LABELS)
     h0_labels = list(H0_LABELS)
     detector_labels = [network.label for network in networks]
     if len(args.detector_xi0_n_chains) != len(networks):
         raise SystemExit(
             f"--detector-xi0-n-chains has {len(args.detector_xi0_n_chains)} paths "
-            f"but {PROPAGATION_EXPERIMENT} declares {len(networks)} networks"
+            f"but the figure declares {len(networks)} networks"
         )
 
     chain_paths = [
@@ -557,6 +561,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         networks,
         fiducials,
         grid=grid,
+        injection=config.catalog.injection,
     )
     xi0_n_constraint_table = build_snr_xi0_n_constraint_table(
         networks,
