@@ -42,31 +42,6 @@ def _condition_without_density(model, fixed_params):
     )
 
 
-def test_spectral_density_model_smoke_trace() -> None:
-    polarization_power = jnp.array([[1.0, 2.0], [5.0, 6.0]])
-    samples = {"mass_1": jnp.array([20.0, 30.0])}
-
-    def merger_rate_and_log_weights_fn(params, samples):
-        return jnp.array(1.0), jnp.zeros(2)
-
-    trace = handlers.trace(
-        handlers.seed(
-            spectral_density_model,
-            rng_seed=0,
-        )
-    ).get_trace(
-        polarization_power=polarization_power,
-        samples=samples,
-        observed_spectral_density=jnp.array([16.0, 48.0]),
-        effective_psd=jnp.ones(2),
-        **UNIT_SCALE_NOISE_KWARGS,
-        average_mode="catalog_inclination",
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
-    )
-
-    assert trace["spectral_density_obs"]["fn"].event_shape == (2,)
-
-
 def test_spectral_density_model_derives_the_gaussian_bin_scale() -> None:
     """The likelihood sigma must be exactly ``gaussian_bin_scale`` of the inputs.
 
@@ -196,29 +171,14 @@ _RECONSTRUCTION_KWARGS: dict[str, Any] = {
 """The same direction, spelled the way the reconstruction model takes it."""
 
 
-def test_amplitude_marginalized_model_registers_expected_sites() -> None:
-    trace = handlers.trace(
-        handlers.seed(amplitude_marginalized_model, rng_seed=0)
-    ).get_trace(
-        **_MARGINALIZED_KWARGS,
-        **_MARGINALIZATION_KWARGS,
-        priors={"tilt": dist.Normal(0.0, 1.0)},
-    )
-
-    assert "amplitude_mle" in trace
-    assert "template_optimal_snr" in trace
-    assert "importance_relative_ess" in trace
-    assert "template_merger_rate" in trace
-    np.testing.assert_allclose(
-        np.asarray(trace["template_merger_rate"]["value"]), FIDUCIAL_RATE
-    )
-    factor_site = trace["amplitude_marginalized_log_likelihood"]
-    assert isinstance(factor_site["fn"], dist.Unit)
-    assert np.isfinite(float(factor_site["fn"].log_factor))
-    assert "spectral_density_obs" not in trace
-
-
 def test_amplitude_statistics_match_explicit_sigma_weighted_sums() -> None:
+    """The published statistics are the sigma-space sums, not PSD-space ones.
+
+    Also pins, from the same trace, that the amplitude direction reaches the
+    potential as a ``numpyro.factor`` and never as an observed likelihood: a
+    ``spectral_density_obs`` site here would double-count the data against the
+    already-marginalized amplitude.
+    """
     tilt = jnp.array(0.3)
     model = _condition_without_density(amplitude_marginalized_model, {"tilt": tilt})
     trace = handlers.trace(handlers.seed(model, rng_seed=0)).get_trace(
@@ -248,6 +208,14 @@ def test_amplitude_statistics_match_explicit_sigma_weighted_sums() -> None:
         np.asarray(trace["template_optimal_snr"]["value"]),
         np.asarray(jnp.sqrt(template_norm)),
     )
+    # The published rate is the template's, at the pinned fiducial amplitude.
+    np.testing.assert_allclose(
+        np.asarray(trace["template_merger_rate"]["value"]), FIDUCIAL_RATE
+    )
+    factor_site = trace["amplitude_marginalized_log_likelihood"]
+    assert isinstance(factor_site["fn"], dist.Unit)
+    assert np.isfinite(float(factor_site["fn"].log_factor))
+    assert "spectral_density_obs" not in trace
 
 
 def test_amplitude_marginalized_model_pins_the_amplitude_to_its_fiducial() -> None:

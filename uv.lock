@@ -225,6 +225,10 @@ tpu = [
 ]
 
 [package.dev-dependencies]
+fixture = [
+    { name = "gwmock-pop" },
+    { name = "pyyaml" },
+]
 test = [
     { name = "gwmock-pop" },
     { name = "pytest" },
@@ -246,6 +250,10 @@ requires-dist = [
 provides-extras = ["cuda", "simulation", "tpu"]
 
 [package.metadata.requires-dev]
+fixture = [
+    { name = "gwmock-pop", specifier = "==0.11.4" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+]
 test = [
     { name = "gwmock-pop", specifier = ">=0.11.4" },
     { name = "pytest", specifier = ">=9.0.2" },
