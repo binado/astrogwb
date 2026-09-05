@@ -361,6 +361,3 @@ __pycache__
 # silently ignored every config/ file that was not already tracked.
 **/config/scratch/
 .DS_Store
-
-# Scratch venv for the wheel smoke test (just smoke-wheel).
-.wheel-venv/

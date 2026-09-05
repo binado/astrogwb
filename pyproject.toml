@@ -18,8 +18,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 # The publishable core. Everything the paper application needs -- pydantic,
-# arviz, xarray -- is an extra, so `pip install astrogwb` stays lean and the
-# wheel smoke test in CI can prove it.
+# arviz, xarray -- is an extra, so `pip install astrogwb` stays lean.
 dependencies = [
     "gwmock-noise>=0.10.1",
     "gwmock-signal[jax]>=0.15.0",
