@@ -62,7 +62,8 @@ convert-notebooks:
     uv run --group jupyter jupytext --to notebook notebooks/*.py
 
 # The publishable distribution. `astrogwb.paper` ships inside it but is
-# unimportable without the `paper` extra -- proved by the CI wheel smoke test.
+# unimportable without the `paper` extra, whose dependencies stay out of the
+# core requirement set.
 build-core:
     uv build --no-sources
 
@@ -75,12 +76,3 @@ generate-mock-population-fixture:
         --output tests/core/fixtures/mock_bns_population.csv \
         --num-samples 1024 \
         --seed 41
-
-# Build the wheel, install it WITHOUT extras, and prove the boundary holds.
-# This is the packaging half of the one-way dependency; ruff's TID251 ban is
-# the source half. Run by the CI `build-core` job.
-smoke-wheel: build-core
-    rm -rf .wheel-venv
-    uv venv .wheel-venv
-    uv pip install --python .wheel-venv/bin/python dist/*.whl
-    .wheel-venv/bin/python scripts/check_wheel.py

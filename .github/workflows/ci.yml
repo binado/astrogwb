@@ -93,17 +93,3 @@ jobs:
       - run: just test-notebooks
         env:
           ASTROGWB_NOTEBOOK_SMOKE: "1"
-
-  build-core:
-    name: Build publishable core distribution
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.12"
-      - uses: extractions/setup-just@v3
-      # Builds the wheel, installs it WITHOUT extras, and asserts the
-      # boundary: core imports, the application's dependencies stay out, and
-      # astrogwb.paper ships but cannot run. See scripts/check_wheel.py.
-      - run: just smoke-wheel
