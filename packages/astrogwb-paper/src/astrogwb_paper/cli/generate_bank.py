@@ -38,10 +38,10 @@ from astrogwb.catalog import (
     FrequencyDomainWaveformMetadata,
     simulate_population,
 )
+from astrogwb.catalog.io import save_catalog
 from astrogwb.waveform import polarization_power
 from gwmock_signal.waveform import RippleBackend
 
-from astrogwb_paper.catalog_io import save_catalog
 from astrogwb_paper.config.banks import (
     BankConfig,
     BankGenerationConfig,

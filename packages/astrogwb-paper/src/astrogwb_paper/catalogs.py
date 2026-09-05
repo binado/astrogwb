@@ -11,6 +11,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import xarray as xr
+from astrogwb.catalog.io import open_catalog
 from astrogwb.gwb import spectral_density
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
@@ -18,7 +19,6 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb.waveform import apply_gw_distance_to_power
 from numpy.typing import ArrayLike
 
-from astrogwb_paper.catalog_io import open_catalog
 from astrogwb_paper.config.mcmc import CatalogSpec, ProposalConfig
 
 #: Bank attributes both components of a mixture must agree on. Concatenating

@@ -217,6 +217,10 @@ dependencies = [
 cuda = [
     { name = "jax", extra = ["cuda12"] },
 ]
+io = [
+    { name = "h5netcdf", extra = ["h5py"] },
+    { name = "xarray" },
+]
 simulation = [
     { name = "gwmock-pop" },
 ]
@@ -240,14 +244,16 @@ requires-dist = [
     { name = "gwmock-noise", specifier = ">=0.10.1" },
     { name = "gwmock-pop", marker = "extra == 'simulation'", specifier = ">=0.11.4" },
     { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.15.0" },
+    { name = "h5netcdf", extras = ["h5py"], marker = "extra == 'io'", specifier = ">=1.8.1" },
     { name = "jax", marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
     { name = "jax", extras = ["cpu"], marker = "sys_platform != 'linux'", specifier = ">=0.11.0" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda'", specifier = ">=0.11.0" },
     { name = "jax", extras = ["tpu"], marker = "extra == 'tpu'", specifier = ">=0.11.0" },
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "numpyro", specifier = ">=0.21.0" },
+    { name = "xarray", marker = "extra == 'io'", specifier = ">=2025.1" },
 ]
-provides-extras = ["cuda", "simulation", "tpu"]
+provides-extras = ["cuda", "io", "simulation", "tpu"]
 
 [package.metadata.requires-dev]
 fixture = [
@@ -266,7 +272,7 @@ version = "0.1.0"
 source = { editable = "packages/astrogwb-paper" }
 dependencies = [
     { name = "arviz", extra = ["h5netcdf"] },
-    { name = "astrogwb" },
+    { name = "astrogwb", extra = ["io"] },
     { name = "gwmock-pop" },
     { name = "gwmock-signal", extra = ["jax"] },
     { name = "h5netcdf", extra = ["h5py"] },
@@ -372,8 +378,8 @@ requires-dist = [
     { name = "arviz-base", marker = "extra == 'notebook'", specifier = ">=1.2.0" },
     { name = "arviz-plots", marker = "extra == 'notebook'", specifier = ">=1.2.0" },
     { name = "arviz-stats", extras = ["xarray"], marker = "extra == 'notebook'", specifier = ">=1.2.0" },
-    { name = "astrogwb", editable = "packages/astrogwb" },
     { name = "astrogwb", extras = ["cuda"], marker = "extra == 'cuda'", editable = "packages/astrogwb" },
+    { name = "astrogwb", extras = ["io"], editable = "packages/astrogwb" },
     { name = "astrogwb", extras = ["tpu"], marker = "extra == 'tpu'", editable = "packages/astrogwb" },
     { name = "corner", marker = "extra == 'notebook'", git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" },
     { name = "gwmock-pop", specifier = ">=0.11.4" },

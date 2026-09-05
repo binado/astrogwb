@@ -13,7 +13,7 @@ from astrogwb.catalog import (
     FrequencyDomainWaveformMetadata,
     PopulationMetadata,
 )
-from astrogwb_paper.catalog_io import (
+from astrogwb.catalog.io import (
     DOMAIN_FREQUENCY,
     FORMAT_NAME,
     RESERVED_ATTRS,
