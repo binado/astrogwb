@@ -173,7 +173,7 @@ def run(
     )
     model, marginalization = build_model(
         config,
-        merger_rate_and_log_weights_fn=inputs.merger_rate_and_log_weights_fn,
+        spectral_density_fn=inputs.estimator,
     )
 
     sampler = config.sampler

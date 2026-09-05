@@ -3,9 +3,9 @@
 Every entrypoint that samples, profiles, or plots the fiducial spectrum runs
 the same sequence: load the catalogs, validate them, build the fiducial
 injection spectrum, build the effective PSD, build the analysis-band mask,
-build the importance-weight closure, build the model. It used to be spelled
-out at eight call sites, two of which were near-verbatim clones of each other
-down to the model-building block.
+build the importance catalog and its estimator, build the model. It used to be
+spelled out at eight call sites, two of which were near-verbatim clones of each
+other down to the model-building block.
 
 JAX ops run only inside functions, after ``runtime.configure_runtime``. Importing
 this module loads ``jax`` but does not initialize the XLA backend; a subprocess
@@ -31,18 +31,22 @@ import xarray as xr
 from numpyro import handlers
 from numpyro.distributions import Distribution
 
+from astrogwb.catalog import ImportanceCatalog
+from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import effective_psd as compute_effective_psd
-from astrogwb.detector import load_sensitivity_map
+from astrogwb.detector import gaussian_bin_scale, load_sensitivity_map
 from astrogwb.distributions.amplitude import (
     AmplitudeFn,
     MergerRateAmplitudeFn,
     quadrature_grid,
 )
 from astrogwb.frequency import frequency_mask as make_frequency_mask
+from astrogwb.gwb import AverageMode
+from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
-    make_merger_rate_and_log_weights_fn,
+    bns_population,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
@@ -55,9 +59,11 @@ from astrogwb.paper.catalogs import (
     validate_matching_frequency_grids,
 )
 from astrogwb.paper.config.mcmc import AnalysisGrid, ProposalConfig, RunConfig
-from astrogwb.sampling.models import (
-    amplitude_marginalized_model,
-    spectral_density_model,
+from astrogwb.sampling import (
+    SpectralDensityFn,
+    gwb_amplitude_marginalized_model,
+    gwb_spectral_density_model,
+    with_renamed_diagnostics,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,22 +94,24 @@ class InferenceInputs:
     proposal: xr.Dataset
     effective_psd: jax.Array
     observation_time: float
-    merger_rate_and_log_weights_fn: Any
+    estimator: SpectralDensityImportanceEstimator
+    """The masked, band-restricted catalog bound to its population factory."""
 
     def masked_model_kwargs(self) -> dict[str, Any]:
-        """Restrict to the analysis band and return the model's keyword inputs."""
+        """Restrict to the analysis band and return the model's data inputs.
+
+        The generic likelihood takes only the observation and the per-bin
+        Gaussian scale: the catalog and the inclination convention already
+        live inside :attr:`estimator`, and the PSD, observation time, and bin
+        width are consumed here rather than inside the model.
+        """
         observation = self.observation
         mask = np.asarray(observation.frequency_mask)
-        # `source_parameters` has no `frequency` dim, so `isel` cannot touch it --
-        # the old "NOT masked" hazard is now structurally enforced.
-        band = self.proposal.isel(frequency=mask)
         return {
-            "polarization_power": jnp.asarray(band.polarization_power.values),
-            "samples": samples_from_catalog(band),
             "observed_spectral_density": observation.spectral_density[mask],
-            "effective_psd": self.effective_psd[mask],
-            "observation_time": self.observation_time,
-            "df": observation.df,
+            "scale": gaussian_bin_scale(
+                self.effective_psd[mask], self.observation_time, observation.df
+            ),
         }
 
 
@@ -206,8 +214,15 @@ def prepare_inference_inputs(
     proposal_config: ProposalConfig,
     grid: AnalysisGrid,
     detectors: Sequence[str],
+    average_mode: AverageMode = "analytic_inclination",
 ) -> InferenceInputs:
-    """Build every array the model is evaluated against, from the two catalogs."""
+    """Build every array the model is evaluated against, from the two catalogs.
+
+    ``average_mode`` is the inclination convention the spectrum contraction
+    uses. It belongs here rather than at the model-building sites because the
+    estimator owns it: once the catalog is bound, the model itself never sees
+    a polarization power array to average.
+    """
     observation = prepare_observation(injection, fiducials=fiducials, grid=grid)
     proposal_catalog = propagate_catalog(proposal, fiducials=dict(fiducials))
     n_loaded = proposal_catalog.polarization_power.shape[1]
@@ -263,20 +278,45 @@ def prepare_inference_inputs(
         )
     observation = replace(observation, frequency_mask=band_mask)
 
-    proposal_redshift = proposal_catalog.source_parameters.sel(
-        parameter="redshift"
-    ).values
-    merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
-        fiducials=dict(fiducials),
-        redshift_grid=observation.redshift_grid,
-        proposal_logprob=compute_proposal_logprob(proposal_redshift, proposal_config),
+    # The band mask restricts the power and nothing else: masking the source
+    # samples would silently truncate the population and change every
+    # posterior without erroring. `isel(frequency=...)` is what makes that
+    # structural rather than a rule to remember -- `source_parameters` has no
+    # `frequency` dim, so the slice cannot reach it even by accident.
+    samples = samples_from_catalog(proposal_catalog)
+    band = proposal_catalog.isel(frequency=np.asarray(band_mask))
+
+    # `propagate_catalog` divided the stored power by xi(z)^2, so the distance
+    # that power actually corresponds to is the *effective* one, not the EM
+    # distance still sitting in `source_parameters`. `ImportanceCatalog` takes
+    # that effective distance directly and never corrects it again -- so the
+    # fiducial correction is applied here, exactly once.
+    log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
+        samples["redshift"], fiducials["xi_0"], fiducials["xi_n"]
+    )
+    # The proposal is an MD/uniform *mixture*, not a single population, so it
+    # is cached through the ordinary constructor rather than
+    # `ImportanceCatalog.from_population`. Evaluating it here, once, is also
+    # what keeps it off the per-sampler-step path.
+    catalog = ImportanceCatalog(
+        source_parameters=samples,
+        polarization_power=jnp.asarray(band.polarization_power.values),
+        proposal_log_prob=compute_proposal_logprob(
+            samples["redshift"], proposal_config
+        ),
+        log_reference_distance=log_reference_distance,
+    )
+    estimator = SpectralDensityImportanceEstimator(
+        catalog,
+        partial(bns_population, redshift_grid=observation.redshift_grid),
+        average_mode,
     )
     return InferenceInputs(
         observation=observation,
         proposal=proposal_catalog,
         effective_psd=effective_psd_arr,
         observation_time=grid.observation_time,
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+        estimator=estimator,
     )
 
 
@@ -299,7 +339,7 @@ def _fix_model_params(model: Any, fixed_params: Mapping[str, Any]) -> Any:
 def build_model(
     config: RunConfig,
     *,
-    merger_rate_and_log_weights_fn: Any,
+    spectral_density_fn: SpectralDensityFn,
 ) -> tuple[Any, AmplitudeMarginalization | None]:
     """Build the NumPyro model this config describes.
 
@@ -307,8 +347,9 @@ def build_model(
     :class:`~astrogwb.paper.inference.AmplitudeMarginalization` built for an
     amplitude-marginalized run, or ``None`` for the default likelihood.
 
-    Depends only on the config and the weights closure -- no catalog array --
-    so it is exercisable without generating one.
+    Depends only on the config and the spectrum callable -- no catalog array --
+    so it is exercisable without generating one. Production runs pass
+    ``inputs.estimator``; an analytic spectrum works just as well.
     """
     analysis = config.analysis
     # `config.priors` holds every live parameter distribution. Fixed sites are
@@ -350,11 +391,17 @@ def build_model(
         }
         model = _fix_model_params(
             partial(
-                amplitude_marginalized_model,
-                average_mode="analytic_inclination",
-                merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+                gwb_amplitude_marginalized_model,
+                # The spectrum is evaluated at the pinned fiducial amplitude,
+                # so its rate is the *template* rate. Renaming it here is what
+                # keeps a template quantity out of the `total_merger_rate`
+                # site that post-processing reconstructs.
+                spectral_density_fn=with_renamed_diagnostics(
+                    spectral_density_fn,
+                    {"total_merger_rate": "template_merger_rate"},
+                ),
                 amplitude_parameter=parameter,
-                fiducials=config.fiducials,
+                amplitude_fiducial=marginalization.fiducial,
                 amplitude_fn=marginalization.amplitude_fn,
                 amplitude_prior=marginalization.prior,
                 amplitude_grid=marginalization.grid,
@@ -366,9 +413,8 @@ def build_model(
 
     model = _fix_model_params(
         partial(
-            spectral_density_model,
-            average_mode="analytic_inclination",
-            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+            gwb_spectral_density_model,
+            spectral_density_fn=spectral_density_fn,
             priors=priors,
         ),
         config.fixed_params,

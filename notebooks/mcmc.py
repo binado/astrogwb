@@ -163,13 +163,16 @@ from matplotlib.projections import register_projection
 from numpyro import handlers
 from numpyro.infer import MCMC, NUTS
 
-from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.catalog import ImportanceCatalog
+from astrogwb.cosmology import log_gw_em_ratio
+from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
+from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    make_merger_rate_and_log_weights_fn,
+    bns_population,
 )
 from astrogwb.paper.catalogs import (
     compute_fiducial_injection_spectrum,
@@ -182,7 +185,7 @@ from astrogwb.paper.catalogs import (
 )
 from astrogwb.paper.config.mcmc import ProposalConfig, build_run_config
 from astrogwb.paper.config.runs import assemble_run
-from astrogwb.sampling.models import spectral_density_model
+from astrogwb.sampling import gwb_spectral_density_model
 
 register_projection(MplAxes)
 
@@ -392,15 +395,12 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 #
 # ### Implementing the model
 #
-# To implement and use the importance sampling model in the pipeline, it suffices to implement a
-#
-# ```python
-# def merger_rate_and_log_weights(parameters: jax.Array, samples: jax.Array):
-#     pass
-# ```
-#
-#
-# which returns a tuple of (merger rate, log importance weights). While it would be conceptually simpler to pass separate functions for each quantity, encapsulating all the logic in a single function allows the caller to efficiently implement the cosmology integrals which are used in both calculations.
+# The pipeline expresses this as a `Population` -- a source density plus the
+# distance and total rate it implies -- built at the sampled parameters by a
+# `params -> Population` factory. `SpectralDensityImportanceEstimator` pairs
+# one such factory with a fixed `ImportanceCatalog` and returns the spectrum
+# the sampling model consumes. Encapsulating density, distance, and rate in one
+# object is what lets the cosmology integrals, which all three need, be shared.
 #
 # Evaluate the fixed catalog proposal density in memory.
 
@@ -424,16 +424,21 @@ proposal_logprob = compute_proposal_logprob(
 
 
 # %% [markdown]
-# The `merger_rate_and_log_weights` callback is packaged in
+# The population is packaged in
 # `astrogwb.importance.models.bns_madau_dickinson_modified_propagation`
-# (BNS + Madau-Dickinson rate + modified GW/EM propagation). We bind the
-# canonical, tested factory to this notebook's proposal catalog here.
+# (BNS + Madau-Dickinson rate + modified GW/EM propagation). The catalog caches
+# everything that does not depend on the sampled parameters: the proposal
+# density evaluated above, and the reference distance the stored power
+# corresponds to.
+#
+# `propagate_catalog` divided the power by $\xi(z)^2$ but left
+# `source_parameters["luminosity_distance"]` as the *EM* distance, so the
+# effective reference distance is $\log d_{\mathrm{EM}} + \log \xi$. It is
+# applied here exactly once: `ImportanceCatalog` never corrects it again.
 
 # %%
-merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
-    fiducials=fiducials,
-    redshift_grid=z_grid,
-    proposal_logprob=proposal_logprob,
+log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
+    samples["redshift"], fiducials["xi_0"], fiducials["xi_n"]
 )
 
 
@@ -500,14 +505,26 @@ frequencies, polarization_power, observed_spectral_density, effective_psd_arr = 
 # %% [markdown]
 # ## Running the MCMC
 #
-# We run the NUTS sampler as implemented in the `numpyro` python package.
+# We run the NUTS sampler as implemented in the `numpyro` python package. The
+# estimator is built *after* the frequency mask, since it owns the
+# band-restricted power; the source samples keep their full length.
 
 # %%
+estimator = SpectralDensityImportanceEstimator(
+    ImportanceCatalog(
+        source_parameters=samples,
+        polarization_power=polarization_power,
+        proposal_log_prob=proposal_logprob,
+        log_reference_distance=log_reference_distance,
+    ),
+    partial(bns_population, redshift_grid=z_grid),
+    "analytic_inclination",
+)
 base_model = partial(
-    spectral_density_model,
-    average_mode="analytic_inclination",
-    merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+    gwb_spectral_density_model,
+    spectral_density_fn=estimator,
     priors=priors,
+    scale=gaussian_bin_scale(effective_psd_arr, observation_time, df),
 )
 model = handlers.block(
     handlers.condition(base_model, data=fixed_params),
@@ -532,12 +549,7 @@ mcmc = MCMC(
 rng_key = jax.random.PRNGKey(seed)
 mcmc.run(
     rng_key,
-    polarization_power=polarization_power,
-    samples=samples,
     observed_spectral_density=observed_spectral_density,
-    effective_psd=effective_psd_arr,
-    observation_time=observation_time,
-    df=df,
     extra_fields=("num_steps", "accept_prob", "diverging"),
 )
 mcmc.print_summary()
