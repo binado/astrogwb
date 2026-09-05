@@ -29,11 +29,16 @@ include = [
     "packages/*/tests/**/*.py",
     "packages/astrogwb/examples/**/*.py",
     "packages/astrogwb-paper/scripts/**/*.py",
+    "packages/astrogwb-paper/notebooks/**/*.py",
 ]
 
-# Colab bootstrap + configure_runtime must run before JAX-touching imports.
 [tool.ruff.lint.per-file-ignores]
+# Colab bootstrap + configure_runtime must run before JAX-touching imports.
 "packages/astrogwb-paper/notebooks/mcmc.py" = ["E402"]
+# B018: a bare name on a cell's last line is how a notebook renders a value,
+# not a useless expression. DTZ005: run-artifact filenames are stamped with
+# local wall-clock time on purpose, so the author recognizes their own runs.
+"packages/astrogwb-paper/notebooks/**/*.py" = ["B018", "DTZ005"]
 
 [tool.ty.src]
 include = [

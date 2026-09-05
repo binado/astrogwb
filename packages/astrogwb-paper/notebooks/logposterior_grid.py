@@ -45,13 +45,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
-from matplotlib.axes import Axes as MplAxes
-from matplotlib.colors import LinearSegmentedColormap, colorConverter
-from matplotlib.projections import register_projection
-from numpyro import handlers
-from numpyro.infer.util import log_density
-from scipy.ndimage import gaussian_filter
-
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import (
@@ -63,8 +56,8 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
 from astrogwb.sampling.models import spectral_density_model
 from astrogwb_paper.catalogs import (
     CatalogSource,
-    compute_proposal_logprob,
     compute_fiducial_injection_spectrum,
+    compute_proposal_logprob,
     propagate_catalog,
     samples_from_catalog,
     truncate_catalog_samples,
@@ -73,6 +66,12 @@ from astrogwb_paper.catalogs import (
 from astrogwb_paper.config.figures import load_injection_spec, load_proposal_spec
 from astrogwb_paper.config.mcmc import ProposalConfig
 from astrogwb_paper.paths import paper_project_root
+from matplotlib.axes import Axes as MplAxes
+from matplotlib.colors import LinearSegmentedColormap, colorConverter
+from matplotlib.projections import register_projection
+from numpyro import handlers
+from numpyro.infer.util import log_density
+from scipy.ndimage import gaussian_filter
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
 # matplotlib axes so plotting behaves as expected after importing detector utilities.
