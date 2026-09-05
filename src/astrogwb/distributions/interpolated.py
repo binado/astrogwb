@@ -103,12 +103,24 @@ class InterpolatedDistribution(dist.Distribution):
     def log_prob(self, value: ArrayLike) -> jax.Array:
         """Log density, ``-inf`` off the table.
 
+        Formed as ``log(interp(y) / norm)``: interpolate the unnormalized
+        table, divide, then take one log. Linear interpolation is homogeneous,
+        so ``interp(y / norm)`` is the same density, and ``log(interp(y)) -
+        log(norm)`` is too, but both differ in the last bit and the second
+        cancels two logs of order tens, which turns a one-ulp difference in
+        a batched ``norm`` into a relative error near ``1e-15``. This is also
+        the operation order of the hand-written reference,
+        :func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.compute_merger_rate_distance_and_logprob`,
+        and matching it bit-for-bit is what keeps a catalog that is its own
+        proposal at *exactly* zero log-weight -- an identity
+        ``tests/core/test_frequency_resolution.py`` builds on.
+
         Deliberately not ``@validate_sample``-decorated: importance weights
         built on this depend on getting ``-inf`` for an out-of-grid sample,
         not an exception.
         """
-        pdf = jnp.interp(value, self.x, self.normalized_y, left=0.0, right=0.0)
-        return jnp.log(pdf)
+        unnormalized_pdf = jnp.interp(value, self.x, self.y, left=0.0, right=0.0)
+        return jnp.log(unnormalized_pdf / self.norm)
 
     def icdf(self, q: ArrayLike) -> jax.Array:
         """Inverse CDF by linear-in-CDF inversion on :attr:`cdf_grid`."""

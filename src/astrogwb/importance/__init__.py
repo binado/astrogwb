@@ -8,6 +8,8 @@ cosmology primitives they share.
 Import from explicit submodules rather than this package root:
 
 - :mod:`astrogwb.cosmology` — shared cosmology helpers
+- :mod:`astrogwb.importance.population` — populations as pytrees of
+  distributions, and the importance weights between two of them
 - :mod:`astrogwb.importance.protocol` — the callback protocol
 - :mod:`astrogwb.importance.diagnostics` — effective sample size helper
 - :mod:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation` —
