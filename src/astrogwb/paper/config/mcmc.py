@@ -11,9 +11,9 @@ in ``tests/test_prior_native_types.py`` (re-running ``set_host_device_count``
 after a backend init is a silent no-op, hence the subprocess).
 
 The generic merge/load helpers (``deep_merge``, ``load_mapping``) live in
-:mod:`astrogwb.paper.utils`, and the run-assembly merge semantics
-(``merge_run_overlay``) in :mod:`astrogwb.paper.config.runs`; only the
-``AnalysisGrid`` shared by every experiment run lives here next to the models.
+:mod:`astrogwb.paper.utils`, and the run-assembly merge semantics live in
+:mod:`astrogwb.paper.config.runs`; only the ``AnalysisGrid`` shared by every
+experiment run lives here next to the models.
 """
 
 from __future__ import annotations
@@ -383,24 +383,6 @@ class RunConfig(BaseModel):
         return {k: v for k, v in self.fiducials.items() if k not in self.sampled_params}
 
     @property
-    def posterior_params(self) -> tuple[str, ...]:
-        """Parameters present in the saved posterior group.
-
-        A superset of `sampled_params`, which means strictly "parameters NUTS
-        has a latent for". Under an amplitude-marginalized likelihood the two
-        sets differ: the amplitude parameter is integrated out of the potential
-        and has no latent, so it must stay out of `sampled_params` (its prior
-        drives the numerical marginalization), yet post-processing reconstructs
-        it into the posterior via
-        `amplitude_reconstruction_model`. Use this for anything describing the
-        saved chain -- plot `var_names`, run records, summaries.
-        """
-        amplitude_parameter = self.analysis.amplitude_parameter
-        if amplitude_parameter is None:
-            return self.sampled_params
-        return (*self.sampled_params, amplitude_parameter)
-
-    @property
     def analysis_grid(self) -> AnalysisGrid:
         """The frequency band and redshift grid this run's inputs are built on.
 
@@ -415,14 +397,6 @@ class RunConfig(BaseModel):
             maximum_redshift=self.cosmology.maximum_redshift,
             n_grid=self.cosmology.n_grid,
         )
-
-    @property
-    def outdir(self) -> Path:
-        return self.output.outdir
-
-    @property
-    def label(self) -> str:
-        return self.output.label
 
 
 def save_config(config: RunConfig, path: Path) -> None:

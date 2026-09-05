@@ -24,13 +24,11 @@ from astrogwb.paper.config.runs import (
     RUNS_DIR,
     assemble_run,
     base_config_paths,
-    catalog_bank_names,
     discover_runs,
     load_base,
     merge_config_layers,
     resolve_bank_names,
     run_config_paths,
-    run_target,
 )
 from astrogwb.paper.utils import load_mapping
 
@@ -77,11 +75,10 @@ def test_every_experiment_has_the_required_base_overlay() -> None:
         assert (PAPER_ROOT / RUNS_DIR / experiment / EXPERIMENT_BASE).is_file()
 
 
-def test_output_paths_follow_from_the_run_name() -> None:
+def test_chain_output_root_is_fixed() -> None:
     # There is no assembled-config path any more: a run is addressed by its
     # layer files going in and by its chain coming out.
     assert CHAINS_ROOT == Path("outputs/chains")
-    assert run_target("variable-catalog-size") == "run_experiment_variable_catalog_size"
 
 
 def test_run_config_paths_are_the_three_layers_in_merge_order() -> None:
@@ -220,7 +217,7 @@ def test_variable_proposal_guard_samples_h0_md() -> None:
         assert config.sampled_params == ("gamma", "kappa", "z_peak"), run
         assert config.analysis.likelihood == "amplitude_marginalized"
         assert config.analysis.amplitude_parameter == "H0"
-        assert config.posterior_params == ("gamma", "kappa", "z_peak", "H0")
+        assert "H0" in config.priors
         assert config.sampler.dense_mass is True
         assert config.sampler.num_warmup == 1000
 
@@ -299,11 +296,29 @@ def test_resolve_bank_names_are_the_distinct_banks_both_roles_need() -> None:
     ]
 
 
-def test_catalog_bank_names_requires_both_roles() -> None:
-    with pytest.raises(TypeError, match=r"\[catalog.proposal\] table"):
-        catalog_bank_names({"catalog": {"injection": {"md_bank": "a"}}})
-    with pytest.raises(TypeError, match=r"\[catalog\] table"):
-        catalog_bank_names({})
+@pytest.mark.parametrize(
+    ("base_config", "message"),
+    [
+        (
+            '[catalog.injection]\nmd_bank = "a"\n',
+            r"\[catalog.proposal\] table",
+        ),
+        ("seed = 1\n", r"\[catalog\] table"),
+    ],
+)
+def test_resolve_bank_names_rejects_malformed_catalogs(
+    tmp_path: Path, base_config: str, message: str
+) -> None:
+    base = tmp_path / "config/analysis/base"
+    experiment = tmp_path / "config/analysis/runs/demo"
+    base.mkdir(parents=True)
+    experiment.mkdir(parents=True)
+    (base / "catalog.toml").write_text(base_config, encoding="utf-8")
+    (experiment / EXPERIMENT_BASE).write_text("", encoding="utf-8")
+    (experiment / "only.toml").write_text("", encoding="utf-8")
+
+    with pytest.raises(TypeError, match=message):
+        resolve_bank_names("demo", "only", root=tmp_path)
 
 
 # --------------------------------------------------------------------------- #

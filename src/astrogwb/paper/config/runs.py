@@ -53,7 +53,7 @@ EXPERIMENT_BASE = "_base.toml"
 CHAINS_ROOT = Path("outputs/chains")
 
 
-def merge_run_overlay(
+def _merge_run_overlay(
     base: Mapping[str, Any], override: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Merge a run overlay, replacing named prior tables wholesale.
@@ -79,7 +79,7 @@ def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
     """Fold run-config layer files into one raw mapping, in the order given.
 
     This is a *run-config* parser, not generic config infrastructure: it folds
-    :func:`merge_run_overlay`, whose prior-replacement rule is domain-specific.
+    :func:`_merge_run_overlay`, whose prior-replacement rule is domain-specific.
     A run that swaps a uniform prior for a normal one must not inherit the
     uniform's ``low`` / ``high``, and a plain deep merge would leave them
     behind.
@@ -93,7 +93,7 @@ def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
         raise ValueError("no config layers given")
     merged: dict[str, Any] = {}
     for path in paths:
-        merged = merge_run_overlay(merged, load_mapping(path))
+        merged = _merge_run_overlay(merged, load_mapping(path))
     return merged
 
 
@@ -177,7 +177,7 @@ def assemble_run(
     return merge_config_layers(run_config_paths(experiment, run, root=root))
 
 
-def catalog_bank_names(raw: Mapping[str, Any]) -> list[str]:
+def _catalog_bank_names(raw: Mapping[str, Any]) -> list[str]:
     """Sorted distinct bank names named by a raw config's ``[catalog]`` block."""
     catalog = raw.get("catalog")
     if not isinstance(catalog, Mapping):
@@ -204,7 +204,7 @@ def resolve_bank_names(
     :class:`~astrogwb.paper.config.mcmc.RunConfig`: the DAG must be buildable
     without paying for full validation of all 26 runs.
     """
-    return catalog_bank_names(assemble_run(experiment, run, root=root))
+    return _catalog_bank_names(assemble_run(experiment, run, root=root))
 
 
 def resolve_networks(
@@ -298,11 +298,6 @@ def parse_run_reference(value: str) -> tuple[str, str]:
     if not sep or not experiment or not run or "/" in run:
         raise argparse.ArgumentTypeError(f"expected <experiment>/<run>, got {value!r}")
     return experiment, run
-
-
-def run_target(experiment: str) -> str:
-    """Return the Snakemake target that samples every run in an experiment."""
-    return f"run_experiment_{experiment.replace('-', '_')}"
 
 
 def add_config_arguments(parser: argparse.ArgumentParser) -> None:

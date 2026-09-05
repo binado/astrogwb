@@ -74,8 +74,8 @@ from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
-    from astrogwb.paper.amplitude import AmplitudeMarginalization
     from astrogwb.paper.catalogs import CatalogSource
+    from astrogwb.paper.inference import AmplitudeMarginalization
 
 logger = logging.getLogger("run_mcmc")
 
@@ -149,7 +149,7 @@ def run(
     """Replicate the notebook inference cells headlessly and return the MCMC object.
 
     Returns ``(mcmc, marginalization)``, where ``marginalization`` is the
-    :class:`~astrogwb.paper.amplitude.AmplitudeMarginalization` built for an
+    :class:`~astrogwb.paper.inference.AmplitudeMarginalization` built for an
     amplitude-marginalized run, or ``None`` for the default likelihood.
     """
     from numpyro.infer import MCMC, NUTS
@@ -224,14 +224,14 @@ def chain_output_path(config: RunConfig, *, timestamp: str | None = None) -> Pat
     timestamped naming convention, while still allowing a collision check before
     expensive sampling starts.
     """
-    if config.label:
-        base = config.label
+    if config.output.label:
+        base = config.output.label
     else:
         timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
         params_suffix = "-".join(config.sampled_params)
         det_suffix = ",".join(config.analysis.detectors)
         base = f"mcmc-{params_suffix}-det={det_suffix}-seed{config.seed}-{timestamp}"
-    return config.outdir / f"{base}.nc"
+    return config.output.outdir / f"{base}.nc"
 
 
 def ensure_chain_path_available(
@@ -271,7 +271,7 @@ def save(
     import numpy as np
     import xarray as xr
 
-    config.outdir.mkdir(parents=True, exist_ok=True)
+    config.output.outdir.mkdir(parents=True, exist_ok=True)
     timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     nc_path = ensure_chain_path_available(config, timestamp=timestamp, force=force)
 

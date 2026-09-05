@@ -24,7 +24,7 @@ def test_assembled_configs_fix_local_merger_rate() -> None:
     assert config.fixed_params["local_merger_rate"] == expected
 
 
-def test_posterior_params_adds_the_marginalized_amplitude_parameter() -> None:
+def test_marginalized_amplitude_keeps_its_prior_but_is_not_sampled() -> None:
     # Marginalize H0 out, leaving Omega_m as the only sampled parameter.
     raw = example_raw()
     raw["sampled_params"] = ["Omega_m"]
@@ -38,15 +38,6 @@ def test_posterior_params_adds_the_marginalized_amplitude_parameter() -> None:
     assert "H0" not in config.sampled_params
     # ...while its prior still lives in priors for the marginalization...
     assert "H0" in config.priors
-    # ...and the reconstruction writes it into the saved posterior group.
-    assert config.posterior_params == (*config.sampled_params, "H0")
-
-
-def test_posterior_params_matches_sampled_params_without_marginalization() -> None:
-    config = build_run_config(example_raw())
-
-    assert config.analysis.amplitude_parameter is None
-    assert config.posterior_params == config.sampled_params
 
 
 def test_legacy_top_level_local_merger_rate_is_rejected() -> None:
