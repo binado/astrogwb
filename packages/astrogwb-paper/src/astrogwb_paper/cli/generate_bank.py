@@ -31,13 +31,17 @@ import logging
 import math
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 import numpy as np
-from astrogwb.waveform import make_catalog, polarization_power, save_catalog
-from gwmock_pop import GraphSimulator
+from astrogwb.catalog import (
+    Catalog,
+    FrequencyDomainWaveformMetadata,
+    simulate_population,
+)
+from astrogwb.waveform import polarization_power
 from gwmock_signal.waveform import RippleBackend
 
+from astrogwb_paper.catalog_io import save_catalog
 from astrogwb_paper.config.banks import (
     BankConfig,
     BankGenerationConfig,
@@ -54,7 +58,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description=(
             "Simulate a single-component BNS population from its graph config, "
             "generate frequency-domain waveforms with the Ripple backend, and "
-            "persist the polarization power as a waveform_catalog HDF5 bank."
+            "persist the polarization power as an astrogwb_catalog HDF5 bank."
         )
     )
     parser.add_argument(
@@ -165,16 +169,6 @@ def _generate_polarization_power(
     return frequencies, np.concatenate(power_chunks, axis=1)
 
 
-def simulate_population(
-    population_path: Path, *, num_samples: int, seed: int
-) -> dict[str, Any]:
-    """Draw a fresh single-component population from its graph config."""
-    simulator = GraphSimulator.from_config_file(
-        population_path, source_type="bns", seed=seed
-    )
-    return dict(simulator.simulate(num_samples))
-
-
 def _resolve_population(bank: BankGenerationConfig, config_path: Path) -> Path:
     """Locate a bank's population graph.
 
@@ -216,6 +210,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     bank = load_bank_config(config_path)
     population_path = _resolve_population(bank, config_path)
     provenance = bank_provenance(bank, population_path)
+    population_metadata = provenance.to_population_metadata()
     logger.info(
         "Bank %s: population=%s seed=%d num_samples=%d proposal=%s",
         bank.name,
@@ -225,9 +220,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         provenance.redshift_proposal.kind,
     )
 
-    population = simulate_population(
-        population_path, num_samples=bank.num_samples, seed=bank.seed
-    )
+    population = simulate_population(population_path, metadata=population_metadata)
 
     # Source -> detector frame: redshift the component masses. gwmock provides only
     # the inverse conversion, so the (1 + z) scaling is applied inline here.
@@ -274,22 +267,25 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     logger.info("Truncated frequency axis to f <= %.1f Hz", waveform.maximum_frequency)
 
-    # power is (n_freq, n_events), matching make_catalog's (nfreq, nsamples)
-    # in-memory convention.
-    catalog = make_catalog(
+    actual_df = (
+        float(frequencies[1] - frequencies[0]) if frequencies.size > 1 else effective_df
+    )
+    waveform_metadata = FrequencyDomainWaveformMetadata(
         frequencies=frequencies,
-        polarization_power=power,
-        source_parameters={
-            name: np.asarray(values, dtype=np.float64)
-            for name, values in samples.items()
-        },
         approximant=waveform.approximant,
         minimum_frequency=waveform.minimum_frequency,
         maximum_frequency=waveform.maximum_frequency,
         reference_frequency=waveform.reference_frequency,
         sampling_frequency=waveform.sampling_frequency,
-        df=effective_df,
-        extra_attrs=provenance.to_dict(),
+        df=actual_df,
+    )
+    catalog = Catalog(
+        source_parameters={
+            name: np.asarray(values) for name, values in samples.items()
+        },
+        polarization_power=power,
+        waveform_metadata=waveform_metadata,
+        population_metadata=population_metadata,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -300,8 +296,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     logger.info(
         "Saved bank %s: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",
         bank.name,
-        catalog.sizes["sample"],
-        catalog.sizes["frequency"],
+        catalog.population_metadata.num_samples,
+        catalog.waveform_metadata.frequencies.size,
         float(frequencies[0]),
         float(frequencies[-1]),
         waveform.approximant,

@@ -84,7 +84,7 @@ time:
 ```text
 population_name    = "madau-dickinson"
 population_seed    = 41
-population_samples = 32768
+population_num_samples = 32768
 redshift_proposal  = '{"kind": "madau_dickinson", "z_min": 0.0, "z_max": 20.0,
                        "gamma": 1.42, "kappa": 4.62, "z_peak": 1.84,
                        "H0": 67.66, "Omega_m": 0.3096, "n_grid": 4096}'

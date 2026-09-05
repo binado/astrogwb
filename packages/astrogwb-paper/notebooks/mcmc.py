@@ -28,7 +28,7 @@
 # total merger rate only.
 #
 # To run the notebook end-to-end, point `INJECTION_BANK_PATH` and
-# `PROPOSAL_BANK_PATH` at the `waveform_catalog` HDF5 banks generated
+# `PROPOSAL_BANK_PATH` at the `astrogwb_catalog` HDF5 banks generated
 # by the catalog workflow (``outputs/banks/<bank>.h5``).
 
 # %% [markdown]
@@ -258,7 +258,7 @@ fixed_params = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # The model uses a guarded proposal catalog carrying its analytic proposal
 # redshift log-density.
 #
-# The catalog is a `waveform_catalog` HDF5 file containing:
+# The catalog is an `astrogwb_catalog` HDF5 file containing:
 #
 # - `frequencies` — shape `(nfreq,)`, the FFT frequency grid (Hz).
 # - `polarization_power` — shape `(nfreq, nsamples)`, the on-disk

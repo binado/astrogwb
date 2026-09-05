@@ -37,25 +37,24 @@ def test_console_command_help_from_nested_directory(
     assert "usage:" in result.stdout.lower()
 
 
-def test_help_path_imports_do_not_import_jax() -> None:
-    """CLI --help modules must not pull jax into sys.modules.
+def test_pure_config_imports_do_not_import_jax() -> None:
+    """Pure-config and runtime modules must not pull jax into sys.modules.
 
-    ``astrogwb-run-mcmc --help`` imports config, banks, and runtime at module
-    load. Importing jax is slow; it is not needed to parse flags. Catalogs,
-    inference, and snr are allowed to import jax -- they are not on this graph.
+    ``astrogwb_paper.config.mcmc`` and ``astrogwb_paper.runtime`` parse flags
+    and configure the process without touching jax: importing jax is slow, and
+    ``runtime`` deliberately imports it only inside ``configure_runtime``.
 
-    ``astrogwb_paper.config.banks`` is on this graph deliberately: run_mcmc
-    resolves the proposal density from bank attributes *before*
-    configure_runtime, so that module must stay JAX-free (xarray/h5netcdf and
-    pydantic only).
+    ``config.banks`` (and ``config.runs`` / ``config.figures`` through it) now
+    imports jax transitively: it reads ``PopulationMetadata`` from
+    ``astrogwb.catalog``, which re-exports waveform-grid metadata from
+    ``astrogwb.waveform``. That import is accepted -- ``import jax`` only loads
+    the package and does not consume runtime configuration; the sibling test
+    below proves the XLA backend stays uninitialized on that path.
     """
     code = """
 import sys
 import astrogwb_paper
 import astrogwb_paper.config.mcmc
-import astrogwb_paper.config.figures
-import astrogwb_paper.config.runs
-import astrogwb_paper.config.banks
 import astrogwb_paper.runtime
 assert 'jax' not in sys.modules
 """
@@ -77,9 +76,12 @@ def test_catalog_inference_snr_imports_leave_the_xla_backend_uninitialized() -> 
     (``jax.devices()``, array creation) is what freezes ``JAX_PLATFORMS`` /
     ``set_host_device_count``. A late ``set_host_device_count(2)`` still yielding
     two devices proves catalogs / inference / snr did not consume that config.
+    ``config.banks`` belongs on this path too: run_mcmc resolves the proposal
+    density from bank attributes *before* ``configure_runtime``.
     """
     code = """
 import astrogwb_paper.catalogs
+import astrogwb_paper.config.banks
 import astrogwb_paper.inference
 import astrogwb_paper.snr
 import numpyro

@@ -11,7 +11,12 @@ pip install astrogwb
 ```
 
 Optional accelerator builds are available as `astrogwb[cuda]` and
-`astrogwb[tpu]`.
+`astrogwb[tpu]`. Install the population-simulation adapter separately when it
+is needed:
+
+```bash
+pip install astrogwb[simulation]
+```
 
 ## Library modules
 
@@ -27,9 +32,15 @@ Optional accelerator builds are available as `astrogwb[cuda]` and
 - `astrogwb.importance` defines the reusable importance-weighting protocol and
   compact-binary population model.
 - `astrogwb.sampling` exposes the caller-prepared NumPyro model.
-- `astrogwb.waveform` owns the `waveform_catalog` HDF5 format (IO via
-  `astrogwb.waveform.catalog`), which stores per-sample polarization power,
-  and reduces raw plus/cross polarizations to that power at generation time.
+- `astrogwb.catalog` provides array-native catalog metadata, validation,
+  population simulation, and polarization-power generation.
+  `astrogwb.catalog.generator` defines the generator protocol and the
+  closed-form inspiral adapter; the optional `gwmock-pop` adapter is imported
+  only when `simulate_population` is called.
+- `astrogwb.waveform` reduces raw plus/cross polarizations to power, applies
+  GW-distance corrections to plain arrays, and provides a closed-form
+  quadrupolar inspiral model. Persistence and labelled-array policy stay with
+  applications.
   `astrogwb.waveform.analytical` gives the same power in closed form for a
   quadrupolar, inspiral-only binary, truncated at `f = alpha / ((1 + z) M)`
   for a caller-chosen dimensionless `alpha`.
@@ -43,9 +54,45 @@ hanford = load_detector("H1")
 sensitivity = load_sensitivity("H1")
 ```
 
+A prepared population can be reduced through the common generation interface:
+
+```python
+from astrogwb.constants import ISCO_ALPHA
+from astrogwb.catalog import (
+    AnalyticInspiralGenerator,
+    Catalog,
+    FrequencyDomainWaveformMetadata,
+    PopulationMetadata,
+)
+
+waveform_metadata = FrequencyDomainWaveformMetadata.from_bounds(
+    approximant="AnalyticInspiral",
+    minimum_frequency=2.0,
+    maximum_frequency=2048.0,
+    reference_frequency=2.0,
+    sampling_frequency=4096.0,
+    df=1.0,
+)
+population_metadata = PopulationMetadata(
+    name="my-caller-owned-graph",
+    seed=42,
+    num_samples=len(source_parameters["redshift"]),
+)
+
+catalog = Catalog.from_generator(
+    source_parameters,
+    generator=AnalyticInspiralGenerator(alpha=ISCO_ALPHA),
+    waveform_metadata=waveform_metadata,
+    population_metadata=population_metadata,
+)
+```
+
 ## Examples
 
 `examples/` holds runnable end-to-end scripts that depend only on `astrogwb`.
+The scripts read and write xarray/HDF5 files directly, so install `xarray` and
+`h5netcdf[h5py]` separately before running them; these I/O dependencies are not
+installed by `astrogwb`.
 `examples/h0_mcmc.py` takes a waveform catalog, builds the observed spectral
 density from it, and infers `H0` with a NumPyro NUTS chain:
 

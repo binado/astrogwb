@@ -19,18 +19,16 @@ classifiers = [
 ]
 dependencies = [
     "gwmock-noise>=0.10.1",
-    "gwmock-pop>=0.11.4",
     "gwmock-signal[jax]>=0.15.0",
-    "h5netcdf[h5py]>=1.8.1",
     "jax>=0.10.2; sys_platform == 'linux'",
     "jax[cpu]>=0.11.0; sys_platform != 'linux'",
     "numpy>=2.5.1",
     "numpyro>=0.21.0",
-    "xarray>=2025.1",
 ]
 
 [project.optional-dependencies]
 cuda = ["jax[cuda12]>=0.11.0"]
+simulation = ["gwmock-pop>=0.11.4"]
 tpu = ["jax[tpu]>=0.11.0"]
 
 [project.urls]
@@ -43,4 +41,4 @@ requires = ["uv_build>=0.12.2,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0"]
+test = ["gwmock-pop>=0.11.4", "pytest>=9.0.2", "pytest-xdist>=3.8.0"]

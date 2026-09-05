@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from astrogwb.waveform import make_catalog, save_catalog
+from astrogwb.catalog import PopulationMetadata
 from astrogwb_paper.config.banks import (
     MD_FIDUCIAL_NAMES,
     BankConfig,
@@ -21,6 +21,7 @@ from astrogwb_paper.config.banks import (
     resolve_proposal,
 )
 from astrogwb_paper.utils import load_mapping
+from catalog_fixtures import make_catalog, save_catalog
 
 MD_GRAPH: dict[str, Any] = {
     "parameters": {
@@ -63,20 +64,21 @@ def _provenance(**overrides: Any) -> BankConfig:
     return BankConfig(**{**fields, **overrides})
 
 
-def _bank_file(path: Path, extra_attrs: dict[str, Any] | None) -> Path:
+def _bank_file(path: Path, metadata: PopulationMetadata | None) -> Path:
+    num_samples = 3 if metadata is None else metadata.num_samples
     save_catalog(
         path,
         make_catalog(
             frequencies=np.linspace(10.0, 50.0, 4),
-            polarization_power=np.ones((4, 3)),
-            source_parameters={"redshift": np.array([0.5, 1.0, 2.0])},
+            polarization_power=np.ones((4, num_samples)),
+            source_parameters={"redshift": np.linspace(0.5, 2.0, num_samples)},
             approximant="Toy",
             minimum_frequency=10.0,
             maximum_frequency=50.0,
             reference_frequency=20.0,
             sampling_frequency=128.0,
             df=40.0 / 3.0,
-            extra_attrs=extra_attrs,
+            population_metadata=metadata,
         ),
     )
     return path
@@ -148,7 +150,7 @@ def test_committed_populations_agree_on_generation_support() -> None:
 # --------------------------------------------------------------------------- #
 def test_provenance_round_trips_through_a_real_bank_file(tmp_path: Path) -> None:
     provenance = _provenance()
-    path = _bank_file(tmp_path / "bank.h5", provenance.to_dict())
+    path = _bank_file(tmp_path / "bank.h5", provenance.to_population_metadata())
 
     assert read_bank_provenance(path) == provenance
 
@@ -160,7 +162,7 @@ def test_uniform_provenance_round_trips(tmp_path: Path) -> None:
         num_samples=8192,
         redshift_proposal=extract_redshift_proposal(UNIFORM_GRAPH),
     )
-    path = _bank_file(tmp_path / "bank.h5", provenance.to_dict())
+    path = _bank_file(tmp_path / "bank.h5", provenance.to_population_metadata())
 
     assert read_bank_provenance(path) == provenance
 
@@ -175,9 +177,13 @@ def test_bank_without_proposal_metadata_is_rejected_not_reparsed(
 
 
 def test_bank_missing_only_the_proposal_attr_is_rejected(tmp_path: Path) -> None:
-    attrs = _provenance().to_dict()
-    attrs.pop("redshift_proposal")
-    path = _bank_file(tmp_path / "partial.h5", attrs)
+    provenance = _provenance()
+    metadata = PopulationMetadata(
+        name=provenance.population,
+        seed=provenance.seed,
+        num_samples=provenance.num_samples,
+    )
+    path = _bank_file(tmp_path / "partial.h5", metadata)
 
     with pytest.raises(ValueError, match="missing redshift_proposal"):
         read_bank_provenance(path)

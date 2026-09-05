@@ -15,18 +15,14 @@ every later consumer reads it back from the file
 (:func:`read_bank_provenance`) instead of re-parsing a config that may have
 drifted since the bank was built. netCDF attributes are flat scalars, so the
 proposal descriptor travels as a single JSON-encoded string under
-``redshift_proposal``; population name, seed, and sample count travel as
-plain scalars alongside it.
+``redshift_proposal`` in :class:`astrogwb.catalog.PopulationMetadata`.
 
 Mixture *compositions* are not banks: they are cheap, in-memory draws over one
 or two banks, declared inline by each run. See
 :class:`astrogwb_paper.catalogs.CatalogSource`.
 
-Deliberately JAX-free -- pydantic at import time, xarray/h5netcdf lazily
-inside the one function that reads a bank file. This is why it lives here and
-not in :mod:`astrogwb_paper.catalogs`, which imports JAX at module scope: the
-workflow and the config layer must be able to read configs and provenance
-without paying for a JAX import.
+Deliberately JAX-free: the workflow and config layers can inspect provenance
+without initializing JAX or loading polarization power.
 """
 
 from __future__ import annotations
@@ -35,8 +31,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
+from astrogwb.catalog import PopulationMetadata
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from astrogwb_paper.catalog_io import open_catalog, population_metadata_from_attrs
 from astrogwb_paper.config.mcmc import ProposalConfig
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.utils import load_mapping
@@ -48,10 +46,6 @@ POPULATIONS_DIR = Path("config/populations")
 
 #: Bank attribute holding the JSON redshift-proposal descriptor.
 PROPOSAL_ATTR = "redshift_proposal"
-POPULATION_NAME_ATTR = "population_name"
-POPULATION_SEED_ATTR = "population_seed"
-POPULATION_SAMPLES_ATTR = "population_samples"
-
 #: Constants a run's [fiducials] table must agree with for the recorded MD
 #: proposal to be the density the importance weights divide by.
 MD_FIDUCIAL_NAMES = ("H0", "Omega_m", "gamma", "kappa", "z_peak")
@@ -196,39 +190,32 @@ class BankConfig(BaseModel):
         """The redshift span this bank's samples were drawn over."""
         return self.redshift_proposal.z_min, self.redshift_proposal.z_max
 
-    def to_dict(self) -> dict[str, str | int]:
-        """Flatten into the scalar attrs ``make_catalog`` will stamp on."""
-        return {
-            POPULATION_NAME_ATTR: self.population,
-            POPULATION_SEED_ATTR: self.seed,
-            POPULATION_SAMPLES_ATTR: self.num_samples,
-            PROPOSAL_ATTR: self.redshift_proposal.model_dump_json(),
-        }
+    def to_population_metadata(self) -> PopulationMetadata:
+        """Convert bank provenance into the core population metadata model."""
+        return PopulationMetadata(
+            name=self.population,
+            seed=self.seed,
+            num_samples=self.num_samples,
+            source_type="bns",
+            provenance={PROPOSAL_ATTR: self.redshift_proposal.model_dump_json()},
+        )
 
     @classmethod
-    def from_dict(cls, attrs: Mapping[str, Any], *, label: str) -> Self:
-        """Validate one bank's attribute mapping into a :class:`BankConfig`."""
-        missing = [
-            name
-            for name in (
-                POPULATION_NAME_ATTR,
-                POPULATION_SEED_ATTR,
-                POPULATION_SAMPLES_ATTR,
-                PROPOSAL_ATTR,
-            )
-            if name not in attrs
-        ]
-        if missing:
+    def from_population_metadata(
+        cls, metadata: PopulationMetadata, *, label: str
+    ) -> Self:
+        """Convert decoded catalog metadata into validated bank provenance."""
+        if PROPOSAL_ATTR not in metadata.provenance:
             raise ValueError(
                 f"bank {label} was generated before proposal metadata "
-                f"(missing {', '.join(missing)}); regenerate it"
+                f"(missing {PROPOSAL_ATTR}); regenerate it"
             )
         return cls(
-            population=str(attrs[POPULATION_NAME_ATTR]),
-            seed=int(attrs[POPULATION_SEED_ATTR]),
-            num_samples=int(attrs[POPULATION_SAMPLES_ATTR]),
+            population=metadata.name,
+            seed=metadata.seed,
+            num_samples=metadata.num_samples,
             redshift_proposal=_PROPOSAL_ADAPTER.validate_json(
-                str(attrs[PROPOSAL_ATTR])
+                str(metadata.provenance[PROPOSAL_ATTR])
             ),
         )
 
@@ -241,11 +228,9 @@ def read_bank_provenance(path: Path) -> BankConfig:
     to parsing the population config: the point of the attribute is that the
     config may have drifted since the bank was built.
     """
-    import xarray as xr
-
-    with xr.open_dataset(path, engine="h5netcdf") as bank:
-        attrs = dict(bank.attrs)
-    return BankConfig.from_dict(attrs, label=str(path))
+    with open_catalog(path) as bank:
+        metadata = population_metadata_from_attrs(bank.attrs, label=str(path))
+    return BankConfig.from_population_metadata(metadata, label=str(path))
 
 
 # --------------------------------------------------------------------------- #
