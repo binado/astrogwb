@@ -38,6 +38,7 @@ never recomputed; :mod:`astrogwb.importance.population` explains why.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import jax
@@ -53,11 +54,11 @@ from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 # them. The name stays importable from here, which is how every existing caller
 # and `tests/core/test_importance.py` reach it.
 from astrogwb.distributions.rates import madau_dickinson_rate
-from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
 )
 from astrogwb.importance.population import (
+    CosmologicalPopulation,
     Population,
     PopulationTerms,
     importance_log_weights,
@@ -194,9 +195,21 @@ def compute_merger_rate_distance_and_logprob(
     return total_merger_rate, luminosity_distance, logpdf
 
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class ModifiedPropagationPopulation(CosmologicalPopulation):
+    """Cosmological population with the ``xi_0`` / ``xi_n`` propagation law."""
+
+    def luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
+        """Effective luminosity distance governing waveform amplitude, in Mpc."""
+        return super().luminosity_distance(redshift) * jnp.exp(
+            log_gw_em_ratio(redshift, self.params["xi_0"], self.params["xi_n"])
+        )
+
+
 def bns_population(
     params: Mapping[str, ArrayLike], *, redshift_grid: jax.Array
-) -> Population:
+) -> ModifiedPropagationPopulation:
     """The BNS population at ``params``: a Madau-Dickinson redshift law.
 
     ``redshift_grid`` must be a concrete array -- the one the factory captured
@@ -215,7 +228,9 @@ def bns_population(
         maximum_redshift=float(grid[-1]),
         n_grid=grid.shape[0],
     )
-    return Population(distributions={"redshift": redshift}, params=params)
+    return ModifiedPropagationPopulation(
+        distributions={"redshift": redshift}, params=params
+    )
 
 
 def bns_population_terms(
@@ -232,8 +247,7 @@ def bns_population_terms(
     distance -- the one the waveforms were generated at -- and only the GW/EM
     ratio at ``population.params`` is applied on top.
     """
-    redshift_distribution = population.distributions["redshift"]
-    assert isinstance(redshift_distribution, RedshiftDistribution)
+    redshift_distribution = population.redshift_distribution
     params = population.params
     redshift = jnp.asarray(source_parameters["redshift"])
 
@@ -244,32 +258,25 @@ def bns_population_terms(
     )
     return PopulationTerms(
         log_prob=population.log_prob(source_parameters),
-        log_gw_distance=log_gw_distance,
+        log_luminosity_distance=log_gw_distance,
         total_merger_rate=redshift_distribution.total_merger_rate(
             params["local_merger_rate"]
         ),
     )
 
 
-def _proposal_terms(
-    proposal_logprob: jax.Array,
+def _log_reference_distance(
     samples: Mapping[str, jax.Array],
     fiducials: Mapping[str, Any],
-) -> PopulationTerms:
-    """Proposal-side terms from a precomputed density and the stored distances.
+) -> jax.Array:
+    """Legacy effective reference distance from stored EM distance and propagation.
 
-    No :class:`Population` is built: the density arrives as an array, and the
-    distance is the catalog's own. The rate is unused by the weights and is
-    filled with ``nan`` so a stray read is loud rather than plausible.
+    Unlike this compatibility path, ``ImportanceCatalog`` accepts the effective
+    reference distance directly; it must not apply propagation a second time.
+    Keep the log-space operation order for exactly neutral fiducial weights.
     """
-    redshift = samples["redshift"]
-    log_gw_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
-        redshift, fiducials["xi_0"], fiducials["xi_n"]
-    )
-    return PopulationTerms(
-        log_prob=proposal_logprob,
-        log_gw_distance=log_gw_distance,
-        total_merger_rate=jnp.asarray(jnp.nan),
+    return jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
+        samples["redshift"], fiducials["xi_0"], fiducials["xi_n"]
     )
 
 
@@ -294,12 +301,14 @@ def log_weights(
     redshift = samples["redshift"]
     target = PopulationTerms(
         log_prob=logprob,
-        log_gw_distance=jnp.log(luminosity_distance)
+        log_luminosity_distance=jnp.log(luminosity_distance)
         + log_gw_em_ratio(redshift, parameters["xi_0"], parameters["xi_n"]),
         total_merger_rate=jnp.asarray(jnp.nan),
     )
     return importance_log_weights(
-        target, _proposal_terms(proposal_logprob, samples, fiducials)
+        target,
+        proposal_log_prob=proposal_logprob,
+        log_reference_distance=_log_reference_distance(samples, fiducials),
     )
 
 
@@ -350,7 +359,10 @@ def make_merger_rate_and_log_weights_fn(
         target = bns_population_terms(
             bns_population(params, redshift_grid=redshift_grid), samples
         )
-        proposal = _proposal_terms(proposal_logprob, samples, fiducials)
-        return target.total_merger_rate, importance_log_weights(target, proposal)
+        return target.total_merger_rate, importance_log_weights(
+            target,
+            proposal_log_prob=proposal_logprob,
+            log_reference_distance=_log_reference_distance(samples, fiducials),
+        )
 
     return merger_rate_and_log_weights_fn

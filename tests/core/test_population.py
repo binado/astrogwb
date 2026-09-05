@@ -11,12 +11,16 @@ follow-up that will express the MD + uniform proposal natively.
 
 from __future__ import annotations
 
+import inspect
+from dataclasses import dataclass
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
 from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN, make_redshift_grid
+from jax.typing import ArrayLike
 from numpyro.distributions import constraints
 
 from astrogwb.cosmology import log_gw_em_ratio
@@ -30,6 +34,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     make_merger_rate_and_log_weights_fn,
 )
 from astrogwb.importance.population import (
+    CosmologicalPopulation,
     Population,
     PopulationTerms,
     importance_log_weights,
@@ -55,58 +60,105 @@ OFF_FIDUCIALS: dict[str, float] = {
 # --------------------------------------------------------------------------- #
 # Population
 # --------------------------------------------------------------------------- #
+def _standard_population() -> CosmologicalPopulation:
+    modified = bns_population(FIDUCIALS, redshift_grid=make_redshift_grid())
+    return CosmologicalPopulation(
+        distributions=modified.distributions,
+        params={
+            key: value
+            for key, value in FIDUCIALS.items()
+            if key not in {"xi_0", "xi_n"}
+        },
+    )
+
+
+def test_population_base_is_abstract() -> None:
+    assert inspect.isabstract(Population)
+
+
 def test_log_prob_sums_the_per_parameter_log_densities() -> None:
-    population = Population(
-        distributions={"a": dist.Normal(0.0, 1.0), "b": dist.Uniform(0.0, 2.0)},
+    redshift = _standard_population().redshift_distribution
+    population = CosmologicalPopulation(
+        distributions={"redshift": redshift, "a": dist.Normal(0.0, 1.0)},
         params={},
     )
-    source_parameters = {"a": jnp.array([0.0, 1.0]), "b": jnp.array([0.5, 1.5])}
-
-    expected = dist.Normal(0.0, 1.0).log_prob(source_parameters["a"]) + dist.Uniform(
-        0.0, 2.0
-    ).log_prob(source_parameters["b"])
-    np.testing.assert_allclose(
-        np.asarray(population.log_prob(source_parameters)), np.asarray(expected)
+    source_parameters = {"redshift": SAMPLE_REDSHIFTS, "a": jnp.arange(5.0)}
+    expected = redshift.log_prob(SAMPLE_REDSHIFTS) + dist.Normal(0.0, 1.0).log_prob(
+        source_parameters["a"]
     )
+    np.testing.assert_allclose(population.log_prob(source_parameters), expected)
 
 
 def test_log_prob_ignores_source_parameters_without_a_distribution() -> None:
-    """Parameters the two sides agree on are simply absent from `distributions`."""
-    population = Population(distributions={"a": dist.Normal(0.0, 1.0)}, params={})
-    values = jnp.array([0.3, -0.7])
-
-    np.testing.assert_allclose(
-        np.asarray(population.log_prob({"a": values, "mass": jnp.ones(2)})),
-        np.asarray(dist.Normal(0.0, 1.0).log_prob(values)),
+    population = _standard_population()
+    np.testing.assert_array_equal(
+        population.log_prob({"redshift": SAMPLE_REDSHIFTS, "mass": jnp.ones(5)}),
+        population.redshift_distribution.log_prob(SAMPLE_REDSHIFTS),
     )
 
 
-def test_log_prob_of_empty_distributions_is_zero() -> None:
-    """The empty sum is neutral when only rates or propagation differ."""
-    population = Population(
-        distributions={},
-        params={"local_merger_rate": 1.0, "xi_0": 1.4},
-    )
+def test_population_requires_redshift() -> None:
+    with pytest.raises(ValueError, match="requires a redshift"):
+        CosmologicalPopulation(distributions={}, params={})
 
-    log_prob = population.log_prob({"mass": jnp.zeros(3)})
 
-    assert log_prob.shape == ()
-    np.testing.assert_array_equal(np.asarray(log_prob), np.asarray(0.0))
+def test_population_requires_a_redshift_distribution() -> None:
+    with pytest.raises(TypeError, match="RedshiftDistribution"):
+        CosmologicalPopulation(
+            distributions={"redshift": dist.Normal(0.0, 1.0)}, params={}
+        )
 
 
 def test_log_prob_raises_on_a_missing_source_parameter() -> None:
-    population = Population(distributions={"a": dist.Normal(0.0, 1.0)}, params={})
-    with pytest.raises(KeyError):
-        population.log_prob({"b": jnp.zeros(2)})
+    population = _standard_population()
+    with pytest.raises(KeyError, match="redshift"):
+        population.log_prob({"mass": jnp.zeros(2)})
 
 
-def test_population_is_a_pytree_of_its_distributions() -> None:
-    population = Population(
-        distributions={"a": dist.Normal(jnp.array(1.0), jnp.array(2.0))},
-        params={"H0": jnp.array(70.0)},
+def test_standard_population_needs_no_propagation_parameters() -> None:
+    population = _standard_population()
+    terms = population.compute_population_terms({"redshift": SAMPLE_REDSHIFTS})
+    rate, distance, logpdf = _reference(FIDUCIALS)
+    np.testing.assert_allclose(terms.total_merger_rate, rate, rtol=1e-15)
+    np.testing.assert_array_equal(terms.log_prob, logpdf)
+    np.testing.assert_array_equal(terms.log_luminosity_distance, jnp.log(distance))
+
+
+def test_base_does_not_prescribe_rate_parameters() -> None:
+    @jax.tree_util.register_dataclass
+    @dataclass(frozen=True)
+    class UnitRatePopulation(Population):
+        def luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
+            return self.redshift_distribution.luminosity_distance(redshift)
+
+        def total_merger_rate(self) -> jax.Array:
+            return jnp.asarray(1.0)
+
+    population = UnitRatePopulation(_standard_population().distributions, params={})
+    terms = population.compute_population_terms({"redshift": SAMPLE_REDSHIFTS})
+    assert float(terms.total_merger_rate) == 1.0
+
+
+@pytest.mark.parametrize("modified", [False, True])
+def test_population_is_a_pytree_of_distributions_and_parameters(modified: bool) -> None:
+    population = (
+        bns_population(OFF_FIDUCIALS, redshift_grid=make_redshift_grid())
+        if modified
+        else _standard_population()
     )
-    leaves = jax.tree.leaves(population)
-    assert {float(leaf) for leaf in leaves} == {1.0, 2.0, 70.0}
+    leaves, structure = jax.tree.flatten(population)
+    assert len(leaves) == len(jax.tree.leaves(population.distributions)) + len(
+        population.params
+    )
+    rebuilt = jax.tree.unflatten(structure, leaves)
+    assert type(rebuilt) is type(population)
+    samples = {"redshift": SAMPLE_REDSHIFTS}
+    for actual, expected in zip(
+        rebuilt.compute_population_terms(samples),
+        population.compute_population_terms(samples),
+        strict=True,
+    ):
+        np.testing.assert_array_equal(actual, expected)
 
 
 # --------------------------------------------------------------------------- #
@@ -115,7 +167,7 @@ def test_population_is_a_pytree_of_its_distributions() -> None:
 def _terms(log_prob: list[float], log_distance: list[float]) -> PopulationTerms:
     return PopulationTerms(
         log_prob=jnp.array(log_prob),
-        log_gw_distance=jnp.array(log_distance),
+        log_luminosity_distance=jnp.array(log_distance),
         total_merger_rate=jnp.array(1.0),
     )
 
@@ -123,7 +175,14 @@ def _terms(log_prob: list[float], log_distance: list[float]) -> PopulationTerms:
 def test_identical_terms_give_exactly_zero_log_weights() -> None:
     terms = _terms([-1.0, -2.5], [7.0, 7.5])
     np.testing.assert_array_equal(
-        np.asarray(importance_log_weights(terms, terms)), np.zeros(2)
+        np.asarray(
+            importance_log_weights(
+                terms,
+                proposal_log_prob=terms.log_prob,
+                log_reference_distance=terms.log_luminosity_distance,
+            )
+        ),
+        np.zeros(2),
     )
 
 
@@ -135,7 +194,15 @@ def test_log_weights_are_the_density_ratio_minus_twice_the_distance_ratio() -> N
         [7.0 - 6.8, 7.5 - 7.7]
     )
     np.testing.assert_allclose(
-        np.asarray(importance_log_weights(target, proposal)), expected, rtol=1e-14
+        np.asarray(
+            importance_log_weights(
+                target,
+                proposal_log_prob=proposal.log_prob,
+                log_reference_distance=proposal.log_luminosity_distance,
+            )
+        ),
+        expected,
+        rtol=1e-14,
     )
 
 
@@ -155,6 +222,14 @@ def test_bns_population_matches_the_reference_formula(
     population = bns_population(params, redshift_grid=make_redshift_grid())
     samples = {"redshift": SAMPLE_REDSHIFTS}
     terms = bns_population_terms(population, samples)
+    new_terms = population.compute_population_terms(samples)
+    for actual, expected in zip(new_terms, terms, strict=True):
+        np.testing.assert_allclose(actual, expected, rtol=1e-14, atol=1e-14)
+    np.testing.assert_allclose(
+        population.luminosity_distance(SAMPLE_REDSHIFTS),
+        jnp.exp(terms.log_luminosity_distance),
+        rtol=1e-14,
+    )
 
     reference_rate, reference_distance, reference_logpdf = _reference(params)
     # Bit-exact, as in `tests/core/test_distributions.py`: the distribution
@@ -165,12 +240,12 @@ def test_bns_population_matches_the_reference_formula(
     np.testing.assert_allclose(
         float(terms.total_merger_rate), float(reference_rate), rtol=1e-15
     )
-    expected_log_gw_distance = jnp.log(reference_distance) + log_gw_em_ratio(
+    expected_log_luminosity_distance = jnp.log(reference_distance) + log_gw_em_ratio(
         SAMPLE_REDSHIFTS, params["xi_0"], params["xi_n"]
     )
     np.testing.assert_allclose(
-        np.asarray(terms.log_gw_distance),
-        np.asarray(expected_log_gw_distance),
+        np.asarray(terms.log_luminosity_distance),
+        np.asarray(expected_log_luminosity_distance),
         rtol=1e-14,
     )
 
@@ -186,7 +261,9 @@ def test_bns_population_terms_use_the_given_distance_on_the_proposal_side() -> N
     expected = jnp.log(stored) + log_gw_em_ratio(
         SAMPLE_REDSHIFTS, FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]
     )
-    np.testing.assert_allclose(np.asarray(terms.log_gw_distance), np.asarray(expected))
+    np.testing.assert_allclose(
+        np.asarray(terms.log_luminosity_distance), np.asarray(expected)
+    )
 
 
 def test_bns_population_rebuilds_the_shared_grid_bit_exactly() -> None:
