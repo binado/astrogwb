@@ -12,11 +12,11 @@ from astrogwb.catalog import (
     FrequencyDomainWaveformMetadata,
     PopulationMetadata,
 )
-from astrogwb_paper.catalog_io import (
+from astrogwb.catalog.io import (
     catalog_from_dataset,
     catalog_to_dataset,
 )
-from astrogwb_paper.catalog_io import (
+from astrogwb.catalog.io import (
     save_catalog as save_core_catalog,
 )
 

@@ -32,9 +32,9 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
 from astrogwb.catalog import PopulationMetadata
+from astrogwb.catalog.io import open_catalog, population_metadata_from_attrs
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from astrogwb_paper.catalog_io import open_catalog, population_metadata_from_attrs
 from astrogwb_paper.config.mcmc import ProposalConfig
 from astrogwb_paper.paths import paper_project_root
 from astrogwb_paper.utils import load_mapping

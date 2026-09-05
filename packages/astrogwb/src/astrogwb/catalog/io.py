@@ -1,4 +1,9 @@
-"""JAX-free xarray and HDF5 serialization for array-native catalogs."""
+"""JAX-free xarray and HDF5 serialization for array-native catalogs.
+
+xarray pulls in pandas, which the publishable wheel deliberately does not
+carry, so this module lives behind the ``io`` optional dependency rather than
+in the core dependency set.
+"""
 
 from __future__ import annotations
 
@@ -7,12 +12,21 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import xarray as xr
+
 from astrogwb.catalog import (
     Catalog,
     FrequencyDomainWaveformMetadata,
     PopulationMetadata,
 )
+
+try:
+    import xarray as xr
+except ImportError as error:  # pragma: no cover - depends on the install extras
+    raise ImportError(
+        "astrogwb.catalog.io needs xarray and h5netcdf, which are not core "
+        "dependencies. Install them with the 'io' extra: "
+        "pip install 'astrogwb[io]'."
+    ) from error
 
 __all__ = [
     "DOMAIN_FREQUENCY",
@@ -56,7 +70,7 @@ RESERVED_ATTRS = frozenset(
 
 
 def catalog_to_dataset(catalog: Catalog) -> xr.Dataset:
-    """Encode a core catalog in the paper-owned stacked xarray format."""
+    """Encode a catalog in the stacked xarray format."""
     waveform = catalog.waveform_metadata
     population = catalog.population_metadata
     collisions = sorted(RESERVED_ATTRS.intersection(population.provenance))
@@ -140,7 +154,7 @@ def save_catalog(
     *,
     compression: str | None = None,
 ) -> None:
-    """Write a core catalog to the paper-owned HDF5 format."""
+    """Write a catalog to the astrogwb HDF5 format."""
     dataset = catalog_to_dataset(catalog)
     encoding = (
         {"polarization_power": {"compression": compression}}
@@ -171,7 +185,7 @@ def open_catalog(path: str | Path) -> xr.Dataset:
 
 
 def validate_catalog_dataset(dataset: xr.Dataset, *, label: str) -> None:
-    """Validate the paper format without loading polarization power."""
+    """Validate the catalog format without loading polarization power."""
     _check_format(dataset.attrs, label=label)
 
     if "frequency" not in dataset.coords:
