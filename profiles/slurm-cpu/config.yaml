@@ -1,0 +1,35 @@
+# CPU MCMC profile:
+#   snakemake --snakefile Snakefile \
+#     --allowed-rules validate run_mcmc plot_cosmological_parameters \
+#     --profile profiles/slurm-cpu plot_cosmological_parameters --dry-run
+# Requires `uv sync --extra paper --group slurm`.
+# Job logs land under .snakemake/slurm_logs/.
+executor: slurm
+jobs: 32
+# Config assembly and figures are local rules on the submit host.
+local-cores: 2
+# NOTE: run_mcmc jobs were previously batched into one SLURM job array via
+# `slurm-array-jobs: run_mcmc` (parity with the retired sbatch --array flow).
+# Disabled: with heterogeneous wildcards per run, the SLURM array executor
+# can only encode the first job's wildcards/output paths in the shared
+# array comment string, so every other array task's wait-for-files check
+# ends up waiting on the wrong output file and fails with a spurious
+# MissingOutputException, even though the run actually completed
+# successfully. Submitting run_mcmc jobs individually avoids this.
+# Force the JAX backend to CPU so run_mcmc does not try to init CUDA on a
+# CPU node. Overrides the "cuda" default in the root Snakefile.
+# Caveat: any CLI ``--config …`` replaces this whole list (Snakemake does not
+# merge), so pass ``jax_platforms=cpu`` alongside any other ``--config`` keys.
+config:
+  - jax_platforms=cpu
+# the root Snakefile passes rule threads as --host-device-count on CPU jobs
+# (one logical device per concurrent chain, --cpu-threads pinned to 1), and
+# threads also sets --cpus-per-task via Snakemake's SLURM resource mapping,
+# so this must be >= the run config's [sampler] num_chains.
+set-threads:
+  - run_mcmc=4
+set-resources:
+  run_mcmc:
+    slurm_partition: cpu
+    mem_mb: 16000
+    runtime: 1440

@@ -1,0 +1,58 @@
+# Fiducial values every run injects at, and the prior for each. The
+# MD-rate fiducials (H0, Omega_m, gamma, kappa, z_peak) must equal what
+# the proposal bank was generated at; astrogwb.paper.banks.
+# check_fiducials_match enforces that against the bank file itself.
+#
+# Every fiducial carries a prior here. RunConfig retains the complete table;
+# sampled_params selects the NUTS latents and the remaining sites are fixed by
+# NumPyro effect handlers.
+
+[fiducials]
+H0 = 67.66
+Omega_m = 0.3096
+xi_0 = 1.0
+xi_n = 1.91
+gamma = 1.42
+kappa = 4.62
+z_peak = 1.84
+local_merger_rate = 770.0
+
+[priors.H0]
+type = "uniform"
+low = 20.0
+high = 140.0
+
+[priors.Omega_m]
+type = "normal"
+loc = 0.3096
+scale = 0.006
+
+[priors.xi_0]
+type = "uniform"
+low = 0.5
+high = 5.0
+
+[priors.xi_n]
+type = "uniform"
+low = 0.3
+high = 3.0
+
+[priors.gamma]
+type = "uniform"
+low = -10.0
+high = 10.0
+
+[priors.kappa]
+type = "uniform"
+low = -10.0
+high = 10.0
+
+[priors.z_peak]
+type = "uniform"
+low = 0.0
+high = 2.5
+
+[priors.local_merger_rate]
+type = "normal"
+loc = 770.0
+scale = 7.7

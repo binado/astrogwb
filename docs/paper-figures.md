@@ -1,0 +1,122 @@
+# Paper figures
+
+Experiment figures are part of the same DAG as their chains. Each figure's
+presentation -- the ordered run IDs it compares and its LaTeX labels -- is
+hard-coded in the script that draws it. There is no figure config to load:
+changing a legend label is a code change, reviewed alongside the plot it
+labels. The six detector networks compared by more than one figure are the one
+shared piece, and they live in `astrogwb.paper.plotting.DETECTOR_NETWORKS` as
+ordered `(run name, LaTeX label)` pairs.
+
+Input and output paths are both named literally in
+[`Snakefile`](../Snakefile), and every output is a valid Snakemake target.
+Shared scientific values -- fiducials, frequency bounds, cosmology grid settings
+-- arrive on argv as repeated `--config` layer files, the same list the rule
+declares as `input:`, so a figure reports exactly what was sampled and a layer
+edit retriggers the figure.
+
+Detector *lists* are never hard-coded next to a label. The rule passes
+`--network-run <experiment>/<run>` once per network, in legend order, and
+`astrogwb.paper.config.runs.resolve_networks` reads each run's detectors out of
+that run's own config layers. The detectors a figure reports an SNR for are
+therefore always the ones its chain was sampled with.
+
+`resolve_networks` matches the `--network-run` list against the legend
+*positionally* and rejects a mismatch. That check matters more than it looks:
+declaration order drives chain order, legend order, and colour assignment, so a
+swapped pair would render a perfectly good figure with the wrong labels on the
+wrong curves rather than failing.
+
+The workflow imports that same tuple and expands its chain paths from it, so
+chain order and legend order are one list rather than two that have to be kept
+in step:
+
+```python
+from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
+
+chains=expand("outputs/chains/cosmological-parameters/{run}.nc",
+              run=DETECTOR_NETWORK_RUNS),
+```
+
+## Experiment figures
+
+The detector-network, merger-rate, and Omega-m analyses form one paper section.
+The `plot_cosmological_parameters` rule consumes all eight chains and produces their
+five figures and two CSV/LaTeX table pairs in one script invocation. All
+artifacts live under `outputs/figures/cosmological-parameters/`.
+
+Preview or build the section (from the repository root):
+
+```bash
+snakemake --snakefile Snakefile \
+  --allowed-rules validate run_mcmc plot_cosmological_parameters \
+  --profile profiles/local --cores 8 --dry-run plot_cosmological_parameters
+snakemake --snakefile Snakefile \
+  --allowed-rules validate run_mcmc plot_cosmological_parameters \
+  --profile profiles/slurm plot_cosmological_parameters
+```
+
+Every artifact remains a valid Snakemake target, but because the rule has
+multiple outputs, requesting one builds the complete section:
+
+```bash
+snakemake --snakefile Snakefile \
+  --allowed-rules validate run_mcmc plot_cosmological_parameters \
+  --profile profiles/local --cores 8 \
+  outputs/figures/cosmological-parameters/H0-by-detector.pdf
+```
+
+With a SLURM profile, sampling runs remotely and figure rules run locally on the
+submit host after their chains finish. The submit host must remain attached,
+share the output filesystem, and provide plotting dependencies.
+
+Use `run_experiment_cosmological_parameters` to sample the constituent
+experiment without running post-processing.
+
+The modified-propagation section works the same way:
+`plot_modified_propagation` builds its propagation figures and tables from the
+chains of `run_experiment_modified_propagation`.
+
+## Standalone figures
+
+The amplitude toy model, fiducial spectrum, effective detector PSD comparison,
+and importance-weight grids are explicit standalone rules in the unified
+workflow. The fiducial spectrum borrows the six detector networks of the
+`cosmological-parameters` experiment rather than restating them, and keeps its
+`OMEGA_GW_MIN` y-limit next to the axis it sets. All of them read an assembled
+run config directly. `importance_weights_grid` additionally reads its proposal
+*density* from the bank file it is handed, the same way `astrogwb-run-mcmc`
+does -- so the weights it plots divide by the same denominator the chains did.
+
+```bash
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules amplitude_toy fiducial_spectrum importance_weights_grid \
+  outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf \
+  outputs/figures/standalone/fiducial_spectrum.pdf \
+  outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf \
+  outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf \
+  outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf
+```
+
+Or build any one of them directly:
+
+```bash
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules fiducial_spectrum \
+  outputs/figures/standalone/fiducial_spectrum.pdf
+```
+
+All new figure products are written under `outputs/figures/`.
+
+## Scripts
+
+Figure entry points are plain Python scripts under `scripts/`. Each reads its
+own fiducials and analysis grid from an assembled run config, whose path the
+library owns, and hard-codes its own labels and run order. Snakemake passes only
+what it owns: the chain and bank paths it built, and the output paths it
+declared.
+
+The assembled config is a declared input of each rule, so editing a fiducial or
+a detector list rebuilds the figure; editing a label is a code change and
+rebuilds it the same way. Config parsing stays free of JAX, so `--help` and
+config errors stay cheap.
