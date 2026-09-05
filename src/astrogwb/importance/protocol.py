@@ -1,4 +1,10 @@
-"""Protocol for importance-weighted merger-rate callbacks."""
+"""Protocol for importance-weighted merger-rate callbacks.
+
+The reference realization in
+:mod:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation`
+is built from a :class:`~astrogwb.importance.population.PopulationFn`; this
+protocol is the catalog-facing shape the NumPyro models consume.
+"""
 
 from __future__ import annotations
 

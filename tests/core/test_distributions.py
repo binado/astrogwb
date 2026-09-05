@@ -94,14 +94,13 @@ def test_grid_is_bit_identical_to_the_shared_redshift_grid() -> None:
 
 
 def test_log_prob_agrees_with_the_reference_model() -> None:
-    # Not tighter than 1e-13: the reference forms `log(u) - log(Z)` while the
-    # class forms `log(u/Z)`, which round differently. Measured max relative
-    # difference is 2.5e-15.
+    # Bit-exact, not a tolerance: `log_prob` forms `log(u) - log(Z)` in the
+    # reference's operation order precisely so a catalog that is its own
+    # proposal has exactly zero log-weight (see `test_frequency_resolution.py`).
     _, _, reference_logpdf = _reference()
-    np.testing.assert_allclose(
+    np.testing.assert_array_equal(
         np.asarray(_distribution().log_prob(SAMPLE_REDSHIFTS)),
         np.asarray(reference_logpdf),
-        rtol=1e-13,
     )
 
 
@@ -109,10 +108,9 @@ def test_log_prob_agrees_with_the_reference_model_off_the_fiducials() -> None:
     """The agreement is in the formula, not in a coincidence at one parameter point."""
     overrides = {"gamma": 2.7, "kappa": 2.9, "z_peak": 1.9, "H0": 74.0, "Omega_m": 0.27}
     _, _, reference_logpdf = _reference(**overrides)
-    np.testing.assert_allclose(
+    np.testing.assert_array_equal(
         np.asarray(_distribution(**overrides).log_prob(SAMPLE_REDSHIFTS)),
         np.asarray(reference_logpdf),
-        rtol=1e-13,
     )
 
 
