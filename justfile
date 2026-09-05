@@ -43,6 +43,19 @@ test-integration:
 # Both fast suites.
 test: test-core test-paper
 
+# Execution *is* the test: nbclient fails the run on any raised exception, so
+# the notebooks carry no assertion cells. Set ASTROGWB_NOTEBOOK_SMOKE=1 to
+# shrink the chains, the catalog, and the convergence sweeps.
+
+# Convert and execute the root notebooks.
+test-notebooks:
+    uv run --group notebook jupytext --to notebook --execute \
+        notebooks/catalog_convergence.py
+
+# Convert notebook from py:percent format to .ipynb
+convert-notebooks:
+    uv run --group notebook jupytext --to notebook notebooks/*.py
+
 # The publishable core distribution.
 build-core:
     uv build --package astrogwb --no-sources

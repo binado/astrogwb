@@ -15,6 +15,19 @@ astrogwb-paper = { workspace = true }
 members = ["packages/*"]
 
 [dependency-groups]
+# Converts and executes the root notebooks. These depend on core alone --
+# simulation to draw a population, io to round-trip it through HDF5 -- so
+# matplotlib is listed directly rather than arriving via astrogwb-paper.
+notebook = [
+    "astrogwb[simulation,io]",
+    "ipykernel>=7.3.0",
+    "jupytext>=1.19",
+    "matplotlib>=3.10.0",
+    # jupytext --execute drives the kernel through nbconvert. It used to arrive
+    # transitively via astrogwb-paper's jupyter dependency; declare it here so
+    # the notebook environment does not depend on the paper package at all.
+    "nbconvert>=7.16",
+]
 dev = [
     "pytest>=9.0.2",
     "pytest-xdist>=3.8.0",
@@ -30,6 +43,7 @@ include = [
     "packages/astrogwb/examples/**/*.py",
     "packages/astrogwb-paper/scripts/**/*.py",
     "packages/astrogwb-paper/notebooks/**/*.py",
+    "notebooks/**/*.py",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -38,6 +52,7 @@ include = [
 # B018: a bare name on a cell's last line is how a notebook renders a value,
 # not a useless expression. DTZ005: run-artifact filenames are stamped with
 # local wall-clock time on purpose, so the author recognizes their own runs.
+"notebooks/**/*.py" = ["B018", "DTZ005"]
 "packages/astrogwb-paper/notebooks/**/*.py" = ["B018", "DTZ005"]
 
 [tool.ty.src]
