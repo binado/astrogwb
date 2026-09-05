@@ -331,7 +331,7 @@ def load_merged_config(args: argparse.Namespace) -> dict[str, Any]:
     Merge order is the caller's to get right now that no single function owns
     it, and a wrong-but-valid order fails silently, so the resolved order is
     logged before the merge and recorded next to every chain by
-    :mod:`astrogwb.paper.cli.run_mcmc`.
+    ``scripts/run_mcmc.py``.
     """
     paths: list[Path] = list(args.config)
     logger.info(

@@ -19,7 +19,7 @@ descriptor.
 
 Usage::
 
-    uv run astrogwb-generate-bank \\
+    uv run --extra paper python scripts/generate_bank.py \\
         --config config/banks/md-imrphenom-s41.toml \\
         --output outputs/banks/md-imrphenom-s41.h5
 """

@@ -1,4 +1,4 @@
-"""Shared paper-figure styling for ``astrogwb-paper``.
+"""Shared styling for the astrogwb paper application.
 
 Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
 style (solid), and a loader for ``paper.mplstyle``. This module is independent

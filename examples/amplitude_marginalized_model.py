@@ -6,8 +6,8 @@ integrates :math:`H_0` out of the Gaussian likelihood, NUTS samples
 :math:`\Omega_m` alone, and a mandatory post-processing pass through
 :func:`~astrogwb.sampling.amplitude_reconstruction_model` draws :math:`H_0`
 back to give a joint :math:`(H_0, \Omega_m)` posterior. This mirrors the
-``cosmological-parameters/H0-Omega_m`` run shipped with the ``astrogwb-paper``
-workspace project, which is how every production analysis is set up.
+``cosmological-parameters/H0-Omega_m`` run in the paper application, which is
+how every production analysis is set up.
 
 Why the marginalization is exact rather than approximate: the *normalized*
 redshift PDF's :math:`H_0` dependence cancels, leaving

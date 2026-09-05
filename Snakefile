@@ -162,12 +162,13 @@ localrules:
 rule waveform_bank:
     """Population draw + waveform generation, in one process."""
     input:
+        script="scripts/generate_bank.py",
         config=BANK_CONFIG_PATTERN,
         population=bank_population,
     output:
         str(BANKS_DIR / "{bank}.h5"),
     shell:
-        "uv run --extra paper astrogwb-generate-bank"
+        "uv run --extra paper python {input.script:q}"
         " --config {input.config:q} --output {output:q} --force"
 
 
@@ -196,6 +197,7 @@ rule validate:
 rule run_mcmc:
     """Sample one run into outputs/chains/<experiment>/<run>.nc."""
     input:
+        script="scripts/run_mcmc.py",
         # The same three layers `assemble_config` used to declare, so re-run
         # granularity is unchanged: edit a leaf -> one chain; edit
         # base/sampling.toml -> all 26.
@@ -239,7 +241,7 @@ rule run_mcmc:
         # can only be settled by a real submission, not locally, so it stays
         # until one is run. UV_EXTRAS is inert under --no-sync; it is kept so
         # the two branches still say which environment each platform wants.
-        $NANNY uv run --active --no-sync $UV_EXTRAS astrogwb-run-mcmc \
+        $NANNY uv run --active --no-sync $UV_EXTRAS python {input.script:q} \
             {params.config_flags} --outdir {params.outdir:q} \
             --label {wildcards.run:q} \
             {params.bank_flags} \

@@ -141,7 +141,10 @@ def test_bank_rule_reads_its_config_and_population_directly() -> None:
     assert "config/populations/uniform-redshift.yaml" in result.stdout
     assert "outputs/banks/md-imrphenom-s41.h5" in result.stdout
     assert "outputs/banks/uniform-imrphenom-s51.h5" in result.stdout
-    assert "astrogwb-generate-bank" in result.stdout
+    assert "python scripts/generate_bank.py" in result.stdout
+    assert any(
+        "scripts/generate_bank.py" in line for line in _rule_inputs(result.stdout)
+    )
     # The population intermediate and its merge rule are both gone.
     assert "outputs/populations/" not in result.stdout
     assert "outputs/population-configs/" not in result.stdout
@@ -253,6 +256,8 @@ def test_run_mcmc_is_handed_its_layers_on_argv(tmp_path: Path) -> None:
     assert "astrogwb-assemble-config" not in result.stdout
     assert "outputs/configs/" not in result.stdout
     assert "rule assemble_config:" not in result.stdout
+    assert "python scripts/run_mcmc.py" in result.stdout
+    assert any("scripts/run_mcmc.py" in line for line in _rule_inputs(result.stdout))
 
     layers = [
         str(path.relative_to(PAPER_ROOT))

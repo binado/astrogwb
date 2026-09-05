@@ -85,7 +85,7 @@ workflow. The fiducial spectrum borrows the six detector networks of the
 `cosmological-parameters` experiment rather than restating them, and keeps its
 `OMEGA_GW_MIN` y-limit next to the axis it sets. All of them read an assembled
 run config directly. `importance_weights_grid` additionally reads its proposal
-*density* from the bank file it is handed, the same way `astrogwb-run-mcmc`
+*density* from the bank file it is handed, the same way `scripts/run_mcmc.py`
 does -- so the weights it plots divide by the same denominator the chains did.
 
 ```bash
