@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 matplotlib = pytest.importorskip("matplotlib")
@@ -36,6 +37,80 @@ def test_get_corner_kwargs_and_combo_colors() -> None:
     colors = plotting.combo_colors(4)
     assert len(colors) == 4
     assert all(color.startswith("#") for color in colors)
+
+
+def _gaussian_grids_and_log_density(
+    nx: int = 64, ny: int = 48
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A separable 2D Gaussian log-posterior on uniform bin-center grids."""
+    x = np.linspace(-3.0, 3.0, nx)
+    y = np.linspace(-4.0, 4.0, ny)
+    xx, yy = np.meshgrid(x, y, indexing="ij")
+    return x, y, -0.5 * (xx**2 + (yy / 2.0) ** 2)
+
+
+def test_plot_corner_for_posterior_grid_2d() -> None:
+    x, y, log_density = _gaussian_grids_and_log_density()
+    fig = plotting.plot_corner_for_posterior_grid(
+        (x, y), log_density, labels=["x", "y"], truths=[0.1, -0.2]
+    )
+    assert isinstance(fig, matplotlib.figure.Figure)
+    # 2x2 corner layout; the joint panel (1, 0) carries the filled contours
+    # and the diagonal panels the 1D marginals.
+    assert len(fig.axes) == 4
+    joint = np.asarray(fig.axes).reshape(2, 2)[1, 0]
+    assert joint.collections
+    for index in range(2):
+        assert np.asarray(fig.axes).reshape(2, 2)[index, index].lines
+    matplotlib.pyplot.close(fig)
+
+
+def test_plot_corner_for_posterior_grid_expands_range_with_truths() -> None:
+    x, y, log_density = _gaussian_grids_and_log_density()
+    fig = plotting.plot_corner_for_posterior_grid(
+        (x, y), log_density, truths=[4.0, 0.0]
+    )
+    joint = np.asarray(fig.axes).reshape(2, 2)[1, 0]
+    # The grid spans [-3, 3]; an out-of-grid truth must stay visible.
+    assert joint.get_xlim()[1] >= 4.0
+    matplotlib.pyplot.close(fig)
+
+
+def test_plot_corner_for_posterior_grid_1d() -> None:
+    x = np.linspace(-3.0, 3.0, 64)
+    fig = plotting.plot_corner_for_posterior_grid((x,), -0.5 * x**2, labels=["x"])
+    assert isinstance(fig, matplotlib.figure.Figure)
+    assert len(fig.axes) == 1
+    assert fig.axes[0].lines
+    matplotlib.pyplot.close(fig)
+
+
+def test_plot_corner_for_posterior_grid_validation() -> None:
+    x, y, log_density = _gaussian_grids_and_log_density()
+
+    nonuniform = x.copy()
+    nonuniform[1] += 0.01
+    with pytest.raises(ValueError, match="uniform"):
+        plotting.plot_corner_for_posterior_grid((nonuniform, y), log_density)
+
+    with pytest.raises(ValueError, match="strictly increasing"):
+        plotting.plot_corner_for_posterior_grid((x[::-1], y), log_density)
+
+    with pytest.raises(ValueError, match="does not match"):
+        plotting.plot_corner_for_posterior_grid((x, y), np.zeros((x.size, x.size)))
+
+    with pytest.raises(ValueError, match="1 or 2 grid dimensions"):
+        plotting.plot_corner_for_posterior_grid(
+            (x, y, x), np.zeros((x.size, y.size, x.size))
+        )
+
+    nan_density = log_density.copy()
+    nan_density[0, 0] = np.nan
+    with pytest.raises(ValueError, match="finite"):
+        plotting.plot_corner_for_posterior_grid((x, y), nan_density)
+
+    with pytest.raises(ValueError, match="truths"):
+        plotting.plot_corner_for_posterior_grid((x, y), log_density, truths=[0.0])
 
 
 def test_detector_network_styles_pairs_et_and_et_plus_ce() -> None:

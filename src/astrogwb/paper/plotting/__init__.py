@@ -129,6 +129,134 @@ def get_corner_kwargs(**overrides: object) -> dict[str, object]:
     return kwargs | overrides
 
 
+def plot_corner_for_posterior_grid(
+    grids: Sequence[np.ndarray],
+    log_density: np.ndarray,
+    *,
+    labels: Sequence[str] | None = None,
+    truths: Sequence[float | None] | None = None,
+    smooth: float | None = None,
+    **corner_kwargs: object,
+) -> plt.Figure:
+    """Corner plot of a posterior evaluated on a grid, via ``corner.corner()``.
+
+    The posterior density is recovered by exponentiating ``log_density``
+    (unnormalized; stabilized by subtracting its maximum), and every grid
+    point is passed to ``corner.corner()`` as a pseudo-sample weighted by its
+    density value. ``bins`` are set to coincide with the grid cells and
+    ``range`` with the cell-edge extents, so corner's histograms *are* the
+    grid and its credible-region levels and quantiles carry the same meaning
+    as for chains -- the density is not discretized a second time.
+
+    Each grid must be strictly increasing and *uniform*: uniform cell areas
+    are what make the density value proportional to the enclosed mass. For
+    non-uniform grids, use the density-native renderer in
+    ``notebooks/logposterior_grid.py`` instead.
+
+    ``plot_datapoints`` and ``plot_density`` default to ``False`` here: the
+    pseudo-samples cover the full parameter rectangle uniformly, so corner's
+    datapoint scatter would be a featureless gray fog. These and every other
+    default can be overridden through ``corner_kwargs``.
+
+    Parameters
+    ----------
+    grids
+        Bin-center coordinates, one 1D array per dimension (1 or 2).
+    log_density
+        Unnormalized log-posterior with shape ``tuple(len(g) for g in
+        grids)``; ``log_density[i, j]`` corresponds to ``(grids[0][i],
+        grids[1][j])``.
+    labels
+        Axis labels, one per dimension.
+    truths
+        Marker positions, one per dimension (``None`` entries omit the
+        marker). The plot range is expanded to include them.
+    smooth
+        Gaussian smoothing width in grid cells for the 2D panel, forwarded
+        to ``corner.corner()``.
+    corner_kwargs
+        Additional keyword arguments forwarded to ``corner.corner()``; they
+        take precedence over this function's defaults.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The figure produced by ``corner.corner()``.
+    """
+    import corner
+
+    grids = tuple(np.asarray(grid, dtype=np.float64) for grid in grids)
+    ndim = len(grids)
+    if ndim not in (1, 2):
+        raise ValueError(f"expected 1 or 2 grid dimensions, got {ndim}")
+    for grid in grids:
+        if grid.ndim != 1 or grid.size < 2:
+            raise ValueError("each grid must be a 1D array with at least 2 points")
+        spacings = np.diff(grid)
+        if np.any(spacings <= 0):
+            raise ValueError("each grid must be strictly increasing")
+        if not np.allclose(spacings, spacings[0]):
+            raise ValueError(
+                "each grid must be uniform so that cell areas are equal and "
+                "density values are proportional to enclosed mass; for "
+                "non-uniform grids use notebooks/logposterior_grid.py"
+            )
+
+    log_density = np.asarray(log_density, dtype=np.float64)
+    expected_shape = tuple(grid.size for grid in grids)
+    if log_density.shape != expected_shape:
+        raise ValueError(
+            f"log_density shape {log_density.shape} does not match "
+            f"the grids {expected_shape}"
+        )
+    if not np.all(np.isfinite(log_density)):
+        raise ValueError("log_density must be finite everywhere")
+
+    # Cell-edge extents, expanded to include any truth markers.
+    extents: list[list[float]] = []
+    for grid in grids:
+        half = 0.5 * (grid[1] - grid[0])
+        extents.append([float(grid[0] - half), float(grid[-1] + half)])
+    if truths is not None:
+        truths = tuple(truths)
+        if len(truths) != ndim:
+            raise ValueError(f"expected {ndim} truths, got {len(truths)}")
+        for index, truth in enumerate(truths):
+            if truth is None:
+                continue
+            extents[index][0] = min(extents[index][0], float(truth))
+            extents[index][1] = max(extents[index][1], float(truth))
+
+    weights = np.exp(log_density - log_density.max()).ravel()
+    # corner requires 2D (nsamples, ndim) input; the pinned revision's 1D
+    # ndarray path reshapes as data[None, :, :] and crashes, so present the
+    # 1D grid as (npoints, 1).
+    data = (
+        grids[0][:, None]
+        if ndim == 1
+        else np.column_stack(
+            [coords.ravel() for coords in np.meshgrid(*grids, indexing="ij")]
+        )
+    )
+
+    kwargs: dict[str, object] = {
+        **get_corner_kwargs(),
+        "bins": [grid.size for grid in grids],
+        "range": [tuple(extent) for extent in extents],
+        "weights": weights,
+        "plot_datapoints": False,
+        "plot_density": False,
+        "smooth": smooth,
+        "truths": list(truths) if truths is not None else None,
+        "labels": list(labels) if labels is not None else None,
+    }
+    kwargs |= corner_kwargs
+    fig = corner.corner(data, **kwargs)  # type: ignore[arg-type]
+    if fig is None:  # pragma: no cover - corner always creates a figure here
+        raise RuntimeError("corner did not create a figure")
+    return fig
+
+
 def combo_colors(n: int) -> list[str]:
     """Ordered qualitative colors for the per-parameter-combination overlay."""
     return [to_hex(c) for c in plt.cm.viridis(np.linspace(0.1, 0.9, n))]
