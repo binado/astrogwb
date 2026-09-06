@@ -2,7 +2,7 @@ r"""Importance-weight relative-ESS grids for two-parameter combinations.
 
 For each hard-coded pair this script builds a prior-support grid via the
 inverse CDF of each parameter's prior, evaluates the BNS Madau–Dickinson
-modified-propagation ``merger_rate_and_log_weights`` callback, and plots a
+modified-propagation population's importance log-weights, and plots a
 heatmap of
 $N_{\mathrm{eff}}/N = (\\sum_i w_i)^2 / (N\\sum_i w_i^2)$.
 
@@ -29,9 +29,11 @@ from matplotlib.axes import Axes as MplAxes
 from matplotlib.figure import Figure
 from matplotlib.projections import register_projection
 
+from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    make_merger_rate_and_log_weights_fn,
+    bns_population,
 )
+from astrogwb.importance.population import importance_log_weights
 from astrogwb.paper.catalogs import (
     compute_proposal_logprob,
     load_run_catalog,
@@ -96,7 +98,7 @@ def evaluate_relative_ess_grid(
     *,
     constants: Mapping[str, float],
     samples: Mapping[str, jax.Array],
-    merger_rate_and_log_weights_fn: Callable[..., tuple[jax.Array, jax.Array]],
+    log_weights_fn: Callable[[Mapping[str, jax.Array]], jax.Array],
     chunk_size: int,
 ) -> jax.Array:
     """Return relative ESS on the Cartesian product of ``axis0/1``."""
@@ -107,8 +109,7 @@ def evaluate_relative_ess_grid(
 
     def _relative_ess_at_point(point: jax.Array) -> jax.Array:
         params = {**constants, name0: point[0], name1: point[1]}
-        _, log_weights = merger_rate_and_log_weights_fn(params, samples)
-        return relative_ess(log_weights)
+        return relative_ess(log_weights_fn(params))
 
     ess = jax.lax.map(_relative_ess_at_point, points, batch_size=chunk_size).reshape(
         mesh0.shape
@@ -205,11 +206,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         maximum_redshift=Z_MAX,
         label=str(catalog_path),
     )
-    merger_rate_and_log_weights_fn = make_merger_rate_and_log_weights_fn(
-        fiducials=fiducials,
-        redshift_grid=z_grid,
-        proposal_logprob=compute_proposal_logprob(samples["redshift"], proposal),
+    # This figure wants the raw per-source weights, which
+    # `SpectralDensityImportanceEstimator` deliberately does not publish (an
+    # (N,) array per sampler step is not a diagnostic). Drop to the population
+    # API instead. Unlike the inference pipeline, nothing here calls
+    # `propagate_catalog`, so the catalog's stored EM distances still need the
+    # fiducial GW/EM correction to become the effective reference distance.
+    proposal_log_prob = compute_proposal_logprob(samples["redshift"], proposal)
+    log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
+        samples["redshift"], fiducials["xi_0"], fiducials["xi_n"]
     )
+
+    def log_weights_fn(params: Mapping[str, jax.Array]) -> jax.Array:
+        population = bns_population(params, redshift_grid=z_grid)
+        return importance_log_weights(
+            population.compute_population_terms(samples),
+            proposal_log_prob=proposal_log_prob,
+            log_reference_distance=log_reference_distance,
+        )
 
     figures: list[tuple[Figure, Path]] = []
     for combo in GRID_PRIORS:
@@ -228,7 +242,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             (name1, grid1),
             constants=constants,
             samples=samples,
-            merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+            log_weights_fn=log_weights_fn,
             chunk_size=CHUNK_SIZE,
         )
         print(

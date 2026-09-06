@@ -5,7 +5,7 @@ from .models import (
     gwb_spectral_density_model,
     spectral_density_model,
 )
-from .protocol import SpectralDensityFn
+from .protocol import SpectralDensityFn, with_renamed_diagnostics
 
 __all__ = [
     "SpectralDensityFn",
@@ -14,4 +14,5 @@ __all__ = [
     "gwb_amplitude_marginalized_model",
     "gwb_spectral_density_model",
     "spectral_density_model",
+    "with_renamed_diagnostics",
 ]

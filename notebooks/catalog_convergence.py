@@ -76,6 +76,7 @@ from astrogwb.catalog import (
 )
 from astrogwb.catalog.io import catalog_to_dataset, load_catalog, save_catalog
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
+from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import (
@@ -86,10 +87,11 @@ from astrogwb.gwb import (
     uniform_prior_mass_moments,
 )
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    bns_population,
     compute_merger_rate_distance_and_logprob,
     madau_dickinson_rate,
-    make_merger_rate_and_log_weights_fn,
 )
+from astrogwb.importance.population import importance_log_weights
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces
 # matplotlib's registered rectilinear axes with its own subclass on import.
@@ -1076,17 +1078,29 @@ pd.DataFrame(
 # closed-form check below instead.
 
 # %%
-weights_fn = make_merger_rate_and_log_weights_fn(
-    fiducials=FIDUCIALS,
-    redshift_grid=make_redshift_grid(),
-    proposal_logprob=proposal_logprob,
+# No NumPyro model here -- only the weights themselves -- so this drops
+# straight to the population API rather than going through an estimator. The
+# stored distances are the EM ones this catalog was generated at, so the
+# reference distance the stored power corresponds to carries the fiducial
+# GW/EM ratio on top; it is cached once, outside the H0 scan.
+log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
+    samples["redshift"], FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]
 )
 
 
 def log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
     """Gaussian log-density of the injection under the H0-shifted template."""
     noise_scale = gaussian_bin_scale(run["effective_psd"], OBSERVATION_TIME, run["df"])
-    rate, log_weights = weights_fn({**FIDUCIALS, "H0": hubble_constant}, samples)
+    population = bns_population(
+        {**FIDUCIALS, "H0": hubble_constant}, redshift_grid=make_redshift_grid()
+    )
+    terms = population.compute_population_terms(samples)
+    rate = terms.total_merger_rate
+    log_weights = importance_log_weights(
+        terms,
+        proposal_log_prob=proposal_logprob,
+        log_reference_distance=log_reference_distance,
+    )
     model = spectral_density(
         run["power"],
         jnp.exp(log_weights),

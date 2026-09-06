@@ -1,9 +1,10 @@
 """Single-amplitude toy MCMC and Fisher-overlay figure.
 
-A stripped-down sibling of the inference runner: same importance-weighted
-pipeline scaffolding, but the cosmology/population callback is a one-parameter
-model. $S_h(f, A)$ scales linearly with amplitude through the total merger
-rate; importance weights are unity. Used as a smoke test that NUTS recovers a
+A stripped-down sibling of the inference runner: same pipeline scaffolding,
+but the spectrum callable is a one-parameter model rather than a reweighted
+population. $S_h(f, A)$ scales linearly with amplitude through the total merger
+rate; importance weights are unity, so no catalog is reweighted at all -- which
+makes this the demonstration that the sampling model is catalog-free. Used as a smoke test that NUTS recovers a
 known injection, and to build the paper Fisher-overlay figure.
 """
 
@@ -35,14 +36,13 @@ from matplotlib.projections import register_projection
 from numpyro.infer import MCMC, NUTS
 
 from astrogwb.catalog.io import open_catalog
-from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr_squared
-from astrogwb.paper.catalogs import samples_from_catalog
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.plotting import TRUTH, use_paper_style
-from astrogwb.sampling.models import spectral_density_model
+from astrogwb.sampling import gwb_spectral_density_model
 from astrogwb.utils import years_to_seconds
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
@@ -123,7 +123,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     frequencies = jnp.asarray(catalog.frequency.values)
     df = float(catalog.attrs["df"])
     polarization_power = jnp.asarray(catalog.polarization_power.values)
-    samples = samples_from_catalog(catalog)
     del catalog
     n_freq, n_samples = polarization_power.shape
     print(f"loaded catalog: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
@@ -138,11 +137,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         effective_psd_arr
     )
     print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
-
-    def merger_rate_and_log_weights_fn(params, _samples):
-        total_merger_rate = params["amplitude"] * merger_rate_norm
-        log_weights = jnp.zeros(n_samples)
-        return total_merger_rate, log_weights
 
     weights_fid = jnp.ones((n_samples,))
     rate_fid = amplitude_fiducial * merger_rate_norm
@@ -159,11 +153,25 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
     )
 
+    # Defined after masking so it closes over the band-restricted power. The
+    # weights are unity by construction here, so there is no catalog to
+    # reweight and nothing for an importance estimator to do -- the generic
+    # likelihood takes the spectrum callable directly.
+    def spectral_density_fn(params):
+        total_merger_rate = params["amplitude"] * merger_rate_norm
+        prediction = spectral_density(
+            polarization_power,
+            weights_fid,
+            total_merger_rate,
+            average_mode="analytic_inclination",
+        )
+        return prediction, {"total_merger_rate": total_merger_rate}
+
     model = partial(
-        spectral_density_model,
-        average_mode="analytic_inclination",
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights_fn,
+        gwb_spectral_density_model,
+        spectral_density_fn=spectral_density_fn,
         priors=priors,
+        scale=gaussian_bin_scale(effective_psd_arr, observation_time, df),
     )
     kernel = NUTS(
         model,
@@ -182,12 +190,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     mcmc.run(
         jax.random.PRNGKey(seed),
-        polarization_power=polarization_power,
-        samples=samples,
         observed_spectral_density=observed_spectral_density,
-        effective_psd=effective_psd_arr,
-        observation_time=observation_time,
-        df=df,
         extra_fields=("num_steps", "accept_prob", "diverging"),
     )
     mcmc.print_summary()

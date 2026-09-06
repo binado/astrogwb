@@ -1,9 +1,9 @@
 """Tests for the shared inference-input pipeline that need no catalog.
 
-``build_model`` depends only on a validated config and the importance-weight
-closure, so the model-building block is exercisable without generating a
-catalog. The array-consuming half lives in ``test_inference_pipeline.py``
-behind the ``integration`` marker.
+``build_model`` depends only on a validated config and a spectrum callable,
+so the model-building block is exercisable without generating a catalog. The
+array-consuming half lives in ``test_inference_pipeline.py`` behind the
+``integration`` marker.
 """
 
 from __future__ import annotations
@@ -35,21 +35,25 @@ def _marginalized_raw() -> dict:
 
 
 _MODEL_KWARGS: dict[str, Any] = {
-    "polarization_power": jnp.ones((2, 2)),
-    "samples": {"sentinel": jnp.ones(2)},
     "observed_spectral_density": jnp.ones(2),
-    "effective_psd": jnp.ones(2),
-    "observation_time": 1.0,
-    "df": 0.25,
+    "scale": jnp.ones(2),
 }
 
 
-def _recording_weights_fn(seen: list[Mapping[str, Any]]):
-    def weights_fn(params, samples):
-        seen.append(dict(params))
-        return jnp.array(1.0), jnp.zeros(samples["sentinel"].shape)
+def _recording_spectrum_fn(seen: list[Mapping[str, Any]]):
+    """A ``SpectralDensityFn`` spy: records the params it was evaluated at.
 
-    return weights_fn
+    It publishes ``total_merger_rate`` because that is the one diagnostic
+    ``build_model`` renames on the marginalized path, and nothing else: no
+    catalog, no power array, no weights. Staying catalog-free here is exactly
+    the property these cases exist to pin.
+    """
+
+    def spectral_density_fn(params):
+        seen.append(dict(params))
+        return jnp.ones(2), {"total_merger_rate": jnp.array(3.0)}
+
+    return spectral_density_fn
 
 
 def test_initial_values_are_the_sampled_parameter_fiducials() -> None:
@@ -87,12 +91,14 @@ def test_build_model_default_likelihood_conditions_every_fixed_param() -> None:
 
     model, marginalization = build_model(
         config,
-        merger_rate_and_log_weights_fn=_recording_weights_fn(seen),
+        spectral_density_fn=_recording_spectrum_fn(seen),
     )
     trace = handlers.trace(handlers.seed(model, rng_seed=0)).get_trace(**_MODEL_KWARGS)
 
     assert marginalization is None
     assert set(seen[0]) == set(config.priors)
+    # Nothing renames the rate on the default path: it is the physical one.
+    np.testing.assert_allclose(float(trace["total_merger_rate"]["value"]), 3.0)
     for name, value in config.fixed_params.items():
         assert name not in trace
         np.testing.assert_allclose(float(seen[0][name]), value)
@@ -105,12 +111,17 @@ def test_build_model_amplitude_marginalized_conditions_other_fixed_params() -> N
 
     model, marginalization = build_model(
         config,
-        merger_rate_and_log_weights_fn=_recording_weights_fn(seen),
+        spectral_density_fn=_recording_spectrum_fn(seen),
     )
     trace = handlers.trace(handlers.seed(model, rng_seed=0)).get_trace(**_MODEL_KWARGS)
 
     assert marginalization is not None
     assert set(seen[0]) == set(config.priors)
+    # The spectrum was evaluated with H0 pinned, so its rate is the template
+    # rate; publishing it as `total_merger_rate` would be indistinguishable
+    # from the physical rate `amplitude_reconstruction_model` later writes.
+    assert "total_merger_rate" not in trace
+    np.testing.assert_allclose(float(trace["template_merger_rate"]["value"]), 3.0)
     assert "H0" not in trace
     np.testing.assert_allclose(seen[0]["H0"], config.fiducials["H0"])
     for name, value in config.fixed_params.items():
