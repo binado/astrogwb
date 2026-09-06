@@ -144,8 +144,8 @@ def test_diagnostic_collisions_are_rejected(marginalized: bool, name: str) -> No
     model = (
         gwb_amplitude_marginalized_model if marginalized else gwb_spectral_density_model
     )
-    with pytest.raises(ValueError, match="diagnostics collide"):
-        handlers.seed(model, 0)(**kwargs)
+    with pytest.raises(AssertionError, match="unique names"):
+        handlers.trace(handlers.seed(model, 0)).get_trace(**kwargs)
 
 
 @pytest.mark.parametrize("explicit_grid", [False, True])

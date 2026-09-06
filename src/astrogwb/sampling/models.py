@@ -151,20 +151,6 @@ from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.sampling.protocol import SpectralDensityFn
 
 
-def _record_diagnostics(
-    extras: Mapping[str, ArrayLike],
-    priors: Mapping[str, dist.Distribution],
-    owned_sites: set[str],
-) -> None:
-    collisions = extras.keys() & (priors.keys() | owned_sites)
-    if collisions:
-        raise ValueError(
-            f"spectrum diagnostics collide with model sites: {sorted(collisions)}"
-        )
-    for name, value in extras.items():
-        numpyro.deterministic(name, value)
-
-
 def _legacy_spectrum_fn(
     polarization_power: jax.Array,
     samples: Mapping[str, jax.Array],
@@ -208,7 +194,8 @@ def gwb_spectral_density_model(
     """
     params = {name: numpyro.sample(name, prior) for name, prior in priors.items()}
     prediction, extras = spectral_density_fn(params)
-    _record_diagnostics(extras, priors, {"spectral_density_obs"})
+    for name, value in extras.items():
+        numpyro.deterministic(name, value)
     numpyro.sample(
         "spectral_density_obs",
         dist.Normal(prediction, scale).to_event(1),
@@ -257,15 +244,8 @@ def gwb_amplitude_marginalized_model(
     params = {name: numpyro.sample(name, prior) for name, prior in priors.items()}
     params[amplitude_parameter] = amplitude_fiducial
     model_spectral_density, extras = spectral_density_fn(params)
-    _record_diagnostics(
-        extras,
-        priors,
-        {
-            "amplitude_mle",
-            "template_optimal_snr",
-            "amplitude_marginalized_log_likelihood",
-        },
-    )
+    for name, value in extras.items():
+        numpyro.deterministic(name, value)
 
     inverse_variance = scale**-2
     template_norm = jnp.sum(
