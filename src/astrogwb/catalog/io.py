@@ -15,9 +15,9 @@ import numpy as np
 
 from astrogwb.catalog import (
     Catalog,
-    FrequencyDomainWaveformMetadata,
     PopulationMetadata,
 )
+from astrogwb.waveform import PolarizationPowerGenerator
 
 try:
     import xarray as xr
@@ -238,7 +238,7 @@ def validate_catalog_dataset(dataset: xr.Dataset, *, label: str) -> None:
 
 def waveform_metadata_from_dataset(
     dataset: xr.Dataset, *, label: str
-) -> FrequencyDomainWaveformMetadata:
+) -> PolarizationPowerGenerator:
     """Decode waveform metadata and the coordinate without touching data variables."""
     missing = [name for name in WAVEFORM_ATTRS if name not in dataset.attrs]
     if missing:
@@ -249,7 +249,7 @@ def waveform_metadata_from_dataset(
         raise ValueError(f"{label}: missing 'frequency' coordinate")
     attrs = dataset.attrs
     try:
-        return FrequencyDomainWaveformMetadata(
+        return PolarizationPowerGenerator(
             frequencies=np.asarray(dataset.coords["frequency"].values),
             approximant=str(_scalar(attrs["approximant"], name="approximant")),
             minimum_frequency=float(

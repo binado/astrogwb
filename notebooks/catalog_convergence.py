@@ -67,13 +67,7 @@ import xarray as xr
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
-from astrogwb.catalog import (
-    AnalyticInspiralGenerator,
-    Catalog,
-    FrequencyDomainWaveformMetadata,
-    PopulationMetadata,
-    simulate_population,
-)
+from astrogwb.catalog import Catalog, PopulationMetadata, simulate_population
 from astrogwb.catalog.io import catalog_to_dataset, load_catalog, save_catalog
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.cosmology import log_gw_em_ratio
@@ -92,6 +86,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     madau_dickinson_rate,
 )
 from astrogwb.importance.population import importance_log_weights
+from astrogwb.waveform import AnalyticInspiralGenerator
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces
 # matplotlib's registered rectilinear axes with its own subclass on import.
@@ -407,8 +402,8 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
 
     return Catalog.from_generator(
         parameters,
-        generator=AnalyticInspiralGenerator(alpha=ISCO_ALPHA),
-        waveform_metadata=FrequencyDomainWaveformMetadata.from_bounds(
+        generator=AnalyticInspiralGenerator.from_bounds(
+            alpha=ISCO_ALPHA,
             approximant="AnalyticInspiral",
             minimum_frequency=F_MIN,
             maximum_frequency=f_max,

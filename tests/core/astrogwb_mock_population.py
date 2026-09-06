@@ -21,18 +21,14 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from astrogwb.catalog import (
-    AnalyticInspiralGenerator,
-    Catalog,
-    FrequencyDomainWaveformMetadata,
-    PopulationMetadata,
-)
+from astrogwb.catalog import Catalog, PopulationMetadata
 from astrogwb.catalog.importance import ImportanceCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     bns_population,
     compute_merger_rate_distance_and_logprob,
 )
+from astrogwb.waveform import AnalyticInspiralGenerator
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -110,7 +106,7 @@ def build_mock_catalog(
     """Build a real ``Catalog`` from the committed population draw.
 
     The polarization power comes from
-    :class:`~astrogwb.catalog.AnalyticInspiralGenerator`, so the catalog is
+    :class:`~astrogwb.waveform.AnalyticInspiralGenerator`, so the catalog is
     a genuine closed-form inspiral bank -- no Ripple backend, no persisted
     file -- and :meth:`~astrogwb.catalog.Catalog.from_generator` self-validates,
     so a malformed mock fails at construction rather than deep inside a model.
@@ -139,8 +135,8 @@ def build_mock_catalog(
 
     return Catalog.from_generator(
         parameters,
-        generator=AnalyticInspiralGenerator(alpha=ISCO_ALPHA),
-        waveform_metadata=FrequencyDomainWaveformMetadata.from_bounds(
+        generator=AnalyticInspiralGenerator.from_bounds(
+            alpha=ISCO_ALPHA,
             approximant="AnalyticInspiral",
             minimum_frequency=f_min,
             maximum_frequency=f_max,

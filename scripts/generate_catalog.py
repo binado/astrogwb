@@ -34,16 +34,13 @@ from __future__ import annotations
 
 import argparse
 import logging
-import math
 from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
-from gwmock_signal.waveform import RippleBackend
 
 from astrogwb.catalog import (
     Catalog,
-    FrequencyDomainWaveformMetadata,
     PopulationMetadata,
     simulate_population,
     simulate_population_mixture,
@@ -56,7 +53,7 @@ from astrogwb.paper.config.catalogs import (
     load_catalog_layers,
 )
 from astrogwb.paper.utils import load_mapping
-from astrogwb.waveform import polarization_power
+from astrogwb.waveform import RippleGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -94,94 +91,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Replace an existing output catalog.",
     )
     return parser.parse_args(argv)
-
-
-def _resolve_segment_duration(frequency_resolution: float) -> float:
-    """Map a target frequency resolution to a segment duration in seconds.
-
-    df = 1 / segment_duration -- two views of the same knob. We work with the
-    polarizations purely in the frequency domain (never an inverse FFT), so a
-    coarse df is safe: the long, fine-df segment the backend would otherwise
-    pick exists only to avoid time-domain wraparound of the inspiral, which
-    cannot affect a frequency-domain-only catalog.
-    """
-    if frequency_resolution <= 0:
-        raise ValueError("waveform.frequency_resolution must be > 0")
-    return 1.0 / frequency_resolution
-
-
-def _effective_resolution(segment_duration: float, sampling_frequency: float) -> float:
-    """Achieved df after the backend rounds the segment up to a power-of-two seconds."""
-    rounded_seconds = float(2.0 ** math.ceil(math.log2(segment_duration)))
-    return sampling_frequency / round(rounded_seconds * sampling_frequency)
-
-
-def _truncate(
-    frequencies: np.ndarray,
-    plus: np.ndarray,
-    cross: np.ndarray,
-    maximum_frequency: float | None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Restrict the frequency axis (and matching polarization columns) to f <= f_max.
-
-    ``plus`` and ``cross`` are in the backend's ``(n_events, n_freq)`` orientation.
-    Truncation happens here, before the polarization-power reduction.
-    """
-    if maximum_frequency is None:
-        return frequencies, plus, cross
-    mask = frequencies <= maximum_frequency
-    return frequencies[mask], plus[:, mask], cross[:, mask]
-
-
-def _generate_polarization_power(
-    samples: dict[str, np.ndarray],
-    *,
-    approximant: str,
-    sampling_frequency: float,
-    minimum_frequency: float,
-    backend: RippleBackend,
-    maximum_frequency: float | None,
-    chunk_size: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Generate polarization power chunk by chunk, reusing one fixed-grid backend.
-
-    The backend already carries a fixed ``segment_duration``, so every chunk lands on
-    the same frequency axis. Each chunk is truncated to ``maximum_frequency`` and then
-    reduced to power immediately, so the running accumulator holds float64 power
-    instead of two complex polarization arrays -- a 4x cut in peak memory -- and the
-    chunks concatenate directly into a C-contiguous ``(n_freq, n_events)`` array with
-    no full-size transpose ever materialized. Returns ``frequencies`` plus that power
-    array.
-    """
-    n_events = samples["detector_frame_mass_1"].shape[0]
-    step = chunk_size if 0 < chunk_size < n_events else n_events
-    frequencies: np.ndarray | None = None
-    power_chunks: list[np.ndarray] = []
-    for start in range(0, n_events, step):
-        stop = min(start + step, n_events)
-        chunk_samples = {
-            name: np.asarray(values)[start:stop] for name, values in samples.items()
-        }
-        polarizations = backend.generate_fd_polarizations_batch(
-            approximant,
-            sampling_frequency=sampling_frequency,
-            minimum_frequency=minimum_frequency,
-            parameters=chunk_samples,
-        )
-        chunk_frequencies, chunk_plus, chunk_cross = _truncate(
-            np.asarray(polarizations.frequencies),
-            np.asarray(polarizations.plus),
-            np.asarray(polarizations.cross),
-            maximum_frequency,
-        )
-        if frequencies is None:
-            frequencies = chunk_frequencies
-        chunk_power = polarization_power(chunk_plus, chunk_cross)  # (F, n_chunk)
-        power_chunks.append(chunk_power)
-        logger.info("Generated chunk %d:%d of %d events", start, stop, n_events)
-
-    assert frequencies is not None  # n_events > 0 guaranteed by CatalogDefinition
-    return frequencies, np.concatenate(power_chunks, axis=1)
 
 
 def resolve_population_paths(
@@ -307,14 +216,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     }
 
     waveform = definition.waveform
-    segment_duration = _resolve_segment_duration(waveform.frequency_resolution)
-    effective_df = _effective_resolution(segment_duration, waveform.sampling_frequency)
-    # A fixed segment_duration pins df at generation time so we evaluate the analytic
-    # FD waveform directly on the coarse grid instead of generating ~1/df more bins and
-    # discarding them. Safe here because the catalog is consumed in the frequency domain
-    # only; this backend must NOT be used for time-domain (inverse-FFT) generation.
-    backend = RippleBackend(
-        f_ref=waveform.reference_frequency, segment_duration=segment_duration
+    generator = RippleGenerator(
+        approximant=waveform.approximant,
+        sampling_frequency=waveform.sampling_frequency,
+        minimum_frequency=waveform.minimum_frequency,
+        maximum_frequency=waveform.maximum_frequency,
+        reference_frequency=waveform.reference_frequency,
+        frequency_resolution=waveform.frequency_resolution,
+        chunk_size=waveform.chunk_size,
     )
     logger.info(
         "Generating %s waveforms for %d events (f_min=%.1f Hz, f_ref=%.1f Hz, "
@@ -324,39 +233,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         waveform.minimum_frequency,
         waveform.reference_frequency,
         waveform.sampling_frequency,
-        segment_duration,
-        effective_df,
+        1.0 / generator.frequency_resolution,
+        generator.df,
     )
 
-    frequencies, power = _generate_polarization_power(
-        samples,
-        approximant=waveform.approximant,
-        sampling_frequency=waveform.sampling_frequency,
-        minimum_frequency=waveform.minimum_frequency,
-        backend=backend,
-        maximum_frequency=waveform.maximum_frequency,
-        chunk_size=waveform.chunk_size,
-    )
     logger.info("Truncated frequency axis to f <= %.1f Hz", waveform.maximum_frequency)
 
-    actual_df = (
-        float(frequencies[1] - frequencies[0]) if frequencies.size > 1 else effective_df
-    )
-    waveform_metadata = FrequencyDomainWaveformMetadata(
-        frequencies=frequencies,
-        approximant=waveform.approximant,
-        minimum_frequency=waveform.minimum_frequency,
-        maximum_frequency=waveform.maximum_frequency,
-        reference_frequency=waveform.reference_frequency,
-        sampling_frequency=waveform.sampling_frequency,
-        df=actual_df,
-    )
-    catalog = Catalog(
-        source_parameters={
-            name: np.asarray(values) for name, values in samples.items()
-        },
-        polarization_power=power,
-        waveform_metadata=waveform_metadata,
+    catalog = Catalog.from_generator(
+        samples,
+        generator=generator,
         population_metadata=population_metadata,
     )
 
@@ -370,8 +255,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         definition.name,
         catalog.population_metadata.num_samples,
         catalog.waveform_metadata.frequencies.size,
-        float(frequencies[0]),
-        float(frequencies[-1]),
+        float(generator.frequencies[0]),
+        float(generator.frequencies[-1]),
         waveform.approximant,
     )
     logger.info("Output written to %s", output_path)

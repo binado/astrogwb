@@ -1,4 +1,4 @@
-"""Tests for array-native catalog metadata, generation, and simulation."""
+"""Tests for array-native catalog generation and simulation."""
 
 from __future__ import annotations
 
@@ -8,17 +8,14 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from numpy.typing import ArrayLike
 
-from astrogwb.catalog import (
-    AnalyticInspiralGenerator,
-    Catalog,
-    FrequencyDomainWaveformMetadata,
-    PopulationMetadata,
-    simulate_population,
-)
+from astrogwb.catalog import Catalog, PopulationMetadata, simulate_population
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.waveform import inspiral_polarization_power
+from astrogwb.waveform import (
+    AnalyticInspiralGenerator,
+    PolarizationPowerGenerator,
+    inspiral_polarization_power,
+)
 
 
 @pytest.fixture
@@ -33,8 +30,8 @@ def source_parameters() -> dict[str, np.ndarray]:
     }
 
 
-def _waveform_metadata() -> FrequencyDomainWaveformMetadata:
-    return FrequencyDomainWaveformMetadata(
+def _waveform_generator() -> PolarizationPowerGenerator:
+    return PolarizationPowerGenerator(
         frequencies=np.array([10.0, 12.0]),
         approximant="FakeWaveform",
         minimum_frequency=10.0,
@@ -64,10 +61,10 @@ def _population_metadata(
         (19.0, np.array([10.0, 12.0, 14.0, 16.0, 18.0])),
     ],
 )
-def test_waveform_metadata_from_bounds_includes_largest_in_band_bin(
+def test_generator_from_bounds_includes_largest_in_band_bin(
     maximum_frequency: float, expected: np.ndarray
 ) -> None:
-    metadata = FrequencyDomainWaveformMetadata.from_bounds(
+    generator = PolarizationPowerGenerator.from_bounds(
         approximant="Toy",
         minimum_frequency=10.0,
         maximum_frequency=maximum_frequency,
@@ -76,8 +73,8 @@ def test_waveform_metadata_from_bounds_includes_largest_in_band_bin(
         df=2.0,
     )
 
-    np.testing.assert_array_equal(metadata.frequencies, expected)
-    assert metadata.maximum_frequency == maximum_frequency
+    np.testing.assert_array_equal(generator.frequencies, expected)
+    assert generator.maximum_frequency == maximum_frequency
 
 
 @pytest.mark.parametrize(
@@ -91,11 +88,11 @@ def test_waveform_metadata_from_bounds_includes_largest_in_band_bin(
         ([1.0, 2.0], 0.0, "finite positive"),
     ],
 )
-def test_waveform_metadata_rejects_invalid_grid(
+def test_generator_rejects_invalid_grid(
     frequencies: list[float], df: float, message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        FrequencyDomainWaveformMetadata(
+        PolarizationPowerGenerator(
             frequencies=np.asarray(frequencies),
             approximant="Toy",
             minimum_frequency=1.0,
@@ -106,11 +103,11 @@ def test_waveform_metadata_rejects_invalid_grid(
         )
 
 
-def test_waveform_metadata_accepts_float64_fft_roundoff() -> None:
+def test_generator_accepts_float64_fft_roundoff() -> None:
     frequencies = np.array([10.0, 20.0, 30.0, 40.0])
     frequencies[2] += 32.0 * np.finfo(np.float64).eps * frequencies[-1]
 
-    FrequencyDomainWaveformMetadata(
+    PolarizationPowerGenerator(
         frequencies=frequencies,
         approximant="Toy",
         minimum_frequency=10.0,
@@ -121,47 +118,35 @@ def test_waveform_metadata_accepts_float64_fft_roundoff() -> None:
     )
 
 
-def test_from_generator_passes_exact_grid_and_preserves_parameter_dtypes(
+def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes(
     source_parameters: dict[str, np.ndarray],
 ) -> None:
-    expected_power = np.array([[1.0, 2.0], [3.0, 4.0]])
-    waveform = _waveform_metadata()
+    generator = AnalyticInspiralGenerator.from_bounds(
+        alpha=ISCO_ALPHA,
+        approximant="AnalyticInspiral",
+        minimum_frequency=10.0,
+        maximum_frequency=12.0,
+        reference_frequency=10.0,
+        sampling_frequency=32.0,
+        df=2.0,
+    )
     population = _population_metadata(provenance={"producer": "test"})
-
-    class FakeGenerator:
-        received_parameters: Mapping[str, ArrayLike] | None = None
-        received_metadata: FrequencyDomainWaveformMetadata | None = None
-
-        def __call__(
-            self,
-            source_parameters: Mapping[str, ArrayLike],
-            waveform_metadata: FrequencyDomainWaveformMetadata,
-        ) -> np.ndarray:
-            self.received_parameters = source_parameters
-            self.received_metadata = waveform_metadata
-            return expected_power
-
-    generator = FakeGenerator()
     catalog = Catalog.from_generator(
         source_parameters,
         generator=generator,
-        waveform_metadata=waveform,
         population_metadata=population,
     )
 
-    assert generator.received_parameters is source_parameters
-    assert generator.received_metadata is waveform
-    assert catalog.waveform_metadata is waveform
+    assert catalog.waveform_metadata is generator
     assert catalog.population_metadata is population
-    np.testing.assert_array_equal(catalog.polarization_power, expected_power)
     assert catalog.source_parameters["integer_label"].dtype == np.int16
 
 
 def test_analytic_generator_evaluates_on_exact_metadata_grid(
     source_parameters: dict[str, np.ndarray],
 ) -> None:
-    waveform = FrequencyDomainWaveformMetadata(
-        frequencies=np.array([10.0, 12.0, 14.0]),
+    generator = AnalyticInspiralGenerator.from_bounds(
+        alpha=ISCO_ALPHA,
         approximant="AnalyticInspiral",
         minimum_frequency=9.5,
         maximum_frequency=14.5,
@@ -169,12 +154,11 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
         sampling_frequency=32.0,
         df=2.0,
     )
-    generator = AnalyticInspiralGenerator(alpha=ISCO_ALPHA)
 
-    actual = generator(source_parameters, waveform)
+    actual = generator(source_parameters)
     expected = np.asarray(
         inspiral_polarization_power(
-            waveform.frequencies, source_parameters, alpha=ISCO_ALPHA
+            generator.frequencies, source_parameters, alpha=ISCO_ALPHA
         )
     ).T
 
@@ -195,7 +179,7 @@ def test_catalog_rejects_malformed_power(power: np.ndarray, message: str) -> Non
         Catalog(
             source_parameters={"redshift": np.array([0.1, 0.2])},
             polarization_power=power,
-            waveform_metadata=_waveform_metadata(),
+            waveform_metadata=_waveform_generator(),
             population_metadata=_population_metadata(),
         )
 
@@ -206,7 +190,7 @@ def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None
         Catalog(
             source_parameters={"redshift": values},
             polarization_power=np.ones((2, 2)),
-            waveform_metadata=_waveform_metadata(),
+            waveform_metadata=_waveform_generator(),
             population_metadata=_population_metadata(),
         )
 

@@ -1,20 +1,27 @@
-"""Exact frequency-grid metadata for frequency-domain waveform power."""
+"""Common descriptor and interface for polarization-power generation."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any, Self
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 
-__all__ = ["FrequencyDomainWaveformMetadata"]
+__all__ = ["PolarizationPowerGenerator"]
 
 GRID_SPACING_TOLERANCE_ULP = 64.0
 
 
 @dataclass(frozen=True, slots=True)
-class FrequencyDomainWaveformMetadata:
-    """The exact frequency grid and settings used to generate waveform power."""
+class PolarizationPowerGenerator:
+    """Frequency-domain waveform descriptor and power-generation interface.
+
+    Concrete subclasses turn source parameters into frequency-first
+    polarization power. The base class is also used as a metadata-only
+    descriptor when a persisted catalog is loaded.
+    """
 
     frequencies: NDArray[np.float64]
     approximant: str
@@ -59,7 +66,8 @@ class FrequencyDomainWaveformMetadata:
         reference_frequency: float,
         sampling_frequency: float,
         df: float,
-    ) -> FrequencyDomainWaveformMetadata:
+        **kwargs: Any,
+    ) -> Self:
         """Construct the inclusive uniform grid ``minimum + k*df <= maximum``."""
         minimum = float(minimum_frequency)
         maximum = float(maximum_frequency)
@@ -94,6 +102,19 @@ class FrequencyDomainWaveformMetadata:
             reference_frequency=reference_frequency,
             sampling_frequency=sampling_frequency,
             df=spacing,
+            **kwargs,
+        )
+
+    def __call__(self, source_parameters: Mapping[str, ArrayLike]) -> NDArray[Any]:
+        """Generate power for ``source_parameters``.
+
+        The base implementation exists so it can describe a loaded catalog;
+        only concrete generator subclasses are intended to generate power.
+        """
+        del source_parameters
+        raise NotImplementedError(
+            "PolarizationPowerGenerator is a metadata-only descriptor; "
+            "use a concrete generator subclass"
         )
 
 

@@ -32,15 +32,13 @@ pip install astrogwb[simulation]
 - `astrogwb.importance` defines the reusable importance-weighting protocol and
   compact-binary population model.
 - `astrogwb.sampling` exposes the caller-prepared NumPyro model.
-- `astrogwb.catalog` provides array-native catalog metadata, validation,
-  population simulation, and polarization-power generation.
-  `astrogwb.catalog.generator` defines the generator protocol and the
-  closed-form inspiral adapter; the optional `gwmock-pop` adapter is imported
-  only when `simulate_population` is called.
-- `astrogwb.waveform` reduces raw plus/cross polarizations to power, applies
-  GW-distance corrections to plain arrays, and provides a closed-form
-  quadrupolar inspiral model. Persistence and labelled-array policy stay with
-  applications.
+- `astrogwb.catalog` provides array-native catalog validation and population
+  simulation. The optional `gwmock-pop` adapter is imported only when
+  `simulate_population` is called.
+- `astrogwb.waveform` owns polarization-power generators, reduces raw
+  plus/cross polarizations to power, applies GW-distance corrections to plain
+  arrays, and provides a closed-form quadrupolar inspiral model. Persistence
+  and labelled-array policy stay with applications.
   `astrogwb.waveform.analytical` gives the same power in closed form for a
   quadrupolar, inspiral-only binary, truncated at `f = alpha / ((1 + z) M)`
   for a caller-chosen dimensionless `alpha`.
@@ -58,14 +56,11 @@ A prepared population can be reduced through the common generation interface:
 
 ```python
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.catalog import (
-    AnalyticInspiralGenerator,
-    Catalog,
-    FrequencyDomainWaveformMetadata,
-    PopulationMetadata,
-)
+from astrogwb.catalog import Catalog, PopulationMetadata
+from astrogwb.waveform import AnalyticInspiralGenerator
 
-waveform_metadata = FrequencyDomainWaveformMetadata.from_bounds(
+generator = AnalyticInspiralGenerator.from_bounds(
+    alpha=ISCO_ALPHA,
     approximant="AnalyticInspiral",
     minimum_frequency=2.0,
     maximum_frequency=2048.0,
@@ -81,8 +76,7 @@ population_metadata = PopulationMetadata(
 
 catalog = Catalog.from_generator(
     source_parameters,
-    generator=AnalyticInspiralGenerator(alpha=ISCO_ALPHA),
-    waveform_metadata=waveform_metadata,
+    generator=generator,
     population_metadata=population_metadata,
 )
 ```

@@ -47,7 +47,7 @@ That recipe installs the `simulation` and `io` extras and the `jupyter` group,
 and nothing else — which is what keeps the notebook's self-containment honest. The notebook keeps its
 scientifically significant population graph and luminosity-distance
 recomputation inline, then passes the prepared parameters through
-`Catalog.from_generator(..., generator=AnalyticInspiralGenerator(...))`.
+`Catalog.from_generator(..., generator=AnalyticInspiralGenerator.from_bounds(...))`.
 
 `ASTROGWB_NOTEBOOK_SMOKE=1` shrinks the catalog and the convergence sweeps. It
 changes only how long the notebook runs, never which

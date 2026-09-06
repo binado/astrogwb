@@ -10,7 +10,6 @@ import xarray as xr
 
 from astrogwb.catalog import (
     Catalog,
-    FrequencyDomainWaveformMetadata,
     PopulationMetadata,
 )
 from astrogwb.catalog.io import (
@@ -20,6 +19,7 @@ from astrogwb.catalog.io import (
 from astrogwb.catalog.io import (
     save_catalog as save_core_catalog,
 )
+from astrogwb.waveform import PolarizationPowerGenerator
 
 
 def make_catalog(
@@ -49,7 +49,7 @@ def make_catalog(
             name: np.asarray(value) for name, value in source_parameters.items()
         },
         polarization_power=np.asarray(polarization_power),
-        waveform_metadata=FrequencyDomainWaveformMetadata(
+        waveform_metadata=PolarizationPowerGenerator(
             frequencies=np.asarray(frequencies),
             approximant=approximant,
             minimum_frequency=minimum_frequency,
