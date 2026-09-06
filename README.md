@@ -87,26 +87,6 @@ catalog = Catalog.from_generator(
 )
 ```
 
-## Examples
-
-`examples/` holds runnable end-to-end scripts that depend only on `astrogwb`.
-The scripts read and write xarray/HDF5 files directly, so install `xarray` and
-`h5netcdf[h5py]` separately before running them; these I/O dependencies are not
-installed by `astrogwb`.
-`examples/h0_mcmc.py` takes a waveform catalog, builds the observed spectral
-density from it, and infers `H0` with a NumPyro NUTS chain:
-
-```bash
-python examples/h0_mcmc.py CATALOG.h5 -o chains.nc
-```
-
-`examples/amplitude_marginalized_model.py` is the same run with `H0` marginalized out of the
-likelihood analytically and reconstructed afterwards, giving a joint
-`(H0, Omega_m)` posterior -- the setup every production analysis uses.
-
-See `examples/README.md` for the options and for how the catalog serves as its
-own importance-sampling proposal.
-
 ## The manuscript application
 
 The reproducibility application -- the MCMC runner, catalog generation, campaign

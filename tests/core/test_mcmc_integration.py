@@ -83,9 +83,8 @@ SEED = 42
 NUM_WARMUP = 500
 NUM_SAMPLES = 1000
 
-#: Nodes in the H0 quadrature grid the marginalization runs on. Smaller than
-#: the examples' 1024; ``quadrature_effective_nodes`` is asserted rather than
-#: assumed.
+#: Nodes in the H0 quadrature grid the marginalization runs on.
+#: ``quadrature_effective_nodes`` is asserted rather than assumed.
 AMPLITUDE_NUM_NODES = 512
 
 H0_PRIOR = dist.Uniform(20.0, 140.0)
@@ -117,9 +116,9 @@ def _build_analysis_inputs(
     *,
     target_snr: float = TARGET_SNR,
 ) -> AnalysisInputs:
-    """Reproduce the examples' setup block against an in-memory catalog.
+    """Reproduce the standard setup block against an in-memory catalog.
 
-    Mirrors ``examples/h0_mcmc.py``: unpack the catalog, build the redshift
+    Unpack the catalog, build the redshift
     grid, call :func:`compute_merger_rate_distance_and_logprob` *once* for both
     the injection rate and the proposal log-density, contract with unit
     weights, load the network effective PSD, and mask out-of-band and
@@ -353,8 +352,8 @@ def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
     for name in ("H0", "total_merger_rate", "importance_relative_ess"):
         assert posterior[name].shape == (1, NUM_SAMPLES)
 
-    # The catalog is its own proposal, so every weight is exactly 1. This is a
-    # far sharper statement than the examples' `> 0.1` collapse warning.
+    # The catalog is its own proposal, so every weight is exactly 1: a far
+    # sharper statement than the usual `> 0.1` collapse warning.
     np.testing.assert_allclose(
         np.asarray(posterior["importance_relative_ess"]), 1.0, rtol=1e-12
     )
