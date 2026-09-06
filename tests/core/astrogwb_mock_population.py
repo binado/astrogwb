@@ -39,8 +39,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 #: The committed frozen draw from the core test population graph.
 MOCK_POPULATION_PATH = FIXTURES_DIR / "mock_bns_population.csv"
 
-#: Hyperparameters the mock injection is built at, verbatim from
-#: ``examples/h0_mcmc.py`` and ``examples/amplitude_marginalized_model.py``.
+#: Hyperparameters the mock injection is built at.
 #: ``local_merger_rate`` is in Gpc^-3 yr^-1; the rest feed the Madau-Dickinson
 #: rate shape and the flat-LambdaCDM cosmology. They also match the population
 #: graph the fixture was drawn from, which is what lets the catalog serve as
