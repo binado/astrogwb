@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from collections.abc import Mapping
 from functools import partial
 from pathlib import Path
 
@@ -45,16 +46,18 @@ import numpy as np
 import numpyro
 import numpyro.distributions as dist
 import xarray as xr
+from jax.typing import ArrayLike
 from numpyro.infer import MCMC, NUTS, init_to_value
 
-from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density
+from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     compute_merger_rate_distance_and_logprob,
     make_merger_rate_and_log_weights_fn,
 )
-from astrogwb.sampling.models import spectral_density_model
+from astrogwb.sampling.models import gwb_spectral_density_model
 
 logger = logging.getLogger(__name__)
 
@@ -345,16 +348,28 @@ def main(argv: list[str] | None = None) -> None:
         args.observation_time,
     )
 
+    def spectrum_fn(
+        params: Mapping[str, ArrayLike],
+    ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
+        rate, log_weights = merger_rate_and_log_weights(params, samples)
+        prediction = spectral_density(
+            polarization_power,
+            jnp.exp(log_weights),
+            rate,
+            average_mode="analytic_inclination",
+        )
+        return prediction, {
+            "total_merger_rate": rate,
+            "importance_relative_ess": relative_ess(log_weights),
+        }
+
+    scale = gaussian_bin_scale(network_psd, args.observation_time, df)
+
     model = partial(
-        spectral_density_model,
-        polarization_power=polarization_power,
-        samples=samples,
+        gwb_spectral_density_model,
+        spectral_density_fn=spectrum_fn,
         observed_spectral_density=observed_spectral_density,
-        effective_psd=network_psd,
-        observation_time=args.observation_time,
-        df=df,
-        average_mode="analytic_inclination",
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights,
+        scale=scale,
         priors={"H0": dist.Uniform(args.h0_min, args.h0_max)},
     )
     # One latent against an (F, N) matvec is exactly the case forward-mode AD
@@ -379,10 +394,10 @@ def main(argv: list[str] | None = None) -> None:
     mcmc.print_summary()
 
     posterior = mcmc.get_samples(group_by_chain=True)
-    relative_ess = float(jnp.mean(posterior["importance_relative_ess"]))
+    mean_relative_ess = float(jnp.mean(posterior["importance_relative_ess"]))
     logger.info("Fiducial H0: %s", FIDUCIALS["H0"])
-    logger.info("Mean importance relative ESS: %.4f", relative_ess)
-    if relative_ess < 0.1:
+    logger.info("Mean importance relative ESS: %.4f", mean_relative_ess)
+    if mean_relative_ess < 0.1:
         logger.warning(
             "importance weights have collapsed; the posterior is "
             "dominated by a handful of catalog sources"

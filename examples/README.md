@@ -173,3 +173,13 @@ chains = xr.open_dataset("chains.nc", engine="h5netcdf")
 print(chains.H0.mean(), chains.attrs["fiducial_H0"])
 print(float(chains.quadrature_effective_nodes.min()))
 ```
+
+### Spectrum callable interface
+
+Both examples prepare `gaussian_bin_scale(network_psd, observation_time, df)`
+once and pass a `params -> (spectrum, diagnostics)` callable to
+`gwb_spectral_density_model` or `gwb_amplitude_marginalized_model`. Their existing
+importance callbacks remain inside that callable while catalog preparation is
+migrated separately. Analytic calculators can return an empty diagnostics mapping.
+The amplitude example supplies `amplitude_fiducial=FIDUCIALS["H0"]` and names its
+rate diagnostic `template_merger_rate`, preserving physical-rate reconstruction.
