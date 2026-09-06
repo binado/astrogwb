@@ -43,7 +43,7 @@ OFF_FIDUCIALS = {
 
 @pytest.fixture
 def catalog() -> ImportanceCatalog:
-    """A consistent catalog built directly, skipping factory validation."""
+    """A consistent catalog built directly."""
     return ImportanceCatalog(
         source_parameters={"redshift": REDSHIFTS},
         polarization_power=POWER,
@@ -64,77 +64,6 @@ def _estimator(
         luminosity_distance=proposal.luminosity_distance(REDSHIFTS),
     )
     return SpectralDensityImportanceEstimator(catalog, factory, average_mode)
-
-
-@pytest.mark.parametrize(
-    ("power", "message"),
-    [
-        (jnp.ones(4), "two-dimensional"),
-        (jnp.ones((3, 4), dtype=complex), "real"),
-        (jnp.ones((3, 0)), "at least one source"),
-    ],
-)
-def test_from_population_rejects_inconsistent_power(
-    power: jax.Array, message: str
-) -> None:
-    num_samples = power.shape[1] if power.ndim == 2 else REDSHIFTS.size
-    with pytest.raises(ValueError, match=message):
-        ImportanceCatalog.from_population(
-            population=bns_population(FIDUCIALS, redshift_grid=make_redshift_grid()),
-            source_parameters={"redshift": REDSHIFTS[:num_samples]},
-            polarization_power=power,
-            luminosity_distance=jnp.ones(num_samples),
-        )
-
-
-@pytest.mark.parametrize(
-    ("samples", "message"),
-    [
-        ({"redshift": jnp.ones((4, 1))}, "shape"),
-        ({"redshift": REDSHIFTS, "mass": jnp.ones(3)}, "shape"),
-    ],
-)
-def test_from_population_rejects_inconsistent_source_parameters(
-    samples: Mapping[str, jax.Array], message: str
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        ImportanceCatalog.from_population(
-            population=bns_population(FIDUCIALS, redshift_grid=make_redshift_grid()),
-            source_parameters=samples,
-            polarization_power=POWER,
-            luminosity_distance=jnp.ones(4),
-        )
-
-
-@pytest.mark.parametrize("distance", [0.0, -1.0, jnp.inf, jnp.nan, 1.0 + 1.0j])
-def test_catalog_rejects_invalid_linear_distances(distance: complex) -> None:
-    with pytest.raises(ValueError, match="positive and finite"):
-        ImportanceCatalog.from_population(
-            population=bns_population(FIDUCIALS, redshift_grid=make_redshift_grid()),
-            source_parameters={"redshift": REDSHIFTS},
-            polarization_power=POWER,
-            luminosity_distance=jnp.full(4, distance),
-        )
-
-
-@pytest.mark.parametrize(
-    ("samples", "distance", "message"),
-    [
-        ({"mass": REDSHIFTS}, jnp.ones(4), "redshift"),
-        ({"redshift": REDSHIFTS}, jnp.ones(3), "log_reference_distance"),
-        ({"redshift": REDSHIFTS}, jnp.asarray(1234.5), "log_reference_distance"),
-    ],
-)
-def test_population_constructor_requires_aligned_redshifts_and_distances(
-    samples: Mapping[str, jax.Array], distance: jax.Array, message: str
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        ImportanceCatalog.from_population(
-            population=bns_population(FIDUCIALS, redshift_grid=make_redshift_grid()),
-            source_parameters=samples,
-            polarization_power=POWER,
-            luminosity_distance=distance,
-        )
 
 
 def test_supplied_reference_distance_wins_over_population_cosmology() -> None:

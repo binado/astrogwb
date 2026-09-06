@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Self
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 from jax.typing import ArrayLike
 
 if TYPE_CHECKING:
@@ -31,8 +30,9 @@ class ImportanceCatalog:
 
     The constructor performs no validation or array conversion: JAX rebuilds
     instances internally while flattening and unflattening pytrees, possibly
-    with tracers, placeholders, or additional batch dimensions. Validated
-    construction is :meth:`from_population`. Direct construction with
+    with tracers, placeholders, or additional batch dimensions.
+    :meth:`from_population` only converts inputs to arrays and caches the
+    proposal density and reference distances. Direct construction with
     precomputed proposal densities (including mixtures) remains supported; the
     proposal need not itself be a physical population, and no proposal merger
     rate or observation time enters the importance estimator. Ensuring
@@ -55,46 +55,24 @@ class ImportanceCatalog:
     ) -> Self:
         """Cache the proposal density and supplied effective distances once.
 
-        Call outside JAX transformations: array shapes and positive, finite
-        linear distances are validated on the host. Distances are supplied
-        explicitly rather than recomputed from the population's cosmology.
+        Call outside JAX transformations: distances are supplied explicitly
+        rather than recomputed from the population's cosmology. Inputs are
+        converted to arrays without validation; ensuring consistent shapes
+        and positive, finite linear distances is the caller's responsibility.
         """
         power = jnp.asarray(polarization_power)
-        if power.ndim != 2 or not (
-            np.issubdtype(power.dtype, np.floating)
-            or np.issubdtype(power.dtype, np.integer)
-        ):
-            raise ValueError("polarization_power must be a real two-dimensional array")
-        num_samples = power.shape[1]
-        if num_samples == 0:
-            raise ValueError("ImportanceCatalog requires at least one source")
 
         parameters = {
             name: jnp.asarray(values) for name, values in source_parameters.items()
         }
-        if "redshift" not in parameters:
-            raise ValueError("ImportanceCatalog requires redshift samples")
-        for name, values in parameters.items():
-            if values.shape != (num_samples,):
-                raise ValueError(
-                    f"source parameter {name!r} must have shape ({num_samples},)"
-                )
 
-        distance = np.asarray(luminosity_distance)
-        if distance.shape != (num_samples,):
-            raise ValueError(
-                f"log_reference_distance requires distances of shape ({num_samples},)"
-            )
-        if not np.isrealobj(distance) or not np.all(
-            np.isfinite(distance) & (distance > 0)
-        ):
-            raise ValueError("luminosity_distance must be positive and finite")
+        distance = jnp.asarray(luminosity_distance)
 
         return cls(
             source_parameters=parameters,
-            polarization_power=jnp.asarray(power),
+            polarization_power=power,
             proposal_log_prob=population.log_prob(parameters),
-            log_reference_distance=jnp.log(jnp.asarray(distance)),
+            log_reference_distance=jnp.log(distance),
         )
 
 
