@@ -65,14 +65,26 @@ def test_plot_corner_for_posterior_grid_2d() -> None:
     matplotlib.pyplot.close(fig)
 
 
-def test_plot_corner_for_posterior_grid_expands_range_with_truths() -> None:
+def test_plot_corner_for_posterior_grid_expands_axes_with_truths() -> None:
     x, y, log_density = _gaussian_grids_and_log_density()
+    grid_extent = (x[0] - (x[1] - x[0]) / 2, x[-1] + (x[1] - x[0]) / 2)
+
     fig = plotting.plot_corner_for_posterior_grid(
         (x, y), log_density, truths=[4.0, 0.0]
     )
-    joint = np.asarray(fig.axes).reshape(2, 2)[1, 0]
-    # The grid spans [-3, 3]; an out-of-grid truth must stay visible.
-    assert joint.get_xlim()[1] >= 4.0
+    axes = np.asarray(fig.axes).reshape(2, 2)
+    # The grid spans [-3, 3]; after rendering, both the joint panel and the
+    # x marginal must show the out-of-grid truth.
+    assert axes[1, 0].get_xlim()[1] == pytest.approx(4.0)
+    assert axes[0, 0].get_xlim()[1] == pytest.approx(4.0)
+    matplotlib.pyplot.close(fig)
+
+    # Without truths, the limits are exactly the grid's cell-edge extent:
+    # the histogram range must never exceed it (otherwise corner's bins are
+    # wider than the grid cells and the density/contours are distorted).
+    fig = plotting.plot_corner_for_posterior_grid((x, y), log_density)
+    axes = np.asarray(fig.axes).reshape(2, 2)
+    assert axes[1, 0].get_xlim() == pytest.approx(grid_extent)
     matplotlib.pyplot.close(fig)
 
 
@@ -82,6 +94,15 @@ def test_plot_corner_for_posterior_grid_1d() -> None:
     assert isinstance(fig, matplotlib.figure.Figure)
     assert len(fig.axes) == 1
     assert fig.axes[0].lines
+    matplotlib.pyplot.close(fig)
+
+
+def test_plot_corner_for_posterior_grid_1d_truth() -> None:
+    x = np.linspace(-3.0, 3.0, 64)
+    # An out-of-grid truth must not crash (the pinned corner revision's
+    # overplot_lines breaks on 1D figures) and must stay visible.
+    fig = plotting.plot_corner_for_posterior_grid((x,), -0.5 * x**2, truths=[4.0])
+    assert fig.axes[0].get_xlim()[1] == pytest.approx(4.0)
     matplotlib.pyplot.close(fig)
 
 

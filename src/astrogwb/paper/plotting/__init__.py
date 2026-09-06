@@ -170,7 +170,9 @@ def plot_corner_for_posterior_grid(
         Axis labels, one per dimension.
     truths
         Marker positions, one per dimension (``None`` entries omit the
-        marker). The plot range is expanded to include them.
+        marker). The axis limits are expanded to include them -- after
+        corner has rendered, so the histogram range stays aligned with the
+        grid cells and the density is unaffected.
     smooth
         Gaussian smoothing width in grid cells for the 2D panel, forwarded
         to ``corner.corner()``.
@@ -212,7 +214,9 @@ def plot_corner_for_posterior_grid(
     if not np.all(np.isfinite(log_density)):
         raise ValueError("log_density must be finite everywhere")
 
-    # Cell-edge extents, expanded to include any truth markers.
+    # Cell-edge extents. The histogram range is kept exactly at these bounds:
+    # widening it to include out-of-grid truths would rebin the grid points
+    # into non-cell-aligned bins and distort the density and its contours.
     extents: list[list[float]] = []
     for grid in grids:
         half = 0.5 * (grid[1] - grid[0])
@@ -221,11 +225,6 @@ def plot_corner_for_posterior_grid(
         truths = tuple(truths)
         if len(truths) != ndim:
             raise ValueError(f"expected {ndim} truths, got {len(truths)}")
-        for index, truth in enumerate(truths):
-            if truth is None:
-                continue
-            extents[index][0] = min(extents[index][0], float(truth))
-            extents[index][1] = max(extents[index][1], float(truth))
 
     weights = np.exp(log_density - log_density.max()).ravel()
     # corner requires 2D (nsamples, ndim) input; the pinned revision's 1D
@@ -247,13 +246,34 @@ def plot_corner_for_posterior_grid(
         "plot_datapoints": False,
         "plot_density": False,
         "smooth": smooth,
-        "truths": list(truths) if truths is not None else None,
+        # corner's overplot_lines crashes for 1D figures in the pinned
+        # revision (axes[k1, k1] on a non-subscriptable Axes), so in 1D the
+        # truth line is drawn manually after rendering, below.
+        "truths": list(truths) if truths is not None and ndim == 2 else None,
         "labels": list(labels) if labels is not None else None,
     }
     kwargs |= corner_kwargs
     fig = corner.corner(data, **kwargs)  # type: ignore[arg-type]
     if fig is None:  # pragma: no cover - corner always creates a figure here
         raise RuntimeError("corner did not create a figure")
+
+    # Expand the visible axes to include out-of-grid truths after rendering:
+    # corner's truth artists (truly spanning axvline/axhline plus square
+    # markers) are drawn regardless of the limits and simply reappear once
+    # the limits cover them.
+    if truths is not None:
+        axes = np.asarray(fig.axes).reshape(ndim, ndim)
+        for index, truth in enumerate(truths):
+            if truth is None:
+                continue
+            lo = min(extents[index][0], float(truth))
+            hi = max(extents[index][1], float(truth))
+            for row in range(index, ndim):
+                axes[row, index].set_xlim(lo, hi)
+            for col in range(index):
+                axes[index, col].set_ylim(lo, hi)
+        if ndim == 1 and truths[0] is not None:
+            fig.axes[0].axvline(truths[0], color=str(kwargs["truth_color"]))
     return fig
 
 
