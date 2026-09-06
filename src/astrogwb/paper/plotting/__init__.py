@@ -27,6 +27,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import to_hex
+from numpy.typing import ArrayLike
 
 _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
 
@@ -130,8 +131,8 @@ def get_corner_kwargs(**overrides: object) -> dict[str, object]:
 
 
 def plot_corner_for_posterior_grid(
-    grids: Sequence[np.ndarray],
-    log_density: np.ndarray,
+    grids: Sequence[ArrayLike],
+    log_density: ArrayLike,
     *,
     labels: Sequence[str] | None = None,
     truths: Sequence[float | None] | None = None,
