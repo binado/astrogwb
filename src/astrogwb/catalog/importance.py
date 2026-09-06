@@ -59,7 +59,7 @@ class ImportanceCatalog:
         linear distances are validated on the host. Distances are supplied
         explicitly rather than recomputed from the population's cosmology.
         """
-        power = np.asarray(polarization_power)
+        power = jnp.asarray(polarization_power)
         if power.ndim != 2 or not (
             np.issubdtype(power.dtype, np.floating)
             or np.issubdtype(power.dtype, np.integer)
