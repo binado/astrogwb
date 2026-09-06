@@ -250,7 +250,6 @@ def waveform_metadata_from_dataset(
     attrs = dataset.attrs
     try:
         return PolarizationPowerGenerator(
-            frequencies=np.asarray(dataset.coords["frequency"].values),
             approximant=str(_scalar(attrs["approximant"], name="approximant")),
             minimum_frequency=float(
                 _scalar(attrs["minimum_frequency"], name="minimum_frequency")

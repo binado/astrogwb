@@ -50,7 +50,6 @@ def make_catalog(
         },
         polarization_power=np.asarray(polarization_power),
         waveform_metadata=PolarizationPowerGenerator(
-            frequencies=np.asarray(frequencies),
             approximant=approximant,
             minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,

@@ -28,7 +28,7 @@ pip install astrogwb[simulation]
 - `astrogwb.gwb` provides spectral-density, Omega-GW conversion, and SNR
   calculations. `astrogwb.gwb.analytic` evaluates the inspiral-only
   background in closed form, truncated on the same dimensionless `alpha` as
-  `astrogwb.waveform.analytical`.
+  `astrogwb.waveform`.
 - `astrogwb.importance` defines the reusable importance-weighting protocol and
   compact-binary population model.
 - `astrogwb.sampling` exposes the caller-prepared NumPyro model.
@@ -39,7 +39,7 @@ pip install astrogwb[simulation]
   plus/cross polarizations to power, applies GW-distance corrections to plain
   arrays, and provides a closed-form quadrupolar inspiral model. Persistence
   and labelled-array policy stay with applications.
-  `astrogwb.waveform.analytical` gives the same power in closed form for a
+  `astrogwb.waveform` gives the same power in closed form for a
   quadrupolar, inspiral-only binary, truncated at `f = alpha / ((1 + z) M)`
   for a caller-chosen dimensionless `alpha`.
 

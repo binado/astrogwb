@@ -6,6 +6,7 @@ import logging
 import math
 from collections.abc import Mapping
 
+import jax.numpy as jnp
 import numpy as np
 from gwmock_signal.waveform import RippleBackend
 from numpy.typing import ArrayLike, NDArray
@@ -40,23 +41,38 @@ class RippleGenerator(PolarizationPowerGenerator):
         resolution = float(frequency_resolution)
         if not np.isfinite(resolution) or resolution <= 0.0:
             raise ValueError("frequency_resolution must be a finite positive scalar")
+        resolved_sampling_frequency = float(sampling_frequency)
+        if (
+            not np.isfinite(resolved_sampling_frequency)
+            or resolved_sampling_frequency <= 0.0
+        ):
+            raise ValueError("sampling_frequency must be finite and positive")
         if isinstance(chunk_size, bool) or chunk_size <= 0:
             raise ValueError("chunk_size must be a positive integer")
         if not isinstance(chunk_size, int):
             raise TypeError("chunk_size must be an integer")
 
-        segment_duration = _resolve_segment_duration(resolution)
-        effective_df = _effective_resolution(segment_duration, sampling_frequency)
-        frequencies = _ripple_frequency_grid(
-            sampling_frequency, effective_df, maximum_frequency
-        )
+        segment_duration = 1.0 / resolution
+        segment_duration = float(2.0 ** math.ceil(math.log2(segment_duration)))
+        n_samples = round(segment_duration * resolved_sampling_frequency)
+        if n_samples <= 0:
+            raise ValueError("sampling_frequency produces no Ripple samples")
+        effective_df = resolved_sampling_frequency / n_samples
+
+        minimum = float(minimum_frequency)
+        alignment = minimum / effective_df
+        tolerance = 64.0 * np.finfo(np.float64).eps * max(1.0, abs(alignment))
+        if not np.isclose(alignment, round(alignment), rtol=0.0, atol=tolerance):
+            raise ValueError(
+                "minimum_frequency must align with Ripple's effective frequency "
+                f"resolution ({effective_df} Hz)"
+            )
         super().__init__(
-            frequencies=frequencies,
             approximant=approximant,
-            minimum_frequency=minimum_frequency,
+            minimum_frequency=minimum,
             maximum_frequency=maximum_frequency,
             reference_frequency=reference_frequency,
-            sampling_frequency=sampling_frequency,
+            sampling_frequency=resolved_sampling_frequency,
             df=effective_df,
         )
         object.__setattr__(self, "frequency_resolution", resolution)
@@ -74,17 +90,19 @@ class RippleGenerator(PolarizationPowerGenerator):
         self, source_parameters: Mapping[str, ArrayLike]
     ) -> NDArray[np.float64]:
         """Generate power in ``(frequency, sample)`` layout, chunk by chunk."""
-        n_events = np.asarray(source_parameters["detector_frame_mass_1"]).shape[0]
+        parameters = {
+            name: jnp.asarray(values) for name, values in source_parameters.items()
+        }
+        n_events = parameters["detector_frame_mass_1"].shape[0]
         if n_events == 0:
             raise ValueError("source_parameters must contain at least one event")
         step = min(n_events, self.chunk_size)
 
-        power_chunks: list[NDArray[np.float64]] = []
+        power_chunks = []
         for start in range(0, n_events, step):
             stop = min(start + step, n_events)
             chunk_samples = {
-                name: np.asarray(values)[start:stop]
-                for name, values in source_parameters.items()
+                name: values[start:stop] for name, values in parameters.items()
             }
             polarizations = self._backend.generate_fd_polarizations_batch(
                 self.approximant,
@@ -92,11 +110,13 @@ class RippleGenerator(PolarizationPowerGenerator):
                 minimum_frequency=self.minimum_frequency,
                 parameters=chunk_samples,
             )
-            chunk_frequencies = np.asarray(polarizations.frequencies)
-            chunk_plus = np.asarray(polarizations.plus)
-            chunk_cross = np.asarray(polarizations.cross)
-            mask = chunk_frequencies <= self.maximum_frequency
-            if not np.array_equal(chunk_frequencies[mask], self.frequencies):
+            chunk_frequencies = jnp.asarray(polarizations.frequencies)
+            chunk_plus = jnp.asarray(polarizations.plus)
+            chunk_cross = jnp.asarray(polarizations.cross)
+            mask = (chunk_frequencies >= self.minimum_frequency) & (
+                chunk_frequencies <= self.maximum_frequency
+            )
+            if not bool(jnp.array_equal(chunk_frequencies[mask], self.frequencies)):
                 raise ValueError(
                     "Ripple returned a frequency grid different from its descriptor"
                 )
@@ -105,24 +125,4 @@ class RippleGenerator(PolarizationPowerGenerator):
             )
             logger.info("Generated chunk %d:%d of %d events", start, stop, n_events)
 
-        return np.concatenate(power_chunks, axis=1)
-
-
-def _resolve_segment_duration(frequency_resolution: float) -> float:
-    """Map a target frequency resolution to a segment duration in seconds."""
-    return 1.0 / frequency_resolution
-
-
-def _effective_resolution(segment_duration: float, sampling_frequency: float) -> float:
-    """Return the achieved df after Ripple rounds duration to a power of two."""
-    rounded_seconds = float(2.0 ** math.ceil(math.log2(segment_duration)))
-    return sampling_frequency / round(rounded_seconds * sampling_frequency)
-
-
-def _ripple_frequency_grid(
-    sampling_frequency: float, df: float, maximum_frequency: float
-) -> NDArray[np.float64]:
-    """Build Ripple's nonnegative FFT grid and apply the upper-frequency cut."""
-    n_samples = round(sampling_frequency / df)
-    frequencies = np.arange(n_samples // 2 + 1, dtype=np.float64) * df
-    return frequencies[frequencies <= maximum_frequency]
+        return np.asarray(jnp.concatenate(power_chunks, axis=1), dtype=np.float64)

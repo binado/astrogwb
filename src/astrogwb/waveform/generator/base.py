@@ -23,7 +23,6 @@ class PolarizationPowerGenerator:
     descriptor when a persisted catalog is loaded.
     """
 
-    frequencies: NDArray[np.float64]
     approximant: str
     minimum_frequency: float
     maximum_frequency: float
@@ -32,14 +31,11 @@ class PolarizationPowerGenerator:
     df: float
 
     def __post_init__(self) -> None:
-        frequencies = np.asarray(self.frequencies, dtype=np.float64)
-        object.__setattr__(self, "frequencies", frequencies)
         object.__setattr__(self, "minimum_frequency", float(self.minimum_frequency))
         object.__setattr__(self, "maximum_frequency", float(self.maximum_frequency))
         object.__setattr__(self, "reference_frequency", float(self.reference_frequency))
         object.__setattr__(self, "sampling_frequency", float(self.sampling_frequency))
         object.__setattr__(self, "df", float(self.df))
-        _validate_frequency_grid(frequencies, self.df)
 
         settings = (
             self.minimum_frequency,
@@ -55,6 +51,39 @@ class PolarizationPowerGenerator:
             )
         if self.sampling_frequency <= 0.0:
             raise ValueError("sampling_frequency must be positive")
+        if not np.isfinite(self.df) or self.df <= 0.0:
+            raise ValueError("df must be a finite positive scalar")
+
+    @property
+    def frequencies(self) -> NDArray[np.float64]:
+        """Return the inclusive uniform grid ``minimum + k*df <= maximum``."""
+        span_in_bins = (self.maximum_frequency - self.minimum_frequency) / self.df
+        num_bins = int(np.floor(span_in_bins)) + 1
+        next_frequency = self.minimum_frequency + self.df * num_bins
+        tolerance = (
+            GRID_SPACING_TOLERANCE_ULP
+            * np.finfo(np.float64).eps
+            * max(
+                1.0,
+                abs(self.minimum_frequency),
+                abs(self.maximum_frequency),
+                abs(next_frequency),
+            )
+        )
+        if next_frequency <= self.maximum_frequency + tolerance:
+            num_bins += 1
+        frequencies = np.asarray(
+            self.minimum_frequency + self.df * np.arange(num_bins),
+            dtype=np.float64,
+        )
+        if np.isclose(
+            frequencies[-1],
+            self.maximum_frequency,
+            rtol=0.0,
+            atol=tolerance,
+        ):
+            frequencies[-1] = self.maximum_frequency
+        return frequencies
 
     @classmethod
     def from_bounds(
@@ -68,40 +97,14 @@ class PolarizationPowerGenerator:
         df: float,
         **kwargs: Any,
     ) -> Self:
-        """Construct the inclusive uniform grid ``minimum + k*df <= maximum``."""
-        minimum = float(minimum_frequency)
-        maximum = float(maximum_frequency)
-        spacing = float(df)
-        if not all(np.isfinite((minimum, maximum, spacing))):
-            raise ValueError("frequency-grid settings must be finite")
-        if spacing <= 0.0:
-            raise ValueError("df must be positive")
-        if maximum < minimum:
-            raise ValueError(
-                "maximum_frequency must be greater than or equal to minimum_frequency"
-            )
-
-        span_in_bins = (maximum - minimum) / spacing
-        if not np.isfinite(span_in_bins):
-            raise ValueError("frequency grid is too large to construct")
-        num_bins = int(np.floor(span_in_bins)) + 1
-
-        # Division can round an exact final bin below the next integer. Build
-        # from integer indices and explicitly test the next computed value.
-        next_frequency = minimum + spacing * num_bins
-        if next_frequency <= maximum:
-            num_bins += 1
-        frequencies = np.asarray(
-            minimum + spacing * np.arange(num_bins), dtype=np.float64
-        )
+        """Construct a generator with an inclusive derived frequency grid."""
         return cls(
-            frequencies=frequencies,
             approximant=approximant,
-            minimum_frequency=minimum,
-            maximum_frequency=maximum,
+            minimum_frequency=minimum_frequency,
+            maximum_frequency=maximum_frequency,
             reference_frequency=reference_frequency,
             sampling_frequency=sampling_frequency,
-            df=spacing,
+            df=df,
             **kwargs,
         )
 
@@ -116,27 +119,3 @@ class PolarizationPowerGenerator:
             "PolarizationPowerGenerator is a metadata-only descriptor; "
             "use a concrete generator subclass"
         )
-
-
-def _validate_frequency_grid(frequencies: NDArray[np.float64], df: float) -> None:
-    if frequencies.ndim != 1:
-        raise ValueError("frequencies must be one-dimensional")
-    if frequencies.size == 0:
-        raise ValueError("frequencies must contain at least one bin")
-    if not np.all(np.isfinite(frequencies)):
-        raise ValueError("frequencies must be finite")
-    if not np.isfinite(df) or df <= 0.0:
-        raise ValueError("df must be a finite positive scalar")
-    if frequencies.size == 1:
-        return
-
-    differences = np.diff(frequencies)
-    if not np.all(differences > 0.0):
-        raise ValueError("frequencies must be strictly increasing")
-    tolerance = (
-        GRID_SPACING_TOLERANCE_ULP
-        * np.finfo(np.float64).eps
-        * max(1.0, float(np.max(np.abs(frequencies))))
-    )
-    if not np.all(np.abs(differences - df) <= tolerance):
-        raise ValueError(f"frequencies must be uniformly spaced by df={df} Hz")

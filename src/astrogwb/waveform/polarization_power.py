@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import numpy as np
-from numpy.typing import NDArray
+import jax
+import jax.numpy as jnp
+from jax.typing import ArrayLike
 
 
-def polarization_power(
-    plus: NDArray[np.complex128], cross: NDArray[np.complex128]
-) -> NDArray[np.float64]:
+def polarization_power(plus: ArrayLike, cross: ArrayLike) -> jax.Array:
     """Reduce ``(n, F)`` complex polarization arrays to ``(F, n)`` float64 power.
 
     Returns ``|h+|^2 + |hx|^2`` per sample and frequency, transposed to the
     on-disk ``(frequency, sample)`` layout.
     """
-    power = np.abs(plus) ** 2 + np.abs(cross) ** 2
-    return power.T.astype(np.float64)
+    power = jnp.abs(jnp.asarray(plus)) ** 2 + jnp.abs(jnp.asarray(cross)) ** 2
+    return power.T.astype(jnp.float64)

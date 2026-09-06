@@ -29,7 +29,6 @@ def _catalog(
     provenance: dict[str, str | int | float] | None = None,
     source_type: str | None = "bns",
 ) -> Catalog:
-    frequencies = np.array([10.0, 20.0, 30.0, 40.0])
     return Catalog(
         source_parameters={
             "redshift": np.array([0.1, 0.5, 1.0]),
@@ -37,7 +36,6 @@ def _catalog(
         },
         polarization_power=np.arange(12, dtype=np.float64).reshape(4, 3),
         waveform_metadata=PolarizationPowerGenerator(
-            frequencies=frequencies,
             approximant="Toy",
             minimum_frequency=10.0,
             maximum_frequency=40.0,

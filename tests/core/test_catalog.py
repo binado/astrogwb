@@ -32,7 +32,6 @@ def source_parameters() -> dict[str, np.ndarray]:
 
 def _waveform_generator() -> PolarizationPowerGenerator:
     return PolarizationPowerGenerator(
-        frequencies=np.array([10.0, 12.0]),
         approximant="FakeWaveform",
         minimum_frequency=10.0,
         maximum_frequency=12.5,
@@ -75,47 +74,6 @@ def test_generator_from_bounds_includes_largest_in_band_bin(
 
     np.testing.assert_array_equal(generator.frequencies, expected)
     assert generator.maximum_frequency == maximum_frequency
-
-
-@pytest.mark.parametrize(
-    ("frequencies", "df", "message"),
-    [
-        ([], 1.0, "at least one bin"),
-        ([1.0, np.inf], 1.0, "finite"),
-        ([1.0, 1.0], 1.0, "strictly increasing"),
-        ([2.0, 1.0], 1.0, "strictly increasing"),
-        ([1.0, 2.5, 3.0], 1.0, "uniformly spaced"),
-        ([1.0, 2.0], 0.0, "finite positive"),
-    ],
-)
-def test_generator_rejects_invalid_grid(
-    frequencies: list[float], df: float, message: str
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        PolarizationPowerGenerator(
-            frequencies=np.asarray(frequencies),
-            approximant="Toy",
-            minimum_frequency=1.0,
-            maximum_frequency=3.0,
-            reference_frequency=1.0,
-            sampling_frequency=8.0,
-            df=df,
-        )
-
-
-def test_generator_accepts_float64_fft_roundoff() -> None:
-    frequencies = np.array([10.0, 20.0, 30.0, 40.0])
-    frequencies[2] += 32.0 * np.finfo(np.float64).eps * frequencies[-1]
-
-    PolarizationPowerGenerator(
-        frequencies=frequencies,
-        approximant="Toy",
-        minimum_frequency=10.0,
-        maximum_frequency=40.0,
-        reference_frequency=20.0,
-        sampling_frequency=128.0,
-        df=10.0,
-    )
 
 
 def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes(
