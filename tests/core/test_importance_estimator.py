@@ -1,4 +1,4 @@
-"""Catalog-backed spectral estimates against the existing importance callback."""
+"""Catalog-backed spectral estimates against the hand-written grid formula."""
 
 from __future__ import annotations
 
@@ -16,13 +16,14 @@ from jax.typing import ArrayLike
 from numpyro.distributions import constraints
 
 from astrogwb.catalog import ImportanceCatalog
+from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.gwb.spectral import AverageMode, spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     ModifiedPropagationPopulation,
     bns_population,
-    make_merger_rate_and_log_weights_fn,
+    compute_merger_rate_distance_and_logprob,
 )
 from astrogwb.importance.population import importance_log_weights
 
@@ -162,26 +163,32 @@ def test_identical_population_and_catalog_have_exactly_neutral_weights() -> None
     np.testing.assert_array_equal(extras["importance_relative_ess"], 1.0)
 
 
-def _legacy_fn(
+def _grid_reference(
     estimator: SpectralDensityImportanceEstimator,
 ) -> Callable[[Mapping[str, ArrayLike]], tuple[jax.Array, dict[str, jax.Array]]]:
-    proposal = estimator.population_fn(OFF_FIDUCIALS)
-    samples = {
-        **estimator.catalog.source_parameters,
-        "luminosity_distance": proposal.redshift_distribution.luminosity_distance(
-            REDSHIFTS
-        ),
-    }
-    callback = make_merger_rate_and_log_weights_fn(
-        fiducials=OFF_FIDUCIALS,
-        redshift_grid=make_redshift_grid(),
-        proposal_logprob=estimator.catalog.proposal_log_prob,
-    )
+    """The same estimate, written out from the hand-written grid-level formula.
+
+    Deliberately not routed through :class:`Population`: an expectation built
+    from the code under test would agree by construction. This restates the
+    density, the distance, and the weight ratio in full, so a drift in either
+    route shows up as a failure rather than as silent agreement.
+    """
+    catalog = estimator.catalog
 
     def evaluate(
         params: Mapping[str, ArrayLike],
     ) -> tuple[jax.Array, dict[str, jax.Array]]:
-        rate, log_weights = callback(params, samples)
+        rate, distance, logprob = compute_merger_rate_distance_and_logprob(
+            params, catalog.source_parameters, redshift_grid=make_redshift_grid()
+        )
+        log_target_distance = jnp.log(distance) + log_gw_em_ratio(
+            REDSHIFTS, params["xi_0"], params["xi_n"]
+        )
+        log_weights = (
+            logprob
+            - catalog.proposal_log_prob
+            - 2.0 * (log_target_distance - catalog.log_reference_distance)
+        )
         return spectral_density(
             POWER, jnp.exp(log_weights), rate, average_mode=estimator.average_mode
         ), {
@@ -194,12 +201,12 @@ def _legacy_fn(
 
 @pytest.mark.parametrize("params", [FIDUCIALS, OFF_FIDUCIALS])
 @pytest.mark.parametrize("mode", ["analytic_inclination", "catalog_inclination"])
-def test_estimator_matches_legacy_spectrum_rate_and_ess(
+def test_estimator_matches_the_grid_formula_spectrum_rate_and_ess(
     params: dict[str, float], mode: AverageMode
 ) -> None:
     estimator = _estimator(mode)
     actual = estimator(params)
-    expected = _legacy_fn(estimator)(params)
+    expected = _grid_reference(estimator)(params)
     assert set(actual[1]) == {"total_merger_rate", "importance_relative_ess"}
     for value, reference in zip(
         jax.tree.leaves(actual), jax.tree.leaves(expected), strict=True
@@ -235,8 +242,8 @@ def test_estimator_jit_vmap_and_gradients() -> None:
     normalization = jnp.sum(estimator(FIDUCIALS)[0])
     params = {name: jnp.asarray(value) for name, value in FIDUCIALS.items()}
     gradient = jax.grad(lambda p: jnp.sum(estimator(p)[0]) / normalization)(params)
-    legacy = _legacy_fn(estimator)
-    reference = jax.grad(lambda p: jnp.sum(legacy(p)[0]) / normalization)(params)
+    grid_formula = _grid_reference(estimator)
+    reference = jax.grad(lambda p: jnp.sum(grid_formula(p)[0]) / normalization)(params)
     for name, value in gradient.items():
         assert np.isfinite(value), name
         np.testing.assert_allclose(

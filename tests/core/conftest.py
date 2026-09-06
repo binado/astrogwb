@@ -31,11 +31,11 @@ from astrogwb_mock_population import (
     F_MAX,
     F_MIN,
     build_mock_catalog,
-    build_synthetic_weights_callback,
+    build_synthetic_importance_catalog,
     load_mock_population,
 )
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import Catalog, ImportanceCatalog
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -79,6 +79,8 @@ def mock_catalog_factory(
 
 
 @pytest.fixture
-def synthetic_weights_callback() -> Callable[..., tuple[object, dict[str, jax.Array]]]:
-    """Expose the synthetic weights callback builder as a fixture."""
-    return build_synthetic_weights_callback
+def synthetic_importance_catalog() -> Callable[
+    ..., tuple[ImportanceCatalog, dict[str, jax.Array]]
+]:
+    """Expose the synthetic importance-catalog builder as a fixture."""
+    return build_synthetic_importance_catalog

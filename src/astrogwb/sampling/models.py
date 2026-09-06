@@ -20,14 +20,12 @@ preparation outside inference::
         scale=gaussian_bin_scale(effective_psd, observation_time, df),
     )
 
-For amplitude marginalization, diagnostics describe the pinned template. An
-importance caller adapts the rate name without changing any other extras::
+For amplitude marginalization, diagnostics describe the pinned template, so an
+importance caller relabels the rate without touching any other extras::
 
-    def template_spectrum(params):
-        prediction, extras = estimator(params)
-        extras = dict(extras)
-        extras["template_merger_rate"] = extras.pop("total_merger_rate")
-        return prediction, extras
+    template_spectrum = with_renamed_diagnostics(
+        estimator, {"total_merger_rate": "template_merger_rate"}
+    )
 
 ``gwb_amplitude_marginalized_model`` publishes amplitude sufficient statistics.
 ``amplitude_reconstruction_model`` consumes those statistics and a template rate
@@ -35,8 +33,6 @@ via ``Predictive`` to recover joint amplitude/shape draws and the physical rate.
 Keep reconstruction separate from inference to avoid counting amplitude twice.
 When no rate is available, draw amplitudes directly from ``AmplitudeConditional``
 using the same statistics, prior, fiducial, scaling function, and grid.
-The old ``spectral_density_model`` and ``amplitude_marginalized_model`` remain
-compatibility wrappers until application callers migrate.
 
 End-to-end sketch (toy data; runnable as-is):
 
@@ -136,44 +132,12 @@ import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
-from astrogwb.detector import gaussian_bin_scale
 from astrogwb.distributions.amplitude import (
     AmplitudeConditional,
     AmplitudeFn,
     MergerRateAmplitudeFn,
 )
-from astrogwb.gwb import (
-    AverageMode,
-    spectral_density,
-)
-from astrogwb.importance.diagnostics import relative_ess
-from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.sampling.protocol import SpectralDensityFn
-
-
-def _legacy_spectrum_fn(
-    polarization_power: jax.Array,
-    samples: Mapping[str, jax.Array],
-    callback: MergerRateAndLogWeightsFn,
-    average_mode: AverageMode,
-    *,
-    rate_site: str,
-) -> SpectralDensityFn:
-    """Adapt the legacy callback without duplicating likelihood mathematics."""
-
-    def evaluate(
-        params: Mapping[str, ArrayLike],
-    ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
-        rate, log_weights = callback(params, samples)
-        prediction = spectral_density(
-            polarization_power, jnp.exp(log_weights), rate, average_mode=average_mode
-        )
-        return prediction, {
-            rate_site: rate,
-            "importance_relative_ess": relative_ess(log_weights),
-        }
-
-    return evaluate
 
 
 def gwb_spectral_density_model(
@@ -288,212 +252,6 @@ def gwb_amplitude_marginalized_model(
     )
 
 
-def spectral_density_model(
-    *,
-    polarization_power: jax.Array,
-    samples: Mapping[str, jax.Array],
-    observed_spectral_density: jax.Array,
-    effective_psd: jax.Array,
-    observation_time: float,
-    df: float | jax.Array,
-    average_mode: AverageMode,
-    merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
-    priors: Mapping[str, dist.Distribution] | None = None,
-) -> None:
-    """Compatibility wrapper for importance-weighted SGWB inference.
-
-    Samples hyperparameters from ``priors``, evaluates a fixed proposal catalog
-    through ``merger_rate_and_log_weights_fn``, and compares the predicted
-    stochastic gravitational-wave background (SGWB) spectral density to
-    ``observed_spectral_density`` under a per-frequency Gaussian likelihood.
-
-    The predicted spectrum is built from precomputed per-source polarization
-    powers and importance weights; waveform generation is
-    not part of this model.
-
-    This is the fully general model: every hyperparameter is sampled. See
-    :func:`amplitude_marginalized_model` for the variant that integrates a
-    multiplicative parameter out analytically.
-
-    Registered sites:
-
-    - one ``numpyro.sample`` per entry in ``priors``;
-    - ``total_merger_rate`` and ``importance_relative_ess`` as deterministics;
-    - ``spectral_density_obs`` as the observed Gaussian likelihood.
-
-    Parameters
-    ----------
-    polarization_power:
-        Per-source polarization power at each frequency, shape ``(F, N)`` where
-        ``N`` is the catalog size.
-    samples:
-        Catalog arrays passed to ``merger_rate_and_log_weights_fn``. Each value
-        should have leading dimension ``N``.
-    observed_spectral_density:
-        Observed SGWB spectral density, shape ``(F,)``.
-    effective_psd:
-        Network effective power spectral density over the analysis band, shape
-        ``(F,)``.
-    observation_time:
-        Observation time in years, used only in the likelihood noise scale via
-        :func:`astrogwb.detector.gaussian_bin_scale`.
-    df:
-        Frequency bin width in Hz -- the catalog's ``df`` attribute. Never
-        measure it off the analysis band: a mask may drop interior bins, and
-        the mean spacing of what survives is not the bin width.
-    average_mode:
-        How inclination is averaged when contracting polarization power:
-        ``"analytic_inclination"`` applies the usual 0.4 factor;
-        ``"catalog_inclination"`` uses the catalog weights directly.
-    merger_rate_and_log_weights_fn:
-        Callable ``(params, samples) -> (total_merger_rate, log_weights)``.
-        ``params`` contains the values of every site declared by ``priors``;
-        callers may condition any of those sites. ``log_weights`` has shape
-        ``(N,)``. ``total_merger_rate`` is in mergers per second.
-    priors:
-        Mapping from parameter name to NumPyro prior distribution. Keys become
-        sampled sites; defaults to an empty mapping (likelihood-only model).
-    """
-    gwb_spectral_density_model(
-        spectral_density_fn=_legacy_spectrum_fn(
-            polarization_power,
-            samples,
-            merger_rate_and_log_weights_fn,
-            average_mode,
-            rate_site="total_merger_rate",
-        ),
-        observed_spectral_density=observed_spectral_density,
-        priors=priors or {},
-        scale=gaussian_bin_scale(effective_psd, observation_time, df),
-    )
-
-
-def amplitude_marginalized_model(
-    *,
-    polarization_power: jax.Array,
-    samples: Mapping[str, jax.Array],
-    observed_spectral_density: jax.Array,
-    effective_psd: jax.Array,
-    observation_time: float,
-    df: float | jax.Array,
-    average_mode: AverageMode,
-    merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn,
-    amplitude_parameter: str,
-    fiducials: Mapping[str, Any],
-    amplitude_fn: AmplitudeFn,
-    amplitude_prior: dist.Distribution,
-    amplitude_grid: jax.Array | None = None,
-    priors: Mapping[str, dist.Distribution] | None = None,
-) -> None:
-    r"""Compatibility wrapper with a multiplicative amplitude marginalized out.
-
-    Identical to :func:`spectral_density_model` except that one strictly
-    multiplicative parameter is integrated out instead of being sampled, which
-    removes the long, curved amplitude--shape degeneracy that NUTS handles
-    worst. The marginalization is essentially free here: the amplitude never
-    touches the importance weights, and ``polarization_power`` is a fixed
-    precomputed catalog.
-
-    The physical parameter :math:`\varphi` is marginalized numerically under
-    its own prior ``amplitude_prior``, for an arbitrary scaling
-    :math:`f(\varphi)` to the multiplicative amplitude, with the integral
-    evaluated by trapezoid quadrature on ``amplitude_grid``. What
-    :meth:`~astrogwb.distributions.amplitude.AmplitudeConditional.sample` returns in
-    post-processing is :math:`\varphi` itself (e.g. :math:`H_0`), not the
-    amplitude. The only error is quadrature error, so grid resolution should be
-    checked with
-    :attr:`~astrogwb.distributions.amplitude.AmplitudeConditional.effective_nodes`.
-
-    The callback is invoked with ``amplitude_parameter`` pinned to
-    ``fiducials[amplitude_parameter]``, so the predicted spectrum it returns is
-    the *template* :math:`\mathbf{m}(\theta)` and the marginalized amplitude
-    :math:`A(\varphi) = f(\varphi)/f(\varphi_{\mathrm{fid}})` is the
-    dimensionless ratio to that reference, with
-    :math:`f = g_R \cdot g_F` factored into an independently scaling
-    merger-rate piece and mean-energy-flux piece (see
-    :func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.amplitude_H0_fn`
-    and
-    :func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.amplitude_local_merger_rate_fn`).
-    This covers a parameter entering directly, such as ``local_merger_rate``
-    with :math:`g_R = \varphi`, :math:`g_F = 1`, and one entering inversely,
-    such as :math:`H_0` with :math:`g_R = H_0^{-3}`, :math:`g_F = H_0^{2}`
-    -- both work directly with the physical parameter name, no synthetic
-    amplitude key required.
-
-    Registered sites:
-
-    - one ``numpyro.sample`` per entry in ``priors``;
-    - ``template_merger_rate``, ``amplitude_mle``, ``template_optimal_snr``,
-      and ``importance_relative_ess`` as deterministics;
-    - ``amplitude_marginalized_log_likelihood`` as a ``numpyro.factor``.
-
-    ``template_merger_rate`` is the rate at the pinned fiducial amplitude (the
-    template), not the marginalized physical rate: the model never publishes
-    a number that would be mistaken for the real merger rate at an
-    unmarginalized :math:`\varphi`. Post-processing recovers the physical rate
-    as ``template_merger_rate * g_R(varphi) / g_R(varphi_fid)``; see
-    :func:`amplitude_reconstruction_model`.
-
-    The two amplitude statistics are what post-processing needs to reconstruct
-    joint :math:`(\varphi, \theta)` samples via
-    :func:`amplitude_reconstruction_model` -- ``factor`` sites do not appear in
-    ArviZ's posterior group, so they must be carried explicitly. They are preferred over the raw inner products because
-    they are better conditioned, directly interpretable
-    (:math:`\sigma_A = 1/\rho`), and invertible by multiplication alone:
-    :math:`(m|m) = \rho^2` and :math:`(d|m) = \hat{A}\rho^2`. The contraction
-    is deliberately :math:`\sigma`-space, :math:`\sum_i x_i y_i/\sigma_i^2`,
-    and distinct from :func:`astrogwb.frequency.noise_weighted_inner_product`:
-    routing it through the PSD-space function would make :math:`\rho^2` too
-    small by :math:`2T`.
-
-    Parameters
-    ----------
-    amplitude_parameter:
-        Name of the parameter to marginalize over. Must be understood by
-        ``merger_rate_and_log_weights_fn`` and must not appear in ``priors``.
-    fiducials:
-        Fiducial hyperparameters; ``fiducials[amplitude_parameter]`` is the
-        reference value that defines the template.
-    amplitude_fn:
-        The absolute scaling :math:`f(\varphi) = g_R(\varphi) g_F(\varphi)`;
-        the model anchors it at ``fiducials[amplitude_parameter]`` itself. Must
-        be hashable by value -- see
-        :class:`~astrogwb.distributions.amplitude.AmplitudeFn`.
-    amplitude_prior:
-        Prior :math:`\pi(\varphi)` on the marginalized parameter.
-    amplitude_grid:
-        Quadrature nodes for the marginalization integral. Defaults to
-        :func:`~astrogwb.distributions.amplitude.quadrature_grid` of
-        ``amplitude_prior``.
-
-    Other parameters are as in :func:`spectral_density_model`.
-
-    Raises
-    ------
-    ValueError
-        If ``amplitude_parameter`` also appears in ``priors``. Sampling and
-        marginalizing the same parameter is a silent double-counting with no
-        visible symptom.
-    """
-    gwb_amplitude_marginalized_model(
-        spectral_density_fn=_legacy_spectrum_fn(
-            polarization_power,
-            samples,
-            merger_rate_and_log_weights_fn,
-            average_mode,
-            rate_site="template_merger_rate",
-        ),
-        observed_spectral_density=observed_spectral_density,
-        priors=priors or {},
-        scale=gaussian_bin_scale(effective_psd, observation_time, df),
-        amplitude_parameter=amplitude_parameter,
-        amplitude_fiducial=fiducials[amplitude_parameter],
-        amplitude_fn=amplitude_fn,
-        amplitude_prior=amplitude_prior,
-        amplitude_grid=amplitude_grid,
-    )
-
-
 def amplitude_reconstruction_model(
     amplitude_mle: jax.Array,
     template_optimal_snr: jax.Array,
@@ -509,7 +267,7 @@ def amplitude_reconstruction_model(
     r"""Generative-only reconstruction of joint :math:`(\varphi, \theta)` posterior draws.
 
     Consumed via :class:`~numpyro.infer.Predictive` with the sufficient
-    statistics published by :func:`amplitude_marginalized_model`; see this
+    statistics published by :func:`gwb_amplitude_marginalized_model`; see this
     module's docstring for the end-to-end sketch. The statistics' broadcast
     shape is the batch shape of
     :class:`~astrogwb.distributions.amplitude.AmplitudeConditional`, so a
@@ -530,14 +288,14 @@ def amplitude_reconstruction_model(
     ----------
     amplitude_mle, template_optimal_snr, template_merger_rate:
         Sufficient statistics published by
-        :func:`amplitude_marginalized_model`. Their shapes must broadcast to a
+        :func:`gwb_amplitude_marginalized_model`. Their shapes must broadcast to a
         common batch shape; production reconstruction passes ``(chain, draw)``
         arrays.
     amplitude_parameter:
         Name of the marginalized parameter; becomes the sample-site name of
         the reconstructed draws (e.g. ``"H0"``).
     amplitude_fn, prior, fiducial, grid:
-        Must be exactly what :func:`amplitude_marginalized_model` was given.
+        Must be exactly what :func:`gwb_amplitude_marginalized_model` was given.
         Reconstruction is only exact against the density the chain's factor
         site actually integrated; a silently different one yields a wrong
         marginalized posterior with no visible symptom, because the sufficient

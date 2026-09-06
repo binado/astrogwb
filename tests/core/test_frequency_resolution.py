@@ -48,13 +48,15 @@ from astrogwb_mock_population import (
 
 from astrogwb.catalog import Catalog
 from astrogwb.constants import SECONDS_PER_YEAR
+from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr_squared
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    bns_population,
     compute_merger_rate_distance_and_logprob,
-    make_merger_rate_and_log_weights_fn,
 )
+from astrogwb.importance.population import importance_log_weights
 
 #: Reference resolution, and the band the refinement study runs over.
 FINE_DF = 0.25
@@ -166,11 +168,22 @@ def resolutions(fine_catalog: Catalog) -> dict[int, dict[str, Any]]:
     total_merger_rate, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
         FIDUCIALS, samples, redshift_grid=redshift_grid
     )
-    weights_fn = make_merger_rate_and_log_weights_fn(
-        fiducials=FIDUCIALS,
-        redshift_grid=redshift_grid,
-        proposal_logprob=proposal_logprob,
+    # The catalog is its own proposal: the density above and the reference
+    # distance below are the same expressions the target forms at FIDUCIALS,
+    # which is what makes every fiducial log-weight exactly zero.
+    log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
+        samples["redshift"], FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]
     )
+
+    def weights_fn(params: dict[str, float]) -> tuple[jax.Array, jax.Array]:
+        terms = bns_population(
+            params, redshift_grid=redshift_grid
+        ).compute_population_terms(samples)
+        return terms.total_merger_rate, importance_log_weights(
+            terms,
+            proposal_log_prob=proposal_logprob,
+            log_reference_distance=log_reference_distance,
+        )
 
     # Loaded once: the noise curves are the same at every resolution, and
     # re-reading them per grid dominated the module's runtime.
@@ -205,7 +218,7 @@ def _log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
     """Gaussian log-density of the injection under the H0-shifted template."""
     noise_scale = gaussian_bin_scale(run["effective_psd"], OBSERVATION_TIME, run["df"])
     total_merger_rate, log_weights = run["weights_fn"](
-        {**FIDUCIALS, "H0": hubble_constant}, run["samples"]
+        {**FIDUCIALS, "H0": hubble_constant}
     )
     model = spectral_density(
         run["polarization_power"],
@@ -319,6 +332,6 @@ def test_every_log_weight_is_exactly_zero_at_the_fiducials(
 ) -> None:
     """The premise the identity above rests on, stated on its own."""
     run = resolutions[1]
-    _, log_weights = run["weights_fn"](dict(FIDUCIALS), run["samples"])
+    _, log_weights = run["weights_fn"](dict(FIDUCIALS))
     assert isinstance(log_weights, jax.Array)
     np.testing.assert_array_equal(np.asarray(log_weights), 0.0)

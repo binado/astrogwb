@@ -8,17 +8,19 @@ import numpy as np
 import pytest
 
 # Standard cosmology + population hyperparameters, and the redshift grid they
-# are integrated on. Shared with `synthetic_weights_callback`, which builds its
-# catalog at exactly these values: a second copy here would let the two drift
-# apart with no visible symptom.
-from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN
+# are integrated on. Shared with `synthetic_importance_catalog`, which builds
+# its catalog at exactly these values: a second copy here would let the two
+# drift apart with no visible symptom.
+from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN, make_redshift_grid
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    bns_population,
     compute_merger_rate_distance_and_logprob,
     madau_dickinson_rate,
 )
+from astrogwb.importance.population import importance_log_weights
 
 
 # --------------------------------------------------------------------------- #
@@ -139,11 +141,29 @@ def test_redshift_logpdf_is_negative_infinite_outside_the_grid() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# make_merger_rate_and_log_weights_fn
+# The BNS population reweighting a fixed catalog
+#
+# `synthetic_importance_catalog` builds a catalog that is its own proposal at
+# FIDUCIALS, so these exercise the rate and the weights against a reference
+# whose neutral point is known exactly.
 # --------------------------------------------------------------------------- #
-def test_make_merger_rate_and_log_weights_fn_smoke(synthetic_weights_callback) -> None:
-    fn, samples = synthetic_weights_callback()
-    total_rate, log_weights = fn(FIDUCIALS, samples)
+def _reweight(catalog, params: dict[str, float]) -> tuple[jax.Array, jax.Array]:
+    """The total rate and log-weights the estimator would form internally."""
+    terms = bns_population(
+        params, redshift_grid=make_redshift_grid()
+    ).compute_population_terms(catalog.source_parameters)
+    return terms.total_merger_rate, importance_log_weights(
+        terms,
+        proposal_log_prob=catalog.proposal_log_prob,
+        log_reference_distance=catalog.log_reference_distance,
+    )
+
+
+def test_reweighting_a_synthetic_catalog_is_finite(
+    synthetic_importance_catalog,
+) -> None:
+    catalog, samples = synthetic_importance_catalog()
+    total_rate, log_weights = _reweight(catalog, FIDUCIALS)
 
     total_rate = float(total_rate)
     log_weights = np.asarray(log_weights)
@@ -153,26 +173,27 @@ def test_make_merger_rate_and_log_weights_fn_smoke(synthetic_weights_callback) -
 
 
 def test_local_merger_rate_scales_total_rate_without_changing_weights(
-    synthetic_weights_callback,
+    synthetic_importance_catalog,
 ) -> None:
-    fn, samples = synthetic_weights_callback()
-    fiducial_rate, fiducial_log_weights = fn(FIDUCIALS, samples)
+    """Why `local_merger_rate` is analytically marginalizable: it is pure amplitude."""
+    catalog, _ = synthetic_importance_catalog()
+    fiducial_rate, fiducial_log_weights = _reweight(catalog, FIDUCIALS)
 
-    scaled_params = {
-        **FIDUCIALS,
-        "local_merger_rate": 2.5 * FIDUCIALS["local_merger_rate"],
-    }
-    scaled_rate, scaled_log_weights = fn(scaled_params, samples)
+    scaled_rate, scaled_log_weights = _reweight(
+        catalog,
+        {**FIDUCIALS, "local_merger_rate": 2.5 * FIDUCIALS["local_merger_rate"]},
+    )
 
     assert float(scaled_rate) == pytest.approx(2.5 * float(fiducial_rate))
     np.testing.assert_allclose(scaled_log_weights, fiducial_log_weights)
 
 
 def test_fiducial_local_merger_rate_preserves_rate_calculation(
-    synthetic_weights_callback,
+    synthetic_importance_catalog,
 ) -> None:
-    fn, samples = synthetic_weights_callback()
-    total_rate, _ = fn(FIDUCIALS, samples)
+    """The population's rate is the hand-written grid formula, not a second copy."""
+    catalog, _ = synthetic_importance_catalog()
+    total_rate, _ = _reweight(catalog, FIDUCIALS)
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
     _, dvc_dz_grid = distance_and_volume_grid(
@@ -197,16 +218,21 @@ def test_fiducial_local_merger_rate_preserves_rate_calculation(
     assert float(total_rate) == pytest.approx(expected)
 
 
-def test_make_merger_rate_and_log_weights_fn_fiducial_weights_cancel(
-    synthetic_weights_callback,
+def test_fiducial_weights_cancel_exactly(
+    synthetic_importance_catalog,
 ) -> None:
-    # Proposal and target share compute_merger_rate_distance_and_logprob, so at
-    # the fiducial point log_weights are identically zero and relative ESS is 1.
-    fn, samples = synthetic_weights_callback()
-    _, log_weights = fn(FIDUCIALS, samples)
+    # The catalog's cached proposal density and reference distance are the same
+    # expressions the target forms at FIDUCIALS, so at the fiducial point the
+    # log-weights are identically zero and the relative ESS is exactly 1.
+    catalog, _ = synthetic_importance_catalog()
+    _, log_weights = _reweight(catalog, FIDUCIALS)
     log_weights = np.asarray(log_weights)
     weights = np.exp(log_weights)
-    np.testing.assert_allclose(log_weights, 0.0, atol=1e-12)
+    # Exactly, not to tolerance: the two sides are bit-identical expressions.
+    # A tolerance here would hide an operation-order change that costs a ulp
+    # per weight -- small on its own, but the identity is what several other
+    # tests build their exact expectations on.
+    np.testing.assert_array_equal(log_weights, np.zeros_like(log_weights))
     assert np.all(np.isfinite(weights))
     rel_ess = float(weights.sum() ** 2 / (weights.size * (weights**2).sum()))
     assert rel_ess == pytest.approx(1.0)

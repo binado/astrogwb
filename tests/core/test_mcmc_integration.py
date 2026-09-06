@@ -37,24 +37,30 @@ from astrogwb_mock_population import (
 )
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import Catalog, ImportanceCatalog
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.cosmology import log_gw_em_ratio
+from astrogwb.detector import (
+    effective_psd,
+    gaussian_bin_scale,
+    load_sensitivity_map,
+)
 from astrogwb.distributions.amplitude import quadrature_grid
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
+from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     amplitude_H0_fn,
+    bns_population,
     compute_merger_rate_distance_and_logprob,
-    make_merger_rate_and_log_weights_fn,
     merger_rate_H0_fn,
 )
-from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 from astrogwb.sampling import (
-    amplitude_marginalized_model,
     amplitude_reconstruction_model,
+    gwb_amplitude_marginalized_model,
+    gwb_spectral_density_model,
+    with_renamed_diagnostics,
 )
-from astrogwb.sampling.models import spectral_density_model
 
 pytestmark = pytest.mark.integration
 
@@ -89,13 +95,11 @@ OMEGA_M_PRIOR = dist.Normal(0.3096, 0.006)
 class AnalysisInputs(NamedTuple):
     """Everything a model needs, plus the diagnostics the assertions use."""
 
-    polarization_power: jax.Array
-    samples: dict[str, jax.Array]
     observed_spectral_density: jax.Array
     effective_psd: jax.Array
     observation_time: float
     df: float
-    merger_rate_and_log_weights_fn: MergerRateAndLogWeightsFn
+    estimator: SpectralDensityImportanceEstimator
     frequencies: jax.Array
     total_merger_rate: jax.Array
     snr: float
@@ -141,16 +145,6 @@ def _build_analysis_inputs(
         average_mode="analytic_inclination",
     )
 
-    weights_fn = make_merger_rate_and_log_weights_fn(
-        fiducials=FIDUCIALS,
-        redshift_grid=redshift_grid,
-        proposal_logprob=proposal_logprob,
-    )
-
-    def merger_rate_and_log_weights(params, samples):
-        """Take every hyperparameter the chain does not sample from the fiducials."""
-        return weights_fn({**FIDUCIALS, **params}, samples)
-
     sensitivities = load_sensitivity_map(DETECTORS)
     network_psd = jnp.asarray(effective_psd(frequencies, DETECTORS, sensitivities))
     # effective_psd is inf wherever no detector pair contributes, and
@@ -190,14 +184,31 @@ def _build_analysis_inputs(
     )
     np.testing.assert_allclose(snr, target_snr, rtol=1e-12, atol=0.0)
 
-    return AnalysisInputs(
+    # Built after masking: the catalog owns the band-restricted power, while
+    # the source samples keep their full length. The catalog is its own
+    # proposal, so the cached density and reference distance are the same
+    # expressions the target forms at FIDUCIALS -- every fiducial log-weight is
+    # then exactly zero, which is what the unit-weight injection above assumes.
+    importance_catalog = ImportanceCatalog(
+        source_parameters=samples,
         polarization_power=polarization_power,
-        samples=samples,
+        proposal_log_prob=proposal_logprob,
+        log_reference_distance=jnp.log(samples["luminosity_distance"])
+        + log_gw_em_ratio(samples["redshift"], FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]),
+    )
+
+    def target_population(params):
+        """Take every hyperparameter the chain does not sample from the fiducials."""
+        return bns_population({**FIDUCIALS, **params}, redshift_grid=redshift_grid)
+
+    return AnalysisInputs(
         observed_spectral_density=observed_spectral_density,
         effective_psd=network_psd,
         observation_time=observation_time,
         df=df,
-        merger_rate_and_log_weights_fn=merger_rate_and_log_weights,
+        estimator=SpectralDensityImportanceEstimator(
+            importance_catalog, target_population, "analytic_inclination"
+        ),
         frequencies=frequencies,
         total_merger_rate=total_merger_rate,
         snr=snr,
@@ -207,12 +218,10 @@ def _build_analysis_inputs(
 def _model_kwargs(inputs: AnalysisInputs) -> dict[str, object]:
     """Expose same-shaped data as dynamic arguments to NumPyro's JIT cache."""
     return {
-        "polarization_power": inputs.polarization_power,
-        "samples": inputs.samples,
         "observed_spectral_density": inputs.observed_spectral_density,
-        "effective_psd": inputs.effective_psd,
-        "observation_time": inputs.observation_time,
-        "df": inputs.df,
+        "scale": gaussian_bin_scale(
+            inputs.effective_psd, inputs.observation_time, inputs.df
+        ),
     }
 
 
@@ -246,9 +255,8 @@ def _run_nuts(
 
 def _direct_h0_model(inputs: AnalysisInputs, priors: dict[str, dist.Distribution]):
     return partial(
-        spectral_density_model,
-        average_mode="analytic_inclination",
-        merger_rate_and_log_weights_fn=inputs.merger_rate_and_log_weights_fn,
+        gwb_spectral_density_model,
+        spectral_density_fn=inputs.estimator,
         priors=priors,
     )
 
@@ -259,11 +267,15 @@ def _marginalized_model(
     amplitude_grid: jax.Array,
 ):
     return partial(
-        amplitude_marginalized_model,
-        average_mode="analytic_inclination",
-        merger_rate_and_log_weights_fn=inputs.merger_rate_and_log_weights_fn,
+        gwb_amplitude_marginalized_model,
+        # The spectrum is evaluated with H0 pinned, so its rate is the
+        # template's; publishing it as `total_merger_rate` would collide with
+        # the physical rate the reconstruction below writes under that name.
+        spectral_density_fn=with_renamed_diagnostics(
+            inputs.estimator, {"total_merger_rate": "template_merger_rate"}
+        ),
         amplitude_parameter="H0",
-        fiducials=FIDUCIALS,
+        amplitude_fiducial=FIDUCIALS["H0"],
         # Passed by name, never wrapped: AmplitudeConditional hashes
         # amplitude_fn into the jit cache key, so a freshly-minted callable
         # retraces the model on every construction. Pinned by
@@ -328,7 +340,7 @@ def marginalized_result(analysis_inputs: AnalysisInputs) -> MarginalizedResult:
 def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
     analysis_inputs: AnalysisInputs,
 ) -> None:
-    """NUTS on ``spectral_density_model`` lands on H0_fid with the Fisher width."""
+    """NUTS on ``gwb_spectral_density_model`` lands on H0_fid with the Fisher width."""
     inputs = analysis_inputs
 
     posterior = _run_nuts(

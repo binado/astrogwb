@@ -8,9 +8,8 @@ at catalog-build time and inside the jitted NUTS model.
 The grid-based helpers are traceable because they evaluate on the exact
 ``z_grid`` array they are given: no static Python scalars (``max_redshift`` /
 ``n_grid``) need to be extracted from traced values inside the jitted NUTS
-model. Callers build ``z_grid`` once at factory time and capture it in the
-closure; see
-:func:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation.make_merger_rate_and_log_weights_fn`.
+model. Callers build ``z_grid`` once and bind it to the population factory; see
+:func:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation.bns_population`.
 """
 
 from __future__ import annotations

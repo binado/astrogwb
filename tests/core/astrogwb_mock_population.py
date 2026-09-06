@@ -27,12 +27,12 @@ from astrogwb.catalog import (
     FrequencyDomainWaveformMetadata,
     PopulationMetadata,
 )
+from astrogwb.catalog.importance import ImportanceCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+    bns_population,
     compute_merger_rate_distance_and_logprob,
-    make_merger_rate_and_log_weights_fn,
 )
-from astrogwb.importance.protocol import MergerRateAndLogWeightsFn
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -175,25 +175,42 @@ def catalog_samples(catalog: Catalog) -> dict[str, jax.Array]:
     }
 
 
-def build_synthetic_weights_callback(
+def build_synthetic_importance_catalog(
     n_samples: int = 16,
-) -> tuple[MergerRateAndLogWeightsFn, dict[str, jax.Array]]:
-    """Build the reference weights callback over an evenly spaced redshift set.
+    *,
+    polarization_power: jax.Array | None = None,
+) -> tuple[ImportanceCatalog, dict[str, jax.Array]]:
+    """Build a catalog whose proposal *is* its target at the fiducials.
 
     Shared by ``test_importance.py`` and ``test_amplitude_scalings.py``, which
-    both need a callback whose proposal *is* its target at the fiducials, so
-    every log-weight is exactly zero and any departure is attributable to the
-    parameter under test rather than to the catalog.
+    both need every log-weight to be exactly zero at ``FIDUCIALS``, so that any
+    departure is attributable to the parameter under test rather than to the
+    catalog. ``from_population`` is what makes that exact rather than
+    approximate: the cached proposal density and reference distance are the
+    *same expressions*, evaluated on the same inputs, that
+    ``compute_population_terms`` will produce on the target side.
+
+    ``polarization_power`` defaults to a single unit-power frequency bin --
+    callers that only want rates and weights need no waveforms. Its sample axis
+    must be ``n_samples``.
     """
     redshift_grid = make_redshift_grid()
     samples: dict[str, jax.Array] = {"redshift": jnp.linspace(Z_MIN, Z_MAX, n_samples)}
-    _, luminosity_distance, proposal_logprob = compute_merger_rate_distance_and_logprob(
+    _, luminosity_distance, _ = compute_merger_rate_distance_and_logprob(
         FIDUCIALS, samples, redshift_grid=redshift_grid
     )
+    # The EM distance, kept on the samples because tests that build their own
+    # reference distances still read it. The catalog below is given the
+    # *effective* distance instead.
     samples["luminosity_distance"] = luminosity_distance
-    fn = make_merger_rate_and_log_weights_fn(
-        fiducials=FIDUCIALS,
-        redshift_grid=redshift_grid,
-        proposal_logprob=proposal_logprob,
+
+    population = bns_population(FIDUCIALS, redshift_grid=redshift_grid)
+    if polarization_power is None:
+        polarization_power = jnp.ones((1, n_samples))
+    catalog = ImportanceCatalog.from_population(
+        population=population,
+        source_parameters=samples,
+        polarization_power=polarization_power,
+        luminosity_distance=population.luminosity_distance(samples["redshift"]),
     )
-    return fn, samples
+    return catalog, samples

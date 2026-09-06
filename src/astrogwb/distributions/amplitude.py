@@ -1,7 +1,7 @@
 r"""Numerical marginalization of a multiplicative amplitude direction.
 
 Under the per-frequency Gaussian likelihood used by
-:func:`~astrogwb.sampling.models.spectral_density_model`, one parameter can
+:func:`~astrogwb.sampling.models.gwb_spectral_density_model`, one parameter can
 enter the predicted spectrum as a pure multiplicative factor,
 
 .. math:: \boldsymbol{\mu}(\varphi, \theta) = A(\varphi)\, \mathbf{m}(\theta)
@@ -194,7 +194,7 @@ class AmplitudeConditional(dist.Distribution):
 
     Given the amplitude sufficient statistics :math:`\hat A` and :math:`\rho`
     published by
-    :func:`~astrogwb.sampling.models.amplitude_marginalized_model`, this is
+    :func:`~astrogwb.sampling.models.gwb_amplitude_marginalized_model`, this is
     the density
 
     .. math::

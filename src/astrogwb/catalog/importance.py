@@ -25,8 +25,10 @@ class ImportanceCatalog:
 
     ``log_reference_distance`` is the log of the effective distance in Mpc
     governing the stored power's amplitude. It already includes any fiducial
-    propagation modification. Unlike the legacy BNS callback's stored EM
-    distances, it must not receive another propagation correction.
+    propagation modification, so it must not receive another one. A catalog
+    whose stored source distances are the *EM* ones -- because the fiducial
+    propagation was applied to the power instead -- must convert them before
+    they reach this field.
 
     The constructor performs no validation or array conversion: JAX rebuilds
     instances internally while flattening and unflattening pytrees, possibly
