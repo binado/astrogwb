@@ -166,7 +166,9 @@ def plot_corner_for_posterior_grid(
     log_density
         Unnormalized log-posterior with shape ``tuple(len(g) for g in
         grids)``; ``log_density[i, j]`` corresponds to ``(grids[0][i],
-        grids[1][j])``.
+        grids[1][j])``. ``-inf`` entries are allowed and become zero-weight
+        cells (e.g. points outside a bounded prior); NaN and ``+inf`` are
+        rejected.
     labels
         Axis labels, one per dimension.
     truths
@@ -212,8 +214,15 @@ def plot_corner_for_posterior_grid(
             f"log_density shape {log_density.shape} does not match "
             f"the grids {expected_shape}"
         )
-    if not np.all(np.isfinite(log_density)):
-        raise ValueError("log_density must be finite everywhere")
+    if np.any(np.isnan(log_density)) or np.any(log_density == np.inf):
+        raise ValueError(
+            "log_density must not contain NaN or +inf; use -inf for zero density"
+        )
+    if not np.any(np.isfinite(log_density)):
+        raise ValueError(
+            "log_density must contain at least one finite entry; maximum "
+            "subtraction is undefined for an all -inf grid"
+        )
 
     # Cell-edge extents. The histogram range is kept exactly at these bounds:
     # widening it to include out-of-grid truths would rebin the grid points

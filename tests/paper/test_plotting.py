@@ -127,8 +127,31 @@ def test_plot_corner_for_posterior_grid_validation() -> None:
 
     nan_density = log_density.copy()
     nan_density[0, 0] = np.nan
-    with pytest.raises(ValueError, match="finite"):
+    with pytest.raises(ValueError, match="NaN"):
         plotting.plot_corner_for_posterior_grid((x, y), nan_density)
+
+    inf_density = log_density.copy()
+    inf_density[0, 0] = np.inf
+    with pytest.raises(ValueError, match=r"\+inf"):
+        plotting.plot_corner_for_posterior_grid((x, y), inf_density)
+
+    with pytest.raises(ValueError, match="at least one finite entry"):
+        plotting.plot_corner_for_posterior_grid(
+            (x, y), np.full_like(log_density, -np.inf)
+        )
+
+
+def test_plot_corner_for_posterior_grid_accepts_neg_inf_zero_density() -> None:
+    x, y, log_density = _gaussian_grids_and_log_density()
+    # Mimic a bounded prior: zero density outside |x| < 2, |y| < 1.
+    xx, yy = np.meshgrid(x, y, indexing="ij")
+    log_density = np.where(
+        (np.abs(xx) < 2.0) & (np.abs(yy) < 1.0), log_density, -np.inf
+    )
+    fig = plotting.plot_corner_for_posterior_grid((x, y), log_density)
+    assert isinstance(fig, matplotlib.figure.Figure)
+    assert np.asarray(fig.axes).reshape(2, 2)[1, 0].collections
+    matplotlib.pyplot.close(fig)
 
     with pytest.raises(ValueError, match="truths"):
         plotting.plot_corner_for_posterior_grid((x, y), log_density, truths=[0.0])
