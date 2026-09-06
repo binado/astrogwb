@@ -41,7 +41,9 @@ OFF_FIDUCIALS = {
 }
 
 
-def _catalog() -> ImportanceCatalog:
+@pytest.fixture
+def catalog() -> ImportanceCatalog:
+    """A consistent catalog built directly, skipping factory validation."""
     return ImportanceCatalog(
         source_parameters={"redshift": REDSHIFTS},
         polarization_power=POWER,
@@ -65,23 +67,43 @@ def _estimator(
 
 
 @pytest.mark.parametrize(
-    ("field", "value", "message"),
+    ("power", "message"),
     [
-        ("polarization_power", jnp.ones(4), "two-dimensional"),
-        ("polarization_power", jnp.ones((3, 4), dtype=complex), "real"),
-        ("polarization_power", jnp.ones((3, 0)), "at least one source"),
-        ("source_parameters", {"mass": REDSHIFTS}, "redshift"),
-        ("source_parameters", {"redshift": jnp.ones((4, 1))}, "shape"),
-        ("source_parameters", {"redshift": REDSHIFTS, "mass": jnp.ones(3)}, "shape"),
-        ("proposal_log_prob", jnp.zeros(3), "shape"),
-        ("log_reference_distance", jnp.zeros((1, 4)), "shape"),
+        (jnp.ones(4), "two-dimensional"),
+        (jnp.ones((3, 4), dtype=complex), "real"),
+        (jnp.ones((3, 0)), "at least one source"),
     ],
 )
-def test_catalog_rejects_inconsistent_arrays(
-    field: str, value: object, message: str
+def test_from_population_rejects_inconsistent_power(
+    power: jax.Array, message: str
+) -> None:
+    num_samples = power.shape[1] if power.ndim == 2 else REDSHIFTS.size
+    with pytest.raises(ValueError, match=message):
+        ImportanceCatalog.from_population(
+            population=bns_population(FIDUCIALS, redshift_grid=make_redshift_grid()),
+            source_parameters={"redshift": REDSHIFTS[:num_samples]},
+            polarization_power=power,
+            luminosity_distance=jnp.ones(num_samples),
+        )
+
+
+@pytest.mark.parametrize(
+    ("samples", "message"),
+    [
+        ({"redshift": jnp.ones((4, 1))}, "shape"),
+        ({"redshift": REDSHIFTS, "mass": jnp.ones(3)}, "shape"),
+    ],
+)
+def test_from_population_rejects_inconsistent_source_parameters(
+    samples: Mapping[str, jax.Array], message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        replace(_catalog(), **{field: value})
+        ImportanceCatalog.from_population(
+            population=bns_population(FIDUCIALS, redshift_grid=make_redshift_grid()),
+            source_parameters=samples,
+            polarization_power=POWER,
+            luminosity_distance=jnp.ones(4),
+        )
 
 
 @pytest.mark.parametrize("distance", [0.0, -1.0, jnp.inf, jnp.nan, 1.0 + 1.0j])
@@ -146,21 +168,16 @@ def test_catalog_and_estimator_round_trip_as_pytrees() -> None:
         np.testing.assert_array_equal(actual, expected)
 
 
-def test_catalog_reconstruction_does_not_validate_again(
-    monkeypatch: pytest.MonkeyPatch,
+def test_catalog_reconstruction_supports_tracers_and_batching(
+    catalog: ImportanceCatalog,
 ) -> None:
-    catalog = _catalog()
     leaves, structure = jax.tree.flatten(catalog)
-
-    def fail_validation(self: ImportanceCatalog) -> None:
-        pytest.fail("pytree reconstruction repeated construction validation")
-
-    monkeypatch.setattr(ImportanceCatalog, "__post_init__", fail_validation)
     rebuilt = jax.tree.unflatten(structure, leaves)
     np.testing.assert_array_equal(
         jax.jit(lambda value: value.polarization_power)(rebuilt), POWER
     )
-    # vmap also reconstructs pytrees with placeholder and batched leaves.
+    # vmap reconstructs the pytree with placeholder and batched leaves; the
+    # base constructor must accept them without re-validation.
     batched = jax.vmap(lambda scale: jax.tree.map(lambda x: x * scale, catalog))(
         jnp.array([1.0, 2.0])
     )

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from astrogwb.importance.population import Population
 
 
-@jax.tree_util.register_pytree_node_class
+@jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class ImportanceCatalog:
     """A fixed Monte Carlo realization and the quantities needed to reweight it.
@@ -29,52 +29,20 @@ class ImportanceCatalog:
     propagation modification. Unlike the legacy BNS callback's stored EM
     distances, it must not receive another propagation correction.
 
-    The ordinary constructor accepts precomputed proposal densities, including
-    mixtures. The proposal need not itself be a physical population, and no
-    proposal merger rate or observation time enters the importance estimator.
+    The constructor performs no validation or array conversion: JAX rebuilds
+    instances internally while flattening and unflattening pytrees, possibly
+    with tracers, placeholders, or additional batch dimensions. Validated
+    construction is :meth:`from_population`. Direct construction with
+    precomputed proposal densities (including mixtures) remains supported; the
+    proposal need not itself be a physical population, and no proposal merger
+    rate or observation time enters the importance estimator. Ensuring
+    consistent shapes is then the caller's responsibility.
     """
 
     source_parameters: Mapping[str, jax.Array]
     polarization_power: jax.Array
     proposal_log_prob: jax.Array
     log_reference_distance: jax.Array
-
-    def __post_init__(self) -> None:
-        power = jnp.asarray(self.polarization_power)
-        if power.ndim != 2 or not (
-            jnp.issubdtype(power.dtype, jnp.floating)
-            or jnp.issubdtype(power.dtype, jnp.integer)
-        ):
-            raise ValueError("polarization_power must be a real two-dimensional array")
-        num_samples = power.shape[1]
-        if num_samples == 0:
-            raise ValueError("ImportanceCatalog requires at least one source")
-        if "redshift" not in self.source_parameters:
-            raise ValueError("ImportanceCatalog requires redshift samples")
-
-        parameters = {}
-        for name, values in self.source_parameters.items():
-            if not isinstance(name, str):
-                raise TypeError("source parameter names must be strings")
-            array = jnp.asarray(values)
-            if array.shape != (num_samples,):
-                raise ValueError(
-                    f"source parameter {name!r} must have shape ({num_samples},)"
-                )
-            parameters[name] = array
-
-        object.__setattr__(self, "source_parameters", parameters)
-        object.__setattr__(self, "polarization_power", power)
-        for name in ("proposal_log_prob", "log_reference_distance"):
-            array = jnp.asarray(getattr(self, name))
-            if array.shape != (num_samples,):
-                raise ValueError(f"{name} must have shape ({num_samples},)")
-            if not (
-                jnp.issubdtype(array.dtype, jnp.floating)
-                or jnp.issubdtype(array.dtype, jnp.integer)
-            ):
-                raise ValueError(f"{name} must be real-valued")
-            object.__setattr__(self, name, array)
 
     @classmethod
     def from_population(
@@ -85,64 +53,49 @@ class ImportanceCatalog:
         polarization_power: ArrayLike,
         luminosity_distance: ArrayLike,
     ) -> Self:
-        """Cache proposal density and supplied effective reference distances once.
+        """Cache the proposal density and supplied effective distances once.
 
-        Call outside JAX transformations: positive, finite linear distances
-        are validated on the host. Distances are supplied explicitly rather
-        than recomputed from the population's cosmology.
+        Call outside JAX transformations: array shapes and positive, finite
+        linear distances are validated on the host. Distances are supplied
+        explicitly rather than recomputed from the population's cosmology.
         """
-        distance = np.asarray(luminosity_distance)
-        if not np.isrealobj(distance) or not np.all(
-            np.isfinite(distance) & (distance > 0)
+        power = np.asarray(polarization_power)
+        if power.ndim != 2 or not (
+            np.issubdtype(power.dtype, np.floating)
+            or np.issubdtype(power.dtype, np.integer)
         ):
-            raise ValueError("luminosity_distance must be positive and finite")
+            raise ValueError("polarization_power must be a real two-dimensional array")
+        num_samples = power.shape[1]
+        if num_samples == 0:
+            raise ValueError("ImportanceCatalog requires at least one source")
+
         parameters = {
             name: jnp.asarray(values) for name, values in source_parameters.items()
         }
         if "redshift" not in parameters:
             raise ValueError("ImportanceCatalog requires redshift samples")
+        for name, values in parameters.items():
+            if values.shape != (num_samples,):
+                raise ValueError(
+                    f"source parameter {name!r} must have shape ({num_samples},)"
+                )
+
+        distance = np.asarray(luminosity_distance)
+        if distance.shape != (num_samples,):
+            raise ValueError(
+                f"log_reference_distance requires distances of shape ({num_samples},)"
+            )
+        if not np.isrealobj(distance) or not np.all(
+            np.isfinite(distance) & (distance > 0)
+        ):
+            raise ValueError("luminosity_distance must be positive and finite")
+
         return cls(
             source_parameters=parameters,
-            polarization_power=jnp.asarray(polarization_power),
+            polarization_power=jnp.asarray(power),
             proposal_log_prob=population.log_prob(parameters),
             log_reference_distance=jnp.log(jnp.asarray(distance)),
         )
-
-    def tree_flatten(
-        self,
-    ) -> tuple[tuple[Mapping[str, jax.Array], jax.Array, jax.Array, jax.Array], None]:
-        """Expose arrays as dynamic leaves with no static catalog metadata."""
-        return (
-            self.source_parameters,
-            self.polarization_power,
-            self.proposal_log_prob,
-            self.log_reference_distance,
-        ), None
-
-    @classmethod
-    def tree_unflatten(
-        cls,
-        aux_data: None,
-        children: tuple[Mapping[str, jax.Array], jax.Array, jax.Array, jax.Array],
-    ) -> Self:
-        """Reconstruct transformed data without validation or host conversion.
-
-        JAX may supply tracers, placeholders, or additional batch dimensions.
-        The original user-facing construction already validated the catalog.
-        """
-        catalog = object.__new__(cls)
-        for name, value in zip(
-            (
-                "source_parameters",
-                "polarization_power",
-                "proposal_log_prob",
-                "log_reference_distance",
-            ),
-            children,
-            strict=True,
-        ):
-            object.__setattr__(catalog, name, value)
-        return catalog
 
 
 __all__ = ["ImportanceCatalog"]
