@@ -13,6 +13,7 @@ from astrogwb.catalog.generator import (
     AnalyticInspiralGenerator,
     PolarizationPowerGenerator,
 )
+from astrogwb.catalog.importance import ImportanceCatalog
 from astrogwb.catalog.population import (
     PopulationMetadata,
     simulate_population,
@@ -24,6 +25,7 @@ __all__ = [
     "AnalyticInspiralGenerator",
     "Catalog",
     "FrequencyDomainWaveformMetadata",
+    "ImportanceCatalog",
     "PolarizationPowerGenerator",
     "PopulationMetadata",
     "simulate_population",

@@ -1,6 +1,6 @@
 """Redshift distributions induced by source-frame merger-rate models.
 
-Import concrete models from their modules directly:
+The base and Madau-Dickinson implementation are also exported here:
 
 - :mod:`astrogwb.distributions.redshift.base` — the abstract base and its
   cosmology tables
@@ -8,4 +8,12 @@ Import concrete models from their modules directly:
   Madau-Dickinson rate shape
 """
 
-__all__: list[str] = []
+from astrogwb.distributions.redshift.base import RedshiftDistribution
+from astrogwb.distributions.redshift.madau_dickinson import (
+    MadauDickinsonRedshiftDistribution,
+)
+
+__all__: list[str] = [
+    "MadauDickinsonRedshiftDistribution",
+    "RedshiftDistribution",
+]
