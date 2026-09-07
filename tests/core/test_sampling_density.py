@@ -226,3 +226,76 @@ def test_call_covers_the_amplitude_marginalized_factor_site() -> None:
         [log_density(model, (), kwargs, {"tilt": tilt})[0] for tilt in tilt_grid]
     )
     np.testing.assert_allclose(result, naive, rtol=1e-10)
+
+
+# --------------------------------------------------------------------------- #
+# Positional model_args support and JIT caching
+# --------------------------------------------------------------------------- #
+def _positional_model(
+    observed_spectral_density: jax.Array,
+    scale: jax.Array,
+    *,
+    spectral_density_fn=_analytic,
+    priors=PRIORS,
+) -> None:
+    gwb_spectral_density_model(
+        spectral_density_fn=spectral_density_fn,
+        observed_spectral_density=observed_spectral_density,
+        priors=priors,
+        scale=scale,
+    )
+
+
+def test_call_matches_naive_log_density_with_model_args() -> None:
+    model = partial(_positional_model, spectral_density_fn=_analytic, priors=PRIORS)
+    lp = LogDensityFn(model)
+    h0_grid = jnp.linspace(55.0, 85.0, 7)
+    tilt = jnp.array(0.2)
+
+    result = lp(
+        {"h0": h0_grid},
+        fixed={"tilt": tilt},
+        model_args=(OBSERVED, SCALE),
+    )
+    assert result.shape == (7,)
+
+    naive = jnp.stack(
+        [
+            log_density(model, (OBSERVED, SCALE), {}, {"h0": h0, "tilt": tilt})[0]
+            for h0 in h0_grid
+        ]
+    )
+    np.testing.assert_allclose(result, naive, rtol=1e-10)
+
+
+def test_call_retraces_once_per_model_args_shape_not_per_value() -> None:
+    calls: list[None] = []
+
+    def counting_spectrum(params: Mapping[str, ArrayLike]) -> tuple[jax.Array, dict]:
+        calls.append(None)
+        prediction = jnp.asarray(params["h0"]) * (1.0 + 0.1 * params["tilt"])
+        return prediction, {}
+
+    model = partial(
+        _positional_model, spectral_density_fn=counting_spectrum, priors=PRIORS
+    )
+    lp = LogDensityFn(model)
+    grids = {"h0": jnp.linspace(60.0, 80.0, 4)}
+    fixed = {"tilt": jnp.array(0.3)}
+
+    calls.clear()
+    lp(grids, fixed=fixed, model_args=(OBSERVED, SCALE))
+    assert len(calls) == 1
+
+    lp(grids, fixed=fixed, model_args=(OBSERVED, SCALE * 2.0))
+    assert len(calls) == 1, "same shape/dtype must reuse the compiled program"
+
+    lp(
+        grids,
+        fixed=fixed,
+        model_args=(
+            jnp.concatenate([OBSERVED, OBSERVED]),
+            jnp.concatenate([SCALE, SCALE]),
+        ),
+    )
+    assert len(calls) == 2, "a different array shape must trigger exactly one retrace"

@@ -26,13 +26,13 @@ from numpyro.infer.util import log_density
 class LogDensityFn:
     """Grid-evaluate a NumPyro model's constrained log density.
 
-    The model given to :meth:`__init__` must take only keyword arguments (the
-    convention every model in :mod:`astrogwb.sampling.models` follows), since
-    it is always called with ``model_args=()`` and the caller's
-    ``model_kwargs`` supplied as keywords. ``spectral_density_fn`` and
+    The model given to :meth:`__init__` can take positional or keyword
+    arguments. Callers supply positional inputs via ``model_args`` and
+    keyword inputs via ``model_kwargs`` (the convention every model in
+    :mod:`astrogwb.sampling.models` follows). ``spectral_density_fn`` and
     ``priors`` are baked into ``model`` with :func:`functools.partial` at the
     call site (as :func:`astrogwb.paper.inference.build_model` already does),
-    not passed as ``model_kwargs`` -- only array data varies between calls.
+    not passed as call arguments -- only array data varies between calls.
 
     Deliberately a plain class, not a ``NamedTuple`` (implicitly a pytree --
     passing this into a jitted function would silently flatten it, which is
@@ -61,8 +61,8 @@ class LogDensityFn:
     Parameters
     ----------
     model:
-        A NumPyro model called as ``model(**model_kwargs)``. Every model in
-        :mod:`astrogwb.sampling.models` returns ``None``; a
+        A NumPyro model called as ``model(*model_args, **model_kwargs)``. Every
+        model in :mod:`astrogwb.sampling.models` returns ``None``; a
         ``functools.partial`` or a ``numpyro.handlers.Messenger`` wrapper
         (e.g. from ``handlers.block``/``handlers.condition``) around one
         satisfies this too.
@@ -79,6 +79,7 @@ class LogDensityFn:
         def evaluate(
             grids: dict[str, jax.Array],
             fixed_params: dict[str, ArrayLike],
+            model_args: tuple[Any, ...],
             model_kwargs: dict[str, Any],
         ) -> jax.Array:
             mesh = jnp.meshgrid(*grids.values(), indexing="ij")
@@ -88,15 +89,15 @@ class LogDensityFn:
 
             def score(point: dict[str, jax.Array]) -> jax.Array:
                 log_joint, _ = log_density(
-                    model, (), model_kwargs, point | fixed_params
+                    model, model_args, model_kwargs, point | fixed_params
                 )
                 return log_joint
 
             flat = jax.lax.map(score, points, batch_size=chunk_size)
             return flat.reshape(tuple(grid.size for grid in grids.values()))
 
-        # Built once: this is what makes a sweep over model_kwargs pay for a
-        # single compilation instead of one per iteration.
+        # Built once: this is what makes a sweep over model_args/model_kwargs
+        # pay for a single compilation instead of one per iteration.
         self._evaluator = jax.jit(evaluate)
 
     def __call__(
@@ -104,6 +105,7 @@ class LogDensityFn:
         grids: Mapping[str, jax.Array],
         *,
         fixed: Mapping[str, ArrayLike] | None = None,
+        model_args: Any = (),
         **model_kwargs: Any,
     ) -> jax.Array:
         """Constrained log density over the cartesian product of 1-2 grids.
@@ -114,9 +116,11 @@ class LogDensityFn:
         argument, so sweeping its value never triggers a recompile -- only a
         change to its set of keys does, since that changes the argument
         pytree's structure.
+
+        ``model_args`` and ``model_kwargs`` are forwarded to ``model``.
         """
         fixed_params = dict(fixed) if fixed is not None else {}
-        return self._evaluator(grids, fixed_params, model_kwargs)
+        return self._evaluator(grids, fixed_params, tuple(model_args), model_kwargs)
 
 
 __all__ = ["LogDensityFn"]
