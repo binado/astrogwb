@@ -17,6 +17,19 @@ def _ripple_sources() -> dict[str, np.ndarray]:
     }
 
 
+@pytest.fixture
+def ripple_generator() -> RippleGenerator:
+    return RippleGenerator(
+        approximant="TaylorF2",
+        sampling_frequency=256.0,
+        minimum_frequency=20.0,
+        maximum_frequency=100.0,
+        reference_frequency=20.0,
+        frequency_resolution=4.0,
+        chunk_size=1,
+    )
+
+
 def test_base_generator_constructor_builds_the_owned_grid() -> None:
     generator = PolarizationPowerGenerator(
         approximant="Toy",
@@ -62,16 +75,10 @@ def test_base_generator_is_a_metadata_only_descriptor() -> None:
 
 
 @pytest.mark.integration
-def test_ripple_generator_owns_grid_and_reduces_chunked_power() -> None:
-    generator = RippleGenerator(
-        approximant="TaylorF2",
-        sampling_frequency=256.0,
-        minimum_frequency=20.0,
-        maximum_frequency=100.0,
-        reference_frequency=20.0,
-        frequency_resolution=4.0,
-        chunk_size=1,
-    )
+def test_ripple_generator_owns_grid_and_reduces_chunked_power(
+    ripple_generator: RippleGenerator,
+) -> None:
+    generator = ripple_generator
 
     power = generator(_ripple_sources())
 
@@ -81,6 +88,41 @@ def test_ripple_generator_owns_grid_and_reduces_chunked_power() -> None:
     assert power.shape == (generator.frequencies.size, 2)
     assert power.dtype == np.float64
     assert np.all(power >= 0.0)
+
+
+def test_ripple_generator_rejects_mismatched_source_parameter_shapes(
+    ripple_generator: RippleGenerator,
+) -> None:
+    sources = _ripple_sources()
+    sources["inclination"] = np.array([0.0])
+
+    with pytest.raises(ValueError, match="matching shapes"):
+        ripple_generator(sources)
+
+
+def test_ripple_generator_rejects_non_one_dimensional_source_parameters(
+    ripple_generator: RippleGenerator,
+) -> None:
+    sources = {name: np.ones((2, 1)) for name in _ripple_sources()}
+
+    with pytest.raises(ValueError, match="one-dimensional"):
+        ripple_generator(sources)
+
+
+def test_ripple_generator_rejects_empty_source_parameters(
+    ripple_generator: RippleGenerator,
+) -> None:
+    with pytest.raises(ValueError, match="at least one array"):
+        ripple_generator({})
+
+
+def test_ripple_generator_rejects_zero_events(
+    ripple_generator: RippleGenerator,
+) -> None:
+    sources = {name: np.array([]) for name in _ripple_sources()}
+
+    with pytest.raises(ValueError, match="at least one event"):
+        ripple_generator(sources)
 
 
 @pytest.mark.parametrize(

@@ -11,6 +11,7 @@ import numpy as np
 from gwmock_signal.waveform import RippleBackend
 from numpy.typing import ArrayLike, NDArray
 
+from astrogwb.utils import array_dict_shape
 from astrogwb.waveform.generator.base import PolarizationPowerGenerator
 from astrogwb.waveform.polarization_power import polarization_power
 
@@ -93,7 +94,13 @@ class RippleGenerator(PolarizationPowerGenerator):
         parameters = {
             name: jnp.asarray(values) for name, values in source_parameters.items()
         }
-        n_events = parameters["detector_frame_mass_1"].shape[0]
+        parameter_shape = array_dict_shape(parameters)
+        if len(parameter_shape) != 1:
+            raise ValueError(
+                "Ripple source parameters must be one-dimensional; "
+                f"received shape {parameter_shape}"
+            )
+        n_events = parameter_shape[0]
         if n_events == 0:
             raise ValueError("source_parameters must contain at least one event")
         step = min(n_events, self.chunk_size)
