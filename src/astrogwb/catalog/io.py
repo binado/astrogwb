@@ -121,7 +121,7 @@ def catalog_to_dataset(catalog: Catalog) -> xr.Dataset:
             ),
         },
         coords={
-            "frequency": waveform.frequencies,
+            "frequency": np.asarray(waveform.frequencies),
             "parameter": names,
         },
         attrs=attrs,

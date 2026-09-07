@@ -12,7 +12,10 @@ from gwmock_signal.waveform import RippleBackend
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.utils import array_dict_shape
-from astrogwb.waveform.generator.base import PolarizationPowerGenerator
+from astrogwb.waveform.generator.base import (
+    GRID_SPACING_TOLERANCE_ULP,
+    PolarizationPowerGenerator,
+)
 from astrogwb.waveform.polarization_power import polarization_power
 
 __all__ = ["RippleGenerator"]
@@ -123,7 +126,19 @@ class RippleGenerator(PolarizationPowerGenerator):
             mask = (chunk_frequencies >= self.minimum_frequency) & (
                 chunk_frequencies <= self.maximum_frequency
             )
-            if not jnp.array_equal(chunk_frequencies[mask], self.frequencies).item():
+            descriptor_frequencies = self.frequencies
+            candidate = chunk_frequencies[mask]
+            grid_tolerance = (
+                GRID_SPACING_TOLERANCE_ULP
+                * jnp.finfo(jnp.float64).eps
+                * jnp.maximum(1.0, jnp.max(jnp.abs(descriptor_frequencies)))
+            )
+            grids_match = candidate.shape == descriptor_frequencies.shape and bool(
+                jnp.allclose(
+                    candidate, descriptor_frequencies, rtol=0.0, atol=grid_tolerance
+                )
+            )
+            if not grids_match:
                 raise ValueError(
                     "Ripple returned a frequency grid different from its descriptor"
                 )

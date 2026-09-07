@@ -57,7 +57,7 @@ def test_base_generator_derives_inclusive_grid_with_float_roundoff() -> None:
     )
 
     np.testing.assert_allclose(generator.frequencies, [0.1, 0.2, 0.3])
-    assert generator.frequencies is not generator.frequencies
+    assert generator.frequencies is generator.frequencies
 
 
 def test_base_generator_is_a_metadata_only_descriptor() -> None:

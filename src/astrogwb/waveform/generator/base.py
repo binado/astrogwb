@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+import jax
+import jax.numpy as jnp
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import ArrayLike
+
+from astrogwb.utils import require_x64
 
 __all__ = ["PolarizationPowerGenerator"]
 
@@ -29,6 +33,9 @@ class PolarizationPowerGenerator:
     reference_frequency: float
     sampling_frequency: float
     df: float
+    _frequencies_cache: jax.Array | None = field(
+        default=None, init=False, compare=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "minimum_frequency", float(self.minimum_frequency))
@@ -55,8 +62,15 @@ class PolarizationPowerGenerator:
             raise ValueError("df must be a finite positive scalar")
 
     @property
-    def frequencies(self) -> NDArray[np.float64]:
-        """Return the inclusive uniform grid ``minimum + k*df <= maximum``."""
+    @require_x64
+    def frequencies(self) -> jax.Array:
+        """Return the inclusive uniform grid ``minimum + k*df <= maximum``.
+
+        Computed once per instance and cached.
+        """
+        if self._frequencies_cache is not None:
+            return self._frequencies_cache
+
         span_in_bins = (self.maximum_frequency - self.minimum_frequency) / self.df
         num_bins = int(np.floor(span_in_bins)) + 1
         next_frequency = self.minimum_frequency + self.df * num_bins
@@ -72,20 +86,20 @@ class PolarizationPowerGenerator:
         )
         if next_frequency <= self.maximum_frequency + tolerance:
             num_bins += 1
-        frequencies = np.asarray(
-            self.minimum_frequency + self.df * np.arange(num_bins),
-            dtype=np.float64,
+
+        frequencies = self.minimum_frequency + self.df * jnp.arange(
+            num_bins, dtype=jnp.float64
         )
-        if np.isclose(
-            frequencies[-1],
-            self.maximum_frequency,
-            rtol=0.0,
-            atol=tolerance,
+        if bool(
+            jnp.isclose(
+                frequencies[-1], self.maximum_frequency, rtol=0.0, atol=tolerance
+            )
         ):
-            frequencies[-1] = self.maximum_frequency
+            frequencies = frequencies.at[-1].set(self.maximum_frequency)
+        object.__setattr__(self, "_frequencies_cache", frequencies)
         return frequencies
 
-    def __call__(self, source_parameters: Mapping[str, ArrayLike]) -> NDArray[Any]:
+    def __call__(self, source_parameters: Mapping[str, ArrayLike]) -> Any:
         """Generate power for ``source_parameters``.
 
         The base implementation exists so it can describe a loaded catalog;
