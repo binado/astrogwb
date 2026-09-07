@@ -46,21 +46,28 @@ repository root as the working directory.
 - **`mcmc_plotting.py`** — load saved chains and produce diagnostic and corner
   plots
 - **`logposterior_grid.py`** — evaluate the log-posterior on a parameter grid
+- **`cosmological_parameters_grid.py`** — reproduces the cosmological-parameter
+  figures from `scripts/mcmc_cosmological_parameters.py` via grid-evaluated
+  posteriors (`LogDensityFn`, `plot_corner_for_posterior_grid`) instead of NUTS
+  chains, sizing the `H0` grid per network from its matched-filter SNR
 - **`fiducial_spectrum.py`** — fiducial injection $S_h$ / $\Omega_{\mathrm{GW}}$,
   network $S_{\mathrm{eff}}$, $\sigma$, and per-network SNR
 
-The paper notebooks merge a run's config layers with
-`assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
-merge the workflow performs by passing layer paths on argv. None of them reads
-an intermediate assembled-config artifact, so they run against a fresh clone.
-
-`fiducial_spectrum.py` is the exception: it stands in for no particular run, so
-it reads the shared tables directly — `config/fiducials.json` and
-`config/networks.json` through `astrogwb.paper.config`, and the ordered network
-legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS` — rather than merging a
-run's layers. Its analysis grid and local plotting choices stay hand-written in
-its configuration cell, so edits to `config/analysis/base/model.toml` should be
-mirrored there by hand.
+`mcmc.py`, `mcmc_plotting.py`, and `logposterior_grid.py` merge a run's config
+layers with `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper
+over the same merge the workflow performs by passing layer paths on argv.
+`cosmological_parameters_grid.py` instead reads its fiducials and per-network
+detector lists from `astrogwb.paper.config.constants`, a stdlib-only leaf
+module duplicating the same run TOMLs; `tests/paper/test_config_constants.py`
+guards the two from drifting apart. `fiducial_spectrum.py` is the other
+exception: it stands in for no particular run, so it reads the shared tables
+directly — `config/fiducials.json` and `config/networks.json` through
+`astrogwb.paper.config`, and the ordered network legend from
+`astrogwb.paper.plotting.DETECTOR_NETWORKS` — rather than merging a run's
+layers. Its analysis grid and local plotting choices stay hand-written in its
+configuration cell, so edits to `config/analysis/base/model.toml` should be
+mirrored there by hand. None of them reads an intermediate artifact, so they
+run against a fresh clone.
 
 For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:
