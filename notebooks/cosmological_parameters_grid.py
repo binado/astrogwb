@@ -25,9 +25,17 @@
 # the default network, and use the second as an exact-quadrature cross-check against
 # the script's amplitude-marginalized $H_0$-$\mathcal{R}_0$ run.
 #
-# **Inputs:** `outputs/catalogs/md-imrphenom-s41-n32768.h5` (injection) and
-# `outputs/catalogs/md-imrphenom-s42-n16384.h5` (proposal) -- built by
-# `snakemake --snakefile Snakefile --cores 1 catalogs`.
+# **Inputs:** `outputs/catalogs/md-imrphenom-s41-n32768.h5`, used as *both* the
+# injection and the proposal -- built by
+# `snakemake --snakefile Snakefile --cores 1 catalogs`. Using two independently
+# seeded catalogs (s41 injection / s42 proposal) leaves real Monte Carlo shot
+# noise in the comparison: the spectral-density power sum is dominated by
+# whichever handful of samples land nearest the `minimum_redshift` window edge
+# (`1/d_L^2` weighting), so two independent draws disagree at the percent
+# level even though both are unbiased and the importance weights are exact.
+# Reusing the injection catalog as its own proposal -- the same trick the
+# waveform-approximant/IMRPhenom systematics-baseline run uses -- removes that
+# noise source so the grid posteriors sit on the fiducial line.
 #
 # **Outputs (when `SAVE_OUTPUTS`):** grid arrays and metadata under `grids/`, figures
 # under `figures/`.
@@ -96,8 +104,11 @@ jax.config.update("jax_enable_x64", True)
 # %%
 DEBUG: bool = False  # shrinks NPOINTS_1D / NPOINTS_2D only; one code path in both modes
 
+# Same catalog (same seed) for both roles: see the markdown cell above --
+# an independently seeded proposal leaves catalog shot noise in the comparison
+# that this notebook's tight, high-SNR grids are sensitive enough to show.
 INJECTION_CATALOG_PATH = Path("outputs/catalogs/md-imrphenom-s41-n32768.h5")
-PROPOSAL_CATALOG_PATH = Path("outputs/catalogs/md-imrphenom-s42-n16384.h5")
+PROPOSAL_CATALOG_PATH = INJECTION_CATALOG_PATH
 
 # Frequency band and redshift grid, mirroring config/analysis/base/model.toml.
 ANALYSIS_GRID = AnalysisGrid(
