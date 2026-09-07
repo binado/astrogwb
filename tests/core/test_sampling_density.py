@@ -102,6 +102,44 @@ def amplitude_marginalized_model() -> Callable[..., None]:
     )
 
 
+def _positional_model(
+    observed_spectral_density: jax.Array,
+    scale: jax.Array,
+    *,
+    priors: Mapping[str, dist.Distribution],
+    spectral_density_fn: Callable[..., Any] = _analytic,
+) -> None:
+    gwb_spectral_density_model(
+        spectral_density_fn=spectral_density_fn,
+        observed_spectral_density=observed_spectral_density,
+        priors=priors,
+        scale=scale,
+    )
+
+
+@pytest.fixture
+def positional_model_factory(
+    priors: dict[str, dist.Distribution],
+) -> Callable[..., Callable[..., None]]:
+    def _factory(
+        spectral_density_fn: Callable[..., Any] = _analytic,
+    ) -> Callable[..., None]:
+        return partial(
+            _positional_model,
+            spectral_density_fn=spectral_density_fn,
+            priors=priors,
+        )
+
+    return _factory
+
+
+@pytest.fixture
+def positional_model(
+    positional_model_factory: Callable[..., Callable[..., None]],
+) -> Callable[..., None]:
+    return positional_model_factory()
+
+
 def test_call_matches_naive_log_density_1d(
     log_density_fn: LogDensityFn,
     model: Callable[..., None],
@@ -273,44 +311,6 @@ def test_call_covers_the_amplitude_marginalized_factor_site(
         ]
     )
     np.testing.assert_allclose(result, naive, rtol=1e-10)
-
-
-def _positional_model(
-    observed_spectral_density: jax.Array,
-    scale: jax.Array,
-    *,
-    priors: Mapping[str, dist.Distribution],
-    spectral_density_fn: Callable[..., Any] = _analytic,
-) -> None:
-    gwb_spectral_density_model(
-        spectral_density_fn=spectral_density_fn,
-        observed_spectral_density=observed_spectral_density,
-        priors=priors,
-        scale=scale,
-    )
-
-
-@pytest.fixture
-def positional_model_factory(
-    priors: dict[str, dist.Distribution],
-) -> Callable[..., Callable[..., None]]:
-    def _factory(
-        spectral_density_fn: Callable[..., Any] = _analytic,
-    ) -> Callable[..., None]:
-        return partial(
-            _positional_model,
-            spectral_density_fn=spectral_density_fn,
-            priors=priors,
-        )
-
-    return _factory
-
-
-@pytest.fixture
-def positional_model(
-    positional_model_factory: Callable[..., Callable[..., None]],
-) -> Callable[..., None]:
-    return positional_model_factory()
 
 
 def test_call_matches_naive_log_density_with_model_args(
