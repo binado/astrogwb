@@ -68,7 +68,7 @@ build-backend = "uv_build"
 
 # Groups are tooling: never imported by shipped code, never part of a wheel.
 [dependency-groups]
-fixture = ["gwmock-pop==0.11.4", "pyyaml>=6.0.3"]
+fixture = ["gwmock-pop==0.13.0", "pyyaml>=6.0.3"]
 test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0"]
 workflow = ["snakemake>=9.24.0"]
 # Notebook *execution* tooling, as opposed to the `notebook` extra, which is
