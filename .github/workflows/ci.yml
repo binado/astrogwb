@@ -19,7 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - run: just lint
 
   typecheck:
@@ -30,7 +30,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - run: just typecheck
 
   test-core:
@@ -41,7 +41,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - name: Verify reference fixtures are present
         run: |
           test -f tests/core/fixtures/gwfast_orf_reference.npz
@@ -58,7 +58,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - run: just test-paper
 
   test-integration:
@@ -69,7 +69,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - name: Verify reference fixtures are present
         run: |
           test -f tests/core/fixtures/gwfast_orf_reference.npz
@@ -86,7 +86,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       # The notebooks build their own catalogs from an inline population graph,
       # so this job needs no fixture guard: nothing it reads comes from
       # tests/core. Executing them *is* the assertion.
