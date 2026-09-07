@@ -102,9 +102,6 @@ def amplitude_marginalized_model() -> Callable[..., None]:
     )
 
 
-# --------------------------------------------------------------------------- #
-# Grid correctness, against a naive Python loop over `log_density` directly
-# --------------------------------------------------------------------------- #
 def test_call_matches_naive_log_density_1d(
     log_density_fn: LogDensityFn,
     model: Callable[..., None],
@@ -151,9 +148,6 @@ def test_call_shape_and_axis_order_2d(
     np.testing.assert_allclose(result, naive, rtol=1e-10)
 
 
-# --------------------------------------------------------------------------- #
-# One compilation across differing data shapes
-# --------------------------------------------------------------------------- #
 def test_call_retraces_once_per_data_shape_not_per_value(
     model_factory: Callable[..., Callable[..., None]],
     data_kwargs: dict[str, Any],
@@ -192,9 +186,6 @@ def test_call_retraces_once_per_data_shape_not_per_value(
     assert len(calls) == 2, "a different array shape must trigger exactly one retrace"
 
 
-# --------------------------------------------------------------------------- #
-# One compilation across differing swept-parameter key sets and `fixed` values
-# --------------------------------------------------------------------------- #
 def test_call_reuses_compilation_across_grid_key_sets(
     model_factory: Callable[..., Callable[..., None]],
     data_kwargs: dict[str, Any],
@@ -262,9 +253,6 @@ def test_batched_evaluation_matches_unbatched(
     np.testing.assert_allclose(batched, unbatched, rtol=1e-10)
 
 
-# --------------------------------------------------------------------------- #
-# Amplitude-marginalized model
-# --------------------------------------------------------------------------- #
 def test_call_covers_the_amplitude_marginalized_factor_site(
     amplitude_marginalized_model: Callable[..., None],
     data_kwargs: dict[str, Any],
@@ -287,9 +275,6 @@ def test_call_covers_the_amplitude_marginalized_factor_site(
     np.testing.assert_allclose(result, naive, rtol=1e-10)
 
 
-# --------------------------------------------------------------------------- #
-# Positional model_args support and JIT caching
-# --------------------------------------------------------------------------- #
 def _positional_model(
     observed_spectral_density: jax.Array,
     scale: jax.Array,
