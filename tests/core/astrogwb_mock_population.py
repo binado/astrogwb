@@ -135,7 +135,7 @@ def build_mock_catalog(
 
     return Catalog.from_generator(
         parameters,
-        generator=AnalyticInspiralGenerator.from_bounds(
+        generator=AnalyticInspiralGenerator(
             alpha=ISCO_ALPHA,
             approximant="AnalyticInspiral",
             minimum_frequency=f_min,

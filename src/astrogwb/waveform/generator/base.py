@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Self
+from typing import Any
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -84,29 +84,6 @@ class PolarizationPowerGenerator:
         ):
             frequencies[-1] = self.maximum_frequency
         return frequencies
-
-    @classmethod
-    def from_bounds(
-        cls,
-        *,
-        approximant: str,
-        minimum_frequency: float,
-        maximum_frequency: float,
-        reference_frequency: float,
-        sampling_frequency: float,
-        df: float,
-        **kwargs: Any,
-    ) -> Self:
-        """Construct a generator with an inclusive derived frequency grid."""
-        return cls(
-            approximant=approximant,
-            minimum_frequency=minimum_frequency,
-            maximum_frequency=maximum_frequency,
-            reference_frequency=reference_frequency,
-            sampling_frequency=sampling_frequency,
-            df=df,
-            **kwargs,
-        )
 
     def __call__(self, source_parameters: Mapping[str, ArrayLike]) -> NDArray[Any]:
         """Generate power for ``source_parameters``.

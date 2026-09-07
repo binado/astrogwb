@@ -17,8 +17,8 @@ def _ripple_sources() -> dict[str, np.ndarray]:
     }
 
 
-def test_base_generator_from_bounds_builds_the_owned_grid() -> None:
-    generator = PolarizationPowerGenerator.from_bounds(
+def test_base_generator_constructor_builds_the_owned_grid() -> None:
+    generator = PolarizationPowerGenerator(
         approximant="Toy",
         minimum_frequency=10.0,
         maximum_frequency=19.0,
@@ -34,7 +34,7 @@ def test_base_generator_from_bounds_builds_the_owned_grid() -> None:
 
 
 def test_base_generator_derives_inclusive_grid_with_float_roundoff() -> None:
-    generator = PolarizationPowerGenerator.from_bounds(
+    generator = PolarizationPowerGenerator(
         approximant="Toy",
         minimum_frequency=0.1,
         maximum_frequency=0.3,
@@ -48,7 +48,7 @@ def test_base_generator_derives_inclusive_grid_with_float_roundoff() -> None:
 
 
 def test_base_generator_is_a_metadata_only_descriptor() -> None:
-    generator = PolarizationPowerGenerator.from_bounds(
+    generator = PolarizationPowerGenerator(
         approximant="Toy",
         minimum_frequency=10.0,
         maximum_frequency=12.0,

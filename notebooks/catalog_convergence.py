@@ -402,7 +402,7 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
 
     return Catalog.from_generator(
         parameters,
-        generator=AnalyticInspiralGenerator.from_bounds(
+        generator=AnalyticInspiralGenerator(
             alpha=ISCO_ALPHA,
             approximant="AnalyticInspiral",
             minimum_frequency=F_MIN,

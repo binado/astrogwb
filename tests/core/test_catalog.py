@@ -60,10 +60,10 @@ def _population_metadata(
         (19.0, np.array([10.0, 12.0, 14.0, 16.0, 18.0])),
     ],
 )
-def test_generator_from_bounds_includes_largest_in_band_bin(
+def test_generator_includes_largest_in_band_bin(
     maximum_frequency: float, expected: np.ndarray
 ) -> None:
-    generator = PolarizationPowerGenerator.from_bounds(
+    generator = PolarizationPowerGenerator(
         approximant="Toy",
         minimum_frequency=10.0,
         maximum_frequency=maximum_frequency,
@@ -79,7 +79,7 @@ def test_generator_from_bounds_includes_largest_in_band_bin(
 def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes(
     source_parameters: dict[str, np.ndarray],
 ) -> None:
-    generator = AnalyticInspiralGenerator.from_bounds(
+    generator = AnalyticInspiralGenerator(
         alpha=ISCO_ALPHA,
         approximant="AnalyticInspiral",
         minimum_frequency=10.0,
@@ -103,7 +103,7 @@ def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes
 def test_analytic_generator_evaluates_on_exact_metadata_grid(
     source_parameters: dict[str, np.ndarray],
 ) -> None:
-    generator = AnalyticInspiralGenerator.from_bounds(
+    generator = AnalyticInspiralGenerator(
         alpha=ISCO_ALPHA,
         approximant="AnalyticInspiral",
         minimum_frequency=9.5,

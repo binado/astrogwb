@@ -59,7 +59,7 @@ from astrogwb.constants import ISCO_ALPHA
 from astrogwb.catalog import Catalog, PopulationMetadata
 from astrogwb.waveform import AnalyticInspiralGenerator
 
-generator = AnalyticInspiralGenerator.from_bounds(
+generator = AnalyticInspiralGenerator(
     alpha=ISCO_ALPHA,
     approximant="AnalyticInspiral",
     minimum_frequency=2.0,
