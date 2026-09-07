@@ -14,7 +14,7 @@ compilation.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import jax
@@ -61,7 +61,11 @@ class LogDensityFn:
     Parameters
     ----------
     model:
-        A NumPyro model called as ``model(**model_kwargs)``.
+        A NumPyro model called as ``model(**model_kwargs)``. Every model in
+        :mod:`astrogwb.sampling.models` returns ``None``; a
+        ``functools.partial`` or a ``numpyro.handlers.Messenger`` wrapper
+        (e.g. from ``handlers.block``/``handlers.condition``) around one
+        satisfies this too.
     chunk_size:
         Forwarded to :func:`jax.lax.map` as ``batch_size``, bounding peak
         memory to ``chunk_size`` grid points' worth of intermediates rather
@@ -69,7 +73,9 @@ class LogDensityFn:
         (the default) evaluates one point at a time.
     """
 
-    def __init__(self, model: Any, *, chunk_size: int | None = None) -> None:
+    def __init__(
+        self, model: Callable[..., None], *, chunk_size: int | None = None
+    ) -> None:
         def evaluate(
             grids: dict[str, jax.Array],
             fixed_params: dict[str, ArrayLike],
