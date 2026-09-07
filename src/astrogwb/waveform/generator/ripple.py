@@ -123,7 +123,7 @@ class RippleGenerator(PolarizationPowerGenerator):
             mask = (chunk_frequencies >= self.minimum_frequency) & (
                 chunk_frequencies <= self.maximum_frequency
             )
-            if not bool(jnp.array_equal(chunk_frequencies[mask], self.frequencies)):
+            if not jnp.array_equal(chunk_frequencies[mask], self.frequencies).item():
                 raise ValueError(
                     "Ripple returned a frequency grid different from its descriptor"
                 )
