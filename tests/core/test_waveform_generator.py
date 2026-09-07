@@ -74,6 +74,13 @@ def test_base_generator_is_a_metadata_only_descriptor() -> None:
         generator({"detector_frame_mass_1": np.array([1.4])})
 
 
+def test_ripple_generator_rejects_frequencies_before_generating(
+    ripple_generator: RippleGenerator,
+) -> None:
+    with pytest.raises(ValueError, match="has not generated yet"):
+        _ = ripple_generator.frequencies
+
+
 @pytest.mark.integration
 def test_ripple_generator_owns_grid_and_reduces_chunked_power(
     ripple_generator: RippleGenerator,
@@ -88,6 +95,7 @@ def test_ripple_generator_owns_grid_and_reduces_chunked_power(
     assert power.shape == (generator.frequencies.size, 2)
     assert power.dtype == np.float64
     assert np.all(power >= 0.0)
+    assert generator.frequencies is generator.frequencies
 
 
 def test_ripple_generator_rejects_mismatched_source_parameter_shapes(
