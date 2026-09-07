@@ -1,17 +1,23 @@
-"""Waveform power reduction, propagation, and a closed-form inspiral model."""
+"""Waveform generation, power reduction, propagation, and inspiral models."""
 
-from astrogwb.waveform.analytical import (
+from astrogwb.waveform.distance import apply_gw_distance_to_power
+from astrogwb.waveform.generator import (
+    AnalyticInspiralGenerator,
+    PolarizationPowerGenerator,
+    RippleGenerator,
+)
+from astrogwb.waveform.generator.analytical import (
     chirp_mass,
     inclination_factor,
     inspiral_polarization_power,
     termination_frequency,
 )
-from astrogwb.waveform.distance import apply_gw_distance_to_power
-from astrogwb.waveform.metadata import FrequencyDomainWaveformMetadata
 from astrogwb.waveform.polarization_power import polarization_power
 
 __all__ = [
-    "FrequencyDomainWaveformMetadata",
+    "AnalyticInspiralGenerator",
+    "PolarizationPowerGenerator",
+    "RippleGenerator",
     "apply_gw_distance_to_power",
     "chirp_mass",
     "inclination_factor",

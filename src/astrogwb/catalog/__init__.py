@@ -9,24 +9,17 @@ from typing import Any, Self
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.catalog.generator import (
-    AnalyticInspiralGenerator,
-    PolarizationPowerGenerator,
-)
 from astrogwb.catalog.importance import ImportanceCatalog
 from astrogwb.catalog.population import (
     PopulationMetadata,
     simulate_population,
     simulate_population_mixture,
 )
-from astrogwb.waveform.metadata import FrequencyDomainWaveformMetadata
+from astrogwb.waveform import PolarizationPowerGenerator as _PolarizationPowerGenerator
 
 __all__ = [
-    "AnalyticInspiralGenerator",
     "Catalog",
-    "FrequencyDomainWaveformMetadata",
     "ImportanceCatalog",
-    "PolarizationPowerGenerator",
     "PopulationMetadata",
     "simulate_population",
     "simulate_population_mixture",
@@ -39,7 +32,7 @@ class Catalog:
 
     source_parameters: Mapping[str, NDArray[Any]]
     polarization_power: NDArray[Any]
-    waveform_metadata: FrequencyDomainWaveformMetadata
+    waveform_metadata: _PolarizationPowerGenerator
     population_metadata: PopulationMetadata
 
     def __post_init__(self) -> None:
@@ -88,18 +81,17 @@ class Catalog:
         cls,
         source_parameters: Mapping[str, ArrayLike],
         *,
-        generator: PolarizationPowerGenerator,
-        waveform_metadata: FrequencyDomainWaveformMetadata,
+        generator: _PolarizationPowerGenerator,
         population_metadata: PopulationMetadata,
     ) -> Self:
         """Generate polarization power and return a validated array-native catalog."""
         parameters = {
             name: np.asarray(values) for name, values in source_parameters.items()
         }
-        power = np.asarray(generator(source_parameters, waveform_metadata))
+        power = np.asarray(generator(source_parameters))
         return cls(
             source_parameters=parameters,
             polarization_power=power,
-            waveform_metadata=waveform_metadata,
+            waveform_metadata=generator,
             population_metadata=population_metadata,
         )

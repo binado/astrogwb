@@ -3,7 +3,7 @@
 These are the regression tests for the class of bug that motivated collecting
 the constants in one place: two modules independently encoding the same
 physics, in silently incompatible units. The identities asserted here are what
-keep :mod:`astrogwb.gwb.analytic` and :mod:`astrogwb.waveform.analytical`
+keep :mod:`astrogwb.gwb.analytic` and :mod:`astrogwb.waveform.generator.analytical`
 speaking the same language.
 """
 

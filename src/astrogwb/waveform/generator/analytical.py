@@ -35,15 +35,20 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
-from jax.typing import ArrayLike
+import numpy as np
+from jax.typing import ArrayLike as JaxArrayLike
+from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.constants import MPC_IN_SECONDS, SOLAR_MASS_IN_SECONDS
 from astrogwb.utils import require_x64
+from astrogwb.waveform.generator.base import PolarizationPowerGenerator
 
 __all__ = [
+    "AnalyticInspiralGenerator",
     "chirp_mass",
     "inclination_factor",
     "inspiral_polarization_power",
@@ -54,7 +59,7 @@ __all__ = [
 _AMPLITUDE_PREFACTOR: float = (5.0 / 24.0) * math.pi ** (-4.0 / 3.0)
 
 
-def inclination_factor(inclination: ArrayLike) -> jax.Array:
+def inclination_factor(inclination: JaxArrayLike) -> jax.Array:
     r"""Quadrupolar inclination factor $g(\iota)$.
 
     .. math::
@@ -74,7 +79,7 @@ def inclination_factor(inclination: ArrayLike) -> jax.Array:
     return ((1.0 + cos_squared) / 2.0) ** 2 + cos_squared
 
 
-def chirp_mass(mass_1: ArrayLike, mass_2: ArrayLike) -> jax.Array:
+def chirp_mass(mass_1: JaxArrayLike, mass_2: JaxArrayLike) -> jax.Array:
     r"""Chirp mass $M_c = (m_1 m_2)^{3/5} / (m_1 + m_2)^{1/5}$.
 
     Frame-agnostic and unit-agnostic: the result carries whatever mass unit
@@ -86,7 +91,7 @@ def chirp_mass(mass_1: ArrayLike, mass_2: ArrayLike) -> jax.Array:
     return (mass_1 * mass_2) ** 0.6 / (mass_1 + mass_2) ** 0.2
 
 
-def _require_scalar_alpha(alpha: ArrayLike) -> jax.Array:
+def _require_scalar_alpha(alpha: JaxArrayLike) -> jax.Array:
     alpha_value = jnp.asarray(alpha)
     if alpha_value.ndim != 0:
         msg = (
@@ -97,11 +102,11 @@ def _require_scalar_alpha(alpha: ArrayLike) -> jax.Array:
 
 
 def termination_frequency(
-    mass_1: ArrayLike,
-    mass_2: ArrayLike,
-    redshift: ArrayLike,
+    mass_1: JaxArrayLike,
+    mass_2: JaxArrayLike,
+    redshift: JaxArrayLike,
     *,
-    alpha: ArrayLike,
+    alpha: JaxArrayLike,
 ) -> jax.Array:
     r"""Frequency in Hz at which the inspiral is truncated.
 
@@ -131,7 +136,7 @@ def termination_frequency(
     return alpha_value / ((1.0 + redshift) * total_mass * SOLAR_MASS_IN_SECONDS)
 
 
-def _require_frequency_grid(frequencies: ArrayLike) -> jax.Array:
+def _require_frequency_grid(frequencies: JaxArrayLike) -> jax.Array:
     frequency_grid = jnp.asarray(frequencies)
     if frequency_grid.ndim != 1:
         msg = (
@@ -142,7 +147,7 @@ def _require_frequency_grid(frequencies: ArrayLike) -> jax.Array:
     return frequency_grid
 
 
-def _normalize_source_parameter(name: str, value: ArrayLike) -> jax.Array:
+def _normalize_source_parameter(name: str, value: JaxArrayLike) -> jax.Array:
     parameter = jnp.asarray(value)
     if parameter.ndim > 1:
         msg = (
@@ -157,11 +162,11 @@ def _normalize_source_parameter(name: str, value: ArrayLike) -> jax.Array:
 
 def _normalize_source_parameters(
     *,
-    source_frame_mass_1: ArrayLike,
-    source_frame_mass_2: ArrayLike,
-    redshift: ArrayLike,
-    luminosity_distance: ArrayLike,
-    inclination: ArrayLike,
+    source_frame_mass_1: JaxArrayLike,
+    source_frame_mass_2: JaxArrayLike,
+    redshift: JaxArrayLike,
+    luminosity_distance: JaxArrayLike,
+    inclination: JaxArrayLike,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     parameters = (
         _normalize_source_parameter("source_frame_mass_1", source_frame_mass_1),
@@ -229,10 +234,10 @@ _batched_inspiral_power = jax.vmap(
 
 @require_x64
 def inspiral_polarization_power(
-    frequencies: ArrayLike,
-    parameters: Mapping[str, ArrayLike],
+    frequencies: JaxArrayLike,
+    parameters: Mapping[str, JaxArrayLike],
     *,
-    alpha: ArrayLike,
+    alpha: JaxArrayLike,
 ) -> jax.Array:
     r"""Polarization power $|\tilde h_+|^2 + |\tilde h_\times|^2$ on an ``(N, F)`` grid.
 
@@ -281,3 +286,22 @@ def inspiral_polarization_power(
         inclination=parameters["inclination"],
     )
     return _batched_inspiral_power(frequency_grid, *source_parameters, alpha_value)
+
+
+@dataclass(frozen=True, slots=True)
+class AnalyticInspiralGenerator(PolarizationPowerGenerator):
+    """Generate inspiral-only polarization power on the descriptor grid."""
+
+    alpha: float
+
+    def __call__(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> NDArray[np.float64]:
+        prepared_parameters = {
+            name: np.asarray(values) for name, values in source_parameters.items()
+        }
+        return np.asarray(
+            inspiral_polarization_power(
+                self.frequencies, prepared_parameters, alpha=self.alpha
+            )
+        ).T

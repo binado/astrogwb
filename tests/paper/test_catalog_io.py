@@ -9,11 +9,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from astrogwb.catalog import (
-    Catalog,
-    FrequencyDomainWaveformMetadata,
-    PopulationMetadata,
-)
+from astrogwb.catalog import Catalog, PopulationMetadata
 from astrogwb.catalog.io import (
     DOMAIN_FREQUENCY,
     FORMAT_NAME,
@@ -25,6 +21,7 @@ from astrogwb.catalog.io import (
     save_catalog,
     validate_catalog_dataset,
 )
+from astrogwb.waveform import PolarizationPowerGenerator
 
 
 def _catalog(
@@ -32,15 +29,13 @@ def _catalog(
     provenance: dict[str, str | int | float] | None = None,
     source_type: str | None = "bns",
 ) -> Catalog:
-    frequencies = np.array([10.0, 20.0, 30.0, 40.0])
     return Catalog(
         source_parameters={
             "redshift": np.array([0.1, 0.5, 1.0]),
             "integer_parameter": np.array([1, 2, 3], dtype=np.int16),
         },
         polarization_power=np.arange(12, dtype=np.float64).reshape(4, 3),
-        waveform_metadata=FrequencyDomainWaveformMetadata(
-            frequencies=frequencies,
+        waveform_metadata=PolarizationPowerGenerator(
             approximant="Toy",
             minimum_frequency=10.0,
             maximum_frequency=40.0,
@@ -98,6 +93,7 @@ def test_catalog_dataset_file_dataset_catalog_round_trip(tmp_path: Path) -> None
     loaded_dataset = load_catalog(path)
     restored = catalog_from_dataset(loaded_dataset)
 
+    assert type(restored.waveform_metadata) is PolarizationPowerGenerator
     np.testing.assert_array_equal(
         restored.waveform_metadata.frequencies,
         original.waveform_metadata.frequencies,
