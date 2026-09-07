@@ -85,7 +85,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     compute_merger_rate_distance_and_logprob,
     madau_dickinson_rate,
 )
-from astrogwb.importance.population import importance_log_weights
+from astrogwb.importance.weights import importance_log_weights
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces

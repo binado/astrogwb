@@ -12,7 +12,8 @@ from jax.typing import ArrayLike
 from astrogwb.catalog.importance import ImportanceCatalog
 from astrogwb.gwb.spectral import AverageMode, spectral_density
 from astrogwb.importance.diagnostics import relative_ess
-from astrogwb.importance.population import PopulationFn, importance_log_weights
+from astrogwb.importance.weights import importance_log_weights
+from astrogwb.population import PopulationFn
 
 
 @jax.tree_util.register_dataclass

@@ -56,7 +56,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     bns_population,
     compute_merger_rate_distance_and_logprob,
 )
-from astrogwb.importance.population import importance_log_weights
+from astrogwb.importance.weights import importance_log_weights
 
 #: Reference resolution, and the band the refinement study runs over.
 FINE_DF = 0.25
