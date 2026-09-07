@@ -29,11 +29,19 @@ repository root as the working directory.
 - **`mcmc_plotting.py`** — load saved chains and produce diagnostic and corner
   plots
 - **`logposterior_grid.py`** — evaluate the log-posterior on a parameter grid
+- **`cosmological_parameters_grid.py`** — reproduces the cosmological-parameter
+  figures from `scripts/mcmc_cosmological_parameters.py` via grid-evaluated
+  posteriors (`LogDensityFn`, `plot_corner_for_posterior_grid`) instead of NUTS
+  chains, sizing the `H0` grid per network from its matched-filter SNR
 
-The three paper notebooks merge a run's config layers with
-`assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
-merge the workflow performs by passing layer paths on argv. Neither reads an
-intermediate artifact, so these run against a fresh clone.
+`mcmc.py`, `mcmc_plotting.py`, and `logposterior_grid.py` merge a run's config
+layers with `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper
+over the same merge the workflow performs by passing layer paths on argv.
+`cosmological_parameters_grid.py` instead reads its fiducials and per-network
+detector lists from `astrogwb.paper.config.constants`, a stdlib-only leaf
+module duplicating the same run TOMLs; `tests/paper/test_config_constants.py`
+guards the two from drifting apart. None of the four reads an intermediate
+artifact, so all run against a fresh clone.
 
 ## Running them
 
