@@ -1,4 +1,4 @@
-from .density import LogPosterior
+from .density import LogDensityFn
 from .models import (
     amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
@@ -7,7 +7,7 @@ from .models import (
 from .protocol import SpectralDensityFn, with_renamed_diagnostics
 
 __all__ = [
-    "LogPosterior",
+    "LogDensityFn",
     "SpectralDensityFn",
     "amplitude_reconstruction_model",
     "gwb_amplitude_marginalized_model",

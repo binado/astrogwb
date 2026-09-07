@@ -1,13 +1,14 @@
-"""Contract tests for ``LogPosterior``: dict-native calls, the constrained vs.
-unconstrained Jacobian, single-compilation reuse across differing data, and
-``evaluate_grid``.
+"""Contract tests for ``LogDensityFn``: grid-evaluation correctness against a
+naive Python loop, single-compilation reuse across differing data shapes and
+across swept-parameter key sets, and coverage of the amplitude-marginalized
+model's ``numpyro.factor`` branch.
 
 Uses a small analytic ``spectral_density_fn``, the same pattern
 ``tests/core/test_spectral_sampling.py`` already uses, so these tests stay
 fast and need no catalog. As in production (``astrogwb.paper.inference.build_model``),
 ``spectral_density_fn`` and ``priors`` are baked into the model with
 ``functools.partial`` -- they are static, not part of the per-call
-``model_kwargs`` a ``LogPosterior`` sweeps over. Only ``observed_spectral_density``
+``model_kwargs`` a ``LogDensityFn`` sweeps over. Only ``observed_spectral_density``
 and ``scale`` vary between calls.
 """
 
@@ -23,7 +24,7 @@ from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
 
 from astrogwb.sampling import (
-    LogPosterior,
+    LogDensityFn,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
 )
@@ -56,51 +57,51 @@ def _model(spectral_density_fn=_analytic, priors=PRIORS):
 
 
 # --------------------------------------------------------------------------- #
-# 1. Dict in, scalar out
+# Grid correctness, against a naive Python loop over `log_density` directly
 # --------------------------------------------------------------------------- #
-def test_call_accepts_a_params_dict_and_differentiates() -> None:
+def test_call_matches_naive_log_density_1d() -> None:
+    model = _model()
     kwargs = _data_kwargs()
-    lp = LogPosterior(_model(), template_kwargs=kwargs)
-    params = {"h0": jnp.array(70.0), "tilt": jnp.array(0.3)}
+    lp = LogDensityFn(model)
+    h0_grid = jnp.linspace(55.0, 85.0, 7)
+    tilt = jnp.array(0.2)
 
-    value = lp(params, **kwargs)
-    assert value.shape == ()
-    assert np.isfinite(value)
+    result = lp({"h0": h0_grid}, fixed={"tilt": tilt}, **kwargs)
+    assert result.shape == (7,)
 
-    gradient = jax.grad(lp)(params, **kwargs)
-    assert set(gradient) == set(params)
-    assert all(np.isfinite(g) for g in gradient.values())
-
-
-# --------------------------------------------------------------------------- #
-# 2. The two spaces differ by the Jacobian
-# --------------------------------------------------------------------------- #
-def test_potential_and_constrained_density_differ_by_the_jacobian() -> None:
-    """``h0``'s support is bounded, so its bijector is not the identity.
-
-    ``potential(u) = -log p(x) - log|dx/du|`` (see
-    ``numpyro.infer.util.potential_energy`` / ``_unconstrain_reparam``), so
-    ``-potential(u) - log p(x)`` isolates the log-Jacobian contributed by
-    every transformed site. With ``tilt`` on the real line (identity
-    bijector, zero Jacobian), only ``h0``'s ``Uniform`` transform contributes.
-    """
-    kwargs = _data_kwargs()
-    lp = LogPosterior(_model(), template_kwargs=kwargs)
-
-    unconstrained = lp.init_params
-    constrained = lp.constrain(unconstrained, **kwargs)
-    potential = lp.potential(unconstrained, **kwargs)
-    density = lp(constrained, **kwargs)
-
-    transform = dist.biject_to(PRIORS["h0"].support)
-    expected_log_det = transform.log_abs_det_jacobian(
-        unconstrained["h0"], constrained["h0"]
+    naive = jnp.stack(
+        [log_density(model, (), kwargs, {"h0": h0, "tilt": tilt})[0] for h0 in h0_grid]
     )
-    np.testing.assert_allclose(-potential - density, expected_log_det, rtol=1e-10)
+    np.testing.assert_allclose(result, naive, rtol=1e-10)
+
+
+def test_call_shape_and_axis_order_2d() -> None:
+    model = _model()
+    kwargs = _data_kwargs()
+    lp = LogDensityFn(model, chunk_size=6)
+    h0_grid = jnp.linspace(55.0, 85.0, 5)
+    tilt_grid = jnp.linspace(-1.0, 1.0, 4)
+
+    result = lp({"h0": h0_grid, "tilt": tilt_grid}, **kwargs)
+    assert result.shape == (5, 4)
+    assert bool(jnp.all(jnp.isfinite(result)))
+
+    naive = jnp.stack(
+        [
+            jnp.stack(
+                [
+                    log_density(model, (), kwargs, {"h0": h0, "tilt": tilt})[0]
+                    for tilt in tilt_grid
+                ]
+            )
+            for h0 in h0_grid
+        ]
+    )
+    np.testing.assert_allclose(result, naive, rtol=1e-10)
 
 
 # --------------------------------------------------------------------------- #
-# 3. One compilation across differing data
+# One compilation across differing data shapes
 # --------------------------------------------------------------------------- #
 def test_call_retraces_once_per_data_shape_not_per_value() -> None:
     calls: list[None] = []
@@ -113,21 +114,23 @@ def test_call_retraces_once_per_data_shape_not_per_value() -> None:
         return prediction, {}
 
     kwargs = _data_kwargs()
-    lp = LogPosterior(_model(counting_spectrum), template_kwargs=kwargs)
-    params = {"h0": jnp.array(70.0), "tilt": jnp.array(0.3)}
+    lp = LogDensityFn(_model(counting_spectrum))
+    grids = {"h0": jnp.linspace(60.0, 80.0, 4)}
+    fixed = {"tilt": jnp.array(0.3)}
 
-    calls.clear()  # `initialize_model` traced the model plainly during __init__
-    lp(params, **kwargs)
+    calls.clear()
+    lp(grids, fixed=fixed, **kwargs)
     assert len(calls) == 1
 
-    lp(params, **{**kwargs, "scale": SCALE * 2.0})
+    lp(grids, fixed=fixed, **{**kwargs, "scale": SCALE * 2.0})
     assert len(calls) == 1, "same shape/dtype must reuse the compiled program"
 
-    lp(params, **{**kwargs, "observed_spectral_density": jnp.zeros(3)})
+    lp(grids, fixed=fixed, observed_spectral_density=jnp.zeros(3), scale=SCALE)
     assert len(calls) == 1
 
     lp(
-        params,
+        grids,
+        fixed=fixed,
         observed_spectral_density=jnp.concatenate([OBSERVED, OBSERVED]),
         scale=jnp.concatenate([SCALE, SCALE]),
     )
@@ -135,44 +138,19 @@ def test_call_retraces_once_per_data_shape_not_per_value() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 4. evaluate_grid
+# One compilation across differing swept-parameter key sets and `fixed` values
 # --------------------------------------------------------------------------- #
-def test_evaluate_grid_1d_matches_a_naive_python_loop() -> None:
-    kwargs = _data_kwargs()
-    lp = LogPosterior(_model(), template_kwargs=kwargs)
-    h0_grid = jnp.linspace(55.0, 85.0, 7)
+def test_call_reuses_compilation_across_grid_key_sets() -> None:
+    """A single `jax.jit` object already caches per argument pytree structure.
 
-    result = lp.evaluate_grid({"h0": h0_grid}, fixed={"tilt": jnp.array(0.2)}, **kwargs)
-    assert result.shape == (7,)
-
-    naive = jnp.stack(
-        [lp({"h0": h0, "tilt": jnp.array(0.2)}, **kwargs) for h0 in h0_grid]
-    )
-    np.testing.assert_allclose(result, naive, rtol=1e-10)
-
-
-def test_evaluate_grid_2d_shape_and_axis_order() -> None:
-    kwargs = _data_kwargs()
-    lp = LogPosterior(_model(), template_kwargs=kwargs)
-    h0_grid = jnp.linspace(55.0, 85.0, 5)
-    tilt_grid = jnp.linspace(-1.0, 1.0, 4)
-
-    result = lp.evaluate_grid(
-        {"h0": h0_grid, "tilt": tilt_grid}, chunk_size=6, **kwargs
-    )
-    assert result.shape == (5, 4)
-    assert bool(jnp.all(jnp.isfinite(result)))
-
-    naive = jnp.stack(
-        [
-            jnp.stack([lp({"h0": h0, "tilt": tilt}, **kwargs) for tilt in tilt_grid])
-            for h0 in h0_grid
-        ]
-    )
-    np.testing.assert_allclose(result, naive, rtol=1e-10)
-
-
-def test_evaluate_grid_cache_reuses_compilation_across_data_and_fixed_values() -> None:
+    Revisiting a previously-seen combination of swept parameter names and
+    data shapes is a cache hit with no bookkeeping of our own -- verified
+    here by going back to the first grid/shape after an intervening call
+    with a *different* key set, and confirming it reuses the first compile
+    rather than producing a third one. `chunk_size` stays at its default
+    (`None`, unbatched) throughout so `jax.lax.map`'s own remainder-chunk
+    retracing (see the batched test below) never conflates with this.
+    """
     calls: list[None] = []
 
     def counting_spectrum(params: Mapping[str, ArrayLike]) -> tuple[jax.Array, dict]:
@@ -180,44 +158,51 @@ def test_evaluate_grid_cache_reuses_compilation_across_data_and_fixed_values() -
         return _analytic(params)
 
     kwargs = _data_kwargs()
-    lp = LogPosterior(_model(counting_spectrum), template_kwargs=kwargs)
-    # 6 points with chunk_size=2 divides evenly: `jax.lax.map` traces its
-    # mapped function twice whenever the grid size isn't a multiple of
-    # `chunk_size` (once for the batched part, once for the remainder), which
-    # would masquerade as a second "retrace" here. See `jax.lax.map`'s
-    # docstring ("If the axis is not divisible by the batch size...").
-    h0_grid = jnp.linspace(55.0, 85.0, 6)
+    lp = LogDensityFn(_model(counting_spectrum))
+    h0_grid = jnp.linspace(55.0, 85.0, 5)
+    tilt_grid = jnp.linspace(-1.0, 1.0, 4)
 
     calls.clear()
-    lp.evaluate_grid(
-        {"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, chunk_size=2, **kwargs
-    )
+    lp({"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **kwargs)
     assert len(calls) == 1
 
-    # A different `fixed` *value* must not retrace.
-    lp.evaluate_grid(
-        {"h0": h0_grid}, fixed={"tilt": jnp.array(0.9)}, chunk_size=2, **kwargs
-    )
+    # Same grid key set, different `fixed` *value*: no retrace.
+    lp({"h0": h0_grid}, fixed={"tilt": jnp.array(0.9)}, **kwargs)
     assert len(calls) == 1
 
-    # A different `scale` *value* of the same shape must not retrace either.
-    lp.evaluate_grid(
+    # Same grid key set, different `scale` *value* of the same shape: no retrace.
+    lp(
         {"h0": h0_grid},
         fixed={"tilt": jnp.array(0.1)},
-        chunk_size=2,
         **{**kwargs, "scale": SCALE * 1.5},
     )
     assert len(calls) == 1
 
-    # A different chunk_size is a different cache key and must retrace.
-    lp.evaluate_grid(
-        {"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, chunk_size=3, **kwargs
-    )
+    # A different grid *key set* is a new argument pytree structure: one retrace.
+    lp({"h0": h0_grid, "tilt": tilt_grid}, **kwargs)
+    assert len(calls) == 2
+
+    # Back to the first key set/shape: reuses the FIRST compile, not a third one.
+    lp({"h0": h0_grid}, fixed={"tilt": jnp.array(0.3)}, **kwargs)
     assert len(calls) == 2
 
 
+def test_batched_evaluation_matches_unbatched() -> None:
+    """`chunk_size` only bounds peak memory; the result must not depend on it."""
+    kwargs = _data_kwargs()
+    h0_grid = jnp.linspace(55.0, 85.0, 6)  # divides evenly by chunk_size=2 below
+
+    unbatched = LogDensityFn(_model())(
+        {"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **kwargs
+    )
+    batched = LogDensityFn(_model(), chunk_size=2)(
+        {"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **kwargs
+    )
+    np.testing.assert_allclose(batched, unbatched, rtol=1e-10)
+
+
 # --------------------------------------------------------------------------- #
-# 5. Amplitude-marginalized model
+# Amplitude-marginalized model
 # --------------------------------------------------------------------------- #
 def test_call_covers_the_amplitude_marginalized_factor_site() -> None:
     model = partial(
@@ -230,43 +215,14 @@ def test_call_covers_the_amplitude_marginalized_factor_site() -> None:
         amplitude_prior=dist.Uniform(50.0, 90.0),
     )
     kwargs = _data_kwargs()
-    lp = LogPosterior(model, template_kwargs=kwargs)
-    params = {"tilt": jnp.array(0.3)}
+    lp = LogDensityFn(model)
+    tilt_grid = jnp.array([-0.3, 0.0, 0.3])
 
-    value = lp(params, **kwargs)
-    assert np.isfinite(value)
+    result = lp({"tilt": tilt_grid}, **kwargs)
+    assert result.shape == (3,)
+    assert bool(jnp.all(jnp.isfinite(result)))
 
-    expected, _ = log_density(model, (), kwargs, params)
-    np.testing.assert_allclose(value, expected, rtol=1e-10)
-
-
-# --------------------------------------------------------------------------- #
-# 6. Init round-trip
-# --------------------------------------------------------------------------- #
-def test_constrained_init_params_land_inside_every_priors_support() -> None:
-    kwargs = _data_kwargs()
-    lp = LogPosterior(_model(), template_kwargs=kwargs)
-    constrained = lp.constrain(lp.init_params, **kwargs)
-
-    for name, prior in PRIORS.items():
-        assert np.isfinite(prior.log_prob(constrained[name])), name
-
-
-def test_unconstrain_is_the_inverse_of_constrain() -> None:
-    kwargs = _data_kwargs()
-    lp = LogPosterior(_model(), template_kwargs=kwargs)
-
-    unconstrained = lp.init_params
-    roundtrip = lp.unconstrain(lp.constrain(unconstrained, **kwargs), **kwargs)
-    for name, value in unconstrained.items():
-        np.testing.assert_allclose(roundtrip[name], value, atol=1e-8)
-
-
-def test_unconstrain_is_the_inverse_of_constrain_with_no_sampled_sites() -> None:
-    model = _model(spectral_density_fn=lambda _params: (OBSERVED, {}), priors={})
-    kwargs = _data_kwargs()
-    lp = LogPosterior(model, template_kwargs=kwargs)
-
-    assert lp.init_params == {}
-    assert lp.constrain(lp.init_params, **kwargs) == {}
-    assert lp.unconstrain(lp.init_params, **kwargs) == {}
+    naive = jnp.stack(
+        [log_density(model, (), kwargs, {"tilt": tilt})[0] for tilt in tilt_grid]
+    )
+    np.testing.assert_allclose(result, naive, rtol=1e-10)
