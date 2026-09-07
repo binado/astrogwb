@@ -1,4 +1,5 @@
-"""Fiducials and detector networks for the cosmological-parameters experiment.
+"""Fiducials, detector networks, and plot labels for the cosmological-parameters
+experiment.
 
 Stdlib-only, deliberately: this duplicates values that also live in
 ``config/fiducials.json`` and ``config/networks.json``, so that a script or
@@ -47,9 +48,18 @@ NETWORK_EXPERIMENT: str = "cosmological-parameters"
 #: The network used for the joint (H0, Omega_m) / (H0, local_merger_rate) grids.
 DEFAULT_NETWORK: str = "ET-2L-aligned-CE-Hanford"
 
+#: LaTeX axis labels for the parameters plotted by name, matching
+#: scripts/mcmc_cosmological_parameters.py's VAR_LABELS.
+PARAMETER_LABELS: dict[str, str] = {
+    "H0": r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$",
+    "Omega_m": r"$\Omega_m$",
+    "local_merger_rate": r"$\mathcal{R}_0\,[\mathrm{Gpc^{-3}\,yr^{-1}}]$",
+}
+
 __all__ = [
     "DEFAULT_NETWORK",
     "FIDUCIALS",
     "NETWORK_DETECTORS",
     "NETWORK_EXPERIMENT",
+    "PARAMETER_LABELS",
 ]
