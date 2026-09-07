@@ -28,12 +28,12 @@
 # used for the IMRPhenom-vs-itself "systematics baseline" run), which removes the
 # noise source rather than showing it.
 #
-# This notebook makes the mechanism itself the subject: two figures showing how the
+# This notebook makes the mechanism itself the subject: three figures showing how the
 # recovered $H_0$ posterior degrades as (1) the proposal catalog shrinks, holding the
-# redshift cutoff fixed, and (2) the redshift cutoff moves toward $z=0$, holding
-# catalog size fixed. It uses the **default detector network only**
-# (`DEFAULT_NETWORK`, `ET-2L-aligned-CE-Hanford`) to keep both figures to a small,
-# readable set of curves.
+# redshift cutoff fixed, (1b) that same size sweep's relative bias against the
+# fiducial, and (2) the redshift cutoff moves toward $z=0$, holding catalog size
+# fixed. It uses the **default detector network only** (`DEFAULT_NETWORK`,
+# `ET-2L-aligned-CE-Hanford`) to keep the figures to a small, readable set of curves.
 #
 # Because this is shot noise and not a systematic, a single realization's shift does
 # **not** shrink monotonically with catalog size -- see the size-sweep figure below,
@@ -49,8 +49,10 @@
 # generation needed.
 #
 # **Outputs (when `SAVE_OUTPUTS`):** `figures/H0-catalog-size-sweep.pdf` + `.csv` +
-# `.tex`, `figures/H0-redshift-cutoff-sweep.pdf` + `.csv` + `.tex`, and raw grids
-# under `grids/catalog_shot_noise.npz` plus a JSON metadata sidecar.
+# `.tex`, `figures/H0-relative-bias-vs-size.pdf` (no separate `.csv`/`.tex`; rides on
+# `SIZE_SHIFT_TABLE`'s export), `figures/H0-redshift-cutoff-sweep.pdf` + `.csv` +
+# `.tex`, and raw grids under `grids/catalog_shot_noise.npz` plus a JSON metadata
+# sidecar.
 #
 # This notebook needs the repository root as its working directory.
 
@@ -89,6 +91,7 @@ from astrogwb.paper.config.constants import (
 from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.inference import prepare_inference_inputs
 from astrogwb.paper.plotting import (
+    CATEGORY,
     DETECTOR_NETWORKS,
     MERGER_RATE_LEGEND,
     TRUTH,
@@ -229,6 +232,8 @@ def shift_table_latex(table: pd.DataFrame, *, caption: str, label: str) -> str:
             "shift": r"$H_0^{\rm MAP} - H_0^{\rm fid}$",
             "sigma": r"$\sigma_{H_0}$",
             "shift_sigma": r"shift$/\sigma_{H_0}$",
+            "rel_bias": r"$(H_0^{\rm MAP} - H_0^{\rm fid})/H_0^{\rm fid}$",
+            "rel_sigma": r"$\sigma_{H_0}/H_0^{\rm fid}$",
         }
     )
     return latex_table.to_latex(
@@ -452,11 +457,57 @@ _size_rows.append(
         "shift_sigma": (_reference_h0_map - FIDUCIALS["H0"]) / _reference_sigma,
     }
 )
-SIZE_SHIFT_TABLE = pd.DataFrame(_size_rows)
+SIZE_SHIFT_TABLE = pd.DataFrame(_size_rows).assign(
+    rel_bias=lambda df: df["shift"] / FIDUCIALS["H0"],
+    rel_sigma=lambda df: df["sigma"] / FIDUCIALS["H0"],
+)
 SIZE_SHIFT_TABLE
 
 # %% [markdown]
-# ## Figure 2 -- H0 posterior vs. redshift cutoff
+# ## Figure 2 -- Relative bias in H0 vs. catalog size
+#
+# ≙ `H0-relative-bias-vs-size.pdf`. The same `SIZE_SHIFT_TABLE` values plotted
+# against `N` instead of overlaid as posterior curves: relative bias
+# `(H0_MAP - H0_fid)/H0_fid`, error bars at `sigma_H0/H0_fid`. As in Figure 1,
+# three points from one realization each is not enough to fit a shot-noise
+# scaling law -- this is a visual comparison against the self-matched floor at
+# N=32768, not a fitted trend.
+
+# %%
+_size_ns = np.asarray(list(SIZE_SWEEP_PROPOSAL_PATHS), dtype=np.float64)
+_size_sweep_rows = SIZE_SHIFT_TABLE.iloc[: len(_size_ns)]
+_reference_row = SIZE_SHIFT_TABLE.iloc[-1]
+
+fig_size_relative_bias, ax = plt.subplots()
+ax.errorbar(
+    _size_ns,
+    _size_sweep_rows["rel_bias"],
+    yerr=_size_sweep_rows["rel_sigma"],
+    fmt="o-",
+    lw=1.3,
+    capsize=3,
+    color=CATEGORY["cosmology"],
+    label="size sweep",
+)
+ax.errorbar(
+    [32768],
+    [_reference_row["rel_bias"]],
+    yerr=[_reference_row["rel_sigma"]],
+    fmt="D",
+    capsize=3,
+    color=str(TRUTH["color"]),
+    label="self-matched (N=32768)",
+)
+ax.axhline(0.0, **TRUTH)
+ax.set_xscale("log")
+ax.set_xlabel("catalog size $N$")
+ax.set_ylabel(r"relative bias in $H_0$")
+ax.legend(**MERGER_RATE_LEGEND)
+fig_size_relative_bias.tight_layout()
+fig_size_relative_bias
+
+# %% [markdown]
+# ## Figure 3 -- H0 posterior vs. redshift cutoff
 #
 # ≙ `H0-redshift-cutoff-sweep.pdf`. The proposal catalog is held fixed at
 # `md-imrphenom-s42-n32768.h5`; only `minimum_redshift` varies. No new SNR
@@ -578,6 +629,9 @@ if SAVE_OUTPUTS:
 
     fig_size_sweep.savefig(
         FIGURE_DIR / "H0-catalog-size-sweep.pdf", bbox_inches="tight"
+    )
+    fig_size_relative_bias.savefig(
+        FIGURE_DIR / "H0-relative-bias-vs-size.pdf", bbox_inches="tight"
     )
     fig_zmin_sweep.savefig(
         FIGURE_DIR / "H0-redshift-cutoff-sweep.pdf", bbox_inches="tight"
