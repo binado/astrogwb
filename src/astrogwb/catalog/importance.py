@@ -11,7 +11,7 @@ import jax.numpy as jnp
 from jax.typing import ArrayLike
 
 if TYPE_CHECKING:
-    from astrogwb.importance.population import Population
+    from astrogwb.population import Population
 
 
 @jax.tree_util.register_dataclass

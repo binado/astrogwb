@@ -1,7 +1,7 @@
 """Reference population: BNS + Madau-Dickinson rate + modified propagation.
 
 This module packages one concrete realization of the
-:mod:`astrogwb.importance.population` API: a binary-neutron-star population
+:mod:`astrogwb.population` API: a binary-neutron-star population
 whose merger-rate density follows the Madau-Dickinson (2017) shape, evolved on
 a flat-LambdaCDM cosmology, with a phenomenological GW-to-EM
 luminosity-distance ratio (``xi_0``, ``xi_n``) capturing a modified-gravity
@@ -9,7 +9,7 @@ propagation effect.
 
 It is a *reference implementation* --
 :class:`~astrogwb.importance.estimator.SpectralDensityImportanceEstimator`
-accepts any :class:`~astrogwb.importance.population.PopulationFn`, so callers
+accepts any :class:`~astrogwb.population.PopulationFn`, so callers
 may substitute their own.
 
 Two routes express the same redshift density here, and
@@ -17,8 +17,8 @@ Two routes express the same redshift density here, and
 
 - :func:`bns_population` builds a
   :class:`~astrogwb.distributions.redshift.madau_dickinson.MadauDickinsonRedshiftDistribution`
-  inside a :class:`~astrogwb.importance.population.Population`. Its
-  :meth:`~astrogwb.importance.population.Population.compute_population_terms`
+  inside a :class:`~astrogwb.population.Population`. Its
+  :meth:`~astrogwb.population.Population.compute_population_terms`
   reduces it to the arrays the weights need.
 - :func:`compute_merger_rate_distance_and_logprob` is the grid-level formula
   written out by hand. It is kept as the reference the distribution class is
@@ -32,7 +32,7 @@ construct inside ``jax.jit`` during NUTS. Bind it once with
 
 The reference distance the stored polarization power corresponds to is cached
 on :class:`~astrogwb.catalog.ImportanceCatalog`, never recomputed from a
-cosmology table; :mod:`astrogwb.importance.population` explains why.
+cosmology table; :mod:`astrogwb.importance.weights` explains why.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
 )
-from astrogwb.importance.population import CosmologicalPopulation
+from astrogwb.population import CosmologicalPopulation
 
 AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
 """Parameters this population supports marginalizing analytically."""
@@ -125,7 +125,7 @@ def compute_merger_rate_distance_and_logprob(
     the two densities can never drift apart; the importance weight is a *ratio*
     of them, and a second copy of the formula would bias every weight the
     moment either copy changed.
-    :func:`~astrogwb.importance.population.importance_log_weights` combines
+    :func:`~astrogwb.importance.weights.importance_log_weights` combines
     these with the reference distance cached on the catalog. Construction of a
     proposal density for a precomputed catalog must call this same function (on
     the grid the catalog was actually *sampled* from).

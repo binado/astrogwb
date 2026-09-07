@@ -31,11 +31,11 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     bns_population,
     compute_merger_rate_distance_and_logprob,
 )
-from astrogwb.importance.population import (
+from astrogwb.importance.weights import importance_log_weights
+from astrogwb.population import (
     CosmologicalPopulation,
     Population,
     PopulationTerms,
-    importance_log_weights,
 )
 
 #: Interior to the mock grid and not on a node.
@@ -157,6 +157,170 @@ def test_population_is_a_pytree_of_distributions_and_parameters(modified: bool) 
         strict=True,
     ):
         np.testing.assert_array_equal(actual, expected)
+
+
+def test_population_sample_splits_one_key_per_distribution() -> None:
+    standard = _standard_population()
+    population = CosmologicalPopulation(
+        distributions={
+            "redshift": standard.redshift_distribution,
+            "uniform": dist.Uniform(-2.0, 3.0),
+            "normal": dist.Normal(4.0, 0.5),
+        },
+        params=standard.params,
+    )
+    key = jax.random.key(19)
+    sample_shape = (7,)
+
+    actual = population.sample(key, sample_shape)
+    repeated = population.sample(key, sample_shape)
+    split_keys = jax.random.split(key, len(population.distributions))
+    expected = {
+        name: distribution.sample(parameter_key, sample_shape)
+        for (name, distribution), parameter_key in zip(
+            population.distributions.items(), split_keys, strict=True
+        )
+    }
+
+    assert list(actual) == ["redshift", "uniform", "normal"]
+    for name in actual:
+        assert actual[name].shape == sample_shape
+        np.testing.assert_array_equal(actual[name], repeated[name])
+        np.testing.assert_array_equal(actual[name], expected[name])
+
+
+def test_population_converts_supported_distributions_to_gwmock_graph() -> None:
+    standard = _standard_population()
+    population = CosmologicalPopulation(
+        distributions={
+            "redshift": standard.redshift_distribution,
+            "uniform": dist.Uniform(-2.0, 3.0),
+            "normal": dist.Normal(4.0, 0.5),
+        },
+        params=standard.params,
+    )
+
+    assert population._to_gwmock_population_graph() == {
+        "redshift": {
+            "sampler": {
+                "function": "madau_dickinson_redshift",
+                "arguments": {
+                    "z_min": Z_MIN,
+                    "z_max": Z_MAX,
+                    "gamma": FIDUCIALS["gamma"],
+                    "kappa": FIDUCIALS["kappa"],
+                    "z_peak": FIDUCIALS["z_peak"],
+                    "hubble_constant": FIDUCIALS["H0"],
+                    "omega_m": FIDUCIALS["Omega_m"],
+                    "n_grid": N_GRID,
+                },
+            }
+        },
+        "uniform": {
+            "sampler": {
+                "function": "uniform",
+                "arguments": {"minimum": -2.0, "maximum": 3.0},
+            }
+        },
+        "normal": {
+            "sampler": {
+                "function": "astrogwb.population._gwmock_normal",
+                "arguments": {"loc": 4.0, "scale": 0.5},
+            }
+        },
+    }
+
+
+def test_population_gwmock_graph_rejects_an_unsupported_distribution() -> None:
+    standard = _standard_population()
+    population = CosmologicalPopulation(
+        distributions={
+            "redshift": standard.redshift_distribution,
+            "unsupported": dist.Exponential(1.0),
+        },
+        params=standard.params,
+    )
+
+    with pytest.raises(TypeError, match="'unsupported'.*Exponential"):
+        population._to_gwmock_population_graph()
+
+
+@pytest.mark.parametrize(
+    "distribution",
+    [
+        dist.Normal(jnp.zeros(2), jnp.ones(2)),
+        dist.Normal(jnp.zeros(2), jnp.ones(2)).to_event(1),
+    ],
+    ids=["batch", "event"],
+)
+def test_population_gwmock_graph_rejects_non_scalar_distributions(
+    distribution: dist.Distribution,
+) -> None:
+    standard = _standard_population()
+    population = CosmologicalPopulation(
+        distributions={
+            "redshift": standard.redshift_distribution,
+            "non_scalar": distribution,
+        },
+        params=standard.params,
+    )
+
+    with pytest.raises(ValueError, match="'non_scalar'.*batch_shape.*event_shape"):
+        population._to_gwmock_population_graph()
+
+
+def test_population_gwmock_graph_requires_madau_dickinson_parameters() -> None:
+    standard = _standard_population()
+    population = CosmologicalPopulation(
+        distributions=standard.distributions,
+        params={"local_merger_rate": FIDUCIALS["local_merger_rate"]},
+    )
+
+    with pytest.raises(ValueError, match=r"Population\.params keys.*H0"):
+        population._to_gwmock_population_graph()
+
+
+def test_population_gwmock_graph_requires_concrete_values() -> None:
+    standard = _standard_population()
+
+    @jax.jit
+    def convert(low: jax.Array) -> jax.Array:
+        population = CosmologicalPopulation(
+            distributions={
+                "uniform": dist.Uniform(low, 3.0),
+                "redshift": standard.redshift_distribution,
+            },
+            params=standard.params,
+        )
+        population._to_gwmock_population_graph()
+        return low
+
+    with pytest.raises(ValueError, match="'uniform' low must be a concrete scalar"):
+        convert(jnp.asarray(-2.0))
+
+
+@pytest.mark.integration
+def test_gwmock_graph_simulates_every_supported_distribution() -> None:
+    from gwmock_pop import GraphSimulator
+
+    standard = _standard_population()
+    population = CosmologicalPopulation(
+        distributions={
+            "redshift": standard.redshift_distribution,
+            "uniform": dist.Uniform(-2.0, 3.0),
+            "normal": dist.Normal(4.0, 0.5),
+        },
+        params=standard.params,
+    )
+
+    simulator = GraphSimulator(
+        population._to_gwmock_population_graph(), source_type="bns", seed=29
+    )
+    samples = simulator.simulate(32)
+
+    assert list(samples) == ["redshift", "uniform", "normal"]
+    assert all(sample.shape == (32,) for sample in samples.values())
+    assert np.isfinite(np.asarray(samples["normal"])).all()
 
 
 # --------------------------------------------------------------------------- #

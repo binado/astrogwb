@@ -33,7 +33,7 @@ from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
     bns_population,
 )
-from astrogwb.importance.population import importance_log_weights
+from astrogwb.importance.weights import importance_log_weights
 from astrogwb.paper.catalogs import (
     compute_proposal_logprob,
     load_run_catalog,

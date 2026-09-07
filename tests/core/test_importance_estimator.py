@@ -25,7 +25,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     bns_population,
     compute_merger_rate_distance_and_logprob,
 )
-from astrogwb.importance.population import importance_log_weights
+from astrogwb.importance.weights import importance_log_weights
 
 REDSHIFTS = jnp.array([0.41, 1.23, 3.77, 7.1])
 POWER = jnp.arange(1.0, 13.0).reshape(3, 4)
