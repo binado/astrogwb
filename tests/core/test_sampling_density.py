@@ -12,7 +12,7 @@ fast and need no catalog. As in production (``astrogwb.paper.inference.build_mod
 and ``scale`` vary between calls.
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from functools import partial
 from typing import Any
 
@@ -20,6 +20,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
+import pytest
 from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
 
@@ -29,10 +30,25 @@ from astrogwb.sampling import (
     gwb_spectral_density_model,
 )
 
-OBSERVED = jnp.array([1.4, 2.0, 3.2])
-SCALE = jnp.array([0.7, 0.9, 1.2])
 
-PRIORS = {"h0": dist.Uniform(50.0, 90.0), "tilt": dist.Normal(0.0, 1.0)}
+@pytest.fixture
+def observed() -> jax.Array:
+    return jnp.array([1.4, 2.0, 3.2])
+
+
+@pytest.fixture
+def scale() -> jax.Array:
+    return jnp.array([0.7, 0.9, 1.2])
+
+
+@pytest.fixture
+def priors() -> dict[str, dist.Distribution]:
+    return {"h0": dist.Uniform(50.0, 90.0), "tilt": dist.Normal(0.0, 1.0)}
+
+
+@pytest.fixture
+def data_kwargs(observed: jax.Array, scale: jax.Array) -> dict[str, Any]:
+    return {"observed_spectral_density": observed, "scale": scale}
 
 
 def _identity_amplitude(marginalized_parameter: jax.Array) -> jax.Array:
@@ -44,45 +60,80 @@ def _analytic(params: Mapping[str, ArrayLike]) -> tuple[jax.Array, dict[str, Any
     return jnp.asarray(params["h0"]) * shape, {}
 
 
-def _data_kwargs() -> dict[str, Any]:
-    return {"observed_spectral_density": OBSERVED, "scale": SCALE}
+@pytest.fixture
+def model_factory(
+    priors: dict[str, dist.Distribution],
+) -> Callable[..., Callable[..., None]]:
+    def _factory(
+        spectral_density_fn: Callable[..., Any] = _analytic,
+        priors: Mapping[str, dist.Distribution] = priors,
+    ) -> Callable[..., None]:
+        return partial(
+            gwb_spectral_density_model,
+            spectral_density_fn=spectral_density_fn,
+            priors=priors,
+        )
+
+    return _factory
 
 
-def _model(spectral_density_fn=_analytic, priors=PRIORS):
+@pytest.fixture
+def model(
+    model_factory: Callable[..., Callable[..., None]],
+) -> Callable[..., None]:
+    return model_factory()
+
+
+@pytest.fixture
+def log_density_fn(model: Callable[..., None]) -> LogDensityFn:
+    return LogDensityFn(model)
+
+
+@pytest.fixture
+def amplitude_marginalized_model() -> Callable[..., None]:
     return partial(
-        gwb_spectral_density_model,
-        spectral_density_fn=spectral_density_fn,
-        priors=priors,
+        gwb_amplitude_marginalized_model,
+        spectral_density_fn=_analytic,
+        priors={"tilt": dist.Normal(0.0, 1.0)},
+        amplitude_parameter="h0",
+        amplitude_fiducial=70.0,
+        amplitude_fn=_identity_amplitude,
+        amplitude_prior=dist.Uniform(50.0, 90.0),
     )
 
 
 # --------------------------------------------------------------------------- #
 # Grid correctness, against a naive Python loop over `log_density` directly
 # --------------------------------------------------------------------------- #
-def test_call_matches_naive_log_density_1d() -> None:
-    model = _model()
-    kwargs = _data_kwargs()
-    lp = LogDensityFn(model)
+def test_call_matches_naive_log_density_1d(
+    log_density_fn: LogDensityFn,
+    model: Callable[..., None],
+    data_kwargs: dict[str, Any],
+) -> None:
     h0_grid = jnp.linspace(55.0, 85.0, 7)
     tilt = jnp.array(0.2)
 
-    result = lp({"h0": h0_grid}, fixed={"tilt": tilt}, **kwargs)
+    result = log_density_fn({"h0": h0_grid}, fixed={"tilt": tilt}, **data_kwargs)
     assert result.shape == (7,)
 
     naive = jnp.stack(
-        [log_density(model, (), kwargs, {"h0": h0, "tilt": tilt})[0] for h0 in h0_grid]
+        [
+            log_density(model, (), data_kwargs, {"h0": h0, "tilt": tilt})[0]
+            for h0 in h0_grid
+        ]
     )
     np.testing.assert_allclose(result, naive, rtol=1e-10)
 
 
-def test_call_shape_and_axis_order_2d() -> None:
-    model = _model()
-    kwargs = _data_kwargs()
+def test_call_shape_and_axis_order_2d(
+    model: Callable[..., None],
+    data_kwargs: dict[str, Any],
+) -> None:
     lp = LogDensityFn(model, chunk_size=6)
     h0_grid = jnp.linspace(55.0, 85.0, 5)
     tilt_grid = jnp.linspace(-1.0, 1.0, 4)
 
-    result = lp({"h0": h0_grid, "tilt": tilt_grid}, **kwargs)
+    result = lp({"h0": h0_grid, "tilt": tilt_grid}, **data_kwargs)
     assert result.shape == (5, 4)
     assert bool(jnp.all(jnp.isfinite(result)))
 
@@ -90,7 +141,7 @@ def test_call_shape_and_axis_order_2d() -> None:
         [
             jnp.stack(
                 [
-                    log_density(model, (), kwargs, {"h0": h0, "tilt": tilt})[0]
+                    log_density(model, (), data_kwargs, {"h0": h0, "tilt": tilt})[0]
                     for tilt in tilt_grid
                 ]
             )
@@ -103,7 +154,12 @@ def test_call_shape_and_axis_order_2d() -> None:
 # --------------------------------------------------------------------------- #
 # One compilation across differing data shapes
 # --------------------------------------------------------------------------- #
-def test_call_retraces_once_per_data_shape_not_per_value() -> None:
+def test_call_retraces_once_per_data_shape_not_per_value(
+    model_factory: Callable[..., Callable[..., None]],
+    data_kwargs: dict[str, Any],
+    observed: jax.Array,
+    scale: jax.Array,
+) -> None:
     calls: list[None] = []
 
     def counting_spectrum(params: Mapping[str, ArrayLike]) -> tuple[jax.Array, dict]:
@@ -113,26 +169,25 @@ def test_call_retraces_once_per_data_shape_not_per_value() -> None:
         prediction = jnp.asarray(params["h0"]) * (1.0 + 0.1 * params["tilt"])
         return prediction, {}
 
-    kwargs = _data_kwargs()
-    lp = LogDensityFn(_model(counting_spectrum))
+    lp = LogDensityFn(model_factory(counting_spectrum))
     grids = {"h0": jnp.linspace(60.0, 80.0, 4)}
     fixed = {"tilt": jnp.array(0.3)}
 
     calls.clear()
-    lp(grids, fixed=fixed, **kwargs)
+    lp(grids, fixed=fixed, **data_kwargs)
     assert len(calls) == 1
 
-    lp(grids, fixed=fixed, **{**kwargs, "scale": SCALE * 2.0})
+    lp(grids, fixed=fixed, **{**data_kwargs, "scale": scale * 2.0})
     assert len(calls) == 1, "same shape/dtype must reuse the compiled program"
 
-    lp(grids, fixed=fixed, observed_spectral_density=jnp.zeros(3), scale=SCALE)
+    lp(grids, fixed=fixed, observed_spectral_density=jnp.zeros(3), scale=scale)
     assert len(calls) == 1
 
     lp(
         grids,
         fixed=fixed,
-        observed_spectral_density=jnp.concatenate([OBSERVED, OBSERVED]),
-        scale=jnp.concatenate([SCALE, SCALE]),
+        observed_spectral_density=jnp.concatenate([observed, observed]),
+        scale=jnp.concatenate([scale, scale]),
     )
     assert len(calls) == 2, "a different array shape must trigger exactly one retrace"
 
@@ -140,7 +195,11 @@ def test_call_retraces_once_per_data_shape_not_per_value() -> None:
 # --------------------------------------------------------------------------- #
 # One compilation across differing swept-parameter key sets and `fixed` values
 # --------------------------------------------------------------------------- #
-def test_call_reuses_compilation_across_grid_key_sets() -> None:
+def test_call_reuses_compilation_across_grid_key_sets(
+    model_factory: Callable[..., Callable[..., None]],
+    data_kwargs: dict[str, Any],
+    scale: jax.Array,
+) -> None:
     """A single `jax.jit` object already caches per argument pytree structure.
 
     Revisiting a previously-seen combination of swept parameter names and
@@ -157,46 +216,48 @@ def test_call_reuses_compilation_across_grid_key_sets() -> None:
         calls.append(None)
         return _analytic(params)
 
-    kwargs = _data_kwargs()
-    lp = LogDensityFn(_model(counting_spectrum))
+    lp = LogDensityFn(model_factory(counting_spectrum))
     h0_grid = jnp.linspace(55.0, 85.0, 5)
     tilt_grid = jnp.linspace(-1.0, 1.0, 4)
 
     calls.clear()
-    lp({"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **kwargs)
+    lp({"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **data_kwargs)
     assert len(calls) == 1
 
     # Same grid key set, different `fixed` *value*: no retrace.
-    lp({"h0": h0_grid}, fixed={"tilt": jnp.array(0.9)}, **kwargs)
+    lp({"h0": h0_grid}, fixed={"tilt": jnp.array(0.9)}, **data_kwargs)
     assert len(calls) == 1
 
     # Same grid key set, different `scale` *value* of the same shape: no retrace.
     lp(
         {"h0": h0_grid},
         fixed={"tilt": jnp.array(0.1)},
-        **{**kwargs, "scale": SCALE * 1.5},
+        **{**data_kwargs, "scale": scale * 1.5},
     )
     assert len(calls) == 1
 
     # A different grid *key set* is a new argument pytree structure: one retrace.
-    lp({"h0": h0_grid, "tilt": tilt_grid}, **kwargs)
+    lp({"h0": h0_grid, "tilt": tilt_grid}, **data_kwargs)
     assert len(calls) == 2
 
     # Back to the first key set/shape: reuses the FIRST compile, not a third one.
-    lp({"h0": h0_grid}, fixed={"tilt": jnp.array(0.3)}, **kwargs)
+    lp({"h0": h0_grid}, fixed={"tilt": jnp.array(0.3)}, **data_kwargs)
     assert len(calls) == 2
 
 
-def test_batched_evaluation_matches_unbatched() -> None:
+def test_batched_evaluation_matches_unbatched(
+    log_density_fn: LogDensityFn,
+    model: Callable[..., None],
+    data_kwargs: dict[str, Any],
+) -> None:
     """`chunk_size` only bounds peak memory; the result must not depend on it."""
-    kwargs = _data_kwargs()
     h0_grid = jnp.linspace(55.0, 85.0, 6)  # divides evenly by chunk_size=2 below
 
-    unbatched = LogDensityFn(_model())(
-        {"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **kwargs
+    unbatched = log_density_fn(
+        {"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **data_kwargs
     )
-    batched = LogDensityFn(_model(), chunk_size=2)(
-        {"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **kwargs
+    batched = LogDensityFn(model, chunk_size=2)(
+        {"h0": h0_grid}, fixed={"tilt": jnp.array(0.1)}, **data_kwargs
     )
     np.testing.assert_allclose(batched, unbatched, rtol=1e-10)
 
@@ -204,26 +265,24 @@ def test_batched_evaluation_matches_unbatched() -> None:
 # --------------------------------------------------------------------------- #
 # Amplitude-marginalized model
 # --------------------------------------------------------------------------- #
-def test_call_covers_the_amplitude_marginalized_factor_site() -> None:
-    model = partial(
-        gwb_amplitude_marginalized_model,
-        spectral_density_fn=_analytic,
-        priors={"tilt": dist.Normal(0.0, 1.0)},
-        amplitude_parameter="h0",
-        amplitude_fiducial=70.0,
-        amplitude_fn=_identity_amplitude,
-        amplitude_prior=dist.Uniform(50.0, 90.0),
-    )
-    kwargs = _data_kwargs()
-    lp = LogDensityFn(model)
+def test_call_covers_the_amplitude_marginalized_factor_site(
+    amplitude_marginalized_model: Callable[..., None],
+    data_kwargs: dict[str, Any],
+) -> None:
+    lp = LogDensityFn(amplitude_marginalized_model)
     tilt_grid = jnp.array([-0.3, 0.0, 0.3])
 
-    result = lp({"tilt": tilt_grid}, **kwargs)
+    result = lp({"tilt": tilt_grid}, **data_kwargs)
     assert result.shape == (3,)
     assert bool(jnp.all(jnp.isfinite(result)))
 
     naive = jnp.stack(
-        [log_density(model, (), kwargs, {"tilt": tilt})[0] for tilt in tilt_grid]
+        [
+            log_density(amplitude_marginalized_model, (), data_kwargs, {"tilt": tilt})[
+                0
+            ]
+            for tilt in tilt_grid
+        ]
     )
     np.testing.assert_allclose(result, naive, rtol=1e-10)
 
@@ -235,8 +294,8 @@ def _positional_model(
     observed_spectral_density: jax.Array,
     scale: jax.Array,
     *,
-    spectral_density_fn=_analytic,
-    priors=PRIORS,
+    priors: Mapping[str, dist.Distribution],
+    spectral_density_fn: Callable[..., Any] = _analytic,
 ) -> None:
     gwb_spectral_density_model(
         spectral_density_fn=spectral_density_fn,
@@ -246,29 +305,61 @@ def _positional_model(
     )
 
 
-def test_call_matches_naive_log_density_with_model_args() -> None:
-    model = partial(_positional_model, spectral_density_fn=_analytic, priors=PRIORS)
-    lp = LogDensityFn(model)
+@pytest.fixture
+def positional_model_factory(
+    priors: dict[str, dist.Distribution],
+) -> Callable[..., Callable[..., None]]:
+    def _factory(
+        spectral_density_fn: Callable[..., Any] = _analytic,
+    ) -> Callable[..., None]:
+        return partial(
+            _positional_model,
+            spectral_density_fn=spectral_density_fn,
+            priors=priors,
+        )
+
+    return _factory
+
+
+@pytest.fixture
+def positional_model(
+    positional_model_factory: Callable[..., Callable[..., None]],
+) -> Callable[..., None]:
+    return positional_model_factory()
+
+
+def test_call_matches_naive_log_density_with_model_args(
+    positional_model: Callable[..., None],
+    observed: jax.Array,
+    scale: jax.Array,
+) -> None:
+    lp = LogDensityFn(positional_model)
     h0_grid = jnp.linspace(55.0, 85.0, 7)
     tilt = jnp.array(0.2)
 
     result = lp(
         {"h0": h0_grid},
         fixed={"tilt": tilt},
-        model_args=(OBSERVED, SCALE),
+        model_args=(observed, scale),
     )
     assert result.shape == (7,)
 
     naive = jnp.stack(
         [
-            log_density(model, (OBSERVED, SCALE), {}, {"h0": h0, "tilt": tilt})[0]
+            log_density(
+                positional_model, (observed, scale), {}, {"h0": h0, "tilt": tilt}
+            )[0]
             for h0 in h0_grid
         ]
     )
     np.testing.assert_allclose(result, naive, rtol=1e-10)
 
 
-def test_call_retraces_once_per_model_args_shape_not_per_value() -> None:
+def test_call_retraces_once_per_model_args_shape_not_per_value(
+    positional_model_factory: Callable[..., Callable[..., None]],
+    observed: jax.Array,
+    scale: jax.Array,
+) -> None:
     calls: list[None] = []
 
     def counting_spectrum(params: Mapping[str, ArrayLike]) -> tuple[jax.Array, dict]:
@@ -276,26 +367,23 @@ def test_call_retraces_once_per_model_args_shape_not_per_value() -> None:
         prediction = jnp.asarray(params["h0"]) * (1.0 + 0.1 * params["tilt"])
         return prediction, {}
 
-    model = partial(
-        _positional_model, spectral_density_fn=counting_spectrum, priors=PRIORS
-    )
-    lp = LogDensityFn(model)
+    lp = LogDensityFn(positional_model_factory(counting_spectrum))
     grids = {"h0": jnp.linspace(60.0, 80.0, 4)}
     fixed = {"tilt": jnp.array(0.3)}
 
     calls.clear()
-    lp(grids, fixed=fixed, model_args=(OBSERVED, SCALE))
+    lp(grids, fixed=fixed, model_args=(observed, scale))
     assert len(calls) == 1
 
-    lp(grids, fixed=fixed, model_args=(OBSERVED, SCALE * 2.0))
+    lp(grids, fixed=fixed, model_args=(observed, scale * 2.0))
     assert len(calls) == 1, "same shape/dtype must reuse the compiled program"
 
     lp(
         grids,
         fixed=fixed,
         model_args=(
-            jnp.concatenate([OBSERVED, OBSERVED]),
-            jnp.concatenate([SCALE, SCALE]),
+            jnp.concatenate([observed, observed]),
+            jnp.concatenate([scale, scale]),
         ),
     )
     assert len(calls) == 2, "a different array shape must trigger exactly one retrace"
