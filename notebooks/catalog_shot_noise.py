@@ -16,37 +16,56 @@
 # # Catalog shot noise in the GWB spectral density
 #
 # `notebooks/cosmological_parameters_grid.py` originally drew its proposal from an
-# independently seeded catalog (`s42`) against an `s41` injection, and its $H_0$
-# posteriors quietly missed the fiducial line. The cause was not a weight-formula
-# bug -- the importance weights themselves are exact -- but Monte Carlo shot noise:
+# independently seeded catalog against an independently seeded injection, and its
+# $H_0$ posteriors quietly missed the fiducial line. The cause was not a
+# weight-formula bug -- the raw importance weights stay within a hair of uniform
+# whenever the proposal is drawn at the same fiducial cosmology as the target,
+# regardless of catalog size or seed (`astrogwb.importance.diagnostics.relative_ess`
+# alone is ≈1 throughout this notebook too) -- but Monte Carlo shot noise:
 # polarization power scales as $1/d_L^2$ and the redshift density vanishes toward
-# $z=0$, so the spectral-density power sum is dominated by whichever handful of
-# samples land nearest the analysis window's `minimum_redshift` edge, an effective
-# sample size of order 10-50 out of tens of thousands of draws. Two independently
-# seeded catalogs disagree at the percent level purely from this. That notebook was
-# fixed by reusing its injection catalog as its own proposal (the same trick already
-# used for the IMRPhenom-vs-itself "systematics baseline" run), which removes the
-# noise source rather than showing it.
+# $z=0$, so the spectral-density power *sum* is dominated by whichever handful of
+# samples land nearest the analysis window's `minimum_redshift` edge, no matter how
+# uniform the weights multiplying them are. `astrogwb.importance.diagnostics`
+# gained `power_weighted_relative_ess` for exactly this notebook: it folds
+# `polarization_power` into the Kish effective-sample-size calculation instead of
+# looking at the weights alone, and what it measures below is not subtle -- at the
+# standard `minimum_redshift=0.3` cutoff every catalog here, self-matched or
+# independent, retains only about 35-40% of its nominal sample count
+# (`n_eff` in the thousands out of tens of thousands, essentially independent of
+# $N$), and that fraction collapses by more than 25x, to roughly 1%
+# (`n_eff` under 1000 even at $N=65536$), as the cutoff tightens toward $z=0.03$.
+# Two independently seeded catalogs at the *same* size and cutoff still disagree at
+# the percent level in $H_0$ purely from this. That notebook was fixed by reusing
+# its injection catalog as its own proposal (the same trick already used for the
+# IMRPhenom-vs-itself "systematics baseline" run), which removes the resulting
+# importance-weight mismatch rather than showing the underlying noise source.
 #
-# This notebook makes the mechanism itself the subject: three figures showing how the
-# recovered $H_0$ posterior degrades as (1) the proposal catalog shrinks, holding the
-# redshift cutoff fixed, (1b) that same size sweep's relative bias against the
-# fiducial, and (2) the redshift cutoff moves toward $z=0$, holding catalog size
-# fixed. It uses the **default detector network only** (`DEFAULT_NETWORK`,
-# `ET-2L-aligned-CE-Hanford`) to keep the figures to a small, readable set of curves.
+# This notebook makes the mechanism itself the subject: three figures showing how
+# the recovered $H_0$ posterior degrades as (1) the proposal catalog shrinks,
+# holding the redshift cutoff fixed, (1b) that same size sweep's relative bias
+# against the fiducial, and (2) the redshift cutoff moves toward $z=0$, holding
+# catalog size fixed. It uses the **default detector network only**
+# (`DEFAULT_NETWORK`, `ET-2L-aligned-CE-Hanford`) to keep the figures to a small,
+# readable set of curves.
 #
-# Because this is shot noise and not a systematic, a single realization's shift does
-# **not** shrink monotonically with catalog size -- see the size-sweep figure below,
-# where $N=16384$ sits farther from the fiducial than $N=32768$. That is expected,
-# not a bug to chase.
+# Because this is shot noise and not a systematic, a single realization's shift
+# does **not** shrink monotonically with catalog size. Every proposal catalog here
+# is a genuinely independent draw at its own seed (`PROPOSAL_SEEDS`), not a nested
+# prefix of one shared stream, which if anything strengthens the point: a
+# "worse" outcome at a larger $N$ is not an artifact of subsetting one draw, it is
+# what independent shot noise actually looks like. That is expected, not a bug to
+# chase.
 #
-# **Inputs:** `outputs/catalogs/md-imrphenom-s41-n32768.h5` (injection, and reused as
-# its own proposal for the zero-mismatch reference curve),
-# `outputs/catalogs/md-imrphenom-s42-n{8192,16384,32768}.h5` (size sweep -- the
-# smaller files are exact prefixes of the larger one, same seed), and
-# `outputs/catalogs/md-imrphenom-s42-n32768.h5` again at three `minimum_redshift`
-# values (0.3, 0.1, 0.03) for the cutoff sweep. All already exist; no new catalog
-# generation needed.
+# **No input files.** The injection and every proposal catalog are generated
+# in-process from one Madau-Dickinson population graph (`POPULATION_GRAPH`
+# below) and reduced to polarization power with a single shared `RippleGenerator`
+# (`TaylorF2`, `f_max = 2048` Hz -- narrower than production's 4096 Hz, which
+# halves the two resident frequency-by-sample arrays; see the memory-budget note
+# below). The injection is drawn at `INJECTION_SEED`/`INJECTION_SIZE`; each
+# size-sweep point is an independent draw at its own seed. **TaylorF2 changes the
+# numbers, not the mechanism**: shot noise is a property of the Monte Carlo sum,
+# not the approximant, so every quoted number below is measured from this
+# notebook's own output and is not comparable to a previously committed run.
 #
 # **Outputs (when `SAVE_OUTPUTS`):** `figures/H0-catalog-size-sweep.pdf` + `.csv` +
 # `.tex`, `figures/H0-relative-bias-vs-size.pdf` (no separate `.csv`/`.tex`; rides on
@@ -61,10 +80,13 @@
 
 # %%
 import json
+import os
 import time
+from collections.abc import Sequence
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -76,10 +98,14 @@ import xarray as xr
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
-from astrogwb.paper.catalogs import load_run_catalog
+from astrogwb.catalog import Catalog, PopulationMetadata, simulate_population
+from astrogwb.catalog.io import catalog_to_dataset
+from astrogwb.importance.diagnostics import power_weighted_relative_ess
+from astrogwb.importance.population import importance_log_weights
 from astrogwb.paper.config.catalogs import (
-    CatalogProvenance,
-    check_fiducials_match,
+    MadauDickinsonProposal,
+    MixtureProposal,
+    ProposalComponent,
     resolve_proposal,
 )
 from astrogwb.paper.config.constants import (
@@ -101,6 +127,7 @@ from astrogwb.paper.plotting import (
 )
 from astrogwb.paper.snr import compute_network_snrs
 from astrogwb.sampling import LogDensityFn, gwb_spectral_density_model
+from astrogwb.waveform import RippleGenerator
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
 # matplotlib axes so plotting behaves as expected after importing detector utilities.
@@ -114,32 +141,47 @@ jax.config.update("jax_enable_x64", True)
 # ## Notebook configuration
 
 # %%
-INJECTION_CATALOG_PATH = Path("outputs/catalogs/md-imrphenom-s41-n32768.h5")
+SMOKE = os.environ.get("ASTROGWB_NOTEBOOK_SMOKE") == "1"
 
-# Same seed (s42) at three sizes: the smaller files are exact prefixes of
-# md-imrphenom-s42-n32768.h5, so this sweep varies only the effective sample size,
-# not the draw itself.
-SIZE_SWEEP_PROPOSAL_PATHS: dict[int, Path] = {
-    8192: Path("outputs/catalogs/md-imrphenom-s42-n8192.h5"),
-    16384: Path("outputs/catalogs/md-imrphenom-s42-n16384.h5"),
-    32768: Path("outputs/catalogs/md-imrphenom-s42-n32768.h5"),
-}
+INJECTION_SEED: int = 41
+INJECTION_SIZE: int = 2048 if SMOKE else 65536
 
-# Held against the largest s42 catalog: only minimum_redshift moves.
+# Independent draws, one seed per size -- not nested prefixes of one stream (see
+# the markdown above). PROPOSAL_SEEDS[INJECTION_SIZE] additionally serves the
+# z_min sweep below, since evaluate_h0_posteriors generates it once and loops
+# over every requested minimum_redshift internally.
+PROPOSAL_SEEDS: dict[int, int] = (
+    {2048: 42, 512: 43}
+    if SMOKE
+    else {65536: 42, 32768: 43, 16384: 44, 8192: 45, 4096: 46}
+)
+
+# Held against the largest proposal draw: only minimum_redshift moves.
 ZMIN_SWEEP_VALUES: tuple[float, ...] = (0.3, 0.1, 0.03)
-ZMIN_SWEEP_PROPOSAL_PATH = SIZE_SWEEP_PROPOSAL_PATHS[32768]
 
-# Frequency band and redshift grid, mirroring config/analysis/base/model.toml.
-# minimum_redshift here is the size sweep's (and the reference curve's) fixed
-# cutoff; evaluate_h0_posterior overrides it for each z_min sweep point.
+# Frequency band and redshift grid, mirroring config/analysis/base/model.toml
+# except f_max, narrowed from 4096 to 2048 Hz -- see the memory-budget note
+# below. minimum_redshift here is the size sweep's (and the reference curve's)
+# fixed cutoff; evaluate_h0_posteriors overrides it for each z_min sweep point.
 ANALYSIS_GRID = AnalysisGrid(
     observation_time=1.0,
     f_min=2.0,
-    f_max=4096.0,
+    f_max=2048.0,
     minimum_redshift=0.3,
     maximum_redshift=20.0,
     n_grid=256,
 )
+
+# TaylorF2 waveform generation, shared by the injection and every proposal draw
+# so their frequency grids are bit-identical by construction --
+# validate_matching_frequency_grids checks this with np.array_equal.
+# sampling_frequency drives generation cost; f_max (via ANALYSIS_GRID) drives
+# peak memory.
+WAVEFORM_APPROXIMANT: str = "TaylorF2"
+SAMPLING_FREQUENCY: float = 8192.0
+REFERENCE_FREQUENCY: float = 20.0
+FREQUENCY_RESOLUTION: float = 1.0
+GENERATOR_CHUNK_SIZE: int = 2048
 
 # Inlined to match config/analysis/base/parameters.toml, as in
 # cosmological_parameters_grid.py. Every fiducial carries a prior:
@@ -160,12 +202,19 @@ PRIORS: dict[str, dist.Distribution] = {
 # shifts the MAP by roughly 8 sigma at the Fisher-predicted scale, and 15 sigma of
 # half-width leaves margin to see the posterior shape around that excursion.
 COVERAGE_SIGMAS: float = 15.0
-NPOINTS_1D: int = 256
+NPOINTS_1D: int = 32 if SMOKE else 256
 CHUNK_SIZE: int = 64  # LogDensityFn batch_size; bounds peak memory
 
 SAVE_OUTPUTS: bool = True
-GRID_DIR = Path("grids")
-FIGURE_DIR = Path("figures")
+# `grids/` and `figures/` are repository-root artifacts (see CLAUDE.md), never
+# notebook-local ones. Interactive use (Jupyter Lab/VS Code) launches with cwd
+# already at the repository root, but `jupytext --execute` launches with cwd at
+# this file's own directory -- the same quirk `catalog_convergence.py`'s
+# `NOTEBOOK_DIR` works around. `config/` exists only at the repository root, so
+# its presence tells the two cases apart.
+_REPO_ROOT = Path() if Path("config").is_dir() else Path("..")
+GRID_DIR = _REPO_ROOT / "grids"
+FIGURE_DIR = _REPO_ROOT / "figures"
 
 # %% [markdown]
 # ## Helper functions
@@ -234,6 +283,8 @@ def shift_table_latex(table: pd.DataFrame, *, caption: str, label: str) -> str:
             "shift_sigma": r"shift$/\sigma_{H_0}$",
             "rel_bias": r"$(H_0^{\rm MAP} - H_0^{\rm fid})/H_0^{\rm fid}$",
             "rel_sigma": r"$\sigma_{H_0}/H_0^{\rm fid}$",
+            "n_eff": r"$N_{\rm eff}$",
+            "rel_ess": r"$N_{\rm eff}/N$",
         }
     )
     return latex_table.to_latex(
@@ -263,77 +314,331 @@ def write_shift_table(
 
 
 # %% [markdown]
-# ## Building one sweep point's H0 posterior
+# ## Source population and waveform generator
 #
-# The one substantive new helper. Each sweep point re-derives its own proposal
-# density and analysis inputs from scratch -- unlike
-# `cosmological_parameters_grid.py`'s per-network evaluator, there is no shared
-# `LogDensityFn` to reuse across a sweep's own points, since either the proposal
-# file or `minimum_redshift` changes at every call. This replaces re-inlining the
-# same ~15-line block seven times (three size points, three z_min points, one
-# self-matched reference).
-
+# `POPULATION_GRAPH` is an inline mirror of
+# `config/populations/madau-dickinson.yaml`. **Keep the two in step**: nothing
+# enforces their agreement, and `GraphSimulator` draws RNG keys in topological
+# order, broken by declaration order, so reordering these blocks silently
+# changes every generated catalog.
+#
+# **`z_min = 0.0` here**, not the `0.3` `catalog_convergence.py` inlines: the
+# z_min sweep reaches down to `0.03`, and `resolve_proposal` requires
+# `mixture.z_min <= minimum_redshift`, so a graph drawn from `z_min = 0.3` would
+# reject the two smallest cutoff sweep points.
+#
+# `GENERATOR` is the single `RippleGenerator` instance shared by the injection
+# and every proposal draw below. That is what makes their frequency grids
+# bit-identical by construction rather than by coincidence --
+# `prepare_inference_inputs` checks exact equality with `np.array_equal`. Its
+# `frequencies` property raises until the first call (Ripple sizes its own FFT
+# segment), so nothing here inspects it before generating.
+#
+# `generate_catalog_dataset` mirrors `scripts/generate_catalog.py`'s generation
+# path minus the config-layer loading: gwmock only provides the EM-frame ->
+# source-frame mass conversion, so the inverse `(1 + z)` redshift to
+# detector-frame masses is applied here, inline, exactly as production does.
+# The graph's own `luminosity_distance` is kept as-is (unlike
+# `catalog_convergence.py`, which recomputes it at the fiducials) because
+# production catalogs store the graph's EM distance and this notebook is
+# diagnosing production.
 
 # %%
-def evaluate_h0_posterior(
-    injection_catalog: xr.Dataset,
-    proposal_path: Path,
-    *,
-    minimum_redshift: float,
-    network: Network,
-    snr: float,
-) -> tuple[jax.Array, jax.Array]:
-    """H0 log-posterior grid for one proposal catalog and redshift cutoff."""
-    proposal_catalog = load_run_catalog(proposal_path, label="proposal")
-    grid = replace(ANALYSIS_GRID, minimum_redshift=minimum_redshift)
+POPULATION_GRAPH: dict[str, Any] = {
+    "luminosity_distance": {
+        "transform": {
+            "function": "redshift_to_luminosity_distance",
+            "arguments": {
+                "redshift": "@redshift",
+                "hubble_constant": FIDUCIALS["H0"],
+                "omega_m": FIDUCIALS["Omega_m"],
+                "max_redshift": 20.0,
+            },
+        }
+    },
+    "mass_pair": {
+        "intermediate": True,
+        "sampler": {
+            "function": "joint_uniform_mass_pair",
+            "arguments": {
+                "m1_min": 1.0,
+                "m1_max": 2.5,
+                "m2_min": 1.0,
+                "m2_max": 2.5,
+                "ordered": True,
+            },
+        },
+    },
+    "source_frame_mass_1": {
+        "transform": {
+            "function": "take_row",
+            "arguments": {"matrix": "@mass_pair", "index": 0},
+        }
+    },
+    "source_frame_mass_2": {
+        "transform": {
+            "function": "take_row",
+            "arguments": {"matrix": "@mass_pair", "index": 1},
+        }
+    },
+    "spin_1z": {
+        "sampler": {
+            "function": "uniform",
+            "arguments": {"minimum": -0.05, "maximum": 0.05},
+        }
+    },
+    "spin_2z": {
+        "sampler": {
+            "function": "uniform",
+            "arguments": {"minimum": -0.05, "maximum": 0.05},
+        }
+    },
+    "lambda_1": {
+        "sampler": {
+            "function": "uniform",
+            "arguments": {"minimum": 0.0, "maximum": 2000.0},
+        }
+    },
+    "lambda_2": {
+        "sampler": {
+            "function": "uniform",
+            "arguments": {"minimum": 0.0, "maximum": 2000.0},
+        }
+    },
+    "inclination": {
+        "transform": {
+            "function": "constant_like",
+            "arguments": {"reference": "@redshift", "value": 0.0},
+        }
+    },
+    "coa_phase": {
+        "transform": {
+            "function": "constant_like",
+            "arguments": {"reference": "@redshift", "value": 0.0},
+        }
+    },
+    "coa_time": {
+        "transform": {
+            "function": "constant_like",
+            "arguments": {"reference": "@redshift", "value": 0.0},
+        }
+    },
+    "redshift": {
+        "sampler": {
+            "function": "madau_dickinson_redshift",
+            "arguments": {
+                "z_min": 0.0,
+                "z_max": 20.0,
+                "gamma": FIDUCIALS["gamma"],
+                "kappa": FIDUCIALS["kappa"],
+                "z_peak": FIDUCIALS["z_peak"],
+                "hubble_constant": FIDUCIALS["H0"],
+                "omega_m": FIDUCIALS["Omega_m"],
+                "n_grid": 4096,
+            },
+        }
+    },
+}
 
-    provenance = CatalogProvenance.from_file(proposal_path)
-    check_fiducials_match(provenance, FIDUCIALS, label=str(proposal_path))
-    proposal_config = resolve_proposal(
-        provenance.redshift_proposal,
-        minimum_redshift=grid.minimum_redshift,
-        maximum_redshift=grid.maximum_redshift,
-        label=str(proposal_path),
-    )
+GENERATOR = RippleGenerator(
+    approximant=WAVEFORM_APPROXIMANT,
+    sampling_frequency=SAMPLING_FREQUENCY,
+    minimum_frequency=ANALYSIS_GRID.f_min,
+    maximum_frequency=ANALYSIS_GRID.f_max,
+    reference_frequency=REFERENCE_FREQUENCY,
+    frequency_resolution=FREQUENCY_RESOLUTION,
+    chunk_size=GENERATOR_CHUNK_SIZE,
+)
 
-    inputs = prepare_inference_inputs(
-        injection_catalog,
-        proposal_catalog,
-        fiducials=FIDUCIALS,
-        proposal_config=proposal_config,
-        grid=grid,
-        detectors=network.detectors,
+# The single Madau-Dickinson component every draw above follows, built from the
+# same graph dict rather than read back off a file -- so the density and the
+# draw cannot disagree.
+PROPOSAL_MIXTURE = MixtureProposal(
+    components=(
+        ProposalComponent(
+            weight=1.0,
+            density=MadauDickinsonProposal.from_gwmock_dict(
+                POPULATION_GRAPH["redshift"]["sampler"]["arguments"]
+            ),
+        ),
     )
-    model = partial(
-        gwb_spectral_density_model,
-        spectral_density_fn=inputs.estimator,
-        priors=PRIORS,
-    )
-    log_density_fn = LogDensityFn(model, chunk_size=CHUNK_SIZE)
+)
 
-    h0_window = fisher_window(
-        FIDUCIALS["H0"],
-        FIDUCIALS["H0"] / snr,
-        sigmas=COVERAGE_SIGMAS,
-        support=(float(PRIORS["H0"].low), float(PRIORS["H0"].high)),
+
+def generate_catalog_dataset(*, seed: int, num_samples: int) -> xr.Dataset:
+    """Draw one population and reduce it to polarization power via `GENERATOR`."""
+    metadata = PopulationMetadata(
+        name="madau-dickinson",
+        seed=seed,
+        num_samples=num_samples,
+        source_type="bns",
+        provenance={"notebook": "catalog_shot_noise"},
     )
-    h0_grid = uniform_grid(*h0_window, NPOINTS_1D)
-    fixed = {name: FIDUCIALS[name] for name in PRIORS if name != "H0"}
-    logpost = jax.block_until_ready(
-        log_density_fn({"H0": h0_grid}, fixed=fixed, **inputs.masked_model_kwargs())
+    population = simulate_population(POPULATION_GRAPH, metadata=metadata)
+    one_plus_z = 1.0 + population["redshift"]
+    samples = {
+        **population,
+        "detector_frame_mass_1": population["source_frame_mass_1"] * one_plus_z,
+        "detector_frame_mass_2": population["source_frame_mass_2"] * one_plus_z,
+    }
+    return catalog_to_dataset(
+        Catalog.from_generator(
+            samples, generator=GENERATOR, population_metadata=metadata
+        )
     )
-    return h0_grid, logpost
 
 
 # %% [markdown]
-# ## Loading the injection catalog
+# ## Building one sweep point's H0 posteriors
 #
-# Loaded once and reused as `injection_catalog` for every call to
-# `evaluate_h0_posterior` below -- only the proposal side changes between sweep
-# points.
+# The one substantive new helper. It generates one proposal catalog, then loops
+# `minimum_redshift` *inside*: reloading a fresh proposal per z_min value would
+# regenerate the same 64k catalog three times over, once per z_min sweep point,
+# for no reason -- generating once and evaluating three redshift windows against
+# it is what lets the largest size-sweep point double as the z_min sweep's whole
+# input.
+#
+# **Reusing the injection as its own proposal needs no sentinel.** When
+# `(seed, num_samples) == (INJECTION_SEED, INJECTION_SIZE)` the draw would be
+# bitwise identical to `injection_catalog` anyway, so the function returns that
+# object directly instead of regenerating it -- which is what makes the
+# self-matched reference's importance weights exactly zero-mismatch rather than
+# zero to rounding.
+#
+# **Memory budget.** At `f_max = 2048`, `df = 1.0 Hz`, the grid is $F = 2047$
+# bins, so one 64k catalog's `polarization_power` is
+# `2047 x 65536 x 8 B ~ 1.07 GB`. The invariant this function's return type
+# holds is **at most two such arrays resident at once** -- the injection (alive
+# for the whole notebook) and the proposal currently under evaluation, which
+# becomes unreachable the moment this function returns a `PosteriorPoint`
+# holding only small 1D arrays. Measured directly (per-sweep-point RSS tracing):
+# the baseline between sweep points stays flat at 2.3-3.3 GB across all five
+# sizes -- confirming no proposal leaks past its own point -- but the *transient*
+# peak *during* the largest ($N=65536$) point's `LogDensityFn` evaluation reaches
+# roughly 7-8 GB, well above a naive `1.07 (injection) + 1.07 (proposal numpy) +
+# 1.07 (proposal device) ~ 3.2 GB` estimate: chunked evaluation
+# (`CHUNK_SIZE` batches of the $H_0$ grid) keeps more than one band-masked
+# device copy of the proposal power alive at once while XLA's allocator holds
+# buffers rather than freeing them immediately. Smaller catalogs peak
+# proportionally lower. Plan for a peak in the single-digit GB range at
+# $N=65536$, not the ~3 GB the raw array arithmetic alone would suggest.
+#
+# **`LogDensityFn` recompiles at every sweep point.** The catalog's sample count
+# `N` is baked into the traced array shapes, so a new proposal size forces a new
+# trace; this is a consequence of the design, not an oversight to fix.
+
 
 # %%
-injection_catalog = load_run_catalog(INJECTION_CATALOG_PATH, label="injection")
+class PosteriorPoint(NamedTuple):
+    """One `(proposal, minimum_redshift)` evaluation's H0 posterior and diagnostics."""
+
+    h0_grid: jax.Array
+    log_posterior: jax.Array
+    relative_ess: float
+    """N_eff / N of the Monte-Carlo power sum at the fiducials (Kish ESS of
+    w_i * P_i, not of the importance weights alone -- see
+    power_weighted_relative_ess)."""
+    n_kept: int
+    """Proposal samples surviving the minimum_redshift truncation."""
+
+
+def evaluate_h0_posteriors(
+    injection_catalog: xr.Dataset,
+    *,
+    seed: int,
+    num_samples: int,
+    minimum_redshifts: Sequence[float],
+    network: Network,
+    snr: float,
+) -> dict[float, PosteriorPoint]:
+    """H0 log-posterior grids for one proposal catalog, at every requested z_min."""
+    proposal_catalog = (
+        injection_catalog
+        if (seed, num_samples) == (INJECTION_SEED, INJECTION_SIZE)
+        else generate_catalog_dataset(seed=seed, num_samples=num_samples)
+    )
+
+    results: dict[float, PosteriorPoint] = {}
+    for minimum_redshift in minimum_redshifts:
+        grid = replace(ANALYSIS_GRID, minimum_redshift=minimum_redshift)
+        proposal_config = resolve_proposal(
+            PROPOSAL_MIXTURE,
+            minimum_redshift=grid.minimum_redshift,
+            maximum_redshift=grid.maximum_redshift,
+            label=f"s{seed}-n{num_samples}",
+        )
+
+        inputs = prepare_inference_inputs(
+            injection_catalog,
+            proposal_catalog,
+            fiducials=FIDUCIALS,
+            proposal_config=proposal_config,
+            grid=grid,
+            detectors=network.detectors,
+        )
+        # importance_relative_ess (the estimator's own extras key) measures only
+        # the raw weight ratios, which are ~uniform whenever the proposal was
+        # drawn at the same fiducial cosmology as the target -- true for every
+        # catalog here, so it stays pinned near 1.0 regardless of catalog size
+        # or seed and says nothing about the mechanism this notebook is about.
+        # power_weighted_relative_ess folds in polarization_power, evaluated at
+        # the lowest surviving in-band frequency: the dominant 1/d_L(z)^2
+        # blowup is common to every frequency bin for a given sample, so any
+        # single bin gives a representative reading of the Monte-Carlo power
+        # sum's actual effective sample size.
+        catalog = inputs.estimator.catalog
+        target = inputs.estimator.population_fn(FIDUCIALS).compute_population_terms(
+            catalog.source_parameters
+        )
+        log_weights = importance_log_weights(
+            target,
+            proposal_log_prob=catalog.proposal_log_prob,
+            log_reference_distance=catalog.log_reference_distance,
+        )
+        relative_ess = float(
+            power_weighted_relative_ess(log_weights, catalog.polarization_power[0])
+        )
+        n_kept = int(inputs.proposal.sizes["sample"])
+
+        model = partial(
+            gwb_spectral_density_model,
+            spectral_density_fn=inputs.estimator,
+            priors=PRIORS,
+        )
+        log_density_fn = LogDensityFn(model, chunk_size=CHUNK_SIZE)
+
+        h0_window = fisher_window(
+            FIDUCIALS["H0"],
+            FIDUCIALS["H0"] / snr,
+            sigmas=COVERAGE_SIGMAS,
+            support=(float(PRIORS["H0"].low), float(PRIORS["H0"].high)),
+        )
+        h0_grid = uniform_grid(*h0_window, NPOINTS_1D)
+        fixed = {name: FIDUCIALS[name] for name in PRIORS if name != "H0"}
+        logpost = jax.block_until_ready(
+            log_density_fn({"H0": h0_grid}, fixed=fixed, **inputs.masked_model_kwargs())
+        )
+        results[minimum_redshift] = PosteriorPoint(
+            h0_grid=h0_grid,
+            log_posterior=logpost,
+            relative_ess=relative_ess,
+            n_kept=n_kept,
+        )
+    return results
+
+
+# %% [markdown]
+# ## Generating the injection catalog
+#
+# Generated once, at `INJECTION_SEED`/`INJECTION_SIZE`, and reused as
+# `injection_catalog` for every call to `evaluate_h0_posteriors` below -- only
+# the proposal side is regenerated per sweep point. It is the one array kept
+# alive for the whole notebook (see the memory-budget note above).
+
+# %%
+injection_catalog = generate_catalog_dataset(
+    seed=INJECTION_SEED, num_samples=INJECTION_SIZE
+)
 
 NETWORK: Network = Network(
     DEFAULT_NETWORK,
@@ -351,10 +656,15 @@ print(f"Default network: {NETWORK.label} ({', '.join(NETWORK.detectors)})")
 # including the z_min sweep, whose own SNR does shift slightly with the cutoff, but
 # only the grid's *width* depends on it, and `COVERAGE_SIGMAS=15` already leaves
 # ample margin against that small mismatch.
+#
+# `compute_network_snrs` takes the in-memory `injection_catalog` directly --
+# `astrogwb.paper.snr` widened its first parameter to accept either a path or an
+# already-loaded dataset for exactly this notebook, since there is no file to
+# point it at.
 
 # %%
 SNR_TABLE = compute_network_snrs(
-    INJECTION_CATALOG_PATH, [NETWORK], FIDUCIALS, grid=ANALYSIS_GRID
+    injection_catalog, [NETWORK], FIDUCIALS, grid=ANALYSIS_GRID
 )
 snr = float(SNR_TABLE["snr"].iloc[0])
 print(f"SNR ({NETWORK.label}): {snr:.1f}")
@@ -363,61 +673,98 @@ SNR_TABLE
 # %% [markdown]
 # ## Zero-mismatch reference curve
 #
-# `evaluate_h0_posterior` called with `proposal_path = INJECTION_CATALOG_PATH`: the
-# same file plays both roles, so the importance weights carry zero catalog mismatch
-# and the posterior sits on the fiducial line up to numerical noise. Computed once
-# here and reused as a fixed dashed reference line in **both** figures below.
-# Re-evaluating it at each swept `z_min` would show nothing new: with the same file
-# on both sides, the residual is at the bit level regardless of `minimum_redshift`.
+# `evaluate_h0_posteriors` called with `seed=INJECTION_SEED,
+# num_samples=INJECTION_SIZE`: that combination reuses `injection_catalog` as
+# its own proposal (see above), so the importance weights carry zero catalog
+# mismatch and the posterior sits close to the fiducial line, up to the
+# injection's own finite-N noise.
+#
+# Its `relative_ess` (the power-weighted diagnostic, see `PosteriorPoint`) comes
+# out **statistically indistinguishable** from the independently drawn
+# `N=INJECTION_SIZE` proposal in the sweep below (~0.38 either way): this
+# diagnostic reflects each catalog's own intrinsic Monte-Carlo noise, present
+# whether or not the proposal matches the injection, not the importance-weight
+# mismatch between the two. What differs is the recovered $H_0$ shift itself --
+# the self-matched curve's MAP sits almost exactly on the fiducial (zero weight
+# mismatch by construction), while the independently drawn catalog's does not,
+# because it combines two *separate* finite-$N$ noisy realizations. Evaluated
+# only at `ANALYSIS_GRID`'s fixed `minimum_redshift`: the z_min sweep below
+# already shows how `relative_ess` moves with the cutoff, via the independently
+# drawn catalogs, so re-evaluating this self-matched curve at every z_min would
+# not add anything past that.
 
 # %%
-REFERENCE_GRID, REFERENCE_LOGPOST = evaluate_h0_posterior(
+REFERENCE_POINT = evaluate_h0_posteriors(
     injection_catalog,
-    INJECTION_CATALOG_PATH,
-    minimum_redshift=ANALYSIS_GRID.minimum_redshift,
+    seed=INJECTION_SEED,
+    num_samples=INJECTION_SIZE,
+    minimum_redshifts=(ANALYSIS_GRID.minimum_redshift,),
     network=NETWORK,
     snr=snr,
-)
+)[ANALYSIS_GRID.minimum_redshift]
+print(f"self-matched relative_ess: {REFERENCE_POINT.relative_ess:.6f}")
 
 # %% [markdown]
 # ## Figure 1 -- H0 posterior vs. proposal catalog size
 #
-# ≙ `H0-catalog-size-sweep.pdf`. `minimum_redshift` is held fixed at `0.3`; only the
-# proposal catalog's sample count varies. **Shot noise does not shrink monotonically
-# in a single realization** -- the curves below are not expected to nest tightest to
-# widest with $N$, and a "worse" outcome at a larger $N$ is not a bug.
+# ≙ `H0-catalog-size-sweep.pdf`. `minimum_redshift` is held fixed at `0.3`; only
+# the proposal catalog's sample count and seed vary. **Shot noise does not
+# shrink monotonically in a single realization** -- the curves below are not
+# expected to nest tightest to widest with $N$, and a "worse" outcome at a
+# larger $N$ is not a bug.
+#
+# The loop below also fills `ZMIN_SWEEP_RESULTS`: the largest sweep point
+# (`N=INJECTION_SIZE`) is evaluated at every `ZMIN_SWEEP_VALUES` entry in one
+# call, since `evaluate_h0_posteriors` generates that catalog once and reuses it
+# across `minimum_redshift` -- Figure 3 below reads its result directly rather
+# than generating a seventh catalog.
 
 # %%
-_size_colors = combo_colors(len(SIZE_SWEEP_PROPOSAL_PATHS))
+_size_colors = combo_colors(len(PROPOSAL_SEEDS))
 
-SIZE_SWEEP_RESULTS: dict[int, tuple[jax.Array, jax.Array]] = {}
-for n_samples, proposal_path in SIZE_SWEEP_PROPOSAL_PATHS.items():
+SIZE_SWEEP_RESULTS: dict[int, PosteriorPoint] = {}
+ZMIN_SWEEP_RESULTS: dict[float, PosteriorPoint] = {}
+for n_samples, seed in PROPOSAL_SEEDS.items():
+    minimum_redshifts = (
+        ZMIN_SWEEP_VALUES
+        if n_samples == INJECTION_SIZE
+        else (ANALYSIS_GRID.minimum_redshift,)
+    )
     start = time.perf_counter()
-    SIZE_SWEEP_RESULTS[n_samples] = evaluate_h0_posterior(
+    points = evaluate_h0_posteriors(
         injection_catalog,
-        proposal_path,
-        minimum_redshift=ANALYSIS_GRID.minimum_redshift,
+        seed=seed,
+        num_samples=n_samples,
+        minimum_redshifts=minimum_redshifts,
         network=NETWORK,
         snr=snr,
     )
-    print(f"N={n_samples}: {time.perf_counter() - start:.2f}s")
+    print(f"N={n_samples} (s{seed}): {time.perf_counter() - start:.2f}s")
+    SIZE_SWEEP_RESULTS[n_samples] = points[ANALYSIS_GRID.minimum_redshift]
+    if n_samples == INJECTION_SIZE:
+        ZMIN_SWEEP_RESULTS = points
 
 fig_size_sweep, ax = plt.subplots()
-for (n_samples, (grid, logpost)), color in zip(
+for (n_samples, point), color in zip(
     SIZE_SWEEP_RESULTS.items(), _size_colors, strict=True
 ):
-    grid_np = np.asarray(grid)
-    density = safe_exponentiate(logpost)
+    grid_np = np.asarray(point.h0_grid)
+    density = safe_exponentiate(point.log_posterior)
     density /= np.trapezoid(density, grid_np)
-    ax.plot(grid_np, density, label=f"N={n_samples}", color=color)
+    ax.plot(
+        grid_np,
+        density,
+        label=f"N={n_samples} (s{PROPOSAL_SEEDS[n_samples]})",
+        color=color,
+    )
 
-_reference_grid_np = np.asarray(REFERENCE_GRID)
-_reference_density = safe_exponentiate(REFERENCE_LOGPOST)
+_reference_grid_np = np.asarray(REFERENCE_POINT.h0_grid)
+_reference_density = safe_exponentiate(REFERENCE_POINT.log_posterior)
 _reference_density /= np.trapezoid(_reference_density, _reference_grid_np)
 ax.plot(
     _reference_grid_np,
     _reference_density,
-    label="self-matched (N=32768)",
+    label=f"self-matched (N={INJECTION_SIZE})",
     color=str(TRUTH["color"]),
     linestyle="--",
     linewidth=TRUTH["linewidth"],
@@ -430,31 +777,36 @@ fig_size_sweep
 
 # %% [markdown]
 # `SIZE_SHIFT_TABLE`: MAP shift from the fiducial, in units of the grid posterior's
-# own standard deviation, for each sweep point plus the self-matched reference.
+# own standard deviation, plus the measured effective sample size (`n_eff`,
+# `rel_ess`), for each sweep point and the self-matched reference.
 
 # %%
 _size_rows: list[dict[str, object]] = []
-for n_samples, (grid, logpost) in SIZE_SWEEP_RESULTS.items():
-    h0_map, _, sigma = posterior_summary(grid, logpost)
+for n_samples, point in SIZE_SWEEP_RESULTS.items():
+    h0_map, _, sigma = posterior_summary(point.h0_grid, point.log_posterior)
     _size_rows.append(
         {
-            "label": f"N={n_samples}",
+            "label": f"N={n_samples} (s{PROPOSAL_SEEDS[n_samples]})",
             "h0_map": h0_map,
             "shift": h0_map - FIDUCIALS["H0"],
             "sigma": sigma,
             "shift_sigma": (h0_map - FIDUCIALS["H0"]) / sigma,
+            "rel_ess": point.relative_ess,
+            "n_eff": point.relative_ess * point.n_kept,
         }
     )
 _reference_h0_map, _, _reference_sigma = posterior_summary(
-    REFERENCE_GRID, REFERENCE_LOGPOST
+    REFERENCE_POINT.h0_grid, REFERENCE_POINT.log_posterior
 )
 _size_rows.append(
     {
-        "label": "self-matched (N=32768)",
+        "label": f"self-matched (N={INJECTION_SIZE})",
         "h0_map": _reference_h0_map,
         "shift": _reference_h0_map - FIDUCIALS["H0"],
         "sigma": _reference_sigma,
         "shift_sigma": (_reference_h0_map - FIDUCIALS["H0"]) / _reference_sigma,
+        "rel_ess": REFERENCE_POINT.relative_ess,
+        "n_eff": REFERENCE_POINT.relative_ess * REFERENCE_POINT.n_kept,
     }
 )
 SIZE_SHIFT_TABLE = pd.DataFrame(_size_rows).assign(
@@ -469,12 +821,12 @@ SIZE_SHIFT_TABLE
 # ≙ `H0-relative-bias-vs-size.pdf`. The same `SIZE_SHIFT_TABLE` values plotted
 # against `N` instead of overlaid as posterior curves: relative bias
 # `(H0_MAP - H0_fid)/H0_fid`, error bars at `sigma_H0/H0_fid`. As in Figure 1,
-# three points from one realization each is not enough to fit a shot-noise
-# scaling law -- this is a visual comparison against the self-matched floor at
-# N=32768, not a fitted trend.
+# five points from one independent realization each is not enough to fit a
+# shot-noise scaling law -- this is a visual comparison against the
+# self-matched floor, not a fitted trend.
 
 # %%
-_size_ns = np.asarray(list(SIZE_SWEEP_PROPOSAL_PATHS), dtype=np.float64)
+_size_ns = np.asarray(list(PROPOSAL_SEEDS), dtype=np.float64)
 _size_sweep_rows = SIZE_SHIFT_TABLE.iloc[: len(_size_ns)]
 _reference_row = SIZE_SHIFT_TABLE.iloc[-1]
 
@@ -490,13 +842,13 @@ ax.errorbar(
     label="size sweep",
 )
 ax.errorbar(
-    [32768],
+    [INJECTION_SIZE],
     [_reference_row["rel_bias"]],
     yerr=[_reference_row["rel_sigma"]],
     fmt="D",
     capsize=3,
     color=str(TRUTH["color"]),
-    label="self-matched (N=32768)",
+    label=f"self-matched (N={INJECTION_SIZE})",
 )
 ax.axhline(0.0, **TRUTH)
 ax.set_xscale("log")
@@ -510,38 +862,27 @@ fig_size_relative_bias
 # ## Figure 3 -- H0 posterior vs. redshift cutoff
 #
 # ≙ `H0-redshift-cutoff-sweep.pdf`. The proposal catalog is held fixed at
-# `md-imrphenom-s42-n32768.h5`; only `minimum_redshift` varies. No new SNR
-# computation is needed -- `fisher_window` reuses the `snr` computed above, and only
-# `minimum_redshift` changes per grid.
+# `N=INJECTION_SIZE` (seed `PROPOSAL_SEEDS[INJECTION_SIZE]`); only
+# `minimum_redshift` varies. No new catalog generation or SNR computation is
+# needed here: `ZMIN_SWEEP_RESULTS` was already filled by the Figure 1 loop
+# above, and `fisher_window` reuses the `snr` computed earlier.
 
 # %%
 _zmin_colors = combo_colors(len(ZMIN_SWEEP_VALUES))
 
-ZMIN_SWEEP_RESULTS: dict[float, tuple[jax.Array, jax.Array]] = {}
-for minimum_redshift in ZMIN_SWEEP_VALUES:
-    start = time.perf_counter()
-    ZMIN_SWEEP_RESULTS[minimum_redshift] = evaluate_h0_posterior(
-        injection_catalog,
-        ZMIN_SWEEP_PROPOSAL_PATH,
-        minimum_redshift=minimum_redshift,
-        network=NETWORK,
-        snr=snr,
-    )
-    print(f"z_min={minimum_redshift}: {time.perf_counter() - start:.2f}s")
-
 fig_zmin_sweep, ax = plt.subplots()
-for (minimum_redshift, (grid, logpost)), color in zip(
+for (minimum_redshift, point), color in zip(
     ZMIN_SWEEP_RESULTS.items(), _zmin_colors, strict=True
 ):
-    grid_np = np.asarray(grid)
-    density = safe_exponentiate(logpost)
+    grid_np = np.asarray(point.h0_grid)
+    density = safe_exponentiate(point.log_posterior)
     density /= np.trapezoid(density, grid_np)
     ax.plot(grid_np, density, label=f"z_min={minimum_redshift}", color=color)
 
 ax.plot(
     _reference_grid_np,
     _reference_density,
-    label="self-matched (z_min=0.3)",
+    label=f"self-matched (z_min={ANALYSIS_GRID.minimum_redshift})",
     color=str(TRUTH["color"]),
     linestyle="--",
     linewidth=TRUTH["linewidth"],
@@ -558,8 +899,8 @@ fig_zmin_sweep
 
 # %%
 _zmin_rows: list[dict[str, object]] = []
-for minimum_redshift, (grid, logpost) in ZMIN_SWEEP_RESULTS.items():
-    h0_map, _, sigma = posterior_summary(grid, logpost)
+for minimum_redshift, point in ZMIN_SWEEP_RESULTS.items():
+    h0_map, _, sigma = posterior_summary(point.h0_grid, point.log_posterior)
     _zmin_rows.append(
         {
             "label": f"z_min={minimum_redshift}",
@@ -567,15 +908,19 @@ for minimum_redshift, (grid, logpost) in ZMIN_SWEEP_RESULTS.items():
             "shift": h0_map - FIDUCIALS["H0"],
             "sigma": sigma,
             "shift_sigma": (h0_map - FIDUCIALS["H0"]) / sigma,
+            "rel_ess": point.relative_ess,
+            "n_eff": point.relative_ess * point.n_kept,
         }
     )
 _zmin_rows.append(
     {
-        "label": "self-matched (z_min=0.3)",
+        "label": f"self-matched (z_min={ANALYSIS_GRID.minimum_redshift})",
         "h0_map": _reference_h0_map,
         "shift": _reference_h0_map - FIDUCIALS["H0"],
         "sigma": _reference_sigma,
         "shift_sigma": (_reference_h0_map - FIDUCIALS["H0"]) / _reference_sigma,
+        "rel_ess": REFERENCE_POINT.relative_ess,
+        "n_eff": REFERENCE_POINT.relative_ess * REFERENCE_POINT.n_kept,
     }
 )
 ZMIN_SHIFT_TABLE = pd.DataFrame(_zmin_rows)
@@ -592,22 +937,22 @@ if SAVE_OUTPUTS:
     np.savez(
         GRID_DIR / "catalog_shot_noise.npz",
         reference_grid=_reference_grid_np,
-        reference_logpost=np.asarray(REFERENCE_LOGPOST),
+        reference_logpost=np.asarray(REFERENCE_POINT.log_posterior),
         **{
-            f"size_grid_{n_samples}": np.asarray(grid)
-            for n_samples, (grid, _) in SIZE_SWEEP_RESULTS.items()
+            f"size_grid_{n_samples}": np.asarray(point.h0_grid)
+            for n_samples, point in SIZE_SWEEP_RESULTS.items()
         },
         **{
-            f"size_logpost_{n_samples}": np.asarray(logpost)
-            for n_samples, (_, logpost) in SIZE_SWEEP_RESULTS.items()
+            f"size_logpost_{n_samples}": np.asarray(point.log_posterior)
+            for n_samples, point in SIZE_SWEEP_RESULTS.items()
         },
         **{
-            f"zmin_grid_{minimum_redshift}": np.asarray(grid)
-            for minimum_redshift, (grid, _) in ZMIN_SWEEP_RESULTS.items()
+            f"zmin_grid_{minimum_redshift}": np.asarray(point.h0_grid)
+            for minimum_redshift, point in ZMIN_SWEEP_RESULTS.items()
         },
         **{
-            f"zmin_logpost_{minimum_redshift}": np.asarray(logpost)
-            for minimum_redshift, (_, logpost) in ZMIN_SWEEP_RESULTS.items()
+            f"zmin_logpost_{minimum_redshift}": np.asarray(point.log_posterior)
+            for minimum_redshift, point in ZMIN_SWEEP_RESULTS.items()
         },
     )
     (GRID_DIR / "catalog_shot_noise.json").write_text(
@@ -618,7 +963,11 @@ if SAVE_OUTPUTS:
                 "npoints_1d": NPOINTS_1D,
                 "network": NETWORK.name,
                 "snr": snr,
-                "size_sweep_n": list(SIZE_SWEEP_PROPOSAL_PATHS),
+                "approximant": WAVEFORM_APPROXIMANT,
+                "f_max": ANALYSIS_GRID.f_max,
+                "injection_seed": INJECTION_SEED,
+                "injection_size": INJECTION_SIZE,
+                "proposal_seeds": PROPOSAL_SEEDS,
                 "zmin_sweep_values": list(ZMIN_SWEEP_VALUES),
             },
             indent=2,
@@ -644,7 +993,8 @@ if SAVE_OUTPUTS:
         caption=(
             "Recovered $H_0$ MAP shift from the fiducial value, in units of the "
             "grid posterior's own standard deviation, as the proposal catalog "
-            r"size grows at fixed $z_{\rm min}=0.3$."
+            rf"size grows at fixed $z_{{\rm min}}={ANALYSIS_GRID.minimum_redshift}$, "
+            "each point an independent draw at its own seed."
         ),
         label="tab:catalog_shot_noise_size_sweep",
     )
@@ -655,7 +1005,7 @@ if SAVE_OUTPUTS:
         caption=(
             "Recovered $H_0$ MAP shift from the fiducial value, in units of the "
             "grid posterior's own standard deviation, as the redshift cutoff "
-            "moves toward $z=0$ at fixed $N=32768$."
+            rf"moves toward $z=0$ at fixed $N={INJECTION_SIZE}$."
         ),
         label="tab:catalog_shot_noise_zmin_sweep",
     )

@@ -40,3 +40,26 @@ def relative_ess(log_weights: jax.Array) -> jax.Array:
         - logsumexp(2.0 * log_weights, axis=-1)
     )
     return jnp.exp(log_relative_ess)
+
+
+def power_weighted_relative_ess(
+    log_weights: jax.Array, polarization_power: jax.Array
+) -> jax.Array:
+    r"""Effective sample size of the Monte-Carlo power sum, not of the weights alone.
+
+    ``spectral_density`` estimates each frequency bin as a weighted mean
+    ``mean_i(w_i P_{f,i})``, not merely a mean of ``w_i``. Whenever
+    ``polarization_power`` is itself heavy-tailed -- e.g. :math:`1/d_L(z)^2`
+    blowing up as a source approaches the redshift window's inner edge -- a
+    handful of high-power samples can dominate that sum even when the
+    importance weights :math:`w_i` are close to uniform. ``relative_ess``
+    alone is blind to this: it never sees ``polarization_power``. Folding it
+    in by treating :math:`w_i P_{f,i}` as the effective weight recovers the
+    quantity that actually governs the sum's Monte-Carlo noise.
+
+    ``log_weights`` broadcasts against ``polarization_power``'s trailing
+    (sample) axis, so passing the full ``(frequency, sample)`` array returns
+    one effective sample size per frequency bin, and passing a single
+    frequency slice (shape ``(sample,)``) returns a scalar.
+    """
+    return relative_ess(log_weights + jnp.log(polarization_power))
