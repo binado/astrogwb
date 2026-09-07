@@ -64,6 +64,7 @@ from astrogwb.paper.config.constants import (
     FIDUCIALS,
     NETWORK_DETECTORS,
     NETWORK_EXPERIMENT,
+    PARAMETER_LABELS,
 )
 from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.inference import prepare_inference_inputs
@@ -133,11 +134,6 @@ if DEBUG:
 SAVE_OUTPUTS: bool = True
 GRID_DIR = Path("grids")
 FIGURE_DIR = Path("figures")
-
-# Axis labels, matching scripts/mcmc_cosmological_parameters.py.
-H0_LABEL = r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
-OMEGA_M_LABEL = r"$\Omega_m$"
-LOCAL_MERGER_RATE_LABEL = r"$\mathcal{R}_0\,[\mathrm{Gpc^{-3}\,yr^{-1}}]$"
 
 # %% [markdown]
 # ## Detector networks and fiducials
@@ -370,7 +366,7 @@ for network, color, linestyle in zip(NETWORKS, _h0_colors, _h0_linestyles, stric
     density /= np.trapezoid(density, grid)
     ax.plot(grid, density, label=network.label, color=color, linestyle=linestyle)
 ax.axvline(FIDUCIALS["H0"], **TRUTH)
-ax.set(xlabel=H0_LABEL, ylabel="Posterior density")
+ax.set(xlabel=PARAMETER_LABELS["H0"], ylabel="Posterior density")
 ax.legend(**DETECTOR_COMPARISON_LEGEND)
 fig_h0_by_detector.tight_layout()
 fig_h0_by_detector
@@ -467,7 +463,7 @@ H0_MERGER_RATE_LOGPOST = jax.block_until_ready(
 fig_h0_omega_m_corner = plot_corner_for_posterior_grid(
     tuple(H0_OMEGA_M_GRIDS.values()),
     H0_OMEGA_M_LOGPOST,
-    labels=[H0_LABEL, OMEGA_M_LABEL],
+    labels=[PARAMETER_LABELS["H0"], PARAMETER_LABELS["Omega_m"]],
     truths=[FIDUCIALS["H0"], FIDUCIALS["Omega_m"]],
     smooth=1.0,
 )
@@ -477,7 +473,7 @@ fig_h0_omega_m_corner
 fig_h0_merger_rate_corner = plot_corner_for_posterior_grid(
     tuple(H0_MERGER_RATE_GRIDS.values()),
     H0_MERGER_RATE_LOGPOST,
-    labels=[H0_LABEL, LOCAL_MERGER_RATE_LABEL],
+    labels=[PARAMETER_LABELS["H0"], PARAMETER_LABELS["local_merger_rate"]],
     truths=[FIDUCIALS["H0"], FIDUCIALS["local_merger_rate"]],
     smooth=1.0,
 )
@@ -514,7 +510,7 @@ ax.plot(
     label=r"$H_0$ ($\mathcal{R}_0$ marginalized, grid quadrature)",
 )
 ax.axvline(FIDUCIALS["H0"], **TRUTH)
-ax.set(xlabel=H0_LABEL, ylabel="Posterior density")
+ax.set(xlabel=PARAMETER_LABELS["H0"], ylabel="Posterior density")
 ax.legend(**MERGER_RATE_LEGEND)
 fig_h0_merger_rate_priors.tight_layout()
 fig_h0_merger_rate_priors

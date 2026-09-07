@@ -15,6 +15,7 @@ from astrogwb.paper.config.constants import (
     FIDUCIALS,
     NETWORK_DETECTORS,
     NETWORK_EXPERIMENT,
+    PARAMETER_LABELS,
 )
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import assemble_run
@@ -38,3 +39,8 @@ def test_network_detectors_match_each_run_config() -> None:
 
 def test_network_detectors_keys_match_detector_network_runs() -> None:
     assert tuple(NETWORK_DETECTORS) == DETECTOR_NETWORK_RUNS
+
+
+def test_parameter_labels_keys_are_known_fiducials() -> None:
+    """A label for a renamed/removed parameter would be exactly this failure mode."""
+    assert set(PARAMETER_LABELS) <= set(FIDUCIALS)
