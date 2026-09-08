@@ -11,15 +11,12 @@ would.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from functools import partial
 from pathlib import Path
 
 import numpy as np
 
 from astrogwb.catalog import Catalog, PopulationMetadata
 from astrogwb.populations import (
-    BNS_HIDDEN_SITES,
-    derive_source_columns,
     population_model,
 )
 from astrogwb.waveform import PolarizationPowerGenerator
@@ -50,12 +47,9 @@ def source_parameters(
     population_params: Mapping[str, float] | None = None,
 ) -> dict[str, np.ndarray]:
     """Complete a redshift ladder into every column the population declares."""
-    model = partial(
-        population_model(model_name), **(model_kwargs or PAPER_MODEL_KWARGS)
-    )
+    model = population_model(model_name)(**model_kwargs or PAPER_MODEL_KWARGS)
     ones = np.ones_like(redshift)
-    columns = derive_source_columns(
-        model,
+    columns = model.derive_sources(
         population_params or PAPER_POPULATION_PARAMS,
         {
             "redshift": redshift,
@@ -87,7 +81,7 @@ def make_catalog(
     model_name: str = PAPER_MODEL,
     model_kwargs: Mapping[str, float | int] | None = None,
     population_params: Mapping[str, float] | None = None,
-    hidden_sites: frozenset[str] = BNS_HIDDEN_SITES,
+    density_sites: tuple[str, ...] = ("redshift",),
     extra_source_parameters: Mapping[str, np.ndarray] | None = None,
 ) -> Catalog:
     """Build a valid paper-format catalog over a chosen redshift ladder."""
@@ -135,7 +129,7 @@ def make_catalog(
         _model_name=model_name,
         _model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
         _population_params=dict(population_params or PAPER_POPULATION_PARAMS),
-        _hidden_sites=hidden_sites,
+        _density_sites=density_sites,
     )
 
 

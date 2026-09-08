@@ -9,7 +9,7 @@ layers under ``config/catalogs/`` -- a shared ``base/`` and one
 This file describes a catalog only until it exists. Afterwards the *file* is
 authoritative: it records its own registered population model, that model's
 construction settings, the hyperparameters it was drawn at, and the density
-factors excluded from importance weighting. Nothing here is re-read at analysis
+factors included in importance weighting. Nothing here is re-read at analysis
 time, and no run config restates any of it, so there is nothing for the two to
 disagree about.
 
@@ -78,11 +78,8 @@ class PopulationConfig(BaseModel):
     not affect the normalized source draws, because the observation's total
     rate is reconstructed from it.
 
-    ``hidden_sites`` names the source-density factors left out of the
-    importance weights on the grounds that they cancel. It is committed here,
-    and recorded in the file, rather than assumed: a catalog whose proposal
-    density excluded the mass factors, reweighted against a target that
-    includes them, gives silently wrong weights with no shape error anywhere.
+    Density factors and source outputs are declared by the registered
+    population class. Generation records its effective density selection.
     """
 
     model_config = _STRICT
@@ -90,7 +87,6 @@ class PopulationConfig(BaseModel):
     model: str
     kwargs: dict[str, float | int] = Field(default_factory=dict)
     params: dict[str, float]
-    hidden_sites: tuple[str, ...] = ()
 
 
 class CatalogDefinition(BaseModel):

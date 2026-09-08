@@ -2,7 +2,7 @@
 
 These files describe a catalog only until it exists. Afterwards the *file* is
 authoritative -- it records its own model, construction settings,
-hyperparameters and excluded density factors -- so nothing here is re-read at
+hyperparameters and included density factors -- so nothing here is re-read at
 analysis time and no run config restates any of it. What is left to check is
 that every committed declaration can actually be built.
 
@@ -14,10 +14,10 @@ eight parameters the catalog was drawn at.
 
 from __future__ import annotations
 
-from functools import partial
 from pathlib import Path
 
 import pytest
+from numpyro import handlers
 from repo import REPO_ROOT
 
 from astrogwb.paper.config.catalogs import (
@@ -29,7 +29,6 @@ from astrogwb.paper.config.catalogs import (
 from astrogwb.populations import (
     known_population_models,
     population_model,
-    population_sites,
 )
 
 
@@ -55,21 +54,23 @@ def test_every_committed_catalog_can_build_its_population() -> None:
     """
     for name, definition in _definitions().items():
         population = definition.population
-        model = partial(population_model(population.model), **population.kwargs)
-        sites = population_sites(model, population.params)
-        assert "redshift" in sites.stochastic, name
-        assert "luminosity_distance" in sites.deterministic, name
+        model = population_model(population.model)(**population.kwargs)
+        with handlers.seed(rng_seed=0):
+            trace = handlers.trace(model).get_trace(population.params)
+        assert trace["redshift"]["type"] == "sample", name
+        assert trace["luminosity_distance"]["type"] == "deterministic", name
 
 
-def test_every_excluded_factor_is_a_real_stochastic_site() -> None:
-    """A misspelled exclusion would leave the factor in the weights silently."""
+def test_every_declared_density_factor_is_a_real_sample_site() -> None:
     for name, definition in _definitions().items():
-        population = definition.population
-        model = partial(population_model(population.model), **population.kwargs)
-        sites = population_sites(model, population.params)
-        unknown = sorted(set(population.hidden_sites) - sites.stochastic)
-        assert not unknown, f"{name}: {unknown}"
-        assert "redshift" not in population.hidden_sites, name
+        model = population_model(definition.population.model)(
+            **definition.population.kwargs
+        )
+        with handlers.seed(rng_seed=0):
+            trace = handlers.trace(model).get_trace(definition.population.params)
+        for site in model.density_sites:
+            assert trace[site]["type"] == "sample", name
+        assert "redshift" in model.density_sites, name
 
 
 def test_every_catalog_shares_one_generation_support() -> None:

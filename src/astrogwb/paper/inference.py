@@ -51,16 +51,13 @@ from astrogwb.paper.catalogs import validate_matching_frequency_grids
 from astrogwb.paper.config.mcmc import AnalysisGrid, RunConfig
 from astrogwb.populations import (
     TOTAL_MERGER_RATE_SITE,
-    PopulationModel,
+    Population,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
-    population_log_probs,
     population_model,
-    population_sites,
     required_deterministic,
-    select_stochastic_values,
 )
 from astrogwb.sampling import (
     SpectralDensityFn,
@@ -146,19 +143,15 @@ class AmplitudeMarginalization(NamedTuple):
     """Quadrature nodes the marginalization integral is evaluated on."""
 
 
-def target_population_model(config: RunConfig) -> PopulationModel:
+def target_population_model(config: RunConfig) -> Population:
     """Resolve and bind the population the run's hyperparameters describe.
 
-    Bound once per run and reused for every evaluation: the estimator carries
-    the callable as *static* pytree metadata, and a ``functools.partial`` hashes
-    by identity, so a fresh one per step would retrace the whole model.
+    Constructed once per run and reused as static pytree metadata in the
+    estimator. Hyperparameters remain arguments to the population methods.
     """
     grid = config.analysis_grid
-    return partial(
-        population_model(config.analysis.population_model),
-        z_min=grid.minimum_redshift,
-        z_max=grid.maximum_redshift,
-        n_grid=grid.n_grid,
+    return population_model(config.analysis.population_model)(
+        z_min=grid.minimum_redshift, z_max=grid.maximum_redshift, n_grid=grid.n_grid
     )
 
 
@@ -232,9 +225,8 @@ def catalog_total_merger_rate(catalog: Catalog, *, label: str) -> jax.Array:
     """
     model = catalog.get_population_model()
     params = catalog.population_params
-    sites = population_sites(model, params)
-    values = select_stochastic_values(catalog.source_parameters, sites, label=label)
-    _, trace = population_log_probs(model, params, values)
+    values = catalog.source_parameters
+    _, trace = model.evaluate(params, values)
     return required_deterministic(trace, TOTAL_MERGER_RATE_SITE, ndim=0, label=label)
 
 
@@ -244,8 +236,7 @@ def prepare_inference_inputs(
     *,
     grid: AnalysisGrid,
     detectors: Sequence[str],
-    target_model: PopulationModel,
-    target_params: Mapping[str, float],
+    target_model: Population,
     average_mode: AverageMode = "analytic_inclination",
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs.
@@ -254,13 +245,6 @@ def prepare_inference_inputs(
     uses. It belongs here rather than at the model-building sites because the
     estimator owns it: once the catalog is bound, the model itself never sees
     a polarization power array to average.
-
-    ``target_params`` is a representative hyperparameter point -- the run's
-    fiducials -- used only to discover which sites the target model declares
-    and to check they agree with the proposal's. It is *not* the point the
-    spectrum is evaluated at; sampled parameters arrive through the estimator's
-    own call. It is needed because the target reads parameters the catalog does
-    not record: the propagation law is target-side only.
     """
     observation = prepare_observation(injection, grid=grid)
 
@@ -320,7 +304,6 @@ def prepare_inference_inputs(
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         proposal_catalog,
         model=target_model,
-        target_params=target_params,
         average_mode=average_mode,
         frequency_mask=band_mask,
     )

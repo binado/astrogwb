@@ -13,23 +13,7 @@
 
 [population]
 model = "bns_md_cosmological"
-# Source-density factors left out of the importance weights because they are
-# identical between every target and every proposal built from this population,
-# so their ratio is one. Redshift is deliberately absent and is rejected if
-# listed: it is the factor the weights exist to correct.
-#
-# This travels with the catalog file. A catalog whose proposal density excluded
-# the mass factors, reweighted against a target that includes them, gives
-# silently wrong weights with no shape error anywhere -- which is why the set is
-# recorded rather than assumed.
-hidden_sites = [
-  "source_frame_mass_1",
-  "source_frame_mass_2",
-  "spin_1z",
-  "spin_2z",
-  "lambda_1",
-  "lambda_2",
-]
+# Density factors and source outputs are declared by the population class.
 
 # Construction settings: the redshift window and the grid the cosmology
 # integrals and the density normalization run on. Narrowing the window to an

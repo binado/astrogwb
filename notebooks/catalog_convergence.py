@@ -47,7 +47,6 @@
 # %%
 import os
 import warnings
-from functools import partial
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -80,15 +79,10 @@ from astrogwb.gwb import (
 )
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.populations import (
-    BNS_HIDDEN_SITES,
     TOTAL_MERGER_RATE_SITE,
-    bns_md_cosmological,
-    bns_md_modified_propagation,
-    draw_population,
-    population_log_probs,
-    population_sites,
+    BNSMadauDickinson,
+    BNSMadauDickinsonModifiedPropagation,
     required_deterministic,
-    select_stochastic_values,
 )
 from astrogwb.waveform import AnalyticInspiralGenerator
 
@@ -199,7 +193,7 @@ OMEGA_CATALOG_PATH = NOTEBOOK_DIR / (
 # %% [markdown]
 # ## The source population
 #
-# One declaration, used twice: `draw_population` samples from it, and the
+# One declaration, used twice: `Population.sample` samples from it, and the
 # importance weights below evaluate the *same* model's density at the stored
 # samples. That is what makes this catalog exactly its own proposal
 # ($\log w \equiv 0$ at the fiducials) rather than approximately so.
@@ -247,12 +241,12 @@ POPULATION_MODEL_KWARGS: dict[str, float | int] = {
 
 def population_model_fn():
     """The generating population, with its construction settings bound."""
-    return partial(bns_md_cosmological, **POPULATION_MODEL_KWARGS)
+    return BNSMadauDickinson(**POPULATION_MODEL_KWARGS)
 
 
 def target_model_fn():
     """The target population: the same sources under modified propagation."""
-    return partial(bns_md_modified_propagation, z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID)
+    return BNSMadauDickinsonModifiedPropagation(z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID)
 
 
 def make_redshift_grid() -> jax.Array:
@@ -264,7 +258,7 @@ def make_redshift_grid() -> jax.Array:
 # ## Building or loading the catalogs
 #
 # Two catalogs, drawn from one population. `build_catalog` re-runs
-# `draw_population` at the same seed for each, so the two files hold the *same*
+# `Population.sample` at the same seed for each, so the two files hold the *same*
 # sources reduced onto different frequency grids — the wide 1 Hz grid the
 # $\Omega_{\rm gw}$ comparison needs, and the fine 0.125 Hz grid everything from
 # the SNR section on runs against.
@@ -316,12 +310,13 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
     )
     parameters = {
         name: np.asarray(values, dtype=np.float64)
-        for name, values in draw_population(
-            population_model_fn(),
+        for name, values in population_model_fn()
+        .sample(
+            jax.random.PRNGKey(POPULATION_SEED),
             POPULATION_PARAMS,
             num_samples=NUM_SOURCES,
-            seed=POPULATION_SEED,
-        ).items()
+        )
+        .items()
     }
 
     return Catalog.from_generator(
@@ -339,7 +334,7 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
         model_name=POPULATION_MODEL,
         model_kwargs=POPULATION_MODEL_KWARGS,
         population_params=POPULATION_PARAMS,
-        hidden_sites=BNS_HIDDEN_SITES,
+        density_sites=("redshift",),
     )
 
 
@@ -411,9 +406,8 @@ def catalog_merger_rate(catalog: Catalog) -> jax.Array:
     """The observer-frame rate this catalog's own population implies."""
     model = catalog.get_population_model()
     params = catalog.population_params
-    sites = population_sites(model, params)
-    values = select_stochastic_values(catalog.source_parameters, sites, label="catalog")
-    _, trace = population_log_probs(model, params, values)
+    values = catalog.source_parameters
+    _, trace = model.evaluate(params, values)
     return required_deterministic(
         trace, TOTAL_MERGER_RATE_SITE, ndim=0, label="catalog"
     )
@@ -1026,7 +1020,6 @@ pd.DataFrame(
 scan_estimator = SpectralDensityImportanceEstimator.from_catalog(
     catalog,
     model=target_model_fn(),
-    target_params=FIDUCIALS,
     average_mode="analytic_inclination",
 )
 

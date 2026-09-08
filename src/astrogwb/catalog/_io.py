@@ -24,10 +24,7 @@ from astrogwb.catalog.catalog import Catalog
 from astrogwb.catalog.metadata import PopulationMetadata
 from astrogwb.populations import (
     REDSHIFT_SITE,
-    population_log_probs,
-    population_sites,
     redshift_log_density,
-    select_stochastic_values,
 )
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -50,10 +47,10 @@ __all__ = [
     "save_catalog",
 ]
 
-#: Bumped when the population record became mandatory. Files written under a
-#: previous name carry no reconstructable density and are rejected outright.
-FORMAT_NAME = "astrogwb_catalog_v2"
-LEGACY_FORMAT_NAMES = ("waveform_catalog", "astrogwb_catalog")
+#: Version 3 records ordered included density sites. Earlier formats require
+#: regeneration; no excluded-factor compatibility reader is provided.
+FORMAT_NAME = "astrogwb_catalog_v3"
+LEGACY_FORMAT_NAMES = ("waveform_catalog", "astrogwb_catalog", "astrogwb_catalog_v2")
 DOMAIN_FREQUENCY = "frequency"
 
 WAVEFORM_ATTRS = (
@@ -71,7 +68,7 @@ POPULATION_SOURCE_TYPE_ATTR = "population_source_type"
 MODEL_NAME_ATTR = "population_model"
 MODEL_KWARGS_ATTR = "population_model_kwargs"
 POPULATION_PARAMS_ATTR = "population_params"
-HIDDEN_SITES_ATTR = "population_hidden_sites"
+DENSITY_SITES_ATTR = "population_density_sites"
 
 #: Kept from the previous format, demoted from source of truth to assertion.
 #: See :func:`_redshift_density_probe`.
@@ -85,7 +82,7 @@ POPULATION_ATTRS = (
     MODEL_NAME_ATTR,
     MODEL_KWARGS_ATTR,
     POPULATION_PARAMS_ATTR,
-    HIDDEN_SITES_ATTR,
+    DENSITY_SITES_ATTR,
     PROPOSAL_ATTR,
 )
 RESERVED_ATTRS = frozenset(
@@ -102,7 +99,7 @@ REQUIRED_POPULATION_ATTRS = (
     MODEL_NAME_ATTR,
     MODEL_KWARGS_ATTR,
     POPULATION_PARAMS_ATTR,
-    HIDDEN_SITES_ATTR,
+    DENSITY_SITES_ATTR,
     PROPOSAL_ATTR,
 )
 
@@ -158,7 +155,7 @@ def catalog_to_dataset(catalog: Catalog) -> xr.Dataset:
         MODEL_NAME_ATTR: catalog.population_model_name,
         MODEL_KWARGS_ATTR: json.dumps(catalog.population_model_kwargs, sort_keys=True),
         POPULATION_PARAMS_ATTR: json.dumps(catalog.population_params, sort_keys=True),
-        HIDDEN_SITES_ATTR: json.dumps(sorted(catalog.hidden_sites)),
+        DENSITY_SITES_ATTR: json.dumps(list(catalog.density_sites)),
         PROPOSAL_ATTR: json.dumps(_redshift_density_probe(catalog)),
         **population.provenance,
     }
@@ -248,8 +245,10 @@ def catalog_from_dataset[C: Catalog](
                 name=POPULATION_PARAMS_ATTR,
             ).items()
         },
-        _hidden_sites=frozenset(
-            _json_list(decoded[HIDDEN_SITES_ATTR], label=label, name=HIDDEN_SITES_ATTR)
+        _density_sites=tuple(
+            _json_list(
+                decoded[DENSITY_SITES_ATTR], label=label, name=DENSITY_SITES_ATTR
+            )
         ),
     )
 
@@ -289,10 +288,11 @@ def check_population_consistency(
                 "the registered model."
             )
 
-    sites = population_sites(model, params)
-    values = select_stochastic_values(catalog.source_parameters, sites, label=label)
-    _, trace = population_log_probs(model, params, values)
-    for name in sorted(sites.deterministic & set(catalog.source_parameters)):
+    values = catalog.source_parameters
+    _, trace = model.evaluate(params, values)
+    for name in sorted(catalog.source_parameters):
+        if name not in trace or trace[name]["type"] != "deterministic":
+            continue
         stored = np.asarray(catalog.source_parameters[name], dtype=np.float64)
         derived = np.asarray(trace[name]["value"], dtype=np.float64)
         if not np.allclose(

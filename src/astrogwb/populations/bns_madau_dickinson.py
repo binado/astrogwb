@@ -26,8 +26,8 @@ The declaration is a NumPyro model, and that is the whole point of it:
   waveform amplitude, and the scalar observer-frame rate.
 
 The masses are currently independent uniforms rather than an ordered pair, and
-they sit in the excluded set for importance weighting, which reproduces the
-cancellation the analysis relies on today. Unhiding them is what unlocks
+they are omitted from ``density_sites`` for importance weighting, reproducing
+the cancellation the analysis relies on today. Including them enables
 mass-hyperparameter inference, and at that point the ordered-pair density must
 be *correct* rather than merely symmetric: ordering doubles the density on the
 retained region and zeroes it elsewhere.
@@ -36,6 +36,8 @@ retained region and zeroes it elsewhere.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import ClassVar
 
 import jax
 import jax.numpy as jnp
@@ -47,15 +49,16 @@ from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
 )
+from astrogwb.populations.base import Population
 from astrogwb.populations.registry import register_population_model
 
 __all__ = [
     "AMPLITUDE_PARAMETERS",
-    "BNS_HIDDEN_SITES",
+    "BNSMadauDickinson",
+    "BNSMadauDickinsonModifiedPropagation",
+    "BNSMadauDickinsonUniformMixture",
     "amplitude_H0_fn",
     "amplitude_local_merger_rate_fn",
-    "bns_md_cosmological",
-    "bns_md_modified_propagation",
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
 ]
@@ -106,21 +109,6 @@ SPIN_MAGNITUDE = 0.05
 
 #: Dimensionless tidal-deformability bounds.
 TIDAL_DEFORMABILITY_MAXIMUM = 2000.0
-
-#: Source densities excluded from the importance weights because they are
-#: identical between every target and every proposal built from this
-#: population, so their ratio is one. Redshift is deliberately absent: it is
-#: the factor the weights exist to correct, and excluding it is rejected.
-BNS_HIDDEN_SITES = frozenset(
-    {
-        "source_frame_mass_1",
-        "source_frame_mass_2",
-        "spin_1z",
-        "spin_2z",
-        "lambda_1",
-        "lambda_2",
-    }
-)
 
 
 def _declare_bns_madau_dickinson(
@@ -187,13 +175,8 @@ def _redshift(
 
 
 @register_population_model("bns_md_cosmological")
-def bns_md_cosmological(
-    params: Mapping[str, ArrayLike],
-    *,
-    z_min: float,
-    z_max: float,
-    n_grid: int,
-) -> None:
+@dataclass(frozen=True, kw_only=True)
+class BNSMadauDickinson(Population):
     r"""BNS sources on a Madau-Dickinson rate, with standard GW propagation.
 
     ``params`` must carry ``H0``, ``Omega_m``, ``gamma``, ``kappa`` and
@@ -203,29 +186,45 @@ def bns_md_cosmological(
     cosmology integrals and the redshift normalization run on; they are
     construction settings, bound once and serialized with the catalog.
     """
-    redshift, redshift_distribution = _redshift(
-        params, z_min=z_min, z_max=z_max, n_grid=n_grid
+
+    z_min: float
+    z_max: float
+    n_grid: int
+    density_sites: tuple[str, ...] = ("redshift",)
+    source_sites: ClassVar[tuple[str, ...]] = (
+        "redshift",
+        "source_frame_mass_1",
+        "source_frame_mass_2",
+        "spin_1z",
+        "spin_2z",
+        "lambda_1",
+        "lambda_2",
+        "detector_frame_mass_1",
+        "detector_frame_mass_2",
+        "luminosity_distance",
+        "inclination",
+        "coa_phase",
+        "coa_time",
     )
-    _declare_bns_madau_dickinson(
-        params,
-        z_min=z_min,
-        z_max=z_max,
-        n_grid=n_grid,
-        redshift=redshift,
-        redshift_distribution=redshift_distribution,
-        luminosity_distance=redshift_distribution.luminosity_distance(redshift),
-    )
+
+    def __call__(self, params: Mapping[str, ArrayLike]) -> None:
+        redshift, redshift_distribution = _redshift(
+            params, z_min=self.z_min, z_max=self.z_max, n_grid=self.n_grid
+        )
+        _declare_bns_madau_dickinson(
+            params,
+            z_min=self.z_min,
+            z_max=self.z_max,
+            n_grid=self.n_grid,
+            redshift=redshift,
+            redshift_distribution=redshift_distribution,
+            luminosity_distance=redshift_distribution.luminosity_distance(redshift),
+        )
 
 
 @register_population_model("bns_md_uniform_mixture")
-def bns_md_uniform_mixture(
-    params: Mapping[str, ArrayLike],
-    *,
-    z_min: float,
-    z_max: float,
-    n_grid: int,
-    uniform_mixing_fraction: float,
-) -> None:
+@dataclass(frozen=True, kw_only=True)
+class BNSMadauDickinsonUniformMixture(BNSMadauDickinson):
     r"""A Madau-Dickinson redshift law blended with a uniform guard component.
 
     A *proposal* population, not a physical one: mixing a fraction
@@ -241,44 +240,45 @@ def bns_md_uniform_mixture(
     declared only if ``local_merger_rate`` is supplied, and for a guard mixture
     it usually should not be: a sampling density has no physical rate.
     """
-    if not 0.0 <= uniform_mixing_fraction <= 1.0:
-        raise ValueError(
-            f"uniform_mixing_fraction must lie in [0, 1], got {uniform_mixing_fraction}"
+
+    uniform_mixing_fraction: float
+
+    def __call__(self, params: Mapping[str, ArrayLike]) -> None:
+        if not 0.0 <= self.uniform_mixing_fraction <= 1.0:
+            raise ValueError(
+                f"uniform_mixing_fraction must lie in [0, 1], got {self.uniform_mixing_fraction}"
+            )
+        redshift_distribution = MadauDickinsonRedshiftDistribution(
+            params=params,
+            minimum_redshift=self.z_min,
+            maximum_redshift=self.z_max,
+            n_grid=self.n_grid,
         )
-    redshift_distribution = MadauDickinsonRedshiftDistribution(
-        params=params,
-        minimum_redshift=z_min,
-        maximum_redshift=z_max,
-        n_grid=n_grid,
-    )
-    mixture = dist.MixtureGeneral(
-        dist.Categorical(
-            probs=jnp.array([1.0 - uniform_mixing_fraction, uniform_mixing_fraction])
-        ),
-        [redshift_distribution, dist.Uniform(z_min, z_max)],
-        support=redshift_distribution.support,
-    )
-    redshift = jnp.asarray(numpyro.sample("redshift", mixture))
-    _declare_bns_madau_dickinson(
-        params,
-        z_min=z_min,
-        z_max=z_max,
-        n_grid=n_grid,
-        redshift=redshift,
-        redshift_distribution=redshift_distribution,
-        luminosity_distance=redshift_distribution.luminosity_distance(redshift),
-    )
+        mixture = dist.MixtureGeneral(
+            dist.Categorical(
+                probs=jnp.array(
+                    [1.0 - self.uniform_mixing_fraction, self.uniform_mixing_fraction]
+                )
+            ),
+            [redshift_distribution, dist.Uniform(self.z_min, self.z_max)],
+            support=redshift_distribution.support,
+        )
+        redshift = jnp.asarray(numpyro.sample("redshift", mixture))
+        _declare_bns_madau_dickinson(
+            params,
+            z_min=self.z_min,
+            z_max=self.z_max,
+            n_grid=self.n_grid,
+            redshift=redshift,
+            redshift_distribution=redshift_distribution,
+            luminosity_distance=redshift_distribution.luminosity_distance(redshift),
+        )
 
 
 @register_population_model("bns_md_modified_propagation")
-def bns_md_modified_propagation(
-    params: Mapping[str, ArrayLike],
-    *,
-    z_min: float,
-    z_max: float,
-    n_grid: int,
-) -> None:
-    r"""As :func:`bns_md_cosmological`, with a modified GW propagation distance.
+@dataclass(frozen=True, kw_only=True)
+class BNSMadauDickinsonModifiedPropagation(BNSMadauDickinson):
+    r"""As :class:`BNSMadauDickinson`, with a modified GW propagation distance.
 
     Additionally requires ``xi_0`` and ``xi_n`` in ``params``. The distance the
     model declares is the *effective* one governing waveform amplitude,
@@ -291,18 +291,20 @@ def bns_md_modified_propagation(
 
     so a catalog's stored polarization power and this distance describe the
     same signal. At :math:`\Xi_0 = 1` the ratio is identically one and this
-    reduces to :func:`bns_md_cosmological` bit-for-bit.
+    reduces to :class:`BNSMadauDickinson` bit-for-bit.
     """
-    redshift, redshift_distribution = _redshift(
-        params, z_min=z_min, z_max=z_max, n_grid=n_grid
-    )
-    _declare_bns_madau_dickinson(
-        params,
-        z_min=z_min,
-        z_max=z_max,
-        n_grid=n_grid,
-        redshift=redshift,
-        redshift_distribution=redshift_distribution,
-        luminosity_distance=redshift_distribution.luminosity_distance(redshift)
-        * jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"])),
-    )
+
+    def __call__(self, params: Mapping[str, ArrayLike]) -> None:
+        redshift, redshift_distribution = _redshift(
+            params, z_min=self.z_min, z_max=self.z_max, n_grid=self.n_grid
+        )
+        _declare_bns_madau_dickinson(
+            params,
+            z_min=self.z_min,
+            z_max=self.z_max,
+            n_grid=self.n_grid,
+            redshift=redshift,
+            redshift_distribution=redshift_distribution,
+            luminosity_distance=redshift_distribution.luminosity_distance(redshift)
+            * jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"])),
+        )

@@ -165,7 +165,6 @@ def resolutions(fine_catalog: Catalog) -> dict[int, dict[str, Any]]:
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         fine_catalog,
         model=mock_target_model(),
-        target_params=FIDUCIALS,
         average_mode="analytic_inclination",
     )
     total_merger_rate = jnp.asarray(estimator(FIDUCIALS)[1]["total_merger_rate"])

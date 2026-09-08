@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from functools import partial
-from typing import Any, cast
+from typing import Any
 
 import jax
 import numpy as np
@@ -12,7 +11,6 @@ import pytest
 
 from astrogwb.catalog import Catalog, PopulationMetadata
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.populations import BNS_HIDDEN_SITES
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
     PolarizationPowerGenerator,
@@ -69,7 +67,7 @@ POPULATION_RECORD: dict[str, Any] = {
         "z_peak": 1.84,
         "local_merger_rate": 770.0,
     },
-    "hidden_sites": BNS_HIDDEN_SITES,
+    "density_sites": ("redshift",),
 }
 PRIVATE_RECORD: dict[str, Any] = {
     f"_{name}": value for name, value in POPULATION_RECORD.items()
@@ -225,12 +223,14 @@ def test_get_population_model_binds_construction_settings_only() -> None:
     They describe how the catalog was made; a target evaluation supplies its
     own, and binding the generating ones here would silently pin them.
     """
-    from astrogwb.populations import bns_md_cosmological
+    from astrogwb.populations import BNSMadauDickinson
 
-    model = cast(partial, _catalog(np.array([0.5, 1.5])).get_population_model())
-    assert model.func is bns_md_cosmological
-    assert model.keywords == POPULATION_RECORD["model_kwargs"]
-    assert not model.args
+    model = _catalog(np.array([0.5, 1.5])).get_population_model()
+    assert isinstance(model, BNSMadauDickinson)
+    assert {
+        name: getattr(model, name) for name in ("z_min", "z_max", "n_grid")
+    } == POPULATION_RECORD["model_kwargs"]
+    assert model.density_sites == POPULATION_RECORD["density_sites"]
 
 
 def test_unknown_population_model_names_fail_clearly() -> None:
@@ -256,7 +256,7 @@ def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> 
     assert restricted.population_model_kwargs["z_max"] == 2.0
     # Everything else about the record travels unchanged.
     assert restricted.population_params == catalog.population_params
-    assert restricted.hidden_sites == catalog.hidden_sites
+    assert restricted.density_sites == catalog.density_sites
 
 
 def test_restrict_redshift_leaves_the_original_untouched() -> None:

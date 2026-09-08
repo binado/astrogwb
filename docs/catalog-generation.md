@@ -73,9 +73,9 @@ model = "bns_md_uniform_mixture"
 uniform_mixing_fraction = 0.1
 ```
 
-Everything else — the redshift window, the grid resolution, the
-hyperparameters, and the density factors excluded from importance weighting —
-is inherited from `config/catalogs/base/population.toml`.
+The redshift window, grid resolution, and hyperparameters are inherited from
+`config/catalogs/base/population.toml`. The population class declares its density
+factors and source outputs.
 
 **A registry key, not an import path.** Registry keys change only on purpose;
 module paths move as collateral whenever a module is reorganized, so a
@@ -83,20 +83,38 @@ persisted `module:function` string is a reference that silently rots. An
 unknown key fails pre-flight, in `snakemake validate`, listing what is
 registered — before a GPU job is queued.
 
-The models themselves are ordinary NumPyro model functions
-(`src/astrogwb/populations/bns_madau_dickinson.py`). Their sample sites are
-exactly the columns a catalog stores, and their `numpyro.deterministic` sites
-are the derived ones: detector-frame masses, the luminosity distance governing
-waveform amplitude, and the observer-frame total merger rate. Detector-frame
-masses used to be computed by hand in `generate_catalog.py`, which meant nothing
-checked them on the way back in; they are recomputed and compared on every load
-now.
+The models are immutable callable `Population` objects. Their `__call__(params)`
+methods declare ordinary NumPyro sample and deterministic sites. Construction
+settings are frozen fields; hyperparameters and source arrays remain arguments.
+The registry maps stable names to constructors:
 
-**One declaration serves generation and inference.** `Predictive` draws the
-catalog from it, and substituting those draws back into the *same* model
-recovers the per-sample source density the importance weights divide by. There
-is no second implementation of the density to keep in step, and no descriptor to
-extract.
+```python
+population = population_model("bns_md_cosmological")(
+    z_min=0.0, z_max=20.0, n_grid=4096,
+)
+sources = population.sample(key, params, num_samples=1024)
+log_prob = population.log_prob(params, sources)  # shape (1024,)
+```
+
+- `source_sites` explicitly selects returned sampled and deterministic values,
+  including spins and detector-frame masses. It must include every sampled
+  input needed to replay the model. The population-level total merger rate is
+  available from evaluation but is not a source column.
+- `density_sites` selects the density factors included in importance weighting.
+  The BNS classes default to `("redshift",)`, since their other factors cancel
+  between proposal and target. Omitting factors does not marginalize variables.
+- `derive_sources(params, sources)` recomputes the declared outputs from supplied
+  sample values. Stored deterministic values never override model calculations.
+- `evaluate(params, sources)` returns both the selected log density and a trace
+  containing recomputed distances and rate, letting inference use one execution.
+
+Sampling uses `Predictive` followed by batched recomputation of derived columns.
+That pass matches density evaluation and preserves exactly zero self-reweighting
+errors. No seeded site-discovery pass or array-rank heuristic selects outputs.
+The methods isolate their NumPyro effects from enclosing inference models.
+
+A population can remain static in a JIT-compiled estimator, while hyperparameters
+and source arrays are traced. To compile sampling, keep `num_samples` static.
 
 ### Guard mixtures are one density, not two draws
 
@@ -171,15 +189,15 @@ population_model_kwargs  = '{"n_grid": 4096, "z_max": 20.0, "z_min": 0.0}'
 population_params        = '{"H0": 67.66, "Omega_m": 0.3096, "gamma": 1.42,
                              "kappa": 4.62, "local_merger_rate": 770.0,
                              "z_peak": 1.84}'
-population_hidden_sites  = '["lambda_1", "lambda_2", "source_frame_mass_1",
-                             "source_frame_mass_2", "spin_1z", "spin_2z"]'
+population_density_sites = '["redshift"]'
 population_seed          = 41
 population_num_samples   = 32768
 ```
 
 netCDF attributes are flat scalars, so the mappings travel as JSON strings.
 What is *not* stored is a callable: `Catalog.get_population_model()` looks the
-name up in the registry and binds the construction settings.
+name up in the registry and constructs the model with its recorded settings
+and ordered density selection.
 
 That is enough to reconstruct the exact map from hyperparameters to source
 density, which is why the run config no longer restates any of it and nothing
@@ -190,7 +208,7 @@ exact float equality over five hard-coded parameter names. Three more
 parameters that change the answer (`xi_0`, `xi_n`, `local_merger_rate`) were
 checked by nothing at all.
 
-`population_hidden_sites` is part of the record for a reason that is easy to
+`population_density_sites` is part of the record for a reason that is easy to
 miss: a catalog whose proposal density was computed with the mass factors
 excluded, reweighted against a target that includes them, gives silently wrong
 weights with no shape error anywhere.
@@ -211,10 +229,10 @@ performs two independent checks:
   column. This is what catches columns computed by some other route that have
   since drifted.
 
-Files written under a previous `format_name` carry no reconstructable density
-and are rejected with a regeneration message. There is no legacy reader:
-inferring a missing population from an old descriptor is exactly the guesswork
-this format exists to remove.
+The format is `astrogwb_catalog_v3`. Earlier formats, including v2 catalogs
+with excluded-factor metadata, require regeneration. There is no compatibility
+reader. The recorded density-site order is preserved on load and when narrowing
+the redshift window.
 
 ## What is *not* in the file: the analysis window
 

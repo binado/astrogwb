@@ -18,8 +18,6 @@ from exactly the density the tests reweight with.
 
 from __future__ import annotations
 
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -28,12 +26,9 @@ from astrogwb.catalog import Catalog, PopulationMetadata
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.populations import (
-    BNS_HIDDEN_SITES,
-    PopulationModel,
-    bns_md_cosmological,
-    bns_md_modified_propagation,
-    derive_source_columns,
-    draw_population,
+    BNSMadauDickinson,
+    BNSMadauDickinsonModifiedPropagation,
+    Population,
 )
 from astrogwb.waveform import AnalyticInspiralGenerator
 
@@ -86,23 +81,22 @@ def make_redshift_grid(n_grid: int = N_GRID) -> jax.Array:
     return jnp.linspace(Z_MIN, Z_MAX, n_grid)
 
 
-def mock_population_model(n_grid: int = N_GRID) -> PopulationModel:
+def mock_population_model(n_grid: int = N_GRID) -> Population:
     """The generating population: Madau-Dickinson, standard propagation."""
-    return partial(bns_md_cosmological, z_min=Z_MIN, z_max=Z_MAX, n_grid=n_grid)
+    return BNSMadauDickinson(z_min=Z_MIN, z_max=Z_MAX, n_grid=n_grid)
 
 
-def mock_target_model(n_grid: int = N_GRID) -> PopulationModel:
+def mock_target_model(n_grid: int = N_GRID) -> Population:
     """The target population the mock catalog is reweighted to."""
-    return partial(bns_md_modified_propagation, z_min=Z_MIN, z_max=Z_MAX, n_grid=n_grid)
+    return BNSMadauDickinsonModifiedPropagation(z_min=Z_MIN, z_max=Z_MAX, n_grid=n_grid)
 
 
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
     """Draw the mock population as plain ``(N,)`` float64 arrays."""
-    samples = draw_population(
-        mock_population_model(),
+    samples = mock_population_model().sample(
+        jax.random.PRNGKey(MOCK_POPULATION_SEED),
         POPULATION_PARAMS,
         num_samples=num_sources,
-        seed=MOCK_POPULATION_SEED,
     )
     return {name: np.asarray(values) for name, values in samples.items()}
 
@@ -132,7 +126,7 @@ def mock_catalog(
         model_name="bns_md_cosmological",
         model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
         population_params=POPULATION_PARAMS,
-        hidden_sites=BNS_HIDDEN_SITES,
+        density_sites=("redshift",),
     )
 
 
@@ -214,14 +208,14 @@ def synthetic_source_parameters(n_samples: int = 16) -> dict[str, jax.Array]:
         "lambda_1": 400.0 * constant,
         "lambda_2": 300.0 * constant,
     }
-    return derive_source_columns(mock_population_model(), POPULATION_PARAMS, stochastic)
+    return mock_population_model().derive_sources(POPULATION_PARAMS, stochastic)
 
 
 def build_synthetic_estimator(
     n_samples: int = 16,
     *,
     polarization_power: jax.Array | None = None,
-    model: PopulationModel | None = None,
+    model: Population | None = None,
 ) -> tuple[SpectralDensityImportanceEstimator, dict[str, jax.Array]]:
     """Build an estimator whose proposal *is* its target at the fiducials.
 
@@ -263,12 +257,11 @@ def build_synthetic_estimator(
         _model_name="bns_md_cosmological",
         _model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
         _population_params=POPULATION_PARAMS,
-        _hidden_sites=BNS_HIDDEN_SITES,
+        _density_sites=("redshift",),
     )
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         catalog,
         model=mock_target_model() if model is None else model,
-        target_params=FIDUCIALS,
         average_mode="analytic_inclination",
     )
     return estimator, samples

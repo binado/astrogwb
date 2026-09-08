@@ -171,7 +171,7 @@ from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import AnalysisGrid, build_run_config
 from astrogwb.paper.config.runs import assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
-from astrogwb.populations import bns_md_modified_propagation
+from astrogwb.populations import BNSMadauDickinsonModifiedPropagation
 from astrogwb.sampling import gwb_spectral_density_model
 
 register_projection(MplAxes)
@@ -282,11 +282,8 @@ analysis_grid = AnalysisGrid(
 # The target population, bound to the analysis grid once: it is static pytree
 # metadata on the estimator, and a partial hashes by identity, so rebuilding
 # one per step would retrace the whole model.
-target_model = partial(
-    bns_md_modified_propagation,
-    z_min=minimum_redshift,
-    z_max=maximum_redshift,
-    n_grid=n_grid,
+target_model = BNSMadauDickinsonModifiedPropagation(
+    z_min=minimum_redshift, z_max=maximum_redshift, n_grid=n_grid
 )
 
 # One call does every step the headless runner does: restrict both catalogs to
@@ -301,7 +298,6 @@ inputs = prepare_inference_inputs(
     grid=analysis_grid,
     detectors=detnames,
     target_model=target_model,
-    target_params=fiducials,
 )
 observation = inputs.observation
 proposal = inputs.proposal

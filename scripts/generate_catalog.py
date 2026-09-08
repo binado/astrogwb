@@ -6,11 +6,11 @@ the registered NumPyro model it names, generates frequency-domain waveforms
 with the Ripple backend, reduces them to polarization power, and writes
 ``outputs/catalogs/<catalog>.h5``.
 
-The population declaration is a model function, not a graph config, and it is
+The population declaration is a callable population, not a graph config, and it is
 the *same* declaration the analysis evaluates the proposal density with. That
 is what makes the output self-describing: the file records the model's registry
 name, its construction settings, the hyperparameters it was drawn at, and the
-density factors excluded from importance weighting, which is everything needed
+density factors included in importance weighting, which is everything needed
 to reconstruct the map from hyperparameters to source density. Nothing
 downstream re-reads these configs, and no run config restates any of it.
 
@@ -34,8 +34,9 @@ from __future__ import annotations
 import argparse
 import logging
 from collections.abc import Sequence
-from functools import partial
 from pathlib import Path
+
+import jax
 
 from astrogwb.catalog import Catalog, PopulationMetadata
 from astrogwb.paper.config.catalogs import (
@@ -43,7 +44,7 @@ from astrogwb.paper.config.catalogs import (
     check_population_model,
     load_catalog_layers,
 )
-from astrogwb.populations import draw_population, population_model
+from astrogwb.populations import population_model
 from astrogwb.waveform import RippleGenerator
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
     check_population_model(
         population.model, label=f"catalog {definition.name!r} population.model"
     )
-    model = partial(population_model(population.model), **population.kwargs)
+    model = population_model(population.model)(**population.kwargs)
 
     logger.info(
         "Catalog %s: model=%s seed=%d num_samples=%d kwargs=%s",
@@ -100,11 +101,10 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
         definition.num_samples,
         population.kwargs,
     )
-    samples = draw_population(
-        model,
+    samples = model.sample(
+        jax.random.PRNGKey(definition.seed),
         population.params,
         num_samples=definition.num_samples,
-        seed=definition.seed,
     )
 
     waveform = definition.waveform
@@ -142,7 +142,7 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
         model_name=population.model,
         model_kwargs=population.kwargs,
         population_params=population.params,
-        hidden_sites=frozenset(population.hidden_sites),
+        density_sites=model.density_sites,
     )
 
 

@@ -233,7 +233,7 @@ class CatalogConfig(BaseModel):
     stem is both the config filename and the ``outputs/catalogs/<name>.h5`` it
     produces. The run records the *name* only: everything about how the catalog
     was drawn -- the population model, its construction settings, the
-    hyperparameters, and the excluded density factors -- is recorded in the
+    hyperparameters, and the included density factors -- is recorded in the
     file itself and read back at run time. The two roles differ by filename and
     nothing else.
     """

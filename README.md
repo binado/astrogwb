@@ -60,15 +60,11 @@ A population is drawn, reduced to polarization power, and stored together with
 the declaration that produced it:
 
 ```python
-from functools import partial
+import jax
 
 from astrogwb.catalog import Catalog, PopulationMetadata
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.populations import (
-    BNS_HIDDEN_SITES,
-    bns_md_cosmological,
-    draw_population,
-)
+from astrogwb.populations import BNSMadauDickinson
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 model_kwargs = {"z_min": 0.0, "z_max": 20.0, "n_grid": 4096}
@@ -80,12 +76,8 @@ params = {
     "z_peak": 1.84,
     "local_merger_rate": 770.0,
 }
-source_parameters = draw_population(
-    partial(bns_md_cosmological, **model_kwargs),
-    params,
-    num_samples=1024,
-    seed=42,
-)
+population = BNSMadauDickinson(**model_kwargs)
+source_parameters = population.sample(jax.random.PRNGKey(42), params, num_samples=1024)
 
 catalog = Catalog.from_generator(
     source_parameters,
@@ -104,7 +96,7 @@ catalog = Catalog.from_generator(
     model_name="bns_md_cosmological",
     model_kwargs=model_kwargs,
     population_params=params,
-    hidden_sites=BNS_HIDDEN_SITES,
+    density_sites=population.density_sites,
 )
 catalog.save("catalog.h5")
 ```

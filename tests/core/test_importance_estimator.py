@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import replace
-from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -30,11 +29,10 @@ from astrogwb.gwb.spectral import AverageMode, spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.populations import (
-    BNS_HIDDEN_SITES,
     LUMINOSITY_DISTANCE_SITE,
     REDSHIFT_SITE,
-    bns_md_cosmological,
-    derive_source_columns,
+    BNSMadauDickinson,
+    Population,
 )
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -61,16 +59,15 @@ OFF_POPULATION_PARAMS = {
 MODEL_KWARGS = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
 
 
-def _generating_model() -> Callable[..., None]:
-    return partial(bns_md_cosmological, **MODEL_KWARGS)
+def _generating_model() -> Population:
+    return BNSMadauDickinson(z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID)
 
 
 def _source_parameters(
     params: Mapping[str, float] = OFF_POPULATION_PARAMS,
 ) -> dict[str, jax.Array]:
     ones = jnp.ones_like(REDSHIFTS)
-    return derive_source_columns(
-        _generating_model(),
+    return _generating_model().derive_sources(
         params,
         {
             REDSHIFT_SITE: REDSHIFTS,
@@ -111,7 +108,7 @@ def _catalog(
         _model_name="bns_md_cosmological",
         _model_kwargs=MODEL_KWARGS,
         _population_params=params,
-        _hidden_sites=BNS_HIDDEN_SITES,
+        _density_sites=("redshift",),
     )
 
 
@@ -121,7 +118,6 @@ def _estimator(
     return SpectralDensityImportanceEstimator.from_catalog(
         _catalog(),
         model=mock_target_model(),
-        target_params=FIDUCIALS,
         average_mode=average_mode,
     )
 
@@ -134,7 +130,6 @@ def test_preparation_caches_the_catalogs_own_proposal_density() -> None:
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         catalog,
         model=mock_target_model(),
-        target_params=FIDUCIALS,
         average_mode="catalog_inclination",
     )
 
@@ -150,8 +145,8 @@ def test_preparation_caches_the_catalogs_own_proposal_density() -> None:
         jnp.log(catalog.source_parameters[LUMINOSITY_DISTANCE_SITE]),
     )
     np.testing.assert_array_equal(estimator.polarization_power, POWER)
-    assert set(estimator.source_parameters) == set(BNS_HIDDEN_SITES) | {REDSHIFT_SITE}
-    assert estimator.hidden_sites == BNS_HIDDEN_SITES
+    assert set(estimator.source_parameters) == set(catalog.source_parameters)
+    assert estimator.model.density_sites == ("redshift",)
 
 
 def test_preparation_reuses_the_stored_reference_distance() -> None:
@@ -184,7 +179,6 @@ def test_preparation_selects_the_analysis_band_from_the_power_only() -> None:
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         _catalog(),
         model=mock_target_model(),
-        target_params=FIDUCIALS,
         average_mode="catalog_inclination",
         frequency_mask=jnp.array([True, False, True]),
     )
@@ -203,7 +197,6 @@ def test_preparation_needs_no_merger_rate_for_the_proposal() -> None:
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         _catalog(params=without_rate),
         model=mock_target_model(),
-        target_params=FIDUCIALS,
         average_mode="catalog_inclination",
     )
     assert estimator.proposal_log_prob.shape == (4,)
@@ -223,26 +216,10 @@ def test_a_target_missing_the_rate_is_rejected() -> None:
 
 
 def test_mismatched_density_factors_are_rejected() -> None:
-    """The ratio is only a ratio if both sides carry the same factors.
-
-    A target that adds a factor the proposal never had leaves that factor
-    undivided in every weight -- an error with no shape mismatch anywhere,
-    which is exactly why it is checked rather than trusted. Note what this
-    check cannot do: two populations can agree on the *names* and still
-    disagree about the law behind an excluded one.
-    """
-    import numpyro
-
-    def target_with_an_extra_factor(params: Mapping[str, ArrayLike]) -> None:
-        mock_target_model()(params)
-        numpyro.sample("eccentricity", dist.Uniform(0.0, 0.1))
-
+    target = replace(mock_target_model(), density_sites=("redshift", "spin_1z"))
     with pytest.raises(ValueError, match="same source density factors"):
         SpectralDensityImportanceEstimator.from_catalog(
-            _catalog(),
-            model=target_with_an_extra_factor,
-            target_params=FIDUCIALS,
-            average_mode="catalog_inclination",
+            _catalog(), model=target, average_mode="catalog_inclination"
         )
 
 
@@ -256,11 +233,11 @@ def test_a_catalog_missing_a_stochastic_column_is_rejected() -> None:
             if name != "spin_1z"
         },
     )
-    with pytest.raises(ValueError, match="spin_1z"):
+    with pytest.raises(TypeError, match="PRNG key"):
+        # NumPyro cannot draw the missing source without an RNG key.
         SpectralDensityImportanceEstimator.from_catalog(
             trimmed,
             model=mock_target_model(),
-            target_params=FIDUCIALS,
             average_mode="catalog_inclination",
         )
 
@@ -271,12 +248,11 @@ def test_a_catalog_missing_a_stochastic_column_is_rejected() -> None:
 def test_estimator_round_trips_as_a_pytree() -> None:
     estimator = _estimator()
     leaves, structure = jax.tree.flatten(estimator)
-    # Seven source arrays, the power, the proposal density, the reference
-    # distances.
-    assert len(leaves) == 10
+    # All stored source arrays, power, proposal density, and reference distances.
+    assert len(leaves) == len(estimator.source_parameters) + 3
     rebuilt = jax.tree.unflatten(structure, leaves)
     assert rebuilt.model is estimator.model
-    assert rebuilt.hidden_sites == estimator.hidden_sites
+    assert rebuilt.model.density_sites == estimator.model.density_sites
     assert rebuilt.average_mode == estimator.average_mode
     for actual, expected in zip(
         jax.tree.leaves(rebuilt(FIDUCIALS)),
@@ -306,7 +282,6 @@ def test_direct_construction_from_prepared_arrays_is_supported() -> None:
         proposal_log_prob=jnp.zeros(4),
         log_reference_distance=jnp.log(jnp.full(4, 1234.5)),
         model=mock_target_model(),
-        hidden_sites=BNS_HIDDEN_SITES,
         average_mode="catalog_inclination",
     )
     spectrum, extras = estimator(FIDUCIALS)
@@ -318,31 +293,26 @@ def test_direct_construction_from_prepared_arrays_is_supported() -> None:
 def test_proposal_density_is_evaluated_only_during_preparation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The cached density must not be recomputed per sampler step."""
-    import astrogwb.importance.estimator as estimator_module
+    calls: list[Population] = []
+    original = Population.evaluate
 
+    def counted(self, params, sources):
+        calls.append(self)
+        return original(self, params, sources)
+
+    monkeypatch.setattr(Population, "evaluate", counted)
     catalog = _catalog()
-    calls = 0
-    original = estimator_module.population_log_probs
-
-    def counted(model, params, source_values, **kwargs):
-        nonlocal calls
-        calls += 1
-        return original(model, params, source_values, **kwargs)
-
-    monkeypatch.setattr(estimator_module, "population_log_probs", counted)
+    target = mock_target_model()
     estimator = SpectralDensityImportanceEstimator.from_catalog(
-        catalog,
-        model=mock_target_model(),
-        target_params=FIDUCIALS,
-        average_mode="catalog_inclination",
+        catalog, model=target, average_mode="catalog_inclination"
     )
-    assert calls == 1  # the proposal, once
-
+    assert len(calls) == 1
+    assert type(calls[0]) is BNSMadauDickinson
     estimator(FIDUCIALS)
     estimator(OFF_FIDUCIALS)
     jax.jit(lambda value, params: value(params))(estimator, FIDUCIALS)
-    assert calls == 4  # one per target evaluation, never again for the proposal
+    assert len(calls) == 4
+    assert all(model is target for model in calls[1:])
 
 
 # --------------------------------------------------------------------------- #
@@ -363,7 +333,6 @@ def test_a_catalog_reweighted_to_its_own_proposal_has_exactly_zero_log_weights()
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         catalog,
         model=mock_target_model(),
-        target_params=FIDUCIALS,
         average_mode="catalog_inclination",
     )
     at_generating = {**OFF_POPULATION_PARAMS, "xi_0": 1.0, "xi_n": 2.3}

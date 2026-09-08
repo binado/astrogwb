@@ -14,14 +14,14 @@ before the XLA backend is initialized, but importing a model does not
 initialize it.
 """
 
+from astrogwb.populations.base import Population, PopulationTrace
 from astrogwb.populations.bns_madau_dickinson import (
     AMPLITUDE_PARAMETERS,
-    BNS_HIDDEN_SITES,
+    BNSMadauDickinson,
+    BNSMadauDickinsonModifiedPropagation,
+    BNSMadauDickinsonUniformMixture,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
-    bns_md_cosmological,
-    bns_md_modified_propagation,
-    bns_md_uniform_mixture,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
@@ -29,21 +29,11 @@ from astrogwb.populations.evaluation import (
     LUMINOSITY_DISTANCE_SITE,
     REDSHIFT_SITE,
     TOTAL_MERGER_RATE_SITE,
-    PopulationSites,
-    PopulationTrace,
-    population_log_probs,
-    population_sites,
     redshift_log_density,
     required_deterministic,
-    select_stochastic_values,
-)
-from astrogwb.populations.generation import (
-    derive_source_columns,
-    draw_population,
 )
 from astrogwb.populations.registry import (
-    PopulationModel,
-    PopulationModelFn,
+    PopulationFactory,
     known_population_models,
     population_model,
     register_population_model,
@@ -51,29 +41,22 @@ from astrogwb.populations.registry import (
 
 __all__ = [
     "AMPLITUDE_PARAMETERS",
-    "BNS_HIDDEN_SITES",
     "LUMINOSITY_DISTANCE_SITE",
     "REDSHIFT_SITE",
     "TOTAL_MERGER_RATE_SITE",
-    "PopulationModel",
-    "PopulationModelFn",
-    "PopulationSites",
+    "BNSMadauDickinson",
+    "BNSMadauDickinsonModifiedPropagation",
+    "BNSMadauDickinsonUniformMixture",
+    "Population",
+    "PopulationFactory",
     "PopulationTrace",
     "amplitude_H0_fn",
     "amplitude_local_merger_rate_fn",
-    "bns_md_cosmological",
-    "bns_md_modified_propagation",
-    "bns_md_uniform_mixture",
-    "derive_source_columns",
-    "draw_population",
     "known_population_models",
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
-    "population_log_probs",
     "population_model",
-    "population_sites",
     "redshift_log_density",
     "register_population_model",
     "required_deterministic",
-    "select_stochastic_values",
 ]

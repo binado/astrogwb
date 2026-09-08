@@ -20,6 +20,8 @@ linear regime instead of silently drifting out of it.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass, fields
 from functools import partial
 from typing import NamedTuple
 
@@ -37,6 +39,7 @@ from astrogwb_mock_population import (
     make_redshift_grid,
     mock_target_model,
 )
+from jax.typing import ArrayLike
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 from reference_population import reference_merger_rate_distance_and_logprob
 
@@ -51,7 +54,11 @@ from astrogwb.distributions.amplitude import quadrature_grid
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.populations import amplitude_H0_fn, merger_rate_H0_fn
+from astrogwb.populations import (
+    BNSMadauDickinsonModifiedPropagation,
+    amplitude_H0_fn,
+    merger_rate_H0_fn,
+)
 from astrogwb.sampling import (
     amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
@@ -183,14 +190,20 @@ def _build_analysis_inputs(
     # silently truncate the population.
     target = mock_target_model()
 
-    def pinned_target(params):
-        """Take every hyperparameter the chain does not sample from the fiducials."""
-        target({**FIDUCIALS, **params})
+    @dataclass(frozen=True, kw_only=True)
+    class PinnedTarget(BNSMadauDickinsonModifiedPropagation):
+        """Take unsampled hyperparameters from the test's fixed fiducials."""
+
+        def __call__(self, params: Mapping[str, ArrayLike]) -> None:
+            super().__call__({**FIDUCIALS, **params})
+
+    pinned_target = PinnedTarget(
+        **{field.name: getattr(target, field.name) for field in fields(target)}
+    )
 
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         catalog,
         model=pinned_target,
-        target_params={},
         average_mode="analytic_inclination",
         frequency_mask=mask,
     )

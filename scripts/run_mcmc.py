@@ -166,7 +166,6 @@ def run(
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
         target_model=target_population_model(config),
-        target_params=config.fiducials,
     )
     model, marginalization = build_model(
         config,
@@ -286,7 +285,7 @@ def save(
                 "model": proposal.population_model_name,
                 "kwargs": dict(proposal.population_model_kwargs),
                 "params": dict(proposal.population_params),
-                "hidden_sites": sorted(proposal.hidden_sites),
+                "density_sites": list(proposal.density_sites),
                 "num_samples": proposal.population_metadata.num_samples,
                 "seed": proposal.population_metadata.seed,
             },
@@ -422,12 +421,12 @@ def main(argv: list[str] | None = None) -> None:
     injection_catalog = load_run_catalog(injection_path, label="injection")
     proposal_catalog = load_run_catalog(proposal_path, label="proposal")
     logger.info(
-        "Proposal density from %s: model=%s kwargs=%s params=%s excluded=%s",
+        "Proposal density from %s: model=%s kwargs=%s params=%s density_sites=%s",
         config.catalog.proposal,
         proposal_catalog.population_model_name,
         dict(proposal_catalog.population_model_kwargs),
         dict(proposal_catalog.population_params),
-        sorted(proposal_catalog.hidden_sites),
+        proposal_catalog.density_sites,
     )
 
     jax, chain_method = configure_runtime(

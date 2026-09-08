@@ -128,7 +128,6 @@ def build_potential(
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
         target_model=target_population_model(config),
-        target_params=config.fiducials,
     )
     model, _ = build_model(
         config,

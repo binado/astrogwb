@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Mapping, Sequence
-from functools import partial
 from pathlib import Path
 
 import jax
@@ -35,7 +34,7 @@ from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.plotting import TRUTH, use_paper_style
-from astrogwb.populations import bns_md_modified_propagation
+from astrogwb.populations import BNSMadauDickinsonModifiedPropagation
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
 # Restore the standard projection for consistent plotting.
@@ -185,11 +184,8 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         catalog,
-        model=partial(
-            bns_md_modified_propagation,
-            z_min=Z_MIN,
-            z_max=Z_MAX,
-            n_grid=N_REDSHIFT_GRID,
+        model=BNSMadauDickinsonModifiedPropagation(
+            z_min=Z_MIN, z_max=Z_MAX, n_grid=N_REDSHIFT_GRID
         ),
         average_mode="analytic_inclination",
     )

@@ -32,7 +32,6 @@ log densities produces ``nan``, which propagates silently.
 
 from __future__ import annotations
 
-import operator
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Self
@@ -47,12 +46,9 @@ from astrogwb.importance.weights import importance_log_weights
 from astrogwb.populations import (
     LUMINOSITY_DISTANCE_SITE,
     TOTAL_MERGER_RATE_SITE,
-    PopulationModel,
+    Population,
     PopulationTrace,
-    population_log_probs,
-    population_sites,
     required_deterministic,
-    select_stochastic_values,
 )
 
 if TYPE_CHECKING:
@@ -66,17 +62,14 @@ __all__ = ["SpectralDensityImportanceEstimator"]
 class SpectralDensityImportanceEstimator:
     """A fixed Monte Carlo realization bound to the population that reweights it.
 
-    Dynamic pytree data: ``source_parameters`` (the stochastic sites the target
-    model is evaluated at, each shape ``(N,)``), ``polarization_power`` of shape
+    Dynamic pytree data: ``source_parameters`` (the stored source columns, each
+    shape ``(N,)``), ``polarization_power`` of shape
     ``(F, N)``, and the cached ``proposal_log_prob`` and
     ``log_reference_distance``, both shape ``(N,)``.
 
-    Static metadata: the bound ``model``, the ``hidden_sites`` excluded from the
-    density ratio, and the ``average_mode`` inclination convention. The model
-    must be hashable and constructed once -- rebuilding a ``functools.partial``
-    per call would retrace on every step, since partials hash by identity.
-    Sampled hyperparameters arrive through ``__call__``, never through static
-    metadata.
+    Static metadata: the immutable population ``model`` and ``average_mode``
+    inclination convention. Construct the model once and reuse it. Sampled
+    hyperparameters arrive through ``__call__``, never through static metadata.
 
     The constructor performs no conversion, density evaluation, or
     value-dependent validation: JAX rebuilds instances while flattening and
@@ -95,8 +88,7 @@ class SpectralDensityImportanceEstimator:
     polarization_power: jax.Array
     proposal_log_prob: jax.Array
     log_reference_distance: jax.Array
-    model: PopulationModel = field(metadata={"static": True})
-    hidden_sites: frozenset[str] = field(metadata={"static": True})
+    model: Population = field(metadata={"static": True})
     average_mode: AverageMode = field(metadata={"static": True})
 
     @classmethod
@@ -104,9 +96,7 @@ class SpectralDensityImportanceEstimator:
         cls,
         catalog: Catalog,
         *,
-        model: PopulationModel | None = None,
-        target_params: Mapping[str, ArrayLike] | None = None,
-        hidden_sites: frozenset[str] | None = None,
+        model: Population | None = None,
         average_mode: AverageMode,
         frequency_mask: ArrayLike | None = None,
     ) -> Self:
@@ -124,16 +114,6 @@ class SpectralDensityImportanceEstimator:
         modified propagation, say -- and is resolved and bound here once, then
         reused for every later evaluation.
 
-        ``target_params`` is a representative hyperparameter point, used only to
-        discover which sites the target declares and to check that they agree
-        with the proposal's. It is needed because a population's site set can
-        depend on which parameters are present -- the physical merger rate is
-        declared only when its parameter is supplied -- so the structure cannot
-        be read off the model alone. It defaults to the catalog's generating
-        parameters, which is right whenever the target is the generating model,
-        and must be given when the target reads parameters the catalog does not
-        record (modified propagation, say).
-
         ``frequency_mask`` selects the analysis band. It reaches the power and
         nothing else: masking source samples would silently truncate the
         population and change every posterior without erroring.
@@ -141,40 +121,21 @@ class SpectralDensityImportanceEstimator:
         generating_model = catalog.get_population_model()
         generating_params = catalog.population_params
         target_model = generating_model if model is None else model
-        excluded = catalog.hidden_sites if hidden_sites is None else hidden_sites
-
-        proposal_sites = population_sites(generating_model, generating_params)
-        proposal_values = select_stochastic_values(
-            catalog.source_parameters, proposal_sites, label="proposal population"
+        source_parameters = {
+            name: jnp.asarray(value)
+            for name, value in catalog.source_parameters.items()
+        }
+        proposal_log_prob = generating_model.log_prob(
+            generating_params, source_parameters
         )
-        proposal_log_probs, _ = population_log_probs(
-            generating_model, generating_params, proposal_values, hidden_sites=excluded
-        )
-        proposal_log_prob = jax.tree.reduce(
-            operator.add, proposal_log_probs, initializer=jnp.zeros(())
-        )
-
-        # The target is executed here purely to check that it can be, and that
-        # it agrees with the proposal about which factors are in play. Matching
-        # excluded *names* is a weaker claim than it looks: two populations can
-        # both exclude `source_frame_mass_1` and still disagree about its law,
-        # in which case the omitted factors do not cancel and every weight is
-        # wrong with no shape error anywhere.
-        target_sites = population_sites(
-            target_model,
-            generating_params if target_params is None else target_params,
-        )
-        target_included = target_sites.stochastic - excluded
-        proposal_included = proposal_sites.stochastic - excluded
+        target_included = set(target_model.density_sites)
+        proposal_included = set(generating_model.density_sites)
         if target_included != proposal_included:
             raise ValueError(
                 "target and proposal populations must include the same source "
                 f"density factors; target includes {sorted(target_included)}, "
                 f"proposal includes {sorted(proposal_included)}"
             )
-        source_parameters = select_stochastic_values(
-            catalog.source_parameters, target_sites, label="target population"
-        )
 
         reference_distance = jnp.asarray(
             catalog.source_parameters[LUMINOSITY_DISTANCE_SITE]
@@ -210,7 +171,6 @@ class SpectralDensityImportanceEstimator:
             proposal_log_prob=proposal_log_prob,
             log_reference_distance=jnp.log(reference_distance),
             model=target_model,
-            hidden_sites=frozenset(excluded),
             average_mode=average_mode,
         )
 
@@ -228,12 +188,7 @@ class SpectralDensityImportanceEstimator:
         self, params: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, PopulationTrace]:
         """One model execution: the weights, and the trace holding its rate."""
-        site_log_probs, trace = population_log_probs(
-            self.model, params, self.source_parameters, hidden_sites=self.hidden_sites
-        )
-        target_log_prob = jax.tree.reduce(
-            operator.add, site_log_probs, initializer=jnp.zeros(())
-        )
+        target_log_prob, trace = self.model.evaluate(params, self.source_parameters)
         log_distance = jnp.log(
             required_deterministic(
                 trace, LUMINOSITY_DISTANCE_SITE, ndim=1, label="target population"

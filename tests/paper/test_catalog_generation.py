@@ -18,7 +18,6 @@ import pytest
 from repo import REPO_ROOT
 
 from astrogwb.catalog import Catalog
-from astrogwb.populations import BNS_HIDDEN_SITES
 
 CATALOG_TOML = """
 num_samples = 8
@@ -26,14 +25,6 @@ seed = 41
 
 [population]
 model = "{model}"
-hidden_sites = [
-  "source_frame_mass_1",
-  "source_frame_mass_2",
-  "spin_1z",
-  "spin_2z",
-  "lambda_1",
-  "lambda_2",
-]
 
 [population.kwargs]
 z_min = 0.0
@@ -98,7 +89,7 @@ def test_generation_produces_a_catalog_that_describes_itself(
         "n_grid": 256,
     }
     assert catalog.population_params["local_merger_rate"] == 770.0
-    assert catalog.hidden_sites == BNS_HIDDEN_SITES
+    assert catalog.density_sites == ("redshift",)
     assert catalog.polarization_power.shape[1] == 8
 
     # Round-tripping is the real assertion: loading re-executes the recorded

@@ -8,11 +8,11 @@ left ``xi_0``, ``xi_n`` and ``local_merger_rate`` checked by nothing at all.
 
 A catalog now records its complete population declaration: the registered model
 name, the model's construction settings, the hyperparameters it was drawn at,
-and the density factors excluded from importance weighting. That is enough to
+and the density factors included in importance weighting. That is enough to
 reconstruct the exact map from hyperparameters to source density, so the run
 config no longer restates any of it and nothing has to be cross-checked.
 
-The excluded-factor set is part of that record for a reason that is easy to
+The included-factor tuple is part of that record for a reason that is easy to
 miss: a catalog whose proposal density was computed with the mass factors
 excluded, reweighted against a target that includes them, gives silently wrong
 weights with no shape error anywhere.
@@ -25,7 +25,6 @@ a caller writing through them.
 
 from __future__ import annotations
 
-import functools
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -37,7 +36,7 @@ from numpy.typing import ArrayLike, NDArray
 from astrogwb.catalog.metadata import PopulationMetadata
 from astrogwb.populations import (
     REDSHIFT_SITE,
-    PopulationModel,
+    Population,
     population_model,
 )
 from astrogwb.waveform import PolarizationPowerGenerator
@@ -72,7 +71,7 @@ class Catalog:
     _model_name: str
     _model_kwargs: Mapping[str, Any]
     _population_params: Mapping[str, float]
-    _hidden_sites: frozenset[str]
+    _density_sites: tuple[str, ...]
 
     def __post_init__(self) -> None:
         power = np.asarray(self.polarization_power)
@@ -118,8 +117,8 @@ class Catalog:
                 "weight"
             )
 
-        if not isinstance(self._hidden_sites, frozenset):
-            object.__setattr__(self, "_hidden_sites", frozenset(self._hidden_sites))
+        if not isinstance(self._density_sites, tuple):
+            object.__setattr__(self, "_density_sites", tuple(self._density_sites))
         object.__setattr__(self, "polarization_power", power)
         object.__setattr__(self, "source_parameters", parameters)
         object.__setattr__(self, "_model_kwargs", dict(self._model_kwargs))
@@ -139,7 +138,7 @@ class Catalog:
         model_name: str,
         model_kwargs: Mapping[str, Any],
         population_params: Mapping[str, float],
-        hidden_sites: frozenset[str],
+        density_sites: tuple[str, ...],
     ) -> Self:
         """Generate polarization power and return a validated catalog.
 
@@ -159,7 +158,7 @@ class Catalog:
             _model_name=model_name,
             _model_kwargs=model_kwargs,
             _population_params=population_params,
-            _hidden_sites=hidden_sites,
+            _density_sites=density_sites,
         )
 
     # ----------------------------------------------------------------- #
@@ -186,19 +185,19 @@ class Catalog:
         return dict(self._population_params)
 
     @property
-    def hidden_sites(self) -> frozenset[str]:
-        """Source-density factors excluded from importance weighting."""
-        return self._hidden_sites
+    def density_sites(self) -> tuple[str, ...]:
+        """Ordered source-density factors included in importance weighting."""
+        return self._density_sites
 
-    def get_population_model(self) -> PopulationModel:
+    def get_population_model(self) -> Population:
         """Reconstruct the generating model with its construction settings bound.
 
         Returns the callable rather than a ``(model, kwargs)`` pair so every
         consumer sees the one ``model(params)`` interface. An unknown name
         fails here, listing what is registered.
         """
-        return functools.partial(
-            population_model(self._model_name), **self._model_kwargs
+        return population_model(self._model_name)(
+            **self._model_kwargs, density_sites=self._density_sites
         )
 
     # ----------------------------------------------------------------- #
@@ -269,7 +268,7 @@ class Catalog:
         whose columns drifted from its declared population fails here rather
         than producing a plausible, wrong spectrum.
 
-        Files written before the population record existed are rejected with a
+        Files written before the v3 population record are rejected with a
         regeneration message; there is no reconstruction path for them.
         """
         from astrogwb.catalog import _io
@@ -280,7 +279,7 @@ class Catalog:
         """Write source arrays, power, waveform metadata, and the population record.
 
         The population travels as ``(registry name, construction kwargs,
-        generating parameters, excluded sites)``. Neither this nor
+        generating parameters, density sites)``. Neither this nor
         :meth:`load` serializes a Python callable.
         """
         from astrogwb.catalog import _io

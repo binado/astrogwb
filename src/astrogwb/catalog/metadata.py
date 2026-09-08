@@ -1,7 +1,7 @@
 """Generation provenance for one catalog.
 
 Distinct from the *density spec* a catalog carries. The spec -- registry name,
-model construction settings, generating hyperparameters, excluded density
+model construction settings, generating hyperparameters, included density
 factors -- fully determines the law the samples follow, and lives on
 :class:`~astrogwb.catalog.Catalog`. What is left here is provenance: the seed
 and sample count a draw is reproducible from, and free-form scalar notes.
