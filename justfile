@@ -57,6 +57,11 @@ test-notebooks:
     uv run --extra simulation --extra io --group jupyter \
         jupytext --to notebook --execute notebooks/catalog_convergence.py
 
+# Execute the catalog shot-noise sweeps; ASTROGWB_NOTEBOOK_SMOKE=1 shrinks them.
+test-catalog-shot-noise:
+    uv run --extra notebook --group jupyter \
+        jupytext --to notebook --execute notebooks/catalog_shot_noise.py
+
 # Convert notebook from py:percent format to .ipynb
 convert-notebooks:
     uv run --group jupyter jupytext --to notebook notebooks/*.py

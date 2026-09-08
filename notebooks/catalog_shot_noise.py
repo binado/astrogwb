@@ -523,12 +523,22 @@ def generate_catalog_dataset(*, seed: int, num_samples: int) -> xr.Dataset:
 # proportionally lower. Plan for a peak in the single-digit GB range at
 # $N=65536$, not the ~3 GB the raw array arithmetic alone would suggest.
 #
-# **`LogDensityFn` recompiles at every sweep point.** The catalog's sample count
-# `N` is baked into the traced array shapes, so a new proposal size forces a new
-# trace; this is a consequence of the design, not an oversight to fix.
+# **Catalog arrays are dynamic inputs to one shared `LogDensityFn`.** Each
+# estimator crosses the JIT boundary as a pytree, including its polarization
+# power and source arrays. Changing array values alone can reuse compilation,
+# but changing the retained sample count changes the traced shapes. Preparation
+# also constructs a fresh population factory at every point; that factory is
+# static pytree metadata, so compilation reuse across sweep points is not
+# guaranteed even when their shapes match.
 
 
 # %%
+log_density_fn = LogDensityFn(
+    partial(gwb_spectral_density_model, priors=PRIORS),
+    chunk_size=CHUNK_SIZE,
+)
+
+
 class PosteriorPoint(NamedTuple):
     """One `(proposal, minimum_redshift)` evaluation's H0 posterior and diagnostics."""
 
@@ -600,13 +610,6 @@ def evaluate_h0_posteriors(
         )
         n_kept = int(inputs.proposal.sizes["sample"])
 
-        model = partial(
-            gwb_spectral_density_model,
-            spectral_density_fn=inputs.estimator,
-            priors=PRIORS,
-        )
-        log_density_fn = LogDensityFn(model, chunk_size=CHUNK_SIZE)
-
         h0_window = fisher_window(
             FIDUCIALS["H0"],
             FIDUCIALS["H0"] / snr,
@@ -616,7 +619,12 @@ def evaluate_h0_posteriors(
         h0_grid = uniform_grid(*h0_window, NPOINTS_1D)
         fixed = {name: FIDUCIALS[name] for name in PRIORS if name != "H0"}
         logpost = jax.block_until_ready(
-            log_density_fn({"H0": h0_grid}, fixed=fixed, **inputs.masked_model_kwargs())
+            log_density_fn(
+                {"H0": h0_grid},
+                fixed=fixed,
+                spectral_density_fn=inputs.estimator,
+                **inputs.masked_model_kwargs(),
+            )
         )
         results[minimum_redshift] = PosteriorPoint(
             h0_grid=h0_grid,
