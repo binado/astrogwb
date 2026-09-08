@@ -7,8 +7,8 @@ declaration, so the model cannot drift without a failure here.
 
 The composition properties get as much attention as the numbers. A population
 model is executed *inside* an outer inference model, and the two boundaries
-that make that safe -- handler isolation, and excluding constant factors by
-filtering names rather than hiding sites -- fail silently when they are wrong:
+that make that safe -- handler isolation, and substituting source values inside
+the selective block -- fail silently when they are wrong:
 sites leak into the outer joint density, or a factor drops out of one side of a
 ratio. Neither produces a shape error.
 """
@@ -46,7 +46,6 @@ from astrogwb.populations import (
     bns_md_uniform_mixture,
     derive_source_columns,
     draw_population,
-    included_log_prob,
     known_population_models,
     population_log_probs,
     population_model,
@@ -311,37 +310,24 @@ def test_modified_propagation_reduces_exactly_to_the_cosmological_model() -> Non
 # --------------------------------------------------------------------------- #
 # Excluded factors
 # --------------------------------------------------------------------------- #
-def test_excluding_factors_drops_exactly_those_terms() -> None:
-    site_log_probs, _ = population_log_probs(
+def test_excluding_factors_preserves_supplied_values_and_deterministics() -> None:
+    site_log_probs, trace = population_log_probs(
         mock_population_model(), POPULATION_PARAMS, sample_values()
     )
-    excluded = frozenset({"spin_1z", "lambda_2"})
-    total = included_log_prob(site_log_probs, hidden_sites=excluded, label="population")
-    expected = sum(
-        (value for name, value in site_log_probs.items() if name not in excluded),
-        start=jnp.zeros(()),
+    excluded = frozenset({"source_frame_mass_1", "spin_1z", "lambda_2"})
+    filtered_probs, filtered_trace = population_log_probs(
+        mock_population_model(),
+        POPULATION_PARAMS,
+        sample_values(),
+        hidden_sites=excluded,
     )
-    np.testing.assert_array_equal(total, expected)
-
-
-def test_redshift_can_never_be_excluded() -> None:
-    site_log_probs, _ = population_log_probs(
-        mock_population_model(), POPULATION_PARAMS, sample_values()
-    )
-    with pytest.raises(ValueError, match="never be excluded"):
-        included_log_prob(
-            site_log_probs, hidden_sites=frozenset({REDSHIFT_SITE}), label="population"
-        )
-
-
-def test_excluding_an_unknown_site_is_rejected() -> None:
-    site_log_probs, _ = population_log_probs(
-        mock_population_model(), POPULATION_PARAMS, sample_values()
-    )
-    with pytest.raises(ValueError, match="not stochastic sites"):
-        included_log_prob(
-            site_log_probs, hidden_sites=frozenset({"mass_pair"}), label="population"
-        )
+    assert set(filtered_probs) == set(site_log_probs) - excluded
+    assert set(filtered_trace) == set(trace) - excluded
+    for name, value in filtered_probs.items():
+        assert value.shape == SAMPLE_REDSHIFTS.shape
+        np.testing.assert_array_equal(value, site_log_probs[name])
+    for name, site in filtered_trace.items():
+        np.testing.assert_array_equal(site["value"], trace[name]["value"])
 
 
 # --------------------------------------------------------------------------- #
@@ -354,7 +340,10 @@ def _outer_model(observed: jax.Array) -> None:
     total = jnp.zeros(())
     for _ in range(2):
         site_log_probs, trace = population_log_probs(
-            mock_target_model(), params, sample_values()
+            mock_target_model(),
+            params,
+            sample_values(),
+            hidden_sites=frozenset({"source_frame_mass_1"}),
         )
         total = total + jnp.sum(site_log_probs[REDSHIFT_SITE])
         total = total + jnp.sum(trace[LUMINOSITY_DISTANCE_SITE]["value"])

@@ -325,10 +325,10 @@ def test_proposal_density_is_evaluated_only_during_preparation(
     calls = 0
     original = estimator_module.population_log_probs
 
-    def counted(model, params, source_values):
+    def counted(model, params, source_values, **kwargs):
         nonlocal calls
         calls += 1
-        return original(model, params, source_values)
+        return original(model, params, source_values, **kwargs)
 
     monkeypatch.setattr(estimator_module, "population_log_probs", counted)
     estimator = SpectralDensityImportanceEstimator.from_catalog(

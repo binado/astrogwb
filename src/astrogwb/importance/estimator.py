@@ -32,6 +32,7 @@ log densities produces ``nan``, which propagates silently.
 
 from __future__ import annotations
 
+import operator
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Self
@@ -48,7 +49,6 @@ from astrogwb.populations import (
     TOTAL_MERGER_RATE_SITE,
     PopulationModel,
     PopulationTrace,
-    included_log_prob,
     population_log_probs,
     population_sites,
     required_deterministic,
@@ -148,10 +148,10 @@ class SpectralDensityImportanceEstimator:
             catalog.source_parameters, proposal_sites, label="proposal population"
         )
         proposal_log_probs, _ = population_log_probs(
-            generating_model, generating_params, proposal_values
+            generating_model, generating_params, proposal_values, hidden_sites=excluded
         )
-        proposal_log_prob = included_log_prob(
-            proposal_log_probs, hidden_sites=excluded, label="proposal population"
+        proposal_log_prob = jax.tree.reduce(
+            operator.add, proposal_log_probs, initializer=jnp.zeros(())
         )
 
         # The target is executed here purely to check that it can be, and that
@@ -229,10 +229,10 @@ class SpectralDensityImportanceEstimator:
     ) -> tuple[jax.Array, PopulationTrace]:
         """One model execution: the weights, and the trace holding its rate."""
         site_log_probs, trace = population_log_probs(
-            self.model, params, self.source_parameters
+            self.model, params, self.source_parameters, hidden_sites=self.hidden_sites
         )
-        target_log_prob = included_log_prob(
-            site_log_probs, hidden_sites=self.hidden_sites, label="target population"
+        target_log_prob = jax.tree.reduce(
+            operator.add, site_log_probs, initializer=jnp.zeros(())
         )
         log_distance = jnp.log(
             required_deterministic(

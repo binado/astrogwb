@@ -12,16 +12,16 @@ Two boundaries make a population model safe to evaluate *inside* an outer
 inference model:
 
 - The whole utility call runs under ``handlers.block()``. The trace the utility
-  builds internally still sees every population site, but enclosing inference
-  handlers do not, so population sites never enter the outer joint density and
-  repeated evaluations cannot raise duplicate-site errors. The block wraps the
-  *call*, never the model: a blocked model handed to the utility would hide the
-  sites from the utility's own trace as well. Blocking does not stop gradients
-  flowing through the numerical result.
-- Constant factors are excluded by *filtering the returned densities by name*,
-  never by selectively hiding sites. Every site still executes, so downstream
-  deterministics -- detector-frame masses, distances -- are computed from the
-  same values the density was evaluated at.
+  builds internally still sees the included population sites, but enclosing
+  inference handlers do not, so population sites never enter the outer joint
+  density and repeated evaluations cannot raise duplicate-site errors. The
+  block wraps the *call*. Blocking does not stop gradients flowing through the
+  numerical result.
+- Constant factors are excluded by selectively blocking the model after
+  substituting source values inside that block. Hidden sites receive their
+  supplied values but never reach the utility's trace or log-probability
+  calculation. Every site still executes, so downstream deterministics --
+  detector-frame masses, distances -- use the supplied source values.
 
 Only stochastic source values are substituted. Substituting a stored derived
 column would overwrite the value the model recomputes and defeat the
@@ -48,7 +48,6 @@ __all__ = [
     "TOTAL_MERGER_RATE_SITE",
     "PopulationSites",
     "PopulationTrace",
-    "included_log_prob",
     "population_log_probs",
     "population_sites",
     "redshift_log_density",
@@ -166,6 +165,8 @@ def population_log_probs(
     model: PopulationModel,
     params: Mapping[str, ArrayLike],
     source_values: Mapping[str, ArrayLike],
+    *,
+    hidden_sites: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, jax.Array], PopulationTrace]:
     """Per-site log densities and the trace, at supplied stochastic values.
 
@@ -173,42 +174,16 @@ def population_log_probs(
     reach the sampler, and this evaluation carries no RNG key by design.
     Returns the densities *unreduced*, so each has the sample axis the weights
     need, together with the trace holding the recomputed deterministics.
+    ``hidden_sites`` excludes factors from the densities and trace without
+    changing their supplied values. Exclusion names are not validated here.
     """
     with handlers.block():
-        return compute_log_probs(
-            model, (params,), {}, dict(source_values), sum_log_prob=False
+        bound_model = handlers.substitute(
+            model,
+            data={name: jnp.asarray(value) for name, value in source_values.items()},
         )
-
-
-def included_log_prob(
-    site_log_probs: Mapping[str, jax.Array],
-    *,
-    hidden_sites: frozenset[str],
-    label: str,
-) -> jax.Array:
-    """Sum the source densities that are not excluded as constant factors.
-
-    Excluding a factor is a claim that it cancels between target and proposal.
-    Redshift never cancels, so it can never be excluded.
-    """
-    if REDSHIFT_SITE in hidden_sites:
-        raise ValueError(
-            f"{label}: {REDSHIFT_SITE!r} density can never be excluded from the "
-            "importance weights"
-        )
-    unknown = sorted(hidden_sites - set(site_log_probs))
-    if unknown:
-        raise ValueError(
-            f"{label}: excluded site(s) {unknown} are not stochastic sites of this "
-            f"population; it declares {sorted(site_log_probs)}"
-        )
-    included = [
-        value for name, value in site_log_probs.items() if name not in hidden_sites
-    ]
-    total = jnp.zeros(())
-    for value in included:
-        total = total + value
-    return total
+        filtered_model = handlers.block(bound_model, hide=list(hidden_sites))
+        return compute_log_probs(filtered_model, (params,), {}, {}, sum_log_prob=False)
 
 
 def required_deterministic(
