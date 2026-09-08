@@ -40,11 +40,10 @@
 # IMRPhenom-vs-itself "systematics baseline" run), which removes the resulting
 # importance-weight mismatch rather than showing the underlying noise source.
 #
-# This notebook makes the mechanism itself the subject: three figures showing how
+# This notebook makes the mechanism itself the subject: two figures showing how
 # the recovered $H_0$ posterior degrades as (1) the proposal catalog shrinks,
-# holding the redshift cutoff fixed, (1b) that same size sweep's relative bias
-# against the fiducial, and (2) the redshift cutoff moves toward $z=0$, holding
-# catalog size fixed. It uses the **default detector network only**
+# holding the redshift cutoff fixed, and (2) the redshift cutoff moves toward
+# $z=0$, holding catalog size fixed. It uses the **default detector network only**
 # (`DEFAULT_NETWORK`, `ET-2L-aligned-CE-Hanford`) to keep the figures to a small,
 # readable set of curves.
 #
@@ -68,10 +67,8 @@
 # notebook's own output and is not comparable to a previously committed run.
 #
 # **Outputs (when `SAVE_OUTPUTS`):** `figures/H0-catalog-size-sweep.pdf` + `.csv` +
-# `.tex`, `figures/H0-relative-bias-vs-size.pdf` (no separate `.csv`/`.tex`; rides on
-# `SIZE_SHIFT_TABLE`'s export), `figures/H0-redshift-cutoff-sweep.pdf` + `.csv` +
-# `.tex`, and raw grids under `grids/catalog_shot_noise.npz` plus a JSON metadata
-# sidecar.
+# `.tex`, `figures/H0-redshift-cutoff-sweep.pdf` + `.csv` + `.tex`, and raw grids
+# under `grids/catalog_shot_noise.npz` plus a JSON metadata sidecar.
 #
 # This notebook needs the repository root as its working directory.
 
@@ -117,9 +114,8 @@ from astrogwb.paper.config.constants import (
 from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.inference import prepare_inference_inputs
 from astrogwb.paper.plotting import (
-    CATEGORY,
+    DETECTOR_COMPARISON_LEGEND,
     DETECTOR_NETWORKS,
-    MERGER_RATE_LEGEND,
     TRUTH,
     Network,
     combo_colors,
@@ -676,7 +672,7 @@ SNR_TABLE = compute_network_snrs(
 )
 snr = float(SNR_TABLE["snr"].iloc[0])
 print(f"SNR ({NETWORK.label}): {snr:.1f}")
-SNR_TABLE
+SNR_TABLE.style.format(precision=2)
 
 # %% [markdown]
 # ## Zero-mismatch reference curve
@@ -762,7 +758,7 @@ for (n_samples, point), color in zip(
     ax.plot(
         grid_np,
         density,
-        label=f"N={n_samples} (s{PROPOSAL_SEEDS[n_samples]})",
+        label=rf"$N={n_samples}$",
         color=color,
     )
 
@@ -772,14 +768,14 @@ _reference_density /= np.trapezoid(_reference_density, _reference_grid_np)
 ax.plot(
     _reference_grid_np,
     _reference_density,
-    label=f"self-matched (N={INJECTION_SIZE})",
+    label=rf"self-matched ($N={INJECTION_SIZE}$)",
     color=str(TRUTH["color"]),
     linestyle="--",
     linewidth=TRUTH["linewidth"],
 )
 ax.axvline(FIDUCIALS["H0"], **TRUTH)
 ax.set(xlabel=PARAMETER_LABELS["H0"], ylabel="Posterior density")
-ax.legend(**MERGER_RATE_LEGEND)
+ax.legend(**DETECTOR_COMPARISON_LEGEND)
 fig_size_sweep.tight_layout()
 fig_size_sweep
 
@@ -794,7 +790,7 @@ for n_samples, point in SIZE_SWEEP_RESULTS.items():
     h0_map, _, sigma = posterior_summary(point.h0_grid, point.log_posterior)
     _size_rows.append(
         {
-            "label": f"N={n_samples} (s{PROPOSAL_SEEDS[n_samples]})",
+            "label": str(n_samples),
             "h0_map": h0_map,
             "shift": h0_map - FIDUCIALS["H0"],
             "sigma": sigma,
@@ -808,7 +804,7 @@ _reference_h0_map, _, _reference_sigma = posterior_summary(
 )
 _size_rows.append(
     {
-        "label": f"self-matched (N={INJECTION_SIZE})",
+        "label": f"self-matched ({INJECTION_SIZE})",
         "h0_map": _reference_h0_map,
         "shift": _reference_h0_map - FIDUCIALS["H0"],
         "sigma": _reference_sigma,
@@ -821,53 +817,10 @@ SIZE_SHIFT_TABLE = pd.DataFrame(_size_rows).assign(
     rel_bias=lambda df: df["shift"] / FIDUCIALS["H0"],
     rel_sigma=lambda df: df["sigma"] / FIDUCIALS["H0"],
 )
-SIZE_SHIFT_TABLE
+SIZE_SHIFT_TABLE.style.format(precision=2)
 
 # %% [markdown]
-# ## Figure 2 -- Relative bias in H0 vs. catalog size
-#
-# ≙ `H0-relative-bias-vs-size.pdf`. The same `SIZE_SHIFT_TABLE` values plotted
-# against `N` instead of overlaid as posterior curves: relative bias
-# `(H0_MAP - H0_fid)/H0_fid`, error bars at `sigma_H0/H0_fid`. As in Figure 1,
-# five points from one independent realization each is not enough to fit a
-# shot-noise scaling law -- this is a visual comparison against the
-# self-matched floor, not a fitted trend.
-
-# %%
-_size_ns = np.asarray(list(PROPOSAL_SEEDS), dtype=np.float64)
-_size_sweep_rows = SIZE_SHIFT_TABLE.iloc[: len(_size_ns)]
-_reference_row = SIZE_SHIFT_TABLE.iloc[-1]
-
-fig_size_relative_bias, ax = plt.subplots()
-ax.errorbar(
-    _size_ns,
-    _size_sweep_rows["rel_bias"],
-    yerr=_size_sweep_rows["rel_sigma"],
-    fmt="o-",
-    lw=1.3,
-    capsize=3,
-    color=CATEGORY["cosmology"],
-    label="size sweep",
-)
-ax.errorbar(
-    [INJECTION_SIZE],
-    [_reference_row["rel_bias"]],
-    yerr=[_reference_row["rel_sigma"]],
-    fmt="D",
-    capsize=3,
-    color=str(TRUTH["color"]),
-    label=f"self-matched (N={INJECTION_SIZE})",
-)
-ax.axhline(0.0, **TRUTH)
-ax.set_xscale("log")
-ax.set_xlabel("catalog size $N$")
-ax.set_ylabel(r"relative bias in $H_0$")
-ax.legend(**MERGER_RATE_LEGEND)
-fig_size_relative_bias.tight_layout()
-fig_size_relative_bias
-
-# %% [markdown]
-# ## Figure 3 -- H0 posterior vs. redshift cutoff
+# ## Figure 2 -- H0 posterior vs. redshift cutoff
 #
 # ≙ `H0-redshift-cutoff-sweep.pdf`. The proposal catalog is held fixed at
 # `N=INJECTION_SIZE` (seed `PROPOSAL_SEEDS[INJECTION_SIZE]`); only
@@ -885,19 +838,24 @@ for (minimum_redshift, point), color in zip(
     grid_np = np.asarray(point.h0_grid)
     density = safe_exponentiate(point.log_posterior)
     density /= np.trapezoid(density, grid_np)
-    ax.plot(grid_np, density, label=f"z_min={minimum_redshift}", color=color)
+    ax.plot(
+        grid_np,
+        density,
+        label=rf"$z_{{\mathrm{{min}}}}={minimum_redshift}$",
+        color=color,
+    )
 
 ax.plot(
     _reference_grid_np,
     _reference_density,
-    label=f"self-matched (z_min={ANALYSIS_GRID.minimum_redshift})",
+    label=rf"self-matched ($z_{{\mathrm{{min}}}}={ANALYSIS_GRID.minimum_redshift}$)",
     color=str(TRUTH["color"]),
     linestyle="--",
     linewidth=TRUTH["linewidth"],
 )
 ax.axvline(FIDUCIALS["H0"], **TRUTH)
 ax.set(xlabel=PARAMETER_LABELS["H0"], ylabel="Posterior density")
-ax.legend(**MERGER_RATE_LEGEND)
+ax.legend(**{**DETECTOR_COMPARISON_LEGEND, "ncol": 2})
 fig_zmin_sweep.tight_layout()
 fig_zmin_sweep
 
@@ -932,7 +890,7 @@ _zmin_rows.append(
     }
 )
 ZMIN_SHIFT_TABLE = pd.DataFrame(_zmin_rows)
-ZMIN_SHIFT_TABLE
+ZMIN_SHIFT_TABLE.style.format(precision=2)
 
 # %% [markdown]
 # ## Saving the grids and figures
@@ -986,9 +944,6 @@ if SAVE_OUTPUTS:
 
     fig_size_sweep.savefig(
         FIGURE_DIR / "H0-catalog-size-sweep.pdf", bbox_inches="tight"
-    )
-    fig_size_relative_bias.savefig(
-        FIGURE_DIR / "H0-relative-bias-vs-size.pdf", bbox_inches="tight"
     )
     fig_zmin_sweep.savefig(
         FIGURE_DIR / "H0-redshift-cutoff-sweep.pdf", bbox_inches="tight"
