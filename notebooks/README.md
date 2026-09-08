@@ -33,6 +33,12 @@ repository root as the working directory.
   figures from `scripts/mcmc_cosmological_parameters.py` via grid-evaluated
   posteriors (`LogDensityFn`, `plot_corner_for_posterior_grid`) instead of NUTS
   chains, sizing the `H0` grid per network from its matched-filter SNR
+- **`catalog_shot_noise.py`** — visualizes the Monte Carlo shot noise that
+  `cosmological_parameters_grid.py` sidesteps by self-matching its catalog:
+  how the recovered `H0` posterior shifts from the fiducial as the proposal
+  catalog shrinks and as the redshift cutoff moves toward `z = 0`, for the
+  default network only. Reuses catalogs already built for the other
+  paper-analysis notebooks; no new ones needed.
 
 `mcmc.py`, `mcmc_plotting.py`, and `logposterior_grid.py` merge a run's config
 layers with `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper

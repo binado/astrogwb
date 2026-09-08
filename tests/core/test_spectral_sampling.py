@@ -7,6 +7,7 @@ against explicit quadrature.
 """
 
 from collections.abc import Mapping
+from dataclasses import replace
 from functools import partial
 from typing import Any
 
@@ -31,6 +32,7 @@ from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import 
     compute_merger_rate_distance_and_logprob,
 )
 from astrogwb.sampling import (
+    LogDensityFn,
     SpectralDensityFn,
     amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
@@ -323,6 +325,49 @@ def test_estimator_likelihood_and_gradient_match_the_grid_formula(
     ) / (2.0 * step)
     np.testing.assert_allclose(actual_value, value, rtol=1e-12)
     np.testing.assert_allclose(gradient, numerical, rtol=1e-5)
+
+
+def test_log_density_reuses_trace_across_same_shaped_importance_catalogs() -> None:
+    """Dynamic catalog values change the density without retracing a shared factory."""
+    estimator = _importance_estimator("catalog_inclination")
+    population = estimator.population_fn(FIDUCIALS)
+    model = partial(gwb_spectral_density_model, priors={"H0": dist.Uniform(50.0, 90.0)})
+    calls: list[None] = []
+
+    def counting_model(**kwargs: Any) -> None:
+        calls.append(None)
+        model(**kwargs)
+
+    # Unbatched mapping has no separate remainder trace to confuse this count.
+    evaluate = LogDensityFn(counting_model)
+    h0_grid = jnp.array([65.0, 70.0, 75.0])
+    observed, _ = estimator({"H0": 70.0})
+    data = {
+        "observed_spectral_density": observed,
+        "scale": jnp.full(3, jnp.max(observed) / 3.0),
+    }
+    results = []
+    for factor in (1.0, 1.1, 1.2):
+        redshift = estimator.catalog.source_parameters["redshift"] * factor
+        distances = population.luminosity_distance(redshift)
+        catalog = ImportanceCatalog.from_population(
+            population=population,
+            source_parameters={"redshift": redshift, "luminosity_distance": distances},
+            polarization_power=estimator.catalog.polarization_power * factor,
+            luminosity_distance=distances,
+        )
+        current = replace(estimator, catalog=catalog)
+        kwargs: dict[str, Any] = {"spectral_density_fn": current, **data}
+        actual = evaluate({"H0": h0_grid}, **kwargs).block_until_ready()
+        expected = jnp.stack(
+            [log_density(model, (), kwargs, {"H0": h0})[0] for h0 in h0_grid]
+        )
+        np.testing.assert_allclose(actual, expected, rtol=1e-12)
+        assert len(calls) == 1, "same-shaped catalogs must reuse the model trace"
+        results.append(np.asarray(actual))
+
+    assert not np.allclose(results[0], results[1])
+    assert not np.allclose(results[1], results[2])
 
 
 def test_amplitude_adapter_preserves_reconstruction_and_jit() -> None:

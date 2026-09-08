@@ -23,12 +23,13 @@ from astrogwb.utils import years_to_seconds
 
 if TYPE_CHECKING:
     import pandas as pd
+    import xarray as xr
 
     from astrogwb.paper.plotting import Network
 
 
 def compute_network_snrs(
-    injection_catalog_path: Path,
+    injection_catalog: Path | xr.Dataset,
     networks: Sequence[Network],
     fiducials: Mapping[str, float],
     *,
@@ -36,16 +37,22 @@ def compute_network_snrs(
 ) -> pd.DataFrame:
     """Compute the fiducial matched-filter SNR for each detector network.
 
-    ``injection_catalog_path`` is the injection catalog file the run's chains
-    were sampled against; the caller resolves it from the same merged run
-    config that supplied ``fiducials`` and ``grid``, so a figure's SNR is
-    computed over exactly that catalog.
+    ``injection_catalog`` is the injection catalog the run's chains were
+    sampled against, either a path to load or an already-loaded dataset (a
+    notebook generating its catalog in-process passes one directly). A path
+    is resolved from the same merged run config that supplied ``fiducials``
+    and ``grid``, so a figure's SNR is computed over exactly that catalog.
     """
     import pandas as pd
+    import xarray as xr
 
     from astrogwb.paper.catalogs import load_run_catalog
 
-    catalog = load_run_catalog(injection_catalog_path, label="injection")
+    catalog = (
+        injection_catalog
+        if isinstance(injection_catalog, xr.Dataset)
+        else load_run_catalog(injection_catalog, label="injection")
+    )
     observation = prepare_observation(catalog, fiducials=fiducials, grid=grid)
     frequencies = observation.frequencies
     band = observation.frequency_mask
