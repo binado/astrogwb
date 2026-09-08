@@ -13,7 +13,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
+import jax.numpy as jnp
 import numpy as np
+from numpyro import handlers
 
 from astrogwb.catalog import Catalog, PopulationMetadata
 from astrogwb.populations import (
@@ -39,6 +41,16 @@ PAPER_POPULATION_PARAMS: dict[str, float] = {
 }
 
 
+def _derived_columns(model, params, sources):
+    """Replay a population at fixed source values, returning declared outputs."""
+    with handlers.block():
+        bound = handlers.condition(
+            model, data={name: jnp.asarray(value) for name, value in sources.items()}
+        )
+        trace = handlers.trace(bound).get_trace(params)
+    return {name: jnp.asarray(trace[name]["value"]) for name in model.source_sites}
+
+
 def source_parameters(
     redshift: np.ndarray,
     *,
@@ -49,7 +61,8 @@ def source_parameters(
     """Complete a redshift ladder into every column the population declares."""
     model = population_model(model_name)(**model_kwargs or PAPER_MODEL_KWARGS)
     ones = np.ones_like(redshift)
-    columns = model.derive_sources(
+    columns = _derived_columns(
+        model,
         population_params or PAPER_POPULATION_PARAMS,
         {
             "redshift": redshift,

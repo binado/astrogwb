@@ -18,9 +18,13 @@ from exactly the density the tests reweight with.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax.typing import ArrayLike
+from numpyro import handlers
 
 from astrogwb.catalog import Catalog, PopulationMetadata
 from astrogwb.constants import ISCO_ALPHA
@@ -31,6 +35,26 @@ from astrogwb.populations import (
     Population,
 )
 from astrogwb.waveform import AnalyticInspiralGenerator
+
+
+def derived_columns(
+    model: Population,
+    params: Mapping[str, ArrayLike],
+    sources: Mapping[str, ArrayLike],
+) -> dict[str, jax.Array]:
+    """Replay a population at fixed source values, returning declared outputs.
+
+    The test-side counterpart of the batched replay inside
+    :meth:`astrogwb.populations.Population.sample`: sample sites take the
+    supplied values, deterministic outputs are the model's recomputation.
+    """
+    with handlers.block():
+        bound = handlers.condition(
+            model, data={name: jnp.asarray(value) for name, value in sources.items()}
+        )
+        trace = handlers.trace(bound).get_trace(params)
+    return {name: jnp.asarray(trace[name]["value"]) for name in model.source_sites}
+
 
 #: Hyperparameters the mock injection is drawn at and built at.
 #: ``local_merger_rate`` is in Gpc^-3 yr^-1; the rest feed the Madau-Dickinson
@@ -208,7 +232,7 @@ def synthetic_source_parameters(n_samples: int = 16) -> dict[str, jax.Array]:
         "lambda_1": 400.0 * constant,
         "lambda_2": 300.0 * constant,
     }
-    return mock_population_model().derive_sources(POPULATION_PARAMS, stochastic)
+    return derived_columns(mock_population_model(), POPULATION_PARAMS, stochastic)
 
 
 def build_synthetic_estimator(

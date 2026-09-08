@@ -103,14 +103,14 @@ log_prob = population.log_prob(params, sources)  # shape (1024,)
 - `density_sites` selects the density factors included in importance weighting.
   The BNS classes default to `("redshift",)`, since their other factors cancel
   between proposal and target. Omitting factors does not marginalize variables.
-- `derive_sources(params, sources)` recomputes the declared outputs from supplied
-  sample values. Stored deterministic values never override model calculations.
 - `evaluate(params, sources)` returns both the selected log density and a trace
   containing recomputed distances and rate, letting inference use one execution.
 
 Sampling uses `Predictive` followed by batched recomputation of derived columns.
-That pass matches density evaluation and preserves exactly zero self-reweighting
-errors. No seeded site-discovery pass or array-rank heuristic selects outputs.
+Conditioning affects sample sites only, so stored deterministic values never
+override the model's recomputation. That pass matches density evaluation and
+preserves exactly zero self-reweighting errors. No seeded site-discovery pass or
+array-rank heuristic selects outputs.
 The methods isolate their NumPyro effects from enclosing inference models.
 
 A population can remain static in a JIT-compiled estimator, while hyperparameters

@@ -15,6 +15,7 @@ from astrogwb_mock_population import (
     N_GRID,
     Z_MAX,
     Z_MIN,
+    derived_columns,
     make_redshift_grid,
     mock_population_metadata,
     mock_target_model,
@@ -67,7 +68,8 @@ def _source_parameters(
     params: Mapping[str, float] = OFF_POPULATION_PARAMS,
 ) -> dict[str, jax.Array]:
     ones = jnp.ones_like(REDSHIFTS)
-    return _generating_model().derive_sources(
+    return derived_columns(
+        _generating_model(),
         params,
         {
             REDSHIFT_SITE: REDSHIFTS,

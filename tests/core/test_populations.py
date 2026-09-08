@@ -30,6 +30,7 @@ from astrogwb_mock_population import (
     POPULATION_PARAMS,
     Z_MAX,
     Z_MIN,
+    derived_columns,
     make_redshift_grid,
     mock_population_model,
     mock_target_model,
@@ -171,12 +172,12 @@ def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
         LUMINOSITY_DISTANCE_SITE: jnp.ones_like(SAMPLE_REDSHIFTS),
         "detector_frame_mass_1": jnp.zeros_like(SAMPLE_REDSHIFTS),
     }
-    expected = model.derive_sources(POPULATION_PARAMS, sample_values())
-    actual = model.derive_sources(POPULATION_PARAMS, stored)
-    _, trace = model.evaluate(POPULATION_PARAMS, stored)
+    _, clean = model.evaluate(POPULATION_PARAMS, sample_values())
+    actual = derived_columns(model, POPULATION_PARAMS, stored)
+    _, tampered = model.evaluate(POPULATION_PARAMS, stored)
     for name in (LUMINOSITY_DISTANCE_SITE, "detector_frame_mass_1"):
-        np.testing.assert_array_equal(actual[name], expected[name])
-        np.testing.assert_array_equal(trace[name]["value"], expected[name])
+        np.testing.assert_array_equal(actual[name], clean[name]["value"])
+        np.testing.assert_array_equal(tampered[name]["value"], clean[name]["value"])
 
 
 # --------------------------------------------------------------------------- #
@@ -242,7 +243,7 @@ def test_wrongly_shaped_deterministic_is_rejected() -> None:
 
 def test_derived_columns_match_the_declared_transforms() -> None:
     values = sample_values()
-    columns = mock_population_model().derive_sources(POPULATION_PARAMS, values)
+    columns = derived_columns(mock_population_model(), POPULATION_PARAMS, values)
     one_plus_z = 1.0 + SAMPLE_REDSHIFTS
     np.testing.assert_array_equal(
         columns["detector_frame_mass_1"], values["source_frame_mass_1"] * one_plus_z
@@ -524,8 +525,8 @@ def test_sampling_is_jittable_and_isolated_from_outer_handlers() -> None:
 
 
 def test_sampling_and_derivation_are_isolated_without_jit() -> None:
-    model = mock_population_model()
     with handlers.trace() as outer:
-        sources = model.sample(jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=8)
-        model.derive_sources(POPULATION_PARAMS, sources)
+        mock_population_model().sample(
+            jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=8
+        )
     assert outer == {}
