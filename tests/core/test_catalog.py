@@ -6,6 +6,7 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+import jax
 import numpy as np
 import pytest
 
@@ -120,6 +121,7 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
         )
     ).T
 
+    assert isinstance(actual, jax.Array)
     np.testing.assert_array_equal(actual, expected)
 
 

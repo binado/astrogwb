@@ -41,7 +41,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike as JaxArrayLike
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import ArrayLike
 
 from astrogwb.constants import MPC_IN_SECONDS, SOLAR_MASS_IN_SECONDS
 from astrogwb.utils import require_x64
@@ -294,14 +294,10 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
 
     alpha: float
 
-    def __call__(
-        self, source_parameters: Mapping[str, ArrayLike]
-    ) -> NDArray[np.float64]:
+    def __call__(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         prepared_parameters = {
             name: np.asarray(values) for name, values in source_parameters.items()
         }
-        return np.asarray(
-            inspiral_polarization_power(
-                self.frequencies, prepared_parameters, alpha=self.alpha
-            )
+        return inspiral_polarization_power(
+            self.frequencies, prepared_parameters, alpha=self.alpha
         ).T

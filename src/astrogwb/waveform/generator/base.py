@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -99,7 +98,7 @@ class PolarizationPowerGenerator:
         object.__setattr__(self, "_frequencies_cache", frequencies)
         return frequencies
 
-    def __call__(self, source_parameters: Mapping[str, ArrayLike]) -> Any:
+    def __call__(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Generate power for ``source_parameters``.
 
         The base implementation exists so it can describe a loaded catalog;

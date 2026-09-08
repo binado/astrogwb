@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import jax
 import numpy as np
 import pytest
 
@@ -92,6 +93,7 @@ def test_ripple_generator_owns_grid_and_reduces_chunked_power(
     assert generator.frequencies[0] == 20.0
     assert generator.frequencies[-1] == 100.0
     assert generator.df == 4.0
+    assert isinstance(power, jax.Array)
     assert power.shape == (generator.frequencies.size, 2)
     assert power.dtype == np.float64
     assert np.all(power >= 0.0)
