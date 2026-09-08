@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from gwmock_signal.waveform import RippleBackend
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import ArrayLike
 
 from astrogwb.utils import array_dict_shape
 from astrogwb.waveform.generator.base import PolarizationPowerGenerator
@@ -105,9 +105,7 @@ class RippleGenerator(PolarizationPowerGenerator):
             )
         return self._frequencies_cache
 
-    def __call__(
-        self, source_parameters: Mapping[str, ArrayLike]
-    ) -> NDArray[np.float64]:
+    def __call__(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Generate power in ``(frequency, sample)`` layout, chunk by chunk."""
         parameters = {
             name: jnp.asarray(values) for name, values in source_parameters.items()
@@ -153,4 +151,4 @@ class RippleGenerator(PolarizationPowerGenerator):
             )
             logger.info("Generated chunk %d:%d of %d events", start, stop, n_events)
 
-        return np.asarray(jnp.concatenate(power_chunks, axis=1), dtype=np.float64)
+        return jnp.concatenate(power_chunks, axis=1)
