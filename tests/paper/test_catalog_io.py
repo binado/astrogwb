@@ -1,97 +1,88 @@
-"""Round-trip and format tests for the paper-owned xarray catalog I/O."""
+"""Round-trip and format tests for the catalog's own HDF5 serialization.
+
+A catalog file records the density that drew it: the registered population
+model, that model's construction settings, the hyperparameters, and the
+excluded density factors. Everything here is about that record surviving the
+round trip intact -- and about a file that no longer describes its own arrays
+being rejected rather than loaded.
+"""
 
 from __future__ import annotations
 
+import json
+from functools import partial
 from pathlib import Path
+from typing import cast
 
 import h5py
 import numpy as np
 import pytest
 import xarray as xr
+from catalog_fixtures import (
+    PAPER_MODEL,
+    PAPER_MODEL_KWARGS,
+    PAPER_POPULATION_PARAMS,
+    make_catalog,
+    save_catalog,
+)
 
-from astrogwb.catalog import Catalog, PopulationMetadata
-from astrogwb.catalog.io import (
+from astrogwb.catalog import Catalog
+from astrogwb.catalog._io import (
     DOMAIN_FREQUENCY,
     FORMAT_NAME,
+    HIDDEN_SITES_ATTR,
+    MODEL_KWARGS_ATTR,
+    MODEL_NAME_ATTR,
+    POPULATION_PARAMS_ATTR,
+    PROPOSAL_ATTR,
     RESERVED_ATTRS,
-    catalog_from_dataset,
     catalog_to_dataset,
-    load_catalog,
-    open_catalog,
-    save_catalog,
     validate_catalog_dataset,
 )
+from astrogwb.populations import BNS_HIDDEN_SITES
 from astrogwb.waveform import PolarizationPowerGenerator
 
+REDSHIFT = np.array([0.1, 0.5, 1.0])
 
-def _catalog(
-    *,
-    provenance: dict[str, str | int | float] | None = None,
-    source_type: str | None = "bns",
-) -> Catalog:
-    return Catalog(
-        source_parameters={
-            "redshift": np.array([0.1, 0.5, 1.0]),
-            "integer_parameter": np.array([1, 2, 3], dtype=np.int16),
-        },
-        polarization_power=np.arange(12, dtype=np.float64).reshape(4, 3),
-        waveform_metadata=PolarizationPowerGenerator(
-            approximant="Toy",
-            minimum_frequency=10.0,
-            maximum_frequency=40.0,
-            reference_frequency=20.0,
-            sampling_frequency=128.0,
-            df=10.0,
-        ),
-        population_metadata=PopulationMetadata(
-            name="madau-dickinson",
-            seed=41,
-            num_samples=3,
-            source_type=source_type,
-            provenance={
-                "producer": "test",
-                "version": 2,
-                "threshold": 0.25,
-                **({} if provenance is None else provenance),
-            },
-        ),
-    )
+
+def _catalog(**overrides) -> Catalog:
+    return make_catalog(redshift=REDSHIFT, num_frequencies=4, **overrides)
 
 
 def test_catalog_to_dataset_uses_stacked_float64_format() -> None:
-    dataset = catalog_to_dataset(_catalog())
+    dataset = catalog_to_dataset(_catalog(provenance={"producer": "test"}))
 
     assert dataset.polarization_power.dims == ("frequency", "sample")
     assert dataset.source_parameters.dims == ("sample", "parameter")
     assert dataset.source_parameters.dtype == np.float64
-    assert dataset.parameter.values.tolist() == ["redshift", "integer_parameter"]
-    assert dataset.attrs == {
-        "format_name": FORMAT_NAME,
-        "domain": DOMAIN_FREQUENCY,
-        "approximant": "Toy",
-        "minimum_frequency": 10.0,
-        "maximum_frequency": 40.0,
-        "reference_frequency": 20.0,
-        "sampling_frequency": 128.0,
-        "df": 10.0,
-        "population_name": "madau-dickinson",
-        "population_seed": 41,
-        "population_num_samples": 3,
-        "population_source_type": "bns",
-        "producer": "test",
-        "version": 2,
-        "threshold": 0.25,
-    }
+    assert "redshift" in dataset.parameter.values.tolist()
+    assert dataset.attrs["format_name"] == FORMAT_NAME
+    assert dataset.attrs["domain"] == DOMAIN_FREQUENCY
+    assert dataset.attrs["producer"] == "test"
 
 
-def test_catalog_dataset_file_dataset_catalog_round_trip(tmp_path: Path) -> None:
-    original = _catalog()
+def test_the_population_record_travels_as_data_not_as_a_callable() -> None:
+    """A file stores a name and settings; the model is rebuilt from the registry."""
+    dataset = catalog_to_dataset(_catalog())
+
+    assert dataset.attrs[MODEL_NAME_ATTR] == PAPER_MODEL
+    assert json.loads(dataset.attrs[MODEL_KWARGS_ATTR]) == PAPER_MODEL_KWARGS
+    assert json.loads(dataset.attrs[POPULATION_PARAMS_ATTR]) == (
+        PAPER_POPULATION_PARAMS
+    )
+    assert json.loads(dataset.attrs[HIDDEN_SITES_ATTR]) == sorted(BNS_HIDDEN_SITES)
+    for value in dataset.attrs.values():
+        assert isinstance(value, str | int | float)
+
+
+def test_round_trip_preserves_arrays_and_the_population_record(
+    tmp_path: Path,
+) -> None:
+    original = _catalog(provenance={"producer": "test", "version": 2})
     path = tmp_path / "catalog.h5"
+    original.save(path)
 
-    initial_dataset = catalog_to_dataset(original)
-    save_catalog(path, catalog_from_dataset(initial_dataset))
-    loaded_dataset = load_catalog(path)
-    restored = catalog_from_dataset(loaded_dataset)
+    restored = Catalog.load(path)
 
     assert type(restored.waveform_metadata) is PolarizationPowerGenerator
     np.testing.assert_array_equal(
@@ -101,18 +92,52 @@ def test_catalog_dataset_file_dataset_catalog_round_trip(tmp_path: Path) -> None
     np.testing.assert_array_equal(
         restored.polarization_power, original.polarization_power
     )
+    assert set(restored.source_parameters) == set(original.source_parameters)
     for name, values in original.source_parameters.items():
         np.testing.assert_allclose(restored.source_parameters[name], values)
         assert restored.source_parameters[name].dtype == np.float64
-    assert restored.population_metadata.name == "madau-dickinson"
+
+    assert restored.population_model_name == original.population_model_name
+    assert restored.population_model_kwargs == original.population_model_kwargs
+    assert restored.population_params == original.population_params
+    assert restored.hidden_sites == original.hidden_sites
     assert restored.population_metadata.seed == 41
-    assert restored.population_metadata.num_samples == 3
     assert restored.population_metadata.source_type == "bns"
     assert restored.population_metadata.provenance == {
         "producer": "test",
         "version": 2,
-        "threshold": 0.25,
     }
+
+
+def test_a_loaded_catalog_reconstructs_its_model_and_evaluates_at_new_params(
+    tmp_path: Path,
+) -> None:
+    """The point of the record: the density is recoverable, not just described."""
+    from astrogwb.populations import (
+        bns_md_cosmological,
+        population_log_probs,
+        population_sites,
+        select_stochastic_values,
+    )
+
+    path = tmp_path / "catalog.h5"
+    _catalog().save(path)
+    restored = Catalog.load(path)
+
+    model = cast(partial, restored.get_population_model())
+    assert model.func is bns_md_cosmological
+    assert model.keywords == PAPER_MODEL_KWARGS
+
+    for params in (
+        restored.population_params,
+        {**restored.population_params, "H0": 74.0},
+    ):
+        sites = population_sites(model, params)
+        values = select_stochastic_values(
+            restored.source_parameters, sites, label="catalog"
+        )
+        site_log_probs, _ = population_log_probs(model, params, values)
+        assert site_log_probs["redshift"].shape == REDSHIFT.shape
 
 
 def test_save_with_compression_round_trips(tmp_path: Path) -> None:
@@ -122,17 +147,8 @@ def test_save_with_compression_round_trips(tmp_path: Path) -> None:
     with h5py.File(path) as handle:
         assert handle["polarization_power"].compression == "gzip"
     np.testing.assert_array_equal(
-        load_catalog(path).polarization_power.values,
-        _catalog().polarization_power,
+        Catalog.load(path).polarization_power, _catalog().polarization_power
     )
-
-
-def test_open_catalog_leaves_polarization_power_lazy(tmp_path: Path) -> None:
-    path = tmp_path / "catalog.h5"
-    save_catalog(path, _catalog())
-
-    with open_catalog(path) as dataset:
-        assert dataset.polarization_power._in_memory is False
 
 
 @pytest.mark.parametrize("reserved", sorted(RESERVED_ATTRS))
@@ -141,21 +157,107 @@ def test_provenance_rejects_reserved_names(reserved: str) -> None:
         catalog_to_dataset(_catalog(provenance={reserved: "hijacked"}))
 
 
-def test_optional_source_type_is_omitted_and_decodes_as_none() -> None:
-    dataset = catalog_to_dataset(_catalog(source_type=None))
+def test_optional_source_type_is_omitted_and_decodes_as_none(tmp_path: Path) -> None:
+    path = tmp_path / "catalog.h5"
+    _catalog(source_type=None).save(path)
 
-    assert "population_source_type" not in dataset.attrs
-    assert catalog_from_dataset(dataset).population_metadata.source_type is None
+    with xr.open_dataset(path, engine="h5netcdf") as dataset:
+        assert "population_source_type" not in dataset.attrs
+    assert Catalog.load(path).population_metadata.source_type is None
 
 
-def test_old_waveform_catalog_format_requires_regeneration(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy", ["waveform_catalog", "astrogwb_catalog"])
+def test_files_without_a_population_record_require_regeneration(
+    tmp_path: Path, legacy: str
+) -> None:
+    """No legacy reader: a file that cannot say what drew it is not loadable."""
     path = tmp_path / "old.h5"
     dataset = catalog_to_dataset(_catalog())
-    dataset.attrs["format_name"] = "waveform_catalog"
+    dataset.attrs["format_name"] = legacy
     dataset.to_netcdf(path, engine="h5netcdf")
 
-    with pytest.raises(ValueError, match="obsolete.*regenerate"):
-        load_catalog(path)
+    with pytest.raises(ValueError, match="regenerate"):
+        Catalog.load(path)
+
+
+@pytest.mark.parametrize(
+    "attribute",
+    [MODEL_NAME_ATTR, MODEL_KWARGS_ATTR, POPULATION_PARAMS_ATTR, HIDDEN_SITES_ATTR],
+)
+def test_a_missing_population_attribute_requires_regeneration(
+    tmp_path: Path, attribute: str
+) -> None:
+    path = tmp_path / "incomplete.h5"
+    dataset = catalog_to_dataset(_catalog())
+    del dataset.attrs[attribute]
+    dataset.to_netcdf(path, engine="h5netcdf")
+
+    with pytest.raises(ValueError, match="regenerate"):
+        Catalog.load(path)
+
+
+def test_a_model_whose_density_moved_is_caught_on_load(tmp_path: Path) -> None:
+    """A registry key pins a name, not the mathematics behind it.
+
+    The recorded fingerprint is the generating redshift density at fixed probe
+    points, recomputed on every load. Shifting the recorded parameters stands in
+    for a registered model whose density changed underneath an existing file --
+    the case the name alone can never catch.
+    """
+    path = tmp_path / "drifted.h5"
+    dataset = catalog_to_dataset(_catalog())
+    moved = {**PAPER_POPULATION_PARAMS, "gamma": 2.7}
+    dataset.attrs[POPULATION_PARAMS_ATTR] = json.dumps(moved, sort_keys=True)
+    dataset.to_netcdf(path, engine="h5netcdf")
+
+    with pytest.raises(ValueError, match="no longer reproduces the redshift density"):
+        Catalog.load(path)
+
+
+def test_a_stored_column_that_drifted_from_the_population_is_caught(
+    tmp_path: Path,
+) -> None:
+    """Derived columns are recomputed and compared, not trusted."""
+    path = tmp_path / "drifted.h5"
+    catalog = _catalog()
+    corrupted = dict(catalog.source_parameters)
+    corrupted["detector_frame_mass_1"] = corrupted["detector_frame_mass_1"] * 1.01
+    dataset = catalog_to_dataset(
+        Catalog(
+            source_parameters=corrupted,
+            polarization_power=catalog.polarization_power,
+            waveform_metadata=catalog.waveform_metadata,
+            population_metadata=catalog.population_metadata,
+            _model_name=catalog.population_model_name,
+            _model_kwargs=catalog.population_model_kwargs,
+            _population_params=catalog.population_params,
+            _hidden_sites=catalog.hidden_sites,
+        )
+    )
+    dataset.to_netcdf(path, engine="h5netcdf")
+
+    with pytest.raises(ValueError, match="detector_frame_mass_1"):
+        Catalog.load(path)
+
+
+def test_an_unregistered_model_name_fails_clearly(tmp_path: Path) -> None:
+    path = tmp_path / "unknown.h5"
+    dataset = catalog_to_dataset(_catalog())
+    dataset.attrs[MODEL_NAME_ATTR] = "no_such_population"
+    dataset.to_netcdf(path, engine="h5netcdf")
+
+    with pytest.raises(KeyError, match="bns_md_cosmological"):
+        Catalog.load(path)
+
+
+def test_a_corrupt_drift_fingerprint_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "corrupt.h5"
+    dataset = catalog_to_dataset(_catalog())
+    dataset.attrs[PROPOSAL_ATTR] = "not json"
+    dataset.to_netcdf(path, engine="h5netcdf")
+
+    with pytest.raises(ValueError, match="not valid JSON"):
+        Catalog.load(path)
 
 
 def test_unknown_format_and_domain_are_rejected() -> None:
@@ -183,8 +285,20 @@ def test_dataset_validation_rejects_malformed_layout_and_sample_metadata() -> No
 
 def test_dataset_validation_does_not_require_loading_power(tmp_path: Path) -> None:
     path = tmp_path / "catalog.h5"
-    save_catalog(path, _catalog())
+    _catalog().save(path)
 
     with xr.open_dataset(path, engine="h5netcdf") as dataset:
         validate_catalog_dataset(dataset, label="test")
         assert dataset.polarization_power._in_memory is False
+
+
+def test_in_memory_catalogs_do_not_need_the_io_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The optional-dependency boundary: xarray is imported by save/load only."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "astrogwb.catalog._io", None)
+    catalog = _catalog()
+    assert catalog.restrict_redshift(0.3, 20.0).population_metadata.num_samples == 2
+    assert catalog.get_population_model() is not None

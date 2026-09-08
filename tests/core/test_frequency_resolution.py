@@ -43,20 +43,15 @@ from astrogwb_mock_population import (
     FIDUCIALS,
     build_mock_catalog,
     catalog_samples,
-    make_redshift_grid,
+    mock_target_model,
 )
 
 from astrogwb.catalog import Catalog
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr_squared
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    bns_population,
-    compute_merger_rate_distance_and_logprob,
-)
-from astrogwb.importance.weights import importance_log_weights
+from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 
 #: Reference resolution, and the band the refinement study runs over.
 FINE_DF = 0.25
@@ -164,26 +159,20 @@ def _analysis_at(
 def resolutions(fine_catalog: Catalog) -> dict[int, dict[str, Any]]:
     """Masked analysis inputs, the injection, and SNR^2, at every resolution."""
     samples = catalog_samples(fine_catalog)
-    redshift_grid = make_redshift_grid()
-    total_merger_rate, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, samples, redshift_grid=redshift_grid
+    # The catalog is its own proposal: the estimator caches the density and
+    # reference distances the target re-forms at FIDUCIALS, which is what makes
+    # every fiducial log-weight exactly zero.
+    estimator = SpectralDensityImportanceEstimator.from_catalog(
+        fine_catalog,
+        model=mock_target_model(),
+        target_params=FIDUCIALS,
+        average_mode="analytic_inclination",
     )
-    # The catalog is its own proposal: the density above and the reference
-    # distance below are the same expressions the target forms at FIDUCIALS,
-    # which is what makes every fiducial log-weight exactly zero.
-    log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
-        samples["redshift"], FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]
-    )
+    total_merger_rate = jnp.asarray(estimator(FIDUCIALS)[1]["total_merger_rate"])
 
     def weights_fn(params: dict[str, float]) -> tuple[jax.Array, jax.Array]:
-        terms = bns_population(
-            params, redshift_grid=redshift_grid
-        ).compute_population_terms(samples)
-        return terms.total_merger_rate, importance_log_weights(
-            terms,
-            proposal_log_prob=proposal_logprob,
-            log_reference_distance=log_reference_distance,
-        )
+        _, extras = estimator(params)
+        return jnp.asarray(extras["total_merger_rate"]), estimator.log_weights(params)
 
     # Loaded once: the noise curves are the same at every resolution, and
     # re-reading them per grid dominated the module's runtime.

@@ -32,14 +32,16 @@ from astrogwb_mock_population import (
     F_MAX,
     F_MIN,
     FIDUCIALS,
+    POPULATION_PARAMS,
     catalog_samples,
     make_redshift_grid,
+    mock_target_model,
 )
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
+from reference_population import reference_merger_rate_distance_and_logprob
 
-from astrogwb.catalog import Catalog, ImportanceCatalog
+from astrogwb.catalog import Catalog
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import (
     effective_psd,
     gaussian_bin_scale,
@@ -49,12 +51,7 @@ from astrogwb.distributions.amplitude import quadrature_grid
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    amplitude_H0_fn,
-    bns_population,
-    compute_merger_rate_distance_and_logprob,
-    merger_rate_H0_fn,
-)
+from astrogwb.populations import amplitude_H0_fn, merger_rate_H0_fn
 from astrogwb.sampling import (
     amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
@@ -118,24 +115,22 @@ def _build_analysis_inputs(
 ) -> AnalysisInputs:
     """Reproduce the standard setup block against an in-memory catalog.
 
-    Unpack the catalog, build the redshift
-    grid, call :func:`compute_merger_rate_distance_and_logprob` *once* for both
-    the injection rate and the proposal log-density, contract with unit
-    weights, load the network effective PSD, and mask out-of-band and
-    non-finite bins.
+    Unpack the catalog, prepare the estimator from its own recorded
+    population, contract with unit weights, load the network effective PSD,
+    and mask out-of-band and non-finite bins.
     """
     frequencies = jnp.asarray(catalog.waveform_metadata.frequencies)
     df = catalog.waveform_metadata.df
     polarization_power = jnp.asarray(catalog.polarization_power)
     samples = catalog_samples(catalog)
     num_sources = polarization_power.shape[1]
-    redshift_grid = make_redshift_grid()
 
-    # One call yields both the fiducial rate (for the injection) and the
-    # proposal log-density (for the weights). Sharing it is what makes every
-    # weight exactly 1 at the fiducials.
-    total_merger_rate, _, proposal_logprob = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, samples, redshift_grid=redshift_grid
+    # The injection rate comes from the catalog's own recorded population, at
+    # the parameters it was drawn at -- which is also what the estimator
+    # divides by, so every fiducial log-weight is exactly zero and the
+    # unit-weight injection below is the same quantity the target reproduces.
+    total_merger_rate, _, _ = reference_merger_rate_distance_and_logprob(
+        POPULATION_PARAMS, samples["redshift"], redshift_grid=make_redshift_grid()
     )
     observed_spectral_density = spectral_density(
         polarization_power,
@@ -183,31 +178,29 @@ def _build_analysis_inputs(
     )
     np.testing.assert_allclose(snr, target_snr, rtol=1e-12, atol=0.0)
 
-    # Built after masking: the catalog owns the band-restricted power, while
-    # the source samples keep their full length. The catalog is its own
-    # proposal, so the cached density and reference distance are the same
-    # expressions the target forms at FIDUCIALS -- every fiducial log-weight is
-    # then exactly zero, which is what the unit-weight injection above assumes.
-    importance_catalog = ImportanceCatalog(
-        source_parameters=samples,
-        polarization_power=polarization_power,
-        proposal_log_prob=proposal_logprob,
-        log_reference_distance=jnp.log(samples["luminosity_distance"])
-        + log_gw_em_ratio(samples["redshift"], FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]),
-    )
+    # Prepared after masking, from the catalog's own population record. The
+    # band mask reaches the power and nothing else -- masking the sources would
+    # silently truncate the population.
+    target = mock_target_model()
 
-    def target_population(params):
+    def pinned_target(params):
         """Take every hyperparameter the chain does not sample from the fiducials."""
-        return bns_population({**FIDUCIALS, **params}, redshift_grid=redshift_grid)
+        target({**FIDUCIALS, **params})
+
+    estimator = SpectralDensityImportanceEstimator.from_catalog(
+        catalog,
+        model=pinned_target,
+        target_params={},
+        average_mode="analytic_inclination",
+        frequency_mask=mask,
+    )
 
     return AnalysisInputs(
         observed_spectral_density=observed_spectral_density,
         effective_psd=network_psd,
         observation_time=observation_time,
         df=df,
-        estimator=SpectralDensityImportanceEstimator(
-            importance_catalog, target_population, "analytic_inclination"
-        ),
+        estimator=estimator,
         frequencies=frequencies,
         total_merger_rate=total_merger_rate,
         snr=snr,

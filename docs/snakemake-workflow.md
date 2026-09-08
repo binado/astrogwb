@@ -38,11 +38,12 @@ snakemake --snakefile Snakefile --cores 1 \
   outputs/catalogs/md-imrphenom-s42-n16384.h5
 ```
 
-One rule does the whole thing: it reads the catalog's config layers, simulates its
-population graph in-process, and generates waveforms for those rows. The
-population is not a workflow node -- it was a `temp()` output with exactly one
-consumer, and several catalogs share one graph at different seeds and sizes. All
-durable catalogs live under `outputs/catalogs/`. The `--allowed-rules` filter
+One rule does the whole thing: it reads the catalog's config layers, draws the
+registered population they name in-process, and generates waveforms for those
+rows. The population is not a workflow node and no longer a file either -- the
+layer list *is* the dependency edge, so editing
+`config/catalogs/base/population.toml` invalidates every catalog. All durable
+catalogs live under `outputs/catalogs/`. The `--allowed-rules` filter
 keeps catalog generation explicit. MCMC commands omit these rules, so a missing
 catalog stops MCMC with a
 `MissingInputException`.

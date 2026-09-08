@@ -46,7 +46,7 @@ def compute_network_snrs(
     from astrogwb.paper.catalogs import load_run_catalog
 
     catalog = load_run_catalog(injection_catalog_path, label="injection")
-    observation = prepare_observation(catalog, fiducials=fiducials, grid=grid)
+    observation = prepare_observation(catalog, grid=grid)
     frequencies = observation.frequencies
     band = observation.frequency_mask
     observed_spectral_density = observation.spectral_density

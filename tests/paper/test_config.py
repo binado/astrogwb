@@ -89,10 +89,11 @@ def test_analysis_grid_mirrors_the_config() -> None:
 
 
 def test_run_config_carries_no_proposal_density() -> None:
-    """The density is derived from the catalog file's provenance, not an input.
+    """The density is the proposal catalog's own record, not a config input.
 
     Window equality with [cosmology] used to need a validator; it now holds by
-    construction, because `resolve_proposal` is handed the run's own window.
+    construction, because `Catalog.restrict_redshift` is handed the run's own
+    window and moves the samples and the recorded density together.
     """
     config = build_run_config(example_raw())
 

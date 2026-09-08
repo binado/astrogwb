@@ -102,26 +102,47 @@ injection = "md-imrphenom-s41-n32768"
 proposal  = "md-imrphenom-s42-n16384"
 ```
 
-That is the whole block. How a catalog was drawn -- its components, seeds and
-mixing fractions -- lives in `config/catalogs/defs/<name>.toml` and in the
-generated file's own provenance, never in the run config.
+That is the whole block, and injection versus proposal is two filenames and
+nothing else. How a catalog was drawn -- its population model, that model's
+construction settings, the hyperparameters, and the excluded density factors --
+lives in `config/catalogs/defs/<name>.toml` and, once the file exists, in the
+file itself. Never in the run config.
 
 Every run shares one injection catalog -- it is the "observed" data -- so it
 lives in `base/catalogs.toml` and no run overrides it. Only
 `variable-catalog-size`, `variable-proposal-guard`, `astrophysical-parameters`,
 and `waveform-approximant` override the proposal catalog.
 
-The importance-sampling *proposal density* is **not** in the config. It is
-derived at run time from the proposal catalog's own provenance attributes (see
-[catalog generation](catalog-generation.md)), restricted to the run's analysis
-redshift window, and checked against the run's `[fiducials]`. That window is
-narrower than what was generated, which is why the density cannot be baked
-into the file. Resolution happens at run time rather than at config time so
-that `snakemake validate` stays cheap: a config typo fails without any catalog
-having to exist.
+The importance-sampling *proposal density* is **not** in the config, and it is
+not derived from the config either. It is the proposal catalog's *own* recorded
+population, evaluated at the parameters it was drawn at (see
+[catalog generation](catalog-generation.md)), narrowed to the run's analysis
+redshift window by `Catalog.restrict_redshift` -- samples and recorded density
+together. There is nothing left to cross-check against the run's `[fiducials]`,
+which is why the old exact-float-equality gate over five hard-coded parameter
+names is gone.
 
-The resolved density is stamped into the saved chain's posterior attributes, so
-the `.nc` remains the self-describing record of what was sampled.
+The window is narrower than what was generated, which is why the per-sample
+density cannot be baked into the file. Nothing about it is resolved at config
+time, so `snakemake validate` stays cheap: a config typo, or an unregistered
+population name, fails without any catalog having to exist.
+
+The `[analysis]` block names the *target* population the sampled
+hyperparameters describe:
+
+```toml
+[analysis]
+population_model = "bns_md_modified_propagation"
+```
+
+That is the default, and every committed run uses it. It reduces exactly to the
+plain cosmological population at `xi_0 = 1`, which is how a run that does not
+sample the propagation parameters gets the standard law without naming a second
+model.
+
+The proposal catalog's recorded population, narrowed to the analysis window, is
+stamped into the saved chain's posterior attributes, so the `.nc` remains the
+self-describing record of what was sampled.
 
 ## Curated experiment runs
 

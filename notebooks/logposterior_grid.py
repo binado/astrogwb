@@ -52,28 +52,15 @@ from numpyro import handlers
 from numpyro.infer.util import log_density
 from scipy.ndimage import gaussian_filter
 
-from astrogwb.catalog import ImportanceCatalog
-from astrogwb.cosmology import log_gw_em_ratio
-from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
-from astrogwb.frequency import apply_frequency_mask, frequency_mask
+from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
-from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    bns_population,
-)
-from astrogwb.paper.catalogs import (
-    compute_fiducial_injection_spectrum,
-    compute_proposal_logprob,
-    load_run_catalog,
-    propagate_catalog,
-    samples_from_catalog,
-    truncate_catalog_samples,
-    validate_matching_frequency_grids,
-)
-from astrogwb.paper.config.mcmc import ProposalConfig, build_run_config
+from astrogwb.paper.catalogs import load_run_catalog
+from astrogwb.paper.config.mcmc import AnalysisGrid, build_run_config
 from astrogwb.paper.config.runs import assemble_run
+from astrogwb.paper.inference import prepare_inference_inputs
+from astrogwb.populations import bns_md_modified_propagation
 from astrogwb.sampling import gwb_spectral_density_model
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
@@ -174,29 +161,46 @@ fixed_params = {k: v for k, v in fiducials.items() if k not in sampled_params}
 RUN_CONFIG = build_run_config(assemble_run(*REFERENCE_RUN))
 injection_catalog = load_run_catalog(INJECTION_CATALOG_PATH, label="injection")
 proposal_catalog = load_run_catalog(PROPOSAL_CATALOG_PATH, label="proposal")
-injection = propagate_catalog(injection_catalog, fiducials=fiducials)
-proposal = propagate_catalog(proposal_catalog, fiducials=fiducials)
-injection = truncate_catalog_samples(
-    injection,
-    label="injection",
-    minimum_redshift=minimum_redshift,
-    maximum_redshift=maximum_redshift,
-)
-proposal = truncate_catalog_samples(
-    proposal,
-    label="proposal",
-    minimum_redshift=minimum_redshift,
-    maximum_redshift=maximum_redshift,
-)
-validate_matching_frequency_grids(injection.frequency.values, proposal.frequency.values)
 
-frequencies = jnp.asarray(proposal.frequency.values)
-df = float(proposal.attrs["df"])
-polarization_power = jnp.asarray(proposal.polarization_power.values)
-samples = samples_from_catalog(proposal)
-n_freq, n_samples = polarization_power.shape
+analysis_grid = AnalysisGrid(
+    observation_time=observation_time,
+    f_min=f_min,
+    f_max=f_max,
+    minimum_redshift=minimum_redshift,
+    maximum_redshift=maximum_redshift,
+    n_grid=n_grid,
+)
+target_model = partial(
+    bns_md_modified_propagation,
+    z_min=minimum_redshift,
+    z_max=maximum_redshift,
+    n_grid=n_grid,
+)
+
+# One call restricts both catalogs to the analysis window, builds the fiducial
+# observation from the injection catalog's own population, builds the effective
+# PSD and band mask, and prepares the estimator against the proposal catalog's
+# own recorded density -- the same sequence `scripts/run_mcmc.py` runs.
+inputs = prepare_inference_inputs(
+    injection_catalog,
+    proposal_catalog,
+    grid=analysis_grid,
+    detectors=detnames,
+    target_model=target_model,
+    target_params=fiducials,
+)
+observation = inputs.observation
+proposal = inputs.proposal
+estimator = inputs.estimator
+
+frequencies = observation.frequencies
+df = observation.df
+mask = observation.frequency_mask
+effective_psd_arr = inputs.effective_psd
+samples = dict(estimator.source_parameters)
+n_freq, n_samples = proposal.polarization_power.shape
 print(f"loaded proposal: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
-print("loaded injection:", injection.polarization_power.shape[1], "samples")
+print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 
 # %% [markdown]
 # ## Effective PSD and analysis band
@@ -209,16 +213,9 @@ print("loaded injection:", injection.polarization_power.shape[1], "samples")
 # $$
 
 # %%
-sensitivities = load_sensitivity_map(detnames)
-effective_psd_arr = jnp.asarray(
-    effective_psd(frequencies, list(detnames), sensitivities)
-)
-# Uncovered bins have an infinite effective PSD and would contribute a constant
-# -inf to the log-density; drop them along with the out-of-band ones.
-mask = frequency_mask(frequencies, fmin=f_min, fmax=f_max) & jnp.isfinite(
-    effective_psd_arr
-)
-print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
+# Both were built by `prepare_inference_inputs` above: bins with no detector
+# coverage have an infinite effective PSD and are dropped with the out-of-band
+# ones.
 
 
 # %%
@@ -244,39 +241,9 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 # ## Modelling the astrophysical SGWB
 #
 # The importance-weighted spectral-density model is identical to `mcmc.py`. The
-# proposal log-density is persisted with the assembled production population.
-
-# %%
-z_grid = jnp.linspace(minimum_redshift, maximum_redshift, n_grid)
-
-proposal_logprob = compute_proposal_logprob(
-    samples["redshift"],
-    ProposalConfig(
-        uniform_mixing_fraction=0.1,
-        minimum_redshift=0.3,
-        maximum_redshift=20.0,
-        n_grid=4096,
-        H0=67.66,
-        Omega_m=0.3096,
-        gamma=1.42,
-        kappa=4.62,
-        z_peak=1.84,
-    ),
-)
-
-
-# %% [markdown]
-# `propagate_catalog` divided the stored power by $\xi(z)^2$ but left
-# `source_parameters["luminosity_distance"]` as the *EM* distance, so the
-# effective reference distance the power corresponds to is
-# $\log d_{\mathrm{EM}} + \log \xi$. `ImportanceCatalog` takes that directly
-# and never corrects it again, so it is applied here exactly once.
-
-# %%
-log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
-    samples["redshift"], fiducials["xi_0"], fiducials["xi_n"]
-)
-
+# proposal density is the proposal catalog's *own* recorded population,
+# evaluated at the parameters it was drawn at, and the reference distance is
+# the distance column that file already holds -- so neither is configured here.
 
 # %% [markdown]
 # ## Visualizing $\Omega_{\mathrm{GW}}(f)$
@@ -313,53 +280,35 @@ def plot_omegagw(
     return fig
 
 
-rate0, observed_spectral_density = compute_fiducial_injection_spectrum(
-    jnp.asarray(injection.polarization_power.values),
-    samples_from_catalog(injection),
-    fiducials=fiducials,
-    redshift_grid=z_grid,
-)
+rate0 = observation.total_merger_rate
+observed_spectral_density = observation.spectral_density
 plot_omegagw(
     observed_spectral_density,
     frequencies,
     mask,
-    # Must match the H0 the ProposalConfig above builds the spectrum with.
-    hubble_constant=67.66,
+    hubble_constant=fiducials["H0"],
     color="black",
     ymin=1e-15,
 )
 
-frequencies, polarization_power, observed_spectral_density, effective_psd_arr = (
-    apply_frequency_mask(
-        mask,
-        frequencies,
-        polarization_power,
-        observed_spectral_density,
-        effective_psd_arr,
-    )
-)
+# The masked arrays the likelihood is evaluated against. The estimator already
+# holds the band-restricted power; masking the source samples would silently
+# truncate the population, so it never happens.
+observed_spectral_density = inputs.masked_model_kwargs()["observed_spectral_density"]
+effective_psd_arr = effective_psd_arr[np.asarray(mask)]
+frequencies = frequencies[mask]
 
 # %% [markdown]
 # ## Building the model
 #
 # We assemble the same `gwb_spectral_density_model` used by the NUTS run.
 # Rather than sampling it, we evaluate its log joint density on a grid below.
-# The estimator is built *after* the frequency mask, since it owns the
+# The estimator was prepared *with* the frequency mask, so it owns the
 # band-restricted power; the source samples keep their full length. Everything
-# the grid does not vary -- the proposal density, the reference distance, the
-# per-bin noise scale -- is prepared once, here.
+# the grid does not vary -- the proposal density, the reference distances, the
+# per-bin noise scale -- was prepared once, above.
 
 # %%
-estimator = SpectralDensityImportanceEstimator(
-    ImportanceCatalog(
-        source_parameters=samples,
-        polarization_power=polarization_power,
-        proposal_log_prob=proposal_logprob,
-        log_reference_distance=log_reference_distance,
-    ),
-    partial(bns_population, redshift_grid=z_grid),
-    "analytic_inclination",
-)
 base_model = partial(
     gwb_spectral_density_model,
     spectral_density_fn=estimator,

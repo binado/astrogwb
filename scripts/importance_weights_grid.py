@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from pathlib import Path
 
 import jax
@@ -29,24 +30,12 @@ from matplotlib.axes import Axes as MplAxes
 from matplotlib.figure import Figure
 from matplotlib.projections import register_projection
 
-from astrogwb.cosmology import log_gw_em_ratio
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    bns_population,
-)
-from astrogwb.importance.weights import importance_log_weights
-from astrogwb.paper.catalogs import (
-    compute_proposal_logprob,
-    load_run_catalog,
-    samples_from_catalog,
-    truncate_catalog_samples,
-)
-from astrogwb.paper.config.catalogs import (
-    CatalogProvenance,
-    resolve_proposal,
-)
+from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
+from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.plotting import TRUTH, use_paper_style
+from astrogwb.populations import bns_md_modified_propagation
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
 # Restore the standard projection for consistent plotting.
@@ -185,45 +174,29 @@ def main(argv: Sequence[str] | None = None) -> None:
     fiducials = dict(config.fiducials)
     use_paper_style()
 
-    catalog = truncate_catalog_samples(
-        load_run_catalog(catalog_path, label="proposal"),
-        label="proposal",
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
+    # The proposal density comes from the catalog's own population record,
+    # exactly as scripts/run_mcmc.py builds it -- so this figure reweights
+    # against the same denominator the chains did, with nothing restated here.
+    catalog = load_run_catalog(catalog_path, label="proposal").restrict_redshift(
+        Z_MIN, Z_MAX
     )
-    samples = samples_from_catalog(catalog)
-    n_samples = int(np.asarray(samples["redshift"]).shape[0])
+    n_samples = catalog.population_metadata.num_samples
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
-    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_REDSHIFT_GRID)
-    # The proposal density comes from the catalog's own provenance, exactly as
-    # scripts/run_mcmc.py resolves it -- so this figure reweights against the
-    # same denominator the chains did.
-    provenance = CatalogProvenance.from_file(catalog_path)
-    proposal = resolve_proposal(
-        provenance.redshift_proposal,
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        label=str(catalog_path),
+    estimator = SpectralDensityImportanceEstimator.from_catalog(
+        catalog,
+        model=partial(
+            bns_md_modified_propagation,
+            z_min=Z_MIN,
+            z_max=Z_MAX,
+            n_grid=N_REDSHIFT_GRID,
+        ),
+        average_mode="analytic_inclination",
     )
-    # This figure wants the raw per-source weights, which
-    # `SpectralDensityImportanceEstimator` deliberately does not publish (an
-    # (N,) array per sampler step is not a diagnostic). Drop to the population
-    # API instead. Unlike the inference pipeline, nothing here calls
-    # `propagate_catalog`, so the catalog's stored EM distances still need the
-    # fiducial GW/EM correction to become the effective reference distance.
-    proposal_log_prob = compute_proposal_logprob(samples["redshift"], proposal)
-    log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
-        samples["redshift"], fiducials["xi_0"], fiducials["xi_n"]
-    )
+    samples = dict(estimator.source_parameters)
 
     def log_weights_fn(params: Mapping[str, jax.Array]) -> jax.Array:
-        population = bns_population(params, redshift_grid=z_grid)
-        return importance_log_weights(
-            population.compute_population_terms(samples),
-            proposal_log_prob=proposal_log_prob,
-            log_reference_distance=log_reference_distance,
-        )
+        return estimator.log_weights(params)
 
     figures: list[tuple[Figure, Path]] = []
     for combo in GRID_PRIORS:

@@ -1,8 +1,9 @@
 """Tests for the NumPyro-native population distributions.
 
 The physics is checked against
-:func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.compute_merger_rate_distance_and_logprob`,
-which is the reference implementation of the same redshift density. The rest
+:func:`reference_population.reference_merger_rate_distance_and_logprob`, a
+hand-written restatement of the same redshift density kept as a test oracle so
+the class-based path is compared against something other than itself. The rest
 of the module is about JAX plumbing: these classes are auto-registered as
 pytrees, and a wrong ``pytree_data_fields`` is invisible to ``ruff``, to ``ty``
 and to any test that builds the distribution *inside* a model function.
@@ -23,18 +24,13 @@ import pytest
 # them drift apart with no visible symptom.
 from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN, make_redshift_grid
 from numpyro.distributions.transforms import biject_to
+from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.distributions.interpolated import InterpolatedDistribution
 from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
-)
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_distance_and_logprob,
-)
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    madau_dickinson_rate as reference_madau_dickinson_rate,
 )
 
 #: Redshifts to evaluate at: interior to the grid, and not on a node.
@@ -53,9 +49,9 @@ def _distribution(**overrides: float) -> MadauDickinsonRedshiftDistribution:
 
 def _reference(**overrides: float) -> tuple[jax.Array, jax.Array, jax.Array]:
     """``(total_merger_rate, luminosity_distance, logpdf)`` from the reference model."""
-    return compute_merger_rate_distance_and_logprob(
+    return reference_merger_rate_distance_and_logprob(
         {**FIDUCIALS, **overrides},
-        {"redshift": SAMPLE_REDSHIFTS},
+        SAMPLE_REDSHIFTS,
         redshift_grid=make_redshift_grid(),
     )
 
@@ -131,12 +127,6 @@ def test_luminosity_distance_matches_the_reference_model() -> None:
         np.asarray(reference_distance),
         rtol=1e-15,
     )
-
-
-def test_rate_shape_has_one_shared_implementation() -> None:
-    """Two densities, one rate shape: the distribution and the reference callback
-    read `madau_dickinson_rate` from the same module, so it cannot drift."""
-    assert reference_madau_dickinson_rate is madau_dickinson_rate
 
 
 def test_source_frame_distribution_is_the_rate_shape() -> None:

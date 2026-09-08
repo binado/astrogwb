@@ -31,11 +31,12 @@ from astrogwb_mock_population import (
     F_MAX,
     F_MIN,
     build_mock_catalog,
-    build_synthetic_importance_catalog,
+    build_synthetic_estimator,
     load_mock_population,
 )
 
-from astrogwb.catalog import Catalog, ImportanceCatalog
+from astrogwb.catalog import Catalog
+from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -57,7 +58,7 @@ def load_orf_fixture() -> Callable[[str], dict[str, np.ndarray]]:
 
 @pytest.fixture(scope="session")
 def mock_population() -> dict[str, np.ndarray]:
-    """Load the committed mock population once per pytest worker."""
+    """Draw the mock population once per pytest worker."""
     return load_mock_population()
 
 
@@ -79,8 +80,8 @@ def mock_catalog_factory(
 
 
 @pytest.fixture
-def synthetic_importance_catalog() -> Callable[
-    ..., tuple[ImportanceCatalog, dict[str, jax.Array]]
+def synthetic_estimator() -> Callable[
+    ..., tuple[SpectralDensityImportanceEstimator, dict[str, jax.Array]]
 ]:
-    """Expose the synthetic importance-catalog builder as a fixture."""
-    return build_synthetic_importance_catalog
+    """Expose the synthetic self-proposal estimator builder as a fixture."""
+    return build_synthetic_estimator

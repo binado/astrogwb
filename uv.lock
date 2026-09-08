@@ -256,10 +256,6 @@ dev = [
     { name = "snakemake" },
     { name = "ty" },
 ]
-fixture = [
-    { name = "gwmock-pop" },
-    { name = "pyyaml" },
-]
 jupyter = [
     { name = "ipykernel" },
     { name = "jupyter" },
@@ -325,10 +321,6 @@ dev = [
     { name = "ruff", specifier = ">=0.16.1" },
     { name = "snakemake", specifier = ">=9.24.0" },
     { name = "ty", specifier = ">=0.0.69" },
-]
-fixture = [
-    { name = "gwmock-pop", specifier = "==0.11.4" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 jupyter = [
     { name = "ipykernel", specifier = ">=7.3.0" },

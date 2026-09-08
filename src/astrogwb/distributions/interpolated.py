@@ -109,11 +109,10 @@ class InterpolatedDistribution(dist.Distribution):
         log(norm)`` is too, but both differ in the last bit and the second
         cancels two logs of order tens, which turns a one-ulp difference in
         a batched ``norm`` into a relative error near ``1e-15``. This is also
-        the operation order of the hand-written reference,
-        :func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.compute_merger_rate_distance_and_logprob`,
-        and matching it bit-for-bit is what keeps a catalog that is its own
-        proposal at *exactly* zero log-weight -- an identity
-        ``tests/core/test_frequency_resolution.py`` builds on.
+        the operation order of the hand-written reference in
+        ``tests/reference_population.py``, and matching it bit-for-bit is what
+        keeps a catalog that is its own proposal at *exactly* zero log-weight --
+        an identity ``tests/core/test_frequency_resolution.py`` builds on.
 
         Deliberately not ``@validate_sample``-decorated: importance weights
         built on this depend on getting ``-inf`` for an out-of-grid sample,

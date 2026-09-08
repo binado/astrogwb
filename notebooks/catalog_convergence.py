@@ -37,17 +37,17 @@
 # frequency, nor whether an error is falling like $N^{-1/2}$ or has hit a bias
 # floor.
 #
-# **This notebook needs no external data**; it carries its own population graph
-# inline and caches the catalog it builds to `notebooks/convergence_catalog.h5`
+# **This notebook needs no external data**; it names a registered population
+# model and caches the catalog it builds to `notebooks/convergence_catalog.h5`
 # (gitignored).
 
 # %% [markdown]
 # ## Imports
 
 # %%
-import importlib.metadata
 import os
 import warnings
+from functools import partial
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -63,15 +63,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpyro.distributions as dist
 import pandas as pd
-import xarray as xr
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
-from astrogwb.catalog import Catalog, PopulationMetadata, simulate_population
-from astrogwb.catalog.io import catalog_to_dataset, load_catalog, save_catalog
+from astrogwb.catalog import Catalog, PopulationMetadata
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
-from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
+from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import (
     analytic_spectral_density_from_mass_moments,
@@ -80,12 +78,18 @@ from astrogwb.gwb import (
     spectral_snr,
     uniform_prior_mass_moments,
 )
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    bns_population,
-    compute_merger_rate_distance_and_logprob,
-    madau_dickinson_rate,
+from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
+from astrogwb.populations import (
+    BNS_HIDDEN_SITES,
+    TOTAL_MERGER_RATE_SITE,
+    bns_md_cosmological,
+    bns_md_modified_propagation,
+    draw_population,
+    population_log_probs,
+    population_sites,
+    required_deterministic,
+    select_stochastic_values,
 )
-from astrogwb.importance.weights import importance_log_weights
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces
@@ -195,16 +199,16 @@ OMEGA_CATALOG_PATH = NOTEBOOK_DIR / (
 # %% [markdown]
 # ## The source population
 #
-# The graph below is an inline mirror of
-# `packages/astrogwb/tests/fixtures/mock_bns_population.yaml`, the frozen
-# population the core test suite draws its committed fixture from. **Keep the
-# two in step**: nothing enforces their agreement, and that is deliberate.
+# One declaration, used twice: `draw_population` samples from it, and the
+# importance weights below evaluate the *same* model's density at the stored
+# samples. That is what makes this catalog exactly its own proposal
+# ($\log w \equiv 0$ at the fiducials) rather than approximately so.
 #
-# The component-mass bounds are load-bearing here in a way they are not in
-# `mcmc_example_models.py`: `uniform_prior_mass_moments` below is given the
-# *same* bounds, and the analytic spectrum it feeds is only the right oracle
-# for this catalog if they agree. So is the zero `inclination` column, which
-# pairs with `average_mode="analytic_inclination"`.
+# The component-mass bounds are load-bearing here: `uniform_prior_mass_moments`
+# below is given the *same* bounds, and the analytic spectrum it feeds is only
+# the right oracle for this catalog if they agree. So is the zero `inclination`
+# column the population declares, which pairs with
+# `average_mode="analytic_inclination"`.
 
 # %%
 FIDUCIALS: dict[str, float] = {
@@ -218,6 +222,12 @@ FIDUCIALS: dict[str, float] = {
     "local_merger_rate": 770.0,
 }
 
+#: The generating population takes no propagation parameters: modified
+#: propagation is target-side only, and at `xi_0 = 1` the two agree exactly.
+POPULATION_PARAMS: dict[str, float] = {
+    name: value for name, value in FIDUCIALS.items() if name not in {"xi_0", "xi_n"}
+}
+
 Z_MIN = 0.3
 Z_MAX = 20.0
 N_GRID = 256
@@ -225,108 +235,24 @@ N_GRID = 256
 MINIMUM_COMPONENT_MASS = 1.0
 MAXIMUM_COMPONENT_MASS = 2.5
 
-POPULATION_GRAPH: dict[str, Any] = {
-    "luminosity_distance": {
-        "transform": {
-            "function": "redshift_to_luminosity_distance",
-            "arguments": {
-                "redshift": "@redshift",
-                "hubble_constant": FIDUCIALS["H0"],
-                "omega_m": FIDUCIALS["Omega_m"],
-                "max_redshift": Z_MAX,
-            },
-        }
-    },
-    "mass_pair": {
-        "intermediate": True,
-        "sampler": {
-            "function": "joint_uniform_mass_pair",
-            "arguments": {
-                "m1_min": MINIMUM_COMPONENT_MASS,
-                "m1_max": MAXIMUM_COMPONENT_MASS,
-                "m2_min": MINIMUM_COMPONENT_MASS,
-                "m2_max": MAXIMUM_COMPONENT_MASS,
-                "ordered": True,
-            },
-        },
-    },
-    "source_frame_mass_1": {
-        "transform": {
-            "function": "take_row",
-            "arguments": {"matrix": "@mass_pair", "index": 0},
-        }
-    },
-    "source_frame_mass_2": {
-        "transform": {
-            "function": "take_row",
-            "arguments": {"matrix": "@mass_pair", "index": 1},
-        }
-    },
-    "spin_1z": {
-        "sampler": {
-            "function": "uniform",
-            "arguments": {"minimum": -0.05, "maximum": 0.05},
-        }
-    },
-    "spin_2z": {
-        "sampler": {
-            "function": "uniform",
-            "arguments": {"minimum": -0.05, "maximum": 0.05},
-        }
-    },
-    "lambda_1": {
-        "sampler": {
-            "function": "uniform",
-            "arguments": {"minimum": 0.0, "maximum": 2000.0},
-        }
-    },
-    "lambda_2": {
-        "sampler": {
-            "function": "uniform",
-            "arguments": {"minimum": 0.0, "maximum": 2000.0},
-        }
-    },
-    "inclination": {
-        "transform": {
-            "function": "constant_like",
-            "arguments": {"reference": "@redshift", "value": 0.0},
-        }
-    },
-    "coa_phase": {
-        "transform": {
-            "function": "constant_like",
-            "arguments": {"reference": "@redshift", "value": 0.0},
-        }
-    },
-    "coa_time": {
-        "transform": {
-            "function": "constant_like",
-            "arguments": {"reference": "@redshift", "value": 0.0},
-        }
-    },
-    "redshift": {
-        "sampler": {
-            "function": "madau_dickinson_redshift",
-            "arguments": {
-                "z_min": Z_MIN,
-                "z_max": Z_MAX,
-                "gamma": FIDUCIALS["gamma"],
-                "kappa": FIDUCIALS["kappa"],
-                "z_peak": FIDUCIALS["z_peak"],
-                "hubble_constant": FIDUCIALS["H0"],
-                "omega_m": FIDUCIALS["Omega_m"],
-                "n_grid": 4096,
-            },
-        }
-    },
+#: The registered model, and the settings bound into it. Both travel into the
+#: generated file, so a cached catalog says which population produced it.
+POPULATION_MODEL = "bns_md_cosmological"
+POPULATION_MODEL_KWARGS: dict[str, float | int] = {
+    "z_min": Z_MIN,
+    "z_max": Z_MAX,
+    "n_grid": 4096,
 }
 
-CATALOG_PARAMETERS = (
-    "redshift",
-    "source_frame_mass_1",
-    "source_frame_mass_2",
-    "inclination",
-)
+
+def population_model_fn():
+    """The generating population, with its construction settings bound."""
+    return partial(bns_md_cosmological, **POPULATION_MODEL_KWARGS)
+
+
+def target_model_fn():
+    """The target population: the same sources under modified propagation."""
+    return partial(bns_md_modified_propagation, z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID)
 
 
 def make_redshift_grid() -> jax.Array:
@@ -338,7 +264,7 @@ def make_redshift_grid() -> jax.Array:
 # ## Building or loading the catalogs
 #
 # Two catalogs, drawn from one population. `build_catalog` re-runs
-# `simulate_population` at the same seed for each, so the two files hold the *same*
+# `draw_population` at the same seed for each, so the two files hold the *same*
 # sources reduced onto different frequency grids — the wide 1 Hz grid the
 # $\Omega_{\rm gw}$ comparison needs, and the fine 0.125 Hz grid everything from
 # the SNR section on runs against.
@@ -347,13 +273,13 @@ def make_redshift_grid() -> jax.Array:
 # those all describe the same sources too and the only thing that varies is
 # $\Delta f$.
 #
-# `build_catalog` discards the luminosity distance the graph produced and
-# recomputes it from `compute_merger_rate_distance_and_logprob` at the
-# fiducials, which is what makes the catalog exactly its own importance
-# proposal ($\log w \equiv 0$).
+# The luminosity distance is the population's own `numpyro.deterministic`,
+# computed in the same batched pass every later density evaluation takes, which
+# is what makes the catalog exactly its own importance proposal
+# ($\log w \equiv 0$) rather than approximately so.
 #
-# A cached file is reused only when its stored attributes still describe the
-# configuration cell. That guard matters more here than in
+# A cached file is reused only when its recorded population and waveform grid
+# still describe the configuration cell. That guard matters more here than in
 # `mcmc_example_models.py`: `FINE_DF` *is* the subject, so silently reusing a
 # catalog built at a different resolution would invalidate every result below
 # while looking perfectly healthy. The `grid` attribute records which of the two
@@ -373,11 +299,12 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
     into the file's attributes, so the two cache files below are
     self-describing rather than distinguished by filename.
 
-    One `PopulationMetadata` drives both the draw and the catalog, so the seed
-    and source count recorded in the file are necessarily the ones used.
+    The derived columns -- distances, detector-frame masses -- come from the
+    population itself, in one batched pass, so they are bit-identical to what
+    every later density evaluation recomputes from the stored samples.
     """
     population_metadata = PopulationMetadata(
-        name="madau-dickinson",
+        name=POPULATION_MODEL,
         seed=POPULATION_SEED,
         num_samples=NUM_SOURCES,
         source_type="bns",
@@ -385,20 +312,17 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
             "notebook": "catalog_convergence",
             "grid": grid,
             "termination_alpha": ISCO_ALPHA,
-            "gwmock_pop_version": importlib.metadata.version("gwmock-pop"),
-            **{f"fiducial_{name}": value for name, value in FIDUCIALS.items()},
         },
     )
-    drawn = simulate_population(POPULATION_GRAPH, metadata=population_metadata)
     parameters = {
-        name: np.asarray(drawn[name], dtype=np.float64) for name in CATALOG_PARAMETERS
+        name: np.asarray(values, dtype=np.float64)
+        for name, values in draw_population(
+            population_model_fn(),
+            POPULATION_PARAMS,
+            num_samples=NUM_SOURCES,
+            seed=POPULATION_SEED,
+        ).items()
     }
-    _, luminosity_distance, _ = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS,
-        {"redshift": jnp.asarray(parameters["redshift"])},
-        redshift_grid=make_redshift_grid(),
-    )
-    parameters["luminosity_distance"] = np.asarray(luminosity_distance)
 
     return Catalog.from_generator(
         parameters,
@@ -412,44 +336,46 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
             df=df,
         ),
         population_metadata=population_metadata,
+        model_name=POPULATION_MODEL,
+        model_kwargs=POPULATION_MODEL_KWARGS,
+        population_params=POPULATION_PARAMS,
+        hidden_sites=BNS_HIDDEN_SITES,
     )
 
 
-def catalog_matches_configuration(
-    catalog: xr.Dataset, *, df: float, f_max: float
-) -> bool:
+def catalog_matches_configuration(catalog: Catalog, *, df: float, f_max: float) -> bool:
     """Does a cached catalog still describe the configuration cell?
 
-    Attributes survive the netCDF round trip as numpy scalars, so both sides
-    are cast before comparing.
+    The population half of the question no longer needs asking: the file
+    records its own model, settings and hyperparameters, and `Catalog.load`
+    refuses a file whose columns no longer match them. What is left is the
+    waveform grid and the draw size, which the population record does not
+    cover.
     """
-    attrs = catalog.attrs
+    waveform = catalog.waveform_metadata
     return (
-        float(attrs["df"]) == df
-        and float(attrs["minimum_frequency"]) == F_MIN
-        and float(attrs["maximum_frequency"]) == f_max
-        and int(attrs.get("population_num_samples", -1)) == NUM_SOURCES
-        and int(attrs.get("population_seed", -1)) == POPULATION_SEED
-        and all(
-            float(attrs.get(f"fiducial_{name}", float("nan"))) == value
-            for name, value in FIDUCIALS.items()
-        )
+        waveform.df == df
+        and waveform.minimum_frequency == F_MIN
+        and waveform.maximum_frequency == f_max
+        and catalog.population_metadata.num_samples == NUM_SOURCES
+        and catalog.population_metadata.seed == POPULATION_SEED
+        and catalog.population_model_name == POPULATION_MODEL
+        and dict(catalog.population_params) == POPULATION_PARAMS
+        and dict(catalog.population_model_kwargs) == POPULATION_MODEL_KWARGS
     )
 
 
-def load_or_build_catalog(
-    *, df: float, f_max: float, grid: str, path: Path
-) -> xr.Dataset:
+def load_or_build_catalog(*, df: float, f_max: float, grid: str, path: Path) -> Catalog:
     """Return the cached catalog if it is still current, else rebuild it.
 
-    A file written by an older astrogwb is *rejected* by `load_catalog` rather
+    A file written by an older astrogwb is *rejected* by `Catalog.load` rather
     than merely failing the configuration check below, so the read is guarded:
     a stale cache is a rebuild, not a crash.
     """
     if path.is_file():
         try:
-            cached = load_catalog(path)
-        except (OSError, ValueError) as error:
+            cached = Catalog.load(path)
+        except (OSError, KeyError, ValueError) as error:
             print(f"{path} is not a current astrogwb catalog ({error}); rebuilding")
         else:
             if catalog_matches_configuration(cached, df=df, f_max=f_max):
@@ -458,25 +384,51 @@ def load_or_build_catalog(
             print(f"{path} does not match this notebook's configuration; rebuilding")
     catalog = build_catalog(df=df, f_max=f_max, grid=grid)
     path.parent.mkdir(parents=True, exist_ok=True)
-    save_catalog(path, catalog)
+    catalog.save(path)
     print(f"Built and wrote {path}")
-    return catalog_to_dataset(catalog)
+    return catalog
+
+
+def describe(catalog: Catalog) -> pd.Series:
+    """A one-glance summary of what a catalog file holds."""
+    waveform = catalog.waveform_metadata
+    return pd.Series(
+        {
+            "population": catalog.population_model_name,
+            "seed": catalog.population_metadata.seed,
+            "num_sources": catalog.population_metadata.num_samples,
+            "grid": catalog.population_metadata.provenance.get("grid", ""),
+            "num_frequencies": waveform.frequencies.size,
+            "df_hz": waveform.df,
+            "f_min_hz": waveform.minimum_frequency,
+            "f_max_hz": waveform.maximum_frequency,
+            "total_merger_rate_per_s": float(catalog_merger_rate(catalog)),
+        }
+    )
+
+
+def catalog_merger_rate(catalog: Catalog) -> jax.Array:
+    """The observer-frame rate this catalog's own population implies."""
+    model = catalog.get_population_model()
+    params = catalog.population_params
+    sites = population_sites(model, params)
+    values = select_stochastic_values(catalog.source_parameters, sites, label="catalog")
+    _, trace = population_log_probs(model, params, values)
+    return required_deterministic(
+        trace, TOTAL_MERGER_RATE_SITE, ndim=0, label="catalog"
+    )
 
 
 def unpack(
-    catalog: xr.Dataset,
-) -> tuple[np.ndarray, np.ndarray, dict[str, jax.Array], jax.Array, jax.Array]:
-    """The five things every section wants out of a catalog."""
-    frequencies = np.asarray(catalog.frequency.values)
-    power = np.asarray(catalog.polarization_power.values)
+    catalog: Catalog,
+) -> tuple[np.ndarray, np.ndarray, dict[str, jax.Array], jax.Array]:
+    """The four things every section wants out of a catalog."""
+    frequencies = np.asarray(catalog.waveform_metadata.frequencies)
+    power = np.asarray(catalog.polarization_power)
     catalog_samples = {
-        str(name): jnp.asarray(catalog.source_parameters.sel(parameter=name).values)
-        for name in catalog.parameter.values
+        name: jnp.asarray(values) for name, values in catalog.source_parameters.items()
     }
-    merger_rate, _, logprob = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, catalog_samples, redshift_grid=make_redshift_grid()
-    )
-    return frequencies, power, catalog_samples, merger_rate, logprob
+    return frequencies, power, catalog_samples, catalog_merger_rate(catalog)
 
 
 # The wide, coarse grid: the Omega_gw comparison and the Monte-Carlo
@@ -484,24 +436,21 @@ def unpack(
 wide_catalog = load_or_build_catalog(
     df=OMEGA_DF, f_max=OMEGA_F_MAX, grid="omega", path=OMEGA_CATALOG_PATH
 )
-wide_frequencies, wide_power, wide_samples, wide_merger_rate, _ = unpack(wide_catalog)
-# Derived by unpack from the guarded fiducials and the stored samples, so
-# stamped for the repr below rather than persisted in the cache file.
-wide_catalog.attrs["total_merger_rate_per_s"] = float(wide_merger_rate)
+wide_frequencies, wide_power, wide_samples, wide_merger_rate = unpack(wide_catalog)
 
-wide_catalog
+# The rate is derived from the file's own population rather than persisted:
+# it is a property of the population and the redshift window, so a stored copy
+# would be stale the moment either moved.
+describe(wide_catalog)
 
 # %%
 # The narrow, fine grid: everything from the SNR section on.
 catalog = load_or_build_catalog(
     df=FINE_DF, f_max=SNR_F_MAX, grid="snr", path=SNR_CATALOG_PATH
 )
-fine_frequencies, fine_power, samples, total_merger_rate, proposal_logprob = unpack(
-    catalog
-)
-catalog.attrs["total_merger_rate_per_s"] = float(total_merger_rate)
+fine_frequencies, fine_power, samples, total_merger_rate = unpack(catalog)
 
-catalog
+describe(catalog)
 
 # %% [markdown]
 # ## Analytic vs sample-mean $\Omega_{\rm gw}$
@@ -522,8 +471,8 @@ catalog
 # **One convention.** The source-frame merger rate passed to the analytic
 # spectrum deliberately omits the $1/(1+z)$ time dilation:
 # `analytic_spectral_density_from_mass_moments` carries it inside its
-# $(1+z)^{4/3}$ factor, whereas `compute_merger_rate_distance_and_logprob`
-# applies it inside its own density. Dividing in both places double-counts it
+# $(1+z)^{4/3}$ factor, whereas the population's redshift density applies it
+# inside $p(z) \propto \psi(z)/(1+z)\,dV_c/dz$. Dividing in both places double-counts it
 # — exactly the class of error these two independent paths are crossed to
 # catch.
 
@@ -560,12 +509,9 @@ analytic_spectrum = np.asarray(
 )
 
 
-def contract(power: np.ndarray, catalog_samples: dict[str, jax.Array]) -> np.ndarray:
+def contract(power: np.ndarray, rate: jax.Array) -> np.ndarray:
     """Unweighted catalog contraction at the fiducials, for `power`'s sources."""
     num = power.shape[1]
-    rate, _, _ = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, catalog_samples, redshift_grid=make_redshift_grid()
-    )
     return np.asarray(
         spectral_density(
             jnp.asarray(power),
@@ -587,7 +533,7 @@ def to_omega(spectrum: np.ndarray, frequencies: np.ndarray) -> np.ndarray:
     )
 
 
-catalog_spectrum = contract(wide_power, wide_samples)
+catalog_spectrum = contract(wide_power, wide_merger_rate)
 omega_catalog = to_omega(catalog_spectrum, wide_frequencies)
 omega_analytic = to_omega(analytic_spectrum, wide_frequencies)
 
@@ -761,12 +707,11 @@ for size in CATALOG_SIZES:
     signed = np.empty((NUM_REALIZATIONS, NUM_BANDS))
     for realization in range(NUM_REALIZATIONS):
         columns = rng.integers(0, NUM_SOURCES, size=size)
+        # The rate is a property of the population and the redshift window,
+        # not of which sources were drawn, so resampling columns changes the
+        # contraction and nothing else.
         subset_omega = to_omega(
-            contract(
-                wide_power[:, columns],
-                {name: values[columns] for name, values in wide_samples.items()},
-            ),
-            wide_frequencies,
+            contract(wide_power[:, columns], wide_merger_rate), wide_frequencies
         )
         # Where the subset has no source left emitting the ratio is exactly -1.
         # That looks like a numerical artifact and is not: it is the
@@ -1073,33 +1018,28 @@ pd.DataFrame(
 # closed-form check below instead.
 
 # %%
-# No NumPyro model here -- only the weights themselves -- so this drops
-# straight to the population API rather than going through an estimator. The
-# stored distances are the EM ones this catalog was generated at, so the
-# reference distance the stored power corresponds to carries the fiducial
-# GW/EM ratio on top; it is cached once, outside the H0 scan.
-log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
-    samples["redshift"], FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]
+# The estimator caches the proposal density and the reference distances once,
+# from the catalog's own recorded population, so the H0 scan below pays for the
+# target evaluation only. The reference distance is the stored distance column
+# -- the one the stored power was generated at -- never a freshly interpolated
+# cosmology table.
+scan_estimator = SpectralDensityImportanceEstimator.from_catalog(
+    catalog,
+    model=target_model_fn(),
+    target_params=FIDUCIALS,
+    average_mode="analytic_inclination",
 )
 
 
 def log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
     """Gaussian log-density of the injection under the H0-shifted template."""
     noise_scale = gaussian_bin_scale(run["effective_psd"], OBSERVATION_TIME, run["df"])
-    population = bns_population(
-        {**FIDUCIALS, "H0": hubble_constant}, redshift_grid=make_redshift_grid()
-    )
-    terms = population.compute_population_terms(samples)
-    rate = terms.total_merger_rate
-    log_weights = importance_log_weights(
-        terms,
-        proposal_log_prob=proposal_logprob,
-        log_reference_distance=log_reference_distance,
-    )
+    params = {**FIDUCIALS, "H0": hubble_constant}
+    _, extras = scan_estimator(params)
     model = spectral_density(
         run["power"],
-        jnp.exp(log_weights),
-        rate,
+        jnp.exp(scan_estimator.log_weights(params)),
+        jnp.asarray(extras["total_merger_rate"]),
         average_mode="analytic_inclination",
     )
     return float(jnp.sum(dist.Normal(model, noise_scale).log_prob(run["spectrum"])))

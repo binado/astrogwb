@@ -129,14 +129,6 @@ def catalog_config_flags(wildcards):
     )
 
 
-def catalog_populations(wildcards):
-    """Every population graph one catalog draws from, in component order."""
-    from astrogwb.paper.config.catalogs import load_catalog_definition
-
-    definition = load_catalog_definition(wildcards.catalog, Path("."))
-    return [str(path) for path in definition.population_paths(Path("."))]
-
-
 def run_catalog_input(role):
     """The catalog file one role of a run samples against.
 
@@ -182,11 +174,15 @@ localrules:
 
 
 rule waveform_catalog:
-    """Population draw + waveform generation, in one process."""
+    """Population draw + waveform generation, in one process.
+
+    The population is declared by `config/catalogs/base/population.toml`, which
+    `catalog_layers` already returns, so there is no separate graph file to
+    declare as an input any more.
+    """
     input:
         script="scripts/generate_catalog.py",
         config=catalog_layers,
-        population=catalog_populations,
     output:
         catalog_path("{catalog}"),
     params:

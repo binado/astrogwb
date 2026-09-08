@@ -5,8 +5,9 @@
 One package, `astrogwb`, with the reproducibility application inside it:
 
 - `src/astrogwb/`: publishable scientific library. It owns cosmology, detector
-  geometry/data, GWB contractions, importance weighting, the generic NumPyro
-  model, waveform power reduction, and HDF5 catalog serialization.
+  geometry/data, GWB contractions, source populations declared as NumPyro
+  models, importance weighting, the generic NumPyro model, waveform power
+  reduction, and HDF5 catalog serialization.
 - `src/astrogwb/paper/`: the reproducibility application. It owns
   configuration, runtime setup, prior adaptation, console commands, plotting
   style, and the SNR/inference helpers the figures use.
@@ -44,6 +45,13 @@ Every check is a `just` recipe, and CI runs the same string:
 
 ## Configuration
 
+A catalog records the density that drew it: its file carries the registered
+population model, that model's construction settings, the hyperparameters it
+was drawn at, and the density factors excluded from importance weighting. No
+run config restates any of it, and nothing cross-checks the two. Adding a
+population means adding a registered model function under
+`src/astrogwb/populations/`, never an import path in a config.
+
 A run config is three TOML layers merged in order -- `config/analysis/base/*`,
 then the experiment `_base.toml`, then the run. There is no assembled-config
 artifact: every entrypoint takes the layers on argv as repeated `--config`
@@ -55,12 +63,15 @@ config next to the chain and stamps the ordered layer paths into it.
 
 - Target Python `>=3.12`, use explicit public type hints, `pathlib.Path`, Ruff
   formatting, snake_case functions, PascalCase classes, and uppercase constants.
-- `astrogwb.paper.config.runs` is stdlib-only and `astrogwb.paper.config.catalogs`
-  reaches `astrogwb.catalog` only inside function bodies. The `Snakefile`
-  imports both, so keeping them JAX-free is what keeps `--dry-run` cheap;
-  `tests/paper/test_cli.py` asserts it.
-- Runtime configuration must run before imports that can initialize JAX or
-  NumPyro.
+- `astrogwb.paper.config.runs` is stdlib-only; the `Snakefile` imports it to
+  build the DAG, which is what keeps `--dry-run` cheap.
+  `astrogwb.paper.config.catalogs` reaches the population registry only inside
+  function bodies -- a cheap habit rather than a constraint, since the
+  `Snakefile` no longer imports it.
+- The load-bearing rule is narrower than "no JAX at import": runtime
+  configuration must run before the XLA *backend* is initialized. Importing JAX
+  or NumPyro does not initialize it; creating an array or querying devices
+  does. `tests/paper/test_cli.py` asserts both halves.
 - Add core tests for scientific interfaces and paper tests for configuration,
   CLI, runtime, I/O, and workflows. Mark dependency-heavy tests with
   `@pytest.mark.integration`.

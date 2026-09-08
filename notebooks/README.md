@@ -7,11 +7,11 @@ Workflows in this directory are stored as plain `.py` files in [Jupytext](https:
 They used to live in two trees, one per workspace package. The packages merged;
 the distinction did not, and it is worth knowing which kind you are opening.
 
-**Self-contained** — demonstrations of the core `astrogwb` library. They carry
-their population graph inline and build their own catalog through
-`astrogwb.catalog`, so they run against a clean checkout with
-`astrogwb[simulation,io]` installed and nothing else. They read no file outside
-themselves and import nothing from `tests/core`.
+**Self-contained** — demonstrations of the core `astrogwb` library. They name a
+registered population model and build their own catalog through
+`astrogwb.populations` and `astrogwb.catalog`, so they run against a clean
+checkout with `astrogwb[io]` installed and nothing else. They read no file
+outside themselves and import nothing from `tests/core`.
 
 - **`catalog_convergence.py`** — how the catalog contraction approaches the
   analytic spectrum as the number of sources grows ($\propto N^{-1/2}$), and
@@ -44,10 +44,13 @@ just test-notebooks
 ```
 
 That recipe installs the `simulation` and `io` extras and the `jupyter` group,
-and nothing else — which is what keeps the notebook's self-containment honest. The notebook keeps its
-scientifically significant population graph and luminosity-distance
-recomputation inline, then passes the prepared parameters through
-`Catalog.from_generator(..., generator=AnalyticInspiralGenerator(...))`.
+and nothing else — which is what keeps the notebook's self-containment honest.
+The notebook names the population it draws from and the parameters it draws at,
+then passes `draw_population`'s output through
+`Catalog.from_generator(..., generator=AnalyticInspiralGenerator(...))`. The
+luminosity distance is the population's own `numpyro.deterministic`, computed
+in the same batched pass every later density evaluation takes, which is what
+makes the catalog exactly its own importance proposal.
 
 `ASTROGWB_NOTEBOOK_SMOKE=1` shrinks the catalog and the convergence sweeps. It
 changes only how long the notebook runs, never which
@@ -78,21 +81,17 @@ uv sync --extra notebook --group jupyter
 The self-contained notebook writes the catalog it builds to a
 `notebooks/*.h5` file
 (gitignored) and reuses it on the next run. The file is a cache, not an input:
-delete it and the notebook rebuilds from its own inline population graph.
+delete it and the notebook rebuilds from the population model it names.
 Persistence is not part of the core dependency set: `astrogwb` builds an
-array-native `Catalog`, and `astrogwb.catalog.io` writes it to HDF5 behind the
-`io` extra, so the notebook needs `astrogwb[simulation,io]` and nothing else.
+array-native `Catalog` in memory, and `Catalog.save` / `Catalog.load` reach
+HDF5 behind the `io` extra, so the notebook needs `astrogwb[io]` and nothing
+else.
 
-The reuse is guarded on more than the file existing. The notebook compares
-the stored catalog's attributes — `df`, `population_num_samples`,
-`population_seed`, the
-band, and the fiducials — against its configuration cell, and rebuilds on any
-mismatch. Without that, editing `CATALOG_DF` and re-running would silently
-analyse the old frequency grid, which in `catalog_convergence.py` would
-invalidate the entire result while looking perfectly healthy.
-
-Because the catalogs are regenerated live rather than read from the committed
-`tests/core/fixtures/mock_bns_population.csv`, a `gwmock-pop`
-version bump can shift the draw: `GraphSimulator` derives its RNG keys from
-the graph. The notebook prints the installed version alongside the seed and
-the grid, so a changed plot is explainable rather than mysterious.
+The reuse is guarded on more than the file existing, but the population half of
+that guard is no longer the notebook's job: a catalog records its own model,
+construction settings and hyperparameters, and `Catalog.load` refuses a file
+whose columns no longer match them. What the notebook still checks is the
+waveform grid and the draw size, which the population record does not cover.
+Without that, editing `CATALOG_DF` and re-running would silently analyse the
+old frequency grid, which in `catalog_convergence.py` would invalidate the
+entire result while looking perfectly healthy.

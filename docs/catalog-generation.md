@@ -1,9 +1,9 @@
 # Catalog generation
 
-A **catalog** is one persisted waveform draw: a population drawn from one or
-more graphs, with its frequency-domain polarization power reduced and written
-to `outputs/catalogs/<name>.h5`. Catalogs are the only expensive artifact in
-the workflow and the only generated input a run consumes.
+A **catalog** is one persisted waveform draw: a population drawn from a
+registered NumPyro model, with its frequency-domain polarization power reduced
+and written to `outputs/catalogs/<name>.h5`. Catalogs are the only expensive
+artifact in the workflow and the only generated input a run consumes.
 
 There is no separate "bank" any more. Catalogs used to be split in two: banks
 were persisted single-component draws, and a catalog was a cheap in-memory
@@ -22,104 +22,118 @@ config/catalogs/defs/<name>.toml  ->  outputs/catalogs/<name>.h5
 No registry translates between them. Adding a catalog means adding a TOML file;
 the `waveform_catalog` rule and the `catalogs` target pick it up by globbing.
 
-A catalog config is two layers merged in order, the same shape as a run config:
+A catalog config is three layers merged in order, the same shape as a run
+config:
 
-1. `config/catalogs/base/*.toml` — the `[waveform]` block every catalog shares.
-2. `config/catalogs/defs/<name>.toml` — the draw, and any waveform override.
+1. `config/catalogs/base/population.toml` — the population every catalog is
+   drawn from, and the hyperparameters it is drawn at.
+2. `config/catalogs/base/waveform.toml` — the `[waveform]` block every catalog
+   shares.
+3. `config/catalogs/defs/<name>.toml` — the seed, the sample count, and any
+   population or waveform override.
 
-The base layer is declared as a workflow input of every catalog, so editing it
-correctly invalidates all of them.
+Both base layers are declared as workflow inputs of every catalog, so editing
+either correctly invalidates all of them.
 
 The eight committed catalogs:
 
-| Catalog | Components | Samples | Approximant |
-| --- | --- | ---: | --- |
-| `md-imrphenom-s41-n32768` | `madau-dickinson` @ s41 | 32768 | `IMRPhenomXAS_NRTidalv3` |
-| `md-imrphenom-s42-n8192` | `madau-dickinson` @ s42 | 8192 | `IMRPhenomXAS_NRTidalv3` |
-| `md-imrphenom-s42-n16384` | `madau-dickinson` @ s42 | 16384 | `IMRPhenomXAS_NRTidalv3` |
-| `md-imrphenom-s42-n32768` | `madau-dickinson` @ s42 | 32768 | `IMRPhenomXAS_NRTidalv3` |
-| `md-taylorf2-s41-n32768` | `madau-dickinson` @ s41 | 32768 | `TaylorF2` |
-| `md-uniform-imrphenom-s61-n16384-eps1e-1` | MD @ s42 × 0.9 + uniform @ s51 × 0.1 | 16384 | `IMRPhenomXAS_NRTidalv3` |
-| `md-uniform-imrphenom-s62-n16384-eps1e-2` | MD @ s42 × 0.99 + uniform @ s51 × 0.01 | 16384 | `IMRPhenomXAS_NRTidalv3` |
-| `md-uniform-imrphenom-s63-n16384-eps1e-3` | MD @ s42 × 0.999 + uniform @ s51 × 0.001 | 16384 | `IMRPhenomXAS_NRTidalv3` |
+| Catalog | Population | Seed | Samples | Approximant |
+| --- | --- | ---: | ---: | --- |
+| `md-imrphenom-s41-n32768` | `bns_md_cosmological` | 41 | 32768 | `IMRPhenomXAS_NRTidalv3` |
+| `md-imrphenom-s42-n8192` | `bns_md_cosmological` | 42 | 8192 | `IMRPhenomXAS_NRTidalv3` |
+| `md-imrphenom-s42-n16384` | `bns_md_cosmological` | 42 | 16384 | `IMRPhenomXAS_NRTidalv3` |
+| `md-imrphenom-s42-n32768` | `bns_md_cosmological` | 42 | 32768 | `IMRPhenomXAS_NRTidalv3` |
+| `md-taylorf2-s41-n32768` | `bns_md_cosmological` | 41 | 32768 | `TaylorF2` |
+| `md-uniform-imrphenom-s61-n16384-eps1e-1` | `bns_md_uniform_mixture` (ε = 0.1) | 61 | 16384 | `IMRPhenomXAS_NRTidalv3` |
+| `md-uniform-imrphenom-s62-n16384-eps1e-2` | `bns_md_uniform_mixture` (ε = 0.01) | 62 | 16384 | `IMRPhenomXAS_NRTidalv3` |
+| `md-uniform-imrphenom-s63-n16384-eps1e-3` | `bns_md_uniform_mixture` (ε = 0.001) | 63 | 16384 | `IMRPhenomXAS_NRTidalv3` |
 
 Eight, not nine: `md-imrphenom-s41-n32768` serves as both the shared injection
-and `waveform-approximant/IMRPhenom`'s proposal, and the eps = 0.1 guard
-catalog serves both `astrophysical-parameters` runs and
+and `waveform-approximant/IMRPhenom`'s proposal, and the ε = 0.1 guard catalog
+serves both `astrophysical-parameters` runs and
 `variable-proposal-guard/eps1e-1`.
 
 `seed` and `num_samples` are catalog-level, not population-level: `s41` and
-`s42` are the *same* graph drawn twice, so pushing either into the population
-config would mean near-identical graph files.
+`s42` are the *same* population drawn twice, so pushing either into the shared
+population layer would mean near-identical layer files.
 
-## The draw: one component or several
+## The population is a registered model
 
-A def declares its components as an array of tables:
+A def names a population by its key in the `astrogwb.populations` registry, and
+supplies the construction settings it takes:
 
 ```toml
 num_samples = 16384
-mixture_seed = 61
+seed = 61
 
-[[components]]
-population = "madau-dickinson"
-seed = 42
-weight = 0.9
+[population]
+model = "bns_md_uniform_mixture"
 
-[[components]]
-population = "uniform-redshift"
-seed = 51
-weight = 0.1
+[population.kwargs]
+uniform_mixing_fraction = 0.1
 ```
 
-`weight` defaults to `1.0`, so a single-component def is four lines and carries
-no `mixture_seed` — a lone component has no assignment draw to seed.
+Everything else — the redshift window, the grid resolution, the
+hyperparameters, and the density factors excluded from importance weighting —
+is inherited from `config/catalogs/base/population.toml`.
 
-**One component draws straight through `GraphSimulator`; two or more go through
-`MixtureSimulator`.** That dispatch is load-bearing, not an optimization.
-`MixtureSimulator` splits its seed to draw component assignments, so routing a
-lone graph through it would change that graph's RNG stream. Keeping the direct
-path is what makes single-component catalogs prefix-stable across sizes: the
-three `md-imrphenom-s42-n*` catalogs are generated independently and their
+**A registry key, not an import path.** Registry keys change only on purpose;
+module paths move as collateral whenever a module is reorganized, so a
+persisted `module:function` string is a reference that silently rots. An
+unknown key fails pre-flight, in `snakemake validate`, listing what is
+registered — before a GPU job is queued.
+
+The models themselves are ordinary NumPyro model functions
+(`src/astrogwb/populations/bns_madau_dickinson.py`). Their sample sites are
+exactly the columns a catalog stores, and their `numpyro.deterministic` sites
+are the derived ones: detector-frame masses, the luminosity distance governing
+waveform amplitude, and the observer-frame total merger rate. Detector-frame
+masses used to be computed by hand in `generate_catalog.py`, which meant nothing
+checked them on the way back in; they are recomputed and compared on every load
+now.
+
+**One declaration serves generation and inference.** `Predictive` draws the
+catalog from it, and substituting those draws back into the *same* model
+recovers the per-sample source density the importance weights divide by. There
+is no second implementation of the density to keep in step, and no descriptor to
+extract.
+
+### Guard mixtures are one density, not two draws
+
+`bns_md_uniform_mixture` blends a fraction ε of uniform-in-redshift draws into
+the Madau-Dickinson density with `numpyro.distributions.MixtureGeneral`. The
+same mixture that draws the redshifts evaluates their log density, so the
+recorded guard fraction can never be something other than what was drawn. It
+replaced a pair of gwmock graphs differing only in their redshift block, a
+weighted `MixtureSimulator`, and a hand-written `logaddexp` mixture density in
+the analysis layer.
+
+### Prefix stability across sizes
+
+The three `md-imrphenom-s42-n*` catalogs are generated independently and their
 *source parameters* are still exact nested draws, which is what makes
 `variable-catalog-size` a clean series rather than three unrelated runs.
+`Predictive` allocates its per-draw keys with `jax.random.split`, which is
+prefix-stable — a property of the installed JAX rather than an API promise, so
+`tests/core/test_populations.py` checks it directly.
 
 Prefix stability is a property of the population draw, not of the waveforms.
 Generation is exactly reproducible at a fixed sample count, but the same source
 generated in a batch of 8192 and a batch of 32768 gets polarization power
 agreeing only to ~1e-14 relative: XLA picks different reduction orders at
 different batch sizes and floating-point addition is not associative. The
-differences land on the deep tail of the spectrum -- values some three orders
-of magnitude below the array peak -- so they are numerically irrelevant, but
-the catalogs are not byte-identical to one another.
-
-Each component keeps its own seed because a component's draw comes from its
-*construction* seed: `MixtureSimulator` passes each component a derived `seed`
-keyword, and `GraphSimulator._simulate_impl` discards it (`del kwargs`). The
-`mixture_seed` and the component seeds are nonetheless independent, because
-`MixtureSimulator` splits its key before drawing assignments — so unlike the
-old in-memory composition, they need not be distinct.
-
-## Population graphs
-
-[`config/populations/`](../config/populations/) holds two complete, standalone
-graphs — [`madau-dickinson.yaml`](../config/populations/madau-dickinson.yaml)
-and [`uniform-redshift.yaml`](../config/populations/uniform-redshift.yaml).
-There is no base/overlay split and no merge rule: the ~80 duplicated lines are
-visible and diffable, and there are only two files.
-
-They differ only in `parameters.redshift`. Keep the parameter *order* in sync
-between them as well: `GraphSimulator` draws RNG keys in topological order,
-which breaks ties by declaration order, so reordering a block silently changes
-every generated catalog.
+differences land on the deep tail of the spectrum — values some three orders of
+magnitude below the array peak — so they are numerically irrelevant, but the
+catalogs are not byte-identical to one another.
 
 ## Generate a catalog
 
 One command does the whole thing — population draw, waveform generation, power
-reduction, write. The population never lands on disk; it was previously a
-`temp()` node with exactly one consumer.
+reduction, write.
 
 ```bash
 uv run --extra paper python scripts/generate_catalog.py \
+  --config config/catalogs/base/population.toml \
   --config config/catalogs/base/waveform.toml \
   --config config/catalogs/defs/md-imrphenom-s41-n32768.toml \
   --output outputs/catalogs/md-imrphenom-s41-n32768.h5
@@ -127,8 +141,7 @@ uv run --extra paper python scripts/generate_catalog.py \
 
 Layers arrive as repeated `--config` flags, in merge order, and the last one's
 filename stem names the catalog. It refuses to overwrite an existing catalog
-unless `--force` is passed. Source-frame masses are converted to detector-frame
-masses by multiplying by `1 + z` immediately before waveform generation.
+unless `--force` is passed.
 
 Through the workflow, from the repository root:
 
@@ -147,49 +160,73 @@ omit these rules, so a missing catalog stops the run with a
 `MissingInputException` rather than silently scheduling hours of waveform
 generation.
 
-## Catalogs record their own provenance
+## Catalogs record the density that drew them
 
-Each catalog stores how it was made, as HDF5 attributes written once at
-generation time:
+Each catalog stores the complete population declaration, as HDF5 attributes
+written once at generation time:
 
 ```text
-population_name        = "md-imrphenom-s41-n32768"
-population_seed        = 41
-population_num_samples = 32768
-redshift_proposal      = '{"components": [{"weight": 1.0, "density":
-                           {"kind": "madau_dickinson", "z_min": 0.0,
-                            "z_max": 20.0, "gamma": 1.42, "kappa": 4.62,
-                            "z_peak": 1.84, "H0": 67.66, "Omega_m": 0.3096,
-                            "n_grid": 4096}}]}'
+population_model         = "bns_md_cosmological"
+population_model_kwargs  = '{"n_grid": 4096, "z_max": 20.0, "z_min": 0.0}'
+population_params        = '{"H0": 67.66, "Omega_m": 0.3096, "gamma": 1.42,
+                             "kappa": 4.62, "local_merger_rate": 770.0,
+                             "z_peak": 1.84}'
+population_hidden_sites  = '["lambda_1", "lambda_2", "source_frame_mass_1",
+                             "source_frame_mass_2", "spin_1z", "spin_2z"]'
+population_seed          = 41
+population_num_samples   = 32768
 ```
 
-netCDF attributes are flat scalars, so the descriptor travels as one JSON
-string. It is always a *mixture*, even for a single-component catalog, so the
-analysis reads one shape regardless of how the catalog was built; a guard
-catalog records two components with their normalized mixing fractions.
+netCDF attributes are flat scalars, so the mappings travel as JSON strings.
+What is *not* stored is a callable: `Catalog.get_population_model()` looks the
+name up in the registry and binds the construction settings.
 
-This is the density the importance weights divide by, and it is what lets the
-run config drop `uniform_mixing_fraction` entirely — the catalog owns it. It is
-extracted from the population graphs exactly once, by
-`astrogwb.paper.config.catalogs.extract_mixture_proposal`, and every later
-consumer reads it back with `CatalogProvenance.from_file` instead of re-parsing
-a config that may have drifted since. `scripts/run_mcmc.py` also checks the
-run's `[fiducials]` against what the catalog recorded, so a drifted fiducial
-fails before a device is claimed rather than silently reweighting against the
-wrong denominator.
+That is enough to reconstruct the exact map from hyperparameters to source
+density, which is why the run config no longer restates any of it and nothing
+has to be cross-checked. Before this, three partial records described one run —
+the merged run TOML, a catalog attribute naming only the *shape* of the
+redshift proposal, and a config object derived from those two — reconciled by
+exact float equality over five hard-coded parameter names. Three more
+parameters that change the answer (`xi_0`, `xi_n`, `local_merger_rate`) were
+checked by nothing at all.
 
-A file written before this metadata existed carries no readable
-`redshift_proposal` attribute. Reading it fails with *"generated before proposal
-metadata; regenerate it"* — deliberately, rather than falling back to parsing.
+`population_hidden_sites` is part of the record for a reason that is easy to
+miss: a catalog whose proposal density was computed with the mass factors
+excluded, reweighted against a target that includes them, gives silently wrong
+weights with no shape error anywhere.
+
+### What loading checks
+
+`Catalog.load` is not just a read. It re-executes the recorded population and
+performs two independent checks:
+
+- **the drift guard**: the redshift log density is recomputed at probe points
+  recorded when the file was written and compared. A registry key pins a name,
+  not the mathematics behind it, so this is what catches a registered model
+  whose density changed underneath an existing catalog. It travels under the
+  `redshift_proposal` attribute, which survives from the previous format
+  demoted from source of truth to assertion.
+- **the derived-column check**: every deterministic the population declares is
+  recomputed from the stored stochastic values and compared against the stored
+  column. This is what catches columns computed by some other route that have
+  since drifted.
+
+Files written under a previous `format_name` carry no reconstructable density
+and are rejected with a regeneration message. There is no legacy reader:
+inferring a missing population from an old descriptor is exactly the guesswork
+this format exists to remove.
 
 ## What is *not* in the file: the analysis window
 
-The recorded descriptor is the *generation* density, over `[0.0, 20.0]`. The
-analysis window is narrower — `minimum_redshift = 0.3` in
-`config/analysis/base/model.toml` — and `compute_proposal_logprob` renormalizes
-both the uniform component and the Madau-Dickinson grid to *that* window.
+The recorded settings are the *generation* window, `[0.0, 20.0]`. The analysis
+window is narrower — `minimum_redshift = 0.3` in
+`config/analysis/base/model.toml` — so the per-sample log density cannot be
+baked into the catalog: it depends on a truncation the run chooses, not on
+anything generation knows.
 
-So the per-sample log-density cannot be baked into the catalog: it depends on a
-truncation the run chooses, not on anything generation knows. The file records
-the descriptor; `astrogwb.paper.config.catalogs.resolve_proposal` narrows it
-with the run's own window at load time, before JAX claims a device.
+`Catalog.restrict_redshift(z_min, z_max)` narrows both halves together, and
+that is the whole reason it is one method. Dropping samples without narrowing
+the recorded model would leave the density normalized over a window the samples
+no longer span, and every importance weight would be off by that
+normalization. Draws truncated to a sub-window follow the same law as draws
+made directly from it, so only the support changes.

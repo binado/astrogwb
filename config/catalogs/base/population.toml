@@ -1,0 +1,52 @@
+# The BNS population every catalog is drawn from, and drawn at.
+#
+# `model` is a key in the astrogwb.populations registry, not an import path:
+# registry keys change only on purpose, while module paths move as collateral.
+# The guarded-proposal catalogs override it with the uniform-mixture variant
+# and add `uniform_mixing_fraction` to [population.kwargs].
+#
+# Everything here is copied verbatim into the generated .h5 file, which is what
+# makes the catalog self-describing. Nothing re-reads this layer at analysis
+# time, and no run config restates any of it, so there is nothing for the two
+# to disagree about. This layer is declared as a Snakemake input of every
+# catalog, so editing it correctly invalidates all of them.
+
+[population]
+model = "bns_md_cosmological"
+# Source-density factors left out of the importance weights because they are
+# identical between every target and every proposal built from this population,
+# so their ratio is one. Redshift is deliberately absent and is rejected if
+# listed: it is the factor the weights exist to correct.
+#
+# This travels with the catalog file. A catalog whose proposal density excluded
+# the mass factors, reweighted against a target that includes them, gives
+# silently wrong weights with no shape error anywhere -- which is why the set is
+# recorded rather than assumed.
+hidden_sites = [
+  "source_frame_mass_1",
+  "source_frame_mass_2",
+  "spin_1z",
+  "spin_2z",
+  "lambda_1",
+  "lambda_2",
+]
+
+# Construction settings: the redshift window and the grid the cosmology
+# integrals and the density normalization run on. Narrowing the window to an
+# analysis band is a Catalog operation, not an edit here.
+[population.kwargs]
+z_min = 0.0
+z_max = 20.0
+n_grid = 4096
+
+# The hyperparameters the draw is made at. `local_merger_rate` (Gpc^-3 yr^-1)
+# does not affect the normalized source draws, but the injection's observed
+# spectrum is reconstructed from it, so it is recorded rather than restated in
+# the run config.
+[population.params]
+H0 = 67.66
+Omega_m = 0.3096
+gamma = 1.42
+kappa = 4.62
+z_peak = 1.84
+local_merger_rate = 770.0

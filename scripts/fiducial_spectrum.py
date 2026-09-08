@@ -209,7 +209,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     use_paper_style()
 
     catalog = load_run_catalog(args.catalog, label="injection")
-    observation = prepare_observation(catalog, fiducials=fiducials, grid=grid)
+    observation = prepare_observation(catalog, grid=grid)
     frequencies = observation.frequencies
     frequency_mask = observation.frequency_mask
     figure = plot_omega_and_sh(

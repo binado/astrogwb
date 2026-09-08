@@ -5,8 +5,16 @@ and exercise the application-library preparation shared by pipeline scripts.
 
 The catalogs are deliberately tiny and their frequency grid deliberately
 straddles the analysis band, so the frequency slice actually selects a strict
-subset -- which is what makes the "``samples`` must NOT be masked" assertion
-meaningful.
+subset -- which is what makes the "source samples must NOT be masked"
+assertion meaningful.
+
+Three steps that used to live here are gone, and their tests with them: a
+proposal density derived from the run config, a check reconciling the run's
+fiducials against the catalog's provenance, and a fiducial propagation
+correction applied to stored power and patched into the reference distance at
+the call site. Each catalog now records the density that drew it, and the
+propagation law is part of the population declaration, so the reference
+distance is simply the distance column the file already holds.
 """
 
 from __future__ import annotations
@@ -20,35 +28,25 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
-import xarray as xr
-from catalog_fixtures import make_catalog, save_catalog
+from catalog_fixtures import (
+    PAPER_POPULATION_PARAMS,
+    make_catalog,
+)
 from config_fixtures import example_raw
 from numpyro.infer.util import log_density
+from repo import REPO_ROOT
 
+from astrogwb.catalog import Catalog
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import spectral_density
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_distance_and_logprob,
+from astrogwb.paper.catalogs import load_run_catalog
+from astrogwb.paper.config.mcmc import RunConfig, build_run_config
+from astrogwb.paper.inference import (
+    prepare_inference_inputs,
+    prepare_observation,
+    target_population_model,
 )
-from astrogwb.paper.catalogs import (
-    compute_proposal_logprob,
-    load_run_catalog,
-    samples_from_catalog,
-)
-from astrogwb.paper.config.catalogs import (
-    MadauDickinsonProposal,
-    MixtureProposal,
-    ProposalComponent,
-    UniformRedshiftProposal,
-    resolve_proposal,
-)
-from astrogwb.paper.config.mcmc import (
-    ProposalConfig,
-    RunConfig,
-    build_run_config,
-)
-from astrogwb.paper.inference import prepare_inference_inputs, prepare_observation
 from astrogwb.sampling import gwb_spectral_density_model
 
 pytestmark = pytest.mark.integration
@@ -59,88 +57,57 @@ BAND = (20.0, 40.0)
 N_BAND = 3
 N_SOURCES = 8
 # Catalogs span below the assembled analysis window (minimum_redshift 0.3):
-# linspace(0.05, 1.5, 8) keeps 6 samples after truncation.
+# linspace(0.05, 1.5, 8) keeps 6 samples after restriction.
 N_RETAINED = 6
+REDSHIFT = np.linspace(0.05, 1.5, N_SOURCES)
+
+#: The catalog's own generation window and grid, narrower in resolution than
+#: the analysis grid the target runs on. Keeping them different is deliberate:
+#: it is what a real run does, and it stops a bug that conflates the two from
+#: cancelling out of both sides.
+GENERATION_KWARGS: dict[str, float | int] = {
+    "z_min": 0.0,
+    "z_max": 20.0,
+    "n_grid": 256,
+}
+GUARD_FRACTION = 0.3
 
 
 def _write_catalog(
     path: Path,
     *,
-    proposal: bool,
     seed: int,
     frequencies: np.ndarray = FREQUENCIES,
+    guarded: bool = False,
 ) -> Path:
     rng = np.random.default_rng(seed)
-    n_freq = frequencies.size
-    shape = (n_freq, N_SOURCES)
-    redshift = np.linspace(0.05, 1.5, N_SOURCES)
-    source_parameters: dict[str, Any] = {
-        "redshift": redshift,
-        # Only needs to be positive and finite: the model divides by the
-        # catalog's fiducial distances rather than re-deriving them.
-        "luminosity_distance": 1.0e3 * (1.0 + redshift),
-        "mass_1": np.full(N_SOURCES, 1.4),
-        "mass_2": np.full(N_SOURCES, 1.4),
-    }
+    kwargs = dict(GENERATION_KWARGS)
+    if guarded:
+        kwargs["uniform_mixing_fraction"] = GUARD_FRACTION
     catalog = make_catalog(
-        frequencies=frequencies,
-        polarization_power=rng.uniform(0.0, 1.0, size=shape),
-        source_parameters=source_parameters,
-        approximant="Toy",
+        redshift=REDSHIFT,
+        polarization_power=rng.uniform(0.0, 1.0, size=(frequencies.size, N_SOURCES)),
         minimum_frequency=float(frequencies[0]),
-        maximum_frequency=float(frequencies[-1]),
-        reference_frequency=20.0,
-        sampling_frequency=128.0,
         df=float(frequencies[1] - frequencies[0]),
+        seed=seed,
+        model_name=("bns_md_uniform_mixture" if guarded else "bns_md_cosmological"),
+        model_kwargs=kwargs,
     )
-    save_catalog(path, catalog)
+    catalog.save(path)
     return path
 
 
-def _proposal(config: RunConfig) -> ProposalConfig:
-    """The density production derives from the catalog file, built inline here.
-
-    These tests write synthetic catalogs with no provenance attrs, so the
-    descriptor is constructed from the run's own fiducials -- the same values a
-    real catalog would have recorded, since check_fiducials_match requires them
-    to agree.
-    """
-    return resolve_proposal(
-        MixtureProposal(
-            components=(
-                ProposalComponent(
-                    weight=1.0,
-                    density=MadauDickinsonProposal(
-                        z_min=0.0,
-                        z_max=20.0,
-                        gamma=config.fiducials["gamma"],
-                        kappa=config.fiducials["kappa"],
-                        z_peak=config.fiducials["z_peak"],
-                        H0=config.fiducials["H0"],
-                        Omega_m=config.fiducials["Omega_m"],
-                    ),
-                ),
-            )
-        ),
-        minimum_redshift=config.cosmology.minimum_redshift,
-        maximum_redshift=config.cosmology.maximum_redshift,
-        label="test-catalog",
+@pytest.fixture
+def injection_catalog(tmp_path: Path) -> Catalog:
+    return load_run_catalog(
+        _write_catalog(tmp_path / "injection.h5", seed=0), label="injection"
     )
 
 
 @pytest.fixture
-def injection_catalog(tmp_path: Path) -> xr.Dataset:
+def proposal_catalog(tmp_path: Path) -> Catalog:
     return load_run_catalog(
-        _write_catalog(tmp_path / "injection.h5", proposal=False, seed=0),
-        label="injection",
-    )
-
-
-@pytest.fixture
-def proposal_catalog(tmp_path: Path) -> xr.Dataset:
-    return load_run_catalog(
-        _write_catalog(tmp_path / "proposal.h5", proposal=True, seed=1),
-        label="proposal",
+        _write_catalog(tmp_path / "proposal.h5", seed=1), label="proposal"
     )
 
 
@@ -162,23 +129,29 @@ def _config(**overrides: Any) -> RunConfig:
     return build_run_config(raw)
 
 
+def _prepare(injection: Catalog, proposal: Catalog, config: RunConfig):
+    return prepare_inference_inputs(
+        injection,
+        proposal,
+        grid=config.analysis_grid,
+        detectors=config.analysis.detectors,
+        target_model=target_population_model(config),
+        target_params=config.fiducials,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # prepare_observation / prepare_inference_inputs
 # --------------------------------------------------------------------------- #
 def test_prepare_observation_keeps_arrays_unmasked(
-    injection_catalog: xr.Dataset,
+    injection_catalog: Catalog,
 ) -> None:
     config = _config()
 
-    observation = prepare_observation(
-        injection_catalog,
-        fiducials=config.fiducials,
-        grid=config.analysis_grid,
-    )
+    observation = prepare_observation(injection_catalog, grid=config.analysis_grid)
 
     assert observation.frequencies.shape == FREQUENCIES.shape
     assert observation.spectral_density.shape == FREQUENCIES.shape
-    assert observation.redshift_grid.shape == (config.cosmology.n_grid,)
     assert float(observation.total_merger_rate) > 0.0
     # The mask is carried alongside, not applied: notebooks plot the full band.
     assert observation.df == 10.0
@@ -191,51 +164,93 @@ def test_prepare_observation_keeps_arrays_unmasked(
     )
 
 
-def test_prepared_catalog_slices_frequency_arrays_but_not_samples(
-    injection_catalog: xr.Dataset, proposal_catalog: xr.Dataset
+def test_the_observed_rate_comes_from_the_injection_catalogs_own_population(
+    injection_catalog: Catalog,
+) -> None:
+    """Nothing is cross-checked against the run config any more, so nothing may
+    be *read* from it either: the file records what was injected."""
+    from reference_population import reference_merger_rate_distance_and_logprob
+
+    config = _config()
+    observation = prepare_observation(injection_catalog, grid=config.analysis_grid)
+
+    grid = config.analysis_grid
+    restricted = injection_catalog.restrict_redshift(
+        grid.minimum_redshift, grid.maximum_redshift
+    )
+    expected_rate, _, _ = reference_merger_rate_distance_and_logprob(
+        PAPER_POPULATION_PARAMS,
+        jnp.asarray(restricted.source_parameters["redshift"]),
+        redshift_grid=jnp.linspace(
+            grid.minimum_redshift,
+            grid.maximum_redshift,
+            int(restricted.population_model_kwargs["n_grid"]),
+        ),
+    )
+    np.testing.assert_allclose(
+        float(observation.total_merger_rate), float(expected_rate), rtol=1e-12
+    )
+    # The weights are identically one, so the observation is the plain
+    # unweighted contraction of the restricted power.
+    np.testing.assert_allclose(
+        np.asarray(observation.spectral_density),
+        0.4
+        * float(expected_rate)
+        * np.asarray(restricted.polarization_power).mean(axis=1),
+        rtol=1e-12,
+    )
+
+
+def test_prepared_estimator_slices_frequency_arrays_but_not_samples(
+    injection_catalog: Catalog, proposal_catalog: Catalog
 ) -> None:
     config = _config()
 
-    inputs = prepare_inference_inputs(
-        injection_catalog,
-        proposal_catalog,
-        fiducials=config.fiducials,
-        proposal_config=_proposal(config),
-        grid=config.analysis_grid,
-        detectors=config.analysis.detectors,
-    )
+    inputs = _prepare(injection_catalog, proposal_catalog, config)
     kwargs = inputs.masked_model_kwargs()
-    catalog = inputs.estimator.catalog
+    estimator = inputs.estimator
 
     assert kwargs["observed_spectral_density"].shape == (N_BAND,)
     assert kwargs["scale"].shape == (N_BAND,)
-    assert catalog.polarization_power.shape == (N_BAND, N_RETAINED)
+    assert estimator.polarization_power.shape == (N_BAND, N_RETAINED)
     # `source_parameters` is per-source, not per-frequency. Masking it would
     # silently truncate the population and change every posterior without
     # erroring; the cached proposal arrays follow the same axis.
-    for name, values in catalog.source_parameters.items():
+    for name, values in estimator.source_parameters.items():
         assert values.shape == (N_RETAINED,), name
-    assert catalog.proposal_log_prob.shape == (N_RETAINED,)
-    assert catalog.log_reference_distance.shape == (N_RETAINED,)
+    assert estimator.proposal_log_prob.shape == (N_RETAINED,)
+    assert estimator.log_reference_distance.shape == (N_RETAINED,)
     # The likelihood takes data only: the catalog and the averaging convention
     # travel on the estimator, and the bin width is consumed into `scale`.
     assert set(kwargs) == {"observed_spectral_density", "scale"}
 
 
-def test_masked_model_kwargs_scale_is_the_masked_gaussian_bin_scale(
-    injection_catalog: xr.Dataset, proposal_catalog: xr.Dataset
+def test_restriction_narrows_the_proposals_recorded_population_too(
+    injection_catalog: Catalog, proposal_catalog: Catalog
 ) -> None:
-    """The scale is now prepared here, not derived inside the sampling model."""
+    """Dropping samples without narrowing the density would misnormalize it."""
     config = _config()
 
-    inputs = prepare_inference_inputs(
-        injection_catalog,
-        proposal_catalog,
-        fiducials=config.fiducials,
-        proposal_config=_proposal(config),
-        grid=config.analysis_grid,
-        detectors=config.analysis.detectors,
+    inputs = _prepare(injection_catalog, proposal_catalog, config)
+
+    assert inputs.proposal.population_metadata.num_samples == N_RETAINED
+    assert inputs.proposal.population_model_kwargs["z_min"] == (
+        config.cosmology.minimum_redshift
     )
+    assert inputs.proposal.population_model_kwargs["z_max"] == (
+        config.cosmology.maximum_redshift
+    )
+    # The file on disk is untouched.
+    assert proposal_catalog.population_model_kwargs["z_min"] == 0.0
+
+
+def test_masked_model_kwargs_scale_is_the_masked_gaussian_bin_scale(
+    injection_catalog: Catalog, proposal_catalog: Catalog
+) -> None:
+    """The scale is prepared here, not derived inside the sampling model."""
+    config = _config()
+
+    inputs = _prepare(injection_catalog, proposal_catalog, config)
     mask = np.asarray(inputs.observation.frequency_mask)
 
     np.testing.assert_allclose(
@@ -252,31 +267,21 @@ def test_masked_model_kwargs_scale_is_the_masked_gaussian_bin_scale(
 
 
 def test_mismatched_frequency_grids_are_rejected(
-    injection_catalog: xr.Dataset, proposal_catalog: xr.Dataset, tmp_path: Path
+    injection_catalog: Catalog, tmp_path: Path
 ) -> None:
     shifted = _write_catalog(
-        tmp_path / "shifted.h5",
-        proposal=True,
-        seed=2,
-        frequencies=FREQUENCIES + 1.0,
+        tmp_path / "shifted.h5", seed=2, frequencies=FREQUENCIES + 10.0
     )
     config = _config()
 
     with pytest.raises(ValueError, match="identical frequency grids"):
-        prepare_inference_inputs(
-            injection_catalog,
-            load_run_catalog(shifted, label="proposal"),
-            fiducials=config.fiducials,
-            proposal_config=_proposal(config),
-            grid=config.analysis_grid,
-            detectors=config.analysis.detectors,
-        )
+        _prepare(injection_catalog, load_run_catalog(shifted, label="proposal"), config)
 
 
 @pytest.mark.parametrize("uncovered", [0.0, np.inf])
 def test_bins_without_network_coverage_narrow_the_band(
-    injection_catalog: xr.Dataset,
-    proposal_catalog: xr.Dataset,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
     monkeypatch: pytest.MonkeyPatch,
     uncovered: float,
 ) -> None:
@@ -289,14 +294,7 @@ def test_bins_without_network_coverage_narrow_the_band(
         lambda *_args, **_kwargs: effective_noise,
     )
 
-    inputs = prepare_inference_inputs(
-        injection_catalog,
-        proposal_catalog,
-        fiducials=config.fiducials,
-        proposal_config=_proposal(config),
-        grid=config.analysis_grid,
-        detectors=config.analysis.detectors,
-    )
+    inputs = _prepare(injection_catalog, proposal_catalog, config)
     kwargs = inputs.masked_model_kwargs()
 
     # The band was [20, 30, 40] Hz; 30 Hz is uncovered, so the surviving band is
@@ -307,15 +305,12 @@ def test_bins_without_network_coverage_narrow_the_band(
     )
     assert kwargs["scale"].shape == (N_BAND - 1,)
     assert kwargs["observed_spectral_density"].shape == (N_BAND - 1,)
-    assert inputs.estimator.catalog.polarization_power.shape == (
-        N_BAND - 1,
-        N_RETAINED,
-    )
+    assert inputs.estimator.polarization_power.shape == (N_BAND - 1, N_RETAINED)
 
 
 def test_a_band_with_fewer_than_two_usable_bins_is_rejected(
-    injection_catalog: xr.Dataset,
-    proposal_catalog: xr.Dataset,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config()
@@ -327,144 +322,119 @@ def test_a_band_with_fewer_than_two_usable_bins_is_rejected(
     )
 
     with pytest.raises(ValueError, match="only 1 usable frequency bin"):
-        prepare_inference_inputs(
-            injection_catalog,
-            proposal_catalog,
-            fiducials=config.fiducials,
-            proposal_config=_proposal(config),
-            grid=config.analysis_grid,
-            detectors=config.analysis.detectors,
-        )
+        _prepare(injection_catalog, proposal_catalog, config)
 
 
-def test_catalog_without_stored_proposal_density_is_accepted(
-    injection_catalog: xr.Dataset,
-) -> None:
+def test_a_catalog_may_serve_as_both_roles(injection_catalog: Catalog) -> None:
+    """Injection versus proposal is two filenames in a TOML, nothing more."""
     config = _config()
 
-    inputs = prepare_inference_inputs(
-        injection_catalog,
-        injection_catalog,
-        fiducials=config.fiducials,
-        proposal_config=_proposal(config),
-        grid=config.analysis_grid,
-        detectors=config.analysis.detectors,
-    )
+    inputs = _prepare(injection_catalog, injection_catalog, config)
 
-    assert "proposal_redshift_logpdf" not in inputs.proposal.parameter.values
+    assert inputs.estimator.polarization_power.shape == (N_BAND, N_RETAINED)
 
 
 # --------------------------------------------------------------------------- #
-# Migration parity: the prepared estimator against the grid-level formula
+# Parity: the prepared estimator against the grid-level formula
 #
-# `propagate_catalog` divides the stored power by xi(z)^2 but leaves
-# `source_parameters["luminosity_distance"]` as the *EM* distance, so the
-# distance the stored power actually corresponds to is the effective one.
-# `ImportanceCatalog` takes that directly and never corrects it again, which
-# makes the conversion in `prepare_inference_inputs` load-bearing and silent:
-# getting it wrong biases every weight by xi^2 while leaving them finite and
-# plausible. These tests are what make it loud.
+# The reference distance is the catalog's own stored distance column, and the
+# target's distance includes modified propagation. Getting that pairing wrong
+# biases every weight by xi^2 while leaving them finite and plausible, so it is
+# checked against a formula written out in full rather than against the
+# pipeline's own intermediates.
 # --------------------------------------------------------------------------- #
-def _non_gr_config() -> RunConfig:
-    """A config whose fiducial propagation is deliberately *not* GR.
+def _non_gr_config(**overrides: Any) -> RunConfig:
+    """A config whose propagation parameters are deliberately *not* GR.
 
     The shipped fiducials have ``xi_0 == 1``, which makes every GW/EM ratio
-    exactly 1 -- so a parity test on them would pass whether the conversion is
-    applied, omitted, or applied twice. Only ``xi_0`` and ``xi_n`` move; the MD
-    constants ``check_fiducials_match`` pins are untouched.
+    exactly 1 -- so a parity test on them would pass whether the propagation
+    correction is applied, omitted, or applied twice.
     """
-    return _config(fiducials={**example_raw()["fiducials"], "xi_0": 1.7, "xi_n": 2.3})
-
-
-def _mixture_proposal(config: RunConfig) -> ProposalConfig:
-    """An MD/uniform mixture: a density no single ``Population`` can express."""
-    return resolve_proposal(
-        MixtureProposal(
-            components=(
-                ProposalComponent(
-                    weight=0.7,
-                    density=MadauDickinsonProposal(
-                        z_min=0.0,
-                        z_max=20.0,
-                        gamma=config.fiducials["gamma"],
-                        kappa=config.fiducials["kappa"],
-                        z_peak=config.fiducials["z_peak"],
-                        H0=config.fiducials["H0"],
-                        Omega_m=config.fiducials["Omega_m"],
-                    ),
-                ),
-                ProposalComponent(
-                    weight=0.3,
-                    density=UniformRedshiftProposal(z_min=0.0, z_max=20.0),
-                ),
-            )
-        ),
-        minimum_redshift=config.cosmology.minimum_redshift,
-        maximum_redshift=config.cosmology.maximum_redshift,
-        label="test-catalog",
+    return _config(
+        fiducials={**example_raw()["fiducials"], "xi_0": 1.7, "xi_n": 2.3},
+        **overrides,
     )
 
 
-def test_log_reference_distance_is_the_effective_distance_of_the_stored_power(
-    injection_catalog: xr.Dataset, proposal_catalog: xr.Dataset
+def test_the_reference_distance_is_the_stored_distance_of_the_stored_power(
+    injection_catalog: Catalog, proposal_catalog: Catalog
 ) -> None:
     config = _non_gr_config()
 
-    inputs = prepare_inference_inputs(
-        injection_catalog,
-        proposal_catalog,
-        fiducials=config.fiducials,
-        proposal_config=_proposal(config),
-        grid=config.analysis_grid,
-        detectors=config.analysis.detectors,
-    )
-
-    # `inputs.proposal` carries the untouched EM distances; the propagation
-    # correction lives only in its power array and in the cached reference.
-    samples = samples_from_catalog(inputs.proposal)
-    em_distance = np.asarray(samples["luminosity_distance"])
-    expected = np.log(em_distance) + np.asarray(
-        log_gw_em_ratio(
-            samples["redshift"], config.fiducials["xi_0"], config.fiducials["xi_n"]
-        )
-    )
+    inputs = _prepare(injection_catalog, proposal_catalog, config)
+    stored = np.asarray(inputs.proposal.source_parameters["luminosity_distance"])
 
     np.testing.assert_array_equal(
-        np.asarray(inputs.estimator.catalog.log_reference_distance), expected
+        np.asarray(inputs.estimator.log_reference_distance), np.log(stored)
     )
-    # The conversion is not a no-op at these fiducials, which is what makes the
-    # equality above worth asserting.
-    assert not np.allclose(expected, np.log(em_distance))
+    # The target's distance is *not* that one at these parameters, which is
+    # what makes the equality above worth asserting.
+    target_distance = np.exp(
+        np.asarray(inputs.estimator.log_reference_distance)
+        + np.asarray(
+            log_gw_em_ratio(
+                inputs.proposal.source_parameters["redshift"],
+                config.fiducials["xi_0"],
+                config.fiducials["xi_n"],
+            )
+        )
+    )
+    assert not np.allclose(target_distance, stored)
 
 
-def _grid_formula_spectrum(
-    inputs: Any, config: RunConfig, proposal_config: ProposalConfig, params: dict
-) -> jax.Array:
+def _proposal_log_prob(catalog: Catalog) -> jax.Array:
+    """The proposal density, restated from the grid formula the file implies."""
+    from reference_population import reference_merger_rate_distance_and_logprob
+
+    kwargs = catalog.population_model_kwargs
+    grid = jnp.linspace(
+        float(kwargs["z_min"]), float(kwargs["z_max"]), int(kwargs["n_grid"])
+    )
+    redshift = jnp.asarray(catalog.source_parameters["redshift"])
+    _, _, md_logprob = reference_merger_rate_distance_and_logprob(
+        catalog.population_params, redshift, redshift_grid=grid
+    )
+    if catalog.population_model_name != "bns_md_uniform_mixture":
+        return md_logprob
+    epsilon = float(kwargs["uniform_mixing_fraction"])
+    return jnp.logaddexp(
+        jnp.log1p(-epsilon) + md_logprob,
+        jnp.log(epsilon) - jnp.log(float(kwargs["z_max"]) - float(kwargs["z_min"])),
+    )
+
+
+def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.Array:
     """The predicted spectrum, restated from the hand-written grid formula.
 
-    Independent of ``Population``, ``ImportanceCatalog``, and the estimator:
-    every step -- the target density, the effective target distance, the
-    reference distance, the weight ratio, the contraction -- is written out
-    here, so an expectation cannot agree with the pipeline by construction.
+    Independent of the population model and the estimator: every step -- the
+    target density, the effective target distance, the reference distance, the
+    weight ratio, the contraction -- is written out here, so an expectation
+    cannot agree with the pipeline by construction.
     """
-    observation = inputs.observation
-    mask = np.asarray(observation.frequency_mask)
-    samples = samples_from_catalog(inputs.proposal)
-    power = jnp.asarray(inputs.proposal.isel(frequency=mask).polarization_power.values)
-    redshift = samples["redshift"]
+    from reference_population import reference_merger_rate_distance_and_logprob
 
-    rate, distance, logprob = compute_merger_rate_distance_and_logprob(
-        params, samples, redshift_grid=observation.redshift_grid
+    catalog = inputs.proposal
+    mask = np.asarray(inputs.observation.frequency_mask)
+    power = jnp.asarray(catalog.polarization_power)[mask, :]
+    redshift = jnp.asarray(catalog.source_parameters["redshift"])
+    grid = config.analysis_grid
+
+    rate, distance, logprob = reference_merger_rate_distance_and_logprob(
+        params,
+        redshift,
+        redshift_grid=jnp.linspace(
+            grid.minimum_redshift, grid.maximum_redshift, grid.n_grid
+        ),
     )
     log_target_distance = jnp.log(distance) + log_gw_em_ratio(
         redshift, params["xi_0"], params["xi_n"]
     )
-    log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
-        redshift, config.fiducials["xi_0"], config.fiducials["xi_n"]
+    log_reference_distance = jnp.log(
+        jnp.asarray(catalog.source_parameters["luminosity_distance"])
     )
     log_weights = (
         logprob
-        - compute_proposal_logprob(redshift, proposal_config)
+        - _proposal_log_prob(catalog)
         - 2.0 * (log_target_distance - log_reference_distance)
     )
     return spectral_density(
@@ -472,33 +442,26 @@ def _grid_formula_spectrum(
     )
 
 
-@pytest.mark.parametrize("mixture", [False, True], ids=["ordinary", "mixture"])
+@pytest.mark.parametrize("guarded", [False, True], ids=["ordinary", "guard-mixture"])
 @pytest.mark.parametrize("offset", [0.0, 0.13], ids=["fiducial", "off-fiducial"])
 def test_prepared_estimator_reproduces_the_grid_formula(
-    injection_catalog: xr.Dataset,
-    proposal_catalog: xr.Dataset,
-    mixture: bool,
-    offset: float,
+    injection_catalog: Catalog, tmp_path: Path, guarded: bool, offset: float
 ) -> None:
     """End-to-end: the same spectrum, the same rate, the same log posterior."""
     config = _non_gr_config()
-    proposal_config = _mixture_proposal(config) if mixture else _proposal(config)
-
-    inputs = prepare_inference_inputs(
-        injection_catalog,
-        proposal_catalog,
-        fiducials=config.fiducials,
-        proposal_config=proposal_config,
-        grid=config.analysis_grid,
-        detectors=config.analysis.detectors,
+    proposal_catalog = load_run_catalog(
+        _write_catalog(tmp_path / "guarded.h5", seed=1, guarded=guarded),
+        label="proposal",
     )
+
+    inputs = _prepare(injection_catalog, proposal_catalog, config)
 
     params = {
         name: float(value) * (1.0 + offset)
         for name, value in config.fiducials.items()
         if name in config.priors
     }
-    expected = _grid_formula_spectrum(inputs, config, proposal_config, params)
+    expected = _grid_formula_spectrum(inputs, config, params)
 
     kwargs = inputs.masked_model_kwargs()
     value, trace = log_density(
@@ -526,3 +489,33 @@ def test_prepared_estimator_reproduces_the_grid_formula(
         )
     ) + sum(prior.log_prob(params[name]) for name, prior in config.priors.items())
     np.testing.assert_allclose(float(value), float(expected_density), rtol=1e-9)
+
+
+def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights(
+    proposal_catalog: Catalog,
+) -> None:
+    """The sanity check the whole importance scheme is legible through.
+
+    The catalog's own generation grid, not the analysis one: the two differ in
+    resolution on purpose everywhere else in this module, and interpolating the
+    same cosmology on two grids is exactly what stops the weights being
+    identically one.
+    """
+    from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
+
+    estimator = SpectralDensityImportanceEstimator.from_catalog(
+        proposal_catalog, average_mode="analytic_inclination"
+    )
+    np.testing.assert_array_equal(
+        np.asarray(estimator.log_weights(proposal_catalog.population_params)),
+        np.zeros(N_SOURCES),
+    )
+
+
+def test_the_repository_ships_no_proposal_density_config() -> None:
+    """A run names two catalog files; the density is in each file."""
+    text = (REPO_ROOT / "config/analysis/base/catalogs.toml").read_text(
+        encoding="utf-8"
+    )
+    assert "[catalog]" in text
+    assert "uniform_mixing_fraction" not in text

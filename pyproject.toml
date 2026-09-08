@@ -31,8 +31,11 @@ dependencies = [
 [project.optional-dependencies]
 cuda = ["jax[cuda12]>=0.11.0"]
 # xarray drags in pandas, so HDF5 catalog serialization is opt-in and the
-# published wheel stays lean. See astrogwb/catalog/io.py.
+# published wheel stays lean. See astrogwb/catalog/_io.py.
 io = ["h5netcdf[h5py]>=1.8.1", "xarray>=2025.1"]
+# Only the integration cosmology cross-check needs it now: populations are
+# declared as NumPyro models here, so nothing in the library draws through a
+# gwmock graph any more.
 simulation = ["gwmock-pop>=0.11.4"]
 tpu = ["jax[tpu]>=0.11.0"]
 # The reproducibility application library: astrogwb.paper. It is shipped in the
@@ -68,7 +71,6 @@ build-backend = "uv_build"
 
 # Groups are tooling: never imported by shipped code, never part of a wheel.
 [dependency-groups]
-fixture = ["gwmock-pop==0.11.4", "pyyaml>=6.0.3"]
 test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0"]
 workflow = ["snakemake>=9.24.0"]
 # Notebook *execution* tooling, as opposed to the `notebook` extra, which is

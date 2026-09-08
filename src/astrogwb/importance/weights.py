@@ -1,34 +1,42 @@
-r"""Population importance weights evaluated at fixed catalog samples.
+r"""The importance weight itself, over plain arrays.
 
-The target density and distance are evaluated at fixed catalog samples. The
-proposal density and reference distance are cached by ``ImportanceCatalog``.
-The reference distance must correspond to the stored polarization power,
-which scales as distance to the power minus two. It must not be reconstructed
-from a cosmology table: interpolation differences would bias every weight.
+Separated from :mod:`astrogwb.importance.estimator` so the estimator and the
+diagnostic figures that want raw per-source weights share one implementation of
+the arithmetic rather than two that agree by inspection. Identical evaluated
+densities and distances give *exactly* zero log weights, which is the sanity
+check the whole importance scheme is legible through -- and an arithmetic that
+exists twice cannot promise it.
 """
 
 from __future__ import annotations
 
 import jax
 
-from astrogwb.population import PopulationTerms
+__all__ = ["importance_log_weights"]
 
 
 def importance_log_weights(
-    target: PopulationTerms,
     *,
+    target_log_prob: jax.Array,
     proposal_log_prob: jax.Array,
+    log_luminosity_distance: jax.Array,
     log_reference_distance: jax.Array,
 ) -> jax.Array:
-    """Source density ratio times inverse-square distance rescaling in log space.
+    r"""Source density ratio times inverse-square distance rescaling, in log space.
 
-    The reference distance corresponds to the stored polarization power. No
-    proposal merger rate is needed. Identical evaluated densities and distances
-    give exactly zero log weights.
+    .. math::
+
+        \log w_i = \left[\log p(x_i \mid \theta) - \log q(x_i)\right]
+            - 2\left[\log d_L(z_i \mid \theta) - \log d_i^{\mathrm{ref}}\right]
+
+    The reference distance is the effective distance the stored polarization
+    power was generated at; power scales as the inverse square of it. No
+    proposal merger rate is needed -- a proposal is a density, not an
+    observation.
+
+    Every argument has shape ``(N,)``. Evaluate only where the proposal has
+    support: subtracting two negative-infinite log densities gives ``nan``.
     """
-    log_prob_ratio = target.log_prob - proposal_log_prob
-    log_distance_ratio = target.log_luminosity_distance - log_reference_distance
+    log_prob_ratio = target_log_prob - proposal_log_prob
+    log_distance_ratio = log_luminosity_distance - log_reference_distance
     return log_prob_ratio - 2.0 * log_distance_ratio
-
-
-__all__ = ["importance_log_weights"]

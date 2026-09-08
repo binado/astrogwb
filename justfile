@@ -37,13 +37,23 @@ test-paper:
         --extra notebook --group test --group workflow \
         pytest tests/paper -m "not integration"
 
-# The end-to-end NUTS runs, slow enough to be their own CI job. These are the
-# tests that cross-check against gwmock-pop, so they need `simulation` -- which
-# test-core deliberately does not have, since core must work without it.
+# The end-to-end NUTS runs, slow enough to be their own CI job. These are also
+# the tests that cross-check the cosmology against gwmock-pop, so they need
+# `simulation` -- which test-core deliberately does not have, since core must
+# work without it.
+#
+# The second line is the paper half: the pipeline's parity checks against the
+# hand-written grid formula, and the generation tests that actually run Ripple.
+# They were dark before -- marked `integration` but reachable from no recipe --
+# so a change to catalog generation or to the prepared estimator could pass CI
+# with nothing having exercised either end to end.
 test-integration:
     uv run --frozen --isolated --no-default-groups \
         --extra io --extra simulation --group test \
         pytest tests/core -m integration
+    uv run --frozen --isolated --no-default-groups \
+        --extra notebook --group test --group workflow \
+        pytest tests/paper -m integration
 
 # Both fast suites.
 test: test-core test-paper
@@ -66,13 +76,3 @@ convert-notebooks:
 # core requirement set.
 build-core:
     uv build --no-sources
-
-# Regenerate the committed core mock-population fixture.
-generate-mock-population-fixture:
-    uv run --frozen --isolated --no-default-groups \
-        --group fixture \
-        python scripts/generate_mock_population_fixture.py \
-        --population tests/core/fixtures/mock_bns_population.yaml \
-        --output tests/core/fixtures/mock_bns_population.csv \
-        --num-samples 1024 \
-        --seed 41

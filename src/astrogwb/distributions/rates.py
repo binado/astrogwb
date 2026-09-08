@@ -1,12 +1,11 @@
 r"""Dimensionless merger-rate shapes :math:`\psi(z)`.
 
-The canonical home for the rate shapes shared by the distribution classes in
-:mod:`astrogwb.distributions` and the importance-weighting reference callbacks
-in :mod:`astrogwb.importance.models`. NumPyro-free by design: it must stay
-importable without loading NumPyro, so that the reference callbacks can share
-these definitions without inheriting a NumPyro import from the distribution
-subpackage. That is also why :mod:`astrogwb.distributions` re-exports nothing
-from its package root.
+The canonical home for the rate shapes the distribution classes in
+:mod:`astrogwb.distributions` build on. NumPyro-free by design: it must stay
+importable without loading NumPyro, so a caller that only wants
+:math:`\psi(z)` -- an analytic spectrum, a test oracle -- does not inherit a
+NumPyro import from the distribution subpackage. That is also why
+:mod:`astrogwb.distributions` re-exports nothing from its package root.
 """
 
 from __future__ import annotations
