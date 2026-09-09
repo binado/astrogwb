@@ -29,7 +29,6 @@ from astrogwb.populations.evaluation import (
     LUMINOSITY_DISTANCE_SITE,
     REDSHIFT_SITE,
     TOTAL_MERGER_RATE_SITE,
-    redshift_log_density,
 )
 from astrogwb.populations.registry import (
     PopulationFactory,
@@ -55,6 +54,5 @@ __all__ = [
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
     "population_model",
-    "redshift_log_density",
     "register_population_model",
 ]

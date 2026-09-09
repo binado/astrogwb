@@ -216,18 +216,10 @@ weights with no shape error anywhere.
 ### What loading checks
 
 `Catalog.load` is not just a read. It re-executes the recorded population and
-performs two independent checks:
-
-- **the drift guard**: the redshift log density is recomputed at probe points
-  recorded when the file was written and compared. A registry key pins a name,
-  not the mathematics behind it, so this is what catches a registered model
-  whose density changed underneath an existing catalog. It travels under the
-  `redshift_proposal` attribute, which survives from the previous format
-  demoted from source of truth to assertion.
-- **the derived-column check**: every deterministic the population declares is
-  recomputed from the stored stochastic values and compared against the stored
-  column. This is what catches columns computed by some other route that have
-  since drifted.
+performs the **derived-column check**: every deterministic the population
+declares is recomputed from the stored stochastic values and compared against
+the stored column. This is what catches columns computed by some other route
+that have since drifted.
 
 The format is `astrogwb_catalog_v3`. Earlier formats, including v2 catalogs
 with excluded-factor metadata, require regeneration. There is no compatibility

@@ -21,10 +21,7 @@ from typing import Any
 import numpy as np
 
 from astrogwb.catalog.catalog import Catalog
-from astrogwb.populations import (
-    REDSHIFT_SITE,
-    redshift_log_density,
-)
+from astrogwb.populations import REDSHIFT_SITE
 from astrogwb.waveform import PolarizationPowerGenerator
 
 try:
@@ -66,10 +63,6 @@ MODEL_KWARGS_ATTR = "population_model_kwargs"
 POPULATION_PARAMS_ATTR = "population_params"
 DENSITY_SITES_ATTR = "population_density_sites"
 
-#: Kept from the previous format, demoted from source of truth to assertion.
-#: See :func:`_redshift_density_probe`.
-PROPOSAL_ATTR = "redshift_proposal"
-
 POPULATION_ATTRS = (
     POPULATION_SEED_ATTR,
     POPULATION_NUM_SAMPLES_ATTR,
@@ -77,7 +70,6 @@ POPULATION_ATTRS = (
     MODEL_KWARGS_ATTR,
     POPULATION_PARAMS_ATTR,
     DENSITY_SITES_ATTR,
-    PROPOSAL_ATTR,
 )
 
 #: The population record is mandatory: a file missing any of these cannot say
@@ -85,13 +77,10 @@ POPULATION_ATTRS = (
 #: acceptable substitute for that.
 REQUIRED_POPULATION_ATTRS = POPULATION_ATTRS
 
-#: Number of interior redshifts the drift fingerprint is evaluated at.
-PROBE_POINTS = 8
-
-#: Tolerances for the two load-time consistency checks. Both compare a value
-#: recomputed now against one computed at generation time, which ran the same
-#: expressions under ``vmap``; agreement is to floating-point noise, not to the
-#: last bit.
+#: Tolerances for the load-time derived-column consistency check. It compares a
+#: value recomputed now against one computed at generation time, which ran the
+#: same expressions under ``vmap``; agreement is to floating-point noise, not
+#: to the last bit.
 DERIVED_COLUMN_RTOL = 1e-9
 DERIVED_COLUMN_ATOL = 1e-12
 
@@ -129,7 +118,6 @@ def catalog_to_dataset(catalog: Catalog) -> xr.Dataset:
         MODEL_KWARGS_ATTR: json.dumps(catalog.population_model_kwargs, sort_keys=True),
         POPULATION_PARAMS_ATTR: json.dumps(catalog.fiducials, sort_keys=True),
         DENSITY_SITES_ATTR: json.dumps(list(catalog.density_sites)),
-        PROPOSAL_ATTR: json.dumps(_redshift_density_probe(catalog)),
     }
 
     dataset = xr.Dataset(
@@ -174,11 +162,7 @@ def load_catalog[C: Catalog](cls: type[C], path: str | Path) -> C:
     label = Path(path).name
     dataset = xr.load_dataset(path, engine="h5netcdf")
     catalog = catalog_from_dataset(dataset, cls=cls, label=label)
-    check_population_consistency(
-        catalog,
-        recorded_probe=_decode_probe(dataset.attrs, label=label),
-        label=label,
-    )
+    check_population_consistency(catalog, label=label)
     return catalog
 
 
@@ -225,41 +209,16 @@ def catalog_from_dataset[C: Catalog](
     )
 
 
-def check_population_consistency(
-    catalog: Catalog, *, recorded_probe: Mapping[str, list[float]], label: str
-) -> None:
+def check_population_consistency(catalog: Catalog, *, label: str) -> None:
     """Prove the recorded population still describes the stored arrays.
 
-    Two independent checks, because they fail for different reasons:
-
-    - The **drift guard** recomputes the redshift log density at the probe
-      points recorded when the file was written. A registry key pins a name,
-      not the mathematics behind it, so this is what catches a registered model
-      whose density changed underneath an existing catalog.
-    - The **derived-column check** re-executes the model at the stored
-      stochastic values and compares every deterministic it declares against
-      the stored column. This is what catches columns that were computed by
-      some other route and have since drifted.
+    The **derived-column check** re-executes the model at the stored
+    stochastic values and compares every deterministic it declares against
+    the stored column. This is what catches columns that were computed by
+    some other route and have since drifted.
     """
     model = catalog.get_population_model()
     params = catalog.fiducials
-
-    recomputed = np.asarray(
-        redshift_log_density(model, params, np.asarray(recorded_probe["redshift"]))
-    )
-    expected = np.asarray(recorded_probe["log_prob"], dtype=np.float64)
-    for index, (probe, want, got) in enumerate(
-        zip(recorded_probe["redshift"], expected, recomputed, strict=True)
-    ):
-        if not np.isclose(want, got, rtol=DERIVED_COLUMN_RTOL, atol=0.0):
-            raise ValueError(
-                f"{label}: population model {catalog.population_model_name!r} no "
-                f"longer reproduces the redshift density this catalog was drawn "
-                f"from: log p(z={probe:.6g}) recorded {want:.12g}, recomputed "
-                f"{got:.12g} (probe {index}). Regenerate the catalog, or restore "
-                "the registered model."
-            )
-
     values = catalog.source_parameters
     _, trace = model.evaluate(params, values)
     for name in sorted(catalog.source_parameters):
@@ -383,41 +342,6 @@ def waveform_metadata_from_dataset(
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
-def _redshift_density_probe(catalog: Catalog) -> dict[str, list[float]]:
-    """Fingerprint the generating redshift density at fixed interior probes.
-
-    Interior points only: the endpoints of the generation window sit on the
-    edge of the interpolation table, where the density is zero and the log is
-    ``-inf`` -- a probe that carries no information and does not round-trip
-    through JSON.
-    """
-    kwargs = catalog.population_model_kwargs
-    z_min = float(kwargs.get("z_min", 0.0))
-    z_max = float(kwargs.get("z_max", 1.0))
-    probes = np.linspace(z_min, z_max, PROBE_POINTS + 2)[1:-1]
-    log_prob = np.asarray(
-        redshift_log_density(catalog.get_population_model(), catalog.fiducials, probes),
-        dtype=np.float64,
-    )
-    return {
-        "redshift": [float(value) for value in probes],
-        "log_prob": [float(value) for value in log_prob],
-    }
-
-
-def _decode_probe(attrs: Mapping[Any, Any], *, label: str) -> dict[str, list[float]]:
-    raw = attrs.get(PROPOSAL_ATTR)
-    if raw is None:
-        raise ValueError(
-            f"{label}: missing the {PROPOSAL_ATTR!r} drift fingerprint; "
-            "regenerate this catalog"
-        )
-    probe = _json_mapping(raw, label=label, name=PROPOSAL_ATTR)
-    if set(probe) != {"redshift", "log_prob"}:
-        raise ValueError(
-            f"{label}: {PROPOSAL_ATTR!r} must hold 'redshift' and 'log_prob' lists"
-        )
-    return {name: [float(value) for value in probe[name]] for name in probe}
 
 
 def _json_mapping(value: Any, *, label: str, name: str) -> dict[str, Any]:

@@ -32,7 +32,6 @@ from astrogwb.catalog._io import (
     MODEL_KWARGS_ATTR,
     MODEL_NAME_ATTR,
     POPULATION_PARAMS_ATTR,
-    PROPOSAL_ATTR,
     catalog_to_dataset,
     validate_catalog_dataset,
 )
@@ -169,24 +168,6 @@ def test_a_missing_population_attribute_requires_regeneration(
         Catalog.load(path)
 
 
-def test_a_model_whose_density_moved_is_caught_on_load(tmp_path: Path) -> None:
-    """A registry key pins a name, not the mathematics behind it.
-
-    The recorded fingerprint is the generating redshift density at fixed probe
-    points, recomputed on every load. Shifting the recorded parameters stands in
-    for a registered model whose density changed underneath an existing file --
-    the case the name alone can never catch.
-    """
-    path = tmp_path / "drifted.h5"
-    dataset = catalog_to_dataset(_catalog())
-    moved = {**PAPER_POPULATION_PARAMS, "gamma": 2.7}
-    dataset.attrs[POPULATION_PARAMS_ATTR] = json.dumps(moved, sort_keys=True)
-    dataset.to_netcdf(path, engine="h5netcdf")
-
-    with pytest.raises(ValueError, match="no longer reproduces the redshift density"):
-        Catalog.load(path)
-
-
 def test_a_stored_column_that_drifted_from_the_population_is_caught(
     tmp_path: Path,
 ) -> None:
@@ -220,16 +201,6 @@ def test_an_unregistered_model_name_fails_clearly(tmp_path: Path) -> None:
     dataset.to_netcdf(path, engine="h5netcdf")
 
     with pytest.raises(KeyError, match="bns_md_cosmological"):
-        Catalog.load(path)
-
-
-def test_a_corrupt_drift_fingerprint_is_rejected(tmp_path: Path) -> None:
-    path = tmp_path / "corrupt.h5"
-    dataset = catalog_to_dataset(_catalog())
-    dataset.attrs[PROPOSAL_ATTR] = "not json"
-    dataset.to_netcdf(path, engine="h5netcdf")
-
-    with pytest.raises(ValueError, match="not valid JSON"):
         Catalog.load(path)
 
 

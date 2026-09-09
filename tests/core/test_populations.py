@@ -15,6 +15,7 @@ ratio. Neither produces a shape error.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import FrozenInstanceError, replace
 from functools import partial
 
@@ -35,6 +36,7 @@ from astrogwb_mock_population import (
     mock_population_model,
     mock_target_model,
 )
+from jax.typing import ArrayLike
 from numpyro import handlers
 from reference_population import reference_merger_rate_distance_and_logprob
 
@@ -46,9 +48,9 @@ from astrogwb.populations import (
     BNSMadauDickinson,
     BNSMadauDickinsonModifiedPropagation,
     BNSMadauDickinsonUniformMixture,
+    Population,
     known_population_models,
     population_model,
-    redshift_log_density,
     register_population_model,
 )
 
@@ -366,12 +368,28 @@ def test_nuts_samples_only_the_outer_hyperparameter() -> None:
 # --------------------------------------------------------------------------- #
 # The uniform-guard mixture proposal
 # --------------------------------------------------------------------------- #
+def _redshift_log_density(
+    model: Population,
+    params: Mapping[str, ArrayLike],
+    redshift: ArrayLike,
+) -> jax.Array:
+    with handlers.block(), handlers.seed(rng_seed=0):
+        trace = handlers.trace(model).get_trace(params)
+    site = trace.get(REDSHIFT_SITE)
+    if site is None or site["type"] != "sample":
+        raise ValueError(
+            f"population model declares no {REDSHIFT_SITE!r} sample site; every "
+            "population must draw a redshift"
+        )
+    return jnp.asarray(site["fn"].log_prob(jnp.asarray(redshift)))
+
+
 def test_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:
     epsilon = 0.1
     model = BNSMadauDickinsonUniformMixture(
         z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID, uniform_mixing_fraction=epsilon
     )
-    actual = redshift_log_density(model, POPULATION_PARAMS, SAMPLE_REDSHIFTS)
+    actual = _redshift_log_density(model, POPULATION_PARAMS, SAMPLE_REDSHIFTS)
 
     _, _, md_logprob = reference(FIDUCIALS)
     expected = jnp.logaddexp(
@@ -382,7 +400,9 @@ def test_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:
 
     outside = jnp.array([Z_MIN - 0.1, Z_MAX + 0.1])
     assert np.all(
-        np.isneginf(np.asarray(redshift_log_density(model, POPULATION_PARAMS, outside)))
+        np.isneginf(
+            np.asarray(_redshift_log_density(model, POPULATION_PARAMS, outside))
+        )
     )
 
 
