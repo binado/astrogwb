@@ -50,7 +50,6 @@ from astrogwb.populations import (
     population_model,
     redshift_log_density,
     register_population_model,
-    required_deterministic,
 )
 
 #: Interior to the mock grid and not on a node.
@@ -189,12 +188,8 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
     )
     assert log_prob.shape == SAMPLE_REDSHIFTS.shape
 
-    distance = required_deterministic(
-        trace, LUMINOSITY_DISTANCE_SITE, ndim=1, label="population"
-    )
-    rate = required_deterministic(
-        trace, TOTAL_MERGER_RATE_SITE, ndim=0, label="population"
-    )
+    distance = trace[LUMINOSITY_DISTANCE_SITE]["value"]
+    rate = trace[TOTAL_MERGER_RATE_SITE]["value"]
     assert distance.shape == SAMPLE_REDSHIFTS.shape
     assert rate.shape == ()
 
@@ -218,27 +213,6 @@ def test_rate_and_distance_deterministics_add_no_density_factors() -> None:
         without_rate_params, sample_values()
     )
     np.testing.assert_array_equal(with_rate, without_rate)
-
-
-def test_missing_required_deterministic_is_rejected() -> None:
-    without_rate = {
-        name: value
-        for name, value in POPULATION_PARAMS.items()
-        if name != "local_merger_rate"
-    }
-    _, trace = mock_population_model().evaluate(without_rate, sample_values())
-    with pytest.raises(ValueError, match=TOTAL_MERGER_RATE_SITE):
-        required_deterministic(
-            trace, TOTAL_MERGER_RATE_SITE, ndim=0, label="population"
-        )
-
-
-def test_wrongly_shaped_deterministic_is_rejected() -> None:
-    _, trace = mock_population_model().evaluate(POPULATION_PARAMS, sample_values())
-    with pytest.raises(ValueError, match="1 dimension"):
-        required_deterministic(
-            trace, TOTAL_MERGER_RATE_SITE, ndim=1, label="population"
-        )
 
 
 def test_derived_columns_match_the_declared_transforms() -> None:

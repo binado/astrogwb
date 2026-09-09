@@ -57,7 +57,6 @@ from astrogwb.populations import (
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
     population_model,
-    required_deterministic,
 )
 from astrogwb.sampling import (
     SpectralDensityFn,
@@ -181,7 +180,7 @@ def prepare_observation(injection: Catalog, *, grid: AnalysisGrid) -> Observatio
         n_loaded - n_kept,
     )
 
-    total_merger_rate = catalog_total_merger_rate(restricted, label="injection catalog")
+    total_merger_rate = catalog_total_merger_rate(restricted)
     power = jnp.asarray(restricted.polarization_power)
     spectrum = spectral_density(
         power,
@@ -216,7 +215,7 @@ def prepare_observation(injection: Catalog, *, grid: AnalysisGrid) -> Observatio
     )
 
 
-def catalog_total_merger_rate(catalog: Catalog, *, label: str) -> jax.Array:
+def catalog_total_merger_rate(catalog: Catalog) -> jax.Array:
     """The observer-frame total merger rate this catalog's population implies.
 
     Recomputed from the recorded model rather than read from a stored column:
@@ -227,7 +226,7 @@ def catalog_total_merger_rate(catalog: Catalog, *, label: str) -> jax.Array:
     params = catalog.population_params
     values = catalog.source_parameters
     _, trace = model.evaluate(params, values)
-    return required_deterministic(trace, TOTAL_MERGER_RATE_SITE, ndim=0, label=label)
+    return trace[TOTAL_MERGER_RATE_SITE]["value"]
 
 
 def prepare_inference_inputs(

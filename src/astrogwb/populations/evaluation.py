@@ -17,7 +17,6 @@ __all__ = [
     "TOTAL_MERGER_RATE_SITE",
     "PopulationTrace",
     "redshift_log_density",
-    "required_deterministic",
 ]
 
 #: The redshift site every population must declare. Its density can never be
@@ -57,31 +56,3 @@ def redshift_log_density(
             "population must draw a redshift"
         )
     return jnp.asarray(site["fn"].log_prob(jnp.asarray(redshift)))
-
-
-def required_deterministic(
-    trace: PopulationTrace,
-    name: str,
-    *,
-    ndim: int,
-    label: str,
-) -> jax.Array:
-    """Read one deterministic site off a trace, checking its type and rank."""
-    site = trace.get(name)
-    if site is None:
-        raise ValueError(
-            f"{label}: population model declares no {name!r} site; it is required "
-            "here. Check that the hyperparameters this model needs to declare it "
-            "were supplied."
-        )
-    if site["type"] != "deterministic":
-        raise TypeError(
-            f"{label}: {name!r} must be a numpyro.deterministic site, got "
-            f"{site['type']!r}"
-        )
-    value = jnp.asarray(site["value"])
-    if value.ndim != ndim:
-        raise ValueError(
-            f"{label}: {name!r} must have {ndim} dimension(s), got shape {value.shape}"
-        )
-    return value

@@ -82,7 +82,6 @@ from astrogwb.populations import (
     TOTAL_MERGER_RATE_SITE,
     BNSMadauDickinson,
     BNSMadauDickinsonModifiedPropagation,
-    required_deterministic,
 )
 from astrogwb.waveform import AnalyticInspiralGenerator
 
@@ -408,9 +407,7 @@ def catalog_merger_rate(catalog: Catalog) -> jax.Array:
     params = catalog.population_params
     values = catalog.source_parameters
     _, trace = model.evaluate(params, values)
-    return required_deterministic(
-        trace, TOTAL_MERGER_RATE_SITE, ndim=0, label="catalog"
-    )
+    return trace[TOTAL_MERGER_RATE_SITE]["value"]
 
 
 def unpack(

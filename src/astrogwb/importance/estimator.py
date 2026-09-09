@@ -48,7 +48,6 @@ from astrogwb.populations import (
     TOTAL_MERGER_RATE_SITE,
     Population,
     PopulationTrace,
-    required_deterministic,
 )
 
 if TYPE_CHECKING:
@@ -189,11 +188,7 @@ class SpectralDensityImportanceEstimator:
     ) -> tuple[jax.Array, PopulationTrace]:
         """One model execution: the weights, and the trace holding its rate."""
         target_log_prob, trace = self.model.evaluate(params, self.source_parameters)
-        log_distance = jnp.log(
-            required_deterministic(
-                trace, LUMINOSITY_DISTANCE_SITE, ndim=1, label="target population"
-            )
-        )
+        log_distance = jnp.log(trace[LUMINOSITY_DISTANCE_SITE]["value"])
         log_weights = importance_log_weights(
             target_log_prob=target_log_prob,
             proposal_log_prob=self.proposal_log_prob,
@@ -207,9 +202,7 @@ class SpectralDensityImportanceEstimator:
     ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
         """Return the spectrum, total merger rate, and relative importance ESS."""
         log_weights, trace = self._log_weights_and_trace(params)
-        total_merger_rate = required_deterministic(
-            trace, TOTAL_MERGER_RATE_SITE, ndim=0, label="target population"
-        )
+        total_merger_rate = trace[TOTAL_MERGER_RATE_SITE]["value"]
         prediction = spectral_density(
             self.polarization_power,
             jnp.exp(log_weights),

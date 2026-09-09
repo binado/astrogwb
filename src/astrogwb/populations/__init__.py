@@ -30,7 +30,6 @@ from astrogwb.populations.evaluation import (
     REDSHIFT_SITE,
     TOTAL_MERGER_RATE_SITE,
     redshift_log_density,
-    required_deterministic,
 )
 from astrogwb.populations.registry import (
     PopulationFactory,
@@ -58,5 +57,4 @@ __all__ = [
     "population_model",
     "redshift_log_density",
     "register_population_model",
-    "required_deterministic",
 ]

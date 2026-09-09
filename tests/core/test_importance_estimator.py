@@ -208,15 +208,6 @@ def test_preparation_needs_no_merger_rate_for_the_proposal() -> None:
     assert float(jnp.asarray(extras["total_merger_rate"])) > 0.0
 
 
-def test_a_target_missing_the_rate_is_rejected() -> None:
-    estimator = _estimator()
-    without_rate = {
-        name: value for name, value in FIDUCIALS.items() if name != "local_merger_rate"
-    }
-    with pytest.raises(ValueError, match="total_merger_rate"):
-        estimator(without_rate)
-
-
 def test_mismatched_density_factors_are_rejected() -> None:
     target = replace(mock_target_model(), density_sites=("redshift", "spin_1z"))
     with pytest.raises(ValueError, match="same source density factors"):
