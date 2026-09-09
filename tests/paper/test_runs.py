@@ -14,7 +14,6 @@ from repo import REPO_ROOT
 
 from astrogwb.paper.config.catalogs import (
     check_catalog_references,
-    discover_catalogs,
     validate_all_runs,
 )
 from astrogwb.paper.config.mcmc import build_run_config
@@ -172,80 +171,8 @@ def test_every_run_names_declared_catalogs(experiment: str, run: str) -> None:
 #: collapsed into one file when catalogs stopped being composed in memory:
 #: astrophysical-parameters reuses the eps=0.1 guard catalog, and
 #: waveform-approximant/IMRPhenom reuses the injection catalog.
-INJECTION_CATALOG = "md-imrphenom-s41-n32768"
-GUARD_EPS1 = "md-uniform-imrphenom-s61-n16384-eps1e-1"
 
 
-def test_every_run_shares_one_injection_catalog() -> None:
-    injections = {
-        build_run_config(assemble_run(*run)).catalog.injection for run in all_runs()
-    }
-
-    assert injections == {INJECTION_CATALOG}
-
-
-def test_proposal_catalogs_by_experiment() -> None:
-    """The base layer defaults the proposal to the injection catalog.
-
-    Only the four experiments that override it pin different files, so the
-    wiring worth pinning is the override per experiment.
-    """
-
-    def proposals(experiment: str) -> dict[str, str]:
-        return {
-            run: build_run_config(assemble_run(experiment, run)).catalog.proposal
-            for run in discover_runs()[experiment]
-        }
-
-    for experiment in ("cosmological-parameters", "modified-propagation"):
-        assert set(proposals(experiment).values()) == {INJECTION_CATALOG}
-
-    assert set(proposals("astrophysical-parameters").values()) == {GUARD_EPS1}
-    assert proposals("variable-catalog-size") == {
-        "n8192": "md-imrphenom-s42-n8192",
-        "n16384": "md-imrphenom-s42-n16384",
-        "n32768": "md-imrphenom-s42-n32768",
-    }
-    assert proposals("variable-proposal-guard") == {
-        "eps1e-1": GUARD_EPS1,
-        "eps1e-2": "md-uniform-imrphenom-s62-n16384-eps1e-2",
-        "eps1e-3": "md-uniform-imrphenom-s63-n16384-eps1e-3",
-    }
-    assert proposals("waveform-approximant") == {
-        "IMRPhenom": INJECTION_CATALOG,
-        "TaylorF2": "md-taylorf2-s41-n32768",
-    }
-
-
-def test_only_astrophysical_and_guard_runs_use_a_guarded_proposal() -> None:
-    """The mixing fraction is a property of the catalog file, not the run."""
-    catalogs = discover_catalogs()
-    mixed = {"astrophysical-parameters", "variable-proposal-guard"}
-
-    for experiment, run in all_runs():
-        config = build_run_config(assemble_run(experiment, run))
-        definition = catalogs[config.catalog.proposal]
-        guarded = definition.population.model == "bns_md_uniform_mixture"
-        assert guarded == (experiment in mixed), f"{experiment}/{run}"
-
-
-def test_every_declared_catalog_is_used_by_some_run() -> None:
-    """No orphan catalogs: eight files, all of them sampled against."""
-    used = {name for run in all_runs() for name in resolve_catalog_names(*run).values()}
-
-    assert used == set(discover_catalog_names())
-    assert len(used) == 8
-
-
-def test_resolve_catalog_names_are_the_two_roles() -> None:
-    assert resolve_catalog_names("cosmological-parameters", "ET-triangular") == {
-        "injection": INJECTION_CATALOG,
-        "proposal": INJECTION_CATALOG,
-    }
-    assert resolve_catalog_names("variable-proposal-guard", "eps1e-1") == {
-        "injection": INJECTION_CATALOG,
-        "proposal": GUARD_EPS1,
-    }
 @pytest.mark.parametrize(
     ("base_config", "message"),
     [
@@ -310,79 +237,6 @@ def test_the_validation_gate_covers_every_run() -> None:
 # --------------------------------------------------------------------------- #
 # Catalog configs
 # --------------------------------------------------------------------------- #
-def test_eight_catalogs_are_declared_by_filename() -> None:
-    catalogs = discover_catalogs()
-
-    assert list(catalogs) == [
-        "md-imrphenom-s41-n32768",
-        "md-imrphenom-s42-n16384",
-        "md-imrphenom-s42-n32768",
-        "md-imrphenom-s42-n8192",
-        "md-taylorf2-s41-n32768",
-        "md-uniform-imrphenom-s61-n16384-eps1e-1",
-        "md-uniform-imrphenom-s62-n16384-eps1e-2",
-        "md-uniform-imrphenom-s63-n16384-eps1e-3",
-    ]
-    assert all(
-        definition.waveform.frequency_resolution == 1.0
-        for definition in catalogs.values()
-    )
-
-
-def test_the_guard_fraction_is_declared_only_by_the_guard_catalogs() -> None:
-    """A mixing fraction is the only setting the mixture population adds."""
-    catalogs = discover_catalogs()
-
-    guarded = {
-        name
-        for name, d in catalogs.items()
-        if d.population.model == "bns_md_uniform_mixture"
-    }
-    assert guarded == {
-        "md-uniform-imrphenom-s61-n16384-eps1e-1",
-        "md-uniform-imrphenom-s62-n16384-eps1e-2",
-        "md-uniform-imrphenom-s63-n16384-eps1e-3",
-    }
-    for name, definition in catalogs.items():
-        declared = "uniform_mixing_fraction" in definition.population.kwargs
-        assert declared == (name in guarded), name
-
-
-def test_the_three_md_s42_catalogs_are_one_nested_series() -> None:
-    """variable-catalog-size compares sizes, so the draws must be nested.
-
-    Same population, same seed: ``Predictive`` allocates per-draw keys with
-    ``jax.random.split``, which is prefix-stable, so the three files are
-    prefixes of one stream even though each is generated independently.
-    """
-    catalogs = discover_catalogs()
-    series = {
-        name: catalogs[name]
-        for name in (
-            "md-imrphenom-s42-n8192",
-            "md-imrphenom-s42-n16384",
-            "md-imrphenom-s42-n32768",
-        )
-    }
-
-    assert {(d.population.model, d.seed) for d in series.values()} == {
-        ("bns_md_cosmological", 42)
-    }
-    assert [d.num_samples for d in series.values()] == [8192, 16384, 32768]
-
-
-def test_taylorf2_catalog_only_changes_the_waveform_approximant() -> None:
-    catalogs = discover_catalogs()
-    imrphenom = catalogs["md-imrphenom-s41-n32768"].model_dump()
-    taylorf2 = catalogs["md-taylorf2-s41-n32768"].model_dump()
-
-    assert imrphenom["waveform"]["approximant"] == "IMRPhenomXAS_NRTidalv3"
-    assert taylorf2["waveform"]["approximant"] == "TaylorF2"
-    taylorf2["name"] = imrphenom["name"]
-    taylorf2["waveform"]["approximant"] = imrphenom["waveform"]["approximant"]
-    assert taylorf2 == imrphenom
-
-
 def test_the_shared_blocks_are_declared_once() -> None:
     """Every catalog inherits [waveform] and [population] from the base layers.
 

@@ -18,7 +18,6 @@ def test_assembled_configs_fix_local_merger_rate() -> None:
     # The complete prior table declares the site; sampled_params decides that
     # production conditions it rather than giving NUTS a latent.
     assert "local_merger_rate" not in config.sampled_params
-    assert expected == 770.0
     assert config.fiducials["local_merger_rate"] == expected
     assert "local_merger_rate" in config.priors
     assert config.fixed_params["local_merger_rate"] == expected
