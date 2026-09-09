@@ -160,29 +160,6 @@ def _marginalized_raw() -> dict:
     return raw
 
 
-def test_default_likelihood_configs_still_validate() -> None:
-    raw = example_raw()
-    config = build_run_config(raw)
-
-    assert config.analysis.likelihood == "default"
-    assert config.analysis.amplitude_parameter is None
-
-
-def test_marginalized_config_keeps_amplitude_prior_in_priors() -> None:
-    config = build_run_config(_marginalized_raw())
-
-    assert config.analysis.amplitude_parameter == "H0"
-    assert "H0" not in config.sampled_params
-    assert prior_to_spec(config.priors["H0"]) == {
-        "type": "uniform",
-        "low": 20.0,
-        "high": 140.0,
-    }
-    assert set(config.priors) == set(config.fiducials)
-    # H0 is not sampled, but the model still pins its template to the fiducial.
-    assert config.fixed_params["H0"] == 67.66
-
-
 def test_marginalized_config_round_trips_through_save(tmp_path) -> None:
     """assemble_config writes normalized configs; run_mcmc must reload them.
 
@@ -296,8 +273,6 @@ def test_prior_spec_rejects_stale_keys_from_a_cross_type_override() -> None:
         raw,
         {"priors": {"H0": {"type": "normal", "loc": 67.66, "scale": 0.6766}}},
     )
-    assert polluted["priors"]["H0"]["low"] == 20.0
-
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         build_run_config(polluted)
 

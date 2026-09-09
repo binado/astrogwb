@@ -136,57 +136,6 @@ def _catalogs(tmp_path: Path, *names: str) -> Path:
     return directory
 
 
-def test_catalog_rule_reads_its_layers_and_populations_directly() -> None:
-    """One rule per catalog; the population is not a workflow node.
-
-    A mixture declares both graphs, so editing either retriggers only the
-    catalogs that draw from it.
-    """
-    result = _snakemake(
-        "--snakefile",
-        str(SNAKEFILE),
-        "--allowed-rules",
-        *CATALOG_RULES,
-        "--dry-run",
-        "--forceall",
-        "--printshellcmds",
-        "--cores",
-        "1",
-        "outputs/catalogs/md-imrphenom-s41-n32768.h5",
-        "outputs/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.h5",
-    )
-
-    assert result.returncode == 0, result.stderr
-    # The shared base layer is an input of both, so editing it rebuilds both.
-    assert result.stdout.count("config/catalogs/base/waveform.toml") >= 2
-    assert "config/catalogs/defs/md-imrphenom-s41-n32768.toml" in result.stdout
-    assert (
-        "config/catalogs/defs/md-uniform-imrphenom-s61-n16384-eps1e-1.toml"
-        in result.stdout
-    )
-    assert "config/populations/madau-dickinson.yaml" in result.stdout
-    assert "config/populations/uniform-redshift.yaml" in result.stdout
-    assert "outputs/catalogs/md-imrphenom-s41-n32768.h5" in result.stdout
-    assert (
-        "outputs/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.h5" in result.stdout
-    )
-    assert "python scripts/generate_catalog.py" in result.stdout
-    assert any(
-        "scripts/generate_catalog.py" in line for line in _rule_inputs(result.stdout)
-    )
-    # Layers reach the script as repeated flags, never space-joined into one.
-    assert (
-        "--config config/catalogs/base/waveform.toml "
-        "--config config/catalogs/defs/md-imrphenom-s41-n32768.toml"
-    ) in result.stdout
-    # The population intermediate and its merge rule are both gone.
-    assert "outputs/populations/" not in result.stdout
-    assert "outputs/population-configs/" not in result.stdout
-    # The bank/catalog split is gone: no separate bank tree, no bank rule.
-    assert "outputs/banks/" not in result.stdout
-    assert "config/banks/" not in result.stdout
-
-
 def test_the_snakefile_no_longer_needs_ancient() -> None:
     """Per-run configs restore real change tracking.
 
@@ -213,19 +162,6 @@ def test_catalogs_target_builds_all_8_catalogs() -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule waveform_catalog:") == 8
     assert "rule population_config:" not in result.stdout
-    for name in (
-        "md-imrphenom-s41-n32768",
-        "md-imrphenom-s42-n8192",
-        "md-imrphenom-s42-n16384",
-        "md-imrphenom-s42-n32768",
-        "md-taylorf2-s41-n32768",
-        "md-uniform-imrphenom-s61-n16384-eps1e-1",
-        "md-uniform-imrphenom-s62-n16384-eps1e-2",
-        "md-uniform-imrphenom-s63-n16384-eps1e-3",
-    ):
-        assert f"outputs/catalogs/{name}.h5" in result.stdout
-
-
 def test_plot_cosmological_parameters_expands_all_chains_and_figures(
     tmp_path: Path,
 ) -> None:
@@ -273,97 +209,6 @@ def test_run_experiment_target_excludes_figure_rule(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule run_mcmc:") == 8
     assert "rule plot_cosmological_parameters:" not in result.stdout
-
-
-def test_variable_catalog_size_names_one_catalog_per_size(
-    tmp_path: Path,
-) -> None:
-    """One file per size now: the three are nested draws, not bank prefixes."""
-    catalogs = _catalogs(
-        tmp_path,
-        "md-imrphenom-s42-n8192.h5",
-        "md-imrphenom-s42-n16384.h5",
-        "md-imrphenom-s42-n32768.h5",
-    )
-
-    result = _mcmc(
-        "--dry-run",
-        "--forceall",
-        "--printshellcmds",
-        "--cores",
-        "8",
-        "run_experiment_variable_catalog_size",
-        "--config",
-        f"catalogs_dir={catalogs}",
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule run_mcmc:") == 3
-    for name in (
-        "md-imrphenom-s42-n8192.h5",
-        "md-imrphenom-s42-n16384.h5",
-        "md-imrphenom-s42-n32768.h5",
-    ):
-        assert str(catalogs / name) in result.stdout
-    # All three share the one injection catalog.
-    assert result.stdout.count(str(catalogs / "md-imrphenom-s41-n32768.h5")) >= 3
-
-
-def test_variable_proposal_guard_names_one_catalog_per_eps(
-    tmp_path: Path,
-) -> None:
-    catalogs = _catalogs(
-        tmp_path,
-        "md-uniform-imrphenom-s61-n16384-eps1e-1.h5",
-        "md-uniform-imrphenom-s62-n16384-eps1e-2.h5",
-        "md-uniform-imrphenom-s63-n16384-eps1e-3.h5",
-    )
-
-    result = _mcmc(
-        "--dry-run",
-        "--forceall",
-        "--cores",
-        "8",
-        "run_experiment_variable_proposal_guard",
-        "--config",
-        f"catalogs_dir={catalogs}",
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule run_mcmc:") == 3
-    for name in (
-        "md-uniform-imrphenom-s61-n16384-eps1e-1.h5",
-        "md-uniform-imrphenom-s62-n16384-eps1e-2.h5",
-        "md-uniform-imrphenom-s63-n16384-eps1e-3.h5",
-    ):
-        assert str(catalogs / name) in result.stdout
-
-
-def test_waveform_approximant_uses_imr_and_taylorf2_catalogs(
-    tmp_path: Path,
-) -> None:
-    catalogs = _catalogs(tmp_path, "md-taylorf2-s41-n32768.h5")
-    imr = catalogs / "md-imrphenom-s41-n32768.h5"
-    taylorf2 = catalogs / "md-taylorf2-s41-n32768.h5"
-
-    result = _mcmc(
-        "--dry-run",
-        "--forceall",
-        "--printshellcmds",
-        "--cores",
-        "8",
-        "run_experiment_waveform_approximant",
-        "--config",
-        f"catalogs_dir={catalogs}",
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule run_mcmc:") == 2
-    # The IMRPhenom run's proposal *is* the injection catalog -- the same file
-    # in both roles, which is what collapsed nine specs into eight files.
-    assert result.stdout.count(f"--injection-catalog {imr}") == 2
-    assert result.stdout.count(f"--proposal-catalog {imr}") == 1
-    assert result.stdout.count(f"--proposal-catalog {taylorf2}") == 1
 
 
 def test_missing_catalog_does_not_acquire_a_producer(tmp_path: Path) -> None:

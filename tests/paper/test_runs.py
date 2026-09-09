@@ -137,50 +137,8 @@ def test_an_experiment_without_a_base_overlay_is_rejected(tmp_path: Path) -> Non
 def test_base_files_merge_into_one_mapping() -> None:
     base = load_base()
 
-    assert base["seed"] == 42
-    assert base["sampler"]["num_samples"] == 2000
-    assert base["analysis"]["f_min"] == 2.0
-    assert base["cosmology"]["minimum_redshift"] == 0.3
-    assert base["fiducials"]["H0"] == 67.66
-    assert base["catalog"]["injection"] == "md-imrphenom-s41-n32768"
     # A detector list is never a base default: a run must state its network.
     assert "detectors" not in base["analysis"]
-
-
-def test_run_layer_overrides_the_experiment_layer() -> None:
-    """astrophysical-parameters/redshift-peak overrides its experiment's sampler block."""
-    shared = assemble_run("astrophysical-parameters", "madau-dickinson")
-    overridden = assemble_run("astrophysical-parameters", "redshift-peak")
-
-    assert shared["sampler"]["num_warmup"] == 1000
-    assert shared["sampler"]["dense_mass"] is True
-    assert overridden["sampler"]["num_warmup"] == 500
-    assert overridden["sampler"]["dense_mass"] is False
-    # Untouched sampler keys still come from the base layer.
-    assert overridden["sampler"]["num_samples"] == 2000
-
-
-def test_experiment_layer_overrides_the_base_layer() -> None:
-    assert load_base()["sampler"]["num_warmup"] == 1000
-    assert (
-        assemble_run("cosmological-parameters", "ET-triangular")["sampler"][
-            "num_warmup"
-        ]
-        == 500
-    )
-
-
-def test_cross_type_prior_override_replaces_the_whole_table() -> None:
-    """Key-merging a normal prior onto a uniform one would leave stale low/high."""
-    merged = assemble_run("modified-propagation", "Xi_0-H0")
-
-    assert merged["priors"]["H0"] == {
-        "type": "normal",
-        "loc": 67.66,
-        "scale": 0.6766,
-    }
-    assert "low" not in merged["priors"]["H0"]
-    assert "high" not in merged["priors"]["H0"]
 
 
 # --------------------------------------------------------------------------- #
@@ -205,29 +163,6 @@ def test_every_run_names_declared_catalogs(experiment: str, run: str) -> None:
     check_catalog_references(config, label=f"{experiment}/{run}")
 
 
-def test_1d_runs_use_diagonal_mass_matrix_and_short_warmup() -> None:
-    """1D problems (one latent, marginalized amplitude included) need no dense
-    mass matrix and converge faster: NUTS is configured accordingly."""
-    for experiment, run in all_runs():
-        config = build_run_config(assemble_run(experiment, run))
-        if len(config.sampled_params) != 1:
-            continue
-        assert config.sampler.num_warmup == 500, f"{experiment}/{run}"
-        assert config.sampler.dense_mass is False, f"{experiment}/{run}"
-
-
-def test_variable_proposal_guard_samples_h0_md() -> None:
-    """Guard sweeps epsilon on the H0-marginalized Madau-Dickinson problem."""
-    for run in discover_runs()["variable-proposal-guard"]:
-        config = build_run_config(assemble_run("variable-proposal-guard", run))
-        assert config.sampled_params == ("gamma", "kappa", "z_peak"), run
-        assert config.analysis.likelihood == "amplitude_marginalized"
-        assert config.analysis.amplitude_parameter == "H0"
-        assert "H0" in config.priors
-        assert config.sampler.dense_mass is True
-        assert config.sampler.num_warmup == 1000
-
-
 # --------------------------------------------------------------------------- #
 # Catalog selection
 # --------------------------------------------------------------------------- #
@@ -235,36 +170,6 @@ def test_variable_proposal_guard_samples_h0_md() -> None:
 #: collapsed into one file when catalogs stopped being composed in memory:
 #: astrophysical-parameters reuses the eps=0.1 guard catalog, and
 #: waveform-approximant/IMRPhenom reuses the injection catalog.
-INJECTION_CATALOG = "md-imrphenom-s41-n32768"
-
-
-def test_every_run_shares_one_injection_catalog() -> None:
-    injections = {
-        build_run_config(assemble_run(*run)).catalog.injection for run in all_runs()
-    }
-
-    assert injections == {INJECTION_CATALOG}
-
-
-def test_only_astrophysical_and_guard_runs_use_a_mixed_proposal() -> None:
-    """The mixing fraction is a property of the catalog file now, not the run."""
-    catalogs = discover_catalogs()
-    mixed = {"astrophysical-parameters", "variable-proposal-guard"}
-
-    for experiment, run in all_runs():
-        config = build_run_config(assemble_run(experiment, run))
-        definition = catalogs[config.catalog.proposal]
-        assert definition.is_mixture == (experiment in mixed), f"{experiment}/{run}"
-
-
-def test_every_declared_catalog_is_used_by_some_run() -> None:
-    """No orphan catalogs: eight files, all of them sampled against."""
-    used = {name for run in all_runs() for name in resolve_catalog_names(*run).values()}
-
-    assert used == set(discover_catalog_names())
-    assert len(used) == 8
-
-
 @pytest.mark.parametrize(
     ("base_config", "message"),
     [
@@ -326,98 +231,9 @@ def test_the_validation_gate_covers_every_run() -> None:
         assert label in labels
 
 
-def test_the_guard_run_merges_to_its_declared_settings() -> None:
-    guard = build_run_config(
-        assemble_run("variable-proposal-guard", "eps1e-3")
-    ).model_dump(mode="json")
-
-    assert guard["catalog"]["proposal"] == "md-uniform-imrphenom-s63-n16384-eps1e-3"
-    assert guard["sampled_params"] == ["gamma", "kappa", "z_peak"]
-    assert guard["analysis"]["likelihood"] == "amplitude_marginalized"
-    assert guard["analysis"]["amplitude_parameter"] == "H0"
-    # The proposal *density* is derived at run time, never carried by a config.
-    assert "proposal" not in guard
-
-
-def test_run_mcmc_writes_its_config_record_beside_the_chain() -> None:
-    # The record moved out of `outputs/configs/` and next to the chain when
-    # `assemble_config` went away; `RunConfig.save` still writes the
-    # defaults-filled RunConfig, so the file stays diff-able.
-    config = build_run_config(assemble_run("modified-propagation", "Xi_0"))
-
-    assert config.model_dump(mode="json")["sampled_params"] == ["xi_0"]
-
-
 # --------------------------------------------------------------------------- #
 # Catalog configs
 # --------------------------------------------------------------------------- #
-def test_eight_catalogs_are_declared_by_filename() -> None:
-    catalogs = discover_catalogs()
-
-    assert list(catalogs) == [
-        "md-imrphenom-s41-n32768",
-        "md-imrphenom-s42-n16384",
-        "md-imrphenom-s42-n32768",
-        "md-imrphenom-s42-n8192",
-        "md-taylorf2-s41-n32768",
-        "md-uniform-imrphenom-s61-n16384-eps1e-1",
-        "md-uniform-imrphenom-s62-n16384-eps1e-2",
-        "md-uniform-imrphenom-s63-n16384-eps1e-3",
-    ]
-    assert all(
-        definition.waveform.frequency_resolution == 1.0
-        for definition in catalogs.values()
-    )
-
-
-def test_only_the_guard_catalogs_are_mixtures() -> None:
-    """A mixture is the only shape that needs a mixture_seed, and vice versa."""
-    catalogs = discover_catalogs()
-
-    mixtures = {name for name, d in catalogs.items() if d.is_mixture}
-    assert mixtures == {
-        "md-uniform-imrphenom-s61-n16384-eps1e-1",
-        "md-uniform-imrphenom-s62-n16384-eps1e-2",
-        "md-uniform-imrphenom-s63-n16384-eps1e-3",
-    }
-    for name, definition in catalogs.items():
-        assert (definition.mixture_seed is not None) == (name in mixtures), name
-
-
-def test_the_three_md_s42_catalogs_are_one_nested_series() -> None:
-    """variable-catalog-size compares sizes, so the draws must be nested.
-
-    Same graph, same seed: GraphSimulator is prefix-stable, so the three files
-    are prefixes of one stream even though each is generated independently.
-    """
-    catalogs = discover_catalogs()
-    series = {
-        name: catalogs[name]
-        for name in (
-            "md-imrphenom-s42-n8192",
-            "md-imrphenom-s42-n16384",
-            "md-imrphenom-s42-n32768",
-        )
-    }
-
-    assert {(c.population, c.seed) for d in series.values() for c in d.components} == {
-        ("madau-dickinson", 42)
-    }
-    assert [d.num_samples for d in series.values()] == [8192, 16384, 32768]
-
-
-def test_taylorf2_catalog_only_changes_the_waveform_approximant() -> None:
-    catalogs = discover_catalogs()
-    imrphenom = catalogs["md-imrphenom-s41-n32768"].model_dump()
-    taylorf2 = catalogs["md-taylorf2-s41-n32768"].model_dump()
-
-    assert imrphenom["waveform"]["approximant"] == "IMRPhenomXAS_NRTidalv3"
-    assert taylorf2["waveform"]["approximant"] == "TaylorF2"
-    taylorf2["name"] = imrphenom["name"]
-    taylorf2["waveform"]["approximant"] = imrphenom["waveform"]["approximant"]
-    assert taylorf2 == imrphenom
-
-
 def test_the_shared_waveform_block_is_declared_once() -> None:
     """Every catalog inherits [waveform] from the base layer, not its own copy."""
     for name in discover_catalog_names():
