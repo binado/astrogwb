@@ -10,6 +10,7 @@ import pytest
 
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
+from astrogwb.frequency import uniform_frequency_grid
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
     PolarizationPowerGenerator,
@@ -86,7 +87,12 @@ def test_generator_includes_largest_in_band_bin(
         df=2.0,
     )
 
-    np.testing.assert_array_equal(generator.frequencies, expected)
+    np.testing.assert_array_equal(
+        uniform_frequency_grid(
+            generator.minimum_frequency, generator.maximum_frequency, generator.df
+        ),
+        expected,
+    )
     assert generator.maximum_frequency == maximum_frequency
 
 
@@ -154,6 +160,7 @@ def test_catalog_rejects_malformed_power(power: np.ndarray, message: str) -> Non
         Catalog(
             source_parameters={"redshift": np.array([0.1, 0.2])},
             polarization_power=power,
+            frequencies=np.array([10.0, 12.0]),
             waveform_metadata=_waveform_generator(),
             **CATALOG_DEFAULTS,
         )
@@ -165,6 +172,7 @@ def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None
         Catalog(
             source_parameters={"redshift": values},
             polarization_power=np.ones((2, 2)),
+            frequencies=np.array([10.0, 12.0]),
             waveform_metadata=_waveform_generator(),
             **CATALOG_DEFAULTS,
         )
@@ -175,6 +183,7 @@ def test_catalog_rejects_non_int_seed() -> None:
         Catalog(
             source_parameters={"redshift": np.array([0.1, 0.2])},
             polarization_power=np.ones((2, 2)),
+            frequencies=np.array([10.0, 12.0]),
             waveform_metadata=_waveform_generator(),
             seed="not_an_int",  # ty: ignore[invalid-argument-type]
             **PRIVATE_RECORD,
@@ -187,6 +196,7 @@ def test_catalog_requires_a_redshift_column() -> None:
         Catalog(
             source_parameters={"source_frame_mass_1": np.array([1.4, 1.3])},
             polarization_power=np.ones((2, 2)),
+            frequencies=np.array([10.0, 12.0]),
             waveform_metadata=_waveform_generator(),
             **CATALOG_DEFAULTS,
         )
@@ -202,6 +212,7 @@ def _catalog(redshift: np.ndarray) -> Catalog:
         polarization_power=np.arange(2 * num_samples, dtype=np.float64).reshape(
             2, num_samples
         ),
+        frequencies=np.array([10.0, 12.0]),
         waveform_metadata=_waveform_generator(),
         **CATALOG_DEFAULTS,
     )

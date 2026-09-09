@@ -2,12 +2,73 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 __all__ = [
     "apply_frequency_mask",
     "frequency_mask",
     "noise_weighted_inner_product",
+    "ripple_frequency_grid",
+    "uniform_frequency_grid",
 ]
+
+GRID_SPACING_TOLERANCE_ULP = 64.0
+
+
+def uniform_frequency_grid(
+    minimum_frequency: float, maximum_frequency: float, df: float
+) -> np.ndarray:
+    """Return the inclusive uniform grid from ``minimum_frequency`` by ``df``."""
+    minimum = float(minimum_frequency)
+    maximum = float(maximum_frequency)
+    spacing = float(df)
+    if not np.isfinite(minimum) or not np.isfinite(maximum):
+        raise ValueError("frequency bounds must be finite")
+    if maximum < minimum:
+        raise ValueError(
+            "maximum_frequency must be greater than or equal to minimum_frequency"
+        )
+    if not np.isfinite(spacing) or spacing <= 0.0:
+        raise ValueError("df must be a finite positive scalar")
+    span_in_bins = (maximum - minimum) / spacing
+    num_bins = int(np.floor(span_in_bins)) + 1
+    next_frequency = minimum + spacing * num_bins
+    tolerance = (
+        GRID_SPACING_TOLERANCE_ULP
+        * np.finfo(np.float64).eps
+        * max(1.0, abs(minimum), abs(maximum), abs(next_frequency))
+    )
+    if next_frequency <= maximum + tolerance:
+        num_bins += 1
+    frequencies = minimum + spacing * np.arange(num_bins, dtype=np.float64)
+    if np.isclose(frequencies[-1], maximum, rtol=0.0, atol=tolerance):
+        frequencies[-1] = maximum
+    return frequencies
+
+
+def ripple_frequency_grid(
+    *,
+    sampling_frequency: float,
+    minimum_frequency: float,
+    maximum_frequency: float,
+    frequency_resolution: float,
+) -> np.ndarray:
+    """Reproduce Ripple's generated positive-frequency grid in a band."""
+    sampling = float(sampling_frequency)
+    resolution = float(frequency_resolution)
+    minimum = float(minimum_frequency)
+    maximum = float(maximum_frequency)
+    if not np.isfinite(sampling) or sampling <= 0.0:
+        raise ValueError("sampling_frequency must be finite and positive")
+    if not np.isfinite(resolution) or resolution <= 0.0:
+        raise ValueError("frequency_resolution must be a finite positive scalar")
+    segment_duration = float(2.0 ** np.ceil(np.log2(1.0 / resolution)))
+    n_samples = round(segment_duration * sampling)
+    if n_samples <= 0:
+        raise ValueError("sampling_frequency produces no Ripple samples")
+    effective_df = sampling / n_samples
+    frequencies = effective_df * np.arange(n_samples // 2 + 1, dtype=np.float64)
+    return frequencies[(frequencies >= minimum) & (frequencies <= maximum)]
 
 
 def frequency_mask(

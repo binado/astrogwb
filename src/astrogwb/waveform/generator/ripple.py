@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import math
 from collections.abc import Mapping
 
 import jax
@@ -12,6 +11,7 @@ import numpy as np
 from gwmock_signal.waveform import RippleBackend
 from numpy.typing import ArrayLike
 
+from astrogwb.frequency import ripple_frequency_grid
 from astrogwb.utils import array_dict_shape
 from astrogwb.waveform.generator.base import PolarizationPowerGenerator
 from astrogwb.waveform.polarization_power import polarization_power
@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 class RippleGenerator(PolarizationPowerGenerator):
     """Generate chunked polarization power with one fixed Ripple frequency grid."""
 
-    __slots__ = ("_backend", "chunk_size", "frequency_resolution")
+    __slots__ = ("_backend", "_frequencies_cache", "chunk_size", "frequency_resolution")
     _backend: RippleBackend
     chunk_size: int
     frequency_resolution: float
+    _frequencies_cache: jax.Array | None
 
     def __init__(
         self,
@@ -54,11 +55,14 @@ class RippleGenerator(PolarizationPowerGenerator):
         if not isinstance(chunk_size, int):
             raise TypeError("chunk_size must be an integer")
 
-        segment_duration = 1.0 / resolution
-        segment_duration = float(2.0 ** math.ceil(math.log2(segment_duration)))
+        segment_duration = float(2.0 ** np.ceil(np.log2(1.0 / resolution)))
+        ripple_frequency_grid(
+            sampling_frequency=resolved_sampling_frequency,
+            minimum_frequency=minimum_frequency,
+            maximum_frequency=maximum_frequency,
+            frequency_resolution=resolution,
+        )
         n_samples = round(segment_duration * resolved_sampling_frequency)
-        if n_samples <= 0:
-            raise ValueError("sampling_frequency produces no Ripple samples")
         effective_df = resolved_sampling_frequency / n_samples
 
         minimum = float(minimum_frequency)
@@ -79,6 +83,7 @@ class RippleGenerator(PolarizationPowerGenerator):
         )
         object.__setattr__(self, "frequency_resolution", resolution)
         object.__setattr__(self, "chunk_size", chunk_size)
+        object.__setattr__(self, "_frequencies_cache", None)
         object.__setattr__(
             self,
             "_backend",

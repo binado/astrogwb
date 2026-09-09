@@ -102,7 +102,7 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
     power-of-two ``df``, so anything less than bit-for-bit agreement means the
     grid construction changed.
     """
-    fine_frequencies = np.asarray(fine_catalog.waveform_metadata.frequencies)
+    fine_frequencies = np.asarray(fine_catalog.frequencies)
     fine_power = np.asarray(fine_catalog.polarization_power)
 
     for factor in SUBSAMPLE_FACTORS:
@@ -115,7 +115,7 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
         )
         np.testing.assert_array_equal(
             fine_frequencies[::factor],
-            np.asarray(coarse.waveform_metadata.frequencies),
+            np.asarray(coarse.frequencies),
         )
         np.testing.assert_array_equal(
             fine_power[::factor], np.asarray(coarse.polarization_power)
@@ -131,7 +131,7 @@ def _analysis_at(
     subsampled themselves, so nothing about the coarse analysis is inherited
     from the fine one except the sources.
     """
-    frequencies = jnp.asarray(catalog.waveform_metadata.frequencies)[::factor]
+    frequencies = jnp.asarray(catalog.frequencies)[::factor]
     polarization_power = jnp.asarray(catalog.polarization_power)[::factor]
     # The line this module exists to protect: df tracks the subsampling. Leave
     # it at the catalog's stored value and the SNR falls by exactly sqrt(k),

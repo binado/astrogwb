@@ -88,7 +88,7 @@ def save_catalog(
         for name, value in attrs.items():
             handle.attrs[name] = value
         handle.create_dataset(
-            "frequency", data=np.asarray(waveform.frequencies), compression=compression
+            "frequency", data=np.asarray(catalog.frequencies), compression=compression
         )
         handle.create_dataset(
             "polarization_power",
@@ -122,6 +122,7 @@ def load_catalog[C: Catalog](cls: type[C], path: str | Path) -> C:
                 str(name): values[:, index] for index, name in enumerate(names)
             },
             polarization_power=np.asarray(handle["polarization_power"]),
+            frequencies=np.asarray(handle["frequency"]),
             waveform_metadata=waveform,
             _model_name=str(attrs[MODEL_NAME_ATTR]),
             _model_kwargs=_json_mapping(

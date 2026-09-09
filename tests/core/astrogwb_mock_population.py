@@ -263,6 +263,7 @@ def build_synthetic_estimator(
             name: np.asarray(values) for name, values in samples.items()
         },
         polarization_power=np.asarray(polarization_power),
+        frequencies=np.asarray(generator.frequencies),
         waveform_metadata=generator,
         _model_name="bns_md_cosmological",
         _model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},

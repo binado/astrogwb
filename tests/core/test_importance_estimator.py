@@ -106,6 +106,7 @@ def _catalog(
             for name, values in _source_parameters(params).items()
         },
         polarization_power=np.asarray(power),
+        frequencies=10.0 + 2.0 * np.arange(power.shape[0]),
         waveform_metadata=_waveform_metadata(power.shape[0]),
         _model_name="bns_md_cosmological",
         _model_kwargs=MODEL_KWARGS,
@@ -228,6 +229,7 @@ def test_empty_density_factors_broadcast_to_source_count() -> None:
     catalog = Catalog(
         source_parameters=catalog.source_parameters,
         polarization_power=catalog.polarization_power,
+        frequencies=catalog.frequencies,
         waveform_metadata=catalog.waveform_metadata,
         _model_name=catalog.population_model_name,
         _model_kwargs=catalog.population_model_kwargs,

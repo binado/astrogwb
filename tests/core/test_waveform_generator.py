@@ -6,6 +6,7 @@ import jax
 import numpy as np
 import pytest
 
+from astrogwb.frequency import uniform_frequency_grid
 from astrogwb.waveform import PolarizationPowerGenerator, RippleGenerator
 
 
@@ -31,7 +32,7 @@ def ripple_generator() -> RippleGenerator:
     )
 
 
-def test_base_generator_constructor_builds_the_owned_grid() -> None:
+def test_base_generator_is_metadata_only_without_a_frequency_grid() -> None:
     generator = PolarizationPowerGenerator(
         approximant="Toy",
         minimum_frequency=10.0,
@@ -41,13 +42,15 @@ def test_base_generator_constructor_builds_the_owned_grid() -> None:
         df=2.0,
     )
 
+    assert not hasattr(generator, "frequencies")
     np.testing.assert_array_equal(
-        generator.frequencies, np.array([10.0, 12.0, 14.0, 16.0, 18.0])
+        uniform_frequency_grid(10.0, 19.0, 2.0),
+        np.array([10.0, 12.0, 14.0, 16.0, 18.0]),
     )
     assert generator.df == 2.0
 
 
-def test_base_generator_derives_inclusive_grid_with_float_roundoff() -> None:
+def test_uniform_grid_handles_float_roundoff() -> None:
     generator = PolarizationPowerGenerator(
         approximant="Toy",
         minimum_frequency=0.1,
@@ -57,8 +60,8 @@ def test_base_generator_derives_inclusive_grid_with_float_roundoff() -> None:
         df=0.1,
     )
 
-    np.testing.assert_allclose(generator.frequencies, [0.1, 0.2, 0.3])
-    assert generator.frequencies is generator.frequencies
+    np.testing.assert_allclose(uniform_frequency_grid(0.1, 0.3, 0.1), [0.1, 0.2, 0.3])
+    assert generator.df == 0.1
 
 
 def test_base_generator_is_a_metadata_only_descriptor() -> None:

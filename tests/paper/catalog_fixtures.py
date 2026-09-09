@@ -126,6 +126,8 @@ def make_catalog(
     return Catalog(
         source_parameters=parameters,
         polarization_power=polarization_power,
+        frequencies=minimum_frequency
+        + df * np.arange(num_frequencies, dtype=np.float64),
         waveform_metadata=PolarizationPowerGenerator(
             approximant=approximant,
             minimum_frequency=minimum_frequency,

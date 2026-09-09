@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from astrogwb.frequency import (
     apply_frequency_mask,
     frequency_mask,
     noise_weighted_inner_product,
+    uniform_frequency_grid,
 )
 
 
@@ -108,3 +110,21 @@ def test_noise_weighted_inner_product_honors_the_axis_keyword() -> None:
     expected = df * np.sum(np.asarray(a) ** 2 / np.asarray(psd)[:, None] ** 2, axis=0)
     assert actual.shape == (3,)
     np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-6)
+
+
+def test_uniform_frequency_grid_includes_tolerant_endpoint() -> None:
+    frequencies = uniform_frequency_grid(0.1, 0.3, 0.1)
+    assert frequencies.dtype == np.float64
+    assert frequencies.shape == (3,)
+    np.testing.assert_array_equal(frequencies, [0.1, 0.2, 0.3])
+
+
+@pytest.mark.parametrize(
+    ("minimum", "maximum", "df"),
+    [(2.0, 1.0, 0.5), (1.0, 2.0, 0.0), (1.0, 2.0, -1.0)],
+)
+def test_uniform_frequency_grid_rejects_invalid_settings(
+    minimum: float, maximum: float, df: float
+) -> None:
+    with pytest.raises(ValueError):
+        uniform_frequency_grid(minimum, maximum, df)

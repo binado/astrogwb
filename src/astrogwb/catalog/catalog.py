@@ -66,6 +66,7 @@ class Catalog:
 
     source_parameters: Mapping[str, NDArray[Any]]
     polarization_power: NDArray[Any]
+    frequencies: NDArray[np.floating[Any]]
     waveform_metadata: PolarizationPowerGenerator
     _model_name: str
     _model_kwargs: Mapping[str, Any]
@@ -90,9 +91,12 @@ class Catalog:
         num_frequencies, num_samples = power.shape
         if num_samples <= 0:
             raise ValueError("catalog must contain at least one sample")
-        if num_frequencies != self.waveform_metadata.frequencies.size:
+        frequencies = np.asarray(self.frequencies)
+        if frequencies.ndim != 1:
+            raise ValueError("catalog frequencies must be one-dimensional")
+        if num_frequencies != frequencies.size:
             raise ValueError(
-                "polarization_power frequency axis does not match waveform frequencies"
+                "polarization_power frequency axis does not match catalog frequencies"
             )
 
         parameters: dict[str, NDArray[Any]] = {}
@@ -121,6 +125,7 @@ class Catalog:
         if not isinstance(self._density_sites, tuple):
             object.__setattr__(self, "_density_sites", tuple(self._density_sites))
         object.__setattr__(self, "polarization_power", power)
+        object.__setattr__(self, "frequencies", frequencies)
         object.__setattr__(self, "source_parameters", parameters)
         object.__setattr__(self, "_model_kwargs", dict(self._model_kwargs))
         object.__setattr__(
@@ -151,9 +156,11 @@ class Catalog:
             name: np.asarray(values) for name, values in source_parameters.items()
         }
         power = np.asarray(generator(source_parameters))
+        frequencies = np.asarray(generator.frequencies)
         return cls(
             source_parameters=parameters,
             polarization_power=power,
+            frequencies=frequencies,
             waveform_metadata=generator,
             _model_name=model_name,
             _model_kwargs=model_kwargs,

@@ -132,9 +132,7 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
         )
         for num_sources in catalog_sizes
     }
-    frequencies = jnp.asarray(
-        catalogs[LARGE_CATALOG_SIZE].waveform_metadata.frequencies
-    )
+    frequencies = jnp.asarray(catalogs[LARGE_CATALOG_SIZE].frequencies)
     mass_moments = uniform_prior_mass_moments(
         frequencies,
         minimum_redshift=Z_MIN,
@@ -245,7 +243,7 @@ def test_catalog_omega_gw_matches_the_analytic_spectrum(mock_catalog_factory) ->
     catalog = mock_catalog_factory(
         num_sources=LARGE_CATALOG_SIZE, f_min=F_MIN, f_max=F_MAX, df=CATALOG_DF
     )
-    frequencies = jnp.asarray(catalog.waveform_metadata.frequencies)
+    frequencies = jnp.asarray(catalog.frequencies)
     polarization_power = jnp.asarray(catalog.polarization_power)
     samples = catalog_samples(catalog)
     total_merger_rate, _, _ = reference_merger_rate_distance_and_logprob(

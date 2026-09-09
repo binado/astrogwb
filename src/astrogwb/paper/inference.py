@@ -197,7 +197,7 @@ def prepare_observation(injection: Catalog, *, grid: AnalysisGrid) -> Observatio
         total_merger_rate,
     )
 
-    frequencies = jnp.asarray(restricted.waveform_metadata.frequencies)
+    frequencies = jnp.asarray(restricted.frequencies)
     # Band bounds only: this function never sees a detector network, so bins
     # the network cannot measure are dropped later, in prepare_inference_inputs.
     analysis_frequency_mask = make_frequency_mask(
@@ -261,7 +261,7 @@ def prepare_inference_inputs(
     proposal_catalog = proposal.restrict_redshift(
         grid.minimum_redshift, grid.maximum_redshift
     )
-    proposal_frequencies = np.asarray(proposal_catalog.waveform_metadata.frequencies)
+    proposal_frequencies = np.asarray(proposal_catalog.frequencies)
     validate_matching_frequency_grids(observation.frequencies, proposal_frequencies)
     n_freq, n_samples = proposal_catalog.polarization_power.shape
     logger.info(

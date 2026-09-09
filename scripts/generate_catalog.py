@@ -167,9 +167,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         "Saved catalog %s: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",
         definition.name,
         catalog.num_samples,
-        catalog.waveform_metadata.frequencies.size,
-        float(catalog.waveform_metadata.frequencies[0]),
-        float(catalog.waveform_metadata.frequencies[-1]),
+        catalog.frequencies.size,
+        float(catalog.frequencies[0]),
+        float(catalog.frequencies[-1]),
         definition.waveform.approximant,
     )
     logger.info("Output written to %s", output_path)

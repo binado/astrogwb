@@ -126,7 +126,7 @@ def _build_analysis_inputs(
     population, contract with unit weights, load the network effective PSD,
     and mask out-of-band and non-finite bins.
     """
-    frequencies = jnp.asarray(catalog.waveform_metadata.frequencies)
+    frequencies = jnp.asarray(catalog.frequencies)
     df = catalog.waveform_metadata.df
     polarization_power = jnp.asarray(catalog.polarization_power)
     samples = catalog_samples(catalog)
