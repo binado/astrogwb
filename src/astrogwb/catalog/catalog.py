@@ -13,9 +13,9 @@ reconstruct the exact map from hyperparameters to source density, so the run
 config no longer restates any of it and nothing has to be cross-checked.
 
 The included-factor tuple is part of that record for a reason that is easy to
-miss: a catalog whose proposal density was computed with the mass factors
-excluded, reweighted against a target that includes them, gives silently wrong
-weights with no shape error anywhere.
+miss: the two mass sites form one conceptual ordered-pair density contribution.
+A catalog whose proposal density was computed with either mass factor excluded
+gives silently wrong weights with no shape error anywhere.
 
 Immutability is a contract, not a language guarantee. The dataclass is frozen
 and transformations such as :meth:`Catalog.restrict_redshift` return new

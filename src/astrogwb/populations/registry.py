@@ -28,7 +28,11 @@ _REGISTRY: dict[str, tuple[PopulationFn, tuple[str, ...]]] = {}
 #: Density factors a catalog selects when nothing narrower is requested.
 #: Every registered population declares ``redshift`` -- the one source
 #: parameter whose density never cancels in an importance weight.
-_DEFAULT_DENSITY_SITES: tuple[str, ...] = ("redshift",)
+_DEFAULT_DENSITY_SITES: tuple[str, ...] = (
+    "redshift",
+    "source_frame_mass_1",
+    "source_frame_mass_2",
+)
 
 
 def register_population_model(

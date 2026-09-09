@@ -25,12 +25,11 @@ The declaration is a NumPyro model, and that is the whole point of it:
   run supplies the ``(N,)`` source log density, the ``(N,)`` distance governing
   waveform amplitude, and the scalar observer-frame rate.
 
-The masses are currently independent uniforms rather than an ordered pair, and
-they are omitted from ``density_sites`` for importance weighting, reproducing
-the cancellation the analysis relies on today. Including them enables
-mass-hyperparameter inference, and at that point the ordered-pair density must
-be *correct* rather than merely symmetric: ordering doubles the density on the
-retained region and zeroes it elsewhere.
+The component masses are an ordered pair: the first mass is the larger one.
+The required parameters are ``minimum_mass`` and ``mass_width``; the fiducial
+support is ``[1.0, 2.5]`` solar masses.
+Their conditional factorization has constant joint density ``2 / width**2``
+on the ordered triangle. Both mass sites are included in importance weighting.
 """
 
 from __future__ import annotations
@@ -99,10 +98,6 @@ def amplitude_local_merger_rate_fn(marginalized_parameter: jax.Array) -> jax.Arr
     return marginalized_parameter
 
 
-#: Source-frame component-mass bounds, in solar masses.
-SOURCE_FRAME_MASS_MINIMUM = 1.0
-SOURCE_FRAME_MASS_MAXIMUM = 2.5
-
 #: Aligned-spin bounds.
 SPIN_MAGNITUDE = 0.05
 
@@ -142,13 +137,20 @@ def _declare_bns_madau_dickinson(
     """Declare every site the two propagation variants share."""
     del z_min, z_max, n_grid
 
+    minimum_mass: jax.Array = jnp.asarray(params["minimum_mass"])
+    mass_width: jax.Array = jnp.asarray(params["mass_width"])
+    # For two ordered iid uniforms, Beta(2, 1) is the primary mass marginal.
     mass_1 = numpyro.sample(
         "source_frame_mass_1",
-        dist.Uniform(SOURCE_FRAME_MASS_MINIMUM, SOURCE_FRAME_MASS_MAXIMUM),
+        dist.TransformedDistribution(
+            dist.Beta(2.0, 1.0, validate_args=True),
+            dist.transforms.AffineTransform(minimum_mass, mass_width),
+            validate_args=True,
+        ),
     )
     mass_2 = numpyro.sample(
         "source_frame_mass_2",
-        dist.Uniform(SOURCE_FRAME_MASS_MINIMUM, SOURCE_FRAME_MASS_MAXIMUM),
+        dist.Uniform(minimum_mass, mass_1, validate_args=True),
     )
     numpyro.sample("spin_1z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))
     numpyro.sample("spin_2z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))

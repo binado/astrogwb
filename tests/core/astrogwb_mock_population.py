@@ -62,6 +62,8 @@ FIDUCIALS: dict[str, float] = {
     "kappa": 4.62,
     "z_peak": 1.84,
     "local_merger_rate": 770.0,
+    "minimum_mass": 1.0,
+    "mass_width": 1.5,
 }
 
 #: The parameters the *generating* population takes: the modified-propagation
@@ -134,7 +136,7 @@ def mock_catalog(
         model_name="bns_md_cosmological",
         model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
         fiducials=POPULATION_PARAMS,
-        density_sites=("redshift",),
+        density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
         seed=MOCK_POPULATION_SEED,
     )
 
@@ -265,7 +267,7 @@ def build_synthetic_estimator(
         _model_name="bns_md_cosmological",
         _model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
         _fiducials=POPULATION_PARAMS,
-        _density_sites=("redshift",),
+        _density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
         seed=MOCK_POPULATION_SEED,
     )
     estimator = SpectralDensityImportanceEstimator.from_catalog(

@@ -31,14 +31,13 @@ from astrogwb.gwb import (
     spectral_density_from_omega_gw,
     uniform_prior_mass_moments,
 )
-from astrogwb.populations import bns_madau_dickinson
 
 CATALOG_DF = 8.0
 SMALL_CATALOG_SIZE = 256
 LARGE_CATALOG_SIZE = 1024
 
 
-def test_mock_constants_match_the_population_declaration() -> None:
+def test_mock_fiducials_preserve_the_population_support() -> None:
     """The mass bounds the analytic comparison uses are the model's own.
 
     The analytic spectrum below integrates a uniform component-mass prior over
@@ -46,11 +45,10 @@ def test_mock_constants_match_the_population_declaration() -> None:
     did not follow would show up as a spurious convergence failure rather than
     as a mismatch.
     """
-    assert bns_madau_dickinson.SOURCE_FRAME_MASS_MINIMUM == (
-        MOCK_MINIMUM_COMPONENT_MASS
-    )
-    assert bns_madau_dickinson.SOURCE_FRAME_MASS_MAXIMUM == (
-        MOCK_MAXIMUM_COMPONENT_MASS
+    assert POPULATION_PARAMS["minimum_mass"] == MOCK_MINIMUM_COMPONENT_MASS
+    assert (
+        POPULATION_PARAMS["minimum_mass"] + POPULATION_PARAMS["mass_width"]
+        == MOCK_MAXIMUM_COMPONENT_MASS
     )
 
 

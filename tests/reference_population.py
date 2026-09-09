@@ -38,6 +38,8 @@ def reference_merger_rate_distance_and_logprob(
     redshift: ArrayLike,
     *,
     redshift_grid: jax.Array,
+    source_frame_mass_1: ArrayLike | None = None,
+    source_frame_mass_2: ArrayLike | None = None,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     r"""Total merger rate, luminosity distance, and redshift log-pdf.
 
@@ -75,6 +77,24 @@ def reference_merger_rate_distance_and_logprob(
         redshift, redshift_grid, unnormalized_pdf_grid, left=0.0, right=0.0
     )
     logpdf = jnp.log(unnormalized_pdf / integral_mpc3)
+    if source_frame_mass_1 is not None or source_frame_mass_2 is not None:
+        mass_1 = jnp.asarray(
+            1.4 if source_frame_mass_1 is None else source_frame_mass_1
+        )
+        mass_2 = jnp.asarray(
+            1.3 if source_frame_mass_2 is None else source_frame_mass_2
+        )
+        minimum_mass = params["minimum_mass"]
+        mass_width = params["mass_width"]
+        mass_logpdf = jnp.where(
+            (mass_1 >= minimum_mass)
+            & (mass_1 <= minimum_mass + mass_width)
+            & (mass_2 >= minimum_mass)
+            & (mass_2 <= mass_1),
+            jnp.log(2.0) - 2.0 * jnp.log(mass_width),
+            -jnp.inf,
+        )
+        logpdf = logpdf + mass_logpdf
     luminosity_distance = jnp.interp(
         redshift,
         redshift_grid,

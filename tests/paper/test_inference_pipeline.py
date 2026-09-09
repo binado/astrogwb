@@ -391,14 +391,27 @@ def _proposal_log_prob(catalog: Catalog) -> jax.Array:
     )
     redshift = jnp.asarray(catalog.source_parameters["redshift"])
     _, _, md_logprob = reference_merger_rate_distance_and_logprob(
-        catalog.fiducials, redshift, redshift_grid=grid
+        catalog.fiducials,
+        redshift,
+        redshift_grid=grid,
+        source_frame_mass_1=catalog.source_parameters["source_frame_mass_1"],
+        source_frame_mass_2=catalog.source_parameters["source_frame_mass_2"],
     )
     if catalog.population_model_name != "bns_md_uniform_mixture":
         return md_logprob
+    # The mixture acts only on redshift; add the ordered-pair factor after
+    # mixing rather than weighting it as if the uniform component included masses.
+    _, _, redshift_logprob = reference_merger_rate_distance_and_logprob(
+        catalog.fiducials, redshift, redshift_grid=grid
+    )
+    mass_logprob = md_logprob - redshift_logprob
     epsilon = float(kwargs["uniform_mixing_fraction"])
-    return jnp.logaddexp(
-        jnp.log1p(-epsilon) + md_logprob,
-        jnp.log(epsilon) - jnp.log(float(kwargs["z_max"]) - float(kwargs["z_min"])),
+    return (
+        jnp.logaddexp(
+            jnp.log1p(-epsilon) + redshift_logprob,
+            jnp.log(epsilon) - jnp.log(float(kwargs["z_max"]) - float(kwargs["z_min"])),
+        )
+        + mass_logprob
     )
 
 
@@ -424,6 +437,8 @@ def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.
         redshift_grid=jnp.linspace(
             grid.minimum_redshift, grid.maximum_redshift, grid.n_grid
         ),
+        source_frame_mass_1=catalog.source_parameters["source_frame_mass_1"],
+        source_frame_mass_2=catalog.source_parameters["source_frame_mass_2"],
     )
     log_target_distance = jnp.log(distance) + log_gw_em_ratio(
         redshift, params["xi_0"], params["xi_n"]

@@ -203,6 +203,8 @@ OMEGA_CATALOG_PATH = NOTEBOOK_DIR / (
 FIDUCIALS: dict[str, float] = {
     "H0": 67.66,
     "Omega_m": 0.3096,
+    "minimum_mass": 1.0,
+    "mass_width": 1.5,
     "xi_0": 1.0,
     "xi_n": 1.91,
     "gamma": 1.42,
@@ -320,7 +322,7 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
         model_name=POPULATION_MODEL,
         model_kwargs=POPULATION_MODEL_KWARGS,
         fiducials=POPULATION_PARAMS,
-        density_sites=("redshift",),
+        density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
         seed=POPULATION_SEED,
     )
 

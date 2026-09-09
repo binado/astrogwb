@@ -22,7 +22,7 @@ except ImportError as error:  # pragma: no cover
 
 __all__ = ["DOMAIN_FREQUENCY", "FORMAT_NAME", "load_catalog", "save_catalog"]
 
-FORMAT_NAME = "astrogwb_catalog_v4"
+FORMAT_NAME = "astrogwb_catalog_v5"
 DOMAIN_FREQUENCY = "frequency"
 WAVEFORM_ATTRS = (
     "approximant",
@@ -53,7 +53,7 @@ REQUIRED_POPULATION_ATTRS = POPULATION_ATTRS
 def save_catalog(
     catalog: Catalog, path: str | Path, *, compression: str | None = None
 ) -> None:
-    """Write one catalog in the v4 direct-HDF5 format."""
+    """Write one catalog in the v5 direct-HDF5 format."""
     waveform = catalog.waveform_metadata
     names = list(catalog.source_parameters)
     source_parameters = (

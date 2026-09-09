@@ -39,6 +39,8 @@ gamma = 1.42
 kappa = 4.62
 z_peak = 1.84
 local_merger_rate = 770.0
+minimum_mass = 1.0
+mass_width = 1.5
 
 [waveform]
 approximant = "TaylorF2"
@@ -89,7 +91,11 @@ def test_generation_produces_a_catalog_that_describes_itself(
         "n_grid": 256,
     }
     assert catalog.fiducials["local_merger_rate"] == 770.0
-    assert catalog.density_sites == ("redshift",)
+    assert catalog.density_sites == (
+        "redshift",
+        "source_frame_mass_1",
+        "source_frame_mass_2",
+    )
     assert catalog.polarization_power.shape[1] == 8
 
     # Round-tripping is the real assertion: loading re-executes the recorded
