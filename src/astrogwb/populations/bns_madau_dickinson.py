@@ -139,6 +139,7 @@ def _declare_bns_madau_dickinson(
 
     minimum_mass: jax.Array = jnp.asarray(params["minimum_mass"])
     mass_width: jax.Array = jnp.asarray(params["mass_width"])
+    # Beta(2, 1) favors heavier primary masses while preserving the fixed support.
     mass_1 = numpyro.sample(
         "source_frame_mass_1",
         dist.TransformedDistribution(
