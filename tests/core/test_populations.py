@@ -254,7 +254,9 @@ def test_rate_and_distance_deterministics_add_no_density_factors() -> None:
     without_rate = (
         mock_population_model().evaluate(without_rate_params, sample_values()).log_prob
     )
-    np.testing.assert_array_equal(with_rate, without_rate)
+    # The source table now carries the absolute rate, so renormalizing the
+    # differently scaled table can differ by a machine ulp.
+    np.testing.assert_allclose(with_rate, without_rate, rtol=0.0, atol=1e-14)
 
 
 def test_derived_columns_match_the_declared_transforms() -> None:
