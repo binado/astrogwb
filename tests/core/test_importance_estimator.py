@@ -108,7 +108,7 @@ def _catalog(
         waveform_metadata=_waveform_metadata(power.shape[0]),
         _model_name="bns_md_cosmological",
         _model_kwargs=MODEL_KWARGS,
-        _population_params=params,
+        _fiducials=params,
         _density_sites=("redshift",),
         seed=MOCK_POPULATION_SEED,
     )

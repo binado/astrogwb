@@ -68,7 +68,7 @@ class Catalog:
     waveform_metadata: PolarizationPowerGenerator
     _model_name: str
     _model_kwargs: Mapping[str, Any]
-    _population_params: Mapping[str, float]
+    _fiducials: Mapping[str, float]
     _density_sites: tuple[str, ...]
     seed: int
 
@@ -124,8 +124,8 @@ class Catalog:
         object.__setattr__(self, "_model_kwargs", dict(self._model_kwargs))
         object.__setattr__(
             self,
-            "_population_params",
-            {name: float(value) for name, value in self._population_params.items()},
+            "_fiducials",
+            {name: float(value) for name, value in self._fiducials.items()},
         )
 
     @classmethod
@@ -136,7 +136,7 @@ class Catalog:
         generator: PolarizationPowerGenerator,
         model_name: str,
         model_kwargs: Mapping[str, Any],
-        population_params: Mapping[str, float],
+        fiducials: Mapping[str, float],
         density_sites: tuple[str, ...],
         seed: int,
     ) -> Self:
@@ -156,7 +156,7 @@ class Catalog:
             waveform_metadata=generator,
             _model_name=model_name,
             _model_kwargs=model_kwargs,
-            _population_params=population_params,
+            _fiducials=fiducials,
             _density_sites=density_sites,
             seed=seed,
         )
@@ -175,14 +175,14 @@ class Catalog:
         return dict(self._model_kwargs)
 
     @property
-    def population_params(self) -> Mapping[str, float]:
+    def fiducials(self) -> Mapping[str, float]:
         """The hyperparameters the samples were drawn at.
 
         These are *generating* parameters. They are not bound into the callable
         :meth:`get_population_model` returns: a target evaluation supplies its
         own, and binding these would silently pin them.
         """
-        return dict(self._population_params)
+        return dict(self._fiducials)
 
     @property
     def density_sites(self) -> tuple[str, ...]:

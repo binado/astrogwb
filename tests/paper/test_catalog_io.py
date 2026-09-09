@@ -94,7 +94,7 @@ def test_round_trip_preserves_arrays_and_the_population_record(
 
     assert restored.population_model_name == original.population_model_name
     assert restored.population_model_kwargs == original.population_model_kwargs
-    assert restored.population_params == original.population_params
+    assert restored.fiducials == original.fiducials
     assert restored.density_sites == original.density_sites
     assert restored.seed == 41
 
@@ -118,8 +118,8 @@ def test_a_loaded_catalog_reconstructs_its_model_and_evaluates_at_new_params(
     } == PAPER_MODEL_KWARGS
 
     for params in (
-        restored.population_params,
-        {**restored.population_params, "H0": 74.0},
+        restored.fiducials,
+        {**restored.fiducials, "H0": 74.0},
     ):
         values = restored.source_parameters
         site_log_probs, _ = model.evaluate(params, values)
@@ -202,7 +202,7 @@ def test_a_stored_column_that_drifted_from_the_population_is_caught(
             waveform_metadata=catalog.waveform_metadata,
             _model_name=catalog.population_model_name,
             _model_kwargs=catalog.population_model_kwargs,
-            _population_params=catalog.population_params,
+            _fiducials=catalog.fiducials,
             _density_sites=catalog.density_sites,
             seed=catalog.seed,
         )
@@ -289,9 +289,9 @@ def test_round_trip_restores_an_ordered_nondefault_density_selection(
     model = restored.get_population_model()
     assert model.density_sites == sites
     np.testing.assert_array_equal(
-        model.log_prob(restored.population_params, restored.source_parameters),
+        model.log_prob(restored.fiducials, restored.source_parameters),
         catalog.get_population_model().log_prob(
-            catalog.population_params, catalog.source_parameters
+            catalog.fiducials, catalog.source_parameters
         ),
     )
     assert (

@@ -320,7 +320,7 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
         ),
         model_name=POPULATION_MODEL,
         model_kwargs=POPULATION_MODEL_KWARGS,
-        population_params=POPULATION_PARAMS,
+        fiducials=POPULATION_PARAMS,
         density_sites=("redshift",),
         seed=POPULATION_SEED,
     )
@@ -343,7 +343,7 @@ def catalog_matches_configuration(catalog: Catalog, *, df: float, f_max: float) 
         and catalog.num_samples == NUM_SOURCES
         and catalog.seed == POPULATION_SEED
         and catalog.population_model_name == POPULATION_MODEL
-        and dict(catalog.population_params) == POPULATION_PARAMS
+        and dict(catalog.fiducials) == POPULATION_PARAMS
         and dict(catalog.population_model_kwargs) == POPULATION_MODEL_KWARGS
     )
 
@@ -392,7 +392,7 @@ def describe(catalog: Catalog) -> pd.Series:
 def catalog_merger_rate(catalog: Catalog) -> jax.Array:
     """The observer-frame rate this catalog's own population implies."""
     model = catalog.get_population_model()
-    params = catalog.population_params
+    params = catalog.fiducials
     values = catalog.source_parameters
     _, trace = model.evaluate(params, values)
     return trace[TOTAL_MERGER_RATE_SITE]["value"]

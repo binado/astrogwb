@@ -391,7 +391,7 @@ def _proposal_log_prob(catalog: Catalog) -> jax.Array:
     )
     redshift = jnp.asarray(catalog.source_parameters["redshift"])
     _, _, md_logprob = reference_merger_rate_distance_and_logprob(
-        catalog.population_params, redshift, redshift_grid=grid
+        catalog.fiducials, redshift, redshift_grid=grid
     )
     if catalog.population_model_name != "bns_md_uniform_mixture":
         return md_logprob
@@ -506,7 +506,7 @@ def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights
         proposal_catalog, average_mode="analytic_inclination"
     )
     np.testing.assert_array_equal(
-        np.asarray(estimator.log_weights(proposal_catalog.population_params)),
+        np.asarray(estimator.log_weights(proposal_catalog.fiducials)),
         np.zeros(N_SOURCES),
     )
 

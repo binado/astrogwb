@@ -223,7 +223,7 @@ def catalog_total_merger_rate(catalog: Catalog) -> jax.Array:
     stored copy would be stale the moment the window is narrowed.
     """
     model = catalog.get_population_model()
-    params = catalog.population_params
+    params = catalog.fiducials
     values = catalog.source_parameters
     _, trace = model.evaluate(params, values)
     return trace[TOTAL_MERGER_RATE_SITE]["value"]

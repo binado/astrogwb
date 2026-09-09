@@ -56,14 +56,17 @@ def source_parameters(
     *,
     model_name: str = PAPER_MODEL,
     model_kwargs: Mapping[str, float | int] | None = None,
+    fiducials: Mapping[str, float] | None = None,
     population_params: Mapping[str, float] | None = None,
 ) -> dict[str, np.ndarray]:
     """Complete a redshift ladder into every column the population declares."""
+    if fiducials is None:
+        fiducials = population_params
     model = population_model(model_name)(**model_kwargs or PAPER_MODEL_KWARGS)
     ones = np.ones_like(redshift)
     columns = _derived_columns(
         model,
-        population_params or PAPER_POPULATION_PARAMS,
+        fiducials or PAPER_POPULATION_PARAMS,
         {
             "redshift": redshift,
             "source_frame_mass_1": 1.4 * ones,
@@ -90,11 +93,14 @@ def make_catalog(
     seed: int = 41,
     model_name: str = PAPER_MODEL,
     model_kwargs: Mapping[str, float | int] | None = None,
+    fiducials: Mapping[str, float] | None = None,
     population_params: Mapping[str, float] | None = None,
     density_sites: tuple[str, ...] = ("redshift",),
     extra_source_parameters: Mapping[str, np.ndarray] | None = None,
 ) -> Catalog:
     """Build a valid paper-format catalog over a chosen redshift ladder."""
+    if fiducials is None:
+        fiducials = population_params
     redshift = np.asarray(redshift, dtype=np.float64)
     num_samples = redshift.size
     if polarization_power is None:
@@ -108,7 +114,7 @@ def make_catalog(
         redshift,
         model_name=model_name,
         model_kwargs=model_kwargs,
-        population_params=population_params,
+        fiducials=fiducials,
     )
     if extra_source_parameters is not None:
         parameters.update(
@@ -131,7 +137,7 @@ def make_catalog(
         ),
         _model_name=model_name,
         _model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
-        _population_params=dict(population_params or PAPER_POPULATION_PARAMS),
+        _fiducials=dict(fiducials or PAPER_POPULATION_PARAMS),
         _density_sites=density_sites,
         seed=seed,
     )

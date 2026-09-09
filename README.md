@@ -92,7 +92,7 @@ catalog = Catalog.from_generator(
     ),
     model_name="bns_md_cosmological",
     model_kwargs=model_kwargs,
-    population_params=params,
+    fiducials=params,
     density_sites=population.density_sites,
     seed=42,
 )

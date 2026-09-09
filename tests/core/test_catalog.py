@@ -46,7 +46,7 @@ def _waveform_generator() -> PolarizationPowerGenerator:
 POPULATION_RECORD: dict[str, Any] = {
     "model_name": "bns_md_cosmological",
     "model_kwargs": {"z_min": 0.0, "z_max": 20.0, "n_grid": 256},
-    "population_params": {
+    "fiducials": {
         "H0": 67.66,
         "Omega_m": 0.3096,
         "gamma": 1.42,
@@ -243,7 +243,7 @@ def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> 
     assert restricted.population_model_kwargs["z_min"] == 0.3
     assert restricted.population_model_kwargs["z_max"] == 2.0
     # Everything else about the record travels unchanged.
-    assert restricted.population_params == catalog.population_params
+    assert restricted.fiducials == catalog.fiducials
     assert restricted.density_sites == catalog.density_sites
 
 

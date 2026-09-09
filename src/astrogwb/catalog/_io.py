@@ -127,7 +127,7 @@ def catalog_to_dataset(catalog: Catalog) -> xr.Dataset:
         POPULATION_NUM_SAMPLES_ATTR: catalog.num_samples,
         MODEL_NAME_ATTR: catalog.population_model_name,
         MODEL_KWARGS_ATTR: json.dumps(catalog.population_model_kwargs, sort_keys=True),
-        POPULATION_PARAMS_ATTR: json.dumps(catalog.population_params, sort_keys=True),
+        POPULATION_PARAMS_ATTR: json.dumps(catalog.fiducials, sort_keys=True),
         DENSITY_SITES_ATTR: json.dumps(list(catalog.density_sites)),
         PROPOSAL_ATTR: json.dumps(_redshift_density_probe(catalog)),
     }
@@ -208,7 +208,7 @@ def catalog_from_dataset[C: Catalog](
         _model_kwargs=_json_mapping(
             decoded[MODEL_KWARGS_ATTR], label=label, name=MODEL_KWARGS_ATTR
         ),
-        _population_params={
+        _fiducials={
             name: float(value)
             for name, value in _json_mapping(
                 decoded[POPULATION_PARAMS_ATTR],
@@ -242,7 +242,7 @@ def check_population_consistency(
       some other route and have since drifted.
     """
     model = catalog.get_population_model()
-    params = catalog.population_params
+    params = catalog.fiducials
 
     recomputed = np.asarray(
         redshift_log_density(model, params, np.asarray(recorded_probe["redshift"]))
@@ -396,9 +396,7 @@ def _redshift_density_probe(catalog: Catalog) -> dict[str, list[float]]:
     z_max = float(kwargs.get("z_max", 1.0))
     probes = np.linspace(z_min, z_max, PROBE_POINTS + 2)[1:-1]
     log_prob = np.asarray(
-        redshift_log_density(
-            catalog.get_population_model(), catalog.population_params, probes
-        ),
+        redshift_log_density(catalog.get_population_model(), catalog.fiducials, probes),
         dtype=np.float64,
     )
     return {

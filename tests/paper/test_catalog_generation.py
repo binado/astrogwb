@@ -88,7 +88,7 @@ def test_generation_produces_a_catalog_that_describes_itself(
         "z_max": 20.0,
         "n_grid": 256,
     }
-    assert catalog.population_params["local_merger_rate"] == 770.0
+    assert catalog.fiducials["local_merger_rate"] == 770.0
     assert catalog.density_sites == ("redshift",)
     assert catalog.polarization_power.shape[1] == 8
 
@@ -100,7 +100,7 @@ def test_generation_produces_a_catalog_that_describes_itself(
     np.testing.assert_array_equal(
         restored.polarization_power, catalog.polarization_power
     )
-    assert restored.population_params == catalog.population_params
+    assert restored.fiducials == catalog.fiducials
 
 
 @pytest.mark.integration

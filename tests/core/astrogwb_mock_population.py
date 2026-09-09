@@ -136,7 +136,7 @@ def mock_catalog(
         generator=generator,
         model_name="bns_md_cosmological",
         model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
-        population_params=POPULATION_PARAMS,
+        fiducials=POPULATION_PARAMS,
         density_sites=("redshift",),
         seed=MOCK_POPULATION_SEED,
     )
@@ -267,7 +267,7 @@ def build_synthetic_estimator(
         waveform_metadata=generator,
         _model_name="bns_md_cosmological",
         _model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
-        _population_params=POPULATION_PARAMS,
+        _fiducials=POPULATION_PARAMS,
         _density_sites=("redshift",),
         seed=MOCK_POPULATION_SEED,
     )

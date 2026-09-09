@@ -135,7 +135,7 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
         generator=generator,
         model_name=population.model,
         model_kwargs=population.kwargs,
-        population_params=population.params,
+        fiducials=population.params,
         density_sites=model.density_sites,
         seed=definition.seed,
     )

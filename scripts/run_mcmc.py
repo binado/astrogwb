@@ -284,7 +284,7 @@ def save(
             {
                 "model": proposal.population_model_name,
                 "kwargs": dict(proposal.population_model_kwargs),
-                "params": dict(proposal.population_params),
+                "params": dict(proposal.fiducials),
                 "density_sites": list(proposal.density_sites),
                 "num_samples": proposal.num_samples,
                 "seed": proposal.seed,
@@ -425,7 +425,7 @@ def main(argv: list[str] | None = None) -> None:
         config.catalog.proposal,
         proposal_catalog.population_model_name,
         dict(proposal_catalog.population_model_kwargs),
-        dict(proposal_catalog.population_params),
+        dict(proposal_catalog.fiducials),
         proposal_catalog.density_sites,
     )
 

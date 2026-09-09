@@ -118,7 +118,7 @@ class SpectralDensityImportanceEstimator:
         population and change every posterior without erroring.
         """
         generating_model = catalog.get_population_model()
-        generating_params = catalog.population_params
+        generating_params = catalog.fiducials
         target_model = generating_model if model is None else model
         source_parameters = {
             name: jnp.asarray(value)
