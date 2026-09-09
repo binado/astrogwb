@@ -11,6 +11,7 @@ and to any test that builds the distribution *inside* a model function.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import cast
 
 import jax
@@ -23,6 +24,7 @@ import pytest
 # implementations run on the *same* grid, so a second copy of these would let
 # them drift apart with no visible symptom.
 from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN, make_redshift_grid
+from jax.typing import ArrayLike
 from numpyro.distributions.transforms import biject_to
 from reference_population import reference_merger_rate_distance_and_logprob
 
@@ -37,7 +39,7 @@ from astrogwb.distributions.redshift.madau_dickinson import (
 SAMPLE_REDSHIFTS = jnp.array([0.5, 1.234, 3.7, 12.0, 19.5])
 
 
-def _distribution(**overrides: float) -> MadauDickinsonRedshiftDistribution:
+def _distribution(**overrides: float) -> RedshiftDistribution:
     """The Madau-Dickinson specimen at the mock fiducials, on the mock grid."""
     return MadauDickinsonRedshiftDistribution(
         params={**FIDUCIALS, **overrides},
@@ -114,7 +116,7 @@ def test_total_merger_rate_is_in_mergers_per_second() -> None:
     """The `1e-9 / SECONDS_PER_YEAR` conversion, bit-identical given the factor order."""
     reference_rate, _, _ = _reference()
     np.testing.assert_allclose(
-        float(_distribution().total_merger_rate(FIDUCIALS["local_merger_rate"])),
+        float(_distribution().total_merger_rate()),
         float(reference_rate),
         rtol=1e-15,
     )
@@ -129,7 +131,7 @@ def test_luminosity_distance_matches_the_reference_model() -> None:
     )
 
 
-def test_source_frame_distribution_is_the_rate_shape() -> None:
+def test_source_frame_distribution_is_the_rate() -> None:
     distribution = _distribution()
     np.testing.assert_array_equal(
         np.asarray(distribution.source_frame_distribution(SAMPLE_REDSHIFTS, FIDUCIALS)),
@@ -139,6 +141,7 @@ def test_source_frame_distribution_is_the_rate_shape() -> None:
                 FIDUCIALS["gamma"],
                 FIDUCIALS["kappa"],
                 FIDUCIALS["z_peak"],
+                FIDUCIALS["local_merger_rate"],
             )
         ),
     )
@@ -239,10 +242,10 @@ _MAPPED_FIELDS = ("y",)
 
 
 def _stack_over_y(
-    distributions: list[MadauDickinsonRedshiftDistribution],
-) -> MadauDickinsonRedshiftDistribution:
+    distributions: list[RedshiftDistribution],
+) -> RedshiftDistribution:
     """Hand-stack a batch of specimens along `y`, leaving every other leaf shared."""
-    cls = MadauDickinsonRedshiftDistribution
+    cls = RedshiftDistribution
     fields = cls.gather_pytree_data_fields()
     children, aux = cls.tree_flatten(distributions[0])
     stacked = tuple(
@@ -253,7 +256,7 @@ def _stack_over_y(
     )
     # `Distribution.tree_unflatten` is annotated as returning the base class,
     # but it constructs `cls`; that is what the round-trip test below pins.
-    return cast("MadauDickinsonRedshiftDistribution", cls.tree_unflatten(aux, stacked))
+    return cast("RedshiftDistribution", cls.tree_unflatten(aux, stacked))
 
 
 def test_distribution_survives_jit_as_a_pytree_argument() -> None:
@@ -275,7 +278,7 @@ def test_distribution_vmaps_over_a_hand_stacked_pytree() -> None:
     distributions = [_distribution(gamma=gamma) for gamma in gammas]
     stacked = _stack_over_y(distributions)
 
-    cls = MadauDickinsonRedshiftDistribution
+    cls = RedshiftDistribution
     fields = cls.gather_pytree_data_fields()
     aux = cls.tree_flatten(distributions[0])[1]
     # The gathered field order is a set iteration order, so build the specimen
@@ -336,21 +339,24 @@ def test_lazy_fields_are_not_pytree_leaves() -> None:
 def test_aux_data_is_hashable_and_stable() -> None:
     """Aux data is hashed into the jit cache key, so it must not carry arrays."""
     distribution = _distribution()
-    cls = MadauDickinsonRedshiftDistribution
+    cls = RedshiftDistribution
     aux = cls.tree_flatten(distribution)[1]
 
     assert hash(aux) == hash(cls.tree_flatten(distribution)[1])
 
 
-def test_concrete_subclasses_are_still_registered_as_pytrees() -> None:
-    """The merged metaclass must not shadow `Distribution.__init_subclass__`,
-    which is what registers each concrete subclass as a pytree node."""
+def test_redshift_distribution_is_registered_as_a_pytree() -> None:
+    """The concrete distribution remains registered as a NumPyro pytree node."""
     distribution = _distribution()
     round_tripped = jax.tree.unflatten(
         jax.tree.structure(distribution), jax.tree.leaves(distribution)
     )
 
-    assert type(round_tripped) is MadauDickinsonRedshiftDistribution
+    assert type(round_tripped) is RedshiftDistribution
+    assert (
+        round_tripped._source_frame_distribution
+        is distribution._source_frame_distribution
+    )
     np.testing.assert_array_equal(
         np.asarray(round_tripped.log_prob(SAMPLE_REDSHIFTS)),
         np.asarray(distribution.log_prob(SAMPLE_REDSHIFTS)),
@@ -396,12 +402,49 @@ def test_window_is_read_back_off_the_grid() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Abstractness under the merged metaclass
+# Callable source-frame rate law
 # --------------------------------------------------------------------------- #
-def test_redshift_distribution_cannot_be_instantiated() -> None:
-    """`ABCMeta` enforcement survived being merged with `DistributionMeta`."""
-    with pytest.raises(TypeError, match="abstract"):
+def _doubled_madau_dickinson_rate(
+    redshift: ArrayLike, params: Mapping[str, ArrayLike]
+) -> jax.Array:
+    return 2.0 * madau_dickinson_rate(
+        redshift,
+        params["gamma"],
+        params["kappa"],
+        params["z_peak"],
+    )
+
+
+def test_madau_dickinson_factory_returns_redshift_distribution() -> None:
+    assert type(_distribution()) is RedshiftDistribution
+
+
+def test_source_frame_distribution_is_required() -> None:
+    with pytest.raises(TypeError, match="source_frame_distribution"):
         RedshiftDistribution(params=FIDUCIALS)
+
+
+def test_redshift_distribution_uses_supplied_source_frame_callable() -> None:
+    distribution = RedshiftDistribution(
+        params=FIDUCIALS,
+        source_frame_distribution=_doubled_madau_dickinson_rate,
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_GRID,
+    )
+
+    np.testing.assert_array_equal(
+        np.asarray(distribution.source_frame_distribution(SAMPLE_REDSHIFTS, FIDUCIALS)),
+        np.asarray(
+            2.0
+            * madau_dickinson_rate(
+                SAMPLE_REDSHIFTS,
+                FIDUCIALS["gamma"],
+                FIDUCIALS["kappa"],
+                FIDUCIALS["z_peak"],
+            )
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -426,10 +469,9 @@ def test_normalized_density_is_independent_of_the_hubble_constant() -> None:
 
 def test_total_merger_rate_scales_as_the_inverse_cube_of_the_hubble_constant() -> None:
     """Pins `merger_rate_H0_fn = H0**-3` against the class itself."""
-    local_merger_rate = FIDUCIALS["local_merger_rate"]
 
     def rate_at(h0: float) -> jax.Array:
-        return _distribution(H0=h0).total_merger_rate(local_merger_rate)
+        return _distribution(H0=h0).total_merger_rate()
 
     h0 = FIDUCIALS["H0"]
     np.testing.assert_allclose(

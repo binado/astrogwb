@@ -1,4 +1,4 @@
-r"""Dimensionless merger-rate shapes :math:`\psi(z)`.
+r"""Madau-Dickinson source-frame merger-rate densities.
 
 The canonical home for the rate shapes the distribution classes in
 :mod:`astrogwb.distributions` build on. NumPyro-free by design: it must stay
@@ -20,12 +20,17 @@ def madau_dickinson_rate(
     gamma: ArrayLike,
     kappa: ArrayLike,
     z_peak: ArrayLike,
+    local_merger_rate: ArrayLike = 1.0,
 ) -> jax.Array:
-    r"""Dimensionless Madau-like rate shape :math:`\psi(z)` with :math:`\psi(0) = 1`.
+    r"""Madau-like source-frame rate density in ``Gpc^-3 yr^-1``.
+
+    The ``local_merger_rate`` argument sets the value at zero redshift. With
+    the default ``local_merger_rate=1.0``, this returns the dimensionless shape
+    :math:`\psi(z)` with :math:`\psi(0) = 1`.
 
     .. math::
 
-        \psi(z) = \mathcal{C}\,
+        \psi(z) = \mathcal{R}_0 \mathcal{C}\,
             \frac{(1+z)^{\gamma}}{1 + \left(\frac{1+z}{1+z_p}\right)^{\gamma+\kappa}},
         \qquad
         \mathcal{C} = 1 + (1+z_p)^{-(\gamma+\kappa)}.
@@ -40,7 +45,7 @@ def madau_dickinson_rate(
     # has no `__neg__`, so the unary minus below is not well typed otherwise.
     exponent = jnp.asarray(gamma) + jnp.asarray(kappa)
     normalization = 1.0 + (1.0 + z_peak) ** (-exponent)
-    return (
+    return jnp.asarray(local_merger_rate) * (
         normalization
         * one_plus_z**gamma
         / (1.0 + (one_plus_z / (1.0 + z_peak)) ** exponent)

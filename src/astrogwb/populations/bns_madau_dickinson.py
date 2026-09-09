@@ -44,6 +44,7 @@ import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
 from astrogwb.cosmology import log_gw_em_ratio
+from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
 )
@@ -136,7 +137,7 @@ def _declare_bns_madau_dickinson(
     n_grid: int,
     luminosity_distance: jax.Array,
     redshift: jax.Array,
-    redshift_distribution: MadauDickinsonRedshiftDistribution,
+    redshift_distribution: RedshiftDistribution,
 ) -> None:
     """Declare every site the two propagation variants share."""
     del z_min, z_max, n_grid
@@ -173,13 +174,13 @@ def _declare_bns_madau_dickinson(
     if "local_merger_rate" in params:
         numpyro.deterministic(
             "total_merger_rate",
-            redshift_distribution.total_merger_rate(params["local_merger_rate"]),
+            redshift_distribution.total_merger_rate(),
         )
 
 
 def _redshift(
     params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
-) -> tuple[jax.Array, MadauDickinsonRedshiftDistribution]:
+) -> tuple[jax.Array, RedshiftDistribution]:
     """Draw (or accept) the redshift and return it with its distribution."""
     redshift_distribution = MadauDickinsonRedshiftDistribution(
         params=params,
