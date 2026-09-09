@@ -6,7 +6,7 @@ observation_time = 1.0
 
 [analysis]
 f_min = 2.0
-f_max = 4096.0
+f_max = 2048.0
 
 [cosmology]
 minimum_redshift = 0.3

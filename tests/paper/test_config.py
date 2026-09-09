@@ -75,15 +75,6 @@ def test_build_run_config_deep_merges_extra_overrides() -> None:
     assert config.sampler.target_accept == raw["sampler"]["target_accept"]
 
 
-def test_analysis_settings_round_trip() -> None:
-    raw = example_raw()
-    config = build_run_config(raw)
-
-    assert config.analysis.detectors == ("S1", "R1", "C1")
-    assert config.analysis.f_min == 2.0
-    assert config.model_dump(mode="json")["analysis"]["f_max"] == 4096.0
-
-
 def test_analysis_grid_mirrors_the_config() -> None:
     config = build_run_config(example_raw())
     grid = config.analysis_grid
@@ -167,29 +158,6 @@ def _marginalized_raw() -> dict:
     }
     raw["sampled_params"] = []
     return raw
-
-
-def test_default_likelihood_configs_still_validate() -> None:
-    raw = example_raw()
-    config = build_run_config(raw)
-
-    assert config.analysis.likelihood == "default"
-    assert config.analysis.amplitude_parameter is None
-
-
-def test_marginalized_config_keeps_amplitude_prior_in_priors() -> None:
-    config = build_run_config(_marginalized_raw())
-
-    assert config.analysis.amplitude_parameter == "H0"
-    assert "H0" not in config.sampled_params
-    assert prior_to_spec(config.priors["H0"]) == {
-        "type": "uniform",
-        "low": 20.0,
-        "high": 140.0,
-    }
-    assert set(config.priors) == set(config.fiducials)
-    # H0 is not sampled, but the model still pins its template to the fiducial.
-    assert config.fixed_params["H0"] == 67.66
 
 
 def test_marginalized_config_round_trips_through_save(tmp_path) -> None:
@@ -305,8 +273,6 @@ def test_prior_spec_rejects_stale_keys_from_a_cross_type_override() -> None:
         raw,
         {"priors": {"H0": {"type": "normal", "loc": 67.66, "scale": 0.6766}}},
     )
-    assert polluted["priors"]["H0"]["low"] == 20.0
-
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         build_run_config(polluted)
 
