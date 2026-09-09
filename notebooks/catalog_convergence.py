@@ -203,6 +203,8 @@ OMEGA_CATALOG_PATH = NOTEBOOK_DIR / (
 FIDUCIALS: dict[str, float] = {
     "H0": 67.66,
     "Omega_m": 0.3096,
+    "minimum_mass": 1.0,
+    "mass_width": 1.5,
     "xi_0": 1.0,
     "xi_n": 1.91,
     "gamma": 1.42,
