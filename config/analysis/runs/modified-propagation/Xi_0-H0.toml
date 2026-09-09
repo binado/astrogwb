@@ -9,6 +9,10 @@ likelihood = "amplitude_marginalized"
 amplitude_parameter = "H0"
 amplitude_num_nodes = 1024
 
+[sampler]
+num_warmup = 500
+dense_mass = false
+
 [priors.H0]
 type = "normal"
 loc = 67.66
