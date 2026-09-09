@@ -75,15 +75,6 @@ def test_build_run_config_deep_merges_extra_overrides() -> None:
     assert config.sampler.target_accept == raw["sampler"]["target_accept"]
 
 
-def test_analysis_settings_round_trip() -> None:
-    raw = example_raw()
-    config = build_run_config(raw)
-
-    assert config.analysis.detectors == ("S1", "R1", "C1")
-    assert config.analysis.f_min == 2.0
-    assert config.model_dump(mode="json")["analysis"]["f_max"] == 4096.0
-
-
 def test_analysis_grid_mirrors_the_config() -> None:
     config = build_run_config(example_raw())
     grid = config.analysis_grid

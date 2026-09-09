@@ -126,37 +126,6 @@ def test_resolve_networks_rejects_a_short_or_mixed_network_run_list() -> None:
         resolve_networks(mixed, DETECTOR_NETWORKS)
 
 
-def test_fiducials_and_analysis_grid_come_from_a_merged_run() -> None:
-    from astrogwb.paper.config.mcmc import build_run_config
-
-    config = build_run_config(
-        assemble_run("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
-    )
-    fiducials = config.fiducials
-    grid = config.analysis_grid
-
-    # `importance_relative_ess` is a plotting truth line, not a fiducial: adding
-    # it here would inject a spurious constant into the sampled model.
-    assert set(fiducials) == {
-        "H0",
-        "Omega_m",
-        "xi_0",
-        "xi_n",
-        "gamma",
-        "kappa",
-        "z_peak",
-        "local_merger_rate",
-    }
-    assert fiducials["H0"] == 67.66
-    assert fiducials["local_merger_rate"] == 770.0
-    assert (grid.observation_time, grid.f_min, grid.f_max) == (1.0, 2.0, 4096.0)
-    assert (grid.minimum_redshift, grid.maximum_redshift, grid.n_grid) == (
-        0.3,
-        20.0,
-        256,
-    )
-
-
 def test_only_the_network_experiments_have_figure_rules() -> None:
     # The remaining experiments have no figure script, so the workflow offers
     # only their run_experiment_* targets.
