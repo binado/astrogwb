@@ -208,6 +208,29 @@ def test_preparation_needs_no_merger_rate_for_the_proposal() -> None:
     assert float(jnp.asarray(extras["total_merger_rate"])) > 0.0
 
 
+def test_empty_density_factors_broadcast_to_source_count() -> None:
+    catalog = _catalog()
+    catalog = Catalog(
+        source_parameters=catalog.source_parameters,
+        polarization_power=catalog.polarization_power,
+        waveform_metadata=catalog.waveform_metadata,
+        _model_name=catalog.population_model_name,
+        _model_kwargs=catalog.population_model_kwargs,
+        _fiducials=catalog.fiducials,
+        _density_sites=(),
+        seed=MOCK_POPULATION_SEED,
+    )
+    target = replace(mock_target_model(), density_sites=())
+    estimator = SpectralDensityImportanceEstimator.from_catalog(
+        catalog, model=target, average_mode="catalog_inclination"
+    )
+    assert estimator.proposal_log_prob.shape == (4,)
+    np.testing.assert_array_equal(estimator.proposal_log_prob, jnp.zeros(4))
+    spectrum, extras = estimator(FIDUCIALS)
+    assert spectrum.shape == (3,)
+    assert jnp.asarray(extras["importance_relative_ess"]).shape == ()
+
+
 def test_mismatched_density_factors_are_rejected() -> None:
     target = replace(mock_target_model(), density_sites=("redshift", "spin_1z"))
     with pytest.raises(ValueError, match="same source density factors"):

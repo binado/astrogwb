@@ -158,11 +158,13 @@ class SpectralDensityImportanceEstimator:
                 f"polarization_power has {power.shape[1]} samples but the catalog "
                 f"holds {num_samples} sources"
             )
-        if proposal_log_prob.shape != (num_samples,):
+        try:
+            proposal_log_prob = jnp.broadcast_to(proposal_log_prob, (num_samples,))
+        except ValueError as err:
             raise ValueError(
                 "proposal source density must have one entry per source, got shape "
                 f"{proposal_log_prob.shape} for {num_samples} sources"
-            )
+            ) from err
 
         return cls(
             source_parameters=source_parameters,

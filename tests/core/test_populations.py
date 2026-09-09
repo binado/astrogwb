@@ -288,6 +288,14 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
     )
 
 
+def test_empty_density_selection_returns_scalar_zero() -> None:
+    values = sample_values()
+    empty = replace(mock_population_model(), density_sites=())
+    log_prob, _ = empty.evaluate(POPULATION_PARAMS, values)
+    assert log_prob.shape == ()
+    assert float(log_prob) == 0.0
+
+
 # --------------------------------------------------------------------------- #
 # Isolation from an outer inference model
 # --------------------------------------------------------------------------- #

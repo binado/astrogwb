@@ -6,7 +6,6 @@ import operator
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
-from functools import reduce
 from typing import Any, ClassVar
 
 import jax
@@ -106,11 +105,5 @@ class Population(ABC):
             log_probs, trace = compute_log_probs(
                 filtered, (params,), {}, {}, sum_log_prob=False
             )
-        # Preserve the source axis even for an empty selection of factors.
-        num_sources = jnp.shape(next(iter(sources.values())))[0]
-        log_prob = reduce(
-            operator.add,
-            (log_probs[name] for name in self.density_sites),
-            jnp.zeros(num_sources),
-        )
+        log_prob = jax.tree.reduce(operator.add, log_probs, initializer=jnp.zeros(()))
         return log_prob, trace
