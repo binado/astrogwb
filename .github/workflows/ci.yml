@@ -46,8 +46,6 @@ jobs:
         run: |
           test -f tests/core/fixtures/gwfast_orf_reference.npz
           test -f tests/core/fixtures/gwfast_orf_reference_et_triangle.npz
-          test -f tests/core/fixtures/mock_bns_population.yaml
-          test -f tests/core/fixtures/mock_bns_population.csv
       - run: just test-core
 
   test-paper:
