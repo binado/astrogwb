@@ -16,31 +16,26 @@ owns the normalization, the log density, and the inverse-transform draw.
 
 from __future__ import annotations
 
-import abc
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
-from numpyro.distributions.distribution import DistributionMeta
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import distance_and_volume_grid
 from astrogwb.distributions.interpolated import InterpolatedDistribution
 
+type SourceFrameDistribution = Callable[[ArrayLike, Mapping[str, ArrayLike]], jax.Array]
+"""Callable defining the unnormalized source-frame rate shape."""
 
-class _AbstractDistributionMeta(abc.ABCMeta, DistributionMeta):
-    """Metaclass merging ABC enforcement with NumPyro's distribution metaclass."""
 
-
-class RedshiftDistribution(
-    InterpolatedDistribution, metaclass=_AbstractDistributionMeta
-):
+class RedshiftDistribution(InterpolatedDistribution):
     r"""Redshift distribution corresponding to a merger-rate model.
 
-    Abstract in :meth:`source_frame_distribution`: subclasses supply
-    :math:`\psi(z)` and inherit the cosmology, the normalization, the log
-    density, and the sampler. The distribution is normalized over
+    The source-frame rate shape :math:`\psi(z)` is supplied as a callable, and
+    the distribution provides the cosmology, normalization, log density, and
+    sampler. The distribution is normalized over
     ``[minimum_redshift, maximum_redshift]``.
 
     Note that the default ``minimum_redshift=0.0`` puts a zero-density point
@@ -54,10 +49,13 @@ class RedshiftDistribution(
     params:
         Hyperparameters. Must include ``H0`` (in
         :math:`\mathrm{km\,s^{-1}\,Mpc^{-1}}`) and ``Omega_m``, plus whatever
-        the subclass's :meth:`source_frame_distribution` reads. The keys match
+        ``source_frame_distribution`` reads. The keys match
         :data:`~astrogwb.paper.config.catalogs.MD_FIDUCIAL_NAMES` and the
         reference callback's, so one fiducials mapping feeds both with no
         translation layer.
+    source_frame_distribution:
+        Callable returning the unnormalized source-frame merger-rate shape
+        :math:`\psi(z)`. It is retained as static pytree metadata.
     minimum_redshift, maximum_redshift, n_grid:
         The linear grid the cosmology integrals and the normalization run on.
         Read back afterwards off :attr:`redshift_grid` rather than stored.
@@ -69,13 +67,17 @@ class RedshiftDistribution(
     # `gather_pytree_data_fields` walks the MRO and unions each base's own
     # `pytree_data_fields`, so only the two new grids are named here.
     #
-    # No `pytree_aux_fields`. `minimum_redshift` / `maximum_redshift` / `n_grid`
-    # were once declared there but never assigned, so they flattened to
-    # `(None, None, None)` and `tree_unflatten` faithfully restored three
-    # `None`s. They are now properties over `self.x`, which is strictly better
-    # than assigning them: aux data is hashed into the jit cache key, and the
-    # grid endpoints are traced values under `jax.jit`, where a hashed Python
-    # float would either be wrong or force a retrace per grid.
+    # `source_frame_distribution` is Python metadata, not numerical data: JAX
+    # must restore the same callable when the distribution is flattened.
+    pytree_aux_fields = ("_source_frame_distribution",)
+
+    # `minimum_redshift` / `maximum_redshift` / `n_grid` were once declared as
+    # aux fields but never assigned, so they flattened to `(None, None, None)`
+    # and `tree_unflatten` faithfully restored three `None`s. They are now
+    # properties over `self.x`, which is strictly better than assigning them:
+    # aux data is hashed into the jit cache key, and the grid endpoints are
+    # traced values under `jax.jit`, where a hashed Python float would either be
+    # wrong or force a retrace per grid.
     pytree_data_fields = (
         "luminosity_distance_grid",
         "differential_comoving_volume_grid",
@@ -85,6 +87,7 @@ class RedshiftDistribution(
         self,
         *,
         params: Mapping[str, ArrayLike],
+        source_frame_distribution: SourceFrameDistribution,
         minimum_redshift: float = 0.0,
         maximum_redshift: float = 10.0,
         n_grid: int = 1000,
@@ -95,6 +98,7 @@ class RedshiftDistribution(
         # Binding it here as well would put the same array in the pytree twice,
         # where a `tree_unflatten` with mismatched leaves could make the two
         # copies disagree.
+        self._source_frame_distribution = source_frame_distribution
         redshift_grid = jnp.linspace(minimum_redshift, maximum_redshift, n_grid)
 
         self.luminosity_distance_grid, self.differential_comoving_volume_grid = (
@@ -105,21 +109,17 @@ class RedshiftDistribution(
             )
         )
         y = (
-            self.source_frame_distribution(redshift_grid, params)
+            self._source_frame_distribution(redshift_grid, params)
             / (1.0 + redshift_grid)
             * self.differential_comoving_volume_grid
         )
         super().__init__(redshift_grid, y, validate_args=validate_args)
 
-    @abc.abstractmethod
     def source_frame_distribution(
         self, redshift: ArrayLike, params: Mapping[str, ArrayLike]
     ) -> jax.Array:
-        r"""The comoving source-frame merger-rate shape :math:`\psi(z)`.
-
-        Called from ``__init__`` before ``super().__init__``, so it must not
-        touch any attribute the base class sets.
-        """
+        r"""Forward to the supplied source-frame merger-rate shape :math:`\psi(z)`."""
+        return self._source_frame_distribution(redshift, params)
 
     @property
     def redshift_grid(self) -> jax.Array:
