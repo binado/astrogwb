@@ -44,7 +44,7 @@ from astrogwb.paper.config.catalogs import (
     check_population_model,
     load_catalog_layers,
 )
-from astrogwb.populations import population_model
+from astrogwb.populations import build_population
 from astrogwb.waveform import RippleGenerator
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
     check_population_model(
         population.model, label=f"catalog {definition.name!r} population.model"
     )
-    model = population_model(population.model)(**population.kwargs)
+    model = build_population(population.model, settings=population.kwargs)
 
     logger.info(
         "Catalog %s: model=%s seed=%d num_samples=%d kwargs=%s",

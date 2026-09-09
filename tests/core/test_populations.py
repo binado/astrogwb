@@ -40,19 +40,24 @@ from jax.typing import ArrayLike
 from numpyro import handlers
 from reference_population import reference_merger_rate_distance_and_logprob
 
+from astrogwb.catalog.catalog import REDSHIFT_SITE
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.populations import (
-    LUMINOSITY_DISTANCE_SITE,
-    REDSHIFT_SITE,
-    TOTAL_MERGER_RATE_SITE,
-    BNSMadauDickinson,
-    BNSMadauDickinsonModifiedPropagation,
-    BNSMadauDickinsonUniformMixture,
     Population,
+    build_population,
     known_population_models,
-    population_model,
     register_population_model,
 )
+from astrogwb.populations.bns_madau_dickinson import (
+    bns_md_cosmological,
+    bns_md_modified_propagation,
+    bns_md_uniform_mixture,
+)
+
+#: Deterministic site names, used only where a raw trace (rather than the
+#: typed :class:`~astrogwb.populations.PopulationTrace`) is under test.
+LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
+TOTAL_MERGER_RATE_SITE = "total_merger_rate"
 
 #: Interior to the mock grid and not on a node.
 SAMPLE_REDSHIFTS = jnp.array([0.5, 1.234, 3.7, 12.0, 19.5])
@@ -123,21 +128,53 @@ def test_shipped_models_are_registered() -> None:
         "bns_md_modified_propagation",
         "bns_md_uniform_mixture",
     )
-    assert population_model("bns_md_cosmological") is BNSMadauDickinson
-    assert population_model("bns_md_modified_propagation") is (
-        BNSMadauDickinsonModifiedPropagation
+    assert build_population("bns_md_cosmological", settings={}).fn is (
+        bns_md_cosmological
     )
-    assert population_model("bns_md_uniform_mixture") is BNSMadauDickinsonUniformMixture
+    assert build_population("bns_md_modified_propagation", settings={}).fn is (
+        bns_md_modified_propagation
+    )
+    assert build_population("bns_md_uniform_mixture", settings={}).fn is (
+        bns_md_uniform_mixture
+    )
 
 
 def test_unknown_model_names_list_the_known_set() -> None:
     with pytest.raises(KeyError, match="bns_md_cosmological"):
-        population_model("no_such_population")
+        build_population("no_such_population", settings={})
 
 
 def test_registering_a_name_twice_is_rejected() -> None:
     with pytest.raises(ValueError, match="already registered"):
-        register_population_model("bns_md_cosmological")(BNSMadauDickinson)
+        register_population_model("bns_md_cosmological", source_sites=())(
+            bns_md_cosmological
+        )
+
+
+def test_populations_from_reordered_settings_hash_equal_and_compile_once() -> None:
+    """The regression guard for keeping ``Population`` a canonical value object.
+
+    A dict's insertion order is not part of its equality, but an unsorted
+    ``settings`` tuple would leak that order into hashing and into ``jax.jit``'s
+    cache key -- silently retracing the ``(F, N)`` contraction on every
+    construction from the same catalog. Sorting in ``__post_init__`` is what
+    keeps all three of these genuinely one value.
+    """
+    kwargs = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
+    reordered = {"n_grid": N_GRID, "z_max": Z_MAX, "z_min": Z_MIN}
+    first = build_population("bns_md_cosmological", settings=kwargs)
+    second = build_population("bns_md_cosmological", settings=kwargs)
+    third = build_population("bns_md_cosmological", settings=reordered)
+    assert first == second == third
+    assert hash(first) == hash(second) == hash(third)
+
+    compiled = jax.jit(
+        lambda model, params: model.log_prob(params, sample_values()),
+        static_argnums=0,
+    )
+    for model in (first, second, third):
+        compiled(model, POPULATION_PARAMS)
+    assert compiled._cache_size() == 1  # ty: ignore[unresolved-attribute]
 
 
 # --------------------------------------------------------------------------- #
@@ -161,9 +198,9 @@ def test_total_merger_rate_is_declared_only_with_a_physical_rate() -> None:
         for name, value in POPULATION_PARAMS.items()
         if name != "local_merger_rate"
     }
-    _, trace = mock_population_model().evaluate(without_rate, sample_values())
-    assert TOTAL_MERGER_RATE_SITE not in trace
-    assert LUMINOSITY_DISTANCE_SITE in trace
+    trace = mock_population_model().evaluate(without_rate, sample_values())
+    assert trace.total_merger_rate is None
+    assert trace.luminosity_distance.shape == SAMPLE_REDSHIFTS.shape
 
 
 def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
@@ -173,9 +210,9 @@ def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
         LUMINOSITY_DISTANCE_SITE: jnp.ones_like(SAMPLE_REDSHIFTS),
         "detector_frame_mass_1": jnp.zeros_like(SAMPLE_REDSHIFTS),
     }
-    _, clean = model.evaluate(POPULATION_PARAMS, sample_values())
+    clean = model.trace(POPULATION_PARAMS, sample_values())
     actual = derived_columns(model, POPULATION_PARAMS, stored)
-    _, tampered = model.evaluate(POPULATION_PARAMS, stored)
+    tampered = model.trace(POPULATION_PARAMS, stored)
     for name in (LUMINOSITY_DISTANCE_SITE, "detector_frame_mass_1"):
         np.testing.assert_array_equal(actual[name], clean[name]["value"])
         np.testing.assert_array_equal(tampered[name]["value"], clean[name]["value"])
@@ -185,34 +222,37 @@ def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
 # One execution supplies density, distance, and rate
 # --------------------------------------------------------------------------- #
 def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() -> None:
-    log_prob, trace = mock_population_model().evaluate(
-        POPULATION_PARAMS, sample_values()
-    )
-    assert log_prob.shape == SAMPLE_REDSHIFTS.shape
+    trace = mock_population_model().evaluate(POPULATION_PARAMS, sample_values())
+    assert trace.log_prob.shape == SAMPLE_REDSHIFTS.shape
 
-    distance = trace[LUMINOSITY_DISTANCE_SITE]["value"]
-    rate = trace[TOTAL_MERGER_RATE_SITE]["value"]
+    distance = trace.luminosity_distance
+    rate = trace.total_merger_rate
     assert distance.shape == SAMPLE_REDSHIFTS.shape
+    assert rate is not None
     assert rate.shape == ()
 
     expected_rate, expected_distance, expected_logpdf = reference(FIDUCIALS)
     # Bit-exact: the distribution shares the reference's operation order, which
     # is what keeps a catalog that is its own proposal at exactly zero weight.
-    np.testing.assert_array_equal(np.asarray(log_prob), np.asarray(expected_logpdf))
+    np.testing.assert_array_equal(
+        np.asarray(trace.log_prob), np.asarray(expected_logpdf)
+    )
     np.testing.assert_allclose(distance, expected_distance, rtol=1e-14)
     np.testing.assert_allclose(float(rate), float(expected_rate), rtol=1e-15)
 
 
 def test_rate_and_distance_deterministics_add_no_density_factors() -> None:
     """Deterministic sites carry no log density, so they cannot bias a ratio."""
-    with_rate, _ = mock_population_model().evaluate(POPULATION_PARAMS, sample_values())
+    with_rate = (
+        mock_population_model().evaluate(POPULATION_PARAMS, sample_values()).log_prob
+    )
     without_rate_params = {
         name: value
         for name, value in POPULATION_PARAMS.items()
         if name != "local_merger_rate"
     }
-    without_rate, _ = mock_population_model().evaluate(
-        without_rate_params, sample_values()
+    without_rate = (
+        mock_population_model().evaluate(without_rate_params, sample_values()).log_prob
     )
     np.testing.assert_array_equal(with_rate, without_rate)
 
@@ -238,8 +278,8 @@ def test_derived_columns_match_the_declared_transforms() -> None:
 # Modified propagation
 # --------------------------------------------------------------------------- #
 def test_modified_propagation_scales_the_distance_by_the_gw_em_ratio() -> None:
-    _, trace = mock_target_model().evaluate(OFF_FIDUCIALS, sample_values())
-    distance = trace[LUMINOSITY_DISTANCE_SITE]["value"]
+    trace = mock_target_model().evaluate(OFF_FIDUCIALS, sample_values())
+    distance = trace.luminosity_distance
     _, cosmological_distance, _ = reference(OFF_FIDUCIALS)
     expected = cosmological_distance * jnp.exp(
         log_gw_em_ratio(SAMPLE_REDSHIFTS, OFF_FIDUCIALS["xi_0"], OFF_FIDUCIALS["xi_n"])
@@ -256,15 +296,13 @@ def test_modified_propagation_reduces_exactly_to_the_cosmological_model() -> Non
     a floor under the self-proposal log weights.
     """
     values = sample_values()
-    cosmological, cosmological_trace = mock_population_model().evaluate(
-        POPULATION_PARAMS, values
-    )
-    modified, modified_trace = mock_target_model().evaluate(FIDUCIALS, values)
+    cosmological_trace = mock_population_model().evaluate(POPULATION_PARAMS, values)
+    modified_trace = mock_target_model().evaluate(FIDUCIALS, values)
     assert FIDUCIALS["xi_0"] == 1.0
-    np.testing.assert_array_equal(cosmological, modified)
+    np.testing.assert_array_equal(cosmological_trace.log_prob, modified_trace.log_prob)
     np.testing.assert_array_equal(
-        cosmological_trace[LUMINOSITY_DISTANCE_SITE]["value"],
-        modified_trace[LUMINOSITY_DISTANCE_SITE]["value"],
+        cosmological_trace.luminosity_distance,
+        modified_trace.luminosity_distance,
     )
 
 
@@ -275,17 +313,21 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
     values = sample_values()
     model = mock_population_model()
     selected = replace(model, density_sites=("redshift", "spin_1z"))
-    redshift_prob, trace = model.evaluate(POPULATION_PARAMS, values)
-    selected_prob, selected_trace = selected.evaluate(POPULATION_PARAMS, values)
+    trace = model.evaluate(POPULATION_PARAMS, values)
+    selected_trace = selected.evaluate(POPULATION_PARAMS, values)
     expected_spin = dist.Uniform(-0.05, 0.05).log_prob(values["spin_1z"])
-    np.testing.assert_allclose(selected_prob, redshift_prob + expected_spin)
-    assert set(selected_trace) == set(trace) | {"spin_1z"}
-    for name in DETERMINISTIC_SITES:
-        np.testing.assert_array_equal(
-            trace[name]["value"], selected_trace[name]["value"]
-        )
+    np.testing.assert_allclose(selected_trace.log_prob, trace.log_prob + expected_spin)
     np.testing.assert_array_equal(
-        trace["detector_frame_mass_1"]["value"],
+        trace.luminosity_distance, selected_trace.luminosity_distance
+    )
+    assert trace.total_merger_rate is not None
+    assert selected_trace.total_merger_rate is not None
+    np.testing.assert_array_equal(
+        trace.total_merger_rate, selected_trace.total_merger_rate
+    )
+    raw = selected.trace(POPULATION_PARAMS, values)
+    np.testing.assert_array_equal(
+        raw["detector_frame_mass_1"]["value"],
         values["source_frame_mass_1"] * (1 + values["redshift"]),
     )
 
@@ -293,9 +335,9 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
 def test_empty_density_selection_returns_scalar_zero() -> None:
     values = sample_values()
     empty = replace(mock_population_model(), density_sites=())
-    log_prob, _ = empty.evaluate(POPULATION_PARAMS, values)
-    assert log_prob.shape == ()
-    assert float(log_prob) == 0.0
+    trace = empty.evaluate(POPULATION_PARAMS, values)
+    assert trace.log_prob.shape == ()
+    assert float(trace.log_prob) == 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -307,9 +349,9 @@ def _outer_model(observed: jax.Array) -> None:
     params = {**FIDUCIALS, "H0": hubble_constant}
     total = jnp.zeros(())
     for _ in range(2):
-        log_prob, trace = mock_target_model().evaluate(params, sample_values())
-        total = total + jnp.sum(log_prob)
-        total = total + jnp.sum(trace[LUMINOSITY_DISTANCE_SITE]["value"])
+        trace = mock_target_model().evaluate(params, sample_values())
+        total = total + jnp.sum(trace.log_prob)
+        total = total + jnp.sum(trace.luminosity_distance)
     numpyro.sample("obs", dist.Normal(total * 1e-6, 1.0), obs=observed)
 
 
@@ -332,9 +374,9 @@ def test_outer_density_and_gradient_match_a_direct_calculation() -> None:
         params = {**FIDUCIALS, "H0": hubble_constant}
         total = jnp.zeros(())
         for _ in range(2):
-            log_prob, trace = mock_target_model().evaluate(params, sample_values())
-            total = total + jnp.sum(log_prob)
-            total = total + jnp.sum(trace[LUMINOSITY_DISTANCE_SITE]["value"])
+            trace = mock_target_model().evaluate(params, sample_values())
+            total = total + jnp.sum(trace.log_prob)
+            total = total + jnp.sum(trace.luminosity_distance)
         prior = dist.Uniform(20.0, 140.0).log_prob(hubble_constant)
         likelihood = dist.Normal(total * 1e-6, 1.0).log_prob(jnp.asarray(0.0))
         return prior + likelihood
@@ -384,11 +426,21 @@ def _redshift_log_density(
     return jnp.asarray(site["fn"].log_prob(jnp.asarray(redshift)))
 
 
+def _uniform_mixture_model(uniform_mixing_fraction: float) -> Population:
+    return build_population(
+        "bns_md_uniform_mixture",
+        settings={
+            "z_min": Z_MIN,
+            "z_max": Z_MAX,
+            "n_grid": N_GRID,
+            "uniform_mixing_fraction": uniform_mixing_fraction,
+        },
+    )
+
+
 def test_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:
     epsilon = 0.1
-    model = BNSMadauDickinsonUniformMixture(
-        z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID, uniform_mixing_fraction=epsilon
-    )
+    model = _uniform_mixture_model(epsilon)
     actual = _redshift_log_density(model, POPULATION_PARAMS, SAMPLE_REDSHIFTS)
 
     _, _, md_logprob = reference(FIDUCIALS)
@@ -408,24 +460,22 @@ def test_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:
 
 def test_uniform_mixture_keeps_the_cosmological_distance_and_rate() -> None:
     """The guard changes which redshifts are drawn, not the physics at one."""
-    model = BNSMadauDickinsonUniformMixture(
-        z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID, uniform_mixing_fraction=0.1
+    model = _uniform_mixture_model(0.1)
+    mixture_trace = model.evaluate(POPULATION_PARAMS, sample_values())
+    plain_trace = mock_population_model().evaluate(POPULATION_PARAMS, sample_values())
+    np.testing.assert_array_equal(
+        mixture_trace.luminosity_distance, plain_trace.luminosity_distance
     )
-    _, mixture_trace = model.evaluate(POPULATION_PARAMS, sample_values())
-    _, plain_trace = mock_population_model().evaluate(
-        POPULATION_PARAMS, sample_values()
+    assert mixture_trace.total_merger_rate is not None
+    assert plain_trace.total_merger_rate is not None
+    np.testing.assert_array_equal(
+        mixture_trace.total_merger_rate, plain_trace.total_merger_rate
     )
-    for name in (LUMINOSITY_DISTANCE_SITE, TOTAL_MERGER_RATE_SITE):
-        np.testing.assert_array_equal(
-            mixture_trace[name]["value"], plain_trace[name]["value"]
-        )
 
 
 @pytest.mark.parametrize("fraction", [-0.1, 1.5])
 def test_uniform_mixture_rejects_an_out_of_range_fraction(fraction: float) -> None:
-    model = BNSMadauDickinsonUniformMixture(
-        z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID, uniform_mixing_fraction=fraction
-    )
+    model = _uniform_mixture_model(fraction)
     with pytest.raises(ValueError, match="uniform_mixing_fraction"):
         model.evaluate(POPULATION_PARAMS, sample_values())
 
@@ -476,7 +526,7 @@ def test_stored_columns_are_bit_identical_to_a_later_recomputation() -> None:
         jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=32
     )
     stochastic = {name: samples[name] for name in STOCHASTIC_SITES}
-    _, trace = mock_population_model().evaluate(POPULATION_PARAMS, stochastic)
+    trace = mock_population_model().trace(POPULATION_PARAMS, stochastic)
     for name in DETERMINISTIC_SITES - {TOTAL_MERGER_RATE_SITE}:
         np.testing.assert_array_equal(samples[name], trace[name]["value"])
 
@@ -496,8 +546,7 @@ def test_evaluation_traces_under_jit_and_vmaps_over_hyperparameters() -> None:
 
     def redshift_density(hubble_constant: jax.Array) -> jax.Array:
         params = {**OFF_FIDUCIALS, "H0": hubble_constant}
-        log_prob, _ = mock_target_model().evaluate(params, values)
-        return log_prob
+        return mock_target_model().evaluate(params, values).log_prob
 
     hubble_constants = jnp.array([60.0, 67.66, 75.0])
     batched = jax.jit(jax.vmap(redshift_density))(hubble_constants)

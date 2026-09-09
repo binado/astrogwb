@@ -78,11 +78,7 @@ from astrogwb.gwb import (
     uniform_prior_mass_moments,
 )
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.populations import (
-    TOTAL_MERGER_RATE_SITE,
-    BNSMadauDickinson,
-    BNSMadauDickinsonModifiedPropagation,
-)
+from astrogwb.populations import build_population
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces
@@ -240,12 +236,15 @@ POPULATION_MODEL_KWARGS: dict[str, float | int] = {
 
 def population_model_fn():
     """The generating population, with its construction settings bound."""
-    return BNSMadauDickinson(**POPULATION_MODEL_KWARGS)
+    return build_population(POPULATION_MODEL, settings=POPULATION_MODEL_KWARGS)
 
 
 def target_model_fn():
     """The target population: the same sources under modified propagation."""
-    return BNSMadauDickinsonModifiedPropagation(z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID)
+    return build_population(
+        "bns_md_modified_propagation",
+        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
+    )
 
 
 def make_redshift_grid() -> jax.Array:
@@ -394,8 +393,9 @@ def catalog_merger_rate(catalog: Catalog) -> jax.Array:
     model = catalog.get_population_model()
     params = catalog.fiducials
     values = catalog.source_parameters
-    _, trace = model.evaluate(params, values)
-    return trace[TOTAL_MERGER_RATE_SITE]["value"]
+    trace = model.evaluate(params, values)
+    assert trace.total_merger_rate is not None
+    return trace.total_merger_rate
 
 
 def unpack(

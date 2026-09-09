@@ -15,12 +15,9 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
-from numpyro import handlers
 
 from astrogwb.catalog import Catalog
-from astrogwb.populations import (
-    population_model,
-)
+from astrogwb.populations import build_population
 from astrogwb.waveform import PolarizationPowerGenerator
 
 #: The population every fixture catalog is drawn from, matching what
@@ -43,11 +40,7 @@ PAPER_POPULATION_PARAMS: dict[str, float] = {
 
 def _derived_columns(model, params, sources):
     """Replay a population at fixed source values, returning declared outputs."""
-    with handlers.block():
-        bound = handlers.condition(
-            model, data={name: jnp.asarray(value) for name, value in sources.items()}
-        )
-        trace = handlers.trace(bound).get_trace(params)
+    trace = model.trace(params, sources)
     return {name: jnp.asarray(trace[name]["value"]) for name in model.source_sites}
 
 
@@ -62,7 +55,7 @@ def source_parameters(
     """Complete a redshift ladder into every column the population declares."""
     if fiducials is None:
         fiducials = population_params
-    model = population_model(model_name)(**model_kwargs or PAPER_MODEL_KWARGS)
+    model = build_population(model_name, settings=model_kwargs or PAPER_MODEL_KWARGS)
     ones = np.ones_like(redshift)
     columns = _derived_columns(
         model,

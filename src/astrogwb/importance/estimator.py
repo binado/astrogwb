@@ -43,15 +43,15 @@ from jax.typing import ArrayLike
 from astrogwb.gwb.spectral import AverageMode, spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.weights import importance_log_weights
-from astrogwb.populations import (
-    LUMINOSITY_DISTANCE_SITE,
-    TOTAL_MERGER_RATE_SITE,
-    Population,
-    PopulationTrace,
-)
+from astrogwb.populations import Population, PopulationTrace
 
 if TYPE_CHECKING:
     from astrogwb.catalog import Catalog
+
+#: The catalog column naming the effective distance the stored polarization
+#: power was generated at -- the same name the population declares as a
+#: deterministic site.
+_LUMINOSITY_DISTANCE_COLUMN = "luminosity_distance"
 
 __all__ = ["SpectralDensityImportanceEstimator"]
 
@@ -137,14 +137,14 @@ class SpectralDensityImportanceEstimator:
             )
 
         reference_distance = jnp.asarray(
-            catalog.source_parameters[LUMINOSITY_DISTANCE_SITE]
+            catalog.source_parameters[_LUMINOSITY_DISTANCE_COLUMN]
         )
         finite_and_positive = jnp.isfinite(reference_distance) & (
             reference_distance > 0.0
         )
         if not bool(jnp.all(finite_and_positive)):
             raise ValueError(
-                f"catalog {LUMINOSITY_DISTANCE_SITE!r} column must be positive and "
+                f"catalog {_LUMINOSITY_DISTANCE_COLUMN!r} column must be positive and "
                 "finite: it is the effective distance the stored polarization "
                 "power was generated at"
             )
@@ -189,10 +189,10 @@ class SpectralDensityImportanceEstimator:
         self, params: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, PopulationTrace]:
         """One model execution: the weights, and the trace holding its rate."""
-        target_log_prob, trace = self.model.evaluate(params, self.source_parameters)
-        log_distance = jnp.log(trace[LUMINOSITY_DISTANCE_SITE]["value"])
+        trace = self.model.evaluate(params, self.source_parameters)
+        log_distance = jnp.log(trace.luminosity_distance)
         log_weights = importance_log_weights(
-            target_log_prob=target_log_prob,
+            target_log_prob=trace.log_prob,
             proposal_log_prob=self.proposal_log_prob,
             log_luminosity_distance=log_distance,
             log_reference_distance=self.log_reference_distance,
@@ -204,7 +204,13 @@ class SpectralDensityImportanceEstimator:
     ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
         """Return the spectrum, total merger rate, and relative importance ESS."""
         log_weights, trace = self._log_weights_and_trace(params)
-        total_merger_rate = trace[TOTAL_MERGER_RATE_SITE]["value"]
+        if trace.total_merger_rate is None:
+            raise ValueError(
+                "target population declares no total_merger_rate site: params "
+                "must carry the physical rate parameter for a spectrum, unlike "
+                "for a bare proposal density"
+            )
+        total_merger_rate = trace.total_merger_rate
         prediction = spectral_density(
             self.polarization_power,
             jnp.exp(log_weights),

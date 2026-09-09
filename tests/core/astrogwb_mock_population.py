@@ -24,16 +24,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
-from numpyro import handlers
 
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.populations import (
-    BNSMadauDickinson,
-    BNSMadauDickinsonModifiedPropagation,
-    Population,
-)
+from astrogwb.populations import Population, build_population
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 
@@ -48,11 +43,7 @@ def derived_columns(
     :meth:`astrogwb.populations.Population.sample`: sample sites take the
     supplied values, deterministic outputs are the model's recomputation.
     """
-    with handlers.block():
-        bound = handlers.condition(
-            model, data={name: jnp.asarray(value) for name, value in sources.items()}
-        )
-        trace = handlers.trace(bound).get_trace(params)
+    trace = model.trace(params, sources)
     return {name: jnp.asarray(trace[name]["value"]) for name in model.source_sites}
 
 
@@ -107,12 +98,18 @@ def make_redshift_grid(n_grid: int = N_GRID) -> jax.Array:
 
 def mock_population_model(n_grid: int = N_GRID) -> Population:
     """The generating population: Madau-Dickinson, standard propagation."""
-    return BNSMadauDickinson(z_min=Z_MIN, z_max=Z_MAX, n_grid=n_grid)
+    return build_population(
+        "bns_md_cosmological",
+        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": n_grid},
+    )
 
 
 def mock_target_model(n_grid: int = N_GRID) -> Population:
     """The target population the mock catalog is reweighted to."""
-    return BNSMadauDickinsonModifiedPropagation(z_min=Z_MIN, z_max=Z_MAX, n_grid=n_grid)
+    return build_population(
+        "bns_md_modified_propagation",
+        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": n_grid},
+    )
 
 
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:

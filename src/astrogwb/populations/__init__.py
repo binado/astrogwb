@@ -14,45 +14,36 @@ before the XLA backend is initialized, but importing a model does not
 initialize it.
 """
 
-from astrogwb.populations.base import Population, PopulationTrace
+from astrogwb.populations.base import Population, PopulationFn, PopulationTrace
 from astrogwb.populations.bns_madau_dickinson import (
     AMPLITUDE_PARAMETERS,
-    BNSMadauDickinson,
-    BNSMadauDickinsonModifiedPropagation,
-    BNSMadauDickinsonUniformMixture,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
+    bns_md_cosmological,
+    bns_md_modified_propagation,
+    bns_md_uniform_mixture,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
-from astrogwb.populations.evaluation import (
-    LUMINOSITY_DISTANCE_SITE,
-    REDSHIFT_SITE,
-    TOTAL_MERGER_RATE_SITE,
-)
 from astrogwb.populations.registry import (
-    PopulationFactory,
+    build_population,
     known_population_models,
-    population_model,
     register_population_model,
 )
 
 __all__ = [
     "AMPLITUDE_PARAMETERS",
-    "LUMINOSITY_DISTANCE_SITE",
-    "REDSHIFT_SITE",
-    "TOTAL_MERGER_RATE_SITE",
-    "BNSMadauDickinson",
-    "BNSMadauDickinsonModifiedPropagation",
-    "BNSMadauDickinsonUniformMixture",
     "Population",
-    "PopulationFactory",
+    "PopulationFn",
     "PopulationTrace",
     "amplitude_H0_fn",
     "amplitude_local_merger_rate_fn",
+    "bns_md_cosmological",
+    "bns_md_modified_propagation",
+    "bns_md_uniform_mixture",
+    "build_population",
     "known_population_models",
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
-    "population_model",
     "register_population_model",
 ]

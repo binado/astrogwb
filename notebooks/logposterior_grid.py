@@ -60,7 +60,7 @@ from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import AnalysisGrid, build_run_config
 from astrogwb.paper.config.runs import assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
-from astrogwb.populations import BNSMadauDickinsonModifiedPropagation
+from astrogwb.populations import build_population
 from astrogwb.sampling import gwb_spectral_density_model
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
@@ -170,8 +170,13 @@ analysis_grid = AnalysisGrid(
     maximum_redshift=maximum_redshift,
     n_grid=n_grid,
 )
-target_model = BNSMadauDickinsonModifiedPropagation(
-    z_min=minimum_redshift, z_max=maximum_redshift, n_grid=n_grid
+target_model = build_population(
+    "bns_md_modified_propagation",
+    settings={
+        "z_min": minimum_redshift,
+        "z_max": maximum_redshift,
+        "n_grid": n_grid,
+    },
 )
 
 # One call restricts both catalogs to the analysis window, builds the fiducial

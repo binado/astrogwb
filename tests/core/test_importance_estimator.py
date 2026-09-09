@@ -25,17 +25,18 @@ from numpyro.distributions import constraints
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.catalog import Catalog
+from astrogwb.catalog.catalog import REDSHIFT_SITE
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.gwb.spectral import AverageMode, spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.populations import (
-    LUMINOSITY_DISTANCE_SITE,
-    REDSHIFT_SITE,
-    BNSMadauDickinson,
-    Population,
-)
+from astrogwb.populations import Population, build_population
+from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
 from astrogwb.waveform import PolarizationPowerGenerator
+
+#: The catalog column naming the effective distance the stored polarization
+#: power was generated at.
+LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
 
 REDSHIFTS = jnp.array([0.41, 1.23, 3.77, 7.1])
 POWER = jnp.arange(1.0, 13.0).reshape(3, 4)
@@ -61,7 +62,7 @@ MODEL_KWARGS = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
 
 
 def _generating_model() -> Population:
-    return BNSMadauDickinson(z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID)
+    return build_population("bns_md_cosmological", settings=MODEL_KWARGS)
 
 
 def _source_parameters(
@@ -323,7 +324,7 @@ def test_proposal_density_is_evaluated_only_during_preparation(
         catalog, model=target, average_mode="catalog_inclination"
     )
     assert len(calls) == 1
-    assert type(calls[0]) is BNSMadauDickinson
+    assert calls[0].fn is bns_md_cosmological
     estimator(FIDUCIALS)
     estimator(OFF_FIDUCIALS)
     jax.jit(lambda value, params: value(params))(estimator, FIDUCIALS)

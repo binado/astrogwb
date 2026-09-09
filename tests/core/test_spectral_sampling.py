@@ -7,7 +7,7 @@ against explicit quadrature.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass, fields, replace
+from dataclasses import replace
 from functools import partial
 from typing import Any
 
@@ -32,7 +32,7 @@ from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.distributions.amplitude import AmplitudeConditional, quadrature_grid
 from astrogwb.gwb import AverageMode, spectral_density
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.populations import BNSMadauDickinsonModifiedPropagation
+from astrogwb.populations.bns_madau_dickinson import bns_md_modified_propagation
 from astrogwb.sampling import (
     SpectralDensityFn,
     amplitude_reconstruction_model,
@@ -231,14 +231,11 @@ def _importance_estimator(mode: AverageMode) -> SpectralDensityImportanceEstimat
     )
     target = mock_target_model()
 
-    @dataclass(frozen=True, kw_only=True)
-    class PinnedTarget(BNSMadauDickinsonModifiedPropagation):
-        def __call__(self, params: Mapping[str, ArrayLike]) -> None:
-            super().__call__({**FIDUCIALS, **params})
+    def pinned_call(params: Mapping[str, ArrayLike], **settings: object) -> None:
+        """Take unsampled hyperparameters from the test's fixed fiducials."""
+        bns_md_modified_propagation({**FIDUCIALS, **params}, **settings)
 
-    pinned = PinnedTarget(
-        **{field.name: getattr(target, field.name) for field in fields(target)}
-    )
+    pinned = replace(target, fn=pinned_call)
     return replace(estimator, model=pinned, average_mode=mode)
 
 

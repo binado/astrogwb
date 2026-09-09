@@ -20,8 +20,7 @@ from typing import Any
 
 import numpy as np
 
-from astrogwb.catalog.catalog import Catalog
-from astrogwb.populations import REDSHIFT_SITE
+from astrogwb.catalog.catalog import REDSHIFT_SITE, Catalog
 from astrogwb.waveform import PolarizationPowerGenerator
 
 try:
@@ -220,7 +219,7 @@ def check_population_consistency(catalog: Catalog, *, label: str) -> None:
     model = catalog.get_population_model()
     params = catalog.fiducials
     values = catalog.source_parameters
-    _, trace = model.evaluate(params, values)
+    trace = model.trace(params, values)
     for name in sorted(catalog.source_parameters):
         if name not in trace or trace[name]["type"] != "deterministic":
             continue

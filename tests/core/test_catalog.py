@@ -211,13 +211,11 @@ def test_get_population_model_binds_construction_settings_only() -> None:
     They describe how the catalog was made; a target evaluation supplies its
     own, and binding the generating ones here would silently pin them.
     """
-    from astrogwb.populations import BNSMadauDickinson
+    from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
 
     model = _catalog(np.array([0.5, 1.5])).get_population_model()
-    assert isinstance(model, BNSMadauDickinson)
-    assert {
-        name: getattr(model, name) for name in ("z_min", "z_max", "n_grid")
-    } == POPULATION_RECORD["model_kwargs"]
+    assert model.fn is bns_md_cosmological
+    assert dict(model.settings) == POPULATION_RECORD["model_kwargs"]
     assert model.density_sites == POPULATION_RECORD["density_sites"]
 
 

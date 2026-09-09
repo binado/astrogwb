@@ -102,27 +102,23 @@ def test_a_loaded_catalog_reconstructs_its_model_and_evaluates_at_new_params(
     tmp_path: Path,
 ) -> None:
     """The point of the record: the density is recoverable, not just described."""
-    from astrogwb.populations import (
-        BNSMadauDickinson,
-    )
+    from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
 
     path = tmp_path / "catalog.h5"
     _catalog().save(path)
     restored = Catalog.load(path)
 
     model = restored.get_population_model()
-    assert isinstance(model, BNSMadauDickinson)
-    assert {
-        name: getattr(model, name) for name in ("z_min", "z_max", "n_grid")
-    } == PAPER_MODEL_KWARGS
+    assert model.fn is bns_md_cosmological
+    assert dict(model.settings) == PAPER_MODEL_KWARGS
 
     for params in (
         restored.fiducials,
         {**restored.fiducials, "H0": 74.0},
     ):
         values = restored.source_parameters
-        site_log_probs, _ = model.evaluate(params, values)
-        assert site_log_probs.shape == REDSHIFT.shape
+        trace = model.evaluate(params, values)
+        assert trace.log_prob.shape == REDSHIFT.shape
 
 
 def test_save_with_compression_round_trips(tmp_path: Path) -> None:

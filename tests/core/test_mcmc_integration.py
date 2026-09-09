@@ -21,7 +21,7 @@ linear regime instead of silently drifting out of it.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import replace
 from functools import partial
 from typing import NamedTuple
 
@@ -55,10 +55,10 @@ from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.populations import (
-    BNSMadauDickinsonModifiedPropagation,
     amplitude_H0_fn,
     merger_rate_H0_fn,
 )
+from astrogwb.populations.bns_madau_dickinson import bns_md_modified_propagation
 from astrogwb.sampling import (
     amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
@@ -190,16 +190,11 @@ def _build_analysis_inputs(
     # silently truncate the population.
     target = mock_target_model()
 
-    @dataclass(frozen=True, kw_only=True)
-    class PinnedTarget(BNSMadauDickinsonModifiedPropagation):
+    def pinned_call(params: Mapping[str, ArrayLike], **settings: object) -> None:
         """Take unsampled hyperparameters from the test's fixed fiducials."""
+        bns_md_modified_propagation({**FIDUCIALS, **params}, **settings)
 
-        def __call__(self, params: Mapping[str, ArrayLike]) -> None:
-            super().__call__({**FIDUCIALS, **params})
-
-    pinned_target = PinnedTarget(
-        **{field.name: getattr(target, field.name) for field in fields(target)}
-    )
+    pinned_target = replace(target, fn=pinned_call)
 
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         catalog,

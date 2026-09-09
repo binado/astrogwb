@@ -12,51 +12,69 @@ drift guard that closes that hole for the redshift law.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
-from astrogwb.populations.base import Population
+from astrogwb.populations.base import Population, PopulationFn
 
 __all__ = [
-    "PopulationFactory",
+    "build_population",
     "known_population_models",
-    "population_model",
     "register_population_model",
 ]
 
-# Constructors accept each population's own static construction keywords.
-type PopulationFactory = Callable[..., Population]
+
+_REGISTRY: dict[str, tuple[PopulationFn, tuple[str, ...]]] = {}
+
+#: Density factors a catalog selects when nothing narrower is requested.
+#: Every registered population declares ``redshift`` -- the one source
+#: parameter whose density never cancels in an importance weight.
+_DEFAULT_DENSITY_SITES: tuple[str, ...] = ("redshift",)
 
 
-_REGISTRY: dict[str, PopulationFactory] = {}
-
-
-def register_population_model[Factory: PopulationFactory](
-    name: str,
-) -> Callable[[Factory], Factory]:
+def register_population_model(
+    name: str, *, source_sites: tuple[str, ...]
+) -> Callable[[PopulationFn], PopulationFn]:
     """Register a population model under ``name``, returning it unchanged.
 
-    Applied directly to the population constructor, so the name lives beside the
-    declaration rather than in a separate table that can fall out of step.
+    Applied directly to the model function, so the name and its declared
+    source outputs live beside the declaration rather than in a separate table
+    that can fall out of step.
     """
 
-    def decorate(model: Factory) -> Factory:
+    def decorate(fn: PopulationFn) -> PopulationFn:
         if name in _REGISTRY:
             raise ValueError(f"population model {name!r} is already registered")
-        _REGISTRY[name] = model
-        return model
+        _REGISTRY[name] = (fn, tuple(source_sites))
+        return fn
 
     return decorate
 
 
-def population_model(name: str) -> PopulationFactory:
-    """Look up a registered population model, listing the known set on failure."""
+def build_population(
+    name: str,
+    *,
+    settings: Mapping[str, float | int],
+    density_sites: tuple[str, ...] = _DEFAULT_DENSITY_SITES,
+) -> Population:
+    """Assemble the registered model into a frozen, hashable ``Population``.
+
+    ``source_sites`` is not a caller-supplied argument: which sites a model
+    declares is a property of the model, stored on the registry entry, not an
+    analysis choice like ``density_sites``.
+    """
     try:
-        return _REGISTRY[name]
+        fn, source_sites = _REGISTRY[name]
     except KeyError:
         known = ", ".join(known_population_models())
         raise KeyError(
             f"unknown population model {name!r}; registered models are: {known}"
         ) from None
+    return Population(
+        fn=fn,
+        settings=tuple(settings.items()),
+        density_sites=density_sites,
+        source_sites=source_sites,
+    )
 
 
 def known_population_models() -> tuple[str, ...]:

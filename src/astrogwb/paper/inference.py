@@ -50,13 +50,12 @@ from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.paper.catalogs import validate_matching_frequency_grids
 from astrogwb.paper.config.mcmc import AnalysisGrid, RunConfig
 from astrogwb.populations import (
-    TOTAL_MERGER_RATE_SITE,
     Population,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
+    build_population,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
-    population_model,
 )
 from astrogwb.sampling import (
     SpectralDensityFn,
@@ -149,8 +148,13 @@ def target_population_model(config: RunConfig) -> Population:
     estimator. Hyperparameters remain arguments to the population methods.
     """
     grid = config.analysis_grid
-    return population_model(config.analysis.population_model)(
-        z_min=grid.minimum_redshift, z_max=grid.maximum_redshift, n_grid=grid.n_grid
+    return build_population(
+        config.analysis.population_model,
+        settings={
+            "z_min": grid.minimum_redshift,
+            "z_max": grid.maximum_redshift,
+            "n_grid": grid.n_grid,
+        },
     )
 
 
@@ -225,8 +229,14 @@ def catalog_total_merger_rate(catalog: Catalog) -> jax.Array:
     model = catalog.get_population_model()
     params = catalog.fiducials
     values = catalog.source_parameters
-    _, trace = model.evaluate(params, values)
-    return trace[TOTAL_MERGER_RATE_SITE]["value"]
+    trace = model.evaluate(params, values)
+    if trace.total_merger_rate is None:
+        raise ValueError(
+            f"catalog population {catalog.population_model_name!r} declares no "
+            "total_merger_rate site: its fiducials must carry local_merger_rate "
+            "for an injection catalog"
+        )
+    return trace.total_merger_rate
 
 
 def prepare_inference_inputs(

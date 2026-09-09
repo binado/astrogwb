@@ -154,10 +154,10 @@ def check_population_model(name: str, *, label: str) -> None:
     populated by importing the models, which pulls in JAX, and this module is
     otherwise free of it.
     """
-    from astrogwb.populations import population_model
+    from astrogwb.populations import build_population
 
     try:
-        population_model(name)
+        build_population(name, settings={})
     except KeyError as error:
         raise ValueError(f"{label}: {error.args[0]}") from None
 

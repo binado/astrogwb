@@ -33,14 +33,15 @@ from typing import Any, Self
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.populations import (
-    REDSHIFT_SITE,
-    Population,
-    population_model,
-)
+from astrogwb.populations import Population, build_population
 from astrogwb.waveform import PolarizationPowerGenerator
 
-__all__ = ["Catalog"]
+__all__ = ["REDSHIFT_SITE", "Catalog"]
+
+#: The redshift site every population must declare. Its density can never be
+#: excluded: redshift is the one source parameter the target and the proposal
+#: are guaranteed to disagree on.
+REDSHIFT_SITE = "redshift"
 
 #: Construction settings a population model must take for a catalog drawn from
 #: it to support :meth:`Catalog.restrict_redshift`. Narrowing the window changes
@@ -196,8 +197,10 @@ class Catalog:
         consumer sees the one ``model(params)`` interface. An unknown name
         fails here, listing what is registered.
         """
-        return population_model(self._model_name)(
-            **self._model_kwargs, density_sites=self._density_sites
+        return build_population(
+            self._model_name,
+            settings=self._model_kwargs,
+            density_sites=self._density_sites,
         )
 
     @property

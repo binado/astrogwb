@@ -27,8 +27,8 @@ from astrogwb.paper.config.catalogs import (
     load_catalog_layers,
 )
 from astrogwb.populations import (
+    build_population,
     known_population_models,
-    population_model,
 )
 
 
@@ -54,7 +54,7 @@ def test_every_committed_catalog_can_build_its_population() -> None:
     """
     for name, definition in _definitions().items():
         population = definition.population
-        model = population_model(population.model)(**population.kwargs)
+        model = build_population(population.model, settings=population.kwargs)
         with handlers.seed(rng_seed=0):
             trace = handlers.trace(model).get_trace(population.params)
         assert trace["redshift"]["type"] == "sample", name
@@ -63,8 +63,8 @@ def test_every_committed_catalog_can_build_its_population() -> None:
 
 def test_every_declared_density_factor_is_a_real_sample_site() -> None:
     for name, definition in _definitions().items():
-        model = population_model(definition.population.model)(
-            **definition.population.kwargs
+        model = build_population(
+            definition.population.model, settings=definition.population.kwargs
         )
         with handlers.seed(rng_seed=0):
             trace = handlers.trace(model).get_trace(definition.population.params)
