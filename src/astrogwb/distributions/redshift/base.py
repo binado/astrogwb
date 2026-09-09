@@ -26,7 +26,9 @@ from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import distance_and_volume_grid
 from astrogwb.distributions.interpolated import InterpolatedDistribution
 
-type SourceFrameDistribution = Callable[[ArrayLike, Mapping[str, ArrayLike]], jax.Array]
+type SourceFrameDistributionFn = Callable[
+    [ArrayLike, Mapping[str, ArrayLike]], jax.Array
+]
 """Callable defining the unnormalized source-frame rate shape."""
 
 
@@ -87,7 +89,7 @@ class RedshiftDistribution(InterpolatedDistribution):
         self,
         *,
         params: Mapping[str, ArrayLike],
-        source_frame_distribution: SourceFrameDistribution,
+        source_frame_distribution: SourceFrameDistributionFn,
         minimum_redshift: float = 0.0,
         maximum_redshift: float = 10.0,
         n_grid: int = 1000,

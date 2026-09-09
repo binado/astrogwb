@@ -10,7 +10,7 @@ The base and Madau-Dickinson implementation are also exported here:
 
 from astrogwb.distributions.redshift.base import (
     RedshiftDistribution,
-    SourceFrameDistribution,
+    SourceFrameDistributionFn,
 )
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
@@ -20,6 +20,6 @@ from astrogwb.distributions.redshift.madau_dickinson import (
 __all__: list[str] = [
     "MadauDickinsonRedshiftDistribution",
     "RedshiftDistribution",
-    "SourceFrameDistribution",
+    "SourceFrameDistributionFn",
     "madau_dickinson_redshift_distribution",
 ]
