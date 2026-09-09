@@ -22,6 +22,13 @@ from astrogwb.distributions.rates import madau_dickinson_rate
 # --------------------------------------------------------------------------- #
 # madau_dickinson_rate
 # --------------------------------------------------------------------------- #
+def test_madau_dickinson_rate_scales_with_local_merger_rate() -> None:
+    z = jnp.asarray([0.0, 1.0, 3.0])
+    base = madau_dickinson_rate(z, 1.42, 4.62, 1.84)
+    scaled = madau_dickinson_rate(z, 1.42, 4.62, 1.84, 3.5)
+    np.testing.assert_allclose(scaled, 3.5 * base)
+
+
 def test_madau_dickinson_rate_is_unity_at_redshift_zero() -> None:
     z = jnp.asarray(0.0)
     assert float(madau_dickinson_rate(z, 1.42, 4.62, 1.84)) == pytest.approx(1.0)
@@ -175,7 +182,11 @@ def test_local_merger_rate_scales_total_rate_without_changing_weights(
     )
 
     assert float(scaled_rate) == pytest.approx(2.5 * float(fiducial_rate))
-    np.testing.assert_allclose(scaled_log_weights, fiducial_log_weights)
+    # The source table now carries the absolute rate, so renormalizing a
+    # differently scaled table introduces only floating-point roundoff.
+    np.testing.assert_allclose(
+        scaled_log_weights, fiducial_log_weights, rtol=0.0, atol=1e-14
+    )
 
 
 def test_fiducial_local_merger_rate_preserves_rate_calculation(
@@ -191,19 +202,18 @@ def test_fiducial_local_merger_rate_preserves_rate_calculation(
         hubble_constant=FIDUCIALS["H0"],
         omega_m=FIDUCIALS["Omega_m"],
     )
-    rate_shape_grid = madau_dickinson_rate(
+    rate_grid = madau_dickinson_rate(
         z_grid,
         FIDUCIALS["gamma"],
         FIDUCIALS["kappa"],
         FIDUCIALS["z_peak"],
+        FIDUCIALS["local_merger_rate"],
     )
     integral_mpc3 = jnp.trapezoid(
-        rate_shape_grid / (1.0 + z_grid) * dvc_dz_grid,
+        rate_grid / (1.0 + z_grid) * dvc_dz_grid,
         z_grid,
     )
-    expected = (
-        1e-9 * FIDUCIALS["local_merger_rate"] * float(integral_mpc3) / SECONDS_PER_YEAR
-    )
+    expected = 1e-9 * float(integral_mpc3) / SECONDS_PER_YEAR
 
     assert float(total_rate) == pytest.approx(expected)
 

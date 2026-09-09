@@ -61,10 +61,14 @@ def reference_merger_rate_distance_and_logprob(
         hubble_constant=params["H0"],
         omega_m=params["Omega_m"],
     )
-    rate_shape_grid = madau_dickinson_rate(
-        redshift_grid, params["gamma"], params["kappa"], params["z_peak"]
+    rate_grid = madau_dickinson_rate(
+        redshift_grid,
+        params["gamma"],
+        params["kappa"],
+        params["z_peak"],
+        params["local_merger_rate"],
     )
-    unnormalized_pdf_grid = rate_shape_grid / (1.0 + redshift_grid) * dvc_dz_grid
+    unnormalized_pdf_grid = rate_grid / (1.0 + redshift_grid) * dvc_dz_grid
     integral_mpc3 = jnp.trapezoid(unnormalized_pdf_grid, redshift_grid)
 
     unnormalized_pdf = jnp.interp(
@@ -78,7 +82,5 @@ def reference_merger_rate_distance_and_logprob(
         left=luminosity_distance_grid[0],
         right=luminosity_distance_grid[-1],
     )
-    total_merger_rate = (
-        1e-9 * params["local_merger_rate"] * integral_mpc3 / SECONDS_PER_YEAR
-    )
+    total_merger_rate = 1e-9 * integral_mpc3 / SECONDS_PER_YEAR
     return total_merger_rate, luminosity_distance, logpdf

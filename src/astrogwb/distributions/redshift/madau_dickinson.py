@@ -20,6 +20,7 @@ def _madau_dickinson_source_frame_distribution(
         params["gamma"],
         params["kappa"],
         params["z_peak"],
+        params.get("local_merger_rate", 1.0),
     )
 
 
@@ -34,7 +35,8 @@ def madau_dickinson_redshift_distribution(
     r"""Construct a redshift distribution for a Madau-Dickinson merger rate.
 
     ``params`` must carry ``gamma``, ``kappa`` and ``z_peak`` -- the arguments
-    of :func:`~astrogwb.distributions.rates.madau_dickinson_rate` -- on top of
+    of :func:`~astrogwb.distributions.rates.madau_dickinson_rate` -- and may
+    carry ``local_merger_rate`` for the absolute source-frame rate, on top of
     the ``H0`` / ``Omega_m`` cosmology keys
     :class:`~astrogwb.distributions.redshift.base.RedshiftDistribution` reads.
     """

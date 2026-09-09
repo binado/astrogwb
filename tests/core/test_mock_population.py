@@ -111,11 +111,12 @@ def _source_frame_merger_rate(redshift: jax.Array, hyperparameters) -> jax.Array
     Dividing here as well would double-count it -- exactly the class of error
     the two independent paths are being crossed to detect.
     """
-    return hyperparameters["local_merger_rate"] * madau_dickinson_rate(
+    return madau_dickinson_rate(
         redshift,
         hyperparameters["gamma"],
         hyperparameters["kappa"],
         hyperparameters["z_peak"],
+        hyperparameters["local_merger_rate"],
     )
 
 

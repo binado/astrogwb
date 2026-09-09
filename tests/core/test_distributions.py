@@ -116,7 +116,7 @@ def test_total_merger_rate_is_in_mergers_per_second() -> None:
     """The `1e-9 / SECONDS_PER_YEAR` conversion, bit-identical given the factor order."""
     reference_rate, _, _ = _reference()
     np.testing.assert_allclose(
-        float(_distribution().total_merger_rate(FIDUCIALS["local_merger_rate"])),
+        float(_distribution().total_merger_rate()),
         float(reference_rate),
         rtol=1e-15,
     )
@@ -131,7 +131,7 @@ def test_luminosity_distance_matches_the_reference_model() -> None:
     )
 
 
-def test_source_frame_distribution_is_the_rate_shape() -> None:
+def test_source_frame_distribution_is_the_rate() -> None:
     distribution = _distribution()
     np.testing.assert_array_equal(
         np.asarray(distribution.source_frame_distribution(SAMPLE_REDSHIFTS, FIDUCIALS)),
@@ -141,6 +141,7 @@ def test_source_frame_distribution_is_the_rate_shape() -> None:
                 FIDUCIALS["gamma"],
                 FIDUCIALS["kappa"],
                 FIDUCIALS["z_peak"],
+                FIDUCIALS["local_merger_rate"],
             )
         ),
     )
@@ -468,10 +469,9 @@ def test_normalized_density_is_independent_of_the_hubble_constant() -> None:
 
 def test_total_merger_rate_scales_as_the_inverse_cube_of_the_hubble_constant() -> None:
     """Pins `merger_rate_H0_fn = H0**-3` against the class itself."""
-    local_merger_rate = FIDUCIALS["local_merger_rate"]
 
     def rate_at(h0: float) -> jax.Array:
-        return _distribution(H0=h0).total_merger_rate(local_merger_rate)
+        return _distribution(H0=h0).total_merger_rate()
 
     h0 = FIDUCIALS["H0"]
     np.testing.assert_allclose(

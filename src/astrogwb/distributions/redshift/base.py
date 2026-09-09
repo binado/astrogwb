@@ -143,15 +143,15 @@ class RedshiftDistribution(InterpolatedDistribution):
         """Number of grid nodes. Static even under tracing -- shapes always are."""
         return self.x.shape[-1]
 
-    def total_merger_rate(self, local_merger_rate: ArrayLike) -> jax.Array:
+    def total_merger_rate(self) -> jax.Array:
         r"""Total merger rate, in mergers per second.
 
         .. math::
 
-            \mathcal{R} = \mathcal{R}_0 \int \frac{\psi(z)}{1+z}
+            \mathcal{R} = \int \frac{\psi(z)}{1+z}
                 \frac{\mathrm{d}V_c}{\mathrm{d}z}\,\mathrm{d}z
         """
-        return 1e-9 * jnp.asarray(local_merger_rate) * self.norm / SECONDS_PER_YEAR
+        return 1e-9 * self.norm / SECONDS_PER_YEAR
 
     def luminosity_distance(self, redshift: ArrayLike) -> jax.Array:
         """Luminosity distance in Mpc at redshift(s), clamped outside the grid."""

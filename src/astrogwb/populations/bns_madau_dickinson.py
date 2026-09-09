@@ -174,7 +174,7 @@ def _declare_bns_madau_dickinson(
     if "local_merger_rate" in params:
         numpyro.deterministic(
             "total_merger_rate",
-            redshift_distribution.total_merger_rate(params["local_merger_rate"]),
+            redshift_distribution.total_merger_rate(),
         )
 
 
