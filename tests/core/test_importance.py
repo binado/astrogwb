@@ -8,19 +8,15 @@ import numpy as np
 import pytest
 
 # Standard cosmology + population hyperparameters, and the redshift grid they
-# are integrated on. Shared with `synthetic_importance_catalog`, which builds
-# its catalog at exactly these values: a second copy here would let the two
-# drift apart with no visible symptom.
-from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN, make_redshift_grid
+# are integrated on. Shared with `synthetic_estimator`, which builds its
+# catalog at exactly these values: a second copy here would let the two drift
+# apart with no visible symptom.
+from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN
+from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    bns_population,
-    compute_merger_rate_distance_and_logprob,
-    madau_dickinson_rate,
-)
-from astrogwb.importance.population import importance_log_weights
+from astrogwb.distributions.rates import madau_dickinson_rate
 
 
 # --------------------------------------------------------------------------- #
@@ -112,14 +108,14 @@ def test_flat_lcdm_grid_is_jit_traceable() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# compute_merger_rate_distance_and_logprob
+# The reference redshift density
 # --------------------------------------------------------------------------- #
 def test_redshift_logpdf_normalizes_on_its_own_grid() -> None:
     # Interpolating the unnormalized density and dividing by its trapezoidal
     # integral makes the interpolant integrate to exactly that normalization.
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    _, _, logpdf = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, {"redshift": z_grid}, redshift_grid=z_grid
+    _, _, logpdf = reference_merger_rate_distance_and_logprob(
+        FIDUCIALS, z_grid, redshift_grid=z_grid
     )
 
     assert np.trapezoid(np.exp(np.asarray(logpdf)), np.asarray(z_grid)) == (
@@ -133,8 +129,8 @@ def test_redshift_logpdf_is_negative_infinite_outside_the_grid() -> None:
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
     outside = jnp.asarray([Z_MAX + 0.5, Z_MIN - 0.5])
 
-    _, _, logpdf = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, {"redshift": outside}, redshift_grid=z_grid
+    _, _, logpdf = reference_merger_rate_distance_and_logprob(
+        FIDUCIALS, outside, redshift_grid=z_grid
     )
 
     assert np.all(np.isneginf(np.asarray(logpdf)))
@@ -143,27 +139,21 @@ def test_redshift_logpdf_is_negative_infinite_outside_the_grid() -> None:
 # --------------------------------------------------------------------------- #
 # The BNS population reweighting a fixed catalog
 #
-# `synthetic_importance_catalog` builds a catalog that is its own proposal at
-# FIDUCIALS, so these exercise the rate and the weights against a reference
-# whose neutral point is known exactly.
+# `synthetic_estimator` builds a catalog that is its own proposal at FIDUCIALS,
+# so these exercise the rate and the weights against a reference whose neutral
+# point is known exactly.
 # --------------------------------------------------------------------------- #
-def _reweight(catalog, params: dict[str, float]) -> tuple[jax.Array, jax.Array]:
-    """The total rate and log-weights the estimator would form internally."""
-    terms = bns_population(
-        params, redshift_grid=make_redshift_grid()
-    ).compute_population_terms(catalog.source_parameters)
-    return terms.total_merger_rate, importance_log_weights(
-        terms,
-        proposal_log_prob=catalog.proposal_log_prob,
-        log_reference_distance=catalog.log_reference_distance,
-    )
+def _reweight(estimator, params: dict[str, float]) -> tuple[jax.Array, jax.Array]:
+    """The total rate and log-weights one estimator evaluation produces."""
+    _, extras = estimator(params)
+    return extras["total_merger_rate"], estimator.log_weights(params)
 
 
 def test_reweighting_a_synthetic_catalog_is_finite(
-    synthetic_importance_catalog,
+    synthetic_estimator,
 ) -> None:
-    catalog, samples = synthetic_importance_catalog()
-    total_rate, log_weights = _reweight(catalog, FIDUCIALS)
+    estimator, samples = synthetic_estimator()
+    total_rate, log_weights = _reweight(estimator, FIDUCIALS)
 
     total_rate = float(total_rate)
     log_weights = np.asarray(log_weights)
@@ -173,14 +163,14 @@ def test_reweighting_a_synthetic_catalog_is_finite(
 
 
 def test_local_merger_rate_scales_total_rate_without_changing_weights(
-    synthetic_importance_catalog,
+    synthetic_estimator,
 ) -> None:
     """Why `local_merger_rate` is analytically marginalizable: it is pure amplitude."""
-    catalog, _ = synthetic_importance_catalog()
-    fiducial_rate, fiducial_log_weights = _reweight(catalog, FIDUCIALS)
+    estimator, _ = synthetic_estimator()
+    fiducial_rate, fiducial_log_weights = _reweight(estimator, FIDUCIALS)
 
     scaled_rate, scaled_log_weights = _reweight(
-        catalog,
+        estimator,
         {**FIDUCIALS, "local_merger_rate": 2.5 * FIDUCIALS["local_merger_rate"]},
     )
 
@@ -189,11 +179,11 @@ def test_local_merger_rate_scales_total_rate_without_changing_weights(
 
 
 def test_fiducial_local_merger_rate_preserves_rate_calculation(
-    synthetic_importance_catalog,
+    synthetic_estimator,
 ) -> None:
-    """The population's rate is the hand-written grid formula, not a second copy."""
-    catalog, _ = synthetic_importance_catalog()
-    total_rate, _ = _reweight(catalog, FIDUCIALS)
+    """The population's rate matches the hand-written grid formula."""
+    estimator, _ = synthetic_estimator()
+    total_rate, _ = _reweight(estimator, FIDUCIALS)
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
     _, dvc_dz_grid = distance_and_volume_grid(
@@ -219,13 +209,13 @@ def test_fiducial_local_merger_rate_preserves_rate_calculation(
 
 
 def test_fiducial_weights_cancel_exactly(
-    synthetic_importance_catalog,
+    synthetic_estimator,
 ) -> None:
     # The catalog's cached proposal density and reference distance are the same
     # expressions the target forms at FIDUCIALS, so at the fiducial point the
     # log-weights are identically zero and the relative ESS is exactly 1.
-    catalog, _ = synthetic_importance_catalog()
-    _, log_weights = _reweight(catalog, FIDUCIALS)
+    estimator, _ = synthetic_estimator()
+    _, log_weights = _reweight(estimator, FIDUCIALS)
     log_weights = np.asarray(log_weights)
     weights = np.exp(log_weights)
     # Exactly, not to tolerance: the two sides are bit-identical expressions.

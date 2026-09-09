@@ -1,77 +1,223 @@
-"""Population-based importance estimator for the GWB spectral density."""
+r"""Reweighting one fixed catalog to a target population, as a spectrum.
+
+The estimator holds the prepared inference inputs directly -- the source
+samples, the polarization power, the cached proposal density and the reference
+distances -- rather than delegating them to a separate catalog object. There
+was never a second implementation of that container, and splitting the prepared
+arrays from the model they are evaluated against only made it possible to pair
+the wrong two.
+
+One model execution per evaluation supplies everything the weights need:
+
+.. math::
+
+    \log w_i = \log p(x_i \mid \theta) - \log q(x_i)
+        - 2\left[\log d_L(z_i \mid \theta) - \log d_i^{\mathrm{ref}}\right],
+
+where :math:`q` is the density the catalog was drawn from, cached once, and
+:math:`d^{\mathrm{ref}}` is the effective distance the stored polarization
+power was generated at. Power scales as :math:`d^{-2}` in amplitude, hence the
+factor of two. The distance the model declares includes modified GW
+propagation where the population has it, so nothing outside the model ever
+applies a propagation correction.
+
+The reference distance is the *stored* one, never a freshly interpolated
+cosmology table: the power on disk corresponds to those exact distances, and
+recomputing them on a different grid would bias every weight by the
+interpolation difference.
+
+Evaluate only where the proposal has support. Subtracting two negative-infinite
+log densities produces ``nan``, which propagates silently.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Self
 
 import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from astrogwb.catalog.importance import ImportanceCatalog
 from astrogwb.gwb.spectral import AverageMode, spectral_density
 from astrogwb.importance.diagnostics import relative_ess
-from astrogwb.importance.population import PopulationFn, importance_log_weights
+from astrogwb.importance.weights import importance_log_weights
+from astrogwb.populations import Population, PopulationTrace
+
+if TYPE_CHECKING:
+    from astrogwb.catalog import Catalog
+
+#: The catalog column naming the effective distance the stored polarization
+#: power was generated at -- the same name the population declares as a
+#: deterministic site.
+_LUMINOSITY_DISTANCE_COLUMN = "luminosity_distance"
+
+__all__ = ["SpectralDensityImportanceEstimator"]
 
 
 @jax.tree_util.register_dataclass
 @dataclass(frozen=True)
 class SpectralDensityImportanceEstimator:
-    """Evaluate spectra from a fixed catalog and a ``params -> Population`` factory.
+    """A fixed Monte Carlo realization bound to the population that reweights it.
 
-    The catalog is dynamic pytree data. The factory and inclination convention
-    are static metadata; construct the factory once and reuse it. The factory
-    must be hashable, and sampled parameters must arrive through its argument,
-    rather than being captured in static metadata.
+    Dynamic pytree data: ``source_parameters`` (the stored source columns, each
+    shape ``(N,)``), ``polarization_power`` of shape
+    ``(F, N)``, and the cached ``proposal_log_prob`` and
+    ``log_reference_distance``, both shape ``(N,)``.
 
-    ``__call__`` returns ``(spectrum, extras)`` with a fixed diagnostics key set,
-    matching the spectral-density sampling protocol without depending on it.
+    Static metadata: the immutable population ``model`` and ``average_mode``
+    inclination convention. Construct the model once and reuse it. Sampled
+    hyperparameters arrive through ``__call__``, never through static metadata.
 
-    Construct the catalog outside the sampler, using the effective distances
-    at which the power was computed, then reuse the estimator::
+    The constructor performs no conversion, density evaluation, or
+    value-dependent validation: JAX rebuilds instances while flattening and
+    unflattening pytrees, with tracers and placeholders in the leaves. All of
+    that happens once in :meth:`from_catalog`, outside JAX transformations.
+    Direct construction from already-prepared arrays stays supported -- the
+    proposal need not be a population at all, and no proposal merger rate or
+    observation time ever enters the weights.
 
-        catalog = ImportanceCatalog.from_population(
-            population=population_fn(fiducials),
-            source_parameters=samples,
-            polarization_power=power,
-            luminosity_distance=reference_distances,
-        )
-        estimator = SpectralDensityImportanceEstimator(
-            catalog, population_fn, average_mode="analytic_inclination"
-        )
-        spectrum, extras = estimator(params)
-
-    Fixed population-factory inputs, such as a redshift grid, can be bound once
-    with ``functools.partial``. JIT and vmap operate on sampled parameters; to
-    pass the catalog dynamically, use ``jax.jit(lambda e, p: e(p))``.
+    ``__call__`` returns ``(spectrum, extras)`` with a fixed diagnostics key
+    set, matching the spectral-density sampling protocol without depending on
+    it.
     """
 
-    catalog: ImportanceCatalog
-    population_fn: PopulationFn = field(metadata={"static": True})
+    source_parameters: Mapping[str, jax.Array]
+    polarization_power: jax.Array
+    proposal_log_prob: jax.Array
+    log_reference_distance: jax.Array
+    model: Population = field(metadata={"static": True})
     average_mode: AverageMode = field(metadata={"static": True})
+
+    @classmethod
+    def from_catalog(
+        cls,
+        catalog: Catalog,
+        *,
+        model: Population | None = None,
+        average_mode: AverageMode,
+        frequency_mask: ArrayLike | None = None,
+    ) -> Self:
+        """Prepare every fixed input, evaluating the proposal density once.
+
+        Call outside JAX transformations. The proposal density is the catalog's
+        *own* recorded population, evaluated at the parameters it was drawn at,
+        so nothing has to be restated in a run config and nothing has to be
+        cross-checked against it. No physical merger rate is required for that:
+        a proposal is a density, not an observation.
+
+        ``model`` defaults to the catalog's generating model, which is what
+        makes a catalog reweighted to itself give exactly zero log weights. A
+        different target model is the normal case -- the same sources under
+        modified propagation, say -- and is resolved and bound here once, then
+        reused for every later evaluation.
+
+        ``frequency_mask`` selects the analysis band. It reaches the power and
+        nothing else: masking source samples would silently truncate the
+        population and change every posterior without erroring.
+        """
+        generating_model = catalog.get_population_model()
+        generating_params = catalog.fiducials
+        target_model = generating_model if model is None else model
+        source_parameters = {
+            name: jnp.asarray(value)
+            for name, value in catalog.source_parameters.items()
+        }
+        proposal_log_prob = generating_model.log_prob(
+            generating_params, source_parameters
+        )
+        target_included = set(target_model.density_sites)
+        proposal_included = set(generating_model.density_sites)
+        if target_included != proposal_included:
+            raise ValueError(
+                "target and proposal populations must include the same source "
+                f"density factors; target includes {sorted(target_included)}, "
+                f"proposal includes {sorted(proposal_included)}"
+            )
+
+        reference_distance = jnp.asarray(
+            catalog.source_parameters[_LUMINOSITY_DISTANCE_COLUMN]
+        )
+        finite_and_positive = jnp.isfinite(reference_distance) & (
+            reference_distance > 0.0
+        )
+        if not bool(jnp.all(finite_and_positive)):
+            raise ValueError(
+                f"catalog {_LUMINOSITY_DISTANCE_COLUMN!r} column must be positive and "
+                "finite: it is the effective distance the stored polarization "
+                "power was generated at"
+            )
+
+        power = jnp.asarray(catalog.polarization_power)
+        if frequency_mask is not None:
+            power = power[jnp.asarray(frequency_mask), :]
+        num_samples = reference_distance.shape[0]
+        if power.shape[1] != num_samples:
+            raise ValueError(
+                f"polarization_power has {power.shape[1]} samples but the catalog "
+                f"holds {num_samples} sources"
+            )
+        try:
+            proposal_log_prob = jnp.broadcast_to(proposal_log_prob, (num_samples,))
+        except ValueError as err:
+            raise ValueError(
+                "proposal source density must have one entry per source, got shape "
+                f"{proposal_log_prob.shape} for {num_samples} sources"
+            ) from err
+
+        return cls(
+            source_parameters=source_parameters,
+            polarization_power=power,
+            proposal_log_prob=proposal_log_prob,
+            log_reference_distance=jnp.log(reference_distance),
+            model=target_model,
+            average_mode=average_mode,
+        )
+
+    def log_weights(self, params: Mapping[str, ArrayLike]) -> jax.Array:
+        """Per-source log importance weights at ``params``, shape ``(N,)``.
+
+        The estimator's diagnostics deliberately publish only the relative ESS
+        -- an ``(N,)`` array per sampler step is not a diagnostic -- but the
+        raw weights are what the effective-sample-size figures are made of.
+        Requires no merger rate: weights are a density ratio.
+        """
+        return self._log_weights_and_trace(params)[0]
+
+    def _log_weights_and_trace(
+        self, params: Mapping[str, ArrayLike]
+    ) -> tuple[jax.Array, PopulationTrace]:
+        """One model execution: the weights, and the trace holding its rate."""
+        trace = self.model.evaluate(params, self.source_parameters)
+        log_distance = jnp.log(trace.luminosity_distance)
+        log_weights = importance_log_weights(
+            target_log_prob=trace.log_prob,
+            proposal_log_prob=self.proposal_log_prob,
+            log_luminosity_distance=log_distance,
+            log_reference_distance=self.log_reference_distance,
+        )
+        return log_weights, trace
 
     def __call__(
         self, params: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
         """Return the spectrum, total merger rate, and relative importance ESS."""
-        population = self.population_fn(params)
-        target = population.compute_population_terms(self.catalog.source_parameters)
-        log_weights = importance_log_weights(
-            target,
-            proposal_log_prob=self.catalog.proposal_log_prob,
-            log_reference_distance=self.catalog.log_reference_distance,
-        )
+        log_weights, trace = self._log_weights_and_trace(params)
+        if trace.total_merger_rate is None:
+            raise ValueError(
+                "target population declares no total_merger_rate site: params "
+                "must carry the physical rate parameter for a spectrum, unlike "
+                "for a bare proposal density"
+            )
+        total_merger_rate = trace.total_merger_rate
         prediction = spectral_density(
-            self.catalog.polarization_power,
+            self.polarization_power,
             jnp.exp(log_weights),
-            target.total_merger_rate,
+            total_merger_rate,
             average_mode=self.average_mode,
         )
         return prediction, {
-            "total_merger_rate": target.total_merger_rate,
+            "total_merger_rate": total_merger_rate,
             "importance_relative_ess": relative_ess(log_weights),
         }
-
-
-__all__ = ["SpectralDensityImportanceEstimator"]

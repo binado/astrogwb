@@ -1,15 +1,21 @@
 """One implementation of the catalogs-to-model-inputs pipeline.
 
 Every entrypoint that samples, profiles, or plots the fiducial spectrum runs
-the same sequence: load the catalogs, validate them, build the fiducial
-injection spectrum, build the effective PSD, build the analysis-band mask,
-build the importance catalog and its estimator, build the model. It used to be
-spelled out at eight call sites, two of which were near-verbatim clones of each
-other down to the model-building block.
+the same sequence: load the two catalogs, restrict them to the analysis
+redshift window, build the fiducial injection spectrum, build the effective
+PSD, build the analysis-band mask, prepare the estimator, build the model. It
+used to be spelled out at eight call sites, two of which were near-verbatim
+clones of each other down to the model-building block.
+
+The catalogs are now authoritative about their own populations, so this file no
+longer derives a proposal density from the run config, no longer cross-checks
+run fiducials against catalog provenance, and no longer applies a fiducial
+propagation correction to stored power. Those three steps existed to reconcile
+records that are now one record.
 
 JAX ops run only inside functions, after ``runtime.configure_runtime``. Importing
 this module loads ``jax`` but does not initialize the XLA backend; a subprocess
-test in ``tests/test_cli.py`` guards that.
+test in ``tests/paper/test_cli.py`` guards that.
 
 Arrays on :class:`Observation` are *pre*-mask, with the mask carried alongside,
 because the notebooks plot the unmasked PSD and spectrum before restricting to
@@ -27,12 +33,10 @@ from typing import Any, NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
-import xarray as xr
 from numpyro import handlers
 from numpyro.distributions import Distribution
 
-from astrogwb.catalog import ImportanceCatalog
-from astrogwb.cosmology import log_gw_em_ratio
+from astrogwb.catalog import Catalog
 from astrogwb.detector import effective_psd as compute_effective_psd
 from astrogwb.detector import gaussian_bin_scale, load_sensitivity_map
 from astrogwb.distributions.amplitude import (
@@ -41,24 +45,18 @@ from astrogwb.distributions.amplitude import (
     quadrature_grid,
 )
 from astrogwb.frequency import frequency_mask as make_frequency_mask
-from astrogwb.gwb import AverageMode
+from astrogwb.gwb import AverageMode, spectral_density
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+from astrogwb.paper.catalogs import validate_matching_frequency_grids
+from astrogwb.paper.config.mcmc import AnalysisGrid, RunConfig
+from astrogwb.populations import (
+    Population,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
-    bns_population,
+    build_population,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
-from astrogwb.paper.catalogs import (
-    compute_fiducial_injection_spectrum,
-    compute_proposal_logprob,
-    propagate_catalog,
-    samples_from_catalog,
-    truncate_catalog_samples,
-    validate_matching_frequency_grids,
-)
-from astrogwb.paper.config.mcmc import AnalysisGrid, ProposalConfig, RunConfig
 from astrogwb.sampling import (
     SpectralDensityFn,
     gwb_amplitude_marginalized_model,
@@ -80,7 +78,6 @@ class Observation:
 
     frequencies: jax.Array
     df: float
-    redshift_grid: jax.Array
     total_merger_rate: jax.Array
     spectral_density: jax.Array
     frequency_mask: jax.Array
@@ -91,11 +88,11 @@ class InferenceInputs:
     """Everything the NumPyro model is evaluated against, for one run."""
 
     observation: Observation
-    proposal: xr.Dataset
+    proposal: Catalog
     effective_psd: jax.Array
     observation_time: float
     estimator: SpectralDensityImportanceEstimator
-    """The masked, band-restricted catalog bound to its population factory."""
+    """The masked, band-restricted catalog bound to its target population."""
 
     def masked_model_kwargs(self) -> dict[str, Any]:
         """Restrict to the analysis band and return the model's data inputs.
@@ -144,23 +141,42 @@ class AmplitudeMarginalization(NamedTuple):
     """Quadrature nodes the marginalization integral is evaluated on."""
 
 
-def prepare_observation(
-    injection: xr.Dataset,
-    *,
-    fiducials: Mapping[str, float],
-    grid: AnalysisGrid,
-) -> Observation:
-    """Propagate the injection catalog and build the fiducial observed spectrum."""
-    fiducial_values = dict(fiducials)
-    composed = propagate_catalog(injection, fiducials=fiducial_values)
-    n_loaded = composed.polarization_power.shape[1]
-    composed = truncate_catalog_samples(
-        composed,
-        label="injection",
-        minimum_redshift=grid.minimum_redshift,
-        maximum_redshift=grid.maximum_redshift,
+def target_population_model(config: RunConfig) -> Population:
+    """Resolve and bind the population the run's hyperparameters describe.
+
+    Constructed once per run and reused as static pytree metadata in the
+    estimator. Hyperparameters remain arguments to the population methods.
+    """
+    grid = config.analysis_grid
+    return build_population(
+        config.analysis.population_model,
+        settings={
+            "z_min": grid.minimum_redshift,
+            "z_max": grid.maximum_redshift,
+            "n_grid": grid.n_grid,
+        },
     )
-    n_kept = composed.polarization_power.shape[1]
+
+
+def prepare_observation(injection: Catalog, *, grid: AnalysisGrid) -> Observation:
+    """Build the fiducial observed spectrum from the injection catalog.
+
+    The rate comes from the injection catalog's *own* population, evaluated
+    over the analysis window: restricting the window narrows both the samples
+    and the recorded density together, so the rate counts exactly the sources
+    the spectrum sums over. The parameters are the catalog's, not the run's --
+    the file records what was actually injected, which is why nothing has to
+    check the two against each other any more.
+
+    Weights are identically one. This is the observed data, not a reweighting,
+    and keeping it independent of the estimator is what lets a bug in the
+    weights show up as a mismatch rather than cancel out of both sides.
+    """
+    n_loaded = injection.polarization_power.shape[1]
+    restricted = injection.restrict_redshift(
+        grid.minimum_redshift, grid.maximum_redshift
+    )
+    n_kept = restricted.polarization_power.shape[1]
     logger.info(
         "Loaded independent injection catalog: n_injection_samples=%d "
         "(%d outside the analysis window dropped)",
@@ -168,52 +184,68 @@ def prepare_observation(
         n_loaded - n_kept,
     )
 
-    redshift_grid = jnp.linspace(
-        grid.minimum_redshift, grid.maximum_redshift, grid.n_grid
-    )
-    injection_frequencies = jnp.asarray(composed.frequency.values)
-    df = float(composed.attrs["df"])
-    total_merger_rate, spectral_density = compute_fiducial_injection_spectrum(
-        jnp.asarray(composed.polarization_power.values),
-        samples_from_catalog(composed),
-        fiducials=fiducial_values,
-        redshift_grid=redshift_grid,
+    total_merger_rate = catalog_total_merger_rate(restricted)
+    power = jnp.asarray(restricted.polarization_power)
+    spectrum = spectral_density(
+        power,
+        jnp.ones(power.shape[1]),
+        total_merger_rate,
+        average_mode="analytic_inclination",
     )
     logger.info(
         "Constructed independent fiducial observed spectrum (rate0=%.4e /s)",
         total_merger_rate,
     )
 
+    frequencies = jnp.asarray(restricted.waveform_metadata.frequencies)
     # Band bounds only: this function never sees a detector network, so bins
     # the network cannot measure are dropped later, in prepare_inference_inputs.
     analysis_frequency_mask = make_frequency_mask(
-        injection_frequencies, fmin=grid.f_min, fmax=grid.f_max
+        frequencies, fmin=grid.f_min, fmax=grid.f_max
     )
     logger.info(
         "Analysis band: %d of %d bins (%.1f-%.1f Hz)",
         int(jnp.sum(analysis_frequency_mask)),
-        injection_frequencies.shape[0],
+        frequencies.shape[0],
         grid.f_min,
         grid.f_max,
     )
     return Observation(
-        frequencies=injection_frequencies,
-        df=df,
-        redshift_grid=redshift_grid,
+        frequencies=frequencies,
+        df=float(restricted.waveform_metadata.df),
         total_merger_rate=total_merger_rate,
-        spectral_density=spectral_density,
+        spectral_density=spectrum,
         frequency_mask=analysis_frequency_mask,
     )
 
 
+def catalog_total_merger_rate(catalog: Catalog) -> jax.Array:
+    """The observer-frame total merger rate this catalog's population implies.
+
+    Recomputed from the recorded model rather than read from a stored column:
+    the rate is a property of the population and the redshift window, so a
+    stored copy would be stale the moment the window is narrowed.
+    """
+    model = catalog.get_population_model()
+    params = catalog.fiducials
+    values = catalog.source_parameters
+    trace = model.evaluate(params, values)
+    if trace.total_merger_rate is None:
+        raise ValueError(
+            f"catalog population {catalog.population_model_name!r} declares no "
+            "total_merger_rate site: its fiducials must carry local_merger_rate "
+            "for an injection catalog"
+        )
+    return trace.total_merger_rate
+
+
 def prepare_inference_inputs(
-    injection: xr.Dataset,
-    proposal: xr.Dataset,
+    injection: Catalog,
+    proposal: Catalog,
     *,
-    fiducials: Mapping[str, float],
-    proposal_config: ProposalConfig,
     grid: AnalysisGrid,
     detectors: Sequence[str],
+    target_model: Population,
     average_mode: AverageMode = "analytic_inclination",
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs.
@@ -223,16 +255,13 @@ def prepare_inference_inputs(
     estimator owns it: once the catalog is bound, the model itself never sees
     a polarization power array to average.
     """
-    observation = prepare_observation(injection, fiducials=fiducials, grid=grid)
-    proposal_catalog = propagate_catalog(proposal, fiducials=dict(fiducials))
-    n_loaded = proposal_catalog.polarization_power.shape[1]
-    proposal_catalog = truncate_catalog_samples(
-        proposal_catalog,
-        label="proposal",
-        minimum_redshift=grid.minimum_redshift,
-        maximum_redshift=grid.maximum_redshift,
+    observation = prepare_observation(injection, grid=grid)
+
+    n_loaded = proposal.polarization_power.shape[1]
+    proposal_catalog = proposal.restrict_redshift(
+        grid.minimum_redshift, grid.maximum_redshift
     )
-    proposal_frequencies = proposal_catalog.frequency.values
+    proposal_frequencies = np.asarray(proposal_catalog.waveform_metadata.frequencies)
     validate_matching_frequency_grids(observation.frequencies, proposal_frequencies)
     n_freq, n_samples = proposal_catalog.polarization_power.shape
     logger.info(
@@ -278,38 +307,14 @@ def prepare_inference_inputs(
         )
     observation = replace(observation, frequency_mask=band_mask)
 
-    # The band mask restricts the power and nothing else: masking the source
-    # samples would silently truncate the population and change every
-    # posterior without erroring. `isel(frequency=...)` is what makes that
-    # structural rather than a rule to remember -- `source_parameters` has no
-    # `frequency` dim, so the slice cannot reach it even by accident.
-    samples = samples_from_catalog(proposal_catalog)
-    band = proposal_catalog.isel(frequency=np.asarray(band_mask))
-
-    # `propagate_catalog` divided the stored power by xi(z)^2, so the distance
-    # that power actually corresponds to is the *effective* one, not the EM
-    # distance still sitting in `source_parameters`. `ImportanceCatalog` takes
-    # that effective distance directly and never corrects it again -- so the
-    # fiducial correction is applied here, exactly once.
-    log_reference_distance = jnp.log(samples["luminosity_distance"]) + log_gw_em_ratio(
-        samples["redshift"], fiducials["xi_0"], fiducials["xi_n"]
-    )
-    # The proposal is an MD/uniform *mixture*, not a single population, so it
-    # is cached through the ordinary constructor rather than
-    # `ImportanceCatalog.from_population`. Evaluating it here, once, is also
-    # what keeps it off the per-sampler-step path.
-    catalog = ImportanceCatalog(
-        source_parameters=samples,
-        polarization_power=jnp.asarray(band.polarization_power.values),
-        proposal_log_prob=compute_proposal_logprob(
-            samples["redshift"], proposal_config
-        ),
-        log_reference_distance=log_reference_distance,
-    )
-    estimator = SpectralDensityImportanceEstimator(
-        catalog,
-        partial(bns_population, redshift_grid=observation.redshift_grid),
-        average_mode,
+    # The proposal density is the catalog's own recorded population, evaluated
+    # at the parameters it was drawn at. Doing that here, once, is also what
+    # keeps it off the per-sampler-step path.
+    estimator = SpectralDensityImportanceEstimator.from_catalog(
+        proposal_catalog,
+        model=target_model,
+        average_mode=average_mode,
+        frequency_mask=band_mask,
     )
     return InferenceInputs(
         observation=observation,

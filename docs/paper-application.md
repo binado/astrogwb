@@ -43,7 +43,7 @@ scheduler and runtime logs under `logs/`.
 Filenames are the mapping, so there is no registry file:
 
 ```text
-config/populations/<population>.yaml            one complete population graph
+config/catalogs/base/population.toml            the shared population declaration
 config/catalogs/defs/<name>.toml -> outputs/catalogs/<name>.h5
 config/analysis/base/*.toml                     settings every run shares
 config/analysis/runs/<experiment>/_base.toml    the experiment override

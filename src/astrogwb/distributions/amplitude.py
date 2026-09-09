@@ -22,9 +22,9 @@ would be something else entirely. The predicted spectrum factorizes into two
 independently-scaling pieces, a total merger rate and a mean energy flux (the
 importance-weighted polarization-power contraction), so
 :math:`f = g_R \cdot g_F`; see
-:func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.amplitude_H0_fn`
+:func:`~astrogwb.populations.bns_madau_dickinson.amplitude_H0_fn`
 and
-:func:`~astrogwb.importance.models.bns_madau_dickinson_modified_propagation.amplitude_local_merger_rate_fn`
+:func:`~astrogwb.populations.bns_madau_dickinson.amplitude_local_merger_rate_fn`
 for the concrete scalings for :math:`H_0` and ``local_merger_rate``. Define
 the noise-weighted inner product
 :math:`(x|y) = \sum_i x_i y_i / \sigma_i^2`. Then

@@ -13,12 +13,16 @@ def test_pure_config_imports_do_not_import_jax() -> None:
     and configure the process without touching jax: importing jax is slow, and
     ``runtime`` deliberately imports it only inside ``configure_runtime``.
 
-    ``config.runs`` and ``config.catalogs`` are in this list rather than excluded
-    from it, and that is the point: the ``Snakefile`` imports both to build the
-    DAG, so every ``--dry-run`` paid for a jax import while ``config.catalogs``
-    read ``PopulationMetadata`` from ``astrogwb.catalog`` at module scope. It
-    reads it inside the two functions that need it now, and ``config.runs``
-    reaches no further than stdlib.
+    ``config.runs`` is the one this genuinely protects: the ``Snakefile``
+    imports it to build the DAG, so every ``--dry-run`` would pay for a jax
+    import. It reaches no further than stdlib.
+
+    ``config.catalogs`` is here as a cheap habit rather than a constraint. The
+    ``Snakefile`` no longer imports it -- populations are registered model
+    names, not graph files it has to resolve into rule inputs -- so its import
+    cost stops mattering for ``--dry-run``. It reaches the population registry
+    inside the one function that needs it, which keeps this true for free. The
+    constraint that *is* load-bearing is the one below.
     """
     code = """
 import sys
@@ -48,8 +52,10 @@ def test_catalog_inference_snr_imports_leave_the_xla_backend_uninitialized() -> 
     (``jax.devices()``, array creation) is what freezes ``JAX_PLATFORMS`` /
     ``set_host_device_count``. A late ``set_host_device_count(2)`` still yielding
     two devices proves catalogs / inference / snr did not consume that config.
-    ``config.catalogs`` belongs on this path too: the run script resolves the proposal
-    density from the catalog file's attributes *before* ``configure_runtime``.
+    This is the real requirement, and it is narrower than "no jax at import":
+    ``scripts/run_mcmc.py`` loads and validates both catalogs -- which executes
+    their recorded population models -- *before* ``configure_runtime``, so
+    those imports must leave the backend free even though they pull in jax.
     """
     code = """
 import astrogwb.paper.catalogs

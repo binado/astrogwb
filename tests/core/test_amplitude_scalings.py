@@ -11,26 +11,24 @@ formulas. If the cosmology or the importance weights ever change, this test
 
 from __future__ import annotations
 
-from functools import partial
+from dataclasses import replace
 
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
-# The `synthetic_importance_catalog` fixture builds its catalog at these
-# fiducials; a second copy here would let the two drift apart silently.
-from astrogwb_mock_population import FIDUCIALS, make_redshift_grid
+# The `synthetic_estimator` fixture builds its catalog at these fiducials; a
+# second copy here would let the two drift apart silently.
+from astrogwb_mock_population import FIDUCIALS
 
-from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.importance.models import bns_madau_dickinson_modified_propagation as mod
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
+from astrogwb.populations import (
     AMPLITUDE_PARAMETERS,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
-    bns_population,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
+from astrogwb.populations import bns_madau_dickinson as mod
 
 _SCALINGS = {
     "H0": (amplitude_H0_fn, merger_rate_H0_fn),
@@ -44,29 +42,25 @@ _SCALINGS = {
 _PHI_FACTORS = (0.5, 0.8, 1.3, 2.0)
 
 
-def _estimator(synthetic_importance_catalog, n_samples: int = 16):
+def _estimator(synthetic_estimator, n_samples: int = 16):
     """The real estimator over a synthetic catalog that is its own proposal.
 
     ``catalog_inclination`` keeps the contraction a plain weighted mean, so a
     drifted exponent shows up undivided by the 0.4 analytic factor.
     """
     rng = np.random.default_rng(0)
-    catalog, _ = synthetic_importance_catalog(
+    estimator, _ = synthetic_estimator(
         n_samples,
         polarization_power=jnp.asarray(rng.uniform(0.5, 1.5, size=(5, n_samples))),
     )
-    return SpectralDensityImportanceEstimator(
-        catalog,
-        partial(bns_population, redshift_grid=make_redshift_grid()),
-        "catalog_inclination",
-    )
+    return replace(estimator, average_mode="catalog_inclination")
 
 
 @pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
 def test_merger_rate_amplitude_matches_the_real_estimator(
-    parameter: str, synthetic_importance_catalog
+    parameter: str, synthetic_estimator
 ) -> None:
-    estimator = _estimator(synthetic_importance_catalog)
+    estimator = _estimator(synthetic_estimator)
     fiducial = FIDUCIALS[parameter]
     _amplitude_fn, merger_rate_fn = _SCALINGS[parameter]
 
@@ -89,9 +83,9 @@ def test_merger_rate_amplitude_matches_the_real_estimator(
 
 @pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
 def test_amplitude_factorization_matches_the_real_spectral_density(
-    parameter: str, synthetic_importance_catalog
+    parameter: str, synthetic_estimator
 ) -> None:
-    estimator = _estimator(synthetic_importance_catalog)
+    estimator = _estimator(synthetic_estimator)
     fiducial = FIDUCIALS[parameter]
     amplitude_fn, _merger_rate_fn = _SCALINGS[parameter]
 

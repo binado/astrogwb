@@ -1,4 +1,4 @@
-"""Cosmology helpers for the importance-weighting reference models.
+"""Cosmology helpers for the source-population models.
 
 These functions are pure and JAX-traceable: they accept anything JAX accepts
 (:data:`jax.typing.ArrayLike` -- Python scalars, NumPy arrays, JAX arrays,
@@ -8,8 +8,9 @@ at catalog-build time and inside the jitted NUTS model.
 The grid-based helpers are traceable because they evaluate on the exact
 ``z_grid`` array they are given: no static Python scalars (``max_redshift`` /
 ``n_grid``) need to be extracted from traced values inside the jitted NUTS
-model. Callers build ``z_grid`` once and bind it to the population factory; see
-:func:`astrogwb.importance.models.bns_madau_dickinson_modified_propagation.bns_population`.
+model. A population model binds its window and grid size as construction
+settings and rebuilds the grid from them; see
+:mod:`astrogwb.populations.bns_madau_dickinson`.
 """
 
 from __future__ import annotations

@@ -14,7 +14,6 @@ from repo import REPO_ROOT
 
 from astrogwb.paper.config.catalogs import (
     check_catalog_references,
-    discover_catalogs,
     validate_all_runs,
 )
 from astrogwb.paper.config.mcmc import build_run_config
@@ -73,7 +72,9 @@ def test_the_retired_inventories_are_gone() -> None:
     assert (PAPER_ROOT / "config/analysis/base").is_dir()
     assert (PAPER_ROOT / "config/catalogs/base").is_dir()
     assert (PAPER_ROOT / "config/catalogs/defs").is_dir()
-    assert (PAPER_ROOT / "config/populations").is_dir()
+    # config/populations went with the gwmock graph path: a population is a
+    # registered NumPyro model now, named by config/catalogs/base/population.toml.
+    assert not (PAPER_ROOT / "config/populations").exists()
 
 
 def test_every_experiment_has_the_required_base_overlay() -> None:
@@ -170,6 +171,8 @@ def test_every_run_names_declared_catalogs(experiment: str, run: str) -> None:
 #: collapsed into one file when catalogs stopped being composed in memory:
 #: astrophysical-parameters reuses the eps=0.1 guard catalog, and
 #: waveform-approximant/IMRPhenom reuses the injection catalog.
+
+
 @pytest.mark.parametrize(
     ("base_config", "message"),
     [
@@ -234,39 +237,21 @@ def test_the_validation_gate_covers_every_run() -> None:
 # --------------------------------------------------------------------------- #
 # Catalog configs
 # --------------------------------------------------------------------------- #
-def test_the_shared_waveform_block_is_declared_once() -> None:
-    """Every catalog inherits [waveform] from the base layer, not its own copy."""
+def test_the_shared_blocks_are_declared_once() -> None:
+    """Every catalog inherits [waveform] and [population] from the base layers.
+
+    Editing either base file must therefore invalidate all eight catalogs,
+    which is only true because they are declared as inputs of every one.
+    """
     for name in discover_catalog_names():
         layers = catalog_config_paths(name)
-        assert layers[0].name == "waveform.toml"
+        assert [path.name for path in layers[:-1]] == [
+            "population.toml",
+            "waveform.toml",
+        ]
         assert layers[-1].stem == name
         own = load_mapping(layers[-1])
-        # Only the TaylorF2 catalog overrides anything in the shared block.
+        # Only the TaylorF2 catalog overrides anything in the shared waveform
+        # block, and only the guard catalogs touch the shared population.
         assert set(own.get("waveform", {})) <= {"approximant"}, name
-
-
-def test_every_catalog_component_points_at_an_existing_population_graph() -> None:
-    for definition in discover_catalogs().values():
-        for path in definition.population_paths():
-            assert path.is_file(), definition.name
-
-
-def test_the_two_population_graphs_differ_only_in_redshift() -> None:
-    graphs = {
-        component.population: load_mapping(component.population_path())
-        for definition in discover_catalogs().values()
-        for component in definition.components
-    }
-    assert set(graphs) == {"madau-dickinson", "uniform-redshift"}
-
-    parameters = []
-    for graph in graphs.values():
-        without_redshift = dict(graph["parameters"])
-        without_redshift.pop("redshift")
-        parameters.append(without_redshift)
-    assert parameters[0] == parameters[1]
-    # Declaration order drives GraphSimulator's RNG key order via the
-    # topological sort's tie-breaking, so it must match too.
-    assert list(graphs["madau-dickinson"]["parameters"]) == list(
-        graphs["uniform-redshift"]["parameters"]
-    )
+        assert set(own.get("population", {})) <= {"model", "kwargs"}, name

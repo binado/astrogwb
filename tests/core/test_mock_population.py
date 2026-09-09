@@ -8,23 +8,22 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-import yaml
 from astrogwb_mock_population import (
     F_MAX,
     F_MIN,
     FIDUCIALS,
-    FIXTURES_DIR,
     MOCK_MAXIMUM_COMPONENT_MASS,
     MOCK_MINIMUM_COMPONENT_MASS,
-    MOCK_POPULATION_PATH,
-    MOCK_POPULATION_SEED,
+    POPULATION_PARAMS,
     Z_MAX,
     Z_MIN,
     catalog_samples,
     make_redshift_grid,
 )
+from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.constants import ISCO_ALPHA
+from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.gwb import (
     analytic_spectral_density_from_mass_moments,
     omega_gw_from_spectral_density,
@@ -32,46 +31,27 @@ from astrogwb.gwb import (
     spectral_density_from_omega_gw,
     uniform_prior_mass_moments,
 )
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    compute_merger_rate_distance_and_logprob,
-    madau_dickinson_rate,
-)
+from astrogwb.populations import bns_madau_dickinson
 
 CATALOG_DF = 8.0
 SMALL_CATALOG_SIZE = 256
 LARGE_CATALOG_SIZE = 1024
 
 
-def test_population_graph_matches_shared_mock_constants() -> None:
-    config = yaml.safe_load(
-        (FIXTURES_DIR / "mock_bns_population.yaml").read_text(encoding="utf-8")
+def test_mock_constants_match_the_population_declaration() -> None:
+    """The mass bounds the analytic comparison uses are the model's own.
+
+    The analytic spectrum below integrates a uniform component-mass prior over
+    exactly this range, so a change to the declared population that this module
+    did not follow would show up as a spurious convergence failure rather than
+    as a mismatch.
+    """
+    assert bns_madau_dickinson.SOURCE_FRAME_MASS_MINIMUM == (
+        MOCK_MINIMUM_COMPONENT_MASS
     )
-    parameters = config["parameters"]
-
-    redshift_arguments = parameters["redshift"]["sampler"]["arguments"]
-    assert redshift_arguments["hubble_constant"] == FIDUCIALS["H0"]
-    assert redshift_arguments["omega_m"] == FIDUCIALS["Omega_m"]
-    assert redshift_arguments["gamma"] == FIDUCIALS["gamma"]
-    assert redshift_arguments["kappa"] == FIDUCIALS["kappa"]
-    assert redshift_arguments["z_peak"] == FIDUCIALS["z_peak"]
-    assert redshift_arguments["z_min"] == Z_MIN
-    assert redshift_arguments["z_max"] == Z_MAX
-
-    mass_arguments = parameters["mass_pair"]["sampler"]["arguments"]
-    assert mass_arguments["m1_min"] == MOCK_MINIMUM_COMPONENT_MASS
-    assert mass_arguments["m1_max"] == MOCK_MAXIMUM_COMPONENT_MASS
-    assert mass_arguments["m2_min"] == MOCK_MINIMUM_COMPONENT_MASS
-    assert mass_arguments["m2_max"] == MOCK_MAXIMUM_COMPONENT_MASS
-
-
-def test_committed_population_provenance_matches_shared_constants() -> None:
-    header = MOCK_POPULATION_PATH.read_text(encoding="utf-8").splitlines()[0]
-    provenance = dict(
-        field.split("=", maxsplit=1) for field in header.removeprefix("# ").split()
+    assert bns_madau_dickinson.SOURCE_FRAME_MASS_MAXIMUM == (
+        MOCK_MAXIMUM_COMPONENT_MASS
     )
-
-    assert provenance["seed"] == str(MOCK_POPULATION_SEED)
-    assert provenance["num_samples"] == str(LARGE_CATALOG_SIZE)
 
 
 def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -> None:
@@ -82,8 +62,24 @@ def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -
     redshift = np.asarray(catalog.source_parameters["redshift"])
 
     assert waveform.frequencies.size == 512
-    assert catalog.population_metadata.num_samples == 1024
-    assert len(catalog.source_parameters) == 5
+    assert catalog.num_samples == 1024
+    # Every stochastic site plus every per-source deterministic the population
+    # declares -- the columns are the model's sites, by construction.
+    assert set(catalog.source_parameters) == {
+        "redshift",
+        "source_frame_mass_1",
+        "source_frame_mass_2",
+        "spin_1z",
+        "spin_2z",
+        "lambda_1",
+        "lambda_2",
+        "detector_frame_mass_1",
+        "detector_frame_mass_2",
+        "luminosity_distance",
+        "inclination",
+        "coa_phase",
+        "coa_time",
+    }
     assert waveform.df == CATALOG_DF
     assert waveform.minimum_frequency == 2.0
     assert waveform.maximum_frequency == 4096.0
@@ -110,7 +106,7 @@ def _source_frame_merger_rate(redshift: jax.Array, hyperparameters) -> jax.Array
     Deliberately *without* the source-to-detector time dilation.
     :func:`analytic_spectral_density_from_mass_moments` carries that inside its
     :math:`(1 + z)^{4/3}` factor, whereas
-    :func:`compute_merger_rate_distance_and_logprob` applies ``/(1 + z)``
+    :func:`reference_merger_rate_distance_and_logprob` applies ``/(1 + z)``
     inside its own density, :math:`p(z) \propto \psi(z)/(1+z)\,dV_c/dz`.
     Dividing here as well would double-count it -- exactly the class of error
     the two independent paths are being crossed to detect.
@@ -162,8 +158,10 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
     for num_sources, catalog in catalogs.items():
         polarization_power = jnp.asarray(catalog.polarization_power)
         samples = catalog_samples(catalog)
-        total_merger_rate, _, _ = compute_merger_rate_distance_and_logprob(
-            FIDUCIALS, samples, redshift_grid=make_redshift_grid()
+        total_merger_rate, _, _ = reference_merger_rate_distance_and_logprob(
+            POPULATION_PARAMS,
+            samples["redshift"],
+            redshift_grid=make_redshift_grid(),
         )
         contracted = spectral_density(
             polarization_power,
@@ -199,8 +197,8 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
 def _analytic_spectral_density(frequencies: jax.Array) -> jax.Array:
     """The population spectrum the catalog contraction estimates.
 
-    The same physics with no sampling anywhere: a uniform ordered mass prior
-    over the pinned graph's component-mass bounds, the same Madau-Dickinson
+    The same physics with no sampling anywhere: a uniform mass prior over the
+    declared component-mass bounds, the same Madau-Dickinson
     rate, and the same ISCO truncation the catalog's polarization power was
     built with.
     """
@@ -251,8 +249,8 @@ def test_catalog_omega_gw_matches_the_analytic_spectrum(mock_catalog_factory) ->
     frequencies = jnp.asarray(catalog.waveform_metadata.frequencies)
     polarization_power = jnp.asarray(catalog.polarization_power)
     samples = catalog_samples(catalog)
-    total_merger_rate, _, _ = compute_merger_rate_distance_and_logprob(
-        FIDUCIALS, samples, redshift_grid=make_redshift_grid()
+    total_merger_rate, _, _ = reference_merger_rate_distance_and_logprob(
+        POPULATION_PARAMS, samples["redshift"], redshift_grid=make_redshift_grid()
     )
     contracted = spectral_density(
         polarization_power,

@@ -7,6 +7,7 @@ against explicit quadrature.
 """
 
 from collections.abc import Mapping
+from dataclasses import replace
 from functools import partial
 from typing import Any
 
@@ -15,21 +16,23 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
-from astrogwb_mock_population import FIDUCIALS, make_redshift_grid
+from astrogwb_mock_population import (
+    FIDUCIALS,
+    build_synthetic_estimator,
+    make_redshift_grid,
+    mock_target_model,
+)
 from jax.typing import ArrayLike
 from numpyro import handlers
 from numpyro.infer import MCMC, NUTS, Predictive
 from numpyro.infer.util import log_density
+from reference_population import reference_merger_rate_distance_and_logprob
 
-from astrogwb.catalog import ImportanceCatalog
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.distributions.amplitude import AmplitudeConditional, quadrature_grid
 from astrogwb.gwb import AverageMode, spectral_density
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.importance.models.bns_madau_dickinson_modified_propagation import (
-    bns_population,
-    compute_merger_rate_distance_and_logprob,
-)
+from astrogwb.populations.bns_madau_dickinson import bns_md_modified_propagation
 from astrogwb.sampling import (
     SpectralDensityFn,
     amplitude_reconstruction_model,
@@ -217,29 +220,23 @@ def test_generic_rejects_sampled_amplitude_before_evaluation() -> None:
 
 
 def _importance_estimator(mode: AverageMode) -> SpectralDensityImportanceEstimator:
-    """The estimator over a catalog that is its own proposal at ``FIDUCIALS``."""
-    grid = make_redshift_grid()
-    factory = partial(bns_population, redshift_grid=grid)
-    population = factory(FIDUCIALS)
-    redshift = jnp.array([0.4, 1.2, 3.7, 7.1])
-    samples = {
-        "redshift": redshift,
-        "luminosity_distance": population.luminosity_distance(redshift),
-    }
-    power = jnp.arange(1.0, 13.0).reshape(3, 4)
-    catalog = ImportanceCatalog.from_population(
-        population=population,
-        source_parameters=samples,
-        polarization_power=power,
-        luminosity_distance=samples["luminosity_distance"],
+    """The estimator over a catalog that is its own proposal at ``FIDUCIALS``.
+
+    The target model is wrapped so that only the *sampled* parameters arrive
+    through ``params``; everything else is pinned at the fiducials, which is
+    what the paper layer's conditioning handlers do.
+    """
+    estimator, _ = build_synthetic_estimator(
+        4, polarization_power=jnp.arange(1.0, 13.0).reshape(3, 4)
     )
+    target = mock_target_model()
 
-    # The concrete factory binds fixed parameters once; the sampled H0
-    # equivalents here remain dynamic inputs to the population.
-    def target(params):
-        return factory({**FIDUCIALS, **params})
+    def pinned_call(params: Mapping[str, ArrayLike], **settings: object) -> None:
+        """Take unsampled hyperparameters from the test's fixed fiducials."""
+        bns_md_modified_propagation({**FIDUCIALS, **params}, **settings)
 
-    return SpectralDensityImportanceEstimator(catalog, target, mode)
+    pinned = replace(target, fn=pinned_call)
+    return replace(estimator, model=pinned, average_mode=mode)
 
 
 def _reference_spectrum(
@@ -247,28 +244,27 @@ def _reference_spectrum(
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Rate, weights, and spectrum from the hand-written grid-level formula.
 
-    Deliberately *not* routed through ``Population``: this restates
-    ``compute_merger_rate_distance_and_logprob`` and the weight ratio in full,
-    so it fails if the class-based path drifts rather than agreeing with it by
-    construction. The two are pinned bit-identical by
-    ``tests/core/test_distributions.py``.
+    Deliberately *not* routed through the population model: this restates the
+    grid-level formula and the weight ratio in full, so it fails if the model
+    path drifts rather than agreeing with it by construction. The two are
+    pinned bit-identical by ``tests/core/test_distributions.py``.
     """
-    catalog = estimator.catalog
+    redshift = estimator.source_parameters["redshift"]
     full = {**FIDUCIALS, **params}
-    rate, distance, logprob = compute_merger_rate_distance_and_logprob(
-        full, catalog.source_parameters, redshift_grid=make_redshift_grid()
+    rate, distance, logprob = reference_merger_rate_distance_and_logprob(
+        full, redshift, redshift_grid=make_redshift_grid()
     )
     log_target_distance = jnp.log(distance) + log_gw_em_ratio(
-        catalog.source_parameters["redshift"], full["xi_0"], full["xi_n"]
+        redshift, full["xi_0"], full["xi_n"]
     )
     log_weights = (
         logprob
-        - catalog.proposal_log_prob
-        - 2.0 * (log_target_distance - catalog.log_reference_distance)
+        - estimator.proposal_log_prob
+        - 2.0 * (log_target_distance - estimator.log_reference_distance)
     )
     weights = jnp.exp(log_weights)
     factor = 0.4 if estimator.average_mode == "analytic_inclination" else 1.0
-    spectrum = factor * rate * (catalog.polarization_power @ weights) / weights.size
+    spectrum = factor * rate * (estimator.polarization_power @ weights) / weights.size
     return rate, log_weights, spectrum
 
 

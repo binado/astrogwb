@@ -41,12 +41,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from astrogwb.paper.config.mcmc import ProposalConfig, RunConfig, build_run_config
+from astrogwb.paper.config.mcmc import RunConfig, build_run_config
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
-    import xarray as xr
+    from astrogwb.catalog import Catalog
 
 logger = logging.getLogger("profile_model")
 
@@ -102,9 +102,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_potential(
     config: RunConfig,
-    injection_catalog: xr.Dataset,
-    proposal_catalog: xr.Dataset,
-    proposal: ProposalConfig,
+    injection_catalog: Catalog,
+    proposal_catalog: Catalog,
     jax,
 ):
     """Build the production model inputs and return (potential_fn, init_params).
@@ -120,15 +119,15 @@ def build_potential(
         build_model,
         initial_values,
         prepare_inference_inputs,
+        target_population_model,
     )
 
     inputs = prepare_inference_inputs(
         injection_catalog,
         proposal_catalog,
-        fiducials=config.fiducials,
-        proposal_config=proposal,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
+        target_model=target_population_model(config),
     )
     model, _ = build_model(
         config,
@@ -166,12 +165,11 @@ def main(argv: list[str] | None = None) -> None:
     outdir = args.outdir.resolve()
     config = build_run_config(load_merged_config(args), seed=args.seed)
 
-    # Resolve the proposal density from the catalog's provenance before JAX
-    # starts, the same way scripts/run_mcmc.py does -- what is profiled must be
-    # the production model on production inputs.
-    from astrogwb.paper.catalogs import load_run_catalog, resolve_run_proposal
+    # Load both catalogs before JAX starts, the same way scripts/run_mcmc.py
+    # does -- what is profiled must be the production model on production
+    # inputs, including the proposal density each file records for itself.
+    from astrogwb.paper.catalogs import load_run_catalog
 
-    proposal = resolve_run_proposal(config, args.proposal_catalog.resolve())
     injection_catalog = load_run_catalog(
         args.injection_catalog.resolve(), label="injection"
     )
@@ -188,7 +186,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     potential_fn, init_params = build_potential(
-        config, injection_catalog, proposal_catalog, proposal, jax
+        config, injection_catalog, proposal_catalog, jax
     )
 
     forward_mode = config.sampler.forward_mode_differentiation and not args.reverse_ad

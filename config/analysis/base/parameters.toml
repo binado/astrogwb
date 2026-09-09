@@ -1,7 +1,11 @@
-# Fiducial values every run injects at, and the prior for each. The
-# MD-rate fiducials (H0, Omega_m, gamma, kappa, z_peak) must equal what
-# the proposal bank was generated at; astrogwb.paper.banks.
-# check_fiducials_match enforces that against the bank file itself.
+# Fiducial values every run injects at, and the prior for each.
+#
+# These are *not* the injection: what was injected is recorded in the injection
+# catalog file, which is where the observed spectrum's rate and density come
+# from. These are where NUTS initializes each sampled parameter, what the
+# non-sampled sites are conditioned at, and the reference point an
+# amplitude-marginalized run forms its ratio against. Nothing cross-checks them
+# against a catalog any more, because nothing needs to.
 #
 # Every fiducial carries a prior here. RunConfig retains the complete table;
 # sampled_params selects the NUTS latents and the remaining sites are fixed by

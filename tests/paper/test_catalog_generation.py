@@ -1,134 +1,151 @@
-"""Population-draw properties the persisted catalogs rely on."""
+"""End-to-end generation: config layers in, a self-describing catalog out.
+
+The RNG properties the persisted catalogs rely on -- reproducibility and prefix
+stability across sizes -- are properties of the population declaration and are
+pinned in ``tests/core/test_populations.py``. What is left for this layer is
+that the committed config schema actually reaches the generator, and that what
+lands on disk describes itself well enough to load.
+"""
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
-import yaml
+from repo import REPO_ROOT
 
-from astrogwb.catalog import (
-    PopulationMetadata,
-    simulate_population,
-    simulate_population_mixture,
-)
+from astrogwb.catalog import Catalog
+
+CATALOG_TOML = """
+num_samples = 8
+seed = 41
+
+[population]
+model = "{model}"
+
+[population.kwargs]
+z_min = 0.0
+z_max = 20.0
+n_grid = 256
+{extra_kwargs}
+
+[population.params]
+H0 = 67.66
+Omega_m = 0.3096
+gamma = 1.42
+kappa = 4.62
+z_peak = 1.84
+local_merger_rate = 770.0
+
+[waveform]
+approximant = "TaylorF2"
+sampling_frequency = 512.0
+minimum_frequency = 16.0
+maximum_frequency = 64.0
+reference_frequency = 16.0
+frequency_resolution = 1.0
+chunk_size = 8
+"""
 
 
-def _simple_graph(path: Path, minimum: float, maximum: float) -> Path:
-    """A one-parameter graph: enough for the RNG-stream properties."""
+@pytest.fixture(scope="module")
+def generate_catalog():
+    """Import ``scripts/generate_catalog.py``, which is not an installed module."""
+    path = REPO_ROOT / "scripts" / "generate_catalog.py"
+    spec = importlib.util.spec_from_file_location("generate_catalog_script", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _config(tmp_path: Path, *, model: str, extra_kwargs: str = "") -> Path:
+    path = tmp_path / "toy-catalog.toml"
     path.write_text(
-        yaml.safe_dump(
-            {
-                "parameters": {
-                    "redshift": {
-                        "sampler": {
-                            "function": "uniform",
-                            "arguments": {"minimum": minimum, "maximum": maximum},
-                        }
-                    },
-                    "marker": {
-                        "transform": {
-                            "function": "constant_like",
-                            "arguments": {"reference": "@redshift", "value": minimum},
-                        }
-                    },
-                }
-            },
-            sort_keys=False,
-        ),
-        encoding="utf-8",
+        CATALOG_TOML.format(model=model, extra_kwargs=extra_kwargs), encoding="utf-8"
     )
     return path
 
 
-def test_seeded_generation_is_reproducible(tmp_path: Path) -> None:
-    config = _simple_graph(tmp_path / "md.yaml", 0.0, 1.0)
-    metadata = PopulationMetadata(
-        name="test", seed=12, num_samples=1000, source_type="bns"
+@pytest.mark.integration
+def test_generation_produces_a_catalog_that_describes_itself(
+    generate_catalog, tmp_path: Path
+) -> None:
+    definition = generate_catalog.load_catalog_layers(
+        [_config(tmp_path, model="bns_md_cosmological")]
     )
+    catalog = generate_catalog.build_catalog(definition)
 
-    first = simulate_population(config, metadata=metadata)
-    second = simulate_population(config, metadata=metadata)
+    assert catalog.num_samples == 8
+    assert catalog.seed == 41
+    assert catalog.population_model_name == "bns_md_cosmological"
+    assert catalog.population_model_kwargs == {
+        "z_min": 0.0,
+        "z_max": 20.0,
+        "n_grid": 256,
+    }
+    assert catalog.fiducials["local_merger_rate"] == 770.0
+    assert catalog.density_sites == ("redshift",)
+    assert catalog.polarization_power.shape[1] == 8
 
-    np.testing.assert_array_equal(first["redshift"], second["redshift"])
-
-
-def test_generation_draws_are_a_prefix_stable_stream(tmp_path: Path) -> None:
-    """A smaller draw is a bit-identical prefix of a larger one, same seed.
-
-    This pins what makes variable-catalog-size a clean series: the three
-    ``md-imrphenom-s42-n*`` catalogs are separate files drawn independently,
-    and they are only nested draws because ``GraphSimulator`` draws from its
-    construction-time RNG (``del kwargs`` in ``_simulate_impl``), so requesting
-    fewer samples never perturbs the stream. A ``gwmock_pop`` upgrade that
-    broke this would silently turn that experiment into three unrelated runs
-    without touching this file.
-    """
-    config = _simple_graph(tmp_path / "md.yaml", 0.0, 1.0)
-    small_metadata = PopulationMetadata(
-        name="test", seed=5, num_samples=8, source_type="bns"
-    )
-    large_metadata = PopulationMetadata(
-        name="test", seed=5, num_samples=32, source_type="bns"
-    )
-
-    small = simulate_population(config, metadata=small_metadata)
-    large = simulate_population(config, metadata=large_metadata)
-
+    # Round-tripping is the real assertion: loading re-executes the recorded
+    # population and compares every derived column against the file.
+    path = tmp_path / "toy-catalog.h5"
+    catalog.save(path)
+    restored = Catalog.load(path)
     np.testing.assert_array_equal(
-        np.asarray(large["redshift"])[:8], np.asarray(small["redshift"])
+        restored.polarization_power, catalog.polarization_power
     )
+    assert restored.fiducials == catalog.fiducials
 
 
-def test_a_mixture_draws_each_component_at_its_declared_weight(tmp_path: Path) -> None:
-    """Component counts follow the weights, and every sample comes from one of them.
-
-    The two graphs have disjoint support, so which component produced a sample
-    is readable off its value alone.
-    """
-    low = _simple_graph(tmp_path / "low.yaml", 0.0, 1.0)
-    high = _simple_graph(tmp_path / "high.yaml", 10.0, 11.0)
-    metadata = PopulationMetadata(
-        name="test", seed=61, num_samples=4000, source_type="bns"
+@pytest.mark.integration
+def test_generation_is_reproducible_from_the_same_config(
+    generate_catalog, tmp_path: Path
+) -> None:
+    definition = generate_catalog.load_catalog_layers(
+        [_config(tmp_path, model="bns_md_cosmological")]
     )
+    first = generate_catalog.build_catalog(definition)
+    second = generate_catalog.build_catalog(definition)
 
-    drawn = np.asarray(
-        simulate_population_mixture(
-            [(low, 42, 0.9), (high, 51, 0.1)], metadata=metadata
-        )["redshift"]
+    for name, values in first.source_parameters.items():
+        np.testing.assert_array_equal(values, second.source_parameters[name])
+    np.testing.assert_array_equal(first.polarization_power, second.polarization_power)
+
+
+@pytest.mark.integration
+def test_the_guard_mixture_is_generated_from_its_declared_fraction(
+    generate_catalog, tmp_path: Path
+) -> None:
+    """The eps in the config is the eps the file records and reweights by."""
+    definition = generate_catalog.load_catalog_layers(
+        [
+            _config(
+                tmp_path,
+                model="bns_md_uniform_mixture",
+                extra_kwargs="uniform_mixing_fraction = 0.1",
+            )
+        ]
     )
+    catalog = generate_catalog.build_catalog(definition)
 
-    from_low = (drawn >= 0.0) & (drawn <= 1.0)
-    from_high = (drawn >= 10.0) & (drawn <= 11.0)
-    assert np.all(from_low | from_high)
-    assert 0.85 < from_low.mean() < 0.95
+    assert catalog.population_model_name == "bns_md_uniform_mixture"
+    assert catalog.population_model_kwargs["uniform_mixing_fraction"] == 0.1
+    path = tmp_path / "guard.h5"
+    catalog.save(path)
+    assert Catalog.load(path).population_model_kwargs["uniform_mixing_fraction"] == 0.1
 
 
-def test_a_lone_component_does_not_go_through_the_mixture_path(tmp_path: Path) -> None:
-    """One component is a plain graph draw, never a one-entry mixture.
-
-    ``MixtureSimulator`` splits its seed to draw component assignments, so
-    wrapping a single graph would change its RNG stream -- and with it every
-    single-component catalog, forcing all 26 chains to be regenerated.
-    ``scripts/generate_catalog.py`` dispatches on component count to avoid
-    exactly that; this pins that the two paths really are different.
-    """
-    config = _simple_graph(tmp_path / "md.yaml", 0.0, 1.0)
-    metadata = PopulationMetadata(
-        name="test", seed=7, num_samples=64, source_type="bns"
+def test_an_unregistered_model_fails_before_any_waveform_is_generated(
+    generate_catalog, tmp_path: Path
+) -> None:
+    definition = generate_catalog.load_catalog_layers(
+        [_config(tmp_path, model="no_such_population")]
     )
-
-    with pytest.raises(ValueError, match="at least two components"):
-        simulate_population_mixture([(config, 7, 1.0)], metadata=metadata)
-
-    # Balanced weights so both components certainly contribute: the mixture
-    # path permutes and re-slices the stream, so even over one graph at one
-    # seed it cannot reproduce the direct draw.
-    direct = np.asarray(simulate_population(config, metadata=metadata)["redshift"])
-    mixed = np.asarray(
-        simulate_population_mixture(
-            [(config, 7, 0.5), (config, 7, 0.5)], metadata=metadata
-        )["redshift"]
-    )
-    assert not np.array_equal(direct, mixed)
+    with pytest.raises(ValueError, match="bns_md_cosmological"):
+        generate_catalog.build_catalog(definition)

@@ -136,6 +136,62 @@ def _catalogs(tmp_path: Path, *names: str) -> Path:
     return directory
 
 
+def test_catalog_rule_reads_its_config_layers_directly() -> None:
+    """One rule per catalog, and the population is one of its config layers.
+
+    The population used to be a separate graph file declared as an extra
+    input. It is a registered model named by `config/catalogs/base/population.
+    toml` now, so the layer list *is* the dependency edge -- there is nothing
+    else for the rule to declare.
+    """
+    result = _snakemake(
+        "--snakefile",
+        str(SNAKEFILE),
+        "--allowed-rules",
+        *CATALOG_RULES,
+        "--dry-run",
+        "--forceall",
+        "--printshellcmds",
+        "--cores",
+        "1",
+        "outputs/catalogs/md-imrphenom-s41-n32768.h5",
+        "outputs/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.h5",
+    )
+
+    assert result.returncode == 0, result.stderr
+    # The shared base layer is an input of both, so editing it rebuilds both.
+    assert result.stdout.count("config/catalogs/base/waveform.toml") >= 2
+    assert "config/catalogs/defs/md-imrphenom-s41-n32768.toml" in result.stdout
+    assert (
+        "config/catalogs/defs/md-uniform-imrphenom-s61-n16384-eps1e-1.toml"
+        in result.stdout
+    )
+    # Editing the shared population declaration rebuilds every catalog.
+    assert result.stdout.count("config/catalogs/base/population.toml") >= 2
+    assert "outputs/catalogs/md-imrphenom-s41-n32768.h5" in result.stdout
+    assert (
+        "outputs/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.h5" in result.stdout
+    )
+    assert "python scripts/generate_catalog.py" in result.stdout
+    assert any(
+        "scripts/generate_catalog.py" in line for line in _rule_inputs(result.stdout)
+    )
+    # Layers reach the script as repeated flags, never space-joined into one.
+    assert (
+        "--config config/catalogs/base/population.toml "
+        "--config config/catalogs/base/waveform.toml "
+        "--config config/catalogs/defs/md-imrphenom-s41-n32768.toml"
+    ) in result.stdout
+    # The population intermediate, its merge rule, and the graph configs the
+    # rule used to declare are all gone.
+    assert "outputs/populations/" not in result.stdout
+    assert "outputs/population-configs/" not in result.stdout
+    assert "config/populations/" not in result.stdout
+    # The bank/catalog split is gone: no separate bank tree, no bank rule.
+    assert "outputs/banks/" not in result.stdout
+    assert "config/banks/" not in result.stdout
+
+
 def test_the_snakefile_no_longer_needs_ancient() -> None:
     """Per-run configs restore real change tracking.
 

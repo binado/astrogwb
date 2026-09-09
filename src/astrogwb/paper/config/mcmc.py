@@ -56,10 +56,10 @@ class AnalysisGrid:
 # --------------------------------------------------------------------------- #
 # Pydantic models
 # --------------------------------------------------------------------------- #
-# Restates astrogwb.importance.models.bns_madau_dickinson_modified_propagation
-# .AMPLITUDE_PARAMETERS rather than importing it: this module must stay
-# stdlib+pydantic only (see module docstring), so a
-# @pytest.mark.integration paper test cross-checks the two lists instead.
+# Restates astrogwb.populations.bns_madau_dickinson.AMPLITUDE_PARAMETERS rather
+# than importing it: this module must stay stdlib+pydantic only (see module
+# docstring), so a @pytest.mark.integration paper test cross-checks the two
+# lists instead.
 AmplitudeParameter = Literal["H0", "local_merger_rate"]
 
 
@@ -168,6 +168,14 @@ class AnalysisConfig(BaseModel):
     detectors: tuple[str, ...]
     f_min: float
     f_max: float
+    # The registered population the sampled hyperparameters describe. The
+    # default is the one every committed run uses; it reduces exactly to the
+    # plain cosmological population at xi_0 = 1, which is how a run that does
+    # not sample the propagation parameters gets the standard law without
+    # naming a second model. Validated against the registry by
+    # `astrogwb.paper.config.catalogs.check_population_models`, not here: this
+    # module must stay importable without JAX.
+    population_model: str = "bns_md_modified_propagation"
     likelihood: Literal["default", "amplitude_marginalized"] = "default"
     amplitude_parameter: AmplitudeParameter | None = None
     amplitude_num_nodes: Annotated[int, Field(gt=1)] = 1024
@@ -218,51 +226,16 @@ class OutputConfig(BaseModel):
     label: str = ""
 
 
-class ProposalConfig(BaseModel):
-    """The fixed redshift density the importance weights divide by.
-
-    Not a config *input*: it is derived at run time from the proposal
-    catalog's recorded provenance plus the run's analysis window (see
-    :func:`astrogwb.paper.config.catalogs.resolve_proposal`). Scripts and
-    notebooks that reweight outside the sampler construct one directly.
-
-    Note the name collision with ``RunConfig.catalog.proposal``, which is kept
-    deliberately: that field names the *catalog* while this one is the
-    *density* its samples follow.
-    """
-
-    model_config = _STRICT
-
-    uniform_mixing_fraction: Annotated[
-        float, Field(ge=0.0, le=1.0, allow_inf_nan=False)
-    ]
-    minimum_redshift: float
-    maximum_redshift: float
-    n_grid: Annotated[int, Field(gt=1)]
-    H0: float
-    Omega_m: float
-    gamma: float
-    kappa: float
-    z_peak: float
-
-    @model_validator(mode="after")
-    def _validate_support(self) -> ProposalConfig:
-        if self.maximum_redshift <= self.minimum_redshift:
-            raise ValueError(
-                "proposal maximum_redshift must be greater than minimum_redshift"
-            )
-        return self
-
-
 class CatalogConfig(BaseModel):
     """The two catalogs this run uses: the injection and the proposal.
 
     Each role names one persisted catalog under ``config/catalogs/defs``, whose
     stem is both the config filename and the ``outputs/catalogs/<name>.h5`` it
     produces. The run records the *name* only: everything about how the catalog
-    was drawn -- components, seeds, mixing fractions, and the redshift density
-    that follows from them -- is recorded in the file itself and read back at
-    run time.
+    was drawn -- the population model, its construction settings, the
+    hyperparameters, and the included density factors -- is recorded in the
+    file itself and read back at run time. The two roles differ by filename and
+    nothing else.
     """
 
     model_config = _STRICT

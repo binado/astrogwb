@@ -1,19 +1,22 @@
-# Guarded proposal at eps = 1e-2: a Madau-Dickinson draw with a
-# uniform-redshift component mixed in, so the importance weights do not
+# Guarded proposal at eps = 1e-2: the Madau-Dickinson redshift law with a
+# uniform-in-redshift component mixed in, so the importance weights do not
 # degenerate when NUTS moves the posterior away from the proposal.
 #
-# The component seeds run the two graph streams; mixture_seed seeds only the
-# per-sample component assignment, which MixtureSimulator splits before
-# drawing -- so the three seeds need not be distinct.
+# The mixture is one density, not two draws blended after the fact: the same
+# `MixtureGeneral` that draws the redshifts evaluates their log density, so the
+# recorded guard fraction can never be something other than what was drawn.
+# That replaced a pair of gwmock graphs whose only difference was the redshift
+# block, plus a hand-written mixture log-density in the analysis layer.
+#
+# [population.params] is inherited whole from the base layer, `local_merger_rate`
+# included. The model does declare a `total_merger_rate` from it, but nothing
+# reads one off a proposal: a guard mixture is a sampling density, not a
+# physical population, and only the injection catalog's rate is an observation.
 num_samples = 16384
-mixture_seed = 62
+seed = 62
 
-[[components]]
-population = "madau-dickinson"
-seed = 42
-weight = 0.99
+[population]
+model = "bns_md_uniform_mixture"
 
-[[components]]
-population = "uniform-redshift"
-seed = 51
-weight = 0.01
+[population.kwargs]
+uniform_mixing_fraction = 1e-2

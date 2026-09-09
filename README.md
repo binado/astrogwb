@@ -11,11 +11,10 @@ pip install astrogwb
 ```
 
 Optional accelerator builds are available as `astrogwb[cuda]` and
-`astrogwb[tpu]`. Install the population-simulation adapter separately when it
-is needed:
+`astrogwb[tpu]`. Direct HDF5 catalog serialization is opt-in:
 
 ```bash
-pip install astrogwb[simulation]
+pip install astrogwb[io]
 ```
 
 ## Library modules
@@ -29,12 +28,16 @@ pip install astrogwb[simulation]
   calculations. `astrogwb.gwb.analytic` evaluates the inspiral-only
   background in closed form, truncated on the same dimensionless `alpha` as
   `astrogwb.waveform`.
-- `astrogwb.importance` defines the reusable importance-weighting protocol and
-  compact-binary population model.
+- `astrogwb.populations` declares source populations as NumPyro models,
+  addressed by registered name. One declaration serves both generation and
+  density evaluation, so a catalog and the weights that reweight it can never
+  disagree about the law behind it.
+- `astrogwb.importance` reweights a fixed catalog to a target population and
+  contracts it into a spectrum.
 - `astrogwb.sampling` exposes the caller-prepared NumPyro model.
-- `astrogwb.catalog` provides array-native catalog validation and population
-  simulation. The optional `gwmock-pop` adapter is imported only when
-  `simulate_population` is called.
+- `astrogwb.catalog` provides an array-native catalog that records the
+  population that drew it, and reads and writes it as HDF5 behind the `io`
+  extra.
 - `astrogwb.waveform` owns polarization-power generators, reduces raw
   plus/cross polarizations to power, applies GW-distance corrections to plain
   arrays, and provides a closed-form quadrupolar inspiral model. Persistence
@@ -52,33 +55,59 @@ hanford = load_detector("H1")
 sensitivity = load_sensitivity("H1")
 ```
 
-A prepared population can be reduced through the common generation interface:
+A population is drawn, reduced to polarization power, and stored together with
+the declaration that produced it:
 
 ```python
+import jax
+
+from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.catalog import Catalog, PopulationMetadata
+from astrogwb.populations import BNSMadauDickinson
 from astrogwb.waveform import AnalyticInspiralGenerator
 
-generator = AnalyticInspiralGenerator(
-    alpha=ISCO_ALPHA,
-    approximant="AnalyticInspiral",
-    minimum_frequency=2.0,
-    maximum_frequency=2048.0,
-    reference_frequency=2.0,
-    sampling_frequency=4096.0,
-    df=1.0,
-)
-population_metadata = PopulationMetadata(
-    name="my-caller-owned-graph",
-    seed=42,
-    num_samples=len(source_parameters["redshift"]),
-)
+model_kwargs = {"z_min": 0.0, "z_max": 20.0, "n_grid": 4096}
+params = {
+    "H0": 67.66,
+    "Omega_m": 0.3096,
+    "gamma": 1.42,
+    "kappa": 4.62,
+    "z_peak": 1.84,
+    "local_merger_rate": 770.0,
+}
+population = BNSMadauDickinson(**model_kwargs)
+source_parameters = population.sample(jax.random.PRNGKey(42), params, num_samples=1024)
 
 catalog = Catalog.from_generator(
     source_parameters,
-    generator=generator,
-    population_metadata=population_metadata,
+    generator=AnalyticInspiralGenerator(
+        alpha=ISCO_ALPHA,
+        approximant="AnalyticInspiral",
+        minimum_frequency=2.0,
+        maximum_frequency=2048.0,
+        reference_frequency=2.0,
+        sampling_frequency=4096.0,
+        df=1.0,
+    ),
+    model_name="bns_md_cosmological",
+    model_kwargs=model_kwargs,
+    fiducials=params,
+    density_sites=population.density_sites,
+    seed=42,
 )
+catalog.save("catalog.h5")
+```
+
+Reweighting it to a target population needs nothing else: the file says what
+drew it, so the proposal density is recovered rather than restated.
+
+```python
+from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
+
+estimator = SpectralDensityImportanceEstimator.from_catalog(
+    Catalog.load("catalog.h5"), average_mode="analytic_inclination"
+)
+spectrum, extras = estimator({**params, "H0": 70.0})
 ```
 
 ## The manuscript application
