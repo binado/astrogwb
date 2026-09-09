@@ -113,6 +113,9 @@ def load_catalog[C: Catalog](cls: type[C], path: str | Path) -> C:
         names = _json_list(
             attrs[PARAMETER_NAMES_ATTR], label=label, name=PARAMETER_NAMES_ATTR
         )
+        seed = attrs[POPULATION_SEED_ATTR]
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise TypeError(f"{label}: {POPULATION_SEED_ATTR} must be an int")
         values = np.asarray(handle["source_parameters"])
         catalog = cls(
             source_parameters={
@@ -137,7 +140,7 @@ def load_catalog[C: Catalog](cls: type[C], path: str | Path) -> C:
                     attrs[DENSITY_SITES_ATTR], label=label, name=DENSITY_SITES_ATTR
                 )
             ),
-            seed=attrs[POPULATION_SEED_ATTR],
+            seed=seed,
         )
     catalog.get_population_model()  # verify registry reconstruction
     return catalog

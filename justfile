@@ -64,7 +64,7 @@ test: test-core test-paper
 
 # Convert and execute the root notebooks.
 test-notebooks:
-    uv run --extra simulation --extra io --group jupyter \
+    uv run --extra notebook --group jupyter \
         jupytext --to notebook --execute notebooks/catalog_convergence.py
 
 # Convert notebook from py:percent format to .ipynb
