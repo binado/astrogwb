@@ -12,12 +12,12 @@ import numpyro.distributions as dist
 import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
+    MOCK_POPULATION_SEED,
     N_GRID,
     Z_MAX,
     Z_MIN,
     derived_columns,
     make_redshift_grid,
-    mock_population_metadata,
     mock_target_model,
 )
 from jax.typing import ArrayLike
@@ -106,11 +106,13 @@ def _catalog(
         },
         polarization_power=np.asarray(power),
         waveform_metadata=_waveform_metadata(power.shape[0]),
-        population_metadata=mock_population_metadata(power.shape[1]),
         _model_name="bns_md_cosmological",
         _model_kwargs=MODEL_KWARGS,
         _population_params=params,
         _density_sites=("redshift",),
+        seed=MOCK_POPULATION_SEED,
+        name="bns_md_cosmological",
+        source_type="bns",
     )
 
 

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 import jax
 import numpy as np
 import pytest
 
-from astrogwb.catalog import Catalog, PopulationMetadata
+from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
@@ -41,18 +40,6 @@ def _waveform_generator() -> PolarizationPowerGenerator:
     )
 
 
-def _population_metadata(
-    *, num_samples: int = 2, provenance: Mapping[str, str | int | float] | None = None
-) -> PopulationMetadata:
-    return PopulationMetadata(
-        name="test-population",
-        seed=42,
-        num_samples=num_samples,
-        source_type="bns",
-        provenance={} if provenance is None else provenance,
-    )
-
-
 #: The population record every direct construction has to carry. The catalog
 #: is the record of the density that drew it, so there is no valid catalog
 #: without one.
@@ -71,6 +58,12 @@ POPULATION_RECORD: dict[str, Any] = {
 }
 PRIVATE_RECORD: dict[str, Any] = {
     f"_{name}": value for name, value in POPULATION_RECORD.items()
+}
+CATALOG_DEFAULTS: dict[str, Any] = {
+    **PRIVATE_RECORD,
+    "seed": 42,
+    "name": "test-population",
+    "source_type": "bns",
 }
 
 
@@ -109,16 +102,22 @@ def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes
         sampling_frequency=32.0,
         df=2.0,
     )
-    population = _population_metadata(provenance={"producer": "test"})
     catalog = Catalog.from_generator(
         source_parameters,
         generator=generator,
-        population_metadata=population,
+        seed=42,
+        name="test-population",
+        source_type="bns",
+        provenance={"producer": "test"},
         **POPULATION_RECORD,
     )
 
     assert catalog.waveform_metadata is generator
-    assert catalog.population_metadata is population
+    assert catalog.seed == 42
+    assert catalog.name == "test-population"
+    assert catalog.source_type == "bns"
+    assert catalog.provenance == {"producer": "test"}
+    assert catalog.num_samples == 2
     assert catalog.source_parameters["integer_label"].dtype == np.int16
 
 
@@ -151,7 +150,8 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
     [
         (np.ones(2), "two-dimensional"),
         (np.ones((3, 2)), "frequency axis"),
-        (np.ones((2, 3)), "num_samples"),
+        (np.ones((2, 3)), "source parameter"),
+        (np.ones((2, 0)), "at least one sample"),
         (np.ones((2, 2), dtype=np.complex128), "real-valued"),
     ],
 )
@@ -161,8 +161,7 @@ def test_catalog_rejects_malformed_power(power: np.ndarray, message: str) -> Non
             source_parameters={"redshift": np.array([0.1, 0.2])},
             polarization_power=power,
             waveform_metadata=_waveform_generator(),
-            population_metadata=_population_metadata(),
-            **PRIVATE_RECORD,
+            **CATALOG_DEFAULTS,
         )
 
 
@@ -173,19 +172,30 @@ def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None
             source_parameters={"redshift": values},
             polarization_power=np.ones((2, 2)),
             waveform_metadata=_waveform_generator(),
-            population_metadata=_population_metadata(),
-            **PRIVATE_RECORD,
+            **CATALOG_DEFAULTS,
         )
 
 
 @pytest.mark.parametrize("value", [True, {"nested": 1}, [1], None, np.int64(1)])
-def test_population_metadata_rejects_non_scalar_provenance(value: object) -> None:
+def test_catalog_rejects_non_scalar_provenance(value: object) -> None:
     with pytest.raises(TypeError, match="provenance"):
-        PopulationMetadata(
-            name="test",
-            seed=1,
-            num_samples=2,
+        Catalog(
+            source_parameters={"redshift": np.array([0.1, 0.2])},
+            polarization_power=np.ones((2, 2)),
+            waveform_metadata=_waveform_generator(),
+            **CATALOG_DEFAULTS,
             provenance={"invalid": value},  # ty: ignore[invalid-argument-type]
+        )
+
+
+def test_catalog_rejects_non_int_seed() -> None:
+    with pytest.raises(TypeError, match="seed"):
+        Catalog(
+            source_parameters={"redshift": np.array([0.1, 0.2])},
+            polarization_power=np.ones((2, 2)),
+            waveform_metadata=_waveform_generator(),
+            seed="not_an_int",  # ty: ignore[invalid-argument-type]
+            **PRIVATE_RECORD,
         )
 
 
@@ -196,8 +206,7 @@ def test_catalog_requires_a_redshift_column() -> None:
             source_parameters={"source_frame_mass_1": np.array([1.4, 1.3])},
             polarization_power=np.ones((2, 2)),
             waveform_metadata=_waveform_generator(),
-            population_metadata=_population_metadata(),
-            **PRIVATE_RECORD,
+            **CATALOG_DEFAULTS,
         )
 
 
@@ -212,8 +221,7 @@ def _catalog(redshift: np.ndarray) -> Catalog:
             2, num_samples
         ),
         waveform_metadata=_waveform_generator(),
-        population_metadata=_population_metadata(num_samples=num_samples),
-        **PRIVATE_RECORD,
+        **CATALOG_DEFAULTS,
     )
 
 
@@ -251,7 +259,7 @@ def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> 
     np.testing.assert_array_equal(
         restricted.polarization_power, catalog.polarization_power[:, [1, 2]]
     )
-    assert restricted.population_metadata.num_samples == 2
+    assert restricted.num_samples == 2
     assert restricted.population_model_kwargs["z_min"] == 0.3
     assert restricted.population_model_kwargs["z_max"] == 2.0
     # Everything else about the record travels unchanged.
@@ -263,7 +271,7 @@ def test_restrict_redshift_leaves_the_original_untouched() -> None:
     catalog = _catalog(np.array([0.1, 0.5, 1.5, 19.0]))
     catalog.restrict_redshift(0.3, 2.0)
 
-    assert catalog.population_metadata.num_samples == 4
+    assert catalog.num_samples == 4
     assert catalog.polarization_power.shape == (2, 4)
     assert catalog.population_model_kwargs["z_min"] == 0.0
 

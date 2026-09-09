@@ -98,9 +98,9 @@ def test_round_trip_preserves_arrays_and_the_population_record(
     assert restored.population_model_kwargs == original.population_model_kwargs
     assert restored.population_params == original.population_params
     assert restored.density_sites == original.density_sites
-    assert restored.population_metadata.seed == 41
-    assert restored.population_metadata.source_type == "bns"
-    assert restored.population_metadata.provenance == {
+    assert restored.seed == 41
+    assert restored.source_type == "bns"
+    assert restored.provenance == {
         "producer": "test",
         "version": 2,
     }
@@ -156,7 +156,7 @@ def test_optional_source_type_is_omitted_and_decodes_as_none(tmp_path: Path) -> 
 
     with xr.open_dataset(path, engine="h5netcdf") as dataset:
         assert "population_source_type" not in dataset.attrs
-    assert Catalog.load(path).population_metadata.source_type is None
+    assert Catalog.load(path).source_type is None
 
 
 @pytest.mark.parametrize(
@@ -222,11 +222,14 @@ def test_a_stored_column_that_drifted_from_the_population_is_caught(
             source_parameters=corrupted,
             polarization_power=catalog.polarization_power,
             waveform_metadata=catalog.waveform_metadata,
-            population_metadata=catalog.population_metadata,
             _model_name=catalog.population_model_name,
             _model_kwargs=catalog.population_model_kwargs,
             _population_params=catalog.population_params,
             _density_sites=catalog.density_sites,
+            seed=catalog.seed,
+            name=catalog.name,
+            source_type=catalog.source_type,
+            provenance=catalog.provenance,
         )
     )
     dataset.to_netcdf(path, engine="h5netcdf")
@@ -295,7 +298,7 @@ def test_in_memory_catalogs_do_not_need_the_io_extra(
 
     monkeypatch.setitem(sys.modules, "astrogwb.catalog._io", None)
     catalog = _catalog()
-    assert catalog.restrict_redshift(0.3, 20.0).population_metadata.num_samples == 2
+    assert catalog.restrict_redshift(0.3, 20.0).num_samples == 2
     assert catalog.get_population_model() is not None
 
 

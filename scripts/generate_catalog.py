@@ -38,7 +38,7 @@ from pathlib import Path
 
 import jax
 
-from astrogwb.catalog import Catalog, PopulationMetadata
+from astrogwb.catalog import Catalog
 from astrogwb.paper.config.catalogs import (
     CatalogDefinition,
     check_population_model,
@@ -133,16 +133,13 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
     return Catalog.from_generator(
         samples,
         generator=generator,
-        population_metadata=PopulationMetadata(
-            name=population.model,
-            seed=definition.seed,
-            num_samples=definition.num_samples,
-            source_type="bns",
-        ),
         model_name=population.model,
         model_kwargs=population.kwargs,
         population_params=population.params,
         density_sites=model.density_sites,
+        seed=definition.seed,
+        name=population.model,
+        source_type="bns",
     )
 
 
@@ -171,7 +168,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     logger.info(
         "Saved catalog %s: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",
         definition.name,
-        catalog.population_metadata.num_samples,
+        catalog.num_samples,
         catalog.waveform_metadata.frequencies.size,
         float(catalog.waveform_metadata.frequencies[0]),
         float(catalog.waveform_metadata.frequencies[-1]),

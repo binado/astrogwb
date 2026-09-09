@@ -232,7 +232,7 @@ def test_restriction_narrows_the_proposals_recorded_population_too(
 
     inputs = _prepare(injection_catalog, proposal_catalog, config)
 
-    assert inputs.proposal.population_metadata.num_samples == N_RETAINED
+    assert inputs.proposal.num_samples == N_RETAINED
     assert inputs.proposal.population_model_kwargs["z_min"] == (
         config.cosmology.minimum_redshift
     )

@@ -21,7 +21,6 @@ from typing import Any
 import numpy as np
 
 from astrogwb.catalog.catalog import Catalog
-from astrogwb.catalog.metadata import PopulationMetadata
 from astrogwb.populations import (
     REDSHIFT_SITE,
     redshift_log_density,
@@ -120,8 +119,7 @@ DERIVED_COLUMN_ATOL = 1e-12
 def catalog_to_dataset(catalog: Catalog) -> xr.Dataset:
     """Encode a catalog, including its complete population record."""
     waveform = catalog.waveform_metadata
-    population = catalog.population_metadata
-    collisions = sorted(RESERVED_ATTRS.intersection(population.provenance))
+    collisions = sorted(RESERVED_ATTRS.intersection(catalog.provenance))
     if collisions:
         raise ValueError(
             "population provenance may not override reserved catalog attribute(s): "
@@ -138,7 +136,7 @@ def catalog_to_dataset(catalog: Catalog) -> xr.Dataset:
             axis=1,
         )
     else:
-        source_parameters = np.empty((population.num_samples, 0), dtype=np.float64)
+        source_parameters = np.empty((catalog.num_samples, 0), dtype=np.float64)
 
     attrs: dict[str, str | int | float] = {
         "format_name": FORMAT_NAME,
@@ -149,18 +147,18 @@ def catalog_to_dataset(catalog: Catalog) -> xr.Dataset:
         "reference_frequency": waveform.reference_frequency,
         "sampling_frequency": waveform.sampling_frequency,
         "df": waveform.df,
-        POPULATION_NAME_ATTR: population.name,
-        POPULATION_SEED_ATTR: population.seed,
-        POPULATION_NUM_SAMPLES_ATTR: population.num_samples,
+        POPULATION_NAME_ATTR: catalog.name,
+        POPULATION_SEED_ATTR: catalog.seed,
+        POPULATION_NUM_SAMPLES_ATTR: catalog.num_samples,
         MODEL_NAME_ATTR: catalog.population_model_name,
         MODEL_KWARGS_ATTR: json.dumps(catalog.population_model_kwargs, sort_keys=True),
         POPULATION_PARAMS_ATTR: json.dumps(catalog.population_params, sort_keys=True),
         DENSITY_SITES_ATTR: json.dumps(list(catalog.density_sites)),
         PROPOSAL_ATTR: json.dumps(_redshift_density_probe(catalog)),
-        **population.provenance,
+        **catalog.provenance,
     }
-    if population.source_type is not None:
-        attrs[POPULATION_SOURCE_TYPE_ATTR] = population.source_type
+    if catalog.source_type is not None:
+        attrs[POPULATION_SOURCE_TYPE_ATTR] = catalog.source_type
 
     dataset = xr.Dataset(
         data_vars={
@@ -218,11 +216,17 @@ def catalog_from_dataset[C: Catalog](
     """Decode a validated Dataset into a catalog, without running its model."""
     validate_catalog_dataset(dataset, label=label)
     waveform = waveform_metadata_from_dataset(dataset, label=label)
-    population = population_metadata_from_attrs(dataset.attrs, label=label)
     decoded = {
         str(name): _scalar(value, name=str(name))
         for name, value in dataset.attrs.items()
     }
+    seed = decoded[POPULATION_SEED_ATTR]
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError(f"{label}: population_seed must be an int")
+    provenance = {
+        name: value for name, value in decoded.items() if name not in RESERVED_ATTRS
+    }
+    source_type_value = decoded.get(POPULATION_SOURCE_TYPE_ATTR)
     names = [str(name) for name in dataset.coords["parameter"].values.tolist()]
     parameters = {
         name: np.asarray(dataset["source_parameters"].isel(parameter=index).values)
@@ -232,7 +236,6 @@ def catalog_from_dataset[C: Catalog](
         source_parameters=parameters,
         polarization_power=np.asarray(dataset["polarization_power"].values),
         waveform_metadata=waveform,
-        population_metadata=population,
         _model_name=str(decoded[MODEL_NAME_ATTR]),
         _model_kwargs=_json_mapping(
             decoded[MODEL_KWARGS_ATTR], label=label, name=MODEL_KWARGS_ATTR
@@ -250,6 +253,10 @@ def catalog_from_dataset[C: Catalog](
                 decoded[DENSITY_SITES_ATTR], label=label, name=DENSITY_SITES_ATTR
             )
         ),
+        seed=seed,
+        name=str(decoded[POPULATION_NAME_ATTR]),
+        source_type=(None if source_type_value is None else str(source_type_value)),
+        provenance=provenance,
     )
 
 
@@ -357,10 +364,20 @@ def validate_catalog_dataset(dataset: xr.Dataset, *, label: str) -> None:
     if source_parameters.dtype != np.dtype(np.float64):
         raise ValueError(f"{label}: 'source_parameters' must be serialized as float64")
 
-    population = population_metadata_from_attrs(dataset.attrs, label=label)
-    if dataset.sizes["sample"] != population.num_samples:
+    missing = [name for name in REQUIRED_POPULATION_ATTRS if name not in dataset.attrs]
+    if missing:
         raise ValueError(
-            f"{label}: population_num_samples ({population.num_samples}) does not "
+            f"{label}: missing population metadata attribute(s): "
+            f"{', '.join(missing)}; regenerate this catalog"
+        )
+    num_samples_scalar = _scalar(
+        dataset.attrs[POPULATION_NUM_SAMPLES_ATTR], name=POPULATION_NUM_SAMPLES_ATTR
+    )
+    if isinstance(num_samples_scalar, bool) or not isinstance(num_samples_scalar, int):
+        raise TypeError(f"{label}: population_num_samples must be an int")
+    if dataset.sizes["sample"] != num_samples_scalar:
+        raise ValueError(
+            f"{label}: population_num_samples ({num_samples_scalar}) does not "
             f"match the sample dimension ({dataset.sizes['sample']})"
         )
 
@@ -396,43 +413,6 @@ def waveform_metadata_from_dataset(
         )
     except (TypeError, ValueError) as error:
         raise ValueError(f"{label}: invalid waveform metadata: {error}") from error
-
-
-def population_metadata_from_attrs(
-    attrs: Mapping[Any, Any], *, label: str
-) -> PopulationMetadata:
-    """Decode generation provenance from attributes without loading arrays."""
-    missing = [name for name in REQUIRED_POPULATION_ATTRS if name not in attrs]
-    if missing:
-        raise ValueError(
-            f"{label}: missing population metadata attribute(s): "
-            f"{', '.join(missing)}; regenerate this catalog"
-        )
-
-    decoded = {
-        str(name): _scalar(value, name=str(name)) for name, value in attrs.items()
-    }
-    seed = decoded[POPULATION_SEED_ATTR]
-    num_samples = decoded[POPULATION_NUM_SAMPLES_ATTR]
-    if isinstance(seed, bool) or not isinstance(seed, int):
-        raise TypeError(f"{label}: population_seed must be an int")
-    if isinstance(num_samples, bool) or not isinstance(num_samples, int):
-        raise TypeError(f"{label}: population_num_samples must be an int")
-
-    provenance = {
-        name: value for name, value in decoded.items() if name not in RESERVED_ATTRS
-    }
-    source_type_value = decoded.get(POPULATION_SOURCE_TYPE_ATTR)
-    try:
-        return PopulationMetadata(
-            name=str(decoded[POPULATION_NAME_ATTR]),
-            seed=seed,
-            num_samples=num_samples,
-            source_type=(None if source_type_value is None else str(source_type_value)),
-            provenance=provenance,
-        )
-    except (TypeError, ValueError) as error:
-        raise ValueError(f"{label}: invalid population metadata: {error}") from error
 
 
 # --------------------------------------------------------------------------- #

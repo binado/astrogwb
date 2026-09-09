@@ -179,7 +179,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     catalog = load_run_catalog(catalog_path, label="proposal").restrict_redshift(
         Z_MIN, Z_MAX
     )
-    n_samples = catalog.population_metadata.num_samples
+    n_samples = catalog.num_samples
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
     estimator = SpectralDensityImportanceEstimator.from_catalog(

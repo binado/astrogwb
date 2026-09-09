@@ -286,8 +286,8 @@ def save(
                 "kwargs": dict(proposal.population_model_kwargs),
                 "params": dict(proposal.population_params),
                 "density_sites": list(proposal.density_sites),
-                "num_samples": proposal.population_metadata.num_samples,
-                "seed": proposal.population_metadata.seed,
+                "num_samples": proposal.num_samples,
+                "seed": proposal.seed,
             },
             sort_keys=True,
         )

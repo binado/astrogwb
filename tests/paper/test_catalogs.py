@@ -28,7 +28,7 @@ def test_load_run_catalog_returns_the_whole_file(tmp_path: Path) -> None:
 
     loaded = load_run_catalog(path, label="proposal")
 
-    assert loaded.population_metadata.num_samples == 6
+    assert loaded.num_samples == 6
     np.testing.assert_allclose(loaded.source_parameters["redshift"], redshift)
 
 

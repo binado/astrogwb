@@ -26,7 +26,7 @@ import numpy as np
 from jax.typing import ArrayLike
 from numpyro import handlers
 
-from astrogwb.catalog import Catalog, PopulationMetadata
+from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 from astrogwb.populations import (
@@ -125,32 +125,23 @@ def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
     return {name: np.asarray(values) for name, values in samples.items()}
 
 
-def mock_population_metadata(num_samples: int) -> PopulationMetadata:
-    """Generation provenance for a mock catalog of ``num_samples`` sources."""
-    return PopulationMetadata(
-        name="bns_md_cosmological",
-        seed=MOCK_POPULATION_SEED,
-        num_samples=num_samples,
-        source_type="bns",
-        provenance={"termination_alpha": ISCO_ALPHA},
-    )
-
-
 def mock_catalog(
     source_parameters: dict[str, np.ndarray],
     *,
     generator: AnalyticInspiralGenerator,
 ) -> Catalog:
     """Wrap a mock draw in a catalog carrying the population that produced it."""
-    num_samples = len(next(iter(source_parameters.values())))
     return Catalog.from_generator(
         source_parameters,
         generator=generator,
-        population_metadata=mock_population_metadata(num_samples),
         model_name="bns_md_cosmological",
         model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
         population_params=POPULATION_PARAMS,
         density_sites=("redshift",),
+        seed=MOCK_POPULATION_SEED,
+        name="bns_md_cosmological",
+        source_type="bns",
+        provenance={"termination_alpha": ISCO_ALPHA},
     )
 
 
@@ -277,11 +268,14 @@ def build_synthetic_estimator(
         },
         polarization_power=np.asarray(polarization_power),
         waveform_metadata=generator,
-        population_metadata=mock_population_metadata(n_samples),
         _model_name="bns_md_cosmological",
         _model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
         _population_params=POPULATION_PARAMS,
         _density_sites=("redshift",),
+        seed=MOCK_POPULATION_SEED,
+        name="bns_md_cosmological",
+        source_type="bns",
+        provenance={"termination_alpha": ISCO_ALPHA},
     )
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         catalog,

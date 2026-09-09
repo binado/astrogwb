@@ -65,7 +65,7 @@ import pandas as pd
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
-from astrogwb.catalog import Catalog, PopulationMetadata
+from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.distributions.rates import madau_dickinson_rate
@@ -296,17 +296,6 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
     population itself, in one batched pass, so they are bit-identical to what
     every later density evaluation recomputes from the stored samples.
     """
-    population_metadata = PopulationMetadata(
-        name=POPULATION_MODEL,
-        seed=POPULATION_SEED,
-        num_samples=NUM_SOURCES,
-        source_type="bns",
-        provenance={
-            "notebook": "catalog_convergence",
-            "grid": grid,
-            "termination_alpha": ISCO_ALPHA,
-        },
-    )
     parameters = {
         name: np.asarray(values, dtype=np.float64)
         for name, values in population_model_fn()
@@ -329,11 +318,18 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
             sampling_frequency=2.0 * f_max,
             df=df,
         ),
-        population_metadata=population_metadata,
         model_name=POPULATION_MODEL,
         model_kwargs=POPULATION_MODEL_KWARGS,
         population_params=POPULATION_PARAMS,
         density_sites=("redshift",),
+        seed=POPULATION_SEED,
+        name=POPULATION_MODEL,
+        source_type="bns",
+        provenance={
+            "notebook": "catalog_convergence",
+            "grid": grid,
+            "termination_alpha": ISCO_ALPHA,
+        },
     )
 
 
@@ -351,8 +347,8 @@ def catalog_matches_configuration(catalog: Catalog, *, df: float, f_max: float) 
         waveform.df == df
         and waveform.minimum_frequency == F_MIN
         and waveform.maximum_frequency == f_max
-        and catalog.population_metadata.num_samples == NUM_SOURCES
-        and catalog.population_metadata.seed == POPULATION_SEED
+        and catalog.num_samples == NUM_SOURCES
+        and catalog.seed == POPULATION_SEED
         and catalog.population_model_name == POPULATION_MODEL
         and dict(catalog.population_params) == POPULATION_PARAMS
         and dict(catalog.population_model_kwargs) == POPULATION_MODEL_KWARGS
@@ -389,9 +385,9 @@ def describe(catalog: Catalog) -> pd.Series:
     return pd.Series(
         {
             "population": catalog.population_model_name,
-            "seed": catalog.population_metadata.seed,
-            "num_sources": catalog.population_metadata.num_samples,
-            "grid": catalog.population_metadata.provenance.get("grid", ""),
+            "seed": catalog.seed,
+            "num_sources": catalog.num_samples,
+            "grid": catalog.provenance.get("grid", ""),
             "num_frequencies": waveform.frequencies.size,
             "df_hz": waveform.df,
             "f_min_hz": waveform.minimum_frequency,

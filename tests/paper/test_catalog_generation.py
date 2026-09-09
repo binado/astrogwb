@@ -80,8 +80,8 @@ def test_generation_produces_a_catalog_that_describes_itself(
     )
     catalog = generate_catalog.build_catalog(definition)
 
-    assert catalog.population_metadata.num_samples == 8
-    assert catalog.population_metadata.seed == 41
+    assert catalog.num_samples == 8
+    assert catalog.seed == 41
     assert catalog.population_model_name == "bns_md_cosmological"
     assert catalog.population_model_kwargs == {
         "z_min": 0.0,

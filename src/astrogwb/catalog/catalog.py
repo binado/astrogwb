@@ -26,14 +26,13 @@ a caller writing through them.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Self
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.catalog.metadata import PopulationMetadata
 from astrogwb.populations import (
     REDSHIFT_SITE,
     Population,
@@ -41,7 +40,9 @@ from astrogwb.populations import (
 )
 from astrogwb.waveform import PolarizationPowerGenerator
 
-__all__ = ["Catalog"]
+__all__ = ["Catalog", "ScalarProvenance"]
+
+ScalarProvenance = str | int | float
 
 #: Construction settings a population model must take for a catalog drawn from
 #: it to support :meth:`Catalog.restrict_redshift`. Narrowing the window changes
@@ -67,13 +68,27 @@ class Catalog:
     source_parameters: Mapping[str, NDArray[Any]]
     polarization_power: NDArray[Any]
     waveform_metadata: PolarizationPowerGenerator
-    population_metadata: PopulationMetadata
     _model_name: str
     _model_kwargs: Mapping[str, Any]
     _population_params: Mapping[str, float]
     _density_sites: tuple[str, ...]
+    seed: int
+    name: str = ""
+    source_type: str | None = None
+    provenance: Mapping[str, ScalarProvenance] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
+            raise TypeError("seed must be an int")
+        for key, value in self.provenance.items():
+            if not isinstance(key, str):
+                raise TypeError("provenance names must be strings")
+            if isinstance(value, bool) or not isinstance(value, str | int | float):
+                raise TypeError(
+                    f"provenance[{key!r}] must be a str, non-boolean int, or "
+                    f"float scalar, got {type(value).__name__}"
+                )
+
         power = np.asarray(self.polarization_power)
         if power.ndim != 2 or not np.issubdtype(power.dtype, np.number):
             raise ValueError(
@@ -85,13 +100,11 @@ class Catalog:
                 "not raw complex polarizations"
             )
         num_frequencies, num_samples = power.shape
+        if num_samples <= 0:
+            raise ValueError("catalog must contain at least one sample")
         if num_frequencies != self.waveform_metadata.frequencies.size:
             raise ValueError(
                 "polarization_power frequency axis does not match waveform frequencies"
-            )
-        if num_samples != self.population_metadata.num_samples:
-            raise ValueError(
-                "population num_samples does not match polarization_power sample axis"
             )
 
         parameters: dict[str, NDArray[Any]] = {}
@@ -127,6 +140,7 @@ class Catalog:
             "_population_params",
             {name: float(value) for name, value in self._population_params.items()},
         )
+        object.__setattr__(self, "provenance", dict(self.provenance))
 
     @classmethod
     def from_generator(
@@ -134,11 +148,14 @@ class Catalog:
         source_parameters: Mapping[str, ArrayLike],
         *,
         generator: PolarizationPowerGenerator,
-        population_metadata: PopulationMetadata,
         model_name: str,
         model_kwargs: Mapping[str, Any],
         population_params: Mapping[str, float],
         density_sites: tuple[str, ...],
+        seed: int,
+        name: str = "",
+        source_type: str | None = None,
+        provenance: Mapping[str, ScalarProvenance] | None = None,
     ) -> Self:
         """Generate polarization power and return a validated catalog.
 
@@ -154,11 +171,14 @@ class Catalog:
             source_parameters=parameters,
             polarization_power=power,
             waveform_metadata=generator,
-            population_metadata=population_metadata,
             _model_name=model_name,
             _model_kwargs=model_kwargs,
             _population_params=population_params,
             _density_sites=density_sites,
+            seed=seed,
+            name=name,
+            source_type=source_type,
+            provenance={} if provenance is None else provenance,
         )
 
     # ----------------------------------------------------------------- #
@@ -200,6 +220,11 @@ class Catalog:
             **self._model_kwargs, density_sites=self._density_sites
         )
 
+    @property
+    def num_samples(self) -> int:
+        """The number of source samples in this catalog."""
+        return int(self.polarization_power.shape[1])
+
     # ----------------------------------------------------------------- #
     # Transformations
     # ----------------------------------------------------------------- #
@@ -236,7 +261,7 @@ class Catalog:
         keep = np.flatnonzero((redshift >= z_min) & (redshift <= z_max))
         if keep.size == 0:
             raise ValueError(
-                f"catalog {self.population_metadata.name!r} has no samples in the "
+                f"catalog {self.name!r} has no samples in the "
                 f"redshift window [{z_min:.4g}, {z_max:.4g}]"
             )
         return replace(
@@ -245,9 +270,6 @@ class Catalog:
                 name: values[keep] for name, values in self.source_parameters.items()
             },
             polarization_power=self.polarization_power[:, keep],
-            population_metadata=replace(
-                self.population_metadata, num_samples=int(keep.size)
-            ),
             _model_kwargs={
                 **self._model_kwargs,
                 "z_min": float(z_min),

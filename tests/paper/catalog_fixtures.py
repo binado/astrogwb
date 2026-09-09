@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 from numpyro import handlers
 
-from astrogwb.catalog import Catalog, PopulationMetadata
+from astrogwb.catalog import Catalog
 from astrogwb.populations import (
     population_model,
 )
@@ -132,17 +132,14 @@ def make_catalog(
             sampling_frequency=sampling_frequency,
             df=df,
         ),
-        population_metadata=PopulationMetadata(
-            name=name,
-            seed=seed,
-            num_samples=num_samples,
-            source_type=source_type,
-            provenance={} if provenance is None else dict(provenance),
-        ),
         _model_name=model_name,
         _model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
         _population_params=dict(population_params or PAPER_POPULATION_PARAMS),
         _density_sites=density_sites,
+        seed=seed,
+        name=name,
+        source_type=source_type,
+        provenance={} if provenance is None else dict(provenance),
     )
 
 

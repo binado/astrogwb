@@ -62,7 +62,7 @@ the declaration that produced it:
 ```python
 import jax
 
-from astrogwb.catalog import Catalog, PopulationMetadata
+from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.populations import BNSMadauDickinson
 from astrogwb.waveform import AnalyticInspiralGenerator
@@ -90,13 +90,12 @@ catalog = Catalog.from_generator(
         sampling_frequency=4096.0,
         df=1.0,
     ),
-    population_metadata=PopulationMetadata(
-        name="bns_md_cosmological", seed=42, num_samples=1024
-    ),
     model_name="bns_md_cosmological",
     model_kwargs=model_kwargs,
     population_params=params,
     density_sites=population.density_sites,
+    seed=42,
+    name="bns_md_cosmological",
 )
 catalog.save("catalog.h5")
 ```

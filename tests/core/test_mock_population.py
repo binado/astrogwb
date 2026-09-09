@@ -62,7 +62,7 @@ def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -
     redshift = np.asarray(catalog.source_parameters["redshift"])
 
     assert waveform.frequencies.size == 512
-    assert catalog.population_metadata.num_samples == 1024
+    assert catalog.num_samples == 1024
     # Every stochastic site plus every per-source deterministic the population
     # declares -- the columns are the model's sites, by construction.
     assert set(catalog.source_parameters) == {
