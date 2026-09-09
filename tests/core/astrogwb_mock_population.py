@@ -139,9 +139,6 @@ def mock_catalog(
         population_params=POPULATION_PARAMS,
         density_sites=("redshift",),
         seed=MOCK_POPULATION_SEED,
-        name="bns_md_cosmological",
-        source_type="bns",
-        provenance={"termination_alpha": ISCO_ALPHA},
     )
 
 
@@ -273,9 +270,6 @@ def build_synthetic_estimator(
         _population_params=POPULATION_PARAMS,
         _density_sites=("redshift",),
         seed=MOCK_POPULATION_SEED,
-        name="bns_md_cosmological",
-        source_type="bns",
-        provenance={"termination_alpha": ISCO_ALPHA},
     )
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         catalog,

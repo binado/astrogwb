@@ -26,7 +26,7 @@ a caller writing through them.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Self
 
@@ -40,9 +40,7 @@ from astrogwb.populations import (
 )
 from astrogwb.waveform import PolarizationPowerGenerator
 
-__all__ = ["Catalog", "ScalarProvenance"]
-
-ScalarProvenance = str | int | float
+__all__ = ["Catalog"]
 
 #: Construction settings a population model must take for a catalog drawn from
 #: it to support :meth:`Catalog.restrict_redshift`. Narrowing the window changes
@@ -73,21 +71,10 @@ class Catalog:
     _population_params: Mapping[str, float]
     _density_sites: tuple[str, ...]
     seed: int
-    name: str = ""
-    source_type: str | None = None
-    provenance: Mapping[str, ScalarProvenance] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
             raise TypeError("seed must be an int")
-        for key, value in self.provenance.items():
-            if not isinstance(key, str):
-                raise TypeError("provenance names must be strings")
-            if isinstance(value, bool) or not isinstance(value, str | int | float):
-                raise TypeError(
-                    f"provenance[{key!r}] must be a str, non-boolean int, or "
-                    f"float scalar, got {type(value).__name__}"
-                )
 
         power = np.asarray(self.polarization_power)
         if power.ndim != 2 or not np.issubdtype(power.dtype, np.number):
@@ -140,7 +127,6 @@ class Catalog:
             "_population_params",
             {name: float(value) for name, value in self._population_params.items()},
         )
-        object.__setattr__(self, "provenance", dict(self.provenance))
 
     @classmethod
     def from_generator(
@@ -153,9 +139,6 @@ class Catalog:
         population_params: Mapping[str, float],
         density_sites: tuple[str, ...],
         seed: int,
-        name: str = "",
-        source_type: str | None = None,
-        provenance: Mapping[str, ScalarProvenance] | None = None,
     ) -> Self:
         """Generate polarization power and return a validated catalog.
 
@@ -176,9 +159,6 @@ class Catalog:
             _population_params=population_params,
             _density_sites=density_sites,
             seed=seed,
-            name=name,
-            source_type=source_type,
-            provenance={} if provenance is None else provenance,
         )
 
     # ----------------------------------------------------------------- #
@@ -261,7 +241,7 @@ class Catalog:
         keep = np.flatnonzero((redshift >= z_min) & (redshift <= z_max))
         if keep.size == 0:
             raise ValueError(
-                f"catalog {self.name!r} has no samples in the "
+                f"catalog has no samples in the "
                 f"redshift window [{z_min:.4g}, {z_max:.4g}]"
             )
         return replace(

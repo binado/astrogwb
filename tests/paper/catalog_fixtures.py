@@ -87,10 +87,7 @@ def make_catalog(
     reference_frequency: float = 20.0,
     sampling_frequency: float = 128.0,
     df: float = 10.0,
-    name: str = PAPER_MODEL,
     seed: int = 41,
-    source_type: str | None = "bns",
-    provenance: Mapping[str, str | int | float] | None = None,
     model_name: str = PAPER_MODEL,
     model_kwargs: Mapping[str, float | int] | None = None,
     population_params: Mapping[str, float] | None = None,
@@ -137,9 +134,6 @@ def make_catalog(
         _population_params=dict(population_params or PAPER_POPULATION_PARAMS),
         _density_sites=density_sites,
         seed=seed,
-        name=name,
-        source_type=source_type,
-        provenance={} if provenance is None else dict(provenance),
     )
 
 

@@ -33,7 +33,6 @@ from astrogwb.catalog._io import (
     MODEL_NAME_ATTR,
     POPULATION_PARAMS_ATTR,
     PROPOSAL_ATTR,
-    RESERVED_ATTRS,
     catalog_to_dataset,
     validate_catalog_dataset,
 )
@@ -47,7 +46,7 @@ def _catalog(**overrides) -> Catalog:
 
 
 def test_catalog_to_dataset_uses_stacked_float64_format() -> None:
-    dataset = catalog_to_dataset(_catalog(provenance={"producer": "test"}))
+    dataset = catalog_to_dataset(_catalog())
 
     assert dataset.polarization_power.dims == ("frequency", "sample")
     assert dataset.source_parameters.dims == ("sample", "parameter")
@@ -55,7 +54,6 @@ def test_catalog_to_dataset_uses_stacked_float64_format() -> None:
     assert "redshift" in dataset.parameter.values.tolist()
     assert dataset.attrs["format_name"] == FORMAT_NAME
     assert dataset.attrs["domain"] == DOMAIN_FREQUENCY
-    assert dataset.attrs["producer"] == "test"
 
 
 def test_the_population_record_travels_as_data_not_as_a_callable() -> None:
@@ -75,7 +73,7 @@ def test_the_population_record_travels_as_data_not_as_a_callable() -> None:
 def test_round_trip_preserves_arrays_and_the_population_record(
     tmp_path: Path,
 ) -> None:
-    original = _catalog(provenance={"producer": "test", "version": 2})
+    original = _catalog()
     path = tmp_path / "catalog.h5"
     original.save(path)
 
@@ -99,11 +97,6 @@ def test_round_trip_preserves_arrays_and_the_population_record(
     assert restored.population_params == original.population_params
     assert restored.density_sites == original.density_sites
     assert restored.seed == 41
-    assert restored.source_type == "bns"
-    assert restored.provenance == {
-        "producer": "test",
-        "version": 2,
-    }
 
 
 def test_a_loaded_catalog_reconstructs_its_model_and_evaluates_at_new_params(
@@ -142,21 +135,6 @@ def test_save_with_compression_round_trips(tmp_path: Path) -> None:
     np.testing.assert_array_equal(
         Catalog.load(path).polarization_power, _catalog().polarization_power
     )
-
-
-@pytest.mark.parametrize("reserved", sorted(RESERVED_ATTRS))
-def test_provenance_rejects_reserved_names(reserved: str) -> None:
-    with pytest.raises(ValueError, match="reserved catalog attribute"):
-        catalog_to_dataset(_catalog(provenance={reserved: "hijacked"}))
-
-
-def test_optional_source_type_is_omitted_and_decodes_as_none(tmp_path: Path) -> None:
-    path = tmp_path / "catalog.h5"
-    _catalog(source_type=None).save(path)
-
-    with xr.open_dataset(path, engine="h5netcdf") as dataset:
-        assert "population_source_type" not in dataset.attrs
-    assert Catalog.load(path).source_type is None
 
 
 @pytest.mark.parametrize(
@@ -227,9 +205,6 @@ def test_a_stored_column_that_drifted_from_the_population_is_caught(
             _population_params=catalog.population_params,
             _density_sites=catalog.density_sites,
             seed=catalog.seed,
-            name=catalog.name,
-            source_type=catalog.source_type,
-            provenance=catalog.provenance,
         )
     )
     dataset.to_netcdf(path, engine="h5netcdf")

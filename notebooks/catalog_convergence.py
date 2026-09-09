@@ -323,13 +323,6 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
         population_params=POPULATION_PARAMS,
         density_sites=("redshift",),
         seed=POPULATION_SEED,
-        name=POPULATION_MODEL,
-        source_type="bns",
-        provenance={
-            "notebook": "catalog_convergence",
-            "grid": grid,
-            "termination_alpha": ISCO_ALPHA,
-        },
     )
 
 
@@ -387,7 +380,6 @@ def describe(catalog: Catalog) -> pd.Series:
             "population": catalog.population_model_name,
             "seed": catalog.seed,
             "num_sources": catalog.num_samples,
-            "grid": catalog.provenance.get("grid", ""),
             "num_frequencies": waveform.frequencies.size,
             "df_hz": waveform.df,
             "f_min_hz": waveform.minimum_frequency,

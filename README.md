@@ -95,7 +95,6 @@ catalog = Catalog.from_generator(
     population_params=params,
     density_sites=population.density_sites,
     seed=42,
-    name="bns_md_cosmological",
 )
 catalog.save("catalog.h5")
 ```

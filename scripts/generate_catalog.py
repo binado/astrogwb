@@ -138,8 +138,6 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
         population_params=population.params,
         density_sites=model.density_sites,
         seed=definition.seed,
-        name=population.model,
-        source_type="bns",
     )
 
 

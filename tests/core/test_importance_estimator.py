@@ -111,8 +111,6 @@ def _catalog(
         _population_params=params,
         _density_sites=("redshift",),
         seed=MOCK_POPULATION_SEED,
-        name="bns_md_cosmological",
-        source_type="bns",
     )
 
 

@@ -62,8 +62,6 @@ PRIVATE_RECORD: dict[str, Any] = {
 CATALOG_DEFAULTS: dict[str, Any] = {
     **PRIVATE_RECORD,
     "seed": 42,
-    "name": "test-population",
-    "source_type": "bns",
 }
 
 
@@ -106,17 +104,11 @@ def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes
         source_parameters,
         generator=generator,
         seed=42,
-        name="test-population",
-        source_type="bns",
-        provenance={"producer": "test"},
         **POPULATION_RECORD,
     )
 
     assert catalog.waveform_metadata is generator
     assert catalog.seed == 42
-    assert catalog.name == "test-population"
-    assert catalog.source_type == "bns"
-    assert catalog.provenance == {"producer": "test"}
     assert catalog.num_samples == 2
     assert catalog.source_parameters["integer_label"].dtype == np.int16
 
@@ -173,18 +165,6 @@ def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None
             polarization_power=np.ones((2, 2)),
             waveform_metadata=_waveform_generator(),
             **CATALOG_DEFAULTS,
-        )
-
-
-@pytest.mark.parametrize("value", [True, {"nested": 1}, [1], None, np.int64(1)])
-def test_catalog_rejects_non_scalar_provenance(value: object) -> None:
-    with pytest.raises(TypeError, match="provenance"):
-        Catalog(
-            source_parameters={"redshift": np.array([0.1, 0.2])},
-            polarization_power=np.ones((2, 2)),
-            waveform_metadata=_waveform_generator(),
-            **CATALOG_DEFAULTS,
-            provenance={"invalid": value},  # ty: ignore[invalid-argument-type]
         )
 
 

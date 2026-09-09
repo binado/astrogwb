@@ -39,7 +39,6 @@ except ImportError as error:  # pragma: no cover - depends on the install extras
 __all__ = [
     "DOMAIN_FREQUENCY",
     "FORMAT_NAME",
-    "RESERVED_ATTRS",
     "catalog_from_dataset",
     "catalog_to_dataset",
     "load_catalog",
@@ -60,10 +59,8 @@ WAVEFORM_ATTRS = (
     "sampling_frequency",
     "df",
 )
-POPULATION_NAME_ATTR = "population_name"
 POPULATION_SEED_ATTR = "population_seed"
 POPULATION_NUM_SAMPLES_ATTR = "population_num_samples"
-POPULATION_SOURCE_TYPE_ATTR = "population_source_type"
 MODEL_NAME_ATTR = "population_model"
 MODEL_KWARGS_ATTR = "population_model_kwargs"
 POPULATION_PARAMS_ATTR = "population_params"
@@ -74,33 +71,19 @@ DENSITY_SITES_ATTR = "population_density_sites"
 PROPOSAL_ATTR = "redshift_proposal"
 
 POPULATION_ATTRS = (
-    POPULATION_NAME_ATTR,
     POPULATION_SEED_ATTR,
     POPULATION_NUM_SAMPLES_ATTR,
-    POPULATION_SOURCE_TYPE_ATTR,
     MODEL_NAME_ATTR,
     MODEL_KWARGS_ATTR,
     POPULATION_PARAMS_ATTR,
     DENSITY_SITES_ATTR,
     PROPOSAL_ATTR,
-)
-RESERVED_ATTRS = frozenset(
-    {"format_name", "domain", *WAVEFORM_ATTRS, *POPULATION_ATTRS}
 )
 
 #: The population record is mandatory: a file missing any of these cannot say
 #: what density drew it, and no amount of inference from the run config is an
 #: acceptable substitute for that.
-REQUIRED_POPULATION_ATTRS = (
-    POPULATION_NAME_ATTR,
-    POPULATION_SEED_ATTR,
-    POPULATION_NUM_SAMPLES_ATTR,
-    MODEL_NAME_ATTR,
-    MODEL_KWARGS_ATTR,
-    POPULATION_PARAMS_ATTR,
-    DENSITY_SITES_ATTR,
-    PROPOSAL_ATTR,
-)
+REQUIRED_POPULATION_ATTRS = POPULATION_ATTRS
 
 #: Number of interior redshifts the drift fingerprint is evaluated at.
 PROBE_POINTS = 8
@@ -119,13 +102,6 @@ DERIVED_COLUMN_ATOL = 1e-12
 def catalog_to_dataset(catalog: Catalog) -> xr.Dataset:
     """Encode a catalog, including its complete population record."""
     waveform = catalog.waveform_metadata
-    collisions = sorted(RESERVED_ATTRS.intersection(catalog.provenance))
-    if collisions:
-        raise ValueError(
-            "population provenance may not override reserved catalog attribute(s): "
-            + ", ".join(collisions)
-        )
-
     names = list(catalog.source_parameters)
     if names:
         source_parameters = np.stack(
@@ -147,7 +123,6 @@ def catalog_to_dataset(catalog: Catalog) -> xr.Dataset:
         "reference_frequency": waveform.reference_frequency,
         "sampling_frequency": waveform.sampling_frequency,
         "df": waveform.df,
-        POPULATION_NAME_ATTR: catalog.name,
         POPULATION_SEED_ATTR: catalog.seed,
         POPULATION_NUM_SAMPLES_ATTR: catalog.num_samples,
         MODEL_NAME_ATTR: catalog.population_model_name,
@@ -155,10 +130,7 @@ def catalog_to_dataset(catalog: Catalog) -> xr.Dataset:
         POPULATION_PARAMS_ATTR: json.dumps(catalog.population_params, sort_keys=True),
         DENSITY_SITES_ATTR: json.dumps(list(catalog.density_sites)),
         PROPOSAL_ATTR: json.dumps(_redshift_density_probe(catalog)),
-        **catalog.provenance,
     }
-    if catalog.source_type is not None:
-        attrs[POPULATION_SOURCE_TYPE_ATTR] = catalog.source_type
 
     dataset = xr.Dataset(
         data_vars={
@@ -223,10 +195,6 @@ def catalog_from_dataset[C: Catalog](
     seed = decoded[POPULATION_SEED_ATTR]
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise TypeError(f"{label}: population_seed must be an int")
-    provenance = {
-        name: value for name, value in decoded.items() if name not in RESERVED_ATTRS
-    }
-    source_type_value = decoded.get(POPULATION_SOURCE_TYPE_ATTR)
     names = [str(name) for name in dataset.coords["parameter"].values.tolist()]
     parameters = {
         name: np.asarray(dataset["source_parameters"].isel(parameter=index).values)
@@ -254,9 +222,6 @@ def catalog_from_dataset[C: Catalog](
             )
         ),
         seed=seed,
-        name=str(decoded[POPULATION_NAME_ATTR]),
-        source_type=(None if source_type_value is None else str(source_type_value)),
-        provenance=provenance,
     )
 
 
