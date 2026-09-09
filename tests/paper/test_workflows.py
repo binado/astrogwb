@@ -162,6 +162,8 @@ def test_catalogs_target_builds_all_8_catalogs() -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("rule waveform_catalog:") == 8
     assert "rule population_config:" not in result.stdout
+
+
 def test_plot_cosmological_parameters_expands_all_chains_and_figures(
     tmp_path: Path,
 ) -> None:
