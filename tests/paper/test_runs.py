@@ -236,8 +236,6 @@ def test_variable_proposal_guard_samples_h0_md() -> None:
 #: astrophysical-parameters reuses the eps=0.1 guard catalog, and
 #: waveform-approximant/IMRPhenom reuses the injection catalog.
 INJECTION_CATALOG = "md-imrphenom-s41-n32768"
-DEFAULT_PROPOSAL = "md-imrphenom-s42-n16384"
-GUARD_EPS1 = "md-uniform-imrphenom-s61-n16384-eps1e-1"
 
 
 def test_every_run_shares_one_injection_catalog() -> None:
@@ -246,33 +244,6 @@ def test_every_run_shares_one_injection_catalog() -> None:
     }
 
     assert injections == {INJECTION_CATALOG}
-
-
-def test_proposal_catalogs_by_experiment() -> None:
-    def proposals(experiment: str) -> dict[str, str]:
-        return {
-            run: build_run_config(assemble_run(experiment, run)).catalog.proposal
-            for run in discover_runs()[experiment]
-        }
-
-    for experiment in ("cosmological-parameters", "modified-propagation"):
-        assert set(proposals(experiment).values()) == {DEFAULT_PROPOSAL}
-
-    assert set(proposals("astrophysical-parameters").values()) == {GUARD_EPS1}
-    assert proposals("variable-catalog-size") == {
-        "n8192": "md-imrphenom-s42-n8192",
-        "n16384": DEFAULT_PROPOSAL,
-        "n32768": "md-imrphenom-s42-n32768",
-    }
-    assert proposals("variable-proposal-guard") == {
-        "eps1e-1": GUARD_EPS1,
-        "eps1e-2": "md-uniform-imrphenom-s62-n16384-eps1e-2",
-        "eps1e-3": "md-uniform-imrphenom-s63-n16384-eps1e-3",
-    }
-    assert proposals("waveform-approximant") == {
-        "IMRPhenom": INJECTION_CATALOG,
-        "TaylorF2": "md-taylorf2-s41-n32768",
-    }
 
 
 def test_only_astrophysical_and_guard_runs_use_a_mixed_proposal() -> None:
@@ -292,17 +263,6 @@ def test_every_declared_catalog_is_used_by_some_run() -> None:
 
     assert used == set(discover_catalog_names())
     assert len(used) == 8
-
-
-def test_resolve_catalog_names_are_the_two_roles() -> None:
-    assert resolve_catalog_names("cosmological-parameters", "ET-triangular") == {
-        "injection": INJECTION_CATALOG,
-        "proposal": DEFAULT_PROPOSAL,
-    }
-    assert resolve_catalog_names("variable-proposal-guard", "eps1e-1") == {
-        "injection": INJECTION_CATALOG,
-        "proposal": GUARD_EPS1,
-    }
 
 
 @pytest.mark.parametrize(

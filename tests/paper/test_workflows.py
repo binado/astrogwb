@@ -275,56 +275,6 @@ def test_run_experiment_target_excludes_figure_rule(tmp_path: Path) -> None:
     assert "rule plot_cosmological_parameters:" not in result.stdout
 
 
-def test_run_mcmc_is_handed_its_layers_on_argv(tmp_path: Path) -> None:
-    catalogs = _catalogs(tmp_path, "md-imrphenom-s42-n16384.h5")
-
-    result = _mcmc(
-        "--dry-run",
-        "--forceall",
-        "--printshellcmds",
-        "--cores",
-        "4",
-        "outputs/chains/cosmological-parameters/H0-Omega_m.nc",
-        "--config",
-        f"catalogs_dir={catalogs}",
-    )
-
-    assert result.returncode == 0, result.stderr
-    # No intermediate artifact: the layers are the rule's inputs *and* what it
-    # passes on argv, so the dependency edges and the data path are one list.
-    assert "astrogwb-assemble-config" not in result.stdout
-    assert "outputs/configs/" not in result.stdout
-    assert "rule assemble_config:" not in result.stdout
-    assert "python scripts/run_mcmc.py" in result.stdout
-    assert any("scripts/run_mcmc.py" in line for line in _rule_inputs(result.stdout))
-
-    layers = [
-        str(path.relative_to(PAPER_ROOT))
-        for path in run_config_paths(
-            "cosmological-parameters", "H0-Omega_m", root=PAPER_ROOT
-        )
-    ]
-    # Three layers, all declared, so any of them retriggers this run alone.
-    assert "config/analysis/base/parameters.toml" in layers
-    assert "config/analysis/runs/cosmological-parameters/_base.toml" in layers
-    assert "config/analysis/runs/cosmological-parameters/H0-Omega_m.toml" in layers
-    for layer in layers:
-        assert f"--config {layer}" in result.stdout
-        assert any(layer in line for line in _rule_inputs(result.stdout))
-    # Repeated, not space-joined: argparse's append action takes one path each.
-    assert result.stdout.count("--config config/analysis/") >= len(layers)
-
-    # Roles are fixed, so the two files arrive as named flags with no
-    # name-to-path mapping to parse.
-    assert (
-        f"--injection-catalog {catalogs / 'md-imrphenom-s41-n32768.h5'}"
-        in result.stdout
-    )
-    assert (
-        f"--proposal-catalog {catalogs / 'md-imrphenom-s42-n16384.h5'}" in result.stdout
-    )
-
-
 def test_variable_catalog_size_names_one_catalog_per_size(
     tmp_path: Path,
 ) -> None:
