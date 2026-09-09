@@ -35,6 +35,8 @@ PAPER_POPULATION_PARAMS: dict[str, float] = {
     "kappa": 4.62,
     "z_peak": 1.84,
     "local_merger_rate": 770.0,
+    "minimum_mass": 1.0,
+    "mass_width": 1.5,
 }
 
 
@@ -88,7 +90,11 @@ def make_catalog(
     model_kwargs: Mapping[str, float | int] | None = None,
     fiducials: Mapping[str, float] | None = None,
     population_params: Mapping[str, float] | None = None,
-    density_sites: tuple[str, ...] = ("redshift",),
+    density_sites: tuple[str, ...] = (
+        "redshift",
+        "source_frame_mass_1",
+        "source_frame_mass_2",
+    ),
     extra_source_parameters: Mapping[str, np.ndarray] | None = None,
 ) -> Catalog:
     """Build a valid paper-format catalog over a chosen redshift ladder."""

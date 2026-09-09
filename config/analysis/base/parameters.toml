@@ -20,6 +20,8 @@ gamma = 1.42
 kappa = 4.62
 z_peak = 1.84
 local_merger_rate = 770.0
+minimum_mass = 1.0
+mass_width = 1.5
 
 [priors.H0]
 type = "uniform"
@@ -60,3 +62,13 @@ high = 2.5
 type = "normal"
 loc = 770.0
 scale = 7.7
+
+[priors.minimum_mass]
+type = "uniform"
+low = 0.5
+high = 1.5
+
+[priors.mass_width]
+type = "uniform"
+low = 0.5
+high = 3.0

@@ -53,8 +53,10 @@ POPULATION_RECORD: dict[str, Any] = {
         "kappa": 4.62,
         "z_peak": 1.84,
         "local_merger_rate": 770.0,
+        "minimum_mass": 1.0,
+        "mass_width": 1.5,
     },
-    "density_sites": ("redshift",),
+    "density_sites": ("redshift", "source_frame_mass_1", "source_frame_mass_2"),
 }
 PRIVATE_RECORD: dict[str, Any] = {
     f"_{name}": value for name, value in POPULATION_RECORD.items()

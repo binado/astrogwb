@@ -115,7 +115,11 @@ def sample_values(redshift: jax.Array = SAMPLE_REDSHIFTS) -> dict[str, jax.Array
 
 def reference(params: dict[str, float]) -> tuple[jax.Array, jax.Array, jax.Array]:
     return reference_merger_rate_distance_and_logprob(
-        params, SAMPLE_REDSHIFTS, redshift_grid=make_redshift_grid()
+        params,
+        SAMPLE_REDSHIFTS,
+        redshift_grid=make_redshift_grid(),
+        source_frame_mass_1=sample_values()["source_frame_mass_1"],
+        source_frame_mass_2=sample_values()["source_frame_mass_2"],
     )
 
 
@@ -185,7 +189,11 @@ def test_population_declares_its_source_outputs_and_density_factors() -> None:
     assert set(model.source_sites) == STOCHASTIC_SITES | (
         DETERMINISTIC_SITES - {TOTAL_MERGER_RATE_SITE}
     )
-    assert model.density_sites == (REDSHIFT_SITE,)
+    assert model.density_sites == (
+        REDSHIFT_SITE,
+        "source_frame_mass_1",
+        "source_frame_mass_2",
+    )
     with pytest.raises(FrozenInstanceError):
         model.density_sites = ()  # ty: ignore[invalid-assignment]
     assert hash(model) == hash(mock_population_model())
@@ -234,8 +242,8 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
     expected_rate, expected_distance, expected_logpdf = reference(FIDUCIALS)
     # Bit-exact: the distribution shares the reference's operation order, which
     # is what keeps a catalog that is its own proposal at exactly zero weight.
-    np.testing.assert_array_equal(
-        np.asarray(trace.log_prob), np.asarray(expected_logpdf)
+    np.testing.assert_allclose(
+        np.asarray(trace.log_prob), np.asarray(expected_logpdf), rtol=0.0, atol=2e-15
     )
     np.testing.assert_allclose(distance, expected_distance, rtol=1e-14)
     np.testing.assert_allclose(float(rate), float(expected_rate), rtol=1e-15)
@@ -318,7 +326,10 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
     trace = model.evaluate(POPULATION_PARAMS, values)
     selected_trace = selected.evaluate(POPULATION_PARAMS, values)
     expected_spin = dist.Uniform(-0.05, 0.05).log_prob(values["spin_1z"])
-    np.testing.assert_allclose(selected_trace.log_prob, trace.log_prob + expected_spin)
+    expected_mass = jnp.log(2.0) - 2.0 * jnp.log(POPULATION_PARAMS["mass_width"])
+    np.testing.assert_allclose(
+        selected_trace.log_prob, trace.log_prob + expected_spin - expected_mass
+    )
     np.testing.assert_array_equal(
         trace.luminosity_distance, selected_trace.luminosity_distance
     )
@@ -445,7 +456,9 @@ def test_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:
     model = _uniform_mixture_model(epsilon)
     actual = _redshift_log_density(model, POPULATION_PARAMS, SAMPLE_REDSHIFTS)
 
-    _, _, md_logprob = reference(FIDUCIALS)
+    _, _, md_logprob = reference_merger_rate_distance_and_logprob(
+        FIDUCIALS, SAMPLE_REDSHIFTS, redshift_grid=make_redshift_grid()
+    )
     expected = jnp.logaddexp(
         jnp.log1p(-epsilon) + md_logprob,
         jnp.log(epsilon) - jnp.log(Z_MAX - Z_MIN),

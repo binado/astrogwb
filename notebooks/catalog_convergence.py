@@ -320,7 +320,7 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
         model_name=POPULATION_MODEL,
         model_kwargs=POPULATION_MODEL_KWARGS,
         fiducials=POPULATION_PARAMS,
-        density_sites=("redshift",),
+        density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
         seed=POPULATION_SEED,
     )
 

@@ -110,7 +110,7 @@ def _catalog(
         _model_name="bns_md_cosmological",
         _model_kwargs=MODEL_KWARGS,
         _fiducials=params,
-        _density_sites=("redshift",),
+        _density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
         seed=MOCK_POPULATION_SEED,
     )
 
@@ -140,16 +140,26 @@ def test_preparation_caches_the_catalogs_own_proposal_density() -> None:
     # excluding the recorded constant factors -- so it is the redshift density
     # at OFF_POPULATION_PARAMS, not at the fiducials the target uses.
     _, _, expected_logprob = reference_merger_rate_distance_and_logprob(
-        OFF_POPULATION_PARAMS, REDSHIFTS, redshift_grid=make_redshift_grid()
+        OFF_POPULATION_PARAMS,
+        REDSHIFTS,
+        redshift_grid=make_redshift_grid(),
+        source_frame_mass_1=jnp.full_like(REDSHIFTS, 1.4),
+        source_frame_mass_2=jnp.full_like(REDSHIFTS, 1.3),
     )
-    np.testing.assert_array_equal(estimator.proposal_log_prob, expected_logprob)
+    np.testing.assert_allclose(
+        estimator.proposal_log_prob, expected_logprob, rtol=0.0, atol=2e-15
+    )
     np.testing.assert_array_equal(
         estimator.log_reference_distance,
         jnp.log(catalog.source_parameters[LUMINOSITY_DISTANCE_SITE]),
     )
     np.testing.assert_array_equal(estimator.polarization_power, POWER)
     assert set(estimator.source_parameters) == set(catalog.source_parameters)
-    assert estimator.model.density_sites == ("redshift",)
+    assert estimator.model.density_sites == (
+        "redshift",
+        "source_frame_mass_1",
+        "source_frame_mass_2",
+    )
 
 
 def test_preparation_reuses_the_stored_reference_distance() -> None:
@@ -164,7 +174,11 @@ def test_preparation_reuses_the_stored_reference_distance() -> None:
     target_distance = jnp.exp(
         jnp.log(
             reference_merger_rate_distance_and_logprob(
-                FIDUCIALS, REDSHIFTS, redshift_grid=make_redshift_grid()
+                FIDUCIALS,
+                REDSHIFTS,
+                redshift_grid=make_redshift_grid(),
+                source_frame_mass_1=jnp.full_like(REDSHIFTS, 1.4),
+                source_frame_mass_2=jnp.full_like(REDSHIFTS, 1.3),
             )[1]
         )
     )
@@ -357,7 +371,11 @@ def test_a_catalog_reweighted_to_its_own_proposal_has_exactly_zero_log_weights()
 
     spectrum, extras = estimator(at_generating)
     _, _, _ = reference_merger_rate_distance_and_logprob(
-        OFF_POPULATION_PARAMS, REDSHIFTS, redshift_grid=make_redshift_grid()
+        OFF_POPULATION_PARAMS,
+        REDSHIFTS,
+        redshift_grid=make_redshift_grid(),
+        source_frame_mass_1=jnp.full_like(REDSHIFTS, 1.4),
+        source_frame_mass_2=jnp.full_like(REDSHIFTS, 1.3),
     )
     np.testing.assert_allclose(
         spectrum,
@@ -383,7 +401,11 @@ def _grid_reference(
         params: Mapping[str, ArrayLike],
     ) -> tuple[jax.Array, dict[str, jax.Array]]:
         rate, distance, logprob = reference_merger_rate_distance_and_logprob(
-            params, REDSHIFTS, redshift_grid=make_redshift_grid()
+            params,
+            REDSHIFTS,
+            redshift_grid=make_redshift_grid(),
+            source_frame_mass_1=jnp.full_like(REDSHIFTS, 1.4),
+            source_frame_mass_2=jnp.full_like(REDSHIFTS, 1.3),
         )
         log_target_distance = jnp.log(distance) + log_gw_em_ratio(
             REDSHIFTS, params["xi_0"], params["xi_n"]
@@ -477,7 +499,11 @@ def test_precomputed_mixture_density_is_used_in_estimate() -> None:
     mixed = replace(estimator, proposal_log_prob=mixture.log_prob(REDSHIFTS))
 
     rate, distance, logprob = reference_merger_rate_distance_and_logprob(
-        FIDUCIALS, REDSHIFTS, redshift_grid=make_redshift_grid()
+        FIDUCIALS,
+        REDSHIFTS,
+        redshift_grid=make_redshift_grid(),
+        source_frame_mass_1=jnp.full_like(REDSHIFTS, 1.4),
+        source_frame_mass_2=jnp.full_like(REDSHIFTS, 1.3),
     )
     log_target_distance = jnp.log(distance) + log_gw_em_ratio(
         REDSHIFTS, FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]

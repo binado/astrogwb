@@ -252,7 +252,11 @@ def _reference_spectrum(
     redshift = estimator.source_parameters["redshift"]
     full = {**FIDUCIALS, **params}
     rate, distance, logprob = reference_merger_rate_distance_and_logprob(
-        full, redshift, redshift_grid=make_redshift_grid()
+        full,
+        redshift,
+        redshift_grid=make_redshift_grid(),
+        source_frame_mass_1=estimator.source_parameters["source_frame_mass_1"],
+        source_frame_mass_2=estimator.source_parameters["source_frame_mass_2"],
     )
     log_target_distance = jnp.log(distance) + log_gw_em_ratio(
         redshift, full["xi_0"], full["xi_n"]
