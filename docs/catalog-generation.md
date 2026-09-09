@@ -215,16 +215,16 @@ weights with no shape error anywhere.
 
 ### What loading checks
 
-`Catalog.load` is not just a read. It re-executes the recorded population and
-performs the **derived-column check**: every deterministic the population
-declares is recomputed from the stored stochastic values and compared against
-the stored column. This is what catches columns computed by some other route
-that have since drifted.
+`Catalog.load` validates the HDF5 layout, array shapes and serialized dtypes,
+then reconstructs the recorded population from the registry. It does not
+serialize a callable or require the analysis run configuration.
 
-The format is `astrogwb_catalog_v3`. Earlier formats, including v2 catalogs
-with excluded-factor metadata, require regeneration. There is no compatibility
-reader. The recorded density-site order is preserved on load and when narrowing
-the redshift window.
+The format is `astrogwb_catalog_v4`, a direct HDF5 file. Root attributes hold
+the waveform and population metadata (JSON is used for mappings and ordered
+lists); `frequency`, `polarization_power`, and `source_parameters` are HDF5
+datasets. Earlier formats require regeneration. The recorded density-site and
+source-parameter order is preserved on load and when narrowing the redshift
+window.
 
 ## What is *not* in the file: the analysis window
 

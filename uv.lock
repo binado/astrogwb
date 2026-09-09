@@ -211,8 +211,7 @@ cuda = [
     { name = "jax", extra = ["cuda12"] },
 ]
 io = [
-    { name = "h5netcdf", extra = ["h5py"] },
-    { name = "xarray" },
+    { name = "h5py" },
 ]
 notebook = [
     { name = "arviz", extra = ["h5netcdf"] },
@@ -221,21 +220,19 @@ notebook = [
     { name = "arviz-stats", extra = ["xarray"] },
     { name = "corner" },
     { name = "gwmock-pop" },
-    { name = "h5netcdf", extra = ["h5py"] },
+    { name = "h5py" },
     { name = "matplotlib" },
     { name = "pandas" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "scipy" },
-    { name = "xarray" },
 ]
 paper = [
     { name = "arviz", extra = ["h5netcdf"] },
     { name = "gwmock-pop" },
-    { name = "h5netcdf", extra = ["h5py"] },
+    { name = "h5py" },
     { name = "pydantic" },
     { name = "pyyaml" },
-    { name = "xarray" },
 ]
 simulation = [
     { name = "gwmock-pop" },
@@ -294,7 +291,7 @@ requires-dist = [
     { name = "gwmock-noise", specifier = ">=0.10.1" },
     { name = "gwmock-pop", marker = "extra == 'simulation'", specifier = ">=0.11.4" },
     { name = "gwmock-signal", extras = ["jax"], specifier = ">=0.15.0" },
-    { name = "h5netcdf", extras = ["h5py"], marker = "extra == 'io'", specifier = ">=1.8.1" },
+    { name = "h5py", marker = "extra == 'io'", specifier = ">=3.15" },
     { name = "jax", marker = "sys_platform == 'linux'", specifier = ">=0.10.2" },
     { name = "jax", extras = ["cpu"], marker = "sys_platform != 'linux'", specifier = ">=0.11.0" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda'", specifier = ">=0.11.0" },
@@ -306,7 +303,6 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'paper'", specifier = ">=2.11" },
     { name = "pyyaml", marker = "extra == 'paper'", specifier = ">=6.0" },
     { name = "scipy", marker = "extra == 'notebook'", specifier = ">=1.10" },
-    { name = "xarray", marker = "extra == 'io'", specifier = ">=2025.1" },
 ]
 provides-extras = ["cuda", "io", "simulation", "tpu", "paper", "notebook"]
 
@@ -708,7 +704,7 @@ wheels = [
 
 [[package]]
 name = "corner"
-version = "2.2.4.dev32+gd9c1219df"
+version = "2.3.0rc1"
 source = { git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4#d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" }
 dependencies = [
     { name = "matplotlib" },

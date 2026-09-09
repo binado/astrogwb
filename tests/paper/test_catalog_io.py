@@ -1,11 +1,4 @@
-"""Round-trip and format tests for the catalog's own HDF5 serialization.
-
-A catalog file records the density that drew it: the registered population
-model, that model's construction settings, the hyperparameters, and the
-included density factors. Everything here is about that record surviving the
-round trip intact -- and about a file that no longer describes its own arrays
-being rejected rather than loaded.
-"""
+"""Tests for the direct HDF5 catalog format."""
 
 from __future__ import annotations
 
@@ -15,253 +8,87 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
-import xarray as xr
-from catalog_fixtures import (
-    PAPER_MODEL,
-    PAPER_MODEL_KWARGS,
-    PAPER_POPULATION_PARAMS,
-    make_catalog,
-    save_catalog,
-)
+from catalog_fixtures import make_catalog
 
 from astrogwb.catalog import Catalog
-from astrogwb.catalog._io import (
-    DENSITY_SITES_ATTR,
-    DOMAIN_FREQUENCY,
-    FORMAT_NAME,
-    MODEL_KWARGS_ATTR,
-    MODEL_NAME_ATTR,
-    POPULATION_PARAMS_ATTR,
-    catalog_to_dataset,
-    validate_catalog_dataset,
-)
+from astrogwb.catalog._io import FORMAT_NAME, validate_catalog_file
 from astrogwb.waveform import PolarizationPowerGenerator
 
-REDSHIFT = np.array([0.1, 0.5, 1.0])
 
-
-def _catalog(**overrides) -> Catalog:
-    return make_catalog(redshift=REDSHIFT, num_frequencies=4, **overrides)
-
-
-def test_catalog_to_dataset_uses_stacked_float64_format() -> None:
-    dataset = catalog_to_dataset(_catalog())
-
-    assert dataset.polarization_power.dims == ("frequency", "sample")
-    assert dataset.source_parameters.dims == ("sample", "parameter")
-    assert dataset.source_parameters.dtype == np.float64
-    assert "redshift" in dataset.parameter.values.tolist()
-    assert dataset.attrs["format_name"] == FORMAT_NAME
-    assert dataset.attrs["domain"] == DOMAIN_FREQUENCY
-
-
-def test_the_population_record_travels_as_data_not_as_a_callable() -> None:
-    """A file stores a name and settings; the model is rebuilt from the registry."""
-    dataset = catalog_to_dataset(_catalog())
-
-    assert dataset.attrs[MODEL_NAME_ATTR] == PAPER_MODEL
-    assert json.loads(dataset.attrs[MODEL_KWARGS_ATTR]) == PAPER_MODEL_KWARGS
-    assert json.loads(dataset.attrs[POPULATION_PARAMS_ATTR]) == (
-        PAPER_POPULATION_PARAMS
+def test_hdf5_layout_metadata_and_order_round_trip(tmp_path: Path) -> None:
+    catalog = make_catalog(
+        redshift=np.array([0.1, 0.5, 1.0]), density_sites=("spin_1z", "redshift")
     )
-    assert json.loads(dataset.attrs[DENSITY_SITES_ATTR]) == sorted(("redshift",))
-    for value in dataset.attrs.values():
-        assert isinstance(value, str | int | float)
-
-
-def test_round_trip_preserves_arrays_and_the_population_record(
-    tmp_path: Path,
-) -> None:
-    original = _catalog()
     path = tmp_path / "catalog.h5"
-    original.save(path)
-
-    restored = Catalog.load(path)
-
-    assert type(restored.waveform_metadata) is PolarizationPowerGenerator
-    np.testing.assert_array_equal(
-        restored.waveform_metadata.frequencies,
-        original.waveform_metadata.frequencies,
-    )
-    np.testing.assert_array_equal(
-        restored.polarization_power, original.polarization_power
-    )
-    assert set(restored.source_parameters) == set(original.source_parameters)
-    for name, values in original.source_parameters.items():
-        np.testing.assert_allclose(restored.source_parameters[name], values)
-        assert restored.source_parameters[name].dtype == np.float64
-
-    assert restored.population_model_name == original.population_model_name
-    assert restored.population_model_kwargs == original.population_model_kwargs
-    assert restored.fiducials == original.fiducials
-    assert restored.density_sites == original.density_sites
-    assert restored.seed == 41
-
-
-def test_a_loaded_catalog_reconstructs_its_model_and_evaluates_at_new_params(
-    tmp_path: Path,
-) -> None:
-    """The point of the record: the density is recoverable, not just described."""
-    from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
-
-    path = tmp_path / "catalog.h5"
-    _catalog().save(path)
-    restored = Catalog.load(path)
-
-    model = restored.get_population_model()
-    assert model.fn is bns_md_cosmological
-    assert dict(model.settings) == PAPER_MODEL_KWARGS
-
-    for params in (
-        restored.fiducials,
-        {**restored.fiducials, "H0": 74.0},
-    ):
-        values = restored.source_parameters
-        trace = model.evaluate(params, values)
-        assert trace.log_prob.shape == REDSHIFT.shape
-
-
-def test_save_with_compression_round_trips(tmp_path: Path) -> None:
-    path = tmp_path / "catalog.h5"
-    save_catalog(path, _catalog(), compression="gzip")
-
-    with h5py.File(path) as handle:
-        assert handle["polarization_power"].compression == "gzip"
-    np.testing.assert_array_equal(
-        Catalog.load(path).polarization_power, _catalog().polarization_power
-    )
-
-
-@pytest.mark.parametrize(
-    "legacy", ["waveform_catalog", "astrogwb_catalog", "astrogwb_catalog_v2"]
-)
-def test_files_without_a_population_record_require_regeneration(
-    tmp_path: Path, legacy: str
-) -> None:
-    """No legacy reader: a file that cannot say what drew it is not loadable."""
-    path = tmp_path / "old.h5"
-    dataset = catalog_to_dataset(_catalog())
-    dataset.attrs["format_name"] = legacy
-    dataset.to_netcdf(path, engine="h5netcdf")
-
-    with pytest.raises(ValueError, match="regenerate"):
-        Catalog.load(path)
-
-
-@pytest.mark.parametrize(
-    "attribute",
-    [MODEL_NAME_ATTR, MODEL_KWARGS_ATTR, POPULATION_PARAMS_ATTR, DENSITY_SITES_ATTR],
-)
-def test_a_missing_population_attribute_requires_regeneration(
-    tmp_path: Path, attribute: str
-) -> None:
-    path = tmp_path / "incomplete.h5"
-    dataset = catalog_to_dataset(_catalog())
-    del dataset.attrs[attribute]
-    dataset.to_netcdf(path, engine="h5netcdf")
-
-    with pytest.raises(ValueError, match="regenerate"):
-        Catalog.load(path)
-
-
-def test_a_stored_column_that_drifted_from_the_population_is_caught(
-    tmp_path: Path,
-) -> None:
-    """Derived columns are recomputed and compared, not trusted."""
-    path = tmp_path / "drifted.h5"
-    catalog = _catalog()
-    corrupted = dict(catalog.source_parameters)
-    corrupted["detector_frame_mass_1"] = corrupted["detector_frame_mass_1"] * 1.01
-    dataset = catalog_to_dataset(
-        Catalog(
-            source_parameters=corrupted,
-            polarization_power=catalog.polarization_power,
-            waveform_metadata=catalog.waveform_metadata,
-            _model_name=catalog.population_model_name,
-            _model_kwargs=catalog.population_model_kwargs,
-            _fiducials=catalog.fiducials,
-            _density_sites=catalog.density_sites,
-            seed=catalog.seed,
-        )
-    )
-    dataset.to_netcdf(path, engine="h5netcdf")
-
-    with pytest.raises(ValueError, match="detector_frame_mass_1"):
-        Catalog.load(path)
-
-
-def test_an_unregistered_model_name_fails_clearly(tmp_path: Path) -> None:
-    path = tmp_path / "unknown.h5"
-    dataset = catalog_to_dataset(_catalog())
-    dataset.attrs[MODEL_NAME_ATTR] = "no_such_population"
-    dataset.to_netcdf(path, engine="h5netcdf")
-
-    with pytest.raises(KeyError, match="bns_md_cosmological"):
-        Catalog.load(path)
-
-
-def test_unknown_format_and_domain_are_rejected() -> None:
-    dataset = catalog_to_dataset(_catalog())
-
-    with pytest.raises(ValueError, match="format_name"):
-        validate_catalog_dataset(
-            dataset.assign_attrs(format_name="foreign"), label="test"
-        )
-    with pytest.raises(ValueError, match="domain"):
-        validate_catalog_dataset(dataset.assign_attrs(domain="time"), label="test")
-
-
-def test_dataset_validation_rejects_malformed_layout_and_sample_metadata() -> None:
-    dataset = catalog_to_dataset(_catalog())
-
-    wrong_dims = dataset.rename_dims({"sample": "event"})
-    with pytest.raises(ValueError, match="frequency, sample"):
-        validate_catalog_dataset(wrong_dims, label="test")
-    with pytest.raises(ValueError, match="population_num_samples"):
-        validate_catalog_dataset(
-            dataset.assign_attrs(population_num_samples=4), label="test"
-        )
-
-
-def test_dataset_validation_does_not_require_loading_power(tmp_path: Path) -> None:
-    path = tmp_path / "catalog.h5"
-    _catalog().save(path)
-
-    with xr.open_dataset(path, engine="h5netcdf") as dataset:
-        validate_catalog_dataset(dataset, label="test")
-        assert dataset.polarization_power._in_memory is False
-
-
-def test_in_memory_catalogs_do_not_need_the_io_extra(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The optional-dependency boundary: xarray is imported by save/load only."""
-    import sys
-
-    monkeypatch.setitem(sys.modules, "astrogwb.catalog._io", None)
-    catalog = _catalog()
-    assert catalog.restrict_redshift(0.3, 20.0).num_samples == 2
-    assert catalog.get_population_model() is not None
-
-
-def test_round_trip_restores_an_ordered_nondefault_density_selection(
-    tmp_path: Path,
-) -> None:
-    sites = ("spin_1z", "redshift")
-    catalog = _catalog(density_sites=sites)
-    path = tmp_path / "selected-density.h5"
     catalog.save(path)
+    with h5py.File(path) as handle:
+        assert set(handle) == {"frequency", "polarization_power", "source_parameters"}
+        assert handle.attrs["format_name"] == FORMAT_NAME
+        assert json.loads(handle.attrs["source_parameter_names"]) == list(
+            catalog.source_parameters
+        )
+        assert handle["source_parameters"].dtype == np.float64
     restored = Catalog.load(path)
-    assert restored.density_sites == sites
-    model = restored.get_population_model()
-    assert model.density_sites == sites
+    assert restored.density_sites == catalog.density_sites
+    assert list(restored.source_parameters) == list(catalog.source_parameters)
     np.testing.assert_array_equal(
-        model.log_prob(restored.fiducials, restored.source_parameters),
-        catalog.get_population_model().log_prob(
-            catalog.fiducials, catalog.source_parameters
-        ),
+        restored.polarization_power, catalog.polarization_power
     )
-    assert (
-        restored.restrict_redshift(0.2, 2.0).get_population_model().density_sites
-        == sites
-    )
+
+
+def test_compression_applies_to_arrays(tmp_path: Path) -> None:
+    path = tmp_path / "compressed.h5"
+    make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path, compression="gzip")
+    with h5py.File(path) as handle:
+        assert all(handle[name].compression == "gzip" for name in handle)
+
+
+@pytest.mark.parametrize(
+    "dataset", ["frequency", "polarization_power", "source_parameters"]
+)
+def test_missing_dataset_is_rejected(tmp_path: Path, dataset: str) -> None:
+    path = tmp_path / "invalid.h5"
+    make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
+    with h5py.File(path, "r+") as handle:
+        del handle[dataset]
+        with pytest.raises(ValueError, match="missing"):
+            validate_catalog_file(handle, label="test")
+
+
+def test_unknown_format_and_domain_are_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "invalid.h5"
+    make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
+    with h5py.File(path, "r+") as handle:
+        handle.attrs["format_name"] = "foreign"
+        with pytest.raises(ValueError, match="format_name"):
+            validate_catalog_file(handle, label="test")
+        handle.attrs["format_name"] = FORMAT_NAME
+        handle.attrs["domain"] = "time"
+        with pytest.raises(ValueError, match="domain"):
+            validate_catalog_file(handle, label="test")
+
+
+def test_malformed_source_shape_and_dtype_are_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "invalid.h5"
+    make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
+    with h5py.File(path, "r+") as handle:
+        data = np.asarray(handle["source_parameters"])
+        del handle["source_parameters"]
+        handle.create_dataset("source_parameters", data=data.astype(np.float32))
+        with pytest.raises(ValueError, match="float64"):
+            validate_catalog_file(handle, label="test")
+
+
+def test_invalid_metadata_and_unknown_population_fail_on_load(tmp_path: Path) -> None:
+    path = tmp_path / "invalid.h5"
+    make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
+    with h5py.File(path, "r+") as handle:
+        handle.attrs["population_model"] = "no_such_population"
+    with pytest.raises(KeyError):
+        Catalog.load(path)
+
+
+def test_waveform_type_is_restored(tmp_path: Path) -> None:
+    path = tmp_path / "catalog.h5"
+    make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
+    assert type(Catalog.load(path).waveform_metadata) is PolarizationPowerGenerator

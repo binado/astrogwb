@@ -11,8 +11,7 @@ pip install astrogwb
 ```
 
 Optional accelerator builds are available as `astrogwb[cuda]` and
-`astrogwb[tpu]`. HDF5 catalog serialization drags in xarray and pandas, so it
-is opt-in:
+`astrogwb[tpu]`. Direct HDF5 catalog serialization is opt-in:
 
 ```bash
 pip install astrogwb[io]

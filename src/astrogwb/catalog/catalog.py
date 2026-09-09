@@ -273,8 +273,8 @@ class Catalog:
         whose columns drifted from its declared population fails here rather
         than producing a plausible, wrong spectrum.
 
-        Files written before the v3 population record are rejected with a
-        regeneration message; there is no reconstruction path for them.
+        Files written in older catalog formats are rejected; there is no
+        compatibility reader.
         """
         from astrogwb.catalog import _io
 

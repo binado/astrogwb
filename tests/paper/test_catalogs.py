@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import h5py
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -40,14 +41,12 @@ def test_load_run_catalog_names_the_role_on_a_missing_file(tmp_path: Path) -> No
 
 def test_load_run_catalog_names_the_role_on_a_stale_file(tmp_path: Path) -> None:
     """A file that cannot say what drew it fails here, before JAX claims a device."""
-    from astrogwb.catalog._io import catalog_to_dataset
-
     path = tmp_path / "catalog.h5"
-    dataset = catalog_to_dataset(make_catalog(redshift=np.linspace(0.1, 5.0, 4)))
-    dataset.attrs["format_name"] = "astrogwb_catalog"
-    dataset.to_netcdf(path, engine="h5netcdf")
+    make_catalog(redshift=np.linspace(0.1, 5.0, 4)).save(path)
+    with h5py.File(path, "r+") as handle:
+        handle.attrs["format_name"] = "astrogwb_catalog_v3"
 
-    with pytest.raises(ValueError, match="injection catalog.*regenerate"):
+    with pytest.raises(ValueError, match="injection catalog.*format_name"):
         load_run_catalog(path, label="injection")
 
 
