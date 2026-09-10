@@ -16,7 +16,9 @@ from numpyro.infer.util import compute_log_probs
 
 #: A registered population: a plain NumPyro model taking the sampled
 #: hyperparameters and the model's own construction settings as keywords.
-type PopulationFn = Callable[..., None]
+#: The model declares sites as a side effect and returns those source arrays
+#: so callers can pass them to a waveform generator without scraping a trace.
+type PopulationFn = Callable[..., Mapping[str, jax.Array]]
 
 #: The raw NumPyro trace escape hatch -- every site, untyped. Only
 #: :meth:`Population.trace` returns this; :meth:`Population.evaluate` returns
@@ -75,9 +77,10 @@ class Population:
         object.__setattr__(self, "density_sites", tuple(self.density_sites))
         object.__setattr__(self, "source_sites", tuple(self.source_sites))
 
-    def __call__(self, params: Mapping[str, ArrayLike]) -> None:
-        """Declare source sites and population-level quantities with NumPyro."""
-        self.fn(params, **dict(self.settings))
+    def __call__(self, params: Mapping[str, ArrayLike]) -> dict[str, jax.Array]:
+        """Declare source sites and return them as arrays for this execution."""
+        sources = self.fn(params, **dict(self.settings))
+        return {name: jnp.asarray(sources[name]) for name in self.source_sites}
 
     def sample(
         self,

@@ -36,10 +36,10 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import ClassVar
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike
 
@@ -293,7 +293,6 @@ def inspiral_polarization_power(
 class AnalyticInspiralGenerator(PolarizationPowerGenerator):
     """Generate inspiral-only polarization power on the descriptor grid."""
 
-    jax_native: ClassVar[bool] = True
     alpha: float
 
     @property
@@ -302,14 +301,29 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
             self.minimum_frequency, self.maximum_frequency, self.frequency_resolution
         )
 
-    def __call__(
-        self, source_parameters: Mapping[str, ArrayLike]
-    ) -> tuple[jax.Array, jax.Array]:
+    def generate(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
+        power = self.generate_batch(
+            {
+                name: jnp.atleast_1d(jnp.asarray(values))
+                for name, values in source_parameters.items()
+            }
+        )
+        if power.shape[-1] != 1:
+            raise ValueError(
+                f"generate expects a single source; received {power.shape[-1]} events"
+            )
+        return power[:, 0]
+
+    def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         prepared_parameters = {
             name: jnp.asarray(values) for name, values in source_parameters.items()
         }
         frequencies = self.frequencies
-        power = inspiral_polarization_power(
+        return inspiral_polarization_power(
             frequencies, prepared_parameters, alpha=self.alpha
         ).T
-        return jnp.asarray(frequencies), power
+
+    def __call__(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> tuple[jax.Array, jax.Array]:
+        return jnp.asarray(self.frequencies), self.generate_batch(source_parameters)

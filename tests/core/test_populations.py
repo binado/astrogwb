@@ -214,6 +214,14 @@ def test_population_declares_its_source_outputs_and_density_factors() -> None:
     assert hash(model) == hash(mock_population_model())
 
 
+def test_population_call_returns_declared_source_sites() -> None:
+    model = mock_population_model()
+    sources = handlers.seed(model, 0)(POPULATION_PARAMS)
+    assert tuple(sources) == model.source_sites
+    for values in sources.values():
+        assert jnp.asarray(values).shape == ()
+
+
 def test_total_merger_rate_is_declared_only_with_a_physical_rate() -> None:
     """A proposal is a density, not an observation, so its rate is optional."""
     without_rate = {

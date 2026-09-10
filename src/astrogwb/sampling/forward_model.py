@@ -10,8 +10,10 @@ of a known size instead:
    ``num_events``.
 3. Draw ``num_events`` sources from the population under a NumPyro plate
    (a Python integer, so the model is a valid JAX pytree and ``jax.jit``
-   target).
-4. Generate polarization power over contiguous batches of ``batch_size``,
+   target). The population model returns that source dict, which is passed
+   to the waveform generator.
+4. Generate polarization power over contiguous batches of ``batch_size``
+   with :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate_batch`,
    reducing each chunk to ``(F,)`` before the next so the ``(F, N)`` array
    is never materialized, and form
 
@@ -30,25 +32,17 @@ catalog of size ``N``, consumed with :class:`~numpyro.infer.Predictive` or
 ``jax.jit``. To draw a random :math:`N` first, sample it in Python and pass
 it as ``num_events``.
 
-Batching over the *event* axis is the memory-safe counterpart of
-``lax.map(f, sources, batch_size=...)``. Mapping a per-source waveform
-function would stack an ``(N, F)`` result -- the OOM the batching exists to
-avoid. Each step consumes a catalog chunk, calls the generator once, and
-returns the ``(F,)`` sum. Full batches of ``batch_size`` are mapped; a
-static remainder (``num_events % batch_size``) is a separate generate, so
-dummy sources are never padded in.
+Batching over the *event* axis is the memory-safe counterpart of mapping a
+per-source :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate`.
+That would stack an ``(N, F)`` result -- the OOM the batching exists to
+avoid -- and would vmap the scalar waveform under the plate. The plated
+population already returns ``(N,)`` arrays; each step calls
+``generate_batch`` on a catalog chunk and returns the ``(F,)`` sum. Full
+batches of ``batch_size`` are reduced in a Python loop (static under JIT);
+a static remainder (``num_events % batch_size``) is a separate generate.
 
-Under :func:`jax.jit` -- and under ``Predictive`` with more than one
-sample, which itself uses :func:`jax.lax.map` -- full batches use
-:func:`jax.lax.map`. JAX-native generators (AnalyticInspiral) are called
-directly. Ripple is not a tracing target (``gwmock_signal`` uses host-side
-``bool`` checks), so those batches go through :func:`jax.pure_callback`.
-Ripple's frequency grid is only known after the first generate, so the
-callback needs a warmed generator. Eager single-trace execution uses a
-Python loop over the same batches and does not need that warmup.
-
-Warm a Ripple generator (one generate) before ``Predictive`` or
-:func:`jax.jit` so the host callback can size its result::
+Ripple's batch backend is the production waveform. Warm it (one generate)
+before reading ``generator.frequencies`` on an empty catalog::
 
     from functools import partial
 
@@ -79,9 +73,7 @@ import math
 from collections.abc import Mapping
 
 import jax
-import jax.core
 import jax.numpy as jnp
-import numpy as np
 import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
@@ -148,40 +140,15 @@ def _draw_sources(
         numpyro.plate("events", num_events),
         handlers.block(hide=[_TOTAL_MERGER_RATE_SITE]),
     ):
-        trace = handlers.trace(population).get_trace(params)
-    return {name: jnp.asarray(trace[name]["value"]) for name in population.source_sites}
-
-
-def _is_traced(value: jax.Array) -> bool:
-    """True when ``value`` is a JAX tracer, so host-side Python control flow is unsafe."""
-    return isinstance(value, jax.core.Tracer)
-
-
-def _generate_power(
-    generator: PolarizationPowerGenerator,
-    batch_sources: Mapping[str, jax.Array],
-) -> jax.Array:
-    """Evaluate the generator, using a host callback when tracing a non-JAX waveform."""
-    prototype = next(iter(batch_sources.values()))
-    if _is_traced(prototype) and not generator.jax_native:
-        n_chunk = prototype.shape[0]
-        result_shape = jax.ShapeDtypeStruct(
-            (generator.frequencies.shape[0], n_chunk), jnp.float64
-        )
-
-        def host_generate(batch: dict[str, np.ndarray]) -> np.ndarray:
-            return np.asarray(generator(batch), dtype=np.float64)
-
-        return jax.pure_callback(host_generate, result_shape, dict(batch_sources))
-    return jnp.asarray(generator(batch_sources))
+        return dict(population(params))
 
 
 def _batch_power_sum(
     generator: PolarizationPowerGenerator,
     batch_sources: Mapping[str, jax.Array],
 ) -> jax.Array:
-    """Call ``generator`` on one chunk and return the ``(F,)`` sum."""
-    power = _generate_power(generator, batch_sources)
+    """Call ``generate_batch`` on one chunk and return the ``(F,)`` sum."""
+    power = jnp.asarray(generator.generate_batch(batch_sources))
     n_chunk = next(iter(batch_sources.values())).shape[0]
     if power.ndim != 2 or power.shape[-1] != n_chunk:
         raise ValueError(
@@ -189,30 +156,6 @@ def _batch_power_sum(
             f"shape (F, n_chunk); got {power.shape} for {n_chunk} sources"
         )
     return power.sum(axis=1)
-
-
-def _sum_full_batches(
-    generator: PolarizationPowerGenerator,
-    chunked: Mapping[str, jax.Array],
-    *,
-    traced: bool,
-) -> jax.Array:
-    """Reduce ``(n_full, batch_size)`` sources to an ``(F,)`` power sum."""
-    if traced:
-        return jax.lax.map(
-            lambda batch: _batch_power_sum(generator, batch),
-            dict(chunked),
-        ).sum(axis=0)
-
-    n_full = next(iter(chunked.values())).shape[0]
-    total = _batch_power_sum(
-        generator, {name: values[0] for name, values in chunked.items()}
-    )
-    for index in range(1, n_full):
-        total = total + _batch_power_sum(
-            generator, {name: values[index] for name, values in chunked.items()}
-        )
-    return total
 
 
 def _sum_polarization_power(
@@ -224,28 +167,27 @@ def _sum_polarization_power(
     """Sum frequency-first polarization power over sources, chunk by chunk.
 
     Full batches of ``batch_size`` are reduced together; a static remainder
-    is a separate generate. Peak waveform memory is ``(F, batch_size)``
-    rather than ``(F, N)``. Under a trace the host callback for a non-JAX
-    generator needs ``generator.frequencies`` already cached.
+    is a separate ``generate_batch``. Peak waveform memory is
+    ``(F, batch_size)`` rather than ``(F, N)``.
     """
     n_events = array_dict_shape(sources)[0]
     if n_events == 0:
         return jnp.zeros(generator.frequencies.shape, dtype=jnp.float64)
 
     n_full, remainder = divmod(n_events, batch_size)
-    traced = _is_traced(next(iter(sources.values())))
+
+    def slice_sum(start: int, size: int) -> jax.Array:
+        batch = {name: values[start : start + size] for name, values in sources.items()}
+        return _batch_power_sum(generator, batch)
+
     if n_full:
-        chunked = {
-            name: values[: n_full * batch_size].reshape((n_full, batch_size))
-            for name, values in sources.items()
-        }
-        total = _sum_full_batches(generator, chunked, traced=traced)
+        total = slice_sum(0, batch_size)
+        for index in range(1, n_full):
+            total = total + slice_sum(index * batch_size, batch_size)
         if not remainder:
             return total
-        tail = {name: values[n_full * batch_size :] for name, values in sources.items()}
-        return total + _batch_power_sum(generator, tail)
-    tail = {name: values[:remainder] for name, values in sources.items()}
-    return _batch_power_sum(generator, tail)
+        return total + slice_sum(n_full * batch_size, remainder)
+    return slice_sum(0, remainder)
 
 
 def gwb_forward_model(

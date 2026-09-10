@@ -193,27 +193,37 @@ def _declare_bns_madau_dickinson(
     declare_masses: Callable[
         [Mapping[str, ArrayLike]], tuple[jax.Array, jax.Array]
     ] = _declare_ordered_uniform_masses,
-) -> None:
+) -> dict[str, jax.Array]:
     """Declare every site the propagation and mass variants share."""
     del z_min, z_max, n_grid
     mass_1, mass_2 = declare_masses(params)
-    numpyro.sample("spin_1z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))
-    numpyro.sample("spin_2z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))
-    numpyro.sample("lambda_1", dist.Uniform(0.0, TIDAL_DEFORMABILITY_MAXIMUM))
-    numpyro.sample("lambda_2", dist.Uniform(0.0, TIDAL_DEFORMABILITY_MAXIMUM))
+    spin_1z = numpyro.sample("spin_1z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))
+    spin_2z = numpyro.sample("spin_2z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))
+    lambda_1 = numpyro.sample(
+        "lambda_1", dist.Uniform(0.0, TIDAL_DEFORMABILITY_MAXIMUM)
+    )
+    lambda_2 = numpyro.sample(
+        "lambda_2", dist.Uniform(0.0, TIDAL_DEFORMABILITY_MAXIMUM)
+    )
 
     one_plus_z = 1.0 + redshift
-    numpyro.deterministic("detector_frame_mass_1", mass_1 * one_plus_z)
-    numpyro.deterministic("detector_frame_mass_2", mass_2 * one_plus_z)
-    numpyro.deterministic("luminosity_distance", luminosity_distance)
+    detector_frame_mass_1 = numpyro.deterministic(
+        "detector_frame_mass_1", mass_1 * one_plus_z
+    )
+    detector_frame_mass_2 = numpyro.deterministic(
+        "detector_frame_mass_2", mass_2 * one_plus_z
+    )
+    declared_luminosity_distance = numpyro.deterministic(
+        "luminosity_distance", luminosity_distance
+    )
 
     # Face-on, phase- and time-aligned: the catalog pairs with
     # ``average_mode="analytic_inclination"``, which converts face-on power
     # into the inclination average analytically.
     zeros = jnp.zeros_like(redshift)
-    numpyro.deterministic("inclination", zeros)
-    numpyro.deterministic("coa_phase", zeros)
-    numpyro.deterministic("coa_time", zeros)
+    inclination = numpyro.deterministic("inclination", zeros)
+    coa_phase = numpyro.deterministic("coa_phase", zeros)
+    coa_time = numpyro.deterministic("coa_time", zeros)
 
     # The physical rate is optional: a proposal density needs no rate, while a
     # target or injection observation cannot be built without one. Declaring it
@@ -223,6 +233,25 @@ def _declare_bns_madau_dickinson(
             "total_merger_rate",
             redshift_distribution.total_merger_rate(),
         )
+
+    return {
+        name: jnp.asarray(values)
+        for name, values in {
+            "redshift": redshift,
+            "source_frame_mass_1": mass_1,
+            "source_frame_mass_2": mass_2,
+            "spin_1z": spin_1z,
+            "spin_2z": spin_2z,
+            "lambda_1": lambda_1,
+            "lambda_2": lambda_2,
+            "detector_frame_mass_1": detector_frame_mass_1,
+            "detector_frame_mass_2": detector_frame_mass_2,
+            "luminosity_distance": declared_luminosity_distance,
+            "inclination": inclination,
+            "coa_phase": coa_phase,
+            "coa_time": coa_time,
+        }.items()
+    }
 
 
 def _redshift(
@@ -242,7 +271,7 @@ def _redshift(
 @register_population_model("bns_md_cosmological", source_sites=SOURCE_SITES)
 def bns_md_cosmological(
     params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
-) -> None:
+) -> dict[str, jax.Array]:
     r"""BNS sources on a Madau-Dickinson rate, with standard GW propagation.
 
     ``params`` must carry ``H0``, ``Omega_m``, ``gamma``, ``kappa`` and
@@ -255,7 +284,7 @@ def bns_md_cosmological(
     redshift, redshift_distribution = _redshift(
         params, z_min=z_min, z_max=z_max, n_grid=n_grid
     )
-    _declare_bns_madau_dickinson(
+    return _declare_bns_madau_dickinson(
         params,
         z_min=z_min,
         z_max=z_max,
@@ -274,7 +303,7 @@ def bns_md_uniform_mixture(
     z_max: float,
     n_grid: int,
     uniform_mixing_fraction: float,
-) -> None:
+) -> dict[str, jax.Array]:
     r"""A Madau-Dickinson redshift law blended with a uniform guard component.
 
     A *proposal* population, not a physical one: mixing a fraction
@@ -308,7 +337,7 @@ def bns_md_uniform_mixture(
         support=redshift_distribution.support,
     )
     redshift = jnp.asarray(numpyro.sample("redshift", mixture))
-    _declare_bns_madau_dickinson(
+    return _declare_bns_madau_dickinson(
         params,
         z_min=z_min,
         z_max=z_max,
@@ -322,7 +351,7 @@ def bns_md_uniform_mixture(
 @register_population_model("bns_md_modified_propagation", source_sites=SOURCE_SITES)
 def bns_md_modified_propagation(
     params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
-) -> None:
+) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_cosmological`, with a modified GW propagation distance.
 
     Additionally requires ``xi_0`` and ``xi_n`` in ``params``. The distance the
@@ -341,7 +370,7 @@ def bns_md_modified_propagation(
     redshift, redshift_distribution = _redshift(
         params, z_min=z_min, z_max=z_max, n_grid=n_grid
     )
-    _declare_bns_madau_dickinson(
+    return _declare_bns_madau_dickinson(
         params,
         z_min=z_min,
         z_max=z_max,
@@ -356,7 +385,7 @@ def bns_md_modified_propagation(
 @register_population_model("bns_md_gaussian_cosmological", source_sites=SOURCE_SITES)
 def bns_md_gaussian_cosmological(
     params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
-) -> None:
+) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_cosmological`, with i.i.d. Gaussian component masses.
 
     ``params`` must carry ``mass_mean`` and ``mass_sigma`` instead of
@@ -370,7 +399,7 @@ def bns_md_gaussian_cosmological(
     redshift, redshift_distribution = _redshift(
         params, z_min=z_min, z_max=z_max, n_grid=n_grid
     )
-    _declare_bns_madau_dickinson(
+    return _declare_bns_madau_dickinson(
         params,
         z_min=z_min,
         z_max=z_max,
@@ -390,7 +419,7 @@ def bns_md_gaussian_uniform_mixture(
     z_max: float,
     n_grid: int,
     uniform_mixing_fraction: float,
-) -> None:
+) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_uniform_mixture`, with i.i.d. Gaussian component masses.
 
     The redshift law is the same uniform-guard mixture; only the mass sites
@@ -414,7 +443,7 @@ def bns_md_gaussian_uniform_mixture(
         support=redshift_distribution.support,
     )
     redshift = jnp.asarray(numpyro.sample("redshift", mixture))
-    _declare_bns_madau_dickinson(
+    return _declare_bns_madau_dickinson(
         params,
         z_min=z_min,
         z_max=z_max,
@@ -431,7 +460,7 @@ def bns_md_gaussian_uniform_mixture(
 )
 def bns_md_gaussian_modified_propagation(
     params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
-) -> None:
+) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_modified_propagation`, with i.i.d. Gaussian component masses.
 
     ``params`` must carry ``mass_mean`` and ``mass_sigma`` as well as ``xi_0``
@@ -441,7 +470,7 @@ def bns_md_gaussian_modified_propagation(
     redshift, redshift_distribution = _redshift(
         params, z_min=z_min, z_max=z_max, n_grid=n_grid
     )
-    _declare_bns_madau_dickinson(
+    return _declare_bns_madau_dickinson(
         params,
         z_min=z_min,
         z_max=z_max,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import ClassVar
 
 import jax
 import numpy as np
@@ -18,19 +17,18 @@ class PolarizationPowerGenerator:
     """Frequency-domain waveform descriptor and power-generation interface.
 
     Concrete subclasses turn source parameters into a frequency axis and
-    frequency-first polarization power. The base class is also used as a
+    frequency-first polarization power. :meth:`generate` is one source;
+    :meth:`generate_batch` is a 1-D catalog. ``__call__`` returns
+    ``(frequencies, polarization_power)`` so catalog construction records the
+    axis the backend actually produced. The base class is also used as a
     metadata-only descriptor when a persisted catalog is loaded.
 
     ``frequency_resolution`` records what was *requested*; it is not
     necessarily the realized bin width. The generating backend chooses the
     actual grid, so the realized spacing belongs to the catalog it produces
     (see ``Catalog.df``), not to this descriptor.
-
-    ``jax_native`` is True when ``__call__`` is a valid JAX tracing target.
-    Ripple is not: its backend uses host-side ``bool`` checks.
     """
 
-    jax_native: ClassVar[bool] = False
     approximant: str
     minimum_frequency: float
     maximum_frequency: float
@@ -66,6 +64,22 @@ class PolarizationPowerGenerator:
             or self.frequency_resolution <= 0.0
         ):
             raise ValueError("frequency_resolution must be a finite positive scalar")
+
+    def generate(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
+        """Generate power for a single source, shape ``(F,)``."""
+        del source_parameters
+        raise NotImplementedError(
+            "PolarizationPowerGenerator is a metadata-only descriptor; "
+            "use a concrete generator subclass"
+        )
+
+    def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
+        """Generate power for a 1-D catalog, shape ``(F, N)``."""
+        del source_parameters
+        raise NotImplementedError(
+            "PolarizationPowerGenerator is a metadata-only descriptor; "
+            "use a concrete generator subclass"
+        )
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]

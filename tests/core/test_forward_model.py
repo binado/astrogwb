@@ -130,7 +130,7 @@ def _expected_spectrum(trace, generator, observation_time, *, average_mode):
     sources = {
         name: trace[name]["value"] for name in mock_population_model().source_sites
     }
-    power = jnp.asarray(generator(sources))
+    power = jnp.asarray(generator.generate_batch(sources))
     factor = (
         INCLINATION_AVERAGE_TO_FACE_ON_RATIO
         if average_mode == "analytic_inclination"
