@@ -20,12 +20,14 @@
 # reproduces the same figures from **grid-evaluated log densities** instead: for each
 # detector network we evaluate the model's constrained log density directly over a
 # 1D $H_0$ grid (`astrogwb.sampling.LogDensityFn`), sized from that network's own
-# matched-filter SNR via the Fisher prediction $\sigma_{H_0} \approx H_0 / \mathrm{SNR}$.
-# We also evaluate three 2D joint grids for the default network: $(H_0, \Omega_m)$
-# and $(H_0, \mathcal{R}_0)$ for the cosmological-parameter figures, and
-# $(\Xi_0, n)$ mirroring `scripts/mcmc_modified_propagation.py`'s $\Xi_0$--$n$
-# corner. The $(H_0, \mathcal{R}_0)$ grid is an exact-quadrature cross-check against
-# the script's amplitude-marginalized $H_0$-$\mathcal{R}_0$ run.
+# matched-filter SNR via the Fisher prediction $\sigma_{H_0} \approx H_0 / \mathrm{SNR}$,
+# with $\Omega_m$ pinned to the fiducial. An identical per-network scan replaces that
+# pin with $\Omega_m$'s Gaussian prior, so each network also gets a 2D $(H_0,
+# \Omega_m)$ grid whose $H_0$ marginal is the prior-marginalized counterpart of the
+# 1D scan. The default network additionally gets $(H_0, \mathcal{R}_0)$ and
+# $(\Xi_0, n)$ joints -- the latter mirroring `scripts/mcmc_modified_propagation.py`'s
+# $\Xi_0$--$n$ corner, the former an exact-quadrature cross-check against the
+# script's amplitude-marginalized $H_0$-$\mathcal{R}_0$ run.
 #
 # **Inputs:** `outputs/catalogs/md-imrphenom-s41-n32768.h5`, used as *both* the
 # injection and the proposal -- built by
@@ -293,9 +295,14 @@ LOCAL_MERGER_RATE_GRID = uniform_grid(
 XI_N_GRID = uniform_grid(
     *prior_window(PRIORS["xi_n"], sigmas=COVERAGE_SIGMAS), NPOINTS_2D
 )
-# The default network's H0 / xi_0 windows, resolved at the coarser 2D grid
-# resolution for the joint sweeps below.
-H0_GRID_2D = uniform_grid(*H0_WINDOWS[DEFAULT_NETWORK], NPOINTS_2D)
+# Per-network H0 windows at the coarser 2D resolution. The 1D scan uses
+# NPOINTS_1D; every (H0, Omega_m) joint uses these, including the default
+# network's remaining 2D sweeps.
+H0_GRIDS_2D: dict[str, jax.Array] = {
+    name: uniform_grid(low, high, NPOINTS_2D)
+    for name, (low, high) in H0_WINDOWS.items()
+}
+H0_GRID_2D = H0_GRIDS_2D[DEFAULT_NETWORK]
 XI0_SUPPORT = (float(PRIORS["xi_0"].low), float(PRIORS["xi_0"].high))
 XI0_WINDOW = fisher_window(
     FIDUCIALS["xi_0"],
@@ -323,9 +330,9 @@ pd.DataFrame(
 # **No `handlers.condition` / `handlers.block`.** The model carries every prior;
 # `LogDensityFn(...)(grids, fixed=...)` pins the rest. `fixed` is traced, so only a
 # change to its *key set* recompiles -- which is exactly what lets one network's
-# evaluator serve the 1D `H0` sweep and all three 2D sweeps (the joint-posterior
-# section reuses the default network's evaluator built here rather than rebuilding
-# it).
+# evaluator serve the 1D `H0` sweep, that network's `(H0, Omega_m)` joint, and
+# (for the default network) the remaining 2D sweeps. The joint-posterior section
+# reuses the evaluators built here rather than rebuilding them.
 #
 # `prepare_inference_inputs` re-runs `prepare_observation` (the fiducial spectrum
 # contraction) once per network. That is redundant work -- the observation does not
@@ -350,35 +357,72 @@ def build_log_density(network: Network) -> tuple[LogDensityFn, dict[str, jax.Arr
     return LogDensityFn(model, chunk_size=CHUNK_SIZE), inputs.masked_model_kwargs()
 
 
+def evaluate_joint(
+    log_density_fn: LogDensityFn,
+    grids: dict[str, jax.Array],
+    *,
+    model_kwargs: dict[str, jax.Array],
+) -> jax.Array:
+    """Evaluate the constrained log density on a Cartesian product of `grids`."""
+    fixed = {name: FIDUCIALS[name] for name in PRIORS if name not in grids}
+    return jax.block_until_ready(log_density_fn(grids, fixed=fixed, **model_kwargs))
+
+
 # %% [markdown]
 # ## Evaluating the H0 posterior for each network
+#
+# $\Omega_m$ (and every other non-$H_0$ site) is pinned to its fiducial.
 
 # %%
 LOG_DENSITY_FNS: dict[str, LogDensityFn] = {}
 MODEL_KWARGS: dict[str, dict[str, jax.Array]] = {}
 H0_LOGPOSTERIORS: dict[str, jax.Array] = {}
 
-_h0_fixed = {name: FIDUCIALS[name] for name in PRIORS if name != "H0"}
 for network in NETWORKS:
     log_density_fn, model_kwargs = build_log_density(network)
     LOG_DENSITY_FNS[network.name] = log_density_fn
     MODEL_KWARGS[network.name] = model_kwargs
 
     start = time.perf_counter()
-    logpost = log_density_fn(
-        {"H0": H0_GRIDS[network.name]}, fixed=_h0_fixed, **model_kwargs
+    logpost = evaluate_joint(
+        log_density_fn, {"H0": H0_GRIDS[network.name]}, model_kwargs=model_kwargs
     )
-    logpost = jax.block_until_ready(logpost)
     elapsed = time.perf_counter() - start
     H0_LOGPOSTERIORS[network.name] = logpost
     print(f"{network.label}: {elapsed:.2f}s for {NPOINTS_1D} grid points")
 
 # %% [markdown]
+# ## Evaluating H0--Omega_m for each network
+#
+# Identical to the 1D scan -- same networks, same per-network $H_0$ windows -- except
+# $\Omega_m$ is no longer pinned to the fiducial. It is gridded over
+# `prior_window(PRIORS["Omega_m"])`, the Gaussian $\mathrm{loc} \pm
+# \mathtt{COVERAGE\_SIGMAS}\,\sigma$, so the model prior is part of the density
+# rather than a delta at the fiducial. Each call reuses the evaluator compiled
+# above; only the `grids` / `fixed` key set changes (one extra compilation per
+# network).
+
+
+# %%
+H0_OMEGA_M_LOGPOSTERIORS: dict[str, jax.Array] = {}
+for network in NETWORKS:
+    start = time.perf_counter()
+    logpost = evaluate_joint(
+        LOG_DENSITY_FNS[network.name],
+        {"H0": H0_GRIDS_2D[network.name], "Omega_m": OMEGA_M_GRID},
+        model_kwargs=MODEL_KWARGS[network.name],
+    )
+    elapsed = time.perf_counter() - start
+    H0_OMEGA_M_LOGPOSTERIORS[network.name] = logpost
+    print(f"{network.label}: {elapsed:.2f}s for {NPOINTS_2D}x{NPOINTS_2D} grid points")
+
+# %% [markdown]
 # ## H0 posterior by detector network
 #
-# ≙ `H0-by-detector.pdf`. Each network's grid is normalized to a proper density with
-# `np.trapezoid` before plotting; the grids differ in window per network, so the raw
-# `log_density` values are not directly comparable across curves.
+# ≙ `H0-by-detector.pdf`. $\Omega_m$ is pinned to the fiducial. Each network's grid
+# is normalized to a proper density with `np.trapezoid` before plotting; the grids
+# differ in window per network, so the raw `log_density` values are not directly
+# comparable across curves.
 
 
 # %%
@@ -393,45 +437,91 @@ def safe_exponentiate(log_values: jax.Array) -> np.ndarray:
     return np.exp(values - values.max())
 
 
-_h0_colors, _h0_linestyles = detector_network_styles(NETWORKS)
+def marginal_along(
+    log_density: jax.Array, axis_grid: jax.Array, *, axis: int
+) -> np.ndarray:
+    """Trapezoidal marginal of a joint log-density along `axis`."""
+    return np.trapezoid(
+        safe_exponentiate(log_density), np.asarray(axis_grid), axis=axis
+    )
 
-fig_h0_by_detector, ax = plt.subplots()
-for network, color, linestyle in zip(NETWORKS, _h0_colors, _h0_linestyles, strict=True):
-    grid = np.asarray(H0_GRIDS[network.name])
-    density = safe_exponentiate(H0_LOGPOSTERIORS[network.name])
-    density /= np.trapezoid(density, grid)
-    ax.plot(grid, density, label=network.label, color=color, linestyle=linestyle)
-ax.axvline(FIDUCIALS["H0"], **TRUTH)
-ax.set(xlabel=PARAMETER_LABELS["H0"], ylabel="Posterior density")
-ax.legend(**DETECTOR_COMPARISON_LEGEND)
-fig_h0_by_detector.tight_layout()
+
+def plot_h0_by_detector(
+    h0_grids: dict[str, jax.Array],
+    densities: dict[str, np.ndarray],
+) -> plt.Figure:
+    """Overlay per-network H0 posterior densities with the detector-network styles."""
+    colors, linestyles = detector_network_styles(NETWORKS)
+    fig, ax = plt.subplots()
+    for network, color, linestyle in zip(NETWORKS, colors, linestyles, strict=True):
+        grid = np.asarray(h0_grids[network.name])
+        density = np.asarray(densities[network.name], dtype=np.float64)
+        density = density / np.trapezoid(density, grid)
+        ax.plot(grid, density, label=network.label, color=color, linestyle=linestyle)
+    ax.axvline(FIDUCIALS["H0"], **TRUTH)
+    ax.set(xlabel=PARAMETER_LABELS["H0"], ylabel="Posterior density")
+    ax.legend(**DETECTOR_COMPARISON_LEGEND)
+    fig.tight_layout()
+    return fig
+
+
+fig_h0_by_detector = plot_h0_by_detector(
+    H0_GRIDS,
+    {name: safe_exponentiate(logpost) for name, logpost in H0_LOGPOSTERIORS.items()},
+)
 fig_h0_by_detector
+
+# %% [markdown]
+# ## H0 posterior by detector network, Omega_m marginalized
+#
+# Same overlay as the 1D scan, from the $H_0$ marginal of each network's $(H_0,
+# \Omega_m)$ grid (`np.trapezoid` over $\Omega_m$). $\Omega_m$ is prior-dominated at
+# these priors, so the curves should closely track the fixed-$\Omega_m$ overlay
+# above; a large disagreement would mean the Gaussian prior window is clipping the
+# joint or the $H_0$--$\Omega_m$ degeneracy is not negligible.
+
+
+# %%
+H0_OMEGA_M_H0_MARGINAL: dict[str, np.ndarray] = {
+    name: marginal_along(logpost, OMEGA_M_GRID, axis=1)
+    for name, logpost in H0_OMEGA_M_LOGPOSTERIORS.items()
+}
+fig_h0_omega_m_by_detector = plot_h0_by_detector(H0_GRIDS_2D, H0_OMEGA_M_H0_MARGINAL)
+fig_h0_omega_m_by_detector
 
 # %% [markdown]
 # ## SNR versus the measured H0 uncertainty
 #
 # ≙ `H0-by-detector.csv` / `.tex`. `sigma_h0_grid` is the half-width of the smallest
-# highest-density interval enclosing `CORNER_LEVELS[0]` (68.27%) of the grid's mass --
-# found by sorting the grid cells by density and thresholding at the enclosed-mass
-# level, the same construction `plot_corner_for_posterior_grid` relies on for its
-# credible-region contours. `rel_sigma_h0_grid` should track `rel_sigma_h0_snr =
-# 1/SNR` across the six networks; large disagreement means `COVERAGE_SIGMAS` is
-# clipping the posterior.
+# highest-density interval enclosing `CORNER_LEVELS[0]` (68.27%) of the 1D
+# (fixed-$\Omega_m$) grid's mass -- found by sorting the grid cells by density and
+# thresholding at the enclosed-mass level, the same construction
+# `plot_corner_for_posterior_grid` relies on for its credible-region contours.
+# `sigma_h0_omega_m_grid` is the same HPD on the $H_0$ marginal of the 2D scan.
+# `rel_sigma_h0_grid` should track `rel_sigma_h0_snr = 1/SNR` across the six
+# networks; large disagreement means `COVERAGE_SIGMAS` is clipping the posterior.
 
 
 # %%
-def hpd_half_width_1d(
-    grid: np.ndarray, log_density: np.ndarray, *, probability: float
+def hpd_half_width(
+    grid: np.ndarray, density: np.ndarray, *, probability: float
 ) -> float:
     """Half-width of the smallest region enclosing `probability` of the grid's mass."""
     grid = np.asarray(grid)
-    density = safe_exponentiate(log_density)
+    density = np.asarray(density, dtype=np.float64)
     weights = density / density.sum()
     order = np.argsort(density)[::-1]
     cumulative = np.cumsum(weights[order])
     n_included = int(np.searchsorted(cumulative, probability)) + 1
     included_grid = grid[order[:n_included]]
     return float(included_grid.max() - included_grid.min()) / 2.0
+
+
+def hpd_half_width_1d(
+    grid: np.ndarray, log_density: np.ndarray, *, probability: float
+) -> float:
+    """Half-width of the HPD of a 1D log-density grid."""
+    return hpd_half_width(grid, safe_exponentiate(log_density), probability=probability)
 
 
 CONSTRAINT_TABLE = pd.DataFrame(
@@ -444,12 +534,19 @@ CONSTRAINT_TABLE = pd.DataFrame(
                 H0_LOGPOSTERIORS[network.name],
                 probability=CORNER_LEVELS[0],
             ),
+            "sigma_h0_omega_m_grid": hpd_half_width(
+                H0_GRIDS_2D[network.name],
+                H0_OMEGA_M_H0_MARGINAL[network.name],
+                probability=CORNER_LEVELS[0],
+            ),
         }
         for network in NETWORKS
     ]
 )
 CONSTRAINT_TABLE = CONSTRAINT_TABLE.assign(
     rel_sigma_h0_grid=CONSTRAINT_TABLE["sigma_h0_grid"] / FIDUCIALS["H0"],
+    rel_sigma_h0_omega_m_grid=CONSTRAINT_TABLE["sigma_h0_omega_m_grid"]
+    / FIDUCIALS["H0"],
     rel_sigma_h0_snr=1.0 / CONSTRAINT_TABLE["snr"],
 )
 CONSTRAINT_TABLE
@@ -457,30 +554,16 @@ CONSTRAINT_TABLE
 # %% [markdown]
 # ## Joint posteriors for the default network
 #
-# All three 2D sweeps reuse `LOG_DENSITY_FNS[DEFAULT_NETWORK]`, built once above: only
-# the `grids` / `fixed` key sets change between calls. `evaluate_joint` pins every
-# prior that is not a grid axis to its fiducial.
-
+# The $(H_0, \Omega_m)$ joint is the default network's slice of the per-network 2D
+# scan above. The remaining two 2D sweeps reuse the same evaluator: only the
+# `grids` / `fixed` key sets change between calls.
 
 # %%
-def evaluate_joint(
-    log_density_fn: LogDensityFn,
-    grids: dict[str, jax.Array],
-    *,
-    model_kwargs: dict[str, jax.Array],
-) -> jax.Array:
-    """Evaluate the constrained log density on a Cartesian product of `grids`."""
-    fixed = {name: FIDUCIALS[name] for name in PRIORS if name not in grids}
-    return jax.block_until_ready(log_density_fn(grids, fixed=fixed, **model_kwargs))
-
-
 _default_log_density_fn = LOG_DENSITY_FNS[DEFAULT_NETWORK]
 _default_model_kwargs = MODEL_KWARGS[DEFAULT_NETWORK]
 
 H0_OMEGA_M_GRIDS = {"H0": H0_GRID_2D, "Omega_m": OMEGA_M_GRID}
-H0_OMEGA_M_LOGPOST = evaluate_joint(
-    _default_log_density_fn, H0_OMEGA_M_GRIDS, model_kwargs=_default_model_kwargs
-)
+H0_OMEGA_M_LOGPOST = H0_OMEGA_M_LOGPOSTERIORS[DEFAULT_NETWORK]
 
 H0_MERGER_RATE_GRIDS = {"H0": H0_GRID_2D, "local_merger_rate": LOCAL_MERGER_RATE_GRID}
 H0_MERGER_RATE_LOGPOST = evaluate_joint(
@@ -550,8 +633,7 @@ fig_xi0_n_corner
 _fixed_density = safe_exponentiate(H0_LOGPOSTERIORS[DEFAULT_NETWORK])
 _fixed_density /= np.trapezoid(_fixed_density, np.asarray(H0_GRIDS[DEFAULT_NETWORK]))
 
-_joint_density = safe_exponentiate(H0_MERGER_RATE_LOGPOST)
-_h0_marginal = np.trapezoid(_joint_density, np.asarray(LOCAL_MERGER_RATE_GRID), axis=1)
+_h0_marginal = marginal_along(H0_MERGER_RATE_LOGPOST, LOCAL_MERGER_RATE_GRID, axis=1)
 _h0_marginal /= np.trapezoid(_h0_marginal, np.asarray(H0_GRID_2D))
 
 fig_h0_merger_rate_priors, ax = plt.subplots()
@@ -586,6 +668,13 @@ if SAVE_OUTPUTS:
             f"h0_logpost_{name}": np.asarray(logpost)
             for name, logpost in H0_LOGPOSTERIORS.items()
         },
+        **{
+            f"h0_grid_2d_{name}": np.asarray(grid) for name, grid in H0_GRIDS_2D.items()
+        },
+        **{
+            f"h0_omega_m_logpost_{name}": np.asarray(logpost)
+            for name, logpost in H0_OMEGA_M_LOGPOSTERIORS.items()
+        },
         h0_grid_2d=np.asarray(H0_GRID_2D),
         omega_m_grid=np.asarray(OMEGA_M_GRID),
         local_merger_rate_grid=np.asarray(LOCAL_MERGER_RATE_GRID),
@@ -616,6 +705,9 @@ if SAVE_OUTPUTS:
     CONSTRAINT_TABLE.to_csv(FIGURE_DIR / "H0-by-detector-grid.csv", index=False)
     fig_h0_by_detector.savefig(
         FIGURE_DIR / "H0-by-detector-grid.pdf", bbox_inches="tight"
+    )
+    fig_h0_omega_m_by_detector.savefig(
+        FIGURE_DIR / "H0-Omega_m-by-detector-grid.pdf", bbox_inches="tight"
     )
     fig_h0_omega_m_corner.savefig(
         FIGURE_DIR / "H0-Omega_m-corner-grid.pdf", bbox_inches="tight"

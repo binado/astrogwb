@@ -45,8 +45,8 @@ NETWORK_DETECTORS: dict[str, tuple[str, ...]] = {
 #: The experiment every constant here was read off of.
 NETWORK_EXPERIMENT: str = "cosmological-parameters"
 
-#: The network used for the joint (H0, Omega_m) / (H0, local_merger_rate) /
-#: (xi_0, xi_n) grids.
+#: The network used for the joint (H0, local_merger_rate) / (xi_0, xi_n)
+#: grids. Every detector network gets a (H0, Omega_m) grid.
 DEFAULT_NETWORK: str = "ET-2L-aligned-CE-Hanford"
 
 #: LaTeX axis labels for the parameters plotted by name, matching
