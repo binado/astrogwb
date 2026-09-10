@@ -2,37 +2,44 @@ r"""Exact Poisson-catalog forward model of the gravitational-wave spectrum.
 
 The catalog contraction :func:`~astrogwb.gwb.spectral.spectral_density`
 replaces a finite observation with its large-N mean,
-:math:`S_h(f) = \mathcal{R}\,\langle P(f)\rangle`. This module draws the
-catalog instead:
+:math:`S_h(f) = \mathcal{R}\,\langle P(f)\rangle`. This module draws a catalog
+of a known size instead:
 
 1. Evaluate the population's observer-frame merger rate :math:`\mathcal{R}`.
-2. Draw :math:`N \sim \mathrm{Poisson}(\mathcal{R}\, T)`.
-3. Draw ``max_events`` sources from the population under a NumPyro plate
-   (a static size, so the model is a valid JAX pytree and ``jax.jit``
-   target). Events with index :math:`\ge N` are masked out.
+2. Observe :math:`N` as ``Poisson(\mathcal{R}\, T)`` at the plate size
+   ``num_events``.
+3. Draw ``num_events`` sources from the population under a NumPyro plate
+   (a Python integer, so the model is a valid JAX pytree and ``jax.jit``
+   target).
 4. Generate polarization power over contiguous batches of ``batch_size``,
    reducing each chunk to ``(F,)`` before the next so the ``(F, N)`` array
    is never materialized, and form
 
    .. math::
 
-       S_h(f) = \frac{1}{T}\sum_{i=1}^{\min(N,\, N_{\max})} P_i(f).
+       S_h(f) = \frac{1}{T}\sum_{i=1}^{N} P_i(f).
 
-In expectation this recovers :math:`\mathcal{R}\,\langle P\rangle` whenever
-``max_events`` upper-bounds the Poisson draw. There is no observation site:
-the model is a simulator, consumed with :class:`~numpyro.infer.Predictive`
-or ``jax.jit``.
+``num_events`` is the observed count, not the rate. The Poisson mean is
+still :math:`\mathcal{R}\, T`; observing it at ``N`` puts :math:`p(N\mid
+\mathcal{R}\, T)` in the joint without sampling a data-dependent plate size.
+A traced Poisson draw cannot size a plate under :func:`jax.jit`. Each
+distinct ``num_events`` is a different JIT specialization.
+
+There is no ``spectral_density_obs`` site: the model is a simulator for a
+catalog of size ``N``, consumed with :class:`~numpyro.infer.Predictive` or
+``jax.jit``. To draw a random :math:`N` first, sample it in Python and pass
+it as ``num_events``.
 
 Batching over the *event* axis is the memory-safe counterpart of
 ``lax.map(f, sources, batch_size=...)``. Mapping a per-source waveform
 function would stack an ``(N, F)`` result -- the OOM the batching exists to
-avoid. Each step therefore consumes a ``(batch_size,)`` catalog chunk,
-calls the generator once, and returns the masked ``(F,)`` sum.
-``max_events`` is padded to a multiple of ``batch_size`` so that path has
-no remainder kernel.
+avoid. Each step consumes a catalog chunk, calls the generator once, and
+returns the ``(F,)`` sum. Full batches of ``batch_size`` are mapped; a
+static remainder (``num_events % batch_size``) is a separate generate, so
+dummy sources are never padded in.
 
 Under :func:`jax.jit` -- and under ``Predictive`` with more than one
-sample, which itself uses :func:`jax.lax.map` -- the reduction is
+sample, which itself uses :func:`jax.lax.map` -- full batches use
 :func:`jax.lax.map`. JAX-native generators (AnalyticInspiral) are called
 directly. Ripple is not a tracing target (``gwmock_signal`` uses host-side
 ``bool`` checks), so those batches go through :func:`jax.pure_callback`.
@@ -40,12 +47,8 @@ Ripple's frequency grid is only known after the first generate, so the
 callback needs a warmed generator. Eager single-trace execution uses a
 Python loop over the same batches and does not need that warmup.
 
-``max_events`` sizes the source plate, so it is a Python integer (static
-under JIT). ``N`` itself stays a traced Poisson draw. For several Predictive
-draws the source sites have a fixed leading length and stack without
-``return_sites``; omitting them is still cheaper. Warm a Ripple generator
-(one generate) before ``Predictive`` or :func:`jax.jit` so the host
-callback can size its result::
+Warm a Ripple generator (one generate) before ``Predictive`` or
+:func:`jax.jit` so the host callback can size its result::
 
     from functools import partial
 
@@ -61,7 +64,7 @@ callback can size its result::
                 generator=generator,
                 observation_time=1.0,
                 batch_size=1024,
-                max_events=1 << 18,
+                num_events=10_000,
             ),
             num_samples=1,
             return_sites=("spectral_density", "n_events", "total_merger_rate"),
@@ -99,6 +102,12 @@ def _require_positive_int(name: str, value: int) -> int:
     return value
 
 
+def _require_non_negative_int(name: str, value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer, got {value!r}")
+    return value
+
+
 def _require_positive_time(observation_time: float) -> float:
     time = float(observation_time)
     if not math.isfinite(time) or time <= 0.0:
@@ -126,43 +135,21 @@ def _population_total_merger_rate(
 
 
 def _draw_sources(
-    population: Population, params: Mapping[str, ArrayLike], max_events: int
+    population: Population, params: Mapping[str, ArrayLike], num_events: int
 ) -> dict[str, jax.Array]:
-    """Draw ``max_events`` sources under a plate, hiding the plated rate site.
+    """Draw ``num_events`` sources under a plate, hiding the plated rate site.
 
     The unplated rate is already published as ``total_merger_rate``. The
     population also declares that deterministic, and under a plate it would
-    become an ``(N,)`` site of the same name.
+    become an ``(N,)`` site of the same name. ``num_events`` must be positive:
+    NumPyro plates reject size 0.
     """
     with (
-        numpyro.plate("events", max_events),
+        numpyro.plate("events", num_events),
         handlers.block(hide=[_TOTAL_MERGER_RATE_SITE]),
     ):
         trace = handlers.trace(population).get_trace(params)
     return {name: jnp.asarray(trace[name]["value"]) for name in population.source_sites}
-
-
-def _chunked_sources(
-    sources: Mapping[str, jax.Array],
-    mask: jax.Array,
-    *,
-    batch_size: int,
-) -> tuple[dict[str, jax.Array], jax.Array]:
-    """Reshape ``(N,)`` sources into ``(n_batches, batch_size)``, padding if needed."""
-    n_events = array_dict_shape(sources)[0]
-    pad = (batch_size - (n_events % batch_size)) % batch_size
-    # Repeat a real source rather than padding with zeros: d_L = 0 and
-    # M = 0 make the inspiral amplitude inf/NaN, and those values would
-    # leak into the reduction even with a zero mask (NaN * 0 is NaN).
-    padded = {
-        name: jnp.pad(values, (0, pad), mode="edge") for name, values in sources.items()
-    }
-    padded_mask = jnp.pad(mask.astype(jnp.float64), (0, pad))
-    n_batches = (n_events + pad) // batch_size
-    chunked = {
-        name: values.reshape((n_batches, batch_size)) for name, values in padded.items()
-    }
-    return chunked, padded_mask.reshape((n_batches, batch_size))
 
 
 def _is_traced(value: jax.Array) -> bool:
@@ -189,61 +176,76 @@ def _generate_power(
     return jnp.asarray(generator(batch_sources))
 
 
-def _masked_batch_power(
+def _batch_power_sum(
     generator: PolarizationPowerGenerator,
     batch_sources: Mapping[str, jax.Array],
-    batch_mask: jax.Array,
 ) -> jax.Array:
-    """Call ``generator`` on one chunk and return the masked ``(F,)`` sum."""
+    """Call ``generator`` on one chunk and return the ``(F,)`` sum."""
     power = _generate_power(generator, batch_sources)
-    n_chunk = batch_mask.shape[0]
+    n_chunk = next(iter(batch_sources.values())).shape[0]
     if power.ndim != 2 or power.shape[-1] != n_chunk:
         raise ValueError(
             "waveform generator must return frequency-first power of "
             f"shape (F, n_chunk); got {power.shape} for {n_chunk} sources"
         )
-    return jnp.where(batch_mask > 0, power, 0.0).sum(axis=1)
+    return power.sum(axis=1)
+
+
+def _sum_full_batches(
+    generator: PolarizationPowerGenerator,
+    chunked: Mapping[str, jax.Array],
+    *,
+    traced: bool,
+) -> jax.Array:
+    """Reduce ``(n_full, batch_size)`` sources to an ``(F,)`` power sum."""
+    if traced:
+        return jax.lax.map(
+            lambda batch: _batch_power_sum(generator, batch),
+            dict(chunked),
+        ).sum(axis=0)
+
+    n_full = next(iter(chunked.values())).shape[0]
+    total = _batch_power_sum(
+        generator, {name: values[0] for name, values in chunked.items()}
+    )
+    for index in range(1, n_full):
+        total = total + _batch_power_sum(
+            generator, {name: values[index] for name, values in chunked.items()}
+        )
+    return total
 
 
 def _sum_polarization_power(
     generator: PolarizationPowerGenerator,
     sources: Mapping[str, jax.Array],
-    mask: jax.Array,
     *,
     batch_size: int,
 ) -> jax.Array:
-    """Sum frequency-first polarization power over masked sources, chunk by chunk.
+    """Sum frequency-first polarization power over sources, chunk by chunk.
 
-    Each step receives ``batch_size`` sources, calls ``generator`` once, and
-    returns an ``(F,)`` masked sum, so peak waveform memory is
-    ``(F, batch_size)`` rather than ``(F, N)``. Frequency count is taken from
-    the generator output when running eagerly. Under a trace the host callback
-    for a non-JAX generator needs ``generator.frequencies`` already cached.
+    Full batches of ``batch_size`` are reduced together; a static remainder
+    is a separate generate. Peak waveform memory is ``(F, batch_size)``
+    rather than ``(F, N)``. Under a trace the host callback for a non-JAX
+    generator needs ``generator.frequencies`` already cached.
     """
-    chunked, chunked_mask = _chunked_sources(sources, mask, batch_size=batch_size)
+    n_events = array_dict_shape(sources)[0]
+    if n_events == 0:
+        return jnp.zeros(generator.frequencies.shape, dtype=jnp.float64)
 
-    def batch_power_sum(
-        batch: tuple[dict[str, jax.Array], jax.Array],
-    ) -> jax.Array:
-        batch_sources, batch_mask = batch
-        return _masked_batch_power(generator, batch_sources, batch_mask)
-
-    if _is_traced(mask):
-        batch_totals = jax.lax.map(batch_power_sum, (chunked, chunked_mask))
-        return batch_totals.sum(axis=0)
-
-    n_batches = next(iter(chunked.values())).shape[0]
-    total = _masked_batch_power(
-        generator,
-        {name: values[0] for name, values in chunked.items()},
-        chunked_mask[0],
-    )
-    for index in range(1, n_batches):
-        batch_sources = {name: values[index] for name, values in chunked.items()}
-        total = total + _masked_batch_power(
-            generator, batch_sources, chunked_mask[index]
-        )
-    return total
+    n_full, remainder = divmod(n_events, batch_size)
+    traced = _is_traced(next(iter(sources.values())))
+    if n_full:
+        chunked = {
+            name: values[: n_full * batch_size].reshape((n_full, batch_size))
+            for name, values in sources.items()
+        }
+        total = _sum_full_batches(generator, chunked, traced=traced)
+        if not remainder:
+            return total
+        tail = {name: values[n_full * batch_size :] for name, values in sources.items()}
+        return total + _batch_power_sum(generator, tail)
+    tail = {name: values[:remainder] for name, values in sources.items()}
+    return _batch_power_sum(generator, tail)
 
 
 def gwb_forward_model(
@@ -253,10 +255,10 @@ def gwb_forward_model(
     generator: PolarizationPowerGenerator,
     observation_time: float,
     batch_size: int,
-    max_events: int,
+    num_events: int,
     average_mode: AverageMode = "catalog_inclination",
 ) -> None:
-    r"""Draw a Poisson catalog and reduce it to a strain spectral density.
+    r"""Draw a catalog of size ``num_events`` and reduce it to a strain spectrum.
 
     ``params`` is the hyperparameter dict the population already accepts --
     this model does not sample them. ``observation_time`` is in years, the
@@ -264,18 +266,21 @@ def gwb_forward_model(
     grid; the Poisson rate converts it against the population's mergers-per-
     second :math:`\mathcal{R}`.
 
-    ``max_events`` and ``batch_size`` are Python integers and are static under
-    JIT. The Poisson count is traced; sources with index ``>= n_events`` do
-    not contribute. Counts above ``max_events`` are truncated.
+    ``num_events`` and ``batch_size`` are Python integers and are static under
+    JIT. ``num_events`` is the plate dimension and the observed Poisson count
+    (the event count, not the merger rate). A traced sample cannot size the
+    plate. ``num_events = 0`` skips the plate (NumPyro requires a positive
+    plate size) and yields a zero spectrum.
 
     Registered sites:
 
-    - ``n_events``, a ``sample`` from
+    - ``n_events``, an observed ``sample`` from
       ``Poisson(total_merger_rate * observation_time_seconds)``;
     - ``total_merger_rate`` and ``spectral_density`` as deterministics.
 
     Source sites from ``population`` are sampled under the ``events`` plate
-    of length ``max_events``. There is no ``spectral_density_obs`` site.
+    of length ``num_events`` when that length is positive. There is no
+    ``spectral_density_obs`` site.
 
     ``average_mode`` is the same inclination convention as
     :func:`~astrogwb.gwb.spectral.spectral_density`. Face-on populations
@@ -283,19 +288,23 @@ def gwb_forward_model(
     population that already samples inclination uses ``"catalog_inclination"``.
     """
     batch_size = _require_positive_int("batch_size", batch_size)
-    max_events = _require_positive_int("max_events", max_events)
+    num_events = _require_non_negative_int("num_events", num_events)
     observation_time = _require_positive_time(observation_time)
     observation_time_sec = years_to_seconds(observation_time)
 
     total_merger_rate = _population_total_merger_rate(population, params)
     numpyro.deterministic(_TOTAL_MERGER_RATE_SITE, total_merger_rate)
-    n_events = numpyro.sample(
-        "n_events", dist.Poisson(total_merger_rate * observation_time_sec)
+    numpyro.sample(
+        "n_events",
+        dist.Poisson(total_merger_rate * observation_time_sec),
+        obs=num_events,
     )
 
-    sources = _draw_sources(population, params, max_events)
-    mask = jnp.arange(max_events) < n_events
-    power_sum = _sum_polarization_power(generator, sources, mask, batch_size=batch_size)
+    if num_events:
+        sources = _draw_sources(population, params, num_events)
+        power_sum = _sum_polarization_power(generator, sources, batch_size=batch_size)
+    else:
+        power_sum = jnp.zeros(generator.frequencies.shape, dtype=jnp.float64)
 
     factor = (
         INCLINATION_AVERAGE_TO_FACE_ON_RATIO

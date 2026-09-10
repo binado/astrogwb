@@ -20,7 +20,6 @@ from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
 
 N_EVENTS = 8
-MAX_EVENTS = 16
 BATCH_SIZE = 3
 F_MIN = 20.0
 F_MAX = 40.0
@@ -107,7 +106,7 @@ def _model_kwargs(**overrides: Any) -> dict[str, Any]:
         "generator": _generator(),
         "observation_time": _observation_time_for(N_EVENTS),
         "batch_size": BATCH_SIZE,
-        "max_events": MAX_EVENTS,
+        "num_events": N_EVENTS,
         "average_mode": "catalog_inclination",
     }
     kwargs.update(overrides)
@@ -118,7 +117,7 @@ def _ripple_kwargs(**overrides: Any) -> dict[str, Any]:
     kwargs = _model_kwargs(**overrides)
     if "generator" not in overrides:
         kwargs["generator"] = _ripple_generator(
-            chunk_size=max(kwargs["batch_size"], kwargs["max_events"])
+            chunk_size=max(kwargs["batch_size"], kwargs["num_events"])
         )
     return kwargs
 
@@ -131,19 +130,13 @@ def _expected_spectrum(trace, generator, observation_time, *, average_mode):
     sources = {
         name: trace[name]["value"] for name in mock_population_model().source_sites
     }
-    max_events = sources["redshift"].shape[0]
-    mask = jnp.arange(max_events) < trace["n_events"]["value"]
     power = jnp.asarray(generator(sources))
     factor = (
         INCLINATION_AVERAGE_TO_FACE_ON_RATIO
         if average_mode == "analytic_inclination"
         else 1.0
     )
-    return (
-        factor
-        * jnp.where(mask, power, 0.0).sum(axis=1)
-        / years_to_seconds(observation_time)
-    )
+    return factor * power.sum(axis=1) / years_to_seconds(observation_time)
 
 
 def test_poisson_rate_is_total_merger_rate_times_observation_seconds() -> None:
@@ -157,17 +150,17 @@ def test_poisson_rate_is_total_merger_rate_times_observation_seconds() -> None:
         rtol=1e-12,
     )
     assert trace["n_events"]["type"] == "sample"
-    assert not trace["n_events"]["is_observed"]
+    assert trace["n_events"]["is_observed"]
+    np.testing.assert_array_equal(trace["n_events"]["value"], N_EVENTS)
     assert trace["spectral_density"]["type"] == "deterministic"
     assert "spectral_density_obs" not in trace
-    assert trace["redshift"]["value"].shape == (MAX_EVENTS,)
+    assert trace["redshift"]["value"].shape == (N_EVENTS,)
 
 
 def test_spectrum_matches_the_sum_of_per_source_power_over_time() -> None:
     generator = _generator()
     kwargs = _model_kwargs(generator=generator)
-    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(N_EVENTS)})
-    trace = _seeded_trace(model, POPULATION_PARAMS, **kwargs)
+    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
     expected = _expected_spectrum(
         trace,
         generator,
@@ -178,12 +171,11 @@ def test_spectrum_matches_the_sum_of_per_source_power_over_time() -> None:
     np.testing.assert_array_equal(trace["n_events"]["value"], N_EVENTS)
 
 
-@pytest.mark.parametrize("batch_size", [1, N_EVENTS, MAX_EVENTS, MAX_EVENTS + 5])
+@pytest.mark.parametrize("batch_size", [1, N_EVENTS, N_EVENTS + 5])
 def test_batched_power_matches_a_single_generator_call(batch_size: int) -> None:
     generator = _generator()
     kwargs = _model_kwargs(generator=generator, batch_size=batch_size)
-    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(N_EVENTS)})
-    batched = _seeded_trace(model, POPULATION_PARAMS, **kwargs)
+    batched = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
     expected = _expected_spectrum(
         batched,
         generator,
@@ -197,10 +189,11 @@ def test_batched_power_matches_a_single_generator_call(batch_size: int) -> None:
 
 def test_batch_size_does_not_change_the_spectrum() -> None:
     kwargs = _model_kwargs()
-    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(N_EVENTS)})
-    first = _seeded_trace(model, POPULATION_PARAMS, **{**kwargs, "batch_size": 1})
+    first = _seeded_trace(
+        gwb_forward_model, POPULATION_PARAMS, **{**kwargs, "batch_size": 1}
+    )
     second = _seeded_trace(
-        model, POPULATION_PARAMS, **{**kwargs, "batch_size": MAX_EVENTS}
+        gwb_forward_model, POPULATION_PARAMS, **{**kwargs, "batch_size": N_EVENTS}
     )
     np.testing.assert_allclose(
         first["spectral_density"]["value"],
@@ -213,12 +206,13 @@ def test_batch_size_does_not_change_the_spectrum() -> None:
 
 def test_analytic_inclination_rescales_face_on_power() -> None:
     kwargs = _model_kwargs()
-    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(N_EVENTS)})
     catalog = _seeded_trace(
-        model, POPULATION_PARAMS, **{**kwargs, "average_mode": "catalog_inclination"}
+        gwb_forward_model,
+        POPULATION_PARAMS,
+        **{**kwargs, "average_mode": "catalog_inclination"},
     )
     analytic = _seeded_trace(
-        model,
+        gwb_forward_model,
         POPULATION_PARAMS,
         **{**kwargs, "average_mode": "analytic_inclination"},
     )
@@ -227,42 +221,19 @@ def test_analytic_inclination_rescales_face_on_power() -> None:
         INCLINATION_AVERAGE_TO_FACE_ON_RATIO * catalog["spectral_density"]["value"],
         rtol=1e-12,
     )
-    np.testing.assert_array_equal(
-        catalog["inclination"]["value"], jnp.zeros(MAX_EVENTS)
-    )
+    np.testing.assert_array_equal(catalog["inclination"]["value"], jnp.zeros(N_EVENTS))
 
 
 def test_empty_catalog_is_a_zero_spectrum() -> None:
     generator = _generator()
-    kwargs = _model_kwargs(generator=generator)
-    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(0)})
-    trace = _seeded_trace(model, POPULATION_PARAMS, **kwargs)
+    kwargs = _model_kwargs(generator=generator, num_events=0)
+    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
     np.testing.assert_array_equal(
         trace["spectral_density"]["value"],
         jnp.zeros(generator.frequencies.shape),
     )
-    assert trace["redshift"]["value"].shape == (MAX_EVENTS,)
-
-
-def test_counts_above_max_events_are_truncated() -> None:
-    generator = _generator()
-    kwargs = _model_kwargs(generator=generator, max_events=N_EVENTS)
-    model = handlers.condition(
-        gwb_forward_model, {"n_events": jnp.asarray(N_EVENTS + 7)}
-    )
-    trace = _seeded_trace(model, POPULATION_PARAMS, **kwargs)
-    expected = _expected_spectrum(
-        trace,
-        generator,
-        kwargs["observation_time"],
-        average_mode="catalog_inclination",
-    )
-    np.testing.assert_allclose(trace["spectral_density"]["value"], expected, rtol=1e-12)
-    # Every plated source contributes; the extra Poisson count is dropped.
-    np.testing.assert_array_equal(
-        jnp.arange(N_EVENTS) < trace["n_events"]["value"],
-        jnp.ones(N_EVENTS, dtype=bool),
-    )
+    np.testing.assert_array_equal(trace["n_events"]["value"], 0)
+    assert "redshift" not in trace
 
 
 def test_predictive_stacks_fixed_shape_sites() -> None:
@@ -314,13 +285,13 @@ def test_invalid_batch_size_is_rejected(batch_size: int) -> None:
         )
 
 
-@pytest.mark.parametrize("max_events", [0, -1, True])
-def test_invalid_max_events_is_rejected(max_events: int) -> None:
-    with pytest.raises(ValueError, match="max_events"):
+@pytest.mark.parametrize("num_events", [-1, True])
+def test_invalid_num_events_is_rejected(num_events: int) -> None:
+    with pytest.raises(ValueError, match="num_events"):
         _seeded_trace(
             gwb_forward_model,
             POPULATION_PARAMS,
-            **_model_kwargs(max_events=max_events),
+            **_model_kwargs(num_events=num_events),
         )
 
 
@@ -336,10 +307,9 @@ def test_invalid_observation_time_is_rejected(observation_time: float) -> None:
 
 @pytest.mark.integration
 def test_ripple_spectrum_matches_the_sum_of_per_source_power_over_time() -> None:
-    generator = _ripple_generator(chunk_size=MAX_EVENTS)
+    generator = _ripple_generator(chunk_size=N_EVENTS)
     kwargs = _ripple_kwargs(generator=generator)
-    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(N_EVENTS)})
-    trace = _seeded_trace(model, POPULATION_PARAMS, **kwargs)
+    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
     expected = _expected_spectrum(
         trace,
         generator,
@@ -353,12 +323,11 @@ def test_ripple_spectrum_matches_the_sum_of_per_source_power_over_time() -> None
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("batch_size", [1, N_EVENTS, MAX_EVENTS, MAX_EVENTS + 5])
+@pytest.mark.parametrize("batch_size", [1, N_EVENTS, N_EVENTS + 5])
 def test_ripple_batched_power_matches_a_single_generator_call(batch_size: int) -> None:
     kwargs = _ripple_kwargs(batch_size=batch_size)
     generator = kwargs["generator"]
-    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(N_EVENTS)})
-    batched = _seeded_trace(model, POPULATION_PARAMS, **kwargs)
+    batched = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
     expected = _expected_spectrum(
         batched,
         generator,
@@ -372,10 +341,11 @@ def test_ripple_batched_power_matches_a_single_generator_call(batch_size: int) -
 
 @pytest.mark.integration
 def test_ripple_batch_size_does_not_change_the_spectrum() -> None:
-    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(N_EVENTS)})
-    first = _seeded_trace(model, POPULATION_PARAMS, **_ripple_kwargs(batch_size=1))
+    first = _seeded_trace(
+        gwb_forward_model, POPULATION_PARAMS, **_ripple_kwargs(batch_size=1)
+    )
     second = _seeded_trace(
-        model, POPULATION_PARAMS, **_ripple_kwargs(batch_size=MAX_EVENTS)
+        gwb_forward_model, POPULATION_PARAMS, **_ripple_kwargs(batch_size=N_EVENTS)
     )
     np.testing.assert_allclose(
         first["spectral_density"]["value"],
@@ -388,14 +358,15 @@ def test_ripple_batch_size_does_not_change_the_spectrum() -> None:
 
 @pytest.mark.integration
 def test_ripple_empty_catalog_is_a_zero_spectrum() -> None:
-    kwargs = _ripple_kwargs()
+    kwargs = _ripple_kwargs(num_events=0)
     generator = kwargs["generator"]
-    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(0)})
-    trace = _seeded_trace(model, POPULATION_PARAMS, **kwargs)
+    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
     np.testing.assert_array_equal(
         trace["spectral_density"]["value"],
         jnp.zeros(generator.frequencies.shape),
     )
+    np.testing.assert_array_equal(trace["n_events"]["value"], 0)
+    assert "redshift" not in trace
 
 
 @pytest.mark.integration
