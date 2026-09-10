@@ -26,6 +26,8 @@ FIDUCIALS: dict[str, float] = {
     "kappa": 4.62,
     "z_peak": 1.84,
     "local_merger_rate": 770.0,
+    "minimum_mass": 1.0,
+    "mass_width": 1.5,
 }
 
 #: Each detector-comparison network's [analysis.detectors], keyed by run name.

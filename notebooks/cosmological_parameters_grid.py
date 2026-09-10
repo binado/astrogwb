@@ -62,11 +62,6 @@ from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
 from astrogwb.paper.catalogs import load_run_catalog
-from astrogwb.paper.config.catalogs import (
-    CatalogProvenance,
-    check_fiducials_match,
-    resolve_proposal,
-)
 from astrogwb.paper.config.constants import (
     DEFAULT_NETWORK,
     FIDUCIALS,
@@ -88,6 +83,7 @@ from astrogwb.paper.plotting import (
     use_paper_style,
 )
 from astrogwb.paper.snr import compute_network_snrs
+from astrogwb.populations import build_population
 from astrogwb.sampling import LogDensityFn, gwb_spectral_density_model
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
@@ -114,7 +110,7 @@ PROPOSAL_CATALOG_PATH = INJECTION_CATALOG_PATH
 ANALYSIS_GRID = AnalysisGrid(
     observation_time=1.0,
     f_min=2.0,
-    f_max=4096.0,
+    f_max=2048.0,
     minimum_redshift=0.3,
     maximum_redshift=20.0,
     n_grid=256,
@@ -132,6 +128,8 @@ PRIORS: dict[str, dist.Distribution] = {
     "kappa": dist.Uniform(-10.0, 10.0),
     "z_peak": dist.Uniform(0.0, 2.5),
     "local_merger_rate": dist.Normal(770.0, 7.7),
+    "minimum_mass": dist.Uniform(0.5, 1.5),
+    "mass_width": dist.Uniform(0.5, 3.0),
 }
 
 COVERAGE_SIGMAS: float = 5.0  # grid half-width, in predicted sigma
@@ -168,28 +166,37 @@ pd.DataFrame(
 # %% [markdown]
 # ## Loading the catalogs
 #
-# `resolve_run_proposal` (`paper/catalogs.py`) needs a `RunConfig` this notebook does
-# not build, so the two steps it wraps -- reading the proposal catalog's own recorded
-# provenance and restricting it to the analysis window -- are inlined here.
+# `prepare_inference_inputs` restricts both catalogs to the analysis window
+# (samples and recorded density together), builds the fiducial observation from
+# the injection catalog's own population, and prepares the estimator against the
+# proposal catalog's own recorded density. Nothing here restates the proposal:
+# the file carries it.
 #
-# `check_fiducials_match` validates `FIDUCIALS` against the catalog's own recorded
-# provenance for `H0`, `Omega_m`, `gamma`, `kappa`, `z_peak`: five of the eight
-# constants in `astrogwb.paper.config.constants` are checked again here, at notebook
-# runtime, on top of `tests/paper/test_config_constants.py`.
+# `FIDUCIALS` still come from `astrogwb.paper.config.constants` -- they are the
+# analysis truth the grids are centred on, not a second copy of the catalog
+# record. `tests/paper/test_config_constants.py` guards them against the run
+# TOMLs.
 
 # %%
 injection_catalog = load_run_catalog(INJECTION_CATALOG_PATH, label="injection")
 proposal_catalog = load_run_catalog(PROPOSAL_CATALOG_PATH, label="proposal")
 
-provenance = CatalogProvenance.from_file(PROPOSAL_CATALOG_PATH)
-check_fiducials_match(provenance, FIDUCIALS, label=str(PROPOSAL_CATALOG_PATH))
-PROPOSAL_CONFIG = resolve_proposal(
-    provenance.redshift_proposal,
-    minimum_redshift=ANALYSIS_GRID.minimum_redshift,
-    maximum_redshift=ANALYSIS_GRID.maximum_redshift,
-    label=str(PROPOSAL_CATALOG_PATH),
+# Bound to the analysis grid once: it is static pytree metadata on the
+# estimator. At xi_0 = 1 this reduces to the catalog's cosmological law.
+TARGET_MODEL = build_population(
+    "bns_md_modified_propagation",
+    settings={
+        "z_min": ANALYSIS_GRID.minimum_redshift,
+        "z_max": ANALYSIS_GRID.maximum_redshift,
+        "n_grid": ANALYSIS_GRID.n_grid,
+    },
 )
-print("proposal uniform mixing fraction:", PROPOSAL_CONFIG.uniform_mixing_fraction)
+print(
+    "proposal:",
+    proposal_catalog.population_model_name,
+    "n_samples=",
+    proposal_catalog.num_samples,
+)
 
 # %% [markdown]
 # ## Matched-filter SNR per network
@@ -295,16 +302,16 @@ pd.DataFrame(
 # between networks and the estimator holds band-restricted power. That is baked into
 # the model closure, not traced, so each network pays one compilation.
 #
-# **No `handlers.condition` / `handlers.block`.** The model carries all eight priors;
+# **No `handlers.condition` / `handlers.block`.** The model carries every prior;
 # `LogDensityFn(...)(grids, fixed=...)` pins the rest. `fixed` is traced, so only a
 # change to its *key set* recompiles -- which is exactly what lets one network's
 # evaluator serve the 1D `H0` sweep and both 2D sweeps (section 13 reuses the default
 # network's evaluator built here rather than rebuilding it).
 #
-# `prepare_inference_inputs` re-runs `prepare_observation` (injection propagation and
-# the fiducial spectrum contraction) once per network. That is redundant work -- the
-# observation does not depend on the detectors -- but it is the honest reuse of the
-# production path, and it is a one-off cost per network, not per grid point.
+# `prepare_inference_inputs` re-runs `prepare_observation` (the fiducial spectrum
+# contraction) once per network. That is redundant work -- the observation does not
+# depend on the detectors -- but it is the honest reuse of the production path, and
+# it is a one-off cost per network, not per grid point.
 
 
 # %%
@@ -312,10 +319,9 @@ def build_log_density(network: Network) -> tuple[LogDensityFn, dict[str, jax.Arr
     inputs = prepare_inference_inputs(
         injection_catalog,
         proposal_catalog,
-        fiducials=FIDUCIALS,
-        proposal_config=PROPOSAL_CONFIG,
         grid=ANALYSIS_GRID,
         detectors=network.detectors,
+        target_model=TARGET_MODEL,
     )
     model = partial(
         gwb_spectral_density_model,
