@@ -19,6 +19,12 @@ from astrogwb.paper.plotting import Network
 matplotlib = pytest.importorskip("matplotlib")
 
 
+@pytest.fixture(autouse=True)
+def _disable_usetex() -> None:
+    """Paper style enables usetex; CI paper tests do not install LaTeX."""
+    matplotlib.pyplot.rcParams["text.usetex"] = False
+
+
 @pytest.fixture(scope="module")
 def fiducial_spectrum() -> ModuleType:
     """Import ``scripts/fiducial_spectrum.py``."""
