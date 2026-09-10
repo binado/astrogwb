@@ -17,7 +17,7 @@ from numpyro.infer import Predictive
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO, ISCO_ALPHA
 from astrogwb.sampling import gwb_forward_model
 from astrogwb.utils import years_to_seconds
-from astrogwb.waveform import AnalyticInspiralGenerator
+from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
 
 N_EVENTS = 8
 MAX_EVENTS = 16
@@ -40,6 +40,23 @@ def _generator() -> AnalyticInspiralGenerator:
     # Warm the frequency cache outside JIT so a traced arange is never stored.
     _ = generator.frequencies
     return generator
+
+
+def _ripple_generator(*, chunk_size: int) -> RippleGenerator:
+    """TaylorF2 settings shared with :mod:`test_waveform_generator`.
+
+    ``chunk_size`` is at least the forward-model ``batch_size`` so Ripple
+    does not chunk again inside each batched generate.
+    """
+    return RippleGenerator(
+        approximant="TaylorF2",
+        sampling_frequency=256.0,
+        minimum_frequency=20.0,
+        maximum_frequency=100.0,
+        reference_frequency=20.0,
+        frequency_resolution=4.0,
+        chunk_size=chunk_size,
+    )
 
 
 def _observation_time_for(expected_events: float) -> float:
@@ -80,6 +97,15 @@ def _model_kwargs(**overrides: Any) -> dict[str, Any]:
         "average_mode": "catalog_inclination",
     }
     kwargs.update(overrides)
+    return kwargs
+
+
+def _ripple_kwargs(**overrides: Any) -> dict[str, Any]:
+    kwargs = _model_kwargs(**overrides)
+    if "generator" not in overrides:
+        kwargs["generator"] = _ripple_generator(
+            chunk_size=max(kwargs["batch_size"], kwargs["max_events"])
+        )
     return kwargs
 
 
@@ -292,3 +318,84 @@ def test_invalid_observation_time_is_rejected(observation_time: float) -> None:
             POPULATION_PARAMS,
             **_model_kwargs(observation_time=observation_time),
         )
+
+
+@pytest.mark.integration
+def test_ripple_spectrum_matches_the_sum_of_per_source_power_over_time() -> None:
+    generator = _ripple_generator(chunk_size=MAX_EVENTS)
+    kwargs = _ripple_kwargs(generator=generator)
+    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(N_EVENTS)})
+    trace = _seeded_trace(model, POPULATION_PARAMS, **kwargs)
+    expected = _expected_spectrum(
+        trace,
+        generator,
+        kwargs["observation_time"],
+        average_mode="catalog_inclination",
+    )
+    np.testing.assert_allclose(trace["spectral_density"]["value"], expected, rtol=1e-12)
+    np.testing.assert_array_equal(trace["n_events"]["value"], N_EVENTS)
+    assert bool(jnp.all(jnp.isfinite(trace["spectral_density"]["value"])))
+    assert bool(jnp.all(trace["spectral_density"]["value"] >= 0.0))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("batch_size", [1, N_EVENTS, MAX_EVENTS, MAX_EVENTS + 5])
+def test_ripple_batched_power_matches_a_single_generator_call(batch_size: int) -> None:
+    kwargs = _ripple_kwargs(batch_size=batch_size)
+    generator = kwargs["generator"]
+    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(N_EVENTS)})
+    batched = _seeded_trace(model, POPULATION_PARAMS, **kwargs)
+    expected = _expected_spectrum(
+        batched,
+        generator,
+        kwargs["observation_time"],
+        average_mode="catalog_inclination",
+    )
+    np.testing.assert_allclose(
+        batched["spectral_density"]["value"], expected, rtol=1e-12
+    )
+
+
+@pytest.mark.integration
+def test_ripple_batch_size_does_not_change_the_spectrum() -> None:
+    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(N_EVENTS)})
+    first = _seeded_trace(model, POPULATION_PARAMS, **_ripple_kwargs(batch_size=1))
+    second = _seeded_trace(
+        model, POPULATION_PARAMS, **_ripple_kwargs(batch_size=MAX_EVENTS)
+    )
+    np.testing.assert_allclose(
+        first["spectral_density"]["value"],
+        second["spectral_density"]["value"],
+        rtol=1e-12,
+    )
+    for name in mock_population_model().source_sites:
+        np.testing.assert_array_equal(first[name]["value"], second[name]["value"])
+
+
+@pytest.mark.integration
+def test_ripple_empty_catalog_is_a_zero_spectrum() -> None:
+    kwargs = _ripple_kwargs()
+    generator = kwargs["generator"]
+    model = handlers.condition(gwb_forward_model, {"n_events": jnp.asarray(0)})
+    trace = _seeded_trace(model, POPULATION_PARAMS, **kwargs)
+    np.testing.assert_array_equal(
+        trace["spectral_density"]["value"],
+        jnp.zeros(generator.frequencies.shape),
+    )
+
+
+@pytest.mark.integration
+def test_ripple_predictive_stacks_finite_spectrum() -> None:
+    kwargs = _ripple_kwargs()
+    draws = Predictive(
+        partial(gwb_forward_model, **kwargs),
+        num_samples=2,
+        return_sites=("spectral_density", "n_events", "total_merger_rate"),
+    )(jax.random.key(1), POPULATION_PARAMS)
+    assert draws["spectral_density"].ndim == 2
+    assert draws["spectral_density"].shape[0] == 2
+    assert draws["n_events"].shape == (2,)
+    assert draws["total_merger_rate"].shape == (2,)
+    assert bool(jnp.all(jnp.isfinite(draws["spectral_density"])))
+    assert bool(jnp.all(draws["spectral_density"] >= 0.0))
+    assert "redshift" not in draws

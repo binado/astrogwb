@@ -10,9 +10,9 @@ catalog instead:
 3. Draw ``max_events`` sources from the population under a NumPyro plate
    (a static size, so the model is a valid JAX pytree and ``jax.jit``
    target). Events with index :math:`\ge N` are masked out.
-4. Generate polarization power with :func:`jax.lax.map` over contiguous
-   batches of ``batch_size``, reducing each chunk to ``(F,)`` before the
-   next so the ``(F, N)`` array is never materialized, and form
+4. Generate polarization power over contiguous batches of ``batch_size``,
+   reducing each chunk to ``(F,)`` before the next so the ``(F, N)`` array
+   is never materialized, and form
 
    .. math::
 
@@ -23,18 +23,27 @@ In expectation this recovers :math:`\mathcal{R}\,\langle P\rangle` whenever
 the model is a simulator, consumed with :class:`~numpyro.infer.Predictive`
 or ``jax.jit``.
 
-``jax.lax.map`` over the *batch* axis is the memory-safe counterpart of
+Batching over the *event* axis is the memory-safe counterpart of
 ``lax.map(f, sources, batch_size=...)``. Mapping a per-source waveform
 function would stack an ``(N, F)`` result -- the OOM the batching exists to
-avoid. The mapped function therefore consumes a ``(batch_size,)`` catalog
-chunk, calls the generator once, and returns the masked ``(F,)`` sum.
+avoid. Each step therefore consumes a ``(batch_size,)`` catalog chunk,
+calls the generator once, and returns the masked ``(F,)`` sum.
 ``max_events`` is padded to a multiple of ``batch_size`` so that path has
 no remainder kernel.
+
+Under :func:`jax.jit` the reduction is :func:`jax.lax.map`, which compiles
+once per batch size. Eager execution (``Predictive`` without jit) uses a
+Python loop over those same batches so generators with host-side control
+flow -- Ripple's TaylorF2 path, which is what production catalogs use --
+see concrete arrays. ``jax.lax.map`` always traces its body, and that
+trace hits ``bool(jnp.any(...))`` inside ``gwmock_signal``.
 
 ``max_events`` sizes the source plate, so it is a Python integer (static
 under JIT). ``N`` itself stays a traced Poisson draw. For several Predictive
 draws the source sites have a fixed leading length and stack without
-``return_sites``; omitting them is still cheaper::
+``return_sites``; omitting them is still cheaper. A JAX-native generator
+(AnalyticInspiral) can wrap that Predictive in :func:`jax.jit`; Ripple
+must not -- use the same call without ``jit``::
 
     from functools import partial
 
@@ -152,6 +161,27 @@ def _chunked_sources(
     return chunked, padded_mask.reshape((n_batches, batch_size))
 
 
+def _is_traced(value: jax.Array) -> bool:
+    """True when ``value`` is a JAX tracer, so host-side Python control flow is unsafe."""
+    return isinstance(value, jax.core.Tracer)
+
+
+def _masked_batch_power(
+    generator: PolarizationPowerGenerator,
+    batch_sources: Mapping[str, jax.Array],
+    batch_mask: jax.Array,
+) -> jax.Array:
+    """Call ``generator`` on one chunk and return the masked ``(F,)`` sum."""
+    power = jnp.asarray(generator(batch_sources))
+    n_chunk = batch_mask.shape[0]
+    if power.ndim != 2 or power.shape[-1] != n_chunk:
+        raise ValueError(
+            "waveform generator must return frequency-first power of "
+            f"shape (F, n_chunk); got {power.shape} for {n_chunk} sources"
+        )
+    return jnp.where(batch_mask > 0, power, 0.0).sum(axis=1)
+
+
 def _sum_polarization_power(
     generator: PolarizationPowerGenerator,
     sources: Mapping[str, jax.Array],
@@ -161,33 +191,35 @@ def _sum_polarization_power(
 ) -> jax.Array:
     """Sum frequency-first polarization power over masked sources, chunk by chunk.
 
-    Each mapped step receives ``batch_size`` sources, calls ``generator`` once,
-    and returns an ``(F,)`` masked sum. :func:`jax.lax.map` scans those steps
-    so peak waveform memory is ``(F, batch_size)`` rather than ``(F, N)``.
+    Each step receives ``batch_size`` sources, calls ``generator`` once, and
+    returns an ``(F,)`` masked sum, so peak waveform memory is
+    ``(F, batch_size)`` rather than ``(F, N)``. Frequency count is taken from
+    the generator output: Ripple only knows its grid after the first generate.
     """
     chunked, chunked_mask = _chunked_sources(sources, mask, batch_size=batch_size)
-    n_frequencies = generator.frequencies.shape[0]
 
     def batch_power_sum(
         batch: tuple[dict[str, jax.Array], jax.Array],
     ) -> jax.Array:
         batch_sources, batch_mask = batch
-        power = jnp.asarray(generator(batch_sources))
-        n_chunk = batch_mask.shape[0]
-        if power.ndim != 2 or power.shape[-1] != n_chunk:
-            raise ValueError(
-                "waveform generator must return frequency-first power of "
-                f"shape (F, n_chunk); got {power.shape} for {n_chunk} sources"
-            )
-        if power.shape[0] != n_frequencies:
-            raise ValueError(
-                "waveform generator frequency axis does not match "
-                f"generator.frequencies ({n_frequencies}); got {power.shape[0]}"
-            )
-        return jnp.where(batch_mask > 0, power, 0.0).sum(axis=1)
+        return _masked_batch_power(generator, batch_sources, batch_mask)
 
-    batch_totals = jax.lax.map(batch_power_sum, (chunked, chunked_mask))
-    return batch_totals.sum(axis=0)
+    if _is_traced(mask):
+        batch_totals = jax.lax.map(batch_power_sum, (chunked, chunked_mask))
+        return batch_totals.sum(axis=0)
+
+    n_batches = next(iter(chunked.values())).shape[0]
+    total = _masked_batch_power(
+        generator,
+        {name: values[0] for name, values in chunked.items()},
+        chunked_mask[0],
+    )
+    for index in range(1, n_batches):
+        batch_sources = {name: values[index] for name, values in chunked.items()}
+        total = total + _masked_batch_power(
+            generator, batch_sources, chunked_mask[index]
+        )
+    return total
 
 
 def gwb_forward_model(
