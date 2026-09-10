@@ -145,6 +145,16 @@ def _draw_sources(
     return {name: sources[name] for name in population.source_sites}
 
 
+def _zero_spectrum(generator: PolarizationPowerGenerator) -> jax.Array:
+    """Zeros on the concrete generator's realized frequency axis.
+
+    The metadata-only base descriptor has no grid. AnalyticInspiral owns a
+    uniform grid; Ripple caches the axis from the first generate.
+    """
+    frequencies = generator.frequencies  # ty: ignore[unresolved-attribute]
+    return jnp.zeros(jnp.shape(frequencies), dtype=jnp.float64)
+
+
 def _batch_power_sum(
     generator: PolarizationPowerGenerator,
     batch_sources: Mapping[str, jax.Array],
@@ -174,7 +184,7 @@ def _sum_polarization_power(
     """
     n_events = array_dict_shape(sources)[0]
     if n_events == 0:
-        return jnp.zeros(generator.frequencies.shape, dtype=jnp.float64)
+        return _zero_spectrum(generator)
 
     n_full, remainder = divmod(n_events, batch_size)
 
@@ -248,7 +258,7 @@ def gwb_forward_model(
         sources = _draw_sources(population, params, num_events)
         power_sum = _sum_polarization_power(generator, sources, batch_size=batch_size)
     else:
-        power_sum = jnp.zeros(generator.frequencies.shape, dtype=jnp.float64)
+        power_sum = _zero_spectrum(generator)
 
     factor = (
         INCLINATION_AVERAGE_TO_FACE_ON_RATIO
