@@ -412,7 +412,7 @@ rule plot_modified_propagation:
 
 
 rule fiducial_spectrum:
-    """Fiducial injection spectrum and per-network effective PSDs."""
+    """Fiducial injection spectrum, network PSDs, and SNR-frequency figures."""
     input:
         catalog=INJECTION_CATALOG,
         # Borrows the cosmological-parameters networks; reads no chains. The
@@ -426,6 +426,15 @@ rule fiducial_spectrum:
         effective_psd_pdf=(
             "outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf"
         ),
+        spectrum_psd_pdf=(
+            "outputs/figures/standalone/fiducial_spectrum_with_psd.pdf"
+        ),
+        snr_cumulative_pdf=(
+            "outputs/figures/standalone/fiducial_snr_cumulative.pdf"
+        ),
+        spectrum_snr_pdf=(
+            "outputs/figures/standalone/fiducial_spectrum_and_snr.pdf"
+        ),
     shell:
         "uv run --extra notebook"
         " python scripts/fiducial_spectrum.py"
@@ -434,6 +443,9 @@ rule fiducial_spectrum:
         " --catalog {input.catalog:q}"
         " --output-pdf {output.spectrum_pdf:q}"
         " --output-effective-psd-pdf {output.effective_psd_pdf:q}"
+        " --output-spectrum-psd-pdf {output.spectrum_psd_pdf:q}"
+        " --output-snr-cumulative-pdf {output.snr_cumulative_pdf:q}"
+        " --output-spectrum-snr-pdf {output.spectrum_snr_pdf:q}"
 
 
 rule importance_weights_grid:

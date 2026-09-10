@@ -105,16 +105,22 @@ chains of `run_experiment_modified_propagation`.
 The fiducial spectrum, effective detector PSD comparison, and importance-weight
 grids are explicit standalone rules in the unified workflow. The fiducial spectrum borrows the six detector networks of the
 `cosmological-parameters` experiment rather than restating them, and keeps its
-`OMEGA_GW_MIN` y-limit next to the axis it sets. All of them read an assembled
-run config directly. `importance_weights_grid` additionally reads its proposal
-*density* from the catalog file it is handed, the same way `scripts/run_mcmc.py`
-does -- so the weights it plots divide by the same denominator the chains did.
+`OMEGA_GW_MIN` y-limit next to the axis it sets. The same rule also overlays
+that run's $S_{\mathrm{eff}}$ on the spectrum and plots the matched-filter SNR
+integrand with cumulative $\mathrm{SNR}(<f)$ and $\mathrm{SNR}(>f)$. All of
+them read an assembled run config directly. `importance_weights_grid`
+additionally reads its proposal *density* from the catalog file it is handed,
+the same way `scripts/run_mcmc.py` does -- so the weights it plots divide by
+the same denominator the chains did.
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
   --allowed-rules fiducial_spectrum importance_weights_grid \
   outputs/figures/standalone/fiducial_spectrum.pdf \
   outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf \
+  outputs/figures/standalone/fiducial_spectrum_with_psd.pdf \
+  outputs/figures/standalone/fiducial_snr_cumulative.pdf \
+  outputs/figures/standalone/fiducial_spectrum_and_snr.pdf \
   outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf \
   outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf
 ```
