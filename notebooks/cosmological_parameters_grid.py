@@ -74,6 +74,7 @@ from astrogwb.paper.config.constants import (
 from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.inference import prepare_inference_inputs
 from astrogwb.paper.plotting import (
+    CATEGORY,
     CORNER_LEVELS,
     DETECTOR_COMPARISON_LEGEND,
     DETECTOR_NETWORKS,
@@ -530,6 +531,7 @@ fig_xi0_n_corner = plot_corner_for_posterior_grid(
     labels=[PARAMETER_LABELS["xi_0"], PARAMETER_LABELS["xi_n"]],
     truths=[FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]],
     smooth=1.0,
+    color=CATEGORY["modified_propagation"],
 )
 fig_xi0_n_corner
 
