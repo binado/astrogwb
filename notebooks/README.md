@@ -29,11 +29,13 @@ repository root as the working directory.
 - **`mcmc_plotting.py`** — load saved chains and produce diagnostic and corner
   plots
 - **`logposterior_grid.py`** — evaluate the log-posterior on a parameter grid
+- **`fiducial_spectrum.py`** — fiducial injection $S_h$ / $\Omega_{\mathrm{GW}}$,
+  network $S_{\mathrm{eff}}$, $\sigma$, and per-network SNR
 
 The paper notebooks merge a run's config layers with
 `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
-merge the workflow performs by passing layer paths on argv. Neither reads an
-intermediate artifact, so these run against a fresh clone.
+merge the workflow performs by passing layer paths on argv. None of them reads
+an intermediate assembled-config artifact, so they run against a fresh clone.
 
 For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:

@@ -102,27 +102,22 @@ chains of `run_experiment_modified_propagation`.
 
 ## Standalone figures
 
-The fiducial spectrum, effective detector PSD comparison, and importance-weight
-grids are explicit standalone rules in the unified workflow. The fiducial spectrum borrows the six detector networks of the
-`cosmological-parameters` experiment rather than restating them, and keeps its
-`OMEGA_GW_MIN` y-limit next to the axis it sets. The same rule also overlays
-that run's per-bin Gaussian scale $\sigma$ on the spectrum. The SNR figure
-overlays every compared network's matched-filter integrand and cumulative
-$\mathrm{SNR}(<f)$ / $\mathrm{SNR}(>f)$ with the same detector colors and
-linestyles as the effective-PSD comparison; the stacked spectrum+SNR figure
-keeps the run's own network. All of them read an assembled run config
-directly. `importance_weights_grid` additionally reads its proposal *density*
-from the catalog file it is handed, the same way `scripts/run_mcmc.py` does --
-so the weights it plots divide by the same denominator the chains did.
+The importance-weight grids are the standalone figure rules in the unified
+workflow. `importance_weights_grid` reads its proposal *density* from the
+catalog file it is handed, the same way `scripts/run_mcmc.py` does -- so the
+weights it plots divide by the same denominator the chains did.
+
+The fiducial injection spectrum, network $S_{\mathrm{eff}}$, $\sigma$ overlay,
+and per-network SNR figures live in
+[`notebooks/fiducial_spectrum.py`](../notebooks/fiducial_spectrum.py) rather
+than the DAG. That notebook hard-codes the injection catalog path and
+`REFERENCE_RUN`, then resolves the six `DETECTOR_NETWORKS` entries against
+that experiment so each curve's detectors are the ones its chain was sampled
+with.
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules fiducial_spectrum importance_weights_grid \
-  outputs/figures/standalone/fiducial_spectrum.pdf \
-  outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf \
-  outputs/figures/standalone/fiducial_spectrum_with_sigma.pdf \
-  outputs/figures/standalone/fiducial_snr_cumulative.pdf \
-  outputs/figures/standalone/fiducial_spectrum_and_snr.pdf \
+  --allowed-rules importance_weights_grid \
   outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf \
   outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf
 ```
@@ -131,8 +126,8 @@ Or build any one of them directly:
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules fiducial_spectrum \
-  outputs/figures/standalone/fiducial_spectrum.pdf
+  --allowed-rules importance_weights_grid \
+  outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf
 ```
 
 All new figure products are written under `outputs/figures/`.

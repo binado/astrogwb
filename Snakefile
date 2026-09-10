@@ -65,7 +65,7 @@ DEFAULT_PROPOSAL_CATALOG = catalog_path(_BASE_CATALOGS["proposal"])
 # layers for the shared fiducials and analysis grid. Which run that is used to
 # be a constant buried in the library (config.figures.REFERENCE_RUN); it is an
 # explicit choice here now. The two chain figures read the layers of a run they
-# actually plot; the three chain-free figures fall back to this one.
+# actually plot; the two chain-free figures fall back to this one.
 FIGURE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
 
 
@@ -181,7 +181,6 @@ localrules:
     validate,
     plot_cosmological_parameters,
     plot_modified_propagation,
-    fiducial_spectrum,
     importance_weights_grid,
     catalogs,
     experiments,
@@ -409,43 +408,6 @@ rule plot_modified_propagation:
         " --output-xi0-marginal-pdf {output.xi0_marginal_pdf:q}"
         " --output-h0-corner-pdf {output.h0_corner_pdf:q}"
         " --output-xi0-n-csv {output.csv:q} --output-xi0-n-tex {output.tex:q}"
-
-
-rule fiducial_spectrum:
-    """Fiducial injection spectrum, network PSDs, and SNR-frequency figures."""
-    input:
-        catalog=INJECTION_CATALOG,
-        # Borrows the cosmological-parameters networks; reads no chains. The
-        # network config files are declared even though no chain is, so editing
-        # one network's detector list retriggers this figure -- which it did not
-        # do while the figure resolved everything from one assembled config.
-        config=config_layers(*FIGURE_RUN),
-        network_configs=network_config_inputs("cosmological-parameters"),
-    output:
-        spectrum_pdf="outputs/figures/standalone/fiducial_spectrum.pdf",
-        effective_psd_pdf=(
-            "outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf"
-        ),
-        spectrum_sigma_pdf=(
-            "outputs/figures/standalone/fiducial_spectrum_with_sigma.pdf"
-        ),
-        snr_cumulative_pdf=(
-            "outputs/figures/standalone/fiducial_snr_cumulative.pdf"
-        ),
-        spectrum_snr_pdf=(
-            "outputs/figures/standalone/fiducial_spectrum_and_snr.pdf"
-        ),
-    shell:
-        "uv run --extra notebook"
-        " python scripts/fiducial_spectrum.py"
-        f" {config_flags(*FIGURE_RUN)}"
-        f" {network_run_flags('cosmological-parameters')}"
-        " --catalog {input.catalog:q}"
-        " --output-pdf {output.spectrum_pdf:q}"
-        " --output-effective-psd-pdf {output.effective_psd_pdf:q}"
-        " --output-spectrum-sigma-pdf {output.spectrum_sigma_pdf:q}"
-        " --output-snr-cumulative-pdf {output.snr_cumulative_pdf:q}"
-        " --output-spectrum-snr-pdf {output.spectrum_snr_pdf:q}"
 
 
 rule importance_weights_grid:

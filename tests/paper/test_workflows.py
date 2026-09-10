@@ -41,7 +41,6 @@ MCMC_RULES = (
     "run_mcmc",
     "plot_cosmological_parameters",
     "plot_modified_propagation",
-    "fiducial_spectrum",
     "importance_weights_grid",
     "experiments",
     "run_experiment_cosmological_parameters",
@@ -325,7 +324,6 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "run_experiment_waveform_approximant",
         "catalogs",
         "plot_cosmological_parameters",
-        "fiducial_spectrum",
         "importance_weights_grid",
         "validate",
         "run_mcmc",
@@ -486,43 +484,25 @@ def test_standalone_figures_receive_config_paths(
         "--printshellcmds",
         "--cores",
         "4",
-        "fiducial_spectrum",
         "importance_weights_grid",
         "--config",
         f"catalogs_dir={catalogs}",
     )
 
     assert result.returncode == 0, result.stderr
-    for script in (
-        "scripts/fiducial_spectrum.py",
-        "scripts/importance_weights_grid.py",
-    ):
-        assert script in result.stdout
+    assert "scripts/importance_weights_grid.py" in result.stdout
     # Each standalone script is handed config *layers*, never fiducials and
     # analysis bounds reconstructed into flags, and never an assembled config.
     assert "--base-config" not in result.stdout
     assert "--figure-config" not in result.stdout
     assert "outputs/configs/" not in result.stdout
-    # Two standalone rules, so each shared layer appears twice -- once per rule,
-    # in its `input:` and again in its `--config` flags.
+    # The standalone rule receives each shared layer as both an input and a
+    # repeated --config flag.
     for layer in FIGURE_CONFIG_LAYERS:
-        assert sum(layer in line for line in _rule_inputs(result.stdout)) == 2
-        assert result.stdout.count(f"--config {layer}") == 2
+        assert sum(layer in line for line in _rule_inputs(result.stdout)) == 1
+        assert result.stdout.count(f"--config {layer}") == 1
     for flag in ("--observation-time", "--f-min", "--h0", "--omega-gw-min"):
         assert flag not in result.stdout
-    # fiducial_spectrum borrows the cosmological-parameters networks and reads
-    # no chains; it still declares their TOMLs, so editing one retriggers it.
-    assert result.stdout.count("--network-run cosmological-parameters/") == len(
-        DETECTOR_NETWORK_RUNS
-    )
-    assert "--output-spectrum-sigma-pdf" in result.stdout
-    assert "--output-snr-cumulative-pdf" in result.stdout
-    assert "--output-spectrum-snr-pdf" in result.stdout
-    assert (
-        "outputs/figures/standalone/fiducial_spectrum_with_sigma.pdf" in result.stdout
-    )
-    assert "outputs/figures/standalone/fiducial_snr_cumulative.pdf" in result.stdout
-    assert "outputs/figures/standalone/fiducial_spectrum_and_snr.pdf" in result.stdout
 
 
 def test_figure_path_is_a_valid_snakemake_target(
