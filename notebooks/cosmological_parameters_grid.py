@@ -21,8 +21,10 @@
 # detector network we evaluate the model's constrained log density directly over a
 # 1D $H_0$ grid (`astrogwb.sampling.LogDensityFn`), sized from that network's own
 # matched-filter SNR via the Fisher prediction $\sigma_{H_0} \approx H_0 / \mathrm{SNR}$.
-# We also evaluate two 2D joint grids, $(H_0, \Omega_m)$ and $(H_0, \mathcal{R}_0)$, for
-# the default network, and use the second as an exact-quadrature cross-check against
+# We also evaluate three 2D joint grids for the default network: $(H_0, \Omega_m)$
+# and $(H_0, \mathcal{R}_0)$ for the cosmological-parameter figures, and
+# $(\Xi_0, n)$ mirroring `scripts/mcmc_modified_propagation.py`'s $\Xi_0$--$n$
+# corner. The $(H_0, \mathcal{R}_0)$ grid is an exact-quadrature cross-check against
 # the script's amplitude-marginalized $H_0$-$\mathcal{R}_0$ run.
 #
 # **Inputs:** `outputs/catalogs/md-imrphenom-s41-n32768.h5`, used as *both* the
@@ -227,9 +229,13 @@ SNR_TABLE
 #
 # `H0` gets a **per-network** window centred on the fiducial with half-width
 # `COVERAGE_SIGMAS * H0 / snr`, clipped to the `H0` prior support so no grid points are
-# spent on `-inf` cells. `Omega_m` and `local_merger_rate` are prior-dominated at these
-# priors (their scale is much narrower than what any network's SNR could resolve), so
-# their windows come from the prior itself.
+# spent on `-inf` cells. `xi_0` is amplitude-like in the same way
+# ($\sigma_{\Xi_0} \approx \Xi_0 / \mathrm{SNR}$), so its 2D window uses that Fisher
+# prediction on the default network. `n` has no SNR-scaling analog -- the same
+# observation `scripts/mcmc_modified_propagation.py` makes in its constraint table --
+# so its window is the Uniform prior support. `Omega_m` and `local_merger_rate` are
+# prior-dominated at these priors (their scale is much narrower than what any network's
+# SNR could resolve), so their windows come from the prior itself.
 
 
 # %%
@@ -283,9 +289,20 @@ OMEGA_M_GRID = uniform_grid(
 LOCAL_MERGER_RATE_GRID = uniform_grid(
     *prior_window(PRIORS["local_merger_rate"], sigmas=COVERAGE_SIGMAS), NPOINTS_2D
 )
-# The default network's H0 window, resolved at the coarser 2D grid resolution for
-# the joint (H0, Omega_m) / (H0, local_merger_rate) sweeps below.
+XI_N_GRID = uniform_grid(
+    *prior_window(PRIORS["xi_n"], sigmas=COVERAGE_SIGMAS), NPOINTS_2D
+)
+# The default network's H0 / xi_0 windows, resolved at the coarser 2D grid
+# resolution for the joint sweeps below.
 H0_GRID_2D = uniform_grid(*H0_WINDOWS[DEFAULT_NETWORK], NPOINTS_2D)
+XI0_SUPPORT = (float(PRIORS["xi_0"].low), float(PRIORS["xi_0"].high))
+XI0_WINDOW = fisher_window(
+    FIDUCIALS["xi_0"],
+    FIDUCIALS["xi_0"] / float(_snr_by_network[DEFAULT_NETWORK]),
+    sigmas=COVERAGE_SIGMAS,
+    support=XI0_SUPPORT,
+)
+XI0_GRID_2D = uniform_grid(*XI0_WINDOW, NPOINTS_2D)
 
 pd.DataFrame(
     [
@@ -305,8 +322,9 @@ pd.DataFrame(
 # **No `handlers.condition` / `handlers.block`.** The model carries every prior;
 # `LogDensityFn(...)(grids, fixed=...)` pins the rest. `fixed` is traced, so only a
 # change to its *key set* recompiles -- which is exactly what lets one network's
-# evaluator serve the 1D `H0` sweep and both 2D sweeps (section 13 reuses the default
-# network's evaluator built here rather than rebuilding it).
+# evaluator serve the 1D `H0` sweep and all three 2D sweeps (the joint-posterior
+# section reuses the default network's evaluator built here rather than rebuilding
+# it).
 #
 # `prepare_inference_inputs` re-runs `prepare_observation` (the fiducial spectrum
 # contraction) once per network. That is redundant work -- the observation does not
@@ -438,43 +456,52 @@ CONSTRAINT_TABLE
 # %% [markdown]
 # ## Joint posteriors for the default network
 #
-# Both 2D sweeps reuse `LOG_DENSITY_FNS[DEFAULT_NETWORK]`, built once above: only the
-# `grids` / `fixed` key sets change between calls.
+# All three 2D sweeps reuse `LOG_DENSITY_FNS[DEFAULT_NETWORK]`, built once above: only
+# the `grids` / `fixed` key sets change between calls. `evaluate_joint` pins every
+# prior that is not a grid axis to its fiducial.
+
 
 # %%
+def evaluate_joint(
+    log_density_fn: LogDensityFn,
+    grids: dict[str, jax.Array],
+    *,
+    model_kwargs: dict[str, jax.Array],
+) -> jax.Array:
+    """Evaluate the constrained log density on a Cartesian product of `grids`."""
+    fixed = {name: FIDUCIALS[name] for name in PRIORS if name not in grids}
+    return jax.block_until_ready(log_density_fn(grids, fixed=fixed, **model_kwargs))
+
+
 _default_log_density_fn = LOG_DENSITY_FNS[DEFAULT_NETWORK]
 _default_model_kwargs = MODEL_KWARGS[DEFAULT_NETWORK]
 
 H0_OMEGA_M_GRIDS = {"H0": H0_GRID_2D, "Omega_m": OMEGA_M_GRID}
-_h0_omega_m_fixed = {
-    name: FIDUCIALS[name] for name in PRIORS if name not in H0_OMEGA_M_GRIDS
-}
-H0_OMEGA_M_LOGPOST = jax.block_until_ready(
-    _default_log_density_fn(
-        H0_OMEGA_M_GRIDS, fixed=_h0_omega_m_fixed, **_default_model_kwargs
-    )
+H0_OMEGA_M_LOGPOST = evaluate_joint(
+    _default_log_density_fn, H0_OMEGA_M_GRIDS, model_kwargs=_default_model_kwargs
 )
 
 H0_MERGER_RATE_GRIDS = {"H0": H0_GRID_2D, "local_merger_rate": LOCAL_MERGER_RATE_GRID}
-_h0_merger_rate_fixed = {
-    name: FIDUCIALS[name] for name in PRIORS if name not in H0_MERGER_RATE_GRIDS
-}
-H0_MERGER_RATE_LOGPOST = jax.block_until_ready(
-    _default_log_density_fn(
-        H0_MERGER_RATE_GRIDS, fixed=_h0_merger_rate_fixed, **_default_model_kwargs
-    )
+H0_MERGER_RATE_LOGPOST = evaluate_joint(
+    _default_log_density_fn, H0_MERGER_RATE_GRIDS, model_kwargs=_default_model_kwargs
+)
+
+XI0_N_GRIDS = {"xi_0": XI0_GRID_2D, "xi_n": XI_N_GRID}
+XI0_N_LOGPOST = evaluate_joint(
+    _default_log_density_fn, XI0_N_GRIDS, model_kwargs=_default_model_kwargs
 )
 
 # %% [markdown]
 # ## Corner plots
 #
-# ≙ `H0-Omega_m-corner.pdf`, `H0-merger-rate-corner.pdf`. Both grids `dict`s above are
-# handed to `tuple(...values())` rather than re-listed, so the dict-to-sequence
-# handoff cannot silently transpose the axes.
+# ≙ `H0-Omega_m-corner.pdf`, `H0-merger-rate-corner.pdf`, `Xi0-n-corner.pdf`. The grids
+# `dict`s above are handed to `tuple(...values())` rather than re-listed, so the
+# dict-to-sequence handoff cannot silently transpose the axes.
 #
-# **No ESS panel.** `H0-Omega_m-ess-corner.pdf` plots `importance_relative_ess`, a
-# NumPyro `deterministic` site; `LogDensityFn` returns only the scalar log density, so
-# it has no grid analogue -- there is no third panel here.
+# **No ESS panel.** `H0-Omega_m-ess-corner.pdf` and `Xi0-n-ess-corner.pdf` plot
+# `importance_relative_ess`, a NumPyro `deterministic` site; `LogDensityFn` returns
+# only the scalar log density, so it has no grid analogue -- there is no third panel
+# here.
 
 # %%
 fig_h0_omega_m_corner = plot_corner_for_posterior_grid(
@@ -495,6 +522,16 @@ fig_h0_merger_rate_corner = plot_corner_for_posterior_grid(
     smooth=1.0,
 )
 fig_h0_merger_rate_corner
+
+# %%
+fig_xi0_n_corner = plot_corner_for_posterior_grid(
+    tuple(XI0_N_GRIDS.values()),
+    XI0_N_LOGPOST,
+    labels=[PARAMETER_LABELS["xi_0"], PARAMETER_LABELS["xi_n"]],
+    truths=[FIDUCIALS["xi_0"], FIDUCIALS["xi_n"]],
+    smooth=1.0,
+)
+fig_xi0_n_corner
 
 # %% [markdown]
 # ## Fixed versus marginalized merger rate
@@ -552,6 +589,9 @@ if SAVE_OUTPUTS:
         local_merger_rate_grid=np.asarray(LOCAL_MERGER_RATE_GRID),
         h0_omega_m_logpost=np.asarray(H0_OMEGA_M_LOGPOST),
         h0_merger_rate_logpost=np.asarray(H0_MERGER_RATE_LOGPOST),
+        xi0_grid_2d=np.asarray(XI0_GRID_2D),
+        xi_n_grid=np.asarray(XI_N_GRID),
+        xi0_n_logpost=np.asarray(XI0_N_LOGPOST),
     )
     (GRID_DIR / "cosmological_parameters_grid.json").write_text(
         json.dumps(
@@ -563,6 +603,7 @@ if SAVE_OUTPUTS:
                 "default_network": DEFAULT_NETWORK,
                 "networks": [network.name for network in NETWORKS],
                 "h0_windows": H0_WINDOWS,
+                "xi0_window": XI0_WINDOW,
             },
             indent=2,
         )
@@ -580,6 +621,7 @@ if SAVE_OUTPUTS:
     fig_h0_merger_rate_corner.savefig(
         FIGURE_DIR / "H0-merger-rate-corner-grid.pdf", bbox_inches="tight"
     )
+    fig_xi0_n_corner.savefig(FIGURE_DIR / "Xi0-n-corner-grid.pdf", bbox_inches="tight")
     fig_h0_merger_rate_priors.savefig(
         FIGURE_DIR / "H0-merger-rate-priors-grid.pdf", bbox_inches="tight"
     )
