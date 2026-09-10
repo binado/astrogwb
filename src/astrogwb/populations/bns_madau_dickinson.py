@@ -57,7 +57,7 @@ import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
 from astrogwb.cosmology import log_gw_em_ratio
-from astrogwb.distributions.mass import MaxOfTwoNormals
+from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
@@ -172,7 +172,7 @@ def _declare_ordered_gaussian_masses(
     mass_sigma: jax.Array = jnp.asarray(params["mass_sigma"])
     mass_1 = numpyro.sample(
         "source_frame_mass_1",
-        MaxOfTwoNormals(mass_mean, mass_sigma, validate_args=True),
+        MaxOfTwoNormalsDistribution(mass_mean, mass_sigma, validate_args=True),
     )
     mass_2 = numpyro.sample(
         "source_frame_mass_2",

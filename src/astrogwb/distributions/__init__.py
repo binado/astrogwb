@@ -9,6 +9,6 @@
   marginalized amplitude parameter
 """
 
-from astrogwb.distributions.mass import MaxOfTwoNormals
+from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
 
-__all__ = ["MaxOfTwoNormals"]
+__all__ = ["MaxOfTwoNormalsDistribution"]

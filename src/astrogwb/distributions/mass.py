@@ -1,8 +1,9 @@
 r"""Component-mass distributions used by the BNS population models.
 
-:class:`MaxOfTwoNormals` is the primary-mass marginal of two i.i.d. Gaussians
-after ordering. Paired with a ``TruncatedNormal(..., high=m1)`` secondary it
-gives the joint ``2\,\mathcal{N}(m_1)\,\mathcal{N}(m_2)`` on ``m_1 \ge m_2``.
+:class:`MaxOfTwoNormalsDistribution` is the primary-mass marginal of two
+i.i.d. Gaussians after ordering. Paired with a ``TruncatedNormal(..., high=m1)``
+secondary it gives the joint ``2\,\mathcal{N}(m_1)\,\mathcal{N}(m_2)`` on
+``m_1 \ge m_2``.
 """
 
 from __future__ import annotations
@@ -15,13 +16,14 @@ from jax.typing import ArrayLike
 from numpyro.distributions.util import promote_shapes, validate_sample
 
 
-class MaxOfTwoNormals(dist.Distribution):
+class MaxOfTwoNormalsDistribution(dist.Distribution):
     r"""Larger of two i.i.d. normals.
 
     If :math:`X, Y \sim \mathcal{N}(\mu, \sigma^2)` independently, this is the
     law of :math:`\max(X, Y)`. The density is ``2 \phi(x) \Phi(x)`` in standard
-    units; the CDF is :math:`[\Phi((x-\mu)/\sigma)]^2`; inverse-transform sampling
-    is :math:`\mu + \sigma\,\Phi^{-1}(\sqrt{u})`.
+    units; the CDF is :math:`[\Phi((x-\mu)/\sigma)]^2`; sampling draws two
+    i.i.d. component normals and returns the larger. The inverse CDF is
+    :math:`\mu + \sigma\,\Phi^{-1}(\sqrt{q})`.
 
     Parameters
     ----------
@@ -54,18 +56,12 @@ class MaxOfTwoNormals(dist.Distribution):
     def sample(
         self, key: jax.Array | None, sample_shape: tuple[int, ...] = ()
     ) -> jax.Array:
-        """Inverse-transform draw: one uniform per element, through :meth:`icdf`."""
+        """Two i.i.d. component normals, then the larger of the pair."""
         # `None` only exists to match the base-class signature; handlers
         # always pass a real key.
         assert key is not None
-        tiny = jnp.finfo(jnp.result_type(float)).tiny
-        u = jax.random.uniform(
-            key,
-            shape=sample_shape + self.batch_shape,
-            minval=tiny,
-            maxval=1.0 - tiny,
-        )
-        return jnp.asarray(self.icdf(u))
+        eps = jax.random.normal(key, shape=(2,) + sample_shape + self.batch_shape)
+        return jnp.asarray(self.loc + self.scale * jnp.max(eps, axis=0))
 
     @validate_sample
     def log_prob(self, value: ArrayLike) -> jax.Array:

@@ -30,7 +30,7 @@ from numpyro.distributions.transforms import biject_to
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.distributions.interpolated import InterpolatedDistribution
-from astrogwb.distributions.mass import MaxOfTwoNormals
+from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
 from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
@@ -482,7 +482,7 @@ def test_total_merger_rate_scales_as_the_inverse_cube_of_the_hubble_constant() -
 
 
 # --------------------------------------------------------------------------- #
-# MaxOfTwoNormals
+# MaxOfTwoNormalsDistribution
 # --------------------------------------------------------------------------- #
 _MASS_MEAN = 1.33
 _MASS_SIGMA = 0.09
@@ -490,8 +490,8 @@ _MASS_VALUES = jnp.array([1.1, 1.33, 1.5])
 _MASS_QUANTILES = jnp.array([0.1, 0.5, 0.9])
 
 
-def _max_of_two_normals() -> MaxOfTwoNormals:
-    return MaxOfTwoNormals(_MASS_MEAN, _MASS_SIGMA, validate_args=True)
+def _max_of_two_normals() -> MaxOfTwoNormalsDistribution:
+    return MaxOfTwoNormalsDistribution(_MASS_MEAN, _MASS_SIGMA, validate_args=True)
 
 
 def test_max_of_two_normals_log_prob_matches_the_closed_form() -> None:
@@ -528,24 +528,21 @@ def test_max_of_two_normals_icdf_matches_the_closed_form() -> None:
     )
 
 
-def test_max_of_two_normals_samples_are_the_inverse_cdf_of_clipped_uniforms() -> None:
+def test_max_of_two_normals_samples_are_the_max_of_two_standard_normals() -> None:
     distribution = _max_of_two_normals()
     key = jax.random.PRNGKey(0)
     sample_shape = (32,)
-    tiny = jnp.finfo(jnp.result_type(float)).tiny
-    uniforms = jax.random.uniform(
-        key, shape=sample_shape, minval=tiny, maxval=1.0 - tiny
-    )
+    eps = jax.random.normal(key, shape=(2,) + sample_shape)
     np.testing.assert_array_equal(
         distribution.sample(key, sample_shape=sample_shape),
-        distribution.icdf(uniforms),
+        _MASS_MEAN + _MASS_SIGMA * jnp.max(eps, axis=0),
     )
 
 
 def test_max_of_two_normals_survives_jit_as_a_pytree_argument() -> None:
     """Without flattening ``loc`` / ``scale``, ``jit`` would drop them."""
     distribution = _max_of_two_normals()
-    fields = MaxOfTwoNormals.gather_pytree_data_fields()
+    fields = MaxOfTwoNormalsDistribution.gather_pytree_data_fields()
     assert "loc" in fields
     assert "scale" in fields
     jitted = jax.jit(lambda d, x: d.log_prob(x))(distribution, _MASS_VALUES)
