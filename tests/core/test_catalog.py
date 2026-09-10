@@ -119,6 +119,7 @@ def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes
     assert catalog.seed == 42
     assert catalog.num_samples == 2
     assert catalog.source_parameters["integer_label"].dtype == np.int16
+    np.testing.assert_array_equal(catalog.frequencies, generator.frequencies)
 
 
 def test_analytic_generator_evaluates_on_exact_metadata_grid(
@@ -134,13 +135,14 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
         df=2.0,
     )
 
-    actual = generator(source_parameters)
+    frequencies, actual = generator(source_parameters)
     expected = np.asarray(
         inspiral_polarization_power(
             generator.frequencies, source_parameters, alpha=ISCO_ALPHA
         )
     ).T
 
+    np.testing.assert_array_equal(frequencies, generator.frequencies)
     assert isinstance(actual, jax.Array)
     np.testing.assert_array_equal(actual, expected)
 

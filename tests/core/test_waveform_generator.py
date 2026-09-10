@@ -78,29 +78,22 @@ def test_base_generator_is_a_metadata_only_descriptor() -> None:
         generator({"detector_frame_mass_1": np.array([1.4])})
 
 
-def test_ripple_generator_rejects_frequencies_before_generating(
-    ripple_generator: RippleGenerator,
-) -> None:
-    with pytest.raises(ValueError, match="has not generated yet"):
-        _ = ripple_generator.frequencies
-
-
 @pytest.mark.integration
 def test_ripple_generator_owns_grid_and_reduces_chunked_power(
     ripple_generator: RippleGenerator,
 ) -> None:
     generator = ripple_generator
+    assert not hasattr(generator, "frequencies")
 
-    power = generator(_ripple_sources())
+    frequencies, power = generator(_ripple_sources())
 
-    assert generator.frequencies[0] == 20.0
-    assert generator.frequencies[-1] == 100.0
+    assert frequencies[0] == 20.0
+    assert frequencies[-1] == 100.0
     assert generator.df == 4.0
     assert isinstance(power, jax.Array)
-    assert power.shape == (generator.frequencies.size, 2)
+    assert power.shape == (frequencies.size, 2)
     assert power.dtype == np.float64
     assert np.all(power >= 0.0)
-    assert generator.frequencies is generator.frequencies
 
 
 def test_ripple_generator_rejects_mismatched_source_parameter_shapes(
@@ -197,4 +190,8 @@ def test_ripple_generator_chunking_preserves_power() -> None:
         chunk_size=2,
     )
 
-    np.testing.assert_allclose(one_per_chunk(sources), one_chunk(sources), rtol=1e-12)
+    frequencies_one_per_chunk, power_one_per_chunk = one_per_chunk(sources)
+    frequencies_one_chunk, power_one_chunk = one_chunk(sources)
+
+    np.testing.assert_array_equal(frequencies_one_per_chunk, frequencies_one_chunk)
+    np.testing.assert_allclose(power_one_per_chunk, power_one_chunk, rtol=1e-12)

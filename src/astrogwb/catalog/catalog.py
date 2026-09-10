@@ -150,17 +150,18 @@ class Catalog:
 
         The population record is supplied rather than inferred: the caller ran
         the model to draw ``source_parameters``, so it is the only place that
-        knows which model and settings produced them.
+        knows which model and settings produced them. Frequencies come from
+        the same generator call as the power: that is the axis the backend
+        actually produced, not a reconstruction from metadata.
         """
         parameters = {
             name: np.asarray(values) for name, values in source_parameters.items()
         }
-        power = np.asarray(generator(source_parameters))
-        frequencies = np.asarray(generator.frequencies)
+        frequencies, power = generator(source_parameters)
         return cls(
             source_parameters=parameters,
-            polarization_power=power,
-            frequencies=frequencies,
+            polarization_power=np.asarray(power),
+            frequencies=np.asarray(frequencies),
             waveform_metadata=generator,
             _model_name=model_name,
             _model_kwargs=model_kwargs,

@@ -120,7 +120,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     priors = {"amplitude": dist.Uniform(args.prior_low, args.prior_high)}
 
     catalog = Catalog.load(catalog_path)
-    frequencies = jnp.asarray(catalog.waveform_metadata.frequencies)
+    frequencies = jnp.asarray(catalog.frequencies)
     df = float(catalog.waveform_metadata.df)
     polarization_power = jnp.asarray(catalog.polarization_power)
     del catalog
