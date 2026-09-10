@@ -4,11 +4,37 @@ import jax
 import jax.numpy as jnp
 
 
+def _broadcast_scale_along_axis(
+    scale: float | jax.Array,
+    ndim: int,
+    axis: int,
+) -> jax.Array:
+    """Expand a scalar or batch factor so it does not align to ``axis``.
+
+    NumPy broadcasts trailing dimensions, so a ``(batch,)`` scale would
+    otherwise multiply the frequency axis of a ``(batch, frequency)`` array.
+    Inserting a length-1 axis at ``axis`` makes the factor apply per batch
+    item, matching multiplication after a reduction along that axis.
+    """
+    array = jnp.asarray(scale)
+    if array.ndim == 0 or array.ndim == ndim:
+        return array
+    axis_norm = axis if axis >= 0 else axis + ndim
+    if array.ndim == ndim - 1:
+        return jnp.expand_dims(array, axis_norm)
+    raise ValueError(
+        f"scale with shape {array.shape} cannot broadcast against "
+        f"{ndim}-dimensional arrays along axis {axis}"
+    )
+
+
 def spectral_snr_squared_per_bin(
     spectral_density: jax.Array,
     effective_psd: jax.Array,
     observation_time_sec: float | jax.Array,
     df: float | jax.Array,
+    *,
+    axis: int = -1,
 ) -> jax.Array:
     r"""Per-bin contribution to :func:`spectral_snr_squared`.
 
@@ -16,10 +42,17 @@ def spectral_snr_squared_per_bin(
 
         \Delta\mathrm{SNR}^2_i = 2 T \Delta f \frac{S_{h,i}^2}{S_{\mathrm{eff},i}^2}
 
-    Summing along the frequency axis recovers :math:`\mathrm{SNR}^2`. The
-    arrays are not contracted here, so leading batch dimensions broadcast.
+    Summing along ``axis`` recovers :math:`\mathrm{SNR}^2`. ``T`` and
+    ``df`` are batch factors: a trailing ``(batch,)`` shape is expanded at
+    ``axis`` rather than multiplied against the frequency bins.
     """
-    return 2.0 * observation_time_sec * df * spectral_density**2 / effective_psd**2
+    ratio_squared = spectral_density**2 / effective_psd**2
+    scale = _broadcast_scale_along_axis(
+        2.0 * observation_time_sec * df,
+        ratio_squared.ndim,
+        axis,
+    )
+    return scale * ratio_squared
 
 
 def spectral_snr_squared(
@@ -54,6 +87,7 @@ def spectral_snr_squared(
             effective_psd,
             observation_time_sec,
             df,
+            axis=axis,
         ),
         axis=axis,
     )
