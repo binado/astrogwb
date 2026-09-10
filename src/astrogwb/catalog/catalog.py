@@ -6,11 +6,12 @@ redshift proposal, and a config object derived from the two. They were
 reconciled by exact float equality over five hard-coded parameter names, which
 left ``xi_0``, ``xi_n`` and ``local_merger_rate`` checked by nothing at all.
 
-A catalog now records its complete population declaration: the registered model
-name, the model's construction settings, the hyperparameters it was drawn at,
-and the density factors included in importance weighting. That is enough to
-reconstruct the exact map from hyperparameters to source density, so the run
-config no longer restates any of it and nothing has to be cross-checked.
+A catalog now records its complete population declaration: the registered
+source and rate names, the construction settings, the hyperparameters it
+was drawn at, and the density factors included in importance weighting. That
+is enough to reconstruct the exact map from hyperparameters to source density,
+so the run config no longer restates any of it and nothing has to be
+cross-checked.
 
 The included-factor tuple is part of that record for a reason that is easy to
 miss: the two mass sites form one conceptual ordered-pair density contribution.
@@ -189,25 +190,18 @@ class Catalog:
 
     @property
     def population_rate_model_name(self) -> str:
-        """The registry key of the merger-rate model this catalog was drawn at."""
+        """The registry key of the merger-rate function this catalog was drawn at."""
         return self._rate_model_name
 
     @property
     def population_model_name(self) -> str:
-        """The recipe name pairing this catalog's (source, rate) models.
+        """The source-model name this catalog was drawn from.
 
-        Best-effort: falls back to the source model's own name when the pair
-        is not one of the registered recipes -- an arbitrary pairing a run
-        config can express, which has no single legacy name. Kept for logging
-        and for callers that still compare against one of the historical
-        single names.
+        An alias of :attr:`population_source_model_name`, kept for logging and
+        for callers that still compare against one of the historical single
+        population names, which are now the source-model keys.
         """
-        from astrogwb.populations import recipe_name
-
-        return (
-            recipe_name(self._source_model_name, self._rate_model_name)
-            or self._source_model_name
-        )
+        return self._source_model_name
 
     @property
     def population_model_kwargs(self) -> Mapping[str, Any]:
@@ -237,7 +231,7 @@ class Catalog:
         fails here, listing what is registered.
         """
         return build_population(
-            source_model=self._source_model_name,
+            self._source_model_name,
             rate_model=self._rate_model_name,
             settings=self._model_kwargs,
             density_sites=self._density_sites,

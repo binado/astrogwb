@@ -47,6 +47,7 @@ from astrogwb.populations import (
     build_population,
     known_merger_rate_models,
     known_source_models,
+    register_merger_rate_model,
     register_source_model,
 )
 from astrogwb.populations.bns_madau_dickinson import (
@@ -56,13 +57,15 @@ from astrogwb.populations.bns_madau_dickinson import (
     bns_md_gaussian_uniform_mixture,
     bns_md_modified_propagation,
     bns_md_uniform_mixture,
+    madau_dickinson_total_merger_rate,
 )
+from astrogwb.populations.registry import _BoundMergerRate
 
 #: Deterministic site names, used only where a raw trace (rather than the
 #: typed :class:`~astrogwb.populations.SourceEvaluation`) is under test.
 LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
-#: Population-level, declared by the rate model outside the source model's
-#: own output set -- kept separate from ``DETERMINISTIC_SITES`` below.
+#: Population-level, declared by the merger-rate function outside the source
+#: model's own output set -- kept separate from ``DETERMINISTIC_SITES`` below.
 TOTAL_MERGER_RATE_SITE = "total_merger_rate"
 
 #: Interior to the mock grid and not on a node.
@@ -141,9 +144,11 @@ def test_shipped_models_are_registered() -> None:
         "bns_md_uniform_mixture",
     )
     assert known_merger_rate_models() == ("madau_dickinson",)
-    assert build_population("bns_md_cosmological", settings={}).source.fn is (
-        bns_md_cosmological
-    )
+    cosmological = build_population("bns_md_cosmological", settings={})
+    assert cosmological.source.fn is bns_md_cosmological
+    assert isinstance(cosmological.rate, _BoundMergerRate)
+    assert cosmological.rate.fn is madau_dickinson_total_merger_rate
+    assert cosmological.rate.kwargs == ()
     assert build_population("bns_md_modified_propagation", settings={}).source.fn is (
         bns_md_modified_propagation
     )
@@ -164,11 +169,15 @@ def test_shipped_models_are_registered() -> None:
 def test_unknown_model_names_list_the_known_set() -> None:
     with pytest.raises(KeyError, match="bns_md_cosmological"):
         build_population("no_such_population", settings={})
+    with pytest.raises(KeyError, match="madau_dickinson"):
+        build_population("bns_md_cosmological", rate_model="no_such_rate", settings={})
 
 
 def test_registering_a_name_twice_is_rejected() -> None:
     with pytest.raises(ValueError, match="already registered"):
         register_source_model("bns_md_cosmological")(bns_md_cosmological)
+    with pytest.raises(ValueError, match="already registered"):
+        register_merger_rate_model("madau_dickinson")(madau_dickinson_total_merger_rate)
 
 
 def test_populations_from_reordered_settings_hash_equal_and_compile_once() -> None:
@@ -272,7 +281,7 @@ def test_source_evaluate_needs_no_physical_rate() -> None:
 
 
 def test_population_evaluate_requires_the_physical_rate_parameter() -> None:
-    """The rate model owns this check now, not an ``"x" in params`` branch."""
+    """The merger-rate function owns this check now, not an ``"x" in params`` branch."""
     without_rate = {
         name: value
         for name, value in POPULATION_PARAMS.items()

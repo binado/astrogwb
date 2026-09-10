@@ -11,11 +11,11 @@ about the source density they share.
 Each variant is registered as a *source* model: it declares sites and returns
 the mapping that defines the source-output set, with no notion of a physical
 rate. The rate lives in :func:`madau_dickinson_total_merger_rate`, registered
-separately as the *merger-rate* model every variant here pairs with by
-default (see ``register_recipe`` at the bottom). Splitting the two is what
-lets a guard-mixture *redshift law* pair with the same Madau-Dickinson *rate*
-the physical population uses, without executing the whole source model just
-to read one scalar.
+separately; :func:`~astrogwb.populations.build_population` binds it by default
+when a caller names only the source. Splitting the two is what lets a
+guard-mixture *redshift law* pair with the same Madau-Dickinson *rate* the
+physical population uses, without executing the whole source model just to
+read one scalar.
 
 The declaration is a NumPyro model, and that is the whole point of it:
 
@@ -73,7 +73,6 @@ from astrogwb.distributions.redshift.madau_dickinson import (
 )
 from astrogwb.populations.registry import (
     register_merger_rate_model,
-    register_recipe,
     register_source_model,
 )
 
@@ -285,8 +284,8 @@ def bns_md_cosmological(
     ``z_peak``. ``z_min``, ``z_max`` and ``n_grid`` describe the grid the
     cosmology integrals and the redshift normalization run on; they are
     construction settings, bound once and serialized with the catalog. Pairs
-    with :func:`madau_dickinson_total_merger_rate` by default (see the
-    ``register_recipe`` call below).
+    with :func:`madau_dickinson_total_merger_rate` when assembled by
+    :func:`~astrogwb.populations.build_population`.
     """
     redshift, redshift_distribution = _redshift(
         params, z_min=z_min, z_max=z_max, n_grid=n_grid
@@ -460,40 +459,3 @@ def bns_md_gaussian_modified_propagation(
         * jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"])),
         declare_masses=_declare_ordered_gaussian_masses,
     )
-
-
-# The six previously-registered population names, kept as recipes pairing
-# each source model here with the Madau-Dickinson rate above -- the same
-# pairing every one of them used before the split. Catalog reconstruction,
-# the notebooks, and existing call sites that name one of these six keep
-# working unchanged.
-register_recipe(
-    "bns_md_cosmological",
-    source_model="bns_md_cosmological",
-    rate_model="madau_dickinson",
-)
-register_recipe(
-    "bns_md_uniform_mixture",
-    source_model="bns_md_uniform_mixture",
-    rate_model="madau_dickinson",
-)
-register_recipe(
-    "bns_md_modified_propagation",
-    source_model="bns_md_modified_propagation",
-    rate_model="madau_dickinson",
-)
-register_recipe(
-    "bns_md_gaussian_cosmological",
-    source_model="bns_md_gaussian_cosmological",
-    rate_model="madau_dickinson",
-)
-register_recipe(
-    "bns_md_gaussian_uniform_mixture",
-    source_model="bns_md_gaussian_uniform_mixture",
-    rate_model="madau_dickinson",
-)
-register_recipe(
-    "bns_md_gaussian_modified_propagation",
-    source_model="bns_md_gaussian_modified_propagation",
-    rate_model="madau_dickinson",
-)

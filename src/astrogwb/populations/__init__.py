@@ -3,9 +3,9 @@
 One pair of declarations serves generation and inference: a source model's
 ``Predictive`` draws a catalog, and substituting those draws back into it
 recovers the per-sample source density the importance weights divide by. A
-merger-rate model returns the one observer-frame scalar the same catalog's
+merger-rate function returns the one observer-frame scalar the same catalog's
 Poisson count and predicted spectrum need. That is what makes a catalog
-self-describing -- the file records the two registry names, both models'
+self-describing -- the file records the two registry names, both callables'
 construction settings, and the hyperparameters they were drawn at, which is
 everything needed to reconstruct the density that produced it.
 
@@ -18,7 +18,6 @@ initialize it.
 
 from astrogwb.populations.base import (
     MergerRateFn,
-    MergerRateModel,
     Population,
     PopulationDraw,
     PopulationEvaluation,
@@ -41,24 +40,21 @@ from astrogwb.populations.bns_madau_dickinson import (
     merger_rate_local_merger_rate_fn,
 )
 from astrogwb.populations.registry import (
+    DEFAULT_MERGER_RATE_MODEL,
     SHARED_MODEL_KWARGS,
-    build_merger_rate_model,
     build_population,
     build_source_model,
     known_merger_rate_models,
     known_source_models,
-    recipe_name,
     register_merger_rate_model,
-    register_recipe,
     register_source_model,
-    resolve_recipe,
 )
 
 __all__ = [
     "AMPLITUDE_PARAMETERS",
+    "DEFAULT_MERGER_RATE_MODEL",
     "SHARED_MODEL_KWARGS",
     "MergerRateFn",
-    "MergerRateModel",
     "Population",
     "PopulationDraw",
     "PopulationEvaluation",
@@ -73,7 +69,6 @@ __all__ = [
     "bns_md_gaussian_uniform_mixture",
     "bns_md_modified_propagation",
     "bns_md_uniform_mixture",
-    "build_merger_rate_model",
     "build_population",
     "build_source_model",
     "known_merger_rate_models",
@@ -81,9 +76,6 @@ __all__ = [
     "madau_dickinson_total_merger_rate",
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
-    "recipe_name",
     "register_merger_rate_model",
-    "register_recipe",
     "register_source_model",
-    "resolve_recipe",
 ]

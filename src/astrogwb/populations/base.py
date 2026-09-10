@@ -2,7 +2,7 @@
 
 A population is two independent declarations composed together: a
 :class:`SourceModel` draws and evaluates per-source quantities (masses,
-spins, redshift, distance, ...), and a :class:`MergerRateModel` returns one
+spins, redshift, distance, ...), and a :data:`MergerRateFn` returns one
 observer-frame scalar. Composing them into a :class:`Population` is what a
 registered population used to do in one callable; splitting them is what lets
 a guard-mixture source pair with the same Madau-Dickinson rate the physical
@@ -31,9 +31,10 @@ from numpyro.infer.util import compute_log_probs
 #: ``total_merger_rate`` is a reserved population-level name and is rejected.
 type SourceFn = Callable[..., Mapping[str, jax.Array]]
 
-#: A registered merger-rate model: returns one observer-frame scalar,
-#: mergers per second, executed once outside any plate.
-type MergerRateFn = Callable[..., jax.Array]
+#: A bound merger-rate callable: returns one observer-frame scalar,
+#: mergers per second, from hyperparameters alone. Construction settings
+#: are closed over by the caller that assembled the :class:`Population`.
+type MergerRateFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
 
 #: The raw NumPyro trace escape hatch -- every site, untyped. Only
 #: :meth:`SourceModel.trace` returns this.
@@ -44,7 +45,7 @@ type RawPopulationTrace = Mapping[str, Mapping[str, Any]]
 _LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
 
 #: The population-level rate site name. Reserved: a source model returning
-#: this key would collide with the rate model's own declaration.
+#: this key would collide with the merger-rate function's own declaration.
 _TOTAL_MERGER_RATE_SITE = "total_merger_rate"
 
 
@@ -120,7 +121,7 @@ class SourceModel:
         if _TOTAL_MERGER_RATE_SITE in sources:
             raise ValueError(
                 f"source model must not return {_TOTAL_MERGER_RATE_SITE!r}: that "
-                "name is reserved for the merger-rate model it is paired with"
+                "name is reserved for the merger-rate function it is paired with"
             )
         if _LUMINOSITY_DISTANCE_SITE not in sources:
             raise ValueError(
@@ -237,28 +238,8 @@ class SourceModel:
 
 
 @dataclass(frozen=True, kw_only=True)
-class MergerRateModel:
-    """A NumPyro model returning one observer-frame scalar rate.
-
-    ``fn`` is a plain, module-level NumPyro model, a stable, hashable
-    singleton for the same reason :class:`SourceModel.fn` is. ``model_kwargs``
-    are sorted in :meth:`__post_init__` for the same equality/hashing reason.
-    Has no ``density_sites``: a deterministic scalar carries no density.
-    """
-
-    fn: MergerRateFn
-    model_kwargs: tuple[tuple[str, float | int], ...]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "model_kwargs", tuple(sorted(self.model_kwargs)))
-
-    def __call__(self, params: Mapping[str, ArrayLike]) -> jax.Array:
-        return jnp.reshape(jnp.asarray(self.fn(params, **dict(self.model_kwargs))), ())
-
-
-@dataclass(frozen=True, kw_only=True)
 class Population:
-    """A source model and a merger-rate model, composed.
+    """A source model and a bound merger-rate function, composed.
 
     The rate is published *outside* the plate the source model draws inside:
     that is the property that used to require executing the whole source
@@ -266,10 +247,17 @@ class Population:
     hiding the plated re-declaration with ``handlers.block``. Composing two
     declarations instead of branching one on ``"local_merger_rate" in params``
     is what makes ``total_merger_rate`` always present rather than optional.
+
+    ``rate`` is already ``(params) -> Array``: construction settings are bound
+    by the caller that assembled this object, typically
+    :func:`~astrogwb.populations.registry.build_population`. The callable
+    must be a value object -- a module-level function or a frozen wrapper of
+    one -- not a nested ``def``, which would hash by identity and silently retrace
+    under ``jax.jit``.
     """
 
     source: SourceModel
-    rate: MergerRateModel
+    rate: MergerRateFn
 
     def __call__(
         self, params: Mapping[str, ArrayLike], *, num_events: int
@@ -280,7 +268,7 @@ class Population:
         reject size 0, so ``num_events <= 0`` skips the plate and returns an
         empty source mapping.
         """
-        total_merger_rate = self.rate(params)
+        total_merger_rate = _as_scalar_rate(self.rate(params))
         numpyro.deterministic(_TOTAL_MERGER_RATE_SITE, total_merger_rate)
         if num_events <= 0:
             return PopulationDraw(sources={}, total_merger_rate=total_merger_rate)
@@ -295,7 +283,7 @@ class Population:
     ) -> PopulationEvaluation:
         """One rate call plus one source evaluation, both handler-isolated."""
         with handlers.block():
-            total_merger_rate = self.rate(params)
+            total_merger_rate = _as_scalar_rate(self.rate(params))
             numpyro.deterministic(_TOTAL_MERGER_RATE_SITE, total_merger_rate)
             source_eval = self.source.evaluate(params, sources)
         return PopulationEvaluation(
@@ -303,3 +291,8 @@ class Population:
             luminosity_distance=source_eval.luminosity_distance,
             total_merger_rate=total_merger_rate,
         )
+
+
+def _as_scalar_rate(value: ArrayLike) -> jax.Array:
+    """Coerce a rate return value to a shape-``()`` array."""
+    return jnp.reshape(jnp.asarray(value), ())
