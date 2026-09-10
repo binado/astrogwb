@@ -8,7 +8,6 @@ __all__ = [
     "apply_frequency_mask",
     "frequency_mask",
     "noise_weighted_inner_product",
-    "ripple_frequency_grid",
     "uniform_frequency_grid",
 ]
 
@@ -44,31 +43,6 @@ def uniform_frequency_grid(
     if np.isclose(frequencies[-1], maximum, rtol=0.0, atol=tolerance):
         frequencies[-1] = maximum
     return frequencies
-
-
-def ripple_frequency_grid(
-    *,
-    sampling_frequency: float,
-    minimum_frequency: float,
-    maximum_frequency: float,
-    frequency_resolution: float,
-) -> np.ndarray:
-    """Reproduce Ripple's generated positive-frequency grid in a band."""
-    sampling = float(sampling_frequency)
-    resolution = float(frequency_resolution)
-    minimum = float(minimum_frequency)
-    maximum = float(maximum_frequency)
-    if not np.isfinite(sampling) or sampling <= 0.0:
-        raise ValueError("sampling_frequency must be finite and positive")
-    if not np.isfinite(resolution) or resolution <= 0.0:
-        raise ValueError("frequency_resolution must be a finite positive scalar")
-    segment_duration = float(2.0 ** np.ceil(np.log2(1.0 / resolution)))
-    n_samples = round(segment_duration * sampling)
-    if n_samples <= 0:
-        raise ValueError("sampling_frequency produces no Ripple samples")
-    effective_df = sampling / n_samples
-    frequencies = effective_df * np.arange(n_samples // 2 + 1, dtype=np.float64)
-    return frequencies[(frequencies >= minimum) & (frequencies <= maximum)]
 
 
 def frequency_mask(

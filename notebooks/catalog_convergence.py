@@ -381,7 +381,7 @@ def describe(catalog: Catalog) -> pd.Series:
             "population": catalog.population_model_name,
             "seed": catalog.seed,
             "num_sources": catalog.num_samples,
-            "num_frequencies": waveform.frequencies.size,
+            "num_frequencies": catalog.frequencies.size,
             "df_hz": waveform.df,
             "f_min_hz": waveform.minimum_frequency,
             "f_max_hz": waveform.maximum_frequency,
@@ -404,7 +404,7 @@ def unpack(
     catalog: Catalog,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, jax.Array], jax.Array]:
     """The four things every section wants out of a catalog."""
-    frequencies = np.asarray(catalog.waveform_metadata.frequencies)
+    frequencies = np.asarray(catalog.frequencies)
     power = np.asarray(catalog.polarization_power)
     catalog_samples = {
         name: jnp.asarray(values) for name, values in catalog.source_parameters.items()

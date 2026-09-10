@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import jax
 import numpy as np
@@ -17,9 +16,9 @@ __all__ = ["PolarizationPowerGenerator"]
 class PolarizationPowerGenerator:
     """Frequency-domain waveform descriptor and power-generation interface.
 
-    Concrete subclasses turn source parameters into frequency-first
-    polarization power. The base class is also used as a metadata-only
-    descriptor when a persisted catalog is loaded.
+    Concrete subclasses turn source parameters into a frequency axis and
+    frequency-first polarization power. The base class is also used as a
+    metadata-only descriptor when a persisted catalog is loaded.
     """
 
     approximant: str
@@ -28,11 +27,6 @@ class PolarizationPowerGenerator:
     reference_frequency: float
     sampling_frequency: float
     df: float
-
-    if TYPE_CHECKING:
-
-        @property
-        def frequencies(self) -> np.ndarray: ...
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "minimum_frequency", float(self.minimum_frequency))
@@ -58,11 +52,14 @@ class PolarizationPowerGenerator:
         if not np.isfinite(self.df) or self.df <= 0.0:
             raise ValueError("df must be a finite positive scalar")
 
-    def __call__(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
-        """Generate power for ``source_parameters``.
+    def __call__(
+        self, source_parameters: Mapping[str, ArrayLike]
+    ) -> tuple[np.ndarray, jax.Array]:
+        """Return ``(frequencies, polarization_power)`` for ``source_parameters``.
 
-        The base implementation exists so it can describe a loaded catalog;
-        only concrete generator subclasses are intended to generate power.
+        Polarization power is frequency-first, shape ``(F, N)``. The base
+        implementation exists so it can describe a loaded catalog; only
+        concrete generator subclasses are intended to generate.
         """
         del source_parameters
         raise NotImplementedError(

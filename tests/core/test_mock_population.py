@@ -56,10 +56,10 @@ def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -
     """The realistic default trades frequency resolution for catalog size."""
     catalog = mock_catalog_factory()
     waveform = catalog.waveform_metadata
-    frequencies = np.asarray(waveform.frequencies)
+    frequencies = np.asarray(catalog.frequencies)
     redshift = np.asarray(catalog.source_parameters["redshift"])
 
-    assert waveform.frequencies.size == 512
+    assert catalog.frequencies.size == 512
     assert catalog.num_samples == 1024
     # Every stochastic site plus every per-source deterministic the population
     # declares -- the columns are the model's sites, by construction.
