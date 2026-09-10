@@ -1,9 +1,11 @@
 # The BNS population every catalog is drawn from, and drawn at.
 #
-# `model` is a key in the astrogwb.populations registry, not an import path:
-# registry keys change only on purpose, while module paths move as collateral.
-# The guarded-proposal catalogs override it with the uniform-mixture variant
-# and add `uniform_mixing_fraction` to [population.kwargs].
+# `source_model` / `rate_model` are keys in the astrogwb.populations source
+# and merger-rate registries, not import paths: registry keys change only on
+# purpose, while module paths move as collateral. The guarded-proposal
+# catalogs override `source_model` with the uniform-mixture variant and add
+# `uniform_mixing_fraction` to [population.source_kwargs]; `rate_model` stays
+# the Madau-Dickinson rate every catalog pairs with.
 #
 # Everything here is copied verbatim into the generated .h5 file, which is what
 # makes the catalog self-describing. Nothing re-reads this layer at analysis
@@ -12,12 +14,14 @@
 # catalog, so editing it correctly invalidates all of them.
 
 [population]
-model = "bns_md_cosmological"
-# Density factors and source outputs are declared by the population class.
+source_model = "bns_md_cosmological"
+rate_model = "madau_dickinson"
+# Density factors and source outputs are declared by the source model class.
 
-# Construction settings: the redshift window and the grid the cosmology
-# integrals and the density normalization run on. Narrowing the window to an
-# analysis band is a Catalog operation, not an edit here.
+# Construction settings routed to *both* models: the redshift window and the
+# grid the cosmology integrals and the density normalization run on.
+# Narrowing the window to an analysis band is a Catalog operation, not an
+# edit here.
 [population.kwargs]
 z_min = 0.0
 z_max = 20.0

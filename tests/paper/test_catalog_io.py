@@ -85,6 +85,20 @@ def test_invalid_metadata_and_unknown_population_fail_on_load(tmp_path: Path) ->
     path = tmp_path / "invalid.h5"
     make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
     with h5py.File(path, "r+") as handle:
+        handle.attrs["population_source_model"] = "no_such_population"
+    with pytest.raises(KeyError):
+        Catalog.load(path)
+
+
+def test_a_tampered_legacy_name_fails_on_load_when_the_new_attrs_are_absent(
+    tmp_path: Path,
+) -> None:
+    """The additive attrs win when present; the legacy name is a fallback only."""
+    path = tmp_path / "invalid.h5"
+    make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
+    with h5py.File(path, "r+") as handle:
+        del handle.attrs["population_source_model"]
+        del handle.attrs["population_rate_model"]
         handle.attrs["population_model"] = "no_such_population"
     with pytest.raises(KeyError):
         Catalog.load(path)

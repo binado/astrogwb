@@ -123,10 +123,22 @@ def _seeded_trace(model, params, **kwargs):
     return handlers.trace(handlers.seed(model, 0)).get_trace(params, **kwargs)
 
 
+def _plated_source_site_names(trace) -> list[str]:
+    """Every site declared inside the ``events`` plate -- the source columns.
+
+    A structural selector rather than a static name list: any site whose
+    ``cond_indep_stack`` is non-empty was declared inside the plate, which is
+    exactly the set ``population.source`` returns from one execution.
+    """
+    return [
+        name
+        for name, site in trace.items()
+        if site["type"] in ("sample", "deterministic") and site["cond_indep_stack"]
+    ]
+
+
 def _expected_spectrum(trace, generator, observation_time, *, average_mode):
-    sources = {
-        name: trace[name]["value"] for name in mock_population_model().source_sites
-    }
+    sources = {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
     power = jnp.asarray(generator.generate_batch(sources))
     factor = (
         INCLINATION_AVERAGE_TO_FACE_ON_RATIO
@@ -197,7 +209,7 @@ def test_batch_size_does_not_change_the_spectrum() -> None:
         second["spectral_density"]["value"],
         rtol=1e-12,
     )
-    for name in kwargs["population"].source_sites:
+    for name in _plated_source_site_names(first):
         np.testing.assert_array_equal(first[name]["value"], second[name]["value"])
 
 
@@ -263,12 +275,13 @@ def test_jitted_spectrum_matches_eager() -> None:
 
 
 def test_missing_physical_rate_is_rejected() -> None:
+    """The rate model owns this check now, not an ``"x" in params`` branch."""
     params = {
         name: value
         for name, value in POPULATION_PARAMS.items()
         if name != "local_merger_rate"
     }
-    with pytest.raises(ValueError, match="total_merger_rate"):
+    with pytest.raises(ValueError, match="local_merger_rate"):
         _seeded_trace(gwb_forward_model, params, **_model_kwargs())
 
 
@@ -349,7 +362,7 @@ def test_ripple_batch_size_does_not_change_the_spectrum() -> None:
         second["spectral_density"]["value"],
         rtol=1e-12,
     )
-    for name in mock_population_model().source_sites:
+    for name in _plated_source_site_names(first):
         np.testing.assert_array_equal(first[name]["value"], second[name]["value"])
 
 

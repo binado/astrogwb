@@ -149,7 +149,8 @@ def target_population_model(config: RunConfig) -> Population:
     """
     grid = config.analysis_grid
     return build_population(
-        config.analysis.population_model,
+        source_model=config.analysis.source_model,
+        rate_model=config.analysis.rate_model,
         settings={
             "z_min": grid.minimum_redshift,
             "z_max": grid.maximum_redshift,
@@ -230,12 +231,6 @@ def catalog_total_merger_rate(catalog: Catalog) -> jax.Array:
     params = catalog.fiducials
     values = catalog.source_parameters
     trace = model.evaluate(params, values)
-    if trace.total_merger_rate is None:
-        raise ValueError(
-            f"catalog population {catalog.population_model_name!r} declares no "
-            "total_merger_rate site: its fiducials must carry local_merger_rate "
-            "for an injection catalog"
-        )
     return trace.total_merger_rate
 
 

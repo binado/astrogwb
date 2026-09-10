@@ -79,15 +79,12 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
-from numpyro import handlers
 
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO
 from astrogwb.gwb.spectral import AverageMode
 from astrogwb.populations import Population
 from astrogwb.utils import array_dict_shape, years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
-
-_TOTAL_MERGER_RATE_SITE = "total_merger_rate"
 
 
 def _require_positive_int(name: str, value: int) -> int:
@@ -110,39 +107,6 @@ def _require_positive_time(observation_time: float) -> float:
             f"got {observation_time!r}"
         )
     return time
-
-
-def _population_total_merger_rate(
-    population: Population, params: Mapping[str, ArrayLike]
-) -> jax.Array:
-    """Observer-frame rate at ``params``, without consuming the outer RNG."""
-    with handlers.block():
-        sources = handlers.seed(population, 0)(params)
-    if _TOTAL_MERGER_RATE_SITE not in sources:
-        raise ValueError(
-            "population declares no total_merger_rate site: params must carry "
-            "the physical rate parameter (typically local_merger_rate) for a "
-            "forward spectrum"
-        )
-    return jnp.reshape(jnp.asarray(sources[_TOTAL_MERGER_RATE_SITE]), ())
-
-
-def _draw_sources(
-    population: Population, params: Mapping[str, ArrayLike], num_events: int
-) -> dict[str, jax.Array]:
-    """Draw ``num_events`` sources under a plate, hiding the plated rate site.
-
-    The unplated rate is already published as ``total_merger_rate``. The
-    population also declares that deterministic, and under a plate it would
-    become an ``(N,)`` site of the same name. ``num_events`` must be positive:
-    NumPyro plates reject size 0.
-    """
-    with (
-        numpyro.plate("events", num_events),
-        handlers.block(hide=[_TOTAL_MERGER_RATE_SITE]),
-    ):
-        sources = dict(population(params))
-    return {name: sources[name] for name in population.source_sites}
 
 
 def _zero_spectrum(generator: PolarizationPowerGenerator) -> jax.Array:
@@ -246,17 +210,17 @@ def gwb_forward_model(
     observation_time = _require_positive_time(observation_time)
     observation_time_sec = years_to_seconds(observation_time)
 
-    total_merger_rate = _population_total_merger_rate(population, params)
-    numpyro.deterministic(_TOTAL_MERGER_RATE_SITE, total_merger_rate)
+    draw = population(params, num_events=num_events)
     numpyro.sample(
         "n_events",
-        dist.Poisson(total_merger_rate * observation_time_sec),
+        dist.Poisson(draw.total_merger_rate * observation_time_sec),
         obs=num_events,
     )
 
     if num_events:
-        sources = _draw_sources(population, params, num_events)
-        power_sum = _sum_polarization_power(generator, sources, batch_size=batch_size)
+        power_sum = _sum_polarization_power(
+            generator, draw.sources, batch_size=batch_size
+        )
     else:
         power_sum = _zero_spectrum(generator)
 

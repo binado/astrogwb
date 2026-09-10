@@ -45,8 +45,9 @@ from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.populations import (
     Population,
     build_population,
-    known_population_models,
-    register_population_model,
+    known_merger_rate_models,
+    known_source_models,
+    register_source_model,
 )
 from astrogwb.populations.bns_madau_dickinson import (
     bns_md_cosmological,
@@ -58,8 +59,10 @@ from astrogwb.populations.bns_madau_dickinson import (
 )
 
 #: Deterministic site names, used only where a raw trace (rather than the
-#: typed :class:`~astrogwb.populations.PopulationTrace`) is under test.
+#: typed :class:`~astrogwb.populations.SourceEvaluation`) is under test.
 LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
+#: Population-level, declared by the rate model outside the source model's
+#: own output set -- kept separate from ``DETERMINISTIC_SITES`` below.
 TOTAL_MERGER_RATE_SITE = "total_merger_rate"
 
 #: Interior to the mock grid and not on a node.
@@ -97,7 +100,6 @@ DETERMINISTIC_SITES = frozenset(
         "inclination",
         "coa_phase",
         "coa_time",
-        TOTAL_MERGER_RATE_SITE,
     }
 )
 
@@ -130,7 +132,7 @@ def reference(params: dict[str, float]) -> tuple[jax.Array, jax.Array, jax.Array
 # Registry
 # --------------------------------------------------------------------------- #
 def test_shipped_models_are_registered() -> None:
-    assert known_population_models() == (
+    assert known_source_models() == (
         "bns_md_cosmological",
         "bns_md_gaussian_cosmological",
         "bns_md_gaussian_modified_propagation",
@@ -138,24 +140,25 @@ def test_shipped_models_are_registered() -> None:
         "bns_md_modified_propagation",
         "bns_md_uniform_mixture",
     )
-    assert build_population("bns_md_cosmological", settings={}).fn is (
+    assert known_merger_rate_models() == ("madau_dickinson",)
+    assert build_population("bns_md_cosmological", settings={}).source.fn is (
         bns_md_cosmological
     )
-    assert build_population("bns_md_modified_propagation", settings={}).fn is (
+    assert build_population("bns_md_modified_propagation", settings={}).source.fn is (
         bns_md_modified_propagation
     )
-    assert build_population("bns_md_uniform_mixture", settings={}).fn is (
+    assert build_population("bns_md_uniform_mixture", settings={}).source.fn is (
         bns_md_uniform_mixture
     )
-    assert build_population("bns_md_gaussian_cosmological", settings={}).fn is (
+    assert build_population("bns_md_gaussian_cosmological", settings={}).source.fn is (
         bns_md_gaussian_cosmological
     )
-    assert build_population("bns_md_gaussian_modified_propagation", settings={}).fn is (
-        bns_md_gaussian_modified_propagation
-    )
-    assert build_population("bns_md_gaussian_uniform_mixture", settings={}).fn is (
-        bns_md_gaussian_uniform_mixture
-    )
+    assert build_population(
+        "bns_md_gaussian_modified_propagation", settings={}
+    ).source.fn is (bns_md_gaussian_modified_propagation)
+    assert build_population(
+        "bns_md_gaussian_uniform_mixture", settings={}
+    ).source.fn is (bns_md_gaussian_uniform_mixture)
 
 
 def test_unknown_model_names_list_the_known_set() -> None:
@@ -165,19 +168,17 @@ def test_unknown_model_names_list_the_known_set() -> None:
 
 def test_registering_a_name_twice_is_rejected() -> None:
     with pytest.raises(ValueError, match="already registered"):
-        register_population_model("bns_md_cosmological", source_sites=())(
-            bns_md_cosmological
-        )
+        register_source_model("bns_md_cosmological")(bns_md_cosmological)
 
 
 def test_populations_from_reordered_settings_hash_equal_and_compile_once() -> None:
     """The regression guard for keeping ``Population`` a canonical value object.
 
     A dict's insertion order is not part of its equality, but an unsorted
-    ``settings`` tuple would leak that order into hashing and into ``jax.jit``'s
-    cache key -- silently retracing the ``(F, N)`` contraction on every
-    construction from the same catalog. Sorting in ``__post_init__`` is what
-    keeps all three of these genuinely one value.
+    ``model_kwargs`` tuple would leak that order into hashing and into
+    ``jax.jit``'s cache key -- silently retracing the ``(F, N)`` contraction on
+    every construction from the same catalog. Sorting in ``__post_init__`` is
+    what keeps all three of these genuinely one value.
     """
     kwargs = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
     reordered = {"n_grid": N_GRID, "z_max": Z_MAX, "z_min": Z_MIN}
@@ -188,10 +189,48 @@ def test_populations_from_reordered_settings_hash_equal_and_compile_once() -> No
     assert hash(first) == hash(second) == hash(third)
 
     compiled = jax.jit(
-        lambda model, params: model.log_prob(params, sample_values()),
+        lambda model, params: model.source.log_prob(params, sample_values()),
         static_argnums=0,
     )
     for model in (first, second, third):
+        compiled(model, POPULATION_PARAMS)
+    assert compiled._cache_size() == 1  # ty: ignore[unresolved-attribute]
+
+
+def test_composed_population_from_reordered_kwargs_hash_equal_and_compile_once() -> (
+    None
+):
+    """Extends the guard above to a config-level composed ``Population``.
+
+    Built from the explicit ``source_model``/``rate_model`` call shape, with
+    both the shared block and the source-only block reordered. Without this,
+    a retrace-per-construction regression in that call shape lands silently
+    and surfaces only as slow NUTS.
+    """
+    kwargs = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
+    reordered_kwargs = {"n_grid": N_GRID, "z_max": Z_MAX, "z_min": Z_MIN}
+    source_kwargs = {"uniform_mixing_fraction": 0.1}
+    reordered_source_kwargs = dict(reversed(list(source_kwargs.items())))
+    first = build_population(
+        source_model="bns_md_uniform_mixture",
+        rate_model="madau_dickinson",
+        settings=kwargs,
+        source_kwargs=source_kwargs,
+    )
+    second = build_population(
+        source_model="bns_md_uniform_mixture",
+        rate_model="madau_dickinson",
+        settings=reordered_kwargs,
+        source_kwargs=reordered_source_kwargs,
+    )
+    assert first == second
+    assert hash(first) == hash(second)
+
+    compiled = jax.jit(
+        lambda model, params: model.source.log_prob(params, sample_values()),
+        static_argnums=0,
+    )
+    for model in (first, second):
         compiled(model, POPULATION_PARAMS)
     assert compiled._cache_size() == 1  # ty: ignore[unresolved-attribute]
 
@@ -201,54 +240,50 @@ def test_populations_from_reordered_settings_hash_equal_and_compile_once() -> No
 # --------------------------------------------------------------------------- #
 def test_population_declares_its_source_outputs_and_density_factors() -> None:
     model = mock_population_model()
-    assert set(model.source_sites) == STOCHASTIC_SITES | (
-        DETERMINISTIC_SITES - {TOTAL_MERGER_RATE_SITE}
-    )
-    assert model.density_sites == (
+    declared = set(derived_columns(model.source, POPULATION_PARAMS, sample_values()))
+    assert declared == STOCHASTIC_SITES | DETERMINISTIC_SITES
+    assert model.source.density_sites == (
         REDSHIFT_SITE,
         "source_frame_mass_1",
         "source_frame_mass_2",
     )
     with pytest.raises(FrozenInstanceError):
-        model.density_sites = ()  # ty: ignore[invalid-assignment]
+        model.source.density_sites = ()  # ty: ignore[invalid-assignment]
     assert hash(model) == hash(mock_population_model())
 
 
-def test_population_call_returns_declared_source_sites() -> None:
-    model = mock_population_model()
+def test_source_call_returns_every_declared_site() -> None:
+    model = mock_population_model().source
     sources = handlers.seed(model, 0)(POPULATION_PARAMS)
-    assert set(model.source_sites) <= set(sources)
-    assert sources["total_merger_rate"].shape == ()
-    for name in model.source_sites:
+    assert set(sources) == STOCHASTIC_SITES | DETERMINISTIC_SITES
+    for name in sources:
         assert jnp.asarray(sources[name]).shape == ()
 
 
-def test_population_call_omits_rate_without_physical_rate() -> None:
-    model = mock_population_model()
+def test_source_evaluate_needs_no_physical_rate() -> None:
+    """A source model has no notion of a rate at all -- not even an absent one."""
     without_rate = {
         name: value
         for name, value in POPULATION_PARAMS.items()
         if name != "local_merger_rate"
     }
-    sources = handlers.seed(model, 0)(without_rate)
-    assert "total_merger_rate" not in sources
-    assert set(model.source_sites) <= set(sources)
+    source_eval = mock_population_model().source.evaluate(without_rate, sample_values())
+    assert source_eval.luminosity_distance.shape == SAMPLE_REDSHIFTS.shape
 
 
-def test_total_merger_rate_is_declared_only_with_a_physical_rate() -> None:
-    """A proposal is a density, not an observation, so its rate is optional."""
+def test_population_evaluate_requires_the_physical_rate_parameter() -> None:
+    """The rate model owns this check now, not an ``"x" in params`` branch."""
     without_rate = {
         name: value
         for name, value in POPULATION_PARAMS.items()
         if name != "local_merger_rate"
     }
-    trace = mock_population_model().evaluate(without_rate, sample_values())
-    assert trace.total_merger_rate is None
-    assert trace.luminosity_distance.shape == SAMPLE_REDSHIFTS.shape
+    with pytest.raises(ValueError, match="local_merger_rate"):
+        mock_population_model().evaluate(without_rate, sample_values())
 
 
 def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
-    model = mock_population_model()
+    model = mock_population_model().source
     stored = {
         **sample_values(),
         LUMINOSITY_DISTANCE_SITE: jnp.ones_like(SAMPLE_REDSHIFTS),
@@ -272,7 +307,6 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
     distance = trace.luminosity_distance
     rate = trace.total_merger_rate
     assert distance.shape == SAMPLE_REDSHIFTS.shape
-    assert rate is not None
     assert rate.shape == ()
 
     expected_rate, expected_distance, expected_logpdf = reference(FIDUCIALS)
@@ -285,27 +319,9 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
     np.testing.assert_allclose(float(rate), float(expected_rate), rtol=1e-15)
 
 
-def test_rate_and_distance_deterministics_add_no_density_factors() -> None:
-    """Deterministic sites carry no log density, so they cannot bias a ratio."""
-    with_rate = (
-        mock_population_model().evaluate(POPULATION_PARAMS, sample_values()).log_prob
-    )
-    without_rate_params = {
-        name: value
-        for name, value in POPULATION_PARAMS.items()
-        if name != "local_merger_rate"
-    }
-    without_rate = (
-        mock_population_model().evaluate(without_rate_params, sample_values()).log_prob
-    )
-    # The source table now carries the absolute rate, so renormalizing the
-    # differently scaled table can differ by a machine ulp.
-    np.testing.assert_allclose(with_rate, without_rate, rtol=0.0, atol=1e-14)
-
-
 def test_derived_columns_match_the_declared_transforms() -> None:
     values = sample_values()
-    columns = derived_columns(mock_population_model(), POPULATION_PARAMS, values)
+    columns = derived_columns(mock_population_model().source, POPULATION_PARAMS, values)
     one_plus_z = 1.0 + SAMPLE_REDSHIFTS
     np.testing.assert_array_equal(
         columns["detector_frame_mass_1"], values["source_frame_mass_1"] * one_plus_z
@@ -314,9 +330,10 @@ def test_derived_columns_match_the_declared_transforms() -> None:
         columns["detector_frame_mass_2"], values["source_frame_mass_2"] * one_plus_z
     )
     np.testing.assert_array_equal(columns["inclination"], jnp.zeros_like(one_plus_z))
-    # The population-level rate has no sample axis and is deliberately not a
-    # source column: it is recomputed from the model, where a stored copy would
-    # be stale after a redshift window is narrowed.
+    # The population-level rate is declared by the rate model, outside the
+    # plate the source model draws inside: it can never appear in the source
+    # model's own returned mapping (see SourceModel.__call__'s reserved-name
+    # check).
     assert TOTAL_MERGER_RATE_SITE not in columns
 
 
@@ -358,7 +375,9 @@ def test_modified_propagation_reduces_exactly_to_the_cosmological_model() -> Non
 def test_density_selection_preserves_supplied_values_and_deterministics() -> None:
     values = sample_values()
     model = mock_population_model()
-    selected = replace(model, density_sites=("redshift", "spin_1z"))
+    selected = replace(
+        model, source=replace(model.source, density_sites=("redshift", "spin_1z"))
+    )
     trace = model.evaluate(POPULATION_PARAMS, values)
     selected_trace = selected.evaluate(POPULATION_PARAMS, values)
     expected_spin = dist.Uniform(-0.05, 0.05).log_prob(values["spin_1z"])
@@ -369,12 +388,10 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
     np.testing.assert_array_equal(
         trace.luminosity_distance, selected_trace.luminosity_distance
     )
-    assert trace.total_merger_rate is not None
-    assert selected_trace.total_merger_rate is not None
     np.testing.assert_array_equal(
         trace.total_merger_rate, selected_trace.total_merger_rate
     )
-    raw = selected.trace(POPULATION_PARAMS, values)
+    raw = selected.source.trace(POPULATION_PARAMS, values)
     np.testing.assert_array_equal(
         raw["detector_frame_mass_1"]["value"],
         values["source_frame_mass_1"] * (1 + values["redshift"]),
@@ -383,7 +400,8 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
 
 def test_empty_density_selection_returns_scalar_zero() -> None:
     values = sample_values()
-    empty = replace(mock_population_model(), density_sites=())
+    model = mock_population_model()
+    empty = replace(model, source=replace(model.source, density_sites=()))
     trace = empty.evaluate(POPULATION_PARAMS, values)
     assert trace.log_prob.shape == ()
     assert float(trace.log_prob) == 0.0
@@ -465,7 +483,7 @@ def _redshift_log_density(
     redshift: ArrayLike,
 ) -> jax.Array:
     with handlers.block(), handlers.seed(rng_seed=0):
-        trace = handlers.trace(model).get_trace(params)
+        trace = handlers.trace(model.source).get_trace(params)
     site = trace.get(REDSHIFT_SITE)
     if site is None or site["type"] != "sample":
         raise ValueError(
@@ -535,15 +553,13 @@ def test_uniform_mixture_rejects_an_out_of_range_fraction(fraction: float) -> No
 # Generation
 # --------------------------------------------------------------------------- #
 def test_generation_is_reproducible() -> None:
-    first = mock_population_model().sample(
+    first = mock_population_model().source.sample(
         jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=32
     )
-    second = mock_population_model().sample(
+    second = mock_population_model().source.sample(
         jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=32
     )
-    assert set(first) == STOCHASTIC_SITES | (
-        DETERMINISTIC_SITES - {TOTAL_MERGER_RATE_SITE}
-    )
+    assert set(first) == STOCHASTIC_SITES | DETERMINISTIC_SITES
     for name in first:
         np.testing.assert_array_equal(first[name], second[name])
 
@@ -555,10 +571,10 @@ def test_a_smaller_catalog_is_a_prefix_of_a_larger_one() -> None:
     prefix stability is a property of the installed JAX rather than something
     the API promises, so it is checked here rather than assumed.
     """
-    small = mock_population_model().sample(
+    small = mock_population_model().source.sample(
         jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=16
     )
-    large = mock_population_model().sample(
+    large = mock_population_model().source.sample(
         jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=64
     )
     for name, values in small.items():
@@ -573,18 +589,18 @@ def test_stored_columns_are_bit_identical_to_a_later_recomputation() -> None:
     batched pass rather than from ``Predictive`` is what removes that
     difference.
     """
-    samples = mock_population_model().sample(
+    samples = mock_population_model().source.sample(
         jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=32
     )
     stochastic = {name: samples[name] for name in STOCHASTIC_SITES}
-    trace = mock_population_model().trace(POPULATION_PARAMS, stochastic)
-    for name in DETERMINISTIC_SITES - {TOTAL_MERGER_RATE_SITE}:
+    trace = mock_population_model().source.trace(POPULATION_PARAMS, stochastic)
+    for name in DETERMINISTIC_SITES:
         np.testing.assert_array_equal(samples[name], trace[name]["value"])
 
 
 def test_generation_rejects_a_non_positive_sample_count() -> None:
     with pytest.raises(ValueError, match="num_samples must be positive"):
-        mock_population_model().sample(
+        mock_population_model().source.sample(
             jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=0
         )
 
@@ -608,12 +624,12 @@ def test_evaluation_traces_under_jit_and_vmaps_over_hyperparameters() -> None:
 
 
 def test_sampling_is_jittable_and_isolated_from_outer_handlers() -> None:
-    model = mock_population_model()
+    model = mock_population_model().source
     sample = jax.jit(partial(model.sample, num_samples=8))
     with handlers.trace() as outer:
         sources = sample(jax.random.PRNGKey(7), POPULATION_PARAMS)
     assert outer == {}
-    assert set(sources) == set(model.source_sites)
+    assert set(sources) == STOCHASTIC_SITES | DETERMINISTIC_SITES
     assert sources["spin_1z"].shape == (8,)
     np.testing.assert_allclose(
         sources["detector_frame_mass_1"],
@@ -628,7 +644,7 @@ def test_sampling_is_jittable_and_isolated_from_outer_handlers() -> None:
 
 def test_sampling_and_derivation_are_isolated_without_jit() -> None:
     with handlers.trace() as outer:
-        mock_population_model().sample(
+        mock_population_model().source.sample(
             jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=8
         )
     assert outer == {}
@@ -684,7 +700,12 @@ def _gaussian_mixture_model(uniform_mixing_fraction: float) -> Population:
 
 
 def _mass_only(model: Population) -> Population:
-    return replace(model, density_sites=("source_frame_mass_1", "source_frame_mass_2"))
+    return replace(
+        model,
+        source=replace(
+            model.source, density_sites=("source_frame_mass_1", "source_frame_mass_2")
+        ),
+    )
 
 
 def test_gaussian_mass_density_matches_two_iid_normals_on_the_ordered_half_plane() -> (
@@ -721,14 +742,14 @@ def test_gaussian_mass_density_matches_two_iid_normals_on_the_ordered_half_plane
 
 
 def test_gaussian_draws_are_ordered_and_have_finite_self_density() -> None:
-    sources = _gaussian_population_model().sample(
+    sources = _gaussian_population_model().source.sample(
         jax.random.PRNGKey(7), GAUSSIAN_PARAMS, num_samples=64
     )
     np.testing.assert_array_equal(
         sources["source_frame_mass_1"] >= sources["source_frame_mass_2"],
         jnp.ones(64, dtype=bool),
     )
-    log_prob = _gaussian_population_model().log_prob(GAUSSIAN_PARAMS, sources)
+    log_prob = _gaussian_population_model().source.log_prob(GAUSSIAN_PARAMS, sources)
     assert np.all(np.isfinite(np.asarray(log_prob)))
 
 

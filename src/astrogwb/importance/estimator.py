@@ -43,7 +43,7 @@ from jax.typing import ArrayLike
 from astrogwb.gwb.spectral import AverageMode, spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.weights import importance_log_weights
-from astrogwb.populations import Population, PopulationTrace
+from astrogwb.populations import Population, PopulationEvaluation
 
 if TYPE_CHECKING:
     from astrogwb.catalog import Catalog
@@ -124,11 +124,11 @@ class SpectralDensityImportanceEstimator:
             name: jnp.asarray(value)
             for name, value in catalog.source_parameters.items()
         }
-        proposal_log_prob = generating_model.log_prob(
+        proposal_log_prob = generating_model.source.log_prob(
             generating_params, source_parameters
         )
-        target_included = set(target_model.density_sites)
-        proposal_included = set(generating_model.density_sites)
+        target_included = set(target_model.source.density_sites)
+        proposal_included = set(generating_model.source.density_sites)
         if target_included != proposal_included:
             raise ValueError(
                 "target and proposal populations must include the same source "
@@ -187,7 +187,7 @@ class SpectralDensityImportanceEstimator:
 
     def _log_weights_and_trace(
         self, params: Mapping[str, ArrayLike]
-    ) -> tuple[jax.Array, PopulationTrace]:
+    ) -> tuple[jax.Array, PopulationEvaluation]:
         """One model execution: the weights, and the trace holding its rate."""
         trace = self.model.evaluate(params, self.source_parameters)
         log_distance = jnp.log(trace.luminosity_distance)
@@ -204,12 +204,6 @@ class SpectralDensityImportanceEstimator:
     ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
         """Return the spectrum, total merger rate, and relative importance ESS."""
         log_weights, trace = self._log_weights_and_trace(params)
-        if trace.total_merger_rate is None:
-            raise ValueError(
-                "target population declares no total_merger_rate site: params "
-                "must carry the physical rate parameter for a spectrum, unlike "
-                "for a bare proposal density"
-            )
         total_merger_rate = trace.total_merger_rate
         prediction = spectral_density(
             self.polarization_power,

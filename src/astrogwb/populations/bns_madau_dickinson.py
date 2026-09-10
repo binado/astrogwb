@@ -8,6 +8,15 @@ except the mass sites and the ``luminosity_distance`` deterministic is declared
 once, by :func:`_declare_bns_madau_dickinson`, so the variants cannot disagree
 about the source density they share.
 
+Each variant is registered as a *source* model: it declares sites and returns
+the mapping that defines the source-output set, with no notion of a physical
+rate. The rate lives in :func:`madau_dickinson_total_merger_rate`, registered
+separately as the *merger-rate* model every variant here pairs with by
+default (see ``register_recipe`` at the bottom). Splitting the two is what
+lets a guard-mixture *redshift law* pair with the same Madau-Dickinson *rate*
+the physical population uses, without executing the whole source model just
+to read one scalar.
+
 The declaration is a NumPyro model, and that is the whole point of it:
 
 - **Sample sites are exactly the columns a catalog stores.** Density
@@ -22,9 +31,9 @@ The declaration is a NumPyro model, and that is the whole point of it:
   them on the way back in. Here they are recomputed from the substituted
   stochastic values on every evaluation, so a catalog whose columns drifted
   from its declared population fails on load.
-- **Distance and rate come from the same execution as the density.** One model
-  run supplies the ``(N,)`` source log density, the ``(N,)`` distance governing
-  waveform amplitude, and the scalar observer-frame rate.
+- **Distance comes from the same execution as the density.** One source-model
+  run supplies the ``(N,)`` source log density and the ``(N,)`` distance
+  governing waveform amplitude; the rate is a separate, unplated execution.
 
 The component masses are an ordered pair: the first mass is the larger one.
 Both mass sites are included in importance weighting. Two mass laws are
@@ -62,11 +71,14 @@ from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
 )
-from astrogwb.populations.registry import register_population_model
+from astrogwb.populations.registry import (
+    register_merger_rate_model,
+    register_recipe,
+    register_source_model,
+)
 
 __all__ = [
     "AMPLITUDE_PARAMETERS",
-    "SOURCE_SITES",
     "amplitude_H0_fn",
     "amplitude_local_merger_rate_fn",
     "bns_md_cosmological",
@@ -75,6 +87,7 @@ __all__ = [
     "bns_md_gaussian_uniform_mixture",
     "bns_md_modified_propagation",
     "bns_md_uniform_mixture",
+    "madau_dickinson_total_merger_rate",
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
 ]
@@ -122,25 +135,6 @@ SPIN_MAGNITUDE = 0.05
 #: Dimensionless tidal-deformability bounds.
 TIDAL_DEFORMABILITY_MAXIMUM = 2000.0
 
-#: Every sampled input needed to replay the model, plus selected deterministic
-#: outputs. Shared by every registered variant: they declare identical sites,
-#: differing in the mass law, the redshift law, and the propagation distance.
-SOURCE_SITES: tuple[str, ...] = (
-    "redshift",
-    "source_frame_mass_1",
-    "source_frame_mass_2",
-    "spin_1z",
-    "spin_2z",
-    "lambda_1",
-    "lambda_2",
-    "detector_frame_mass_1",
-    "detector_frame_mass_2",
-    "luminosity_distance",
-    "inclination",
-    "coa_phase",
-    "coa_time",
-)
-
 
 def _declare_ordered_uniform_masses(
     params: Mapping[str, ArrayLike],
@@ -184,18 +178,13 @@ def _declare_ordered_gaussian_masses(
 def _declare_bns_madau_dickinson(
     params: Mapping[str, ArrayLike],
     *,
-    z_min: float,
-    z_max: float,
-    n_grid: int,
     luminosity_distance: jax.Array,
     redshift: jax.Array,
-    redshift_distribution: RedshiftDistribution,
     declare_masses: Callable[
         [Mapping[str, ArrayLike]], tuple[jax.Array, jax.Array]
     ] = _declare_ordered_uniform_masses,
 ) -> dict[str, jax.Array]:
     """Declare every site the propagation and mass variants share."""
-    del z_min, z_max, n_grid
     mass_1, mass_2 = declare_masses(params)
     spin_1z = numpyro.sample("spin_1z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))
     spin_2z = numpyro.sample("spin_2z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))
@@ -240,14 +229,6 @@ def _declare_bns_madau_dickinson(
         "coa_phase": coa_phase,
         "coa_time": coa_time,
     }
-    # The physical rate is optional: a proposal density needs no rate, while a
-    # target or injection observation cannot be built without one. Declaring it
-    # conditionally is what lets one model serve both.
-    if "local_merger_rate" in params:
-        sources["total_merger_rate"] = numpyro.deterministic(
-            "total_merger_rate",
-            redshift_distribution.total_merger_rate(),
-        )
     return {name: jnp.asarray(values) for name, values in sources.items()}
 
 
@@ -265,34 +246,59 @@ def _redshift(
     return jnp.asarray(redshift), redshift_distribution
 
 
-@register_population_model("bns_md_cosmological", source_sites=SOURCE_SITES)
+@register_merger_rate_model("madau_dickinson")
+def madau_dickinson_total_merger_rate(
+    params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
+) -> jax.Array:
+    r"""Observer-frame total merger rate under the Madau-Dickinson rate shape.
+
+    ``params`` must carry ``H0``, ``Omega_m``, ``gamma``, ``kappa``, ``z_peak``
+    and ``local_merger_rate`` (in :math:`\mathrm{Gpc}^{-3}\,\mathrm{yr}^{-1}`).
+    ``local_merger_rate`` is required explicitly here rather than left to the
+    underlying rate shape's own ``params.get(..., 1.0)`` default: a
+    merger-rate model silently normalizing to an implicit 1.0 has no
+    meaningful use, so a missing physical rate fails at the model that owns
+    it rather than propagating a placeholder into a spectrum.
+    """
+    if "local_merger_rate" not in params:
+        raise ValueError(
+            "madau_dickinson_total_merger_rate requires "
+            "params['local_merger_rate'] (Gpc^-3 yr^-1): a merger-rate model "
+            "has no meaningful default rate"
+        )
+    redshift_distribution = MadauDickinsonRedshiftDistribution(
+        params=params,
+        minimum_redshift=z_min,
+        maximum_redshift=z_max,
+        n_grid=n_grid,
+    )
+    return redshift_distribution.total_merger_rate()
+
+
+@register_source_model("bns_md_cosmological")
 def bns_md_cosmological(
     params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
 ) -> dict[str, jax.Array]:
-    r"""BNS sources on a Madau-Dickinson rate, with standard GW propagation.
+    r"""BNS sources on a Madau-Dickinson redshift law, with standard GW propagation.
 
     ``params`` must carry ``H0``, ``Omega_m``, ``gamma``, ``kappa`` and
-    ``z_peak``; ``local_merger_rate`` (in :math:`\mathrm{Gpc}^{-3}\,
-    \mathrm{yr}^{-1}`) is additionally required for the ``total_merger_rate``
-    deterministic. ``z_min``, ``z_max`` and ``n_grid`` describe the grid the
+    ``z_peak``. ``z_min``, ``z_max`` and ``n_grid`` describe the grid the
     cosmology integrals and the redshift normalization run on; they are
-    construction settings, bound once and serialized with the catalog.
+    construction settings, bound once and serialized with the catalog. Pairs
+    with :func:`madau_dickinson_total_merger_rate` by default (see the
+    ``register_recipe`` call below).
     """
     redshift, redshift_distribution = _redshift(
         params, z_min=z_min, z_max=z_max, n_grid=n_grid
     )
     return _declare_bns_madau_dickinson(
         params,
-        z_min=z_min,
-        z_max=z_max,
-        n_grid=n_grid,
         redshift=redshift,
-        redshift_distribution=redshift_distribution,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift),
     )
 
 
-@register_population_model("bns_md_uniform_mixture", source_sites=SOURCE_SITES)
+@register_source_model("bns_md_uniform_mixture")
 def bns_md_uniform_mixture(
     params: Mapping[str, ArrayLike],
     *,
@@ -303,7 +309,7 @@ def bns_md_uniform_mixture(
 ) -> dict[str, jax.Array]:
     r"""A Madau-Dickinson redshift law blended with a uniform guard component.
 
-    A *proposal* population, not a physical one: mixing a fraction
+    A *proposal* source model, not a physical one: mixing a fraction
     :math:`\epsilon` of uniform-in-redshift draws into the Madau-Dickinson
     density fattens the tails, so reweighting to a target far from the
     generating parameters keeps a usable effective sample size instead of
@@ -312,9 +318,7 @@ def bns_md_uniform_mixture(
     Everything except the redshift law is the physical BNS population, and the
     ``luminosity_distance`` deterministic comes from the Madau-Dickinson
     component's cosmology -- the mixture changes which redshifts are drawn, not
-    how far away a source at a given redshift is. ``total_merger_rate`` is
-    declared only if ``local_merger_rate`` is supplied, and for a guard mixture
-    it usually should not be: a sampling density has no physical rate.
+    how far away a source at a given redshift is.
     """
     if not 0.0 <= uniform_mixing_fraction <= 1.0:
         raise ValueError(
@@ -336,16 +340,12 @@ def bns_md_uniform_mixture(
     redshift = jnp.asarray(numpyro.sample("redshift", mixture))
     return _declare_bns_madau_dickinson(
         params,
-        z_min=z_min,
-        z_max=z_max,
-        n_grid=n_grid,
         redshift=redshift,
-        redshift_distribution=redshift_distribution,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift),
     )
 
 
-@register_population_model("bns_md_modified_propagation", source_sites=SOURCE_SITES)
+@register_source_model("bns_md_modified_propagation")
 def bns_md_modified_propagation(
     params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
 ) -> dict[str, jax.Array]:
@@ -369,17 +369,13 @@ def bns_md_modified_propagation(
     )
     return _declare_bns_madau_dickinson(
         params,
-        z_min=z_min,
-        z_max=z_max,
-        n_grid=n_grid,
         redshift=redshift,
-        redshift_distribution=redshift_distribution,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift)
         * jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"])),
     )
 
 
-@register_population_model("bns_md_gaussian_cosmological", source_sites=SOURCE_SITES)
+@register_source_model("bns_md_gaussian_cosmological")
 def bns_md_gaussian_cosmological(
     params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
 ) -> dict[str, jax.Array]:
@@ -398,17 +394,13 @@ def bns_md_gaussian_cosmological(
     )
     return _declare_bns_madau_dickinson(
         params,
-        z_min=z_min,
-        z_max=z_max,
-        n_grid=n_grid,
         redshift=redshift,
-        redshift_distribution=redshift_distribution,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift),
         declare_masses=_declare_ordered_gaussian_masses,
     )
 
 
-@register_population_model("bns_md_gaussian_uniform_mixture", source_sites=SOURCE_SITES)
+@register_source_model("bns_md_gaussian_uniform_mixture")
 def bns_md_gaussian_uniform_mixture(
     params: Mapping[str, ArrayLike],
     *,
@@ -442,19 +434,13 @@ def bns_md_gaussian_uniform_mixture(
     redshift = jnp.asarray(numpyro.sample("redshift", mixture))
     return _declare_bns_madau_dickinson(
         params,
-        z_min=z_min,
-        z_max=z_max,
-        n_grid=n_grid,
         redshift=redshift,
-        redshift_distribution=redshift_distribution,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift),
         declare_masses=_declare_ordered_gaussian_masses,
     )
 
 
-@register_population_model(
-    "bns_md_gaussian_modified_propagation", source_sites=SOURCE_SITES
-)
+@register_source_model("bns_md_gaussian_modified_propagation")
 def bns_md_gaussian_modified_propagation(
     params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
 ) -> dict[str, jax.Array]:
@@ -469,12 +455,45 @@ def bns_md_gaussian_modified_propagation(
     )
     return _declare_bns_madau_dickinson(
         params,
-        z_min=z_min,
-        z_max=z_max,
-        n_grid=n_grid,
         redshift=redshift,
-        redshift_distribution=redshift_distribution,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift)
         * jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"])),
         declare_masses=_declare_ordered_gaussian_masses,
     )
+
+
+# The six previously-registered population names, kept as recipes pairing
+# each source model here with the Madau-Dickinson rate above -- the same
+# pairing every one of them used before the split. Catalog reconstruction,
+# the notebooks, and existing call sites that name one of these six keep
+# working unchanged.
+register_recipe(
+    "bns_md_cosmological",
+    source_model="bns_md_cosmological",
+    rate_model="madau_dickinson",
+)
+register_recipe(
+    "bns_md_uniform_mixture",
+    source_model="bns_md_uniform_mixture",
+    rate_model="madau_dickinson",
+)
+register_recipe(
+    "bns_md_modified_propagation",
+    source_model="bns_md_modified_propagation",
+    rate_model="madau_dickinson",
+)
+register_recipe(
+    "bns_md_gaussian_cosmological",
+    source_model="bns_md_gaussian_cosmological",
+    rate_model="madau_dickinson",
+)
+register_recipe(
+    "bns_md_gaussian_uniform_mixture",
+    source_model="bns_md_gaussian_uniform_mixture",
+    rate_model="madau_dickinson",
+)
+register_recipe(
+    "bns_md_gaussian_modified_propagation",
+    source_model="bns_md_gaussian_modified_propagation",
+    rate_model="madau_dickinson",
+)

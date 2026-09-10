@@ -1,11 +1,8 @@
 """Small paper-format catalog builders shared by tests.
 
 Test catalogs are *real* catalogs: they carry a registered population, and
-every derived column is computed by that population from the stochastic ones.
-That is not ceremony -- :meth:`Catalog.load` re-executes the recorded model and
-compares its derived columns against the file, so a hand-assembled catalog with
-invented distances would fail to load, exactly as a drifted production one
-would.
+every derived column is computed by that population from the stochastic ones,
+matching what any later evaluation recomputes from the stored samples.
 """
 
 from __future__ import annotations
@@ -17,12 +14,13 @@ import jax.numpy as jnp
 import numpy as np
 
 from astrogwb.catalog import Catalog
-from astrogwb.populations import build_population
+from astrogwb.populations import build_population, resolve_recipe
 from astrogwb.waveform import PolarizationPowerGenerator
 
 #: The population every fixture catalog is drawn from, matching what
 #: ``config/catalogs/base/population.toml`` commits.
 PAPER_MODEL = "bns_md_cosmological"
+PAPER_RATE_MODEL = "madau_dickinson"
 PAPER_MODEL_KWARGS: dict[str, float | int] = {
     "z_min": 0.0,
     "z_max": 20.0,
@@ -41,9 +39,13 @@ PAPER_POPULATION_PARAMS: dict[str, float] = {
 
 
 def _derived_columns(model, params, sources):
-    """Replay a population at fixed source values, returning declared outputs."""
+    """Replay a source model at fixed source values, returning declared outputs."""
     trace = model.trace(params, sources)
-    return {name: jnp.asarray(trace[name]["value"]) for name in model.source_sites}
+    return {
+        name: jnp.asarray(site["value"])
+        for name, site in trace.items()
+        if site["type"] in ("sample", "deterministic")
+    }
 
 
 def source_parameters(
@@ -60,7 +62,7 @@ def source_parameters(
     model = build_population(model_name, settings=model_kwargs or PAPER_MODEL_KWARGS)
     ones = np.ones_like(redshift)
     columns = _derived_columns(
-        model,
+        model.source,
         fiducials or PAPER_POPULATION_PARAMS,
         {
             "redshift": redshift,
@@ -123,6 +125,7 @@ def make_catalog(
             }
         )
 
+    source_model_name, rate_model_name = resolve_recipe(model_name)
     return Catalog(
         source_parameters=parameters,
         polarization_power=polarization_power,
@@ -136,7 +139,8 @@ def make_catalog(
             sampling_frequency=sampling_frequency,
             frequency_resolution=df,
         ),
-        _model_name=model_name,
+        _source_model_name=source_model_name,
+        _rate_model_name=rate_model_name,
         _model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
         _fiducials=dict(fiducials or PAPER_POPULATION_PARAMS),
         _density_sites=density_sites,

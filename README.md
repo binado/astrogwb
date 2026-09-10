@@ -63,7 +63,7 @@ import jax
 
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.populations import BNSMadauDickinson
+from astrogwb.populations import build_population
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 model_kwargs = {"z_min": 0.0, "z_max": 20.0, "n_grid": 4096}
@@ -75,8 +75,10 @@ params = {
     "z_peak": 1.84,
     "local_merger_rate": 770.0,
 }
-population = BNSMadauDickinson(**model_kwargs)
-source_parameters = population.sample(jax.random.PRNGKey(42), params, num_samples=1024)
+population = build_population("bns_md_cosmological", settings=model_kwargs)
+source_parameters = population.source.sample(
+    jax.random.PRNGKey(42), params, num_samples=1024
+)
 
 catalog = Catalog.from_generator(
     source_parameters,
@@ -89,10 +91,11 @@ catalog = Catalog.from_generator(
         sampling_frequency=4096.0,
         frequency_resolution=1.0,
     ),
-    model_name="bns_md_cosmological",
+    source_model_name="bns_md_cosmological",
+    rate_model_name="madau_dickinson",
     model_kwargs=model_kwargs,
     fiducials=params,
-    density_sites=population.density_sites,
+    density_sites=population.source.density_sites,
     seed=42,
 )
 catalog.save("catalog.h5")

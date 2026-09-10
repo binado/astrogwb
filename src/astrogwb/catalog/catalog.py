@@ -69,7 +69,8 @@ class Catalog:
     polarization_power: NDArray[Any]
     frequencies: NDArray[np.floating[Any]]
     waveform_metadata: PolarizationPowerGenerator
-    _model_name: str
+    _source_model_name: str
+    _rate_model_name: str
     _model_kwargs: Mapping[str, Any]
     _fiducials: Mapping[str, float]
     _density_sites: tuple[str, ...]
@@ -146,7 +147,8 @@ class Catalog:
         source_parameters: Mapping[str, ArrayLike],
         *,
         generator: PolarizationPowerGenerator,
-        model_name: str,
+        source_model_name: str,
+        rate_model_name: str,
         model_kwargs: Mapping[str, Any],
         fiducials: Mapping[str, float],
         density_sites: tuple[str, ...],
@@ -156,7 +158,7 @@ class Catalog:
 
         The population record is supplied rather than inferred: the caller ran
         the model to draw ``source_parameters``, so it is the only place that
-        knows which model and settings produced them. Frequencies come from
+        knows which models and settings produced them. Frequencies come from
         the same generator call as the power: that is the axis the backend
         actually produced, not a reconstruction from metadata.
         """
@@ -169,7 +171,8 @@ class Catalog:
             polarization_power=np.asarray(power),
             frequencies=np.asarray(frequencies),
             waveform_metadata=generator,
-            _model_name=model_name,
+            _source_model_name=source_model_name,
+            _rate_model_name=rate_model_name,
             _model_kwargs=model_kwargs,
             _fiducials=fiducials,
             _density_sites=density_sites,
@@ -180,9 +183,31 @@ class Catalog:
     # The recorded population
     # ----------------------------------------------------------------- #
     @property
+    def population_source_model_name(self) -> str:
+        """The registry key of the source model this catalog was drawn from."""
+        return self._source_model_name
+
+    @property
+    def population_rate_model_name(self) -> str:
+        """The registry key of the merger-rate model this catalog was drawn at."""
+        return self._rate_model_name
+
+    @property
     def population_model_name(self) -> str:
-        """The registry key of the model this catalog was drawn from."""
-        return self._model_name
+        """The recipe name pairing this catalog's (source, rate) models.
+
+        Best-effort: falls back to the source model's own name when the pair
+        is not one of the registered recipes -- an arbitrary pairing a run
+        config can express, which has no single legacy name. Kept for logging
+        and for callers that still compare against one of the historical
+        single names.
+        """
+        from astrogwb.populations import recipe_name
+
+        return (
+            recipe_name(self._source_model_name, self._rate_model_name)
+            or self._source_model_name
+        )
 
     @property
     def population_model_kwargs(self) -> Mapping[str, Any]:
@@ -212,7 +237,8 @@ class Catalog:
         fails here, listing what is registered.
         """
         return build_population(
-            self._model_name,
+            source_model=self._source_model_name,
+            rate_model=self._rate_model_name,
             settings=self._model_kwargs,
             density_sites=self._density_sites,
         )
@@ -255,7 +281,7 @@ class Catalog:
         ]
         if missing:
             raise ValueError(
-                f"population model {self._model_name!r} takes no {missing} "
+                f"population model {self._source_model_name!r} takes no {missing} "
                 "construction setting(s), so its redshift window cannot be narrowed"
             )
         generated_min = float(self._model_kwargs["z_min"])
@@ -292,13 +318,13 @@ class Catalog:
     # ----------------------------------------------------------------- #
     @classmethod
     def load(cls, path: str | Path) -> Self:
-        """Read a catalog file, validating its population record against its arrays.
+        """Read a catalog file, reconstructing and validating its population record.
 
-        Loading re-executes the recorded population at the stored stochastic
-        values and compares every derived column it declares -- detector-frame
-        masses, luminosity distance -- against what the file holds. A catalog
-        whose columns drifted from its declared population fails here rather
-        than producing a plausible, wrong spectrum.
+        Loading calls :meth:`get_population_model` once to verify the
+        recorded source and rate model names are still registered; it does
+        not re-execute the population or compare derived columns against the
+        stored arrays. A catalog whose columns have drifted from its declared
+        population is not caught here.
 
         Files written in older catalog formats are rejected; there is no
         compatibility reader.
@@ -310,9 +336,9 @@ class Catalog:
     def save(self, path: str | Path, *, compression: str | None = None) -> None:
         """Write source arrays, power, waveform metadata, and the population record.
 
-        The population travels as ``(registry name, construction kwargs,
-        generating parameters, density sites)``. Neither this nor
-        :meth:`load` serializes a Python callable.
+        The population travels as ``(source model name, rate model name,
+        construction kwargs, generating parameters, density sites)``. Neither
+        this nor :meth:`load` serializes a Python callable.
         """
         from astrogwb.catalog import _io
 

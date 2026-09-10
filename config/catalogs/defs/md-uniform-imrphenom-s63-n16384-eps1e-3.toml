@@ -9,14 +9,16 @@
 # block, plus a hand-written mixture log-density in the analysis layer.
 #
 # [population.params] is inherited whole from the base layer, `local_merger_rate`
-# included. The model does declare a `total_merger_rate` from it, but nothing
-# reads one off a proposal: a guard mixture is a sampling density, not a
-# physical population, and only the injection catalog's rate is an observation.
+# included. The paired rate model does compute a `total_merger_rate` from it,
+# but nothing reads one off a proposal: a guard mixture is a sampling density,
+# not a physical population, and only the injection catalog's rate is an
+# observation. `rate_model` is inherited unchanged from the base layer -- only
+# the redshift law (`source_model`) differs.
 num_samples = 16384
 seed = 63
 
 [population]
-model = "bns_md_uniform_mixture"
+source_model = "bns_md_uniform_mixture"
 
-[population.kwargs]
+[population.source_kwargs]
 uniform_mixing_fraction = 1e-3

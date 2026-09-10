@@ -32,7 +32,10 @@ from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.distributions.amplitude import AmplitudeConditional, quadrature_grid
 from astrogwb.gwb import AverageMode, spectral_density
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.populations.bns_madau_dickinson import bns_md_modified_propagation
+from astrogwb.populations.bns_madau_dickinson import (
+    bns_md_modified_propagation,
+    madau_dickinson_total_merger_rate,
+)
 from astrogwb.sampling import (
     SpectralDensityFn,
     amplitude_reconstruction_model,
@@ -231,11 +234,23 @@ def _importance_estimator(mode: AverageMode) -> SpectralDensityImportanceEstimat
     )
     target = mock_target_model()
 
-    def pinned_call(params: Mapping[str, ArrayLike], **settings: object) -> None:
+    def pinned_call(
+        params: Mapping[str, ArrayLike], **settings: object
+    ) -> Mapping[str, jax.Array]:
         """Take unsampled hyperparameters from the test's fixed fiducials."""
-        bns_md_modified_propagation({**FIDUCIALS, **params}, **settings)
+        return bns_md_modified_propagation({**FIDUCIALS, **params}, **settings)
 
-    pinned = replace(target, fn=pinned_call)
+    def pinned_rate_call(
+        params: Mapping[str, ArrayLike], **settings: object
+    ) -> jax.Array:
+        """The rate model needs the same pinning: it takes ``params`` independently."""
+        return madau_dickinson_total_merger_rate({**FIDUCIALS, **params}, **settings)
+
+    pinned = replace(
+        target,
+        source=replace(target.source, fn=pinned_call),
+        rate=replace(target.rate, fn=pinned_rate_call),
+    )
     return replace(estimator, model=pinned, average_mode=mode)
 
 
