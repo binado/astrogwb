@@ -217,9 +217,22 @@ def test_population_declares_its_source_outputs_and_density_factors() -> None:
 def test_population_call_returns_declared_source_sites() -> None:
     model = mock_population_model()
     sources = handlers.seed(model, 0)(POPULATION_PARAMS)
-    assert tuple(sources) == model.source_sites
-    for values in sources.values():
-        assert jnp.asarray(values).shape == ()
+    assert set(model.source_sites) <= set(sources)
+    assert sources["total_merger_rate"].shape == ()
+    for name in model.source_sites:
+        assert jnp.asarray(sources[name]).shape == ()
+
+
+def test_population_call_omits_rate_without_physical_rate() -> None:
+    model = mock_population_model()
+    without_rate = {
+        name: value
+        for name, value in POPULATION_PARAMS.items()
+        if name != "local_merger_rate"
+    }
+    sources = handlers.seed(model, 0)(without_rate)
+    assert "total_merger_rate" not in sources
+    assert set(model.source_sites) <= set(sources)
 
 
 def test_total_merger_rate_is_declared_only_with_a_physical_rate() -> None:

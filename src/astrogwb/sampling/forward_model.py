@@ -32,17 +32,21 @@ catalog of size ``N``, consumed with :class:`~numpyro.infer.Predictive` or
 ``jax.jit``. To draw a random :math:`N` first, sample it in Python and pass
 it as ``num_events``.
 
-Batching over the *event* axis is the memory-safe counterpart of mapping a
-per-source :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate`.
-That would stack an ``(N, F)`` result -- the OOM the batching exists to
-avoid -- and would vmap the scalar waveform under the plate. The plated
-population already returns ``(N,)`` arrays; each step calls
-``generate_batch`` on a catalog chunk and returns the ``(F,)`` sum. Full
-batches of ``batch_size`` are reduced in a Python loop (static under JIT);
-a static remainder (``num_events % batch_size``) is a separate generate.
+The plated population already returns ``(N,)`` arrays, passed as a dict
+to :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate_batch`.
+Mapping per-source :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate`
+would stack ``(N, F)`` -- the OOM the batching exists to avoid -- not because
+of a vmap-inside-plate problem. Full batches of ``batch_size`` are reduced
+in a Python loop (static under JIT); a static remainder
+(``num_events % batch_size``) is a separate generate.
 
-Ripple's batch backend is the production waveform. Warm it (one generate)
-before reading ``generator.frequencies`` on an empty catalog::
+:class:`~astrogwb.waveform.AnalyticInspiralGenerator` is JAX-native and a
+valid ``jax.jit`` / ``Predictive(num_samples>1)`` target. Ripple's
+``generate_fd_polarizations_batch`` is a ``vmap``, but
+``RippleBackend._resolve_batch`` still does host ``bool`` / ``numpy``
+conversions, so a traced Ripple call fails there. Draw Ripple catalogs
+eagerly. Warm Ripple (one generate) before reading
+``generator.frequencies`` on an empty catalog::
 
     from functools import partial
 
@@ -50,19 +54,17 @@ before reading ``generator.frequencies`` on an empty catalog::
 
     from astrogwb.sampling import gwb_forward_model
 
-    simulate = jax.jit(
-        Predictive(
-            partial(
-                gwb_forward_model,
-                population=population,
-                generator=generator,
-                observation_time=1.0,
-                batch_size=1024,
-                num_events=10_000,
-            ),
-            num_samples=1,
-            return_sites=("spectral_density", "n_events", "total_merger_rate"),
-        )
+    simulate = Predictive(
+        partial(
+            gwb_forward_model,
+            population=population,
+            generator=generator,
+            observation_time=1.0,
+            batch_size=1024,
+            num_events=10_000,
+        ),
+        num_samples=1,
+        return_sites=("spectral_density", "n_events", "total_merger_rate"),
     )
     draws = simulate(jax.random.key(0), params)
 """
@@ -115,15 +117,14 @@ def _population_total_merger_rate(
 ) -> jax.Array:
     """Observer-frame rate at ``params``, without consuming the outer RNG."""
     with handlers.block():
-        trace = handlers.trace(handlers.seed(population, 0)).get_trace(params)
-    if _TOTAL_MERGER_RATE_SITE not in trace:
+        sources = handlers.seed(population, 0)(params)
+    if _TOTAL_MERGER_RATE_SITE not in sources:
         raise ValueError(
             "population declares no total_merger_rate site: params must carry "
             "the physical rate parameter (typically local_merger_rate) for a "
             "forward spectrum"
         )
-    rate = jnp.asarray(trace[_TOTAL_MERGER_RATE_SITE]["value"])
-    return jnp.reshape(rate, ())
+    return jnp.reshape(jnp.asarray(sources[_TOTAL_MERGER_RATE_SITE]), ())
 
 
 def _draw_sources(
@@ -140,7 +141,8 @@ def _draw_sources(
         numpyro.plate("events", num_events),
         handlers.block(hide=[_TOTAL_MERGER_RATE_SITE]),
     ):
-        return dict(population(params))
+        sources = dict(population(params))
+    return {name: sources[name] for name in population.source_sites}
 
 
 def _batch_power_sum(

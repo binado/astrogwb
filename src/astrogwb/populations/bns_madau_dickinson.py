@@ -225,33 +225,30 @@ def _declare_bns_madau_dickinson(
     coa_phase = numpyro.deterministic("coa_phase", zeros)
     coa_time = numpyro.deterministic("coa_time", zeros)
 
+    sources = {
+        "redshift": redshift,
+        "source_frame_mass_1": mass_1,
+        "source_frame_mass_2": mass_2,
+        "spin_1z": spin_1z,
+        "spin_2z": spin_2z,
+        "lambda_1": lambda_1,
+        "lambda_2": lambda_2,
+        "detector_frame_mass_1": detector_frame_mass_1,
+        "detector_frame_mass_2": detector_frame_mass_2,
+        "luminosity_distance": declared_luminosity_distance,
+        "inclination": inclination,
+        "coa_phase": coa_phase,
+        "coa_time": coa_time,
+    }
     # The physical rate is optional: a proposal density needs no rate, while a
     # target or injection observation cannot be built without one. Declaring it
     # conditionally is what lets one model serve both.
     if "local_merger_rate" in params:
-        numpyro.deterministic(
+        sources["total_merger_rate"] = numpyro.deterministic(
             "total_merger_rate",
             redshift_distribution.total_merger_rate(),
         )
-
-    return {
-        name: jnp.asarray(values)
-        for name, values in {
-            "redshift": redshift,
-            "source_frame_mass_1": mass_1,
-            "source_frame_mass_2": mass_2,
-            "spin_1z": spin_1z,
-            "spin_2z": spin_2z,
-            "lambda_1": lambda_1,
-            "lambda_2": lambda_2,
-            "detector_frame_mass_1": detector_frame_mass_1,
-            "detector_frame_mass_2": detector_frame_mass_2,
-            "luminosity_distance": declared_luminosity_distance,
-            "inclination": inclination,
-            "coa_phase": coa_phase,
-            "coa_time": coa_time,
-        }.items()
-    }
+    return {name: jnp.asarray(values) for name, values in sources.items()}
 
 
 def _redshift(

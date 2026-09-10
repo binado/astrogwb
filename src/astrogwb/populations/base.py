@@ -16,8 +16,9 @@ from numpyro.infer.util import compute_log_probs
 
 #: A registered population: a plain NumPyro model taking the sampled
 #: hyperparameters and the model's own construction settings as keywords.
-#: The model declares sites as a side effect and returns those source arrays
-#: so callers can pass them to a waveform generator without scraping a trace.
+#: The model declares sites as a side effect and returns those arrays
+#: (source columns plus optional extras such as ``total_merger_rate``)
+#: so callers can pass them on without scraping a trace.
 type PopulationFn = Callable[..., Mapping[str, jax.Array]]
 
 #: The raw NumPyro trace escape hatch -- every site, untyped. Only
@@ -25,8 +26,9 @@ type PopulationFn = Callable[..., Mapping[str, jax.Array]]
 #: the typed :class:`PopulationTrace` instead.
 type RawPopulationTrace = Mapping[str, Mapping[str, Any]]
 
-#: Deterministic sites every registered population declares. Private: nothing
-#: outside this module indexes a trace by these names any more.
+#: Deterministic sites every registered population declares. Private: density
+#: evaluation still reads these from a replay trace; generation reads them
+#: from the model's return value.
 _LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
 _TOTAL_MERGER_RATE_SITE = "total_merger_rate"
 
@@ -78,9 +80,14 @@ class Population:
         object.__setattr__(self, "source_sites", tuple(self.source_sites))
 
     def __call__(self, params: Mapping[str, ArrayLike]) -> dict[str, jax.Array]:
-        """Declare source sites and return them as arrays for this execution."""
+        """Declare sites and return this execution's arrays, including extras.
+
+        ``source_sites`` are always present. The inner model may also return
+        scalars such as ``total_merger_rate`` so callers can use the values
+        without scraping a NumPyro trace.
+        """
         sources = self.fn(params, **dict(self.settings))
-        return {name: jnp.asarray(sources[name]) for name in self.source_sites}
+        return {name: jnp.asarray(value) for name, value in sources.items()}
 
     def sample(
         self,
