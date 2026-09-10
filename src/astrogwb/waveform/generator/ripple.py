@@ -20,25 +20,6 @@ __all__ = ["RippleGenerator"]
 
 logger = logging.getLogger(__name__)
 
-#: Canonical names the scalar Ripple backend accepts. Other population columns
-#: (redshift, source-frame masses, ``coa_time``) are ignored, matching the
-#: batch path which only looks up these keys.
-_RIPPLE_SOURCE_KEYS: tuple[str, ...] = (
-    "detector_frame_mass_1",
-    "detector_frame_mass_2",
-    "luminosity_distance",
-    "inclination",
-    "coa_phase",
-    "spin_1x",
-    "spin_1y",
-    "spin_1z",
-    "spin_2x",
-    "spin_2y",
-    "spin_2z",
-    "lambda_1",
-    "lambda_2",
-)
-
 
 class RippleGenerator(PolarizationPowerGenerator):
     """Generate chunked polarization power with one fixed Ripple frequency grid."""
@@ -164,29 +145,6 @@ class RippleGenerator(PolarizationPowerGenerator):
         elif not bool(jnp.array_equal(self._frequencies_cache, masked_frequencies)):
             raise ValueError("Ripple chunks produced different frequency grids")
         return polarization_power(plus[:, mask], cross[:, mask])
-
-    def generate(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
-        """Generate power for a single source via the scalar Ripple backend."""
-        parameters = {
-            name: jnp.asarray(values) for name, values in source_parameters.items()
-        }
-        parameter_shape = array_dict_shape(parameters)
-        if parameter_shape not in ((), (1,)):
-            raise ValueError(
-                f"generate expects a single source; received shape {parameter_shape}"
-            )
-        scalars = {
-            name: float(jnp.reshape(parameters[name], ()))
-            for name in _RIPPLE_SOURCE_KEYS
-            if name in parameters
-        }
-        polarizations = self._backend.generate_fd_polarizations(
-            self.approximant,
-            sampling_frequency=self.sampling_frequency,
-            minimum_frequency=self.minimum_frequency,
-            **scalars,
-        )
-        return self._power_from_polarizations(polarizations)[:, 0]
 
     def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Generate power in ``(frequency, sample)`` layout, chunk by chunk."""

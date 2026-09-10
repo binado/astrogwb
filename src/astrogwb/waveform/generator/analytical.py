@@ -301,19 +301,6 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
             self.minimum_frequency, self.maximum_frequency, self.frequency_resolution
         )
 
-    def generate(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
-        power = self.generate_batch(
-            {
-                name: jnp.atleast_1d(jnp.asarray(values))
-                for name, values in source_parameters.items()
-            }
-        )
-        if power.shape[-1] != 1:
-            raise ValueError(
-                f"generate expects a single source; received {power.shape[-1]} events"
-            )
-        return power[:, 0]
-
     def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         prepared_parameters = {
             name: jnp.asarray(values) for name, values in source_parameters.items()

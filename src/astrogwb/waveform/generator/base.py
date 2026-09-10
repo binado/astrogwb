@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike
 
@@ -66,12 +67,23 @@ class PolarizationPowerGenerator:
             raise ValueError("frequency_resolution must be a finite positive scalar")
 
     def generate(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
-        """Generate power for a single source, shape ``(F,)``."""
-        del source_parameters
-        raise NotImplementedError(
-            "PolarizationPowerGenerator is a metadata-only descriptor; "
-            "use a concrete generator subclass"
+        """Generate power for a single source, shape ``(F,)``.
+
+        The default implementation wraps :meth:`generate_batch` around a
+        length-1 catalog. Concrete generators that cannot form a batch of one
+        should override this.
+        """
+        power = self.generate_batch(
+            {
+                name: jnp.atleast_1d(jnp.asarray(values))
+                for name, values in source_parameters.items()
+            }
         )
+        if power.shape[-1] != 1:
+            raise ValueError(
+                f"generate expects a single source; received {power.shape[-1]} events"
+            )
+        return power[:, 0]
 
     def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Generate power for a 1-D catalog, shape ``(F, N)``."""
