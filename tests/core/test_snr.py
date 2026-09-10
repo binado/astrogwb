@@ -8,6 +8,7 @@ from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import (
     spectral_snr,
     spectral_snr_squared,
+    spectral_snr_squared_per_bin,
 )
 from astrogwb.utils import years_to_seconds
 
@@ -38,6 +39,30 @@ def test_spectral_snr_squared_hand_computed() -> None:
     actual = spectral_snr_squared(sd, eff, observation_time_sec, df)
 
     np.testing.assert_allclose(np.asarray(actual), expected)
+
+
+def test_spectral_snr_squared_per_bin_matches_hand_computed_terms() -> None:
+    eff = jnp.array([2.0, 4.0, 6.0])
+    sd = jnp.array([0.2, 0.4, 0.6])
+    observation_time_sec = 5.0
+    df = 10.0
+
+    expected = 100.0 * (sd / eff) ** 2
+    actual = spectral_snr_squared_per_bin(sd, eff, observation_time_sec, df)
+
+    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
+
+
+def test_spectral_snr_squared_sums_per_bin_contributions() -> None:
+    eff = jnp.array([2.0, 4.0, 6.0])
+    sd = jnp.array([0.1, 0.2, 0.3])
+    observation_time_sec = 5.0
+    df = 10.0
+
+    per_bin = spectral_snr_squared_per_bin(sd, eff, observation_time_sec, df)
+    actual = spectral_snr_squared(sd, eff, observation_time_sec, df)
+
+    np.testing.assert_allclose(np.asarray(actual), np.asarray(jnp.sum(per_bin)))
 
 
 def test_spectral_snr_is_sqrt_of_spectral_snr_squared() -> None:
