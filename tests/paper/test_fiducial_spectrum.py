@@ -16,7 +16,7 @@ import pytest
 from repo import REPO_ROOT
 
 from astrogwb.detector import gaussian_bin_scale
-from astrogwb.paper.plotting import Network
+from astrogwb.paper.plotting import DETECTOR_NETWORKS, Network, detector_network_styles
 
 matplotlib = pytest.importorskip("matplotlib")
 
@@ -116,10 +116,29 @@ def test_overlay_and_snr_figures_have_expected_axes(
     assert sum(len(axis.lines) for axis in overlay.axes) == 3
     matplotlib.pyplot.close(overlay)
 
-    snr_fig = fiducial_spectrum.plot_snr_cumulative(freq, snr_squared, snr_lt, snr_gt)
+    networks = (
+        Network("ET-2L-aligned", "ET-2L-par", ("S1", "R1")),
+        Network("ET-2L-aligned-CE-Hanford", r"ET-2L-par $+$ CE", ("S1", "R1", "C1")),
+    )
+    colors, linestyles = detector_network_styles(networks)
+    quieter = fiducial_spectrum.snr_integrand_and_cumulative(
+        sh, 4.0 * seff, observation_time_sec=1.0e7, df=df
+    )
+    snr_fig = fiducial_spectrum.plot_snr_cumulative(
+        networks,
+        {networks[0].name: freq, networks[1].name: freq},
+        {networks[0].name: quieter[0], networks[1].name: snr_squared},
+        {networks[0].name: quieter[1], networks[1].name: snr_lt},
+        {networks[0].name: quieter[2], networks[1].name: snr_gt},
+        colors=colors,
+        linestyles=linestyles,
+    )
     assert isinstance(snr_fig, matplotlib.figure.Figure)
     assert len(snr_fig.axes) == 3
-    assert all(len(axis.lines) == 1 for axis in snr_fig.axes)
+    for axis in snr_fig.axes:
+        assert len(axis.lines) == 2
+        assert [line.get_color() for line in axis.lines] == colors
+        assert [line.get_linestyle() for line in axis.lines] == linestyles
     matplotlib.pyplot.close(snr_fig)
 
     combined = fiducial_spectrum.plot_spectrum_and_cumulative_snr(
@@ -129,3 +148,56 @@ def test_overlay_and_snr_figures_have_expected_axes(
     assert len(combined.axes) == 3
     assert sum(len(axis.lines) for axis in combined.axes) == 4
     matplotlib.pyplot.close(combined)
+
+
+def test_snr_cumulative_rejects_style_count_mismatch(
+    fiducial_spectrum: ModuleType,
+) -> None:
+    networks = (Network("ET-2L-aligned", "ET-2L-par", ("S1", "R1")),)
+    empty: dict[str, np.ndarray] = {}
+    with pytest.raises(ValueError, match="color and linestyle counts"):
+        fiducial_spectrum.plot_snr_cumulative(
+            networks,
+            empty,
+            empty,
+            empty,
+            empty,
+            colors=["#000000", "#ffffff"],
+            linestyles=["-"],
+        )
+
+
+def test_snr_cumulative_overlays_all_detector_networks(
+    fiducial_spectrum: ModuleType,
+) -> None:
+    freq, _omega, sh, seff, df = _synthetic_band(fiducial_spectrum)
+    networks = tuple(Network(name, label, ()) for name, label in DETECTOR_NETWORKS)
+    colors, linestyles = detector_network_styles(networks)
+    frequency_by_network: dict[str, np.ndarray] = {}
+    snr_squared_by_network: dict[str, np.ndarray] = {}
+    snr_lt_by_network: dict[str, np.ndarray] = {}
+    snr_gt_by_network: dict[str, np.ndarray] = {}
+    for index, network in enumerate(networks):
+        snr_squared, snr_lt, snr_gt = fiducial_spectrum.snr_integrand_and_cumulative(
+            sh, (1.0 + 0.5 * index) * seff, observation_time_sec=1.0e7, df=df
+        )
+        frequency_by_network[network.name] = freq
+        snr_squared_by_network[network.name] = snr_squared
+        snr_lt_by_network[network.name] = snr_lt
+        snr_gt_by_network[network.name] = snr_gt
+
+    snr_fig = fiducial_spectrum.plot_snr_cumulative(
+        networks,
+        frequency_by_network,
+        snr_squared_by_network,
+        snr_lt_by_network,
+        snr_gt_by_network,
+        colors=colors,
+        linestyles=linestyles,
+    )
+    assert len(snr_fig.axes) == 3
+    for axis in snr_fig.axes:
+        assert len(axis.lines) == len(networks)
+        assert [line.get_color() for line in axis.lines] == colors
+        assert [line.get_linestyle() for line in axis.lines] == linestyles
+    matplotlib.pyplot.close(snr_fig)
