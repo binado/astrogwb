@@ -9,6 +9,8 @@ a silent mismatch.
 
 from __future__ import annotations
 
+from repo import REPO_ROOT
+
 from astrogwb.paper.config.constants import (
     DEFAULT_NETWORK,
     FIDUCIALS,
@@ -42,3 +44,12 @@ def test_network_detectors_keys_match_detector_network_runs() -> None:
 def test_parameter_labels_keys_are_known_fiducials() -> None:
     """A label for a renamed/removed parameter would be exactly this failure mode."""
     assert set(PARAMETER_LABELS) <= set(FIDUCIALS)
+
+
+def test_cosmological_grid_notebook_priors_name_every_fiducial() -> None:
+    """``LogDensityFn`` pins non-gridded sites from ``FIDUCIALS`` keyed by ``PRIORS``."""
+    source = (REPO_ROOT / "notebooks/cosmological_parameters_grid.py").read_text(
+        encoding="utf-8"
+    )
+    missing = [name for name in FIDUCIALS if f'"{name}": dist.' not in source]
+    assert not missing, missing
