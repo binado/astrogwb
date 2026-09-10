@@ -1,4 +1,5 @@
 from .density import LogDensityFn
+from .forward_model import gwb_forward_model
 from .models import (
     amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
@@ -11,6 +12,7 @@ __all__ = [
     "SpectralDensityFn",
     "amplitude_reconstruction_model",
     "gwb_amplitude_marginalized_model",
+    "gwb_forward_model",
     "gwb_spectral_density_model",
     "with_renamed_diagnostics",
 ]
