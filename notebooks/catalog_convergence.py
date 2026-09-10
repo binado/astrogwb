@@ -317,7 +317,7 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
             maximum_frequency=f_max,
             reference_frequency=F_MIN,
             sampling_frequency=2.0 * f_max,
-            df=df,
+            frequency_resolution=df,
         ),
         model_name=POPULATION_MODEL,
         model_kwargs=POPULATION_MODEL_KWARGS,
@@ -338,7 +338,7 @@ def catalog_matches_configuration(catalog: Catalog, *, df: float, f_max: float) 
     """
     waveform = catalog.waveform_metadata
     return (
-        waveform.df == df
+        waveform.frequency_resolution == df
         and waveform.minimum_frequency == F_MIN
         and waveform.maximum_frequency == f_max
         and catalog.num_samples == NUM_SOURCES
@@ -382,7 +382,7 @@ def describe(catalog: Catalog) -> pd.Series:
             "seed": catalog.seed,
             "num_sources": catalog.num_samples,
             "num_frequencies": catalog.frequencies.size,
-            "df_hz": waveform.df,
+            "df_hz": catalog.df,
             "f_min_hz": waveform.minimum_frequency,
             "f_max_hz": waveform.maximum_frequency,
             "total_merger_rate_per_s": float(catalog_merger_rate(catalog)),

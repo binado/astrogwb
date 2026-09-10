@@ -91,7 +91,7 @@ def _waveform_metadata(num_frequencies: int) -> PolarizationPowerGenerator:
         maximum_frequency=10.0 + 2.0 * (num_frequencies - 1),
         reference_frequency=10.0,
         sampling_frequency=64.0,
-        df=2.0,
+        frequency_resolution=2.0,
     )
 
 

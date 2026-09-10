@@ -23,10 +23,9 @@ logger = logging.getLogger(__name__)
 class RippleGenerator(PolarizationPowerGenerator):
     """Generate chunked polarization power with one fixed Ripple frequency grid."""
 
-    __slots__ = ("_backend", "chunk_size", "frequency_resolution")
+    __slots__ = ("_backend", "chunk_size")
     _backend: RippleBackend
     chunk_size: int
-    frequency_resolution: float
 
     def __init__(
         self,
@@ -53,29 +52,24 @@ class RippleGenerator(PolarizationPowerGenerator):
         if not isinstance(chunk_size, int):
             raise TypeError("chunk_size must be an integer")
 
+        # astrogwb's own power-of-two rounding policy for the segment duration
+        # -- deliberate, and only ever makes the grid finer than asked. It no
+        # longer produces a spacing: Ripple's own rounding
+        # (`_next_smooth_even`, 5-smooth, not power-of-two) decides the actual
+        # frequency grid, so `n_samples` survives only as a feasibility guard.
         segment_duration = float(2.0 ** np.ceil(np.log2(1.0 / resolution)))
         n_samples = round(segment_duration * resolved_sampling_frequency)
         if n_samples <= 0:
             raise ValueError("sampling_frequency produces no Ripple samples")
-        effective_df = resolved_sampling_frequency / n_samples
 
-        minimum = float(minimum_frequency)
-        alignment = minimum / effective_df
-        tolerance = 64.0 * np.finfo(np.float64).eps * max(1.0, abs(alignment))
-        if not np.isclose(alignment, round(alignment), rtol=0.0, atol=tolerance):
-            raise ValueError(
-                "minimum_frequency must align with Ripple's effective frequency "
-                f"resolution ({effective_df} Hz)"
-            )
         super().__init__(
             approximant=approximant,
-            minimum_frequency=minimum,
+            minimum_frequency=minimum_frequency,
             maximum_frequency=maximum_frequency,
             reference_frequency=reference_frequency,
             sampling_frequency=resolved_sampling_frequency,
-            df=effective_df,
+            frequency_resolution=resolution,
         )
-        object.__setattr__(self, "frequency_resolution", resolution)
         object.__setattr__(self, "chunk_size", chunk_size)
         object.__setattr__(
             self,
@@ -97,6 +91,12 @@ class RippleGenerator(PolarizationPowerGenerator):
         axis is taken from the generated polarizations rather than recomputed
         here. ``segment_duration`` is pinned on ``_backend``, so every chunk
         lands on the same grid; a mismatch raises.
+
+        ``minimum_frequency`` alignment is checked here, against the grid
+        Ripple actually built, rather than at construction time: no
+        backend-independent check on ``minimum_frequency`` alone can predict
+        Ripple's 5-smooth ``n_samples`` without replicating the rule this
+        generator exists to delete.
         """
         parameters = {
             name: jnp.asarray(values) for name, values in source_parameters.items()
@@ -133,6 +133,30 @@ class RippleGenerator(PolarizationPowerGenerator):
             )
             masked_frequencies = chunk_frequencies[mask]
             if frequencies is None:
+                if masked_frequencies.size < 2:
+                    raise ValueError(
+                        "Ripple's in-band frequency grid has fewer than two "
+                        f"bins in [{self.minimum_frequency}, "
+                        f"{self.maximum_frequency}] Hz"
+                    )
+                # Not `==`: when `n_samples` is 5-smooth but not a power of
+                # two, `delta_f = fs / n_samples` is inexact in binary and
+                # `k * delta_f` need not reproduce `minimum_frequency` bit for
+                # bit even when the configuration is valid.
+                first_frequency = float(masked_frequencies[0])
+                tolerance = (
+                    64.0
+                    * np.finfo(np.float64).eps
+                    * max(1.0, abs(self.minimum_frequency), abs(first_frequency))
+                )
+                if not np.isclose(
+                    first_frequency, self.minimum_frequency, rtol=0.0, atol=tolerance
+                ):
+                    raise ValueError(
+                        f"minimum_frequency ({self.minimum_frequency} Hz) is not "
+                        "on Ripple's frequency grid; the nearest in-band bin is "
+                        f"{first_frequency} Hz"
+                    )
                 frequencies = masked_frequencies
             elif not bool(jnp.array_equal(frequencies, masked_frequencies)):
                 raise ValueError("Ripple chunks produced different frequency grids")

@@ -19,6 +19,11 @@ class PolarizationPowerGenerator:
     Concrete subclasses turn source parameters into a frequency axis and
     frequency-first polarization power. The base class is also used as a
     metadata-only descriptor when a persisted catalog is loaded.
+
+    ``frequency_resolution`` records what was *requested*; it is not
+    necessarily the realized bin width. The generating backend chooses the
+    actual grid, so the realized spacing belongs to the catalog it produces
+    (see ``Catalog.df``), not to this descriptor.
     """
 
     approximant: str
@@ -26,14 +31,16 @@ class PolarizationPowerGenerator:
     maximum_frequency: float
     reference_frequency: float
     sampling_frequency: float
-    df: float
+    frequency_resolution: float
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "minimum_frequency", float(self.minimum_frequency))
         object.__setattr__(self, "maximum_frequency", float(self.maximum_frequency))
         object.__setattr__(self, "reference_frequency", float(self.reference_frequency))
         object.__setattr__(self, "sampling_frequency", float(self.sampling_frequency))
-        object.__setattr__(self, "df", float(self.df))
+        object.__setattr__(
+            self, "frequency_resolution", float(self.frequency_resolution)
+        )
 
         settings = (
             self.minimum_frequency,
@@ -49,8 +56,11 @@ class PolarizationPowerGenerator:
             )
         if self.sampling_frequency <= 0.0:
             raise ValueError("sampling_frequency must be positive")
-        if not np.isfinite(self.df) or self.df <= 0.0:
-            raise ValueError("df must be a finite positive scalar")
+        if (
+            not np.isfinite(self.frequency_resolution)
+            or self.frequency_resolution <= 0.0
+        ):
+            raise ValueError("frequency_resolution must be a finite positive scalar")
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]

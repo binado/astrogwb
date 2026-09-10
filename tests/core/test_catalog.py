@@ -37,7 +37,7 @@ def _waveform_generator() -> PolarizationPowerGenerator:
         maximum_frequency=12.5,
         reference_frequency=11.0,
         sampling_frequency=64.0,
-        df=2.0,
+        frequency_resolution=2.0,
     )
 
 
@@ -84,12 +84,14 @@ def test_generator_includes_largest_in_band_bin(
         maximum_frequency=maximum_frequency,
         reference_frequency=10.0,
         sampling_frequency=64.0,
-        df=2.0,
+        frequency_resolution=2.0,
     )
 
     np.testing.assert_array_equal(
         uniform_frequency_grid(
-            generator.minimum_frequency, generator.maximum_frequency, generator.df
+            generator.minimum_frequency,
+            generator.maximum_frequency,
+            generator.frequency_resolution,
         ),
         expected,
     )
@@ -106,7 +108,7 @@ def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes
         maximum_frequency=12.0,
         reference_frequency=10.0,
         sampling_frequency=32.0,
-        df=2.0,
+        frequency_resolution=2.0,
     )
     catalog = Catalog.from_generator(
         source_parameters,
@@ -132,7 +134,7 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
         maximum_frequency=14.5,
         reference_frequency=10.0,
         sampling_frequency=32.0,
-        df=2.0,
+        frequency_resolution=2.0,
     )
 
     frequencies, actual = generator(source_parameters)
@@ -279,3 +281,60 @@ def test_restrict_redshift_rejects_an_empty_window() -> None:
     catalog = _catalog(np.array([0.5, 1.5]))
     with pytest.raises(ValueError, match="no samples"):
         catalog.restrict_redshift(5.0, 10.0)
+
+
+# --------------------------------------------------------------------------- #
+# Catalog.df: measured from the grid, not recorded from the descriptor
+# --------------------------------------------------------------------------- #
+def test_catalog_df_matches_the_generators_requested_resolution(
+    source_parameters: dict[str, np.ndarray],
+) -> None:
+    generator = AnalyticInspiralGenerator(
+        alpha=ISCO_ALPHA,
+        approximant="AnalyticInspiral",
+        minimum_frequency=10.0,
+        maximum_frequency=14.0,
+        reference_frequency=10.0,
+        sampling_frequency=32.0,
+        frequency_resolution=2.0,
+    )
+    catalog = Catalog.from_generator(
+        source_parameters,
+        generator=generator,
+        seed=42,
+        **POPULATION_RECORD,
+    )
+
+    assert catalog.df == 2.0
+
+
+def test_catalog_rejects_a_non_uniform_frequency_grid() -> None:
+    with pytest.raises(ValueError, match="not uniform"):
+        Catalog(
+            source_parameters={"redshift": np.array([0.1, 0.2, 0.3])},
+            polarization_power=np.ones((3, 3)),
+            frequencies=np.array([10.0, 12.0, 15.0]),
+            waveform_metadata=_waveform_generator(),
+            **CATALOG_DEFAULTS,
+        )
+
+
+def test_one_bin_catalog_constructs_but_df_has_no_answer() -> None:
+    """A one-bin catalog is a supported shape -- there is just no width to report."""
+    catalog = Catalog(
+        source_parameters={"redshift": np.array([0.1, 0.2])},
+        polarization_power=np.ones((1, 2)),
+        frequencies=np.array([10.0]),
+        waveform_metadata=_waveform_generator(),
+        **CATALOG_DEFAULTS,
+    )
+
+    with pytest.raises(ValueError, match="at least two bins"):
+        _ = catalog.df
+
+
+def test_restrict_redshift_leaves_df_unchanged() -> None:
+    catalog = _catalog(np.array([0.1, 0.5, 1.5, 19.0]))
+    restricted = catalog.restrict_redshift(0.3, 2.0)
+
+    assert restricted.df == catalog.df

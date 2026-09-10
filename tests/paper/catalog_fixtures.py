@@ -134,7 +134,7 @@ def make_catalog(
             maximum_frequency=minimum_frequency + df * (num_frequencies - 1),
             reference_frequency=reference_frequency,
             sampling_frequency=sampling_frequency,
-            df=df,
+            frequency_resolution=df,
         ),
         _model_name=model_name,
         _model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),

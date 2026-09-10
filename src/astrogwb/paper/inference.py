@@ -72,8 +72,8 @@ class Observation:
     """The observed-data side of a run: the fiducial injection spectrum.
 
     Arrays are pre-mask; ``frequency_mask`` selects the analysis band. ``df``
-    is the catalog's bin width and stays valid under the mask, which is why it
-    is carried here rather than measured off the masked grid.
+    is the catalog's grid-derived bin width and stays valid under the mask,
+    which is why it is carried here rather than measured off the masked grid.
     """
 
     frequencies: jax.Array
@@ -212,7 +212,7 @@ def prepare_observation(injection: Catalog, *, grid: AnalysisGrid) -> Observatio
     )
     return Observation(
         frequencies=frequencies,
-        df=float(restricted.waveform_metadata.df),
+        df=float(restricted.df),
         total_merger_rate=total_merger_rate,
         spectral_density=spectrum,
         frequency_mask=analysis_frequency_mask,
@@ -285,8 +285,8 @@ def prepare_inference_inputs(
     # `compute_effective_psd` returns inf wherever no detector pair contributes,
     # and Normal(loc, inf).log_prob is -inf -- a constant that kills NUTS with no
     # usable diagnostic. Drop those bins along with the out-of-band ones. This is
-    # safe precisely because `df` is the catalog's attribute: the surviving bins
-    # need not be contiguous, and each still has width `df`.
+    # safe precisely because `df` is the catalog's grid-derived property: the
+    # surviving bins need not be contiguous, and each still has width `df`.
     band_mask = (
         observation.frequency_mask
         & jnp.isfinite(effective_psd_arr)

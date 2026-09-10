@@ -32,6 +32,10 @@ WAVEFORM_ATTRS = (
     "sampling_frequency",
     "df",
 )
+#: Written on every save, but optional on read: older v5 files predate it, and
+#: for every file written so far it equals the ``df`` attribute (see
+#: ``waveform_metadata_from_file``).
+FREQUENCY_RESOLUTION_ATTR = "frequency_resolution"
 POPULATION_SEED_ATTR = "population_seed"
 POPULATION_NUM_SAMPLES_ATTR = "population_num_samples"
 MODEL_NAME_ATTR = "population_model"
@@ -75,7 +79,10 @@ def save_catalog(
         "maximum_frequency": waveform.maximum_frequency,
         "reference_frequency": waveform.reference_frequency,
         "sampling_frequency": waveform.sampling_frequency,
-        "df": waveform.df,
+        # Informational only, measured from the `frequency` dataset on write
+        # and never read back into a computation -- the dataset is the truth.
+        "df": catalog.df,
+        FREQUENCY_RESOLUTION_ATTR: waveform.frequency_resolution,
         POPULATION_SEED_ATTR: catalog.seed,
         POPULATION_NUM_SAMPLES_ATTR: catalog.num_samples,
         MODEL_NAME_ATTR: catalog.population_model_name,
@@ -208,6 +215,16 @@ def waveform_metadata_from_file(
         raise ValueError(
             f"{label}: missing waveform metadata attribute(s): {', '.join(missing)}"
         )
+    # `frequency_resolution` is additive: a pre-existing v5 file predates it,
+    # and falls back to `df`, since for every file written so far the two are
+    # equal. This is not a cross-check -- df is never read back into a
+    # computation -- just a reasonable default for an older file's *request*.
+    if FREQUENCY_RESOLUTION_ATTR in handle.attrs:
+        frequency_resolution = _scalar(
+            handle.attrs[FREQUENCY_RESOLUTION_ATTR], name=FREQUENCY_RESOLUTION_ATTR
+        )
+    else:
+        frequency_resolution = handle.attrs["df"]
     try:
         return PolarizationPowerGenerator(
             approximant=str(_scalar(handle.attrs["approximant"], name="approximant")),
@@ -223,7 +240,7 @@ def waveform_metadata_from_file(
             sampling_frequency=float(
                 _scalar(handle.attrs["sampling_frequency"], name="sampling_frequency")
             ),
-            df=float(_scalar(handle.attrs["df"], name="df")),
+            frequency_resolution=float(frequency_resolution),
         )
     except (TypeError, ValueError) as error:
         raise ValueError(f"{label}: invalid waveform metadata: {error}") from error

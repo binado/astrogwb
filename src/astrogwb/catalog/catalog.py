@@ -33,6 +33,7 @@ from typing import Any, Self
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from astrogwb.frequency import uniform_grid_spacing
 from astrogwb.populations import Population, build_population
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -98,6 +99,11 @@ class Catalog:
             raise ValueError(
                 "polarization_power frequency axis does not match catalog frequencies"
             )
+        if frequencies.size >= 2:
+            # Validation only, result discarded: a uniform grid is a catalog
+            # invariant, checked against itself rather than against a second
+            # record. Runs once per catalog, including every `load`.
+            uniform_grid_spacing(frequencies)
 
         parameters: dict[str, NDArray[Any]] = {}
         for name, values in self.source_parameters.items():
@@ -215,6 +221,19 @@ class Catalog:
     def num_samples(self) -> int:
         """The number of source samples in this catalog."""
         return int(self.polarization_power.shape[1])
+
+    @property
+    def df(self) -> float:
+        """The catalog's frequency bin width, measured from its own grid.
+
+        Measured, not recorded: the generating backend chooses the actual
+        grid (Ripple's rounding is 5-smooth, not power-of-two), so its
+        spacing is the only thing that can be right. What was *asked for*
+        lives on ``waveform_metadata.frequency_resolution``, and the two can
+        differ. Raises on a one-bin catalog, which is a supported shape --
+        there is no bin width to report.
+        """
+        return uniform_grid_spacing(self.frequencies)
 
     # ----------------------------------------------------------------- #
     # Transformations

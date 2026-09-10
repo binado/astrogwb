@@ -127,7 +127,7 @@ def _build_analysis_inputs(
     and mask out-of-band and non-finite bins.
     """
     frequencies = jnp.asarray(catalog.frequencies)
-    df = catalog.waveform_metadata.df
+    df = catalog.df
     polarization_power = jnp.asarray(catalog.polarization_power)
     samples = catalog_samples(catalog)
     num_sources = polarization_power.shape[1]

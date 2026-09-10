@@ -20,6 +20,11 @@ Coarsening by subsampling therefore holds the sources fixed and varies only
 ``FINE_DF`` is a negative power of two so that ``k * FINE_DF`` is exact in
 binary and the two grids agree bit for bit rather than to a tolerance.
 
+``Catalog.df`` now derives the bin width from the grid itself, so
+``_analysis_at``'s manual ``factor * FINE_DF`` is a deliberate exception, not
+an oversight: the subsampled grid it describes is not the catalog's own grid,
+so nothing can measure its width off a `Catalog`.
+
 The band stops at 256 Hz because that is where the signal is: with the ET
 effective PSD the SNR integrand is a peak a few hertz wide near 7 Hz, and
 99.9% of :math:`\rho^2` accumulates below 150 Hz. ``notebooks/catalog_convergence.py``
@@ -86,7 +91,7 @@ def fine_catalog(mock_population: dict[str, np.ndarray]) -> Catalog:
         num_sources=NUM_SOURCES,
         f_min=F_MIN,
         f_max=F_MAX,
-        df=FINE_DF,
+        frequency_resolution=FINE_DF,
     )
 
 
@@ -111,7 +116,7 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
             num_sources=NUM_SOURCES,
             f_min=F_MIN,
             f_max=F_MAX,
-            df=factor * FINE_DF,
+            frequency_resolution=factor * FINE_DF,
         )
         np.testing.assert_array_equal(
             fine_frequencies[::factor],

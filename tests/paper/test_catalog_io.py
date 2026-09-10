@@ -35,6 +35,7 @@ def test_hdf5_layout_metadata_and_order_round_trip(tmp_path: Path) -> None:
     np.testing.assert_array_equal(
         restored.polarization_power, catalog.polarization_power
     )
+    assert restored.df == catalog.df
 
 
 def test_compression_applies_to_arrays(tmp_path: Path) -> None:

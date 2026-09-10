@@ -219,12 +219,17 @@ weights with no shape error anywhere.
 then reconstructs the recorded population from the registry. It does not
 serialize a callable or require the analysis run configuration.
 
-The format is `astrogwb_catalog_v4`, a direct HDF5 file. Root attributes hold
+The format is `astrogwb_catalog_v5`, a direct HDF5 file. Root attributes hold
 the waveform and population metadata (JSON is used for mappings and ordered
 lists); `frequency`, `polarization_power`, and `source_parameters` are HDF5
 datasets. Earlier formats require regeneration. The recorded density-site and
 source-parameter order is preserved on load and when narrowing the redshift
 window.
+
+The waveform attributes record `frequency_resolution` -- what was *requested*
+of the generating backend -- while the bin width used in every integral is
+measured from the `frequency` dataset itself (`Catalog.df`); the backend
+chooses the actual grid, so the two can differ.
 
 ## What is *not* in the file: the analysis window
 

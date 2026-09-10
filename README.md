@@ -87,7 +87,7 @@ catalog = Catalog.from_generator(
         maximum_frequency=2048.0,
         reference_frequency=2.0,
         sampling_frequency=4096.0,
-        df=1.0,
+        frequency_resolution=1.0,
     ),
     model_name="bns_md_cosmological",
     model_kwargs=model_kwargs,

@@ -298,7 +298,7 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
     @property
     def frequencies(self) -> np.ndarray:
         return uniform_frequency_grid(
-            self.minimum_frequency, self.maximum_frequency, self.df
+            self.minimum_frequency, self.maximum_frequency, self.frequency_resolution
         )
 
     def __call__(

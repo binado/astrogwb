@@ -121,7 +121,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     catalog = Catalog.load(catalog_path)
     frequencies = jnp.asarray(catalog.frequencies)
-    df = float(catalog.waveform_metadata.df)
+    df = catalog.df
     polarization_power = jnp.asarray(catalog.polarization_power)
     del catalog
     n_freq, n_samples = polarization_power.shape
