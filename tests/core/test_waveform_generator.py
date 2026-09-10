@@ -83,9 +83,12 @@ def test_ripple_generator_owns_grid_and_reduces_chunked_power(
     ripple_generator: RippleGenerator,
 ) -> None:
     generator = ripple_generator
-    assert not hasattr(generator, "frequencies")
+    with pytest.raises(ValueError, match="has not generated yet"):
+        _ = generator.frequencies
 
     frequencies, power = generator(_ripple_sources())
+
+    np.testing.assert_array_equal(generator.frequencies, frequencies)
 
     assert frequencies[0] == 20.0
     assert frequencies[-1] == 100.0

@@ -34,10 +34,8 @@ def _generator() -> AnalyticInspiralGenerator:
         maximum_frequency=F_MAX,
         reference_frequency=F_MIN,
         sampling_frequency=128.0,
-        df=DF,
+        frequency_resolution=DF,
     )
-    # Warm the frequency cache outside JIT so a traced arange is never stored.
-    _ = generator.frequencies
     return generator
 
 
