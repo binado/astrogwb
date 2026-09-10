@@ -168,8 +168,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         definition.name,
         catalog.num_samples,
         catalog.frequencies.size,
-        float(catalog.frequencies[0]),
-        float(catalog.frequencies[-1]),
+        catalog.frequencies[0].item(),
+        catalog.frequencies[-1].item(),
         definition.waveform.approximant,
     )
     logger.info("Output written to %s", output_path)
