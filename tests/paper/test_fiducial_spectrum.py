@@ -10,10 +10,12 @@ import importlib.util
 import sys
 from types import ModuleType
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 from repo import REPO_ROOT
 
+from astrogwb.detector import gaussian_bin_scale
 from astrogwb.paper.plotting import Network
 
 matplotlib = pytest.importorskip("matplotlib")
@@ -101,13 +103,13 @@ def test_overlay_and_snr_figures_have_expected_axes(
         sh, seff, observation_time_sec=1.0e7, df=df
     )
 
-    overlay = fiducial_spectrum.plot_omega_sh_and_effective_psd(
+    overlay = fiducial_spectrum.plot_omega_sh_and_sigma(
         freq,
         omega,
         sh,
-        seff,
+        np.asarray(gaussian_bin_scale(jnp.asarray(seff), 1.0, float(df))),
         omega_gw_min=1.0e-15,
-        seff_label=r"$S_{\mathrm{eff}}$",
+        sigma_label=r"$\sigma$",
     )
     assert isinstance(overlay, matplotlib.figure.Figure)
     assert len(overlay.axes) == 2

@@ -426,8 +426,8 @@ rule fiducial_spectrum:
         effective_psd_pdf=(
             "outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf"
         ),
-        spectrum_psd_pdf=(
-            "outputs/figures/standalone/fiducial_spectrum_with_psd.pdf"
+        spectrum_sigma_pdf=(
+            "outputs/figures/standalone/fiducial_spectrum_with_sigma.pdf"
         ),
         snr_cumulative_pdf=(
             "outputs/figures/standalone/fiducial_snr_cumulative.pdf"
@@ -443,7 +443,7 @@ rule fiducial_spectrum:
         " --catalog {input.catalog:q}"
         " --output-pdf {output.spectrum_pdf:q}"
         " --output-effective-psd-pdf {output.effective_psd_pdf:q}"
-        " --output-spectrum-psd-pdf {output.spectrum_psd_pdf:q}"
+        " --output-spectrum-sigma-pdf {output.spectrum_sigma_pdf:q}"
         " --output-snr-cumulative-pdf {output.snr_cumulative_pdf:q}"
         " --output-spectrum-snr-pdf {output.spectrum_snr_pdf:q}"
 

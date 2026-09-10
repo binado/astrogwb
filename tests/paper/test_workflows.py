@@ -515,10 +515,12 @@ def test_standalone_figures_receive_config_paths(
     assert result.stdout.count("--network-run cosmological-parameters/") == len(
         DETECTOR_NETWORK_RUNS
     )
-    assert "--output-spectrum-psd-pdf" in result.stdout
+    assert "--output-spectrum-sigma-pdf" in result.stdout
     assert "--output-snr-cumulative-pdf" in result.stdout
     assert "--output-spectrum-snr-pdf" in result.stdout
-    assert "outputs/figures/standalone/fiducial_spectrum_with_psd.pdf" in result.stdout
+    assert (
+        "outputs/figures/standalone/fiducial_spectrum_with_sigma.pdf" in result.stdout
+    )
     assert "outputs/figures/standalone/fiducial_snr_cumulative.pdf" in result.stdout
     assert "outputs/figures/standalone/fiducial_spectrum_and_snr.pdf" in result.stdout
 

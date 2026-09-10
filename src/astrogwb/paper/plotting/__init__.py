@@ -14,7 +14,7 @@ Convention:
 - the network palette colors the detector-network comparison figures;
 - ``SPECTRUM`` / ``SPECTRUM_LINESTYLES`` style the fiducial dual-axis
   spectrum figure (black curves; dotted $S_h$, solid $\\Omega_{\\mathrm{GW}}$;
-  dashed $S_{\\mathrm{eff}}$ in the Okabe-Ito blue);
+  dashed $\\sigma$ in the Okabe-Ito blue);
 - ``combo_colors`` orders the per-parameter-combination marginal overlay;
 - ``detector_network_styles`` pairs each ET network with its ET+CE companion;
 - truth / fiducial markers are always neutral solid (``TRUTH``), everywhere.
@@ -127,17 +127,17 @@ CATEGORY: dict[str, str] = {
 }
 
 # Dual-axis style for the fiducial spectrum figure: $S_h$ and
-# $\Omega_{\mathrm{GW}}$ are black (dotted / solid); $S_{\mathrm{eff}}$ is
+# $\Omega_{\mathrm{GW}}$ are black (dotted / solid); $\sigma$ is
 # dashed Okabe-Ito blue so it is readable on the shared $S_h$ axis.
 SPECTRUM: dict[str, str] = {
     "omega_gw": "k",
     "sh": "k",
-    "seff": "#0072B2",
+    "sigma": "#0072B2",
 }
 SPECTRUM_LINESTYLES: dict[str, str] = {
     "omega_gw": "-",
     "sh": ":",
-    "seff": "--",
+    "sigma": "--",
 }
 
 # linewidth matches matplotlib's default lines.linewidth (and corner's truth
