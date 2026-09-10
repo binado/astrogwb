@@ -36,6 +36,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import ClassVar
 
 import jax
 import jax.numpy as jnp
@@ -292,6 +293,7 @@ def inspiral_polarization_power(
 class AnalyticInspiralGenerator(PolarizationPowerGenerator):
     """Generate inspiral-only polarization power on the descriptor grid."""
 
+    jax_native: ClassVar[bool] = True
     alpha: float
 
     @property

@@ -31,19 +31,21 @@ calls the generator once, and returns the masked ``(F,)`` sum.
 ``max_events`` is padded to a multiple of ``batch_size`` so that path has
 no remainder kernel.
 
-Under :func:`jax.jit` the reduction is :func:`jax.lax.map`, which compiles
-once per batch size. Eager execution (``Predictive`` without jit) uses a
-Python loop over those same batches so generators with host-side control
-flow -- Ripple's TaylorF2 path, which is what production catalogs use --
-see concrete arrays. ``jax.lax.map`` always traces its body, and that
-trace hits ``bool(jnp.any(...))`` inside ``gwmock_signal``.
+Under :func:`jax.jit` -- and under ``Predictive`` with more than one
+sample, which itself uses :func:`jax.lax.map` -- the reduction is
+:func:`jax.lax.map`. JAX-native generators (AnalyticInspiral) are called
+directly. Ripple is not a tracing target (``gwmock_signal`` uses host-side
+``bool`` checks), so those batches go through :func:`jax.pure_callback`.
+Ripple's frequency grid is only known after the first generate, so the
+callback needs a warmed generator. Eager single-trace execution uses a
+Python loop over the same batches and does not need that warmup.
 
 ``max_events`` sizes the source plate, so it is a Python integer (static
 under JIT). ``N`` itself stays a traced Poisson draw. For several Predictive
 draws the source sites have a fixed leading length and stack without
-``return_sites``; omitting them is still cheaper. A JAX-native generator
-(AnalyticInspiral) can wrap that Predictive in :func:`jax.jit`; Ripple
-must not -- use the same call without ``jit``::
+``return_sites``; omitting them is still cheaper. Warm a Ripple generator
+(one generate) before ``Predictive`` or :func:`jax.jit` so the host
+callback can size its result::
 
     from functools import partial
 
@@ -74,7 +76,9 @@ import math
 from collections.abc import Mapping
 
 import jax
+import jax.core
 import jax.numpy as jnp
+import numpy as np
 import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
@@ -166,13 +170,32 @@ def _is_traced(value: jax.Array) -> bool:
     return isinstance(value, jax.core.Tracer)
 
 
+def _generate_power(
+    generator: PolarizationPowerGenerator,
+    batch_sources: Mapping[str, jax.Array],
+) -> jax.Array:
+    """Evaluate the generator, using a host callback when tracing a non-JAX waveform."""
+    prototype = next(iter(batch_sources.values()))
+    if _is_traced(prototype) and not generator.jax_native:
+        n_chunk = prototype.shape[0]
+        result_shape = jax.ShapeDtypeStruct(
+            (generator.frequencies.shape[0], n_chunk), jnp.float64
+        )
+
+        def host_generate(batch: dict[str, np.ndarray]) -> np.ndarray:
+            return np.asarray(generator(batch), dtype=np.float64)
+
+        return jax.pure_callback(host_generate, result_shape, dict(batch_sources))
+    return jnp.asarray(generator(batch_sources))
+
+
 def _masked_batch_power(
     generator: PolarizationPowerGenerator,
     batch_sources: Mapping[str, jax.Array],
     batch_mask: jax.Array,
 ) -> jax.Array:
     """Call ``generator`` on one chunk and return the masked ``(F,)`` sum."""
-    power = jnp.asarray(generator(batch_sources))
+    power = _generate_power(generator, batch_sources)
     n_chunk = batch_mask.shape[0]
     if power.ndim != 2 or power.shape[-1] != n_chunk:
         raise ValueError(
@@ -194,7 +217,8 @@ def _sum_polarization_power(
     Each step receives ``batch_size`` sources, calls ``generator`` once, and
     returns an ``(F,)`` masked sum, so peak waveform memory is
     ``(F, batch_size)`` rather than ``(F, N)``. Frequency count is taken from
-    the generator output: Ripple only knows its grid after the first generate.
+    the generator output when running eagerly. Under a trace the host callback
+    for a non-JAX generator needs ``generator.frequencies`` already cached.
     """
     chunked, chunked_mask = _chunked_sources(sources, mask, batch_size=batch_size)
 

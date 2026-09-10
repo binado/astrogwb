@@ -46,9 +46,11 @@ def _ripple_generator(*, chunk_size: int) -> RippleGenerator:
     """TaylorF2 settings shared with :mod:`test_waveform_generator`.
 
     ``chunk_size`` is at least the forward-model ``batch_size`` so Ripple
-    does not chunk again inside each batched generate.
+    does not chunk again inside each batched generate. One generate warms
+    the frequency cache so ``Predictive`` (which traces via ``lax.map``)
+    can size the host callback.
     """
-    return RippleGenerator(
+    generator = RippleGenerator(
         approximant="TaylorF2",
         sampling_frequency=256.0,
         minimum_frequency=20.0,
@@ -57,6 +59,18 @@ def _ripple_generator(*, chunk_size: int) -> RippleGenerator:
         frequency_resolution=4.0,
         chunk_size=chunk_size,
     )
+    ones = jnp.ones((1,))
+    _ = generator(
+        {
+            "detector_frame_mass_1": 1.4 * ones,
+            "detector_frame_mass_2": 1.3 * ones,
+            "inclination": 0.0 * ones,
+            "luminosity_distance": 100.0 * ones,
+            "lambda_1": 400.0 * ones,
+            "lambda_2": 300.0 * ones,
+        }
+    )
+    return generator
 
 
 def _observation_time_for(expected_events: float) -> float:
@@ -392,8 +406,10 @@ def test_ripple_predictive_stacks_finite_spectrum() -> None:
         num_samples=2,
         return_sites=("spectral_density", "n_events", "total_merger_rate"),
     )(jax.random.key(1), POPULATION_PARAMS)
-    assert draws["spectral_density"].ndim == 2
-    assert draws["spectral_density"].shape[0] == 2
+    assert draws["spectral_density"].shape == (
+        2,
+        kwargs["generator"].frequencies.shape[0],
+    )
     assert draws["n_events"].shape == (2,)
     assert draws["total_merger_rate"].shape == (2,)
     assert bool(jnp.all(jnp.isfinite(draws["spectral_density"])))

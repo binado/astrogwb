@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import ClassVar
 
 import jax
 import numpy as np
@@ -24,8 +25,12 @@ class PolarizationPowerGenerator:
     necessarily the realized bin width. The generating backend chooses the
     actual grid, so the realized spacing belongs to the catalog it produces
     (see ``Catalog.df``), not to this descriptor.
+
+    ``jax_native`` is True when ``__call__`` is a valid JAX tracing target.
+    Ripple is not: its backend uses host-side ``bool`` checks.
     """
 
+    jax_native: ClassVar[bool] = False
     approximant: str
     minimum_frequency: float
     maximum_frequency: float
