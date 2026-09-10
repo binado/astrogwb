@@ -17,6 +17,7 @@ from typing import cast
 import jax
 import jax.numpy as jnp
 import numpy as np
+import numpyro.distributions as dist
 import pytest
 
 # The mock population's fiducials and grid, shared with `test_importance.py`:
@@ -29,6 +30,7 @@ from numpyro.distributions.transforms import biject_to
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.distributions.interpolated import InterpolatedDistribution
+from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
 from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
@@ -476,4 +478,77 @@ def test_total_merger_rate_scales_as_the_inverse_cube_of_the_hubble_constant() -
     h0 = FIDUCIALS["H0"]
     np.testing.assert_allclose(
         float(jax.grad(rate_at)(h0)), -3.0 * float(rate_at(h0)) / h0, rtol=1e-9
+    )
+
+
+# --------------------------------------------------------------------------- #
+# MaxOfTwoNormalsDistribution
+# --------------------------------------------------------------------------- #
+_MASS_MEAN = 1.33
+_MASS_SIGMA = 0.09
+_MASS_VALUES = jnp.array([1.1, 1.33, 1.5])
+_MASS_QUANTILES = jnp.array([0.1, 0.5, 0.9])
+
+
+def _max_of_two_normals() -> MaxOfTwoNormalsDistribution:
+    return MaxOfTwoNormalsDistribution(_MASS_MEAN, _MASS_SIGMA, validate_args=True)
+
+
+def test_max_of_two_normals_log_prob_matches_the_closed_form() -> None:
+    distribution = _max_of_two_normals()
+    component = dist.Normal(_MASS_MEAN, _MASS_SIGMA)
+    expected = (
+        jnp.log(2.0)
+        + component.log_prob(_MASS_VALUES)
+        + component.log_cdf(_MASS_VALUES)
+    )
+    np.testing.assert_allclose(
+        np.asarray(distribution.log_prob(_MASS_VALUES)),
+        np.asarray(expected),
+        rtol=0.0,
+        atol=0.0,
+    )
+
+
+def test_max_of_two_normals_icdf_matches_the_closed_form() -> None:
+    from jax.scipy.special import ndtri
+
+    distribution = _max_of_two_normals()
+    expected = _MASS_MEAN + _MASS_SIGMA * ndtri(jnp.sqrt(_MASS_QUANTILES))
+    np.testing.assert_allclose(
+        np.asarray(distribution.icdf(_MASS_QUANTILES)),
+        np.asarray(expected),
+        rtol=0.0,
+        atol=0.0,
+    )
+    np.testing.assert_allclose(
+        np.asarray(distribution.cdf(distribution.icdf(_MASS_QUANTILES))),
+        np.asarray(_MASS_QUANTILES),
+        rtol=1e-12,
+    )
+
+
+def test_max_of_two_normals_samples_are_the_max_of_two_standard_normals() -> None:
+    distribution = _max_of_two_normals()
+    key = jax.random.PRNGKey(0)
+    sample_shape = (32,)
+    eps = jax.random.normal(key, shape=(2,) + sample_shape)
+    np.testing.assert_array_equal(
+        distribution.sample(key, sample_shape=sample_shape),
+        _MASS_MEAN + _MASS_SIGMA * jnp.max(eps, axis=0),
+    )
+
+
+def test_max_of_two_normals_survives_jit_as_a_pytree_argument() -> None:
+    """Without flattening ``loc`` / ``scale`` / ``_normal``, ``jit`` would drop them."""
+    distribution = _max_of_two_normals()
+    fields = MaxOfTwoNormalsDistribution.gather_pytree_data_fields()
+    assert "loc" in fields
+    assert "scale" in fields
+    assert "_normal" in fields
+    jitted = jax.jit(lambda d, x: d.log_prob(x))(distribution, _MASS_VALUES)
+    np.testing.assert_allclose(
+        np.asarray(jitted),
+        np.asarray(distribution.log_prob(_MASS_VALUES)),
+        rtol=1e-14,
     )

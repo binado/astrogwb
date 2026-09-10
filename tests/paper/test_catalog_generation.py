@@ -41,6 +41,7 @@ z_peak = 1.84
 local_merger_rate = 770.0
 minimum_mass = 1.0
 mass_width = 1.5
+{extra_params}
 
 [waveform]
 approximant = "TaylorF2"
@@ -65,10 +66,15 @@ def generate_catalog():
     return module
 
 
-def _config(tmp_path: Path, *, model: str, extra_kwargs: str = "") -> Path:
+def _config(
+    tmp_path: Path, *, model: str, extra_kwargs: str = "", extra_params: str = ""
+) -> Path:
     path = tmp_path / "toy-catalog.toml"
     path.write_text(
-        CATALOG_TOML.format(model=model, extra_kwargs=extra_kwargs), encoding="utf-8"
+        CATALOG_TOML.format(
+            model=model, extra_kwargs=extra_kwargs, extra_params=extra_params
+        ),
+        encoding="utf-8",
     )
     return path
 
@@ -145,6 +151,29 @@ def test_the_guard_mixture_is_generated_from_its_declared_fraction(
     path = tmp_path / "guard.h5"
     catalog.save(path)
     assert Catalog.load(path).population_model_kwargs["uniform_mixing_fraction"] == 0.1
+
+
+@pytest.mark.integration
+def test_the_gaussian_mass_model_is_generated_from_its_declared_name(
+    generate_catalog, tmp_path: Path
+) -> None:
+    definition = generate_catalog.load_catalog_layers(
+        [
+            _config(
+                tmp_path,
+                model="bns_md_gaussian_cosmological",
+                extra_params="mass_mean = 1.33\nmass_sigma = 0.09",
+            )
+        ]
+    )
+    catalog = generate_catalog.build_catalog(definition)
+
+    assert catalog.population_model_name == "bns_md_gaussian_cosmological"
+    assert catalog.fiducials["mass_mean"] == 1.33
+    assert catalog.fiducials["mass_sigma"] == 0.09
+    path = tmp_path / "gaussian.h5"
+    catalog.save(path)
+    assert Catalog.load(path).population_model_name == "bns_md_gaussian_cosmological"
 
 
 def test_an_unregistered_model_fails_before_any_waveform_is_generated(

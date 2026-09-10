@@ -1,11 +1,12 @@
 r"""BNS population with a Madau-Dickinson merger-rate density.
 
-Two registered models live here rather than in two files because they are one
-population under two propagation laws: ``bns_md_modified_propagation`` reduces
-*exactly* to ``bns_md_cosmological`` at :math:`\Xi_0 = 1`. Everything except
-the ``luminosity_distance`` deterministic is declared once, by
-:func:`_declare_bns_madau_dickinson`, so the two can never disagree about the
-source density they share.
+Registered models live here rather than in several files because they are one
+population under two mass laws and two propagation laws.
+``bns_md_modified_propagation`` reduces *exactly* to ``bns_md_cosmological`` at
+:math:`\Xi_0 = 1`; the Gaussian-mass counterparts share that pair. Everything
+except the mass sites and the ``luminosity_distance`` deterministic is declared
+once, by :func:`_declare_bns_madau_dickinson`, so the variants cannot disagree
+about the source density they share.
 
 The declaration is a NumPyro model, and that is the whole point of it:
 
@@ -26,15 +27,28 @@ The declaration is a NumPyro model, and that is the whole point of it:
   waveform amplitude, and the scalar observer-frame rate.
 
 The component masses are an ordered pair: the first mass is the larger one.
-The required parameters are ``minimum_mass`` and ``mass_width``; the fiducial
-support is ``[1.0, 2.5]`` solar masses.
-Their conditional factorization has constant joint density ``2 / width**2``
-on the ordered triangle. Both mass sites are included in importance weighting.
+Both mass sites are included in importance weighting. Two mass laws are
+registered:
+
+- **Ordered uniforms** (``bns_md_cosmological`` and its variants). Parameters
+  ``minimum_mass`` and ``mass_width``; the fiducial support is ``[1.0, 2.5]``
+  solar masses. The conditional factorization has constant joint density
+  ``2 / width**2`` on the ordered triangle. That triangle is compact, so a
+  NUTS step that moves the edges can send catalog samples outside the
+  support and drop their importance weights to zero.
+- **Ordered Gaussians** (``bns_md_gaussian_cosmological`` and its variants).
+  Both components are i.i.d. :math:`\mathcal{N}(\mu, \sigma^2)`, then ordered;
+  the parameters are ``mass_mean`` and ``mass_sigma``. The joint density is
+  ``2\,\mathcal{N}(m_1)\,\mathcal{N}(m_2)`` on the half-plane ``m_1 \ge m_2``,
+  with no compact mass support. Moving :math:`(\mu, \sigma)` therefore never
+  sends an importance weight to zero, which is the property NUTS needs.
+  Galactic BNS masses motivate the shape (a Gaussian around
+  :math:`1.33\,M_\odot` with width :math:`\sim 0.09\,M_\odot`).
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 import jax
 import jax.numpy as jnp
@@ -43,6 +57,7 @@ import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
 from astrogwb.cosmology import log_gw_em_ratio
+from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
@@ -55,6 +70,9 @@ __all__ = [
     "amplitude_H0_fn",
     "amplitude_local_merger_rate_fn",
     "bns_md_cosmological",
+    "bns_md_gaussian_cosmological",
+    "bns_md_gaussian_modified_propagation",
+    "bns_md_gaussian_uniform_mixture",
     "bns_md_modified_propagation",
     "bns_md_uniform_mixture",
     "merger_rate_H0_fn",
@@ -105,8 +123,8 @@ SPIN_MAGNITUDE = 0.05
 TIDAL_DEFORMABILITY_MAXIMUM = 2000.0
 
 #: Every sampled input needed to replay the model, plus selected deterministic
-#: outputs. Shared by all three registered variants: they declare identical
-#: sites, differing only in the redshift law and the propagation distance.
+#: outputs. Shared by every registered variant: they declare identical sites,
+#: differing in the mass law, the redshift law, and the propagation distance.
 SOURCE_SITES: tuple[str, ...] = (
     "redshift",
     "source_frame_mass_1",
@@ -124,19 +142,10 @@ SOURCE_SITES: tuple[str, ...] = (
 )
 
 
-def _declare_bns_madau_dickinson(
+def _declare_ordered_uniform_masses(
     params: Mapping[str, ArrayLike],
-    *,
-    z_min: float,
-    z_max: float,
-    n_grid: int,
-    luminosity_distance: jax.Array,
-    redshift: jax.Array,
-    redshift_distribution: RedshiftDistribution,
-) -> None:
-    """Declare every site the two propagation variants share."""
-    del z_min, z_max, n_grid
-
+) -> tuple[jax.Array, jax.Array]:
+    """Ordered pair of i.i.d. uniforms on ``[minimum_mass, minimum_mass + width]``."""
     minimum_mass: jax.Array = jnp.asarray(params["minimum_mass"])
     mass_width: jax.Array = jnp.asarray(params["mass_width"])
     # For two ordered iid uniforms, Beta(2, 1) is the primary mass marginal.
@@ -152,6 +161,42 @@ def _declare_bns_madau_dickinson(
         "source_frame_mass_2",
         dist.Uniform(minimum_mass, mass_1, validate_args=True),
     )
+    return jnp.asarray(mass_1), jnp.asarray(mass_2)
+
+
+def _declare_ordered_gaussian_masses(
+    params: Mapping[str, ArrayLike],
+) -> tuple[jax.Array, jax.Array]:
+    """Ordered pair of i.i.d. ``Normal(mass_mean, mass_sigma)`` components."""
+    mass_mean: jax.Array = jnp.asarray(params["mass_mean"])
+    mass_sigma: jax.Array = jnp.asarray(params["mass_sigma"])
+    mass_1 = numpyro.sample(
+        "source_frame_mass_1",
+        MaxOfTwoNormalsDistribution(mass_mean, mass_sigma, validate_args=True),
+    )
+    mass_2 = numpyro.sample(
+        "source_frame_mass_2",
+        dist.TruncatedNormal(mass_mean, mass_sigma, high=mass_1, validate_args=True),
+    )
+    return jnp.asarray(mass_1), jnp.asarray(mass_2)
+
+
+def _declare_bns_madau_dickinson(
+    params: Mapping[str, ArrayLike],
+    *,
+    z_min: float,
+    z_max: float,
+    n_grid: int,
+    luminosity_distance: jax.Array,
+    redshift: jax.Array,
+    redshift_distribution: RedshiftDistribution,
+    declare_masses: Callable[
+        [Mapping[str, ArrayLike]], tuple[jax.Array, jax.Array]
+    ] = _declare_ordered_uniform_masses,
+) -> None:
+    """Declare every site the propagation and mass variants share."""
+    del z_min, z_max, n_grid
+    mass_1, mass_2 = declare_masses(params)
     numpyro.sample("spin_1z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))
     numpyro.sample("spin_2z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))
     numpyro.sample("lambda_1", dist.Uniform(0.0, TIDAL_DEFORMABILITY_MAXIMUM))
@@ -305,4 +350,105 @@ def bns_md_modified_propagation(
         redshift_distribution=redshift_distribution,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift)
         * jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"])),
+    )
+
+
+@register_population_model("bns_md_gaussian_cosmological", source_sites=SOURCE_SITES)
+def bns_md_gaussian_cosmological(
+    params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
+) -> None:
+    r"""As :func:`bns_md_cosmological`, with i.i.d. Gaussian component masses.
+
+    ``params`` must carry ``mass_mean`` and ``mass_sigma`` instead of
+    ``minimum_mass`` and ``mass_width``. Both components are drawn from
+    :math:`\mathcal{N}(\mu, \sigma^2)` and ordered so the first mass is the
+    larger one; the joint density ``2\,\mathcal{N}(m_1)\,\mathcal{N}(m_2)``
+    has support on the half-plane ``m_1 \ge m_2``. Moving :math:`(\mu, \sigma)`
+    therefore never sends an importance weight to zero, unlike the ordered
+    uniform triangle whose edges are a hard constraint on the hyperparameters.
+    """
+    redshift, redshift_distribution = _redshift(
+        params, z_min=z_min, z_max=z_max, n_grid=n_grid
+    )
+    _declare_bns_madau_dickinson(
+        params,
+        z_min=z_min,
+        z_max=z_max,
+        n_grid=n_grid,
+        redshift=redshift,
+        redshift_distribution=redshift_distribution,
+        luminosity_distance=redshift_distribution.luminosity_distance(redshift),
+        declare_masses=_declare_ordered_gaussian_masses,
+    )
+
+
+@register_population_model("bns_md_gaussian_uniform_mixture", source_sites=SOURCE_SITES)
+def bns_md_gaussian_uniform_mixture(
+    params: Mapping[str, ArrayLike],
+    *,
+    z_min: float,
+    z_max: float,
+    n_grid: int,
+    uniform_mixing_fraction: float,
+) -> None:
+    r"""As :func:`bns_md_uniform_mixture`, with i.i.d. Gaussian component masses.
+
+    The redshift law is the same uniform-guard mixture; only the mass sites
+    differ. ``params`` must carry ``mass_mean`` and ``mass_sigma``.
+    """
+    if not 0.0 <= uniform_mixing_fraction <= 1.0:
+        raise ValueError(
+            f"uniform_mixing_fraction must lie in [0, 1], got {uniform_mixing_fraction}"
+        )
+    redshift_distribution = MadauDickinsonRedshiftDistribution(
+        params=params,
+        minimum_redshift=z_min,
+        maximum_redshift=z_max,
+        n_grid=n_grid,
+    )
+    mixture = dist.MixtureGeneral(
+        dist.Categorical(
+            probs=jnp.array([1.0 - uniform_mixing_fraction, uniform_mixing_fraction])
+        ),
+        [redshift_distribution, dist.Uniform(z_min, z_max)],
+        support=redshift_distribution.support,
+    )
+    redshift = jnp.asarray(numpyro.sample("redshift", mixture))
+    _declare_bns_madau_dickinson(
+        params,
+        z_min=z_min,
+        z_max=z_max,
+        n_grid=n_grid,
+        redshift=redshift,
+        redshift_distribution=redshift_distribution,
+        luminosity_distance=redshift_distribution.luminosity_distance(redshift),
+        declare_masses=_declare_ordered_gaussian_masses,
+    )
+
+
+@register_population_model(
+    "bns_md_gaussian_modified_propagation", source_sites=SOURCE_SITES
+)
+def bns_md_gaussian_modified_propagation(
+    params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
+) -> None:
+    r"""As :func:`bns_md_modified_propagation`, with i.i.d. Gaussian component masses.
+
+    ``params`` must carry ``mass_mean`` and ``mass_sigma`` as well as ``xi_0``
+    and ``xi_n``. At :math:`\Xi_0 = 1` this reduces to
+    :func:`bns_md_gaussian_cosmological` bit-for-bit.
+    """
+    redshift, redshift_distribution = _redshift(
+        params, z_min=z_min, z_max=z_max, n_grid=n_grid
+    )
+    _declare_bns_madau_dickinson(
+        params,
+        z_min=z_min,
+        z_max=z_max,
+        n_grid=n_grid,
+        redshift=redshift,
+        redshift_distribution=redshift_distribution,
+        luminosity_distance=redshift_distribution.luminosity_distance(redshift)
+        * jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"])),
+        declare_masses=_declare_ordered_gaussian_masses,
     )

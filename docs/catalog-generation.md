@@ -90,7 +90,9 @@ The registry maps stable names to constructors:
 
 ```python
 population = population_model("bns_md_cosmological")(
-    z_min=0.0, z_max=20.0, n_grid=4096,
+    z_min=0.0,
+    z_max=20.0,
+    n_grid=4096,
 )
 sources = population.sample(key, params, num_samples=1024)
 log_prob = population.log_prob(params, sources)  # shape (1024,)
@@ -115,6 +117,26 @@ The methods isolate their NumPyro effects from enclosing inference models.
 
 A population can remain static in a JIT-compiled estimator, while hyperparameters
 and source arrays are traced. To compile sampling, keep `num_samples` static.
+
+### Mass models
+
+Component masses are an ordered pair: `source_frame_mass_1` is the larger one.
+Two mass laws share the rest of the BNS Madau-Dickinson declaration:
+
+- **Ordered uniforms** (`bns_md_cosmological`, `bns_md_modified_propagation`,
+  `bns_md_uniform_mixture`). Parameters `minimum_mass` and `mass_width`; the
+  fiducial support is `[1.0, 2.5]` solar masses, with constant joint density
+  `2 / width**2` on the ordered triangle. That triangle is compact, so a NUTS
+  step that moves the edges can send catalog samples outside the support and
+  drop their importance weights to zero.
+- **Ordered Gaussians** (`bns_md_gaussian_cosmological`,
+  `bns_md_gaussian_modified_propagation`, `bns_md_gaussian_uniform_mixture`).
+  Both components are i.i.d. `Normal(mass_mean, mass_sigma)`, then ordered.
+  The joint density `2 N(m1) N(m2)` lives on the half-plane `m1 >= m2`, with
+  no compact mass support, so moving `(mass_mean, mass_sigma)` never zeros a
+  weight. Galactic BNS masses motivate the shape (a Gaussian around
+  `1.33 Msun` with width `~0.09 Msun`). Default catalogs and run configs still
+  use the uniform triangle.
 
 ### Guard mixtures are one density, not two draws
 

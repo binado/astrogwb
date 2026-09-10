@@ -50,6 +50,9 @@ from astrogwb.populations import (
 )
 from astrogwb.populations.bns_madau_dickinson import (
     bns_md_cosmological,
+    bns_md_gaussian_cosmological,
+    bns_md_gaussian_modified_propagation,
+    bns_md_gaussian_uniform_mixture,
     bns_md_modified_propagation,
     bns_md_uniform_mixture,
 )
@@ -129,6 +132,9 @@ def reference(params: dict[str, float]) -> tuple[jax.Array, jax.Array, jax.Array
 def test_shipped_models_are_registered() -> None:
     assert known_population_models() == (
         "bns_md_cosmological",
+        "bns_md_gaussian_cosmological",
+        "bns_md_gaussian_modified_propagation",
+        "bns_md_gaussian_uniform_mixture",
         "bns_md_modified_propagation",
         "bns_md_uniform_mixture",
     )
@@ -140,6 +146,15 @@ def test_shipped_models_are_registered() -> None:
     )
     assert build_population("bns_md_uniform_mixture", settings={}).fn is (
         bns_md_uniform_mixture
+    )
+    assert build_population("bns_md_gaussian_cosmological", settings={}).fn is (
+        bns_md_gaussian_cosmological
+    )
+    assert build_population("bns_md_gaussian_modified_propagation", settings={}).fn is (
+        bns_md_gaussian_modified_propagation
+    )
+    assert build_population("bns_md_gaussian_uniform_mixture", settings={}).fn is (
+        bns_md_gaussian_uniform_mixture
     )
 
 
@@ -596,3 +611,179 @@ def test_sampling_and_derivation_are_isolated_without_jit() -> None:
             jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=8
         )
     assert outer == {}
+
+
+# --------------------------------------------------------------------------- #
+# Ordered Gaussian masses
+# --------------------------------------------------------------------------- #
+GAUSSIAN_PARAMS: dict[str, float] = {
+    **{
+        name: value
+        for name, value in POPULATION_PARAMS.items()
+        if name not in {"minimum_mass", "mass_width"}
+    },
+    "mass_mean": 1.33,
+    "mass_sigma": 0.09,
+}
+GAUSSIAN_FIDUCIALS: dict[str, float] = {
+    **{
+        name: value
+        for name, value in FIDUCIALS.items()
+        if name not in {"minimum_mass", "mass_width"}
+    },
+    "mass_mean": 1.33,
+    "mass_sigma": 0.09,
+}
+
+
+def _gaussian_population_model() -> Population:
+    return build_population(
+        "bns_md_gaussian_cosmological",
+        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
+    )
+
+
+def _gaussian_target_model() -> Population:
+    return build_population(
+        "bns_md_gaussian_modified_propagation",
+        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
+    )
+
+
+def _gaussian_mixture_model(uniform_mixing_fraction: float) -> Population:
+    return build_population(
+        "bns_md_gaussian_uniform_mixture",
+        settings={
+            "z_min": Z_MIN,
+            "z_max": Z_MAX,
+            "n_grid": N_GRID,
+            "uniform_mixing_fraction": uniform_mixing_fraction,
+        },
+    )
+
+
+def _mass_only(model: Population) -> Population:
+    return replace(model, density_sites=("source_frame_mass_1", "source_frame_mass_2"))
+
+
+def test_gaussian_mass_density_matches_two_iid_normals_on_the_ordered_half_plane() -> (
+    None
+):
+    values = sample_values()
+    actual = (
+        _mass_only(_gaussian_population_model())
+        .evaluate(GAUSSIAN_PARAMS, values)
+        .log_prob
+    )
+    component = dist.Normal(GAUSSIAN_PARAMS["mass_mean"], GAUSSIAN_PARAMS["mass_sigma"])
+    expected = (
+        jnp.log(2.0)
+        + component.log_prob(values["source_frame_mass_1"])
+        + component.log_prob(values["source_frame_mass_2"])
+    )
+    np.testing.assert_allclose(actual, expected, rtol=1e-12)
+
+    unordered = {
+        **values,
+        "source_frame_mass_1": values["source_frame_mass_2"],
+        "source_frame_mass_2": values["source_frame_mass_1"],
+    }
+
+    def unordered_log_prob(sources: Mapping[str, ArrayLike]) -> jax.Array:
+        return (
+            _mass_only(_gaussian_population_model())
+            .evaluate(GAUSSIAN_PARAMS, sources)
+            .log_prob
+        )
+
+    assert np.all(np.isneginf(np.asarray(jax.jit(unordered_log_prob)(unordered))))
+
+
+def test_gaussian_draws_are_ordered_and_have_finite_self_density() -> None:
+    sources = _gaussian_population_model().sample(
+        jax.random.PRNGKey(7), GAUSSIAN_PARAMS, num_samples=64
+    )
+    np.testing.assert_array_equal(
+        sources["source_frame_mass_1"] >= sources["source_frame_mass_2"],
+        jnp.ones(64, dtype=bool),
+    )
+    log_prob = _gaussian_population_model().log_prob(GAUSSIAN_PARAMS, sources)
+    assert np.all(np.isfinite(np.asarray(log_prob)))
+
+
+def test_gaussian_mass_density_stays_finite_when_hyperparameters_move() -> None:
+    """The NUTS property: moving (mean, sigma) never zeros a catalog sample.
+
+    The ordered-uniform triangle still drops out the moment a sample exits
+    the support, which is the reviewer's concern this model exists to answer.
+    """
+    values = sample_values()
+    shifted = {**GAUSSIAN_PARAMS, "mass_mean": 2.0, "mass_sigma": 0.2}
+    gaussian_log_prob = (
+        _mass_only(_gaussian_population_model()).evaluate(shifted, values).log_prob
+    )
+    assert np.all(np.isfinite(np.asarray(gaussian_log_prob)))
+
+    def total(mass_mean: jax.Array, mass_sigma: jax.Array) -> jax.Array:
+        params = {
+            **GAUSSIAN_PARAMS,
+            "mass_mean": mass_mean,
+            "mass_sigma": mass_sigma,
+        }
+        return jnp.sum(
+            _mass_only(_gaussian_population_model()).evaluate(params, values).log_prob
+        )
+
+    d_mean, d_sigma = jax.grad(total, argnums=(0, 1))(
+        jnp.asarray(GAUSSIAN_PARAMS["mass_mean"]),
+        jnp.asarray(GAUSSIAN_PARAMS["mass_sigma"]),
+    )
+    assert np.isfinite(float(d_mean))
+    assert np.isfinite(float(d_sigma))
+
+    outside_uniform = {**POPULATION_PARAMS, "minimum_mass": 1.35}
+
+    def uniform_log_prob(params: Mapping[str, ArrayLike]) -> jax.Array:
+        return _mass_only(mock_population_model()).evaluate(params, values).log_prob
+
+    assert np.all(np.isneginf(np.asarray(jax.jit(uniform_log_prob)(outside_uniform))))
+
+
+def test_gaussian_modified_propagation_reduces_exactly_to_the_cosmological_model() -> (
+    None
+):
+    values = sample_values()
+    cosmological = _gaussian_population_model().evaluate(GAUSSIAN_PARAMS, values)
+    modified = _gaussian_target_model().evaluate(GAUSSIAN_FIDUCIALS, values)
+    assert GAUSSIAN_FIDUCIALS["xi_0"] == 1.0
+    np.testing.assert_array_equal(cosmological.log_prob, modified.log_prob)
+    np.testing.assert_array_equal(
+        cosmological.luminosity_distance, modified.luminosity_distance
+    )
+
+
+def test_gaussian_and_uniform_models_share_distance_and_rate() -> None:
+    values = sample_values()
+    gaussian = _gaussian_population_model().evaluate(GAUSSIAN_PARAMS, values)
+    uniform = mock_population_model().evaluate(POPULATION_PARAMS, values)
+    np.testing.assert_array_equal(
+        gaussian.luminosity_distance, uniform.luminosity_distance
+    )
+    assert gaussian.total_merger_rate is not None
+    assert uniform.total_merger_rate is not None
+    np.testing.assert_array_equal(gaussian.total_merger_rate, uniform.total_merger_rate)
+
+
+def test_gaussian_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:
+    epsilon = 0.1
+    actual = _redshift_log_density(
+        _gaussian_mixture_model(epsilon), GAUSSIAN_PARAMS, SAMPLE_REDSHIFTS
+    )
+    _, _, md_logprob = reference_merger_rate_distance_and_logprob(
+        FIDUCIALS, SAMPLE_REDSHIFTS, redshift_grid=make_redshift_grid()
+    )
+    expected = jnp.logaddexp(
+        jnp.log1p(-epsilon) + md_logprob,
+        jnp.log(epsilon) - jnp.log(Z_MAX - Z_MIN),
+    )
+    np.testing.assert_allclose(actual, expected, rtol=1e-13)
