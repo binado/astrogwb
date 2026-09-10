@@ -39,7 +39,6 @@ from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike
 
@@ -305,7 +304,7 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
         self, source_parameters: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, jax.Array]:
         prepared_parameters = {
-            name: np.asarray(values) for name, values in source_parameters.items()
+            name: jnp.asarray(values) for name, values in source_parameters.items()
         }
         frequencies = self.frequencies
         power = inspiral_polarization_power(
