@@ -45,15 +45,19 @@ NETWORK_DETECTORS: dict[str, tuple[str, ...]] = {
 #: The experiment every constant here was read off of.
 NETWORK_EXPERIMENT: str = "cosmological-parameters"
 
-#: The network used for the joint (H0, Omega_m) / (H0, local_merger_rate) grids.
+#: The network used for the joint (H0, Omega_m) / (H0, local_merger_rate) /
+#: (xi_0, xi_n) grids.
 DEFAULT_NETWORK: str = "ET-2L-aligned-CE-Hanford"
 
 #: LaTeX axis labels for the parameters plotted by name, matching
-#: scripts/mcmc_cosmological_parameters.py's VAR_LABELS.
+#: scripts/mcmc_cosmological_parameters.py's VAR_LABELS and
+#: scripts/mcmc_modified_propagation.py's VAR_LABELS.
 PARAMETER_LABELS: dict[str, str] = {
     "H0": r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$",
     "Omega_m": r"$\Omega_m$",
     "local_merger_rate": r"$\mathcal{R}_0\,[\mathrm{Gpc^{-3}\,yr^{-1}}]$",
+    "xi_0": r"$\Xi_0$",
+    "xi_n": r"$n$",
 }
 
 __all__ = [

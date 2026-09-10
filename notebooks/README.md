@@ -49,7 +49,9 @@ repository root as the working directory.
 - **`cosmological_parameters_grid.py`** — reproduces the cosmological-parameter
   figures from `scripts/mcmc_cosmological_parameters.py` via grid-evaluated
   posteriors (`LogDensityFn`, `plot_corner_for_posterior_grid`) instead of NUTS
-  chains, sizing the `H0` grid per network from its matched-filter SNR
+  chains, sizing the `H0` grid per network from its matched-filter SNR, and
+  the $\Xi_0$--$n$ corner from `scripts/mcmc_modified_propagation.py` on the
+  same default-network evaluator
 - **`fiducial_spectrum.py`** — fiducial injection $S_h$ / $\Omega_{\mathrm{GW}}$,
   network $S_{\mathrm{eff}}$, $\sigma$, and per-network SNR
 
