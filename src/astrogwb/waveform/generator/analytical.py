@@ -303,7 +303,7 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]
-    ) -> tuple[np.ndarray, jax.Array]:
+    ) -> tuple[jax.Array, jax.Array]:
         prepared_parameters = {
             name: np.asarray(values) for name, values in source_parameters.items()
         }
@@ -311,4 +311,4 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
         power = inspiral_polarization_power(
             frequencies, prepared_parameters, alpha=self.alpha
         ).T
-        return frequencies, power
+        return jnp.asarray(frequencies), power

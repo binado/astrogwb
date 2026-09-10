@@ -88,7 +88,7 @@ class RippleGenerator(PolarizationPowerGenerator):
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]
-    ) -> tuple[np.ndarray, jax.Array]:
+    ) -> tuple[jax.Array, jax.Array]:
         """Return the Ripple frequency axis and power, chunk by chunk.
 
         Ripple sizes its FFT segment from ``segment_duration`` with its own
@@ -112,7 +112,7 @@ class RippleGenerator(PolarizationPowerGenerator):
             raise ValueError("source_parameters must contain at least one event")
         step = min(n_events, self.chunk_size)
 
-        frequencies: np.ndarray | None = None
+        frequencies: jax.Array | None = None
         power_chunks = []
         for start in range(0, n_events, step):
             stop = min(start + step, n_events)
@@ -131,10 +131,10 @@ class RippleGenerator(PolarizationPowerGenerator):
             mask = (chunk_frequencies >= self.minimum_frequency) & (
                 chunk_frequencies <= self.maximum_frequency
             )
-            masked_frequencies = np.asarray(chunk_frequencies[mask])
+            masked_frequencies = chunk_frequencies[mask]
             if frequencies is None:
                 frequencies = masked_frequencies
-            elif not np.array_equal(frequencies, masked_frequencies):
+            elif not bool(jnp.array_equal(frequencies, masked_frequencies)):
                 raise ValueError("Ripple chunks produced different frequency grids")
             power_chunks.append(
                 polarization_power(chunk_plus[:, mask], chunk_cross[:, mask])

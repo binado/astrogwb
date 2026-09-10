@@ -54,7 +54,7 @@ class PolarizationPowerGenerator:
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]
-    ) -> tuple[np.ndarray, jax.Array]:
+    ) -> tuple[jax.Array, jax.Array]:
         """Return ``(frequencies, polarization_power)`` for ``source_parameters``.
 
         Polarization power is frequency-first, shape ``(F, N)``. The base
