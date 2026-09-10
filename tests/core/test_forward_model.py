@@ -415,3 +415,19 @@ def test_ripple_predictive_stacks_finite_spectrum() -> None:
     assert bool(jnp.all(jnp.isfinite(draws["spectral_density"])))
     assert bool(jnp.all(draws["spectral_density"] >= 0.0))
     assert "redshift" not in draws
+
+
+@pytest.mark.integration
+def test_ripple_jitted_spectrum_matches_eager() -> None:
+    kwargs = _ripple_kwargs()
+    model = partial(gwb_forward_model, **kwargs)
+    params = _jax_params()
+
+    def spectrum(values: dict[str, jax.Array]) -> tuple[jax.Array, jax.Array]:
+        trace = handlers.trace(handlers.seed(model, 0)).get_trace(values)
+        return trace["spectral_density"]["value"], trace["n_events"]["value"]
+
+    eager_spectrum, eager_n = spectrum(params)
+    compiled_spectrum, compiled_n = jax.jit(spectrum)(params)
+    np.testing.assert_allclose(compiled_spectrum, eager_spectrum, rtol=1e-12)
+    np.testing.assert_array_equal(compiled_n, eager_n)
