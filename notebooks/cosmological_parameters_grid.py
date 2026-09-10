@@ -24,7 +24,10 @@
 # with $\Omega_m$ pinned to the fiducial. An identical per-network scan replaces that
 # pin with $\Omega_m$'s Gaussian prior, so each network also gets a 2D $(H_0,
 # \Omega_m)$ grid whose $H_0$ marginal is the prior-marginalized counterpart of the
-# 1D scan. The default network additionally gets $(H_0, \mathcal{R}_0)$ and
+# 1D scan. A second per-network 2D scan grids $(H_0, z_{\mathrm{peak}})$ over the
+# Uniform $z_{\mathrm{peak}}$ prior; its $z_{\mathrm{peak}}$ marginal is the
+# by-detector overlay, and joint corners are drawn for ET-2L-aligned+CE and
+# ET-triangular+CE. The default network additionally gets $(H_0, \mathcal{R}_0)$ and
 # $(\Xi_0, n)$ joints -- the latter mirroring `scripts/mcmc_modified_propagation.py`'s
 # $\Xi_0$--$n$ corner, the former an exact-quadrature cross-check against the
 # script's amplitude-marginalized $H_0$-$\mathcal{R}_0$ run.
@@ -289,6 +292,9 @@ H0_GRIDS: dict[str, jax.Array] = {
 OMEGA_M_GRID = uniform_grid(
     *prior_window(PRIORS["Omega_m"], sigmas=COVERAGE_SIGMAS), NPOINTS_2D
 )
+Z_PEAK_GRID = uniform_grid(
+    *prior_window(PRIORS["z_peak"], sigmas=COVERAGE_SIGMAS), NPOINTS_2D
+)
 LOCAL_MERGER_RATE_GRID = uniform_grid(
     *prior_window(PRIORS["local_merger_rate"], sigmas=COVERAGE_SIGMAS), NPOINTS_2D
 )
@@ -296,8 +302,8 @@ XI_N_GRID = uniform_grid(
     *prior_window(PRIORS["xi_n"], sigmas=COVERAGE_SIGMAS), NPOINTS_2D
 )
 # Per-network H0 windows at the coarser 2D resolution. The 1D scan uses
-# NPOINTS_1D; every (H0, Omega_m) joint uses these, including the default
-# network's remaining 2D sweeps.
+# NPOINTS_1D; every (H0, Omega_m) and (H0, z_peak) joint uses these, including
+# the default network's remaining 2D sweeps.
 H0_GRIDS_2D: dict[str, jax.Array] = {
     name: uniform_grid(low, high, NPOINTS_2D)
     for name, (low, high) in H0_WINDOWS.items()
@@ -330,9 +336,10 @@ pd.DataFrame(
 # **No `handlers.condition` / `handlers.block`.** The model carries every prior;
 # `LogDensityFn(...)(grids, fixed=...)` pins the rest. `fixed` is traced, so only a
 # change to its *key set* recompiles -- which is exactly what lets one network's
-# evaluator serve the 1D `H0` sweep, that network's `(H0, Omega_m)` joint, and
-# (for the default network) the remaining 2D sweeps. The joint-posterior section
-# reuses the evaluators built here rather than rebuilding them.
+# evaluator serve the 1D `H0` sweep, that network's `(H0, Omega_m)` and
+# `(H0, z_peak)` joints, and (for the default network) the remaining 2D sweeps.
+# The joint-posterior section reuses the evaluators built here rather than
+# rebuilding them.
 #
 # `prepare_inference_inputs` re-runs `prepare_observation` (the fiducial spectrum
 # contraction) once per network. That is redundant work -- the observation does not
@@ -417,6 +424,29 @@ for network in NETWORKS:
     print(f"{network.label}: {elapsed:.2f}s for {NPOINTS_2D}x{NPOINTS_2D} grid points")
 
 # %% [markdown]
+# ## Evaluating H0--$z_{\mathrm{peak}}$ for each network
+#
+# Same networks and per-network $H_0$ windows as the $\Omega_m$ joint. $z_{\mathrm{peak}}$
+# is gridded over its Uniform prior support -- unlike $\Omega_m$ it is not
+# prior-dominated, so the $z_{\mathrm{peak}}$ marginal can move with detector
+# network. Joint corners below are drawn for ET-2L-aligned+CE and ET-triangular+CE;
+# the by-detector overlay uses every network's $z_{\mathrm{peak}}$ marginal.
+
+
+# %%
+H0_Z_PEAK_LOGPOSTERIORS: dict[str, jax.Array] = {}
+for network in NETWORKS:
+    start = time.perf_counter()
+    logpost = evaluate_joint(
+        LOG_DENSITY_FNS[network.name],
+        {"H0": H0_GRIDS_2D[network.name], "z_peak": Z_PEAK_GRID},
+        model_kwargs=MODEL_KWARGS[network.name],
+    )
+    elapsed = time.perf_counter() - start
+    H0_Z_PEAK_LOGPOSTERIORS[network.name] = logpost
+    print(f"{network.label}: {elapsed:.2f}s for {NPOINTS_2D}x{NPOINTS_2D} grid points")
+
+# %% [markdown]
 # ## H0 posterior by detector network
 #
 # ≙ `H0-by-detector.pdf`. $\Omega_m$ is pinned to the fiducial. Each network's grid
@@ -446,28 +476,31 @@ def marginal_along(
     )
 
 
-def plot_h0_by_detector(
-    h0_grids: dict[str, jax.Array],
+def plot_parameter_by_detector(
+    grids: dict[str, jax.Array],
     densities: dict[str, np.ndarray],
+    *,
+    param: str,
 ) -> plt.Figure:
-    """Overlay per-network H0 posterior densities with the detector-network styles."""
+    """Overlay per-network posterior densities with the detector-network styles."""
     colors, linestyles = detector_network_styles(NETWORKS)
     fig, ax = plt.subplots()
     for network, color, linestyle in zip(NETWORKS, colors, linestyles, strict=True):
-        grid = np.asarray(h0_grids[network.name])
+        grid = np.asarray(grids[network.name])
         density = np.asarray(densities[network.name], dtype=np.float64)
         density = density / np.trapezoid(density, grid)
         ax.plot(grid, density, label=network.label, color=color, linestyle=linestyle)
-    ax.axvline(FIDUCIALS["H0"], **TRUTH)
-    ax.set(xlabel=PARAMETER_LABELS["H0"], ylabel="Posterior density")
+    ax.axvline(FIDUCIALS[param], **TRUTH)
+    ax.set(xlabel=PARAMETER_LABELS[param], ylabel="Posterior density")
     ax.legend(**DETECTOR_COMPARISON_LEGEND)
     fig.tight_layout()
     return fig
 
 
-fig_h0_by_detector = plot_h0_by_detector(
+fig_h0_by_detector = plot_parameter_by_detector(
     H0_GRIDS,
     {name: safe_exponentiate(logpost) for name, logpost in H0_LOGPOSTERIORS.items()},
+    param="H0",
 )
 fig_h0_by_detector
 
@@ -486,8 +519,30 @@ H0_OMEGA_M_H0_MARGINAL: dict[str, np.ndarray] = {
     name: marginal_along(logpost, OMEGA_M_GRID, axis=1)
     for name, logpost in H0_OMEGA_M_LOGPOSTERIORS.items()
 }
-fig_h0_omega_m_by_detector = plot_h0_by_detector(H0_GRIDS_2D, H0_OMEGA_M_H0_MARGINAL)
+fig_h0_omega_m_by_detector = plot_parameter_by_detector(
+    H0_GRIDS_2D, H0_OMEGA_M_H0_MARGINAL, param="H0"
+)
 fig_h0_omega_m_by_detector
+
+# %% [markdown]
+# ## $z_{\mathrm{peak}}$ posterior by detector network
+#
+# $z_{\mathrm{peak}}$ marginal of each network's $(H_0, z_{\mathrm{peak}})$ grid
+# (`np.trapezoid` over $H_0$). Every network shares the same Uniform $z_{\mathrm{peak}}$
+# grid, so the overlay is on a common x-axis.
+
+
+# %%
+H0_Z_PEAK_Z_PEAK_MARGINAL: dict[str, np.ndarray] = {
+    name: marginal_along(logpost, H0_GRIDS_2D[name], axis=0)
+    for name, logpost in H0_Z_PEAK_LOGPOSTERIORS.items()
+}
+fig_z_peak_by_detector = plot_parameter_by_detector(
+    {network.name: Z_PEAK_GRID for network in NETWORKS},
+    H0_Z_PEAK_Z_PEAK_MARGINAL,
+    param="z_peak",
+)
+fig_z_peak_by_detector
 
 # %% [markdown]
 # ## SNR versus the measured H0 uncertainty
@@ -578,9 +633,11 @@ XI0_N_LOGPOST = evaluate_joint(
 # %% [markdown]
 # ## Corner plots
 #
-# ≙ `H0-Omega_m-corner.pdf`, `H0-merger-rate-corner.pdf`, `Xi0-n-corner.pdf`. The grids
-# `dict`s above are handed to `tuple(...values())` rather than re-listed, so the
-# dict-to-sequence handoff cannot silently transpose the axes.
+# ≙ `H0-Omega_m-corner.pdf`, `H0-merger-rate-corner.pdf`, `Xi0-n-corner.pdf`,
+# `H0-z_peak-corner-ET-2L-aligned-CE-Hanford.pdf`,
+# `H0-z_peak-corner-ET-triangular-CE-Hanford.pdf`. The grids `dict`s are handed to
+# `tuple(...values())` rather than re-listed, so the dict-to-sequence handoff
+# cannot silently transpose the axes.
 #
 # **No ESS panel.** `H0-Omega_m-ess-corner.pdf` and `Xi0-n-ess-corner.pdf` plot
 # `importance_relative_ess`, a NumPyro `deterministic` site; `LogDensityFn` returns
@@ -617,6 +674,29 @@ fig_xi0_n_corner = plot_corner_for_posterior_grid(
     color=CATEGORY["modified_propagation"],
 )
 fig_xi0_n_corner
+
+
+# %%
+def plot_h0_z_peak_corner(network_name: str) -> plt.Figure:
+    """$(H_0, z_{peak})$ corner for one network's 2D grid."""
+    grids = {"H0": H0_GRIDS_2D[network_name], "z_peak": Z_PEAK_GRID}
+    return plot_corner_for_posterior_grid(
+        tuple(grids.values()),
+        H0_Z_PEAK_LOGPOSTERIORS[network_name],
+        labels=[PARAMETER_LABELS["H0"], PARAMETER_LABELS["z_peak"]],
+        truths=[FIDUCIALS["H0"], FIDUCIALS["z_peak"]],
+        smooth=1.0,
+    )
+
+
+fig_h0_z_peak_corner_et_2l_ce = plot_h0_z_peak_corner(DEFAULT_NETWORK)
+fig_h0_z_peak_corner_et_2l_ce
+
+# %%
+fig_h0_z_peak_corner_et_triangular_ce = plot_h0_z_peak_corner(
+    "ET-triangular-CE-Hanford"
+)
+fig_h0_z_peak_corner_et_triangular_ce
 
 # %% [markdown]
 # ## Fixed versus marginalized merger rate
@@ -675,8 +755,13 @@ if SAVE_OUTPUTS:
             f"h0_omega_m_logpost_{name}": np.asarray(logpost)
             for name, logpost in H0_OMEGA_M_LOGPOSTERIORS.items()
         },
+        **{
+            f"h0_z_peak_logpost_{name}": np.asarray(logpost)
+            for name, logpost in H0_Z_PEAK_LOGPOSTERIORS.items()
+        },
         h0_grid_2d=np.asarray(H0_GRID_2D),
         omega_m_grid=np.asarray(OMEGA_M_GRID),
+        z_peak_grid=np.asarray(Z_PEAK_GRID),
         local_merger_rate_grid=np.asarray(LOCAL_MERGER_RATE_GRID),
         h0_omega_m_logpost=np.asarray(H0_OMEGA_M_LOGPOST),
         h0_merger_rate_logpost=np.asarray(H0_MERGER_RATE_LOGPOST),
@@ -709,6 +794,9 @@ if SAVE_OUTPUTS:
     fig_h0_omega_m_by_detector.savefig(
         FIGURE_DIR / "H0-Omega_m-by-detector-grid.pdf", bbox_inches="tight"
     )
+    fig_z_peak_by_detector.savefig(
+        FIGURE_DIR / "z_peak-by-detector-grid.pdf", bbox_inches="tight"
+    )
     fig_h0_omega_m_corner.savefig(
         FIGURE_DIR / "H0-Omega_m-corner-grid.pdf", bbox_inches="tight"
     )
@@ -716,6 +804,14 @@ if SAVE_OUTPUTS:
         FIGURE_DIR / "H0-merger-rate-corner-grid.pdf", bbox_inches="tight"
     )
     fig_xi0_n_corner.savefig(FIGURE_DIR / "Xi0-n-corner-grid.pdf", bbox_inches="tight")
+    fig_h0_z_peak_corner_et_2l_ce.savefig(
+        FIGURE_DIR / "H0-z_peak-corner-ET-2L-aligned-CE-Hanford-grid.pdf",
+        bbox_inches="tight",
+    )
+    fig_h0_z_peak_corner_et_triangular_ce.savefig(
+        FIGURE_DIR / "H0-z_peak-corner-ET-triangular-CE-Hanford-grid.pdf",
+        bbox_inches="tight",
+    )
     fig_h0_merger_rate_priors.savefig(
         FIGURE_DIR / "H0-merger-rate-priors-grid.pdf", bbox_inches="tight"
     )

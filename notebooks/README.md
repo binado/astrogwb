@@ -34,7 +34,9 @@ repository root as the working directory.
   posteriors (`LogDensityFn`, `plot_corner_for_posterior_grid`) instead of NUTS
   chains, sizing the `H0` grid per network from its matched-filter SNR, with a
   matching per-network $(H_0, \Omega_m)$ scan under $\Omega_m$'s Gaussian prior,
-  and the $\Xi_0$--$n$ corner from `scripts/mcmc_modified_propagation.py` on the
+  a per-network $(H_0, z_{\mathrm{peak}})$ scan with $z_{\mathrm{peak}}$
+  overlay and corners for ET-2L-aligned+CE and ET-triangular+CE, and the
+  $\Xi_0$--$n$ corner from `scripts/mcmc_modified_propagation.py` on the
   same default-network evaluator
 
 `mcmc.py`, `mcmc_plotting.py`, and `logposterior_grid.py` merge a run's config
