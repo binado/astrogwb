@@ -16,10 +16,11 @@ from numpyro.infer.util import compute_log_probs
 
 #: A registered population: a plain NumPyro model taking the sampled
 #: hyperparameters and the model's own construction settings as keywords.
-#: The model declares sites as a side effect and returns those arrays
-#: (source columns plus optional extras such as ``total_merger_rate``)
-#: so callers can pass them on without scraping a trace.
-type PopulationFn = Callable[..., Mapping[str, jax.Array]]
+#: The model declares sites as a side effect and, when it draws sources,
+#: returns those arrays (source columns plus optional extras such as
+#: ``total_merger_rate``) so callers can pass them on without scraping a
+#: trace. Wrappers that only declare sites may return ``None``.
+type PopulationFn = Callable[..., Mapping[str, jax.Array] | None]
 
 #: The raw NumPyro trace escape hatch -- every site, untyped. Only
 #: :meth:`Population.trace` returns this; :meth:`Population.evaluate` returns
@@ -82,11 +83,13 @@ class Population:
     def __call__(self, params: Mapping[str, ArrayLike]) -> dict[str, jax.Array]:
         """Declare sites and return this execution's arrays, including extras.
 
-        ``source_sites`` are always present. The inner model may also return
-        scalars such as ``total_merger_rate`` so callers can use the values
-        without scraping a NumPyro trace.
+        ``source_sites`` are present when the inner model returns a mapping.
+        It may also return scalars such as ``total_merger_rate``. Wrappers
+        that only declare sites (for ``evaluate``) may return ``None``.
         """
         sources = self.fn(params, **dict(self.settings))
+        if sources is None:
+            return {}
         return {name: jnp.asarray(value) for name, value in sources.items()}
 
     def sample(
