@@ -540,11 +540,12 @@ def test_max_of_two_normals_samples_are_the_max_of_two_standard_normals() -> Non
 
 
 def test_max_of_two_normals_survives_jit_as_a_pytree_argument() -> None:
-    """Without flattening ``loc`` / ``scale``, ``jit`` would drop them."""
+    """Without flattening ``loc`` / ``scale`` / ``_normal``, ``jit`` would drop them."""
     distribution = _max_of_two_normals()
     fields = MaxOfTwoNormalsDistribution.gather_pytree_data_fields()
     assert "loc" in fields
     assert "scale" in fields
+    assert "_normal" in fields
     jitted = jax.jit(lambda d, x: d.log_prob(x))(distribution, _MASS_VALUES)
     np.testing.assert_allclose(
         np.asarray(jitted),

@@ -41,6 +41,11 @@ class MaxOfTwoNormalsDistribution(dist.Distribution):
     }
     support = dist.constraints.real
     reparametrized_params = ["loc", "scale"]  # noqa: RUF012
+    # Same layout as numpyro.distributions.HalfNormal: the component lives on
+    # the instance, and is named here so a JIT round-trip restores it.
+    # `tree_flatten` reads ``__dict__`` and `tree_unflatten` does not re-run
+    # ``__init__``.
+    pytree_data_fields = ("_normal", "loc", "scale")
 
     def __init__(
         self,
@@ -50,6 +55,7 @@ class MaxOfTwoNormalsDistribution(dist.Distribution):
         validate_args: bool | None = None,
     ) -> None:
         self.loc, self.scale = promote_shapes(loc, scale)
+        self._normal = dist.Normal(self.loc, self.scale)
         batch_shape = jnp.broadcast_shapes(jnp.shape(loc), jnp.shape(scale))
         super().__init__(batch_shape=batch_shape, validate_args=validate_args)
 
@@ -65,13 +71,12 @@ class MaxOfTwoNormalsDistribution(dist.Distribution):
 
     @validate_sample
     def log_prob(self, value: ArrayLike) -> jax.Array:
-        component = dist.Normal(self.loc, self.scale)
         return jnp.asarray(
-            jnp.log(2.0) + component.log_prob(value) + component.log_cdf(value)
+            jnp.log(2.0) + self._normal.log_prob(value) + self._normal.log_cdf(value)
         )
 
     def cdf(self, value: ArrayLike) -> jax.Array:
-        return jnp.asarray(dist.Normal(self.loc, self.scale).cdf(value) ** 2)
+        return jnp.asarray(self._normal.cdf(value) ** 2)
 
     def icdf(self, q: ArrayLike) -> jax.Array:
         return jnp.asarray(self.loc + self.scale * ndtri(jnp.sqrt(q)))
