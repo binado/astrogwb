@@ -6,6 +6,7 @@ import jax
 import numpy as np
 import pytest
 
+from astrogwb.frequency import uniform_frequency_grid, uniform_grid_spacing
 from astrogwb.waveform import PolarizationPowerGenerator, RippleGenerator
 
 
@@ -31,34 +32,36 @@ def ripple_generator() -> RippleGenerator:
     )
 
 
-def test_base_generator_constructor_builds_the_owned_grid() -> None:
+def test_base_generator_is_metadata_only_without_a_frequency_grid() -> None:
     generator = PolarizationPowerGenerator(
         approximant="Toy",
         minimum_frequency=10.0,
         maximum_frequency=19.0,
         reference_frequency=20.0,
         sampling_frequency=64.0,
-        df=2.0,
+        frequency_resolution=2.0,
     )
 
+    assert not hasattr(generator, "frequencies")
     np.testing.assert_array_equal(
-        generator.frequencies, np.array([10.0, 12.0, 14.0, 16.0, 18.0])
+        uniform_frequency_grid(10.0, 19.0, 2.0),
+        np.array([10.0, 12.0, 14.0, 16.0, 18.0]),
     )
-    assert generator.df == 2.0
+    assert generator.frequency_resolution == 2.0
 
 
-def test_base_generator_derives_inclusive_grid_with_float_roundoff() -> None:
+def test_uniform_grid_handles_float_roundoff() -> None:
     generator = PolarizationPowerGenerator(
         approximant="Toy",
         minimum_frequency=0.1,
         maximum_frequency=0.3,
         reference_frequency=0.1,
         sampling_frequency=8.0,
-        df=0.1,
+        frequency_resolution=0.1,
     )
 
-    np.testing.assert_allclose(generator.frequencies, [0.1, 0.2, 0.3])
-    assert generator.frequencies is generator.frequencies
+    np.testing.assert_allclose(uniform_frequency_grid(0.1, 0.3, 0.1), [0.1, 0.2, 0.3])
+    assert generator.frequency_resolution == 0.1
 
 
 def test_base_generator_is_a_metadata_only_descriptor() -> None:
@@ -68,18 +71,11 @@ def test_base_generator_is_a_metadata_only_descriptor() -> None:
         maximum_frequency=12.0,
         reference_frequency=10.0,
         sampling_frequency=32.0,
-        df=2.0,
+        frequency_resolution=2.0,
     )
 
     with pytest.raises(NotImplementedError, match="metadata-only"):
         generator({"detector_frame_mass_1": np.array([1.4])})
-
-
-def test_ripple_generator_rejects_frequencies_before_generating(
-    ripple_generator: RippleGenerator,
-) -> None:
-    with pytest.raises(ValueError, match="has not generated yet"):
-        _ = ripple_generator.frequencies
 
 
 @pytest.mark.integration
@@ -87,17 +83,26 @@ def test_ripple_generator_owns_grid_and_reduces_chunked_power(
     ripple_generator: RippleGenerator,
 ) -> None:
     generator = ripple_generator
+    assert not hasattr(generator, "frequencies")
 
-    power = generator(_ripple_sources())
+    frequencies, power = generator(_ripple_sources())
 
-    assert generator.frequencies[0] == 20.0
-    assert generator.frequencies[-1] == 100.0
-    assert generator.df == 4.0
+    assert frequencies[0] == 20.0
+    assert frequencies[-1] == 100.0
+    # An assertion on the produced grid, not a prediction: this is now a real
+    # test of the inference against Ripple's own axis.
+    assert uniform_grid_spacing(np.asarray(frequencies)) == 4.0
     assert isinstance(power, jax.Array)
-    assert power.shape == (generator.frequencies.size, 2)
+    assert power.shape == (frequencies.size, 2)
     assert power.dtype == np.float64
     assert np.all(power >= 0.0)
-    assert generator.frequencies is generator.frequencies
+
+
+def test_ripple_generator_has_no_fabricated_spacing(
+    ripple_generator: RippleGenerator,
+) -> None:
+    """Nothing stands in for the measured grid spacing any more."""
+    assert not hasattr(ripple_generator, "df")
 
 
 def test_ripple_generator_rejects_mismatched_source_parameter_shapes(
@@ -159,17 +164,66 @@ def test_ripple_generator_rejects_invalid_sampling_frequency(
         )
 
 
+@pytest.mark.integration
 def test_ripple_generator_rejects_non_aligned_minimum_frequency() -> None:
-    with pytest.raises(ValueError, match="minimum_frequency must align"):
-        RippleGenerator(
-            approximant="TaylorF2",
-            sampling_frequency=256.0,
-            minimum_frequency=21.0,
-            maximum_frequency=100.0,
-            reference_frequency=20.0,
-            frequency_resolution=4.0,
-            chunk_size=1,
-        )
+    """Misalignment is now detected against the grid Ripple actually built.
+
+    Construction no longer knows Ripple's effective resolution, so this can
+    only be caught by generating -- which is what promotes this test to
+    ``integration``. The check it becomes is strictly stronger: "did the grid
+    Ripple actually built start at f_min?" rather than "is f_min a multiple of
+    a number astrogwb guessed?"
+    """
+    generator = RippleGenerator(
+        approximant="TaylorF2",
+        sampling_frequency=256.0,
+        minimum_frequency=21.0,
+        maximum_frequency=100.0,
+        reference_frequency=20.0,
+        frequency_resolution=4.0,
+        chunk_size=1,
+    )
+    with pytest.raises(ValueError, match="not on Ripple's frequency grid"):
+        generator(_ripple_sources())
+
+
+@pytest.mark.integration
+def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
+    """The regression this whole change exists for.
+
+    At ``sampling_frequency=1234.0, frequency_resolution=1.0`` astrogwb's old
+    power-of-two replica predicted ``n=1234, df=1.0``; Ripple's real
+    ``_next_smooth_even`` rounds to ``n=1250``, giving
+    ``delta_f=1234/1250=0.9872`` -- 1.28% off. The old code accepted
+    ``minimum_frequency=2.0`` silently and stamped the wrong df into the file;
+    this generator must instead reject it, and accept only the frequency that
+    is actually on Ripple's grid.
+    """
+    misaligned = RippleGenerator(
+        approximant="TaylorF2",
+        sampling_frequency=1234.0,
+        minimum_frequency=2.0,
+        maximum_frequency=100.0,
+        reference_frequency=2.0,
+        frequency_resolution=1.0,
+        chunk_size=1,
+    )
+    with pytest.raises(ValueError, match="not on Ripple's frequency grid"):
+        misaligned(_ripple_sources())
+
+    aligned = RippleGenerator(
+        approximant="TaylorF2",
+        sampling_frequency=1234.0,
+        minimum_frequency=2.0 * (1234.0 / 1250.0),
+        maximum_frequency=100.0,
+        reference_frequency=2.0,
+        frequency_resolution=1.0,
+        chunk_size=1,
+    )
+    frequencies, _ = aligned(_ripple_sources())
+    assert uniform_grid_spacing(np.asarray(frequencies)) == pytest.approx(
+        0.9872, abs=1e-15
+    )
 
 
 @pytest.mark.integration
@@ -194,4 +248,8 @@ def test_ripple_generator_chunking_preserves_power() -> None:
         chunk_size=2,
     )
 
-    np.testing.assert_allclose(one_per_chunk(sources), one_chunk(sources), rtol=1e-12)
+    frequencies_one_per_chunk, power_one_per_chunk = one_per_chunk(sources)
+    frequencies_one_chunk, power_one_chunk = one_chunk(sources)
+
+    np.testing.assert_array_equal(frequencies_one_per_chunk, frequencies_one_chunk)
+    np.testing.assert_allclose(power_one_per_chunk, power_one_chunk, rtol=1e-12)

@@ -33,6 +33,7 @@ from typing import Any, Self
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from astrogwb.frequency import uniform_grid_spacing
 from astrogwb.populations import Population, build_population
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -66,6 +67,7 @@ class Catalog:
 
     source_parameters: Mapping[str, NDArray[Any]]
     polarization_power: NDArray[Any]
+    frequencies: NDArray[np.floating[Any]]
     waveform_metadata: PolarizationPowerGenerator
     _model_name: str
     _model_kwargs: Mapping[str, Any]
@@ -90,10 +92,18 @@ class Catalog:
         num_frequencies, num_samples = power.shape
         if num_samples <= 0:
             raise ValueError("catalog must contain at least one sample")
-        if num_frequencies != self.waveform_metadata.frequencies.size:
+        frequencies = np.asarray(self.frequencies)
+        if frequencies.ndim != 1:
+            raise ValueError("catalog frequencies must be one-dimensional")
+        if num_frequencies != frequencies.size:
             raise ValueError(
-                "polarization_power frequency axis does not match waveform frequencies"
+                "polarization_power frequency axis does not match catalog frequencies"
             )
+        if frequencies.size >= 2:
+            # Validation only, result discarded: a uniform grid is a catalog
+            # invariant, checked against itself rather than against a second
+            # record. Runs once per catalog, including every `load`.
+            uniform_grid_spacing(frequencies)
 
         parameters: dict[str, NDArray[Any]] = {}
         for name, values in self.source_parameters.items():
@@ -121,6 +131,7 @@ class Catalog:
         if not isinstance(self._density_sites, tuple):
             object.__setattr__(self, "_density_sites", tuple(self._density_sites))
         object.__setattr__(self, "polarization_power", power)
+        object.__setattr__(self, "frequencies", frequencies)
         object.__setattr__(self, "source_parameters", parameters)
         object.__setattr__(self, "_model_kwargs", dict(self._model_kwargs))
         object.__setattr__(
@@ -145,15 +156,18 @@ class Catalog:
 
         The population record is supplied rather than inferred: the caller ran
         the model to draw ``source_parameters``, so it is the only place that
-        knows which model and settings produced them.
+        knows which model and settings produced them. Frequencies come from
+        the same generator call as the power: that is the axis the backend
+        actually produced, not a reconstruction from metadata.
         """
         parameters = {
             name: np.asarray(values) for name, values in source_parameters.items()
         }
-        power = np.asarray(generator(source_parameters))
+        frequencies, power = generator(source_parameters)
         return cls(
             source_parameters=parameters,
-            polarization_power=power,
+            polarization_power=np.asarray(power),
+            frequencies=np.asarray(frequencies),
             waveform_metadata=generator,
             _model_name=model_name,
             _model_kwargs=model_kwargs,
@@ -207,6 +221,19 @@ class Catalog:
     def num_samples(self) -> int:
         """The number of source samples in this catalog."""
         return int(self.polarization_power.shape[1])
+
+    @property
+    def df(self) -> float:
+        """The catalog's frequency bin width, measured from its own grid.
+
+        Measured, not recorded: the generating backend chooses the actual
+        grid (Ripple's rounding is 5-smooth, not power-of-two), so its
+        spacing is the only thing that can be right. What was *asked for*
+        lives on ``waveform_metadata.frequency_resolution``, and the two can
+        differ. Raises on a one-bin catalog, which is a supported shape --
+        there is no bin width to report.
+        """
+        return uniform_grid_spacing(self.frequencies)
 
     # ----------------------------------------------------------------- #
     # Transformations

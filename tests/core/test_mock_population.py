@@ -56,10 +56,10 @@ def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -
     """The realistic default trades frequency resolution for catalog size."""
     catalog = mock_catalog_factory()
     waveform = catalog.waveform_metadata
-    frequencies = np.asarray(waveform.frequencies)
+    frequencies = np.asarray(catalog.frequencies)
     redshift = np.asarray(catalog.source_parameters["redshift"])
 
-    assert waveform.frequencies.size == 512
+    assert catalog.frequencies.size == 512
     assert catalog.num_samples == 1024
     # Every stochastic site plus every per-source deterministic the population
     # declares -- the columns are the model's sites, by construction.
@@ -78,7 +78,7 @@ def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -
         "coa_phase",
         "coa_time",
     }
-    assert waveform.df == CATALOG_DF
+    assert catalog.df == CATALOG_DF
     assert waveform.minimum_frequency == 2.0
     assert waveform.maximum_frequency == 4096.0
     np.testing.assert_allclose(np.diff(frequencies), CATALOG_DF, rtol=0.0, atol=0.0)
@@ -128,13 +128,11 @@ def test_catalog_contraction_matches_the_analytic_spectrum(
             num_sources=num_sources,
             f_min=F_MIN,
             f_max=F_MAX,
-            df=CATALOG_DF,
+            frequency_resolution=CATALOG_DF,
         )
         for num_sources in catalog_sizes
     }
-    frequencies = jnp.asarray(
-        catalogs[LARGE_CATALOG_SIZE].waveform_metadata.frequencies
-    )
+    frequencies = jnp.asarray(catalogs[LARGE_CATALOG_SIZE].frequencies)
     mass_moments = uniform_prior_mass_moments(
         frequencies,
         minimum_redshift=Z_MIN,
@@ -243,9 +241,12 @@ def test_catalog_omega_gw_matches_the_analytic_spectrum(mock_catalog_factory) ->
        wrong.
     """
     catalog = mock_catalog_factory(
-        num_sources=LARGE_CATALOG_SIZE, f_min=F_MIN, f_max=F_MAX, df=CATALOG_DF
+        num_sources=LARGE_CATALOG_SIZE,
+        f_min=F_MIN,
+        f_max=F_MAX,
+        frequency_resolution=CATALOG_DF,
     )
-    frequencies = jnp.asarray(catalog.waveform_metadata.frequencies)
+    frequencies = jnp.asarray(catalog.frequencies)
     polarization_power = jnp.asarray(catalog.polarization_power)
     samples = catalog_samples(catalog)
     total_merger_rate, _, _ = reference_merger_rate_distance_and_logprob(

@@ -37,6 +37,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import jax
+import numpy as np
 
 from astrogwb.catalog import Catalog
 from astrogwb.paper.config.catalogs import (
@@ -117,20 +118,20 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
         frequency_resolution=waveform.frequency_resolution,
         chunk_size=waveform.chunk_size,
     )
+    segment_duration = 2.0 ** np.ceil(np.log2(1.0 / waveform.frequency_resolution))
     logger.info(
         "Generating %s waveforms for %d events (f_min=%.1f Hz, f_ref=%.1f Hz, "
-        "f_s=%.1f Hz, segment=%.4g s, df=%.4g Hz)",
+        "f_s=%.1f Hz, segment=%.4g s)",
         waveform.approximant,
         definition.num_samples,
         waveform.minimum_frequency,
         waveform.reference_frequency,
         waveform.sampling_frequency,
-        1.0 / generator.frequency_resolution,
-        generator.df,
+        segment_duration,
     )
     logger.info("Truncated frequency axis to f <= %.1f Hz", waveform.maximum_frequency)
 
-    return Catalog.from_generator(
+    catalog = Catalog.from_generator(
         samples,
         generator=generator,
         model_name=population.model,
@@ -139,6 +140,8 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
         density_sites=model.density_sites,
         seed=definition.seed,
     )
+    logger.info("Generated catalog with measured df=%.4g Hz", catalog.df)
+    return catalog
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -167,9 +170,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         "Saved catalog %s: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",
         definition.name,
         catalog.num_samples,
-        catalog.waveform_metadata.frequencies.size,
-        float(catalog.waveform_metadata.frequencies[0]),
-        float(catalog.waveform_metadata.frequencies[-1]),
+        catalog.frequencies.size,
+        catalog.frequencies[0].item(),
+        catalog.frequencies[-1].item(),
         definition.waveform.approximant,
     )
     logger.info("Output written to %s", output_path)

@@ -147,7 +147,7 @@ def build_mock_catalog(
     num_sources: int = 1024,
     f_min: float = 2.0,
     f_max: float = 4096.0,
-    df: float = 8.0,
+    frequency_resolution: float = 8.0,
 ) -> Catalog:
     """Build a real ``Catalog`` from the mock population draw.
 
@@ -181,7 +181,7 @@ def build_mock_catalog(
             maximum_frequency=f_max,
             reference_frequency=f_min,
             sampling_frequency=2.0 * f_max,
-            df=df,
+            frequency_resolution=frequency_resolution,
         ),
     )
 
@@ -256,13 +256,14 @@ def build_synthetic_estimator(
         maximum_frequency=F_MIN * num_frequencies,
         reference_frequency=F_MIN,
         sampling_frequency=2.0 * F_MAX,
-        df=F_MIN,
+        frequency_resolution=F_MIN,
     )
     catalog = Catalog(
         source_parameters={
             name: np.asarray(values) for name, values in samples.items()
         },
         polarization_power=np.asarray(polarization_power),
+        frequencies=np.asarray(generator.frequencies),
         waveform_metadata=generator,
         _model_name="bns_md_cosmological",
         _model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},

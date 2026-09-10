@@ -72,8 +72,8 @@ class Observation:
     """The observed-data side of a run: the fiducial injection spectrum.
 
     Arrays are pre-mask; ``frequency_mask`` selects the analysis band. ``df``
-    is the catalog's bin width and stays valid under the mask, which is why it
-    is carried here rather than measured off the masked grid.
+    is the catalog's grid-derived bin width and stays valid under the mask,
+    which is why it is carried here rather than measured off the masked grid.
     """
 
     frequencies: jax.Array
@@ -197,7 +197,7 @@ def prepare_observation(injection: Catalog, *, grid: AnalysisGrid) -> Observatio
         total_merger_rate,
     )
 
-    frequencies = jnp.asarray(restricted.waveform_metadata.frequencies)
+    frequencies = jnp.asarray(restricted.frequencies)
     # Band bounds only: this function never sees a detector network, so bins
     # the network cannot measure are dropped later, in prepare_inference_inputs.
     analysis_frequency_mask = make_frequency_mask(
@@ -212,7 +212,7 @@ def prepare_observation(injection: Catalog, *, grid: AnalysisGrid) -> Observatio
     )
     return Observation(
         frequencies=frequencies,
-        df=float(restricted.waveform_metadata.df),
+        df=float(restricted.df),
         total_merger_rate=total_merger_rate,
         spectral_density=spectrum,
         frequency_mask=analysis_frequency_mask,
@@ -261,7 +261,7 @@ def prepare_inference_inputs(
     proposal_catalog = proposal.restrict_redshift(
         grid.minimum_redshift, grid.maximum_redshift
     )
-    proposal_frequencies = np.asarray(proposal_catalog.waveform_metadata.frequencies)
+    proposal_frequencies = np.asarray(proposal_catalog.frequencies)
     validate_matching_frequency_grids(observation.frequencies, proposal_frequencies)
     n_freq, n_samples = proposal_catalog.polarization_power.shape
     logger.info(
@@ -285,8 +285,8 @@ def prepare_inference_inputs(
     # `compute_effective_psd` returns inf wherever no detector pair contributes,
     # and Normal(loc, inf).log_prob is -inf -- a constant that kills NUTS with no
     # usable diagnostic. Drop those bins along with the out-of-band ones. This is
-    # safe precisely because `df` is the catalog's attribute: the surviving bins
-    # need not be contiguous, and each still has width `df`.
+    # safe precisely because `df` is the catalog's grid-derived property: the
+    # surviving bins need not be contiguous, and each still has width `df`.
     band_mask = (
         observation.frequency_mask
         & jnp.isfinite(effective_psd_arr)

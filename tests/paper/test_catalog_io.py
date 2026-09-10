@@ -31,9 +31,11 @@ def test_hdf5_layout_metadata_and_order_round_trip(tmp_path: Path) -> None:
     restored = Catalog.load(path)
     assert restored.density_sites == catalog.density_sites
     assert list(restored.source_parameters) == list(catalog.source_parameters)
+    np.testing.assert_array_equal(restored.frequencies, catalog.frequencies)
     np.testing.assert_array_equal(
         restored.polarization_power, catalog.polarization_power
     )
+    assert restored.df == catalog.df
 
 
 def test_compression_applies_to_arrays(tmp_path: Path) -> None:
