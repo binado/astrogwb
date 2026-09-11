@@ -11,11 +11,7 @@ import pytest
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid
-from astrogwb.populations.bns_madau_dickinson import (
-    bns_md_cosmological,
-    madau_dickinson_total_merger_rate,
-)
-from astrogwb.populations.registry import _BoundMergerRate
+from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
     PolarizationPowerGenerator,
@@ -229,7 +225,7 @@ def _catalog(redshift: np.ndarray) -> Catalog:
 
 
 def test_get_population_model_binds_construction_settings_only() -> None:
-    """Generating hyperparameters must not be captured in the bound callable.
+    """Generating hyperparameters must not be captured in the bound source model.
 
     They describe how the catalog was made; a target evaluation supplies its
     own, and binding the generating ones here would silently pin them.
@@ -238,9 +234,6 @@ def test_get_population_model_binds_construction_settings_only() -> None:
     assert model.source.fn is bns_md_cosmological
     assert dict(model.source.model_kwargs) == POPULATION_RECORD["model_kwargs"]
     assert model.source.density_sites == POPULATION_RECORD["density_sites"]
-    assert isinstance(model.rate, _BoundMergerRate)
-    assert model.rate.fn is madau_dickinson_total_merger_rate
-    assert dict(model.rate.kwargs) == POPULATION_RECORD["model_kwargs"]
 
 
 def test_unknown_population_model_names_fail_clearly() -> None:

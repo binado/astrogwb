@@ -59,7 +59,6 @@ from astrogwb.populations.bns_madau_dickinson import (
     bns_md_uniform_mixture,
     madau_dickinson_total_merger_rate,
 )
-from astrogwb.populations.registry import _BoundMergerRate
 
 #: Deterministic site names, used only where a raw trace (rather than
 #: :meth:`~astrogwb.populations.SourceModel.evaluate`'s ``(log_prob, d_L)``
@@ -147,9 +146,6 @@ def test_shipped_models_are_registered() -> None:
     assert known_merger_rate_models() == ("madau_dickinson",)
     cosmological = build_population("bns_md_cosmological", settings={})
     assert cosmological.source.fn is bns_md_cosmological
-    assert isinstance(cosmological.rate, _BoundMergerRate)
-    assert cosmological.rate.fn is madau_dickinson_total_merger_rate
-    assert cosmological.rate.kwargs == ()
     assert build_population("bns_md_modified_propagation", settings={}).source.fn is (
         bns_md_modified_propagation
     )
@@ -181,70 +177,6 @@ def test_registering_a_name_twice_is_rejected() -> None:
         register_merger_rate_model("madau_dickinson")(madau_dickinson_total_merger_rate)
 
 
-def test_populations_from_reordered_settings_hash_equal_and_compile_once() -> None:
-    """The regression guard for keeping ``Population`` a canonical value object.
-
-    A dict's insertion order is not part of its equality, but an unsorted
-    ``model_kwargs`` tuple would leak that order into hashing and into
-    ``jax.jit``'s cache key -- silently retracing the ``(F, N)`` contraction on
-    every construction from the same catalog. Sorting in ``__post_init__`` is
-    what keeps all three of these genuinely one value.
-    """
-    kwargs = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
-    reordered = {"n_grid": N_GRID, "z_max": Z_MAX, "z_min": Z_MIN}
-    first = build_population("bns_md_cosmological", settings=kwargs)
-    second = build_population("bns_md_cosmological", settings=kwargs)
-    third = build_population("bns_md_cosmological", settings=reordered)
-    assert first == second == third
-    assert hash(first) == hash(second) == hash(third)
-
-    compiled = jax.jit(
-        lambda model, params: model.source.log_prob(params, sample_values()),
-        static_argnums=0,
-    )
-    for model in (first, second, third):
-        compiled(model, POPULATION_PARAMS)
-    assert compiled._cache_size() == 1  # ty: ignore[unresolved-attribute]
-
-
-def test_composed_population_from_reordered_kwargs_hash_equal_and_compile_once() -> (
-    None
-):
-    """Extends the guard above to a config-level composed ``Population``.
-
-    Built from the explicit ``source_model``/``rate_model`` call shape, with
-    both the shared block and the source-only block reordered. Without this,
-    a retrace-per-construction regression in that call shape lands silently
-    and surfaces only as slow NUTS.
-    """
-    kwargs = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
-    reordered_kwargs = {"n_grid": N_GRID, "z_max": Z_MAX, "z_min": Z_MIN}
-    source_kwargs = {"uniform_mixing_fraction": 0.1}
-    reordered_source_kwargs = dict(reversed(list(source_kwargs.items())))
-    first = build_population(
-        source_model="bns_md_uniform_mixture",
-        rate_model="madau_dickinson",
-        settings=kwargs,
-        source_kwargs=source_kwargs,
-    )
-    second = build_population(
-        source_model="bns_md_uniform_mixture",
-        rate_model="madau_dickinson",
-        settings=reordered_kwargs,
-        source_kwargs=reordered_source_kwargs,
-    )
-    assert first == second
-    assert hash(first) == hash(second)
-
-    compiled = jax.jit(
-        lambda model, params: model.source.log_prob(params, sample_values()),
-        static_argnums=0,
-    )
-    for model in (first, second):
-        compiled(model, POPULATION_PARAMS)
-    assert compiled._cache_size() == 1  # ty: ignore[unresolved-attribute]
-
-
 # --------------------------------------------------------------------------- #
 # Explicit site metadata and recomputation
 # --------------------------------------------------------------------------- #
@@ -259,7 +191,6 @@ def test_population_declares_its_source_outputs_and_density_factors() -> None:
     )
     with pytest.raises(FrozenInstanceError):
         model.source.density_sites = ()  # ty: ignore[invalid-assignment]
-    assert hash(model) == hash(mock_population_model())
 
 
 def test_source_call_returns_every_declared_site() -> None:

@@ -21,10 +21,9 @@ drift guard that closes that hole for the redshift law.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from functools import partial
 
 import jax
-from jax.typing import ArrayLike
 
 from astrogwb.populations.base import (
     MergerRateFn,
@@ -71,25 +70,6 @@ DEFAULT_MERGER_RATE_MODEL = "madau_dickinson"
 #: ``z_min``/``z_max`` in the one flat mapping and have both halves of the
 #: reconstructed population see the narrowed window.
 SHARED_MODEL_KWARGS: tuple[str, ...] = ("z_min", "z_max", "n_grid")
-
-
-@dataclass(frozen=True, kw_only=True)
-class _BoundMergerRate:
-    """Hashable ``(params) -> Array`` wrapping a registered rate plus kwargs.
-
-    ``functools.partial`` hashes and compares by identity, so two constructions
-    from the same catalog would silently retrace under ``jax.jit``. This
-    wrapper is a value object: same function and kwargs, same hash.
-    """
-
-    fn: Callable[..., jax.Array]
-    kwargs: tuple[tuple[str, float | int], ...]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "kwargs", tuple(sorted(self.kwargs)))
-
-    def __call__(self, params: Mapping[str, ArrayLike]) -> jax.Array:
-        return self.fn(params, **dict(self.kwargs))
 
 
 def register_source_model(name: str) -> Callable[[SourceFn], SourceFn]:
@@ -156,7 +136,7 @@ def _split_shared_kwargs(
 def _bound_merger_rate(
     name: str, *, model_kwargs: Mapping[str, float | int]
 ) -> MergerRateFn:
-    """Look up ``name`` and bind construction kwargs as a hashable callable."""
+    """Look up ``name`` and bind construction kwargs into a ``functools.partial``."""
     try:
         fn = _RATE_REGISTRY[name]
     except KeyError:
@@ -164,7 +144,7 @@ def _bound_merger_rate(
         raise KeyError(
             f"unknown merger-rate model {name!r}; registered models are: {known}"
         ) from None
-    return _BoundMergerRate(fn=fn, kwargs=tuple(model_kwargs.items()))
+    return partial(fn, **model_kwargs)
 
 
 def build_population(
@@ -188,6 +168,10 @@ def build_population(
     wrapper and the bound rate callable. The shared window/grid kwargs
     reach both from one definition, because a catalog persists only one flat
     kwargs mapping.
+
+    The bound rate is a :func:`functools.partial`, so the returned
+    :class:`~astrogwb.populations.Population` is compared and hashed by
+    identity: build it once per run and reuse that instance.
     """
     shared, source_only = _split_shared_kwargs(settings or {})
     source = build_source_model(

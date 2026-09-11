@@ -33,7 +33,8 @@ type SourceFn = Callable[..., Mapping[str, jax.Array]]
 
 #: A bound merger-rate callable: returns one observer-frame scalar,
 #: mergers per second, from hyperparameters alone. Construction settings
-#: are closed over by the caller that assembled the :class:`Population`.
+#: are closed over by the caller that assembled the :class:`Population`,
+#: as a :func:`functools.partial` over the registered rate function.
 type MergerRateFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
 
 #: The raw NumPyro trace escape hatch -- every site, untyped. Only
@@ -57,9 +58,7 @@ class SourceModel:
     singleton, which is what lets this object serve as static pytree metadata
     without forcing a retrace on every construction. ``model_kwargs`` are the
     model's construction keywords, forwarded to ``fn`` alongside ``params`` on
-    every call; they are sorted in :meth:`__post_init__` so two
-    ``SourceModel``s built from the same kwargs, in any order, are genuinely
-    equal and hash identically.
+    every call.
 
     ``density_sites`` names only the factors included in importance
     weighting; omitted factors must cancel between the target and proposal.
@@ -69,10 +68,6 @@ class SourceModel:
     fn: SourceFn
     model_kwargs: tuple[tuple[str, float | int], ...]
     density_sites: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "model_kwargs", tuple(sorted(self.model_kwargs)))
-        object.__setattr__(self, "density_sites", tuple(self.density_sites))
 
     def __call__(self, params: Mapping[str, ArrayLike]) -> dict[str, jax.Array]:
         """Declare sites and return the mapping that defines the source outputs.
@@ -222,11 +217,12 @@ class Population:
     is what makes ``total_merger_rate`` always present rather than optional.
 
     ``rate`` is already ``(params) -> Array``: construction settings are bound
-    by the caller that assembled this object, typically
-    :func:`~astrogwb.populations.registry.build_population`. The callable
-    must be a value object -- a module-level function or a frozen wrapper of
-    one -- not a nested ``def``, which would hash by identity and silently retrace
-    under ``jax.jit``.
+    by the caller that assembled this object, normally
+    :func:`~astrogwb.populations.registry.build_population`, which returns a
+    :func:`functools.partial`. It is compared and hashed **by identity**, so a
+    ``Population`` used as static metadata in a ``jax.jit`` call must be built
+    once and reused -- reconstructing an equal population forces a fresh
+    compile.
     """
 
     source: SourceModel
