@@ -163,9 +163,8 @@ SNR_GT_LINESTYLE = "--"
 # %% [markdown]
 # ## Plot helpers
 #
-# Shared band-limiting, SNR accumulation, the dual-axis $S_h$ /
-# $\Omega_{\mathrm{GW}}$ drawing, and the single-axis spectrum-versus-
-# sensitivity overlay used by the ET-only panels.
+# Shared band-limiting, SNR accumulation, and the dual-axis $S_h$ /
+# $\Omega_{\mathrm{GW}}$ drawing used by the spectrum panels.
 
 
 # %%
@@ -345,232 +344,6 @@ def _draw_omega_and_sh(
     return ax_omega, line_sh, line_omega
 
 
-def plot_omega_and_sh(
-    frequencies: jax.Array,
-    spectral_density_arr: jax.Array,
-    frequency_mask: jax.Array,
-    *,
-    h0: float,
-    omega_gw_min: float,
-) -> Figure:
-    """Plot $\\Omega_{\\mathrm{GW}}(f)$ and $S_h(f)$ on dual $y$-axes."""
-    freq, omega, sh, _ = band_limited_spectrum(
-        frequencies,
-        spectral_density_arr,
-        frequency_mask,
-        h0=h0,
-    )
-    fig, ax_sh = plt.subplots()
-    _draw_omega_and_sh(
-        ax_sh,
-        freq,
-        omega,
-        sh,
-        omega_gw_min=omega_gw_min,
-    )
-    return fig
-
-
-def plot_spectrum_and_sensitivities(
-    frequency: np.ndarray,
-    spectrum: np.ndarray,
-    networks: Sequence[Network],
-    frequency_by_network: Mapping[str, np.ndarray],
-    sensitivities_by_network: Mapping[str, np.ndarray],
-    *,
-    colors: Sequence[str],
-    linestyles: Sequence[str],
-    spectrum_label: str,
-    spectrum_color: str,
-    spectrum_linestyle: str,
-    ylabel: str,
-    ymin: float | None = None,
-) -> Figure:
-    """Overlay a fiducial spectrum with per-network Gaussian sensitivities."""
-    if len(networks) != len(colors) or len(networks) != len(linestyles):
-        raise ValueError("color and linestyle counts must match the networks")
-
-    fig, ax = plt.subplots()
-    (line_spectrum,) = ax.loglog(
-        frequency,
-        spectrum,
-        color=spectrum_color,
-        linestyle=spectrum_linestyle,
-        label=spectrum_label,
-    )
-    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
-        network_frequency = np.asarray(frequency_by_network[network.name])
-        sensitivity = np.asarray(sensitivities_by_network[network.name])
-        pos = np.isfinite(sensitivity) & (sensitivity > 0.0) & (network_frequency > 0.0)
-        ax.loglog(
-            network_frequency[pos],
-            sensitivity[pos],
-            color=color,
-            linestyle=linestyle,
-        )
-
-    ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-    ax.set_ylabel(ylabel)
-    if ymin is not None:
-        _, ymax = ax.get_ylim()
-        ax.set_ylim(ymin, ymax)
-    ax.set_axisbelow(True)
-    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-    _format_axis_ticks(ax)
-    ax.legend(
-        handles=[line_spectrum, *_network_legend_handles(networks, colors, linestyles)],
-        **DETECTOR_COMPARISON_LEGEND,
-    )
-    fig.tight_layout()
-    return fig
-
-
-def plot_effective_psds(
-    frequencies: jax.Array,
-    networks: Sequence[Network],
-    psds_by_network: Mapping[str, jax.Array | np.ndarray],
-    *,
-    colors: Sequence[str],
-    linestyles: Sequence[str],
-    frequency_mask: jax.Array,
-) -> Figure:
-    """Overlay network effective PSDs on shared log–log axes."""
-    if len(networks) != len(colors) or len(networks) != len(linestyles):
-        raise ValueError("color and linestyle counts must match the networks")
-
-    fig, ax = plt.subplots()
-    mask = np.asarray(frequency_mask)
-    freq = np.asarray(frequencies)[mask]
-    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
-        psd = np.asarray(psds_by_network[network.name])[mask]
-        pos = np.isfinite(psd) & (psd > 0.0) & (freq > 0.0)
-        ax.loglog(
-            freq[pos],
-            psd[pos],
-            color=color,
-            linestyle=linestyle,
-        )
-
-    ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-    ax.set_ylabel(r"$S_{\mathrm{eff}}(f)\ \mathrm{[Hz^{-1}]}$")
-    ax.set_axisbelow(True)
-    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-    _format_axis_ticks(ax)
-    ax.legend(
-        handles=_network_legend_handles(networks, colors, linestyles),
-        **DETECTOR_COMPARISON_LEGEND,
-    )
-    fig.tight_layout()
-    return fig
-
-
-def plot_snr_cumulative(
-    networks: Sequence[Network],
-    frequency_by_network: Mapping[str, np.ndarray],
-    snr_squared_by_network: Mapping[str, np.ndarray],
-    snr_lt_by_network: Mapping[str, np.ndarray],
-    snr_gt_by_network: Mapping[str, np.ndarray],
-    *,
-    colors: Sequence[str],
-    linestyles: Sequence[str],
-) -> Figure:
-    """Overlay per-network SNR integrand and cumulative SNR from each side."""
-    if len(networks) != len(colors) or len(networks) != len(linestyles):
-        raise ValueError("color and linestyle counts must match the networks")
-
-    fig, axes = plt.subplots(3, 1, sharex=True)
-    ax_integrand, ax_lt, ax_gt = axes
-
-    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
-        freq = frequency_by_network[network.name]
-        ax_integrand.loglog(
-            freq,
-            snr_squared_by_network[network.name],
-            color=color,
-            linestyle=linestyle,
-        )
-        ax_lt.semilogx(
-            freq,
-            snr_lt_by_network[network.name],
-            color=color,
-            linestyle=linestyle,
-        )
-        ax_gt.semilogx(
-            freq,
-            snr_gt_by_network[network.name],
-            color=color,
-            linestyle=linestyle,
-        )
-
-    ax_integrand.set_ylabel(r"$\Delta\mathrm{SNR}^{2}(f)$")
-    ax_lt.set_ylabel(r"$\mathrm{SNR}(<f)$")
-    ax_gt.set_ylabel(r"$\mathrm{SNR}(>f)$")
-    ax_gt.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-    ax_integrand.legend(
-        handles=_network_legend_handles(networks, colors, linestyles),
-        **DETECTOR_COMPARISON_LEGEND,
-    )
-
-    for axis in axes:
-        axis.set_axisbelow(True)
-        axis.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-        _format_axis_ticks(axis)
-    fig.tight_layout()
-    return fig
-
-
-def plot_spectrum_and_cumulative_snr(
-    frequency: np.ndarray,
-    omega_gw: np.ndarray,
-    spectral_density: np.ndarray,
-    snr_lt: np.ndarray,
-    snr_gt: np.ndarray,
-    *,
-    omega_gw_min: float,
-) -> Figure:
-    """Stack $S_h$ / $\\Omega_{\\mathrm{GW}}$ above both cumulative SNR curves."""
-    fig, (ax_sh, ax_snr) = plt.subplots(
-        2, 1, sharex=True, gridspec_kw={"height_ratios": [1.2, 1.0]}
-    )
-    _draw_omega_and_sh(
-        ax_sh,
-        frequency,
-        omega_gw,
-        spectral_density,
-        omega_gw_min=omega_gw_min,
-        xlabel=False,
-    )
-    ax_sh.tick_params(axis="x", labelbottom=False)
-
-    (line_lt,) = ax_snr.semilogx(
-        frequency,
-        snr_lt,
-        color=SNR_LT_COLOR,
-        linestyle=SNR_LT_LINESTYLE,
-        label=r"$\mathrm{SNR}(<f)$",
-    )
-    (line_gt,) = ax_snr.semilogx(
-        frequency,
-        snr_gt,
-        color=SNR_GT_COLOR,
-        linestyle=SNR_GT_LINESTYLE,
-        label=r"$\mathrm{SNR}(>f)$",
-    )
-    ax_snr.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-    ax_snr.set_ylabel(r"$\mathrm{SNR}$")
-    ax_snr.set_axisbelow(True)
-    ax_snr.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-    _format_axis_ticks(ax_snr)
-    ax_snr.legend(
-        handles=[line_lt, line_gt],
-        loc="best",
-        frameon=False,
-        handlelength=2.5,
-    )
-    fig.tight_layout()
-    return fig
-
-
 # %% [markdown]
 # ## Loading the waveform catalog
 #
@@ -664,6 +437,33 @@ print("reference network:", reference_network.label)
 # `OMEGA_GW_MIN`, so both axes show the same frequency band.
 
 # %%
+def plot_omega_and_sh(
+    frequencies: jax.Array,
+    spectral_density_arr: jax.Array,
+    frequency_mask: jax.Array,
+    *,
+    h0: float,
+    omega_gw_min: float,
+) -> Figure:
+    """Plot $\\Omega_{\\mathrm{GW}}(f)$ and $S_h(f)$ on dual $y$-axes."""
+    freq, omega, sh, _ = band_limited_spectrum(
+        frequencies,
+        spectral_density_arr,
+        frequency_mask,
+        h0=h0,
+    )
+    fig, ax_sh = plt.subplots()
+    _draw_omega_and_sh(
+        ax_sh,
+        freq,
+        omega,
+        sh,
+        omega_gw_min=omega_gw_min,
+    )
+    return fig
+
+
+# %%
 plot_omega_and_sh(
     frequencies,
     observation.spectral_density,
@@ -679,6 +479,46 @@ plot_omega_and_sh(
 # $S_{\mathrm{eff}}(f)$ for each detector network in `NETWORKS`.
 # `detector_network_styles` shares a color between each ET configuration and
 # its ET+CE companion, and dashes the CE curves.
+
+# %%
+def plot_effective_psds(
+    frequencies: jax.Array,
+    networks: Sequence[Network],
+    psds_by_network: Mapping[str, jax.Array | np.ndarray],
+    *,
+    colors: Sequence[str],
+    linestyles: Sequence[str],
+    frequency_mask: jax.Array,
+) -> Figure:
+    """Overlay network effective PSDs on shared log–log axes."""
+    if len(networks) != len(colors) or len(networks) != len(linestyles):
+        raise ValueError("color and linestyle counts must match the networks")
+
+    fig, ax = plt.subplots()
+    mask = np.asarray(frequency_mask)
+    freq = np.asarray(frequencies)[mask]
+    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
+        psd = np.asarray(psds_by_network[network.name])[mask]
+        pos = np.isfinite(psd) & (psd > 0.0) & (freq > 0.0)
+        ax.loglog(
+            freq[pos],
+            psd[pos],
+            color=color,
+            linestyle=linestyle,
+        )
+
+    ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax.set_ylabel(r"$S_{\mathrm{eff}}(f)\ \mathrm{[Hz^{-1}]}$")
+    ax.set_axisbelow(True)
+    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+    _format_axis_ticks(ax)
+    ax.legend(
+        handles=_network_legend_handles(networks, colors, linestyles),
+        **DETECTOR_COMPARISON_LEGEND,
+    )
+    fig.tight_layout()
+    return fig
+
 
 # %%
 plot_effective_psds(
@@ -698,6 +538,61 @@ plot_effective_psds(
 # for the three ET-only networks. $\sigma$ is the per-bin Gaussian scale of
 # $S_h$, so it shares units and observation-time scaling. Colors follow
 # `detector_network_styles`; labels sit above the axes.
+
+# %%
+def plot_spectrum_and_sensitivities(
+    frequency: np.ndarray,
+    spectrum: np.ndarray,
+    networks: Sequence[Network],
+    frequency_by_network: Mapping[str, np.ndarray],
+    sensitivities_by_network: Mapping[str, np.ndarray],
+    *,
+    colors: Sequence[str],
+    linestyles: Sequence[str],
+    spectrum_label: str,
+    spectrum_color: str,
+    spectrum_linestyle: str,
+    ylabel: str,
+    ymin: float | None = None,
+) -> Figure:
+    """Overlay a fiducial spectrum with per-network Gaussian sensitivities."""
+    if len(networks) != len(colors) or len(networks) != len(linestyles):
+        raise ValueError("color and linestyle counts must match the networks")
+
+    fig, ax = plt.subplots()
+    (line_spectrum,) = ax.loglog(
+        frequency,
+        spectrum,
+        color=spectrum_color,
+        linestyle=spectrum_linestyle,
+        label=spectrum_label,
+    )
+    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
+        network_frequency = np.asarray(frequency_by_network[network.name])
+        sensitivity = np.asarray(sensitivities_by_network[network.name])
+        pos = np.isfinite(sensitivity) & (sensitivity > 0.0) & (network_frequency > 0.0)
+        ax.loglog(
+            network_frequency[pos],
+            sensitivity[pos],
+            color=color,
+            linestyle=linestyle,
+        )
+
+    ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax.set_ylabel(ylabel)
+    if ymin is not None:
+        _, ymax = ax.get_ylim()
+        ax.set_ylim(ymin, ymax)
+    ax.set_axisbelow(True)
+    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+    _format_axis_ticks(ax)
+    ax.legend(
+        handles=[line_spectrum, *_network_legend_handles(networks, colors, linestyles)],
+        **DETECTOR_COMPARISON_LEGEND,
+    )
+    fig.tight_layout()
+    return fig
+
 
 # %%
 plot_spectrum_and_sensitivities(
@@ -749,6 +644,62 @@ plot_spectrum_and_sensitivities(
 # linestyles as the $S_{\mathrm{eff}}$ figure.
 
 # %%
+def plot_snr_cumulative(
+    networks: Sequence[Network],
+    frequency_by_network: Mapping[str, np.ndarray],
+    snr_squared_by_network: Mapping[str, np.ndarray],
+    snr_lt_by_network: Mapping[str, np.ndarray],
+    snr_gt_by_network: Mapping[str, np.ndarray],
+    *,
+    colors: Sequence[str],
+    linestyles: Sequence[str],
+) -> Figure:
+    """Overlay per-network SNR integrand and cumulative SNR from each side."""
+    if len(networks) != len(colors) or len(networks) != len(linestyles):
+        raise ValueError("color and linestyle counts must match the networks")
+
+    fig, axes = plt.subplots(3, 1, sharex=True)
+    ax_integrand, ax_lt, ax_gt = axes
+
+    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
+        freq = frequency_by_network[network.name]
+        ax_integrand.loglog(
+            freq,
+            snr_squared_by_network[network.name],
+            color=color,
+            linestyle=linestyle,
+        )
+        ax_lt.semilogx(
+            freq,
+            snr_lt_by_network[network.name],
+            color=color,
+            linestyle=linestyle,
+        )
+        ax_gt.semilogx(
+            freq,
+            snr_gt_by_network[network.name],
+            color=color,
+            linestyle=linestyle,
+        )
+
+    ax_integrand.set_ylabel(r"$\Delta\mathrm{SNR}^{2}(f)$")
+    ax_lt.set_ylabel(r"$\mathrm{SNR}(<f)$")
+    ax_gt.set_ylabel(r"$\mathrm{SNR}(>f)$")
+    ax_gt.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax_integrand.legend(
+        handles=_network_legend_handles(networks, colors, linestyles),
+        **DETECTOR_COMPARISON_LEGEND,
+    )
+
+    for axis in axes:
+        axis.set_axisbelow(True)
+        axis.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+        _format_axis_ticks(axis)
+    fig.tight_layout()
+    return fig
+
+
+# %%
 plot_snr_cumulative(
     NETWORKS,
     frequency_by_network,
@@ -765,6 +716,59 @@ plot_snr_cumulative(
 #
 # The fiducial spectrum stacked above both cumulative SNR curves, for the
 # reference network only.
+
+# %%
+def plot_spectrum_and_cumulative_snr(
+    frequency: np.ndarray,
+    omega_gw: np.ndarray,
+    spectral_density: np.ndarray,
+    snr_lt: np.ndarray,
+    snr_gt: np.ndarray,
+    *,
+    omega_gw_min: float,
+) -> Figure:
+    """Stack $S_h$ / $\\Omega_{\\mathrm{GW}}$ above both cumulative SNR curves."""
+    fig, (ax_sh, ax_snr) = plt.subplots(
+        2, 1, sharex=True, gridspec_kw={"height_ratios": [1.2, 1.0]}
+    )
+    _draw_omega_and_sh(
+        ax_sh,
+        frequency,
+        omega_gw,
+        spectral_density,
+        omega_gw_min=omega_gw_min,
+        xlabel=False,
+    )
+    ax_sh.tick_params(axis="x", labelbottom=False)
+
+    (line_lt,) = ax_snr.semilogx(
+        frequency,
+        snr_lt,
+        color=SNR_LT_COLOR,
+        linestyle=SNR_LT_LINESTYLE,
+        label=r"$\mathrm{SNR}(<f)$",
+    )
+    (line_gt,) = ax_snr.semilogx(
+        frequency,
+        snr_gt,
+        color=SNR_GT_COLOR,
+        linestyle=SNR_GT_LINESTYLE,
+        label=r"$\mathrm{SNR}(>f)$",
+    )
+    ax_snr.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax_snr.set_ylabel(r"$\mathrm{SNR}$")
+    ax_snr.set_axisbelow(True)
+    ax_snr.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+    _format_axis_ticks(ax_snr)
+    ax_snr.legend(
+        handles=[line_lt, line_gt],
+        loc="best",
+        frameon=False,
+        handlelength=2.5,
+    )
+    fig.tight_layout()
+    return fig
+
 
 # %%
 plot_spectrum_and_cumulative_snr(
