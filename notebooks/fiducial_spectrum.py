@@ -29,9 +29,10 @@
 # - a stacked panel of the spectrum above both cumulative SNR curves for the
 #   reference network only.
 #
-# Point `INJECTION_CATALOG_PATH` at the injection catalog used by `mcmc.py`,
-# and set `REFERENCE_RUN` to the `(experiment, run)` pair whose analysis grid
-# and detector list the overlays should follow.
+# Point `INJECTION_CATALOG_PATH` at the injection catalog used by `mcmc.py`.
+# The fiducials, analysis grid, and detector networks the overlays follow are
+# inlined in the configuration cell below as `FIDUCIALS`, `GRID`, `NETWORKS`,
+# and `REFERENCE_NETWORK`.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -56,12 +57,10 @@ from astrogwb.gwb import (
     spectral_snr_squared_per_bin,
 )
 from astrogwb.paper.catalogs import load_run_catalog
-from astrogwb.paper.config.mcmc import build_run_config
-from astrogwb.paper.config.runs import assemble_run, resolve_networks
+from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.inference import prepare_observation
 from astrogwb.paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
-    DETECTOR_NETWORKS,
     SPECTRUM,
     SPECTRUM_LINESTYLES,
     Network,
@@ -82,17 +81,65 @@ use_paper_style()
 # %% [markdown]
 # ## Pipeline configuration
 #
-# The injection catalog is the observed SGWB; `REFERENCE_RUN` is the analysis
-# whose frequency grid, observation time, and detector list the reference
-# overlays use. The compared networks are the legend in `DETECTOR_NETWORKS`,
-# resolved against `NETWORK_EXPERIMENT` so each curve's detectors are the ones
-# that run was sampled with.
+# The injection catalog is the observed SGWB. Everything else here is the
+# `cosmological-parameters` experiment's configuration written out literally
+# rather than merged from its config layers: `GRID` is the frequency band,
+# observation time, and redshift grid the reference overlays use, `FIDUCIALS`
+# is the point the non-sampled parameters are conditioned at, and `NETWORKS`
+# carries each compared network's own detector list.
+#
+# These values mirror `config/analysis/base/parameters.toml`,
+# `config/analysis/base/model.toml`, and
+# `config/analysis/runs/cosmological-parameters/*.toml`. Editing those files
+# does **not** update this notebook; the copies below are hand-maintained.
 
 # %%
 ROOT_DIR = Path()
 INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
-REFERENCE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
-NETWORK_EXPERIMENT = REFERENCE_RUN[0]
+
+# Inlined from config/analysis/base/parameters.toml [fiducials]. Only "H0" is
+# read below; the rest are kept so this is the whole fiducial point.
+FIDUCIALS: dict[str, float] = {
+    "H0": 67.66,
+    "Omega_m": 0.3096,
+    "xi_0": 1.0,
+    "xi_n": 1.91,
+    "gamma": 1.42,
+    "kappa": 4.62,
+    "z_peak": 1.84,
+    "local_merger_rate": 770.0,
+    "minimum_mass": 1.0,
+    "mass_width": 1.5,
+}
+
+# Inlined from config/analysis/base/model.toml plus its top-level
+# observation_time -- what that experiment's RunConfig.analysis_grid assembled to.
+GRID = AnalysisGrid(
+    observation_time=1.0,
+    f_min=2.0,
+    f_max=2048.0,
+    minimum_redshift=0.3,
+    maximum_redshift=20.0,
+    n_grid=256,
+)
+
+# Labels copied from astrogwb.paper.plotting.DETECTOR_NETWORKS, detector lists
+# from config/analysis/runs/cosmological-parameters/<name>.toml. Order is
+# load-bearing: detector_network_styles assigns a color by first appearance of
+# each base network name, so reordering recolors the curves and breaks the match
+# with the other network figures.
+NETWORKS: tuple[Network, ...] = (
+    Network("ET-triangular", r"ET-$\Delta$", ("E1", "E2", "E3")),
+    Network(
+        "ET-triangular-CE-Hanford", r"ET-$\Delta$ $+$ CE", ("E1", "E2", "E3", "C1")
+    ),
+    Network("ET-2L-aligned", "ET-2L-par", ("S1", "R1")),
+    Network("ET-2L-aligned-CE-Hanford", r"ET-2L-par $+$ CE", ("S1", "R1", "C1")),
+    Network("ET-2L-misaligned", "ET-2L", ("S2", "R2")),
+    Network("ET-2L-misaligned-CE-Hanford", r"ET-2L $+$ CE", ("S2", "R2", "C1")),
+)
+REFERENCE_NETWORK = "ET-2L-aligned-CE-Hanford"
+
 OMEGA_GW_MIN = 1.0e-15
 
 # Cumulative-SNR curves on the stacked figure: Okabe-Ito blue / vermillion,
@@ -499,48 +546,40 @@ def plot_spectrum_and_cumulative_snr(
 # %% [markdown]
 # ## Loading the waveform catalog
 #
-# `assemble_run` merges the reference run's config layers the same way the
-# workflow merges them on argv. `prepare_observation` builds the fiducial
-# $S_h$ from the injection catalog; each compared network then gets its own
-# $S_{\mathrm{eff}}$ from the detectors recorded in that run's config.
+# `prepare_observation` builds the fiducial $S_h$ from the injection catalog on
+# the inlined `GRID`; each compared network then gets its own
+# $S_{\mathrm{eff}}$ from the detector list inlined in `NETWORKS`.
 
 # %%
-RUN_CONFIG = build_run_config(assemble_run(*REFERENCE_RUN))
-fiducials = dict(RUN_CONFIG.fiducials)
-grid = RUN_CONFIG.analysis_grid
 catalog = load_run_catalog(INJECTION_CATALOG_PATH, label="injection")
-observation = prepare_observation(catalog, grid=grid)
+observation = prepare_observation(catalog, grid=GRID)
 frequencies = observation.frequencies
 frequency_mask = observation.frequency_mask
 
-networks = resolve_networks(
-    [(NETWORK_EXPERIMENT, name) for name, _ in DETECTOR_NETWORKS],
-    DETECTOR_NETWORKS,
-)
 reference_network = next(
-    network for network in networks if network.name == REFERENCE_RUN[1]
+    network for network in NETWORKS if network.name == REFERENCE_NETWORK
 )
-detector_colors, detector_linestyles = detector_network_styles(networks)
+detector_colors, detector_linestyles = detector_network_styles(NETWORKS)
 
 effective_psds: dict[str, jax.Array] = {}
-for network in networks:
+for network in NETWORKS:
     sensitivities = load_sensitivity_map(network.detectors)
     effective_psds[network.name] = jnp.asarray(
         effective_psd(frequencies, list(network.detectors), sensitivities)
     )
 
-observation_time_sec = years_to_seconds(grid.observation_time)
+observation_time_sec = years_to_seconds(GRID.observation_time)
 frequency_by_network: dict[str, np.ndarray] = {}
 snr_squared_by_network: dict[str, np.ndarray] = {}
 snr_lt_by_network: dict[str, np.ndarray] = {}
 snr_gt_by_network: dict[str, np.ndarray] = {}
 reference_band: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None = None
-for network in networks:
+for network in NETWORKS:
     band_freq, band_omega, band_sh, band_seff = band_limited_spectrum(
         frequencies,
         observation.spectral_density,
         frequency_mask,
-        h0=fiducials["H0"],
+        h0=FIDUCIALS["H0"],
         effective_psd_arr=effective_psds[network.name],
     )
     if band_seff is None:
@@ -561,7 +600,7 @@ if reference_band is None:
     raise RuntimeError("reference-network spectrum was not computed")
 freq, omega, sh, seff = reference_band
 sigma = np.asarray(
-    gaussian_bin_scale(jnp.asarray(seff), grid.observation_time, observation.df)
+    gaussian_bin_scale(jnp.asarray(seff), GRID.observation_time, observation.df)
 )
 print(f"loaded injection: n_frequency_bins={frequencies.shape[0]}")
 print("band bins:", int(np.sum(np.asarray(frequency_mask))), "of", frequencies.shape[0])
@@ -580,7 +619,7 @@ plot_omega_and_sh(
     frequencies,
     observation.spectral_density,
     frequency_mask,
-    h0=fiducials["H0"],
+    h0=FIDUCIALS["H0"],
     omega_gw_min=OMEGA_GW_MIN,
 )
 
@@ -588,14 +627,14 @@ plot_omega_and_sh(
 # %% [markdown]
 # ## Network effective PSDs
 #
-# $S_{\mathrm{eff}}(f)$ for each detector network in `DETECTOR_NETWORKS`.
+# $S_{\mathrm{eff}}(f)$ for each detector network in `NETWORKS`.
 # `detector_network_styles` shares a color between each ET configuration and
 # its ET+CE companion, and dashes the CE curves.
 
 # %%
 plot_effective_psds(
     frequencies,
-    networks,
+    NETWORKS,
     effective_psds,
     colors=detector_colors,
     linestyles=detector_linestyles,
@@ -630,7 +669,7 @@ plot_omega_sh_and_sigma(
 
 # %%
 plot_snr_cumulative(
-    networks,
+    NETWORKS,
     frequency_by_network,
     snr_squared_by_network,
     snr_lt_by_network,

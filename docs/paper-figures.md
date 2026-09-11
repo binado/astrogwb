@@ -110,10 +110,13 @@ weights it plots divide by the same denominator the chains did.
 The fiducial injection spectrum, network $S_{\mathrm{eff}}$, $\sigma$ overlay,
 and per-network SNR figures live in
 [`notebooks/fiducial_spectrum.py`](../notebooks/fiducial_spectrum.py) rather
-than the DAG. That notebook hard-codes the injection catalog path and
-`REFERENCE_RUN`, then resolves the six `DETECTOR_NETWORKS` entries against
-that experiment so each curve's detectors are the ones its chain was sampled
-with.
+than the DAG. That notebook is the one place that does not resolve its
+configuration: it inlines the `cosmological-parameters` fiducials, analysis
+grid, and all six detector networks as literals, and reads no run config. The
+values are hand-maintained copies of `config/analysis/base/parameters.toml`,
+`config/analysis/base/model.toml`, and
+`config/analysis/runs/cosmological-parameters/*.toml`, so editing those files
+does not change these figures -- update the notebook's configuration cell too.
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \

@@ -37,6 +37,14 @@ The paper notebooks merge a run's config layers with
 merge the workflow performs by passing layer paths on argv. None of them reads
 an intermediate assembled-config artifact, so they run against a fresh clone.
 
+`fiducial_spectrum.py` is the exception: it inlines the fiducials, analysis
+grid, and detector networks its run configs would resolve to. It is a
+notebook, not a Snakemake figure rule, and its configuration cell is a
+hand-maintained copy of the values it plots. The shared fiducials and detector
+lists now live in `config/fiducials.json` and `config/networks.json`; the
+notebook's analysis grid and local plotting choices remain in the notebook, so
+changes to those values should be mirrored in its configuration cell by hand.
+
 For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:
 
