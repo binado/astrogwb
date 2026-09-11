@@ -436,6 +436,8 @@ print("reference network:", reference_network.label)
 # is taken from the bin whose $\Omega_{\mathrm{GW}}$ is closest to
 # `OMEGA_GW_MIN`, so both axes show the same frequency band.
 
+
+# %%
 # %%
 def plot_omega_and_sh(
     frequencies: jax.Array,
@@ -464,13 +466,13 @@ def plot_omega_and_sh(
 
 
 # %%
-plot_omega_and_sh(
+_ = plot_omega_and_sh(
     frequencies,
     observation.spectral_density,
     frequency_mask,
     h0=FIDUCIALS["H0"],
     omega_gw_min=OMEGA_GW_MIN,
-);
+)
 
 
 # %% [markdown]
@@ -480,6 +482,8 @@ plot_omega_and_sh(
 # `detector_network_styles` shares a color between each ET configuration and
 # its ET+CE companion, and dashes the CE curves.
 
+
+# %%
 # %%
 def plot_effective_psds(
     frequencies: jax.Array,
@@ -521,14 +525,14 @@ def plot_effective_psds(
 
 
 # %%
-plot_effective_psds(
+_ = plot_effective_psds(
     frequencies,
     NETWORKS,
     effective_psds,
     colors=detector_colors,
     linestyles=detector_linestyles,
     frequency_mask=frequency_mask,
-);
+)
 
 
 # %% [markdown]
@@ -539,6 +543,8 @@ plot_effective_psds(
 # $S_h$, so it shares units and observation-time scaling. Colors follow
 # `detector_network_styles`; labels sit above the axes.
 
+
+# %%
 # %%
 def plot_spectrum_and_sensitivities(
     frequency: np.ndarray,
@@ -595,7 +601,7 @@ def plot_spectrum_and_sensitivities(
 
 
 # %%
-plot_spectrum_and_sensitivities(
+_ = plot_spectrum_and_sensitivities(
     fiducial_freq,
     fiducial_sh,
     ET_ONLY_NETWORKS,
@@ -608,7 +614,7 @@ plot_spectrum_and_sensitivities(
     spectrum_linestyle=SPECTRUM_LINESTYLES["sh"],
     ylabel=r"$S_h(f)\ \mathrm{[Hz^{-1}]}$",
     ymin=sh_ymin_matching_omega_floor(fiducial_omega, fiducial_sh, OMEGA_GW_MIN),
-);
+)
 
 
 # %% [markdown]
@@ -619,7 +625,7 @@ plot_spectrum_and_sensitivities(
 # $\Omega_{\mathrm{GW}}$.
 
 # %%
-plot_spectrum_and_sensitivities(
+_ = plot_spectrum_and_sensitivities(
     fiducial_freq,
     fiducial_omega,
     ET_ONLY_NETWORKS,
@@ -632,7 +638,7 @@ plot_spectrum_and_sensitivities(
     spectrum_linestyle=SPECTRUM_LINESTYLES["omega_gw"],
     ylabel=r"$\Omega_{\mathrm{GW}}(f)$",
     ymin=OMEGA_GW_MIN,
-);
+)
 
 
 # %% [markdown]
@@ -643,6 +649,8 @@ plot_spectrum_and_sensitivities(
 # the right. Every compared network is overlaid with the same colors and
 # linestyles as the $S_{\mathrm{eff}}$ figure.
 
+
+# %%
 # %%
 def plot_snr_cumulative(
     networks: Sequence[Network],
@@ -700,7 +708,7 @@ def plot_snr_cumulative(
 
 
 # %%
-plot_snr_cumulative(
+_ = plot_snr_cumulative(
     NETWORKS,
     frequency_by_network,
     snr_squared_by_network,
@@ -708,7 +716,7 @@ plot_snr_cumulative(
     snr_gt_by_network,
     colors=detector_colors,
     linestyles=detector_linestyles,
-);
+)
 
 
 # %% [markdown]
@@ -717,6 +725,8 @@ plot_snr_cumulative(
 # The fiducial spectrum stacked above both cumulative SNR curves, for the
 # reference network only.
 
+
+# %%
 # %%
 def plot_spectrum_and_cumulative_snr(
     frequency: np.ndarray,
@@ -771,11 +781,11 @@ def plot_spectrum_and_cumulative_snr(
 
 
 # %%
-plot_spectrum_and_cumulative_snr(
+_ = plot_spectrum_and_cumulative_snr(
     freq,
     omega,
     sh,
     snr_lt_by_network[reference_network.name],
     snr_gt_by_network[reference_network.name],
     omega_gw_min=OMEGA_GW_MIN,
-);
+)
