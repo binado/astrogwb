@@ -438,7 +438,6 @@ print("reference network:", reference_network.label)
 
 
 # %%
-# %%
 def plot_omega_and_sh(
     frequencies: jax.Array,
     spectral_density_arr: jax.Array,
@@ -483,7 +482,6 @@ _ = plot_omega_and_sh(
 # its ET+CE companion, and dashes the CE curves.
 
 
-# %%
 # %%
 def plot_effective_psds(
     frequencies: jax.Array,
@@ -544,7 +542,6 @@ _ = plot_effective_psds(
 # `detector_network_styles`; labels sit above the axes.
 
 
-# %%
 # %%
 def plot_spectrum_and_sensitivities(
     frequency: np.ndarray,
@@ -651,7 +648,6 @@ _ = plot_spectrum_and_sensitivities(
 
 
 # %%
-# %%
 def plot_snr_cumulative(
     networks: Sequence[Network],
     frequency_by_network: Mapping[str, np.ndarray],
@@ -726,7 +722,6 @@ _ = plot_snr_cumulative(
 # reference network only.
 
 
-# %%
 # %%
 def plot_spectrum_and_cumulative_snr(
     frequency: np.ndarray,
