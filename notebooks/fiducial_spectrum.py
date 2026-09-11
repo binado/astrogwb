@@ -670,7 +670,7 @@ plot_omega_and_sh(
     frequency_mask,
     h0=FIDUCIALS["H0"],
     omega_gw_min=OMEGA_GW_MIN,
-)
+);
 
 
 # %% [markdown]
@@ -688,7 +688,7 @@ plot_effective_psds(
     colors=detector_colors,
     linestyles=detector_linestyles,
     frequency_mask=frequency_mask,
-)
+);
 
 
 # %% [markdown]
@@ -713,7 +713,7 @@ plot_spectrum_and_sensitivities(
     spectrum_linestyle=SPECTRUM_LINESTYLES["sh"],
     ylabel=r"$S_h(f)\ \mathrm{[Hz^{-1}]}$",
     ymin=sh_ymin_matching_omega_floor(fiducial_omega, fiducial_sh, OMEGA_GW_MIN),
-)
+);
 
 
 # %% [markdown]
@@ -737,7 +737,7 @@ plot_spectrum_and_sensitivities(
     spectrum_linestyle=SPECTRUM_LINESTYLES["omega_gw"],
     ylabel=r"$\Omega_{\mathrm{GW}}(f)$",
     ymin=OMEGA_GW_MIN,
-)
+);
 
 
 # %% [markdown]
@@ -757,7 +757,7 @@ plot_snr_cumulative(
     snr_gt_by_network,
     colors=detector_colors,
     linestyles=detector_linestyles,
-)
+);
 
 
 # %% [markdown]
@@ -774,4 +774,4 @@ plot_spectrum_and_cumulative_snr(
     snr_lt_by_network[reference_network.name],
     snr_gt_by_network[reference_network.name],
     omega_gw_min=OMEGA_GW_MIN,
-)
+);
