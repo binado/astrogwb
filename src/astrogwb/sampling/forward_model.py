@@ -93,12 +93,6 @@ def _require_positive_int(name: str, value: int) -> int:
     return value
 
 
-def _require_non_negative_int(name: str, value: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError(f"{name} must be a non-negative integer, got {value!r}")
-    return value
-
-
 def _require_positive_time(observation_time: float) -> float:
     time = float(observation_time)
     if not math.isfinite(time) or time <= 0.0:
@@ -107,16 +101,6 @@ def _require_positive_time(observation_time: float) -> float:
             f"got {observation_time!r}"
         )
     return time
-
-
-def _zero_spectrum(generator: PolarizationPowerGenerator) -> jax.Array:
-    """Zeros on the concrete generator's realized frequency axis.
-
-    The metadata-only base descriptor has no grid. AnalyticInspiral owns a
-    uniform grid; Ripple caches the axis from the first generate.
-    """
-    frequencies = generator.frequencies  # ty: ignore[unresolved-attribute]
-    return jnp.zeros(jnp.shape(frequencies), dtype=jnp.float64)
 
 
 def _batch_power_sum(
@@ -147,9 +131,6 @@ def _sum_polarization_power(
     ``(F, batch_size)`` rather than ``(F, N)``.
     """
     n_events = array_dict_shape(sources)[0]
-    if n_events == 0:
-        return _zero_spectrum(generator)
-
     n_full, remainder = divmod(n_events, batch_size)
 
     def slice_sum(start: int, size: int) -> jax.Array:
@@ -184,11 +165,10 @@ def gwb_forward_model(
     grid; the Poisson rate converts it against the population's mergers-per-
     second :math:`\mathcal{R}`.
 
-    ``num_events`` and ``batch_size`` are Python integers and are static under
-    JIT. ``num_events`` is the plate dimension and the observed Poisson count
-    (the event count, not the merger rate). A traced sample cannot size the
-    plate. ``num_events = 0`` skips the plate (NumPyro requires a positive
-    plate size) and yields a zero spectrum.
+    ``num_events`` and ``batch_size`` must be positive Python integers and are
+    static under JIT. ``num_events`` is the plate dimension and the observed
+    Poisson count (the event count, not the merger rate). A traced sample
+    cannot size the plate.
 
     Registered sites:
 
@@ -196,9 +176,8 @@ def gwb_forward_model(
       ``Poisson(total_merger_rate * observation_time_seconds)``;
     - ``total_merger_rate`` and ``spectral_density`` as deterministics.
 
-    Source sites from ``population`` are sampled under the ``events`` plate
-    of length ``num_events`` when that length is positive. There is no
-    ``spectral_density_obs`` site.
+    Source sites from ``population`` are sampled under the ``events`` plate of
+    length ``num_events``. There is no ``spectral_density_obs`` site.
 
     ``average_mode`` is the same inclination convention as
     :func:`~astrogwb.gwb.spectral.spectral_density`. Face-on populations
@@ -206,7 +185,7 @@ def gwb_forward_model(
     population that already samples inclination uses ``"catalog_inclination"``.
     """
     batch_size = _require_positive_int("batch_size", batch_size)
-    num_events = _require_non_negative_int("num_events", num_events)
+    num_events = _require_positive_int("num_events", num_events)
     observation_time = _require_positive_time(observation_time)
     observation_time_sec = years_to_seconds(observation_time)
 
@@ -217,10 +196,7 @@ def gwb_forward_model(
         obs=num_events,
     )
 
-    if num_events:
-        power_sum = _sum_polarization_power(generator, sources, batch_size=batch_size)
-    else:
-        power_sum = _zero_spectrum(generator)
+    power_sum = _sum_polarization_power(generator, sources, batch_size=batch_size)
 
     factor = (
         INCLINATION_AVERAGE_TO_FACE_ON_RATIO

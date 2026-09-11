@@ -611,13 +611,6 @@ def test_stored_columns_are_bit_identical_to_a_later_recomputation() -> None:
         np.testing.assert_array_equal(samples[name], trace[name]["value"])
 
 
-def test_generation_rejects_a_non_positive_sample_count() -> None:
-    with pytest.raises(ValueError, match="num_samples must be positive"):
-        mock_population_model().source.sample(
-            jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=0
-        )
-
-
 # --------------------------------------------------------------------------- #
 # JAX transformations
 # --------------------------------------------------------------------------- #

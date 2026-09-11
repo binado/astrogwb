@@ -229,18 +229,6 @@ def test_analytic_inclination_rescales_face_on_power() -> None:
     np.testing.assert_array_equal(catalog["inclination"]["value"], jnp.zeros(N_EVENTS))
 
 
-def test_empty_catalog_is_a_zero_spectrum() -> None:
-    generator = _generator()
-    kwargs = _model_kwargs(generator=generator, num_events=0)
-    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
-    np.testing.assert_array_equal(
-        trace["spectral_density"]["value"],
-        jnp.zeros(generator.frequencies.shape),
-    )
-    np.testing.assert_array_equal(trace["n_events"]["value"], 0)
-    assert "redshift" not in trace
-
-
 def test_predictive_stacks_fixed_shape_sites() -> None:
     kwargs = _model_kwargs()
     draws = Predictive(
@@ -291,7 +279,7 @@ def test_invalid_batch_size_is_rejected(batch_size: int) -> None:
         )
 
 
-@pytest.mark.parametrize("num_events", [-1, True])
+@pytest.mark.parametrize("num_events", [0, -1, True])
 def test_invalid_num_events_is_rejected(num_events: int) -> None:
     with pytest.raises(ValueError, match="num_events"):
         _seeded_trace(
@@ -360,19 +348,6 @@ def test_ripple_batch_size_does_not_change_the_spectrum() -> None:
     )
     for name in _plated_source_site_names(first):
         np.testing.assert_array_equal(first[name]["value"], second[name]["value"])
-
-
-@pytest.mark.integration
-def test_ripple_empty_catalog_is_a_zero_spectrum() -> None:
-    kwargs = _ripple_kwargs(num_events=0)
-    generator = kwargs["generator"]
-    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
-    np.testing.assert_array_equal(
-        trace["spectral_density"]["value"],
-        jnp.zeros(generator.frequencies.shape),
-    )
-    np.testing.assert_array_equal(trace["n_events"]["value"], 0)
-    assert "redshift" not in trace
 
 
 @pytest.mark.integration

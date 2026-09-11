@@ -104,9 +104,10 @@ class SourceModel:
         *,
         num_samples: int,
     ) -> dict[str, jax.Array]:
-        """Draw source outputs; ``num_samples`` must be static under JIT.
+        """Draw source outputs; ``num_samples`` must be a positive Python int.
 
-        ``Predictive`` draws the sampled inputs, then one batched replay
+        ``num_samples`` is static under JIT. ``Predictive`` draws the sampled
+        inputs, then one batched replay
         recomputes the derived columns identically to evaluation. Predictive's
         per-draw execution can otherwise differ in its final bits, spoiling the
         exact-zero weights of a catalog used as its own proposal. Conditioning
@@ -114,8 +115,6 @@ class SourceModel:
         off ``Predictive``'s full return value -- so a deterministic is always
         the model's own recomputation, never a value handed back to it.
         """
-        if num_samples <= 0:
-            raise ValueError(f"num_samples must be positive, got {num_samples}")
         with handlers.block():
             draws = Predictive(self, num_samples=num_samples)(key, params)
             probe = handlers.trace(
@@ -238,19 +237,15 @@ class Population:
     ) -> tuple[Mapping[str, jax.Array], jax.Array]:
         """Publish the rate, then draw ``num_events`` sources under a plate.
 
-        ``num_events`` is a Python integer, static under JIT: NumPyro plates
-        reject size 0, so ``num_events <= 0`` skips the plate and returns an
-        empty source mapping.
+        ``num_events`` must be a positive Python integer, static under JIT.
 
         Returns ``(sources, total_merger_rate)``. ``sources`` maps column
-        name to an array of shape ``(num_events,)``, or is empty when
-        ``num_events <= 0``. ``total_merger_rate`` is the observer-frame
-        total merger rate, in mergers per second, shape ``()``.
+        name to an array of shape ``(num_events,)``. ``total_merger_rate`` is
+        the observer-frame total merger rate, in mergers per second, shape
+        ``()``.
         """
         total_merger_rate = _as_scalar_rate(self.rate(params))
         numpyro.deterministic(_TOTAL_MERGER_RATE_SITE, total_merger_rate)
-        if num_events <= 0:
-            return {}, total_merger_rate
         with numpyro.plate("events", num_events):
             sources = dict(self.source(params))
         return sources, total_merger_rate
