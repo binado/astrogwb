@@ -14,7 +14,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from astrogwb.catalog import Catalog
-from astrogwb.populations import build_population, resolve_recipe
+from astrogwb.populations import build_population
 from astrogwb.waveform import PolarizationPowerGenerator
 
 #: The population every fixture catalog is drawn from, matching what
@@ -125,7 +125,7 @@ def make_catalog(
             }
         )
 
-    source_model_name, rate_model_name = resolve_recipe(model_name)
+    source_model_name, rate_model_name = model_name, PAPER_RATE_MODEL
     return Catalog(
         source_parameters=parameters,
         polarization_power=polarization_power,

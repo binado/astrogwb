@@ -71,8 +71,7 @@ class PopulationConfig(BaseModel):
     import paths: registry keys change only on purpose, while module paths
     move as collateral whenever a module is reorganized. Composing the two
     independently is what lets a catalog def pair a guard-mixture redshift
-    law with the same rate a physical population uses, or express a pairing
-    that has no single legacy name.
+    law with the same rate a physical population uses.
 
     ``kwargs`` are construction settings routed to *both* models -- the
     redshift window and grid, the one correctness-relevant overlap between

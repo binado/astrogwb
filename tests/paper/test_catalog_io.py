@@ -104,6 +104,22 @@ def test_a_tampered_legacy_name_fails_on_load_when_the_new_attrs_are_absent(
         Catalog.load(path)
 
 
+def test_a_pre_split_catalog_loads_the_source_name_and_default_rate(
+    tmp_path: Path,
+) -> None:
+    """Files written before the source/rate attrs still reconstruct both names."""
+    path = tmp_path / "legacy.h5"
+    catalog = make_catalog(redshift=np.linspace(0.1, 1.0, 4))
+    catalog.save(path)
+    with h5py.File(path, "r+") as handle:
+        del handle.attrs["population_source_model"]
+        del handle.attrs["population_rate_model"]
+    loaded = Catalog.load(path)
+    assert loaded.population_source_model_name == "bns_md_cosmological"
+    assert loaded.population_rate_model_name == "madau_dickinson"
+    assert loaded.population_model_name == "bns_md_cosmological"
+
+
 def test_waveform_type_is_restored(tmp_path: Path) -> None:
     path = tmp_path / "catalog.h5"
     make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
