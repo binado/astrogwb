@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -98,6 +99,18 @@ def test_an_unlabelled_name_falls_back_to_itself() -> None:
     assert (
         plotting.parameter_label("no_such_parameter", REPO_ROOT) == "no_such_parameter"
     )
+
+
+def test_use_paper_style_finds_tex_when_kernel_path_is_stripped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tex_bin = Path("/Library/TeX/texbin")
+    if not (tex_bin / "kpsewhich").is_file():
+        pytest.skip("macOS TeX installation not present")
+
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    plotting._ensure_tex_on_path()
+    assert shutil.which("kpsewhich") is not None
 
 
 def test_spectrum_style_is_black_with_dotted_sh() -> None:
