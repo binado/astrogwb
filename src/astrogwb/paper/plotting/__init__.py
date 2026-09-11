@@ -34,9 +34,6 @@ order it sits in.
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cache
@@ -51,9 +48,6 @@ from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 
 _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
-_TEX_BIN_CANDIDATES: tuple[Path, ...] = (
-    Path("/Library/TeX/texbin"),  # macOS MacTeX / BasicTeX
-)
 
 #: Relative to the working directory -- the repository root for the workflow
 #: and every script -- matching `astrogwb.paper.config.runs`. Read lazily, never
@@ -187,49 +181,11 @@ DETECTOR_NETWORKS: tuple[tuple[str, str], ...] = (
 DETECTOR_NETWORK_RUNS: tuple[str, ...] = tuple(name for name, _ in DETECTOR_NETWORKS)
 
 
-def _ensure_tex_on_path() -> None:
-    """Prepend standard TeX bin dirs when the kernel PATH omits them.
-
-    GUI-launched Jupyter kernels (Cursor, VS Code, JupyterLab) often inherit a
-    stripped PATH that excludes ``/Library/TeX/texbin``. Matplotlib's usetex
-    backend then cannot run ``kpsewhich`` and fails looking for ``cmr10.tfm``.
-    """
-    if shutil.which("kpsewhich") is not None:
-        return
-    path_entries = set(os.environ.get("PATH", "").split(os.pathsep))
-    for candidate in _TEX_BIN_CANDIDATES:
-        if candidate.is_dir() and str(candidate) not in path_entries:
-            os.environ["PATH"] = f"{candidate}{os.pathsep}{os.environ.get('PATH', '')}"
-            if shutil.which("kpsewhich") is not None:
-                return
-
-
-def _tex_is_available() -> bool:
-    kpsewhich = shutil.which("kpsewhich")
-    if kpsewhich is None:
-        return False
-    result = subprocess.run(
-        [kpsewhich, "cmr10.tfm"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.returncode == 0 and bool(result.stdout.strip())
-
-
 def use_paper_style(root: Path | None = None) -> None:
-    """Apply ``paper.mplstyle`` and configured savefig settings.
-
-    GUI-launched notebook kernels may need their TeX path repaired before the
-    stylesheet is applied. If TeX is configured but unavailable, fall back to
-    Matplotlib's mathtext renderer.
-    """
-    _ensure_tex_on_path()
+    """Apply ``paper.mplstyle`` and configured savefig settings."""
     plt.style.use(str(_STYLE_PATH))
     plt.rcParams["savefig.dpi"] = figure_dpi(root)
     plt.rcParams["savefig.format"] = figure_format(root)
-    if plt.rcParams["text.usetex"] and not _tex_is_available():
-        plt.rcParams["text.usetex"] = False
 
 
 def save_figures(
