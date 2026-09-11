@@ -269,36 +269,6 @@ def test_missing_physical_rate_is_rejected() -> None:
         _seeded_trace(gwb_forward_model, params, **_model_kwargs())
 
 
-@pytest.mark.parametrize("batch_size", [0, -1, True])
-def test_invalid_batch_size_is_rejected(batch_size: int) -> None:
-    with pytest.raises(ValueError, match="batch_size"):
-        _seeded_trace(
-            gwb_forward_model,
-            POPULATION_PARAMS,
-            **_model_kwargs(batch_size=batch_size),
-        )
-
-
-@pytest.mark.parametrize("num_events", [0, -1, True])
-def test_invalid_num_events_is_rejected(num_events: int) -> None:
-    with pytest.raises(ValueError, match="num_events"):
-        _seeded_trace(
-            gwb_forward_model,
-            POPULATION_PARAMS,
-            **_model_kwargs(num_events=num_events),
-        )
-
-
-@pytest.mark.parametrize("observation_time", [0.0, -1.0, float("nan")])
-def test_invalid_observation_time_is_rejected(observation_time: float) -> None:
-    with pytest.raises(ValueError, match="observation_time"):
-        _seeded_trace(
-            gwb_forward_model,
-            POPULATION_PARAMS,
-            **_model_kwargs(observation_time=observation_time),
-        )
-
-
 @pytest.mark.integration
 def test_ripple_spectrum_matches_the_sum_of_per_source_power_over_time() -> None:
     generator = _ripple_generator(chunk_size=N_EVENTS)

@@ -71,7 +71,6 @@ eagerly. Warm Ripple (one generate) before reading
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 
 import jax
@@ -85,22 +84,6 @@ from astrogwb.gwb.spectral import AverageMode
 from astrogwb.populations import Population
 from astrogwb.utils import array_dict_shape, years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
-
-
-def _require_positive_int(name: str, value: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError(f"{name} must be a positive integer, got {value!r}")
-    return value
-
-
-def _require_positive_time(observation_time: float) -> float:
-    time = float(observation_time)
-    if not math.isfinite(time) or time <= 0.0:
-        raise ValueError(
-            f"observation_time must be a finite positive duration in years, "
-            f"got {observation_time!r}"
-        )
-    return time
 
 
 def _batch_power_sum(
@@ -165,8 +148,8 @@ def gwb_forward_model(
     grid; the Poisson rate converts it against the population's mergers-per-
     second :math:`\mathcal{R}`.
 
-    ``num_events`` and ``batch_size`` must be positive Python integers and are
-    static under JIT. ``num_events`` is the plate dimension and the observed
+    ``num_events`` and ``batch_size`` are Python integers, static under JIT.
+    ``num_events`` is the plate dimension and the observed
     Poisson count (the event count, not the merger rate). A traced sample
     cannot size the plate.
 
@@ -184,9 +167,6 @@ def gwb_forward_model(
     (inclination pinned at 0) pair with ``"analytic_inclination"``; a
     population that already samples inclination uses ``"catalog_inclination"``.
     """
-    batch_size = _require_positive_int("batch_size", batch_size)
-    num_events = _require_positive_int("num_events", num_events)
-    observation_time = _require_positive_time(observation_time)
     observation_time_sec = years_to_seconds(observation_time)
 
     sources, total_merger_rate = population(params, num_events=num_events)

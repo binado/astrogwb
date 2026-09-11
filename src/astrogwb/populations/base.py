@@ -104,9 +104,9 @@ class SourceModel:
         *,
         num_samples: int,
     ) -> dict[str, jax.Array]:
-        """Draw source outputs; ``num_samples`` must be a positive Python int.
+        """Draw source outputs; ``num_samples`` is a Python int, static under JIT.
 
-        ``num_samples`` is static under JIT. ``Predictive`` draws the sampled
+        ``Predictive`` draws the sampled
         inputs, then one batched replay
         recomputes the derived columns identically to evaluation. Predictive's
         per-draw execution can otherwise differ in its final bits, spoiling the
@@ -237,7 +237,7 @@ class Population:
     ) -> tuple[Mapping[str, jax.Array], jax.Array]:
         """Publish the rate, then draw ``num_events`` sources under a plate.
 
-        ``num_events`` must be a positive Python integer, static under JIT.
+        ``num_events`` is a Python integer, static under JIT.
 
         Returns ``(sources, total_merger_rate)``. ``sources`` maps column
         name to an array of shape ``(num_events,)``. ``total_merger_rate`` is
