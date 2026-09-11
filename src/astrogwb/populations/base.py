@@ -15,7 +15,7 @@ from __future__ import annotations
 import operator
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, NamedTuple
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -47,39 +47,6 @@ _LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
 #: The population-level rate site name. Reserved: a source model returning
 #: this key would collide with the merger-rate function's own declaration.
 _TOTAL_MERGER_RATE_SITE = "total_merger_rate"
-
-
-class SourceEvaluation(NamedTuple):
-    """One source-model execution's outputs: selected density and distance."""
-
-    log_prob: jax.Array
-    """Selected importance-weighting density, one value per source."""
-
-    luminosity_distance: jax.Array
-    """Effective distance governing waveform amplitude, in Mpc, shape ``(N,)``."""
-
-
-class PopulationEvaluation(NamedTuple):
-    """One population evaluation's outputs: density, distance, and rate."""
-
-    log_prob: jax.Array
-    """Selected importance-weighting density, one value per source."""
-
-    luminosity_distance: jax.Array
-    """Effective distance governing waveform amplitude, in Mpc, shape ``(N,)``."""
-
-    total_merger_rate: jax.Array
-    """Observer-frame total merger rate, in mergers per second, shape ``()``."""
-
-
-class PopulationDraw(NamedTuple):
-    """One population draw: the plated source columns and the scalar rate."""
-
-    sources: Mapping[str, jax.Array]
-    """Source columns, each shape ``(num_events,)``; empty when ``num_events == 0``."""
-
-    total_merger_rate: jax.Array
-    """Observer-frame total merger rate, in mergers per second, shape ``()``."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -171,14 +138,18 @@ class SourceModel:
 
         This is not necessarily the full joint or a marginal density. Every
         sampled input must be supplied, including those with omitted factors.
+
+        Returns an array of shape ``(N,)`` matching the source columns, or
+        ``()`` when ``density_sites`` is empty (the sum of no factors).
         """
-        return self.evaluate(params, sources).log_prob
+        log_prob, _ = self.evaluate(params, sources)
+        return log_prob
 
     def evaluate(
         self,
         params: Mapping[str, ArrayLike],
         sources: Mapping[str, ArrayLike],
-    ) -> SourceEvaluation:
+    ) -> tuple[jax.Array, jax.Array]:
         """Return selected log density and the recomputed distance in one pass.
 
         Effects are isolated from enclosing inference handlers, without
@@ -190,6 +161,11 @@ class SourceModel:
         out of a single execution alongside the log densities -- not from the
         trace's own copy of the same site -- which is what keeps the return
         mapping the one authoritative source of derived columns.
+
+        Returns ``(log_prob, luminosity_distance)``. ``log_prob`` is the
+        selected importance-weighting density, shape ``(N,)`` or ``()`` when
+        ``density_sites`` is empty. ``luminosity_distance`` is the effective
+        distance governing waveform amplitude, in Mpc, shape ``(N,)``.
         """
         captured: list[Mapping[str, jax.Array]] = []
 
@@ -215,9 +191,7 @@ class SourceModel:
         log_prob = jax.tree.reduce(operator.add, log_probs, initializer=jnp.zeros(()))
         result = captured[0]
         luminosity_distance = jnp.asarray(result[_LUMINOSITY_DISTANCE_SITE])
-        return SourceEvaluation(
-            log_prob=log_prob, luminosity_distance=luminosity_distance
-        )
+        return log_prob, luminosity_distance
 
     def trace(
         self,
@@ -261,36 +235,45 @@ class Population:
 
     def __call__(
         self, params: Mapping[str, ArrayLike], *, num_events: int
-    ) -> PopulationDraw:
+    ) -> tuple[Mapping[str, jax.Array], jax.Array]:
         """Publish the rate, then draw ``num_events`` sources under a plate.
 
         ``num_events`` is a Python integer, static under JIT: NumPyro plates
         reject size 0, so ``num_events <= 0`` skips the plate and returns an
         empty source mapping.
+
+        Returns ``(sources, total_merger_rate)``. ``sources`` maps column
+        name to an array of shape ``(num_events,)``, or is empty when
+        ``num_events <= 0``. ``total_merger_rate`` is the observer-frame
+        total merger rate, in mergers per second, shape ``()``.
         """
         total_merger_rate = _as_scalar_rate(self.rate(params))
         numpyro.deterministic(_TOTAL_MERGER_RATE_SITE, total_merger_rate)
         if num_events <= 0:
-            return PopulationDraw(sources={}, total_merger_rate=total_merger_rate)
+            return {}, total_merger_rate
         with numpyro.plate("events", num_events):
             sources = dict(self.source(params))
-        return PopulationDraw(sources=sources, total_merger_rate=total_merger_rate)
+        return sources, total_merger_rate
 
     def evaluate(
         self,
         params: Mapping[str, ArrayLike],
         sources: Mapping[str, ArrayLike],
-    ) -> PopulationEvaluation:
-        """One rate call plus one source evaluation, both handler-isolated."""
+    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        """One rate call plus one source evaluation, both handler-isolated.
+
+        Returns ``(log_prob, luminosity_distance, total_merger_rate)``.
+        ``log_prob`` and ``luminosity_distance`` are the source-evaluation
+        pair: selected density of shape ``(N,)`` (or ``()`` if no density
+        sites) and effective distance in Mpc of shape ``(N,)``.
+        ``total_merger_rate`` is the observer-frame total merger rate, in
+        mergers per second, shape ``()``.
+        """
         with handlers.block():
             total_merger_rate = _as_scalar_rate(self.rate(params))
             numpyro.deterministic(_TOTAL_MERGER_RATE_SITE, total_merger_rate)
-            source_eval = self.source.evaluate(params, sources)
-        return PopulationEvaluation(
-            log_prob=source_eval.log_prob,
-            luminosity_distance=source_eval.luminosity_distance,
-            total_merger_rate=total_merger_rate,
-        )
+            log_prob, luminosity_distance = self.source.evaluate(params, sources)
+        return log_prob, luminosity_distance, total_merger_rate
 
 
 def _as_scalar_rate(value: ArrayLike) -> jax.Array:

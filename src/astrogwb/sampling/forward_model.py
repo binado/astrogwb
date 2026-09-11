@@ -210,17 +210,15 @@ def gwb_forward_model(
     observation_time = _require_positive_time(observation_time)
     observation_time_sec = years_to_seconds(observation_time)
 
-    draw = population(params, num_events=num_events)
+    sources, total_merger_rate = population(params, num_events=num_events)
     numpyro.sample(
         "n_events",
-        dist.Poisson(draw.total_merger_rate * observation_time_sec),
+        dist.Poisson(total_merger_rate * observation_time_sec),
         obs=num_events,
     )
 
     if num_events:
-        power_sum = _sum_polarization_power(
-            generator, draw.sources, batch_size=batch_size
-        )
+        power_sum = _sum_polarization_power(generator, sources, batch_size=batch_size)
     else:
         power_sum = _zero_spectrum(generator)
 

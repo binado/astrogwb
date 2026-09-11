@@ -19,9 +19,6 @@ initialize it.
 from astrogwb.populations.base import (
     MergerRateFn,
     Population,
-    PopulationDraw,
-    PopulationEvaluation,
-    SourceEvaluation,
     SourceFn,
     SourceModel,
 )
@@ -56,9 +53,6 @@ __all__ = [
     "SHARED_MODEL_KWARGS",
     "MergerRateFn",
     "Population",
-    "PopulationDraw",
-    "PopulationEvaluation",
-    "SourceEvaluation",
     "SourceFn",
     "SourceModel",
     "amplitude_H0_fn",

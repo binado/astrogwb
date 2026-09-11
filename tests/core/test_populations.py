@@ -61,8 +61,9 @@ from astrogwb.populations.bns_madau_dickinson import (
 )
 from astrogwb.populations.registry import _BoundMergerRate
 
-#: Deterministic site names, used only where a raw trace (rather than the
-#: typed :class:`~astrogwb.populations.SourceEvaluation`) is under test.
+#: Deterministic site names, used only where a raw trace (rather than
+#: :meth:`~astrogwb.populations.SourceModel.evaluate`'s ``(log_prob, d_L)``
+#: pair) is under test.
 LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
 #: Population-level, declared by the merger-rate function outside the source
 #: model's own output set -- kept separate from ``DETERMINISTIC_SITES`` below.
@@ -276,8 +277,10 @@ def test_source_evaluate_needs_no_physical_rate() -> None:
         for name, value in POPULATION_PARAMS.items()
         if name != "local_merger_rate"
     }
-    source_eval = mock_population_model().source.evaluate(without_rate, sample_values())
-    assert source_eval.luminosity_distance.shape == SAMPLE_REDSHIFTS.shape
+    _, luminosity_distance = mock_population_model().source.evaluate(
+        without_rate, sample_values()
+    )
+    assert luminosity_distance.shape == SAMPLE_REDSHIFTS.shape
 
 
 def test_population_evaluate_requires_the_physical_rate_parameter() -> None:
@@ -310,11 +313,10 @@ def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
 # One execution supplies density, distance, and rate
 # --------------------------------------------------------------------------- #
 def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() -> None:
-    trace = mock_population_model().evaluate(POPULATION_PARAMS, sample_values())
-    assert trace.log_prob.shape == SAMPLE_REDSHIFTS.shape
-
-    distance = trace.luminosity_distance
-    rate = trace.total_merger_rate
+    log_prob, distance, rate = mock_population_model().evaluate(
+        POPULATION_PARAMS, sample_values()
+    )
+    assert log_prob.shape == SAMPLE_REDSHIFTS.shape
     assert distance.shape == SAMPLE_REDSHIFTS.shape
     assert rate.shape == ()
 
@@ -322,7 +324,7 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
     # Bit-exact: the distribution shares the reference's operation order, which
     # is what keeps a catalog that is its own proposal at exactly zero weight.
     np.testing.assert_allclose(
-        np.asarray(trace.log_prob), np.asarray(expected_logpdf), rtol=0.0, atol=2e-15
+        np.asarray(log_prob), np.asarray(expected_logpdf), rtol=0.0, atol=2e-15
     )
     np.testing.assert_allclose(distance, expected_distance, rtol=1e-14)
     np.testing.assert_allclose(float(rate), float(expected_rate), rtol=1e-15)
@@ -350,8 +352,7 @@ def test_derived_columns_match_the_declared_transforms() -> None:
 # Modified propagation
 # --------------------------------------------------------------------------- #
 def test_modified_propagation_scales_the_distance_by_the_gw_em_ratio() -> None:
-    trace = mock_target_model().evaluate(OFF_FIDUCIALS, sample_values())
-    distance = trace.luminosity_distance
+    _, distance, _ = mock_target_model().evaluate(OFF_FIDUCIALS, sample_values())
     _, cosmological_distance, _ = reference(OFF_FIDUCIALS)
     expected = cosmological_distance * jnp.exp(
         log_gw_em_ratio(SAMPLE_REDSHIFTS, OFF_FIDUCIALS["xi_0"], OFF_FIDUCIALS["xi_n"])
@@ -368,14 +369,15 @@ def test_modified_propagation_reduces_exactly_to_the_cosmological_model() -> Non
     a floor under the self-proposal log weights.
     """
     values = sample_values()
-    cosmological_trace = mock_population_model().evaluate(POPULATION_PARAMS, values)
-    modified_trace = mock_target_model().evaluate(FIDUCIALS, values)
-    assert FIDUCIALS["xi_0"] == 1.0
-    np.testing.assert_array_equal(cosmological_trace.log_prob, modified_trace.log_prob)
-    np.testing.assert_array_equal(
-        cosmological_trace.luminosity_distance,
-        modified_trace.luminosity_distance,
+    cosmological_log_prob, cosmological_distance, _ = mock_population_model().evaluate(
+        POPULATION_PARAMS, values
     )
+    modified_log_prob, modified_distance, _ = mock_target_model().evaluate(
+        FIDUCIALS, values
+    )
+    assert FIDUCIALS["xi_0"] == 1.0
+    np.testing.assert_array_equal(cosmological_log_prob, modified_log_prob)
+    np.testing.assert_array_equal(cosmological_distance, modified_distance)
 
 
 # --------------------------------------------------------------------------- #
@@ -387,19 +389,19 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
     selected = replace(
         model, source=replace(model.source, density_sites=("redshift", "spin_1z"))
     )
-    trace = model.evaluate(POPULATION_PARAMS, values)
-    selected_trace = selected.evaluate(POPULATION_PARAMS, values)
+    log_prob, luminosity_distance, total_merger_rate = model.evaluate(
+        POPULATION_PARAMS, values
+    )
+    selected_log_prob, selected_distance, selected_rate = selected.evaluate(
+        POPULATION_PARAMS, values
+    )
     expected_spin = dist.Uniform(-0.05, 0.05).log_prob(values["spin_1z"])
     expected_mass = jnp.log(2.0) - 2.0 * jnp.log(POPULATION_PARAMS["mass_width"])
     np.testing.assert_allclose(
-        selected_trace.log_prob, trace.log_prob + expected_spin - expected_mass
+        selected_log_prob, log_prob + expected_spin - expected_mass
     )
-    np.testing.assert_array_equal(
-        trace.luminosity_distance, selected_trace.luminosity_distance
-    )
-    np.testing.assert_array_equal(
-        trace.total_merger_rate, selected_trace.total_merger_rate
-    )
+    np.testing.assert_array_equal(luminosity_distance, selected_distance)
+    np.testing.assert_array_equal(total_merger_rate, selected_rate)
     raw = selected.source.trace(POPULATION_PARAMS, values)
     np.testing.assert_array_equal(
         raw["detector_frame_mass_1"]["value"],
@@ -411,9 +413,9 @@ def test_empty_density_selection_returns_scalar_zero() -> None:
     values = sample_values()
     model = mock_population_model()
     empty = replace(model, source=replace(model.source, density_sites=()))
-    trace = empty.evaluate(POPULATION_PARAMS, values)
-    assert trace.log_prob.shape == ()
-    assert float(trace.log_prob) == 0.0
+    log_prob, _, _ = empty.evaluate(POPULATION_PARAMS, values)
+    assert log_prob.shape == ()
+    assert float(log_prob) == 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -425,9 +427,11 @@ def _outer_model(observed: jax.Array) -> None:
     params = {**FIDUCIALS, "H0": hubble_constant}
     total = jnp.zeros(())
     for _ in range(2):
-        trace = mock_target_model().evaluate(params, sample_values())
-        total = total + jnp.sum(trace.log_prob)
-        total = total + jnp.sum(trace.luminosity_distance)
+        log_prob, luminosity_distance, _ = mock_target_model().evaluate(
+            params, sample_values()
+        )
+        total = total + jnp.sum(log_prob)
+        total = total + jnp.sum(luminosity_distance)
     numpyro.sample("obs", dist.Normal(total * 1e-6, 1.0), obs=observed)
 
 
@@ -450,9 +454,11 @@ def test_outer_density_and_gradient_match_a_direct_calculation() -> None:
         params = {**FIDUCIALS, "H0": hubble_constant}
         total = jnp.zeros(())
         for _ in range(2):
-            trace = mock_target_model().evaluate(params, sample_values())
-            total = total + jnp.sum(trace.log_prob)
-            total = total + jnp.sum(trace.luminosity_distance)
+            log_prob, luminosity_distance, _ = mock_target_model().evaluate(
+                params, sample_values()
+            )
+            total = total + jnp.sum(log_prob)
+            total = total + jnp.sum(luminosity_distance)
         prior = dist.Uniform(20.0, 140.0).log_prob(hubble_constant)
         likelihood = dist.Normal(total * 1e-6, 1.0).log_prob(jnp.asarray(0.0))
         return prior + likelihood
@@ -539,16 +545,14 @@ def test_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:
 def test_uniform_mixture_keeps_the_cosmological_distance_and_rate() -> None:
     """The guard changes which redshifts are drawn, not the physics at one."""
     model = _uniform_mixture_model(0.1)
-    mixture_trace = model.evaluate(POPULATION_PARAMS, sample_values())
-    plain_trace = mock_population_model().evaluate(POPULATION_PARAMS, sample_values())
-    np.testing.assert_array_equal(
-        mixture_trace.luminosity_distance, plain_trace.luminosity_distance
+    _, mixture_distance, mixture_rate = model.evaluate(
+        POPULATION_PARAMS, sample_values()
     )
-    assert mixture_trace.total_merger_rate is not None
-    assert plain_trace.total_merger_rate is not None
-    np.testing.assert_array_equal(
-        mixture_trace.total_merger_rate, plain_trace.total_merger_rate
+    _, plain_distance, plain_rate = mock_population_model().evaluate(
+        POPULATION_PARAMS, sample_values()
     )
+    np.testing.assert_array_equal(mixture_distance, plain_distance)
+    np.testing.assert_array_equal(mixture_rate, plain_rate)
 
 
 @pytest.mark.parametrize("fraction", [-0.1, 1.5])
@@ -622,7 +626,8 @@ def test_evaluation_traces_under_jit_and_vmaps_over_hyperparameters() -> None:
 
     def redshift_density(hubble_constant: jax.Array) -> jax.Array:
         params = {**OFF_FIDUCIALS, "H0": hubble_constant}
-        return mock_target_model().evaluate(params, values).log_prob
+        log_prob, _, _ = mock_target_model().evaluate(params, values)
+        return log_prob
 
     hubble_constants = jnp.array([60.0, 67.66, 75.0])
     batched = jax.jit(jax.vmap(redshift_density))(hubble_constants)
@@ -721,10 +726,8 @@ def test_gaussian_mass_density_matches_two_iid_normals_on_the_ordered_half_plane
     None
 ):
     values = sample_values()
-    actual = (
-        _mass_only(_gaussian_population_model())
-        .evaluate(GAUSSIAN_PARAMS, values)
-        .log_prob
+    actual, _, _ = _mass_only(_gaussian_population_model()).evaluate(
+        GAUSSIAN_PARAMS, values
     )
     component = dist.Normal(GAUSSIAN_PARAMS["mass_mean"], GAUSSIAN_PARAMS["mass_sigma"])
     expected = (
@@ -741,11 +744,10 @@ def test_gaussian_mass_density_matches_two_iid_normals_on_the_ordered_half_plane
     }
 
     def unordered_log_prob(sources: Mapping[str, ArrayLike]) -> jax.Array:
-        return (
-            _mass_only(_gaussian_population_model())
-            .evaluate(GAUSSIAN_PARAMS, sources)
-            .log_prob
+        log_prob, _, _ = _mass_only(_gaussian_population_model()).evaluate(
+            GAUSSIAN_PARAMS, sources
         )
+        return log_prob
 
     assert np.all(np.isneginf(np.asarray(jax.jit(unordered_log_prob)(unordered))))
 
@@ -770,8 +772,8 @@ def test_gaussian_mass_density_stays_finite_when_hyperparameters_move() -> None:
     """
     values = sample_values()
     shifted = {**GAUSSIAN_PARAMS, "mass_mean": 2.0, "mass_sigma": 0.2}
-    gaussian_log_prob = (
-        _mass_only(_gaussian_population_model()).evaluate(shifted, values).log_prob
+    gaussian_log_prob, _, _ = _mass_only(_gaussian_population_model()).evaluate(
+        shifted, values
     )
     assert np.all(np.isfinite(np.asarray(gaussian_log_prob)))
 
@@ -781,9 +783,10 @@ def test_gaussian_mass_density_stays_finite_when_hyperparameters_move() -> None:
             "mass_mean": mass_mean,
             "mass_sigma": mass_sigma,
         }
-        return jnp.sum(
-            _mass_only(_gaussian_population_model()).evaluate(params, values).log_prob
+        log_prob, _, _ = _mass_only(_gaussian_population_model()).evaluate(
+            params, values
         )
+        return jnp.sum(log_prob)
 
     d_mean, d_sigma = jax.grad(total, argnums=(0, 1))(
         jnp.asarray(GAUSSIAN_PARAMS["mass_mean"]),
@@ -795,7 +798,8 @@ def test_gaussian_mass_density_stays_finite_when_hyperparameters_move() -> None:
     outside_uniform = {**POPULATION_PARAMS, "minimum_mass": 1.35}
 
     def uniform_log_prob(params: Mapping[str, ArrayLike]) -> jax.Array:
-        return _mass_only(mock_population_model()).evaluate(params, values).log_prob
+        log_prob, _, _ = _mass_only(mock_population_model()).evaluate(params, values)
+        return log_prob
 
     assert np.all(np.isneginf(np.asarray(jax.jit(uniform_log_prob)(outside_uniform))))
 
@@ -804,25 +808,27 @@ def test_gaussian_modified_propagation_reduces_exactly_to_the_cosmological_model
     None
 ):
     values = sample_values()
-    cosmological = _gaussian_population_model().evaluate(GAUSSIAN_PARAMS, values)
-    modified = _gaussian_target_model().evaluate(GAUSSIAN_FIDUCIALS, values)
-    assert GAUSSIAN_FIDUCIALS["xi_0"] == 1.0
-    np.testing.assert_array_equal(cosmological.log_prob, modified.log_prob)
-    np.testing.assert_array_equal(
-        cosmological.luminosity_distance, modified.luminosity_distance
+    cosmological_log_prob, cosmological_distance, _ = (
+        _gaussian_population_model().evaluate(GAUSSIAN_PARAMS, values)
     )
+    modified_log_prob, modified_distance, _ = _gaussian_target_model().evaluate(
+        GAUSSIAN_FIDUCIALS, values
+    )
+    assert GAUSSIAN_FIDUCIALS["xi_0"] == 1.0
+    np.testing.assert_array_equal(cosmological_log_prob, modified_log_prob)
+    np.testing.assert_array_equal(cosmological_distance, modified_distance)
 
 
 def test_gaussian_and_uniform_models_share_distance_and_rate() -> None:
     values = sample_values()
-    gaussian = _gaussian_population_model().evaluate(GAUSSIAN_PARAMS, values)
-    uniform = mock_population_model().evaluate(POPULATION_PARAMS, values)
-    np.testing.assert_array_equal(
-        gaussian.luminosity_distance, uniform.luminosity_distance
+    _, gaussian_distance, gaussian_rate = _gaussian_population_model().evaluate(
+        GAUSSIAN_PARAMS, values
     )
-    assert gaussian.total_merger_rate is not None
-    assert uniform.total_merger_rate is not None
-    np.testing.assert_array_equal(gaussian.total_merger_rate, uniform.total_merger_rate)
+    _, uniform_distance, uniform_rate = mock_population_model().evaluate(
+        POPULATION_PARAMS, values
+    )
+    np.testing.assert_array_equal(gaussian_distance, uniform_distance)
+    np.testing.assert_array_equal(gaussian_rate, uniform_rate)
 
 
 def test_gaussian_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:

@@ -396,9 +396,8 @@ def catalog_merger_rate(catalog: Catalog) -> jax.Array:
     model = catalog.get_population_model()
     params = catalog.fiducials
     values = catalog.source_parameters
-    trace = model.evaluate(params, values)
-    assert trace.total_merger_rate is not None
-    return trace.total_merger_rate
+    _, _, total_merger_rate = model.evaluate(params, values)
+    return total_merger_rate
 
 
 def unpack(

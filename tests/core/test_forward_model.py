@@ -71,11 +71,7 @@ def _ripple_generator(*, chunk_size: int) -> RippleGenerator:
 
 def _observation_time_for(expected_events: float) -> float:
     """Years of observation such that ``R * T = expected_events``."""
-    rate = (
-        mock_population_model()
-        .evaluate(POPULATION_PARAMS, _one_source())
-        .total_merger_rate
-    )
+    _, _, rate = mock_population_model().evaluate(POPULATION_PARAMS, _one_source())
     assert rate is not None
     return expected_events / (float(rate) * years_to_seconds(1.0))
 
