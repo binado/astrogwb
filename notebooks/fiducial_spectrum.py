@@ -21,7 +21,10 @@
 # - the strain power $S_h(f)$ and energy-density spectrum
 #   $\Omega_{\mathrm{GW}}(f)$ on dual $y$-axes;
 # - each network's effective noise PSD $S_{\mathrm{eff}}(f)$;
-# - the per-bin Gaussian scale $\sigma$ for the reference network;
+# - $S_h(f)$ against the per-bin Gaussian scale $\sigma$ of the three ET-only
+#   networks (no Cosmic Explorer);
+# - $\Omega_{\mathrm{GW}}(f)$ against the same $\sigma$ converted through the
+#   $f^3$ map that takes $S_h$ to $\Omega_{\mathrm{GW}}$;
 # - the matched-filter integrand $\Delta\mathrm{SNR}^{2}(f)$ and the
 #   cumulative $\mathrm{SNR}(<f)$ and $\mathrm{SNR}(>f)$, overlaid for every
 #   network with the same colors and linestyles as the $S_{\mathrm{eff}}$
@@ -143,11 +146,14 @@ NETWORKS: tuple[Network, ...] = (
     Network("ET-2L-misaligned-CE-Hanford", r"ET-2L $+$ CE", ("S2", "R2", "C1")),
 )
 REFERENCE_NETWORK = "ET-2L-aligned-CE-Hanford"
+ET_ONLY_NETWORKS: tuple[Network, ...] = tuple(
+    network for network in NETWORKS if not network.name.endswith("-CE-Hanford")
+)
 
 OMEGA_GW_MIN = 1.0e-15
 
 # Cumulative-SNR curves on the stacked figure: Okabe-Ito blue / vermillion,
-# distinct from the black dual-axis spectrum and from dashed $\sigma$.
+# distinct from the black dual-axis spectrum.
 SNR_LT_COLOR = "#0072B2"
 SNR_GT_COLOR = "#D55E00"
 SNR_LT_LINESTYLE = "-"
@@ -157,8 +163,9 @@ SNR_GT_LINESTYLE = "--"
 # %% [markdown]
 # ## Plot helpers
 #
-# Shared band-limiting, SNR accumulation, and the dual-axis $S_h$ /
-# $\Omega_{\mathrm{GW}}$ drawing used by several panels below.
+# Shared band-limiting, SNR accumulation, the dual-axis $S_h$ /
+# $\Omega_{\mathrm{GW}}$ drawing, and the single-axis spectrum-versus-
+# sensitivity overlay used by the ET-only panels.
 
 
 # %%
@@ -282,7 +289,6 @@ def _draw_omega_and_sh(
     sh_linestyle: str | None = None,
     xlabel: bool = True,
     legend: bool = True,
-    extra_handles: Sequence[Line2D] = (),
 ) -> tuple[MplAxes, Line2D, Line2D]:
     """Draw dual-axis $S_h$ / $\\Omega_{\\mathrm{GW}}$ onto ``ax_sh``."""
     axis_color = "k"
@@ -331,7 +337,7 @@ def _draw_omega_and_sh(
     _format_axis_ticks(ax_omega)
     if legend:
         ax_sh.legend(
-            handles=[line_sh, line_omega, *extra_handles],
+            handles=[line_sh, line_omega],
             loc="upper right",
             frameon=False,
             handlelength=2.5,
@@ -365,39 +371,57 @@ def plot_omega_and_sh(
     return fig
 
 
-def plot_omega_sh_and_sigma(
+def plot_spectrum_and_sensitivities(
     frequency: np.ndarray,
-    omega_gw: np.ndarray,
-    spectral_density: np.ndarray,
-    sigma: np.ndarray,
+    spectrum: np.ndarray,
+    networks: Sequence[Network],
+    frequency_by_network: Mapping[str, np.ndarray],
+    sensitivities_by_network: Mapping[str, np.ndarray],
     *,
-    omega_gw_min: float,
-    sigma_label: str,
+    colors: Sequence[str],
+    linestyles: Sequence[str],
+    spectrum_label: str,
+    spectrum_color: str,
+    spectrum_linestyle: str,
+    ylabel: str,
+    ymin: float | None = None,
 ) -> Figure:
-    """Plot $S_h$, $\\Omega_{\\mathrm{GW}}$, and the per-bin Gaussian scale $\\sigma$."""
-    sigma_color = SPECTRUM["sigma"]
-    sigma_linestyle = SPECTRUM_LINESTYLES["sigma"]
-    fig, ax_sh = plt.subplots()
-    (line_sigma,) = ax_sh.loglog(
+    """Overlay a fiducial spectrum with per-network Gaussian sensitivities."""
+    if len(networks) != len(colors) or len(networks) != len(linestyles):
+        raise ValueError("color and linestyle counts must match the networks")
+
+    fig, ax = plt.subplots()
+    (line_spectrum,) = ax.loglog(
         frequency,
-        sigma,
-        color=sigma_color,
-        linestyle=sigma_linestyle,
-        label=sigma_label,
+        spectrum,
+        color=spectrum_color,
+        linestyle=spectrum_linestyle,
+        label=spectrum_label,
     )
-    _draw_omega_and_sh(
-        ax_sh,
-        frequency,
-        omega_gw,
-        spectral_density,
-        omega_gw_min=omega_gw_min,
-        extra_handles=(line_sigma,),
+    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
+        network_frequency = np.asarray(frequency_by_network[network.name])
+        sensitivity = np.asarray(sensitivities_by_network[network.name])
+        pos = np.isfinite(sensitivity) & (sensitivity > 0.0) & (network_frequency > 0.0)
+        ax.loglog(
+            network_frequency[pos],
+            sensitivity[pos],
+            color=color,
+            linestyle=linestyle,
+        )
+
+    ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax.set_ylabel(ylabel)
+    if ymin is not None:
+        _, ymax = ax.get_ylim()
+        ax.set_ylim(ymin, ymax)
+    ax.set_axisbelow(True)
+    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+    _format_axis_ticks(ax)
+    ax.legend(
+        handles=[line_spectrum, *_network_legend_handles(networks, colors, linestyles)],
+        **DETECTOR_COMPARISON_LEGEND,
     )
-    _, ymax = ax_sh.get_ylim()
-    ax_sh.set_ylim(
-        sh_ymin_matching_omega_floor(omega_gw, spectral_density, omega_gw_min),
-        max(float(ymax), float(np.max(sigma))),
-    )
+    fig.tight_layout()
     return fig
 
 
@@ -552,7 +576,9 @@ def plot_spectrum_and_cumulative_snr(
 #
 # `prepare_observation` builds the fiducial $S_h$ from the injection catalog on
 # the inlined `GRID`; each compared network then gets its own
-# $S_{\mathrm{eff}}$ from the detector list inlined in `NETWORKS`.
+# $S_{\mathrm{eff}}$ from the detector list inlined in `NETWORKS`. The ET-only
+# overlays use $\sigma = S_{\mathrm{eff}}/\sqrt{2 T \Delta f}$ on that same
+# band, and $\sigma_\Omega$ is the $f^3$ conversion of $\sigma$.
 
 # %%
 catalog = load_run_catalog(INJECTION_CATALOG_PATH, label="injection")
@@ -564,6 +590,7 @@ reference_network = next(
     network for network in NETWORKS if network.name == REFERENCE_NETWORK
 )
 detector_colors, detector_linestyles = detector_network_styles(NETWORKS)
+et_only_colors, et_only_linestyles = detector_network_styles(ET_ONLY_NETWORKS)
 
 effective_psds: dict[str, jax.Array] = {}
 for network in NETWORKS:
@@ -577,6 +604,8 @@ frequency_by_network: dict[str, np.ndarray] = {}
 snr_squared_by_network: dict[str, np.ndarray] = {}
 snr_lt_by_network: dict[str, np.ndarray] = {}
 snr_gt_by_network: dict[str, np.ndarray] = {}
+sigma_by_network: dict[str, np.ndarray] = {}
+omega_sigma_by_network: dict[str, np.ndarray] = {}
 reference_band: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None = None
 for network in NETWORKS:
     band_freq, band_omega, band_sh, band_seff = band_limited_spectrum(
@@ -594,17 +623,33 @@ for network in NETWORKS:
         observation_time_sec,
         observation.df,
     )
+    sigma = np.asarray(
+        gaussian_bin_scale(
+            jnp.asarray(band_seff), GRID.observation_time, observation.df
+        )
+    )
     frequency_by_network[network.name] = band_freq
     snr_squared_by_network[network.name] = snr_squared
     snr_lt_by_network[network.name] = snr_lt
     snr_gt_by_network[network.name] = snr_gt
+    sigma_by_network[network.name] = sigma
+    omega_sigma_by_network[network.name] = np.asarray(
+        omega_gw_from_spectral_density(
+            jnp.asarray(sigma),
+            jnp.asarray(band_freq),
+            hubble_constant=FIDUCIALS["H0"],
+        )
+    )
     if network.name == reference_network.name:
         reference_band = (band_freq, band_omega, band_sh, band_seff)
 if reference_band is None:
     raise RuntimeError("reference-network spectrum was not computed")
-freq, omega, sh, seff = reference_band
-sigma = np.asarray(
-    gaussian_bin_scale(jnp.asarray(seff), GRID.observation_time, observation.df)
+freq, omega, sh, _ = reference_band
+fiducial_freq, fiducial_omega, fiducial_sh, _ = band_limited_spectrum(
+    frequencies,
+    observation.spectral_density,
+    frequency_mask,
+    h0=FIDUCIALS["H0"],
 )
 print(f"loaded injection: n_frequency_bins={frequencies.shape[0]}")
 print("band bins:", int(np.sum(np.asarray(frequency_mask))), "of", frequencies.shape[0])
@@ -647,19 +692,51 @@ plot_effective_psds(
 
 
 # %% [markdown]
-# ## Spectrum with $\sigma$
+# ## $S_h$ and ET-only $\sigma$
 #
-# The per-bin Gaussian scale $\sigma = S_{\mathrm{eff}} / \sqrt{2 T \Delta f}$
-# for the reference network, overlaid on the same dual-axis spectrum.
+# The fiducial $S_h$ against $\sigma = S_{\mathrm{eff}} / \sqrt{2 T \Delta f}$
+# for the three ET-only networks. $\sigma$ is the per-bin Gaussian scale of
+# $S_h$, so it shares units and observation-time scaling. Colors follow
+# `detector_network_styles`; labels sit above the axes.
 
 # %%
-plot_omega_sh_and_sigma(
-    freq,
-    omega,
-    sh,
-    sigma,
-    omega_gw_min=OMEGA_GW_MIN,
-    sigma_label=r"$\sigma$",
+plot_spectrum_and_sensitivities(
+    fiducial_freq,
+    fiducial_sh,
+    ET_ONLY_NETWORKS,
+    frequency_by_network,
+    sigma_by_network,
+    colors=et_only_colors,
+    linestyles=et_only_linestyles,
+    spectrum_label=r"$S_h$",
+    spectrum_color=SPECTRUM["sh"],
+    spectrum_linestyle=SPECTRUM_LINESTYLES["sh"],
+    ylabel=r"$S_h(f)\ \mathrm{[Hz^{-1}]}$",
+    ymin=sh_ymin_matching_omega_floor(fiducial_omega, fiducial_sh, OMEGA_GW_MIN),
+)
+
+
+# %% [markdown]
+# ## $\Omega_{\mathrm{GW}}$ and ET-only $\sigma_\Omega$
+#
+# The same comparison in energy-density units: each $\sigma$ is converted with
+# `omega_gw_from_spectral_density`, the $f^3$ map that takes $S_h$ to
+# $\Omega_{\mathrm{GW}}$.
+
+# %%
+plot_spectrum_and_sensitivities(
+    fiducial_freq,
+    fiducial_omega,
+    ET_ONLY_NETWORKS,
+    frequency_by_network,
+    omega_sigma_by_network,
+    colors=et_only_colors,
+    linestyles=et_only_linestyles,
+    spectrum_label=r"$\Omega_{\mathrm{GW}}$",
+    spectrum_color=SPECTRUM["omega_gw"],
+    spectrum_linestyle=SPECTRUM_LINESTYLES["omega_gw"],
+    ylabel=r"$\Omega_{\mathrm{GW}}(f)$",
+    ymin=OMEGA_GW_MIN,
 )
 
 
