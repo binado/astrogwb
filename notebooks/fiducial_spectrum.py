@@ -94,7 +94,11 @@ use_paper_style()
 # does **not** update this notebook; the copies below are hand-maintained.
 
 # %%
-ROOT_DIR = Path()
+#: The notebook may be executed from the repository root (`jupytext --execute`,
+#: whose kernel cwd is this directory) or from the root itself, so probe for
+#: `notebooks/` the way `catalog_convergence.py` does. `Path().parent` is `.`,
+#: not `..`, hence the literal.
+ROOT_DIR = Path() if Path("notebooks").is_dir() else Path("..")
 INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
 
 # Inlined from config/analysis/base/parameters.toml [fiducials]. Only "H0" is
