@@ -30,7 +30,7 @@ from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.gwb.spectral import AverageMode, spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.populations import Population, build_population
+from astrogwb.populations import Population, SourceModel, build_population
 from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -70,7 +70,7 @@ def _source_parameters(
 ) -> dict[str, jax.Array]:
     ones = jnp.ones_like(REDSHIFTS)
     return derived_columns(
-        _generating_model(),
+        _generating_model().source,
         params,
         {
             REDSHIFT_SITE: REDSHIFTS,
@@ -108,7 +108,8 @@ def _catalog(
         polarization_power=np.asarray(power),
         frequencies=10.0 + 2.0 * np.arange(power.shape[0]),
         waveform_metadata=_waveform_metadata(power.shape[0]),
-        _model_name="bns_md_cosmological",
+        _source_model_name="bns_md_cosmological",
+        _rate_model_name="madau_dickinson",
         _model_kwargs=MODEL_KWARGS,
         _fiducials=params,
         _density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
@@ -156,7 +157,7 @@ def test_preparation_caches_the_catalogs_own_proposal_density() -> None:
     )
     np.testing.assert_array_equal(estimator.polarization_power, POWER)
     assert set(estimator.source_parameters) == set(catalog.source_parameters)
-    assert estimator.model.density_sites == (
+    assert estimator.model.source.density_sites == (
         "redshift",
         "source_frame_mass_1",
         "source_frame_mass_2",
@@ -231,13 +232,15 @@ def test_empty_density_factors_broadcast_to_source_count() -> None:
         polarization_power=catalog.polarization_power,
         frequencies=catalog.frequencies,
         waveform_metadata=catalog.waveform_metadata,
-        _model_name=catalog.population_model_name,
+        _source_model_name=catalog.population_source_model_name,
+        _rate_model_name=catalog.population_rate_model_name,
         _model_kwargs=catalog.population_model_kwargs,
         _fiducials=catalog.fiducials,
         _density_sites=(),
         seed=MOCK_POPULATION_SEED,
     )
-    target = replace(mock_target_model(), density_sites=())
+    base_target = mock_target_model()
+    target = replace(base_target, source=replace(base_target.source, density_sites=()))
     estimator = SpectralDensityImportanceEstimator.from_catalog(
         catalog, model=target, average_mode="catalog_inclination"
     )
@@ -249,7 +252,11 @@ def test_empty_density_factors_broadcast_to_source_count() -> None:
 
 
 def test_mismatched_density_factors_are_rejected() -> None:
-    target = replace(mock_target_model(), density_sites=("redshift", "spin_1z"))
+    base_target = mock_target_model()
+    target = replace(
+        base_target,
+        source=replace(base_target.source, density_sites=("redshift", "spin_1z")),
+    )
     with pytest.raises(ValueError, match="same source density factors"):
         SpectralDensityImportanceEstimator.from_catalog(
             _catalog(), model=target, average_mode="catalog_inclination"
@@ -285,7 +292,7 @@ def test_estimator_round_trips_as_a_pytree() -> None:
     assert len(leaves) == len(estimator.source_parameters) + 3
     rebuilt = jax.tree.unflatten(structure, leaves)
     assert rebuilt.model is estimator.model
-    assert rebuilt.model.density_sites == estimator.model.density_sites
+    assert rebuilt.model.source.density_sites == estimator.model.source.density_sites
     assert rebuilt.average_mode == estimator.average_mode
     for actual, expected in zip(
         jax.tree.leaves(rebuilt(FIDUCIALS)),
@@ -326,14 +333,22 @@ def test_direct_construction_from_prepared_arrays_is_supported() -> None:
 def test_proposal_density_is_evaluated_only_during_preparation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[Population] = []
-    original = Population.evaluate
+    """The proposal's one call happens at ``from_catalog``; the target's, per step.
+
+    The proposal density goes through ``SourceModel.log_prob`` (no rate
+    needed); the target goes through ``Population.evaluate``, which calls
+    ``self.source.evaluate`` once internally. Counting ``SourceModel.evaluate``
+    calls sees both: one for the proposal during preparation, one per later
+    ``estimator(...)`` call for the target.
+    """
+    calls: list[SourceModel] = []
+    original = SourceModel.evaluate
 
     def counted(self, params, sources):
         calls.append(self)
         return original(self, params, sources)
 
-    monkeypatch.setattr(Population, "evaluate", counted)
+    monkeypatch.setattr(SourceModel, "evaluate", counted)
     catalog = _catalog()
     target = mock_target_model()
     estimator = SpectralDensityImportanceEstimator.from_catalog(
@@ -345,7 +360,7 @@ def test_proposal_density_is_evaluated_only_during_preparation(
     estimator(OFF_FIDUCIALS)
     jax.jit(lambda value, params: value(params))(estimator, FIDUCIALS)
     assert len(calls) == 4
-    assert all(model is target for model in calls[1:])
+    assert all(model is target.source for model in calls[1:])
 
 
 # --------------------------------------------------------------------------- #

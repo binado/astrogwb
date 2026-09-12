@@ -300,7 +300,7 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
     parameters = {
         name: np.asarray(values, dtype=np.float64)
         for name, values in population_model_fn()
-        .sample(
+        .source.sample(
             jax.random.PRNGKey(POPULATION_SEED),
             POPULATION_PARAMS,
             num_samples=NUM_SOURCES,
@@ -319,7 +319,8 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
             sampling_frequency=2.0 * f_max,
             frequency_resolution=df,
         ),
-        model_name=POPULATION_MODEL,
+        source_model_name=POPULATION_MODEL,
+        rate_model_name="madau_dickinson",
         model_kwargs=POPULATION_MODEL_KWARGS,
         fiducials=POPULATION_PARAMS,
         density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
@@ -395,9 +396,8 @@ def catalog_merger_rate(catalog: Catalog) -> jax.Array:
     model = catalog.get_population_model()
     params = catalog.fiducials
     values = catalog.source_parameters
-    trace = model.evaluate(params, values)
-    assert trace.total_merger_rate is not None
-    return trace.total_merger_rate
+    _, _, total_merger_rate = model.evaluate(params, values)
+    return total_merger_rate
 
 
 def unpack(

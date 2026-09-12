@@ -39,6 +39,14 @@ FREQUENCY_RESOLUTION_ATTR = "frequency_resolution"
 POPULATION_SEED_ATTR = "population_seed"
 POPULATION_NUM_SAMPLES_ATTR = "population_num_samples"
 MODEL_NAME_ATTR = "population_model"
+#: Written on every save, additive on top of the legacy single ``MODEL_NAME_ATTR``.
+#: Optional on read: a v5 file written before the source/rate split has only
+#: ``MODEL_NAME_ATTR``, treated as the source-model name (see ``load_catalog``).
+SOURCE_MODEL_NAME_ATTR = "population_source_model"
+RATE_MODEL_NAME_ATTR = "population_rate_model"
+#: The rate every pre-split v5 catalog was drawn at. Those files name only
+#: the source (as ``population_model``); this is the pairing they all used.
+_LEGACY_RATE_MODEL_NAME = "madau_dickinson"
 MODEL_KWARGS_ATTR = "population_model_kwargs"
 POPULATION_PARAMS_ATTR = "population_params"
 DENSITY_SITES_ATTR = "population_density_sites"
@@ -86,6 +94,8 @@ def save_catalog(
         POPULATION_SEED_ATTR: catalog.seed,
         POPULATION_NUM_SAMPLES_ATTR: catalog.num_samples,
         MODEL_NAME_ATTR: catalog.population_model_name,
+        SOURCE_MODEL_NAME_ATTR: catalog.population_source_model_name,
+        RATE_MODEL_NAME_ATTR: catalog.population_rate_model_name,
         MODEL_KWARGS_ATTR: json.dumps(catalog.population_model_kwargs, sort_keys=True),
         POPULATION_PARAMS_ATTR: json.dumps(catalog.fiducials, sort_keys=True),
         DENSITY_SITES_ATTR: json.dumps(list(catalog.density_sites)),
@@ -123,6 +133,15 @@ def load_catalog[C: Catalog](cls: type[C], path: str | Path) -> C:
         seed = attrs[POPULATION_SEED_ATTR]
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise TypeError(f"{label}: {POPULATION_SEED_ATTR} must be an int")
+        if SOURCE_MODEL_NAME_ATTR in attrs and RATE_MODEL_NAME_ATTR in attrs:
+            source_model_name = str(attrs[SOURCE_MODEL_NAME_ATTR])
+            rate_model_name = str(attrs[RATE_MODEL_NAME_ATTR])
+        else:
+            # A v5 file written before the source/rate split: the single
+            # ``population_model`` attribute is the source-model name, and
+            # every such catalog used the Madau-Dickinson rate.
+            source_model_name = str(attrs[MODEL_NAME_ATTR])
+            rate_model_name = _LEGACY_RATE_MODEL_NAME
         values = np.asarray(handle["source_parameters"])
         catalog = cls(
             source_parameters={
@@ -131,7 +150,8 @@ def load_catalog[C: Catalog](cls: type[C], path: str | Path) -> C:
             polarization_power=np.asarray(handle["polarization_power"]),
             frequencies=np.asarray(handle["frequency"]),
             waveform_metadata=waveform,
-            _model_name=str(attrs[MODEL_NAME_ATTR]),
+            _source_model_name=source_model_name,
+            _rate_model_name=rate_model_name,
             _model_kwargs=_json_mapping(
                 attrs[MODEL_KWARGS_ATTR], label=label, name=MODEL_KWARGS_ATTR
             ),

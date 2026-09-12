@@ -231,11 +231,21 @@ def _importance_estimator(mode: AverageMode) -> SpectralDensityImportanceEstimat
     )
     target = mock_target_model()
 
-    def pinned_call(params: Mapping[str, ArrayLike], **settings: object) -> None:
+    def pinned_call(
+        params: Mapping[str, ArrayLike], **settings: object
+    ) -> Mapping[str, jax.Array]:
         """Take unsampled hyperparameters from the test's fixed fiducials."""
-        bns_md_modified_propagation({**FIDUCIALS, **params}, **settings)
+        return bns_md_modified_propagation({**FIDUCIALS, **params}, **settings)
 
-    pinned = replace(target, fn=pinned_call)
+    def pinned_rate_call(params: Mapping[str, ArrayLike]) -> jax.Array:
+        """The rate needs the same pinning: it takes ``params`` independently."""
+        return target.rate({**FIDUCIALS, **params})
+
+    pinned = replace(
+        target,
+        source=replace(target.source, fn=pinned_call),
+        rate=pinned_rate_call,
+    )
     return replace(estimator, model=pinned, average_mode=mode)
 
 

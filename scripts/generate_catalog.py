@@ -6,19 +6,20 @@ the registered NumPyro model it names, generates frequency-domain waveforms
 with the Ripple backend, reduces them to polarization power, and writes
 ``outputs/catalogs/<catalog>.h5``.
 
-The population declaration is a callable population, not a graph config, and it is
-the *same* declaration the analysis evaluates the proposal density with. That
-is what makes the output self-describing: the file records the model's registry
-name, its construction settings, the hyperparameters it was drawn at, and the
-density factors included in importance weighting, which is everything needed
-to reconstruct the map from hyperparameters to source density. Nothing
-downstream re-reads these configs, and no run config restates any of it.
+The population declaration is a source model composed with a merger-rate
+model, not a graph config, and it is the *same* pair the analysis evaluates
+the proposal density with. That is what makes the output self-describing: the
+file records both models' registry names, their construction settings, the
+hyperparameters they were drawn at, and the density factors included in
+importance weighting, which is everything needed to reconstruct the map from
+hyperparameters to source density. Nothing downstream re-reads these configs,
+and no run config restates any of it.
 
 It also retired the arithmetic that used to sit in this script. Detector-frame
 masses were computed here, by hand, from source-frame masses and redshift --
 so nothing checked them on the way back in. They are now
-``numpyro.deterministic`` sites of the population, recomputed and compared
-against the stored columns every time the catalog is loaded.
+``numpyro.deterministic`` sites of the source model, recomputed from the
+stochastic values on every evaluation.
 
 Usage::
 
@@ -42,7 +43,8 @@ import numpy as np
 from astrogwb.catalog import Catalog
 from astrogwb.paper.config.catalogs import (
     CatalogDefinition,
-    check_population_model,
+    check_rate_model,
+    check_source_model,
     load_catalog_layers,
 )
 from astrogwb.populations import build_population
@@ -89,20 +91,33 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def build_catalog(definition: CatalogDefinition) -> Catalog:
     """Draw the population, generate its power, and record what produced it."""
     population = definition.population
-    check_population_model(
-        population.model, label=f"catalog {definition.name!r} population.model"
+    check_source_model(
+        population.source_model,
+        label=f"catalog {definition.name!r} population.source_model",
     )
-    model = build_population(population.model, settings=population.kwargs)
+    check_rate_model(
+        population.rate_model,
+        label=f"catalog {definition.name!r} population.rate_model",
+    )
+    model = build_population(
+        source_model=population.source_model,
+        rate_model=population.rate_model,
+        settings=population.kwargs,
+        source_kwargs=population.source_kwargs,
+    )
 
     logger.info(
-        "Catalog %s: model=%s seed=%d num_samples=%d kwargs=%s",
+        "Catalog %s: source_model=%s rate_model=%s seed=%d num_samples=%d kwargs=%s "
+        "source_kwargs=%s",
         definition.name,
-        population.model,
+        population.source_model,
+        population.rate_model,
         definition.seed,
         definition.num_samples,
         population.kwargs,
+        population.source_kwargs,
     )
-    samples = model.sample(
+    samples = model.source.sample(
         jax.random.PRNGKey(definition.seed),
         population.params,
         num_samples=definition.num_samples,
@@ -134,10 +149,11 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
     catalog = Catalog.from_generator(
         samples,
         generator=generator,
-        model_name=population.model,
-        model_kwargs=population.kwargs,
+        source_model_name=population.source_model,
+        rate_model_name=population.rate_model,
+        model_kwargs={**population.kwargs, **population.source_kwargs},
         fiducials=population.params,
-        density_sites=model.density_sites,
+        density_sites=model.source.density_sites,
         seed=definition.seed,
     )
     logger.info("Generated catalog with measured df=%.4g Hz", catalog.df)
