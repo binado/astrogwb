@@ -12,6 +12,7 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
+from numpyro import handlers
 
 from astrogwb.catalog import Catalog
 from astrogwb.populations import build_population
@@ -40,12 +41,10 @@ PAPER_POPULATION_PARAMS: dict[str, float] = {
 
 def _derived_columns(model, params, sources):
     """Replay a source model at fixed source values, returning declared outputs."""
-    trace = model.trace(params, sources)
-    return {
-        name: jnp.asarray(site["value"])
-        for name, site in trace.items()
-        if site["type"] in ("sample", "deterministic")
-    }
+    bound = handlers.condition(
+        model, data={name: jnp.asarray(value) for name, value in sources.items()}
+    )
+    return {name: jnp.asarray(value) for name, value in bound(params).items()}
 
 
 def source_parameters(

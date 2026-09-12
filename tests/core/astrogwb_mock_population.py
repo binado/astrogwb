@@ -24,6 +24,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
+from numpyro import handlers
 
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
@@ -42,17 +43,14 @@ def derived_columns(
     The test-side counterpart of the batched replay inside
     :meth:`astrogwb.populations.SourceModel.sample`: sample sites take the
     supplied values, deterministic outputs are the model's recomputation. The
-    returned mapping is read off the raw trace's sample/deterministic sites --
-    the same set :meth:`SourceModel.__call__` returns -- rather than a static
-    site-name list, since the returned mapping is what defines the
-    source-output set.
+    result is the model's own return mapping -- the mapping that defines the
+    source-output set -- so a stored deterministic is never trusted over the
+    recomputation, and no static site-name list is needed.
     """
-    trace = model.trace(params, sources)
-    return {
-        name: jnp.asarray(site["value"])
-        for name, site in trace.items()
-        if site["type"] in ("sample", "deterministic")
-    }
+    bound = handlers.condition(
+        model, data={name: jnp.asarray(value) for name, value in sources.items()}
+    )
+    return {name: jnp.asarray(value) for name, value in bound(params).items()}
 
 
 #: Hyperparameters the mock injection is drawn at and built at.

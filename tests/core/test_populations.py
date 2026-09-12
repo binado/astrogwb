@@ -7,8 +7,8 @@ declaration, so the model cannot drift without a failure here.
 
 The composition properties get as much attention as the numbers. A population
 model is executed *inside* an outer inference model, and the two boundaries
-that make that safe -- handler isolation, and substituting source values inside
-the selective block -- fail silently when they are wrong:
+that make that safe -- handler isolation, and conditioning the source values --
+fail silently when they are wrong:
 sites leak into the outer joint density, or a factor drops out of one side of a
 ratio. Neither produces a shape error.
 """
@@ -60,9 +60,9 @@ from astrogwb.populations.bns_madau_dickinson import (
     madau_dickinson_total_merger_rate,
 )
 
-#: Deterministic site names, used only where a raw trace (rather than
-#: :meth:`~astrogwb.populations.SourceModel.evaluate`'s ``(log_prob, d_L)``
-#: pair) is under test.
+#: Deterministic site names, used only where the model's derived columns
+#: (rather than :meth:`~astrogwb.populations.SourceModel.evaluate`'s
+#: ``(log_prob, d_L)`` pair) are under test.
 LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
 #: Population-level, declared by the merger-rate function outside the source
 #: model's own output set -- kept separate from ``DETERMINISTIC_SITES`` below.
@@ -232,12 +232,10 @@ def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
         LUMINOSITY_DISTANCE_SITE: jnp.ones_like(SAMPLE_REDSHIFTS),
         "detector_frame_mass_1": jnp.zeros_like(SAMPLE_REDSHIFTS),
     }
-    clean = model.trace(POPULATION_PARAMS, sample_values())
-    actual = derived_columns(model, POPULATION_PARAMS, stored)
-    tampered = model.trace(POPULATION_PARAMS, stored)
+    clean = derived_columns(model, POPULATION_PARAMS, sample_values())
+    tampered = derived_columns(model, POPULATION_PARAMS, stored)
     for name in (LUMINOSITY_DISTANCE_SITE, "detector_frame_mass_1"):
-        np.testing.assert_array_equal(actual[name], clean[name]["value"])
-        np.testing.assert_array_equal(tampered[name]["value"], clean[name]["value"])
+        np.testing.assert_array_equal(tampered[name], clean[name])
 
 
 # --------------------------------------------------------------------------- #
@@ -333,9 +331,9 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
     )
     np.testing.assert_array_equal(luminosity_distance, selected_distance)
     np.testing.assert_array_equal(total_merger_rate, selected_rate)
-    raw = selected.source.trace(POPULATION_PARAMS, values)
+    columns = derived_columns(selected.source, POPULATION_PARAMS, values)
     np.testing.assert_array_equal(
-        raw["detector_frame_mass_1"]["value"],
+        columns["detector_frame_mass_1"],
         values["source_frame_mass_1"] * (1 + values["redshift"]),
     )
 
@@ -537,9 +535,11 @@ def test_stored_columns_are_bit_identical_to_a_later_recomputation() -> None:
         jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=32
     )
     stochastic = {name: samples[name] for name in STOCHASTIC_SITES}
-    trace = mock_population_model().source.trace(POPULATION_PARAMS, stochastic)
+    columns = derived_columns(
+        mock_population_model().source, POPULATION_PARAMS, stochastic
+    )
     for name in DETERMINISTIC_SITES:
-        np.testing.assert_array_equal(samples[name], trace[name]["value"])
+        np.testing.assert_array_equal(samples[name], columns[name])
 
 
 # --------------------------------------------------------------------------- #

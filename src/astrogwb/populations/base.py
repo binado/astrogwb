@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -37,12 +36,8 @@ type SourceFn = Callable[..., Mapping[str, jax.Array]]
 #: as a :func:`functools.partial` over the registered rate function.
 type MergerRateFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
 
-#: The raw NumPyro trace escape hatch -- every site, untyped. Only
-#: :meth:`SourceModel.trace` returns this.
-type RawPopulationTrace = Mapping[str, Mapping[str, Any]]
-
 #: Deterministic site every source model must declare. Private: density
-#: evaluation reads it from the model's *return value*, not from a trace.
+#: evaluation reads it from the model's *return value*.
 _LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
 
 #: The population-level rate site name. Reserved: a source model returning
@@ -170,23 +165,6 @@ class SourceModel:
         )
         luminosity_distance = jnp.asarray(result[_LUMINOSITY_DISTANCE_SITE])
         return log_prob, luminosity_distance
-
-    def trace(
-        self,
-        params: Mapping[str, ArrayLike],
-        sources: Mapping[str, ArrayLike],
-    ) -> RawPopulationTrace:
-        """Raw NumPyro trace escape hatch, isolated from enclosing handlers.
-
-        For consumers that need to inspect an arbitrary site by name -- such as
-        the test suite's derived-column recomputation. Runs once, outside JAX
-        transformations; nothing on the hot inference path uses it.
-        """
-        with handlers.block():
-            bound = handlers.condition(
-                self, data={name: jnp.asarray(value) for name, value in sources.items()}
-            )
-            return handlers.trace(bound).get_trace(params)
 
 
 @dataclass(frozen=True, kw_only=True)
