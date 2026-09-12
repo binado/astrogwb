@@ -10,12 +10,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
-from numpyro import handlers
 
 from astrogwb.catalog import Catalog
-from astrogwb.populations import build_population
+from astrogwb.populations import build_source_model
+from astrogwb.utils.sampling import evaluate_sources
 from astrogwb.waveform import PolarizationPowerGenerator
 
 #: The population every fixture catalog is drawn from, matching what
@@ -40,11 +39,13 @@ PAPER_POPULATION_PARAMS: dict[str, float] = {
 
 
 def _derived_columns(model, params, sources):
-    """Replay a source model at fixed source values, returning declared outputs."""
-    bound = handlers.condition(
-        model, data={name: jnp.asarray(value) for name, value in sources.items()}
-    )
-    return {name: jnp.asarray(value) for name, value in bound(params).items()}
+    """Replay a source model at fixed source values, returning declared outputs.
+
+    The same isolated, plated pass generation and every later evaluation take,
+    so stored deterministics match their recomputation bit for bit.
+    """
+    _, outputs = evaluate_sources(model, params, sources, density_sites=())
+    return outputs
 
 
 def source_parameters(
@@ -58,10 +59,10 @@ def source_parameters(
     """Complete a redshift ladder into every column the population declares."""
     if fiducials is None:
         fiducials = population_params
-    model = build_population(model_name, settings=model_kwargs or PAPER_MODEL_KWARGS)
+    model = build_source_model(model_name, settings=model_kwargs or PAPER_MODEL_KWARGS)
     ones = np.ones_like(redshift)
     columns = _derived_columns(
-        model.source,
+        model,
         fiducials or PAPER_POPULATION_PARAMS,
         {
             "redshift": redshift,

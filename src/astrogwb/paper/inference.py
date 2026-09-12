@@ -3,9 +3,9 @@
 Every entrypoint that samples, profiles, or plots the fiducial spectrum runs
 the same sequence: load the two catalogs, restrict them to the analysis
 redshift window, build the fiducial injection spectrum, build the effective
-PSD, build the analysis-band mask, prepare the estimator, build the model. It
-used to be spelled out at eight call sites, two of which were near-verbatim
-clones of each other down to the model-building block.
+PSD, build the analysis-band mask, prepare the importance arrays, build the
+model. It used to be spelled out at eight call sites, two of which were
+near-verbatim clones of each other down to the model-building block.
 
 The catalogs are now authoritative about their own populations, so this file no
 longer derives a proposal density from the run config, no longer cross-checks
@@ -25,7 +25,7 @@ the analysis band. :meth:`InferenceInputs.masked_model_kwargs` applies it.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import Any, NamedTuple
@@ -33,6 +33,7 @@ from typing import Any, NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
+from jax.typing import ArrayLike
 from numpyro import handlers
 from numpyro.distributions import Distribution
 
@@ -46,14 +47,20 @@ from astrogwb.distributions.amplitude import (
 )
 from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import AverageMode, spectral_density
-from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
+from astrogwb.importance.spectral import (
+    evaluate_log_weights,
+    importance_spectral_density,
+    prepare_importance_arrays,
+)
 from astrogwb.paper.catalogs import validate_matching_frequency_grids
 from astrogwb.paper.config.mcmc import AnalysisGrid, RunConfig
 from astrogwb.populations import (
-    Population,
+    MergerRateFn,
+    SourceFn,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
-    build_population,
+    build_merger_rate_fn,
+    build_source_model,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
@@ -91,16 +98,19 @@ class InferenceInputs:
     proposal: Catalog
     effective_psd: jax.Array
     observation_time: float
-    estimator: SpectralDensityImportanceEstimator
-    """The masked, band-restricted catalog bound to its target population."""
+    spectral_density_fn: SpectralDensityFn
+    """The importance-sampled spectrum: band-restricted catalog arrays bound to
+    the target source model and merger rate."""
+    log_weights_fn: Callable[[Mapping[str, ArrayLike]], jax.Array]
+    """Per-source log importance weights, bound to the same arrays and target."""
 
     def masked_model_kwargs(self) -> dict[str, Any]:
         """Restrict to the analysis band and return the model's data inputs.
 
         The generic likelihood takes only the observation and the per-bin
         Gaussian scale: the catalog and the inclination convention already
-        live inside :attr:`estimator`, and the PSD, observation time, and bin
-        width are consumed here rather than inside the model.
+        live inside :attr:`spectral_density_fn`, and the PSD, observation time,
+        and bin width are consumed here rather than inside the model.
         """
         observation = self.observation
         mask = np.asarray(observation.frequency_mask)
@@ -141,21 +151,32 @@ class AmplitudeMarginalization(NamedTuple):
     """Quadrature nodes the marginalization integral is evaluated on."""
 
 
-def target_population_model(config: RunConfig) -> Population:
-    """Resolve and bind the population the run's hyperparameters describe.
-
-    Constructed once per run and reused as static pytree metadata in the
-    estimator. Hyperparameters remain arguments to the population methods.
-    """
+def _analysis_grid_settings(config: RunConfig) -> dict[str, float | int]:
+    """The redshift window and grid a run's target callables are built on."""
     grid = config.analysis_grid
-    return build_population(
-        source_model=config.analysis.source_model,
-        rate_model=config.analysis.rate_model,
-        settings={
-            "z_min": grid.minimum_redshift,
-            "z_max": grid.maximum_redshift,
-            "n_grid": grid.n_grid,
-        },
+    return {
+        "z_min": grid.minimum_redshift,
+        "z_max": grid.maximum_redshift,
+        "n_grid": grid.n_grid,
+    }
+
+
+def target_source_model(config: RunConfig) -> SourceFn:
+    """Resolve and bind the source model the run's hyperparameters describe.
+
+    Build once per run and reuse: the returned partial hashes by identity, so
+    an equal rebuild under a jit-cached call forces a recompile.
+    Hyperparameters remain its call argument.
+    """
+    return build_source_model(
+        config.analysis.source_model, settings=_analysis_grid_settings(config)
+    )
+
+
+def target_merger_rate_fn(config: RunConfig) -> MergerRateFn:
+    """Resolve and bind the merger-rate function the run's target pairs with."""
+    return build_merger_rate_fn(
+        config.analysis.rate_model, settings=_analysis_grid_settings(config)
     )
 
 
@@ -170,8 +191,8 @@ def prepare_observation(injection: Catalog, *, grid: AnalysisGrid) -> Observatio
     check the two against each other any more.
 
     Weights are identically one. This is the observed data, not a reweighting,
-    and keeping it independent of the estimator is what lets a bug in the
-    weights show up as a mismatch rather than cancel out of both sides.
+    and keeping it independent of the importance weights is what lets a bug in
+    the weights show up as a mismatch rather than cancel out of both sides.
     """
     n_loaded = injection.polarization_power.shape[1]
     restricted = injection.restrict_redshift(
@@ -227,11 +248,8 @@ def catalog_total_merger_rate(catalog: Catalog) -> jax.Array:
     the rate is a property of the population and the redshift window, so a
     stored copy would be stale the moment the window is narrowed.
     """
-    model = catalog.get_population_model()
-    params = catalog.fiducials
-    values = catalog.source_parameters
-    _, _, total_merger_rate = model.evaluate(params, values)
-    return total_merger_rate
+    rate = catalog.get_merger_rate_fn()(catalog.fiducials)
+    return jnp.reshape(jnp.asarray(rate), ())
 
 
 def prepare_inference_inputs(
@@ -240,15 +258,20 @@ def prepare_inference_inputs(
     *,
     grid: AnalysisGrid,
     detectors: Sequence[str],
-    target_model: Population,
+    target_source_model: SourceFn,
+    target_merger_rate_fn: MergerRateFn,
     average_mode: AverageMode = "analytic_inclination",
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs.
 
+    ``target_source_model`` and ``target_merger_rate_fn`` are the bound target
+    callables, normally :func:`target_source_model` and
+    :func:`target_merger_rate_fn` of the run config; build them once per run.
+
     ``average_mode`` is the inclination convention the spectrum contraction
     uses. It belongs here rather than at the model-building sites because the
-    estimator owns it: once the catalog is bound, the model itself never sees
-    a polarization power array to average.
+    bound spectrum owns it: once the catalog is bound, the model itself never
+    sees a polarization power array to average.
     """
     observation = prepare_observation(injection, grid=grid)
 
@@ -302,21 +325,32 @@ def prepare_inference_inputs(
         )
     observation = replace(observation, frequency_mask=band_mask)
 
-    # The proposal density is the catalog's own recorded population, evaluated
-    # at the parameters it was drawn at. Doing that here, once, is also what
-    # keeps it off the per-sampler-step path.
-    estimator = SpectralDensityImportanceEstimator.from_catalog(
-        proposal_catalog,
-        model=target_model,
-        average_mode=average_mode,
-        frequency_mask=band_mask,
-    )
+    # The proposal density is the catalog's own recorded source model,
+    # evaluated at the parameters it was drawn at. Doing that here, once, is
+    # also what keeps it off the per-sampler-step path.
+    arrays = prepare_importance_arrays(proposal_catalog, frequency_mask=band_mask)
+    # One mapping feeds both partials, so the weights and the spectrum provably
+    # use the density factors the proposal was evaluated with.
+    weight_kwargs = {
+        "source_model": target_source_model,
+        "source_parameters": arrays.source_parameters,
+        "proposal_log_prob": arrays.proposal_log_prob,
+        "log_reference_distance": arrays.log_reference_distance,
+        "density_sites": arrays.density_sites,
+    }
     return InferenceInputs(
         observation=observation,
         proposal=proposal_catalog,
         effective_psd=effective_psd_arr,
         observation_time=grid.observation_time,
-        estimator=estimator,
+        spectral_density_fn=partial(
+            importance_spectral_density,
+            merger_rate_fn=target_merger_rate_fn,
+            polarization_power=arrays.polarization_power,
+            average_mode=average_mode,
+            **weight_kwargs,
+        ),
+        log_weights_fn=partial(evaluate_log_weights, **weight_kwargs),
     )
 
 
@@ -349,7 +383,7 @@ def build_model(
 
     Depends only on the config and the spectrum callable -- no catalog array --
     so it is exercisable without generating one. Production runs pass
-    ``inputs.estimator``; an analytic spectrum works just as well.
+    ``inputs.spectral_density_fn``; an analytic spectrum works just as well.
     """
     analysis = config.analysis
     # `config.priors` holds every live parameter distribution. Fixed sites are

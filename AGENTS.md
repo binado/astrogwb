@@ -49,7 +49,7 @@ A catalog records the density that drew it: its file carries the registered
 population model, that model's construction settings, the hyperparameters it
 was drawn at, and the density factors included in importance weighting. No
 run config restates any of it, and nothing cross-checks the two. Adding a
-population means adding a registered population class under
+population means adding a registered source-model function under
 `src/astrogwb/populations/`, never an import path in a config.
 
 A run config is three TOML layers merged in order -- `config/analysis/base/*`,

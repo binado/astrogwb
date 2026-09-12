@@ -47,7 +47,8 @@ from astrogwb.paper.config.catalogs import (
     check_source_model,
     load_catalog_layers,
 )
-from astrogwb.populations import build_population
+from astrogwb.populations import DEFAULT_DENSITY_SITES, build_source_model
+from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import RippleGenerator
 
 logger = logging.getLogger(__name__)
@@ -99,9 +100,8 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
         population.rate_model,
         label=f"catalog {definition.name!r} population.rate_model",
     )
-    model = build_population(
-        source_model=population.source_model,
-        rate_model=population.rate_model,
+    source_model = build_source_model(
+        population.source_model,
         settings=population.kwargs,
         source_kwargs=population.source_kwargs,
     )
@@ -117,7 +117,8 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
         population.kwargs,
         population.source_kwargs,
     )
-    samples = model.source.sample(
+    samples = sample_sources(
+        source_model,
         jax.random.PRNGKey(definition.seed),
         population.params,
         num_samples=definition.num_samples,
@@ -153,7 +154,7 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
         rate_model_name=population.rate_model,
         model_kwargs={**population.kwargs, **population.source_kwargs},
         fiducials=population.params,
-        density_sites=model.source.density_sites,
+        density_sites=DEFAULT_DENSITY_SITES,
         seed=definition.seed,
     )
     logger.info("Generated catalog with measured df=%.4g Hz", catalog.df)

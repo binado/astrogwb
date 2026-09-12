@@ -83,40 +83,51 @@ persisted `module:function` string is a reference that silently rots. An
 unknown key fails pre-flight, in `snakemake validate`, listing what is
 registered — before a GPU job is queued.
 
-The models are immutable callable `Population` objects. Their `__call__(params)`
-methods declare ordinary NumPyro sample and deterministic sites. Construction
-settings are frozen fields; hyperparameters and source arrays remain arguments.
-The registry maps stable names to constructors:
+Source models are plain registered NumPyro functions. `build_source_model`
+binds their construction settings into a `functools.partial`; hyperparameters
+and source arrays remain arguments. The merger rate is a separate registered
+function, bound the same way from the same flat settings:
 
 ```python
-population = population_model("bns_md_cosmological")(
-    z_min=0.0,
-    z_max=20.0,
-    n_grid=4096,
+from astrogwb.populations import (
+    DEFAULT_DENSITY_SITES,
+    build_merger_rate_fn,
+    build_source_model,
 )
-sources = population.sample(key, params, num_samples=1024)
-log_prob = population.log_prob(params, sources)  # shape (1024,)
+from astrogwb.utils.sampling import evaluate_sources, sample_sources
+
+settings = {"z_min": 0.0, "z_max": 20.0, "n_grid": 4096}
+source_model = build_source_model("bns_md_cosmological", settings=settings)
+merger_rate_fn = build_merger_rate_fn(settings=settings)
+
+sources = sample_sources(source_model, key, params, num_samples=1024)
+log_prob, outputs = evaluate_sources(
+    source_model, params, sources, density_sites=DEFAULT_DENSITY_SITES
+)  # log_prob: shape (1024,); outputs["luminosity_distance"]: shape (1024,)
+total_merger_rate = merger_rate_fn(params)  # shape ()
 ```
 
-- `source_sites` explicitly selects returned sampled and deterministic values,
-  including spins and detector-frame masses. It must include every sampled
-  input needed to replay the model. The population-level total merger rate is
-  available from evaluation but is not a source column.
+- The source model's returned mapping defines the stored columns, including
+  spins, detector-frame masses, and `luminosity_distance`. Its sample sites are
+  exactly the inputs needed to replay it; a missing one raises `KeyError`.
 - `density_sites` selects the density factors included in importance weighting.
-  The BNS classes default to `("redshift",)`, since their other factors cancel
-  between proposal and target. Omitting factors does not marginalize variables.
-- `evaluate(params, sources)` returns both the selected log density and a trace
-  containing recomputed distances and rate, letting inference use one execution.
+  Generation records `DEFAULT_DENSITY_SITES` — redshift and the ordered mass
+  pair — and the catalog's recorded tuple is the one both sides of every weight
+  are evaluated with. Omitting factors does not marginalize variables.
+- `evaluate_sources` runs the model once, under a `sources` plate, with every
+  column conditioned in, and returns the selected log density together with the
+  model's recomputed outputs.
 
-Sampling uses `Predictive` followed by batched recomputation of derived columns.
-Conditioning affects sample sites only, so stored deterministic values never
-override the model's recomputation. That pass matches density evaluation and
-preserves exactly zero self-reweighting errors. No seeded site-discovery pass or
-array-rank heuristic selects outputs.
-The methods isolate their NumPyro effects from enclosing inference models.
+`sample_sources` uses `Predictive` followed by one batched replay through
+`evaluate_sources`. Conditioning affects sample sites only, so stored
+deterministic values never override the model's recomputation. That replay is
+the same code path density evaluation takes, which preserves exactly zero
+self-reweighting errors. Both functions isolate their NumPyro effects from
+enclosing inference models with `handlers.block`.
 
-A population can remain static in a JIT-compiled estimator, while hyperparameters
-and source arrays are traced. To compile sampling, keep `num_samples` static.
+A bound partial hashes by identity: build it once per run and close a
+JIT-compiled function over it, while hyperparameters and source arrays are
+traced. To compile sampling, keep `num_samples` static.
 
 ### Mass models
 
@@ -217,9 +228,10 @@ population_num_samples   = 32768
 ```
 
 netCDF attributes are flat scalars, so the mappings travel as JSON strings.
-What is *not* stored is a callable: `Catalog.get_population_model()` looks the
-name up in the registry and constructs the model with its recorded settings
-and ordered density selection.
+What is *not* stored is a callable: `Catalog.get_source_model()` and
+`Catalog.get_merger_rate_fn()` look the names up in the registries and bind
+their recorded settings; `Catalog.density_sites` carries the ordered density
+selection.
 
 That is enough to reconstruct the exact map from hyperparameters to source
 density, which is why the run config no longer restates any of it and nothing

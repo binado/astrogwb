@@ -18,6 +18,7 @@ import pytest
 from repo import REPO_ROOT
 
 from astrogwb.catalog import Catalog
+from astrogwb.populations import DEFAULT_DENSITY_SITES
 
 CATALOG_TOML = """
 num_samples = 8
@@ -106,7 +107,9 @@ def test_generation_produces_a_catalog_that_describes_itself(
         "n_grid": 256,
     }
     assert catalog.fiducials["local_merger_rate"] == 770.0
-    assert catalog.density_sites == (
+    # Generation records the default factor set; the literal pins that default.
+    assert catalog.density_sites == DEFAULT_DENSITY_SITES
+    assert DEFAULT_DENSITY_SITES == (
         "redshift",
         "source_frame_mass_1",
         "source_frame_mass_2",

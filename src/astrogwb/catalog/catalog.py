@@ -35,7 +35,12 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.frequency import uniform_grid_spacing
-from astrogwb.populations import Population, build_population
+from astrogwb.populations import (
+    MergerRateFn,
+    SourceFn,
+    build_merger_rate_fn,
+    build_source_model,
+)
 from astrogwb.waveform import PolarizationPowerGenerator
 
 __all__ = ["REDSHIFT_SITE", "Catalog"]
@@ -61,9 +66,10 @@ class Catalog:
     parameter has shape ``(N,)``.
 
     The population fields are private because their public interface is
-    :meth:`get_population_model`: what callers need is the reconstructed
-    ``model(params)`` callable, not the strings it was rebuilt from. They are
-    persisted as HDF5 attributes; the callable itself never is.
+    :meth:`get_source_model` and :meth:`get_merger_rate_fn`: what callers need
+    is the reconstructed ``fn(params)`` callables, not the strings they were
+    rebuilt from. They are persisted as HDF5 attributes; the callables
+    themselves never are.
     """
 
     source_parameters: Mapping[str, NDArray[Any]]
@@ -212,9 +218,10 @@ class Catalog:
     def fiducials(self) -> Mapping[str, float]:
         """The hyperparameters the samples were drawn at.
 
-        These are *generating* parameters. They are not bound into the callable
-        :meth:`get_population_model` returns: a target evaluation supplies its
-        own, and binding these would silently pin them.
+        These are *generating* parameters. They are not bound into the
+        callables :meth:`get_source_model` and :meth:`get_merger_rate_fn`
+        return: a target evaluation supplies its own, and binding these would
+        silently pin them.
         """
         return dict(self._fiducials)
 
@@ -223,19 +230,23 @@ class Catalog:
         """Ordered source-density factors included in importance weighting."""
         return self._density_sites
 
-    def get_population_model(self) -> Population:
-        """Reconstruct the generating model with its construction settings bound.
+    def get_source_model(self) -> SourceFn:
+        """Reconstruct the generating source model with its settings bound.
 
         Returns the callable rather than a ``(model, kwargs)`` pair so every
-        consumer sees the one ``model(params)`` interface. An unknown name
-        fails here, listing what is registered.
+        consumer sees the one ``source_model(params)`` interface. An unknown
+        name fails here, listing what is registered. Each call builds a new
+        :func:`functools.partial`; call once and reuse the result.
         """
-        return build_population(
-            self._source_model_name,
-            rate_model=self._rate_model_name,
-            settings=self._model_kwargs,
-            density_sites=self._density_sites,
-        )
+        return build_source_model(self._source_model_name, settings=self._model_kwargs)
+
+    def get_merger_rate_fn(self) -> MergerRateFn:
+        """Reconstruct the merger-rate function with its shared settings bound.
+
+        Reads the same flat construction settings as :meth:`get_source_model`,
+        so a window narrowed by :meth:`restrict_redshift` reaches both.
+        """
+        return build_merger_rate_fn(self._rate_model_name, settings=self._model_kwargs)
 
     @property
     def num_samples(self) -> int:
@@ -314,9 +325,9 @@ class Catalog:
     def load(cls, path: str | Path) -> Self:
         """Read a catalog file, reconstructing and validating its population record.
 
-        Loading calls :meth:`get_population_model` once to verify the
-        recorded source and rate model names are still registered; it does
-        not re-execute the population or compare derived columns against the
+        Loading calls :meth:`get_source_model` and :meth:`get_merger_rate_fn`
+        once each to verify the recorded source and rate model names are still
+        registered; it does not re-execute the population or compare derived columns against the
         stored arrays. A catalog whose columns have drifted from its declared
         population is not caught here.
 

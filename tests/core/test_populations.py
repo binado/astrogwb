@@ -1,11 +1,11 @@
-"""Tests for populations declared as NumPyro models, and their evaluation.
+"""Tests for source models declared as NumPyro models, and their evaluation.
 
 The physics is checked against
 :func:`reference_population.reference_merger_rate_distance_and_logprob`, a
 hand-written grid-level restatement kept deliberately independent of the model
 declaration, so the model cannot drift without a failure here.
 
-The composition properties get as much attention as the numbers. A population
+The composition properties get as much attention as the numbers. A source
 model is executed *inside* an outer inference model, and the two boundaries
 that make that safe -- handler isolation, and conditioning the source values --
 fail silently when they are wrong:
@@ -15,8 +15,7 @@ ratio. Neither produces a shape error.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import FrozenInstanceError, replace
+from collections.abc import Callable, Mapping, Sequence
 from functools import partial
 
 import jax
@@ -33,6 +32,7 @@ from astrogwb_mock_population import (
     Z_MIN,
     derived_columns,
     make_redshift_grid,
+    mock_merger_rate_fn,
     mock_population_model,
     mock_target_model,
 )
@@ -43,8 +43,10 @@ from reference_population import reference_merger_rate_distance_and_logprob
 from astrogwb.catalog.catalog import REDSHIFT_SITE
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.populations import (
-    Population,
-    build_population,
+    DEFAULT_DENSITY_SITES,
+    SourceFn,
+    build_merger_rate_fn,
+    build_source_model,
     known_merger_rate_models,
     known_source_models,
     register_merger_rate_model,
@@ -59,14 +61,10 @@ from astrogwb.populations.bns_madau_dickinson import (
     bns_md_uniform_mixture,
     madau_dickinson_total_merger_rate,
 )
+from astrogwb.utils.sampling import evaluate_sources, sample_sources
 
-#: Deterministic site names, used only where the model's derived columns
-#: (rather than :meth:`~astrogwb.populations.SourceModel.evaluate`'s
-#: ``(log_prob, d_L)`` pair) are under test.
+#: The deterministic output governing waveform amplitude.
 LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
-#: Population-level, declared by the merger-rate function outside the source
-#: model's own output set -- kept separate from ``DETERMINISTIC_SITES`` below.
-TOTAL_MERGER_RATE_SITE = "total_merger_rate"
 
 #: Interior to the mock grid and not on a node.
 SAMPLE_REDSHIFTS = jnp.array([0.5, 1.234, 3.7, 12.0, 19.5])
@@ -121,6 +119,62 @@ def sample_values(redshift: jax.Array = SAMPLE_REDSHIFTS) -> dict[str, jax.Array
     }
 
 
+def evaluate(
+    model: SourceFn,
+    params: Mapping[str, ArrayLike],
+    values: Mapping[str, ArrayLike],
+    density_sites: Sequence[str] = DEFAULT_DENSITY_SITES,
+) -> tuple[jax.Array, jax.Array]:
+    """Selected ``(N,)`` density and recomputed distance, in one isolated pass."""
+    log_prob, outputs = evaluate_sources(
+        model, params, values, density_sites=density_sites
+    )
+    return log_prob, outputs[LUMINOSITY_DISTANCE_SITE]
+
+
+GAUSSIAN_PARAMS: dict[str, float] = {
+    **{
+        name: value
+        for name, value in POPULATION_PARAMS.items()
+        if name not in {"minimum_mass", "mass_width"}
+    },
+    "mass_mean": 1.33,
+    "mass_sigma": 0.09,
+}
+GAUSSIAN_FIDUCIALS: dict[str, float] = {
+    **{
+        name: value
+        for name, value in FIDUCIALS.items()
+        if name not in {"minimum_mass", "mass_width"}
+    },
+    "mass_mean": 1.33,
+    "mass_sigma": 0.09,
+}
+MASS_SITES = ("source_frame_mass_1", "source_frame_mass_2")
+
+
+def _gaussian_population_model() -> SourceFn:
+    return build_source_model(
+        "bns_md_gaussian_cosmological",
+        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
+    )
+
+
+def _gaussian_target_model() -> SourceFn:
+    return build_source_model(
+        "bns_md_gaussian_modified_propagation",
+        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
+    )
+
+
+#: The generating models whose draw path runs through the plated replay: the
+#: ordered-uniform triangle and the data-dependent truncated Gaussian.
+GENERATING_MODELS: dict[str, tuple[Callable[[], SourceFn], dict[str, float]]] = {
+    "uniform_mass": (mock_population_model, POPULATION_PARAMS),
+    "gaussian_mass": (_gaussian_population_model, GAUSSIAN_PARAMS),
+}
+
+
 def reference(params: dict[str, float]) -> tuple[jax.Array, jax.Array, jax.Array]:
     return reference_merger_rate_distance_and_logprob(
         params,
@@ -144,30 +198,50 @@ def test_shipped_models_are_registered() -> None:
         "bns_md_uniform_mixture",
     )
     assert known_merger_rate_models() == ("madau_dickinson",)
-    cosmological = build_population("bns_md_cosmological", settings={})
-    assert cosmological.source.fn is bns_md_cosmological
-    assert build_population("bns_md_modified_propagation", settings={}).source.fn is (
-        bns_md_modified_propagation
+    shipped = {
+        "bns_md_cosmological": bns_md_cosmological,
+        "bns_md_modified_propagation": bns_md_modified_propagation,
+        "bns_md_uniform_mixture": bns_md_uniform_mixture,
+        "bns_md_gaussian_cosmological": bns_md_gaussian_cosmological,
+        "bns_md_gaussian_modified_propagation": bns_md_gaussian_modified_propagation,
+        "bns_md_gaussian_uniform_mixture": bns_md_gaussian_uniform_mixture,
+    }
+    for name, fn in shipped.items():
+        assert build_source_model(name).func is fn  # ty: ignore[unresolved-attribute]
+    rate = build_merger_rate_fn()
+    assert rate.func is madau_dickinson_total_merger_rate  # ty: ignore[unresolved-attribute]
+
+
+def test_builders_bind_construction_settings() -> None:
+    settings = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
+    source = build_source_model(
+        "bns_md_uniform_mixture",
+        settings={**settings, "uniform_mixing_fraction": 0.2},
     )
-    assert build_population("bns_md_uniform_mixture", settings={}).source.fn is (
-        bns_md_uniform_mixture
+    assert source.keywords == {  # ty: ignore[unresolved-attribute]
+        **settings,
+        "uniform_mixing_fraction": 0.2,
+    }
+    # ``source_kwargs`` layers on top of ``settings``, overriding a shared key.
+    extra = build_source_model(
+        "bns_md_uniform_mixture",
+        settings={**settings, "uniform_mixing_fraction": 0.2},
+        source_kwargs={"uniform_mixing_fraction": 0.3},
     )
-    assert build_population("bns_md_gaussian_cosmological", settings={}).source.fn is (
-        bns_md_gaussian_cosmological
-    )
-    assert build_population(
-        "bns_md_gaussian_modified_propagation", settings={}
-    ).source.fn is (bns_md_gaussian_modified_propagation)
-    assert build_population(
-        "bns_md_gaussian_uniform_mixture", settings={}
-    ).source.fn is (bns_md_gaussian_uniform_mixture)
+    assert extra.keywords == {  # ty: ignore[unresolved-attribute]
+        **settings,
+        "uniform_mixing_fraction": 0.3,
+    }
+    # The rate binds only the shared window/grid keys of the same flat mapping.
+    rate = build_merger_rate_fn(settings={**settings, "uniform_mixing_fraction": 0.2})
+    assert rate.keywords == settings  # ty: ignore[unresolved-attribute]
 
 
 def test_unknown_model_names_list_the_known_set() -> None:
     with pytest.raises(KeyError, match="bns_md_cosmological"):
-        build_population("no_such_population", settings={})
+        build_source_model("no_such_population")
     with pytest.raises(KeyError, match="madau_dickinson"):
-        build_population("bns_md_cosmological", rate_model="no_such_rate", settings={})
+        build_merger_rate_fn("no_such_rate")
 
 
 def test_registering_a_name_twice_is_rejected() -> None:
@@ -180,21 +254,8 @@ def test_registering_a_name_twice_is_rejected() -> None:
 # --------------------------------------------------------------------------- #
 # Explicit site metadata and recomputation
 # --------------------------------------------------------------------------- #
-def test_population_declares_its_source_outputs_and_density_factors() -> None:
-    model = mock_population_model()
-    declared = set(derived_columns(model.source, POPULATION_PARAMS, sample_values()))
-    assert declared == STOCHASTIC_SITES | DETERMINISTIC_SITES
-    assert model.source.density_sites == (
-        REDSHIFT_SITE,
-        "source_frame_mass_1",
-        "source_frame_mass_2",
-    )
-    with pytest.raises(FrozenInstanceError):
-        model.source.density_sites = ()  # ty: ignore[invalid-assignment]
-
-
 def test_source_call_returns_every_declared_site() -> None:
-    model = mock_population_model().source
+    model = mock_population_model()
     sources = handlers.seed(model, 0)(POPULATION_PARAMS)
     assert set(sources) == STOCHASTIC_SITES | DETERMINISTIC_SITES
     for name in sources:
@@ -208,25 +269,25 @@ def test_source_evaluate_needs_no_physical_rate() -> None:
         for name, value in POPULATION_PARAMS.items()
         if name != "local_merger_rate"
     }
-    _, luminosity_distance = mock_population_model().source.evaluate(
-        without_rate, sample_values()
+    _, luminosity_distance = evaluate(
+        mock_population_model(), without_rate, sample_values()
     )
     assert luminosity_distance.shape == SAMPLE_REDSHIFTS.shape
 
 
-def test_population_evaluate_requires_the_physical_rate_parameter() -> None:
-    """The merger-rate function owns this check now, not an ``"x" in params`` branch."""
+def test_merger_rate_requires_the_physical_rate_parameter() -> None:
+    """The merger-rate function owns this check, not an ``"x" in params`` branch."""
     without_rate = {
         name: value
         for name, value in POPULATION_PARAMS.items()
         if name != "local_merger_rate"
     }
     with pytest.raises(ValueError, match="local_merger_rate"):
-        mock_population_model().evaluate(without_rate, sample_values())
+        mock_merger_rate_fn()(without_rate)
 
 
 def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
-    model = mock_population_model().source
+    model = mock_population_model()
     stored = {
         **sample_values(),
         LUMINOSITY_DISTANCE_SITE: jnp.ones_like(SAMPLE_REDSHIFTS),
@@ -239,12 +300,13 @@ def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# One execution supplies density, distance, and rate
+# One execution supplies density and distance; the rate is a separate call
 # --------------------------------------------------------------------------- #
 def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() -> None:
-    log_prob, distance, rate = mock_population_model().evaluate(
-        POPULATION_PARAMS, sample_values()
+    log_prob, distance = evaluate(
+        mock_population_model(), POPULATION_PARAMS, sample_values()
     )
+    rate = mock_merger_rate_fn()(POPULATION_PARAMS)
     assert log_prob.shape == SAMPLE_REDSHIFTS.shape
     assert distance.shape == SAMPLE_REDSHIFTS.shape
     assert rate.shape == ()
@@ -261,7 +323,7 @@ def test_one_execution_supplies_per_sample_density_distance_and_scalar_rate() ->
 
 def test_derived_columns_match_the_declared_transforms() -> None:
     values = sample_values()
-    columns = derived_columns(mock_population_model().source, POPULATION_PARAMS, values)
+    columns = derived_columns(mock_population_model(), POPULATION_PARAMS, values)
     one_plus_z = 1.0 + SAMPLE_REDSHIFTS
     np.testing.assert_array_equal(
         columns["detector_frame_mass_1"], values["source_frame_mass_1"] * one_plus_z
@@ -270,18 +332,13 @@ def test_derived_columns_match_the_declared_transforms() -> None:
         columns["detector_frame_mass_2"], values["source_frame_mass_2"] * one_plus_z
     )
     np.testing.assert_array_equal(columns["inclination"], jnp.zeros_like(one_plus_z))
-    # The population-level rate is declared by the rate model, outside the
-    # plate the source model draws inside: it can never appear in the source
-    # model's own returned mapping (see SourceModel.__call__'s reserved-name
-    # check).
-    assert TOTAL_MERGER_RATE_SITE not in columns
 
 
 # --------------------------------------------------------------------------- #
 # Modified propagation
 # --------------------------------------------------------------------------- #
 def test_modified_propagation_scales_the_distance_by_the_gw_em_ratio() -> None:
-    _, distance, _ = mock_target_model().evaluate(OFF_FIDUCIALS, sample_values())
+    _, distance = evaluate(mock_target_model(), OFF_FIDUCIALS, sample_values())
     _, cosmological_distance, _ = reference(OFF_FIDUCIALS)
     expected = cosmological_distance * jnp.exp(
         log_gw_em_ratio(SAMPLE_REDSHIFTS, OFF_FIDUCIALS["xi_0"], OFF_FIDUCIALS["xi_n"])
@@ -298,11 +355,11 @@ def test_modified_propagation_reduces_exactly_to_the_cosmological_model() -> Non
     a floor under the self-proposal log weights.
     """
     values = sample_values()
-    cosmological_log_prob, cosmological_distance, _ = mock_population_model().evaluate(
-        POPULATION_PARAMS, values
+    cosmological_log_prob, cosmological_distance = evaluate(
+        mock_population_model(), POPULATION_PARAMS, values
     )
-    modified_log_prob, modified_distance, _ = mock_target_model().evaluate(
-        FIDUCIALS, values
+    modified_log_prob, modified_distance = evaluate(
+        mock_target_model(), FIDUCIALS, values
     )
     assert FIDUCIALS["xi_0"] == 1.0
     np.testing.assert_array_equal(cosmological_log_prob, modified_log_prob)
@@ -315,14 +372,9 @@ def test_modified_propagation_reduces_exactly_to_the_cosmological_model() -> Non
 def test_density_selection_preserves_supplied_values_and_deterministics() -> None:
     values = sample_values()
     model = mock_population_model()
-    selected = replace(
-        model, source=replace(model.source, density_sites=("redshift", "spin_1z"))
-    )
-    log_prob, luminosity_distance, total_merger_rate = model.evaluate(
-        POPULATION_PARAMS, values
-    )
-    selected_log_prob, selected_distance, selected_rate = selected.evaluate(
-        POPULATION_PARAMS, values
+    log_prob, luminosity_distance = evaluate(model, POPULATION_PARAMS, values)
+    selected_log_prob, selected_distance = evaluate(
+        model, POPULATION_PARAMS, values, density_sites=("redshift", "spin_1z")
     )
     expected_spin = dist.Uniform(-0.05, 0.05).log_prob(values["spin_1z"])
     expected_mass = jnp.log(2.0) - 2.0 * jnp.log(POPULATION_PARAMS["mass_width"])
@@ -330,41 +382,40 @@ def test_density_selection_preserves_supplied_values_and_deterministics() -> Non
         selected_log_prob, log_prob + expected_spin - expected_mass
     )
     np.testing.assert_array_equal(luminosity_distance, selected_distance)
-    np.testing.assert_array_equal(total_merger_rate, selected_rate)
-    columns = derived_columns(selected.source, POPULATION_PARAMS, values)
+    columns = derived_columns(model, POPULATION_PARAMS, values)
     np.testing.assert_array_equal(
         columns["detector_frame_mass_1"],
         values["source_frame_mass_1"] * (1 + values["redshift"]),
     )
 
 
-def test_empty_density_selection_returns_scalar_zero() -> None:
+def test_empty_density_selection_returns_per_source_zeros() -> None:
     values = sample_values()
-    model = mock_population_model()
-    empty = replace(model, source=replace(model.source, density_sites=()))
-    log_prob, _, _ = empty.evaluate(POPULATION_PARAMS, values)
-    assert log_prob.shape == ()
-    assert float(log_prob) == 0.0
+    log_prob, _ = evaluate(
+        mock_population_model(), POPULATION_PARAMS, values, density_sites=()
+    )
+    assert log_prob.shape == SAMPLE_REDSHIFTS.shape
+    np.testing.assert_array_equal(log_prob, jnp.zeros_like(SAMPLE_REDSHIFTS))
 
 
 # --------------------------------------------------------------------------- #
 # Isolation from an outer inference model
 # --------------------------------------------------------------------------- #
 def _outer_model(observed: jax.Array) -> None:
-    """An inference model that evaluates a population twice."""
+    """An inference model that evaluates a source model twice."""
     hubble_constant = numpyro.sample("H0", dist.Uniform(20.0, 140.0))
     params = {**FIDUCIALS, "H0": hubble_constant}
     total = jnp.zeros(())
     for _ in range(2):
-        log_prob, luminosity_distance, _ = mock_target_model().evaluate(
-            params, sample_values()
+        log_prob, luminosity_distance = evaluate(
+            mock_target_model(), params, sample_values()
         )
         total = total + jnp.sum(log_prob)
         total = total + jnp.sum(luminosity_distance)
     numpyro.sample("obs", dist.Normal(total * 1e-6, 1.0), obs=observed)
 
 
-def test_population_sites_stay_out_of_the_outer_trace() -> None:
+def test_source_sites_stay_out_of_the_outer_trace() -> None:
     with handlers.seed(rng_seed=0):
         trace = handlers.trace(_outer_model).get_trace(jnp.asarray(0.0))
     assert set(trace) == {"H0", "obs"}
@@ -383,8 +434,8 @@ def test_outer_density_and_gradient_match_a_direct_calculation() -> None:
         params = {**FIDUCIALS, "H0": hubble_constant}
         total = jnp.zeros(())
         for _ in range(2):
-            log_prob, luminosity_distance, _ = mock_target_model().evaluate(
-                params, sample_values()
+            log_prob, luminosity_distance = evaluate(
+                mock_target_model(), params, sample_values()
             )
             total = total + jnp.sum(log_prob)
             total = total + jnp.sum(luminosity_distance)
@@ -422,23 +473,23 @@ def test_nuts_samples_only_the_outer_hyperparameter() -> None:
 # The uniform-guard mixture proposal
 # --------------------------------------------------------------------------- #
 def _redshift_log_density(
-    model: Population,
+    model: SourceFn,
     params: Mapping[str, ArrayLike],
     redshift: ArrayLike,
 ) -> jax.Array:
     with handlers.block(), handlers.seed(rng_seed=0):
-        trace = handlers.trace(model.source).get_trace(params)
+        trace = handlers.trace(model).get_trace(params)
     site = trace.get(REDSHIFT_SITE)
     if site is None or site["type"] != "sample":
         raise ValueError(
-            f"population model declares no {REDSHIFT_SITE!r} sample site; every "
-            "population must draw a redshift"
+            f"source model declares no {REDSHIFT_SITE!r} sample site; every "
+            "source model must draw a redshift"
         )
     return jnp.asarray(site["fn"].log_prob(jnp.asarray(redshift)))
 
 
-def _uniform_mixture_model(uniform_mixing_fraction: float) -> Population:
-    return build_population(
+def _uniform_mixture_model(uniform_mixing_fraction: float) -> SourceFn:
+    return build_source_model(
         "bns_md_uniform_mixture",
         settings={
             "z_min": Z_MIN,
@@ -471,36 +522,32 @@ def test_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:
     )
 
 
-def test_uniform_mixture_keeps_the_cosmological_distance_and_rate() -> None:
+def test_uniform_mixture_keeps_the_cosmological_distance() -> None:
     """The guard changes which redshifts are drawn, not the physics at one."""
-    model = _uniform_mixture_model(0.1)
-    _, mixture_distance, mixture_rate = model.evaluate(
-        POPULATION_PARAMS, sample_values()
+    _, mixture_distance = evaluate(
+        _uniform_mixture_model(0.1), POPULATION_PARAMS, sample_values()
     )
-    _, plain_distance, plain_rate = mock_population_model().evaluate(
-        POPULATION_PARAMS, sample_values()
+    _, plain_distance = evaluate(
+        mock_population_model(), POPULATION_PARAMS, sample_values()
     )
     np.testing.assert_array_equal(mixture_distance, plain_distance)
-    np.testing.assert_array_equal(mixture_rate, plain_rate)
 
 
 @pytest.mark.parametrize("fraction", [-0.1, 1.5])
 def test_uniform_mixture_rejects_an_out_of_range_fraction(fraction: float) -> None:
     model = _uniform_mixture_model(fraction)
     with pytest.raises(ValueError, match="uniform_mixing_fraction"):
-        model.evaluate(POPULATION_PARAMS, sample_values())
+        evaluate(model, POPULATION_PARAMS, sample_values())
 
 
 # --------------------------------------------------------------------------- #
 # Generation
 # --------------------------------------------------------------------------- #
-def test_generation_is_reproducible() -> None:
-    first = mock_population_model().source.sample(
-        jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=32
-    )
-    second = mock_population_model().source.sample(
-        jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=32
-    )
+@pytest.mark.parametrize("generating", GENERATING_MODELS)
+def test_generation_is_reproducible(generating: str) -> None:
+    build, params = GENERATING_MODELS[generating]
+    first = sample_sources(build(), jax.random.PRNGKey(7), params, num_samples=32)
+    second = sample_sources(build(), jax.random.PRNGKey(7), params, num_samples=32)
     assert set(first) == STOCHASTIC_SITES | DETERMINISTIC_SITES
     for name in first:
         np.testing.assert_array_equal(first[name], second[name])
@@ -513,31 +560,40 @@ def test_a_smaller_catalog_is_a_prefix_of_a_larger_one() -> None:
     prefix stability is a property of the installed JAX rather than something
     the API promises, so it is checked here rather than assumed.
     """
-    small = mock_population_model().source.sample(
-        jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=16
+    small = sample_sources(
+        mock_population_model(),
+        jax.random.PRNGKey(7),
+        POPULATION_PARAMS,
+        num_samples=16,
     )
-    large = mock_population_model().source.sample(
-        jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=64
+    large = sample_sources(
+        mock_population_model(),
+        jax.random.PRNGKey(7),
+        POPULATION_PARAMS,
+        num_samples=64,
     )
     for name, values in small.items():
         np.testing.assert_array_equal(values, large[name][:16])
 
 
-def test_stored_columns_are_bit_identical_to_a_later_recomputation() -> None:
+@pytest.mark.parametrize("generating", GENERATING_MODELS)
+def test_stored_columns_are_bit_identical_to_a_later_recomputation(
+    generating: str,
+) -> None:
     """What makes both the exact-zero weights and the load check exact.
 
     ``Predictive`` runs the model under ``vmap``, one draw at a time, while
     every later evaluation runs it batched. Taking the derived columns from a
     batched pass rather than from ``Predictive`` is what removes that
-    difference.
+    difference. The Gaussian model is here because its second mass is a
+    ``TruncatedNormal`` whose upper bound is the first mass: a data-dependent
+    support is where running the replay under a plate could plausibly shift a
+    bit.
     """
-    samples = mock_population_model().source.sample(
-        jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=32
-    )
+    build, params = GENERATING_MODELS[generating]
+    samples = sample_sources(build(), jax.random.PRNGKey(7), params, num_samples=32)
     stochastic = {name: samples[name] for name in STOCHASTIC_SITES}
-    columns = derived_columns(
-        mock_population_model().source, POPULATION_PARAMS, stochastic
-    )
+    columns = derived_columns(build(), params, stochastic)
     for name in DETERMINISTIC_SITES:
         np.testing.assert_array_equal(samples[name], columns[name])
 
@@ -550,7 +606,7 @@ def test_evaluation_traces_under_jit_and_vmaps_over_hyperparameters() -> None:
 
     def redshift_density(hubble_constant: jax.Array) -> jax.Array:
         params = {**OFF_FIDUCIALS, "H0": hubble_constant}
-        log_prob, _, _ = mock_target_model().evaluate(params, values)
+        log_prob, _ = evaluate(mock_target_model(), params, values)
         return log_prob
 
     hubble_constants = jnp.array([60.0, 67.66, 75.0])
@@ -562,8 +618,8 @@ def test_evaluation_traces_under_jit_and_vmaps_over_hyperparameters() -> None:
 
 
 def test_sampling_is_jittable_and_isolated_from_outer_handlers() -> None:
-    model = mock_population_model().source
-    sample = jax.jit(partial(model.sample, num_samples=8))
+    model = mock_population_model()
+    sample = jax.jit(partial(sample_sources, model, num_samples=8))
     with handlers.trace() as outer:
         sources = sample(jax.random.PRNGKey(7), POPULATION_PARAMS)
     assert outer == {}
@@ -573,17 +629,26 @@ def test_sampling_is_jittable_and_isolated_from_outer_handlers() -> None:
         sources["detector_frame_mass_1"],
         sources["source_frame_mass_1"] * (1 + sources["redshift"]),
     )
+
+    def log_prob(
+        params: Mapping[str, ArrayLike], values: Mapping[str, ArrayLike]
+    ) -> jax.Array:
+        return evaluate(model, params, values)[0]
+
     np.testing.assert_allclose(
-        jax.jit(model.log_prob)(POPULATION_PARAMS, sources),
-        model.log_prob(POPULATION_PARAMS, sources),
+        jax.jit(log_prob)(POPULATION_PARAMS, sources),
+        log_prob(POPULATION_PARAMS, sources),
         rtol=1e-12,
     )
 
 
 def test_sampling_and_derivation_are_isolated_without_jit() -> None:
     with handlers.trace() as outer:
-        mock_population_model().source.sample(
-            jax.random.PRNGKey(7), POPULATION_PARAMS, num_samples=8
+        sample_sources(
+            mock_population_model(),
+            jax.random.PRNGKey(7),
+            POPULATION_PARAMS,
+            num_samples=8,
         )
     assert outer == {}
 
@@ -591,42 +656,8 @@ def test_sampling_and_derivation_are_isolated_without_jit() -> None:
 # --------------------------------------------------------------------------- #
 # Ordered Gaussian masses
 # --------------------------------------------------------------------------- #
-GAUSSIAN_PARAMS: dict[str, float] = {
-    **{
-        name: value
-        for name, value in POPULATION_PARAMS.items()
-        if name not in {"minimum_mass", "mass_width"}
-    },
-    "mass_mean": 1.33,
-    "mass_sigma": 0.09,
-}
-GAUSSIAN_FIDUCIALS: dict[str, float] = {
-    **{
-        name: value
-        for name, value in FIDUCIALS.items()
-        if name not in {"minimum_mass", "mass_width"}
-    },
-    "mass_mean": 1.33,
-    "mass_sigma": 0.09,
-}
-
-
-def _gaussian_population_model() -> Population:
-    return build_population(
-        "bns_md_gaussian_cosmological",
-        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
-    )
-
-
-def _gaussian_target_model() -> Population:
-    return build_population(
-        "bns_md_gaussian_modified_propagation",
-        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
-    )
-
-
-def _gaussian_mixture_model(uniform_mixing_fraction: float) -> Population:
-    return build_population(
+def _gaussian_mixture_model(uniform_mixing_fraction: float) -> SourceFn:
+    return build_source_model(
         "bns_md_gaussian_uniform_mixture",
         settings={
             "z_min": Z_MIN,
@@ -637,21 +668,12 @@ def _gaussian_mixture_model(uniform_mixing_fraction: float) -> Population:
     )
 
 
-def _mass_only(model: Population) -> Population:
-    return replace(
-        model,
-        source=replace(
-            model.source, density_sites=("source_frame_mass_1", "source_frame_mass_2")
-        ),
-    )
-
-
 def test_gaussian_mass_density_matches_two_iid_normals_on_the_ordered_half_plane() -> (
     None
 ):
     values = sample_values()
-    actual, _, _ = _mass_only(_gaussian_population_model()).evaluate(
-        GAUSSIAN_PARAMS, values
+    actual, _ = evaluate(
+        _gaussian_population_model(), GAUSSIAN_PARAMS, values, density_sites=MASS_SITES
     )
     component = dist.Normal(GAUSSIAN_PARAMS["mass_mean"], GAUSSIAN_PARAMS["mass_sigma"])
     expected = (
@@ -668,8 +690,11 @@ def test_gaussian_mass_density_matches_two_iid_normals_on_the_ordered_half_plane
     }
 
     def unordered_log_prob(sources: Mapping[str, ArrayLike]) -> jax.Array:
-        log_prob, _, _ = _mass_only(_gaussian_population_model()).evaluate(
-            GAUSSIAN_PARAMS, sources
+        log_prob, _ = evaluate(
+            _gaussian_population_model(),
+            GAUSSIAN_PARAMS,
+            sources,
+            density_sites=MASS_SITES,
         )
         return log_prob
 
@@ -677,14 +702,17 @@ def test_gaussian_mass_density_matches_two_iid_normals_on_the_ordered_half_plane
 
 
 def test_gaussian_draws_are_ordered_and_have_finite_self_density() -> None:
-    sources = _gaussian_population_model().source.sample(
-        jax.random.PRNGKey(7), GAUSSIAN_PARAMS, num_samples=64
+    sources = sample_sources(
+        _gaussian_population_model(),
+        jax.random.PRNGKey(7),
+        GAUSSIAN_PARAMS,
+        num_samples=64,
     )
     np.testing.assert_array_equal(
         sources["source_frame_mass_1"] >= sources["source_frame_mass_2"],
         jnp.ones(64, dtype=bool),
     )
-    log_prob = _gaussian_population_model().source.log_prob(GAUSSIAN_PARAMS, sources)
+    log_prob, _ = evaluate(_gaussian_population_model(), GAUSSIAN_PARAMS, sources)
     assert np.all(np.isfinite(np.asarray(log_prob)))
 
 
@@ -696,8 +724,8 @@ def test_gaussian_mass_density_stays_finite_when_hyperparameters_move() -> None:
     """
     values = sample_values()
     shifted = {**GAUSSIAN_PARAMS, "mass_mean": 2.0, "mass_sigma": 0.2}
-    gaussian_log_prob, _, _ = _mass_only(_gaussian_population_model()).evaluate(
-        shifted, values
+    gaussian_log_prob, _ = evaluate(
+        _gaussian_population_model(), shifted, values, density_sites=MASS_SITES
     )
     assert np.all(np.isfinite(np.asarray(gaussian_log_prob)))
 
@@ -707,8 +735,8 @@ def test_gaussian_mass_density_stays_finite_when_hyperparameters_move() -> None:
             "mass_mean": mass_mean,
             "mass_sigma": mass_sigma,
         }
-        log_prob, _, _ = _mass_only(_gaussian_population_model()).evaluate(
-            params, values
+        log_prob, _ = evaluate(
+            _gaussian_population_model(), params, values, density_sites=MASS_SITES
         )
         return jnp.sum(log_prob)
 
@@ -722,7 +750,9 @@ def test_gaussian_mass_density_stays_finite_when_hyperparameters_move() -> None:
     outside_uniform = {**POPULATION_PARAMS, "minimum_mass": 1.35}
 
     def uniform_log_prob(params: Mapping[str, ArrayLike]) -> jax.Array:
-        log_prob, _, _ = _mass_only(mock_population_model()).evaluate(params, values)
+        log_prob, _ = evaluate(
+            mock_population_model(), params, values, density_sites=MASS_SITES
+        )
         return log_prob
 
     assert np.all(np.isneginf(np.asarray(jax.jit(uniform_log_prob)(outside_uniform))))
@@ -732,27 +762,24 @@ def test_gaussian_modified_propagation_reduces_exactly_to_the_cosmological_model
     None
 ):
     values = sample_values()
-    cosmological_log_prob, cosmological_distance, _ = (
-        _gaussian_population_model().evaluate(GAUSSIAN_PARAMS, values)
+    cosmological_log_prob, cosmological_distance = evaluate(
+        _gaussian_population_model(), GAUSSIAN_PARAMS, values
     )
-    modified_log_prob, modified_distance, _ = _gaussian_target_model().evaluate(
-        GAUSSIAN_FIDUCIALS, values
+    modified_log_prob, modified_distance = evaluate(
+        _gaussian_target_model(), GAUSSIAN_FIDUCIALS, values
     )
     assert GAUSSIAN_FIDUCIALS["xi_0"] == 1.0
     np.testing.assert_array_equal(cosmological_log_prob, modified_log_prob)
     np.testing.assert_array_equal(cosmological_distance, modified_distance)
 
 
-def test_gaussian_and_uniform_models_share_distance_and_rate() -> None:
+def test_gaussian_and_uniform_models_share_distance() -> None:
     values = sample_values()
-    _, gaussian_distance, gaussian_rate = _gaussian_population_model().evaluate(
-        GAUSSIAN_PARAMS, values
+    _, gaussian_distance = evaluate(
+        _gaussian_population_model(), GAUSSIAN_PARAMS, values
     )
-    _, uniform_distance, uniform_rate = mock_population_model().evaluate(
-        POPULATION_PARAMS, values
-    )
+    _, uniform_distance = evaluate(mock_population_model(), POPULATION_PARAMS, values)
     np.testing.assert_array_equal(gaussian_distance, uniform_distance)
-    np.testing.assert_array_equal(gaussian_rate, uniform_rate)
 
 
 def test_gaussian_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:

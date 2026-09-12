@@ -37,6 +37,7 @@ Fast by design -- no NUTS, so these are not marked ``integration``.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import partial
 from typing import Any
 
 import jax
@@ -48,6 +49,8 @@ from astrogwb_mock_population import (
     FIDUCIALS,
     build_mock_catalog,
     catalog_samples,
+    log_weight_kwargs,
+    mock_merger_rate_fn,
     mock_target_model,
 )
 
@@ -56,7 +59,11 @@ from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr_squared
-from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
+from astrogwb.importance.spectral import (
+    evaluate_log_weights,
+    importance_spectral_density,
+    prepare_importance_arrays,
+)
 
 #: Reference resolution, and the band the refinement study runs over.
 FINE_DF = 0.25
@@ -164,19 +171,22 @@ def _analysis_at(
 def resolutions(fine_catalog: Catalog) -> dict[int, dict[str, Any]]:
     """Masked analysis inputs, the injection, and SNR^2, at every resolution."""
     samples = catalog_samples(fine_catalog)
-    # The catalog is its own proposal: the estimator caches the density and
+    # The catalog is its own proposal: preparation caches the density and
     # reference distances the target re-forms at FIDUCIALS, which is what makes
     # every fiducial log-weight exactly zero.
-    estimator = SpectralDensityImportanceEstimator.from_catalog(
-        fine_catalog,
-        model=mock_target_model(),
-        average_mode="analytic_inclination",
-    )
+    importance = {
+        **prepare_importance_arrays(fine_catalog)._asdict(),
+        "source_model": mock_target_model(),
+        "merger_rate_fn": mock_merger_rate_fn(),
+        "average_mode": "analytic_inclination",
+    }
+    estimator = partial(importance_spectral_density, **importance)
+    log_weights_fn = partial(evaluate_log_weights, **log_weight_kwargs(importance))
     total_merger_rate = jnp.asarray(estimator(FIDUCIALS)[1]["total_merger_rate"])
 
     def weights_fn(params: dict[str, float]) -> tuple[jax.Array, jax.Array]:
         _, extras = estimator(params)
-        return jnp.asarray(extras["total_merger_rate"]), estimator.log_weights(params)
+        return jnp.asarray(extras["total_merger_rate"]), log_weights_fn(params)
 
     # Loaded once: the noise curves are the same at every resolution, and
     # re-reading them per grid dominated the module's runtime.

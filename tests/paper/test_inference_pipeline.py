@@ -40,12 +40,17 @@ from astrogwb.catalog import Catalog
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import spectral_density
+from astrogwb.importance.spectral import (
+    evaluate_log_weights,
+    prepare_importance_arrays,
+)
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import RunConfig, build_run_config
 from astrogwb.paper.inference import (
     prepare_inference_inputs,
     prepare_observation,
-    target_population_model,
+    target_merger_rate_fn,
+    target_source_model,
 )
 from astrogwb.sampling import gwb_spectral_density_model
 
@@ -135,7 +140,8 @@ def _prepare(injection: Catalog, proposal: Catalog, config: RunConfig):
         proposal,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
-        target_model=target_population_model(config),
+        target_source_model=target_source_model(config),
+        target_merger_rate_fn=target_merger_rate_fn(config),
     )
 
 
@@ -200,27 +206,36 @@ def test_the_observed_rate_comes_from_the_injection_catalogs_own_population(
     )
 
 
-def test_prepared_estimator_slices_frequency_arrays_but_not_samples(
+def _bound(inputs: Any) -> dict[str, Any]:
+    """The keywords ``prepare_inference_inputs`` bound into the spectrum partial."""
+    return inputs.spectral_density_fn.keywords
+
+
+def test_prepared_spectrum_slices_frequency_arrays_but_not_samples(
     injection_catalog: Catalog, proposal_catalog: Catalog
 ) -> None:
     config = _config()
 
     inputs = _prepare(injection_catalog, proposal_catalog, config)
     kwargs = inputs.masked_model_kwargs()
-    estimator = inputs.estimator
+    bound = _bound(inputs)
 
     assert kwargs["observed_spectral_density"].shape == (N_BAND,)
     assert kwargs["scale"].shape == (N_BAND,)
-    assert estimator.polarization_power.shape == (N_BAND, N_RETAINED)
+    assert bound["polarization_power"].shape == (N_BAND, N_RETAINED)
     # `source_parameters` is per-source, not per-frequency. Masking it would
     # silently truncate the population and change every posterior without
     # erroring; the cached proposal arrays follow the same axis.
-    for name, values in estimator.source_parameters.items():
+    for name, values in bound["source_parameters"].items():
         assert values.shape == (N_RETAINED,), name
-    assert estimator.proposal_log_prob.shape == (N_RETAINED,)
-    assert estimator.log_reference_distance.shape == (N_RETAINED,)
+    assert bound["proposal_log_prob"].shape == (N_RETAINED,)
+    assert bound["log_reference_distance"].shape == (N_RETAINED,)
+    # The weights see exactly the arrays and density factors the spectrum does.
+    weights_bound = inputs.log_weights_fn.keywords
+    for name, value in weights_bound.items():
+        assert bound[name] is value, name
     # The likelihood takes data only: the catalog and the averaging convention
-    # travel on the estimator, and the bin width is consumed into `scale`.
+    # travel on the bound spectrum, and the bin width is consumed into `scale`.
     assert set(kwargs) == {"observed_spectral_density", "scale"}
 
 
@@ -304,7 +319,7 @@ def test_bins_without_network_coverage_narrow_the_band(
     )
     assert kwargs["scale"].shape == (N_BAND - 1,)
     assert kwargs["observed_spectral_density"].shape == (N_BAND - 1,)
-    assert inputs.estimator.polarization_power.shape == (N_BAND - 1, N_RETAINED)
+    assert _bound(inputs)["polarization_power"].shape == (N_BAND - 1, N_RETAINED)
 
 
 def test_a_band_with_fewer_than_two_usable_bins_is_rejected(
@@ -330,11 +345,11 @@ def test_a_catalog_may_serve_as_both_roles(injection_catalog: Catalog) -> None:
 
     inputs = _prepare(injection_catalog, injection_catalog, config)
 
-    assert inputs.estimator.polarization_power.shape == (N_BAND, N_RETAINED)
+    assert _bound(inputs)["polarization_power"].shape == (N_BAND, N_RETAINED)
 
 
 # --------------------------------------------------------------------------- #
-# Parity: the prepared estimator against the grid-level formula
+# Parity: the prepared spectrum against the grid-level formula
 #
 # The reference distance is the catalog's own stored distance column, and the
 # target's distance includes modified propagation. Getting that pairing wrong
@@ -364,12 +379,12 @@ def test_the_reference_distance_is_the_stored_distance_of_the_stored_power(
     stored = np.asarray(inputs.proposal.source_parameters["luminosity_distance"])
 
     np.testing.assert_array_equal(
-        np.asarray(inputs.estimator.log_reference_distance), np.log(stored)
+        np.asarray(_bound(inputs)["log_reference_distance"]), np.log(stored)
     )
     # The target's distance is *not* that one at these parameters, which is
     # what makes the equality above worth asserting.
     target_distance = np.exp(
-        np.asarray(inputs.estimator.log_reference_distance)
+        np.asarray(_bound(inputs)["log_reference_distance"])
         + np.asarray(
             log_gw_em_ratio(
                 inputs.proposal.source_parameters["redshift"],
@@ -418,7 +433,7 @@ def _proposal_log_prob(catalog: Catalog) -> jax.Array:
 def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.Array:
     """The predicted spectrum, restated from the hand-written grid formula.
 
-    Independent of the population model and the estimator: every step -- the
+    Independent of the source model and the bound spectrum: every step -- the
     target density, the effective target distance, the reference distance, the
     weight ratio, the contraction -- is written out here, so an expectation
     cannot agree with the pipeline by construction.
@@ -458,7 +473,7 @@ def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.
 
 @pytest.mark.parametrize("guarded", [False, True], ids=["ordinary", "guard-mixture"])
 @pytest.mark.parametrize("offset", [0.0, 0.13], ids=["fiducial", "off-fiducial"])
-def test_prepared_estimator_reproduces_the_grid_formula(
+def test_prepared_spectrum_reproduces_the_grid_formula(
     injection_catalog: Catalog, tmp_path: Path, guarded: bool, offset: float
 ) -> None:
     """End-to-end: the same spectrum, the same rate, the same log posterior."""
@@ -481,7 +496,7 @@ def test_prepared_estimator_reproduces_the_grid_formula(
     value, trace = log_density(
         partial(
             gwb_spectral_density_model,
-            spectral_density_fn=inputs.estimator,
+            spectral_density_fn=inputs.spectral_density_fn,
             priors=config.priors,
         ),
         (),
@@ -515,14 +530,61 @@ def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights
     same cosmology on two grids is exactly what stops the weights being
     identically one.
     """
-    from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-
-    estimator = SpectralDensityImportanceEstimator.from_catalog(
-        proposal_catalog, average_mode="analytic_inclination"
+    arrays = prepare_importance_arrays(proposal_catalog)
+    kwargs = arrays._asdict()
+    del kwargs["polarization_power"]
+    log_weights = evaluate_log_weights(
+        proposal_catalog.fiducials,
+        source_model=proposal_catalog.get_source_model(),
+        **kwargs,
     )
+    np.testing.assert_array_equal(np.asarray(log_weights), np.zeros(N_SOURCES))
+
+
+def test_the_proposals_density_factors_reach_the_bound_weights_unchanged(
+    injection_catalog: Catalog,
+) -> None:
+    """``prepare_inference_inputs`` threads the catalog's factor set to the target.
+
+    The proposal records only the redshift factor. Reweighted to its own
+    (window-restricted) source model at its own parameters, the weights are
+    exactly zero only if the target was evaluated with that same narrow set;
+    substituting the default factors anywhere in the pipeline would add the
+    ordered-mass factor to the target side alone.
+    """
+    config = _config()
+    grid = config.analysis_grid
+    narrow = make_catalog(
+        redshift=REDSHIFT,
+        polarization_power=np.random.default_rng(1).uniform(
+            0.0, 1.0, size=(FREQUENCIES.size, N_SOURCES)
+        ),
+        minimum_frequency=float(FREQUENCIES[0]),
+        df=float(FREQUENCIES[1] - FREQUENCIES[0]),
+        # Generated on the analysis window itself, so restricting to it leaves
+        # the grid -- and with it the stored distances -- unchanged.
+        model_kwargs={
+            **GENERATION_KWARGS,
+            "z_min": grid.minimum_redshift,
+            "z_max": grid.maximum_redshift,
+        },
+        density_sites=("redshift",),
+    )
+    restricted = narrow.restrict_redshift(grid.minimum_redshift, grid.maximum_redshift)
+
+    inputs = prepare_inference_inputs(
+        injection_catalog,
+        narrow,
+        grid=grid,
+        detectors=config.analysis.detectors,
+        target_source_model=restricted.get_source_model(),
+        target_merger_rate_fn=restricted.get_merger_rate_fn(),
+    )
+
+    assert _bound(inputs)["density_sites"] == ("redshift",)
     np.testing.assert_array_equal(
-        np.asarray(estimator.log_weights(proposal_catalog.fiducials)),
-        np.zeros(N_SOURCES),
+        np.asarray(inputs.log_weights_fn(inputs.proposal.fiducials)),
+        np.zeros(N_RETAINED),
     )
 
 

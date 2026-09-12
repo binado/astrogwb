@@ -21,7 +21,6 @@ linear regime instead of silently drifting out of it.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
 from functools import partial
 from typing import NamedTuple
 
@@ -37,6 +36,7 @@ from astrogwb_mock_population import (
     POPULATION_PARAMS,
     catalog_samples,
     make_redshift_grid,
+    mock_merger_rate_fn,
     mock_target_model,
 )
 from jax.typing import ArrayLike
@@ -53,15 +53,16 @@ from astrogwb.detector import (
 from astrogwb.distributions.amplitude import quadrature_grid
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
-from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
+from astrogwb.importance.spectral import (
+    importance_spectral_density,
+    prepare_importance_arrays,
+)
 from astrogwb.populations import (
     amplitude_H0_fn,
     merger_rate_H0_fn,
 )
-from astrogwb.populations.bns_madau_dickinson import (
-    bns_md_modified_propagation,
-)
 from astrogwb.sampling import (
+    SpectralDensityFn,
     amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
@@ -104,10 +105,24 @@ class AnalysisInputs(NamedTuple):
     effective_psd: jax.Array
     observation_time: float
     df: float
-    estimator: SpectralDensityImportanceEstimator
+    estimator: SpectralDensityFn
     frequencies: jax.Array
     total_merger_rate: jax.Array
     snr: float
+
+
+_TARGET_SOURCE = mock_target_model()
+_TARGET_RATE = mock_merger_rate_fn()
+
+
+def pinned_target(params: Mapping[str, ArrayLike]) -> Mapping[str, jax.Array]:
+    """The target source model, unsampled hyperparameters pinned at the fiducials."""
+    return _TARGET_SOURCE({**FIDUCIALS, **params})
+
+
+def pinned_rate(params: Mapping[str, ArrayLike]) -> jax.Array:
+    """The rate needs the same pinning: it takes ``params`` independently."""
+    return _TARGET_RATE({**FIDUCIALS, **params})
 
 
 class MarginalizedResult(NamedTuple):
@@ -124,7 +139,7 @@ def _build_analysis_inputs(
 ) -> AnalysisInputs:
     """Reproduce the standard setup block against an in-memory catalog.
 
-    Unpack the catalog, prepare the estimator from its own recorded
+    Unpack the catalog, prepare the importance arrays from its own recorded
     population, contract with unit weights, load the network effective PSD,
     and mask out-of-band and non-finite bins.
     """
@@ -135,8 +150,8 @@ def _build_analysis_inputs(
     num_sources = polarization_power.shape[1]
 
     # The injection rate comes from the catalog's own recorded population, at
-    # the parameters it was drawn at -- which is also what the estimator
-    # divides by, so every fiducial log-weight is exactly zero and the
+    # the parameters it was drawn at -- which is also what the weights
+    # divide by, so every fiducial log-weight is exactly zero and the
     # unit-weight injection below is the same quantity the target reproduces.
     total_merger_rate, _, _ = reference_merger_rate_distance_and_logprob(
         POPULATION_PARAMS, samples["redshift"], redshift_grid=make_redshift_grid()
@@ -190,29 +205,12 @@ def _build_analysis_inputs(
     # Prepared after masking, from the catalog's own population record. The
     # band mask reaches the power and nothing else -- masking the sources would
     # silently truncate the population.
-    target = mock_target_model()
-
-    def pinned_call(
-        params: Mapping[str, ArrayLike], **settings: object
-    ) -> Mapping[str, jax.Array]:
-        """Take unsampled hyperparameters from the test's fixed fiducials."""
-        return bns_md_modified_propagation({**FIDUCIALS, **params}, **settings)
-
-    def pinned_rate_call(params: Mapping[str, ArrayLike]) -> jax.Array:
-        """The rate needs the same pinning: it takes ``params`` independently."""
-        return target.rate({**FIDUCIALS, **params})
-
-    pinned_target = replace(
-        target,
-        source=replace(target.source, fn=pinned_call),
-        rate=pinned_rate_call,
-    )
-
-    estimator = SpectralDensityImportanceEstimator.from_catalog(
-        catalog,
-        model=pinned_target,
+    estimator = partial(
+        importance_spectral_density,
+        source_model=pinned_target,
+        merger_rate_fn=pinned_rate,
         average_mode="analytic_inclination",
-        frequency_mask=mask,
+        **prepare_importance_arrays(catalog, frequency_mask=mask)._asdict(),
     )
 
     return AnalysisInputs(
@@ -361,7 +359,9 @@ def test_h0_model_recovers_the_fiducial_and_the_fisher_width(
         init_values={"H0": FIDUCIALS["H0"]},
     )
 
-    assert set(posterior) >= {"H0", "total_merger_rate", "importance_relative_ess"}
+    # Exactly these sites and no others: the source model runs isolated, so no
+    # per-source (N,) column reaches the chain as a latent or deterministic.
+    assert set(posterior) == {"H0", "total_merger_rate", "importance_relative_ess"}
     for name in ("H0", "total_merger_rate", "importance_relative_ess"):
         assert posterior[name].shape == (1, NUM_SAMPLES)
 

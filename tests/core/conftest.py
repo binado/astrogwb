@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import jax
 import numpy as np
@@ -31,12 +32,11 @@ from astrogwb_mock_population import (
     F_MAX,
     F_MIN,
     build_mock_catalog,
-    build_synthetic_estimator,
+    build_synthetic_importance,
     load_mock_population,
 )
 
 from astrogwb.catalog import Catalog
-from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -80,8 +80,8 @@ def mock_catalog_factory(
 
 
 @pytest.fixture
-def synthetic_estimator() -> Callable[
-    ..., tuple[SpectralDensityImportanceEstimator, dict[str, jax.Array]]
+def synthetic_importance() -> Callable[
+    ..., tuple[dict[str, Any], dict[str, jax.Array]]
 ]:
-    """Expose the synthetic self-proposal estimator builder as a fixture."""
-    return build_synthetic_estimator
+    """Expose the synthetic self-proposal importance-kwargs builder as a fixture."""
+    return build_synthetic_importance

@@ -119,7 +119,8 @@ def build_potential(
         build_model,
         initial_values,
         prepare_inference_inputs,
-        target_population_model,
+        target_merger_rate_fn,
+        target_source_model,
     )
 
     inputs = prepare_inference_inputs(
@@ -127,11 +128,12 @@ def build_potential(
         proposal_catalog,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
-        target_model=target_population_model(config),
+        target_source_model=target_source_model(config),
+        target_merger_rate_fn=target_merger_rate_fn(config),
     )
     model, _ = build_model(
         config,
-        spectral_density_fn=inputs.estimator,
+        spectral_density_fn=inputs.spectral_density_fn,
     )
 
     init_strategy = init_to_value(values=initial_values(config))

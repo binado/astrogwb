@@ -11,11 +11,10 @@ about the source density they share.
 Each variant is registered as a *source* model: it declares sites and returns
 the mapping that defines the source-output set, with no notion of a physical
 rate. The rate lives in :func:`madau_dickinson_total_merger_rate`, registered
-separately; :func:`~astrogwb.populations.build_population` binds it by default
-when a caller names only the source. Splitting the two is what lets a
-guard-mixture *redshift law* pair with the same Madau-Dickinson *rate* the
-physical population uses, without executing the whole source model just to
-read one scalar.
+separately and bound by :func:`~astrogwb.populations.build_merger_rate_fn`.
+Splitting the two is what lets a guard-mixture *redshift law* pair with the
+same Madau-Dickinson *rate* the physical population uses, without executing
+the whole source model just to read one scalar.
 
 The declaration is a NumPyro model, and that is the whole point of it:
 
@@ -284,8 +283,8 @@ def bns_md_cosmological(
     ``z_peak``. ``z_min``, ``z_max`` and ``n_grid`` describe the grid the
     cosmology integrals and the redshift normalization run on; they are
     construction settings, bound once and serialized with the catalog. Pairs
-    with :func:`madau_dickinson_total_merger_rate` when assembled by
-    :func:`~astrogwb.populations.build_population`.
+    with :func:`madau_dickinson_total_merger_rate`, bound by
+    :func:`~astrogwb.populations.build_merger_rate_fn`.
     """
     redshift, redshift_distribution = _redshift(
         params, z_min=z_min, z_max=z_max, n_grid=n_grid

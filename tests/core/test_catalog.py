@@ -11,7 +11,10 @@ import pytest
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid
-from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
+from astrogwb.populations.bns_madau_dickinson import (
+    bns_md_cosmological,
+    madau_dickinson_total_merger_rate,
+)
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
     PolarizationPowerGenerator,
@@ -224,23 +227,31 @@ def _catalog(redshift: np.ndarray) -> Catalog:
     )
 
 
-def test_get_population_model_binds_construction_settings_only() -> None:
-    """Generating hyperparameters must not be captured in the bound source model.
+def test_getters_bind_construction_settings_only() -> None:
+    """Generating hyperparameters must not be captured in the bound callables.
 
     They describe how the catalog was made; a target evaluation supplies its
     own, and binding the generating ones here would silently pin them.
     """
-    model = _catalog(np.array([0.5, 1.5])).get_population_model()
-    assert model.source.fn is bns_md_cosmological
-    assert dict(model.source.model_kwargs) == POPULATION_RECORD["model_kwargs"]
-    assert model.source.density_sites == POPULATION_RECORD["density_sites"]
+    catalog = _catalog(np.array([0.5, 1.5]))
+    source = catalog.get_source_model()
+    assert source.func is bns_md_cosmological  # ty: ignore[unresolved-attribute]
+    assert source.args == ()  # ty: ignore[unresolved-attribute]
+    assert source.keywords == POPULATION_RECORD["model_kwargs"]  # ty: ignore[unresolved-attribute]
+    rate = catalog.get_merger_rate_fn()
+    assert rate.func is madau_dickinson_total_merger_rate  # ty: ignore[unresolved-attribute]
+    assert rate.args == ()  # ty: ignore[unresolved-attribute]
+    assert rate.keywords == POPULATION_RECORD["model_kwargs"]  # ty: ignore[unresolved-attribute]
 
 
 def test_unknown_population_model_names_fail_clearly() -> None:
     catalog = _catalog(np.array([0.5, 1.5]))
     object.__setattr__(catalog, "_source_model_name", "no_such_population")
     with pytest.raises(KeyError, match="bns_md_cosmological"):
-        catalog.get_population_model()
+        catalog.get_source_model()
+    object.__setattr__(catalog, "_rate_model_name", "no_such_rate")
+    with pytest.raises(KeyError, match="madau_dickinson"):
+        catalog.get_merger_rate_fn()
 
 
 def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> None:
@@ -260,6 +271,10 @@ def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> 
     # Everything else about the record travels unchanged.
     assert restricted.fiducials == catalog.fiducials
     assert restricted.density_sites == catalog.density_sites
+    # Both reconstructed callables see the narrowed window.
+    for bound in (restricted.get_source_model(), restricted.get_merger_rate_fn()):
+        assert bound.keywords["z_min"] == 0.3  # ty: ignore[unresolved-attribute]
+        assert bound.keywords["z_max"] == 2.0  # ty: ignore[unresolved-attribute]
 
 
 def test_restrict_redshift_leaves_the_original_untouched() -> None:

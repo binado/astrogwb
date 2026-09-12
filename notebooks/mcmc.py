@@ -171,7 +171,7 @@ from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import AnalysisGrid, build_run_config
 from astrogwb.paper.config.runs import assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
-from astrogwb.populations import build_population
+from astrogwb.populations import build_merger_rate_fn, build_source_model
 from astrogwb.sampling import gwb_spectral_density_model
 
 register_projection(MplAxes)
@@ -279,22 +279,23 @@ analysis_grid = AnalysisGrid(
     maximum_redshift=maximum_redshift,
     n_grid=n_grid,
 )
-# The target population, bound to the analysis grid once: it is static pytree
-# metadata on the estimator, and a partial hashes by identity, so rebuilding
-# one per step would retrace the whole model.
-target_model = build_population(
-    "bns_md_modified_propagation",
-    settings={
-        "z_min": minimum_redshift,
-        "z_max": maximum_redshift,
-        "n_grid": n_grid,
-    },
+# The target source model and merger rate, bound to the analysis grid once: a
+# partial hashes by identity, so rebuilding one per step would retrace the
+# whole model.
+target_settings = {
+    "z_min": minimum_redshift,
+    "z_max": maximum_redshift,
+    "n_grid": n_grid,
+}
+target_source_model = build_source_model(
+    "bns_md_modified_propagation", settings=target_settings
 )
+target_merger_rate_fn = build_merger_rate_fn(settings=target_settings)
 
 # One call does every step the headless runner does: restrict both catalogs to
 # the analysis window (samples *and* recorded density together), build the
 # fiducial observation from the injection catalog's own population, build the
-# effective PSD and the band mask, and prepare the estimator against the
+# effective PSD and the band mask, and prepare the importance arrays against the
 # proposal catalog's own recorded density. Nothing here restates the proposal:
 # the file carries it.
 inputs = prepare_inference_inputs(
@@ -302,17 +303,18 @@ inputs = prepare_inference_inputs(
     proposal_catalog,
     grid=analysis_grid,
     detectors=detnames,
-    target_model=target_model,
+    target_source_model=target_source_model,
+    target_merger_rate_fn=target_merger_rate_fn,
 )
 observation = inputs.observation
 proposal = inputs.proposal
-estimator = inputs.estimator
+spectral_density_fn = inputs.spectral_density_fn
 
 frequencies = observation.frequencies
 df = observation.df
 mask = observation.frequency_mask
 effective_psd_arr = inputs.effective_psd
-samples = dict(estimator.source_parameters)
+samples = {name: jnp.asarray(v) for name, v in proposal.source_parameters.items()}
 n_freq, n_samples = proposal.polarization_power.shape
 print(f"loaded proposal: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
 print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
@@ -401,16 +403,17 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 #
 # ### Implementing the model
 #
-# The pipeline expresses this as a *population model*: one NumPyro declaration
+# The pipeline expresses this as a *source model*: one NumPyro declaration
 # whose sample sites are the catalog's stored columns and whose deterministic
-# sites are the luminosity distance governing waveform amplitude and the
-# observer-frame total merger rate. One execution supplies all three, so the
-# cosmology integrals they share are computed once.
+# sites include the luminosity distance governing waveform amplitude. One
+# isolated execution supplies both the source density and that distance; the
+# observer-frame total merger rate is a separate merger-rate function.
 #
-# `SpectralDensityImportanceEstimator.from_catalog` pairs a target model with a
-# fixed catalog. The denominator $q(\theta_i)$ is not configured anywhere: it is
-# the proposal catalog's *own* recorded population, evaluated at the parameters
-# it was drawn at. The reference distance $d_{GW}(z, \Lambda_0)$ is the distance
+# `prepare_importance_arrays` reads a fixed catalog once, and
+# `importance_spectral_density` reweights it to a target source model. The
+# denominator $q(\theta_i)$ is not configured anywhere: it is the proposal
+# catalog's *own* recorded source model, evaluated at the parameters it was
+# drawn at. The reference distance $d_{GW}(z, \Lambda_0)$ is the distance
 # column the file already holds -- the one its stored power was generated at --
 # never a freshly interpolated cosmology table.
 
@@ -459,8 +462,8 @@ plot_omegagw(
     ymin=1e-15,
 )
 
-# The masked arrays the likelihood is evaluated against. The estimator already
-# holds the band-restricted power; masking the source samples would silently
+# The masked arrays the likelihood is evaluated against. The bound spectrum
+# already holds the band-restricted power; masking the source samples would silently
 # truncate the population, so it never happens.
 model_kwargs = inputs.masked_model_kwargs()
 observed_spectral_density = model_kwargs["observed_spectral_density"]
@@ -471,13 +474,14 @@ frequencies = frequencies[mask]
 # ## Running the MCMC
 #
 # We run the NUTS sampler as implemented in the `numpyro` python package. The
-# estimator was prepared *with* the frequency mask, so it owns the
-# band-restricted power; the source samples keep their full length.
+# importance arrays were prepared *with* the frequency mask, so the bound
+# spectrum owns the band-restricted power; the source samples keep their full
+# length.
 
 # %%
 base_model = partial(
     gwb_spectral_density_model,
-    spectral_density_fn=estimator,
+    spectral_density_fn=spectral_density_fn,
     priors=priors,
     scale=gaussian_bin_scale(effective_psd_arr, observation_time, df),
 )
