@@ -83,9 +83,12 @@ def test_ripple_generator_owns_grid_and_reduces_chunked_power(
     ripple_generator: RippleGenerator,
 ) -> None:
     generator = ripple_generator
-    assert not hasattr(generator, "frequencies")
+    with pytest.raises(ValueError, match="has not generated yet"):
+        _ = generator.frequencies
 
     frequencies, power = generator(_ripple_sources())
+
+    np.testing.assert_array_equal(generator.frequencies, frequencies)
 
     assert frequencies[0] == 20.0
     assert frequencies[-1] == 100.0
@@ -103,6 +106,18 @@ def test_ripple_generator_has_no_fabricated_spacing(
 ) -> None:
     """Nothing stands in for the measured grid spacing any more."""
     assert not hasattr(ripple_generator, "df")
+
+
+@pytest.mark.integration
+def test_ripple_generate_matches_the_first_batch_column(
+    ripple_generator: RippleGenerator,
+) -> None:
+    sources = _ripple_sources()
+    batch = ripple_generator.generate_batch(sources)
+    first = {name: values[:1] for name, values in sources.items()}
+    np.testing.assert_allclose(
+        ripple_generator.generate(first), batch[:, 0], rtol=1e-12
+    )
 
 
 def test_ripple_generator_rejects_mismatched_source_parameter_shapes(

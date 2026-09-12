@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike
 
@@ -17,7 +18,10 @@ class PolarizationPowerGenerator:
     """Frequency-domain waveform descriptor and power-generation interface.
 
     Concrete subclasses turn source parameters into a frequency axis and
-    frequency-first polarization power. The base class is also used as a
+    frequency-first polarization power. :meth:`generate` is one source;
+    :meth:`generate_batch` is a 1-D catalog. ``__call__`` returns
+    ``(frequencies, polarization_power)`` so catalog construction records the
+    axis the backend actually produced. The base class is also used as a
     metadata-only descriptor when a persisted catalog is loaded.
 
     ``frequency_resolution`` records what was *requested*; it is not
@@ -61,6 +65,33 @@ class PolarizationPowerGenerator:
             or self.frequency_resolution <= 0.0
         ):
             raise ValueError("frequency_resolution must be a finite positive scalar")
+
+    def generate(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
+        """Generate power for a single source, shape ``(F,)``.
+
+        The default implementation wraps :meth:`generate_batch` around a
+        length-1 catalog. Concrete generators that cannot form a batch of one
+        should override this.
+        """
+        power = self.generate_batch(
+            {
+                name: jnp.atleast_1d(jnp.asarray(values))
+                for name, values in source_parameters.items()
+            }
+        )
+        if power.shape[-1] != 1:
+            raise ValueError(
+                f"generate expects a single source; received {power.shape[-1]} events"
+            )
+        return power[:, 0]
+
+    def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
+        """Generate power for a 1-D catalog, shape ``(F, N)``."""
+        del source_parameters
+        raise NotImplementedError(
+            "PolarizationPowerGenerator is a metadata-only descriptor; "
+            "use a concrete generator subclass"
+        )
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]

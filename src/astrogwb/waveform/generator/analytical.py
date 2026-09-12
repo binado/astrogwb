@@ -301,14 +301,16 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
             self.minimum_frequency, self.maximum_frequency, self.frequency_resolution
         )
 
+    def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
+        prepared_parameters = {
+            name: jnp.asarray(values) for name, values in source_parameters.items()
+        }
+        frequencies = self.frequencies
+        return inspiral_polarization_power(
+            frequencies, prepared_parameters, alpha=self.alpha
+        ).T
+
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, jax.Array]:
-        prepared_parameters = {
-            name: np.asarray(values) for name, values in source_parameters.items()
-        }
-        frequencies = self.frequencies
-        power = inspiral_polarization_power(
-            frequencies, prepared_parameters, alpha=self.alpha
-        ).T
-        return jnp.asarray(frequencies), power
+        return jnp.asarray(self.frequencies), self.generate_batch(source_parameters)
