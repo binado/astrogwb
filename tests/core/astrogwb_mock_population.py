@@ -24,27 +24,33 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
+from numpyro import handlers
 
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.populations import Population, build_population
+from astrogwb.populations import Population, SourceModel, build_population
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 
 def derived_columns(
-    model: Population,
+    model: SourceModel,
     params: Mapping[str, ArrayLike],
     sources: Mapping[str, ArrayLike],
 ) -> dict[str, jax.Array]:
-    """Replay a population at fixed source values, returning declared outputs.
+    """Replay a source model at fixed source values, returning declared outputs.
 
     The test-side counterpart of the batched replay inside
-    :meth:`astrogwb.populations.Population.sample`: sample sites take the
-    supplied values, deterministic outputs are the model's recomputation.
+    :meth:`astrogwb.populations.SourceModel.sample`: sample sites take the
+    supplied values, deterministic outputs are the model's recomputation. The
+    result is the model's own return mapping -- the mapping that defines the
+    source-output set -- so a stored deterministic is never trusted over the
+    recomputation, and no static site-name list is needed.
     """
-    trace = model.trace(params, sources)
-    return {name: jnp.asarray(trace[name]["value"]) for name in model.source_sites}
+    bound = handlers.condition(
+        model, data={name: jnp.asarray(value) for name, value in sources.items()}
+    )
+    return {name: jnp.asarray(value) for name, value in bound(params).items()}
 
 
 #: Hyperparameters the mock injection is drawn at and built at.
@@ -116,7 +122,7 @@ def mock_target_model(n_grid: int = N_GRID) -> Population:
 
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
     """Draw the mock population as plain ``(N,)`` float64 arrays."""
-    samples = mock_population_model().sample(
+    samples = mock_population_model().source.sample(
         jax.random.PRNGKey(MOCK_POPULATION_SEED),
         POPULATION_PARAMS,
         num_samples=num_sources,
@@ -133,7 +139,8 @@ def mock_catalog(
     return Catalog.from_generator(
         source_parameters,
         generator=generator,
-        model_name="bns_md_cosmological",
+        source_model_name="bns_md_cosmological",
+        rate_model_name="madau_dickinson",
         model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
         fiducials=POPULATION_PARAMS,
         density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
@@ -219,7 +226,9 @@ def synthetic_source_parameters(n_samples: int = 16) -> dict[str, jax.Array]:
         "lambda_1": 400.0 * constant,
         "lambda_2": 300.0 * constant,
     }
-    return derived_columns(mock_population_model(), POPULATION_PARAMS, stochastic)
+    return derived_columns(
+        mock_population_model().source, POPULATION_PARAMS, stochastic
+    )
 
 
 def build_synthetic_estimator(
@@ -265,7 +274,8 @@ def build_synthetic_estimator(
         polarization_power=np.asarray(polarization_power),
         frequencies=np.asarray(generator.frequencies),
         waveform_metadata=generator,
-        _model_name="bns_md_cosmological",
+        _source_model_name="bns_md_cosmological",
+        _rate_model_name="madau_dickinson",
         _model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
         _fiducials=POPULATION_PARAMS,
         _density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
