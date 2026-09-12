@@ -22,18 +22,30 @@ from repo import REPO_ROOT
 
 from astrogwb.paper.config.catalogs import (
     CatalogDefinition,
-    check_population_model,
+    check_rate_model,
+    check_source_model,
     discover_catalogs,
     load_catalog_layers,
 )
 from astrogwb.populations import (
+    Population,
     build_population,
-    known_population_models,
+    known_merger_rate_models,
+    known_source_models,
 )
 
 
 def _definitions() -> dict[str, CatalogDefinition]:
     return discover_catalogs(REPO_ROOT)
+
+
+def _build(population) -> Population:
+    return build_population(
+        source_model=population.source_model,
+        rate_model=population.rate_model,
+        settings=population.kwargs,
+        source_kwargs=population.source_kwargs,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -42,7 +54,10 @@ def _definitions() -> dict[str, CatalogDefinition]:
 def test_every_committed_catalog_names_a_registered_model() -> None:
     """Caught pre-flight, not at the top of a queued GPU generation job."""
     for name, definition in _definitions().items():
-        check_population_model(definition.population.model, label=f"catalog {name!r}")
+        check_source_model(
+            definition.population.source_model, label=f"catalog {name!r}"
+        )
+        check_rate_model(definition.population.rate_model, label=f"catalog {name!r}")
 
 
 def test_every_committed_catalog_can_build_its_population() -> None:
@@ -54,23 +69,21 @@ def test_every_committed_catalog_can_build_its_population() -> None:
     """
     for name, definition in _definitions().items():
         population = definition.population
-        model = build_population(population.model, settings=population.kwargs)
+        model = _build(population)
         with handlers.seed(rng_seed=0):
-            trace = handlers.trace(model).get_trace(population.params)
+            trace = handlers.trace(model.source).get_trace(population.params)
         assert trace["redshift"]["type"] == "sample", name
         assert trace["luminosity_distance"]["type"] == "deterministic", name
 
 
 def test_every_declared_density_factor_is_a_real_sample_site() -> None:
     for name, definition in _definitions().items():
-        model = build_population(
-            definition.population.model, settings=definition.population.kwargs
-        )
+        model = _build(definition.population)
         with handlers.seed(rng_seed=0):
-            trace = handlers.trace(model).get_trace(definition.population.params)
-        for site in model.density_sites:
+            trace = handlers.trace(model.source).get_trace(definition.population.params)
+        for site in model.source.density_sites:
             assert trace[site]["type"] == "sample", name
-        assert "redshift" in model.density_sites, name
+        assert "redshift" in model.source.density_sites, name
 
 
 def test_the_retired_population_graphs_are_gone() -> None:
@@ -81,12 +94,21 @@ def test_the_retired_population_graphs_are_gone() -> None:
 # --------------------------------------------------------------------------- #
 # Validation
 # --------------------------------------------------------------------------- #
-def test_an_unregistered_model_name_lists_the_known_set() -> None:
+def test_an_unregistered_source_model_name_lists_the_known_set() -> None:
     with pytest.raises(ValueError) as error:
-        check_population_model("no_such_population", label="catalog 'toy'")
+        check_source_model("no_such_population", label="catalog 'toy'")
     message = str(error.value)
     assert "catalog 'toy'" in message
-    for name in known_population_models():
+    for name in known_source_models():
+        assert name in message
+
+
+def test_an_unregistered_rate_model_name_lists_the_known_set() -> None:
+    with pytest.raises(ValueError) as error:
+        check_rate_model("no_such_rate", label="catalog 'toy'")
+    message = str(error.value)
+    assert "catalog 'toy'" in message
+    for name in known_merger_rate_models():
         assert name in message
 
 
@@ -105,7 +127,8 @@ num_samples = 8
 seed = 1
 
 [population]
-model = "bns_md_cosmological"
+source_model = "bns_md_cosmological"
+rate_model = "madau_dickinson"
 
 [population.kwargs]
 z_min = 20.0

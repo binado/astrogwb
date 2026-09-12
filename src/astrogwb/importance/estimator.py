@@ -43,7 +43,7 @@ from jax.typing import ArrayLike
 from astrogwb.gwb.spectral import AverageMode, spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.weights import importance_log_weights
-from astrogwb.populations import Population, PopulationTrace
+from astrogwb.populations import Population
 
 if TYPE_CHECKING:
     from astrogwb.catalog import Catalog
@@ -124,11 +124,11 @@ class SpectralDensityImportanceEstimator:
             name: jnp.asarray(value)
             for name, value in catalog.source_parameters.items()
         }
-        proposal_log_prob = generating_model.log_prob(
+        proposal_log_prob = generating_model.source.log_prob(
             generating_params, source_parameters
         )
-        target_included = set(target_model.density_sites)
-        proposal_included = set(generating_model.density_sites)
+        target_included = set(target_model.source.density_sites)
+        proposal_included = set(generating_model.source.density_sites)
         if target_included != proposal_included:
             raise ValueError(
                 "target and proposal populations must include the same source "
@@ -187,30 +187,29 @@ class SpectralDensityImportanceEstimator:
 
     def _log_weights_and_trace(
         self, params: Mapping[str, ArrayLike]
-    ) -> tuple[jax.Array, PopulationTrace]:
-        """One model execution: the weights, and the trace holding its rate."""
-        trace = self.model.evaluate(params, self.source_parameters)
-        log_distance = jnp.log(trace.luminosity_distance)
+    ) -> tuple[jax.Array, jax.Array]:
+        """One model execution: the weights, and the rate they were evaluated at.
+
+        Returns ``(log_weights, total_merger_rate)``. ``log_weights`` is
+        per-source, shape ``(N,)``. ``total_merger_rate`` is the
+        observer-frame rate at ``params``, in mergers per second, shape ``()``.
+        """
+        log_prob, luminosity_distance, total_merger_rate = self.model.evaluate(
+            params, self.source_parameters
+        )
         log_weights = importance_log_weights(
-            target_log_prob=trace.log_prob,
+            target_log_prob=log_prob,
             proposal_log_prob=self.proposal_log_prob,
-            log_luminosity_distance=log_distance,
+            log_luminosity_distance=jnp.log(luminosity_distance),
             log_reference_distance=self.log_reference_distance,
         )
-        return log_weights, trace
+        return log_weights, total_merger_rate
 
     def __call__(
         self, params: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
         """Return the spectrum, total merger rate, and relative importance ESS."""
-        log_weights, trace = self._log_weights_and_trace(params)
-        if trace.total_merger_rate is None:
-            raise ValueError(
-                "target population declares no total_merger_rate site: params "
-                "must carry the physical rate parameter for a spectrum, unlike "
-                "for a bare proposal density"
-            )
-        total_merger_rate = trace.total_merger_rate
+        log_weights, total_merger_rate = self._log_weights_and_trace(params)
         prediction = spectral_density(
             self.polarization_power,
             jnp.exp(log_weights),

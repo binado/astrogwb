@@ -11,6 +11,7 @@ import pytest
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid
+from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
     PolarizationPowerGenerator,
@@ -45,7 +46,8 @@ def _waveform_generator() -> PolarizationPowerGenerator:
 #: is the record of the density that drew it, so there is no valid catalog
 #: without one.
 POPULATION_RECORD: dict[str, Any] = {
-    "model_name": "bns_md_cosmological",
+    "source_model_name": "bns_md_cosmological",
+    "rate_model_name": "madau_dickinson",
     "model_kwargs": {"z_min": 0.0, "z_max": 20.0, "n_grid": 256},
     "fiducials": {
         "H0": 67.66,
@@ -223,22 +225,20 @@ def _catalog(redshift: np.ndarray) -> Catalog:
 
 
 def test_get_population_model_binds_construction_settings_only() -> None:
-    """Generating hyperparameters must not be captured in the bound callable.
+    """Generating hyperparameters must not be captured in the bound source model.
 
     They describe how the catalog was made; a target evaluation supplies its
     own, and binding the generating ones here would silently pin them.
     """
-    from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
-
     model = _catalog(np.array([0.5, 1.5])).get_population_model()
-    assert model.fn is bns_md_cosmological
-    assert dict(model.settings) == POPULATION_RECORD["model_kwargs"]
-    assert model.density_sites == POPULATION_RECORD["density_sites"]
+    assert model.source.fn is bns_md_cosmological
+    assert dict(model.source.model_kwargs) == POPULATION_RECORD["model_kwargs"]
+    assert model.source.density_sites == POPULATION_RECORD["density_sites"]
 
 
 def test_unknown_population_model_names_fail_clearly() -> None:
     catalog = _catalog(np.array([0.5, 1.5]))
-    object.__setattr__(catalog, "_model_name", "no_such_population")
+    object.__setattr__(catalog, "_source_model_name", "no_such_population")
     with pytest.raises(KeyError, match="bns_md_cosmological"):
         catalog.get_population_model()
 

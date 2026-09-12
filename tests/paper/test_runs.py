@@ -252,6 +252,12 @@ def test_the_shared_blocks_are_declared_once() -> None:
         assert layers[-1].stem == name
         own = load_mapping(layers[-1])
         # Only the TaylorF2 catalog overrides anything in the shared waveform
-        # block, and only the guard catalogs touch the shared population.
+        # block, and only the guard catalogs touch the shared population --
+        # overriding the source model and its own construction kwargs, never
+        # the shared window/grid block or the rate model.
         assert set(own.get("waveform", {})) <= {"approximant"}, name
-        assert set(own.get("population", {})) <= {"model", "kwargs"}, name
+        assert set(own.get("population", {})) <= {
+            "source_model",
+            "kwargs",
+            "source_kwargs",
+        }, name
