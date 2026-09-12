@@ -12,7 +12,6 @@ the plated draw path instead of hiding it with a handler.
 
 from __future__ import annotations
 
-import operator
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -23,7 +22,8 @@ import numpyro
 from jax.typing import ArrayLike
 from numpyro import handlers
 from numpyro.infer import Predictive
-from numpyro.infer.util import compute_log_probs
+
+from astrogwb.utils.sampling import compute_model_and_log_probs
 
 #: A registered source model: declares per-source sites as a side effect and
 #: returns the mapping that defines the source-output set -- the columns a
@@ -151,39 +151,23 @@ class SourceModel:
         values but do not reach the log-probability calculation. There is no
         RNG key: evaluation cannot silently draw missing source inputs.
 
-        ``luminosity_distance`` comes from the model's *return value*, read
-        out of a single execution alongside the log densities -- not from the
-        trace's own copy of the same site -- which is what keeps the return
-        mapping the one authoritative source of derived columns.
+        ``luminosity_distance`` comes from the model's *return value*, read out
+        of the same isolated execution that produces the log density, so a
+        stored distance column is never trusted over the model's own
+        recomputation.
 
         Returns ``(log_prob, luminosity_distance)``. ``log_prob`` is the
         selected importance-weighting density, shape ``(N,)`` or ``()`` when
         ``density_sites`` is empty. ``luminosity_distance`` is the effective
         distance governing waveform amplitude, in Mpc, shape ``(N,)``.
         """
-        captured: list[Mapping[str, jax.Array]] = []
-
-        def _capture(p: Mapping[str, ArrayLike]) -> dict[str, jax.Array]:
-            result = self(p)
-            captured.append(result)
-            return result
-
-        with handlers.block():
-            bound = handlers.condition(
-                _capture,
-                data={name: jnp.asarray(value) for name, value in sources.items()},
-            )
-            filtered = handlers.block(
-                bound,
-                hide_fn=lambda site: (
-                    site["type"] == "sample" and site["name"] not in self.density_sites
-                ),
-            )
-            log_probs, _ = compute_log_probs(
-                filtered, (params,), {}, {}, sum_log_prob=False
-            )
-        log_prob = jax.tree.reduce(operator.add, log_probs, initializer=jnp.zeros(()))
-        result = captured[0]
+        bound = handlers.condition(
+            self,
+            data={name: jnp.asarray(value) for name, value in sources.items()},
+        )
+        result, log_prob = compute_model_and_log_probs(
+            bound, self.density_sites, params
+        )
         luminosity_distance = jnp.asarray(result[_LUMINOSITY_DISTANCE_SITE])
         return log_prob, luminosity_distance
 
