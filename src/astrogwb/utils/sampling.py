@@ -20,7 +20,7 @@ from numpyro.distributions.util import is_identically_one
 from numpyro.primitives import Messenger
 
 
-class SelectedDensityAccumulator(Messenger):
+class DensityAccumulator(Messenger):
     """Sum ``fn.log_prob(value)`` over selected sample sites in one execution.
 
     Only sample sites named in ``sites`` are recognised; every other site is
@@ -80,9 +80,9 @@ def compute_model_and_log_probs(
     source, or is the scalar zero if no ``density_sites`` matched.
     """
     with handlers.block():
-        accumulator = SelectedDensityAccumulator(model, sites=density_sites)
+        accumulator = DensityAccumulator(model, sites=density_sites)
         result = accumulator(*model_args, **model_kwargs)
     return result, accumulator.log_prob
 
 
-__all__ = ["SelectedDensityAccumulator", "compute_model_and_log_probs"]
+__all__ = ["DensityAccumulator", "compute_model_and_log_probs"]

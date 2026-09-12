@@ -1,6 +1,6 @@
 """Contract tests for :mod:`astrogwb.utils.sampling`.
 
-``SelectedDensityAccumulator`` must reproduce numpyro's ``compute_log_probs``
+``DensityAccumulator`` must reproduce numpyro's ``compute_log_probs``
 bit-for-bit -- including the ``intermediates`` and plate-subsample ``scale``
 paths -- and ``compute_model_and_log_probs`` must hand back the model's return
 value from that same single execution.
@@ -22,7 +22,7 @@ from numpyro import handlers
 from numpyro.infer.util import compute_log_probs
 
 from astrogwb.utils.sampling import (
-    SelectedDensityAccumulator,
+    DensityAccumulator,
     compute_model_and_log_probs,
 )
 
@@ -60,7 +60,7 @@ def _reference(model: Any, sites: tuple[str, ...]) -> jax.Array:
 
 def _accumulate(model: Any, sites: tuple[str, ...]) -> jax.Array:
     with handlers.block():
-        accumulator = SelectedDensityAccumulator(
+        accumulator = DensityAccumulator(
             handlers.condition(model, data=FIXED), sites=sites
         )
         accumulator({})
@@ -98,7 +98,7 @@ def test_accumulator_matches_compute_log_probs_under_a_subsampled_plate() -> Non
         expected = jax.tree.reduce(operator.add, log_probs, initializer=jnp.zeros(()))
     with handlers.block():
         seeded = handlers.seed(_plated_model, jax.random.PRNGKey(0))
-        accumulator = SelectedDensityAccumulator(seeded, sites=sites)
+        accumulator = DensityAccumulator(seeded, sites=sites)
         accumulator({})
     assert jnp.array_equal(accumulator.log_prob, expected)
 
