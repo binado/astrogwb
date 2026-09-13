@@ -39,24 +39,38 @@ The plated source draw already returns ``(N,)`` arrays, passed as a dict
 to :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate_batch`.
 Mapping per-source :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate`
 would stack ``(N, F)`` -- the OOM the batching exists to avoid -- not because
-of a vmap-inside-plate problem. Full batches of ``batch_size`` are reduced
-in a Python loop (static under JIT); a static remainder
-(``num_events % batch_size``) is a separate generate.
+of a vmap-inside-plate problem.
 
-:class:`~astrogwb.waveform.AnalyticInspiralGenerator` is JAX-native and a
-valid ``jax.jit`` / ``Predictive(num_samples>1)`` target. Ripple's
-``generate_fd_polarizations_batch`` is a ``vmap``, but
-``RippleBackend._resolve_batch`` still does host ``bool`` / ``numpy``
-conversions, so a traced Ripple call fails there. Draw Ripple catalogs
-eagerly. Warm Ripple (one generate) before reading
-``generator.frequencies`` on an empty catalog::
+Full batches of ``batch_size`` are reduced with :func:`jax.lax.scan`, so the
+compiled graph carries one batch body however many chunks there are; a static
+remainder (``num_events % batch_size``) is a separate ``generate_batch``. Peak
+waveform memory is ``(F, batch_size)`` per draw. The scan bounds the *waveform*
+intermediate, not the NumPyro draw: the catalog of source parameters is still
+materialized in full, so source storage remains ``O(num_events)``, and
+:class:`~numpyro.infer.Predictive` adds a leading draw axis on top of that.
+
+Shapes are static, values are not. ``num_events`` is a plate size, so each
+distinct catalog size is its own JIT specialization, and the full-chunk and
+remainder paths compile separately because their array shapes differ. Changing
+hyperparameter *values* costs no compilation.
+
+Both generators are JAX-native and valid :func:`jax.jit`,
+:class:`~numpyro.infer.Predictive` and :func:`jax.vmap` targets.
+Neither validates physical values during generation -- a traced array cannot
+raise, and forcing the question would sync the host on every chunk. Run
+:func:`validate_source_model` once before inference to check a population
+against a generator's waveform family::
 
     from functools import partial
 
     from numpyro.infer import Predictive
 
-    from astrogwb.sampling import gwb_forward_model
+    from astrogwb.sampling import gwb_forward_model, validate_source_model
 
+    validate_source_model(
+        params, source_model=source_model, generator=generator,
+        rng_key=jax.random.key(0),
+    )
     simulate = Predictive(
         partial(
             gwb_forward_model,
@@ -67,7 +81,7 @@ eagerly. Warm Ripple (one generate) before reading
             batch_size=1024,
             num_events=10_000,
         ),
-        num_samples=1,
+        num_samples=8,
         return_sites=("spectral_density", "n_events", "total_merger_rate"),
     )
     draws = simulate(jax.random.key(0), params)
@@ -79,6 +93,7 @@ from collections.abc import Mapping
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
@@ -97,6 +112,15 @@ _LUMINOSITY_DISTANCE = "luminosity_distance"
 #: The population-level rate site name, published outside the ``events``
 #: plate the source draw runs inside.
 _TOTAL_MERGER_RATE_SITE = "total_merger_rate"
+
+
+def _require_luminosity_distance(sources: Mapping[str, jax.Array]) -> None:
+    """Raise unless the source mapping names the distance scaling the waveform."""
+    if _LUMINOSITY_DISTANCE not in sources:
+        raise KeyError(
+            f"source model must return {_LUMINOSITY_DISTANCE!r}: it is the "
+            "distance governing waveform amplitude"
+        )
 
 
 def _batch_power_sum(
@@ -122,25 +146,66 @@ def _sum_polarization_power(
 ) -> jax.Array:
     """Sum frequency-first polarization power over sources, chunk by chunk.
 
-    Full batches of ``batch_size`` are reduced together; a static remainder
-    is a separate ``generate_batch``. Peak waveform memory is
+    Full batches of ``batch_size`` are reduced with :func:`jax.lax.scan`, so
+    the compiled body is one batch regardless of how many chunks there are; a
+    static remainder is a separate ``generate_batch``. Peak waveform memory is
     ``(F, batch_size)`` rather than ``(F, N)``.
+
+    The zero carry comes from ``generator.frequencies``, so an empty catalog
+    returns zeros without tracing or calling a waveform kernel at all.
     """
     n_events = array_dict_shape(sources)[0]
     n_full, remainder = divmod(n_events, batch_size)
+    total = jnp.zeros(np.shape(generator.frequencies)[0], dtype=jnp.float64)
 
-    def slice_sum(start: int, size: int) -> jax.Array:
-        batch = {name: values[start : start + size] for name, values in sources.items()}
-        return _batch_power_sum(generator, batch)
-
+    # A Python branch, not a traced one: n_full is static, and lax.scan over
+    # zero chunks would still trace the waveform body it never runs.
     if n_full:
-        total = slice_sum(0, batch_size)
-        for index in range(1, n_full):
-            total = total + slice_sum(index * batch_size, batch_size)
-        if not remainder:
-            return total
-        return total + slice_sum(n_full * batch_size, remainder)
-    return slice_sum(0, remainder)
+        chunks = {
+            name: values[: n_full * batch_size].reshape(n_full, batch_size)
+            for name, values in sources.items()
+        }
+
+        def accumulate(
+            carry: jax.Array, chunk: Mapping[str, jax.Array]
+        ) -> tuple[jax.Array, None]:
+            return carry + _batch_power_sum(generator, chunk), None
+
+        total, _ = jax.lax.scan(accumulate, total, chunks)
+    if remainder:
+        tail = {name: values[n_full * batch_size :] for name, values in sources.items()}
+        total = total + _batch_power_sum(generator, tail)
+    return total
+
+
+def validate_source_model(
+    params: Mapping[str, ArrayLike],
+    *,
+    source_model: SourceFn,
+    generator: PolarizationPowerGenerator,
+    rng_key: jax.Array | int,
+) -> None:
+    """Check a population against a generator's waveform family, eagerly.
+
+    :func:`gwb_forward_model` cannot do this itself: under ``jax.jit`` the
+    source arrays are tracers, and a tracer cannot drive a Python exception.
+    So generation trusts its inputs, and this is how a caller earns that trust
+    -- one eager draw of a single source, checked against the approximant,
+    before handing the model to NUTS or :class:`~numpyro.infer.Predictive`.
+
+    No waveform is evaluated, so this is cheap enough to call unconditionally.
+
+    Raises:
+        KeyError: If ``source_model`` does not return ``luminosity_distance``.
+        ValueError: If a drawn value names a degree of freedom the generator's
+            approximant does not carry -- a tidal population against an
+            aligned-spin model, say, whose deformabilities would otherwise be
+            silently ignored.
+    """
+    with numpyro.handlers.seed(rng_seed=rng_key), numpyro.plate("events", 1):
+        sources = dict(source_model(params))
+    _require_luminosity_distance(sources)
+    generator.check_sources(sources)
 
 
 def gwb_forward_model(
@@ -197,11 +262,7 @@ def gwb_forward_model(
     numpyro.deterministic(_TOTAL_MERGER_RATE_SITE, total_merger_rate)
     with numpyro.plate("events", num_events):
         sources = dict(source_model(params))
-    if _LUMINOSITY_DISTANCE not in sources:
-        raise KeyError(
-            f"source model must return {_LUMINOSITY_DISTANCE!r}: it is the "
-            "distance governing waveform amplitude"
-        )
+    _require_luminosity_distance(sources)
     numpyro.sample(
         "n_events",
         dist.Poisson(total_merger_rate * observation_time_sec),
@@ -218,4 +279,4 @@ def gwb_forward_model(
     numpyro.deterministic("spectral_density", factor * power_sum / observation_time_sec)
 
 
-__all__ = ["gwb_forward_model"]
+__all__ = ["gwb_forward_model", "validate_source_model"]

@@ -1,7 +1,8 @@
 """Exact Poisson-catalog forward model, checked against an explicit power sum."""
 
 from functools import partial
-from typing import Any
+from typing import Any, cast
+from unittest.mock import Mock
 
 import jax
 import jax.numpy as jnp
@@ -16,9 +17,14 @@ from numpyro import handlers
 from numpyro.infer import Predictive
 
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO, ISCO_ALPHA
-from astrogwb.sampling import gwb_forward_model
+from astrogwb.sampling import gwb_forward_model, validate_source_model
+from astrogwb.sampling.forward_model import _sum_polarization_power
 from astrogwb.utils import years_to_seconds
-from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
+from astrogwb.waveform import (
+    AnalyticInspiralGenerator,
+    PolarizationPowerGenerator,
+    RippleGenerator,
+)
 
 N_EVENTS = 8
 BATCH_SIZE = 3
@@ -43,10 +49,10 @@ def _generator() -> AnalyticInspiralGenerator:
 def _ripple_generator() -> RippleGenerator:
     """TaylorF2 settings shared with :mod:`test_waveform_generator`.
 
-    One generate warms the frequency cache so an empty-catalog spectrum can
-    read it.
+    No warm-up call: the generator knows its grid from its configuration, so
+    an empty-catalog spectrum can size itself without evaluating a waveform.
     """
-    generator = RippleGenerator(
+    return RippleGenerator(
         approximant="TaylorF2",
         sampling_frequency=256.0,
         minimum_frequency=20.0,
@@ -54,18 +60,6 @@ def _ripple_generator() -> RippleGenerator:
         reference_frequency=20.0,
         frequency_resolution=4.0,
     )
-    ones = jnp.ones((1,))
-    _ = generator(
-        {
-            "detector_frame_mass_1": 1.4 * ones,
-            "detector_frame_mass_2": 1.3 * ones,
-            "inclination": 0.0 * ones,
-            "luminosity_distance": 100.0 * ones,
-            "lambda_1": 400.0 * ones,
-            "lambda_2": 300.0 * ones,
-        }
-    )
-    return generator
 
 
 def _observation_time_for(expected_events: float) -> float:
@@ -322,3 +316,241 @@ def test_ripple_predictive_returns_finite_spectrum() -> None:
     assert bool(jnp.all(jnp.isfinite(draws["spectral_density"])))
     assert bool(jnp.all(draws["spectral_density"] >= 0.0))
     assert "redshift" not in draws
+
+
+# --------------------------------------------------------------------- #
+# The scan replaced an unrolled Python loop
+# --------------------------------------------------------------------- #
+def _unrolled_power_sum(generator, sources, *, batch_size: int):
+    """The loop ``_sum_polarization_power`` used to be, kept as the oracle.
+
+    The scan must agree with it for every catalog shape, including the ragged
+    and empty ones where the chunking arithmetic is easiest to get wrong.
+    """
+    n_events = next(iter(sources.values())).shape[0]
+    n_full, remainder = divmod(n_events, batch_size)
+
+    def slice_sum(start: int, size: int):
+        batch = {name: values[start : start + size] for name, values in sources.items()}
+        return jnp.asarray(generator.generate_batch(batch)).sum(axis=1)
+
+    if n_full:
+        total = slice_sum(0, batch_size)
+        for index in range(1, n_full):
+            total = total + slice_sum(index * batch_size, batch_size)
+        if not remainder:
+            return total
+        return total + slice_sum(n_full * batch_size, remainder)
+    if remainder:
+        return slice_sum(0, remainder)
+    return jnp.zeros(jnp.shape(generator.frequencies)[0], dtype=jnp.float64)
+
+
+def _draw_sources(n_events: int) -> dict[str, jax.Array]:
+    trace = _seeded_trace(
+        gwb_forward_model, _jax_params(), **_model_kwargs(num_events=n_events)
+    )
+    return {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
+
+
+@pytest.mark.parametrize("batch_size", [1, 3, 5, 8, 13])
+@pytest.mark.parametrize("n_events", [1, 5, 8, 15])
+def test_scan_matches_the_unrolled_loop(n_events: int, batch_size: int) -> None:
+    """Full, ragged and single-event catalogs, across chunk sizes."""
+    generator = _generator()
+    sources = _draw_sources(n_events)
+
+    np.testing.assert_allclose(
+        np.asarray(_sum_polarization_power(generator, sources, batch_size=batch_size)),
+        np.asarray(_unrolled_power_sum(generator, sources, batch_size=batch_size)),
+        rtol=1e-12,
+    )
+
+
+def test_empty_catalog_reduces_without_calling_the_generator() -> None:
+    """Zero events is a static branch, not a zero-length scan.
+
+    A ``lax.scan`` over no chunks still traces its body, which for a Ripple
+    generator means building a waveform for a catalog that does not exist.
+    """
+    real = _generator()
+
+    class _CountingGenerator:
+        """Only ``frequencies`` may be read when the catalog is empty."""
+
+        frequencies = real.frequencies
+        generate_batch = Mock(side_effect=AssertionError("generator was called"))
+
+    sources = {name: values[:0] for name, values in _draw_sources(4).items()}
+
+    total = _sum_polarization_power(
+        cast(PolarizationPowerGenerator, _CountingGenerator()),
+        sources,
+        batch_size=BATCH_SIZE,
+    )
+
+    _CountingGenerator.generate_batch.assert_not_called()
+    np.testing.assert_array_equal(
+        np.asarray(total), np.zeros(np.shape(real.frequencies)[0])
+    )
+
+
+@pytest.mark.parametrize("n_events", [6, 7])
+def test_jitted_scan_matches_eager_for_full_and_ragged_catalogs(n_events: int) -> None:
+    """``n_events=6`` divides ``BATCH_SIZE``; ``7`` leaves a remainder chunk."""
+    kwargs = _model_kwargs(num_events=n_events)
+    eager = _seeded_trace(gwb_forward_model, _jax_params(), **kwargs)
+
+    def spectrum(params):
+        trace = _seeded_trace(gwb_forward_model, params, **kwargs)
+        return trace["spectral_density"]["value"]
+
+    np.testing.assert_allclose(
+        np.asarray(jax.jit(spectrum)(_jax_params())),
+        np.asarray(eager["spectral_density"]["value"]),
+        rtol=1e-12,
+    )
+
+
+def test_vmap_over_draws_shares_one_static_event_count() -> None:
+    """Two hyperparameter draws at one catalog size, mapped rather than looped."""
+    kwargs = _model_kwargs()
+
+    def spectrum(params):
+        return _seeded_trace(gwb_forward_model, params, **kwargs)["spectral_density"][
+            "value"
+        ]
+
+    params = _jax_params()
+    stacked = {name: jnp.stack([value, value]) for name, value in params.items()}
+    mapped = jax.vmap(spectrum)(stacked)
+
+    assert mapped.shape == (2, np.shape(kwargs["generator"].frequencies)[0])
+    np.testing.assert_allclose(
+        np.asarray(mapped[0]), np.asarray(spectrum(params)), rtol=1e-12
+    )
+
+
+# --------------------------------------------------------------------- #
+# Validation the traced model cannot do for itself
+# --------------------------------------------------------------------- #
+def test_validate_source_model_accepts_a_matched_population() -> None:
+    validate_source_model(
+        _jax_params(),
+        source_model=mock_population_model(),
+        generator=_generator(),
+        rng_key=jax.random.key(0),
+    )
+
+
+def test_validate_source_model_rejects_a_mismatched_approximant() -> None:
+    """A tidal population against an aligned-spin model.
+
+    Nothing downstream would complain: the approximant simply never reads the
+    deformabilities, so the spectrum comes out quietly wrong. Catching it is
+    the whole reason this helper exists.
+    """
+    aligned_spin = RippleGenerator(
+        approximant="IMRPhenomXAS",
+        sampling_frequency=256.0,
+        minimum_frequency=20.0,
+        maximum_frequency=100.0,
+        reference_frequency=20.0,
+        frequency_resolution=4.0,
+    )
+
+    def tidal_population(params):
+        sources = dict(mock_population_model()(params))
+        sources["lambda_1"] = jnp.full_like(sources["luminosity_distance"], 300.0)
+        return sources
+
+    with pytest.raises(ValueError, match="no tidal deformability"):
+        validate_source_model(
+            _jax_params(),
+            source_model=tidal_population,
+            generator=aligned_spin,
+            rng_key=jax.random.key(0),
+        )
+
+
+def test_validate_source_model_requires_luminosity_distance() -> None:
+    def no_distance(params):
+        sources = dict(mock_population_model()(params))
+        del sources["luminosity_distance"]
+        return sources
+
+    with pytest.raises(KeyError, match="luminosity_distance"):
+        validate_source_model(
+            _jax_params(),
+            source_model=no_distance,
+            generator=_generator(),
+            rng_key=jax.random.key(0),
+        )
+
+
+# --------------------------------------------------------------------- #
+# Ripple inside the model, which the eager caveat used to forbid
+# --------------------------------------------------------------------- #
+@pytest.mark.integration
+def test_ripple_forward_model_is_jittable() -> None:
+    """The caveat this whole change removes: Ripple under a trace."""
+    kwargs = _ripple_kwargs()
+
+    def spectrum(params):
+        return _seeded_trace(gwb_forward_model, params, **kwargs)["spectral_density"][
+            "value"
+        ]
+
+    jitted = np.asarray(jax.jit(spectrum)(_jax_params()))
+
+    assert np.all(np.isfinite(jitted))
+    assert np.all(jitted > 0.0)
+    np.testing.assert_allclose(jitted, np.asarray(spectrum(_jax_params())), rtol=1e-12)
+
+
+@pytest.mark.integration
+def test_ripple_predictive_stacks_multiple_draws() -> None:
+    """``num_samples > 1`` maps the model, which eager Ripple could not survive."""
+    kwargs = _ripple_kwargs()
+    draws = Predictive(
+        partial(gwb_forward_model, **kwargs),
+        num_samples=2,
+        return_sites=("spectral_density", "n_events"),
+    )(jax.random.key(0), _jax_params())
+
+    frequencies = np.shape(kwargs["generator"].frequencies)[0]
+    assert draws["spectral_density"].shape == (2, frequencies)
+    assert np.all(np.isfinite(draws["spectral_density"]))
+
+
+@pytest.mark.integration
+def test_ripple_waveform_power_is_differentiable() -> None:
+    """A prerequisite for gradient-based inference, not a demonstration of it.
+
+    This differentiates deterministic waveform power through the generator.
+    Differentiating a NumPyro population draw is a separate question and this
+    says nothing about it.
+    """
+    generator = _ripple_generator()
+    sources = _draw_sources(4)
+    sources = {
+        "detector_frame_mass_1": jnp.full((2,), 1.4),
+        "detector_frame_mass_2": jnp.full((2,), 1.3),
+        "inclination": jnp.zeros((2,)),
+        "luminosity_distance": jnp.array([100.0, 200.0]),
+    }
+
+    def total_power(chirp_scale):
+        scaled = dict(sources)
+        scaled["detector_frame_mass_1"] = sources["detector_frame_mass_1"] * chirp_scale
+        return jnp.sum(generator.generate_batch(scaled))
+
+    gradient = float(jax.grad(total_power)(1.0))
+    step = 1e-4
+    numerical = float(
+        (total_power(1.0 + step) - total_power(1.0 - step)) / (2.0 * step)
+    )
+
+    assert np.isfinite(gradient)
+    assert gradient != 0.0
+    np.testing.assert_allclose(gradient, numerical, rtol=1e-4)
