@@ -120,6 +120,26 @@ def test_ripple_generate_matches_the_first_batch_column(
     )
 
 
+def test_ripple_generate_rejects_multiple_events(
+    ripple_generator: RippleGenerator,
+) -> None:
+    with pytest.raises(ValueError, match="single source"):
+        ripple_generator.generate(_ripple_sources())
+
+
+@pytest.mark.integration
+def test_ripple_generate_accepts_zero_dimensional_scalars(
+    ripple_generator: RippleGenerator,
+) -> None:
+    sources = _ripple_sources()
+    arrays = {name: values[:1] for name, values in sources.items()}
+    scalars = {name: values[0] for name, values in sources.items()}
+
+    np.testing.assert_array_equal(
+        ripple_generator.generate(scalars), ripple_generator.generate(arrays)
+    )
+
+
 def test_ripple_generator_rejects_mismatched_source_parameter_shapes(
     ripple_generator: RippleGenerator,
 ) -> None:

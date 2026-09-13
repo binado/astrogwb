@@ -179,6 +179,31 @@ class RippleGenerator(PolarizationPowerGenerator):
 
         return jnp.concatenate(power_chunks, axis=1)
 
+    def generate(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
+        """Generate power for a single source, shape ``(F,)``.
+
+        Routes to the backend's per-event entry point instead of wrapping a
+        length-one catalog through :meth:`generate_batch`: the pinned
+        ``segment_duration`` keeps both paths on the same frequency grid, and
+        the per-event path avoids compiling a one-event batch kernel.
+        """
+        parameters: dict[str, float] = {}
+        for name, values in source_parameters.items():
+            scalar = jnp.asarray(values)
+            if scalar.size != 1:
+                raise ValueError(
+                    f"generate expects a single source; {name!r} carries "
+                    f"{scalar.size} values"
+                )
+            parameters[name] = float(scalar.reshape(()))
+        polarizations = self._backend.generate_fd_polarizations(
+            self.approximant,
+            sampling_frequency=self.sampling_frequency,
+            minimum_frequency=self.minimum_frequency,
+            **parameters,
+        )
+        return self._power_from_polarizations(polarizations)[:, 0]
+
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, jax.Array]:
