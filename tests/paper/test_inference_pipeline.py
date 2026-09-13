@@ -40,10 +40,7 @@ from astrogwb.catalog import Catalog
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import spectral_density
-from astrogwb.importance.spectral import (
-    evaluate_log_weights,
-    prepare_importance_arrays,
-)
+from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import RunConfig, build_run_config
 from astrogwb.paper.inference import (
@@ -530,14 +527,13 @@ def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights
     same cosmology on two grids is exactly what stops the weights being
     identically one.
     """
-    arrays = prepare_importance_arrays(proposal_catalog)
-    kwargs = arrays._asdict()
-    del kwargs["polarization_power"]
-    log_weights = evaluate_log_weights(
-        proposal_catalog.fiducials,
+    log_weights_fn = build_importance_spectrum(
+        proposal_catalog,
         source_model=proposal_catalog.get_source_model(),
-        **kwargs,
-    )
+        merger_rate_fn=proposal_catalog.get_merger_rate_fn(),
+        average_mode="analytic_inclination",
+    ).log_weights
+    log_weights = log_weights_fn(proposal_catalog.fiducials)
     np.testing.assert_array_equal(np.asarray(log_weights), np.zeros(N_SOURCES))
 
 

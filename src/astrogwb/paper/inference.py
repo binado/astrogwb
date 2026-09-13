@@ -3,9 +3,9 @@
 Every entrypoint that samples, profiles, or plots the fiducial spectrum runs
 the same sequence: load the two catalogs, restrict them to the analysis
 redshift window, build the fiducial injection spectrum, build the effective
-PSD, build the analysis-band mask, prepare the importance arrays, build the
-model. It used to be spelled out at eight call sites, two of which were
-near-verbatim clones of each other down to the model-building block.
+PSD, build the analysis-band mask, bind the proposal catalog to the target,
+build the model. It used to be spelled out at eight call sites, two of which
+were near-verbatim clones of each other down to the model-building block.
 
 The catalogs are now authoritative about their own populations, so this file no
 longer derives a proposal density from the run config, no longer cross-checks
@@ -25,7 +25,7 @@ the analysis band. :meth:`InferenceInputs.masked_model_kwargs` applies it.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import Any, NamedTuple
@@ -33,7 +33,6 @@ from typing import Any, NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax.typing import ArrayLike
 from numpyro import handlers
 from numpyro.distributions import Distribution
 
@@ -47,11 +46,7 @@ from astrogwb.distributions.amplitude import (
 )
 from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import AverageMode, spectral_density
-from astrogwb.importance.spectral import (
-    evaluate_log_weights,
-    importance_spectral_density,
-    prepare_importance_arrays,
-)
+from astrogwb.importance.spectral import LogWeightsFn, build_importance_spectrum
 from astrogwb.paper.catalogs import validate_matching_frequency_grids
 from astrogwb.paper.config.mcmc import AnalysisGrid, RunConfig
 from astrogwb.populations import (
@@ -101,7 +96,7 @@ class InferenceInputs:
     spectral_density_fn: SpectralDensityFn
     """The importance-sampled spectrum: band-restricted catalog arrays bound to
     the target source model and merger rate."""
-    log_weights_fn: Callable[[Mapping[str, ArrayLike]], jax.Array]
+    log_weights_fn: LogWeightsFn
     """Per-source log importance weights, bound to the same arrays and target."""
 
     def masked_model_kwargs(self) -> dict[str, Any]:
@@ -328,29 +323,20 @@ def prepare_inference_inputs(
     # The proposal density is the catalog's own recorded source model,
     # evaluated at the parameters it was drawn at. Doing that here, once, is
     # also what keeps it off the per-sampler-step path.
-    arrays = prepare_importance_arrays(proposal_catalog, frequency_mask=band_mask)
-    # One mapping feeds both partials, so the weights and the spectrum provably
-    # use the density factors the proposal was evaluated with.
-    weight_kwargs = {
-        "source_model": target_source_model,
-        "source_parameters": arrays.source_parameters,
-        "proposal_log_prob": arrays.proposal_log_prob,
-        "log_reference_distance": arrays.log_reference_distance,
-        "density_sites": arrays.density_sites,
-    }
+    spectrum = build_importance_spectrum(
+        proposal_catalog,
+        source_model=target_source_model,
+        merger_rate_fn=target_merger_rate_fn,
+        average_mode=average_mode,
+        frequency_mask=band_mask,
+    )
     return InferenceInputs(
         observation=observation,
         proposal=proposal_catalog,
         effective_psd=effective_psd_arr,
         observation_time=grid.observation_time,
-        spectral_density_fn=partial(
-            importance_spectral_density,
-            merger_rate_fn=target_merger_rate_fn,
-            polarization_power=arrays.polarization_power,
-            average_mode=average_mode,
-            **weight_kwargs,
-        ),
-        log_weights_fn=partial(evaluate_log_weights, **weight_kwargs),
+        spectral_density_fn=spectrum.spectral_density,
+        log_weights_fn=spectrum.log_weights,
     )
 
 

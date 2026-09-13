@@ -108,23 +108,17 @@ Reweighting it to a target source model needs nothing else: the file says what
 drew it, so the proposal density is recovered rather than restated.
 
 ```python
-from functools import partial
-
-from astrogwb.importance.spectral import (
-    importance_spectral_density,
-    prepare_importance_arrays,
-)
+from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import build_merger_rate_fn
 
-spectrum_fn = partial(
-    importance_spectral_density,
+spectrum_fn = build_importance_spectrum(
+    Catalog.load("catalog.h5"),
     source_model=build_source_model(
         "bns_md_modified_propagation", settings=model_kwargs
     ),
     merger_rate_fn=build_merger_rate_fn(settings=model_kwargs),
     average_mode="analytic_inclination",
-    **prepare_importance_arrays(Catalog.load("catalog.h5"))._asdict(),
-)
+).spectral_density
 spectrum, extras = spectrum_fn({**params, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91})
 ```
 

@@ -1,12 +1,17 @@
 r"""Reweighting one fixed catalog to a target source model, as a spectrum.
 
-Two steps, split by when they run. :func:`prepare_importance_arrays` runs once,
-outside JAX transformations: it reads the catalog's stored columns and power,
-and evaluates the density the catalog was drawn from at the parameters it was
-drawn at. :func:`importance_spectral_density` and :func:`evaluate_log_weights`
-run per sampler step, against a target source model and hyperparameters.
-Binding the prepared arrays with :func:`functools.partial` gives a
-:class:`~astrogwb.sampling.SpectralDensityFn`.
+:func:`build_importance_spectrum` is the entry point: give it a catalog and
+the target's bound callables, and it returns an :class:`ImportanceSpectrum` --
+the ``spectral_density`` and ``log_weights`` functions inference needs.
+
+Underneath, that builder is two steps, split by when they run. Preparation
+runs once, outside JAX transformations: it reads the catalog's stored columns
+and power, and evaluates the density the catalog was drawn from at the
+parameters it was drawn at. :func:`importance_spectral_density` and
+:func:`evaluate_log_weights` run per sampler step, against a target source
+model and hyperparameters. The builder binds one dict of prepared arrays into
+both with :func:`functools.partial`, which is what makes the invariant below
+structural rather than conventional.
 
 One target execution per evaluation supplies everything the weights need:
 
@@ -29,8 +34,9 @@ interpolation difference.
 
 Target and proposal densities must include the same factors, or the weights
 are finite and wrong. ``density_sites`` therefore comes from one place -- the
-catalog, through :func:`prepare_importance_arrays` -- and every caller threads
-that value to the target evaluation unchanged; nothing supplies a default.
+catalog, through preparation -- and :func:`build_importance_spectrum` threads
+that value to the target evaluation unchanged, in the one dict it splats into
+both returned callables; nothing supplies a default.
 
 Evaluate only where the proposal has support. Subtracting two negative-infinite
 log densities produces ``nan``, which propagates silently.
@@ -38,7 +44,8 @@ log densities produces ``nan``, which propagates silently.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from typing import TYPE_CHECKING, NamedTuple
 
 import jax
@@ -53,12 +60,14 @@ from astrogwb.utils.sampling import evaluate_sources
 
 if TYPE_CHECKING:
     from astrogwb.catalog import Catalog
+    from astrogwb.sampling.protocol import SpectralDensityFn
 
 __all__ = [
-    "ImportanceArrays",
+    "ImportanceSpectrum",
+    "LogWeightsFn",
+    "build_importance_spectrum",
     "evaluate_log_weights",
     "importance_spectral_density",
-    "prepare_importance_arrays",
 ]
 
 #: The source output naming the effective distance governing waveform
@@ -67,11 +76,11 @@ __all__ = [
 _LUMINOSITY_DISTANCE = "luminosity_distance"
 
 
-class ImportanceArrays(NamedTuple):
+class _ImportanceArrays(NamedTuple):
     """The fixed inputs prepared from one catalog.
 
-    A return type only: unpack it, or splat ``_asdict()`` into a
-    :func:`functools.partial`. Nothing downstream accepts the container.
+    Private: :func:`build_importance_spectrum` is what splats this into the
+    two per-step callables. Nothing outside this module accepts the container.
     """
 
     source_parameters: dict[str, jax.Array]
@@ -90,11 +99,11 @@ class ImportanceArrays(NamedTuple):
     """The factor set ``proposal_log_prob`` was evaluated with."""
 
 
-def prepare_importance_arrays(
+def _prepare_importance_arrays(
     catalog: Catalog,
     *,
     frequency_mask: ArrayLike | None = None,
-) -> ImportanceArrays:
+) -> _ImportanceArrays:
     """Prepare every fixed input, evaluating the proposal density once.
 
     Call outside JAX transformations. The proposal density is the catalog's
@@ -142,7 +151,7 @@ def prepare_importance_arrays(
             f"holds {num_samples} sources"
         )
 
-    return ImportanceArrays(
+    return _ImportanceArrays(
         source_parameters=source_parameters,
         polarization_power=power,
         proposal_log_prob=proposal_log_prob,
@@ -163,9 +172,8 @@ def evaluate_log_weights(
     """Per-source log importance weights at ``params``, shape ``(N,)``.
 
     One isolated target execution supplies both the selected density and the
-    distance. ``density_sites`` must be the value
-    :func:`prepare_importance_arrays` returned alongside ``proposal_log_prob``.
-    Requires no merger rate: weights are a density ratio.
+    distance. ``density_sites`` must be the same value ``proposal_log_prob``
+    was evaluated with. Requires no merger rate: weights are a density ratio.
     """
     target_log_prob, outputs = evaluate_sources(
         source_model, params, source_parameters, density_sites=density_sites
@@ -225,3 +233,63 @@ def importance_spectral_density(
         "total_merger_rate": total_merger_rate,
         "importance_relative_ess": relative_ess(log_weights),
     }
+
+
+#: Per-source log importance weights from hyperparameters alone, shape ``(N,)``.
+type LogWeightsFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
+
+
+class ImportanceSpectrum(NamedTuple):
+    """One catalog bound to one target, as the two callables inference needs."""
+
+    spectral_density: SpectralDensityFn
+    """The importance-weighted spectrum, ready for a sampling model."""
+
+    log_weights: LogWeightsFn
+    """Per-source log importance weights, bound to the same arrays and target."""
+
+
+def build_importance_spectrum(
+    catalog: Catalog,
+    *,
+    source_model: SourceFn,
+    merger_rate_fn: MergerRateFn,
+    average_mode: AverageMode,
+    frequency_mask: ArrayLike | None = None,
+) -> ImportanceSpectrum:
+    """Prepare one catalog and bind it to a target, as both callables at once.
+
+    ``source_model`` and ``merger_rate_fn`` are the target's already-built
+    callables -- normally :func:`~astrogwb.populations.build_source_model` and
+    :func:`~astrogwb.populations.build_merger_rate_fn`, built once per run and
+    reused, since the returned partials hash by identity and a fresh,
+    equal-but-not-identical rebuild forces a jit recompile. ``catalog`` must
+    already be restricted to the analysis redshift window.
+
+    One prepare call feeds both returned callables from a single keyword
+    mapping, so the weights and the spectrum provably use the density factors
+    the proposal was evaluated with -- a target evaluated with a different
+    factor set would otherwise produce weights that are finite and wrong, with
+    no error.
+
+    ``frequency_mask`` reaches the power and nothing else: masking source
+    samples would silently truncate the population.
+    """
+    arrays = _prepare_importance_arrays(catalog, frequency_mask=frequency_mask)
+    weight_kwargs = {
+        "source_model": source_model,
+        "source_parameters": arrays.source_parameters,
+        "proposal_log_prob": arrays.proposal_log_prob,
+        "log_reference_distance": arrays.log_reference_distance,
+        "density_sites": arrays.density_sites,
+    }
+    return ImportanceSpectrum(
+        spectral_density=partial(
+            importance_spectral_density,
+            merger_rate_fn=merger_rate_fn,
+            polarization_power=arrays.polarization_power,
+            average_mode=average_mode,
+            **weight_kwargs,
+        ),
+        log_weights=partial(evaluate_log_weights, **weight_kwargs),
+    )

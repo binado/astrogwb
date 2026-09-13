@@ -47,7 +47,6 @@
 # %%
 import os
 import warnings
-from functools import partial
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -78,10 +77,7 @@ from astrogwb.gwb import (
     spectral_snr,
     uniform_prior_mass_moments,
 )
-from astrogwb.importance.spectral import (
-    evaluate_log_weights,
-    prepare_importance_arrays,
-)
+from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     build_merger_rate_fn,
@@ -1017,16 +1013,13 @@ pd.DataFrame(
 # the target evaluation only. The reference distance is the stored distance
 # column -- the one the stored power was generated at -- never a freshly
 # interpolated cosmology table.
-scan_arrays = prepare_importance_arrays(catalog)
-scan_log_weights = partial(
-    evaluate_log_weights,
-    source_model=target_model_fn(),
-    source_parameters=scan_arrays.source_parameters,
-    proposal_log_prob=scan_arrays.proposal_log_prob,
-    log_reference_distance=scan_arrays.log_reference_distance,
-    density_sites=scan_arrays.density_sites,
-)
 scan_merger_rate = target_merger_rate_fn()
+scan_log_weights = build_importance_spectrum(
+    catalog,
+    source_model=target_model_fn(),
+    merger_rate_fn=scan_merger_rate,
+    average_mode="analytic_inclination",
+).log_weights
 
 
 def log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:

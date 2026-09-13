@@ -35,9 +35,10 @@ from astrogwb.gwb.spectral import AverageMode, spectral_density
 from astrogwb.importance import spectral
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.spectral import (
+    _prepare_importance_arrays,
+    build_importance_spectrum,
     evaluate_log_weights,
     importance_spectral_density,
-    prepare_importance_arrays,
 )
 from astrogwb.populations import DEFAULT_DENSITY_SITES, SourceFn, build_source_model
 from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
@@ -135,7 +136,7 @@ def _importance(
     frequency_mask: ArrayLike | None = None,
 ) -> dict[str, Any]:
     """Every keyword of ``importance_spectral_density``, prepared from a catalog."""
-    arrays = prepare_importance_arrays(
+    arrays = _prepare_importance_arrays(
         _catalog() if catalog is None else catalog, frequency_mask=frequency_mask
     )
     return {
@@ -151,7 +152,7 @@ def _importance(
 # --------------------------------------------------------------------------- #
 def test_preparation_caches_the_catalogs_own_proposal_density() -> None:
     catalog = _catalog()
-    arrays = prepare_importance_arrays(catalog)
+    arrays = _prepare_importance_arrays(catalog)
 
     # The proposal is the catalog's source model at the catalog's parameters,
     # with the recorded density factors -- so it is the density at
@@ -183,7 +184,7 @@ def test_preparation_reuses_the_stored_reference_distance() -> None:
     target's own distance for the same redshift is different.
     """
     catalog = _catalog()
-    arrays = prepare_importance_arrays(catalog)
+    arrays = _prepare_importance_arrays(catalog)
     target_distance = reference_merger_rate_distance_and_logprob(
         FIDUCIALS,
         REDSHIFTS,
@@ -214,11 +215,11 @@ def test_preparation_rejects_a_non_physical_stored_distance(bad: float) -> None:
         },
     )
     with pytest.raises(ValueError, match="positive and finite"):
-        prepare_importance_arrays(broken)
+        _prepare_importance_arrays(broken)
 
 
 def test_preparation_selects_the_analysis_band_from_the_power_only() -> None:
-    arrays = prepare_importance_arrays(
+    arrays = _prepare_importance_arrays(
         _catalog(), frequency_mask=jnp.array([True, False, True])
     )
     np.testing.assert_array_equal(arrays.polarization_power, POWER[[0, 2], :])
@@ -260,7 +261,7 @@ def test_the_catalogs_density_factors_reach_the_target_unchanged() -> None:
     default anywhere would add the ordered-mass factor to one side alone.
     """
     catalog = _catalog(density_sites=(REDSHIFT_SITE,))
-    arrays = prepare_importance_arrays(catalog)
+    arrays = _prepare_importance_arrays(catalog)
     assert arrays.density_sites == (REDSHIFT_SITE,)
 
     source_model = catalog.get_source_model()
@@ -299,7 +300,7 @@ def test_a_catalog_missing_a_stochastic_column_is_rejected() -> None:
         },
     )
     with pytest.raises(KeyError, match="spin_1z"):
-        prepare_importance_arrays(trimmed)
+        _prepare_importance_arrays(trimmed)
 
 
 def test_direct_construction_from_prepared_arrays_is_supported() -> None:
@@ -326,8 +327,8 @@ def test_proposal_density_is_evaluated_only_during_preparation(
     """The proposal's one evaluation happens at preparation; the target's, per step.
 
     Counting ``evaluate_sources`` calls sees both: one for the proposal during
-    ``prepare_importance_arrays``, one per later spectrum call (and one per
-    trace under ``jit``) for the target.
+    preparation, one per later spectrum call (and one per trace under
+    ``jit``) for the target.
     """
     calls: list[SourceFn] = []
     original = spectral.evaluate_sources
@@ -360,6 +361,70 @@ def test_a_target_without_a_distance_output_is_rejected() -> None:
     weight_kwargs["source_model"] = distanceless
     with pytest.raises(KeyError, match=LUMINOSITY_DISTANCE_SITE):
         evaluate_log_weights(FIDUCIALS, **weight_kwargs)
+
+
+# --------------------------------------------------------------------------- #
+# The builder
+# --------------------------------------------------------------------------- #
+def _spectrum(
+    *,
+    catalog: Catalog | None = None,
+    frequency_mask: ArrayLike | None = None,
+    average_mode: AverageMode = "catalog_inclination",
+):
+    return build_importance_spectrum(
+        _catalog() if catalog is None else catalog,
+        source_model=mock_target_model(),
+        merger_rate_fn=mock_merger_rate_fn(),
+        average_mode=average_mode,
+        frequency_mask=frequency_mask,
+    )
+
+
+def test_the_builder_binds_both_callables_from_one_shared_mapping() -> None:
+    """The structural version of the shared-``density_sites`` invariant.
+
+    A hand-written dict feeding two partials could drift; here the two
+    returned callables must carry the identical array objects and factor set,
+    because one internal mapping is splatted into both.
+    """
+    spectrum = _spectrum()
+    density_keywords = spectrum.spectral_density.keywords
+    weight_keywords = spectrum.log_weights.keywords
+    shared = (
+        "source_model",
+        "source_parameters",
+        "proposal_log_prob",
+        "log_reference_distance",
+        "density_sites",
+    )
+    for name in shared:
+        assert density_keywords[name] is weight_keywords[name], name
+
+
+def test_the_builders_frequency_mask_slices_power_but_not_samples() -> None:
+    spectrum = _spectrum(frequency_mask=jnp.array([True, False, True]))
+    density_keywords = spectrum.spectral_density.keywords
+    assert density_keywords["polarization_power"].shape == (2, 4)
+    for name, values in density_keywords["source_parameters"].items():
+        assert values.shape == (4,), name
+    assert density_keywords["proposal_log_prob"].shape == (4,)
+
+
+def test_the_builders_spectral_density_matches_the_underlying_primitive() -> None:
+    catalog = _catalog()
+    spectrum = _spectrum(catalog=catalog)
+    prediction, extras = spectrum.spectral_density(FIDUCIALS)
+    expected_prediction, expected_extras = importance_spectral_density(
+        FIDUCIALS, **_importance(catalog=catalog)
+    )
+    np.testing.assert_array_equal(prediction, expected_prediction)
+    assert set(extras) == set(expected_extras)
+    log_weights = spectrum.log_weights(FIDUCIALS)
+    expected_log_weights = evaluate_log_weights(
+        FIDUCIALS, **log_weight_kwargs(_importance(catalog=catalog))
+    )
+    np.testing.assert_array_equal(log_weights, expected_log_weights)
 
 
 # --------------------------------------------------------------------------- #

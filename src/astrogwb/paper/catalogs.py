@@ -9,7 +9,7 @@ file's own population record rather than being reassembled from the run config.
 What used to live here has mostly moved to where it belongs:
 :meth:`~astrogwb.catalog.Catalog.restrict_redshift` narrows the samples and the
 recorded population together, and the proposal density is evaluated by
-:func:`~astrogwb.importance.spectral.prepare_importance_arrays` directly from
+:func:`~astrogwb.importance.spectral.build_importance_spectrum` directly from
 the catalog's own source model. Fiducial GW propagation is gone
 entirely: which propagation law applies is now part of the population
 declaration, so a catalog's power and its recorded distances are consistent by
