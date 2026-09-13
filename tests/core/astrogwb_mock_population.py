@@ -28,7 +28,7 @@ from jax.typing import ArrayLike
 
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.importance.spectral import prepare_importance_arrays
+from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import (
     MergerRateFn,
     SourceFn,
@@ -270,10 +270,9 @@ def build_synthetic_importance(
     Shared by ``test_importance.py`` and ``test_amplitude_scalings.py``, which
     both need every log-weight to be exactly zero at ``FIDUCIALS``, so that any
     departure is attributable to the parameter under test rather than to the
-    catalog. :func:`~astrogwb.importance.spectral.prepare_importance_arrays` is
-    what makes that exact rather than approximate: the cached proposal density
-    and reference distances are the *same expressions*, on the same inputs,
-    that the target side will evaluate.
+    catalog. Preparation is what makes that exact rather than approximate: the
+    cached proposal density and reference distances are the *same
+    expressions*, on the same inputs, that the target side will evaluate.
 
     ``polarization_power`` defaults to a single unit-power frequency bin --
     callers that only want rates and weights need no waveforms. Its sample axis
@@ -309,10 +308,13 @@ def build_synthetic_importance(
         _density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
         seed=MOCK_POPULATION_SEED,
     )
-    kwargs = {
-        **prepare_importance_arrays(catalog)._asdict(),
-        "source_model": mock_target_model() if source_model is None else source_model,
-        "merger_rate_fn": mock_merger_rate_fn(),
-        "average_mode": "analytic_inclination",
-    }
-    return kwargs, samples
+    spectrum = build_importance_spectrum(
+        catalog,
+        source_model=mock_target_model() if source_model is None else source_model,
+        merger_rate_fn=mock_merger_rate_fn(),
+        average_mode="analytic_inclination",
+    )
+    return (
+        dict(spectrum[0].keywords),  # ty: ignore[unresolved-attribute]
+        samples,
+    )

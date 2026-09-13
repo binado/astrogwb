@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Mapping, Sequence
-from functools import partial
 from pathlib import Path
 
 import jax
@@ -30,15 +29,12 @@ from matplotlib.axes import Axes as MplAxes
 from matplotlib.figure import Figure
 from matplotlib.projections import register_projection
 
-from astrogwb.importance.spectral import (
-    evaluate_log_weights,
-    prepare_importance_arrays,
-)
+from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.plotting import TRUTH, use_paper_style
-from astrogwb.populations import build_source_model
+from astrogwb.populations import build_merger_rate_fn, build_source_model
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
 # Restore the standard projection for consistent plotting.
@@ -89,7 +85,6 @@ def evaluate_relative_ess_grid(
     axis1: tuple[str, jax.Array],
     *,
     constants: Mapping[str, float],
-    samples: Mapping[str, jax.Array],
     log_weights_fn: Callable[[Mapping[str, jax.Array]], jax.Array],
     chunk_size: int,
 ) -> jax.Array:
@@ -186,19 +181,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     n_samples = catalog.num_samples
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
-    arrays = prepare_importance_arrays(catalog)
-    samples = dict(arrays.source_parameters)
-    log_weights_fn = partial(
-        evaluate_log_weights,
+    grid_settings = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_REDSHIFT_GRID}
+    log_weights_fn = build_importance_spectrum(
+        catalog,
         source_model=build_source_model(
-            "bns_md_modified_propagation",
-            settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_REDSHIFT_GRID},
+            "bns_md_modified_propagation", settings=grid_settings
         ),
-        source_parameters=arrays.source_parameters,
-        proposal_log_prob=arrays.proposal_log_prob,
-        log_reference_distance=arrays.log_reference_distance,
-        density_sites=arrays.density_sites,
-    )
+        merger_rate_fn=build_merger_rate_fn(settings=grid_settings),
+        average_mode="analytic_inclination",
+    )[1]
 
     figures: list[tuple[Figure, Path]] = []
     for combo in GRID_PRIORS:
@@ -216,7 +207,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             (name0, grid0),
             (name1, grid1),
             constants=constants,
-            samples=samples,
             log_weights_fn=log_weights_fn,
             chunk_size=CHUNK_SIZE,
         )

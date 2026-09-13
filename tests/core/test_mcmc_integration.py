@@ -53,10 +53,7 @@ from astrogwb.detector import (
 from astrogwb.distributions.amplitude import quadrature_grid
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
-from astrogwb.importance.spectral import (
-    importance_spectral_density,
-    prepare_importance_arrays,
-)
+from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import (
     amplitude_H0_fn,
     merger_rate_H0_fn,
@@ -205,13 +202,13 @@ def _build_analysis_inputs(
     # Prepared after masking, from the catalog's own population record. The
     # band mask reaches the power and nothing else -- masking the sources would
     # silently truncate the population.
-    estimator = partial(
-        importance_spectral_density,
+    estimator = build_importance_spectrum(
+        catalog,
         source_model=pinned_target,
         merger_rate_fn=pinned_rate,
         average_mode="analytic_inclination",
-        **prepare_importance_arrays(catalog, frequency_mask=mask)._asdict(),
-    )
+        frequency_mask=mask,
+    )[0]
 
     return AnalysisInputs(
         observed_spectral_density=observed_spectral_density,

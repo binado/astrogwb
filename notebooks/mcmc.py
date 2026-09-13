@@ -409,13 +409,13 @@ plot_effective_psd(frequencies, effective_psd_arr, mask)
 # isolated execution supplies both the source density and that distance; the
 # observer-frame total merger rate is a separate merger-rate function.
 #
-# `prepare_importance_arrays` reads a fixed catalog once, and
-# `importance_spectral_density` reweights it to a target source model. The
-# denominator $q(\theta_i)$ is not configured anywhere: it is the proposal
-# catalog's *own* recorded source model, evaluated at the parameters it was
-# drawn at. The reference distance $d_{GW}(z, \Lambda_0)$ is the distance
-# column the file already holds -- the one its stored power was generated at --
-# never a freshly interpolated cosmology table.
+# `build_importance_spectrum` reads a fixed catalog once and binds it to a
+# target source model. The denominator $q(\theta_i)$ is not configured
+# anywhere: it is the proposal catalog's *own* recorded source model,
+# evaluated at the parameters it was drawn at. The reference distance
+# $d_{GW}(z, \Lambda_0)$ is the distance column the file already holds -- the
+# one its stored power was generated at -- never a freshly interpolated
+# cosmology table.
 
 # %% [markdown]
 # ## Visualizing $\Omega_{\mathrm{GW}}(f)$

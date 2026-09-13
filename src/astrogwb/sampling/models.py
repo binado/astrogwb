@@ -6,17 +6,15 @@ an analytic calculator can return no diagnostics::
     def analytic_spectrum(params):
         return params["amplitude"] * jnp.ones(3), {}
 
-The importance-sampled spectrum is one too, once the catalog arrays are
-prepared and bound outside inference::
+The importance-sampled spectrum is one too, once the catalog is bound to a
+target outside inference::
 
-    arrays = prepare_importance_arrays(catalog)
-    spectrum = partial(
-        importance_spectral_density,
+    spectrum = build_importance_spectrum(
+        catalog,
         source_model=target_source_model,
         merger_rate_fn=target_merger_rate_fn,
         average_mode="analytic_inclination",
-        **arrays._asdict(),
-    )
+    )[0]
     model = partial(
         gwb_spectral_density_model,
         spectral_density_fn=spectrum,
