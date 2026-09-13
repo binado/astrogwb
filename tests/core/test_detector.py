@@ -239,9 +239,9 @@ def _gwmock_pair_orf(
 ) -> np.ndarray:
     """gwmock's long-wavelength ORF for one unordered detector pair."""
     pair = [detector_1, detector_2]
-    names = detector_names(pair)
+    first, second = sorted(detector_names(pair))
     result = long_wavelength_overlap_reduction(pair, frequencies)
-    return result[tuple(sorted(names))]
+    return result[(first, second)]
 
 
 def _colocated_detector(
@@ -288,7 +288,13 @@ def test_gwmock_long_wavelength_orf_matches_colocated_detectors(
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "pair", [("H1", "L1"), ("H1", "V1"), ("L1", "V1"), ("H1", "K1")]
+    "pair",
+    [
+        pytest.param(("H1", "L1"), id="H1-L1"),
+        pytest.param(("H1", "V1"), id="H1-V1"),
+        pytest.param(("L1", "V1"), id="L1-V1"),
+        pytest.param(("H1", "K1"), id="H1-K1"),
+    ],
 )
 def test_gwmock_long_wavelength_orf_matches_hlv_at_low_frequency(
     pair: tuple[str, str],
