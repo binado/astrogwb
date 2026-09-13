@@ -737,7 +737,13 @@ def test_reconstruct_amplitude_raises_on_a_missing_statistic() -> None:
     del statistics["template_optimal_snr"]
 
     with pytest.raises(TypeError, match="template_optimal_snr"):
-        _reconstruction_draws(statistics)
+        reconstruct_amplitude(
+            jax.random.key(0),
+            statistics["amplitude_mle"],
+            template_merger_rate=statistics["template_merger_rate"],
+            amplitude_parameter="local_merger_rate",
+            **_RECONSTRUCTION_KWARGS,
+        )
 
 
 def test_predictive_on_the_marginalized_model_reconstructs_the_rate() -> None:
