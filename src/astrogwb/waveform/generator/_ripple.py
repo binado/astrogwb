@@ -31,32 +31,58 @@ that side effect (see the runtime-configuration rule in ``CLAUDE.md`` and
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, overload
 
 import jax
 import jax.numpy as jnp
 from numpy.typing import ArrayLike
 
 __all__ = [
-    "SUPPORTED_APPROXIMANTS",
     "build_kernel",
     "check_sources",
     "next_smooth_even",
     "ripple_parameters",
 ]
 
-#: Aligned-spin, point-particle models. Ripple parameters ``M_c, eta, s1_z,
-#: s2_z, d_L, phase_c, iota``.
-ALIGNED_SPIN_MODELS = ("IMRPhenomD", "IMRPhenomHM", "IMRPhenomXAS", "IMRPhenomXHM")
 
-#: Models that additionally take tidal deformabilities ``lambda_1, lambda_2``.
-TIDAL_MODELS = ("TaylorF2", "IMRPhenomD_NRTidalv2", "IMRPhenomXAS_NRTidalv3")
+class _WaveformNames(Sequence[str]):
+    """Lazy view over Ripple's registered waveform names."""
 
-#: Precessing models, taking all six spin components.
-PRECESSING_MODELS = ("IMRPhenomPv2", "IMRPhenomXP", "IMRPhenomXPHM")
+    def __init__(self, **filters: Any) -> None:
+        self._filters = filters
 
-#: Every approximant this adapter can generate.
-SUPPORTED_APPROXIMANTS = ALIGNED_SPIN_MODELS + TIDAL_MODELS + PRECESSING_MODELS
+    def _names(self) -> tuple[str, ...]:
+        # Imported here, not at module scope -- see the module docstring.
+        import ripplegw
+
+        return tuple(ripplegw.list_waveforms(**self._filters))
+
+    @overload
+    def __getitem__(self, index: int) -> str: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> Sequence[str]: ...
+
+    def __getitem__(self, index: int | slice) -> str | Sequence[str]:
+        return self._names()[index]
+
+    def __len__(self) -> int:
+        return len(self._names())
+
+    def __repr__(self) -> str:
+        return repr(self._names())
+
+
+_CBC_FILTERS = {"domain": "FD", "source_type": "cbc"}
+
+# Compatibility views for callers that used the former module-level groups.
+SUPPORTED_APPROXIMANTS = _WaveformNames(**_CBC_FILTERS)
+ALIGNED_SPIN_MODELS = _WaveformNames(
+    **_CBC_FILTERS, is_precessing=False, is_tidal=False
+)
+TIDAL_MODELS = _WaveformNames(**_CBC_FILTERS, is_tidal=True)
+PRECESSING_MODELS = _WaveformNames(**_CBC_FILTERS, is_precessing=True)
 
 #: Canonical source names this adapter requires of every catalog.
 REQUIRED_PARAMETERS = (
@@ -84,6 +110,19 @@ _IN_PLANE_SPINS = ("spin_1x", "spin_1y", "spin_2x", "spin_2y")
 
 #: Prime factors an FFT length may contain.
 _SMOOTH_FACTORS = (2, 3, 5)
+
+
+def _approximant_metadata(approximant: str) -> dict[str, Any]:
+    """Return Ripple metadata for a supported frequency-domain CBC model."""
+    # Imported here, not at module scope -- see the module docstring.
+    import ripplegw
+
+    available = tuple(SUPPORTED_APPROXIMANTS)
+    if approximant not in available:
+        raise ValueError(
+            f"unsupported approximant {approximant!r}; available: {available}"
+        )
+    return ripplegw.get_waveform_metadata(approximant)
 
 
 def next_smooth_even(minimum: int) -> int:
@@ -154,11 +193,7 @@ def _canonical_arrays(
     approximant: str, source_parameters: Mapping[str, ArrayLike]
 ) -> dict[str, jax.Array]:
     """Return every canonical parameter as a 1-D float64 array, zeros included."""
-    if approximant not in SUPPORTED_APPROXIMANTS:
-        raise ValueError(
-            f"unsupported approximant {approximant!r}; "
-            f"available: {list(SUPPORTED_APPROXIMANTS)}"
-        )
+    _approximant_metadata(approximant)
     first, *rest = REQUIRED_PARAMETERS
     arrays = {first: _as_batch(source_parameters, first, None)}
     n_events = arrays[first].shape[0]
@@ -186,6 +221,7 @@ def ripple_parameters(
     from ripplegw.conversions import ms_to_Mc_eta
 
     arrays = _canonical_arrays(approximant, source_parameters)
+    metadata = _approximant_metadata(approximant)
     masses = jnp.stack(
         [arrays["detector_frame_mass_1"], arrays["detector_frame_mass_2"]], axis=-1
     )
@@ -199,14 +235,14 @@ def ripple_parameters(
         "phase_c": arrays["coa_phase"],
         "iota": arrays["inclination"],
     }
-    if approximant in PRECESSING_MODELS:
+    if metadata.get("is_precessing", False):
         parameters |= {
             "s1_x": arrays["spin_1x"],
             "s1_y": arrays["spin_1y"],
             "s2_x": arrays["spin_2x"],
             "s2_y": arrays["spin_2y"],
         }
-    if approximant in TIDAL_MODELS:
+    if metadata.get("is_tidal", False):
         parameters |= {
             "lambda_1": arrays["lambda_1"],
             "lambda_2": arrays["lambda_2"],
@@ -230,15 +266,16 @@ def check_sources(approximant: str, source_parameters: Mapping[str, ArrayLike]) 
             failure this guards: an aligned-spin model hands back a waveform
             for a precessing binary without ever seeing its in-plane spins.
     """
+    metadata = _approximant_metadata(approximant)
     arrays = _canonical_arrays(approximant, source_parameters)
-    if approximant not in PRECESSING_MODELS:
+    if not metadata.get("is_precessing", False):
         for name in _IN_PLANE_SPINS:
             if bool(jnp.any(arrays[name] != 0.0)):
                 raise ValueError(
                     f"{approximant} is an aligned-spin model; {name} must be "
                     "zero for every event"
                 )
-    if approximant not in TIDAL_MODELS:
+    if not metadata.get("is_tidal", False):
         for name in ("lambda_1", "lambda_2"):
             if bool(jnp.any(arrays[name] != 0.0)):
                 raise ValueError(
@@ -272,11 +309,7 @@ def build_kernel(
     # Imported here, not at module scope -- see the module docstring.
     import ripplegw
 
-    if approximant not in SUPPORTED_APPROXIMANTS:
-        raise ValueError(
-            f"unsupported approximant {approximant!r}; "
-            f"available: {list(SUPPORTED_APPROXIMANTS)}"
-        )
+    _approximant_metadata(approximant)
     waveform = ripplegw.waveform(approximant, f_ref=reference_frequency)
 
     def one_event(
