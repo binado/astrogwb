@@ -118,7 +118,7 @@ spectrum_fn = build_importance_spectrum(
     ),
     merger_rate_fn=build_merger_rate_fn(settings=model_kwargs),
     average_mode="analytic_inclination",
-).spectral_density
+)[0]
 spectrum, extras = spectrum_fn({**params, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91})
 ```
 

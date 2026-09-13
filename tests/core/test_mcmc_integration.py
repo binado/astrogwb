@@ -208,7 +208,7 @@ def _build_analysis_inputs(
         merger_rate_fn=pinned_rate,
         average_mode="analytic_inclination",
         frequency_mask=mask,
-    ).spectral_density
+    )[0]
 
     return AnalysisInputs(
         observed_spectral_density=observed_spectral_density,

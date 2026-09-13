@@ -315,6 +315,6 @@ def build_synthetic_importance(
         average_mode="analytic_inclination",
     )
     return (
-        dict(spectrum.spectral_density.keywords),  # ty: ignore[unresolved-attribute]
+        dict(spectrum[0].keywords),  # ty: ignore[unresolved-attribute]
         samples,
     )

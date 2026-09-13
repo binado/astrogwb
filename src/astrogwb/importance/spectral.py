@@ -1,8 +1,8 @@
 r"""Reweighting one fixed catalog to a target source model, as a spectrum.
 
 :func:`build_importance_spectrum` is the entry point: give it a catalog and
-the target's bound callables, and it returns an :class:`ImportanceSpectrum` --
-the ``spectral_density`` and ``log_weights`` functions inference needs.
+the target's bound callables, and it returns a ``(spectral_density,
+log_weights)`` pair -- the two functions inference needs.
 
 Underneath, that builder is two steps, split by when they run. Preparation
 runs once, outside JAX transformations: it reads the catalog's stored columns
@@ -46,7 +46,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from functools import partial
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
@@ -63,7 +63,6 @@ if TYPE_CHECKING:
     from astrogwb.sampling.protocol import SpectralDensityFn
 
 __all__ = [
-    "ImportanceSpectrum",
     "LogWeightsFn",
     "build_importance_spectrum",
     "evaluate_log_weights",
@@ -155,16 +154,6 @@ def importance_spectral_density(
 type LogWeightsFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
 
 
-class ImportanceSpectrum(NamedTuple):
-    """One catalog bound to one target, as the two callables inference needs."""
-
-    spectral_density: SpectralDensityFn
-    """The importance-weighted spectrum, ready for a sampling model."""
-
-    log_weights: LogWeightsFn
-    """Per-source log importance weights, bound to the same arrays and target."""
-
-
 def build_importance_spectrum(
     catalog: Catalog,
     *,
@@ -172,7 +161,7 @@ def build_importance_spectrum(
     merger_rate_fn: MergerRateFn,
     average_mode: AverageMode,
     frequency_mask: ArrayLike | None = None,
-) -> ImportanceSpectrum:
+) -> tuple[SpectralDensityFn, LogWeightsFn]:
     """Prepare one catalog and bind it to a target, as both callables at once.
 
     Call outside JAX transformations. The proposal density is the catalog's
@@ -196,6 +185,10 @@ def build_importance_spectrum(
 
     ``frequency_mask`` reaches the power and nothing else: masking source
     samples would silently truncate the population.
+
+    Returns ``(spectral_density, log_weights)``: the importance-weighted
+    spectrum, ready for a sampling model, and per-source log importance
+    weights bound to the same arrays and target.
     """
     source_parameters = {
         name: jnp.asarray(value) for name, value in catalog.source_parameters.items()
@@ -239,13 +232,13 @@ def build_importance_spectrum(
         "log_reference_distance": jnp.log(reference_distance),
         "density_sites": density_sites,
     }
-    return ImportanceSpectrum(
-        spectral_density=partial(
+    return (
+        partial(
             importance_spectral_density,
             merger_rate_fn=merger_rate_fn,
             polarization_power=power,
             average_mode=average_mode,
             **weight_kwargs,
         ),
-        log_weights=partial(evaluate_log_weights, **weight_kwargs),
+        partial(evaluate_log_weights, **weight_kwargs),
     )

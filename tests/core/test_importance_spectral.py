@@ -141,7 +141,7 @@ def _importance(
         average_mode=average_mode,
         frequency_mask=frequency_mask,
     )
-    return dict(spectrum.spectral_density.keywords)  # ty: ignore[unresolved-attribute]
+    return dict(spectrum[0].keywords)  # ty: ignore[unresolved-attribute]
 
 
 def test_preparation_needs_no_merger_rate_for_the_proposal() -> None:
@@ -255,8 +255,8 @@ def test_the_builder_binds_both_callables_from_one_shared_mapping() -> None:
     because one internal mapping is splatted into both.
     """
     spectrum = _spectrum()
-    density_keywords = spectrum.spectral_density.keywords
-    weight_keywords = spectrum.log_weights.keywords
+    density_keywords = spectrum[0].keywords
+    weight_keywords = spectrum[1].keywords
     shared = (
         "source_model",
         "source_parameters",
@@ -270,7 +270,7 @@ def test_the_builder_binds_both_callables_from_one_shared_mapping() -> None:
 
 def test_the_builders_frequency_mask_slices_power_but_not_samples() -> None:
     spectrum = _spectrum(frequency_mask=jnp.array([True, False, True]))
-    density_keywords = spectrum.spectral_density.keywords
+    density_keywords = spectrum[0].keywords
     assert density_keywords["polarization_power"].shape == (2, 4)
     for name, values in density_keywords["source_parameters"].items():
         assert values.shape == (4,), name
@@ -280,13 +280,13 @@ def test_the_builders_frequency_mask_slices_power_but_not_samples() -> None:
 def test_the_builders_spectral_density_matches_the_underlying_primitive() -> None:
     catalog = _catalog()
     spectrum = _spectrum(catalog=catalog)
-    prediction, extras = spectrum.spectral_density(FIDUCIALS)
+    prediction, extras = spectrum[0](FIDUCIALS)
     expected_prediction, expected_extras = importance_spectral_density(
         FIDUCIALS, **_importance(catalog=catalog)
     )
     np.testing.assert_array_equal(prediction, expected_prediction)
     assert set(extras) == set(expected_extras)
-    log_weights = spectrum.log_weights(FIDUCIALS)
+    log_weights = spectrum[1](FIDUCIALS)
     expected_log_weights = evaluate_log_weights(
         FIDUCIALS, **log_weight_kwargs(_importance(catalog=catalog))
     )

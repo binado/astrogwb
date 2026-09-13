@@ -189,7 +189,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         ),
         merger_rate_fn=build_merger_rate_fn(settings=grid_settings),
         average_mode="analytic_inclination",
-    ).log_weights
+    )[1]
 
     figures: list[tuple[Figure, Path]] = []
     for combo in GRID_PRIORS:

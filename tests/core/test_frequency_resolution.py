@@ -168,14 +168,12 @@ def resolutions(fine_catalog: Catalog) -> dict[int, dict[str, Any]]:
     # The catalog is its own proposal: preparation caches the density and
     # reference distances the target re-forms at FIDUCIALS, which is what makes
     # every fiducial log-weight exactly zero.
-    spectrum = build_importance_spectrum(
+    estimator, log_weights_fn = build_importance_spectrum(
         fine_catalog,
         source_model=mock_target_model(),
         merger_rate_fn=mock_merger_rate_fn(),
         average_mode="analytic_inclination",
     )
-    estimator = spectrum.spectral_density
-    log_weights_fn = spectrum.log_weights
     total_merger_rate = jnp.asarray(estimator(FIDUCIALS)[1]["total_merger_rate"])
 
     def weights_fn(params: dict[str, float]) -> tuple[jax.Array, jax.Array]:

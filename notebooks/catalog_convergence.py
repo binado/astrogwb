@@ -1019,7 +1019,7 @@ scan_log_weights = build_importance_spectrum(
     source_model=target_model_fn(),
     merger_rate_fn=scan_merger_rate,
     average_mode="analytic_inclination",
-).log_weights
+)[1]
 
 
 def log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:

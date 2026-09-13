@@ -323,7 +323,7 @@ def prepare_inference_inputs(
     # The proposal density is the catalog's own recorded source model,
     # evaluated at the parameters it was drawn at. Doing that here, once, is
     # also what keeps it off the per-sampler-step path.
-    spectrum = build_importance_spectrum(
+    spectral_density_fn, log_weights_fn = build_importance_spectrum(
         proposal_catalog,
         source_model=target_source_model,
         merger_rate_fn=target_merger_rate_fn,
@@ -335,8 +335,8 @@ def prepare_inference_inputs(
         proposal=proposal_catalog,
         effective_psd=effective_psd_arr,
         observation_time=grid.observation_time,
-        spectral_density_fn=spectrum.spectral_density,
-        log_weights_fn=spectrum.log_weights,
+        spectral_density_fn=spectral_density_fn,
+        log_weights_fn=log_weights_fn,
     )
 
 

@@ -532,7 +532,7 @@ def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights
         source_model=proposal_catalog.get_source_model(),
         merger_rate_fn=proposal_catalog.get_merger_rate_fn(),
         average_mode="analytic_inclination",
-    ).log_weights
+    )[1]
     log_weights = log_weights_fn(proposal_catalog.fiducials)
     np.testing.assert_array_equal(np.asarray(log_weights), np.zeros(N_SOURCES))
 
