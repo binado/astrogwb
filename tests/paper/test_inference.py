@@ -119,7 +119,7 @@ def test_build_model_amplitude_marginalized_conditions_other_fixed_params() -> N
     assert set(seen[0]) == set(config.priors)
     # The spectrum was evaluated with H0 pinned, so its rate is the template
     # rate; publishing it as `total_merger_rate` would be indistinguishable
-    # from the physical rate `amplitude_reconstruction_model` later writes.
+    # from the physical rate reconstruction later writes.
     assert "total_merger_rate" not in trace
     np.testing.assert_allclose(float(trace["template_merger_rate"]["value"]), 3.0)
     assert "H0" not in trace
