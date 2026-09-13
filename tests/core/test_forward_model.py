@@ -40,12 +40,11 @@ def _generator() -> AnalyticInspiralGenerator:
     return generator
 
 
-def _ripple_generator(*, chunk_size: int) -> RippleGenerator:
+def _ripple_generator() -> RippleGenerator:
     """TaylorF2 settings shared with :mod:`test_waveform_generator`.
 
-    ``chunk_size`` is at least the forward-model ``batch_size`` so Ripple
-    does not chunk again inside each batched generate. One generate warms
-    the frequency cache so an empty-catalog spectrum can read it.
+    One generate warms the frequency cache so an empty-catalog spectrum can
+    read it.
     """
     generator = RippleGenerator(
         approximant="TaylorF2",
@@ -54,7 +53,6 @@ def _ripple_generator(*, chunk_size: int) -> RippleGenerator:
         maximum_frequency=100.0,
         reference_frequency=20.0,
         frequency_resolution=4.0,
-        chunk_size=chunk_size,
     )
     ones = jnp.ones((1,))
     _ = generator(
@@ -97,9 +95,7 @@ def _model_kwargs(**overrides: Any) -> dict[str, Any]:
 def _ripple_kwargs(**overrides: Any) -> dict[str, Any]:
     kwargs = _model_kwargs(**overrides)
     if "generator" not in overrides:
-        kwargs["generator"] = _ripple_generator(
-            chunk_size=max(kwargs["batch_size"], kwargs["num_events"])
-        )
+        kwargs["generator"] = _ripple_generator()
     return kwargs
 
 
@@ -259,7 +255,7 @@ def test_missing_physical_rate_is_rejected() -> None:
 
 @pytest.mark.integration
 def test_ripple_spectrum_matches_the_sum_of_per_source_power_over_time() -> None:
-    generator = _ripple_generator(chunk_size=N_EVENTS)
+    generator = _ripple_generator()
     kwargs = _ripple_kwargs(generator=generator)
     trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
     expected = _expected_spectrum(

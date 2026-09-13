@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
@@ -28,7 +32,6 @@ def ripple_generator() -> RippleGenerator:
         maximum_frequency=100.0,
         reference_frequency=20.0,
         frequency_resolution=4.0,
-        chunk_size=1,
     )
 
 
@@ -78,8 +81,31 @@ def test_base_generator_is_a_metadata_only_descriptor() -> None:
         generator({"detector_frame_mass_1": np.array([1.4])})
 
 
+def test_ripple_generator_delegates_one_full_batch(
+    ripple_generator: RippleGenerator,
+) -> None:
+    backend = Mock()
+    backend.generate_fd_polarizations_batch.return_value = SimpleNamespace(
+        frequencies=jnp.array([20.0, 60.0, 100.0]),
+        plus=jnp.ones((2, 3), dtype=jnp.complex64),
+        cross=jnp.zeros((2, 3), dtype=jnp.complex64),
+    )
+    object.__setattr__(ripple_generator, "_backend", backend)
+
+    power = ripple_generator.generate_batch(_ripple_sources())
+
+    backend.generate_fd_polarizations_batch.assert_called_once()
+    call = backend.generate_fd_polarizations_batch.call_args
+    assert call.args == ("TaylorF2",)
+    assert call.kwargs["sampling_frequency"] == 256.0
+    assert call.kwargs["minimum_frequency"] == 20.0
+    for name, values in _ripple_sources().items():
+        np.testing.assert_array_equal(call.kwargs["parameters"][name], values)
+    np.testing.assert_array_equal(power, np.ones((3, 2)))
+
+
 @pytest.mark.integration
-def test_ripple_generator_owns_grid_and_reduces_chunked_power(
+def test_ripple_generator_owns_grid_and_reduces_batch_power(
     ripple_generator: RippleGenerator,
 ) -> None:
     generator = ripple_generator
@@ -140,41 +166,6 @@ def test_ripple_generate_accepts_zero_dimensional_scalars(
     )
 
 
-def test_ripple_generator_rejects_mismatched_source_parameter_shapes(
-    ripple_generator: RippleGenerator,
-) -> None:
-    sources = _ripple_sources()
-    sources["inclination"] = np.array([0.0])
-
-    with pytest.raises(ValueError, match="matching shapes"):
-        ripple_generator(sources)
-
-
-def test_ripple_generator_rejects_non_one_dimensional_source_parameters(
-    ripple_generator: RippleGenerator,
-) -> None:
-    sources = {name: np.ones((2, 1)) for name in _ripple_sources()}
-
-    with pytest.raises(ValueError, match="one-dimensional"):
-        ripple_generator(sources)
-
-
-def test_ripple_generator_rejects_empty_source_parameters(
-    ripple_generator: RippleGenerator,
-) -> None:
-    with pytest.raises(ValueError, match="at least one array"):
-        ripple_generator({})
-
-
-def test_ripple_generator_rejects_zero_events(
-    ripple_generator: RippleGenerator,
-) -> None:
-    sources = {name: np.array([]) for name in _ripple_sources()}
-
-    with pytest.raises(ValueError, match="at least one event"):
-        ripple_generator(sources)
-
-
 @pytest.mark.parametrize(
     ("sampling_frequency", "message"),
     [
@@ -195,7 +186,6 @@ def test_ripple_generator_rejects_invalid_sampling_frequency(
             maximum_frequency=100.0,
             reference_frequency=20.0,
             frequency_resolution=4.0,
-            chunk_size=1,
         )
 
 
@@ -216,7 +206,6 @@ def test_ripple_generator_rejects_non_aligned_minimum_frequency() -> None:
         maximum_frequency=100.0,
         reference_frequency=20.0,
         frequency_resolution=4.0,
-        chunk_size=1,
     )
     with pytest.raises(ValueError, match="not on Ripple's frequency grid"):
         generator(_ripple_sources())
@@ -241,7 +230,6 @@ def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
         maximum_frequency=100.0,
         reference_frequency=2.0,
         frequency_resolution=1.0,
-        chunk_size=1,
     )
     with pytest.raises(ValueError, match="not on Ripple's frequency grid"):
         misaligned(_ripple_sources())
@@ -253,38 +241,8 @@ def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
         maximum_frequency=100.0,
         reference_frequency=2.0,
         frequency_resolution=1.0,
-        chunk_size=1,
     )
     frequencies, _ = aligned(_ripple_sources())
     assert uniform_grid_spacing(np.asarray(frequencies)) == pytest.approx(
         0.9872, abs=1e-15
     )
-
-
-@pytest.mark.integration
-def test_ripple_generator_chunking_preserves_power() -> None:
-    sources = _ripple_sources()
-    one_per_chunk = RippleGenerator(
-        approximant="TaylorF2",
-        sampling_frequency=256.0,
-        minimum_frequency=20.0,
-        maximum_frequency=100.0,
-        reference_frequency=20.0,
-        frequency_resolution=4.0,
-        chunk_size=1,
-    )
-    one_chunk = RippleGenerator(
-        approximant="TaylorF2",
-        sampling_frequency=256.0,
-        minimum_frequency=20.0,
-        maximum_frequency=100.0,
-        reference_frequency=20.0,
-        frequency_resolution=4.0,
-        chunk_size=2,
-    )
-
-    frequencies_one_per_chunk, power_one_per_chunk = one_per_chunk(sources)
-    frequencies_one_chunk, power_one_chunk = one_chunk(sources)
-
-    np.testing.assert_array_equal(frequencies_one_per_chunk, frequencies_one_chunk)
-    np.testing.assert_allclose(power_one_per_chunk, power_one_chunk, rtol=1e-12)

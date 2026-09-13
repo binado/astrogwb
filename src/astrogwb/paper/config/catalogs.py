@@ -60,7 +60,6 @@ class WaveformConfig(BaseModel):
     maximum_frequency: Annotated[float, Field(gt=0.0)]
     reference_frequency: Annotated[float, Field(gt=0.0)]
     frequency_resolution: Annotated[float, Field(gt=0.0)]
-    chunk_size: Annotated[int, Field(gt=0)]
 
 
 class PopulationConfig(BaseModel):

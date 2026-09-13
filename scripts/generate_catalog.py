@@ -132,7 +132,6 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
         maximum_frequency=waveform.maximum_frequency,
         reference_frequency=waveform.reference_frequency,
         frequency_resolution=waveform.frequency_resolution,
-        chunk_size=waveform.chunk_size,
     )
     segment_duration = 2.0 ** np.ceil(np.log2(1.0 / waveform.frequency_resolution))
     logger.info(
