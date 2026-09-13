@@ -79,7 +79,8 @@ def _model_kwargs(**overrides: Any) -> dict[str, Any]:
         "generator": _generator(),
         "observation_time": _observation_time_for(N_EVENTS),
         "batch_size": BATCH_SIZE,
-        "num_events": N_EVENTS,
+        "max_events": N_EVENTS,
+        "observed_num_events": N_EVENTS,
         "average_mode": "catalog_inclination",
     }
     kwargs.update(overrides)
@@ -114,15 +115,20 @@ def _plated_source_site_names(trace) -> list[str]:
 def _expected_spectrum(trace, generator, observation_time, *, average_mode):
     sources = {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
     power = jnp.asarray(generator.generate_batch(sources))
+    event_mask = jnp.arange(power.shape[-1]) < trace["n_events"]["value"]
     factor = (
         INCLINATION_AVERAGE_TO_FACE_ON_RATIO
         if average_mode == "analytic_inclination"
         else 1.0
     )
-    return factor * power.sum(axis=1) / years_to_seconds(observation_time)
+    return (
+        factor * (power * event_mask).sum(axis=1) / years_to_seconds(observation_time)
+    )
 
 
-def test_poisson_rate_is_total_merger_rate_times_observation_seconds() -> None:
+def test_conditioned_poisson_rate_is_total_merger_rate_times_observation_seconds() -> (
+    None
+):
     kwargs = _model_kwargs()
     trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
     rate = trace["total_merger_rate"]["value"]
@@ -219,6 +225,100 @@ def test_predictive_stacks_fixed_shape_sites() -> None:
     assert draws["total_merger_rate"].shape == (3,)
     assert bool(jnp.all(jnp.isfinite(draws["spectral_density"])))
     assert "redshift" not in draws
+
+
+def test_unobserved_poisson_count_is_jittable_and_keeps_static_shapes() -> None:
+    kwargs = _model_kwargs(observed_num_events=None)
+
+    def outputs(params):
+        trace = _seeded_trace(gwb_forward_model, params, **kwargs)
+        return (
+            trace["spectral_density"]["value"],
+            trace["n_events"]["value"],
+            tuple(trace[name]["value"] for name in _plated_source_site_names(trace)),
+        )
+
+    eager_spectrum, eager_n, eager_sources = outputs(_jax_params())
+    compiled_spectrum, compiled_n, compiled_sources = jax.jit(outputs)(_jax_params())
+
+    assert not _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)[
+        "n_events"
+    ]["is_observed"]
+    assert np.shape(eager_spectrum) == np.shape(compiled_spectrum)
+    assert np.shape(eager_n) == ()
+    np.testing.assert_allclose(compiled_spectrum, eager_spectrum, rtol=1e-12)
+    np.testing.assert_array_equal(compiled_n, eager_n)
+    assert all(source.shape == (kwargs["max_events"],) for source in eager_sources)
+    assert all(source.shape == (kwargs["max_events"],) for source in compiled_sources)
+
+
+def test_unobserved_poisson_predictive_stacks_static_capacity() -> None:
+    kwargs = _model_kwargs(observed_num_events=None)
+    draws = Predictive(
+        partial(gwb_forward_model, **kwargs),
+        num_samples=3,
+        return_sites=None,
+    )(jax.random.key(2), POPULATION_PARAMS)
+
+    assert draws["n_events"].shape == (3,)
+    assert draws["spectral_density"].shape == (
+        3,
+        _generator().frequencies.shape[0],
+    )
+    for name in ("redshift", "luminosity_distance"):
+        assert draws[name].shape == (3, kwargs["max_events"])
+
+
+def test_zero_conditioned_count_has_zero_power_and_static_sources() -> None:
+    kwargs = _model_kwargs(observed_num_events=0)
+    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+
+    np.testing.assert_array_equal(trace["n_events"]["value"], 0)
+    np.testing.assert_array_equal(
+        trace["spectral_density"]["value"],
+        np.zeros(_generator().frequencies.shape[0]),
+    )
+    for name in _plated_source_site_names(trace):
+        assert trace[name]["value"].shape == (kwargs["max_events"],)
+
+
+def test_partial_count_masks_power_but_not_source_capacity() -> None:
+    active_events = 3
+    kwargs = _model_kwargs(observed_num_events=active_events)
+    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    generator = kwargs["generator"]
+    sources = {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
+    reference_power = jnp.asarray(generator.generate_batch(sources))[:, :active_events]
+
+    np.testing.assert_allclose(
+        trace["spectral_density"]["value"],
+        reference_power.sum(axis=1) / years_to_seconds(kwargs["observation_time"]),
+        rtol=1e-12,
+    )
+    assert all(
+        trace[name]["value"].shape == (kwargs["max_events"],)
+        for name in _plated_source_site_names(trace)
+    )
+
+
+def test_count_above_capacity_is_silently_capped() -> None:
+    max_events = 4
+    observed_count = max_events + 3
+    kwargs = _model_kwargs(
+        max_events=max_events,
+        observed_num_events=observed_count,
+    )
+    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    sources = {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
+    reference = jnp.asarray(kwargs["generator"].generate_batch(sources)).sum(axis=1)
+
+    np.testing.assert_array_equal(trace["n_events"]["value"], observed_count)
+    np.testing.assert_allclose(
+        trace["spectral_density"]["value"],
+        reference / years_to_seconds(kwargs["observation_time"]),
+        rtol=1e-12,
+    )
+    assert all(source.shape == (max_events,) for source in sources.values())
 
 
 def test_jitted_spectrum_matches_eager() -> None:
@@ -321,7 +421,7 @@ def test_ripple_predictive_returns_finite_spectrum() -> None:
 # --------------------------------------------------------------------- #
 # The scan replaced an unrolled Python loop
 # --------------------------------------------------------------------- #
-def _unrolled_power_sum(generator, sources, *, batch_size: int):
+def _unrolled_power_sum(generator, sources, event_mask, *, batch_size: int):
     """The loop ``_sum_polarization_power`` used to be, kept as the oracle.
 
     The scan must agree with it for every catalog shape, including the ragged
@@ -332,7 +432,8 @@ def _unrolled_power_sum(generator, sources, *, batch_size: int):
 
     def slice_sum(start: int, size: int):
         batch = {name: values[start : start + size] for name, values in sources.items()}
-        return jnp.asarray(generator.generate_batch(batch)).sum(axis=1)
+        power = jnp.asarray(generator.generate_batch(batch))
+        return (power * event_mask[start : start + size]).sum(axis=1)
 
     if n_full:
         total = slice_sum(0, batch_size)
@@ -346,9 +447,11 @@ def _unrolled_power_sum(generator, sources, *, batch_size: int):
     return jnp.zeros(jnp.shape(generator.frequencies)[0], dtype=jnp.float64)
 
 
-def _draw_sources(n_events: int) -> dict[str, jax.Array]:
+def _draw_sources(max_events: int) -> dict[str, jax.Array]:
     trace = _seeded_trace(
-        gwb_forward_model, _jax_params(), **_model_kwargs(num_events=n_events)
+        gwb_forward_model,
+        _jax_params(),
+        **_model_kwargs(max_events=max_events, observed_num_events=max_events),
     )
     return {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
 
@@ -359,10 +462,17 @@ def test_scan_matches_the_unrolled_loop(n_events: int, batch_size: int) -> None:
     """Full, ragged and single-event catalogs, across chunk sizes."""
     generator = _generator()
     sources = _draw_sources(n_events)
+    event_mask = jnp.arange(n_events) < n_events
 
     np.testing.assert_allclose(
-        np.asarray(_sum_polarization_power(generator, sources, batch_size=batch_size)),
-        np.asarray(_unrolled_power_sum(generator, sources, batch_size=batch_size)),
+        np.asarray(
+            _sum_polarization_power(
+                generator, sources, event_mask, batch_size=batch_size
+            )
+        ),
+        np.asarray(
+            _unrolled_power_sum(generator, sources, event_mask, batch_size=batch_size)
+        ),
         rtol=1e-12,
     )
 
@@ -386,6 +496,7 @@ def test_empty_catalog_reduces_without_calling_the_generator() -> None:
     total = _sum_polarization_power(
         cast(PolarizationPowerGenerator, _CountingGenerator()),
         sources,
+        jnp.zeros(0, dtype=bool),
         batch_size=BATCH_SIZE,
     )
 
@@ -398,7 +509,7 @@ def test_empty_catalog_reduces_without_calling_the_generator() -> None:
 @pytest.mark.parametrize("n_events", [6, 7])
 def test_jitted_scan_matches_eager_for_full_and_ragged_catalogs(n_events: int) -> None:
     """``n_events=6`` divides ``BATCH_SIZE``; ``7`` leaves a remainder chunk."""
-    kwargs = _model_kwargs(num_events=n_events)
+    kwargs = _model_kwargs(max_events=n_events, observed_num_events=n_events)
     eager = _seeded_trace(gwb_forward_model, _jax_params(), **kwargs)
 
     def spectrum(params):
