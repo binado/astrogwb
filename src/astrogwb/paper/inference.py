@@ -63,6 +63,7 @@ from astrogwb.sampling import (
     SpectralDensityFn,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
+    hide_amplitude_draws,
     with_renamed_diagnostics,
 )
 
@@ -410,22 +411,26 @@ def build_model(
             name: value for name, value in config.fixed_params.items() if name in priors
         }
         model = _fix_model_params(
-            partial(
-                gwb_amplitude_marginalized_model,
-                # The spectrum is evaluated at the pinned fiducial amplitude,
-                # so its rate is the *template* rate. Renaming it here is what
-                # keeps a template quantity out of the `total_merger_rate`
-                # site that post-processing reconstructs.
-                spectral_density_fn=with_renamed_diagnostics(
-                    spectral_density_fn,
-                    {"total_merger_rate": "template_merger_rate"},
+            hide_amplitude_draws(
+                partial(
+                    gwb_amplitude_marginalized_model,
+                    # The spectrum is evaluated at the pinned fiducial amplitude,
+                    # so its rate is the *template* rate. Renaming it here is what
+                    # keeps a template quantity out of the `total_merger_rate`
+                    # site that post-processing reconstructs.
+                    spectral_density_fn=with_renamed_diagnostics(
+                        spectral_density_fn,
+                        {"total_merger_rate": "template_merger_rate"},
+                    ),
+                    amplitude_parameter=parameter,
+                    amplitude_fiducial=marginalization.fiducial,
+                    amplitude_fn=marginalization.amplitude_fn,
+                    amplitude_prior=marginalization.prior,
+                    amplitude_grid=marginalization.grid,
+                    merger_rate_amplitude_fn=marginalization.merger_rate_fn,
+                    priors=priors,
                 ),
-                amplitude_parameter=parameter,
-                amplitude_fiducial=marginalization.fiducial,
-                amplitude_fn=marginalization.amplitude_fn,
-                amplitude_prior=marginalization.prior,
-                amplitude_grid=marginalization.grid,
-                priors=priors,
+                parameter,
             ),
             fixed_params,
         )

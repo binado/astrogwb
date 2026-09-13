@@ -40,7 +40,7 @@ from astrogwb_mock_population import (
     mock_target_model,
 )
 from jax.typing import ArrayLike
-from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
+from numpyro.infer import MCMC, NUTS, init_to_value
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.catalog import Catalog
@@ -60,9 +60,10 @@ from astrogwb.populations import (
 )
 from astrogwb.sampling import (
     SpectralDensityFn,
-    amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
+    hide_amplitude_draws,
+    reconstruct_amplitude,
     with_renamed_diagnostics,
 )
 
@@ -273,49 +274,46 @@ def _marginalized_model(
     priors: dict[str, dist.Distribution],
     amplitude_grid: jax.Array,
 ):
-    return partial(
-        gwb_amplitude_marginalized_model,
-        # The spectrum is evaluated with H0 pinned, so its rate is the
-        # template's; publishing it as `total_merger_rate` would collide with
-        # the physical rate the reconstruction below writes under that name.
-        spectral_density_fn=with_renamed_diagnostics(
-            inputs.estimator, {"total_merger_rate": "template_merger_rate"}
+    return hide_amplitude_draws(
+        partial(
+            gwb_amplitude_marginalized_model,
+            # The spectrum is evaluated with H0 pinned, so its rate is the
+            # template's; publishing it as `total_merger_rate` would collide with
+            # the physical rate reconstruction writes under that name.
+            spectral_density_fn=with_renamed_diagnostics(
+                inputs.estimator, {"total_merger_rate": "template_merger_rate"}
+            ),
+            amplitude_parameter="H0",
+            amplitude_fiducial=FIDUCIALS["H0"],
+            # Passed by name, never wrapped: AmplitudeConditional hashes
+            # amplitude_fn into the jit cache key, so a freshly-minted callable
+            # retraces the model on every construction. Pinned by
+            # test_amplitude_scalings.py.
+            amplitude_fn=amplitude_H0_fn,
+            amplitude_prior=H0_PRIOR,
+            amplitude_grid=amplitude_grid,
+            merger_rate_amplitude_fn=merger_rate_H0_fn,
+            priors=priors,
         ),
-        amplitude_parameter="H0",
-        amplitude_fiducial=FIDUCIALS["H0"],
-        # Passed by name, never wrapped: AmplitudeConditional hashes
-        # amplitude_fn into the jit cache key, so a freshly-minted callable
-        # retraces the model on every construction. Pinned by
-        # test_amplitude_scalings.py.
-        amplitude_fn=amplitude_H0_fn,
-        amplitude_prior=H0_PRIOR,
-        amplitude_grid=amplitude_grid,
-        priors=priors,
+        "H0",
     )
 
 
 def _reconstruct_h0(posterior: dict, amplitude_grid: jax.Array) -> dict:
     """Draw H0 back from the chain's sufficient statistics."""
-    draws = Predictive(
-        partial(
-            amplitude_reconstruction_model,
-            amplitude_parameter="H0",
-            amplitude_fn=amplitude_H0_fn,
-            merger_rate_amplitude_fn=merger_rate_H0_fn,
-            prior=H0_PRIOR,
-            fiducial=FIDUCIALS["H0"],
-            grid=amplitude_grid,
-        ),
-        num_samples=1,
-        return_sites=["H0", "total_merger_rate", "quadrature_effective_nodes"],
-    )(
+    return reconstruct_amplitude(
         # fold_in keeps the reconstruction key distinct from the chain's.
         jax.random.fold_in(jax.random.PRNGKey(SEED), 1),
         amplitude_mle=posterior["amplitude_mle"],
         template_optimal_snr=posterior["template_optimal_snr"],
         template_merger_rate=posterior["template_merger_rate"],
+        amplitude_parameter="H0",
+        amplitude_fn=amplitude_H0_fn,
+        merger_rate_amplitude_fn=merger_rate_H0_fn,
+        prior=H0_PRIOR,
+        fiducial=FIDUCIALS["H0"],
+        grid=amplitude_grid,
     )
-    return {name: values[0] for name, values in draws.items()}
 
 
 @pytest.fixture(scope="module")
@@ -442,9 +440,9 @@ def test_marginalized_and_direct_h0_posteriors_agree(
     ``test_sampling.py::test_amplitude_marginalized_model_matches_the_general_model``
     already pins the *exact* log-density equivalence at ``rtol=1e-3`` by
     numerical quadrature, which is far sharper than any MCMC comparison. What
-    this adds is coverage of the full pipeline -- NUTS, ``Predictive``, the
-    reconstruction conditional -- on realistic data, which is where a
-    mismatched conditional would actually bite.
+    this adds is coverage of the full pipeline -- NUTS, reconstruction from
+    the published statistics, the reconstruction conditional -- on realistic
+    data, which is where a mismatched conditional would actually bite.
     """
     inputs = analysis_inputs
 

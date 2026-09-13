@@ -226,11 +226,11 @@ class AmplitudeConditional(dist.Distribution):
 
     .. warning::
 
-        This distribution is meant for :class:`~numpyro.infer.Predictive`
-        (generative-only use in
-        :func:`~astrogwb.sampling.models.amplitude_reconstruction_model`). Do
-        **not** ``numpyro.sample`` it as a latent site inside a NUTS model
-        without revisiting two things. Its ``support`` is a
+        :func:`~astrogwb.sampling.models.gwb_amplitude_marginalized_model`
+        draws from this distribution under ``handlers.block``, so the site is
+        not a NUTS latent and its log density does not enter the potential.
+        Do **not** ``numpyro.sample`` it as an *unblocked* latent inside a
+        NUTS model without revisiting two things. Its ``support`` is a
         :class:`~numpyro.distributions.constraints.dependent_property`, which
         routes latent use through NumPyro's dynamic-support path; and because
         the support is the *prior's* -- unbounded for a ``Normal`` prior --

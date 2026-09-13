@@ -265,7 +265,6 @@ def save(
     next to it.
     """
     import json
-    from functools import partial
 
     import arviz as az
     import numpy as np
@@ -304,9 +303,8 @@ def save(
 
     if marginalization is not None:
         import jax
-        from numpyro.infer import Predictive
 
-        from astrogwb.sampling.models import amplitude_reconstruction_model
+        from astrogwb.sampling.models import reconstruct_amplitude
 
         amplitude_parameter = marginalization.parameter
 
@@ -314,31 +312,20 @@ def save(
         # chain was marginalized with -- which is why nothing about the
         # quadrature needs persisting to the NetCDF.
         # The sufficient statistics form the AmplitudeConditional batch shape;
-        # one Predictive invocation draws one amplitude per (chain, draw).
+        # one call draws one amplitude per (chain, draw).
         posterior_samples = mcmc.get_samples(group_by_chain=True)
-        draws = Predictive(
-            partial(
-                amplitude_reconstruction_model,
-                amplitude_parameter=amplitude_parameter,
-                amplitude_fn=marginalization.amplitude_fn,
-                merger_rate_amplitude_fn=marginalization.merger_rate_fn,
-                prior=marginalization.prior,
-                fiducial=marginalization.fiducial,
-                grid=marginalization.grid,
-            ),
-            num_samples=1,
-            return_sites=[
-                amplitude_parameter,
-                "total_merger_rate",
-                "quadrature_effective_nodes",
-            ],
-        )(
+        draws = reconstruct_amplitude(
             jax.random.fold_in(jax.random.PRNGKey(config.seed), 1),
             amplitude_mle=posterior_samples["amplitude_mle"],
             template_optimal_snr=posterior_samples["template_optimal_snr"],
             template_merger_rate=posterior_samples["template_merger_rate"],
+            amplitude_parameter=amplitude_parameter,
+            amplitude_fn=marginalization.amplitude_fn,
+            merger_rate_amplitude_fn=marginalization.merger_rate_fn,
+            prior=marginalization.prior,
+            fiducial=marginalization.fiducial,
+            grid=marginalization.grid,
         )
-        draws = {name: values[0] for name, values in draws.items()}
 
         # `az.from_numpyro` returns an xarray DataTree, whose __setitem__ does
         # not accept a Dataset-style `(dims, values)` tuple: it would store the
