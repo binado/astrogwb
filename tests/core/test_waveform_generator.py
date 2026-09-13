@@ -87,16 +87,22 @@ def test_base_generator_is_a_metadata_only_descriptor() -> None:
         generator({"detector_frame_mass_1": np.array([1.4])})
 
 
-def test_ripple_generator_calls_its_kernel_with_the_full_grid(
+def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
     ripple_generator: RippleGenerator,
 ) -> None:
-    """Ripple sees every bin; the band is taken from its output, not its input.
+    """Ripple sees every bin above DC; the band comes from its output.
 
     Several supported models do not evaluate pointwise in frequency, so a
     generator that handed Ripple only the in-band bins would quietly change
     the in-band values. Mocking the kernel is what pins that direction.
+
+    The DC bin is excluded at the input instead: Ripple evaluates it to NaN,
+    and that NaN cannot be masked out of a gradient afterwards. Dropping it
+    leaves the spacing Ripple reads off the bottom of the grid intact, which
+    is why the exclusion does not perturb the in-band values.
     """
-    n_grid = ripple_generator.n_samples // 2 + 1
+    delta_f = 256.0 / ripple_generator.n_samples
+    n_grid = ripple_generator.n_samples // 2
     kernel = Mock(
         return_value=(
             jnp.ones((2, n_grid), dtype=jnp.complex128),
@@ -110,13 +116,37 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid(
     kernel.assert_called_once()
     frequencies, events = kernel.call_args.args
     np.testing.assert_array_equal(
-        np.asarray(frequencies),
-        np.arange(n_grid) * (256.0 / ripple_generator.n_samples),
+        np.asarray(frequencies), np.arange(1, n_grid + 1) * delta_f
     )
     assert set(events) >= {"M_c", "eta", "d_L", "iota"}
     np.testing.assert_array_equal(
         power, np.ones((ripple_generator.frequencies.size, 2))
     )
+
+
+def test_ripple_generate_batch_has_no_nan_gradient(
+    ripple_generator: RippleGenerator,
+) -> None:
+    """No NaN reaches reverse mode, which masking the output could not fix.
+
+    With ``f = 0`` in the input grid the DC bin evaluates to NaN, and its
+    derivative stays NaN however the forward value is masked or sliced --
+    source parameters broadcast across frequency, so their VJP sums every bin
+    and ``0 * NaN`` comes back. Excluding the bin is what makes this finite.
+    """
+    sources = _ripple_sources()
+
+    def total_power(distance: jax.Array) -> jax.Array:
+        return ripple_generator.generate_batch(
+            {**sources, "luminosity_distance": distance}
+        ).sum()
+
+    gradient = jax.grad(total_power)(
+        jnp.asarray(sources["luminosity_distance"], dtype=jnp.float64)
+    )
+
+    assert np.all(np.isfinite(np.asarray(gradient)))
+    assert np.all(np.asarray(gradient) < 0.0)
 
 
 def test_ripple_generator_has_no_fabricated_spacing(

@@ -92,7 +92,19 @@ class RippleGenerator(PolarizationPowerGenerator):
         # NumPy, not JAX: constructing a generator must not touch the XLA
         # backend, so runtime configuration stays free to run after it.
         delta_f = resolved_sampling_frequency / n_samples
-        grid = np.arange(n_samples // 2 + 1, dtype=np.float64) * delta_f
+        # From bin 1, not bin 0. Ripple evaluates the DC bin to NaN -- the
+        # f^(-7/6) amplitude divergence -- and while nan_to_num keeps that out
+        # of the forward sum, reverse mode cannot be rescued downstream: the
+        # local derivative at f = 0 is NaN, a slice or mask only zeros that
+        # bin's cotangent, and 0 * NaN is NaN. Source parameters broadcast
+        # across frequency, so their VJP sums every bin and the NaN comes back.
+        # Excluding it from the input is the only fix, and it is free: Ripple
+        # reads the bottom of the grid only through the spacing f[1] - f[0],
+        # which dropping one bin leaves at delta_f. Dropping rather than
+        # substituting is what preserves it -- a value patched into the DC bin
+        # would change f[1] - f[0] and so move IMRPhenomXAS_NRTidalv3's
+        # alignment frequency f[-1] + df.
+        grid = np.arange(1, n_samples // 2 + 1, dtype=np.float64) * delta_f
         band = self._resolve_band(grid)
 
         object.__setattr__(self, "_segment_duration", segment_duration)
@@ -110,6 +122,10 @@ class RippleGenerator(PolarizationPowerGenerator):
         from the configuration alone, so a misaligned ``minimum_frequency`` is
         a constructor error, not something to discover once a catalog has
         already been drawn.
+
+        ``grid`` starts at ``delta_f``, so a ``minimum_frequency`` of zero is
+        reported here as a misalignment. That band was never usable: its first
+        bin was Ripple's NaN at DC, zeroed on the way out.
         """
         in_band = np.flatnonzero(
             (grid >= self.minimum_frequency) & (grid <= self.maximum_frequency)
@@ -147,7 +163,10 @@ class RippleGenerator(PolarizationPowerGenerator):
 
     @property
     def frequencies(self) -> jax.Array:
-        """Ripple's frequency grid, restricted to the descriptor band."""
+        """Ripple's frequency grid, restricted to the descriptor band.
+
+        The underlying grid runs from ``delta_f``, not zero; see ``__init__``.
+        """
         return jnp.asarray(self._frequencies[self._band])
 
     def check_sources(self, source_parameters: Mapping[str, ArrayLike]) -> None:
@@ -162,10 +181,13 @@ class RippleGenerator(PolarizationPowerGenerator):
     def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Generate power in ``(frequency, sample)`` layout via Ripple.
 
-        Ripple sees the whole one-sided grid and the band is taken from its
-        output, never from its input: several supported models -- among them
-        the NRTidal and precessing families -- do not evaluate pointwise in
-        frequency, so restricting the input would change the in-band values.
+        Ripple sees the whole one-sided grid above DC and the band is taken
+        from its output, never from its input: several supported models --
+        among them the NRTidal and precessing families -- do not evaluate
+        pointwise in frequency, so restricting the input would change the
+        in-band values. The DC bin is the one exception, excluded at
+        construction: no model reads it, and the approximants astrogwb uses
+        evaluate it to NaN.
         """
         events = ripple_parameters(self.approximant, source_parameters)
         plus, cross = self._kernel(jnp.asarray(self._frequencies), events)
