@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -22,40 +24,6 @@ from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import RippleGenerator
 
 
-def _parse_value(raw: str) -> float | int | str:
-    value = raw.strip()
-    lower = value.lower()
-    if lower in {"true", "false"}:
-        return lower == "true"
-    try:
-        return int(value)
-    except ValueError:
-        pass
-    try:
-        return float(value)
-    except ValueError:
-        return value
-
-
-def _parse_key_value(raw: str) -> tuple[str, float | int | str]:
-    if "=" not in raw:
-        raise argparse.ArgumentTypeError(
-            f"expected KEY=VALUE, got {raw!r}"
-        )
-    key, value = raw.split("=", 1)
-    key = key.strip()
-    if not key:
-        raise argparse.ArgumentTypeError("key in KEY=VALUE cannot be empty")
-    return key, _parse_value(value)
-
-
-def _as_mapping(pairs: Sequence[tuple[str, float | int | str]]) -> dict[str, float | int | str]:
-    mapping: dict[str, float | int | str] = {}
-    for key, value in pairs:
-        mapping[key] = value
-    return mapping
-
-
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Simulate many padded forward-model spectral-density draws and save (draws, F)."
@@ -70,18 +38,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--source-model", type=str, required=True)
     parser.add_argument("--rate-model", type=str, required=True)
     parser.add_argument(
-        "--model-kwarg",
-        action="append",
-        default=[],
-        type=_parse_key_value,
-        metavar="KEY=VALUE",
+        "--model-kwargs",
+        type=json.loads,
+        default={},
+        metavar="JSON",
+        help='JSON object of model construction kwargs, e.g. \'{"z_min": 0.3, "z_max": 20}\'',
     )
     parser.add_argument(
-        "--param",
-        action="append",
-        default=[],
-        type=_parse_key_value,
-        metavar="KEY=VALUE",
+        "--params",
+        type=json.loads,
+        default={},
+        metavar="JSON",
+        help='JSON object of population hyperparameters, e.g. \'{"log10_R0": 1.5}\'',
     )
 
     parser.add_argument("--observation-time", type=float, required=True)
@@ -93,7 +61,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _float_params(params: Mapping[str, float | int | str]) -> dict[str, float]:
+def _require_mapping(value: Any, *, flag: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{flag} must be a JSON object, got {type(value).__name__}")
+    return value
+
+
+def _float_params(params: Mapping[str, Any]) -> dict[str, float]:
     converted: dict[str, float] = {}
     for key, value in params.items():
         if isinstance(value, str):
@@ -112,8 +86,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.observation_time <= 0.0:
         raise ValueError("--observation-time must be positive")
 
-    model_kwargs = _as_mapping(args.model_kwarg)
-    params = _float_params(_as_mapping(args.param))
+    model_kwargs = _require_mapping(args.model_kwargs, flag="--model-kwargs")
+    params = _float_params(_require_mapping(args.params, flag="--params"))
 
     source_model = build_source_model(args.source_model, settings=model_kwargs)
     merger_rate_fn = build_merger_rate_fn(args.rate_model, settings=model_kwargs)
