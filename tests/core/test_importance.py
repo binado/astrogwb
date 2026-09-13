@@ -2,21 +2,33 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
 # Standard cosmology + population hyperparameters, and the redshift grid they
-# are integrated on. Shared with `synthetic_estimator`, which builds its
+# are integrated on. Shared with `synthetic_importance`, which builds its
 # catalog at exactly these values: a second copy here would let the two drift
 # apart with no visible symptom.
-from astrogwb_mock_population import FIDUCIALS, N_GRID, Z_MAX, Z_MIN
+from astrogwb_mock_population import (
+    FIDUCIALS,
+    N_GRID,
+    Z_MAX,
+    Z_MIN,
+    log_weight_kwargs,
+)
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.distributions.rates import madau_dickinson_rate
+from astrogwb.importance.spectral import (
+    evaluate_log_weights,
+    importance_spectral_density,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -146,21 +158,24 @@ def test_redshift_logpdf_is_negative_infinite_outside_the_grid() -> None:
 # --------------------------------------------------------------------------- #
 # The BNS population reweighting a fixed catalog
 #
-# `synthetic_estimator` builds a catalog that is its own proposal at FIDUCIALS,
+# `synthetic_importance` builds a catalog that is its own proposal at FIDUCIALS,
 # so these exercise the rate and the weights against a reference whose neutral
 # point is known exactly.
 # --------------------------------------------------------------------------- #
-def _reweight(estimator, params: dict[str, float]) -> tuple[jax.Array, jax.Array]:
-    """The total rate and log-weights one estimator evaluation produces."""
-    _, extras = estimator(params)
-    return extras["total_merger_rate"], estimator.log_weights(params)
+def _reweight(
+    importance: dict[str, Any], params: dict[str, float]
+) -> tuple[jax.Array, jax.Array]:
+    """The total rate and log-weights at ``params``."""
+    _, extras = importance_spectral_density(params, **importance)
+    log_weights = evaluate_log_weights(params, **log_weight_kwargs(importance))
+    return extras["total_merger_rate"], log_weights
 
 
 def test_reweighting_a_synthetic_catalog_is_finite(
-    synthetic_estimator,
+    synthetic_importance,
 ) -> None:
-    estimator, samples = synthetic_estimator()
-    total_rate, log_weights = _reweight(estimator, FIDUCIALS)
+    importance, samples = synthetic_importance()
+    total_rate, log_weights = _reweight(importance, FIDUCIALS)
 
     total_rate = float(total_rate)
     log_weights = np.asarray(log_weights)
@@ -170,14 +185,14 @@ def test_reweighting_a_synthetic_catalog_is_finite(
 
 
 def test_local_merger_rate_scales_total_rate_without_changing_weights(
-    synthetic_estimator,
+    synthetic_importance,
 ) -> None:
     """Why `local_merger_rate` is analytically marginalizable: it is pure amplitude."""
-    estimator, _ = synthetic_estimator()
-    fiducial_rate, fiducial_log_weights = _reweight(estimator, FIDUCIALS)
+    importance, _ = synthetic_importance()
+    fiducial_rate, fiducial_log_weights = _reweight(importance, FIDUCIALS)
 
     scaled_rate, scaled_log_weights = _reweight(
-        estimator,
+        importance,
         {**FIDUCIALS, "local_merger_rate": 2.5 * FIDUCIALS["local_merger_rate"]},
     )
 
@@ -190,11 +205,11 @@ def test_local_merger_rate_scales_total_rate_without_changing_weights(
 
 
 def test_fiducial_local_merger_rate_preserves_rate_calculation(
-    synthetic_estimator,
+    synthetic_importance,
 ) -> None:
-    """The population's rate matches the hand-written grid formula."""
-    estimator, _ = synthetic_estimator()
-    total_rate, _ = _reweight(estimator, FIDUCIALS)
+    """The merger-rate function matches the hand-written grid formula."""
+    importance, _ = synthetic_importance()
+    total_rate, _ = _reweight(importance, FIDUCIALS)
 
     z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
     _, dvc_dz_grid = distance_and_volume_grid(
@@ -219,13 +234,13 @@ def test_fiducial_local_merger_rate_preserves_rate_calculation(
 
 
 def test_fiducial_weights_cancel_exactly(
-    synthetic_estimator,
+    synthetic_importance,
 ) -> None:
     # The catalog's cached proposal density and reference distance are the same
     # expressions the target forms at FIDUCIALS, so at the fiducial point the
     # log-weights are identically zero and the relative ESS is exactly 1.
-    estimator, _ = synthetic_estimator()
-    _, log_weights = _reweight(estimator, FIDUCIALS)
+    importance, _ = synthetic_importance()
+    _, log_weights = _reweight(importance, FIDUCIALS)
     log_weights = np.asarray(log_weights)
     weights = np.exp(log_weights)
     # Exactly, not to tolerance: the two sides are bit-identical expressions.

@@ -46,7 +46,7 @@ just test-notebooks
 That recipe installs the `simulation` and `io` extras and the `jupyter` group,
 and nothing else — which is what keeps the notebook's self-containment honest.
 The notebook names the population it draws from and the parameters it draws at,
-then passes `Population.sample`'s output through
+then passes `sample_sources`'s output through
 `Catalog.from_generator(..., generator=AnalyticInspiralGenerator(...))`. The
 luminosity distance is the population's own `numpyro.deterministic`, computed
 in the same batched pass every later density evaluation takes, which is what

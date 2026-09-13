@@ -28,7 +28,7 @@ def with_renamed_diagnostics(
 
     ``names`` maps a key the wrapped function returns to the name it should be
     published under, leaving every other extra untouched. The canonical use is
-    an amplitude-marginalized run relabelling an estimator's
+    an amplitude-marginalized run relabelling an importance spectrum's
     ``total_merger_rate`` as ``template_merger_rate``, so the trace never
     carries a template quantity under the name of a physical one.
 

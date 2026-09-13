@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from pathlib import Path
 
 import jax
@@ -29,12 +30,15 @@ from matplotlib.axes import Axes as MplAxes
 from matplotlib.figure import Figure
 from matplotlib.projections import register_projection
 
-from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
+from astrogwb.importance.spectral import (
+    evaluate_log_weights,
+    prepare_importance_arrays,
+)
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.plotting import TRUTH, use_paper_style
-from astrogwb.populations import build_population
+from astrogwb.populations import build_source_model
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
 # Restore the standard projection for consistent plotting.
@@ -182,18 +186,19 @@ def main(argv: Sequence[str] | None = None) -> None:
     n_samples = catalog.num_samples
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
-    estimator = SpectralDensityImportanceEstimator.from_catalog(
-        catalog,
-        model=build_population(
+    arrays = prepare_importance_arrays(catalog)
+    samples = dict(arrays.source_parameters)
+    log_weights_fn = partial(
+        evaluate_log_weights,
+        source_model=build_source_model(
             "bns_md_modified_propagation",
             settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_REDSHIFT_GRID},
         ),
-        average_mode="analytic_inclination",
+        source_parameters=arrays.source_parameters,
+        proposal_log_prob=arrays.proposal_log_prob,
+        log_reference_distance=arrays.log_reference_distance,
+        density_sites=arrays.density_sites,
     )
-    samples = dict(estimator.source_parameters)
-
-    def log_weights_fn(params: Mapping[str, jax.Array]) -> jax.Array:
-        return estimator.log_weights(params)
 
     figures: list[tuple[Figure, Path]] = []
     for combo in GRID_PRIORS:

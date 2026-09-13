@@ -28,8 +28,10 @@ from astrogwb.paper.config.catalogs import (
     load_catalog_layers,
 )
 from astrogwb.populations import (
-    Population,
-    build_population,
+    DEFAULT_DENSITY_SITES,
+    SourceFn,
+    build_merger_rate_fn,
+    build_source_model,
     known_merger_rate_models,
     known_source_models,
 )
@@ -39,10 +41,9 @@ def _definitions() -> dict[str, CatalogDefinition]:
     return discover_catalogs(REPO_ROOT)
 
 
-def _build(population) -> Population:
-    return build_population(
-        source_model=population.source_model,
-        rate_model=population.rate_model,
+def _build(population) -> SourceFn:
+    return build_source_model(
+        population.source_model,
         settings=population.kwargs,
         source_kwargs=population.source_kwargs,
     )
@@ -71,19 +72,21 @@ def test_every_committed_catalog_can_build_its_population() -> None:
         population = definition.population
         model = _build(population)
         with handlers.seed(rng_seed=0):
-            trace = handlers.trace(model.source).get_trace(population.params)
+            trace = handlers.trace(model).get_trace(population.params)
         assert trace["redshift"]["type"] == "sample", name
         assert trace["luminosity_distance"]["type"] == "deterministic", name
+        build_merger_rate_fn(population.rate_model, settings=population.kwargs)
 
 
 def test_every_declared_density_factor_is_a_real_sample_site() -> None:
+    """Generation records ``DEFAULT_DENSITY_SITES``; each must be a sample site."""
+    assert "redshift" in DEFAULT_DENSITY_SITES
     for name, definition in _definitions().items():
         model = _build(definition.population)
         with handlers.seed(rng_seed=0):
-            trace = handlers.trace(model.source).get_trace(definition.population.params)
-        for site in model.source.density_sites:
+            trace = handlers.trace(model).get_trace(definition.population.params)
+        for site in DEFAULT_DENSITY_SITES:
             assert trace[site]["type"] == "sample", name
-        assert "redshift" in model.source.density_sites, name
 
 
 def test_the_retired_population_graphs_are_gone() -> None:

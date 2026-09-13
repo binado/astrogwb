@@ -170,7 +170,9 @@ def load_catalog[C: Catalog](cls: type[C], path: str | Path) -> C:
             ),
             seed=seed,
         )
-    catalog.get_population_model()  # verify registry reconstruction
+    # verify registry reconstruction
+    catalog.get_source_model()
+    catalog.get_merger_rate_fn()
     return catalog
 
 

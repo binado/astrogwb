@@ -1,6 +1,6 @@
 r"""The importance weight itself, over plain arrays.
 
-Separated from :mod:`astrogwb.importance.estimator` so the estimator and the
+Separated from :mod:`astrogwb.importance.spectral` so the spectrum and the
 diagnostic figures that want raw per-source weights share one implementation of
 the arithmetic rather than two that agree by inspection. Identical evaluated
 densities and distances give *exactly* zero log weights, which is the sanity

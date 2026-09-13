@@ -1,4 +1,4 @@
-"""Name-to-model registries for source populations and merger-rate functions.
+"""Name-to-model registries for source models and merger-rate functions.
 
 A catalog file records the *names* of the source and rate callables that drew
 it, never an import path and never a pickled callable. Registry keys change
@@ -9,9 +9,14 @@ rots.
 Two registries, because a source model and a merger-rate function are
 independent declarations: a redshift *law* used for a guard-mixture proposal
 already pairs with the same Madau-Dickinson *rate* the physical population
-uses. :func:`build_population` takes the source name positionally and defaults
-the rate to :data:`DEFAULT_MERGER_RATE_MODEL`, so the six previously-registered
-single names keep working as source keys without a recipe table.
+uses. One source registry holds both physical and proposal models -- a
+proposal is just the source model a catalog happened to be drawn from.
+
+What the builders return is a plain :func:`functools.partial` with the
+construction settings bound: a :data:`SourceFn` or a :data:`MergerRateFn`,
+called with hyperparameters alone. Evaluating or sampling one is the job of
+:func:`astrogwb.utils.sampling.evaluate_sources` and
+:func:`astrogwb.utils.sampling.sample_sources`.
 
 The name pins the name, not the mathematics: re-pointing a registered key at a
 different density would be invisible here. :mod:`astrogwb.catalog` carries the
@@ -24,18 +29,15 @@ from collections.abc import Callable, Mapping
 from functools import partial
 
 import jax
-
-from astrogwb.populations.base import (
-    MergerRateFn,
-    Population,
-    SourceFn,
-    SourceModel,
-)
+from jax.typing import ArrayLike
 
 __all__ = [
+    "DEFAULT_DENSITY_SITES",
     "DEFAULT_MERGER_RATE_MODEL",
     "SHARED_MODEL_KWARGS",
-    "build_population",
+    "MergerRateFn",
+    "SourceFn",
+    "build_merger_rate_fn",
     "build_source_model",
     "known_merger_rate_models",
     "known_source_models",
@@ -43,23 +45,30 @@ __all__ = [
     "register_source_model",
 ]
 
+#: A bound source model: declares per-source sites as a side effect and
+#: returns the mapping that defines the source-output set -- the columns a
+#: catalog stores. ``luminosity_distance`` is required in it: it is the
+#: effective distance governing waveform amplitude.
+type SourceFn = Callable[[Mapping[str, ArrayLike]], Mapping[str, jax.Array]]
 
-_SOURCE_REGISTRY: dict[str, SourceFn] = {}
-#: Registered implementations may take construction kwargs; :func:`build_population`
-#: binds them into a :data:`~astrogwb.populations.base.MergerRateFn`.
+#: A bound merger-rate callable: returns one observer-frame scalar, mergers per
+#: second, shape ``()``, from hyperparameters alone.
+type MergerRateFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
+
+_SOURCE_REGISTRY: dict[str, Callable[..., Mapping[str, jax.Array]]] = {}
 _RATE_REGISTRY: dict[str, Callable[..., jax.Array]] = {}
 
 #: Density factors a catalog selects when nothing narrower is requested.
 #: Every registered source model declares ``redshift`` -- the one source
 #: parameter whose density never cancels in an importance weight.
-_DEFAULT_DENSITY_SITES: tuple[str, ...] = (
+DEFAULT_DENSITY_SITES: tuple[str, ...] = (
     "redshift",
     "source_frame_mass_1",
     "source_frame_mass_2",
 )
 
-#: The merger-rate name :func:`build_population` pairs with a source when the
-#: caller names only the source. Every shipped source today uses this rate.
+#: The merger-rate name :func:`build_merger_rate_fn` resolves when the caller
+#: names none. Every shipped source model pairs with this rate.
 DEFAULT_MERGER_RATE_MODEL = "madau_dickinson"
 
 #: Construction kwargs routed to *both* the source model and the rate
@@ -67,15 +76,22 @@ DEFAULT_MERGER_RATE_MODEL = "madau_dickinson"
 #: mapping (see ``Catalog._model_kwargs``), so a name given only one of the two
 #: registered callables is split by this fixed key set rather than by a
 #: second persisted field. This is why ``Catalog.restrict_redshift`` can rewrite
-#: ``z_min``/``z_max`` in the one flat mapping and have both halves of the
-#: reconstructed population see the narrowed window.
+#: ``z_min``/``z_max`` in the one flat mapping and have both reconstructed
+#: callables see the narrowed window.
 SHARED_MODEL_KWARGS: tuple[str, ...] = ("z_min", "z_max", "n_grid")
 
 
-def register_source_model(name: str) -> Callable[[SourceFn], SourceFn]:
-    """Register a source model under ``name``, returning it unchanged."""
+def register_source_model[F: Callable[..., Mapping[str, jax.Array]]](
+    name: str,
+) -> Callable[[F], F]:
+    """Register a source model under ``name``, returning it unchanged.
 
-    def decorate(fn: SourceFn) -> SourceFn:
+    Physical and proposal models share this one registry. The registered
+    callable takes ``params`` positionally and construction kwargs by keyword;
+    :func:`build_source_model` binds the latter.
+    """
+
+    def decorate(fn: F) -> F:
         if name in _SOURCE_REGISTRY:
             raise ValueError(f"source model {name!r} is already registered")
         _SOURCE_REGISTRY[name] = fn
@@ -90,8 +106,7 @@ def register_merger_rate_model[F: Callable[..., jax.Array]](
     """Register a merger-rate implementation under ``name``, returning it unchanged.
 
     The registered callable may take construction kwargs after ``params``.
-    :func:`build_population` binds those into a
-    :data:`~astrogwb.populations.base.MergerRateFn`.
+    :func:`build_merger_rate_fn` binds those into a :data:`MergerRateFn`.
     """
 
     def decorate(fn: F) -> F:
@@ -106,11 +121,21 @@ def register_merger_rate_model[F: Callable[..., jax.Array]](
 def build_source_model(
     name: str,
     *,
-    model_kwargs: Mapping[str, float | int],
-    source_kwargs: Mapping[str, float | int],
-    density_sites: tuple[str, ...] = _DEFAULT_DENSITY_SITES,
-) -> SourceModel:
-    """Assemble the registered source model into a frozen, hashable value."""
+    settings: Mapping[str, float | int] | None = None,
+    source_kwargs: Mapping[str, float | int] | None = None,
+) -> SourceFn:
+    """Bind a registered source model's construction settings.
+
+    ``settings`` is the flat construction-kwargs mapping a catalog persists,
+    shared window/grid keys and source-only keys alike; ``source_kwargs`` adds
+    source-only keys on top, overriding ``settings`` on a shared key -- the
+    same merge a generated catalog persists. An unknown name raises
+    ``KeyError`` listing the registered models.
+
+    The returned :func:`functools.partial` is compared and hashed **by
+    identity**. Build it once per run and reuse it: closing a jit-compiled
+    function over a freshly built, equal model forces a recompile.
+    """
     try:
         fn = _SOURCE_REGISTRY[name]
     except KeyError:
@@ -118,25 +143,23 @@ def build_source_model(
         raise KeyError(
             f"unknown source model {name!r}; registered models are: {known}"
         ) from None
-    combined = {**dict(model_kwargs), **dict(source_kwargs)}
-    return SourceModel(
-        fn=fn, model_kwargs=tuple(combined.items()), density_sites=density_sites
-    )
+    return partial(fn, **{**(settings or {}), **(source_kwargs or {})})
 
 
-def _split_shared_kwargs(
-    settings: Mapping[str, float | int],
-) -> tuple[dict[str, float | int], dict[str, float | int]]:
-    """Split a flat kwargs mapping into the shared and source-only parts."""
-    shared = {k: v for k, v in settings.items() if k in SHARED_MODEL_KWARGS}
-    source_only = {k: v for k, v in settings.items() if k not in SHARED_MODEL_KWARGS}
-    return shared, source_only
-
-
-def _bound_merger_rate(
-    name: str, *, model_kwargs: Mapping[str, float | int]
+def build_merger_rate_fn(
+    name: str = DEFAULT_MERGER_RATE_MODEL,
+    *,
+    settings: Mapping[str, float | int] | None = None,
 ) -> MergerRateFn:
-    """Look up ``name`` and bind construction kwargs into a ``functools.partial``."""
+    """Bind a registered merger-rate function's construction settings.
+
+    Only the :data:`SHARED_MODEL_KWARGS` keys of ``settings`` are bound, so the
+    same flat mapping that builds a source model builds its rate. An unknown
+    name raises ``KeyError`` listing the registered rates.
+
+    Like :func:`build_source_model`, the returned partial hashes by identity:
+    build it once per run.
+    """
     try:
         fn = _RATE_REGISTRY[name]
     except KeyError:
@@ -144,44 +167,8 @@ def _bound_merger_rate(
         raise KeyError(
             f"unknown merger-rate model {name!r}; registered models are: {known}"
         ) from None
-    return partial(fn, **model_kwargs)
-
-
-def build_population(
-    source_model: str,
-    *,
-    rate_model: str = DEFAULT_MERGER_RATE_MODEL,
-    settings: Mapping[str, float | int] | None = None,
-    source_kwargs: Mapping[str, float | int] | None = None,
-    density_sites: tuple[str, ...] = _DEFAULT_DENSITY_SITES,
-) -> Population:
-    """Assemble a source model and a bound merger-rate function into a ``Population``.
-
-    ``source_model`` is a registered source-model name -- the same six keys
-    previously used as single population names. ``rate_model`` names any
-    registered merger-rate function independently; it defaults to
-    :data:`DEFAULT_MERGER_RATE_MODEL` so a caller that names only the source
-    still gets the Madau-Dickinson rate every shipped source pairs with.
-
-    ``settings`` is the flat construction-kwargs mapping a catalog persists.
-    It is split automatically by :data:`SHARED_MODEL_KWARGS` between the source
-    wrapper and the bound rate callable. The shared window/grid kwargs
-    reach both from one definition, because a catalog persists only one flat
-    kwargs mapping.
-
-    The bound rate is a :func:`functools.partial`, so the returned
-    :class:`~astrogwb.populations.Population` is compared and hashed by
-    identity: build it once per run and reuse that instance.
-    """
-    shared, source_only = _split_shared_kwargs(settings or {})
-    source = build_source_model(
-        source_model,
-        model_kwargs=shared,
-        source_kwargs={**source_only, **(source_kwargs or {})},
-        density_sites=density_sites,
-    )
-    rate = _bound_merger_rate(rate_model, model_kwargs=shared)
-    return Population(source=source, rate=rate)
+    shared = {k: v for k, v in (settings or {}).items() if k in SHARED_MODEL_KWARGS}
+    return partial(fn, **shared)
 
 
 def known_source_models() -> tuple[str, ...]:

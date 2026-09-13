@@ -6,15 +6,20 @@ an analytic calculator can return no diagnostics::
     def analytic_spectrum(params):
         return params["amplitude"] * jnp.ones(3), {}
 
-The population-based estimator can be passed directly, after catalog and noise
-preparation outside inference::
+The importance-sampled spectrum is one too, once the catalog arrays are
+prepared and bound outside inference::
 
-    estimator = SpectralDensityImportanceEstimator(
-        catalog, population_fn, average_mode="analytic_inclination"
+    arrays = prepare_importance_arrays(catalog)
+    spectrum = partial(
+        importance_spectral_density,
+        source_model=target_source_model,
+        merger_rate_fn=target_merger_rate_fn,
+        average_mode="analytic_inclination",
+        **arrays._asdict(),
     )
     model = partial(
         gwb_spectral_density_model,
-        spectral_density_fn=estimator,
+        spectral_density_fn=spectrum,
         observed_spectral_density=observed,
         priors=priors,
         scale=gaussian_bin_scale(effective_psd, observation_time, df),
@@ -24,7 +29,7 @@ For amplitude marginalization, diagnostics describe the pinned template, so an
 importance caller relabels the rate without touching any other extras::
 
     template_spectrum = with_renamed_diagnostics(
-        estimator, {"total_merger_rate": "template_merger_rate"}
+        spectrum, {"total_merger_rate": "template_merger_rate"}
     )
 
 ``gwb_amplitude_marginalized_model`` publishes amplitude sufficient statistics.
@@ -192,7 +197,7 @@ def gwb_amplitude_marginalized_model(
     and the ``amplitude_marginalized_log_likelihood`` factor. Diagnostics must
     not collide with priors or these three likelihood-owned names. No merger
     rate is required and extras are never rescaled. Importance callers should
-    rename their estimator's ``total_merger_rate`` to ``template_merger_rate``
+    rename their spectrum's ``total_merger_rate`` to ``template_merger_rate``
     before returning it; see the module example. Use the unchanged
     ``amplitude_reconstruction_model`` for rate-aware reconstruction, or
     ``AmplitudeConditional`` directly when only amplitude draws are needed.

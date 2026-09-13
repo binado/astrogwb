@@ -220,7 +220,7 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
     The pre-flight gate ``astrogwb-assemble-config --all`` used to provide,
     kept because its real value was never the JSON it wrote: it fails on the
     first invalid run *before any catalog is built*, and a catalog is a GPU job.
-    Population models are resolved here too, so an unregistered name is caught
+    Source and rate models are resolved here too, so an unregistered name is caught
     by the same pre-flight rather than at the top of a queued generation job.
 
     It lives here rather than in :mod:`astrogwb.paper.config.runs` for the same

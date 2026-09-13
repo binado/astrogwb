@@ -63,7 +63,8 @@ import jax
 
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.populations import build_population
+from astrogwb.populations import DEFAULT_DENSITY_SITES, build_source_model
+from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 model_kwargs = {"z_min": 0.0, "z_max": 20.0, "n_grid": 4096}
@@ -74,10 +75,12 @@ params = {
     "kappa": 4.62,
     "z_peak": 1.84,
     "local_merger_rate": 770.0,
+    "minimum_mass": 1.0,
+    "mass_width": 1.5,
 }
-population = build_population("bns_md_cosmological", settings=model_kwargs)
-source_parameters = population.source.sample(
-    jax.random.PRNGKey(42), params, num_samples=1024
+source_model = build_source_model("bns_md_cosmological", settings=model_kwargs)
+source_parameters = sample_sources(
+    source_model, jax.random.PRNGKey(42), params, num_samples=1024
 )
 
 catalog = Catalog.from_generator(
@@ -95,22 +98,34 @@ catalog = Catalog.from_generator(
     rate_model_name="madau_dickinson",
     model_kwargs=model_kwargs,
     fiducials=params,
-    density_sites=population.source.density_sites,
+    density_sites=DEFAULT_DENSITY_SITES,
     seed=42,
 )
 catalog.save("catalog.h5")
 ```
 
-Reweighting it to a target population needs nothing else: the file says what
+Reweighting it to a target source model needs nothing else: the file says what
 drew it, so the proposal density is recovered rather than restated.
 
 ```python
-from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
+from functools import partial
 
-estimator = SpectralDensityImportanceEstimator.from_catalog(
-    Catalog.load("catalog.h5"), average_mode="analytic_inclination"
+from astrogwb.importance.spectral import (
+    importance_spectral_density,
+    prepare_importance_arrays,
 )
-spectrum, extras = estimator({**params, "H0": 70.0})
+from astrogwb.populations import build_merger_rate_fn
+
+spectrum_fn = partial(
+    importance_spectral_density,
+    source_model=build_source_model(
+        "bns_md_modified_propagation", settings=model_kwargs
+    ),
+    merger_rate_fn=build_merger_rate_fn(settings=model_kwargs),
+    average_mode="analytic_inclination",
+    **prepare_importance_arrays(Catalog.load("catalog.h5"))._asdict(),
+)
+spectrum, extras = spectrum_fn({**params, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91})
 ```
 
 ## The manuscript application

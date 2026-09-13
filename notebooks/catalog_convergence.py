@@ -47,6 +47,7 @@
 # %%
 import os
 import warnings
+from functools import partial
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -77,8 +78,16 @@ from astrogwb.gwb import (
     spectral_snr,
     uniform_prior_mass_moments,
 )
-from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.populations import build_population
+from astrogwb.importance.spectral import (
+    evaluate_log_weights,
+    prepare_importance_arrays,
+)
+from astrogwb.populations import (
+    DEFAULT_DENSITY_SITES,
+    build_merger_rate_fn,
+    build_source_model,
+)
+from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces
@@ -188,7 +197,7 @@ OMEGA_CATALOG_PATH = NOTEBOOK_DIR / (
 # %% [markdown]
 # ## The source population
 #
-# One declaration, used twice: `Population.sample` samples from it, and the
+# One declaration, used twice: `sample_sources` samples from it, and the
 # importance weights below evaluate the *same* model's density at the stored
 # samples. That is what makes this catalog exactly its own proposal
 # ($\log w \equiv 0$ at the fiducials) rather than approximately so.
@@ -237,16 +246,25 @@ POPULATION_MODEL_KWARGS: dict[str, float | int] = {
 
 
 def population_model_fn():
-    """The generating population, with its construction settings bound."""
-    return build_population(POPULATION_MODEL, settings=POPULATION_MODEL_KWARGS)
+    """The generating source model, with its construction settings bound."""
+    return build_source_model(POPULATION_MODEL, settings=POPULATION_MODEL_KWARGS)
+
+
+TARGET_SETTINGS: dict[str, float | int] = {
+    "z_min": Z_MIN,
+    "z_max": Z_MAX,
+    "n_grid": N_GRID,
+}
 
 
 def target_model_fn():
-    """The target population: the same sources under modified propagation."""
-    return build_population(
-        "bns_md_modified_propagation",
-        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
-    )
+    """The target source model: the same sources under modified propagation."""
+    return build_source_model("bns_md_modified_propagation", settings=TARGET_SETTINGS)
+
+
+def target_merger_rate_fn():
+    """The Madau-Dickinson merger rate the target pairs with."""
+    return build_merger_rate_fn(settings=TARGET_SETTINGS)
 
 
 def make_redshift_grid() -> jax.Array:
@@ -258,7 +276,7 @@ def make_redshift_grid() -> jax.Array:
 # ## Building or loading the catalogs
 #
 # Two catalogs, drawn from one population. `build_catalog` re-runs
-# `Population.sample` at the same seed for each, so the two files hold the *same*
+# `sample_sources` at the same seed for each, so the two files hold the *same*
 # sources reduced onto different frequency grids — the wide 1 Hz grid the
 # $\Omega_{\rm gw}$ comparison needs, and the fine 0.125 Hz grid everything from
 # the SNR section on runs against.
@@ -299,13 +317,12 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
     """
     parameters = {
         name: np.asarray(values, dtype=np.float64)
-        for name, values in population_model_fn()
-        .source.sample(
+        for name, values in sample_sources(
+            population_model_fn(),
             jax.random.PRNGKey(POPULATION_SEED),
             POPULATION_PARAMS,
             num_samples=NUM_SOURCES,
-        )
-        .items()
+        ).items()
     }
 
     return Catalog.from_generator(
@@ -323,7 +340,7 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
         rate_model_name="madau_dickinson",
         model_kwargs=POPULATION_MODEL_KWARGS,
         fiducials=POPULATION_PARAMS,
-        density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
+        density_sites=DEFAULT_DENSITY_SITES,
         seed=POPULATION_SEED,
     )
 
@@ -393,11 +410,7 @@ def describe(catalog: Catalog) -> pd.Series:
 
 def catalog_merger_rate(catalog: Catalog) -> jax.Array:
     """The observer-frame rate this catalog's own population implies."""
-    model = catalog.get_population_model()
-    params = catalog.fiducials
-    values = catalog.source_parameters
-    _, _, total_merger_rate = model.evaluate(params, values)
-    return total_merger_rate
+    return jnp.asarray(catalog.get_merger_rate_fn()(catalog.fiducials))
 
 
 def unpack(
@@ -999,27 +1012,31 @@ pd.DataFrame(
 # closed-form check below instead.
 
 # %%
-# The estimator caches the proposal density and the reference distances once,
-# from the catalog's own recorded population, so the H0 scan below pays for the
-# target evaluation only. The reference distance is the stored distance column
-# -- the one the stored power was generated at -- never a freshly interpolated
-# cosmology table.
-scan_estimator = SpectralDensityImportanceEstimator.from_catalog(
-    catalog,
-    model=target_model_fn(),
-    average_mode="analytic_inclination",
+# Preparation caches the proposal density and the reference distances once,
+# from the catalog's own recorded source model, so the H0 scan below pays for
+# the target evaluation only. The reference distance is the stored distance
+# column -- the one the stored power was generated at -- never a freshly
+# interpolated cosmology table.
+scan_arrays = prepare_importance_arrays(catalog)
+scan_log_weights = partial(
+    evaluate_log_weights,
+    source_model=target_model_fn(),
+    source_parameters=scan_arrays.source_parameters,
+    proposal_log_prob=scan_arrays.proposal_log_prob,
+    log_reference_distance=scan_arrays.log_reference_distance,
+    density_sites=scan_arrays.density_sites,
 )
+scan_merger_rate = target_merger_rate_fn()
 
 
 def log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
     """Gaussian log-density of the injection under the H0-shifted template."""
     noise_scale = gaussian_bin_scale(run["effective_psd"], OBSERVATION_TIME, run["df"])
     params = {**FIDUCIALS, "H0": hubble_constant}
-    _, extras = scan_estimator(params)
     model = spectral_density(
         run["power"],
-        jnp.exp(scan_estimator.log_weights(params)),
-        jnp.asarray(extras["total_merger_rate"]),
+        jnp.exp(scan_log_weights(params)),
+        jnp.asarray(scan_merger_rate(params)),
         average_mode="analytic_inclination",
     )
     return float(jnp.sum(dist.Normal(model, noise_scale).log_prob(run["spectrum"])))

@@ -60,7 +60,7 @@ from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import AnalysisGrid, build_run_config
 from astrogwb.paper.config.runs import assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
-from astrogwb.populations import build_population
+from astrogwb.populations import build_merger_rate_fn, build_source_model
 from astrogwb.sampling import gwb_spectral_density_model
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
@@ -170,35 +170,37 @@ analysis_grid = AnalysisGrid(
     maximum_redshift=maximum_redshift,
     n_grid=n_grid,
 )
-target_model = build_population(
-    "bns_md_modified_propagation",
-    settings={
-        "z_min": minimum_redshift,
-        "z_max": maximum_redshift,
-        "n_grid": n_grid,
-    },
+target_settings = {
+    "z_min": minimum_redshift,
+    "z_max": maximum_redshift,
+    "n_grid": n_grid,
+}
+target_source_model = build_source_model(
+    "bns_md_modified_propagation", settings=target_settings
 )
+target_merger_rate_fn = build_merger_rate_fn(settings=target_settings)
 
 # One call restricts both catalogs to the analysis window, builds the fiducial
 # observation from the injection catalog's own population, builds the effective
-# PSD and band mask, and prepares the estimator against the proposal catalog's
-# own recorded density -- the same sequence `scripts/run_mcmc.py` runs.
+# PSD and band mask, and prepares the importance arrays against the proposal
+# catalog's own recorded density -- the same sequence `scripts/run_mcmc.py` runs.
 inputs = prepare_inference_inputs(
     injection_catalog,
     proposal_catalog,
     grid=analysis_grid,
     detectors=detnames,
-    target_model=target_model,
+    target_source_model=target_source_model,
+    target_merger_rate_fn=target_merger_rate_fn,
 )
 observation = inputs.observation
 proposal = inputs.proposal
-estimator = inputs.estimator
+spectral_density_fn = inputs.spectral_density_fn
 
 frequencies = observation.frequencies
 df = observation.df
 mask = observation.frequency_mask
 effective_psd_arr = inputs.effective_psd
-samples = dict(estimator.source_parameters)
+samples = {name: jnp.asarray(v) for name, v in proposal.source_parameters.items()}
 n_freq, n_samples = proposal.polarization_power.shape
 print(f"loaded proposal: n_frequency_bins={n_freq} n_proposal_samples={n_samples}")
 print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
@@ -292,8 +294,8 @@ plot_omegagw(
     ymin=1e-15,
 )
 
-# The masked arrays the likelihood is evaluated against. The estimator already
-# holds the band-restricted power; masking the source samples would silently
+# The masked arrays the likelihood is evaluated against. The bound spectrum
+# already holds the band-restricted power; masking the source samples would silently
 # truncate the population, so it never happens.
 observed_spectral_density = inputs.masked_model_kwargs()["observed_spectral_density"]
 effective_psd_arr = effective_psd_arr[np.asarray(mask)]
@@ -304,15 +306,16 @@ frequencies = frequencies[mask]
 #
 # We assemble the same `gwb_spectral_density_model` used by the NUTS run.
 # Rather than sampling it, we evaluate its log joint density on a grid below.
-# The estimator was prepared *with* the frequency mask, so it owns the
-# band-restricted power; the source samples keep their full length. Everything
+# The importance arrays were prepared *with* the frequency mask, so the bound
+# spectrum owns the band-restricted power; the source samples keep their full
+# length. Everything
 # the grid does not vary -- the proposal density, the reference distances, the
 # per-bin noise scale -- was prepared once, above.
 
 # %%
 base_model = partial(
     gwb_spectral_density_model,
-    spectral_density_fn=estimator,
+    spectral_density_fn=spectral_density_fn,
     priors=priors,
     scale=gaussian_bin_scale(effective_psd_arr, observation_time, df),
 )

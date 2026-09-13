@@ -1,8 +1,10 @@
 """Source populations declared as NumPyro models, addressed by registered name.
 
-One pair of declarations serves generation and inference: a source model's
-``Predictive`` draws a catalog, and substituting those draws back into it
-recovers the per-sample source density the importance weights divide by. A
+One pair of declarations serves generation and inference: a source model
+draws a catalog (:func:`~astrogwb.utils.sampling.sample_sources`), and
+conditioning those draws back into it recovers the per-sample source density
+the importance weights divide by
+(:func:`~astrogwb.utils.sampling.evaluate_sources`). A
 merger-rate function returns the one observer-frame scalar the same catalog's
 Poisson count and predicted spectrum need. That is what makes a catalog
 self-describing -- the file records the two registry names, both callables'
@@ -16,12 +18,6 @@ before the XLA backend is initialized, but importing a model does not
 initialize it.
 """
 
-from astrogwb.populations.base import (
-    MergerRateFn,
-    Population,
-    SourceFn,
-    SourceModel,
-)
 from astrogwb.populations.bns_madau_dickinson import (
     AMPLITUDE_PARAMETERS,
     amplitude_H0_fn,
@@ -37,9 +33,12 @@ from astrogwb.populations.bns_madau_dickinson import (
     merger_rate_local_merger_rate_fn,
 )
 from astrogwb.populations.registry import (
+    DEFAULT_DENSITY_SITES,
     DEFAULT_MERGER_RATE_MODEL,
     SHARED_MODEL_KWARGS,
-    build_population,
+    MergerRateFn,
+    SourceFn,
+    build_merger_rate_fn,
     build_source_model,
     known_merger_rate_models,
     known_source_models,
@@ -49,12 +48,11 @@ from astrogwb.populations.registry import (
 
 __all__ = [
     "AMPLITUDE_PARAMETERS",
+    "DEFAULT_DENSITY_SITES",
     "DEFAULT_MERGER_RATE_MODEL",
     "SHARED_MODEL_KWARGS",
     "MergerRateFn",
-    "Population",
     "SourceFn",
-    "SourceModel",
     "amplitude_H0_fn",
     "amplitude_local_merger_rate_fn",
     "bns_md_cosmological",
@@ -63,7 +61,7 @@ __all__ = [
     "bns_md_gaussian_uniform_mixture",
     "bns_md_modified_propagation",
     "bns_md_uniform_mixture",
-    "build_population",
+    "build_merger_rate_fn",
     "build_source_model",
     "known_merger_rate_models",
     "known_source_models",

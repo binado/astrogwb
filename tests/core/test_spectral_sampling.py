@@ -1,13 +1,13 @@
 """The callable sampling boundary, checked against independent likelihoods.
 
 Three layers, in order: the generic model against a hand-written Gaussian
-density; the population estimator against the hand-written grid-level formula;
+density; the importance-sampled spectrum against the hand-written grid-level
+formula;
 and the amplitude machinery -- statistics, marginalization, reconstruction --
 against explicit quadrature.
 """
 
 from collections.abc import Mapping
-from dataclasses import replace
 from functools import partial
 from typing import Any
 
@@ -18,8 +18,9 @@ import numpyro.distributions as dist
 import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
-    build_synthetic_estimator,
+    build_synthetic_importance,
     make_redshift_grid,
+    mock_merger_rate_fn,
     mock_target_model,
 )
 from jax.typing import ArrayLike
@@ -31,8 +32,7 @@ from reference_population import reference_merger_rate_distance_and_logprob
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.distributions.amplitude import AmplitudeConditional, quadrature_grid
 from astrogwb.gwb import AverageMode, spectral_density
-from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.populations.bns_madau_dickinson import bns_md_modified_propagation
+from astrogwb.importance.spectral import importance_spectral_density
 from astrogwb.sampling import (
     SpectralDensityFn,
     amplitude_reconstruction_model,
@@ -219,78 +219,87 @@ def test_generic_rejects_sampled_amplitude_before_evaluation() -> None:
         handlers.seed(gwb_amplitude_marginalized_model, 0)(**kwargs)
 
 
-def _importance_estimator(mode: AverageMode) -> SpectralDensityImportanceEstimator:
-    """The estimator over a catalog that is its own proposal at ``FIDUCIALS``.
+_TARGET_SOURCE = mock_target_model()
+_TARGET_RATE = mock_merger_rate_fn()
 
-    The target model is wrapped so that only the *sampled* parameters arrive
-    through ``params``; everything else is pinned at the fiducials, which is
-    what the paper layer's conditioning handlers do.
+
+def pinned_target(params: Mapping[str, ArrayLike]) -> Mapping[str, jax.Array]:
+    """The target source model, unsampled hyperparameters pinned at the fiducials."""
+    return _TARGET_SOURCE({**FIDUCIALS, **params})
+
+
+def pinned_rate(params: Mapping[str, ArrayLike]) -> jax.Array:
+    """The rate needs the same pinning: it takes ``params`` independently."""
+    return _TARGET_RATE({**FIDUCIALS, **params})
+
+
+def _importance(mode: AverageMode) -> dict[str, Any]:
+    """Spectrum keywords over a catalog that is its own proposal at ``FIDUCIALS``.
+
+    The target is pinned so that only the *sampled* parameters arrive through
+    ``params``; everything else comes from the fiducials, which is what the
+    paper layer's conditioning handlers do.
     """
-    estimator, _ = build_synthetic_estimator(
+    importance, _ = build_synthetic_importance(
         4, polarization_power=jnp.arange(1.0, 13.0).reshape(3, 4)
     )
-    target = mock_target_model()
+    return {
+        **importance,
+        "source_model": pinned_target,
+        "merger_rate_fn": pinned_rate,
+        "average_mode": mode,
+    }
 
-    def pinned_call(
-        params: Mapping[str, ArrayLike], **settings: object
-    ) -> Mapping[str, jax.Array]:
-        """Take unsampled hyperparameters from the test's fixed fiducials."""
-        return bns_md_modified_propagation({**FIDUCIALS, **params}, **settings)
 
-    def pinned_rate_call(params: Mapping[str, ArrayLike]) -> jax.Array:
-        """The rate needs the same pinning: it takes ``params`` independently."""
-        return target.rate({**FIDUCIALS, **params})
-
-    pinned = replace(
-        target,
-        source=replace(target.source, fn=pinned_call),
-        rate=pinned_rate_call,
-    )
-    return replace(estimator, model=pinned, average_mode=mode)
+def _importance_estimator(mode: AverageMode) -> SpectralDensityFn:
+    """The importance spectrum over :func:`_importance`, as a bound callable."""
+    return partial(importance_spectral_density, **_importance(mode))
 
 
 def _reference_spectrum(
-    estimator: SpectralDensityImportanceEstimator, params: Mapping[str, ArrayLike]
+    importance: Mapping[str, Any], params: Mapping[str, ArrayLike]
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
     """Rate, weights, and spectrum from the hand-written grid-level formula.
 
-    Deliberately *not* routed through the population model: this restates the
+    Deliberately *not* routed through the source model: this restates the
     grid-level formula and the weight ratio in full, so it fails if the model
     path drifts rather than agreeing with it by construction. The two are
     pinned bit-identical by ``tests/core/test_distributions.py``.
     """
-    redshift = estimator.source_parameters["redshift"]
+    sources = importance["source_parameters"]
+    redshift = sources["redshift"]
     full = {**FIDUCIALS, **params}
     rate, distance, logprob = reference_merger_rate_distance_and_logprob(
         full,
         redshift,
         redshift_grid=make_redshift_grid(),
-        source_frame_mass_1=estimator.source_parameters["source_frame_mass_1"],
-        source_frame_mass_2=estimator.source_parameters["source_frame_mass_2"],
+        source_frame_mass_1=sources["source_frame_mass_1"],
+        source_frame_mass_2=sources["source_frame_mass_2"],
     )
     log_target_distance = jnp.log(distance) + log_gw_em_ratio(
         redshift, full["xi_0"], full["xi_n"]
     )
     log_weights = (
         logprob
-        - estimator.proposal_log_prob
-        - 2.0 * (log_target_distance - estimator.log_reference_distance)
+        - importance["proposal_log_prob"]
+        - 2.0 * (log_target_distance - importance["log_reference_distance"])
     )
     weights = jnp.exp(log_weights)
-    factor = 0.4 if estimator.average_mode == "analytic_inclination" else 1.0
-    spectrum = factor * rate * (estimator.polarization_power @ weights) / weights.size
+    factor = 0.4 if importance["average_mode"] == "analytic_inclination" else 1.0
+    power = importance["polarization_power"]
+    spectrum = factor * rate * (power @ weights) / weights.size
     return rate, log_weights, spectrum
 
 
 @pytest.mark.parametrize("mode", ["analytic_inclination", "catalog_inclination"])
-def test_estimator_likelihood_and_gradient_match_the_grid_formula(
+def test_importance_likelihood_and_gradient_match_the_grid_formula(
     mode: AverageMode,
 ) -> None:
-    estimator = _importance_estimator(mode)
-    fn: SpectralDensityFn = estimator  # Structural protocol conformance is typechecked.
+    importance = _importance(mode)
+    fn: SpectralDensityFn = partial(importance_spectral_density, **importance)
     priors = {"H0": dist.Uniform(50.0, 90.0)}
     params = {"H0": jnp.array(73.0)}
-    rate, log_weights, expected = _reference_spectrum(estimator, params)
+    rate, log_weights, expected = _reference_spectrum(importance, params)
     weights = jnp.exp(log_weights)
     scale = jnp.full(3, jnp.max(expected) / 3.0)
     observed = expected * 1.1
@@ -314,29 +323,23 @@ def test_estimator_likelihood_and_gradient_match_the_grid_formula(
     ) + priors["H0"].log_prob(params["H0"])
     np.testing.assert_allclose(value, expected_density, rtol=1e-12)
 
-    # The estimator is a pytree, so it can cross a jit boundary as an argument
-    # and still differentiate with respect to a sampled hyperparameter.
-    def density(e, h0):
-        return log_density(
-            gwb_spectral_density_model,
-            (),
-            {**kwargs, "spectral_density_fn": e},
-            {"H0": h0},
-        )[0]
+    # The bound spectrum closes over the catalog arrays, so it compiles as a
+    # constant and still differentiates with respect to a sampled hyperparameter.
+    def density(h0):
+        return log_density(gwb_spectral_density_model, (), kwargs, {"H0": h0})[0]
 
-    compiled = jax.jit(jax.value_and_grad(density, argnums=1))
-    actual_value, gradient = compiled(estimator, params["H0"])
+    compiled = jax.jit(jax.value_and_grad(density))
+    actual_value, gradient = compiled(params["H0"])
     step = 1e-4
-    numerical = (
-        density(estimator, params["H0"] + step)
-        - density(estimator, params["H0"] - step)
-    ) / (2.0 * step)
+    numerical = (density(params["H0"] + step) - density(params["H0"] - step)) / (
+        2.0 * step
+    )
     np.testing.assert_allclose(actual_value, value, rtol=1e-12)
     np.testing.assert_allclose(gradient, numerical, rtol=1e-5)
 
 
 def test_amplitude_adapter_preserves_reconstruction_and_jit() -> None:
-    """The rename adapter is what makes the estimator usable as a template."""
+    """The rename adapter is what makes the spectrum usable as a template."""
     estimator = _importance_estimator("catalog_inclination")
     template = with_renamed_diagnostics(
         estimator, {"total_merger_rate": "template_merger_rate"}

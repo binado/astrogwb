@@ -19,38 +19,43 @@ from exactly the density the tests reweight with.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
-from numpyro import handlers
 
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.importance.estimator import SpectralDensityImportanceEstimator
-from astrogwb.populations import Population, SourceModel, build_population
+from astrogwb.importance.spectral import prepare_importance_arrays
+from astrogwb.populations import (
+    MergerRateFn,
+    SourceFn,
+    build_merger_rate_fn,
+    build_source_model,
+)
+from astrogwb.utils.sampling import evaluate_sources, sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 
 def derived_columns(
-    model: SourceModel,
+    model: SourceFn,
     params: Mapping[str, ArrayLike],
     sources: Mapping[str, ArrayLike],
 ) -> dict[str, jax.Array]:
     """Replay a source model at fixed source values, returning declared outputs.
 
     The test-side counterpart of the batched replay inside
-    :meth:`astrogwb.populations.SourceModel.sample`: sample sites take the
-    supplied values, deterministic outputs are the model's recomputation. The
-    result is the model's own return mapping -- the mapping that defines the
-    source-output set -- so a stored deterministic is never trusted over the
-    recomputation, and no static site-name list is needed.
+    :func:`astrogwb.utils.sampling.sample_sources`, and the same code path:
+    sample sites take the supplied values, deterministic outputs are the
+    model's recomputation. The result is the model's own return mapping -- the
+    mapping that defines the source-output set -- so a stored deterministic is
+    never trusted over the recomputation, and no static site-name list is
+    needed.
     """
-    bound = handlers.condition(
-        model, data={name: jnp.asarray(value) for name, value in sources.items()}
-    )
-    return {name: jnp.asarray(value) for name, value in bound(params).items()}
+    _, outputs = evaluate_sources(model, params, sources, density_sites=())
+    return outputs
 
 
 #: Hyperparameters the mock injection is drawn at and built at.
@@ -104,25 +109,33 @@ def make_redshift_grid(n_grid: int = N_GRID) -> jax.Array:
     return jnp.linspace(Z_MIN, Z_MAX, n_grid)
 
 
-def mock_population_model(n_grid: int = N_GRID) -> Population:
-    """The generating population: Madau-Dickinson, standard propagation."""
-    return build_population(
+def mock_population_model(n_grid: int = N_GRID) -> SourceFn:
+    """The generating source model: Madau-Dickinson, standard propagation."""
+    return build_source_model(
         "bns_md_cosmological",
         settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": n_grid},
     )
 
 
-def mock_target_model(n_grid: int = N_GRID) -> Population:
-    """The target population the mock catalog is reweighted to."""
-    return build_population(
+def mock_target_model(n_grid: int = N_GRID) -> SourceFn:
+    """The target source model the mock catalog is reweighted to."""
+    return build_source_model(
         "bns_md_modified_propagation",
         settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": n_grid},
     )
 
 
+def mock_merger_rate_fn(n_grid: int = N_GRID) -> MergerRateFn:
+    """The Madau-Dickinson merger rate both mock source models pair with."""
+    return build_merger_rate_fn(
+        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": n_grid}
+    )
+
+
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
     """Draw the mock population as plain ``(N,)`` float64 arrays."""
-    samples = mock_population_model().source.sample(
+    samples = sample_sources(
+        mock_population_model(),
         jax.random.PRNGKey(MOCK_POPULATION_SEED),
         POPULATION_PARAMS,
         num_samples=num_sources,
@@ -226,26 +239,41 @@ def synthetic_source_parameters(n_samples: int = 16) -> dict[str, jax.Array]:
         "lambda_1": 400.0 * constant,
         "lambda_2": 300.0 * constant,
     }
-    return derived_columns(
-        mock_population_model().source, POPULATION_PARAMS, stochastic
-    )
+    return derived_columns(mock_population_model(), POPULATION_PARAMS, stochastic)
 
 
-def build_synthetic_estimator(
+def log_weight_kwargs(importance: Mapping[str, Any]) -> dict[str, Any]:
+    """The subset of ``importance_spectral_density`` keywords the weights take.
+
+    ``evaluate_log_weights`` needs no power, rate, or inclination convention;
+    this drops exactly those from a full spectrum keyword set.
+    """
+    spectrum_only = {"polarization_power", "merger_rate_fn", "average_mode"}
+    return {
+        name: value for name, value in importance.items() if name not in spectrum_only
+    }
+
+
+def build_synthetic_importance(
     n_samples: int = 16,
     *,
     polarization_power: jax.Array | None = None,
-    model: Population | None = None,
-) -> tuple[SpectralDensityImportanceEstimator, dict[str, jax.Array]]:
-    """Build an estimator whose proposal *is* its target at the fiducials.
+    source_model: SourceFn | None = None,
+) -> tuple[dict[str, Any], dict[str, jax.Array]]:
+    """Build importance kwargs whose proposal *is* their target at the fiducials.
+
+    Returns ``(kwargs, samples)``. ``kwargs`` is the full keyword set of
+    :func:`~astrogwb.importance.spectral.importance_spectral_density`, so a
+    test binds it with ``partial(importance_spectral_density, **kwargs)`` or
+    overrides one entry with ``{**kwargs, ...}``.
 
     Shared by ``test_importance.py`` and ``test_amplitude_scalings.py``, which
     both need every log-weight to be exactly zero at ``FIDUCIALS``, so that any
     departure is attributable to the parameter under test rather than to the
-    catalog. :meth:`SpectralDensityImportanceEstimator.from_catalog` is what
-    makes that exact rather than approximate: the cached proposal density and
-    reference distances are the *same expressions*, on the same inputs, that
-    the target side will evaluate.
+    catalog. :func:`~astrogwb.importance.spectral.prepare_importance_arrays` is
+    what makes that exact rather than approximate: the cached proposal density
+    and reference distances are the *same expressions*, on the same inputs,
+    that the target side will evaluate.
 
     ``polarization_power`` defaults to a single unit-power frequency bin --
     callers that only want rates and weights need no waveforms. Its sample axis
@@ -281,9 +309,10 @@ def build_synthetic_estimator(
         _density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
         seed=MOCK_POPULATION_SEED,
     )
-    estimator = SpectralDensityImportanceEstimator.from_catalog(
-        catalog,
-        model=mock_target_model() if model is None else model,
-        average_mode="analytic_inclination",
-    )
-    return estimator, samples
+    kwargs = {
+        **prepare_importance_arrays(catalog)._asdict(),
+        "source_model": mock_target_model() if source_model is None else source_model,
+        "merger_rate_fn": mock_merger_rate_fn(),
+        "average_mode": "analytic_inclination",
+    }
+    return kwargs, samples
