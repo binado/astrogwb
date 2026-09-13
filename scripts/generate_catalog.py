@@ -38,7 +38,6 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import jax
-import numpy as np
 
 from astrogwb.catalog import Catalog
 from astrogwb.paper.config.catalogs import (
@@ -133,18 +132,24 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
         reference_frequency=waveform.reference_frequency,
         frequency_resolution=waveform.frequency_resolution,
     )
-    segment_duration = 2.0 ** np.ceil(np.log2(1.0 / waveform.frequency_resolution))
     logger.info(
         "Generating %s waveforms for %d events (f_min=%.1f Hz, f_ref=%.1f Hz, "
-        "f_s=%.1f Hz, segment=%.4g s)",
+        "f_s=%.1f Hz, segment=%.4g s, n=%d)",
         waveform.approximant,
         definition.num_samples,
         waveform.minimum_frequency,
         waveform.reference_frequency,
         waveform.sampling_frequency,
-        segment_duration,
+        generator.segment_duration,
+        generator.n_samples,
     )
     logger.info("Truncated frequency axis to f <= %.1f Hz", waveform.maximum_frequency)
+
+    # Values are checked once, here, on the concrete catalog: generation is
+    # trace-safe and therefore trusts its inputs, so a population carrying a
+    # degree of freedom this approximant cannot represent would otherwise be
+    # silently dropped rather than reported.
+    generator.check_sources(samples)
 
     catalog = Catalog.from_generator(
         samples,

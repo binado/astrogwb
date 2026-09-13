@@ -31,6 +31,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Self
 
+import jax
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
@@ -166,13 +167,22 @@ class Catalog:
         The population record is supplied rather than inferred: the caller ran
         the model to draw ``source_parameters``, so it is the only place that
         knows which models and settings produced them. Frequencies come from
-        the same generator call as the power: that is the axis the backend
-        actually produced, not a reconstruction from metadata.
+        the generator rather than from metadata: that is the axis the backend
+        actually produces.
+
+        Generation runs under :func:`jax.jit`. Generators are deliberately
+        jit-free so they compose inside NumPyro models, which inference jits
+        anyway -- but this constructor is the opposite case. It is the eager,
+        whole-catalog entry point (it materializes NumPy immediately, so it
+        can never run under a trace), and at production sizes an unfused graph
+        would hold every waveform intermediate at once. The jit belongs here,
+        at the call site, rather than hidden inside the generator.
         """
         parameters = {
             name: np.asarray(values) for name, values in source_parameters.items()
         }
-        frequencies, power = generator(source_parameters)
+        frequencies = generator.frequencies
+        power = jax.jit(generator.generate_batch)(source_parameters)
         return cls(
             source_parameters=parameters,
             polarization_power=np.asarray(power),
