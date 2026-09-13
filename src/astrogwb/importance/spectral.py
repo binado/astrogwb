@@ -76,90 +76,6 @@ __all__ = [
 _LUMINOSITY_DISTANCE = "luminosity_distance"
 
 
-class _ImportanceArrays(NamedTuple):
-    """The fixed inputs prepared from one catalog.
-
-    Private: :func:`build_importance_spectrum` is what splats this into the
-    two per-step callables. Nothing outside this module accepts the container.
-    """
-
-    source_parameters: dict[str, jax.Array]
-    """Stored source columns, each of shape ``(N,)``."""
-
-    polarization_power: jax.Array
-    """Stored power, shape ``(F, N)``, restricted to the frequency mask."""
-
-    proposal_log_prob: jax.Array
-    """The catalog's own density at its fiducials, shape ``(N,)``."""
-
-    log_reference_distance: jax.Array
-    """Log of the stored ``luminosity_distance`` column, shape ``(N,)``."""
-
-    density_sites: tuple[str, ...]
-    """The factor set ``proposal_log_prob`` was evaluated with."""
-
-
-def _prepare_importance_arrays(
-    catalog: Catalog,
-    *,
-    frequency_mask: ArrayLike | None = None,
-) -> _ImportanceArrays:
-    """Prepare every fixed input, evaluating the proposal density once.
-
-    Call outside JAX transformations. The proposal density is the catalog's
-    *own* recorded source model, evaluated at the parameters it was drawn at
-    with the density factors it records, so nothing has to be restated in a
-    run config. No merger rate enters: a proposal is a density, not an
-    observation.
-
-    ``frequency_mask`` selects the analysis band. It reaches the power and
-    nothing else: masking source samples would silently truncate the
-    population and change every posterior without erroring.
-    """
-    source_parameters = {
-        name: jnp.asarray(value) for name, value in catalog.source_parameters.items()
-    }
-    density_sites = tuple(catalog.density_sites)
-    proposal_log_prob, _ = evaluate_sources(
-        catalog.get_source_model(),
-        catalog.fiducials,
-        source_parameters,
-        density_sites=density_sites,
-    )
-
-    if _LUMINOSITY_DISTANCE not in source_parameters:
-        raise ValueError(
-            f"catalog must store a {_LUMINOSITY_DISTANCE!r} column: it is the "
-            "effective distance the stored polarization power was generated at"
-        )
-    reference_distance = source_parameters[_LUMINOSITY_DISTANCE]
-    finite_and_positive = jnp.isfinite(reference_distance) & (reference_distance > 0.0)
-    if not bool(jnp.all(finite_and_positive)):
-        raise ValueError(
-            f"catalog {_LUMINOSITY_DISTANCE!r} column must be positive and "
-            "finite: it is the effective distance the stored polarization "
-            "power was generated at"
-        )
-
-    power = jnp.asarray(catalog.polarization_power)
-    if frequency_mask is not None:
-        power = power[jnp.asarray(frequency_mask), :]
-    num_samples = reference_distance.shape[0]
-    if power.shape[1] != num_samples:
-        raise ValueError(
-            f"polarization_power has {power.shape[1]} samples but the catalog "
-            f"holds {num_samples} sources"
-        )
-
-    return _ImportanceArrays(
-        source_parameters=source_parameters,
-        polarization_power=power,
-        proposal_log_prob=proposal_log_prob,
-        log_reference_distance=jnp.log(reference_distance),
-        density_sites=density_sites,
-    )
-
-
 def evaluate_log_weights(
     params: Mapping[str, ArrayLike],
     *,
@@ -259,6 +175,12 @@ def build_importance_spectrum(
 ) -> ImportanceSpectrum:
     """Prepare one catalog and bind it to a target, as both callables at once.
 
+    Call outside JAX transformations. The proposal density is the catalog's
+    *own* recorded source model, evaluated at the parameters it was drawn at
+    with the density factors it records, so nothing has to be restated in a
+    run config. No merger rate enters the preparation: a proposal is a
+    density, not an observation.
+
     ``source_model`` and ``merger_rate_fn`` are the target's already-built
     callables -- normally :func:`~astrogwb.populations.build_source_model` and
     :func:`~astrogwb.populations.build_merger_rate_fn`, built once per run and
@@ -266,7 +188,7 @@ def build_importance_spectrum(
     equal-but-not-identical rebuild forces a jit recompile. ``catalog`` must
     already be restricted to the analysis redshift window.
 
-    One prepare call feeds both returned callables from a single keyword
+    One preparation pass feeds both returned callables from a single keyword
     mapping, so the weights and the spectrum provably use the density factors
     the proposal was evaluated with -- a target evaluated with a different
     factor set would otherwise produce weights that are finite and wrong, with
@@ -275,19 +197,53 @@ def build_importance_spectrum(
     ``frequency_mask`` reaches the power and nothing else: masking source
     samples would silently truncate the population.
     """
-    arrays = _prepare_importance_arrays(catalog, frequency_mask=frequency_mask)
+    source_parameters = {
+        name: jnp.asarray(value) for name, value in catalog.source_parameters.items()
+    }
+    density_sites = tuple(catalog.density_sites)
+    proposal_log_prob, _ = evaluate_sources(
+        catalog.get_source_model(),
+        catalog.fiducials,
+        source_parameters,
+        density_sites=density_sites,
+    )
+
+    if _LUMINOSITY_DISTANCE not in source_parameters:
+        raise ValueError(
+            f"catalog must store a {_LUMINOSITY_DISTANCE!r} column: it is the "
+            "effective distance the stored polarization power was generated at"
+        )
+    reference_distance = source_parameters[_LUMINOSITY_DISTANCE]
+    finite_and_positive = jnp.isfinite(reference_distance) & (reference_distance > 0.0)
+    if not bool(jnp.all(finite_and_positive)):
+        raise ValueError(
+            f"catalog {_LUMINOSITY_DISTANCE!r} column must be positive and "
+            "finite: it is the effective distance the stored polarization "
+            "power was generated at"
+        )
+
+    power = jnp.asarray(catalog.polarization_power)
+    if frequency_mask is not None:
+        power = power[jnp.asarray(frequency_mask), :]
+    num_samples = reference_distance.shape[0]
+    if power.shape[1] != num_samples:
+        raise ValueError(
+            f"polarization_power has {power.shape[1]} samples but the catalog "
+            f"holds {num_samples} sources"
+        )
+
     weight_kwargs = {
         "source_model": source_model,
-        "source_parameters": arrays.source_parameters,
-        "proposal_log_prob": arrays.proposal_log_prob,
-        "log_reference_distance": arrays.log_reference_distance,
-        "density_sites": arrays.density_sites,
+        "source_parameters": source_parameters,
+        "proposal_log_prob": proposal_log_prob,
+        "log_reference_distance": jnp.log(reference_distance),
+        "density_sites": density_sites,
     }
     return ImportanceSpectrum(
         spectral_density=partial(
             importance_spectral_density,
             merger_rate_fn=merger_rate_fn,
-            polarization_power=arrays.polarization_power,
+            polarization_power=power,
             average_mode=average_mode,
             **weight_kwargs,
         ),

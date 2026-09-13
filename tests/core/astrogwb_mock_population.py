@@ -28,7 +28,7 @@ from jax.typing import ArrayLike
 
 from astrogwb.catalog import Catalog
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.importance.spectral import _prepare_importance_arrays
+from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import (
     MergerRateFn,
     SourceFn,
@@ -308,10 +308,13 @@ def build_synthetic_importance(
         _density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
         seed=MOCK_POPULATION_SEED,
     )
-    kwargs = {
-        **_prepare_importance_arrays(catalog)._asdict(),
-        "source_model": mock_target_model() if source_model is None else source_model,
-        "merger_rate_fn": mock_merger_rate_fn(),
-        "average_mode": "analytic_inclination",
-    }
-    return kwargs, samples
+    spectrum = build_importance_spectrum(
+        catalog,
+        source_model=mock_target_model() if source_model is None else source_model,
+        merger_rate_fn=mock_merger_rate_fn(),
+        average_mode="analytic_inclination",
+    )
+    return (
+        dict(spectrum.spectral_density.keywords),  # ty: ignore[unresolved-attribute]
+        samples,
+    )
