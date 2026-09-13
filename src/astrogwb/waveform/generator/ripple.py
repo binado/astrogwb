@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import Protocol
 
 import jax
 import jax.numpy as jnp
@@ -19,6 +19,25 @@ from astrogwb.waveform.polarization_power import polarization_power
 __all__ = ["RippleGenerator"]
 
 logger = logging.getLogger(__name__)
+
+
+class _Polarizations(Protocol):
+    """Structural view of the polarizations ``RippleBackend`` returns.
+
+    gwmock's concrete type, ``FrequencyDomainPolarizations``, is not exported
+    from its public surface, and this helper reads only these three fields --
+    so the contract is typed structurally rather than through a private
+    import.
+    """
+
+    @property
+    def frequencies(self) -> jax.Array: ...
+
+    @property
+    def plus(self) -> jax.Array: ...
+
+    @property
+    def cross(self) -> jax.Array: ...
 
 
 class RippleGenerator(PolarizationPowerGenerator):
@@ -100,7 +119,7 @@ class RippleGenerator(PolarizationPowerGenerator):
             )
         return self._frequencies_cache
 
-    def _power_from_polarizations(self, polarizations: Any) -> jax.Array:
+    def _power_from_polarizations(self, polarizations: _Polarizations) -> jax.Array:
         chunk_frequencies = jnp.asarray(polarizations.frequencies)
         plus = jnp.asarray(polarizations.plus)
         cross = jnp.asarray(polarizations.cross)
