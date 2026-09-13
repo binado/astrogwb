@@ -14,6 +14,7 @@ from astrogwb_mock_population import (
 )
 from numpyro import handlers
 from numpyro.infer import Predictive
+from numpyro.infer.util import log_density
 
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO, ISCO_ALPHA
 from astrogwb.sampling import gwb_forward_model
@@ -118,6 +119,14 @@ def _plated_source_site_names(trace) -> list[str]:
         name
         for name, site in trace.items()
         if site["type"] in ("sample", "deterministic") and site["cond_indep_stack"]
+    ]
+
+
+def _plated_sample_site_names(trace) -> list[str]:
+    return [
+        name
+        for name, site in trace.items()
+        if site["type"] == "sample" and site["cond_indep_stack"]
     ]
 
 
@@ -255,6 +264,89 @@ def test_missing_physical_rate_is_rejected() -> None:
     }
     with pytest.raises(ValueError, match="local_merger_rate"):
         _seeded_trace(gwb_forward_model, params, **_model_kwargs())
+
+
+@pytest.mark.parametrize("n_active", [1, 3, 7])
+def test_masked_sum_matches_the_truncated_sum_exactly(n_active: int) -> None:
+    generator = _generator()
+    kwargs = _model_kwargs(generator=generator)
+    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **{**kwargs, "n_active": n_active})
+    sources = {name: trace[name]["value"][:n_active] for name in _plated_source_site_names(trace)}
+    expected = jnp.asarray(generator.generate_batch(sources)).sum(axis=1) / years_to_seconds(
+        kwargs["observation_time"]
+    )
+    np.testing.assert_allclose(
+        np.asarray(trace["spectral_density"]["value"]),
+        np.asarray(expected),
+        rtol=1e-12,
+    )
+    np.testing.assert_array_equal(trace["n_events"]["value"], n_active)
+
+
+def test_n_active_none_preserves_default_behavior() -> None:
+    kwargs = _model_kwargs()
+    baseline = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    explicit_none = _seeded_trace(
+        gwb_forward_model, POPULATION_PARAMS, **{**kwargs, "n_active": None}
+    )
+    np.testing.assert_allclose(
+        np.asarray(explicit_none["spectral_density"]["value"]),
+        np.asarray(baseline["spectral_density"]["value"]),
+        rtol=1e-12,
+    )
+    np.testing.assert_array_equal(explicit_none["n_events"]["value"], N_EVENTS)
+
+
+@pytest.mark.parametrize("n_active", [1, 2, 5])
+def test_padded_and_unpadded_log_density_match(n_active: int) -> None:
+    padded_kwargs = _model_kwargs(num_events=N_EVENTS, n_active=n_active)
+    padded_trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **padded_kwargs)
+    sample_names = _plated_sample_site_names(padded_trace)
+    padded_values = {name: padded_trace[name]["value"] for name in sample_names}
+    padded_log_density, _ = log_density(
+        gwb_forward_model,
+        (POPULATION_PARAMS,),
+        padded_kwargs,
+        padded_values,
+    )
+
+    unpadded_kwargs = _model_kwargs(num_events=n_active)
+    unpadded_values = {name: padded_trace[name]["value"][:n_active] for name in sample_names}
+    unpadded_log_density, _ = log_density(
+        gwb_forward_model,
+        (POPULATION_PARAMS,),
+        unpadded_kwargs,
+        unpadded_values,
+    )
+
+    np.testing.assert_allclose(
+        np.asarray(padded_log_density),
+        np.asarray(unpadded_log_density),
+        rtol=1e-10,
+    )
+
+
+def test_jitted_model_compiles_once_for_many_active_counts() -> None:
+    calls: list[None] = []
+    source_model = mock_population_model()
+
+    def counting_source_model(params):
+        calls.append(None)
+        return source_model(params)
+
+    kwargs = _model_kwargs(source_model=counting_source_model, num_events=N_EVENTS)
+
+    def spectrum(n_active: jax.Array) -> jax.Array:
+        trace = handlers.trace(handlers.seed(gwb_forward_model, 0)).get_trace(
+            POPULATION_PARAMS, **{**kwargs, "n_active": n_active}
+        )
+        return trace["spectral_density"]["value"]
+
+    compiled = jax.jit(spectrum)
+    for n_active in (1, 2, 4, 7):
+        result = compiled(jnp.asarray(n_active))
+        assert result.shape == (_generator().frequencies.shape[0],)
+    assert len(calls) == 1
 
 
 @pytest.mark.integration

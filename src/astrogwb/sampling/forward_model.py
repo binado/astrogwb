@@ -1,77 +1,4 @@
-r"""Exact Poisson-catalog forward model of the gravitational-wave spectrum.
-
-The catalog contraction :func:`~astrogwb.gwb.spectral.spectral_density`
-replaces a finite observation with its large-N mean,
-:math:`S_h(f) = \mathcal{R}\,\langle P(f)\rangle` -- equivalently, this
-module's exact sum with every importance weight pinned to one and the
-empirical rate :math:`N/T` in place of :math:`\mathcal{R}`. This module draws
-a catalog of a known size instead:
-
-1. Evaluate the observer-frame merger rate :math:`\mathcal{R}` from
-   ``merger_rate_fn``.
-2. Observe :math:`N` as ``Poisson(\mathcal{R}\, T)`` at the plate size
-   ``num_events``.
-3. Draw ``num_events`` sources from ``source_model`` under a NumPyro plate
-   (a Python integer, so the model is a valid JAX pytree and ``jax.jit``
-   target). The source model returns that source dict, which is passed
-   to the waveform generator.
-4. Generate polarization power over contiguous batches of ``batch_size``
-   with :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate_batch`,
-   reducing each chunk to ``(F,)`` before the next so the ``(F, N)`` array
-   is never materialized, and form
-
-   .. math::
-
-       S_h(f) = \frac{1}{T}\sum_{i=1}^{N} P_i(f).
-
-``num_events`` is the observed count, not the rate. The Poisson mean is
-still :math:`\mathcal{R}\, T`; observing it at ``N`` puts :math:`p(N\mid
-\mathcal{R}\, T)` in the joint without sampling a data-dependent plate size.
-A traced Poisson draw cannot size a plate under :func:`jax.jit`. Each
-distinct ``num_events`` is a different JIT specialization.
-
-There is no ``spectral_density_obs`` site: the model is a simulator for a
-catalog of size ``N``, consumed with :class:`~numpyro.infer.Predictive` or
-``jax.jit``. To draw a random :math:`N` first, sample it in Python and pass
-it as ``num_events``.
-
-The plated source draw already returns ``(N,)`` arrays, passed as a dict
-to :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate_batch`.
-Mapping per-source :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate`
-would stack ``(N, F)`` -- the OOM the batching exists to avoid -- not because
-of a vmap-inside-plate problem. Full batches of ``batch_size`` are reduced
-in a Python loop (static under JIT); a static remainder
-(``num_events % batch_size``) is a separate generate.
-
-:class:`~astrogwb.waveform.AnalyticInspiralGenerator` is JAX-native and a
-valid ``jax.jit`` / ``Predictive(num_samples>1)`` target. Ripple's
-``generate_fd_polarizations_batch`` is a ``vmap``, but
-``RippleBackend._resolve_batch`` still does host ``bool`` / ``numpy``
-conversions, so a traced Ripple call fails there. Draw Ripple catalogs
-eagerly. Warm Ripple (one generate) before reading
-``generator.frequencies`` on an empty catalog::
-
-    from functools import partial
-
-    from numpyro.infer import Predictive
-
-    from astrogwb.sampling import gwb_forward_model
-
-    simulate = Predictive(
-        partial(
-            gwb_forward_model,
-            source_model=source_model,
-            merger_rate_fn=merger_rate_fn,
-            generator=generator,
-            observation_time=1.0,
-            batch_size=1024,
-            num_events=10_000,
-        ),
-        num_samples=1,
-        return_sites=("spectral_density", "n_events", "total_merger_rate"),
-    )
-    draws = simulate(jax.random.key(0), params)
-"""
+r"""Exact Poisson-catalog forward model of the gravitational-wave spectrum."""
 
 from __future__ import annotations
 
@@ -79,6 +6,7 @@ from collections.abc import Mapping
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
@@ -89,21 +17,25 @@ from astrogwb.populations import MergerRateFn, SourceFn
 from astrogwb.utils import array_dict_shape, years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
 
-#: The source output naming the effective distance governing waveform
-#: amplitude. Required in every source model's returned mapping; see
-#: :mod:`astrogwb.importance.spectral`, which checks the same key.
 _LUMINOSITY_DISTANCE = "luminosity_distance"
-
-#: The population-level rate site name, published outside the ``events``
-#: plate the source draw runs inside.
 _TOTAL_MERGER_RATE_SITE = "total_merger_rate"
+
+
+def _require_luminosity_distance(sources: Mapping[str, jax.Array]) -> None:
+    if _LUMINOSITY_DISTANCE not in sources:
+        raise KeyError(
+            f"source model must return {_LUMINOSITY_DISTANCE!r}: it is the "
+            "distance governing waveform amplitude"
+        )
 
 
 def _batch_power_sum(
     generator: PolarizationPowerGenerator,
     batch_sources: Mapping[str, jax.Array],
+    *,
+    active: jax.Array | None = None,
 ) -> jax.Array:
-    """Call ``generate_batch`` on one chunk and return the ``(F,)`` sum."""
+    """Call ``generate_batch`` on one chunk and return the masked ``(F,)`` sum."""
     power = jnp.asarray(generator.generate_batch(batch_sources))
     n_chunk = next(iter(batch_sources.values())).shape[0]
     if power.ndim != 2 or power.shape[-1] != n_chunk:
@@ -111,7 +43,9 @@ def _batch_power_sum(
             "waveform generator must return frequency-first power of "
             f"shape (F, n_chunk); got {power.shape} for {n_chunk} sources"
         )
-    return power.sum(axis=1)
+    if active is None:
+        return power.sum(axis=1)
+    return jnp.where(jnp.asarray(active)[jnp.newaxis, :], power, 0.0).sum(axis=1)
 
 
 def _sum_polarization_power(
@@ -119,28 +53,71 @@ def _sum_polarization_power(
     sources: Mapping[str, jax.Array],
     *,
     batch_size: int,
+    active: jax.Array | None = None,
 ) -> jax.Array:
-    """Sum frequency-first polarization power over sources, chunk by chunk.
-
-    Full batches of ``batch_size`` are reduced together; a static remainder
-    is a separate ``generate_batch``. Peak waveform memory is
-    ``(F, batch_size)`` rather than ``(F, N)``.
-    """
+    """Sum polarization power over sources in static chunks."""
     n_events = array_dict_shape(sources)[0]
     n_full, remainder = divmod(n_events, batch_size)
 
-    def slice_sum(start: int, size: int) -> jax.Array:
-        batch = {name: values[start : start + size] for name, values in sources.items()}
-        return _batch_power_sum(generator, batch)
+    if n_events == 0:
+        return jnp.zeros(np.shape(generator.frequencies)[0], dtype=jnp.float64)
 
-    if n_full:
-        total = slice_sum(0, batch_size)
-        for index in range(1, n_full):
-            total = total + slice_sum(index * batch_size, batch_size)
-        if not remainder:
-            return total
-        return total + slice_sum(n_full * batch_size, remainder)
-    return slice_sum(0, remainder)
+    first_chunk = min(batch_size, n_events)
+    first_sources = {
+        name: values[:first_chunk] for name, values in sources.items()
+    }
+    first_active = None if active is None else jnp.asarray(active)[:first_chunk]
+    total = _batch_power_sum(generator, first_sources, active=first_active)
+
+    if n_full > 1:
+        chunks = {
+            name: values[first_chunk : n_full * batch_size].reshape(
+                n_full - 1, batch_size
+            )
+            for name, values in sources.items()
+        }
+        active_chunks = None
+        if active is not None:
+            active_chunks = jnp.asarray(active)[first_chunk : n_full * batch_size].reshape(
+                n_full - 1, batch_size
+            )
+
+        def accumulate(carry: jax.Array, chunk: Mapping[str, jax.Array]) -> tuple[jax.Array, None]:
+            return carry + _batch_power_sum(generator, chunk), None
+
+        def accumulate_masked(
+            carry: jax.Array, chunk: tuple[Mapping[str, jax.Array], jax.Array]
+        ) -> tuple[jax.Array, None]:
+            chunk_sources, chunk_active = chunk
+            return carry + _batch_power_sum(
+                generator, chunk_sources, active=chunk_active
+            ), None
+
+        if active_chunks is None:
+            total, _ = jax.lax.scan(accumulate, total, chunks)
+        else:
+            total, _ = jax.lax.scan(accumulate_masked, total, (chunks, active_chunks))
+
+    if remainder:
+        start = n_full * batch_size
+        tail = {name: values[start:] for name, values in sources.items()}
+        tail_active = None if active is None else jnp.asarray(active)[start:]
+        total = total + _batch_power_sum(generator, tail, active=tail_active)
+    return total
+
+
+def validate_source_model(
+    params: Mapping[str, ArrayLike],
+    *,
+    source_model: SourceFn,
+    generator: PolarizationPowerGenerator,
+    rng_key: jax.Array | int,
+) -> None:
+    """Eagerly draw one source and validate that generation is possible."""
+    with numpyro.handlers.seed(rng_seed=rng_key), numpyro.plate("events", 1):
+        sources = dict(source_model(params))
+    _require_luminosity_distance(sources)
+    generator.generate_batch(sources)
 
 
 def gwb_forward_model(
@@ -153,62 +130,40 @@ def gwb_forward_model(
     batch_size: int,
     num_events: int,
     average_mode: AverageMode = "catalog_inclination",
+    n_active: ArrayLike | None = None,
 ) -> None:
-    r"""Draw a catalog of size ``num_events`` and reduce it to a strain spectrum.
-
-    ``params`` is the hyperparameter dict ``source_model`` and
-    ``merger_rate_fn`` already accept -- this model does not sample them.
-    Normally the callables :func:`~astrogwb.populations.build_source_model`
-    and :func:`~astrogwb.populations.build_merger_rate_fn` return, built once
-    per run and reused, since both hash by identity and a fresh, equal
-    rebuild forces a jit recompile. ``observation_time`` is in years, the
-    same unit as :func:`~astrogwb.utils.years_to_seconds` and the analysis
-    grid; the Poisson rate converts it against ``merger_rate_fn``'s
-    mergers-per-second :math:`\mathcal{R}`.
-
-    ``num_events`` and ``batch_size`` are Python integers, static under JIT.
-    ``num_events`` is the plate dimension and the observed
-    Poisson count (the event count, not the merger rate). A traced sample
-    cannot size the plate.
-
-    Registered sites:
-
-    - ``n_events``, an observed ``sample`` from
-      ``Poisson(total_merger_rate * observation_time_seconds)``;
-    - ``total_merger_rate`` and ``spectral_density`` as deterministics.
-
-    Source sites from ``source_model`` are sampled under the ``events`` plate
-    of length ``num_events``, published *after* ``total_merger_rate`` so the
-    rate is always available even when ``num_events`` is zero. There is no
-    ``spectral_density_obs`` site.
-
-    ``average_mode`` is the same inclination convention as
-    :func:`~astrogwb.gwb.spectral.spectral_density`. Face-on populations
-    (inclination pinned at 0) pair with ``"analytic_inclination"``; a
-    population that already samples inclination uses ``"catalog_inclination"``.
-
-    Raises ``KeyError`` if ``source_model`` does not return
-    ``luminosity_distance``: it is the distance governing waveform amplitude,
-    and every registered source model must declare it.
-    """
+    r"""Draw a padded catalog and reduce it to a strain spectrum."""
     observation_time_sec = years_to_seconds(observation_time)
 
     total_merger_rate = jnp.reshape(jnp.asarray(merger_rate_fn(params)), ())
     numpyro.deterministic(_TOTAL_MERGER_RATE_SITE, total_merger_rate)
+
+    active = None
+    observed_n: int | jax.Array = num_events
+    if n_active is not None:
+        observed_n = jnp.reshape(jnp.asarray(n_active), ())
+        active = jnp.arange(num_events) < observed_n
+
     with numpyro.plate("events", num_events):
-        sources = dict(source_model(params))
-    if _LUMINOSITY_DISTANCE not in sources:
-        raise KeyError(
-            f"source model must return {_LUMINOSITY_DISTANCE!r}: it is the "
-            "distance governing waveform amplitude"
-        )
+        if active is None:
+            sources = dict(source_model(params))
+        else:
+            with numpyro.handlers.mask(mask=active):
+                sources = dict(source_model(params))
+
+    _require_luminosity_distance(sources)
     numpyro.sample(
         "n_events",
         dist.Poisson(total_merger_rate * observation_time_sec),
-        obs=num_events,
+        obs=observed_n,
     )
 
-    power_sum = _sum_polarization_power(generator, sources, batch_size=batch_size)
+    power_sum = _sum_polarization_power(
+        generator,
+        sources,
+        batch_size=batch_size,
+        active=active,
+    )
 
     factor = (
         INCLINATION_AVERAGE_TO_FACE_ON_RATIO
@@ -218,4 +173,4 @@ def gwb_forward_model(
     numpyro.deterministic("spectral_density", factor * power_sum / observation_time_sec)
 
 
-__all__ = ["gwb_forward_model"]
+__all__ = ["gwb_forward_model", "validate_source_model"]
