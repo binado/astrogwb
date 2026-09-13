@@ -669,8 +669,10 @@ def _reconstruction_statistics() -> dict[str, jax.Array]:
 def _reconstruction_draws(statistics: dict[str, jax.Array]) -> dict[str, jax.Array]:
     return reconstruct_amplitude(
         jax.random.key(0),
+        statistics["amplitude_mle"],
+        statistics["template_optimal_snr"],
+        statistics["template_merger_rate"],
         amplitude_parameter="local_merger_rate",
-        **statistics,
         **_RECONSTRUCTION_KWARGS,
     )
 
