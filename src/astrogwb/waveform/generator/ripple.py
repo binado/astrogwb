@@ -214,7 +214,7 @@ class RippleGenerator(PolarizationPowerGenerator):
                     f"generate expects a single source; {name!r} carries "
                     f"{scalar.size} values"
                 )
-            parameters[name] = float(scalar.reshape(()))
+            parameters[name] = scalar.item()
         polarizations = self._backend.generate_fd_polarizations(
             self.approximant,
             sampling_frequency=self.sampling_frequency,
