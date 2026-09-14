@@ -18,10 +18,21 @@ window is the identity. Applying it would be arithmetic with no effect;
 ``tests/core/test_waveform_generator.py`` pins that against gwmock rather than
 leaving it as a claim here.
 
-*The full grid still reaches Ripple.* Several models -- ``IMRPhenomXAS_NRTidalv3``
-and ``IMRPhenomXPHM`` among them -- do not evaluate pointwise in the frequency
-argument, so handing Ripple only the in-band bins changes the in-band values.
-The caller slices the result, never the input.
+*The full grid above DC still reaches Ripple.* Several models --
+``IMRPhenomXAS_NRTidalv3`` and ``IMRPhenomXPHM`` among them -- do not evaluate
+pointwise in the frequency argument, so handing Ripple only the in-band bins
+changes the in-band values. NRTidalv3 shows why: it reads the top of the grid
+as ``f_final = f[-1] + df`` and the spacing as ``df = f[1] - f[0]``, and
+``f_final`` sets a linear-in-frequency phase slope. Truncate the grid and the
+in-band phase winds away from the untruncated answer at fixed amplitude. The
+caller slices the result, never the input.
+
+The DC bin is the one exception, and it is dropped at the input rather than
+sliced from the output: Ripple evaluates ``f = 0`` to NaN, and while
+``nan_to_num`` keeps that out of the forward sum, no output-side treatment
+rescues reverse mode (see :func:`build_kernel`). Dropping it is safe precisely
+because the quantities above are read off the *top* of the grid and off the
+spacing, both of which one fewer leading bin leaves untouched.
 
 ``ripplegw`` is imported inside function bodies, never at module scope:
 importing it enables JAX x64 globally, and ``import astrogwb`` must not carry
@@ -303,8 +314,18 @@ def build_kernel(
     Callers that evaluate eagerly at catalog scale supply their own jit, where
     it is visible -- see ``scripts/generate_catalog.py``.
 
-    ``nan_to_num`` keeps a NaN from one event -- Ripple returns them above a
-    model's cutoff -- out of the summed spectrum.
+    ``nan_to_num`` guards the summed spectrum against a NaN from one event.
+    It is not what makes the gradient finite, and it never was: a NaN reaching
+    it has a NaN derivative, and masking or slicing the result only zeros that
+    bin's cotangent, which leaves ``0 * NaN``. Because source parameters
+    broadcast across frequency, their VJP sums every bin and the NaN returns.
+    The one NaN astrogwb actually provoked was the DC bin, and
+    :class:`~astrogwb.waveform.RippleGenerator` now keeps it out of the input
+    grid; this stays as a guard, not as a cure.
+
+    Above a model's cutoff Ripple returns exact zeros, not NaNs -- checked for
+    ``IMRPhenomD``, ``TaylorF2``, ``IMRPhenomXAS_NRTidalv3`` and
+    ``IMRPhenomXPHM`` across the production band.
     """
     # Imported here, not at module scope -- see the module docstring.
     import ripplegw
