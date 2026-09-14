@@ -184,7 +184,7 @@ azp.style.use("arviz-variat")
 # ## Pipeline configuration
 
 # %%
-# --- Catalog input ----------------------------------------------------------
+# --- Catalog input ---------------------------------------------------------
 
 if IN_COLAB:
     INJECTION_CATALOG_PATH = Path(

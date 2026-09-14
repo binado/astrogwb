@@ -73,9 +73,10 @@ DEFAULT_MERGER_RATE_MODEL = "madau_dickinson"
 
 #: Construction kwargs routed to *both* the source model and the rate
 #: function: the redshift window and grid. A catalog persists one flat kwargs
-#: mapping (see ``Catalog._model_kwargs``), so a name given only one of the two
-#: registered callables is split by this fixed key set rather than by a
-#: second persisted field. This is why ``Catalog.restrict_redshift`` can rewrite
+#: mapping (see ``PopulationRecord.model_kwargs``), so a name given only one of
+#: the two registered callables is split by this fixed key set rather than by
+#: a second persisted field. This is why
+#: ``PolarizationPowerCatalog.restrict_redshift`` can rewrite
 #: ``z_min``/``z_max`` in the one flat mapping and have both reconstructed
 #: callables see the narrowed window.
 SHARED_MODEL_KWARGS: tuple[str, ...] = ("z_min", "z_max", "n_grid")

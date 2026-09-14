@@ -61,7 +61,7 @@ the declaration that produced it:
 ```python
 import jax
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_source_model
 from astrogwb.utils.sampling import sample_sources
@@ -83,7 +83,7 @@ source_parameters = sample_sources(
     source_model, jax.random.PRNGKey(42), params, num_samples=1024
 )
 
-catalog = Catalog.from_generator(
+catalog = PolarizationPowerCatalog.from_generator(
     source_parameters,
     generator=AnalyticInspiralGenerator(
         alpha=ISCO_ALPHA,
@@ -112,7 +112,7 @@ from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import build_merger_rate_fn
 
 spectrum_fn = build_importance_spectrum(
-    Catalog.load("catalog.h5"),
+    PolarizationPowerCatalog.load("catalog.h5"),
     source_model=build_source_model(
         "bns_md_modified_propagation", settings=model_kwargs
     ),

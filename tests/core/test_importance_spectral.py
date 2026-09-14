@@ -27,8 +27,7 @@ from jax.typing import ArrayLike
 from numpyro.distributions import constraints
 from reference_population import reference_merger_rate_distance_and_logprob
 
-from astrogwb.catalog import Catalog
-from astrogwb.catalog.catalog import REDSHIFT_SITE
+from astrogwb.catalog import REDSHIFT_SITE, PolarizationPowerCatalog
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.gwb.spectral import AverageMode, spectral_density
 from astrogwb.importance import spectral
@@ -38,7 +37,12 @@ from astrogwb.importance.spectral import (
     evaluate_log_weights,
     importance_spectral_density,
 )
-from astrogwb.populations import DEFAULT_DENSITY_SITES, SourceFn, build_source_model
+from astrogwb.populations import (
+    DEFAULT_DENSITY_SITES,
+    PopulationRecord,
+    SourceFn,
+    build_source_model,
+)
 from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -108,8 +112,8 @@ def _catalog(
     params: Mapping[str, float] = OFF_POPULATION_PARAMS,
     power: jax.Array = POWER,
     density_sites: tuple[str, ...] = DEFAULT_DENSITY_SITES,
-) -> Catalog:
-    return Catalog(
+) -> PolarizationPowerCatalog:
+    return PolarizationPowerCatalog(
         source_parameters={
             name: np.asarray(values)
             for name, values in _source_parameters(params).items()
@@ -117,19 +121,21 @@ def _catalog(
         polarization_power=np.asarray(power),
         frequencies=10.0 + 2.0 * np.arange(power.shape[0]),
         waveform_metadata=_waveform_metadata(power.shape[0]),
-        _source_model_name="bns_md_cosmological",
-        _rate_model_name="madau_dickinson",
-        _model_kwargs=MODEL_KWARGS,
+        _population=PopulationRecord(
+            source_model_name="bns_md_cosmological",
+            rate_model_name="madau_dickinson",
+            model_kwargs=MODEL_KWARGS,
+            density_sites=density_sites,
+            seed=MOCK_POPULATION_SEED,
+        ),
         _fiducials=params,
-        _density_sites=density_sites,
-        seed=MOCK_POPULATION_SEED,
     )
 
 
 def _importance(
     average_mode: AverageMode = "catalog_inclination",
     *,
-    catalog: Catalog | None = None,
+    catalog: PolarizationPowerCatalog | None = None,
     source_model: SourceFn | None = None,
     frequency_mask: ArrayLike | None = None,
 ) -> dict[str, Any]:
@@ -234,7 +240,7 @@ def test_a_target_without_a_distance_output_is_rejected() -> None:
 # --------------------------------------------------------------------------- #
 def _spectrum(
     *,
-    catalog: Catalog | None = None,
+    catalog: PolarizationPowerCatalog | None = None,
     frequency_mask: ArrayLike | None = None,
     average_mode: AverageMode = "catalog_inclination",
 ):

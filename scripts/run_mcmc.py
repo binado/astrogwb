@@ -71,7 +71,7 @@ from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
-    from astrogwb.catalog import Catalog
+    from astrogwb.catalog import PolarizationPowerCatalog
     from astrogwb.paper.inference import AmplitudeMarginalization
 
 logger = logging.getLogger("run_mcmc")
@@ -139,8 +139,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # --------------------------------------------------------------------------- #
 def run(
     config: RunConfig,
-    injection_catalog: Catalog,
-    proposal_catalog: Catalog,
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
     jax,
     chain_method: str,
 ):
@@ -251,7 +251,7 @@ def save(
     mcmc,
     config: RunConfig,
     *,
-    proposal: Catalog | None = None,
+    proposal: PolarizationPowerCatalog | None = None,
     timestamp: str | None = None,
     force: bool = False,
     marginalization: AmplitudeMarginalization | None = None,

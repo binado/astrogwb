@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from astrogwb_mock_population import POPULATION_PARAMS, mock_merger_rate_fn
 
-from astrogwb.sampling._io import load_spectra
+from astrogwb.catalog import SpectralDensityCatalog
 from astrogwb.utils import years_to_seconds
 
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "simulate_spectra.py"
@@ -153,8 +153,8 @@ def test_small_run_writes_expected_shapes_and_seed_changes_draws(
         )
     )
 
-    first = load_spectra(first_output)
-    second = load_spectra(second_output)
+    first = SpectralDensityCatalog.load(first_output)
+    second = SpectralDensityCatalog.load(second_output)
 
     assert first.spectral_density.shape[0] == draws
     assert second.spectral_density.shape[0] == draws

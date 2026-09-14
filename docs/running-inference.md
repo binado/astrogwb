@@ -117,7 +117,8 @@ The importance-sampling *proposal density* is **not** in the config, and it is
 not derived from the config either. It is the proposal catalog's *own* recorded
 population, evaluated at the parameters it was drawn at (see
 [catalog generation](catalog-generation.md)), narrowed to the run's analysis
-redshift window by `Catalog.restrict_redshift` -- samples and recorded density
+redshift window by `PolarizationPowerCatalog.restrict_redshift` -- samples
+and recorded density
 together. There is nothing left to cross-check against the run's `[fiducials]`,
 which is why the old exact-float-equality gate over five hard-coded parameter
 names is gone.

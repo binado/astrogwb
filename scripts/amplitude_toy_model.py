@@ -35,7 +35,7 @@ from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 from numpyro.infer import MCMC, NUTS
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr_squared
@@ -119,7 +119,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     sampled_params = ("amplitude",)
     priors = {"amplitude": dist.Uniform(args.prior_low, args.prior_high)}
 
-    catalog = Catalog.load(catalog_path)
+    catalog = PolarizationPowerCatalog.load(catalog_path)
     frequencies = jnp.asarray(catalog.frequencies)
     df = catalog.df
     polarization_power = jnp.asarray(catalog.polarization_power)

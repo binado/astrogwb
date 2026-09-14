@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 from repo import REPO_ROOT
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.populations import DEFAULT_DENSITY_SITES
 
 CATALOG_TOML = """
@@ -158,7 +158,7 @@ def test_generation_produces_a_catalog_that_describes_itself(
     # population and compares every derived column against the file.
     path = tmp_path / "toy-catalog.h5"
     catalog.save(path)
-    restored = Catalog.load(path)
+    restored = PolarizationPowerCatalog.load(path)
     np.testing.assert_array_equal(
         restored.polarization_power, catalog.polarization_power
     )
@@ -200,7 +200,12 @@ def test_the_guard_mixture_is_generated_from_its_declared_fraction(
     assert catalog.population_model_kwargs["uniform_mixing_fraction"] == 0.1
     path = tmp_path / "guard.h5"
     catalog.save(path)
-    assert Catalog.load(path).population_model_kwargs["uniform_mixing_fraction"] == 0.1
+    assert (
+        PolarizationPowerCatalog.load(path).population_model_kwargs[
+            "uniform_mixing_fraction"
+        ]
+        == 0.1
+    )
 
 
 @pytest.mark.integration
@@ -223,7 +228,10 @@ def test_the_gaussian_mass_model_is_generated_from_its_declared_name(
     assert catalog.fiducials["mass_sigma"] == 0.09
     path = tmp_path / "gaussian.h5"
     catalog.save(path)
-    assert Catalog.load(path).population_model_name == "bns_md_gaussian_cosmological"
+    assert (
+        PolarizationPowerCatalog.load(path).population_model_name
+        == "bns_md_gaussian_cosmological"
+    )
 
 
 def test_an_unregistered_model_fails_before_any_waveform_is_generated(

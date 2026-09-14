@@ -8,12 +8,11 @@ matching what any later evaluation recomputes from the stored samples.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path
 
 import numpy as np
 
-from astrogwb.catalog import Catalog
-from astrogwb.populations import build_source_model
+from astrogwb.catalog import PolarizationPowerCatalog
+from astrogwb.populations import PopulationRecord, build_source_model
 from astrogwb.utils.sampling import evaluate_sources
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -98,7 +97,7 @@ def make_catalog(
         "source_frame_mass_2",
     ),
     extra_source_parameters: Mapping[str, np.ndarray] | None = None,
-) -> Catalog:
+) -> PolarizationPowerCatalog:
     """Build a valid paper-format catalog over a chosen redshift ladder."""
     if fiducials is None:
         fiducials = population_params
@@ -125,8 +124,7 @@ def make_catalog(
             }
         )
 
-    source_model_name, rate_model_name = model_name, PAPER_RATE_MODEL
-    return Catalog(
+    return PolarizationPowerCatalog(
         source_parameters=parameters,
         polarization_power=polarization_power,
         frequencies=minimum_frequency
@@ -139,17 +137,12 @@ def make_catalog(
             sampling_frequency=sampling_frequency,
             frequency_resolution=df,
         ),
-        _source_model_name=source_model_name,
-        _rate_model_name=rate_model_name,
-        _model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
+        _population=PopulationRecord(
+            source_model_name=model_name,
+            rate_model_name=PAPER_RATE_MODEL,
+            model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
+            density_sites=density_sites,
+            seed=seed,
+        ),
         _fiducials=dict(fiducials or PAPER_POPULATION_PARAMS),
-        _density_sites=density_sites,
-        seed=seed,
     )
-
-
-def save_catalog(
-    path: str | Path, catalog: Catalog, *, compression: str | None = None
-) -> None:
-    """Persist a fixture catalog through the production serializer."""
-    catalog.save(path, compression=compression)

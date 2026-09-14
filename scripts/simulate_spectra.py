@@ -1,6 +1,6 @@
 """Simulate many spectrum-only SGWB draws in one process.
 
-The catalog path persists ``(F, N)`` polarization power. This writes only the
+A polarization-power catalog persists ``(F, N)`` power. This writes only the
 forward-model spectrum ``(draws, F)``: one compiled ``max_events`` plate, a
 free Poisson count per draw, and no catalog materialization.
 
@@ -39,14 +39,15 @@ import jax.numpy as jnp
 import numpy as np
 from numpyro.infer import Predictive
 
+from astrogwb.catalog import SpectralDensityCatalog
 from astrogwb.gwb.spectral import AverageMode
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
+    PopulationRecord,
     build_merger_rate_fn,
     build_source_model,
 )
 from astrogwb.sampling import gwb_forward_model, validate_source_model
-from astrogwb.sampling._io import SpectraArtifact, save_spectra
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import RippleGenerator
 
@@ -220,19 +221,21 @@ def main(argv: Sequence[str] | None = None) -> None:
         for name, value in params.items()
     }
 
-    artifact = SpectraArtifact(
-        frequencies=frequencies,
+    catalog = SpectralDensityCatalog(
         spectral_density=spectral_density,
+        frequencies=frequencies,
         n_events=n_events,
         total_merger_rate=merger_rates,
         hyperparameters=draw_hyperparameters,
-        source_model_name=args.source_model,
-        rate_model_name=args.rate_model,
-        model_kwargs=model_kwargs,
-        density_sites=DEFAULT_DENSITY_SITES,
         waveform_metadata=generator,
+        _population=PopulationRecord(
+            source_model_name=args.source_model,
+            rate_model_name=args.rate_model,
+            model_kwargs=model_kwargs,
+            density_sites=DEFAULT_DENSITY_SITES,
+            seed=args.seed,
+        ),
         n_max_sigma=args.n_max_sigma,
-        seed=args.seed,
         average_mode=average_mode,
         observation_time=args.observation_time,
     )
@@ -240,7 +243,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists():
         output.unlink()
-    save_spectra(artifact, output)
+    catalog.save(output)
 
 
 if __name__ == "__main__":

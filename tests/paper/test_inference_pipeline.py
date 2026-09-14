@@ -36,7 +36,7 @@ from config_fixtures import example_raw
 from numpyro.infer.util import log_density
 from repo import REPO_ROOT
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import spectral_density
@@ -100,14 +100,14 @@ def _write_catalog(
 
 
 @pytest.fixture
-def injection_catalog(tmp_path: Path) -> Catalog:
+def injection_catalog(tmp_path: Path) -> PolarizationPowerCatalog:
     return load_run_catalog(
         _write_catalog(tmp_path / "injection.h5", seed=0), label="injection"
     )
 
 
 @pytest.fixture
-def proposal_catalog(tmp_path: Path) -> Catalog:
+def proposal_catalog(tmp_path: Path) -> PolarizationPowerCatalog:
     return load_run_catalog(
         _write_catalog(tmp_path / "proposal.h5", seed=1), label="proposal"
     )
@@ -131,7 +131,11 @@ def _config(**overrides: Any) -> RunConfig:
     return build_run_config(raw)
 
 
-def _prepare(injection: Catalog, proposal: Catalog, config: RunConfig):
+def _prepare(
+    injection: PolarizationPowerCatalog,
+    proposal: PolarizationPowerCatalog,
+    config: RunConfig,
+):
     return prepare_inference_inputs(
         injection,
         proposal,
@@ -146,7 +150,7 @@ def _prepare(injection: Catalog, proposal: Catalog, config: RunConfig):
 # prepare_observation / prepare_inference_inputs
 # --------------------------------------------------------------------------- #
 def test_prepare_observation_keeps_arrays_unmasked(
-    injection_catalog: Catalog,
+    injection_catalog: PolarizationPowerCatalog,
 ) -> None:
     config = _config()
 
@@ -167,7 +171,7 @@ def test_prepare_observation_keeps_arrays_unmasked(
 
 
 def test_the_observed_rate_comes_from_the_injection_catalogs_own_population(
-    injection_catalog: Catalog,
+    injection_catalog: PolarizationPowerCatalog,
 ) -> None:
     """Nothing is cross-checked against the run config any more, so nothing may
     be *read* from it either: the file records what was injected."""
@@ -209,7 +213,8 @@ def _bound(inputs: Any) -> dict[str, Any]:
 
 
 def test_prepared_spectrum_slices_frequency_arrays_but_not_samples(
-    injection_catalog: Catalog, proposal_catalog: Catalog
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
 ) -> None:
     config = _config()
 
@@ -237,7 +242,8 @@ def test_prepared_spectrum_slices_frequency_arrays_but_not_samples(
 
 
 def test_restriction_narrows_the_proposals_recorded_population_too(
-    injection_catalog: Catalog, proposal_catalog: Catalog
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
 ) -> None:
     """Dropping samples without narrowing the density would misnormalize it."""
     config = _config()
@@ -256,7 +262,8 @@ def test_restriction_narrows_the_proposals_recorded_population_too(
 
 
 def test_masked_model_kwargs_scale_is_the_masked_gaussian_bin_scale(
-    injection_catalog: Catalog, proposal_catalog: Catalog
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
 ) -> None:
     """The scale is prepared here, not derived inside the sampling model."""
     config = _config()
@@ -278,7 +285,7 @@ def test_masked_model_kwargs_scale_is_the_masked_gaussian_bin_scale(
 
 
 def test_mismatched_frequency_grids_are_rejected(
-    injection_catalog: Catalog, tmp_path: Path
+    injection_catalog: PolarizationPowerCatalog, tmp_path: Path
 ) -> None:
     shifted = _write_catalog(
         tmp_path / "shifted.h5", seed=2, frequencies=FREQUENCIES + 10.0
@@ -291,8 +298,8 @@ def test_mismatched_frequency_grids_are_rejected(
 
 @pytest.mark.parametrize("uncovered", [0.0, np.inf])
 def test_bins_without_network_coverage_narrow_the_band(
-    injection_catalog: Catalog,
-    proposal_catalog: Catalog,
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
     monkeypatch: pytest.MonkeyPatch,
     uncovered: float,
 ) -> None:
@@ -320,8 +327,8 @@ def test_bins_without_network_coverage_narrow_the_band(
 
 
 def test_a_band_with_fewer_than_two_usable_bins_is_rejected(
-    injection_catalog: Catalog,
-    proposal_catalog: Catalog,
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _config()
@@ -336,7 +343,9 @@ def test_a_band_with_fewer_than_two_usable_bins_is_rejected(
         _prepare(injection_catalog, proposal_catalog, config)
 
 
-def test_a_catalog_may_serve_as_both_roles(injection_catalog: Catalog) -> None:
+def test_a_catalog_may_serve_as_both_roles(
+    injection_catalog: PolarizationPowerCatalog,
+) -> None:
     """Injection versus proposal is two filenames in a TOML, nothing more."""
     config = _config()
 
@@ -368,7 +377,8 @@ def _non_gr_config(**overrides: Any) -> RunConfig:
 
 
 def test_the_reference_distance_is_the_stored_distance_of_the_stored_power(
-    injection_catalog: Catalog, proposal_catalog: Catalog
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
 ) -> None:
     config = _non_gr_config()
 
@@ -393,7 +403,7 @@ def test_the_reference_distance_is_the_stored_distance_of_the_stored_power(
     assert not np.allclose(target_distance, stored)
 
 
-def _proposal_log_prob(catalog: Catalog) -> jax.Array:
+def _proposal_log_prob(catalog: PolarizationPowerCatalog) -> jax.Array:
     """The proposal density, restated from the grid formula the file implies."""
     from reference_population import reference_merger_rate_distance_and_logprob
 
@@ -471,7 +481,10 @@ def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.
 @pytest.mark.parametrize("guarded", [False, True], ids=["ordinary", "guard-mixture"])
 @pytest.mark.parametrize("offset", [0.0, 0.13], ids=["fiducial", "off-fiducial"])
 def test_prepared_spectrum_reproduces_the_grid_formula(
-    injection_catalog: Catalog, tmp_path: Path, guarded: bool, offset: float
+    injection_catalog: PolarizationPowerCatalog,
+    tmp_path: Path,
+    guarded: bool,
+    offset: float,
 ) -> None:
     """End-to-end: the same spectrum, the same rate, the same log posterior."""
     config = _non_gr_config()
@@ -518,7 +531,7 @@ def test_prepared_spectrum_reproduces_the_grid_formula(
 
 
 def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights(
-    proposal_catalog: Catalog,
+    proposal_catalog: PolarizationPowerCatalog,
 ) -> None:
     """The sanity check the whole importance scheme is legible through.
 
@@ -538,7 +551,7 @@ def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights
 
 
 def test_the_proposals_density_factors_reach_the_bound_weights_unchanged(
-    injection_catalog: Catalog,
+    injection_catalog: PolarizationPowerCatalog,
 ) -> None:
     """``prepare_inference_inputs`` threads the catalog's factor set to the target.
 

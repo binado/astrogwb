@@ -7,8 +7,8 @@ just reading the file, and the density its samples follow comes back off the
 file's own population record rather than being reassembled from the run config.
 
 What used to live here has mostly moved to where it belongs:
-:meth:`~astrogwb.catalog.Catalog.restrict_redshift` narrows the samples and the
-recorded population together, and the proposal density is evaluated by
+:meth:`~astrogwb.catalog.PolarizationPowerCatalog.restrict_redshift`
+narrows the samples and the recorded population together, and the proposal density is evaluated by
 :func:`~astrogwb.importance.spectral.build_importance_spectrum` directly from
 the catalog's own source model. Fiducial GW propagation is gone
 entirely: which propagation law applies is now part of the population
@@ -23,10 +23,10 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import ArrayLike
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 
 
-def load_run_catalog(path: Path | str, *, label: str) -> Catalog:
+def load_run_catalog(path: Path | str, *, label: str) -> PolarizationPowerCatalog:
     """Load one catalog file, validating its format and its population record.
 
     ``label`` is the role -- ``"injection"`` or ``"proposal"`` -- and is what
@@ -36,7 +36,7 @@ def load_run_catalog(path: Path | str, *, label: str) -> Catalog:
     if not path.is_file():
         raise FileNotFoundError(f"{label} catalog not found: {path}")
     try:
-        return Catalog.load(path)
+        return PolarizationPowerCatalog.load(path)
     except ValueError as error:
         raise ValueError(f"{label} catalog {path}: {error}") from error
 

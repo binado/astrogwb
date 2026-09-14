@@ -40,7 +40,7 @@ from jax.typing import ArrayLike
 from numpyro import handlers
 from reference_population import reference_merger_rate_distance_and_logprob
 
-from astrogwb.catalog.catalog import REDSHIFT_SITE
+from astrogwb.catalog import REDSHIFT_SITE
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,

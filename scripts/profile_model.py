@@ -46,7 +46,7 @@ from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
-    from astrogwb.catalog import Catalog
+    from astrogwb.catalog import PolarizationPowerCatalog
 
 logger = logging.getLogger("profile_model")
 
@@ -102,8 +102,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_potential(
     config: RunConfig,
-    injection_catalog: Catalog,
-    proposal_catalog: Catalog,
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
     jax,
 ):
     """Build the production model inputs and return (potential_fn, init_params).

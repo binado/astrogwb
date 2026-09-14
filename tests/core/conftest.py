@@ -36,7 +36,7 @@ from astrogwb_mock_population import (
     load_mock_population,
 )
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -65,8 +65,8 @@ def mock_population() -> dict[str, np.ndarray]:
 @pytest.fixture(scope="session")
 def mock_catalog_factory(
     mock_population: dict[str, np.ndarray],
-) -> Callable[..., Catalog]:
-    """Build a real ``Catalog`` from the committed population draw.
+) -> Callable[..., PolarizationPowerCatalog]:
+    """Build a real ``PolarizationPowerCatalog`` from the committed population draw.
 
     Session-scoped, so the draw is parsed once. The root ``addopts`` is
     ``-n auto --dist loadscope``, so this is once *per worker* rather than once
