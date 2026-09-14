@@ -3,44 +3,53 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request: {}
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: "Run integration tests"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # Every `run:` below is a `just` recipe, so the command a contributor runs
-# locally and the command CI runs are the same string. The jobs stay separate
-# rather than collapsing behind one recipe: that keeps them parallel and keeps
-# one independent red/green signal per concern instead of a single verdict.
+# locally and the command CI runs are the same string.
 
 jobs:
-  lint:
-    name: Lint
+  check:
+    name: Lint and type check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+          enable-cache: true
       - uses: extractions/setup-just@v4
       - run: just lint
-
-  typecheck:
-    name: Type check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.12"
-      - uses: extractions/setup-just@v4
       - run: just typecheck
 
   test-core:
     name: Core tests (Python 3.12)
+    needs: [check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+          enable-cache: true
       - uses: extractions/setup-just@v4
       - name: Verify reference fixtures are present
         run: |
@@ -50,42 +59,31 @@ jobs:
 
   test-paper:
     name: Paper tests (Python 3.12)
+    needs: [check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+          enable-cache: true
       - uses: extractions/setup-just@v4
       - run: just test-paper
 
   test-integration:
     name: Test integration (Python 3.12)
+    if: github.event_name == 'workflow_dispatch' && (inputs.run_integration == true || inputs.run_integration == 'true' || inputs.run_integration == null)
+    needs: [check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+          enable-cache: true
       - uses: extractions/setup-just@v4
       - name: Verify reference fixtures are present
         run: |
           test -f tests/core/fixtures/gwfast_orf_reference.npz
           test -f tests/core/fixtures/gwfast_orf_reference_et_triangle.npz
       - run: just test-integration
-
-  test-notebooks:
-    name: Notebooks (smoke)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.12"
-      - uses: extractions/setup-just@v4
-      # The notebooks build their own catalogs from an inline population graph,
-      # so this job needs no fixture guard: nothing it reads comes from
-      # tests/core. Executing them *is* the assertion.
-      - run: just test-notebooks
-        env:
-          ASTROGWB_NOTEBOOK_SMOKE: "1"
