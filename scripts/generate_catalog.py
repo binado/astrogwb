@@ -50,6 +50,12 @@ from astrogwb.populations import DEFAULT_DENSITY_SITES, build_source_model
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import RippleGenerator
 
+# x64 must be on before the population draw. `build_catalog` samples before it
+# builds the Ripple-backed generator, and importing ripplegw -- which turns this
+# on globally -- happens only inside that generator, so relying on it would draw
+# and persist every source column in float32.
+jax.config.update("jax_enable_x64", True)
+
 logger = logging.getLogger(__name__)
 
 

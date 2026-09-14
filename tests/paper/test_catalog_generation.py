@@ -10,6 +10,7 @@ lands on disk describes itself well enough to load.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -67,6 +68,44 @@ def generate_catalog():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_the_script_enables_x64_before_it_draws() -> None:
+    """The script must configure x64 itself, not inherit it from Ripple's import.
+
+    ``build_catalog`` draws the population before it builds the Ripple-backed
+    generator, and ``import ripplegw`` -- which turns x64 on globally -- happens
+    only inside that generator. Left to that side effect, every source column is
+    drawn and persisted at float32. The paper conftest enables x64 for the whole
+    in-process suite, so this runs in a fresh interpreter where it starts off,
+    and asserts ripplegw is still unimported: that is what proves the flag came
+    from the script rather than from the import it must not depend on.
+    """
+    code = f"""
+import importlib.util
+import sys
+
+import jax
+
+assert not jax.config.x64_enabled, "x64 was already on before the script ran"
+path = {str(REPO_ROOT / "scripts" / "generate_catalog.py")!r}
+spec = importlib.util.spec_from_file_location("generate_catalog_script", path)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+
+assert jax.config.x64_enabled, "importing generate_catalog did not enable x64"
+assert "ripplegw" not in sys.modules, "x64 came from importing ripplegw"
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def _config(
