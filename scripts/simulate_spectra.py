@@ -20,7 +20,7 @@ Usage::
         --frequency-resolution 4 \\
         --source-model bns_md_cosmological --rate-model madau_dickinson \\
         --model-kwargs '{"z_min": 0.3, "z_max": 20, "n_grid": 64}' \\
-        --params '{"log10_R0": 1.5}' \\
+        --params '{"H0": 67.66, "Omega_m": 0.3096, "gamma": 1.42, "kappa": 4.62, "z_peak": 1.84, "local_merger_rate": 770.0, "minimum_mass": 1.0, "mass_width": 1.5}' \\
         --observation-time 1 --draws 8 --seed 0 \\
         --output outputs/spectra.h5
 """
@@ -83,7 +83,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=json.loads,
         default={},
         metavar="JSON",
-        help="JSON object of population hyperparameters, e.g. '{\"log10_R0\": 1.5}'",
+        help=(
+            "JSON object of population hyperparameters, e.g. "
+            '\'{"H0": 67.66, "local_merger_rate": 770}\''
+        ),
     )
 
     parser.add_argument("--observation-time", type=float, required=True)
@@ -101,6 +104,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing output spectra file.",
+    )
     return parser.parse_args(argv)
 
 
@@ -137,6 +145,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise ValueError("--batch-size must be positive")
     if args.observation_time <= 0.0:
         raise ValueError("--observation-time must be positive")
+
+    output = args.output.expanduser().resolve()
+    if output.exists() and not args.force:
+        raise FileExistsError(
+            f"refusing to replace existing spectra: {output}. "
+            "Pass --force only for an intentional replacement."
+        )
 
     model_kwargs = _require_mapping(args.model_kwargs, flag="--model-kwargs")
     params = _float_params(_require_mapping(args.params, flag="--params"))
@@ -222,7 +237,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         observation_time=args.observation_time,
     )
 
-    output = args.output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists():
         output.unlink()

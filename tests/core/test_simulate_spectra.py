@@ -107,6 +107,7 @@ def test_parse_args_loads_json_dicts() -> None:
     assert args.model_kwargs == {"z_min": 0.3, "n_grid": 64}
     assert args.params == {"log10_R0": 1.5, "gamma": 2.7}
     assert args.average_mode == "analytic_inclination"
+    assert args.force is False
 
 
 def test_padded_event_capacity_is_the_poisson_tail() -> None:
@@ -115,6 +116,15 @@ def test_padded_event_capacity_is_the_poisson_tail() -> None:
         np.ceil(8.0 + 5.0 * np.sqrt(8.0))
     )
     assert module.padded_event_capacity(0.0, 5.0) == 1
+
+
+def test_existing_output_is_refused_without_force(tmp_path: Path) -> None:
+    module = _load_script_module()
+    output = tmp_path / "spectra.h5"
+    output.write_text("keep")
+    with pytest.raises(FileExistsError, match="--force"):
+        module.main(_argv(seed=0, draws=1, observation_time=1.0, output=output))
+    assert output.read_text() == "keep"
 
 
 @pytest.mark.integration
