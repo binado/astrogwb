@@ -1,11 +1,12 @@
 # ---
 # jupyter:
 #   jupytext:
+#     formats: ipynb,py:percent
 #     text_representation:
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.3
+#       jupytext_version: 1.19.5
 #   kernelspec:
 #     display_name: astrogwb (3.12.9)
 #     language: python
@@ -103,6 +104,9 @@ use_paper_style()
 #: not `..`, hence the literal.
 ROOT_DIR = Path() if Path("notebooks").is_dir() else Path("..")
 INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
+BASE_DIR = ROOT_DIR / "outputs/figures/fiducial_spectrum"
+FIG_DPI = 300
+FIG_FORMAT = ".pdf"
 
 # Inlined from config/analysis/base/parameters.toml [fiducials]. Only "H0" is
 # read below; the rest are kept so this is the whole fiducial point.
@@ -168,6 +172,13 @@ SNR_GT_LINESTYLE = "--"
 
 
 # %%
+def save_figure(fig: Figure, name: str) -> Path:
+    BASE_DIR.mkdir(parents=True, exist_ok=True)
+    path = BASE_DIR / f"{name}{FIG_FORMAT}"
+    fig.savefig(path, dpi=FIG_DPI, bbox_inches="tight")
+    return path
+
+
 def sh_ymin_matching_omega_floor(
     omega_gw: np.ndarray,
     spectral_density_arr: np.ndarray,
@@ -465,13 +476,14 @@ def plot_omega_and_sh(
 
 
 # %%
-_ = plot_omega_and_sh(
+fig = plot_omega_and_sh(
     frequencies,
     observation.spectral_density,
     frequency_mask,
     h0=FIDUCIALS["H0"],
     omega_gw_min=OMEGA_GW_MIN,
 )
+_ = save_figure(fig, "omega_and_sh")
 
 
 # %% [markdown]
@@ -523,7 +535,7 @@ def plot_effective_psds(
 
 
 # %%
-_ = plot_effective_psds(
+fig = plot_effective_psds(
     frequencies,
     NETWORKS,
     effective_psds,
@@ -531,6 +543,7 @@ _ = plot_effective_psds(
     linestyles=detector_linestyles,
     frequency_mask=frequency_mask,
 )
+_ = save_figure(fig, "effective_psds")
 
 
 # %% [markdown]
@@ -557,10 +570,23 @@ def plot_spectrum_and_sensitivities(
     spectrum_linestyle: str,
     ylabel: str,
     ymin: float | None = None,
+    include_spectrum_in_legend: bool = True,
+    spectrum_legend_loc: str | None = None,
 ) -> Figure:
-    """Overlay a fiducial spectrum with per-network Gaussian sensitivities."""
+    """Overlay a fiducial spectrum with per-network Gaussian sensitivities.
+
+    When ``spectrum_legend_loc`` is set, the spectrum gets its own legend inside
+    the axes (e.g. ``"upper left"``). The network legend still uses
+    ``DETECTOR_COMPARISON_LEGEND`` above the frame and remains ``ax.legend_``
+    so ``tight_layout`` keeps reserving space for it; the inner legend is
+    pinned with ``ax.add_artist``.
+    """
     if len(networks) != len(colors) or len(networks) != len(linestyles):
         raise ValueError("color and linestyle counts must match the networks")
+    if include_spectrum_in_legend and spectrum_legend_loc is not None:
+        raise ValueError(
+            "use at most one of include_spectrum_in_legend and spectrum_legend_loc"
+        )
 
     fig, ax = plt.subplots()
     (line_spectrum,) = ax.loglog(
@@ -589,16 +615,29 @@ def plot_spectrum_and_sensitivities(
     ax.set_axisbelow(True)
     ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
     _format_axis_ticks(ax)
-    ax.legend(
-        handles=[line_spectrum, *_network_legend_handles(networks, colors, linestyles)],
-        **DETECTOR_COMPARISON_LEGEND,
+    network_handles = _network_legend_handles(networks, colors, linestyles)
+    legend_handles = (
+        [line_spectrum, *network_handles]
+        if include_spectrum_in_legend
+        else network_handles
     )
+    if spectrum_legend_loc is not None:
+        # Keep the detector legend as ax.legend_ so tight_layout still
+        # accounts for the above-axes bbox; pin the spectrum entry separately.
+        spectrum_legend = ax.legend(
+            handles=[line_spectrum],
+            loc=spectrum_legend_loc,
+            frameon=False,
+            handlelength=2.5,
+        )
+        ax.add_artist(spectrum_legend)
+    ax.legend(handles=legend_handles, **DETECTOR_COMPARISON_LEGEND)
     fig.tight_layout()
     return fig
 
 
 # %%
-_ = plot_spectrum_and_sensitivities(
+fig = plot_spectrum_and_sensitivities(
     fiducial_freq,
     fiducial_sh,
     ET_ONLY_NETWORKS,
@@ -609,9 +648,12 @@ _ = plot_spectrum_and_sensitivities(
     spectrum_label=r"$S_h$",
     spectrum_color=SPECTRUM["sh"],
     spectrum_linestyle=SPECTRUM_LINESTYLES["sh"],
-    ylabel=r"$S_h(f)\ \mathrm{[Hz^{-1}]}$",
+    ylabel=r"$S_h(f), \, \sigma(f)\ \mathrm{[Hz^{-1}]}$",
     ymin=sh_ymin_matching_omega_floor(fiducial_omega, fiducial_sh, OMEGA_GW_MIN),
+    include_spectrum_in_legend=False,
+    spectrum_legend_loc="upper left",
 )
+_ = save_figure(fig, "sh_and_sigma")
 
 
 # %% [markdown]
@@ -622,7 +664,7 @@ _ = plot_spectrum_and_sensitivities(
 # $\Omega_{\mathrm{GW}}$.
 
 # %%
-_ = plot_spectrum_and_sensitivities(
+fig = plot_spectrum_and_sensitivities(
     fiducial_freq,
     fiducial_omega,
     ET_ONLY_NETWORKS,
@@ -632,10 +674,13 @@ _ = plot_spectrum_and_sensitivities(
     linestyles=et_only_linestyles,
     spectrum_label=r"$\Omega_{\mathrm{GW}}$",
     spectrum_color=SPECTRUM["omega_gw"],
-    spectrum_linestyle=SPECTRUM_LINESTYLES["omega_gw"],
-    ylabel=r"$\Omega_{\mathrm{GW}}(f)$",
+    spectrum_linestyle=":",
+    ylabel=r"$\Omega_{\mathrm{GW}}(f), \, \sigma(f)$",
     ymin=OMEGA_GW_MIN,
+    include_spectrum_in_legend=False,
+    spectrum_legend_loc="upper left",
 )
+_ = save_figure(fig, "omega_and_sigma")
 
 
 # %% [markdown]
@@ -704,7 +749,7 @@ def plot_snr_cumulative(
 
 
 # %%
-_ = plot_snr_cumulative(
+fig = plot_snr_cumulative(
     NETWORKS,
     frequency_by_network,
     snr_squared_by_network,
@@ -713,6 +758,7 @@ _ = plot_snr_cumulative(
     colors=detector_colors,
     linestyles=detector_linestyles,
 )
+_ = save_figure(fig, "snr_cumulative")
 
 
 # %% [markdown]
@@ -776,7 +822,7 @@ def plot_spectrum_and_cumulative_snr(
 
 
 # %%
-_ = plot_spectrum_and_cumulative_snr(
+fig = plot_spectrum_and_cumulative_snr(
     freq,
     omega,
     sh,
@@ -784,3 +830,4 @@ _ = plot_spectrum_and_cumulative_snr(
     snr_gt_by_network[reference_network.name],
     omega_gw_min=OMEGA_GW_MIN,
 )
+_ = save_figure(fig, "spectrum_and_cumulative_snr")
