@@ -2,32 +2,54 @@
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable, Mapping
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from gwmock_signal.waveform import RippleBackend
 from numpy.typing import ArrayLike
 
-from astrogwb.utils import array_dict_shape
+from astrogwb.utils import require_x64
+from astrogwb.waveform.generator._ripple import (
+    build_kernel,
+    check_sources,
+    next_smooth_even,
+    ripple_parameters,
+)
 from astrogwb.waveform.generator.base import PolarizationPowerGenerator
 from astrogwb.waveform.polarization_power import polarization_power
 
 __all__ = ["RippleGenerator"]
 
-logger = logging.getLogger(__name__)
+#: How far the first in-band bin may sit from ``minimum_frequency`` and still
+#: count as aligned. Not ``==``: when ``n_samples`` is 5-smooth but not a power
+#: of two, ``delta_f = f_s / n_samples`` is inexact in binary and ``k * delta_f``
+#: need not reproduce ``minimum_frequency`` bit for bit even when the
+#: configuration is valid.
+_ALIGNMENT_TOLERANCE_EPS = 64.0
 
 
 class RippleGenerator(PolarizationPowerGenerator):
-    """Generate chunked polarization power with one fixed Ripple frequency grid."""
+    """Generate polarization power with one fixed Ripple frequency grid.
 
-    __slots__ = ("_backend", "_frequencies_cache", "chunk_size")
-    _backend: RippleBackend
-    _frequencies_cache: jax.Array | None
-    chunk_size: int
+    A run has one approximant, one reference frequency, and one sampling grid.
+    Those fix the frequency axis and the waveform kernel at construction, so
+    :attr:`frequencies` is available before the first generation (including for
+    an empty catalog) and the source parameters are the only thing that varies
+    between calls.
+
+    Generation is trace-safe: it performs no host synchronization and no
+    data-dependent branching, so it composes with :func:`jax.jit`,
+    :func:`jax.lax.scan` and NumPyro inference. The price is that physical
+    values are not validated here -- see :meth:`check_sources`.
+    """
+
+    __slots__ = ("_band", "_frequencies", "_kernel", "_n_samples", "_segment_duration")
+    _band: slice
+    _frequencies: np.ndarray
+    _kernel: Callable[[jax.Array, Mapping[str, jax.Array]], tuple[jax.Array, jax.Array]]
+    _n_samples: int
+    _segment_duration: float
 
     def __init__(
         self,
@@ -38,7 +60,6 @@ class RippleGenerator(PolarizationPowerGenerator):
         maximum_frequency: float,
         reference_frequency: float,
         frequency_resolution: float,
-        chunk_size: int,
     ) -> None:
         resolution = float(frequency_resolution)
         if not np.isfinite(resolution) or resolution <= 0.0:
@@ -49,20 +70,15 @@ class RippleGenerator(PolarizationPowerGenerator):
             or resolved_sampling_frequency <= 0.0
         ):
             raise ValueError("sampling_frequency must be finite and positive")
-        if isinstance(chunk_size, bool) or chunk_size <= 0:
-            raise ValueError("chunk_size must be a positive integer")
-        if not isinstance(chunk_size, int):
-            raise TypeError("chunk_size must be an integer")
-
         # astrogwb's own power-of-two rounding policy for the segment duration
-        # -- deliberate, and only ever makes the grid finer than asked. It no
-        # longer produces a spacing: Ripple's own rounding
-        # (`_next_smooth_even`, 5-smooth, not power-of-two) decides the actual
-        # frequency grid, so `n_samples` survives only as a feasibility guard.
+        # -- deliberate, and only ever makes the grid finer than asked.
         segment_duration = float(2.0 ** np.ceil(np.log2(1.0 / resolution)))
-        n_samples = round(segment_duration * resolved_sampling_frequency)
-        if n_samples <= 0:
-            raise ValueError("sampling_frequency produces no Ripple samples")
+        # next_smooth_even floors at 2, so this cannot be empty. A sampling
+        # frequency too low to reach the band is caught by _resolve_band
+        # instead, which can say which band it failed to cover.
+        n_samples = next_smooth_even(
+            int(np.ceil(segment_duration * resolved_sampling_frequency))
+        )
 
         super().__init__(
             approximant=approximant,
@@ -72,130 +88,91 @@ class RippleGenerator(PolarizationPowerGenerator):
             sampling_frequency=resolved_sampling_frequency,
             frequency_resolution=resolution,
         )
-        object.__setattr__(self, "chunk_size", chunk_size)
-        object.__setattr__(self, "_frequencies_cache", None)
+
+        # NumPy, not JAX: constructing a generator must not touch the XLA
+        # backend, so runtime configuration stays free to run after it.
+        delta_f = resolved_sampling_frequency / n_samples
+        grid = np.arange(n_samples // 2 + 1, dtype=np.float64) * delta_f
+        band = self._resolve_band(grid)
+
+        object.__setattr__(self, "_segment_duration", segment_duration)
+        object.__setattr__(self, "_n_samples", int(n_samples))
+        object.__setattr__(self, "_frequencies", grid)
+        object.__setattr__(self, "_band", band)
         object.__setattr__(
-            self,
-            "_backend",
-            RippleBackend(
-                f_ref=self.reference_frequency,
-                segment_duration=segment_duration,
-            ),
+            self, "_kernel", build_kernel(self.approximant, self.reference_frequency)
         )
+
+    def _resolve_band(self, grid: np.ndarray) -> slice:
+        """Return the contiguous in-band slice of ``grid``, validating alignment.
+
+        Checked here rather than after a first generation: the grid follows
+        from the configuration alone, so a misaligned ``minimum_frequency`` is
+        a constructor error, not something to discover once a catalog has
+        already been drawn.
+        """
+        in_band = np.flatnonzero(
+            (grid >= self.minimum_frequency) & (grid <= self.maximum_frequency)
+        )
+        if in_band.size < 2:
+            raise ValueError(
+                "Ripple's in-band frequency grid has fewer than two bins in "
+                f"[{self.minimum_frequency}, {self.maximum_frequency}] Hz"
+            )
+        first_frequency = float(grid[in_band[0]])
+        tolerance = (
+            _ALIGNMENT_TOLERANCE_EPS
+            * np.finfo(np.float64).eps
+            * max(1.0, abs(self.minimum_frequency), abs(first_frequency))
+        )
+        if not np.isclose(
+            first_frequency, self.minimum_frequency, rtol=0.0, atol=tolerance
+        ):
+            raise ValueError(
+                f"minimum_frequency ({self.minimum_frequency} Hz) is not on "
+                "Ripple's frequency grid; the nearest in-band bin is "
+                f"{first_frequency} Hz"
+            )
+        return slice(int(in_band[0]), int(in_band[-1]) + 1)
+
+    @property
+    def segment_duration(self) -> float:
+        """The analysis-segment length in seconds the grid was sized from."""
+        return self._segment_duration
+
+    @property
+    def n_samples(self) -> int:
+        """Ripple's segment length in samples: even, and 5-smooth."""
+        return self._n_samples
 
     @property
     def frequencies(self) -> jax.Array:
-        """Return the frequency grid Ripple generated on, masked to the descriptor band.
+        """Ripple's frequency grid, restricted to the descriptor band."""
+        return jnp.asarray(self._frequencies[self._band])
 
-        Ripple sizes its FFT segment from ``segment_duration`` with its own
-        rounding rule (5-smooth, not power-of-two -- see
-        ``gwmock_signal.RippleBackend._segment_samples``), so this grid is
-        only known by asking Ripple for it, not by recomputing it here. It is
-        cached from the first chunk generated by :meth:`generate_batch`.
+    def check_sources(self, source_parameters: Mapping[str, ArrayLike]) -> None:
+        """Check source values against what this approximant can represent.
+
+        Eager only; see
+        :meth:`~astrogwb.waveform.PolarizationPowerGenerator.check_sources`.
         """
-        if self._frequencies_cache is None:
-            raise ValueError(
-                "RippleGenerator has not generated yet; frequencies are only "
-                "known after the first call"
-            )
-        return self._frequencies_cache
+        check_sources(self.approximant, source_parameters)
 
-    def _power_from_polarizations(self, polarizations: Any) -> jax.Array:
-        chunk_frequencies = jnp.asarray(polarizations.frequencies)
-        plus = jnp.asarray(polarizations.plus)
-        cross = jnp.asarray(polarizations.cross)
-        if plus.ndim == 1:
-            plus = plus[jnp.newaxis, :]
-            cross = cross[jnp.newaxis, :]
-        mask = (chunk_frequencies >= self.minimum_frequency) & (
-            chunk_frequencies <= self.maximum_frequency
-        )
-        masked_frequencies = chunk_frequencies[mask]
-        if self._frequencies_cache is None:
-            if masked_frequencies.size < 2:
-                raise ValueError(
-                    "Ripple's in-band frequency grid has fewer than two "
-                    f"bins in [{self.minimum_frequency}, "
-                    f"{self.maximum_frequency}] Hz"
-                )
-            # Not `==`: when `n_samples` is 5-smooth but not a power of
-            # two, `delta_f = fs / n_samples` is inexact in binary and
-            # `k * delta_f` need not reproduce `minimum_frequency` bit for
-            # bit even when the configuration is valid.
-            first_frequency = float(masked_frequencies[0])
-            tolerance = (
-                64.0
-                * np.finfo(np.float64).eps
-                * max(1.0, abs(self.minimum_frequency), abs(first_frequency))
-            )
-            if not np.isclose(
-                first_frequency, self.minimum_frequency, rtol=0.0, atol=tolerance
-            ):
-                raise ValueError(
-                    f"minimum_frequency ({self.minimum_frequency} Hz) is not "
-                    "on Ripple's frequency grid; the nearest in-band bin is "
-                    f"{first_frequency} Hz"
-                )
-            # segment_duration is pinned on `_backend` (see __init__), so
-            # Ripple's grid is a pure function of that fixed config, not
-            # of any chunk's source parameters -- every chunk in this
-            # call lands on the same grid, so caching the first one is
-            # exact for the rest.
-            object.__setattr__(self, "_frequencies_cache", masked_frequencies)
-        elif not bool(jnp.array_equal(self._frequencies_cache, masked_frequencies)):
-            raise ValueError("Ripple chunks produced different frequency grids")
-        return polarization_power(plus[:, mask], cross[:, mask])
-
+    @require_x64
     def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
-        """Generate power in ``(frequency, sample)`` layout, chunk by chunk."""
-        parameters = {
-            name: jnp.asarray(values) for name, values in source_parameters.items()
-        }
-        parameter_shape = array_dict_shape(parameters)
-        if len(parameter_shape) != 1:
-            raise ValueError(
-                "Ripple source parameters must be one-dimensional; "
-                f"received shape {parameter_shape}"
-            )
-        n_events = parameter_shape[0]
-        if n_events == 0:
-            raise ValueError("source_parameters must contain at least one event")
-        step = min(n_events, self.chunk_size)
+        """Generate power in ``(frequency, sample)`` layout via Ripple.
 
-        power_chunks = []
-        for start in range(0, n_events, step):
-            stop = min(start + step, n_events)
-            chunk_samples = {
-                name: values[start:stop] for name, values in parameters.items()
-            }
-            polarizations = self._backend.generate_fd_polarizations_batch(
-                self.approximant,
-                sampling_frequency=self.sampling_frequency,
-                minimum_frequency=self.minimum_frequency,
-                parameters=chunk_samples,
-            )
-            power_chunks.append(self._power_from_polarizations(polarizations))
-            logger.info("Generated chunk %d:%d of %d events", start, stop, n_events)
-
-        return jnp.concatenate(power_chunks, axis=1)
+        Ripple sees the whole one-sided grid and the band is taken from its
+        output, never from its input: several supported models -- among them
+        the NRTidal and precessing families -- do not evaluate pointwise in
+        frequency, so restricting the input would change the in-band values.
+        """
+        events = ripple_parameters(self.approximant, source_parameters)
+        plus, cross = self._kernel(jnp.asarray(self._frequencies), events)
+        return polarization_power(plus[:, self._band], cross[:, self._band])
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]
     ) -> tuple[jax.Array, jax.Array]:
-        """Return the Ripple frequency axis and power, chunk by chunk.
-
-        Ripple sizes its FFT segment from ``segment_duration`` with its own
-        rounding rule (5-smooth, not power-of-two -- see
-        ``gwmock_signal.RippleBackend._segment_samples``), so the frequency
-        axis is taken from the generated polarizations rather than recomputed
-        here. ``segment_duration`` is pinned on ``_backend``, so every chunk
-        lands on the same grid; a mismatch raises.
-
-        ``minimum_frequency`` alignment is checked here, against the grid
-        Ripple actually built, rather than at construction time: no
-        backend-independent check on ``minimum_frequency`` alone can predict
-        Ripple's 5-smooth ``n_samples`` without replicating the rule this
-        generator exists to delete.
-        """
-        power = self.generate_batch(source_parameters)
-        return self.frequencies, power
+        """Return the Ripple frequency axis and power."""
+        return self.frequencies, self.generate_batch(source_parameters)

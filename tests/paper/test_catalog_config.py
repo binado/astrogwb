@@ -148,7 +148,6 @@ minimum_frequency = 10.0
 maximum_frequency = 50.0
 reference_frequency = 20.0
 frequency_resolution = 1.0
-chunk_size = 4
 """,
         encoding="utf-8",
     )

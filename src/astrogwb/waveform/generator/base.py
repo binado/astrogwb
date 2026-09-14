@@ -66,6 +66,34 @@ class PolarizationPowerGenerator:
         ):
             raise ValueError("frequency_resolution must be a finite positive scalar")
 
+    @property
+    def frequencies(self) -> ArrayLike:
+        """The frequency axis this generator produces power on.
+
+        Concrete generators know their grid from their configuration alone, so
+        it is available before the first generation -- which is what lets a
+        caller size a reduction over an empty catalog.
+        """
+        raise NotImplementedError(
+            "PolarizationPowerGenerator is a metadata-only descriptor; "
+            "use a concrete generator subclass"
+        )
+
+    def check_sources(self, source_parameters: Mapping[str, ArrayLike]) -> None:
+        """Check source *values* against what this generator can represent.
+
+        Eager only, and never called during generation: a traced array cannot
+        drive a Python exception, and converting one to decide would sync the
+        host on every batch. Generation therefore trusts its parameter arrays,
+        and a caller establishes that trust once by calling this -- or
+        :func:`~astrogwb.sampling.validate_source_model` -- on concrete values
+        before handing a model to inference.
+
+        The base implementation accepts everything: a generator constrains its
+        inputs only where its waveform family does.
+        """
+        del source_parameters
+
     def generate(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
         """Generate power for a single source, shape ``(F,)``.
 
