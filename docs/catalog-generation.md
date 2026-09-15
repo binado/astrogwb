@@ -257,7 +257,7 @@ weights with no shape error anywhere.
 serialized dtypes, then reconstructs the recorded population from the registry. It does not
 serialize a callable or require the analysis run configuration.
 
-The format is `astrogwb_catalog_v5`, a direct HDF5 file. Root attributes hold
+The format is `astrogwb_catalog_v6`, a direct HDF5 file. Root attributes hold
 the waveform and population metadata (JSON is used for mappings and ordered
 lists); `frequency`, `polarization_power`, and `source_parameters` are HDF5
 datasets. Earlier formats require regeneration. The recorded density-site and
@@ -272,7 +272,7 @@ the backend chooses the actual grid, so the two can differ.
 ## The spectral-density format
 
 `scripts/simulate_spectra.py` writes the sibling artifact: a
-`SpectralDensityCatalog`, format `astrogwb_spectral_density_v1`. It persists
+`SpectralDensityCatalog`, format `astrogwb_spectral_density_v2`. It persists
 the forward model's *contraction* rather than the power it contracts, so a
 run that only needs predicted spectra never materializes `(F, N)` waveforms.
 
@@ -302,7 +302,7 @@ even though the simulator holds them fixed today.
 
 `SpectralDensityCatalog.load` validates the same way its sibling does: layout,
 shapes, serialized dtypes, then reconstruction of the recorded population from
-the registry. There is no compatibility tier -- v1 is the first version.
+the registry. Earlier formats require regeneration.
 
 ## What is *not* in the file: the analysis window
 
