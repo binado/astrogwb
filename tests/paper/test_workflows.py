@@ -158,8 +158,8 @@ def test_catalog_rule_reads_its_config_layers_directly() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    # The shared base layer is an input of both, so editing it rebuilds both.
-    assert result.stdout.count("config/catalogs/base/waveform.toml") >= 2
+    # The shared waveform layer is an input of both, so editing it rebuilds both.
+    assert result.stdout.count("config/waveform.json") >= 2
     assert "config/catalogs/defs/md-imrphenom-s41-n32768.toml" in result.stdout
     assert (
         "config/catalogs/defs/md-uniform-imrphenom-s61-n16384-eps1e-1.toml"
@@ -177,8 +177,8 @@ def test_catalog_rule_reads_its_config_layers_directly() -> None:
     )
     # Layers reach the script as repeated flags, never space-joined into one.
     assert (
+        "--config config/waveform.json "
         "--config config/catalogs/base/population.toml "
-        "--config config/catalogs/base/waveform.toml "
         "--config config/catalogs/defs/md-imrphenom-s41-n32768.toml"
     ) in result.stdout
     # The population intermediate, its merge rule, and the graph configs the

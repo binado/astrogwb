@@ -42,7 +42,7 @@ One rule does the whole thing: it reads the catalog's config layers, draws the
 registered population they name in-process, and generates waveforms for those
 rows. The population is not a workflow node and no longer a file either -- the
 layer list *is* the dependency edge, so editing
-`config/catalogs/base/population.toml` invalidates every catalog. All durable
+`config/waveform.json` or `config/catalogs/base/population.toml` invalidates every catalog. All durable
 catalogs live under `outputs/catalogs/`. The `--allowed-rules` filter
 keeps catalog generation explicit. MCMC commands omit these rules, so a missing
 catalog stops MCMC with a

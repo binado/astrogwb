@@ -24,7 +24,7 @@ the model as a boolean mask carried alongside them, which
 :meth:`InferenceInputs.model_kwargs` assembles. That is what lets one compiled
 sampler be reused across bands: a mask is a traced value, while a compressed
 array is a new shape and therefore a new compilation. The catalogs are generated
-on the analysis band (see ``config/catalogs/base/waveform.toml``), so the grid
+on the analysis band (see ``config/waveform.json``), so the grid
 costs no more per sampler step than the band it selects.
 """
 

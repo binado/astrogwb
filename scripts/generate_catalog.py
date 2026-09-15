@@ -1,10 +1,10 @@
 """Generate one reusable waveform catalog from its config layers.
 
-One rule, one file: this merges ``config/catalogs/base/*.toml`` with
-``config/catalogs/defs/<catalog>.toml``, draws that catalog's population from
-the registered NumPyro model it names, generates frequency-domain waveforms
-with the Ripple backend, reduces them to polarization power, and writes
-``outputs/catalogs/<catalog>.h5``.
+One rule, one file: this merges ``config/waveform.json`` and
+``config/catalogs/base/*.toml`` with ``config/catalogs/defs/<catalog>.toml``,
+draws that catalog's population from the registered NumPyro model it names,
+generates frequency-domain waveforms, reduces them to polarization power, and
+writes ``outputs/catalogs/<catalog>.h5``.
 
 The population declaration is a source model composed with a merger-rate
 model, not a graph config, and it is the *same* pair the analysis evaluates
@@ -24,8 +24,8 @@ stochastic values on every evaluation.
 Usage::
 
     uv run --extra paper python scripts/generate_catalog.py \\
+        --config config/waveform.json \\
         --config config/catalogs/base/population.toml \\
-        --config config/catalogs/base/waveform.toml \\
         --config config/catalogs/defs/md-imrphenom-s41-n32768.toml \\
         --output outputs/catalogs/md-imrphenom-s41-n32768.h5
 """
@@ -40,6 +40,7 @@ from pathlib import Path
 import jax
 
 from astrogwb.catalog import PolarizationPowerCatalog
+from astrogwb.paper.config import waveform_generator
 from astrogwb.paper.config.catalogs import (
     CatalogDefinition,
     check_rate_model,
@@ -48,7 +49,6 @@ from astrogwb.paper.config.catalogs import (
 )
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_source_model
 from astrogwb.utils.sampling import sample_sources
-from astrogwb.waveform import RippleGenerator
 
 # x64 must be on before the population draw. `build_catalog` samples before it
 # builds the Ripple-backed generator, and importing ripplegw -- which turns this
@@ -63,8 +63,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Draw a BNS population from its registered NumPyro model, generate "
-            "frequency-domain waveforms with the Ripple backend, and persist "
-            "the polarization power as an astrogwb_catalog HDF5 file."
+            "frequency-domain waveforms, and persist the polarization power as "
+            "an astrogwb_catalog HDF5 file."
         )
     )
     parser.add_argument(
@@ -129,27 +129,21 @@ def build_catalog(definition: CatalogDefinition) -> PolarizationPowerCatalog:
         num_samples=definition.num_samples,
     )
 
-    waveform = definition.waveform
-    generator = RippleGenerator(
-        approximant=waveform.approximant,
-        sampling_frequency=waveform.sampling_frequency,
-        minimum_frequency=waveform.minimum_frequency,
-        maximum_frequency=waveform.maximum_frequency,
-        reference_frequency=waveform.reference_frequency,
-        frequency_resolution=waveform.frequency_resolution,
-    )
+    generator = waveform_generator(**definition.waveform.model_dump())
     logger.info(
         "Generating %s waveforms for %d events (f_min=%.1f Hz, f_ref=%.1f Hz, "
-        "f_s=%.1f Hz, segment=%.4g s, n=%d)",
-        waveform.approximant,
+        "f_s=%.1f Hz)",
+        generator.approximant,
         definition.num_samples,
-        waveform.minimum_frequency,
-        waveform.reference_frequency,
-        waveform.sampling_frequency,
-        generator.segment_duration,
-        generator.n_samples,
+        generator.minimum_frequency,
+        generator.reference_frequency,
+        generator.sampling_frequency,
     )
-    logger.info("Truncated frequency axis to f <= %.1f Hz", waveform.maximum_frequency)
+    segment_duration = getattr(generator, "segment_duration", None)
+    n_samples = getattr(generator, "n_samples", None)
+    if segment_duration is not None and n_samples is not None:
+        logger.info("Grid: segment=%.4g s, n=%d", segment_duration, n_samples)
+    logger.info("Truncated frequency axis to f <= %.1f Hz", generator.maximum_frequency)
 
     # Values are checked once, here, on the concrete catalog: generation is
     # trace-safe and therefore trusts its inputs, so a population carrying a

@@ -127,6 +127,20 @@ def test_plotting_settings_are_not_a_run_layer() -> None:
     assert "plotting.json" not in names
 
 
+def test_waveform_settings_are_not_a_run_layer() -> None:
+    """`config/waveform.json` is catalog generation and must not reach a RunConfig.
+
+    It sits in the same directory as the three shared run layers, so a glob
+    would sweep it in and `extra="forbid"` would then reject every run.
+    """
+    names = {
+        path.name
+        for path in run_config_paths("cosmological-parameters", "ET-triangular")
+    }
+
+    assert "waveform.json" not in names
+
+
 def test_assemble_run_is_merge_config_layers_over_run_config_paths() -> None:
     # The seam the workflow relies on: the rule declares `run_config_paths` as
     # its input and passes them on argv, and `assemble_run` -- what the
@@ -320,8 +334,8 @@ def test_the_shared_blocks_are_declared_once() -> None:
     for name in discover_catalog_names():
         layers = catalog_config_paths(name)
         assert [path.name for path in layers[:-1]] == [
+            "waveform.json",
             "population.toml",
-            "waveform.toml",
         ]
         assert layers[-1].stem == name
         own = load_mapping(layers[-1])

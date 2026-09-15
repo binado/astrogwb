@@ -95,7 +95,9 @@ def test_config_accessors_are_lazy_and_leave_the_backend_free() -> None:
        `configure_runtime` runs, and a late `set_host_device_count` that still
        yields two devices proves nothing consumed that configuration early.
        This is what breaks if anyone adds a `.sample()` smoke check or a
-       `jnp.asarray` to the loader.
+       `jnp.asarray` to the loader. :func:`waveform_generator` is not on that
+       path -- constructing a Ripple kernel does initialize the backend -- so
+       this test only pins that importing its *name* does not import JAX.
 
     Unlike the test above, this one runs from the repository root: the
     accessors resolve `config/*.json` against the caller's cwd by design.
@@ -107,8 +109,10 @@ assert 'numpyro' not in sys.modules, 'importing the package imported numpyro'
 assert 'pydantic' not in sys.modules, 'importing the package imported pydantic'
 assert 'jax' not in sys.modules, 'importing the package imported jax'
 
-from astrogwb.paper.config import fiducials, networks, priors
+from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
 assert 'numpyro' not in sys.modules, 'importing the accessor names imported numpyro'
+assert 'jax' not in sys.modules, 'importing waveform_generator imported jax'
+assert callable(waveform_generator)
 
 assert len(fiducials()) == 10
 assert networks()['ET-2L-aligned-CE-Hanford'] == ('S1', 'R1', 'C1')
