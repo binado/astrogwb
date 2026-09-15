@@ -43,14 +43,18 @@ from astrogwb.paper.config import fiducials, networks, priors
 
 fid = fiducials()
 detectors = networks()["ET-2L-aligned-CE-Hanford"]
+higher_h0 = fiducials(H0=70.0)  # keyword overrides, merged over the file
 ```
 
 These are `config/fiducials.json`, `config/priors.json` and
 `config/networks.json` — the same files the workflow merges into every run, so
 a notebook cannot drift from what the runs sample. `priors()` returns live
-NumPyro distributions. Each call is cached, so a long-lived kernel will not see
-an edit to the JSON until you call `fiducials.cache_clear()` (and likewise for
-the other two).
+NumPyro distributions. Each accessor also takes keyword overrides merged over
+the file, so varying one value does not mean retyping the table; a network name
+is hyphenated, so override one by unpacking a mapping
+(`networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})`). Each call is cached, so
+a long-lived kernel will not see an edit to the JSON until you call
+`fiducials.cache_clear()` (and likewise for the other two).
 
 ## Running them
 

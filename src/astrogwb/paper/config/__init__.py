@@ -20,6 +20,13 @@ them from here instead::
     detectors = networks()["ET-2L-aligned-CE-Hanford"]
     generator = waveform_generator()
 
+Every accessor also takes keyword overrides, merged over the file, so a
+notebook can vary one entry without editing JSON or retyping the table::
+
+    fiducials(H0=70.0)
+    priors(xi_0={"dist": "Uniform", "kwargs": {"low": 0.1, "high": 5.0}})
+    networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})
+
 **These are functions, not module-level dicts, and that is load-bearing.** The
 ``Snakefile`` imports :mod:`astrogwb.paper.config.runs` to build the DAG, which
 executes this module; eager dicts would mean file I/O at import (failing from
@@ -35,8 +42,9 @@ script is the repository root -- the same contract as
 anywhere, pass ``root=`` explicitly.
 
 Each accessor caches its parse and hands back a fresh copy, so a caller that
-mutates what it got does not poison the cache for everyone else. A long-lived
-Jupyter session will not see an edit to the JSON until ``fiducials.cache_clear()``.
+mutates what it got does not poison the cache for everyone else -- overrides are
+merged *after* the cached parse, so they cannot either. A long-lived Jupyter
+session will not see an edit to the JSON until ``fiducials.cache_clear()``.
 """
 
 from __future__ import annotations
@@ -73,7 +81,7 @@ def _load(path: Path, key: str) -> dict[str, Any]:
     return table
 
 
-def fiducials(root: Path | None = None) -> dict[str, float]:
+def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
     """The fiducial hyperparameter values, from ``config/fiducials.json``.
 
     These are **not** the injection: what was injected is recorded in the
@@ -86,14 +94,19 @@ def fiducials(root: Path | None = None) -> dict[str, float]:
     Every fiducial carries a prior in :func:`priors`; ``RunConfig`` retains the
     complete table and ``sampled_params`` selects the NUTS latents, leaving the
     remaining sites to be fixed by NumPyro effect handlers.
+
+    Keyword arguments override the file, and may name a fiducial the file does
+    not declare. An added fiducial is the caller's to keep consistent with
+    :func:`priors` -- only ``RunConfig`` cross-checks the two tables.
     """
-    return {
-        name: float(value)
-        for name, value in _load((root or Path()) / FIDUCIALS_PATH, "fiducials").items()
+    table = {
+        **_load((root or Path()) / FIDUCIALS_PATH, "fiducials"),
+        **kwargs,
     }
+    return {name: float(value) for name, value in table.items()}
 
 
-def priors(root: Path | None = None) -> dict[str, Distribution]:
+def priors(root: Path | None = None, **kwargs: Any) -> dict[str, Distribution]:
     """The prior for each parameter, materialized from ``config/priors.json``.
 
     One entry per fiducial. The returned distributions hold plain Python
@@ -103,18 +116,24 @@ def priors(root: Path | None = None) -> dict[str, Distribution]:
     Note this is the *inference* prior. A diagnostic that scans a parameter is
     free to scan wider (see ``GRID_SCAN_RANGES`` in
     ``scripts/importance_weights_grid.py``); it just has to say so.
+
+    Keyword arguments override the file, and may name a parameter the file does
+    not declare. A value may be a wire-format spec
+    (``{"dist": ..., "kwargs": {...}}``) or an already-built ``numpyro``
+    distribution, which ``materialize_prior`` passes through unchanged.
     """
     # Imported here, not at module scope: `mcmc` reaches pydantic, and the
     # Snakefile's DAG construction imports this package via `config.runs`.
     from astrogwb.paper.config.mcmc import materialize_prior
 
-    return {
-        name: materialize_prior(spec)
-        for name, spec in _load((root or Path()) / PRIORS_PATH, "priors").items()
+    table = {
+        **_load((root or Path()) / PRIORS_PATH, "priors"),
+        **kwargs,
     }
+    return {name: materialize_prior(spec) for name, spec in table.items()}
 
 
-def networks(root: Path | None = None) -> dict[str, tuple[str, ...]]:
+def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ...]]:
     """Detector networks by name, from ``config/networks.json``.
 
     Each run names one of these keys as ``analysis.network``; ``RunConfig``
@@ -126,13 +145,20 @@ def networks(root: Path | None = None) -> dict[str, tuple[str, ...]]:
     the network-comparison figures is
     :data:`astrogwb.paper.plotting.DETECTOR_NETWORKS`, because order is
     presentation -- and because a JSON object is not an ordered thing.
+
+    Keyword arguments override the file, and may name a network the file does
+    not declare -- whose detectors then have to resolve through
+    ``astrogwb.detector`` on their own. Every committed name is hyphenated
+    (``ET-2L-aligned``), so an override has to be unpacked from a mapping
+    rather than written as a literal keyword::
+
+        networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})
     """
-    return {
-        name: tuple(detectors)
-        for name, detectors in _load(
-            (root or Path()) / NETWORKS_PATH, "networks"
-        ).items()
+    table = {
+        **_load((root or Path()) / NETWORKS_PATH, "networks"),
+        **kwargs,
     }
+    return {name: tuple(detectors) for name, detectors in table.items()}
 
 
 def waveform_generator(
