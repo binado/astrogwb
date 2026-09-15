@@ -1,12 +1,12 @@
 """Simulate many spectrum-only SGWB draws in one process.
 
 A polarization-power catalog persists ``(F, N)`` power. This writes only the
-forward-model spectrum ``(draws, F)``: one compiled ``max_events`` plate, a
+forward-model spectrum ``(draws, F)``: a static ``max_events`` plate, a
 free Poisson count per draw, and no catalog materialization.
 
 ``gwb_forward_model`` already samples ``n_events ~ Poisson(R T)`` and masks a
-static plate. This script is the documented :class:`~numpyro.infer.Predictive`
-loop over that model -- not a host-side Poisson draw fed back as
+static plate. This script draws that model with
+:class:`~numpyro.infer.Predictive` -- not a host-side Poisson draw fed back as
 ``observed_num_events``. ``--n-max-sigma`` sizes ``max_events`` from the rate
 tail; a Poisson draw above that capacity is silently capped, as the model
 documents.
@@ -179,29 +179,14 @@ def main(argv: Sequence[str] | None = None) -> None:
             batch_size=args.batch_size,
             max_events=max_events,
         ),
-        num_samples=1,
+        num_samples=args.draws,
         return_sites=("spectral_density", "n_events", "total_merger_rate"),
     )
-
-    def one_draw(key: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
-        draws = simulate(key, params)
-        return (
-            draws["spectral_density"][0],
-            draws["n_events"][0],
-            draws["total_merger_rate"][0],
-        )
-
+    draws = simulate(jax.random.key(args.seed), params)
     frequencies = np.asarray(generator.frequencies)
-    spectral_density = np.empty((args.draws, frequencies.shape[0]), dtype=np.float64)
-    n_events = np.empty(args.draws, dtype=np.int64)
-    merger_rates = np.empty(args.draws, dtype=np.float64)
-    model = jax.jit(one_draw)
-    seed = jax.random.key(args.seed)
-    for draw in range(args.draws):
-        spectrum, draw_n_events, draw_rate = model(jax.random.fold_in(seed, draw))
-        spectral_density[draw] = np.asarray(spectrum)
-        n_events[draw] = int(np.asarray(draw_n_events))
-        merger_rates[draw] = float(np.asarray(draw_rate))
+    spectral_density = np.asarray(draws["spectral_density"])
+    n_events = np.asarray(draws["n_events"], dtype=np.int64)
+    merger_rates = np.asarray(draws["total_merger_rate"], dtype=np.float64)
 
     draw_hyperparameters = {
         name: np.full(args.draws, value, dtype=np.float64)
