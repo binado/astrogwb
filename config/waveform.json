@@ -1,0 +1,10 @@
+{
+  "waveform": {
+    "approximant": "IMRPhenomXAS_NRTidalv3",
+    "sampling_frequency": 8192.0,
+    "minimum_frequency": 2.0,
+    "maximum_frequency": 2048.0,
+    "reference_frequency": 20.0,
+    "frequency_resolution": 1.0
+  }
+}

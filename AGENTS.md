@@ -50,7 +50,9 @@ cannot drift from what the runs sample. `jq` can read them without importing
 the package. A run names a detector network (`analysis.network`) rather than
 listing detectors. `config/plotting.json` is presentation -- LaTeX parameter
 labels and savefig settings, reached through `astrogwb.paper.plotting` -- and
-is deliberately *not* a run layer. There is no assembled-config artifact: every entrypoint takes the layers on argv as repeated `--config`
+is deliberately *not* a run layer. `config/waveform.json` is catalog layer 0,
+reached through `astrogwb.paper.config.waveform_generator()`, and is likewise
+not a run layer. There is no assembled-config artifact: every entrypoint takes the layers on argv as repeated `--config`
 flags, and the workflow rule declares those same files as its `input:`, so the
 dependency edge and the data path are one list. `run_mcmc` writes the resolved
 config next to the chain and stamps the ordered layer paths into it.

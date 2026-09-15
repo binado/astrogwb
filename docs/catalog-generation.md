@@ -25,7 +25,17 @@ the `waveform_catalog` rule and the `catalogs` target pick it up by globbing.
 A catalog config is three layers merged in order -- shared base files, then
 one file per named thing, the same shape a run config has:
 
-1. `config/catalogs/base/population.toml` — the population every catalog is
+1. `config/waveform.json` — the `[waveform]` block every catalog shares.
+   JSON so `jq` can read it; catalog layer 0, not a run layer. Only
+   `config/catalogs/defs/md-taylorf2-s41-n32768.toml` overrides anything here
+   (the approximant). The stored band matches
+   `config/analysis/base/model.toml`'s `[analysis]` `f_min` and `f_max`: the
+   catalog grid *is* the array every model is evaluated on, and a run's band
+   selects bins on it with a mask rather than compressing it.
+   `sampling_frequency` is the waveform backend's Nyquist, not the stored grid.
+   `astrogwb.paper.config.waveform_generator()` builds the generator from this
+   file; `approximant="analytical"` selects the closed-form inspiral.
+2. `config/catalogs/base/population.toml` — the population every catalog is
    drawn from, and the hyperparameters it is drawn at. Those hyperparameters
    are deliberately *not* read from `config/fiducials.json`: a catalog records
    the values it was actually drawn at, copied verbatim into the `.h5` so the
@@ -33,12 +43,10 @@ one file per named thing, the same shape a run config has:
    injection is drawn at GR, so it carries no `xi_0` / `xi_n`). Wiring them
    together would also make every fiducial edit invalidate all eight
    catalogs — GPU jobs — to redraw data that was already correct.
-2. `config/catalogs/base/waveform.toml` — the `[waveform]` block every catalog
-   shares.
 3. `config/catalogs/defs/<name>.toml` — the seed, the sample count, and any
    population or waveform override.
 
-Both base layers are declared as workflow inputs of every catalog, so editing
+Both shared layers are declared as workflow inputs of every catalog, so editing
 either correctly invalidates all of them.
 
 The eight committed catalogs:
@@ -190,8 +198,8 @@ reduction, write.
 
 ```bash
 uv run --extra paper python scripts/generate_catalog.py \
+  --config config/waveform.json \
   --config config/catalogs/base/population.toml \
-  --config config/catalogs/base/waveform.toml \
   --config config/catalogs/defs/md-imrphenom-s41-n32768.toml \
   --output outputs/catalogs/md-imrphenom-s41-n32768.h5
 ```

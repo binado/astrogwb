@@ -68,6 +68,12 @@ ROOT_LAYERS = (FIDUCIALS_PATH, PRIORS_PATH, NETWORKS_PATH)
 #: a run-config layer: nothing a run samples depends on it.
 PLOTTING_PATH = CONFIG_DIR / "plotting.json"
 
+#: Catalog layer 0: the ``[waveform]`` block every catalog inherits. Named
+#: rather than globbed because it sits next to the run JSON files and
+#: ``config/plotting.json``, which must not enter a catalog merge. Deliberately
+#: *not* a run-config layer: ``RunConfig`` is ``extra="forbid"``.
+WAVEFORM_PATH = CONFIG_DIR / "waveform.json"
+
 ANALYSIS_DIR = Path("config/analysis")
 BASE_DIR = ANALYSIS_DIR / "base"
 RUNS_DIR = ANALYSIS_DIR / "runs"
@@ -231,19 +237,34 @@ CATALOG_ROLES = ("injection", "proposal")
 
 
 def catalog_base_paths(root: Path | None = None) -> tuple[Path, ...]:
-    """Every shared ``config/catalogs/base/*.toml`` layer, in merge order."""
-    directory = (root or Path()) / CATALOG_BASE_DIR
+    """Every shared catalog layer, in merge order.
+
+    Layer 0 is ``config/waveform.json`` -- named, because a glob of
+    ``config/*.json`` would also sweep in the run tables and
+    ``config/plotting.json``. Then ``config/catalogs/base/*.toml``. Only
+    ``config/catalogs/defs/md-taylorf2-s41-n32768.toml`` overrides anything in
+    the waveform block (the approximant); the rest of the tree inherits it
+    verbatim. The stored band matches ``config/analysis/base/model.toml``'s
+    ``[analysis]`` ``f_min`` / ``f_max``: the catalog grid *is* the array
+    every model is evaluated on. ``sampling_frequency`` is the waveform
+    backend's Nyquist, not the stored grid.
+    """
+    resolved = root or Path()
+    waveform = resolved / WAVEFORM_PATH
+    if not waveform.is_file():
+        raise ValueError(f"missing shared catalog layer: {waveform}")
+    directory = resolved / CATALOG_BASE_DIR
     paths = tuple(sorted(directory.glob("*.toml")))
     if not paths:
         raise ValueError(f"{directory} declares no base config files")
-    return paths
+    return (waveform, *paths)
 
 
 def catalog_config_paths(name: str, *, root: Path | None = None) -> tuple[Path, ...]:
     """The ordered layer files that make up one catalog's config.
 
     Mirrors :func:`run_config_paths`: the ``Snakefile`` declares exactly these
-    as the catalog rule's inputs, so editing the shared ``[waveform]`` block
+    as the catalog rule's inputs, so editing ``config/waveform.json``
     invalidates every catalog.
     """
     resolved = root or Path()

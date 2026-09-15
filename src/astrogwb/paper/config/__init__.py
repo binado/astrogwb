@@ -6,22 +6,27 @@ not re-exported; import them explicitly.
 
 What this package *does* expose is the three shared tables that
 ``config/fiducials.json``, ``config/priors.json`` and ``config/networks.json``
-own -- the same bytes the workflow merges into every run. Before they lived
-here, the notebook and the figure scripts each kept a hand-written copy, and
-those copies drifted: the notebook sampled ``local_merger_rate`` under a prior
-that excluded its own fiducial. Consume them from here instead::
+own -- the same bytes the workflow merges into every run -- and
+:func:`waveform_generator`, which builds a polarization-power generator from
+``config/waveform.json``. That file is catalog layer 0, not a run layer.
+Before the tables lived here, the notebook and the figure scripts each kept a
+hand-written copy, and those copies drifted: the notebook sampled
+``local_merger_rate`` under a prior that excluded its own fiducial. Consume
+them from here instead::
 
-    from astrogwb.paper.config import fiducials, networks, priors
+    from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
 
     fid = fiducials()
     detectors = networks()["ET-2L-aligned-CE-Hanford"]
+    generator = waveform_generator()
 
 **These are functions, not module-level dicts, and that is load-bearing.** The
 ``Snakefile`` imports :mod:`astrogwb.paper.config.runs` to build the DAG, which
 executes this module; eager dicts would mean file I/O at import (failing from
 any working directory but the repository root) and, for the priors, a numpyro
 import on every ``--dry-run``. :func:`priors` therefore imports
-:func:`~astrogwb.paper.config.mcmc.materialize_prior` inside its own body. A
+:func:`~astrogwb.paper.config.mcmc.materialize_prior` inside its own body;
+:func:`waveform_generator` imports the generator classes the same way. A
 subprocess test in ``tests/paper/test_cli.py`` pins both halves.
 
 Paths are relative to the working directory, which for the workflow and every
@@ -40,13 +45,22 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrogwb.paper.config.runs import FIDUCIALS_PATH, NETWORKS_PATH, PRIORS_PATH
+from astrogwb.paper.config.runs import (
+    FIDUCIALS_PATH,
+    NETWORKS_PATH,
+    PRIORS_PATH,
+    WAVEFORM_PATH,
+)
 from astrogwb.paper.utils import load_mapping
 
 if TYPE_CHECKING:
     from numpyro.distributions import Distribution
 
-__all__ = ["fiducials", "networks", "priors"]
+    from astrogwb.waveform import PolarizationPowerGenerator
+
+__all__ = ["fiducials", "networks", "priors", "waveform_generator"]
+
+_ANALYTICAL_APPROXIMANT = "analytical"
 
 
 @cache
@@ -119,3 +133,48 @@ def networks(root: Path | None = None) -> dict[str, tuple[str, ...]]:
             (root or Path()) / NETWORKS_PATH, "networks"
         ).items()
     }
+
+
+def waveform_generator(
+    root: Path | None = None, **kwargs: Any
+) -> PolarizationPowerGenerator:
+    """Build the polarization-power generator from ``config/waveform.json``.
+
+    Keyword arguments override the file. ``approximant="analytical"`` selects
+    the closed-form inspiral; any other name is a Ripple approximant. Catalog
+    generation passes the merged ``[waveform]`` block as kwargs so a def
+    overlay (the TaylorF2 approximant) still wins.
+
+    Imported here, not at module scope: constructing a generator reaches JAX,
+    and the Snakefile's DAG construction imports this package via
+    ``config.runs``. Ripple construction initializes the XLA backend, so this
+    is not safe to call before ``configure_runtime``.
+    """
+    from astrogwb.constants import ISCO_ALPHA
+    from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
+
+    settings = {**_load((root or Path()) / WAVEFORM_PATH, "waveform"), **kwargs}
+    approximant = str(settings["approximant"])
+    sampling_frequency = float(settings["sampling_frequency"])
+    minimum_frequency = float(settings["minimum_frequency"])
+    maximum_frequency = float(settings["maximum_frequency"])
+    reference_frequency = float(settings["reference_frequency"])
+    frequency_resolution = float(settings["frequency_resolution"])
+    if approximant == _ANALYTICAL_APPROXIMANT:
+        return AnalyticInspiralGenerator(
+            approximant=approximant,
+            sampling_frequency=sampling_frequency,
+            minimum_frequency=minimum_frequency,
+            maximum_frequency=maximum_frequency,
+            reference_frequency=reference_frequency,
+            frequency_resolution=frequency_resolution,
+            alpha=float(settings.get("alpha", ISCO_ALPHA)),
+        )
+    return RippleGenerator(
+        approximant=approximant,
+        sampling_frequency=sampling_frequency,
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
+        reference_frequency=reference_frequency,
+        frequency_resolution=frequency_resolution,
+    )

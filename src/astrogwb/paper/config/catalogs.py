@@ -50,7 +50,15 @@ _STRICT = ConfigDict(frozen=True, extra="forbid")
 
 
 class WaveformConfig(BaseModel):
-    """Waveform-generation settings for one catalog."""
+    """Waveform-generation settings for one catalog.
+
+    Owned by ``config/waveform.json``; a catalog def may overlay fields, and
+    only ``md-taylorf2-s41-n32768`` does (the approximant). The stored band
+    matches ``config/analysis/base/model.toml``'s ``[analysis]`` ``f_min`` /
+    ``f_max``. ``sampling_frequency`` is the backend Nyquist, not the stored
+    grid. ``approximant="analytical"`` selects the closed-form inspiral
+    through :func:`astrogwb.paper.config.waveform_generator`.
+    """
 
     model_config = _STRICT
 

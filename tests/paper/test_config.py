@@ -9,6 +9,8 @@ from config_fixtures import example_raw
 from pydantic import ValidationError
 from repo import REPO_ROOT
 
+from astrogwb.constants import ISCO_ALPHA
+from astrogwb.paper.config import waveform_generator
 from astrogwb.paper.config.mcmc import build_run_config, prior_to_spec
 from astrogwb.paper.config.runs import (
     assemble_run,
@@ -16,6 +18,7 @@ from astrogwb.paper.config.runs import (
     load_base,
 )
 from astrogwb.paper.utils import deep_merge, load_mapping
+from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
 
 PAPER_ROOT = REPO_ROOT
 
@@ -317,3 +320,21 @@ def test_prior_spec_rejects_missing_required_key() -> None:
 
     with pytest.raises(ValidationError, match="scale"):
         build_run_config(raw)
+
+
+def test_waveform_generator_defaults_to_the_committed_ripple() -> None:
+    generator = waveform_generator(REPO_ROOT)
+
+    assert isinstance(generator, RippleGenerator)
+    assert generator.approximant == "IMRPhenomXAS_NRTidalv3"
+    assert generator.minimum_frequency == 2.0
+    assert generator.maximum_frequency == 2048.0
+
+
+def test_waveform_generator_kwargs_select_the_analytical_inspiral() -> None:
+    generator = waveform_generator(REPO_ROOT, approximant="analytical")
+
+    assert isinstance(generator, AnalyticInspiralGenerator)
+    assert generator.approximant == "analytical"
+    assert generator.alpha == ISCO_ALPHA
+    assert generator.minimum_frequency == 2.0

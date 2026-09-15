@@ -48,6 +48,8 @@ config/catalogs/defs/<name>.toml -> outputs/catalogs/<name>.h5
 config/fiducials.json                           fiducial value of every parameter
 config/priors.json                              prior on every parameter
 config/networks.json                            each detector network, by name
+config/waveform.json                            [waveform] every catalog shares
+                                                (catalog layer 0; not a run layer)
 config/plotting.json                            LaTeX labels and savefig settings
                                                 (presentation; not a run layer)
 config/analysis/base/*.toml                     the remaining shared settings
