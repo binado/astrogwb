@@ -124,6 +124,22 @@ class RedshiftDistribution(InterpolatedDistribution):
         return self._source_frame_distribution(redshift, params)
 
     @property
+    def source_frame_law(self) -> SourceFrameDistributionFn:
+        r"""The stored rate shape :math:`\psi` itself, not an evaluation of it.
+
+        Distinct from :meth:`source_frame_distribution`, which evaluates the
+        shape at a redshift. This hands back the callable, so a caller can
+        rebuild an equivalent distribution at new hyperparameters -- see
+        :func:`~astrogwb.populations.infer_merger_rate_fn`.
+
+        Registered shapes are module-level functions, so the value is a
+        singleton: a rebuild puts the *identical* object in
+        ``pytree_aux_fields``, which JAX hashes into the jit cache key. A bound
+        method would be a fresh object per access and retrace on every rebuild.
+        """
+        return self._source_frame_distribution
+
+    @property
     def redshift_grid(self) -> jax.Array:
         """The redshift grid -- an alias for the interpolant abscissa ``x``."""
         return self.x

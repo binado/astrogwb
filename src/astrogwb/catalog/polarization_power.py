@@ -33,15 +33,19 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.frequency import uniform_grid_spacing
-from astrogwb.populations import MergerRateFn, PopulationRecord, SourceFn
+from astrogwb.populations import (
+    REDSHIFT_SITE,
+    MergerRateFn,
+    PopulationRecord,
+    SourceFn,
+)
 from astrogwb.waveform import PolarizationPowerGenerator
 
 __all__ = ["REDSHIFT_SITE", "PolarizationPowerCatalog"]
 
-#: The redshift site every population must declare. Its density can never be
-#: excluded: redshift is the one source parameter the target and the proposal
-#: are guaranteed to disagree on.
-REDSHIFT_SITE = "redshift"
+# ``REDSHIFT_SITE`` is owned by :mod:`astrogwb.populations.registry`, beside the
+# models that declare the site, and re-exported here: a catalog's redshift
+# column and the population's redshift site are the same name by construction.
 
 #: Construction settings a population model must take for a catalog drawn from
 #: it to support :meth:`PolarizationPowerCatalog.restrict_redshift`. Narrowing

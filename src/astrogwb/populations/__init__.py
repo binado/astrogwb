@@ -11,6 +11,15 @@ self-describing -- the file records the two registry names, both callables'
 construction settings, and the hyperparameters they were drawn at, which is
 everything needed to reconstruct the density that produced it.
 
+The two declarations stay separate because they are independent: a
+guard-mixture *redshift law* pairs with the same Madau-Dickinson *rate* the
+physical population uses. Where a population's redshift law does determine its
+own rate -- any model drawing redshift from a
+:class:`~astrogwb.distributions.redshift.base.RedshiftDistribution` -- the rate
+need not be restated by hand: :func:`infer_merger_rate_fn` derives it from the
+declaration itself, and a core test holds the registered rate to the same
+value.
+
 Importing this package registers every model it ships, the same way
 :mod:`astrogwb.detector` exposes its own submodules. That import pulls in JAX
 and NumPyro; :func:`astrogwb.paper.runtime.configure_runtime` must still run
@@ -32,10 +41,17 @@ from astrogwb.populations.bns_madau_dickinson import (
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
+from astrogwb.populations.merger_rate import (
+    ABSOLUTE_RATE_PARAMETER,
+    infer_merger_rate_fn,
+    probe_redshift_distribution,
+    require_absolute_rate,
+)
 from astrogwb.populations.record import PopulationRecord
 from astrogwb.populations.registry import (
     DEFAULT_DENSITY_SITES,
     DEFAULT_MERGER_RATE_MODEL,
+    REDSHIFT_SITE,
     SHARED_MODEL_KWARGS,
     MergerRateFn,
     SourceFn,
@@ -48,9 +64,11 @@ from astrogwb.populations.registry import (
 )
 
 __all__ = [
+    "ABSOLUTE_RATE_PARAMETER",
     "AMPLITUDE_PARAMETERS",
     "DEFAULT_DENSITY_SITES",
     "DEFAULT_MERGER_RATE_MODEL",
+    "REDSHIFT_SITE",
     "SHARED_MODEL_KWARGS",
     "MergerRateFn",
     "PopulationRecord",
@@ -65,11 +83,14 @@ __all__ = [
     "bns_md_uniform_mixture",
     "build_merger_rate_fn",
     "build_source_model",
+    "infer_merger_rate_fn",
     "known_merger_rate_models",
     "known_source_models",
     "madau_dickinson_total_merger_rate",
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
+    "probe_redshift_distribution",
     "register_merger_rate_model",
     "register_source_model",
+    "require_absolute_rate",
 ]

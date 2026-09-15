@@ -34,6 +34,7 @@ from jax.typing import ArrayLike
 __all__ = [
     "DEFAULT_DENSITY_SITES",
     "DEFAULT_MERGER_RATE_MODEL",
+    "REDSHIFT_SITE",
     "SHARED_MODEL_KWARGS",
     "MergerRateFn",
     "SourceFn",
@@ -58,11 +59,19 @@ type MergerRateFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
 _SOURCE_REGISTRY: dict[str, Callable[..., Mapping[str, jax.Array]]] = {}
 _RATE_REGISTRY: dict[str, Callable[..., jax.Array]] = {}
 
+#: The redshift site every source model must declare. Its density can never be
+#: excluded: redshift is the one source parameter the target and the proposal
+#: are guaranteed to disagree on. It lives beside the registry because both the
+#: populations that declare it and the catalogs that store it need the name, and
+#: :mod:`astrogwb.catalog` imports this package rather than the other way round;
+#: it is re-exported as ``astrogwb.catalog.REDSHIFT_SITE``.
+REDSHIFT_SITE = "redshift"
+
 #: Density factors a catalog selects when nothing narrower is requested.
-#: Every registered source model declares ``redshift`` -- the one source
-#: parameter whose density never cancels in an importance weight.
+#: Every registered source model declares :data:`REDSHIFT_SITE` -- the one
+#: source parameter whose density never cancels in an importance weight.
 DEFAULT_DENSITY_SITES: tuple[str, ...] = (
-    "redshift",
+    REDSHIFT_SITE,
     "source_frame_mass_1",
     "source_frame_mass_2",
 )

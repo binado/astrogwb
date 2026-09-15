@@ -70,7 +70,9 @@ from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
 )
+from astrogwb.populations.merger_rate import require_absolute_rate
 from astrogwb.populations.registry import (
+    REDSHIFT_SITE,
     register_merger_rate_model,
     register_source_model,
 )
@@ -238,7 +240,7 @@ def _redshift(
         maximum_redshift=z_max,
         n_grid=n_grid,
     )
-    redshift = numpyro.sample("redshift", redshift_distribution)
+    redshift = numpyro.sample(REDSHIFT_SITE, redshift_distribution)
     return jnp.asarray(redshift), redshift_distribution
 
 
@@ -250,18 +252,16 @@ def madau_dickinson_total_merger_rate(
 
     ``params`` must carry ``H0``, ``Omega_m``, ``gamma``, ``kappa``, ``z_peak``
     and ``local_merger_rate`` (in :math:`\mathrm{Gpc}^{-3}\,\mathrm{yr}^{-1}`).
-    ``local_merger_rate`` is required explicitly here rather than left to the
-    underlying rate shape's own ``params.get(..., 1.0)`` default: a
-    merger-rate model silently normalizing to an implicit 1.0 has no
-    meaningful use, so a missing physical rate fails at the model that owns
-    it rather than propagating a placeholder into a spectrum.
+    The last is enforced by
+    :func:`~astrogwb.populations.merger_rate.require_absolute_rate`, shared with
+    :func:`~astrogwb.populations.infer_merger_rate_fn` so the registered rate
+    and an inferred one cannot disagree about what a rate requires.
+
+    Equivalent to inferring the rate from any of the non-mixture source models
+    below, which ``tests/core/test_populations.py`` asserts: the two
+    constructions build the same redshift table from the same settings.
     """
-    if "local_merger_rate" not in params:
-        raise ValueError(
-            "madau_dickinson_total_merger_rate requires "
-            "params['local_merger_rate'] (Gpc^-3 yr^-1): a merger-rate model "
-            "has no meaningful default rate"
-        )
+    require_absolute_rate(params, label="madau_dickinson_total_merger_rate")
     redshift_distribution = MadauDickinsonRedshiftDistribution(
         params=params,
         minimum_redshift=z_min,
@@ -333,7 +333,7 @@ def bns_md_uniform_mixture(
         [redshift_distribution, dist.Uniform(z_min, z_max)],
         support=redshift_distribution.support,
     )
-    redshift = jnp.asarray(numpyro.sample("redshift", mixture))
+    redshift = jnp.asarray(numpyro.sample(REDSHIFT_SITE, mixture))
     return _declare_bns_madau_dickinson(
         params,
         redshift=redshift,
@@ -427,7 +427,7 @@ def bns_md_gaussian_uniform_mixture(
         [redshift_distribution, dist.Uniform(z_min, z_max)],
         support=redshift_distribution.support,
     )
-    redshift = jnp.asarray(numpyro.sample("redshift", mixture))
+    redshift = jnp.asarray(numpyro.sample(REDSHIFT_SITE, mixture))
     return _declare_bns_madau_dickinson(
         params,
         redshift=redshift,

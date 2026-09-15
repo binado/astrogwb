@@ -149,6 +149,22 @@ def test_source_frame_distribution_is_the_rate() -> None:
     )
 
 
+def test_source_frame_law_is_a_singleton_across_constructions() -> None:
+    """The rate shape is shared, not copied.
+
+    :func:`~astrogwb.populations.infer_merger_rate_fn` rebuilds a distribution
+    from this accessor, and the rebuilt one carries the shape as pytree *aux*
+    data, which JAX hashes into the jit cache key. A fresh callable per
+    construction -- a lambda, a bound method -- would retrace every rebuild.
+    """
+    first, second = _distribution(), _distribution(H0=70.0)
+    assert first.source_frame_law is second.source_frame_law
+    np.testing.assert_array_equal(
+        np.asarray(first.source_frame_law(SAMPLE_REDSHIFTS, FIDUCIALS)),
+        np.asarray(first.source_frame_distribution(SAMPLE_REDSHIFTS, FIDUCIALS)),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Normalization, CDF and sampling
 # --------------------------------------------------------------------------- #

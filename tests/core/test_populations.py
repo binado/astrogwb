@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from functools import partial
+from typing import Any, cast
 
 import jax
 import jax.numpy as jnp
@@ -44,9 +45,11 @@ from astrogwb.catalog import REDSHIFT_SITE
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
+    MergerRateFn,
     SourceFn,
     build_merger_rate_fn,
     build_source_model,
+    infer_merger_rate_fn,
     known_merger_rate_models,
     known_source_models,
     register_merger_rate_model,
@@ -536,6 +539,148 @@ def test_uniform_mixture_rejects_an_out_of_range_fraction(fraction: float) -> No
     model = _uniform_mixture_model(fraction)
     with pytest.raises(ValueError, match="uniform_mixing_fraction"):
         evaluate(model, POPULATION_PARAMS, sample_values())
+
+
+# --------------------------------------------------------------------------- #
+# The merger rate a redshift law already determines
+# --------------------------------------------------------------------------- #
+#: Source models whose ``redshift`` site is a bare ``RedshiftDistribution``, so
+#: the total merger rate is the normalization of a table the model has already
+#: built.
+#:
+#: Each is paired with hyperparameters complete enough to *execute* it, not just
+#: to evaluate its redshift law: inference probes the model, so the
+#: modified-propagation variants need ``xi_0``/``xi_n`` here even though the
+#: rate does not depend on them. That is the same requirement
+#: :func:`~astrogwb.sampling.validate_source_model` has.
+INFERABLE_MODELS: dict[str, dict[str, float]] = {
+    "bns_md_cosmological": POPULATION_PARAMS,
+    "bns_md_modified_propagation": FIDUCIALS,
+    "bns_md_gaussian_cosmological": GAUSSIAN_PARAMS,
+    "bns_md_gaussian_modified_propagation": GAUSSIAN_FIDUCIALS,
+}
+
+#: A second point in hyperparameter space, off the probe point in every
+#: direction the rate depends on: the cosmology, the rate shape, and the
+#: absolute normalization.
+MOVED_PARAMS: dict[str, float] = {
+    "H0": 70.0,
+    "gamma": 2.0,
+    "kappa": 5.5,
+    "z_peak": 2.2,
+    "local_merger_rate": 1000.0,
+}
+
+
+def _settings(**extra: float) -> dict[str, float]:
+    return {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID, **extra}
+
+
+def _registered_rate_fn() -> MergerRateFn:
+    return build_merger_rate_fn("madau_dickinson", settings=_settings())
+
+
+@pytest.mark.parametrize("name", INFERABLE_MODELS)
+def test_inferred_rate_is_the_registered_rate(name: str) -> None:
+    """The one check the two registries never had.
+
+    ``registry`` is explicit that nothing compares a registered source model
+    against the rate it is paired with: "re-pointing a registered key at a
+    different density would be invisible here". For a population whose redshift
+    law *is* its rate, this closes that hole -- and bit-exactly, since both
+    constructions build the same table from the same settings.
+    """
+    params = INFERABLE_MODELS[name]
+    inferred = infer_merger_rate_fn(
+        build_source_model(name, settings=_settings()), params
+    )
+    assert inferred(params) == _registered_rate_fn()(params)
+
+
+@pytest.mark.parametrize("name", INFERABLE_MODELS)
+def test_inferred_rate_tracks_hyperparameters_off_the_probe_point(name: str) -> None:
+    """The probe supplies a recipe, not a value.
+
+    Closing over the probed distribution instead would freeze the rate at the
+    hyperparameters it was built with -- correct at the probe point and wrong
+    everywhere NUTS goes, with no shape error to show it.
+    """
+    params = INFERABLE_MODELS[name]
+    inferred = infer_merger_rate_fn(
+        build_source_model(name, settings=_settings()), params
+    )
+    registered = _registered_rate_fn()
+    moved = {**params, **MOVED_PARAMS}
+
+    assert inferred(moved) == registered(moved)
+    assert inferred(moved) != inferred(params)
+    # And the probe point still evaluates correctly afterwards.
+    assert inferred(params) == registered(params)
+
+
+def test_inferred_rate_is_jittable_without_retracing_per_call() -> None:
+    params = POPULATION_PARAMS
+    inferred = infer_merger_rate_fn(mock_population_model(), params)
+    jitted = jax.jit(inferred)
+    moved = {**params, **MOVED_PARAMS}
+
+    # Not bit-exact: XLA is free to reassociate the trapezoid sum, so a jitted
+    # rate agrees with an eager one to round-off, not to the last bit. The
+    # bit-exact claim is between the inferred and registered rates, which run
+    # the same code path -- see above.
+    for values in (params, moved):
+        np.testing.assert_allclose(
+            np.asarray(jitted(values)), np.asarray(inferred(values)), rtol=1e-14
+        )
+    # One signature, so one trace: the captured rate shape is a singleton and
+    # the window is closed-over data, not an argument. This is the recompile
+    # hazard `registry` warns about, so it is worth reaching for JAX's private
+    # cache counter rather than settling for value agreement alone.
+    assert cast(Any, jitted)._cache_size() == 1
+
+
+@pytest.mark.parametrize(
+    "name", ["bns_md_uniform_mixture", "bns_md_gaussian_uniform_mixture"]
+)
+def test_a_mixture_redshift_law_carries_no_rate_to_infer(name: str) -> None:
+    """A guard mixture is a proposal density; its normalization is not a rate.
+
+    The component order is not a contract, so unwrapping the first component
+    would silently return whichever rate it happened to hold.
+    """
+    params = GAUSSIAN_PARAMS if "gaussian" in name else POPULATION_PARAMS
+    model = build_source_model(name, settings=_settings(uniform_mixing_fraction=0.1))
+    with pytest.raises(TypeError, match=f"{REDSHIFT_SITE}.*MixtureGeneral"):
+        infer_merger_rate_fn(model, params)
+
+
+def test_a_model_without_a_redshift_site_is_rejected() -> None:
+    def no_redshift(params: Mapping[str, ArrayLike]) -> dict[str, jax.Array]:
+        return {"source_frame_mass_1": jnp.asarray(numpyro.sample("m", dist.Uniform()))}
+
+    with pytest.raises(ValueError, match=REDSHIFT_SITE):
+        infer_merger_rate_fn(no_redshift, POPULATION_PARAMS)
+
+
+def test_an_inferred_rate_requires_the_physical_rate_parameter() -> None:
+    """The same guard the registered rate applies, from the same function."""
+    without_rate = {
+        name: value
+        for name, value in POPULATION_PARAMS.items()
+        if name != "local_merger_rate"
+    }
+    inferred = infer_merger_rate_fn(mock_population_model(), POPULATION_PARAMS)
+    with pytest.raises(ValueError, match="local_merger_rate"):
+        inferred(without_rate)
+
+
+def test_inference_is_isolated_from_outer_handlers() -> None:
+    """The probe executes a whole source model; none of it may reach a trace."""
+    with handlers.trace() as outer, handlers.seed(rng_seed=0):
+        inferred = infer_merger_rate_fn(mock_population_model(), POPULATION_PARAMS)
+        rate = inferred(POPULATION_PARAMS)
+    assert outer == {}
+    assert rate == _registered_rate_fn()(POPULATION_PARAMS)
 
 
 # --------------------------------------------------------------------------- #
