@@ -20,8 +20,12 @@ on:
         default: true
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Include event_name so push/PR CI and manual dispatch do not share a group
+  # (otherwise a push to main cancels an in-flight integration run, and vice versa).
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  # Keep cancel-in-progress for push/PR supersession; never cancel expensive
+  # manual integration runs when a second dispatch lands on the same ref.
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 # Every `run:` below is a `just` recipe, so the command a contributor runs
 # locally and the command CI runs are the same string.
@@ -72,7 +76,8 @@ jobs:
 
   test-integration:
     name: Test integration (Python 3.12)
-    if: github.event_name == 'workflow_dispatch' && (inputs.run_integration == true || inputs.run_integration == 'true' || inputs.run_integration == null)
+    # Boolean inputs only: do not compare to null — Actions coerces false == null.
+    if: github.event_name == 'workflow_dispatch' && inputs.run_integration
     needs: [check]
     runs-on: ubuntu-latest
     steps:
