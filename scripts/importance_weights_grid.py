@@ -188,7 +188,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             "bns_md_modified_propagation", settings=grid_settings
         ),
         merger_rate_fn=build_merger_rate_fn(settings=grid_settings),
-        average_mode="analytic_inclination",
     )[1]
 
     figures: list[tuple[Figure, Path]] = []

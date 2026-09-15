@@ -172,7 +172,6 @@ def resolutions(fine_catalog: PolarizationPowerCatalog) -> dict[int, dict[str, A
         fine_catalog,
         source_model=mock_target_model(),
         merger_rate_fn=mock_merger_rate_fn(),
-        average_mode="analytic_inclination",
     )
     total_merger_rate = jnp.asarray(estimator(FIDUCIALS)[1]["total_merger_rate"])
 
@@ -195,7 +194,7 @@ def resolutions(fine_catalog: PolarizationPowerCatalog) -> dict[int, dict[str, A
             run["polarization_power"],
             jnp.ones(NUM_SOURCES),
             total_merger_rate,
-            average_mode="analytic_inclination",
+            source_parameters=run["samples"],
         )
         run["snr_squared"] = float(
             spectral_snr_squared(
@@ -219,7 +218,7 @@ def _log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
         run["polarization_power"],
         jnp.exp(log_weights),
         total_merger_rate,
-        average_mode="analytic_inclination",
+        source_parameters=run["samples"],
     )
     return float(jnp.sum(dist.Normal(model, noise_scale).log_prob(run["observed"])))
 

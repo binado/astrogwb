@@ -1,14 +1,31 @@
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Mapping
 
 import jax
 import jax.numpy as jnp
+from jax.typing import ArrayLike
 
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO
 from astrogwb.cosmology import hubble_constant_si
 
-AverageMode = Literal["analytic_inclination", "catalog_inclination"]
+
+def inclination_averaging_factor(source_parameters: Mapping[str, ArrayLike]) -> float:
+    """Return the static inclination factor implied by source columns.
+
+    A source mapping with an ``inclination`` column has already folded each
+    source's orientation into its waveform power.  Without that column,
+    waveform generators use the face-on orientation and this factor converts
+    the resulting power to the isotropic inclination average.
+
+    Mapping keys are part of a JAX pytree's static structure, so this ordinary
+    Python branch is resolved while tracing and is safe under :func:`jax.jit`.
+    """
+    return (
+        1.0
+        if "inclination" in source_parameters
+        else INCLINATION_AVERAGE_TO_FACE_ON_RATIO
+    )
 
 
 def spectral_density(
@@ -16,17 +33,10 @@ def spectral_density(
     weights: jax.Array,
     total_merger_rate: float | jax.Array,
     *,
-    average_mode: AverageMode,
+    source_parameters: Mapping[str, ArrayLike],
 ) -> jax.Array:
-    # Population graphs generate every source face-on; scaling by <g>/g(0)
-    # turns that catalog into an inclination-averaged one.
-    factor = (
-        INCLINATION_AVERAGE_TO_FACE_ON_RATIO
-        if average_mode == "analytic_inclination"
-        else 1.0
-    )
     return (
-        factor
+        inclination_averaging_factor(source_parameters)
         * total_merger_rate
         * jnp.dot(polarization_power, weights)
         / weights.shape[0]

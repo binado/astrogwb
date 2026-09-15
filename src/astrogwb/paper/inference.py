@@ -51,7 +51,7 @@ from astrogwb.distributions.amplitude import (
     quadrature_grid,
 )
 from astrogwb.frequency import frequency_mask as make_frequency_mask
-from astrogwb.gwb import AverageMode, spectral_density
+from astrogwb.gwb import spectral_density
 from astrogwb.importance.spectral import LogWeightsFn, build_importance_spectrum
 from astrogwb.paper.catalogs import validate_matching_frequency_grids
 from astrogwb.paper.config.mcmc import AnalysisGrid, RunConfig
@@ -248,7 +248,7 @@ def prepare_observation(
         power,
         jnp.ones(power.shape[1]),
         total_merger_rate,
-        average_mode="analytic_inclination",
+        source_parameters=restricted.source_parameters,
     )
     logger.info(
         "Constructed independent fiducial observed spectrum (rate0=%.4e /s)",
@@ -296,7 +296,6 @@ def prepare_inference_inputs(
     detectors: Sequence[str],
     target_source_model: SourceFn,
     target_merger_rate_fn: MergerRateFn,
-    average_mode: AverageMode = "analytic_inclination",
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs.
 
@@ -304,10 +303,6 @@ def prepare_inference_inputs(
     callables, normally :func:`target_source_model` and
     :func:`target_merger_rate_fn` of the run config; build them once per run.
 
-    ``average_mode`` is the inclination convention the spectrum contraction
-    uses. It belongs here rather than at the model-building sites because the
-    bound spectrum owns it: once the catalog is bound, the model itself never
-    sees a polarization power array to average.
     """
     observation = prepare_observation(injection, grid=grid)
 
@@ -372,7 +367,6 @@ def prepare_inference_inputs(
         proposal_catalog,
         source_model=target_source_model,
         merger_rate_fn=target_merger_rate_fn,
-        average_mode=average_mode,
     )
     return InferenceInputs(
         observation=observation,

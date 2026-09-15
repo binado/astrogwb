@@ -29,7 +29,7 @@ from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.catalog import REDSHIFT_SITE, PolarizationPowerCatalog
 from astrogwb.cosmology import log_gw_em_ratio
-from astrogwb.gwb.spectral import AverageMode, spectral_density
+from astrogwb.gwb.spectral import spectral_density
 from astrogwb.importance import spectral
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.spectral import (
@@ -133,7 +133,6 @@ def _catalog(
 
 
 def _importance(
-    average_mode: AverageMode = "catalog_inclination",
     *,
     catalog: PolarizationPowerCatalog | None = None,
     source_model: SourceFn | None = None,
@@ -144,7 +143,6 @@ def _importance(
         _catalog() if catalog is None else catalog,
         source_model=mock_target_model() if source_model is None else source_model,
         merger_rate_fn=mock_merger_rate_fn(),
-        average_mode=average_mode,
         frequency_mask=frequency_mask,
     )
     return dict(spectrum[0].keywords)  # ty: ignore[unresolved-attribute]
@@ -186,7 +184,6 @@ def test_direct_construction_from_prepared_arrays_is_supported() -> None:
         proposal_log_prob=jnp.zeros(4),
         log_reference_distance=jnp.log(jnp.full(4, 1234.5)),
         density_sites=DEFAULT_DENSITY_SITES,
-        average_mode="catalog_inclination",
     )
     prediction, extras = spectrum(FIDUCIALS)
     assert prediction.shape == (3,)
@@ -242,13 +239,11 @@ def _spectrum(
     *,
     catalog: PolarizationPowerCatalog | None = None,
     frequency_mask: ArrayLike | None = None,
-    average_mode: AverageMode = "catalog_inclination",
 ):
     return build_importance_spectrum(
         _catalog() if catalog is None else catalog,
         source_model=mock_target_model(),
         merger_rate_fn=mock_merger_rate_fn(),
-        average_mode=average_mode,
         frequency_mask=frequency_mask,
     )
 
@@ -323,7 +318,7 @@ def test_a_catalog_reweighted_to_its_own_proposal_has_exactly_zero_log_weights()
     spectrum, extras = importance_spectral_density(at_generating, **importance)
     np.testing.assert_allclose(
         spectrum,
-        float(jnp.asarray(extras["total_merger_rate"])) * POWER.mean(axis=1),
+        0.4 * float(jnp.asarray(extras["total_merger_rate"])) * POWER.mean(axis=1),
         rtol=1e-14,
     )
     np.testing.assert_array_equal(extras["importance_relative_ess"], 1.0)
@@ -363,7 +358,7 @@ def _grid_reference(
             importance["polarization_power"],
             jnp.exp(log_weights),
             rate,
-            average_mode=importance["average_mode"],
+            source_parameters=importance["source_parameters"],
         ), {
             "total_merger_rate": jnp.asarray(rate),
             "importance_relative_ess": relative_ess(log_weights),
@@ -373,11 +368,10 @@ def _grid_reference(
 
 
 @pytest.mark.parametrize("params", [FIDUCIALS, OFF_FIDUCIALS])
-@pytest.mark.parametrize("mode", ["analytic_inclination", "catalog_inclination"])
 def test_spectrum_matches_the_grid_formula_spectrum_rate_and_ess(
-    params: dict[str, float], mode: AverageMode
+    params: dict[str, float],
 ) -> None:
-    importance = _importance(mode)
+    importance = _importance()
     actual = importance_spectral_density(params, **importance)
     expected = _grid_reference(importance)(params)
     assert set(actual[1]) == {"total_merger_rate", "importance_relative_ess"}
@@ -466,7 +460,7 @@ def test_precomputed_mixture_density_is_used_in_estimate() -> None:
         POWER,
         jnp.exp(manual_log_weights),
         rate,
-        average_mode=mixed["average_mode"],
+        source_parameters=mixed["source_parameters"],
     )
     np.testing.assert_allclose(
         importance_spectral_density(FIDUCIALS, **mixed)[0], expected, rtol=1e-13

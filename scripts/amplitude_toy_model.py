@@ -141,7 +141,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     weights_fid = jnp.ones((n_samples,))
     rate_fid = amplitude_fiducial * merger_rate_norm
     observed_spectral_density = spectral_density(
-        polarization_power, weights_fid, rate_fid, average_mode="analytic_inclination"
+        polarization_power, weights_fid, rate_fid, source_parameters={}
     )
     frequencies, polarization_power, observed_spectral_density, effective_psd_arr = (
         apply_frequency_mask(
@@ -163,7 +163,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             polarization_power,
             weights_fid,
             total_merger_rate,
-            average_mode="analytic_inclination",
+            source_parameters={},
         )
         return prediction, {"total_merger_rate": total_merger_rate}
 

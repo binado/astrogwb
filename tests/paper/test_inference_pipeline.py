@@ -459,7 +459,6 @@ def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
             inputs.proposal,
             source_model=target_source_model(config),
             merger_rate_fn=target_merger_rate_fn(config),
-            average_mode="analytic_inclination",
             frequency_mask=inputs.observation.frequency_mask,
         )[0],
     )
@@ -610,7 +609,10 @@ def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.
         - 2.0 * (log_target_distance - log_reference_distance)
     )
     return spectral_density(
-        power, jnp.exp(log_weights), rate, average_mode="analytic_inclination"
+        power,
+        jnp.exp(log_weights),
+        rate,
+        source_parameters=catalog.source_parameters,
     )
 
 
@@ -686,7 +688,6 @@ def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights
         proposal_catalog,
         source_model=proposal_catalog.get_source_model(),
         merger_rate_fn=proposal_catalog.get_merger_rate_fn(),
-        average_mode="analytic_inclination",
     )[1]
     log_weights = log_weights_fn(proposal_catalog.fiducials)
     np.testing.assert_array_equal(np.asarray(log_weights), np.zeros(N_SOURCES))

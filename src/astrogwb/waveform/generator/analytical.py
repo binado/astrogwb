@@ -167,14 +167,16 @@ def _normalize_source_parameters(
     source_frame_mass_2: JaxArrayLike,
     redshift: JaxArrayLike,
     luminosity_distance: JaxArrayLike,
-    inclination: JaxArrayLike,
+    inclination: JaxArrayLike | None,
 ) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     parameters = (
         _normalize_source_parameter("source_frame_mass_1", source_frame_mass_1),
         _normalize_source_parameter("source_frame_mass_2", source_frame_mass_2),
         _normalize_source_parameter("redshift", redshift),
         _normalize_source_parameter("luminosity_distance", luminosity_distance),
-        _normalize_source_parameter("inclination", inclination),
+        _normalize_source_parameter(
+            "inclination", 0.0 if inclination is None else inclination
+        ),
     )
     (
         source_frame_mass_1_array,
@@ -264,7 +266,7 @@ def inspiral_polarization_power(
     parameters:
         Source population mapping with ``source_frame_mass_1``,
         ``source_frame_mass_2``, ``redshift``, ``luminosity_distance``, and
-        ``inclination`` entries. The component masses are in solar masses,
+        entries. ``inclination`` is optional and defaults to face-on. The component masses are in solar masses,
         luminosity distance is in Mpc, and inclination is in radians. Redshift
         enters only by redshifting the masses -- both the chirp mass in the
         amplitude and the total mass in the cutoff.
@@ -284,7 +286,7 @@ def inspiral_polarization_power(
         source_frame_mass_2=parameters["source_frame_mass_2"],
         redshift=parameters["redshift"],
         luminosity_distance=parameters["luminosity_distance"],
-        inclination=parameters["inclination"],
+        inclination=parameters.get("inclination"),
     )
     return _batched_inspiral_power(frequency_grid, *source_parameters, alpha_value)
 

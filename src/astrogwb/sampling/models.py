@@ -13,7 +13,6 @@ target outside inference::
         catalog,
         source_model=target_source_model,
         merger_rate_fn=target_merger_rate_fn,
-        average_mode="analytic_inclination",
     )[0]
     model = partial(
         gwb_spectral_density_model,

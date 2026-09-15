@@ -204,11 +204,10 @@ def _declare_bns_madau_dickinson(
         "luminosity_distance", luminosity_distance
     )
 
-    # Face-on, phase- and time-aligned: the catalog pairs with
-    # ``average_mode="analytic_inclination"``, which converts face-on power
-    # into the inclination average analytically.
+    # Phase- and time-aligned. Waveform generators default a missing
+    # inclination to face-on; its absence also marks the catalog for analytic
+    # inclination averaging during the spectral contraction.
     zeros = jnp.zeros_like(redshift)
-    inclination = numpyro.deterministic("inclination", zeros)
     coa_phase = numpyro.deterministic("coa_phase", zeros)
     coa_time = numpyro.deterministic("coa_time", zeros)
 
@@ -223,7 +222,6 @@ def _declare_bns_madau_dickinson(
         "detector_frame_mass_1": detector_frame_mass_1,
         "detector_frame_mass_2": detector_frame_mass_2,
         "luminosity_distance": declared_luminosity_distance,
-        "inclination": inclination,
         "coa_phase": coa_phase,
         "coa_time": coa_time,
     }

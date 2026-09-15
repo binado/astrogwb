@@ -31,7 +31,7 @@ from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.distributions.amplitude import AmplitudeConditional, quadrature_grid
-from astrogwb.gwb import AverageMode, spectral_density
+from astrogwb.gwb import spectral_density
 from astrogwb.importance.spectral import importance_spectral_density
 from astrogwb.sampling import (
     SpectralDensityFn,
@@ -233,7 +233,7 @@ def pinned_rate(params: Mapping[str, ArrayLike]) -> jax.Array:
     return _TARGET_RATE({**FIDUCIALS, **params})
 
 
-def _importance(mode: AverageMode) -> dict[str, Any]:
+def _importance() -> dict[str, Any]:
     """Spectrum keywords over a catalog that is its own proposal at ``FIDUCIALS``.
 
     The target is pinned so that only the *sampled* parameters arrive through
@@ -247,13 +247,12 @@ def _importance(mode: AverageMode) -> dict[str, Any]:
         **importance,
         "source_model": pinned_target,
         "merger_rate_fn": pinned_rate,
-        "average_mode": mode,
     }
 
 
-def _importance_estimator(mode: AverageMode) -> SpectralDensityFn:
+def _importance_estimator() -> SpectralDensityFn:
     """The importance spectrum over :func:`_importance`, as a bound callable."""
-    return partial(importance_spectral_density, **_importance(mode))
+    return partial(importance_spectral_density, **_importance())
 
 
 def _reference_spectrum(
@@ -285,17 +284,13 @@ def _reference_spectrum(
         - 2.0 * (log_target_distance - importance["log_reference_distance"])
     )
     weights = jnp.exp(log_weights)
-    factor = 0.4 if importance["average_mode"] == "analytic_inclination" else 1.0
     power = importance["polarization_power"]
-    spectrum = factor * rate * (power @ weights) / weights.size
+    spectrum = 0.4 * rate * (power @ weights) / weights.size
     return rate, log_weights, spectrum
 
 
-@pytest.mark.parametrize("mode", ["analytic_inclination", "catalog_inclination"])
-def test_importance_likelihood_and_gradient_match_the_grid_formula(
-    mode: AverageMode,
-) -> None:
-    importance = _importance(mode)
+def test_importance_likelihood_and_gradient_match_the_grid_formula() -> None:
+    importance = _importance()
     fn: SpectralDensityFn = partial(importance_spectral_density, **importance)
     priors = {"H0": dist.Uniform(50.0, 90.0)}
     params = {"H0": jnp.array(73.0)}
@@ -340,7 +335,7 @@ def test_importance_likelihood_and_gradient_match_the_grid_formula(
 
 def test_amplitude_adapter_preserves_reconstruction_and_jit() -> None:
     """The rename adapter is what makes the spectrum usable as a template."""
-    estimator = _importance_estimator("catalog_inclination")
+    estimator = _importance_estimator()
     template = with_renamed_diagnostics(
         estimator, {"total_merger_rate": "template_merger_rate"}
     )
@@ -418,7 +413,7 @@ def test_amplitude_adapter_preserves_reconstruction_and_jit() -> None:
 
 def test_renaming_a_missing_or_colliding_diagnostic_is_rejected() -> None:
     """A silent no-op would publish a template rate as the physical one."""
-    estimator = _importance_estimator("catalog_inclination")
+    estimator = _importance_estimator()
 
     missing = with_renamed_diagnostics(estimator, {"absent": "renamed"})
     with pytest.raises(ValueError, match="missing"):
@@ -499,7 +494,7 @@ def _linear_spectrum(
     rate = jnp.asarray(params["local_merger_rate"])
     weights = jnp.exp(jnp.asarray(params["tilt"]) * _SENTINEL)
     prediction = spectral_density(
-        _POWER, weights, rate, average_mode="catalog_inclination"
+        _POWER, weights, rate, source_parameters={"inclination": _SENTINEL}
     )
     return prediction, {"total_merger_rate": rate}
 

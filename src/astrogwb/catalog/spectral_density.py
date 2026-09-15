@@ -16,10 +16,9 @@ model -- each with its own Poisson event count and total merger rate -- so its
 hyperparameters are a column per name, free to vary from row to row even though
 the simulator that writes them today holds them fixed.
 
-``n_max_sigma``, ``average_mode`` and ``observation_time`` are recorded because
-none of them is recoverable from the arrays: the first sized the static plate
-the Poisson count was capped against, the second fixed the inclination
-convention the contraction assumed, and the third set the Poisson mean.
+``n_max_sigma`` and ``observation_time`` are recorded because neither is
+recoverable from the arrays: the first sized the static plate the Poisson count
+was capped against and the second set the Poisson mean.
 """
 
 from __future__ import annotations
@@ -33,27 +32,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb.frequency import uniform_grid_spacing
-from astrogwb.gwb.spectral import AverageMode
 from astrogwb.populations import MergerRateFn, PopulationRecord, SourceFn
 from astrogwb.waveform import PolarizationPowerGenerator
 
-__all__ = ["AVERAGE_MODES", "SpectralDensityCatalog", "average_mode_from"]
-
-#: Every inclination convention ``gwb_forward_model`` accepts, as a runtime
-#: tuple. ``AverageMode`` is a ``Literal`` and so cannot be checked against a
-#: value read back from a file; this is the same set, spelled once.
-AVERAGE_MODES: tuple[AverageMode, ...] = (
-    "analytic_inclination",
-    "catalog_inclination",
-)
-
-
-def average_mode_from(value: str) -> AverageMode:
-    """Narrow a string read back from a file to an :data:`AverageMode`."""
-    for mode in AVERAGE_MODES:
-        if value == mode:
-            return mode
-    raise ValueError(f"average_mode is {value!r}, expected one of {AVERAGE_MODES}")
+__all__ = ["SpectralDensityCatalog"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,15 +61,11 @@ class SpectralDensityCatalog:
     waveform_metadata: PolarizationPowerGenerator
     _population: PopulationRecord
     n_max_sigma: float
-    average_mode: AverageMode
     observation_time: float
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "n_max_sigma", float(self.n_max_sigma))
         object.__setattr__(self, "observation_time", float(self.observation_time))
-        object.__setattr__(
-            self, "average_mode", average_mode_from(str(self.average_mode))
-        )
         if self.n_max_sigma < 0.0:
             raise ValueError("n_max_sigma must be non-negative")
         if self.observation_time <= 0.0:

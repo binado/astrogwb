@@ -40,7 +40,6 @@ import numpy as np
 from numpyro.infer import Predictive
 
 from astrogwb.catalog import SpectralDensityCatalog
-from astrogwb.gwb.spectral import AverageMode
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     PopulationRecord,
@@ -95,15 +94,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--n-max-sigma", type=float, default=5.0)
-    parser.add_argument(
-        "--average-mode",
-        choices=("analytic_inclination", "catalog_inclination"),
-        default="analytic_inclination",
-        help=(
-            "Inclination convention of gwb_forward_model. Face-on BNS "
-            "populations pair with analytic_inclination (the default)."
-        ),
-    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--force",
@@ -156,8 +146,6 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     model_kwargs = _require_mapping(args.model_kwargs, flag="--model-kwargs")
     params = _float_params(_require_mapping(args.params, flag="--params"))
-    average_mode: AverageMode = args.average_mode
-
     source_model = build_source_model(args.source_model, settings=model_kwargs)
     merger_rate_fn = build_merger_rate_fn(args.rate_model, settings=model_kwargs)
 
@@ -190,7 +178,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             observation_time=args.observation_time,
             batch_size=args.batch_size,
             max_events=max_events,
-            average_mode=average_mode,
         ),
         num_samples=1,
         return_sites=("spectral_density", "n_events", "total_merger_rate"),
@@ -236,7 +223,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             seed=args.seed,
         ),
         n_max_sigma=args.n_max_sigma,
-        average_mode=average_mode,
         observation_time=args.observation_time,
     )
 

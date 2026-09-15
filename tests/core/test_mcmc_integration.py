@@ -158,7 +158,7 @@ def _build_analysis_inputs(
         polarization_power,
         jnp.ones(num_sources),
         total_merger_rate,
-        average_mode="analytic_inclination",
+        source_parameters=samples,
     )
 
     sensitivities = load_sensitivity_map(DETECTORS)
@@ -207,7 +207,6 @@ def _build_analysis_inputs(
         catalog,
         source_model=pinned_target,
         merger_rate_fn=pinned_rate,
-        average_mode="analytic_inclination",
         frequency_mask=mask,
     )[0]
 

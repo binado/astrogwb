@@ -96,8 +96,7 @@ import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
-from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO
-from astrogwb.gwb.spectral import AverageMode
+from astrogwb.gwb.spectral import inclination_averaging_factor
 from astrogwb.populations import MergerRateFn, SourceFn
 from astrogwb.utils import array_dict_shape, years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
@@ -230,7 +229,6 @@ def gwb_forward_model(
     batch_size: int,
     max_events: int,
     observed_num_events: ArrayLike | None = None,
-    average_mode: AverageMode = "catalog_inclination",
 ) -> None:
     r"""Draw up to ``max_events`` sources and reduce them to a strain spectrum.
 
@@ -263,10 +261,10 @@ def gwb_forward_model(
     all slots contribute, while the count site retains the actual draw. There
     is no ``spectral_density_obs`` site.
 
-    ``average_mode`` is the same inclination convention as
-    :func:`~astrogwb.gwb.spectral.spectral_density`. Face-on populations
-    (inclination pinned at 0) pair with ``"analytic_inclination"``; a
-    population that already samples inclination uses ``"catalog_inclination"``.
+    A source model that omits ``inclination`` generates face-on waveform power;
+    the contraction converts it to the isotropic inclination average. A model
+    that returns an ``inclination`` array has that orientation already included
+    in each waveform's power.
 
     Raises ``KeyError`` if ``source_model`` does not return
     ``luminosity_distance``: it is the distance governing waveform amplitude,
@@ -292,12 +290,10 @@ def gwb_forward_model(
         batch_size=batch_size,
     )
 
-    factor = (
-        INCLINATION_AVERAGE_TO_FACE_ON_RATIO
-        if average_mode == "analytic_inclination"
-        else 1.0
+    numpyro.deterministic(
+        "spectral_density",
+        inclination_averaging_factor(sources) * power_sum / observation_time_sec,
     )
-    numpyro.deterministic("spectral_density", factor * power_sum / observation_time_sec)
 
 
 __all__ = ["gwb_forward_model", "validate_source_model"]

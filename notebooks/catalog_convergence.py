@@ -200,9 +200,9 @@ OMEGA_CATALOG_PATH = NOTEBOOK_DIR / (
 #
 # The component-mass bounds are load-bearing here: `uniform_prior_mass_moments`
 # below is given the *same* bounds, and the analytic spectrum it feeds is only
-# the right oracle for this catalog if they agree. So is the zero `inclination`
-# column the population declares, which pairs with
-# `average_mode="analytic_inclination"`.
+# the right oracle for this catalog if they agree. So is the omitted
+# `inclination` column: face-on BNS populations leave it out, which marks the
+# catalog for analytic inclination averaging during the spectral contraction.
 
 # %%
 FIDUCIALS: dict[str, float] = {
@@ -505,7 +505,11 @@ analytic_spectrum = np.asarray(
 )
 
 
-def contract(power: np.ndarray, rate: jax.Array) -> np.ndarray:
+def contract(
+    power: np.ndarray,
+    rate: jax.Array,
+    source_parameters: dict[str, jax.Array],
+) -> np.ndarray:
     """Unweighted catalog contraction at the fiducials, for `power`'s sources."""
     num = power.shape[1]
     return np.asarray(
@@ -513,7 +517,7 @@ def contract(power: np.ndarray, rate: jax.Array) -> np.ndarray:
             jnp.asarray(power),
             jnp.ones(num),
             rate,
-            average_mode="analytic_inclination",
+            source_parameters=source_parameters,
         )
     )
 
@@ -529,7 +533,7 @@ def to_omega(spectrum: np.ndarray, frequencies: np.ndarray) -> np.ndarray:
     )
 
 
-catalog_spectrum = contract(wide_power, wide_merger_rate)
+catalog_spectrum = contract(wide_power, wide_merger_rate, wide_samples)
 omega_catalog = to_omega(catalog_spectrum, wide_frequencies)
 omega_analytic = to_omega(analytic_spectrum, wide_frequencies)
 
@@ -709,7 +713,8 @@ for size in CATALOG_SIZES:
         # not of which sources were drawn, so resampling columns changes the
         # contraction and nothing else.
         subset_omega = to_omega(
-            contract(wide_power[:, columns], wide_merger_rate), wide_frequencies
+            contract(wide_power[:, columns], wide_merger_rate, wide_samples),
+            wide_frequencies,
         )
         # Where the subset has no source left emitting the ratio is exactly -1.
         # That looks like a numerical artifact and is not: it is the
@@ -890,7 +895,7 @@ def analysis_at(factor: int) -> dict[str, Any]:
         power,
         jnp.ones(NUM_SOURCES),
         total_merger_rate,
-        average_mode="analytic_inclination",
+        source_parameters=samples,
     )
     return {
         "factor": factor,
@@ -1026,7 +1031,6 @@ scan_log_weights = build_importance_spectrum(
     catalog,
     source_model=target_model_fn(),
     merger_rate_fn=scan_merger_rate,
-    average_mode="analytic_inclination",
 )[1]
 
 
@@ -1038,7 +1042,7 @@ def log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
         run["power"],
         jnp.exp(scan_log_weights(params)),
         jnp.asarray(scan_merger_rate(params)),
-        average_mode="analytic_inclination",
+        source_parameters=samples,
     )
     return float(jnp.sum(dist.Normal(model, noise_scale).log_prob(run["spectrum"])))
 

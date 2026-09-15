@@ -1,5 +1,6 @@
 """Exact Poisson-catalog forward model, checked against an explicit power sum."""
 
+from collections.abc import Mapping
 from functools import partial
 from typing import Any, cast
 from unittest.mock import Mock
@@ -17,6 +18,7 @@ from numpyro import handlers
 from numpyro.infer import Predictive
 
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO, ISCO_ALPHA
+from astrogwb.gwb.spectral import inclination_averaging_factor
 from astrogwb.sampling import gwb_forward_model, validate_source_model
 from astrogwb.sampling.forward_model import _sum_polarization_power
 from astrogwb.utils import years_to_seconds
@@ -81,7 +83,6 @@ def _model_kwargs(**overrides: Any) -> dict[str, Any]:
         "batch_size": BATCH_SIZE,
         "max_events": N_EVENTS,
         "observed_num_events": N_EVENTS,
-        "average_mode": "catalog_inclination",
     }
     kwargs.update(overrides)
     return kwargs
@@ -112,17 +113,14 @@ def _plated_source_site_names(trace) -> list[str]:
     ]
 
 
-def _expected_spectrum(trace, generator, observation_time, *, average_mode):
+def _expected_spectrum(trace, generator, observation_time):
     sources = {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
     power = jnp.asarray(generator.generate_batch(sources))
     event_mask = jnp.arange(power.shape[-1]) < trace["n_events"]["value"]
-    factor = (
-        INCLINATION_AVERAGE_TO_FACE_ON_RATIO
-        if average_mode == "analytic_inclination"
-        else 1.0
-    )
     return (
-        factor * (power * event_mask).sum(axis=1) / years_to_seconds(observation_time)
+        inclination_averaging_factor(sources)
+        * (power * event_mask).sum(axis=1)
+        / years_to_seconds(observation_time)
     )
 
 
@@ -154,7 +152,6 @@ def test_spectrum_matches_the_sum_of_per_source_power_over_time() -> None:
         trace,
         generator,
         kwargs["observation_time"],
-        average_mode="catalog_inclination",
     )
     np.testing.assert_allclose(trace["spectral_density"]["value"], expected, rtol=1e-12)
     np.testing.assert_array_equal(trace["n_events"]["value"], N_EVENTS)
@@ -169,7 +166,6 @@ def test_batched_power_matches_a_single_generator_call(batch_size: int) -> None:
         batched,
         generator,
         kwargs["observation_time"],
-        average_mode="catalog_inclination",
     )
     np.testing.assert_allclose(
         batched["spectral_density"]["value"], expected, rtol=1e-12
@@ -193,24 +189,52 @@ def test_batch_size_does_not_change_the_spectrum() -> None:
         np.testing.assert_array_equal(first[name]["value"], second[name]["value"])
 
 
-def test_analytic_inclination_rescales_face_on_power() -> None:
+def test_missing_inclination_rescales_face_on_power() -> None:
     kwargs = _model_kwargs()
-    catalog = _seeded_trace(
-        gwb_forward_model,
-        POPULATION_PARAMS,
-        **{**kwargs, "average_mode": "catalog_inclination"},
-    )
-    analytic = _seeded_trace(
-        gwb_forward_model,
-        POPULATION_PARAMS,
-        **{**kwargs, "average_mode": "analytic_inclination"},
-    )
+    analytic = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    sources = {
+        name: analytic[name]["value"] for name in _plated_source_site_names(analytic)
+    }
+    power = _generator().generate_batch(sources)
+    event_mask = jnp.arange(power.shape[-1]) < analytic["n_events"]["value"]
     np.testing.assert_allclose(
         analytic["spectral_density"]["value"],
-        INCLINATION_AVERAGE_TO_FACE_ON_RATIO * catalog["spectral_density"]["value"],
+        INCLINATION_AVERAGE_TO_FACE_ON_RATIO
+        * (power * event_mask).sum(axis=1)
+        / years_to_seconds(kwargs["observation_time"]),
         rtol=1e-12,
     )
-    np.testing.assert_array_equal(catalog["inclination"]["value"], jnp.zeros(N_EVENTS))
+    assert "inclination" not in sources
+
+
+def test_returned_inclination_disables_analytic_rescaling() -> None:
+    base_model = mock_population_model()
+
+    def inclined_model(params: Mapping[str, jax.Array]) -> dict[str, jax.Array]:
+        sources = dict(base_model(params))
+        return {**sources, "inclination": jnp.zeros_like(sources["redshift"])}
+
+    baseline = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **_model_kwargs())
+    inclined = _seeded_trace(
+        gwb_forward_model,
+        POPULATION_PARAMS,
+        **_model_kwargs(source_model=inclined_model),
+    )
+    np.testing.assert_allclose(
+        inclined["spectral_density"]["value"],
+        baseline["spectral_density"]["value"] / INCLINATION_AVERAGE_TO_FACE_ON_RATIO,
+        rtol=1e-12,
+    )
+
+    model = partial(gwb_forward_model, **_model_kwargs(source_model=inclined_model))
+
+    def spectrum(values: dict[str, jax.Array]) -> jax.Array:
+        trace = handlers.trace(handlers.seed(model, 0)).get_trace(values)
+        return trace["spectral_density"]["value"]
+
+    np.testing.assert_allclose(
+        jax.jit(spectrum)(_jax_params()), spectrum(_jax_params())
+    )
 
 
 def test_predictive_stacks_fixed_shape_sites() -> None:
@@ -292,7 +316,9 @@ def test_partial_count_masks_power_but_not_source_capacity() -> None:
 
     np.testing.assert_allclose(
         trace["spectral_density"]["value"],
-        reference_power.sum(axis=1) / years_to_seconds(kwargs["observation_time"]),
+        INCLINATION_AVERAGE_TO_FACE_ON_RATIO
+        * reference_power.sum(axis=1)
+        / years_to_seconds(kwargs["observation_time"]),
         rtol=1e-12,
     )
     assert all(
@@ -315,7 +341,9 @@ def test_count_above_capacity_is_silently_capped() -> None:
     np.testing.assert_array_equal(trace["n_events"]["value"], observed_count)
     np.testing.assert_allclose(
         trace["spectral_density"]["value"],
-        reference / years_to_seconds(kwargs["observation_time"]),
+        INCLINATION_AVERAGE_TO_FACE_ON_RATIO
+        * reference
+        / years_to_seconds(kwargs["observation_time"]),
         rtol=1e-12,
     )
     assert all(source.shape == (max_events,) for source in sources.values())
@@ -356,7 +384,6 @@ def test_ripple_spectrum_matches_the_sum_of_per_source_power_over_time() -> None
         trace,
         generator,
         kwargs["observation_time"],
-        average_mode="catalog_inclination",
     )
     np.testing.assert_allclose(trace["spectral_density"]["value"], expected, rtol=1e-12)
     np.testing.assert_array_equal(trace["n_events"]["value"], N_EVENTS)
@@ -374,7 +401,6 @@ def test_ripple_batched_power_matches_a_single_generator_call(batch_size: int) -
         batched,
         generator,
         kwargs["observation_time"],
-        average_mode="catalog_inclination",
     )
     np.testing.assert_allclose(
         batched["spectral_density"]["value"], expected, rtol=1e-12
