@@ -142,13 +142,17 @@ def test_the_accessors_hand_back_copies() -> None:
     """`@cache` returns the same object every call; the accessors must not.
 
     A notebook that does `p = priors(); p['H0'] = ...` would otherwise poison
-    every later reader in the process.
+    every later reader in the process. Keyword overrides are merged after the
+    cached parse, so they must not reach the cache either.
     """
     from astrogwb.paper.config import fiducials, networks, priors
 
     fiducials(REPO_ROOT)["H0"] = 999.0
     networks(REPO_ROOT)["ET-2L-aligned"] = ("nope",)
     del priors(REPO_ROOT)["H0"]
+
+    fiducials(REPO_ROOT, H0=1.0)
+    networks(REPO_ROOT, **{"ET-2L-aligned": ("overridden",)})
 
     assert fiducials(REPO_ROOT)["H0"] == 67.66
     assert networks(REPO_ROOT)["ET-2L-aligned"] == ("S1", "R1")

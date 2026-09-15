@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpyro.distributions as dist
 import pytest
 from config_fixtures import example_raw
 from pydantic import ValidationError
 from repo import REPO_ROOT
 
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.paper.config import waveform_generator
+from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
 from astrogwb.paper.config.mcmc import build_run_config, prior_to_spec
 from astrogwb.paper.config.runs import (
     assemble_run,
@@ -338,3 +339,68 @@ def test_waveform_generator_kwargs_select_the_analytical_inspiral() -> None:
     assert generator.approximant == "analytical"
     assert generator.alpha == ISCO_ALPHA
     assert generator.minimum_frequency == 2.0
+
+
+# --------------------------------------------------------------------------- #
+# Accessor kwargs overrides
+# --------------------------------------------------------------------------- #
+def test_fiducials_kwargs_override_the_file() -> None:
+    from_file = fiducials(REPO_ROOT)
+    overridden = fiducials(REPO_ROOT, H0=70.0)
+
+    assert overridden["H0"] == 70.0
+    # Every fiducial the override did not name keeps its file value.
+    assert set(overridden) == set(from_file)
+    assert {k: v for k, v in overridden.items() if k != "H0"} == {
+        k: v for k, v in from_file.items() if k != "H0"
+    }
+
+
+def test_accessor_kwargs_may_add_an_entry() -> None:
+    """A merge, not a rejection: waveform_generator already behaves this way."""
+    assert fiducials(REPO_ROOT, demo=1)["demo"] == 1.0
+    assert len(fiducials(REPO_ROOT, demo=1)) == len(fiducials(REPO_ROOT)) + 1
+
+
+def test_networks_kwargs_override_and_coerce_to_a_tuple() -> None:
+    # Hyphenated names cannot be literal keywords; unpack a mapping, as the
+    # docstring shows.
+    overridden = networks(REPO_ROOT, **{"ET-2L-aligned": ["E1", "E2"]})
+
+    assert overridden["ET-2L-aligned"] == ("E1", "E2")
+    assert isinstance(overridden["ET-2L-aligned"], tuple)
+    assert networks(REPO_ROOT, **{"demo-net": ["A"]})["demo-net"] == ("A",)
+
+
+def test_priors_kwargs_accept_a_wire_spec() -> None:
+    overridden = priors(
+        REPO_ROOT,
+        H0={"dist": "Uniform", "kwargs": {"low": 21.0, "high": 139.0}},
+    )
+
+    assert prior_to_spec(overridden["H0"]) == {
+        "dist": "Uniform",
+        "kwargs": {"low": 21.0, "high": 139.0},
+    }
+    # Untouched entries are still materialized from the file.
+    assert len(overridden) == len(priors(REPO_ROOT))
+
+
+def test_priors_kwargs_accept_a_live_distribution() -> None:
+    prior = dist.Normal(0.0, 1.0)
+
+    assert priors(REPO_ROOT, H0=prior)["H0"] is prior
+
+
+def test_accessor_kwargs_do_not_poison_the_cache() -> None:
+    """The merge happens after the cached parse, so no-arg calls are unaffected."""
+    fiducials(REPO_ROOT, H0=999.0)
+    networks(REPO_ROOT, **{"ET-2L-aligned": ("nope",)})
+    priors(REPO_ROOT, H0=dist.Normal(0.0, 1.0))
+
+    assert fiducials(REPO_ROOT)["H0"] == 67.66
+    assert networks(REPO_ROOT)["ET-2L-aligned"] == ("S1", "R1")
+    assert prior_to_spec(priors(REPO_ROOT)["H0"]) == {
+        "dist": "Uniform",
+        "kwargs": {"low": 20.0, "high": 140.0},
+    }

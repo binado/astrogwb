@@ -62,7 +62,9 @@ config/analysis/runs/<experiment>/<run>.toml
 The three JSON files are layer 0. They are top-level and JSON because more
 than the workflow reads them: the notebooks and figure scripts consume the same
 bytes through `astrogwb.paper.config.fiducials()` / `priors()` / `networks()`,
-and `jq` reads them without importing the package.
+and `jq` reads them without importing the package. Each accessor takes keyword
+overrides merged over the file, so a notebook can vary one value without
+editing JSON or retyping the table.
 
 There is no intermediate assembled config. The four layers are merged in
 process by whatever runs -- the workflow passes them on argv as repeated
