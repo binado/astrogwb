@@ -39,13 +39,13 @@ from numpyro import handlers
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.populations.registry import REDSHIFT_SITE, MergerRateFn, SourceFn
 
-__all__ = ["ABSOLUTE_RATE_PARAMETER", "infer_merger_rate_fn", "require_absolute_rate"]
+__all__ = ["infer_merger_rate_fn", "require_absolute_rate"]
 
 #: The hyperparameter carrying a rate shape's absolute normalization, in
 #: :math:`\mathrm{Gpc}^{-3}\,\mathrm{yr}^{-1}`. A source *density* normalizes it
 #: away, so the shapes this package ships default it to ``1.0``; a *rate* cannot,
 #: which is what :func:`require_absolute_rate` enforces.
-ABSOLUTE_RATE_PARAMETER = "local_merger_rate"
+_ABSOLUTE_RATE_PARAMETER = "local_merger_rate"
 
 #: The probe seed. The drawn redshift is discarded -- only the site's
 #: distribution is read -- so the value cannot affect the result.
@@ -61,14 +61,14 @@ def require_absolute_rate(params: Mapping[str, ArrayLike], *, label: str) -> Non
     missing physical rate fails at the model that owns it rather than
     propagating a placeholder into a spectrum.
     """
-    if ABSOLUTE_RATE_PARAMETER not in params:
+    if _ABSOLUTE_RATE_PARAMETER not in params:
         raise ValueError(
-            f"{label} requires params[{ABSOLUTE_RATE_PARAMETER!r}] "
+            f"{label} requires params[{_ABSOLUTE_RATE_PARAMETER!r}] "
             "(Gpc^-3 yr^-1): a merger-rate model has no meaningful default rate"
         )
 
 
-def probe_redshift_distribution(
+def _probe_redshift_distribution(
     source_model: SourceFn, params: Mapping[str, ArrayLike]
 ) -> RedshiftDistribution:
     """The ``redshift`` site's distribution, read off one isolated execution.
@@ -117,8 +117,8 @@ def infer_merger_rate_fn(
     requirement :func:`~astrogwb.sampling.validate_source_model` has -- but the
     returned callable does not close over it. Each call rebuilds the redshift
     distribution at the hyperparameters it is given, so the rate responds to
-    ``H0``, the rate-shape parameters and
-    :data:`ABSOLUTE_RATE_PARAMETER` exactly as the registered rate does.
+    ``H0``, the rate-shape parameters and ``local_merger_rate`` exactly as the
+    registered rate does.
 
     What is captured, once, is the *recipe*: the source-frame rate shape
     :math:`\psi` and the redshift window and grid the normalization runs on,
@@ -130,11 +130,12 @@ def infer_merger_rate_fn(
     closure is compared and hashed **by identity**: build it once per run and
     reuse it, or a freshly built, equal rate forces a recompile.
 
-    Raises ``ValueError`` if the model declares no ``redshift`` sample site,
-    and ``TypeError`` if that site carries no total merger rate -- see
-    :func:`probe_redshift_distribution`.
+    Raises ``ValueError`` if the model declares no ``redshift`` sample site, and
+    ``TypeError`` if that site's distribution is not a
+    :class:`~astrogwb.distributions.redshift.base.RedshiftDistribution` and so
+    carries no total merger rate.
     """
-    distribution = probe_redshift_distribution(source_model, params)
+    distribution = _probe_redshift_distribution(source_model, params)
     # ``type(distribution)`` rather than ``RedshiftDistribution``: a subclass
     # rebuilds as itself. The Madau-Dickinson name is a *function* alias, so
     # what comes back here is the base class, as intended.

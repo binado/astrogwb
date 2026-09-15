@@ -42,9 +42,7 @@ from astrogwb.populations.bns_madau_dickinson import (
     merger_rate_local_merger_rate_fn,
 )
 from astrogwb.populations.merger_rate import (
-    ABSOLUTE_RATE_PARAMETER,
     infer_merger_rate_fn,
-    probe_redshift_distribution,
     require_absolute_rate,
 )
 from astrogwb.populations.record import PopulationRecord
@@ -64,7 +62,6 @@ from astrogwb.populations.registry import (
 )
 
 __all__ = [
-    "ABSOLUTE_RATE_PARAMETER",
     "AMPLITUDE_PARAMETERS",
     "DEFAULT_DENSITY_SITES",
     "DEFAULT_MERGER_RATE_MODEL",
@@ -89,7 +86,6 @@ __all__ = [
     "madau_dickinson_total_merger_rate",
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
-    "probe_redshift_distribution",
     "register_merger_rate_model",
     "register_source_model",
     "require_absolute_rate",
