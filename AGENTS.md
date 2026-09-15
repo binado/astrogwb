@@ -14,19 +14,8 @@ One package, `astrogwb`, with the reproducibility application inside it:
 - `config/`, `scripts/`, `notebooks/`, `profiles/`, `docs/`, `Snakefile`: the
   application's committed assets, at the repository root.
 - `tests/core/` and `tests/paper/`.
-- `out/`, `outputs/`, `chains/`, `figures/`, `grids/`, `logs/`: generated
-  artifacts at the repository root, which is Snakemake's execution `cwd`. They
-  are gitignored and must not be committed.
 
-The dependency runs one way: `astrogwb.paper` may import `astrogwb`, never the
-reverse. Ruff `TID251` bans `astrogwb.paper` inside core (`[tool.ruff.lint]`
-`extend-select = ["TID"]` plus the `banned-api` entry), which catches a helper
-drifting across. On the packaging side, the application's dependencies live
-behind the `paper` extra, so `pip install astrogwb` gets none of them.
 
-Library code names no absolute path and never looks for a checkout: paths like
-`config/analysis` are relative to the caller's cwd, which for the workflow and
-every script is the repository root.
 
 ## Commands
 
@@ -35,8 +24,6 @@ Every check is a `just` recipe, and CI runs the same string:
 - `uv sync --extra notebook --group dev`: full development environment.
 - `just lint`, `just typecheck`, `just fmt`.
 - `just test-core`, `just test-paper`, `just test-integration`.
-- `just test-notebooks` (set `ASTROGWB_NOTEBOOK_SMOKE=1` to shrink it).
-- `just build-core`: publication build of the wheel.
 - `uv run --group workflow snakemake --snakefile Snakefile --dry-run --cores 1 experiments`:
   production workflow entrypoint (omit `--dry-run` to execute). Chains come
   from `run_experiment_<name>` targets; figures are opt-in via the `plot_*`
@@ -44,6 +31,8 @@ Every check is a `just` recipe, and CI runs the same string:
   without building anything.
 
 ## Configuration
+
+Run workflow and application entrypoints from the repository root; configuration paths are relative to the caller's current working directory, and no checkout discovery is performed.
 
 A catalog records the density that drew it: its file carries the registered
 population model, that model's construction settings, the hyperparameters it
@@ -63,20 +52,11 @@ config next to the chain and stamps the ordered layer paths into it.
 
 - Target Python `>=3.12`, use explicit public type hints, `pathlib.Path`, Ruff
   formatting, snake_case functions, PascalCase classes, and uppercase constants.
-- `astrogwb.paper.config.runs` is stdlib-only; the `Snakefile` imports it to
-  build the DAG, which is what keeps `--dry-run` cheap.
-  `astrogwb.paper.config.catalogs` reaches the population registry only inside
-  function bodies -- a cheap habit rather than a constraint, since the
-  `Snakefile` no longer imports it.
-- The load-bearing rule is narrower than "no JAX at import": runtime
-  configuration must run before the XLA *backend* is initialized. Importing JAX
+- Runtime configuration must run before the XLA *backend* is initialized. Importing JAX
   or NumPyro does not initialize it; creating an array or querying devices
   does. `tests/paper/test_cli.py` asserts both halves.
-- Add core tests for scientific interfaces and paper tests for configuration,
-  CLI, runtime, I/O, and workflows. Mark dependency-heavy tests with
+- Add core tests for scientific interfaces. Mark dependency-heavy tests with
   `@pytest.mark.integration`.
-- Preserve detector TOML/noise data inside the core module tree and verify it
-  from built wheels.
 
 ## Commits and pull requests
 
