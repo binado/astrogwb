@@ -41,9 +41,16 @@ run config restates any of it, and nothing cross-checks the two. Adding a
 population means adding a registered source-model function under
 `src/astrogwb/populations/`, never an import path in a config.
 
-A run config is three TOML layers merged in order -- `config/analysis/base/*`,
-then the experiment `_base.toml`, then the run. There is no assembled-config
-artifact: every entrypoint takes the layers on argv as repeated `--config`
+A run config is four layers merged in order -- `config/{fiducials,priors,networks}.json`,
+then `config/analysis/base/*`, then the experiment `_base.toml`, then the run.
+The three JSON files are layer 0: the shared scientific values, which the
+notebooks and figure scripts also read directly through
+`astrogwb.paper.config.fiducials()` / `priors()` / `networks()`, so a copy
+cannot drift from what the runs sample. `jq` can read them without importing
+the package. A run names a detector network (`analysis.network`) rather than
+listing detectors. `config/plotting.json` is presentation -- LaTeX parameter
+labels and savefig settings, reached through `astrogwb.paper.plotting` -- and
+is deliberately *not* a run layer. There is no assembled-config artifact: every entrypoint takes the layers on argv as repeated `--config`
 flags, and the workflow rule declares those same files as its `input:`, so the
 dependency edge and the data path are one list. `run_mcmc` writes the resolved
 config next to the chain and stamps the ordered layer paths into it.

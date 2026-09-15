@@ -194,7 +194,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--output-pdf", type=Path, required=True)
     parser.add_argument("--output-effective-psd-pdf", type=Path, required=True)
-    parser.add_argument("--figure-dpi", type=int, default=300)
     add_config_arguments(parser)
     add_network_run_arguments(parser)
     return parser.parse_args(argv)
@@ -238,14 +237,12 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     output_path = args.output_pdf
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
+    figure.savefig(output_path)
     print("saved figure:", output_path)
 
     effective_psd_output_path = args.output_effective_psd_pdf
     effective_psd_output_path.parent.mkdir(parents=True, exist_ok=True)
-    effective_psd_figure.savefig(
-        effective_psd_output_path, dpi=args.figure_dpi, bbox_inches="tight"
-    )
+    effective_psd_figure.savefig(effective_psd_output_path)
     print("saved figure:", effective_psd_output_path)
 
 

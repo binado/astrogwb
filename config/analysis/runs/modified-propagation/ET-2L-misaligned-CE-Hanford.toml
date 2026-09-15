@@ -1,2 +1,2 @@
 [analysis]
-detectors = ["S2", "R2", "C1"]
+network = "ET-2L-misaligned-CE-Hanford"

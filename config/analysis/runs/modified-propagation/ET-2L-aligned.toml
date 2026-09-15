@@ -1,2 +1,2 @@
 [analysis]
-detectors = ["S1", "R1"]
+network = "ET-2L-aligned"

@@ -5,7 +5,7 @@
 # component keeps the importance weights from degenerating.
 
 [analysis]
-detectors = ["S1", "R1", "C1"]
+network = "ET-2L-aligned-CE-Hanford"
 likelihood = "amplitude_marginalized"
 amplitude_parameter = "H0"
 amplitude_num_nodes = 1024

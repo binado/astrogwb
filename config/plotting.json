@@ -1,0 +1,17 @@
+{
+  "figure_format": "pdf",
+  "figure_dpi": 300,
+  "labels": {
+    "H0": "$H_0\\,[\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}]$",
+    "Omega_m": "$\\Omega_m$",
+    "xi_0": "$\\Xi_0$",
+    "xi_n": "$n$",
+    "gamma": "$\\gamma$",
+    "kappa": "$\\kappa$",
+    "z_peak": "$z_{\\mathrm{peak}}$",
+    "local_merger_rate": "$\\mathcal{R}_0\\,[\\mathrm{Gpc^{-3}\\,yr^{-1}}]$",
+    "minimum_mass": "$m_{\\mathrm{min}}\\,[M_\\odot]$",
+    "mass_width": "$\\Delta m\\,[M_\\odot]$",
+    "importance_relative_ess": "$N_{\\mathrm{eff}} / N_{\\mathrm{inj}}$"
+  }
+}

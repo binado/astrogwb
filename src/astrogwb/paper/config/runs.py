@@ -6,11 +6,18 @@ translates between the two. That convention is what let the previous
 ``inputs/experiments.yaml`` registry -- and the ten ``Snakefile`` helpers that
 read it -- go away.
 
-A run config is three layers merged in order:
+A run config is four layers merged in order:
 
-1. ``config/analysis/base/*.toml`` -- settings every run shares.
+0. ``config/{fiducials,priors,networks}.json`` -- the shared scientific values,
+   which the notebooks and figure scripts also read directly through
+   :mod:`astrogwb.paper.config`. JSON so that ``jq`` can read them without
+   importing the package.
+1. ``config/analysis/base/*.toml`` -- the remaining settings every run shares.
 2. ``config/analysis/runs/<experiment>/_base.toml`` -- the experiment override.
 3. ``config/analysis/runs/<experiment>/<run>.toml`` -- the run override.
+
+Layers 0 and 1 together are :func:`base_config_paths`, so a caller that wants
+"everything shared" asks for it once.
 
 ``_base.toml`` is required in every experiment directory rather than optional:
 a conditional Snakemake input complicates the DAG for no gain.
@@ -45,6 +52,22 @@ logger = logging.getLogger(__name__)
 #: Relative to the working directory, which for the workflow and every script
 #: is the repository root. Library code names no absolute path and does not go
 #: looking for a checkout: the caller's cwd is the answer.
+CONFIG_DIR = Path("config")
+
+#: Layer 0: the values shared by every run *and* read directly by the notebooks
+#: and figure scripts through `astrogwb.paper.config`. They are JSON so that
+#: `jq` can read them without importing the package, and they are ordinary
+#: merge layers -- each is a single-key object -- so nothing here special-cases
+#: them.
+FIDUCIALS_PATH = CONFIG_DIR / "fiducials.json"
+PRIORS_PATH = CONFIG_DIR / "priors.json"
+NETWORKS_PATH = CONFIG_DIR / "networks.json"
+ROOT_LAYERS = (FIDUCIALS_PATH, PRIORS_PATH, NETWORKS_PATH)
+
+#: Presentation settings, read by `astrogwb.paper.plotting`. Deliberately *not*
+#: a run-config layer: nothing a run samples depends on it.
+PLOTTING_PATH = CONFIG_DIR / "plotting.json"
+
 ANALYSIS_DIR = Path("config/analysis")
 BASE_DIR = ANALYSIS_DIR / "base"
 RUNS_DIR = ANALYSIS_DIR / "runs"
@@ -134,17 +157,37 @@ def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
     return runs
 
 
-def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
-    """Every shared ``config/analysis/base/*.toml`` layer, in merge order.
+def root_config_paths(root: Path | None = None) -> tuple[Path, ...]:
+    """Layer 0: the top-level ``config/*.json`` files, in merge order.
 
-    Sorted for determinism only: the base files partition disjoint top-level
-    keys, so the order does not change the outcome.
+    Named explicitly rather than globbed. These three are a fixed contract --
+    `astrogwb.paper.config` exposes each one through an accessor -- and
+    ``config/plotting.json`` sits in the same directory without being a run
+    layer, which a glob would sweep in.
+    """
+    resolved = root or Path()
+    paths = tuple(resolved / path for path in ROOT_LAYERS)
+    missing = [str(path) for path in paths if not path.is_file()]
+    if missing:
+        raise ValueError("missing shared config layer(s): " + ", ".join(missing))
+    return paths
+
+
+def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
+    """Every shared layer a run inherits, in merge order.
+
+    Layer 0 (``config/*.json``) first, then ``config/analysis/base/*.toml``.
+    The TOML half is sorted for determinism only: the base files partition
+    disjoint top-level keys, so the order does not change the outcome. The JSON
+    half is ordered by :data:`ROOT_LAYERS` and partitions disjoint keys too --
+    ``fiducials``, ``priors``, ``networks`` -- so the whole prefix is
+    order-insensitive in practice and ordered anyway for reproducibility.
     """
     directory = (root or Path()) / BASE_DIR
     paths = tuple(sorted(directory.glob("*.toml")))
     if not paths:
         raise ValueError(f"{directory} declares no base config files")
-    return paths
+    return (*root_config_paths(root), *paths)
 
 
 def run_config_paths(
@@ -300,11 +343,25 @@ def resolve_networks(
 
     resolved: list[Network] = []
     for name, label in networks:
+        # Resolved through the run's own merge rather than by looking the label
+        # up in `config/networks.json` directly. The two agree today only
+        # because every network run happens to be named after the network it
+        # uses, which is a property of the tree and not a derivation: a direct
+        # lookup would report SNRs for one network beside a chain sampled on
+        # another the moment a run changed its `network`.
         merged = assemble_run(experiment, name, root=root)
         analysis = merged.get("analysis") or {}
-        detectors = analysis.get("detectors")
+        network_name = analysis.get("network")
+        if not network_name:
+            raise ValueError(f"{experiment}/{name} declares no analysis.network")
+        table = merged.get("networks") or {}
+        detectors = table.get(network_name)
         if not detectors:
-            raise ValueError(f"{experiment}/{name} declares no analysis.detectors")
+            raise ValueError(
+                f"{experiment}/{name} names network {network_name!r}, which "
+                f"config/networks.json does not declare; known networks: "
+                f"{sorted(table)}"
+            )
         resolved.append(Network(name, label, tuple(detectors)))
     return tuple(resolved)
 

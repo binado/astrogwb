@@ -13,7 +13,7 @@ Source inputs live under `config/`; generated artifacts live under `outputs/`.
 The Snakefile computes its own inputs by globbing that tree --
 `discover_catalog_names()` over `config/catalogs/defs/*.toml` and `discover_runs()` over
 `config/analysis/runs/*/` -- and imports exactly one config function,
-`assemble_run`, because a run's catalog names are known only after the three-layer
+`assemble_run`, because a run's catalog names are known only after the four-layer
 merge. No registry file translates a name into a path.
 
 ## Catalog workflow
@@ -54,7 +54,7 @@ itself.
 ## Experiment workflow
 
 [`config/analysis/`](../config/analysis/) holds the shared base, one `_base.toml`
-per experiment, and one TOML per run. `run_mcmc` declares those three layers as
+per experiment, and one TOML per run. `run_mcmc` declares those four layers as
 its own `input:` and passes them straight back to the runner as repeated
 `--config` flags, then writes:
 
@@ -160,13 +160,13 @@ Snakefile -- there is no aggregate target, so request the rules or their
 outputs directly:
 
 ```bash
-snakemake --snakefile Snakefile --cores 1 amplitude_toy \
-  --allowed-rules amplitude_toy fiducial_spectrum importance_weights_grid \
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules fiducial_spectrum importance_weights_grid \
   fiducial_spectrum importance_weights_grid
 ```
 
-These cover the amplitude toy model, fiducial spectrum, effective
-detector PSDs, and importance-weight grids. Input and output paths are both
+These cover the fiducial spectrum, effective detector PSDs, and
+importance-weight grids. Input and output paths are both
 named literally in each rule. Presentation -- labels, run order, plot limits --
 is hard-coded in the scripts in [`scripts/`](../scripts/) rather than passed on
 argv or loaded from a config the workflow has to parse first.

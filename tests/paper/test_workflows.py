@@ -41,7 +41,6 @@ MCMC_RULES = (
     "run_mcmc",
     "plot_cosmological_parameters",
     "plot_modified_propagation",
-    "amplitude_toy",
     "fiducial_spectrum",
     "importance_weights_grid",
     "experiments",
@@ -301,7 +300,6 @@ def test_unified_workflow_exposes_explicit_experiment_targets() -> None:
         "run_experiment_waveform_approximant",
         "catalogs",
         "plot_cosmological_parameters",
-        "amplitude_toy",
         "fiducial_spectrum",
         "importance_weights_grid",
         "validate",
@@ -463,7 +461,6 @@ def test_standalone_figures_receive_config_paths(
         "--printshellcmds",
         "--cores",
         "4",
-        "amplitude_toy",
         "fiducial_spectrum",
         "importance_weights_grid",
         "--config",
@@ -472,7 +469,6 @@ def test_standalone_figures_receive_config_paths(
 
     assert result.returncode == 0, result.stderr
     for script in (
-        "scripts/amplitude_toy_model.py",
         "scripts/fiducial_spectrum.py",
         "scripts/importance_weights_grid.py",
     ):
@@ -482,9 +478,11 @@ def test_standalone_figures_receive_config_paths(
     assert "--base-config" not in result.stdout
     assert "--figure-config" not in result.stdout
     assert "outputs/configs/" not in result.stdout
+    # Two standalone rules, so each shared layer appears twice -- once per rule,
+    # in its `input:` and again in its `--config` flags.
     for layer in FIGURE_CONFIG_LAYERS:
-        assert sum(layer in line for line in _rule_inputs(result.stdout)) == 3
-        assert result.stdout.count(f"--config {layer}") == 3
+        assert sum(layer in line for line in _rule_inputs(result.stdout)) == 2
+        assert result.stdout.count(f"--config {layer}") == 2
     for flag in ("--observation-time", "--f-min", "--h0", "--omega-gw-min"):
         assert flag not in result.stdout
     # fiducial_spectrum borrows the cosmological-parameters networks and reads

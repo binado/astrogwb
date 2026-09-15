@@ -154,7 +154,6 @@ import arviz_stats as azs
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-import numpyro.distributions as dist
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes; ArviZ 1.2
 # mis-detects gwpy axes and looks for arviz_plots.backend.gwpy. Restore matplotlib axes.
@@ -167,6 +166,9 @@ from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
 from astrogwb.paper.catalogs import load_run_catalog
+from astrogwb.paper.config import fiducials as committed_fiducials
+from astrogwb.paper.config import networks as committed_networks
+from astrogwb.paper.config import priors as committed_priors
 from astrogwb.paper.config.mcmc import AnalysisGrid, build_run_config
 from astrogwb.paper.config.runs import assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
@@ -202,8 +204,13 @@ else:
 # the notebook say which run it is standing in for.
 REFERENCE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
 
-# Detector settings
-detnames = ("S1", "R1", "C1")  # resolve via bundled geometry.toml / sensitivity.toml
+# Detector settings. The network name resolves to its detector list through
+# config/networks.json -- the same table the reference run resolves through --
+# so this cell stays a knob (change the name) without keeping a second copy of
+# the list. The detector names resolve further via the bundled geometry.toml /
+# sensitivity.toml.
+NETWORK = "ET-2L-aligned-CE-Hanford"
+detnames = committed_networks()[NETWORK]
 observation_time = 1.0  # [yr]; cancels in S_h, kept for the likelihood scale
 
 # Redshift grid for the cosmology integrals (and MD normalization)
@@ -215,29 +222,14 @@ n_grid = 256  # grid points for cosmology integrals / MD normalization
 f_min = 2
 f_max = 4096
 
-# Fiducial parameters
-fiducials = {
-    "H0": 67.66,
-    "Omega_m": 0.3096,
-    "xi_0": 1.0,
-    "xi_n": 1.91,
-    "gamma": 1.42,
-    "kappa": 4.62,
-    "z_peak": 1.84,
-    "local_merger_rate": 770.0,
-}
-
-# --- Hyperprior bounds (order: cosmology, then population) -------------------
-hyperprior_dists = {
-    "H0": dist.Uniform(20.0, 140.0),
-    "Omega_m": dist.Uniform(0.05, 0.95),
-    "xi_0": dist.Uniform(0.5, 5.0),
-    "xi_n": dist.Uniform(0.3, 3.0),
-    "gamma": dist.Uniform(-10.0, 10.0),
-    "kappa": dist.Uniform(-10.0, 10.0),
-    "z_peak": dist.Uniform(0.0, 2.5),
-    "local_merger_rate": dist.Uniform(7.6, 250.0),
-}
+# Fiducial parameters and the prior on each, straight from config/fiducials.json
+# and config/priors.json -- the same tables every committed run merges. These
+# used to be hand-written here and had drifted: `local_merger_rate` carried a
+# Uniform(7.6, 250) prior that excluded its own fiducial of 770, and `Omega_m`
+# a broad uniform where the analysis assumes a Planck-tight normal. Reading
+# them means this notebook samples what a run samples.
+fiducials = committed_fiducials()
+hyperprior_dists = committed_priors()
 
 sampled_params = {"H0"}
 
@@ -267,9 +259,10 @@ RUN_CONFIG = build_run_config(assemble_run(*REFERENCE_RUN))
 injection_catalog = load_run_catalog(INJECTION_CATALOG_PATH, label="injection")
 proposal_catalog = load_run_catalog(PROPOSAL_CATALOG_PATH, label="proposal")
 
-# The notebook's own knobs rather than the reference run's, so the settings
-# cell above stays live. `RUN_CONFIG` is still loaded: its priors and fiducials
-# are what a real run samples with.
+# The frequency band and redshift grid stay the notebook's own knobs rather
+# than the reference run's, so the settings cell above stays live -- they are
+# deliberately explorable here, unlike the fiducials and priors, which have one
+# home now and are read from it. `RUN_CONFIG` is still loaded for its catalogs.
 analysis_grid = AnalysisGrid(
     observation_time=observation_time,
     f_min=f_min,

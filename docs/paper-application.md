@@ -45,14 +45,24 @@ Filenames are the mapping, so there is no registry file:
 ```text
 config/catalogs/base/population.toml            the shared population declaration
 config/catalogs/defs/<name>.toml -> outputs/catalogs/<name>.h5
-config/analysis/base/*.toml                     settings every run shares
+config/fiducials.json                           fiducial value of every parameter
+config/priors.json                              prior on every parameter
+config/networks.json                            each detector network, by name
+config/plotting.json                            LaTeX labels and savefig settings
+                                                (presentation; not a run layer)
+config/analysis/base/*.toml                     the remaining shared settings
 config/analysis/runs/<experiment>/_base.toml    the experiment override
 config/analysis/runs/<experiment>/<run>.toml
   -> outputs/chains/<experiment>/<run>.nc       the chain
   -> outputs/chains/<experiment>/<run>.json     the config it was sampled with
 ```
 
-There is no intermediate assembled config. The three layers are merged in
+The three JSON files are layer 0. They are top-level and JSON because more
+than the workflow reads them: the notebooks and figure scripts consume the same
+bytes through `astrogwb.paper.config.fiducials()` / `priors()` / `networks()`,
+and `jq` reads them without importing the package.
+
+There is no intermediate assembled config. The four layers are merged in
 process by whatever runs -- the workflow passes them on argv as repeated
 `--config` flags, and declares those same files as the rule's `input:` -- and
 `run_mcmc` writes the resolved config next to the chain, stamping the ordered

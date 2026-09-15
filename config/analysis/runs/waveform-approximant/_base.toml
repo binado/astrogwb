@@ -4,7 +4,7 @@
 sampled_params = ["H0"]
 
 [analysis]
-detectors = ["S1", "R1", "C1"]
+network = "ET-2L-aligned-CE-Hanford"
 
 [sampler]
 num_warmup = 500

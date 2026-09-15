@@ -1,25 +1,48 @@
 # Paper figures
 
-Experiment figures are part of the same DAG as their chains. Each figure's
-presentation -- the ordered run IDs it compares and its LaTeX labels -- is
-hard-coded in the script that draws it. There is no figure config to load:
-changing a legend label is a code change, reviewed alongside the plot it
-labels. The six detector networks compared by more than one figure are the one
-shared piece, and they live in `astrogwb.paper.plotting.DETECTOR_NETWORKS` as
-ordered `(run name, LaTeX label)` pairs.
+Experiment figures are part of the same DAG as their chains. The split for
+presentation is that *order and structure* are code, *values* are data.
+
+Order and structure stay hard-coded in the script that draws each figure: the
+run IDs it compares, and the sequence they appear in. Changing that is a code
+change, reviewed alongside the plot it affects. The six detector networks
+compared by more than one figure are the one shared piece, and they live in
+`astrogwb.paper.plotting.DETECTOR_NETWORKS` as ordered
+`(run name, LaTeX label)` pairs -- a network's label stays there because
+nothing reads it without also needing the order it sits in.
+
+Values live in [`config/plotting.json`](../config/plotting.json): the LaTeX
+label for each *parameter*, plus `figure_dpi` and `figure_format`. Scripts
+reach them through `astrogwb.paper.plotting.parameter_label`,
+`figure_dpi` and `figure_format`. Parameter labels used to be declared
+separately in three scripts; `figure_dpi` was a literal `300` in four of them
+*and* in `paper.mplstyle`. `use_paper_style()` applies the dpi and format as
+rcParams, so `paper.mplstyle` no longer declares either and no figure script
+takes a `--figure-dpi` flag.
 
 Input and output paths are both named literally in
 [`Snakefile`](../Snakefile), and every output is a valid Snakemake target.
-Shared scientific values -- fiducials, frequency bounds, cosmology grid settings
--- arrive on argv as repeated `--config` layer files, the same list the rule
-declares as `input:`, so a figure reports exactly what was sampled and a layer
-edit retriggers the figure.
+Shared scientific values -- fiducials, priors, detector networks, frequency
+bounds, cosmology grid settings -- arrive on argv as repeated `--config` layer
+files, the same list the rule declares as `input:`, so a figure reports exactly
+what was sampled and a layer edit retriggers the figure. A script that needs
+one of the top-level tables outside a run context can also call
+`astrogwb.paper.config.fiducials()` / `priors()` / `networks()` directly; both
+paths read the same files.
 
 Detector *lists* are never hard-coded next to a label. The rule passes
 `--network-run <experiment>/<run>` once per network, in legend order, and
-`astrogwb.paper.config.runs.resolve_networks` reads each run's detectors out of
-that run's own config layers. The detectors a figure reports an SNR for are
-therefore always the ones its chain was sampled with.
+`astrogwb.paper.config.runs.resolve_networks` merges each run's own config
+layers, reads the `analysis.network` that run names, and resolves it through
+the `[networks]` table those same layers carry. The detectors a figure reports
+an SNR for are therefore always the ones its chain was sampled with.
+
+That indirection is deliberate. Every network run happens to be named after the
+network it uses, so looking the legend name up in `config/networks.json`
+directly would give the same answer today -- but that is a property of the
+current tree, not a derivation. Going through the run means a run that changed
+its `network` moves the figure with it, instead of the figure quietly
+reporting one network's SNRs beside another network's chain.
 
 `resolve_networks` matches the `--network-run` list against the legend
 *positionally* and rejects a mismatch. That check matters more than it looks:
@@ -79,9 +102,8 @@ chains of `run_experiment_modified_propagation`.
 
 ## Standalone figures
 
-The amplitude toy model, fiducial spectrum, effective detector PSD comparison,
-and importance-weight grids are explicit standalone rules in the unified
-workflow. The fiducial spectrum borrows the six detector networks of the
+The fiducial spectrum, effective detector PSD comparison, and importance-weight
+grids are explicit standalone rules in the unified workflow. The fiducial spectrum borrows the six detector networks of the
 `cosmological-parameters` experiment rather than restating them, and keeps its
 `OMEGA_GW_MIN` y-limit next to the axis it sets. All of them read an assembled
 run config directly. `importance_weights_grid` additionally reads its proposal
@@ -90,8 +112,7 @@ does -- so the weights it plots divide by the same denominator the chains did.
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules amplitude_toy fiducial_spectrum importance_weights_grid \
-  outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf \
+  --allowed-rules fiducial_spectrum importance_weights_grid \
   outputs/figures/standalone/fiducial_spectrum.pdf \
   outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf \
   outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf \

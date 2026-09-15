@@ -21,14 +21,17 @@ PAPER_ROOT = REPO_ROOT
 
 
 def test_deep_merge_nested_dicts_and_list_replacement() -> None:
+    # `detector_ids` is a stand-in list key, deliberately not named `networks`:
+    # that is a real config section now, and it is a *mapping*, so reusing the
+    # name here would advertise the wrong merge rule for it.
     base = {
         "seed": 1,
         "figures": {"compare": {"var_name": "H0", "figure_dpi": 300}},
-        "networks": ["A", "B"],
+        "detector_ids": ["A", "B"],
     }
     override = {
         "figures": {"compare": {"var_name": "Omega_m"}},
-        "networks": ["C"],
+        "detector_ids": ["C"],
     }
 
     merged = deep_merge(base, override)
@@ -36,7 +39,7 @@ def test_deep_merge_nested_dicts_and_list_replacement() -> None:
     assert merged == {
         "seed": 1,
         "figures": {"compare": {"var_name": "Omega_m", "figure_dpi": 300}},
-        "networks": ["C"],
+        "detector_ids": ["C"],
     }
     # Inputs are not mutated.
     figures = base["figures"]
@@ -44,7 +47,7 @@ def test_deep_merge_nested_dicts_and_list_replacement() -> None:
     compare = figures["compare"]
     assert isinstance(compare, dict)
     assert compare["var_name"] == "H0"
-    assert base["networks"] == ["A", "B"]
+    assert base["detector_ids"] == ["A", "B"]
 
 
 def test_load_mapping_resolves_yaml_aliases(tmp_path: Path) -> None:
@@ -222,7 +225,10 @@ def test_marginalized_config_rejects_amplitude_parameter_missing_fiducial() -> N
     raw["analysis"]["amplitude_parameter"] = "local_merger_rate"
     raw["priors"] = {
         **raw["priors"],
-        "local_merger_rate": {"type": "uniform", "low": 50.0, "high": 300.0},
+        "local_merger_rate": {
+            "dist": "Uniform",
+            "kwargs": {"low": 50.0, "high": 300.0},
+        },
     }
     del raw["fiducials"]["local_merger_rate"]
 
@@ -235,7 +241,7 @@ def test_marginalized_config_rejects_unsupported_amplitude_parameter_name() -> N
     raw["analysis"]["amplitude_parameter"] = "Omega_m"
     raw["priors"] = {
         **raw["priors"],
-        "Omega_m": {"type": "uniform", "low": 0.05, "high": 0.95},
+        "Omega_m": {"dist": "Uniform", "kwargs": {"low": 0.05, "high": 0.95}},
     }
 
     with pytest.raises(ValidationError):
@@ -263,7 +269,7 @@ def test_config_rejects_a_fiducial_without_a_prior() -> None:
 
 def test_config_rejects_a_prior_without_a_fiducial() -> None:
     raw = example_raw()
-    raw["priors"]["unused"] = {"type": "normal", "loc": 0.0, "scale": 1.0}
+    raw["priors"]["unused"] = {"dist": "Normal", "kwargs": {"loc": 0.0, "scale": 1.0}}
 
     with pytest.raises(ValidationError, match="priors missing from"):
         build_run_config(raw)
@@ -273,23 +279,41 @@ def test_prior_spec_rejects_stale_keys_from_a_cross_type_override() -> None:
     raw = example_raw()
     polluted = deep_merge(
         raw,
-        {"priors": {"H0": {"type": "normal", "loc": 67.66, "scale": 0.6766}}},
+        {
+            "priors": {
+                "H0": {"dist": "Normal", "kwargs": {"loc": 67.66, "scale": 0.6766}}
+            }
+        },
     )
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         build_run_config(polluted)
 
 
-def test_prior_spec_rejects_unsupported_type_before_jax_starts() -> None:
+def test_prior_spec_rejects_an_unknown_distribution_name() -> None:
     raw = example_raw()
-    raw["priors"]["H0"] = {"type": "lognormal", "loc": 1.0, "scale": 1.0}
+    raw["priors"]["H0"] = {"dist": "Lognormal", "kwargs": {"loc": 1.0, "scale": 1.0}}
 
-    with pytest.raises(ValidationError, match="does not match any of the expected"):
+    with pytest.raises(ValidationError, match="not a numpyro distribution"):
+        build_run_config(raw)
+
+
+def test_prior_spec_rejects_a_name_that_is_not_a_distribution() -> None:
+    """The guard on the `getattr`, not just the lookup.
+
+    `dist` is a config-supplied string indexed into a live module, so a name
+    that resolves to something other than a Distribution subclass -- here the
+    `constraints` submodule -- must be refused rather than called.
+    """
+    raw = example_raw()
+    raw["priors"]["H0"] = {"dist": "constraints", "kwargs": {}}
+
+    with pytest.raises(ValidationError, match="not a numpyro distribution"):
         build_run_config(raw)
 
 
 def test_prior_spec_rejects_missing_required_key() -> None:
     raw = example_raw()
-    raw["priors"]["H0"] = {"type": "normal", "loc": 67.66, "scal": 0.6766}
+    raw["priors"]["H0"] = {"dist": "Normal", "kwargs": {"loc": 67.66, "scal": 0.6766}}
 
     with pytest.raises(ValidationError, match="scale"):
         build_run_config(raw)

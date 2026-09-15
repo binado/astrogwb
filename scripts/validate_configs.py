@@ -7,9 +7,9 @@ invalid run *before any catalog is built*, and a catalog is a GPU job.
 
 Three checks per run, cheapest first:
 
-1. the three layers merge (a malformed TOML fails here);
+1. the four layers merge (a malformed TOML or JSON fails here);
 2. the merge validates into a :class:`RunConfig` (a typo'd key, an impossible
-   prior, a missing detector list);
+   prior, an unknown network name);
 3. both catalogs the run names exist in ``config/catalogs/defs/``.
 
 JAX-free: nothing here touches a device, so it is cheap enough to run before

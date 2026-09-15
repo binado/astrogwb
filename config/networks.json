@@ -1,0 +1,10 @@
+{
+  "networks": {
+    "ET-triangular": ["E1", "E2", "E3"],
+    "ET-triangular-CE-Hanford": ["E1", "E2", "E3", "C1"],
+    "ET-2L-aligned": ["S1", "R1"],
+    "ET-2L-aligned-CE-Hanford": ["S1", "R1", "C1"],
+    "ET-2L-misaligned": ["S2", "R2"],
+    "ET-2L-misaligned-CE-Hanford": ["S2", "R2", "C1"]
+  }
+}

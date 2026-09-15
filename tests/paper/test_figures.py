@@ -9,14 +9,20 @@ paths and its ``--network-run`` flags from.
 
 Detectors are read from each run's own committed config layers rather than from
 an assembled artifact, so these tests need no build step and no tmp tree: they
-run against the checkout as committed.
+run against the checkout as committed. A run names a network and its layers
+carry the table that resolves the name, so the detectors a figure reports an
+SNR for are still the ones its chain was sampled with.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from config_fixtures import write_root_layers
 from repo import REPO_ROOT
 
+from astrogwb.paper.config import networks
 from astrogwb.paper.config.runs import assemble_run, discover_runs, resolve_networks
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS, DETECTOR_NETWORKS
 
@@ -75,9 +81,12 @@ def test_resolve_networks_preserves_order_and_attaches_detectors() -> None:
 
     assert [network.name for network in networks] == list(DETECTOR_NETWORK_RUNS)
     for network in networks:
-        expected = assemble_run("cosmological-parameters", network.name)["analysis"][
-            "detectors"
-        ]
+        # Through the run's own merge, exactly as `resolve_networks` does it:
+        # the run names a network, and the [networks] table its layers carry
+        # resolves that name. Not a direct `networks()` lookup, which would
+        # assume the run name and the network name always agree.
+        merged = assemble_run("cosmological-parameters", network.name)
+        expected = merged["networks"][merged["analysis"]["network"]]
         assert network.detectors == tuple(expected)
     assert networks[0].detectors == ("E1", "E2", "E3")
     assert networks[-1].detectors == ("S2", "R2", "C1")
@@ -138,3 +147,45 @@ def test_only_the_network_experiments_have_figure_rules() -> None:
         "variable-proposal-guard",
         "waveform-approximant",
     }
+
+
+def test_every_legend_network_is_declared_in_the_table() -> None:
+    """The legend cannot name a network `config/networks.json` does not have.
+
+    Membership lives in the table; only the order and the LaTeX label live in
+    `DETECTOR_NETWORKS`. This is the seam between them.
+    """
+    declared = networks(REPO_ROOT)
+
+    assert set(DETECTOR_NETWORK_RUNS) <= set(declared)
+
+
+def test_the_network_a_run_names_matches_its_legend_name() -> None:
+    """Every network run is named after the network it uses.
+
+    `resolve_networks` deliberately does not rely on this -- it merges each run
+    and reads that run's own `analysis.network` -- but the property is worth
+    pinning: it is what would make a future direct-lookup simplification safe,
+    and its quiet loss is exactly the bug the indirection guards against.
+    """
+    for experiment in NETWORK_EXPERIMENTS:
+        for run in DETECTOR_NETWORK_RUNS:
+            merged = assemble_run(experiment, run, root=REPO_ROOT)
+
+            assert merged["analysis"]["network"] == run, f"{experiment}/{run}"
+
+
+def test_resolve_networks_rejects_an_undeclared_network(tmp_path: Path) -> None:
+    """A run naming a network the table lacks fails, naming both."""
+    write_root_layers(tmp_path, networks={"known": ["S1", "R1"]})
+    experiment = tmp_path / "config/analysis/runs/demo"
+    experiment.mkdir(parents=True)
+    (tmp_path / "config/analysis/base").mkdir(parents=True)
+    (tmp_path / "config/analysis/base/model.toml").write_text("", encoding="utf-8")
+    (experiment / "_base.toml").write_text("", encoding="utf-8")
+    (experiment / "only.toml").write_text(
+        '[analysis]\nnetwork = "absent"\n', encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match=r"names network 'absent'"):
+        resolve_networks([("demo", "only")], (("only", "label"),), root=tmp_path)

@@ -21,7 +21,9 @@ Usage -- one ``--config`` per layer, in merge order::
 
     uv run --extra paper python scripts/run_mcmc.py \
         --config config/analysis/base/model.toml \
-        --config config/analysis/base/parameters.toml \
+        --config config/fiducials.json \
+        --config config/priors.json \
+        --config config/networks.json \
         --config config/analysis/base/sampling.toml \
         --config config/analysis/runs/cosmological-parameters/_base.toml \
         --config config/analysis/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
