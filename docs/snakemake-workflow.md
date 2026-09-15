@@ -160,13 +160,13 @@ Snakefile -- there is no aggregate target, so request the rules or their
 outputs directly:
 
 ```bash
-snakemake --snakefile Snakefile --cores 1 amplitude_toy \
-  --allowed-rules amplitude_toy fiducial_spectrum importance_weights_grid \
+snakemake --snakefile Snakefile --cores 1 \
+  --allowed-rules fiducial_spectrum importance_weights_grid \
   fiducial_spectrum importance_weights_grid
 ```
 
-These cover the amplitude toy model, fiducial spectrum, effective
-detector PSDs, and importance-weight grids. Input and output paths are both
+These cover the fiducial spectrum, effective detector PSDs, and
+importance-weight grids. Input and output paths are both
 named literally in each rule. Presentation -- labels, run order, plot limits --
 is hard-coded in the scripts in [`scripts/`](../scripts/) rather than passed on
 argv or loaded from a config the workflow has to parse first.

@@ -102,9 +102,8 @@ chains of `run_experiment_modified_propagation`.
 
 ## Standalone figures
 
-The amplitude toy model, fiducial spectrum, effective detector PSD comparison,
-and importance-weight grids are explicit standalone rules in the unified
-workflow. The fiducial spectrum borrows the six detector networks of the
+The fiducial spectrum, effective detector PSD comparison, and importance-weight
+grids are explicit standalone rules in the unified workflow. The fiducial spectrum borrows the six detector networks of the
 `cosmological-parameters` experiment rather than restating them, and keeps its
 `OMEGA_GW_MIN` y-limit next to the axis it sets. All of them read an assembled
 run config directly. `importance_weights_grid` additionally reads its proposal
@@ -113,8 +112,7 @@ does -- so the weights it plots divide by the same denominator the chains did.
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules amplitude_toy fiducial_spectrum importance_weights_grid \
-  outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf \
+  --allowed-rules fiducial_spectrum importance_weights_grid \
   outputs/figures/standalone/fiducial_spectrum.pdf \
   outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf \
   outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf \

@@ -166,7 +166,6 @@ localrules:
     validate,
     plot_cosmological_parameters,
     plot_modified_propagation,
-    amplitude_toy,
     fiducial_spectrum,
     importance_weights_grid,
     catalogs,
@@ -363,22 +362,6 @@ rule plot_modified_propagation:
         " --output-xi0-marginal-pdf {output.xi0_marginal_pdf:q}"
         " --output-h0-corner-pdf {output.h0_corner_pdf:q}"
         " --output-xi0-n-csv {output.csv:q} --output-xi0-n-tex {output.tex:q}"
-
-
-rule amplitude_toy:
-    """Single-amplitude toy MCMC and its Fisher-overlay figure."""
-    input:
-        catalog=INJECTION_CATALOG,
-        config=config_layers(*FIGURE_RUN),
-    output:
-        "outputs/figures/standalone/amplitude_toy_fisher_overlay.pdf",
-    shell:
-        "uv run --extra notebook"
-        " python scripts/amplitude_toy_model.py"
-        f" {config_flags(*FIGURE_RUN)}"
-        " --catalog {input.catalog:q}"
-        " --chains-dir outputs/chains/amplitude-toy"
-        " --output-pdf {output:q}"
 
 
 rule fiducial_spectrum:
