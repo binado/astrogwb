@@ -20,6 +20,7 @@ linear regime instead of silently drifting out of it.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from functools import partial
 from typing import NamedTuple
@@ -470,3 +471,77 @@ def test_marginalized_and_direct_h0_posteriors_agree(
     np.testing.assert_allclose(
         np.std(marginalized_h0), np.std(direct_h0), rtol=0.2, atol=0.0
     )
+
+
+# --------------------------------------------------------------------------- #
+# One compiled sampler, several bands
+# --------------------------------------------------------------------------- #
+def _count_compilations(run) -> int:
+    """XLA compilations triggered by ``run()``, counted off jax's own log."""
+    records: list[str] = []
+
+    class _Counter(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    logger = logging.getLogger("jax")
+    handler = _Counter()
+    previous_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    try:
+        with jax.log_compiles():
+            run()
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+    return len(records)
+
+
+def test_one_compiled_sampler_serves_several_frequency_bands(
+    analysis_inputs: AnalysisInputs,
+) -> None:
+    """Re-running on a sub-band must not pay for a second compilation.
+
+    This is the whole reason the band is a traced mask rather than compressed
+    arrays: compressing makes the bin count a *shape*, so every band is a new
+    signature and a fresh sampler. Here one ``MCMC`` object is run twice with
+    the same shapes and a different mask value, and the second run's
+    compilations are counted against the first's.
+    """
+    inputs = analysis_inputs
+    kwargs = _model_kwargs(inputs)
+    midpoint = float(jnp.median(inputs.frequencies))
+    wide = jnp.ones_like(inputs.frequencies, dtype=bool)
+    narrow = inputs.frequencies <= midpoint
+    assert 2 <= int(jnp.sum(narrow)) < int(jnp.sum(wide))
+
+    mcmc = MCMC(
+        NUTS(
+            _direct_h0_model(inputs, {"H0": H0_PRIOR}),
+            target_accept_prob=0.9,
+            forward_mode_differentiation=True,
+            init_strategy=init_to_value(values={"H0": FIDUCIALS["H0"]}),
+        ),
+        num_warmup=50,
+        num_samples=50,
+        num_chains=1,
+        progress_bar=False,
+        jit_model_args=True,
+    )
+
+    def run(mask: jax.Array, seed: int):
+        def go() -> None:
+            mcmc.run(jax.random.PRNGKey(seed), **kwargs, frequency_mask=mask)
+
+        compilations = _count_compilations(go)
+        return compilations, mcmc.get_samples()["H0"]
+
+    first, wide_h0 = run(wide, SEED)
+    second, narrow_h0 = run(narrow, SEED)
+
+    assert first > 0
+    assert second < first / 10, (first, second)
+    # A narrower band is less informative, so the two chains are genuinely
+    # different -- the reused program is not one that ignores its mask.
+    assert float(jnp.std(narrow_h0)) > float(jnp.std(wide_h0))

@@ -163,7 +163,6 @@ from matplotlib.projections import register_projection
 from numpyro import handlers
 from numpyro.infer import MCMC, NUTS
 
-from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
@@ -462,28 +461,26 @@ plot_omegagw(
     ymin=1e-15,
 )
 
-# The masked arrays the likelihood is evaluated against. The bound spectrum
-# already holds the band-restricted power; masking the source samples would silently
-# truncate the population, so it never happens.
-model_kwargs = inputs.masked_model_kwargs()
+# The arrays the likelihood is evaluated against: the observed spectrum, the
+# per-bin scale, and the analysis-band mask, all on the catalog's frequency
+# grid. The bound spectrum holds the full-grid power; masking the source
+# samples would silently truncate the population, so it never happens.
+model_kwargs = inputs.model_kwargs()
 observed_spectral_density = model_kwargs["observed_spectral_density"]
-effective_psd_arr = effective_psd_arr[np.asarray(mask)]
-frequencies = frequencies[mask]
 
 # %% [markdown]
 # ## Running the MCMC
 #
 # We run the NUTS sampler as implemented in the `numpyro` python package. The
-# importance arrays were prepared *with* the frequency mask, so the bound
-# spectrum owns the band-restricted power; the source samples keep their full
-# length.
+# band reaches the model as a boolean mask over the catalog grid rather than as
+# a compressed array, so re-running on a sub-band (`inputs.model_kwargs(fmax=...)`)
+# reuses this compiled sampler instead of recompiling it.
 
 # %%
 base_model = partial(
     gwb_spectral_density_model,
     spectral_density_fn=spectral_density_fn,
     priors=priors,
-    scale=gaussian_bin_scale(effective_psd_arr, observation_time, df),
 )
 model = handlers.block(
     handlers.condition(base_model, data=fixed_params),
@@ -508,7 +505,7 @@ mcmc = MCMC(
 rng_key = jax.random.PRNGKey(seed)
 mcmc.run(
     rng_key,
-    observed_spectral_density=observed_spectral_density,
+    **model_kwargs,
     extra_fields=("num_steps", "accept_prob", "diverging"),
 )
 mcmc.print_summary()

@@ -44,6 +44,7 @@ from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import RunConfig, build_run_config
 from astrogwb.paper.inference import (
+    build_model,
     prepare_inference_inputs,
     prepare_observation,
     target_merger_rate_fn,
@@ -54,7 +55,10 @@ from astrogwb.sampling import gwb_spectral_density_model
 pytestmark = pytest.mark.integration
 
 # Uniform grid (df = 10 Hz); the band below keeps the middle three bins.
+# Model arrays live on the whole grid -- `N_FREQ` long -- and the band reaches
+# the model as a mask selecting `N_BAND` of those bins.
 FREQUENCIES = np.linspace(10.0, 50.0, 5)
+N_FREQ = FREQUENCIES.size
 BAND = (20.0, 40.0)
 N_BAND = 3
 N_SOURCES = 8
@@ -212,19 +216,29 @@ def _bound(inputs: Any) -> dict[str, Any]:
     return inputs.spectral_density_fn.keywords
 
 
-def test_prepared_spectrum_slices_frequency_arrays_but_not_samples(
+def test_prepared_spectrum_keeps_the_full_grid_and_all_samples(
     injection_catalog: PolarizationPowerCatalog,
     proposal_catalog: PolarizationPowerCatalog,
 ) -> None:
+    """Nothing is compressed: the band is a mask over the catalog's own grid.
+
+    Compressing would bake the bin count into every compiled program, so a
+    second band would cost a recompile. These shapes are what make one
+    compiled sampler reusable across bands.
+    """
     config = _config()
 
     inputs = _prepare(injection_catalog, proposal_catalog, config)
-    kwargs = inputs.masked_model_kwargs()
+    kwargs = inputs.model_kwargs()
     bound = _bound(inputs)
 
-    assert kwargs["observed_spectral_density"].shape == (N_BAND,)
-    assert kwargs["scale"].shape == (N_BAND,)
-    assert bound["polarization_power"].shape == (N_BAND, N_RETAINED)
+    assert kwargs["observed_spectral_density"].shape == (N_FREQ,)
+    assert kwargs["scale"].shape == (N_FREQ,)
+    assert kwargs["frequency_mask"].shape == (N_FREQ,)
+    assert int(jnp.sum(kwargs["frequency_mask"])) == N_BAND
+    assert bound["polarization_power"].shape == (N_FREQ, N_RETAINED)
+    # The builder is handed no mask at all -- the band never reaches it.
+    assert "frequency_mask" not in bound
     # `source_parameters` is per-source, not per-frequency. Masking it would
     # silently truncate the population and change every posterior without
     # erroring; the cached proposal arrays follow the same axis.
@@ -236,9 +250,10 @@ def test_prepared_spectrum_slices_frequency_arrays_but_not_samples(
     weights_bound = inputs.log_weights_fn.keywords
     for name, value in weights_bound.items():
         assert bound[name] is value, name
-    # The likelihood takes data only: the catalog and the averaging convention
-    # travel on the bound spectrum, and the bin width is consumed into `scale`.
-    assert set(kwargs) == {"observed_spectral_density", "scale"}
+    # The likelihood takes data and the band only: the catalog and the
+    # averaging convention travel on the bound spectrum, and the bin width is
+    # consumed into `scale`.
+    assert set(kwargs) == {"observed_spectral_density", "scale", "frequency_mask"}
 
 
 def test_restriction_narrows_the_proposals_recorded_population_too(
@@ -261,7 +276,7 @@ def test_restriction_narrows_the_proposals_recorded_population_too(
     assert proposal_catalog.population_model_kwargs["z_min"] == 0.0
 
 
-def test_masked_model_kwargs_scale_is_the_masked_gaussian_bin_scale(
+def test_model_kwargs_scale_is_the_full_grid_gaussian_bin_scale(
     injection_catalog: PolarizationPowerCatalog,
     proposal_catalog: PolarizationPowerCatalog,
 ) -> None:
@@ -270,18 +285,19 @@ def test_masked_model_kwargs_scale_is_the_masked_gaussian_bin_scale(
 
     inputs = _prepare(injection_catalog, proposal_catalog, config)
     mask = np.asarray(inputs.observation.frequency_mask)
-
-    np.testing.assert_allclose(
-        np.asarray(inputs.masked_model_kwargs()["scale"]),
-        np.asarray(
-            gaussian_bin_scale(
-                inputs.effective_psd[mask],
-                config.analysis_grid.observation_time,
-                # The catalog's bin width, never measured off the masked band.
-                10.0,
-            )
-        ),
+    expected = np.asarray(
+        gaussian_bin_scale(
+            inputs.effective_psd,
+            config.analysis_grid.observation_time,
+            # The catalog's bin width, never measured off the selected band.
+            10.0,
+        )
     )
+
+    actual = np.asarray(inputs.model_kwargs()["scale"])
+
+    assert actual.shape == (N_FREQ,)
+    np.testing.assert_allclose(actual[mask], expected[mask])
 
 
 def test_mismatched_frequency_grids_are_rejected(
@@ -313,7 +329,7 @@ def test_bins_without_network_coverage_narrow_the_band(
     )
 
     inputs = _prepare(injection_catalog, proposal_catalog, config)
-    kwargs = inputs.masked_model_kwargs()
+    kwargs = inputs.model_kwargs()
 
     # The band was [20, 30, 40] Hz; 30 Hz is uncovered, so the surviving band is
     # gappy -- which is only sound because `df` is the catalog's attribute.
@@ -321,9 +337,17 @@ def test_bins_without_network_coverage_narrow_the_band(
         np.asarray(inputs.observation.frequency_mask),
         [False, True, False, True, False],
     )
-    assert kwargs["scale"].shape == (N_BAND - 1,)
-    assert kwargs["observed_spectral_density"].shape == (N_BAND - 1,)
-    assert _bound(inputs)["polarization_power"].shape == (N_BAND - 1, N_RETAINED)
+    # The arrays keep the catalog's length; only the mask records the gap.
+    assert kwargs["scale"].shape == (N_FREQ,)
+    assert kwargs["observed_spectral_density"].shape == (N_FREQ,)
+    assert _bound(inputs)["polarization_power"].shape == (N_FREQ, N_RETAINED)
+    np.testing.assert_array_equal(
+        np.asarray(kwargs["frequency_mask"]), [False, True, False, True, False]
+    )
+    # An uncovered bin's scale is `inf` (or a division by zero); both
+    # likelihoods discard it, and `model_kwargs` substitutes a finite
+    # placeholder so nothing downstream has to survive a non-finite value.
+    assert bool(jnp.all(jnp.isfinite(kwargs["scale"])))
 
 
 def test_a_band_with_fewer_than_two_usable_bins_is_rejected(
@@ -343,6 +367,117 @@ def test_a_band_with_fewer_than_two_usable_bins_is_rejected(
         _prepare(injection_catalog, proposal_catalog, config)
 
 
+def test_a_sub_band_narrows_the_mask_without_changing_any_shape(
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
+) -> None:
+    """The whole point: a second band is a new mask value, not a new shape."""
+    config = _config()
+
+    inputs = _prepare(injection_catalog, proposal_catalog, config)
+    full = inputs.model_kwargs()
+    narrowed = inputs.model_kwargs(fmax=30.0)
+
+    # The band was [20, 30, 40] Hz; capping at 30 Hz keeps the first two.
+    np.testing.assert_array_equal(
+        np.asarray(narrowed["frequency_mask"]), [False, True, True, False, False]
+    )
+    for name, array in narrowed.items():
+        assert array.shape == full[name].shape, name
+    # Everything but the mask is untouched, so only a traced value differs.
+    for name in ("observed_spectral_density", "scale"):
+        np.testing.assert_array_equal(
+            np.asarray(narrowed[name]), np.asarray(full[name])
+        )
+
+
+def test_a_sub_band_is_intersected_with_the_runs_own_band(
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
+) -> None:
+    """Bounds widen nothing: bins the run already excluded stay excluded."""
+    config = _config()
+
+    inputs = _prepare(injection_catalog, proposal_catalog, config)
+
+    # [0, 100] Hz spans the whole grid, but the run's band is [20, 40] Hz.
+    np.testing.assert_array_equal(
+        np.asarray(inputs.model_kwargs(fmin=0.0, fmax=100.0)["frequency_mask"]),
+        np.asarray(inputs.observation.frequency_mask),
+    )
+
+
+def test_a_sub_band_with_fewer_than_two_usable_bins_is_rejected(
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
+) -> None:
+    config = _config()
+
+    inputs = _prepare(injection_catalog, proposal_catalog, config)
+
+    with pytest.raises(ValueError, match="only 1 usable frequency bin"):
+        inputs.model_kwargs(fmin=20.0, fmax=25.0)
+
+
+def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
+) -> None:
+    """The other production likelihood, end to end through ``build_model``.
+
+    The amplitude-marginalized model reaches the band through four hand-written
+    sums rather than through a distribution, so its masking is separate code
+    from the general model's and needs its own end-to-end check: a mask that
+    reached the factor but not the sufficient statistics would leave a chain
+    that looks healthy and reconstructs the wrong posterior.
+    """
+    config = _config(
+        analysis={
+            **example_raw()["analysis"],
+            "f_min": BAND[0],
+            "f_max": BAND[1],
+            "likelihood": "amplitude_marginalized",
+            "amplitude_parameter": "H0",
+        },
+        sampled_params=["Omega_m"],
+    )
+
+    inputs = _prepare(injection_catalog, proposal_catalog, config)
+    model, marginalization = build_model(
+        config, spectral_density_fn=inputs.spectral_density_fn
+    )
+    assert marginalization is not None
+    params = {"Omega_m": jnp.asarray(config.fiducials["Omega_m"])}
+
+    value, _ = log_density(model, (), inputs.model_kwargs(), params)
+
+    # The same likelihood with the band compressed away instead of masked.
+    mask = np.asarray(inputs.observation.frequency_mask)
+    compressed_model, _ = build_model(
+        config,
+        spectral_density_fn=build_importance_spectrum(
+            inputs.proposal,
+            source_model=target_source_model(config),
+            merger_rate_fn=target_merger_rate_fn(config),
+            average_mode="analytic_inclination",
+            frequency_mask=inputs.observation.frequency_mask,
+        )[0],
+    )
+    kwargs = inputs.model_kwargs()
+    expected, _ = log_density(
+        compressed_model,
+        (),
+        {
+            "observed_spectral_density": kwargs["observed_spectral_density"][mask],
+            "scale": kwargs["scale"][mask],
+        },
+        params,
+    )
+
+    assert np.isfinite(float(value))
+    np.testing.assert_allclose(float(value), float(expected), rtol=1e-10)
+
+
 def test_a_catalog_may_serve_as_both_roles(
     injection_catalog: PolarizationPowerCatalog,
 ) -> None:
@@ -351,7 +486,7 @@ def test_a_catalog_may_serve_as_both_roles(
 
     inputs = _prepare(injection_catalog, injection_catalog, config)
 
-    assert _bound(inputs)["polarization_power"].shape == (N_BAND, N_RETAINED)
+    assert _bound(inputs)["polarization_power"].shape == (N_FREQ, N_RETAINED)
 
 
 # --------------------------------------------------------------------------- #
@@ -448,8 +583,9 @@ def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.
     from reference_population import reference_merger_rate_distance_and_logprob
 
     catalog = inputs.proposal
-    mask = np.asarray(inputs.observation.frequency_mask)
-    power = jnp.asarray(catalog.polarization_power)[mask, :]
+    # The bound spectrum is on the catalog's full grid; the band is applied by
+    # the likelihood's mask, not by compressing the power.
+    power = jnp.asarray(catalog.polarization_power)
     redshift = jnp.asarray(catalog.source_parameters["redshift"])
     grid = config.analysis_grid
 
@@ -502,7 +638,7 @@ def test_prepared_spectrum_reproduces_the_grid_formula(
     }
     expected = _grid_formula_spectrum(inputs, config, params)
 
-    kwargs = inputs.masked_model_kwargs()
+    kwargs = inputs.model_kwargs()
     value, trace = log_density(
         partial(
             gwb_spectral_density_model,
@@ -517,14 +653,20 @@ def test_prepared_spectrum_reproduces_the_grid_formula(
     # The target side forms the effective distance linearly and then logs it,
     # where the grid formula adds two logs -- so parity is scientific, not
     # bitwise.
+    # The site is Independent(Masked(Normal)): one event dimension over the
+    # frequency axis, wrapped around the mask.
     np.testing.assert_allclose(
-        np.asarray(trace["spectral_density_obs"]["fn"].base_dist.loc),
+        np.asarray(trace["spectral_density_obs"]["fn"].base_dist.base_dist.loc),
         np.asarray(expected),
         rtol=1e-9,
     )
     expected_density = jnp.sum(
-        dist.Normal(expected, kwargs["scale"]).log_prob(
-            kwargs["observed_spectral_density"]
+        jnp.where(
+            kwargs["frequency_mask"],
+            dist.Normal(expected, kwargs["scale"]).log_prob(
+                kwargs["observed_spectral_density"]
+            ),
+            0.0,
         )
     ) + sum(prior.log_prob(params[name]) for name, prior in config.priors.items())
     np.testing.assert_allclose(float(value), float(expected_density), rtol=1e-9)

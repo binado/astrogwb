@@ -17,9 +17,15 @@ JAX ops run only inside functions, after ``runtime.configure_runtime``. Importin
 this module loads ``jax`` but does not initialize the XLA backend; a subprocess
 test in ``tests/paper/test_cli.py`` guards that.
 
-Arrays on :class:`Observation` are *pre*-mask, with the mask carried alongside,
-because the notebooks plot the unmasked PSD and spectrum before restricting to
-the analysis band. :meth:`InferenceInputs.masked_model_kwargs` applies it.
+Nothing here compresses an array to the analysis band. The catalog's frequency
+grid is *the* grid every model array lives on -- the observed spectrum, the
+scale, and the bound ``(F, N)`` polarization power alike -- and the band reaches
+the model as a boolean mask carried alongside them, which
+:meth:`InferenceInputs.model_kwargs` assembles. That is what lets one compiled
+sampler be reused across bands: a mask is a traced value, while a compressed
+array is a new shape and therefore a new compilation. The catalogs are generated
+on the analysis band (see ``config/catalogs/base/waveform.toml``), so the grid
+costs no more per sampler step than the band it selects.
 """
 
 from __future__ import annotations
@@ -73,9 +79,10 @@ logger = logging.getLogger(__name__)
 class Observation:
     """The observed-data side of a run: the fiducial injection spectrum.
 
-    Arrays are pre-mask; ``frequency_mask`` selects the analysis band. ``df``
-    is the catalog's grid-derived bin width and stays valid under the mask,
-    which is why it is carried here rather than measured off the masked grid.
+    Arrays are on the catalog's full frequency grid; ``frequency_mask`` selects
+    the analysis band within it. ``df`` is the catalog's grid-derived bin width
+    and stays valid under any mask, which is why it is carried here rather than
+    measured off a selected grid.
     """
 
     frequencies: jax.Array
@@ -94,26 +101,58 @@ class InferenceInputs:
     effective_psd: jax.Array
     observation_time: float
     spectral_density_fn: SpectralDensityFn
-    """The importance-sampled spectrum: band-restricted catalog arrays bound to
+    """The importance-sampled spectrum: the catalog's full-grid arrays bound to
     the target source model and merger rate."""
     log_weights_fn: LogWeightsFn
     """Per-source log importance weights, bound to the same arrays and target."""
 
-    def masked_model_kwargs(self) -> dict[str, Any]:
-        """Restrict to the analysis band and return the model's data inputs.
+    def model_kwargs(
+        self, *, fmin: float | None = None, fmax: float | None = None
+    ) -> dict[str, Any]:
+        """The model's data inputs, on the catalog grid, with the band as a mask.
 
-        The generic likelihood takes only the observation and the per-bin
-        Gaussian scale: the catalog and the inclination convention already
-        live inside :attr:`spectral_density_fn`, and the PSD, observation time,
-        and bin width are consumed here rather than inside the model.
+        The likelihoods take the observation, the per-bin Gaussian scale, and
+        the boolean band mask: the catalog and the inclination convention
+        already live inside :attr:`spectral_density_fn`, and the PSD,
+        observation time, and bin width are consumed here rather than inside
+        the model.
+
+        ``fmin``/``fmax`` narrow the run's band to a sub-band, intersected with
+        the run's own mask so detector-coverage gaps stay excluded. Because
+        only the mask's *value* changes, a sweep over sub-bands reuses one
+        compiled sampler -- build the inputs and the ``MCMC`` object once, then
+        call ``mcmc.run(key, **inputs.model_kwargs(fmax=f))`` per band.
+
+        Raises ``ValueError`` if fewer than two bins survive.
         """
         observation = self.observation
-        mask = np.asarray(observation.frequency_mask)
+        mask = observation.frequency_mask
+        if fmin is not None or fmax is not None:
+            mask = mask & make_frequency_mask(
+                observation.frequencies, fmin=fmin, fmax=fmax
+            )
+            num_bins = int(jnp.sum(mask))
+            if num_bins < 2:
+                raise ValueError(
+                    f"only {num_bins} usable frequency bin(s) in the requested "
+                    f"sub-band [{fmin}, {fmax}] Hz; widen it or check that it "
+                    "lies inside the run's analysis band"
+                )
+        scale = gaussian_bin_scale(
+            self.effective_psd, self.observation_time, observation.df
+        )
         return {
-            "observed_spectral_density": observation.spectral_density[mask],
-            "scale": gaussian_bin_scale(
-                self.effective_psd[mask], self.observation_time, observation.df
-            ),
+            "observed_spectral_density": observation.spectral_density,
+            # `effective_psd` is inf wherever no detector pair contributes, so
+            # `scale` is non-finite at exactly the bins the run's band already
+            # excludes. Both likelihoods discard those bins, which makes the
+            # substituted value unobservable; it exists so the array stays
+            # finite and inspectable rather than relying on a non-finite value
+            # surviving a `where`. The substitution keys off the run's band and
+            # not off `mask`, so `scale` is one fixed array across a sub-band
+            # sweep and the mask is the only thing that varies.
+            "scale": jnp.where(observation.frequency_mask, scale, 1.0),
+            "frequency_mask": mask,
         }
 
 
@@ -299,9 +338,9 @@ def prepare_inference_inputs(
     )
     # `compute_effective_psd` returns inf wherever no detector pair contributes,
     # and Normal(loc, inf).log_prob is -inf -- a constant that kills NUTS with no
-    # usable diagnostic. Drop those bins along with the out-of-band ones. This is
-    # safe precisely because `df` is the catalog's grid-derived property: the
-    # surviving bins need not be contiguous, and each still has width `df`.
+    # usable diagnostic. Exclude those bins along with the out-of-band ones. This
+    # is safe precisely because `df` is the catalog's grid-derived property: the
+    # selected bins need not be contiguous, and each still has width `df`.
     band_mask = (
         observation.frequency_mask
         & jnp.isfinite(effective_psd_arr)
@@ -315,22 +354,25 @@ def prepare_inference_inputs(
             f"{' '.join(detectors)}; widen the band or choose a detector "
             "network with full coverage"
         )
-    dropped = int(jnp.sum(observation.frequency_mask)) - num_bins
-    if dropped:
+    excluded = int(jnp.sum(observation.frequency_mask)) - num_bins
+    if excluded:
         logger.info(
-            "Dropped %d in-band bin(s) with no detector-network coverage", dropped
+            "Excluded %d in-band bin(s) with no detector-network coverage", excluded
         )
     observation = replace(observation, frequency_mask=band_mask)
 
     # The proposal density is the catalog's own recorded source model,
     # evaluated at the parameters it was drawn at. Doing that here, once, is
     # also what keeps it off the per-sampler-step path.
+    #
+    # No `frequency_mask`: the power stays on the catalog's full grid, so the
+    # band is a traced mask rather than a compiled-in shape. `model_kwargs`
+    # supplies it alongside arrays of the same length.
     spectral_density_fn, log_weights_fn = build_importance_spectrum(
         proposal_catalog,
         source_model=target_source_model,
         merger_rate_fn=target_merger_rate_fn,
         average_mode=average_mode,
-        frequency_mask=band_mask,
     )
     return InferenceInputs(
         observation=observation,

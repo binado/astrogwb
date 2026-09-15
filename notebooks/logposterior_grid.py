@@ -52,7 +52,6 @@ from numpyro import handlers
 from numpyro.infer.util import log_density
 from scipy.ndimage import gaussian_filter
 
-from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
@@ -294,37 +293,34 @@ plot_omegagw(
     ymin=1e-15,
 )
 
-# The masked arrays the likelihood is evaluated against. The bound spectrum
-# already holds the band-restricted power; masking the source samples would silently
-# truncate the population, so it never happens.
-observed_spectral_density = inputs.masked_model_kwargs()["observed_spectral_density"]
-effective_psd_arr = effective_psd_arr[np.asarray(mask)]
-frequencies = frequencies[mask]
+# The arrays the likelihood is evaluated against: the observed spectrum, the
+# per-bin scale, and the analysis-band mask, all on the catalog's frequency
+# grid. The bound spectrum holds the full-grid power; masking the source
+# samples would silently truncate the population, so it never happens.
+model_kwargs = inputs.model_kwargs()
+observed_spectral_density = model_kwargs["observed_spectral_density"]
 
 # %% [markdown]
 # ## Building the model
 #
 # We assemble the same `gwb_spectral_density_model` used by the NUTS run.
 # Rather than sampling it, we evaluate its log joint density on a grid below.
-# The importance arrays were prepared *with* the frequency mask, so the bound
-# spectrum owns the band-restricted power; the source samples keep their full
-# length. Everything
-# the grid does not vary -- the proposal density, the reference distances, the
-# per-bin noise scale -- was prepared once, above.
+# The band reaches the model as a boolean mask over the catalog grid rather
+# than as a compressed array, so the bound spectrum owns the full-grid power
+# and the source samples keep their full length. Everything the grid does not
+# vary -- the proposal density, the reference distances, the per-bin noise
+# scale -- was prepared once, above.
 
 # %%
 base_model = partial(
     gwb_spectral_density_model,
     spectral_density_fn=spectral_density_fn,
     priors=priors,
-    scale=gaussian_bin_scale(effective_psd_arr, observation_time, df),
 )
 model = handlers.block(
     handlers.condition(base_model, data=fixed_params),
     hide=list(fixed_params),
 )
-
-model_kwargs = {"observed_spectral_density": observed_spectral_density}
 
 # %% [markdown]
 # ## Building the parameter grid
