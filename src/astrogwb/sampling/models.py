@@ -11,8 +11,8 @@ target outside inference::
 
     spectrum = build_importance_spectrum(
         catalog,
-        source_model=target_source_model,
-        merger_rate_fn=target_merger_rate_fn,
+        source_model=target.source_model,
+        merger_rate_fn=target.merger_rate_fn,
     )[0]
     model = partial(
         gwb_spectral_density_model,

@@ -85,7 +85,7 @@ def test_invalid_metadata_and_unknown_population_fail_on_load(tmp_path: Path) ->
     path = tmp_path / "invalid.h5"
     make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
     with h5py.File(path, "r+") as handle:
-        handle.attrs["population_source_model"] = "no_such_population"
+        handle.attrs["population_model"] = "no_such_population"
     with pytest.raises(KeyError):
         PolarizationPowerCatalog.load(path)
 
@@ -94,9 +94,8 @@ def test_missing_population_names_are_rejected(tmp_path: Path) -> None:
     path = tmp_path / "invalid.h5"
     make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
     with h5py.File(path, "r+") as handle:
-        del handle.attrs["population_source_model"]
-        del handle.attrs["population_rate_model"]
-    with pytest.raises(ValueError, match="population_source_model"):
+        del handle.attrs["population_model"]
+    with pytest.raises(ValueError, match="population_model"):
         PolarizationPowerCatalog.load(path)
 
 

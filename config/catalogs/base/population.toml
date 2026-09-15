@@ -1,11 +1,12 @@
 # The BNS population every catalog is drawn from, and drawn at.
 #
-# `source_model` / `rate_model` are keys in the astrogwb.populations source
-# and merger-rate registries, not import paths: registry keys change only on
-# purpose, while module paths move as collateral. The guarded-proposal
-# catalogs override `source_model` with the uniform-mixture variant and add
-# `uniform_mixing_fraction` to [population.source_kwargs]; `rate_model` stays
-# the Madau-Dickinson rate every catalog pairs with.
+# `model` is a key in the astrogwb.populations registry, not an import path:
+# registry keys change only on purpose, while module paths move as collateral.
+# It names the population -- the source model and its merger rate together --
+# so a def cannot pair a redshift law with a rate that is not its own
+# normalization. The guarded-proposal catalogs override `model` with the
+# uniform-mixture variant, which is a sampling density and declares no merger
+# rate at all.
 #
 # Everything here is copied verbatim into the generated .h5 file, which is what
 # makes the catalog self-describing. Nothing re-reads this layer at analysis
@@ -14,14 +15,13 @@
 # catalog, so editing it correctly invalidates all of them.
 
 [population]
-source_model = "bns_md_cosmological"
-rate_model = "madau_dickinson"
-# Density factors and source outputs are declared by the source model class.
+model = "bns_md_cosmological"
+# Density factors and source outputs are declared by the registered population.
 
-# Construction settings routed to *both* models: the redshift window and the
-# grid the cosmology integrals and the density normalization run on.
-# Narrowing the window to an analysis band is a Catalog operation, not an
-# edit here.
+# The population's construction settings: the redshift window and the grid the
+# cosmology integrals and the density normalization run on. A def adds
+# whatever else the population it names takes. Narrowing the window to an
+# analysis band is a Catalog operation, not an edit here.
 [population.kwargs]
 z_min = 0.0
 z_max = 20.0

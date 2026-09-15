@@ -32,7 +32,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb.frequency import uniform_grid_spacing
-from astrogwb.populations import MergerRateFn, PopulationRecord, SourceFn
+from astrogwb.populations import Population, PopulationRecord
 from astrogwb.waveform import PolarizationPowerGenerator
 
 __all__ = ["SpectralDensityCatalog"]
@@ -49,8 +49,7 @@ class SpectralDensityCatalog:
     hyperparameter column has shape ``(draws,)``.
 
     Like its sibling, the population record is private: what callers need is
-    :meth:`get_source_model` and :meth:`get_merger_rate_fn`, not the strings
-    they were rebuilt from.
+    :meth:`get_population`, not the strings it was rebuilt from.
     """
 
     spectral_density: NDArray[Any]
@@ -130,14 +129,9 @@ class SpectralDensityCatalog:
         return self._population.seed
 
     @property
-    def population_source_model_name(self) -> str:
-        """The registry key of the source model these draws used."""
-        return self._population.source_model_name
-
-    @property
-    def population_rate_model_name(self) -> str:
-        """The registry key of the merger-rate function these draws used."""
-        return self._population.rate_model_name
+    def population_model_name(self) -> str:
+        """The registry key of the population these draws used."""
+        return self._population.model_name
 
     @property
     def population_model_kwargs(self) -> Mapping[str, Any]:
@@ -149,13 +143,13 @@ class SpectralDensityCatalog:
         """Ordered source-density factors included in importance weighting."""
         return self._population.density_sites
 
-    def get_source_model(self) -> SourceFn:
-        """Reconstruct the generating source model with its settings bound."""
-        return self._population.get_source_model()
+    def get_population(self) -> Population:
+        """Reconstruct the generating population with its settings bound.
 
-    def get_merger_rate_fn(self) -> MergerRateFn:
-        """Reconstruct the merger-rate function with its shared settings bound."""
-        return self._population.get_merger_rate_fn()
+        ``merger_rate_fn`` is ``None`` only for a proposal density, which the
+        simulator that writes this format refuses to draw from.
+        """
+        return self._population.build()
 
     @property
     def num_draws(self) -> int:
@@ -182,9 +176,8 @@ class SpectralDensityCatalog:
 
         Loading calls
         :meth:`~astrogwb.populations.PopulationRecord.check_registered` to
-        verify the recorded source and rate model names are still registered;
-        it does not re-run the forward model or compare the stored spectra
-        against it.
+        verify the recorded population name is still registered; it does not
+        re-run the forward model or compare the stored spectra against it.
         """
         from astrogwb.catalog import _io
 

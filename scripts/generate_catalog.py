@@ -6,14 +6,14 @@ draws that catalog's population from the registered NumPyro model it names,
 generates frequency-domain waveforms, reduces them to polarization power, and
 writes ``outputs/catalogs/<catalog>.h5``.
 
-The population declaration is a source model composed with a merger-rate
-model, not a graph config, and it is the *same* pair the analysis evaluates
-the proposal density with. That is what makes the output self-describing: the
-file records both models' registry names, their construction settings, the
-hyperparameters they were drawn at, and the density factors included in
-importance weighting, which is everything needed to reconstruct the map from
-hyperparameters to source density. Nothing downstream re-reads these configs,
-and no run config restates any of it.
+The population declaration is one registered name, not a graph config, and it
+is the *same* population the analysis evaluates the proposal density with.
+That is what makes the output self-describing: the file records the
+population's registry name, its construction settings, the hyperparameters it
+was drawn at, and the density factors included in importance weighting, which
+is everything needed to reconstruct the map from hyperparameters to source
+density. Nothing downstream re-reads these configs, and no run config restates
+any of it.
 
 It also retired the arithmetic that used to sit in this script. Detector-frame
 masses were computed here, by hand, from source-frame masses and redshift --
@@ -43,11 +43,10 @@ from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.paper.config import waveform_generator
 from astrogwb.paper.config.catalogs import (
     CatalogDefinition,
-    check_rate_model,
-    check_source_model,
+    check_population_model,
     load_catalog_layers,
 )
-from astrogwb.populations import DEFAULT_DENSITY_SITES, build_source_model
+from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.utils.sampling import sample_sources
 
 # x64 must be on before the population draw. `build_catalog` samples before it
@@ -97,30 +96,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def build_catalog(definition: CatalogDefinition) -> PolarizationPowerCatalog:
     """Draw the population, generate its power, and record what produced it."""
     population = definition.population
-    check_source_model(
-        population.source_model,
-        label=f"catalog {definition.name!r} population.source_model",
-    )
-    check_rate_model(
-        population.rate_model,
-        label=f"catalog {definition.name!r} population.rate_model",
-    )
-    source_model = build_source_model(
-        population.source_model,
+    check_population_model(
+        population.model,
+        label=f"catalog {definition.name!r} population.model",
         settings=population.kwargs,
-        source_kwargs=population.source_kwargs,
     )
+    source_model = build_population(population.model, **population.kwargs).source_model
 
     logger.info(
-        "Catalog %s: source_model=%s rate_model=%s seed=%d num_samples=%d kwargs=%s "
-        "source_kwargs=%s",
+        "Catalog %s: population=%s seed=%d num_samples=%d kwargs=%s",
         definition.name,
-        population.source_model,
-        population.rate_model,
+        population.model,
         definition.seed,
         definition.num_samples,
         population.kwargs,
-        population.source_kwargs,
     )
     samples = sample_sources(
         source_model,
@@ -154,9 +143,8 @@ def build_catalog(definition: CatalogDefinition) -> PolarizationPowerCatalog:
     catalog = PolarizationPowerCatalog.from_generator(
         samples,
         generator=generator,
-        source_model_name=population.source_model,
-        rate_model_name=population.rate_model,
-        model_kwargs={**population.kwargs, **population.source_kwargs},
+        model_name=population.model,
+        model_kwargs=population.kwargs,
         fiducials=population.params,
         density_sites=DEFAULT_DENSITY_SITES,
         seed=definition.seed,

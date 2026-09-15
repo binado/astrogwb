@@ -78,11 +78,7 @@ from astrogwb.gwb import (
     uniform_prior_mass_moments,
 )
 from astrogwb.importance.spectral import build_importance_spectrum
-from astrogwb.populations import (
-    DEFAULT_DENSITY_SITES,
-    build_merger_rate_fn,
-    build_source_model,
-)
+from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
@@ -243,7 +239,7 @@ POPULATION_MODEL_KWARGS: dict[str, float | int] = {
 
 def population_model_fn():
     """The generating source model, with its construction settings bound."""
-    return build_source_model(POPULATION_MODEL, settings=POPULATION_MODEL_KWARGS)
+    return build_population(POPULATION_MODEL, **POPULATION_MODEL_KWARGS).source_model
 
 
 TARGET_SETTINGS: dict[str, float | int] = {
@@ -253,14 +249,9 @@ TARGET_SETTINGS: dict[str, float | int] = {
 }
 
 
-def target_model_fn():
-    """The target source model: the same sources under modified propagation."""
-    return build_source_model("bns_md_modified_propagation", settings=TARGET_SETTINGS)
-
-
-def target_merger_rate_fn():
-    """The Madau-Dickinson merger rate the target pairs with."""
-    return build_merger_rate_fn(settings=TARGET_SETTINGS)
+def target_population_fn():
+    """The target population: the same sources under modified propagation."""
+    return build_population("bns_md_modified_propagation", **TARGET_SETTINGS)
 
 
 def make_redshift_grid() -> jax.Array:
@@ -332,8 +323,7 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> PolarizationPowerCat
             sampling_frequency=2.0 * f_max,
             frequency_resolution=df,
         ),
-        source_model_name=POPULATION_MODEL,
-        rate_model_name="madau_dickinson",
+        model_name=POPULATION_MODEL,
         model_kwargs=POPULATION_MODEL_KWARGS,
         fiducials=POPULATION_PARAMS,
         density_sites=DEFAULT_DENSITY_SITES,
@@ -1026,10 +1016,11 @@ pd.DataFrame(
 # the target evaluation only. The reference distance is the stored distance
 # column -- the one the stored power was generated at -- never a freshly
 # interpolated cosmology table.
-scan_merger_rate = target_merger_rate_fn()
+scan_target = target_population_fn()
+scan_merger_rate = scan_target.merger_rate_fn
 scan_log_weights = build_importance_spectrum(
     catalog,
-    source_model=target_model_fn(),
+    source_model=scan_target.source_model,
     merger_rate_fn=scan_merger_rate,
 )[1]
 

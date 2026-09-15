@@ -45,10 +45,10 @@ from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import RunConfig, build_run_config
 from astrogwb.paper.inference import (
     build_model,
+    catalog_total_merger_rate,
     prepare_inference_inputs,
     prepare_observation,
-    target_merger_rate_fn,
-    target_source_model,
+    target_population,
 )
 from astrogwb.sampling import gwb_spectral_density_model
 
@@ -145,8 +145,7 @@ def _prepare(
         proposal,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
-        target_source_model=target_source_model(config),
-        target_merger_rate_fn=target_merger_rate_fn(config),
+        target=target_population(config),
     )
 
 
@@ -453,12 +452,14 @@ def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
 
     # The same likelihood with the band compressed away instead of masked.
     mask = np.asarray(inputs.observation.frequency_mask)
+    target = target_population(config)
+    assert target.merger_rate_fn is not None
     compressed_model, _ = build_model(
         config,
         spectral_density_fn=build_importance_spectrum(
             inputs.proposal,
-            source_model=target_source_model(config),
-            merger_rate_fn=target_merger_rate_fn(config),
+            source_model=target.source_model,
+            merger_rate_fn=target.merger_rate_fn,
             frequency_mask=inputs.observation.frequency_mask,
         )[0],
     )
@@ -684,10 +685,12 @@ def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights
     same cosmology on two grids is exactly what stops the weights being
     identically one.
     """
+    population = proposal_catalog.get_population()
+    assert population.merger_rate_fn is not None
     log_weights_fn = build_importance_spectrum(
         proposal_catalog,
-        source_model=proposal_catalog.get_source_model(),
-        merger_rate_fn=proposal_catalog.get_merger_rate_fn(),
+        source_model=population.source_model,
+        merger_rate_fn=population.merger_rate_fn,
     )[1]
     log_weights = log_weights_fn(proposal_catalog.fiducials)
     np.testing.assert_array_equal(np.asarray(log_weights), np.zeros(N_SOURCES))
@@ -729,8 +732,7 @@ def test_the_proposals_density_factors_reach_the_bound_weights_unchanged(
         narrow,
         grid=grid,
         detectors=config.analysis.detectors,
-        target_source_model=restricted.get_source_model(),
-        target_merger_rate_fn=restricted.get_merger_rate_fn(),
+        target=restricted.get_population(),
     )
 
     assert _bound(inputs)["density_sites"] == ("redshift",)
@@ -738,6 +740,29 @@ def test_the_proposals_density_factors_reach_the_bound_weights_unchanged(
         np.asarray(inputs.log_weights_fn(inputs.proposal.fiducials)),
         np.zeros(N_RETAINED),
     )
+
+
+def test_a_guard_mixture_catalog_cannot_supply_an_observed_rate() -> None:
+    """A proposal catalog used as an injection fails, rather than scaling wrong.
+
+    The Madau-Dickinson total rate normalizes the Madau-Dickinson redshift
+    density, not a mixture of it with a uniform component. Every guarded def
+    used to record that rate anyway, and ``catalog_total_merger_rate`` would
+    have returned it -- a finite number, off by the guard fraction, with no
+    error anywhere downstream.
+    """
+    guard = make_catalog(
+        redshift=REDSHIFT,
+        polarization_power=np.ones((FREQUENCIES.size, N_SOURCES)),
+        minimum_frequency=float(FREQUENCIES[0]),
+        df=float(FREQUENCIES[1] - FREQUENCIES[0]),
+        model_name="bns_md_uniform_mixture",
+        model_kwargs={**GENERATION_KWARGS, "uniform_mixing_fraction": 0.1},
+    )
+
+    assert guard.get_population().merger_rate_fn is None
+    with pytest.raises(ValueError, match="declares no merger rate"):
+        catalog_total_merger_rate(guard)
 
 
 def test_the_repository_ships_no_proposal_density_config() -> None:

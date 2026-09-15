@@ -196,16 +196,15 @@ class AnalysisConfig(BaseModel):
     network: str | None = None
     f_min: float
     f_max: float
-    # The registered source and merger-rate models the sampled hyperparameters
-    # describe. The defaults are the ones every committed run uses; the source
-    # model reduces exactly to the plain cosmological population at xi_0 = 1,
-    # which is how a run that does not sample the propagation parameters gets
-    # the standard law without naming a second model. Validated against the
-    # registries by `astrogwb.paper.config.catalogs.check_source_model` /
-    # `check_rate_model`, not here: this module must stay importable without
-    # JAX.
-    source_model: str = "bns_md_modified_propagation"
-    rate_model: str = "madau_dickinson"
+    # The registered population the sampled hyperparameters describe. The
+    # default is the one every committed run uses; it reduces exactly to the
+    # plain cosmological population at xi_0 = 1, which is how a run that does
+    # not sample the propagation parameters gets the standard law without
+    # naming a second population. An analysis target must declare a merger
+    # rate, so a guard mixture cannot be named here. Validated against the
+    # registry by `astrogwb.paper.config.catalogs.check_population_model`, not
+    # here: this module must stay importable without JAX.
+    population_model: str = "bns_md_modified_propagation"
     likelihood: Literal["default", "amplitude_marginalized"] = "default"
     amplitude_parameter: AmplitudeParameter | None = None
     amplitude_num_nodes: Annotated[int, Field(gt=1)] = 1024

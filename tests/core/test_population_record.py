@@ -11,9 +11,8 @@ from astrogwb.populations import PopulationRecord
 from astrogwb.populations.record import (
     DENSITY_SITES_ATTR,
     MODEL_KWARGS_ATTR,
-    RATE_MODEL_NAME_ATTR,
+    MODEL_NAME_ATTR,
     SEED_ATTR,
-    SOURCE_MODEL_NAME_ATTR,
 )
 
 MODEL_KWARGS = {"z_min": 0.1, "z_max": 10.0, "n_grid": 32}
@@ -22,8 +21,7 @@ DENSITY_SITES = ("redshift", "source_frame_mass_1", "source_frame_mass_2")
 
 def _record(**overrides: Any) -> PopulationRecord:
     fields: dict[str, Any] = {
-        "source_model_name": "bns_md_cosmological",
-        "rate_model_name": "madau_dickinson",
+        "model_name": "bns_md_cosmological",
         "model_kwargs": MODEL_KWARGS,
         "density_sites": DENSITY_SITES,
         "seed": 7,
@@ -43,8 +41,7 @@ def test_to_attrs_sorts_mapping_keys_so_a_file_is_reproducible() -> None:
         {"z_min": 0.1, "z_max": 10.0}, sort_keys=True
     )
     assert attrs[DENSITY_SITES_ATTR] == json.dumps(list(DENSITY_SITES))
-    assert attrs[SOURCE_MODEL_NAME_ATTR] == "bns_md_cosmological"
-    assert attrs[RATE_MODEL_NAME_ATTR] == "madau_dickinson"
+    assert attrs[MODEL_NAME_ATTR] == "bns_md_cosmological"
     assert attrs[SEED_ATTR] == 7
 
 
@@ -54,23 +51,37 @@ def test_density_sites_and_kwargs_are_normalized() -> None:
     assert isinstance(record.model_kwargs, dict)
 
 
-def test_getters_bind_construction_settings_only() -> None:
-    record = _record()
-    source = record.get_source_model()
-    rate = record.get_merger_rate_fn()
+def test_build_binds_construction_settings_to_both_callables() -> None:
+    source, rate = _record().build()
     assert source.keywords == MODEL_KWARGS  # ty: ignore[unresolved-attribute]
-    # Only the shared window/grid keys reach the rate function.
+    # One settings mapping reaches both: nothing is filtered on the way to the
+    # rate, so a key neither accepts fails rather than being dropped.
+    assert rate is not None
     assert rate.keywords == MODEL_KWARGS  # ty: ignore[unresolved-attribute]
 
 
-def test_check_registered_names_the_unknown_source_model() -> None:
+def test_check_registered_names_the_unknown_population() -> None:
     with pytest.raises(KeyError, match="no_such_population"):
-        _record(source_model_name="no_such_population").check_registered()
+        _record(model_name="no_such_population").check_registered()
 
 
-def test_check_registered_names_the_unknown_rate_model() -> None:
-    with pytest.raises(KeyError, match="no_such_rate"):
-        _record(rate_model_name="no_such_rate").check_registered()
+def test_check_registered_rejects_a_setting_the_population_does_not_take() -> None:
+    """A record is only valid if its settings actually build its population.
+
+    The flat kwargs mapping used to be filtered down to the shared window keys
+    before reaching the rate function, so a stale key travelled unnoticed.
+    """
+    record = _record(model_kwargs={**MODEL_KWARGS, "uniform_mixing_fraction": 0.1})
+    with pytest.raises(TypeError, match="uniform_mixing_fraction"):
+        record.check_registered()
+
+
+def test_a_proposal_population_builds_with_no_merger_rate() -> None:
+    record = _record(
+        model_name="bns_md_uniform_mixture",
+        model_kwargs={**MODEL_KWARGS, "uniform_mixing_fraction": 0.1},
+    )
+    assert record.build().merger_rate_fn is None
 
 
 @pytest.mark.parametrize("seed", ["7", 7.0, True, None])

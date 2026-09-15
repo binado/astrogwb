@@ -172,7 +172,7 @@ from astrogwb.paper.config import priors as committed_priors
 from astrogwb.paper.config.mcmc import AnalysisGrid, build_run_config
 from astrogwb.paper.config.runs import assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
-from astrogwb.populations import build_merger_rate_fn, build_source_model
+from astrogwb.populations import build_population
 from astrogwb.sampling import gwb_spectral_density_model
 
 register_projection(MplAxes)
@@ -271,18 +271,15 @@ analysis_grid = AnalysisGrid(
     maximum_redshift=maximum_redshift,
     n_grid=n_grid,
 )
-# The target source model and merger rate, bound to the analysis grid once: a
-# partial hashes by identity, so rebuilding one per step would retrace the
-# whole model.
+# The target population -- source model and merger rate together -- bound to
+# the analysis grid once: a partial hashes by identity, so rebuilding one per
+# step would retrace the whole model.
 target_settings = {
     "z_min": minimum_redshift,
     "z_max": maximum_redshift,
     "n_grid": n_grid,
 }
-target_source_model = build_source_model(
-    "bns_md_modified_propagation", settings=target_settings
-)
-target_merger_rate_fn = build_merger_rate_fn(settings=target_settings)
+target = build_population("bns_md_modified_propagation", **target_settings)
 
 # One call does every step the headless runner does: restrict both catalogs to
 # the analysis window (samples *and* recorded density together), build the
@@ -295,8 +292,7 @@ inputs = prepare_inference_inputs(
     proposal_catalog,
     grid=analysis_grid,
     detectors=detnames,
-    target_source_model=target_source_model,
-    target_merger_rate_fn=target_merger_rate_fn,
+    target=target,
 )
 observation = inputs.observation
 proposal = inputs.proposal

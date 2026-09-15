@@ -1,15 +1,16 @@
 """Source populations declared as NumPyro models, addressed by registered name.
 
-One pair of declarations serves generation and inference: a source model
+One declaration serves generation and inference: a population's source model
 draws a catalog (:func:`~astrogwb.utils.sampling.sample_sources`), and
 conditioning those draws back into it recovers the per-sample source density
 the importance weights divide by
-(:func:`~astrogwb.utils.sampling.evaluate_sources`). A
-merger-rate function returns the one observer-frame scalar the same catalog's
-Poisson count and predicted spectrum need. That is what makes a catalog
-self-describing -- the file records the two registry names, both callables'
-construction settings, and the hyperparameters they were drawn at, which is
-everything needed to reconstruct the density that produced it.
+(:func:`~astrogwb.utils.sampling.evaluate_sources`). Its merger-rate function
+returns the one observer-frame scalar the same catalog's Poisson count and
+predicted spectrum need, or ``None`` when the population is a proposal density
+with no physical rate. That is what makes a catalog self-describing -- the file
+records one registry name, the construction settings the population was built
+with, and the hyperparameters it was drawn at, which is everything needed to
+reconstruct the density that produced it.
 
 Importing this package registers every model it ships, the same way
 :mod:`astrogwb.detector` exposes its own submodules. That import pulls in JAX
@@ -35,24 +36,19 @@ from astrogwb.populations.bns_madau_dickinson import (
 from astrogwb.populations.record import PopulationRecord
 from astrogwb.populations.registry import (
     DEFAULT_DENSITY_SITES,
-    DEFAULT_MERGER_RATE_MODEL,
-    SHARED_MODEL_KWARGS,
     MergerRateFn,
+    Population,
     SourceFn,
-    build_merger_rate_fn,
-    build_source_model,
-    known_merger_rate_models,
-    known_source_models,
-    register_merger_rate_model,
-    register_source_model,
+    build_population,
+    known_populations,
+    register_population,
 )
 
 __all__ = [
     "AMPLITUDE_PARAMETERS",
     "DEFAULT_DENSITY_SITES",
-    "DEFAULT_MERGER_RATE_MODEL",
-    "SHARED_MODEL_KWARGS",
     "MergerRateFn",
+    "Population",
     "PopulationRecord",
     "SourceFn",
     "amplitude_H0_fn",
@@ -63,13 +59,10 @@ __all__ = [
     "bns_md_gaussian_uniform_mixture",
     "bns_md_modified_propagation",
     "bns_md_uniform_mixture",
-    "build_merger_rate_fn",
-    "build_source_model",
-    "known_merger_rate_models",
-    "known_source_models",
+    "build_population",
+    "known_populations",
     "madau_dickinson_total_merger_rate",
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
-    "register_merger_rate_model",
-    "register_source_model",
+    "register_population",
 ]

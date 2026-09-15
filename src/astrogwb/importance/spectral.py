@@ -169,10 +169,13 @@ def build_importance_spectrum(
     density, not an observation.
 
     ``source_model`` and ``merger_rate_fn`` are the target's already-built
-    callables -- normally :func:`~astrogwb.populations.build_source_model` and
-    :func:`~astrogwb.populations.build_merger_rate_fn`, built once per run and
+    callables -- normally the two members of one
+    :class:`~astrogwb.populations.Population` from
+    :func:`~astrogwb.populations.build_population`, built once per run and
     reused, since the returned partials hash by identity and a fresh,
-    equal-but-not-identical rebuild forces a jit recompile. ``catalog`` must
+    equal-but-not-identical rebuild forces a jit recompile. The rate is the
+    *target's*, never the proposal's, so it is never ``None``: a proposal is a
+    density, and a guard mixture declares no rate at all. ``catalog`` must
     already be restricted to the analysis redshift window.
 
     One preparation pass feeds both returned callables from a single keyword
@@ -193,7 +196,7 @@ def build_importance_spectrum(
     }
     density_sites = tuple(catalog.density_sites)
     proposal_log_prob, _ = evaluate_sources(
-        catalog.get_source_model(),
+        catalog.get_population().source_model,
         catalog.fiducials,
         source_parameters,
         density_sites=density_sites,

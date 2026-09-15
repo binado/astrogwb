@@ -35,7 +35,7 @@ from astrogwb.paper.config import priors
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
 from astrogwb.paper.plotting import TRUTH, parameter_label, use_paper_style
-from astrogwb.populations import build_merger_rate_fn, build_source_model
+from astrogwb.populations import build_population
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
 # Restore the standard projection for consistent plotting.
@@ -201,12 +201,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
     grid_settings = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_REDSHIFT_GRID}
+    target = build_population("bns_md_modified_propagation", **grid_settings)
     log_weights_fn = build_importance_spectrum(
         catalog,
-        source_model=build_source_model(
-            "bns_md_modified_propagation", settings=grid_settings
-        ),
-        merger_rate_fn=build_merger_rate_fn(settings=grid_settings),
+        source_model=target.source_model,
+        merger_rate_fn=target.merger_rate_fn,
     )[1]
 
     figures: list[tuple[Figure, Path]] = []

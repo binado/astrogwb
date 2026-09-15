@@ -1,48 +1,53 @@
-"""Name-to-model registries for source models and merger-rate functions.
+"""Name-to-population registry.
 
-A catalog file records the *names* of the source and rate callables that drew
-it, never an import path and never a pickled callable. Registry keys change
-only on purpose; module paths change as collateral whenever a module is
-moved, so a persisted ``module:function`` string is a reference that silently
-rots.
+A catalog file records the *name* of the population that drew it, never an
+import path and never a pickled callable. Registry keys change only on
+purpose; module paths change as collateral whenever a module is moved, so a
+persisted ``module:function`` string is a reference that silently rots.
 
-Two registries, because a source model and a merger-rate function are
-independent declarations: a redshift *law* used for a guard-mixture proposal
-already pairs with the same Madau-Dickinson *rate* the physical population
-uses. One source registry holds both physical and proposal models -- a
-proposal is just the source model a catalog happened to be drawn from.
+One registry, because a source model and its merger rate are not independent
+declarations: both are normalizations of the same redshift law, and composing
+them freely is how a guard-mixture proposal came to record the plain
+Madau-Dickinson rate -- a number that is not the normalization of the density
+it travels with. A registered population is a *factory*: it takes the
+construction settings and returns both callables at once, so the pairing is
+structural rather than conventional.
 
-What the builders return is a plain :func:`functools.partial` with the
-construction settings bound: a :data:`SourceFn` or a :data:`MergerRateFn`,
-called with hyperparameters alone. Evaluating or sampling one is the job of
+A population that has no physical rate -- a guard mixture is a sampling
+density, not a population -- returns ``None`` for it, and every consumer that
+needs one fails by name instead of computing a meaningless scalar.
+
+What :func:`build_population` returns is a :class:`Population` of plain
+:func:`functools.partial` objects with the construction settings bound: a
+:data:`SourceFn` and an optional :data:`MergerRateFn`, each called with
+hyperparameters alone. Evaluating or sampling one is the job of
 :func:`astrogwb.utils.sampling.evaluate_sources` and
 :func:`astrogwb.utils.sampling.sample_sources`.
 
+The factory's own signature is the settings schema: a construction key no
+population takes raises ``TypeError`` here rather than being filtered away.
+
 The name pins the name, not the mathematics: re-pointing a registered key at a
-different density would be invisible here. :mod:`astrogwb.catalog` carries the
-drift guard that closes that hole for the redshift law.
+different density would be invisible here.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from functools import partial
+from inspect import signature
+from typing import NamedTuple
 
 import jax
 from jax.typing import ArrayLike
 
 __all__ = [
     "DEFAULT_DENSITY_SITES",
-    "DEFAULT_MERGER_RATE_MODEL",
-    "SHARED_MODEL_KWARGS",
     "MergerRateFn",
+    "Population",
     "SourceFn",
-    "build_merger_rate_fn",
-    "build_source_model",
-    "known_merger_rate_models",
-    "known_source_models",
-    "register_merger_rate_model",
-    "register_source_model",
+    "build_population",
+    "known_populations",
+    "register_population",
 ]
 
 #: A bound source model: declares per-source sites as a side effect and
@@ -55,8 +60,27 @@ type SourceFn = Callable[[Mapping[str, ArrayLike]], Mapping[str, jax.Array]]
 #: second, shape ``()``, from hyperparameters alone.
 type MergerRateFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
 
-_SOURCE_REGISTRY: dict[str, Callable[..., Mapping[str, jax.Array]]] = {}
-_RATE_REGISTRY: dict[str, Callable[..., jax.Array]] = {}
+
+class Population(NamedTuple):
+    """One population's two bound callables, built together.
+
+    ``merger_rate_fn`` is ``None`` exactly when the population declares no
+    physical rate: a guard mixture fattens the tails of a proposal density and
+    the Madau-Dickinson total rate is not its normalization, so there is no
+    scalar to return rather than a wrong one.
+
+    Both members hash **by identity**. Build the population once per run and
+    reuse it: closing a jit-compiled function over a freshly built, equal
+    callable forces a recompile.
+    """
+
+    source_model: SourceFn
+    merger_rate_fn: MergerRateFn | None
+
+
+type PopulationFactory = Callable[..., Population]
+
+_REGISTRY: dict[str, PopulationFactory] = {}
 
 #: Density factors a catalog selects when nothing narrower is requested.
 #: Every registered source model declares ``redshift`` -- the one source
@@ -67,116 +91,58 @@ DEFAULT_DENSITY_SITES: tuple[str, ...] = (
     "source_frame_mass_2",
 )
 
-#: The merger-rate name :func:`build_merger_rate_fn` resolves when the caller
-#: names none. Every shipped source model pairs with this rate.
-DEFAULT_MERGER_RATE_MODEL = "madau_dickinson"
 
-#: Construction kwargs routed to *both* the source model and the rate
-#: function: the redshift window and grid. A catalog persists one flat kwargs
-#: mapping (see ``PopulationRecord.model_kwargs``), so a name given only one of
-#: the two registered callables is split by this fixed key set rather than by
-#: a second persisted field. This is why
-#: ``PolarizationPowerCatalog.restrict_redshift`` can rewrite
-#: ``z_min``/``z_max`` in the one flat mapping and have both reconstructed
-#: callables see the narrowed window.
-SHARED_MODEL_KWARGS: tuple[str, ...] = ("z_min", "z_max", "n_grid")
+def register_population[F: PopulationFactory](name: str) -> Callable[[F], F]:
+    """Register a population factory under ``name``, returning it unchanged.
 
-
-def register_source_model[F: Callable[..., Mapping[str, jax.Array]]](
-    name: str,
-) -> Callable[[F], F]:
-    """Register a source model under ``name``, returning it unchanged.
-
-    Physical and proposal models share this one registry. The registered
-    callable takes ``params`` positionally and construction kwargs by keyword;
-    :func:`build_source_model` binds the latter.
+    Physical and proposal populations share this one registry -- a proposal is
+    just the population a catalog happened to be drawn from. The registered
+    factory takes construction settings by keyword and returns a
+    :class:`Population`; :func:`build_population` calls it.
     """
 
     def decorate(fn: F) -> F:
-        if name in _SOURCE_REGISTRY:
-            raise ValueError(f"source model {name!r} is already registered")
-        _SOURCE_REGISTRY[name] = fn
+        if name in _REGISTRY:
+            raise ValueError(f"population {name!r} is already registered")
+        _REGISTRY[name] = fn
         return fn
 
     return decorate
 
 
-def register_merger_rate_model[F: Callable[..., jax.Array]](
-    name: str,
-) -> Callable[[F], F]:
-    """Register a merger-rate implementation under ``name``, returning it unchanged.
+def build_population(name: str, **settings: float) -> Population:
+    """Build a registered population from its construction settings.
 
-    The registered callable may take construction kwargs after ``params``.
-    :func:`build_merger_rate_fn` binds those into a :data:`MergerRateFn`.
-    """
+    ``settings`` is the flat construction mapping a catalog persists, passed
+    whole: the redshift window and grid every population takes, plus whatever
+    else that one takes. An unknown name raises ``KeyError`` listing the
+    registered populations; a setting the named population does not take
+    raises ``TypeError`` naming the population and the settings it accepts.
 
-    def decorate(fn: F) -> F:
-        if name in _RATE_REGISTRY:
-            raise ValueError(f"merger-rate model {name!r} is already registered")
-        _RATE_REGISTRY[name] = fn
-        return fn
+    The settings are bound against the factory's signature before it is
+    called, so a mismatch is reported against the *population* rather than
+    surfacing as a ``TypeError`` about a private factory function.
 
-    return decorate
-
-
-def build_source_model(
-    name: str,
-    *,
-    settings: Mapping[str, float | int] | None = None,
-    source_kwargs: Mapping[str, float | int] | None = None,
-) -> SourceFn:
-    """Bind a registered source model's construction settings.
-
-    ``settings`` is the flat construction-kwargs mapping a catalog persists,
-    shared window/grid keys and source-only keys alike; ``source_kwargs`` adds
-    source-only keys on top, overriding ``settings`` on a shared key -- the
-    same merge a generated catalog persists. An unknown name raises
-    ``KeyError`` listing the registered models.
-
-    The returned :func:`functools.partial` is compared and hashed **by
-    identity**. Build it once per run and reuse it: closing a jit-compiled
-    function over a freshly built, equal model forces a recompile.
+    The returned callables hash **by identity**. Build the population once per
+    run and reuse it.
     """
     try:
-        fn = _SOURCE_REGISTRY[name]
+        factory = _REGISTRY[name]
     except KeyError:
-        known = ", ".join(known_source_models())
+        known = ", ".join(known_populations())
         raise KeyError(
-            f"unknown source model {name!r}; registered models are: {known}"
+            f"unknown population {name!r}; registered populations are: {known}"
         ) from None
-    return partial(fn, **{**(settings or {}), **(source_kwargs or {})})
-
-
-def build_merger_rate_fn(
-    name: str = DEFAULT_MERGER_RATE_MODEL,
-    *,
-    settings: Mapping[str, float | int] | None = None,
-) -> MergerRateFn:
-    """Bind a registered merger-rate function's construction settings.
-
-    Only the :data:`SHARED_MODEL_KWARGS` keys of ``settings`` are bound, so the
-    same flat mapping that builds a source model builds its rate. An unknown
-    name raises ``KeyError`` listing the registered rates.
-
-    Like :func:`build_source_model`, the returned partial hashes by identity:
-    build it once per run.
-    """
     try:
-        fn = _RATE_REGISTRY[name]
-    except KeyError:
-        known = ", ".join(known_merger_rate_models())
-        raise KeyError(
-            f"unknown merger-rate model {name!r}; registered models are: {known}"
+        signature(factory).bind(**settings)
+    except TypeError as error:
+        accepted = ", ".join(signature(factory).parameters)
+        raise TypeError(
+            f"population {name!r}: {error}; its construction settings are: {accepted}"
         ) from None
-    shared = {k: v for k, v in (settings or {}).items() if k in SHARED_MODEL_KWARGS}
-    return partial(fn, **shared)
+    return factory(**settings)
 
 
-def known_source_models() -> tuple[str, ...]:
-    """Every registered source-model name, in sorted order."""
-    return tuple(sorted(_SOURCE_REGISTRY))
-
-
-def known_merger_rate_models() -> tuple[str, ...]:
-    """Every registered merger-rate-model name, in sorted order."""
-    return tuple(sorted(_RATE_REGISTRY))
+def known_populations() -> tuple[str, ...]:
+    """Every registered population name, in sorted order."""
+    return tuple(sorted(_REGISTRY))

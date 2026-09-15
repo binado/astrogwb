@@ -56,12 +56,10 @@ from astrogwb.importance.spectral import LogWeightsFn, build_importance_spectrum
 from astrogwb.paper.catalogs import validate_matching_frequency_grids
 from astrogwb.paper.config.mcmc import AnalysisGrid, RunConfig
 from astrogwb.populations import (
-    MergerRateFn,
-    SourceFn,
+    Population,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
-    build_merger_rate_fn,
-    build_source_model,
+    build_population,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
@@ -195,23 +193,27 @@ def _analysis_grid_settings(config: RunConfig) -> dict[str, float | int]:
     }
 
 
-def target_source_model(config: RunConfig) -> SourceFn:
-    """Resolve and bind the source model the run's hyperparameters describe.
+def target_population(config: RunConfig) -> Population:
+    """Resolve and bind the population the run's hyperparameters describe.
 
-    Build once per run and reuse: the returned partial hashes by identity, so
+    Build once per run and reuse: the returned partials hash by identity, so
     an equal rebuild under a jit-cached call forces a recompile.
-    Hyperparameters remain its call argument.
+    Hyperparameters remain their call argument.
+
+    An analysis target must declare a merger rate: the predicted spectrum is
+    normalized by one, so a proposal density named here would produce a
+    spectrum with no scale rather than an error.
+    ``check_population_model`` rejects it in pre-flight; this is the same
+    refusal at the point of use.
     """
-    return build_source_model(
-        config.analysis.source_model, settings=_analysis_grid_settings(config)
-    )
-
-
-def target_merger_rate_fn(config: RunConfig) -> MergerRateFn:
-    """Resolve and bind the merger-rate function the run's target pairs with."""
-    return build_merger_rate_fn(
-        config.analysis.rate_model, settings=_analysis_grid_settings(config)
-    )
+    name = config.analysis.population_model
+    population = build_population(name, **_analysis_grid_settings(config))
+    if population.merger_rate_fn is None:
+        raise ValueError(
+            f"analysis.population_model {name!r} declares no merger rate, so "
+            "it cannot be an analysis target; it is a proposal density"
+        )
+    return population
 
 
 def prepare_observation(
@@ -280,11 +282,24 @@ def prepare_observation(
 def catalog_total_merger_rate(catalog: PolarizationPowerCatalog) -> jax.Array:
     """The observer-frame total merger rate this catalog's population implies.
 
-    Recomputed from the recorded model rather than read from a stored column:
-    the rate is a property of the population and the redshift window, so a
-    stored copy would be stale the moment the window is narrowed.
+    Recomputed from the recorded population rather than read from a stored
+    column: the rate is a property of the population and the redshift window,
+    so a stored copy would be stale the moment the window is narrowed.
+
+    A catalog drawn from a proposal density has no such rate. A guard mixture
+    is not a physical population, and the Madau-Dickinson total rate is the
+    normalization of the Madau-Dickinson redshift density, not of a mixture of
+    it with a uniform component -- so this raises rather than returning a
+    number that would silently scale an observed spectrum by the wrong factor.
     """
-    rate = catalog.get_merger_rate_fn()(catalog.fiducials)
+    merger_rate_fn = catalog.get_population().merger_rate_fn
+    if merger_rate_fn is None:
+        raise ValueError(
+            f"catalog population {catalog.population_model_name!r} declares no "
+            "merger rate, so it cannot supply an observed total rate; it is a "
+            "proposal density, not an injection"
+        )
+    rate = merger_rate_fn(catalog.fiducials)
     return jnp.reshape(jnp.asarray(rate), ())
 
 
@@ -294,16 +309,21 @@ def prepare_inference_inputs(
     *,
     grid: AnalysisGrid,
     detectors: Sequence[str],
-    target_source_model: SourceFn,
-    target_merger_rate_fn: MergerRateFn,
+    target: Population,
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs.
 
-    ``target_source_model`` and ``target_merger_rate_fn`` are the bound target
-    callables, normally :func:`target_source_model` and
-    :func:`target_merger_rate_fn` of the run config; build them once per run.
+    ``target`` is the run's bound target population, normally
+    :func:`target_population` of the run config; build it once per run. It must
+    declare a merger rate: the predicted spectrum is normalized by one, so a
+    proposal density here would produce a spectrum with no scale.
 
     """
+    if target.merger_rate_fn is None:
+        raise ValueError(
+            "the target population declares no merger rate, so it cannot "
+            "normalize a predicted spectrum; it is a proposal density"
+        )
     observation = prepare_observation(injection, grid=grid)
 
     n_loaded = proposal.polarization_power.shape[1]
@@ -365,8 +385,8 @@ def prepare_inference_inputs(
     # supplies it alongside arrays of the same length.
     spectral_density_fn, log_weights_fn = build_importance_spectrum(
         proposal_catalog,
-        source_model=target_source_model,
-        merger_rate_fn=target_merger_rate_fn,
+        source_model=target.source_model,
+        merger_rate_fn=target.merger_rate_fn,
     )
     return InferenceInputs(
         observation=observation,

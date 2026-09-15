@@ -7,7 +7,7 @@ reconciled by exact float equality over five hard-coded parameter names, which
 left ``xi_0``, ``xi_n`` and ``local_merger_rate`` checked by nothing at all.
 
 A catalog now records its complete population declaration -- the registered
-source and rate names, the construction settings, and the density factors
+population name, the construction settings, and the density factors
 included in importance weighting, carried as one
 :class:`~astrogwb.populations.PopulationRecord` -- plus the hyperparameters it
 was drawn at. That is enough to reconstruct the exact map from hyperparameters
@@ -33,7 +33,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.frequency import uniform_grid_spacing
-from astrogwb.populations import MergerRateFn, PopulationRecord, SourceFn
+from astrogwb.populations import Population, PopulationRecord
 from astrogwb.waveform import PolarizationPowerGenerator
 
 __all__ = ["REDSHIFT_SITE", "PolarizationPowerCatalog"]
@@ -59,10 +59,9 @@ class PolarizationPowerCatalog:
     parameter has shape ``(N,)``.
 
     The population record is private because its public interface is
-    :meth:`get_source_model` and :meth:`get_merger_rate_fn`: what callers need
-    is the reconstructed ``fn(params)`` callables, not the strings they were
-    rebuilt from. It is persisted as HDF5 attributes; the callables themselves
-    never are.
+    :meth:`get_population`: what callers need is the reconstructed
+    ``fn(params)`` callables, not the strings they were rebuilt from. It is
+    persisted as HDF5 attributes; the callables themselves never are.
     """
 
     source_parameters: Mapping[str, NDArray[Any]]
@@ -137,8 +136,7 @@ class PolarizationPowerCatalog:
         source_parameters: Mapping[str, ArrayLike],
         *,
         generator: PolarizationPowerGenerator,
-        source_model_name: str,
-        rate_model_name: str,
+        model_name: str,
         model_kwargs: Mapping[str, Any],
         fiducials: Mapping[str, float],
         density_sites: tuple[str, ...],
@@ -148,7 +146,7 @@ class PolarizationPowerCatalog:
 
         The population record is supplied rather than inferred: the caller ran
         the model to draw ``source_parameters``, so it is the only place that
-        knows which models and settings produced them. Frequencies come from
+        knows which population and settings produced them. Frequencies come from
         the generator rather than from metadata: that is the axis the backend
         actually produces.
 
@@ -171,8 +169,7 @@ class PolarizationPowerCatalog:
             frequencies=np.asarray(frequencies),
             waveform_metadata=generator,
             _population=PopulationRecord(
-                source_model_name=source_model_name,
-                rate_model_name=rate_model_name,
+                model_name=model_name,
                 model_kwargs=model_kwargs,
                 density_sites=density_sites,
                 seed=seed,
@@ -194,24 +191,9 @@ class PolarizationPowerCatalog:
         return self._population.seed
 
     @property
-    def population_source_model_name(self) -> str:
-        """The registry key of the source model this catalog was drawn from."""
-        return self._population.source_model_name
-
-    @property
-    def population_rate_model_name(self) -> str:
-        """The registry key of the merger-rate function this catalog was drawn at."""
-        return self._population.rate_model_name
-
-    @property
     def population_model_name(self) -> str:
-        """The source-model name this catalog was drawn from.
-
-        An alias of :attr:`population_source_model_name`, kept for logging and
-        for callers that still compare against one of the historical single
-        population names, which are now the source-model keys.
-        """
-        return self._population.source_model_name
+        """The registry key of the population this catalog was drawn from."""
+        return self._population.model_name
 
     @property
     def population_model_kwargs(self) -> Mapping[str, Any]:
@@ -223,9 +205,8 @@ class PolarizationPowerCatalog:
         """The hyperparameters the samples were drawn at.
 
         These are *generating* parameters. They are not bound into the
-        callables :meth:`get_source_model` and :meth:`get_merger_rate_fn`
-        return: a target evaluation supplies its own, and binding these would
-        silently pin them.
+        callables :meth:`get_population` returns: a target evaluation supplies
+        its own, and binding these would silently pin them.
         """
         return dict(self._fiducials)
 
@@ -234,23 +215,20 @@ class PolarizationPowerCatalog:
         """Ordered source-density factors included in importance weighting."""
         return self._population.density_sites
 
-    def get_source_model(self) -> SourceFn:
-        """Reconstruct the generating source model with its settings bound.
+    def get_population(self) -> Population:
+        """Reconstruct the generating population with its settings bound.
 
-        Returns the callable rather than a ``(model, kwargs)`` pair so every
-        consumer sees the one ``source_model(params)`` interface. An unknown
-        name fails here, listing what is registered. Each call builds a new
-        :func:`functools.partial`; call once and reuse the result.
+        Returns the callables rather than the ``(name, kwargs)`` pair they were
+        rebuilt from, so every consumer sees the one ``fn(params)`` interface.
+        An unknown name fails here, listing what is registered. A window
+        narrowed by :meth:`restrict_redshift` reaches both callables, because
+        both are built from the one flat settings mapping it rewrites.
+
+        ``merger_rate_fn`` is ``None`` for a catalog drawn from a proposal
+        density that declares no physical rate. Each call builds fresh
+        partials; call once and reuse the result.
         """
-        return self._population.get_source_model()
-
-    def get_merger_rate_fn(self) -> MergerRateFn:
-        """Reconstruct the merger-rate function with its shared settings bound.
-
-        Reads the same flat construction settings as :meth:`get_source_model`,
-        so a window narrowed by :meth:`restrict_redshift` reaches both.
-        """
-        return self._population.get_merger_rate_fn()
+        return self._population.build()
 
     @property
     def num_samples(self) -> int:
@@ -289,7 +267,7 @@ class PolarizationPowerCatalog:
         missing = [name for name in REDSHIFT_WINDOW_KWARGS if name not in model_kwargs]
         if missing:
             raise ValueError(
-                f"population model {self._population.source_model_name!r} takes no "
+                f"population {self._population.model_name!r} takes no "
                 f"{missing} construction setting(s), so its redshift window cannot "
                 "be narrowed"
             )
@@ -333,9 +311,9 @@ class PolarizationPowerCatalog:
         """Read a catalog file, reconstructing and validating its population record.
 
         Loading calls :meth:`~astrogwb.populations.PopulationRecord.check_registered`
-        to verify the recorded source and rate model names are still registered;
-        it does not re-execute the population or compare derived columns against
-        the stored arrays. A catalog whose columns have drifted from its declared
+        to verify the recorded population name is still registered; it does not
+        re-execute the population or compare derived columns against the stored
+        arrays. A catalog whose columns have drifted from its declared
         population is not caught here.
 
         Files written in older catalog formats are rejected; there is no
@@ -348,9 +326,9 @@ class PolarizationPowerCatalog:
     def save(self, path: str | Path, *, compression: str | None = None) -> None:
         """Write source arrays, power, waveform metadata, and the population record.
 
-        The population travels as ``(source model name, rate model name,
-        construction kwargs, generating parameters, density sites)``. Neither
-        this nor :meth:`load` serializes a Python callable.
+        The population travels as ``(population name, construction kwargs,
+        generating parameters, density sites)``. Neither this nor :meth:`load`
+        serializes a Python callable.
         """
         from astrogwb.catalog import _io
 

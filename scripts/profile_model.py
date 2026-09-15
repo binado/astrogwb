@@ -121,8 +121,7 @@ def build_potential(
         build_model,
         initial_values,
         prepare_inference_inputs,
-        target_merger_rate_fn,
-        target_source_model,
+        target_population,
     )
 
     inputs = prepare_inference_inputs(
@@ -130,8 +129,7 @@ def build_potential(
         proposal_catalog,
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
-        target_source_model=target_source_model(config),
-        target_merger_rate_fn=target_merger_rate_fn(config),
+        target=target_population(config),
     )
     model, _ = build_model(
         config,

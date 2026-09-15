@@ -12,7 +12,7 @@ from collections.abc import Mapping
 import numpy as np
 
 from astrogwb.catalog import PolarizationPowerCatalog
-from astrogwb.populations import PopulationRecord, build_source_model
+from astrogwb.populations import PopulationRecord, build_population
 from astrogwb.utils.sampling import evaluate_sources
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -58,7 +58,9 @@ def source_parameters(
     """Complete a redshift ladder into every column the population declares."""
     if fiducials is None:
         fiducials = population_params
-    model = build_source_model(model_name, settings=model_kwargs or PAPER_MODEL_KWARGS)
+    model = build_population(
+        model_name, **(model_kwargs or PAPER_MODEL_KWARGS)
+    ).source_model
     ones = np.ones_like(redshift)
     columns = _derived_columns(
         model,
@@ -138,8 +140,7 @@ def make_catalog(
             frequency_resolution=df,
         ),
         _population=PopulationRecord(
-            source_model_name=model_name,
-            rate_model_name=PAPER_RATE_MODEL,
+            model_name=model_name,
             model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
             density_sites=density_sites,
             seed=seed,
