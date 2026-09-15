@@ -124,12 +124,13 @@ class RedshiftDistribution(InterpolatedDistribution):
         return self._source_frame_distribution(redshift, params)
 
     @property
-    def source_frame_law(self) -> SourceFrameDistributionFn:
-        r"""The stored rate shape :math:`\psi` itself, not an evaluation of it.
+    def source_frame_distribution_fn(self) -> SourceFrameDistributionFn:
+        r"""The stored rate shape :math:`\psi` -- the callable, not a call of it.
 
-        Distinct from :meth:`source_frame_distribution`, which evaluates the
-        shape at a redshift. This hands back the callable, so a caller can
-        rebuild an equivalent distribution at new hyperparameters -- see
+        One suffix apart from :meth:`source_frame_distribution`, and the
+        distinction is the whole point: that method evaluates the shape at a
+        redshift, this hands back the function. A caller can then rebuild an
+        equivalent distribution at new hyperparameters -- see
         :func:`~astrogwb.populations.infer_merger_rate_fn`.
 
         Registered shapes are module-level functions, so the value is a

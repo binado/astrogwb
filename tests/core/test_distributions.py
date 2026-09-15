@@ -149,7 +149,7 @@ def test_source_frame_distribution_is_the_rate() -> None:
     )
 
 
-def test_source_frame_law_is_a_singleton_across_constructions() -> None:
+def test_source_frame_distribution_fn_is_a_singleton_across_constructions() -> None:
     """The rate shape is shared, not copied.
 
     :func:`~astrogwb.populations.infer_merger_rate_fn` rebuilds a distribution
@@ -158,9 +158,9 @@ def test_source_frame_law_is_a_singleton_across_constructions() -> None:
     construction -- a lambda, a bound method -- would retrace every rebuild.
     """
     first, second = _distribution(), _distribution(H0=70.0)
-    assert first.source_frame_law is second.source_frame_law
+    assert first.source_frame_distribution_fn is second.source_frame_distribution_fn
     np.testing.assert_array_equal(
-        np.asarray(first.source_frame_law(SAMPLE_REDSHIFTS, FIDUCIALS)),
+        np.asarray(first.source_frame_distribution_fn(SAMPLE_REDSHIFTS, FIDUCIALS)),
         np.asarray(first.source_frame_distribution(SAMPLE_REDSHIFTS, FIDUCIALS)),
     )
 

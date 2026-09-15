@@ -140,7 +140,7 @@ def infer_merger_rate_fn(
     # what comes back here is the base class, as intended.
     rebuild = partial(
         type(distribution),
-        source_frame_distribution=distribution.source_frame_law,
+        source_frame_distribution=distribution.source_frame_distribution_fn,
         minimum_redshift=distribution.minimum_redshift,
         maximum_redshift=distribution.maximum_redshift,
         n_grid=distribution.n_grid,
