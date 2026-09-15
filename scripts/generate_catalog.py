@@ -39,7 +39,7 @@ from pathlib import Path
 
 import jax
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.paper.config.catalogs import (
     CatalogDefinition,
     check_rate_model,
@@ -94,7 +94,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def build_catalog(definition: CatalogDefinition) -> Catalog:
+def build_catalog(definition: CatalogDefinition) -> PolarizationPowerCatalog:
     """Draw the population, generate its power, and record what produced it."""
     population = definition.population
     check_source_model(
@@ -157,7 +157,7 @@ def build_catalog(definition: CatalogDefinition) -> Catalog:
     # silently dropped rather than reported.
     generator.check_sources(samples)
 
-    catalog = Catalog.from_generator(
+    catalog = PolarizationPowerCatalog.from_generator(
         samples,
         generator=generator,
         source_model_name=population.source_model,

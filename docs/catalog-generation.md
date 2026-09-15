@@ -227,11 +227,15 @@ population_seed          = 41
 population_num_samples   = 32768
 ```
 
-netCDF attributes are flat scalars, so the mappings travel as JSON strings.
-What is *not* stored is a callable: `Catalog.get_source_model()` and
-`Catalog.get_merger_rate_fn()` look the names up in the registries and bind
-their recorded settings; `Catalog.density_sites` carries the ordered density
-selection.
+HDF5 attributes are flat scalars, so the mappings travel as JSON strings. The
+`population_*` block is one `PopulationRecord`, the same record a
+spectral-density catalog carries, which is what keeps the two formats spelling
+these fields identically.
+
+What is *not* stored is a callable: `PolarizationPowerCatalog.get_source_model()`
+and `PolarizationPowerCatalog.get_merger_rate_fn()` look the names up in the
+registries and bind their recorded settings;
+`PolarizationPowerCatalog.density_sites` carries the ordered density selection.
 
 That is enough to reconstruct the exact map from hyperparameters to source
 density, which is why the run config no longer restates any of it and nothing
@@ -249,8 +253,8 @@ weights with no shape error anywhere.
 
 ### What loading checks
 
-`Catalog.load` validates the HDF5 layout, array shapes and serialized dtypes,
-then reconstructs the recorded population from the registry. It does not
+`PolarizationPowerCatalog.load` validates the HDF5 layout, array shapes and
+serialized dtypes, then reconstructs the recorded population from the registry. It does not
 serialize a callable or require the analysis run configuration.
 
 The format is `astrogwb_catalog_v5`, a direct HDF5 file. Root attributes hold
@@ -262,8 +266,44 @@ window.
 
 The waveform attributes record `frequency_resolution` -- what was *requested*
 of the generating backend -- while the bin width used in every integral is
-measured from the `frequency` dataset itself (`Catalog.df`); the backend
-chooses the actual grid, so the two can differ.
+measured from the `frequency` dataset itself (`PolarizationPowerCatalog.df`);
+the backend chooses the actual grid, so the two can differ.
+
+## The spectral-density format
+
+`scripts/simulate_spectra.py` writes the sibling artifact: a
+`SpectralDensityCatalog`, format `astrogwb_spectral_density_v1`. It persists
+the forward model's *contraction* rather than the power it contracts, so a
+run that only needs predicted spectra never materializes `(F, N)` waveforms.
+
+| Dataset | Shape | Meaning |
+| --- | --- | --- |
+| `frequency` | `(F,)` | the generating backend's grid, as in a power catalog |
+| `spectral_density` | `(draws, F)` | one `gwb_forward_model` draw per row |
+| `n_events` | `(draws,)` | that draw's Poisson event count |
+| `total_merger_rate` | `(draws,)` | that draw's observer-frame total rate |
+| `hyperparameters` | `(draws, P)` | one column per name, ordered by `source_parameter_names` |
+
+Its root attributes are the same three blocks a power catalog stamps -- format
+identity, the six waveform attributes, and the `PopulationRecord` -- plus three
+the draws cannot be read back from:
+
+```
+n_max_sigma      = 5.0   # sized the static plate the Poisson count was capped against
+average_mode     = "analytic_inclination"  # the inclination convention assumed
+observation_time = 1.0   # years; set the Poisson mean
+```
+
+The two formats differ in what a row is, and that is the whole difference. A
+power catalog's sample axis indexes *sources* drawn once at one set of
+hyperparameters, recorded as scalar `population_params` fiducials. A
+spectral-density catalog's row axis indexes *draws* of the whole forward model,
+so its hyperparameters are a column per name -- free to vary from row to row,
+even though the simulator holds them fixed today.
+
+`SpectralDensityCatalog.load` validates the same way its sibling does: layout,
+shapes, serialized dtypes, then reconstruction of the recorded population from
+the registry. There is no compatibility tier -- v1 is the first version.
 
 ## What is *not* in the file: the analysis window
 
@@ -273,8 +313,8 @@ window is narrower — `minimum_redshift = 0.3` in
 baked into the catalog: it depends on a truncation the run chooses, not on
 anything generation knows.
 
-`Catalog.restrict_redshift(z_min, z_max)` narrows both halves together, and
-that is the whole reason it is one method. Dropping samples without narrowing
+`PolarizationPowerCatalog.restrict_redshift(z_min, z_max)` narrows both halves
+together, and that is the whole reason it is one method. Dropping samples without narrowing
 the recorded model would leave the density normalized over a window the samples
 no longer span, and every importance weight would be off by that
 normalization. Draws truncated to a sub-window follow the same law as draws

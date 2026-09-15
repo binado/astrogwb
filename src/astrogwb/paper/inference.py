@@ -36,7 +36,7 @@ import numpy as np
 from numpyro import handlers
 from numpyro.distributions import Distribution
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.detector import effective_psd as compute_effective_psd
 from astrogwb.detector import gaussian_bin_scale, load_sensitivity_map
 from astrogwb.distributions.amplitude import (
@@ -90,7 +90,7 @@ class InferenceInputs:
     """Everything the NumPyro model is evaluated against, for one run."""
 
     observation: Observation
-    proposal: Catalog
+    proposal: PolarizationPowerCatalog
     effective_psd: jax.Array
     observation_time: float
     spectral_density_fn: SpectralDensityFn
@@ -175,7 +175,9 @@ def target_merger_rate_fn(config: RunConfig) -> MergerRateFn:
     )
 
 
-def prepare_observation(injection: Catalog, *, grid: AnalysisGrid) -> Observation:
+def prepare_observation(
+    injection: PolarizationPowerCatalog, *, grid: AnalysisGrid
+) -> Observation:
     """Build the fiducial observed spectrum from the injection catalog.
 
     The rate comes from the injection catalog's *own* population, evaluated
@@ -236,7 +238,7 @@ def prepare_observation(injection: Catalog, *, grid: AnalysisGrid) -> Observatio
     )
 
 
-def catalog_total_merger_rate(catalog: Catalog) -> jax.Array:
+def catalog_total_merger_rate(catalog: PolarizationPowerCatalog) -> jax.Array:
     """The observer-frame total merger rate this catalog's population implies.
 
     Recomputed from the recorded model rather than read from a stored column:
@@ -248,8 +250,8 @@ def catalog_total_merger_rate(catalog: Catalog) -> jax.Array:
 
 
 def prepare_inference_inputs(
-    injection: Catalog,
-    proposal: Catalog,
+    injection: PolarizationPowerCatalog,
+    proposal: PolarizationPowerCatalog,
     *,
     grid: AnalysisGrid,
     detectors: Sequence[str],

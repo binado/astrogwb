@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import jax
 import numpy as np
 import pytest
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid
+from astrogwb.populations import PopulationRecord
 from astrogwb.populations.bns_madau_dickinson import (
     bns_md_cosmological,
     madau_dickinson_total_merger_rate,
@@ -64,12 +66,16 @@ POPULATION_RECORD: dict[str, Any] = {
     },
     "density_sites": ("redshift", "source_frame_mass_1", "source_frame_mass_2"),
 }
-PRIVATE_RECORD: dict[str, Any] = {
-    f"_{name}": value for name, value in POPULATION_RECORD.items()
-}
+CATALOG_SEED = 42
 CATALOG_DEFAULTS: dict[str, Any] = {
-    **PRIVATE_RECORD,
-    "seed": 42,
+    "_population": PopulationRecord(
+        source_model_name=POPULATION_RECORD["source_model_name"],
+        rate_model_name=POPULATION_RECORD["rate_model_name"],
+        model_kwargs=POPULATION_RECORD["model_kwargs"],
+        density_sites=POPULATION_RECORD["density_sites"],
+        seed=CATALOG_SEED,
+    ),
+    "_fiducials": POPULATION_RECORD["fiducials"],
 }
 
 
@@ -115,7 +121,7 @@ def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes
         sampling_frequency=32.0,
         frequency_resolution=2.0,
     )
-    catalog = Catalog.from_generator(
+    catalog = PolarizationPowerCatalog.from_generator(
         source_parameters,
         generator=generator,
         seed=42,
@@ -166,7 +172,7 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
 )
 def test_catalog_rejects_malformed_power(power: np.ndarray, message: str) -> None:
     with pytest.raises(ValueError, match=message):
-        Catalog(
+        PolarizationPowerCatalog(
             source_parameters={"redshift": np.array([0.1, 0.2])},
             polarization_power=power,
             frequencies=np.array([10.0, 12.0]),
@@ -178,7 +184,7 @@ def test_catalog_rejects_malformed_power(power: np.ndarray, message: str) -> Non
 @pytest.mark.parametrize("values", [np.ones((2, 1)), np.ones(1), np.ones(3)])
 def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None:
     with pytest.raises(ValueError, match="source parameter"):
-        Catalog(
+        PolarizationPowerCatalog(
             source_parameters={"redshift": values},
             polarization_power=np.ones((2, 2)),
             frequencies=np.array([10.0, 12.0]),
@@ -187,22 +193,21 @@ def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None
         )
 
 
-def test_catalog_rejects_non_int_seed() -> None:
+def test_population_record_rejects_non_int_seed() -> None:
     with pytest.raises(TypeError, match="seed"):
-        Catalog(
-            source_parameters={"redshift": np.array([0.1, 0.2])},
-            polarization_power=np.ones((2, 2)),
-            frequencies=np.array([10.0, 12.0]),
-            waveform_metadata=_waveform_generator(),
+        PopulationRecord(
+            source_model_name=POPULATION_RECORD["source_model_name"],
+            rate_model_name=POPULATION_RECORD["rate_model_name"],
+            model_kwargs=POPULATION_RECORD["model_kwargs"],
+            density_sites=POPULATION_RECORD["density_sites"],
             seed="not_an_int",  # ty: ignore[invalid-argument-type]
-            **PRIVATE_RECORD,
         )
 
 
 def test_catalog_requires_a_redshift_column() -> None:
     """The one source parameter whose density never cancels in a weight."""
     with pytest.raises(ValueError, match="redshift"):
-        Catalog(
+        PolarizationPowerCatalog(
             source_parameters={"source_frame_mass_1": np.array([1.4, 1.3])},
             polarization_power=np.ones((2, 2)),
             frequencies=np.array([10.0, 12.0]),
@@ -211,9 +216,9 @@ def test_catalog_requires_a_redshift_column() -> None:
         )
 
 
-def _catalog(redshift: np.ndarray) -> Catalog:
+def _catalog(redshift: np.ndarray) -> PolarizationPowerCatalog:
     num_samples = redshift.size
-    return Catalog(
+    return PolarizationPowerCatalog(
         source_parameters={
             "redshift": redshift,
             "luminosity_distance": 1e3 * (1.0 + redshift),
@@ -246,10 +251,18 @@ def test_getters_bind_construction_settings_only() -> None:
 
 def test_unknown_population_model_names_fail_clearly() -> None:
     catalog = _catalog(np.array([0.5, 1.5]))
-    object.__setattr__(catalog, "_source_model_name", "no_such_population")
+    object.__setattr__(
+        catalog,
+        "_population",
+        replace(catalog.population, source_model_name="no_such_population"),
+    )
     with pytest.raises(KeyError, match="bns_md_cosmological"):
         catalog.get_source_model()
-    object.__setattr__(catalog, "_rate_model_name", "no_such_rate")
+    object.__setattr__(
+        catalog,
+        "_population",
+        replace(catalog.population, rate_model_name="no_such_rate"),
+    )
     with pytest.raises(KeyError, match="madau_dickinson"):
         catalog.get_merger_rate_fn()
 
@@ -299,7 +312,7 @@ def test_restrict_redshift_rejects_an_empty_window() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Catalog.df: measured from the grid, not recorded from the descriptor
+# PolarizationPowerCatalog.df: measured from the grid, not recorded from the descriptor
 # --------------------------------------------------------------------------- #
 def test_catalog_df_matches_the_generators_requested_resolution(
     source_parameters: dict[str, np.ndarray],
@@ -313,7 +326,7 @@ def test_catalog_df_matches_the_generators_requested_resolution(
         sampling_frequency=32.0,
         frequency_resolution=2.0,
     )
-    catalog = Catalog.from_generator(
+    catalog = PolarizationPowerCatalog.from_generator(
         source_parameters,
         generator=generator,
         seed=42,
@@ -325,7 +338,7 @@ def test_catalog_df_matches_the_generators_requested_resolution(
 
 def test_catalog_rejects_a_non_uniform_frequency_grid() -> None:
     with pytest.raises(ValueError, match="not uniform"):
-        Catalog(
+        PolarizationPowerCatalog(
             source_parameters={"redshift": np.array([0.1, 0.2, 0.3])},
             polarization_power=np.ones((3, 3)),
             frequencies=np.array([10.0, 12.0, 15.0]),
@@ -336,7 +349,7 @@ def test_catalog_rejects_a_non_uniform_frequency_grid() -> None:
 
 def test_one_bin_catalog_constructs_but_df_has_no_answer() -> None:
     """A one-bin catalog is a supported shape -- there is just no width to report."""
-    catalog = Catalog(
+    catalog = PolarizationPowerCatalog(
         source_parameters={"redshift": np.array([0.1, 0.2])},
         polarization_power=np.ones((1, 2)),
         frequencies=np.array([10.0]),

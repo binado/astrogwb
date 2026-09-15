@@ -47,7 +47,8 @@ That recipe installs the `simulation` and `io` extras and the `jupyter` group,
 and nothing else — which is what keeps the notebook's self-containment honest.
 The notebook names the population it draws from and the parameters it draws at,
 then passes `sample_sources`'s output through
-`Catalog.from_generator(..., generator=AnalyticInspiralGenerator(...))`. The
+`PolarizationPowerCatalog.from_generator(..., generator=AnalyticInspiralGenerator(...))`.
+The
 luminosity distance is the population's own `numpyro.deterministic`, computed
 in the same batched pass every later density evaluation takes, which is what
 makes the catalog exactly its own importance proposal.
@@ -83,14 +84,15 @@ The self-contained notebook writes the catalog it builds to a
 (gitignored) and reuses it on the next run. The file is a cache, not an input:
 delete it and the notebook rebuilds from the population model it names.
 Persistence is not part of the core dependency set: `astrogwb` builds an
-array-native `Catalog` in memory, and `Catalog.save` / `Catalog.load` reach
-HDF5 behind the `io` extra, so the notebook needs `astrogwb[io]` and nothing
-else.
+array-native `PolarizationPowerCatalog` in memory, and its `.save` / `.load`
+reach HDF5 behind the `io` extra, so the notebook needs `astrogwb[io]` and
+nothing else.
 
 The reuse is guarded on more than the file existing, but the population half of
 that guard is no longer the notebook's job: a catalog records its own model,
-construction settings and hyperparameters, and `Catalog.load` refuses a file
-whose columns no longer match them. What the notebook still checks is the
+construction settings and hyperparameters, and
+`PolarizationPowerCatalog.load` refuses a file whose columns no longer match
+them. What the notebook still checks is the
 waveform grid and the draw size, which the population record does not cover.
 Without that, editing `CATALOG_DF` and re-running would silently analyse the
 old frequency grid, which in `catalog_convergence.py` would invalidate the

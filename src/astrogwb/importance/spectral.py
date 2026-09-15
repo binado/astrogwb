@@ -59,7 +59,7 @@ from astrogwb.populations.registry import MergerRateFn, SourceFn
 from astrogwb.utils.sampling import evaluate_sources
 
 if TYPE_CHECKING:
-    from astrogwb.catalog import Catalog
+    from astrogwb.catalog import PolarizationPowerCatalog
     from astrogwb.sampling.protocol import SpectralDensityFn
 
 __all__ = [
@@ -155,7 +155,7 @@ type LogWeightsFn = Callable[[Mapping[str, ArrayLike]], jax.Array]
 
 
 def build_importance_spectrum(
-    catalog: Catalog,
+    catalog: PolarizationPowerCatalog,
     *,
     source_model: SourceFn,
     merger_rate_fn: MergerRateFn,

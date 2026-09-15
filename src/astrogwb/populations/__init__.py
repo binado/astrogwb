@@ -32,6 +32,7 @@ from astrogwb.populations.bns_madau_dickinson import (
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
+from astrogwb.populations.record import PopulationRecord
 from astrogwb.populations.registry import (
     DEFAULT_DENSITY_SITES,
     DEFAULT_MERGER_RATE_MODEL,
@@ -52,6 +53,7 @@ __all__ = [
     "DEFAULT_MERGER_RATE_MODEL",
     "SHARED_MODEL_KWARGS",
     "MergerRateFn",
+    "PopulationRecord",
     "SourceFn",
     "amplitude_H0_fn",
     "amplitude_local_merger_rate_fn",

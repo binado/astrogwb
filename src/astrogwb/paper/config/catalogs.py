@@ -1,4 +1,4 @@
-"""Catalog configuration: what a catalog is made of, before it is made.
+"""PolarizationPowerCatalog configuration: what a catalog is made of, before it is made.
 
 A *catalog* is one persisted waveform draw: expensive to build (population
 draw + ripple waveform generation) and reused by every run that names it. Two

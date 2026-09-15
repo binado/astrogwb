@@ -1,4 +1,4 @@
-"""A catalog that describes the density that drew it.
+"""A catalog of polarization power that describes the density that drew it.
 
 Before this, three partial records described one run and none was sufficient:
 the merged run TOML, a catalog attribute naming only the *shape* of the
@@ -6,22 +6,19 @@ redshift proposal, and a config object derived from the two. They were
 reconciled by exact float equality over five hard-coded parameter names, which
 left ``xi_0``, ``xi_n`` and ``local_merger_rate`` checked by nothing at all.
 
-A catalog now records its complete population declaration: the registered
-source and rate names, the construction settings, the hyperparameters it
-was drawn at, and the density factors included in importance weighting. That
-is enough to reconstruct the exact map from hyperparameters to source density,
-so the run config no longer restates any of it and nothing has to be
-cross-checked.
-
-The included-factor tuple is part of that record for a reason that is easy to
-miss: the two mass sites form one conceptual ordered-pair density contribution.
-A catalog whose proposal density was computed with either mass factor excluded
-gives silently wrong weights with no shape error anywhere.
+A catalog now records its complete population declaration -- the registered
+source and rate names, the construction settings, and the density factors
+included in importance weighting, carried as one
+:class:`~astrogwb.populations.PopulationRecord` -- plus the hyperparameters it
+was drawn at. That is enough to reconstruct the exact map from hyperparameters
+to source density, so the run config no longer restates any of it and nothing
+has to be cross-checked.
 
 Immutability is a contract, not a language guarantee. The dataclass is frozen
-and transformations such as :meth:`Catalog.restrict_redshift` return new
-catalogs, but the underlying arrays are ordinary NumPy arrays and nothing stops
-a caller writing through them.
+and transformations such as
+:meth:`PolarizationPowerCatalog.restrict_redshift` return new catalogs, but the
+underlying arrays are ordinary NumPy arrays and nothing stops a caller writing
+through them.
 """
 
 from __future__ import annotations
@@ -36,15 +33,10 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.frequency import uniform_grid_spacing
-from astrogwb.populations import (
-    MergerRateFn,
-    SourceFn,
-    build_merger_rate_fn,
-    build_source_model,
-)
+from astrogwb.populations import MergerRateFn, PopulationRecord, SourceFn
 from astrogwb.waveform import PolarizationPowerGenerator
 
-__all__ = ["REDSHIFT_SITE", "Catalog"]
+__all__ = ["REDSHIFT_SITE", "PolarizationPowerCatalog"]
 
 #: The redshift site every population must declare. Its density can never be
 #: excluded: redshift is the one source parameter the target and the proposal
@@ -52,42 +44,35 @@ __all__ = ["REDSHIFT_SITE", "Catalog"]
 REDSHIFT_SITE = "redshift"
 
 #: Construction settings a population model must take for a catalog drawn from
-#: it to support :meth:`Catalog.restrict_redshift`. Narrowing the window changes
-#: the *normalization* of the generating density, so the arrays and the model
-#: kwargs have to move together or the recorded density stops describing the
-#: samples.
+#: it to support :meth:`PolarizationPowerCatalog.restrict_redshift`. Narrowing
+#: the window changes the *normalization* of the generating density, so the
+#: arrays and the model kwargs have to move together or the recorded density
+#: stops describing the samples.
 REDSHIFT_WINDOW_KWARGS = ("z_min", "z_max")
 
 
 @dataclass(frozen=True, slots=True)
-class Catalog:
+class PolarizationPowerCatalog:
     """Source parameters, polarization power, and the population that drew them.
 
     ``polarization_power`` is frequency-first, shape ``(F, N)``; every source
     parameter has shape ``(N,)``.
 
-    The population fields are private because their public interface is
+    The population record is private because its public interface is
     :meth:`get_source_model` and :meth:`get_merger_rate_fn`: what callers need
     is the reconstructed ``fn(params)`` callables, not the strings they were
-    rebuilt from. They are persisted as HDF5 attributes; the callables
-    themselves never are.
+    rebuilt from. It is persisted as HDF5 attributes; the callables themselves
+    never are.
     """
 
     source_parameters: Mapping[str, NDArray[Any]]
     polarization_power: NDArray[Any]
     frequencies: NDArray[np.floating[Any]]
     waveform_metadata: PolarizationPowerGenerator
-    _source_model_name: str
-    _rate_model_name: str
-    _model_kwargs: Mapping[str, Any]
+    _population: PopulationRecord
     _fiducials: Mapping[str, float]
-    _density_sites: tuple[str, ...]
-    seed: int
 
     def __post_init__(self) -> None:
-        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
-            raise TypeError("seed must be an int")
-
         power = np.asarray(self.polarization_power)
         if power.ndim != 2 or not np.issubdtype(power.dtype, np.number):
             raise ValueError(
@@ -137,12 +122,9 @@ class Catalog:
                 "weight"
             )
 
-        if not isinstance(self._density_sites, tuple):
-            object.__setattr__(self, "_density_sites", tuple(self._density_sites))
         object.__setattr__(self, "polarization_power", power)
         object.__setattr__(self, "frequencies", frequencies)
         object.__setattr__(self, "source_parameters", parameters)
-        object.__setattr__(self, "_model_kwargs", dict(self._model_kwargs))
         object.__setattr__(
             self,
             "_fiducials",
@@ -188,26 +170,38 @@ class Catalog:
             polarization_power=np.asarray(power),
             frequencies=np.asarray(frequencies),
             waveform_metadata=generator,
-            _source_model_name=source_model_name,
-            _rate_model_name=rate_model_name,
-            _model_kwargs=model_kwargs,
+            _population=PopulationRecord(
+                source_model_name=source_model_name,
+                rate_model_name=rate_model_name,
+                model_kwargs=model_kwargs,
+                density_sites=density_sites,
+                seed=seed,
+            ),
             _fiducials=fiducials,
-            _density_sites=density_sites,
-            seed=seed,
         )
 
     # ----------------------------------------------------------------- #
     # The recorded population
     # ----------------------------------------------------------------- #
     @property
+    def population(self) -> PopulationRecord:
+        """The population declaration this catalog was drawn from."""
+        return self._population
+
+    @property
+    def seed(self) -> int:
+        """The seed the population draw used."""
+        return self._population.seed
+
+    @property
     def population_source_model_name(self) -> str:
         """The registry key of the source model this catalog was drawn from."""
-        return self._source_model_name
+        return self._population.source_model_name
 
     @property
     def population_rate_model_name(self) -> str:
         """The registry key of the merger-rate function this catalog was drawn at."""
-        return self._rate_model_name
+        return self._population.rate_model_name
 
     @property
     def population_model_name(self) -> str:
@@ -217,12 +211,12 @@ class Catalog:
         for callers that still compare against one of the historical single
         population names, which are now the source-model keys.
         """
-        return self._source_model_name
+        return self._population.source_model_name
 
     @property
     def population_model_kwargs(self) -> Mapping[str, Any]:
         """The model's construction settings, as persisted."""
-        return dict(self._model_kwargs)
+        return dict(self._population.model_kwargs)
 
     @property
     def fiducials(self) -> Mapping[str, float]:
@@ -238,7 +232,7 @@ class Catalog:
     @property
     def density_sites(self) -> tuple[str, ...]:
         """Ordered source-density factors included in importance weighting."""
-        return self._density_sites
+        return self._population.density_sites
 
     def get_source_model(self) -> SourceFn:
         """Reconstruct the generating source model with its settings bound.
@@ -248,7 +242,7 @@ class Catalog:
         name fails here, listing what is registered. Each call builds a new
         :func:`functools.partial`; call once and reuse the result.
         """
-        return build_source_model(self._source_model_name, settings=self._model_kwargs)
+        return self._population.get_source_model()
 
     def get_merger_rate_fn(self) -> MergerRateFn:
         """Reconstruct the merger-rate function with its shared settings bound.
@@ -256,7 +250,7 @@ class Catalog:
         Reads the same flat construction settings as :meth:`get_source_model`,
         so a window narrowed by :meth:`restrict_redshift` reaches both.
         """
-        return build_merger_rate_fn(self._rate_model_name, settings=self._model_kwargs)
+        return self._population.get_merger_rate_fn()
 
     @property
     def num_samples(self) -> int:
@@ -291,16 +285,16 @@ class Catalog:
 
         Returns a new catalog; the original is untouched.
         """
-        missing = [
-            name for name in REDSHIFT_WINDOW_KWARGS if name not in self._model_kwargs
-        ]
+        model_kwargs = self._population.model_kwargs
+        missing = [name for name in REDSHIFT_WINDOW_KWARGS if name not in model_kwargs]
         if missing:
             raise ValueError(
-                f"population model {self._source_model_name!r} takes no {missing} "
-                "construction setting(s), so its redshift window cannot be narrowed"
+                f"population model {self._population.source_model_name!r} takes no "
+                f"{missing} construction setting(s), so its redshift window cannot "
+                "be narrowed"
             )
-        generated_min = float(self._model_kwargs["z_min"])
-        generated_max = float(self._model_kwargs["z_max"])
+        generated_min = float(model_kwargs["z_min"])
+        generated_max = float(model_kwargs["z_max"])
         if not generated_min <= z_min < z_max <= generated_max:
             raise ValueError(
                 f"analysis redshift support [{z_min:.4g}, {z_max:.4g}] must lie "
@@ -321,11 +315,14 @@ class Catalog:
                 name: values[keep] for name, values in self.source_parameters.items()
             },
             polarization_power=self.polarization_power[:, keep],
-            _model_kwargs={
-                **self._model_kwargs,
-                "z_min": float(z_min),
-                "z_max": float(z_max),
-            },
+            _population=replace(
+                self._population,
+                model_kwargs={
+                    **model_kwargs,
+                    "z_min": float(z_min),
+                    "z_max": float(z_max),
+                },
+            ),
         )
 
     # ----------------------------------------------------------------- #
@@ -335,10 +332,10 @@ class Catalog:
     def load(cls, path: str | Path) -> Self:
         """Read a catalog file, reconstructing and validating its population record.
 
-        Loading calls :meth:`get_source_model` and :meth:`get_merger_rate_fn`
-        once each to verify the recorded source and rate model names are still
-        registered; it does not re-execute the population or compare derived columns against the
-        stored arrays. A catalog whose columns have drifted from its declared
+        Loading calls :meth:`~astrogwb.populations.PopulationRecord.check_registered`
+        to verify the recorded source and rate model names are still registered;
+        it does not re-execute the population or compare derived columns against
+        the stored arrays. A catalog whose columns have drifted from its declared
         population is not caught here.
 
         Files written in older catalog formats are rejected; there is no
@@ -346,7 +343,7 @@ class Catalog:
         """
         from astrogwb.catalog import _io
 
-        return _io.load_catalog(cls, path)
+        return _io.load_polarization_power_catalog(cls, path)
 
     def save(self, path: str | Path, *, compression: str | None = None) -> None:
         """Write source arrays, power, waveform metadata, and the population record.
@@ -357,4 +354,4 @@ class Catalog:
         """
         from astrogwb.catalog import _io
 
-        _io.save_catalog(self, path, compression=compression)
+        _io.save_polarization_power_catalog(self, path, compression=compression)

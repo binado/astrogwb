@@ -26,11 +26,12 @@ import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import (
     MergerRateFn,
+    PopulationRecord,
     SourceFn,
     build_merger_rate_fn,
     build_source_model,
@@ -147,9 +148,9 @@ def mock_catalog(
     source_parameters: dict[str, np.ndarray],
     *,
     generator: AnalyticInspiralGenerator,
-) -> Catalog:
+) -> PolarizationPowerCatalog:
     """Wrap a mock draw in a catalog carrying the population that produced it."""
-    return Catalog.from_generator(
+    return PolarizationPowerCatalog.from_generator(
         source_parameters,
         generator=generator,
         source_model_name="bns_md_cosmological",
@@ -168,13 +169,15 @@ def build_mock_catalog(
     f_min: float = 2.0,
     f_max: float = 4096.0,
     frequency_resolution: float = 8.0,
-) -> Catalog:
-    """Build a real ``Catalog`` from the mock population draw.
+) -> PolarizationPowerCatalog:
+    """Build a real ``PolarizationPowerCatalog`` from the mock population draw.
 
     The polarization power comes from
     :class:`~astrogwb.waveform.AnalyticInspiralGenerator`, so the catalog is
     a genuine closed-form inspiral bank -- no Ripple backend, no persisted
-    file -- and :meth:`~astrogwb.catalog.Catalog.from_generator` self-validates,
+    file -- and
+    :meth:`~astrogwb.catalog.PolarizationPowerCatalog.from_generator`
+    self-validates,
     so a malformed mock fails at construction rather than deep inside a model.
 
     ``inclination`` is a column of exact zeros, declared that way by the
@@ -206,10 +209,11 @@ def build_mock_catalog(
     )
 
 
-def catalog_samples(catalog: Catalog) -> dict[str, jax.Array]:
+def catalog_samples(catalog: PolarizationPowerCatalog) -> dict[str, jax.Array]:
     """The catalog's source parameters as JAX arrays, keyed by name.
 
-    ``Catalog.source_parameters`` is already a ``Mapping[str, NDArray]`` keyed by
+    ``PolarizationPowerCatalog.source_parameters`` is already a
+    ``Mapping[str, NDArray]`` keyed by
     name, so this only crosses into JAX -- which every model in the suite wants
     and no test should have to restate.
     """
@@ -281,7 +285,7 @@ def build_synthetic_importance(
     samples = synthetic_source_parameters(n_samples)
     if polarization_power is None:
         polarization_power = jnp.ones((1, n_samples))
-    # A descriptor sized to whatever power the caller supplied: `Catalog`
+    # A descriptor sized to whatever power the caller supplied: a catalog
     # checks the two against each other, and the frequencies themselves are
     # never used by anything reweighting this catalog.
     num_frequencies = int(jnp.shape(polarization_power)[0])
@@ -294,19 +298,21 @@ def build_synthetic_importance(
         sampling_frequency=2.0 * F_MAX,
         frequency_resolution=F_MIN,
     )
-    catalog = Catalog(
+    catalog = PolarizationPowerCatalog(
         source_parameters={
             name: np.asarray(values) for name, values in samples.items()
         },
         polarization_power=np.asarray(polarization_power),
         frequencies=np.asarray(generator.frequencies),
         waveform_metadata=generator,
-        _source_model_name="bns_md_cosmological",
-        _rate_model_name="madau_dickinson",
-        _model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
+        _population=PopulationRecord(
+            source_model_name="bns_md_cosmological",
+            rate_model_name="madau_dickinson",
+            model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
+            density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
+            seed=MOCK_POPULATION_SEED,
+        ),
         _fiducials=POPULATION_PARAMS,
-        _density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
-        seed=MOCK_POPULATION_SEED,
     )
     spectrum = build_importance_spectrum(
         catalog,

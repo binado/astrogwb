@@ -20,10 +20,10 @@ Coarsening by subsampling therefore holds the sources fixed and varies only
 ``FINE_DF`` is a negative power of two so that ``k * FINE_DF`` is exact in
 binary and the two grids agree bit for bit rather than to a tolerance.
 
-``Catalog.df`` now derives the bin width from the grid itself, so
+``PolarizationPowerCatalog.df`` now derives the bin width from the grid itself, so
 ``_analysis_at``'s manual ``factor * FINE_DF`` is a deliberate exception, not
 an oversight: the subsampled grid it describes is not the catalog's own grid,
-so nothing can measure its width off a `Catalog`.
+so nothing can measure its width off a `PolarizationPowerCatalog`.
 
 The band stops at 256 Hz because that is where the signal is: with the ET
 effective PSD the SNR integrand is a peak a few hertz wide near 7 Hz, and
@@ -52,7 +52,7 @@ from astrogwb_mock_population import (
     mock_target_model,
 )
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
@@ -85,7 +85,7 @@ FIRST_STEP_TOLERANCE = 5e-3
 
 
 @pytest.fixture(scope="module")
-def fine_catalog(mock_population: dict[str, np.ndarray]) -> Catalog:
+def fine_catalog(mock_population: dict[str, np.ndarray]) -> PolarizationPowerCatalog:
     """The reference catalog every coarser grid is subsampled from."""
     return build_mock_catalog(
         mock_population,
@@ -98,7 +98,7 @@ def fine_catalog(mock_population: dict[str, np.ndarray]) -> Catalog:
 
 def test_subsampling_a_fine_catalog_matches_a_coarse_one(
     mock_population: dict[str, np.ndarray],
-    fine_catalog: Catalog,
+    fine_catalog: PolarizationPowerCatalog,
 ) -> None:
     """``[::k]`` of a fine catalog *is* the catalog built at ``k * df``.
 
@@ -129,7 +129,7 @@ def test_subsampling_a_fine_catalog_matches_a_coarse_one(
 
 
 def _analysis_at(
-    catalog: Catalog, factor: int, sensitivities: Mapping[str, Any]
+    catalog: PolarizationPowerCatalog, factor: int, sensitivities: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Re-derive the masked analysis inputs on the grid coarsened by ``factor``.
 
@@ -162,7 +162,7 @@ def _analysis_at(
 
 
 @pytest.fixture(scope="module")
-def resolutions(fine_catalog: Catalog) -> dict[int, dict[str, Any]]:
+def resolutions(fine_catalog: PolarizationPowerCatalog) -> dict[int, dict[str, Any]]:
     """Masked analysis inputs, the injection, and SNR^2, at every resolution."""
     samples = catalog_samples(fine_catalog)
     # The catalog is its own proposal: preparation caches the density and

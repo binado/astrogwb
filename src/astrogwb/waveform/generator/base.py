@@ -27,7 +27,7 @@ class PolarizationPowerGenerator:
     ``frequency_resolution`` records what was *requested*; it is not
     necessarily the realized bin width. The generating backend chooses the
     actual grid, so the realized spacing belongs to the catalog it produces
-    (see ``Catalog.df``), not to this descriptor.
+    (see ``PolarizationPowerCatalog.df``), not to this descriptor.
     """
 
     approximant: str

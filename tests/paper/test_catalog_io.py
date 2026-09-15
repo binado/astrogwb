@@ -10,8 +10,8 @@ import numpy as np
 import pytest
 from catalog_fixtures import make_catalog
 
-from astrogwb.catalog import Catalog
-from astrogwb.catalog._io import FORMAT_NAME, validate_catalog_file
+from astrogwb.catalog import PolarizationPowerCatalog
+from astrogwb.catalog._io import CATALOG_FORMAT_NAME, validate_catalog_file
 from astrogwb.waveform import PolarizationPowerGenerator
 
 
@@ -23,12 +23,12 @@ def test_hdf5_layout_metadata_and_order_round_trip(tmp_path: Path) -> None:
     catalog.save(path)
     with h5py.File(path) as handle:
         assert set(handle) == {"frequency", "polarization_power", "source_parameters"}
-        assert handle.attrs["format_name"] == FORMAT_NAME
+        assert handle.attrs["format_name"] == CATALOG_FORMAT_NAME
         assert json.loads(handle.attrs["source_parameter_names"]) == list(
             catalog.source_parameters
         )
         assert handle["source_parameters"].dtype == np.float64
-    restored = Catalog.load(path)
+    restored = PolarizationPowerCatalog.load(path)
     assert restored.density_sites == catalog.density_sites
     assert list(restored.source_parameters) == list(catalog.source_parameters)
     np.testing.assert_array_equal(restored.frequencies, catalog.frequencies)
@@ -64,7 +64,7 @@ def test_unknown_format_and_domain_are_rejected(tmp_path: Path) -> None:
         handle.attrs["format_name"] = "foreign"
         with pytest.raises(ValueError, match="format_name"):
             validate_catalog_file(handle, label="test")
-        handle.attrs["format_name"] = FORMAT_NAME
+        handle.attrs["format_name"] = CATALOG_FORMAT_NAME
         handle.attrs["domain"] = "time"
         with pytest.raises(ValueError, match="domain"):
             validate_catalog_file(handle, label="test")
@@ -87,7 +87,7 @@ def test_invalid_metadata_and_unknown_population_fail_on_load(tmp_path: Path) ->
     with h5py.File(path, "r+") as handle:
         handle.attrs["population_source_model"] = "no_such_population"
     with pytest.raises(KeyError):
-        Catalog.load(path)
+        PolarizationPowerCatalog.load(path)
 
 
 def test_a_tampered_legacy_name_fails_on_load_when_the_new_attrs_are_absent(
@@ -101,7 +101,7 @@ def test_a_tampered_legacy_name_fails_on_load_when_the_new_attrs_are_absent(
         del handle.attrs["population_rate_model"]
         handle.attrs["population_model"] = "no_such_population"
     with pytest.raises(KeyError):
-        Catalog.load(path)
+        PolarizationPowerCatalog.load(path)
 
 
 def test_a_pre_split_catalog_loads_the_source_name_and_default_rate(
@@ -114,7 +114,7 @@ def test_a_pre_split_catalog_loads_the_source_name_and_default_rate(
     with h5py.File(path, "r+") as handle:
         del handle.attrs["population_source_model"]
         del handle.attrs["population_rate_model"]
-    loaded = Catalog.load(path)
+    loaded = PolarizationPowerCatalog.load(path)
     assert loaded.population_source_model_name == "bns_md_cosmological"
     assert loaded.population_rate_model_name == "madau_dickinson"
     assert loaded.population_model_name == "bns_md_cosmological"
@@ -123,4 +123,7 @@ def test_a_pre_split_catalog_loads_the_source_name_and_default_rate(
 def test_waveform_type_is_restored(tmp_path: Path) -> None:
     path = tmp_path / "catalog.h5"
     make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
-    assert type(Catalog.load(path).waveform_metadata) is PolarizationPowerGenerator
+    assert (
+        type(PolarizationPowerCatalog.load(path).waveform_metadata)
+        is PolarizationPowerGenerator
+    )

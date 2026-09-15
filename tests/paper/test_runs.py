@@ -165,7 +165,7 @@ def test_every_run_names_declared_catalogs(experiment: str, run: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Catalog selection
+# PolarizationPowerCatalog selection
 # --------------------------------------------------------------------------- #
 #: The eight catalogs the 26 runs share between them. Two pairs of specs
 #: collapsed into one file when catalogs stopped being composed in memory:
@@ -200,7 +200,7 @@ def test_resolve_catalog_names_rejects_malformed_catalogs(
 
 
 # --------------------------------------------------------------------------- #
-# Catalog reference validation
+# PolarizationPowerCatalog reference validation
 # --------------------------------------------------------------------------- #
 def test_a_run_naming_an_unknown_catalog_is_rejected() -> None:
     raw = assemble_run("cosmological-parameters", "ET-triangular")
@@ -235,7 +235,7 @@ def test_the_validation_gate_covers_every_run() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Catalog configs
+# PolarizationPowerCatalog configs
 # --------------------------------------------------------------------------- #
 def test_the_shared_blocks_are_declared_once() -> None:
     """Every catalog inherits [waveform] and [population] from the base layers.

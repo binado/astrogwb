@@ -138,14 +138,16 @@ extend-select = ["TID"]
 
 [tool.ty.src]
 # Most of `scripts/` stays absent because fixture generators can import
-# heavyweight optional dependencies. The three paper entry points are checked
-# explicitly; Ruff continues to cover every script.
+# heavyweight optional dependencies. The paper entry points and the core
+# spectrum simulator are checked explicitly; Ruff continues to cover every
+# script.
 include = [
     "src",
     "tests",
     "scripts/generate_catalog.py",
     "scripts/run_mcmc.py",
     "scripts/profile_model.py",
+    "scripts/simulate_spectra.py",
 ]
 
 [tool.pytest.ini_options]

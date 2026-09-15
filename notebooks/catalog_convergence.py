@@ -13,7 +13,7 @@
 # ---
 
 # %% [markdown]
-# # Catalog convergence: Monte-Carlo size and frequency resolution
+# # PolarizationPowerCatalog convergence: Monte-Carlo size and frequency resolution
 #
 # A catalog-based stochastic background carries two discretization errors, and
 # they are different kinds of thing:
@@ -65,7 +65,7 @@ import pandas as pd
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
-from astrogwb.catalog import Catalog
+from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.distributions.rates import madau_dickinson_rate
@@ -300,7 +300,7 @@ def make_redshift_grid() -> jax.Array:
 
 
 # %%
-def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
+def build_catalog(*, df: float, f_max: float, grid: str) -> PolarizationPowerCatalog:
     """Draw the population and reduce it onto the `[F_MIN, f_max]` grid.
 
     `grid` is a label carried into the population provenance, and from there
@@ -321,7 +321,7 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
         ).items()
     }
 
-    return Catalog.from_generator(
+    return PolarizationPowerCatalog.from_generator(
         parameters,
         generator=AnalyticInspiralGenerator(
             alpha=ISCO_ALPHA,
@@ -341,11 +341,14 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> Catalog:
     )
 
 
-def catalog_matches_configuration(catalog: Catalog, *, df: float, f_max: float) -> bool:
+def catalog_matches_configuration(
+    catalog: PolarizationPowerCatalog, *, df: float, f_max: float
+) -> bool:
     """Does a cached catalog still describe the configuration cell?
 
     The population half of the question no longer needs asking: the file
-    records its own model, settings and hyperparameters, and `Catalog.load`
+    records its own model, settings and hyperparameters, and
+    `PolarizationPowerCatalog.load`
     refuses a file whose columns no longer match them. What is left is the
     waveform grid and the draw size, which the population record does not
     cover.
@@ -363,16 +366,19 @@ def catalog_matches_configuration(catalog: Catalog, *, df: float, f_max: float) 
     )
 
 
-def load_or_build_catalog(*, df: float, f_max: float, grid: str, path: Path) -> Catalog:
+def load_or_build_catalog(
+    *, df: float, f_max: float, grid: str, path: Path
+) -> PolarizationPowerCatalog:
     """Return the cached catalog if it is still current, else rebuild it.
 
-    A file written by an older astrogwb is *rejected* by `Catalog.load` rather
+    A file written by an older astrogwb is *rejected* by
+    `PolarizationPowerCatalog.load` rather
     than merely failing the configuration check below, so the read is guarded:
     a stale cache is a rebuild, not a crash.
     """
     if path.is_file():
         try:
-            cached = Catalog.load(path)
+            cached = PolarizationPowerCatalog.load(path)
         except (OSError, KeyError, ValueError) as error:
             print(f"{path} is not a current astrogwb catalog ({error}); rebuilding")
         else:
@@ -387,7 +393,7 @@ def load_or_build_catalog(*, df: float, f_max: float, grid: str, path: Path) -> 
     return catalog
 
 
-def describe(catalog: Catalog) -> pd.Series:
+def describe(catalog: PolarizationPowerCatalog) -> pd.Series:
     """A one-glance summary of what a catalog file holds."""
     waveform = catalog.waveform_metadata
     return pd.Series(
@@ -404,13 +410,13 @@ def describe(catalog: Catalog) -> pd.Series:
     )
 
 
-def catalog_merger_rate(catalog: Catalog) -> jax.Array:
+def catalog_merger_rate(catalog: PolarizationPowerCatalog) -> jax.Array:
     """The observer-frame rate this catalog's own population implies."""
     return jnp.asarray(catalog.get_merger_rate_fn()(catalog.fiducials))
 
 
 def unpack(
-    catalog: Catalog,
+    catalog: PolarizationPowerCatalog,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, jax.Array], jax.Array]:
     """The four things every section wants out of a catalog."""
     frequencies = np.asarray(catalog.frequencies)
@@ -581,7 +587,9 @@ axes[0].loglog(
     label=f"catalog, $N = {NUM_SOURCES}$",
 )
 axes[0].set_ylabel(r"$\Omega_{\rm gw}(f)$")
-axes[0].set_title(r"Catalog contraction against the analytic $\Omega_{\rm gw}$")
+axes[0].set_title(
+    r"PolarizationPowerCatalog contraction against the analytic $\Omega_{\rm gw}$"
+)
 # Both curves fall off a cliff at the cutoff; without a floor the decades of
 # empty axis below it squash the part worth looking at into a sliver.
 axes[0].set_ylim(1.0e-4 * omega_analytic.max(), 2.0 * omega_analytic.max())

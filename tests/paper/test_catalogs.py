@@ -4,7 +4,8 @@ Composition used to live here: a run declared an inline spec and the two
 catalogs were mixed in memory from persisted banks. Every catalog is a file
 now, built by ``scripts/generate_catalog.py``, so loading is just reading one.
 Narrowing to the analysis window moved onto
-:meth:`~astrogwb.catalog.Catalog.restrict_redshift`, which moves the samples
+:meth:`~astrogwb.catalog.PolarizationPowerCatalog.restrict_redshift`, which
+moves the samples
 and the recorded density together and is covered in ``tests/core``.
 """
 
