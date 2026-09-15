@@ -4,11 +4,16 @@
 # here (the approximant); the rest of the tree inherits this verbatim. This
 # layer is declared as a Snakemake input of every catalog, so editing it
 # correctly invalidates all of them.
+#
+# The stored band matches config/analysis/base/model.toml's [analysis] f_min
+# and f_max: the catalog grid *is* the array every model is evaluated on, and
+# a run's band selects bins on it with a mask rather than compressing it.
+# `sampling_frequency` is the waveform backend's Nyquist, not the stored grid.
 
 [waveform]
 approximant = "IMRPhenomXAS_NRTidalv3"
 sampling_frequency = 8192.0
 minimum_frequency = 2.0
-maximum_frequency = 4096.0
+maximum_frequency = 2048.0
 reference_frequency = 20.0
 frequency_resolution = 1.0

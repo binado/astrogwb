@@ -207,7 +207,7 @@ def run(
     rng_key = jax.random.PRNGKey(config.seed)
     mcmc.run(
         rng_key,
-        **inputs.masked_model_kwargs(),
+        **inputs.model_kwargs(),
         extra_fields=("num_steps", "accept_prob", "diverging"),
     )
 

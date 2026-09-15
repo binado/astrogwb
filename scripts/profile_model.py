@@ -141,7 +141,7 @@ def build_potential(
         jax.random.PRNGKey(config.seed),
         model,
         init_strategy=init_strategy,
-        model_kwargs=inputs.masked_model_kwargs(),
+        model_kwargs=inputs.model_kwargs(),
         forward_mode_differentiation=config.sampler.forward_mode_differentiation,
         dynamic_args=False,
     )

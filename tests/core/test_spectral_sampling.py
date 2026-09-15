@@ -737,3 +737,214 @@ def test_amplitude_reconstruction_model_raises_on_a_missing_statistic() -> None:
 
     with pytest.raises(TypeError, match="template_optimal_snr"):
         _reconstruction_draws(statistics)
+
+
+# --------------------------------------------------------------------------- #
+# Frequency masking
+#
+# The analysis band reaches a likelihood as a traced boolean array instead of
+# as arrays compressed to the band. The two must agree exactly -- that is what
+# makes the mask a reformulation rather than a second likelihood -- and the
+# traced form must let the band vary without a retrace, which is the whole
+# reason for it. Both properties are checked here, for both likelihoods.
+# --------------------------------------------------------------------------- #
+
+#: A five-bin grid and a *non-contiguous* selection of it: a gappy band is what
+#: a detector network with a hole in its coverage actually produces.
+_BAND_MASK = jnp.array([False, True, True, False, True])
+_BAND_OBSERVED = jnp.array([2.4, 4.1, 5.9, 1.8, 3.3])
+_BAND_SCALE = jnp.array([1.0, 1.4, 0.8, 1.2, 0.9])
+_BAND_POWER = jnp.array(
+    [
+        [0.5, 1.1, 0.3],
+        [1.7, 0.4, 2.2],
+        [0.9, 1.3, 0.6],
+        [2.1, 0.8, 1.5],
+        [0.7, 1.9, 1.0],
+    ]
+)
+_BAND_TILT = jnp.array([0.1, -0.2, 0.3])
+_BAND_FIDUCIAL_RATE = 2.0
+_BAND_RATE_PRIOR = dist.Uniform(0.5, 6.0)
+
+
+def _band_spectrum(power: jax.Array) -> SpectralDensityFn:
+    """A spectrum bound to ``power``, so a compressed twin is one call away."""
+
+    def spectrum(
+        params: Mapping[str, ArrayLike],
+    ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
+        rate = jnp.asarray(params["rate"])
+        weights = jnp.exp(jnp.asarray(params["tilt"]) * _BAND_TILT)
+        return rate * (power @ weights), {"total_merger_rate": rate}
+
+    return spectrum
+
+
+def _band_kwargs(marginalized: bool, *, compressed: bool) -> dict[str, Any]:
+    """The same likelihood twice: masked on the full grid, or compressed to it."""
+    selection = np.asarray(_BAND_MASK)
+    power = _BAND_POWER[selection, :] if compressed else _BAND_POWER
+    spectrum = _band_spectrum(power)
+    kwargs: dict[str, Any] = {
+        "observed_spectral_density": (
+            _BAND_OBSERVED[selection] if compressed else _BAND_OBSERVED
+        ),
+        "scale": _BAND_SCALE[selection] if compressed else _BAND_SCALE,
+    }
+    if not compressed:
+        kwargs["frequency_mask"] = _BAND_MASK
+    if marginalized:
+        kwargs |= {
+            "spectral_density_fn": with_renamed_diagnostics(
+                spectrum, {"total_merger_rate": "template_merger_rate"}
+            ),
+            "priors": {"tilt": dist.Normal(0.0, 1.0)},
+            "amplitude_parameter": "rate",
+            "amplitude_fiducial": _BAND_FIDUCIAL_RATE,
+            "amplitude_fn": _identity,
+            "amplitude_prior": _BAND_RATE_PRIOR,
+            "amplitude_grid": quadrature_grid(_BAND_RATE_PRIOR, num_nodes=2001),
+        }
+    else:
+        kwargs |= {
+            "spectral_density_fn": spectrum,
+            "priors": {"rate": _BAND_RATE_PRIOR, "tilt": dist.Normal(0.0, 1.0)},
+        }
+    return kwargs
+
+
+def _band_model(marginalized: bool) -> Any:
+    return (
+        gwb_amplitude_marginalized_model if marginalized else gwb_spectral_density_model
+    )
+
+
+def _band_params(marginalized: bool) -> dict[str, jax.Array]:
+    params = {"tilt": jnp.array(0.35)}
+    if not marginalized:
+        params["rate"] = jnp.array(2.6)
+    return params
+
+
+@pytest.mark.parametrize("marginalized", [False, True])
+def test_a_frequency_mask_equals_compressing_to_the_selected_bins(
+    marginalized: bool,
+) -> None:
+    """The mask is a reformulation of the band, not a different likelihood.
+
+    Excluded bins must contribute exactly zero -- to the Gaussian site of the
+    general model, and to all four sums the marginalized model's sufficient
+    statistics and normalization are built from.
+    """
+    model = _band_model(marginalized)
+    params = _band_params(marginalized)
+
+    masked, _ = log_density(
+        model, (), _band_kwargs(marginalized, compressed=False), params
+    )
+    compressed, _ = log_density(
+        model, (), _band_kwargs(marginalized, compressed=True), params
+    )
+
+    np.testing.assert_allclose(float(masked), float(compressed), rtol=1e-12)
+    # The selection is gappy, so an implementation that quietly assumed a
+    # contiguous band would not land here by accident.
+    assert not bool(jnp.all(_BAND_MASK[1:4]))
+
+
+def test_masked_amplitude_statistics_are_the_band_restricted_ones() -> None:
+    """The published statistics are what reconstruction later integrates.
+
+    They carry no frequency axis, so a band that reached the factor but not
+    these two would leave the chain self-consistent and the reconstructed
+    posterior wrong, with nothing to see.
+    """
+    params = _band_params(marginalized=True)
+
+    _, masked = log_density(
+        gwb_amplitude_marginalized_model,
+        (),
+        _band_kwargs(True, compressed=False),
+        params,
+    )
+    _, compressed = log_density(
+        gwb_amplitude_marginalized_model,
+        (),
+        _band_kwargs(True, compressed=True),
+        params,
+    )
+
+    for name in ("amplitude_mle", "template_optimal_snr"):
+        np.testing.assert_allclose(
+            float(masked[name]["value"]), float(compressed[name]["value"]), rtol=1e-12
+        )
+
+
+@pytest.mark.parametrize("marginalized", [False, True])
+def test_an_excluded_bin_may_carry_a_non_finite_scale(marginalized: bool) -> None:
+    """A bin with no network coverage has an infinite scale, and is excluded.
+
+    Its log density is ``-inf`` and its inverse variance is zero, so the mask
+    has to discard it rather than multiply it: a masked ``inf`` that survived
+    into a sum would poison the value, and a masked ``nan`` the gradient.
+    """
+    kwargs = _band_kwargs(marginalized, compressed=False)
+    kwargs["scale"] = jnp.where(_BAND_MASK, kwargs["scale"], jnp.inf)
+    params = _band_params(marginalized)
+
+    def density(tilt: jax.Array) -> jax.Array:
+        return log_density(
+            _band_model(marginalized), (), kwargs, params | {"tilt": tilt}
+        )[0]
+
+    value, gradient = jax.value_and_grad(density)(params["tilt"])
+
+    assert jnp.isfinite(value)
+    assert jnp.isfinite(gradient)
+    # And it is still the band's own density: the infinities changed nothing.
+    reference, _ = log_density(
+        _band_model(marginalized),
+        (),
+        _band_kwargs(marginalized, compressed=True),
+        params,
+    )
+    np.testing.assert_allclose(float(value), float(reference), rtol=1e-12)
+
+
+@pytest.mark.parametrize("marginalized", [False, True])
+def test_sweeping_a_frequency_mask_reuses_one_compiled_program(
+    marginalized: bool,
+) -> None:
+    """The reason the band is a traced array: a sub-band sweep is free.
+
+    Compressing to the band makes its bin count a shape, so every band costs a
+    compilation -- which is what forces a fresh ``MCMC`` per band. Counting
+    traces of the spectrum callable is the direct test: it runs once per
+    traced program and not once per call.
+    """
+    traces = 0
+    kwargs = _band_kwargs(marginalized, compressed=False)
+    wrapped = kwargs["spectral_density_fn"]
+
+    def counted(params: Mapping[str, ArrayLike]) -> Any:
+        nonlocal traces
+        traces += 1
+        return wrapped(params)
+
+    kwargs["spectral_density_fn"] = counted
+    params = _band_params(marginalized)
+
+    @jax.jit
+    def density(mask: jax.Array) -> jax.Array:
+        return log_density(
+            _band_model(marginalized), (), kwargs | {"frequency_mask": mask}, params
+        )[0]
+
+    wide = density(_BAND_MASK)
+    narrow = density(_BAND_MASK & jnp.array([True, True, False, True, True]))
+
+    assert traces == 1
+    # A different mask is a different answer, so the single trace is not one
+    # program silently ignoring its argument.
+    assert not jnp.allclose(wide, narrow)

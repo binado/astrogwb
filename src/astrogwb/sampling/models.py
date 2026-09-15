@@ -149,6 +149,7 @@ def gwb_spectral_density_model(
     observed_spectral_density: jax.Array,
     priors: Mapping[str, dist.Distribution],
     scale: jax.Array,
+    frequency_mask: jax.Array | None = None,
 ) -> None:
     """Sample parameters and compare a supplied spectrum to Gaussian observations.
 
@@ -158,14 +159,31 @@ def gwb_spectral_density_model(
     Use ``priors={}`` for likelihood-only evaluation. The observation site is
     ``spectral_density_obs`` with one frequency event dimension. Diagnostic
     names must not collide with priors or that observation site.
+
+    ``frequency_mask`` is an optional boolean array of shape ``(F,)`` selecting
+    the bins the likelihood counts. It is a *traced* argument on a fixed grid,
+    so sweeping its value never triggers a recompile -- only changing its
+    length does, since that changes every array's shape. Excluded bins
+    contribute exactly zero, so the result equals evaluating the model on the
+    arrays compressed to the selection, and a masked bin's ``scale`` may be
+    infinite without producing a non-finite log density or gradient.
+
+    The mask is applied to the observation *site*
+    (``dist.Normal(...).mask(...)``) rather than with
+    :func:`numpyro.handlers.mask`: a handler applies to every sample site in
+    its scope, so an ``(F,)`` mask would also reach the scalar prior sites and
+    broadcast their log densities to shape ``(F,)``.
     """
     params = {name: numpyro.sample(name, prior) for name, prior in priors.items()}
     prediction, extras = spectral_density_fn(params)
     for name, value in extras.items():
         numpyro.deterministic(name, value)
+    observation = dist.Normal(prediction, scale)
+    if frequency_mask is not None:
+        observation = observation.mask(frequency_mask)
     numpyro.sample(
         "spectral_density_obs",
-        dist.Normal(prediction, scale).to_event(1),
+        observation.to_event(1),
         obs=observed_spectral_density,
     )
 
@@ -181,6 +199,7 @@ def gwb_amplitude_marginalized_model(
     amplitude_fn: AmplitudeFn,
     amplitude_prior: dist.Distribution,
     amplitude_grid: jax.Array | None = None,
+    frequency_mask: jax.Array | None = None,
 ) -> None:
     """Marginalize a multiplicative parameter of any supplied spectrum.
 
@@ -200,6 +219,10 @@ def gwb_amplitude_marginalized_model(
     ``amplitude_reconstruction_model`` for rate-aware reconstruction, or
     ``AmplitudeConditional`` directly when only amplitude draws are needed.
 
+    ``frequency_mask`` is an optional boolean array of shape ``(F,)`` selecting
+    the bins the likelihood counts, as in :func:`gwb_spectral_density_model`.
+    Every sum below restricts to it.
+
     Raises ``ValueError`` if the amplitude is also present in ``priors``.
     All spectrum, observation, and scale arrays have shape ``(F,)``.
     """
@@ -215,6 +238,15 @@ def gwb_amplitude_marginalized_model(
         numpyro.deterministic(name, value)
 
     inverse_variance = scale**-2
+    # `log_scale` is the per-bin Gaussian normalization, summed further down.
+    # Masking both arrays here is what restricts every sum below: an excluded
+    # bin contributes zero inverse variance to the three sufficient statistics
+    # and zero to the normalization, which is exactly dropping it.
+    log_scale = jnp.log(scale) + 0.5 * jnp.log(2.0 * jnp.pi)
+    if frequency_mask is not None:
+        keep = jnp.asarray(frequency_mask)
+        inverse_variance = jnp.where(keep, inverse_variance, 0.0)
+        log_scale = jnp.where(keep, log_scale, 0.0)
     template_norm = jnp.sum(
         model_spectral_density * model_spectral_density * inverse_variance
     )
@@ -243,7 +275,7 @@ def gwb_amplitude_marginalized_model(
     data_norm = jnp.sum(
         observed_spectral_density * observed_spectral_density * inverse_variance
     )
-    normalization = -jnp.sum(jnp.log(scale) + 0.5 * jnp.log(2.0 * jnp.pi))
+    normalization = -jnp.sum(log_scale)
     log_likelihood_at_mle = normalization - 0.5 * (
         data_norm - amplitude_mle * data_template
     )
