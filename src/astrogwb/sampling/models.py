@@ -220,13 +220,8 @@ def gwb_amplitude_marginalized_model(
     ``AmplitudeConditional`` directly when only amplitude draws are needed.
 
     ``frequency_mask`` is an optional boolean array of shape ``(F,)`` selecting
-    the bins the likelihood counts, with the same semantics and the same
-    recompile-free sweeping as in :func:`gwb_spectral_density_model`. It is
-    applied by zeroing the excluded bins of the two per-bin arrays the
-    sufficient statistics are built from, because
-    :func:`numpyro.handlers.mask` cannot reach this likelihood at all: the
-    ``amplitude_marginalized_log_likelihood`` factor carries a *scalar*
-    log density, so there is no per-bin batch dimension to mask.
+    the bins the likelihood counts, as in :func:`gwb_spectral_density_model`.
+    Every sum below restricts to it.
 
     Raises ``ValueError`` if the amplitude is also present in ``priors``.
     All spectrum, observation, and scale arrays have shape ``(F,)``.
