@@ -52,7 +52,7 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from astrogwb.gwb.spectral import AverageMode, spectral_density
+from astrogwb.gwb.spectral import spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.weights import importance_log_weights
 from astrogwb.populations.registry import MergerRateFn, SourceFn
@@ -116,7 +116,6 @@ def importance_spectral_density(
     proposal_log_prob: jax.Array,
     log_reference_distance: jax.Array,
     density_sites: Sequence[str],
-    average_mode: AverageMode,
 ) -> tuple[jax.Array, dict[str, jax.Array]]:
     """The importance-weighted spectrum at ``params``, with its diagnostics.
 
@@ -142,7 +141,7 @@ def importance_spectral_density(
         polarization_power,
         jnp.exp(log_weights),
         total_merger_rate,
-        average_mode=average_mode,
+        source_parameters=source_parameters,
     )
     return prediction, {
         "total_merger_rate": total_merger_rate,
@@ -159,7 +158,6 @@ def build_importance_spectrum(
     *,
     source_model: SourceFn,
     merger_rate_fn: MergerRateFn,
-    average_mode: AverageMode,
     frequency_mask: ArrayLike | None = None,
 ) -> tuple[SpectralDensityFn, LogWeightsFn]:
     """Prepare one catalog and bind it to a target, as both callables at once.
@@ -237,7 +235,6 @@ def build_importance_spectrum(
             importance_spectral_density,
             merger_rate_fn=merger_rate_fn,
             polarization_power=power,
-            average_mode=average_mode,
             **weight_kwargs,
         ),
         partial(evaluate_log_weights, **weight_kwargs),

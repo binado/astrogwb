@@ -180,9 +180,8 @@ def build_mock_catalog(
     self-validates,
     so a malformed mock fails at construction rather than deep inside a model.
 
-    ``inclination`` is a column of exact zeros, declared that way by the
-    population. That is not a defect -- it pairs exactly with
-    ``average_mode="analytic_inclination"``, whose
+    ``inclination`` is absent from the face-on population. That is deliberate:
+    the missing column selects the
     ``INCLINATION_AVERAGE_TO_FACE_ON_RATIO = <g>/g(0) = 0.4`` converts face-on
     power into the inclination average.
     """
@@ -249,10 +248,10 @@ def synthetic_source_parameters(n_samples: int = 16) -> dict[str, jax.Array]:
 def log_weight_kwargs(importance: Mapping[str, Any]) -> dict[str, Any]:
     """The subset of ``importance_spectral_density`` keywords the weights take.
 
-    ``evaluate_log_weights`` needs no power, rate, or inclination convention;
+    ``evaluate_log_weights`` needs no power or rate;
     this drops exactly those from a full spectrum keyword set.
     """
-    spectrum_only = {"polarization_power", "merger_rate_fn", "average_mode"}
+    spectrum_only = {"polarization_power", "merger_rate_fn"}
     return {
         name: value for name, value in importance.items() if name not in spectrum_only
     }
@@ -318,7 +317,6 @@ def build_synthetic_importance(
         catalog,
         source_model=mock_target_model() if source_model is None else source_model,
         merger_rate_fn=mock_merger_rate_fn(),
-        average_mode="analytic_inclination",
     )
     return (
         dict(spectrum[0].keywords),  # ty: ignore[unresolved-attribute]

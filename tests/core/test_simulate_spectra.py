@@ -106,7 +106,6 @@ def test_parse_args_loads_json_dicts() -> None:
     )
     assert args.model_kwargs == {"z_min": 0.3, "n_grid": 64}
     assert args.params == {"log10_R0": 1.5, "gamma": 2.7}
-    assert args.average_mode == "analytic_inclination"
     assert args.force is False
 
 
@@ -162,7 +161,6 @@ def test_small_run_writes_expected_shapes_and_seed_changes_draws(
     assert first.spectral_density.shape[1] == first.frequencies.shape[0]
     assert second.spectral_density.shape[1] == second.frequencies.shape[0]
     assert first.n_events.shape == (draws,)
-    assert first.average_mode == "analytic_inclination"
     assert first.observation_time == observation_time
     # Strain spectra are ~1e-50; use a relative scale so distinct seeds fail the check.
     scale = max(

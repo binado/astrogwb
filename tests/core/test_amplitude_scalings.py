@@ -56,7 +56,7 @@ def _spectrum(synthetic_importance, n_samples: int = 16):
     )
     return partial(
         importance_spectral_density,
-        **{**importance, "average_mode": "catalog_inclination"},
+        **importance,
     )
 
 

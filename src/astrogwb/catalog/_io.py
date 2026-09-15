@@ -6,8 +6,7 @@ datasets and in the handful of attributes each artifact alone carries. What is
 shared lives in :mod:`astrogwb.catalog._hdf5` and
 :mod:`astrogwb.populations.record`; what is here is per-format: which datasets
 exist, which attributes are required, the shape and dtype checks a reader
-enforces before constructing a record, and the polarization-power catalog's
-two compatibility tiers.
+enforces before constructing a record.
 
 Structural validation is deliberately split. Cross-field invariants -- axis
 agreement, draw counts, the uniform grid -- belong to each record's
@@ -47,17 +46,8 @@ from astrogwb.catalog._hdf5 import (
 from astrogwb.catalog.polarization_power import REDSHIFT_SITE, PolarizationPowerCatalog
 from astrogwb.catalog.spectral_density import (
     SpectralDensityCatalog,
-    average_mode_from,
 )
-from astrogwb.populations.record import (
-    DENSITY_SITES_ATTR,
-    MODEL_KWARGS_ATTR,
-    POPULATION_ATTRS,
-    RATE_MODEL_NAME_ATTR,
-    SEED_ATTR,
-    SOURCE_MODEL_NAME_ATTR,
-    PopulationRecord,
-)
+from astrogwb.populations.record import POPULATION_ATTRS, PopulationRecord
 
 __all__ = [
     "CATALOG_FORMAT_NAME",
@@ -76,38 +66,22 @@ PARAMETER_NAMES_ATTR = "source_parameter_names"
 # --------------------------------------------------------------------- #
 # Polarization-power catalogs
 # --------------------------------------------------------------------- #
-CATALOG_FORMAT_NAME = "astrogwb_catalog_v5"
+CATALOG_FORMAT_NAME = "astrogwb_catalog_v6"
 CATALOG_DATASETS = ("frequency", "polarization_power", "source_parameters")
 
-#: Written on every save, but optional on read: older v5 files predate it, and
-#: for every file written so far it equals the ``df`` attribute (see
-#: ``waveform_from_attrs``).
+#: Written on every save. It equals the ``df`` attribute for every current
+#: waveform descriptor (see :func:`waveform_from_attrs`).
 FREQUENCY_RESOLUTION_ATTR = "frequency_resolution"
 #: Measured from the ``frequency`` dataset on write and never read back into a
 #: computation -- the dataset is the truth. It doubles as the fallback a
 #: pre-``frequency_resolution`` file's waveform descriptor is rebuilt from.
 DF_ATTR = "df"
 POPULATION_NUM_SAMPLES_ATTR = "population_num_samples"
-#: The legacy single population name, still written so a file this version
-#: produces stays readable by a reader that predates the source/rate split.
-#: Optional on read: a v5 file written before that split has only this one,
-#: treated as the source-model name.
-MODEL_NAME_ATTR = "population_model"
-#: The rate every pre-split v5 catalog was drawn at. Those files name only the
-#: source (as ``MODEL_NAME_ATTR``); this is the pairing they all used.
-_LEGACY_RATE_MODEL_NAME = "madau_dickinson"
 POPULATION_PARAMS_ATTR = "population_params"
 
-#: What a catalog file must carry. ``SOURCE_MODEL_NAME_ATTR`` and
-#: ``RATE_MODEL_NAME_ATTR`` are deliberately absent: a v5 file written before
-#: the source/rate split has neither, and ``_catalog_population_attrs``
-#: supplies both from ``MODEL_NAME_ATTR``, which is why *that* is required.
 REQUIRED_CATALOG_ATTRS = (
-    SEED_ATTR,
-    MODEL_KWARGS_ATTR,
-    DENSITY_SITES_ATTR,
+    *POPULATION_ATTRS,
     POPULATION_NUM_SAMPLES_ATTR,
-    MODEL_NAME_ATTR,
     POPULATION_PARAMS_ATTR,
 )
 
@@ -118,7 +92,7 @@ def save_polarization_power_catalog(
     *,
     compression: str | None = None,
 ) -> None:
-    """Write one catalog in the v5 direct-HDF5 format."""
+    """Write one catalog in the v6 direct-HDF5 format."""
     names, source_parameters = stack_columns(
         catalog.source_parameters, rows=catalog.num_samples
     )
@@ -128,7 +102,6 @@ def save_polarization_power_catalog(
         **waveform_attrs(catalog.waveform_metadata),
         DF_ATTR: catalog.df,
         **catalog.population.to_attrs(),
-        MODEL_NAME_ATTR: catalog.population_model_name,
         POPULATION_NUM_SAMPLES_ATTR: catalog.num_samples,
         POPULATION_PARAMS_ATTR: json.dumps(dict(catalog.fiducials), sort_keys=True),
         PARAMETER_NAMES_ATTR: json.dumps(names),
@@ -156,9 +129,7 @@ def load_polarization_power_catalog[C: PolarizationPowerCatalog](
         names = json_array_attr(
             attrs[PARAMETER_NAMES_ATTR], label=label, name=PARAMETER_NAMES_ATTR
         )
-        population = PopulationRecord.from_attrs(
-            _catalog_population_attrs(attrs), label=label
-        )
+        population = PopulationRecord.from_attrs(attrs, label=label)
         catalog = cls(
             source_parameters=unstack_columns(
                 np.asarray(handle["source_parameters"]), names
@@ -236,27 +207,10 @@ def validate_catalog_file(handle: h5py.File | h5py.Group, *, label: str) -> None
         raise ValueError(f"{label}: missing the {REDSHIFT_SITE!r} source parameter")
 
 
-def _catalog_population_attrs(attrs: dict[str, Any]) -> dict[str, Any]:
-    """Fill in the canonical population names a pre-split v5 file lacks.
-
-    Such a file names only the source, as ``population_model``, and every one
-    of them used the Madau-Dickinson rate. Normalizing here keeps the
-    compatibility tier in the reader that owns the format, rather than in
-    :class:`~astrogwb.populations.PopulationRecord`.
-    """
-    if SOURCE_MODEL_NAME_ATTR in attrs and RATE_MODEL_NAME_ATTR in attrs:
-        return attrs
-    return {
-        **attrs,
-        SOURCE_MODEL_NAME_ATTR: attrs[MODEL_NAME_ATTR],
-        RATE_MODEL_NAME_ATTR: _LEGACY_RATE_MODEL_NAME,
-    }
-
-
 # --------------------------------------------------------------------- #
 # Spectral-density catalogs
 # --------------------------------------------------------------------- #
-SPECTRAL_DENSITY_FORMAT_NAME = "astrogwb_spectral_density_v1"
+SPECTRAL_DENSITY_FORMAT_NAME = "astrogwb_spectral_density_v2"
 SPECTRAL_DENSITY_DATASETS = (
     "frequency",
     "spectral_density",
@@ -266,7 +220,6 @@ SPECTRAL_DENSITY_DATASETS = (
 )
 
 N_MAX_SIGMA_ATTR = "n_max_sigma"
-AVERAGE_MODE_ATTR = "average_mode"
 OBSERVATION_TIME_ATTR = "observation_time"
 
 #: What a spectra file must carry. Unlike the catalog format there is no
@@ -276,7 +229,6 @@ OBSERVATION_TIME_ATTR = "observation_time"
 REQUIRED_SPECTRAL_DENSITY_ATTRS = (
     *POPULATION_ATTRS,
     N_MAX_SIGMA_ATTR,
-    AVERAGE_MODE_ATTR,
     OBSERVATION_TIME_ATTR,
 )
 
@@ -298,7 +250,6 @@ def save_spectral_density_catalog(
         **catalog.population.to_attrs(),
         PARAMETER_NAMES_ATTR: json.dumps(names),
         N_MAX_SIGMA_ATTR: catalog.n_max_sigma,
-        AVERAGE_MODE_ATTR: catalog.average_mode,
         OBSERVATION_TIME_ATTR: catalog.observation_time,
     }
     write_h5(
@@ -338,7 +289,6 @@ def load_spectral_density_catalog[C: SpectralDensityCatalog](
             waveform_metadata=waveform_from_attrs(attrs, label=label),
             _population=population,
             n_max_sigma=float(attrs[N_MAX_SIGMA_ATTR]),
-            average_mode=average_mode_from(str(attrs[AVERAGE_MODE_ATTR])),
             observation_time=float(attrs[OBSERVATION_TIME_ATTR]),
         )
     population.check_registered()

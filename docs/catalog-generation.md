@@ -290,7 +290,6 @@ the draws cannot be read back from:
 
 ```
 n_max_sigma      = 5.0   # sized the static plate the Poisson count was capped against
-average_mode     = "analytic_inclination"  # the inclination convention assumed
 observation_time = 1.0   # years; set the Poisson mean
 ```
 

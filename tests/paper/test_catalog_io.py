@@ -90,34 +90,23 @@ def test_invalid_metadata_and_unknown_population_fail_on_load(tmp_path: Path) ->
         PolarizationPowerCatalog.load(path)
 
 
-def test_a_tampered_legacy_name_fails_on_load_when_the_new_attrs_are_absent(
-    tmp_path: Path,
-) -> None:
-    """The additive attrs win when present; the legacy name is a fallback only."""
+def test_missing_population_names_are_rejected(tmp_path: Path) -> None:
     path = tmp_path / "invalid.h5"
     make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
     with h5py.File(path, "r+") as handle:
         del handle.attrs["population_source_model"]
         del handle.attrs["population_rate_model"]
-        handle.attrs["population_model"] = "no_such_population"
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="population_source_model"):
         PolarizationPowerCatalog.load(path)
 
 
-def test_a_pre_split_catalog_loads_the_source_name_and_default_rate(
-    tmp_path: Path,
-) -> None:
-    """Files written before the source/rate attrs still reconstruct both names."""
+def test_legacy_format_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "legacy.h5"
-    catalog = make_catalog(redshift=np.linspace(0.1, 1.0, 4))
-    catalog.save(path)
+    make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
     with h5py.File(path, "r+") as handle:
-        del handle.attrs["population_source_model"]
-        del handle.attrs["population_rate_model"]
-    loaded = PolarizationPowerCatalog.load(path)
-    assert loaded.population_source_model_name == "bns_md_cosmological"
-    assert loaded.population_rate_model_name == "madau_dickinson"
-    assert loaded.population_model_name == "bns_md_cosmological"
+        handle.attrs["format_name"] = "astrogwb_catalog_v5"
+    with pytest.raises(ValueError, match="format_name"):
+        PolarizationPowerCatalog.load(path)
 
 
 def test_waveform_type_is_restored(tmp_path: Path) -> None:

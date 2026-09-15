@@ -76,8 +76,8 @@ def bns_cutoff(bns: dict[str, jax.Array]) -> Callable[..., float]:
 def test_mean_inclination_factor_is_the_analytic_inclination_constant() -> None:
     """``<g> / g(0)`` must equal the 0.4 in ``astrogwb.gwb.spectral_density``.
 
-    ``spectral_density(..., average_mode="analytic_inclination")`` multiplies
-    by a bare 0.4 because the populations declare every source face-on.
+    ``spectral_density(..., source_parameters={})`` multiplies by a bare 0.4
+    because the populations omit inclination for face-on sources.
     That factor is only correct if it is the ratio of the inclination-averaged
     ``g`` to its face-on value -- so this test is what couples the closed form
     here to the magic number over there.
@@ -141,6 +141,21 @@ def test_scales_with_inclination_factor(bns_power: Callable[..., jax.Array]) -> 
 
     np.testing.assert_allclose(
         edge_on, face_on * 0.25 / FACE_ON_INCLINATION_FACTOR, rtol=1e-12
+    )
+
+
+def test_missing_inclination_defaults_to_face_on(
+    bns: dict[str, jax.Array], bns_power: Callable[..., jax.Array]
+) -> None:
+    frequencies = jnp.array([100.0])
+    without_inclination = {
+        name: value for name, value in bns.items() if name != "inclination"
+    }
+
+    np.testing.assert_allclose(
+        inspiral_polarization_power(frequencies, without_inclination, alpha=ISCO_ALPHA),
+        bns_power(frequencies),
+        rtol=1e-12,
     )
 
 
@@ -274,7 +289,6 @@ def test_extra_gwmock_parameters_are_ignored(bns: dict[str, jax.Array]) -> None:
         "source_frame_mass_2",
         "redshift",
         "luminosity_distance",
-        "inclination",
     ],
 )
 def test_missing_required_parameter_raises_named_key_error(

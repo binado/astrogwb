@@ -13,18 +13,18 @@ from astrogwb.gwb.snr import (
     spectral_snr_squared,
 )
 from astrogwb.gwb.spectral import (
-    AverageMode,
+    inclination_averaging_factor,
     omega_gw_from_spectral_density,
     spectral_density,
     spectral_density_from_omega_gw,
 )
 
 __all__ = [
-    "AverageMode",
     "JointMassFunction",
     "PopulationFunction",
     "analytic_spectral_density",
     "analytic_spectral_density_from_mass_moments",
+    "inclination_averaging_factor",
     "omega_gw_from_spectral_density",
     "precompute_cumulative_mass_moments",
     "spectral_density",

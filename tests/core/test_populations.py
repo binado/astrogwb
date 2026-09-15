@@ -98,7 +98,6 @@ DETERMINISTIC_SITES = frozenset(
         "detector_frame_mass_1",
         "detector_frame_mass_2",
         LUMINOSITY_DISTANCE_SITE,
-        "inclination",
         "coa_phase",
         "coa_time",
     }
@@ -331,7 +330,6 @@ def test_derived_columns_match_the_declared_transforms() -> None:
     np.testing.assert_array_equal(
         columns["detector_frame_mass_2"], values["source_frame_mass_2"] * one_plus_z
     )
-    np.testing.assert_array_equal(columns["inclination"], jnp.zeros_like(one_plus_z))
 
 
 # --------------------------------------------------------------------------- #
