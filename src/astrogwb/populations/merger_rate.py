@@ -18,13 +18,24 @@ one eager execution; every subsequent call costs one
 ``RedshiftDistribution`` construction and no model execution at all -- the same
 cost as the registered rate it replaces.
 
-Not every source model has a rate to read. The guard-mixture proposals declare
-``redshift`` with a :class:`~numpyro.distributions.MixtureGeneral`, whose
-normalization is a proposal density rather than a physical rate; there is
-nothing to infer, and :func:`infer_merger_rate_fn` says so rather than guessing
-at a component. Those populations exist to draw importance proposals, which
-need no rate, and the catalogs drawn from them pair with the *physical*
-population's registered rate.
+Not every source model has a rate to read, and that is not an error. The
+guard-mixture proposals declare ``redshift`` with a
+:class:`~numpyro.distributions.MixtureGeneral`, whose normalization is a
+proposal density rather than a physical rate. They are shipped, registered
+models whose whole purpose is to draw importance proposals -- and a proposal
+needs no rate: ``build_importance_spectrum`` evaluates a catalog's own source
+model for the proposal density and takes the *target's* rate separately, so a
+proposal catalog's rate is never read. So :func:`infer_merger_rate_fn` returns
+``None`` for them rather than raising, and never guesses at a mixture
+component: the component order is not a contract, and unwrapping the first one
+would silently return whichever rate it happened to hold.
+
+The one thing that *is* an error is a source model declaring no ``redshift``
+sample site at all. Every population must draw a redshift -- it is the one
+source parameter whose density never cancels in an importance weight, and
+:class:`~astrogwb.catalog.PolarizationPowerCatalog` refuses to store a catalog
+without the column -- so that is a malformed model, not a proposal, and it
+raises.
 """
 
 from __future__ import annotations
@@ -70,18 +81,16 @@ def require_absolute_rate(params: Mapping[str, ArrayLike], *, label: str) -> Non
 
 def _probe_redshift_distribution(
     source_model: SourceFn, params: Mapping[str, ArrayLike]
-) -> RedshiftDistribution:
+) -> RedshiftDistribution | None:
     """The ``redshift`` site's distribution, read off one isolated execution.
 
+    ``None`` when that site carries no total merger rate -- a mixture, say.
     ``handlers.block`` keeps the probe's sites out of any enclosing trace, so
     this is safe to call from inside another model; ``handlers.seed`` supplies
     the key the draw needs, and the drawn value is discarded.
 
     Raises:
-        ValueError: If the model declares no ``redshift`` sample site.
-        TypeError: If that site's distribution is not a
-            :class:`~astrogwb.distributions.redshift.base.RedshiftDistribution`,
-            and so carries no total merger rate.
+        ValueError: If the model declares no ``redshift`` sample site at all.
     """
     with handlers.block(), handlers.seed(rng_seed=_PROBE_SEED):
         trace = handlers.trace(source_model).get_trace(params)
@@ -94,22 +103,19 @@ def _probe_redshift_distribution(
         )
 
     distribution = site["fn"]
-    if not isinstance(distribution, RedshiftDistribution):
-        raise TypeError(
-            f"the {REDSHIFT_SITE!r} site of this source model is a "
-            f"{type(distribution).__name__}, not a RedshiftDistribution, so no "
-            "total merger rate can be read off it; pass an explicit "
-            "merger_rate_fn, or build one with build_merger_rate_fn. A "
-            "guard-mixture redshift law is a proposal density, not a physical "
-            "population, and its normalization is not a merger rate"
-        )
-    return distribution
+    return distribution if isinstance(distribution, RedshiftDistribution) else None
 
 
 def infer_merger_rate_fn(
     source_model: SourceFn, params: Mapping[str, ArrayLike]
-) -> MergerRateFn:
-    r"""Build the merger-rate function a source model's redshift law implies.
+) -> MergerRateFn | None:
+    r"""The merger-rate function a source model's redshift law implies, if any.
+
+    ``None`` when the model's redshift law carries no total merger rate, which
+    is the normal answer for a guard-mixture proposal rather than a failure --
+    see the module docstring. A caller that needs a rate for such a population
+    supplies the physical one, by name, through
+    :func:`~astrogwb.populations.build_merger_rate_fn`.
 
     ``params`` is a *probe point only*: it must be complete enough to execute
     ``source_model`` once -- masses, spins and tidal parameters included, plus
@@ -130,12 +136,13 @@ def infer_merger_rate_fn(
     closure is compared and hashed **by identity**: build it once per run and
     reuse it, or a freshly built, equal rate forces a recompile.
 
-    Raises ``ValueError`` if the model declares no ``redshift`` sample site, and
-    ``TypeError`` if that site's distribution is not a
-    :class:`~astrogwb.distributions.redshift.base.RedshiftDistribution` and so
-    carries no total merger rate.
+    Raises ``ValueError`` if the model declares no ``redshift`` sample site at
+    all: every population must draw a redshift, so that is a malformed model
+    rather than one without a rate.
     """
     distribution = _probe_redshift_distribution(source_model, params)
+    if distribution is None:
+        return None
     # ``type(distribution)`` rather than ``RedshiftDistribution``: a subclass
     # rebuilds as itself. The Madau-Dickinson name is a *function* alias, so
     # what comes back here is the base class, as intended.

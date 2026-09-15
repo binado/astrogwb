@@ -580,6 +580,15 @@ def _registered_rate_fn() -> MergerRateFn:
     return build_merger_rate_fn("madau_dickinson", settings=_settings())
 
 
+def _inferred_rate_fn(name: str) -> MergerRateFn:
+    """The inferred rate, asserted present. Only the mixture tests want ``None``."""
+    inferred = infer_merger_rate_fn(
+        build_source_model(name, settings=_settings()), INFERABLE_MODELS[name]
+    )
+    assert inferred is not None
+    return inferred
+
+
 @pytest.mark.parametrize("name", INFERABLE_MODELS)
 def test_inferred_rate_is_the_registered_rate(name: str) -> None:
     """The one check the two registries never had.
@@ -591,10 +600,7 @@ def test_inferred_rate_is_the_registered_rate(name: str) -> None:
     constructions build the same table from the same settings.
     """
     params = INFERABLE_MODELS[name]
-    inferred = infer_merger_rate_fn(
-        build_source_model(name, settings=_settings()), params
-    )
-    assert inferred(params) == _registered_rate_fn()(params)
+    assert _inferred_rate_fn(name)(params) == _registered_rate_fn()(params)
 
 
 @pytest.mark.parametrize("name", INFERABLE_MODELS)
@@ -606,9 +612,7 @@ def test_inferred_rate_tracks_hyperparameters_off_the_probe_point(name: str) -> 
     everywhere NUTS goes, with no shape error to show it.
     """
     params = INFERABLE_MODELS[name]
-    inferred = infer_merger_rate_fn(
-        build_source_model(name, settings=_settings()), params
-    )
+    inferred = _inferred_rate_fn(name)
     registered = _registered_rate_fn()
     moved = {**params, **MOVED_PARAMS}
 
@@ -620,7 +624,7 @@ def test_inferred_rate_tracks_hyperparameters_off_the_probe_point(name: str) -> 
 
 def test_inferred_rate_is_jittable_without_retracing_per_call() -> None:
     params = POPULATION_PARAMS
-    inferred = infer_merger_rate_fn(mock_population_model(), params)
+    inferred = _inferred_rate_fn("bns_md_cosmological")
     jitted = jax.jit(inferred)
     moved = {**params, **MOVED_PARAMS}
 
@@ -643,18 +647,21 @@ def test_inferred_rate_is_jittable_without_retracing_per_call() -> None:
     "name", ["bns_md_uniform_mixture", "bns_md_gaussian_uniform_mixture"]
 )
 def test_a_mixture_redshift_law_carries_no_rate_to_infer(name: str) -> None:
-    """A guard mixture is a proposal density; its normalization is not a rate.
+    """``None``, not an exception: a proposal having no rate is the normal answer.
 
-    The component order is not a contract, so unwrapping the first component
-    would silently return whichever rate it happened to hold.
+    These are shipped, registered models whose purpose is to draw importance
+    proposals, and a proposal catalog's rate is never read. The component order
+    is not a contract either, so unwrapping the first component would silently
+    return whichever rate it happened to hold.
     """
     params = GAUSSIAN_PARAMS if "gaussian" in name else POPULATION_PARAMS
     model = build_source_model(name, settings=_settings(uniform_mixing_fraction=0.1))
-    with pytest.raises(TypeError, match=f"{REDSHIFT_SITE}.*MixtureGeneral"):
-        infer_merger_rate_fn(model, params)
+    assert infer_merger_rate_fn(model, params) is None
 
 
 def test_a_model_without_a_redshift_site_is_rejected() -> None:
+    """Malformed, not rate-free: every population must draw a redshift."""
+
     def no_redshift(params: Mapping[str, ArrayLike]) -> dict[str, jax.Array]:
         return {"source_frame_mass_1": jnp.asarray(numpyro.sample("m", dist.Uniform()))}
 
@@ -669,7 +676,7 @@ def test_an_inferred_rate_requires_the_physical_rate_parameter() -> None:
         for name, value in POPULATION_PARAMS.items()
         if name != "local_merger_rate"
     }
-    inferred = infer_merger_rate_fn(mock_population_model(), POPULATION_PARAMS)
+    inferred = _inferred_rate_fn("bns_md_cosmological")
     with pytest.raises(ValueError, match="local_merger_rate"):
         inferred(without_rate)
 
@@ -678,6 +685,7 @@ def test_inference_is_isolated_from_outer_handlers() -> None:
     """The probe executes a whole source model; none of it may reach a trace."""
     with handlers.trace() as outer, handlers.seed(rng_seed=0):
         inferred = infer_merger_rate_fn(mock_population_model(), POPULATION_PARAMS)
+        assert inferred is not None
         rate = inferred(POPULATION_PARAMS)
     assert outer == {}
     assert rate == _registered_rate_fn()(POPULATION_PARAMS)
