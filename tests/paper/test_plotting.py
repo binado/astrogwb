@@ -4,10 +4,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from repo import REPO_ROOT
 
 matplotlib = pytest.importorskip("matplotlib")
 
 from astrogwb.paper import plotting
+from astrogwb.paper.config import fiducials
 from astrogwb.paper.plotting import Network
 
 
@@ -16,9 +18,86 @@ def test_paper_mplstyle_sits_next_to_the_module() -> None:
     assert style_path.is_file()
 
 
-def test_use_paper_style_loads_stylesheet() -> None:
-    plotting.use_paper_style()
-    assert matplotlib.pyplot.rcParams["savefig.format"] == "pdf"
+def test_use_paper_style_loads_stylesheet_and_applies_savefig_settings() -> None:
+    """`root=` explicitly: the settings file is resolved against the cwd.
+
+    Passing it makes this test independent of where pytest was invoked from,
+    and turns the assertions into a check that `use_paper_style` actually
+    applies what the JSON says rather than that a literal survived in the
+    stylesheet.
+    """
+    plotting.use_paper_style(REPO_ROOT)
+
+    assert matplotlib.pyplot.rcParams["savefig.format"] == plotting.figure_format(
+        REPO_ROOT
+    )
+    assert matplotlib.pyplot.rcParams["savefig.dpi"] == plotting.figure_dpi(REPO_ROOT)
+    assert matplotlib.pyplot.rcParams["savefig.bbox"] == "tight"
+
+
+def test_the_stylesheet_declares_no_savefig_dpi_or_format() -> None:
+    """One source for these two, not a literal here and another in each script.
+
+    This is the only thing stopping them being re-added to the stylesheet,
+    where they would silently win or lose against `use_paper_style` depending
+    on call order.
+    """
+    text = (Path(plotting.__file__).parent / "paper.mplstyle").read_text()
+    directives = [
+        line.split(":", 1)[0].strip()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+    assert "savefig.dpi" not in directives
+    assert "savefig.format" not in directives
+    assert "savefig.bbox" in directives
+
+
+def test_committed_latex_labels_survive_the_move_out_of_python() -> None:
+    """The guard on JSON backslash escaping.
+
+    Every backslash in `config/plotting.json` is doubled. A *missed* doubling
+    is loud -- `\\,` and `\\m` are invalid JSON escapes, so the file will not
+    parse. Over-doubling is the quiet one: it parses, then emits a literal
+    `\\,` into the TeX stream, and with `text.usetex: True` that surfaces as a
+    LaTeX compile failure deep inside a figure job. These are the exact strings
+    the three figure scripts each carried as `r""` literals before the move.
+    """
+    assert (
+        plotting.parameter_label("H0", REPO_ROOT)
+        == r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
+    )
+    assert (
+        plotting.parameter_label("local_merger_rate", REPO_ROOT)
+        == r"$\mathcal{R}_0\,[\mathrm{Gpc^{-3}\,yr^{-1}}]$"
+    )
+    assert plotting.parameter_label("Omega_m", REPO_ROOT) == r"$\Omega_m$"
+    assert plotting.parameter_label("xi_0", REPO_ROOT) == r"$\Xi_0$"
+    assert plotting.parameter_label("xi_n", REPO_ROOT) == r"$n$"
+    assert (
+        plotting.parameter_label("importance_relative_ess", REPO_ROOT)
+        == r"$N_{\mathrm{eff}} / N_{\mathrm{inj}}$"
+    )
+
+
+def test_every_fiducial_parameter_has_a_label() -> None:
+    """Subset, not equality: the labels also cover a derived diagnostic.
+
+    `importance_relative_ess` is reported beside the parameters and needs a
+    label, but it is not a fiducial and must never acquire one.
+    """
+    labels = plotting.parameter_labels(REPO_ROOT)
+
+    assert set(fiducials(REPO_ROOT)) <= set(labels)
+    assert "importance_relative_ess" in labels
+    assert "importance_relative_ess" not in fiducials(REPO_ROOT)
+
+
+def test_an_unlabelled_name_falls_back_to_itself() -> None:
+    assert (
+        plotting.parameter_label("no_such_parameter", REPO_ROOT) == "no_such_parameter"
+    )
 
 
 def test_spectrum_style_is_black_with_dotted_sh() -> None:

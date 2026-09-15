@@ -1,9 +1,12 @@
 """Shared styling for the astrogwb paper application.
 
 Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
-style (solid), and a loader for ``paper.mplstyle``. This module is independent
-of the ``astrogwb`` package and of the config layer: it imports nothing from
-either.
+style (solid), a loader for ``paper.mplstyle``, and the LaTeX parameter labels
+and savefig settings that ``config/plotting.json`` carries. This module is
+independent of the ``astrogwb`` package and of the config layer: it imports
+nothing from either, at module scope or inside a function body -- it reads that
+one JSON file with stdlib ``json``, lazily, so the ``Snakefile`` can import
+``DETECTOR_NETWORK_RUNS`` while building the DAG without paying for any of it.
 
 Convention:
 - category accents are the default color for single-posterior figures;
@@ -16,13 +19,25 @@ Convention:
 
 ``DETECTOR_NETWORKS`` lives here for the same reason: it is the ordered legend
 of the three network-comparison figures, and order is presentation.
+
+The split with ``config/``: *order and structure* are Python, *values* are
+data. So the ordered network legend is ``DETECTOR_NETWORKS`` here, while the
+detector list behind each name is ``config/networks.json``; and the LaTeX label
+for a *parameter* is ``config/plotting.json``, reached through
+:func:`parameter_label`, while the label for a *network* stays in
+``DETECTOR_NETWORKS`` because nothing can read it without also needing the
+order it sits in.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
+from types import MappingProxyType
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -30,6 +45,63 @@ from matplotlib.colors import to_hex
 from numpy.typing import ArrayLike
 
 _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
+
+#: Relative to the working directory -- the repository root for the workflow
+#: and every script -- matching `astrogwb.paper.config.runs`. Read lazily, never
+#: at import: the `Snakefile` imports this module for `DETECTOR_NETWORK_RUNS`
+#: while building the DAG, and that import must stay free of file I/O.
+_SETTINGS_PATH = Path("config/plotting.json")
+
+
+@cache
+def _figure_settings(root: Path | None = None) -> Mapping[str, Any]:
+    """Parse ``config/plotting.json`` once.
+
+    Read with stdlib ``json`` rather than ``astrogwb.paper.utils.load_mapping``
+    so this module keeps importing nothing from the config layer, at module
+    scope or inside a function body. The file is JSON by decision, so
+    multi-format dispatch would only drag ``yaml`` into every figure process.
+
+    Proxied because ``@cache`` hands every caller the same object.
+    """
+    return MappingProxyType(
+        json.loads(((root or Path()) / _SETTINGS_PATH).read_text(encoding="utf-8"))
+    )
+
+
+def figure_dpi(root: Path | None = None) -> int:
+    """Raster resolution for saved figures. Applied by :func:`use_paper_style`."""
+    return int(_figure_settings(root)["figure_dpi"])
+
+
+def figure_format(root: Path | None = None) -> str:
+    """Default savefig container format. Applied by :func:`use_paper_style`.
+
+    Near-inert in practice: ``savefig.format`` only decides anything when
+    ``savefig`` is handed a path with no extension, and every figure script
+    receives an explicit ``.pdf`` path from a ``Snakefile`` ``output:``
+    declaration. It records intent; changing it does not re-target the
+    workflow.
+    """
+    return str(_figure_settings(root)["figure_format"])
+
+
+def parameter_labels(root: Path | None = None) -> dict[str, str]:
+    """LaTeX display labels by parameter name, from ``config/plotting.json``.
+
+    Covers every fiducial plus ``importance_relative_ess``, which is a derived
+    diagnostic rather than a parameter -- so this is a superset of
+    :func:`astrogwb.paper.config.fiducials`, not a match.
+
+    Parameter labels are data; *network* labels are not. ``DETECTOR_NETWORKS``
+    stays in Python because its order is load-bearing presentation.
+    """
+    return dict(_figure_settings(root)["labels"])
+
+
+def parameter_label(name: str, root: Path | None = None) -> str:
+    """The LaTeX label for ``name``, or ``name`` itself if none is declared."""
+    return parameter_labels(root).get(name, name)
 
 
 @dataclass(frozen=True)
@@ -104,9 +176,17 @@ DETECTOR_NETWORKS: tuple[tuple[str, str], ...] = (
 DETECTOR_NETWORK_RUNS: tuple[str, ...] = tuple(name for name, _ in DETECTOR_NETWORKS)
 
 
-def use_paper_style() -> None:
-    """Apply ``paper.mplstyle`` to the current matplotlib session."""
+def use_paper_style(root: Path | None = None) -> None:
+    """Apply ``paper.mplstyle`` to the current matplotlib session.
+
+    ``savefig.dpi`` and ``savefig.format`` are applied here from
+    ``config/plotting.json`` rather than declared in the stylesheet, so there
+    is one source for them instead of a literal in the style file and another
+    in each figure script's ``--figure-dpi`` default.
+    """
     plt.style.use(str(_STYLE_PATH))
+    plt.rcParams["savefig.dpi"] = figure_dpi(root)
+    plt.rcParams["savefig.format"] = figure_format(root)
 
 
 def get_corner_kwargs(**overrides: object) -> dict[str, object]:

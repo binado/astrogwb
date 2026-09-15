@@ -1,0 +1,14 @@
+{
+  "priors": {
+    "H0": {"dist": "Uniform", "kwargs": {"low": 20.0, "high": 140.0}},
+    "Omega_m": {"dist": "Normal", "kwargs": {"loc": 0.3096, "scale": 0.006}},
+    "xi_0": {"dist": "Uniform", "kwargs": {"low": 0.5, "high": 5.0}},
+    "xi_n": {"dist": "Uniform", "kwargs": {"low": 0.3, "high": 3.0}},
+    "gamma": {"dist": "Uniform", "kwargs": {"low": -10.0, "high": 10.0}},
+    "kappa": {"dist": "Uniform", "kwargs": {"low": -10.0, "high": 10.0}},
+    "z_peak": {"dist": "Uniform", "kwargs": {"low": 0.0, "high": 2.5}},
+    "local_merger_rate": {"dist": "Normal", "kwargs": {"loc": 770.0, "scale": 7.7}},
+    "minimum_mass": {"dist": "Uniform", "kwargs": {"low": 0.5, "high": 1.5}},
+    "mass_width": {"dist": "Uniform", "kwargs": {"low": 0.5, "high": 3.0}}
+  }
+}

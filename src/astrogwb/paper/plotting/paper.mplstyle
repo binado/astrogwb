@@ -26,9 +26,11 @@ ytick.right: True
 axes.spines.top: True
 axes.spines.right: True
 
-savefig.dpi: 300
+# savefig.dpi and savefig.format are deliberately absent: they live in
+# config/plotting.json and are applied by use_paper_style(), so the figure
+# scripts and this file cannot disagree about them. bbox stays here -- it is
+# presentation with no second copy anywhere.
 savefig.bbox: tight
-savefig.format: pdf
 
 # Colorblind-safe fallback cycle (Okabe-Ito). Comparison figures pass explicit
 # colors from the palettes in astrogwb.paper.plotting; this cycle is only the

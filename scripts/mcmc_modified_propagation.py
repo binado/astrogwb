@@ -40,6 +40,7 @@ from astrogwb.paper.plotting import (
     Network,
     combo_colors,
     get_corner_kwargs,
+    parameter_label,
     use_paper_style,
 )
 from astrogwb.paper.snr import compute_network_snrs
@@ -49,17 +50,8 @@ from astrogwb.paper.snr import compute_network_snrs
 register_projection(MplAxes)
 jax.config.update("jax_enable_x64", True)
 
-XI_0_LABEL = r"$\Xi_0$"
-XI_N_LABEL = r"$n$"
-H0_LABEL = r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
-IMPORTANCE_RELATIVE_ESS_LABEL = r"$N_{\mathrm{eff}} / N_{\mathrm{inj}}$"
-
-VAR_LABELS = {
-    "xi_0": XI_0_LABEL,
-    "xi_n": XI_N_LABEL,
-    "H0": H0_LABEL,
-    "importance_relative_ess": IMPORTANCE_RELATIVE_ESS_LABEL,
-}
+# Parameter labels come from config/plotting.json via `parameter_label`. The
+# labels below name parameter *combinations*, not parameters, so they stay here.
 
 # Variable groups for each corner plot.
 XI_N_VAR_NAMES = ("xi_0", "xi_n")
@@ -170,7 +162,7 @@ def plot_marginal_posteriors(
         ax.axvline(fiducial, **TRUTH)
 
     resolved_ax_kwargs = {
-        "xlabel": VAR_LABELS.get(var_name, var_name),
+        "xlabel": parameter_label(var_name),
         "ylabel": "Posterior density",
         **dict(ax_kwargs or {}),
     }
@@ -264,7 +256,7 @@ def plot_corner(
         len(inference_data), colors, linestyles
     )
     labeller = MapLabeller(
-        var_name_map={name: VAR_LABELS.get(name, name) for name in var_names}
+        var_name_map={name: parameter_label(name) for name in var_names}
     )
     truths = None
     if fiducials is not None:
@@ -466,7 +458,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-h0-corner-pdf", type=Path, required=True)
     parser.add_argument("--output-xi0-n-csv", type=Path, required=True)
     parser.add_argument("--output-xi0-n-tex", type=Path, required=True)
-    parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument("--group", default="posterior")
     # Not a fiducial: N_eff/N_inj is a plotting truth line at its definitional
     # maximum. Adding it to [fiducials] would inject a spurious constant into
@@ -576,7 +567,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     }
     for output_path, figure in outputs.items():
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
+        figure.savefig(output_path)
         print("saved figure:", output_path)
 
     csv_path = args.output_xi0_n_csv

@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from config_fixtures import write_root_layers
 from repo import REPO_ROOT
 
 from astrogwb.paper.config.catalogs import (
@@ -88,16 +89,42 @@ def test_chain_output_root_is_fixed() -> None:
     assert CHAINS_ROOT == Path("outputs/chains")
 
 
-def test_run_config_paths_are_the_three_layers_in_merge_order() -> None:
+def test_run_config_paths_are_the_layers_in_merge_order() -> None:
+    """Layer 0 first, then base/*.toml, then the experiment, then the run.
+
+    The JSON names are asserted literally rather than against
+    `root_config_paths()`: nothing else pins that the shared scientific values
+    are merged *before* the TOML base, and a self-consistent comparison against
+    the helper would pass whatever order the helper happened to return.
+    """
     paths = run_config_paths("cosmological-parameters", "ET-triangular")
     base = base_config_paths()
 
+    assert [path.name for path in paths[:3]] == [
+        "fiducials.json",
+        "priors.json",
+        "networks.json",
+    ]
     assert paths[: len(base)] == base
     assert [path.name for path in paths[len(base) :]] == [
         EXPERIMENT_BASE,
         "ET-triangular.toml",
     ]
     assert all(path.is_file() for path in paths)
+
+
+def test_plotting_settings_are_not_a_run_layer() -> None:
+    """`config/plotting.json` is presentation and must not reach a RunConfig.
+
+    It sits in the same directory as the three shared layers, so a glob would
+    sweep it in and `extra="forbid"` would then reject every run.
+    """
+    names = {
+        path.name
+        for path in run_config_paths("cosmological-parameters", "ET-triangular")
+    }
+
+    assert "plotting.json" not in names
 
 
 def test_assemble_run_is_merge_config_layers_over_run_config_paths() -> None:
@@ -138,8 +165,54 @@ def test_an_experiment_without_a_base_overlay_is_rejected(tmp_path: Path) -> Non
 def test_base_files_merge_into_one_mapping() -> None:
     base = load_base()
 
-    # A detector list is never a base default: a run must state its network.
+    # Neither a network nor a detector list is ever a base default: a run must
+    # state its own, or inherit someone else's silently.
+    assert "network" not in base["analysis"]
     assert "detectors" not in base["analysis"]
+    # Layer 0 is part of "everything shared", so it is in this merge too.
+    assert {"fiducials", "priors", "networks"} <= set(base)
+
+
+def test_layer_zero_owns_the_fiducials_and_priors_alone() -> None:
+    """The shared values have one home, not two.
+
+    `config/analysis/base/parameters.toml` used to declare both. It is gone,
+    and no base TOML may quietly reintroduce either table -- a second
+    declaration would win the merge and the JSON the notebooks read would
+    silently stop describing what the runs sample.
+    """
+    assert not (REPO_ROOT / "config/analysis/base/parameters.toml").exists()
+    for path in (REPO_ROOT / "config/analysis/base").glob("*.toml"):
+        raw = load_mapping(path)
+        assert "fiducials" not in raw, path
+        assert "priors" not in raw, path
+
+
+def test_no_run_declares_a_raw_detector_list() -> None:
+    """Read unmerged, so a reintroduced list is caught where it is written.
+
+    A merged-config test cannot see this: `_resolve_network` would either
+    resolve the name or cross-check the list, and both pass when the list
+    happens to agree.
+    """
+    for path in sorted((REPO_ROOT / "config/analysis").rglob("*.toml")):
+        analysis = load_mapping(path).get("analysis") or {}
+        assert "detectors" not in analysis, path
+
+
+@pytest.mark.parametrize(("experiment", "run"), all_runs())
+def test_every_run_names_a_declared_network(experiment: str, run: str) -> None:
+    """`AnalysisConfig.network` is optional at the model level; here it is not.
+
+    The model must allow its absence so a saved config -- which carries the
+    resolved detectors and no [networks] table -- re-validates. That every
+    *committed* run names one is this repo's rule, so it is this repo's test.
+    """
+    merged = assemble_run(experiment, run, root=REPO_ROOT)
+    name = (merged.get("analysis") or {}).get("network")
+
+    assert name, f"{experiment}/{run} names no network"
+    assert name in merged["networks"], f"{experiment}/{run} names unknown {name!r}"
 
 
 # --------------------------------------------------------------------------- #
@@ -191,6 +264,7 @@ def test_resolve_catalog_names_rejects_malformed_catalogs(
     experiment = tmp_path / "config/analysis/runs/demo"
     base.mkdir(parents=True)
     experiment.mkdir(parents=True)
+    write_root_layers(tmp_path)
     (base / "catalog.toml").write_text(base_config, encoding="utf-8")
     (experiment / EXPERIMENT_BASE).write_text("", encoding="utf-8")
     (experiment / "only.toml").write_text("", encoding="utf-8")

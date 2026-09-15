@@ -31,9 +31,10 @@ from matplotlib.projections import register_projection
 
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.paper.catalogs import load_run_catalog
+from astrogwb.paper.config import priors
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
-from astrogwb.paper.plotting import TRUTH, use_paper_style
+from astrogwb.paper.plotting import TRUTH, parameter_label, use_paper_style
 from astrogwb.populations import build_merger_rate_fn, build_source_model
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
@@ -48,24 +49,43 @@ Z_MIN = 0.3
 Z_MAX = 20.0
 N_REDSHIFT_GRID = 256
 
-H0_LABEL = r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
-OMEGA_M_LABEL = r"$\Omega_m$"
-XI_0_LABEL = r"$\Xi_0$"
-XI_N_LABEL = r"$n$"
-RELATIVE_ESS_LABEL = r"$N_{\mathrm{eff}} / N_{\mathrm{inj}}$"
-PARAM_LABELS = {
-    "H0": H0_LABEL,
-    "Omega_m": OMEGA_M_LABEL,
-    "xi_0": XI_0_LABEL,
-    "xi_n": XI_N_LABEL,
+
+#: The parameter pair each panel scans, in figure order.
+GRID_PAIRS: tuple[tuple[str, str], ...] = (
+    ("H0", "Omega_m"),
+    ("xi_0", "xi_n"),
+)
+
+#: Scan ranges that deliberately differ from the committed inference prior.
+#:
+#: This figure asks "over what range of parameters does importance sampling
+#: against the proposal still work", which is a wider question than "what does
+#: the analysis assume". `Omega_m` is the one parameter where the two part
+#: company: `config/priors.json` gives it Normal(0.3096, 0.006), a Planck-tight
+#: constraint whose eps / 1-eps quantiles span about 0.004, so scanning it
+#: would show a flat patch rather than where the proposal degrades. Every other
+#: parameter scans its own prior, which is why this table has one entry and not
+#: four -- it is an exception list, not a second prior declaration.
+GRID_SCAN_RANGES: dict[str, dist.Distribution] = {
+    "Omega_m": dist.Uniform(0.05, 0.95),
 }
 
-GRID_PRIORS: tuple[
+
+def grid_priors() -> tuple[
     tuple[tuple[str, dist.Distribution], tuple[str, dist.Distribution]], ...
-] = (
-    (("H0", dist.Uniform(20.0, 140.0)), ("Omega_m", dist.Uniform(0.05, 0.95))),
-    (("xi_0", dist.Uniform(0.5, 5.0)), ("xi_n", dist.Uniform(0.3, 3.0))),
-)
+]:
+    """The distribution scanned on each axis, per panel.
+
+    Sourced from `config/priors.json` so the axes match what the runs actually
+    sample, except where `GRID_SCAN_RANGES` says otherwise.
+    """
+    inference = priors()
+    return tuple(
+        tuple(  # type: ignore[misc]
+            (name, GRID_SCAN_RANGES.get(name, inference[name])) for name in pair
+        )
+        for pair in GRID_PAIRS
+    )
 
 
 def prior_grid(prior: dist.Distribution, *, eps: float, npoints: int) -> jax.Array:
@@ -141,10 +161,10 @@ def plot_relative_ess_heatmap(
     ax.axvline(fiducials[name0], **TRUTH)
     ax.axhline(fiducials[name1], **TRUTH)
     ax.plot(fiducials[name0], fiducials[name1], marker="s", **TRUTH)
-    ax.set_xlabel(PARAM_LABELS.get(name0, name0))
-    ax.set_ylabel(PARAM_LABELS.get(name1, name1))
+    ax.set_xlabel(parameter_label(name0))
+    ax.set_ylabel(parameter_label(name1))
     cbar = fig.colorbar(image, ax=ax, pad=0.02)
-    cbar.set_label(RELATIVE_ESS_LABEL)
+    cbar.set_label(parameter_label("importance_relative_ess"))
     return fig
 
 
@@ -160,7 +180,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--output-h0-omega-m-pdf", type=Path, required=True)
     parser.add_argument("--output-xi0-n-pdf", type=Path, required=True)
-    parser.add_argument("--figure-dpi", type=int, default=300)
     add_config_arguments(parser)
     return parser.parse_args(argv)
 
@@ -191,7 +210,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )[1]
 
     figures: list[tuple[Figure, Path]] = []
-    for combo in GRID_PRIORS:
+    for combo in grid_priors():
         (name0, prior0), (name1, prior1) = combo
         grid0 = prior_grid(prior0, eps=EPS, npoints=NPOINTS)
         grid1 = prior_grid(prior1, eps=EPS, npoints=NPOINTS)
@@ -225,7 +244,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     for figure, output in figures:
         output_path = output
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
+        figure.savefig(output_path)
         print("saved figure:", output_path)
 
 

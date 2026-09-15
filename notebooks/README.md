@@ -30,10 +30,27 @@ repository root as the working directory.
   plots
 - **`logposterior_grid.py`** — evaluate the log-posterior on a parameter grid
 
-The three paper notebooks merge a run's config layers with
+The paper notebooks merge a run's config layers with
 `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
 merge the workflow performs by passing layer paths on argv. Neither reads an
 intermediate artifact, so these run against a fresh clone.
+
+For the shared scientific values on their own, without standing in for a
+particular run, read them from the package rather than retyping them:
+
+```python
+from astrogwb.paper.config import fiducials, networks, priors
+
+fid = fiducials()
+detectors = networks()["ET-2L-aligned-CE-Hanford"]
+```
+
+These are `config/fiducials.json`, `config/priors.json` and
+`config/networks.json` — the same files the workflow merges into every run, so
+a notebook cannot drift from what the runs sample. `priors()` returns live
+NumPyro distributions. Each call is cached, so a long-lived kernel will not see
+an edit to the JSON until you call `fiducials.cache_clear()` (and likewise for
+the other two).
 
 ## Running them
 

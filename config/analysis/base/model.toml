@@ -1,6 +1,7 @@
 # The frequency band and redshift grid every run's inputs are built on.
-# [analysis.detectors] is deliberately absent: a run without a detector
-# list must fail, never silently inherit someone else's network.
+# [analysis.network] is deliberately absent: a run without a network name
+# must fail, never silently inherit someone else's. The names it may take are
+# declared in config/networks.json, which resolves each one to its detectors.
 
 observation_time = 1.0
 

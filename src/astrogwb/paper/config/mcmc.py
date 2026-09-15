@@ -2,9 +2,9 @@
 
 Importing this module requires only stdlib and pydantic: ``numpyro`` is
 imported lazily inside :func:`materialize_prior` / :func:`prior_to_spec`, so
-parsing and validating a config stays cheap and -- because the constructed
+importing this module stays cheap and -- because the constructed
 distributions hold plain Python floats and no JAX op is ever evaluated --
-does not initialize the XLA backend. That last property is what
+validating a config does not initialize the XLA backend. That last property is what
 :func:`astrogwb.paper.runtime.configure_runtime` relies on to set host device
 count / platform after config validation; it is guarded by a subprocess test
 in ``tests/test_prior_native_types.py`` (re-running ``set_host_device_count``
@@ -63,90 +63,108 @@ class AnalysisGrid:
 AmplitudeParameter = Literal["H0", "local_merger_rate"]
 
 
-# Wire protocol for the priors tables: tag name -> ordered parameter keys.
-# Hand-rolled inside materialize_prior (no pydantic spec models): pydantic
+# Wire protocol for the priors tables:
+#
+#     {"dist": "<numpyro.distributions class name>", "kwargs": {...}}
+#
+# The class is looked up on `numpyro.distributions` by name, so adding a
+# distribution is zero-code -- it needs no registry entry here and no branch in
+# `prior_to_spec`, which recovers the same keys from the class's own
+# `arg_constraints`. Hand-rolled rather than a pydantic spec model: pydantic
 # could never construct distributions from raw config dicts natively anyway
-# (they are not models), so the mapping validation lives here, next to the
-# construction it guards. Unsupported tags fail before numpyro is imported.
-_PRIOR_PARAMS: dict[str, tuple[str, ...]] = {
-    "uniform": ("low", "high"),
-    "normal": ("loc", "scale"),
-}
+# (they are not models), so the validation lives next to the construction it
+# guards.
+#
+# There is deliberately no positional `args` form. `prior_to_spec` can only
+# ever emit kwargs, so a second spelling would make `RunConfig.save()` ->
+# reload non-canonical.
+_PRIOR_SPEC_KEYS = frozenset({"dist", "kwargs"})
 
 
 def materialize_prior(value: Any) -> Distribution:
     """Materialize a prior spec into a live ``numpyro`` distribution.
 
-    Accepts a raw mapping (``{"type": "uniform", "low": ..., ...}``) or an
-    already-built distribution (passed through unchanged, so re-validation is
-    idempotent). Spec validation happens *before* numpyro is imported, so an
-    unsupported ``type`` fails fast and cheap; construction itself only wraps
-    Python floats and never evaluates a JAX op.
+    Accepts a raw mapping (``{"dist": "Uniform", "kwargs": {"low": ...}}``) or
+    an already-built distribution (passed through unchanged, so re-validation
+    is idempotent).
+
+    Construction only wraps Python floats and never evaluates a JAX op, which
+    is what lets :func:`astrogwb.paper.runtime.configure_runtime` still set the
+    host device count after a config has been validated. Unlike the previous
+    two-tag protocol, an unknown name is caught *after* numpyro is imported
+    rather than before -- importing numpyro is not backend initialization, and
+    nothing on the DAG-construction path calls this.
     """
-    if isinstance(value, Mapping):
-        kind = value.get("type")
-        if kind not in _PRIOR_PARAMS:
-            raise ValueError(
-                f"prior type {kind!r} does not match any of the expected tags: "
-                f"{sorted(_PRIOR_PARAMS)}"
-            )
-        params = _PRIOR_PARAMS[kind]
-        missing = [p for p in params if p not in value]
-        if missing:
-            raise ValueError(f"missing required key(s) {missing} for a {kind} prior")
-        extra = sorted({str(k) for k in value} - {"type", *params})
-        if extra:
-            raise ValueError(
-                f"Extra inputs are not permitted for a {kind} prior: {extra}"
-            )
-
-        import numpyro.distributions as dist
-
-        cls = dist.Uniform if kind == "uniform" else dist.Normal
-        return cls(**{name: float(value[name]) for name in params})
-
+    # Every malformed-spec branch below raises ValueError even where the fault
+    # is a wrong *type*, which is what TRY004 objects to. It is deliberate:
+    # this function runs as a pydantic BeforeValidator, and pydantic converts
+    # only ValueError and AssertionError into a ValidationError. A TypeError
+    # would escape as itself, past every `pytest.raises(ValidationError)` and
+    # past the `except (ValueError, TypeError)` in scripts/validate_configs.py
+    # that reports which run is broken.
     import numpyro.distributions as dist
 
     if isinstance(value, dist.Distribution):
         return value  # already materialized
-    raise ValueError(
-        f"cannot materialize a prior from {type(value).__name__!r}; expected a "
-        "spec mapping or a numpyro Distribution"
-    )
+    if not isinstance(value, Mapping):
+        raise ValueError(  # noqa: TRY004
+            f"cannot materialize a prior from {type(value).__name__!r}; expected a "
+            "spec mapping or a numpyro Distribution"
+        )
+
+    extra = sorted({str(key) for key in value} - _PRIOR_SPEC_KEYS)
+    if extra:
+        raise ValueError(f"Extra inputs are not permitted for a prior spec: {extra}")
+    name = value.get("dist")
+    if not isinstance(name, str):
+        raise ValueError("a prior spec must name a distribution in 'dist'")  # noqa: TRY004
+    kwargs = value.get("kwargs")
+    if not isinstance(kwargs, Mapping):
+        raise ValueError(f"prior {name!r} must carry a 'kwargs' table")  # noqa: TRY004
+
+    cls = getattr(dist, name, None)
+    # `getattr` on a config-supplied string: the guard is what keeps it to
+    # distribution classes rather than any attribute the module happens to
+    # expose.
+    if not (isinstance(cls, type) and issubclass(cls, dist.Distribution)):
+        raise ValueError(f"{name!r} is not a numpyro distribution")  # noqa: TRY004
+
+    expected = set(cls.arg_constraints)
+    missing = sorted(expected - set(kwargs))
+    if missing:
+        raise ValueError(f"missing required key(s) {missing} for a {name} prior")
+    unexpected = sorted(set(kwargs) - expected)
+    if unexpected:
+        raise ValueError(
+            f"Extra inputs are not permitted for a {name} prior: {unexpected}"
+        )
+    return cls(**{key: float(val) for key, val in kwargs.items()})
 
 
-def prior_to_spec(prior: Distribution) -> dict[str, str | float]:
+def prior_to_spec(prior: Distribution) -> dict[str, Any]:
     """Serialize a materialized prior back to its wire-format spec.
 
-    Inverse of :func:`materialize_prior` for the spec-constructed
-    distributions this module produces: their parameters are plain Python
-    floats, so ``float(...)`` never touches JAX.
+    Inverse of :func:`materialize_prior`. The constructor keyword names are
+    recovered from the class's own ``arg_constraints``, so this stays correct
+    for any distribution without a branch per type. The spec-constructed
+    distributions this module produces hold plain Python floats, so
+    ``float(...)`` never touches JAX.
     """
     import numpyro.distributions as dist
 
-    match prior:
-        case dist.Uniform():
-            return {
-                "type": "uniform",
-                "low": float(prior.low),
-                "high": float(prior.high),
-            }
-        case dist.Normal():
-            return {
-                "type": "normal",
-                "loc": float(prior.loc),
-                "scale": float(prior.scale),
-            }
-        case _:
-            raise TypeError(
-                f"cannot serialize {type(prior).__name__!r} as a prior spec"
-            )
+    if not isinstance(prior, dist.Distribution):
+        raise TypeError(f"cannot serialize {type(prior).__name__!r} as a prior spec")
+    cls = type(prior)
+    return {
+        "dist": cls.__name__,
+        "kwargs": {key: float(getattr(prior, key)) for key in cls.arg_constraints},
+    }
 
 
 if TYPE_CHECKING:
-    from numpyro.distributions import Distribution, Normal, Uniform
+    from numpyro.distributions import Distribution
 
-    _PriorDists = Uniform | Normal
+    _PriorDists = Distribution
 else:
     _PriorDists = Any
 
@@ -165,7 +183,17 @@ PriorDistribution = Annotated[
 class AnalysisConfig(BaseModel):
     model_config = _STRICT
 
+    #: Resolved by `RunConfig._resolve_network` from the [networks] table that
+    #: `config/networks.json` contributes to every run's merge. Required, and
+    #: recorded by `RunConfig.save`: the chain's own config must say which
+    #: detectors it was sampled with, not just which name they were reached by.
     detectors: tuple[str, ...]
+    #: The name that resolved to `detectors`, kept alongside it so a saved
+    #: config records the intent as well as the result. Optional at the model
+    #: level so a saved config -- which carries `detectors` and no [networks]
+    #: table -- re-validates. That every *committed* run names one is a repo
+    #: test, not a model constraint.
+    network: str | None = None
     f_min: float
     f_max: float
     # The registered source and merger-rate models the sampled hyperparameters
@@ -263,6 +291,65 @@ class RunConfig(BaseModel):
     catalog: CatalogConfig
     sampler: SamplerConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_network(cls, data: Any) -> Any:
+        """Turn ``analysis.network`` into ``analysis.detectors``, dropping the table.
+
+        ``config/networks.json`` is a merge layer, so the lookup table arrives
+        in the same mapping as the run that names one -- resolution is a pure
+        function of the merged config and needs no file I/O, which is what
+        keeps this module stdlib+pydantic.
+
+        The table is *input to validation*, never a field: as a field it would
+        either land in every ``save()`` next to every chain, or need
+        ``exclude=True`` and break the save/reload round-trip. A validator
+        rather than a step in :func:`build_run_config` because
+        ``RunConfig.model_validate`` is public and callable directly, and
+        because the resulting ``ValidationError`` is what
+        ``scripts/validate_configs.py`` and the test suite already catch.
+
+        A config that already carries ``detectors`` is the ``save()`` output
+        being re-validated: ``save`` records the resolved list *and* the name it
+        came from, so both are present, and no ``[networks]`` table is. That
+        round-trip is why the two are cross-checked rather than rejected
+        outright -- when a table *is* present, as it always is in the config
+        tree, a hand-written list that disagrees with the named network is the
+        real error worth catching.
+        """
+        if not isinstance(data, Mapping):
+            return data
+        raw = dict(data)
+        table = raw.pop("networks", None)
+        analysis = raw.get("analysis")
+        if not isinstance(analysis, Mapping):
+            return raw  # let field validation report the real problem
+        analysis = dict(analysis)
+        name = analysis.get("network")
+        if name is None:
+            return raw
+        declared = analysis.get("detectors")
+
+        if not isinstance(table, Mapping) or name not in table:
+            if declared is not None:
+                return raw  # a saved config, re-validating without the table
+            known = sorted(table) if isinstance(table, Mapping) else []
+            raise ValueError(
+                f"analysis.network {name!r} is not declared in [networks]; "
+                f"known networks: {known}"
+            )
+
+        resolved = tuple(table[name])
+        if declared is not None and tuple(declared) != resolved:
+            raise ValueError(
+                f"analysis declares detectors {tuple(declared)} but names "
+                f"network {name!r}, which is {resolved}; drop the list and keep "
+                "the name"
+            )
+        analysis["detectors"] = resolved
+        raw["analysis"] = analysis
+        return raw
 
     @model_validator(mode="after")
     def _resolve_sampled_params(self) -> RunConfig:

@@ -13,7 +13,7 @@ Source inputs live under `config/`; generated artifacts live under `outputs/`.
 The Snakefile computes its own inputs by globbing that tree --
 `discover_catalog_names()` over `config/catalogs/defs/*.toml` and `discover_runs()` over
 `config/analysis/runs/*/` -- and imports exactly one config function,
-`assemble_run`, because a run's catalog names are known only after the three-layer
+`assemble_run`, because a run's catalog names are known only after the four-layer
 merge. No registry file translates a name into a path.
 
 ## Catalog workflow
@@ -54,7 +54,7 @@ itself.
 ## Experiment workflow
 
 [`config/analysis/`](../config/analysis/) holds the shared base, one `_base.toml`
-per experiment, and one TOML per run. `run_mcmc` declares those three layers as
+per experiment, and one TOML per run. `run_mcmc` declares those four layers as
 its own `input:` and passes them straight back to the runner as repeated
 `--config` flags, then writes:
 

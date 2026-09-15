@@ -22,11 +22,17 @@ config/catalogs/defs/<name>.toml  ->  outputs/catalogs/<name>.h5
 No registry translates between them. Adding a catalog means adding a TOML file;
 the `waveform_catalog` rule and the `catalogs` target pick it up by globbing.
 
-A catalog config is three layers merged in order, the same shape as a run
-config:
+A catalog config is three layers merged in order -- shared base files, then
+one file per named thing, the same shape a run config has:
 
 1. `config/catalogs/base/population.toml` — the population every catalog is
-   drawn from, and the hyperparameters it is drawn at.
+   drawn from, and the hyperparameters it is drawn at. Those hyperparameters
+   are deliberately *not* read from `config/fiducials.json`: a catalog records
+   the values it was actually drawn at, copied verbatim into the `.h5` so the
+   file is self-describing, and the two sets are not even the same (the
+   injection is drawn at GR, so it carries no `xi_0` / `xi_n`). Wiring them
+   together would also make every fiducial edit invalidate all eight
+   catalogs — GPU jobs — to redraw data that was already correct.
 2. `config/catalogs/base/waveform.toml` — the `[waveform]` block every catalog
    shares.
 3. `config/catalogs/defs/<name>.toml` — the seed, the sample count, and any

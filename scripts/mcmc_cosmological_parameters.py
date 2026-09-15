@@ -44,6 +44,7 @@ from astrogwb.paper.plotting import (
     combo_colors,
     detector_network_styles,
     get_corner_kwargs,
+    parameter_label,
     use_paper_style,
 )
 from astrogwb.paper.snr import compute_network_snrs
@@ -53,16 +54,10 @@ from astrogwb.paper.snr import compute_network_snrs
 register_projection(MplAxes)
 jax.config.update("jax_enable_x64", True)
 
-H0_LABEL = r"$H_0\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$"
-LOCAL_MERGER_RATE_LABEL = r"$\mathcal{R}_0\,[\mathrm{Gpc^{-3}\,yr^{-1}}]$"
-OMEGA_M_LABEL = r"$\Omega_m$"
-IMPORTANCE_RELATIVE_ESS_LABEL = r"$N_{\mathrm{eff}} / N_{\mathrm{inj}}$"
-VAR_LABELS = {
-    "H0": H0_LABEL,
-    "local_merger_rate": LOCAL_MERGER_RATE_LABEL,
-    "Omega_m": OMEGA_M_LABEL,
-    "importance_relative_ess": IMPORTANCE_RELATIVE_ESS_LABEL,
-}
+# Parameter labels come from config/plotting.json via `parameter_label`, so the
+# three figure scripts cannot disagree about how a parameter is written. Labels
+# that name a *combination* of parameters rather than a parameter stay local --
+# see MERGER_RATE_LABELS below.
 MERGER_RATE_VAR_NAMES = ("H0", "local_merger_rate")
 OMEGA_M_VAR_NAMES = ("H0", "Omega_m")
 OMEGA_M_ESS_VAR_NAMES = ("H0", "Omega_m", "importance_relative_ess")
@@ -209,7 +204,7 @@ def plot_h0_posteriors(
         ax.axvline(fiducial, **TRUTH)
 
     resolved_ax_kwargs = {
-        "xlabel": H0_LABEL,
+        "xlabel": parameter_label("H0"),
         "ylabel": "Posterior density",
         **dict(ax_kwargs or {}),
     }
@@ -315,7 +310,7 @@ def plot_corner(
         len(inference_data), colors, linestyles
     )
     labeller = MapLabeller(
-        var_name_map={name: VAR_LABELS.get(name, name) for name in var_names}
+        var_name_map={name: parameter_label(name) for name in var_names}
     )
     truths = None
     if fiducials is not None:
@@ -469,8 +464,8 @@ def h0_r0_uncertainty_table_latex(table: pd.DataFrame) -> str:
     latex_table = table.rename(
         columns={
             "analysis": "Analysis",
-            "H0": H0_LABEL,
-            "local_merger_rate": LOCAL_MERGER_RATE_LABEL,
+            "H0": parameter_label("H0"),
+            "local_merger_rate": parameter_label("local_merger_rate"),
         }
     )
     return latex_table.to_latex(
@@ -580,7 +575,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-merger-rate-tex", type=Path, required=True)
     parser.add_argument("--output-omega-m-corner-pdf", type=Path, required=True)
     parser.add_argument("--output-omega-m-ess-corner-pdf", type=Path, required=True)
-    parser.add_argument("--figure-dpi", type=int, default=300)
     parser.add_argument("--group", default="posterior")
     # Not a fiducial: N_eff/N_inj is a plotting truth line at its definitional
     # maximum. Adding it to [fiducials] would inject a spurious constant into
@@ -732,7 +726,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         for output_path, figure in outputs.items():
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            figure.savefig(output_path, dpi=args.figure_dpi, bbox_inches="tight")
+            figure.savefig(output_path)
             print("saved figure:", output_path)
     finally:
         for tree in opened_data:

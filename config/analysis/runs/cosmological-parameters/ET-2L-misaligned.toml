@@ -1,4 +1,4 @@
 sampled_params = ["H0"]
 
 [analysis]
-detectors = ["S2", "R2"]
+network = "ET-2L-misaligned"
