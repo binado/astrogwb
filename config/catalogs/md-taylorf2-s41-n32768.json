@@ -1,5 +1,4 @@
 {
-  "description": "The waveform-systematics proposal: the same seed-41 population as the injection, generated with a different approximant, so the comparison isolates the waveform.",
   "num_samples": 32768,
   "seed": 41,
   "waveform": {

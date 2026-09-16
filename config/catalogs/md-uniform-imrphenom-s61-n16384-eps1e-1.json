@@ -1,11 +1,10 @@
 {
-  "description": "Guarded proposal at eps = 1e-1: the Madau-Dickinson redshift law with a uniform-in-redshift component mixed in, so the importance weights do not degenerate when NUTS moves the posterior away from the proposal.",
   "num_samples": 16384,
   "seed": 61,
   "population": {
     "model_name": "bns_md_uniform_mixture",
     "model_kwargs": {
-      "uniform_mixing_fraction": 1e-1
+      "uniform_mixing_fraction": 0.1
     }
   }
 }

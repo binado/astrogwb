@@ -1,5 +1,4 @@
 {
-  "description": "Half-size proposal for variable-catalog-size/n8192; an exact prefix of md-imrphenom-s42-n32768.",
   "num_samples": 8192,
   "seed": 42
 }

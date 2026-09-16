@@ -169,14 +169,15 @@ class CatalogDefinition(BaseModel):
     while these describe the samples. A def that wants an injection away from
     the fiducials overrides the ``[fiducials]`` block like any other layer.
 
-    ``description`` is the def's own prose, carried as data because JSON has no
-    comments.
+    A def carries no prose. JSON has no comments, and a ``description`` field
+    would be a second place for one to rot: what each committed catalog is for
+    is documented once, in ``config/catalogs/README.md``, next to the files it
+    describes. ``extra="forbid"`` is what keeps it there.
     """
 
     model_config = _STRICT
 
     name: str
-    description: str = ""
     seed: int
     num_samples: Annotated[int, Field(gt=0)]
     population: PopulationMetadata

@@ -58,8 +58,11 @@ must not enter a catalog merge:
    model indexes `params` by name and the GR population never reads them —
    `xi_0 = 1.0` is the value the injection is drawn at, so recording it is
    accurate rather than misleading.
-4. `config/catalogs/<name>.json` — the seed, the sample count, a one-line
-   `description`, and any population or waveform override.
+4. `config/catalogs/<name>.json` — the seed, the sample count, and any
+   population or waveform override. Nothing else: `CatalogDefinition` is
+   `extra="forbid"`, so what each committed catalog is *for* is documented in
+   [`config/catalogs/README.md`](../config/catalogs/README.md) rather than in a
+   field that would rot separately from it.
 
 The cost of sourcing the hyperparameters from `config/fiducials.json` is that
 editing *any* fiducial now invalidates all eight catalogs — GPU jobs — including
@@ -72,23 +75,9 @@ the freedom the separate table provided is preserved rather than lost.
 All three shared layers are declared as workflow inputs of every catalog, so
 editing any of them correctly invalidates all of them.
 
-The eight committed catalogs:
-
-| Catalog | Population | Seed | Samples | Approximant |
-| --- | --- | ---: | ---: | --- |
-| `md-imrphenom-s41-n32768` | `bns_md_cosmological` | 41 | 32768 | `IMRPhenomXAS_NRTidalv3` |
-| `md-imrphenom-s42-n8192` | `bns_md_cosmological` | 42 | 8192 | `IMRPhenomXAS_NRTidalv3` |
-| `md-imrphenom-s42-n16384` | `bns_md_cosmological` | 42 | 16384 | `IMRPhenomXAS_NRTidalv3` |
-| `md-imrphenom-s42-n32768` | `bns_md_cosmological` | 42 | 32768 | `IMRPhenomXAS_NRTidalv3` |
-| `md-taylorf2-s41-n32768` | `bns_md_cosmological` | 41 | 32768 | `TaylorF2` |
-| `md-uniform-imrphenom-s61-n16384-eps1e-1` | `bns_md_uniform_mixture` (ε = 0.1) | 61 | 16384 | `IMRPhenomXAS_NRTidalv3` |
-| `md-uniform-imrphenom-s62-n16384-eps1e-2` | `bns_md_uniform_mixture` (ε = 0.01) | 62 | 16384 | `IMRPhenomXAS_NRTidalv3` |
-| `md-uniform-imrphenom-s63-n16384-eps1e-3` | `bns_md_uniform_mixture` (ε = 0.001) | 63 | 16384 | `IMRPhenomXAS_NRTidalv3` |
-
-Eight, not nine: `md-imrphenom-s41-n32768` serves as both the shared injection
-and `waveform-approximant/IMRPhenom`'s proposal, and the ε = 0.1 guard catalog
-serves both `astrophysical-parameters` runs and
-`variable-proposal-guard/eps1e-1`.
+The eight committed catalogs — what each is for, and which experiment needs it
+— are listed in [`config/catalogs/README.md`](../config/catalogs/README.md),
+next to the files themselves. There is one inventory, not two.
 
 `seed` and `num_samples` are catalog-level, not population-level: `s41` and
 `s42` are the *same* population drawn twice, so pushing either into the shared
@@ -103,7 +92,6 @@ supplies the construction kwargs it takes:
 
 ```json
 {
-  "description": "Guarded proposal at eps = 1e-1: the Madau-Dickinson redshift law with a uniform-in-redshift component mixed in, so the importance weights do not degenerate when NUTS moves the posterior away from the proposal.",
   "num_samples": 16384,
   "seed": 61,
   "population": {
@@ -119,16 +107,12 @@ The redshift window and grid resolution are inherited from
 `config/population.json` and the hyperparameters from `config/fiducials.json`;
 `model_kwargs` is one mapping, deep-merged across layers and passed whole to the
 factory. The population declares its density factors and source outputs.
-`description` exists because JSON has no comments: a def's prose is carried as
-data rather than lost in the format.
 
-A guard def inherits `[fiducials]` whole, `local_merger_rate` included, even
-though `bns_md_uniform_mixture` declares no merger rate. A guard mixture is a
-sampling density, not a physical population: the Madau-Dickinson total rate
-normalizes the Madau-Dickinson redshift density, not a mixture of it with a
-uniform component. Nothing reads a rate off a proposal — importance weighting
-takes the target's — and a catalog drawn from this population fails by name if
-it is used as an injection.
+A def inherits every block it does not name, whether or not the population it
+names reads all of it: this one inherits `[fiducials]` whole,
+`local_merger_rate` included, even though `bns_md_uniform_mixture` declares no
+merger rate. [`config/catalogs/README.md`](../config/catalogs/README.md) says
+why that is right for a guard mixture.
 
 **A registry key, not an import path.** Registry keys change only on purpose;
 module paths move as collateral whenever a module is reorganized, so a
