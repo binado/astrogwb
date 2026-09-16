@@ -212,7 +212,8 @@ def snr_integrand_and_cumulative(
     """Per-bin $\\Delta\\mathrm{SNR}^2$ and cumulative SNR from the left and right.
 
     ``SNR(<f)`` and ``SNR(>f)`` both include the bin at ``f``, so the last
-    left-hand value and the first right-hand value equal the total SNR.
+    left-hand value and the first right-hand value equal the total SNR. Both
+    cumulative curves are divided by that total, mapping them to $[0, 1]$.
     """
     snr_squared = np.asarray(
         spectral_snr_squared_per_bin(
@@ -224,7 +225,8 @@ def snr_integrand_and_cumulative(
     )
     snr_lt = np.sqrt(np.cumsum(snr_squared))
     snr_gt = np.sqrt(np.cumsum(snr_squared[::-1])[::-1])
-    return snr_squared, snr_lt, snr_gt
+    total = snr_lt[-1]
+    return snr_squared, snr_lt / total, snr_gt / total
 
 
 def _network_legend_handles(
@@ -672,7 +674,9 @@ _ = save_figures({BASE_DIR / "omega_and_sigma.pdf": fig})
 # Per-bin $\Delta\mathrm{SNR}^{2}(f) = 2 T \Delta f (S_h / S_{\mathrm{eff}})^{2}$,
 # with $\mathrm{SNR}(<f)$ accumulated from the left and $\mathrm{SNR}(>f)$ from
 # the right. Each goes in its own figure; every compared network is overlaid
-# with the same colors and linestyles as the $S_{\mathrm{eff}}$ figure.
+# with the same colors and linestyles as the $S_{\mathrm{eff}}$ figure. The two
+# cumulative curves are divided by the total SNR, so each spans $[0, 1]$ and
+# networks of different sensitivity are directly comparable.
 
 
 # %%
@@ -752,7 +756,7 @@ def plot_snr_cumulative_below(
         snr_lt_by_network,
         colors=colors,
         linestyles=linestyles,
-        ylabel=r"$\mathrm{SNR}(<f)$",
+        ylabel=r"$\mathrm{SNR}(<f) / \mathrm{SNR}_{\mathrm{tot}}$",
     )
     fig.tight_layout()
     return fig
@@ -775,7 +779,7 @@ def plot_snr_cumulative_above(
         snr_gt_by_network,
         colors=colors,
         linestyles=linestyles,
-        ylabel=r"$\mathrm{SNR}(>f)$",
+        ylabel=r"$\mathrm{SNR}(>f) / \mathrm{SNR}_{\mathrm{tot}}$",
     )
     fig.tight_layout()
     return fig
@@ -818,7 +822,8 @@ _ = save_figures({BASE_DIR / "snr_cumulative_above.pdf": fig})
 # ## Spectrum and cumulative SNR
 #
 # The fiducial spectrum stacked above both cumulative SNR curves, for the
-# reference network only.
+# reference network only. The cumulative curves are fractions of that network's
+# total SNR.
 
 
 # %%
@@ -860,7 +865,7 @@ def plot_spectrum_and_cumulative_snr(
         label=r"$\mathrm{SNR}(>f)$",
     )
     ax_snr.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-    ax_snr.set_ylabel(r"$\mathrm{SNR}$")
+    ax_snr.set_ylabel(r"$\mathrm{SNR}/\mathrm{SNR}_{\mathrm{tot}}$")
     ax_snr.set_axisbelow(True)
     ax_snr.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
     _format_axis_ticks(ax_snr)
