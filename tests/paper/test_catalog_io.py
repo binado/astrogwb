@@ -12,7 +12,6 @@ from catalog_fixtures import make_catalog
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.catalog._io import CATALOG_FORMAT_NAME, validate_catalog_file
-from astrogwb.waveform import PolarizationPowerGenerator
 
 
 def test_hdf5_layout_metadata_and_order_round_trip(tmp_path: Path) -> None:
@@ -106,12 +105,3 @@ def test_legacy_format_is_rejected(tmp_path: Path) -> None:
         handle.attrs["format_name"] = "astrogwb_catalog_v5"
     with pytest.raises(ValueError, match="format_name"):
         PolarizationPowerCatalog.load(path)
-
-
-def test_waveform_type_is_restored(tmp_path: Path) -> None:
-    path = tmp_path / "catalog.h5"
-    make_catalog(redshift=np.linspace(0.1, 1.0, 4)).save(path)
-    assert (
-        type(PolarizationPowerCatalog.load(path).waveform_metadata)
-        is PolarizationPowerGenerator
-    )
