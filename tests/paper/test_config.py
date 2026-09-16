@@ -341,6 +341,21 @@ def test_waveform_generator_kwargs_select_the_analytical_inspiral() -> None:
     assert generator.minimum_frequency == 2.0
 
 
+def test_waveform_generator_overrides_are_validated_not_trusted() -> None:
+    """Overrides go through ``WaveformConfig``, so a bad one fails here.
+
+    Before the accessor shared a path with a catalog def, every keyword was
+    coerced with a bare ``float()`` and an override that made no sense for the
+    named approximant was passed straight through.
+    """
+    generator = waveform_generator(REPO_ROOT, approximant="analytical", alpha=0.02)
+    assert isinstance(generator, AnalyticInspiralGenerator)
+    assert generator.alpha == 0.02
+
+    with pytest.raises(ValidationError, match="waveform.alpha is only valid"):
+        waveform_generator(REPO_ROOT, alpha=0.02)
+
+
 # --------------------------------------------------------------------------- #
 # Accessor kwargs overrides
 # --------------------------------------------------------------------------- #

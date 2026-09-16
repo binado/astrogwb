@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike
 
-__all__ = ["PolarizationPowerGenerator"]
+from astrogwb._attrs import require_attrs, scalar_attr
+
+__all__ = ["WAVEFORM_ATTRS", "PolarizationPowerGenerator"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,3 +138,68 @@ class PolarizationPowerGenerator:
             "PolarizationPowerGenerator is a metadata-only descriptor; "
             "use a concrete generator subclass"
         )
+
+    # ----------------------------------------------------------------- #
+    # Persistence
+    # ----------------------------------------------------------------- #
+    def to_attrs(self) -> dict[str, str | int | float]:
+        """Encode the descriptor as the scalar attributes every artifact stamps.
+
+        Only the base class's own fields travel, which is what
+        :data:`WAVEFORM_ATTRS` means. A subclass field -- ``alpha`` on
+        :class:`~astrogwb.waveform.AnalyticInspiralGenerator` -- is deliberately
+        not persisted: :meth:`from_attrs` rebuilds the base descriptor either
+        way, so an attribute no reader could restore would be dead weight in
+        the file.
+        """
+        return {name: getattr(self, name) for name in WAVEFORM_ATTRS}
+
+    @classmethod
+    def from_attrs(
+        cls, attrs: Mapping[str, Any], *, label: str
+    ) -> PolarizationPowerGenerator:
+        """Rebuild the metadata-only descriptor from decoded file attributes.
+
+        Always returns the *base* descriptor, never ``cls``: the concrete
+        subclass is not recoverable from these six fields, and rebuilding one
+        would need construction settings the file does not carry. A loaded
+        catalog therefore describes its waveform backend without being able to
+        re-run it, which is the standing contract (see the class docstring).
+
+        ``attrs`` holds values already reduced to ``str``/``int``/``float``
+        scalars; ``label`` names the file in error messages.
+        """
+        require_attrs(attrs, WAVEFORM_ATTRS, label=label, kind="waveform metadata")
+        try:
+            return PolarizationPowerGenerator(
+                approximant=str(scalar_attr(attrs["approximant"], name="approximant")),
+                minimum_frequency=float(
+                    scalar_attr(attrs["minimum_frequency"], name="minimum_frequency")
+                ),
+                maximum_frequency=float(
+                    scalar_attr(attrs["maximum_frequency"], name="maximum_frequency")
+                ),
+                reference_frequency=float(
+                    scalar_attr(
+                        attrs["reference_frequency"], name="reference_frequency"
+                    )
+                ),
+                sampling_frequency=float(
+                    scalar_attr(attrs["sampling_frequency"], name="sampling_frequency")
+                ),
+                frequency_resolution=float(
+                    scalar_attr(
+                        attrs["frequency_resolution"], name="frequency_resolution"
+                    )
+                ),
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"{label}: invalid waveform metadata: {error}") from error
+
+
+#: The descriptor, as attribute names -- derived from the base class's own
+#: fields rather than restated, so a field added here cannot drift from what
+#: the readers require. Both catalog formats stamp all six.
+WAVEFORM_ATTRS: tuple[str, ...] = tuple(
+    field.name for field in fields(PolarizationPowerGenerator)
+)

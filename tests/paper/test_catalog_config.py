@@ -20,6 +20,7 @@ import pytest
 from numpyro import handlers
 from repo import REPO_ROOT
 
+from astrogwb.constants import ISCO_ALPHA
 from astrogwb.paper.config.catalogs import (
     CatalogDefinition,
     check_population_model,
@@ -32,6 +33,7 @@ from astrogwb.populations import (
     build_population,
     known_populations,
 )
+from astrogwb.waveform import AnalyticInspiralGenerator
 
 
 def _definitions() -> dict[str, CatalogDefinition]:
@@ -184,6 +186,69 @@ frequency_resolution = 1.0
     )
     with pytest.raises(ValueError, match="minimum_redshift must be less than"):
         load_catalog_layers([path])
+
+
+_TOY_DEF = """
+num_samples = 8
+seed = 1
+
+[population]
+model = "bns_md_cosmological"
+
+[population.kwargs]
+minimum_redshift = 0.0
+maximum_redshift = 20.0
+n_grid = 256
+
+[population.params]
+H0 = 67.66
+
+[waveform]
+approximant = "{approximant}"
+sampling_frequency = 128.0
+minimum_frequency = 10.0
+maximum_frequency = 50.0
+reference_frequency = 20.0
+frequency_resolution = 1.0
+{alpha}
+"""
+
+
+def test_alpha_is_rejected_for_a_non_analytical_approximant(tmp_path: Path) -> None:
+    """``alpha`` terminates the closed-form inspiral and means nothing to Ripple.
+
+    Silently ignoring it would let a def look like it set a termination
+    frequency that the generated catalog does not honour.
+    """
+    path = tmp_path / "toy.toml"
+    path.write_text(
+        _TOY_DEF.format(approximant="TaylorF2", alpha="alpha = 0.02"), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="waveform.alpha is only valid"):
+        load_catalog_layers([path])
+
+
+def test_a_declared_alpha_reaches_the_analytical_generator(tmp_path: Path) -> None:
+    path = tmp_path / "toy.toml"
+    path.write_text(
+        _TOY_DEF.format(approximant="analytical", alpha="alpha = 0.02"),
+        encoding="utf-8",
+    )
+    generator = load_catalog_layers([path]).waveform.build()
+
+    assert isinstance(generator, AnalyticInspiralGenerator)
+    assert generator.alpha == 0.02
+
+
+def test_an_omitted_alpha_defaults_to_isco(tmp_path: Path) -> None:
+    path = tmp_path / "toy.toml"
+    path.write_text(
+        _TOY_DEF.format(approximant="analytical", alpha=""), encoding="utf-8"
+    )
+    generator = load_catalog_layers([path]).waveform.build()
+
+    assert isinstance(generator, AnalyticInspiralGenerator)
+    assert generator.alpha == ISCO_ALPHA
 
 
 def test_no_catalog_layers_is_rejected() -> None:

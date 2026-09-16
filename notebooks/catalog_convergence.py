@@ -78,7 +78,11 @@ from astrogwb.gwb import (
     uniform_prior_mass_moments,
 )
 from astrogwb.importance.spectral import build_importance_spectrum
-from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
+from astrogwb.populations import (
+    DEFAULT_DENSITY_SITES,
+    PopulationRecord,
+    build_population,
+)
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
@@ -323,11 +327,13 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> PolarizationPowerCat
             sampling_frequency=2.0 * f_max,
             frequency_resolution=df,
         ),
-        model_name=POPULATION_MODEL,
-        model_kwargs=POPULATION_MODEL_KWARGS,
+        population=PopulationRecord(
+            model_name=POPULATION_MODEL,
+            model_kwargs=POPULATION_MODEL_KWARGS,
+            density_sites=DEFAULT_DENSITY_SITES,
+            seed=POPULATION_SEED,
+        ),
         fiducials=POPULATION_PARAMS,
-        density_sites=DEFAULT_DENSITY_SITES,
-        seed=POPULATION_SEED,
     )
 
 

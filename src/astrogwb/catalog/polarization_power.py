@@ -136,19 +136,24 @@ class PolarizationPowerCatalog:
         source_parameters: Mapping[str, ArrayLike],
         *,
         generator: PolarizationPowerGenerator,
-        model_name: str,
-        model_kwargs: Mapping[str, Any],
+        population: PopulationRecord,
         fiducials: Mapping[str, float],
-        density_sites: tuple[str, ...],
-        seed: int,
     ) -> Self:
         """Generate polarization power and return a validated catalog.
 
         The population record is supplied rather than inferred: the caller ran
         the model to draw ``source_parameters``, so it is the only place that
-        knows which population and settings produced them. Frequencies come from
-        the generator rather than from metadata: that is the axis the backend
-        actually produces.
+        knows which population and settings produced them. It arrives as one
+        :class:`~astrogwb.populations.PopulationRecord` rather than as its four
+        parts, so a caller cannot pair a model name with another draw's seed or
+        density sites -- the record is the unit that has to stay consistent.
+
+        ``fiducials`` stays separate because it is not part of the record: the
+        hyperparameters a draw was made *at* describe the samples, while the
+        record describes the density that produced them.
+
+        Frequencies come from the generator rather than from metadata: that is
+        the axis the backend actually produces.
 
         Generation runs under :func:`jax.jit`. Generators are deliberately
         jit-free so they compose inside NumPyro models, which inference jits
@@ -168,12 +173,7 @@ class PolarizationPowerCatalog:
             polarization_power=np.asarray(power),
             frequencies=np.asarray(frequencies),
             waveform_metadata=generator,
-            _population=PopulationRecord(
-                model_name=model_name,
-                model_kwargs=model_kwargs,
-                density_sites=density_sites,
-                seed=seed,
-            ),
+            _population=population,
             _fiducials=fiducials,
         )
 

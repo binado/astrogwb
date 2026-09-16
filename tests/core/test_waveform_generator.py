@@ -9,8 +9,13 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid, uniform_grid_spacing
-from astrogwb.waveform import PolarizationPowerGenerator, RippleGenerator
+from astrogwb.waveform import (
+    AnalyticInspiralGenerator,
+    PolarizationPowerGenerator,
+    RippleGenerator,
+)
 from astrogwb.waveform.generator._ripple import (
     PRECESSING_MODELS,
     SUPPORTED_APPROXIMANTS,
@@ -71,6 +76,35 @@ def test_uniform_grid_handles_float_roundoff() -> None:
 
     np.testing.assert_allclose(uniform_frequency_grid(0.1, 0.3, 0.1), [0.1, 0.2, 0.3])
     assert generator.frequency_resolution == 0.1
+
+
+def test_descriptor_attrs_round_trip_and_exclude_subclass_fields() -> None:
+    """The six base fields survive a round trip; ``alpha`` deliberately does not.
+
+    A concrete generator encodes only the base descriptor, because that is all
+    ``from_attrs`` can rebuild -- persisting ``alpha`` would put an attribute in
+    the file that no reader restores.
+    """
+    generator = AnalyticInspiralGenerator(
+        approximant="analytical",
+        minimum_frequency=10.0,
+        maximum_frequency=12.0,
+        reference_frequency=10.0,
+        sampling_frequency=32.0,
+        frequency_resolution=2.0,
+        alpha=ISCO_ALPHA,
+    )
+
+    attrs = generator.to_attrs()
+    assert "alpha" not in attrs
+
+    restored = PolarizationPowerGenerator.from_attrs(attrs, label="toy.h5")
+    assert type(restored) is PolarizationPowerGenerator
+    assert restored.to_attrs() == attrs
+
+    del attrs["reference_frequency"]
+    with pytest.raises(ValueError, match="toy.h5: missing waveform metadata"):
+        PolarizationPowerGenerator.from_attrs(attrs, label="toy.h5")
 
 
 def test_base_generator_is_a_metadata_only_descriptor() -> None:

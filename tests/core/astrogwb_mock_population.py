@@ -167,15 +167,17 @@ def mock_catalog(
     return PolarizationPowerCatalog.from_generator(
         source_parameters,
         generator=generator,
-        model_name="bns_md_cosmological",
-        model_kwargs={
-            "minimum_redshift": Z_MIN,
-            "maximum_redshift": Z_MAX,
-            "n_grid": N_GRID,
-        },
+        population=PopulationRecord(
+            model_name="bns_md_cosmological",
+            model_kwargs={
+                "minimum_redshift": Z_MIN,
+                "maximum_redshift": Z_MAX,
+                "n_grid": N_GRID,
+            },
+            density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
+            seed=MOCK_POPULATION_SEED,
+        ),
         fiducials=POPULATION_PARAMS,
-        density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
-        seed=MOCK_POPULATION_SEED,
     )
 
 

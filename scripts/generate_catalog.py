@@ -40,13 +40,12 @@ from pathlib import Path
 import jax
 
 from astrogwb.catalog import PolarizationPowerCatalog
-from astrogwb.paper.config import waveform_generator
 from astrogwb.paper.config.catalogs import (
     CatalogDefinition,
     check_population_model,
     load_catalog_layers,
 )
-from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
+from astrogwb.populations import build_population
 from astrogwb.utils.sampling import sample_sources
 
 # x64 must be on before the population draw. `build_catalog` samples before it
@@ -118,7 +117,7 @@ def build_catalog(definition: CatalogDefinition) -> PolarizationPowerCatalog:
         num_samples=definition.num_samples,
     )
 
-    generator = waveform_generator(**definition.waveform.model_dump())
+    generator = definition.waveform.build()
     logger.info(
         "Generating %s waveforms for %d events (f_min=%.1f Hz, f_ref=%.1f Hz, "
         "f_s=%.1f Hz)",
@@ -143,11 +142,8 @@ def build_catalog(definition: CatalogDefinition) -> PolarizationPowerCatalog:
     catalog = PolarizationPowerCatalog.from_generator(
         samples,
         generator=generator,
-        model_name=population.model,
-        model_kwargs=population.kwargs,
+        population=definition.population_record(),
         fiducials=population.params,
-        density_sites=DEFAULT_DENSITY_SITES,
-        seed=definition.seed,
     )
     logger.info("Generated catalog with measured df=%.4g Hz", catalog.df)
     return catalog

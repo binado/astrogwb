@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -44,20 +44,34 @@ from astrogwb.paper.config.runs import (
     merge_config_layers,
 )
 
+if TYPE_CHECKING:
+    from astrogwb.populations import PopulationRecord
+    from astrogwb.waveform import PolarizationPowerGenerator
+
 logger = logging.getLogger(__name__)
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
+#: The one ``approximant`` that is not a Ripple name: it selects the
+#: closed-form inspiral, which is the only generator taking an ``alpha``.
+_ANALYTICAL_APPROXIMANT = "analytical"
+
 
 class WaveformConfig(BaseModel):
-    """Waveform-generation settings for one catalog.
+    """Waveform-generation settings for one catalog, and the generator they build.
 
     Owned by ``config/waveform.json``; a catalog def may overlay fields, and
     only ``md-taylorf2-s41-n32768`` does (the approximant). The stored band
     matches ``config/analysis/base/model.toml``'s ``[analysis]`` ``f_min`` /
     ``f_max``. ``sampling_frequency`` is the backend Nyquist, not the stored
-    grid. ``approximant="analytical"`` selects the closed-form inspiral
-    through :func:`astrogwb.paper.config.waveform_generator`.
+    grid. ``approximant="analytical"`` selects the closed-form inspiral.
+
+    This is the wire format for
+    :class:`~astrogwb.waveform.PolarizationPowerGenerator`, and :meth:`build`
+    is the one edge between them. The core generator stays a frozen dataclass
+    -- it is closed over by ``jax.jit`` and its concrete subclasses hold a
+    compiled kernel -- so validation of the *settings* lives here and the
+    domain invariants stay in the dataclass.
     """
 
     model_config = _STRICT
@@ -68,6 +82,45 @@ class WaveformConfig(BaseModel):
     maximum_frequency: Annotated[float, Field(gt=0.0)]
     reference_frequency: Annotated[float, Field(gt=0.0)]
     frequency_resolution: Annotated[float, Field(gt=0.0)]
+    #: The inspiral termination constant, valid only for the closed-form
+    #: approximant. Unset means
+    #: :data:`~astrogwb.constants.ISCO_ALPHA`; nothing else defaults to it.
+    #:
+    #: It is a field of ``AnalyticInspiralGenerator`` and not of the base
+    #: descriptor, so it is *not* among the attributes a catalog persists. An
+    #: analytical catalog records the band it was drawn on but not the alpha
+    #: that terminated it, because a loaded catalog is rebuilt as the base
+    #: descriptor either way.
+    alpha: Annotated[float, Field(gt=0.0)] | None = None
+
+    @model_validator(mode="after")
+    def _validate_alpha(self) -> WaveformConfig:
+        if self.alpha is not None and self.approximant != _ANALYTICAL_APPROXIMANT:
+            raise ValueError(
+                f"waveform.alpha is only valid when "
+                f"approximant == {_ANALYTICAL_APPROXIMANT!r}; "
+                f"this catalog names {self.approximant!r}"
+            )
+        return self
+
+    def build(self) -> PolarizationPowerGenerator:
+        """Construct the generator these settings describe.
+
+        Imports the generators in its own body, not at module scope: building
+        one reaches JAX, and Ripple construction initializes the XLA backend,
+        so this is not safe to call before
+        :func:`astrogwb.paper.runtime.configure_runtime`. Keeping the import
+        here is what lets the ``Snakefile`` import this module to build its DAG.
+        """
+        from astrogwb.constants import ISCO_ALPHA
+        from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
+
+        settings = self.model_dump(exclude={"alpha"})
+        if self.approximant == _ANALYTICAL_APPROXIMANT:
+            return AnalyticInspiralGenerator(
+                **settings, alpha=ISCO_ALPHA if self.alpha is None else self.alpha
+            )
+        return RippleGenerator(**settings)
 
 
 class PopulationConfig(BaseModel):
@@ -119,6 +172,29 @@ class CatalogDefinition(BaseModel):
     num_samples: Annotated[int, Field(gt=0)]
     population: PopulationConfig
     waveform: WaveformConfig
+
+    def population_record(self) -> PopulationRecord:
+        """The population declaration this def hands to a generated catalog.
+
+        The record is what the ``.h5`` persists, so assembling it here -- next
+        to the fields it is assembled from -- is what keeps the declaration in
+        the config layer rather than in the script that runs the draw.
+        :data:`~astrogwb.populations.DEFAULT_DENSITY_SITES` is supplied because
+        no def declares density sites: they follow from the registered
+        population, not from configuration.
+
+        Imports :mod:`astrogwb.populations` in its own body; the registry is
+        populated by importing the models, which pulls in JAX, and this module
+        is otherwise free of it.
+        """
+        from astrogwb.populations import DEFAULT_DENSITY_SITES, PopulationRecord
+
+        return PopulationRecord(
+            model_name=self.population.model,
+            model_kwargs=self.population.kwargs,
+            density_sites=DEFAULT_DENSITY_SITES,
+            seed=self.seed,
+        )
 
     @model_validator(mode="after")
     def _validate_redshift_window(self) -> CatalogDefinition:
