@@ -33,7 +33,8 @@ executes this module; eager dicts would mean file I/O at import (failing from
 any working directory but the repository root) and, for the priors, a numpyro
 import on every ``--dry-run``. :func:`priors` therefore imports
 :func:`~astrogwb.paper.config.mcmc.materialize_prior` inside its own body;
-:func:`waveform_generator` imports the generator classes the same way. A
+:func:`waveform_generator` imports
+:class:`~astrogwb.paper.config.catalogs.WaveformConfig` the same way. A
 subprocess test in ``tests/paper/test_cli.py`` pins both halves.
 
 Paths are relative to the working directory, which for the workflow and every
@@ -67,8 +68,6 @@ if TYPE_CHECKING:
     from astrogwb.waveform import PolarizationPowerGenerator
 
 __all__ = ["fiducials", "networks", "priors", "waveform_generator"]
-
-_ANALYTICAL_APPROXIMANT = "analytical"
 
 
 @cache
@@ -167,40 +166,20 @@ def waveform_generator(
     """Build the polarization-power generator from ``config/waveform.json``.
 
     Keyword arguments override the file. ``approximant="analytical"`` selects
-    the closed-form inspiral; any other name is a Ripple approximant. Catalog
-    generation passes the merged ``[waveform]`` block as kwargs so a def
-    overlay (the TaylorF2 approximant) still wins.
+    the closed-form inspiral, and is the only approximant taking an ``alpha``;
+    any other name is a Ripple approximant.
 
-    Imported here, not at module scope: constructing a generator reaches JAX,
-    and the Snakefile's DAG construction imports this package via
-    ``config.runs``. Ripple construction initializes the XLA backend, so this
-    is not safe to call before ``configure_runtime``.
+    The settings are validated through
+    :class:`~astrogwb.paper.config.catalogs.WaveformConfig` rather than coerced
+    field by field here, so this accessor and a catalog def reach a generator
+    down the same path and an override is checked instead of trusted.
+
+    Imported here, not at module scope: ``catalogs`` reaches pydantic and
+    ``build`` reaches JAX, while the Snakefile's DAG construction imports this
+    package via ``config.runs``. Ripple construction initializes the XLA
+    backend, so this is not safe to call before ``configure_runtime``.
     """
-    from astrogwb.constants import ISCO_ALPHA
-    from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
+    from astrogwb.paper.config.catalogs import WaveformConfig
 
     settings = {**_load((root or Path()) / WAVEFORM_PATH, "waveform"), **kwargs}
-    approximant = str(settings["approximant"])
-    sampling_frequency = float(settings["sampling_frequency"])
-    minimum_frequency = float(settings["minimum_frequency"])
-    maximum_frequency = float(settings["maximum_frequency"])
-    reference_frequency = float(settings["reference_frequency"])
-    frequency_resolution = float(settings["frequency_resolution"])
-    if approximant == _ANALYTICAL_APPROXIMANT:
-        return AnalyticInspiralGenerator(
-            approximant=approximant,
-            sampling_frequency=sampling_frequency,
-            minimum_frequency=minimum_frequency,
-            maximum_frequency=maximum_frequency,
-            reference_frequency=reference_frequency,
-            frequency_resolution=frequency_resolution,
-            alpha=float(settings.get("alpha", ISCO_ALPHA)),
-        )
-    return RippleGenerator(
-        approximant=approximant,
-        sampling_frequency=sampling_frequency,
-        minimum_frequency=minimum_frequency,
-        maximum_frequency=maximum_frequency,
-        reference_frequency=reference_frequency,
-        frequency_resolution=frequency_resolution,
-    )
+    return WaveformConfig.model_validate(settings).build()

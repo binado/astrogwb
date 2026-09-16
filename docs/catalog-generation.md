@@ -33,8 +33,12 @@ one file per named thing, the same shape a run config has:
    catalog grid *is* the array every model is evaluated on, and a run's band
    selects bins on it with a mask rather than compressing it.
    `sampling_frequency` is the waveform backend's Nyquist, not the stored grid.
-   `astrogwb.paper.config.waveform_generator()` builds the generator from this
-   file; `approximant="analytical"` selects the closed-form inspiral.
+   `approximant="analytical"` selects the closed-form inspiral, and is the only
+   approximant accepting the optional `alpha` key (the inspiral termination
+   constant, defaulting to the Schwarzschild ISCO value); naming it alongside a
+   Ripple approximant is rejected. `WaveformConfig.build()` constructs the
+   generator, and `astrogwb.paper.config.waveform_generator()` is the same path
+   for a notebook reading this file directly.
 2. `config/catalogs/base/population.toml` — the population every catalog is
    drawn from, and the hyperparameters it is drawn at. Those hyperparameters
    are deliberately *not* read from `config/fiducials.json`: a catalog records

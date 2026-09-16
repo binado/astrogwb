@@ -2,9 +2,11 @@
 
 Both writers stamp the same three metadata blocks -- format identity, the
 waveform descriptor, and the population record -- and differ only in their
-datasets and in the handful of attributes each artifact alone carries. What is
-shared lives in :mod:`astrogwb.catalog._hdf5` and
-:mod:`astrogwb.populations.record`; what is here is per-format: which datasets
+datasets and in the handful of attributes each artifact alone carries. The two
+shared blocks encode themselves: see
+:meth:`astrogwb.waveform.PolarizationPowerGenerator.to_attrs` and
+:meth:`astrogwb.populations.PopulationRecord.to_attrs`, with the h5py mechanics
+in :mod:`astrogwb.catalog._hdf5`. What is here is per-format: which datasets
 exist, which attributes are required, the shape and dtype checks a reader
 enforces before constructing a record.
 
@@ -39,8 +41,6 @@ from astrogwb.catalog._hdf5 import (
     decoded_attrs,
     h5py,
     require_datasets,
-    waveform_attrs,
-    waveform_from_attrs,
     write_h5,
 )
 from astrogwb.catalog.polarization_power import REDSHIFT_SITE, PolarizationPowerCatalog
@@ -48,6 +48,7 @@ from astrogwb.catalog.spectral_density import (
     SpectralDensityCatalog,
 )
 from astrogwb.populations.record import POPULATION_ATTRS, PopulationRecord
+from astrogwb.waveform import PolarizationPowerGenerator
 
 __all__ = [
     "CATALOG_FORMAT_NAME",
@@ -69,12 +70,10 @@ PARAMETER_NAMES_ATTR = "source_parameter_names"
 CATALOG_FORMAT_NAME = "astrogwb_catalog_v7"
 CATALOG_DATASETS = ("frequency", "polarization_power", "source_parameters")
 
-#: Written on every save. It equals the ``df`` attribute for every current
-#: waveform descriptor (see :func:`waveform_from_attrs`).
-FREQUENCY_RESOLUTION_ATTR = "frequency_resolution"
-#: Measured from the ``frequency`` dataset on write and never read back into a
-#: computation -- the dataset is the truth. It doubles as the fallback a
-#: pre-``frequency_resolution`` file's waveform descriptor is rebuilt from.
+#: Measured from the ``frequency`` dataset on write and never read back --
+#: the dataset is the truth, and the descriptor's ``frequency_resolution`` is
+#: only what was *asked for*. It is stamped so the realized bin width can be
+#: read off a file without loading its arrays.
 DF_ATTR = "df"
 POPULATION_NUM_SAMPLES_ATTR = "population_num_samples"
 POPULATION_PARAMS_ATTR = "population_params"
@@ -99,7 +98,7 @@ def save_polarization_power_catalog(
     attrs: dict[str, str | int | float] = {
         FORMAT_NAME_ATTR: CATALOG_FORMAT_NAME,
         "domain": DOMAIN_FREQUENCY,
-        **waveform_attrs(catalog.waveform_metadata),
+        **catalog.waveform_metadata.to_attrs(),
         DF_ATTR: catalog.df,
         **catalog.population.to_attrs(),
         POPULATION_NUM_SAMPLES_ATTR: catalog.num_samples,
@@ -136,9 +135,7 @@ def load_polarization_power_catalog[C: PolarizationPowerCatalog](
             ),
             polarization_power=np.asarray(handle["polarization_power"]),
             frequencies=np.asarray(handle["frequency"]),
-            waveform_metadata=waveform_from_attrs(
-                attrs, label=label, frequency_resolution_fallback=DF_ATTR
-            ),
+            waveform_metadata=PolarizationPowerGenerator.from_attrs(attrs, label=label),
             _population=population,
             _fiducials={
                 name: float(value)
@@ -165,9 +162,7 @@ def validate_catalog_file(handle: h5py.File | h5py.Group, *, label: str) -> None
     frequency = handle["frequency"]
     if frequency.ndim != 1:
         raise ValueError(f"{label}: frequency dataset must be one-dimensional")
-    waveform_from_attrs(
-        decoded_attrs(handle), label=label, frequency_resolution_fallback=DF_ATTR
-    )
+    PolarizationPowerGenerator.from_attrs(decoded_attrs(handle), label=label)
     power = handle["polarization_power"]
     if power.ndim != 2 or power.shape[0] != frequency.shape[0]:
         raise ValueError(
@@ -246,7 +241,7 @@ def save_spectral_density_catalog(
     attrs: dict[str, str | int | float] = {
         FORMAT_NAME_ATTR: SPECTRAL_DENSITY_FORMAT_NAME,
         "domain": DOMAIN_FREQUENCY,
-        **waveform_attrs(catalog.waveform_metadata),
+        **catalog.waveform_metadata.to_attrs(),
         **catalog.population.to_attrs(),
         PARAMETER_NAMES_ATTR: json.dumps(names),
         N_MAX_SIGMA_ATTR: catalog.n_max_sigma,
@@ -286,7 +281,7 @@ def load_spectral_density_catalog[C: SpectralDensityCatalog](
             hyperparameters=unstack_columns(
                 np.asarray(handle["hyperparameters"]), names
             ),
-            waveform_metadata=waveform_from_attrs(attrs, label=label),
+            waveform_metadata=PolarizationPowerGenerator.from_attrs(attrs, label=label),
             _population=population,
             n_max_sigma=float(attrs[N_MAX_SIGMA_ATTR]),
             observation_time=float(attrs[OBSERVATION_TIME_ATTR]),
@@ -306,7 +301,7 @@ def validate_spectral_density_file(
         domain=DOMAIN_FREQUENCY,
     )
     require_datasets(handle, SPECTRAL_DENSITY_DATASETS, label=label)
-    waveform_from_attrs(decoded_attrs(handle), label=label)
+    PolarizationPowerGenerator.from_attrs(decoded_attrs(handle), label=label)
     require_attrs(
         handle.attrs,
         REQUIRED_SPECTRAL_DENSITY_ATTRS,

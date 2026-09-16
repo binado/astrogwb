@@ -66,13 +66,14 @@ POPULATION_RECORD: dict[str, Any] = {
     "density_sites": ("redshift", "source_frame_mass_1", "source_frame_mass_2"),
 }
 CATALOG_SEED = 42
+POPULATION = PopulationRecord(
+    model_name=POPULATION_RECORD["model_name"],
+    model_kwargs=POPULATION_RECORD["model_kwargs"],
+    density_sites=POPULATION_RECORD["density_sites"],
+    seed=CATALOG_SEED,
+)
 CATALOG_DEFAULTS: dict[str, Any] = {
-    "_population": PopulationRecord(
-        model_name=POPULATION_RECORD["model_name"],
-        model_kwargs=POPULATION_RECORD["model_kwargs"],
-        density_sites=POPULATION_RECORD["density_sites"],
-        seed=CATALOG_SEED,
-    ),
+    "_population": POPULATION,
     "_fiducials": POPULATION_RECORD["fiducials"],
 }
 
@@ -122,8 +123,8 @@ def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes
     catalog = PolarizationPowerCatalog.from_generator(
         source_parameters,
         generator=generator,
-        seed=42,
-        **POPULATION_RECORD,
+        population=POPULATION,
+        fiducials=POPULATION_RECORD["fiducials"],
     )
 
     assert catalog.waveform_metadata is generator
@@ -320,8 +321,8 @@ def test_catalog_df_matches_the_generators_requested_resolution(
     catalog = PolarizationPowerCatalog.from_generator(
         source_parameters,
         generator=generator,
-        seed=42,
-        **POPULATION_RECORD,
+        population=POPULATION,
+        fiducials=POPULATION_RECORD["fiducials"],
     )
 
     assert catalog.df == 2.0
