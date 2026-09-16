@@ -252,7 +252,7 @@ def test_every_run_merge_is_a_valid_run_config(experiment: str, run: str) -> Non
 
     amplitude_parameter = config.analysis.amplitude_parameter
     assert set(config.priors) == set(config.fiducials)
-    assert set(config.sampled_params) <= set(config.fiducials)
+    assert set(config.analysis.sampled_params) <= set(config.fiducials)
     if config.analysis.likelihood == "amplitude_marginalized":
         assert amplitude_parameter is not None
     assert config.analysis.detectors

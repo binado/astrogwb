@@ -75,7 +75,7 @@ def test_build_run_config_deep_merges_extra_overrides() -> None:
         sampler={"num_warmup": 11, "num_samples": 13},
     )
 
-    assert config.seed == 99
+    assert config.sampler.seed == 99
     assert config.sampler.num_warmup == 11
     assert config.sampler.num_samples == 13
     # Unrelated sampler fields keep their file values.
@@ -86,7 +86,7 @@ def test_analysis_grid_mirrors_the_config() -> None:
     config = build_run_config(example_raw())
     grid = config.analysis_grid
 
-    assert grid.observation_time == config.observation_time
+    assert grid.observation_time == config.analysis.observation_time
     assert (grid.minimum_frequency, grid.maximum_frequency) == (
         config.analysis.minimum_frequency,
         config.analysis.maximum_frequency,
@@ -167,8 +167,8 @@ def _marginalized_raw() -> dict:
         **raw["analysis"],
         "likelihood": "amplitude_marginalized",
         "amplitude_parameter": "H0",
+        "sampled_params": [],
     }
-    raw["sampled_params"] = []
     return raw
 
 
@@ -190,7 +190,7 @@ def test_marginalized_config_round_trips_through_save(tmp_path) -> None:
     assert {name: prior_to_spec(prior) for name, prior in reloaded.priors.items()} == {
         name: prior_to_spec(prior) for name, prior in config.priors.items()
     }
-    assert reloaded.sampled_params == config.sampled_params
+    assert reloaded.analysis.sampled_params == config.analysis.sampled_params
     assert reloaded.fixed_params == config.fixed_params
     assert reloaded.model_dump(mode="json") == config.model_dump(mode="json")
 
@@ -202,7 +202,10 @@ def test_reloaded_marginalized_config_still_rejects_amplitude_parameter_sampled(
     path = tmp_path / "run.json"
     config.save(path)
     raw = load_mapping(path)
-    raw["sampled_params"] = [*raw["sampled_params"], "H0"]
+    raw["analysis"]["sampled_params"] = [
+        *raw["analysis"]["sampled_params"],
+        "H0",
+    ]
 
     with pytest.raises(ValidationError, match="cannot also appear in sampled_params"):
         build_run_config(raw)
@@ -210,7 +213,7 @@ def test_reloaded_marginalized_config_still_rejects_amplitude_parameter_sampled(
 
 def test_marginalized_config_rejects_amplitude_parameter_also_sampled() -> None:
     raw = _marginalized_raw()
-    raw["sampled_params"] = ["H0"]
+    raw["analysis"]["sampled_params"] = ["H0"]
 
     with pytest.raises(ValidationError, match="cannot also appear in sampled_params"):
         build_run_config(raw)

@@ -1,8 +1,7 @@
 # Xi_0 alone (n pinned): a 1D problem.
 
-sampled_params = ["xi_0"]
-
 [analysis]
+sampled_params = ["xi_0"]
 network = "ET-2L-aligned-CE-Hanford"
 
 [sampler]

@@ -1,9 +1,8 @@
 # The local merger rate with H0 marginalized out: the reference the
 # fixed-R0 H0 posterior is compared against.
 
-sampled_params = ["local_merger_rate"]
-
 [analysis]
+sampled_params = ["local_merger_rate"]
 network = "ET-2L-aligned-CE-Hanford"
 likelihood = "amplitude_marginalized"
 amplitude_parameter = "H0"

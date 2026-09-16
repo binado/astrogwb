@@ -206,7 +206,7 @@ def run(
         sampler.target_accept,
         sampler.forward_mode_differentiation,
     )
-    rng_key = jax.random.PRNGKey(config.seed)
+    rng_key = jax.random.PRNGKey(config.sampler.seed)
     mcmc.run(
         rng_key,
         **inputs.model_kwargs(),
@@ -230,9 +230,9 @@ def chain_output_path(config: RunConfig, *, timestamp: str | None = None) -> Pat
         base = config.output.label
     else:
         timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
-        params_suffix = "-".join(config.sampled_params)
+        params_suffix = "-".join(config.analysis.sampled_params)
         det_suffix = ",".join(config.analysis.detectors)
-        base = f"mcmc-{params_suffix}-det={det_suffix}-seed{config.seed}-{timestamp}"
+        base = f"mcmc-{params_suffix}-det={det_suffix}-seed{config.sampler.seed}-{timestamp}"
     return config.output.outdir / f"{base}.nc"
 
 
@@ -335,7 +335,7 @@ def save(
                 "quadrature_effective_nodes",
             ],
         )(
-            jax.random.fold_in(jax.random.PRNGKey(config.seed), 1),
+            jax.random.fold_in(jax.random.PRNGKey(config.sampler.seed), 1),
             amplitude_mle=posterior_samples["amplitude_mle"],
             template_optimal_snr=posterior_samples["template_optimal_snr"],
             template_merger_rate=posterior_samples["template_merger_rate"],
@@ -404,7 +404,7 @@ def main(argv: list[str] | None = None) -> None:
 
     logger.info(
         "Sampling %s | fixed %s",
-        tuple(config.sampled_params),
+        tuple(config.analysis.sampled_params),
         tuple(config.fixed_params),
     )
 

@@ -1,4 +1,3 @@
-sampled_params = ["H0"]
-
 [analysis]
+sampled_params = ["H0"]
 network = "ET-2L-misaligned"

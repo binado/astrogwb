@@ -1,9 +1,8 @@
 # Waveform systematics: the same H0 measurement against an IMRPhenom
 # proposal and a TaylorF2 one, both drawn from the seed-41 population.
 
-sampled_params = ["H0"]
-
 [analysis]
+sampled_params = ["H0"]
 network = "ET-2L-aligned-CE-Hanford"
 
 [sampler]

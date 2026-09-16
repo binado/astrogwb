@@ -6,9 +6,8 @@
 # eps has its own catalog, drawn at its own mixture seed, so the three
 # draws are independent.
 
-sampled_params = ["gamma", "kappa", "z_peak"]
-
 [analysis]
+sampled_params = ["gamma", "kappa", "z_peak"]
 network = "ET-2L-aligned-CE-Hanford"
 likelihood = "amplitude_marginalized"
 amplitude_parameter = "H0"

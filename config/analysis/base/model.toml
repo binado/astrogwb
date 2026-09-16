@@ -3,9 +3,8 @@
 # must fail, never silently inherit someone else's. The names it may take are
 # declared in config/networks.json, which resolves each one to its detectors.
 
-observation_time = 1.0
-
 [analysis]
+observation_time = 1.0
 minimum_frequency = 2.0
 maximum_frequency = 2048.0
 

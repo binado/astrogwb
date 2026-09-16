@@ -108,8 +108,8 @@ def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
     them against a catalog, because nothing needs to.
 
     Every fiducial carries a prior in :func:`priors`; ``RunConfig`` retains the
-    complete table and ``sampled_params`` selects the NUTS latents, leaving the
-    remaining sites to be fixed by NumPyro effect handlers.
+    complete table and ``analysis.sampled_params`` selects the NUTS latents,
+    leaving the remaining sites to be fixed by NumPyro effect handlers.
 
     Keyword arguments override the file, and may name a fiducial the file does
     not declare. An added fiducial is the caller's to keep consistent with

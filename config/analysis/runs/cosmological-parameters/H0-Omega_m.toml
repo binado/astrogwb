@@ -1,8 +1,7 @@
 # Omega_m with H0 marginalized out analytically.
 
-sampled_params = ["Omega_m"]
-
 [analysis]
+sampled_params = ["Omega_m"]
 network = "ET-2L-aligned-CE-Hanford"
 likelihood = "amplitude_marginalized"
 amplitude_parameter = "H0"

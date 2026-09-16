@@ -4,9 +4,8 @@
 # setting is pinned here so the comparison is clean. The three catalogs are
 # nested prefixes of one seed-42 stream, so the sizes are a clean series.
 
-sampled_params = ["H0"]
-
 [analysis]
+sampled_params = ["H0"]
 network = "ET-2L-aligned-CE-Hanford"
 
 [sampler]

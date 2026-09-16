@@ -194,8 +194,13 @@ class AnalysisConfig(BaseModel):
     #: table -- re-validates. That every *committed* run names one is a repo
     #: test, not a model constraint.
     network: str | None = None
+    observation_time: float = 1.0
     minimum_frequency: float
     maximum_frequency: float
+    #: Unset (empty) -> every key in [priors] except a marginalized amplitude
+    #: parameter; resolved by `RunConfig._resolve_sampled_params`, which needs
+    #: the [priors] table and so cannot live here.
+    sampled_params: tuple[str, ...] = ()
     # The registered population the sampled hyperparameters describe. The
     # default is the one every committed run uses; it reduces exactly to the
     # plain cosmological population at xi_0 = 1, which is how a run that does
@@ -237,6 +242,10 @@ class CosmoConfig(BaseModel):
 class SamplerConfig(BaseModel):
     model_config = _STRICT
 
+    #: The sampling RNG seed. It belongs to the sampler rather than to the run
+    #: as a whole, which is what lets `config/sampler.json` be the single-key
+    #: layer its stem names.
+    seed: int = 42
     num_warmup: Annotated[int, Field(gt=0)]
     num_samples: Annotated[int, Field(gt=0)]
     num_chains: Annotated[int, Field(gt=0)] = 1
@@ -276,15 +285,11 @@ class CatalogConfig(BaseModel):
 class RunConfig(BaseModel):
     model_config = _STRICT
 
-    seed: int = 42
-    observation_time: float = 1.0
     fiducials: dict[str, float]
-    # Complete parameter name -> prior distribution table. `sampled_params`
-    # selects the NUTS latents; every other non-marginalized site is conditioned.
+    # Complete parameter name -> prior distribution table.
+    # `analysis.sampled_params` selects the NUTS latents; every other
+    # non-marginalized site is conditioned.
     priors: dict[str, PriorDistribution]
-    # Unset (empty) -> default to every key in [priors] except a marginalized
-    # amplitude parameter; resolved below.
-    sampled_params: tuple[str, ...] = ()
     analysis: AnalysisConfig
     cosmology: CosmoConfig
     catalog: CatalogConfig
@@ -360,7 +365,7 @@ class RunConfig(BaseModel):
         priors = dict(self.priors)
         amplitude_parameter = self.analysis.amplitude_parameter
         if amplitude_parameter is not None:
-            if amplitude_parameter in self.sampled_params:
+            if amplitude_parameter in self.analysis.sampled_params:
                 raise ValueError(
                     f"analysis.amplitude_parameter {amplitude_parameter!r} "
                     "cannot also appear in sampled_params"
@@ -383,7 +388,7 @@ class RunConfig(BaseModel):
         if missing_fiducials:
             raise ValueError(f"priors missing from [fiducials]: {missing_fiducials}")
 
-        sampled = self.sampled_params or tuple(
+        sampled = self.analysis.sampled_params or tuple(
             p for p in priors if p != amplitude_parameter
         )
         missing_priors = [p for p in sampled if p not in priors]
@@ -395,7 +400,12 @@ class RunConfig(BaseModel):
         if missing_fid:
             raise ValueError(f"sampled_params missing from [fiducials]: {missing_fid}")
 
-        object.__setattr__(self, "sampled_params", sampled)
+        # The field lives on `analysis` but only `RunConfig` can default it:
+        # the fallback is "every prior except a marginalized amplitude", and
+        # [priors] is a sibling block. `object.__setattr__` writes straight into
+        # the nested model's `__dict__`, past `frozen=True` -- the same escape
+        # this validator has always used, one level down.
+        object.__setattr__(self.analysis, "sampled_params", sampled)
         return self
 
     @property
@@ -406,7 +416,11 @@ class RunConfig(BaseModel):
         NUTS latent, but its fiducial value is still what the model pins it
         to. This is a plain property and is not serialized.
         """
-        return {k: v for k, v in self.fiducials.items() if k not in self.sampled_params}
+        return {
+            k: v
+            for k, v in self.fiducials.items()
+            if k not in self.analysis.sampled_params
+        }
 
     @property
     def analysis_grid(self) -> AnalysisGrid:
@@ -416,7 +430,7 @@ class RunConfig(BaseModel):
         only inputs needed to reconstruct the validated run configuration.
         """
         return AnalysisGrid(
-            observation_time=self.observation_time,
+            observation_time=self.analysis.observation_time,
             minimum_frequency=self.analysis.minimum_frequency,
             maximum_frequency=self.analysis.maximum_frequency,
             minimum_redshift=self.cosmology.minimum_redshift,
@@ -449,7 +463,7 @@ def build_run_config(
     """
     cli_overrides: dict[str, Any] = {}
     if seed is not None:
-        cli_overrides["seed"] = seed
+        cli_overrides["sampler"] = {"seed": seed}
     if outdir is not None or label is not None:
         output: dict[str, Any] = {}
         if outdir is not None:

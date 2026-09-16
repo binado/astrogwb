@@ -408,7 +408,7 @@ def prepare_inference_inputs(
 
 def initial_values(config: RunConfig) -> dict[str, float]:
     """Fiducial values NUTS initializes each sampled parameter at."""
-    return {name: config.fiducials[name] for name in config.sampled_params}
+    return {name: config.fiducials[name] for name in config.analysis.sampled_params}
 
 
 def _fix_model_params(model: Any, fixed_params: Mapping[str, Any]) -> Any:

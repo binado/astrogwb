@@ -2,9 +2,8 @@
 # single scalar override [sampler] with a diagonal mass matrix and a
 # shorter warmup.
 
-seed = 42
-
 [sampler]
+seed = 42
 num_warmup = 1000
 num_samples = 2000
 num_chains = 4

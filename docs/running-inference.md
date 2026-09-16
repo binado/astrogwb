@@ -79,8 +79,8 @@ come from. They are where NUTS initializes each sampled parameter, what the
 non-sampled sites are conditioned at, and the reference point an
 amplitude-marginalized run forms its ratio against. Nothing cross-checks them
 against a catalog, because nothing needs to. Every fiducial carries a prior;
-`RunConfig` retains the complete table and `sampled_params` selects the NUTS
-latents, leaving the rest to NumPyro effect handlers.
+`RunConfig` retains the complete table and `analysis.sampled_params` selects
+the NUTS latents, leaving the rest to NumPyro effect handlers.
 
 A prior is `{"dist": "<numpyro.distributions class name>", "kwargs": {...}}`.
 The class is looked up on `numpyro.distributions` by name, so adding a

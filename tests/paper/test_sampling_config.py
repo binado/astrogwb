@@ -17,7 +17,7 @@ def test_assembled_configs_fix_local_merger_rate() -> None:
 
     # The complete prior table declares the site; sampled_params decides that
     # production conditions it rather than giving NUTS a latent.
-    assert "local_merger_rate" not in config.sampled_params
+    assert "local_merger_rate" not in config.analysis.sampled_params
     assert config.fiducials["local_merger_rate"] == expected
     assert "local_merger_rate" in config.priors
     assert config.fixed_params["local_merger_rate"] == expected
@@ -26,15 +26,15 @@ def test_assembled_configs_fix_local_merger_rate() -> None:
 def test_marginalized_amplitude_keeps_its_prior_but_is_not_sampled() -> None:
     # Marginalize H0 out, leaving Omega_m as the only sampled parameter.
     raw = example_raw()
-    raw["sampled_params"] = ["Omega_m"]
+    raw["analysis"]["sampled_params"] = ["Omega_m"]
     raw["analysis"]["likelihood"] = "amplitude_marginalized"
     raw["analysis"]["amplitude_parameter"] = "H0"
     config = build_run_config(raw)
 
-    assert config.sampled_params == ("Omega_m",)
+    assert config.analysis.sampled_params == ("Omega_m",)
 
     # H0 has no NUTS latent, so it must stay out of sampled_params...
-    assert "H0" not in config.sampled_params
+    assert "H0" not in config.analysis.sampled_params
     # ...while its prior still lives in priors for the marginalization...
     assert "H0" in config.priors
 

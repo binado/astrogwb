@@ -1,9 +1,8 @@
 # Xi_0 jointly with H0 under a tight (1%) H0 prior, isolating the
 # propagation-cosmology degeneracy.
 
-sampled_params = ["xi_0"]
-
 [analysis]
+sampled_params = ["xi_0"]
 network = "ET-2L-aligned-CE-Hanford"
 likelihood = "amplitude_marginalized"
 amplitude_parameter = "H0"

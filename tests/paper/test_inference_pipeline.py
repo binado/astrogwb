@@ -443,8 +443,8 @@ def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
             "maximum_frequency": BAND[1],
             "likelihood": "amplitude_marginalized",
             "amplitude_parameter": "H0",
+            "sampled_params": ["Omega_m"],
         },
-        sampled_params=["Omega_m"],
     )
 
     inputs = _prepare(injection_catalog, proposal_catalog, config)

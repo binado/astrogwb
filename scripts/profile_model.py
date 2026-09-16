@@ -140,7 +140,7 @@ def build_potential(
 
     init_strategy = init_to_value(values=initial_values(config))
     info = initialize_model(
-        jax.random.PRNGKey(config.seed),
+        jax.random.PRNGKey(config.sampler.seed),
         model,
         init_strategy=init_strategy,
         model_kwargs=inputs.model_kwargs(),
