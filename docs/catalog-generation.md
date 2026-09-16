@@ -40,7 +40,7 @@ must not enter a catalog merge:
    `approximant="AnalyticInspiral"` selects the closed-form inspiral, and is the only
    approximant accepting the optional `alpha` key (the inspiral termination
    constant, defaulting to the Schwarzschild ISCO value); naming it alongside a
-   Ripple approximant is rejected. `WaveformConfig.build()` constructs the
+   Ripple approximant is rejected. `WaveformMetadata.build()` constructs the
    generator, and `astrogwb.paper.config.waveform_generator()` is the same path
    for a notebook reading this file directly.
 2. `config/population.json` — the population every catalog is drawn from:

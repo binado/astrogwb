@@ -13,14 +13,13 @@ from pydantic import ValidationError
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid
-from astrogwb.metadata import PopulationMetadata
+from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations.bns_madau_dickinson import (
     bns_md_cosmological,
     madau_dickinson_total_merger_rate,
 )
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
-    PolarizationPowerGenerator,
     inspiral_polarization_power,
 )
 
@@ -37,8 +36,8 @@ def source_parameters() -> dict[str, np.ndarray]:
     }
 
 
-def _waveform_generator() -> PolarizationPowerGenerator:
-    return PolarizationPowerGenerator(
+def _waveform_generator() -> WaveformMetadata:
+    return WaveformMetadata(
         approximant="FakeWaveform",
         minimum_frequency=10.0,
         maximum_frequency=12.5,
@@ -74,7 +73,7 @@ POPULATION = PopulationMetadata(
     seed=CATALOG_SEED,
 )
 CATALOG_DEFAULTS: dict[str, Any] = {
-    "_population": POPULATION,
+    "_metadata": CatalogMetadata(waveform=_waveform_generator(), population=POPULATION),
     "_fiducials": POPULATION_RECORD["fiducials"],
 }
 
@@ -89,7 +88,7 @@ CATALOG_DEFAULTS: dict[str, Any] = {
 def test_generator_includes_largest_in_band_bin(
     maximum_frequency: float, expected: np.ndarray
 ) -> None:
-    generator = PolarizationPowerGenerator(
+    generator = WaveformMetadata(
         approximant="Toy",
         minimum_frequency=10.0,
         maximum_frequency=maximum_frequency,
@@ -113,13 +112,15 @@ def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes
     source_parameters: dict[str, np.ndarray],
 ) -> None:
     generator = AnalyticInspiralGenerator(
-        alpha=ISCO_ALPHA,
-        approximant="AnalyticInspiral",
-        minimum_frequency=10.0,
-        maximum_frequency=12.0,
-        reference_frequency=10.0,
-        sampling_frequency=32.0,
-        frequency_resolution=2.0,
+        WaveformMetadata(
+            alpha=ISCO_ALPHA,
+            approximant="AnalyticInspiral",
+            minimum_frequency=10.0,
+            maximum_frequency=12.0,
+            reference_frequency=10.0,
+            sampling_frequency=32.0,
+            frequency_resolution=2.0,
+        )
     )
     catalog = PolarizationPowerCatalog.from_generator(
         source_parameters,
@@ -128,7 +129,7 @@ def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes
         fiducials=POPULATION_RECORD["fiducials"],
     )
 
-    assert catalog.waveform_metadata is generator
+    assert catalog.waveform_metadata is generator.metadata
     assert catalog.seed == 42
     assert catalog.num_samples == 2
     assert catalog.source_parameters["integer_label"].dtype == np.int16
@@ -139,13 +140,15 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
     source_parameters: dict[str, np.ndarray],
 ) -> None:
     generator = AnalyticInspiralGenerator(
-        alpha=ISCO_ALPHA,
-        approximant="AnalyticInspiral",
-        minimum_frequency=9.5,
-        maximum_frequency=14.5,
-        reference_frequency=10.0,
-        sampling_frequency=32.0,
-        frequency_resolution=2.0,
+        WaveformMetadata(
+            alpha=ISCO_ALPHA,
+            approximant="AnalyticInspiral",
+            minimum_frequency=9.5,
+            maximum_frequency=14.5,
+            reference_frequency=10.0,
+            sampling_frequency=32.0,
+            frequency_resolution=2.0,
+        )
     )
 
     frequencies, actual = generator(source_parameters)
@@ -176,7 +179,6 @@ def test_catalog_rejects_malformed_power(power: np.ndarray, message: str) -> Non
             source_parameters={"redshift": np.array([0.1, 0.2])},
             polarization_power=power,
             frequencies=np.array([10.0, 12.0]),
-            waveform_metadata=_waveform_generator(),
             **CATALOG_DEFAULTS,
         )
 
@@ -188,7 +190,6 @@ def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None
             source_parameters={"redshift": values},
             polarization_power=np.ones((2, 2)),
             frequencies=np.array([10.0, 12.0]),
-            waveform_metadata=_waveform_generator(),
             **CATALOG_DEFAULTS,
         )
 
@@ -210,7 +211,6 @@ def test_catalog_requires_a_redshift_column() -> None:
             source_parameters={"source_frame_mass_1": np.array([1.4, 1.3])},
             polarization_power=np.ones((2, 2)),
             frequencies=np.array([10.0, 12.0]),
-            waveform_metadata=_waveform_generator(),
             **CATALOG_DEFAULTS,
         )
 
@@ -226,7 +226,6 @@ def _catalog(redshift: np.ndarray) -> PolarizationPowerCatalog:
             2, num_samples
         ),
         frequencies=np.array([10.0, 12.0]),
-        waveform_metadata=_waveform_generator(),
         **CATALOG_DEFAULTS,
     )
 
@@ -261,7 +260,12 @@ def test_an_unknown_population_name_fails_clearly() -> None:
         seed=catalog.population.seed,
     )
     with pytest.raises(KeyError, match="bns_md_cosmological"):
-        replace(catalog, _population=unknown).get_population()
+        replace(
+            catalog,
+            _metadata=CatalogMetadata(
+                waveform=catalog.waveform_metadata, population=unknown
+            ),
+        ).get_population()
 
 
 def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> None:
@@ -316,13 +320,15 @@ def test_catalog_df_matches_the_generators_requested_resolution(
     source_parameters: dict[str, np.ndarray],
 ) -> None:
     generator = AnalyticInspiralGenerator(
-        alpha=ISCO_ALPHA,
-        approximant="AnalyticInspiral",
-        minimum_frequency=10.0,
-        maximum_frequency=14.0,
-        reference_frequency=10.0,
-        sampling_frequency=32.0,
-        frequency_resolution=2.0,
+        WaveformMetadata(
+            alpha=ISCO_ALPHA,
+            approximant="AnalyticInspiral",
+            minimum_frequency=10.0,
+            maximum_frequency=14.0,
+            reference_frequency=10.0,
+            sampling_frequency=32.0,
+            frequency_resolution=2.0,
+        )
     )
     catalog = PolarizationPowerCatalog.from_generator(
         source_parameters,
@@ -340,7 +346,6 @@ def test_catalog_rejects_a_non_uniform_frequency_grid() -> None:
             source_parameters={"redshift": np.array([0.1, 0.2, 0.3])},
             polarization_power=np.ones((3, 3)),
             frequencies=np.array([10.0, 12.0, 15.0]),
-            waveform_metadata=_waveform_generator(),
             **CATALOG_DEFAULTS,
         )
 
@@ -351,7 +356,6 @@ def test_one_bin_catalog_constructs_but_df_has_no_answer() -> None:
         source_parameters={"redshift": np.array([0.1, 0.2])},
         polarization_power=np.ones((1, 2)),
         frequencies=np.array([10.0]),
-        waveform_metadata=_waveform_generator(),
         **CATALOG_DEFAULTS,
     )
 

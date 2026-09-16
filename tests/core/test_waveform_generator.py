@@ -11,9 +11,9 @@ import pytest
 
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid, uniform_grid_spacing
+from astrogwb.metadata import WaveformMetadata
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
-    PolarizationPowerGenerator,
     RippleGenerator,
 )
 from astrogwb.waveform.generator._ripple import (
@@ -36,18 +36,20 @@ def _ripple_sources() -> dict[str, np.ndarray]:
 @pytest.fixture
 def ripple_generator() -> RippleGenerator:
     return RippleGenerator(
-        approximant="TaylorF2",
-        sampling_frequency=256.0,
-        minimum_frequency=20.0,
-        maximum_frequency=100.0,
-        reference_frequency=20.0,
-        frequency_resolution=4.0,
+        WaveformMetadata(
+            approximant="TaylorF2",
+            sampling_frequency=256.0,
+            minimum_frequency=20.0,
+            maximum_frequency=100.0,
+            reference_frequency=20.0,
+            frequency_resolution=4.0,
+        )
     )
 
 
-def test_base_generator_is_metadata_only_without_a_frequency_grid() -> None:
-    generator = PolarizationPowerGenerator(
-        approximant="Toy",
+def test_waveform_metadata_does_not_claim_a_frequency_grid() -> None:
+    metadata = WaveformMetadata(
+        approximant="TaylorF2",
         minimum_frequency=10.0,
         maximum_frequency=19.0,
         reference_frequency=20.0,
@@ -55,17 +57,16 @@ def test_base_generator_is_metadata_only_without_a_frequency_grid() -> None:
         frequency_resolution=2.0,
     )
 
-    with pytest.raises(NotImplementedError, match="metadata-only descriptor"):
-        _ = generator.frequencies
+    assert not hasattr(metadata, "frequencies")
     np.testing.assert_array_equal(
         uniform_frequency_grid(10.0, 19.0, 2.0),
         np.array([10.0, 12.0, 14.0, 16.0, 18.0]),
     )
-    assert generator.frequency_resolution == 2.0
+    assert metadata.frequency_resolution == 2.0
 
 
 def test_uniform_grid_handles_float_roundoff() -> None:
-    generator = PolarizationPowerGenerator(
+    metadata = WaveformMetadata(
         approximant="Toy",
         minimum_frequency=0.1,
         maximum_frequency=0.3,
@@ -75,41 +76,74 @@ def test_uniform_grid_handles_float_roundoff() -> None:
     )
 
     np.testing.assert_allclose(uniform_frequency_grid(0.1, 0.3, 0.1), [0.1, 0.2, 0.3])
-    assert generator.frequency_resolution == 0.1
+    assert metadata.frequency_resolution == 0.1
 
 
-def test_descriptor_attrs_round_trip_and_exclude_subclass_fields() -> None:
-    """The six base fields survive a round trip; ``alpha`` deliberately does not.
-
-    A concrete generator encodes only the base descriptor, because that is all
-    ``from_attrs`` can rebuild -- persisting ``alpha`` would put an attribute in
-    the file that no reader restores.
-    """
+def test_waveform_metadata_attrs_round_trip_includes_alpha() -> None:
     generator = AnalyticInspiralGenerator(
-        approximant="AnalyticInspiral",
-        minimum_frequency=10.0,
-        maximum_frequency=12.0,
-        reference_frequency=10.0,
-        sampling_frequency=32.0,
-        frequency_resolution=2.0,
-        alpha=ISCO_ALPHA,
+        WaveformMetadata(
+            approximant="AnalyticInspiral",
+            minimum_frequency=10.0,
+            maximum_frequency=12.0,
+            reference_frequency=10.0,
+            sampling_frequency=32.0,
+            frequency_resolution=2.0,
+            alpha=ISCO_ALPHA,
+        )
     )
 
-    attrs = generator.to_attrs()
-    assert "alpha" not in attrs
+    attrs = generator.metadata.to_attrs()
+    assert attrs["alpha"] == ISCO_ALPHA
 
-    restored = PolarizationPowerGenerator.from_attrs(attrs, label="toy.h5")
-    assert type(restored) is PolarizationPowerGenerator
+    restored = WaveformMetadata.from_attrs(attrs, label="toy.h5")
     assert restored.to_attrs() == attrs
 
     del attrs["reference_frequency"]
     with pytest.raises(ValueError, match="toy.h5: missing waveform metadata"):
-        PolarizationPowerGenerator.from_attrs(attrs, label="toy.h5")
+        WaveformMetadata.from_attrs(attrs, label="toy.h5")
 
 
-def test_base_generator_is_a_metadata_only_descriptor() -> None:
-    generator = PolarizationPowerGenerator(
-        approximant="Toy",
+def test_from_attrs_rejects_a_non_numeric_frequency_attribute() -> None:
+    generator = AnalyticInspiralGenerator(
+        WaveformMetadata(
+            approximant="AnalyticInspiral",
+            minimum_frequency=10.0,
+            maximum_frequency=12.0,
+            reference_frequency=10.0,
+            sampling_frequency=32.0,
+            frequency_resolution=2.0,
+            alpha=ISCO_ALPHA,
+        )
+    )
+    attrs = generator.metadata.to_attrs()
+    attrs["minimum_frequency"] = "not-a-number"
+
+    with pytest.raises(ValueError, match="toy.h5: invalid waveform metadata"):
+        WaveformMetadata.from_attrs(attrs, label="toy.h5")
+
+
+def test_from_attrs_rejects_a_non_numeric_alpha_attribute() -> None:
+    generator = AnalyticInspiralGenerator(
+        WaveformMetadata(
+            approximant="AnalyticInspiral",
+            minimum_frequency=10.0,
+            maximum_frequency=12.0,
+            reference_frequency=10.0,
+            sampling_frequency=32.0,
+            frequency_resolution=2.0,
+            alpha=ISCO_ALPHA,
+        )
+    )
+    attrs = generator.metadata.to_attrs()
+    attrs["alpha"] = "not-a-number"
+
+    with pytest.raises(ValueError, match="toy.h5: invalid waveform metadata"):
+        WaveformMetadata.from_attrs(attrs, label="toy.h5")
+
+
+def test_waveform_metadata_builds_a_concrete_generator() -> None:
+    metadata = WaveformMetadata(
+        approximant="TaylorF2",
         minimum_frequency=10.0,
         maximum_frequency=12.0,
         reference_frequency=10.0,
@@ -117,8 +151,9 @@ def test_base_generator_is_a_metadata_only_descriptor() -> None:
         frequency_resolution=2.0,
     )
 
-    with pytest.raises(NotImplementedError, match="metadata-only"):
-        generator({"detector_frame_mass_1": np.array([1.4])})
+    generator = metadata.build()
+    assert isinstance(generator, RippleGenerator)
+    assert generator.metadata is metadata
 
 
 def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
@@ -225,9 +260,9 @@ def test_ripple_generate_accepts_zero_dimensional_scalars(
 @pytest.mark.parametrize(
     ("sampling_frequency", "message"),
     [
-        (0.0, "finite and positive"),
-        (np.inf, "finite and positive"),
-        (np.nan, "finite and positive"),
+        (0.0, "sampling_frequency"),
+        (np.inf, "sampling_frequency"),
+        (np.nan, "sampling_frequency"),
         (1.0e-12, "fewer than two bins"),
     ],
 )
@@ -236,12 +271,14 @@ def test_ripple_generator_rejects_invalid_sampling_frequency(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         RippleGenerator(
-            approximant="TaylorF2",
-            sampling_frequency=sampling_frequency,
-            minimum_frequency=20.0,
-            maximum_frequency=100.0,
-            reference_frequency=20.0,
-            frequency_resolution=4.0,
+            WaveformMetadata(
+                approximant="TaylorF2",
+                sampling_frequency=sampling_frequency,
+                minimum_frequency=20.0,
+                maximum_frequency=100.0,
+                reference_frequency=20.0,
+                frequency_resolution=4.0,
+            )
         )
 
 
@@ -256,12 +293,14 @@ def test_ripple_generator_rejects_non_aligned_minimum_frequency() -> None:
     """
     with pytest.raises(ValueError, match="not on Ripple's frequency grid"):
         RippleGenerator(
-            approximant="TaylorF2",
-            sampling_frequency=256.0,
-            minimum_frequency=21.0,
-            maximum_frequency=100.0,
-            reference_frequency=20.0,
-            frequency_resolution=4.0,
+            WaveformMetadata(
+                approximant="TaylorF2",
+                sampling_frequency=256.0,
+                minimum_frequency=21.0,
+                maximum_frequency=100.0,
+                reference_frequency=20.0,
+                frequency_resolution=4.0,
+            )
         )
 
 
@@ -279,21 +318,25 @@ def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
     """
     with pytest.raises(ValueError, match="not on Ripple's frequency grid"):
         RippleGenerator(
+            WaveformMetadata(
+                approximant="TaylorF2",
+                sampling_frequency=1234.0,
+                minimum_frequency=2.0,
+                maximum_frequency=100.0,
+                reference_frequency=2.0,
+                frequency_resolution=1.0,
+            )
+        )
+
+    aligned = RippleGenerator(
+        WaveformMetadata(
             approximant="TaylorF2",
             sampling_frequency=1234.0,
-            minimum_frequency=2.0,
+            minimum_frequency=2.0 * (1234.0 / 1250.0),
             maximum_frequency=100.0,
             reference_frequency=2.0,
             frequency_resolution=1.0,
         )
-
-    aligned = RippleGenerator(
-        approximant="TaylorF2",
-        sampling_frequency=1234.0,
-        minimum_frequency=2.0 * (1234.0 / 1250.0),
-        maximum_frequency=100.0,
-        reference_frequency=2.0,
-        frequency_resolution=1.0,
     )
     frequencies, _ = aligned(_ripple_sources())
     assert uniform_grid_spacing(np.asarray(frequencies)) == pytest.approx(
@@ -330,12 +373,14 @@ def test_next_smooth_even_is_the_smallest_admissible_length(minimum: int) -> Non
 def test_generator_grid_matches_ripples_own_5_smooth_rounding() -> None:
     """``fs=1234`` rounds to 1250, not 1234: the case a power-of-two rule got wrong."""
     generator = RippleGenerator(
-        approximant="TaylorF2",
-        sampling_frequency=1234.0,
-        minimum_frequency=2.0 * (1234.0 / 1250.0),
-        maximum_frequency=100.0,
-        reference_frequency=2.0,
-        frequency_resolution=1.0,
+        WaveformMetadata(
+            approximant="TaylorF2",
+            sampling_frequency=1234.0,
+            minimum_frequency=2.0 * (1234.0 / 1250.0),
+            maximum_frequency=100.0,
+            reference_frequency=2.0,
+            frequency_resolution=1.0,
+        )
     )
 
     assert generator.n_samples == 1250
@@ -377,12 +422,14 @@ def test_ripple_generator_requires_x64(ripple_generator: RippleGenerator) -> Non
 def test_check_sources_rejects_values_the_approximant_cannot_carry() -> None:
     """An aligned-spin model would otherwise ignore in-plane spin in silence."""
     generator = RippleGenerator(
-        approximant="IMRPhenomXAS",
-        sampling_frequency=256.0,
-        minimum_frequency=20.0,
-        maximum_frequency=100.0,
-        reference_frequency=20.0,
-        frequency_resolution=4.0,
+        WaveformMetadata(
+            approximant="IMRPhenomXAS",
+            sampling_frequency=256.0,
+            minimum_frequency=20.0,
+            maximum_frequency=100.0,
+            reference_frequency=20.0,
+            frequency_resolution=4.0,
+        )
     )
 
     with pytest.raises(ValueError, match="aligned-spin model"):
@@ -447,12 +494,14 @@ def test_generate_batch_still_rejects_names_and_shapes(
 def test_unsupported_approximant_is_rejected_at_construction() -> None:
     with pytest.raises(ValueError, match="unsupported approximant"):
         RippleGenerator(
-            approximant="NotAWaveform",
-            sampling_frequency=256.0,
-            minimum_frequency=20.0,
-            maximum_frequency=100.0,
-            reference_frequency=20.0,
-            frequency_resolution=4.0,
+            WaveformMetadata(
+                approximant="NotAWaveform",
+                sampling_frequency=256.0,
+                minimum_frequency=20.0,
+                maximum_frequency=100.0,
+                reference_frequency=20.0,
+                frequency_resolution=4.0,
+            )
         )
 
 
@@ -544,7 +593,7 @@ def test_power_matches_the_gwmock_backend(approximant: str) -> None:
     }
     sources = _parity_sources(approximant)
     generator = RippleGenerator(
-        approximant=approximant, frequency_resolution=1.0, **settings
+        WaveformMetadata(approximant=approximant, frequency_resolution=1.0, **settings)
     )
     frequencies, power = _gwmock_reference(
         approximant, sources, segment_duration=1.0, **settings
@@ -571,12 +620,14 @@ def test_dropping_the_cutoff_window_changes_nothing_in_band() -> None:
     from gwmock_signal.waveform.backends.ripple import _cutoff_window
 
     generator = RippleGenerator(
-        approximant="IMRPhenomXAS_NRTidalv3",
-        sampling_frequency=512.0,
-        minimum_frequency=16.0,
-        maximum_frequency=64.0,
-        reference_frequency=16.0,
-        frequency_resolution=1.0,
+        WaveformMetadata(
+            approximant="IMRPhenomXAS_NRTidalv3",
+            sampling_frequency=512.0,
+            minimum_frequency=16.0,
+            maximum_frequency=64.0,
+            reference_frequency=16.0,
+            frequency_resolution=1.0,
+        )
     )
     full_grid = jnp.arange(generator.n_samples // 2 + 1) * (512.0 / generator.n_samples)
     window = jnp.asarray(_cutoff_window(full_grid, 16.0, 0.05, jnp))

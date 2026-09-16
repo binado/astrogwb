@@ -78,6 +78,7 @@ from astrogwb.gwb import (
     uniform_prior_mass_moments,
 )
 from astrogwb.importance.spectral import build_importance_spectrum
+from astrogwb.metadata import WaveformMetadata
 from astrogwb.paper.config import fiducials, population_metadata, population_model
 from astrogwb.populations import build_population
 from astrogwb.utils.sampling import sample_sources
@@ -309,13 +310,15 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> PolarizationPowerCat
     return PolarizationPowerCatalog.from_generator(
         parameters,
         generator=AnalyticInspiralGenerator(
-            alpha=ISCO_ALPHA,
-            approximant="AnalyticInspiral",
-            minimum_frequency=F_MIN,
-            maximum_frequency=f_max,
-            reference_frequency=F_MIN,
-            sampling_frequency=2.0 * f_max,
-            frequency_resolution=df,
+            WaveformMetadata(
+                alpha=ISCO_ALPHA,
+                approximant="AnalyticInspiral",
+                minimum_frequency=F_MIN,
+                maximum_frequency=f_max,
+                reference_frequency=F_MIN,
+                sampling_frequency=2.0 * f_max,
+                frequency_resolution=df,
+            )
         ),
         population=POPULATION,
         fiducials=FIDUCIALS,

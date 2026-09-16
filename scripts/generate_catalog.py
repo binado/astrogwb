@@ -179,17 +179,19 @@ def build_catalog(definition: CatalogDefinition) -> PolarizationPowerCatalog:
     logger.info(
         "Generating %s waveforms for %d events (f_min=%.1f Hz, f_ref=%.1f Hz, "
         "f_s=%.1f Hz)",
-        generator.approximant,
+        generator.metadata.approximant,
         definition.num_samples,
-        generator.minimum_frequency,
-        generator.reference_frequency,
-        generator.sampling_frequency,
+        generator.metadata.minimum_frequency,
+        generator.metadata.reference_frequency,
+        generator.metadata.sampling_frequency,
     )
     segment_duration = getattr(generator, "segment_duration", None)
     n_samples = getattr(generator, "n_samples", None)
     if segment_duration is not None and n_samples is not None:
         logger.info("Grid: segment=%.4g s, n=%d", segment_duration, n_samples)
-    logger.info("Truncated frequency axis to f <= %.1f Hz", generator.maximum_frequency)
+    logger.info(
+        "Truncated frequency axis to f <= %.1f Hz", generator.metadata.maximum_frequency
+    )
 
     # Values are checked once, here, on the concrete catalog: generation is
     # trace-safe and therefore trusts its inputs, so a population carrying a

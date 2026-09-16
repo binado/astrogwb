@@ -32,9 +32,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb.frequency import uniform_grid_spacing
-from astrogwb.metadata import PopulationMetadata
+from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import Population
-from astrogwb.waveform import PolarizationPowerGenerator
 
 __all__ = ["SpectralDensityCatalog"]
 
@@ -58,8 +57,7 @@ class SpectralDensityCatalog:
     n_events: NDArray[Any]
     total_merger_rate: NDArray[Any]
     hyperparameters: Mapping[str, NDArray[Any]]
-    waveform_metadata: PolarizationPowerGenerator
-    _population: PopulationMetadata
+    _metadata: CatalogMetadata
     n_max_sigma: float
     observation_time: float
 
@@ -122,27 +120,32 @@ class SpectralDensityCatalog:
     @property
     def population(self) -> PopulationMetadata:
         """The population declaration these draws were produced from."""
-        return self._population
+        return self._metadata.population
+
+    @property
+    def waveform_metadata(self) -> WaveformMetadata:
+        """The waveform settings that produced these draws."""
+        return self._metadata.waveform
 
     @property
     def seed(self) -> int:
         """The seed the draws were folded from."""
-        return self._population.seed
+        return self.population.seed
 
     @property
     def population_model_name(self) -> str:
         """The registry key of the population these draws used."""
-        return self._population.model_name
+        return self.population.model_name
 
     @property
     def population_model_kwargs(self) -> Mapping[str, Any]:
         """The model's construction kwargs, as persisted."""
-        return dict(self._population.model_kwargs)
+        return dict(self.population.model_kwargs)
 
     @property
     def density_sites(self) -> tuple[str, ...]:
         """Ordered source-density factors included in importance weighting."""
-        return self._population.density_sites
+        return self.population.density_sites
 
     def get_population(self) -> Population:
         """Reconstruct the generating population with its kwargs bound.
@@ -150,7 +153,7 @@ class SpectralDensityCatalog:
         ``merger_rate_fn`` is ``None`` only for a proposal density, which the
         simulator that writes this format refuses to draw from.
         """
-        return self._population.build()
+        return self.population.build()
 
     @property
     def num_draws(self) -> int:

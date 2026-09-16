@@ -16,12 +16,11 @@ from astrogwb.catalog._io import (
     SPECTRAL_DENSITY_DATASETS,
     SPECTRAL_DENSITY_FORMAT_NAME,
 )
-from astrogwb.metadata import PopulationMetadata
-from astrogwb.waveform import PolarizationPowerGenerator
+from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 
 
 def _catalog(**overrides: Any) -> SpectralDensityCatalog:
-    waveform = PolarizationPowerGenerator(
+    waveform = WaveformMetadata(
         approximant="TaylorF2",
         minimum_frequency=20.0,
         maximum_frequency=32.0,
@@ -43,16 +42,22 @@ def _catalog(**overrides: Any) -> SpectralDensityCatalog:
             "H0": np.array([67.0, 67.0]),
             "local_merger_rate": np.array([800.0, 800.0]),
         },
-        "waveform_metadata": waveform,
-        "_population": PopulationMetadata(
-            model_name="bns_md_cosmological",
-            model_kwargs={
-                "minimum_redshift": 0.1,
-                "maximum_redshift": 10.0,
-                "n_grid": 32,
-            },
-            density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
-            seed=7,
+        "_metadata": CatalogMetadata(
+            waveform=waveform,
+            population=PopulationMetadata(
+                model_name="bns_md_cosmological",
+                model_kwargs={
+                    "minimum_redshift": 0.1,
+                    "maximum_redshift": 10.0,
+                    "n_grid": 32,
+                },
+                density_sites=(
+                    "redshift",
+                    "source_frame_mass_1",
+                    "source_frame_mass_2",
+                ),
+                seed=7,
+            ),
         ),
         "n_max_sigma": 5.0,
         "observation_time": 1.0,
