@@ -63,19 +63,14 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-import numpyro.distributions as dist
 import pandas as pd
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
+from numpyro.distributions import Distribution, Normal, Uniform
 
+from astrogwb.metadata import PopulationMetadata, WaveformMetadata
 from astrogwb.paper.catalogs import load_run_catalog
-from astrogwb.paper.config.constants import (
-    DEFAULT_NETWORK,
-    FIDUCIALS,
-    NETWORK_DETECTORS,
-    NETWORK_EXPERIMENT,
-    PARAMETER_LABELS,
-)
+from astrogwb.paper.config import fiducials, networks, priors
 from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.inference import prepare_inference_inputs
 from astrogwb.paper.plotting import (
@@ -87,6 +82,7 @@ from astrogwb.paper.plotting import (
     TRUTH,
     Network,
     detector_network_styles,
+    parameter_labels,
     plot_corner_for_posterior_grid,
     use_paper_style,
 )
@@ -124,21 +120,18 @@ ANALYSIS_GRID = AnalysisGrid(
     n_grid=256,
 )
 
-# Inlined to match config/analysis/base/parameters.toml. Every fiducial carries a
-# prior: gwb_spectral_density_model samples every key, and LogDensityFn's `fixed=`
-# pins the ones a given sweep is not gridding.
-PRIORS: dict[str, dist.Distribution] = {
-    "H0": dist.Uniform(20.0, 140.0),
-    "Omega_m": dist.Normal(0.3096, 0.006),
-    "xi_0": dist.Uniform(0.5, 5.0),
-    "xi_n": dist.Uniform(0.3, 3.0),
-    "gamma": dist.Uniform(-10.0, 10.0),
-    "kappa": dist.Uniform(-10.0, 10.0),
-    "z_peak": dist.Uniform(0.0, 2.5),
-    "local_merger_rate": dist.Normal(770.0, 7.7),
-    "minimum_mass": dist.Uniform(0.5, 1.5),
-    "mass_width": dist.Uniform(0.5, 3.0),
-}
+# Shared scientific values come from the same JSON layers used by the run
+# configuration. Every fiducial carries a prior: `gwb_spectral_density_model`
+# samples every key, and `LogDensityFn`'s `fixed=` pins the ones a given sweep
+# is not gridding.
+FIDUCIALS = fiducials()
+PRIORS: dict[str, Distribution] = priors()
+NETWORK_CONFIG = networks()
+PARAMETER_LABELS = parameter_labels()
+
+# This is a notebook/presentation choice: it selects the network for the two
+# extra joint plots and is not part of the scientific configuration layers.
+DEFAULT_NETWORK = "ET-2L-aligned-CE-Hanford"
 
 COVERAGE_SIGMAS: float = 5.0  # grid half-width, in predicted sigma
 NPOINTS_1D: int = 256
@@ -155,15 +148,15 @@ FIGURE_DIR = Path("figures")
 # %% [markdown]
 # ## Detector networks and fiducials
 #
-# `NETWORK_DETECTORS` and `plotting.DETECTOR_NETWORKS` are keyed by the same run
-# names, so they compose directly into `Network` objects without a lookup table.
+# `networks()` and `plotting.DETECTOR_NETWORKS` are keyed by the same run names,
+# so they compose directly into `Network` objects without a lookup table.
 
 # %%
 NETWORKS: tuple[Network, ...] = tuple(
-    Network(name, label, NETWORK_DETECTORS[name]) for name, label in DETECTOR_NETWORKS
+    Network(name, label, NETWORK_CONFIG[name]) for name, label in DETECTOR_NETWORKS
 )
 
-print(f"Detector networks ({NETWORK_EXPERIMENT}):")
+print("Detector networks:")
 pd.DataFrame(
     [
         {"name": n.name, "label": n.label, "detectors": ", ".join(n.detectors)}
@@ -180,30 +173,39 @@ pd.DataFrame(
 # proposal catalog's own recorded density. Nothing here restates the proposal:
 # the file carries it.
 #
-# `FIDUCIALS` still come from `astrogwb.paper.config.constants` -- they are the
-# analysis truth the grids are centred on, not a second copy of the catalog
-# record. `tests/paper/test_config_constants.py` guards them against the run
-# TOMLs.
+# `FIDUCIALS` and `PRIORS` come from `astrogwb.paper.config` -- they are the
+# analysis truth and prior the grids use, not a second copy of the catalog
+# record. The catalog itself remains authoritative about its population and
+# waveform provenance through `PopulationMetadata` and `WaveformMetadata`.
 
 # %%
 injection_catalog = load_run_catalog(INJECTION_CATALOG_PATH, label="injection")
 proposal_catalog = load_run_catalog(PROPOSAL_CATALOG_PATH, label="proposal")
 
+PROPOSAL_POPULATION_METADATA: PopulationMetadata = proposal_catalog.population
+PROPOSAL_WAVEFORM_METADATA: WaveformMetadata = proposal_catalog.waveform_metadata
+
 # Bound to the analysis grid once: it is static pytree metadata on the
 # estimator. At xi_0 = 1 this reduces to the catalog's cosmological law.
 TARGET_MODEL = build_population(
     "bns_md_modified_propagation",
-    settings={
-        "z_min": ANALYSIS_GRID.minimum_redshift,
-        "z_max": ANALYSIS_GRID.maximum_redshift,
-        "n_grid": ANALYSIS_GRID.n_grid,
-    },
+    minimum_redshift=ANALYSIS_GRID.minimum_redshift,
+    maximum_redshift=ANALYSIS_GRID.maximum_redshift,
+    n_grid=ANALYSIS_GRID.n_grid,
 )
 print(
     "proposal:",
-    proposal_catalog.population_model_name,
+    PROPOSAL_POPULATION_METADATA.model_name,
+    "seed=",
+    PROPOSAL_POPULATION_METADATA.seed,
     "n_samples=",
     proposal_catalog.num_samples,
+)
+print(
+    "proposal waveform:",
+    PROPOSAL_WAVEFORM_METADATA.approximant,
+    "frequency_resolution=",
+    PROPOSAL_WAVEFORM_METADATA.frequency_resolution,
 )
 
 # %% [markdown]
@@ -254,12 +256,12 @@ def fisher_window(
     return low, high
 
 
-def prior_window(prior: dist.Distribution, *, sigmas: float) -> tuple[float, float]:
+def prior_window(prior: Distribution, *, sigmas: float) -> tuple[float, float]:
     """Grid window implied by a prior: full range for Uniform, loc +/- sigmas*scale
     for Normal."""
-    if isinstance(prior, dist.Uniform):
+    if isinstance(prior, Uniform):
         return float(prior.low), float(prior.high)
-    if isinstance(prior, dist.Normal):
+    if isinstance(prior, Normal):
         return (
             float(prior.loc - sigmas * prior.scale),
             float(prior.loc + sigmas * prior.scale),
@@ -354,7 +356,7 @@ def build_log_density(network: Network) -> tuple[LogDensityFn, dict[str, jax.Arr
         proposal_catalog,
         grid=ANALYSIS_GRID,
         detectors=network.detectors,
-        target_model=TARGET_MODEL,
+        target=TARGET_MODEL,
     )
     model = partial(
         gwb_spectral_density_model,
