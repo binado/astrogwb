@@ -295,12 +295,12 @@ def inspiral_polarization_power(
 class AnalyticInspiralGenerator(PolarizationPowerGenerator):
     """Generate inspiral-only polarization power on the descriptor grid."""
 
-    alpha: float
-
     @property
     def frequencies(self) -> np.ndarray:
         return uniform_frequency_grid(
-            self.minimum_frequency, self.maximum_frequency, self.frequency_resolution
+            self.metadata.minimum_frequency,
+            self.metadata.maximum_frequency,
+            self.metadata.frequency_resolution,
         )
 
     def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
@@ -308,8 +308,9 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
             name: jnp.asarray(values) for name, values in source_parameters.items()
         }
         frequencies = self.frequencies
+        assert self.metadata.alpha is not None
         return inspiral_polarization_power(
-            frequencies, prepared_parameters, alpha=self.alpha
+            frequencies, prepared_parameters, alpha=self.metadata.alpha
         ).T
 
     def __call__(

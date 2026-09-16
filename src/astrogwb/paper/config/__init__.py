@@ -34,7 +34,7 @@ any working directory but the repository root) and, for the priors, a numpyro
 import on every ``--dry-run``. :func:`priors` therefore imports
 :func:`~astrogwb.paper.config.mcmc.materialize_prior` inside its own body;
 :func:`waveform_generator` imports
-:class:`~astrogwb.paper.config.catalogs.WaveformConfig` the same way. A
+:class:`~astrogwb.paper.config.catalogs.WaveformMetadata` the same way. A
 subprocess test in ``tests/paper/test_cli.py`` pins both halves.
 
 Paths are relative to the working directory, which for the workflow and every
@@ -170,7 +170,7 @@ def waveform_generator(
     any other name is a Ripple approximant.
 
     The settings are validated through
-    :class:`~astrogwb.paper.config.catalogs.WaveformConfig` rather than coerced
+    :class:`~astrogwb.paper.config.catalogs.WaveformMetadata` rather than coerced
     field by field here, so this accessor and a catalog def reach a generator
     down the same path and an override is checked instead of trusted.
 
@@ -179,7 +179,7 @@ def waveform_generator(
     package via ``config.runs``. Ripple construction initializes the XLA
     backend, so this is not safe to call before ``configure_runtime``.
     """
-    from astrogwb.paper.config.catalogs import WaveformConfig
+    from astrogwb.metadata import WaveformMetadata
 
     settings = {**_load((root or Path()) / WAVEFORM_PATH, "waveform"), **kwargs}
-    return WaveformConfig.model_validate(settings).build()
+    return WaveformMetadata.model_validate(settings).build()

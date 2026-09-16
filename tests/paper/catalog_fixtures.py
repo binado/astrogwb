@@ -12,10 +12,9 @@ from collections.abc import Mapping
 import numpy as np
 
 from astrogwb.catalog import PolarizationPowerCatalog
-from astrogwb.metadata import PopulationMetadata
+from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import build_population
 from astrogwb.utils.sampling import evaluate_sources
-from astrogwb.waveform import PolarizationPowerGenerator
 
 #: The population every fixture catalog is drawn from, matching what
 #: ``config/catalogs/base/population.toml`` commits.
@@ -132,19 +131,21 @@ def make_catalog(
         polarization_power=polarization_power,
         frequencies=minimum_frequency
         + df * np.arange(num_frequencies, dtype=np.float64),
-        waveform_metadata=PolarizationPowerGenerator(
-            approximant=approximant,
-            minimum_frequency=minimum_frequency,
-            maximum_frequency=minimum_frequency + df * (num_frequencies - 1),
-            reference_frequency=reference_frequency,
-            sampling_frequency=sampling_frequency,
-            frequency_resolution=df,
-        ),
-        _population=PopulationMetadata(
-            model_name=model_name,
-            model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
-            density_sites=density_sites,
-            seed=seed,
+        _metadata=CatalogMetadata(
+            waveform=WaveformMetadata(
+                approximant=approximant,
+                minimum_frequency=minimum_frequency,
+                maximum_frequency=minimum_frequency + df * (num_frequencies - 1),
+                reference_frequency=reference_frequency,
+                sampling_frequency=sampling_frequency,
+                frequency_resolution=df,
+            ),
+            population=PopulationMetadata(
+                model_name=model_name,
+                model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
+                density_sites=density_sites,
+                seed=seed,
+            ),
         ),
         _fiducials=dict(fiducials or PAPER_POPULATION_PARAMS),
     )

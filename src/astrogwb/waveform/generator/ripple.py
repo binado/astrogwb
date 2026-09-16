@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 from numpy.typing import ArrayLike
 
+from astrogwb.metadata import WaveformMetadata
 from astrogwb.utils import require_x64
 from astrogwb.waveform.generator._ripple import (
     build_kernel,
@@ -53,23 +54,11 @@ class RippleGenerator(PolarizationPowerGenerator):
 
     def __init__(
         self,
-        *,
-        approximant: str,
-        sampling_frequency: float,
-        minimum_frequency: float,
-        maximum_frequency: float,
-        reference_frequency: float,
-        frequency_resolution: float,
+        metadata: WaveformMetadata,
     ) -> None:
-        resolution = float(frequency_resolution)
-        if not np.isfinite(resolution) or resolution <= 0.0:
-            raise ValueError("frequency_resolution must be a finite positive scalar")
-        resolved_sampling_frequency = float(sampling_frequency)
-        if (
-            not np.isfinite(resolved_sampling_frequency)
-            or resolved_sampling_frequency <= 0.0
-        ):
-            raise ValueError("sampling_frequency must be finite and positive")
+        super().__init__(metadata)
+        resolution = metadata.frequency_resolution
+        resolved_sampling_frequency = metadata.sampling_frequency
         # astrogwb's own power-of-two rounding policy for the segment duration
         # -- deliberate, and only ever makes the grid finer than asked.
         segment_duration = float(2.0 ** np.ceil(np.log2(1.0 / resolution)))
@@ -78,15 +67,6 @@ class RippleGenerator(PolarizationPowerGenerator):
         # instead, which can say which band it failed to cover.
         n_samples = next_smooth_even(
             int(np.ceil(segment_duration * resolved_sampling_frequency))
-        )
-
-        super().__init__(
-            approximant=approximant,
-            minimum_frequency=minimum_frequency,
-            maximum_frequency=maximum_frequency,
-            reference_frequency=reference_frequency,
-            sampling_frequency=resolved_sampling_frequency,
-            frequency_resolution=resolution,
         )
 
         # NumPy, not JAX: constructing a generator must not touch the XLA
@@ -112,7 +92,9 @@ class RippleGenerator(PolarizationPowerGenerator):
         object.__setattr__(self, "_frequencies", grid)
         object.__setattr__(self, "_band", band)
         object.__setattr__(
-            self, "_kernel", build_kernel(self.approximant, self.reference_frequency)
+            self,
+            "_kernel",
+            build_kernel(metadata.approximant, metadata.reference_frequency),
         )
 
     def _resolve_band(self, grid: np.ndarray) -> slice:
@@ -128,24 +110,25 @@ class RippleGenerator(PolarizationPowerGenerator):
         bin was Ripple's NaN at DC, zeroed on the way out.
         """
         in_band = np.flatnonzero(
-            (grid >= self.minimum_frequency) & (grid <= self.maximum_frequency)
+            (grid >= self.metadata.minimum_frequency)
+            & (grid <= self.metadata.maximum_frequency)
         )
         if in_band.size < 2:
             raise ValueError(
                 "Ripple's in-band frequency grid has fewer than two bins in "
-                f"[{self.minimum_frequency}, {self.maximum_frequency}] Hz"
+                f"[{self.metadata.minimum_frequency}, {self.metadata.maximum_frequency}] Hz"
             )
         first_frequency = float(grid[in_band[0]])
         tolerance = (
             _ALIGNMENT_TOLERANCE_EPS
             * np.finfo(np.float64).eps
-            * max(1.0, abs(self.minimum_frequency), abs(first_frequency))
+            * max(1.0, abs(self.metadata.minimum_frequency), abs(first_frequency))
         )
         if not np.isclose(
-            first_frequency, self.minimum_frequency, rtol=0.0, atol=tolerance
+            first_frequency, self.metadata.minimum_frequency, rtol=0.0, atol=tolerance
         ):
             raise ValueError(
-                f"minimum_frequency ({self.minimum_frequency} Hz) is not on "
+                f"minimum_frequency ({self.metadata.minimum_frequency} Hz) is not on "
                 "Ripple's frequency grid; the nearest in-band bin is "
                 f"{first_frequency} Hz"
             )
@@ -175,7 +158,7 @@ class RippleGenerator(PolarizationPowerGenerator):
         Eager only; see
         :meth:`~astrogwb.waveform.PolarizationPowerGenerator.check_sources`.
         """
-        check_sources(self.approximant, source_parameters)
+        check_sources(self.metadata.approximant, source_parameters)
 
     @require_x64
     def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:
@@ -189,7 +172,7 @@ class RippleGenerator(PolarizationPowerGenerator):
         construction: no model reads it, and the approximants astrogwb uses
         evaluate it to NaN.
         """
-        events = ripple_parameters(self.approximant, source_parameters)
+        events = ripple_parameters(self.metadata.approximant, source_parameters)
         plus, cross = self._kernel(jnp.asarray(self._frequencies), events)
         return polarization_power(plus[:, self._band], cross[:, self._band])
 

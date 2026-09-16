@@ -37,14 +37,13 @@ from astrogwb.importance.spectral import (
     evaluate_log_weights,
     importance_spectral_density,
 )
-from astrogwb.metadata import PopulationMetadata
+from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     SourceFn,
     build_population,
 )
 from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
-from astrogwb.waveform import PolarizationPowerGenerator
 
 #: The catalog column naming the effective distance the stored polarization
 #: power was generated at.
@@ -96,8 +95,8 @@ def _source_parameters(
     )
 
 
-def _waveform_metadata(num_frequencies: int) -> PolarizationPowerGenerator:
-    return PolarizationPowerGenerator(
+def _waveform_metadata(num_frequencies: int) -> WaveformMetadata:
+    return WaveformMetadata(
         approximant="Toy",
         minimum_frequency=10.0,
         maximum_frequency=10.0 + 2.0 * (num_frequencies - 1),
@@ -120,12 +119,14 @@ def _catalog(
         },
         polarization_power=np.asarray(power),
         frequencies=10.0 + 2.0 * np.arange(power.shape[0]),
-        waveform_metadata=_waveform_metadata(power.shape[0]),
-        _population=PopulationMetadata(
-            model_name="bns_md_cosmological",
-            model_kwargs=MODEL_KWARGS,
-            density_sites=density_sites,
-            seed=MOCK_POPULATION_SEED,
+        _metadata=CatalogMetadata(
+            waveform=_waveform_metadata(power.shape[0]),
+            population=PopulationMetadata(
+                model_name="bns_md_cosmological",
+                model_kwargs=MODEL_KWARGS,
+                density_sites=density_sites,
+                seed=MOCK_POPULATION_SEED,
+            ),
         ),
         _fiducials=params,
     )

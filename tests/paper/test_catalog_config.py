@@ -224,7 +224,7 @@ def test_alpha_is_rejected_for_a_non_analytical_approximant(tmp_path: Path) -> N
     path.write_text(
         _TOY_DEF.format(approximant="TaylorF2", alpha="alpha = 0.02"), encoding="utf-8"
     )
-    with pytest.raises(ValueError, match="waveform.alpha is only valid"):
+    with pytest.raises(ValueError, match="alpha is only valid"):
         load_catalog_layers([path])
 
 
@@ -237,7 +237,7 @@ def test_a_declared_alpha_reaches_the_analytical_generator(tmp_path: Path) -> No
     generator = load_catalog_layers([path]).waveform.build()
 
     assert isinstance(generator, AnalyticInspiralGenerator)
-    assert generator.alpha == 0.02
+    assert generator.metadata.alpha == 0.02
 
 
 def test_an_omitted_alpha_defaults_to_isco(tmp_path: Path) -> None:
@@ -248,7 +248,7 @@ def test_an_omitted_alpha_defaults_to_isco(tmp_path: Path) -> None:
     generator = load_catalog_layers([path]).waveform.build()
 
     assert isinstance(generator, AnalyticInspiralGenerator)
-    assert generator.alpha == ISCO_ALPHA
+    assert generator.metadata.alpha == ISCO_ALPHA
 
 
 def test_no_catalog_layers_is_rejected() -> None:
