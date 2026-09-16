@@ -32,12 +32,20 @@ from repo import REPO_ROOT
 SCAN_RANGE_EXEMPTION = "GRID_SCAN_RANGES"
 
 CONSUMERS = (
+    "notebooks/catalog_convergence.py",
     "notebooks/mcmc.py",
     "scripts/importance_weights_grid.py",
     "scripts/mcmc_cosmological_parameters.py",
     "scripts/mcmc_modified_propagation.py",
     "scripts/fiducial_spectrum.py",
 )
+
+#: `notebooks/catalog_convergence.py` declares no prior at all -- it is a
+#: convergence study, not an inference -- so the distribution rule below does
+#: not apply to it. Its one `dist` call is the Gaussian *likelihood* of the
+#: measured spectrum, which is a model, not a copied prior. It is still held to
+#: the table rule above: it draws its catalog at `config/fiducials.json`.
+PRIOR_FREE_CONSUMERS = ("notebooks/catalog_convergence.py",)
 
 
 def _assignments(tree: ast.AST) -> list[tuple[list[str], ast.AST]]:
@@ -87,7 +95,9 @@ def test_no_consumer_declares_its_own_fiducials_or_priors(relative: str) -> None
             )
 
 
-@pytest.mark.parametrize("relative", CONSUMERS)
+@pytest.mark.parametrize(
+    "relative", [name for name in CONSUMERS if name not in PRIOR_FREE_CONSUMERS]
+)
 def test_no_consumer_constructs_a_prior_distribution(relative: str) -> None:
     """No `dist.Uniform(...)` / `dist.Normal(...)` outside the scan-range table.
 

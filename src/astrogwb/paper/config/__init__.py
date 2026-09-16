@@ -6,9 +6,12 @@ not re-exported; import them explicitly.
 
 What this package *does* expose is the three shared tables that
 ``config/fiducials.json``, ``config/priors.json`` and ``config/networks.json``
-own -- the same bytes the workflow merges into every run -- and
-:func:`waveform_generator`, which builds a polarization-power generator from
-``config/waveform.json``. That file is catalog layer 0, not a run layer.
+own -- the same bytes the workflow merges into every run -- plus the three
+accessors that build something from a shared catalog layer:
+:func:`waveform_generator` from ``config/waveform.json``, and
+:func:`population_model` / :func:`population_metadata` from
+``config/population.json``. Those two files are catalog layers, not run layers;
+``config/fiducials.json`` is both.
 Before the tables lived here, the notebook and the figure scripts each kept a
 hand-written copy, and those copies drifted: the notebook sampled
 ``local_merger_rate`` under a prior that excluded its own fiducial. Consume
@@ -19,6 +22,10 @@ them from here instead::
     fid = fiducials()
     detectors = networks()["ET-2L-aligned-CE-Hanford"]
     generator = waveform_generator()
+
+There is deliberately no accessor for the hyperparameters a catalog is drawn
+at: that is :func:`fiducials`, which ``config/catalogs/<name>.json`` inherits
+as a layer like any other. One table, one file.
 
 Every accessor also takes keyword overrides, merged over the file, so a
 notebook can vary one entry without editing JSON or retyping the table::
@@ -57,6 +64,7 @@ from typing import TYPE_CHECKING, Any
 from astrogwb.paper.config.runs import (
     FIDUCIALS_PATH,
     NETWORKS_PATH,
+    POPULATION_PATH,
     PRIORS_PATH,
     WAVEFORM_PATH,
 )
@@ -65,9 +73,18 @@ from astrogwb.paper.utils import load_mapping
 if TYPE_CHECKING:
     from numpyro.distributions import Distribution
 
+    from astrogwb.metadata import PopulationMetadata
+    from astrogwb.populations.registry import Population
     from astrogwb.waveform import PolarizationPowerGenerator
 
-__all__ = ["fiducials", "networks", "priors", "waveform_generator"]
+__all__ = [
+    "fiducials",
+    "networks",
+    "population_metadata",
+    "population_model",
+    "priors",
+    "waveform_generator",
+]
 
 
 @cache
@@ -183,3 +200,63 @@ def waveform_generator(
 
     settings = {**_load((root or Path()) / WAVEFORM_PATH, "waveform"), **kwargs}
     return WaveformConfig.model_validate(settings).build()
+
+
+def population_model(root: Path | None = None, **kwargs: float) -> Population:
+    """Build the generating population from ``config/population.json``.
+
+    Returns the registered :class:`~astrogwb.populations.registry.Population` --
+    source model and merger rate together -- with its construction settings
+    bound. Keyword arguments override ``model_kwargs``, which is how a notebook
+    studies the committed population on a coarser grid or a narrower redshift
+    window without editing the file::
+
+        population_model(n_grid=256, minimum_redshift=0.3)
+
+    A key the named population does not take raises here rather than being
+    filtered away, which is the same contract a catalog def gets.
+
+    Imports the registry in its own body: populating it means importing the
+    population models, which reaches JAX, so this is not safe to call before
+    ``configure_runtime``. Keeping the import here is what lets the ``Snakefile``
+    import this package to build its DAG.
+    """
+    from astrogwb.populations import build_population
+
+    table = _load((root or Path()) / POPULATION_PATH, "population")
+    settings = {**table.get("model_kwargs", {}), **kwargs}
+    return build_population(table["model_name"], **settings)
+
+
+def population_metadata(
+    root: Path | None = None, *, seed: int, **kwargs: float
+) -> PopulationMetadata:
+    """The population record a catalog drawn from ``config/population.json`` carries.
+
+    ``seed`` is required and has no entry in the file: the shared layer declares
+    the population, while a particular draw of it declares the seed -- which is
+    why ``config/catalogs/<name>.json`` carries one and
+    ``config/population.json`` does not.
+    :data:`~astrogwb.populations.DEFAULT_DENSITY_SITES` is supplied for the same
+    reason no def declares it: the density factors follow from the registered
+    population, not from configuration.
+
+    Keyword arguments override ``model_kwargs``, validated rather than trusted,
+    so this accessor and
+    :class:`~astrogwb.paper.config.catalogs.CatalogDefinition` reach a record
+    down the same path. An already-built record is re-derived with
+    :meth:`~astrogwb.metadata.PopulationMetadata.with_model_kwargs`.
+
+    Imports the registry in its own body, and is not safe to call before
+    ``configure_runtime``, for the reason :func:`population_model` gives.
+    """
+    from astrogwb.metadata import PopulationMetadata
+    from astrogwb.populations import DEFAULT_DENSITY_SITES
+
+    table = _load((root or Path()) / POPULATION_PATH, "population")
+    return PopulationMetadata(
+        model_name=table["model_name"],
+        model_kwargs={**table.get("model_kwargs", {}), **kwargs},
+        density_sites=DEFAULT_DENSITY_SITES,
+        seed=seed,
+    )

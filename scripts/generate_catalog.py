@@ -1,10 +1,20 @@
-"""Generate one reusable waveform catalog from its config layers.
+"""Generate one reusable waveform catalog from its merged config blocks.
 
-One rule, one file: this merges ``config/waveform.json`` and
-``config/catalogs/base/*.toml`` with ``config/catalogs/defs/<catalog>.toml``,
-draws that catalog's population from the registered NumPyro model it names,
-generates frequency-domain waveforms, reduces them to polarization power, and
-writes ``outputs/catalogs/<catalog>.h5``.
+One rule, one file: this takes the already-merged ``[population]``,
+``[fiducials]`` and ``[waveform]`` blocks, draws that catalog's population from
+the registered NumPyro model it names, generates frequency-domain waveforms,
+reduces them to polarization power, and writes
+``outputs/catalogs/<catalog>.h5``.
+
+The layers are JSON, so the merge itself belongs to the caller and the
+``Snakefile`` does it in one ``jq`` pass over the same files it declares as the
+rule's ``input:``. That is a plain recursive merge -- the catalog layers carry
+no ``[priors]`` block, so the shallow-merge rule
+:func:`~astrogwb.paper.config.runs._merge_run_overlay` exists for never applies
+here, and ``jq``'s ``*`` is
+:func:`~astrogwb.paper.utils.deep_merge` exactly. Validation still happens in
+one place: the blocks are handed to
+:class:`~astrogwb.paper.config.catalogs.CatalogDefinition` whole.
 
 The population declaration is one registered name, not a graph config, and it
 is the *same* population the analysis evaluates the proposal density with.
@@ -23,29 +33,32 @@ stochastic values on every evaluation.
 
 Usage::
 
+    layers="config/waveform.json config/population.json config/fiducials.json \\
+        config/catalogs/md-imrphenom-s41-n32768.json"
+    merged=$(jq -s 'reduce .[] as $layer ({}; . * $layer)' $layers)
+
     uv run --extra paper python scripts/generate_catalog.py \\
-        --config config/waveform.json \\
-        --config config/catalogs/base/population.toml \\
-        --config config/catalogs/defs/md-imrphenom-s41-n32768.toml \\
+        --name md-imrphenom-s41-n32768 \\
+        --population "$(printf '%s' "$merged" | jq -c .population)" \\
+        --fiducials "$(printf '%s' "$merged" | jq -c .fiducials)" \\
+        --waveform "$(printf '%s' "$merged" | jq -c .waveform)" \\
+        --seed 41 --num-samples 32768 \\
         --output outputs/catalogs/md-imrphenom-s41-n32768.h5
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import jax
 
 from astrogwb.catalog import PolarizationPowerCatalog
-from astrogwb.paper.config.catalogs import (
-    CatalogDefinition,
-    check_population_model,
-    load_catalog_layers,
-)
-from astrogwb.populations import build_population
+from astrogwb.paper.config.catalogs import CatalogDefinition, check_population_model
 from astrogwb.utils.sampling import sample_sources
 
 # x64 must be on before the population draw. `build_catalog` samples before it
@@ -57,6 +70,17 @@ jax.config.update("jax_enable_x64", True)
 logger = logging.getLogger(__name__)
 
 
+def _json_object(raw: str) -> dict[str, Any]:
+    """Parse one config block off argv, rejecting anything but an object."""
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise argparse.ArgumentTypeError(f"not valid JSON: {error}") from None
+    if not isinstance(value, dict):
+        raise argparse.ArgumentTypeError(f"expected a JSON object, got {type(value)}")
+    return value
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -66,17 +90,49 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         )
     )
     parser.add_argument(
-        "--config",
-        dest="config",
-        action="append",
-        type=Path,
+        "--name",
         required=True,
-        metavar="PATH",
         help=(
-            "One catalog config layer, in merge order; repeat the flag. The "
-            "last layer is config/catalogs/defs/<catalog>.toml and its stem "
-            "names the catalog."
+            "The catalog's name: the stem of config/catalogs/<name>.json, and "
+            "of the .h5 it produces."
         ),
+    )
+    parser.add_argument(
+        "--population",
+        required=True,
+        type=_json_object,
+        metavar="JSON",
+        help=(
+            "The merged [population] block: model_name and model_kwargs. The "
+            "seed and the density sites are not configuration and are supplied "
+            "from --seed and the registry."
+        ),
+    )
+    parser.add_argument(
+        "--fiducials",
+        required=True,
+        type=_json_object,
+        metavar="JSON",
+        help="The merged [fiducials] block: the hyperparameters to draw at.",
+    )
+    parser.add_argument(
+        "--waveform",
+        required=True,
+        type=_json_object,
+        metavar="JSON",
+        help="The merged [waveform] block: the generator's settings.",
+    )
+    parser.add_argument(
+        "--seed",
+        required=True,
+        type=int,
+        help="The population draw's seed.",
+    )
+    parser.add_argument(
+        "--num-samples",
+        required=True,
+        type=int,
+        help="How many sources to draw.",
     )
     parser.add_argument(
         "--output",
@@ -96,24 +152,24 @@ def build_catalog(definition: CatalogDefinition) -> PolarizationPowerCatalog:
     """Draw the population, generate its power, and record what produced it."""
     population = definition.population
     check_population_model(
-        population.model,
-        label=f"catalog {definition.name!r} population.model",
-        kwargs=population.kwargs,
+        population.model_name,
+        label=f"catalog {definition.name!r} population.model_name",
+        kwargs=population.model_kwargs,
     )
-    source_model = build_population(population.model, **population.kwargs).source_model
+    source_model = population.build().source_model
 
     logger.info(
         "Catalog %s: population=%s seed=%d num_samples=%d kwargs=%s",
         definition.name,
-        population.model,
+        population.model_name,
         definition.seed,
         definition.num_samples,
-        population.kwargs,
+        population.model_kwargs,
     )
     samples = sample_sources(
         source_model,
         jax.random.PRNGKey(definition.seed),
-        population.params,
+        definition.fiducials,
         num_samples=definition.num_samples,
     )
 
@@ -142,8 +198,8 @@ def build_catalog(definition: CatalogDefinition) -> PolarizationPowerCatalog:
     catalog = PolarizationPowerCatalog.from_generator(
         samples,
         generator=generator,
-        population=definition.population_record(),
-        fiducials=population.params,
+        population=population,
+        fiducials=definition.fiducials,
     )
     logger.info("Generated catalog with measured df=%.4g Hz", catalog.df)
     return catalog
@@ -155,7 +211,6 @@ def main(argv: Sequence[str] | None = None) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
     args = parse_args(argv)
-    config_paths = [path.expanduser().resolve() for path in args.config]
     output_path = args.output.expanduser().resolve()
     if output_path.exists() and not args.force:
         raise FileExistsError(
@@ -163,7 +218,16 @@ def main(argv: Sequence[str] | None = None) -> None:
             "Pass --force only for an intentional replacement."
         )
 
-    definition = load_catalog_layers(config_paths)
+    definition = CatalogDefinition.model_validate(
+        {
+            "name": args.name,
+            "seed": args.seed,
+            "num_samples": args.num_samples,
+            "population": args.population,
+            "fiducials": args.fiducials,
+            "waveform": args.waveform,
+        }
+    )
     catalog = build_catalog(definition)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

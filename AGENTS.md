@@ -41,6 +41,25 @@ run config restates any of it, and nothing cross-checks the two. Adding a
 population means adding a registered source-model function under
 `src/astrogwb/populations/`, never an import path in a config.
 
+A catalog config is four layers: `config/waveform.json`,
+`config/population.json`, `config/fiducials.json`, then
+`config/catalogs/<name>.json`, whose stem is the catalog name and its output
+path. The shared three are named rather than globbed, because they sit beside
+run tables that must not enter a catalog merge. `config/fiducials.json` is
+deliberately both a run layer and a catalog layer: the hyperparameters a
+catalog is drawn at and the ones a run initializes at are one table, so editing
+it invalidates every catalog as well as every run. `config/population.json`
+declares only `model_name` and `model_kwargs` -- the seed belongs to a
+particular draw and the density sites follow from the registered population, so
+`CatalogDefinition` supplies both during validation and holds the result as a
+`PopulationMetadata`, the same record the `.h5` persists.
+
+Every catalog layer is JSON, so `rule waveform_catalog` merges them in one `jq`
+pass over exactly the files it declares as `input:` and hands the generator the
+merged blocks. `jq`'s `*` is `deep_merge`; catalog layers carry no `[priors]`
+block, so the shallow-merge rule the run path needs never applies. A test pins
+the two merges agreeing.
+
 A run config is four layers merged in order -- `config/{fiducials,priors,networks}.json`,
 then `config/analysis/base/*`, then the experiment `_base.toml`, then the run.
 The three JSON files are layer 0: the shared scientific values, which the

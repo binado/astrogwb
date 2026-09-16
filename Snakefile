@@ -27,7 +27,7 @@ def catalog_path(name: str) -> str:
     return str(CATALOGS_DIR / f"{name}.h5")
 
 
-# Filenames are the mapping: config/catalogs/defs/<name>.toml ->
+# Filenames are the mapping: config/catalogs/<name>.json ->
 # outputs/catalogs/<name>.h5, and config/analysis/runs/<experiment>/<run>.toml
 # -> outputs/chains/<experiment>/<run>.nc. Nothing below translates a registry
 # name into a path; it only globs the config tree and reads back the two names
@@ -110,23 +110,13 @@ def network_config_inputs(experiment):
 def catalog_layers(wildcards):
     """One catalog's ordered config layers, relative to this workflow's cwd.
 
-    Declaring the shared base alongside the def is what makes editing the
-    common [waveform] block invalidate every catalog.
+    Declaring the shared layers alongside the def is what makes editing the
+    common [waveform], [population] or [fiducials] block invalidate every
+    catalog.
     """
     return [
         str(path) for path in catalog_config_paths(wildcards.catalog, root=Path("."))
     ]
-
-
-def catalog_config_flags(wildcards):
-    """The same layers as repeated --config flags, in merge order.
-
-    Built in `params:` rather than interpolated from `input:` for the same
-    reason `config_flags` is: a list input would space-join into one argument.
-    """
-    return " ".join(
-        f"--config {shlex.quote(path)}" for path in catalog_layers(wildcards)
-    )
 
 
 def run_catalog_input(role):
@@ -175,24 +165,34 @@ localrules:
 rule waveform_catalog:
     """Population draw + waveform generation, in one process.
 
-    The population is declared by `config/catalogs/base/population.toml`, which
-    `catalog_layers` already returns, so there is no separate graph file to
-    declare as an input any more.
+    Every layer is JSON, so the merge is one `jq` pass over the same files
+    declared as `input:` -- `jq`'s `*` is a recursive merge, which is
+    `astrogwb.paper.utils.deep_merge` exactly. The catalog layers carry no
+    `[priors]` block, so the shallow-merge rule the run path needs never
+    applies here. The generator is then handed the three merged blocks rather
+    than a list of paths, so nothing re-reads the config tree downstream.
+
+    POSIX sh, not bash: Snakemake does not set `shell.executable`, so no `<<<`.
     """
     input:
         script="scripts/generate_catalog.py",
         config=catalog_layers,
     output:
         catalog_path("{catalog}"),
-    params:
-        config_flags=catalog_config_flags,
     shell:
+        "merged=$(jq -s 'reduce .[] as $layer ({{}}; . * $layer)' {input.config:q}) && "
         "uv run --extra paper python {input.script:q}"
-        " {params.config_flags} --output {output:q} --force"
+        " --name {wildcards.catalog:q}"
+        " --population \"$(printf '%s' \"$merged\" | jq -c .population)\""
+        " --fiducials \"$(printf '%s' \"$merged\" | jq -c .fiducials)\""
+        " --waveform \"$(printf '%s' \"$merged\" | jq -c .waveform)\""
+        " --seed \"$(printf '%s' \"$merged\" | jq -r .seed)\""
+        " --num-samples \"$(printf '%s' \"$merged\" | jq -r .num_samples)\""
+        " --output {output:q} --force"
 
 
 rule catalogs:
-    """Aggregate target: build every catalog declared in config/catalogs/defs/."""
+    """Aggregate target: build every catalog declared in config/catalogs/."""
     input:
         CATALOG_OUTPUTS,
 

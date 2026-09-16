@@ -1,6 +1,6 @@
 # The two catalogs every run uses, by name.
 #
-# Each name resolves to config/catalogs/defs/<name>.toml and to the
+# Each name resolves to config/catalogs/<name>.json and to the
 # outputs/catalogs/<name>.h5 it produces. How a catalog was drawn -- its
 # components, seeds and mixing fractions -- lives in those files, not here,
 # and the redshift density that follows from them is read back off the

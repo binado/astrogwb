@@ -14,6 +14,7 @@ eight parameters the catalog was drawn at.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,6 @@ from astrogwb.paper.config.catalogs import (
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     Population,
-    build_population,
     known_populations,
 )
 from astrogwb.waveform import AnalyticInspiralGenerator
@@ -40,8 +40,10 @@ def _definitions() -> dict[str, CatalogDefinition]:
     return discover_catalogs(REPO_ROOT)
 
 
-def _build(population) -> Population:
-    return build_population(population.model, **population.kwargs)
+def _build(definition: CatalogDefinition) -> Population:
+    """The population a def declares, built. ``PopulationMetadata.build`` is
+    the same call generation makes, so this exercises the production path."""
+    return definition.population.build()
 
 
 # --------------------------------------------------------------------------- #
@@ -51,26 +53,25 @@ def test_every_committed_catalog_names_a_registered_population() -> None:
     """Caught pre-flight, not at the top of a queued GPU generation job."""
     for name, definition in _definitions().items():
         check_population_model(
-            definition.population.model,
+            definition.population.model_name,
             label=f"catalog {name!r}",
-            kwargs=definition.population.kwargs,
+            kwargs=definition.population.model_kwargs,
         )
 
 
 def test_every_committed_catalog_can_build_its_population() -> None:
     """The construction kwargs and parameters must actually fit the population.
 
-    A typo in ``population.kwargs`` is otherwise invisible until generation
+    A typo in ``population.model_kwargs`` is otherwise invisible until generation
     runs, and generation is the expensive step this pre-flight exists to
     protect. The kwargs mapping now reaches the population whole, so a key it
     does not take fails here rather than being filtered on its way to one of
     two separately built callables.
     """
     for name, definition in _definitions().items():
-        population = definition.population
         with handlers.seed(rng_seed=0):
-            trace = handlers.trace(_build(population).source_model).get_trace(
-                population.params
+            trace = handlers.trace(_build(definition).source_model).get_trace(
+                definition.fiducials
             )
         assert trace["redshift"]["type"] == "sample", name
         assert trace["luminosity_distance"]["type"] == "deterministic", name
@@ -84,8 +85,8 @@ def test_only_the_guarded_proposals_declare_no_merger_rate() -> None:
     def did -- recorded a rate that was never the one its samples imply.
     """
     for name, definition in _definitions().items():
-        merger_rate_fn = _build(definition.population).merger_rate_fn
-        expected_none = "uniform_mixture" in definition.population.model
+        merger_rate_fn = _build(definition).merger_rate_fn
+        expected_none = "uniform_mixture" in definition.population.model_name
         assert (merger_rate_fn is None) is expected_none, name
 
 
@@ -94,9 +95,9 @@ def test_every_declared_density_factor_is_a_real_sample_site() -> None:
     assert "redshift" in DEFAULT_DENSITY_SITES
     for name, definition in _definitions().items():
         with handlers.seed(rng_seed=0):
-            trace = handlers.trace(
-                _build(definition.population).source_model
-            ).get_trace(definition.population.params)
+            trace = handlers.trace(_build(definition).source_model).get_trace(
+                definition.fiducials
+            )
         for site in DEFAULT_DENSITY_SITES:
             assert trace[site]["type"] == "sample", name
 
@@ -150,68 +151,83 @@ def test_a_proposal_density_is_rejected_as_an_analysis_target() -> None:
 
 
 def test_layers_must_declare_a_population(tmp_path: Path) -> None:
-    path = tmp_path / "toy.toml"
-    path.write_text("num_samples = 8\nseed = 1\n", encoding="utf-8")
+    path = tmp_path / "toy.json"
+    path.write_text('{"num_samples": 8, "seed": 1}', encoding="utf-8")
     with pytest.raises(ValueError, match="population"):
         load_catalog_layers([path])
 
 
-def test_an_inverted_redshift_window_is_rejected(tmp_path: Path) -> None:
-    path = tmp_path / "toy.toml"
-    path.write_text(
-        """
-num_samples = 8
-seed = 1
-
-[population]
-model = "bns_md_cosmological"
-
-[population.kwargs]
-minimum_redshift = 20.0
-maximum_redshift = 0.0
-n_grid = 256
-
-[population.params]
-H0 = 67.66
-
-[waveform]
-approximant = "Toy"
-sampling_frequency = 128.0
-minimum_frequency = 10.0
-maximum_frequency = 50.0
-reference_frequency = 20.0
-frequency_resolution = 1.0
-""",
-        encoding="utf-8",
+def _toy_def(
+    *,
+    approximant: str = "Toy",
+    minimum_redshift: float = 0.0,
+    maximum_redshift: float = 20.0,
+    alpha: float | None = None,
+) -> str:
+    """One complete catalog def, in the committed format: a single JSON layer."""
+    waveform: dict[str, object] = {
+        "approximant": approximant,
+        "sampling_frequency": 128.0,
+        "minimum_frequency": 10.0,
+        "maximum_frequency": 50.0,
+        "reference_frequency": 20.0,
+        "frequency_resolution": 1.0,
+    }
+    if alpha is not None:
+        waveform["alpha"] = alpha
+    return json.dumps(
+        {
+            "num_samples": 8,
+            "seed": 1,
+            "population": {
+                "model_name": "bns_md_cosmological",
+                "model_kwargs": {
+                    "minimum_redshift": minimum_redshift,
+                    "maximum_redshift": maximum_redshift,
+                    "n_grid": 256,
+                },
+            },
+            "fiducials": {"H0": 67.66},
+            "waveform": waveform,
+        }
     )
-    with pytest.raises(ValueError, match="minimum_redshift must be less than"):
+
+
+def test_the_seed_a_def_states_is_the_seed_the_record_carries() -> None:
+    """One seed per def, folded into the record during validation."""
+    for name, definition in _definitions().items():
+        assert definition.seed == definition.population.seed, name
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("seed", 99), ("density_sites", ["redshift"])],
+)
+def test_a_population_block_may_not_restate_the_draw(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    """Neither is configuration, and a silent override would desync the record.
+
+    A ``[population]`` ``seed`` would win over the def's own and leave
+    ``definition.seed`` disagreeing with what the ``.h5`` records; density sites
+    follow from the registered population, not from a file.
+    """
+    blocks = json.loads(_toy_def())
+    blocks["population"][field] = value
+    path = tmp_path / "toy.json"
+    path.write_text(json.dumps(blocks), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=f"population may not declare {field}"):
         load_catalog_layers([path])
 
 
-_TOY_DEF = """
-num_samples = 8
-seed = 1
-
-[population]
-model = "bns_md_cosmological"
-
-[population.kwargs]
-minimum_redshift = 0.0
-maximum_redshift = 20.0
-n_grid = 256
-
-[population.params]
-H0 = 67.66
-
-[waveform]
-approximant = "{approximant}"
-sampling_frequency = 128.0
-minimum_frequency = 10.0
-maximum_frequency = 50.0
-reference_frequency = 20.0
-frequency_resolution = 1.0
-{alpha}
-"""
+def test_an_inverted_redshift_window_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "toy.json"
+    path.write_text(
+        _toy_def(minimum_redshift=20.0, maximum_redshift=0.0), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="minimum_redshift must be less than"):
+        load_catalog_layers([path])
 
 
 def test_alpha_is_rejected_for_a_non_analytical_approximant(tmp_path: Path) -> None:
@@ -220,19 +236,16 @@ def test_alpha_is_rejected_for_a_non_analytical_approximant(tmp_path: Path) -> N
     Silently ignoring it would let a def look like it set a termination
     frequency that the generated catalog does not honour.
     """
-    path = tmp_path / "toy.toml"
-    path.write_text(
-        _TOY_DEF.format(approximant="TaylorF2", alpha="alpha = 0.02"), encoding="utf-8"
-    )
+    path = tmp_path / "toy.json"
+    path.write_text(_toy_def(approximant="TaylorF2", alpha=0.02), encoding="utf-8")
     with pytest.raises(ValueError, match="waveform.alpha is only valid"):
         load_catalog_layers([path])
 
 
 def test_a_declared_alpha_reaches_the_analytical_generator(tmp_path: Path) -> None:
-    path = tmp_path / "toy.toml"
+    path = tmp_path / "toy.json"
     path.write_text(
-        _TOY_DEF.format(approximant="AnalyticInspiral", alpha="alpha = 0.02"),
-        encoding="utf-8",
+        _toy_def(approximant="AnalyticInspiral", alpha=0.02), encoding="utf-8"
     )
     generator = load_catalog_layers([path]).waveform.build()
 
@@ -241,10 +254,8 @@ def test_a_declared_alpha_reaches_the_analytical_generator(tmp_path: Path) -> No
 
 
 def test_an_omitted_alpha_defaults_to_isco(tmp_path: Path) -> None:
-    path = tmp_path / "toy.toml"
-    path.write_text(
-        _TOY_DEF.format(approximant="AnalyticInspiral", alpha=""), encoding="utf-8"
-    )
+    path = tmp_path / "toy.json"
+    path.write_text(_toy_def(approximant="AnalyticInspiral"), encoding="utf-8")
     generator = load_catalog_layers([path]).waveform.build()
 
     assert isinstance(generator, AnalyticInspiralGenerator)

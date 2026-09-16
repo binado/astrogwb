@@ -1,7 +1,7 @@
 """Loading the two catalog files a run names, and the checks between them.
 
 A catalog is a file: ``outputs/catalogs/<name>.h5``, built once by
-``scripts/generate_catalog.py`` from ``config/catalogs/defs/<name>.toml``. A
+``scripts/generate_catalog.py`` from ``config/catalogs/<name>.json``. A
 run names one for each role, so there is nothing to compose here -- loading is
 just reading the file, and the density its samples follow comes back off the
 file's own population record rather than being reassembled from the run config.

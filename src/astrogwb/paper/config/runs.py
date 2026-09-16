@@ -68,22 +68,28 @@ ROOT_LAYERS = (FIDUCIALS_PATH, PRIORS_PATH, NETWORKS_PATH)
 #: a run-config layer: nothing a run samples depends on it.
 PLOTTING_PATH = CONFIG_DIR / "plotting.json"
 
-#: Catalog layer 0: the ``[waveform]`` block every catalog inherits. Named
-#: rather than globbed because it sits next to the run JSON files and
-#: ``config/plotting.json``, which must not enter a catalog merge. Deliberately
-#: *not* a run-config layer: ``RunConfig`` is ``extra="forbid"``.
+#: The ``[waveform]`` and ``[population]`` blocks every catalog inherits.
+#: Deliberately *not* run-config layers: ``RunConfig`` is ``extra="forbid"``.
 WAVEFORM_PATH = CONFIG_DIR / "waveform.json"
+POPULATION_PATH = CONFIG_DIR / "population.json"
+
+#: Every shared catalog layer, in merge order. Named rather than globbed
+#: because they sit among files that must not enter a catalog merge --
+#: ``config/priors.json``, ``config/networks.json``, ``config/plotting.json``.
+#: ``config/fiducials.json`` is deliberately in both this list and
+#: :data:`ROOT_LAYERS`: the hyperparameters a catalog is drawn at and the ones a
+#: run initializes at are the same table, stated once, so editing it invalidates
+#: every catalog as well as every run.
+CATALOG_ROOT_LAYERS = (WAVEFORM_PATH, POPULATION_PATH, FIDUCIALS_PATH)
 
 ANALYSIS_DIR = Path("config/analysis")
 BASE_DIR = ANALYSIS_DIR / "base"
 RUNS_DIR = ANALYSIS_DIR / "runs"
 EXPERIMENT_BASE = "_base.toml"
 
-#: Catalogs follow the same two-layer shape as runs: a shared base and one
-#: file per named catalog, whose stem is the name.
+#: Catalogs follow the same two-layer shape as runs: the shared layers above,
+#: then one file per named catalog, whose stem is the name.
 CATALOGS_DIR = Path("config/catalogs")
-CATALOG_BASE_DIR = CATALOGS_DIR / "base"
-CATALOG_DEFS_DIR = CATALOGS_DIR / "defs"
 
 #: Root of everything the workflow writes, so the three output roots below are
 #: composed rather than re-typed. Relative to the working directory, as every
@@ -245,45 +251,46 @@ CATALOG_ROLES = ("injection", "proposal")
 def catalog_base_paths(root: Path | None = None) -> tuple[Path, ...]:
     """Every shared catalog layer, in merge order.
 
-    Layer 0 is ``config/waveform.json`` -- named, because a glob of
-    ``config/*.json`` would also sweep in the run tables and
-    ``config/plotting.json``. Then ``config/catalogs/base/*.toml``. Only
-    ``config/catalogs/defs/md-taylorf2-s41-n32768.toml`` overrides anything in
-    the waveform block (the approximant); the rest of the tree inherits it
-    verbatim. The stored band matches ``config/analysis/base/model.toml``'s
-    ``[analysis]`` ``f_min`` / ``f_max``: the catalog grid *is* the array
-    every model is evaluated on. ``sampling_frequency`` is the waveform
-    backend's Nyquist, not the stored grid.
+    :data:`CATALOG_ROOT_LAYERS`: ``config/waveform.json``,
+    ``config/population.json``, ``config/fiducials.json``. Named rather than
+    globbed, because a glob of ``config/*.json`` would also sweep in the run
+    tables and ``config/plotting.json``. They declare disjoint top-level keys,
+    so the order among them is arbitrary; a def is what overrides any of them.
+
+    Only ``config/catalogs/md-taylorf2-s41-n32768.json`` overrides anything in
+    the waveform block (the approximant), and only the guarded proposals touch
+    the population block; the rest of the tree inherits both verbatim. The
+    stored band matches ``config/analysis/base/model.toml``'s ``[analysis]``
+    ``f_min`` / ``f_max``: the catalog grid *is* the array every model is
+    evaluated on. ``sampling_frequency`` is the waveform backend's Nyquist, not
+    the stored grid.
     """
     resolved = root or Path()
-    waveform = resolved / WAVEFORM_PATH
-    if not waveform.is_file():
-        raise ValueError(f"missing shared catalog layer: {waveform}")
-    directory = resolved / CATALOG_BASE_DIR
-    paths = tuple(sorted(directory.glob("*.toml")))
-    if not paths:
-        raise ValueError(f"{directory} declares no base config files")
-    return (waveform, *paths)
+    paths = tuple(resolved / layer for layer in CATALOG_ROOT_LAYERS)
+    missing = [str(path) for path in paths if not path.is_file()]
+    if missing:
+        raise ValueError(f"missing shared catalog layers: {', '.join(missing)}")
+    return paths
 
 
 def catalog_config_paths(name: str, *, root: Path | None = None) -> tuple[Path, ...]:
     """The ordered layer files that make up one catalog's config.
 
     Mirrors :func:`run_config_paths`: the ``Snakefile`` declares exactly these
-    as the catalog rule's inputs, so editing ``config/waveform.json``
-    invalidates every catalog.
+    as the catalog rule's inputs, so editing any shared layer invalidates every
+    catalog.
     """
     resolved = root or Path()
-    definition = resolved / CATALOG_DEFS_DIR / f"{name}.toml"
+    definition = resolved / CATALOGS_DIR / f"{name}.json"
     if not definition.is_file():
         raise ValueError(f"unknown catalog {name}: {definition} does not exist")
     return (*catalog_base_paths(resolved), definition)
 
 
 def discover_catalog_names(root: Path | None = None) -> tuple[str, ...]:
-    """Every declared catalog name, sorted. Stems of ``config/catalogs/defs``."""
-    directory = (root or Path()) / CATALOG_DEFS_DIR
-    names = tuple(sorted(path.stem for path in directory.glob("*.toml")))
+    """Every declared catalog name, sorted. Stems of ``config/catalogs``."""
+    directory = (root or Path()) / CATALOGS_DIR
+    names = tuple(sorted(path.stem for path in directory.glob("*.json")))
     if not names:
         raise ValueError(f"{directory} declares no catalog configs")
     return names

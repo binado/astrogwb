@@ -16,18 +16,22 @@ catalog is a file.
 ## Filenames are the mapping
 
 ```text
-config/catalogs/defs/<name>.toml  ->  outputs/catalogs/<name>.h5
+config/catalogs/<name>.json  ->  outputs/catalogs/<name>.h5
 ```
 
-No registry translates between them. Adding a catalog means adding a TOML file;
+No registry translates between them. Adding a catalog means adding a JSON file;
 the `waveform_catalog` rule and the `catalogs` target pick it up by globbing.
 
-A catalog config is three layers merged in order -- shared base files, then
-one file per named thing, the same shape a run config has:
+A catalog config is four layers merged in order -- three shared files, then one
+file per named thing, the same shape a run config has. The shared three sit in
+`config/` beside the run tables rather than in a `base/` subdirectory, and they
+are named rather than globbed, because `config/priors.json`,
+`config/networks.json` and `config/plotting.json` are in that directory too and
+must not enter a catalog merge:
 
 1. `config/waveform.json` — the `[waveform]` block every catalog shares.
-   JSON so `jq` can read it; catalog layer 0, not a run layer. Only
-   `config/catalogs/defs/md-taylorf2-s41-n32768.toml` overrides anything here
+   A catalog layer, not a run layer. Only
+   `config/catalogs/md-taylorf2-s41-n32768.json` overrides anything here
    (the approximant). The stored band matches
    `config/analysis/base/model.toml`'s `[analysis]` `f_min` and `f_max`: the
    catalog grid *is* the array every model is evaluated on, and a run's band
@@ -39,19 +43,34 @@ one file per named thing, the same shape a run config has:
    Ripple approximant is rejected. `WaveformConfig.build()` constructs the
    generator, and `astrogwb.paper.config.waveform_generator()` is the same path
    for a notebook reading this file directly.
-2. `config/catalogs/base/population.toml` — the population every catalog is
-   drawn from, and the hyperparameters it is drawn at. Those hyperparameters
-   are deliberately *not* read from `config/fiducials.json`: a catalog records
-   the values it was actually drawn at, copied verbatim into the `.h5` so the
-   file is self-describing, and the two sets are not even the same (the
-   injection is drawn at GR, so it carries no `xi_0` / `xi_n`). Wiring them
-   together would also make every fiducial edit invalidate all eight
-   catalogs — GPU jobs — to redraw data that was already correct.
-3. `config/catalogs/defs/<name>.toml` — the seed, the sample count, and any
-   population or waveform override.
+2. `config/population.json` — the population every catalog is drawn from:
+   `model_name`, a key in the `astrogwb.populations` registry, and
+   `model_kwargs`, the construction settings bound into it. Those two keys are
+   exactly `PopulationMetadata`'s configurable half, so the block validates
+   straight into the record the `.h5` persists. It declares no `seed` and no
+   density sites: a seed belongs to a particular draw, and the density factors
+   follow from the registered population rather than from a file.
+3. `config/fiducials.json` — the hyperparameters the draw is made at. The same
+   table the runs initialize at, stated once. It used to be restated as a
+   `[population.params]` block here, which was an exact copy of the eight
+   fiducials a source model reads; the copy is gone. The propagation entries
+   `xi_0` / `xi_n` ride along and are inert during generation, because a source
+   model indexes `params` by name and the GR population never reads them —
+   `xi_0 = 1.0` is the value the injection is drawn at, so recording it is
+   accurate rather than misleading.
+4. `config/catalogs/<name>.json` — the seed, the sample count, a one-line
+   `description`, and any population or waveform override.
 
-Both shared layers are declared as workflow inputs of every catalog, so editing
-either correctly invalidates all of them.
+The cost of sourcing the hyperparameters from `config/fiducials.json` is that
+editing *any* fiducial now invalidates all eight catalogs — GPU jobs — including
+an edit to the analysis-only `xi_0` / `xi_n`. That is the price of the two
+tables being one: while they were separate, keeping them in step was a manual
+two-file discipline that nothing checked. A def that wants an injection away
+from the fiducials overrides the `[fiducials]` block like any other layer, so
+the freedom the separate table provided is preserved rather than lost.
+
+All three shared layers are declared as workflow inputs of every catalog, so
+editing any of them correctly invalidates all of them.
 
 The eight committed catalogs:
 
@@ -73,28 +92,43 @@ serves both `astrophysical-parameters` runs and
 
 `seed` and `num_samples` are catalog-level, not population-level: `s41` and
 `s42` are the *same* population drawn twice, so pushing either into the shared
-population layer would mean near-identical layer files.
+population layer would mean near-identical layer files. `CatalogDefinition`
+folds the seed into the population record during validation, which is where it
+belongs once a particular draw exists.
 
 ## The population is a registered model
 
 A def names a population by its key in the `astrogwb.populations` registry, and
 supplies the construction kwargs it takes:
 
-```toml
-num_samples = 16384
-seed = 61
-
-[population]
-model = "bns_md_uniform_mixture"
-
-[population.kwargs]
-uniform_mixing_fraction = 0.1
+```json
+{
+  "description": "Guarded proposal at eps = 1e-1: the Madau-Dickinson redshift law with a uniform-in-redshift component mixed in, so the importance weights do not degenerate when NUTS moves the posterior away from the proposal.",
+  "num_samples": 16384,
+  "seed": 61,
+  "population": {
+    "model_name": "bns_md_uniform_mixture",
+    "model_kwargs": {
+      "uniform_mixing_fraction": 0.1
+    }
+  }
+}
 ```
 
-The redshift window, grid resolution, and hyperparameters are inherited from
-`config/catalogs/base/population.toml`; `[population.kwargs]` is one mapping,
-deep-merged across layers and passed whole to the factory. The population
-declares its density factors and source outputs.
+The redshift window and grid resolution are inherited from
+`config/population.json` and the hyperparameters from `config/fiducials.json`;
+`model_kwargs` is one mapping, deep-merged across layers and passed whole to the
+factory. The population declares its density factors and source outputs.
+`description` exists because JSON has no comments: a def's prose is carried as
+data rather than lost in the format.
+
+A guard def inherits `[fiducials]` whole, `local_merger_rate` included, even
+though `bns_md_uniform_mixture` declares no merger rate. A guard mixture is a
+sampling density, not a physical population: the Madau-Dickinson total rate
+normalizes the Madau-Dickinson redshift density, not a mixture of it with a
+uniform component. Nothing reads a rate off a proposal — importance weighting
+takes the target's — and a catalog drawn from this population fails by name if
+it is used as an injection.
 
 **A registry key, not an import path.** Registry keys change only on purpose;
 module paths move as collateral whenever a module is reorganized, so a
@@ -219,17 +253,29 @@ catalogs are not byte-identical to one another.
 One command does the whole thing — population draw, waveform generation, power
 reduction, write.
 
+Every layer is JSON, so the merge is one `jq` pass and the generator is handed
+the merged blocks rather than a list of paths:
+
 ```bash
+merged=$(jq -s 'reduce .[] as $layer ({}; . * $layer)' \
+  config/waveform.json config/population.json config/fiducials.json \
+  config/catalogs/md-imrphenom-s41-n32768.json)
+
 uv run --extra paper python scripts/generate_catalog.py \
-  --config config/waveform.json \
-  --config config/catalogs/base/population.toml \
-  --config config/catalogs/defs/md-imrphenom-s41-n32768.toml \
+  --name md-imrphenom-s41-n32768 \
+  --population "$(printf '%s' "$merged" | jq -c .population)" \
+  --fiducials "$(printf '%s' "$merged" | jq -c .fiducials)" \
+  --waveform "$(printf '%s' "$merged" | jq -c .waveform)" \
+  --seed 41 --num-samples 32768 \
   --output outputs/catalogs/md-imrphenom-s41-n32768.h5
 ```
 
-Layers arrive as repeated `--config` flags, in merge order, and the last one's
-filename stem names the catalog. It refuses to overwrite an existing catalog
-unless `--force` is passed.
+`jq`'s `*` is a recursive merge, which is `astrogwb.paper.utils.deep_merge`
+exactly; the catalog layers carry no `[priors]` block, so the shallow-merge rule
+the run path needs never applies here. `tests/paper/test_runs.py` pins the two
+merges agreeing. `rule waveform_catalog` runs exactly this, over the same files
+it declares as `input:`. It refuses to overwrite an existing catalog unless
+`--force` is passed.
 
 Through the workflow, from the repository root:
 

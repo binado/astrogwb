@@ -136,12 +136,14 @@ def _catalogs(tmp_path: Path, *names: str) -> Path:
 
 
 def test_catalog_rule_reads_its_config_layers_directly() -> None:
-    """One rule per catalog, and the population is one of its config layers.
+    """One rule per catalog, and every shared block is one of its config layers.
 
     The population used to be a separate graph file declared as an extra
-    input. It is a registered model named by `config/catalogs/base/population.
-    toml` now, so the layer list *is* the dependency edge -- there is nothing
-    else for the rule to declare.
+    input. It is a registered model named by `config/population.json` now, and
+    the hyperparameters come from `config/fiducials.json`, so the layer list
+    *is* the dependency edge -- there is nothing else for the rule to declare.
+    The rule merges those layers with `jq` and passes the blocks, so the paths
+    appear in `input:` while the script's argv carries JSON.
     """
     result = _snakemake(
         "--snakefile",
@@ -160,13 +162,15 @@ def test_catalog_rule_reads_its_config_layers_directly() -> None:
     assert result.returncode == 0, result.stderr
     # The shared waveform layer is an input of both, so editing it rebuilds both.
     assert result.stdout.count("config/waveform.json") >= 2
-    assert "config/catalogs/defs/md-imrphenom-s41-n32768.toml" in result.stdout
+    assert "config/catalogs/md-imrphenom-s41-n32768.json" in result.stdout
     assert (
-        "config/catalogs/defs/md-uniform-imrphenom-s61-n16384-eps1e-1.toml"
-        in result.stdout
+        "config/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.json" in result.stdout
     )
-    # Editing the shared population declaration rebuilds every catalog.
-    assert result.stdout.count("config/catalogs/base/population.toml") >= 2
+    # Editing either shared declaration rebuilds every catalog. fiducials.json
+    # is a run layer too, so the hyperparameters a catalog is drawn at and the
+    # ones a run initializes at cannot drift.
+    assert result.stdout.count("config/population.json") >= 2
+    assert result.stdout.count("config/fiducials.json") >= 2
     assert "outputs/catalogs/md-imrphenom-s41-n32768.h5" in result.stdout
     assert (
         "outputs/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.h5" in result.stdout
@@ -175,12 +179,21 @@ def test_catalog_rule_reads_its_config_layers_directly() -> None:
     assert any(
         "scripts/generate_catalog.py" in line for line in _rule_inputs(result.stdout)
     )
-    # Layers reach the script as repeated flags, never space-joined into one.
+    # The merge is one jq pass over exactly the declared inputs, and the
+    # script is handed the blocks rather than the paths.
     assert (
-        "--config config/waveform.json "
-        "--config config/catalogs/base/population.toml "
-        "--config config/catalogs/defs/md-imrphenom-s41-n32768.toml"
+        "jq -s 'reduce .[] as $layer ({}; . * $layer)' "
+        "config/waveform.json config/population.json config/fiducials.json "
+        "config/catalogs/md-imrphenom-s41-n32768.json"
     ) in result.stdout
+    for flag in ("--population", "--fiducials", "--waveform"):
+        assert f'{flag} "$(printf \'%s\' "$merged" | jq -c .{flag[2:]})"' in (
+            result.stdout
+        )
+    assert "--config" not in result.stdout
+    # The old base/ and defs/ split is gone: one flat directory of defs.
+    assert "config/catalogs/base/" not in result.stdout
+    assert "config/catalogs/defs/" not in result.stdout
     # The population intermediate, its merge rule, and the graph configs the
     # rule used to declare are all gone.
     assert "outputs/populations/" not in result.stdout

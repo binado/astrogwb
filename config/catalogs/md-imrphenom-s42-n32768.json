@@ -1,0 +1,5 @@
+{
+  "description": "Double-size proposal for variable-catalog-size/n32768; the longest of the three nested seed-42 draws.",
+  "num_samples": 32768,
+  "seed": 42
+}
