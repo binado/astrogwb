@@ -8,6 +8,7 @@ from typing import Any
 import jax
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
@@ -193,7 +194,7 @@ def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None
 
 
 def test_population_record_rejects_non_int_seed() -> None:
-    with pytest.raises(TypeError, match="seed"):
+    with pytest.raises(ValidationError, match="seed"):
         PopulationMetadata(
             model_name=POPULATION_RECORD["model_name"],
             model_kwargs=POPULATION_RECORD["model_kwargs"],
@@ -249,13 +250,18 @@ def test_get_population_binds_construction_kwargs_only() -> None:
 
 def test_an_unknown_population_name_fails_clearly() -> None:
     catalog = _catalog(np.array([0.5, 1.5]))
-    object.__setattr__(
-        catalog,
-        "_population",
-        replace(catalog.population, model_name="no_such_population"),
+    # Constructed, not mutated: `object.__setattr__` on a pydantic model writes
+    # straight into `__dict__`, bypassing both `frozen=True` and every
+    # validator, so a test that reached for it would no longer be exercising
+    # the record a real file produces.
+    unknown = PopulationMetadata(
+        model_name="no_such_population",
+        model_kwargs=catalog.population.model_kwargs,
+        density_sites=catalog.population.density_sites,
+        seed=catalog.population.seed,
     )
     with pytest.raises(KeyError, match="bns_md_cosmological"):
-        catalog.get_population()
+        replace(catalog, _population=unknown).get_population()
 
 
 def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> None:

@@ -298,13 +298,9 @@ class PolarizationPowerCatalog:
                 name: values[keep] for name, values in self.source_parameters.items()
             },
             polarization_power=self.polarization_power[:, keep],
-            _population=replace(
-                self._population,
-                model_kwargs={
-                    **model_kwargs,
-                    "minimum_redshift": float(minimum_redshift),
-                    "maximum_redshift": float(maximum_redshift),
-                },
+            _population=self._population.with_model_kwargs(
+                minimum_redshift=float(minimum_redshift),
+                maximum_redshift=float(maximum_redshift),
             ),
         )
 

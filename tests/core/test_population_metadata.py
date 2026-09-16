@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from astrogwb.metadata import (
     DENSITY_SITES_ATTR,
@@ -88,7 +89,13 @@ def test_a_proposal_population_builds_with_no_merger_rate() -> None:
 
 @pytest.mark.parametrize("seed", ["7", 7.0, True, None])
 def test_seed_must_be_a_non_boolean_int(seed: object) -> None:
-    with pytest.raises(TypeError, match="seed"):
+    """``True`` is the case strict validation exists for.
+
+    Pydantic's default lax mode widens a bool to an int, so a seed of
+    ``True`` would validate as ``1`` and a draw would record a seed it was
+    never made at.
+    """
+    with pytest.raises(ValidationError, match="seed"):
         _record(seed=seed)
 
 

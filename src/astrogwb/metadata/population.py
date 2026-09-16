@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Annotated, Any, Self
+
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
 
 from astrogwb._attrs import int_attr, json_array_attr, json_object_attr
 
@@ -58,8 +59,30 @@ POPULATION_ATTRS: tuple[str, ...] = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class PopulationMetadata:
+def _as_tuple(value: Any) -> Any:
+    """Accept an ordered sequence where a tuple is declared.
+
+    Strict mode does not coerce ``list`` to ``tuple``, and the read path
+    decodes ``density_sites`` from a JSON array. Narrowed to genuinely ordered
+    sequences: a ``set`` would validate under a looser rule and silently lose
+    the ordering the field depends on.
+    """
+    if isinstance(value, list):
+        return tuple(value)
+    return value
+
+
+#: Construction kwargs travel as HDF5 attributes via JSON, so they must be
+#: JSON scalars. Declaring that here rather than as prose in the config layer
+#: is what makes the round trip type-stable: an ``int`` stays an ``int`` and a
+#: ``float`` stays a ``float``, so a file written from a loaded record is
+#: byte-identical to the one it was read from.
+ModelKwargs = dict[str, float | int]
+
+DensitySites = Annotated[tuple[str, ...], BeforeValidator(_as_tuple)]
+
+
+class PopulationMetadata(BaseModel):
     """The registered population an artifact was drawn from.
 
     ``model_kwargs`` is the flat construction mapping the population is built
@@ -72,20 +95,21 @@ class PopulationMetadata:
     conceptual ordered-pair density contribution, and a proposal density
     computed with either excluded gives silently wrong importance weights with
     no shape error anywhere.
+
+    Validation is strict. That is not fussiness: in pydantic's default lax mode
+    a ``seed`` of ``True`` validates as ``1``, which would silently undo the
+    bool rejection this record has always had, and a ``"42"`` from a
+    hand-edited config would be accepted as an integer. Strict mode still
+    promotes ``int`` to ``float``, so a setting written ``2`` rather than
+    ``2.0`` keeps validating.
     """
 
-    model_name: str
-    model_kwargs: Mapping[str, Any]
-    density_sites: tuple[str, ...]
-    seed: int
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
-    def __post_init__(self) -> None:
-        if isinstance(self.seed, bool) or not isinstance(self.seed, int):
-            raise TypeError("seed must be an int")
-        if not isinstance(self.model_name, str):
-            raise TypeError("model_name must be a str")
-        object.__setattr__(self, "model_kwargs", dict(self.model_kwargs))
-        object.__setattr__(self, "density_sites", tuple(self.density_sites))
+    model_name: str
+    model_kwargs: ModelKwargs = Field(default_factory=dict)
+    density_sites: DensitySites
+    seed: int
 
     def build(self) -> Population:
         """Reconstruct the generating population with its kwargs bound.
@@ -117,11 +141,31 @@ class PopulationMetadata:
         """
         self.build()
 
+    def with_model_kwargs(self, **updates: float) -> Self:
+        """A re-validated copy with construction kwargs overridden.
+
+        Constructs rather than using ``model_copy(update=...)``, which writes
+        the field and skips every validator -- so a narrowed redshift window
+        would reach a rebuilt population unchecked. Every field is named rather
+        than splatted, so a field added later is a type error here instead of
+        something silently dropped from the copy.
+        """
+        return type(self)(
+            model_name=self.model_name,
+            model_kwargs={**self.model_kwargs, **updates},
+            density_sites=self.density_sites,
+            seed=self.seed,
+        )
+
     def to_attrs(self) -> dict[str, str | int]:
         """Encode the record as HDF5-writable scalar attributes.
 
         Mappings and sequences travel as JSON strings with sorted keys, so a
         file written twice from the same record is byte-identical.
+
+        Hand-written rather than ``model_dump_json``: pydantic serializes in
+        field-declaration order, not sorted-key order, so switching to it would
+        quietly cost the byte-identity this guarantees.
         """
         return {
             MODEL_NAME_ATTR: self.model_name,
@@ -140,15 +184,20 @@ class PopulationMetadata:
         compatibility tier that supplies a missing one -- belong to the reader
         that calls this, not here.
         """
-        return cls(
-            model_name=str(attrs[MODEL_NAME_ATTR]),
-            model_kwargs=json_object_attr(
-                attrs[MODEL_KWARGS_ATTR], label=label, name=MODEL_KWARGS_ATTR
-            ),
-            density_sites=tuple(
-                json_array_attr(
-                    attrs[DENSITY_SITES_ATTR], label=label, name=DENSITY_SITES_ATTR
-                )
-            ),
-            seed=int_attr(attrs[SEED_ATTR], label=label, name=SEED_ATTR),
-        )
+        try:
+            return cls(
+                model_name=str(attrs[MODEL_NAME_ATTR]),
+                model_kwargs=json_object_attr(
+                    attrs[MODEL_KWARGS_ATTR], label=label, name=MODEL_KWARGS_ATTR
+                ),
+                density_sites=tuple(
+                    json_array_attr(
+                        attrs[DENSITY_SITES_ATTR], label=label, name=DENSITY_SITES_ATTR
+                    )
+                ),
+                seed=int_attr(attrs[SEED_ATTR], label=label, name=SEED_ATTR),
+            )
+        except ValidationError as error:
+            raise ValueError(
+                f"{label}: invalid population metadata: {error}"
+            ) from error
