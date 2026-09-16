@@ -27,9 +27,9 @@
 # - $\Omega_{\mathrm{GW}}(f)$ against the same $\sigma$ converted through the
 #   $f^3$ map that takes $S_h$ to $\Omega_{\mathrm{GW}}$;
 # - the matched-filter integrand $\Delta\mathrm{SNR}^{2}(f)$ and the
-#   cumulative $\mathrm{SNR}(<f)$ and $\mathrm{SNR}(>f)$, overlaid for every
-#   network with the same colors and linestyles as the $S_{\mathrm{eff}}$
-#   comparison;
+#   cumulative $\mathrm{SNR}(<f)$ and $\mathrm{SNR}(>f)$ as three separate
+#   figures, each overlaid for every network with the same colors and
+#   linestyles as the $S_{\mathrm{eff}}$ comparison;
 # - a stacked panel of the spectrum above both cumulative SNR curves for the
 #   reference network only.
 #
@@ -671,77 +671,147 @@ _ = save_figures({BASE_DIR / "omega_and_sigma.pdf": fig})
 #
 # Per-bin $\Delta\mathrm{SNR}^{2}(f) = 2 T \Delta f (S_h / S_{\mathrm{eff}})^{2}$,
 # with $\mathrm{SNR}(<f)$ accumulated from the left and $\mathrm{SNR}(>f)$ from
-# the right. Every compared network is overlaid with the same colors and
-# linestyles as the $S_{\mathrm{eff}}$ figure.
+# the right. Each goes in its own figure; every compared network is overlaid
+# with the same colors and linestyles as the $S_{\mathrm{eff}}$ figure.
 
 
 # %%
-def plot_snr_cumulative(
+def _draw_snr_curves(
+    ax: MplAxes,
+    networks: Sequence[Network],
+    frequency_by_network: Mapping[str, np.ndarray],
+    values_by_network: Mapping[str, np.ndarray],
+    *,
+    colors: Sequence[str],
+    linestyles: Sequence[str],
+    ylabel: str,
+    loglog: bool = False,
+) -> None:
+    """Overlay one per-network SNR curve on ``ax`` and style the axes."""
+    if len(networks) != len(colors) or len(networks) != len(linestyles):
+        raise ValueError("color and linestyle counts must match the networks")
+
+    draw = ax.loglog if loglog else ax.semilogx
+    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
+        draw(
+            frequency_by_network[network.name],
+            values_by_network[network.name],
+            color=color,
+            linestyle=linestyle,
+        )
+
+    ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+    ax.set_ylabel(ylabel)
+    ax.set_axisbelow(True)
+    ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+    _format_axis_ticks(ax)
+    ax.legend(
+        handles=_network_legend_handles(networks, colors, linestyles),
+        **DETECTOR_COMPARISON_LEGEND,
+    )
+
+
+def plot_snr_integrand(
     networks: Sequence[Network],
     frequency_by_network: Mapping[str, np.ndarray],
     snr_squared_by_network: Mapping[str, np.ndarray],
+    *,
+    colors: Sequence[str],
+    linestyles: Sequence[str],
+) -> Figure:
+    """Plot the per-network matched-filter integrand."""
+    fig, ax = plt.subplots()
+    _draw_snr_curves(
+        ax,
+        networks,
+        frequency_by_network,
+        snr_squared_by_network,
+        colors=colors,
+        linestyles=linestyles,
+        ylabel=r"$\Delta\mathrm{SNR}^{2}(f)$",
+        loglog=True,
+    )
+    fig.tight_layout()
+    return fig
+
+
+def plot_snr_cumulative_below(
+    networks: Sequence[Network],
+    frequency_by_network: Mapping[str, np.ndarray],
     snr_lt_by_network: Mapping[str, np.ndarray],
+    *,
+    colors: Sequence[str],
+    linestyles: Sequence[str],
+) -> Figure:
+    """Plot each network's SNR accumulated from the low-frequency end."""
+    fig, ax = plt.subplots()
+    _draw_snr_curves(
+        ax,
+        networks,
+        frequency_by_network,
+        snr_lt_by_network,
+        colors=colors,
+        linestyles=linestyles,
+        ylabel=r"$\mathrm{SNR}(<f)$",
+    )
+    fig.tight_layout()
+    return fig
+
+
+def plot_snr_cumulative_above(
+    networks: Sequence[Network],
+    frequency_by_network: Mapping[str, np.ndarray],
     snr_gt_by_network: Mapping[str, np.ndarray],
     *,
     colors: Sequence[str],
     linestyles: Sequence[str],
 ) -> Figure:
-    """Overlay per-network SNR integrand and cumulative SNR from each side."""
-    if len(networks) != len(colors) or len(networks) != len(linestyles):
-        raise ValueError("color and linestyle counts must match the networks")
-
-    fig, axes = plt.subplots(3, 1, sharex=True)
-    ax_integrand, ax_lt, ax_gt = axes
-
-    for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
-        freq = frequency_by_network[network.name]
-        ax_integrand.loglog(
-            freq,
-            snr_squared_by_network[network.name],
-            color=color,
-            linestyle=linestyle,
-        )
-        ax_lt.semilogx(
-            freq,
-            snr_lt_by_network[network.name],
-            color=color,
-            linestyle=linestyle,
-        )
-        ax_gt.semilogx(
-            freq,
-            snr_gt_by_network[network.name],
-            color=color,
-            linestyle=linestyle,
-        )
-
-    ax_integrand.set_ylabel(r"$\Delta\mathrm{SNR}^{2}(f)$")
-    ax_lt.set_ylabel(r"$\mathrm{SNR}(<f)$")
-    ax_gt.set_ylabel(r"$\mathrm{SNR}(>f)$")
-    ax_gt.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-    ax_integrand.legend(
-        handles=_network_legend_handles(networks, colors, linestyles),
-        **DETECTOR_COMPARISON_LEGEND,
+    """Plot each network's SNR accumulated from the high-frequency end."""
+    fig, ax = plt.subplots()
+    _draw_snr_curves(
+        ax,
+        networks,
+        frequency_by_network,
+        snr_gt_by_network,
+        colors=colors,
+        linestyles=linestyles,
+        ylabel=r"$\mathrm{SNR}(>f)$",
     )
-
-    for axis in axes:
-        axis.set_axisbelow(True)
-        axis.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-        _format_axis_ticks(axis)
     fig.tight_layout()
     return fig
 
 
 # %%
-fig = plot_snr_cumulative(
+fig = plot_snr_integrand(
     NETWORKS,
     frequency_by_network,
     snr_squared_by_network,
+    colors=detector_colors,
+    linestyles=detector_linestyles,
+)
+_ = save_figures({BASE_DIR / "snr_integrand.pdf": fig})
+
+
+# %%
+fig = plot_snr_cumulative_below(
+    NETWORKS,
+    frequency_by_network,
     snr_lt_by_network,
+    colors=detector_colors,
+    linestyles=detector_linestyles,
+)
+_ = save_figures({BASE_DIR / "snr_cumulative_below.pdf": fig})
+
+
+# %%
+fig = plot_snr_cumulative_above(
+    NETWORKS,
+    frequency_by_network,
     snr_gt_by_network,
     colors=detector_colors,
     linestyles=detector_linestyles,
 )
-_ = save_figures({BASE_DIR / "snr_cumulative.pdf": fig})
+_ = save_figures({BASE_DIR / "snr_cumulative_above.pdf": fig})
 
 
 # %% [markdown]
