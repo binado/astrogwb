@@ -16,6 +16,7 @@ SNR for are still the ones its chain was sampled with.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -189,3 +190,68 @@ def test_resolve_networks_rejects_an_undeclared_network(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r"names network 'absent'"):
         resolve_networks([("demo", "only")], (("only", "label"),), root=tmp_path)
+
+
+# --------------------------------------------------------------------------- #
+# Where a hand-run figure writes
+# --------------------------------------------------------------------------- #
+#: The four figure scripts. Their `--output-*` flags are what a hand run writes
+#: to, while the workflow hands each one explicit paths -- so the defaults are
+#: the only place a script could grow a second `outputs/figures/...` literal.
+FIGURE_SCRIPTS = (
+    "scripts/fiducial_spectrum.py",
+    "scripts/importance_weights_grid.py",
+    "scripts/mcmc_cosmological_parameters.py",
+    "scripts/mcmc_modified_propagation.py",
+)
+
+
+def _output_flags(relative: str) -> dict[str, dict[str, ast.expr]]:
+    """Every ``--output-*`` ``add_argument`` in a script, as flag -> keywords.
+
+    Parsed rather than imported: the scripts reach JAX and matplotlib, and this
+    is a property of the source, not of what importing it builds.
+    """
+    tree = ast.parse((REPO_ROOT / relative).read_text(encoding="utf-8"))
+    flags: dict[str, dict[str, ast.expr]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == "add_argument"):
+            continue
+        if not node.args or not isinstance(node.args[0], ast.Constant):
+            continue
+        flag = node.args[0].value
+        if isinstance(flag, str) and flag.startswith("--output-"):
+            flags[flag] = {
+                keyword.arg: keyword.value
+                for keyword in node.keywords
+                if keyword.arg is not None
+            }
+    return flags
+
+
+def _rooted_name(expr: ast.expr) -> str | None:
+    """The leftmost name of a `A / "b" / "c"` path chain."""
+    while isinstance(expr, ast.BinOp):
+        expr = expr.left
+    return expr.id if isinstance(expr, ast.Name) else None
+
+
+@pytest.mark.parametrize("relative", FIGURE_SCRIPTS)
+def test_every_output_flag_defaults_under_figures_dir(relative: str) -> None:
+    """A hand-run script writes under the same root the workflow declares.
+
+    The default has to exist and the flag has to be optional, or the default is
+    unreachable; and it has to be `FIGURES_DIR / ...` rather than a typed-out
+    `outputs/figures/...`, which is how the two would drift apart.
+    """
+    flags = _output_flags(relative)
+
+    assert flags, f"{relative} declares no --output-* flags"
+    for flag, keywords in flags.items():
+        assert "required" not in keywords, f"{relative} {flag} is still required"
+        default = keywords.get("default")
+        assert default is not None, f"{relative} {flag} has no default"
+        assert _rooted_name(default) == "FIGURES_DIR", f"{relative} {flag}"

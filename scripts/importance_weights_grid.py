@@ -33,8 +33,17 @@ from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config import priors
 from astrogwb.paper.config.mcmc import build_run_config
-from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
-from astrogwb.paper.plotting import TRUTH, parameter_label, use_paper_style
+from astrogwb.paper.config.runs import (
+    FIGURES_DIR,
+    add_config_arguments,
+    load_merged_config,
+)
+from astrogwb.paper.plotting import (
+    TRUTH,
+    parameter_label,
+    save_figures,
+    use_paper_style,
+)
 from astrogwb.populations import build_population
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
@@ -178,8 +187,16 @@ def combo_constants(
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", type=Path, required=True)
-    parser.add_argument("--output-h0-omega-m-pdf", type=Path, required=True)
-    parser.add_argument("--output-xi0-n-pdf", type=Path, required=True)
+    parser.add_argument(
+        "--output-h0-omega-m-pdf",
+        type=Path,
+        default=FIGURES_DIR / "standalone" / "importance_weights_grid_H0_Omega_m.pdf",
+    )
+    parser.add_argument(
+        "--output-xi0-n-pdf",
+        type=Path,
+        default=FIGURES_DIR / "standalone" / "importance_weights_grid_Xi0_n.pdf",
+    )
     add_config_arguments(parser)
     return parser.parse_args(argv)
 
@@ -212,7 +229,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         merger_rate_fn=target.merger_rate_fn,
     )[1]
 
-    figures: list[tuple[Figure, Path]] = []
+    figures: dict[Path, Figure] = {}
     for combo in grid_priors():
         (name0, prior0), (name1, prior1) = combo
         grid0 = prior_grid(prior0, eps=EPS, npoints=NPOINTS)
@@ -242,13 +259,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             fiducials=fiducials,
         )
         output = args.output_h0_omega_m_pdf if name0 == "H0" else args.output_xi0_n_pdf
-        figures.append((figure, output))
+        figures[output] = figure
 
-    for figure, output in figures:
-        output_path = output
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        figure.savefig(output_path)
-        print("saved figure:", output_path)
+    save_figures(figures)
 
 
 if __name__ == "__main__":

@@ -19,8 +19,11 @@ from astrogwb.paper.config.catalogs import (
 )
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import (
+    BASE_OUT_DIR,
+    CATALOGS_ROOT,
     CHAINS_ROOT,
     EXPERIMENT_BASE,
+    FIGURES_DIR,
     RUNS_DIR,
     assemble_run,
     base_config_paths,
@@ -83,10 +86,14 @@ def test_every_experiment_has_the_required_base_overlay() -> None:
         assert (PAPER_ROOT / RUNS_DIR / experiment / EXPERIMENT_BASE).is_file()
 
 
-def test_chain_output_root_is_fixed() -> None:
+def test_output_roots_are_derived_from_one_base() -> None:
     # There is no assembled-config path any more: a run is addressed by its
-    # layer files going in and by its chain coming out.
-    assert CHAINS_ROOT == Path("outputs/chains")
+    # layer files going in and by its chain coming out. The three output roots
+    # share one base so a second `outputs` literal cannot drift from the first.
+    assert BASE_OUT_DIR == Path("outputs")
+    assert CHAINS_ROOT == BASE_OUT_DIR / "chains"
+    assert CATALOGS_ROOT == BASE_OUT_DIR / "catalogs"
+    assert FIGURES_DIR == BASE_OUT_DIR / "figures"
 
 
 def test_run_config_paths_are_the_layers_in_merge_order() -> None:

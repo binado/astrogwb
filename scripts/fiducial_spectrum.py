@@ -22,6 +22,7 @@ from astrogwb.gwb import (
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import (
+    FIGURES_DIR,
     add_config_arguments,
     add_network_run_arguments,
     load_merged_config,
@@ -35,6 +36,7 @@ from astrogwb.paper.plotting import (
     SPECTRUM_LINESTYLES,
     Network,
     detector_network_styles,
+    save_figures,
     use_paper_style,
 )
 
@@ -192,8 +194,16 @@ def plot_effective_psds(
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", type=Path, required=True)
-    parser.add_argument("--output-pdf", type=Path, required=True)
-    parser.add_argument("--output-effective-psd-pdf", type=Path, required=True)
+    parser.add_argument(
+        "--output-pdf",
+        type=Path,
+        default=FIGURES_DIR / "standalone" / "fiducial_spectrum.pdf",
+    )
+    parser.add_argument(
+        "--output-effective-psd-pdf",
+        type=Path,
+        default=FIGURES_DIR / "standalone" / "fiducial_effective_psd_by_detector.pdf",
+    )
     add_config_arguments(parser)
     add_network_run_arguments(parser)
     return parser.parse_args(argv)
@@ -235,15 +245,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         frequency_mask=frequency_mask,
     )
 
-    output_path = args.output_pdf
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output_path)
-    print("saved figure:", output_path)
-
-    effective_psd_output_path = args.output_effective_psd_pdf
-    effective_psd_output_path.parent.mkdir(parents=True, exist_ok=True)
-    effective_psd_figure.savefig(effective_psd_output_path)
-    print("saved figure:", effective_psd_output_path)
+    save_figures(
+        {
+            args.output_pdf: figure,
+            args.output_effective_psd_pdf: effective_psd_figure,
+        }
+    )
 
 
 if __name__ == "__main__":
