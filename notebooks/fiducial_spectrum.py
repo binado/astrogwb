@@ -62,6 +62,7 @@ from astrogwb.gwb import (
 )
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import AnalysisGrid
+from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.inference import prepare_observation
 from astrogwb.paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
@@ -69,6 +70,7 @@ from astrogwb.paper.plotting import (
     SPECTRUM_LINESTYLES,
     Network,
     detector_network_styles,
+    save_figures,
     use_paper_style,
 )
 from astrogwb.utils import years_to_seconds
@@ -104,9 +106,9 @@ use_paper_style()
 #: not `..`, hence the literal.
 ROOT_DIR = Path() if Path("notebooks").is_dir() else Path("..")
 INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
-BASE_DIR = ROOT_DIR / "outputs/figures/fiducial_spectrum"
-FIG_DPI = 300
-FIG_FORMAT = ".pdf"
+#: Where this notebook's figures go: under the one output root the workflow,
+#: the figure scripts and `config/plotting.json` all agree on.
+BASE_DIR = ROOT_DIR / FIGURES_DIR / "fiducial_spectrum"
 
 # Inlined from config/analysis/base/parameters.toml [fiducials]. Only "H0" is
 # read below; the rest are kept so this is the whole fiducial point.
@@ -172,13 +174,6 @@ SNR_GT_LINESTYLE = "--"
 
 
 # %%
-def save_figure(fig: Figure, name: str) -> Path:
-    BASE_DIR.mkdir(parents=True, exist_ok=True)
-    path = BASE_DIR / f"{name}{FIG_FORMAT}"
-    fig.savefig(path, dpi=FIG_DPI, bbox_inches="tight")
-    return path
-
-
 def sh_ymin_matching_omega_floor(
     omega_gw: np.ndarray,
     spectral_density_arr: np.ndarray,
@@ -483,7 +478,7 @@ fig = plot_omega_and_sh(
     h0=FIDUCIALS["H0"],
     omega_gw_min=OMEGA_GW_MIN,
 )
-_ = save_figure(fig, "omega_and_sh")
+_ = save_figures({BASE_DIR / "omega_and_sh.pdf": fig})
 
 
 # %% [markdown]
@@ -543,7 +538,7 @@ fig = plot_effective_psds(
     linestyles=detector_linestyles,
     frequency_mask=frequency_mask,
 )
-_ = save_figure(fig, "effective_psds")
+_ = save_figures({BASE_DIR / "effective_psds.pdf": fig})
 
 
 # %% [markdown]
@@ -653,7 +648,7 @@ fig = plot_spectrum_and_sensitivities(
     include_spectrum_in_legend=False,
     spectrum_legend_loc="upper left",
 )
-_ = save_figure(fig, "sh_and_sigma")
+_ = save_figures({BASE_DIR / "sh_and_sigma.pdf": fig})
 
 
 # %% [markdown]
@@ -680,7 +675,7 @@ fig = plot_spectrum_and_sensitivities(
     include_spectrum_in_legend=False,
     spectrum_legend_loc="upper left",
 )
-_ = save_figure(fig, "omega_and_sigma")
+_ = save_figures({BASE_DIR / "omega_and_sigma.pdf": fig})
 
 
 # %% [markdown]
@@ -758,7 +753,7 @@ fig = plot_snr_cumulative(
     colors=detector_colors,
     linestyles=detector_linestyles,
 )
-_ = save_figure(fig, "snr_cumulative")
+_ = save_figures({BASE_DIR / "snr_cumulative.pdf": fig})
 
 
 # %% [markdown]
@@ -830,4 +825,4 @@ fig = plot_spectrum_and_cumulative_snr(
     snr_gt_by_network[reference_network.name],
     omega_gw_min=OMEGA_GW_MIN,
 )
-_ = save_figure(fig, "spectrum_and_cumulative_snr")
+_ = save_figures({BASE_DIR / "spectrum_and_cumulative_snr.pdf": fig})
