@@ -33,7 +33,8 @@ must not enter a catalog merge:
    A catalog layer, not a run layer. Only
    `config/catalogs/md-taylorf2-s41-n32768.json` overrides anything here
    (the approximant). The stored band matches
-   `config/analysis/base/model.toml`'s `[analysis]` `f_min` and `f_max`: the
+   `config/analysis/base/model.toml`'s `[analysis]` `minimum_frequency` and
+   `maximum_frequency`: the
    catalog grid *is* the array every model is evaluated on, and a run's band
    selects bins on it with a mask rather than compressing it.
    `sampling_frequency` is the waveform backend's Nyquist, not the stored grid.

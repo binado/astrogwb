@@ -261,14 +261,14 @@ def prepare_observation(
     # Band bounds only: this function never sees a detector network, so bins
     # the network cannot measure are dropped later, in prepare_inference_inputs.
     analysis_frequency_mask = make_frequency_mask(
-        frequencies, fmin=grid.f_min, fmax=grid.f_max
+        frequencies, fmin=grid.minimum_frequency, fmax=grid.maximum_frequency
     )
     logger.info(
         "Analysis band: %d of %d bins (%.1f-%.1f Hz)",
         int(jnp.sum(analysis_frequency_mask)),
         frequencies.shape[0],
-        grid.f_min,
-        grid.f_max,
+        grid.minimum_frequency,
+        grid.maximum_frequency,
     )
     return Observation(
         frequencies=frequencies,
@@ -371,7 +371,8 @@ def prepare_inference_inputs(
     if num_bins < 2:
         raise ValueError(
             f"only {num_bins} usable frequency bin(s) in "
-            f"[{grid.f_min}, {grid.f_max}] Hz for detectors "
+            f"[{grid.minimum_frequency}, {grid.maximum_frequency}] Hz for "
+            f"detectors "
             f"{' '.join(detectors)}; widen the band or choose a detector "
             "network with full coverage"
         )

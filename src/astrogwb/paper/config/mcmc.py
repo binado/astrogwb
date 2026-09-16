@@ -46,8 +46,8 @@ class AnalysisGrid:
     """Frequency band and redshift grid shared by every experiment run."""
 
     observation_time: float
-    f_min: float
-    f_max: float
+    minimum_frequency: float
+    maximum_frequency: float
     minimum_redshift: float
     maximum_redshift: float
     n_grid: int
@@ -194,8 +194,8 @@ class AnalysisConfig(BaseModel):
     #: table -- re-validates. That every *committed* run names one is a repo
     #: test, not a model constraint.
     network: str | None = None
-    f_min: float
-    f_max: float
+    minimum_frequency: float
+    maximum_frequency: float
     # The registered population the sampled hyperparameters describe. The
     # default is the one every committed run uses; it reduces exactly to the
     # plain cosmological population at xi_0 = 1, which is how a run that does
@@ -417,8 +417,8 @@ class RunConfig(BaseModel):
         """
         return AnalysisGrid(
             observation_time=self.observation_time,
-            f_min=self.analysis.f_min,
-            f_max=self.analysis.f_max,
+            minimum_frequency=self.analysis.minimum_frequency,
+            maximum_frequency=self.analysis.maximum_frequency,
             minimum_redshift=self.cosmology.minimum_redshift,
             maximum_redshift=self.cosmology.maximum_redshift,
             n_grid=self.cosmology.n_grid,

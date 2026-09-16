@@ -265,7 +265,8 @@ def catalog_base_paths(root: Path | None = None) -> tuple[Path, ...]:
     the waveform block (the approximant), and only the guarded proposals touch
     the population block; the rest of the tree inherits both verbatim. The
     stored band matches ``config/analysis/base/model.toml``'s ``[analysis]``
-    ``f_min`` / ``f_max``: the catalog grid *is* the array every model is
+    ``minimum_frequency`` / ``maximum_frequency``: the catalog grid *is* the
+    array every model is
     evaluated on. ``sampling_frequency`` is the waveform backend's Nyquist, not
     the stored grid.
     """

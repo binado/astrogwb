@@ -120,8 +120,12 @@ def proposal_catalog(tmp_path: Path) -> PolarizationPowerCatalog:
 
 def _config(**overrides: Any) -> RunConfig:
     raw = example_raw()
-    f_min, f_max = BAND
-    raw["analysis"] = {**raw["analysis"], "f_min": f_min, "f_max": f_max}
+    minimum_frequency, maximum_frequency = BAND
+    raw["analysis"] = {
+        **raw["analysis"],
+        "minimum_frequency": minimum_frequency,
+        "maximum_frequency": maximum_frequency,
+    }
     raw["cosmology"] = {**raw["cosmology"], "n_grid": 32}
     raw["sampler"] = {
         **raw["sampler"],
@@ -435,8 +439,8 @@ def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
     config = _config(
         analysis={
             **example_raw()["analysis"],
-            "f_min": BAND[0],
-            "f_max": BAND[1],
+            "minimum_frequency": BAND[0],
+            "maximum_frequency": BAND[1],
             "likelihood": "amplitude_marginalized",
             "amplitude_parameter": "H0",
         },
