@@ -402,7 +402,13 @@ def describe(catalog: PolarizationPowerCatalog) -> pd.Series:
 
 def catalog_merger_rate(catalog: PolarizationPowerCatalog) -> jax.Array:
     """The observer-frame rate this catalog's own population implies."""
-    return jnp.asarray(catalog.get_merger_rate_fn()(catalog.fiducials))
+    merger_rate_fn = catalog.get_population().merger_rate_fn
+    if merger_rate_fn is None:
+        raise ValueError(
+            f"catalog population {catalog.population_model_name!r} declares no "
+            "merger rate, so it cannot supply an observed total rate"
+        )
+    return jnp.asarray(merger_rate_fn(catalog.fiducials))
 
 
 def unpack(
