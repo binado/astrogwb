@@ -66,7 +66,6 @@ from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
 from astrogwb.catalog import PolarizationPowerCatalog
-from astrogwb.metadata import WaveformMetadata
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.distributions.rates import madau_dickinson_rate
@@ -79,6 +78,7 @@ from astrogwb.gwb import (
     uniform_prior_mass_moments,
 )
 from astrogwb.importance.spectral import build_importance_spectrum
+from astrogwb.metadata import WaveformMetadata
 from astrogwb.paper.config import fiducials, population_metadata, population_model
 from astrogwb.populations import build_population
 from astrogwb.utils.sampling import sample_sources

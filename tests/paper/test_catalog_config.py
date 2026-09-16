@@ -238,7 +238,9 @@ def test_alpha_is_rejected_for_a_non_analytical_approximant(tmp_path: Path) -> N
     """
     path = tmp_path / "toy.json"
     path.write_text(_toy_def(approximant="TaylorF2", alpha=0.02), encoding="utf-8")
-    with pytest.raises(ValueError, match="alpha is only valid for the AnalyticInspiral"):
+    with pytest.raises(
+        ValueError, match="alpha is only valid for the AnalyticInspiral"
+    ):
         load_catalog_layers([path])
 
 
