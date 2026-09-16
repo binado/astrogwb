@@ -66,6 +66,7 @@ from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
 from astrogwb.catalog import PolarizationPowerCatalog
+from astrogwb.metadata import WaveformMetadata
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
 from astrogwb.distributions.rates import madau_dickinson_rate
@@ -309,13 +310,15 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> PolarizationPowerCat
     return PolarizationPowerCatalog.from_generator(
         parameters,
         generator=AnalyticInspiralGenerator(
-            alpha=ISCO_ALPHA,
-            approximant="AnalyticInspiral",
-            minimum_frequency=F_MIN,
-            maximum_frequency=f_max,
-            reference_frequency=F_MIN,
-            sampling_frequency=2.0 * f_max,
-            frequency_resolution=df,
+            WaveformMetadata(
+                alpha=ISCO_ALPHA,
+                approximant="AnalyticInspiral",
+                minimum_frequency=F_MIN,
+                maximum_frequency=f_max,
+                reference_frequency=F_MIN,
+                sampling_frequency=2.0 * f_max,
+                frequency_resolution=df,
+            )
         ),
         population=POPULATION,
         fiducials=FIDUCIALS,
