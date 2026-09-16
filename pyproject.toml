@@ -17,8 +17,8 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Physics",
 ]
-# The publishable core. Everything the paper application needs -- pydantic,
-# arviz, xarray -- is an extra, so `pip install astrogwb` stays lean.
+# The publishable core. The application's own stack -- arviz, xarray, pyyaml --
+# is an extra, so `pip install astrogwb` stays lean.
 dependencies = [
     "gwmock-noise>=0.10.1",
     "gwmock-signal[jax]>=0.15.0",
@@ -29,6 +29,11 @@ dependencies = [
     "jax[cpu]>=0.11.0; sys_platform != 'linux'",
     "numpy>=2.5.1",
     "numpyro>=0.21.0",
+    # Direct, though gwmock-noise already installs it and imports it at module
+    # scope: core owns the metadata models every persisted artifact carries, so
+    # the dependency is declared rather than borrowed from a transitive edge
+    # that gwmock-noise is free to drop.
+    "pydantic>=2.11",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +52,6 @@ tpu = ["jax[tpu]>=0.11.0"]
 paper = [
     "astrogwb[io,simulation]",
     "arviz[h5netcdf]>=1.2.0",
-    "pydantic>=2.11",
     "pyyaml>=6.0",
 ]
 # The analysis stack the notebooks and figure scripts import.

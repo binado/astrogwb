@@ -231,7 +231,7 @@ def test_alpha_is_rejected_for_a_non_analytical_approximant(tmp_path: Path) -> N
 def test_a_declared_alpha_reaches_the_analytical_generator(tmp_path: Path) -> None:
     path = tmp_path / "toy.toml"
     path.write_text(
-        _TOY_DEF.format(approximant="analytical", alpha="alpha = 0.02"),
+        _TOY_DEF.format(approximant="AnalyticInspiral", alpha="alpha = 0.02"),
         encoding="utf-8",
     )
     generator = load_catalog_layers([path]).waveform.build()
@@ -243,7 +243,7 @@ def test_a_declared_alpha_reaches_the_analytical_generator(tmp_path: Path) -> No
 def test_an_omitted_alpha_defaults_to_isco(tmp_path: Path) -> None:
     path = tmp_path / "toy.toml"
     path.write_text(
-        _TOY_DEF.format(approximant="analytical", alpha=""), encoding="utf-8"
+        _TOY_DEF.format(approximant="AnalyticInspiral", alpha=""), encoding="utf-8"
     )
     generator = load_catalog_layers([path]).waveform.build()
 

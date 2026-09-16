@@ -16,7 +16,7 @@ from astrogwb.catalog._io import (
     SPECTRAL_DENSITY_DATASETS,
     SPECTRAL_DENSITY_FORMAT_NAME,
 )
-from astrogwb.populations import PopulationRecord
+from astrogwb.metadata import PopulationMetadata
 from astrogwb.waveform import PolarizationPowerGenerator
 
 
@@ -44,7 +44,7 @@ def _catalog(**overrides: Any) -> SpectralDensityCatalog:
             "local_merger_rate": np.array([800.0, 800.0]),
         },
         "waveform_metadata": waveform,
-        "_population": PopulationRecord(
+        "_population": PopulationMetadata(
             model_name="bns_md_cosmological",
             model_kwargs={
                 "minimum_redshift": 0.1,

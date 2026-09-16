@@ -9,7 +9,7 @@ named parameter arrays.
 
 It touches no h5py: everything here operates on values a reader has already
 pulled out of a file, or values a writer is about to put in. That is what lets
-:mod:`astrogwb.populations.record` serialize itself without the population
+:mod:`astrogwb.metadata` serialize itself without the population
 layer taking on an optional dependency.
 """
 

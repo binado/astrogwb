@@ -9,7 +9,7 @@ differ.
 
 The metadata codecs themselves are not here. Each record encodes itself --
 :meth:`astrogwb.waveform.PolarizationPowerGenerator.to_attrs` and
-:meth:`astrogwb.populations.PopulationRecord.to_attrs` -- over the scalar and
+:meth:`astrogwb.metadata.PopulationMetadata.to_attrs` -- over the scalar and
 JSON primitives in :mod:`astrogwb._attrs`, which imports no h5py. That is what
 keeps the waveform and population layers free of a serialization dependency,
 and leaves this module as the one place that opens a file.

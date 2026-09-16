@@ -33,7 +33,7 @@ one file per named thing, the same shape a run config has:
    catalog grid *is* the array every model is evaluated on, and a run's band
    selects bins on it with a mask rather than compressing it.
    `sampling_frequency` is the waveform backend's Nyquist, not the stored grid.
-   `approximant="analytical"` selects the closed-form inspiral, and is the only
+   `approximant="AnalyticInspiral"` selects the closed-form inspiral, and is the only
    approximant accepting the optional `alpha` key (the inspiral termination
    constant, defaulting to the Schwarzschild ISCO value); naming it alongside a
    Ripple approximant is rejected. `WaveformConfig.build()` constructs the
@@ -265,7 +265,7 @@ population_num_samples   = 32768
 ```
 
 HDF5 attributes are flat scalars, so the mappings travel as JSON strings. The
-`population_*` block is one `PopulationRecord`, the same record a
+`population_*` block is one `PopulationMetadata`, the same record a
 spectral-density catalog carries, which is what keeps the two formats spelling
 these fields identically.
 
@@ -326,7 +326,7 @@ run that only needs predicted spectra never materializes `(F, N)` waveforms.
 | `hyperparameters` | `(draws, P)` | one column per name, ordered by `source_parameter_names` |
 
 Its root attributes are the same three blocks a power catalog stamps -- format
-identity, the six waveform attributes, and the `PopulationRecord` -- plus three
+identity, the six waveform attributes, and the `PopulationMetadata` -- plus three
 the draws cannot be read back from:
 
 ```

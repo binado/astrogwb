@@ -333,10 +333,10 @@ def test_waveform_generator_defaults_to_the_committed_ripple() -> None:
 
 
 def test_waveform_generator_kwargs_select_the_analytical_inspiral() -> None:
-    generator = waveform_generator(REPO_ROOT, approximant="analytical")
+    generator = waveform_generator(REPO_ROOT, approximant="AnalyticInspiral")
 
     assert isinstance(generator, AnalyticInspiralGenerator)
-    assert generator.approximant == "analytical"
+    assert generator.approximant == "AnalyticInspiral"
     assert generator.alpha == ISCO_ALPHA
     assert generator.minimum_frequency == 2.0
 
@@ -348,12 +348,29 @@ def test_waveform_generator_overrides_are_validated_not_trusted() -> None:
     coerced with a bare ``float()`` and an override that made no sense for the
     named approximant was passed straight through.
     """
-    generator = waveform_generator(REPO_ROOT, approximant="analytical", alpha=0.02)
+    generator = waveform_generator(
+        REPO_ROOT, approximant="AnalyticInspiral", alpha=0.02
+    )
     assert isinstance(generator, AnalyticInspiralGenerator)
     assert generator.alpha == 0.02
 
     with pytest.raises(ValidationError, match="waveform.alpha is only valid"):
         waveform_generator(REPO_ROOT, alpha=0.02)
+
+
+@pytest.mark.parametrize(
+    "approximant", ["analytical", "analytic", "Analytic", "AnalyticalInspiral"]
+)
+def test_a_near_miss_analytical_approximant_is_rejected(approximant: str) -> None:
+    """A spelling close to the canonical one must not be read as a Ripple name.
+
+    Anything that is not ``"AnalyticInspiral"`` selects the Ripple backend, so
+    without this the failure is silent in the direction that matters: the
+    closed-form inspiral a caller asked for is quietly swapped for a waveform
+    approximant, and the error -- if any -- surfaces from inside ripple.
+    """
+    with pytest.raises(ValidationError, match="is not a Ripple approximant"):
+        waveform_generator(REPO_ROOT, approximant=approximant)
 
 
 # --------------------------------------------------------------------------- #

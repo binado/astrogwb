@@ -165,7 +165,7 @@ def waveform_generator(
 ) -> PolarizationPowerGenerator:
     """Build the polarization-power generator from ``config/waveform.json``.
 
-    Keyword arguments override the file. ``approximant="analytical"`` selects
+    Keyword arguments override the file. ``approximant="AnalyticInspiral"`` selects
     the closed-form inspiral, and is the only approximant taking an ``alpha``;
     any other name is a Ripple approximant.
 

@@ -5,7 +5,7 @@ waveform descriptor, and the population record -- and differ only in their
 datasets and in the handful of attributes each artifact alone carries. The two
 shared blocks encode themselves: see
 :meth:`astrogwb.waveform.PolarizationPowerGenerator.to_attrs` and
-:meth:`astrogwb.populations.PopulationRecord.to_attrs`, with the h5py mechanics
+:meth:`astrogwb.metadata.PopulationMetadata.to_attrs`, with the h5py mechanics
 in :mod:`astrogwb.catalog._hdf5`. What is here is per-format: which datasets
 exist, which attributes are required, the shape and dtype checks a reader
 enforces before constructing a record.
@@ -47,7 +47,7 @@ from astrogwb.catalog.polarization_power import REDSHIFT_SITE, PolarizationPower
 from astrogwb.catalog.spectral_density import (
     SpectralDensityCatalog,
 )
-from astrogwb.populations.record import POPULATION_ATTRS, PopulationRecord
+from astrogwb.metadata import POPULATION_ATTRS, PopulationMetadata
 from astrogwb.waveform import PolarizationPowerGenerator
 
 __all__ = [
@@ -128,7 +128,7 @@ def load_polarization_power_catalog[C: PolarizationPowerCatalog](
         names = json_array_attr(
             attrs[PARAMETER_NAMES_ATTR], label=label, name=PARAMETER_NAMES_ATTR
         )
-        population = PopulationRecord.from_attrs(attrs, label=label)
+        population = PopulationMetadata.from_attrs(attrs, label=label)
         catalog = cls(
             source_parameters=unstack_columns(
                 np.asarray(handle["source_parameters"]), names
@@ -272,7 +272,7 @@ def load_spectral_density_catalog[C: SpectralDensityCatalog](
         names = json_array_attr(
             attrs[PARAMETER_NAMES_ATTR], label=label, name=PARAMETER_NAMES_ATTR
         )
-        population = PopulationRecord.from_attrs(attrs, label=label)
+        population = PopulationMetadata.from_attrs(attrs, label=label)
         catalog = cls(
             spectral_density=np.asarray(handle["spectral_density"]),
             frequencies=np.asarray(handle["frequency"]),

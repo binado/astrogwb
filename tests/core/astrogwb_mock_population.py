@@ -29,10 +29,10 @@ from jax.typing import ArrayLike
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.spectral import build_importance_spectrum
+from astrogwb.metadata import PopulationMetadata
 from astrogwb.populations import (
     MergerRateFn,
     Population,
-    PopulationRecord,
     SourceFn,
     build_population,
 )
@@ -167,7 +167,7 @@ def mock_catalog(
     return PolarizationPowerCatalog.from_generator(
         source_parameters,
         generator=generator,
-        population=PopulationRecord(
+        population=PopulationMetadata(
             model_name="bns_md_cosmological",
             model_kwargs={
                 "minimum_redshift": Z_MIN,
@@ -323,7 +323,7 @@ def build_synthetic_importance(
         polarization_power=np.asarray(polarization_power),
         frequencies=np.asarray(generator.frequencies),
         waveform_metadata=generator,
-        _population=PopulationRecord(
+        _population=PopulationMetadata(
             model_name="bns_md_cosmological",
             model_kwargs={
                 "minimum_redshift": Z_MIN,

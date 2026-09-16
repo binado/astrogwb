@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from astrogwb.metadata import PopulationMetadata
 from astrogwb.paper.config.mcmc import RunConfig
 from astrogwb.paper.config.runs import (
     CATALOG_DEFS_DIR,
@@ -45,7 +46,6 @@ from astrogwb.paper.config.runs import (
 )
 
 if TYPE_CHECKING:
-    from astrogwb.populations import PopulationRecord
     from astrogwb.waveform import PolarizationPowerGenerator
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,18 @@ _STRICT = ConfigDict(frozen=True, extra="forbid")
 
 #: The one ``approximant`` that is not a Ripple name: it selects the
 #: closed-form inspiral, which is the only generator taking an ``alpha``.
-_ANALYTICAL_APPROXIMANT = "analytical"
+_ANALYTICAL_APPROXIMANT = "AnalyticInspiral"
+
+#: Spellings close enough to :data:`_ANALYTICAL_APPROXIMANT` to be meant as it.
+#: They are rejected by name rather than passed through, because the failure
+#: they would otherwise cause is silent: anything that is not the canonical
+#: spelling is treated as a Ripple approximant, so a near miss selects the
+#: wrong backend instead of the wrong-looking one. Checked as a deny list
+#: rather than against Ripple's own catalogue, which cannot be consulted
+#: without reaching JAX.
+_CONFUSABLE_ANALYTICAL_APPROXIMANTS = frozenset(
+    {"analytical", "analytic", "Analytic", "AnalyticalInspiral", "analytic_inspiral"}
+)
 
 
 class WaveformConfig(BaseModel):
@@ -64,7 +75,7 @@ class WaveformConfig(BaseModel):
     only ``md-taylorf2-s41-n32768`` does (the approximant). The stored band
     matches ``config/analysis/base/model.toml``'s ``[analysis]`` ``f_min`` /
     ``f_max``. ``sampling_frequency`` is the backend Nyquist, not the stored
-    grid. ``approximant="analytical"`` selects the closed-form inspiral.
+    grid. ``approximant="AnalyticInspiral"`` selects the closed-form inspiral.
 
     This is the wire format for
     :class:`~astrogwb.waveform.PolarizationPowerGenerator`, and :meth:`build`
@@ -94,7 +105,13 @@ class WaveformConfig(BaseModel):
     alpha: Annotated[float, Field(gt=0.0)] | None = None
 
     @model_validator(mode="after")
-    def _validate_alpha(self) -> WaveformConfig:
+    def _validate_approximant(self) -> WaveformConfig:
+        if self.approximant in _CONFUSABLE_ANALYTICAL_APPROXIMANTS:
+            raise ValueError(
+                f"waveform.approximant {self.approximant!r} is not a Ripple "
+                f"approximant; the closed-form inspiral is spelled "
+                f"{_ANALYTICAL_APPROXIMANT!r}"
+            )
         if self.alpha is not None and self.approximant != _ANALYTICAL_APPROXIMANT:
             raise ValueError(
                 f"waveform.alpha is only valid when "
@@ -173,7 +190,7 @@ class CatalogDefinition(BaseModel):
     population: PopulationConfig
     waveform: WaveformConfig
 
-    def population_record(self) -> PopulationRecord:
+    def population_record(self) -> PopulationMetadata:
         """The population declaration this def hands to a generated catalog.
 
         The record is what the ``.h5`` persists, so assembling it here -- next
@@ -183,13 +200,15 @@ class CatalogDefinition(BaseModel):
         no def declares density sites: they follow from the registered
         population, not from configuration.
 
-        Imports :mod:`astrogwb.populations` in its own body; the registry is
-        populated by importing the models, which pulls in JAX, and this module
-        is otherwise free of it.
+        :class:`~astrogwb.metadata.PopulationMetadata` is imported at module
+        scope -- it is JAX-free by construction --  but
+        :data:`~astrogwb.populations.DEFAULT_DENSITY_SITES` is not: the
+        registry is populated by importing the models, which pulls in JAX, and
+        this module is otherwise free of it.
         """
-        from astrogwb.populations import DEFAULT_DENSITY_SITES, PopulationRecord
+        from astrogwb.populations import DEFAULT_DENSITY_SITES
 
-        return PopulationRecord(
+        return PopulationMetadata(
             model_name=self.population.model,
             model_kwargs=self.population.kwargs,
             density_sites=DEFAULT_DENSITY_SITES,
