@@ -31,6 +31,7 @@ from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import (
+    DEFAULT_DENSITY_SITES,
     MergerRateFn,
     Population,
     SourceFn,
@@ -174,7 +175,6 @@ def mock_catalog(
                 "maximum_redshift": Z_MAX,
                 "n_grid": N_GRID,
             },
-            density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
             seed=MOCK_POPULATION_SEED,
         ),
         fiducials=POPULATION_PARAMS,
@@ -335,11 +335,6 @@ def build_synthetic_importance(
                     "maximum_redshift": Z_MAX,
                     "n_grid": N_GRID,
                 },
-                density_sites=(
-                    "redshift",
-                    "source_frame_mass_1",
-                    "source_frame_mass_2",
-                ),
                 seed=MOCK_POPULATION_SEED,
             ),
         ),
@@ -349,6 +344,7 @@ def build_synthetic_importance(
         catalog,
         source_model=mock_target_model() if source_model is None else source_model,
         merger_rate_fn=mock_merger_rate_fn(),
+        density_sites=DEFAULT_DENSITY_SITES,
     )
     return (
         dict(spectrum[0].keywords),  # ty: ignore[unresolved-attribute]

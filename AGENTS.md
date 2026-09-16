@@ -35,11 +35,12 @@ Every check is a `just` recipe, and CI runs the same string:
 Run workflow and application entrypoints from the repository root; configuration paths are relative to the caller's current working directory, and no checkout discovery is performed.
 
 A catalog records the density that drew it: its file carries the registered
-population model, that model's construction settings, the hyperparameters it
-was drawn at, and the density factors included in importance weighting. No
-run config restates any of it, and nothing cross-checks the two. Adding a
-population means adding a registered source-model function under
-`src/astrogwb/populations/`, never an import path in a config.
+population model, that model's construction settings, and the hyperparameters
+it was drawn at. No run config restates any of it, and nothing cross-checks the
+two. Which of those density factors enter an importance weight is *not* part of
+the record -- no sample depends on it -- so it is declared by the analysis that
+reweights the draw. Adding a population means adding a registered source-model
+function under `src/astrogwb/populations/`, never an import path in a config.
 
 A catalog config is four layers: `config/waveform.json`,
 `config/population.json`, `config/fiducials.json`, then
@@ -50,9 +51,8 @@ deliberately both a run layer and a catalog layer: the hyperparameters a
 catalog is drawn at and the ones a run initializes at are one table, so editing
 it invalidates every catalog as well as every run. `config/population.json`
 declares only `model_name` and `model_kwargs` -- the seed belongs to a
-particular draw and the density sites follow from the registered population, so
-`CatalogDefinition` supplies both during validation and holds the result as a
-`PopulationMetadata`, the same record the `.h5` persists.
+particular draw, so `CatalogDefinition` supplies it during validation and holds
+the result as a `PopulationMetadata`, the same record the `.h5` persists.
 
 Every catalog layer is JSON, so the fold is `jq`, not Python. `rule
 merge_catalog_config` folds exactly the files it declares as `input:` into one

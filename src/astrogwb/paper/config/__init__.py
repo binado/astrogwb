@@ -237,9 +237,6 @@ def population_metadata(
     the population, while a particular draw of it declares the seed -- which is
     why ``config/catalogs/<name>.json`` carries one and
     ``config/population.json`` does not.
-    :data:`~astrogwb.populations.DEFAULT_DENSITY_SITES` is supplied for the same
-    reason no def declares it: the density factors follow from the registered
-    population, not from configuration.
 
     Keyword arguments override ``model_kwargs``, validated rather than trusted,
     so this accessor and
@@ -251,12 +248,10 @@ def population_metadata(
     ``configure_runtime``, for the reason :func:`population_model` gives.
     """
     from astrogwb.metadata import PopulationMetadata
-    from astrogwb.populations import DEFAULT_DENSITY_SITES
 
     table = _load((root or Path()) / POPULATION_PATH, "population")
     return PopulationMetadata(
         model_name=table["model_name"],
         model_kwargs={**table.get("model_kwargs", {}), **kwargs},
-        density_sites=DEFAULT_DENSITY_SITES,
         seed=seed,
     )

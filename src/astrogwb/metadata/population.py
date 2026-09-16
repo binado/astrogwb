@@ -3,8 +3,8 @@
 Every artifact this package persists -- a polarization-power catalog, a
 spectral-density catalog -- records the density that produced it: the
 registered population name, the flat construction kwargs it was built with,
-the density factors included in importance weighting, and the seed the draw
-used. That record was previously spelled out field by field on each artifact
+and the seed the draw used. That record was previously spelled out field by
+field on each artifact
 and re-encoded attribute by attribute in each writer, which is how the two
 formats drifted into naming the same thing differently.
 
@@ -17,24 +17,25 @@ bodies, which is the only edge from here back into the population layer.
 
 The record is deliberately not a cross-check: nothing here compares the
 declaration against the arrays it travels with. It is the single statement of
-what drew them.
+what drew them -- and only of that. Which of the population's density factors
+enter an importance weight is not part of it: that choice changes no sample,
+is made by the analysis that reweights the draw, and is declared there.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Annotated, Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from astrogwb._attrs import int_attr, json_array_attr, json_object_attr
+from astrogwb._attrs import int_attr, json_object_attr
 
 if TYPE_CHECKING:
     from astrogwb.populations.registry import Population
 
 __all__ = [
-    "DENSITY_SITES_ATTR",
     "MODEL_KWARGS_ATTR",
     "MODEL_NAME_ATTR",
     "POPULATION_ATTRS",
@@ -47,29 +48,14 @@ __all__ = [
 #: spell the same field differently.
 MODEL_NAME_ATTR = "population_model"
 MODEL_KWARGS_ATTR = "population_model_kwargs"
-DENSITY_SITES_ATTR = "population_density_sites"
 SEED_ATTR = "population_seed"
 
 #: Every attribute :meth:`PopulationMetadata.to_attrs` writes, in write order.
 POPULATION_ATTRS: tuple[str, ...] = (
     MODEL_NAME_ATTR,
     MODEL_KWARGS_ATTR,
-    DENSITY_SITES_ATTR,
     SEED_ATTR,
 )
-
-
-def _as_tuple(value: Any) -> Any:
-    """Accept an ordered sequence where a tuple is declared.
-
-    Strict mode does not coerce ``list`` to ``tuple``, and the read path
-    decodes ``density_sites`` from a JSON array. Narrowed to genuinely ordered
-    sequences: a ``set`` would validate under a looser rule and silently lose
-    the ordering the field depends on.
-    """
-    if isinstance(value, list):
-        return tuple(value)
-    return value
 
 
 #: Construction kwargs travel as HDF5 attributes via JSON, so they must be
@@ -78,8 +64,6 @@ def _as_tuple(value: Any) -> Any:
 #: ``float`` stays a ``float``, so a file written from a loaded record is
 #: byte-identical to the one it was read from.
 ModelKwargs = dict[str, float | int]
-
-DensitySites = Annotated[tuple[str, ...], BeforeValidator(_as_tuple)]
 
 
 class PopulationMetadata(BaseModel):
@@ -90,11 +74,6 @@ class PopulationMetadata(BaseModel):
     :func:`~astrogwb.populations.build_population`. Keeping it flat is what
     lets a narrowed redshift window reach the rebuilt population from a single
     rewrite.
-
-    ``density_sites`` is ordered and load-bearing: the two mass sites form one
-    conceptual ordered-pair density contribution, and a proposal density
-    computed with either excluded gives silently wrong importance weights with
-    no shape error anywhere.
 
     Validation is strict. That is not fussiness: in pydantic's default lax mode
     a ``seed`` of ``True`` validates as ``1``, which would silently undo the
@@ -108,7 +87,6 @@ class PopulationMetadata(BaseModel):
 
     model_name: str
     model_kwargs: ModelKwargs = Field(default_factory=dict)
-    density_sites: DensitySites
     seed: int
 
     def build(self) -> Population:
@@ -153,15 +131,14 @@ class PopulationMetadata(BaseModel):
         return type(self)(
             model_name=self.model_name,
             model_kwargs={**self.model_kwargs, **updates},
-            density_sites=self.density_sites,
             seed=self.seed,
         )
 
     def to_attrs(self) -> dict[str, str | int]:
         """Encode the record as HDF5-writable scalar attributes.
 
-        Mappings and sequences travel as JSON strings with sorted keys, so a
-        file written twice from the same record is byte-identical.
+        ``model_kwargs`` travels as a JSON string with sorted keys, so a file
+        written twice from the same record is byte-identical.
 
         Hand-written rather than ``model_dump_json``: pydantic serializes in
         field-declaration order, not sorted-key order, so switching to it would
@@ -170,7 +147,6 @@ class PopulationMetadata(BaseModel):
         return {
             MODEL_NAME_ATTR: self.model_name,
             MODEL_KWARGS_ATTR: json.dumps(dict(self.model_kwargs), sort_keys=True),
-            DENSITY_SITES_ATTR: json.dumps(list(self.density_sites)),
             SEED_ATTR: self.seed,
         }
 
@@ -183,17 +159,16 @@ class PopulationMetadata(BaseModel):
         concerns -- which attributes a given format requires, and any
         compatibility tier that supplies a missing one -- belong to the reader
         that calls this, not here.
+
+        Only the named keys are read, so a file written before the weighting
+        choice moved to the analysis config still loads: its leftover
+        ``population_density_sites`` attribute is simply not one of them.
         """
         try:
             return cls(
                 model_name=str(attrs[MODEL_NAME_ATTR]),
                 model_kwargs=json_object_attr(
                     attrs[MODEL_KWARGS_ATTR], label=label, name=MODEL_KWARGS_ATTR
-                ),
-                density_sites=tuple(
-                    json_array_attr(
-                        attrs[DENSITY_SITES_ATTR], label=label, name=DENSITY_SITES_ATTR
-                    )
                 ),
                 seed=int_attr(attrs[SEED_ATTR], label=label, name=SEED_ATTR),
             )

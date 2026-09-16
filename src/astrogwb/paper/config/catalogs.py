@@ -57,8 +57,8 @@ class CatalogDefinition(BaseModel):
     ``population`` is the :class:`~astrogwb.metadata.PopulationMetadata` the
     generated ``.h5`` persists verbatim, assembled here rather than bridged
     from a second config-layer model: the declaration and the record were the
-    same four facts stated twice, and a bridge between them is one more place
-    for them to disagree. ``model_name`` is a key in the
+    same facts stated twice, and a bridge between them is one more place for
+    them to disagree. ``model_name`` is a key in the
     :mod:`astrogwb.populations` registry, never an import path -- registry keys
     change only on purpose, while module paths move as collateral whenever a
     module is reorganized. It names the population, the source model and its
@@ -100,19 +100,14 @@ class CatalogDefinition(BaseModel):
         """Complete the ``[population]`` block into a full record.
 
         The config layer declares the two facts that are configuration --
-        ``model_name`` and ``model_kwargs``. The other two are not: ``seed``
-        belongs to this particular draw and is stated once, at the top level,
-        and :data:`~astrogwb.populations.DEFAULT_DENSITY_SITES` follows from the
-        registered population rather than from a file, so no def declares it.
+        ``model_name`` and ``model_kwargs``. ``seed`` is not: it belongs to this
+        particular draw and is stated once, at the top level, so it is folded in
+        here.
 
-        Both are rejected rather than ignored when a layer does declare one.
-        A ``[population]`` ``seed`` would otherwise win here and leave
-        ``definition.seed`` disagreeing with the seed the ``.h5`` records, which
-        is the one thing this assembly exists to make impossible.
-
-        Imports the registry in its own body: populating it means importing the
-        population models, which reaches JAX, and this module is otherwise free
-        of it.
+        A ``[population]`` ``seed`` is rejected rather than ignored. It would
+        otherwise win here and leave ``definition.seed`` disagreeing with the
+        seed the ``.h5`` records, which is the one thing this assembly exists to
+        make impossible.
         """
         if not isinstance(data, Mapping):
             return data
@@ -122,20 +117,12 @@ class CatalogDefinition(BaseModel):
             # it better than a KeyError here would.
             return data
 
-        supplied = [name for name in ("seed", "density_sites") if name in population]
-        if supplied:
+        if "seed" in population:
             raise ValueError(
-                f"population may not declare {', '.join(supplied)}: the seed is "
-                "the def's own, and the density sites follow from the "
-                "registered population"
+                "population may not declare seed: the seed is the def's own"
             )
 
-        from astrogwb.populations import DEFAULT_DENSITY_SITES
-
-        completed = {
-            **population,
-            "density_sites": DEFAULT_DENSITY_SITES,
-        }
+        completed = dict(population)
         if "seed" in data:
             completed["seed"] = data["seed"]
         return {**data, "population": completed}

@@ -310,6 +310,7 @@ def prepare_inference_inputs(
     grid: AnalysisGrid,
     detectors: Sequence[str],
     target: Population,
+    density_sites: Sequence[str],
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs.
 
@@ -318,6 +319,11 @@ def prepare_inference_inputs(
     declare a merger rate: the predicted spectrum is normalized by one, so a
     proposal density here would produce a spectrum with no scale.
 
+    ``density_sites`` names the source-density factors the importance weights
+    include, and is passed straight through to
+    :func:`~astrogwb.importance.build_importance_spectrum`. It is an analysis
+    input rather than something read off the proposal: the catalog's samples do
+    not depend on which of their densities are counted.
     """
     if target.merger_rate_fn is None:
         raise ValueError(
@@ -387,6 +393,7 @@ def prepare_inference_inputs(
         proposal_catalog,
         source_model=target.source_model,
         merger_rate_fn=target.merger_rate_fn,
+        density_sites=density_sites,
     )
     return InferenceInputs(
         observation=observation,

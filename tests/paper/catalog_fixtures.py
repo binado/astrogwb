@@ -91,11 +91,6 @@ def make_catalog(
     model_kwargs: Mapping[str, float | int] | None = None,
     fiducials: Mapping[str, float] | None = None,
     population_params: Mapping[str, float] | None = None,
-    density_sites: tuple[str, ...] = (
-        "redshift",
-        "source_frame_mass_1",
-        "source_frame_mass_2",
-    ),
     extra_source_parameters: Mapping[str, np.ndarray] | None = None,
 ) -> PolarizationPowerCatalog:
     """Build a valid paper-format catalog over a chosen redshift ladder."""
@@ -141,7 +136,6 @@ def make_catalog(
             population=PopulationMetadata(
                 model_name=model_name,
                 model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
-                density_sites=density_sites,
                 seed=seed,
             ),
         ),

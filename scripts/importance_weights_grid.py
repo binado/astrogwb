@@ -44,7 +44,7 @@ from astrogwb.paper.plotting import (
     save_figures,
     use_paper_style,
 )
-from astrogwb.populations import build_population
+from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
 # Restore the standard projection for consistent plotting.
@@ -227,6 +227,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         catalog,
         source_model=target.source_model,
         merger_rate_fn=target.merger_rate_fn,
+        density_sites=DEFAULT_DENSITY_SITES,
     )[1]
 
     figures: dict[Path, Figure] = {}

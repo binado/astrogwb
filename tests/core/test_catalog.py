@@ -63,13 +63,11 @@ POPULATION_RECORD: dict[str, Any] = {
         "minimum_mass": 1.0,
         "mass_width": 1.5,
     },
-    "density_sites": ("redshift", "source_frame_mass_1", "source_frame_mass_2"),
 }
 CATALOG_SEED = 42
 POPULATION = PopulationMetadata(
     model_name=POPULATION_RECORD["model_name"],
     model_kwargs=POPULATION_RECORD["model_kwargs"],
-    density_sites=POPULATION_RECORD["density_sites"],
     seed=CATALOG_SEED,
 )
 CATALOG_DEFAULTS: dict[str, Any] = {
@@ -199,7 +197,6 @@ def test_population_record_rejects_non_int_seed() -> None:
         PopulationMetadata(
             model_name=POPULATION_RECORD["model_name"],
             model_kwargs=POPULATION_RECORD["model_kwargs"],
-            density_sites=POPULATION_RECORD["density_sites"],
             seed="not_an_int",  # ty: ignore[invalid-argument-type]
         )
 
@@ -256,7 +253,6 @@ def test_an_unknown_population_name_fails_clearly() -> None:
     unknown = PopulationMetadata(
         model_name="no_such_population",
         model_kwargs=catalog.population.model_kwargs,
-        density_sites=catalog.population.density_sites,
         seed=catalog.population.seed,
     )
     with pytest.raises(KeyError, match="bns_md_cosmological"):
@@ -284,7 +280,6 @@ def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> 
     assert restricted.population_model_kwargs["maximum_redshift"] == 2.0
     # Everything else about the record travels unchanged.
     assert restricted.fiducials == catalog.fiducials
-    assert restricted.density_sites == catalog.density_sites
     # Both reconstructed callables see the narrowed window: they are built
     # from the one flat kwargs mapping restrict_redshift rewrites.
     for bound in restricted.get_population():

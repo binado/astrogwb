@@ -110,7 +110,6 @@ def _catalog(
     *,
     params: Mapping[str, float] = OFF_POPULATION_PARAMS,
     power: jax.Array = POWER,
-    density_sites: tuple[str, ...] = DEFAULT_DENSITY_SITES,
 ) -> PolarizationPowerCatalog:
     return PolarizationPowerCatalog(
         source_parameters={
@@ -124,7 +123,6 @@ def _catalog(
             population=PopulationMetadata(
                 model_name="bns_md_cosmological",
                 model_kwargs=MODEL_KWARGS,
-                density_sites=density_sites,
                 seed=MOCK_POPULATION_SEED,
             ),
         ),
@@ -137,12 +135,14 @@ def _importance(
     catalog: PolarizationPowerCatalog | None = None,
     source_model: SourceFn | None = None,
     frequency_mask: ArrayLike | None = None,
+    density_sites: tuple[str, ...] = DEFAULT_DENSITY_SITES,
 ) -> dict[str, Any]:
     """Every keyword of ``importance_spectral_density``, prepared from a catalog."""
     spectrum = build_importance_spectrum(
         _catalog() if catalog is None else catalog,
         source_model=mock_target_model() if source_model is None else source_model,
         merger_rate_fn=mock_merger_rate_fn(),
+        density_sites=density_sites,
         frequency_mask=frequency_mask,
     )
     return dict(spectrum[0].keywords)  # ty: ignore[unresolved-attribute]
@@ -164,7 +164,7 @@ def test_preparation_needs_no_merger_rate_for_the_proposal() -> None:
 
 
 def test_empty_density_factors_broadcast_to_source_count() -> None:
-    importance = _importance(catalog=_catalog(density_sites=()))
+    importance = _importance(density_sites=())
     assert importance["density_sites"] == ()
     assert importance["proposal_log_prob"].shape == (4,)
     np.testing.assert_array_equal(importance["proposal_log_prob"], jnp.zeros(4))
@@ -239,11 +239,13 @@ def _spectrum(
     *,
     catalog: PolarizationPowerCatalog | None = None,
     frequency_mask: ArrayLike | None = None,
+    density_sites: tuple[str, ...] = DEFAULT_DENSITY_SITES,
 ):
     return build_importance_spectrum(
         _catalog() if catalog is None else catalog,
         source_model=mock_target_model(),
         merger_rate_fn=mock_merger_rate_fn(),
+        density_sites=density_sites,
         frequency_mask=frequency_mask,
     )
 

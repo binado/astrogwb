@@ -22,7 +22,6 @@ bodies, so nothing here imports JAX at module scope.
 
 from astrogwb.metadata.catalog import CatalogMetadata
 from astrogwb.metadata.population import (
-    DENSITY_SITES_ATTR,
     MODEL_KWARGS_ATTR,
     MODEL_NAME_ATTR,
     POPULATION_ATTRS,
@@ -32,7 +31,6 @@ from astrogwb.metadata.population import (
 from astrogwb.metadata.waveform import WAVEFORM_ATTRS, WaveformMetadata
 
 __all__ = [
-    "DENSITY_SITES_ATTR",
     "MODEL_KWARGS_ATTR",
     "MODEL_NAME_ATTR",
     "POPULATION_ATTRS",

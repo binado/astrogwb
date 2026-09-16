@@ -50,6 +50,7 @@ from astrogwb.paper.inference import (
     prepare_observation,
     target_population,
 )
+from astrogwb.populations import DEFAULT_DENSITY_SITES
 from astrogwb.sampling import gwb_spectral_density_model
 
 pytestmark = pytest.mark.integration
@@ -146,6 +147,7 @@ def _prepare(
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
         target=target_population(config),
+        density_sites=DEFAULT_DENSITY_SITES,
     )
 
 
@@ -460,6 +462,7 @@ def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
             inputs.proposal,
             source_model=target.source_model,
             merger_rate_fn=target.merger_rate_fn,
+            density_sites=DEFAULT_DENSITY_SITES,
             frequency_mask=inputs.observation.frequency_mask,
         )[0],
     )
@@ -696,21 +699,22 @@ def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights
         proposal_catalog,
         source_model=population.source_model,
         merger_rate_fn=population.merger_rate_fn,
+        density_sites=DEFAULT_DENSITY_SITES,
     )[1]
     log_weights = log_weights_fn(proposal_catalog.fiducials)
     np.testing.assert_array_equal(np.asarray(log_weights), np.zeros(N_SOURCES))
 
 
-def test_the_proposals_density_factors_reach_the_bound_weights_unchanged(
+def test_the_requested_density_factors_reach_the_bound_weights_unchanged(
     injection_catalog: PolarizationPowerCatalog,
 ) -> None:
-    """``prepare_inference_inputs`` threads the catalog's factor set to the target.
+    """``prepare_inference_inputs`` threads its factor set to *both* densities.
 
-    The proposal records only the redshift factor. Reweighted to its own
-    (window-restricted) source model at its own parameters, the weights are
-    exactly zero only if the target was evaluated with that same narrow set;
-    substituting the default factors anywhere in the pipeline would add the
-    ordered-mass factor to the target side alone.
+    Only the redshift factor is asked for. Reweighting the proposal to its own
+    (window-restricted) source model at its own parameters gives exactly zero
+    weights only if both sides were evaluated with that same narrow set;
+    substituting the default factors on either side alone would add the
+    ordered-mass factor to one half of the ratio.
     """
     config = _config()
     grid = config.analysis_grid
@@ -728,7 +732,6 @@ def test_the_proposals_density_factors_reach_the_bound_weights_unchanged(
             "minimum_redshift": grid.minimum_redshift,
             "maximum_redshift": grid.maximum_redshift,
         },
-        density_sites=("redshift",),
     )
     restricted = narrow.restrict_redshift(grid.minimum_redshift, grid.maximum_redshift)
 
@@ -738,6 +741,7 @@ def test_the_proposals_density_factors_reach_the_bound_weights_unchanged(
         grid=grid,
         detectors=config.analysis.detectors,
         target=restricted.get_population(),
+        density_sites=("redshift",),
     )
 
     assert _bound(inputs)["density_sites"] == ("redshift",)

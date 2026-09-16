@@ -216,11 +216,6 @@ class PolarizationPowerCatalog:
         """
         return dict(self._fiducials)
 
-    @property
-    def density_sites(self) -> tuple[str, ...]:
-        """Ordered source-density factors included in importance weighting."""
-        return self.population.density_sites
-
     def get_population(self) -> Population:
         """Reconstruct the generating population with its kwargs bound.
 

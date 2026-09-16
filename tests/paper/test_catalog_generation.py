@@ -22,7 +22,6 @@ from repo import REPO_ROOT
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.paper.config.catalogs import CatalogDefinition
-from astrogwb.populations import DEFAULT_DENSITY_SITES
 
 #: The hyperparameters a real catalog inherits from ``config/fiducials.json``.
 TOY_FIDUCIALS: dict[str, float] = {
@@ -142,13 +141,6 @@ def test_generation_produces_a_catalog_that_describes_itself(
         "n_grid": 256,
     }
     assert catalog.fiducials["local_merger_rate"] == 770.0
-    # Generation records the default factor set; the literal pins that default.
-    assert catalog.density_sites == DEFAULT_DENSITY_SITES
-    assert DEFAULT_DENSITY_SITES == (
-        "redshift",
-        "source_frame_mass_1",
-        "source_frame_mass_2",
-    )
     assert catalog.polarization_power.shape[1] == 8
 
     # Round-tripping is the real assertion: loading re-executes the recorded

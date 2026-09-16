@@ -58,6 +58,7 @@ from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivit
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr_squared
 from astrogwb.importance.spectral import build_importance_spectrum
+from astrogwb.populations import DEFAULT_DENSITY_SITES
 
 #: Reference resolution, and the band the refinement study runs over.
 FINE_DF = 0.25
@@ -172,6 +173,7 @@ def resolutions(fine_catalog: PolarizationPowerCatalog) -> dict[int, dict[str, A
         fine_catalog,
         source_model=mock_target_model(),
         merger_rate_fn=mock_merger_rate_fn(),
+        density_sites=DEFAULT_DENSITY_SITES,
     )
     total_merger_rate = jnp.asarray(estimator(FIDUCIALS)[1]["total_merger_rate"])
 

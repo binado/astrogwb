@@ -15,9 +15,7 @@ from astrogwb.catalog._io import CATALOG_FORMAT_NAME, validate_catalog_file
 
 
 def test_hdf5_layout_metadata_and_order_round_trip(tmp_path: Path) -> None:
-    catalog = make_catalog(
-        redshift=np.array([0.1, 0.5, 1.0]), density_sites=("spin_1z", "redshift")
-    )
+    catalog = make_catalog(redshift=np.array([0.1, 0.5, 1.0]))
     path = tmp_path / "catalog.h5"
     catalog.save(path)
     with h5py.File(path) as handle:
@@ -28,13 +26,38 @@ def test_hdf5_layout_metadata_and_order_round_trip(tmp_path: Path) -> None:
         )
         assert handle["source_parameters"].dtype == np.float64
     restored = PolarizationPowerCatalog.load(path)
-    assert restored.density_sites == catalog.density_sites
     assert list(restored.source_parameters) == list(catalog.source_parameters)
     np.testing.assert_array_equal(restored.frequencies, catalog.frequencies)
     np.testing.assert_array_equal(
         restored.polarization_power, catalog.polarization_power
     )
     assert restored.df == catalog.df
+
+
+def test_a_file_carrying_the_retired_density_sites_attribute_still_loads(
+    tmp_path: Path,
+) -> None:
+    """Catalogs generated before the weighting choice moved need no regeneration.
+
+    Every ``.h5`` written while ``density_sites`` was part of the population
+    record carries a ``population_density_sites`` attribute. The reader names
+    the attributes it wants, so the leftover is not read -- and the eight
+    committed catalogs are GPU jobs, which is why this is a compatibility
+    guarantee rather than a rebuild.
+    """
+    path = tmp_path / "pre-migration.h5"
+    catalog = make_catalog(redshift=np.linspace(0.1, 1.0, 4))
+    catalog.save(path)
+    with h5py.File(path, "r+") as handle:
+        handle.attrs["population_density_sites"] = json.dumps(
+            ["redshift", "source_frame_mass_1", "source_frame_mass_2"]
+        )
+
+    restored = PolarizationPowerCatalog.load(path)
+    assert restored.population == catalog.population
+    np.testing.assert_array_equal(
+        restored.polarization_power, catalog.polarization_power
+    )
 
 
 def test_compression_applies_to_arrays(tmp_path: Path) -> None:

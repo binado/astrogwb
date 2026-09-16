@@ -123,6 +123,7 @@ def build_potential(
         prepare_inference_inputs,
         target_population,
     )
+    from astrogwb.populations import DEFAULT_DENSITY_SITES
 
     inputs = prepare_inference_inputs(
         injection_catalog,
@@ -130,6 +131,7 @@ def build_potential(
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
         target=target_population(config),
+        density_sites=DEFAULT_DENSITY_SITES,
     )
     model, _ = build_model(
         config,

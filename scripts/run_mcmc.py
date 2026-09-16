@@ -161,6 +161,7 @@ def run(
         prepare_inference_inputs,
         target_population,
     )
+    from astrogwb.populations import DEFAULT_DENSITY_SITES
 
     inputs = prepare_inference_inputs(
         injection_catalog,
@@ -168,6 +169,7 @@ def run(
         grid=config.analysis_grid,
         detectors=config.analysis.detectors,
         target=target_population(config),
+        density_sites=DEFAULT_DENSITY_SITES,
     )
     model, marginalization = build_model(
         config,
@@ -284,12 +286,12 @@ def save(
     if proposal is not None:
         idata.posterior.attrs["proposal"] = json.dumps(
             {
-                "model": proposal.population_model_name,
-                "kwargs": dict(proposal.population_model_kwargs),
+                # The record itself, not a field-by-field restatement of it:
+                # one spelling, so a field added to PopulationMetadata reaches
+                # the chain without an edit here.
+                "population": proposal.population.model_dump(mode="json"),
                 "params": dict(proposal.fiducials),
-                "density_sites": list(proposal.density_sites),
                 "num_samples": proposal.num_samples,
-                "seed": proposal.seed,
             },
             sort_keys=True,
         )
@@ -423,12 +425,11 @@ def main(argv: list[str] | None = None) -> None:
     injection_catalog = load_run_catalog(injection_path, label="injection")
     proposal_catalog = load_run_catalog(proposal_path, label="proposal")
     logger.info(
-        "Proposal density from %s: model=%s kwargs=%s params=%s density_sites=%s",
+        "Proposal density from %s: model=%s kwargs=%s params=%s",
         config.catalog.proposal,
         proposal_catalog.population_model_name,
         dict(proposal_catalog.population_model_kwargs),
         dict(proposal_catalog.fiducials),
-        proposal_catalog.density_sites,
     )
 
     jax, chain_method = configure_runtime(

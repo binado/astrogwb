@@ -41,10 +41,7 @@ from numpyro.infer import Predictive
 
 from astrogwb.catalog import SpectralDensityCatalog
 from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
-from astrogwb.populations import (
-    DEFAULT_DENSITY_SITES,
-    build_population,
-)
+from astrogwb.populations import build_population
 from astrogwb.sampling import gwb_forward_model, validate_source_model
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import RippleGenerator
@@ -209,7 +206,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             population=PopulationMetadata(
                 model_name=args.population,
                 model_kwargs=model_kwargs,
-                density_sites=DEFAULT_DENSITY_SITES,
                 seed=args.seed,
             ),
         ),

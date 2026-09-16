@@ -56,6 +56,7 @@ from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import (
+    DEFAULT_DENSITY_SITES,
     amplitude_H0_fn,
     merger_rate_H0_fn,
 )
@@ -207,6 +208,7 @@ def _build_analysis_inputs(
         catalog,
         source_model=pinned_target,
         merger_rate_fn=pinned_rate,
+        density_sites=DEFAULT_DENSITY_SITES,
         frequency_mask=mask,
     )[0]
 

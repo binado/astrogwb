@@ -172,7 +172,7 @@ from astrogwb.paper.config import priors as committed_priors
 from astrogwb.paper.config.mcmc import AnalysisGrid, build_run_config
 from astrogwb.paper.config.runs import assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
-from astrogwb.populations import build_population
+from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.sampling import gwb_spectral_density_model
 
 register_projection(MplAxes)
@@ -293,6 +293,7 @@ inputs = prepare_inference_inputs(
     grid=analysis_grid,
     detectors=detnames,
     target=target,
+    density_sites=DEFAULT_DENSITY_SITES,
 )
 observation = inputs.observation
 proposal = inputs.proposal

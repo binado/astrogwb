@@ -47,9 +47,8 @@ must not enter a catalog merge:
    `model_name`, a key in the `astrogwb.populations` registry, and
    `model_kwargs`, the construction settings bound into it. Those two keys are
    exactly `PopulationMetadata`'s configurable half, so the block validates
-   straight into the record the `.h5` persists. It declares no `seed` and no
-   density sites: a seed belongs to a particular draw, and the density factors
-   follow from the registered population rather than from a file.
+   straight into the record the `.h5` persists. It declares no `seed`: a seed
+   belongs to a particular draw rather than to the shared layer.
 3. `config/fiducials.json` — the hyperparameters the draw is made at. The same
    table the runs initialize at, stated once. It used to be restated as a
    `[population.params]` block here, which was an exact copy of the eight
@@ -156,10 +155,12 @@ separately built callables.
 - The source model's returned mapping defines the stored columns, including
   spins, detector-frame masses, and `luminosity_distance`. Its sample sites are
   exactly the inputs needed to replay it; a missing one raises `KeyError`.
-- `density_sites` selects the density factors included in importance weighting.
-  Generation records `DEFAULT_DENSITY_SITES` — redshift and the ordered mass
-  pair — and the catalog's recorded tuple is the one both sides of every weight
-  are evaluated with. Omitting factors does not marginalize variables.
+- `density_sites` selects the density factors included in importance
+  weighting. It is an argument, not a stored field: no sample depends on it, so
+  the analysis that reweights a draw states it — `DEFAULT_DENSITY_SITES`,
+  redshift and the ordered mass pair, for every committed run — and one value
+  is used for both sides of every weight. Omitting factors does not
+  marginalize variables.
 - `evaluate_sources` runs the model once, under a `sources` plate, with every
   column conditioned in, and returns the selected log density together with the
   model's recomputed outputs.
@@ -298,7 +299,6 @@ population_model_kwargs  = '{"n_grid": 4096, "maximum_redshift": 20.0, "minimum_
 population_params        = '{"H0": 67.66, "Omega_m": 0.3096, "gamma": 1.42,
                              "kappa": 4.62, "local_merger_rate": 770.0,
                              "z_peak": 1.84}'
-population_density_sites = '["redshift"]'
 population_seed          = 41
 population_num_samples   = 32768
 ```
@@ -311,8 +311,7 @@ these fields identically.
 What is *not* stored is a callable: `PolarizationPowerCatalog.get_population()`
 looks the name up in the registry and binds the recorded settings, returning
 both callables at once (they hash by identity, so two getters would force a
-recompile on every call); `PolarizationPowerCatalog.density_sites` carries the
-ordered density selection.
+recompile on every call).
 
 That is enough to reconstruct the exact map from hyperparameters to source
 density, which is why the run config no longer restates any of it and nothing
@@ -323,10 +322,16 @@ exact float equality over five hard-coded parameter names. Three more
 parameters that change the answer (`xi_0`, `xi_n`, `local_merger_rate`) were
 checked by nothing at all.
 
-`population_density_sites` is part of the record for a reason that is easy to
-miss: a catalog whose proposal density was computed with the mass factors
-excluded, reweighted against a target that includes them, gives silently wrong
-weights with no shape error anywhere.
+The density factors are deliberately *not* part of the record. They change no
+sample: the stored columns and power are the same whichever of their densities
+a later weight counts, so the choice belongs to the analysis rather than to the
+file. What still matters is that one value covers both sides of a ratio — a
+proposal density computed with the mass factors excluded, reweighted against a
+target that includes them, gives silently wrong weights with no shape error
+anywhere — which is why `build_importance_spectrum` takes it once and threads
+that one value into both callables it returns. Catalogs written before this
+moved still carry a `population_density_sites` attribute; the reader names the
+attributes it wants, so it is simply not read.
 
 ### What loading checks
 

@@ -142,11 +142,6 @@ class SpectralDensityCatalog:
         """The model's construction kwargs, as persisted."""
         return dict(self.population.model_kwargs)
 
-    @property
-    def density_sites(self) -> tuple[str, ...]:
-        """Ordered source-density factors included in importance weighting."""
-        return self.population.density_sites
-
     def get_population(self) -> Population:
         """Reconstruct the generating population with its kwargs bound.
 
