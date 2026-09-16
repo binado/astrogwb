@@ -61,10 +61,10 @@ repository root as the working directory.
 `mcmc.py`, `mcmc_plotting.py`, and `logposterior_grid.py` merge a run's config
 layers with `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper
 over the same merge the workflow performs by passing layer paths on argv.
-`cosmological_parameters_grid.py` instead reads its fiducials and per-network
-detector lists from `astrogwb.paper.config.constants`, a stdlib-only leaf
-module duplicating the same run TOMLs; `tests/paper/test_config_constants.py`
-guards the two from drifting apart.
+`cosmological_parameters_grid.py` instead reads its fiducials, priors, and
+per-network detector lists from `astrogwb.paper.config` helper functions, and
+its plotting labels from `astrogwb.paper.plotting`. Catalog provenance is read
+from the loaded catalog's `PopulationMetadata` and `WaveformMetadata` records.
 
 `fiducial_spectrum.py` is the exception: it stands in for no particular run, so
 it reads the shared tables directly — `config/fiducials.json` and

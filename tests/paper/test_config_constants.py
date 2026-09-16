@@ -46,10 +46,12 @@ def test_parameter_labels_keys_are_known_fiducials() -> None:
     assert set(PARAMETER_LABELS) <= set(FIDUCIALS)
 
 
-def test_cosmological_grid_notebook_priors_name_every_fiducial() -> None:
-    """``LogDensityFn`` pins non-gridded sites from ``FIDUCIALS`` keyed by ``PRIORS``."""
+def test_cosmological_grid_notebook_uses_shared_config_helpers() -> None:
+    """The grid notebook reads shared values instead of retyping config tables."""
     source = (REPO_ROOT / "notebooks/cosmological_parameters_grid.py").read_text(
         encoding="utf-8"
     )
-    missing = [name for name in FIDUCIALS if f'"{name}": dist.' not in source]
-    assert not missing, missing
+    assert "FIDUCIALS = fiducials()" in source
+    assert "PRIORS: dict[str, Distribution] = priors()" in source
+    assert "NETWORK_CONFIG = networks()" in source
+    assert "PARAMETER_LABELS = parameter_labels()" in source
