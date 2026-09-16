@@ -1,8 +1,9 @@
 """Shared styling for the astrogwb paper application.
 
 Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
-style (solid), a loader for ``paper.mplstyle``, and the LaTeX parameter labels
-and savefig settings that ``config/plotting.json`` carries. This module is
+style (solid), a loader for ``paper.mplstyle``, the LaTeX parameter labels
+and savefig settings that ``config/plotting.json`` carries, and
+:func:`save_figures`, the single writer that applies them. This module is
 independent of the ``astrogwb`` package and of the config layer: it imports
 nothing from either, at module scope or inside a function body -- it reads that
 one JSON file with stdlib ``json``, lazily, so the ``Snakefile`` can import
@@ -42,6 +43,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import to_hex
+from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 
 _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
@@ -187,6 +189,43 @@ def use_paper_style(root: Path | None = None) -> None:
     plt.style.use(str(_STYLE_PATH))
     plt.rcParams["savefig.dpi"] = figure_dpi(root)
     plt.rcParams["savefig.format"] = figure_format(root)
+
+
+def save_figures(
+    figures: Mapping[Path, Figure],
+    *,
+    figure_dpi: int | None = None,
+    figure_format: str | None = None,
+    root: Path | None = None,
+) -> list[Path]:
+    """Write each figure to its path, creating the parent directory.
+
+    ``figures`` maps the output path to the figure to write, so the caller keeps
+    owning *where* -- its ``--output-*`` flags -- while this owns *how*: the dpi
+    and format come from ``config/plotting.json``, and the written paths are
+    returned in iteration order so a caller can report them without restating
+    them.
+
+    ``figure_format`` names the extension a path that has none is given. A path
+    that already names one keeps it, which is why the setting is near-inert
+    here: every caller's ``--output-*`` flag ends in ``.pdf``.
+    """
+    settings = _figure_settings(root)
+    dpi = int(settings["figure_dpi"]) if figure_dpi is None else figure_dpi
+    fallback_format = (
+        str(settings["figure_format"]) if figure_format is None else figure_format
+    )
+
+    saved: list[Path] = []
+    for output, figure in figures.items():
+        path = Path(output)
+        if not path.suffix:
+            path = path.with_suffix(f".{fallback_format}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        figure.savefig(path, dpi=dpi, format=path.suffix.lstrip("."))
+        print("saved figure:", path)
+        saved.append(path)
+    return saved
 
 
 def get_corner_kwargs(**overrides: object) -> dict[str, object]:

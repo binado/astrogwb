@@ -28,6 +28,7 @@ from matplotlib.projections import register_projection
 
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import (
+    FIGURES_DIR,
     add_config_arguments,
     add_network_run_arguments,
     load_merged_config,
@@ -45,6 +46,7 @@ from astrogwb.paper.plotting import (
     detector_network_styles,
     get_corner_kwargs,
     parameter_label,
+    save_figures,
     use_paper_style,
 )
 from astrogwb.paper.snr import compute_network_snrs
@@ -566,15 +568,51 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--detector-chains", type=Path, nargs="+", required=True)
     parser.add_argument("--prior-chains", type=Path, nargs="+", required=True)
     parser.add_argument("--omega-m-chain", type=Path, required=True)
-    parser.add_argument("--output-detector-pdf", type=Path, required=True)
-    parser.add_argument("--output-detector-csv", type=Path, required=True)
-    parser.add_argument("--output-detector-tex", type=Path, required=True)
-    parser.add_argument("--output-prior-pdf", type=Path, required=True)
-    parser.add_argument("--output-narrow-corner-pdf", type=Path, required=True)
-    parser.add_argument("--output-merger-rate-csv", type=Path, required=True)
-    parser.add_argument("--output-merger-rate-tex", type=Path, required=True)
-    parser.add_argument("--output-omega-m-corner-pdf", type=Path, required=True)
-    parser.add_argument("--output-omega-m-ess-corner-pdf", type=Path, required=True)
+    parser.add_argument(
+        "--output-detector-pdf",
+        type=Path,
+        default=FIGURES_DIR / "cosmological-parameters" / "H0-by-detector.pdf",
+    )
+    parser.add_argument(
+        "--output-detector-csv",
+        type=Path,
+        default=FIGURES_DIR / "cosmological-parameters" / "H0-by-detector.csv",
+    )
+    parser.add_argument(
+        "--output-detector-tex",
+        type=Path,
+        default=FIGURES_DIR / "cosmological-parameters" / "H0-by-detector.tex",
+    )
+    parser.add_argument(
+        "--output-prior-pdf",
+        type=Path,
+        default=FIGURES_DIR / "cosmological-parameters" / "H0-merger-rate-priors.pdf",
+    )
+    parser.add_argument(
+        "--output-narrow-corner-pdf",
+        type=Path,
+        default=FIGURES_DIR / "cosmological-parameters" / "H0-merger-rate-corner.pdf",
+    )
+    parser.add_argument(
+        "--output-merger-rate-csv",
+        type=Path,
+        default=FIGURES_DIR / "cosmological-parameters" / "H0-merger-rate.csv",
+    )
+    parser.add_argument(
+        "--output-merger-rate-tex",
+        type=Path,
+        default=FIGURES_DIR / "cosmological-parameters" / "H0-merger-rate.tex",
+    )
+    parser.add_argument(
+        "--output-omega-m-corner-pdf",
+        type=Path,
+        default=FIGURES_DIR / "cosmological-parameters" / "H0-Omega_m-corner.pdf",
+    )
+    parser.add_argument(
+        "--output-omega-m-ess-corner-pdf",
+        type=Path,
+        default=FIGURES_DIR / "cosmological-parameters" / "H0-Omega_m-ess-corner.pdf",
+    )
     parser.add_argument("--group", default="posterior")
     # Not a fiducial: N_eff/N_inj is a plotting truth line at its definitional
     # maximum. Adding it to [fiducials] would inject a spurious constant into
@@ -724,10 +762,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             fiducials=fiducials,
         )
 
-        for output_path, figure in outputs.items():
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            figure.savefig(output_path)
-            print("saved figure:", output_path)
+        save_figures(outputs)
     finally:
         for tree in opened_data:
             tree.close()

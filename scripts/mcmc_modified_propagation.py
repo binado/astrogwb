@@ -27,6 +27,7 @@ from matplotlib.projections import register_projection
 
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import (
+    FIGURES_DIR,
     add_config_arguments,
     add_network_run_arguments,
     load_merged_config,
@@ -41,6 +42,7 @@ from astrogwb.paper.plotting import (
     combo_colors,
     get_corner_kwargs,
     parameter_label,
+    save_figures,
     use_paper_style,
 )
 from astrogwb.paper.snr import compute_network_snrs
@@ -452,12 +454,36 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--xi0-n-chain", type=Path, required=True)
     parser.add_argument("--h0-chain", type=Path, required=True)
     parser.add_argument("--detector-xi0-n-chains", type=Path, nargs="+", required=True)
-    parser.add_argument("--output-xi-n-corner-pdf", type=Path, required=True)
-    parser.add_argument("--output-xi-n-ess-corner-pdf", type=Path, required=True)
-    parser.add_argument("--output-xi0-marginal-pdf", type=Path, required=True)
-    parser.add_argument("--output-h0-corner-pdf", type=Path, required=True)
-    parser.add_argument("--output-xi0-n-csv", type=Path, required=True)
-    parser.add_argument("--output-xi0-n-tex", type=Path, required=True)
+    parser.add_argument(
+        "--output-xi-n-corner-pdf",
+        type=Path,
+        default=FIGURES_DIR / "modified-propagation" / "Xi0-n-corner.pdf",
+    )
+    parser.add_argument(
+        "--output-xi-n-ess-corner-pdf",
+        type=Path,
+        default=FIGURES_DIR / "modified-propagation" / "Xi0-n-ess-corner.pdf",
+    )
+    parser.add_argument(
+        "--output-xi0-marginal-pdf",
+        type=Path,
+        default=FIGURES_DIR / "modified-propagation" / "Xi0-marginal.pdf",
+    )
+    parser.add_argument(
+        "--output-h0-corner-pdf",
+        type=Path,
+        default=FIGURES_DIR / "modified-propagation" / "Xi0-H0-corner.pdf",
+    )
+    parser.add_argument(
+        "--output-xi0-n-csv",
+        type=Path,
+        default=FIGURES_DIR / "modified-propagation" / "Xi0-n-by-detector.csv",
+    )
+    parser.add_argument(
+        "--output-xi0-n-tex",
+        type=Path,
+        default=FIGURES_DIR / "modified-propagation" / "Xi0-n-by-detector.tex",
+    )
     parser.add_argument("--group", default="posterior")
     # Not a fiducial: N_eff/N_inj is a plotting truth line at its definitional
     # maximum. Adding it to [fiducials] would inject a spurious constant into
@@ -565,10 +591,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         args.output_xi0_marginal_pdf: xi0_marginal_figure,
         args.output_h0_corner_pdf: h0_corner_figure,
     }
-    for output_path, figure in outputs.items():
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        figure.savefig(output_path)
-        print("saved figure:", output_path)
+    save_figures(outputs)
 
     csv_path = args.output_xi0_n_csv
     tex_path = args.output_xi0_n_tex

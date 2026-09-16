@@ -85,8 +85,14 @@ CATALOGS_DIR = Path("config/catalogs")
 CATALOG_BASE_DIR = CATALOGS_DIR / "base"
 CATALOG_DEFS_DIR = CATALOGS_DIR / "defs"
 
-CHAINS_ROOT = Path("outputs/chains")
-CATALOGS_ROOT = Path("outputs/catalogs")
+#: Root of everything the workflow writes, so the three output roots below are
+#: composed rather than re-typed. Relative to the working directory, as every
+#: path in this module is.
+BASE_OUT_DIR = Path("outputs")
+
+CHAINS_ROOT = BASE_OUT_DIR / "chains"
+CATALOGS_ROOT = BASE_OUT_DIR / "catalogs"
+FIGURES_DIR = BASE_OUT_DIR / "figures"
 
 
 def _merge_run_overlay(
