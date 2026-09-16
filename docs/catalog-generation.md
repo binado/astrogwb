@@ -74,7 +74,7 @@ population layer would mean near-identical layer files.
 ## The population is a registered model
 
 A def names a population by its key in the `astrogwb.populations` registry, and
-supplies the construction settings it takes:
+supplies the construction kwargs it takes:
 
 ```toml
 num_samples = 16384
@@ -98,9 +98,9 @@ persisted `module:function` string is a reference that silently rots. An
 unknown key fails pre-flight, in `snakemake validate`, listing what is
 registered — before a GPU job is queued.
 
-A registered population is a *factory*: it takes the construction settings and
+A registered population is a *factory*: it takes the construction kwargs and
 returns the source model and the merger rate together, each a
-`functools.partial` with those settings bound. Hyperparameters and source
+`functools.partial` with those kwargs bound. Hyperparameters and source
 arrays remain arguments.
 
 ```python

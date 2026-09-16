@@ -51,10 +51,10 @@ def test_density_sites_and_kwargs_are_normalized() -> None:
     assert isinstance(record.model_kwargs, dict)
 
 
-def test_build_binds_construction_settings_to_both_callables() -> None:
+def test_build_binds_construction_kwargs_to_both_callables() -> None:
     source, rate = _record().build()
     assert source.keywords == MODEL_KWARGS  # ty: ignore[unresolved-attribute]
-    # One settings mapping reaches both: nothing is filtered on the way to the
+    # One kwargs mapping reaches both: nothing is filtered on the way to the
     # rate, so a key neither accepts fails rather than being dropped.
     assert rate is not None
     assert rate.keywords == MODEL_KWARGS  # ty: ignore[unresolved-attribute]
@@ -65,8 +65,8 @@ def test_check_registered_names_the_unknown_population() -> None:
         _record(model_name="no_such_population").check_registered()
 
 
-def test_check_registered_rejects_a_setting_the_population_does_not_take() -> None:
-    """A record is only valid if its settings actually build its population.
+def test_check_registered_rejects_a_kwarg_the_population_does_not_take() -> None:
+    """A record is only valid if its kwargs actually build its population.
 
     The flat kwargs mapping used to be filtered down to the shared window keys
     before reaching the rate function, so a stale key travelled unnoticed.

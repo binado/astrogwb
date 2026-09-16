@@ -200,8 +200,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     n_samples = catalog.num_samples
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
-    grid_settings = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_REDSHIFT_GRID}
-    target = build_population("bns_md_modified_propagation", **grid_settings)
+    grid_kwargs = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_REDSHIFT_GRID}
+    target = build_population("bns_md_modified_propagation", **grid_kwargs)
     log_weights_fn = build_importance_spectrum(
         catalog,
         source_model=target.source_model,

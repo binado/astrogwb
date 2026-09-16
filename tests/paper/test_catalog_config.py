@@ -1,7 +1,7 @@
 """The committed catalog configs, and the population declarations they name.
 
 These files describe a catalog only until it exists. Afterwards the *file* is
-authoritative -- it records its own model, construction settings,
+authoritative -- it records its own model, construction kwargs,
 hyperparameters and included density factors -- so nothing here is re-read at
 analysis time and no run config restates any of it. What is left to check is
 that every committed declaration can actually be built.
@@ -51,16 +51,16 @@ def test_every_committed_catalog_names_a_registered_population() -> None:
         check_population_model(
             definition.population.model,
             label=f"catalog {name!r}",
-            settings=definition.population.kwargs,
+            kwargs=definition.population.kwargs,
         )
 
 
 def test_every_committed_catalog_can_build_its_population() -> None:
-    """The construction settings and parameters must actually fit the population.
+    """The construction kwargs and parameters must actually fit the population.
 
     A typo in ``population.kwargs`` is otherwise invisible until generation
     runs, and generation is the expensive step this pre-flight exists to
-    protect. The settings mapping now reaches the population whole, so a key it
+    protect. The kwargs mapping now reaches the population whole, so a key it
     does not take fails here rather than being filtered on its way to one of
     two separately built callables.
     """
@@ -116,13 +116,13 @@ def test_an_unregistered_population_name_lists_the_known_set() -> None:
         assert name in message
 
 
-def test_a_setting_the_population_does_not_take_is_rejected() -> None:
-    """The factory signature is the settings schema, so a stale key fails here."""
+def test_a_kwarg_the_population_does_not_take_is_rejected() -> None:
+    """The factory signature is the kwargs schema, so a stale key fails here."""
     with pytest.raises(ValueError, match="uniform_mixing_fraction"):
         check_population_model(
             "bns_md_cosmological",
             label="catalog 'toy'",
-            settings={
+            kwargs={
                 "z_min": 0.0,
                 "z_max": 20.0,
                 "n_grid": 256,
@@ -137,7 +137,7 @@ def test_a_proposal_density_is_rejected_as_an_analysis_target() -> None:
         check_population_model(
             "bns_md_uniform_mixture",
             label="run 'toy' analysis.population_model",
-            settings={
+            kwargs={
                 "z_min": 0.3,
                 "z_max": 20.0,
                 "n_grid": 256,

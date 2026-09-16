@@ -274,12 +274,12 @@ analysis_grid = AnalysisGrid(
 # The target population -- source model and merger rate together -- bound to
 # the analysis grid once: a partial hashes by identity, so rebuilding one per
 # step would retrace the whole model.
-target_settings = {
+target_kwargs = {
     "z_min": minimum_redshift,
     "z_max": maximum_redshift,
     "n_grid": n_grid,
 }
-target = build_population("bns_md_modified_propagation", **target_settings)
+target = build_population("bns_md_modified_propagation", **target_kwargs)
 
 # One call does every step the headless runner does: restrict both catalogs to
 # the analysis window (samples *and* recorded density together), build the

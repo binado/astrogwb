@@ -277,7 +277,7 @@ def bns_md_cosmological(
     ``params`` must carry ``H0``, ``Omega_m``, ``gamma``, ``kappa`` and
     ``z_peak``. ``z_min``, ``z_max`` and ``n_grid`` describe the grid the
     cosmology integrals and the redshift normalization run on; they are
-    construction settings, bound once and serialized with the catalog. The
+    construction kwargs, bound once and serialized with the catalog. The
     ``bns_md_cosmological`` population pairs it with
     :func:`madau_dickinson_total_merger_rate`.
     """
@@ -454,23 +454,23 @@ def bns_md_gaussian_modified_propagation(
 # Registered populations
 # --------------------------------------------------------------------- #
 #
-# A factory's signature is the construction-settings schema for its
+# A factory's signature is the construction-kwargs schema for its
 # population: a key no factory takes fails here rather than being filtered
 # away on its way to one of two separately built callables.
 
 
 def _madau_dickinson_population(
-    source: Callable[..., dict[str, jax.Array]], **settings: float
+    source: Callable[..., dict[str, jax.Array]], **kwargs: float
 ) -> Population:
     """Pair a Madau-Dickinson source declaration with the rate that normalizes it."""
     return Population(
-        source_model=partial(source, **settings),
-        merger_rate_fn=partial(madau_dickinson_total_merger_rate, **settings),
+        source_model=partial(source, **kwargs),
+        merger_rate_fn=partial(madau_dickinson_total_merger_rate, **kwargs),
     )
 
 
 def _guard_mixture_population(
-    source: Callable[..., dict[str, jax.Array]], **settings: float
+    source: Callable[..., dict[str, jax.Array]], **kwargs: float
 ) -> Population:
     """Bind a guard-mixture source declaration, with no merger rate.
 
@@ -481,7 +481,7 @@ def _guard_mixture_population(
     off a proposal -- importance weighting takes the *target's* -- and a
     catalog drawn from one now fails by name if used as an observation.
     """
-    return Population(source_model=partial(source, **settings), merger_rate_fn=None)
+    return Population(source_model=partial(source, **kwargs), merger_rate_fn=None)
 
 
 @register_population("bns_md_cosmological")

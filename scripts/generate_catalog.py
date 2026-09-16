@@ -9,7 +9,7 @@ writes ``outputs/catalogs/<catalog>.h5``.
 The population declaration is one registered name, not a graph config, and it
 is the *same* population the analysis evaluates the proposal density with.
 That is what makes the output self-describing: the file records the
-population's registry name, its construction settings, the hyperparameters it
+population's registry name, its construction kwargs, the hyperparameters it
 was drawn at, and the density factors included in importance weighting, which
 is everything needed to reconstruct the map from hyperparameters to source
 density. Nothing downstream re-reads these configs, and no run config restates
@@ -99,7 +99,7 @@ def build_catalog(definition: CatalogDefinition) -> PolarizationPowerCatalog:
     check_population_model(
         population.model,
         label=f"catalog {definition.name!r} population.model",
-        settings=population.kwargs,
+        kwargs=population.kwargs,
     )
     source_model = build_population(population.model, **population.kwargs).source_model
 

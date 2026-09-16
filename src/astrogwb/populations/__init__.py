@@ -8,7 +8,7 @@ the importance weights divide by
 returns the one observer-frame scalar the same catalog's Poisson count and
 predicted spectrum need, or ``None`` when the population is a proposal density
 with no physical rate. That is what makes a catalog self-describing -- the file
-records one registry name, the construction settings the population was built
+records one registry name, the construction kwargs the population was built
 with, and the hyperparameters it was drawn at, which is everything needed to
 reconstruct the density that produced it.
 

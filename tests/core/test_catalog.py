@@ -229,7 +229,7 @@ def _catalog(redshift: np.ndarray) -> PolarizationPowerCatalog:
     )
 
 
-def test_get_population_binds_construction_settings_only() -> None:
+def test_get_population_binds_construction_kwargs_only() -> None:
     """Generating hyperparameters must not be captured in the bound callables.
 
     They describe how the catalog was made; a target evaluation supplies its
@@ -275,7 +275,7 @@ def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> 
     assert restricted.fiducials == catalog.fiducials
     assert restricted.density_sites == catalog.density_sites
     # Both reconstructed callables see the narrowed window: they are built
-    # from the one flat settings mapping restrict_redshift rewrites.
+    # from the one flat kwargs mapping restrict_redshift rewrites.
     for bound in restricted.get_population():
         assert bound.keywords["z_min"] == 0.3  # ty: ignore[unresolved-attribute]
         assert bound.keywords["z_max"] == 2.0  # ty: ignore[unresolved-attribute]

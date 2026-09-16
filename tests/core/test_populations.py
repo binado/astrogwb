@@ -235,10 +235,10 @@ def test_only_a_physical_population_declares_a_merger_rate() -> None:
         assert rate.func is madau_dickinson_total_merger_rate, name  # ty: ignore[unresolved-attribute]
 
 
-def test_a_population_binds_one_settings_mapping_to_both_callables() -> None:
-    settings = {**WINDOW, "uniform_mixing_fraction": 0.2}
-    mixture = build_population("bns_md_uniform_mixture", **settings).source_model
-    assert mixture.keywords == settings  # ty: ignore[unresolved-attribute]
+def test_a_population_binds_one_kwargs_mapping_to_both_callables() -> None:
+    kwargs = {**WINDOW, "uniform_mixing_fraction": 0.2}
+    mixture = build_population("bns_md_uniform_mixture", **kwargs).source_model
+    assert mixture.keywords == kwargs  # ty: ignore[unresolved-attribute]
 
     source, rate = build_population("bns_md_cosmological", **WINDOW)
     assert source.keywords == WINDOW  # ty: ignore[unresolved-attribute]
@@ -246,8 +246,8 @@ def test_a_population_binds_one_settings_mapping_to_both_callables() -> None:
     assert rate.keywords == WINDOW  # ty: ignore[unresolved-attribute]
 
 
-def test_a_setting_the_population_does_not_take_is_rejected() -> None:
-    """The factory signature is the settings schema.
+def test_a_kwarg_the_population_does_not_take_is_rejected() -> None:
+    """The factory signature is the kwargs schema.
 
     The rate builder used to filter the flat mapping down to the window keys,
     so a setting only the source model took was silently dropped on its way to
@@ -256,7 +256,7 @@ def test_a_setting_the_population_does_not_take_is_rejected() -> None:
     with pytest.raises(TypeError, match="uniform_mixing_fraction"):
         build_population("bns_md_cosmological", **WINDOW, uniform_mixing_fraction=0.2)
     with pytest.raises(TypeError, match="bns_md_cosmological"):
-        build_population("bns_md_cosmological", **WINDOW, no_such_setting=1.0)
+        build_population("bns_md_cosmological", **WINDOW, no_such_kwarg=1.0)
 
 
 def test_unknown_population_names_list_the_known_set() -> None:

@@ -7,7 +7,7 @@ reconciled by exact float equality over five hard-coded parameter names, which
 left ``xi_0``, ``xi_n`` and ``local_merger_rate`` checked by nothing at all.
 
 A catalog now records its complete population declaration -- the registered
-population name, the construction settings, and the density factors
+population name, the construction kwargs, and the density factors
 included in importance weighting, carried as one
 :class:`~astrogwb.populations.PopulationRecord` -- plus the hyperparameters it
 was drawn at. That is enough to reconstruct the exact map from hyperparameters
@@ -43,7 +43,7 @@ __all__ = ["REDSHIFT_SITE", "PolarizationPowerCatalog"]
 #: are guaranteed to disagree on.
 REDSHIFT_SITE = "redshift"
 
-#: Construction settings a population model must take for a catalog drawn from
+#: Construction kwargs a population model must take for a catalog drawn from
 #: it to support :meth:`PolarizationPowerCatalog.restrict_redshift`. Narrowing
 #: the window changes the *normalization* of the generating density, so the
 #: arrays and the model kwargs have to move together or the recorded density
@@ -197,7 +197,7 @@ class PolarizationPowerCatalog:
 
     @property
     def population_model_kwargs(self) -> Mapping[str, Any]:
-        """The model's construction settings, as persisted."""
+        """The model's construction kwargs, as persisted."""
         return dict(self._population.model_kwargs)
 
     @property
@@ -216,13 +216,13 @@ class PolarizationPowerCatalog:
         return self._population.density_sites
 
     def get_population(self) -> Population:
-        """Reconstruct the generating population with its settings bound.
+        """Reconstruct the generating population with its kwargs bound.
 
         Returns the callables rather than the ``(name, kwargs)`` pair they were
         rebuilt from, so every consumer sees the one ``fn(params)`` interface.
         An unknown name fails here, listing what is registered. A window
         narrowed by :meth:`restrict_redshift` reaches both callables, because
-        both are built from the one flat settings mapping it rewrites.
+        both are built from the one flat kwargs mapping it rewrites.
 
         ``merger_rate_fn`` is ``None`` for a catalog drawn from a proposal
         density that declares no physical rate. Each call builds fresh

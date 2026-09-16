@@ -242,7 +242,7 @@ def population_model_fn():
     return build_population(POPULATION_MODEL, **POPULATION_MODEL_KWARGS).source_model
 
 
-TARGET_SETTINGS: dict[str, float | int] = {
+TARGET_KWARGS: dict[str, float | int] = {
     "z_min": Z_MIN,
     "z_max": Z_MAX,
     "n_grid": N_GRID,
@@ -251,7 +251,7 @@ TARGET_SETTINGS: dict[str, float | int] = {
 
 def target_population_fn():
     """The target population: the same sources under modified propagation."""
-    return build_population("bns_md_modified_propagation", **TARGET_SETTINGS)
+    return build_population("bns_md_modified_propagation", **TARGET_KWARGS)
 
 
 def make_redshift_grid() -> jax.Array:

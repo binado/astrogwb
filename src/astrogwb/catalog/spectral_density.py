@@ -135,7 +135,7 @@ class SpectralDensityCatalog:
 
     @property
     def population_model_kwargs(self) -> Mapping[str, Any]:
-        """The model's construction settings, as persisted."""
+        """The model's construction kwargs, as persisted."""
         return dict(self._population.model_kwargs)
 
     @property
@@ -144,7 +144,7 @@ class SpectralDensityCatalog:
         return self._population.density_sites
 
     def get_population(self) -> Population:
-        """Reconstruct the generating population with its settings bound.
+        """Reconstruct the generating population with its kwargs bound.
 
         ``merger_rate_fn`` is ``None`` only for a proposal density, which the
         simulator that writes this format refuses to draw from.

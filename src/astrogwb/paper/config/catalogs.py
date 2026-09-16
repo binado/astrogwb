@@ -8,7 +8,7 @@ layers under ``config/catalogs/`` -- a shared ``base/`` and one
 
 This file describes a catalog only until it exists. Afterwards the *file* is
 authoritative: it records its own registered population model, that model's
-construction settings, the hyperparameters it was drawn at, and the density
+construction kwargs, the hyperparameters it was drawn at, and the density
 factors included in importance weighting. Nothing here is re-read at analysis
 time, and no run config restates any of it, so there is nothing for the two to
 disagree about.
@@ -79,7 +79,7 @@ class PopulationConfig(BaseModel):
     the source model and its merger rate together -- so a def cannot pair a
     redshift law with a rate that is not its own normalization.
 
-    ``kwargs`` are the population's construction settings, passed whole to
+    ``kwargs`` are the population's construction kwargs, passed whole to
     :func:`~astrogwb.populations.build_population`: the redshift window and
     grid every population takes, plus whatever else the named one takes, such
     as a guard mixture's ``uniform_mixing_fraction``. They must be
@@ -165,13 +165,13 @@ def check_population_model(
     name: str,
     *,
     label: str,
-    settings: Mapping[str, float | int] | None = None,
+    kwargs: Mapping[str, float | int] | None = None,
     requires_merger_rate: bool = False,
 ) -> None:
     """Reject a population a run or catalog def cannot actually be built from.
 
-    Checks as much as the caller supplies: the name is registered, ``settings``
-    are settings that population takes, and -- for an analysis target, which
+    Checks as much as the caller supplies: the name is registered, ``kwargs``
+    are kwargs that population takes, and -- for an analysis target, which
     reconstructs an observed total rate -- that it declares a merger rate at
     all. A guard mixture does not, so naming one as a target is a
     configuration error rather than a silently meaningless spectrum.
@@ -188,10 +188,10 @@ def check_population_model(
             f"{label}: unknown population {name!r}; registered populations are: "
             f"{', '.join(known)}"
         )
-    if settings is None:
+    if kwargs is None:
         return
     try:
-        population = build_population(name, **settings)
+        population = build_population(name, **kwargs)
     except TypeError as error:
         raise ValueError(f"{label}: {error}") from None
     if requires_merger_rate and population.merger_rate_fn is None:
@@ -254,7 +254,7 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
         check_population_model(
             definition.population.model,
             label=f"catalog {name!r} population.model",
-            settings=definition.population.kwargs,
+            kwargs=definition.population.kwargs,
         )
     labels: list[str] = []
     for experiment, runs in discover_runs(root).items():
@@ -266,7 +266,7 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
             check_population_model(
                 config.analysis.population_model,
                 label=f"{label} analysis.population_model",
-                settings={
+                kwargs={
                     "z_min": grid.minimum_redshift,
                     "z_max": grid.maximum_redshift,
                     "n_grid": grid.n_grid,

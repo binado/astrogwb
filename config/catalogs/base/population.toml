@@ -18,7 +18,7 @@
 model = "bns_md_cosmological"
 # Density factors and source outputs are declared by the registered population.
 
-# The population's construction settings: the redshift window and the grid the
+# The population's construction kwargs: the redshift window and the grid the
 # cosmology integrals and the density normalization run on. A def adds
 # whatever else the population it names takes. Narrowing the window to an
 # analysis band is a Catalog operation, not an edit here.

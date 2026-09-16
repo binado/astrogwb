@@ -183,7 +183,7 @@ class AmplitudeMarginalization(NamedTuple):
     """Quadrature nodes the marginalization integral is evaluated on."""
 
 
-def _analysis_grid_settings(config: RunConfig) -> dict[str, float | int]:
+def _analysis_grid_kwargs(config: RunConfig) -> dict[str, float | int]:
     """The redshift window and grid a run's target callables are built on."""
     grid = config.analysis_grid
     return {
@@ -207,7 +207,7 @@ def target_population(config: RunConfig) -> Population:
     refusal at the point of use.
     """
     name = config.analysis.population_model
-    population = build_population(name, **_analysis_grid_settings(config))
+    population = build_population(name, **_analysis_grid_kwargs(config))
     if population.merger_rate_fn is None:
         raise ValueError(
             f"analysis.population_model {name!r} declares no merger rate, so "

@@ -2,7 +2,7 @@
 
 Every artifact this package persists -- a polarization-power catalog, a
 spectral-density catalog -- records the density that produced it: the
-registered population name, the flat construction settings it was built with,
+registered population name, the flat construction kwargs it was built with,
 the density factors included in importance weighting, and the seed the draw
 used. That record was previously spelled out field by field on each artifact
 and re-encoded attribute by attribute in each writer, which is how the two
@@ -85,7 +85,7 @@ class PopulationRecord:
         object.__setattr__(self, "density_sites", tuple(self.density_sites))
 
     def build(self) -> Population:
-        """Reconstruct the generating population with its settings bound.
+        """Reconstruct the generating population with its kwargs bound.
 
         Returns both callables from one call rather than a getter each: they
         hash by identity, so two getters would hand a caller a fresh,
