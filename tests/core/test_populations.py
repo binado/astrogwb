@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from functools import partial
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -44,13 +45,11 @@ from astrogwb.catalog import REDSHIFT_SITE
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
+    Population,
     SourceFn,
-    build_merger_rate_fn,
-    build_source_model,
-    known_merger_rate_models,
-    known_source_models,
-    register_merger_rate_model,
-    register_source_model,
+    build_population,
+    known_populations,
+    register_population,
 )
 from astrogwb.populations.bns_madau_dickinson import (
     bns_md_cosmological,
@@ -153,17 +152,21 @@ MASS_SITES = ("source_frame_mass_1", "source_frame_mass_2")
 
 
 def _gaussian_population_model() -> SourceFn:
-    return build_source_model(
+    return build_population(
         "bns_md_gaussian_cosmological",
-        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
-    )
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_GRID,
+    ).source_model
 
 
 def _gaussian_target_model() -> SourceFn:
-    return build_source_model(
+    return build_population(
         "bns_md_gaussian_modified_propagation",
-        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
-    )
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_GRID,
+    ).source_model
 
 
 #: The generating models whose draw path runs through the plated replay: the
@@ -187,67 +190,94 @@ def reference(params: dict[str, float]) -> tuple[jax.Array, jax.Array, jax.Array
 # --------------------------------------------------------------------------- #
 # Registry
 # --------------------------------------------------------------------------- #
-def test_shipped_models_are_registered() -> None:
-    assert known_source_models() == (
-        "bns_md_cosmological",
-        "bns_md_gaussian_cosmological",
-        "bns_md_gaussian_modified_propagation",
-        "bns_md_gaussian_uniform_mixture",
-        "bns_md_modified_propagation",
-        "bns_md_uniform_mixture",
-    )
-    assert known_merger_rate_models() == ("madau_dickinson",)
-    shipped = {
-        "bns_md_cosmological": bns_md_cosmological,
-        "bns_md_modified_propagation": bns_md_modified_propagation,
-        "bns_md_uniform_mixture": bns_md_uniform_mixture,
-        "bns_md_gaussian_cosmological": bns_md_gaussian_cosmological,
-        "bns_md_gaussian_modified_propagation": bns_md_gaussian_modified_propagation,
-        "bns_md_gaussian_uniform_mixture": bns_md_gaussian_uniform_mixture,
-    }
-    for name, fn in shipped.items():
-        assert build_source_model(name).func is fn  # ty: ignore[unresolved-attribute]
-    rate = build_merger_rate_fn()
-    assert rate.func is madau_dickinson_total_merger_rate  # ty: ignore[unresolved-attribute]
+WINDOW = {"minimum_redshift": Z_MIN, "maximum_redshift": Z_MAX, "n_grid": N_GRID}
+
+#: Every shipped population, its source declaration, and whether it declares a
+#: physical merger rate. The guard mixtures do not: the Madau-Dickinson total
+#: rate normalizes the Madau-Dickinson redshift density, not a mixture of it
+#: with a uniform component.
+SHIPPED: dict[str, tuple[Callable[..., Any], dict[str, float], bool]] = {
+    "bns_md_cosmological": (bns_md_cosmological, {}, True),
+    "bns_md_modified_propagation": (bns_md_modified_propagation, {}, True),
+    "bns_md_gaussian_cosmological": (bns_md_gaussian_cosmological, {}, True),
+    "bns_md_gaussian_modified_propagation": (
+        bns_md_gaussian_modified_propagation,
+        {},
+        True,
+    ),
+    "bns_md_uniform_mixture": (
+        bns_md_uniform_mixture,
+        {"uniform_mixing_fraction": 0.2},
+        False,
+    ),
+    "bns_md_gaussian_uniform_mixture": (
+        bns_md_gaussian_uniform_mixture,
+        {"uniform_mixing_fraction": 0.2},
+        False,
+    ),
+}
 
 
-def test_builders_bind_construction_settings() -> None:
-    settings = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
-    source = build_source_model(
-        "bns_md_uniform_mixture",
-        settings={**settings, "uniform_mixing_fraction": 0.2},
-    )
-    assert source.keywords == {  # ty: ignore[unresolved-attribute]
-        **settings,
-        "uniform_mixing_fraction": 0.2,
-    }
-    # ``source_kwargs`` layers on top of ``settings``, overriding a shared key.
-    extra = build_source_model(
-        "bns_md_uniform_mixture",
-        settings={**settings, "uniform_mixing_fraction": 0.2},
-        source_kwargs={"uniform_mixing_fraction": 0.3},
-    )
-    assert extra.keywords == {  # ty: ignore[unresolved-attribute]
-        **settings,
-        "uniform_mixing_fraction": 0.3,
-    }
-    # The rate binds only the shared window/grid keys of the same flat mapping.
-    rate = build_merger_rate_fn(settings={**settings, "uniform_mixing_fraction": 0.2})
-    assert rate.keywords == settings  # ty: ignore[unresolved-attribute]
+def test_shipped_populations_are_registered() -> None:
+    assert known_populations() == tuple(sorted(SHIPPED))
+    for name, (declaration, extra, _) in SHIPPED.items():
+        source = build_population(name, **WINDOW, **extra).source_model
+        assert source.func is declaration, name  # ty: ignore[unresolved-attribute]
 
 
-def test_unknown_model_names_list_the_known_set() -> None:
+def test_only_a_physical_population_declares_a_merger_rate() -> None:
+    """The pairing is structural now, so a proposal cannot carry a wrong rate.
+
+    Every catalog used to record ``rate_model = "madau_dickinson"``, guard
+    mixtures included, and nothing could tell that the recorded rate was not
+    the normalization of the density the samples came from.
+    """
+    for name, (_, extra, physical) in SHIPPED.items():
+        rate = build_population(name, **WINDOW, **extra).merger_rate_fn
+        if not physical:
+            assert rate is None, name
+            continue
+        assert rate is not None, name
+        assert rate.func is madau_dickinson_total_merger_rate, name  # ty: ignore[unresolved-attribute]
+
+
+def test_a_population_binds_one_kwargs_mapping_to_both_callables() -> None:
+    kwargs = {**WINDOW, "uniform_mixing_fraction": 0.2}
+    mixture = build_population("bns_md_uniform_mixture", **kwargs).source_model
+    assert mixture.keywords == kwargs  # ty: ignore[unresolved-attribute]
+
+    source, rate = build_population("bns_md_cosmological", **WINDOW)
+    assert source.keywords == WINDOW  # ty: ignore[unresolved-attribute]
+    assert rate is not None
+    assert rate.keywords == WINDOW  # ty: ignore[unresolved-attribute]
+
+
+def test_a_kwarg_the_population_does_not_take_is_rejected() -> None:
+    """The factory signature is the kwargs schema.
+
+    The rate builder used to filter the flat mapping down to the window keys,
+    so a setting only the source model took was silently dropped on its way to
+    the rate -- and one no model took was dropped everywhere.
+    """
+    with pytest.raises(TypeError, match="uniform_mixing_fraction"):
+        build_population("bns_md_cosmological", **WINDOW, uniform_mixing_fraction=0.2)
+    with pytest.raises(TypeError, match="bns_md_cosmological"):
+        build_population("bns_md_cosmological", **WINDOW, no_such_kwarg=1.0)
+
+
+def test_unknown_population_names_list_the_known_set() -> None:
     with pytest.raises(KeyError, match="bns_md_cosmological"):
-        build_source_model("no_such_population")
-    with pytest.raises(KeyError, match="madau_dickinson"):
-        build_merger_rate_fn("no_such_rate")
+        build_population("no_such_population")
 
 
 def test_registering_a_name_twice_is_rejected() -> None:
+    def factory(
+        *, minimum_redshift: float, maximum_redshift: float, n_grid: int
+    ) -> Population:
+        raise AssertionError("never called")
+
     with pytest.raises(ValueError, match="already registered"):
-        register_source_model("bns_md_cosmological")(bns_md_cosmological)
-    with pytest.raises(ValueError, match="already registered"):
-        register_merger_rate_model("madau_dickinson")(madau_dickinson_total_merger_rate)
+        register_population("bns_md_cosmological")(factory)
 
 
 # --------------------------------------------------------------------------- #
@@ -487,15 +517,13 @@ def _redshift_log_density(
 
 
 def _uniform_mixture_model(uniform_mixing_fraction: float) -> SourceFn:
-    return build_source_model(
+    return build_population(
         "bns_md_uniform_mixture",
-        settings={
-            "z_min": Z_MIN,
-            "z_max": Z_MAX,
-            "n_grid": N_GRID,
-            "uniform_mixing_fraction": uniform_mixing_fraction,
-        },
-    )
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_GRID,
+        uniform_mixing_fraction=uniform_mixing_fraction,
+    ).source_model
 
 
 def test_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> None:
@@ -655,15 +683,13 @@ def test_sampling_and_derivation_are_isolated_without_jit() -> None:
 # Ordered Gaussian masses
 # --------------------------------------------------------------------------- #
 def _gaussian_mixture_model(uniform_mixing_fraction: float) -> SourceFn:
-    return build_source_model(
+    return build_population(
         "bns_md_gaussian_uniform_mixture",
-        settings={
-            "z_min": Z_MIN,
-            "z_max": Z_MAX,
-            "n_grid": N_GRID,
-            "uniform_mixing_fraction": uniform_mixing_fraction,
-        },
-    )
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_GRID,
+        uniform_mixing_fraction=uniform_mixing_fraction,
+    ).source_model
 
 
 def test_gaussian_mass_density_matches_two_iid_normals_on_the_ordered_half_plane() -> (

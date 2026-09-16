@@ -63,11 +63,11 @@ import jax
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.populations import DEFAULT_DENSITY_SITES, build_source_model
+from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
-model_kwargs = {"z_min": 0.0, "z_max": 20.0, "n_grid": 4096}
+model_kwargs = {"minimum_redshift": 0.0, "maximum_redshift": 20.0, "n_grid": 4096}
 params = {
     "H0": 67.66,
     "Omega_m": 0.3096,
@@ -78,7 +78,7 @@ params = {
     "minimum_mass": 1.0,
     "mass_width": 1.5,
 }
-source_model = build_source_model("bns_md_cosmological", settings=model_kwargs)
+source_model = build_population("bns_md_cosmological", **model_kwargs).source_model
 source_parameters = sample_sources(
     source_model, jax.random.PRNGKey(42), params, num_samples=1024
 )
@@ -94,8 +94,7 @@ catalog = PolarizationPowerCatalog.from_generator(
         sampling_frequency=4096.0,
         frequency_resolution=1.0,
     ),
-    source_model_name="bns_md_cosmological",
-    rate_model_name="madau_dickinson",
+    model_name="bns_md_cosmological",
     model_kwargs=model_kwargs,
     fiducials=params,
     density_sites=DEFAULT_DENSITY_SITES,
@@ -104,19 +103,19 @@ catalog = PolarizationPowerCatalog.from_generator(
 catalog.save("catalog.h5")
 ```
 
-Reweighting it to a target source model needs nothing else: the file says what
-drew it, so the proposal density is recovered rather than restated.
+Reweighting it to a target population needs nothing else: the file says what
+drew it, so the proposal density is recovered rather than restated. A
+population is one registered name that yields both callables, so a target's
+source model and merger rate cannot be paired with one another by mistake.
 
 ```python
 from astrogwb.importance.spectral import build_importance_spectrum
-from astrogwb.populations import build_merger_rate_fn
 
+target = build_population("bns_md_modified_propagation", **model_kwargs)
 spectrum_fn = build_importance_spectrum(
     PolarizationPowerCatalog.load("catalog.h5"),
-    source_model=build_source_model(
-        "bns_md_modified_propagation", settings=model_kwargs
-    ),
-    merger_rate_fn=build_merger_rate_fn(settings=model_kwargs),
+    source_model=target.source_model,
+    merger_rate_fn=target.merger_rate_fn,
 )[0]
 spectrum, extras = spectrum_fn({**params, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91})
 ```

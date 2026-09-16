@@ -45,9 +45,12 @@ def _catalog(**overrides: Any) -> SpectralDensityCatalog:
         },
         "waveform_metadata": waveform,
         "_population": PopulationRecord(
-            source_model_name="bns_md_cosmological",
-            rate_model_name="madau_dickinson",
-            model_kwargs={"z_min": 0.1, "z_max": 10.0, "n_grid": 32},
+            model_name="bns_md_cosmological",
+            model_kwargs={
+                "minimum_redshift": 0.1,
+                "maximum_redshift": 10.0,
+                "n_grid": 32,
+            },
             density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
             seed=7,
         ),
@@ -67,8 +70,8 @@ def test_round_trip_preserves_spectra_and_provenance(tmp_path: Path) -> None:
         assert set(handle) == set(SPECTRAL_DENSITY_DATASETS)
         assert json.loads(handle.attrs["population_model_kwargs"]) == {
             "n_grid": 32,
-            "z_max": 10.0,
-            "z_min": 0.1,
+            "maximum_redshift": 10.0,
+            "minimum_redshift": 0.1,
         }
         assert json.loads(handle.attrs["source_parameter_names"]) == [
             "H0",
@@ -157,7 +160,7 @@ def test_unknown_population_is_rejected_on_load(tmp_path: Path) -> None:
     path = tmp_path / "unknown.h5"
     _catalog().save(path)
     with h5py.File(path, "r+") as handle:
-        handle.attrs["population_source_model"] = "not_registered"
+        handle.attrs["population_model"] = "not_registered"
     with pytest.raises(KeyError, match="not_registered"):
         SpectralDensityCatalog.load(path)
 

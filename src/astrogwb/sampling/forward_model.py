@@ -234,10 +234,11 @@ def gwb_forward_model(
 
     ``params`` is the hyperparameter dict ``source_model`` and
     ``merger_rate_fn`` already accept -- this model does not sample them.
-    Normally the callables :func:`~astrogwb.populations.build_source_model`
-    and :func:`~astrogwb.populations.build_merger_rate_fn` return, built once
-    per run and reused, since both hash by identity and a fresh, equal
-    rebuild forces a jit recompile. ``observation_time`` is in years, the
+    Normally the two members of one
+    :class:`~astrogwb.populations.Population`, built once per run and reused,
+    since both hash by identity and a fresh, equal rebuild forces a jit
+    recompile. A population that declares no merger rate cannot drive this
+    model: there is no Poisson mean to draw an event count from. ``observation_time`` is in years, the
     same unit as :func:`~astrogwb.utils.years_to_seconds` and the analysis
     grid; the Poisson rate converts it against ``merger_rate_fn``'s
     mergers-per-second :math:`\mathcal{R}`.

@@ -18,8 +18,8 @@ Usage::
         --sampling-frequency 128 --minimum-frequency 20 \\
         --maximum-frequency 48 --reference-frequency 20 \\
         --frequency-resolution 4 \\
-        --source-model bns_md_cosmological --rate-model madau_dickinson \\
-        --model-kwargs '{"z_min": 0.3, "z_max": 20, "n_grid": 64}' \\
+        --population bns_md_cosmological \\
+        --model-kwargs '{"minimum_redshift": 0.3, "maximum_redshift": 20, "n_grid": 64}' \\
         --params '{"H0": 67.66, "Omega_m": 0.3096, "gamma": 1.42, "kappa": 4.62, "z_peak": 1.84, "local_merger_rate": 770.0, "minimum_mass": 1.0, "mass_width": 1.5}' \\
         --observation-time 1 --draws 8 --seed 0 \\
         --output outputs/spectra.h5
@@ -43,8 +43,7 @@ from astrogwb.catalog import SpectralDensityCatalog
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     PopulationRecord,
-    build_merger_rate_fn,
-    build_source_model,
+    build_population,
 )
 from astrogwb.sampling import gwb_forward_model, validate_source_model
 from astrogwb.utils import years_to_seconds
@@ -69,14 +68,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--reference-frequency", type=float, required=True)
     parser.add_argument("--frequency-resolution", type=float, required=True)
 
-    parser.add_argument("--source-model", type=str, required=True)
-    parser.add_argument("--rate-model", type=str, required=True)
+    parser.add_argument("--population", type=str, required=True)
     parser.add_argument(
         "--model-kwargs",
         type=json.loads,
         default={},
         metavar="JSON",
-        help='JSON object of model construction kwargs, e.g. \'{"z_min": 0.3, "z_max": 20}\'',
+        help='JSON object of model construction kwargs, e.g. \'{"minimum_redshift": 0.3, "maximum_redshift": 20}\'',
     )
     parser.add_argument(
         "--params",
@@ -146,8 +144,13 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     model_kwargs = _require_mapping(args.model_kwargs, flag="--model-kwargs")
     params = _float_params(_require_mapping(args.params, flag="--params"))
-    source_model = build_source_model(args.source_model, settings=model_kwargs)
-    merger_rate_fn = build_merger_rate_fn(args.rate_model, settings=model_kwargs)
+    source_model, merger_rate_fn = build_population(args.population, **model_kwargs)
+    if merger_rate_fn is None:
+        raise ValueError(
+            f"population {args.population!r} declares no merger rate, so there "
+            "is no Poisson mean to draw an event count from; it is a proposal "
+            "density, not a population to simulate observations from"
+        )
 
     generator = RippleGenerator(
         approximant=args.approximant,
@@ -201,8 +204,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         hyperparameters=draw_hyperparameters,
         waveform_metadata=generator,
         _population=PopulationRecord(
-            source_model_name=args.source_model,
-            rate_model_name=args.rate_model,
+            model_name=args.population,
             model_kwargs=model_kwargs,
             density_sites=DEFAULT_DENSITY_SITES,
             seed=args.seed,

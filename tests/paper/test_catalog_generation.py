@@ -26,16 +26,13 @@ num_samples = 8
 seed = 41
 
 [population]
-source_model = "{model}"
-rate_model = "madau_dickinson"
+model = "{model}"
 
 [population.kwargs]
-z_min = 0.0
-z_max = 20.0
+minimum_redshift = 0.0
+maximum_redshift = 20.0
 n_grid = 256
-
-[population.source_kwargs]
-{extra_source_kwargs}
+{extra_kwargs}
 
 [population.params]
 H0 = 67.66
@@ -112,14 +109,14 @@ def _config(
     tmp_path: Path,
     *,
     model: str,
-    extra_source_kwargs: str = "",
+    extra_kwargs: str = "",
     extra_params: str = "",
 ) -> Path:
     path = tmp_path / "toy-catalog.toml"
     path.write_text(
         CATALOG_TOML.format(
             model=model,
-            extra_source_kwargs=extra_source_kwargs,
+            extra_kwargs=extra_kwargs,
             extra_params=extra_params,
         ),
         encoding="utf-8",
@@ -140,8 +137,8 @@ def test_generation_produces_a_catalog_that_describes_itself(
     assert catalog.seed == 41
     assert catalog.population_model_name == "bns_md_cosmological"
     assert catalog.population_model_kwargs == {
-        "z_min": 0.0,
-        "z_max": 20.0,
+        "minimum_redshift": 0.0,
+        "maximum_redshift": 20.0,
         "n_grid": 256,
     }
     assert catalog.fiducials["local_merger_rate"] == 770.0
@@ -190,7 +187,7 @@ def test_the_guard_mixture_is_generated_from_its_declared_fraction(
             _config(
                 tmp_path,
                 model="bns_md_uniform_mixture",
-                extra_source_kwargs="uniform_mixing_fraction = 0.1",
+                extra_kwargs="uniform_mixing_fraction = 0.1",
             )
         ]
     )

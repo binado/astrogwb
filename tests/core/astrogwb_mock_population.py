@@ -31,10 +31,10 @@ from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import (
     MergerRateFn,
+    Population,
     PopulationRecord,
     SourceFn,
-    build_merger_rate_fn,
-    build_source_model,
+    build_population,
 )
 from astrogwb.utils.sampling import evaluate_sources, sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
@@ -110,27 +110,41 @@ def make_redshift_grid(n_grid: int = N_GRID) -> jax.Array:
     return jnp.linspace(Z_MIN, Z_MAX, n_grid)
 
 
+def mock_population(n_grid: int = N_GRID) -> Population:
+    """The generating population: Madau-Dickinson, standard propagation."""
+    return build_population(
+        "bns_md_cosmological",
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=n_grid,
+    )
+
+
+def mock_target_population(n_grid: int = N_GRID) -> Population:
+    """The target population the mock catalog is reweighted to."""
+    return build_population(
+        "bns_md_modified_propagation",
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=n_grid,
+    )
+
+
 def mock_population_model(n_grid: int = N_GRID) -> SourceFn:
     """The generating source model: Madau-Dickinson, standard propagation."""
-    return build_source_model(
-        "bns_md_cosmological",
-        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": n_grid},
-    )
+    return mock_population(n_grid).source_model
 
 
 def mock_target_model(n_grid: int = N_GRID) -> SourceFn:
     """The target source model the mock catalog is reweighted to."""
-    return build_source_model(
-        "bns_md_modified_propagation",
-        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": n_grid},
-    )
+    return mock_target_population(n_grid).source_model
 
 
 def mock_merger_rate_fn(n_grid: int = N_GRID) -> MergerRateFn:
-    """The Madau-Dickinson merger rate both mock source models pair with."""
-    return build_merger_rate_fn(
-        settings={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": n_grid}
-    )
+    """The Madau-Dickinson merger rate both mock populations declare."""
+    merger_rate_fn = mock_target_population(n_grid).merger_rate_fn
+    assert merger_rate_fn is not None
+    return merger_rate_fn
 
 
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
@@ -153,9 +167,12 @@ def mock_catalog(
     return PolarizationPowerCatalog.from_generator(
         source_parameters,
         generator=generator,
-        source_model_name="bns_md_cosmological",
-        rate_model_name="madau_dickinson",
-        model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
+        model_name="bns_md_cosmological",
+        model_kwargs={
+            "minimum_redshift": Z_MIN,
+            "maximum_redshift": Z_MAX,
+            "n_grid": N_GRID,
+        },
         fiducials=POPULATION_PARAMS,
         density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
         seed=MOCK_POPULATION_SEED,
@@ -305,9 +322,12 @@ def build_synthetic_importance(
         frequencies=np.asarray(generator.frequencies),
         waveform_metadata=generator,
         _population=PopulationRecord(
-            source_model_name="bns_md_cosmological",
-            rate_model_name="madau_dickinson",
-            model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
+            model_name="bns_md_cosmological",
+            model_kwargs={
+                "minimum_redshift": Z_MIN,
+                "maximum_redshift": Z_MAX,
+                "n_grid": N_GRID,
+            },
             density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
             seed=MOCK_POPULATION_SEED,
         ),

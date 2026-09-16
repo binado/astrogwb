@@ -41,7 +41,7 @@ from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     PopulationRecord,
     SourceFn,
-    build_source_model,
+    build_population,
 )
 from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
 from astrogwb.waveform import PolarizationPowerGenerator
@@ -70,11 +70,11 @@ OFF_FIDUCIALS = {
 OFF_POPULATION_PARAMS = {
     name: value for name, value in OFF_FIDUCIALS.items() if name not in {"xi_0", "xi_n"}
 }
-MODEL_KWARGS = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
+MODEL_KWARGS = {"minimum_redshift": Z_MIN, "maximum_redshift": Z_MAX, "n_grid": N_GRID}
 
 
 def _generating_model() -> SourceFn:
-    return build_source_model("bns_md_cosmological", settings=MODEL_KWARGS)
+    return build_population("bns_md_cosmological", **MODEL_KWARGS).source_model
 
 
 def _source_parameters(
@@ -122,8 +122,7 @@ def _catalog(
         frequencies=10.0 + 2.0 * np.arange(power.shape[0]),
         waveform_metadata=_waveform_metadata(power.shape[0]),
         _population=PopulationRecord(
-            source_model_name="bns_md_cosmological",
-            rate_model_name="madau_dickinson",
+            model_name="bns_md_cosmological",
             model_kwargs=MODEL_KWARGS,
             density_sites=density_sites,
             seed=MOCK_POPULATION_SEED,

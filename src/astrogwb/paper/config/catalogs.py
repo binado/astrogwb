@@ -8,7 +8,7 @@ layers under ``config/catalogs/`` -- a shared ``base/`` and one
 
 This file describes a catalog only until it exists. Afterwards the *file* is
 authoritative: it records its own registered population model, that model's
-construction settings, the hyperparameters it was drawn at, and the density
+construction kwargs, the hyperparameters it was drawn at, and the density
 factors included in importance weighting. Nothing here is re-read at analysis
 time, and no run config restates any of it, so there is nothing for the two to
 disagree about.
@@ -73,35 +73,33 @@ class WaveformConfig(BaseModel):
 class PopulationConfig(BaseModel):
     """The population declaration a catalog is drawn from, and drawn at.
 
-    ``source_model`` and ``rate_model`` are keys in the
-    :mod:`astrogwb.populations` source and merger-rate registries, never
-    import paths: registry keys change only on purpose, while module paths
-    move as collateral whenever a module is reorganized. Composing the two
-    independently is what lets a catalog def pair a guard-mixture redshift
-    law with the same rate a physical population uses.
+    ``model`` is a key in the :mod:`astrogwb.populations` registry, never an
+    import path: registry keys change only on purpose, while module paths move
+    as collateral whenever a module is reorganized. It names the population --
+    the source model and its merger rate together -- so a def cannot pair a
+    redshift law with a rate that is not its own normalization.
 
-    ``kwargs`` are construction settings routed to *both* models -- the
-    redshift window and grid, the one correctness-relevant overlap between
-    them (see ``astrogwb.populations.SHARED_MODEL_KWARGS``). ``source_kwargs``
-    are settings the source model alone takes, such as a guard mixture's
-    ``uniform_mixing_fraction``. Both must be JSON-serializable scalars,
-    because that is how they travel in the catalog's HDF5 attributes, merged
-    into one flat mapping. ``params`` are the hyperparameters the draw is made
-    at, and they are what a target evaluation is compared against;
-    ``local_merger_rate`` belongs here even though it does not affect the
-    normalized source draws, because the observation's total rate is
-    reconstructed from it.
+    ``kwargs`` are the population's construction kwargs, passed whole to
+    :func:`~astrogwb.populations.build_population`: the redshift window and
+    grid every population takes, plus whatever else the named one takes, such
+    as a guard mixture's ``uniform_mixing_fraction``. They must be
+    JSON-serializable scalars, because that is how they travel in the
+    catalog's HDF5 attributes. A key the named population does not accept
+    fails pre-flight rather than being filtered away.
 
-    Density factors and source outputs are declared by the registered source
-    model class. Generation records its effective density selection.
+    ``params`` are the hyperparameters the draw is made at, and they are what a
+    target evaluation is compared against; ``local_merger_rate`` belongs here
+    even though it does not affect the normalized source draws, because the
+    observation's total rate is reconstructed from it.
+
+    Density factors and source outputs are declared by the registered
+    population. Generation records its effective density selection.
     """
 
     model_config = _STRICT
 
-    source_model: str
-    rate_model: str
+    model: str
     kwargs: dict[str, float | int] = Field(default_factory=dict)
-    source_kwargs: dict[str, float | int] = Field(default_factory=dict)
     params: dict[str, float]
 
 
@@ -125,12 +123,13 @@ class CatalogDefinition(BaseModel):
     @model_validator(mode="after")
     def _validate_redshift_window(self) -> CatalogDefinition:
         kwargs = self.population.kwargs
-        window = ("z_min", "z_max")
+        window = ("minimum_redshift", "maximum_redshift")
         if all(name in kwargs for name in window) and not float(
-            kwargs["z_min"]
-        ) < float(kwargs["z_max"]):
+            kwargs["minimum_redshift"]
+        ) < float(kwargs["maximum_redshift"]):
             raise ValueError(
-                "population.kwargs.z_min must be less than population.kwargs.z_max"
+                "population.kwargs.minimum_redshift must be less than "
+                "population.kwargs.maximum_redshift"
             )
         return self
 
@@ -163,32 +162,43 @@ def discover_catalogs(root: Path | None = None) -> dict[str, CatalogDefinition]:
     }
 
 
-def check_source_model(name: str, *, label: str) -> None:
-    """Reject a source-model name that is not registered.
+def check_population_model(
+    name: str,
+    *,
+    label: str,
+    kwargs: Mapping[str, float | int] | None = None,
+    requires_merger_rate: bool = False,
+) -> None:
+    """Reject a population a run or catalog def cannot actually be built from.
+
+    Checks as much as the caller supplies: the name is registered, ``kwargs``
+    are kwargs that population takes, and -- for an analysis target, which
+    reconstructs an observed total rate -- that it declares a merger rate at
+    all. A guard mixture does not, so naming one as a target is a
+    configuration error rather than a silently meaningless spectrum.
 
     Imports :mod:`astrogwb.populations` in its own body: the registry is
     populated by importing the models, which pulls in JAX, and this module is
     otherwise free of it.
     """
-    from astrogwb.populations import known_source_models
+    from astrogwb.populations import build_population, known_populations
 
-    known = known_source_models()
+    known = known_populations()
     if name not in known:
         raise ValueError(
-            f"{label}: unknown source model {name!r}; registered models are: "
+            f"{label}: unknown population {name!r}; registered populations are: "
             f"{', '.join(known)}"
         )
-
-
-def check_rate_model(name: str, *, label: str) -> None:
-    """Reject a merger-rate-model name that is not registered."""
-    from astrogwb.populations import known_merger_rate_models
-
-    known = known_merger_rate_models()
-    if name not in known:
+    if kwargs is None:
+        return
+    try:
+        population = build_population(name, **kwargs)
+    except TypeError as error:
+        raise ValueError(f"{label}: {error}") from None
+    if requires_merger_rate and population.merger_rate_fn is None:
         raise ValueError(
-            f"{label}: unknown merger-rate model {name!r}; registered models are: "
-            f"{', '.join(known)}"
+            f"{label}: population {name!r} declares no merger rate, so it "
+            "cannot be an analysis target; it is a proposal density"
         )
 
 
@@ -227,8 +237,10 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
     The pre-flight gate ``astrogwb-assemble-config --all`` used to provide,
     kept because its real value was never the JSON it wrote: it fails on the
     first invalid run *before any catalog is built*, and a catalog is a GPU job.
-    Source and rate models are resolved here too, so an unregistered name is caught
-    by the same pre-flight rather than at the top of a queued generation job.
+    Populations are built here too, so an unregistered name, a construction
+    setting the named population does not take, or a proposal density named as
+    an analysis target is caught by the same pre-flight rather than at the top
+    of a queued generation job.
 
     It lives here rather than in :mod:`astrogwb.paper.config.runs` for the same
     reason :func:`check_catalog_references` does -- that module must stay
@@ -240,13 +252,10 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
 
     catalogs = discover_catalogs(root)
     for name, definition in catalogs.items():
-        check_source_model(
-            definition.population.source_model,
-            label=f"catalog {name!r} population.source_model",
-        )
-        check_rate_model(
-            definition.population.rate_model,
-            label=f"catalog {name!r} population.rate_model",
+        check_population_model(
+            definition.population.model,
+            label=f"catalog {name!r} population.model",
+            kwargs=definition.population.kwargs,
         )
     labels: list[str] = []
     for experiment, runs in discover_runs(root).items():
@@ -254,13 +263,16 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
             label = f"{experiment}/{run}"
             config = build_run_config(assemble_run(experiment, run, root=root))
             check_catalog_references(config, label=label, catalogs=catalogs)
-            check_source_model(
-                config.analysis.source_model,
-                label=f"{label} analysis.source_model",
-            )
-            check_rate_model(
-                config.analysis.rate_model,
-                label=f"{label} analysis.rate_model",
+            grid = config.analysis_grid
+            check_population_model(
+                config.analysis.population_model,
+                label=f"{label} analysis.population_model",
+                kwargs={
+                    "minimum_redshift": grid.minimum_redshift,
+                    "maximum_redshift": grid.maximum_redshift,
+                    "n_grid": grid.n_grid,
+                },
+                requires_merger_rate=True,
             )
             logger.info("ok %s", label)
             labels.append(label)
@@ -273,8 +285,7 @@ __all__ = [
     "PopulationConfig",
     "WaveformConfig",
     "check_catalog_references",
-    "check_rate_model",
-    "check_source_model",
+    "check_population_model",
     "discover_catalogs",
     "load_catalog_definition",
     "load_catalog_layers",

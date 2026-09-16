@@ -66,7 +66,7 @@ PARAMETER_NAMES_ATTR = "source_parameter_names"
 # --------------------------------------------------------------------- #
 # Polarization-power catalogs
 # --------------------------------------------------------------------- #
-CATALOG_FORMAT_NAME = "astrogwb_catalog_v6"
+CATALOG_FORMAT_NAME = "astrogwb_catalog_v7"
 CATALOG_DATASETS = ("frequency", "polarization_power", "source_parameters")
 
 #: Written on every save. It equals the ``df`` attribute for every current
@@ -92,7 +92,7 @@ def save_polarization_power_catalog(
     *,
     compression: str | None = None,
 ) -> None:
-    """Write one catalog in the v6 direct-HDF5 format."""
+    """Write one catalog in the v7 direct-HDF5 format."""
     names, source_parameters = stack_columns(
         catalog.source_parameters, rows=catalog.num_samples
     )
@@ -210,7 +210,7 @@ def validate_catalog_file(handle: h5py.File | h5py.Group, *, label: str) -> None
 # --------------------------------------------------------------------- #
 # Spectral-density catalogs
 # --------------------------------------------------------------------- #
-SPECTRAL_DENSITY_FORMAT_NAME = "astrogwb_spectral_density_v2"
+SPECTRAL_DENSITY_FORMAT_NAME = "astrogwb_spectral_density_v3"
 SPECTRAL_DENSITY_DATASETS = (
     "frequency",
     "spectral_density",

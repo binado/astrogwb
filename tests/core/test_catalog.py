@@ -51,9 +51,8 @@ def _waveform_generator() -> PolarizationPowerGenerator:
 #: is the record of the density that drew it, so there is no valid catalog
 #: without one.
 POPULATION_RECORD: dict[str, Any] = {
-    "source_model_name": "bns_md_cosmological",
-    "rate_model_name": "madau_dickinson",
-    "model_kwargs": {"z_min": 0.0, "z_max": 20.0, "n_grid": 256},
+    "model_name": "bns_md_cosmological",
+    "model_kwargs": {"minimum_redshift": 0.0, "maximum_redshift": 20.0, "n_grid": 256},
     "fiducials": {
         "H0": 67.66,
         "Omega_m": 0.3096,
@@ -69,8 +68,7 @@ POPULATION_RECORD: dict[str, Any] = {
 CATALOG_SEED = 42
 CATALOG_DEFAULTS: dict[str, Any] = {
     "_population": PopulationRecord(
-        source_model_name=POPULATION_RECORD["source_model_name"],
-        rate_model_name=POPULATION_RECORD["rate_model_name"],
+        model_name=POPULATION_RECORD["model_name"],
         model_kwargs=POPULATION_RECORD["model_kwargs"],
         density_sites=POPULATION_RECORD["density_sites"],
         seed=CATALOG_SEED,
@@ -196,8 +194,7 @@ def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None
 def test_population_record_rejects_non_int_seed() -> None:
     with pytest.raises(TypeError, match="seed"):
         PopulationRecord(
-            source_model_name=POPULATION_RECORD["source_model_name"],
-            rate_model_name=POPULATION_RECORD["rate_model_name"],
+            model_name=POPULATION_RECORD["model_name"],
             model_kwargs=POPULATION_RECORD["model_kwargs"],
             density_sites=POPULATION_RECORD["density_sites"],
             seed="not_an_int",  # ty: ignore[invalid-argument-type]
@@ -232,39 +229,32 @@ def _catalog(redshift: np.ndarray) -> PolarizationPowerCatalog:
     )
 
 
-def test_getters_bind_construction_settings_only() -> None:
+def test_get_population_binds_construction_kwargs_only() -> None:
     """Generating hyperparameters must not be captured in the bound callables.
 
     They describe how the catalog was made; a target evaluation supplies its
     own, and binding the generating ones here would silently pin them.
     """
     catalog = _catalog(np.array([0.5, 1.5]))
-    source = catalog.get_source_model()
+    source, rate = catalog.get_population()
     assert source.func is bns_md_cosmological  # ty: ignore[unresolved-attribute]
     assert source.args == ()  # ty: ignore[unresolved-attribute]
     assert source.keywords == POPULATION_RECORD["model_kwargs"]  # ty: ignore[unresolved-attribute]
-    rate = catalog.get_merger_rate_fn()
+    assert rate is not None
     assert rate.func is madau_dickinson_total_merger_rate  # ty: ignore[unresolved-attribute]
     assert rate.args == ()  # ty: ignore[unresolved-attribute]
     assert rate.keywords == POPULATION_RECORD["model_kwargs"]  # ty: ignore[unresolved-attribute]
 
 
-def test_unknown_population_model_names_fail_clearly() -> None:
+def test_an_unknown_population_name_fails_clearly() -> None:
     catalog = _catalog(np.array([0.5, 1.5]))
     object.__setattr__(
         catalog,
         "_population",
-        replace(catalog.population, source_model_name="no_such_population"),
+        replace(catalog.population, model_name="no_such_population"),
     )
     with pytest.raises(KeyError, match="bns_md_cosmological"):
-        catalog.get_source_model()
-    object.__setattr__(
-        catalog,
-        "_population",
-        replace(catalog.population, rate_model_name="no_such_rate"),
-    )
-    with pytest.raises(KeyError, match="madau_dickinson"):
-        catalog.get_merger_rate_fn()
+        catalog.get_population()
 
 
 def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> None:
@@ -279,15 +269,16 @@ def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> 
         restricted.polarization_power, catalog.polarization_power[:, [1, 2]]
     )
     assert restricted.num_samples == 2
-    assert restricted.population_model_kwargs["z_min"] == 0.3
-    assert restricted.population_model_kwargs["z_max"] == 2.0
+    assert restricted.population_model_kwargs["minimum_redshift"] == 0.3
+    assert restricted.population_model_kwargs["maximum_redshift"] == 2.0
     # Everything else about the record travels unchanged.
     assert restricted.fiducials == catalog.fiducials
     assert restricted.density_sites == catalog.density_sites
-    # Both reconstructed callables see the narrowed window.
-    for bound in (restricted.get_source_model(), restricted.get_merger_rate_fn()):
-        assert bound.keywords["z_min"] == 0.3  # ty: ignore[unresolved-attribute]
-        assert bound.keywords["z_max"] == 2.0  # ty: ignore[unresolved-attribute]
+    # Both reconstructed callables see the narrowed window: they are built
+    # from the one flat kwargs mapping restrict_redshift rewrites.
+    for bound in restricted.get_population():
+        assert bound.keywords["minimum_redshift"] == 0.3  # ty: ignore[unresolved-attribute]
+        assert bound.keywords["maximum_redshift"] == 2.0  # ty: ignore[unresolved-attribute]
 
 
 def test_restrict_redshift_leaves_the_original_untouched() -> None:
@@ -296,7 +287,7 @@ def test_restrict_redshift_leaves_the_original_untouched() -> None:
 
     assert catalog.num_samples == 4
     assert catalog.polarization_power.shape == (2, 4)
-    assert catalog.population_model_kwargs["z_min"] == 0.0
+    assert catalog.population_model_kwargs["minimum_redshift"] == 0.0
 
 
 def test_restrict_redshift_rejects_a_window_outside_the_generation_support() -> None:

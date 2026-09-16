@@ -74,7 +74,7 @@ population layer would mean near-identical layer files.
 ## The population is a registered model
 
 A def names a population by its key in the `astrogwb.populations` registry, and
-supplies the construction settings it takes:
+supplies the construction kwargs it takes:
 
 ```toml
 num_samples = 16384
@@ -88,8 +88,9 @@ uniform_mixing_fraction = 0.1
 ```
 
 The redshift window, grid resolution, and hyperparameters are inherited from
-`config/catalogs/base/population.toml`. The population class declares its density
-factors and source outputs.
+`config/catalogs/base/population.toml`; `[population.kwargs]` is one mapping,
+deep-merged across layers and passed whole to the factory. The population
+declares its density factors and source outputs.
 
 **A registry key, not an import path.** Registry keys change only on purpose;
 module paths move as collateral whenever a module is reorganized, so a
@@ -97,22 +98,18 @@ persisted `module:function` string is a reference that silently rots. An
 unknown key fails pre-flight, in `snakemake validate`, listing what is
 registered — before a GPU job is queued.
 
-Source models are plain registered NumPyro functions. `build_source_model`
-binds their construction settings into a `functools.partial`; hyperparameters
-and source arrays remain arguments. The merger rate is a separate registered
-function, bound the same way from the same flat settings:
+A registered population is a *factory*: it takes the construction kwargs and
+returns the source model and the merger rate together, each a
+`functools.partial` with those kwargs bound. Hyperparameters and source
+arrays remain arguments.
 
 ```python
-from astrogwb.populations import (
-    DEFAULT_DENSITY_SITES,
-    build_merger_rate_fn,
-    build_source_model,
-)
+from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.utils.sampling import evaluate_sources, sample_sources
 
-settings = {"z_min": 0.0, "z_max": 20.0, "n_grid": 4096}
-source_model = build_source_model("bns_md_cosmological", settings=settings)
-merger_rate_fn = build_merger_rate_fn(settings=settings)
+source_model, merger_rate_fn = build_population(
+    "bns_md_cosmological", minimum_redshift=0.0, maximum_redshift=20.0, n_grid=4096
+)
 
 sources = sample_sources(source_model, key, params, num_samples=1024)
 log_prob, outputs = evaluate_sources(
@@ -120,6 +117,19 @@ log_prob, outputs = evaluate_sources(
 )  # log_prob: shape (1024,); outputs["luminosity_distance"]: shape (1024,)
 total_merger_rate = merger_rate_fn(params)  # shape ()
 ```
+
+One name, not two. The source model and its merger rate are both
+normalizations of the same redshift law, and composing them freely is how every
+guarded-proposal catalog came to record the plain Madau-Dickinson rate -- a
+number that is not the normalization of the density its samples were drawn
+from. A population that has no physical rate returns `None` for it, so a
+proposal catalog used as an injection fails by name rather than scaling an
+observed spectrum by the wrong factor.
+
+The factory's signature *is* the construction-settings schema. A key the named
+population does not take raises `TypeError` naming the population and what it
+accepts, rather than being silently filtered on its way to one of two
+separately built callables.
 
 - The source model's returned mapping defines the stored columns, including
   spins, detector-frame masses, and `luminosity_distance`. Its sample sites are
@@ -172,6 +182,15 @@ recorded guard fraction can never be something other than what was drawn. It
 replaced a pair of gwmock graphs differing only in their redshift block, a
 weighted `MixtureSimulator`, and a hand-written `logaddexp` mixture density in
 the analysis layer.
+
+A guard mixture declares **no merger rate**: it is a sampling density, not a
+physical population, and the Madau-Dickinson total rate is the normalization of
+the Madau-Dickinson redshift density, not of a mixture of it with a uniform
+component. Nothing reads a rate off a proposal -- importance weighting takes
+the *target's* -- so this costs nothing, and a catalog drawn from a guard
+mixture now raises if used as an injection or named as an analysis target,
+where before it would have returned a finite rate wrong by the guard
+fraction.
 
 ### Prefix stability across sizes
 
@@ -232,7 +251,7 @@ written once at generation time:
 
 ```text
 population_model         = "bns_md_cosmological"
-population_model_kwargs  = '{"n_grid": 4096, "z_max": 20.0, "z_min": 0.0}'
+population_model_kwargs  = '{"n_grid": 4096, "maximum_redshift": 20.0, "minimum_redshift": 0.0}'
 population_params        = '{"H0": 67.66, "Omega_m": 0.3096, "gamma": 1.42,
                              "kappa": 4.62, "local_merger_rate": 770.0,
                              "z_peak": 1.84}'
@@ -246,10 +265,11 @@ HDF5 attributes are flat scalars, so the mappings travel as JSON strings. The
 spectral-density catalog carries, which is what keeps the two formats spelling
 these fields identically.
 
-What is *not* stored is a callable: `PolarizationPowerCatalog.get_source_model()`
-and `PolarizationPowerCatalog.get_merger_rate_fn()` look the names up in the
-registries and bind their recorded settings;
-`PolarizationPowerCatalog.density_sites` carries the ordered density selection.
+What is *not* stored is a callable: `PolarizationPowerCatalog.get_population()`
+looks the name up in the registry and binds the recorded settings, returning
+both callables at once (they hash by identity, so two getters would force a
+recompile on every call); `PolarizationPowerCatalog.density_sites` carries the
+ordered density selection.
 
 That is enough to reconstruct the exact map from hyperparameters to source
 density, which is why the run config no longer restates any of it and nothing
@@ -268,10 +288,13 @@ weights with no shape error anywhere.
 ### What loading checks
 
 `PolarizationPowerCatalog.load` validates the HDF5 layout, array shapes and
-serialized dtypes, then reconstructs the recorded population from the registry. It does not
-serialize a callable or require the analysis run configuration.
+serialized dtypes, then reconstructs the recorded population from the registry.
+Reconstruction is the whole check: an unknown name raises `KeyError` listing
+what is registered, and a construction setting the population does not take
+raises `TypeError`. It does not serialize a callable or require the analysis
+run configuration.
 
-The format is `astrogwb_catalog_v6`, a direct HDF5 file. Root attributes hold
+The format is `astrogwb_catalog_v7`, a direct HDF5 file. Root attributes hold
 the waveform and population metadata (JSON is used for mappings and ordered
 lists); `frequency`, `polarization_power`, and `source_parameters` are HDF5
 datasets. Earlier formats require regeneration. The recorded density-site and
@@ -286,7 +309,7 @@ the backend chooses the actual grid, so the two can differ.
 ## The spectral-density format
 
 `scripts/simulate_spectra.py` writes the sibling artifact: a
-`SpectralDensityCatalog`, format `astrogwb_spectral_density_v2`. It persists
+`SpectralDensityCatalog`, format `astrogwb_spectral_density_v3`. It persists
 the forward model's *contraction* rather than the power it contracts, so a
 run that only needs predicted spectra never materializes `(F, N)` waveforms.
 
@@ -326,7 +349,7 @@ window is narrower — `minimum_redshift = 0.3` in
 baked into the catalog: it depends on a truncation the run chooses, not on
 anything generation knows.
 
-`PolarizationPowerCatalog.restrict_redshift(z_min, z_max)` narrows both halves
+`PolarizationPowerCatalog.restrict_redshift(minimum_redshift, maximum_redshift)` narrows both halves
 together, and that is the whole reason it is one method. Dropping samples without narrowing
 the recorded model would leave the density normalized over a window the samples
 no longer span, and every importance weight would be off by that
