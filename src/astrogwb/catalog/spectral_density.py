@@ -5,7 +5,7 @@ persists ``(F, N)`` power for ``N`` sources and leaves the contraction to the
 consumer; this one persists the contraction itself -- one spectral density per
 draw -- and never holds a catalog's worth of waveforms at once. Both describe
 the density that produced them with the same
-:class:`~astrogwb.populations.PopulationRecord`, so a consumer reconstructs the
+:class:`~astrogwb.metadata.PopulationMetadata`, so a consumer reconstructs the
 generating source model the same way from either.
 
 The two differ in what a row is, and that is the whole difference. A
@@ -32,7 +32,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb.frequency import uniform_grid_spacing
-from astrogwb.populations import Population, PopulationRecord
+from astrogwb.metadata import PopulationMetadata
+from astrogwb.populations import Population
 from astrogwb.waveform import PolarizationPowerGenerator
 
 __all__ = ["SpectralDensityCatalog"]
@@ -58,7 +59,7 @@ class SpectralDensityCatalog:
     total_merger_rate: NDArray[Any]
     hyperparameters: Mapping[str, NDArray[Any]]
     waveform_metadata: PolarizationPowerGenerator
-    _population: PopulationRecord
+    _population: PopulationMetadata
     n_max_sigma: float
     observation_time: float
 
@@ -119,7 +120,7 @@ class SpectralDensityCatalog:
     # The recorded population
     # ----------------------------------------------------------------- #
     @property
-    def population(self) -> PopulationRecord:
+    def population(self) -> PopulationMetadata:
         """The population declaration these draws were produced from."""
         return self._population
 
@@ -175,7 +176,7 @@ class SpectralDensityCatalog:
         """Read a spectra file, reconstructing and validating its population record.
 
         Loading calls
-        :meth:`~astrogwb.populations.PopulationRecord.check_registered` to
+        :meth:`~astrogwb.metadata.PopulationMetadata.check_registered` to
         verify the recorded population name is still registered; it does not
         re-run the forward model or compare the stored spectra against it.
         """

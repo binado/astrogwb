@@ -12,7 +12,8 @@ from collections.abc import Mapping
 import numpy as np
 
 from astrogwb.catalog import PolarizationPowerCatalog
-from astrogwb.populations import PopulationRecord, build_population
+from astrogwb.metadata import PopulationMetadata
+from astrogwb.populations import build_population
 from astrogwb.utils.sampling import evaluate_sources
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -139,7 +140,7 @@ def make_catalog(
             sampling_frequency=sampling_frequency,
             frequency_resolution=df,
         ),
-        _population=PopulationRecord(
+        _population=PopulationMetadata(
             model_name=model_name,
             model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
             density_sites=density_sites,

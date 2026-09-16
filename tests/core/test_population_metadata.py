@@ -7,31 +7,31 @@ from typing import Any
 
 import pytest
 
-from astrogwb.populations import PopulationRecord
-from astrogwb.populations.record import (
+from astrogwb.metadata import (
     DENSITY_SITES_ATTR,
     MODEL_KWARGS_ATTR,
     MODEL_NAME_ATTR,
     SEED_ATTR,
+    PopulationMetadata,
 )
 
 MODEL_KWARGS = {"minimum_redshift": 0.1, "maximum_redshift": 10.0, "n_grid": 32}
 DENSITY_SITES = ("redshift", "source_frame_mass_1", "source_frame_mass_2")
 
 
-def _record(**overrides: Any) -> PopulationRecord:
+def _record(**overrides: Any) -> PopulationMetadata:
     fields: dict[str, Any] = {
         "model_name": "bns_md_cosmological",
         "model_kwargs": MODEL_KWARGS,
         "density_sites": DENSITY_SITES,
         "seed": 7,
     }
-    return PopulationRecord(**{**fields, **overrides})
+    return PopulationMetadata(**{**fields, **overrides})
 
 
 def test_attrs_round_trip_preserves_every_field() -> None:
     record = _record()
-    restored = PopulationRecord.from_attrs(record.to_attrs(), label="test")
+    restored = PopulationMetadata.from_attrs(record.to_attrs(), label="test")
     assert restored == record
 
 
@@ -95,4 +95,4 @@ def test_seed_must_be_a_non_boolean_int(seed: object) -> None:
 def test_from_attrs_rejects_a_malformed_json_attribute() -> None:
     attrs = {**_record().to_attrs(), MODEL_KWARGS_ATTR: "{not json"}
     with pytest.raises(ValueError, match=MODEL_KWARGS_ATTR):
-        PopulationRecord.from_attrs(attrs, label="broken.h5")
+        PopulationMetadata.from_attrs(attrs, label="broken.h5")

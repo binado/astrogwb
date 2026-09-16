@@ -40,9 +40,9 @@ import numpy as np
 from numpyro.infer import Predictive
 
 from astrogwb.catalog import SpectralDensityCatalog
+from astrogwb.metadata import PopulationMetadata
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
-    PopulationRecord,
     build_population,
 )
 from astrogwb.sampling import gwb_forward_model, validate_source_model
@@ -203,7 +203,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         total_merger_rate=merger_rates,
         hyperparameters=draw_hyperparameters,
         waveform_metadata=generator,
-        _population=PopulationRecord(
+        _population=PopulationMetadata(
             model_name=args.population,
             model_kwargs=model_kwargs,
             density_sites=DEFAULT_DENSITY_SITES,

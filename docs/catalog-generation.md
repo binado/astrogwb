@@ -265,7 +265,7 @@ population_num_samples   = 32768
 ```
 
 HDF5 attributes are flat scalars, so the mappings travel as JSON strings. The
-`population_*` block is one `PopulationRecord`, the same record a
+`population_*` block is one `PopulationMetadata`, the same record a
 spectral-density catalog carries, which is what keeps the two formats spelling
 these fields identically.
 
@@ -326,7 +326,7 @@ run that only needs predicted spectra never materializes `(F, N)` waveforms.
 | `hyperparameters` | `(draws, P)` | one column per name, ordered by `source_parameter_names` |
 
 Its root attributes are the same three blocks a power catalog stamps -- format
-identity, the six waveform attributes, and the `PopulationRecord` -- plus three
+identity, the six waveform attributes, and the `PopulationMetadata` -- plus three
 the draws cannot be read back from:
 
 ```

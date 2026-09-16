@@ -12,7 +12,7 @@ import pytest
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid
-from astrogwb.populations import PopulationRecord
+from astrogwb.metadata import PopulationMetadata
 from astrogwb.populations.bns_madau_dickinson import (
     bns_md_cosmological,
     madau_dickinson_total_merger_rate,
@@ -66,7 +66,7 @@ POPULATION_RECORD: dict[str, Any] = {
     "density_sites": ("redshift", "source_frame_mass_1", "source_frame_mass_2"),
 }
 CATALOG_SEED = 42
-POPULATION = PopulationRecord(
+POPULATION = PopulationMetadata(
     model_name=POPULATION_RECORD["model_name"],
     model_kwargs=POPULATION_RECORD["model_kwargs"],
     density_sites=POPULATION_RECORD["density_sites"],
@@ -194,7 +194,7 @@ def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None
 
 def test_population_record_rejects_non_int_seed() -> None:
     with pytest.raises(TypeError, match="seed"):
-        PopulationRecord(
+        PopulationMetadata(
             model_name=POPULATION_RECORD["model_name"],
             model_kwargs=POPULATION_RECORD["model_kwargs"],
             density_sites=POPULATION_RECORD["density_sites"],

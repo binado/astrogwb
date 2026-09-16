@@ -9,7 +9,7 @@ left ``xi_0``, ``xi_n`` and ``local_merger_rate`` checked by nothing at all.
 A catalog now records its complete population declaration -- the registered
 population name, the construction kwargs, and the density factors
 included in importance weighting, carried as one
-:class:`~astrogwb.populations.PopulationRecord` -- plus the hyperparameters it
+:class:`~astrogwb.metadata.PopulationMetadata` -- plus the hyperparameters it
 was drawn at. That is enough to reconstruct the exact map from hyperparameters
 to source density, so the run config no longer restates any of it and nothing
 has to be cross-checked.
@@ -33,7 +33,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.frequency import uniform_grid_spacing
-from astrogwb.populations import Population, PopulationRecord
+from astrogwb.metadata import PopulationMetadata
+from astrogwb.populations import Population
 from astrogwb.waveform import PolarizationPowerGenerator
 
 __all__ = ["REDSHIFT_SITE", "PolarizationPowerCatalog"]
@@ -68,7 +69,7 @@ class PolarizationPowerCatalog:
     polarization_power: NDArray[Any]
     frequencies: NDArray[np.floating[Any]]
     waveform_metadata: PolarizationPowerGenerator
-    _population: PopulationRecord
+    _population: PopulationMetadata
     _fiducials: Mapping[str, float]
 
     def __post_init__(self) -> None:
@@ -136,7 +137,7 @@ class PolarizationPowerCatalog:
         source_parameters: Mapping[str, ArrayLike],
         *,
         generator: PolarizationPowerGenerator,
-        population: PopulationRecord,
+        population: PopulationMetadata,
         fiducials: Mapping[str, float],
     ) -> Self:
         """Generate polarization power and return a validated catalog.
@@ -144,7 +145,7 @@ class PolarizationPowerCatalog:
         The population record is supplied rather than inferred: the caller ran
         the model to draw ``source_parameters``, so it is the only place that
         knows which population and settings produced them. It arrives as one
-        :class:`~astrogwb.populations.PopulationRecord` rather than as its four
+        :class:`~astrogwb.metadata.PopulationMetadata` rather than as its four
         parts, so a caller cannot pair a model name with another draw's seed or
         density sites -- the record is the unit that has to stay consistent.
 
@@ -181,7 +182,7 @@ class PolarizationPowerCatalog:
     # The recorded population
     # ----------------------------------------------------------------- #
     @property
-    def population(self) -> PopulationRecord:
+    def population(self) -> PopulationMetadata:
         """The population declaration this catalog was drawn from."""
         return self._population
 
@@ -314,7 +315,7 @@ class PolarizationPowerCatalog:
     def load(cls, path: str | Path) -> Self:
         """Read a catalog file, reconstructing and validating its population record.
 
-        Loading calls :meth:`~astrogwb.populations.PopulationRecord.check_registered`
+        Loading calls :meth:`~astrogwb.metadata.PopulationMetadata.check_registered`
         to verify the recorded population name is still registered; it does not
         re-execute the population or compare derived columns against the stored
         arrays. A catalog whose columns have drifted from its declared

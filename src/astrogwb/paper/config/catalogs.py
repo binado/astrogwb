@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from astrogwb.metadata import PopulationMetadata
 from astrogwb.paper.config.mcmc import RunConfig
 from astrogwb.paper.config.runs import (
     CATALOG_DEFS_DIR,
@@ -45,7 +46,6 @@ from astrogwb.paper.config.runs import (
 )
 
 if TYPE_CHECKING:
-    from astrogwb.populations import PopulationRecord
     from astrogwb.waveform import PolarizationPowerGenerator
 
 logger = logging.getLogger(__name__)
@@ -190,7 +190,7 @@ class CatalogDefinition(BaseModel):
     population: PopulationConfig
     waveform: WaveformConfig
 
-    def population_record(self) -> PopulationRecord:
+    def population_record(self) -> PopulationMetadata:
         """The population declaration this def hands to a generated catalog.
 
         The record is what the ``.h5`` persists, so assembling it here -- next
@@ -200,13 +200,15 @@ class CatalogDefinition(BaseModel):
         no def declares density sites: they follow from the registered
         population, not from configuration.
 
-        Imports :mod:`astrogwb.populations` in its own body; the registry is
-        populated by importing the models, which pulls in JAX, and this module
-        is otherwise free of it.
+        :class:`~astrogwb.metadata.PopulationMetadata` is imported at module
+        scope -- it is JAX-free by construction --  but
+        :data:`~astrogwb.populations.DEFAULT_DENSITY_SITES` is not: the
+        registry is populated by importing the models, which pulls in JAX, and
+        this module is otherwise free of it.
         """
-        from astrogwb.populations import DEFAULT_DENSITY_SITES, PopulationRecord
+        from astrogwb.populations import DEFAULT_DENSITY_SITES
 
-        return PopulationRecord(
+        return PopulationMetadata(
             model_name=self.population.model,
             model_kwargs=self.population.kwargs,
             density_sites=DEFAULT_DENSITY_SITES,

@@ -37,9 +37,9 @@ from astrogwb.importance.spectral import (
     evaluate_log_weights,
     importance_spectral_density,
 )
+from astrogwb.metadata import PopulationMetadata
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
-    PopulationRecord,
     SourceFn,
     build_population,
 )
@@ -121,7 +121,7 @@ def _catalog(
         polarization_power=np.asarray(power),
         frequencies=10.0 + 2.0 * np.arange(power.shape[0]),
         waveform_metadata=_waveform_metadata(power.shape[0]),
-        _population=PopulationRecord(
+        _population=PopulationMetadata(
             model_name="bns_md_cosmological",
             model_kwargs=MODEL_KWARGS,
             density_sites=density_sites,
