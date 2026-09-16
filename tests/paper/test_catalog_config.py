@@ -123,8 +123,8 @@ def test_a_kwarg_the_population_does_not_take_is_rejected() -> None:
             "bns_md_cosmological",
             label="catalog 'toy'",
             kwargs={
-                "z_min": 0.0,
-                "z_max": 20.0,
+                "minimum_redshift": 0.0,
+                "maximum_redshift": 20.0,
                 "n_grid": 256,
                 "uniform_mixing_fraction": 0.1,
             },
@@ -138,8 +138,8 @@ def test_a_proposal_density_is_rejected_as_an_analysis_target() -> None:
             "bns_md_uniform_mixture",
             label="run 'toy' analysis.population_model",
             kwargs={
-                "z_min": 0.3,
-                "z_max": 20.0,
+                "minimum_redshift": 0.3,
+                "maximum_redshift": 20.0,
                 "n_grid": 256,
                 "uniform_mixing_fraction": 0.1,
             },
@@ -165,8 +165,8 @@ seed = 1
 model = "bns_md_cosmological"
 
 [population.kwargs]
-z_min = 20.0
-z_max = 0.0
+minimum_redshift = 20.0
+maximum_redshift = 0.0
 n_grid = 256
 
 [population.params]
@@ -182,7 +182,7 @@ frequency_resolution = 1.0
 """,
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="z_min must be less than"):
+    with pytest.raises(ValueError, match="minimum_redshift must be less than"):
         load_catalog_layers([path])
 
 

@@ -72,8 +72,8 @@ REDSHIFT = np.linspace(0.05, 1.5, N_SOURCES)
 #: it is what a real run does, and it stops a bug that conflates the two from
 #: cancelling out of both sides.
 GENERATION_KWARGS: dict[str, float | int] = {
-    "z_min": 0.0,
-    "z_max": 20.0,
+    "minimum_redshift": 0.0,
+    "maximum_redshift": 20.0,
     "n_grid": 256,
 }
 GUARD_FRACTION = 0.3
@@ -265,14 +265,14 @@ def test_restriction_narrows_the_proposals_recorded_population_too(
     inputs = _prepare(injection_catalog, proposal_catalog, config)
 
     assert inputs.proposal.num_samples == N_RETAINED
-    assert inputs.proposal.population_model_kwargs["z_min"] == (
+    assert inputs.proposal.population_model_kwargs["minimum_redshift"] == (
         config.cosmology.minimum_redshift
     )
-    assert inputs.proposal.population_model_kwargs["z_max"] == (
+    assert inputs.proposal.population_model_kwargs["maximum_redshift"] == (
         config.cosmology.maximum_redshift
     )
     # The file on disk is untouched.
-    assert proposal_catalog.population_model_kwargs["z_min"] == 0.0
+    assert proposal_catalog.population_model_kwargs["minimum_redshift"] == 0.0
 
 
 def test_model_kwargs_scale_is_the_full_grid_gaussian_bin_scale(
@@ -544,7 +544,9 @@ def _proposal_log_prob(catalog: PolarizationPowerCatalog) -> jax.Array:
 
     kwargs = catalog.population_model_kwargs
     grid = jnp.linspace(
-        float(kwargs["z_min"]), float(kwargs["z_max"]), int(kwargs["n_grid"])
+        float(kwargs["minimum_redshift"]),
+        float(kwargs["maximum_redshift"]),
+        int(kwargs["n_grid"]),
     )
     redshift = jnp.asarray(catalog.source_parameters["redshift"])
     _, _, md_logprob = reference_merger_rate_distance_and_logprob(
@@ -566,7 +568,10 @@ def _proposal_log_prob(catalog: PolarizationPowerCatalog) -> jax.Array:
     return (
         jnp.logaddexp(
             jnp.log1p(-epsilon) + redshift_logprob,
-            jnp.log(epsilon) - jnp.log(float(kwargs["z_max"]) - float(kwargs["z_min"])),
+            jnp.log(epsilon)
+            - jnp.log(
+                float(kwargs["maximum_redshift"]) - float(kwargs["minimum_redshift"])
+            ),
         )
         + mass_logprob
     )
@@ -720,8 +725,8 @@ def test_the_proposals_density_factors_reach_the_bound_weights_unchanged(
         # the grid -- and with it the stored distances -- unchanged.
         model_kwargs={
             **GENERATION_KWARGS,
-            "z_min": grid.minimum_redshift,
-            "z_max": grid.maximum_redshift,
+            "minimum_redshift": grid.minimum_redshift,
+            "maximum_redshift": grid.maximum_redshift,
         },
         density_sites=("redshift",),
     )

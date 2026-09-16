@@ -123,12 +123,13 @@ class CatalogDefinition(BaseModel):
     @model_validator(mode="after")
     def _validate_redshift_window(self) -> CatalogDefinition:
         kwargs = self.population.kwargs
-        window = ("z_min", "z_max")
+        window = ("minimum_redshift", "maximum_redshift")
         if all(name in kwargs for name in window) and not float(
-            kwargs["z_min"]
-        ) < float(kwargs["z_max"]):
+            kwargs["minimum_redshift"]
+        ) < float(kwargs["maximum_redshift"]):
             raise ValueError(
-                "population.kwargs.z_min must be less than population.kwargs.z_max"
+                "population.kwargs.minimum_redshift must be less than "
+                "population.kwargs.maximum_redshift"
             )
         return self
 
@@ -267,8 +268,8 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
                 config.analysis.population_model,
                 label=f"{label} analysis.population_model",
                 kwargs={
-                    "z_min": grid.minimum_redshift,
-                    "z_max": grid.maximum_redshift,
+                    "minimum_redshift": grid.minimum_redshift,
+                    "maximum_redshift": grid.maximum_redshift,
                     "n_grid": grid.n_grid,
                 },
                 requires_merger_rate=True,

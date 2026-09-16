@@ -228,13 +228,17 @@ def _declare_bns_madau_dickinson(
 
 
 def _redshift(
-    params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
+    params: Mapping[str, ArrayLike],
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
 ) -> tuple[jax.Array, RedshiftDistribution]:
     """Draw (or accept) the redshift and return it with its distribution."""
     redshift_distribution = MadauDickinsonRedshiftDistribution(
         params=params,
-        minimum_redshift=z_min,
-        maximum_redshift=z_max,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
         n_grid=n_grid,
     )
     redshift = numpyro.sample("redshift", redshift_distribution)
@@ -242,7 +246,11 @@ def _redshift(
 
 
 def madau_dickinson_total_merger_rate(
-    params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
+    params: Mapping[str, ArrayLike],
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
 ) -> jax.Array:
     r"""Observer-frame total merger rate under the Madau-Dickinson rate shape.
 
@@ -262,27 +270,34 @@ def madau_dickinson_total_merger_rate(
         )
     redshift_distribution = MadauDickinsonRedshiftDistribution(
         params=params,
-        minimum_redshift=z_min,
-        maximum_redshift=z_max,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
         n_grid=n_grid,
     )
     return redshift_distribution.total_merger_rate()
 
 
 def bns_md_cosmological(
-    params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
+    params: Mapping[str, ArrayLike],
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
 ) -> dict[str, jax.Array]:
     r"""BNS sources on a Madau-Dickinson redshift law, with standard GW propagation.
 
     ``params`` must carry ``H0``, ``Omega_m``, ``gamma``, ``kappa`` and
-    ``z_peak``. ``z_min``, ``z_max`` and ``n_grid`` describe the grid the
-    cosmology integrals and the redshift normalization run on; they are
-    construction kwargs, bound once and serialized with the catalog. The
-    ``bns_md_cosmological`` population pairs it with
+    ``z_peak``. ``minimum_redshift``, ``maximum_redshift`` and ``n_grid``
+    describe the grid the cosmology integrals and the redshift normalization
+    run on; they are construction kwargs, bound once and serialized with the
+    catalog. The ``bns_md_cosmological`` population pairs it with
     :func:`madau_dickinson_total_merger_rate`.
     """
     redshift, redshift_distribution = _redshift(
-        params, z_min=z_min, z_max=z_max, n_grid=n_grid
+        params,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        n_grid=n_grid,
     )
     return _declare_bns_madau_dickinson(
         params,
@@ -294,8 +309,8 @@ def bns_md_cosmological(
 def bns_md_uniform_mixture(
     params: Mapping[str, ArrayLike],
     *,
-    z_min: float,
-    z_max: float,
+    minimum_redshift: float,
+    maximum_redshift: float,
     n_grid: int,
     uniform_mixing_fraction: float,
 ) -> dict[str, jax.Array]:
@@ -318,15 +333,15 @@ def bns_md_uniform_mixture(
         )
     redshift_distribution = MadauDickinsonRedshiftDistribution(
         params=params,
-        minimum_redshift=z_min,
-        maximum_redshift=z_max,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
         n_grid=n_grid,
     )
     mixture = dist.MixtureGeneral(
         dist.Categorical(
             probs=jnp.array([1.0 - uniform_mixing_fraction, uniform_mixing_fraction])
         ),
-        [redshift_distribution, dist.Uniform(z_min, z_max)],
+        [redshift_distribution, dist.Uniform(minimum_redshift, maximum_redshift)],
         support=redshift_distribution.support,
     )
     redshift = jnp.asarray(numpyro.sample("redshift", mixture))
@@ -338,7 +353,11 @@ def bns_md_uniform_mixture(
 
 
 def bns_md_modified_propagation(
-    params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
+    params: Mapping[str, ArrayLike],
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
 ) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_cosmological`, with a modified GW propagation distance.
 
@@ -356,7 +375,10 @@ def bns_md_modified_propagation(
     reduces to :func:`bns_md_cosmological` bit-for-bit.
     """
     redshift, redshift_distribution = _redshift(
-        params, z_min=z_min, z_max=z_max, n_grid=n_grid
+        params,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        n_grid=n_grid,
     )
     return _declare_bns_madau_dickinson(
         params,
@@ -367,7 +389,11 @@ def bns_md_modified_propagation(
 
 
 def bns_md_gaussian_cosmological(
-    params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
+    params: Mapping[str, ArrayLike],
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
 ) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_cosmological`, with i.i.d. Gaussian component masses.
 
@@ -380,7 +406,10 @@ def bns_md_gaussian_cosmological(
     uniform triangle whose edges are a hard constraint on the hyperparameters.
     """
     redshift, redshift_distribution = _redshift(
-        params, z_min=z_min, z_max=z_max, n_grid=n_grid
+        params,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        n_grid=n_grid,
     )
     return _declare_bns_madau_dickinson(
         params,
@@ -393,8 +422,8 @@ def bns_md_gaussian_cosmological(
 def bns_md_gaussian_uniform_mixture(
     params: Mapping[str, ArrayLike],
     *,
-    z_min: float,
-    z_max: float,
+    minimum_redshift: float,
+    maximum_redshift: float,
     n_grid: int,
     uniform_mixing_fraction: float,
 ) -> dict[str, jax.Array]:
@@ -409,15 +438,15 @@ def bns_md_gaussian_uniform_mixture(
         )
     redshift_distribution = MadauDickinsonRedshiftDistribution(
         params=params,
-        minimum_redshift=z_min,
-        maximum_redshift=z_max,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
         n_grid=n_grid,
     )
     mixture = dist.MixtureGeneral(
         dist.Categorical(
             probs=jnp.array([1.0 - uniform_mixing_fraction, uniform_mixing_fraction])
         ),
-        [redshift_distribution, dist.Uniform(z_min, z_max)],
+        [redshift_distribution, dist.Uniform(minimum_redshift, maximum_redshift)],
         support=redshift_distribution.support,
     )
     redshift = jnp.asarray(numpyro.sample("redshift", mixture))
@@ -430,7 +459,11 @@ def bns_md_gaussian_uniform_mixture(
 
 
 def bns_md_gaussian_modified_propagation(
-    params: Mapping[str, ArrayLike], *, z_min: float, z_max: float, n_grid: int
+    params: Mapping[str, ArrayLike],
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
 ) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_modified_propagation`, with i.i.d. Gaussian component masses.
 
@@ -439,7 +472,10 @@ def bns_md_gaussian_modified_propagation(
     :func:`bns_md_gaussian_cosmological` bit-for-bit.
     """
     redshift, redshift_distribution = _redshift(
-        params, z_min=z_min, z_max=z_max, n_grid=n_grid
+        params,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        n_grid=n_grid,
     )
     return _declare_bns_madau_dickinson(
         params,
@@ -486,17 +522,20 @@ def _guard_mixture_population(
 
 @register_population("bns_md_cosmological")
 def _bns_md_cosmological_population(
-    *, z_min: float, z_max: float, n_grid: int
+    *, minimum_redshift: float, maximum_redshift: float, n_grid: int
 ) -> Population:
     """:func:`bns_md_cosmological` with its Madau-Dickinson rate."""
     return _madau_dickinson_population(
-        bns_md_cosmological, z_min=z_min, z_max=z_max, n_grid=n_grid
+        bns_md_cosmological,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        n_grid=n_grid,
     )
 
 
 @register_population("bns_md_modified_propagation")
 def _bns_md_modified_propagation_population(
-    *, z_min: float, z_max: float, n_grid: int
+    *, minimum_redshift: float, maximum_redshift: float, n_grid: int
 ) -> Population:
     """:func:`bns_md_modified_propagation` with its Madau-Dickinson rate.
 
@@ -505,39 +544,52 @@ def _bns_md_modified_propagation_population(
     one :func:`bns_md_cosmological` pairs with.
     """
     return _madau_dickinson_population(
-        bns_md_modified_propagation, z_min=z_min, z_max=z_max, n_grid=n_grid
+        bns_md_modified_propagation,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        n_grid=n_grid,
     )
 
 
 @register_population("bns_md_gaussian_cosmological")
 def _bns_md_gaussian_cosmological_population(
-    *, z_min: float, z_max: float, n_grid: int
+    *, minimum_redshift: float, maximum_redshift: float, n_grid: int
 ) -> Population:
     """:func:`bns_md_gaussian_cosmological` with its Madau-Dickinson rate."""
     return _madau_dickinson_population(
-        bns_md_gaussian_cosmological, z_min=z_min, z_max=z_max, n_grid=n_grid
+        bns_md_gaussian_cosmological,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        n_grid=n_grid,
     )
 
 
 @register_population("bns_md_gaussian_modified_propagation")
 def _bns_md_gaussian_modified_propagation_population(
-    *, z_min: float, z_max: float, n_grid: int
+    *, minimum_redshift: float, maximum_redshift: float, n_grid: int
 ) -> Population:
     """:func:`bns_md_gaussian_modified_propagation` with its Madau-Dickinson rate."""
     return _madau_dickinson_population(
-        bns_md_gaussian_modified_propagation, z_min=z_min, z_max=z_max, n_grid=n_grid
+        bns_md_gaussian_modified_propagation,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        n_grid=n_grid,
     )
 
 
 @register_population("bns_md_uniform_mixture")
 def _bns_md_uniform_mixture_population(
-    *, z_min: float, z_max: float, n_grid: int, uniform_mixing_fraction: float
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
+    uniform_mixing_fraction: float,
 ) -> Population:
     """:func:`bns_md_uniform_mixture` as a proposal density, with no merger rate."""
     return _guard_mixture_population(
         bns_md_uniform_mixture,
-        z_min=z_min,
-        z_max=z_max,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
         n_grid=n_grid,
         uniform_mixing_fraction=uniform_mixing_fraction,
     )
@@ -545,13 +597,17 @@ def _bns_md_uniform_mixture_population(
 
 @register_population("bns_md_gaussian_uniform_mixture")
 def _bns_md_gaussian_uniform_mixture_population(
-    *, z_min: float, z_max: float, n_grid: int, uniform_mixing_fraction: float
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
+    uniform_mixing_fraction: float,
 ) -> Population:
     """:func:`bns_md_gaussian_uniform_mixture` as a proposal, with no merger rate."""
     return _guard_mixture_population(
         bns_md_gaussian_uniform_mixture,
-        z_min=z_min,
-        z_max=z_max,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
         n_grid=n_grid,
         uniform_mixing_fraction=uniform_mixing_fraction,
     )

@@ -46,7 +46,11 @@ def _catalog(**overrides: Any) -> SpectralDensityCatalog:
         "waveform_metadata": waveform,
         "_population": PopulationRecord(
             model_name="bns_md_cosmological",
-            model_kwargs={"z_min": 0.1, "z_max": 10.0, "n_grid": 32},
+            model_kwargs={
+                "minimum_redshift": 0.1,
+                "maximum_redshift": 10.0,
+                "n_grid": 32,
+            },
             density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
             seed=7,
         ),
@@ -66,8 +70,8 @@ def test_round_trip_preserves_spectra_and_provenance(tmp_path: Path) -> None:
         assert set(handle) == set(SPECTRAL_DENSITY_DATASETS)
         assert json.loads(handle.attrs["population_model_kwargs"]) == {
             "n_grid": 32,
-            "z_max": 10.0,
-            "z_min": 0.1,
+            "maximum_redshift": 10.0,
+            "minimum_redshift": 0.1,
         }
         assert json.loads(handle.attrs["source_parameter_names"]) == [
             "H0",

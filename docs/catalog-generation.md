@@ -108,7 +108,7 @@ from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.utils.sampling import evaluate_sources, sample_sources
 
 source_model, merger_rate_fn = build_population(
-    "bns_md_cosmological", z_min=0.0, z_max=20.0, n_grid=4096
+    "bns_md_cosmological", minimum_redshift=0.0, maximum_redshift=20.0, n_grid=4096
 )
 
 sources = sample_sources(source_model, key, params, num_samples=1024)
@@ -251,7 +251,7 @@ written once at generation time:
 
 ```text
 population_model         = "bns_md_cosmological"
-population_model_kwargs  = '{"n_grid": 4096, "z_max": 20.0, "z_min": 0.0}'
+population_model_kwargs  = '{"n_grid": 4096, "maximum_redshift": 20.0, "minimum_redshift": 0.0}'
 population_params        = '{"H0": 67.66, "Omega_m": 0.3096, "gamma": 1.42,
                              "kappa": 4.62, "local_merger_rate": 770.0,
                              "z_peak": 1.84}'
@@ -349,7 +349,7 @@ window is narrower — `minimum_redshift = 0.3` in
 baked into the catalog: it depends on a truncation the run chooses, not on
 anything generation knows.
 
-`PolarizationPowerCatalog.restrict_redshift(z_min, z_max)` narrows both halves
+`PolarizationPowerCatalog.restrict_redshift(minimum_redshift, maximum_redshift)` narrows both halves
 together, and that is the whole reason it is one method. Dropping samples without narrowing
 the recorded model would leave the density normalized over a window the samples
 no longer span, and every importance weight would be off by that

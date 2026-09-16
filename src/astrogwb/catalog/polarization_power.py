@@ -48,7 +48,7 @@ REDSHIFT_SITE = "redshift"
 #: the window changes the *normalization* of the generating density, so the
 #: arrays and the model kwargs have to move together or the recorded density
 #: stops describing the samples.
-REDSHIFT_WINDOW_KWARGS = ("z_min", "z_max")
+REDSHIFT_WINDOW_KWARGS = ("minimum_redshift", "maximum_redshift")
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,7 +251,9 @@ class PolarizationPowerCatalog:
     # ----------------------------------------------------------------- #
     # Transformations
     # ----------------------------------------------------------------- #
-    def restrict_redshift(self, z_min: float, z_max: float) -> Self:
+    def restrict_redshift(
+        self, minimum_redshift: float, maximum_redshift: float
+    ) -> Self:
         """Restrict to sources inside a redshift window, narrowing the population.
 
         Both halves move together, which is the whole reason this is one
@@ -271,21 +273,23 @@ class PolarizationPowerCatalog:
                 f"{missing} construction setting(s), so its redshift window cannot "
                 "be narrowed"
             )
-        generated_min = float(model_kwargs["z_min"])
-        generated_max = float(model_kwargs["z_max"])
-        if not generated_min <= z_min < z_max <= generated_max:
+        generated_min = float(model_kwargs["minimum_redshift"])
+        generated_max = float(model_kwargs["maximum_redshift"])
+        if not generated_min <= minimum_redshift < maximum_redshift <= generated_max:
             raise ValueError(
-                f"analysis redshift support [{z_min:.4g}, {z_max:.4g}] must lie "
-                f"within the catalog generation support [{generated_min:.4g}, "
-                f"{generated_max:.4g}]"
+                f"analysis redshift support [{minimum_redshift:.4g}, "
+                f"{maximum_redshift:.4g}] must lie within the catalog generation "
+                f"support [{generated_min:.4g}, {generated_max:.4g}]"
             )
 
         redshift = self.source_parameters[REDSHIFT_SITE]
-        keep = np.flatnonzero((redshift >= z_min) & (redshift <= z_max))
+        keep = np.flatnonzero(
+            (redshift >= minimum_redshift) & (redshift <= maximum_redshift)
+        )
         if keep.size == 0:
             raise ValueError(
                 f"catalog has no samples in the "
-                f"redshift window [{z_min:.4g}, {z_max:.4g}]"
+                f"redshift window [{minimum_redshift:.4g}, {maximum_redshift:.4g}]"
             )
         return replace(
             self,
@@ -297,8 +301,8 @@ class PolarizationPowerCatalog:
                 self._population,
                 model_kwargs={
                     **model_kwargs,
-                    "z_min": float(z_min),
-                    "z_max": float(z_max),
+                    "minimum_redshift": float(minimum_redshift),
+                    "maximum_redshift": float(maximum_redshift),
                 },
             ),
         )

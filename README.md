@@ -67,7 +67,7 @@ from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
-model_kwargs = {"z_min": 0.0, "z_max": 20.0, "n_grid": 4096}
+model_kwargs = {"minimum_redshift": 0.0, "maximum_redshift": 20.0, "n_grid": 4096}
 params = {
     "H0": 67.66,
     "Omega_m": 0.3096,

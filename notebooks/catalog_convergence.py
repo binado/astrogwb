@@ -231,8 +231,8 @@ MAXIMUM_COMPONENT_MASS = 2.5
 #: generated file, so a cached catalog says which population produced it.
 POPULATION_MODEL = "bns_md_cosmological"
 POPULATION_MODEL_KWARGS: dict[str, float | int] = {
-    "z_min": Z_MIN,
-    "z_max": Z_MAX,
+    "minimum_redshift": Z_MIN,
+    "maximum_redshift": Z_MAX,
     "n_grid": 4096,
 }
 
@@ -243,8 +243,8 @@ def population_model_fn():
 
 
 TARGET_KWARGS: dict[str, float | int] = {
-    "z_min": Z_MIN,
-    "z_max": Z_MAX,
+    "minimum_redshift": Z_MIN,
+    "maximum_redshift": Z_MAX,
     "n_grid": N_GRID,
 }
 

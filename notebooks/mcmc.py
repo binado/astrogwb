@@ -275,8 +275,8 @@ analysis_grid = AnalysisGrid(
 # the analysis grid once: a partial hashes by identity, so rebuilding one per
 # step would retrace the whole model.
 target_kwargs = {
-    "z_min": minimum_redshift,
-    "z_max": maximum_redshift,
+    "minimum_redshift": minimum_redshift,
+    "maximum_redshift": maximum_redshift,
     "n_grid": n_grid,
 }
 target = build_population("bns_md_modified_propagation", **target_kwargs)

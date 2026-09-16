@@ -15,7 +15,7 @@ from astrogwb.populations.record import (
     SEED_ATTR,
 )
 
-MODEL_KWARGS = {"z_min": 0.1, "z_max": 10.0, "n_grid": 32}
+MODEL_KWARGS = {"minimum_redshift": 0.1, "maximum_redshift": 10.0, "n_grid": 32}
 DENSITY_SITES = ("redshift", "source_frame_mass_1", "source_frame_mass_2")
 
 
@@ -36,9 +36,11 @@ def test_attrs_round_trip_preserves_every_field() -> None:
 
 
 def test_to_attrs_sorts_mapping_keys_so_a_file_is_reproducible() -> None:
-    attrs = _record(model_kwargs={"z_max": 10.0, "z_min": 0.1}).to_attrs()
+    attrs = _record(
+        model_kwargs={"maximum_redshift": 10.0, "minimum_redshift": 0.1}
+    ).to_attrs()
     assert attrs[MODEL_KWARGS_ATTR] == json.dumps(
-        {"z_min": 0.1, "z_max": 10.0}, sort_keys=True
+        {"minimum_redshift": 0.1, "maximum_redshift": 10.0}, sort_keys=True
     )
     assert attrs[DENSITY_SITES_ATTR] == json.dumps(list(DENSITY_SITES))
     assert attrs[MODEL_NAME_ATTR] == "bns_md_cosmological"
@@ -46,7 +48,7 @@ def test_to_attrs_sorts_mapping_keys_so_a_file_is_reproducible() -> None:
 
 
 def test_density_sites_and_kwargs_are_normalized() -> None:
-    record = _record(density_sites=["redshift"], model_kwargs={"z_min": 0.1})
+    record = _record(density_sites=["redshift"], model_kwargs={"minimum_redshift": 0.1})
     assert record.density_sites == ("redshift",)
     assert isinstance(record.model_kwargs, dict)
 

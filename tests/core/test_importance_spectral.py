@@ -70,7 +70,7 @@ OFF_FIDUCIALS = {
 OFF_POPULATION_PARAMS = {
     name: value for name, value in OFF_FIDUCIALS.items() if name not in {"xi_0", "xi_n"}
 }
-MODEL_KWARGS = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
+MODEL_KWARGS = {"minimum_redshift": Z_MIN, "maximum_redshift": Z_MAX, "n_grid": N_GRID}
 
 
 def _generating_model() -> SourceFn:

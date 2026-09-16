@@ -113,14 +113,20 @@ def make_redshift_grid(n_grid: int = N_GRID) -> jax.Array:
 def mock_population(n_grid: int = N_GRID) -> Population:
     """The generating population: Madau-Dickinson, standard propagation."""
     return build_population(
-        "bns_md_cosmological", z_min=Z_MIN, z_max=Z_MAX, n_grid=n_grid
+        "bns_md_cosmological",
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=n_grid,
     )
 
 
 def mock_target_population(n_grid: int = N_GRID) -> Population:
     """The target population the mock catalog is reweighted to."""
     return build_population(
-        "bns_md_modified_propagation", z_min=Z_MIN, z_max=Z_MAX, n_grid=n_grid
+        "bns_md_modified_propagation",
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=n_grid,
     )
 
 
@@ -162,7 +168,11 @@ def mock_catalog(
         source_parameters,
         generator=generator,
         model_name="bns_md_cosmological",
-        model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
+        model_kwargs={
+            "minimum_redshift": Z_MIN,
+            "maximum_redshift": Z_MAX,
+            "n_grid": N_GRID,
+        },
         fiducials=POPULATION_PARAMS,
         density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
         seed=MOCK_POPULATION_SEED,
@@ -313,7 +323,11 @@ def build_synthetic_importance(
         waveform_metadata=generator,
         _population=PopulationRecord(
             model_name="bns_md_cosmological",
-            model_kwargs={"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID},
+            model_kwargs={
+                "minimum_redshift": Z_MIN,
+                "maximum_redshift": Z_MAX,
+                "n_grid": N_GRID,
+            },
             density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
             seed=MOCK_POPULATION_SEED,
         ),

@@ -29,8 +29,8 @@ seed = 41
 model = "{model}"
 
 [population.kwargs]
-z_min = 0.0
-z_max = 20.0
+minimum_redshift = 0.0
+maximum_redshift = 20.0
 n_grid = 256
 {extra_kwargs}
 
@@ -137,8 +137,8 @@ def test_generation_produces_a_catalog_that_describes_itself(
     assert catalog.seed == 41
     assert catalog.population_model_name == "bns_md_cosmological"
     assert catalog.population_model_kwargs == {
-        "z_min": 0.0,
-        "z_max": 20.0,
+        "minimum_redshift": 0.0,
+        "maximum_redshift": 20.0,
         "n_grid": 256,
     }
     assert catalog.fiducials["local_merger_rate"] == 770.0

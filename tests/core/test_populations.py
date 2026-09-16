@@ -153,13 +153,19 @@ MASS_SITES = ("source_frame_mass_1", "source_frame_mass_2")
 
 def _gaussian_population_model() -> SourceFn:
     return build_population(
-        "bns_md_gaussian_cosmological", z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID
+        "bns_md_gaussian_cosmological",
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_GRID,
     ).source_model
 
 
 def _gaussian_target_model() -> SourceFn:
     return build_population(
-        "bns_md_gaussian_modified_propagation", z_min=Z_MIN, z_max=Z_MAX, n_grid=N_GRID
+        "bns_md_gaussian_modified_propagation",
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_GRID,
     ).source_model
 
 
@@ -184,7 +190,7 @@ def reference(params: dict[str, float]) -> tuple[jax.Array, jax.Array, jax.Array
 # --------------------------------------------------------------------------- #
 # Registry
 # --------------------------------------------------------------------------- #
-WINDOW = {"z_min": Z_MIN, "z_max": Z_MAX, "n_grid": N_GRID}
+WINDOW = {"minimum_redshift": Z_MIN, "maximum_redshift": Z_MAX, "n_grid": N_GRID}
 
 #: Every shipped population, its source declaration, and whether it declares a
 #: physical merger rate. The guard mixtures do not: the Madau-Dickinson total
@@ -265,7 +271,9 @@ def test_unknown_population_names_list_the_known_set() -> None:
 
 
 def test_registering_a_name_twice_is_rejected() -> None:
-    def factory(*, z_min: float, z_max: float, n_grid: int) -> Population:
+    def factory(
+        *, minimum_redshift: float, maximum_redshift: float, n_grid: int
+    ) -> Population:
         raise AssertionError("never called")
 
     with pytest.raises(ValueError, match="already registered"):
@@ -511,8 +519,8 @@ def _redshift_log_density(
 def _uniform_mixture_model(uniform_mixing_fraction: float) -> SourceFn:
     return build_population(
         "bns_md_uniform_mixture",
-        z_min=Z_MIN,
-        z_max=Z_MAX,
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
         n_grid=N_GRID,
         uniform_mixing_fraction=uniform_mixing_fraction,
     ).source_model
@@ -677,8 +685,8 @@ def test_sampling_and_derivation_are_isolated_without_jit() -> None:
 def _gaussian_mixture_model(uniform_mixing_fraction: float) -> SourceFn:
     return build_population(
         "bns_md_gaussian_uniform_mixture",
-        z_min=Z_MIN,
-        z_max=Z_MAX,
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
         n_grid=N_GRID,
         uniform_mixing_fraction=uniform_mixing_fraction,
     ).source_model

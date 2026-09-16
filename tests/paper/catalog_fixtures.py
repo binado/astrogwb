@@ -21,8 +21,8 @@ from astrogwb.waveform import PolarizationPowerGenerator
 PAPER_MODEL = "bns_md_cosmological"
 PAPER_RATE_MODEL = "madau_dickinson"
 PAPER_MODEL_KWARGS: dict[str, float | int] = {
-    "z_min": 0.0,
-    "z_max": 20.0,
+    "minimum_redshift": 0.0,
+    "maximum_redshift": 20.0,
     "n_grid": 256,
 }
 PAPER_POPULATION_PARAMS: dict[str, float] = {

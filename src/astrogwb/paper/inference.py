@@ -187,8 +187,8 @@ def _analysis_grid_kwargs(config: RunConfig) -> dict[str, float | int]:
     """The redshift window and grid a run's target callables are built on."""
     grid = config.analysis_grid
     return {
-        "z_min": grid.minimum_redshift,
-        "z_max": grid.maximum_redshift,
+        "minimum_redshift": grid.minimum_redshift,
+        "maximum_redshift": grid.maximum_redshift,
         "n_grid": grid.n_grid,
     }
 
