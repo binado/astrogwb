@@ -29,7 +29,7 @@ from jax.typing import ArrayLike
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.spectral import build_importance_spectrum
-from astrogwb.metadata import PopulationMetadata
+from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import (
     MergerRateFn,
     Population,
@@ -216,13 +216,15 @@ def build_mock_catalog(
     return mock_catalog(
         parameters,
         generator=AnalyticInspiralGenerator(
-            alpha=ISCO_ALPHA,
-            approximant="AnalyticInspiral",
-            minimum_frequency=f_min,
-            maximum_frequency=f_max,
-            reference_frequency=f_min,
-            sampling_frequency=2.0 * f_max,
-            frequency_resolution=frequency_resolution,
+            WaveformMetadata(
+                alpha=ISCO_ALPHA,
+                approximant="AnalyticInspiral",
+                minimum_frequency=f_min,
+                maximum_frequency=f_max,
+                reference_frequency=f_min,
+                sampling_frequency=2.0 * f_max,
+                frequency_resolution=frequency_resolution,
+            )
         ),
     )
 
@@ -308,13 +310,15 @@ def build_synthetic_importance(
     # never used by anything reweighting this catalog.
     num_frequencies = int(jnp.shape(polarization_power)[0])
     generator = AnalyticInspiralGenerator(
-        alpha=ISCO_ALPHA,
-        approximant="AnalyticInspiral",
-        minimum_frequency=F_MIN,
-        maximum_frequency=F_MIN * num_frequencies,
-        reference_frequency=F_MIN,
-        sampling_frequency=2.0 * F_MAX,
-        frequency_resolution=F_MIN,
+        WaveformMetadata(
+            alpha=ISCO_ALPHA,
+            approximant="AnalyticInspiral",
+            minimum_frequency=F_MIN,
+            maximum_frequency=F_MIN * num_frequencies,
+            reference_frequency=F_MIN,
+            sampling_frequency=2.0 * F_MAX,
+            frequency_resolution=F_MIN,
+        )
     )
     catalog = PolarizationPowerCatalog(
         source_parameters={
@@ -322,16 +326,22 @@ def build_synthetic_importance(
         },
         polarization_power=np.asarray(polarization_power),
         frequencies=np.asarray(generator.frequencies),
-        waveform_metadata=generator,
-        _population=PopulationMetadata(
-            model_name="bns_md_cosmological",
-            model_kwargs={
-                "minimum_redshift": Z_MIN,
-                "maximum_redshift": Z_MAX,
-                "n_grid": N_GRID,
-            },
-            density_sites=("redshift", "source_frame_mass_1", "source_frame_mass_2"),
-            seed=MOCK_POPULATION_SEED,
+        _metadata=CatalogMetadata(
+            waveform=generator.metadata,
+            population=PopulationMetadata(
+                model_name="bns_md_cosmological",
+                model_kwargs={
+                    "minimum_redshift": Z_MIN,
+                    "maximum_redshift": Z_MAX,
+                    "n_grid": N_GRID,
+                },
+                density_sites=(
+                    "redshift",
+                    "source_frame_mass_1",
+                    "source_frame_mass_2",
+                ),
+                seed=MOCK_POPULATION_SEED,
+            ),
         ),
         _fiducials=POPULATION_PARAMS,
     )

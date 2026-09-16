@@ -40,7 +40,7 @@ import numpy as np
 from numpyro.infer import Predictive
 
 from astrogwb.catalog import SpectralDensityCatalog
-from astrogwb.metadata import PopulationMetadata
+from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     build_population,
@@ -153,12 +153,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
 
     generator = RippleGenerator(
-        approximant=args.approximant,
-        sampling_frequency=args.sampling_frequency,
-        minimum_frequency=args.minimum_frequency,
-        maximum_frequency=args.maximum_frequency,
-        reference_frequency=args.reference_frequency,
-        frequency_resolution=args.frequency_resolution,
+        WaveformMetadata(
+            approximant=args.approximant,
+            sampling_frequency=args.sampling_frequency,
+            minimum_frequency=args.minimum_frequency,
+            maximum_frequency=args.maximum_frequency,
+            reference_frequency=args.reference_frequency,
+            frequency_resolution=args.frequency_resolution,
+        )
     )
 
     validate_source_model(
@@ -202,12 +204,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         n_events=n_events,
         total_merger_rate=merger_rates,
         hyperparameters=draw_hyperparameters,
-        waveform_metadata=generator,
-        _population=PopulationMetadata(
-            model_name=args.population,
-            model_kwargs=model_kwargs,
-            density_sites=DEFAULT_DENSITY_SITES,
-            seed=args.seed,
+        _metadata=CatalogMetadata(
+            waveform=generator.metadata,
+            population=PopulationMetadata(
+                model_name=args.population,
+                model_kwargs=model_kwargs,
+                density_sites=DEFAULT_DENSITY_SITES,
+                seed=args.seed,
+            ),
         ),
         n_max_sigma=args.n_max_sigma,
         observation_time=args.observation_time,

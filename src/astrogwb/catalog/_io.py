@@ -47,8 +47,12 @@ from astrogwb.catalog.polarization_power import REDSHIFT_SITE, PolarizationPower
 from astrogwb.catalog.spectral_density import (
     SpectralDensityCatalog,
 )
-from astrogwb.metadata import POPULATION_ATTRS, PopulationMetadata
-from astrogwb.waveform import PolarizationPowerGenerator
+from astrogwb.metadata import (
+    POPULATION_ATTRS,
+    CatalogMetadata,
+    PopulationMetadata,
+    WaveformMetadata,
+)
 
 __all__ = [
     "CATALOG_FORMAT_NAME",
@@ -135,8 +139,10 @@ def load_polarization_power_catalog[C: PolarizationPowerCatalog](
             ),
             polarization_power=np.asarray(handle["polarization_power"]),
             frequencies=np.asarray(handle["frequency"]),
-            waveform_metadata=PolarizationPowerGenerator.from_attrs(attrs, label=label),
-            _population=population,
+            _metadata=CatalogMetadata(
+                waveform=WaveformMetadata.from_attrs(attrs, label=label),
+                population=population,
+            ),
             _fiducials={
                 name: float(value)
                 for name, value in json_object_attr(
@@ -162,7 +168,7 @@ def validate_catalog_file(handle: h5py.File | h5py.Group, *, label: str) -> None
     frequency = handle["frequency"]
     if frequency.ndim != 1:
         raise ValueError(f"{label}: frequency dataset must be one-dimensional")
-    PolarizationPowerGenerator.from_attrs(decoded_attrs(handle), label=label)
+    WaveformMetadata.from_attrs(decoded_attrs(handle), label=label)
     power = handle["polarization_power"]
     if power.ndim != 2 or power.shape[0] != frequency.shape[0]:
         raise ValueError(
@@ -281,8 +287,10 @@ def load_spectral_density_catalog[C: SpectralDensityCatalog](
             hyperparameters=unstack_columns(
                 np.asarray(handle["hyperparameters"]), names
             ),
-            waveform_metadata=PolarizationPowerGenerator.from_attrs(attrs, label=label),
-            _population=population,
+            _metadata=CatalogMetadata(
+                waveform=WaveformMetadata.from_attrs(attrs, label=label),
+                population=population,
+            ),
             n_max_sigma=float(attrs[N_MAX_SIGMA_ATTR]),
             observation_time=float(attrs[OBSERVATION_TIME_ATTR]),
         )
@@ -301,7 +309,7 @@ def validate_spectral_density_file(
         domain=DOMAIN_FREQUENCY,
     )
     require_datasets(handle, SPECTRAL_DENSITY_DATASETS, label=label)
-    PolarizationPowerGenerator.from_attrs(decoded_attrs(handle), label=label)
+    WaveformMetadata.from_attrs(decoded_attrs(handle), label=label)
     require_attrs(
         handle.attrs,
         REQUIRED_SPECTRAL_DENSITY_ATTRS,

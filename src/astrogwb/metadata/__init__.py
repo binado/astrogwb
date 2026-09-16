@@ -20,6 +20,7 @@ bodies, so nothing here imports JAX at module scope.
 ``tests/core/test_metadata_imports.py`` asserts that directly.
 """
 
+from astrogwb.metadata.catalog import CatalogMetadata
 from astrogwb.metadata.population import (
     DENSITY_SITES_ATTR,
     MODEL_KWARGS_ATTR,
@@ -28,6 +29,7 @@ from astrogwb.metadata.population import (
     SEED_ATTR,
     PopulationMetadata,
 )
+from astrogwb.metadata.waveform import WAVEFORM_ATTRS, WaveformMetadata
 
 __all__ = [
     "DENSITY_SITES_ATTR",
@@ -35,5 +37,8 @@ __all__ = [
     "MODEL_NAME_ATTR",
     "POPULATION_ATTRS",
     "SEED_ATTR",
+    "WAVEFORM_ATTRS",
+    "CatalogMetadata",
     "PopulationMetadata",
+    "WaveformMetadata",
 ]

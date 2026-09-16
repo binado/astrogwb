@@ -33,7 +33,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.frequency import uniform_grid_spacing
-from astrogwb.metadata import PopulationMetadata
+from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import Population
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -68,8 +68,7 @@ class PolarizationPowerCatalog:
     source_parameters: Mapping[str, NDArray[Any]]
     polarization_power: NDArray[Any]
     frequencies: NDArray[np.floating[Any]]
-    waveform_metadata: PolarizationPowerGenerator
-    _population: PopulationMetadata
+    _metadata: CatalogMetadata
     _fiducials: Mapping[str, float]
 
     def __post_init__(self) -> None:
@@ -173,8 +172,9 @@ class PolarizationPowerCatalog:
             source_parameters=parameters,
             polarization_power=np.asarray(power),
             frequencies=np.asarray(frequencies),
-            waveform_metadata=generator,
-            _population=population,
+            _metadata=CatalogMetadata(
+                waveform=generator.metadata, population=population
+            ),
             _fiducials=fiducials,
         )
 
@@ -184,22 +184,27 @@ class PolarizationPowerCatalog:
     @property
     def population(self) -> PopulationMetadata:
         """The population declaration this catalog was drawn from."""
-        return self._population
+        return self._metadata.population
+
+    @property
+    def waveform_metadata(self) -> WaveformMetadata:
+        """The waveform settings that produced this catalog."""
+        return self._metadata.waveform
 
     @property
     def seed(self) -> int:
         """The seed the population draw used."""
-        return self._population.seed
+        return self.population.seed
 
     @property
     def population_model_name(self) -> str:
         """The registry key of the population this catalog was drawn from."""
-        return self._population.model_name
+        return self.population.model_name
 
     @property
     def population_model_kwargs(self) -> Mapping[str, Any]:
         """The model's construction kwargs, as persisted."""
-        return dict(self._population.model_kwargs)
+        return dict(self.population.model_kwargs)
 
     @property
     def fiducials(self) -> Mapping[str, float]:
@@ -214,7 +219,7 @@ class PolarizationPowerCatalog:
     @property
     def density_sites(self) -> tuple[str, ...]:
         """Ordered source-density factors included in importance weighting."""
-        return self._population.density_sites
+        return self.population.density_sites
 
     def get_population(self) -> Population:
         """Reconstruct the generating population with its kwargs bound.
@@ -229,7 +234,7 @@ class PolarizationPowerCatalog:
         density that declares no physical rate. Each call builds fresh
         partials; call once and reuse the result.
         """
-        return self._population.build()
+        return self.population.build()
 
     @property
     def num_samples(self) -> int:
@@ -266,11 +271,11 @@ class PolarizationPowerCatalog:
 
         Returns a new catalog; the original is untouched.
         """
-        model_kwargs = self._population.model_kwargs
+        model_kwargs = self.population.model_kwargs
         missing = [name for name in REDSHIFT_WINDOW_KWARGS if name not in model_kwargs]
         if missing:
             raise ValueError(
-                f"population {self._population.model_name!r} takes no "
+                f"population {self.population.model_name!r} takes no "
                 f"{missing} construction setting(s), so its redshift window cannot "
                 "be narrowed"
             )
@@ -298,9 +303,12 @@ class PolarizationPowerCatalog:
                 name: values[keep] for name, values in self.source_parameters.items()
             },
             polarization_power=self.polarization_power[:, keep],
-            _population=self._population.with_model_kwargs(
-                minimum_redshift=float(minimum_redshift),
-                maximum_redshift=float(maximum_redshift),
+            _metadata=CatalogMetadata(
+                waveform=self.waveform_metadata,
+                population=self.population.with_model_kwargs(
+                    minimum_redshift=float(minimum_redshift),
+                    maximum_redshift=float(maximum_redshift),
+                ),
             ),
         )
 

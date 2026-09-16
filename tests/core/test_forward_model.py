@@ -19,6 +19,7 @@ from numpyro.infer import Predictive
 
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO, ISCO_ALPHA
 from astrogwb.gwb.spectral import inclination_averaging_factor
+from astrogwb.metadata import WaveformMetadata
 from astrogwb.sampling import gwb_forward_model, validate_source_model
 from astrogwb.sampling.forward_model import _sum_polarization_power
 from astrogwb.utils import years_to_seconds
@@ -37,13 +38,15 @@ DF = 10.0
 
 def _generator() -> AnalyticInspiralGenerator:
     generator = AnalyticInspiralGenerator(
-        alpha=ISCO_ALPHA,
-        approximant="AnalyticInspiral",
-        minimum_frequency=F_MIN,
-        maximum_frequency=F_MAX,
-        reference_frequency=F_MIN,
-        sampling_frequency=128.0,
-        frequency_resolution=DF,
+        WaveformMetadata(
+            alpha=ISCO_ALPHA,
+            approximant="AnalyticInspiral",
+            minimum_frequency=F_MIN,
+            maximum_frequency=F_MAX,
+            reference_frequency=F_MIN,
+            sampling_frequency=128.0,
+            frequency_resolution=DF,
+        )
     )
     return generator
 
@@ -55,12 +58,14 @@ def _ripple_generator() -> RippleGenerator:
     an empty-catalog spectrum can size itself without evaluating a waveform.
     """
     return RippleGenerator(
-        approximant="TaylorF2",
-        sampling_frequency=256.0,
-        minimum_frequency=20.0,
-        maximum_frequency=100.0,
-        reference_frequency=20.0,
-        frequency_resolution=4.0,
+        WaveformMetadata(
+            approximant="TaylorF2",
+            sampling_frequency=256.0,
+            minimum_frequency=20.0,
+            maximum_frequency=100.0,
+            reference_frequency=20.0,
+            frequency_resolution=4.0,
+        )
     )
 
 
@@ -588,12 +593,14 @@ def test_validate_source_model_rejects_a_mismatched_approximant() -> None:
     the whole reason this helper exists.
     """
     aligned_spin = RippleGenerator(
-        approximant="IMRPhenomXAS",
-        sampling_frequency=256.0,
-        minimum_frequency=20.0,
-        maximum_frequency=100.0,
-        reference_frequency=20.0,
-        frequency_resolution=4.0,
+        WaveformMetadata(
+            approximant="IMRPhenomXAS",
+            sampling_frequency=256.0,
+            minimum_frequency=20.0,
+            maximum_frequency=100.0,
+            reference_frequency=20.0,
+            frequency_resolution=4.0,
+        )
     )
 
     def tidal_population(params):

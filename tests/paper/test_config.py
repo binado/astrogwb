@@ -327,22 +327,22 @@ def test_waveform_generator_defaults_to_the_committed_ripple() -> None:
     generator = waveform_generator(REPO_ROOT)
 
     assert isinstance(generator, RippleGenerator)
-    assert generator.approximant == "IMRPhenomXAS_NRTidalv3"
-    assert generator.minimum_frequency == 2.0
-    assert generator.maximum_frequency == 2048.0
+    assert generator.metadata.approximant == "IMRPhenomXAS_NRTidalv3"
+    assert generator.metadata.minimum_frequency == 2.0
+    assert generator.metadata.maximum_frequency == 2048.0
 
 
 def test_waveform_generator_kwargs_select_the_analytical_inspiral() -> None:
     generator = waveform_generator(REPO_ROOT, approximant="AnalyticInspiral")
 
     assert isinstance(generator, AnalyticInspiralGenerator)
-    assert generator.approximant == "AnalyticInspiral"
-    assert generator.alpha == ISCO_ALPHA
-    assert generator.minimum_frequency == 2.0
+    assert generator.metadata.approximant == "AnalyticInspiral"
+    assert generator.metadata.alpha == ISCO_ALPHA
+    assert generator.metadata.minimum_frequency == 2.0
 
 
 def test_waveform_generator_overrides_are_validated_not_trusted() -> None:
-    """Overrides go through ``WaveformConfig``, so a bad one fails here.
+    """Overrides go through ``WaveformMetadata``, so a bad one fails here.
 
     Before the accessor shared a path with a catalog def, every keyword was
     coerced with a bare ``float()`` and an override that made no sense for the
@@ -352,9 +352,9 @@ def test_waveform_generator_overrides_are_validated_not_trusted() -> None:
         REPO_ROOT, approximant="AnalyticInspiral", alpha=0.02
     )
     assert isinstance(generator, AnalyticInspiralGenerator)
-    assert generator.alpha == 0.02
+    assert generator.metadata.alpha == 0.02
 
-    with pytest.raises(ValidationError, match="waveform.alpha is only valid"):
+    with pytest.raises(ValidationError, match="alpha is only valid"):
         waveform_generator(REPO_ROOT, alpha=0.02)
 
 

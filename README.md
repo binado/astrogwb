@@ -62,7 +62,7 @@ the declaration that produced it:
 import jax
 
 from astrogwb.catalog import PolarizationPowerCatalog
-from astrogwb.constants import ISCO_ALPHA
+from astrogwb.metadata import PopulationMetadata, WaveformMetadata
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
@@ -86,19 +86,22 @@ source_parameters = sample_sources(
 catalog = PolarizationPowerCatalog.from_generator(
     source_parameters,
     generator=AnalyticInspiralGenerator(
-        alpha=ISCO_ALPHA,
-        approximant="AnalyticInspiral",
-        minimum_frequency=2.0,
-        maximum_frequency=2048.0,
-        reference_frequency=2.0,
-        sampling_frequency=4096.0,
-        frequency_resolution=1.0,
+        WaveformMetadata(
+            approximant="AnalyticInspiral",
+            minimum_frequency=2.0,
+            maximum_frequency=2048.0,
+            reference_frequency=2.0,
+            sampling_frequency=4096.0,
+            frequency_resolution=1.0,
+        )
     ),
-    model_name="bns_md_cosmological",
-    model_kwargs=model_kwargs,
+    population=PopulationMetadata(
+        model_name="bns_md_cosmological",
+        model_kwargs=model_kwargs,
+        density_sites=DEFAULT_DENSITY_SITES,
+        seed=42,
+    ),
     fiducials=params,
-    density_sites=DEFAULT_DENSITY_SITES,
-    seed=42,
 )
 catalog.save("catalog.h5")
 ```
