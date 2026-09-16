@@ -33,7 +33,7 @@ one file per named thing, the same shape a run config has:
    catalog grid *is* the array every model is evaluated on, and a run's band
    selects bins on it with a mask rather than compressing it.
    `sampling_frequency` is the waveform backend's Nyquist, not the stored grid.
-   `approximant="analytical"` selects the closed-form inspiral, and is the only
+   `approximant="AnalyticInspiral"` selects the closed-form inspiral, and is the only
    approximant accepting the optional `alpha` key (the inspiral termination
    constant, defaulting to the Schwarzschild ISCO value); naming it alongside a
    Ripple approximant is rejected. `WaveformConfig.build()` constructs the

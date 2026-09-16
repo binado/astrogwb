@@ -86,7 +86,7 @@ def test_descriptor_attrs_round_trip_and_exclude_subclass_fields() -> None:
     the file that no reader restores.
     """
     generator = AnalyticInspiralGenerator(
-        approximant="analytical",
+        approximant="AnalyticInspiral",
         minimum_frequency=10.0,
         maximum_frequency=12.0,
         reference_frequency=10.0,

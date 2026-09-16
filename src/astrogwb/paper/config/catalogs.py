@@ -54,7 +54,18 @@ _STRICT = ConfigDict(frozen=True, extra="forbid")
 
 #: The one ``approximant`` that is not a Ripple name: it selects the
 #: closed-form inspiral, which is the only generator taking an ``alpha``.
-_ANALYTICAL_APPROXIMANT = "analytical"
+_ANALYTICAL_APPROXIMANT = "AnalyticInspiral"
+
+#: Spellings close enough to :data:`_ANALYTICAL_APPROXIMANT` to be meant as it.
+#: They are rejected by name rather than passed through, because the failure
+#: they would otherwise cause is silent: anything that is not the canonical
+#: spelling is treated as a Ripple approximant, so a near miss selects the
+#: wrong backend instead of the wrong-looking one. Checked as a deny list
+#: rather than against Ripple's own catalogue, which cannot be consulted
+#: without reaching JAX.
+_CONFUSABLE_ANALYTICAL_APPROXIMANTS = frozenset(
+    {"analytical", "analytic", "Analytic", "AnalyticalInspiral", "analytic_inspiral"}
+)
 
 
 class WaveformConfig(BaseModel):
@@ -64,7 +75,7 @@ class WaveformConfig(BaseModel):
     only ``md-taylorf2-s41-n32768`` does (the approximant). The stored band
     matches ``config/analysis/base/model.toml``'s ``[analysis]`` ``f_min`` /
     ``f_max``. ``sampling_frequency`` is the backend Nyquist, not the stored
-    grid. ``approximant="analytical"`` selects the closed-form inspiral.
+    grid. ``approximant="AnalyticInspiral"`` selects the closed-form inspiral.
 
     This is the wire format for
     :class:`~astrogwb.waveform.PolarizationPowerGenerator`, and :meth:`build`
@@ -94,7 +105,13 @@ class WaveformConfig(BaseModel):
     alpha: Annotated[float, Field(gt=0.0)] | None = None
 
     @model_validator(mode="after")
-    def _validate_alpha(self) -> WaveformConfig:
+    def _validate_approximant(self) -> WaveformConfig:
+        if self.approximant in _CONFUSABLE_ANALYTICAL_APPROXIMANTS:
+            raise ValueError(
+                f"waveform.approximant {self.approximant!r} is not a Ripple "
+                f"approximant; the closed-form inspiral is spelled "
+                f"{_ANALYTICAL_APPROXIMANT!r}"
+            )
         if self.alpha is not None and self.approximant != _ANALYTICAL_APPROXIMANT:
             raise ValueError(
                 f"waveform.alpha is only valid when "
