@@ -237,29 +237,38 @@ catalogs are not byte-identical to one another.
 One command does the whole thing — population draw, waveform generation, power
 reduction, write.
 
-Every layer is JSON, so each block is merged out of them with one `jq` filter
-and the generator is handed the blocks rather than a list of paths:
+Every layer is JSON, so the fold is one `jq` pass into a merged file, and the
+generator is handed blocks read out of it rather than a list of paths:
 
 ```bash
 layers="config/waveform.json config/population.json config/fiducials.json \
   config/catalogs/md-imrphenom-s41-n32768.json"
-merge='reduce .[] as $layer ({}; . * $layer)'
+merged=outputs/catalogs/md-imrphenom-s41-n32768.merged.json
+
+jq -s 'reduce .[] as $layer ({}; . * $layer)' $layers > "$merged"
 
 uv run --extra paper python scripts/generate_catalog.py \
   --name md-imrphenom-s41-n32768 \
-  --population "$(jq -c -s "$merge | .population" $layers)" \
-  --fiducials "$(jq -c -s "$merge | .fiducials" $layers)" \
-  --waveform "$(jq -c -s "$merge | .waveform" $layers)" \
-  --seed 41 --num-samples 32768 \
+  --population "$(jq -c .population "$merged")" \
+  --fiducials "$(jq -c .fiducials "$merged")" \
+  --waveform "$(jq -c .waveform "$merged")" \
+  --seed "$(jq -r .seed "$merged")" \
+  --num-samples "$(jq -r .num_samples "$merged")" \
   --output outputs/catalogs/md-imrphenom-s41-n32768.h5
 ```
 
 `jq`'s `*` is a recursive merge, which is `astrogwb.paper.utils.deep_merge`
 exactly; the catalog layers carry no `[priors]` block, so the shallow-merge rule
 the run path needs never applies here. `tests/paper/test_runs.py` pins the two
-merges agreeing. `rule waveform_catalog` runs exactly this, over the same files
-it declares as `input:`, reading `seed` and `num_samples` out of the merge too.
-It refuses to overwrite an existing catalog unless `--force` is passed.
+merges agreeing.
+
+The workflow splits those two commands into two rules. `merge_catalog_config`
+owns the fold and declares the layer files; `waveform_catalog` reads five keys
+out of its `temp()` output. Folding once and reading keys, rather than folding
+per flag, is the whole reason the merged file exists — it is a build
+intermediate, not an artifact, and the `.h5` records its own provenance either
+way. `waveform_catalog` refuses to overwrite an existing catalog unless
+`--force` is passed.
 
 Through the workflow, from the repository root:
 

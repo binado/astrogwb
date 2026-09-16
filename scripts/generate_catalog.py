@@ -6,14 +6,14 @@ the registered NumPyro model it names, generates frequency-domain waveforms,
 reduces them to polarization power, and writes
 ``outputs/catalogs/<catalog>.h5``.
 
-The layers are JSON, so the merge itself belongs to the caller and the
-``Snakefile`` does it in one ``jq`` pass over the same files it declares as the
-rule's ``input:``. That is a plain recursive merge -- the catalog layers carry
-no ``[priors]`` block, so the shallow-merge rule
+The layers are JSON, so the merge itself belongs to the caller. The
+``Snakefile`` gives it its own rule, ``merge_catalog_config``, which folds the
+files it declares as ``input:`` into one ``temp()`` JSON file; this script's
+caller then reads a key per block out of that. That is a plain recursive merge
+-- the catalog layers carry no ``[priors]`` block, so the shallow-merge rule
 :func:`~astrogwb.paper.config.runs._merge_run_overlay` exists for never applies
-here, and ``jq``'s ``*`` is
-:func:`~astrogwb.paper.utils.deep_merge` exactly. Validation still happens in
-one place: the blocks are handed to
+here, and ``jq``'s ``*`` is :func:`~astrogwb.paper.utils.deep_merge` exactly.
+Validation still happens in one place: the blocks are handed to
 :class:`~astrogwb.paper.config.catalogs.CatalogDefinition` whole.
 
 The population declaration is one registered name, not a graph config, and it
@@ -35,13 +35,15 @@ Usage::
 
     layers="config/waveform.json config/population.json config/fiducials.json \\
         config/catalogs/md-imrphenom-s41-n32768.json"
-    merge='reduce .[] as $layer ({}; . * $layer)'
+    merged=outputs/catalogs/md-imrphenom-s41-n32768.merged.json
+
+    jq -s 'reduce .[] as $layer ({}; . * $layer)' $layers > "$merged"
 
     uv run --extra paper python scripts/generate_catalog.py \\
         --name md-imrphenom-s41-n32768 \\
-        --population "$(jq -c -s "$merge | .population" $layers)" \\
-        --fiducials "$(jq -c -s "$merge | .fiducials" $layers)" \\
-        --waveform "$(jq -c -s "$merge | .waveform" $layers)" \\
+        --population "$(jq -c .population "$merged")" \\
+        --fiducials "$(jq -c .fiducials "$merged")" \\
+        --waveform "$(jq -c .waveform "$merged")" \\
         --seed 41 --num-samples 32768 \\
         --output outputs/catalogs/md-imrphenom-s41-n32768.h5
 """

@@ -22,10 +22,14 @@ Layers 0 and 1 together are :func:`base_config_paths`, so a caller that wants
 ``_base.toml`` is required in every experiment directory rather than optional:
 a conditional Snakemake input complicates the DAG for no gain.
 
-There is no assembled-config artifact. Every entrypoint is handed its layer
-files on argv (see :func:`add_config_arguments`) and merges them in process;
-:func:`assemble_run` is the convenience wrapper for the notebooks and for the
-validation gate, which address a run by name rather than by path.
+There is no assembled-config artifact. Every *run* entrypoint is handed its
+layer files on argv (see :func:`add_config_arguments`) and merges them in
+process; :func:`assemble_run` is the convenience wrapper for the notebooks and
+for the validation gate, which address a run by name rather than by path. The
+catalog path differs: ``scripts/generate_catalog.py`` is handed the already
+merged blocks, because the ``Snakefile`` folds the layers with ``jq`` into a
+``temp()`` file rather than in Python. That file is a build intermediate, not a
+config an entrypoint reads.
 
 **stdlib only, and deliberately so.** The ``Snakefile`` imports this module to
 build the DAG, so it must not reach pydantic, JAX, or ``astrogwb``: a

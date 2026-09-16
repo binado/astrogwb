@@ -54,9 +54,13 @@ particular draw and the density sites follow from the registered population, so
 `CatalogDefinition` supplies both during validation and holds the result as a
 `PopulationMetadata`, the same record the `.h5` persists.
 
-Every catalog layer is JSON, so `rule waveform_catalog` merges them in one `jq`
-pass over exactly the files it declares as `input:` and hands the generator the
-merged blocks. `jq`'s `*` is `deep_merge`; catalog layers carry no `[priors]`
+Every catalog layer is JSON, so the fold is `jq`, not Python. `rule
+merge_catalog_config` folds exactly the files it declares as `input:` into one
+`temp()` merged JSON, and `rule waveform_catalog` reads a key per block out of
+that and hands them to the generator. Two rules rather than one so the fold
+happens once per catalog instead of once per flag; the merged file is a build
+intermediate, not an artifact, and the layer files remain the dependency edge
+through it. `jq`'s `*` is `deep_merge`; catalog layers carry no `[priors]`
 block, so the shallow-merge rule the run path needs never applies. A test pins
 the two merges agreeing.
 
@@ -72,11 +76,13 @@ labels and savefig settings, reached through `astrogwb.paper.plotting` -- and
 is deliberately *not* a run layer. `config/waveform.json` and
 `config/population.json` are catalog layers, reached through
 `astrogwb.paper.config.waveform_generator()` / `population_model()`, and are
-likewise not run layers. There is no assembled-config artifact: a run
+likewise not run layers. No entrypoint is handed an assembled config: a run
 entrypoint takes its layers on argv as repeated `--config` flags and merges
 them in process, and `generate_catalog.py` takes the blocks `jq` merged out of
-them. Either way the workflow rule declares those same files as its `input:`,
-so the dependency edge and the data path are one list. `run_mcmc` writes the resolved
+them. The catalog path does materialize that merge as a `temp()` file, but it
+is a workflow build intermediate that no entrypoint reads as config. Either way
+the workflow rule declares the layer files as its `input:`, so the dependency
+edge and the data path are one list. `run_mcmc` writes the resolved
 config next to the chain and stamps the ordered layer paths into it.
 
 ## Coding and testing

@@ -152,6 +152,7 @@ wildcard_constraints:
 
 
 localrules:
+    merge_catalog_config,
     waveform_catalog,
     validate,
     plot_cosmological_parameters,
@@ -162,14 +163,35 @@ localrules:
     experiments,
 
 
+rule merge_catalog_config:
+    """One catalog's layers, folded once into the blocks the generator takes.
+
+    A rule rather than a shell variable so the fold happens exactly once per
+    catalog and is cached: `waveform_catalog` then reads five keys out of the
+    result, instead of re-folding all four layer files once per flag. `jq`'s
+    `*` is a recursive merge, which is `astrogwb.paper.utils.deep_merge`
+    exactly; the catalog layers carry no `[priors]` block, so the shallow-merge
+    rule the run path needs never applies here, and
+    `tests/paper/test_runs.py` pins the two merges agreeing.
+
+    `temp()` because this is a build intermediate, not an artifact: nothing
+    downstream of the generated catalog reads it, and the `.h5` records its own
+    provenance. The dependency edge on the layer files lives here now, and
+    `waveform_catalog` inherits it transitively -- editing any shared layer
+    still rebuilds every catalog.
+    """
+    input:
+        catalog_layers,
+    output:
+        temp(str(CATALOGS_DIR / "{catalog}.merged.json")),
+    params:
+        merge="reduce .[] as $layer ({}; . * $layer)",
+    shell:
+        "jq -s '{params.merge}' {input:q} > {output:q}"
+
+
 rule waveform_catalog:
     """Population draw + waveform generation, in one process.
-
-    Every layer is JSON, so each block is merged out of the same files declared
-    as `input:` with one `jq` filter. `jq`'s `*` is a recursive merge, which is
-    `astrogwb.paper.utils.deep_merge` exactly; the catalog layers carry no
-    `[priors]` block, so the shallow-merge rule the run path needs never applies
-    here. `tests/paper/test_runs.py` pins the two merges agreeing.
 
     The generator is handed the merged blocks rather than a list of paths, so
     nothing re-reads the config tree downstream. A `jq` that failed would
@@ -178,19 +200,17 @@ rule waveform_catalog:
     """
     input:
         script="scripts/generate_catalog.py",
-        config=catalog_layers,
+        merged=str(CATALOGS_DIR / "{catalog}.merged.json"),
     output:
         catalog_path("{catalog}"),
-    params:
-        merge="reduce .[] as $layer ({}; . * $layer)",
     shell:
         "uv run --extra paper python {input.script:q}"
         " --name {wildcards.catalog:q}"
-        " --population \"$(jq -c -s '{params.merge} | .population' {input.config:q})\""
-        " --fiducials \"$(jq -c -s '{params.merge} | .fiducials' {input.config:q})\""
-        " --waveform \"$(jq -c -s '{params.merge} | .waveform' {input.config:q})\""
-        " --seed \"$(jq -s '{params.merge} | .seed' {input.config:q})\""
-        " --num-samples \"$(jq -s '{params.merge} | .num_samples' {input.config:q})\""
+        " --population \"$(jq -c .population {input.merged:q})\""
+        " --fiducials \"$(jq -c .fiducials {input.merged:q})\""
+        " --waveform \"$(jq -c .waveform {input.merged:q})\""
+        " --seed \"$(jq -r .seed {input.merged:q})\""
+        " --num-samples \"$(jq -r .num_samples {input.merged:q})\""
         " --output {output:q} --force"
 
 

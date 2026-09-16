@@ -35,7 +35,7 @@ WORKFLOW_DIR = PAPER_ROOT
 
 #: Committed inputs the workflow reads. Everything else it touches is output.
 LINKED = ("Snakefile", "config", "scripts")
-CATALOG_RULES = ("waveform_catalog", "catalogs")
+CATALOG_RULES = ("merge_catalog_config", "waveform_catalog", "catalogs")
 MCMC_RULES = (
     "validate",
     "run_mcmc",
@@ -136,14 +136,14 @@ def _catalogs(tmp_path: Path, *names: str) -> Path:
 
 
 def test_catalog_rule_reads_its_config_layers_directly() -> None:
-    """One rule per catalog, and every shared block is one of its config layers.
+    """Two rules per catalog: fold the layers once, then draw from the result.
 
     The population used to be a separate graph file declared as an extra
     input. It is a registered model named by `config/population.json` now, and
     the hyperparameters come from `config/fiducials.json`, so the layer list
-    *is* the dependency edge -- there is nothing else for the rule to declare.
-    The rule merges those layers with `jq` and passes the blocks, so the paths
-    appear in `input:` while the script's argv carries JSON.
+    *is* the dependency edge. That edge now sits on `merge_catalog_config`,
+    and `waveform_catalog` inherits it through the merged file -- which is
+    what lets the fold happen once instead of once per flag.
     """
     result = _snakemake(
         "--snakefile",
@@ -179,13 +179,19 @@ def test_catalog_rule_reads_its_config_layers_directly() -> None:
     assert any(
         "scripts/generate_catalog.py" in line for line in _rule_inputs(result.stdout)
     )
-    # Each block is merged out of exactly the declared inputs by one jq
-    # filter, and the script is handed the blocks rather than the paths.
+    # The fold runs once per catalog, over exactly the declared layers, into
+    # the merged file. This is the assertion that would fail if the merge
+    # migrated back into the flags and started re-folding once each.
     layers = (
         "config/waveform.json config/population.json config/fiducials.json "
         "config/catalogs/md-imrphenom-s41-n32768.json"
     )
+    merged = "outputs/catalogs/md-imrphenom-s41-n32768.merged.json"
     merge = "reduce .[] as $layer ({}; . * $layer)"
+    assert f"jq -s '{merge}' {layers} > {merged}" in result.stdout
+    assert result.stdout.count(f"jq -s '{merge}'") == 2, "one fold per catalog"
+
+    # The generator reads keys out of that one file, never the layer tree.
     for flag, compact in (
         ("--population", True),
         ("--fiducials", True),
@@ -194,8 +200,8 @@ def test_catalog_rule_reads_its_config_layers_directly() -> None:
         ("--num-samples", False),
     ):
         key = flag.removeprefix("--").replace("-", "_")
-        jq = "jq -c -s" if compact else "jq -s"
-        assert f"{flag} \"$({jq} '{merge} | .{key}' {layers})\"" in result.stdout, flag
+        jq = "jq -c" if compact else "jq -r"
+        assert f'{flag} "$({jq} .{key} {merged})"' in result.stdout, flag
     assert "--config" not in result.stdout
     # The old base/ and defs/ split is gone: one flat directory of defs.
     assert "config/catalogs/base/" not in result.stdout
