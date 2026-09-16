@@ -43,13 +43,16 @@ scheduler and runtime logs under `logs/`.
 Filenames are the mapping, so there is no registry file:
 
 ```text
-config/catalogs/base/population.toml            the shared population declaration
-config/catalogs/defs/<name>.toml -> outputs/catalogs/<name>.h5
+config/catalogs/<name>.json      ->  outputs/catalogs/<name>.h5
+config/population.json                          [population] every catalog shares
+                                                (a catalog layer; not a run layer)
 config/fiducials.json                           fiducial value of every parameter
+                                                (a run layer AND a catalog layer:
+                                                the values a catalog is drawn at)
 config/priors.json                              prior on every parameter
 config/networks.json                            each detector network, by name
 config/waveform.json                            [waveform] every catalog shares
-                                                (catalog layer 0; not a run layer)
+                                                (a catalog layer; not a run layer)
 config/plotting.json                            LaTeX labels and savefig settings
                                                 (presentation; not a run layer)
 config/analysis/base/*.toml                     the remaining shared settings

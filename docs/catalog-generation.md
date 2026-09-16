@@ -16,18 +16,22 @@ catalog is a file.
 ## Filenames are the mapping
 
 ```text
-config/catalogs/defs/<name>.toml  ->  outputs/catalogs/<name>.h5
+config/catalogs/<name>.json  ->  outputs/catalogs/<name>.h5
 ```
 
-No registry translates between them. Adding a catalog means adding a TOML file;
+No registry translates between them. Adding a catalog means adding a JSON file;
 the `waveform_catalog` rule and the `catalogs` target pick it up by globbing.
 
-A catalog config is three layers merged in order -- shared base files, then
-one file per named thing, the same shape a run config has:
+A catalog config is four layers merged in order -- three shared files, then one
+file per named thing, the same shape a run config has. The shared three sit in
+`config/` beside the run tables rather than in a `base/` subdirectory, and they
+are named rather than globbed, because `config/priors.json`,
+`config/networks.json` and `config/plotting.json` are in that directory too and
+must not enter a catalog merge:
 
 1. `config/waveform.json` — the `[waveform]` block every catalog shares.
-   JSON so `jq` can read it; catalog layer 0, not a run layer. Only
-   `config/catalogs/defs/md-taylorf2-s41-n32768.toml` overrides anything here
+   A catalog layer, not a run layer. Only
+   `config/catalogs/md-taylorf2-s41-n32768.json` overrides anything here
    (the approximant). The stored band matches
    `config/analysis/base/model.toml`'s `[analysis]` `f_min` and `f_max`: the
    catalog grid *is* the array every model is evaluated on, and a run's band
@@ -39,62 +43,76 @@ one file per named thing, the same shape a run config has:
    Ripple approximant is rejected. `WaveformConfig.build()` constructs the
    generator, and `astrogwb.paper.config.waveform_generator()` is the same path
    for a notebook reading this file directly.
-2. `config/catalogs/base/population.toml` — the population every catalog is
-   drawn from, and the hyperparameters it is drawn at. Those hyperparameters
-   are deliberately *not* read from `config/fiducials.json`: a catalog records
-   the values it was actually drawn at, copied verbatim into the `.h5` so the
-   file is self-describing, and the two sets are not even the same (the
-   injection is drawn at GR, so it carries no `xi_0` / `xi_n`). Wiring them
-   together would also make every fiducial edit invalidate all eight
-   catalogs — GPU jobs — to redraw data that was already correct.
-3. `config/catalogs/defs/<name>.toml` — the seed, the sample count, and any
-   population or waveform override.
+2. `config/population.json` — the population every catalog is drawn from:
+   `model_name`, a key in the `astrogwb.populations` registry, and
+   `model_kwargs`, the construction settings bound into it. Those two keys are
+   exactly `PopulationMetadata`'s configurable half, so the block validates
+   straight into the record the `.h5` persists. It declares no `seed` and no
+   density sites: a seed belongs to a particular draw, and the density factors
+   follow from the registered population rather than from a file.
+3. `config/fiducials.json` — the hyperparameters the draw is made at. The same
+   table the runs initialize at, stated once. It used to be restated as a
+   `[population.params]` block here, which was an exact copy of the eight
+   fiducials a source model reads; the copy is gone. The propagation entries
+   `xi_0` / `xi_n` ride along and are inert during generation, because a source
+   model indexes `params` by name and the GR population never reads them —
+   `xi_0 = 1.0` is the value the injection is drawn at, so recording it is
+   accurate rather than misleading.
+4. `config/catalogs/<name>.json` — the seed, the sample count, and any
+   population or waveform override. Nothing else: `CatalogDefinition` is
+   `extra="forbid"`, so what each committed catalog is *for* is documented in
+   [`config/catalogs/README.md`](../config/catalogs/README.md) rather than in a
+   field that would rot separately from it.
 
-Both shared layers are declared as workflow inputs of every catalog, so editing
-either correctly invalidates all of them.
+The cost of sourcing the hyperparameters from `config/fiducials.json` is that
+editing *any* fiducial now invalidates all eight catalogs — GPU jobs — including
+an edit to the analysis-only `xi_0` / `xi_n`. That is the price of the two
+tables being one: while they were separate, keeping them in step was a manual
+two-file discipline that nothing checked. A def that wants an injection away
+from the fiducials overrides the `[fiducials]` block like any other layer, so
+the freedom the separate table provided is preserved rather than lost.
 
-The eight committed catalogs:
+All three shared layers are declared as workflow inputs of every catalog, so
+editing any of them correctly invalidates all of them.
 
-| Catalog | Population | Seed | Samples | Approximant |
-| --- | --- | ---: | ---: | --- |
-| `md-imrphenom-s41-n32768` | `bns_md_cosmological` | 41 | 32768 | `IMRPhenomXAS_NRTidalv3` |
-| `md-imrphenom-s42-n8192` | `bns_md_cosmological` | 42 | 8192 | `IMRPhenomXAS_NRTidalv3` |
-| `md-imrphenom-s42-n16384` | `bns_md_cosmological` | 42 | 16384 | `IMRPhenomXAS_NRTidalv3` |
-| `md-imrphenom-s42-n32768` | `bns_md_cosmological` | 42 | 32768 | `IMRPhenomXAS_NRTidalv3` |
-| `md-taylorf2-s41-n32768` | `bns_md_cosmological` | 41 | 32768 | `TaylorF2` |
-| `md-uniform-imrphenom-s61-n16384-eps1e-1` | `bns_md_uniform_mixture` (ε = 0.1) | 61 | 16384 | `IMRPhenomXAS_NRTidalv3` |
-| `md-uniform-imrphenom-s62-n16384-eps1e-2` | `bns_md_uniform_mixture` (ε = 0.01) | 62 | 16384 | `IMRPhenomXAS_NRTidalv3` |
-| `md-uniform-imrphenom-s63-n16384-eps1e-3` | `bns_md_uniform_mixture` (ε = 0.001) | 63 | 16384 | `IMRPhenomXAS_NRTidalv3` |
-
-Eight, not nine: `md-imrphenom-s41-n32768` serves as both the shared injection
-and `waveform-approximant/IMRPhenom`'s proposal, and the ε = 0.1 guard catalog
-serves both `astrophysical-parameters` runs and
-`variable-proposal-guard/eps1e-1`.
+The eight committed catalogs — what each is for, and which experiment needs it
+— are listed in [`config/catalogs/README.md`](../config/catalogs/README.md),
+next to the files themselves. There is one inventory, not two.
 
 `seed` and `num_samples` are catalog-level, not population-level: `s41` and
 `s42` are the *same* population drawn twice, so pushing either into the shared
-population layer would mean near-identical layer files.
+population layer would mean near-identical layer files. `CatalogDefinition`
+folds the seed into the population record during validation, which is where it
+belongs once a particular draw exists.
 
 ## The population is a registered model
 
 A def names a population by its key in the `astrogwb.populations` registry, and
 supplies the construction kwargs it takes:
 
-```toml
-num_samples = 16384
-seed = 61
-
-[population]
-model = "bns_md_uniform_mixture"
-
-[population.kwargs]
-uniform_mixing_fraction = 0.1
+```json
+{
+  "num_samples": 16384,
+  "seed": 61,
+  "population": {
+    "model_name": "bns_md_uniform_mixture",
+    "model_kwargs": {
+      "uniform_mixing_fraction": 0.1
+    }
+  }
+}
 ```
 
-The redshift window, grid resolution, and hyperparameters are inherited from
-`config/catalogs/base/population.toml`; `[population.kwargs]` is one mapping,
-deep-merged across layers and passed whole to the factory. The population
-declares its density factors and source outputs.
+The redshift window and grid resolution are inherited from
+`config/population.json` and the hyperparameters from `config/fiducials.json`;
+`model_kwargs` is one mapping, deep-merged across layers and passed whole to the
+factory. The population declares its density factors and source outputs.
+
+A def inherits every block it does not name, whether or not the population it
+names reads all of it: this one inherits `[fiducials]` whole,
+`local_merger_rate` included, even though `bns_md_uniform_mixture` declares no
+merger rate. [`config/catalogs/README.md`](../config/catalogs/README.md) says
+why that is right for a guard mixture.
 
 **A registry key, not an import path.** Registry keys change only on purpose;
 module paths move as collateral whenever a module is reorganized, so a
@@ -219,17 +237,38 @@ catalogs are not byte-identical to one another.
 One command does the whole thing — population draw, waveform generation, power
 reduction, write.
 
+Every layer is JSON, so the fold is one `jq` pass into a merged file, and the
+generator is handed blocks read out of it rather than a list of paths:
+
 ```bash
+layers="config/waveform.json config/population.json config/fiducials.json \
+  config/catalogs/md-imrphenom-s41-n32768.json"
+merged=outputs/catalogs/md-imrphenom-s41-n32768.merged.json
+
+jq -s 'reduce .[] as $layer ({}; . * $layer)' $layers > "$merged"
+
 uv run --extra paper python scripts/generate_catalog.py \
-  --config config/waveform.json \
-  --config config/catalogs/base/population.toml \
-  --config config/catalogs/defs/md-imrphenom-s41-n32768.toml \
+  --name md-imrphenom-s41-n32768 \
+  --population "$(jq -c .population "$merged")" \
+  --fiducials "$(jq -c .fiducials "$merged")" \
+  --waveform "$(jq -c .waveform "$merged")" \
+  --seed "$(jq -r .seed "$merged")" \
+  --num-samples "$(jq -r .num_samples "$merged")" \
   --output outputs/catalogs/md-imrphenom-s41-n32768.h5
 ```
 
-Layers arrive as repeated `--config` flags, in merge order, and the last one's
-filename stem names the catalog. It refuses to overwrite an existing catalog
-unless `--force` is passed.
+`jq`'s `*` is a recursive merge, which is `astrogwb.paper.utils.deep_merge`
+exactly; the catalog layers carry no `[priors]` block, so the shallow-merge rule
+the run path needs never applies here. `tests/paper/test_runs.py` pins the two
+merges agreeing.
+
+The workflow splits those two commands into two rules. `merge_catalog_config`
+owns the fold and declares the layer files; `waveform_catalog` reads five keys
+out of its `temp()` output. Folding once and reading keys, rather than folding
+per flag, is the whole reason the merged file exists — it is a build
+intermediate, not an artifact, and the `.h5` records its own provenance either
+way. `waveform_catalog` refuses to overwrite an existing catalog unless
+`--force` is passed.
 
 Through the workflow, from the repository root:
 

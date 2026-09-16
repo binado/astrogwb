@@ -258,7 +258,7 @@ class OutputConfig(BaseModel):
 class CatalogConfig(BaseModel):
     """The two catalogs this run uses: the injection and the proposal.
 
-    Each role names one persisted catalog under ``config/catalogs/defs``, whose
+    Each role names one persisted catalog under ``config/catalogs``, whose
     stem is both the config filename and the ``outputs/catalogs/<name>.h5`` it
     produces. The run records the *name* only: everything about how the catalog
     was drawn -- the population model, its construction settings, the

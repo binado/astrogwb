@@ -27,7 +27,7 @@ def catalog_path(name: str) -> str:
     return str(CATALOGS_DIR / f"{name}.h5")
 
 
-# Filenames are the mapping: config/catalogs/defs/<name>.toml ->
+# Filenames are the mapping: config/catalogs/<name>.json ->
 # outputs/catalogs/<name>.h5, and config/analysis/runs/<experiment>/<run>.toml
 # -> outputs/chains/<experiment>/<run>.nc. Nothing below translates a registry
 # name into a path; it only globs the config tree and reads back the two names
@@ -110,23 +110,13 @@ def network_config_inputs(experiment):
 def catalog_layers(wildcards):
     """One catalog's ordered config layers, relative to this workflow's cwd.
 
-    Declaring the shared base alongside the def is what makes editing the
-    common [waveform] block invalidate every catalog.
+    Declaring the shared layers alongside the def is what makes editing the
+    common [waveform], [population] or [fiducials] block invalidate every
+    catalog.
     """
     return [
         str(path) for path in catalog_config_paths(wildcards.catalog, root=Path("."))
     ]
-
-
-def catalog_config_flags(wildcards):
-    """The same layers as repeated --config flags, in merge order.
-
-    Built in `params:` rather than interpolated from `input:` for the same
-    reason `config_flags` is: a list input would space-join into one argument.
-    """
-    return " ".join(
-        f"--config {shlex.quote(path)}" for path in catalog_layers(wildcards)
-    )
 
 
 def run_catalog_input(role):
@@ -162,6 +152,7 @@ wildcard_constraints:
 
 
 localrules:
+    merge_catalog_config,
     waveform_catalog,
     validate,
     plot_cosmological_parameters,
@@ -172,27 +163,59 @@ localrules:
     experiments,
 
 
+rule merge_catalog_config:
+    """One catalog's layers, folded once into the blocks the generator takes.
+
+    A rule rather than a shell variable so the fold happens exactly once per
+    catalog and is cached: `waveform_catalog` then reads five keys out of the
+    result, instead of re-folding all four layer files once per flag. `jq`'s
+    `*` is a recursive merge, which is `astrogwb.paper.utils.deep_merge`
+    exactly; the catalog layers carry no `[priors]` block, so the shallow-merge
+    rule the run path needs never applies here, and
+    `tests/paper/test_runs.py` pins the two merges agreeing.
+
+    `temp()` because this is a build intermediate, not an artifact: nothing
+    downstream of the generated catalog reads it, and the `.h5` records its own
+    provenance. The dependency edge on the layer files lives here now, and
+    `waveform_catalog` inherits it transitively -- editing any shared layer
+    still rebuilds every catalog.
+    """
+    input:
+        catalog_layers,
+    output:
+        temp(str(CATALOGS_DIR / "{catalog}.merged.json")),
+    params:
+        merge="reduce .[] as $layer ({}; . * $layer)",
+    shell:
+        "jq -s '{params.merge}' {input:q} > {output:q}"
+
+
 rule waveform_catalog:
     """Population draw + waveform generation, in one process.
 
-    The population is declared by `config/catalogs/base/population.toml`, which
-    `catalog_layers` already returns, so there is no separate graph file to
-    declare as an input any more.
+    The generator is handed the merged blocks rather than a list of paths, so
+    nothing re-reads the config tree downstream. A `jq` that failed would
+    substitute an empty argument, which `generate_catalog.py` rejects as
+    invalid JSON rather than acting on.
     """
     input:
         script="scripts/generate_catalog.py",
-        config=catalog_layers,
+        merged=str(CATALOGS_DIR / "{catalog}.merged.json"),
     output:
         catalog_path("{catalog}"),
-    params:
-        config_flags=catalog_config_flags,
     shell:
         "uv run --extra paper python {input.script:q}"
-        " {params.config_flags} --output {output:q} --force"
+        " --name {wildcards.catalog:q}"
+        " --population \"$(jq -c .population {input.merged:q})\""
+        " --fiducials \"$(jq -c .fiducials {input.merged:q})\""
+        " --waveform \"$(jq -c .waveform {input.merged:q})\""
+        " --seed \"$(jq -r .seed {input.merged:q})\""
+        " --num-samples \"$(jq -r .num_samples {input.merged:q})\""
+        " --output {output:q} --force"
 
 
 rule catalogs:
-    """Aggregate target: build every catalog declared in config/catalogs/defs/."""
+    """Aggregate target: build every catalog declared in config/catalogs/."""
     input:
         CATALOG_OUTPUTS,
 

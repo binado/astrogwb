@@ -2,9 +2,10 @@
 
 A *catalog* is one persisted waveform draw: expensive to build (population
 draw + ripple waveform generation) and reused by every run that names it. Two
-layers under ``config/catalogs/`` -- a shared ``base/`` and one
-``defs/<name>.toml`` per catalog, whose stem is the name and which produces
-``outputs/catalogs/<stem>.h5``. No registry file translates between the two.
+layers: the shared ``config/waveform.json``, ``config/population.json`` and
+``config/fiducials.json``, then one ``config/catalogs/<name>.json`` per catalog,
+whose stem is the name and which produces ``outputs/catalogs/<stem>.h5``. No
+registry file translates between the two.
 
 This file describes a catalog only until it exists. Afterwards the *file* is
 authoritative: it records its own registered population model, that model's
@@ -32,14 +33,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb.metadata import PopulationMetadata
 from astrogwb.paper.config.mcmc import RunConfig
 from astrogwb.paper.config.runs import (
-    CATALOG_DEFS_DIR,
+    CATALOGS_DIR,
     catalog_config_paths,
     discover_catalog_names,
     merge_config_layers,
@@ -140,46 +141,38 @@ class WaveformConfig(BaseModel):
         return RippleGenerator(**settings)
 
 
-class PopulationConfig(BaseModel):
-    """The population declaration a catalog is drawn from, and drawn at.
-
-    ``model`` is a key in the :mod:`astrogwb.populations` registry, never an
-    import path: registry keys change only on purpose, while module paths move
-    as collateral whenever a module is reorganized. It names the population --
-    the source model and its merger rate together -- so a def cannot pair a
-    redshift law with a rate that is not its own normalization.
-
-    ``kwargs`` are the population's construction kwargs, passed whole to
-    :func:`~astrogwb.populations.build_population`: the redshift window and
-    grid every population takes, plus whatever else the named one takes, such
-    as a guard mixture's ``uniform_mixing_fraction``. They must be
-    JSON-serializable scalars, because that is how they travel in the
-    catalog's HDF5 attributes. A key the named population does not accept
-    fails pre-flight rather than being filtered away.
-
-    ``params`` are the hyperparameters the draw is made at, and they are what a
-    target evaluation is compared against; ``local_merger_rate`` belongs here
-    even though it does not affect the normalized source draws, because the
-    observation's total rate is reconstructed from it.
-
-    Density factors and source outputs are declared by the registered
-    population. Generation records its effective density selection.
-    """
-
-    model_config = _STRICT
-
-    model: str
-    kwargs: dict[str, float | int] = Field(default_factory=dict)
-    params: dict[str, float]
-
-
 class CatalogDefinition(BaseModel):
     """Everything needed to generate one reusable catalog.
 
-    ``seed`` and ``num_samples`` live here rather than beside the population
-    declaration on purpose: ``md-imrphenom-s41-n32768`` and
-    ``md-imrphenom-s42-n16384`` are the *same* population drawn at different
-    seeds and sizes.
+    ``population`` is the :class:`~astrogwb.metadata.PopulationMetadata` the
+    generated ``.h5`` persists verbatim, assembled here rather than bridged
+    from a second config-layer model: the declaration and the record were the
+    same four facts stated twice, and a bridge between them is one more place
+    for them to disagree. ``model_name`` is a key in the
+    :mod:`astrogwb.populations` registry, never an import path -- registry keys
+    change only on purpose, while module paths move as collateral whenever a
+    module is reorganized. It names the population, the source model and its
+    merger rate together, so a def cannot pair a redshift law with a rate that
+    is not its own normalization.
+
+    ``seed`` and ``num_samples`` live here rather than inside ``population`` on
+    purpose: ``md-imrphenom-s41-n32768`` and ``md-imrphenom-s42-n16384`` are the
+    *same* population drawn at different seeds and sizes, so the shared
+    ``config/population.json`` declares neither. The seed is folded into the
+    record by :meth:`_assemble_population_record`, because that is where it
+    belongs once a particular draw exists.
+
+    ``fiducials`` are the hyperparameters the draw is made at, inherited from
+    ``config/fiducials.json`` -- the same table the runs initialize at, so the
+    two cannot drift. They stay outside ``population`` because they are not part
+    of the record: the record describes the density that produced the samples,
+    while these describe the samples. A def that wants an injection away from
+    the fiducials overrides the ``[fiducials]`` block like any other layer.
+
+    A def carries no prose. JSON has no comments, and a ``description`` field
+    would be a second place for one to rot: what each committed catalog is for
+    is documented once, in ``config/catalogs/README.md``, next to the files it
+    describes. ``extra="forbid"`` is what keeps it there.
     """
 
     model_config = _STRICT
@@ -187,44 +180,66 @@ class CatalogDefinition(BaseModel):
     name: str
     seed: int
     num_samples: Annotated[int, Field(gt=0)]
-    population: PopulationConfig
+    population: PopulationMetadata
+    fiducials: dict[str, float]
     waveform: WaveformConfig
 
-    def population_record(self) -> PopulationMetadata:
-        """The population declaration this def hands to a generated catalog.
+    @model_validator(mode="before")
+    @classmethod
+    def _assemble_population_record(cls, data: Any) -> Any:
+        """Complete the ``[population]`` block into a full record.
 
-        The record is what the ``.h5`` persists, so assembling it here -- next
-        to the fields it is assembled from -- is what keeps the declaration in
-        the config layer rather than in the script that runs the draw.
-        :data:`~astrogwb.populations.DEFAULT_DENSITY_SITES` is supplied because
-        no def declares density sites: they follow from the registered
-        population, not from configuration.
+        The config layer declares the two facts that are configuration --
+        ``model_name`` and ``model_kwargs``. The other two are not: ``seed``
+        belongs to this particular draw and is stated once, at the top level,
+        and :data:`~astrogwb.populations.DEFAULT_DENSITY_SITES` follows from the
+        registered population rather than from a file, so no def declares it.
 
-        :class:`~astrogwb.metadata.PopulationMetadata` is imported at module
-        scope -- it is JAX-free by construction --  but
-        :data:`~astrogwb.populations.DEFAULT_DENSITY_SITES` is not: the
-        registry is populated by importing the models, which pulls in JAX, and
-        this module is otherwise free of it.
+        Both are rejected rather than ignored when a layer does declare one.
+        A ``[population]`` ``seed`` would otherwise win here and leave
+        ``definition.seed`` disagreeing with the seed the ``.h5`` records, which
+        is the one thing this assembly exists to make impossible.
+
+        Imports the registry in its own body: populating it means importing the
+        population models, which reaches JAX, and this module is otherwise free
+        of it.
         """
+        if not isinstance(data, Mapping):
+            return data
+        population = data.get("population")
+        if not isinstance(population, Mapping):
+            # Already a built record, or absent -- either way pydantic reports
+            # it better than a KeyError here would.
+            return data
+
+        supplied = [name for name in ("seed", "density_sites") if name in population]
+        if supplied:
+            raise ValueError(
+                f"population may not declare {', '.join(supplied)}: the seed is "
+                "the def's own, and the density sites follow from the "
+                "registered population"
+            )
+
         from astrogwb.populations import DEFAULT_DENSITY_SITES
 
-        return PopulationMetadata(
-            model_name=self.population.model,
-            model_kwargs=self.population.kwargs,
-            density_sites=DEFAULT_DENSITY_SITES,
-            seed=self.seed,
-        )
+        completed = {
+            **population,
+            "density_sites": DEFAULT_DENSITY_SITES,
+        }
+        if "seed" in data:
+            completed["seed"] = data["seed"]
+        return {**data, "population": completed}
 
     @model_validator(mode="after")
     def _validate_redshift_window(self) -> CatalogDefinition:
-        kwargs = self.population.kwargs
+        kwargs = self.population.model_kwargs
         window = ("minimum_redshift", "maximum_redshift")
         if all(name in kwargs for name in window) and not float(
             kwargs["minimum_redshift"]
         ) < float(kwargs["maximum_redshift"]):
             raise ValueError(
-                "population.kwargs.minimum_redshift must be less than "
-                "population.kwargs.maximum_redshift"
+                "population.model_kwargs.minimum_redshift must be less than "
+                "population.model_kwargs.maximum_redshift"
             )
         return self
 
@@ -348,9 +363,9 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
     catalogs = discover_catalogs(root)
     for name, definition in catalogs.items():
         check_population_model(
-            definition.population.model,
-            label=f"catalog {name!r} population.model",
-            kwargs=definition.population.kwargs,
+            definition.population.model_name,
+            label=f"catalog {name!r} population.model_name",
+            kwargs=definition.population.model_kwargs,
         )
     labels: list[str] = []
     for experiment, runs in discover_runs(root).items():
@@ -375,9 +390,8 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
 
 
 __all__ = [
-    "CATALOG_DEFS_DIR",
+    "CATALOGS_DIR",
     "CatalogDefinition",
-    "PopulationConfig",
     "WaveformConfig",
     "check_catalog_references",
     "check_population_model",

@@ -78,11 +78,8 @@ from astrogwb.gwb import (
     uniform_prior_mass_moments,
 )
 from astrogwb.importance.spectral import build_importance_spectrum
-from astrogwb.metadata import PopulationMetadata
-from astrogwb.populations import (
-    DEFAULT_DENSITY_SITES,
-    build_population,
-)
+from astrogwb.paper.config import fiducials, population_metadata, population_model
+from astrogwb.populations import build_population
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
@@ -205,24 +202,12 @@ OMEGA_CATALOG_PATH = NOTEBOOK_DIR / (
 # catalog for analytic inclination averaging during the spectral contraction.
 
 # %%
-FIDUCIALS: dict[str, float] = {
-    "H0": 67.66,
-    "Omega_m": 0.3096,
-    "minimum_mass": 1.0,
-    "mass_width": 1.5,
-    "xi_0": 1.0,
-    "xi_n": 1.91,
-    "gamma": 1.42,
-    "kappa": 4.62,
-    "z_peak": 1.84,
-    "local_merger_rate": 770.0,
-}
-
-#: The generating population takes no propagation parameters: modified
-#: propagation is target-side only, and at `xi_0 = 1` the two agree exactly.
-POPULATION_PARAMS: dict[str, float] = {
-    name: value for name, value in FIDUCIALS.items() if name not in {"xi_0", "xi_n"}
-}
+#: `config/fiducials.json`, read rather than restated. The generating
+#: population ignores the propagation entries it carries -- modified
+#: propagation is target-side only, and at `xi_0 = 1` the two agree exactly --
+#: because a source model indexes `params` by name. This is the same table a
+#: generated catalog inherits as a config layer.
+FIDUCIALS: dict[str, float] = fiducials()
 
 Z_MIN = 0.3
 Z_MAX = 20.0
@@ -231,19 +216,24 @@ N_GRID = 256
 MINIMUM_COMPONENT_MASS = 1.0
 MAXIMUM_COMPONENT_MASS = 2.5
 
-#: The registered model, and the settings bound into it. Both travel into the
-#: generated file, so a cached catalog says which population produced it.
-POPULATION_MODEL = "bns_md_cosmological"
-POPULATION_MODEL_KWARGS: dict[str, float | int] = {
+#: The committed population, on this notebook's redshift window. The overrides
+#: are the whole difference from what the runs sample against, which is why
+#: they are written as overrides rather than as a retyped table. The record
+#: travels into the generated file, so a cached catalog says which population
+#: produced it.
+POPULATION_KWARGS: dict[str, float | int] = {
     "minimum_redshift": Z_MIN,
     "maximum_redshift": Z_MAX,
     "n_grid": 4096,
 }
+POPULATION = population_metadata(seed=POPULATION_SEED, **POPULATION_KWARGS)
+POPULATION_MODEL = POPULATION.model_name
+POPULATION_MODEL_KWARGS: dict[str, float | int] = dict(POPULATION.model_kwargs)
 
 
 def population_model_fn():
     """The generating source model, with its construction settings bound."""
-    return build_population(POPULATION_MODEL, **POPULATION_MODEL_KWARGS).source_model
+    return population_model(**POPULATION_KWARGS).source_model
 
 
 TARGET_KWARGS: dict[str, float | int] = {
@@ -311,7 +301,7 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> PolarizationPowerCat
         for name, values in sample_sources(
             population_model_fn(),
             jax.random.PRNGKey(POPULATION_SEED),
-            POPULATION_PARAMS,
+            FIDUCIALS,
             num_samples=NUM_SOURCES,
         ).items()
     }
@@ -327,13 +317,8 @@ def build_catalog(*, df: float, f_max: float, grid: str) -> PolarizationPowerCat
             sampling_frequency=2.0 * f_max,
             frequency_resolution=df,
         ),
-        population=PopulationMetadata(
-            model_name=POPULATION_MODEL,
-            model_kwargs=POPULATION_MODEL_KWARGS,
-            density_sites=DEFAULT_DENSITY_SITES,
-            seed=POPULATION_SEED,
-        ),
-        fiducials=POPULATION_PARAMS,
+        population=POPULATION,
+        fiducials=FIDUCIALS,
     )
 
 
@@ -357,7 +342,7 @@ def catalog_matches_configuration(
         and catalog.num_samples == NUM_SOURCES
         and catalog.seed == POPULATION_SEED
         and catalog.population_model_name == POPULATION_MODEL
-        and dict(catalog.fiducials) == POPULATION_PARAMS
+        and dict(catalog.fiducials) == FIDUCIALS
         and dict(catalog.population_model_kwargs) == POPULATION_MODEL_KWARGS
     )
 

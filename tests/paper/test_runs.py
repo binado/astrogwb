@@ -7,6 +7,9 @@ and the merge that turns them into a run config.
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -74,10 +77,14 @@ def test_the_retired_inventories_are_gone() -> None:
     # now, so there is one config tree for them and one output directory.
     assert not (PAPER_ROOT / "config/banks").exists()
     assert (PAPER_ROOT / "config/analysis/base").is_dir()
-    assert (PAPER_ROOT / "config/catalogs/base").is_dir()
-    assert (PAPER_ROOT / "config/catalogs/defs").is_dir()
+    assert (PAPER_ROOT / "config/catalogs").is_dir()
+    # The catalog tree is one flat directory of defs: the shared layers sit in
+    # config/ with the run tables, where `jq` reads them, so there is no
+    # base/ to glob and no defs/ to distinguish it from.
+    assert not (PAPER_ROOT / "config/catalogs/base").exists()
+    assert not (PAPER_ROOT / "config/catalogs/defs").exists()
     # config/populations went with the gwmock graph path: a population is a
-    # registered NumPyro model now, named by config/catalogs/base/population.toml.
+    # registered NumPyro model now, named by config/population.json.
     assert not (PAPER_ROOT / "config/populations").exists()
 
 
@@ -333,22 +340,54 @@ def test_the_validation_gate_covers_every_run() -> None:
 # PolarizationPowerCatalog configs
 # --------------------------------------------------------------------------- #
 def test_the_shared_blocks_are_declared_once() -> None:
-    """Every catalog inherits [waveform] and [population] from the base layers.
+    """Every catalog inherits [waveform], [population] and [fiducials].
 
-    Editing either base file must therefore invalidate all eight catalogs,
+    Editing any of the three must therefore invalidate all eight catalogs,
     which is only true because they are declared as inputs of every one.
+    ``fiducials.json`` is a run layer as well, so the hyperparameters a catalog
+    is drawn at and the ones a run initializes at cannot drift.
     """
     for name in discover_catalog_names():
         layers = catalog_config_paths(name)
         assert [path.name for path in layers[:-1]] == [
             "waveform.json",
-            "population.toml",
+            "population.json",
+            "fiducials.json",
         ]
         assert layers[-1].stem == name
+        assert layers[-1].suffix == ".json"
         own = load_mapping(layers[-1])
         # Only the TaylorF2 catalog overrides anything in the shared waveform
         # block, and only the guard catalogs touch the shared population --
         # naming a different population and adding the construction setting it
-        # takes, never restating the shared window and grid.
+        # takes, never restating the shared window and grid. No def overrides
+        # [fiducials]: every committed catalog is drawn at them.
         assert set(own.get("waveform", {})) <= {"approximant"}, name
-        assert set(own.get("population", {})) <= {"model", "kwargs"}, name
+        assert set(own.get("population", {})) <= {"model_name", "model_kwargs"}, name
+        assert "fiducials" not in own, name
+
+
+def test_the_jq_merge_matches_the_python_merge() -> None:
+    """The workflow merges catalog layers with `jq`; this pins the two agree.
+
+    `rule waveform_catalog` does its own merge in the shell so it can hand the
+    generator the three blocks rather than a list of paths, which leaves two
+    implementations of one fold. jq's `*` is a recursive merge, and the catalog
+    layers carry no [priors] block, so the shallow-merge rule
+    `_merge_run_overlay` exists for never applies -- but that is an argument,
+    not a check.
+    """
+    jq = shutil.which("jq")
+    if jq is None:
+        pytest.skip("jq is not installed")
+    for name in discover_catalog_names():
+        layers = [str(path) for path in catalog_config_paths(name)]
+        merged = subprocess.run(
+            [jq, "-s", "reduce .[] as $layer ({}; . * $layer)", *layers],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert json.loads(merged.stdout) == merge_config_layers(
+            catalog_config_paths(name)
+        ), name

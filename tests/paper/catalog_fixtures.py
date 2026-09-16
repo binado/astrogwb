@@ -10,32 +10,30 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import numpy as np
+from repo import REPO_ROOT
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.metadata import PopulationMetadata
+from astrogwb.paper.config import fiducials, population_metadata
 from astrogwb.populations import build_population
 from astrogwb.utils.sampling import evaluate_sources
 from astrogwb.waveform import PolarizationPowerGenerator
 
-#: The population every fixture catalog is drawn from, matching what
-#: ``config/catalogs/base/population.toml`` commits.
-PAPER_MODEL = "bns_md_cosmological"
-PAPER_RATE_MODEL = "madau_dickinson"
-PAPER_MODEL_KWARGS: dict[str, float | int] = {
-    "minimum_redshift": 0.0,
-    "maximum_redshift": 20.0,
-    "n_grid": 256,
-}
-PAPER_POPULATION_PARAMS: dict[str, float] = {
-    "H0": 67.66,
-    "Omega_m": 0.3096,
-    "gamma": 1.42,
-    "kappa": 4.62,
-    "z_peak": 1.84,
-    "local_merger_rate": 770.0,
-    "minimum_mass": 1.0,
-    "mass_width": 1.5,
-}
+#: The population every fixture catalog is drawn from: the committed one, read
+#: rather than restated, so a fixture cannot drift from what the runs sample
+#: against. ``n_grid`` is the one deliberate difference -- 256 keeps the
+#: cosmology integrals cheap enough for a unit test -- and it is written as an
+#: override so the difference is visible instead of buried in a retyped table.
+#: The seed is a fixture detail; ``make_catalog`` takes its own.
+PAPER_POPULATION = population_metadata(REPO_ROOT, seed=41, n_grid=256)
+PAPER_MODEL = PAPER_POPULATION.model_name
+PAPER_MODEL_KWARGS: dict[str, float | int] = dict(PAPER_POPULATION.model_kwargs)
+
+#: The hyperparameters fixtures draw at: ``config/fiducials.json``, which is
+#: what a real catalog inherits. It carries ``xi_0`` / ``xi_n`` that
+#: ``bns_md_cosmological`` never reads -- source models index ``params`` by
+#: name, so the extra entries are inert here exactly as they are in generation.
+PAPER_POPULATION_PARAMS: dict[str, float] = fiducials(REPO_ROOT)
 
 
 def _derived_columns(model, params, sources):

@@ -11,7 +11,7 @@ All commands run with the repository root as their working directory.
 Source inputs live under `config/`; generated artifacts live under `outputs/`.
 
 The Snakefile computes its own inputs by globbing that tree --
-`discover_catalog_names()` over `config/catalogs/defs/*.toml` and `discover_runs()` over
+`discover_catalog_names()` over `config/catalogs/*.json` and `discover_runs()` over
 `config/analysis/runs/*/` -- and imports exactly one config function,
 `assemble_run`, because a run's catalog names are known only after the four-layer
 merge. No registry file translates a name into a path.
@@ -38,11 +38,13 @@ snakemake --snakefile Snakefile --cores 1 \
   outputs/catalogs/md-imrphenom-s42-n16384.h5
 ```
 
-One rule does the whole thing: it reads the catalog's config layers, draws the
-registered population they name in-process, and generates waveforms for those
-rows. The population is not a workflow node and no longer a file either -- the
-layer list *is* the dependency edge, so editing
-`config/waveform.json` or `config/catalogs/base/population.toml` invalidates every catalog. All durable
+One rule does the whole thing: it merges the catalog's config layers with `jq`,
+draws the registered population they name in-process, and generates waveforms
+for those rows. The population is not a workflow node and no longer a file
+either -- the layer list *is* the dependency edge, so editing
+`config/waveform.json`, `config/population.json` or `config/fiducials.json`
+invalidates every catalog. `jq` is therefore a workflow dependency, alongside
+`uv`. All durable
 catalogs live under `outputs/catalogs/`. The `--allowed-rules` filter
 keeps catalog generation explicit. MCMC commands omit these rules, so a missing
 catalog stops MCMC with a

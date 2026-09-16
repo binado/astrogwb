@@ -140,7 +140,8 @@ proposal  = "md-imrphenom-s42-n16384"
 That is the whole block, and injection versus proposal is two filenames and
 nothing else. How a catalog was drawn -- its population model, that model's
 construction settings, the hyperparameters, and the included density factors --
-lives in `config/catalogs/defs/<name>.toml` and, once the file exists, in the
+lives in `config/catalogs/<name>.json` and its shared layers and, once the
+file exists, in the
 file itself. Never in the run config.
 
 Every run shares one injection catalog -- it is the "observed" data -- so it

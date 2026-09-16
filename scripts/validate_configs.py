@@ -10,7 +10,7 @@ Three checks per run, cheapest first:
 1. the four layers merge (a malformed TOML or JSON fails here);
 2. the merge validates into a :class:`RunConfig` (a typo'd key, an impossible
    prior, an unknown network name);
-3. both catalogs the run names exist in ``config/catalogs/defs/``.
+3. both catalogs the run names exist in ``config/catalogs/``.
 
 JAX-free: nothing here touches a device, so it is cheap enough to run before
 every campaign.

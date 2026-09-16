@@ -1,0 +1,10 @@
+{
+  "num_samples": 16384,
+  "seed": 63,
+  "population": {
+    "model_name": "bns_md_uniform_mixture",
+    "model_kwargs": {
+      "uniform_mixing_fraction": 0.001
+    }
+  }
+}

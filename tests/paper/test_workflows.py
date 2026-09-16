@@ -35,7 +35,7 @@ WORKFLOW_DIR = PAPER_ROOT
 
 #: Committed inputs the workflow reads. Everything else it touches is output.
 LINKED = ("Snakefile", "config", "scripts")
-CATALOG_RULES = ("waveform_catalog", "catalogs")
+CATALOG_RULES = ("merge_catalog_config", "waveform_catalog", "catalogs")
 MCMC_RULES = (
     "validate",
     "run_mcmc",
@@ -136,12 +136,14 @@ def _catalogs(tmp_path: Path, *names: str) -> Path:
 
 
 def test_catalog_rule_reads_its_config_layers_directly() -> None:
-    """One rule per catalog, and the population is one of its config layers.
+    """Two rules per catalog: fold the layers once, then draw from the result.
 
     The population used to be a separate graph file declared as an extra
-    input. It is a registered model named by `config/catalogs/base/population.
-    toml` now, so the layer list *is* the dependency edge -- there is nothing
-    else for the rule to declare.
+    input. It is a registered model named by `config/population.json` now, and
+    the hyperparameters come from `config/fiducials.json`, so the layer list
+    *is* the dependency edge. That edge now sits on `merge_catalog_config`,
+    and `waveform_catalog` inherits it through the merged file -- which is
+    what lets the fold happen once instead of once per flag.
     """
     result = _snakemake(
         "--snakefile",
@@ -160,13 +162,15 @@ def test_catalog_rule_reads_its_config_layers_directly() -> None:
     assert result.returncode == 0, result.stderr
     # The shared waveform layer is an input of both, so editing it rebuilds both.
     assert result.stdout.count("config/waveform.json") >= 2
-    assert "config/catalogs/defs/md-imrphenom-s41-n32768.toml" in result.stdout
+    assert "config/catalogs/md-imrphenom-s41-n32768.json" in result.stdout
     assert (
-        "config/catalogs/defs/md-uniform-imrphenom-s61-n16384-eps1e-1.toml"
-        in result.stdout
+        "config/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.json" in result.stdout
     )
-    # Editing the shared population declaration rebuilds every catalog.
-    assert result.stdout.count("config/catalogs/base/population.toml") >= 2
+    # Editing either shared declaration rebuilds every catalog. fiducials.json
+    # is a run layer too, so the hyperparameters a catalog is drawn at and the
+    # ones a run initializes at cannot drift.
+    assert result.stdout.count("config/population.json") >= 2
+    assert result.stdout.count("config/fiducials.json") >= 2
     assert "outputs/catalogs/md-imrphenom-s41-n32768.h5" in result.stdout
     assert (
         "outputs/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.h5" in result.stdout
@@ -175,12 +179,33 @@ def test_catalog_rule_reads_its_config_layers_directly() -> None:
     assert any(
         "scripts/generate_catalog.py" in line for line in _rule_inputs(result.stdout)
     )
-    # Layers reach the script as repeated flags, never space-joined into one.
-    assert (
-        "--config config/waveform.json "
-        "--config config/catalogs/base/population.toml "
-        "--config config/catalogs/defs/md-imrphenom-s41-n32768.toml"
-    ) in result.stdout
+    # The fold runs once per catalog, over exactly the declared layers, into
+    # the merged file. This is the assertion that would fail if the merge
+    # migrated back into the flags and started re-folding once each.
+    layers = (
+        "config/waveform.json config/population.json config/fiducials.json "
+        "config/catalogs/md-imrphenom-s41-n32768.json"
+    )
+    merged = "outputs/catalogs/md-imrphenom-s41-n32768.merged.json"
+    merge = "reduce .[] as $layer ({}; . * $layer)"
+    assert f"jq -s '{merge}' {layers} > {merged}" in result.stdout
+    assert result.stdout.count(f"jq -s '{merge}'") == 2, "one fold per catalog"
+
+    # The generator reads keys out of that one file, never the layer tree.
+    for flag, compact in (
+        ("--population", True),
+        ("--fiducials", True),
+        ("--waveform", True),
+        ("--seed", False),
+        ("--num-samples", False),
+    ):
+        key = flag.removeprefix("--").replace("-", "_")
+        jq = "jq -c" if compact else "jq -r"
+        assert f'{flag} "$({jq} .{key} {merged})"' in result.stdout, flag
+    assert "--config" not in result.stdout
+    # The old base/ and defs/ split is gone: one flat directory of defs.
+    assert "config/catalogs/base/" not in result.stdout
+    assert "config/catalogs/defs/" not in result.stdout
     # The population intermediate, its merge rule, and the graph configs the
     # rule used to declare are all gone.
     assert "outputs/populations/" not in result.stdout
