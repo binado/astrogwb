@@ -237,19 +237,19 @@ catalogs are not byte-identical to one another.
 One command does the whole thing — population draw, waveform generation, power
 reduction, write.
 
-Every layer is JSON, so the merge is one `jq` pass and the generator is handed
-the merged blocks rather than a list of paths:
+Every layer is JSON, so each block is merged out of them with one `jq` filter
+and the generator is handed the blocks rather than a list of paths:
 
 ```bash
-merged=$(jq -s 'reduce .[] as $layer ({}; . * $layer)' \
-  config/waveform.json config/population.json config/fiducials.json \
-  config/catalogs/md-imrphenom-s41-n32768.json)
+layers="config/waveform.json config/population.json config/fiducials.json \
+  config/catalogs/md-imrphenom-s41-n32768.json"
+merge='reduce .[] as $layer ({}; . * $layer)'
 
 uv run --extra paper python scripts/generate_catalog.py \
   --name md-imrphenom-s41-n32768 \
-  --population "$(printf '%s' "$merged" | jq -c .population)" \
-  --fiducials "$(printf '%s' "$merged" | jq -c .fiducials)" \
-  --waveform "$(printf '%s' "$merged" | jq -c .waveform)" \
+  --population "$(jq -c -s "$merge | .population" $layers)" \
+  --fiducials "$(jq -c -s "$merge | .fiducials" $layers)" \
+  --waveform "$(jq -c -s "$merge | .waveform" $layers)" \
   --seed 41 --num-samples 32768 \
   --output outputs/catalogs/md-imrphenom-s41-n32768.h5
 ```
@@ -258,8 +258,8 @@ uv run --extra paper python scripts/generate_catalog.py \
 exactly; the catalog layers carry no `[priors]` block, so the shallow-merge rule
 the run path needs never applies here. `tests/paper/test_runs.py` pins the two
 merges agreeing. `rule waveform_catalog` runs exactly this, over the same files
-it declares as `input:`. It refuses to overwrite an existing catalog unless
-`--force` is passed.
+it declares as `input:`, reading `seed` and `num_samples` out of the merge too.
+It refuses to overwrite an existing catalog unless `--force` is passed.
 
 Through the workflow, from the repository root:
 

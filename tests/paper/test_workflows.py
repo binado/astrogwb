@@ -179,17 +179,23 @@ def test_catalog_rule_reads_its_config_layers_directly() -> None:
     assert any(
         "scripts/generate_catalog.py" in line for line in _rule_inputs(result.stdout)
     )
-    # The merge is one jq pass over exactly the declared inputs, and the
-    # script is handed the blocks rather than the paths.
-    assert (
-        "jq -s 'reduce .[] as $layer ({}; . * $layer)' "
+    # Each block is merged out of exactly the declared inputs by one jq
+    # filter, and the script is handed the blocks rather than the paths.
+    layers = (
         "config/waveform.json config/population.json config/fiducials.json "
         "config/catalogs/md-imrphenom-s41-n32768.json"
-    ) in result.stdout
-    for flag in ("--population", "--fiducials", "--waveform"):
-        assert f'{flag} "$(printf \'%s\' "$merged" | jq -c .{flag[2:]})"' in (
-            result.stdout
-        )
+    )
+    merge = "reduce .[] as $layer ({}; . * $layer)"
+    for flag, compact in (
+        ("--population", True),
+        ("--fiducials", True),
+        ("--waveform", True),
+        ("--seed", False),
+        ("--num-samples", False),
+    ):
+        key = flag.removeprefix("--").replace("-", "_")
+        jq = "jq -c -s" if compact else "jq -s"
+        assert f"{flag} \"$({jq} '{merge} | .{key}' {layers})\"" in result.stdout, flag
     assert "--config" not in result.stdout
     # The old base/ and defs/ split is gone: one flat directory of defs.
     assert "config/catalogs/base/" not in result.stdout

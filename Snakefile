@@ -165,29 +165,32 @@ localrules:
 rule waveform_catalog:
     """Population draw + waveform generation, in one process.
 
-    Every layer is JSON, so the merge is one `jq` pass over the same files
-    declared as `input:` -- `jq`'s `*` is a recursive merge, which is
-    `astrogwb.paper.utils.deep_merge` exactly. The catalog layers carry no
-    `[priors]` block, so the shallow-merge rule the run path needs never
-    applies here. The generator is then handed the three merged blocks rather
-    than a list of paths, so nothing re-reads the config tree downstream.
+    Every layer is JSON, so each block is merged out of the same files declared
+    as `input:` with one `jq` filter. `jq`'s `*` is a recursive merge, which is
+    `astrogwb.paper.utils.deep_merge` exactly; the catalog layers carry no
+    `[priors]` block, so the shallow-merge rule the run path needs never applies
+    here. `tests/paper/test_runs.py` pins the two merges agreeing.
 
-    POSIX sh, not bash: Snakemake does not set `shell.executable`, so no `<<<`.
+    The generator is handed the merged blocks rather than a list of paths, so
+    nothing re-reads the config tree downstream. A `jq` that failed would
+    substitute an empty argument, which `generate_catalog.py` rejects as
+    invalid JSON rather than acting on.
     """
     input:
         script="scripts/generate_catalog.py",
         config=catalog_layers,
     output:
         catalog_path("{catalog}"),
+    params:
+        merge="reduce .[] as $layer ({}; . * $layer)",
     shell:
-        "merged=$(jq -s 'reduce .[] as $layer ({{}}; . * $layer)' {input.config:q}) && "
         "uv run --extra paper python {input.script:q}"
         " --name {wildcards.catalog:q}"
-        " --population \"$(printf '%s' \"$merged\" | jq -c .population)\""
-        " --fiducials \"$(printf '%s' \"$merged\" | jq -c .fiducials)\""
-        " --waveform \"$(printf '%s' \"$merged\" | jq -c .waveform)\""
-        " --seed \"$(printf '%s' \"$merged\" | jq -r .seed)\""
-        " --num-samples \"$(printf '%s' \"$merged\" | jq -r .num_samples)\""
+        " --population \"$(jq -c -s '{params.merge} | .population' {input.config:q})\""
+        " --fiducials \"$(jq -c -s '{params.merge} | .fiducials' {input.config:q})\""
+        " --waveform \"$(jq -c -s '{params.merge} | .waveform' {input.config:q})\""
+        " --seed \"$(jq -s '{params.merge} | .seed' {input.config:q})\""
+        " --num-samples \"$(jq -s '{params.merge} | .num_samples' {input.config:q})\""
         " --output {output:q} --force"
 
 

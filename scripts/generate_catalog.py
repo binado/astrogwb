@@ -35,13 +35,13 @@ Usage::
 
     layers="config/waveform.json config/population.json config/fiducials.json \\
         config/catalogs/md-imrphenom-s41-n32768.json"
-    merged=$(jq -s 'reduce .[] as $layer ({}; . * $layer)' $layers)
+    merge='reduce .[] as $layer ({}; . * $layer)'
 
     uv run --extra paper python scripts/generate_catalog.py \\
         --name md-imrphenom-s41-n32768 \\
-        --population "$(printf '%s' "$merged" | jq -c .population)" \\
-        --fiducials "$(printf '%s' "$merged" | jq -c .fiducials)" \\
-        --waveform "$(printf '%s' "$merged" | jq -c .waveform)" \\
+        --population "$(jq -c -s "$merge | .population" $layers)" \\
+        --fiducials "$(jq -c -s "$merge | .fiducials" $layers)" \\
+        --waveform "$(jq -c -s "$merge | .waveform" $layers)" \\
         --seed 41 --num-samples 32768 \\
         --output outputs/catalogs/md-imrphenom-s41-n32768.h5
 """
