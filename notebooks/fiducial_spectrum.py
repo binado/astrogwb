@@ -34,9 +34,10 @@
 #   reference network only.
 #
 # Point `INJECTION_CATALOG_PATH` at the injection catalog used by `mcmc.py`.
-# The fiducials, analysis grid, and detector networks the overlays follow are
-# inlined in the configuration cell below as `FIDUCIALS`, `GRID`, `NETWORKS`,
-# and `REFERENCE_NETWORK`.
+# The fiducials and detector networks the overlays follow are read from
+# `config/fiducials.json` and `config/networks.json` through
+# `astrogwb.paper.config`; the analysis grid is the notebook's own knob,
+# inlined in the configuration cell below as `GRID`.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -61,11 +62,13 @@ from astrogwb.gwb import (
     spectral_snr_squared_per_bin,
 )
 from astrogwb.paper.catalogs import load_run_catalog
+from astrogwb.paper.config import fiducials, networks
 from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.inference import prepare_observation
 from astrogwb.paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
+    DETECTOR_NETWORKS,
     SPECTRUM,
     SPECTRUM_LINESTYLES,
     Network,
@@ -87,17 +90,17 @@ use_paper_style()
 # %% [markdown]
 # ## Pipeline configuration
 #
-# The injection catalog is the observed SGWB. Everything else here is the
-# `cosmological-parameters` experiment's configuration written out literally
-# rather than merged from its config layers: `GRID` is the frequency band,
-# observation time, and redshift grid the reference overlays use, `FIDUCIALS`
-# is the point the non-sampled parameters are conditioned at, and `NETWORKS`
-# carries each compared network's own detector list.
+# The injection catalog is the observed SGWB. `FIDUCIALS` and `NETWORKS` are
+# read from `config/fiducials.json` and `config/networks.json` through
+# `astrogwb.paper.config` -- the same tables every committed run merges and the
+# figure scripts read -- so this notebook cannot drift from what the runs
+# sample. `GRID` (the frequency band, observation time, and redshift grid the
+# reference overlays use) and the plotting choices stay this notebook's own
+# knobs, written out literally.
 #
-# These values mirror `config/analysis/base/parameters.toml`,
-# `config/analysis/base/model.toml`, and
-# `config/analysis/runs/cosmological-parameters/*.toml`. Editing those files
-# does **not** update this notebook; the copies below are hand-maintained.
+# `GRID` mirrors `config/analysis/base/model.toml` plus that file's top-level
+# `observation_time`. Editing it does **not** update this notebook; the copy
+# below is hand-maintained.
 
 # %%
 #: The notebook may be executed from the repository root (`jupytext --execute`,
@@ -110,20 +113,10 @@ INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5
 #: the figure scripts and `config/plotting.json` all agree on.
 BASE_DIR = ROOT_DIR / FIGURES_DIR / "fiducial_spectrum"
 
-# Inlined from config/analysis/base/parameters.toml [fiducials]. Only "H0" is
-# read below; the rest are kept so this is the whole fiducial point.
-FIDUCIALS: dict[str, float] = {
-    "H0": 67.66,
-    "Omega_m": 0.3096,
-    "xi_0": 1.0,
-    "xi_n": 1.91,
-    "gamma": 1.42,
-    "kappa": 4.62,
-    "z_peak": 1.84,
-    "local_merger_rate": 770.0,
-    "minimum_mass": 1.0,
-    "mass_width": 1.5,
-}
+# The whole fiducial point, from config/fiducials.json. Only "H0" is read
+# below. `root=` because the accessors resolve paths against the working
+# directory, which is this notebook's own directory under Jupyter.
+FIDUCIALS = fiducials(root=ROOT_DIR)
 
 # Inlined from config/analysis/base/model.toml plus its top-level
 # observation_time -- what that experiment's RunConfig.analysis_grid assembled to.
@@ -136,27 +129,22 @@ GRID = AnalysisGrid(
     n_grid=256,
 )
 
-# Labels copied from astrogwb.paper.plotting.DETECTOR_NETWORKS, detector lists
-# from config/analysis/runs/cosmological-parameters/<name>.toml. Order is
+# Ordered legend from astrogwb.paper.plotting.DETECTOR_NETWORKS -- a network's
+# label lives there because nothing reads it without the order it sits in --
+# with each detector list resolved through config/networks.json. Order is
 # load-bearing: detector_network_styles assigns a color by first appearance of
 # each base network name, so reordering recolors the curves and breaks the match
 # with the other network figures.
-NETWORKS: tuple[Network, ...] = (
-    Network("ET-triangular", r"ET-$\Delta$", ("E1", "E2", "E3")),
-    Network(
-        "ET-triangular-CE-Hanford", r"ET-$\Delta$ $+$ CE", ("E1", "E2", "E3", "C1")
-    ),
-    Network("ET-2L-aligned", "ET-2L-par", ("S1", "R1")),
-    Network("ET-2L-aligned-CE-Hanford", r"ET-2L-par $+$ CE", ("S1", "R1", "C1")),
-    Network("ET-2L-misaligned", "ET-2L", ("S2", "R2")),
-    Network("ET-2L-misaligned-CE-Hanford", r"ET-2L $+$ CE", ("S2", "R2", "C1")),
+NETWORK_DETECTORS = networks(root=ROOT_DIR)
+NETWORKS: tuple[Network, ...] = tuple(
+    Network(name, label, NETWORK_DETECTORS[name]) for name, label in DETECTOR_NETWORKS
 )
 REFERENCE_NETWORK = "ET-2L-aligned-CE-Hanford"
 ET_ONLY_NETWORKS: tuple[Network, ...] = tuple(
     network for network in NETWORKS if not network.name.endswith("-CE-Hanford")
 )
 
-OMEGA_GW_MIN = 1.0e-15
+OMEGA_GW_MIN = 1.0e-13
 
 # Cumulative-SNR curves on the stacked figure: Okabe-Ito blue / vermillion,
 # distinct from the black dual-axis spectrum.
@@ -354,8 +342,8 @@ def _draw_omega_and_sh(
 # ## Loading the waveform catalog
 #
 # `prepare_observation` builds the fiducial $S_h$ from the injection catalog on
-# the inlined `GRID`; each compared network then gets its own
-# $S_{\mathrm{eff}}$ from the detector list inlined in `NETWORKS`. The ET-only
+# `GRID`; each compared network then gets its own
+# $S_{\mathrm{eff}}$ from the detector list `NETWORKS` resolved. The ET-only
 # overlays use $\sigma = S_{\mathrm{eff}}/\sqrt{2 T \Delta f}$ on that same
 # band, and $\sigma_\Omega$ is the $f^3$ conversion of $\sigma$.
 
