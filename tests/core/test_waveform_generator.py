@@ -103,6 +103,44 @@ def test_waveform_metadata_attrs_round_trip_includes_alpha() -> None:
         WaveformMetadata.from_attrs(attrs, label="toy.h5")
 
 
+def test_from_attrs_rejects_a_non_numeric_frequency_attribute() -> None:
+    generator = AnalyticInspiralGenerator(
+        WaveformMetadata(
+            approximant="AnalyticInspiral",
+            minimum_frequency=10.0,
+            maximum_frequency=12.0,
+            reference_frequency=10.0,
+            sampling_frequency=32.0,
+            frequency_resolution=2.0,
+            alpha=ISCO_ALPHA,
+        )
+    )
+    attrs = generator.metadata.to_attrs()
+    attrs["minimum_frequency"] = "not-a-number"
+
+    with pytest.raises(ValueError, match="toy.h5: invalid waveform metadata"):
+        WaveformMetadata.from_attrs(attrs, label="toy.h5")
+
+
+def test_from_attrs_rejects_a_non_numeric_alpha_attribute() -> None:
+    generator = AnalyticInspiralGenerator(
+        WaveformMetadata(
+            approximant="AnalyticInspiral",
+            minimum_frequency=10.0,
+            maximum_frequency=12.0,
+            reference_frequency=10.0,
+            sampling_frequency=32.0,
+            frequency_resolution=2.0,
+            alpha=ISCO_ALPHA,
+        )
+    )
+    attrs = generator.metadata.to_attrs()
+    attrs["alpha"] = "not-a-number"
+
+    with pytest.raises(ValueError, match="toy.h5: invalid waveform metadata"):
+        WaveformMetadata.from_attrs(attrs, label="toy.h5")
+
+
 def test_waveform_metadata_builds_a_concrete_generator() -> None:
     metadata = WaveformMetadata(
         approximant="TaylorF2",

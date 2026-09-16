@@ -105,7 +105,7 @@ class WaveformMetadata(BaseModel):
                     else None
                 ),
             )
-        except (TypeError, ValidationError) as error:
+        except (TypeError, ValueError, ValidationError) as error:
             raise ValueError(f"{label}: invalid waveform metadata: {error}") from error
 
 
