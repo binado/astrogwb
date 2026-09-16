@@ -222,6 +222,7 @@ def save_figures(
         figure.savefig(path, dpi=dpi, format=path.suffix.lstrip("."))
         print("saved figure:", path)
         saved.append(path)
+    return saved
 
 
 def get_corner_kwargs(**overrides: object) -> dict[str, object]:
