@@ -19,12 +19,12 @@ def test_paper_mplstyle_sits_next_to_the_module() -> None:
 
 
 def test_use_paper_style_loads_stylesheet_and_applies_savefig_settings() -> None:
-    """`root=` explicitly: the settings file is resolved against the cwd.
+    """`root=` explicitly: the settings file resolves against the checkout root.
 
-    Passing it makes this test independent of where pytest was invoked from,
-    and turns the assertions into a check that `use_paper_style` actually
-    applies what the JSON says rather than that a literal survived in the
-    stylesheet.
+    Passing it makes this test independent of where pytest was invoked from
+    (and of the `root_dir()` fallback), and turns the assertions into a check
+    that `use_paper_style` actually applies what the JSON says rather than that
+    a literal survived in the stylesheet.
     """
     plotting.use_paper_style(REPO_ROOT)
 

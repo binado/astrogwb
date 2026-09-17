@@ -19,8 +19,9 @@
 # $(\Xi_0, n)$ grid and draws the corresponding corner plot. The $\Xi_0$
 # window is Fisher-sized from the network SNR; $n$ spans its Uniform prior.
 #
-# The notebook needs the repository root as its working directory and the
-# catalog at outputs/catalogs/md-imrphenom-s41-n32768.h5.
+# The notebook resolves the checkout root with `astrogwb.paper.paths.root_dir`,
+# so it runs from the repository root or from this directory; the catalog is
+# read from outputs/catalogs/md-imrphenom-s41-n32768.h5 below it.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -29,7 +30,6 @@
 import json
 import time
 from functools import partial
-from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -43,6 +43,7 @@ from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config import fiducials, networks, priors
 from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.inference import prepare_inference_inputs
+from astrogwb.paper.paths import root_dir
 from astrogwb.paper.plotting import (
     CATEGORY,
     DETECTOR_NETWORKS,
@@ -63,7 +64,11 @@ jax.config.update("jax_enable_x64", True)
 # ## Notebook configuration
 
 # %%
-INJECTION_CATALOG_PATH = Path("outputs/catalogs/md-imrphenom-s41-n32768.h5")
+#: Jupyter's kernel cwd is this notebook's own directory, so anchor the
+#: notebook's own file paths on the checkout root -- the same root the
+#: `astrogwb.paper` accessors default to when they are given no `root=`.
+ROOT_DIR = root_dir()
+INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
 PROPOSAL_CATALOG_PATH = INJECTION_CATALOG_PATH
 ANALYSIS_GRID = AnalysisGrid(
     observation_time=1.0,
@@ -85,8 +90,8 @@ DEBUG: bool = False
 if DEBUG:
     NPOINTS_2D = 17
 SAVE_OUTPUTS: bool = True
-GRID_DIR = Path("grids")
-FIGURE_DIR = Path("figures")
+GRID_DIR = ROOT_DIR / "grids"
+FIGURE_DIR = ROOT_DIR / "figures"
 
 # %% [markdown]
 # ## Catalog and default network

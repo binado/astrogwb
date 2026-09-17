@@ -4,10 +4,12 @@ Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
 style (solid), a loader for ``paper.mplstyle``, the LaTeX parameter labels
 and savefig settings that ``config/plotting.json`` carries, and
 :func:`save_figures`, the single writer that applies them. This module is
-independent of the ``astrogwb`` package and of the config layer: it imports
-nothing from either, at module scope or inside a function body -- it reads that
-one JSON file with stdlib ``json``, lazily, so the ``Snakefile`` can import
-``DETECTOR_NETWORK_RUNS`` while building the DAG without paying for any of it.
+independent of the ``astrogwb`` package and of the config layer: the only
+import outside the standard library and matplotlib is
+:func:`astrogwb.paper.paths.root_dir` -- stdlib-only and I/O-free -- and it
+reads that one JSON file with stdlib ``json``, lazily, so the ``Snakefile`` can
+import ``DETECTOR_NETWORK_RUNS`` while building the DAG without paying for any
+of it.
 
 Convention:
 - category accents are the default color for single-posterior figures;
@@ -46,18 +48,27 @@ from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 
+from astrogwb.paper.paths import root_dir
+
 _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
 
-#: Relative to the working directory -- the repository root for the workflow
-#: and every script -- matching `astrogwb.paper.config.runs`. Read lazily, never
-#: at import: the `Snakefile` imports this module for `DETECTOR_NETWORK_RUNS`
-#: while building the DAG, and that import must stay free of file I/O.
+#: Resolved against `root=`, which defaults to `paths.root_dir()` -- the same
+#: `config/plotting.json` `astrogwb.paper.config.runs` names as
+#: `PLOTTING_PATH`. Read lazily, never at import: the `Snakefile` imports this
+#: module for `DETECTOR_NETWORK_RUNS` while building the DAG, and that import
+#: must stay free of file I/O.
 _SETTINGS_PATH = Path("config/plotting.json")
 
 
 @cache
 def _figure_settings(root: Path | None = None) -> Mapping[str, Any]:
     """Parse ``config/plotting.json`` once.
+
+    ``root`` defaults to :func:`astrogwb.paper.paths.root_dir`, so the notebook
+    whose kernel cwd is ``notebooks/`` reads the same file the workflow does.
+    Every accessor in this module routes through here, so the one resolution
+    serves all of them; ``@cache`` is keyed on the raw ``root``, so discovery
+    runs once per distinct root.
 
     Read with stdlib ``json`` rather than ``astrogwb.paper.utils.load_mapping``
     so this module keeps importing nothing from the config layer, at module
@@ -66,7 +77,7 @@ def _figure_settings(root: Path | None = None) -> Mapping[str, Any]:
     Proxied because ``@cache`` hands every caller the same object.
     """
     return MappingProxyType(
-        json.loads(((root or Path()) / _SETTINGS_PATH).read_text(encoding="utf-8"))
+        json.loads(((root or root_dir()) / _SETTINGS_PATH).read_text(encoding="utf-8"))
     )
 
 
