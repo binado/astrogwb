@@ -132,7 +132,7 @@ All new figure products are written under `outputs/figures/`.
 ## Scripts
 
 Figure entry points are plain Python scripts under `scripts/`. Each reads its
-own fiducials and analysis grid from an assembled run config, whose path the
+own fiducials and analysis settings from an assembled run config, whose path the
 library owns, and hard-codes its own labels and run order. Snakemake passes only
 what it owns: the chain and catalog paths it built, and the output paths it
 declared.

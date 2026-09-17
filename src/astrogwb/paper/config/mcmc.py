@@ -12,15 +12,13 @@ after a backend init is a silent no-op, hence the subprocess).
 
 The generic merge/load helpers (``deep_merge``, ``load_mapping``) live in
 :mod:`astrogwb.paper.utils`, and the run-assembly merge semantics live in
-:mod:`astrogwb.paper.config.runs`; only the ``AnalysisGrid`` shared by every
-experiment run lives here next to the models.
+:mod:`astrogwb.paper.config.runs`; the validated run models live here.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -36,21 +34,6 @@ from pydantic import (
 from astrogwb.paper.utils import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
-
-
-# --------------------------------------------------------------------------- #
-# Shared helpers
-# --------------------------------------------------------------------------- #
-@dataclass(frozen=True)
-class AnalysisGrid:
-    """Frequency band and redshift grid shared by every experiment run."""
-
-    observation_time: float
-    minimum_frequency: float
-    maximum_frequency: float
-    minimum_redshift: float
-    maximum_redshift: float
-    n_grid: int
 
 
 # --------------------------------------------------------------------------- #
@@ -314,25 +297,6 @@ class AnalysisConfig(BaseModel):
                 "likelihood == 'amplitude_marginalized'"
             )
         return self
-
-    @property
-    def grid(self) -> AnalysisGrid:
-        """The frequency band and redshift grid this run's inputs are built on.
-
-        Derived from this block alone, and deliberately not serialized: `save`
-        writes only the inputs needed to reconstruct the validated config. The
-        redshift entries come back out of ``population.model_kwargs``, where
-        the validator has already required all three.
-        """
-        kwargs = self.population.model_kwargs
-        return AnalysisGrid(
-            observation_time=self.observation_time,
-            minimum_frequency=self.minimum_frequency,
-            maximum_frequency=self.maximum_frequency,
-            minimum_redshift=float(kwargs["minimum_redshift"]),
-            maximum_redshift=float(kwargs["maximum_redshift"]),
-            n_grid=int(kwargs["n_grid"]),
-        )
 
 
 class SamplerConfig(BaseModel):

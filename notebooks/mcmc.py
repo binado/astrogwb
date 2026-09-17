@@ -169,7 +169,7 @@ from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config import fiducials as committed_fiducials
 from astrogwb.paper.config import networks as committed_networks
 from astrogwb.paper.config import priors as committed_priors
-from astrogwb.paper.config.mcmc import AnalysisGrid, build_run_config
+from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
@@ -259,21 +259,13 @@ RUN_CONFIG = build_run_config(assemble_run(*REFERENCE_RUN))
 injection_catalog = load_run_catalog(INJECTION_CATALOG_PATH, label="injection")
 proposal_catalog = load_run_catalog(PROPOSAL_CATALOG_PATH, label="proposal")
 
-# The frequency band and redshift grid stay the notebook's own knobs rather
+# The frequency band and redshift support stay the notebook's own knobs rather
 # than the reference run's, so the settings cell above stays live -- they are
 # deliberately explorable here, unlike the fiducials and priors, which have one
 # home now and are read from it. `RUN_CONFIG` is still loaded for its catalogs.
-analysis_grid = AnalysisGrid(
-    observation_time=observation_time,
-    minimum_frequency=minimum_frequency,
-    maximum_frequency=maximum_frequency,
-    minimum_redshift=minimum_redshift,
-    maximum_redshift=maximum_redshift,
-    n_grid=n_grid,
-)
-# The target population -- source model and merger rate together -- bound to
-# the analysis grid once: a partial hashes by identity, so rebuilding one per
-# step would retrace the whole model.
+# The target population -- source model and merger rate together -- is bound
+# once: a partial hashes by identity, so rebuilding one per step would retrace
+# the whole model.
 target_kwargs = {
     "minimum_redshift": minimum_redshift,
     "maximum_redshift": maximum_redshift,
@@ -290,7 +282,11 @@ target = build_population("bns_md_modified_propagation", **target_kwargs)
 inputs = prepare_inference_inputs(
     injection_catalog,
     proposal_catalog,
-    grid=analysis_grid,
+    observation_time=observation_time,
+    minimum_redshift=minimum_redshift,
+    maximum_redshift=maximum_redshift,
+    minimum_frequency=minimum_frequency,
+    maximum_frequency=maximum_frequency,
     detectors=detnames,
     target=target,
     density_sites=DEFAULT_DENSITY_SITES,

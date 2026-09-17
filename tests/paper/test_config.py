@@ -83,31 +83,21 @@ def test_build_run_config_deep_merges_extra_overrides() -> None:
     assert config.sampler.target_accept == raw["sampler"]["target_accept"]
 
 
-def test_analysis_grid_mirrors_the_config() -> None:
+def test_analysis_population_declares_the_required_redshift_grid() -> None:
     config = build_run_config(example_raw())
-    grid = config.analysis.grid
-
-    assert grid.observation_time == config.analysis.observation_time
-    assert (grid.minimum_frequency, grid.maximum_frequency) == (
-        config.analysis.minimum_frequency,
-        config.analysis.maximum_frequency,
-    )
-    # The redshift entries are the target population's construction kwargs,
-    # stated once: the grid reads them back rather than a second block
-    # restating them.
     kwargs = config.analysis.population.model_kwargs
-    assert (grid.minimum_redshift, grid.maximum_redshift, grid.n_grid) == (
-        kwargs["minimum_redshift"],
-        kwargs["maximum_redshift"],
-        kwargs["n_grid"],
-    )
+    expected = example_raw()["analysis"]["population"]["model_kwargs"]
+    assert {"minimum_redshift", "maximum_redshift", "n_grid"} <= set(kwargs)
+    assert kwargs["minimum_redshift"] == expected["minimum_redshift"]
+    assert kwargs["maximum_redshift"] == expected["maximum_redshift"]
+    assert kwargs["n_grid"] == expected["n_grid"]
 
 
 def test_run_config_carries_no_proposal_density() -> None:
     """The density is the proposal catalog's own record, not a config input.
 
-    Window equality with the analysis grid used to need a validator; it now
-    holds by construction, because
+    Window equality with the analysis population support used to need a
+    validator; it now holds by construction, because
     `PolarizationPowerCatalog.restrict_redshift` is handed the run's own window
     and moves the samples and the recorded density together.
     """
@@ -119,7 +109,7 @@ def test_run_config_carries_no_proposal_density() -> None:
     assert config.analysis.catalog.proposal
 
 
-def test_analysis_grid_is_not_serialized(tmp_path) -> None:
+def test_derived_analysis_values_are_not_serialized(tmp_path) -> None:
     """Derived properties stay out of normalized workflow configurations."""
     config = build_run_config(example_raw())
     assert "grid" not in config.model_dump(mode="json")["analysis"]
@@ -130,7 +120,7 @@ def test_analysis_grid_is_not_serialized(tmp_path) -> None:
     assert "grid" not in load_mapping(path)["analysis"]
 
     reloaded = build_run_config(load_mapping(path))
-    assert reloaded.analysis.grid == config.analysis.grid
+    assert reloaded.model_dump(mode="json") == config.model_dump(mode="json")
 
 
 def test_every_experiment_run_assembles_into_a_valid_config() -> None:

@@ -444,7 +444,7 @@ def test_run_mcmc_validates_the_blocks_the_workflow_folds() -> None:
     assert type(config.priors["H0"]).__name__ == "Normal"
     assert config.analysis.sampled_params == ("xi_0",)
     assert config.analysis.catalog.injection == "md-imrphenom-s41-n32768"
-    assert config.analysis.grid.n_grid == 256
+    assert config.analysis.population.model_kwargs["n_grid"] == 256
 
 
 def test_the_jq_block_folds_match_the_python_merge() -> None:

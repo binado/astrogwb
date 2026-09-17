@@ -213,12 +213,18 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     config = build_run_config(load_merged_config(args))
     fiducials = dict(config.fiducials)
-    grid = config.analysis.grid
+    population_kwargs = config.analysis.population.model_kwargs
     networks = resolve_networks(args.network_runs, DETECTOR_NETWORKS)
     use_paper_style()
 
     catalog = load_run_catalog(args.catalog, label="injection")
-    observation = prepare_observation(catalog, grid=grid)
+    observation = prepare_observation(
+        catalog,
+        minimum_redshift=population_kwargs["minimum_redshift"],
+        maximum_redshift=population_kwargs["maximum_redshift"],
+        minimum_frequency=config.analysis.minimum_frequency,
+        maximum_frequency=config.analysis.maximum_frequency,
+    )
     frequencies = observation.frequencies
     frequency_mask = observation.frequency_mask
     figure = plot_omega_and_sh(

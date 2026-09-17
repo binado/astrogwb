@@ -61,7 +61,7 @@ def uniform_grid_spacing(frequencies: ArrayLike) -> float:
     ``delta_f`` bit for bit, while the latter would make the result depend on
     ``n``.
 
-    Never call this on a *masked* analysis grid -- see
+    Never call this on a *masked* analysis frequency array -- see
     :func:`apply_frequency_mask`.
     """
     array = np.asarray(frequencies, dtype=np.float64)

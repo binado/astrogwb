@@ -62,7 +62,7 @@ _BASE_CATALOGS = load_base()["analysis"]["catalog"]
 INJECTION_CATALOG = catalog_path(_BASE_CATALOGS["injection"])
 DEFAULT_PROPOSAL_CATALOG = catalog_path(_BASE_CATALOGS["proposal"])
 # Figures report what was sampled, so each one is handed a run's own config
-# layers for the shared fiducials and analysis grid. Which run that is used to
+# layers for the shared fiducials and analysis settings. Which run that is used to
 # be a constant buried in the library (config.figures.REFERENCE_RUN); it is an
 # explicit choice here now. The two chain figures read the layers of a run they
 # actually plot; the three chain-free figures fall back to this one.

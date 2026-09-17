@@ -70,7 +70,7 @@ N_RETAINED = 6
 REDSHIFT = np.linspace(0.05, 1.5, N_SOURCES)
 
 #: The catalog's own generation window and grid, narrower in resolution than
-#: the analysis grid the target runs on. Keeping them different is deliberate:
+#: the target population's analysis redshift support. Keeping them different is deliberate:
 #: it is what a real run does, and it stops a bug that conflates the two from
 #: cancelling out of both sides.
 GENERATION_KWARGS: dict[str, float | int] = {
@@ -145,6 +145,16 @@ def _config(**overrides: Any) -> RunConfig:
     return build_run_config(raw)
 
 
+def _analysis_bounds(config: RunConfig) -> dict[str, float]:
+    population_kwargs = config.analysis.population.model_kwargs
+    return {
+        "minimum_redshift": float(population_kwargs["minimum_redshift"]),
+        "maximum_redshift": float(population_kwargs["maximum_redshift"]),
+        "minimum_frequency": config.analysis.minimum_frequency,
+        "maximum_frequency": config.analysis.maximum_frequency,
+    }
+
+
 def _prepare(
     injection: PolarizationPowerCatalog,
     proposal: PolarizationPowerCatalog,
@@ -153,7 +163,8 @@ def _prepare(
     return prepare_inference_inputs(
         injection,
         proposal,
-        grid=config.analysis.grid,
+        observation_time=config.analysis.observation_time,
+        **_analysis_bounds(config),
         detectors=config.analysis.detectors,
         target=target_population(config),
         density_sites=DEFAULT_DENSITY_SITES,
@@ -168,7 +179,7 @@ def test_prepare_observation_keeps_arrays_unmasked(
 ) -> None:
     config = _config()
 
-    observation = prepare_observation(injection_catalog, grid=config.analysis.grid)
+    observation = prepare_observation(injection_catalog, **_analysis_bounds(config))
 
     assert observation.frequencies.shape == FREQUENCIES.shape
     assert observation.spectral_density.shape == FREQUENCIES.shape
@@ -192,18 +203,18 @@ def test_the_observed_rate_comes_from_the_injection_catalogs_own_population(
     from reference_population import reference_merger_rate_distance_and_logprob
 
     config = _config()
-    observation = prepare_observation(injection_catalog, grid=config.analysis.grid)
+    observation = prepare_observation(injection_catalog, **_analysis_bounds(config))
 
-    grid = config.analysis.grid
+    bounds = _analysis_bounds(config)
     restricted = injection_catalog.restrict_redshift(
-        grid.minimum_redshift, grid.maximum_redshift
+        bounds["minimum_redshift"], bounds["maximum_redshift"]
     )
     expected_rate, _, _ = reference_merger_rate_distance_and_logprob(
         PAPER_POPULATION_PARAMS,
         jnp.asarray(restricted.source_parameters["redshift"]),
         redshift_grid=jnp.linspace(
-            grid.minimum_redshift,
-            grid.maximum_redshift,
+            bounds["minimum_redshift"],
+            bounds["maximum_redshift"],
             int(restricted.population_model_kwargs["n_grid"]),
         ),
     )
@@ -276,11 +287,13 @@ def test_restriction_narrows_the_proposals_recorded_population_too(
     inputs = _prepare(injection_catalog, proposal_catalog, config)
 
     assert inputs.proposal.num_samples == N_RETAINED
-    assert inputs.proposal.population_model_kwargs["minimum_redshift"] == (
-        config.analysis.grid.minimum_redshift
+    assert (
+        inputs.proposal.population_model_kwargs["minimum_redshift"]
+        == (config.analysis.population.model_kwargs["minimum_redshift"])
     )
-    assert inputs.proposal.population_model_kwargs["maximum_redshift"] == (
-        config.analysis.grid.maximum_redshift
+    assert (
+        inputs.proposal.population_model_kwargs["maximum_redshift"]
+        == (config.analysis.population.model_kwargs["maximum_redshift"])
     )
     # The file on disk is untouched.
     assert proposal_catalog.population_model_kwargs["minimum_redshift"] == 0.0
@@ -298,7 +311,7 @@ def test_model_kwargs_scale_is_the_full_grid_gaussian_bin_scale(
     expected = np.asarray(
         gaussian_bin_scale(
             inputs.effective_psd,
-            config.analysis.grid.observation_time,
+            config.analysis.observation_time,
             # The catalog's bin width, never measured off the selected band.
             10.0,
         )
@@ -604,13 +617,15 @@ def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.
     # the likelihood's mask, not by compressing the power.
     power = jnp.asarray(catalog.polarization_power)
     redshift = jnp.asarray(catalog.source_parameters["redshift"])
-    grid = config.analysis.grid
+    population_kwargs = config.analysis.population.model_kwargs
 
     rate, distance, logprob = reference_merger_rate_distance_and_logprob(
         params,
         redshift,
         redshift_grid=jnp.linspace(
-            grid.minimum_redshift, grid.maximum_redshift, grid.n_grid
+            float(population_kwargs["minimum_redshift"]),
+            float(population_kwargs["maximum_redshift"]),
+            int(population_kwargs["n_grid"]),
         ),
         source_frame_mass_1=catalog.source_parameters["source_frame_mass_1"],
         source_frame_mass_2=catalog.source_parameters["source_frame_mass_2"],
@@ -726,7 +741,7 @@ def test_the_requested_density_factors_reach_the_bound_weights_unchanged(
     ordered-mass factor to one half of the ratio.
     """
     config = _config()
-    grid = config.analysis.grid
+    bounds = _analysis_bounds(config)
     narrow = make_catalog(
         redshift=REDSHIFT,
         polarization_power=np.random.default_rng(1).uniform(
@@ -738,16 +753,19 @@ def test_the_requested_density_factors_reach_the_bound_weights_unchanged(
         # the grid -- and with it the stored distances -- unchanged.
         model_kwargs={
             **GENERATION_KWARGS,
-            "minimum_redshift": grid.minimum_redshift,
-            "maximum_redshift": grid.maximum_redshift,
+            "minimum_redshift": bounds["minimum_redshift"],
+            "maximum_redshift": bounds["maximum_redshift"],
         },
     )
-    restricted = narrow.restrict_redshift(grid.minimum_redshift, grid.maximum_redshift)
+    restricted = narrow.restrict_redshift(
+        bounds["minimum_redshift"], bounds["maximum_redshift"]
+    )
 
     inputs = prepare_inference_inputs(
         injection_catalog,
         narrow,
-        grid=grid,
+        observation_time=config.analysis.observation_time,
+        **bounds,
         detectors=config.analysis.detectors,
         target=restricted.get_population(),
         density_sites=("redshift",),

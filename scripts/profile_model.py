@@ -127,7 +127,11 @@ def build_potential(
     inputs = prepare_inference_inputs(
         injection_catalog,
         proposal_catalog,
-        grid=config.analysis.grid,
+        observation_time=config.analysis.observation_time,
+        minimum_redshift=config.analysis.population.model_kwargs["minimum_redshift"],
+        maximum_redshift=config.analysis.population.model_kwargs["maximum_redshift"],
+        minimum_frequency=config.analysis.minimum_frequency,
+        maximum_frequency=config.analysis.maximum_frequency,
         detectors=config.analysis.detectors,
         target=target_population(config),
         density_sites=config.analysis.population.density_sites,
