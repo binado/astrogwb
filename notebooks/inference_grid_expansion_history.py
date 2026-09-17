@@ -65,6 +65,7 @@ from astrogwb.sampling import LogDensityFn, gwb_spectral_density_model
 register_projection(MplAxes)
 use_paper_style()
 jax.config.update("jax_enable_x64", True)
+# %config InlineBackend.figure_format = 'retina'
 
 # %% [markdown]
 # ## Notebook configuration
@@ -79,8 +80,8 @@ INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5
 PROPOSAL_CATALOG_PATH = INJECTION_CATALOG_PATH
 ANALYSIS_GRID = AnalysisGrid(
     observation_time=1.0,
-    f_min=2.0,
-    f_max=2048.0,
+    minimum_frequency=2.0,
+    maximum_frequency=2048.0,
     minimum_redshift=0.3,
     maximum_redshift=20.0,
     n_grid=256,
@@ -210,6 +211,7 @@ def build_log_density(network: Network) -> tuple[LogDensityFn, dict[str, jax.Arr
         grid=ANALYSIS_GRID,
         detectors=network.detectors,
         target=TARGET_MODEL,
+        density_sites=[],
     )
     model = partial(
         gwb_spectral_density_model,
@@ -353,7 +355,7 @@ CONSTRAINT_TABLE = CONSTRAINT_TABLE.assign(
 CONSTRAINT_TABLE
 
 # %% [markdown]
-# ## H0--Omega_m corner
+# ## $H_0-\Omega_m$ corner plots
 
 # %%
 H0_OMEGA_M_GRIDS = {"H0": H0_GRID_2D, "Omega_m": OMEGA_M_GRID}
