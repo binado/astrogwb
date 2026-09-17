@@ -172,6 +172,7 @@ from astrogwb.paper.config import priors as committed_priors
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
+from astrogwb.paper.paths import root_dir
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.sampling import gwb_spectral_density_model
 
@@ -195,7 +196,9 @@ if IN_COLAB:
         "/content/drive/MyDrive/asgwb/md-imrphenom-s42-n16384.h5"
     )
 else:
-    ROOT_DIR = Path()
+    # Jupyter's kernel cwd is this notebook's directory, so anchor the
+    # notebook's own paths on the checkout root.
+    ROOT_DIR = root_dir()
     INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
     PROPOSAL_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s42-n16384.h5"
 
