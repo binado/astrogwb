@@ -31,7 +31,10 @@
 #   figures, each overlaid for every network with the same colors and
 #   linestyles as the $S_{\mathrm{eff}}$ comparison;
 # - a stacked panel of the spectrum above both cumulative SNR curves for the
-#   reference network only.
+#   reference network only;
+# - a table of absolute $\mathrm{SNR}(>f)$ at $f = 2, 5, 10, 20\ \mathrm{Hz}$
+#   for every network, exported to LaTeX under
+#   `FIGURES_DIR/fiducial_spectrum/cumulative_snr_above.tex`.
 #
 # Point `INJECTION_CATALOG_PATH` at the injection catalog used by `mcmc.py`.
 # The fiducials and detector networks the overlays follow are read from
@@ -50,6 +53,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
@@ -82,8 +86,14 @@ from astrogwb.utils import years_to_seconds
 # matplotlib axes so plotting behaves as expected after importing detector utilities.
 register_projection(MplAxes)
 
+# The notebook may be executed from the repository root (`jupytext --execute`,
+# whose kernel cwd is this directory) or from the root itself, so probe for
+# `notebooks/` the way `catalog_convergence.py` does. `Path().parent` is `.`,
+# not `..`, hence the literal.
+ROOT_DIR = Path() if Path("notebooks").is_dir() else Path("..")
+
 jax.config.update("jax_enable_x64", True)
-use_paper_style()
+use_paper_style(root=ROOT_DIR)
 # %config InlineBackend.figure_format = 'retina'
 
 
@@ -103,11 +113,6 @@ use_paper_style()
 # below is hand-maintained.
 
 # %%
-#: The notebook may be executed from the repository root (`jupytext --execute`,
-#: whose kernel cwd is this directory) or from the root itself, so probe for
-#: `notebooks/` the way `catalog_convergence.py` does. `Path().parent` is `.`,
-#: not `..`, hence the literal.
-ROOT_DIR = Path() if Path("notebooks").is_dir() else Path("..")
 INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
 #: Where this notebook's figures go: under the one output root the workflow,
 #: the figure scripts and `config/plotting.json` all agree on.
@@ -122,8 +127,8 @@ FIDUCIALS = fiducials(root=ROOT_DIR)
 # observation_time -- what that experiment's RunConfig.analysis_grid assembled to.
 GRID = AnalysisGrid(
     observation_time=1.0,
-    f_min=2.0,
-    f_max=2048.0,
+    minimum_frequency=2.0,
+    maximum_frequency=2048.0,
     minimum_redshift=0.3,
     maximum_redshift=20.0,
     n_grid=256,
@@ -145,6 +150,7 @@ ET_ONLY_NETWORKS: tuple[Network, ...] = tuple(
 )
 
 OMEGA_GW_MIN = 1.0e-13
+CUMULATIVE_SNR_ABOVE_FMINS_HZ = (2.0, 5.0, 10.0, 20.0)
 
 # Cumulative-SNR curves on the stacked figure: Okabe-Ito blue / vermillion,
 # distinct from the black dual-axis spectrum.
@@ -227,6 +233,21 @@ def snr_integrand_and_cumulative(
     snr_gt = np.sqrt(np.cumsum(snr_squared[::-1])[::-1])
     total = snr_lt[-1]
     return snr_squared, snr_lt / total, snr_gt / total
+
+
+def cumulative_snr_above_at(
+    frequency: np.ndarray,
+    snr_squared: np.ndarray,
+    f_cutoff: float,
+) -> float:
+    """Absolute SNR(>f) at the band bin nearest ``f_cutoff``.
+
+    Reuses the same right-cumulative definition as ``snr_integrand_and_cumulative``:
+    the bin at ``f`` is included in SNR(>f).
+    """
+    index = int(np.argmin(np.abs(frequency - f_cutoff)))
+    snr_gt = np.sqrt(np.cumsum(snr_squared[::-1])[::-1])
+    return float(snr_gt[index])
 
 
 def _network_legend_handles(
@@ -468,7 +489,7 @@ fig = plot_omega_and_sh(
     h0=FIDUCIALS["H0"],
     omega_gw_min=OMEGA_GW_MIN,
 )
-_ = save_figures({BASE_DIR / "omega_and_sh.pdf": fig})
+_ = save_figures({BASE_DIR / "omega_and_sh.pdf": fig}, root=ROOT_DIR)
 
 
 # %% [markdown]
@@ -528,7 +549,7 @@ fig = plot_effective_psds(
     linestyles=detector_linestyles,
     frequency_mask=frequency_mask,
 )
-_ = save_figures({BASE_DIR / "effective_psds.pdf": fig})
+_ = save_figures({BASE_DIR / "effective_psds.pdf": fig}, root=ROOT_DIR)
 
 
 # %% [markdown]
@@ -638,7 +659,7 @@ fig = plot_spectrum_and_sensitivities(
     include_spectrum_in_legend=False,
     spectrum_legend_loc="upper left",
 )
-_ = save_figures({BASE_DIR / "sh_and_sigma.pdf": fig})
+_ = save_figures({BASE_DIR / "sh_and_sigma.pdf": fig}, root=ROOT_DIR)
 
 
 # %% [markdown]
@@ -665,7 +686,7 @@ fig = plot_spectrum_and_sensitivities(
     include_spectrum_in_legend=False,
     spectrum_legend_loc="upper left",
 )
-_ = save_figures({BASE_DIR / "omega_and_sigma.pdf": fig})
+_ = save_figures({BASE_DIR / "omega_and_sigma.pdf": fig}, root=ROOT_DIR)
 
 
 # %% [markdown]
@@ -793,7 +814,7 @@ fig = plot_snr_integrand(
     colors=detector_colors,
     linestyles=detector_linestyles,
 )
-_ = save_figures({BASE_DIR / "snr_integrand.pdf": fig})
+_ = save_figures({BASE_DIR / "snr_integrand.pdf": fig}, root=ROOT_DIR)
 
 
 # %%
@@ -804,7 +825,7 @@ fig = plot_snr_cumulative_below(
     colors=detector_colors,
     linestyles=detector_linestyles,
 )
-_ = save_figures({BASE_DIR / "snr_cumulative_below.pdf": fig})
+_ = save_figures({BASE_DIR / "snr_cumulative_below.pdf": fig}, root=ROOT_DIR)
 
 
 # %%
@@ -815,7 +836,83 @@ fig = plot_snr_cumulative_above(
     colors=detector_colors,
     linestyles=detector_linestyles,
 )
-_ = save_figures({BASE_DIR / "snr_cumulative_above.pdf": fig})
+_ = save_figures({BASE_DIR / "snr_cumulative_above.pdf": fig}, root=ROOT_DIR)
+
+
+# %% [markdown]
+# ## Cumulative SNR above frequency cutoffs
+#
+# Absolute $\mathrm{SNR}(>f)$ at $f = 2, 5, 10, 20\ \mathrm{Hz}$ for each
+# detector network. Values come from the same right-cumulative sum as the
+# normalized curves above, evaluated at the band bin nearest each cutoff.
+
+
+# %%
+def build_cumulative_snr_above_table(
+    networks: Sequence[Network],
+    frequency_by_network: Mapping[str, np.ndarray],
+    snr_squared_by_network: Mapping[str, np.ndarray],
+    f_cutoffs_hz: Sequence[float],
+) -> pd.DataFrame:
+    """Tabulate absolute SNR(>f) at each cutoff for every network."""
+    rows: list[dict[str, float | str]] = []
+    for network in networks:
+        frequency = frequency_by_network[network.name]
+        snr_squared = snr_squared_by_network[network.name]
+        row: dict[str, float | str] = {
+            "network": network.name,
+            "label": network.label,
+        }
+        for f_cutoff in f_cutoffs_hz:
+            row[f"snr_above_{f_cutoff:g}_hz"] = cumulative_snr_above_at(
+                frequency,
+                snr_squared,
+                f_cutoff,
+            )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def cumulative_snr_above_table_latex(table: pd.DataFrame) -> str:
+    """Format the cumulative-SNR cutoff table as a publication LaTeX tabular."""
+    column_names = {
+        "label": "Detector Network",
+        **{
+            f"snr_above_{f_cutoff:g}_hz": rf"$\mathrm{{SNR}}(>{f_cutoff:g}\ \mathrm{{Hz}})$"
+            for f_cutoff in CUMULATIVE_SNR_ABOVE_FMINS_HZ
+        },
+    }
+    latex_table = table[list(column_names)].rename(columns=column_names)
+    return latex_table.to_latex(
+        index=False,
+        escape=False,
+        float_format="%.3g",
+        caption=(
+            "Matched-filter SNR accumulated above $f$ for each detector network "
+            "at the fiducial injection."
+        ),
+        label="tab:fiducial_cumulative_snr_above",
+    )
+
+
+# %%
+cumulative_snr_above_table = build_cumulative_snr_above_table(
+    NETWORKS,
+    frequency_by_network,
+    snr_squared_by_network,
+    CUMULATIVE_SNR_ABOVE_FMINS_HZ,
+)
+cumulative_snr_above_table
+
+
+# %%
+BASE_DIR.mkdir(parents=True, exist_ok=True)
+cumulative_snr_above_tex_path = BASE_DIR / "cumulative_snr_above.tex"
+cumulative_snr_above_tex_path.write_text(
+    cumulative_snr_above_table_latex(cumulative_snr_above_table),
+    encoding="utf-8",
+)
+print("saved:", cumulative_snr_above_tex_path)
 
 
 # %% [markdown]
@@ -888,4 +985,4 @@ fig = plot_spectrum_and_cumulative_snr(
     snr_gt_by_network[reference_network.name],
     omega_gw_min=OMEGA_GW_MIN,
 )
-_ = save_figures({BASE_DIR / "spectrum_and_cumulative_snr.pdf": fig})
+_ = save_figures({BASE_DIR / "spectrum_and_cumulative_snr.pdf": fig}, root=ROOT_DIR)
