@@ -33,7 +33,7 @@ must not enter a catalog merge:
    A catalog layer, not a run layer. Only
    `config/catalogs/md-taylorf2-s41-n32768.json` overrides anything here
    (the approximant). The stored band matches
-   `config/analysis/base/model.toml`'s `[analysis]` `minimum_frequency` and
+   `config/analysis.json`'s `[analysis]` `minimum_frequency` and
    `maximum_frequency`: the
    catalog grid *is* the array every model is evaluated on, and a run's band
    selects bins on it with a mask rather than compressing it.
@@ -393,8 +393,8 @@ the registry. Earlier formats require regeneration.
 ## What is *not* in the file: the analysis window
 
 The recorded settings are the *generation* window, `[0.0, 20.0]`. The analysis
-window is narrower — `minimum_redshift = 0.3` in
-`config/analysis/base/model.toml` — so the per-sample log density cannot be
+window is narrower — `analysis.population.model_kwargs.minimum_redshift = 0.3`
+in `config/analysis.json` — so the per-sample log density cannot be
 baked into the catalog: it depends on a truncation the run chooses, not on
 anything generation knows.
 

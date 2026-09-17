@@ -11,15 +11,16 @@ All commands run with the repository root as their working directory.
 Source inputs live under `config/`; generated artifacts live under `outputs/`.
 
 The Snakefile computes its own inputs by globbing that tree --
-`discover_catalog_names()` over `config/catalogs/*.json` and `discover_runs()` over
-`config/analysis/runs/*/` -- and imports exactly one config function,
-`assemble_run`, because a run's catalog names are known only after the four-layer
-merge. No registry file translates a name into a path.
+`discover_catalog_names()` over `config/catalogs/*.json` and `discover_runs()`
+over `config/runs/*/` -- and imports only the path and merge helpers from
+`astrogwb.paper.config.runs`, because a run's catalog names are known only
+after its layers are merged. No registry file translates a name into a path.
 
 ## Catalog workflow
 
-Catalog configs are committed in [`config/catalogs/`](../config/catalogs/): a
-shared `base/` layer plus one `defs/<name>.toml` per catalog. Build all
+Catalog configs are committed in [`config/catalogs/`](../config/catalogs/):
+one `<name>.json` per catalog over the shared `config/waveform.json`,
+`config/population.json` and `config/fiducials.json` layers. Build all
 catalogs before running experiments:
 
 ```bash
@@ -55,10 +56,10 @@ itself.
 
 ## Experiment workflow
 
-[`config/analysis/`](../config/analysis/) holds the shared base, one `_base.toml`
-per experiment, and one TOML per run. `run_mcmc` declares those four layers as
-its own `input:` and passes them straight back to the runner as repeated
-`--config` flags, then writes:
+[`config/runs/`](../config/runs/) holds one `_base.json` per experiment and one
+JSON file per run, over the five shared `config/*.json` layers. `run_mcmc`
+declares those layers as its own `input:` and passes them straight back to the
+runner as repeated `--config` flags, then writes:
 
 ```text
 outputs/chains/<experiment>/<run>.nc      the chain (protected)

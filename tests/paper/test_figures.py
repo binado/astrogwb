@@ -179,13 +179,11 @@ def test_the_network_a_run_names_matches_its_legend_name() -> None:
 def test_resolve_networks_rejects_an_undeclared_network(tmp_path: Path) -> None:
     """A run naming a network the table lacks fails, naming both."""
     write_root_layers(tmp_path, networks={"known": ["S1", "R1"]})
-    experiment = tmp_path / "config/analysis/runs/demo"
+    experiment = tmp_path / "config/runs/demo"
     experiment.mkdir(parents=True)
-    (tmp_path / "config/analysis/base").mkdir(parents=True)
-    (tmp_path / "config/analysis/base/model.toml").write_text("", encoding="utf-8")
-    (experiment / "_base.toml").write_text("", encoding="utf-8")
-    (experiment / "only.toml").write_text(
-        '[analysis]\nnetwork = "absent"\n', encoding="utf-8"
+    (experiment / "_base.json").write_text("{}", encoding="utf-8")
+    (experiment / "only.json").write_text(
+        '{"analysis": {"network": "absent"}}', encoding="utf-8"
     )
 
     with pytest.raises(ValueError, match=r"names network 'absent'"):

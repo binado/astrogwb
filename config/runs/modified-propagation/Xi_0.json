@@ -1,0 +1,12 @@
+{
+  "analysis": {
+    "sampled_params": [
+      "xi_0"
+    ],
+    "network": "ET-2L-aligned-CE-Hanford"
+  },
+  "sampler": {
+    "num_warmup": 500,
+    "dense_mass": false
+  }
+}

@@ -1,4 +1,4 @@
-"""Discovery and the three-layer merge behind ``config/analysis/``.
+"""Discovery and the layered merge behind ``config/``.
 
 Replaces ``test_experiments.py``: there is no inventory to validate any more,
 so what is tested is the convention (which files exist and what they map to)
@@ -76,7 +76,12 @@ def test_the_retired_inventories_are_gone() -> None:
     # config/banks went with the bank/catalog split: every catalog is a file
     # now, so there is one config tree for them and one output directory.
     assert not (PAPER_ROOT / "config/banks").exists()
-    assert (PAPER_ROOT / "config/analysis/base").is_dir()
+    # config/analysis/ went the same way as config/catalogs/base: every
+    # shared run layer is one config/*.json named after the block it declares,
+    # so there is no base/ to glob and no runs/ level to nest under.
+    assert not (PAPER_ROOT / "config/analysis").exists()
+    assert (PAPER_ROOT / "config/analysis.json").is_file()
+    assert (PAPER_ROOT / "config/runs").is_dir()
     assert (PAPER_ROOT / "config/catalogs").is_dir()
     # The catalog tree is one flat directory of defs: the shared layers sit in
     # config/ with the run tables, where `jq` reads them, so there is no
@@ -104,27 +109,42 @@ def test_output_roots_are_derived_from_one_base() -> None:
 
 
 def test_run_config_paths_are_the_layers_in_merge_order() -> None:
-    """Layer 0 first, then base/*.toml, then the experiment, then the run.
+    """Every shared layer first, then the experiment, then the run.
 
-    The JSON names are asserted literally rather than against
-    `root_config_paths()`: nothing else pins that the shared scientific values
-    are merged *before* the TOML base, and a self-consistent comparison against
-    the helper would pass whatever order the helper happened to return.
+    The shared names are asserted literally rather than against
+    `base_config_paths()`: a self-consistent comparison against the helper
+    would pass whatever list the helper happened to return, and what matters
+    here is that there is one file per top-level block and that the run's own
+    file is last.
     """
     paths = run_config_paths("cosmological-parameters", "ET-triangular")
     base = base_config_paths()
 
-    assert [path.name for path in paths[:3]] == [
+    assert [path.name for path in base] == [
+        "analysis.json",
         "fiducials.json",
-        "priors.json",
         "networks.json",
+        "priors.json",
+        "sampler.json",
     ]
     assert paths[: len(base)] == base
     assert [path.name for path in paths[len(base) :]] == [
         EXPERIMENT_BASE,
-        "ET-triangular.toml",
+        "ET-triangular.json",
     ]
     assert all(path.is_file() for path in paths)
+
+
+def test_every_shared_layer_is_one_block_named_after_its_stem() -> None:
+    """The layer-0 convention, which the per-block CLI and `jq` folds rely on.
+
+    A shared layer that declared two blocks, or a block whose name did not
+    match its filename, would make "one flag per block, one file per block"
+    false -- and `astrogwb.paper.config`'s accessors look the table up by stem.
+    """
+    for path in base_config_paths(REPO_ROOT):
+        declared = json.loads(path.read_text(encoding="utf-8"))
+        assert list(declared) == [path.stem], path
 
 
 def test_plotting_settings_are_not_a_run_layer() -> None:
@@ -178,17 +198,17 @@ def test_assembling_an_unknown_run_names_the_missing_file() -> None:
 
 
 def test_an_experiment_without_a_base_overlay_is_rejected(tmp_path: Path) -> None:
-    (tmp_path / "config/analysis/base").mkdir(parents=True)
-    (tmp_path / "config/analysis/base/x.toml").write_text("seed = 1\n")
-    (tmp_path / "config/analysis/runs/demo").mkdir(parents=True)
-    (tmp_path / "config/analysis/runs/demo/only.toml").write_text("")
+    write_root_layers(tmp_path)
+    (tmp_path / "config/runs/demo").mkdir(parents=True)
+    # `{}` rather than an empty file: a layer is JSON now, and "" is not.
+    (tmp_path / "config/runs/demo/only.json").write_text("{}")
 
     with pytest.raises(ValueError, match=f"missing a required {EXPERIMENT_BASE}"):
         discover_runs(tmp_path)
 
 
 # --------------------------------------------------------------------------- #
-# The three-layer merge
+# The layered merge
 # --------------------------------------------------------------------------- #
 def test_base_files_merge_into_one_mapping() -> None:
     base = load_base()
@@ -197,23 +217,22 @@ def test_base_files_merge_into_one_mapping() -> None:
     # state its own, or inherit someone else's silently.
     assert "network" not in base["analysis"]
     assert "detectors" not in base["analysis"]
-    # Layer 0 is part of "everything shared", so it is in this merge too.
-    assert {"fiducials", "priors", "networks"} <= set(base)
+    # Every shared layer is in this merge, one block each.
+    assert set(base) == {"analysis", "fiducials", "networks", "priors", "sampler"}
 
 
-def test_layer_zero_owns_the_fiducials_and_priors_alone() -> None:
+def test_no_run_layer_redeclares_the_fiducials_or_priors() -> None:
     """The shared values have one home, not two.
 
     `config/analysis/base/parameters.toml` used to declare both. It is gone,
-    and no base TOML may quietly reintroduce either table -- a second
+    and no run layer may quietly reintroduce either table -- a second
     declaration would win the merge and the JSON the notebooks read would
-    silently stop describing what the runs sample.
+    silently stop describing what the runs sample. A *run* overriding one
+    named prior is a different thing and is allowed; a whole table is not.
     """
-    assert not (REPO_ROOT / "config/analysis/base/parameters.toml").exists()
-    for path in (REPO_ROOT / "config/analysis/base").glob("*.toml"):
+    for path in sorted((REPO_ROOT / "config/runs").rglob("*.json")):
         raw = load_mapping(path)
         assert "fiducials" not in raw, path
-        assert "priors" not in raw, path
 
 
 def test_no_run_declares_a_raw_detector_list() -> None:
@@ -223,7 +242,11 @@ def test_no_run_declares_a_raw_detector_list() -> None:
     resolve the name or cross-check the list, and both pass when the list
     happens to agree.
     """
-    for path in sorted((REPO_ROOT / "config/analysis").rglob("*.toml")):
+    layers = [
+        REPO_ROOT / "config/analysis.json",
+        *(REPO_ROOT / "config/runs").rglob("*.json"),
+    ]
+    for path in sorted(layers):
         analysis = load_mapping(path).get("analysis") or {}
         assert "detectors" not in analysis, path
 
@@ -275,30 +298,27 @@ def test_every_run_names_declared_catalogs(experiment: str, run: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("base_config", "message"),
+    ("catalog", "message"),
     [
+        ({"injection": "a"}, r"analysis\.catalog\.proposal must be a catalog name"),
+        (None, r"\[analysis\.catalog\] table"),
         (
-            '[analysis.catalog]\ninjection = "a"\n',
-            r"analysis\.catalog\.proposal must be a catalog name",
-        ),
-        ("seed = 1\n", r"\[analysis\.catalog\] table"),
-        (
-            '[analysis.catalog]\ninjection = "a"\nproposal = 3\n',
+            {"injection": "a", "proposal": 3},
             r"analysis\.catalog\.proposal must be a catalog name",
         ),
     ],
 )
 def test_resolve_catalog_names_rejects_malformed_catalogs(
-    tmp_path: Path, base_config: str, message: str
+    tmp_path: Path, catalog: dict[str, object] | None, message: str
 ) -> None:
-    base = tmp_path / "config/analysis/base"
-    experiment = tmp_path / "config/analysis/runs/demo"
-    base.mkdir(parents=True)
+    experiment = tmp_path / "config/runs/demo"
     experiment.mkdir(parents=True)
-    write_root_layers(tmp_path)
-    (base / "catalog.toml").write_text(base_config, encoding="utf-8")
-    (experiment / EXPERIMENT_BASE).write_text("", encoding="utf-8")
-    (experiment / "only.toml").write_text("", encoding="utf-8")
+    analysis: dict[str, object] = {"minimum_frequency": 2.0}
+    if catalog is not None:
+        analysis["catalog"] = catalog
+    write_root_layers(tmp_path, analysis=analysis)
+    (experiment / EXPERIMENT_BASE).write_text("{}", encoding="utf-8")
+    (experiment / "only.json").write_text("{}", encoding="utf-8")
 
     with pytest.raises(TypeError, match=message):
         resolve_catalog_names("demo", "only", root=tmp_path)

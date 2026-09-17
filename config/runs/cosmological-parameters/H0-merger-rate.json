@@ -1,0 +1,11 @@
+{
+  "analysis": {
+    "sampled_params": [
+      "local_merger_rate"
+    ],
+    "network": "ET-2L-aligned-CE-Hanford",
+    "likelihood": "amplitude_marginalized",
+    "amplitude_parameter": "H0",
+    "amplitude_num_nodes": 1024
+  }
+}

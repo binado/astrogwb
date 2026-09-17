@@ -1,0 +1,24 @@
+{
+  "analysis": {
+    "sampled_params": [
+      "xi_0"
+    ],
+    "network": "ET-2L-aligned-CE-Hanford",
+    "likelihood": "amplitude_marginalized",
+    "amplitude_parameter": "H0",
+    "amplitude_num_nodes": 1024
+  },
+  "sampler": {
+    "num_warmup": 500,
+    "dense_mass": false
+  },
+  "priors": {
+    "H0": {
+      "dist": "Normal",
+      "kwargs": {
+        "loc": 67.66,
+        "scale": 0.6766
+      }
+    }
+  }
+}

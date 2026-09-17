@@ -3,7 +3,6 @@ import shlex
 from pathlib import Path
 
 from astrogwb.paper.config.runs import (
-    base_config_paths,
     catalog_config_paths,
     discover_catalog_names,
     discover_runs,
@@ -28,7 +27,7 @@ def catalog_path(name: str) -> str:
 
 
 # Filenames are the mapping: config/catalogs/<name>.json ->
-# outputs/catalogs/<name>.h5, and config/analysis/runs/<experiment>/<run>.toml
+# outputs/catalogs/<name>.h5, and config/runs/<experiment>/<run>.json
 # -> outputs/chains/<experiment>/<run>.nc. Nothing below translates a registry
 # name into a path; it only globs the config tree and reads back the two names
 # a run's own [analysis.catalog] block carries.
@@ -67,7 +66,6 @@ DEFAULT_PROPOSAL_CATALOG = catalog_path(_BASE_CATALOGS["proposal"])
 # explicit choice here now. The two chain figures read the layers of a run they
 # actually plot; the three chain-free figures fall back to this one.
 FIGURE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
-BASE_CONFIGS = [str(path) for path in base_config_paths(Path("."))]
 
 
 def config_layers(experiment, run):
@@ -96,13 +94,15 @@ def network_run_flags(experiment):
 
 
 def network_config_inputs(experiment):
-    """The run TOMLs behind `network_run_flags`, so the DAG edges are real.
+    """The run files behind `network_run_flags`, so the DAG edges are real.
 
     The script re-derives these paths from the run names it is given; declaring
-    them here is what makes editing one network's TOML retrigger the figure.
+    them here is what makes editing one network's config retrigger the figure.
+    Taken from `run_config_paths`, whose last layer is the run's own file, so
+    the path convention lives in one place.
     """
     return [
-        f"config/analysis/runs/{experiment}/{run}.toml"
+        str(run_config_paths(experiment, run, root=Path("."))[-1])
         for run in DETECTOR_NETWORK_RUNS
     ]
 
@@ -240,9 +240,9 @@ rule run_mcmc:
     """Sample one run into outputs/chains/<experiment>/<run>.nc."""
     input:
         script="scripts/run_mcmc.py",
-        # The same three layers `assemble_config` used to declare, so re-run
+        # The same layers `assemble_config` used to declare, so re-run
         # granularity is unchanged: edit a leaf -> one chain; edit
-        # base/sampling.toml -> all 26.
+        # config/sampler.json -> all 26.
         config=lambda w: config_layers(w.experiment, w.run),
         injection=run_catalog_input("injection"),
         proposal=run_catalog_input("proposal"),
@@ -392,9 +392,9 @@ rule fiducial_spectrum:
     input:
         catalog=INJECTION_CATALOG,
         # Borrows the cosmological-parameters networks; reads no chains. The
-        # network TOMLs are declared even though no chain is, so editing one
-        # network's detector list retriggers this figure -- which it did not do
-        # while the figure resolved everything from one assembled config.
+        # network config files are declared even though no chain is, so editing
+        # one network's detector list retriggers this figure -- which it did not
+        # do while the figure resolved everything from one assembled config.
         config=config_layers(*FIGURE_RUN),
         network_configs=network_config_inputs("cosmological-parameters"),
     output:

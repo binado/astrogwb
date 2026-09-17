@@ -51,29 +51,31 @@ config/fiducials.json                           fiducial value of every paramete
                                                 the values a catalog is drawn at)
 config/priors.json                              prior on every parameter
 config/networks.json                            each detector network, by name
+config/analysis.json                            band, target population, catalogs
+config/sampler.json                             RNG seed and the NUTS defaults
 config/waveform.json                            [waveform] every catalog shares
                                                 (a catalog layer; not a run layer)
 config/plotting.json                            LaTeX labels and savefig settings
                                                 (presentation; not a run layer)
-config/analysis/base/*.toml                     the remaining shared settings
-config/analysis/runs/<experiment>/_base.toml    the experiment override
-config/analysis/runs/<experiment>/<run>.toml
+config/runs/<experiment>/_base.json             the experiment override
+config/runs/<experiment>/<run>.json             the run override
   -> outputs/chains/<experiment>/<run>.nc       the chain
   -> outputs/chains/<experiment>/<run>.json     the config it was sampled with
 ```
 
-The three JSON files are layer 0. They are top-level and JSON because more
-than the workflow reads them: the notebooks and figure scripts consume the same
-bytes through `astrogwb.paper.config.fiducials()` / `priors()` / `networks()`,
-and `jq` reads them without importing the package. Each accessor takes keyword
-overrides merged over the file, so a notebook can vary one value without
-editing JSON or retyping the table.
+The five shared run layers are one file per top-level block of a run config,
+each a single-key object whose key is its own stem. They are JSON so that `jq`
+can fold a block in the shell without importing the package, and three of them
+are read by more than the workflow: the notebooks and figure scripts consume
+the same bytes through `astrogwb.paper.config.fiducials()` / `priors()` /
+`networks()`. Each accessor takes keyword overrides merged over the file, so a
+notebook can vary one value without editing JSON or retyping the table.
 
-There is no intermediate assembled config. The four layers are merged in
-process by whatever runs -- the workflow passes them on argv as repeated
-`--config` flags, and declares those same files as the rule's `input:` -- and
-`run_mcmc` writes the resolved config next to the chain, stamping the ordered
-layer paths into the chain itself.
+There is no intermediate assembled config. The layers are merged in process by
+whatever runs -- the workflow passes them on argv as repeated `--config` flags,
+and declares those same files as the rule's `input:` -- and `run_mcmc` writes
+the resolved config next to the chain, stamping the ordered layer paths into
+the chain itself.
 
 See [`docs/`](.) for catalog generation, inference, paper figures, and
 Snakemake/SLURM workflows.

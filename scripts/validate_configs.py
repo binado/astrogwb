@@ -31,7 +31,7 @@ logger = logging.getLogger("validate_configs")
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Merge and validate every config/analysis/ run, and check the "
+            "Merge and validate every config/runs/ run, and check the "
             "catalogs each one names, without building anything."
         )
     )

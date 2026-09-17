@@ -19,6 +19,7 @@ distance is simply the distance column the file already holds.
 
 from __future__ import annotations
 
+import json
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -784,8 +785,10 @@ def test_a_guard_mixture_catalog_cannot_supply_an_observed_rate() -> None:
 
 def test_the_repository_ships_no_proposal_density_config() -> None:
     """A run names two catalog files; the density is in each file."""
-    text = (REPO_ROOT / "config/analysis/base/catalogs.toml").read_text(
-        encoding="utf-8"
+    shared = json.loads(
+        (REPO_ROOT / "config/analysis.json").read_text(encoding="utf-8")
     )
-    assert "[analysis.catalog]" in text
-    assert "uniform_mixing_fraction" not in text
+
+    assert set(shared["analysis"]["catalog"]) == {"injection", "proposal"}
+    for path in sorted((REPO_ROOT / "config/runs").rglob("*.json")):
+        assert "uniform_mixing_fraction" not in path.read_text(encoding="utf-8")

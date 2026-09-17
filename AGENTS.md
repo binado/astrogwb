@@ -64,14 +64,20 @@ through it. `jq`'s `*` is `deep_merge`; catalog layers carry no `[priors]`
 block, so the shallow-merge rule the run path needs never applies. A test pins
 the two merges agreeing.
 
-A run config is four layers merged in order -- `config/{fiducials,priors,networks}.json`,
-then `config/analysis/base/*`, then the experiment `_base.toml`, then the run.
-The three JSON files are layer 0: the shared scientific values, which the
-notebooks and figure scripts also read directly through
+A run config is three layers merged in order --
+`config/{analysis,fiducials,networks,priors,sampler}.json`, then the experiment
+`config/runs/<experiment>/_base.json`, then the run. The shared layers are one
+file per top-level block of a run config, each a single-key object whose key is
+its own stem; that convention is what lets an entrypoint take one flag per
+block and `jq` fold a block in the shell, and a test pins it. Three of them are
+also read directly by the notebooks and figure scripts through
 `astrogwb.paper.config.fiducials()` / `priors()` / `networks()`, so a copy
-cannot drift from what the runs sample. `jq` can read them without importing
-the package. A run names a detector network (`analysis.network`) rather than
-listing detectors. `config/plotting.json` is presentation -- LaTeX parameter
+cannot drift from what the runs sample. Every layer is JSON, so
+`load_mapping` is one parser and `jq` reads any of them without importing the
+package. A run names a detector network (`analysis.network`) rather than
+listing detectors, and its target population, redshift grid and two catalogs
+all live in its `[analysis]` block. What each committed run is for is
+documented in `config/runs/README.md`, next to the files. `config/plotting.json` is presentation -- LaTeX parameter
 labels and savefig settings, reached through `astrogwb.paper.plotting` -- and
 is deliberately *not* a run layer. `config/waveform.json` and
 `config/population.json` are catalog layers, reached through

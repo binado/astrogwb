@@ -8,14 +8,13 @@ the workflow declares as the rule's `input:` and passes straight back on argv:
 
 ```bash
 uv run --extra paper python scripts/run_mcmc.py \
-  --config config/analysis/base/catalogs.toml \
-  --config config/analysis/base/model.toml \
+  --config config/analysis.json \
   --config config/fiducials.json \
-  --config config/priors.json \
   --config config/networks.json \
-  --config config/analysis/base/sampling.toml \
-  --config config/analysis/runs/cosmological-parameters/_base.toml \
-  --config config/analysis/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
+  --config config/priors.json \
+  --config config/sampler.json \
+  --config config/runs/cosmological-parameters/_base.json \
+  --config config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
   --injection-catalog outputs/catalogs/md-imrphenom-s41-n32768.h5 \
   --proposal-catalog outputs/catalogs/md-imrphenom-s42-n16384.h5
 ```
@@ -42,36 +41,36 @@ uv run --extra paper python scripts/profile_model.py --help
 
 ## The configuration tree
 
-[`config/analysis/`](../config/analysis/) is the sole MCMC configuration source.
-A run config is four layers merged in order:
+[`config/`](../config/) is the sole MCMC configuration source. A run config is
+three layers merged in order:
 
 ```text
-config/{fiducials,priors,networks}.json         the shared scientific values
-config/analysis/base/*.toml                     the remaining shared settings
-config/analysis/runs/<experiment>/_base.toml    the experiment override
-config/analysis/runs/<experiment>/<run>.toml    the run override
-  -> outputs/chains/<experiment>/<run>.nc       the chain
-  -> outputs/chains/<experiment>/<run>.json     the config it was sampled with
+config/{analysis,fiducials,networks,priors,sampler}.json   the shared values
+config/runs/<experiment>/_base.json                        the experiment override
+config/runs/<experiment>/<run>.json                        the run override
+  -> outputs/chains/<experiment>/<run>.nc                  the chain
+  -> outputs/chains/<experiment>/<run>.json                the config it was sampled with
 ```
 
 Filenames are the mapping. There is no inventory file: `discover_runs()` globs
-the tree, and a new run is a new TOML. `_base.toml` is required in every
+the tree, and a new run is a new JSON file. `_base.json` is required in every
 experiment directory rather than optional -- a conditional Snakemake input
-complicates the DAG for no gain.
+complicates the DAG for no gain. What each committed run is *for* is documented
+in [`config/runs/README.md`](../config/runs/README.md), next to the files.
 
-Layer 0 is JSON, and top-level, because it is read by more than the workflow:
-the notebooks and figure scripts consume the same files through
-`astrogwb.paper.config`, and `jq` reads them without importing the package.
-Each is a single-key object, so nothing special-cases them in the merge.
+The shared layers are **one file per top-level block of a run config, each a
+single-key object whose key is its own stem**. That is what lets `run_mcmc`
+take one flag per block, and what lets `jq` fold a block in the shell. Three of
+them are read by more than the workflow: the notebooks and figure scripts
+consume `fiducials`, `priors` and `networks` through `astrogwb.paper.config`.
 
 | File | Owns |
 | --- | --- |
+| `analysis.json` | observing time, frequency band, target population, and the two catalogs |
 | `fiducials.json` | the fiducial value of every parameter |
-| `priors.json` | the prior on every parameter |
 | `networks.json` | each detector network, by name |
-| `base/sampling.toml` | the sampling RNG seed and NUTS defaults |
-| `base/model.toml` | observing time, frequency band, target population |
-| `base/catalogs.toml` | the injection catalog and the default proposal catalog |
+| `priors.json` | the prior on every parameter |
+| `sampler.json` | the sampling RNG seed and NUTS defaults |
 
 Fiducials are **not** the injection: what was injected is recorded in the
 injection catalog file, which is where the observed spectrum's rate and density
@@ -89,7 +88,7 @@ form: the serializer can only emit kwargs, so a second spelling would make the
 config `run_mcmc` writes next to each chain fail to round-trip.
 
 A run names a network -- `[analysis] network = "ET-2L-aligned-CE-Hanford"` --
-and `networks.json` resolves it to a detector list. `base/model.toml`
+and `networks.json` resolves it to a detector list. `config/analysis.json`
 deliberately declares no `analysis.network`: a run without one must fail rather
 than silently inherit someone else's. A run may not write out `detectors`
 alongside a `network`; to try a network that is not committed, add it in an
@@ -119,9 +118,9 @@ The six experiments and their 26 runs:
 | `variable-proposal-guard` | `eps1e-1`, `eps1e-2`, and `eps1e-3` |
 | `waveform-approximant` | `IMRPhenom` and `TaylorF2` |
 
-`run_mcmc` declares a run's four layers as its own inputs, so editing a run's
-TOML retriggers exactly that chain. Editing a `base/` file or one of the three
-top-level JSONs retriggers all 26, which is correct.
+`run_mcmc` declares a run's layers as its own inputs, so editing a run's file
+retriggers exactly that chain. Editing any shared layer retriggers all 26,
+which is correct.
 
 `snakemake validate` merges and catalog-checks every run without building
 anything. Run it before a campaign: it fails on the first invalid run *before
@@ -144,7 +143,7 @@ construction settings, and the hyperparameters -- lives in
 in the file itself. Never in the run config.
 
 Every run shares one injection catalog -- it is the "observed" data -- so it
-lives in `base/catalogs.toml` and no run overrides it. Only
+lives in `config/analysis.json` and no run overrides it. Only
 `variable-catalog-size`, `variable-proposal-guard`, `astrophysical-parameters`,
 and `waveform-approximant` override the proposal catalog.
 
