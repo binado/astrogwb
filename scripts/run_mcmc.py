@@ -36,7 +36,7 @@ before the merge and stamped into the chain's ``config_layers`` attribute. The
 ``run_mcmc`` workflow rule declares exactly these files as ``input:`` and
 passes them straight back on argv.
 
-The run config's ``[catalog]`` block names one catalog per role; the two files
+The run config's ``[analysis.catalog]`` block names one per role; the two files
 are supplied directly as ``--injection-catalog`` and ``--proposal-catalog``.
 Roles are fixed, so no name-to-path mapping is needed.
 
@@ -95,14 +95,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [catalog].injection names.",
+        help="The catalog file this run's [analysis.catalog].injection names.",
     )
     parser.add_argument(
         "--proposal-catalog",
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [catalog].proposal names.",
+        help="The catalog file this run's [analysis.catalog].proposal names.",
     )
     parser.add_argument(
         "--seed",
@@ -425,7 +425,7 @@ def main(argv: list[str] | None = None) -> None:
     proposal_catalog = load_run_catalog(proposal_path, label="proposal")
     logger.info(
         "Proposal density from %s: model=%s kwargs=%s params=%s",
-        config.catalog.proposal,
+        config.analysis.catalog.proposal,
         proposal_catalog.population_model_name,
         dict(proposal_catalog.population_model_kwargs),
         dict(proposal_catalog.fiducials),

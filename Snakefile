@@ -31,7 +31,7 @@ def catalog_path(name: str) -> str:
 # outputs/catalogs/<name>.h5, and config/analysis/runs/<experiment>/<run>.toml
 # -> outputs/chains/<experiment>/<run>.nc. Nothing below translates a registry
 # name into a path; it only globs the config tree and reads back the two names
-# a run's own [catalog] block carries.
+# a run's own [analysis.catalog] block carries.
 catalogs = discover_catalog_names()
 runs = discover_runs()
 
@@ -58,7 +58,7 @@ RUN_PATTERN = "|".join(
 # The figures read the same catalog files the runs sample against. Both names
 # are read off the base catalog config so they cannot drift from what the runs
 # actually use.
-_BASE_CATALOGS = load_base()["catalog"]
+_BASE_CATALOGS = load_base()["analysis"]["catalog"]
 INJECTION_CATALOG = catalog_path(_BASE_CATALOGS["injection"])
 DEFAULT_PROPOSAL_CATALOG = catalog_path(_BASE_CATALOGS["proposal"])
 # Figures report what was sampled, so each one is handed a run's own config

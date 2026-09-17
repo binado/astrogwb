@@ -221,14 +221,14 @@ def check_catalog_references(
     """
     known = catalogs if catalogs is not None else discover_catalogs()
     for role, name in (
-        ("injection", config.catalog.injection),
-        ("proposal", config.catalog.proposal),
+        ("injection", config.analysis.catalog.injection),
+        ("proposal", config.analysis.catalog.proposal),
     ):
         if name not in known:
             choices = ", ".join(known)
             raise ValueError(
-                f"{label} catalog.{role} names unknown catalog {name!r}; "
-                f"choose from {choices}"
+                f"{label} analysis.catalog.{role} names unknown catalog "
+                f"{name!r}; choose from {choices}"
             )
 
 

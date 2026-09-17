@@ -10,6 +10,6 @@
 # run overrides it. Only variable-catalog-size, variable-proposal-guard,
 # astrophysical-parameters, and waveform-approximant override the proposal.
 
-[catalog]
+[analysis.catalog]
 injection = "md-imrphenom-s41-n32768"
 proposal = "md-imrphenom-s41-n32768"

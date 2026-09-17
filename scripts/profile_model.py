@@ -66,14 +66,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [catalog].injection names.",
+        help="The catalog file this run's [analysis.catalog].injection names.",
     )
     parser.add_argument(
         "--proposal-catalog",
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [catalog].proposal names.",
+        help="The catalog file this run's [analysis.catalog].proposal names.",
     )
     parser.add_argument(
         "--seed",

@@ -787,5 +787,5 @@ def test_the_repository_ships_no_proposal_density_config() -> None:
     text = (REPO_ROOT / "config/analysis/base/catalogs.toml").read_text(
         encoding="utf-8"
     )
-    assert "[catalog]" in text
+    assert "[analysis.catalog]" in text
     assert "uniform_mixing_fraction" not in text

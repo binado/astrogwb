@@ -21,8 +21,8 @@ uv run --extra paper python scripts/run_mcmc.py \
 ```
 
 The two roles are fixed, so the files are named flags rather than a
-name-to-path mapping. They are the catalogs the merged config's `[catalog]`
-block names.
+name-to-path mapping. They are the catalogs the merged config's
+`[analysis.catalog]` block names.
 
 Order is yours to get right: nothing owns it any more, and a wrong-but-valid
 order produces a valid-but-wrong run. The resolved order is logged at INFO
@@ -132,7 +132,7 @@ any catalog is built*, and a catalog is a GPU job.
 Every run names two catalogs, one per role:
 
 ```toml
-[catalog]
+[analysis.catalog]
 injection = "md-imrphenom-s41-n32768"
 proposal  = "md-imrphenom-s42-n16384"
 ```

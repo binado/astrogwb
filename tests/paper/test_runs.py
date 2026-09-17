@@ -277,11 +277,14 @@ def test_every_run_names_declared_catalogs(experiment: str, run: str) -> None:
 @pytest.mark.parametrize(
     ("base_config", "message"),
     [
-        ('[catalog]\ninjection = "a"\n', r"catalog.proposal must be a catalog name"),
-        ("seed = 1\n", r"\[catalog\] table"),
         (
-            '[catalog]\ninjection = "a"\nproposal = 3\n',
-            r"catalog.proposal must be a catalog name",
+            '[analysis.catalog]\ninjection = "a"\n',
+            r"analysis\.catalog\.proposal must be a catalog name",
+        ),
+        ("seed = 1\n", r"\[analysis\.catalog\] table"),
+        (
+            '[analysis.catalog]\ninjection = "a"\nproposal = 3\n',
+            r"analysis\.catalog\.proposal must be a catalog name",
         ),
     ],
 )
@@ -306,7 +309,7 @@ def test_resolve_catalog_names_rejects_malformed_catalogs(
 # --------------------------------------------------------------------------- #
 def test_a_run_naming_an_unknown_catalog_is_rejected() -> None:
     raw = assemble_run("cosmological-parameters", "ET-triangular")
-    raw["catalog"]["proposal"] = "does-not-exist"
+    raw["analysis"]["catalog"]["proposal"] = "does-not-exist"
     config = build_run_config(raw)
 
     with pytest.raises(ValueError, match="names unknown catalog 'does-not-exist'"):

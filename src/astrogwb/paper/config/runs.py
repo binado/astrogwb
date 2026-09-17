@@ -302,15 +302,16 @@ def discover_catalog_names(root: Path | None = None) -> tuple[str, ...]:
 
 
 def _catalog_names(raw: Mapping[str, Any]) -> dict[str, str]:
-    """The catalog each role names, from a raw config's ``[catalog]`` block."""
-    catalog = raw.get("catalog")
+    """The catalog each role names, from a raw config's ``[analysis.catalog]``."""
+    analysis = raw.get("analysis")
+    catalog = analysis.get("catalog") if isinstance(analysis, Mapping) else None
     if not isinstance(catalog, Mapping):
-        raise TypeError("run config must define a [catalog] table")
+        raise TypeError("run config must define an [analysis.catalog] table")
     names: dict[str, str] = {}
     for role in CATALOG_ROLES:
         name = catalog.get(role)
         if not isinstance(name, str) or not name:
-            raise TypeError(f"catalog.{role} must be a catalog name")
+            raise TypeError(f"analysis.catalog.{role} must be a catalog name")
         names[role] = name
     return names
 

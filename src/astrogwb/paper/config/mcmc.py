@@ -294,6 +294,7 @@ class AnalysisConfig(BaseModel):
     #: the [priors] table and so cannot live here.
     sampled_params: tuple[str, ...] = ()
     population: AnalysisPopulation
+    catalog: CatalogConfig
     likelihood: Literal["default", "amplitude_marginalized"] = "default"
     amplitude_parameter: AmplitudeParameter | None = None
     amplitude_num_nodes: Annotated[int, Field(gt=1)] = 1024
@@ -386,7 +387,6 @@ class RunConfig(BaseModel):
     # non-marginalized site is conditioned.
     priors: dict[str, PriorDistribution]
     analysis: AnalysisConfig
-    catalog: CatalogConfig
     sampler: SamplerConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
 
