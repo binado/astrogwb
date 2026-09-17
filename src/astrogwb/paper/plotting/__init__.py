@@ -13,7 +13,8 @@ Convention:
 - category accents are the default color for single-posterior figures;
 - the network palette colors the detector-network comparison figures;
 - ``SPECTRUM`` / ``SPECTRUM_LINESTYLES`` style the fiducial dual-axis
-  spectrum figure (black curves; dotted $S_h$, solid $\\Omega_{\\mathrm{GW}}$);
+  spectrum figure (black curves; dotted $S_h$, solid $\\Omega_{\\mathrm{GW}}$;
+  dashed $\\sigma$ in the Okabe-Ito blue);
 - ``combo_colors`` orders the per-parameter-combination marginal overlay;
 - ``detector_network_styles`` pairs each ET network with its ET+CE companion;
 - truth / fiducial markers are always neutral solid (``TRUTH``), everywhere.
@@ -125,15 +126,18 @@ CATEGORY: dict[str, str] = {
     "modified_propagation": "#D55E00",
 }
 
-# Dual-axis style for the fiducial spectrum figure: both curves and axes
-# are black, with dotted $S_h$ against solid $\Omega_{\mathrm{GW}}$.
+# Dual-axis style for the fiducial spectrum figure: $S_h$ and
+# $\Omega_{\mathrm{GW}}$ are black (dotted / solid); $\sigma$ is
+# dashed Okabe-Ito blue so it is readable on the shared $S_h$ axis.
 SPECTRUM: dict[str, str] = {
     "omega_gw": "k",
     "sh": "k",
+    "sigma": "#0072B2",
 }
 SPECTRUM_LINESTYLES: dict[str, str] = {
     "omega_gw": "-",
     "sh": ":",
+    "sigma": "--",
 }
 
 # linewidth matches matplotlib's default lines.linewidth (and corner's truth
@@ -178,13 +182,7 @@ DETECTOR_NETWORK_RUNS: tuple[str, ...] = tuple(name for name, _ in DETECTOR_NETW
 
 
 def use_paper_style(root: Path | None = None) -> None:
-    """Apply ``paper.mplstyle`` to the current matplotlib session.
-
-    ``savefig.dpi`` and ``savefig.format`` are applied here from
-    ``config/plotting.json`` rather than declared in the stylesheet, so there
-    is one source for them instead of a literal in the style file and another
-    in each figure script's ``--figure-dpi`` default.
-    """
+    """Apply ``paper.mplstyle`` and configured savefig settings."""
     plt.style.use(str(_STYLE_PATH))
     plt.rcParams["savefig.dpi"] = figure_dpi(root)
     plt.rcParams["savefig.format"] = figure_format(root)

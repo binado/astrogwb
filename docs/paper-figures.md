@@ -102,19 +102,25 @@ chains of `run_experiment_modified_propagation`.
 
 ## Standalone figures
 
-The fiducial spectrum, effective detector PSD comparison, and importance-weight
-grids are explicit standalone rules in the unified workflow. The fiducial spectrum borrows the six detector networks of the
-`cosmological-parameters` experiment rather than restating them, and keeps its
-`OMEGA_GW_MIN` y-limit next to the axis it sets. All of them read an assembled
-run config directly. `importance_weights_grid` additionally reads its proposal
-*density* from the catalog file it is handed, the same way `scripts/run_mcmc.py`
-does -- so the weights it plots divide by the same denominator the chains did.
+The importance-weight grids are the standalone figure rules in the unified
+workflow. `importance_weights_grid` reads its proposal *density* from the
+catalog file it is handed, the same way `scripts/run_mcmc.py` does -- so the
+weights it plots divide by the same denominator the chains did.
+
+The fiducial injection spectrum, network $S_{\mathrm{eff}}$, $\sigma$ overlay,
+and per-network SNR figures live in
+[`notebooks/fiducial_spectrum.py`](../notebooks/fiducial_spectrum.py) rather
+than the DAG. That notebook resolves no run config: it reads the shared
+fiducials and detector networks from `config/fiducials.json` and
+`config/networks.json` through `astrogwb.paper.config`, and the ordered network
+legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS`, but keeps its analysis
+grid and local plotting choices as literals of its own. Those mirror
+`config/analysis/base/model.toml`, so editing that file does not change these
+figures -- update the notebook's configuration cell too.
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules fiducial_spectrum importance_weights_grid \
-  outputs/figures/standalone/fiducial_spectrum.pdf \
-  outputs/figures/standalone/fiducial_effective_psd_by_detector.pdf \
+  --allowed-rules importance_weights_grid \
   outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf \
   outputs/figures/standalone/importance_weights_grid_Xi0_n.pdf
 ```
@@ -123,8 +129,8 @@ Or build any one of them directly:
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules fiducial_spectrum \
-  outputs/figures/standalone/fiducial_spectrum.pdf
+  --allowed-rules importance_weights_grid \
+  outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf
 ```
 
 All new figure products are written under `outputs/figures/`.

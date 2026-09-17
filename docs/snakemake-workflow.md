@@ -164,15 +164,17 @@ outputs directly:
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules fiducial_spectrum importance_weights_grid \
-  fiducial_spectrum importance_weights_grid
+  --allowed-rules importance_weights_grid \
+  importance_weights_grid
 ```
 
-These cover the fiducial spectrum, effective detector PSDs, and
-importance-weight grids. Input and output paths are both
-named literally in each rule. Presentation -- labels, run order, plot limits --
-is hard-coded in the scripts in [`scripts/`](../scripts/) rather than passed on
-argv or loaded from a config the workflow has to parse first.
+This covers the importance-weight grids. The fiducial spectrum, network PSDs,
+and SNR figures are the paper notebook
+[`notebooks/fiducial_spectrum.py`](../notebooks/fiducial_spectrum.py), not a
+workflow rule. The grid rule's input and output paths are named literally in
+the Snakefile. Presentation -- labels, run order, and plot limits -- is
+hard-coded in its script rather than passed on argv or loaded from a config the
+workflow has to parse first.
 
 ## Re-running protected results
 

@@ -193,11 +193,10 @@ def test_resolve_networks_rejects_an_undeclared_network(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 # Where a hand-run figure writes
 # --------------------------------------------------------------------------- #
-#: The four figure scripts. Their `--output-*` flags are what a hand run writes
+#: The three figure scripts. Their `--output-*` flags are what a hand run writes
 #: to, while the workflow hands each one explicit paths -- so the defaults are
 #: the only place a script could grow a second `outputs/figures/...` literal.
 FIGURE_SCRIPTS = (
-    "scripts/fiducial_spectrum.py",
     "scripts/importance_weights_grid.py",
     "scripts/mcmc_cosmological_parameters.py",
     "scripts/mcmc_modified_propagation.py",

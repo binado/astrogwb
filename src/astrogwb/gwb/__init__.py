@@ -11,6 +11,7 @@ from astrogwb.gwb.analytic import (
 from astrogwb.gwb.snr import (
     spectral_snr,
     spectral_snr_squared,
+    spectral_snr_squared_per_bin,
 )
 from astrogwb.gwb.spectral import (
     inclination_averaging_factor,
@@ -31,5 +32,6 @@ __all__ = [
     "spectral_density_from_omega_gw",
     "spectral_snr",
     "spectral_snr_squared",
+    "spectral_snr_squared_per_bin",
     "uniform_prior_mass_moments",
 ]

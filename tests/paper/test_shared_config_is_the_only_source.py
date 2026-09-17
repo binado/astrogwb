@@ -37,7 +37,6 @@ CONSUMERS = (
     "scripts/importance_weights_grid.py",
     "scripts/mcmc_cosmological_parameters.py",
     "scripts/mcmc_modified_propagation.py",
-    "scripts/fiducial_spectrum.py",
 )
 
 #: `notebooks/catalog_convergence.py` declares no prior at all -- it is a

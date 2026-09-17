@@ -103,8 +103,10 @@ def test_an_unlabelled_name_falls_back_to_itself() -> None:
 def test_spectrum_style_is_black_with_dotted_sh() -> None:
     assert plotting.SPECTRUM["omega_gw"] == "k"
     assert plotting.SPECTRUM["sh"] == "k"
+    assert plotting.SPECTRUM["sigma"] == "#0072B2"
     assert plotting.SPECTRUM_LINESTYLES["omega_gw"] == "-"
     assert plotting.SPECTRUM_LINESTYLES["sh"] == ":"
+    assert plotting.SPECTRUM_LINESTYLES["sigma"] == "--"
 
 
 def test_get_corner_kwargs_and_combo_colors() -> None:
