@@ -2,38 +2,46 @@
 
 ## Ad-hoc runs
 
-`scripts/run_mcmc.py` takes a run's config layers plus the two catalog files
-it samples against. One `--config` per layer, in merge order -- the same list
-the workflow declares as the rule's `input:` and passes straight back on argv:
+`scripts/run_mcmc.py` takes one flag per config block -- each already folded
+across the layers that declare it -- plus the two catalog files it samples
+against. The layers are the same list the workflow declares as the rule's
+`input:`, and `jq` does the folding:
 
 ```bash
+LAYERS="config/analysis.json config/fiducials.json config/networks.json \
+  config/priors.json config/sampler.json \
+  config/runs/cosmological-parameters/_base.json \
+  config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json"
+fold() { jq -s "map(.$1 // {}) | reduce .[] as \$b ({}; . $2 \$b)" $LAYERS; }
+
 uv run --extra paper python scripts/run_mcmc.py \
-  --config config/analysis.json \
-  --config config/fiducials.json \
-  --config config/networks.json \
-  --config config/priors.json \
-  --config config/sampler.json \
-  --config config/runs/cosmological-parameters/_base.json \
-  --config config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
+  --analysis "$(fold analysis '*')" \
+  --fiducials "$(fold fiducials '*')" \
+  --networks "$(fold networks '*')" \
+  --priors "$(fold priors '+')" \
+  --sampler "$(fold sampler '*')" \
   --injection-catalog outputs/catalogs/md-imrphenom-s41-n32768.h5 \
   --proposal-catalog outputs/catalogs/md-imrphenom-s42-n16384.h5
 ```
 
-The two roles are fixed, so the files are named flags rather than a
+One operator per block is the whole merge rule: `*` (deep) everywhere, `+`
+(shallow) for `priors`. Both spellings of that rule --
+`astrogwb.paper.config.runs.BLOCK_FOLDS` for the shell and
+`merge_config_layers` for Python -- live in one module, and a test pins them
+against each other over every run.
+
+Blocks rather than paths is why merge order is no longer yours to get right:
+each block arrives folded, so there is no order left to get wrong. To override
+something for a single invocation, add a layer to `LAYERS` -- the stack is
+open-ended, which is the practical gain over a fixed assembled artifact.
+
+The two catalog roles are fixed, so the files are named flags rather than a
 name-to-path mapping. They are the catalogs the merged config's
 `[analysis.catalog]` block names.
 
-Order is yours to get right: nothing owns it any more, and a wrong-but-valid
-order produces a valid-but-wrong run. The resolved order is logged at INFO
-before the merge and stamped into the chain's `config_layers` attribute, so a
-finished chain says which files produced it.
-
-The stack is open-ended, which is the practical gain over a fixed assembled
-artifact: append one more `--config` to override anything for a single
-invocation -- a shorter chain, a smaller catalog -- without editing a committed
-layer or writing a throwaway config.
-
-`scripts/profile_model.py` takes the same flags and runs as:
+`scripts/profile_model.py` still takes a run's layer *paths* as repeated
+`--config` flags -- it merges them in process, as the figure scripts do -- and
+runs as:
 
 ```bash
 uv run --extra paper python scripts/profile_model.py --help
@@ -215,9 +223,6 @@ Every labelled run has a deterministic `.nc` path under
 `outputs/chains/<experiment>/`, and `run_mcmc` writes the record of its
 settings beside it as `<run>.json` -- the defaults-filled config, so two runs
 that reach the same settings by different overrides produce identical files.
-The ordered layer paths that produced it go into the chain's `config_layers`
-attribute, which is the one thing a merged config cannot carry.
-
 Ad-hoc unlabelled runs retain the timestamped
 `mcmc-<params>-det=<detectors>-seed<n>-<timestamp>` convention.
 

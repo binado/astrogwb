@@ -3,6 +3,7 @@ import shlex
 from pathlib import Path
 
 from astrogwb.paper.config.runs import (
+    BLOCK_FOLDS,
     catalog_config_paths,
     discover_catalog_names,
     discover_runs,
@@ -79,9 +80,32 @@ def config_flags(experiment, run):
     Built in `params:` rather than interpolated from `input:`: a list input
     expands to bare space-separated paths, which argparse's `action="append"`
     would read as one value plus stray positionals.
+
+    Still how the figure scripts are handed a run's config: they want the
+    merged mapping for reference values, not one flag per block, and merging in
+    process keeps them off `jq`.
     """
     return " ".join(
         f"--config {shlex.quote(path)}" for path in config_layers(experiment, run)
+    )
+
+
+# `BLOCK_FOLDS` -- the jq program per block -- comes from the config layer, so
+# the shell fold and the Python fold it must agree with are defined next to
+# each other. Interpolated through `params:` rather than written inline, like
+# `rule merge_catalog_config`: Snakemake formats the shell string, so a literal
+# `{}` in a jq program would be read as a placeholder.
+def block_flags(experiment, run):
+    """`--<block> "$(jq ...)"` for every shared block, as one shell fragment.
+
+    The layer files are the same list `input:` declares, so the dependency
+    edges and the data path stay one list even though the blocks, not the
+    paths, are what the script now reads.
+    """
+    layers = " ".join(shlex.quote(path) for path in config_layers(experiment, run))
+    return " ".join(
+        f"--{block} \"$(jq -s {shlex.quote(program)} {layers})\""
+        for block, program in BLOCK_FOLDS.items()
     )
 
 
@@ -251,7 +275,7 @@ rule run_mcmc:
     params:
         platform=JAX_PLATFORM,
         outdir=run_outdir,
-        config_flags=lambda w: config_flags(w.experiment, w.run),
+        block_flags=lambda w: block_flags(w.experiment, w.run),
     threads: 4
     resources:
         mem_mb=8000,
@@ -284,7 +308,7 @@ rule run_mcmc:
         # until one is run. UV_EXTRAS is inert under --no-sync; it is kept so
         # the two branches still say which environment each platform wants.
         $NANNY uv run --active --no-sync $UV_EXTRAS python {input.script:q} \
-            {params.config_flags} --outdir {params.outdir:q} \
+            {params.block_flags} --outdir {params.outdir:q} \
             --label {wildcards.run:q} \
             --injection-catalog {input.injection:q} \
             --proposal-catalog {input.proposal:q} \

@@ -82,10 +82,12 @@ labels and savefig settings, reached through `astrogwb.paper.plotting` -- and
 is deliberately *not* a run layer. `config/waveform.json` and
 `config/population.json` are catalog layers, reached through
 `astrogwb.paper.config.waveform_generator()` / `population_model()`, and are
-likewise not run layers. No entrypoint is handed an assembled config: a run
-entrypoint takes its layers on argv as repeated `--config` flags and merges
-them in process, and `generate_catalog.py` takes the blocks `jq` merged out of
-them. The catalog path does materialize that merge as a `temp()` file, but it
+likewise not run layers. No entrypoint is handed an assembled config. `run_mcmc` and
+`generate_catalog.py` both take the blocks `jq` folded out of their layers, one
+flag per block -- for runs the fold is one operator per block, `*` everywhere
+and `+` for `priors`, spelled once in `BLOCK_FOLDS` beside the Python fold a
+test pins it against. The figure and diagnostic scripts take the layer paths
+instead, as repeated `--config` flags, and merge them in process. The catalog path does materialize that merge as a `temp()` file, but it
 is a workflow build intermediate that no entrypoint reads as config. Either way
 the workflow rule declares the layer files as its `input:`, so the dependency
 edge and the data path are one list. `run_mcmc` writes the resolved

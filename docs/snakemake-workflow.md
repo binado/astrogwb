@@ -58,8 +58,8 @@ itself.
 
 [`config/runs/`](../config/runs/) holds one `_base.json` per experiment and one
 JSON file per run, over the five shared `config/*.json` layers. `run_mcmc`
-declares those layers as its own `input:` and passes them straight back to the
-runner as repeated `--config` flags, then writes:
+declares those layers as its own `input:` and folds them with `jq` into one
+`--<block>` flag per shared block, then writes:
 
 ```text
 outputs/chains/<experiment>/<run>.nc      the chain (protected)

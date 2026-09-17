@@ -7,9 +7,11 @@ and the merge that turns them into a run config.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,6 +25,7 @@ from astrogwb.paper.config.catalogs import (
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import (
     BASE_OUT_DIR,
+    BLOCK_FOLDS,
     CATALOGS_ROOT,
     CHAINS_ROOT,
     EXPERIMENT_BASE,
@@ -34,11 +37,24 @@ from astrogwb.paper.config.runs import (
     discover_catalog_names,
     discover_runs,
     load_base,
+    load_config_blocks,
     merge_config_layers,
     resolve_catalog_names,
     run_config_paths,
 )
 from astrogwb.paper.utils import load_mapping
+
+
+def _import_script(name: str):
+    """Import one ``scripts/*.py``, which are not installed modules."""
+    path = REPO_ROOT / "scripts" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"{name}_script", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
 
 PAPER_ROOT = REPO_ROOT
 
@@ -388,6 +404,114 @@ def test_the_shared_blocks_are_declared_once() -> None:
         assert set(own.get("waveform", {})) <= {"approximant"}, name
         assert set(own.get("population", {})) <= {"model_name", "model_kwargs"}, name
         assert "fiducials" not in own, name
+
+
+def test_run_mcmc_validates_the_blocks_the_workflow_folds() -> None:
+    """The whole path: `jq` folds the layers, `run_mcmc` parses and validates.
+
+    `run_mcmc` is the one entrypoint handed blocks rather than layer paths, and
+    nothing else executes its CLI -- ty does not check `argparse.Namespace`
+    attributes, so a renamed flag would surface only in a submitted job. The
+    run chosen is the one that overrides a prior, so the shallow `[priors]`
+    fold has to survive validation and not merely parse.
+    """
+    jq = shutil.which("jq")
+    if jq is None:
+        pytest.skip("jq is not installed")
+
+    run_mcmc = _import_script("run_mcmc")
+    layers = [str(path) for path in run_config_paths("modified-propagation", "Xi_0-H0")]
+    argv: list[str] = []
+    for block, program in BLOCK_FOLDS.items():
+        folded = subprocess.run(
+            [jq, "-s", program, *layers], capture_output=True, text=True, check=True
+        )
+        argv += [f"--{block}", folded.stdout]
+    argv += [
+        "--injection-catalog",
+        "outputs/catalogs/md-imrphenom-s41-n32768.h5",
+        "--proposal-catalog",
+        "outputs/catalogs/md-imrphenom-s41-n32768.h5",
+        "--label",
+        "Xi_0-H0",
+    ]
+
+    args = run_mcmc.parse_args(argv)
+    config = build_run_config(load_config_blocks(args))
+
+    # The tight H0 prior the run overrides, which a deep fold would have
+    # corrupted, reached the validated config as a Normal.
+    assert type(config.priors["H0"]).__name__ == "Normal"
+    assert config.analysis.sampled_params == ("xi_0",)
+    assert config.analysis.catalog.injection == "md-imrphenom-s41-n32768"
+    assert config.analysis.grid.n_grid == 256
+
+
+def test_the_jq_block_folds_match_the_python_merge() -> None:
+    """`run_mcmc` is handed blocks `jq` folded; this pins them against Python.
+
+    The workflow folds one block per `--<block>` flag, `*` everywhere and `+`
+    for `priors`, while the notebooks and the validation gate reach the same
+    mapping through `merge_config_layers`. Two implementations of one fold, so
+    the agreement is checked rather than argued -- over every run, because
+    exactly one of them (`modified-propagation/Xi_0-H0`) overrides a prior, and
+    that is the only run where `+` and `*` differ.
+    """
+    jq = shutil.which("jq")
+    if jq is None:
+        pytest.skip("jq is not installed")
+
+    overrode_a_prior = False
+    for experiment, runs in discover_runs().items():
+        for run in runs:
+            layers = [str(path) for path in run_config_paths(experiment, run)]
+            expected = merge_config_layers(run_config_paths(experiment, run))
+            folded = {}
+            for block, program in BLOCK_FOLDS.items():
+                result = subprocess.run(
+                    [jq, "-s", program, *layers],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                folded[block] = json.loads(result.stdout)
+            assert folded == expected, f"{experiment}/{run}"
+            if json.loads(Path(layers[-1]).read_text(encoding="utf-8")).get("priors"):
+                overrode_a_prior = True
+    assert overrode_a_prior, "no run exercises the shallow [priors] fold"
+
+
+def test_a_deep_fold_would_corrupt_the_one_prior_override() -> None:
+    """Why `priors` folds with `+`, as a failure rather than a comment.
+
+    `config/priors.json` gives H0 a Uniform; `modified-propagation/Xi_0-H0`
+    replaces it with a Normal. Key-merging the two leaves the Uniform's `low`
+    and `high` beside the Normal's `loc` and `scale`, which `materialize_prior`
+    rejects -- loudly here, but only because the fold is shallow in production.
+    """
+    jq = shutil.which("jq")
+    if jq is None:
+        pytest.skip("jq is not installed")
+
+    layers = [str(path) for path in run_config_paths("modified-propagation", "Xi_0-H0")]
+    deep = subprocess.run(
+        [jq, "-s", BLOCK_FOLDS["priors"].replace(". + $b", ". * $b"), *layers],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert set(json.loads(deep.stdout)["H0"]["kwargs"]) == {
+        "low",
+        "high",
+        "loc",
+        "scale",
+    }
+    assert set(
+        merge_config_layers(run_config_paths("modified-propagation", "Xi_0-H0"))[
+            "priors"
+        ]["H0"]["kwargs"]
+    ) == {"loc", "scale"}
 
 
 def test_the_jq_merge_matches_the_python_merge() -> None:

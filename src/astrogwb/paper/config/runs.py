@@ -40,6 +40,7 @@ every target, and every ``--dry-run`` would pay for a JAX import. Catalog
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -446,6 +447,91 @@ def add_config_arguments(parser: argparse.ArgumentParser) -> None:
             "then the run)."
         ),
     )
+
+
+#: What each shared block is, for the ``--<block>`` flags below. Keyed by
+#: layer stem, which is also the block name and the flag name: one list, so a
+#: block cannot be named one thing in a file and another on argv.
+BLOCK_DESCRIPTIONS: dict[str, str] = {
+    "analysis": (
+        "observing time, frequency band, target population, sampled "
+        "parameters, likelihood, and the two catalogs"
+    ),
+    "fiducials": "the fiducial value of every parameter",
+    "networks": "each detector network by name, resolved to analysis.detectors",
+    "priors": "the prior on every parameter",
+    "sampler": "the sampling RNG seed and the NUTS settings",
+}
+
+
+#: The ``jq`` program that folds one block out of an ordered layer list, per
+#: block. One operator each is the whole merge rule: ``*`` is a recursive
+#: merge, which is :func:`~astrogwb.paper.utils.deep_merge` exactly, and
+#: ``priors`` uses ``+`` -- a shallow merge -- so an overridden
+#: ``[priors.<param>]`` table replaces the inherited one rather than
+#: key-merging a normal prior onto a uniform one and leaving stale ``low`` /
+#: ``high`` behind. That is :func:`_merge_run_overlay`'s rule, stated once per
+#: block rather than as a carve-out inside one program.
+#:
+#: They live here, not in the ``Snakefile``, because they are the shell
+#: spelling of this module's own fold: two implementations of one rule, pinned
+#: against each other by ``tests/paper/test_runs.py`` over every run.
+BLOCK_FOLDS: dict[str, str] = {
+    block: (
+        f"map(.{block} // {{}}) | reduce .[] as $b ({{}}; . "
+        f"{'+' if block == 'priors' else '*'} $b)"
+    )
+    for block in BLOCK_DESCRIPTIONS
+}
+
+
+def json_block(raw: str) -> dict[str, Any]:
+    """Parse one merged config block off argv, rejecting anything but an object.
+
+    The argparse type behind :func:`add_block_arguments`. A ``jq`` fold that
+    failed substitutes an empty argument, which fails here rather than being
+    acted on as an empty block.
+    """
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise argparse.ArgumentTypeError(f"not valid JSON: {error}") from None
+    if not isinstance(value, dict):
+        raise argparse.ArgumentTypeError(
+            f"expected a JSON object, got {type(value).__name__}"
+        )
+    return value
+
+
+def add_block_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add one ``--<block>`` flag per shared layer, taking merged JSON.
+
+    The alternative to :func:`add_config_arguments` for an entrypoint that
+    wants the blocks rather than the layer paths: the workflow folds each block
+    with ``jq`` and passes it here, the way ``generate_catalog.py`` is already
+    handed its merged catalog blocks. The flags are derived from
+    :data:`ROOT_LAYERS`, so the file, the block and the flag share one name by
+    construction.
+    """
+    for path in ROOT_LAYERS:
+        block = path.stem
+        parser.add_argument(
+            f"--{block}",
+            required=True,
+            type=json_block,
+            metavar="JSON",
+            help=f"The merged [{block}] block: {BLOCK_DESCRIPTIONS[block]}.",
+        )
+
+
+def load_config_blocks(args: argparse.Namespace) -> dict[str, Any]:
+    """Reassemble the ``--<block>`` flags into one raw config mapping.
+
+    No merge happens here: each block arrives already folded across every layer
+    that declares it, so this is the inverse of the split
+    :func:`add_block_arguments` describes.
+    """
+    return {path.stem: getattr(args, path.stem) for path in ROOT_LAYERS}
 
 
 def load_merged_config(args: argparse.Namespace) -> dict[str, Any]:
