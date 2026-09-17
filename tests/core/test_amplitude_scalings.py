@@ -98,8 +98,8 @@ def test_amplitude_factorization_matches_the_real_spectral_density(
         phi = factor * fiducial
         actual_spectral_density, _ = estimator({**FIDUCIALS, parameter: phi})
 
-        amplitude = float(amplitude_fn(jnp.asarray(phi))) / float(
-            amplitude_fn(jnp.asarray(fiducial))
+        amplitude = float(np.asarray(amplitude_fn(jnp.asarray(phi)))) / float(
+            np.asarray(amplitude_fn(jnp.asarray(fiducial)))
         )
         np.testing.assert_allclose(
             np.asarray(actual_spectral_density),
