@@ -1,19 +1,16 @@
 """Small shared config-I/O helpers: merge semantics and mapping file loading.
 
-stdlib + PyYAML only, so every consumer -- the config layer, the CLI
-entrypoints, and the ``Snakefile`` -- can import this without paying for
-pydantic, xarray, or JAX.
+stdlib only, so every consumer -- the config layer, the CLI entrypoints, and
+the ``Snakefile`` -- can import this without paying for pydantic, xarray, or
+JAX.
 """
 
 from __future__ import annotations
 
 import json
-import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 
 def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
@@ -33,17 +30,19 @@ def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str
 
 
 def load_mapping(path: Path) -> dict[str, Any]:
-    """Parse a YAML, TOML, or JSON config file into a plain dict."""
-    suffix = path.suffix.lower()
+    """Parse one JSON config file into a plain dict.
+
+    JSON only, and that is the point rather than a limitation: every layer in
+    ``config/`` is JSON, so ``jq`` can fold any of them in the shell exactly as
+    this function folds them in Python. A second accepted format would make
+    that true only by convention. ``astrogwb.detector``'s packaged
+    ``geometry.toml`` and ``sensitivity.toml`` are detector *data*, not config
+    layers, and are read with ``tomllib`` where they are used.
+    """
+    if path.suffix.lower() != ".json":
+        raise ValueError(f"config layers are JSON; got {path.suffix!r} for {path}")
     with path.open("rb") as handle:
-        if suffix == ".toml":
-            raw = tomllib.load(handle)
-        elif suffix == ".json":
-            raw = json.load(handle)
-        elif suffix in {".yaml", ".yml"}:
-            raw = yaml.safe_load(handle)
-        else:
-            raise ValueError(f"unsupported config extension: {path.suffix!r}")
+        raw = json.load(handle)
     if not isinstance(raw, Mapping):
         raise TypeError(f"{path} must contain a mapping")
     return dict(raw)

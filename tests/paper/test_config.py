@@ -59,17 +59,13 @@ def test_deep_merge_nested_dicts_and_list_replacement() -> None:
     assert base["detector_ids"] == ["A", "B"]
 
 
-def test_load_mapping_resolves_yaml_aliases(tmp_path: Path) -> None:
-    path = tmp_path / "config.yaml"
-    path.write_text(
-        "shared: &shared\n  detectors: [S1, R1]\nrun:\n  analysis: *shared\n",
-        encoding="utf-8",
-    )
+def test_load_mapping_rejects_a_non_json_layer(tmp_path: Path) -> None:
+    """One format, so "every layer is jq-readable" holds by construction."""
+    path = tmp_path / "config.toml"
+    path.write_text("[analysis]\nnetwork = 'demo'\n", encoding="utf-8")
 
-    assert load_mapping(path) == {
-        "shared": {"detectors": ["S1", "R1"]},
-        "run": {"analysis": {"detectors": ["S1", "R1"]}},
-    }
+    with pytest.raises(ValueError, match="config layers are JSON"):
+        load_mapping(path)
 
 
 def test_build_run_config_deep_merges_extra_overrides() -> None:

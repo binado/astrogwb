@@ -61,8 +61,7 @@ def _figure_settings(root: Path | None = None) -> Mapping[str, Any]:
 
     Read with stdlib ``json`` rather than ``astrogwb.paper.utils.load_mapping``
     so this module keeps importing nothing from the config layer, at module
-    scope or inside a function body. The file is JSON by decision, so
-    multi-format dispatch would only drag ``yaml`` into every figure process.
+    scope or inside a function body.
 
     Proxied because ``@cache`` hands every caller the same object.
     """

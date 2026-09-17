@@ -52,7 +52,6 @@ tpu = ["jax[tpu]>=0.11.0"]
 paper = [
     "astrogwb[io,simulation]",
     "arviz[h5netcdf]>=1.2.0",
-    "pyyaml>=6.0",
 ]
 # The analysis stack the notebooks and figure scripts import.
 notebook = [
