@@ -25,6 +25,7 @@ from astrogwb_mock_population import (
 )
 from jax.typing import ArrayLike
 from numpyro import handlers
+from numpyro.distributions.transforms import IdentityTransform
 from numpyro.infer import MCMC, NUTS, Predictive
 from numpyro.infer.util import log_density
 from reference_population import reference_merger_rate_distance_and_logprob
@@ -44,6 +45,7 @@ from astrogwb.sampling import (
 OBSERVED = jnp.array([1.4, 2.0, 3.2])
 SCALE = jnp.array([0.7, 0.9, 1.2])
 AMPLITUDE_PRIOR = dist.Uniform(0.2, 4.0)
+_IDENTITY_AMPLITUDE = IdentityTransform()
 
 
 def _identity(marginalized_parameter: jax.Array) -> jax.Array:
@@ -65,7 +67,7 @@ def _generic_kwargs() -> dict[str, Any]:
         "priors": {"tilt": dist.Normal(0.0, 1.0)},
         "amplitude_parameter": "rate",
         "amplitude_fiducial": 2.0,
-        "amplitude_fn": _identity,
+        "amplitude_transform": _IDENTITY_AMPLITUDE,
         "amplitude_prior": AMPLITUDE_PRIOR,
     }
 
@@ -144,7 +146,7 @@ def test_diagnostic_collisions_are_rejected(marginalized: bool, name: str) -> No
         for key in (
             "amplitude_parameter",
             "amplitude_fiducial",
-            "amplitude_fn",
+            "amplitude_transform",
             "amplitude_prior",
         ):
             kwargs.pop(key)
@@ -204,7 +206,7 @@ def test_generic_marginalization_without_rate_matches_quadrature(
     conditional = AmplitudeConditional(
         mle,
         jnp.sqrt(norm),
-        amplitude_fn=_identity,
+        amplitude_transform=_IDENTITY_AMPLITUDE,
         prior=AMPLITUDE_PRIOR,
         fiducial=2.0,
         grid=grid,
@@ -348,7 +350,7 @@ def test_amplitude_adapter_preserves_reconstruction_and_jit() -> None:
         "observed_spectral_density": observed,
         "priors": {"H0": dist.Uniform(50.0, 90.0)},
         "amplitude_parameter": "local_merger_rate",
-        "amplitude_fn": _identity,
+        "amplitude_transform": _IDENTITY_AMPLITUDE,
         "amplitude_prior": prior,
         "spectral_density_fn": template,
         "scale": scale,
@@ -383,7 +385,7 @@ def test_amplitude_adapter_preserves_reconstruction_and_jit() -> None:
         partial(
             amplitude_reconstruction_model,
             amplitude_parameter="local_merger_rate",
-            amplitude_fn=_identity,
+            amplitude_transform=_IDENTITY_AMPLITUDE,
             merger_rate_amplitude_fn=_identity,
             prior=prior,
             fiducial=fiducial,
@@ -437,7 +439,7 @@ def test_generic_nuts_with_analytic_spectrum(marginalized: bool) -> None:
         for key in (
             "amplitude_parameter",
             "amplitude_fiducial",
-            "amplitude_fn",
+            "amplitude_transform",
             "amplitude_prior",
         ):
             kwargs.pop(key)
@@ -511,13 +513,13 @@ _MARGINALIZED_KWARGS: dict[str, Any] = {
     "scale": NOISE_SCALE,
     "amplitude_parameter": "local_merger_rate",
     "amplitude_fiducial": FIDUCIAL_RATE,
-    "amplitude_fn": _identity,
+    "amplitude_transform": _IDENTITY_AMPLITUDE,
     "amplitude_prior": _RATE_PRIOR,
     "amplitude_grid": _RATE_GRID,
 }
 
 _RECONSTRUCTION_KWARGS: dict[str, Any] = {
-    "amplitude_fn": _identity,
+    "amplitude_transform": _IDENTITY_AMPLITUDE,
     "merger_rate_amplitude_fn": _identity,
     "prior": _RATE_PRIOR,
     "fiducial": FIDUCIAL_RATE,
@@ -696,7 +698,7 @@ def test_amplitude_reconstruction_model_computes_deterministics_from_inputs() ->
         AmplitudeConditional(
             statistics["amplitude_mle"],
             statistics["template_optimal_snr"],
-            amplitude_fn=_identity,
+            amplitude_transform=_IDENTITY_AMPLITUDE,
             prior=_RATE_PRIOR,
             fiducial=FIDUCIAL_RATE,
             grid=_RATE_GRID,
@@ -797,7 +799,7 @@ def _band_kwargs(marginalized: bool, *, compressed: bool) -> dict[str, Any]:
             "priors": {"tilt": dist.Normal(0.0, 1.0)},
             "amplitude_parameter": "rate",
             "amplitude_fiducial": _BAND_FIDUCIAL_RATE,
-            "amplitude_fn": _identity,
+            "amplitude_transform": _IDENTITY_AMPLITUDE,
             "amplitude_prior": _BAND_RATE_PRIOR,
             "amplitude_grid": quadrature_grid(_BAND_RATE_PRIOR, num_nodes=2001),
         }

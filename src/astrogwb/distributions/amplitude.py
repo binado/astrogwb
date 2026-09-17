@@ -13,18 +13,19 @@ parameter -- and
 .. math:: A(\varphi) = f(\varphi) / f(\varphi_{\mathrm{fid}})
 
 the dimensionless amplitude relative to that template, for an arbitrary
-scaling :math:`f` from the physical parameter :math:`\varphi`. Normalizing by
-:math:`f(\varphi_{\mathrm{fid}})` here rather than trusting :math:`f` to
-already satisfy :math:`f(\varphi_{\mathrm{fid}}) = 1` makes the anchoring
-structurally impossible to get wrong; it is also the correct construction for
-a non-power-law :math:`f`, where :math:`f(\varphi/\varphi_{\mathrm{fid}})`
+scaling :math:`f` from the physical parameter :math:`\varphi`. :math:`f` is a
+NumPyro :class:`~numpyro.distributions.transforms.Transform`;
+:func:`anchor_amplitude_transform` composes the ratio so
+:math:`T(\varphi_{\mathrm{fid}}) = 1` rather than trusting :math:`f` to
+already satisfy that, which is also the correct construction for a
+non-power-law :math:`f`, where :math:`f(\varphi/\varphi_{\mathrm{fid}})`
 would be something else entirely. The predicted spectrum factorizes into two
 independently-scaling pieces, a total merger rate and a mean energy flux (the
 importance-weighted polarization-power contraction), so
 :math:`f = g_R \cdot g_F`; see
-:func:`~astrogwb.populations.bns_madau_dickinson.amplitude_H0_fn`
+:data:`~astrogwb.populations.bns_madau_dickinson.amplitude_H0_fn`
 and
-:func:`~astrogwb.populations.bns_madau_dickinson.amplitude_local_merger_rate_fn`
+:data:`~astrogwb.populations.bns_madau_dickinson.amplitude_local_merger_rate_fn`
 for the concrete scalings for :math:`H_0` and ``local_merger_rate``. Define
 the noise-weighted inner product
 :math:`(x|y) = \sum_i x_i y_i / \sigma_i^2`. Then
@@ -100,6 +101,11 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 from numpyro.distributions import constraints
+from numpyro.distributions.transforms import (
+    AffineTransform,
+    ComposeTransform,
+    Transform,
+)
 
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.utils import cumulative_trapezoid
@@ -110,20 +116,6 @@ class MergerRateAmplitudeFn(Protocol):
 
     Only ratios :math:`g_R(\\varphi)/g_R(\\varphi_{\\mathrm{fid}})` are used, so
     any overall normalization cancels.
-    """
-
-    def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
-
-
-class AmplitudeFn(Protocol):
-    """Full multiplicative scaling :math:`f(\\varphi) = g_R(\\varphi)\\, g_F(\\varphi)`.
-
-    Implementations must be **hashable by value**:
-    :class:`AmplitudeConditional` carries this callable as pytree *aux* data,
-    which JAX hashes into the jit cache key. A module-level ``def`` is the
-    safe choice; a freshly-minted lambda or a ``functools.partial`` over
-    floats is identity-hashed and silently retraces the model on every
-    construction.
     """
 
     def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
@@ -178,6 +170,19 @@ def quadrature_grid(
     return jnp.linspace(lower, upper, num_nodes)
 
 
+def anchor_amplitude_transform(scaling: Transform, fiducial: ArrayLike) -> Transform:
+    r"""Dimensionless amplitude :math:`T(\varphi) = f(\varphi)/f(\varphi_{\mathrm{fid}})`.
+
+    ``T(fiducial) = 1`` by construction. Callers pass the absolute scaling
+    ``f`` and the fiducial; :class:`AmplitudeConditional` stores this map and
+    evaluates :math:`A = T(\varphi)` with no further division.
+    """
+    fiducial_value = jnp.asarray(fiducial)
+    return ComposeTransform(
+        [scaling, AffineTransform(0.0, 1.0 / scaling(fiducial_value))]
+    )
+
+
 def _log_trapezoid(log_y: jax.Array, x: jax.Array) -> jax.Array:
     r"""Stable :math:`\ln\int \exp(\log y)\, dx` via a shifted trapezoid rule.
 
@@ -202,10 +207,11 @@ class AmplitudeConditional(dist.Distribution):
         p(\varphi \mid d, \theta) \propto
         \pi(\varphi)\,
         \exp\!\left[-\tfrac12\bigl(\rho\,(A(\varphi) - \hat A)\bigr)^2\right],
-        \qquad A(\varphi) = f(\varphi)/f(\varphi_{\mathrm{fid}}).
+        \qquad A(\varphi) = T(\varphi)
+        = f(\varphi)/f(\varphi_{\mathrm{fid}}).
 
-    The distribution owns the live pieces it is defined by -- the prior, the
-    scaling, the fiducial -- rather than a precomputed tabulation of them, so
+    The distribution owns the live pieces it is defined by -- the prior and
+    the anchored transform -- rather than a precomputed tabulation of them, so
     nothing can go stale. The density above is evaluated analytically wherever
     it is asked for; the ``grid`` enters only as the quadrature scheme for the
     normalizing integral:
@@ -217,9 +223,9 @@ class AmplitudeConditional(dist.Distribution):
       :math:`\varphi` for post-processing reconstruction, clipped to the grid.
     - :attr:`effective_nodes` -- grid-adequacy diagnostic.
 
-    Recomputing :math:`f` on the grid every step costs nothing in practice:
+    Recomputing :math:`T` on the grid every step costs nothing in practice:
     the grid enters the jitted model as a closure constant, so XLA
-    constant-folds :math:`f(\text{grid})` away entirely.
+    constant-folds :math:`T(\text{grid})` away entirely.
 
     The ``batch_shape`` is the broadcast of the two statistics' shapes, so a
     ``(chain, draw)`` posterior feeds in directly.
@@ -244,16 +250,19 @@ class AmplitudeConditional(dist.Distribution):
     amplitude_mle, template_optimal_snr:
         The amplitude sufficient statistics :math:`\hat A` and :math:`\rho`,
         broadcast against each other.
-    amplitude_fn:
-        The *absolute* scaling :math:`f(\varphi)`; the ratio to the fiducial is
-        formed here. Must be hashable by value -- see :class:`AmplitudeFn`.
+    amplitude_transform:
+        The *absolute* scaling :math:`f(\varphi)` as a NumPyro
+        :class:`~numpyro.distributions.transforms.Transform`. The ratio to the
+        fiducial is formed here, so the stored map satisfies
+        :math:`T(\varphi_{\mathrm{fid}}) = 1`.
     prior:
         The prior :math:`\pi(\varphi)` on the marginalized parameter. Defines
         the support and, together with ``num_nodes`` / ``span_sigma``, the
         default quadrature grid.
     fiducial:
         Reference value :math:`\varphi_{\mathrm{fid}}` that defines the
-        template, i.e. the point at which :math:`A(\varphi) = 1`.
+        template, i.e. the point at which :math:`A(\varphi) = 1`. Folded into
+        the stored transform; not a pytree field.
     grid:
         Explicit quadrature nodes. Defaults to
         ``quadrature_grid(prior, num_nodes=..., span_sigma=...)``. An explicit
@@ -277,18 +286,15 @@ class AmplitudeConditional(dist.Distribution):
         "template_optimal_snr",
         "prior",
         "grid",
-        "fiducial",
+        "amplitude_transform",
     )
-    # Aux, not data: `amplitude_fn` is a Python callable, and JAX hashes aux
-    # data into the jit cache key. See `AmplitudeFn`.
-    pytree_aux_fields = ("amplitude_fn",)
 
     def __init__(
         self,
         amplitude_mle: ArrayLike,
         template_optimal_snr: ArrayLike,
         *,
-        amplitude_fn: AmplitudeFn,
+        amplitude_transform: Transform,
         prior: dist.Distribution,
         fiducial: ArrayLike,
         grid: jax.Array | None = None,
@@ -298,9 +304,10 @@ class AmplitudeConditional(dist.Distribution):
     ) -> None:
         self.amplitude_mle = jnp.asarray(amplitude_mle)
         self.template_optimal_snr = jnp.asarray(template_optimal_snr)
-        self.amplitude_fn = amplitude_fn
+        self.amplitude_transform = anchor_amplitude_transform(
+            amplitude_transform, fiducial
+        )
         self.prior = prior
-        self.fiducial = jnp.asarray(fiducial)
         self.grid = (
             quadrature_grid(prior, num_nodes=num_nodes, span_sigma=span_sigma)
             if grid is None
@@ -340,10 +347,11 @@ class AmplitudeConditional(dist.Distribution):
         inverse-CDF draw -- which is what keeps them from drifting apart. The
         statistics are passed in rather than read off ``self`` so the caller
         controls broadcasting against the trailing grid axis.
+
+        The Gaussian is evaluated at :math:`T(\varphi)`, not transformed as a
+        random variable, so the transform Jacobian is not applied.
         """
-        amplitude = self.amplitude_fn(marginalized_parameter) / self.amplitude_fn(
-            self.fiducial
-        )
+        amplitude = self.amplitude_transform(marginalized_parameter)
         scaled_residual = template_optimal_snr * (amplitude - amplitude_mle)
         log_prior = jnp.asarray(self.prior.log_prob(marginalized_parameter))
         return log_prior - 0.5 * scaled_residual**2
