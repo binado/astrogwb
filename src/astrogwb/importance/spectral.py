@@ -34,9 +34,11 @@ interpolation difference.
 
 Target and proposal densities must include the same factors, or the weights
 are finite and wrong. ``density_sites`` therefore comes from one place -- the
-catalog, through preparation -- and :func:`build_importance_spectrum` threads
-that value to the target evaluation unchanged, in the one dict it splats into
-both returned callables; nothing supplies a default.
+caller, which states it once -- and :func:`build_importance_spectrum` uses that
+one value for the proposal evaluation *and* threads it to the target
+evaluation, in the one dict it splats into both returned callables; nothing
+supplies a default. It is an analysis-time choice, not a property of the draw:
+no sample depends on it, so a catalog does not record it.
 
 Evaluate only where the proposal has support. Subtracting two negative-infinite
 log densities produces ``nan``, which propagates silently.
@@ -158,15 +160,20 @@ def build_importance_spectrum(
     *,
     source_model: SourceFn,
     merger_rate_fn: MergerRateFn,
+    density_sites: Sequence[str],
     frequency_mask: ArrayLike | None = None,
 ) -> tuple[SpectralDensityFn, LogWeightsFn]:
     """Prepare one catalog and bind it to a target, as both callables at once.
 
     Call outside JAX transformations. The proposal density is the catalog's
-    *own* recorded source model, evaluated at the parameters it was drawn at
-    with the density factors it records, so nothing has to be restated in a
-    run config. No merger rate enters the preparation: a proposal is a
-    density, not an observation.
+    *own* recorded source model, evaluated at the parameters it was drawn at,
+    so no run config restates how the draw was made. No merger rate enters the
+    preparation: a proposal is a density, not an observation.
+
+    ``density_sites`` names the source-density factors the weight ratio
+    includes. It is the caller's to state because it changes no sample: the
+    catalog's arrays are the same whichever factors are counted, so the choice
+    belongs to the analysis that reweights them rather than to the file.
 
     ``source_model`` and ``merger_rate_fn`` are the target's already-built
     callables -- normally the two members of one
@@ -194,12 +201,12 @@ def build_importance_spectrum(
     source_parameters = {
         name: jnp.asarray(value) for name, value in catalog.source_parameters.items()
     }
-    density_sites = tuple(catalog.density_sites)
+    sites = tuple(density_sites)
     proposal_log_prob, _ = evaluate_sources(
         catalog.get_population().source_model,
         catalog.fiducials,
         source_parameters,
-        density_sites=density_sites,
+        density_sites=sites,
     )
 
     if _LUMINOSITY_DISTANCE not in source_parameters:
@@ -231,7 +238,7 @@ def build_importance_spectrum(
         "source_parameters": source_parameters,
         "proposal_log_prob": proposal_log_prob,
         "log_reference_distance": jnp.log(reference_distance),
-        "density_sites": density_sites,
+        "density_sites": sites,
     }
     return (
         partial(

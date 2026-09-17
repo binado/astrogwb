@@ -183,16 +183,6 @@ class AmplitudeMarginalization(NamedTuple):
     """Quadrature nodes the marginalization integral is evaluated on."""
 
 
-def _analysis_grid_kwargs(config: RunConfig) -> dict[str, float | int]:
-    """The redshift window and grid a run's target callables are built on."""
-    grid = config.analysis_grid
-    return {
-        "minimum_redshift": grid.minimum_redshift,
-        "maximum_redshift": grid.maximum_redshift,
-        "n_grid": grid.n_grid,
-    }
-
-
 def target_population(config: RunConfig) -> Population:
     """Resolve and bind the population the run's hyperparameters describe.
 
@@ -206,12 +196,13 @@ def target_population(config: RunConfig) -> Population:
     ``check_population_model`` rejects it in pre-flight; this is the same
     refusal at the point of use.
     """
-    name = config.analysis.population_model
-    population = build_population(name, **_analysis_grid_kwargs(config))
+    declared = config.analysis.population
+    population = build_population(declared.model_name, **declared.model_kwargs)
     if population.merger_rate_fn is None:
         raise ValueError(
-            f"analysis.population_model {name!r} declares no merger rate, so "
-            "it cannot be an analysis target; it is a proposal density"
+            f"analysis.population.model_name {declared.model_name!r} declares "
+            "no merger rate, so it cannot be an analysis target; it is a "
+            "proposal density"
         )
     return population
 
@@ -261,14 +252,14 @@ def prepare_observation(
     # Band bounds only: this function never sees a detector network, so bins
     # the network cannot measure are dropped later, in prepare_inference_inputs.
     analysis_frequency_mask = make_frequency_mask(
-        frequencies, fmin=grid.f_min, fmax=grid.f_max
+        frequencies, fmin=grid.minimum_frequency, fmax=grid.maximum_frequency
     )
     logger.info(
         "Analysis band: %d of %d bins (%.1f-%.1f Hz)",
         int(jnp.sum(analysis_frequency_mask)),
         frequencies.shape[0],
-        grid.f_min,
-        grid.f_max,
+        grid.minimum_frequency,
+        grid.maximum_frequency,
     )
     return Observation(
         frequencies=frequencies,
@@ -310,6 +301,7 @@ def prepare_inference_inputs(
     grid: AnalysisGrid,
     detectors: Sequence[str],
     target: Population,
+    density_sites: Sequence[str],
 ) -> InferenceInputs:
     """Build every array the model is evaluated against, from the two catalogs.
 
@@ -318,6 +310,11 @@ def prepare_inference_inputs(
     declare a merger rate: the predicted spectrum is normalized by one, so a
     proposal density here would produce a spectrum with no scale.
 
+    ``density_sites`` names the source-density factors the importance weights
+    include, and is passed straight through to
+    :func:`~astrogwb.importance.build_importance_spectrum`. It is an analysis
+    input rather than something read off the proposal: the catalog's samples do
+    not depend on which of their densities are counted.
     """
     if target.merger_rate_fn is None:
         raise ValueError(
@@ -365,7 +362,8 @@ def prepare_inference_inputs(
     if num_bins < 2:
         raise ValueError(
             f"only {num_bins} usable frequency bin(s) in "
-            f"[{grid.f_min}, {grid.f_max}] Hz for detectors "
+            f"[{grid.minimum_frequency}, {grid.maximum_frequency}] Hz for "
+            f"detectors "
             f"{' '.join(detectors)}; widen the band or choose a detector "
             "network with full coverage"
         )
@@ -387,6 +385,7 @@ def prepare_inference_inputs(
         proposal_catalog,
         source_model=target.source_model,
         merger_rate_fn=target.merger_rate_fn,
+        density_sites=density_sites,
     )
     return InferenceInputs(
         observation=observation,
@@ -400,7 +399,7 @@ def prepare_inference_inputs(
 
 def initial_values(config: RunConfig) -> dict[str, float]:
     """Fiducial values NUTS initializes each sampled parameter at."""
-    return {name: config.fiducials[name] for name in config.sampled_params}
+    return {name: config.fiducials[name] for name in config.analysis.sampled_params}
 
 
 def _fix_model_params(model: Any, fixed_params: Mapping[str, Any]) -> Any:

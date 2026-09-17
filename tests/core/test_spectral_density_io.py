@@ -51,11 +51,6 @@ def _catalog(**overrides: Any) -> SpectralDensityCatalog:
                     "maximum_redshift": 10.0,
                     "n_grid": 32,
                 },
-                density_sites=(
-                    "redshift",
-                    "source_frame_mass_1",
-                    "source_frame_mass_2",
-                ),
                 seed=7,
             ),
         ),

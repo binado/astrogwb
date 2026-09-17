@@ -1,0 +1,13 @@
+{
+  "analysis": {
+    "sampled_params": [
+      "gamma",
+      "kappa",
+      "z_peak"
+    ],
+    "network": "ET-2L-aligned-CE-Hanford",
+    "likelihood": "amplitude_marginalized",
+    "amplitude_parameter": "H0",
+    "amplitude_num_nodes": 1024
+  }
+}

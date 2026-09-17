@@ -1,0 +1,9 @@
+{
+  "analysis": {
+    "sampled_params": [
+      "gamma",
+      "kappa",
+      "z_peak"
+    ]
+  }
+}

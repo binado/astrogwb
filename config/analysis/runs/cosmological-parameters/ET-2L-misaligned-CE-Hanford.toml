@@ -1,4 +1,0 @@
-sampled_params = ["H0"]
-
-[analysis]
-network = "ET-2L-misaligned-CE-Hanford"

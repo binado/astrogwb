@@ -1,26 +1,25 @@
-"""Discover, locate, and merge MCMC run configs from the ``config/analysis/`` tree.
+"""Discover, locate, and merge MCMC run configs from the ``config/`` tree.
 
-Filenames are the mapping. ``config/analysis/runs/<experiment>/<run>.toml``
-samples into ``outputs/chains/<experiment>/<run>.nc``; no inventory file
-translates between the two. That convention is what let the previous
-``inputs/experiments.yaml`` registry -- and the ten ``Snakefile`` helpers that
-read it -- go away.
+Filenames are the mapping. ``config/runs/<experiment>/<run>.json`` samples into
+``outputs/chains/<experiment>/<run>.nc``; no inventory file translates between
+the two. That convention is what let the previous ``inputs/experiments.yaml``
+registry -- and the ten ``Snakefile`` helpers that read it -- go away.
 
-A run config is four layers merged in order:
+A run config is three layers merged in order:
 
-0. ``config/{fiducials,priors,networks}.json`` -- the shared scientific values,
-   which the notebooks and figure scripts also read directly through
-   :mod:`astrogwb.paper.config`. JSON so that ``jq`` can read them without
-   importing the package.
-1. ``config/analysis/base/*.toml`` -- the remaining settings every run shares.
-2. ``config/analysis/runs/<experiment>/_base.toml`` -- the experiment override.
-3. ``config/analysis/runs/<experiment>/<run>.toml`` -- the run override.
+0. ``config/{analysis,fiducials,networks,priors,sampler}.json`` -- the shared
+   values, one file per top-level block of a run config, each a single-key
+   object whose key is its own stem. :func:`base_config_paths` is that list, so
+   a caller that wants "everything shared" asks for it once.
+1. ``config/runs/<experiment>/_base.json`` -- the experiment override.
+2. ``config/runs/<experiment>/<run>.json`` -- the run override.
 
-Layers 0 and 1 together are :func:`base_config_paths`, so a caller that wants
-"everything shared" asks for it once.
+Every layer is JSON, which is what lets ``jq`` fold a run config in the shell
+exactly as the workflow already folds a catalog config -- and what lets
+:func:`~astrogwb.paper.utils.load_mapping` be one parser rather than three.
 
-``_base.toml`` is required in every experiment directory rather than optional:
-a conditional Snakemake input complicates the DAG for no gain.
+:data:`EXPERIMENT_BASE` is required in every experiment directory rather than
+optional: a conditional Snakemake input complicates the DAG for no gain.
 
 There is no assembled-config artifact. Every *run* entrypoint is handed its
 layer files on argv (see :func:`add_config_arguments`) and merges them in
@@ -41,6 +40,7 @@ every target, and every ``--dry-run`` would pay for a JAX import. Catalog
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -58,15 +58,24 @@ logger = logging.getLogger(__name__)
 #: looking for a checkout: the caller's cwd is the answer.
 CONFIG_DIR = Path("config")
 
-#: Layer 0: the values shared by every run *and* read directly by the notebooks
-#: and figure scripts through `astrogwb.paper.config`. They are JSON so that
-#: `jq` can read them without importing the package, and they are ordinary
-#: merge layers -- each is a single-key object -- so nothing here special-cases
-#: them.
+#: Every shared run layer: one file per top-level block of a run config, each
+#: a single-key object whose key is its own stem. ``fiducials``, ``priors`` and
+#: ``networks`` are also read directly by the notebooks and figure scripts
+#: through `astrogwb.paper.config`. All five are ordinary merge layers, so
+#: nothing here special-cases them, and all five are JSON so that `jq` can
+#: read them without importing the package.
+ANALYSIS_PATH = CONFIG_DIR / "analysis.json"
 FIDUCIALS_PATH = CONFIG_DIR / "fiducials.json"
-PRIORS_PATH = CONFIG_DIR / "priors.json"
 NETWORKS_PATH = CONFIG_DIR / "networks.json"
-ROOT_LAYERS = (FIDUCIALS_PATH, PRIORS_PATH, NETWORKS_PATH)
+PRIORS_PATH = CONFIG_DIR / "priors.json"
+SAMPLER_PATH = CONFIG_DIR / "sampler.json"
+ROOT_LAYERS = (
+    ANALYSIS_PATH,
+    FIDUCIALS_PATH,
+    NETWORKS_PATH,
+    PRIORS_PATH,
+    SAMPLER_PATH,
+)
 
 #: Presentation settings, read by `astrogwb.paper.plotting`. Deliberately *not*
 #: a run-config layer: nothing a run samples depends on it.
@@ -86,10 +95,8 @@ POPULATION_PATH = CONFIG_DIR / "population.json"
 #: every catalog as well as every run.
 CATALOG_ROOT_LAYERS = (WAVEFORM_PATH, POPULATION_PATH, FIDUCIALS_PATH)
 
-ANALYSIS_DIR = Path("config/analysis")
-BASE_DIR = ANALYSIS_DIR / "base"
-RUNS_DIR = ANALYSIS_DIR / "runs"
-EXPERIMENT_BASE = "_base.toml"
+RUNS_DIR = CONFIG_DIR / "runs"
+EXPERIMENT_BASE = "_base.json"
 
 #: Catalogs follow the same two-layer shape as runs: the shared layers above,
 #: then one file per named catalog, whose stem is the name.
@@ -137,9 +144,9 @@ def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
     behind.
 
     Order is the caller's responsibility and it is not recoverable from the
-    result, so it is logged. Applying the same fold to the ``base/`` files is a
-    no-op difference from a plain deep merge -- they partition disjoint
-    top-level keys -- so one function serves every layer.
+    result, so it is logged. Applying the same fold to the shared layers is a
+    no-op difference from a plain deep merge -- they declare disjoint top-level
+    blocks -- so one function serves every layer.
     """
     if not paths:
         raise ValueError("no config layers given")
@@ -152,7 +159,8 @@ def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
 def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
     """Return ``{experiment: (run, ...)}`` by globbing the runs tree.
 
-    ``_base.toml`` is the experiment override, not a run, so it is excluded.
+    :data:`EXPERIMENT_BASE` is the experiment override, not a run, so it is
+    excluded.
     """
     resolved = root or Path()
     runs_dir = resolved / RUNS_DIR
@@ -169,7 +177,7 @@ def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
         names = tuple(
             sorted(
                 path.stem
-                for path in directory.glob("*.toml")
+                for path in directory.glob("*.json")
                 if path.name != EXPERIMENT_BASE
             )
         )
@@ -179,13 +187,15 @@ def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
     return runs
 
 
-def root_config_paths(root: Path | None = None) -> tuple[Path, ...]:
-    """Layer 0: the top-level ``config/*.json`` files, in merge order.
+def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
+    """Every shared layer a run inherits, in merge order: :data:`ROOT_LAYERS`.
 
-    Named explicitly rather than globbed. These three are a fixed contract --
-    `astrogwb.paper.config` exposes each one through an accessor -- and
-    ``config/plotting.json`` sits in the same directory without being a run
-    layer, which a glob would sweep in.
+    Named explicitly rather than globbed. ``config/plotting.json`` and the two
+    catalog layers sit in the same directory without being run layers, which a
+    glob of ``config/*.json`` would sweep in -- and ``RunConfig`` is
+    ``extra="forbid"``, so it would sweep them in loudly. The five declare
+    disjoint top-level blocks, so the order among them does not change the
+    outcome; it is fixed anyway for reproducibility.
     """
     resolved = root or Path()
     paths = tuple(resolved / path for path in ROOT_LAYERS)
@@ -193,23 +203,6 @@ def root_config_paths(root: Path | None = None) -> tuple[Path, ...]:
     if missing:
         raise ValueError("missing shared config layer(s): " + ", ".join(missing))
     return paths
-
-
-def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
-    """Every shared layer a run inherits, in merge order.
-
-    Layer 0 (``config/*.json``) first, then ``config/analysis/base/*.toml``.
-    The TOML half is sorted for determinism only: the base files partition
-    disjoint top-level keys, so the order does not change the outcome. The JSON
-    half is ordered by :data:`ROOT_LAYERS` and partitions disjoint keys too --
-    ``fiducials``, ``priors``, ``networks`` -- so the whole prefix is
-    order-insensitive in practice and ordered anyway for reproducibility.
-    """
-    directory = (root or Path()) / BASE_DIR
-    paths = tuple(sorted(directory.glob("*.toml")))
-    if not paths:
-        raise ValueError(f"{directory} declares no base config files")
-    return (*root_config_paths(root), *paths)
 
 
 def run_config_paths(
@@ -223,7 +216,7 @@ def run_config_paths(
     """
     resolved = root or Path()
     directory = resolved / RUNS_DIR / experiment
-    run_path = directory / f"{run}.toml"
+    run_path = directory / f"{run}.json"
     if not run_path.is_file():
         raise ValueError(f"unknown run {experiment}/{run}: {run_path} does not exist")
     experiment_base = directory / EXPERIMENT_BASE
@@ -233,7 +226,7 @@ def run_config_paths(
 
 
 def load_base(root: Path | None = None) -> dict[str, Any]:
-    """Merge every ``config/analysis/base/*.toml`` into one mapping."""
+    """Merge every shared run layer into one mapping."""
     return merge_config_layers(base_config_paths(root))
 
 
@@ -264,10 +257,10 @@ def catalog_base_paths(root: Path | None = None) -> tuple[Path, ...]:
     Only ``config/catalogs/md-taylorf2-s41-n32768.json`` overrides anything in
     the waveform block (the approximant), and only the guarded proposals touch
     the population block; the rest of the tree inherits both verbatim. The
-    stored band matches ``config/analysis/base/model.toml``'s ``[analysis]``
-    ``f_min`` / ``f_max``: the catalog grid *is* the array every model is
-    evaluated on. ``sampling_frequency`` is the waveform backend's Nyquist, not
-    the stored grid.
+    stored band matches ``config/analysis.json``'s ``[analysis]``
+    ``minimum_frequency`` / ``maximum_frequency``: the catalog grid *is* the
+    array every model is evaluated on. ``sampling_frequency`` is the waveform
+    backend's Nyquist, not the stored grid.
     """
     resolved = root or Path()
     paths = tuple(resolved / layer for layer in CATALOG_ROOT_LAYERS)
@@ -301,15 +294,16 @@ def discover_catalog_names(root: Path | None = None) -> tuple[str, ...]:
 
 
 def _catalog_names(raw: Mapping[str, Any]) -> dict[str, str]:
-    """The catalog each role names, from a raw config's ``[catalog]`` block."""
-    catalog = raw.get("catalog")
+    """The catalog each role names, from a raw config's ``[analysis.catalog]``."""
+    analysis = raw.get("analysis")
+    catalog = analysis.get("catalog") if isinstance(analysis, Mapping) else None
     if not isinstance(catalog, Mapping):
-        raise TypeError("run config must define a [catalog] table")
+        raise TypeError("run config must define an [analysis.catalog] table")
     names: dict[str, str] = {}
     for role in CATALOG_ROLES:
         name = catalog.get(role)
         if not isinstance(name, str) or not name:
-            raise TypeError(f"catalog.{role} must be a catalog name")
+            raise TypeError(f"analysis.catalog.{role} must be a catalog name")
         names[role] = name
     return names
 
@@ -448,10 +442,96 @@ def add_config_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         metavar="PATH",
         help=(
-            "One run-config layer file, in merge order; repeat once per layer "
-            "(base/*.toml, then the experiment _base.toml, then the run)."
+            "One run-config layer file, in merge order; repeat once per "
+            "layer (the shared config/*.json, then the experiment _base.json, "
+            "then the run)."
         ),
     )
+
+
+#: What each shared block is, for the ``--<block>`` flags below. Keyed by
+#: layer stem, which is also the block name and the flag name: one list, so a
+#: block cannot be named one thing in a file and another on argv.
+BLOCK_DESCRIPTIONS: dict[str, str] = {
+    "analysis": (
+        "observing time, frequency band, target population, sampled "
+        "parameters, likelihood, and the two catalogs"
+    ),
+    "fiducials": "the fiducial value of every parameter",
+    "networks": "each detector network by name, resolved to analysis.detectors",
+    "priors": "the prior on every parameter",
+    "sampler": "the sampling RNG seed and the NUTS settings",
+}
+
+
+#: The ``jq`` program that folds one block out of an ordered layer list, per
+#: block. One operator each is the whole merge rule: ``*`` is a recursive
+#: merge, which is :func:`~astrogwb.paper.utils.deep_merge` exactly, and
+#: ``priors`` uses ``+`` -- a shallow merge -- so an overridden
+#: ``[priors.<param>]`` table replaces the inherited one rather than
+#: key-merging a normal prior onto a uniform one and leaving stale ``low`` /
+#: ``high`` behind. That is :func:`_merge_run_overlay`'s rule, stated once per
+#: block rather than as a carve-out inside one program.
+#:
+#: They live here, not in the ``Snakefile``, because they are the shell
+#: spelling of this module's own fold: two implementations of one rule, pinned
+#: against each other by ``tests/paper/test_runs.py`` over every run.
+BLOCK_FOLDS: dict[str, str] = {
+    block: (
+        f"map(.{block} // {{}}) | reduce .[] as $b ({{}}; . "
+        f"{'+' if block == 'priors' else '*'} $b)"
+    )
+    for block in BLOCK_DESCRIPTIONS
+}
+
+
+def json_block(raw: str) -> dict[str, Any]:
+    """Parse one merged config block off argv, rejecting anything but an object.
+
+    The argparse type behind :func:`add_block_arguments`. A ``jq`` fold that
+    failed substitutes an empty argument, which fails here rather than being
+    acted on as an empty block.
+    """
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise argparse.ArgumentTypeError(f"not valid JSON: {error}") from None
+    if not isinstance(value, dict):
+        raise argparse.ArgumentTypeError(
+            f"expected a JSON object, got {type(value).__name__}"
+        )
+    return value
+
+
+def add_block_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add one ``--<block>`` flag per shared layer, taking merged JSON.
+
+    The alternative to :func:`add_config_arguments` for an entrypoint that
+    wants the blocks rather than the layer paths: the workflow folds each block
+    with ``jq`` and passes it here, the way ``generate_catalog.py`` is already
+    handed its merged catalog blocks. The flags are derived from
+    :data:`ROOT_LAYERS`, so the file, the block and the flag share one name by
+    construction.
+    """
+    for path in ROOT_LAYERS:
+        block = path.stem
+        parser.add_argument(
+            f"--{block}",
+            required=True,
+            type=json_block,
+            metavar="JSON",
+            help=f"The merged [{block}] block: {BLOCK_DESCRIPTIONS[block]}.",
+        )
+
+
+def load_config_blocks(args: argparse.Namespace) -> dict[str, Any]:
+    """Reassemble the ``--<block>`` flags into one raw config mapping.
+
+    No merge happens here: each block arrives already folded across every layer
+    that declares it, so this is the inverse of the split
+    :func:`add_block_arguments` describes.
+    """
+    return {path.stem: getattr(args, path.stem) for path in ROOT_LAYERS}
 
 
 def load_merged_config(args: argparse.Namespace) -> dict[str, Any]:

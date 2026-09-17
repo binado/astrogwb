@@ -30,7 +30,7 @@ def _marginalized_raw() -> dict:
         "likelihood": "amplitude_marginalized",
         "amplitude_parameter": "H0",
     }
-    raw["sampled_params"] = ["Omega_m"]
+    raw["analysis"]["sampled_params"] = ["Omega_m"]
     return raw
 
 
@@ -60,7 +60,7 @@ def test_initial_values_are_the_sampled_parameter_fiducials() -> None:
     config = build_run_config(example_raw())
 
     assert initial_values(config) == {
-        name: config.fiducials[name] for name in config.sampled_params
+        name: config.fiducials[name] for name in config.analysis.sampled_params
     }
     assert set(initial_values(config)).isdisjoint(config.fixed_params)
 
@@ -102,7 +102,7 @@ def test_build_model_default_likelihood_conditions_every_fixed_param() -> None:
     for name, value in config.fixed_params.items():
         assert name not in trace
         np.testing.assert_allclose(float(seen[0][name]), value)
-    assert set(config.sampled_params) <= set(trace)
+    assert set(config.analysis.sampled_params) <= set(trace)
 
 
 def test_build_model_amplitude_marginalized_conditions_other_fixed_params() -> None:
@@ -129,4 +129,4 @@ def test_build_model_amplitude_marginalized_conditions_other_fixed_params() -> N
             continue
         assert name not in trace
         np.testing.assert_allclose(float(seen[0][name]), value)
-    assert set(config.sampled_params) <= set(trace)
+    assert set(config.analysis.sampled_params) <= set(trace)

@@ -17,26 +17,36 @@ initializes its backend, so backend-claiming work happens only after
 may load JAX, but is kept free of array creation and device queries; a subprocess
 test guards that distinction. See the runtime helper for the ordering.
 
-Usage -- one ``--config`` per layer, in merge order::
+Usage -- one flag per config block, each already merged across the layers
+that declare it::
 
+    RUN=config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json
+    BASE=config/runs/cosmological-parameters/_base.json
+    LAYERS="config/analysis.json config/fiducials.json config/networks.json \
+        config/priors.json config/sampler.json $BASE $RUN"
     uv run --extra paper python scripts/run_mcmc.py \
-        --config config/analysis/base/model.toml \
-        --config config/fiducials.json \
-        --config config/priors.json \
-        --config config/networks.json \
-        --config config/analysis/base/sampling.toml \
-        --config config/analysis/runs/cosmological-parameters/_base.toml \
-        --config config/analysis/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
+        --analysis "$(jq -s 'map(.analysis // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
+        --fiducials "$(jq -s 'map(.fiducials // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
+        --networks "$(jq -s 'map(.networks // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
+        --priors "$(jq -s 'map(.priors // {}) | reduce .[] as $b ({}; . + $b)' $LAYERS)" \
+        --sampler "$(jq -s 'map(.sampler // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
         --injection-catalog outputs/catalogs/md-imrphenom-s41-n32768.h5 \
         --proposal-catalog outputs/catalogs/md-imrphenom-s42-n16384.h5
 
-Order is the caller's responsibility -- there is no assembled-config artifact
-and no single function that owns it any more -- so the resolved order is logged
-before the merge and stamped into the chain's ``config_layers`` attribute. The
-``run_mcmc`` workflow rule declares exactly these files as ``input:`` and
-passes them straight back on argv.
+One operator per block is the whole merge rule: ``*`` (deep) everywhere, and
+``+`` (shallow) for ``priors``, so an overridden ``[priors.<param>]`` table
+replaces the inherited one rather than key-merging a normal prior onto a
+uniform one and leaving stale ``low`` / ``high`` behind. The ``run_mcmc``
+workflow rule declares the same layer files as ``input:`` and folds them
+exactly this way; ``tests/paper/test_runs.py`` pins the folds against
+``merge_config_layers``, which is the Python path the notebooks and the
+validation gate take.
 
-The run config's ``[catalog]`` block names one catalog per role; the two files
+Taking blocks rather than paths is why merge order is no longer this script's
+concern: each block arrives folded, so there is no order left to get wrong and
+nothing to log. The resolved config still lands beside the chain.
+
+The run config's ``[analysis.catalog]`` block names one per role; the two files
 are supplied directly as ``--injection-catalog`` and ``--proposal-catalog``.
 Roles are fixed, so no name-to-path mapping is needed.
 
@@ -62,14 +72,13 @@ from __future__ import annotations
 
 import argparse
 import logging
-from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from astrogwb.paper.config.catalogs import check_catalog_references
 from astrogwb.paper.config.mcmc import RunConfig, build_run_config
-from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
+from astrogwb.paper.config.runs import add_block_arguments, load_config_blocks
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
@@ -89,20 +98,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "settings from a TOML or JSON config; saves an ArviZ NetCDF."
         )
     )
-    add_config_arguments(parser)
+    add_block_arguments(parser)
     parser.add_argument(
         "--injection-catalog",
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [catalog].injection names.",
+        help="The catalog file this run's [analysis.catalog].injection names.",
     )
     parser.add_argument(
         "--proposal-catalog",
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [catalog].proposal names.",
+        help="The catalog file this run's [analysis.catalog].proposal names.",
     )
     parser.add_argument(
         "--seed",
@@ -165,9 +174,10 @@ def run(
     inputs = prepare_inference_inputs(
         injection_catalog,
         proposal_catalog,
-        grid=config.analysis_grid,
+        grid=config.analysis.grid,
         detectors=config.analysis.detectors,
         target=target_population(config),
+        density_sites=config.analysis.population.density_sites,
     )
     model, marginalization = build_model(
         config,
@@ -204,7 +214,7 @@ def run(
         sampler.target_accept,
         sampler.forward_mode_differentiation,
     )
-    rng_key = jax.random.PRNGKey(config.seed)
+    rng_key = jax.random.PRNGKey(config.sampler.seed)
     mcmc.run(
         rng_key,
         **inputs.model_kwargs(),
@@ -228,9 +238,9 @@ def chain_output_path(config: RunConfig, *, timestamp: str | None = None) -> Pat
         base = config.output.label
     else:
         timestamp = timestamp or datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
-        params_suffix = "-".join(config.sampled_params)
+        params_suffix = "-".join(config.analysis.sampled_params)
         det_suffix = ",".join(config.analysis.detectors)
-        base = f"mcmc-{params_suffix}-det={det_suffix}-seed{config.seed}-{timestamp}"
+        base = f"mcmc-{params_suffix}-det={det_suffix}-seed{config.sampler.seed}-{timestamp}"
     return config.output.outdir / f"{base}.nc"
 
 
@@ -255,14 +265,13 @@ def save(
     timestamp: str | None = None,
     force: bool = False,
     marginalization: AmplitudeMarginalization | None = None,
-    config_layers: Sequence[Path] | None = None,
 ) -> Path:
     """Write the ArviZ NetCDF chain and its config record, and log IS health.
 
-    ``config_layers`` are the ordered ``--config`` files this run was handed.
-    Merge order is caller-controlled and a wrong-but-valid order is silent, so
-    the list is stamped into the chain alongside the resolved config written
-    next to it.
+    The resolved, defaults-filled config lands beside the chain, so two runs
+    that reach the same settings by different overrides produce identical
+    records. There is no layer list to stamp: this script is handed blocks,
+    already folded, rather than an ordered list of files.
     """
     import json
     from functools import partial
@@ -284,22 +293,14 @@ def save(
     if proposal is not None:
         idata.posterior.attrs["proposal"] = json.dumps(
             {
-                "model": proposal.population_model_name,
-                "kwargs": dict(proposal.population_model_kwargs),
+                # The record itself, not a field-by-field restatement of it:
+                # one spelling, so a field added to PopulationMetadata reaches
+                # the chain without an edit here.
+                "population": proposal.population.model_dump(mode="json"),
                 "params": dict(proposal.fiducials),
-                "density_sites": list(proposal.density_sites),
                 "num_samples": proposal.num_samples,
-                "seed": proposal.seed,
             },
             sort_keys=True,
-        )
-
-    # Which files were merged, in which order, to produce `config`. The
-    # resolved config goes next to the chain below; this is the provenance the
-    # resolved config cannot carry.
-    if config_layers is not None:
-        idata.posterior.attrs["config_layers"] = json.dumps(
-            [str(path) for path in config_layers]
         )
 
     if marginalization is not None:
@@ -333,7 +334,7 @@ def save(
                 "quadrature_effective_nodes",
             ],
         )(
-            jax.random.fold_in(jax.random.PRNGKey(config.seed), 1),
+            jax.random.fold_in(jax.random.PRNGKey(config.sampler.seed), 1),
             amplitude_mle=posterior_samples["amplitude_mle"],
             template_optimal_snr=posterior_samples["template_optimal_snr"],
             template_merger_rate=posterior_samples["template_merger_rate"],
@@ -387,9 +388,8 @@ def main(argv: list[str] | None = None) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
 
-    config_layers = [path.resolve() for path in args.config]
     config = build_run_config(
-        load_merged_config(args),
+        load_config_blocks(args),
         seed=args.seed,
         outdir=args.outdir.resolve() if args.outdir else None,
         label=args.label,
@@ -398,11 +398,11 @@ def main(argv: list[str] | None = None) -> None:
     # way to every chain: reject an unknown catalog before JAX claims a
     # device. `scripts/validate_configs.py` runs it over all runs at once,
     # before any catalog is built.
-    check_catalog_references(config, label=args.label or str(config_layers[-1]))
+    check_catalog_references(config, label=args.label or "run")
 
     logger.info(
         "Sampling %s | fixed %s",
-        tuple(config.sampled_params),
+        tuple(config.analysis.sampled_params),
         tuple(config.fixed_params),
     )
 
@@ -423,12 +423,11 @@ def main(argv: list[str] | None = None) -> None:
     injection_catalog = load_run_catalog(injection_path, label="injection")
     proposal_catalog = load_run_catalog(proposal_path, label="proposal")
     logger.info(
-        "Proposal density from %s: model=%s kwargs=%s params=%s density_sites=%s",
-        config.catalog.proposal,
+        "Proposal density from %s: model=%s kwargs=%s params=%s",
+        config.analysis.catalog.proposal,
         proposal_catalog.population_model_name,
         dict(proposal_catalog.population_model_kwargs),
         dict(proposal_catalog.fiducials),
-        proposal_catalog.density_sites,
     )
 
     jax, chain_method = configure_runtime(
@@ -452,7 +451,6 @@ def main(argv: list[str] | None = None) -> None:
         timestamp=timestamp,
         force=args.force,
         marginalization=marginalization,
-        config_layers=config_layers,
     )
 
 

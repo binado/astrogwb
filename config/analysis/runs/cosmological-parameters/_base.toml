@@ -1,9 +1,0 @@
-# H0 (or one parameter with H0 amplitude-marginalized) from the
-# astrophysical background, across detector networks.
-#
-# Every run samples a single scalar, so NUTS uses a diagonal mass matrix
-# and a shorter warmup.
-
-[sampler]
-num_warmup = 500
-dense_mass = false

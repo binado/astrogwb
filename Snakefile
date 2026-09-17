@@ -3,7 +3,7 @@ import shlex
 from pathlib import Path
 
 from astrogwb.paper.config.runs import (
-    base_config_paths,
+    BLOCK_FOLDS,
     catalog_config_paths,
     discover_catalog_names,
     discover_runs,
@@ -28,10 +28,10 @@ def catalog_path(name: str) -> str:
 
 
 # Filenames are the mapping: config/catalogs/<name>.json ->
-# outputs/catalogs/<name>.h5, and config/analysis/runs/<experiment>/<run>.toml
+# outputs/catalogs/<name>.h5, and config/runs/<experiment>/<run>.json
 # -> outputs/chains/<experiment>/<run>.nc. Nothing below translates a registry
 # name into a path; it only globs the config tree and reads back the two names
-# a run's own [catalog] block carries.
+# a run's own [analysis.catalog] block carries.
 catalogs = discover_catalog_names()
 runs = discover_runs()
 
@@ -58,7 +58,7 @@ RUN_PATTERN = "|".join(
 # The figures read the same catalog files the runs sample against. Both names
 # are read off the base catalog config so they cannot drift from what the runs
 # actually use.
-_BASE_CATALOGS = load_base()["catalog"]
+_BASE_CATALOGS = load_base()["analysis"]["catalog"]
 INJECTION_CATALOG = catalog_path(_BASE_CATALOGS["injection"])
 DEFAULT_PROPOSAL_CATALOG = catalog_path(_BASE_CATALOGS["proposal"])
 # Figures report what was sampled, so each one is handed a run's own config
@@ -67,7 +67,6 @@ DEFAULT_PROPOSAL_CATALOG = catalog_path(_BASE_CATALOGS["proposal"])
 # explicit choice here now. The two chain figures read the layers of a run they
 # actually plot; the three chain-free figures fall back to this one.
 FIGURE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
-BASE_CONFIGS = [str(path) for path in base_config_paths(Path("."))]
 
 
 def config_layers(experiment, run):
@@ -81,9 +80,32 @@ def config_flags(experiment, run):
     Built in `params:` rather than interpolated from `input:`: a list input
     expands to bare space-separated paths, which argparse's `action="append"`
     would read as one value plus stray positionals.
+
+    Still how the figure scripts are handed a run's config: they want the
+    merged mapping for reference values, not one flag per block, and merging in
+    process keeps them off `jq`.
     """
     return " ".join(
         f"--config {shlex.quote(path)}" for path in config_layers(experiment, run)
+    )
+
+
+# `BLOCK_FOLDS` -- the jq program per block -- comes from the config layer, so
+# the shell fold and the Python fold it must agree with are defined next to
+# each other. Interpolated through `params:` rather than written inline, like
+# `rule merge_catalog_config`: Snakemake formats the shell string, so a literal
+# `{}` in a jq program would be read as a placeholder.
+def block_flags(experiment, run):
+    """`--<block> "$(jq ...)"` for every shared block, as one shell fragment.
+
+    The layer files are the same list `input:` declares, so the dependency
+    edges and the data path stay one list even though the blocks, not the
+    paths, are what the script now reads.
+    """
+    layers = " ".join(shlex.quote(path) for path in config_layers(experiment, run))
+    return " ".join(
+        f"--{block} \"$(jq -s {shlex.quote(program)} {layers})\""
+        for block, program in BLOCK_FOLDS.items()
     )
 
 
@@ -96,13 +118,15 @@ def network_run_flags(experiment):
 
 
 def network_config_inputs(experiment):
-    """The run TOMLs behind `network_run_flags`, so the DAG edges are real.
+    """The run files behind `network_run_flags`, so the DAG edges are real.
 
     The script re-derives these paths from the run names it is given; declaring
-    them here is what makes editing one network's TOML retrigger the figure.
+    them here is what makes editing one network's config retrigger the figure.
+    Taken from `run_config_paths`, whose last layer is the run's own file, so
+    the path convention lives in one place.
     """
     return [
-        f"config/analysis/runs/{experiment}/{run}.toml"
+        str(run_config_paths(experiment, run, root=Path("."))[-1])
         for run in DETECTOR_NETWORK_RUNS
     ]
 
@@ -240,9 +264,9 @@ rule run_mcmc:
     """Sample one run into outputs/chains/<experiment>/<run>.nc."""
     input:
         script="scripts/run_mcmc.py",
-        # The same three layers `assemble_config` used to declare, so re-run
+        # The same layers `assemble_config` used to declare, so re-run
         # granularity is unchanged: edit a leaf -> one chain; edit
-        # base/sampling.toml -> all 26.
+        # config/sampler.json -> all 26.
         config=lambda w: config_layers(w.experiment, w.run),
         injection=run_catalog_input("injection"),
         proposal=run_catalog_input("proposal"),
@@ -251,7 +275,7 @@ rule run_mcmc:
     params:
         platform=JAX_PLATFORM,
         outdir=run_outdir,
-        config_flags=lambda w: config_flags(w.experiment, w.run),
+        block_flags=lambda w: block_flags(w.experiment, w.run),
     threads: 4
     resources:
         mem_mb=8000,
@@ -284,7 +308,7 @@ rule run_mcmc:
         # until one is run. UV_EXTRAS is inert under --no-sync; it is kept so
         # the two branches still say which environment each platform wants.
         $NANNY uv run --active --no-sync $UV_EXTRAS python {input.script:q} \
-            {params.config_flags} --outdir {params.outdir:q} \
+            {params.block_flags} --outdir {params.outdir:q} \
             --label {wildcards.run:q} \
             --injection-catalog {input.injection:q} \
             --proposal-catalog {input.proposal:q} \
@@ -392,9 +416,9 @@ rule fiducial_spectrum:
     input:
         catalog=INJECTION_CATALOG,
         # Borrows the cosmological-parameters networks; reads no chains. The
-        # network TOMLs are declared even though no chain is, so editing one
-        # network's detector list retriggers this figure -- which it did not do
-        # while the figure resolved everything from one assembled config.
+        # network config files are declared even though no chain is, so editing
+        # one network's detector list retriggers this figure -- which it did not
+        # do while the figure resolved everything from one assembled config.
         config=config_layers(*FIGURE_RUN),
         network_configs=network_config_inputs("cosmological-parameters"),
     output:

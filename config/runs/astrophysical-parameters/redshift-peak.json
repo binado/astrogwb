@@ -1,0 +1,11 @@
+{
+  "sampler": {
+    "num_warmup": 500,
+    "dense_mass": false
+  },
+  "analysis": {
+    "sampled_params": [
+      "z_peak"
+    ]
+  }
+}

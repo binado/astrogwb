@@ -38,7 +38,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb.metadata import PopulationMetadata, WaveformMetadata
-from astrogwb.paper.config.mcmc import RunConfig
+from astrogwb.paper.config.mcmc import RunConfig, check_redshift_grid
 from astrogwb.paper.config.runs import (
     CATALOGS_DIR,
     catalog_config_paths,
@@ -57,8 +57,8 @@ class CatalogDefinition(BaseModel):
     ``population`` is the :class:`~astrogwb.metadata.PopulationMetadata` the
     generated ``.h5`` persists verbatim, assembled here rather than bridged
     from a second config-layer model: the declaration and the record were the
-    same four facts stated twice, and a bridge between them is one more place
-    for them to disagree. ``model_name`` is a key in the
+    same facts stated twice, and a bridge between them is one more place for
+    them to disagree. ``model_name`` is a key in the
     :mod:`astrogwb.populations` registry, never an import path -- registry keys
     change only on purpose, while module paths move as collateral whenever a
     module is reorganized. It names the population, the source model and its
@@ -100,19 +100,14 @@ class CatalogDefinition(BaseModel):
         """Complete the ``[population]`` block into a full record.
 
         The config layer declares the two facts that are configuration --
-        ``model_name`` and ``model_kwargs``. The other two are not: ``seed``
-        belongs to this particular draw and is stated once, at the top level,
-        and :data:`~astrogwb.populations.DEFAULT_DENSITY_SITES` follows from the
-        registered population rather than from a file, so no def declares it.
+        ``model_name`` and ``model_kwargs``. ``seed`` is not: it belongs to this
+        particular draw and is stated once, at the top level, so it is folded in
+        here.
 
-        Both are rejected rather than ignored when a layer does declare one.
-        A ``[population]`` ``seed`` would otherwise win here and leave
-        ``definition.seed`` disagreeing with the seed the ``.h5`` records, which
-        is the one thing this assembly exists to make impossible.
-
-        Imports the registry in its own body: populating it means importing the
-        population models, which reaches JAX, and this module is otherwise free
-        of it.
+        A ``[population]`` ``seed`` is rejected rather than ignored. It would
+        otherwise win here and leave ``definition.seed`` disagreeing with the
+        seed the ``.h5`` records, which is the one thing this assembly exists to
+        make impossible.
         """
         if not isinstance(data, Mapping):
             return data
@@ -122,35 +117,21 @@ class CatalogDefinition(BaseModel):
             # it better than a KeyError here would.
             return data
 
-        supplied = [name for name in ("seed", "density_sites") if name in population]
-        if supplied:
+        if "seed" in population:
             raise ValueError(
-                f"population may not declare {', '.join(supplied)}: the seed is "
-                "the def's own, and the density sites follow from the "
-                "registered population"
+                "population may not declare seed: the seed is the def's own"
             )
 
-        from astrogwb.populations import DEFAULT_DENSITY_SITES
-
-        completed = {
-            **population,
-            "density_sites": DEFAULT_DENSITY_SITES,
-        }
+        completed = dict(population)
         if "seed" in data:
             completed["seed"] = data["seed"]
         return {**data, "population": completed}
 
     @model_validator(mode="after")
     def _validate_redshift_window(self) -> CatalogDefinition:
-        kwargs = self.population.model_kwargs
-        window = ("minimum_redshift", "maximum_redshift")
-        if all(name in kwargs for name in window) and not float(
-            kwargs["minimum_redshift"]
-        ) < float(kwargs["maximum_redshift"]):
-            raise ValueError(
-                "population.model_kwargs.minimum_redshift must be less than "
-                "population.model_kwargs.maximum_redshift"
-            )
+        check_redshift_grid(
+            self.population.model_kwargs, label="population.model_kwargs"
+        )
         return self
 
 
@@ -240,14 +221,14 @@ def check_catalog_references(
     """
     known = catalogs if catalogs is not None else discover_catalogs()
     for role, name in (
-        ("injection", config.catalog.injection),
-        ("proposal", config.catalog.proposal),
+        ("injection", config.analysis.catalog.injection),
+        ("proposal", config.analysis.catalog.proposal),
     ):
         if name not in known:
             choices = ", ".join(known)
             raise ValueError(
-                f"{label} catalog.{role} names unknown catalog {name!r}; "
-                f"choose from {choices}"
+                f"{label} analysis.catalog.{role} names unknown catalog "
+                f"{name!r}; choose from {choices}"
             )
 
 
@@ -283,15 +264,11 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
             label = f"{experiment}/{run}"
             config = build_run_config(assemble_run(experiment, run, root=root))
             check_catalog_references(config, label=label, catalogs=catalogs)
-            grid = config.analysis_grid
+            target = config.analysis.population
             check_population_model(
-                config.analysis.population_model,
-                label=f"{label} analysis.population_model",
-                kwargs={
-                    "minimum_redshift": grid.minimum_redshift,
-                    "maximum_redshift": grid.maximum_redshift,
-                    "n_grid": grid.n_grid,
-                },
+                target.model_name,
+                label=f"{label} analysis.population.model_name",
+                kwargs=target.model_kwargs,
                 requires_merger_rate=True,
             )
             logger.info("ok %s", label)

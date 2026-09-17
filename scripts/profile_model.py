@@ -18,13 +18,13 @@ Usage -- one ``--config`` per layer, in merge order, exactly as
 ``scripts/run_mcmc.py`` takes them::
 
     uv run --extra paper python scripts/profile_model.py \
-        --config config/analysis/base/model.toml \
+        --config config/analysis.json \
         --config config/fiducials.json \
         --config config/priors.json \
         --config config/networks.json \
-        --config config/analysis/base/sampling.toml \
-        --config config/analysis/runs/cosmological-parameters/_base.toml \
-        --config config/analysis/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
+        --config config/sampler.json \
+        --config config/runs/cosmological-parameters/_base.json \
+        --config config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
         --injection-catalog outputs/catalogs/md-imrphenom-s41-n32768.h5 \
         --proposal-catalog outputs/catalogs/md-imrphenom-s42-n16384.h5
 
@@ -66,14 +66,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [catalog].injection names.",
+        help="The catalog file this run's [analysis.catalog].injection names.",
     )
     parser.add_argument(
         "--proposal-catalog",
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [catalog].proposal names.",
+        help="The catalog file this run's [analysis.catalog].proposal names.",
     )
     parser.add_argument(
         "--seed",
@@ -127,9 +127,10 @@ def build_potential(
     inputs = prepare_inference_inputs(
         injection_catalog,
         proposal_catalog,
-        grid=config.analysis_grid,
+        grid=config.analysis.grid,
         detectors=config.analysis.detectors,
         target=target_population(config),
+        density_sites=config.analysis.population.density_sites,
     )
     model, _ = build_model(
         config,
@@ -138,7 +139,7 @@ def build_potential(
 
     init_strategy = init_to_value(values=initial_values(config))
     info = initialize_model(
-        jax.random.PRNGKey(config.seed),
+        jax.random.PRNGKey(config.sampler.seed),
         model,
         init_strategy=init_strategy,
         model_kwargs=inputs.model_kwargs(),

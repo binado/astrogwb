@@ -46,8 +46,8 @@ class AnalysisGrid:
     """Frequency band and redshift grid shared by every experiment run."""
 
     observation_time: float
-    f_min: float
-    f_max: float
+    minimum_frequency: float
+    maximum_frequency: float
     minimum_redshift: float
     maximum_redshift: float
     n_grid: int
@@ -61,6 +61,50 @@ class AnalysisGrid:
 # docstring), so a @pytest.mark.integration paper test cross-checks the two
 # lists instead.
 AmplitudeParameter = Literal["H0", "local_merger_rate"]
+
+#: Restates astrogwb.populations.DEFAULT_DENSITY_SITES, for the same reason and
+#: under the same cross-check: `astrogwb.populations.registry` imports JAX at
+#: module scope, so importing the constant here would cost every
+#: `snakemake --dry-run` a JAX import and break the guard in
+#: `tests/paper/test_cli.py`.
+DEFAULT_DENSITY_SITES: tuple[str, ...] = (
+    "redshift",
+    "source_frame_mass_1",
+    "source_frame_mass_2",
+)
+
+#: The construction kwargs a population must be given to be evaluated on a
+#: redshift grid. Shared by `AnalysisPopulation` and, through
+#: :func:`check_redshift_grid`, by `CatalogDefinition`.
+REDSHIFT_GRID_KWARGS: tuple[str, ...] = (
+    "minimum_redshift",
+    "maximum_redshift",
+    "n_grid",
+)
+
+
+def check_redshift_grid(
+    model_kwargs: Mapping[str, Any], *, label: str, required: bool = False
+) -> None:
+    """Reject a redshift window that is empty, or absent where it is needed.
+
+    One check for the two places a population's construction kwargs are
+    declared. ``required`` is what differs between them: an analysis target is
+    *always* built on a grid -- the same grid its spectral integral runs on --
+    while a catalog's population is only checked for a window when it declares
+    one, since the shared layer, not this function, decides what a draw needs.
+    """
+    if required:
+        missing = [name for name in REDSHIFT_GRID_KWARGS if name not in model_kwargs]
+        if missing:
+            raise ValueError(f"{label} must declare {', '.join(missing)}")
+    window = ("minimum_redshift", "maximum_redshift")
+    if all(name in model_kwargs for name in window) and not float(
+        model_kwargs["minimum_redshift"]
+    ) < float(model_kwargs["maximum_redshift"]):
+        raise ValueError(
+            f"{label}.minimum_redshift must be less than {label}.maximum_redshift"
+        )
 
 
 # Wire protocol for the priors tables:
@@ -180,6 +224,54 @@ PriorDistribution = Annotated[
 ]
 
 
+class AnalysisPopulation(BaseModel):
+    """The population a run's sampled hyperparameters describe.
+
+    Shaped like ``config/population.json``'s block -- ``model_name`` and the
+    flat ``model_kwargs`` :func:`~astrogwb.populations.build_population` is
+    given -- but it is deliberately *not* a
+    :class:`~astrogwb.metadata.PopulationMetadata`. That record describes a
+    draw: its ``seed`` is mandatory and means nothing for a target that is
+    evaluated rather than sampled from.
+
+    ``model_kwargs`` carries the redshift window and grid, which is the one
+    statement of them: the same three numbers build the target callables *and*
+    define the grid its spectral integral runs on, so `grid` reads them back
+    out rather than a second block restating them.
+
+    ``density_sites`` selects the source-density factors importance weighting
+    includes, for both sides of every weight. It lives here because no catalog
+    depends on it -- the samples are the same whichever of their densities are
+    counted -- so the run that reweights a draw is what declares the choice.
+    Ordered and load-bearing: the two mass sites are one conceptual
+    ordered-pair contribution (the secondary's distribution is parameterized by
+    the drawn primary), and dropping either gives silently wrong weights with
+    no shape error anywhere.
+
+    The model name is validated against the registry by
+    `astrogwb.paper.config.catalogs.check_population_model`, not here: this
+    module must stay importable without JAX.
+    """
+
+    model_config = _STRICT
+
+    #: The default is the one every committed run uses; it reduces exactly to
+    #: the plain cosmological population at xi_0 = 1, which is how a run that
+    #: does not sample the propagation parameters gets the standard law without
+    #: naming a second population. An analysis target must declare a merger
+    #: rate, so a guard mixture cannot be named here.
+    model_name: str = "bns_md_modified_propagation"
+    model_kwargs: dict[str, float | int]
+    density_sites: tuple[str, ...] = DEFAULT_DENSITY_SITES
+
+    @model_validator(mode="after")
+    def _validate_model_kwargs(self) -> AnalysisPopulation:
+        check_redshift_grid(
+            self.model_kwargs, label="analysis.population.model_kwargs", required=True
+        )
+        return self
+
+
 class AnalysisConfig(BaseModel):
     model_config = _STRICT
 
@@ -194,17 +286,15 @@ class AnalysisConfig(BaseModel):
     #: table -- re-validates. That every *committed* run names one is a repo
     #: test, not a model constraint.
     network: str | None = None
-    f_min: float
-    f_max: float
-    # The registered population the sampled hyperparameters describe. The
-    # default is the one every committed run uses; it reduces exactly to the
-    # plain cosmological population at xi_0 = 1, which is how a run that does
-    # not sample the propagation parameters gets the standard law without
-    # naming a second population. An analysis target must declare a merger
-    # rate, so a guard mixture cannot be named here. Validated against the
-    # registry by `astrogwb.paper.config.catalogs.check_population_model`, not
-    # here: this module must stay importable without JAX.
-    population_model: str = "bns_md_modified_propagation"
+    observation_time: float = 1.0
+    minimum_frequency: float
+    maximum_frequency: float
+    #: Unset (empty) -> every key in [priors] except a marginalized amplitude
+    #: parameter; resolved by `RunConfig._resolve_sampled_params`, which needs
+    #: the [priors] table and so cannot live here.
+    sampled_params: tuple[str, ...] = ()
+    population: AnalysisPopulation
+    catalog: CatalogConfig
     likelihood: Literal["default", "amplitude_marginalized"] = "default"
     amplitude_parameter: AmplitudeParameter | None = None
     amplitude_num_nodes: Annotated[int, Field(gt=1)] = 1024
@@ -225,18 +315,33 @@ class AnalysisConfig(BaseModel):
             )
         return self
 
+    @property
+    def grid(self) -> AnalysisGrid:
+        """The frequency band and redshift grid this run's inputs are built on.
 
-class CosmoConfig(BaseModel):
-    model_config = _STRICT
-
-    minimum_redshift: float
-    maximum_redshift: float
-    n_grid: int
+        Derived from this block alone, and deliberately not serialized: `save`
+        writes only the inputs needed to reconstruct the validated config. The
+        redshift entries come back out of ``population.model_kwargs``, where
+        the validator has already required all three.
+        """
+        kwargs = self.population.model_kwargs
+        return AnalysisGrid(
+            observation_time=self.observation_time,
+            minimum_frequency=self.minimum_frequency,
+            maximum_frequency=self.maximum_frequency,
+            minimum_redshift=float(kwargs["minimum_redshift"]),
+            maximum_redshift=float(kwargs["maximum_redshift"]),
+            n_grid=int(kwargs["n_grid"]),
+        )
 
 
 class SamplerConfig(BaseModel):
     model_config = _STRICT
 
+    #: The sampling RNG seed. It belongs to the sampler rather than to the run
+    #: as a whole, which is what lets `config/sampler.json` be the single-key
+    #: layer its stem names.
+    seed: int = 42
     num_warmup: Annotated[int, Field(gt=0)]
     num_samples: Annotated[int, Field(gt=0)]
     num_chains: Annotated[int, Field(gt=0)] = 1
@@ -276,18 +381,12 @@ class CatalogConfig(BaseModel):
 class RunConfig(BaseModel):
     model_config = _STRICT
 
-    seed: int = 42
-    observation_time: float = 1.0
     fiducials: dict[str, float]
-    # Complete parameter name -> prior distribution table. `sampled_params`
-    # selects the NUTS latents; every other non-marginalized site is conditioned.
+    # Complete parameter name -> prior distribution table.
+    # `analysis.sampled_params` selects the NUTS latents; every other
+    # non-marginalized site is conditioned.
     priors: dict[str, PriorDistribution]
-    # Unset (empty) -> default to every key in [priors] except a marginalized
-    # amplitude parameter; resolved below.
-    sampled_params: tuple[str, ...] = ()
     analysis: AnalysisConfig
-    cosmology: CosmoConfig
-    catalog: CatalogConfig
     sampler: SamplerConfig
     output: OutputConfig = Field(default_factory=OutputConfig)
 
@@ -360,7 +459,7 @@ class RunConfig(BaseModel):
         priors = dict(self.priors)
         amplitude_parameter = self.analysis.amplitude_parameter
         if amplitude_parameter is not None:
-            if amplitude_parameter in self.sampled_params:
+            if amplitude_parameter in self.analysis.sampled_params:
                 raise ValueError(
                     f"analysis.amplitude_parameter {amplitude_parameter!r} "
                     "cannot also appear in sampled_params"
@@ -383,7 +482,7 @@ class RunConfig(BaseModel):
         if missing_fiducials:
             raise ValueError(f"priors missing from [fiducials]: {missing_fiducials}")
 
-        sampled = self.sampled_params or tuple(
+        sampled = self.analysis.sampled_params or tuple(
             p for p in priors if p != amplitude_parameter
         )
         missing_priors = [p for p in sampled if p not in priors]
@@ -395,7 +494,12 @@ class RunConfig(BaseModel):
         if missing_fid:
             raise ValueError(f"sampled_params missing from [fiducials]: {missing_fid}")
 
-        object.__setattr__(self, "sampled_params", sampled)
+        # The field lives on `analysis` but only `RunConfig` can default it:
+        # the fallback is "every prior except a marginalized amplitude", and
+        # [priors] is a sibling block. `object.__setattr__` writes straight into
+        # the nested model's `__dict__`, past `frozen=True` -- the same escape
+        # this validator has always used, one level down.
+        object.__setattr__(self.analysis, "sampled_params", sampled)
         return self
 
     @property
@@ -406,23 +510,11 @@ class RunConfig(BaseModel):
         NUTS latent, but its fiducial value is still what the model pins it
         to. This is a plain property and is not serialized.
         """
-        return {k: v for k, v in self.fiducials.items() if k not in self.sampled_params}
-
-    @property
-    def analysis_grid(self) -> AnalysisGrid:
-        """The frequency band and redshift grid this run's inputs are built on.
-
-        A plain property, deliberately not serialized: `save` writes
-        only inputs needed to reconstruct the validated run configuration.
-        """
-        return AnalysisGrid(
-            observation_time=self.observation_time,
-            f_min=self.analysis.f_min,
-            f_max=self.analysis.f_max,
-            minimum_redshift=self.cosmology.minimum_redshift,
-            maximum_redshift=self.cosmology.maximum_redshift,
-            n_grid=self.cosmology.n_grid,
-        )
+        return {
+            k: v
+            for k, v in self.fiducials.items()
+            if k not in self.analysis.sampled_params
+        }
 
     def save(self, path: Path) -> None:
         """Write the validated run config as JSON."""
@@ -449,7 +541,7 @@ def build_run_config(
     """
     cli_overrides: dict[str, Any] = {}
     if seed is not None:
-        cli_overrides["seed"] = seed
+        cli_overrides["sampler"] = {"seed": seed}
     if outdir is not None or label is not None:
         output: dict[str, Any] = {}
         if outdir is not None:

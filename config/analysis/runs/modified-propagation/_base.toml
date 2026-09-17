@@ -1,3 +1,0 @@
-# Modified GW propagation (Xi_0, n) across detector networks.
-
-sampled_params = ["xi_0", "xi_n"]

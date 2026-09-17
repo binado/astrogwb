@@ -172,7 +172,7 @@ from astrogwb.paper.config import priors as committed_priors
 from astrogwb.paper.config.mcmc import AnalysisGrid, build_run_config
 from astrogwb.paper.config.runs import assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
-from astrogwb.populations import build_population
+from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.sampling import gwb_spectral_density_model
 
 register_projection(MplAxes)
@@ -219,8 +219,8 @@ maximum_redshift = 20.0
 n_grid = 256  # grid points for cosmology integrals / MD normalization
 
 # Frequency band for the analysis
-f_min = 2
-f_max = 4096
+minimum_frequency = 2
+maximum_frequency = 4096
 
 # Fiducial parameters and the prior on each, straight from config/fiducials.json
 # and config/priors.json -- the same tables every committed run merges. These
@@ -265,8 +265,8 @@ proposal_catalog = load_run_catalog(PROPOSAL_CATALOG_PATH, label="proposal")
 # home now and are read from it. `RUN_CONFIG` is still loaded for its catalogs.
 analysis_grid = AnalysisGrid(
     observation_time=observation_time,
-    f_min=f_min,
-    f_max=f_max,
+    minimum_frequency=minimum_frequency,
+    maximum_frequency=maximum_frequency,
     minimum_redshift=minimum_redshift,
     maximum_redshift=maximum_redshift,
     n_grid=n_grid,
@@ -293,6 +293,7 @@ inputs = prepare_inference_inputs(
     grid=analysis_grid,
     detectors=detnames,
     target=target,
+    density_sites=DEFAULT_DENSITY_SITES,
 )
 observation = inputs.observation
 proposal = inputs.proposal

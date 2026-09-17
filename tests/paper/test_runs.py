@@ -1,4 +1,4 @@
-"""Discovery and the three-layer merge behind ``config/analysis/``.
+"""Discovery and the layered merge behind ``config/``.
 
 Replaces ``test_experiments.py``: there is no inventory to validate any more,
 so what is tested is the convention (which files exist and what they map to)
@@ -7,9 +7,11 @@ and the merge that turns them into a run config.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,6 +25,7 @@ from astrogwb.paper.config.catalogs import (
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import (
     BASE_OUT_DIR,
+    BLOCK_FOLDS,
     CATALOGS_ROOT,
     CHAINS_ROOT,
     EXPERIMENT_BASE,
@@ -34,11 +37,24 @@ from astrogwb.paper.config.runs import (
     discover_catalog_names,
     discover_runs,
     load_base,
+    load_config_blocks,
     merge_config_layers,
     resolve_catalog_names,
     run_config_paths,
 )
 from astrogwb.paper.utils import load_mapping
+
+
+def _import_script(name: str):
+    """Import one ``scripts/*.py``, which are not installed modules."""
+    path = REPO_ROOT / "scripts" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"{name}_script", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
 
 PAPER_ROOT = REPO_ROOT
 
@@ -76,7 +92,12 @@ def test_the_retired_inventories_are_gone() -> None:
     # config/banks went with the bank/catalog split: every catalog is a file
     # now, so there is one config tree for them and one output directory.
     assert not (PAPER_ROOT / "config/banks").exists()
-    assert (PAPER_ROOT / "config/analysis/base").is_dir()
+    # config/analysis/ went the same way as config/catalogs/base: every
+    # shared run layer is one config/*.json named after the block it declares,
+    # so there is no base/ to glob and no runs/ level to nest under.
+    assert not (PAPER_ROOT / "config/analysis").exists()
+    assert (PAPER_ROOT / "config/analysis.json").is_file()
+    assert (PAPER_ROOT / "config/runs").is_dir()
     assert (PAPER_ROOT / "config/catalogs").is_dir()
     # The catalog tree is one flat directory of defs: the shared layers sit in
     # config/ with the run tables, where `jq` reads them, so there is no
@@ -104,27 +125,42 @@ def test_output_roots_are_derived_from_one_base() -> None:
 
 
 def test_run_config_paths_are_the_layers_in_merge_order() -> None:
-    """Layer 0 first, then base/*.toml, then the experiment, then the run.
+    """Every shared layer first, then the experiment, then the run.
 
-    The JSON names are asserted literally rather than against
-    `root_config_paths()`: nothing else pins that the shared scientific values
-    are merged *before* the TOML base, and a self-consistent comparison against
-    the helper would pass whatever order the helper happened to return.
+    The shared names are asserted literally rather than against
+    `base_config_paths()`: a self-consistent comparison against the helper
+    would pass whatever list the helper happened to return, and what matters
+    here is that there is one file per top-level block and that the run's own
+    file is last.
     """
     paths = run_config_paths("cosmological-parameters", "ET-triangular")
     base = base_config_paths()
 
-    assert [path.name for path in paths[:3]] == [
+    assert [path.name for path in base] == [
+        "analysis.json",
         "fiducials.json",
-        "priors.json",
         "networks.json",
+        "priors.json",
+        "sampler.json",
     ]
     assert paths[: len(base)] == base
     assert [path.name for path in paths[len(base) :]] == [
         EXPERIMENT_BASE,
-        "ET-triangular.toml",
+        "ET-triangular.json",
     ]
     assert all(path.is_file() for path in paths)
+
+
+def test_every_shared_layer_is_one_block_named_after_its_stem() -> None:
+    """The layer-0 convention, which the per-block CLI and `jq` folds rely on.
+
+    A shared layer that declared two blocks, or a block whose name did not
+    match its filename, would make "one flag per block, one file per block"
+    false -- and `astrogwb.paper.config`'s accessors look the table up by stem.
+    """
+    for path in base_config_paths(REPO_ROOT):
+        declared = json.loads(path.read_text(encoding="utf-8"))
+        assert list(declared) == [path.stem], path
 
 
 def test_plotting_settings_are_not_a_run_layer() -> None:
@@ -178,17 +214,17 @@ def test_assembling_an_unknown_run_names_the_missing_file() -> None:
 
 
 def test_an_experiment_without_a_base_overlay_is_rejected(tmp_path: Path) -> None:
-    (tmp_path / "config/analysis/base").mkdir(parents=True)
-    (tmp_path / "config/analysis/base/x.toml").write_text("seed = 1\n")
-    (tmp_path / "config/analysis/runs/demo").mkdir(parents=True)
-    (tmp_path / "config/analysis/runs/demo/only.toml").write_text("")
+    write_root_layers(tmp_path)
+    (tmp_path / "config/runs/demo").mkdir(parents=True)
+    # `{}` rather than an empty file: a layer is JSON now, and "" is not.
+    (tmp_path / "config/runs/demo/only.json").write_text("{}")
 
     with pytest.raises(ValueError, match=f"missing a required {EXPERIMENT_BASE}"):
         discover_runs(tmp_path)
 
 
 # --------------------------------------------------------------------------- #
-# The three-layer merge
+# The layered merge
 # --------------------------------------------------------------------------- #
 def test_base_files_merge_into_one_mapping() -> None:
     base = load_base()
@@ -197,23 +233,22 @@ def test_base_files_merge_into_one_mapping() -> None:
     # state its own, or inherit someone else's silently.
     assert "network" not in base["analysis"]
     assert "detectors" not in base["analysis"]
-    # Layer 0 is part of "everything shared", so it is in this merge too.
-    assert {"fiducials", "priors", "networks"} <= set(base)
+    # Every shared layer is in this merge, one block each.
+    assert set(base) == {"analysis", "fiducials", "networks", "priors", "sampler"}
 
 
-def test_layer_zero_owns_the_fiducials_and_priors_alone() -> None:
+def test_no_run_layer_redeclares_the_fiducials_or_priors() -> None:
     """The shared values have one home, not two.
 
     `config/analysis/base/parameters.toml` used to declare both. It is gone,
-    and no base TOML may quietly reintroduce either table -- a second
+    and no run layer may quietly reintroduce either table -- a second
     declaration would win the merge and the JSON the notebooks read would
-    silently stop describing what the runs sample.
+    silently stop describing what the runs sample. A *run* overriding one
+    named prior is a different thing and is allowed; a whole table is not.
     """
-    assert not (REPO_ROOT / "config/analysis/base/parameters.toml").exists()
-    for path in (REPO_ROOT / "config/analysis/base").glob("*.toml"):
+    for path in sorted((REPO_ROOT / "config/runs").rglob("*.json")):
         raw = load_mapping(path)
         assert "fiducials" not in raw, path
-        assert "priors" not in raw, path
 
 
 def test_no_run_declares_a_raw_detector_list() -> None:
@@ -223,7 +258,11 @@ def test_no_run_declares_a_raw_detector_list() -> None:
     resolve the name or cross-check the list, and both pass when the list
     happens to agree.
     """
-    for path in sorted((REPO_ROOT / "config/analysis").rglob("*.toml")):
+    layers = [
+        REPO_ROOT / "config/analysis.json",
+        *(REPO_ROOT / "config/runs").rglob("*.json"),
+    ]
+    for path in sorted(layers):
         analysis = load_mapping(path).get("analysis") or {}
         assert "detectors" not in analysis, path
 
@@ -252,7 +291,7 @@ def test_every_run_merge_is_a_valid_run_config(experiment: str, run: str) -> Non
 
     amplitude_parameter = config.analysis.amplitude_parameter
     assert set(config.priors) == set(config.fiducials)
-    assert set(config.sampled_params) <= set(config.fiducials)
+    assert set(config.analysis.sampled_params) <= set(config.fiducials)
     if config.analysis.likelihood == "amplitude_marginalized":
         assert amplitude_parameter is not None
     assert config.analysis.detectors
@@ -275,27 +314,27 @@ def test_every_run_names_declared_catalogs(experiment: str, run: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("base_config", "message"),
+    ("catalog", "message"),
     [
-        ('[catalog]\ninjection = "a"\n', r"catalog.proposal must be a catalog name"),
-        ("seed = 1\n", r"\[catalog\] table"),
+        ({"injection": "a"}, r"analysis\.catalog\.proposal must be a catalog name"),
+        (None, r"\[analysis\.catalog\] table"),
         (
-            '[catalog]\ninjection = "a"\nproposal = 3\n',
-            r"catalog.proposal must be a catalog name",
+            {"injection": "a", "proposal": 3},
+            r"analysis\.catalog\.proposal must be a catalog name",
         ),
     ],
 )
 def test_resolve_catalog_names_rejects_malformed_catalogs(
-    tmp_path: Path, base_config: str, message: str
+    tmp_path: Path, catalog: dict[str, object] | None, message: str
 ) -> None:
-    base = tmp_path / "config/analysis/base"
-    experiment = tmp_path / "config/analysis/runs/demo"
-    base.mkdir(parents=True)
+    experiment = tmp_path / "config/runs/demo"
     experiment.mkdir(parents=True)
-    write_root_layers(tmp_path)
-    (base / "catalog.toml").write_text(base_config, encoding="utf-8")
-    (experiment / EXPERIMENT_BASE).write_text("", encoding="utf-8")
-    (experiment / "only.toml").write_text("", encoding="utf-8")
+    analysis: dict[str, object] = {"minimum_frequency": 2.0}
+    if catalog is not None:
+        analysis["catalog"] = catalog
+    write_root_layers(tmp_path, analysis=analysis)
+    (experiment / EXPERIMENT_BASE).write_text("{}", encoding="utf-8")
+    (experiment / "only.json").write_text("{}", encoding="utf-8")
 
     with pytest.raises(TypeError, match=message):
         resolve_catalog_names("demo", "only", root=tmp_path)
@@ -306,7 +345,7 @@ def test_resolve_catalog_names_rejects_malformed_catalogs(
 # --------------------------------------------------------------------------- #
 def test_a_run_naming_an_unknown_catalog_is_rejected() -> None:
     raw = assemble_run("cosmological-parameters", "ET-triangular")
-    raw["catalog"]["proposal"] = "does-not-exist"
+    raw["analysis"]["catalog"]["proposal"] = "does-not-exist"
     config = build_run_config(raw)
 
     with pytest.raises(ValueError, match="names unknown catalog 'does-not-exist'"):
@@ -365,6 +404,114 @@ def test_the_shared_blocks_are_declared_once() -> None:
         assert set(own.get("waveform", {})) <= {"approximant"}, name
         assert set(own.get("population", {})) <= {"model_name", "model_kwargs"}, name
         assert "fiducials" not in own, name
+
+
+def test_run_mcmc_validates_the_blocks_the_workflow_folds() -> None:
+    """The whole path: `jq` folds the layers, `run_mcmc` parses and validates.
+
+    `run_mcmc` is the one entrypoint handed blocks rather than layer paths, and
+    nothing else executes its CLI -- ty does not check `argparse.Namespace`
+    attributes, so a renamed flag would surface only in a submitted job. The
+    run chosen is the one that overrides a prior, so the shallow `[priors]`
+    fold has to survive validation and not merely parse.
+    """
+    jq = shutil.which("jq")
+    if jq is None:
+        pytest.skip("jq is not installed")
+
+    run_mcmc = _import_script("run_mcmc")
+    layers = [str(path) for path in run_config_paths("modified-propagation", "Xi_0-H0")]
+    argv: list[str] = []
+    for block, program in BLOCK_FOLDS.items():
+        folded = subprocess.run(
+            [jq, "-s", program, *layers], capture_output=True, text=True, check=True
+        )
+        argv += [f"--{block}", folded.stdout]
+    argv += [
+        "--injection-catalog",
+        "outputs/catalogs/md-imrphenom-s41-n32768.h5",
+        "--proposal-catalog",
+        "outputs/catalogs/md-imrphenom-s41-n32768.h5",
+        "--label",
+        "Xi_0-H0",
+    ]
+
+    args = run_mcmc.parse_args(argv)
+    config = build_run_config(load_config_blocks(args))
+
+    # The tight H0 prior the run overrides, which a deep fold would have
+    # corrupted, reached the validated config as a Normal.
+    assert type(config.priors["H0"]).__name__ == "Normal"
+    assert config.analysis.sampled_params == ("xi_0",)
+    assert config.analysis.catalog.injection == "md-imrphenom-s41-n32768"
+    assert config.analysis.grid.n_grid == 256
+
+
+def test_the_jq_block_folds_match_the_python_merge() -> None:
+    """`run_mcmc` is handed blocks `jq` folded; this pins them against Python.
+
+    The workflow folds one block per `--<block>` flag, `*` everywhere and `+`
+    for `priors`, while the notebooks and the validation gate reach the same
+    mapping through `merge_config_layers`. Two implementations of one fold, so
+    the agreement is checked rather than argued -- over every run, because
+    exactly one of them (`modified-propagation/Xi_0-H0`) overrides a prior, and
+    that is the only run where `+` and `*` differ.
+    """
+    jq = shutil.which("jq")
+    if jq is None:
+        pytest.skip("jq is not installed")
+
+    overrode_a_prior = False
+    for experiment, runs in discover_runs().items():
+        for run in runs:
+            layers = [str(path) for path in run_config_paths(experiment, run)]
+            expected = merge_config_layers(run_config_paths(experiment, run))
+            folded = {}
+            for block, program in BLOCK_FOLDS.items():
+                result = subprocess.run(
+                    [jq, "-s", program, *layers],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                folded[block] = json.loads(result.stdout)
+            assert folded == expected, f"{experiment}/{run}"
+            if json.loads(Path(layers[-1]).read_text(encoding="utf-8")).get("priors"):
+                overrode_a_prior = True
+    assert overrode_a_prior, "no run exercises the shallow [priors] fold"
+
+
+def test_a_deep_fold_would_corrupt_the_one_prior_override() -> None:
+    """Why `priors` folds with `+`, as a failure rather than a comment.
+
+    `config/priors.json` gives H0 a Uniform; `modified-propagation/Xi_0-H0`
+    replaces it with a Normal. Key-merging the two leaves the Uniform's `low`
+    and `high` beside the Normal's `loc` and `scale`, which `materialize_prior`
+    rejects -- loudly here, but only because the fold is shallow in production.
+    """
+    jq = shutil.which("jq")
+    if jq is None:
+        pytest.skip("jq is not installed")
+
+    layers = [str(path) for path in run_config_paths("modified-propagation", "Xi_0-H0")]
+    deep = subprocess.run(
+        [jq, "-s", BLOCK_FOLDS["priors"].replace(". + $b", ". * $b"), *layers],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert set(json.loads(deep.stdout)["H0"]["kwargs"]) == {
+        "low",
+        "high",
+        "loc",
+        "scale",
+    }
+    assert set(
+        merge_config_layers(run_config_paths("modified-propagation", "Xi_0-H0"))[
+            "priors"
+        ]["H0"]["kwargs"]
+    ) == {"loc", "scale"}
 
 
 def test_the_jq_merge_matches_the_python_merge() -> None:

@@ -2,39 +2,46 @@
 
 ## Ad-hoc runs
 
-`scripts/run_mcmc.py` takes a run's config layers plus the two catalog files
-it samples against. One `--config` per layer, in merge order -- the same list
-the workflow declares as the rule's `input:` and passes straight back on argv:
+`scripts/run_mcmc.py` takes one flag per config block -- each already folded
+across the layers that declare it -- plus the two catalog files it samples
+against. The layers are the same list the workflow declares as the rule's
+`input:`, and `jq` does the folding:
 
 ```bash
+LAYERS="config/analysis.json config/fiducials.json config/networks.json \
+  config/priors.json config/sampler.json \
+  config/runs/cosmological-parameters/_base.json \
+  config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json"
+fold() { jq -s "map(.$1 // {}) | reduce .[] as \$b ({}; . $2 \$b)" $LAYERS; }
+
 uv run --extra paper python scripts/run_mcmc.py \
-  --config config/analysis/base/catalogs.toml \
-  --config config/analysis/base/model.toml \
-  --config config/fiducials.json \
-  --config config/priors.json \
-  --config config/networks.json \
-  --config config/analysis/base/sampling.toml \
-  --config config/analysis/runs/cosmological-parameters/_base.toml \
-  --config config/analysis/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
+  --analysis "$(fold analysis '*')" \
+  --fiducials "$(fold fiducials '*')" \
+  --networks "$(fold networks '*')" \
+  --priors "$(fold priors '+')" \
+  --sampler "$(fold sampler '*')" \
   --injection-catalog outputs/catalogs/md-imrphenom-s41-n32768.h5 \
   --proposal-catalog outputs/catalogs/md-imrphenom-s42-n16384.h5
 ```
 
-The two roles are fixed, so the files are named flags rather than a
-name-to-path mapping. They are the catalogs the merged config's `[catalog]`
-block names.
+One operator per block is the whole merge rule: `*` (deep) everywhere, `+`
+(shallow) for `priors`. Both spellings of that rule --
+`astrogwb.paper.config.runs.BLOCK_FOLDS` for the shell and
+`merge_config_layers` for Python -- live in one module, and a test pins them
+against each other over every run.
 
-Order is yours to get right: nothing owns it any more, and a wrong-but-valid
-order produces a valid-but-wrong run. The resolved order is logged at INFO
-before the merge and stamped into the chain's `config_layers` attribute, so a
-finished chain says which files produced it.
+Blocks rather than paths is why merge order is no longer yours to get right:
+each block arrives folded, so there is no order left to get wrong. To override
+something for a single invocation, add a layer to `LAYERS` -- the stack is
+open-ended, which is the practical gain over a fixed assembled artifact.
 
-The stack is open-ended, which is the practical gain over a fixed assembled
-artifact: append one more `--config` to override anything for a single
-invocation -- a shorter chain, a smaller catalog -- without editing a committed
-layer or writing a throwaway config.
+The two catalog roles are fixed, so the files are named flags rather than a
+name-to-path mapping. They are the catalogs the merged config's
+`[analysis.catalog]` block names.
 
-`scripts/profile_model.py` takes the same flags and runs as:
+`scripts/profile_model.py` still takes a run's layer *paths* as repeated
+`--config` flags -- it merges them in process, as the figure scripts do -- and
+runs as:
 
 ```bash
 uv run --extra paper python scripts/profile_model.py --help
@@ -42,36 +49,36 @@ uv run --extra paper python scripts/profile_model.py --help
 
 ## The configuration tree
 
-[`config/analysis/`](../config/analysis/) is the sole MCMC configuration source.
-A run config is four layers merged in order:
+[`config/`](../config/) is the sole MCMC configuration source. A run config is
+three layers merged in order:
 
 ```text
-config/{fiducials,priors,networks}.json         the shared scientific values
-config/analysis/base/*.toml                     the remaining shared settings
-config/analysis/runs/<experiment>/_base.toml    the experiment override
-config/analysis/runs/<experiment>/<run>.toml    the run override
-  -> outputs/chains/<experiment>/<run>.nc       the chain
-  -> outputs/chains/<experiment>/<run>.json     the config it was sampled with
+config/{analysis,fiducials,networks,priors,sampler}.json   the shared values
+config/runs/<experiment>/_base.json                        the experiment override
+config/runs/<experiment>/<run>.json                        the run override
+  -> outputs/chains/<experiment>/<run>.nc                  the chain
+  -> outputs/chains/<experiment>/<run>.json                the config it was sampled with
 ```
 
 Filenames are the mapping. There is no inventory file: `discover_runs()` globs
-the tree, and a new run is a new TOML. `_base.toml` is required in every
+the tree, and a new run is a new JSON file. `_base.json` is required in every
 experiment directory rather than optional -- a conditional Snakemake input
-complicates the DAG for no gain.
+complicates the DAG for no gain. What each committed run is *for* is documented
+in [`config/runs/README.md`](../config/runs/README.md), next to the files.
 
-Layer 0 is JSON, and top-level, because it is read by more than the workflow:
-the notebooks and figure scripts consume the same files through
-`astrogwb.paper.config`, and `jq` reads them without importing the package.
-Each is a single-key object, so nothing special-cases them in the merge.
+The shared layers are **one file per top-level block of a run config, each a
+single-key object whose key is its own stem**. That is what lets `run_mcmc`
+take one flag per block, and what lets `jq` fold a block in the shell. Three of
+them are read by more than the workflow: the notebooks and figure scripts
+consume `fiducials`, `priors` and `networks` through `astrogwb.paper.config`.
 
 | File | Owns |
 | --- | --- |
+| `analysis.json` | observing time, frequency band, target population, and the two catalogs |
 | `fiducials.json` | the fiducial value of every parameter |
-| `priors.json` | the prior on every parameter |
 | `networks.json` | each detector network, by name |
-| `base/sampling.toml` | the sampling RNG seed and NUTS defaults |
-| `base/model.toml` | observing time, frequency band, cosmology grid |
-| `base/catalogs.toml` | the injection catalog and the default proposal catalog |
+| `priors.json` | the prior on every parameter |
+| `sampler.json` | the sampling RNG seed and NUTS defaults |
 
 Fiducials are **not** the injection: what was injected is recorded in the
 injection catalog file, which is where the observed spectrum's rate and density
@@ -79,8 +86,8 @@ come from. They are where NUTS initializes each sampled parameter, what the
 non-sampled sites are conditioned at, and the reference point an
 amplitude-marginalized run forms its ratio against. Nothing cross-checks them
 against a catalog, because nothing needs to. Every fiducial carries a prior;
-`RunConfig` retains the complete table and `sampled_params` selects the NUTS
-latents, leaving the rest to NumPyro effect handlers.
+`RunConfig` retains the complete table and `analysis.sampled_params` selects
+the NUTS latents, leaving the rest to NumPyro effect handlers.
 
 A prior is `{"dist": "<numpyro.distributions class name>", "kwargs": {...}}`.
 The class is looked up on `numpyro.distributions` by name, so adding a
@@ -89,7 +96,7 @@ form: the serializer can only emit kwargs, so a second spelling would make the
 config `run_mcmc` writes next to each chain fail to round-trip.
 
 A run names a network -- `[analysis] network = "ET-2L-aligned-CE-Hanford"` --
-and `networks.json` resolves it to a detector list. `base/model.toml`
+and `networks.json` resolves it to a detector list. `config/analysis.json`
 deliberately declares no `analysis.network`: a run without one must fail rather
 than silently inherit someone else's. A run may not write out `detectors`
 alongside a `network`; to try a network that is not committed, add it in an
@@ -119,9 +126,9 @@ The six experiments and their 26 runs:
 | `variable-proposal-guard` | `eps1e-1`, `eps1e-2`, and `eps1e-3` |
 | `waveform-approximant` | `IMRPhenom` and `TaylorF2` |
 
-`run_mcmc` declares a run's four layers as its own inputs, so editing a run's
-TOML retriggers exactly that chain. Editing a `base/` file or one of the three
-top-level JSONs retriggers all 26, which is correct.
+`run_mcmc` declares a run's layers as its own inputs, so editing a run's file
+retriggers exactly that chain. Editing any shared layer retriggers all 26,
+which is correct.
 
 `snakemake validate` merges and catalog-checks every run without building
 anything. Run it before a campaign: it fails on the first invalid run *before
@@ -132,20 +139,19 @@ any catalog is built*, and a catalog is a GPU job.
 Every run names two catalogs, one per role:
 
 ```toml
-[catalog]
+[analysis.catalog]
 injection = "md-imrphenom-s41-n32768"
 proposal  = "md-imrphenom-s42-n16384"
 ```
 
 That is the whole block, and injection versus proposal is two filenames and
 nothing else. How a catalog was drawn -- its population model, that model's
-construction settings, the hyperparameters, and the included density factors --
-lives in `config/catalogs/<name>.json` and its shared layers and, once the
-file exists, in the
-file itself. Never in the run config.
+construction settings, and the hyperparameters -- lives in
+`config/catalogs/<name>.json` and its shared layers and, once the file exists,
+in the file itself. Never in the run config.
 
 Every run shares one injection catalog -- it is the "observed" data -- so it
-lives in `base/catalogs.toml` and no run overrides it. Only
+lives in `config/analysis.json` and no run overrides it. Only
 `variable-catalog-size`, `variable-proposal-guard`, `astrophysical-parameters`,
 and `waveform-approximant` override the proposal catalog.
 
@@ -164,18 +170,32 @@ density cannot be baked into the file. Nothing about it is resolved at config
 time, so `snakemake validate` stays cheap: a config typo, or an unregistered
 population name, fails without any catalog having to exist.
 
-The `[analysis]` block names the *target* population the sampled
+The `[analysis.population]` block is the *target* population the sampled
 hyperparameters describe:
 
 ```toml
-[analysis]
-population_model = "bns_md_modified_propagation"
+[analysis.population]
+model_name = "bns_md_modified_propagation"
+
+[analysis.population.model_kwargs]
+minimum_redshift = 0.3
+maximum_redshift = 20.0
+n_grid = 256
 ```
 
-That is the default, and every committed run uses it. It reduces exactly to the
-plain cosmological population at `xi_0 = 1`, which is how a run that does not
-sample the propagation parameters gets the standard law without naming a second
-model.
+`model_name` is the default, and every committed run uses it. It reduces
+exactly to the plain cosmological population at `xi_0 = 1`, which is how a run
+that does not sample the propagation parameters gets the standard law without
+naming a second model.
+
+`model_kwargs` is the one statement of the redshift window and grid: the same
+three numbers build the target callables and define the grid the spectral
+integral runs on, so `AnalysisConfig.grid` reads them back rather than a second
+block restating them. A third key, `density_sites`, selects the source-density
+factors importance weighting includes; it defaults to redshift and the ordered
+mass pair, and no committed run overrides it. It lives here rather than on a
+catalog because no draw depends on it — the samples are the same whichever of
+their densities a later weight counts.
 
 The proposal catalog's recorded population, narrowed to the analysis window, is
 stamped into the saved chain's posterior attributes, so the `.nc` remains the
@@ -203,9 +223,6 @@ Every labelled run has a deterministic `.nc` path under
 `outputs/chains/<experiment>/`, and `run_mcmc` writes the record of its
 settings beside it as `<run>.json` -- the defaults-filled config, so two runs
 that reach the same settings by different overrides produce identical files.
-The ordered layer paths that produced it go into the chain's `config_layers`
-attribute, which is the one thing a merged config cannot carry.
-
 Ad-hoc unlabelled runs retain the timestamped
 `mcmc-<params>-det=<detectors>-seed<n>-<timestamp>` convention.
 

@@ -53,7 +53,6 @@ from astrogwb.metadata import PopulationMetadata
 record = PopulationMetadata(
     model_name='bns_md_cosmological',
     model_kwargs={'minimum_redshift': 0.0, 'maximum_redshift': 1.0, 'n_grid': 8},
-    density_sites=('redshift',),
     seed=1,
 )
 assert 'jax' not in sys.modules, 'constructing the record imported jax'

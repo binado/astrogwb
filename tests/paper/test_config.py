@@ -12,7 +12,12 @@ from repo import REPO_ROOT
 
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
-from astrogwb.paper.config.mcmc import build_run_config, prior_to_spec
+from astrogwb.paper.config.mcmc import (
+    DEFAULT_DENSITY_SITES,
+    AmplitudeParameter,
+    build_run_config,
+    prior_to_spec,
+)
 from astrogwb.paper.config.runs import (
     assemble_run,
     discover_runs,
@@ -54,17 +59,13 @@ def test_deep_merge_nested_dicts_and_list_replacement() -> None:
     assert base["detector_ids"] == ["A", "B"]
 
 
-def test_load_mapping_resolves_yaml_aliases(tmp_path: Path) -> None:
-    path = tmp_path / "config.yaml"
-    path.write_text(
-        "shared: &shared\n  detectors: [S1, R1]\nrun:\n  analysis: *shared\n",
-        encoding="utf-8",
-    )
+def test_load_mapping_rejects_a_non_json_layer(tmp_path: Path) -> None:
+    """One format, so "every layer is jq-readable" holds by construction."""
+    path = tmp_path / "config.toml"
+    path.write_text("[analysis]\nnetwork = 'demo'\n", encoding="utf-8")
 
-    assert load_mapping(path) == {
-        "shared": {"detectors": ["S1", "R1"]},
-        "run": {"analysis": {"detectors": ["S1", "R1"]}},
-    }
+    with pytest.raises(ValueError, match="config layers are JSON"):
+        load_mapping(path)
 
 
 def test_build_run_config_deep_merges_extra_overrides() -> None:
@@ -75,7 +76,7 @@ def test_build_run_config_deep_merges_extra_overrides() -> None:
         sampler={"num_warmup": 11, "num_samples": 13},
     )
 
-    assert config.seed == 99
+    assert config.sampler.seed == 99
     assert config.sampler.num_warmup == 11
     assert config.sampler.num_samples == 13
     # Unrelated sampler fields keep their file values.
@@ -84,45 +85,52 @@ def test_build_run_config_deep_merges_extra_overrides() -> None:
 
 def test_analysis_grid_mirrors_the_config() -> None:
     config = build_run_config(example_raw())
-    grid = config.analysis_grid
+    grid = config.analysis.grid
 
-    assert grid.observation_time == config.observation_time
-    assert (grid.f_min, grid.f_max) == (config.analysis.f_min, config.analysis.f_max)
+    assert grid.observation_time == config.analysis.observation_time
+    assert (grid.minimum_frequency, grid.maximum_frequency) == (
+        config.analysis.minimum_frequency,
+        config.analysis.maximum_frequency,
+    )
+    # The redshift entries are the target population's construction kwargs,
+    # stated once: the grid reads them back rather than a second block
+    # restating them.
+    kwargs = config.analysis.population.model_kwargs
     assert (grid.minimum_redshift, grid.maximum_redshift, grid.n_grid) == (
-        config.cosmology.minimum_redshift,
-        config.cosmology.maximum_redshift,
-        config.cosmology.n_grid,
+        kwargs["minimum_redshift"],
+        kwargs["maximum_redshift"],
+        kwargs["n_grid"],
     )
 
 
 def test_run_config_carries_no_proposal_density() -> None:
     """The density is the proposal catalog's own record, not a config input.
 
-    Window equality with [cosmology] used to need a validator; it now holds by
-    construction, because `PolarizationPowerCatalog.restrict_redshift` is
-    handed the run's own
-    window and moves the samples and the recorded density together.
+    Window equality with the analysis grid used to need a validator; it now
+    holds by construction, because
+    `PolarizationPowerCatalog.restrict_redshift` is handed the run's own window
+    and moves the samples and the recorded density together.
     """
     config = build_run_config(example_raw())
 
     assert not hasattr(config, "proposal")
     assert "proposal" not in config.model_dump(mode="json")
     # `catalog.proposal` is the catalog, not the density -- it stays.
-    assert config.catalog.proposal
+    assert config.analysis.catalog.proposal
 
 
 def test_analysis_grid_is_not_serialized(tmp_path) -> None:
     """Derived properties stay out of normalized workflow configurations."""
     config = build_run_config(example_raw())
-    assert "analysis_grid" not in config.model_dump(mode="json")
+    assert "grid" not in config.model_dump(mode="json")["analysis"]
     assert "fixed_params" not in config.model_dump(mode="json")
 
     path = tmp_path / "run.json"
     config.save(path)
-    assert "analysis_grid" not in load_mapping(path)
+    assert "grid" not in load_mapping(path)["analysis"]
 
     reloaded = build_run_config(load_mapping(path))
-    assert reloaded.analysis_grid == config.analysis_grid
+    assert reloaded.analysis.grid == config.analysis.grid
 
 
 def test_every_experiment_run_assembles_into_a_valid_config() -> None:
@@ -164,8 +172,8 @@ def _marginalized_raw() -> dict:
         **raw["analysis"],
         "likelihood": "amplitude_marginalized",
         "amplitude_parameter": "H0",
+        "sampled_params": [],
     }
-    raw["sampled_params"] = []
     return raw
 
 
@@ -187,7 +195,7 @@ def test_marginalized_config_round_trips_through_save(tmp_path) -> None:
     assert {name: prior_to_spec(prior) for name, prior in reloaded.priors.items()} == {
         name: prior_to_spec(prior) for name, prior in config.priors.items()
     }
-    assert reloaded.sampled_params == config.sampled_params
+    assert reloaded.analysis.sampled_params == config.analysis.sampled_params
     assert reloaded.fixed_params == config.fixed_params
     assert reloaded.model_dump(mode="json") == config.model_dump(mode="json")
 
@@ -199,7 +207,10 @@ def test_reloaded_marginalized_config_still_rejects_amplitude_parameter_sampled(
     path = tmp_path / "run.json"
     config.save(path)
     raw = load_mapping(path)
-    raw["sampled_params"] = [*raw["sampled_params"], "H0"]
+    raw["analysis"]["sampled_params"] = [
+        *raw["analysis"]["sampled_params"],
+        "H0",
+    ]
 
     with pytest.raises(ValidationError, match="cannot also appear in sampled_params"):
         build_run_config(raw)
@@ -207,7 +218,7 @@ def test_reloaded_marginalized_config_still_rejects_amplitude_parameter_sampled(
 
 def test_marginalized_config_rejects_amplitude_parameter_also_sampled() -> None:
     raw = _marginalized_raw()
-    raw["sampled_params"] = ["H0"]
+    raw["analysis"]["sampled_params"] = ["H0"]
 
     with pytest.raises(ValidationError, match="cannot also appear in sampled_params"):
         build_run_config(raw)
@@ -436,3 +447,25 @@ def test_accessor_kwargs_do_not_poison_the_cache() -> None:
         "dist": "Uniform",
         "kwargs": {"low": 20.0, "high": 140.0},
     }
+
+
+# --------------------------------------------------------------------------- #
+# The constants `mcmc` restates rather than imports
+# --------------------------------------------------------------------------- #
+@pytest.mark.integration
+def test_the_restated_population_constants_match_the_registry() -> None:
+    """`config.mcmc` copies two tuples out of the population layer.
+
+    It has to: `astrogwb.populations.registry` imports JAX at module scope, and
+    `tests/paper/test_cli.py` pins that importing the config layer does not --
+    every `snakemake --dry-run` would otherwise pay for it. Copies drift, so
+    this is the cross-check, and it is marked `integration` because asserting
+    it is what imports JAX.
+    """
+    from typing import get_args
+
+    from astrogwb.populations import AMPLITUDE_PARAMETERS
+    from astrogwb.populations import DEFAULT_DENSITY_SITES as registered_sites
+
+    assert get_args(AmplitudeParameter) == AMPLITUDE_PARAMETERS
+    assert DEFAULT_DENSITY_SITES == registered_sites

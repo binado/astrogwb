@@ -63,7 +63,7 @@ import jax
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.metadata import PopulationMetadata, WaveformMetadata
-from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
+from astrogwb.populations import build_population
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
@@ -98,7 +98,6 @@ catalog = PolarizationPowerCatalog.from_generator(
     population=PopulationMetadata(
         model_name="bns_md_cosmological",
         model_kwargs=model_kwargs,
-        density_sites=DEFAULT_DENSITY_SITES,
         seed=42,
     ),
     fiducials=params,

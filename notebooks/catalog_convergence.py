@@ -80,7 +80,7 @@ from astrogwb.gwb import (
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.paper.config import fiducials, population_metadata, population_model
-from astrogwb.populations import build_population
+from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
@@ -1022,6 +1022,7 @@ scan_log_weights = build_importance_spectrum(
     catalog,
     source_model=scan_target.source_model,
     merger_rate_fn=scan_merger_rate,
+    density_sites=DEFAULT_DENSITY_SITES,
 )[1]
 
 

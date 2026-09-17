@@ -19,6 +19,7 @@ distance is simply the distance column the file already holds.
 
 from __future__ import annotations
 
+import json
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,7 @@ from astrogwb.paper.inference import (
     prepare_observation,
     target_population,
 )
+from astrogwb.populations import DEFAULT_DENSITY_SITES
 from astrogwb.sampling import gwb_spectral_density_model
 
 pytestmark = pytest.mark.integration
@@ -119,9 +121,17 @@ def proposal_catalog(tmp_path: Path) -> PolarizationPowerCatalog:
 
 def _config(**overrides: Any) -> RunConfig:
     raw = example_raw()
-    f_min, f_max = BAND
-    raw["analysis"] = {**raw["analysis"], "f_min": f_min, "f_max": f_max}
-    raw["cosmology"] = {**raw["cosmology"], "n_grid": 32}
+    minimum_frequency, maximum_frequency = BAND
+    population = raw["analysis"]["population"]
+    raw["analysis"] = {
+        **raw["analysis"],
+        "minimum_frequency": minimum_frequency,
+        "maximum_frequency": maximum_frequency,
+        "population": {
+            **population,
+            "model_kwargs": {**population["model_kwargs"], "n_grid": 32},
+        },
+    }
     raw["sampler"] = {
         **raw["sampler"],
         "num_warmup": 2,
@@ -143,9 +153,10 @@ def _prepare(
     return prepare_inference_inputs(
         injection,
         proposal,
-        grid=config.analysis_grid,
+        grid=config.analysis.grid,
         detectors=config.analysis.detectors,
         target=target_population(config),
+        density_sites=DEFAULT_DENSITY_SITES,
     )
 
 
@@ -157,7 +168,7 @@ def test_prepare_observation_keeps_arrays_unmasked(
 ) -> None:
     config = _config()
 
-    observation = prepare_observation(injection_catalog, grid=config.analysis_grid)
+    observation = prepare_observation(injection_catalog, grid=config.analysis.grid)
 
     assert observation.frequencies.shape == FREQUENCIES.shape
     assert observation.spectral_density.shape == FREQUENCIES.shape
@@ -181,9 +192,9 @@ def test_the_observed_rate_comes_from_the_injection_catalogs_own_population(
     from reference_population import reference_merger_rate_distance_and_logprob
 
     config = _config()
-    observation = prepare_observation(injection_catalog, grid=config.analysis_grid)
+    observation = prepare_observation(injection_catalog, grid=config.analysis.grid)
 
-    grid = config.analysis_grid
+    grid = config.analysis.grid
     restricted = injection_catalog.restrict_redshift(
         grid.minimum_redshift, grid.maximum_redshift
     )
@@ -266,10 +277,10 @@ def test_restriction_narrows_the_proposals_recorded_population_too(
 
     assert inputs.proposal.num_samples == N_RETAINED
     assert inputs.proposal.population_model_kwargs["minimum_redshift"] == (
-        config.cosmology.minimum_redshift
+        config.analysis.grid.minimum_redshift
     )
     assert inputs.proposal.population_model_kwargs["maximum_redshift"] == (
-        config.cosmology.maximum_redshift
+        config.analysis.grid.maximum_redshift
     )
     # The file on disk is untouched.
     assert proposal_catalog.population_model_kwargs["minimum_redshift"] == 0.0
@@ -287,7 +298,7 @@ def test_model_kwargs_scale_is_the_full_grid_gaussian_bin_scale(
     expected = np.asarray(
         gaussian_bin_scale(
             inputs.effective_psd,
-            config.analysis_grid.observation_time,
+            config.analysis.grid.observation_time,
             # The catalog's bin width, never measured off the selected band.
             10.0,
         )
@@ -433,12 +444,12 @@ def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
     config = _config(
         analysis={
             **example_raw()["analysis"],
-            "f_min": BAND[0],
-            "f_max": BAND[1],
+            "minimum_frequency": BAND[0],
+            "maximum_frequency": BAND[1],
             "likelihood": "amplitude_marginalized",
             "amplitude_parameter": "H0",
+            "sampled_params": ["Omega_m"],
         },
-        sampled_params=["Omega_m"],
     )
 
     inputs = _prepare(injection_catalog, proposal_catalog, config)
@@ -460,6 +471,7 @@ def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
             inputs.proposal,
             source_model=target.source_model,
             merger_rate_fn=target.merger_rate_fn,
+            density_sites=DEFAULT_DENSITY_SITES,
             frequency_mask=inputs.observation.frequency_mask,
         )[0],
     )
@@ -592,7 +604,7 @@ def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.
     # the likelihood's mask, not by compressing the power.
     power = jnp.asarray(catalog.polarization_power)
     redshift = jnp.asarray(catalog.source_parameters["redshift"])
-    grid = config.analysis_grid
+    grid = config.analysis.grid
 
     rate, distance, logprob = reference_merger_rate_distance_and_logprob(
         params,
@@ -696,24 +708,25 @@ def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights
         proposal_catalog,
         source_model=population.source_model,
         merger_rate_fn=population.merger_rate_fn,
+        density_sites=DEFAULT_DENSITY_SITES,
     )[1]
     log_weights = log_weights_fn(proposal_catalog.fiducials)
     np.testing.assert_array_equal(np.asarray(log_weights), np.zeros(N_SOURCES))
 
 
-def test_the_proposals_density_factors_reach_the_bound_weights_unchanged(
+def test_the_requested_density_factors_reach_the_bound_weights_unchanged(
     injection_catalog: PolarizationPowerCatalog,
 ) -> None:
-    """``prepare_inference_inputs`` threads the catalog's factor set to the target.
+    """``prepare_inference_inputs`` threads its factor set to *both* densities.
 
-    The proposal records only the redshift factor. Reweighted to its own
-    (window-restricted) source model at its own parameters, the weights are
-    exactly zero only if the target was evaluated with that same narrow set;
-    substituting the default factors anywhere in the pipeline would add the
-    ordered-mass factor to the target side alone.
+    Only the redshift factor is asked for. Reweighting the proposal to its own
+    (window-restricted) source model at its own parameters gives exactly zero
+    weights only if both sides were evaluated with that same narrow set;
+    substituting the default factors on either side alone would add the
+    ordered-mass factor to one half of the ratio.
     """
     config = _config()
-    grid = config.analysis_grid
+    grid = config.analysis.grid
     narrow = make_catalog(
         redshift=REDSHIFT,
         polarization_power=np.random.default_rng(1).uniform(
@@ -728,7 +741,6 @@ def test_the_proposals_density_factors_reach_the_bound_weights_unchanged(
             "minimum_redshift": grid.minimum_redshift,
             "maximum_redshift": grid.maximum_redshift,
         },
-        density_sites=("redshift",),
     )
     restricted = narrow.restrict_redshift(grid.minimum_redshift, grid.maximum_redshift)
 
@@ -738,6 +750,7 @@ def test_the_proposals_density_factors_reach_the_bound_weights_unchanged(
         grid=grid,
         detectors=config.analysis.detectors,
         target=restricted.get_population(),
+        density_sites=("redshift",),
     )
 
     assert _bound(inputs)["density_sites"] == ("redshift",)
@@ -772,8 +785,10 @@ def test_a_guard_mixture_catalog_cannot_supply_an_observed_rate() -> None:
 
 def test_the_repository_ships_no_proposal_density_config() -> None:
     """A run names two catalog files; the density is in each file."""
-    text = (REPO_ROOT / "config/analysis/base/catalogs.toml").read_text(
-        encoding="utf-8"
+    shared = json.loads(
+        (REPO_ROOT / "config/analysis.json").read_text(encoding="utf-8")
     )
-    assert "[catalog]" in text
-    assert "uniform_mixing_fraction" not in text
+
+    assert set(shared["analysis"]["catalog"]) == {"injection", "proposal"}
+    for path in sorted((REPO_ROOT / "config/runs").rglob("*.json")):
+        assert "uniform_mixing_fraction" not in path.read_text(encoding="utf-8")

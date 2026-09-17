@@ -9,7 +9,6 @@ import pytest
 from pydantic import ValidationError
 
 from astrogwb.metadata import (
-    DENSITY_SITES_ATTR,
     MODEL_KWARGS_ATTR,
     MODEL_NAME_ATTR,
     SEED_ATTR,
@@ -17,14 +16,12 @@ from astrogwb.metadata import (
 )
 
 MODEL_KWARGS = {"minimum_redshift": 0.1, "maximum_redshift": 10.0, "n_grid": 32}
-DENSITY_SITES = ("redshift", "source_frame_mass_1", "source_frame_mass_2")
 
 
 def _record(**overrides: Any) -> PopulationMetadata:
     fields: dict[str, Any] = {
         "model_name": "bns_md_cosmological",
         "model_kwargs": MODEL_KWARGS,
-        "density_sites": DENSITY_SITES,
         "seed": 7,
     }
     return PopulationMetadata(**{**fields, **overrides})
@@ -43,14 +40,12 @@ def test_to_attrs_sorts_mapping_keys_so_a_file_is_reproducible() -> None:
     assert attrs[MODEL_KWARGS_ATTR] == json.dumps(
         {"minimum_redshift": 0.1, "maximum_redshift": 10.0}, sort_keys=True
     )
-    assert attrs[DENSITY_SITES_ATTR] == json.dumps(list(DENSITY_SITES))
     assert attrs[MODEL_NAME_ATTR] == "bns_md_cosmological"
     assert attrs[SEED_ATTR] == 7
 
 
-def test_density_sites_and_kwargs_are_normalized() -> None:
-    record = _record(density_sites=["redshift"], model_kwargs={"minimum_redshift": 0.1})
-    assert record.density_sites == ("redshift",)
+def test_kwargs_are_normalized() -> None:
+    record = _record(model_kwargs={"minimum_redshift": 0.1})
     assert isinstance(record.model_kwargs, dict)
 
 

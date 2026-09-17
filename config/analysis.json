@@ -1,0 +1,19 @@
+{
+  "analysis": {
+    "observation_time": 1.0,
+    "minimum_frequency": 2.0,
+    "maximum_frequency": 2048.0,
+    "population": {
+      "model_name": "bns_md_modified_propagation",
+      "model_kwargs": {
+        "minimum_redshift": 0.3,
+        "maximum_redshift": 20.0,
+        "n_grid": 256
+      }
+    },
+    "catalog": {
+      "injection": "md-imrphenom-s41-n32768",
+      "proposal": "md-imrphenom-s41-n32768"
+    }
+  }
+}

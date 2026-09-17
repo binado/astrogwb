@@ -139,7 +139,7 @@ def test_a_proposal_density_is_rejected_as_an_analysis_target() -> None:
     with pytest.raises(ValueError, match="declares no merger rate"):
         check_population_model(
             "bns_md_uniform_mixture",
-            label="run 'toy' analysis.population_model",
+            label="run 'toy' analysis.population.model_name",
             kwargs={
                 "minimum_redshift": 0.3,
                 "maximum_redshift": 20.0,
@@ -199,25 +199,18 @@ def test_the_seed_a_def_states_is_the_seed_the_record_carries() -> None:
         assert definition.seed == definition.population.seed, name
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [("seed", 99), ("density_sites", ["redshift"])],
-)
-def test_a_population_block_may_not_restate_the_draw(
-    tmp_path: Path, field: str, value: object
-) -> None:
-    """Neither is configuration, and a silent override would desync the record.
+def test_a_population_block_may_not_restate_the_draw(tmp_path: Path) -> None:
+    """The seed is not configuration, and a silent override would desync the record.
 
     A ``[population]`` ``seed`` would win over the def's own and leave
-    ``definition.seed`` disagreeing with what the ``.h5`` records; density sites
-    follow from the registered population, not from a file.
+    ``definition.seed`` disagreeing with what the ``.h5`` records.
     """
     blocks = json.loads(_toy_def())
-    blocks["population"][field] = value
+    blocks["population"]["seed"] = 99
     path = tmp_path / "toy.json"
     path.write_text(json.dumps(blocks), encoding="utf-8")
 
-    with pytest.raises(ValueError, match=f"population may not declare {field}"):
+    with pytest.raises(ValueError, match="population may not declare seed"):
         load_catalog_layers([path])
 
 
