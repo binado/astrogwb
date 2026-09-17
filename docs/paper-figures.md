@@ -23,8 +23,8 @@ takes a `--figure-dpi` flag.
 Input and output paths are both named literally in
 [`Snakefile`](../Snakefile), and every output is a valid Snakemake target.
 Shared scientific values -- fiducials, priors, detector networks, frequency
-bounds, cosmology grid settings -- arrive on argv as repeated `--config` layer
-files, the same list the rule declares as `input:`, so a figure reports exactly
+bounds, the target population and its redshift grid -- arrive on argv as
+repeated `--config` layer files, the same list the rule declares as `input:`, so a figure reports exactly
 what was sampled and a layer edit retriggers the figure. A script that needs
 one of the top-level tables outside a run context can also call
 `astrogwb.paper.config.fiducials()` / `priors()` / `networks()` directly; both

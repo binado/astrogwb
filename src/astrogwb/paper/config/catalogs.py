@@ -38,7 +38,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb.metadata import PopulationMetadata, WaveformMetadata
-from astrogwb.paper.config.mcmc import RunConfig
+from astrogwb.paper.config.mcmc import RunConfig, check_redshift_grid
 from astrogwb.paper.config.runs import (
     CATALOGS_DIR,
     catalog_config_paths,
@@ -129,15 +129,9 @@ class CatalogDefinition(BaseModel):
 
     @model_validator(mode="after")
     def _validate_redshift_window(self) -> CatalogDefinition:
-        kwargs = self.population.model_kwargs
-        window = ("minimum_redshift", "maximum_redshift")
-        if all(name in kwargs for name in window) and not float(
-            kwargs["minimum_redshift"]
-        ) < float(kwargs["maximum_redshift"]):
-            raise ValueError(
-                "population.model_kwargs.minimum_redshift must be less than "
-                "population.model_kwargs.maximum_redshift"
-            )
+        check_redshift_grid(
+            self.population.model_kwargs, label="population.model_kwargs"
+        )
         return self
 
 
@@ -270,15 +264,11 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
             label = f"{experiment}/{run}"
             config = build_run_config(assemble_run(experiment, run, root=root))
             check_catalog_references(config, label=label, catalogs=catalogs)
-            grid = config.analysis_grid
+            target = config.analysis.population
             check_population_model(
-                config.analysis.population_model,
-                label=f"{label} analysis.population_model",
-                kwargs={
-                    "minimum_redshift": grid.minimum_redshift,
-                    "maximum_redshift": grid.maximum_redshift,
-                    "n_grid": grid.n_grid,
-                },
+                target.model_name,
+                label=f"{label} analysis.population.model_name",
+                kwargs=target.model_kwargs,
                 requires_merger_rate=True,
             )
             logger.info("ok %s", label)

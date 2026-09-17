@@ -70,7 +70,7 @@ Each is a single-key object, so nothing special-cases them in the merge.
 | `priors.json` | the prior on every parameter |
 | `networks.json` | each detector network, by name |
 | `base/sampling.toml` | the sampling RNG seed and NUTS defaults |
-| `base/model.toml` | observing time, frequency band, cosmology grid |
+| `base/model.toml` | observing time, frequency band, target population |
 | `base/catalogs.toml` | the injection catalog and the default proposal catalog |
 
 Fiducials are **not** the injection: what was injected is recorded in the
@@ -163,18 +163,32 @@ density cannot be baked into the file. Nothing about it is resolved at config
 time, so `snakemake validate` stays cheap: a config typo, or an unregistered
 population name, fails without any catalog having to exist.
 
-The `[analysis]` block names the *target* population the sampled
+The `[analysis.population]` block is the *target* population the sampled
 hyperparameters describe:
 
 ```toml
-[analysis]
-population_model = "bns_md_modified_propagation"
+[analysis.population]
+model_name = "bns_md_modified_propagation"
+
+[analysis.population.model_kwargs]
+minimum_redshift = 0.3
+maximum_redshift = 20.0
+n_grid = 256
 ```
 
-That is the default, and every committed run uses it. It reduces exactly to the
-plain cosmological population at `xi_0 = 1`, which is how a run that does not
-sample the propagation parameters gets the standard law without naming a second
-model.
+`model_name` is the default, and every committed run uses it. It reduces
+exactly to the plain cosmological population at `xi_0 = 1`, which is how a run
+that does not sample the propagation parameters gets the standard law without
+naming a second model.
+
+`model_kwargs` is the one statement of the redshift window and grid: the same
+three numbers build the target callables and define the grid the spectral
+integral runs on, so `AnalysisConfig.grid` reads them back rather than a second
+block restating them. A third key, `density_sites`, selects the source-density
+factors importance weighting includes; it defaults to redshift and the ordered
+mass pair, and no committed run overrides it. It lives here rather than on a
+catalog because no draw depends on it — the samples are the same whichever of
+their densities a later weight counts.
 
 The proposal catalog's recorded population, narrowed to the analysis window, is
 stamped into the saved chain's posterior attributes, so the `.nc` remains the

@@ -497,7 +497,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     config = build_run_config(load_merged_config(args))
-    grid = config.analysis_grid
+    grid = config.analysis.grid
     fiducials = {
         **config.fiducials,
         "importance_relative_ess": args.importance_relative_ess,

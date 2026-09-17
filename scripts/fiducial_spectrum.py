@@ -213,7 +213,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = _parse_args(argv)
     config = build_run_config(load_merged_config(args))
     fiducials = dict(config.fiducials)
-    grid = config.analysis_grid
+    grid = config.analysis.grid
     networks = resolve_networks(args.network_runs, DETECTOR_NETWORKS)
     use_paper_style()
 

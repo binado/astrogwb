@@ -183,16 +183,6 @@ class AmplitudeMarginalization(NamedTuple):
     """Quadrature nodes the marginalization integral is evaluated on."""
 
 
-def _analysis_grid_kwargs(config: RunConfig) -> dict[str, float | int]:
-    """The redshift window and grid a run's target callables are built on."""
-    grid = config.analysis_grid
-    return {
-        "minimum_redshift": grid.minimum_redshift,
-        "maximum_redshift": grid.maximum_redshift,
-        "n_grid": grid.n_grid,
-    }
-
-
 def target_population(config: RunConfig) -> Population:
     """Resolve and bind the population the run's hyperparameters describe.
 
@@ -206,12 +196,13 @@ def target_population(config: RunConfig) -> Population:
     ``check_population_model`` rejects it in pre-flight; this is the same
     refusal at the point of use.
     """
-    name = config.analysis.population_model
-    population = build_population(name, **_analysis_grid_kwargs(config))
+    declared = config.analysis.population
+    population = build_population(declared.model_name, **declared.model_kwargs)
     if population.merger_rate_fn is None:
         raise ValueError(
-            f"analysis.population_model {name!r} declares no merger rate, so "
-            "it cannot be an analysis target; it is a proposal density"
+            f"analysis.population.model_name {declared.model_name!r} declares "
+            "no merger rate, so it cannot be an analysis target; it is a "
+            "proposal density"
         )
     return population
 

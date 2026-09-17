@@ -139,7 +139,7 @@ def test_a_proposal_density_is_rejected_as_an_analysis_target() -> None:
     with pytest.raises(ValueError, match="declares no merger rate"):
         check_population_model(
             "bns_md_uniform_mixture",
-            label="run 'toy' analysis.population_model",
+            label="run 'toy' analysis.population.model_name",
             kwargs={
                 "minimum_redshift": 0.3,
                 "maximum_redshift": 20.0,
