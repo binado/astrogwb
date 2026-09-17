@@ -72,8 +72,8 @@ INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5
 PROPOSAL_CATALOG_PATH = INJECTION_CATALOG_PATH
 ANALYSIS_GRID = AnalysisGrid(
     observation_time=1.0,
-    f_min=2.0,
-    f_max=2048.0,
+    minimum_frequency=2.0,
+    maximum_frequency=2048.0,
     minimum_redshift=0.3,
     maximum_redshift=20.0,
     n_grid=256,
@@ -173,6 +173,7 @@ inputs = prepare_inference_inputs(
     grid=ANALYSIS_GRID,
     detectors=network.detectors,
     target=TARGET_MODEL,
+    density_sites=[],
 )
 model = partial(
     gwb_spectral_density_model,
