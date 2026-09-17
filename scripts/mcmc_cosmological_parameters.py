@@ -630,7 +630,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         **config.fiducials,
         "importance_relative_ess": args.importance_relative_ess,
     }
-    grid = config.analysis.grid
+    population_kwargs = config.analysis.population.model_kwargs
     networks = resolve_networks(args.network_runs, DETECTOR_NETWORKS)
     detector_labels = [network.label for network in networks]
     if len(args.detector_chains) != len(networks):
@@ -698,7 +698,11 @@ def main(argv: Sequence[str] | None = None) -> None:
             args.catalog,
             networks,
             fiducials,
-            grid=grid,
+            observation_time=config.analysis.observation_time,
+            minimum_redshift=population_kwargs["minimum_redshift"],
+            maximum_redshift=population_kwargs["maximum_redshift"],
+            minimum_frequency=config.analysis.minimum_frequency,
+            maximum_frequency=config.analysis.maximum_frequency,
         )
         table = build_snr_h0_constraint_table(
             networks,

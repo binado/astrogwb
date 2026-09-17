@@ -54,7 +54,7 @@ from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import spectral_density
 from astrogwb.importance.spectral import LogWeightsFn, build_importance_spectrum
 from astrogwb.paper.catalogs import validate_matching_frequency_grids
-from astrogwb.paper.config.mcmc import AnalysisGrid, RunConfig
+from astrogwb.paper.config.mcmc import RunConfig
 from astrogwb.populations import (
     Population,
     amplitude_H0_fn,
@@ -208,7 +208,12 @@ def target_population(config: RunConfig) -> Population:
 
 
 def prepare_observation(
-    injection: PolarizationPowerCatalog, *, grid: AnalysisGrid
+    injection: PolarizationPowerCatalog,
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    minimum_frequency: float,
+    maximum_frequency: float,
 ) -> Observation:
     """Build the fiducial observed spectrum from the injection catalog.
 
@@ -224,9 +229,7 @@ def prepare_observation(
     the weights show up as a mismatch rather than cancel out of both sides.
     """
     n_loaded = injection.polarization_power.shape[1]
-    restricted = injection.restrict_redshift(
-        grid.minimum_redshift, grid.maximum_redshift
-    )
+    restricted = injection.restrict_redshift(minimum_redshift, maximum_redshift)
     n_kept = restricted.polarization_power.shape[1]
     logger.info(
         "Loaded independent injection catalog: n_injection_samples=%d "
@@ -252,14 +255,14 @@ def prepare_observation(
     # Band bounds only: this function never sees a detector network, so bins
     # the network cannot measure are dropped later, in prepare_inference_inputs.
     analysis_frequency_mask = make_frequency_mask(
-        frequencies, fmin=grid.minimum_frequency, fmax=grid.maximum_frequency
+        frequencies, fmin=minimum_frequency, fmax=maximum_frequency
     )
     logger.info(
         "Analysis band: %d of %d bins (%.1f-%.1f Hz)",
         int(jnp.sum(analysis_frequency_mask)),
         frequencies.shape[0],
-        grid.minimum_frequency,
-        grid.maximum_frequency,
+        minimum_frequency,
+        maximum_frequency,
     )
     return Observation(
         frequencies=frequencies,
@@ -298,7 +301,11 @@ def prepare_inference_inputs(
     injection: PolarizationPowerCatalog,
     proposal: PolarizationPowerCatalog,
     *,
-    grid: AnalysisGrid,
+    observation_time: float,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    minimum_frequency: float,
+    maximum_frequency: float,
     detectors: Sequence[str],
     target: Population,
     density_sites: Sequence[str],
@@ -321,12 +328,16 @@ def prepare_inference_inputs(
             "the target population declares no merger rate, so it cannot "
             "normalize a predicted spectrum; it is a proposal density"
         )
-    observation = prepare_observation(injection, grid=grid)
+    observation = prepare_observation(
+        injection,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
+    )
 
     n_loaded = proposal.polarization_power.shape[1]
-    proposal_catalog = proposal.restrict_redshift(
-        grid.minimum_redshift, grid.maximum_redshift
-    )
+    proposal_catalog = proposal.restrict_redshift(minimum_redshift, maximum_redshift)
     proposal_frequencies = np.asarray(proposal_catalog.frequencies)
     validate_matching_frequency_grids(observation.frequencies, proposal_frequencies)
     n_freq, n_samples = proposal_catalog.polarization_power.shape
@@ -362,7 +373,7 @@ def prepare_inference_inputs(
     if num_bins < 2:
         raise ValueError(
             f"only {num_bins} usable frequency bin(s) in "
-            f"[{grid.minimum_frequency}, {grid.maximum_frequency}] Hz for "
+            f"[{minimum_frequency}, {maximum_frequency}] Hz for "
             f"detectors "
             f"{' '.join(detectors)}; widen the band or choose a detector "
             "network with full coverage"
@@ -391,7 +402,7 @@ def prepare_inference_inputs(
         observation=observation,
         proposal=proposal_catalog,
         effective_psd=effective_psd_arr,
-        observation_time=grid.observation_time,
+        observation_time=observation_time,
         spectral_density_fn=spectral_density_fn,
         log_weights_fn=log_weights_fn,
     )

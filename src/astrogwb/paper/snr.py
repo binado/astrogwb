@@ -17,7 +17,6 @@ import jax.numpy as jnp
 
 from astrogwb.detector import effective_psd, load_sensitivity_map
 from astrogwb.gwb import spectral_snr
-from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.inference import prepare_observation
 from astrogwb.utils import years_to_seconds
 
@@ -32,7 +31,11 @@ def compute_network_snrs(
     networks: Sequence[Network],
     fiducials: Mapping[str, float],
     *,
-    grid: AnalysisGrid,
+    observation_time: float,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    minimum_frequency: float,
+    maximum_frequency: float,
 ) -> pd.DataFrame:
     """Compute the fiducial matched-filter SNR for each detector network.
 
@@ -46,11 +49,17 @@ def compute_network_snrs(
     from astrogwb.paper.catalogs import load_run_catalog
 
     catalog = load_run_catalog(injection_catalog_path, label="injection")
-    observation = prepare_observation(catalog, grid=grid)
+    observation = prepare_observation(
+        catalog,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
+    )
     frequencies = observation.frequencies
     band = observation.frequency_mask
     observed_spectral_density = observation.spectral_density
-    observation_seconds = years_to_seconds(grid.observation_time)
+    observation_seconds = years_to_seconds(observation_time)
 
     rows: list[dict[str, Any]] = []
     for network in networks:
