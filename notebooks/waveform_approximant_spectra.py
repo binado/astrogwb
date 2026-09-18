@@ -221,6 +221,10 @@ for approximant, generator in generators.items():
             f"{spectral_draws[approximant].shape}"
         )
 
+# %% [markdown]
+# ## Estimating the SNR for each waveform approximant
+
+# %%
 # The detector PSD is evaluated on the same full grid as every generated
 # spectrum. Bins where the network has no finite, positive sensitivity are
 # omitted from every SNR calculation below.
@@ -278,9 +282,12 @@ snr_table = build_snr_table(
         REFERENCE_APPROXIMANT
     ].metadata.frequency_resolution,
 )
-snr_table
+snr_table.style.format(precision=2)
 
+# %% [markdown]
+# Saving the table as a `.tex` file:
 
+# %%
 SNR_TABLE_PATH.parent.mkdir(parents=True, exist_ok=True)
 SNR_TABLE_PATH.write_text(
     snr_table.rename(
