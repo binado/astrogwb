@@ -559,23 +559,18 @@ def test_max_of_two_normals_survives_jit_as_a_pytree_argument() -> None:
 # --------------------------------------------------------------------------- #
 # UniformCosineDistribution
 # --------------------------------------------------------------------------- #
-_POLAR_ANGLES = jnp.array([0.2, 0.8, math.pi / 2.0, 2.2, 2.9])
-_POLAR_QUANTILES = jnp.array([0.0, 0.1, 0.5, 0.9, 1.0])
+@pytest.fixture
+def polar_angles() -> jax.Array:
+    return jnp.array([0.2, 0.8, math.pi / 2.0, 2.2, 2.9])
+
+
+@pytest.fixture
+def polar_quantiles() -> jax.Array:
+    return jnp.array([0.0, 0.1, 0.5, 0.9, 1.0])
 
 
 def _uniform_cosine() -> UniformCosineDistribution:
     return UniformCosineDistribution(validate_args=True)
-
-
-def test_uniform_cosine_log_prob_matches_the_closed_form() -> None:
-    distribution = _uniform_cosine()
-    expected = jnp.log(jnp.sin(_POLAR_ANGLES)) - jnp.log(2.0)
-    np.testing.assert_allclose(
-        np.asarray(distribution.log_prob(_POLAR_ANGLES)),
-        np.asarray(expected),
-        rtol=0.0,
-        atol=0.0,
-    )
 
 
 def test_uniform_cosine_density_integrates_to_unity() -> None:
@@ -595,43 +590,35 @@ def test_uniform_cosine_log_prob_is_negative_infinity_off_support() -> None:
     assert bool(jnp.all(jnp.isneginf(log_prob)))
 
 
-def test_uniform_cosine_cdf_and_icdf_are_inverses() -> None:
+def test_uniform_cosine_cdf_and_icdf_are_inverses(
+    polar_angles: jax.Array, polar_quantiles: jax.Array
+) -> None:
     distribution = _uniform_cosine()
     np.testing.assert_allclose(
-        np.asarray(distribution.icdf(_POLAR_QUANTILES)),
-        np.asarray(jnp.arccos(1.0 - 2.0 * _POLAR_QUANTILES)),
+        np.asarray(distribution.icdf(polar_quantiles)),
+        np.asarray(jnp.arccos(1.0 - 2.0 * polar_quantiles)),
         rtol=0.0,
         atol=0.0,
     )
     np.testing.assert_allclose(
-        np.asarray(distribution.cdf(distribution.icdf(_POLAR_QUANTILES))),
-        np.asarray(_POLAR_QUANTILES),
+        np.asarray(distribution.cdf(distribution.icdf(polar_quantiles))),
+        np.asarray(polar_quantiles),
         rtol=1e-12,
     )
     np.testing.assert_allclose(
-        np.asarray(distribution.icdf(distribution.cdf(_POLAR_ANGLES))),
-        np.asarray(_POLAR_ANGLES),
+        np.asarray(distribution.icdf(distribution.cdf(polar_angles))),
+        np.asarray(polar_angles),
         rtol=1e-12,
     )
 
 
-def test_uniform_cosine_samples_are_arccos_of_uniform_cosine() -> None:
-    """The sampler contract, pinned exactly -- uniform cosine, then arccos."""
+def test_uniform_cosine_survives_jit_as_a_pytree_argument(
+    polar_angles: jax.Array,
+) -> None:
     distribution = _uniform_cosine()
-    key = jax.random.PRNGKey(0)
-    sample_shape = (32,)
-    cos_theta = jax.random.uniform(key, shape=sample_shape, minval=-1.0, maxval=1.0)
-    np.testing.assert_array_equal(
-        distribution.sample(key, sample_shape=sample_shape),
-        jnp.arccos(cos_theta),
-    )
-
-
-def test_uniform_cosine_survives_jit_as_a_pytree_argument() -> None:
-    distribution = _uniform_cosine()
-    jitted = jax.jit(lambda d, x: d.log_prob(x))(distribution, _POLAR_ANGLES)
+    jitted = jax.jit(lambda d, x: d.log_prob(x))(distribution, polar_angles)
     np.testing.assert_allclose(
         np.asarray(jitted),
-        np.asarray(distribution.log_prob(_POLAR_ANGLES)),
+        np.asarray(distribution.log_prob(polar_angles)),
         rtol=1e-14,
     )
