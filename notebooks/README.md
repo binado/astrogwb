@@ -25,10 +25,12 @@ outside themselves and import nothing from `tests/core`.
   tidal reference. Higher-mode spectra use matched isotropic inclination draws
   (`with_isotropic_inclination`) rather than the quadrupole analytic average.
   It requires the `notebook` extra and the `jupyter` tooling group. It writes
-  `outputs/figures/waveform_approximant_spectra.pdf` and the companion
-  `outputs/figures/waveform_approximant_spectra_snr.tex`. The table contains one
-  row per active approximant and its median matched-filter SNR across the
-  retained draws, evaluated with the configured `ET-2L-aligned-CE-Hanford`
+  `outputs/figures/waveform_approximant_spectra.pdf`,
+  `outputs/figures/waveform_approximant_spectra_cumulative_snr.pdf`, and the
+  companion `outputs/figures/waveform_approximant_spectra_snr.tex`. The table
+  contains one row per active approximant and its median matched-filter SNR
+  across the retained draws; the cumulative-SNR figure shows the SNR remaining
+  above each frequency. Both use the configured `ET-2L-aligned-CE-Hanford`
   network. There is no data cache, so every execution deterministically
   regenerates the draws from its fixed seed. Execute it from the repository
   root with:

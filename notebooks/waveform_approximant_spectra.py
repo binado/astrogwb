@@ -52,7 +52,7 @@ import pandas as pd
 from numpyro.infer import Predictive
 
 from astrogwb.detector import effective_psd, load_sensitivity_map
-from astrogwb.gwb import spectral_snr
+from astrogwb.gwb import spectral_snr, spectral_snr_squared_per_bin
 from astrogwb.paper.config import (
     fiducials,
     networks,
@@ -130,6 +130,9 @@ COLORS = {
     "IMRPhenomXAS_NRTidalv3": "#D55E00",
 }
 OUTPUT_PATH = ROOT_DIR / FIGURES_DIR / "waveform_approximant_spectra.pdf"
+CUMULATIVE_SNR_OUTPUT_PATH = (
+    ROOT_DIR / FIGURES_DIR / "waveform_approximant_spectra_cumulative_snr.pdf"
+)
 SNR_TABLE_PATH = ROOT_DIR / FIGURES_DIR / "waveform_approximant_spectra_snr.tex"
 REFERENCE_NETWORK = "ET-2L-aligned-CE-Hanford"
 
@@ -309,6 +312,80 @@ SNR_TABLE_PATH.write_text(
     encoding="utf-8",
 )
 print("saved table:", SNR_TABLE_PATH)
+
+# %% [markdown]
+# ## Cumulative SNR above frequency
+#
+# For each frequency bin, accumulate the matched-filter SNR from that bin to
+# the high-frequency end. The lines and bands summarize the same retained
+# stochastic draws as the SNR table.
+
+
+# %%
+def build_cumulative_snr_draws(
+    spectral_draws: dict[str, np.ndarray],
+    effective_psd_arr: np.ndarray,
+    valid_bins: np.ndarray,
+    *,
+    observation_time: float,
+    frequency_resolution: float,
+) -> dict[str, np.ndarray]:
+    """Return draw-wise SNR accumulated from each valid frequency upward."""
+    observation_time_sec = years_to_seconds(observation_time)
+    cumulative_snr: dict[str, np.ndarray] = {}
+    for approximant in APPROXIMANTS:
+        snr_squared_per_bin = np.asarray(
+            spectral_snr_squared_per_bin(
+                jnp.asarray(spectral_draws[approximant][:, valid_bins]),
+                jnp.asarray(effective_psd_arr[valid_bins]),
+                observation_time_sec,
+                frequency_resolution,
+            )
+        )
+        if not np.all(np.isfinite(snr_squared_per_bin)):
+            raise ValueError(f"invalid SNR contribution for approximant {approximant}")
+        cumulative = np.sqrt(np.cumsum(snr_squared_per_bin[:, ::-1], axis=-1)[:, ::-1])
+        if not np.all(np.isfinite(cumulative) & (cumulative >= 0.0)):
+            raise ValueError(f"invalid cumulative SNR for approximant {approximant}")
+        cumulative_snr[approximant] = cumulative
+    return cumulative_snr
+
+
+cumulative_snr_draws = build_cumulative_snr_draws(
+    spectral_draws,
+    reference_effective_psd,
+    valid_snr_bins,
+    observation_time=CONFIG.observation_time,
+    frequency_resolution=generators[
+        REFERENCE_APPROXIMANT
+    ].metadata.frequency_resolution,
+)
+
+fig, ax = plt.subplots(figsize=(7.0, 4.2))
+cumulative_frequencies = frequencies[valid_snr_bins]
+for approximant in APPROXIMANTS:
+    median, low, high = np.percentile(
+        cumulative_snr_draws[approximant], (50.0, 10.0, 90.0), axis=0
+    )
+    color = COLORS[approximant]
+    label = DISPLAY_LABELS[approximant]
+    ax.semilogx(cumulative_frequencies, median, color=color, label=label)
+    ax.fill_between(
+        cumulative_frequencies,
+        low,
+        high,
+        color=color,
+        alpha=0.18,
+    )
+
+ax.set_xlabel(r"Frequency $f\ [\mathrm{Hz}]$")
+ax.set_ylabel(r"Cumulative $\mathrm{SNR}(>f)$")
+ax.set_ylim(bottom=0.0)
+ax.legend(loc="best")
+ax.grid(alpha=0.25)
+fig.tight_layout()
+save_figures({CUMULATIVE_SNR_OUTPUT_PATH: fig}, root=ROOT_DIR)
+print("saved cumulative SNR figure:", CUMULATIVE_SNR_OUTPUT_PATH)
 
 # %% [markdown]
 # ## Median spectra and fractional residuals
