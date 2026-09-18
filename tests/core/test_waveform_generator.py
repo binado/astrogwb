@@ -172,12 +172,7 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
     """
     delta_f = 256.0 / ripple_generator.n_samples
     n_grid = ripple_generator.n_samples // 2
-    kernel = Mock(
-        return_value=(
-            jnp.ones((2, n_grid), dtype=jnp.complex128),
-            jnp.zeros((2, n_grid), dtype=jnp.complex128),
-        )
-    )
+    kernel = Mock(return_value=jnp.ones((n_grid, 2), dtype=jnp.float64))
     object.__setattr__(ripple_generator, "_kernel", kernel)
 
     power = ripple_generator.generate_batch(_ripple_sources())
