@@ -18,7 +18,7 @@ from jax.typing import ArrayLike
 from numpyro.distributions.util import validate_sample
 
 
-class UniformCosThetaDistribution(dist.Distribution):
+class UniformCosineDistribution(dist.Distribution):
     r"""Polar angle of a direction uniform on the sphere.
 
     If :math:`U \sim \mathrm{Unif}(-1, 1)`, this is the law of

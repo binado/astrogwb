@@ -32,7 +32,7 @@ from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.distributions.interpolated import InterpolatedDistribution
 from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
-from astrogwb.distributions.orientation import UniformCosThetaDistribution
+from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
@@ -557,18 +557,18 @@ def test_max_of_two_normals_survives_jit_as_a_pytree_argument() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# UniformCosThetaDistribution
+# UniformCosineDistribution
 # --------------------------------------------------------------------------- #
 _POLAR_ANGLES = jnp.array([0.2, 0.8, math.pi / 2.0, 2.2, 2.9])
 _POLAR_QUANTILES = jnp.array([0.0, 0.1, 0.5, 0.9, 1.0])
 
 
-def _uniform_cos_theta() -> UniformCosThetaDistribution:
-    return UniformCosThetaDistribution(validate_args=True)
+def _uniform_cosine() -> UniformCosineDistribution:
+    return UniformCosineDistribution(validate_args=True)
 
 
-def test_uniform_cos_theta_log_prob_matches_the_closed_form() -> None:
-    distribution = _uniform_cos_theta()
+def test_uniform_cosine_log_prob_matches_the_closed_form() -> None:
+    distribution = _uniform_cosine()
     expected = jnp.log(jnp.sin(_POLAR_ANGLES)) - jnp.log(2.0)
     np.testing.assert_allclose(
         np.asarray(distribution.log_prob(_POLAR_ANGLES)),
@@ -578,8 +578,8 @@ def test_uniform_cos_theta_log_prob_matches_the_closed_form() -> None:
     )
 
 
-def test_uniform_cos_theta_density_integrates_to_unity() -> None:
-    distribution = _uniform_cos_theta()
+def test_uniform_cosine_density_integrates_to_unity() -> None:
+    distribution = _uniform_cosine()
     theta = jnp.linspace(0.0, math.pi, 20_001)
     density = jnp.exp(distribution.log_prob(theta))
     np.testing.assert_allclose(
@@ -587,16 +587,16 @@ def test_uniform_cos_theta_density_integrates_to_unity() -> None:
     )
 
 
-def test_uniform_cos_theta_log_prob_is_negative_infinity_off_support() -> None:
-    distribution = _uniform_cos_theta()
+def test_uniform_cosine_log_prob_is_negative_infinity_off_support() -> None:
+    distribution = _uniform_cosine()
     outside = jnp.array([-0.1, math.pi + 0.1])
     with pytest.warns(UserWarning, match="Out-of-support"):
         log_prob = distribution.log_prob(outside)
     assert bool(jnp.all(jnp.isneginf(log_prob)))
 
 
-def test_uniform_cos_theta_cdf_and_icdf_are_inverses() -> None:
-    distribution = _uniform_cos_theta()
+def test_uniform_cosine_cdf_and_icdf_are_inverses() -> None:
+    distribution = _uniform_cosine()
     np.testing.assert_allclose(
         np.asarray(distribution.icdf(_POLAR_QUANTILES)),
         np.asarray(jnp.arccos(1.0 - 2.0 * _POLAR_QUANTILES)),
@@ -615,9 +615,9 @@ def test_uniform_cos_theta_cdf_and_icdf_are_inverses() -> None:
     )
 
 
-def test_uniform_cos_theta_samples_are_arccos_of_uniform_cosine() -> None:
+def test_uniform_cosine_samples_are_arccos_of_uniform_cosine() -> None:
     """The sampler contract, pinned exactly -- uniform cosine, then arccos."""
-    distribution = _uniform_cos_theta()
+    distribution = _uniform_cosine()
     key = jax.random.PRNGKey(0)
     sample_shape = (32,)
     cos_theta = jax.random.uniform(key, shape=sample_shape, minval=-1.0, maxval=1.0)
@@ -627,8 +627,8 @@ def test_uniform_cos_theta_samples_are_arccos_of_uniform_cosine() -> None:
     )
 
 
-def test_uniform_cos_theta_survives_jit_as_a_pytree_argument() -> None:
-    distribution = _uniform_cos_theta()
+def test_uniform_cosine_survives_jit_as_a_pytree_argument() -> None:
+    distribution = _uniform_cosine()
     jitted = jax.jit(lambda d, x: d.log_prob(x))(distribution, _POLAR_ANGLES)
     np.testing.assert_allclose(
         np.asarray(jitted),

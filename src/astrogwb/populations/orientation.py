@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import numpyro
 from jax.typing import ArrayLike
 
-from astrogwb.distributions.orientation import UniformCosThetaDistribution
+from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.populations.registry import SourceFn
 
 __all__ = ["with_isotropic_inclination"]
@@ -29,7 +29,7 @@ def _source_model_with_isotropic_inclination(
         )
     inclination = numpyro.sample(
         "inclination",
-        UniformCosThetaDistribution(validate_args=True),
+        UniformCosineDistribution(validate_args=True),
     )
     return {**sources, "inclination": jnp.asarray(inclination)}
 
@@ -38,7 +38,7 @@ def with_isotropic_inclination(source_model: SourceFn) -> SourceFn:
     """Return ``source_model`` with an isotropic inclination site added.
 
     Binary inclination :math:`\\iota` is drawn from
-    :class:`~astrogwb.distributions.orientation.UniformCosThetaDistribution`,
+    :class:`~astrogwb.distributions.orientation.UniformCosineDistribution`,
     the polar-angle law of a direction uniform on the sphere. The wrapped
     model returns the inner source mapping plus an ``inclination`` column, so
     waveform generators evaluate each source at its drawn orientation and

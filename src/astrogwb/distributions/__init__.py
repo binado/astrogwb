@@ -11,6 +11,6 @@
 """
 
 from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
-from astrogwb.distributions.orientation import UniformCosThetaDistribution
+from astrogwb.distributions.orientation import UniformCosineDistribution
 
-__all__ = ["MaxOfTwoNormalsDistribution", "UniformCosThetaDistribution"]
+__all__ = ["MaxOfTwoNormalsDistribution", "UniformCosineDistribution"]
