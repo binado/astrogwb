@@ -20,6 +20,7 @@ from numpyro.infer import Predictive
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO, ISCO_ALPHA
 from astrogwb.gwb.spectral import inclination_averaging_factor
 from astrogwb.metadata import WaveformMetadata
+from astrogwb.populations import with_isotropic_inclination
 from astrogwb.sampling import gwb_forward_model, validate_source_model
 from astrogwb.sampling.forward_model import _sum_polarization_power
 from astrogwb.utils import years_to_seconds
@@ -239,6 +240,23 @@ def test_returned_inclination_disables_analytic_rescaling() -> None:
 
     np.testing.assert_allclose(
         jax.jit(spectrum)(_jax_params()), spectrum(_jax_params())
+    )
+
+
+def test_isotropic_inclination_wrapper_disables_analytic_rescaling() -> None:
+    wrapped = with_isotropic_inclination(mock_population_model())
+    trace = _seeded_trace(
+        gwb_forward_model,
+        POPULATION_PARAMS,
+        **_model_kwargs(source_model=wrapped),
+    )
+    sources = {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
+    assert "inclination" in sources
+    assert inclination_averaging_factor(sources) == 1.0
+    np.testing.assert_allclose(
+        trace["spectral_density"]["value"],
+        _expected_spectrum(trace, _generator(), _model_kwargs()["observation_time"]),
+        rtol=1e-12,
     )
 
 

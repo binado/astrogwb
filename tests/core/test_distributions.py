@@ -11,6 +11,7 @@ and to any test that builds the distribution *inside* a model function.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import cast
 
@@ -31,6 +32,7 @@ from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.distributions.interpolated import InterpolatedDistribution
 from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
+from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
@@ -550,5 +552,89 @@ def test_max_of_two_normals_survives_jit_as_a_pytree_argument() -> None:
     np.testing.assert_allclose(
         np.asarray(jitted),
         np.asarray(distribution.log_prob(_MASS_VALUES)),
+        rtol=1e-14,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# UniformCosineDistribution
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def polar_angles() -> jax.Array:
+    return jnp.array([0.2, 0.8, math.pi / 2.0, 2.2, 2.9])
+
+
+@pytest.fixture
+def polar_quantiles() -> jax.Array:
+    return jnp.array([0.0, 0.1, 0.5, 0.9, 1.0])
+
+
+def _uniform_cosine() -> UniformCosineDistribution:
+    return UniformCosineDistribution(validate_args=True)
+
+
+def test_uniform_cosine_density_integrates_to_unity() -> None:
+    distribution = _uniform_cosine()
+    theta = jnp.linspace(0.0, math.pi, 20_001)
+    density = jnp.exp(distribution.log_prob(theta))
+    np.testing.assert_allclose(
+        float(jnp.trapezoid(density, theta)), 1.0, rtol=1e-8, atol=0.0
+    )
+
+
+def test_uniform_cosine_log_prob_is_negative_infinity_off_support() -> None:
+    distribution = _uniform_cosine()
+    outside = jnp.array([-0.1, math.pi + 0.1])
+    with pytest.warns(UserWarning, match="Out-of-support"):
+        log_prob = distribution.log_prob(outside)
+    assert bool(jnp.all(jnp.isneginf(log_prob)))
+
+
+def test_uniform_cosine_cdf_is_zero_or_one_off_support() -> None:
+    distribution = _uniform_cosine()
+    outside = jnp.array([-2.0, -0.1, math.pi + 0.1, 2.0 * math.pi, 10.0])
+    expected = jnp.array([0.0, 0.0, 1.0, 1.0, 1.0])
+    np.testing.assert_array_equal(
+        np.asarray(distribution.cdf(outside)), np.asarray(expected)
+    )
+    mixed = jnp.array([-0.1, 0.0, math.pi / 2.0, math.pi, math.pi + 0.1])
+    np.testing.assert_allclose(
+        np.asarray(distribution.cdf(mixed)),
+        np.array([0.0, 0.0, 0.5, 1.0, 1.0]),
+        rtol=1e-12,
+        atol=0.0,
+    )
+
+
+def test_uniform_cosine_cdf_and_icdf_are_inverses(
+    polar_angles: jax.Array, polar_quantiles: jax.Array
+) -> None:
+    distribution = _uniform_cosine()
+    np.testing.assert_allclose(
+        np.asarray(distribution.icdf(polar_quantiles)),
+        np.asarray(jnp.arccos(1.0 - 2.0 * polar_quantiles)),
+        rtol=0.0,
+        atol=0.0,
+    )
+    np.testing.assert_allclose(
+        np.asarray(distribution.cdf(distribution.icdf(polar_quantiles))),
+        np.asarray(polar_quantiles),
+        rtol=1e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(distribution.icdf(distribution.cdf(polar_angles))),
+        np.asarray(polar_angles),
+        rtol=1e-12,
+    )
+
+
+def test_uniform_cosine_survives_jit_as_a_pytree_argument(
+    polar_angles: jax.Array,
+) -> None:
+    distribution = _uniform_cosine()
+    jitted = jax.jit(lambda d, x: d.log_prob(x))(distribution, polar_angles)
+    np.testing.assert_allclose(
+        np.asarray(jitted),
+        np.asarray(distribution.log_prob(polar_angles)),
         rtol=1e-14,
     )
