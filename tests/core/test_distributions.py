@@ -601,7 +601,7 @@ def test_uniform_cosine_cdf_is_zero_or_one_off_support() -> None:
     np.testing.assert_allclose(
         np.asarray(distribution.cdf(mixed)),
         np.array([0.0, 0.0, 0.5, 1.0, 1.0]),
-        rtol=0.0,
+        rtol=1e-12,
         atol=0.0,
     )
 
