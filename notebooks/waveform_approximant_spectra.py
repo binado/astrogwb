@@ -48,13 +48,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpyro.infer import Predictive
 
-from astrogwb.metadata import WaveformMetadata
+from astrogwb.paper.config import fiducials, waveform_generator
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
 from astrogwb.populations import build_population, with_isotropic_inclination
 from astrogwb.sampling import gwb_forward_model
 from astrogwb.utils import years_to_seconds
-from astrogwb.waveform import RippleGenerator
 
 # Configure precision before constructing a JAX array or querying a device.
 jax.config.update("jax_enable_x64", True)
@@ -69,9 +68,11 @@ use_paper_style(root=ROOT_DIR)
 # There is one configuration for the population, hyperparameters, observing
 # duration, waveform grid, number of retained draws, batching, capacity-tail
 # rule, and seed. The four generators below receive the same grid settings;
-# their approximant is their only differing metadata field. Ripple calls its
-# registered tidal model `IMRPhenomXAS_NRTidalv3` (lower-case `v`), while plot
-# text uses the conventional `IMRPhenomXAS_NRTidalV3` spelling.
+# their approximant is their only differing metadata field. Fiducials and
+# waveform settings come from the shared `astrogwb.paper.config` accessors, so
+# this comparison cannot drift from the catalog configuration. Ripple calls
+# its registered tidal model `IMRPhenomXAS_NRTidalv3` (lower-case `v`), while
+# plot text uses the conventional `IMRPhenomXAS_NRTidalV3` spelling.
 
 
 # %%
@@ -83,11 +84,6 @@ class ComparisonConfig:
     model_kwargs: dict[str, float | int]
     hyperparameters: dict[str, float]
     observation_time: float
-    sampling_frequency: float
-    minimum_frequency: float
-    maximum_frequency: float
-    reference_frequency: float
-    frequency_resolution: float
     draw_count: int
     batch_size: int
     n_max_sigma: float
@@ -97,22 +93,8 @@ class ComparisonConfig:
 CONFIG = ComparisonConfig(
     population_model="bns_md_cosmological",
     model_kwargs={"minimum_redshift": 0.3, "maximum_redshift": 20.0, "n_grid": 256},
-    hyperparameters={
-        "H0": 67.66,
-        "Omega_m": 0.3096,
-        "gamma": 1.42,
-        "kappa": 4.62,
-        "z_peak": 1.84,
-        "local_merger_rate": 770.0,
-        "minimum_mass": 1.0,
-        "mass_width": 1.5,
-    },
-    observation_time=2.0e-5,
-    sampling_frequency=512.0,
-    minimum_frequency=20.0,
-    maximum_frequency=128.0,
-    reference_frequency=20.0,
-    frequency_resolution=2.0,
+    hyperparameters=fiducials(root=ROOT_DIR),
+    observation_time=1.0,
     draw_count=4,
     batch_size=128,
     n_max_sigma=5.0,
@@ -141,20 +123,8 @@ COLORS = {
 OUTPUT_PATH = ROOT_DIR / FIGURES_DIR / "waveform_approximant_spectra.pdf"
 
 
-def waveform_metadata(approximant: str) -> WaveformMetadata:
-    """Build metadata whose only approximant-specific field is its name."""
-    return WaveformMetadata(
-        approximant=approximant,
-        sampling_frequency=CONFIG.sampling_frequency,
-        minimum_frequency=CONFIG.minimum_frequency,
-        maximum_frequency=CONFIG.maximum_frequency,
-        reference_frequency=CONFIG.reference_frequency,
-        frequency_resolution=CONFIG.frequency_resolution,
-    )
-
-
 generators = {
-    approximant: RippleGenerator(waveform_metadata(approximant))
+    approximant: waveform_generator(root=ROOT_DIR, approximant=approximant)
     for approximant in APPROXIMANTS
 }
 
