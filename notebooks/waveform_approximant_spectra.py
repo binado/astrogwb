@@ -8,7 +8,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: astrogwb (3.12.9)
+#     display_name: .venv (3.13.12.final.0)
 #     language: python
 #     name: python3
 # ---
@@ -95,7 +95,7 @@ CONFIG = ComparisonConfig(
     hyperparameters=fiducials(root=ROOT_DIR),
     observation_time=1.0,
     draw_count=4,
-    batch_size=128,
+    batch_size=1024,
     n_max_sigma=5.0,
     seed=20250314,
 )
@@ -103,27 +103,33 @@ CONFIG = ComparisonConfig(
 APPROXIMANTS = (
     "TaylorF2",
     "IMRPhenomXAS",
-    "IMRPhenomHM",
+    # "IMRPhenomHM",
     "IMRPhenomXAS_NRTidalv3",
 )
-REFERENCE_APPROXIMANT = "IMRPhenomXAS_NRTidalv3"
+REFERENCE_APPROXIMANT = "TaylorF2"
 DISPLAY_LABELS = {
     "TaylorF2": "TaylorF2",
     "IMRPhenomXAS": "IMRPhenomXAS",
     "IMRPhenomHM": "IMRPhenomHM",
-    REFERENCE_APPROXIMANT: "IMRPhenomXAS_NRTidalV3 (reference)",
+    "IMRPhenomXAS_NRTidalv3": "IMRPhenomXAS_NRTidalV3 (reference)",
 }
 COLORS = {
     "TaylorF2": "#0072B2",
     "IMRPhenomXAS": "#E69F00",
     "IMRPhenomHM": "#009E73",
-    REFERENCE_APPROXIMANT: "#D55E00",
+    "IMRPhenomXAS_NRTidalv3": "#D55E00",
 }
 OUTPUT_PATH = ROOT_DIR / FIGURES_DIR / "waveform_approximant_spectra.pdf"
 
 
 generators = {
-    approximant: waveform_generator(root=ROOT_DIR, approximant=approximant)
+    approximant: waveform_generator(
+        root=ROOT_DIR,
+        approximant=approximant,
+        frequency_resolution=4.0,
+        minimum_frequency=4.0,
+        maximum_frequency=4096.0,
+    )
     for approximant in APPROXIMANTS
 }
 
@@ -169,7 +175,9 @@ for approximant, generator in generators.items():
     result = predictive(shared_key, CONFIG.hyperparameters)
     spectral_draws[approximant] = np.asarray(result["spectral_density"])
     event_counts[approximant] = np.asarray(result["n_events"])
+    print(f"Computed spectra for approximant{approximant}")
 
+# %%
 # The identical counts are a cheap explicit check that the stochastic traces
 # stayed paired. The fixed-key construction also pairs every named source site.
 reference_counts = event_counts[REFERENCE_APPROXIMANT]
@@ -232,9 +240,10 @@ for approximant in APPROXIMANTS:
         out=residuals,
         where=reference_draws != 0.0,
     )
+    residuals = np.abs(residuals)
     residual_median = np.nanmedian(residuals, axis=0)
     residual_low, residual_high = np.nanpercentile(residuals, (10.0, 90.0), axis=0)
-    residual_ax.semilogx(frequencies, residual_median, color=color, label=label)
+    residual_ax.loglog(frequencies, residual_median, color=color, label=label)
     residual_ax.fill_between(
         frequencies, residual_low, residual_high, color=color, alpha=0.18
     )
