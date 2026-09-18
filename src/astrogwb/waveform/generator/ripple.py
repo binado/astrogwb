@@ -12,13 +12,12 @@ from numpy.typing import ArrayLike
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.utils import require_x64
 from astrogwb.waveform.generator._ripple import (
-    build_kernel,
+    build_power_kernel,
     check_sources,
     next_smooth_even,
     ripple_parameters,
 )
 from astrogwb.waveform.generator.base import PolarizationPowerGenerator
-from astrogwb.waveform.polarization_power import polarization_power
 
 __all__ = ["RippleGenerator"]
 
@@ -48,7 +47,7 @@ class RippleGenerator(PolarizationPowerGenerator):
     __slots__ = ("_band", "_frequencies", "_kernel", "_n_samples", "_segment_duration")
     _band: slice
     _frequencies: np.ndarray
-    _kernel: Callable[[jax.Array, Mapping[str, jax.Array]], tuple[jax.Array, jax.Array]]
+    _kernel: Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]
     _n_samples: int
     _segment_duration: float
 
@@ -94,7 +93,7 @@ class RippleGenerator(PolarizationPowerGenerator):
         object.__setattr__(
             self,
             "_kernel",
-            build_kernel(metadata.approximant, metadata.reference_frequency),
+            build_power_kernel(metadata.approximant, metadata.reference_frequency),
         )
 
     def _resolve_band(self, grid: np.ndarray) -> slice:
@@ -173,8 +172,8 @@ class RippleGenerator(PolarizationPowerGenerator):
         evaluate it to NaN.
         """
         events = ripple_parameters(self.metadata.approximant, source_parameters)
-        plus, cross = self._kernel(jnp.asarray(self._frequencies), events)
-        return polarization_power(plus[:, self._band], cross[:, self._band])
+        power = self._kernel(jnp.asarray(self._frequencies), events)
+        return power[self._band, :]
 
     def __call__(
         self, source_parameters: Mapping[str, ArrayLike]

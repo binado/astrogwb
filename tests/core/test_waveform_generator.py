@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
 from unittest.mock import Mock
 
 import jax
@@ -20,6 +22,7 @@ from astrogwb.waveform.generator._ripple import (
     PRECESSING_MODELS,
     SUPPORTED_APPROXIMANTS,
     TIDAL_MODELS,
+    build_power_kernel,
     next_smooth_even,
 )
 
@@ -172,12 +175,7 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
     """
     delta_f = 256.0 / ripple_generator.n_samples
     n_grid = ripple_generator.n_samples // 2
-    kernel = Mock(
-        return_value=(
-            jnp.ones((2, n_grid), dtype=jnp.complex128),
-            jnp.zeros((2, n_grid), dtype=jnp.complex128),
-        )
-    )
+    kernel = Mock(return_value=jnp.ones((n_grid, 2), dtype=jnp.float64))
     object.__setattr__(ripple_generator, "_kernel", kernel)
 
     power = ripple_generator.generate_batch(_ripple_sources())
@@ -190,6 +188,82 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
     assert set(events) >= {"M_c", "eta", "d_L", "iota"}
     np.testing.assert_array_equal(
         power, np.ones((ripple_generator.frequencies.size, 2))
+    )
+
+
+def test_power_kernel_uses_amplitude_phase_shortcut(monkeypatch) -> None:
+    """The static Ripple capability selects amplitude-only power before tracing."""
+    import ripplegw
+    from ripplegw.interfaces import AmplitudePhaseWaveform
+
+    class AmplitudeOnlyWaveform(AmplitudePhaseWaveform):
+        @property
+        def parameter_names(self) -> tuple[str, ...]:
+            return ("iota",)
+
+        def amplitude(
+            self, frequency: jax.Array, params: Mapping[str, Any]
+        ) -> jax.Array:
+            del params
+            return jnp.full_like(frequency, 2.0)
+
+        def phase(self, frequency: jax.Array, params: Mapping[str, Any]) -> jax.Array:
+            del frequency, params
+            raise AssertionError("power generation must not evaluate phase")
+
+        def __call__(
+            self, frequency: jax.Array, params: Mapping[str, Any]
+        ) -> dict[str, jax.Array]:
+            del frequency, params
+            raise AssertionError("power generation must not build polarizations")
+
+    monkeypatch.setattr(
+        ripplegw,
+        "waveform",
+        lambda approximant, *, f_ref: AmplitudeOnlyWaveform(),
+    )
+    kernel = build_power_kernel("TaylorF2", 20.0)
+    frequencies = jnp.array([20.0, 24.0], dtype=jnp.float64)
+    events = {"iota": jnp.array([0.0, jnp.pi / 2.0], dtype=jnp.float64)}
+
+    power = jax.jit(kernel)(frequencies, events)
+
+    np.testing.assert_allclose(
+        np.asarray(power),
+        np.array([[8.0, 1.0], [8.0, 1.0]]),
+        rtol=1e-15,
+        atol=0.0,
+    )
+
+
+def test_power_kernel_keeps_full_polarizations_as_fallback(monkeypatch) -> None:
+    """A waveform without the amplitude-phase capability uses both polarizations."""
+    import ripplegw
+
+    class FullPolarizationWaveform:
+        def __call__(
+            self, frequency: jax.Array, params: Mapping[str, Any]
+        ) -> dict[str, jax.Array]:
+            plus = jnp.full_like(frequency, params["scale"], dtype=jnp.complex128)
+            cross = 2.0j * plus
+            return {"p": plus, "c": cross}
+
+    monkeypatch.setattr(
+        ripplegw,
+        "waveform",
+        lambda approximant, *, f_ref: FullPolarizationWaveform(),
+    )
+    kernel = build_power_kernel("IMRPhenomHM", 20.0)
+    frequencies = jnp.array([20.0, 24.0], dtype=jnp.float64)
+    events = {"scale": jnp.array([1.0, 2.0], dtype=jnp.float64)}
+
+    power = jax.jit(kernel)(frequencies, events)
+
+    np.testing.assert_allclose(
+        np.asarray(power),
+        np.array([[5.0, 20.0], [5.0, 20.0]]),
+        rtol=1e-15,
+        atol=0.0,
     )
 
 

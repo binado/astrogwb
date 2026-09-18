@@ -1,9 +1,9 @@
-"""Compare Ripple polarization power with amplitude-only power.
+"""Compare full Ripple polarization power with optimized production power.
 
 This benchmarks one ``generate_batch``-sized waveform evaluation, not the
-notebook or its output file.  The amplitude-only expression is exact for
-non-higher-mode ``AmplitudePhaseWaveform`` models when the inclination
-polarization factor is retained::
+notebook or its output file. Production uses the amplitude-only expression for
+non-higher-mode ``AmplitudePhaseWaveform`` models, which is exact when the
+inclination polarization factor is retained::
 
     |h_+|^2 + |h_x|^2 = A^2 * (((1 + cos(iota)^2) / 2)^2 + cos(iota)^2)
 
@@ -31,6 +31,7 @@ from astrogwb.populations import build_population, with_isotropic_inclination
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import RippleGenerator
 from astrogwb.waveform.generator._ripple import ripple_parameters
+from astrogwb.waveform.polarization_power import polarization_power
 
 jax.config.update("jax_enable_x64", True)
 
@@ -79,21 +80,21 @@ def _metadata(approximant: str) -> WaveformMetadata:
     )
 
 
-def _amplitude_power(
+def _full_polarization_power(
     generator: RippleGenerator,
     waveform: AmplitudePhaseWaveform,
     source_parameters: Mapping[str, jax.Array],
 ) -> jax.Array:
-    """Return amplitude-only polarization power in generator layout ``(F, N)``."""
+    """Return the pre-optimization full-polarization power reference."""
     events = ripple_parameters(generator.metadata.approximant, source_parameters)
     frequencies = jnp.asarray(generator._frequencies)
-    amplitudes = jax.vmap(
-        lambda event: waveform.amplitude(frequencies, dict(event)), in_axes=0
+    polarizations = jax.vmap(
+        lambda event: waveform(frequencies, dict(event)), in_axes=0
     )(events)
-    cosine = jnp.cos(events["iota"])
-    polarization_factor = ((1.0 + cosine**2) / 2.0) ** 2 + cosine**2
-    power = amplitudes**2 * polarization_factor[:, None]
-    return jnp.nan_to_num(power[:, generator._band].T)
+    return polarization_power(
+        jnp.nan_to_num(polarizations["p"][:, generator._band]),
+        jnp.nan_to_num(polarizations["c"][:, generator._band]),
+    )
 
 
 def _raw_amplitude_power(
@@ -158,7 +159,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"events={args.events} repeats={args.repeats}")
     print(
         "approximant                         max_rel_exact  "
-        "max_rel_raw  current_ms  amplitude_ms  speedup"
+        "max_rel_raw  full_ms  optimized_ms  speedup"
     )
 
     for approximant in _APPROXIMANTS:
@@ -167,30 +168,30 @@ def main(argv: Sequence[str] | None = None) -> None:
         if not isinstance(waveform, AmplitudePhaseWaveform):
             raise TypeError(f"{approximant} is not an AmplitudePhaseWaveform")
 
-        current = jax.jit(generator.generate_batch)
-        amplitude = jax.jit(partial(_amplitude_power, generator, waveform))
+        optimized = jax.jit(generator.generate_batch)
+        full = jax.jit(partial(_full_polarization_power, generator, waveform))
         raw_amplitude = jax.jit(partial(_raw_amplitude_power, generator, waveform))
 
-        current_first, current_warm, current_output = _timed(
-            current, source_parameters, args.repeats
+        full_first, full_warm, full_output = _timed(
+            full, source_parameters, args.repeats
         )
-        amplitude_first, amplitude_warm, amplitude_output = _timed(
-            amplitude, source_parameters, args.repeats
+        optimized_first, optimized_warm, optimized_output = _timed(
+            optimized, source_parameters, args.repeats
         )
         raw_output = np.asarray(raw_amplitude(source_parameters))
         raw_output = np.nan_to_num(raw_output)
 
-        exact_error = _relative_error(current_output, amplitude_output)
-        raw_error = _relative_error(current_output, raw_output)
-        speedup = current_warm / amplitude_warm
+        exact_error = _relative_error(full_output, optimized_output)
+        raw_error = _relative_error(full_output, raw_output)
+        speedup = full_warm / optimized_warm
         print(
             f"{approximant:35s} {exact_error:13.3e} {raw_error:12.3e} "
-            f"{current_warm * 1e3:10.2f} {amplitude_warm * 1e3:12.2f} "
+            f"{full_warm * 1e3:8.2f} {optimized_warm * 1e3:12.2f} "
             f"{speedup:7.2f}x"
         )
         print(
-            f"  first-call compile+run: current={current_first:.3f}s "
-            f"amplitude={amplitude_first:.3f}s"
+            f"  first-call compile+run: full={full_first:.3f}s "
+            f"optimized={optimized_first:.3f}s"
         )
 
 

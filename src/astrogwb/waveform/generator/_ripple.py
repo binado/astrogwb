@@ -30,7 +30,7 @@ caller slices the result, never the input.
 The DC bin is the one exception, and it is dropped at the input rather than
 sliced from the output: Ripple evaluates ``f = 0`` to NaN, and while
 ``nan_to_num`` keeps that out of the forward sum, no output-side treatment
-rescues reverse mode (see :func:`build_kernel`). Dropping it is safe precisely
+rescues reverse mode (see :func:`build_power_kernel`). Dropping it is safe precisely
 because the quantities above are read off the *top* of the grid and off the
 spacing, both of which one fewer leading bin leaves untouched.
 
@@ -50,7 +50,7 @@ import jax.numpy as jnp
 from numpy.typing import ArrayLike
 
 __all__ = [
-    "build_kernel",
+    "build_power_kernel",
     "check_sources",
     "next_smooth_even",
     "ripple_parameters",
@@ -299,14 +299,23 @@ def check_sources(approximant: str, source_parameters: Mapping[str, ArrayLike]) 
             raise ValueError(f"{name} must be non-negative")
 
 
-def build_kernel(
+def build_power_kernel(
     approximant: str, reference_frequency: float
-) -> Callable[[jax.Array, Mapping[str, jax.Array]], tuple[jax.Array, jax.Array]]:
-    """Return a vmapped ``(frequencies, events) -> (plus, cross)`` evaluator.
+) -> Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]:
+    """Return a vmapped ``(frequencies, events) -> power`` evaluator.
 
     Constructs the Ripple waveform once; a run has one approximant and one
     reference frequency, so the returned callable is built per generator
-    instance and there is nothing left to key a cache on.
+    instance and there is nothing left to key a cache on. The callable returns
+    frequency-first power with shape ``(F, N)``.
+
+    Ripple's :class:`~ripplegw.interfaces.AmplitudePhaseWaveform` marks models
+    whose pre-polarization strain has one real amplitude and the standard
+    quadrupolar inclination factors. For those models the phase cancels from
+    polarization power exactly, so the selected kernel evaluates only
+    ``amplitude``. Other models -- including higher-mode and precessing
+    families -- retain the full plus/cross evaluation. The ``isinstance``
+    dispatch happens here, before a caller traces the selected array function.
 
     Deliberately **not** wrapped in :func:`jax.jit`. This is a building block
     called from inside a NumPyro model, which NumPyro already jits under
@@ -329,9 +338,28 @@ def build_kernel(
     """
     # Imported here, not at module scope -- see the module docstring.
     import ripplegw
+    from ripplegw.interfaces import AmplitudePhaseWaveform
+
+    from astrogwb.waveform.polarization_power import polarization_power
 
     _approximant_metadata(approximant)
     waveform = ripplegw.waveform(approximant, f_ref=reference_frequency)
+
+    if isinstance(waveform, AmplitudePhaseWaveform):
+
+        def amplitude_power(
+            frequencies: jax.Array, events: Mapping[str, jax.Array]
+        ) -> jax.Array:
+            amplitudes = jax.vmap(
+                lambda event: waveform.amplitude(frequencies, dict(event)),
+                in_axes=0,
+            )(events)
+            cosine = jnp.cos(events["iota"])
+            inclination_factor = ((1.0 + cosine**2) / 2.0) ** 2 + cosine**2
+            power = amplitudes**2 * inclination_factor[:, None]
+            return jnp.nan_to_num(power).T.astype(jnp.float64)
+
+        return amplitude_power
 
     def one_event(
         frequencies: jax.Array, event: Mapping[str, jax.Array]
@@ -342,4 +370,12 @@ def build_kernel(
             jnp.nan_to_num(polarizations["c"]),
         )
 
-    return jax.vmap(one_event, in_axes=(None, 0))
+    evaluate_polarizations = jax.vmap(one_event, in_axes=(None, 0))
+
+    def full_polarization_power(
+        frequencies: jax.Array, events: Mapping[str, jax.Array]
+    ) -> jax.Array:
+        plus, cross = evaluate_polarizations(frequencies, events)
+        return polarization_power(plus, cross)
+
+    return full_polarization_power
