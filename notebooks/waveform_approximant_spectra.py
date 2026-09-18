@@ -48,10 +48,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpyro.infer import Predictive
 
-from astrogwb.paper.config import fiducials, waveform_generator
+from astrogwb.paper.config import fiducials, population_model, waveform_generator
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
-from astrogwb.populations import build_population, with_isotropic_inclination
+from astrogwb.populations import with_isotropic_inclination
 from astrogwb.sampling import gwb_forward_model
 from astrogwb.utils import years_to_seconds
 
@@ -68,11 +68,12 @@ use_paper_style(root=ROOT_DIR)
 # There is one configuration for the population, hyperparameters, observing
 # duration, waveform grid, number of retained draws, batching, capacity-tail
 # rule, and seed. The four generators below receive the same grid settings;
-# their approximant is their only differing metadata field. Fiducials and
-# waveform settings come from the shared `astrogwb.paper.config` accessors, so
-# this comparison cannot drift from the catalog configuration. Ripple calls
-# its registered tidal model `IMRPhenomXAS_NRTidalv3` (lower-case `v`), while
-# plot text uses the conventional `IMRPhenomXAS_NRTidalV3` spelling.
+# their approximant is their only differing metadata field. Fiducials,
+# population, and waveform settings come from the shared
+# `astrogwb.paper.config` accessors, so this comparison cannot drift from the
+# catalog configuration. Ripple calls its registered tidal model
+# `IMRPhenomXAS_NRTidalv3` (lower-case `v`), while plot text uses the
+# conventional `IMRPhenomXAS_NRTidalV3` spelling.
 
 
 # %%
@@ -80,7 +81,6 @@ use_paper_style(root=ROOT_DIR)
 class ComparisonConfig:
     """All stochastic and numerical choices shared by the comparison."""
 
-    population_model: str
     model_kwargs: dict[str, float | int]
     hyperparameters: dict[str, float]
     observation_time: float
@@ -91,7 +91,6 @@ class ComparisonConfig:
 
 
 CONFIG = ComparisonConfig(
-    population_model="bns_md_cosmological",
     model_kwargs={"minimum_redshift": 0.3, "maximum_redshift": 20.0, "n_grid": 256},
     hyperparameters=fiducials(root=ROOT_DIR),
     observation_time=1.0,
@@ -140,12 +139,11 @@ generators = {
 # variables.
 
 # %%
-source_model, merger_rate_fn = build_population(
-    CONFIG.population_model, **CONFIG.model_kwargs
-)
-source_model = with_isotropic_inclination(source_model)
+population = population_model(root=ROOT_DIR, **CONFIG.model_kwargs)
+source_model = with_isotropic_inclination(population.source_model)
+merger_rate_fn = population.merger_rate_fn
 if merger_rate_fn is None:
-    raise ValueError(f"{CONFIG.population_model!r} cannot simulate event counts")
+    raise ValueError("configured population cannot simulate event counts")
 
 rate = float(jnp.asarray(merger_rate_fn(CONFIG.hyperparameters)))
 mean_count = rate * years_to_seconds(CONFIG.observation_time)
