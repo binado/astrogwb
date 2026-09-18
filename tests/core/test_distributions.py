@@ -590,7 +590,9 @@ def test_uniform_cos_theta_density_integrates_to_unity() -> None:
 def test_uniform_cos_theta_log_prob_is_negative_infinity_off_support() -> None:
     distribution = _uniform_cos_theta()
     outside = jnp.array([-0.1, math.pi + 0.1])
-    assert bool(jnp.all(jnp.isneginf(distribution.log_prob(outside))))
+    with pytest.warns(UserWarning, match="Out-of-support"):
+        log_prob = distribution.log_prob(outside)
+    assert bool(jnp.all(jnp.isneginf(log_prob)))
 
 
 def test_uniform_cos_theta_cdf_and_icdf_are_inverses() -> None:
