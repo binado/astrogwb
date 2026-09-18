@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import Mock
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid, uniform_grid_spacing
@@ -103,6 +105,87 @@ def test_waveform_metadata_attrs_round_trip_includes_alpha() -> None:
         WaveformMetadata.from_attrs(attrs, label="toy.h5")
 
 
+@pytest.mark.parametrize("use_taper", [True, False])
+def test_waveform_metadata_serializes_taper_setting_as_an_integer(
+    use_taper: bool,
+) -> None:
+    metadata = WaveformMetadata(
+        approximant="IMRPhenomXAS_NRTidalv3",
+        minimum_frequency=10.0,
+        maximum_frequency=12.0,
+        reference_frequency=10.0,
+        sampling_frequency=32.0,
+        frequency_resolution=2.0,
+        use_taper_in_tidal_corrections=use_taper,
+    )
+
+    attrs = metadata.to_attrs()
+    assert attrs["use_taper_in_tidal_corrections"] == int(use_taper)
+    assert type(attrs["use_taper_in_tidal_corrections"]) is int
+    assert WaveformMetadata.from_attrs(attrs, label="toy.h5") == metadata
+
+
+def test_waveform_metadata_rejects_missing_taper_setting_attribute() -> None:
+    metadata = WaveformMetadata(
+        approximant="TaylorF2",
+        minimum_frequency=10.0,
+        maximum_frequency=12.0,
+        reference_frequency=10.0,
+        sampling_frequency=32.0,
+        frequency_resolution=2.0,
+    )
+    attrs = metadata.to_attrs()
+    del attrs["use_taper_in_tidal_corrections"]
+
+    with pytest.raises(ValueError, match="legacy.h5: missing waveform metadata"):
+        WaveformMetadata.from_attrs(attrs, label="legacy.h5")
+
+
+@pytest.mark.parametrize("value", [True, 2, 1.0, "1"])
+def test_waveform_metadata_rejects_malformed_taper_setting_attribute(
+    value: object,
+) -> None:
+    attrs: dict[str, Any] = WaveformMetadata(
+        approximant="TaylorF2",
+        minimum_frequency=10.0,
+        maximum_frequency=12.0,
+        reference_frequency=10.0,
+        sampling_frequency=32.0,
+        frequency_resolution=2.0,
+    ).to_attrs()
+    attrs["use_taper_in_tidal_corrections"] = value
+
+    with pytest.raises(ValueError, match="invalid waveform metadata"):
+        WaveformMetadata.from_attrs(attrs, label="broken.h5")
+
+
+def test_waveform_metadata_rejects_disabled_tidal_taper_for_analytic_inspiral() -> None:
+    with pytest.raises(ValidationError, match="use_taper_in_tidal_corrections=False"):
+        WaveformMetadata(
+            approximant="AnalyticInspiral",
+            minimum_frequency=10.0,
+            maximum_frequency=12.0,
+            reference_frequency=10.0,
+            sampling_frequency=32.0,
+            frequency_resolution=2.0,
+            use_taper_in_tidal_corrections=False,
+        )
+
+
+def test_waveform_metadata_keeps_strict_validation_for_unknown_settings() -> None:
+    settings = {
+        "approximant": "TaylorF2",
+        "minimum_frequency": 10.0,
+        "maximum_frequency": 12.0,
+        "reference_frequency": 10.0,
+        "sampling_frequency": 32.0,
+        "frequency_resolution": 2.0,
+        "unsupported_setting": 1,
+    }
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        WaveformMetadata.model_validate(settings)
+
+
 def test_from_attrs_rejects_a_non_numeric_frequency_attribute() -> None:
     generator = AnalyticInspiralGenerator(
         WaveformMetadata(
@@ -154,6 +237,46 @@ def test_waveform_metadata_builds_a_concrete_generator() -> None:
     generator = metadata.build()
     assert isinstance(generator, RippleGenerator)
     assert generator.metadata is metadata
+
+
+def test_build_power_kernel_disables_taper_only_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ripplegw
+
+    waveform = Mock()
+    monkeypatch.setattr(ripplegw, "waveform", waveform)
+
+    from astrogwb.waveform.generator._ripple import build_power_kernel
+
+    build_power_kernel("TaylorF2", 20.0)
+    waveform.assert_called_once_with("TaylorF2", f_ref=20.0)
+
+    waveform.reset_mock()
+    build_power_kernel(
+        "IMRPhenomXAS_NRTidalv3",
+        20.0,
+        use_taper_in_tidal_corrections=False,
+    )
+    waveform.assert_called_once_with(
+        "IMRPhenomXAS_NRTidalv3", f_ref=20.0, no_taper=True
+    )
+
+
+def test_build_power_kernel_rejects_disabled_tidal_taper_for_non_tidal_ripple() -> None:
+    from astrogwb.waveform.generator._ripple import build_power_kernel
+
+    with pytest.raises(ValueError, match="only supported for tidal Ripple"):
+        build_power_kernel("IMRPhenomD", 20.0, use_taper_in_tidal_corrections=False)
+
+
+def test_build_power_kernel_rejects_tidal_ripple_without_taper_setting_support() -> (
+    None
+):
+    from astrogwb.waveform.generator._ripple import build_power_kernel
+
+    with pytest.raises(ValueError, match="does not support"):
+        build_power_kernel("TaylorF2", 20.0, use_taper_in_tidal_corrections=False)
 
 
 def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
@@ -588,7 +711,9 @@ def test_power_matches_the_gwmock_backend(approximant: str) -> None:
     }
     sources = _parity_sources(approximant)
     generator = RippleGenerator(
-        WaveformMetadata(approximant=approximant, frequency_resolution=1.0, **settings)
+        WaveformMetadata.model_validate(
+            {"approximant": approximant, "frequency_resolution": 1.0, **settings}
+        )
     )
     frequencies, power = _gwmock_reference(
         approximant, sources, segment_duration=1.0, **settings
@@ -631,6 +756,46 @@ def test_dropping_the_cutoff_window_changes_nothing_in_band() -> None:
     np.testing.assert_array_equal(
         np.asarray(window[in_band]), np.ones(int(in_band.sum()))
     )
+
+
+@pytest.mark.integration
+def test_untapered_nrtidal_power_survives_the_normal_merger_cutoff() -> None:
+    sources = {
+        "detector_frame_mass_1": np.array([1.4]),
+        "detector_frame_mass_2": np.array([1.3]),
+        "inclination": np.array([0.4]),
+        "luminosity_distance": np.array([100.0]),
+        "lambda_1": np.array([400.0]),
+        "lambda_2": np.array([500.0]),
+    }
+    tapered = RippleGenerator(
+        WaveformMetadata(
+            approximant="IMRPhenomXAS_NRTidalv3",
+            sampling_frequency=8192.0,
+            minimum_frequency=2.0,
+            maximum_frequency=4096.0,
+            reference_frequency=20.0,
+            frequency_resolution=1.0,
+        )
+    )
+    untapered = RippleGenerator(
+        WaveformMetadata(
+            approximant="IMRPhenomXAS_NRTidalv3",
+            sampling_frequency=8192.0,
+            minimum_frequency=2.0,
+            maximum_frequency=4096.0,
+            reference_frequency=20.0,
+            frequency_resolution=1.0,
+            use_taper_in_tidal_corrections=False,
+        )
+    )
+
+    frequencies, tapered_power = tapered(sources)
+    _, untapered_power = untapered(sources)
+    high_frequency = np.asarray(frequencies) > 3000.0
+
+    assert np.all(np.asarray(tapered_power)[high_frequency] == 0.0)
+    assert np.all(np.asarray(untapered_power)[high_frequency] > 0.0)
 
 
 @pytest.mark.integration

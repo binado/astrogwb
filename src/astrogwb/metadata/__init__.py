@@ -28,12 +28,17 @@ from astrogwb.metadata.population import (
     SEED_ATTR,
     PopulationMetadata,
 )
-from astrogwb.metadata.waveform import WAVEFORM_ATTRS, WaveformMetadata
+from astrogwb.metadata.waveform import (
+    REQUIRED_WAVEFORM_ATTRS,
+    WAVEFORM_ATTRS,
+    WaveformMetadata,
+)
 
 __all__ = [
     "MODEL_KWARGS_ATTR",
     "MODEL_NAME_ATTR",
     "POPULATION_ATTRS",
+    "REQUIRED_WAVEFORM_ATTRS",
     "SEED_ATTR",
     "WAVEFORM_ATTRS",
     "CatalogMetadata",
