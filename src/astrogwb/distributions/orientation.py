@@ -23,7 +23,8 @@ class UniformCosineDistribution(dist.Distribution):
 
     If :math:`U \sim \mathrm{Unif}(-1, 1)`, this is the law of
     :math:`\theta = \arccos U`. The density is :math:`\frac12\sin\theta` on
-    :math:`[0, \pi]`; the CDF is :math:`(1 - \cos\theta)/2`; the inverse CDF is
+    :math:`[0, \pi]`. The CDF is :math:`(1 - \cos\theta)/2` on that interval,
+    :math:`0` below and :math:`1` above. The inverse CDF is
     :math:`\arccos(1 - 2q)`.
 
     Parameters
@@ -55,6 +56,9 @@ class UniformCosineDistribution(dist.Distribution):
         return jnp.asarray(jnp.log(jnp.sin(value)) - jnp.log(2.0))
 
     def cdf(self, value: ArrayLike) -> jax.Array:
+        # The closed form is even and 2π-periodic, so it would oscillate
+        # outside the support instead of saturating at 0 and 1.
+        value = jnp.clip(jnp.asarray(value), 0.0, math.pi)
         return jnp.asarray((1.0 - jnp.cos(value)) / 2.0)
 
     def icdf(self, q: ArrayLike) -> jax.Array:

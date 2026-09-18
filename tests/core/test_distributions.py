@@ -590,6 +590,22 @@ def test_uniform_cosine_log_prob_is_negative_infinity_off_support() -> None:
     assert bool(jnp.all(jnp.isneginf(log_prob)))
 
 
+def test_uniform_cosine_cdf_is_zero_or_one_off_support() -> None:
+    distribution = _uniform_cosine()
+    outside = jnp.array([-2.0, -0.1, math.pi + 0.1, 2.0 * math.pi, 10.0])
+    expected = jnp.array([0.0, 0.0, 1.0, 1.0, 1.0])
+    np.testing.assert_array_equal(
+        np.asarray(distribution.cdf(outside)), np.asarray(expected)
+    )
+    mixed = jnp.array([-0.1, 0.0, math.pi / 2.0, math.pi, math.pi + 0.1])
+    np.testing.assert_allclose(
+        np.asarray(distribution.cdf(mixed)),
+        np.array([0.0, 0.0, 0.5, 1.0, 1.0]),
+        rtol=0.0,
+        atol=0.0,
+    )
+
+
 def test_uniform_cosine_cdf_and_icdf_are_inverses(
     polar_angles: jax.Array, polar_quantiles: jax.Array
 ) -> None:
