@@ -333,6 +333,13 @@ def test_waveform_generator_defaults_to_the_committed_ripple() -> None:
     assert generator.metadata.maximum_frequency == 2048.0
 
 
+def test_waveform_generator_can_select_untapered_nrtidal() -> None:
+    generator = waveform_generator(REPO_ROOT, use_taper_in_tidal_corrections=False)
+
+    assert isinstance(generator, RippleGenerator)
+    assert generator.metadata.use_taper_in_tidal_corrections is False
+
+
 def test_waveform_generator_kwargs_select_the_analytical_inspiral() -> None:
     generator = waveform_generator(REPO_ROOT, approximant="AnalyticInspiral")
 

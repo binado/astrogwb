@@ -20,13 +20,15 @@ from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetad
 
 
 def _catalog(**overrides: Any) -> SpectralDensityCatalog:
+    use_taper = bool(overrides.pop("use_taper_in_tidal_corrections", True))
     waveform = WaveformMetadata(
-        approximant="TaylorF2",
+        approximant="IMRPhenomXAS_NRTidalv3",
         minimum_frequency=20.0,
         maximum_frequency=32.0,
         reference_frequency=20.0,
         sampling_frequency=128.0,
         frequency_resolution=4.0,
+        use_taper_in_tidal_corrections=use_taper,
     )
     fields: dict[str, Any] = {
         "frequencies": np.array([20.0, 24.0, 28.0, 32.0]),
@@ -58,6 +60,32 @@ def _catalog(**overrides: Any) -> SpectralDensityCatalog:
         "observation_time": 1.0,
     }
     return SpectralDensityCatalog(**{**fields, **overrides})
+
+
+def test_round_trip_preserves_untapered_waveform_metadata(tmp_path: Path) -> None:
+    path = tmp_path / "untapered.h5"
+    expected = _catalog(use_taper_in_tidal_corrections=False)
+    expected.save(path)
+
+    with h5py.File(path) as handle:
+        assert handle.attrs["use_taper_in_tidal_corrections"] == 0
+        assert type(handle.attrs["use_taper_in_tidal_corrections"]) is np.int64
+
+    actual = SpectralDensityCatalog.load(path)
+    assert actual.waveform_metadata.use_taper_in_tidal_corrections is False
+
+
+def test_loading_a_catalog_without_taper_setting_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.h5"
+    _catalog().save(path)
+    with h5py.File(path, "r+") as handle:
+        del handle.attrs["use_taper_in_tidal_corrections"]
+
+    with pytest.raises(
+        ValueError,
+        match="missing waveform metadata.*use_taper_in_tidal_corrections",
+    ):
+        SpectralDensityCatalog.load(path)
 
 
 def test_round_trip_preserves_spectra_and_provenance(tmp_path: Path) -> None:

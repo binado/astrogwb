@@ -93,7 +93,11 @@ class RippleGenerator(PolarizationPowerGenerator):
         object.__setattr__(
             self,
             "_kernel",
-            build_power_kernel(metadata.approximant, metadata.reference_frequency),
+            build_power_kernel(
+                metadata.approximant,
+                metadata.reference_frequency,
+                use_taper_in_tidal_corrections=metadata.use_taper_in_tidal_corrections,
+            ),
         )
 
     def _resolve_band(self, grid: np.ndarray) -> slice:

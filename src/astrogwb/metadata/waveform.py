@@ -28,6 +28,7 @@ class WaveformMetadata(BaseModel):
     sampling_frequency: float = Field(gt=0.0, allow_inf_nan=False)
     frequency_resolution: float = Field(gt=0.0, allow_inf_nan=False)
     alpha: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
+    use_taper_in_tidal_corrections: bool = True
 
     @model_validator(mode="before")
     @classmethod
@@ -55,6 +56,14 @@ class WaveformMetadata(BaseModel):
             )
         if self.alpha is not None and self.approximant != ANALYTIC_APPROXIMANT:
             raise ValueError("alpha is only valid for the AnalyticInspiral approximant")
+        if (
+            not self.use_taper_in_tidal_corrections
+            and self.approximant == ANALYTIC_APPROXIMANT
+        ):
+            raise ValueError(
+                "use_taper_in_tidal_corrections=False is only valid for Ripple "
+                "tidal approximants"
+            )
         return self
 
     def build(self) -> Any:
@@ -65,10 +74,10 @@ class WaveformMetadata(BaseModel):
             return AnalyticInspiralGenerator(self)
         return RippleGenerator(self)
 
-    def to_attrs(self) -> dict[str, str | float]:
+    def to_attrs(self) -> dict[str, str | int | float]:
         """Encode fields as scalar HDF5 attributes, omitting an unset alpha."""
         return {
-            name: value
+            name: int(value) if name == "use_taper_in_tidal_corrections" else value
             for name in WAVEFORM_ATTRS
             if (value := getattr(self, name)) is not None
         }
@@ -76,8 +85,22 @@ class WaveformMetadata(BaseModel):
     @classmethod
     def from_attrs(cls, attrs: Mapping[str, Any], *, label: str) -> Self:
         """Decode waveform attributes, including pre-alpha catalogs."""
-        require_attrs(attrs, WAVEFORM_ATTRS[:-1], label=label, kind="waveform metadata")
+        require_attrs(
+            attrs,
+            REQUIRED_WAVEFORM_ATTRS,
+            label=label,
+            kind="waveform metadata",
+        )
         try:
+            use_taper_value = scalar_attr(
+                attrs["use_taper_in_tidal_corrections"],
+                name="use_taper_in_tidal_corrections",
+            )
+            if not isinstance(use_taper_value, int) or use_taper_value not in (0, 1):
+                raise ValueError(
+                    "use_taper_in_tidal_corrections must be serialized as the "
+                    "integer 0 or 1"
+                )
             return cls(
                 approximant=str(scalar_attr(attrs["approximant"], name="approximant")),
                 minimum_frequency=float(
@@ -104,9 +127,13 @@ class WaveformMetadata(BaseModel):
                     if "alpha" in attrs
                     else None
                 ),
+                use_taper_in_tidal_corrections=bool(use_taper_value),
             )
         except (TypeError, ValueError, ValidationError) as error:
             raise ValueError(f"{label}: invalid waveform metadata: {error}") from error
 
 
 WAVEFORM_ATTRS: tuple[str, ...] = tuple(WaveformMetadata.model_fields)
+REQUIRED_WAVEFORM_ATTRS: tuple[str, ...] = tuple(
+    name for name in WAVEFORM_ATTRS if name != "alpha"
+)

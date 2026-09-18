@@ -300,7 +300,10 @@ def check_sources(approximant: str, source_parameters: Mapping[str, ArrayLike]) 
 
 
 def build_power_kernel(
-    approximant: str, reference_frequency: float
+    approximant: str,
+    reference_frequency: float,
+    *,
+    use_taper_in_tidal_corrections: bool = True,
 ) -> Callable[[jax.Array, Mapping[str, jax.Array]], jax.Array]:
     """Return a vmapped ``(frequencies, events) -> power`` evaluator.
 
@@ -342,8 +345,25 @@ def build_power_kernel(
 
     from astrogwb.waveform.polarization_power import polarization_power
 
-    _approximant_metadata(approximant)
-    waveform = ripplegw.waveform(approximant, f_ref=reference_frequency)
+    metadata = _approximant_metadata(approximant)
+    if not use_taper_in_tidal_corrections and not metadata.get("is_tidal", False):
+        raise ValueError(
+            "use_taper_in_tidal_corrections=False is only supported for tidal "
+            "Ripple approximants"
+        )
+
+    config: dict[str, float | bool] = {"f_ref": reference_frequency}
+    if not use_taper_in_tidal_corrections:
+        config["no_taper"] = True
+    try:
+        waveform = ripplegw.waveform(approximant, **config)
+    except TypeError as error:
+        if not use_taper_in_tidal_corrections:
+            raise ValueError(
+                f"{approximant} is tidal but does not support "
+                "use_taper_in_tidal_corrections=False"
+            ) from error
+        raise
 
     if isinstance(waveform, AmplitudePhaseWaveform):
 
