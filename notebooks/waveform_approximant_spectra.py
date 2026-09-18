@@ -33,6 +33,8 @@
 # The lower panel shows fractional residuals
 # $(S_h^A-S_h^\mathrm{NRTidalv3})/S_h^\mathrm{NRTidalv3}$. Bins where the
 # reference is exactly zero are undefined and are masked rather than divided.
+# The notebook also reports the median matched-filter SNR of each retained
+# draw in the configured `ET-2L-aligned-CE-Hanford` network.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -46,9 +48,17 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from numpyro.infer import Predictive
 
-from astrogwb.paper.config import fiducials, population_model, waveform_generator
+from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.gwb import spectral_snr
+from astrogwb.paper.config import (
+    fiducials,
+    networks,
+    population_model,
+    waveform_generator,
+)
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
 from astrogwb.populations import with_isotropic_inclination
@@ -120,6 +130,10 @@ COLORS = {
     "IMRPhenomXAS_NRTidalv3": "#D55E00",
 }
 OUTPUT_PATH = ROOT_DIR / FIGURES_DIR / "waveform_approximant_spectra.pdf"
+SNR_TABLE_PATH = ROOT_DIR / FIGURES_DIR / "waveform_approximant_spectra_snr.tex"
+REFERENCE_NETWORK = "ET-2L-aligned-CE-Hanford"
+
+REFERENCE_DETECTORS = networks(root=ROOT_DIR)[REFERENCE_NETWORK]
 
 
 generators = {
@@ -175,7 +189,7 @@ for approximant, generator in generators.items():
     result = predictive(shared_key, CONFIG.hyperparameters)
     spectral_draws[approximant] = np.asarray(result["spectral_density"])
     event_counts[approximant] = np.asarray(result["n_events"])
-    print(f"Computed spectra for approximant{approximant}")
+    print(f"Computed spectra for approximant {approximant}")
 
 # %%
 # The identical counts are a cheap explicit check that the stochastic traces
@@ -206,6 +220,88 @@ for approximant, generator in generators.items():
             f"unexpected spectral shape for {approximant}: "
             f"{spectral_draws[approximant].shape}"
         )
+
+# The detector PSD is evaluated on the same full grid as every generated
+# spectrum. Bins where the network has no finite, positive sensitivity are
+# omitted from every SNR calculation below.
+reference_sensitivities = load_sensitivity_map(REFERENCE_DETECTORS)
+reference_effective_psd = np.asarray(
+    effective_psd(
+        frequencies,
+        list(REFERENCE_DETECTORS),
+        reference_sensitivities,
+    )
+)
+valid_snr_bins = np.isfinite(reference_effective_psd) & (reference_effective_psd > 0.0)
+if not np.any(valid_snr_bins):
+    raise ValueError(f"{REFERENCE_NETWORK} has no valid effective-PSD bins")
+
+
+def build_snr_table(
+    spectral_draws: dict[str, np.ndarray],
+    effective_psd_arr: np.ndarray,
+    valid_bins: np.ndarray,
+    *,
+    observation_time: float,
+    frequency_resolution: float,
+) -> pd.DataFrame:
+    """Return one median matched-filter SNR for each active approximant."""
+    observation_time_sec = years_to_seconds(observation_time)
+    rows: list[dict[str, float | str]] = []
+    for approximant in APPROXIMANTS:
+        snr_draws = np.asarray(
+            spectral_snr(
+                jnp.asarray(spectral_draws[approximant][:, valid_bins]),
+                jnp.asarray(effective_psd_arr[valid_bins]),
+                observation_time_sec,
+                frequency_resolution,
+            )
+        )
+        if not np.all(np.isfinite(snr_draws) & (snr_draws > 0.0)):
+            raise ValueError(f"invalid SNR draw for approximant {approximant}")
+        rows.append(
+            {
+                "approximant": approximant,
+                "label": DISPLAY_LABELS[approximant],
+                "median_snr": float(np.median(snr_draws)),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+snr_table = build_snr_table(
+    spectral_draws,
+    reference_effective_psd,
+    valid_snr_bins,
+    observation_time=CONFIG.observation_time,
+    frequency_resolution=generators[
+        REFERENCE_APPROXIMANT
+    ].metadata.frequency_resolution,
+)
+snr_table
+
+
+SNR_TABLE_PATH.parent.mkdir(parents=True, exist_ok=True)
+SNR_TABLE_PATH.write_text(
+    snr_table.rename(
+        columns={
+            "approximant": "Approximant",
+            "label": "Display label",
+            "median_snr": "Median SNR",
+        }
+    ).to_latex(
+        index=False,
+        escape=False,
+        float_format="%.3g",
+        caption=(
+            "Median matched-filter SNR across retained stochastic draws for "
+            f"the {REFERENCE_NETWORK} detector network."
+        ),
+        label="tab:waveform_approximant_spectra_snr",
+    ),
+    encoding="utf-8",
+)
+print("saved table:", SNR_TABLE_PATH)
 
 # %% [markdown]
 # ## Median spectra and fractional residuals
