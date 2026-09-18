@@ -23,6 +23,13 @@
 # is the median of the retained draws and the shaded region is the 10th--90th
 # percentile interval.
 #
+# Higher-mode waveforms depend on inclination, so the source model is wrapped
+# with `with_isotropic_inclination`: each event draws $\iota$ from the isotropic
+# law ($\cos\iota$ uniform on $[-1, 1]$). Returning `inclination` also disables
+# the analytic $2/5$ face-on-to-isotropic rescaling, which is only valid for
+# quadrupole waveforms. The shared PRNG key then replays the same orientations
+# for every approximant.
+#
 # The lower panel shows fractional residuals
 # $(S_h^A-S_h^\mathrm{NRTidalv3})/S_h^\mathrm{NRTidalv3}$. Bins where the
 # reference is exactly zero are undefined and are masked rather than divided.
@@ -44,7 +51,7 @@ from numpyro.infer import Predictive
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
-from astrogwb.populations import build_population
+from astrogwb.populations import build_population, with_isotropic_inclination
 from astrogwb.sampling import gwb_forward_model
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import RippleGenerator
@@ -156,15 +163,17 @@ generators = {
 #
 # `Predictive` assigns keys deterministically by sample-site name. Calling the
 # same model with the same fixed key therefore reproduces `n_events`, masses,
-# redshifts, spins, and tidal deformabilities exactly for every approximant.
-# Splitting the key in the loop would instead produce unrelated catalogs and
-# would confound waveform differences with Monte Carlo variation. Non-tidal
-# approximants deliberately do not consume the shared tidal latent variables.
+# redshifts, spins, tidal deformabilities, and inclinations exactly for every
+# approximant. Splitting the key in the loop would instead produce unrelated
+# catalogs and would confound waveform differences with Monte Carlo variation.
+# Non-tidal approximants deliberately do not consume the shared tidal latent
+# variables.
 
 # %%
 source_model, merger_rate_fn = build_population(
     CONFIG.population_model, **CONFIG.model_kwargs
 )
+source_model = with_isotropic_inclination(source_model)
 if merger_rate_fn is None:
     raise ValueError(f"{CONFIG.population_model!r} cannot simulate event counts")
 

@@ -33,6 +33,7 @@ from astrogwb.populations.bns_madau_dickinson import (
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
+from astrogwb.populations.orientation import with_isotropic_inclination
 from astrogwb.populations.registry import (
     DEFAULT_DENSITY_SITES,
     MergerRateFn,
@@ -63,4 +64,5 @@ __all__ = [
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
     "register_population",
+    "with_isotropic_inclination",
 ]
