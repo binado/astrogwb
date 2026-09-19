@@ -9,6 +9,7 @@ a silent mismatch.
 
 from __future__ import annotations
 
+import pytest
 from repo import REPO_ROOT
 
 from astrogwb.paper.config.constants import (
@@ -46,11 +47,17 @@ def test_parameter_labels_keys_are_known_fiducials() -> None:
     assert set(PARAMETER_LABELS) <= set(FIDUCIALS)
 
 
-def test_cosmological_grid_notebook_uses_shared_config_helpers() -> None:
-    """The grid notebook reads shared values instead of retyping config tables."""
-    source = (REPO_ROOT / "notebooks/cosmological_parameters_grid.py").read_text(
-        encoding="utf-8"
-    )
+@pytest.mark.parametrize(
+    "notebook_name",
+    (
+        "inference_grid_expansion_history.py",
+        "inference_grid_modified_propagation.py",
+        "inference_grid_population.py",
+    ),
+)
+def test_grid_notebooks_use_shared_config_helpers(notebook_name: str) -> None:
+    """Grid notebooks read shared values instead of retyping config tables."""
+    source = (REPO_ROOT / "notebooks" / notebook_name).read_text(encoding="utf-8")
     assert "FIDUCIALS = fiducials()" in source
     assert "PRIORS: dict[str, Distribution] = priors()" in source
     assert "NETWORK_CONFIG = networks()" in source
