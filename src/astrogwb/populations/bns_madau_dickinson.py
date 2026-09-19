@@ -93,12 +93,10 @@ AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
 """Parameters this population supports marginalizing analytically."""
 
 
-# Absolute scalings as module-level ``def``s (not closures over the fiducial)
-# so they are singletons: ``AmplitudeConditional`` carries the amplitude
-# function as pytree *aux* data, which JAX hashes into the jit cache key. A
-# lambda (or a ``functools.partial`` over a float) is identity-hashed, so a
-# fresh one per call would retrace the model on every construction. The
-# consumer forms the ratio ``f(varphi)/f(varphi_fid)`` itself.
+# Absolute scalings as NumPyro Transforms. AmplitudeConditional anchors
+# them at the fiducial (T(phi_fid) = 1) and stores the result as pytree
+# data. The consumer still forms the ratio; the Transform is only the
+# absolute map f.
 #
 # The predicted spectrum factorizes as ``f = g_R * g_F``. ``local_merger_rate``
 # enters only through ``total_merger_rate`` (linear; absent from ``log_weights``),
@@ -111,9 +109,8 @@ def merger_rate_H0_fn(marginalized_parameter: jax.Array) -> jax.Array:
     return marginalized_parameter**-3
 
 
-def amplitude_H0_fn(marginalized_parameter: jax.Array) -> jax.Array:
-    """Total amplitude scaling :math:`f(H_0) = H_0^{-1}` (:math:`g_R g_F`)."""
-    return 1.0 / marginalized_parameter
+#: Total amplitude scaling :math:`f(H_0) = H_0^{-1}` (:math:`g_R g_F`).
+amplitude_H0_fn = dist.transforms.PowerTransform(-1.0)
 
 
 def merger_rate_local_merger_rate_fn(marginalized_parameter: jax.Array) -> jax.Array:
@@ -121,9 +118,8 @@ def merger_rate_local_merger_rate_fn(marginalized_parameter: jax.Array) -> jax.A
     return marginalized_parameter
 
 
-def amplitude_local_merger_rate_fn(marginalized_parameter: jax.Array) -> jax.Array:
-    """Total amplitude scaling :math:`f(\\mathcal{R}_0) = \\mathcal{R}_0`."""
-    return marginalized_parameter
+#: Total amplitude scaling :math:`f(\\mathcal{R}_0) = \\mathcal{R}_0`.
+amplitude_local_merger_rate_fn = dist.transforms.IdentityTransform()
 
 
 #: Aligned-spin bounds.

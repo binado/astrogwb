@@ -325,7 +325,7 @@ def save(
             partial(
                 amplitude_reconstruction_model,
                 amplitude_parameter=amplitude_parameter,
-                amplitude_fn=marginalization.amplitude_fn,
+                amplitude_transform=marginalization.amplitude_transform,
                 merger_rate_amplitude_fn=marginalization.merger_rate_fn,
                 prior=marginalization.prior,
                 fiducial=marginalization.fiducial,

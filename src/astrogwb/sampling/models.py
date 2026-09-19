@@ -35,7 +35,7 @@ importance caller relabels the rate without touching any other extras::
 via ``Predictive`` to recover joint amplitude/shape draws and the physical rate.
 Keep reconstruction separate from inference to avoid counting amplitude twice.
 When no rate is available, draw amplitudes directly from ``AmplitudeConditional``
-using the same statistics, prior, fiducial, scaling function, and grid.
+using the same statistics, prior, fiducial, scaling transform, and grid.
 
 End-to-end sketch (toy data; runnable as-is):
 
@@ -58,7 +58,7 @@ End-to-end sketch (toy data; runnable as-is):
     )
 
     # --- One-time setup: the prior and the grid the amplitude direction is
-    # marginalized on. The scalings are absolute functions of H0; the model
+    # marginalized on. The scalings are absolute Transforms of H0; the model
     # anchors them at the fiducial itself.
     h0_fid = 70.0
     amplitude_prior = dist.Uniform(20.0, 140.0)
@@ -67,8 +67,7 @@ End-to-end sketch (toy data; runnable as-is):
     def h0_merger_rate_amplitude(h0):
         return h0**-3
 
-    def h0_amplitude(h0):
-        return 1.0 / h0  # h0**-3 * h0**2
+    h0_amplitude = dist.transforms.PowerTransform(-1.0)
 
     def toy_spectrum(params):
         template_rate = 10.0 ** params["log10_rate"] * (h0_fid / params["H0"]) ** 3
@@ -86,7 +85,7 @@ End-to-end sketch (toy data; runnable as-is):
         scale=gaussian_bin_scale(jnp.ones(3), 1.0, 0.25),
         amplitude_parameter="H0",
         amplitude_fiducial=h0_fid,
-        amplitude_fn=h0_amplitude,
+        amplitude_transform=h0_amplitude,
         amplitude_prior=amplitude_prior,
         amplitude_grid=grid,
         priors={"log10_rate": dist.Uniform(-8.0, -6.0)},
@@ -101,7 +100,7 @@ End-to-end sketch (toy data; runnable as-is):
     draws = Predictive(
         partial(amplitude_reconstruction_model,
                 amplitude_parameter="H0",
-                amplitude_fn=h0_amplitude,
+                amplitude_transform=h0_amplitude,
                 merger_rate_amplitude_fn=h0_merger_rate_amplitude,
                 prior=amplitude_prior, fiducial=h0_fid, grid=grid),
         num_samples=1,
@@ -134,10 +133,10 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
+from numpyro.distributions.transforms import Transform
 
 from astrogwb.distributions.amplitude import (
     AmplitudeConditional,
-    AmplitudeFn,
     MergerRateAmplitudeFn,
 )
 from astrogwb.sampling.protocol import SpectralDensityFn
@@ -196,7 +195,7 @@ def gwb_amplitude_marginalized_model(
     scale: jax.Array,
     amplitude_parameter: str,
     amplitude_fiducial: ArrayLike,
-    amplitude_fn: AmplitudeFn,
+    amplitude_transform: Transform,
     amplitude_prior: dist.Distribution,
     amplitude_grid: jax.Array | None = None,
     frequency_mask: jax.Array | None = None,
@@ -205,8 +204,9 @@ def gwb_amplitude_marginalized_model(
 
     Sample shape parameters from ``priors`` and evaluate the spectrum once with
     ``amplitude_parameter`` pinned to ``amplitude_fiducial``. The amplitude
-    ratio is ``amplitude_fn(phi) / amplitude_fn(amplitude_fiducial)``; the
-    spectrum must factor this way throughout the amplitude prior's support.
+    ratio is the anchored transform
+    ``amplitude_transform(phi) / amplitude_transform(amplitude_fiducial)``;
+    the spectrum must factor this way throughout the amplitude prior's support.
     Integrate under ``amplitude_prior`` using ``AmplitudeConditional`` and
     its default quadrature grid when ``amplitude_grid`` is omitted.
 
@@ -261,7 +261,7 @@ def gwb_amplitude_marginalized_model(
     conditional = AmplitudeConditional(
         amplitude_mle,
         template_optimal_snr,
-        amplitude_fn=amplitude_fn,
+        amplitude_transform=amplitude_transform,
         prior=amplitude_prior,
         fiducial=amplitude_fiducial,
         grid=amplitude_grid,
@@ -293,7 +293,7 @@ def amplitude_reconstruction_model(
     template_merger_rate: jax.Array,
     *,
     amplitude_parameter: str,
-    amplitude_fn: AmplitudeFn,
+    amplitude_transform: Transform,
     merger_rate_amplitude_fn: MergerRateAmplitudeFn,
     prior: dist.Distribution,
     fiducial: Any,
@@ -329,7 +329,7 @@ def amplitude_reconstruction_model(
     amplitude_parameter:
         Name of the marginalized parameter; becomes the sample-site name of
         the reconstructed draws (e.g. ``"H0"``).
-    amplitude_fn, prior, fiducial, grid:
+    amplitude_transform, prior, fiducial, grid:
         Must be exactly what :func:`gwb_amplitude_marginalized_model` was given.
         Reconstruction is only exact against the density the chain's factor
         site actually integrated; a silently different one yields a wrong
@@ -343,7 +343,7 @@ def amplitude_reconstruction_model(
     conditional = AmplitudeConditional(
         amplitude_mle,
         template_optimal_snr,
-        amplitude_fn=amplitude_fn,
+        amplitude_transform=amplitude_transform,
         prior=prior,
         fiducial=fiducial,
         grid=grid,

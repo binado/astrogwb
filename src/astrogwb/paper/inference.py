@@ -41,12 +41,12 @@ import jax.numpy as jnp
 import numpy as np
 from numpyro import handlers
 from numpyro.distributions import Distribution
+from numpyro.distributions.transforms import Transform
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.detector import effective_psd as compute_effective_psd
 from astrogwb.detector import gaussian_bin_scale, load_sensitivity_map
 from astrogwb.distributions.amplitude import (
-    AmplitudeFn,
     MergerRateAmplitudeFn,
     quadrature_grid,
 )
@@ -158,10 +158,10 @@ class AmplitudeMarginalization(NamedTuple):
     """Everything an amplitude-marginalized run needs, built once from a ``RunConfig``.
 
     App-side plumbing, not a core type: unlike the ``AmplitudeQuadrature`` it
-    replaces, it holds *live* objects -- the prior distribution and the scaling
-    callables -- so there is nothing derived in it that could go stale against
-    the config it came from. The one array, ``grid``, is a quadrature scheme
-    rather than a tabulation of the density.
+    replaces, it holds *live* objects -- the prior distribution, the amplitude
+    transform, and the merger-rate scaling -- so there is nothing derived in
+    it that could go stale against the config it came from. The one array,
+    ``grid``, is a quadrature scheme rather than a tabulation of the density.
     """
 
     parameter: str
@@ -173,7 +173,7 @@ class AmplitudeMarginalization(NamedTuple):
     prior: Distribution
     """Prior on the marginalized parameter; also defines the conditional's support."""
 
-    amplitude_fn: AmplitudeFn
+    amplitude_transform: Transform
     """Absolute total scaling :math:`f(\\varphi) = g_R(\\varphi)\\, g_F(\\varphi)`."""
 
     merger_rate_fn: MergerRateAmplitudeFn
@@ -454,9 +454,9 @@ def build_model(
         # quadrature grid from the very prior being integrated.
         prior = priors.pop(parameter)
         if parameter == "H0":
-            amplitude_fn, merger_rate_fn = amplitude_H0_fn, merger_rate_H0_fn
+            amplitude_transform, merger_rate_fn = amplitude_H0_fn, merger_rate_H0_fn
         elif parameter == "local_merger_rate":
-            amplitude_fn, merger_rate_fn = (
+            amplitude_transform, merger_rate_fn = (
                 amplitude_local_merger_rate_fn,
                 merger_rate_local_merger_rate_fn,
             )
@@ -466,7 +466,7 @@ def build_model(
             parameter=parameter,
             fiducial=float(config.fiducials[parameter]),
             prior=prior,
-            amplitude_fn=amplitude_fn,
+            amplitude_transform=amplitude_transform,
             merger_rate_fn=merger_rate_fn,
             grid=quadrature_grid(
                 prior,
@@ -490,7 +490,7 @@ def build_model(
                 ),
                 amplitude_parameter=parameter,
                 amplitude_fiducial=marginalization.fiducial,
-                amplitude_fn=marginalization.amplitude_fn,
+                amplitude_transform=marginalization.amplitude_transform,
                 amplitude_prior=marginalization.prior,
                 amplitude_grid=marginalization.grid,
                 priors=priors,
