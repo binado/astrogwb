@@ -49,13 +49,13 @@ repository root as the working directory.
 - **`fiducial_spectrum.py`** — fiducial injection $S_h$ / $\Omega_{\mathrm{GW}}$,
   network $S_{\mathrm{eff}}$, $\sigma$, and per-network SNR
 - **`inference_grid_expansion_history.py`** — reproduces the grid-evaluated
-  $H_0$ and $(H_0, \Omega_m)$ figures, including detector overlays, the SNR
-  constraint table, and the $H_0$--$\Omega_m$ corner.
+  $H_0$, $(H_0, \Omega_m)$, and $(H_0, \mathcal{R}_0)$ figures, including
+  detector overlays, the SNR constraint table, the $H_0$--$\Omega_m$ corner,
+  and the fixed-versus-marginalized merger-rate comparison.
 - **`inference_grid_modified_propagation.py`** — evaluates the default-network
   $(\Xi_0, n)$ grid and reproduces its modified-propagation corner plot.
 - **`inference_grid_population.py`** — evaluates the detector-network
-  $(H_0, z_{\mathrm{peak}})$ grids and the default-network
-  $(H_0, \mathcal{R}_0)$ grid, including their marginals and corners.
+  $(H_0, z_{\mathrm{peak}})$ grids, including their marginals and corners.
 
 `mcmc.py`, `mcmc_plotting.py`, and `logposterior_grid.py` merge a run's config
 layers with `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper
