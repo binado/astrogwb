@@ -22,8 +22,10 @@
 # comparison.
 #
 # The notebook resolves the checkout root with `astrogwb.paper.paths.root_dir`,
-# so it runs from the repository root or from this directory; the catalog is
-# read from outputs/catalogs/md-imrphenom-s41-n32768.h5 below it.
+# so it runs from the repository root or from this directory. The injection is
+# the shared observed catalog `md-imrphenom-s41-n32768`; the proposal is the
+# ε = 0.1 uniform-mixture catalog `md-uniform-imrphenom-s61-n16384-eps1e-1`,
+# the same pairing `astrophysical-parameters` uses when sampling $z_{\mathrm{peak}}$.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -44,6 +46,7 @@ from numpyro.distributions import Distribution, Normal, Uniform
 from astrogwb.metadata import PopulationMetadata, WaveformMetadata
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config import fiducials, networks, priors
+from astrogwb.paper.config.runs import CATALOGS_ROOT
 from astrogwb.paper.inference import prepare_inference_inputs
 from astrogwb.paper.paths import root_dir
 from astrogwb.paper.plotting import (
@@ -74,8 +77,10 @@ jax.config.update("jax_enable_x64", True)
 #: `astrogwb.paper` accessors default to when they are given no `root=`.
 ROOT_DIR = root_dir()
 DEBUG: bool = False
-INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
-PROPOSAL_CATALOG_PATH = INJECTION_CATALOG_PATH
+INJECTION_CATALOG = "md-imrphenom-s41-n32768"
+PROPOSAL_CATALOG = "md-uniform-imrphenom-s61-n16384-eps1e-1"
+INJECTION_CATALOG_PATH = ROOT_DIR / CATALOGS_ROOT / f"{INJECTION_CATALOG}.h5"
+PROPOSAL_CATALOG_PATH = ROOT_DIR / CATALOGS_ROOT / f"{PROPOSAL_CATALOG}.h5"
 observation_time = 1.0
 minimum_frequency = 2.0
 maximum_frequency = 2048.0
@@ -117,6 +122,7 @@ TARGET_MODEL = build_population(
 print(
     "proposal:",
     PROPOSAL_POPULATION_METADATA.model_name,
+    PROPOSAL_POPULATION_METADATA.model_kwargs,
     "seed=",
     PROPOSAL_POPULATION_METADATA.seed,
     "n_samples=",
