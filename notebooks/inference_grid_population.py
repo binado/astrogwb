@@ -45,7 +45,7 @@ from astrogwb.metadata import PopulationMetadata, WaveformMetadata
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config import fiducials, networks, priors
 from astrogwb.paper.config.runs import CATALOGS_ROOT
-from astrogwb.paper.inference import prepare_inference_inputs
+from astrogwb.paper.inference import InferenceInputs, prepare_inference_inputs
 from astrogwb.paper.paths import root_dir
 from astrogwb.paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
@@ -194,8 +194,8 @@ Z_PEAK_GRID = uniform_grid(
 
 
 # %%
-def build_log_density(network: Network) -> tuple[LogDensityFn, dict[str, jax.Array]]:
-    inputs = prepare_inference_inputs(
+def build_network_inputs(network: Network) -> InferenceInputs:
+    return prepare_inference_inputs(
         injection_catalog,
         proposal_catalog,
         observation_time=observation_time,
@@ -207,12 +207,6 @@ def build_log_density(network: Network) -> tuple[LogDensityFn, dict[str, jax.Arr
         target=TARGET_MODEL,
         density_sites=["redshift"],
     )
-    model = partial(
-        gwb_spectral_density_model,
-        spectral_density_fn=inputs.spectral_density_fn,
-        priors=PRIORS,
-    )
-    return LogDensityFn(model, chunk_size=CHUNK_SIZE), inputs.model_kwargs()
 
 
 def evaluate_joint(
@@ -225,16 +219,27 @@ def evaluate_joint(
     return jax.block_until_ready(log_density_fn(grids, fixed=fixed, **model_kwargs))
 
 
-LOG_DENSITY_FNS: dict[str, LogDensityFn] = {}
+NETWORK_INPUTS: dict[str, InferenceInputs] = {
+    network.name: build_network_inputs(network) for network in NETWORKS
+}
+# Detector choice changes only the effective PSD and frequency mask carried by
+# `model_kwargs`; the catalog-bound spectral-density function is shared across
+# networks. Keeping this model and evaluator outside the loop lets JAX reuse
+# each grid-signature compilation for every network.
+SHARED_MODEL = partial(
+    gwb_spectral_density_model,
+    spectral_density_fn=next(iter(NETWORK_INPUTS.values())).spectral_density_fn,
+    priors=PRIORS,
+)
+SHARED_LOG_DENSITY_FN = LogDensityFn(SHARED_MODEL, chunk_size=CHUNK_SIZE)
 MODEL_KWARGS: dict[str, dict[str, jax.Array]] = {}
 H0_Z_PEAK_LOGPOSTERIORS: dict[str, jax.Array] = {}
 for network in NETWORKS:
-    log_density_fn, model_kwargs = build_log_density(network)
-    LOG_DENSITY_FNS[network.name] = log_density_fn
+    model_kwargs = NETWORK_INPUTS[network.name].model_kwargs()
     MODEL_KWARGS[network.name] = model_kwargs
     start = time.perf_counter()
     H0_Z_PEAK_LOGPOSTERIORS[network.name] = evaluate_joint(
-        log_density_fn,
+        SHARED_LOG_DENSITY_FN,
         {"H0": H0_GRIDS_2D[network.name], "z_peak": Z_PEAK_GRID},
         model_kwargs=model_kwargs,
     )
