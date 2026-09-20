@@ -8,33 +8,19 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: .venv (3.13.12.final.0)
+#     display_name: .venv
 #     language: python
 #     name: python3
 # ---
 
 # %% [markdown]
-# # Waveform-approximant spectral draws
+# # Comparing the energy spectral density of the astrophysical GWB for different waveform approximants
 #
-# Compare stochastic-background spectra made from the *same events* with four
-# Ripple frequency-domain approximants. Reusing one PRNG key for each NumPyro
-# `Predictive` call makes every call replay the same event count and source
-# latent variables; only `WaveformMetadata.approximant` changes. The solid line
-# is the median of the retained draws and the shaded region is the 10th--90th
-# percentile interval.
-#
-# Higher-mode waveforms depend on inclination, so the source model is wrapped
-# with `with_isotropic_inclination`: each event draws $\iota$ from the isotropic
-# law ($\cos\iota$ uniform on $[-1, 1]$). Returning `inclination` also disables
-# the analytic $2/5$ face-on-to-isotropic rescaling, which is only valid for
-# quadrupole waveforms. The shared PRNG key then replays the same orientations
-# for every approximant.
-#
-# The lower panel shows fractional residuals
-# $(S_h^A-S_h^\mathrm{NRTidalv3})/S_h^\mathrm{NRTidalv3}$. Bins where the
-# reference is exactly zero are undefined and are masked rather than divided.
-# The notebook also reports the median matched-filter SNR of each retained
-# draw in the configured `ET-2L-aligned-CE-Hanford` network.
+# In this notebook, we compare stochastic-background spectral densities for a fixed BNS population
+# with different frequency-domain approximants:
+# - *TaylorF2:* inspiral only
+# - *IMRPhenomXAS:* BBH inspiral-merger-ringdown waveform for aligned spins
+# - *IMRPhenomXAS_NRTidalv3:* IMRPhenomXAS + tidal corrections at higher frequencies for modelling neutron stars
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -74,16 +60,6 @@ use_paper_style(root=ROOT_DIR)
 
 # %% [markdown]
 # ## Shared simulation configuration
-#
-# There is one configuration for the population, hyperparameters, observing
-# duration, waveform grid, number of retained draws, batching, capacity-tail
-# rule, and seed. The four generators below receive the same grid settings;
-# their approximant is their only differing metadata field. Fiducials,
-# population, and waveform settings come from the shared
-# `astrogwb.paper.config` accessors, so this comparison cannot drift from the
-# catalog configuration. Ripple calls its registered tidal model
-# `IMRPhenomXAS_NRTidalv3` (lower-case `v`), while plot text uses the
-# conventional `IMRPhenomXAS_NRTidalV3` spelling.
 
 
 # %%
@@ -151,15 +127,8 @@ generators = {
 }
 
 # %% [markdown]
-# ## Draw matched spectra
+# ## Simulating the BNS populations and $S_h(f)$
 #
-# `Predictive` assigns keys deterministically by sample-site name. Calling the
-# same model with the same fixed key therefore reproduces `n_events`, masses,
-# redshifts, spins, tidal deformabilities, and inclinations exactly for every
-# approximant. Splitting the key in the loop would instead produce unrelated
-# catalogs and would confound waveform differences with Monte Carlo variation.
-# Non-tidal approximants deliberately do not consume the shared tidal latent
-# variables.
 
 # %%
 population = population_model(root=ROOT_DIR, **CONFIG.model_kwargs)
@@ -173,6 +142,7 @@ mean_count = rate * years_to_seconds(CONFIG.observation_time)
 max_events = max(int(np.ceil(mean_count + CONFIG.n_max_sigma * np.sqrt(mean_count))), 1)
 shared_key = jax.random.key(CONFIG.seed)
 
+# %%
 spectral_draws: dict[str, np.ndarray] = {}
 event_counts: dict[str, np.ndarray] = {}
 for approximant, generator in generators.items():
@@ -204,7 +174,7 @@ for approximant, counts in event_counts.items():
     )
 
 # %% [markdown]
-# ## Validate the common frequency grid
+# ### Validating the common frequency grid
 #
 # A pointwise comparison is meaningful only if every generator returns exactly
 # the same bins. Fail before plotting if shape or values differ.
@@ -364,8 +334,10 @@ cumulative_snr_draws = build_cumulative_snr_draws(
 fig, ax = plt.subplots(figsize=(7.0, 4.2))
 cumulative_frequencies = frequencies[valid_snr_bins]
 for approximant in APPROXIMANTS:
+    cumulative_snr = cumulative_snr_draws[approximant]
+    cumulative_snr_fraction = cumulative_snr / cumulative_snr[:, :1]
     median, low, high = np.percentile(
-        cumulative_snr_draws[approximant], (50.0, 10.0, 90.0), axis=0
+        cumulative_snr_fraction, (50.0, 10.0, 90.0), axis=0
     )
     color = COLORS[approximant]
     label = DISPLAY_LABELS[approximant]
