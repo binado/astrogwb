@@ -99,8 +99,9 @@ def test_config_accessors_are_lazy_and_leave_the_backend_free() -> None:
        path -- constructing a Ripple kernel does initialize the backend -- so
        this test only pins that importing its *name* does not import JAX.
 
-    Unlike the test above, this one runs from the repository root: the
-    accessors resolve `config/*.json` against the caller's cwd by design.
+    Unlike the test above, this one runs from the repository root, where the
+    accessors resolve ``config/*.json`` against the discovered checkout root --
+    which for this cwd is the repository root either way.
     """
     code = """
 import sys

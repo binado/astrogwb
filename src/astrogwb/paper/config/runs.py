@@ -33,8 +33,10 @@ config an entrypoint reads.
 **stdlib only, and deliberately so.** The ``Snakefile`` imports this module to
 build the DAG, so it must not reach pydantic, JAX, or ``astrogwb``: a
 validation error in any one run would otherwise break DAG construction for
-every target, and every ``--dry-run`` would pay for a JAX import. Catalog
-*validation* lives in :mod:`astrogwb.paper.config.catalogs` for that reason.
+every target, and every ``--dry-run`` would pay for a JAX import. Its one
+intra-package import, :mod:`astrogwb.paper.paths`, is stdlib-only and I/O-free
+for the same reason. Catalog *validation* lives in
+:mod:`astrogwb.paper.config.catalogs` for that reason.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from astrogwb.paper.paths import root_dir
 from astrogwb.paper.utils import deep_merge, load_mapping
 
 if TYPE_CHECKING:
@@ -53,9 +56,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Relative to the working directory, which for the workflow and every script
-#: is the repository root. Library code names no absolute path and does not go
-#: looking for a checkout: the caller's cwd is the answer.
+#: Relative to ``root=``, which defaults to :func:`astrogwb.paper.paths.root_dir`
+#: -- the checkout root, found by walking up from the cwd to the nearest
+#: ``pyproject.toml``, or the cwd itself when there is none. For the workflow
+#: (which a dry run may point at a scratch tree holding nothing but symlinks to
+#: ``Snakefile``, ``config`` and ``scripts``) and for every script that is the
+#: cwd; a notebook, whose kernel cwd is its own directory, gets the checkout
+#: root instead of failing. An explicit ``root=`` always wins.
 CONFIG_DIR = Path("config")
 
 #: Every shared run layer: one file per top-level block of a run config, each
@@ -162,7 +169,7 @@ def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
     :data:`EXPERIMENT_BASE` is the experiment override, not a run, so it is
     excluded.
     """
-    resolved = root or Path()
+    resolved = root or root_dir()
     runs_dir = resolved / RUNS_DIR
     experiments = tuple(
         sorted(path.name for path in runs_dir.iterdir() if path.is_dir())
@@ -197,7 +204,7 @@ def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
     disjoint top-level blocks, so the order among them does not change the
     outcome; it is fixed anyway for reproducibility.
     """
-    resolved = root or Path()
+    resolved = root or root_dir()
     paths = tuple(resolved / path for path in ROOT_LAYERS)
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
@@ -214,7 +221,7 @@ def run_config_paths(
     and passes them back on argv, so the dependency edges and the data path are
     the same list.
     """
-    resolved = root or Path()
+    resolved = root or root_dir()
     directory = resolved / RUNS_DIR / experiment
     run_path = directory / f"{run}.json"
     if not run_path.is_file():
@@ -262,7 +269,7 @@ def catalog_base_paths(root: Path | None = None) -> tuple[Path, ...]:
     array every model is evaluated on. ``sampling_frequency`` is the waveform
     backend's Nyquist, not the stored grid.
     """
-    resolved = root or Path()
+    resolved = root or root_dir()
     paths = tuple(resolved / layer for layer in CATALOG_ROOT_LAYERS)
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
@@ -277,7 +284,7 @@ def catalog_config_paths(name: str, *, root: Path | None = None) -> tuple[Path, 
     as the catalog rule's inputs, so editing any shared layer invalidates every
     catalog.
     """
-    resolved = root or Path()
+    resolved = root or root_dir()
     definition = resolved / CATALOGS_DIR / f"{name}.json"
     if not definition.is_file():
         raise ValueError(f"unknown catalog {name}: {definition} does not exist")
@@ -286,7 +293,7 @@ def catalog_config_paths(name: str, *, root: Path | None = None) -> tuple[Path, 
 
 def discover_catalog_names(root: Path | None = None) -> tuple[str, ...]:
     """Every declared catalog name, sorted. Stems of ``config/catalogs``."""
-    directory = (root or Path()) / CATALOGS_DIR
+    directory = (root or root_dir()) / CATALOGS_DIR
     names = tuple(sorted(path.stem for path in directory.glob("*.json")))
     if not names:
         raise ValueError(f"{directory} declares no catalog configs")

@@ -44,10 +44,14 @@ import on every ``--dry-run``. :func:`priors` therefore imports
 :class:`~astrogwb.paper.config.catalogs.WaveformMetadata` the same way. A
 subprocess test in ``tests/paper/test_cli.py`` pins both halves.
 
-Paths are relative to the working directory, which for the workflow and every
-script is the repository root -- the same contract as
-:mod:`astrogwb.paper.config.runs`. Tests, which pytest may invoke from
-anywhere, pass ``root=`` explicitly.
+Paths resolve against ``root=``, which defaults to
+:func:`astrogwb.paper.paths.root_dir` -- the checkout root, found by walking up
+from the cwd to the nearest ``pyproject.toml`` (or the cwd itself when there is
+none). The workflow and every script run from the repository root, where that
+is the cwd, so this changes nothing for them; a notebook, whose kernel cwd is
+its own directory, resolves the same files instead of failing on the first
+read. Tests, which pytest may invoke from anywhere, still pass ``root=``
+explicitly.
 
 Each accessor caches its parse and hands back a fresh copy, so a caller that
 mutates what it got does not poison the cache for everyone else -- overrides are
@@ -68,6 +72,7 @@ from astrogwb.paper.config.runs import (
     PRIORS_PATH,
     WAVEFORM_PATH,
 )
+from astrogwb.paper.paths import root_dir
 from astrogwb.paper.utils import load_mapping
 
 if TYPE_CHECKING:
@@ -116,7 +121,7 @@ def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
     :func:`priors` -- only ``RunConfig`` cross-checks the two tables.
     """
     table = {
-        **_load((root or Path()) / FIDUCIALS_PATH, "fiducials"),
+        **_load((root or root_dir()) / FIDUCIALS_PATH, "fiducials"),
         **kwargs,
     }
     return {name: float(value) for name, value in table.items()}
@@ -143,7 +148,7 @@ def priors(root: Path | None = None, **kwargs: Any) -> dict[str, Distribution]:
     from astrogwb.paper.config.mcmc import materialize_prior
 
     table = {
-        **_load((root or Path()) / PRIORS_PATH, "priors"),
+        **_load((root or root_dir()) / PRIORS_PATH, "priors"),
         **kwargs,
     }
     return {name: materialize_prior(spec) for name, spec in table.items()}
@@ -171,7 +176,7 @@ def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ..
         networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})
     """
     table = {
-        **_load((root or Path()) / NETWORKS_PATH, "networks"),
+        **_load((root or root_dir()) / NETWORKS_PATH, "networks"),
         **kwargs,
     }
     return {name: tuple(detectors) for name, detectors in table.items()}
@@ -198,7 +203,7 @@ def waveform_generator(
     """
     from astrogwb.metadata import WaveformMetadata
 
-    settings = {**_load((root or Path()) / WAVEFORM_PATH, "waveform"), **kwargs}
+    settings = {**_load((root or root_dir()) / WAVEFORM_PATH, "waveform"), **kwargs}
     return WaveformMetadata.model_validate(settings).build()
 
 
@@ -223,7 +228,7 @@ def population_model(root: Path | None = None, **kwargs: float) -> Population:
     """
     from astrogwb.populations import build_population
 
-    table = _load((root or Path()) / POPULATION_PATH, "population")
+    table = _load((root or root_dir()) / POPULATION_PATH, "population")
     settings = {**table.get("model_kwargs", {}), **kwargs}
     return build_population(table["model_name"], **settings)
 
@@ -249,7 +254,7 @@ def population_metadata(
     """
     from astrogwb.metadata import PopulationMetadata
 
-    table = _load((root or Path()) / POPULATION_PATH, "population")
+    table = _load((root or root_dir()) / POPULATION_PATH, "population")
     return PopulationMetadata(
         model_name=table["model_name"],
         model_kwargs={**table.get("model_kwargs", {}), **kwargs},
