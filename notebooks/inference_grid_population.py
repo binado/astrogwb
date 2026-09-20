@@ -16,10 +16,8 @@
 # # Population parameters from grid-evaluated posteriors
 #
 # This notebook evaluates the population-shape parameter $z_{\mathrm{peak}}$
-# across detector networks and the default-network degeneracy between $H_0$
-# and the local merger rate $\mathcal{R}_0$. It includes the corresponding
-# detector overlays, joint corners, and fixed-versus-marginalized rate
-# comparison.
+# across detector networks, including the corresponding detector overlays
+# and joint $(H_0, z_{\mathrm{peak}})$ corners.
 #
 # The notebook resolves the checkout root with `astrogwb.paper.paths.root_dir`,
 # so it runs from the repository root or from this directory. The injection is
@@ -52,7 +50,6 @@ from astrogwb.paper.paths import root_dir
 from astrogwb.paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
     DETECTOR_NETWORKS,
-    MERGER_RATE_LEGEND,
     TRUTH,
     Network,
     detector_network_styles,
@@ -188,12 +185,8 @@ H0_GRIDS_2D = {
     name: uniform_grid(low, high, NPOINTS_2D)
     for name, (low, high) in H0_WINDOWS.items()
 }
-H0_GRID_2D = H0_GRIDS_2D[DEFAULT_NETWORK]
 Z_PEAK_GRID = uniform_grid(
     *prior_window(PRIORS["z_peak"], sigmas=COVERAGE_SIGMAS), NPOINTS_2D
-)
-LOCAL_MERGER_RATE_GRID = uniform_grid(
-    *prior_window(PRIORS["local_merger_rate"], sigmas=COVERAGE_SIGMAS), NPOINTS_2D
 )
 
 # %% [markdown]
@@ -249,21 +242,6 @@ for network in NETWORKS:
         f"{network.label}: {time.perf_counter() - start:.2f}s for "
         f"{NPOINTS_2D}x{NPOINTS_2D} grid points"
     )
-
-_default_log_density_fn = LOG_DENSITY_FNS[DEFAULT_NETWORK]
-_default_model_kwargs = MODEL_KWARGS[DEFAULT_NETWORK]
-H0_GRID_1D = uniform_grid(*H0_WINDOWS[DEFAULT_NETWORK], NPOINTS_1D)
-H0_LOGPOST = evaluate_joint(
-    _default_log_density_fn,
-    {"H0": H0_GRID_1D},
-    model_kwargs=_default_model_kwargs,
-)
-H0_MERGER_RATE_GRIDS = {"H0": H0_GRID_2D, "local_merger_rate": LOCAL_MERGER_RATE_GRID}
-H0_MERGER_RATE_LOGPOST = evaluate_joint(
-    _default_log_density_fn,
-    H0_MERGER_RATE_GRIDS,
-    model_kwargs=_default_model_kwargs,
-)
 
 # %% [markdown]
 # ## Marginals and detector overlays
@@ -343,43 +321,6 @@ fig_h0_z_peak_corner_et_triangular_ce = plot_h0_z_peak_corner(
 # %%
 fig_h0_z_peak_corner_et_triangular_ce
 
-fig_h0_merger_rate_corner = plot_corner_for_posterior_grid(
-    tuple(H0_MERGER_RATE_GRIDS.values()),
-    H0_MERGER_RATE_LOGPOST,
-    labels=[PARAMETER_LABELS["H0"], PARAMETER_LABELS["local_merger_rate"]],
-    truths=[FIDUCIALS["H0"], FIDUCIALS["local_merger_rate"]],
-    smooth=1.0,
-)
-
-# %%
-fig_h0_merger_rate_corner
-
-# %% [markdown]
-# ## Fixed versus marginalized merger rate
-
-# %%
-_fixed_density = safe_exponentiate(H0_LOGPOST)
-_fixed_density /= np.trapezoid(_fixed_density, np.asarray(H0_GRID_1D))
-_h0_marginal = marginal_along(H0_MERGER_RATE_LOGPOST, LOCAL_MERGER_RATE_GRID, axis=1)
-_h0_marginal /= np.trapezoid(_h0_marginal, np.asarray(H0_GRID_2D))
-
-fig_h0_merger_rate_priors, ax = plt.subplots()
-ax.plot(
-    np.asarray(H0_GRID_1D),
-    _fixed_density,
-    label=r"$H_0$ (fixed $\mathcal{R}_0$)",
-)
-ax.plot(
-    np.asarray(H0_GRID_2D),
-    _h0_marginal,
-    label=r"$H_0$ ($\mathcal{R}_0$ marginalized, grid quadrature)",
-)
-ax.axvline(FIDUCIALS["H0"], **TRUTH)
-ax.set(xlabel=PARAMETER_LABELS["H0"], ylabel="Posterior density")
-ax.legend(**MERGER_RATE_LEGEND)
-fig_h0_merger_rate_priors.tight_layout()
-fig_h0_merger_rate_priors
-
 # %% [markdown]
 # ## Saving the grids and figures
 
@@ -396,10 +337,7 @@ if SAVE_OUTPUTS:
             f"h0_z_peak_logpost_{name}": np.asarray(logpost)
             for name, logpost in H0_Z_PEAK_LOGPOSTERIORS.items()
         },
-        h0_grid_1d=np.asarray(H0_GRID_1D),
         z_peak_grid=np.asarray(Z_PEAK_GRID),
-        local_merger_rate_grid=np.asarray(LOCAL_MERGER_RATE_GRID),
-        h0_merger_rate_logpost=np.asarray(H0_MERGER_RATE_LOGPOST),
     )
     (GRID_DIR / "inference_grid_population.json").write_text(
         json.dumps(
@@ -427,11 +365,5 @@ if SAVE_OUTPUTS:
     fig_h0_z_peak_corner_et_triangular_ce.savefig(
         FIGURE_DIR / "H0-z_peak-corner-ET-triangular-CE-Hanford-grid.pdf",
         bbox_inches="tight",
-    )
-    fig_h0_merger_rate_corner.savefig(
-        FIGURE_DIR / "H0-merger-rate-corner-grid.pdf", bbox_inches="tight"
-    )
-    fig_h0_merger_rate_priors.savefig(
-        FIGURE_DIR / "H0-merger-rate-priors-grid.pdf", bbox_inches="tight"
     )
     print("saved population grids to", GRID_DIR, "and figures to", FIGURE_DIR)

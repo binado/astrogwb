@@ -15,10 +15,12 @@
 # %% [markdown]
 # # Expansion-history parameters from grid-evaluated posteriors
 #
-# This notebook reproduces the grid-evaluated $H_0$ and $(H_0, \Omega_m)$
-# figures. Each detector network gets its own $H_0$ grid, sized from its
-# matched-filter SNR through the Fisher prediction
-# $\sigma_{H_0} \approx H_0 / \mathrm{SNR}$.
+# This notebook reproduces the grid-evaluated $H_0$, $(H_0, \Omega_m)$, and
+# $(H_0, \mathcal{R}_0)$ figures. Each detector network gets its own $H_0$
+# grid, sized from its matched-filter SNR through the Fisher prediction
+# $\sigma_{H_0} \approx H_0 / \mathrm{SNR}$. The default-network
+# $H_0$--$\mathcal{R}_0$ degeneracy includes the joint corner and the
+# fixed-versus-marginalized rate comparison.
 #
 # The notebook resolves the checkout root with `astrogwb.paper.paths.root_dir`,
 # so it runs from the repository root or from this directory; the catalog is
@@ -50,6 +52,7 @@ from astrogwb.paper.plotting import (
     CORNER_LEVELS,
     DETECTOR_COMPARISON_LEGEND,
     DETECTOR_NETWORKS,
+    MERGER_RATE_LEGEND,
     TRUTH,
     Network,
     detector_network_styles,
@@ -195,6 +198,9 @@ H0_GRIDS_2D: dict[str, jax.Array] = {
 OMEGA_M_GRID = uniform_grid(
     *prior_window(PRIORS["Omega_m"], sigmas=COVERAGE_SIGMAS), NPOINTS_2D
 )
+LOCAL_MERGER_RATE_GRID = uniform_grid(
+    *prior_window(PRIORS["local_merger_rate"], sigmas=COVERAGE_SIGMAS), NPOINTS_2D
+)
 H0_GRID_2D = H0_GRIDS_2D[DEFAULT_NETWORK]
 pd.DataFrame(
     [
@@ -267,6 +273,18 @@ for network in NETWORKS:
         f"{network.label}: {time.perf_counter() - start:.2f}s for "
         f"the 1D and {NPOINTS_2D}x{NPOINTS_2D} grids"
     )
+
+H0_MERGER_RATE_GRIDS = {"H0": H0_GRID_2D, "local_merger_rate": LOCAL_MERGER_RATE_GRID}
+start = time.perf_counter()
+H0_MERGER_RATE_LOGPOST = evaluate_joint(
+    SHARED_LOG_DENSITY_FN,
+    H0_MERGER_RATE_GRIDS,
+    model_kwargs=MODEL_KWARGS[DEFAULT_NETWORK],
+)
+print(
+    f"{DEFAULT_NETWORK}: {time.perf_counter() - start:.2f}s for "
+    f"H0 x local_merger_rate {NPOINTS_2D}x{NPOINTS_2D} grid"
+)
 
 # %% [markdown]
 # ## Detector overlays and constraints
@@ -385,6 +403,43 @@ fig_h0_omega_m_corner = plot_corner_for_posterior_grid(
 fig_h0_omega_m_corner
 
 # %% [markdown]
+# ## $H_0$--$\mathcal{R}_0$ corner and fixed versus marginalized rate
+
+# %%
+fig_h0_merger_rate_corner = plot_corner_for_posterior_grid(
+    tuple(H0_MERGER_RATE_GRIDS.values()),
+    H0_MERGER_RATE_LOGPOST,
+    labels=[PARAMETER_LABELS["H0"], PARAMETER_LABELS["local_merger_rate"]],
+    truths=[FIDUCIALS["H0"], FIDUCIALS["local_merger_rate"]],
+    smooth=1.0,
+)
+fig_h0_merger_rate_corner
+
+# %%
+_h0_grid_1d = H0_GRIDS[DEFAULT_NETWORK]
+_fixed_density = safe_exponentiate(H0_LOGPOSTERIORS[DEFAULT_NETWORK])
+_fixed_density /= np.trapezoid(_fixed_density, np.asarray(_h0_grid_1d))
+_h0_marginal = marginal_along(H0_MERGER_RATE_LOGPOST, LOCAL_MERGER_RATE_GRID, axis=1)
+_h0_marginal /= np.trapezoid(_h0_marginal, np.asarray(H0_GRID_2D))
+
+fig_h0_merger_rate_priors, ax = plt.subplots()
+ax.plot(
+    np.asarray(_h0_grid_1d),
+    _fixed_density,
+    label=r"$H_0$ (fixed $\mathcal{R}_0$)",
+)
+ax.plot(
+    np.asarray(H0_GRID_2D),
+    _h0_marginal,
+    label=r"$H_0$ ($\mathcal{R}_0$ marginalized, grid quadrature)",
+)
+ax.axvline(FIDUCIALS["H0"], **TRUTH)
+ax.set(xlabel=PARAMETER_LABELS["H0"], ylabel="Posterior density")
+ax.legend(**MERGER_RATE_LEGEND)
+fig_h0_merger_rate_priors.tight_layout()
+fig_h0_merger_rate_priors
+
+# %% [markdown]
 # ## Saving the grids and figures
 
 # %%
@@ -407,6 +462,8 @@ if SAVE_OUTPUTS:
         },
         omega_m_grid=np.asarray(OMEGA_M_GRID),
         h0_omega_m_logpost=np.asarray(H0_OMEGA_M_LOGPOST),
+        local_merger_rate_grid=np.asarray(LOCAL_MERGER_RATE_GRID),
+        h0_merger_rate_logpost=np.asarray(H0_MERGER_RATE_LOGPOST),
     )
     (GRID_DIR / "inference_grid_expansion_history.json").write_text(
         json.dumps(
@@ -433,5 +490,11 @@ if SAVE_OUTPUTS:
     )
     fig_h0_omega_m_corner.savefig(
         FIGURE_DIR / "H0-Omega_m-corner-grid.pdf", bbox_inches="tight"
+    )
+    fig_h0_merger_rate_corner.savefig(
+        FIGURE_DIR / "H0-merger-rate-corner-grid.pdf", bbox_inches="tight"
+    )
+    fig_h0_merger_rate_priors.savefig(
+        FIGURE_DIR / "H0-merger-rate-priors-grid.pdf", bbox_inches="tight"
     )
     print("saved expansion-history grids to", GRID_DIR, "and figures to", FIGURE_DIR)
