@@ -39,8 +39,8 @@
 # Point `INJECTION_CATALOG_PATH` at the injection catalog used by `mcmc.py`.
 # The fiducials and detector networks the overlays follow are read from
 # `config/fiducials.json` and `config/networks.json` through
-# `astrogwb.paper.config`; the analysis grid is the notebook's own knob,
-# inlined in the configuration cell below as `GRID`.
+# `astrogwb.paper.config`; the frequency band, observation time, and redshift
+# window are the notebook's own knobs, inlined in the configuration cell below.
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -67,7 +67,6 @@ from astrogwb.gwb import (
 )
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config import fiducials, networks
-from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.inference import prepare_observation
 from astrogwb.paper.plotting import (
@@ -104,11 +103,11 @@ use_paper_style(root=ROOT_DIR)
 # read from `config/fiducials.json` and `config/networks.json` through
 # `astrogwb.paper.config` -- the same tables every committed run merges and the
 # figure scripts read -- so this notebook cannot drift from what the runs
-# sample. `GRID` (the frequency band, observation time, and redshift grid the
-# reference overlays use) and the plotting choices stay this notebook's own
+# sample. The frequency band, observation time, and redshift window the
+# reference overlays use, plus the plotting choices, stay this notebook's own
 # knobs, written out literally.
 #
-# `GRID` mirrors `config/analysis/base/model.toml` plus that file's top-level
+# Those knobs mirror `config/analysis/base/model.toml` plus that file's top-level
 # `observation_time`. Editing it does **not** update this notebook; the copy
 # below is hand-maintained.
 
@@ -124,15 +123,12 @@ BASE_DIR = ROOT_DIR / FIGURES_DIR / "fiducial_spectrum"
 FIDUCIALS = fiducials(root=ROOT_DIR)
 
 # Inlined from config/analysis/base/model.toml plus its top-level
-# observation_time -- what that experiment's RunConfig.analysis_grid assembled to.
-GRID = AnalysisGrid(
-    observation_time=1.0,
-    minimum_frequency=2.0,
-    maximum_frequency=2048.0,
-    minimum_redshift=0.3,
-    maximum_redshift=20.0,
-    n_grid=256,
-)
+# observation_time -- what that experiment's RunConfig.analysis assembled to.
+observation_time = 1.0
+minimum_frequency = 2.0
+maximum_frequency = 2048.0
+minimum_redshift = 0.3
+maximum_redshift = 20.0
 
 # Ordered legend from astrogwb.paper.plotting.DETECTOR_NETWORKS -- a network's
 # label lives there because nothing reads it without the order it sits in --
@@ -365,14 +361,21 @@ def _draw_omega_and_sh(
 # ## Loading the waveform catalog
 #
 # `prepare_observation` builds the fiducial $S_h$ from the injection catalog on
-# `GRID`; each compared network then gets its own
+# the notebook's frequency band and redshift window; each compared network then
+# gets its own
 # $S_{\mathrm{eff}}$ from the detector list `NETWORKS` resolved. The ET-only
 # overlays use $\sigma = S_{\mathrm{eff}}/\sqrt{2 T \Delta f}$ on that same
 # band, and $\sigma_\Omega$ is the $f^3$ conversion of $\sigma$.
 
 # %%
 catalog = load_run_catalog(INJECTION_CATALOG_PATH, label="injection")
-observation = prepare_observation(catalog, grid=GRID)
+observation = prepare_observation(
+    catalog,
+    minimum_redshift=minimum_redshift,
+    maximum_redshift=maximum_redshift,
+    minimum_frequency=minimum_frequency,
+    maximum_frequency=maximum_frequency,
+)
 frequencies = observation.frequencies
 frequency_mask = observation.frequency_mask
 
@@ -389,7 +392,7 @@ for network in NETWORKS:
         effective_psd(frequencies, list(network.detectors), sensitivities)
     )
 
-observation_time_sec = years_to_seconds(GRID.observation_time)
+observation_time_sec = years_to_seconds(observation_time)
 frequency_by_network: dict[str, np.ndarray] = {}
 snr_squared_by_network: dict[str, np.ndarray] = {}
 snr_lt_by_network: dict[str, np.ndarray] = {}
@@ -415,7 +418,7 @@ for network in NETWORKS:
     )
     sigma = np.asarray(
         gaussian_bin_scale(
-            jnp.asarray(band_seff), GRID.observation_time, observation.df
+            jnp.asarray(band_seff), observation_time, observation.df
         )
     )
     frequency_by_network[network.name] = band_freq

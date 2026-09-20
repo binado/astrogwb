@@ -41,7 +41,6 @@ from numpyro.distributions import Distribution, Uniform
 from astrogwb.metadata import PopulationMetadata, WaveformMetadata
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config import fiducials, networks, priors
-from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.inference import prepare_inference_inputs
 from astrogwb.paper.paths import root_dir
 from astrogwb.paper.plotting import (
@@ -70,14 +69,12 @@ jax.config.update("jax_enable_x64", True)
 ROOT_DIR = root_dir()
 INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
 PROPOSAL_CATALOG_PATH = INJECTION_CATALOG_PATH
-ANALYSIS_GRID = AnalysisGrid(
-    observation_time=1.0,
-    minimum_frequency=2.0,
-    maximum_frequency=2048.0,
-    minimum_redshift=0.3,
-    maximum_redshift=20.0,
-    n_grid=256,
-)
+observation_time = 1.0
+minimum_frequency = 2.0
+maximum_frequency = 2048.0
+minimum_redshift = 0.3
+maximum_redshift = 20.0
+n_grid = 256
 FIDUCIALS = fiducials()
 PRIORS: dict[str, Distribution] = priors()
 NETWORK_CONFIG = networks()
@@ -108,9 +105,9 @@ PROPOSAL_POPULATION_METADATA: PopulationMetadata = proposal_catalog.population
 PROPOSAL_WAVEFORM_METADATA: WaveformMetadata = proposal_catalog.waveform_metadata
 TARGET_MODEL = build_population(
     "bns_md_modified_propagation",
-    minimum_redshift=ANALYSIS_GRID.minimum_redshift,
-    maximum_redshift=ANALYSIS_GRID.maximum_redshift,
-    n_grid=ANALYSIS_GRID.n_grid,
+    minimum_redshift=minimum_redshift,
+    maximum_redshift=maximum_redshift,
+    n_grid=n_grid,
 )
 print(
     "proposal:",
@@ -127,7 +124,14 @@ print(
     PROPOSAL_WAVEFORM_METADATA.frequency_resolution,
 )
 SNR_TABLE = compute_network_snrs(
-    INJECTION_CATALOG_PATH, (network,), FIDUCIALS, grid=ANALYSIS_GRID
+    INJECTION_CATALOG_PATH,
+    (network,),
+    FIDUCIALS,
+    observation_time=observation_time,
+    minimum_redshift=minimum_redshift,
+    maximum_redshift=maximum_redshift,
+    minimum_frequency=minimum_frequency,
+    maximum_frequency=maximum_frequency,
 )
 snr = float(SNR_TABLE.iloc[0]["snr"])
 snr
@@ -170,7 +174,11 @@ XI_N_GRID = uniform_grid(
 inputs = prepare_inference_inputs(
     injection_catalog,
     proposal_catalog,
-    grid=ANALYSIS_GRID,
+    observation_time=observation_time,
+    minimum_redshift=minimum_redshift,
+    maximum_redshift=maximum_redshift,
+    minimum_frequency=minimum_frequency,
+    maximum_frequency=maximum_frequency,
     detectors=network.detectors,
     target=TARGET_MODEL,
     density_sites=[],

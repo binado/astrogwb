@@ -44,7 +44,6 @@ from numpyro.distributions import Distribution, Normal, Uniform
 from astrogwb.metadata import PopulationMetadata, WaveformMetadata
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config import fiducials, networks, priors
-from astrogwb.paper.config.mcmc import AnalysisGrid
 from astrogwb.paper.inference import InferenceInputs, prepare_inference_inputs
 from astrogwb.paper.paths import root_dir
 from astrogwb.paper.plotting import (
@@ -78,14 +77,12 @@ ROOT_DIR = root_dir()
 DEBUG: bool = False
 INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
 PROPOSAL_CATALOG_PATH = INJECTION_CATALOG_PATH
-ANALYSIS_GRID = AnalysisGrid(
-    observation_time=1.0,
-    minimum_frequency=2.0,
-    maximum_frequency=2048.0,
-    minimum_redshift=0.3,
-    maximum_redshift=20.0,
-    n_grid=256,
-)
+observation_time = 1.0
+minimum_frequency = 2.0
+maximum_frequency = 2048.0
+minimum_redshift = 0.3
+maximum_redshift = 20.0
+n_grid = 256
 FIDUCIALS = fiducials()
 PRIORS: dict[str, Distribution] = priors()
 NETWORK_CONFIG = networks()
@@ -114,9 +111,9 @@ PROPOSAL_POPULATION_METADATA: PopulationMetadata = proposal_catalog.population
 PROPOSAL_WAVEFORM_METADATA: WaveformMetadata = proposal_catalog.waveform_metadata
 TARGET_MODEL = build_population(
     "bns_md_modified_propagation",
-    minimum_redshift=ANALYSIS_GRID.minimum_redshift,
-    maximum_redshift=ANALYSIS_GRID.maximum_redshift,
-    n_grid=ANALYSIS_GRID.n_grid,
+    minimum_redshift=minimum_redshift,
+    maximum_redshift=maximum_redshift,
+    n_grid=n_grid,
 )
 print(
     "proposal:",
@@ -133,7 +130,14 @@ print(
     PROPOSAL_WAVEFORM_METADATA.frequency_resolution,
 )
 SNR_TABLE = compute_network_snrs(
-    INJECTION_CATALOG_PATH, NETWORKS, FIDUCIALS, grid=ANALYSIS_GRID
+    INJECTION_CATALOG_PATH,
+    NETWORKS,
+    FIDUCIALS,
+    observation_time=observation_time,
+    minimum_redshift=minimum_redshift,
+    maximum_redshift=maximum_redshift,
+    minimum_frequency=minimum_frequency,
+    maximum_frequency=maximum_frequency,
 )
 SNR_TABLE = SNR_TABLE.assign(
     sigma_h0_fisher=FIDUCIALS["H0"] / SNR_TABLE["snr"],
@@ -208,7 +212,11 @@ def build_network_inputs(network: Network) -> InferenceInputs:
     return prepare_inference_inputs(
         injection_catalog,
         proposal_catalog,
-        grid=ANALYSIS_GRID,
+        observation_time=observation_time,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
         detectors=network.detectors,
         target=TARGET_MODEL,
         density_sites=[],
