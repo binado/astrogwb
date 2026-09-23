@@ -46,21 +46,32 @@ repository root as the working directory.
 - **`mcmc_plotting.py`** — load saved chains and produce diagnostic and corner
   plots
 - **`logposterior_grid.py`** — evaluate the log-posterior on a parameter grid
+- **`inference_grid_expansion_history.py`** — reproduces the grid-evaluated
+  $H_0$ and $(H_0, \Omega_m)$ figures, including detector overlays, the SNR
+  constraint table, and the $H_0$--$\Omega_m$ corner.
+- **`inference_grid_modified_propagation.py`** — evaluates the default-network
+  $(\Xi_0, n)$ grid and reproduces its modified-propagation corner plot.
+- **`inference_grid_population.py`** — evaluates the detector-network
+  $(H_0, z_{\mathrm{peak}})$ grids and the default-network
+  $(H_0, \mathcal{R}_0)$ grid, including their marginals and corners.
 - **`fiducial_spectrum.py`** — fiducial injection $S_h$ / $\Omega_{\mathrm{GW}}$,
   network $S_{\mathrm{eff}}$, $\sigma$, and per-network SNR
 
-The paper notebooks merge a run's config layers with
-`assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
-merge the workflow performs by passing layer paths on argv. None of them reads
-an intermediate assembled-config artifact, so they run against a fresh clone.
-
-`fiducial_spectrum.py` is the exception: it stands in for no particular run, so
-it reads the shared tables directly — `config/fiducials.json` and
+`mcmc.py`, `mcmc_plotting.py`, and `logposterior_grid.py` merge a run's config
+layers with `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper
+over the same merge the workflow performs by passing layer paths on argv.
+The three grid-inference notebooks read their fiducials, priors, and per-network
+detector lists from `astrogwb.paper.config` helper functions, and their plotting
+labels from `astrogwb.paper.plotting`. Catalog provenance is read from the loaded
+catalog's `PopulationMetadata` and `WaveformMetadata` records.
+`fiducial_spectrum.py` is the other exception: it stands in for no particular
+run, so it reads the shared tables directly — `config/fiducials.json` and
 `config/networks.json` through `astrogwb.paper.config`, and the ordered network
 legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS` — rather than merging a
 run's layers. Its analysis grid and local plotting choices stay hand-written in
 its configuration cell, so edits to `config/analysis/base/model.toml` should be
-mirrored there by hand.
+mirrored there by hand. None reads an intermediate artifact, so each runs
+independently against a fresh clone.
 
 For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:

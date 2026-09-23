@@ -1,13 +1,13 @@
 """Where the checkout is, for tests that read committed config off disk.
 
-``astrogwb.paper.paths`` used to answer this by walking up looking for a
-workspace. It is gone: with one package and the workflow's cwd at the
-repository root, library code names only relative paths and the caller's cwd is
-the answer.
+:func:`astrogwb.paper.paths.root_dir` walks up from the cwd looking for a
+``pyproject.toml``; that is the fallback the paper accessors use when they are
+handed no ``root=``, and it is what a notebook relies on.
 
-Tests are the exception -- pytest can be invoked from anywhere -- so they
-anchor on this file's own location rather than on cwd. That is a test concern
-and it lives with the tests, not in the library.
+Tests do not use it. Pytest can be invoked from anywhere *and* a stray
+``pyproject.toml`` above the checkout would mis-anchor a cwd-relative walk, so
+this module anchors on its own location instead. That is a test concern and it
+lives with the tests, not in the library.
 """
 
 from __future__ import annotations
