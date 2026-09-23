@@ -420,9 +420,7 @@ for network in NETWORKS:
         observation.df,
     )
     sigma = np.asarray(
-        gaussian_bin_scale(
-            jnp.asarray(band_seff), observation_time, observation.df
-        )
+        gaussian_bin_scale(jnp.asarray(band_seff), observation_time, observation.df)
     )
     frequency_by_network[network.name] = band_freq
     snr_squared_by_network[network.name] = snr_squared
