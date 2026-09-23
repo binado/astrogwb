@@ -114,9 +114,10 @@ than the DAG. That notebook resolves no run config: it reads the shared
 fiducials and detector networks from `config/fiducials.json` and
 `config/networks.json` through `astrogwb.paper.config`, and the ordered network
 legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS`, but keeps its analysis
-grid and local plotting choices as literals of its own. Those mirror
-`config/analysis/base/model.toml`, so editing that file does not change these
-figures -- update the notebook's configuration cell too.
+window (`observation_time`, the frequency band, and the redshift bounds) and
+local plotting choices as literals of its own. Those mirror
+`config/analysis.json`, so editing that file does not change these figures --
+update the notebook's configuration cell too.
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
