@@ -144,6 +144,8 @@ maximum_frequency = 2048.0
 minimum_redshift = 0.35
 maximum_redshift = 20.0
 
+APPROXIMANT = "IMRPhenomXAS_NRTidalv3"
+
 # One Poisson draw. batch_size chunks the waveform sum; n_max_sigma sizes the
 # static event plate a Poisson tail above the mean count.
 seed = 41
@@ -406,7 +408,7 @@ merger_rate_fn = population.merger_rate_fn
 if merger_rate_fn is None:
     raise ValueError("configured population cannot simulate event counts")
 
-generator = waveform_generator(root=ROOT_DIR)
+generator = waveform_generator(root=ROOT_DIR, approximant=APPROXIMANT)
 validate_source_model(
     FIDUCIALS,
     source_model=population.source_model,
