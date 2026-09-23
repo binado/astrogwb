@@ -299,7 +299,8 @@ fig_posteriors
 # ## Sample variance across model draws
 
 # %%
-sample_variance = np.var(np.asarray(model_draws), axis=0, ddof=1)
+model_draws_np = np.asarray(model_draws, dtype=np.float64)
+sample_variance = np.var(model_draws_np, axis=0, ddof=1)
 positive_variance = sample_variance > 0.0
 
 fig_variance, ax = plt.subplots(figsize=(7.0, 4.5))
@@ -312,3 +313,31 @@ ax.set_xlabel(r"$f\ [\mathrm{Hz}]$")
 ax.set_ylabel(r"Sample variance of $S_h(f)$")
 ax.set_title(f"Spectral-density variance across draws: {network.label}")
 fig_variance
+
+# %% [markdown]
+# ## Relative residual variance across draws
+#
+# For each draw the residual is measured relative to the ensemble mean at every
+# frequency, $S_h / \overline{S_h} - 1$. Its sample variance is the raw variance
+# above divided by $\overline{S_h}^2$, so it is dimensionless and comparable
+# across the band. Bins where the ensemble mean vanishes (or the variance is
+# non-positive) are dropped before the log-log plot.
+
+# %%
+mean_spectrum = np.mean(model_draws_np, axis=0)
+relative_residual = model_draws_np / mean_spectrum - 1.0
+residual_variance = np.var(relative_residual, axis=0, ddof=1)
+finite_variance = np.isfinite(residual_variance) & (residual_variance > 0.0)
+
+print(f"usable residual-variance bins: {int(finite_variance.sum())}/{frequencies.size}")
+
+fig_residual_variance, ax = plt.subplots(figsize=(7.0, 4.5))
+ax.loglog(
+    frequencies[finite_variance],
+    residual_variance[finite_variance],
+    color="C1",
+)
+ax.set_xlabel(r"$f\ [\mathrm{Hz}]$")
+ax.set_ylabel(r"Sample variance of $S_h / \overline{S_h} - 1$")
+ax.set_title(f"Relative spectral-density residual variance: {network.label}")
+fig_residual_variance
