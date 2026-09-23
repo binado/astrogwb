@@ -182,8 +182,28 @@ def _():
         show_value=True,
         label="Observation time (years)",
     )
-    mo.vstack([approximant_choice, observation_time_slider])
-    return approximant_choice, observation_time_slider
+    include_cosmic_explorer_switch = mo.ui.switch(
+        value=True,
+        label="Include Cosmic Explorer",
+    )
+    write_figures_switch = mo.ui.switch(
+        value=True,
+        label="Write figures",
+    )
+    mo.vstack(
+        [
+            approximant_choice,
+            observation_time_slider,
+            include_cosmic_explorer_switch,
+            write_figures_switch,
+        ]
+    )
+    return (
+        approximant_choice,
+        include_cosmic_explorer_switch,
+        observation_time_slider,
+        write_figures_switch,
+    )
 
 
 @app.cell
@@ -191,6 +211,18 @@ def _(approximant_choice, observation_time_slider):
     approximant = approximant_choice.value
     observation_time = float(observation_time_slider.value)
     return approximant, observation_time
+
+
+@app.cell
+def _(include_cosmic_explorer_switch):
+    include_cosmic_explorer = include_cosmic_explorer_switch.value
+    return (include_cosmic_explorer,)
+
+
+@app.cell
+def _(write_figures_switch):
+    write_figures = write_figures_switch.value
+    return (write_figures,)
 
 
 @app.cell(hide_code=True)
@@ -591,6 +623,36 @@ def _(
     )
 
 
+@app.cell
+def _(
+    NETWORKS: tuple[Network, ...],
+    detector_colors,
+    detector_linestyles,
+    include_cosmic_explorer,
+):
+    # Styles stay assigned on the full network tuple, so dropping the CE
+    # companions keeps each ET geometry's color.
+    if include_cosmic_explorer:
+        plotted_networks = NETWORKS
+        plotted_colors = detector_colors
+        plotted_linestyles = detector_linestyles
+    else:
+        _kept = tuple(
+            (network, color, linestyle)
+            for network, color, linestyle in zip(
+                NETWORKS,
+                detector_colors,
+                detector_linestyles,
+                strict=True,
+            )
+            if not network.name.endswith("-CE-Hanford")
+        )
+        plotted_networks = tuple(network for network, _, _ in _kept)
+        plotted_colors = [color for _, color, _ in _kept]
+        plotted_linestyles = [linestyle for _, _, linestyle in _kept]
+    return plotted_colors, plotted_linestyles, plotted_networks
+
+
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
@@ -642,6 +704,7 @@ def _(
     frequency_mask,
     plot_omega_and_sh,
     spectral_density,
+    write_figures,
 ):
     _fig = plot_omega_and_sh(
         frequencies,
@@ -650,7 +713,8 @@ def _(
         h0=FIDUCIALS["H0"],
         omega_gw_min=OMEGA_GW_MIN,
     )
-    save_figures({BASE_DIR / "omega_and_sh.pdf": _fig}, root=ROOT_DIR)
+    if write_figures:
+        save_figures({BASE_DIR / "omega_and_sh.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
@@ -713,24 +777,26 @@ def _(format_axis_ticks, network_legend_handles):
 @app.cell
 def _(
     BASE_DIR,
-    NETWORKS: tuple[Network, ...],
     ROOT_DIR,
-    detector_colors,
-    detector_linestyles,
     effective_psds: dict[str, jax.Array],
     frequencies,
     frequency_mask,
     plot_effective_psds,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks: tuple[Network, ...],
+    write_figures,
 ):
     _fig = plot_effective_psds(
         frequencies,
-        NETWORKS,
+        plotted_networks,
         effective_psds,
-        colors=detector_colors,
-        linestyles=detector_linestyles,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
         frequency_mask=frequency_mask,
     )
-    save_figures({BASE_DIR / "effective_psds.pdf": _fig}, root=ROOT_DIR)
+    if write_figures:
+        save_figures({BASE_DIR / "effective_psds.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
@@ -838,27 +904,28 @@ def _(format_axis_ticks, network_legend_handles):
 @app.cell
 def _(
     BASE_DIR,
-    NETWORKS: tuple[Network, ...],
     OMEGA_GW_MIN: float | None,
     ROOT_DIR,
-    detector_colors,
-    detector_linestyles,
     fiducial_freq,
     fiducial_omega,
     fiducial_sh,
     frequency_by_network: dict[str, np.ndarray],
     plot_spectrum_and_sensitivities,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks: tuple[Network, ...],
     sh_ymin_matching_omega_floor,
     sigma_by_network: dict[str, np.ndarray],
+    write_figures,
 ):
     _fig = plot_spectrum_and_sensitivities(
         fiducial_freq,
         fiducial_sh,
-        NETWORKS,
+        plotted_networks,
         frequency_by_network,
         sigma_by_network,
-        colors=detector_colors,
-        linestyles=detector_linestyles,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
         spectrum_label=r"$S_h$",
         spectrum_color=SPECTRUM["sh"],
         spectrum_linestyle=SPECTRUM_LINESTYLES["sh"],
@@ -869,7 +936,8 @@ def _(
         include_spectrum_in_legend=False,
         spectrum_legend_loc="upper left",
     )
-    save_figures({BASE_DIR / "sh_and_sigma.pdf": _fig}, root=ROOT_DIR)
+    if write_figures:
+        save_figures({BASE_DIR / "sh_and_sigma.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
@@ -885,25 +953,26 @@ def _():
 @app.cell
 def _(
     BASE_DIR,
-    NETWORKS: tuple[Network, ...],
     OMEGA_GW_MIN: float | None,
     ROOT_DIR,
-    detector_colors,
-    detector_linestyles,
     fiducial_freq,
     fiducial_omega,
     frequency_by_network: dict[str, np.ndarray],
     omega_sigma_by_network: dict[str, np.ndarray],
     plot_spectrum_and_sensitivities,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks: tuple[Network, ...],
+    write_figures,
 ):
     _fig = plot_spectrum_and_sensitivities(
         fiducial_freq,
         fiducial_omega,
-        NETWORKS,
+        plotted_networks,
         frequency_by_network,
         omega_sigma_by_network,
-        colors=detector_colors,
-        linestyles=detector_linestyles,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
         spectrum_label=r"$\Omega_{\mathrm{GW}}$",
         spectrum_color=SPECTRUM["omega_gw"],
         spectrum_linestyle=":",
@@ -912,7 +981,8 @@ def _(
         include_spectrum_in_legend=False,
         spectrum_legend_loc="upper left",
     )
-    save_figures({BASE_DIR / "omega_and_sigma.pdf": _fig}, root=ROOT_DIR)
+    if write_figures:
+        save_figures({BASE_DIR / "omega_and_sigma.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
@@ -1050,22 +1120,24 @@ def _():
 @app.cell
 def _(
     BASE_DIR,
-    NETWORKS: tuple[Network, ...],
     ROOT_DIR,
-    detector_colors,
-    detector_linestyles,
     frequency_by_network: dict[str, np.ndarray],
     plot_snr_integrand,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks: tuple[Network, ...],
     snr_squared_by_network: dict[str, np.ndarray],
+    write_figures,
 ):
     _fig = plot_snr_integrand(
-        NETWORKS,
+        plotted_networks,
         frequency_by_network,
         snr_squared_by_network,
-        colors=detector_colors,
-        linestyles=detector_linestyles,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
     )
-    save_figures({BASE_DIR / "snr_integrand.pdf": _fig}, root=ROOT_DIR)
+    if write_figures:
+        save_figures({BASE_DIR / "snr_integrand.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
@@ -1081,22 +1153,24 @@ def _():
 @app.cell
 def _(
     BASE_DIR,
-    NETWORKS: tuple[Network, ...],
     ROOT_DIR,
-    detector_colors,
-    detector_linestyles,
     frequency_by_network: dict[str, np.ndarray],
     plot_snr_cumulative_below,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks: tuple[Network, ...],
     snr_lt_by_network: dict[str, np.ndarray],
+    write_figures,
 ):
     _fig = plot_snr_cumulative_below(
-        NETWORKS,
+        plotted_networks,
         frequency_by_network,
         snr_lt_by_network,
-        colors=detector_colors,
-        linestyles=detector_linestyles,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
     )
-    save_figures({BASE_DIR / "snr_cumulative_below.pdf": _fig}, root=ROOT_DIR)
+    if write_figures:
+        save_figures({BASE_DIR / "snr_cumulative_below.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
@@ -1112,22 +1186,24 @@ def _():
 @app.cell
 def _(
     BASE_DIR,
-    NETWORKS: tuple[Network, ...],
     ROOT_DIR,
-    detector_colors,
-    detector_linestyles,
     frequency_by_network: dict[str, np.ndarray],
     plot_snr_cumulative_above,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks: tuple[Network, ...],
     snr_gt_by_network: dict[str, np.ndarray],
+    write_figures,
 ):
     _fig = plot_snr_cumulative_above(
-        NETWORKS,
+        plotted_networks,
         frequency_by_network,
         snr_gt_by_network,
-        colors=detector_colors,
-        linestyles=detector_linestyles,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
     )
-    save_figures({BASE_DIR / "snr_cumulative_above.pdf": _fig}, root=ROOT_DIR)
+    if write_figures:
+        save_figures({BASE_DIR / "snr_cumulative_above.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
@@ -1188,13 +1264,13 @@ def _(cumulative_snr_above_at):
 @app.cell
 def _(
     CUMULATIVE_SNR_ABOVE_FMINS_HZ,
-    NETWORKS: tuple[Network, ...],
     build_cumulative_snr_above_table,
     frequency_by_network: dict[str, np.ndarray],
+    plotted_networks: tuple[Network, ...],
     snr_squared_by_network: dict[str, np.ndarray],
 ):
     cumulative_snr_above_table, latex_table = build_cumulative_snr_above_table(
-        NETWORKS,
+        plotted_networks,
         frequency_by_network,
         snr_squared_by_network,
         CUMULATIVE_SNR_ABOVE_FMINS_HZ,
@@ -1204,14 +1280,15 @@ def _(
 
 
 @app.cell
-def _(BASE_DIR, latex_table):
-    BASE_DIR.mkdir(parents=True, exist_ok=True)
-    _cumulative_snr_above_tex_path = BASE_DIR / "cumulative_snr_above.tex"
-    _cumulative_snr_above_tex_path.write_text(
-        latex_table,
-        encoding="utf-8",
-    )
-    print("saved:", _cumulative_snr_above_tex_path)
+def _(BASE_DIR, latex_table, write_figures):
+    if write_figures:
+        BASE_DIR.mkdir(parents=True, exist_ok=True)
+        _cumulative_snr_above_tex_path = BASE_DIR / "cumulative_snr_above.tex"
+        _cumulative_snr_above_tex_path.write_text(
+            latex_table,
+            encoding="utf-8",
+        )
+        print("saved:", _cumulative_snr_above_tex_path)
     return
 
 
