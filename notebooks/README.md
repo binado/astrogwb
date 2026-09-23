@@ -58,9 +58,10 @@ an intermediate assembled-config artifact, so they run against a fresh clone.
 it reads the shared tables directly — `config/fiducials.json` and
 `config/networks.json` through `astrogwb.paper.config`, and the ordered network
 legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS` — rather than merging a
-run's layers. Its analysis grid and local plotting choices stay hand-written in
-its configuration cell, so edits to `config/analysis/base/model.toml` should be
-mirrored there by hand.
+run's layers. Its analysis window (`observation_time`, the frequency band, and
+the redshift bounds) and local plotting choices stay hand-written in its
+configuration cell, mirroring `config/analysis.json`. Editing that file does
+not update the notebook; mirror the change there by hand.
 
 For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:
