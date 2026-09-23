@@ -46,8 +46,9 @@ repository root as the working directory.
 - **`mcmc_plotting.py`** — load saved chains and produce diagnostic and corner
   plots
 - **`logposterior_grid.py`** — evaluate the log-posterior on a parameter grid
-- **`fiducial_spectrum.py`** — fiducial injection $S_h$ / $\Omega_{\mathrm{GW}}$,
-  network $S_{\mathrm{eff}}$, $\sigma$, and per-network SNR
+- **`fiducial_spectrum.py`** — one seeded forward-model draw of the fiducial
+  $S_h$ / $\Omega_{\mathrm{GW}}$, network $S_{\mathrm{eff}}$, $\sigma$, and
+  per-network SNR. No catalog file.
 
 The paper notebooks merge a run's config layers with
 `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
@@ -58,10 +59,12 @@ an intermediate assembled-config artifact, so they run against a fresh clone.
 it reads the shared tables directly — `config/fiducials.json` and
 `config/networks.json` through `astrogwb.paper.config`, and the ordered network
 legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS` — rather than merging a
-run's layers. Its analysis window (`observation_time`, the frequency band, and
-the redshift bounds) and local plotting choices stay hand-written in its
-configuration cell, mirroring `config/analysis.json`. Editing that file does
-not update the notebook; mirror the change there by hand.
+run's layers. Its $S_h$ is one seeded draw of `gwb_forward_model`, built from
+`config/population.json` and `config/waveform.json`, so it does not need a file
+under `outputs/catalogs/`. Its analysis window (`observation_time`, the frequency
+band, and the redshift bounds), the draw seed, and local plotting choices stay
+hand-written in its configuration cell, mirroring `config/analysis.json`.
+Editing that file does not update the notebook; mirror the change there by hand.
 
 For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:

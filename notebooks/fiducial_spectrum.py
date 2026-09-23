@@ -22,8 +22,8 @@
 # - the strain power $S_h(f)$ and energy-density spectrum
 #   $\Omega_{\mathrm{GW}}(f)$ on dual $y$-axes;
 # - each network's effective noise PSD $S_{\mathrm{eff}}(f)$;
-# - $S_h(f)$ against the per-bin Gaussian scale $\sigma$ of the three ET-only
-#   networks (no Cosmic Explorer);
+# - $S_h(f)$ against the per-bin Gaussian scale $\sigma$ of every network
+#   (solid ET, dashed ET+CE);
 # - $\Omega_{\mathrm{GW}}(f)$ against the same $\sigma$ converted through the
 #   $f^3$ map that takes $S_h$ to $\Omega_{\mathrm{GW}}$;
 # - the matched-filter integrand $\Delta\mathrm{SNR}^{2}(f)$ and the
@@ -36,18 +36,19 @@
 #   for every network, exported to LaTeX under
 #   `FIGURES_DIR/fiducial_spectrum/cumulative_snr_above.tex`.
 #
-# Point `INJECTION_CATALOG_PATH` at the injection catalog used by `mcmc.py`.
-# The fiducials and detector networks the overlays follow are read from
+# The fiducial $S_h$ is one draw of `gwb_forward_model` at `seed`. The
+# fiducials and detector networks the overlays follow are read from
 # `config/fiducials.json` and `config/networks.json` through
 # `astrogwb.paper.config`. The analysis window -- observation time, frequency
-# band, and redshift bounds -- is the notebook's own knob, written out in the
-# configuration cell below.
+# band, and redshift bounds -- and that seed are the notebook's own knobs,
+# written out in the configuration cell below.
 
 # %% [markdown]
 # ## Imports and JAX configuration
 
 # %%
 from collections.abc import Mapping, Sequence
+from functools import partial
 from pathlib import Path
 
 import jax
@@ -60,16 +61,22 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.projections import register_projection
 from matplotlib.ticker import LogFormatterMathtext, ScalarFormatter
+from numpyro.infer import Predictive
 
 from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
+from astrogwb.frequency import frequency_mask as make_frequency_mask
+from astrogwb.frequency import uniform_grid_spacing
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
     spectral_snr_squared_per_bin,
 )
-from astrogwb.paper.catalogs import load_run_catalog
-from astrogwb.paper.config import fiducials, networks
+from astrogwb.paper.config import (
+    fiducials,
+    networks,
+    population_model,
+    waveform_generator,
+)
 from astrogwb.paper.config.runs import FIGURES_DIR
-from astrogwb.paper.inference import prepare_observation
 from astrogwb.paper.plotting import (
     DETECTOR_COMPARISON_LEGEND,
     DETECTOR_NETWORKS,
@@ -80,6 +87,7 @@ from astrogwb.paper.plotting import (
     save_figures,
     use_paper_style,
 )
+from astrogwb.sampling import gwb_forward_model, validate_source_model
 from astrogwb.utils import years_to_seconds
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes. Restore
@@ -100,30 +108,32 @@ use_paper_style(root=ROOT_DIR)
 # %% [markdown]
 # ## Pipeline configuration
 #
-# The injection catalog is the observed SGWB. `FIDUCIALS` and `NETWORKS` are
-# read from `config/fiducials.json` and `config/networks.json` through
-# `astrogwb.paper.config` -- the same tables every committed run merges and the
-# figure scripts read -- so this notebook cannot drift from what the runs
-# sample. The analysis window (observation time, frequency band, and redshift
-# bounds) and the plotting choices stay this notebook's own knobs, written out
-# literally.
+# The observed SGWB is one Poisson draw of `gwb_forward_model` at `seed`.
+# `FIDUCIALS` and `NETWORKS` are read from `config/fiducials.json` and
+# `config/networks.json` through `astrogwb.paper.config` -- the same tables
+# every committed run merges and the figure scripts read -- so this notebook
+# cannot drift from what the runs sample. The analysis window (observation
+# time, frequency band, and redshift bounds), the draw seed, and the plotting
+# choices stay this notebook's own knobs, written out literally.
 #
 # Those window literals mirror `config/analysis.json`: `observation_time` and
 # the frequency band live on `[analysis]`, and the redshift bounds live in
 # `analysis.population.model_kwargs`. Editing that file does **not** update
 # this notebook; the copy below is hand-maintained. `n_grid` is not restated:
-# `prepare_observation` cuts the catalog by redshift bounds only, and the
-# observed spectrum comes from the catalog's own population.
+# `population_model` keeps it from `config/population.json`. The redshift
+# bounds below override that file's window, so the draw counts sources inside
+# the analysis window. `seed` pins this Poisson draw; it does not reconstruct
+# a stored catalog.
 
 # %%
-INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
 #: Where this notebook's figures go: under the one output root the workflow,
 #: the figure scripts and `config/plotting.json` all agree on.
 BASE_DIR = ROOT_DIR / FIGURES_DIR / "fiducial_spectrum"
 
-# The whole fiducial point, from config/fiducials.json. Only "H0" is read
-# below. `root=` because the accessors resolve paths against the working
-# directory, which is this notebook's own directory under Jupyter.
+# The whole fiducial point, from config/fiducials.json: the hyperparameters
+# the draw is taken at, and the H0 the Omega_GW conversion reads. `root=`
+# because the accessors resolve paths against the working directory, which is
+# this notebook's own directory under Jupyter.
 FIDUCIALS = fiducials(root=ROOT_DIR)
 
 # Mirrors config/analysis.json. observation_time and the frequency band are
@@ -133,6 +143,12 @@ minimum_frequency = 2.0
 maximum_frequency = 2048.0
 minimum_redshift = 0.3
 maximum_redshift = 20.0
+
+# One Poisson draw. batch_size chunks the waveform sum; n_max_sigma sizes the
+# static event plate a Poisson tail above the mean count.
+seed = 41
+batch_size = 128
+n_max_sigma = 5.0
 
 # Ordered legend from astrogwb.paper.plotting.DETECTOR_NETWORKS -- a network's
 # label lives there because nothing reads it without the order it sits in --
@@ -145,9 +161,6 @@ NETWORKS: tuple[Network, ...] = tuple(
     Network(name, label, NETWORK_DETECTORS[name]) for name, label in DETECTOR_NETWORKS
 )
 REFERENCE_NETWORK = "ET-2L-aligned-CE-Hanford"
-ET_ONLY_NETWORKS: tuple[Network, ...] = tuple(
-    network for network in NETWORKS if not network.name.endswith("-CE-Hanford")
-)
 
 OMEGA_GW_MIN = 1.0e-13
 CUMULATIVE_SNR_ABOVE_FMINS_HZ = (2.0, 5.0, 10.0, 20.0)
@@ -362,31 +375,66 @@ def _draw_omega_and_sh(
 
 
 # %% [markdown]
-# ## Loading the waveform catalog
+# ## Simulating the fiducial spectrum
 #
-# `prepare_observation` builds the fiducial $S_h$ from the injection catalog
-# over the analysis window above; each compared network then gets its own
-# $S_{\mathrm{eff}}$ from the detector list `NETWORKS` resolved. The ET-only
+# `gwb_forward_model` draws one Poisson realization of the fiducial $S_h$
+# over the analysis window above. The population and waveform come from
+# `config/population.json` and `config/waveform.json`, with the redshift
+# bounds overridden here. Each compared network then gets its own
+# $S_{\mathrm{eff}}$ from the detector list `NETWORKS` resolved. The
 # overlays use $\sigma = S_{\mathrm{eff}}/\sqrt{2 T \Delta f}$ on that same
 # band, and $\sigma_\Omega$ is the $f^3$ conversion of $\sigma$.
 
 # %%
-catalog = load_run_catalog(INJECTION_CATALOG_PATH, label="injection")
-observation = prepare_observation(
-    catalog,
+population = population_model(
+    root=ROOT_DIR,
     minimum_redshift=minimum_redshift,
     maximum_redshift=maximum_redshift,
-    minimum_frequency=minimum_frequency,
-    maximum_frequency=maximum_frequency,
 )
-frequencies = observation.frequencies
-frequency_mask = observation.frequency_mask
+merger_rate_fn = population.merger_rate_fn
+if merger_rate_fn is None:
+    raise ValueError("configured population cannot simulate event counts")
+
+generator = waveform_generator(root=ROOT_DIR)
+validate_source_model(
+    FIDUCIALS,
+    source_model=population.source_model,
+    generator=generator,
+    rng_key=jax.random.key(seed),
+)
+
+rate = float(jnp.asarray(merger_rate_fn(FIDUCIALS)))
+mean_count = rate * years_to_seconds(observation_time)
+max_events = max(int(np.ceil(mean_count + n_max_sigma * np.sqrt(mean_count))), 1)
+predictive = Predictive(
+    partial(
+        gwb_forward_model,
+        source_model=population.source_model,
+        merger_rate_fn=merger_rate_fn,
+        generator=generator,
+        observation_time=observation_time,
+        batch_size=batch_size,
+        max_events=max_events,
+    ),
+    num_samples=1,
+    return_sites=("spectral_density", "n_events", "total_merger_rate"),
+)
+draw = predictive(jax.random.key(seed), FIDUCIALS)
+spectral_density = jnp.asarray(draw["spectral_density"][0])
+n_events = int(np.asarray(draw["n_events"]).reshape(-1)[0])
+
+frequencies = jnp.asarray(generator.frequencies)
+df = uniform_grid_spacing(frequencies)
+frequency_mask = make_frequency_mask(
+    frequencies,
+    fmin=minimum_frequency,
+    fmax=maximum_frequency,
+)
 
 reference_network = next(
     network for network in NETWORKS if network.name == REFERENCE_NETWORK
 )
 detector_colors, detector_linestyles = detector_network_styles(NETWORKS)
-et_only_colors, et_only_linestyles = detector_network_styles(ET_ONLY_NETWORKS)
 
 effective_psds: dict[str, jax.Array] = {}
 for network in NETWORKS:
@@ -406,7 +454,7 @@ reference_band: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None = N
 for network in NETWORKS:
     band_freq, band_omega, band_sh, band_seff = band_limited_spectrum(
         frequencies,
-        observation.spectral_density,
+        spectral_density,
         frequency_mask,
         h0=FIDUCIALS["H0"],
         effective_psd_arr=effective_psds[network.name],
@@ -417,11 +465,9 @@ for network in NETWORKS:
         band_sh,
         band_seff,
         observation_time_sec,
-        observation.df,
+        df,
     )
-    sigma = np.asarray(
-        gaussian_bin_scale(jnp.asarray(band_seff), observation_time, observation.df)
-    )
+    sigma = np.asarray(gaussian_bin_scale(jnp.asarray(band_seff), observation_time, df))
     frequency_by_network[network.name] = band_freq
     snr_squared_by_network[network.name] = snr_squared
     snr_lt_by_network[network.name] = snr_lt
@@ -441,11 +487,14 @@ if reference_band is None:
 freq, omega, sh, _ = reference_band
 fiducial_freq, fiducial_omega, fiducial_sh, _ = band_limited_spectrum(
     frequencies,
-    observation.spectral_density,
+    spectral_density,
     frequency_mask,
     h0=FIDUCIALS["H0"],
 )
-print(f"loaded injection: n_frequency_bins={frequencies.shape[0]}")
+print(
+    f"simulated spectrum: n_frequency_bins={frequencies.shape[0]} "
+    f"n_events={n_events} max_events={max_events}"
+)
 print("band bins:", int(np.sum(np.asarray(frequency_mask))), "of", frequencies.shape[0])
 print("reference network:", reference_network.label)
 
@@ -453,7 +502,7 @@ print("reference network:", reference_network.label)
 # %% [markdown]
 # ## Fiducial $S_h$ and $\Omega_{\mathrm{GW}}$
 #
-# Dual $y$-axes for the injection catalog's spectral density. The $S_h$ floor
+# Dual $y$-axes for the simulated spectral density. The $S_h$ floor
 # is taken from the bin whose $\Omega_{\mathrm{GW}}$ is closest to
 # `OMEGA_GW_MIN`, so both axes show the same frequency band.
 
@@ -488,7 +537,7 @@ def plot_omega_and_sh(
 # %%
 fig = plot_omega_and_sh(
     frequencies,
-    observation.spectral_density,
+    spectral_density,
     frequency_mask,
     h0=FIDUCIALS["H0"],
     omega_gw_min=OMEGA_GW_MIN,
@@ -557,12 +606,12 @@ _ = save_figures({BASE_DIR / "effective_psds.pdf": fig}, root=ROOT_DIR)
 
 
 # %% [markdown]
-# ## $S_h$ and ET-only $\sigma$
+# ## $S_h$ and $\sigma$
 #
 # The fiducial $S_h$ against $\sigma = S_{\mathrm{eff}} / \sqrt{2 T \Delta f}$
-# for the three ET-only networks. $\sigma$ is the per-bin Gaussian scale of
-# $S_h$, so it shares units and observation-time scaling. Colors follow
-# `detector_network_styles`; labels sit above the axes.
+# for every network. $\sigma$ is the per-bin Gaussian scale of $S_h$, so it
+# shares units and observation-time scaling. Colors follow
+# `detector_network_styles` (solid ET, dashed ET+CE); labels sit above the axes.
 
 
 # %%
@@ -650,11 +699,11 @@ def plot_spectrum_and_sensitivities(
 fig = plot_spectrum_and_sensitivities(
     fiducial_freq,
     fiducial_sh,
-    ET_ONLY_NETWORKS,
+    NETWORKS,
     frequency_by_network,
     sigma_by_network,
-    colors=et_only_colors,
-    linestyles=et_only_linestyles,
+    colors=detector_colors,
+    linestyles=detector_linestyles,
     spectrum_label=r"$S_h$",
     spectrum_color=SPECTRUM["sh"],
     spectrum_linestyle=SPECTRUM_LINESTYLES["sh"],
@@ -667,21 +716,21 @@ _ = save_figures({BASE_DIR / "sh_and_sigma.pdf": fig}, root=ROOT_DIR)
 
 
 # %% [markdown]
-# ## $\Omega_{\mathrm{GW}}$ and ET-only $\sigma_\Omega$
+# ## $\Omega_{\mathrm{GW}}$ and $\sigma_\Omega$
 #
-# The same comparison in energy-density units: each $\sigma$ is converted with
-# `omega_gw_from_spectral_density`, the $f^3$ map that takes $S_h$ to
-# $\Omega_{\mathrm{GW}}$.
+# The same comparison in energy-density units, for every network: each
+# $\sigma$ is converted with `omega_gw_from_spectral_density`, the $f^3$ map
+# that takes $S_h$ to $\Omega_{\mathrm{GW}}$.
 
 # %%
 fig = plot_spectrum_and_sensitivities(
     fiducial_freq,
     fiducial_omega,
-    ET_ONLY_NETWORKS,
+    NETWORKS,
     frequency_by_network,
     omega_sigma_by_network,
-    colors=et_only_colors,
-    linestyles=et_only_linestyles,
+    colors=detector_colors,
+    linestyles=detector_linestyles,
     spectrum_label=r"$\Omega_{\mathrm{GW}}$",
     spectrum_color=SPECTRUM["omega_gw"],
     spectrum_linestyle=":",
