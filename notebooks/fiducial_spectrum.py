@@ -141,7 +141,7 @@ FIDUCIALS = fiducials(root=ROOT_DIR)
 observation_time = 1.0
 minimum_frequency = 2.0
 maximum_frequency = 2048.0
-minimum_redshift = 0.3
+minimum_redshift = 0.35
 maximum_redshift = 20.0
 
 # One Poisson draw. batch_size chunks the waveform sum; n_max_sigma sizes the
