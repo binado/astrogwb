@@ -162,7 +162,7 @@ NETWORKS: tuple[Network, ...] = tuple(
 )
 REFERENCE_NETWORK = "ET-2L-aligned-CE-Hanford"
 
-OMEGA_GW_MIN = 1.0e-13
+OMEGA_GW_MIN: float | None = 1.0e-13
 CUMULATIVE_SNR_ABOVE_FMINS_HZ = (2.0, 5.0, 10.0, 20.0)
 
 # Cumulative-SNR curves on the stacked figure: Okabe-Ito blue / vermillion,
@@ -184,9 +184,15 @@ SNR_GT_LINESTYLE = "--"
 def sh_ymin_matching_omega_floor(
     omega_gw: np.ndarray,
     spectral_density_arr: np.ndarray,
-    omega_gw_min: float,
-) -> float:
-    """Infer $S_h$ ymin from the frequency where $\\Omega_{\\mathrm{GW}}$ hits its floor."""
+    omega_gw_min: float | None = None,
+) -> float | None:
+    """Infer $S_h$ ymin from the frequency where $\\Omega_{\\mathrm{GW}}$ hits its floor.
+
+    Defaults to ``None``, which means no floor: the caller should leave the
+    axis autoscaled.
+    """
+    if omega_gw_min is None:
+        return None
     if omega_gw_min <= 0.0:
         raise ValueError(f"omega_gw_min must be positive, got {omega_gw_min}")
     if omega_gw.size == 0:
@@ -310,7 +316,7 @@ def _draw_omega_and_sh(
     omega_gw: np.ndarray,
     spectral_density: np.ndarray,
     *,
-    omega_gw_min: float,
+    omega_gw_min: float | None = None,
     ax_omega: MplAxes | None = None,
     omega_color: str | None = None,
     sh_color: str | None = None,
@@ -319,7 +325,11 @@ def _draw_omega_and_sh(
     xlabel: bool = True,
     legend: bool = True,
 ) -> tuple[MplAxes, Line2D, Line2D]:
-    """Draw dual-axis $S_h$ / $\\Omega_{\\mathrm{GW}}$ onto ``ax_sh``."""
+    """Draw dual-axis $S_h$ / $\\Omega_{\\mathrm{GW}}$ onto ``ax_sh``.
+
+    A numeric ``omega_gw_min`` pins both y-axes to that floor. The default
+    ``None`` leaves them autoscaled.
+    """
     axis_color = "k"
     omega_color, sh_color, omega_linestyle, sh_linestyle = _spectrum_line_styles(
         omega_color=omega_color,
@@ -355,10 +365,11 @@ def _draw_omega_and_sh(
     for axis in (ax_sh, ax_omega):
         for spine in axis.spines.values():
             spine.set_color(axis_color)
-    sh_ymin = sh_ymin_matching_omega_floor(omega_gw, spectral_density, omega_gw_min)
-    _, ymax = ax_sh.get_ylim()
-    ax_sh.set_ylim(sh_ymin, ymax)
-    ax_omega.set_ylim(omega_gw_min, None)
+    if omega_gw_min is not None:
+        sh_ymin = sh_ymin_matching_omega_floor(omega_gw, spectral_density, omega_gw_min)
+        _, ymax = ax_sh.get_ylim()
+        ax_sh.set_ylim(sh_ymin, ymax)
+        ax_omega.set_ylim(omega_gw_min, None)
     ax_sh.set_axisbelow(True)
     ax_sh.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
     ax_omega.grid(False)
@@ -502,9 +513,8 @@ print("reference network:", reference_network.label)
 # %% [markdown]
 # ## Fiducial $S_h$ and $\Omega_{\mathrm{GW}}$
 #
-# Dual $y$-axes for the simulated spectral density. The $S_h$ floor
-# is taken from the bin whose $\Omega_{\mathrm{GW}}$ is closest to
-# `OMEGA_GW_MIN`, so both axes show the same frequency band.
+# Dual $y$-axes for the simulated spectral density. A numeric `OMEGA_GW_MIN`
+# pins both axes to that floor; `None` leaves them autoscaled.
 
 
 # %%
@@ -514,9 +524,12 @@ def plot_omega_and_sh(
     frequency_mask: jax.Array,
     *,
     h0: float,
-    omega_gw_min: float,
+    omega_gw_min: float | None = None,
 ) -> Figure:
-    """Plot $\\Omega_{\\mathrm{GW}}(f)$ and $S_h(f)$ on dual $y$-axes."""
+    """Plot $\\Omega_{\\mathrm{GW}}(f)$ and $S_h(f)$ on dual $y$-axes.
+
+    ``omega_gw_min`` defaults to ``None``, which leaves both axes autoscaled.
+    """
     freq, omega, sh, _ = band_limited_spectrum(
         frequencies,
         spectral_density_arr,
@@ -984,9 +997,13 @@ def plot_spectrum_and_cumulative_snr(
     snr_lt: np.ndarray,
     snr_gt: np.ndarray,
     *,
-    omega_gw_min: float,
+    omega_gw_min: float | None = None,
 ) -> Figure:
-    """Stack $S_h$ / $\\Omega_{\\mathrm{GW}}$ above both cumulative SNR curves."""
+    """Stack $S_h$ / $\\Omega_{\\mathrm{GW}}$ above both cumulative SNR curves.
+
+    ``omega_gw_min`` defaults to ``None``, which leaves both spectrum axes
+    autoscaled.
+    """
     fig, (ax_sh, ax_snr) = plt.subplots(
         2, 1, sharex=True, gridspec_kw={"height_ratios": [1.2, 1.0]}
     )
