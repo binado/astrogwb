@@ -2,7 +2,7 @@
   "population": {
     "model_name": "bns_md_cosmological",
     "model_kwargs": {
-      "minimum_redshift": 0.0,
+      "minimum_redshift": 0.35,
       "maximum_redshift": 20.0,
       "n_grid": 4096
     }
