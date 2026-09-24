@@ -1122,6 +1122,7 @@ def _(
         omega_sensitivities_by_network: Mapping[str, np.ndarray],
         snr_density_by_network: Mapping[str, np.ndarray],
         *,
+        observation_time: float,
         colors: Sequence[str],
         linestyles: Sequence[str],
         omega_gw_min: float | None = None,
@@ -1132,8 +1133,9 @@ def _(
         The squared gap between the spectrum and a network's curve in the top
         panel is that network's $d\\mathrm{SNR}^2/d\\ln f$ in the bottom one,
         so the shared frequency axis lines the comparison up with where the
-        SNR accrues. ``snr_density_by_network`` is drawn as given; pass it
-        normalized to compare shapes rather than amplitudes.
+        SNR accrues. The density is absolute, so each curve's area is its
+        network's $\\mathrm{SNR}^2$ at ``observation_time`` (years), which
+        the bottom panel states.
         """
         width, height = plt.rcParams["figure.figsize"]
         _fig, (ax_top, ax_bottom) = plt.subplots(
@@ -1169,11 +1171,16 @@ def _(
             snr_density_by_network,
             colors=colors,
             linestyles=linestyles,
-            ylabel=(
-                r"$\mathrm{SNR}_{\mathrm{tot}}^{-2}\,"
-                r"d\mathrm{SNR}^{2}/d\ln f$"
-            ),
+            ylabel=r"$d\mathrm{SNR}^{2}/d\ln f$",
             legend=False,
+        )
+        ax_bottom.text(
+            0.98,
+            0.92,
+            rf"$T = {observation_time:g}\ \mathrm{{yr}}$",
+            transform=ax_bottom.transAxes,
+            ha="right",
+            va="top",
         )
         # The bottom panel's semilogx reset the shared x formatter.
         format_axis_ticks(ax_top)
@@ -1301,10 +1308,10 @@ def _():
     ### Network sensitivity and SNR density, stacked
 
     The paper figure: $\Omega_{\mathrm{GW}}$ against each network's
-    $\sigma_{\ln f}$ on top, and below it $d\mathrm{SNR}^2/d\ln f$ normalized
-    by each network's $\mathrm{SNR}^2_{\mathrm{tot}}$, so every curve has unit
-    area in $\ln f$ and the panel compares where the SNR accrues rather than
-    how much there is. Absolute SNRs are in the table below.
+    $\sigma_{\ln f}$ on top, and below it $d\mathrm{SNR}^2/d\ln f$, whose
+    area in $\ln f$ is each network's $\mathrm{SNR}^2$ at the chosen
+    observation time. The ET geometries share nearly one shape, so the curves
+    separate by amplitude; the dashed +CE curves also extend to 10--30 Hz.
     """)
     return
 
@@ -1318,28 +1325,23 @@ def _(
     fiducial_freq,
     fiducial_omega,
     frequency_by_network: dict[str, np.ndarray],
+    observation_time,
     omega_sigma_ln_f_by_network: dict[str, np.ndarray],
     plot_spectrum_and_snr_density,
     plotted_colors,
     plotted_linestyles,
     plotted_networks,
     snr_density_by_network: dict[str, np.ndarray],
-    snr_squared_by_network: dict[str, np.ndarray],
     write_figures,
 ):
-    # Per-bin terms sum to SNR^2_tot, and density * df / f is the per-bin term,
-    # so each normalized curve integrates to one over ln f on this grid.
-    _normalized_snr_density = {
-        name: density / np.sum(snr_squared_by_network[name])
-        for name, density in snr_density_by_network.items()
-    }
     _fig = plot_spectrum_and_snr_density(
         fiducial_freq,
         fiducial_omega,
         plotted_networks,
         frequency_by_network,
         omega_sigma_ln_f_by_network,
-        _normalized_snr_density,
+        snr_density_by_network,
+        observation_time=observation_time,
         colors=plotted_colors,
         linestyles=plotted_linestyles,
         omega_gw_min=OMEGA_GW_MIN,
