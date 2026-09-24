@@ -2,7 +2,7 @@
 
 Workflows in this directory are stored as plain `.py` files. Most are [Jupytext](https://jupytext.readthedocs.io/) **py:percent** notebooks — a way to represent Jupyter notebooks as Python source instead of `.ipynb` JSON. That keeps diffs readable and lets normal Python tooling (Ruff, `ty`) work on notebook code. The `.py` is the source of truth; `*.ipynb` is gitignored.
 
-[`fiducial_spectrum.py`](fiducial_spectrum.py) is a [marimo](https://docs.marimo.io/) notebook: a plain `.py` file whose cells form a reactive graph.
+[`fiducial_spectrum.py`](fiducial_spectrum.py) and [`fisher_forecast.py`](fisher_forecast.py) are [marimo](https://docs.marimo.io/) notebooks: plain `.py` files whose cells form a reactive graph.
 
 ## Two kinds, one directory
 
@@ -51,13 +51,17 @@ repository root as the working directory.
 - **`fiducial_spectrum.py`** — marimo notebook. One seeded forward-model draw
   of the fiducial $S_h$ / $\Omega_{\mathrm{GW}}$, network $S_{\mathrm{eff}}$,
   $\sigma$, and per-network SNR. No catalog file.
+- **`fisher_forecast.py`** — marimo notebook. Gaussian Fisher forecast of the
+  spectrum likelihood at the committed fiducials, one corner per parameter
+  block, overlaid at several low-frequency cutoffs.
 
-The paper notebooks merge a run's config layers with
-`assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
-merge the workflow performs by passing layer paths on argv. None of them reads
-an intermediate assembled-config artifact, so they run against a fresh clone.
+`mcmc.py`, `mcmc_plotting.py`, and `logposterior_grid.py` merge a run's config
+layers with `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper
+over the same merge the workflow performs by passing layer paths on argv. None
+of them reads an intermediate assembled-config artifact, so they run against a
+fresh clone.
 
-`fiducial_spectrum.py` is the exception: it stands in for no particular run, so
+`fiducial_spectrum.py` stands in for no particular run, so
 it reads the shared tables directly — `config/fiducials.json` and
 `config/networks.json` through `astrogwb.paper.config`, and the ordered network
 legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS` — rather than merging a
@@ -73,6 +77,15 @@ Open it from the repository root:
 ```bash
 uv run --extra notebook --group jupyter marimo edit notebooks/fiducial_spectrum.py
 ```
+
+`fisher_forecast.py` forecasts the Gaussian spectrum likelihood at the
+committed fiducials: one importance-spectrum Jacobian, summed into
+cosmological, modified-propagation, and astrophysical blocks at low-frequency
+cutoffs of 2, 5, 10, and 20 Hz. It reads the band, redshift grid, and catalog
+names from `config/analysis.json` and needs those catalogs on disk
+(`outputs/catalogs/md-imrphenom-s41-n32768.h5` for both the injection and the
+proposal). Open it from the repository root with
+`uv run --extra notebook --group jupyter marimo edit notebooks/fisher_forecast.py`.
 
 For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:
@@ -123,7 +136,7 @@ ASTROGWB_NOTEBOOK_SMOKE=1 just test-notebooks
 
 ## Opening in Jupyter
 
-The percent notebooks open in the classic notebook UI after a conversion to `.ipynb`. `fiducial_spectrum.py` opens in marimo, as above.
+The percent notebooks open in the classic notebook UI after a conversion to `.ipynb`. `fiducial_spectrum.py` and `fisher_forecast.py` open in marimo, as above.
 
 To convert a percent notebook:
 
