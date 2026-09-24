@@ -4,11 +4,12 @@ import jax.numpy as jnp
 import numpy as np
 
 from astrogwb.constants import SECONDS_PER_YEAR
-from astrogwb.detector import gaussian_bin_scale
+from astrogwb.detector import gaussian_bin_scale, log_frequency_noise_scale
 from astrogwb.gwb import (
     spectral_snr,
     spectral_snr_squared,
     spectral_snr_squared_per_bin,
+    spectral_snr_squared_per_log_frequency,
 )
 from astrogwb.utils import years_to_seconds
 
@@ -129,3 +130,37 @@ def test_spectral_snr_is_sqrt_of_spectral_snr_squared() -> None:
     snr_squared = spectral_snr_squared(sd, eff, observation_time_sec, df)
 
     np.testing.assert_allclose(np.asarray(snr), np.sqrt(np.asarray(snr_squared)))
+
+
+def test_snr_per_log_frequency_rescales_per_bin_terms_by_f_over_df() -> None:
+    eff = jnp.array([2.0, 4.0, 6.0])
+    sd = jnp.array([0.1, 0.2, 0.3])
+    freqs = jnp.array([10.0, 20.0, 30.0])
+    observation_time_sec = 5.0
+    df = 10.0
+
+    density = spectral_snr_squared_per_log_frequency(
+        sd, eff, freqs, observation_time_sec
+    )
+    per_bin = spectral_snr_squared_per_bin(sd, eff, observation_time_sec, df)
+
+    np.testing.assert_allclose(np.asarray(density * df / freqs), np.asarray(per_bin))
+    np.testing.assert_allclose(
+        np.asarray(jnp.sum(density * df / freqs)),
+        np.asarray(spectral_snr_squared(sd, eff, observation_time_sec, df)),
+    )
+
+
+def test_snr_per_log_frequency_is_squared_ratio_to_log_frequency_scale() -> None:
+    """The sensitivity plot and the SNR-density plot show the same quantity."""
+    eff = jnp.array([2.0, 4.0, 6.0])
+    sd = jnp.array([0.1, 0.2, 0.3])
+    freqs = jnp.array([5.0, 50.0, 500.0])
+    observation_time_yr = 0.5
+
+    scale = log_frequency_noise_scale(eff, freqs, observation_time_yr)
+    density = spectral_snr_squared_per_log_frequency(
+        sd, eff, freqs, years_to_seconds(observation_time_yr)
+    )
+
+    np.testing.assert_allclose(np.asarray(density), np.asarray((sd / scale) ** 2))

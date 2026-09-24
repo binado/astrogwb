@@ -2,7 +2,8 @@
 
 This module owns the detector/network noise model seen by a stochastic
 background search: the inverse-variance network ``effective_psd`` and the
-per-bin Gaussian scale ``σ = S_eff / √(2 T Δf)``. Overlap-reduction geometry
+per-bin Gaussian scale ``σ = S_eff / √(2 T Δf)``, plus its
+grid-independent plotting counterpart ``σ_ln f = S_eff / √(2 T f)``. Overlap-reduction geometry
 stays in ``overlap``; GWB signal spectra stay in ``astrogwb.gwb``.
 """
 
@@ -77,3 +78,35 @@ def gaussian_bin_scale(
     """
     observation_time_sec = years_to_seconds(observation_time)
     return effective_psd / jnp.sqrt(2.0 * observation_time_sec * df)
+
+
+def log_frequency_noise_scale(
+    effective_psd: jax.Array,
+    frequencies: jax.Array,
+    observation_time: float,
+) -> jax.Array:
+    r"""Grid-independent sensitivity curve: the noise scale per e-fold of frequency.
+
+    .. math::
+
+        \sigma_{\ln f}(f) = \frac{S_{\mathrm{eff}}(f)}{\sqrt{2 T f}}
+
+    This is :func:`gaussian_bin_scale` with the bin width replaced by
+    :math:`f`, so it does not move when the frequency grid is refined. It
+    is a *presentation* scale for sensitivity plots, not the likelihood's
+    noise scale: :math:`(S_h/\sigma_{\ln f})^2` is
+    :math:`d\mathrm{SNR}^2/d\ln f`
+    (:func:`astrogwb.gwb.spectral_snr_squared_per_log_frequency`), so the
+    gap between a spectrum and this curve shows where the SNR accrues.
+
+    Parameters
+    ----------
+    effective_psd:
+        Network effective PSD in Hz^-1.
+    frequencies:
+        Frequencies in Hz, aligned with ``effective_psd``.
+    observation_time:
+        Observation time in years. Converted to seconds internally.
+    """
+    observation_time_sec = years_to_seconds(observation_time)
+    return effective_psd / jnp.sqrt(2.0 * observation_time_sec * frequencies)
