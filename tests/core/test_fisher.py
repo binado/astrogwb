@@ -21,94 +21,140 @@ from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import DEFAULT_DENSITY_SITES
 from astrogwb.sampling import (
+    SpectralDensityFn,
     fisher_matrix_per_bin,
     gwb_spectral_density_model,
     spectral_density_jacobian,
 )
 
-FREQUENCIES = jnp.linspace(10.0, 100.0, 7)
-SCALE = 0.1 + 0.01 * FREQUENCIES
-POWER_LAW = {"amplitude": 2.0, "index": 0.7, "offset": 0.3}
+
+@pytest.fixture
+def bin_frequencies() -> jax.Array:
+    """A short grid; named apart from conftest's 128-bin ``frequencies``."""
+    return jnp.linspace(10.0, 100.0, 7)
 
 
-def power_law(
-    params: Mapping[str, ArrayLike],
-) -> tuple[jax.Array, dict[str, jax.Array]]:
-    spectrum = params["amplitude"] * (FREQUENCIES / 10.0) ** params["index"]
-    return jnp.asarray(spectrum + params["offset"]), {}
+@pytest.fixture
+def scale(bin_frequencies: jax.Array) -> jax.Array:
+    return 0.1 + 0.01 * bin_frequencies
 
 
-def test_jacobian_and_fisher_match_the_closed_form() -> None:
+@pytest.fixture
+def power_law_params() -> dict[str, float]:
+    return {"amplitude": 2.0, "index": 0.7, "offset": 0.3}
+
+
+@pytest.fixture
+def power_law(bin_frequencies: jax.Array) -> SpectralDensityFn:
+    def spectrum(
+        params: Mapping[str, ArrayLike],
+    ) -> tuple[jax.Array, dict[str, jax.Array]]:
+        ratio = bin_frequencies / 10.0
+        return jnp.asarray(
+            params["amplitude"] * ratio ** params["index"] + params["offset"]
+        ), {}
+
+    return spectrum
+
+
+def test_jacobian_and_fisher_match_the_closed_form(
+    power_law: SpectralDensityFn,
+    power_law_params: dict[str, float],
+    bin_frequencies: jax.Array,
+    scale: jax.Array,
+) -> None:
     names = ("amplitude", "index")
-    jacobian = spectral_density_jacobian(power_law, POWER_LAW, names)
+    jacobian = spectral_density_jacobian(power_law, power_law_params, names)
 
-    ratio = FREQUENCIES / 10.0
-    expected = jnp.stack([ratio**0.7, 2.0 * ratio**0.7 * jnp.log(ratio)], axis=-1)
+    amplitude, index = power_law_params["amplitude"], power_law_params["index"]
+    ratio = bin_frequencies / 10.0
+    expected = jnp.stack(
+        [ratio**index, amplitude * ratio**index * jnp.log(ratio)], axis=-1
+    )
     np.testing.assert_allclose(jacobian, expected, rtol=1e-12)
 
-    fisher = fisher_matrix_per_bin(power_law, POWER_LAW, names, scale=SCALE)
-    assert fisher.shape == (FREQUENCIES.size, 2, 2)
+    fisher = fisher_matrix_per_bin(power_law, power_law_params, names, scale=scale)
+    assert fisher.shape == (bin_frequencies.size, 2, 2)
     np.testing.assert_allclose(
         fisher,
-        expected[:, :, None] * expected[:, None, :] / SCALE[:, None, None] ** 2,
+        expected[:, :, None] * expected[:, None, :] / scale[:, None, None] ** 2,
         rtol=1e-12,
     )
 
 
-def test_columns_follow_the_requested_order_and_others_stay_fixed() -> None:
-    forward = spectral_density_jacobian(power_law, POWER_LAW, ("amplitude", "index"))
-    reverse = spectral_density_jacobian(power_law, POWER_LAW, ("index", "amplitude"))
+def test_columns_follow_the_requested_order_and_others_stay_fixed(
+    power_law: SpectralDensityFn, power_law_params: dict[str, float]
+) -> None:
+    forward = spectral_density_jacobian(
+        power_law, power_law_params, ("amplitude", "index")
+    )
+    reverse = spectral_density_jacobian(
+        power_law, power_law_params, ("index", "amplitude")
+    )
     np.testing.assert_array_equal(forward, reverse[:, ::-1])
     # An integer fiducial is promoted rather than breaking the derivative.
-    integer = {**POWER_LAW, "amplitude": 2}
+    integer = {**power_law_params, "amplitude": int(power_law_params["amplitude"])}
     np.testing.assert_allclose(
         spectral_density_jacobian(power_law, integer, ("amplitude",)),
         forward[:, :1],
     )
 
 
-def test_an_unknown_parameter_is_rejected() -> None:
+def test_an_unknown_parameter_is_rejected(
+    power_law: SpectralDensityFn, power_law_params: dict[str, float]
+) -> None:
     with pytest.raises(KeyError, match="missing"):
-        spectral_density_jacobian(power_law, POWER_LAW, ("missing",))
+        spectral_density_jacobian(power_law, power_law_params, ("missing",))
 
 
-def test_summed_fisher_is_the_hessian_of_the_model_likelihood() -> None:
+def test_summed_fisher_is_the_hessian_of_the_model_likelihood(
+    power_law: SpectralDensityFn,
+    power_law_params: dict[str, float],
+    scale: jax.Array,
+) -> None:
     names = ("amplitude", "index", "offset")
-    observed, _ = power_law(POWER_LAW)
+    observed, _ = power_law(power_law_params)
     model = partial(
         gwb_spectral_density_model,
         spectral_density_fn=power_law,
         observed_spectral_density=observed,
         priors={},
-        scale=SCALE,
+        scale=scale,
     )
 
     def negative_log_likelihood(free: dict[str, jax.Array]) -> jax.Array:
         # The model samples nothing, so the parameters enter through the spectrum.
         def at_free(
             params: Mapping[str, ArrayLike],
-        ) -> tuple[jax.Array, dict[str, jax.Array]]:
+        ) -> tuple[jax.Array, Mapping[str, ArrayLike]]:
             return power_law(free)
 
         conditioned = partial(model, spectral_density_fn=at_free)
         return -log_density(conditioned, (), {}, {})[0]
 
-    free = {name: jnp.asarray(POWER_LAW[name]) for name in names}
+    free = {name: jnp.asarray(power_law_params[name]) for name in names}
     hessian = jax.hessian(negative_log_likelihood)(free)
     expected = jnp.array([[hessian[a][b] for b in names] for a in names])
 
-    fisher = fisher_matrix_per_bin(power_law, POWER_LAW, names, scale=SCALE)
+    fisher = fisher_matrix_per_bin(power_law, power_law_params, names, scale=scale)
     np.testing.assert_allclose(fisher.sum(axis=0), expected, rtol=1e-10)
 
 
-def test_masked_bins_contribute_zero_even_with_infinite_scale() -> None:
+def test_masked_bins_contribute_zero_even_with_infinite_scale(
+    power_law: SpectralDensityFn,
+    power_law_params: dict[str, float],
+    scale: jax.Array,
+) -> None:
     names = ("amplitude", "index")
-    mask = jnp.arange(FREQUENCIES.size) % 2 == 0
-    scale = jnp.where(mask, SCALE, jnp.inf)
+    mask = jnp.arange(scale.size) % 2 == 0
     masked = fisher_matrix_per_bin(
-        power_law, POWER_LAW, names, scale=scale, frequency_mask=mask
+        power_law,
+        power_law_params,
+        names,
+        scale=jnp.where(mask, scale, jnp.inf),
+        frequency_mask=mask,
     )
-    full = fisher_matrix_per_bin(power_law, POWER_LAW, names, scale=SCALE)
+    full = fisher_matrix_per_bin(power_law, power_law_params, names, scale=scale)
     assert np.all(np.isfinite(masked))
     np.testing.assert_array_equal(masked[~mask], 0.0)
     np.testing.assert_allclose(masked[mask], full[mask], rtol=1e-12)
