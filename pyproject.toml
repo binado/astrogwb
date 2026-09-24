@@ -84,6 +84,7 @@ jupyter = [
     "ipykernel>=7.3.0",
     "jupyter>=1.1.1",
     "jupytext>=1.19",
+    "marimo>=0.24.2",
     "nbconvert>=7.16",
 ]
 dev = [
@@ -138,6 +139,10 @@ extend-select = ["TID"]
 # local wall-clock time on purpose, so the author recognizes their own runs.
 # E402: the Colab bootstrap and configure_runtime must precede JAX imports.
 "notebooks/**/*.py" = ["TID251", "B018", "DTZ005", "E402"]
+# F811: every marimo cell is `def _`, which Pyflakes reads as a redefinition.
+# F401: the setup cell is imports only; later cells are what use those names.
+# PLR1711: marimo writes a bare `return` on cells that export nothing.
+"notebooks/fiducial_spectrum.py" = ["F811", "F401", "PLR1711"]
 
 [tool.ty.src]
 # Most of `scripts/` stays absent because fixture generators can import

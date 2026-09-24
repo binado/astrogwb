@@ -1,5 +1,9 @@
 from ._types import DetectorSpec
-from .effective_psd import effective_psd, gaussian_bin_scale
+from .effective_psd import (
+    effective_psd,
+    gaussian_bin_scale,
+    log_frequency_noise_scale,
+)
 from .geometry import load_detector, resolve_detector
 from .overlap import (
     overlap_reduction_function,
@@ -23,6 +27,7 @@ __all__ = [
     "load_sensitivities_for_network",
     "load_sensitivity",
     "load_sensitivity_map",
+    "log_frequency_noise_scale",
     "overlap_reduction_function",
     "pairwise_overlap_reduction_function",
     "resolve_detector",

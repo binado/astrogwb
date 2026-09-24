@@ -67,9 +67,12 @@ test-notebooks:
     uv run --extra notebook --group jupyter \
         jupytext --to notebook --execute notebooks/catalog_convergence.py
 
-# Convert notebook from py:percent format to .ipynb
+# Convert the py:percent notebooks to .ipynb. fiducial_spectrum.py is marimo.
 convert-notebooks:
-    uv run --group jupyter jupytext --to notebook notebooks/*.py
+    uv run --group jupyter jupytext --to notebook \
+        notebooks/catalog_convergence.py \
+        notebooks/mcmc.py \
+        notebooks/waveform_approximant_spectra.py
 
 # The publishable distribution. `astrogwb.paper` ships inside it but is
 # unimportable without the `paper` extra, whose dependencies stay out of the

@@ -93,6 +93,32 @@ def spectral_snr_squared(
     )
 
 
+def spectral_snr_squared_per_log_frequency(
+    spectral_density: jax.Array,
+    effective_psd: jax.Array,
+    frequencies: jax.Array,
+    observation_time_sec: float | jax.Array,
+) -> jax.Array:
+    r"""SNR density per e-fold of frequency, independent of the grid.
+
+    .. math::
+
+        \frac{d\mathrm{SNR}^2}{d\ln f}
+            = 2 T f \frac{S_h^2}{S_{\mathrm{eff}}^2}
+            = \left(\frac{S_h}{\sigma_{\ln f}}\right)^2
+            = \frac{f_i}{\Delta f}\,\Delta\mathrm{SNR}^2_i,
+
+    with :math:`\sigma_{\ln f}` from
+    :func:`astrogwb.detector.log_frequency_noise_scale` and
+    :math:`\Delta\mathrm{SNR}^2_i` from :func:`spectral_snr_squared_per_bin`.
+    Plotted against :math:`f` with a log x-axis and a linear y-axis, the area
+    under the curve over a band is that band's share of :math:`\mathrm{SNR}^2`.
+    ``frequencies`` broadcasts against the trailing (frequency) axis.
+    """
+    ratio_squared = spectral_density**2 / effective_psd**2
+    return 2.0 * observation_time_sec * frequencies * ratio_squared
+
+
 def spectral_snr(
     spectral_density: jax.Array,
     effective_psd: jax.Array,

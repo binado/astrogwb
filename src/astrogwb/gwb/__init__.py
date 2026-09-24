@@ -12,6 +12,7 @@ from astrogwb.gwb.snr import (
     spectral_snr,
     spectral_snr_squared,
     spectral_snr_squared_per_bin,
+    spectral_snr_squared_per_log_frequency,
 )
 from astrogwb.gwb.spectral import (
     inclination_averaging_factor,
@@ -33,5 +34,6 @@ __all__ = [
     "spectral_snr",
     "spectral_snr_squared",
     "spectral_snr_squared_per_bin",
+    "spectral_snr_squared_per_log_frequency",
     "uniform_prior_mass_moments",
 ]
