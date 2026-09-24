@@ -81,10 +81,14 @@ uv run --extra notebook --group jupyter marimo edit notebooks/fiducial_spectrum.
 `fisher_forecast.py` forecasts the Gaussian spectrum likelihood at the
 committed fiducials: one importance-spectrum Jacobian, summed into
 cosmological, modified-propagation, and astrophysical blocks at low-frequency
-cutoffs of 2, 5, 10, and 20 Hz. It reads the band, redshift grid, and catalog
-names from `config/analysis.json` and needs those catalogs on disk
-(`outputs/catalogs/md-imrphenom-s41-n32768.h5` for both the injection and the
-proposal). Open it from the repository root with
+cutoffs of 2, 5, 10, and 20 Hz. Gaussian priors from `priors()`
+(`config/priors.json`) are added on the $\Omega_m$, $n$ (`xi_n`), and
+$\gamma$ diagonals before each block is inverted; a slider sets how many
+standard deviations the constructed `xi_n` and `gamma` widths span, and
+$\Omega_m$ keeps the production Normal scale. It reads the band, redshift
+grid, and catalog names from `config/analysis.json` and needs those catalogs
+on disk (`outputs/catalogs/md-imrphenom-s41-n32768.h5` for both the injection
+and the proposal). Open it from the repository root with
 `uv run --extra notebook --group jupyter marimo edit notebooks/fisher_forecast.py`.
 
 For the shared scientific values on their own, without standing in for a

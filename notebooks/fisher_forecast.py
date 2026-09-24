@@ -18,10 +18,10 @@ with app.setup(hide_code=True):
     from matplotlib.figure import Figure
     from matplotlib.lines import Line2D
     from matplotlib.projections import register_projection
-    from numpyro.distributions import MultivariateNormal
+    from numpyro.distributions import MultivariateNormal, Normal, Uniform
 
     from astrogwb.paper.catalogs import load_run_catalog
-    from astrogwb.paper.config import fiducials, networks
+    from astrogwb.paper.config import fiducials, networks, priors
     from astrogwb.paper.config.runs import ANALYSIS_PATH, CATALOGS_ROOT
     from astrogwb.paper.inference import prepare_inference_inputs
     from astrogwb.paper.plotting import (
@@ -58,6 +58,13 @@ def _():
     before the inversion. Low-frequency cutoffs of 2, 5, 10, and 20 Hz sum
     the bins `model_kwargs(fmin=...)` keeps. The 2 Hz cutoff is the full
     analysis band.
+
+    Three Gaussian priors, centered at the fiducial, add $1/\sigma^2$ to a
+    diagonal inside the block that contains the parameter. The posterior mean
+    stays at the fiducial. $\Omega_m$ uses the production Normal scale. $n$
+    (`xi_n`) and $\gamma$ take their widths from the production Uniform, in
+    units of the standard-deviation slider. The slider does not rerun the
+    Jacobian.
     """)
     return
 
@@ -271,8 +278,9 @@ def _():
     mo.md(r"""
     ## Blocks and cutoffs
 
-    For each block and each cutoff the cell prints the condition number of
-    the summed block, then inverts it. A covariance that is singular, not
+    For each block and each cutoff the cell adds that block's prior precision,
+    prints the condition number of the result together with the $\sigma$ and
+    $1/\sigma^2$ it used, then inverts. A covariance that is singular, not
     finite, or rejected by `MultivariateNormal` is reported and left out of
     the corner. Contours are about 20,000 draws at the fiducial mean.
     `plot_datapoints` is off: four sample clouds would hide the ellipses.
@@ -305,6 +313,8 @@ def _(CUTOFFS_HZ, inputs, per_bin_fisher):
             dtype=float,
         )
         band_fishers[_cutoff] = (int(_mask.sum()), _total)
+    # Likelihood information only. The standard-deviation slider adds prior
+    # precision later, inside each block, and must not recompute this sum.
     return (band_fishers,)
 
 
@@ -350,20 +360,59 @@ def _(
         key = jax.random.fold_in(jax.random.key(0), round(cutoff))
         return np.asarray(distribution.sample(key, sample_shape=(N_CORNER_SAMPLES,)))
 
+    def _format_priors(
+        names: tuple[str, ...], prior_sigmas: Mapping[str, float]
+    ) -> str:
+        parts: list[str] = []
+        for name in names:
+            sigma = prior_sigmas.get(name)
+            if sigma is None:
+                continue
+            precision = 1.0 / float(sigma) ** 2
+            parts.append(f"{name} sigma={float(sigma):.6g}, 1/sigma**2={precision:.6g}")
+        if not parts:
+            return "no Gaussian prior"
+        return "; ".join(parts)
+
+    def _with_prior(
+        block: np.ndarray,
+        names: tuple[str, ...],
+        prior_sigmas: Mapping[str, float],
+    ) -> np.ndarray:
+        """Add 1/sigma**2 on this block's prior diagonals.
+
+        The prior is centered at the fiducial, so the posterior mean stays
+        there. Parameters outside ``names`` are untouched: a prior is applied
+        only inside the block that contains it.
+        """
+        updated = np.array(block, dtype=float, copy=True)
+        for offset, name in enumerate(names):
+            sigma = prior_sigmas.get(name)
+            if sigma is None:
+                continue
+            updated[offset, offset] += 1.0 / float(sigma) ** 2
+        return updated
+
     def _forecasts(
         title: str,
         names: tuple[str, ...],
         band_fishers: Mapping[float, tuple[int, np.ndarray]],
+        prior_sigmas: Mapping[str, float],
     ) -> dict[float, BlockForecast]:
         index = tuple(FREE_PARAMETERS.index(name) for name in names)
+        prior_note = _format_priors(names, prior_sigmas)
         forecasts: dict[float, BlockForecast] = {}
         for cutoff in CUTOFFS_HZ:
             n_bins, total = band_fishers[cutoff]
-            block = np.asarray(total[np.ix_(index, index)], dtype=float)
+            block = _with_prior(
+                np.asarray(total[np.ix_(index, index)], dtype=float),
+                names,
+                prior_sigmas,
+            )
             condition = float(np.linalg.cond(block))
             print(
                 f"{title} ({', '.join(names)}) at {cutoff:g} Hz: "
-                f"{n_bins} bins, condition number {condition:.6g}"
+                f"{n_bins} bins, condition number {condition:.6g}; {prior_note}"
             )
             if not np.isfinite(condition):
                 print(
@@ -456,25 +505,32 @@ def _(
         title: str,
         names: tuple[str, ...],
         band_fishers: Mapping[float, tuple[int, np.ndarray]],
+        prior_sigmas: Mapping[str, float],
     ) -> mo.Html:
-        forecasts = _forecasts(title, names, band_fishers)
-        condition = pd.DataFrame(
-            [
-                {
-                    "cutoff": f"{cutoff:g} Hz",
-                    "bins": result.n_bins,
-                    "condition number": result.condition_number,
-                    "status": "usable" if result.failure is None else result.failure,
-                }
-                for cutoff, result in forecasts.items()
-            ]
-        ).set_index("cutoff")
+        forecasts = _forecasts(title, names, band_fishers, prior_sigmas)
+        condition_rows: list[dict[str, float | str]] = []
+        for cutoff, result in forecasts.items():
+            row: dict[str, float | str] = {
+                "cutoff": f"{cutoff:g} Hz",
+                "bins": result.n_bins,
+                "condition number": result.condition_number,
+            }
+            for name in names:
+                sigma = prior_sigmas.get(name)
+                if sigma is None:
+                    continue
+                row[f"{name} sigma"] = float(sigma)
+                row[f"{name} 1/sigma**2"] = 1.0 / float(sigma) ** 2
+            row["status"] = "usable" if result.failure is None else result.failure
+            condition_rows.append(row)
+        condition = pd.DataFrame(condition_rows).set_index("cutoff")
         pieces: list[object] = [
             mo.md(f"### {title}"),
             condition,
             mo.md(
-                r"Marginal standard deviation $\sqrt{\mathrm{diag}(C)}$, "
-                r"with every parameter outside the block held at its fiducial."
+                r"Marginal standard deviation $\sqrt{\mathrm{diag}(C)}$ of the "
+                r"likelihood plus the Gaussian prior, with every parameter "
+                r"outside the block held at its fiducial."
             ),
             _sigma_table(names, forecasts),
         ]
@@ -488,25 +544,125 @@ def _(
     return (render_block,)
 
 
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Gaussian priors
+
+    Each prior is a Gaussian centered at the fiducial. Its Fisher contribution
+    is $1/\sigma^2$ on that parameter's diagonal, and only inside the block
+    that contains the parameter. The mean of the forecast stays at the
+    fiducial.
+
+    The widths come from `priors()` (`config/priors.json`):
+
+    - $\Omega_m$ uses the production Normal scale as $\sigma$. The slider
+      does not rescale it.
+    - $n$ (`xi_n`) uses $\sigma = (n_{\mathrm{fid}} - \mathrm{low}) / N_{\sigma}$,
+      where $\mathrm{low}$ is the production Uniform lower edge. At the
+      default, that edge sits two standard deviations below the fiducial.
+    - $\gamma$ is the low-redshift power-law slope of the Madau–Dickinson
+      rate, $(1+z)^{\gamma}$. Its $\sigma$ is the production Uniform width
+      divided by $N_{\sigma}$, so the full production range is
+      $N_{\sigma}$ standard deviations.
+    """)
+    return
+
+
 @app.cell
-def _(COSMOLOGICAL, band_fishers, render_block):
-    cosmological = render_block("Cosmological", COSMOLOGICAL, band_fishers)
+def _():
+    num_sigma_slider = mo.ui.slider(
+        start=1,
+        stop=5,
+        step=1,
+        value=2,
+        debounce=True,
+        show_value=True,
+        label="Standard deviations spanning each constructed prior width",
+    )
+    num_sigma_slider
+    return (num_sigma_slider,)
+
+
+@app.cell
+def _(num_sigma_slider):
+    num_sigma = int(num_sigma_slider.value)
+    return (num_sigma,)
+
+
+@app.cell
+def _(
+    ASTROPHYSICAL,
+    COSMOLOGICAL,
+    FIDUCIALS,
+    MODIFIED_PROPAGATION,
+    ROOT_DIR,
+    num_sigma,
+):
+    _production = priors(root=ROOT_DIR)
+    _omega_m = _production["Omega_m"]
+    _xi_n = _production["xi_n"]
+    _gamma = _production["gamma"]
+    if not isinstance(_omega_m, Normal):
+        raise TypeError(
+            f"Omega_m production prior must be Normal, got {type(_omega_m).__name__}"
+        )
+    if not isinstance(_xi_n, Uniform):
+        raise TypeError(
+            f"xi_n production prior must be Uniform, got {type(_xi_n).__name__}"
+        )
+    if not isinstance(_gamma, Uniform):
+        raise TypeError(
+            f"gamma production prior must be Uniform, got {type(_gamma).__name__}"
+        )
+    # gamma, not kappa: madau_dickinson_rate goes as (1+z)^gamma at low redshift.
+    _raw_sigmas = {
+        "Omega_m": float(_omega_m.scale),
+        "xi_n": (float(FIDUCIALS["xi_n"]) - float(_xi_n.low)) / num_sigma,
+        "gamma": (float(_gamma.high) - float(_gamma.low)) / num_sigma,
+    }
+    _blocks = {
+        "Omega_m": COSMOLOGICAL,
+        "xi_n": MODIFIED_PROPAGATION,
+        "gamma": ASTROPHYSICAL,
+    }
+    for _name, _sigma in _raw_sigmas.items():
+        if not np.isfinite(_sigma) or _sigma <= 0.0:
+            raise ValueError(f"{_name} prior sigma must be positive, got {_sigma}")
+        if _name not in _blocks[_name]:
+            raise RuntimeError(f"{_name} is not in its Fisher block {_blocks[_name]}")
+    prior_sigmas = _raw_sigmas
+    for _name, _sigma in prior_sigmas.items():
+        print(f"{_name}: sigma={_sigma:.6g}, 1/sigma**2={1.0 / _sigma**2:.6g}")
+    return (prior_sigmas,)
+
+
+@app.cell
+def _(COSMOLOGICAL, band_fishers, prior_sigmas, render_block):
+    cosmological = render_block(
+        "Cosmological", COSMOLOGICAL, band_fishers, prior_sigmas
+    )
     cosmological
     return
 
 
 @app.cell
-def _(MODIFIED_PROPAGATION, band_fishers, render_block):
+def _(MODIFIED_PROPAGATION, band_fishers, prior_sigmas, render_block):
     modified_propagation = render_block(
-        "Modified propagation", MODIFIED_PROPAGATION, band_fishers
+        "Modified propagation",
+        MODIFIED_PROPAGATION,
+        band_fishers,
+        prior_sigmas,
     )
     modified_propagation
     return
 
 
 @app.cell
-def _(ASTROPHYSICAL, band_fishers, render_block):
-    astrophysical = render_block("Astrophysical", ASTROPHYSICAL, band_fishers)
+def _(ASTROPHYSICAL, band_fishers, prior_sigmas, render_block):
+    astrophysical = render_block(
+        "Astrophysical", ASTROPHYSICAL, band_fishers, prior_sigmas
+    )
     astrophysical
     return
 
