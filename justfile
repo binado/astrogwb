@@ -74,6 +74,9 @@ convert-notebooks:
         notebooks/mcmc.py \
         notebooks/waveform_approximant_spectra.py
 
+run-notebook notebook:
+    uv run --group jupyter marimo edit {{ notebook }}
+
 # The publishable distribution. `astrogwb.paper` ships inside it but is
 # unimportable without the `paper` extra, whose dependencies stay out of the
 # core requirement set.
