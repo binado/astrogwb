@@ -127,11 +127,6 @@ def _():
         for name, label in DETECTOR_NETWORKS
     )
 
-    # Choose the spectrum shown in the sensitivity + SNR figure:
-    # "omega_gw" or "sh".
-    PLOT_SPECTRUM = "omega_gw"
-    if PLOT_SPECTRUM not in {"omega_gw", "sh"}:
-        raise ValueError("PLOT_SPECTRUM must be 'omega_gw' or 'sh'")
     # Caps the Omega_GW panels above the signal: the L-shaped networks'
     # calibration-line spikes otherwise stretch the axis to ~1e2.
     OMEGA_GW_MAX: float | None = 1e-4
@@ -142,7 +137,6 @@ def _():
         FIDUCIALS,
         NETWORKS,
         OMEGA_GW_MAX,
-        PLOT_SPECTRUM,
         ROOT_DIR,
         batch_size,
         maximum_frequency,
@@ -173,6 +167,11 @@ def _():
         value="IMRPhenomXAS",
         label="Approximant",
     )
+    spectrum_choice = mo.ui.dropdown(
+        options=["Omega_GW", "S_h"],
+        value="Omega_GW",
+        label="Plot spectrum",
+    )
     # Notebook-only: config/waveform.json is a catalog layer, so its 1 Hz
     # resolution stays put. Finer grids resolve the SNR peak at ~5-10 Hz,
     # where 1 Hz bins leave only a handful of points per e-fold.
@@ -201,6 +200,7 @@ def _():
     mo.vstack(
         [
             approximant_choice,
+            spectrum_choice,
             frequency_resolution_choice,
             observation_time_slider,
             include_cosmic_explorer_switch,
@@ -209,6 +209,7 @@ def _():
     )
     return (
         approximant_choice,
+        spectrum_choice,
         frequency_resolution_choice,
         include_cosmic_explorer_switch,
         observation_time_slider,
@@ -1104,7 +1105,7 @@ def _():
 def _(
     BASE_DIR,
     OMEGA_GW_MAX: float | None,
-    PLOT_SPECTRUM,
+    spectrum_choice,
     ROOT_DIR,
     fiducial_freq,
     fiducial_omega,
@@ -1120,7 +1121,7 @@ def _(
     snr_density_by_network: dict[str, np.ndarray],
     write_figures,
 ):
-    if PLOT_SPECTRUM == "omega_gw":
+    if spectrum_choice.value == "Omega_GW":
         _spectrum = fiducial_omega
         _sensitivities = omega_sigma_ln_f_by_network
         _spectrum_label = r"$\Omega_{\mathrm{GW}}$"
