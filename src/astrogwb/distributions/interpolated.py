@@ -14,6 +14,8 @@ is why it is absent from ``arg_constraints`` and published through
 
 from __future__ import annotations
 
+from typing import Any
+
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
@@ -100,8 +102,14 @@ class InterpolatedDistribution(dist.Distribution):
         cdf = cumulative_trapezoid(self.normalized_y, x=self.x)
         return cdf / cdf[..., -1:]
 
-    def log_prob(self, value: ArrayLike) -> jax.Array:
+    def log_prob(
+        self, value: ArrayLike, intermediates: list[Any] | None = None
+    ) -> jax.Array:
         """Log density, ``-inf`` off the table.
+
+        ``intermediates`` is accepted for signature compatibility with
+        :class:`numpyro.distributions.Distribution`; nothing here produces or
+        replays sampling intermediates.
 
         Formed as ``log(interp(y) / norm)``: interpolate the unnormalized
         table, divide, then take one log. Linear interpolation is homogeneous,

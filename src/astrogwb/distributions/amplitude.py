@@ -93,7 +93,7 @@ statistics directly.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 import jax
 import jax.numpy as jnp
@@ -382,11 +382,16 @@ class AmplitudeConditional(dist.Distribution):
         """
         return relative_ess(self._log_integrand) * self.grid.shape[0]
 
-    def log_prob(self, value: ArrayLike) -> jax.Array:
+    def log_prob(
+        self, value: ArrayLike, intermediates: list[Any] | None = None
+    ) -> jax.Array:
         """Exact log density, evaluated analytically off the grid.
 
         The normalizing constant is still the trapezoid integral over the
         grid, so :meth:`log_prob` integrates to 1 only up to quadrature error.
+        ``intermediates`` is accepted for signature compatibility with
+        :class:`numpyro.distributions.Distribution`; nothing here produces or
+        replays sampling intermediates.
         """
         value = jnp.asarray(value)
         log_density = (

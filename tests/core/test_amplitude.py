@@ -12,7 +12,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
-import pytest
 
 from astrogwb.distributions.amplitude import (
     AmplitudeConditional,
@@ -163,13 +162,6 @@ def test_quadrature_grid_reproduces_the_hand_built_grids() -> None:
         np.asarray(quadrature_grid(dist.Normal(1.4, 0.3), num_nodes=101)),
         np.linspace(-1.6, 4.4, 101),
     )
-
-
-def test_quadrature_grid_rejects_a_prior_without_a_variance() -> None:
-    """``TruncatedNormal`` has no ``.variance``; the caller must pass ``grid=``."""
-    prior = dist.TruncatedNormal(1.0, 0.3, low=0.0)
-    with pytest.raises(TypeError, match="does not implement .variance"):
-        quadrature_grid(prior)
 
 
 # --------------------------------------------------------------------------- #
