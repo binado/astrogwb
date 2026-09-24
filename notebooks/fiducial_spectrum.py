@@ -263,9 +263,7 @@ def _():
         if omega_gw_min is None:
             return None
         if omega_gw_min <= 0.0:
-            raise ValueError(
-                f"omega_gw_min must be positive, got {omega_gw_min}"
-            )
+            raise ValueError(f"omega_gw_min must be positive, got {omega_gw_min}")
         if omega_gw.size == 0:
             raise ValueError("cannot infer S_h ymin from an empty spectrum")
         index = int(np.argmin(np.abs(np.log(omega_gw) - np.log(omega_gw_min))))
@@ -342,9 +340,7 @@ def _():
         linestyles: Sequence[str],
     ) -> list[Line2D]:
         return [
-            Line2D(
-                [], [], color=color, linestyle=linestyle, label=network.label
-            )
+            Line2D([], [], color=color, linestyle=linestyle, label=network.label)
             for network, color, linestyle in zip(
                 networks, colors, linestyles, strict=True
             )
@@ -399,13 +395,11 @@ def _():
         ``None`` leaves them autoscaled.
         """
         axis_color = "k"
-        omega_color, sh_color, omega_linestyle, sh_linestyle = (
-            _spectrum_line_styles(
-                omega_color=omega_color,
-                sh_color=sh_color,
-                omega_linestyle=omega_linestyle,
-                sh_linestyle=sh_linestyle,
-            )
+        omega_color, sh_color, omega_linestyle, sh_linestyle = _spectrum_line_styles(
+            omega_color=omega_color,
+            sh_color=sh_color,
+            omega_linestyle=omega_linestyle,
+            sh_linestyle=sh_linestyle,
         )
         if ax_omega is None:
             ax_omega = ax_sh.twinx()
@@ -508,9 +502,7 @@ def _(
 
     _rate = float(jnp.asarray(_merger_rate_fn(FIDUCIALS)))
     _mean_count = _rate * years_to_seconds(observation_time)
-    _max_events = max(
-        int(np.ceil(_mean_count + n_max_sigma * np.sqrt(_mean_count))), 1
-    )
+    _max_events = max(int(np.ceil(_mean_count + n_max_sigma * np.sqrt(_mean_count))), 1)
     _predictive = Predictive(
         partial(
             gwb_forward_model,
@@ -557,9 +549,7 @@ def _(
     for _network in NETWORKS:
         _sensitivities = load_sensitivity_map(_network.detectors)
         effective_psds[_network.name] = jnp.asarray(
-            effective_psd(
-                frequencies, list(_network.detectors), _sensitivities
-            )
+            effective_psd(frequencies, list(_network.detectors), _sensitivities)
         )
 
     _observation_time_sec = years_to_seconds(observation_time)
@@ -579,9 +569,7 @@ def _(
             effective_psd_arr=effective_psds[_network.name],
         )
         if _band_seff is None:
-            raise RuntimeError(
-                f"{_network.name} effective PSD was not restricted"
-            )
+            raise RuntimeError(f"{_network.name} effective PSD was not restricted")
         _snr_squared, _snr_lt, _snr_gt = snr_integrand_and_cumulative(
             _band_sh,
             _band_seff,
@@ -757,16 +745,12 @@ def _(format_axis_ticks, network_legend_handles):
     ) -> Figure:
         """Overlay network effective PSDs on shared log–log axes."""
         if len(networks) != len(colors) or len(networks) != len(linestyles):
-            raise ValueError(
-                "color and linestyle counts must match the networks"
-            )
+            raise ValueError("color and linestyle counts must match the networks")
 
         _fig, ax = plt.subplots()
         mask = np.asarray(frequency_mask)
         freq = np.asarray(frequencies)[mask]
-        for network, color, linestyle in zip(
-            networks, colors, linestyles, strict=True
-        ):
+        for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
             psd = np.asarray(psds_by_network[network.name])[mask]
             pos = np.isfinite(psd) & (psd > 0.0) & (freq > 0.0)
             ax.loglog(
@@ -864,9 +848,7 @@ def _(format_axis_ticks, network_legend_handles):
         pinned with ``ax.add_artist``.
         """
         if len(networks) != len(colors) or len(networks) != len(linestyles):
-            raise ValueError(
-                "color and linestyle counts must match the networks"
-            )
+            raise ValueError("color and linestyle counts must match the networks")
         if include_spectrum_in_legend and spectrum_legend_loc is not None:
             raise ValueError(
                 "use at most one of include_spectrum_in_legend and spectrum_legend_loc"
@@ -879,9 +861,7 @@ def _(format_axis_ticks, network_legend_handles):
             linestyle=spectrum_linestyle,
             label=spectrum_label,
         )
-        for network, color, linestyle in zip(
-            networks, colors, linestyles, strict=True
-        ):
+        for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
             network_frequency = np.asarray(frequency_by_network[network.name])
             sensitivity = np.asarray(sensitivities_by_network[network.name])
             pos = (
@@ -980,9 +960,7 @@ def _(
         spectrum_color=SPECTRUM["sh"],
         spectrum_linestyle=SPECTRUM_LINESTYLES["sh"],
         ylabel=r"$S_h(f), \, \sigma_{\ln f}(f)\ \mathrm{[Hz^{-1}]}$",
-        ymin=sh_ymin_matching_omega_floor(
-            fiducial_omega, fiducial_sh, OMEGA_GW_MIN
-        ),
+        ymin=sh_ymin_matching_omega_floor(fiducial_omega, fiducial_sh, OMEGA_GW_MIN),
         include_spectrum_in_legend=False,
         spectrum_legend_loc="upper left",
     )
@@ -1034,9 +1012,7 @@ def _(
         spectrum_legend_loc="upper left",
     )
     if write_figures:
-        save_figures(
-            {BASE_DIR / "omega_and_sigma_ln_f.pdf": _fig}, root=ROOT_DIR
-        )
+        save_figures({BASE_DIR / "omega_and_sigma_ln_f.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
@@ -1069,14 +1045,10 @@ def _(
     ) -> None:
         """Overlay one per-network SNR curve on ``ax`` and style the axes."""
         if len(networks) != len(colors) or len(networks) != len(linestyles):
-            raise ValueError(
-                "color and linestyle counts must match the networks"
-            )
+            raise ValueError("color and linestyle counts must match the networks")
 
         draw = ax.loglog if loglog else ax.semilogx
-        for network, color, linestyle in zip(
-            networks, colors, linestyles, strict=True
-        ):
+        for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
             draw(
                 frequency_by_network[network.name],
                 values_by_network[network.name],
@@ -1365,9 +1337,7 @@ def _(
         linestyles=plotted_linestyles,
     )
     if write_figures:
-        save_figures(
-            {BASE_DIR / "snr_cumulative_below.pdf": _fig}, root=ROOT_DIR
-        )
+        save_figures({BASE_DIR / "snr_cumulative_below.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
@@ -1400,9 +1370,7 @@ def _(
         linestyles=plotted_linestyles,
     )
     if write_figures:
-        save_figures(
-            {BASE_DIR / "snr_cumulative_above.pdf": _fig}, root=ROOT_DIR
-        )
+        save_figures({BASE_DIR / "snr_cumulative_above.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
