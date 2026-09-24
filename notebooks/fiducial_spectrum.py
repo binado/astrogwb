@@ -7,7 +7,6 @@ with app.setup(hide_code=True):
     from collections.abc import Mapping, Sequence
     from functools import partial
     from pathlib import Path
-    from typing import Any
 
     import jax
     import jax.numpy as jnp
@@ -128,7 +127,11 @@ def _():
         for name, label in DETECTOR_NETWORKS
     )
 
-    OMEGA_GW_MIN: float | None = None
+    # Choose the spectrum shown in the sensitivity + SNR figure:
+    # "omega_gw" or "sh".
+    PLOT_SPECTRUM = "omega_gw"
+    if PLOT_SPECTRUM not in {"omega_gw", "sh"}:
+        raise ValueError("PLOT_SPECTRUM must be 'omega_gw' or 'sh'")
     # Caps the Omega_GW panels above the signal: the L-shaped networks'
     # calibration-line spikes otherwise stretch the axis to ~1e2.
     OMEGA_GW_MAX: float | None = 1e-4
@@ -139,7 +142,7 @@ def _():
         FIDUCIALS,
         NETWORKS,
         OMEGA_GW_MAX,
-        OMEGA_GW_MIN,
+        PLOT_SPECTRUM,
         ROOT_DIR,
         batch_size,
         maximum_frequency,
@@ -661,72 +664,6 @@ def _(
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## Fiducial $S_h$ and $\Omega_{\mathrm{GW}}$
-    """)
-    return
-
-
-@app.cell
-def _(band_limited_spectrum, draw_omega_and_sh):
-    def plot_omega_and_sh(
-        frequencies: jax.Array,
-        spectral_density_arr: jax.Array,
-        frequency_mask: jax.Array,
-        *,
-        h0: float,
-        omega_gw_min: float | None = None,
-    ) -> Figure:
-        """Plot $\\Omega_{\\mathrm{GW}}(f)$ and $S_h(f)$ on dual $y$-axes.
-
-        ``omega_gw_min`` defaults to ``None``, which leaves both axes autoscaled.
-        """
-        freq, omega, sh, _ = band_limited_spectrum(
-            frequencies,
-            spectral_density_arr,
-            frequency_mask,
-            h0=h0,
-        )
-        _fig, ax_sh = plt.subplots()
-        draw_omega_and_sh(
-            ax_sh,
-            freq,
-            omega,
-            sh,
-            omega_gw_min=omega_gw_min,
-        )
-        return _fig
-
-    return (plot_omega_and_sh,)
-
-
-@app.cell
-def _(
-    BASE_DIR,
-    FIDUCIALS,
-    OMEGA_GW_MIN: float | None,
-    ROOT_DIR,
-    frequencies,
-    frequency_mask,
-    plot_omega_and_sh,
-    spectral_density,
-    write_figures,
-):
-    _fig = plot_omega_and_sh(
-        frequencies,
-        spectral_density,
-        frequency_mask,
-        h0=FIDUCIALS["H0"],
-        omega_gw_min=OMEGA_GW_MIN,
-    )
-    if write_figures:
-        save_figures({BASE_DIR / "omega_and_sh.pdf": _fig}, root=ROOT_DIR)
-    _fig
-    return
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
     ## Network effective PSDs
     """)
     return
@@ -906,115 +843,7 @@ def _(format_axis_ticks, network_legend_handles):
             ax.add_artist(spectrum_legend)
         ax.legend(handles=legend_handles, **DETECTOR_COMPARISON_LEGEND)
 
-    def plot_spectrum_and_sensitivities(
-        frequency: np.ndarray,
-        spectrum: np.ndarray,
-        networks: Sequence[Network],
-        frequency_by_network: Mapping[str, np.ndarray],
-        sensitivities_by_network: Mapping[str, np.ndarray],
-        **kwargs: Any,
-    ) -> Figure:
-        """One-panel figure from :func:`draw_spectrum_and_sensitivities`."""
-        _fig, ax = plt.subplots()
-        draw_spectrum_and_sensitivities(
-            ax,
-            frequency,
-            spectrum,
-            networks,
-            frequency_by_network,
-            sensitivities_by_network,
-            **kwargs,
-        )
-        _fig.tight_layout()
-        return _fig
-
-    return draw_spectrum_and_sensitivities, plot_spectrum_and_sensitivities
-
-
-@app.cell
-def _(
-    BASE_DIR,
-    OMEGA_GW_MIN: float | None,
-    ROOT_DIR,
-    fiducial_freq,
-    fiducial_omega,
-    fiducial_sh,
-    frequency_by_network: dict[str, np.ndarray],
-    plot_spectrum_and_sensitivities,
-    plotted_colors,
-    plotted_linestyles,
-    plotted_networks,
-    sh_ymin_matching_omega_floor,
-    sigma_ln_f_by_network: dict[str, np.ndarray],
-    write_figures,
-):
-    _fig = plot_spectrum_and_sensitivities(
-        fiducial_freq,
-        fiducial_sh,
-        plotted_networks,
-        frequency_by_network,
-        sigma_ln_f_by_network,
-        colors=plotted_colors,
-        linestyles=plotted_linestyles,
-        spectrum_label=r"$S_h$",
-        spectrum_color=SPECTRUM["sh"],
-        spectrum_linestyle=SPECTRUM_LINESTYLES["sh"],
-        ylabel=r"$S_h(f), \, \sigma_{\ln f}(f)\ \mathrm{[Hz^{-1}]}$",
-        ymin=sh_ymin_matching_omega_floor(fiducial_omega, fiducial_sh, OMEGA_GW_MIN),
-        include_spectrum_in_legend=False,
-        spectrum_legend_loc="upper left",
-    )
-    if write_figures:
-        save_figures({BASE_DIR / "sh_and_sigma_ln_f.pdf": _fig}, root=ROOT_DIR)
-    _fig
-    return
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ## $\Omega_{\mathrm{GW}}$ and network sensitivity curves
-    """)
-    return
-
-
-@app.cell
-def _(
-    BASE_DIR,
-    OMEGA_GW_MAX: float | None,
-    OMEGA_GW_MIN: float | None,
-    ROOT_DIR,
-    fiducial_freq,
-    fiducial_omega,
-    frequency_by_network: dict[str, np.ndarray],
-    omega_sigma_ln_f_by_network: dict[str, np.ndarray],
-    plot_spectrum_and_sensitivities,
-    plotted_colors,
-    plotted_linestyles,
-    plotted_networks,
-    write_figures,
-):
-    _fig = plot_spectrum_and_sensitivities(
-        fiducial_freq,
-        fiducial_omega,
-        plotted_networks,
-        frequency_by_network,
-        omega_sigma_ln_f_by_network,
-        colors=plotted_colors,
-        linestyles=plotted_linestyles,
-        spectrum_label=r"$\Omega_{\mathrm{GW}}$",
-        spectrum_color=SPECTRUM["omega_gw"],
-        spectrum_linestyle=":",
-        ylabel=r"$\Omega_{\mathrm{GW}}(f), \, \sigma_{\ln f}(f)$",
-        ymin=OMEGA_GW_MIN,
-        ymax=OMEGA_GW_MAX,
-        include_spectrum_in_legend=False,
-        spectrum_legend_loc="upper left",
-    )
-    if write_figures:
-        save_figures({BASE_DIR / "omega_and_sigma_ln_f.pdf": _fig}, root=ROOT_DIR)
-    _fig
-    return
+    return (draw_spectrum_and_sensitivities,)
 
 
 @app.cell(hide_code=True)
@@ -1069,19 +898,22 @@ def _(
 
     def plot_spectrum_and_snr_density(
         frequency: np.ndarray,
-        omega_gw: np.ndarray,
+        spectrum: np.ndarray,
         networks: Sequence[Network],
         frequency_by_network: Mapping[str, np.ndarray],
-        omega_sensitivities_by_network: Mapping[str, np.ndarray],
+        sensitivities_by_network: Mapping[str, np.ndarray],
         snr_density_by_network: Mapping[str, np.ndarray],
         *,
         observation_time: float,
         colors: Sequence[str],
         linestyles: Sequence[str],
-        omega_gw_min: float | None = None,
-        omega_gw_max: float | None = None,
+        spectrum_label: str,
+        spectrum_color: str,
+        spectrum_linestyle: str,
+        ylabel: str,
+        spectrum_max: float | None = None,
     ) -> Figure:
-        """Stack $\\Omega_{\\mathrm{GW}}$ versus $\\sigma_{\\ln f}$ over the SNR density.
+        """Stack the selected spectrum versus sensitivity over the SNR density.
 
         The squared gap between the spectrum and a network's curve in the top
         panel is that network's $d\\mathrm{SNR}^2/d\\ln f$ in the bottom one,
@@ -1101,18 +933,17 @@ def _(
         draw_spectrum_and_sensitivities(
             ax_top,
             frequency,
-            omega_gw,
+            spectrum,
             networks,
             frequency_by_network,
-            omega_sensitivities_by_network,
+            sensitivities_by_network,
             colors=colors,
             linestyles=linestyles,
-            spectrum_label=r"$\Omega_{\mathrm{GW}}$",
-            spectrum_color=SPECTRUM["omega_gw"],
-            spectrum_linestyle=":",
-            ylabel=r"$\Omega_{\mathrm{GW}}(f), \, \sigma_{\ln f}(f)$",
-            ymin=omega_gw_min,
-            ymax=omega_gw_max,
+            spectrum_label=spectrum_label,
+            spectrum_color=spectrum_color,
+            spectrum_linestyle=spectrum_linestyle,
+            ylabel=ylabel,
+            ymax=spectrum_max,
             include_spectrum_in_legend=False,
             spectrum_legend_loc="upper left",
             xlabel=False,
@@ -1260,7 +1091,7 @@ def _():
     mo.md(r"""
     ### Network sensitivity and SNR density, stacked
 
-    The paper figure: $\Omega_{\mathrm{GW}}$ against each network's
+    The paper figure: the configured spectrum against each network's
     $\sigma_{\ln f}$ on top, and below it $d\mathrm{SNR}^2/d\ln f$, whose
     area in $\ln f$ is each network's $\mathrm{SNR}^2$ at the chosen
     observation time. The ET geometries share nearly one shape, so the curves
@@ -1273,13 +1104,15 @@ def _():
 def _(
     BASE_DIR,
     OMEGA_GW_MAX: float | None,
-    OMEGA_GW_MIN: float | None,
+    PLOT_SPECTRUM,
     ROOT_DIR,
     fiducial_freq,
     fiducial_omega,
+    fiducial_sh,
     frequency_by_network: dict[str, np.ndarray],
     observation_time,
     omega_sigma_ln_f_by_network: dict[str, np.ndarray],
+    sigma_ln_f_by_network: dict[str, np.ndarray],
     plot_spectrum_and_snr_density,
     plotted_colors,
     plotted_linestyles,
@@ -1287,22 +1120,44 @@ def _(
     snr_density_by_network: dict[str, np.ndarray],
     write_figures,
 ):
+    if PLOT_SPECTRUM == "omega_gw":
+        _spectrum = fiducial_omega
+        _sensitivities = omega_sigma_ln_f_by_network
+        _spectrum_label = r"$\Omega_{\mathrm{GW}}$"
+        _spectrum_color = SPECTRUM["omega_gw"]
+        _spectrum_linestyle = ":"
+        _ylabel = r"$\Omega_{\mathrm{GW}}(f), \, \sigma_{\ln f}(f)$"
+        _spectrum_max = OMEGA_GW_MAX
+        _filename = "omega_sensitivity_and_snr_density.pdf"
+    else:
+        _spectrum = fiducial_sh
+        _sensitivities = sigma_ln_f_by_network
+        _spectrum_label = r"$S_h$"
+        _spectrum_color = SPECTRUM["sh"]
+        _spectrum_linestyle = SPECTRUM_LINESTYLES["sh"]
+        _ylabel = r"$S_h(f), \, \sigma_{\ln f}(f)\ \mathrm{[Hz^{-1}]}$"
+        _spectrum_max = None
+        _filename = "sh_sensitivity_and_snr_density.pdf"
+
     _fig = plot_spectrum_and_snr_density(
         fiducial_freq,
-        fiducial_omega,
+        _spectrum,
         plotted_networks,
         frequency_by_network,
-        omega_sigma_ln_f_by_network,
+        _sensitivities,
         snr_density_by_network,
         observation_time=observation_time,
         colors=plotted_colors,
         linestyles=plotted_linestyles,
-        omega_gw_min=OMEGA_GW_MIN,
-        omega_gw_max=OMEGA_GW_MAX,
+        spectrum_label=_spectrum_label,
+        spectrum_color=_spectrum_color,
+        spectrum_linestyle=_spectrum_linestyle,
+        ylabel=_ylabel,
+        spectrum_max=_spectrum_max,
     )
     if write_figures:
         save_figures(
-            {BASE_DIR / "omega_sensitivity_and_snr_density.pdf": _fig},
+            {BASE_DIR / _filename: _fig},
             root=ROOT_DIR,
         )
     _fig
