@@ -4,6 +4,10 @@ data
 # Local Jupyter UI only; version-control notebooks/ as Jupytext py:percent .py files.
 *.ipynb
 
+# marimo's per-notebook session cache (UI values, output hashes), written by
+# `marimo edit` / `marimo export` next to the notebook.
+notebooks/__marimo__/
+
 # Catalogs the root notebooks build for themselves on first run. Regenerated
 # from the notebook's own configuration cell, so they are a cache, not an input.
 notebooks/*.h5
