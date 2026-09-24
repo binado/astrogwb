@@ -29,7 +29,6 @@ from astrogwb.populations import (
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
-from astrogwb.populations import bns_madau_dickinson as mod
 
 _SCALINGS = {
     "H0": (amplitude_H0_fn, merger_rate_H0_fn),
@@ -99,29 +98,11 @@ def test_amplitude_factorization_matches_the_real_spectral_density(
         phi = factor * fiducial
         actual_spectral_density, _ = estimator({**FIDUCIALS, parameter: phi})
 
-        amplitude = float(amplitude_fn(jnp.asarray(phi))) / float(
-            amplitude_fn(jnp.asarray(fiducial))
+        amplitude = float(np.asarray(amplitude_fn(jnp.asarray(phi)))) / float(
+            np.asarray(amplitude_fn(jnp.asarray(fiducial)))
         )
         np.testing.assert_allclose(
             np.asarray(actual_spectral_density),
             amplitude * np.asarray(fiducial_spectral_density),
             rtol=1e-8,
         )
-
-
-def test_amplitude_scalings_are_hashable_singletons() -> None:
-    """``AmplitudeConditional`` carries the scaling as pytree *aux* data.
-
-    JAX hashes aux data into the jit cache key, so a scaling that is not
-    identity-stable across calls silently retraces the model every step. A
-    lambda or a ``functools.partial`` over the fiducial would fail this.
-    """
-    pairs = (
-        (amplitude_H0_fn, mod.amplitude_H0_fn),
-        (merger_rate_H0_fn, mod.merger_rate_H0_fn),
-        (amplitude_local_merger_rate_fn, mod.amplitude_local_merger_rate_fn),
-        (merger_rate_local_merger_rate_fn, mod.merger_rate_local_merger_rate_fn),
-    )
-    for imported, via_module in pairs:
-        assert imported is via_module
-        assert hash(imported) == hash(via_module)

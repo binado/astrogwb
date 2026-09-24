@@ -22,6 +22,7 @@ import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax.typing import ArrayLike
+from numpyro.distributions.transforms import IdentityTransform
 from numpyro.infer.util import log_density
 
 from astrogwb.sampling import (
@@ -51,8 +52,7 @@ def data_kwargs(observed: jax.Array, scale: jax.Array) -> dict[str, Any]:
     return {"observed_spectral_density": observed, "scale": scale}
 
 
-def _identity_amplitude(marginalized_parameter: jax.Array) -> jax.Array:
-    return marginalized_parameter
+_IDENTITY_AMPLITUDE = IdentityTransform()
 
 
 def _analytic(params: Mapping[str, ArrayLike]) -> tuple[jax.Array, dict[str, Any]]:
@@ -97,7 +97,7 @@ def amplitude_marginalized_model() -> Callable[..., None]:
         priors={"tilt": dist.Normal(0.0, 1.0)},
         amplitude_parameter="h0",
         amplitude_fiducial=70.0,
-        amplitude_fn=_identity_amplitude,
+        amplitude_transform=_IDENTITY_AMPLITUDE,
         amplitude_prior=dist.Uniform(50.0, 90.0),
     )
 

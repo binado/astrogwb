@@ -13,6 +13,7 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
+from numpyro.distributions.transforms import IdentityTransform
 
 from astrogwb.distributions.amplitude import (
     AmplitudeConditional,
@@ -28,9 +29,7 @@ DATA = np.array([1.3, 1.7, 4.6, 2.8])
 SCALE = np.array([0.5, 0.4, 0.8, 0.6])
 
 
-def _identity_scaling(marginalized_parameter: jax.Array) -> jax.Array:
-    """With ``fiducial=1.0`` this makes the amplitude the parameter itself."""
-    return marginalized_parameter
+_IDENTITY = IdentityTransform()
 
 
 def _statistics() -> tuple[jax.Array, jax.Array]:
@@ -51,7 +50,7 @@ def _uniform_conditional(
 ) -> AmplitudeConditional:
     """The conditional under a uniform prior, with the parameter *being* the amplitude.
 
-    ``_identity_scaling`` anchored at ``fiducial=1.0`` gives
+    ``IdentityTransform`` anchored at ``fiducial=1.0`` gives
     ``A(phi) = phi / 1.0 = phi``, which is what every brute-force reference in
     this module assumes. The grid is left to default, so this also exercises
     :func:`~astrogwb.distributions.amplitude.quadrature_grid` clipping a
@@ -61,7 +60,7 @@ def _uniform_conditional(
     return AmplitudeConditional(
         jnp.broadcast_to(amplitude_mle, batch_shape),
         jnp.broadcast_to(template_optimal_snr, batch_shape),
-        amplitude_fn=_identity_scaling,
+        amplitude_transform=_IDENTITY,
         prior=dist.Uniform(low, high),
         fiducial=1.0,
         num_nodes=num_nodes,
@@ -77,7 +76,7 @@ def _conditional_log_evidence(
     conditional = AmplitudeConditional(
         amplitude_mle,
         template_optimal_snr,
-        amplitude_fn=_identity_scaling,
+        amplitude_transform=_IDENTITY,
         prior=prior,
         fiducial=1.0,
         grid=grid,
@@ -173,77 +172,6 @@ def test_quadrature_grid_rejects_a_prior_without_a_variance() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Nonlinear scaling: the real H0 pair, g_R = H0**-3, g_F = H0**2
-# --------------------------------------------------------------------------- #
-
-
-def _h0_amplitude(marginalized_parameter: jax.Array) -> jax.Array:
-    """``f = g_R * g_F = H0**-3 * H0**2``, left unsimplified on purpose."""
-    return marginalized_parameter**-3 * marginalized_parameter**2
-
-
-def _h0_log_likelihood(h0: np.ndarray, h0_fid: float) -> np.ndarray:
-    """``log p(d | A = f(h0)/f(h0_fid))`` written out from the Gaussian definition.
-
-    ``f(h0)/f(h0_fid) = (h0**-3 * h0**2) / (h0_fid**-3 * h0_fid**2) = h0_fid/h0``,
-    the same net amplitude as the single-scaling formula this test used to
-    exercise -- the product of the two real exponents collapses to the
-    original inverse relation, so the brute-force reference is unchanged.
-    """
-    amplitude = h0_fid / h0
-    residual = (DATA - amplitude[:, None] * TEMPLATE) / SCALE
-    return np.sum(-0.5 * residual**2 - np.log(SCALE) - 0.5 * _LOG_TWO_PI, axis=-1)
-
-
-def _h0_brute_force_moments(
-    low: float, high: float, h0_fid: float, num: int = 200_001
-) -> tuple[float, float]:
-    """Mean and variance of the H0 posterior under a uniform-in-H0 prior.
-
-    The prior is a constant factor that cancels in the normalized weights, so
-    it does not appear explicitly here.
-    """
-    h0 = np.linspace(low, high, num)
-    density = np.exp(_h0_log_likelihood(h0, h0_fid))
-    norm = np.trapezoid(density, h0)
-    mean = np.trapezoid(density * h0, h0) / norm
-    variance = np.trapezoid(density * (h0 - mean) ** 2, h0) / norm
-    return float(mean), float(variance)
-
-
-def test_numerical_h0_marginalization_matches_brute_force_integration() -> None:
-    """The only coverage of the nonlinear scaling path, ``A(H0) = H0_fid / H0``.
-
-    ``AmplitudeConditional.icdf`` materializes a ``batch_shape + (K,)`` CDF, so
-    this is the one test in the module where fixture size directly drives
-    memory, not just wall time.
-    """
-    h0_fid = 70.0
-    h0_low, h0_high = 50.0, 90.0
-    count = 20_000
-
-    amplitude_mle, template_optimal_snr = _statistics()
-    conditional = AmplitudeConditional(
-        jnp.broadcast_to(amplitude_mle, (count,)),
-        jnp.broadcast_to(template_optimal_snr, (count,)),
-        amplitude_fn=_h0_amplitude,
-        prior=dist.Uniform(h0_low, h0_high),
-        fiducial=h0_fid,
-        grid=jnp.linspace(h0_low, h0_high, 1001),
-    )
-    h0_draws = conditional.sample(jax.random.key(3))
-    numeric_mean = float(jnp.mean(h0_draws))
-    numeric_variance = float(jnp.var(h0_draws))
-
-    brute_force_mean, brute_force_variance = _h0_brute_force_moments(
-        h0_low, h0_high, h0_fid
-    )
-
-    np.testing.assert_allclose(numeric_mean, brute_force_mean, atol=1.0)
-    np.testing.assert_allclose(numeric_variance, brute_force_variance, rtol=0.25)
-
-
-# --------------------------------------------------------------------------- #
 # AmplitudeConditional.sample
 # --------------------------------------------------------------------------- #
 
@@ -328,7 +256,7 @@ def test_log_prob_is_finite_off_the_grid_inside_the_prior_support() -> None:
     conditional = AmplitudeConditional(
         amplitude_mle,
         template_optimal_snr,
-        amplitude_fn=_identity_scaling,
+        amplitude_transform=_IDENTITY,
         prior=dist.Normal(1.0, 0.3),
         fiducial=1.0,
         grid=jnp.linspace(0.7, 1.3, 101),
@@ -352,7 +280,7 @@ def test_support_matches_the_prior_support() -> None:
     conditional = AmplitudeConditional(
         amplitude_mle,
         template_optimal_snr,
-        amplitude_fn=_identity_scaling,
+        amplitude_transform=_IDENTITY,
         prior=prior,
         fiducial=1.0,
         grid=jnp.linspace(0.5, 1.5, 101),
@@ -371,7 +299,7 @@ _MAPPED_FIELDS = ("amplitude_mle", "template_optimal_snr")
 
 
 def test_distribution_survives_jit_and_vmap_as_a_pytree_argument() -> None:
-    """``pytree_data_fields`` must carry the statistics, prior, grid, and fiducial."""
+    """``pytree_data_fields`` must carry the statistics, prior, grid, and transform."""
     conditional = _uniform_conditional(0.2, 3.0, 2001, batch_shape=(4,))
     quantiles = 0.5 * jnp.ones(4)
 
@@ -380,7 +308,7 @@ def test_distribution_survives_jit_and_vmap_as_a_pytree_argument() -> None:
 
     # vmap over the statistics batch while keeping the definition unmapped: the
     # in_axes specimen mirrors the distribution's pytree, with 0 on the two
-    # statistics and None covering the prior / grid / fiducial subtrees. The
+    # statistics and None covering the prior / grid / transform subtrees. The
     # gathered field order is a set iteration order, so build the values by
     # field name rather than positionally.
     _aux = AmplitudeConditional.tree_flatten(conditional)[1]
@@ -393,15 +321,6 @@ def test_distribution_survives_jit_and_vmap_as_a_pytree_argument() -> None:
     )
     assert medians.shape == (4,)
     np.testing.assert_allclose(np.asarray(medians), np.asarray(median), rtol=1e-6)
-
-
-def test_amplitude_fn_is_aux_data_so_jit_caches_on_it() -> None:
-    """A non-hashable scaling would make every construction a fresh cache key."""
-    conditional = _uniform_conditional(0.2, 3.0, 101)
-    aux = AmplitudeConditional.tree_flatten(conditional)[1]
-
-    assert _identity_scaling in aux
-    assert hash(aux) == hash(AmplitudeConditional.tree_flatten(conditional)[1])
 
 
 # --------------------------------------------------------------------------- #

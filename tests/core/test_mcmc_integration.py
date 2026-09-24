@@ -285,11 +285,9 @@ def _marginalized_model(
         ),
         amplitude_parameter="H0",
         amplitude_fiducial=FIDUCIALS["H0"],
-        # Passed by name, never wrapped: AmplitudeConditional hashes
-        # amplitude_fn into the jit cache key, so a freshly-minted callable
-        # retraces the model on every construction. Pinned by
-        # test_amplitude_scalings.py.
-        amplitude_fn=amplitude_H0_fn,
+        # Passed by name: AmplitudeConditional stores the anchored transform
+        # as pytree data.
+        amplitude_transform=amplitude_H0_fn,
         amplitude_prior=H0_PRIOR,
         amplitude_grid=amplitude_grid,
         priors=priors,
@@ -302,7 +300,7 @@ def _reconstruct_h0(posterior: dict, amplitude_grid: jax.Array) -> dict:
         partial(
             amplitude_reconstruction_model,
             amplitude_parameter="H0",
-            amplitude_fn=amplitude_H0_fn,
+            amplitude_transform=amplitude_H0_fn,
             merger_rate_amplitude_fn=merger_rate_H0_fn,
             prior=H0_PRIOR,
             fiducial=FIDUCIALS["H0"],
