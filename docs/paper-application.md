@@ -35,7 +35,7 @@ uv sync --extra notebook --group jupyter
 uvx jupytext --to ipynb notebooks/mcmc.py
 ```
 
-`notebooks/fiducial_spectrum.py` is a marimo notebook. Open it from the repository root with `uv run --extra notebook --group jupyter marimo edit notebooks/fiducial_spectrum.py`.
+`notebooks/fiducial_spectrum.py` and `notebooks/waveform_approximant_spectra.py` are marimo notebooks. Open them from the repository root with `uv run --extra notebook --group jupyter marimo edit notebooks/<name>.py`.
 
 Every path is relative to the repository root -- library code names no absolute
 path and does not go looking for a checkout. Committed configuration lives
