@@ -6,7 +6,7 @@
     "population": {
       "model_name": "bns_md_modified_propagation",
       "model_kwargs": {
-        "minimum_redshift": 0.3,
+        "minimum_redshift": 0.35,
         "maximum_redshift": 20.0,
         "n_grid": 256
       }
