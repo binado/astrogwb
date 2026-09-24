@@ -127,20 +127,12 @@ def _():
         Network(name, label, NETWORK_DETECTORS[name])
         for name, label in DETECTOR_NETWORKS
     )
-    REFERENCE_NETWORK = "ET-2L-aligned-CE-Hanford"
 
     OMEGA_GW_MIN: float | None = None
     # Caps the Omega_GW panels above the signal: the L-shaped networks'
     # calibration-line spikes otherwise stretch the axis to ~1e2.
     OMEGA_GW_MAX: float | None = 1e-4
     CUMULATIVE_SNR_ABOVE_FMINS_HZ = (2.0, 5.0, 10.0, 20.0)
-
-    # Cumulative-SNR curves on the stacked figure: Okabe-Ito blue / vermillion,
-    # distinct from the black dual-axis spectrum.
-    SNR_LT_COLOR = "#0072B2"
-    SNR_GT_COLOR = "#D55E00"
-    SNR_LT_LINESTYLE = "-"
-    SNR_GT_LINESTYLE = "--"
     return (
         BASE_DIR,
         CUMULATIVE_SNR_ABOVE_FMINS_HZ,
@@ -148,7 +140,6 @@ def _():
         NETWORKS,
         OMEGA_GW_MAX,
         OMEGA_GW_MIN,
-        REFERENCE_NETWORK,
         ROOT_DIR,
         batch_size,
         maximum_frequency,
@@ -487,21 +478,16 @@ def _():
 @app.cell
 def _(
     FIDUCIALS,
-    NETWORKS: tuple[Network, ...],
-    REFERENCE_NETWORK,
     ROOT_DIR,
     approximant,
-    band_limited_spectrum,
     batch_size,
     frequency_resolution,
     maximum_frequency,
     maximum_redshift,
-    minimum_frequency,
     minimum_redshift,
     n_max_sigma,
     observation_time,
     seed,
-    snr_integrand_and_cumulative,
 ):
     _population = population_model(
         root=ROOT_DIR,
@@ -518,6 +504,7 @@ def _(
         maximum_frequency=maximum_frequency,
         frequency_resolution=frequency_resolution,
     )
+    frequencies = jnp.asarray(_generator.frequencies)
 
     _rate = float(jnp.asarray(_merger_rate_fn(FIDUCIALS)))
     _mean_count = _rate * years_to_seconds(observation_time)
@@ -541,7 +528,22 @@ def _(
     spectral_density = jnp.asarray(_draw["spectral_density"][0])
     _n_events = int(np.asarray(_draw["n_events"]).reshape(-1)[0])
 
-    frequencies = jnp.asarray(_generator.frequencies)
+    {"Number of events": _n_events}
+    return frequencies, spectral_density
+
+
+@app.cell
+def _(
+    FIDUCIALS,
+    NETWORKS: tuple[Network, ...],
+    band_limited_spectrum,
+    frequencies,
+    maximum_frequency,
+    minimum_frequency,
+    observation_time,
+    snr_integrand_and_cumulative,
+    spectral_density,
+):
     _df = uniform_grid_spacing(frequencies)
     frequency_mask = make_frequency_mask(
         frequencies,
@@ -549,9 +551,6 @@ def _(
         fmax=maximum_frequency,
     )
 
-    _reference_network = next(
-        _network for _network in NETWORKS if _network.name == REFERENCE_NETWORK
-    )
     detector_colors, detector_linestyles = detector_network_styles(NETWORKS)
 
     effective_psds: dict[str, jax.Array] = {}
@@ -571,11 +570,8 @@ def _(
     snr_density_by_network: dict[str, np.ndarray] = {}
     sigma_ln_f_by_network: dict[str, np.ndarray] = {}
     omega_sigma_ln_f_by_network: dict[str, np.ndarray] = {}
-    _reference_band: (
-        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None
-    ) = None
     for _network in NETWORKS:
-        _band_freq, _band_omega, _band_sh, _band_seff = band_limited_spectrum(
+        _band_freq, _, _band_sh, _band_seff = band_limited_spectrum(
             frequencies,
             spectral_density,
             frequency_mask,
@@ -620,27 +616,12 @@ def _(
                 hubble_constant=FIDUCIALS["H0"],
             )
         )
-        if _network.name == _reference_network.name:
-            _reference_band = (_band_freq, _band_omega, _band_sh, _band_seff)
-    if _reference_band is None:
-        raise RuntimeError("reference-network spectrum was not computed")
     fiducial_freq, fiducial_omega, fiducial_sh, _ = band_limited_spectrum(
         frequencies,
         spectral_density,
         frequency_mask,
         h0=FIDUCIALS["H0"],
     )
-    print(
-        f"simulated spectrum: n_frequency_bins={frequencies.shape[0]} "
-        f"n_events={_n_events} max_events={_max_events}"
-    )
-    print(
-        "band bins:",
-        int(np.sum(np.asarray(frequency_mask))),
-        "of",
-        frequencies.shape[0],
-    )
-    print("reference network:", _reference_network.label)
     return (
         detector_colors,
         detector_linestyles,
@@ -648,7 +629,6 @@ def _(
         fiducial_freq,
         fiducial_omega,
         fiducial_sh,
-        frequencies,
         frequency_by_network,
         frequency_mask,
         omega_sigma_ln_f_by_network,
@@ -657,7 +637,6 @@ def _(
         snr_gt_by_network,
         snr_lt_by_network,
         snr_squared_by_network,
-        spectral_density,
     )
 
 
@@ -1055,7 +1034,9 @@ def _(
         spectrum_legend_loc="upper left",
     )
     if write_figures:
-        save_figures({BASE_DIR / "omega_and_sigma_ln_f.pdf": _fig}, root=ROOT_DIR)
+        save_figures(
+            {BASE_DIR / "omega_and_sigma_ln_f.pdf": _fig}, root=ROOT_DIR
+        )
     _fig
     return
 
@@ -1384,7 +1365,9 @@ def _(
         linestyles=plotted_linestyles,
     )
     if write_figures:
-        save_figures({BASE_DIR / "snr_cumulative_below.pdf": _fig}, root=ROOT_DIR)
+        save_figures(
+            {BASE_DIR / "snr_cumulative_below.pdf": _fig}, root=ROOT_DIR
+        )
     _fig
     return
 
@@ -1417,7 +1400,9 @@ def _(
         linestyles=plotted_linestyles,
     )
     if write_figures:
-        save_figures({BASE_DIR / "snr_cumulative_above.pdf": _fig}, root=ROOT_DIR)
+        save_figures(
+            {BASE_DIR / "snr_cumulative_above.pdf": _fig}, root=ROOT_DIR
+        )
     _fig
     return
 
