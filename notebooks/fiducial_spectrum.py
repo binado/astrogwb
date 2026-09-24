@@ -209,10 +209,10 @@ def _():
     )
     return (
         approximant_choice,
-        spectrum_choice,
         frequency_resolution_choice,
         include_cosmic_explorer_switch,
         observation_time_slider,
+        spectrum_choice,
         write_figures_switch,
     )
 
@@ -251,7 +251,7 @@ def _():
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     def band_limited_spectrum(
         frequencies: jax.Array,
@@ -990,7 +990,6 @@ def _():
 def _(
     BASE_DIR,
     OMEGA_GW_MAX: float | None,
-    spectrum_choice,
     ROOT_DIR,
     fiducial_freq,
     fiducial_omega,
@@ -998,12 +997,13 @@ def _(
     frequency_by_network: dict[str, np.ndarray],
     observation_time,
     omega_sigma_ln_f_by_network: dict[str, np.ndarray],
-    sigma_ln_f_by_network: dict[str, np.ndarray],
     plot_spectrum_and_snr_density,
     plotted_colors,
     plotted_linestyles,
     plotted_networks,
+    sigma_ln_f_by_network: dict[str, np.ndarray],
     snr_density_by_network: dict[str, np.ndarray],
+    spectrum_choice,
     write_figures,
 ):
     if spectrum_choice.value == "Omega_GW":
