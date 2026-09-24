@@ -130,6 +130,9 @@ def _():
     REFERENCE_NETWORK = "ET-2L-aligned-CE-Hanford"
 
     OMEGA_GW_MIN: float | None = None
+    # Caps the Omega_GW panels above the signal: the L-shaped networks'
+    # calibration-line spikes otherwise stretch the axis to ~1e2.
+    OMEGA_GW_MAX: float | None = 1e-4
     CUMULATIVE_SNR_ABOVE_FMINS_HZ = (2.0, 5.0, 10.0, 20.0)
 
     # Cumulative-SNR curves on the stacked figure: Okabe-Ito blue / vermillion,
@@ -143,6 +146,7 @@ def _():
         CUMULATIVE_SNR_ABOVE_FMINS_HZ,
         FIDUCIALS,
         NETWORKS,
+        OMEGA_GW_MAX,
         OMEGA_GW_MIN,
         REFERENCE_NETWORK,
         ROOT_DIR,
@@ -175,6 +179,14 @@ def _():
         value="IMRPhenomXAS",
         label="Approximant",
     )
+    # Notebook-only: config/waveform.json is a catalog layer, so its 1 Hz
+    # resolution stays put. Finer grids resolve the SNR peak at ~5-10 Hz,
+    # where 1 Hz bins leave only a handful of points per e-fold.
+    frequency_resolution_choice = mo.ui.dropdown(
+        options={"1": 1.0, "0.5": 0.5, "0.25": 0.25, "0.125": 0.125},
+        value="0.25",
+        label="Frequency resolution (Hz)",
+    )
     observation_time_slider = mo.ui.slider(
         start=1,
         stop=10,
@@ -195,6 +207,7 @@ def _():
     mo.vstack(
         [
             approximant_choice,
+            frequency_resolution_choice,
             observation_time_slider,
             include_cosmic_explorer_switch,
             write_figures_switch,
@@ -202,6 +215,7 @@ def _():
     )
     return (
         approximant_choice,
+        frequency_resolution_choice,
         include_cosmic_explorer_switch,
         observation_time_slider,
         write_figures_switch,
@@ -209,10 +223,15 @@ def _():
 
 
 @app.cell
-def _(approximant_choice, observation_time_slider):
+def _(
+    approximant_choice,
+    frequency_resolution_choice,
+    observation_time_slider,
+):
     approximant = approximant_choice.value
+    frequency_resolution = float(frequency_resolution_choice.value)
     observation_time = float(observation_time_slider.value)
-    return approximant, observation_time
+    return approximant, frequency_resolution, observation_time
 
 
 @app.cell
@@ -474,6 +493,7 @@ def _(
     approximant,
     band_limited_spectrum,
     batch_size,
+    frequency_resolution,
     maximum_frequency,
     maximum_redshift,
     minimum_frequency,
@@ -496,6 +516,7 @@ def _(
         root=ROOT_DIR,
         approximant=approximant,
         maximum_frequency=maximum_frequency,
+        frequency_resolution=frequency_resolution,
     )
 
     _rate = float(jnp.asarray(_merger_rate_fn(FIDUCIALS)))
@@ -850,6 +871,7 @@ def _(format_axis_ticks, network_legend_handles):
         spectrum_linestyle: str,
         ylabel: str,
         ymin: float | None = None,
+        ymax: float | None = None,
         include_spectrum_in_legend: bool = True,
         spectrum_legend_loc: str | None = None,
         xlabel: bool = True,
@@ -898,9 +920,12 @@ def _(format_axis_ticks, network_legend_handles):
         if xlabel:
             ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
         ax.set_ylabel(ylabel)
-        if ymin is not None:
-            _, ymax = ax.get_ylim()
-            ax.set_ylim(ymin, ymax)
+        # Either bound may be pinned; the other keeps its autoscaled value.
+        auto_ymin, auto_ymax = ax.get_ylim()
+        ax.set_ylim(
+            auto_ymin if ymin is None else ymin,
+            auto_ymax if ymax is None else ymax,
+        )
         ax.set_axisbelow(True)
         ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
         format_axis_ticks(ax)
@@ -999,6 +1024,7 @@ def _():
 @app.cell
 def _(
     BASE_DIR,
+    OMEGA_GW_MAX: float | None,
     OMEGA_GW_MIN: float | None,
     ROOT_DIR,
     fiducial_freq,
@@ -1024,6 +1050,7 @@ def _(
         spectrum_linestyle=":",
         ylabel=r"$\Omega_{\mathrm{GW}}(f), \, \sigma_{\ln f}(f)$",
         ymin=OMEGA_GW_MIN,
+        ymax=OMEGA_GW_MAX,
         include_spectrum_in_legend=False,
         spectrum_legend_loc="upper left",
     )
@@ -1098,6 +1125,7 @@ def _(
         colors: Sequence[str],
         linestyles: Sequence[str],
         omega_gw_min: float | None = None,
+        omega_gw_max: float | None = None,
     ) -> Figure:
         """Stack $\\Omega_{\\mathrm{GW}}$ versus $\\sigma_{\\ln f}$ over the SNR density.
 
@@ -1129,6 +1157,7 @@ def _(
             spectrum_linestyle=":",
             ylabel=r"$\Omega_{\mathrm{GW}}(f), \, \sigma_{\ln f}(f)$",
             ymin=omega_gw_min,
+            ymax=omega_gw_max,
             include_spectrum_in_legend=False,
             spectrum_legend_loc="upper left",
             xlabel=False,
@@ -1283,6 +1312,7 @@ def _():
 @app.cell
 def _(
     BASE_DIR,
+    OMEGA_GW_MAX: float | None,
     OMEGA_GW_MIN: float | None,
     ROOT_DIR,
     fiducial_freq,
@@ -1313,6 +1343,7 @@ def _(
         colors=plotted_colors,
         linestyles=plotted_linestyles,
         omega_gw_min=OMEGA_GW_MIN,
+        omega_gw_max=OMEGA_GW_MAX,
     )
     if write_figures:
         save_figures(
