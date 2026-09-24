@@ -23,14 +23,15 @@ with app.setup(hide_code=True):
 
     from astrogwb.detector import (
         effective_psd,
-        gaussian_bin_scale,
         load_sensitivity_map,
+        log_frequency_noise_scale,
     )
     from astrogwb.frequency import frequency_mask as make_frequency_mask
     from astrogwb.frequency import uniform_grid_spacing
     from astrogwb.gwb import (
         omega_gw_from_spectral_density,
         spectral_snr_squared_per_bin,
+        spectral_snr_squared_per_log_frequency,
     )
     from astrogwb.paper.config import (
         fiducials,
@@ -545,8 +546,9 @@ def _(
     snr_squared_by_network: dict[str, np.ndarray] = {}
     snr_lt_by_network: dict[str, np.ndarray] = {}
     snr_gt_by_network: dict[str, np.ndarray] = {}
-    sigma_by_network: dict[str, np.ndarray] = {}
-    omega_sigma_by_network: dict[str, np.ndarray] = {}
+    snr_density_by_network: dict[str, np.ndarray] = {}
+    sigma_ln_f_by_network: dict[str, np.ndarray] = {}
+    omega_sigma_ln_f_by_network: dict[str, np.ndarray] = {}
     _reference_band: (
         tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None
     ) = None
@@ -568,17 +570,30 @@ def _(
             _observation_time_sec,
             _df,
         )
-        _sigma = np.asarray(
-            gaussian_bin_scale(jnp.asarray(_band_seff), observation_time, _df)
+        # Per e-fold rather than per bin, so neither curve moves with the grid.
+        _sigma_ln_f = np.asarray(
+            log_frequency_noise_scale(
+                jnp.asarray(_band_seff),
+                jnp.asarray(_band_freq),
+                observation_time,
+            )
         )
         frequency_by_network[_network.name] = _band_freq
         snr_squared_by_network[_network.name] = _snr_squared
         snr_lt_by_network[_network.name] = _snr_lt
         snr_gt_by_network[_network.name] = _snr_gt
-        sigma_by_network[_network.name] = _sigma
-        omega_sigma_by_network[_network.name] = np.asarray(
+        snr_density_by_network[_network.name] = np.asarray(
+            spectral_snr_squared_per_log_frequency(
+                jnp.asarray(_band_sh),
+                jnp.asarray(_band_seff),
+                jnp.asarray(_band_freq),
+                _observation_time_sec,
+            )
+        )
+        sigma_ln_f_by_network[_network.name] = _sigma_ln_f
+        omega_sigma_ln_f_by_network[_network.name] = np.asarray(
             omega_gw_from_spectral_density(
-                jnp.asarray(_sigma),
+                jnp.asarray(_sigma_ln_f),
                 jnp.asarray(_band_freq),
                 hubble_constant=FIDUCIALS["H0"],
             )
@@ -614,8 +629,9 @@ def _(
         frequencies,
         frequency_by_network,
         frequency_mask,
-        omega_sigma_by_network,
-        sigma_by_network,
+        omega_sigma_ln_f_by_network,
+        sigma_ln_f_by_network,
+        snr_density_by_network,
         snr_gt_by_network,
         snr_lt_by_network,
         snr_squared_by_network,
@@ -805,6 +821,13 @@ def _(
 def _():
     mo.md(r"""
     ## $S_h$ versus network sensitivity curves
+
+    The sensitivity curves are $\sigma_{\ln f}(f) = S_{\mathrm{eff}}(f)/\sqrt{2Tf}$:
+    the noise over a bandwidth of about $f$, so they do not move with the
+    frequency grid. The squared ratio of a spectrum to a curve is
+    $d\mathrm{SNR}^2/d\ln f$, plotted below. The likelihood still uses the
+    per-bin scale $S_{\mathrm{eff}}/\sqrt{2T\Delta f}$, which is lower by
+    $\sqrt{f/\Delta f}$ and so is not a detectability threshold.
     """)
     return
 
@@ -915,7 +938,7 @@ def _(
     plotted_linestyles,
     plotted_networks: tuple[Network, ...],
     sh_ymin_matching_omega_floor,
-    sigma_by_network: dict[str, np.ndarray],
+    sigma_ln_f_by_network: dict[str, np.ndarray],
     write_figures,
 ):
     _fig = plot_spectrum_and_sensitivities(
@@ -923,13 +946,13 @@ def _(
         fiducial_sh,
         plotted_networks,
         frequency_by_network,
-        sigma_by_network,
+        sigma_ln_f_by_network,
         colors=plotted_colors,
         linestyles=plotted_linestyles,
         spectrum_label=r"$S_h$",
         spectrum_color=SPECTRUM["sh"],
         spectrum_linestyle=SPECTRUM_LINESTYLES["sh"],
-        ylabel=r"$S_h(f), \, \sigma(f)\ \mathrm{[Hz^{-1}]}$",
+        ylabel=r"$S_h(f), \, \sigma_{\ln f}(f)\ \mathrm{[Hz^{-1}]}$",
         ymin=sh_ymin_matching_omega_floor(
             fiducial_omega, fiducial_sh, OMEGA_GW_MIN
         ),
@@ -937,7 +960,7 @@ def _(
         spectrum_legend_loc="upper left",
     )
     if write_figures:
-        save_figures({BASE_DIR / "sh_and_sigma.pdf": _fig}, root=ROOT_DIR)
+        save_figures({BASE_DIR / "sh_and_sigma_ln_f.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
@@ -958,7 +981,7 @@ def _(
     fiducial_freq,
     fiducial_omega,
     frequency_by_network: dict[str, np.ndarray],
-    omega_sigma_by_network: dict[str, np.ndarray],
+    omega_sigma_ln_f_by_network: dict[str, np.ndarray],
     plot_spectrum_and_sensitivities,
     plotted_colors,
     plotted_linestyles,
@@ -970,19 +993,19 @@ def _(
         fiducial_omega,
         plotted_networks,
         frequency_by_network,
-        omega_sigma_by_network,
+        omega_sigma_ln_f_by_network,
         colors=plotted_colors,
         linestyles=plotted_linestyles,
         spectrum_label=r"$\Omega_{\mathrm{GW}}$",
         spectrum_color=SPECTRUM["omega_gw"],
         spectrum_linestyle=":",
-        ylabel=r"$\Omega_{\mathrm{GW}}(f), \, \sigma(f)$",
+        ylabel=r"$\Omega_{\mathrm{GW}}(f), \, \sigma_{\ln f}(f)$",
         ymin=OMEGA_GW_MIN,
         include_spectrum_in_legend=False,
         spectrum_legend_loc="upper left",
     )
     if write_figures:
-        save_figures({BASE_DIR / "omega_and_sigma.pdf": _fig}, root=ROOT_DIR)
+        save_figures({BASE_DIR / "omega_and_sigma_ln_f.pdf": _fig}, root=ROOT_DIR)
     _fig
     return
 
@@ -1038,22 +1061,25 @@ def _(format_axis_ticks, network_legend_handles):
     def plot_snr_integrand(
         networks: Sequence[Network],
         frequency_by_network: Mapping[str, np.ndarray],
-        snr_squared_by_network: Mapping[str, np.ndarray],
+        snr_density_by_network: Mapping[str, np.ndarray],
         *,
         colors: Sequence[str],
         linestyles: Sequence[str],
     ) -> Figure:
-        """Plot the per-network matched-filter integrand."""
+        """Plot each network's $d\\mathrm{SNR}^2/d\\ln f$.
+
+        Log x-axis, linear y-axis: the area under a curve over a band is that
+        band's share of $\\mathrm{SNR}^2$.
+        """
         _fig, ax = plt.subplots()
         _draw_snr_curves(
             ax,
             networks,
             frequency_by_network,
-            snr_squared_by_network,
+            snr_density_by_network,
             colors=colors,
             linestyles=linestyles,
-            ylabel=r"$\Delta\mathrm{SNR}^{2}(f)$",
-            loglog=True,
+            ylabel=r"$d\mathrm{SNR}^{2}/d\ln f$",
         )
         _fig.tight_layout()
         return _fig
@@ -1112,7 +1138,11 @@ def _(format_axis_ticks, network_legend_handles):
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ### Plotting the SNR accumulated in each frequency bin
+    ### Plotting the SNR density per e-fold of frequency
+
+    $d\mathrm{SNR}^2/d\ln f = 2Tf\,S_h^2/S_{\mathrm{eff}}^2$ on a log
+    frequency axis and a linear y-axis, so equal areas are equal contributions
+    to $\mathrm{SNR}^2$ and the curve does not depend on the frequency grid.
     """)
     return
 
@@ -1126,13 +1156,13 @@ def _(
     plotted_colors,
     plotted_linestyles,
     plotted_networks: tuple[Network, ...],
-    snr_squared_by_network: dict[str, np.ndarray],
+    snr_density_by_network: dict[str, np.ndarray],
     write_figures,
 ):
     _fig = plot_snr_integrand(
         plotted_networks,
         frequency_by_network,
-        snr_squared_by_network,
+        snr_density_by_network,
         colors=plotted_colors,
         linestyles=plotted_linestyles,
     )
