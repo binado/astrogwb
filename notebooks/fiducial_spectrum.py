@@ -246,33 +246,13 @@ def _():
     mo.md(r"""
     ## Plot helpers
 
-    Shared band-limiting, SNR accumulation, and the dual-axis $S_h$ /
-    $\Omega_{\mathrm{GW}}$ drawing used by the spectrum panels.
+    Shared band-limiting and SNR accumulation used by the spectrum panels.
     """)
     return
 
 
 @app.cell
 def _():
-    def sh_ymin_matching_omega_floor(
-        omega_gw: np.ndarray,
-        spectral_density_arr: np.ndarray,
-        omega_gw_min: float | None = None,
-    ) -> float | None:
-        """Infer $S_h$ ymin from the frequency where $\\Omega_{\\mathrm{GW}}$ hits its floor.
-
-        Defaults to ``None``, which means no floor: the caller should leave the
-        axis autoscaled.
-        """
-        if omega_gw_min is None:
-            return None
-        if omega_gw_min <= 0.0:
-            raise ValueError(f"omega_gw_min must be positive, got {omega_gw_min}")
-        if omega_gw.size == 0:
-            raise ValueError("cannot infer S_h ymin from an empty spectrum")
-        index = int(np.argmin(np.abs(np.log(omega_gw) - np.log(omega_gw_min))))
-        return float(spectral_density_arr[index])
-
     def band_limited_spectrum(
         frequencies: jax.Array,
         spectral_density_arr: jax.Array,
@@ -361,106 +341,11 @@ def _():
         else:
             axis.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
 
-    def _spectrum_line_styles(
-        *,
-        omega_color: str | None,
-        sh_color: str | None,
-        omega_linestyle: str | None,
-        sh_linestyle: str | None,
-    ) -> tuple[str, str, str, str]:
-        if omega_color is None:
-            omega_color = SPECTRUM["omega_gw"]
-        if sh_color is None:
-            sh_color = SPECTRUM["sh"]
-        if omega_linestyle is None:
-            omega_linestyle = SPECTRUM_LINESTYLES["omega_gw"]
-        if sh_linestyle is None:
-            sh_linestyle = SPECTRUM_LINESTYLES["sh"]
-        return omega_color, sh_color, omega_linestyle, sh_linestyle
-
-    def draw_omega_and_sh(
-        ax_sh: MplAxes,
-        frequency: np.ndarray,
-        omega_gw: np.ndarray,
-        spectral_density: np.ndarray,
-        *,
-        omega_gw_min: float | None = None,
-        ax_omega: MplAxes | None = None,
-        omega_color: str | None = None,
-        sh_color: str | None = None,
-        omega_linestyle: str | None = None,
-        sh_linestyle: str | None = None,
-        xlabel: bool = True,
-        legend: bool = True,
-    ) -> tuple[MplAxes, Line2D, Line2D]:
-        """Draw dual-axis $S_h$ / $\\Omega_{\\mathrm{GW}}$ onto ``ax_sh``.
-
-        A numeric ``omega_gw_min`` pins both y-axes to that floor. The default
-        ``None`` leaves them autoscaled.
-        """
-        axis_color = "k"
-        omega_color, sh_color, omega_linestyle, sh_linestyle = _spectrum_line_styles(
-            omega_color=omega_color,
-            sh_color=sh_color,
-            omega_linestyle=omega_linestyle,
-            sh_linestyle=sh_linestyle,
-        )
-        if ax_omega is None:
-            ax_omega = ax_sh.twinx()
-
-        (line_sh,) = ax_sh.loglog(
-            frequency,
-            spectral_density,
-            color=sh_color,
-            linestyle=sh_linestyle,
-            label=r"$S_h$",
-        )
-        (line_omega,) = ax_omega.loglog(
-            frequency,
-            omega_gw,
-            color=omega_color,
-            linestyle=omega_linestyle,
-            label=r"$\Omega_{\mathrm{GW}}$",
-        )
-
-        if xlabel:
-            ax_sh.set_xlabel(r"$f\ \mathrm{(Hz)}$", color=axis_color)
-        ax_sh.set_ylabel(r"$S_h(f)\ \mathrm{[Hz^{-1}]}$", color=axis_color)
-        ax_omega.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$", color=axis_color)
-        ax_sh.tick_params(axis="x", colors=axis_color)
-        ax_sh.tick_params(axis="y", colors=axis_color)
-        ax_omega.tick_params(axis="y", colors=axis_color)
-        for axis in (ax_sh, ax_omega):
-            for spine in axis.spines.values():
-                spine.set_color(axis_color)
-        if omega_gw_min is not None:
-            sh_ymin = sh_ymin_matching_omega_floor(
-                omega_gw, spectral_density, omega_gw_min
-            )
-            _, ymax = ax_sh.get_ylim()
-            ax_sh.set_ylim(sh_ymin, ymax)
-            ax_omega.set_ylim(omega_gw_min, None)
-        ax_sh.set_axisbelow(True)
-        ax_sh.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-        ax_omega.grid(False)
-        format_axis_ticks(ax_sh)
-        format_axis_ticks(ax_omega)
-        if legend:
-            ax_sh.legend(
-                handles=[line_sh, line_omega],
-                loc="upper right",
-                frameon=False,
-                handlelength=2.5,
-            )
-        return ax_omega, line_sh, line_omega
-
     return (
         band_limited_spectrum,
         cumulative_snr_above_at,
-        draw_omega_and_sh,
         format_axis_ticks,
         network_legend_handles,
-        sh_ymin_matching_omega_floor,
         snr_integrand_and_cumulative,
     )
 
