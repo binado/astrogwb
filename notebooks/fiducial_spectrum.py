@@ -7,6 +7,7 @@ with app.setup(hide_code=True):
     from collections.abc import Mapping, Sequence
     from functools import partial
     from pathlib import Path
+    from typing import Any
 
     import jax
     import jax.numpy as jnp
@@ -800,7 +801,7 @@ def _(
     plot_effective_psds,
     plotted_colors,
     plotted_linestyles,
-    plotted_networks: tuple[Network, ...],
+    plotted_networks,
     write_figures,
 ):
     _fig = plot_effective_psds(
@@ -834,7 +835,8 @@ def _():
 
 @app.cell
 def _(format_axis_ticks, network_legend_handles):
-    def plot_spectrum_and_sensitivities(
+    def draw_spectrum_and_sensitivities(
+        ax: MplAxes,
         frequency: np.ndarray,
         spectrum: np.ndarray,
         networks: Sequence[Network],
@@ -850,8 +852,9 @@ def _(format_axis_ticks, network_legend_handles):
         ymin: float | None = None,
         include_spectrum_in_legend: bool = True,
         spectrum_legend_loc: str | None = None,
-    ) -> Figure:
-        """Overlay a fiducial spectrum with per-network Gaussian sensitivities.
+        xlabel: bool = True,
+    ) -> None:
+        """Overlay a fiducial spectrum with per-network sensitivities on ``ax``.
 
         When ``spectrum_legend_loc`` is set, the spectrum gets its own legend inside
         the axes (e.g. ``"upper left"``). The network legend still uses
@@ -868,7 +871,6 @@ def _(format_axis_ticks, network_legend_handles):
                 "use at most one of include_spectrum_in_legend and spectrum_legend_loc"
             )
 
-        _fig, ax = plt.subplots()
         (line_spectrum,) = ax.loglog(
             frequency,
             spectrum,
@@ -893,7 +895,8 @@ def _(format_axis_ticks, network_legend_handles):
                 linestyle=linestyle,
             )
 
-        ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+        if xlabel:
+            ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
         ax.set_ylabel(ylabel)
         if ymin is not None:
             _, ymax = ax.get_ylim()
@@ -918,10 +921,30 @@ def _(format_axis_ticks, network_legend_handles):
             )
             ax.add_artist(spectrum_legend)
         ax.legend(handles=legend_handles, **DETECTOR_COMPARISON_LEGEND)
+
+    def plot_spectrum_and_sensitivities(
+        frequency: np.ndarray,
+        spectrum: np.ndarray,
+        networks: Sequence[Network],
+        frequency_by_network: Mapping[str, np.ndarray],
+        sensitivities_by_network: Mapping[str, np.ndarray],
+        **kwargs: Any,
+    ) -> Figure:
+        """One-panel figure from :func:`draw_spectrum_and_sensitivities`."""
+        _fig, ax = plt.subplots()
+        draw_spectrum_and_sensitivities(
+            ax,
+            frequency,
+            spectrum,
+            networks,
+            frequency_by_network,
+            sensitivities_by_network,
+            **kwargs,
+        )
         _fig.tight_layout()
         return _fig
 
-    return (plot_spectrum_and_sensitivities,)
+    return draw_spectrum_and_sensitivities, plot_spectrum_and_sensitivities
 
 
 @app.cell
@@ -936,7 +959,7 @@ def _(
     plot_spectrum_and_sensitivities,
     plotted_colors,
     plotted_linestyles,
-    plotted_networks: tuple[Network, ...],
+    plotted_networks,
     sh_ymin_matching_omega_floor,
     sigma_ln_f_by_network: dict[str, np.ndarray],
     write_figures,
@@ -985,7 +1008,7 @@ def _(
     plot_spectrum_and_sensitivities,
     plotted_colors,
     plotted_linestyles,
-    plotted_networks: tuple[Network, ...],
+    plotted_networks,
     write_figures,
 ):
     _fig = plot_spectrum_and_sensitivities(
@@ -1019,7 +1042,11 @@ def _():
 
 
 @app.cell
-def _(format_axis_ticks, network_legend_handles):
+def _(
+    draw_spectrum_and_sensitivities,
+    format_axis_ticks,
+    network_legend_handles,
+):
     def _draw_snr_curves(
         ax: MplAxes,
         networks: Sequence[Network],
@@ -1030,6 +1057,7 @@ def _(format_axis_ticks, network_legend_handles):
         linestyles: Sequence[str],
         ylabel: str,
         loglog: bool = False,
+        legend: bool = True,
     ) -> None:
         """Overlay one per-network SNR curve on ``ax`` and style the axes."""
         if len(networks) != len(colors) or len(networks) != len(linestyles):
@@ -1053,10 +1081,75 @@ def _(format_axis_ticks, network_legend_handles):
         ax.set_axisbelow(True)
         ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
         format_axis_ticks(ax)
-        ax.legend(
-            handles=network_legend_handles(networks, colors, linestyles),
-            **DETECTOR_COMPARISON_LEGEND,
+        if legend:
+            ax.legend(
+                handles=network_legend_handles(networks, colors, linestyles),
+                **DETECTOR_COMPARISON_LEGEND,
+            )
+
+    def plot_spectrum_and_snr_density(
+        frequency: np.ndarray,
+        omega_gw: np.ndarray,
+        networks: Sequence[Network],
+        frequency_by_network: Mapping[str, np.ndarray],
+        omega_sensitivities_by_network: Mapping[str, np.ndarray],
+        snr_density_by_network: Mapping[str, np.ndarray],
+        *,
+        colors: Sequence[str],
+        linestyles: Sequence[str],
+        omega_gw_min: float | None = None,
+    ) -> Figure:
+        """Stack $\\Omega_{\\mathrm{GW}}$ versus $\\sigma_{\\ln f}$ over the SNR density.
+
+        The squared gap between the spectrum and a network's curve in the top
+        panel is that network's $d\\mathrm{SNR}^2/d\\ln f$ in the bottom one,
+        so the shared frequency axis lines the comparison up with where the
+        SNR accrues. ``snr_density_by_network`` is drawn as given; pass it
+        normalized to compare shapes rather than amplitudes.
+        """
+        width, height = plt.rcParams["figure.figsize"]
+        _fig, (ax_top, ax_bottom) = plt.subplots(
+            2,
+            1,
+            sharex=True,
+            figsize=(width, 1.6 * height),
+            gridspec_kw={"height_ratios": (3, 2)},
         )
+        draw_spectrum_and_sensitivities(
+            ax_top,
+            frequency,
+            omega_gw,
+            networks,
+            frequency_by_network,
+            omega_sensitivities_by_network,
+            colors=colors,
+            linestyles=linestyles,
+            spectrum_label=r"$\Omega_{\mathrm{GW}}$",
+            spectrum_color=SPECTRUM["omega_gw"],
+            spectrum_linestyle=":",
+            ylabel=r"$\Omega_{\mathrm{GW}}(f), \, \sigma_{\ln f}(f)$",
+            ymin=omega_gw_min,
+            include_spectrum_in_legend=False,
+            spectrum_legend_loc="upper left",
+            xlabel=False,
+        )
+        _draw_snr_curves(
+            ax_bottom,
+            networks,
+            frequency_by_network,
+            snr_density_by_network,
+            colors=colors,
+            linestyles=linestyles,
+            ylabel=(
+                r"$\mathrm{SNR}_{\mathrm{tot}}^{-2}\,"
+                r"d\mathrm{SNR}^{2}/d\ln f$"
+            ),
+            legend=False,
+        )
+        # The bottom panel's semilogx reset the shared x formatter.
+        format_axis_ticks(ax_top)
+        _fig.tight_layout(h_pad=0.4)
+        return _fig
 
     def plot_snr_integrand(
         networks: Sequence[Network],
@@ -1132,6 +1225,7 @@ def _(format_axis_ticks, network_legend_handles):
         plot_snr_cumulative_above,
         plot_snr_cumulative_below,
         plot_snr_integrand,
+        plot_spectrum_and_snr_density,
     )
 
 
@@ -1155,7 +1249,7 @@ def _(
     plot_snr_integrand,
     plotted_colors,
     plotted_linestyles,
-    plotted_networks: tuple[Network, ...],
+    plotted_networks,
     snr_density_by_network: dict[str, np.ndarray],
     write_figures,
 ):
@@ -1168,6 +1262,63 @@ def _(
     )
     if write_figures:
         save_figures({BASE_DIR / "snr_integrand.pdf": _fig}, root=ROOT_DIR)
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Network sensitivity and SNR density, stacked
+
+    The paper figure: $\Omega_{\mathrm{GW}}$ against each network's
+    $\sigma_{\ln f}$ on top, and below it $d\mathrm{SNR}^2/d\ln f$ normalized
+    by each network's $\mathrm{SNR}^2_{\mathrm{tot}}$, so every curve has unit
+    area in $\ln f$ and the panel compares where the SNR accrues rather than
+    how much there is. Absolute SNRs are in the table below.
+    """)
+    return
+
+
+@app.cell
+def _(
+    BASE_DIR,
+    OMEGA_GW_MIN: float | None,
+    ROOT_DIR,
+    fiducial_freq,
+    fiducial_omega,
+    frequency_by_network: dict[str, np.ndarray],
+    omega_sigma_ln_f_by_network: dict[str, np.ndarray],
+    plot_spectrum_and_snr_density,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks,
+    snr_density_by_network: dict[str, np.ndarray],
+    snr_squared_by_network: dict[str, np.ndarray],
+    write_figures,
+):
+    # Per-bin terms sum to SNR^2_tot, and density * df / f is the per-bin term,
+    # so each normalized curve integrates to one over ln f on this grid.
+    _normalized_snr_density = {
+        name: density / np.sum(snr_squared_by_network[name])
+        for name, density in snr_density_by_network.items()
+    }
+    _fig = plot_spectrum_and_snr_density(
+        fiducial_freq,
+        fiducial_omega,
+        plotted_networks,
+        frequency_by_network,
+        omega_sigma_ln_f_by_network,
+        _normalized_snr_density,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
+        omega_gw_min=OMEGA_GW_MIN,
+    )
+    if write_figures:
+        save_figures(
+            {BASE_DIR / "omega_sensitivity_and_snr_density.pdf": _fig},
+            root=ROOT_DIR,
+        )
     _fig
     return
 
@@ -1188,7 +1339,7 @@ def _(
     plot_snr_cumulative_below,
     plotted_colors,
     plotted_linestyles,
-    plotted_networks: tuple[Network, ...],
+    plotted_networks,
     snr_lt_by_network: dict[str, np.ndarray],
     write_figures,
 ):
@@ -1221,7 +1372,7 @@ def _(
     plot_snr_cumulative_above,
     plotted_colors,
     plotted_linestyles,
-    plotted_networks: tuple[Network, ...],
+    plotted_networks,
     snr_gt_by_network: dict[str, np.ndarray],
     write_figures,
 ):
@@ -1296,7 +1447,7 @@ def _(
     CUMULATIVE_SNR_ABOVE_FMINS_HZ,
     build_cumulative_snr_above_table,
     frequency_by_network: dict[str, np.ndarray],
-    plotted_networks: tuple[Network, ...],
+    plotted_networks,
     snr_squared_by_network: dict[str, np.ndarray],
 ):
     cumulative_snr_above_table, latex_table = build_cumulative_snr_above_table(
