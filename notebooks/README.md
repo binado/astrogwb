@@ -88,7 +88,14 @@ standard deviations the constructed `xi_n` and `gamma` widths span, and
 $\Omega_m$ keeps the production Normal scale. It reads the band, redshift
 grid, and catalog names from `config/analysis.json` and needs those catalogs
 on disk (`outputs/catalogs/md-imrphenom-s41-n32768.h5` for both the injection
-and the proposal). Open it from the repository root with
+and the proposal). A switch replaces the population with the time-delayed
+Madau–Dickinson model: it then reads the `time-delay/delay-slope` run through
+`assemble_run`, forecasts $H_0$ and `delay_slope` in one block, and puts a
+Gaussian prior on `delay_slope` whose width is the experiment's Uniform divided
+by the slider value. That mode needs
+`outputs/catalogs/md-delayed-imrphenom-s71-n32768.h5` (injection) and
+`outputs/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.h5` (proposal).
+Open it from the repository root with
 `uv run --extra notebook --group jupyter marimo edit notebooks/fisher_forecast.py`.
 
 For the shared scientific values on their own, without standing in for a

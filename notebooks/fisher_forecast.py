@@ -22,7 +22,8 @@ with app.setup(hide_code=True):
 
     from astrogwb.paper.catalogs import load_run_catalog
     from astrogwb.paper.config import fiducials, networks, priors
-    from astrogwb.paper.config.runs import ANALYSIS_PATH, CATALOGS_ROOT
+    from astrogwb.paper.config.mcmc import materialize_prior
+    from astrogwb.paper.config.runs import ANALYSIS_PATH, CATALOGS_ROOT, assemble_run
     from astrogwb.paper.inference import prepare_inference_inputs
     from astrogwb.paper.plotting import (
         combo_colors,
@@ -65,6 +66,14 @@ def _():
     (`xi_n`) and $\gamma$ take their widths from the production Uniform, in
     units of the standard-deviation slider. The slider does not rerun the
     Jacobian.
+
+    With the time-delay switch on, the target is
+    `bns_md_time_delayed_cosmological`: the Madau–Dickinson law is the
+    formation rate, and mergers follow after a delay
+    $p(\tau) \propto \tau^{\alpha_\tau}$. The delay is fixed in Gyr, so $H_0$
+    reshapes the redshift law instead of only rescaling it. The free
+    parameters are then $H_0$ and $\alpha_\tau$ (`delay_slope`), in one
+    block, and every other fiducial stays fixed.
     """)
     return
 
@@ -80,12 +89,28 @@ def _():
     come from `config/analysis.json`. Both roles read
     `outputs/catalogs/<name>.h5`. The notebook stops if either file is
     missing.
+
+    With the time-delay switch on, the same values come instead from the
+    committed `time-delay/delay-slope` run, merged by `assemble_run` exactly
+    as the workflow merges it. That run adds the delayed population and its
+    construction kwargs, the `delay_slope` fiducial and prior, the delayed
+    injection catalog, and the $\epsilon = 0.1$ guard-mixture proposal.
+    Flipping the switch reloads the catalogs and recomputes the Jacobian.
     """)
     return
 
 
 @app.cell
 def _():
+    time_delay_switch = mo.ui.switch(
+        value=False, label="Time-delayed Madau–Dickinson population"
+    )
+    time_delay_switch
+    return (time_delay_switch,)
+
+
+@app.cell
+def _(time_delay_switch):
     # This file lives in notebooks/, so the repository root is its grandparent.
     # `__file__` is the notebook path under `marimo edit` and when the file is
     # run as a script.
@@ -99,17 +124,38 @@ def _():
     jax.config.update("jax_enable_x64", True)
     use_paper_style(root=ROOT_DIR)
 
-    FIDUCIALS = fiducials(root=ROOT_DIR)
+    time_delay = bool(time_delay_switch.value)
     NETWORK = "ET-2L-aligned-CE-Hanford"
     detectors = networks(root=ROOT_DIR)[NETWORK]
 
-    analysis = load_mapping(ROOT_DIR / ANALYSIS_PATH)["analysis"]
+    if time_delay:
+        # The committed experiment, merged as the workflow merges it, so the
+        # population, catalogs, fiducials and priors cannot drift from it.
+        _run = assemble_run("time-delay", "delay-slope", root=ROOT_DIR)
+        analysis = _run["analysis"]
+        FIDUCIALS = {name: float(value) for name, value in _run["fiducials"].items()}
+        PRODUCTION_PRIORS = {
+            name: materialize_prior(spec) for name, spec in _run["priors"].items()
+        }
+        # H0 is no amplitude here: the delay in Gyr makes it reshape the law.
+        BLOCKS = {"Time delay": ("H0", "delay_slope")}
+    else:
+        analysis = load_mapping(ROOT_DIR / ANALYSIS_PATH)["analysis"]
+        FIDUCIALS = fiducials(root=ROOT_DIR)
+        PRODUCTION_PRIORS = priors(root=ROOT_DIR)
+        # H0 is only in the cosmological block.
+        BLOCKS = {
+            "Cosmological": ("H0", "Omega_m"),
+            "Modified propagation": ("xi_0", "xi_n"),
+            "Astrophysical": ("gamma", "kappa", "z_peak"),
+        }
     observation_time = float(analysis["observation_time"])
     minimum_frequency = float(analysis["minimum_frequency"])
     maximum_frequency = float(analysis["maximum_frequency"])
     population = analysis["population"]
+    # JSON keeps the integer kwargs (n_grid, n_delay_nodes) integers.
     population_kwargs = {
-        key: int(value) if key == "n_grid" else float(value)
+        key: value if isinstance(value, int) else float(value)
         for key, value in population["model_kwargs"].items()
     }
     model_name = str(population["model_name"])
@@ -120,19 +166,20 @@ def _():
     injection_path = ROOT_DIR / CATALOGS_ROOT / f"{catalog_names['injection']}.h5"
     proposal_path = ROOT_DIR / CATALOGS_ROOT / f"{catalog_names['proposal']}.h5"
 
-    # Column order of the single Jacobian. H0 is only in the cosmological
-    # block. The three held-fixed names stay in the parameter dict.
-    COSMOLOGICAL = ("H0", "Omega_m")
-    MODIFIED_PROPAGATION = ("xi_0", "xi_n")
-    ASTROPHYSICAL = ("gamma", "kappa", "z_peak")
-    FREE_PARAMETERS = COSMOLOGICAL + MODIFIED_PROPAGATION + ASTROPHYSICAL
-    HELD_FIXED = ("local_merger_rate", "minimum_mass", "mass_width")
+    # Column order of the single Jacobian: the blocks, concatenated. Every
+    # held-fixed name stays in the parameter dict at its fiducial.
+    FREE_PARAMETERS = tuple(name for names in BLOCKS.values() for name in names)
+    HELD_FIXED = (
+        tuple(name for name in FIDUCIALS if name not in FREE_PARAMETERS)
+        if time_delay
+        else ("local_merger_rate", "minimum_mass", "mass_width")
+    )
     classified = set(FREE_PARAMETERS) | set(HELD_FIXED)
     missing = sorted(classified - set(FIDUCIALS))
     unclassified = sorted(set(FIDUCIALS) - classified)
     if missing or unclassified:
         raise KeyError(
-            "fiducial classification does not match fiducials(): "
+            "fiducial classification does not match the fiducials: "
             f"missing {missing}, unclassified {unclassified}"
         )
 
@@ -150,20 +197,20 @@ def _():
     CUTOFF_COLORS = tuple(combo_colors(len(CUTOFFS_HZ)))
     N_CORNER_SAMPLES = 20_000
 
+    print("population:", model_name)
     print("network:", NETWORK, detectors)
     print("free:", ", ".join(FREE_PARAMETERS))
     print("fixed:", ", ".join(HELD_FIXED))
     print("injection:", injection_path)
     print("proposal:", proposal_path)
     return (
-        ASTROPHYSICAL,
-        COSMOLOGICAL,
+        BLOCKS,
         CUTOFFS_HZ,
         CUTOFF_COLORS,
         FIDUCIALS,
         FREE_PARAMETERS,
-        MODIFIED_PROPAGATION,
         N_CORNER_SAMPLES,
+        PRODUCTION_PRIORS,
         ROOT_DIR,
         density_sites,
         detectors,
@@ -176,6 +223,7 @@ def _():
         observation_time,
         population_kwargs,
         proposal_path,
+        time_delay,
     )
 
 
@@ -187,9 +235,10 @@ def _():
     `prepare_inference_inputs` restricts both catalogs to the analysis
     redshift window, builds the fiducial injection spectrum, the effective
     PSD, and the band mask, and binds the proposal catalog to the target
-    population. Evaluated at the catalog fiducials, the injection draw is its
-    own proposal: `config/analysis.json` names the same catalog for both
-    roles. The per-bin scale and the frequency mask passed to the Fisher
+    population. Without the time delay, the injection draw is its own
+    proposal: `config/analysis.json` names the same catalog for both roles.
+    With it, the proposal is the run's guard mixture, and the Jacobian is
+    that of the importance estimator the run samples. The per-bin scale and the frequency mask passed to the Fisher
     matrix are that object's `model_kwargs`. A low-frequency cutoff changes
     the mask only; the scale array stays the one fixed by the analysis band
     and the detector-coverage gaps.
@@ -554,7 +603,8 @@ def _():
     that contains the parameter. The mean of the forecast stays at the
     fiducial.
 
-    The widths come from `priors()` (`config/priors.json`):
+    Without the time delay, the widths come from `priors()`
+    (`config/priors.json`):
 
     - $\Omega_m$ uses the production Normal scale as $\sigma$. The slider
       does not rescale it.
@@ -565,6 +615,11 @@ def _():
       rate, $(1+z)^{\gamma}$. Its $\sigma$ is the production Uniform width
       divided by $N_{\sigma}$, so the full production range is
       $N_{\sigma}$ standard deviations.
+
+    With the time delay, only $\alpha_\tau$ (`delay_slope`) carries a prior.
+    Its $\sigma$ is the width of the `time-delay` experiment's Uniform divided
+    by $N_{\sigma}$, as for $\gamma$. $H_0$ keeps none: its production prior
+    is a wide Uniform.
     """)
     return
 
@@ -591,46 +646,37 @@ def _(num_sigma_slider):
 
 
 @app.cell
-def _(
-    ASTROPHYSICAL,
-    COSMOLOGICAL,
-    FIDUCIALS,
-    MODIFIED_PROPAGATION,
-    ROOT_DIR,
-    num_sigma,
-):
-    _production = priors(root=ROOT_DIR)
-    _omega_m = _production["Omega_m"]
-    _xi_n = _production["xi_n"]
-    _gamma = _production["gamma"]
-    if not isinstance(_omega_m, Normal):
-        raise TypeError(
-            f"Omega_m production prior must be Normal, got {type(_omega_m).__name__}"
-        )
-    if not isinstance(_xi_n, Uniform):
-        raise TypeError(
-            f"xi_n production prior must be Uniform, got {type(_xi_n).__name__}"
-        )
-    if not isinstance(_gamma, Uniform):
-        raise TypeError(
-            f"gamma production prior must be Uniform, got {type(_gamma).__name__}"
-        )
-    # gamma, not kappa: madau_dickinson_rate goes as (1+z)^gamma at low redshift.
-    _raw_sigmas = {
-        "Omega_m": float(_omega_m.scale),
-        "xi_n": (float(FIDUCIALS["xi_n"]) - float(_xi_n.low)) / num_sigma,
-        "gamma": (float(_gamma.high) - float(_gamma.low)) / num_sigma,
-    }
-    _blocks = {
-        "Omega_m": COSMOLOGICAL,
-        "xi_n": MODIFIED_PROPAGATION,
-        "gamma": ASTROPHYSICAL,
-    }
+def _(BLOCKS, FIDUCIALS, PRODUCTION_PRIORS, num_sigma, time_delay):
+    def _require(name: str, kind: type) -> Normal | Uniform:
+        prior = PRODUCTION_PRIORS[name]
+        if not isinstance(prior, kind):
+            raise TypeError(
+                f"{name} production prior must be {kind.__name__}, "
+                f"got {type(prior).__name__}"
+            )
+        return prior
+
+    def _width(name: str) -> float:
+        prior = _require(name, Uniform)
+        return (float(prior.high) - float(prior.low)) / num_sigma
+
+    if time_delay:
+        _raw_sigmas = {"delay_slope": _width("delay_slope")}
+    else:
+        _raw_sigmas = {
+            "Omega_m": float(_require("Omega_m", Normal).scale),
+            "xi_n": (float(FIDUCIALS["xi_n"]) - float(_require("xi_n", Uniform).low))
+            / num_sigma,
+            # gamma, not kappa: madau_dickinson_rate goes as (1+z)^gamma at
+            # low redshift.
+            "gamma": _width("gamma"),
+        }
+    _free = {name for names in BLOCKS.values() for name in names}
     for _name, _sigma in _raw_sigmas.items():
         if not np.isfinite(_sigma) or _sigma <= 0.0:
             raise ValueError(f"{_name} prior sigma must be positive, got {_sigma}")
-        if _name not in _blocks[_name]:
-            raise RuntimeError(f"{_name} is not in its Fisher block {_blocks[_name]}")
+        if _name not in _free:
+            raise RuntimeError(f"{_name} is in no Fisher block {tuple(BLOCKS)}")
     prior_sigmas = _raw_sigmas
     for _name, _sigma in prior_sigmas.items():
         print(f"{_name}: sigma={_sigma:.6g}, 1/sigma**2={1.0 / _sigma**2:.6g}")
@@ -638,32 +684,14 @@ def _(
 
 
 @app.cell
-def _(COSMOLOGICAL, band_fishers, prior_sigmas, render_block):
-    cosmological = render_block(
-        "Cosmological", COSMOLOGICAL, band_fishers, prior_sigmas
+def _(BLOCKS, band_fishers, prior_sigmas, render_block):
+    forecasts = mo.vstack(
+        [
+            render_block(title, names, band_fishers, prior_sigmas)
+            for title, names in BLOCKS.items()
+        ]
     )
-    cosmological
-    return
-
-
-@app.cell
-def _(MODIFIED_PROPAGATION, band_fishers, prior_sigmas, render_block):
-    modified_propagation = render_block(
-        "Modified propagation",
-        MODIFIED_PROPAGATION,
-        band_fishers,
-        prior_sigmas,
-    )
-    modified_propagation
-    return
-
-
-@app.cell
-def _(ASTROPHYSICAL, band_fishers, prior_sigmas, render_block):
-    astrophysical = render_block(
-        "Astrophysical", ASTROPHYSICAL, band_fishers, prior_sigmas
-    )
-    astrophysical
+    forecasts
     return
 
 

@@ -7,6 +7,7 @@
     "xi_0": "$\\Xi_0$",
     "xi_n": "$n$",
     "gamma": "$\\gamma$",
+    "delay_slope": "$\\alpha_\\tau$",
     "kappa": "$\\kappa$",
     "z_peak": "$z_{\\mathrm{peak}}$",
     "local_merger_rate": "$\\mathcal{R}_0\\,[\\mathrm{Gpc^{-3}\\,yr^{-1}}]$",
