@@ -506,9 +506,17 @@ def test_one_compiled_sampler_serves_several_frequency_bands(
 
     This is the whole reason the band is a traced mask rather than compressed
     arrays: compressing makes the bin count a *shape*, so every band is a new
-    signature and a fresh sampler. Here one ``MCMC`` object is run twice with
-    the same shapes and a different mask value, and the second run's
-    compilations are counted against the first's.
+    signature and a fresh sampler. Here one ``MCMC`` object is warmed up, then
+    re-run on the same band and on a narrower one; switching the band must
+    compile nothing that re-running the same band does not.
+
+    The baseline is a repeat run rather than the first run because neither
+    end of a first-vs-second ratio is stable. The first run's count is mostly
+    eager primitives (``jit(log1p)`` on the grid, ...) that JAX caches process
+    wide, so it collapses when an earlier test has already compiled the same
+    shapes. And every ``MCMC.run`` recompiles numpyro's outer
+    ``_fori_collect_loop``, whose static body is a fresh ``jit`` wrapper per
+    call, however unchanged its inputs.
     """
     inputs = analysis_inputs
     kwargs = _model_kwargs(inputs)
@@ -538,11 +546,14 @@ def test_one_compiled_sampler_serves_several_frequency_bands(
         compilations = _count_compilations(go)
         return compilations, mcmc.get_samples()["H0"]
 
-    first, wide_h0 = run(wide, SEED)
-    second, narrow_h0 = run(narrow, SEED)
+    warmup, _ = run(wide, SEED)
+    repeat, wide_h0 = run(wide, SEED)
+    switched, narrow_h0 = run(narrow, SEED)
 
-    assert first > 0
-    assert second < first / 10, (first, second)
+    # The model closure is new to this test, so its sampler compiles at least
+    # once whatever ran before; this also proves the counter sees compiles.
+    assert warmup > 0
+    assert switched <= repeat, (warmup, repeat, switched)
     # A narrower band is less informative, so the two chains are genuinely
     # different -- the reused program is not one that ignores its mask.
     assert float(jnp.std(narrow_h0)) > float(jnp.std(wide_h0))

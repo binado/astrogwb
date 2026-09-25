@@ -702,7 +702,17 @@ def test_power_matches_the_gwmock_backend(approximant: str) -> None:
     ``IMRPhenomHM``: the multi-mode models accumulate more of it than the
     single-mode ones), so ``1e-11`` leaves about two decades of headroom while
     still pinning agreement to eleven significant figures.
+
+    The families come from Ripple's registry, gwmock's from a list of its own,
+    so a Ripple release can add one gwmock cannot yet generate (ripplegw 0.4.0
+    added ``IMRPhenomXP_NRTidalv3``). There is no reference to compare such a
+    family against, so it is skipped rather than failed -- and asked of
+    gwmock's public list rather than named, so it rejoins once gwmock has it.
     """
+    from gwmock_signal.waveform import RippleBackend
+
+    if approximant not in RippleBackend().available_approximants():
+        pytest.skip(f"gwmock-signal has no {approximant} to compare against")
     settings = {
         "sampling_frequency": 512.0,
         "minimum_frequency": 16.0,
