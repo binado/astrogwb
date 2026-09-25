@@ -111,11 +111,24 @@ class RedshiftDistribution(InterpolatedDistribution):
             )
         )
         y = (
-            self._source_frame_distribution(redshift_grid, params)
+            self._merger_rate(redshift_grid, params)
             / (1.0 + redshift_grid)
             * self.differential_comoving_volume_grid
         )
         super().__init__(redshift_grid, y, validate_args=validate_args)
+
+    def _merger_rate(
+        self, redshift: jax.Array, params: Mapping[str, ArrayLike]
+    ) -> jax.Array:
+        r"""Source-frame merger rate on the grid: :math:`\psi(z)` itself.
+
+        The one hook a subclass overrides to change the rate while keeping the
+        cosmology, normalization and sampler; see
+        :class:`~astrogwb.distributions.redshift.time_delayed.TimeDelayedRedshiftDistribution`.
+        Called from ``__init__``, so it may read only attributes a subclass
+        assigns *before* calling ``super().__init__``.
+        """
+        return self._source_frame_distribution(redshift, params)
 
     def source_frame_distribution(
         self, redshift: ArrayLike, params: Mapping[str, ArrayLike]

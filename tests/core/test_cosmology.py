@@ -11,7 +11,10 @@ import pytest
 from astrogwb.cosmology import (
     distance_and_volume_grid,
     hubble_distance,
+    hubble_time_gyr,
+    lookback_time,
     normalized_hubble_parameter,
+    redshift_at_lookback_time,
 )
 
 
@@ -276,3 +279,41 @@ class TestDistanceAndVolumeGrid:
         np.testing.assert_allclose(
             differential_comoving_volume, differential_comoving_volume_theirs, rtol=1e-8
         )
+
+
+def test_lookback_time_derivative_is_the_integrand(parameters) -> None:
+    """The closed form differentiates to dt_L/dz = t_H / ((1 + z) E(z))."""
+    redshift = jnp.linspace(0.0, 20.0, 64)
+    derivative = jax.vmap(jax.grad(lambda z: lookback_time(z, **parameters)))(redshift)
+    expected = hubble_time_gyr(parameters["hubble_constant"]) / (
+        (1.0 + redshift) * normalized_hubble_parameter(redshift, parameters["omega_m"])
+    )
+    np.testing.assert_allclose(derivative, expected, rtol=1e-12)
+
+
+def test_lookback_time_tends_to_the_age_of_the_universe(parameters) -> None:
+    """Planck-like parameters give an age near 13.8 Gyr (no radiation term)."""
+    assert lookback_time(0.0, **parameters) == 0.0
+    np.testing.assert_allclose(lookback_time(1e8, **parameters), 13.81, atol=0.01)
+
+
+def test_redshift_at_lookback_time_inverts_lookback_time(parameters) -> None:
+    redshift = jnp.linspace(0.0, 50.0, 128)
+    round_tripped = redshift_at_lookback_time(
+        lookback_time(redshift, **parameters), **parameters
+    )
+    np.testing.assert_allclose(round_tripped, redshift, rtol=1e-10, atol=1e-13)
+
+
+def test_redshift_at_lookback_time_is_infinite_beyond_the_age(parameters) -> None:
+    """Past the age the redshift is inf, with a finite gradient everywhere."""
+    times = jnp.array([1.0, 14.0, 20.0])
+    redshift = redshift_at_lookback_time(times, **parameters)
+    assert np.isfinite(redshift[0])
+    assert np.all(np.isposinf(redshift[1:]))
+    gradient = jax.grad(
+        lambda t: jnp.sum(
+            jnp.where(t < 13.0, redshift_at_lookback_time(t, **parameters), 0.0)
+        )
+    )(times)
+    assert np.all(np.isfinite(gradient))

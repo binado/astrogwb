@@ -21,7 +21,7 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from astrogwb.constants import MPC_IN_METERS, SPEED_OF_LIGHT
+from astrogwb.constants import MPC_IN_METERS, SECONDS_PER_YEAR, SPEED_OF_LIGHT
 from astrogwb.utils import mapped_gauss_legendre_rule
 
 #: Fixed Gauss-Legendre quadrature order used by the grid helpers. 4 nodes per
@@ -167,3 +167,66 @@ def distance_and_volume_grid(
         4.0 * jnp.pi * comoving_distance**2 * inv_e * hubble_distance(hubble_constant)
     )
     return luminosity_distance, differential_comoving_volume
+
+
+def hubble_time_gyr(h0: ArrayLike) -> jax.Array:
+    r"""Hubble time $1 / H_0$ in Gyr, with $H_0$ in $\mathrm{km\,s^{-1}\,Mpc^{-1}}$."""
+    return 1.0 / (hubble_constant_si(jnp.asarray(h0)) * SECONDS_PER_YEAR * 1e9)
+
+
+def _lambda_matter_ratio(omega_m: ArrayLike) -> tuple[jax.Array, jax.Array]:
+    r"""$\sqrt{\Omega_\Lambda}$ and $\sqrt{\Omega_\Lambda / \Omega_m}$ for flat $\Lambda$CDM."""
+    omega_m = jnp.asarray(omega_m)
+    sqrt_omega_lambda = jnp.sqrt(1.0 - omega_m)
+    return sqrt_omega_lambda, sqrt_omega_lambda / jnp.sqrt(omega_m)
+
+
+def lookback_time(
+    redshift: ArrayLike, hubble_constant: ArrayLike, omega_m: ArrayLike
+) -> jax.Array:
+    r"""Lookback time in Gyr for flat $\Lambda$CDM without radiation.
+
+    The closed form of $t_L(z) = t_H \int_0^z \mathrm{d}z' / [(1+z') E(z')]$:
+
+    .. math::
+
+        t_L(z) = \frac{2 t_H}{3\sqrt{\Omega_\Lambda}} \left[
+            \operatorname{arsinh}\sqrt{\Omega_\Lambda/\Omega_m}
+            - \operatorname{arsinh}\left(\sqrt{\Omega_\Lambda/\Omega_m}
+                \,(1+z)^{-3/2}\right)\right],
+
+    with $t_H = 1/H_0$ and $\Omega_\Lambda = 1 - \Omega_m$, which must be
+    positive. As $z \to \infty$ it tends to the age of the universe.
+    Broadcasts ``redshift``, ``hubble_constant`` and ``omega_m``.
+    """
+    sqrt_omega_lambda, ratio = _lambda_matter_ratio(omega_m)
+    scale = 2.0 * hubble_time_gyr(hubble_constant) / (3.0 * sqrt_omega_lambda)
+    return scale * (
+        jnp.arcsinh(ratio) - jnp.arcsinh(ratio * (1.0 + jnp.asarray(redshift)) ** -1.5)
+    )
+
+
+def redshift_at_lookback_time(
+    time: ArrayLike, hubble_constant: ArrayLike, omega_m: ArrayLike
+) -> jax.Array:
+    r"""Invert :func:`lookback_time`: redshift at a lookback time in Gyr.
+
+    .. math::
+
+        1 + z = \left[\frac{\sqrt{\Omega_\Lambda/\Omega_m}}{\sinh A}\right]^{2/3},
+        \qquad
+        A = \operatorname{arsinh}\sqrt{\Omega_\Lambda/\Omega_m}
+            - \frac{3\sqrt{\Omega_\Lambda}}{2}\,\frac{t}{t_H}.
+
+    Returns ``inf`` at and beyond the age of the universe ($A \le 0$). The
+    masking is gradient-safe: the out-of-range entries never feed a ``nan``
+    into the backward pass.
+    """
+    sqrt_omega_lambda, ratio = _lambda_matter_ratio(omega_m)
+    angle = jnp.arcsinh(ratio) - 1.5 * sqrt_omega_lambda * jnp.asarray(
+        time
+    ) / hubble_time_gyr(hubble_constant)
+    in_range = angle > 0.0
+    safe_angle = jnp.where(in_range, angle, 1.0)
+    redshift = (ratio / jnp.sinh(safe_angle)) ** (2.0 / 3.0) - 1.0
+    return jnp.where(in_range, redshift, jnp.inf)
