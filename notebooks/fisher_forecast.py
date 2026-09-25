@@ -31,9 +31,19 @@ with app.setup(hide_code=True):
         parameter_label,
         use_paper_style,
     )
+    from astrogwb.paper.plotting.fisher import (
+        plot_fisher_eigenmodes,
+        plot_whitened_derivatives,
+    )
     from astrogwb.paper.utils import load_mapping
     from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
-    from astrogwb.sampling import fisher_matrix_per_bin
+    from astrogwb.sampling import (
+        derivative_cosine_matrix,
+        fisher_eigenmodes,
+        fisher_from_whitened_jacobian,
+        prior_sigma_along_modes,
+        whitened_jacobian,
+    )
 
 
 @app.cell(hide_code=True)
@@ -44,9 +54,9 @@ def _():
     Forecast $d_i \sim \mathcal{N}(S_i(\theta), \sigma_i)$ at the committed
     fiducials. $S_i(\theta)$ is the importance estimator
     `prepare_inference_inputs` builds from the injection and proposal
-    catalogs. `fisher_matrix_per_bin` differentiates that spectrum once,
-    through `spectral_density_jacobian`, and returns one Fisher matrix per
-    frequency bin.
+    catalogs. `whitened_jacobian` differentiates that spectrum once, in noise
+    units, and `fisher_from_whitened_jacobian` turns the result into one
+    Fisher matrix per frequency bin.
 
     The free parameters, in column order, are $H_0$, $\Omega_m$, $\Xi_0$,
     $n$, $\gamma$, $\kappa$, and $z_{\mathrm{peak}}$. `local_merger_rate`
@@ -303,23 +313,24 @@ def _():
 
 @app.cell
 def _(CUTOFFS_HZ, FIDUCIALS, FREE_PARAMETERS, inputs):
-    # One differentiation. `fisher_matrix_per_bin` calls
-    # `spectral_density_jacobian`; cutoffs below only sum bins.
+    # One differentiation. The whitened derivatives feed both the Fisher
+    # matrices and the degeneracy figures; cutoffs below only sum bins.
     _full_band = inputs.model_kwargs(fmin=CUTOFFS_HZ[0])
-    per_bin_fisher = fisher_matrix_per_bin(
+    whitened = whitened_jacobian(
         inputs.spectral_density_fn,
         FIDUCIALS,
         FREE_PARAMETERS,
         scale=_full_band["scale"],
         frequency_mask=_full_band["frequency_mask"],
     )
+    per_bin_fisher = fisher_from_whitened_jacobian(whitened)
     print(
         "per-bin Fisher",
         tuple(per_bin_fisher.shape),
         "parameters:",
         ", ".join(FREE_PARAMETERS),
     )
-    return (per_bin_fisher,)
+    return per_bin_fisher, whitened
 
 
 @app.cell(hide_code=True)
@@ -692,6 +703,153 @@ def _(BLOCKS, band_fishers, prior_sigmas, render_block):
         ]
     )
     forecasts
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Degeneracies
+
+    Two views of the same likelihood-only Fisher matrix, for each block and,
+    without the time delay, for all seven free parameters together.
+
+    **Derivative shapes.** $w_a(f) = \partial_a S / \sigma$ is each
+    parameter's effect on the spectrum in noise units, and
+    $F_{ab} = \sum_i w_{ia} w_{ib}$. Each curve is scaled to unit norm, so two
+    curves of the same shape, up to sign, are a degeneracy: the parameters
+    bend the spectrum the same way. The table gives the cosine between the
+    curves, $F_{ab} / \sqrt{F_{aa} F_{bb}}$; for two parameters it is minus
+    the forecast correlation. The lower panel shows the fraction of each
+    parameter's information that a low-frequency cutoff at $f$ keeps.
+
+    **Eigenmodes.** Each parameter is divided by the standard deviation of
+    its production prior, the Uniform or Normal in `priors()` (or in the
+    `time-delay` run), and the Fisher matrix is diagonalized. Without that
+    rescaling the modes would depend on units: $H_0$ in km/s/Mpc would
+    dominate every one. A bar is the likelihood width of one constrained
+    combination; the marker is the Gaussian prior's width along it, from
+    the slider above. A bar above its marker is a prior-dominated mode. The
+    heat map gives each parameter's loading on each mode.
+    """)
+    return
+
+
+@app.cell
+def _(CUTOFFS_HZ):
+    degeneracy_cutoff = mo.ui.dropdown(
+        options={f"{cutoff:g} Hz": cutoff for cutoff in CUTOFFS_HZ},
+        value=f"{CUTOFFS_HZ[0]:g} Hz",
+        label="Low-frequency cutoff for the cosines and eigenmodes",
+    )
+    degeneracy_cutoff
+    return (degeneracy_cutoff,)
+
+
+@app.cell
+def _(
+    CUTOFFS_HZ,
+    FREE_PARAMETERS,
+    PRODUCTION_PRIORS,
+    ROOT_DIR,
+    inputs,
+    whitened,
+):
+    _full_mask = np.asarray(
+        inputs.model_kwargs(fmin=CUTOFFS_HZ[0])["frequency_mask"], dtype=bool
+    )
+    _band_frequencies = np.asarray(inputs.observation.frequencies)[_full_mask]
+    _band_whitened = np.asarray(whitened)[_full_mask]
+    # Production prior standard deviations: the units the eigenmodes use.
+    _reference_scales = {
+        name: float(np.sqrt(PRODUCTION_PRIORS[name].variance))
+        for name in FREE_PARAMETERS
+    }
+
+    def render_degeneracies(
+        title: str,
+        names: tuple[str, ...],
+        fisher: np.ndarray,
+        prior_sigmas: Mapping[str, float],
+    ) -> mo.Html:
+        """Derivative shapes, cosines, and eigenmodes of one parameter set.
+
+        ``fisher`` is the likelihood-only matrix over ``FREE_PARAMETERS`` at
+        the chosen cutoff; the rows and columns outside ``names`` are held
+        fixed, as in the forecast blocks.
+        """
+        index = [FREE_PARAMETERS.index(name) for name in names]
+        labels = [parameter_label(name, root=ROOT_DIR) for name in names]
+        block = np.asarray(fisher, dtype=float)[np.ix_(index, index)]
+        shapes = plot_whitened_derivatives(
+            _band_frequencies,
+            _band_whitened[:, index],
+            labels,
+            colors=combo_colors(len(names)),
+            cutoffs=CUTOFFS_HZ[1:],
+        )
+        cosines = pd.DataFrame(
+            derivative_cosine_matrix(block), index=labels, columns=labels
+        )
+        modes = fisher_eigenmodes(
+            block,
+            names,
+            parameter_scales=[_reference_scales[name] for name in names],
+        )
+        block_priors = {
+            name: sigma for name, sigma in prior_sigmas.items() if name in names
+        }
+        prior_widths = prior_sigma_along_modes(modes, block_priors)
+        eigen_figure = plot_fisher_eigenmodes(
+            modes.sigmas,
+            modes.directions,
+            labels,
+            prior_sigmas=prior_widths,
+            sigma_label=r"$\sigma$ along mode [prior std]",
+        )
+        summary = pd.DataFrame(
+            {
+                "likelihood sigma": modes.sigmas,
+                "prior sigma": prior_widths,
+                "prior-dominated": modes.sigmas > prior_widths,
+            },
+            index=pd.Index(np.arange(1, len(names) + 1), name="mode"),
+        )
+        return mo.vstack(
+            [
+                mo.md(f"### {title}"),
+                shapes,
+                mo.md("Cosine between whitened derivative curves"),
+                cosines,
+                eigen_figure,
+                mo.md("Widths in units of each parameter's production prior std"),
+                summary,
+            ]
+        )
+
+    return (render_degeneracies,)
+
+
+@app.cell
+def _(
+    BLOCKS,
+    FREE_PARAMETERS,
+    band_fishers,
+    degeneracy_cutoff,
+    prior_sigmas,
+    render_degeneracies,
+):
+    _targets = dict(BLOCKS)
+    if len(BLOCKS) > 1:
+        _targets["All free parameters"] = FREE_PARAMETERS
+    _, _fisher = band_fishers[degeneracy_cutoff.value]
+    degeneracies = mo.vstack(
+        [
+            render_degeneracies(title, names, _fisher, prior_sigmas)
+            for title, names in _targets.items()
+        ]
+    )
+    degeneracies
     return
 
 

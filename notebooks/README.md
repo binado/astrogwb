@@ -95,6 +95,13 @@ Gaussian prior on `delay_slope` whose width is the experiment's Uniform divided
 by the slider value. That mode needs
 `outputs/catalogs/md-delayed-imrphenom-s71-n32768.h5` (injection) and
 `outputs/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.h5` (proposal).
+A final *Degeneracies* section, in both modes, plots each parameter's
+whitened derivative $\partial_a S / \sigma$ (unit-normalized; the same shape
+means a degeneracy) and the Fisher eigenmodes in units of the production prior
+standard deviations, with the Gaussian prior's width along each mode. The
+functions behind it are `whitened_jacobian`, `derivative_cosine_matrix`,
+`fisher_eigenmodes` and `prior_sigma_along_modes` in `astrogwb.sampling`, and
+the figures are in `astrogwb.paper.plotting.fisher`.
 Open it from the repository root with
 `uv run --extra notebook --group jupyter marimo edit notebooks/fisher_forecast.py`.
 
