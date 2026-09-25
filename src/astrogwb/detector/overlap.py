@@ -9,7 +9,7 @@ contribution: gwmock ships only the long-wavelength, co-located limit
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -26,7 +26,49 @@ from .geometry import resolve_detector
 R_EARTH: float = EARTH_MEAN_RADIUS_IN_METERS / 1000.0  # km
 C_LIGHT: float = SPEED_OF_LIGHT / 1000.0  # km / s
 
-_LOW_ALPHA_THRESHOLD = 2e-3
+# Below this alpha the closed-form g1/g2/g3 lose ~eps/alpha^4 to cancellation
+# (their O(alpha) numerator terms cancel to O(alpha^5)), so they switch to
+# their Taylor series in alpha^2. Truncated after alpha^18, the series' error
+# at the threshold is ~1e-20; the closed form's there is ~1e-15.
+_SERIES_ALPHA_THRESHOLD = 1.0
+
+# Taylor coefficients of g1, g2, g3 in powers of alpha^2, lowest first.
+_G1_SERIES: tuple[float, ...] = (
+    1.0,
+    -5.0 / 42.0,
+    5.0 / 1008.0,
+    -1.0 / 9504.0,
+    1.0 / 741312.0,
+    -1.0 / 86486400.0,
+    1.0 / 14114580480.0,
+    -1.0 / 3071845969920.0,
+    1.0 / 860116871577600.0,
+    -1.0 / 301305556397260800.0,
+)
+_G2_SERIES: tuple[float, ...] = (
+    0.0,
+    -1.0 / 14.0,
+    5.0 / 1008.0,
+    -1.0 / 7392.0,
+    1.0 / 494208.0,
+    -1.0 / 51891840.0,
+    1.0 / 7841433600.0,
+    -1.0 / 1609062174720.0,
+    1.0 / 430058435788800.0,
+    -1.0 / 145073045672755200.0,
+)
+_G3_SERIES: tuple[float, ...] = (
+    0.0,
+    1.0 / 14.0,
+    -1.0 / 189.0,
+    5.0 / 33264.0,
+    -1.0 / 432432.0,
+    1.0 / 44478720.0,
+    -1.0 / 6616209600.0,
+    1.0 / 1340885145600.0,
+    -1.0 / 354798209525760.0,
+    1.0 / 118696128277708800.0,
+)
 
 
 def _chord_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -71,49 +113,74 @@ def _azimuth_bisector(az1: float, az2: float) -> float:
     return math.atan2(math.sin(az1) + math.sin(az2), math.cos(az1) + math.cos(az2))
 
 
-def _g1(alpha: NDArray[np.float64]) -> NDArray[np.float64]:
-    with np.errstate(invalid="ignore", divide="ignore"):
-        return (
-            (5.0 / 16.0)
-            * (
-                -9.0 * alpha * np.cos(alpha)
-                - 6.0 * alpha**3 * np.cos(alpha)
-                + 9.0 * np.sin(alpha)
-                + 3.0 * alpha**2 * np.sin(alpha)
-                + alpha**4 * np.sin(alpha)
-            )
-            / alpha**5
+def _series_or_closed_form(
+    alpha: NDArray[np.float64],
+    series: tuple[float, ...],
+    closed_form: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+) -> NDArray[np.float64]:
+    small = alpha < _SERIES_ALPHA_THRESHOLD
+    # Evaluate the closed form only where it is stable; the dummy 1.0 keeps
+    # the discarded lanes finite.
+    large_alpha = np.where(small, 1.0, alpha)
+    return np.where(
+        small,
+        np.polynomial.polynomial.polyval(alpha**2, series),
+        closed_form(large_alpha),
+    )
+
+
+def _g1_closed_form(alpha: NDArray[np.float64]) -> NDArray[np.float64]:
+    return (
+        (5.0 / 16.0)
+        * (
+            -9.0 * alpha * np.cos(alpha)
+            - 6.0 * alpha**3 * np.cos(alpha)
+            + 9.0 * np.sin(alpha)
+            + 3.0 * alpha**2 * np.sin(alpha)
+            + alpha**4 * np.sin(alpha)
         )
+        / alpha**5
+    )
+
+
+def _g2_closed_form(alpha: NDArray[np.float64]) -> NDArray[np.float64]:
+    return (
+        (5.0 / 16.0)
+        * (
+            45.0 * alpha * np.cos(alpha)
+            + 6.0 * alpha**3 * np.cos(alpha)
+            - 45.0 * np.sin(alpha)
+            + 9.0 * alpha**2 * np.sin(alpha)
+            + 3.0 * alpha**4 * np.sin(alpha)
+        )
+        / alpha**5
+    )
+
+
+def _g3_closed_form(alpha: NDArray[np.float64]) -> NDArray[np.float64]:
+    return (
+        (5.0 / 4.0)
+        * (
+            15.0 * alpha * np.cos(alpha)
+            - 4.0 * alpha**3 * np.cos(alpha)
+            - 15.0 * np.sin(alpha)
+            + 9.0 * alpha**2 * np.sin(alpha)
+            - alpha**4 * np.sin(alpha)
+        )
+        / alpha**5
+    )
+
+
+def _g1(alpha: NDArray[np.float64]) -> NDArray[np.float64]:
+    return _series_or_closed_form(alpha, _G1_SERIES, _g1_closed_form)
 
 
 def _g2(alpha: NDArray[np.float64]) -> NDArray[np.float64]:
-    with np.errstate(invalid="ignore", divide="ignore"):
-        return (
-            (5.0 / 16.0)
-            * (
-                45.0 * alpha * np.cos(alpha)
-                + 6.0 * alpha**3 * np.cos(alpha)
-                - 45.0 * np.sin(alpha)
-                + 9.0 * alpha**2 * np.sin(alpha)
-                + 3.0 * alpha**4 * np.sin(alpha)
-            )
-            / alpha**5
-        )
+    return _series_or_closed_form(alpha, _G2_SERIES, _g2_closed_form)
 
 
 def _g3(alpha: NDArray[np.float64]) -> NDArray[np.float64]:
-    with np.errstate(invalid="ignore", divide="ignore"):
-        return (
-            (5.0 / 4.0)
-            * (
-                15.0 * alpha * np.cos(alpha)
-                - 4.0 * alpha**3 * np.cos(alpha)
-                - 15.0 * np.sin(alpha)
-                + 9.0 * alpha**2 * np.sin(alpha)
-                - alpha**4 * np.sin(alpha)
-            )
-            / alpha**5
-        )
+    return _series_or_closed_form(alpha, _G3_SERIES, _g3_closed_form)
 
 
 def _get_orf(
@@ -127,25 +194,19 @@ def _get_orf(
     sin1 = math.sin(ang_btw_arms_1)
     sin2 = math.sin(ang_btw_arms_2)
 
-    with np.errstate(invalid="ignore", divide="ignore"):
-        g1 = _g1(alpha)
-        g2 = _g2(alpha)
-        g3 = _g3(alpha)
+    g1 = _g1(alpha)
+    g2 = _g2(alpha)
+    g3 = _g3(alpha)
 
-        theta_1 = (math.cos(0.5 * beta) ** 4) * g1
-        theta_2 = (
-            (math.cos(0.5 * beta) ** 4) * g2
-            + g3
-            - (math.sin(0.5 * beta) ** 4) * (g2 + g1)
-        )
-        high_alpha_orf = (
-            (math.cos(4.0 * delta) * theta_1 + math.cos(4.0 * big_delta) * theta_2)
-            * sin1
-            * sin2
-        )
-
-    low_alpha_orf = math.cos(4.0 * delta) * sin1 * sin2
-    return np.where(alpha > _LOW_ALPHA_THRESHOLD, high_alpha_orf, low_alpha_orf)
+    theta_1 = (math.cos(0.5 * beta) ** 4) * g1
+    theta_2 = (
+        (math.cos(0.5 * beta) ** 4) * g2 + g3 - (math.sin(0.5 * beta) ** 4) * (g2 + g1)
+    )
+    return (
+        (math.cos(4.0 * delta) * theta_1 + math.cos(4.0 * big_delta) * theta_2)
+        * sin1
+        * sin2
+    )
 
 
 def overlap_reduction_function(

@@ -14,7 +14,7 @@ from astrogwb.detector import (
     pairwise_overlap_reduction_function,
     resolve_detector,
 )
-from astrogwb.detector.overlap import R_EARTH
+from astrogwb.detector.overlap import C_LIGHT, R_EARTH
 
 
 @pytest.mark.parametrize("loader", [resolve_detector, load_detector])
@@ -67,34 +67,94 @@ def test_orf_colocated_is_normalized(frequencies: np.ndarray) -> None:
     np.testing.assert_allclose(actual, np.ones_like(frequencies))
 
 
-def test_orf_continuous_across_low_alpha_threshold() -> None:
-    # For two detectors ~1 km apart, alpha = 2*pi*f*d/c crosses the internal
-    # low-alpha series-expansion threshold near f ~= 95 Hz. The ORF must be
-    # continuous across that branch switch: a bad expansion or threshold would
-    # show up as a jump on a fine frequency grid straddling it.
-    dlat = 1.0 / R_EARTH  # ~1 km separation along a meridian
-    det_a = CustomDetector(
-        name="A",
-        latitude_rad=0.0,
-        longitude_rad=0.0,
-        elevation_m=0.0,
-        xarm_azimuth_rad=0.0,
-        yarm_azimuth_rad=math.pi / 2.0,
+def _arm_direction(det: CustomDetector, azimuth: float) -> np.ndarray:
+    # geometry.toml azimuths are measured counter-clockwise from local East.
+    east = np.array([-math.sin(det.longitude_rad), math.cos(det.longitude_rad), 0.0])
+    north = np.array(
+        [
+            -math.sin(det.latitude_rad) * math.cos(det.longitude_rad),
+            -math.sin(det.latitude_rad) * math.sin(det.longitude_rad),
+            math.cos(det.latitude_rad),
+        ]
     )
-    det_b = CustomDetector(
-        name="B",
-        latitude_rad=dlat,
-        longitude_rad=0.0,
-        elevation_m=0.0,
-        xarm_azimuth_rad=0.0,
-        yarm_azimuth_rad=math.pi / 2.0,
+    return math.cos(azimuth) * east + math.sin(azimuth) * north
+
+
+def _position_and_tensor(det: CustomDetector) -> tuple[np.ndarray, np.ndarray]:
+    lat, lon = det.latitude_rad, det.longitude_rad
+    position = R_EARTH * np.array(
+        [math.cos(lat) * math.cos(lon), math.cos(lat) * math.sin(lon), math.sin(lat)]
     )
-    freqs = np.linspace(50.0, 150.0, 2001)
+    x = _arm_direction(det, det.xarm_azimuth_rad)
+    y = _arm_direction(det, det.yarm_azimuth_rad)
+    return position, 0.5 * (np.outer(x, x) - np.outer(y, y))
 
-    orf = overlap_reduction_function(freqs, det_a, det_b)
 
-    assert np.all(np.isfinite(orf))
-    assert np.max(np.abs(np.diff(orf))) < 1e-3
+def _sky_quadrature_orf(
+    frequencies: np.ndarray, spec_1: str, spec_2: str
+) -> np.ndarray:
+    """ORF by direct sky integration, (5/8pi) sum_A int dOmega F1^A F2^A e^(ik.dx).
+
+    The sky is parametrized about the separation vector, so the phase only
+    oscillates in cos(theta), where Gauss-Legendre converges exponentially.
+    """
+    position_1, tensor_1 = _position_and_tensor(resolve_detector(spec_1))
+    position_2, tensor_2 = _position_and_tensor(resolve_detector(spec_2))
+    separation = position_2 - position_1
+    distance = float(np.linalg.norm(separation))
+    z_axis = separation / distance
+    x_axis = np.cross(z_axis, [1.0, 0.0, 0.0] if abs(z_axis[0]) < 0.9 else [0, 1, 0])
+    x_axis /= np.linalg.norm(x_axis)
+    y_axis = np.cross(z_axis, x_axis)
+
+    alpha = 2.0 * math.pi * frequencies * distance / C_LIGHT
+    mu, mu_weights = np.polynomial.legendre.leggauss(int(alpha.max()) + 60)
+    # Half-step offset: no direction is parallel to x_axis, which seeds the
+    # polarization basis below.
+    phi = 2.0 * math.pi * (np.arange(64) + 0.5) / 64
+    mu_grid, phi_grid = np.meshgrid(mu, phi, indexing="ij")
+    sin_theta = np.sqrt(1.0 - mu_grid**2)[..., None]
+    direction = (
+        sin_theta * np.cos(phi_grid)[..., None] * x_axis
+        + sin_theta * np.sin(phi_grid)[..., None] * y_axis
+        + mu_grid[..., None] * z_axis
+    )
+    m = np.cross(direction, x_axis)
+    m /= np.linalg.norm(m, axis=-1, keepdims=True)
+    n = np.cross(direction, m)
+    e_plus = np.einsum("...i,...j->...ij", m, m) - np.einsum("...i,...j->...ij", n, n)
+    e_cross = np.einsum("...i,...j->...ij", m, n) + np.einsum("...i,...j->...ij", n, m)
+    response_product = sum(
+        np.einsum("ij,...ij->...", tensor_1, e)
+        * np.einsum("ij,...ij->...", tensor_2, e)
+        for e in (e_plus, e_cross)
+    )
+    weights = mu_weights[:, None] * (2.0 * math.pi / phi.size) * response_product
+    phase = np.cos(alpha[:, None, None] * mu_grid)
+    return 5.0 / (8.0 * math.pi) * np.sum(weights * phase, axis=(1, 2))
+
+
+@pytest.mark.parametrize(
+    ("detector_1", "detector_2", "max_frequency"),
+    [
+        # ~10 km apart: alpha spans the small-alpha regime where the closed-form
+        # g1/g2/g3 cancel catastrophically, and crosses the series threshold.
+        ("E1", "E2", 1e4),
+        ("E2", "E3", 1e4),
+        # ~3000 km apart: alpha reaches ~125, deep in the oscillatory regime.
+        ("H1", "L1", 2e3),
+        ("V1", "K1", 2e3),
+    ],
+)
+def test_orf_matches_direct_sky_quadrature(
+    detector_1: str, detector_2: str, max_frequency: float
+) -> None:
+    freqs = np.concatenate([[0.0], np.geomspace(0.01, max_frequency, 400)])
+
+    actual = overlap_reduction_function(freqs, detector_1, detector_2)
+
+    expected = _sky_quadrature_orf(freqs, detector_1, detector_2)
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
 
 
 def test_orf_accepts_mixed_str_and_custom_detector(frequencies: np.ndarray) -> None:
