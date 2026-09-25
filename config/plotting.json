@@ -13,6 +13,8 @@
     "local_merger_rate": "$\\mathcal{R}_0\\,[\\mathrm{Gpc^{-3}\\,yr^{-1}}]$",
     "minimum_mass": "$m_{\\mathrm{min}}\\,[M_\\odot]$",
     "mass_width": "$\\Delta m\\,[M_\\odot]$",
+    "mass_mean": "$\\mu_m\\,[M_\\odot]$",
+    "mass_sigma": "$\\sigma_m\\,[M_\\odot]$",
     "importance_relative_ess": "$N_{\\mathrm{eff}} / N_{\\mathrm{inj}}$"
   }
 }

@@ -265,7 +265,7 @@ rule run_mcmc:
         script="scripts/run_mcmc.py",
         # The same layers `assemble_config` used to declare, so re-run
         # granularity is unchanged: edit a leaf -> one chain; edit
-        # config/sampler.json -> all 27.
+        # config/sampler.json -> all 28.
         config=lambda w: config_layers(w.experiment, w.run),
         injection=run_catalog_input("injection"),
         proposal=run_catalog_input("proposal"),

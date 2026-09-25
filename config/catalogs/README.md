@@ -27,23 +27,26 @@ layer model, the registry, and how to generate one.
 | `md-uniform-imrphenom-s62-n16384-eps1e-2` | `bns_md_uniform_mixture` (ε = 0.01) | 62 | 16384 | `IMRPhenomXAS_NRTidalv3` |
 | `md-uniform-imrphenom-s63-n16384-eps1e-3` | `bns_md_uniform_mixture` (ε = 0.001) | 63 | 16384 | `IMRPhenomXAS_NRTidalv3` |
 | `md-delayed-imrphenom-s71-n32768` | `bns_md_time_delayed_cosmological` (α = −1) | 71 | 32768 | `IMRPhenomXAS_NRTidalv3` |
+| `md-gaussian-imrphenom-s81-n32768` | `bns_md_gaussian_cosmological` (μ = 1.33, σ = 0.09) | 81 | 32768 | `IMRPhenomXAS_NRTidalv3` |
 
-Nine, not ten: `md-imrphenom-s41-n32768` serves as both the default injection
-and `waveform-approximant/IMRPhenom`'s proposal, and the ε = 0.1 guard catalog
-serves both `astrophysical-parameters` runs and `variable-proposal-guard/eps1e-1`.
+Ten files for more roles than that: `md-imrphenom-s41-n32768` serves as both
+the default injection and `waveform-approximant/IMRPhenom`'s proposal, the
+ε = 0.1 guard catalog serves both `astrophysical-parameters` runs and
+`variable-proposal-guard/eps1e-1`, and `md-gaussian-imrphenom-s81-n32768` is both
+`mass-model`'s injection and its proposal.
 
 ## What each one is for
 
 ### `md-imrphenom-s41-n32768`
 
-The default injection: the "observed" catalog every run except `time-delay`
-is compared against. Also serves as the proposal for `waveform-approximant/IMRPhenom`,
+The default injection: the "observed" catalog every run except `time-delay` and
+`mass-model` is compared against. Also serves as the proposal for `waveform-approximant/IMRPhenom`,
 which measures IMRPhenom against itself as the systematics baseline.
 
 ### `md-imrphenom-s42-n8192`, `md-imrphenom-s42-n16384`, `md-imrphenom-s42-n32768`
 
 One seed-42 draw at three sizes, which is the `variable-catalog-size`
-experiment. The middle one is also the default proposal, used by 21 of the 27
+experiment. The middle one is also the default proposal, used by 21 of the 28
 runs; the other two exist only for that experiment's other two arms.
 
 `Predictive` allocates its per-draw keys with `jax.random.split`, which is
@@ -91,6 +94,15 @@ so the file records them; the slope α = `delay_slope` is a
 hyperparameter, declared here as a `[fiducials]` override (α = −1) rather than
 in the shared `config/fiducials.json`, which would invalidate every other
 catalog.
+
+### `md-gaussian-imrphenom-s81-n32768`
+
+The `mass-model` injection and proposal. The redshift law is the default
+Madau-Dickinson one, undelayed; both component masses are i.i.d.
+N(μ, σ²) and ordered, with μ = `mass_mean` = 1.33 M☉ and σ = `mass_sigma` =
+0.09 M☉ declared as `[fiducials]` overrides, as for the delayed catalog. The law
+has no hard mass edge, so importance weights stay positive wherever the masses
+move.
 
 ## Adding one
 

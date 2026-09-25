@@ -1,0 +1,8 @@
+{
+  "analysis": {
+    "sampled_params": [
+      "mass_mean",
+      "mass_sigma"
+    ]
+  }
+}
