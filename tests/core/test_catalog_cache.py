@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -229,3 +231,53 @@ def test_check_catalog_answers_with_other_request_raises(
 
     with pytest.raises(ValueError, match="not the requested"):
         check_catalog_answers(catalog, make_request(num_samples=32), label="memory")
+
+
+def test_generate_enables_x64_before_it_draws() -> None:
+    """Generation must configure x64 itself, not inherit it from Ripple's import.
+
+    The population is drawn before the generator is built, and
+    ``import ripplegw`` -- which turns x64 on globally -- happens only inside
+    a Ripple generator. Left to that side effect, every source column would be
+    drawn and persisted at float32. Runs in a fresh interpreter, where x64
+    starts off, with the closed-form generator so Ripple is never imported.
+    """
+    code = """
+import sys
+
+import jax
+
+from astrogwb.catalog import generate
+from astrogwb.metadata import CatalogRequest
+
+assert not jax.config.x64_enabled, "x64 was already on before generation"
+catalog = generate(
+    CatalogRequest.from_blocks(
+        population={
+            "model_name": "bns_md_cosmological",
+            "model_kwargs": {"minimum_redshift": 0.0, "maximum_redshift": 5.0,
+                             "n_grid": 64},
+        },
+        waveform={
+            "approximant": "AnalyticInspiral",
+            "minimum_frequency": 10.0,
+            "maximum_frequency": 16.0,
+            "reference_frequency": 10.0,
+            "sampling_frequency": 64.0,
+            "frequency_resolution": 2.0,
+        },
+        fiducials={"H0": 67.66, "Omega_m": 0.3096, "gamma": 1.42, "kappa": 4.62,
+                   "z_peak": 1.84, "local_merger_rate": 770.0,
+                   "minimum_mass": 1.0, "mass_width": 1.5},
+        seed=7,
+        num_samples=4,
+    )
+)
+assert catalog.source_parameters["redshift"].dtype == "float64"
+assert "ripplegw" not in sys.modules, "x64 came from importing ripplegw"
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code], check=False, capture_output=True, text=True
+    )
+
+    assert result.returncode == 0, result.stderr

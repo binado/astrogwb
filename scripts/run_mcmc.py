@@ -23,15 +23,20 @@ that declare it::
     RUN=config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json
     BASE=config/runs/cosmological-parameters/_base.json
     LAYERS="config/analysis.json config/fiducials.json config/networks.json \
-        config/priors.json config/sampler.json $BASE $RUN"
+        config/priors.json config/sampler.json config/waveform.json \
+        config/population.json $BASE $RUN"
     uv run --extra paper python scripts/run_mcmc.py \
         --analysis "$(jq -s 'map(.analysis // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
         --fiducials "$(jq -s 'map(.fiducials // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
         --networks "$(jq -s 'map(.networks // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
         --priors "$(jq -s 'map(.priors // {}) | reduce .[] as $b ({}; . + $b)' $LAYERS)" \
         --sampler "$(jq -s 'map(.sampler // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
-        --injection-catalog outputs/catalogs/md-imrphenom-s41-n32768.h5 \
-        --proposal-catalog outputs/catalogs/md-imrphenom-s42-n16384.h5
+        --waveform "$(jq -s 'map(.waveform // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
+        --population "$(jq -s 'map(.population // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
+        --injection-catalog outputs/catalogs/<injection key>.h5 \
+        --proposal-catalog outputs/catalogs/<proposal key>.h5
+
+``scripts/catalogs.py ls`` prints each run's two keys.
 
 One operator per block is the whole merge rule: ``*`` (deep) everywhere, and
 ``+`` (shallow) for ``priors``, so an overridden ``[priors.<param>]`` table
@@ -46,9 +51,12 @@ Taking blocks rather than paths is why merge order is no longer this script's
 concern: each block arrives folded, so there is no order left to get wrong and
 nothing to log. The resolved config still lands beside the chain.
 
-The run config's ``[analysis.catalog]`` block names one per role; the two files
-are supplied directly as ``--injection-catalog`` and ``--proposal-catalog``.
-Roles are fixed, so no name-to-path mapping is needed.
+The run config's ``[analysis.catalog]`` block declares what each role draws;
+the two files are supplied directly as ``--injection-catalog`` and
+``--proposal-catalog``. Each file is checked against the request its role
+resolves to before JAX claims a device, so a file handed to the wrong role, or
+one built from a config that has since changed, is refused rather than
+sampled against.
 
 The importance-sampling *proposal density* is not in the config and is not
 derived here either: the proposal catalog records its own population model,
@@ -76,9 +84,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from astrogwb.paper.config.catalogs import check_catalog_references
+from astrogwb.paper.config.catalogs import check_catalog_requests
 from astrogwb.paper.config.mcmc import RunConfig, build_run_config
-from astrogwb.paper.config.runs import add_block_arguments, load_config_blocks
+from astrogwb.paper.config.runs import (
+    CATALOG_ROLES,
+    add_block_arguments,
+    load_config_blocks,
+)
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
@@ -104,14 +116,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [analysis.catalog].injection names.",
+        help="The catalog file answering this run's [analysis.catalog].injection.",
     )
     parser.add_argument(
         "--proposal-catalog",
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [analysis.catalog].proposal names.",
+        help="The catalog file answering this run's [analysis.catalog].proposal.",
     )
     parser.add_argument(
         "--seed",
@@ -307,6 +319,13 @@ def save(
             sort_keys=True,
         )
 
+    # The key of each role's catalog: the address of the exact file sampled
+    # against, which the resolved config beside the chain re-derives.
+    idata.posterior.attrs["catalogs"] = json.dumps(
+        {role: config.catalog_request(role).key() for role in CATALOG_ROLES},
+        sort_keys=True,
+    )
+
     if marginalization is not None:
         import jax
         from numpyro.infer import Predictive
@@ -398,11 +417,10 @@ def main(argv: list[str] | None = None) -> None:
         outdir=args.outdir.resolve() if args.outdir else None,
         label=args.label,
     )
-    # The pre-flight check `assemble_config` used to run once per run on the
-    # way to every chain: reject an unknown catalog before JAX claims a
-    # device. `scripts/validate_configs.py` runs it over all runs at once,
-    # before any catalog is built.
-    check_catalog_references(config, label=args.label or "run")
+    # Reject a catalog spec that could not be drawn before JAX claims a
+    # device. `scripts/validate_configs.py` runs the same check over all runs
+    # at once, before any catalog is built.
+    check_catalog_requests(config, label=args.label or "run")
 
     logger.info(
         "Sampling %s | fixed %s",
@@ -418,17 +436,23 @@ def main(argv: list[str] | None = None) -> None:
 
     from astrogwb.paper.catalogs import load_run_catalog
 
-    # Load both catalogs before JAX claims a device. Loading validates each
-    # file's population record against its own arrays, so a missing file, a
-    # catalog whose columns drifted from its declared population, or a model
-    # that no longer reproduces the density it was drawn from all fail cheaply.
-    injection_path = args.injection_catalog.resolve()
-    proposal_path = args.proposal_catalog.resolve()
-    injection_catalog = load_run_catalog(injection_path, label="injection")
-    proposal_catalog = load_run_catalog(proposal_path, label="proposal")
+    # Load both catalogs before JAX claims a device, and check each against
+    # the request its role resolves to: a missing file, a file handed to the
+    # wrong role, or one generated from a draw the config no longer asks for
+    # all fail cheaply.
+    injection_catalog = load_run_catalog(
+        args.injection_catalog.resolve(),
+        request=config.catalog_request("injection"),
+        label="injection",
+    )
+    proposal_catalog = load_run_catalog(
+        args.proposal_catalog.resolve(),
+        request=config.catalog_request("proposal"),
+        label="proposal",
+    )
     logger.info(
         "Proposal density from %s: model=%s kwargs=%s params=%s",
-        config.analysis.catalog.proposal,
+        config.catalog_request("proposal").key(),
         proposal_catalog.population_model_name,
         dict(proposal_catalog.population_model_kwargs),
         dict(proposal_catalog.fiducials),

@@ -18,8 +18,10 @@ import pytest
 from config_fixtures import write_root_layers
 from repo import REPO_ROOT
 
+from astrogwb.metadata import CatalogRequest
 from astrogwb.paper.config.catalogs import (
-    check_catalog_references,
+    check_catalog_requests,
+    resolve_run_catalogs,
     validate_all_runs,
 )
 from astrogwb.paper.config.mcmc import build_run_config
@@ -33,13 +35,11 @@ from astrogwb.paper.config.runs import (
     RUNS_DIR,
     assemble_run,
     base_config_paths,
-    catalog_config_paths,
-    discover_catalog_names,
+    catalog_blocks,
     discover_runs,
     load_base,
     load_config_blocks,
     merge_config_layers,
-    resolve_catalog_names,
     run_config_paths,
 )
 from astrogwb.paper.utils import load_mapping
@@ -99,12 +99,9 @@ def test_the_retired_inventories_are_gone() -> None:
     assert not (PAPER_ROOT / "config/analysis").exists()
     assert (PAPER_ROOT / "config/analysis.json").is_file()
     assert (PAPER_ROOT / "config/runs").is_dir()
-    assert (PAPER_ROOT / "config/catalogs").is_dir()
-    # The catalog tree is one flat directory of defs: the shared layers sit in
-    # config/ with the run tables, where `jq` reads them, so there is no
-    # base/ to glob and no defs/ to distinguish it from.
-    assert not (PAPER_ROOT / "config/catalogs/base").exists()
-    assert not (PAPER_ROOT / "config/catalogs/defs").exists()
+    # config/catalogs went when catalogs became content-addressed: a run
+    # declares what it draws, and the file is named by the request's key.
+    assert not (PAPER_ROOT / "config/catalogs").exists()
     # config/populations went with the gwmock graph path: a population is a
     # registered NumPyro model now, named by config/population.json.
     assert not (PAPER_ROOT / "config/populations").exists()
@@ -143,6 +140,8 @@ def test_run_config_paths_are_the_layers_in_merge_order() -> None:
         "networks.json",
         "priors.json",
         "sampler.json",
+        "waveform.json",
+        "population.json",
     ]
     assert paths[: len(base)] == base
     assert [path.name for path in paths[len(base) :]] == [
@@ -176,20 +175,6 @@ def test_plotting_settings_are_not_a_run_layer() -> None:
     }
 
     assert "plotting.json" not in names
-
-
-def test_waveform_settings_are_not_a_run_layer() -> None:
-    """`config/waveform.json` is catalog generation and must not reach a RunConfig.
-
-    It sits in the same directory as the three shared run layers, so a glob
-    would sweep it in and `extra="forbid"` would then reject every run.
-    """
-    names = {
-        path.name
-        for path in run_config_paths("cosmological-parameters", "ET-triangular")
-    }
-
-    assert "waveform.json" not in names
 
 
 def test_assemble_run_is_merge_config_layers_over_run_config_paths() -> None:
@@ -235,7 +220,15 @@ def test_base_files_merge_into_one_mapping() -> None:
     assert "network" not in base["analysis"]
     assert "detectors" not in base["analysis"]
     # Every shared layer is in this merge, one block each.
-    assert set(base) == {"analysis", "fiducials", "networks", "priors", "sampler"}
+    assert set(base) == {
+        "analysis",
+        "fiducials",
+        "networks",
+        "priors",
+        "sampler",
+        "waveform",
+        "population",
+    }
 
 
 def test_no_run_declares_a_raw_detector_list() -> None:
@@ -285,33 +278,100 @@ def test_every_run_merge_is_a_valid_run_config(experiment: str, run: str) -> Non
 
 
 @pytest.mark.parametrize(("experiment", "run"), all_runs())
-def test_every_run_names_declared_catalogs(experiment: str, run: str) -> None:
+def test_every_run_asks_for_catalogs_that_can_be_drawn(
+    experiment: str, run: str
+) -> None:
     config = build_run_config(assemble_run(experiment, run))
 
-    check_catalog_references(config, label=f"{experiment}/{run}")
+    check_catalog_requests(config, label=f"{experiment}/{run}")
+
+
+@pytest.mark.parametrize(("experiment", "run"), all_runs())
+@pytest.mark.parametrize("role", ["injection", "proposal"])
+def test_run_config_and_raw_merge_key_a_catalog_identically(
+    experiment: str, run: str, role: str
+) -> None:
+    """The workflow keys the raw merge; `run_mcmc` keys the validated config.
+
+    A disagreement would hand every run a file its own check then refuses.
+    """
+    config = build_run_config(assemble_run(experiment, run))
+    workflow = resolve_run_catalogs().by_run[(experiment, run)][role]
+
+    assert config.catalog_request(role).key() == workflow
 
 
 # --------------------------------------------------------------------------- #
-# PolarizationPowerCatalog selection
+# Catalog resolution
 # --------------------------------------------------------------------------- #
-#: The nine catalogs the 27 runs share between them. Two pairs of specs
-#: collapsed into one file when catalogs stopped being composed in memory:
-#: astrophysical-parameters reuses the eps=0.1 guard catalog, and
-#: waveform-approximant/IMRPhenom reuses the injection catalog.
+def test_catalog_blocks_inherit_the_run_blocks_under_a_role_override() -> None:
+    """The eps=0.1 guard names its own population but keeps the shared window."""
+    blocks = catalog_blocks("variable-proposal-guard", "eps1e-1", "proposal")
+    shared = load_base()["population"]["model_kwargs"]
+
+    assert blocks["population"]["model_name"] == "bns_md_uniform_mixture"
+    assert blocks["population"]["model_kwargs"] == {
+        **shared,
+        "uniform_mixing_fraction": 0.1,
+    }
+    assert (blocks["seed"], blocks["num_samples"]) == (61, 16384)
+
+
+def test_the_injection_is_drawn_at_the_fiducials_the_run_initializes_at() -> None:
+    raw = assemble_run("time-delay", "delay-slope")
+    blocks = catalog_blocks("time-delay", "delay-slope", "injection")
+
+    assert blocks["fiducials"] == raw["fiducials"]
+    assert blocks["fiducials"]["delay_slope"] == -1.0
+    assert blocks["population"]["model_name"] == "bns_md_time_delayed_cosmological"
+
+
+def test_the_catalog_size_series_differs_only_in_size() -> None:
+    requests = [
+        CatalogRequest.from_blocks(
+            **catalog_blocks("variable-catalog-size", run, "proposal")
+        )
+        for run in ("n8192", "n16384", "n32768")
+    ]
+
+    assert [request.num_samples for request in requests] == [8192, 16384, 32768]
+    assert len({request.key() for request in requests}) == 3
+    assert (
+        len(
+            {
+                request.model_copy(update={"num_samples": 1}).key()
+                for request in requests
+            }
+        )
+        == 1
+    )
+
+
+def test_runs_asking_for_the_same_draw_share_one_catalog() -> None:
+    by_run = resolve_run_catalogs().by_run
+
+    shared = by_run[("cosmological-parameters", "ET-triangular")]["injection"]
+    assert by_run[("modified-propagation", "Xi_0")]["injection"] == shared
+    assert by_run[("waveform-approximant", "IMRPhenom")]["proposal"] == shared
+    assert by_run[("waveform-approximant", "TaylorF2")]["proposal"] != shared
 
 
 @pytest.mark.parametrize(
     ("catalog", "message"),
     [
-        ({"injection": "a"}, r"analysis\.catalog\.proposal must be a catalog name"),
-        (None, r"\[analysis\.catalog\] table"),
+        ({"injection": {"seed": 1, "num_samples": 8}}, r"analysis\.catalog\.proposal"),
+        (None, r"analysis\.catalog\.injection"),
         (
-            {"injection": "a", "proposal": 3},
-            r"analysis\.catalog\.proposal must be a catalog name",
+            {
+                "injection": {"seed": 1, "num_samples": 8},
+                "proposal": {"num_samples": 8},
+            },
+            r"analysis\.catalog\.proposal must declare seed",
         ),
     ],
+    ids=["missing-role", "missing-table", "missing-seed"],
 )
-def test_resolve_catalog_names_rejects_malformed_catalogs(
+def test_catalog_blocks_reject_malformed_catalogs(
     tmp_path: Path, catalog: dict[str, object] | None, message: str
 ) -> None:
     experiment = tmp_path / "config/runs/demo"
@@ -324,19 +384,28 @@ def test_resolve_catalog_names_rejects_malformed_catalogs(
     (experiment / "only.json").write_text("{}", encoding="utf-8")
 
     with pytest.raises(TypeError, match=message):
-        resolve_catalog_names("demo", "only", root=tmp_path)
+        for role in ("injection", "proposal"):
+            catalog_blocks("demo", "only", role, root=tmp_path)
 
 
-# --------------------------------------------------------------------------- #
-# PolarizationPowerCatalog reference validation
-# --------------------------------------------------------------------------- #
-def test_a_run_naming_an_unknown_catalog_is_rejected() -> None:
-    raw = assemble_run("cosmological-parameters", "ET-triangular")
-    raw["analysis"]["catalog"]["proposal"] = "does-not-exist"
+def test_a_guard_mixture_is_rejected_as_an_injection() -> None:
+    raw = assemble_run("variable-proposal-guard", "eps1e-1")
+    raw["analysis"]["catalog"]["injection"] = raw["analysis"]["catalog"]["proposal"]
     config = build_run_config(raw)
 
-    with pytest.raises(ValueError, match="names unknown catalog 'does-not-exist'"):
-        check_catalog_references(config, label="demo/only")
+    with pytest.raises(ValueError, match="declares no merger rate"):
+        check_catalog_requests(config, label="demo/only")
+
+
+def test_an_unregistered_catalog_population_is_rejected() -> None:
+    raw = assemble_run("cosmological-parameters", "ET-triangular")
+    raw["analysis"]["catalog"]["proposal"]["population"] = {
+        "model_name": "no_such_population"
+    }
+    config = build_run_config(raw)
+
+    with pytest.raises(ValueError, match="unknown population 'no_such_population'"):
+        check_catalog_requests(config, label="demo/only")
 
 
 # --------------------------------------------------------------------------- #
@@ -362,35 +431,6 @@ def test_the_validation_gate_covers_every_run() -> None:
         assert label in labels
 
 
-# --------------------------------------------------------------------------- #
-# PolarizationPowerCatalog configs
-# --------------------------------------------------------------------------- #
-def test_the_shared_blocks_are_declared_once() -> None:
-    """Every catalog inherits [waveform], [population] and [fiducials].
-
-    Editing any of the three must therefore invalidate all nine catalogs,
-    which is only true because they are declared as inputs of every one.
-    ``fiducials.json`` is a run layer as well, so the hyperparameters a catalog
-    is drawn at and the ones a run initializes at cannot drift.
-    """
-    for name in discover_catalog_names():
-        layers = catalog_config_paths(name)
-        assert [path.name for path in layers[:-1]] == [
-            "waveform.json",
-            "population.json",
-            "fiducials.json",
-        ]
-        assert layers[-1].stem == name
-        assert layers[-1].suffix == ".json"
-        own = load_mapping(layers[-1])
-        # Only the TaylorF2 catalog overrides anything in the shared waveform
-        # block, and a def that touches the shared population names a
-        # different one and adds the construction settings it takes, never
-        # restating the shared window and grid.
-        assert set(own.get("waveform", {})) <= {"approximant"}, name
-        assert set(own.get("population", {})) <= {"model_name", "model_kwargs"}, name
-
-
 def test_run_mcmc_validates_the_blocks_the_workflow_folds() -> None:
     """The whole path: `jq` folds the layers, `run_mcmc` parses and validates.
 
@@ -414,9 +454,9 @@ def test_run_mcmc_validates_the_blocks_the_workflow_folds() -> None:
         argv += [f"--{block}", folded.stdout]
     argv += [
         "--injection-catalog",
-        "outputs/catalogs/md-imrphenom-s41-n32768.h5",
+        "outputs/catalogs/injection.h5",
         "--proposal-catalog",
-        "outputs/catalogs/md-imrphenom-s41-n32768.h5",
+        "outputs/catalogs/proposal.h5",
         "--label",
         "Xi_0-H0",
     ]
@@ -428,7 +468,8 @@ def test_run_mcmc_validates_the_blocks_the_workflow_folds() -> None:
     # corrupted, reached the validated config as a Normal.
     assert type(config.priors["H0"]).__name__ == "Normal"
     assert config.analysis.sampled_params == ("xi_0",)
-    assert config.analysis.catalog.injection == "md-imrphenom-s41-n32768"
+    assert config.analysis.catalog.injection.seed == 41
+    assert config.waveform["approximant"] == "IMRPhenomXAS_NRTidalv3"
     assert config.analysis.population.model_kwargs["n_grid"] == 256
 
 
@@ -497,29 +538,3 @@ def test_a_deep_fold_would_corrupt_the_one_prior_override() -> None:
             "priors"
         ]["H0"]["kwargs"]
     ) == {"loc", "scale"}
-
-
-def test_the_jq_merge_matches_the_python_merge() -> None:
-    """The workflow merges catalog layers with `jq`; this pins the two agree.
-
-    `rule waveform_catalog` does its own merge in the shell so it can hand the
-    generator the three blocks rather than a list of paths, which leaves two
-    implementations of one fold. jq's `*` is a recursive merge, and the catalog
-    layers carry no [priors] block, so the shallow-merge rule
-    `_merge_run_overlay` exists for never applies -- but that is an argument,
-    not a check.
-    """
-    jq = shutil.which("jq")
-    if jq is None:
-        pytest.skip("jq is not installed")
-    for name in discover_catalog_names():
-        layers = [str(path) for path in catalog_config_paths(name)]
-        merged = subprocess.run(
-            [jq, "-s", "reduce .[] as $layer ({}; . * $layer)", *layers],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert json.loads(merged.stdout) == merge_config_layers(
-            catalog_config_paths(name)
-        ), name

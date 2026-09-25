@@ -77,6 +77,11 @@ convert-notebooks:
 run-notebook notebook:
     uv run --group jupyter marimo edit {{ notebook }}
 
+# Map catalog keys back to what they draw and which runs use them. Pass
+# `--orphans` to list built catalogs no committed run asks for.
+catalogs *args:
+    uv run --extra paper python scripts/catalogs.py ls {{ args }}
+
 # The publishable distribution. `astrogwb.paper` ships inside it but is
 # unimportable without the `paper` extra, whose dependencies stay out of the
 # core requirement set.

@@ -1,10 +1,9 @@
-"""The committed catalog configs, and the population declarations they name.
+"""The catalogs the committed runs ask for, and the populations they name.
 
-These files describe a catalog only until it exists. Afterwards the *file* is
-authoritative -- it records its own model, construction kwargs,
-hyperparameters and included density factors -- so nothing here is re-read at
-analysis time and no run config restates any of it. What is left to check is
-that every committed declaration can actually be built.
+A run's ``[analysis.catalog]`` roles resolve to requests; once a catalog is
+built, its *file* is authoritative about what it holds, and ``run_mcmc`` checks
+it against the request. What is left to check here is that every committed
+request can actually be drawn.
 
 That replaced a much larger surface: a descriptor extracted from a gwmock graph
 YAML, a mixture-of-proposals model, a derived proposal-density config, and an
@@ -14,19 +13,15 @@ eight parameters the catalog was drawn at.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 from numpyro import handlers
 from repo import REPO_ROOT
 
 from astrogwb.constants import ISCO_ALPHA
+from astrogwb.metadata import CatalogRequest
 from astrogwb.paper.config.catalogs import (
-    CatalogDefinition,
     check_population_model,
-    discover_catalogs,
-    load_catalog_layers,
+    resolve_run_catalogs,
 )
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
@@ -36,14 +31,14 @@ from astrogwb.populations import (
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 
-def _definitions() -> dict[str, CatalogDefinition]:
-    return discover_catalogs(REPO_ROOT)
+def _requests() -> dict[str, CatalogRequest]:
+    return resolve_run_catalogs(REPO_ROOT).requests
 
 
-def _build(definition: CatalogDefinition) -> Population:
-    """The population a def declares, built. ``PopulationMetadata.build`` is
+def _build(request: CatalogRequest) -> Population:
+    """The population a request declares, built. ``PopulationMetadata.build`` is
     the same call generation makes, so this exercises the production path."""
-    return definition.population.build()
+    return request.metadata.population.build()
 
 
 # --------------------------------------------------------------------------- #
@@ -51,11 +46,11 @@ def _build(definition: CatalogDefinition) -> Population:
 # --------------------------------------------------------------------------- #
 def test_every_committed_catalog_names_a_registered_population() -> None:
     """Caught pre-flight, not at the top of a queued GPU generation job."""
-    for name, definition in _definitions().items():
+    for key, request in _requests().items():
         check_population_model(
-            definition.population.model_name,
-            label=f"catalog {name!r}",
-            kwargs=definition.population.model_kwargs,
+            request.metadata.population.model_name,
+            label=f"catalog {key}",
+            kwargs=request.metadata.population.model_kwargs,
         )
 
 
@@ -68,13 +63,13 @@ def test_every_committed_catalog_can_build_its_population() -> None:
     does not take fails here rather than being filtered on its way to one of
     two separately built callables.
     """
-    for name, definition in _definitions().items():
+    for key, request in _requests().items():
         with handlers.seed(rng_seed=0):
-            trace = handlers.trace(_build(definition).source_model).get_trace(
-                definition.fiducials
+            trace = handlers.trace(_build(request).source_model).get_trace(
+                request.fiducials
             )
-        assert trace["redshift"]["type"] == "sample", name
-        assert trace["luminosity_distance"]["type"] == "deterministic", name
+        assert trace["redshift"]["type"] == "sample", key
+        assert trace["luminosity_distance"]["type"] == "deterministic", key
 
 
 def test_only_the_guarded_proposals_declare_no_merger_rate() -> None:
@@ -84,22 +79,22 @@ def test_only_the_guarded_proposals_declare_no_merger_rate() -> None:
     pairing the two -- which the old two-name record allowed, and every guarded
     def did -- recorded a rate that was never the one its samples imply.
     """
-    for name, definition in _definitions().items():
-        merger_rate_fn = _build(definition).merger_rate_fn
-        expected_none = "uniform_mixture" in definition.population.model_name
-        assert (merger_rate_fn is None) is expected_none, name
+    for key, request in _requests().items():
+        merger_rate_fn = _build(request).merger_rate_fn
+        expected_none = "uniform_mixture" in request.metadata.population.model_name
+        assert (merger_rate_fn is None) is expected_none, key
 
 
 def test_every_declared_density_factor_is_a_real_sample_site() -> None:
     """Generation records ``DEFAULT_DENSITY_SITES``; each must be a sample site."""
     assert "redshift" in DEFAULT_DENSITY_SITES
-    for name, definition in _definitions().items():
+    for key, request in _requests().items():
         with handlers.seed(rng_seed=0):
-            trace = handlers.trace(_build(definition).source_model).get_trace(
-                definition.fiducials
+            trace = handlers.trace(_build(request).source_model).get_trace(
+                request.fiducials
             )
         for site in DEFAULT_DENSITY_SITES:
-            assert trace[site]["type"] == "sample", name
+            assert trace[site]["type"] == "sample", key
 
 
 def test_the_retired_population_graphs_are_gone() -> None:
@@ -178,21 +173,7 @@ def test_an_amplitude_the_population_cannot_marginalize_is_rejected() -> None:
     )
 
 
-def test_layers_must_declare_a_population(tmp_path: Path) -> None:
-    path = tmp_path / "toy.json"
-    path.write_text('{"num_samples": 8, "seed": 1}', encoding="utf-8")
-    with pytest.raises(ValueError, match="population"):
-        load_catalog_layers([path])
-
-
-def _toy_def(
-    *,
-    approximant: str = "Toy",
-    minimum_redshift: float = 0.0,
-    maximum_redshift: float = 20.0,
-    alpha: float | None = None,
-) -> str:
-    """One complete catalog def, in the committed format: a single JSON layer."""
+def _waveform(approximant: str, alpha: float | None = None) -> dict[str, object]:
     waveform: dict[str, object] = {
         "approximant": approximant,
         "sampling_frequency": 128.0,
@@ -203,88 +184,48 @@ def _toy_def(
     }
     if alpha is not None:
         waveform["alpha"] = alpha
-    return json.dumps(
-        {
-            "num_samples": 8,
-            "seed": 1,
-            "population": {
-                "model_name": "bns_md_cosmological",
-                "model_kwargs": {
-                    "minimum_redshift": minimum_redshift,
-                    "maximum_redshift": maximum_redshift,
-                    "n_grid": 256,
-                },
+    return waveform
+
+
+def _request(waveform: dict[str, object]) -> CatalogRequest:
+    return CatalogRequest.from_blocks(
+        population={
+            "model_name": "bns_md_cosmological",
+            "model_kwargs": {
+                "minimum_redshift": 0.0,
+                "maximum_redshift": 20.0,
+                "n_grid": 256,
             },
-            "fiducials": {"H0": 67.66},
-            "waveform": waveform,
-        }
+        },
+        waveform=waveform,
+        fiducials={"H0": 67.66},
+        seed=1,
+        num_samples=8,
     )
 
 
-def test_the_seed_a_def_states_is_the_seed_the_record_carries() -> None:
-    """One seed per def, folded into the record during validation."""
-    for name, definition in _definitions().items():
-        assert definition.seed == definition.population.seed, name
-
-
-def test_a_population_block_may_not_restate_the_draw(tmp_path: Path) -> None:
-    """The seed is not configuration, and a silent override would desync the record.
-
-    A ``[population]`` ``seed`` would win over the def's own and leave
-    ``definition.seed`` disagreeing with what the ``.h5`` records.
-    """
-    blocks = json.loads(_toy_def())
-    blocks["population"]["seed"] = 99
-    path = tmp_path / "toy.json"
-    path.write_text(json.dumps(blocks), encoding="utf-8")
-
-    with pytest.raises(ValueError, match="population may not declare seed"):
-        load_catalog_layers([path])
-
-
-def test_an_inverted_redshift_window_is_rejected(tmp_path: Path) -> None:
-    path = tmp_path / "toy.json"
-    path.write_text(
-        _toy_def(minimum_redshift=20.0, maximum_redshift=0.0), encoding="utf-8"
-    )
-    with pytest.raises(ValueError, match="minimum_redshift must be less than"):
-        load_catalog_layers([path])
-
-
-def test_alpha_is_rejected_for_a_non_analytical_approximant(tmp_path: Path) -> None:
+def test_request_with_alpha_for_ripple_approximant_raises() -> None:
     """``alpha`` terminates the closed-form inspiral and means nothing to Ripple.
 
-    Silently ignoring it would let a def look like it set a termination
+    Silently ignoring it would let a request look like it set a termination
     frequency that the generated catalog does not honour.
     """
-    path = tmp_path / "toy.json"
-    path.write_text(_toy_def(approximant="TaylorF2", alpha=0.02), encoding="utf-8")
     with pytest.raises(
         ValueError, match="alpha is only valid for the AnalyticInspiral"
     ):
-        load_catalog_layers([path])
+        _request(_waveform("TaylorF2", alpha=0.02))
 
 
-def test_a_declared_alpha_reaches_the_analytical_generator(tmp_path: Path) -> None:
-    path = tmp_path / "toy.json"
-    path.write_text(
-        _toy_def(approximant="AnalyticInspiral", alpha=0.02), encoding="utf-8"
-    )
-    generator = load_catalog_layers([path]).waveform.build()
+def test_request_with_declared_alpha_reaches_analytic_generator() -> None:
+    generator = _request(_waveform("AnalyticInspiral", alpha=0.02)).metadata.waveform
+    built = generator.build()
 
-    assert isinstance(generator, AnalyticInspiralGenerator)
-    assert generator.metadata.alpha == 0.02
+    assert isinstance(built, AnalyticInspiralGenerator)
+    assert built.metadata.alpha == 0.02
 
 
-def test_an_omitted_alpha_defaults_to_isco(tmp_path: Path) -> None:
-    path = tmp_path / "toy.json"
-    path.write_text(_toy_def(approximant="AnalyticInspiral"), encoding="utf-8")
-    generator = load_catalog_layers([path]).waveform.build()
+def test_request_without_alpha_defaults_to_isco() -> None:
+    built = _request(_waveform("AnalyticInspiral")).metadata.waveform.build()
 
-    assert isinstance(generator, AnalyticInspiralGenerator)
-    assert generator.metadata.alpha == ISCO_ALPHA
-
-
-def test_no_catalog_layers_is_rejected() -> None:
-    with pytest.raises(ValueError, match="no catalog config layers"):
-        load_catalog_layers([])
+    assert isinstance(built, AnalyticInspiralGenerator)
+    assert built.metadata.alpha == ISCO_ALPHA

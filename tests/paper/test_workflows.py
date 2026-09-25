@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from repo import REPO_ROOT
 
+from astrogwb.paper.config.catalogs import resolve_run_catalogs
 from astrogwb.paper.config.runs import run_config_paths
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
@@ -35,7 +36,7 @@ WORKFLOW_DIR = PAPER_ROOT
 
 #: Committed inputs the workflow reads. Everything else it touches is output.
 LINKED = ("Snakefile", "config", "scripts")
-CATALOG_RULES = ("merge_catalog_config", "waveform_catalog", "catalogs")
+CATALOG_RULES = ("waveform_catalog", "catalogs")
 MCMC_RULES = (
     "validate",
     "run_mcmc",
@@ -106,45 +107,36 @@ def _rule_inputs(stdout: str) -> list[str]:
     ]
 
 
-#: Every catalog name the 27 runs draw on, minus the default injection one
-#: that ``_catalogs`` always creates.
-NON_INJECTION_CATALOGS = (
-    "md-imrphenom-s42-n8192.h5",
-    "md-imrphenom-s42-n16384.h5",
-    "md-imrphenom-s42-n32768.h5",
-    "md-taylorf2-s41-n32768.h5",
-    "md-uniform-imrphenom-s61-n16384-eps1e-1.h5",
-    "md-uniform-imrphenom-s62-n16384-eps1e-2.h5",
-    "md-uniform-imrphenom-s63-n16384-eps1e-3.h5",
-    "md-delayed-imrphenom-s71-n32768.h5",
-)
+#: Every catalog the committed runs ask for, keyed as the workflow keys them.
+RUN_CATALOGS = resolve_run_catalogs(PAPER_ROOT)
+#: The catalog the figure run samples both roles against.
+DEFAULT_CATALOG = f"{RUN_CATALOGS.by_run[FIGURE_RUN]['injection']}.h5"
 
 
 def _all_catalogs(tmp_path: Path) -> Path:
-    """A fake catalogs directory holding all nine."""
-    return _catalogs(tmp_path, *NON_INJECTION_CATALOGS)
+    """A fake catalogs directory holding every catalog any run asks for."""
+    return _catalogs(tmp_path, *(f"{key}.h5" for key in RUN_CATALOGS.requests))
 
 
 def _catalogs(tmp_path: Path, *names: str) -> Path:
-    """A fake catalogs directory: the shared injection catalog plus ``names``."""
+    """A fake catalogs directory: the figure run's catalog plus ``names``."""
     directory = tmp_path / "catalogs"
     directory.mkdir(exist_ok=True)
-    (directory / "md-imrphenom-s41-n32768.h5").touch()
+    (directory / DEFAULT_CATALOG).touch()
     for name in names:
         (directory / name).touch()
     return directory
 
 
-def test_catalog_rule_reads_its_config_layers_directly() -> None:
-    """Two rules per catalog: fold the layers once, then draw from the result.
+def test_catalog_rule_is_handed_the_request_its_key_names() -> None:
+    """One rule per catalog, named by key and handed the request as JSON.
 
-    The population used to be a separate graph file declared as an extra
-    input. It is a registered model named by `config/population.json` now, and
-    the hyperparameters come from `config/fiducials.json`, so the layer list
-    *is* the dependency edge. That edge now sits on `merge_catalog_config`,
-    and `waveform_catalog` inherits it through the merged file -- which is
-    what lets the fold happen once instead of once per flag.
+    The rule declares no config layers: the output path *is* the request's
+    content hash, so an edit that changes a draw names a new file rather than
+    invalidating this one.
     """
+    default = RUN_CATALOGS.by_run[FIGURE_RUN]["injection"]
+    guarded = RUN_CATALOGS.by_run[("variable-proposal-guard", "eps1e-1")]["proposal"]
     result = _snakemake(
         "--snakefile",
         str(SNAKEFILE),
@@ -155,65 +147,35 @@ def test_catalog_rule_reads_its_config_layers_directly() -> None:
         "--printshellcmds",
         "--cores",
         "1",
-        "outputs/catalogs/md-imrphenom-s41-n32768.h5",
-        "outputs/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.h5",
+        f"outputs/catalogs/{default}.h5",
+        f"outputs/catalogs/{guarded}.h5",
     )
 
     assert result.returncode == 0, result.stderr
-    # The shared waveform layer is an input of both, so editing it rebuilds both.
-    assert result.stdout.count("config/waveform.json") >= 2
-    assert "config/catalogs/md-imrphenom-s41-n32768.json" in result.stdout
-    assert (
-        "config/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.json" in result.stdout
-    )
-    # Editing either shared declaration rebuilds every catalog. fiducials.json
-    # is a run layer too, so the hyperparameters a catalog is drawn at and the
-    # ones a run initializes at cannot drift.
-    assert result.stdout.count("config/population.json") >= 2
-    assert result.stdout.count("config/fiducials.json") >= 2
-    assert "outputs/catalogs/md-imrphenom-s41-n32768.h5" in result.stdout
-    assert (
-        "outputs/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.h5" in result.stdout
-    )
+    assert result.stdout.count("rule waveform_catalog:") == 2
     assert "python scripts/generate_catalog.py" in result.stdout
-    assert any(
-        "scripts/generate_catalog.py" in line for line in _rule_inputs(result.stdout)
-    )
-    # The fold runs once per catalog, over exactly the declared layers, into
-    # the merged file. This is the assertion that would fail if the merge
-    # migrated back into the flags and started re-folding once each.
-    layers = (
-        "config/waveform.json config/population.json config/fiducials.json "
-        "config/catalogs/md-imrphenom-s41-n32768.json"
-    )
-    merged = "outputs/catalogs/md-imrphenom-s41-n32768.merged.json"
-    merge = "reduce .[] as $layer ({}; . * $layer)"
-    assert f"jq -s '{merge}' {layers} > {merged}" in result.stdout
-    assert result.stdout.count(f"jq -s '{merge}'") == 2, "one fold per catalog"
+    assert "--request" in result.stdout
+    assert '"uniform_mixing_fraction":0.1' in result.stdout
+    for line in _rule_inputs(result.stdout):
+        assert "config/" not in line
+    # The name-to-config mapping and its merge rule are gone.
+    assert "config/catalogs/" not in result.stdout
+    assert "merged.json" not in result.stdout
 
-    # The generator reads keys out of that one file, never the layer tree.
-    for flag, compact in (
-        ("--population", True),
-        ("--fiducials", True),
-        ("--waveform", True),
-        ("--seed", False),
-        ("--num-samples", False),
-    ):
-        key = flag.removeprefix("--").replace("-", "_")
-        jq = "jq -c" if compact else "jq -r"
-        assert f'{flag} "$({jq} .{key} {merged})"' in result.stdout, flag
-    assert "--config" not in result.stdout
-    # The old base/ and defs/ split is gone: one flat directory of defs.
-    assert "config/catalogs/base/" not in result.stdout
-    assert "config/catalogs/defs/" not in result.stdout
-    # The population intermediate, its merge rule, and the graph configs the
-    # rule used to declare are all gone.
-    assert "outputs/populations/" not in result.stdout
-    assert "outputs/population-configs/" not in result.stdout
-    assert "config/populations/" not in result.stdout
-    # The bank/catalog split is gone: no separate bank tree, no bank rule.
-    assert "outputs/banks/" not in result.stdout
-    assert "config/banks/" not in result.stdout
+
+def test_catalog_rule_rejects_a_path_that_is_not_a_key() -> None:
+    result = _snakemake(
+        "--snakefile",
+        str(SNAKEFILE),
+        "--allowed-rules",
+        *CATALOG_RULES,
+        "--dry-run",
+        "--cores",
+        "1",
+        "outputs/catalogs/md-imrphenom-s41-n32768.h5",
+    )
+
+    assert result.returncode != 0
 
 
 def test_the_snakefile_no_longer_needs_ancient() -> None:
@@ -226,7 +188,7 @@ def test_the_snakefile_no_longer_needs_ancient() -> None:
     assert "ancient(" not in SNAKEFILE.read_text()
 
 
-def test_catalogs_target_builds_all_9_catalogs() -> None:
+def test_catalogs_target_builds_every_distinct_catalog_once() -> None:
     result = _snakemake(
         "--snakefile",
         str(SNAKEFILE),
@@ -240,14 +202,14 @@ def test_catalogs_target_builds_all_9_catalogs() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule waveform_catalog:") == 9
+    assert result.stdout.count("rule waveform_catalog:") == len(RUN_CATALOGS.requests)
     assert "rule population_config:" not in result.stdout
 
 
 def test_plot_cosmological_parameters_expands_all_chains_and_figures(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "md-imrphenom-s42-n16384.h5")
+    catalogs = _catalogs(tmp_path)
 
     result = _mcmc(
         "--dry-run",
@@ -276,7 +238,7 @@ def test_plot_cosmological_parameters_expands_all_chains_and_figures(
 
 
 def test_run_experiment_target_excludes_figure_rule(tmp_path: Path) -> None:
-    catalogs = _catalogs(tmp_path, "md-imrphenom-s42-n16384.h5")
+    catalogs = _catalogs(tmp_path)
 
     result = _mcmc(
         "--dry-run",
@@ -397,7 +359,7 @@ def test_experiments_target_builds_all_26_chains(tmp_path: Path) -> None:
 def test_plot_cosmological_parameters_passes_all_paths_not_labels(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "md-imrphenom-s42-n16384.h5")
+    catalogs = _catalogs(tmp_path)
 
     result = _mcmc(
         "--dry-run",
@@ -452,7 +414,7 @@ def test_network_run_flags_follow_the_legend_order(tmp_path: Path) -> None:
     # assignment. `resolve_networks` rejects a mis-ordered list, so this pins
     # that the workflow emits the order it expects rather than relying on the
     # figure to still render.
-    catalogs = _catalogs(tmp_path, "md-imrphenom-s42-n16384.h5")
+    catalogs = _catalogs(tmp_path)
 
     result = _mcmc(
         "--dry-run",
@@ -477,7 +439,7 @@ def test_network_run_flags_follow_the_legend_order(tmp_path: Path) -> None:
 def test_standalone_figures_receive_config_paths(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "md-imrphenom-s42-n16384.h5")
+    catalogs = _catalogs(tmp_path)
 
     result = _mcmc(
         "--dry-run",
@@ -509,7 +471,7 @@ def test_standalone_figures_receive_config_paths(
 def test_figure_path_is_a_valid_snakemake_target(
     tmp_path: Path,
 ) -> None:
-    catalogs = _catalogs(tmp_path, "md-imrphenom-s42-n16384.h5")
+    catalogs = _catalogs(tmp_path)
 
     result = _mcmc(
         "--dry-run",
@@ -527,7 +489,7 @@ def test_figure_path_is_a_valid_snakemake_target(
 
 
 def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
-    catalogs = _catalogs(tmp_path, "md-imrphenom-s42-n16384.h5")
+    catalogs = _catalogs(tmp_path)
 
     result = _mcmc(
         "--dry-run",

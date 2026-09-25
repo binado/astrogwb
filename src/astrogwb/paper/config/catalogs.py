@@ -1,25 +1,15 @@
-"""PolarizationPowerCatalog configuration: what a catalog is made of, before it is made.
+"""Validating the catalogs a run asks for, before any is built.
 
 A *catalog* is one persisted waveform draw: expensive to build (population
-draw + ripple waveform generation) and reused by every run that names it. Two
-layers: the shared ``config/waveform.json``, ``config/population.json`` and
-``config/fiducials.json``, then one ``config/catalogs/<name>.json`` per catalog,
-whose stem is the name and which produces ``outputs/catalogs/<stem>.h5``. No
-registry file translates between the two.
+draw + ripple waveform generation) and shared by every run that asks for the
+same one. A run declares what it needs in ``[analysis.catalog]`` -- a partial
+spec per role, resolved over the run's own ``[waveform]``, ``[population]``
+and ``[fiducials]`` into a :class:`~astrogwb.metadata.CatalogRequest` -- and
+the file lives at ``outputs/catalogs/<key>.h5``, where ``<key>`` is that
+request's content hash. No name translates between the two.
 
-This file describes a catalog only until it exists. Afterwards the *file* is
-authoritative: it records its own registered population model, that model's
-construction kwargs, the hyperparameters it was drawn at, and the density
-factors included in importance weighting. Nothing here is re-read at analysis
-time, and no run config restates any of it, so there is nothing for the two to
-disagree about.
-
-That replaced a genuinely fragile arrangement. Three partial records used to
-describe one run -- the merged run TOML, a catalog attribute naming only the
-*shape* of the redshift proposal, and a config object derived from those two --
-reconciled by exact float equality over five hard-coded parameter names. Three
-more parameters that change the answer (``xi_0``, ``xi_n``,
-``local_merger_rate``) were checked by nothing at all.
+Once built, the *file* is authoritative about what it holds, and
+``scripts/run_mcmc.py`` checks it against the request its run resolves.
 
 Deliberately JAX-free at import: nothing here needs it. The registry lookup
 that validates a model name imports :mod:`astrogwb.populations` inside its own
@@ -31,136 +21,24 @@ initialized, which ``tests/paper/test_cli.py`` guards directly.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from astrogwb.metadata import PopulationMetadata, WaveformMetadata
-from astrogwb.paper.config.mcmc import RunConfig, check_redshift_grid
+from astrogwb.metadata import CatalogRequest
+from astrogwb.paper.config.mcmc import (
+    RunConfig,
+    build_run_config,
+    check_redshift_grid,
+)
 from astrogwb.paper.config.runs import (
-    CATALOGS_DIR,
-    catalog_config_paths,
-    discover_catalog_names,
-    merge_config_layers,
+    CATALOG_ROLES,
+    assemble_run,
+    discover_runs,
+    resolve_catalog_blocks,
 )
 
 logger = logging.getLogger(__name__)
-
-_STRICT = ConfigDict(frozen=True, extra="forbid")
-
-
-class CatalogDefinition(BaseModel):
-    """Everything needed to generate one reusable catalog.
-
-    ``population`` is the :class:`~astrogwb.metadata.PopulationMetadata` the
-    generated ``.h5`` persists verbatim, assembled here rather than bridged
-    from a second config-layer model: the declaration and the record were the
-    same facts stated twice, and a bridge between them is one more place for
-    them to disagree. ``model_name`` is a key in the
-    :mod:`astrogwb.populations` registry, never an import path -- registry keys
-    change only on purpose, while module paths move as collateral whenever a
-    module is reorganized. It names the population, the source model and its
-    merger rate together, so a def cannot pair a redshift law with a rate that
-    is not its own normalization.
-
-    ``seed`` and ``num_samples`` live here rather than inside ``population`` on
-    purpose: ``md-imrphenom-s41-n32768`` and ``md-imrphenom-s42-n16384`` are the
-    *same* population drawn at different seeds and sizes, so the shared
-    ``config/population.json`` declares neither. The seed is folded into the
-    record by :meth:`_assemble_population_record`, because that is where it
-    belongs once a particular draw exists.
-
-    ``fiducials`` are the hyperparameters the draw is made at, inherited from
-    ``config/fiducials.json`` -- the same table the runs initialize at, so the
-    two cannot drift. They stay outside ``population`` because they are not part
-    of the record: the record describes the density that produced the samples,
-    while these describe the samples. A def that wants an injection away from
-    the fiducials overrides the ``[fiducials]`` block like any other layer.
-
-    A def carries no prose. JSON has no comments, and a ``description`` field
-    would be a second place for one to rot: what each committed catalog is for
-    is documented once, in ``config/catalogs/README.md``, next to the files it
-    describes. ``extra="forbid"`` is what keeps it there.
-    """
-
-    model_config = _STRICT
-
-    name: str
-    seed: int
-    num_samples: Annotated[int, Field(gt=0)]
-    population: PopulationMetadata
-    fiducials: dict[str, float]
-    waveform: WaveformMetadata
-
-    @model_validator(mode="before")
-    @classmethod
-    def _assemble_population_record(cls, data: Any) -> Any:
-        """Complete the ``[population]`` block into a full record.
-
-        The config layer declares the two facts that are configuration --
-        ``model_name`` and ``model_kwargs``. ``seed`` is not: it belongs to this
-        particular draw and is stated once, at the top level, so it is folded in
-        here.
-
-        A ``[population]`` ``seed`` is rejected rather than ignored. It would
-        otherwise win here and leave ``definition.seed`` disagreeing with the
-        seed the ``.h5`` records, which is the one thing this assembly exists to
-        make impossible.
-        """
-        if not isinstance(data, Mapping):
-            return data
-        population = data.get("population")
-        if not isinstance(population, Mapping):
-            # Already a built record, or absent -- either way pydantic reports
-            # it better than a KeyError here would.
-            return data
-
-        if "seed" in population:
-            raise ValueError(
-                "population may not declare seed: the seed is the def's own"
-            )
-
-        completed = dict(population)
-        if "seed" in data:
-            completed["seed"] = data["seed"]
-        return {**data, "population": completed}
-
-    @model_validator(mode="after")
-    def _validate_redshift_window(self) -> CatalogDefinition:
-        check_redshift_grid(
-            self.population.model_kwargs, label="population.model_kwargs"
-        )
-        return self
-
-
-def load_catalog_layers(paths: Sequence[Path]) -> CatalogDefinition:
-    """Merge and validate one catalog from its ordered layer files.
-
-    The last layer is the catalog's own definition, and its filename stem is
-    the catalog name -- the same convention that maps it to
-    ``outputs/catalogs/<stem>.h5``. Taking layers on argv rather than a name
-    keeps the generator symmetric with every other entrypoint: the workflow
-    rule declares exactly these files as its ``input:``.
-    """
-    if not paths:
-        raise ValueError("no catalog config layers given")
-    merged = merge_config_layers(paths)
-    return CatalogDefinition.model_validate({"name": Path(paths[-1]).stem, **merged})
-
-
-def load_catalog_definition(name: str, root: Path | None = None) -> CatalogDefinition:
-    """Merge and validate one catalog's layers, addressing it by name."""
-    return load_catalog_layers(catalog_config_paths(name, root=root))
-
-
-def discover_catalogs(root: Path | None = None) -> dict[str, CatalogDefinition]:
-    """Load every committed catalog config, keyed by name, in sorted order."""
-    return {
-        name: load_catalog_definition(name, root)
-        for name in discover_catalog_names(root)
-    }
 
 
 def check_population_model(
@@ -171,7 +49,7 @@ def check_population_model(
     requires_merger_rate: bool = False,
     amplitude_parameter: str | None = None,
 ) -> None:
-    """Reject a population a run or catalog def cannot actually be built from.
+    """Reject a population a run or catalog cannot actually be built from.
 
     Checks as much as the caller supplies: the name is registered, ``kwargs``
     are kwargs that population takes, and -- for an analysis target, which
@@ -215,37 +93,92 @@ def check_population_model(
     if requires_merger_rate and population.merger_rate_fn is None:
         raise ValueError(
             f"{label}: population {name!r} declares no merger rate, so it "
-            "cannot be an analysis target; it is a proposal density"
+            "cannot be an analysis target or an injection; it is a proposal density"
         )
 
 
-def check_catalog_references(
-    config: RunConfig,
-    *,
-    label: str,
-    catalogs: Mapping[str, CatalogDefinition] | None = None,
-) -> None:
-    """Reject a run naming an unknown catalog.
+def check_catalog_requests(config: RunConfig, *, label: str) -> None:
+    """Reject a run whose catalogs could not be drawn.
 
-    Runs against the committed catalog configs rather than the built files, so
-    a typo fails without building anything expensive. Without it the typo would
-    only surface as a Snakemake wildcard that matches no rule.
-
-    Lives here rather than in :mod:`astrogwb.paper.config.runs` because it
-    needs both a validated ``RunConfig`` and the catalog registry, and that
-    module must stay importable by the ``Snakefile`` without pydantic.
+    Resolves each role into its request -- which validates the waveform
+    settings and the population record -- and builds the population it names,
+    so an unregistered name or a construction setting it does not take fails
+    here rather than at the top of a queued generation job.
     """
-    known = catalogs if catalogs is not None else discover_catalogs()
-    for role, name in (
-        ("injection", config.analysis.catalog.injection),
-        ("proposal", config.analysis.catalog.proposal),
-    ):
-        if name not in known:
-            choices = ", ".join(known)
-            raise ValueError(
-                f"{label} analysis.catalog.{role} names unknown catalog "
-                f"{name!r}; choose from {choices}"
-            )
+    for role in CATALOG_ROLES:
+        role_label = f"{label} analysis.catalog.{role}"
+        try:
+            request = config.catalog_request(role)
+        except ValueError as error:
+            raise ValueError(f"{role_label}: {error}") from None
+        population = request.metadata.population
+        check_redshift_grid(
+            population.model_kwargs, label=f"{role_label}.population.model_kwargs"
+        )
+        # The injection is the "observed" data, whose spectrum is scaled by a
+        # physical rate; a guard mixture declares none, so it can only ever be
+        # a proposal.
+        check_population_model(
+            population.model_name,
+            label=f"{role_label} population.model_name",
+            kwargs=population.model_kwargs,
+            requires_merger_rate=role == "injection",
+        )
+
+
+@dataclass(frozen=True)
+class RunCatalogs:
+    """Every catalog the committed runs ask for, and which run asks for which.
+
+    ``requests`` maps each distinct key to its request, so a draw several runs
+    share appears once; ``by_run`` maps ``(experiment, run)`` to its
+    ``{role: key}``. This is the whole inventory the workflow builds from --
+    there is no catalog config to glob.
+    """
+
+    requests: dict[str, CatalogRequest]
+    by_run: dict[tuple[str, str], dict[str, str]]
+
+    def users(self, key: str) -> list[str]:
+        """Every ``experiment/run:role`` that samples against ``key``."""
+        return [
+            f"{experiment}/{run}:{role}"
+            for (experiment, run), roles in self.by_run.items()
+            for role, used in roles.items()
+            if used == key
+        ]
+
+
+def resolve_run_catalogs(root: Path | None = None) -> RunCatalogs:
+    """Resolve both catalogs of every committed run into keyed requests.
+
+    Works off the raw merge rather than a validated :class:`RunConfig`, so the
+    ``Snakefile`` can build its DAG without validating all 27 runs; the request
+    itself is still validated, because the key is taken over its canonical
+    form. ``RunConfig.catalog_request`` goes through the same
+    :func:`~astrogwb.paper.config.runs.resolve_catalog_blocks`, and a test pins
+    the two agreeing.
+    """
+    requests: dict[str, CatalogRequest] = {}
+    by_run: dict[tuple[str, str], dict[str, str]] = {}
+    for experiment, names in discover_runs(root).items():
+        for run in names:
+            raw = assemble_run(experiment, run, root=root)
+            roles: dict[str, str] = {}
+            for role in CATALOG_ROLES:
+                try:
+                    request = CatalogRequest.from_blocks(
+                        **resolve_catalog_blocks(raw, role)
+                    )
+                except ValueError as error:
+                    raise ValueError(
+                        f"{experiment}/{run} analysis.catalog.{role}: {error}"
+                    ) from None
+                key = request.key()
+                requests.setdefault(key, request)
+                roles[role] = key
+            by_run[(experiment, run)] = roles
+    return RunCatalogs(requests=requests, by_run=by_run)
 
 
 def validate_all_runs(root: Path | None = None) -> list[str]:
@@ -259,27 +192,15 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
     an analysis target is caught by the same pre-flight rather than at the top
     of a queued generation job.
 
-    It lives here rather than in :mod:`astrogwb.paper.config.runs` for the same
-    reason :func:`check_catalog_references` does -- that module must stay
-    importable by the ``Snakefile`` without pydantic. Catalog configs are loaded
-    once: this is one gate over all runs, not a per-run check.
+    It lives here rather than in :mod:`astrogwb.paper.config.runs` because
+    that module must stay stdlib-only.
     """
-    from astrogwb.paper.config.mcmc import build_run_config
-    from astrogwb.paper.config.runs import assemble_run, discover_runs
-
-    catalogs = discover_catalogs(root)
-    for name, definition in catalogs.items():
-        check_population_model(
-            definition.population.model_name,
-            label=f"catalog {name!r} population.model_name",
-            kwargs=definition.population.model_kwargs,
-        )
     labels: list[str] = []
     for experiment, runs in discover_runs(root).items():
         for run in runs:
             label = f"{experiment}/{run}"
             config = build_run_config(assemble_run(experiment, run, root=root))
-            check_catalog_references(config, label=label, catalogs=catalogs)
+            check_catalog_requests(config, label=label)
             target = config.analysis.population
             check_population_model(
                 target.model_name,
@@ -294,12 +215,9 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
 
 
 __all__ = [
-    "CATALOGS_DIR",
-    "CatalogDefinition",
-    "check_catalog_references",
+    "RunCatalogs",
+    "check_catalog_requests",
     "check_population_model",
-    "discover_catalogs",
-    "load_catalog_definition",
-    "load_catalog_layers",
+    "resolve_run_catalogs",
     "validate_all_runs",
 ]

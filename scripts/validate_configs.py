@@ -10,7 +10,8 @@ Three checks per run, cheapest first:
 1. the four layers merge (a malformed TOML or JSON fails here);
 2. the merge validates into a :class:`RunConfig` (a typo'd key, an impossible
    prior, an unknown network name);
-3. both catalogs the run names exist in ``config/catalogs/``.
+3. both catalogs the run asks for resolve to valid requests whose populations
+   can be built (and the injection's declares a merger rate).
 
 JAX-free: nothing here touches a device, so it is cheap enough to run before
 every campaign.
@@ -32,7 +33,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Merge and validate every config/runs/ run, and check the "
-            "catalogs each one names, without building anything."
+            "catalogs each one asks for, without building anything."
         )
     )
     parser.add_argument(

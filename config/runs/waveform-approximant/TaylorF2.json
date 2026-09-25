@@ -1,7 +1,13 @@
 {
   "analysis": {
     "catalog": {
-      "proposal": "md-taylorf2-s41-n32768"
+      "proposal": {
+        "seed": 41,
+        "num_samples": 32768,
+        "waveform": {
+          "approximant": "TaylorF2"
+        }
+      }
     }
   }
 }

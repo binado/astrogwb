@@ -12,8 +12,28 @@
       }
     },
     "catalog": {
-      "injection": "md-delayed-imrphenom-s71-n32768",
-      "proposal": "md-uniform-imrphenom-s61-n16384-eps1e-1"
+      "injection": {
+        "seed": 71,
+        "num_samples": 32768,
+        "population": {
+          "model_name": "bns_md_time_delayed_cosmological",
+          "model_kwargs": {
+            "minimum_delay": 0.02,
+            "maximum_formation_redshift": 20.0,
+            "n_delay_nodes": 48
+          }
+        }
+      },
+      "proposal": {
+        "seed": 61,
+        "num_samples": 16384,
+        "population": {
+          "model_name": "bns_md_uniform_mixture",
+          "model_kwargs": {
+            "uniform_mixing_fraction": 0.1
+          }
+        }
+      }
     }
   },
   "fiducials": {

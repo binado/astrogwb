@@ -2,20 +2,18 @@ import re
 import shlex
 from pathlib import Path
 
+from astrogwb.paper.config.catalogs import resolve_run_catalogs
 from astrogwb.paper.config.runs import (
     BLOCK_FOLDS,
-    catalog_config_paths,
-    discover_catalog_names,
     discover_runs,
-    load_base,
-    resolve_catalog_names,
     run_config_paths,
 )
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
-# Neither config module imports JAX, pydantic, or matplotlib at module scope,
-# so DAG construction stays cheap: a --dry-run costs ~300 modules rather than
-# the ~1200 it took while `assemble_run` reached the pydantic layer.
+# No config module imports JAX or matplotlib at module scope, so DAG
+# construction stays cheap. Keying the catalogs does reach pydantic -- the key
+# is taken over a validated request -- which is the price of there being one
+# canonical form.
 
 
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
@@ -23,19 +21,20 @@ CATALOGS_DIR = Path(config.get("catalogs_dir", "outputs/catalogs"))
 CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 
 
-def catalog_path(name: str) -> str:
-    return str(CATALOGS_DIR / f"{name}.h5")
+def catalog_path(key: str) -> str:
+    return str(CATALOGS_DIR / f"{key}.h5")
 
 
-# Filenames are the mapping: config/catalogs/<name>.json ->
-# outputs/catalogs/<name>.h5, and config/runs/<experiment>/<run>.json
-# -> outputs/chains/<experiment>/<run>.nc. Nothing below translates a registry
-# name into a path; it only globs the config tree and reads back the two names
-# a run's own [analysis.catalog] block carries.
-catalogs = discover_catalog_names()
+# Filenames are the mapping for runs: config/runs/<experiment>/<run>.json ->
+# outputs/chains/<experiment>/<run>.nc. Catalogs are content-addressed instead:
+# each run's [analysis.catalog] roles resolve to a request, and the request's
+# key names outputs/catalogs/<key>.h5. Two runs asking for the same draw share
+# one file, and any edit to a draw -- or a bump of the astrogwb version -- names
+# a new one, so the catalog rule needs no config inputs to rebuild correctly.
 runs = discover_runs()
+run_catalogs = resolve_run_catalogs()
 
-CATALOG_OUTPUTS = [catalog_path(name) for name in catalogs]
+CATALOG_OUTPUTS = [catalog_path(key) for key in run_catalogs.requests]
 CHAIN_OUTPUTS = [
     f"outputs/chains/{experiment}/{run}.nc"
     for experiment, names in runs.items()
@@ -49,24 +48,22 @@ RUN_CONFIG_FILES = sorted(
         for path in run_config_paths(experiment, run, root=Path("."))
     }
 )
-CATALOG_PATTERN = "|".join(re.escape(name) for name in catalogs)
 EXPERIMENT_PATTERN = "|".join(re.escape(name) for name in runs)
 RUN_PATTERN = "|".join(
     re.escape(run) for run in dict.fromkeys(r for names in runs.values() for r in names)
 )
 
-# The figures read the same catalog files the runs sample against. Both names
-# are read off the base catalog config so they cannot drift from what the runs
-# actually use.
-_BASE_CATALOGS = load_base()["analysis"]["catalog"]
-INJECTION_CATALOG = catalog_path(_BASE_CATALOGS["injection"])
-DEFAULT_PROPOSAL_CATALOG = catalog_path(_BASE_CATALOGS["proposal"])
+# The figures read the same catalog files a run samples against, resolved off
+# that run's own config so they cannot drift from what it actually used.
+FIGURE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
+INJECTION_CATALOG = catalog_path(run_catalogs.by_run[FIGURE_RUN]["injection"])
+DEFAULT_PROPOSAL_CATALOG = catalog_path(run_catalogs.by_run[FIGURE_RUN]["proposal"])
 # Figures report what was sampled, so each one is handed a run's own config
 # layers for the shared fiducials and analysis settings. Which run that is used to
 # be a constant buried in the library (config.figures.REFERENCE_RUN); it is an
-# explicit choice here now. The two chain figures read the layers of a run they
-# actually plot; the two chain-free figures fall back to this one.
-FIGURE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
+# explicit choice here now (FIGURE_RUN, above). The two chain figures read the
+# layers of a run they actually plot; the two chain-free figures fall back to
+# this one.
 
 
 def config_layers(experiment, run):
@@ -131,34 +128,19 @@ def network_config_inputs(experiment):
     ]
 
 
-def catalog_layers(wildcards):
-    """One catalog's ordered config layers, relative to this workflow's cwd.
-
-    Declaring the shared layers alongside the def is what makes editing the
-    common [waveform], [population] or [fiducials] block invalidate every
-    catalog.
-    """
-    return [
-        str(path) for path in catalog_config_paths(wildcards.catalog, root=Path("."))
-    ]
-
-
 def run_catalog_input(role):
-    """The catalog file one role of a run samples against.
-
-    The names are known only after the three-layer merge, so `run_mcmc` cannot
-    declare its inputs without one. `resolve_catalog_names` is the library
-    implementation; this returns the wildcards adapter for a single role, so
-    the two files arrive as named inputs the shell block can reference.
-    """
+    """The catalog file one role of a run samples against."""
 
     def resolve(wildcards):
-        names = resolve_catalog_names(
-            wildcards.experiment, wildcards.run, root=Path(".")
-        )
-        return catalog_path(names[role])
+        roles = run_catalogs.by_run[(wildcards.experiment, wildcards.run)]
+        return catalog_path(roles[role])
 
     return resolve
+
+
+def catalog_request(wildcards):
+    """The request behind one catalog key, as the JSON the generator takes."""
+    return run_catalogs.requests[wildcards.catalog].model_dump_json()
 
 
 def run_outdir(wildcards):
@@ -170,13 +152,12 @@ def experiment_chains(experiment):
 
 
 wildcard_constraints:
-    catalog=CATALOG_PATTERN,
+    catalog="[0-9a-f]{16}",
     experiment=EXPERIMENT_PATTERN,
     run=RUN_PATTERN,
 
 
 localrules:
-    merge_catalog_config,
     waveform_catalog,
     validate,
     plot_cosmological_parameters,
@@ -186,59 +167,28 @@ localrules:
     experiments,
 
 
-rule merge_catalog_config:
-    """One catalog's layers, folded once into the blocks the generator takes.
-
-    A rule rather than a shell variable so the fold happens exactly once per
-    catalog and is cached: `waveform_catalog` then reads five keys out of the
-    result, instead of re-folding all four layer files once per flag. `jq`'s
-    `*` is a recursive merge, which is `astrogwb.paper.utils.deep_merge`
-    exactly; the catalog layers carry no `[priors]` block, so the shallow-merge
-    rule the run path needs never applies here, and
-    `tests/paper/test_runs.py` pins the two merges agreeing.
-
-    `temp()` because this is a build intermediate, not an artifact: nothing
-    downstream of the generated catalog reads it, and the `.h5` records its own
-    provenance. The dependency edge on the layer files lives here now, and
-    `waveform_catalog` inherits it transitively -- editing any shared layer
-    still rebuilds every catalog.
-    """
-    input:
-        catalog_layers,
-    output:
-        temp(str(CATALOGS_DIR / "{catalog}.merged.json")),
-    params:
-        merge="reduce .[] as $layer ({}; . * $layer)",
-    shell:
-        "jq -s '{params.merge}' {input:q} > {output:q}"
-
-
 rule waveform_catalog:
     """Population draw + waveform generation, in one process.
 
-    The generator is handed the merged blocks rather than a list of paths, so
-    nothing re-reads the config tree downstream. A `jq` that failed would
-    substitute an empty argument, which `generate_catalog.py` rejects as
-    invalid JSON rather than acting on.
+    The output path is the request's key, so the rule declares no config
+    inputs: an edit that changes what a run asks for changes the key, and with
+    it the file, rather than invalidating this one. The generator re-derives
+    the key from the request it is handed and refuses a path that disagrees.
     """
     input:
         script="scripts/generate_catalog.py",
-        merged=str(CATALOGS_DIR / "{catalog}.merged.json"),
     output:
         catalog_path("{catalog}"),
+    params:
+        request=catalog_request,
     shell:
         "uv run --extra paper python {input.script:q}"
-        " --name {wildcards.catalog:q}"
-        " --population \"$(jq -c .population {input.merged:q})\""
-        " --fiducials \"$(jq -c .fiducials {input.merged:q})\""
-        " --waveform \"$(jq -c .waveform {input.merged:q})\""
-        " --seed \"$(jq -r .seed {input.merged:q})\""
-        " --num-samples \"$(jq -r .num_samples {input.merged:q})\""
+        " --request {params.request:q}"
         " --output {output:q} --force"
 
 
 rule catalogs:
-    """Aggregate target: build every catalog declared in config/catalogs/."""
+    """Aggregate target: build every catalog any committed run asks for."""
     input:
         CATALOG_OUTPUTS,
 
@@ -251,7 +201,6 @@ rule validate:
     """Pre-flight: merge, validate, and catalog-check every run, building nothing."""
     input:
         RUN_CONFIG_FILES,
-        sorted({str(path) for name in catalogs for path in catalog_config_paths(name, root=Path("."))}),
     output:
         "outputs/validated-runs.txt",
     shell:
@@ -265,7 +214,8 @@ rule run_mcmc:
         script="scripts/run_mcmc.py",
         # The same layers `assemble_config` used to declare, so re-run
         # granularity is unchanged: edit a leaf -> one chain; edit
-        # config/sampler.json -> all 27.
+        # config/sampler.json -> all 27. The catalogs are named by key, so an
+        # edit to a draw reaches the chain through a new catalog path too.
         config=lambda w: config_layers(w.experiment, w.run),
         injection=run_catalog_input("injection"),
         proposal=run_catalog_input("proposal"),

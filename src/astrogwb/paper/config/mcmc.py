@@ -31,6 +31,8 @@ from pydantic import (
     model_validator,
 )
 
+from astrogwb.metadata import CatalogRequest
+from astrogwb.paper.config.runs import resolve_catalog_blocks
 from astrogwb.paper.utils import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
@@ -58,7 +60,7 @@ DEFAULT_DENSITY_SITES: tuple[str, ...] = (
 
 #: The construction kwargs a population must be given to be evaluated on a
 #: redshift grid. Shared by `AnalysisPopulation` and, through
-#: :func:`check_redshift_grid`, by `CatalogDefinition`.
+#: :func:`check_redshift_grid`, by `CatalogPopulation` and each catalog request.
 REDSHIFT_GRID_KWARGS: tuple[str, ...] = (
     "minimum_redshift",
     "maximum_redshift",
@@ -324,22 +326,57 @@ class OutputConfig(BaseModel):
     label: str = ""
 
 
-class CatalogConfig(BaseModel):
-    """The two catalogs this run uses: the injection and the proposal.
+class CatalogPopulation(BaseModel):
+    """A population block: a registered name and its construction kwargs.
 
-    Each role names one persisted catalog under ``config/catalogs``, whose
-    stem is both the config filename and the ``outputs/catalogs/<name>.h5`` it
-    produces. The run records the *name* only: everything about how the catalog
-    was drawn -- the population model, its construction settings, the
-    hyperparameters, and the included density factors -- is recorded in the
-    file itself and read back at run time. The two roles differ by filename and
-    nothing else.
+    The shape of ``config/population.json``'s ``[population]`` block, which is
+    the default every catalog of a run is drawn from. No seed: that belongs to
+    a particular draw, and each role in ``[analysis.catalog]`` states its own.
     """
 
     model_config = _STRICT
 
-    injection: str
-    proposal: str
+    model_name: str
+    model_kwargs: dict[str, float | int] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_redshift_window(self) -> CatalogPopulation:
+        check_redshift_grid(self.model_kwargs, label="population.model_kwargs")
+        return self
+
+
+class CatalogSpec(BaseModel):
+    """One role's catalog, as the run asks for it.
+
+    Partial by design. ``seed`` and ``num_samples`` are the draw's own and are
+    always stated; ``waveform``, ``population`` and ``fiducials`` override the
+    run's blocks of the same name, recursively, and are otherwise inherited.
+    :meth:`RunConfig.catalog_request` resolves the result into the
+    :class:`~astrogwb.metadata.CatalogRequest` whose key names the file.
+    """
+
+    model_config = _STRICT
+
+    seed: int
+    num_samples: Annotated[int, Field(gt=0)]
+    waveform: dict[str, Any] = Field(default_factory=dict)
+    population: dict[str, Any] = Field(default_factory=dict)
+    fiducials: dict[str, float] = Field(default_factory=dict)
+
+
+class CatalogConfig(BaseModel):
+    """The two catalogs this run uses: the injection and the proposal.
+
+    Each role is a :class:`CatalogSpec` -- *what* to draw, not a name for a
+    file. The file is content-addressed: its path is the key of the resolved
+    request, so two runs asking for the same draw share one catalog and a run
+    that changes anything about its draw gets a new one.
+    """
+
+    model_config = _STRICT
+
+    injection: CatalogSpec
+    proposal: CatalogSpec
 
 
 class RunConfig(BaseModel):
@@ -352,6 +389,12 @@ class RunConfig(BaseModel):
     priors: dict[str, PriorDistribution]
     analysis: AnalysisConfig
     sampler: SamplerConfig
+    #: The waveform settings every catalog of this run inherits.
+    waveform: dict[str, Any]
+    #: The population every catalog of this run is drawn from unless a role
+    #: overrides it -- a *draw* default, not the analysis target, which is
+    #: ``analysis.population``.
+    population: CatalogPopulation
     output: OutputConfig = Field(default_factory=OutputConfig)
 
     @model_validator(mode="before")
@@ -479,6 +522,17 @@ class RunConfig(BaseModel):
             for k, v in self.fiducials.items()
             if k not in self.analysis.sampled_params
         }
+
+    def catalog_request(self, role: str) -> CatalogRequest:
+        """The fully resolved catalog one role of this run samples against.
+
+        Resolved by :func:`~astrogwb.paper.config.runs.resolve_catalog_blocks`,
+        the same stdlib function the ``Snakefile`` keys its catalog files with,
+        so the file a run is handed and the request it checks that file against
+        cannot be derived two ways.
+        """
+        raw = self.model_dump(mode="json")
+        return CatalogRequest.from_blocks(**resolve_catalog_blocks(raw, role))
 
     def save(self, path: Path) -> None:
         """Write the validated run config as JSON."""
