@@ -100,16 +100,18 @@ def test_merger_rate_matches_adaptive_quadrature() -> None:
             np.log(13.0),
             points=[p for p in points if np.log(0.02) < p < np.log(13.0)] or None,
             limit=500,
+            epsabs=0.0,
+            epsrel=1e-12,
         )[0]
 
     rate = _merger_rate_on_grid(distribution)
     indices = [26, 51, 128]  # z ~ 1, 2, 5 on the 256-node [0, 10] grid
     expected = [reference(float(distribution.x[i])) / reference(0.0) for i in indices]
-    np.testing.assert_allclose(rate[jnp.array(indices)], expected, rtol=5e-4)
+    np.testing.assert_allclose(rate[jnp.array(indices)], expected, rtol=1e-8)
 
 
 def test_log_prob_gradient_in_minimum_delay_is_smooth() -> None:
-    """Quantile nodes move with tau_min, so the gradient has no node-scale jumps."""
+    """The nodes move with tau_min, so the gradient has no node-scale jumps."""
 
     def log_prob(minimum_delay: jax.Array) -> jax.Array:
         return _delayed(
@@ -123,6 +125,22 @@ def test_log_prob_gradient_in_minimum_delay_is_smooth() -> None:
     assert np.max(np.abs(np.diff(gradient, n=2))) < 1e-2 * np.max(np.abs(gradient))
 
 
+def test_log_prob_is_continuous_across_the_formation_cutoff() -> None:
+    """The cut-off is the integral's upper limit, not a mask on fixed nodes.
+
+    As H0 moves, the delay available before z_cut moves with it. Masking fixed
+    nodes dropped them one at a time, which showed up as isolated second
+    differences of order 1e-3 at z = 10 against a smooth background near 1e-7.
+    """
+    delay = dist.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0)
+    hubble_constants = jnp.linspace(60.0, 80.0, 2001)
+    log_prob = jax.vmap(lambda h0: _delayed(delay, H0=h0).log_prob(10.0))(
+        hubble_constants
+    )
+    second_difference = np.abs(np.diff(np.asarray(log_prob), n=2))
+    assert np.max(second_difference) < 10.0 * np.median(second_difference)
+
+
 def test_distribution_round_trips_as_a_pytree() -> None:
     distribution = _delayed(dist.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0))
     leaves, treedef = jax.tree_util.tree_flatten(distribution)
@@ -131,4 +149,5 @@ def test_distribution_round_trips_as_a_pytree() -> None:
     z = jnp.array([0.5, 1.234, 3.7])
     jitted = jax.jit(lambda d, value: d.log_prob(value))(distribution, z)
     np.testing.assert_allclose(jitted, distribution.log_prob(z), rtol=1e-15)
-    np.testing.assert_array_equal(rebuilt.delay_nodes, distribution.delay_nodes)
+    assert rebuilt.n_delay_nodes == distribution.n_delay_nodes
+    np.testing.assert_array_equal(rebuilt.log_prob(z), distribution.log_prob(z))

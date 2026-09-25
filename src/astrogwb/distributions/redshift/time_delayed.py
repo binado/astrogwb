@@ -12,16 +12,37 @@ where :math:`z_f(t)` inverts :math:`t_L`. :math:`R_m` then takes the place of
 :math:`\psi` in :class:`~astrogwb.distributions.redshift.base.RedshiftDistribution`,
 so the cosmology, normalization and sampler are unchanged.
 
-The integral runs over quantile nodes of the delay distribution,
-:math:`\tau_j = F^{-1}\big((j + \tfrac12)/n\big)`, which turns it into a plain
-mean over :math:`j`. Equal-probability nodes crowd where the delay has its
-mass -- next to :math:`\tau_{\min}` for :math:`p \propto 1/\tau` -- which a
-node set tied to the redshift grid cannot do: at :math:`z \approx 0` a
-:math:`\Delta z = 0.01` step is already :math:`\sim 140` Myr. The nodes also
-move smoothly with the delay hyperparameters, so the density has clean
-gradients for NUTS. An FFT would buy nothing here: the direct evaluation is an
+The integral runs in the delay's probability variable :math:`u = F(\tau)`,
+
+.. math::
+
+    R_m(z) \propto \int_0^{F(\tau_{\mathrm{avail}}(z))}
+        \psi\big(z_f(t_L(z) + F^{-1}(u))\big)\,\mathrm{d}u,
+    \qquad
+    \tau_{\mathrm{avail}}(z) = t_L(z_{\mathrm{cut}}) - t_L(z),
+
+with an ``n_delay_nodes``-point Gauss-Legendre rule on that interval, for each
+merger redshift separately.
+
+- **The substitution** takes :math:`p(\tau)` out of the integrand, so the nodes
+  crowd where the delay has its mass -- next to :math:`\tau_{\min}` for
+  :math:`p \propto 1/\tau` -- with no bounds to choose. A node set tied to the
+  redshift grid cannot do this: at :math:`z \approx 0` a
+  :math:`\Delta z = 0.01` step is already :math:`\sim 140` Myr.
+- **The moving upper limit** integrates only the delays that fit before the
+  formation cut-off :math:`z_{\mathrm{cut}}`. The limit and the nodes move
+  continuously with ``H0``, ``Omega_m``, :math:`z` and the delay
+  hyperparameters, so the density has no jumps and autodiff sees the moving
+  boundary. Masking fixed nodes at the cut-off would drop them one at a time.
+- **Gauss-Legendre** converges spectrally for the smooth integrand this leaves:
+  the default 48 nodes reach :math:`\sim 10^{-9}` at :math:`z = 0` (the widest
+  interval) and better at higher :math:`z`, where the midpoint rule needs
+  hundreds of nodes for :math:`10^{-5}`.
+
+An FFT would buy nothing here: the direct evaluation is an
 ``(n_grid, n_delay_nodes)`` array, cheap under ``jit``, and it would need a
-uniform time grid that still under-resolves :math:`\tau_{\min}`.
+uniform time grid that both under-resolves :math:`\tau_{\min}` and forces two
+interpolations.
 """
 
 from __future__ import annotations
@@ -38,6 +59,7 @@ from astrogwb.distributions.redshift.base import (
     RedshiftDistribution,
     SourceFrameDistributionFn,
 )
+from astrogwb.utils import mapped_gauss_legendre_rule
 
 
 class TimeDelayedRedshiftDistribution(RedshiftDistribution):
@@ -51,7 +73,8 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
     in the same units.
 
     Formation is cut off above ``maximum_formation_redshift``: :math:`\psi` is
-    treated as zero there, and never evaluated. That window is independent of
+    treated as zero there, and never evaluated. The cut-off enters as the
+    integral's upper limit rather than a mask, so it is continuous. That window is independent of
     ``maximum_redshift``, which bounds only the *merger* redshift.
 
     Parameters
@@ -63,21 +86,23 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
     source_frame_distribution:
         The formation-rate shape :math:`\psi(z)`.
     time_delay_distribution:
-        Delay distribution in Gyr. Must implement ``icdf``, e.g. the
+        Delay distribution in Gyr. Must implement ``cdf`` and ``icdf``, e.g. the
         canonical :math:`p(\tau) \propto \tau^{-1}` as
         ``numpyro.distributions.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0)``.
     n_delay_nodes:
-        Number of quantile nodes in the delay integral.
+        Gauss-Legendre order of the delay integral.
     maximum_formation_redshift:
         Formation cut-off.
     minimum_redshift, maximum_redshift, n_grid, validate_args:
         As for :class:`RedshiftDistribution`.
     """
 
-    # The delay enters only through its quantile nodes, so those -- not the
-    # distribution object -- are the data. Both fields are set before
-    # `super().__init__`, which calls `_merger_rate`.
-    pytree_data_fields = ("delay_nodes", "maximum_formation_redshift")
+    # Both data fields are set before `super().__init__`, which calls
+    # `_merger_rate`. The distribution is itself a pytree, so its
+    # hyperparameters are traced leaves. The Gauss-Legendre order is a shape,
+    # hence static aux data.
+    pytree_data_fields = ("time_delay_distribution", "maximum_formation_redshift")
+    pytree_aux_fields = ("n_delay_nodes",)
 
     def __init__(
         self,
@@ -85,15 +110,15 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
         params: Mapping[str, ArrayLike],
         source_frame_distribution: SourceFrameDistributionFn,
         time_delay_distribution: dist.Distribution,
-        n_delay_nodes: int = 200,
+        n_delay_nodes: int = 48,
         maximum_formation_redshift: float = 20.0,
         minimum_redshift: float = 0.0,
         maximum_redshift: float = 10.0,
         n_grid: int = 1000,
         validate_args: bool | None = None,
     ) -> None:
-        quantiles = (jnp.arange(n_delay_nodes) + 0.5) / n_delay_nodes
-        self.delay_nodes = time_delay_distribution.icdf(quantiles)
+        self.time_delay_distribution = time_delay_distribution
+        self.n_delay_nodes = n_delay_nodes
         self.maximum_formation_redshift = jnp.asarray(maximum_formation_redshift)
         super().__init__(
             params=params,
@@ -109,23 +134,38 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
     ) -> jax.Array:
         r"""Delayed merger rate :math:`R_m(z)`, rescaled to :math:`R_m(0) = \psi(0)`."""
         hubble_constant, omega_m = params["H0"], params["Omega_m"]
+        delay = self.time_delay_distribution
         # Prepend z = 0 for the normalization: the grid need not start there.
         merger_redshift = jnp.concatenate([jnp.zeros(1, redshift.dtype), redshift])
-        formation_time = (
-            lookback_time(merger_redshift, hubble_constant, omega_m)[:, None]
-            + self.delay_nodes[None, :]
+        merger_time = lookback_time(merger_redshift, hubble_constant, omega_m)
+        available_delay = (
+            lookback_time(self.maximum_formation_redshift, hubble_constant, omega_m)
+            - merger_time
         )
-        formed = formation_time < lookback_time(
-            self.maximum_formation_redshift, hubble_constant, omega_m
+        # Clip into the support so `cdf` saturates at 0 and 1 instead of warning.
+        available_probability = delay.cdf(
+            jnp.clip(
+                available_delay,
+                getattr(delay.support, "lower_bound", -jnp.inf),
+                getattr(delay.support, "upper_bound", jnp.inf),
+            )
         )
-        # Double `where`: the cut-off entries are fed a harmless time, so
-        # neither psi nor its gradient ever sees an infinite redshift.
+        # The weights carry the Jacobian F(tau_avail) / 2, so the probability
+        # mass of the available delays is built in.
+        quantiles, weights = mapped_gauss_legendre_rule(
+            self.n_delay_nodes,
+            jnp.zeros_like(available_probability),
+            available_probability,
+            dtype=jnp.result_type(merger_time, float),
+        )
+        # Every node forms at or before the cut-off, which precedes the age of
+        # the universe, so no redshift here is infinite.
         formation_redshift = redshift_at_lookback_time(
-            jnp.where(formed, formation_time, 0.0), hubble_constant, omega_m
+            merger_time[:, None] + delay.icdf(quantiles), hubble_constant, omega_m
         )
-        formation_rate = jnp.where(
-            formed, self._source_frame_distribution(formation_redshift, params), 0.0
+        rate = jnp.sum(
+            weights * self._source_frame_distribution(formation_redshift, params),
+            axis=-1,
         )
-        rate = jnp.mean(formation_rate, axis=-1)
         local_rate = self._source_frame_distribution(jnp.zeros(()), params)
         return rate[1:] * (local_rate / rate[0])

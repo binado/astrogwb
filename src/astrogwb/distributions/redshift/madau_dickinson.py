@@ -61,7 +61,7 @@ def madau_dickinson_time_delayed_redshift_distribution(
     *,
     params: Mapping[str, ArrayLike],
     time_delay_distribution: dist.Distribution,
-    n_delay_nodes: int = 200,
+    n_delay_nodes: int = 48,
     maximum_formation_redshift: float = 20.0,
     minimum_redshift: float = 0.0,
     maximum_redshift: float = 10.0,
