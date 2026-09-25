@@ -11,7 +11,7 @@ them, because importing a submodule runs its parent package first:
 :mod:`astrogwb.waveform` imports the generators, and both reach JAX. A record
 under either would drag JAX in behind it, which is exactly the constraint
 ``astrogwb.paper.config`` and the ``Snakefile``'s DAG construction cannot
-afford. :mod:`astrogwb` itself is empty, so a top-level package here is
+afford. :mod:`astrogwb` itself holds only ``__version__``, so a top-level package here is
 importable with nothing but ``numpy`` and ``pydantic`` behind it.
 
 The edges back into the layers these records describe --
@@ -20,7 +20,11 @@ bodies, so nothing here imports JAX at module scope.
 ``tests/core/test_metadata_imports.py`` asserts that directly.
 """
 
-from astrogwb.metadata.catalog import CatalogMetadata
+from astrogwb.metadata.catalog import (
+    CATALOG_KEY_LENGTH,
+    CatalogMetadata,
+    CatalogRequest,
+)
 from astrogwb.metadata.population import (
     MODEL_KWARGS_ATTR,
     MODEL_NAME_ATTR,
@@ -35,6 +39,7 @@ from astrogwb.metadata.waveform import (
 )
 
 __all__ = [
+    "CATALOG_KEY_LENGTH",
     "MODEL_KWARGS_ATTR",
     "MODEL_NAME_ATTR",
     "POPULATION_ATTRS",
@@ -42,6 +47,7 @@ __all__ = [
     "SEED_ATTR",
     "WAVEFORM_ATTRS",
     "CatalogMetadata",
+    "CatalogRequest",
     "PopulationMetadata",
     "WaveformMetadata",
 ]

@@ -343,10 +343,25 @@ what is registered, and a construction setting the population does not take
 raises `TypeError`. It does not serialize a callable or require the analysis
 run configuration.
 
-The format is `astrogwb_catalog_v7`, a direct HDF5 file. Root attributes hold
+The format is `astrogwb_catalog_v8`, a direct HDF5 file. Root attributes hold
 the waveform and population metadata (JSON is used for mappings and ordered
-lists); `frequency`, `polarization_power`, and `source_parameters` are HDF5
-datasets. Earlier formats require regeneration. The recorded density-site and
+lists) and `astrogwb_version`, the package version that generated the arrays;
+`frequency`, `polarization_power`, and `source_parameters` are HDF5
+datasets. Earlier formats require regeneration.
+
+## The catalog cache
+
+A `CatalogRequest` (`astrogwb.metadata`) is everything that determines a
+catalog: the waveform settings, the population record with its seed, the
+hyperparameters and size of the draw, and the `astrogwb` version. Its `key()`
+is a 16-hex-digit SHA-256 of the record's canonical JSON, and
+`astrogwb.catalog.load_or_generate(request, cache_dir)` keeps each catalog at
+`<cache_dir>/<key>.h5`: a miss generates and writes atomically, a hit is loaded
+and checked against the request it was asked for.
+
+The version is in the key so that code changes invalidate the cache -- but
+only if it is bumped. Bump `version` in `pyproject.toml` whenever a change
+alters what a population draw or a waveform generator produces. The recorded density-site and
 source-parameter order is preserved on load and when narrowing the redshift
 window.
 

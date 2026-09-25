@@ -24,7 +24,7 @@ through them.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Self
 
@@ -32,6 +32,7 @@ import jax
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from astrogwb import __version__
 from astrogwb.frequency import uniform_grid_spacing
 from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import Population
@@ -70,6 +71,10 @@ class PolarizationPowerCatalog:
     frequencies: NDArray[np.floating[Any]]
     _metadata: CatalogMetadata
     _fiducials: Mapping[str, float]
+    #: The ``astrogwb`` version that generated the arrays. A catalog built in
+    #: memory is stamped with the running version; a loaded one keeps the
+    #: version its file records, which is what its cache key was taken over.
+    _version: str = field(default=__version__)
 
     def __post_init__(self) -> None:
         power = np.asarray(self.polarization_power)
@@ -230,6 +235,11 @@ class PolarizationPowerCatalog:
         partials; call once and reuse the result.
         """
         return self.population.build()
+
+    @property
+    def version(self) -> str:
+        """The ``astrogwb`` version that generated this catalog."""
+        return self._version
 
     @property
     def num_samples(self) -> int:

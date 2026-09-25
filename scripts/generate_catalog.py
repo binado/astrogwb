@@ -59,9 +59,9 @@ from typing import Any
 
 import jax
 
-from astrogwb.catalog import PolarizationPowerCatalog
+from astrogwb.catalog import PolarizationPowerCatalog, generate
+from astrogwb.metadata import CatalogMetadata, CatalogRequest
 from astrogwb.paper.config.catalogs import CatalogDefinition, check_population_model
-from astrogwb.utils.sampling import sample_sources
 
 # x64 must be on before the population draw. `build_catalog` samples before it
 # builds the Ripple-backed generator, and importing ripplegw -- which turns this
@@ -151,59 +151,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def build_catalog(definition: CatalogDefinition) -> PolarizationPowerCatalog:
-    """Draw the population, generate its power, and record what produced it."""
+    """Check the population, then hand the request to the library generator."""
     population = definition.population
     check_population_model(
         population.model_name,
         label=f"catalog {definition.name!r} population.model_name",
         kwargs=population.model_kwargs,
     )
-    source_model = population.build().source_model
-
-    logger.info(
-        "Catalog %s: population=%s seed=%d num_samples=%d kwargs=%s",
-        definition.name,
-        population.model_name,
-        definition.seed,
-        definition.num_samples,
-        population.model_kwargs,
-    )
-    samples = sample_sources(
-        source_model,
-        jax.random.PRNGKey(definition.seed),
-        definition.fiducials,
-        num_samples=definition.num_samples,
-    )
-
-    generator = definition.waveform.build()
-    logger.info(
-        "Generating %s waveforms for %d events (f_min=%.1f Hz, f_ref=%.1f Hz, "
-        "f_s=%.1f Hz)",
-        generator.metadata.approximant,
-        definition.num_samples,
-        generator.metadata.minimum_frequency,
-        generator.metadata.reference_frequency,
-        generator.metadata.sampling_frequency,
-    )
-    segment_duration = getattr(generator, "segment_duration", None)
-    n_samples = getattr(generator, "n_samples", None)
-    if segment_duration is not None and n_samples is not None:
-        logger.info("Grid: segment=%.4g s, n=%d", segment_duration, n_samples)
-    logger.info(
-        "Truncated frequency axis to f <= %.1f Hz", generator.metadata.maximum_frequency
-    )
-
-    # Values are checked once, here, on the concrete catalog: generation is
-    # trace-safe and therefore trusts its inputs, so a population carrying a
-    # degree of freedom this approximant cannot represent would otherwise be
-    # silently dropped rather than reported.
-    generator.check_sources(samples)
-
-    catalog = PolarizationPowerCatalog.from_generator(
-        samples,
-        generator=generator,
-        population=population,
-        fiducials=definition.fiducials,
+    catalog = generate(
+        CatalogRequest(
+            metadata=CatalogMetadata(
+                waveform=definition.waveform, population=population
+            ),
+            fiducials=definition.fiducials,
+            num_samples=definition.num_samples,
+        )
     )
     logger.info("Generated catalog with measured df=%.4g Hz", catalog.df)
     return catalog

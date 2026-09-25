@@ -7,7 +7,23 @@ Both carry the :class:`~astrogwb.metadata.PopulationMetadata` that produced
 them, and both are read and written through the same HDF5 layer.
 """
 
+from astrogwb.catalog.cache import (
+    catalog_path,
+    check_catalog_answers,
+    generate,
+    load_or_generate,
+    save_atomically,
+)
 from astrogwb.catalog.polarization_power import REDSHIFT_SITE, PolarizationPowerCatalog
 from astrogwb.catalog.spectral_density import SpectralDensityCatalog
 
-__all__ = ["REDSHIFT_SITE", "PolarizationPowerCatalog", "SpectralDensityCatalog"]
+__all__ = [
+    "REDSHIFT_SITE",
+    "PolarizationPowerCatalog",
+    "SpectralDensityCatalog",
+    "catalog_path",
+    "check_catalog_answers",
+    "generate",
+    "load_or_generate",
+    "save_atomically",
+]
