@@ -77,13 +77,28 @@ def _():
     units of the standard-deviation slider. The slider does not rerun the
     Jacobian.
 
-    With the time-delay switch on, the target is
-    `bns_md_time_delayed_cosmological`: the Madau–Dickinson law is the
-    formation rate, and mergers follow after a delay
-    $p(\tau) \propto \tau^{\alpha_\tau}$. The delay is fixed in Gyr, so $H_0$
-    reshapes the redshift law instead of only rescaling it. The free
-    parameters are then $H_0$ and $\alpha_\tau$ (`delay_slope`), in one
-    block, and every other fiducial stays fixed.
+    A selector picks the population. Two cases replace the baseline, and each
+    frees one block while every other fiducial stays fixed:
+
+    - **Time-delayed Madau–Dickinson** (`bns_md_time_delayed_cosmological`):
+      the Madau–Dickinson law is the formation rate, and mergers follow after
+      a delay $p(\tau) \propto \tau^{\alpha_\tau}$. The delay is fixed in
+      Gyr, so $H_0$ reshapes the redshift law instead of only rescaling it.
+      Free: $H_0$ and $\alpha_\tau$ (`delay_slope`).
+    - **Gaussian masses** (`bns_md_gaussian_cosmological`): the baseline
+      Madau–Dickinson redshift law, undelayed and held fixed, with both
+      component masses drawn from $\mathcal{N}(\mu_m, \sigma_m^2)$ and
+      ordered. Unlike the ordered-uniform masses, this law has no hard edge,
+      so its derivative is complete. Free: $\mu_m$ (`mass_mean`) and
+      $\sigma_m$ (`mass_sigma`). At the fiducial each derivative is a
+      score-function Monte Carlo average over the catalog. For
+      $32768$ sources, a bootstrap gives $\partial \ln S / \partial \mu_m
+      \approx 1.07 \pm 0.13$ per $M_\odot$ (the inspiral estimate is
+      $5 / 3\mu_m \approx 1.25$). $\partial \ln S / \partial \sigma_m
+      \approx -0.14 \pm 0.19$ is noise: its expected value is
+      $-4\sigma_m / 9\mu_m^2 \approx -0.02$, from the loss of chirp mass in
+      unequal pairs. Read the $\sigma_m$ row, and the $\mu_m$–$\sigma_m$
+      correlation, as limited by the catalog, not by the detectors.
     """)
     return
 
@@ -100,27 +115,39 @@ def _():
     `outputs/catalogs/<name>.h5`. The notebook stops if either file is
     missing.
 
-    With the time-delay switch on, the same values come instead from the
-    committed `time-delay/delay-slope` run, merged by `assemble_run` exactly
-    as the workflow merges it. That run adds the delayed population and its
-    construction kwargs, the `delay_slope` fiducial and prior, the delayed
-    injection catalog, and the $\epsilon = 0.1$ guard-mixture proposal.
-    Flipping the switch reloads the catalogs and recomputes the Jacobian.
+    For the other two cases the same values come instead from a committed
+    run, merged by `assemble_run` exactly as the workflow merges it:
+
+    - `time-delay/delay-slope` adds the delayed population and its
+      construction kwargs, the `delay_slope` fiducial and prior, the delayed
+      injection catalog, and the $\epsilon = 0.1$ guard-mixture proposal.
+    - `mass-model/gaussian-mass` adds the Gaussian-mass population, the
+      `mass_mean` and `mass_sigma` fiducials and priors, and the
+      Gaussian-mass catalog, which is both the injection and, as in
+      `config/analysis.json`, its own proposal.
+
+    Changing the selection reloads the catalogs and recomputes the Jacobian.
     """)
     return
 
 
 @app.cell
 def _():
-    time_delay_switch = mo.ui.switch(
-        value=False, label="Time-delayed Madau–Dickinson population"
+    population_case = mo.ui.dropdown(
+        options={
+            "Madau–Dickinson (baseline)": "baseline",
+            "Time-delayed Madau–Dickinson": "time-delay",
+            "Gaussian masses": "gaussian-mass",
+        },
+        value="Madau–Dickinson (baseline)",
+        label="Population",
     )
-    time_delay_switch
-    return (time_delay_switch,)
+    population_case
+    return (population_case,)
 
 
 @app.cell
-def _(time_delay_switch):
+def _(population_case):
     # This file lives in notebooks/, so the repository root is its grandparent.
     # `__file__` is the notebook path under `marimo edit` and when the file is
     # run as a script.
@@ -134,22 +161,30 @@ def _(time_delay_switch):
     jax.config.update("jax_enable_x64", True)
     use_paper_style(root=ROOT_DIR)
 
-    time_delay = bool(time_delay_switch.value)
+    case = str(population_case.value)
     NETWORK = "ET-2L-aligned-CE-Hanford"
     detectors = networks(root=ROOT_DIR)[NETWORK]
 
-    if time_delay:
+    # Each non-baseline case: the committed run it reads, and its one block.
+    # H0 is no amplitude in the delayed case: the delay in Gyr reshapes the
+    # law. The Gaussian-mass case keeps the undelayed redshift law fixed.
+    _cases = {
+        "time-delay": (("time-delay", "delay-slope"), ("H0", "delay_slope")),
+        "gaussian-mass": (("mass-model", "gaussian-mass"), ("mass_mean", "mass_sigma")),
+    }
+    _titles = {"time-delay": "Time delay", "gaussian-mass": "Mass"}
+    if case in _cases:
         # The committed experiment, merged as the workflow merges it, so the
         # population, catalogs, fiducials and priors cannot drift from it.
-        _run = assemble_run("time-delay", "delay-slope", root=ROOT_DIR)
+        _reference_run, _names = _cases[case]
+        _run = assemble_run(*_reference_run, root=ROOT_DIR)
         analysis = _run["analysis"]
         FIDUCIALS = {name: float(value) for name, value in _run["fiducials"].items()}
         PRODUCTION_PRIORS = {
             name: materialize_prior(spec) for name, spec in _run["priors"].items()
         }
-        # H0 is no amplitude here: the delay in Gyr makes it reshape the law.
-        BLOCKS = {"Time delay": ("H0", "delay_slope")}
-    else:
+        BLOCKS = {_titles[case]: _names}
+    elif case == "baseline":
         analysis = load_mapping(ROOT_DIR / ANALYSIS_PATH)["analysis"]
         FIDUCIALS = fiducials(root=ROOT_DIR)
         PRODUCTION_PRIORS = priors(root=ROOT_DIR)
@@ -159,6 +194,8 @@ def _(time_delay_switch):
             "Modified propagation": ("xi_0", "xi_n"),
             "Astrophysical": ("gamma", "kappa", "z_peak"),
         }
+    else:
+        raise ValueError(f"unknown population case {case!r}")
     observation_time = float(analysis["observation_time"])
     minimum_frequency = float(analysis["minimum_frequency"])
     maximum_frequency = float(analysis["maximum_frequency"])
@@ -181,7 +218,7 @@ def _(time_delay_switch):
     FREE_PARAMETERS = tuple(name for names in BLOCKS.values() for name in names)
     HELD_FIXED = (
         tuple(name for name in FIDUCIALS if name not in FREE_PARAMETERS)
-        if time_delay
+        if case != "baseline"
         else ("local_merger_rate", "minimum_mass", "mass_width")
     )
     classified = set(FREE_PARAMETERS) | set(HELD_FIXED)
@@ -232,8 +269,8 @@ def _(time_delay_switch):
         model_name,
         observation_time,
         population_kwargs,
+        case,
         proposal_path,
-        time_delay,
     )
 
 
@@ -614,7 +651,7 @@ def _():
     that contains the parameter. The mean of the forecast stays at the
     fiducial.
 
-    Without the time delay, the widths come from `priors()`
+    For the baseline, the widths come from `priors()`
     (`config/priors.json`):
 
     - $\Omega_m$ uses the production Normal scale as $\sigma$. The slider
@@ -631,6 +668,9 @@ def _():
     Its $\sigma$ is the width of the `time-delay` experiment's Uniform divided
     by $N_{\sigma}$, as for $\gamma$. $H_0$ keeps none: its production prior
     is a wide Uniform.
+
+    With Gaussian masses, $\mu_m$ and $\sigma_m$ each carry one, built the
+    same way from the `mass-model` experiment's Uniforms.
     """)
     return
 
@@ -657,7 +697,7 @@ def _(num_sigma_slider):
 
 
 @app.cell
-def _(BLOCKS, FIDUCIALS, PRODUCTION_PRIORS, num_sigma, time_delay):
+def _(BLOCKS, FIDUCIALS, PRODUCTION_PRIORS, case, num_sigma):
     def _require(name: str, kind: type) -> Normal | Uniform:
         prior = PRODUCTION_PRIORS[name]
         if not isinstance(prior, kind):
@@ -671,8 +711,10 @@ def _(BLOCKS, FIDUCIALS, PRODUCTION_PRIORS, num_sigma, time_delay):
         prior = _require(name, Uniform)
         return (float(prior.high) - float(prior.low)) / num_sigma
 
-    if time_delay:
+    if case == "time-delay":
         _raw_sigmas = {"delay_slope": _width("delay_slope")}
+    elif case == "gaussian-mass":
+        _raw_sigmas = {name: _width(name) for name in ("mass_mean", "mass_sigma")}
     else:
         _raw_sigmas = {
             "Omega_m": float(_require("Omega_m", Normal).scale),
@@ -712,7 +754,7 @@ def _():
     ## Degeneracies
 
     Two views of the same likelihood-only Fisher matrix, for each block and,
-    without the time delay, for all seven free parameters together.
+    for the baseline, for all seven free parameters together.
 
     **Derivative shapes.** $w_a(f) = \partial_a S / \sigma$ is each
     parameter's effect on the spectrum in noise units, and
@@ -725,7 +767,7 @@ def _():
 
     **Eigenmodes.** Each parameter is divided by the standard deviation of
     its production prior, the Uniform or Normal in `priors()` (or in the
-    `time-delay` run), and the Fisher matrix is diagonalized. Without that
+    case's committed run), and the Fisher matrix is diagonalized. Without that
     rescaling the modes would depend on units: $H_0$ in km/s/Mpc would
     dominate every one. A bar is the likelihood width of one constrained
     combination; the marker is the Gaussian prior's width along it, from
