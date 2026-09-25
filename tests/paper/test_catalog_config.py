@@ -157,7 +157,6 @@ def test_an_amplitude_the_population_cannot_marginalize_is_rejected() -> None:
         "maximum_redshift": 20.0,
         "n_grid": 256,
         "minimum_delay": 0.02,
-        "maximum_delay": 13.0,
         "maximum_formation_redshift": 20.0,
         "n_delay_nodes": 48,
     }

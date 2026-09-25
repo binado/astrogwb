@@ -57,7 +57,8 @@ registered:
 ``bns_md_time_delayed_cosmological`` reads the Madau-Dickinson law as the
 *formation* rate and delays mergers by :math:`p(\tau) \propto
 \tau^{\alpha}`, with the slope :math:`\alpha` the hyperparameter
-``delay_slope`` and the delay bounds construction kwargs. It declares only
+``delay_slope``. The delay floor is a construction kwarg; its ceiling is the
+lookback time to the formation cut-off, so it has none of its own. It declares only
 ``local_merger_rate`` as an amplitude parameter: the delay is in Gyr while
 lookback time scales as :math:`1/H_0`, so the normalized redshift law depends on
 ``H0`` and ``H0`` no longer factors out of the spectrum.
@@ -74,7 +75,7 @@ import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
-from astrogwb.cosmology import log_gw_em_ratio
+from astrogwb.cosmology import log_gw_em_ratio, lookback_time
 from astrogwb.distributions.delay import PowerLawDelayDistribution
 from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
@@ -512,20 +513,30 @@ def _time_delayed_redshift_distribution(
     maximum_redshift: float,
     n_grid: int,
     minimum_delay: float,
-    maximum_delay: float,
     maximum_formation_redshift: float,
     n_delay_nodes: int,
 ) -> TimeDelayedRedshiftDistribution:
     """The delayed Madau-Dickinson law, its delay slope read from ``params``.
 
     The delay is built inside the model so ``delay_slope`` is a traced
-    hyperparameter like ``z_peak``; the bounds and the quadrature are
+    hyperparameter like ``z_peak``; the floor and the quadrature are
     construction kwargs and so are recorded with the catalog.
+
+    The delay has no ceiling of its own: its upper bound is the lookback time
+    to ``maximum_formation_redshift``, the longest delay any merger can have.
+    Each merger redshift then integrates only the delays available to it (see
+    :class:`~astrogwb.distributions.redshift.TimeDelayedRedshiftDistribution`),
+    so this bound only has to be finite for :math:`\alpha > -1` to normalize,
+    and must not bind anywhere a fixed number would. It follows ``H0`` and
+    ``Omega_m``.
     """
+    longest_delay = lookback_time(
+        maximum_formation_redshift, params["H0"], params["Omega_m"]
+    )
     return madau_dickinson_time_delayed_redshift_distribution(
         params=params,
         time_delay_distribution=PowerLawDelayDistribution(
-            params["delay_slope"], minimum_delay, maximum_delay
+            params["delay_slope"], minimum_delay, longest_delay
         ),
         n_delay_nodes=n_delay_nodes,
         maximum_formation_redshift=maximum_formation_redshift,
@@ -542,7 +553,6 @@ def madau_dickinson_time_delayed_total_merger_rate(
     maximum_redshift: float,
     n_grid: int,
     minimum_delay: float,
-    maximum_delay: float,
     maximum_formation_redshift: float,
     n_delay_nodes: int,
 ) -> jax.Array:
@@ -560,7 +570,6 @@ def madau_dickinson_time_delayed_total_merger_rate(
         maximum_redshift=maximum_redshift,
         n_grid=n_grid,
         minimum_delay=minimum_delay,
-        maximum_delay=maximum_delay,
         maximum_formation_redshift=maximum_formation_redshift,
         n_delay_nodes=n_delay_nodes,
     ).total_merger_rate()
@@ -573,16 +582,15 @@ def bns_md_time_delayed_cosmological(
     maximum_redshift: float,
     n_grid: int,
     minimum_delay: float,
-    maximum_delay: float,
     maximum_formation_redshift: float,
     n_delay_nodes: int,
 ) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_cosmological`, with mergers delayed from formation.
 
     The Madau-Dickinson law is the formation rate; a merger follows after
-    :math:`\tau \sim p(\tau) \propto \tau^{\alpha}` on
-    ``[minimum_delay, maximum_delay]`` Gyr, where :math:`\alpha` is
-    ``params["delay_slope"]``. Formation stops above
+    :math:`\tau \sim p(\tau) \propto \tau^{\alpha}`, with :math:`\tau` at
+    least ``minimum_delay`` Gyr and :math:`\alpha` ``params["delay_slope"]``.
+    The delay's only ceiling is cosmological: formation stops above
     ``maximum_formation_redshift``, and ``n_delay_nodes`` is the order of the
     delay quadrature; see
     :class:`~astrogwb.distributions.redshift.TimeDelayedRedshiftDistribution`.
@@ -595,7 +603,6 @@ def bns_md_time_delayed_cosmological(
         maximum_redshift=maximum_redshift,
         n_grid=n_grid,
         minimum_delay=minimum_delay,
-        maximum_delay=maximum_delay,
         maximum_formation_redshift=maximum_formation_redshift,
         n_delay_nodes=n_delay_nodes,
     )
@@ -749,7 +756,6 @@ def _bns_md_time_delayed_cosmological_population(
     maximum_redshift: float,
     n_grid: int,
     minimum_delay: float,
-    maximum_delay: float,
     maximum_formation_redshift: float,
     n_delay_nodes: int,
 ) -> Population:
@@ -763,7 +769,6 @@ def _bns_md_time_delayed_cosmological_population(
         "maximum_redshift": maximum_redshift,
         "n_grid": n_grid,
         "minimum_delay": minimum_delay,
-        "maximum_delay": maximum_delay,
         "maximum_formation_redshift": maximum_formation_redshift,
         "n_delay_nodes": n_delay_nodes,
     }

@@ -83,9 +83,11 @@ as an injection.
 ### `md-delayed-imrphenom-s71-n32768`
 
 The `time-delay` injection. Mergers follow the Madau-Dickinson law as a
-*formation* rate after a power-law delay p(τ) ∝ τ^α on [20 Myr, 13 Gyr], with
-formation cut off above z = 20. The delay bounds and quadrature order are
-construction kwargs, so the file records them; the slope α = `delay_slope` is a
+*formation* rate after a power-law delay p(τ) ∝ τ^α of at least 20 Myr, with
+formation cut off above z = 20. The delay has no ceiling of its own: the longest
+possible one is the lookback time to that cut-off, which follows H0 and Ω_m.
+The delay floor, the cut-off and the quadrature order are construction kwargs,
+so the file records them; the slope α = `delay_slope` is a
 hyperparameter, declared here as a `[fiducials]` override (α = −1) rather than
 in the shared `config/fiducials.json`, which would invalidate every other
 catalog.

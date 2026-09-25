@@ -199,10 +199,10 @@ def reference(params: dict[str, float]) -> tuple[jax.Array, jax.Array, jax.Array
 WINDOW = {"minimum_redshift": Z_MIN, "maximum_redshift": Z_MAX, "n_grid": N_GRID}
 
 #: The delay construction kwargs the time-delayed population takes on top of the
-#: window: a 20 Myr floor, a 13 Gyr ceiling and formation cut off at z = 20.
+#: window: a 20 Myr floor and formation cut off at z = 20, which also caps the
+#: delay.
 DELAY = {
     "minimum_delay": 0.02,
-    "maximum_delay": 13.0,
     "maximum_formation_redshift": 20.0,
     "n_delay_nodes": 48,
 }
@@ -1008,3 +1008,37 @@ def test_time_delayed_rate_is_linear_in_the_local_rate_but_not_in_h0() -> None:
         undelayed(POPULATION_PARAMS) * h0**3,
         rtol=1e-10,
     )
+
+
+@pytest.mark.parametrize("slope", [-1.5, -1.0, 0.5])
+def test_time_delayed_ceiling_is_cosmological_not_a_fixed_number(slope: float) -> None:
+    """A delay longer than the lookback time to the cut-off is never available.
+
+    So the population's ceiling, t_L(z_cut), must give the same rate as an
+    effectively unbounded one: a higher ceiling only rescales the delay CDF,
+    which leaves every quadrature node in tau where it was. The H0 gradient
+    runs through the ceiling as well as through the cosmology.
+    """
+    from astrogwb.distributions.delay import PowerLawDelayDistribution
+    from astrogwb.distributions.redshift import (
+        madau_dickinson_time_delayed_redshift_distribution,
+    )
+
+    params = {**DELAYED_PARAMS, "delay_slope": slope}
+    rate = _delayed_population().merger_rate_fn
+    assert rate is not None
+    unbounded = madau_dickinson_time_delayed_redshift_distribution(
+        params=params,
+        time_delay_distribution=PowerLawDelayDistribution(
+            slope, DELAY["minimum_delay"], 1.0e3
+        ),
+        n_delay_nodes=48,
+        maximum_formation_redshift=20.0,
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_GRID,
+    )
+    np.testing.assert_allclose(rate(params), unbounded.total_merger_rate(), rtol=1e-10)
+
+    gradient = jax.grad(lambda h0: rate({**params, "H0": h0}))(params["H0"])
+    assert jnp.isfinite(gradient)

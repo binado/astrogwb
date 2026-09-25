@@ -5,7 +5,6 @@
     "model_name": "bns_md_time_delayed_cosmological",
     "model_kwargs": {
       "minimum_delay": 0.02,
-      "maximum_delay": 13.0,
       "maximum_formation_redshift": 20.0,
       "n_delay_nodes": 48
     }

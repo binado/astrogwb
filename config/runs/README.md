@@ -105,7 +105,8 @@ a TaylorF2 one, both drawn from the seed-41 population.
 
 The delay-time slope α of `bns_md_time_delayed_cosmological`, whose mergers
 follow a Madau-Dickinson *formation* rate after a delay
-p(τ) ∝ τ^α on [20 Myr, 13 Gyr]. `delay-slope` samples `delay_slope` alone.
+p(τ) ∝ τ^α of at least 20 Myr, capped only by the lookback time to the z = 20
+formation cut-off. `delay-slope` samples `delay_slope` alone.
 
 `_base.json` declares the target population, the one new fiducial
 (α = −1) and its prior (Uniform[−3, 1]) itself rather than adding them to the
