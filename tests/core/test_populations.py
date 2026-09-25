@@ -44,6 +44,10 @@ from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.catalog import REDSHIFT_SITE
 from astrogwb.cosmology import log_gw_em_ratio
+from astrogwb.distributions.delay import PowerLawDelayDistribution
+from astrogwb.distributions.redshift import (
+    madau_dickinson_time_delayed_redshift_distribution,
+)
 from astrogwb.populations import (
     AMPLITUDE_PARAMETERS,
     DEFAULT_DENSITY_SITES,
@@ -1019,11 +1023,6 @@ def test_time_delayed_ceiling_is_cosmological_not_a_fixed_number(slope: float) -
     which leaves every quadrature node in tau where it was. The H0 gradient
     runs through the ceiling as well as through the cosmology.
     """
-    from astrogwb.distributions.delay import PowerLawDelayDistribution
-    from astrogwb.distributions.redshift import (
-        madau_dickinson_time_delayed_redshift_distribution,
-    )
-
     params = {**DELAYED_PARAMS, "delay_slope": slope}
     rate = _delayed_population().merger_rate_fn
     assert rate is not None

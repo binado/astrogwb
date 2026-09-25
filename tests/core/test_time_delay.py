@@ -227,3 +227,14 @@ def test_power_law_delay_is_numpyros_class_and_survives_a_jit_boundary() -> None
     returned = through(delay)
     assert type(returned) is PowerLawDelayDistribution
     np.testing.assert_array_equal(returned.icdf(QUANTILES), delay.icdf(QUANTILES))
+
+
+def test_power_law_delay_cdf_saturates_outside_the_support() -> None:
+    delay = PowerLawDelayDistribution(-1.0, 0.02, 13.0)
+    np.testing.assert_array_equal(delay.cdf(jnp.array([0.001, 20.0])), [0.0, 1.0])
+
+
+def test_power_law_delay_rejects_a_zero_floor() -> None:
+    """The parent accepts ``low = 0``; the log-space formulas cannot."""
+    with pytest.raises(ValueError, match="low"):
+        PowerLawDelayDistribution(0.0, 0.0, 1.0, validate_args=True)

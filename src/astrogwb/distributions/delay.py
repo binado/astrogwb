@@ -64,7 +64,17 @@ class PowerLawDelayDistribution(dist.DoublyTruncatedPowerLaw):
     Takes the parent's ``alpha``, ``low`` and ``high``: the index and the
     delay bounds, in the units the caller measures delays in (Gyr for
     :class:`~astrogwb.distributions.redshift.TimeDelayedRedshiftDistribution`).
+
+    ``low`` must be strictly positive, where the parent also accepts zero: the
+    formulas run in :math:`\log(\tau / a)`. A delay has a physical floor anyway,
+    and :math:`a = 0` normalizes only for :math:`\alpha > -1`.
     """
+
+    arg_constraints = {  # noqa: RUF012
+        "alpha": dist.constraints.real,
+        "low": dist.constraints.positive,
+        "high": dist.constraints.positive,
+    }
 
     def _shape(self) -> tuple[jax.Array, jax.Array]:
         """``(beta, log(high / low))``, the two numbers every formula needs."""
@@ -84,8 +94,12 @@ class PowerLawDelayDistribution(dist.DoublyTruncatedPowerLaw):
     def cdf(self, value: ArrayLike) -> jax.Array:
         beta, log_range = self._shape()
         log_ratio = jnp.log(jnp.asarray(value) / self.low)
-        return (log_ratio * _expm1_ratio(beta * log_ratio)) / (
-            log_range * _expm1_ratio(beta * log_range)
+        # Saturate outside the support, as the parent does.
+        return jnp.clip(
+            (log_ratio * _expm1_ratio(beta * log_ratio))
+            / (log_range * _expm1_ratio(beta * log_range)),
+            0.0,
+            1.0,
         )
 
     def icdf(self, q: ArrayLike) -> jax.Array:
