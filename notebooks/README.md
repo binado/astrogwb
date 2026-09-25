@@ -25,7 +25,7 @@ outside themselves and import nothing from `tests/core`.
   IMRPhenomHM, and IMRPhenomXAS_NRTidalV3 spectra on identical stochastic
   event draws, including percentile bands and fractional residuals to the
   tidal reference. Higher-mode spectra use matched isotropic inclination draws
-  (`with_isotropic_inclination`) rather than the quadrupole analytic average.
+  (`IsotropicInclination`) rather than the quadrupole analytic average.
   It requires the `notebook` extra and the `jupyter` tooling group. It writes
   `outputs/figures/waveform_approximant_spectra.pdf`; there is no data cache,
   so every execution deterministically regenerates the draws from its fixed

@@ -39,18 +39,19 @@ from astrogwb_mock_population import (
 )
 from jax.typing import ArrayLike
 from numpyro import handlers
+from numpyro.primitives import Messenger
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.catalog import REDSHIFT_SITE
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
+    IsotropicInclination,
     Population,
     SourceFn,
     build_population,
     known_populations,
     register_population,
-    with_isotropic_inclination,
 )
 from astrogwb.populations.bns_madau_dickinson import (
     bns_md_cosmological,
@@ -823,7 +824,7 @@ def test_gaussian_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> N
 
 
 # --------------------------------------------------------------------------- #
-# Isotropic inclination wrapper
+# Isotropic inclination Messenger
 # --------------------------------------------------------------------------- #
 def _draw_plated(model: SourceFn, n_events: int = 8) -> dict[str, jax.Array]:
     def plated(params: Mapping[str, ArrayLike]) -> dict[str, jax.Array]:
@@ -833,12 +834,13 @@ def _draw_plated(model: SourceFn, n_events: int = 8) -> dict[str, jax.Array]:
     return dict(handlers.seed(plated, 0)(POPULATION_PARAMS))
 
 
-def test_isotropic_inclination_wrapper_adds_inclination_without_perturbing_sites() -> (
+def test_isotropic_inclination_messenger_adds_inclination_without_perturbing_sites() -> (
     None
 ):
     """NumPyro keys sites by name, so a new inclination stream leaves the rest."""
     base = mock_population_model()
-    wrapped = with_isotropic_inclination(base)
+    wrapped = IsotropicInclination(base)
+    assert isinstance(wrapped, Messenger)
     base_sources = _draw_plated(base)
     wrapped_sources = _draw_plated(wrapped)
 
@@ -854,16 +856,28 @@ def test_isotropic_inclination_wrapper_adds_inclination_without_perturbing_sites
     assert bool(jnp.all(inclination <= jnp.pi))
 
 
-def test_isotropic_inclination_wrapper_rejects_an_already_inclined_model() -> None:
-    wrapped = with_isotropic_inclination(mock_population_model())
-    doubled = with_isotropic_inclination(wrapped)
+def test_isotropic_inclination_messenger_rejects_an_already_inclined_model() -> None:
+    wrapped = IsotropicInclination(mock_population_model())
+    doubled = IsotropicInclination(wrapped)
     with pytest.raises(ValueError, match="already returns 'inclination'"):
         _draw_plated(doubled, n_events=1)
 
 
+def test_isotropic_inclination_can_be_conditioned_by_an_outer_handler() -> None:
+    inclination = jnp.full((4,), 0.75)
+    conditioned = handlers.condition(
+        IsotropicInclination(mock_population_model()),
+        data={"inclination": inclination},
+    )
+
+    sources = _draw_plated(conditioned, n_events=4)
+
+    np.testing.assert_array_equal(sources["inclination"], inclination)
+
+
 def test_isotropic_inclination_is_absent_from_the_default_density() -> None:
     """Inclination has no hyperparameters, so it must not enter the weight."""
-    wrapped = with_isotropic_inclination(mock_population_model())
+    wrapped = IsotropicInclination(mock_population_model())
     samples = sample_sources(
         wrapped, jax.random.PRNGKey(0), POPULATION_PARAMS, num_samples=5
     )
