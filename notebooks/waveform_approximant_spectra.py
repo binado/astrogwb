@@ -8,31 +8,19 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: astrogwb (3.12.9)
+#     display_name: .venv
 #     language: python
 #     name: python3
 # ---
 
 # %% [markdown]
-# # Waveform-approximant spectral draws
+# # Comparing the energy spectral density of the astrophysical GWB for different waveform approximants
 #
-# Compare stochastic-background spectra made from the *same events* with four
-# Ripple frequency-domain approximants. Reusing one PRNG key for each NumPyro
-# `Predictive` call makes every call replay the same event count and source
-# latent variables; only `WaveformMetadata.approximant` changes. The solid line
-# is the median of the retained draws and the shaded region is the 10th--90th
-# percentile interval.
-#
-# Higher-mode waveforms depend on inclination, so the source model is wrapped
-# with `with_isotropic_inclination`: each event draws $\iota$ from the isotropic
-# law ($\cos\iota$ uniform on $[-1, 1]$). Returning `inclination` also disables
-# the analytic $2/5$ face-on-to-isotropic rescaling, which is only valid for
-# quadrupole waveforms. The shared PRNG key then replays the same orientations
-# for every approximant.
-#
-# The lower panel shows fractional residuals
-# $(S_h^A-S_h^\mathrm{NRTidalv3})/S_h^\mathrm{NRTidalv3}$. Bins where the
-# reference is exactly zero are undefined and are masked rather than divided.
+# In this notebook, we compare stochastic-background spectral densities for a fixed BNS population
+# with different frequency-domain approximants:
+# - *TaylorF2:* inspiral only
+# - *IMRPhenomXAS:* BBH inspiral-merger-ringdown waveform for aligned spins
+# - *IMRPhenomXAS_NRTidalv3:* IMRPhenomXAS + tidal corrections at higher frequencies for modelling neutron stars
 
 # %% [markdown]
 # ## Imports and JAX configuration
@@ -46,9 +34,17 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from numpyro.infer import Predictive
 
-from astrogwb.paper.config import fiducials, population_model, waveform_generator
+from astrogwb.detector import effective_psd, load_sensitivity_map
+from astrogwb.gwb import spectral_snr, spectral_snr_squared_per_bin
+from astrogwb.paper.config import (
+    fiducials,
+    networks,
+    population_model,
+    waveform_generator,
+)
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
 from astrogwb.populations import with_isotropic_inclination
@@ -64,16 +60,6 @@ use_paper_style(root=ROOT_DIR)
 
 # %% [markdown]
 # ## Shared simulation configuration
-#
-# There is one configuration for the population, hyperparameters, observing
-# duration, waveform grid, number of retained draws, batching, capacity-tail
-# rule, and seed. The four generators below receive the same grid settings;
-# their approximant is their only differing metadata field. Fiducials,
-# population, and waveform settings come from the shared
-# `astrogwb.paper.config` accessors, so this comparison cannot drift from the
-# catalog configuration. Ripple calls its registered tidal model
-# `IMRPhenomXAS_NRTidalv3` (lower-case `v`), while plot text uses the
-# conventional `IMRPhenomXAS_NRTidalV3` spelling.
 
 
 # %%
@@ -95,7 +81,7 @@ CONFIG = ComparisonConfig(
     hyperparameters=fiducials(root=ROOT_DIR),
     observation_time=1.0,
     draw_count=4,
-    batch_size=128,
+    batch_size=1024,
     n_max_sigma=5.0,
     seed=20250314,
 )
@@ -103,40 +89,46 @@ CONFIG = ComparisonConfig(
 APPROXIMANTS = (
     "TaylorF2",
     "IMRPhenomXAS",
-    "IMRPhenomHM",
+    # "IMRPhenomHM",
     "IMRPhenomXAS_NRTidalv3",
 )
-REFERENCE_APPROXIMANT = "IMRPhenomXAS_NRTidalv3"
+REFERENCE_APPROXIMANT = "TaylorF2"
 DISPLAY_LABELS = {
     "TaylorF2": "TaylorF2",
     "IMRPhenomXAS": "IMRPhenomXAS",
     "IMRPhenomHM": "IMRPhenomHM",
-    REFERENCE_APPROXIMANT: "IMRPhenomXAS_NRTidalV3 (reference)",
+    "IMRPhenomXAS_NRTidalv3": "IMRPhenomXAS_NRTidalV3 (reference)",
 }
 COLORS = {
     "TaylorF2": "#0072B2",
     "IMRPhenomXAS": "#E69F00",
     "IMRPhenomHM": "#009E73",
-    REFERENCE_APPROXIMANT: "#D55E00",
+    "IMRPhenomXAS_NRTidalv3": "#D55E00",
 }
 OUTPUT_PATH = ROOT_DIR / FIGURES_DIR / "waveform_approximant_spectra.pdf"
+CUMULATIVE_SNR_OUTPUT_PATH = (
+    ROOT_DIR / FIGURES_DIR / "waveform_approximant_spectra_cumulative_snr.pdf"
+)
+SNR_TABLE_PATH = ROOT_DIR / FIGURES_DIR / "waveform_approximant_spectra_snr.tex"
+REFERENCE_NETWORK = "ET-2L-aligned-CE-Hanford"
+
+REFERENCE_DETECTORS = networks(root=ROOT_DIR)[REFERENCE_NETWORK]
 
 
 generators = {
-    approximant: waveform_generator(root=ROOT_DIR, approximant=approximant)
+    approximant: waveform_generator(
+        root=ROOT_DIR,
+        approximant=approximant,
+        frequency_resolution=4.0,
+        minimum_frequency=4.0,
+        maximum_frequency=4096.0,
+    )
     for approximant in APPROXIMANTS
 }
 
 # %% [markdown]
-# ## Draw matched spectra
+# ## Simulating the BNS populations and $S_h(f)$
 #
-# `Predictive` assigns keys deterministically by sample-site name. Calling the
-# same model with the same fixed key therefore reproduces `n_events`, masses,
-# redshifts, spins, tidal deformabilities, and inclinations exactly for every
-# approximant. Splitting the key in the loop would instead produce unrelated
-# catalogs and would confound waveform differences with Monte Carlo variation.
-# Non-tidal approximants deliberately do not consume the shared tidal latent
-# variables.
 
 # %%
 population = population_model(root=ROOT_DIR, **CONFIG.model_kwargs)
@@ -150,6 +142,7 @@ mean_count = rate * years_to_seconds(CONFIG.observation_time)
 max_events = max(int(np.ceil(mean_count + CONFIG.n_max_sigma * np.sqrt(mean_count))), 1)
 shared_key = jax.random.key(CONFIG.seed)
 
+# %%
 spectral_draws: dict[str, np.ndarray] = {}
 event_counts: dict[str, np.ndarray] = {}
 for approximant, generator in generators.items():
@@ -169,7 +162,9 @@ for approximant, generator in generators.items():
     result = predictive(shared_key, CONFIG.hyperparameters)
     spectral_draws[approximant] = np.asarray(result["spectral_density"])
     event_counts[approximant] = np.asarray(result["n_events"])
+    print(f"Computed spectra for approximant {approximant}")
 
+# %%
 # The identical counts are a cheap explicit check that the stochastic traces
 # stayed paired. The fixed-key construction also pairs every named source site.
 reference_counts = event_counts[REFERENCE_APPROXIMANT]
@@ -179,7 +174,7 @@ for approximant, counts in event_counts.items():
     )
 
 # %% [markdown]
-# ## Validate the common frequency grid
+# ### Validating the common frequency grid
 #
 # A pointwise comparison is meaningful only if every generator returns exactly
 # the same bins. Fail before plotting if shape or values differ.
@@ -198,6 +193,171 @@ for approximant, generator in generators.items():
             f"unexpected spectral shape for {approximant}: "
             f"{spectral_draws[approximant].shape}"
         )
+
+# %% [markdown]
+# ## Estimating the SNR for each waveform approximant
+
+# %%
+# The detector PSD is evaluated on the same full grid as every generated
+# spectrum. Bins where the network has no finite, positive sensitivity are
+# omitted from every SNR calculation below.
+reference_sensitivities = load_sensitivity_map(REFERENCE_DETECTORS)
+reference_effective_psd = np.asarray(
+    effective_psd(
+        frequencies,
+        list(REFERENCE_DETECTORS),
+        reference_sensitivities,
+    )
+)
+valid_snr_bins = np.isfinite(reference_effective_psd) & (reference_effective_psd > 0.0)
+if not np.any(valid_snr_bins):
+    raise ValueError(f"{REFERENCE_NETWORK} has no valid effective-PSD bins")
+
+
+def build_snr_table(
+    spectral_draws: dict[str, np.ndarray],
+    effective_psd_arr: np.ndarray,
+    valid_bins: np.ndarray,
+    *,
+    observation_time: float,
+    frequency_resolution: float,
+) -> pd.DataFrame:
+    """Return one median matched-filter SNR for each active approximant."""
+    observation_time_sec = years_to_seconds(observation_time)
+    rows: list[dict[str, float | str]] = []
+    for approximant in APPROXIMANTS:
+        snr_draws = np.asarray(
+            spectral_snr(
+                jnp.asarray(spectral_draws[approximant][:, valid_bins]),
+                jnp.asarray(effective_psd_arr[valid_bins]),
+                observation_time_sec,
+                frequency_resolution,
+            )
+        )
+        if not np.all(np.isfinite(snr_draws) & (snr_draws > 0.0)):
+            raise ValueError(f"invalid SNR draw for approximant {approximant}")
+        rows.append(
+            {
+                "approximant": approximant,
+                "label": DISPLAY_LABELS[approximant],
+                "median_snr": float(np.median(snr_draws)),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+snr_table = build_snr_table(
+    spectral_draws,
+    reference_effective_psd,
+    valid_snr_bins,
+    observation_time=CONFIG.observation_time,
+    frequency_resolution=generators[
+        REFERENCE_APPROXIMANT
+    ].metadata.frequency_resolution,
+)
+snr_table.style.format(precision=2)
+
+# %% [markdown]
+# Saving the table as a `.tex` file:
+
+# %%
+SNR_TABLE_PATH.parent.mkdir(parents=True, exist_ok=True)
+SNR_TABLE_PATH.write_text(
+    snr_table.rename(
+        columns={
+            "approximant": "Approximant",
+            "label": "Display label",
+            "median_snr": "Median SNR",
+        }
+    ).to_latex(
+        index=False,
+        escape=False,
+        float_format="%.3g",
+        caption=(
+            "Median matched-filter SNR across retained stochastic draws for "
+            f"the {REFERENCE_NETWORK} detector network."
+        ),
+        label="tab:waveform_approximant_spectra_snr",
+    ),
+    encoding="utf-8",
+)
+print("saved table:", SNR_TABLE_PATH)
+
+# %% [markdown]
+# ## Cumulative SNR above frequency
+#
+# For each frequency bin, accumulate the matched-filter SNR from that bin to
+# the high-frequency end. The lines and bands summarize the same retained
+# stochastic draws as the SNR table.
+
+
+# %%
+def build_cumulative_snr_draws(
+    spectral_draws: dict[str, np.ndarray],
+    effective_psd_arr: np.ndarray,
+    valid_bins: np.ndarray,
+    *,
+    observation_time: float,
+    frequency_resolution: float,
+) -> dict[str, np.ndarray]:
+    """Return draw-wise SNR accumulated from each valid frequency upward."""
+    observation_time_sec = years_to_seconds(observation_time)
+    cumulative_snr: dict[str, np.ndarray] = {}
+    for approximant in APPROXIMANTS:
+        snr_squared_per_bin = np.asarray(
+            spectral_snr_squared_per_bin(
+                jnp.asarray(spectral_draws[approximant][:, valid_bins]),
+                jnp.asarray(effective_psd_arr[valid_bins]),
+                observation_time_sec,
+                frequency_resolution,
+            )
+        )
+        if not np.all(np.isfinite(snr_squared_per_bin)):
+            raise ValueError(f"invalid SNR contribution for approximant {approximant}")
+        cumulative = np.sqrt(np.cumsum(snr_squared_per_bin[:, ::-1], axis=-1)[:, ::-1])
+        if not np.all(np.isfinite(cumulative) & (cumulative >= 0.0)):
+            raise ValueError(f"invalid cumulative SNR for approximant {approximant}")
+        cumulative_snr[approximant] = cumulative
+    return cumulative_snr
+
+
+cumulative_snr_draws = build_cumulative_snr_draws(
+    spectral_draws,
+    reference_effective_psd,
+    valid_snr_bins,
+    observation_time=CONFIG.observation_time,
+    frequency_resolution=generators[
+        REFERENCE_APPROXIMANT
+    ].metadata.frequency_resolution,
+)
+
+fig, ax = plt.subplots(figsize=(7.0, 4.2))
+cumulative_frequencies = frequencies[valid_snr_bins]
+for approximant in APPROXIMANTS:
+    cumulative_snr = cumulative_snr_draws[approximant]
+    cumulative_snr_fraction = cumulative_snr / cumulative_snr[:, :1]
+    median, low, high = np.percentile(
+        cumulative_snr_fraction, (50.0, 10.0, 90.0), axis=0
+    )
+    color = COLORS[approximant]
+    label = DISPLAY_LABELS[approximant]
+    ax.semilogx(cumulative_frequencies, median, color=color, label=label)
+    ax.fill_between(
+        cumulative_frequencies,
+        low,
+        high,
+        color=color,
+        alpha=0.18,
+    )
+
+ax.set_xlabel(r"Frequency $f\ [\mathrm{Hz}]$")
+ax.set_ylabel(r"Cumulative $\mathrm{SNR}(>f)$")
+ax.set_ylim(bottom=0.0)
+ax.legend(loc="best")
+ax.grid(alpha=0.25)
+fig.tight_layout()
+save_figures({CUMULATIVE_SNR_OUTPUT_PATH: fig}, root=ROOT_DIR)
+print("saved cumulative SNR figure:", CUMULATIVE_SNR_OUTPUT_PATH)
 
 # %% [markdown]
 # ## Median spectra and fractional residuals
@@ -232,9 +392,10 @@ for approximant in APPROXIMANTS:
         out=residuals,
         where=reference_draws != 0.0,
     )
+    residuals = np.abs(residuals)
     residual_median = np.nanmedian(residuals, axis=0)
     residual_low, residual_high = np.nanpercentile(residuals, (10.0, 90.0), axis=0)
-    residual_ax.semilogx(frequencies, residual_median, color=color, label=label)
+    residual_ax.loglog(frequencies, residual_median, color=color, label=label)
     residual_ax.fill_between(
         frequencies, residual_low, residual_high, color=color, alpha=0.18
     )
