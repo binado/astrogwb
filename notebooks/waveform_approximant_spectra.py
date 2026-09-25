@@ -24,7 +24,7 @@
 # percentile interval.
 #
 # Higher-mode waveforms depend on inclination, so the source model is wrapped
-# with `with_isotropic_inclination`: each event draws $\iota$ from the isotropic
+# with `IsotropicInclination`: each event draws $\iota$ from the isotropic
 # law ($\cos\iota$ uniform on $[-1, 1]$). Returning `inclination` also disables
 # the analytic $2/5$ face-on-to-isotropic rescaling, which is only valid for
 # quadrupole waveforms. The shared PRNG key then replays the same orientations
@@ -51,7 +51,7 @@ from numpyro.infer import Predictive
 from astrogwb.paper.config import fiducials, population_model, waveform_generator
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
-from astrogwb.populations import with_isotropic_inclination
+from astrogwb.populations import IsotropicInclination
 from astrogwb.sampling import gwb_forward_model
 from astrogwb.utils import years_to_seconds
 
@@ -140,7 +140,7 @@ generators = {
 
 # %%
 population = population_model(root=ROOT_DIR, **CONFIG.model_kwargs)
-source_model = with_isotropic_inclination(population.source_model)
+source_model = IsotropicInclination(population.source_model)
 merger_rate_fn = population.merger_rate_fn
 if merger_rate_fn is None:
     raise ValueError("configured population cannot simulate event counts")

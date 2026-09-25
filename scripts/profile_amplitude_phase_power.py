@@ -27,7 +27,7 @@ import ripplegw
 from ripplegw.interfaces import AmplitudePhaseWaveform
 
 from astrogwb.metadata import WaveformMetadata
-from astrogwb.populations import build_population, with_isotropic_inclination
+from astrogwb.populations import IsotropicInclination, build_population
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import RippleGenerator
 from astrogwb.waveform.generator._ripple import ripple_parameters
@@ -146,7 +146,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         maximum_redshift=20.0,
         n_grid=256,
     )
-    source_model = with_isotropic_inclination(source_model)
+    source_model = IsotropicInclination(source_model)
     source_parameters = sample_sources(
         source_model,
         jax.random.key(20250314),
