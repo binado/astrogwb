@@ -63,8 +63,9 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
     source_frame_distribution:
         The formation-rate shape :math:`\psi(z)`.
     time_delay_distribution:
-        Delay distribution in Gyr. Must implement ``icdf``; see
-        :class:`~astrogwb.distributions.time_delay.PowerLawTimeDelayDistribution`.
+        Delay distribution in Gyr. Must implement ``icdf``, e.g. the
+        canonical :math:`p(\tau) \propto \tau^{-1}` as
+        ``numpyro.distributions.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0)``.
     n_delay_nodes:
         Number of quantile nodes in the delay integral.
     maximum_formation_redshift:

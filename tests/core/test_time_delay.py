@@ -1,4 +1,4 @@
-"""Tests for the delay-time distribution and the time-delayed redshift density.
+"""Tests for the time-delayed redshift density.
 
 The delayed merger rate is checked against an independent adaptive quadrature
 (:func:`scipy.integrate.quad` in :math:`\\log\\tau`) rather than against a
@@ -10,7 +10,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
+import numpyro.distributions as dist
 from scipy.integrate import quad
 
 from astrogwb.cosmology import lookback_time, redshift_at_lookback_time
@@ -20,7 +20,6 @@ from astrogwb.distributions.redshift import (
     TimeDelayedRedshiftDistribution,
     madau_dickinson_time_delayed_redshift_distribution,
 )
-from astrogwb.distributions.time_delay import PowerLawTimeDelayDistribution
 
 PARAMS = {"H0": 67.66, "Omega_m": 0.3096, "gamma": 2.7, "kappa": 2.9, "z_peak": 1.9}
 N_GRID = 256
@@ -28,7 +27,7 @@ MAXIMUM_FORMATION_REDSHIFT = 20.0
 
 
 def _delayed(
-    delay: PowerLawTimeDelayDistribution, **params: float
+    delay: dist.Distribution, **params: float
 ) -> TimeDelayedRedshiftDistribution:
     return madau_dickinson_time_delayed_redshift_distribution(
         params={**PARAMS, **params},
@@ -48,49 +47,12 @@ def _merger_rate_on_grid(distribution: TimeDelayedRedshiftDistribution) -> jax.A
 
 
 # --------------------------------------------------------------------------- #
-# Power-law delay
-# --------------------------------------------------------------------------- #
-
-
-@pytest.mark.parametrize("alpha", [-1.5, -1.0, -0.5, 0.0])
-def test_power_law_delay_is_normalized(alpha: float) -> None:
-    delay = PowerLawTimeDelayDistribution(alpha, 0.02, 13.0)
-    tau = jnp.geomspace(0.02, 13.0, 200_001)
-    np.testing.assert_allclose(
-        jnp.trapezoid(jnp.exp(delay.log_prob(tau)), tau), 1.0, rtol=1e-8
-    )
-
-
-@pytest.mark.parametrize("alpha", [-1.5, -1.0, -0.5, 0.0])
-def test_power_law_delay_cdf_inverts_icdf(alpha: float) -> None:
-    delay = PowerLawTimeDelayDistribution(alpha, 0.02, 13.0)
-    q = jnp.linspace(0.0, 1.0, 101)
-    np.testing.assert_allclose(delay.cdf(delay.icdf(q)), q, atol=1e-12)
-
-
-def test_power_law_delay_is_continuous_through_log_uniform() -> None:
-    """The alpha = -1 branch agrees with the general form just either side."""
-    q = jnp.linspace(0.01, 0.99, 11)
-    at = PowerLawTimeDelayDistribution(-1.0, 0.02, 13.0).icdf(q)
-    for alpha in (-1.0 - 1e-4, -1.0 + 1e-4):
-        near = PowerLawTimeDelayDistribution(alpha, 0.02, 13.0).icdf(q)
-        np.testing.assert_allclose(near, at, rtol=1e-3)
-
-
-def test_power_law_delay_log_prob_is_minus_inf_off_support() -> None:
-    delay = PowerLawTimeDelayDistribution(-1.0, 0.02, 13.0)
-    log_prob = delay.log_prob(jnp.array([0.01, 1.0, 14.0]))
-    assert np.isneginf(log_prob[0]) and np.isneginf(log_prob[2])
-    assert np.isfinite(log_prob[1])
-
-
-# --------------------------------------------------------------------------- #
 # Time-delayed redshift distribution
 # --------------------------------------------------------------------------- #
 
 
 def test_negligible_delay_reproduces_the_undelayed_distribution() -> None:
-    delayed = _delayed(PowerLawTimeDelayDistribution(-1.0, 1e-6, 2e-6))
+    delayed = _delayed(dist.DoublyTruncatedPowerLaw(-1.0, 1e-6, 2e-6))
     undelayed = MadauDickinsonRedshiftDistribution(params=PARAMS, n_grid=N_GRID)
     # Skip z = 0, where both tables vanish with dV_c/dz.
     np.testing.assert_allclose(
@@ -102,7 +64,7 @@ def test_merger_rate_today_is_the_local_merger_rate() -> None:
     """R_m(0) = local_merger_rate. Read just above z = 0, where dV_c/dz > 0."""
     delayed = madau_dickinson_time_delayed_redshift_distribution(
         params={**PARAMS, "local_merger_rate": 320.0},
-        time_delay_distribution=PowerLawTimeDelayDistribution(-1.0, 0.02, 13.0),
+        time_delay_distribution=dist.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0),
         minimum_redshift=1e-6,
         n_grid=N_GRID,
     )
@@ -110,7 +72,7 @@ def test_merger_rate_today_is_the_local_merger_rate() -> None:
 
 
 def test_merger_rate_matches_adaptive_quadrature() -> None:
-    delay = PowerLawTimeDelayDistribution(-1.0, 0.02, 13.0)
+    delay = dist.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0)
     distribution = _delayed(delay)
     h0, omega_m = PARAMS["H0"], PARAMS["Omega_m"]
     formation_cutoff = float(lookback_time(MAXIMUM_FORMATION_REDSHIFT, h0, omega_m))
@@ -151,7 +113,7 @@ def test_log_prob_gradient_in_minimum_delay_is_smooth() -> None:
 
     def log_prob(minimum_delay: jax.Array) -> jax.Array:
         return _delayed(
-            PowerLawTimeDelayDistribution(-1.0, minimum_delay, 13.0)
+            dist.DoublyTruncatedPowerLaw(-1.0, minimum_delay, 13.0)
         ).log_prob(0.3)
 
     minimum_delays = jnp.linspace(0.02, 0.05, 31)
@@ -162,7 +124,7 @@ def test_log_prob_gradient_in_minimum_delay_is_smooth() -> None:
 
 
 def test_distribution_round_trips_as_a_pytree() -> None:
-    distribution = _delayed(PowerLawTimeDelayDistribution(-1.0, 0.02, 13.0))
+    distribution = _delayed(dist.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0))
     leaves, treedef = jax.tree_util.tree_flatten(distribution)
     rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
     assert type(rebuilt) is TimeDelayedRedshiftDistribution
