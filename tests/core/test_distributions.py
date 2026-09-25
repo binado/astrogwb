@@ -85,6 +85,26 @@ def test_interpolated_normalizes_an_unnormalized_table() -> None:
     )
 
 
+@pytest.mark.parametrize("value", [0.9, 1.5], ids=["zero-table", "off-table"])
+def test_interpolated_log_prob_where_density_vanishes_has_zero_gradient(
+    value: float,
+) -> None:
+    """A vanishing density is ``-inf`` with a zero, not NaN, derivative.
+
+    A delayed merger rate is exactly zero next to its formation cut-off, and
+    one importance sample there must not turn the gradient of a weight sum
+    into NaN.
+    """
+    x = jnp.linspace(0.0, 1.0, 11)
+
+    def log_prob(scale: jax.Array) -> jax.Array:
+        table = jnp.where(x < 0.8, scale * (1.0 + x), 0.0)
+        return InterpolatedDistribution(x, table).log_prob(value)
+
+    assert float(log_prob(jnp.asarray(2.0))) == -math.inf
+    assert float(jax.grad(log_prob)(jnp.asarray(2.0))) == 0.0
+
+
 # --------------------------------------------------------------------------- #
 # The Madau-Dickinson density against the reference model
 # --------------------------------------------------------------------------- #
