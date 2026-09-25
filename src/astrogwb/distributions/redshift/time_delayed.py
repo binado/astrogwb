@@ -88,7 +88,10 @@ class TimeDelayedRedshiftDistribution(RedshiftDistribution):
     time_delay_distribution:
         Delay distribution in Gyr. Must implement ``cdf`` and ``icdf``, e.g. the
         canonical :math:`p(\tau) \propto \tau^{-1}` as
-        ``numpyro.distributions.DoublyTruncatedPowerLaw(-1.0, 0.02, 13.0)``.
+        :class:`~astrogwb.distributions.delay.PowerLawDelayDistribution` ``(-1.0,
+        0.02, 13.0)``. Prefer it to ``numpyro.distributions.DoublyTruncatedPowerLaw``
+        when the slope is sampled: that one's gradient in the slope blows up
+        next to :math:`-1`.
     n_delay_nodes:
         Gauss-Legendre order of the delay integral.
     maximum_formation_redshift:
