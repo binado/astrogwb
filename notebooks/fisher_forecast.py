@@ -33,14 +33,18 @@ with app.setup(hide_code=True):
     )
     from astrogwb.paper.plotting.fisher import (
         plot_fisher_eigenmodes,
+        plot_template_composition,
         plot_whitened_derivatives,
     )
     from astrogwb.paper.utils import load_mapping
     from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
     from astrogwb.sampling import (
+        cumulative_template_fractions,
         derivative_cosine_matrix,
         fisher_eigenmodes,
         fisher_from_whitened_jacobian,
+        fisher_svd,
+        post_newtonian_templates,
         prior_sigma_along_modes,
         whitened_jacobian,
     )
@@ -893,6 +897,137 @@ def _(
     )
     degeneracies
     return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Singular modes
+
+    The same forecast, decomposed on the Jacobian instead of on the Fisher
+    matrix. With every free parameter divided by its production-prior
+    standard deviation, $\tilde W = W D = U \Sigma V^\top$ and
+    $\tilde F = V \Sigma^2 V^\top$. Mode $k$ is the combination $V_k$,
+    measured to $1/\Sigma_k$ prior standard deviations, and it changes the
+    whitened spectrum along the unit template $U_k$. `local_merger_rate` stays
+    fixed, so the first mode is the overall amplitude.
+
+    - **Widths.** The table compares $1/\Sigma_k$ with the eigenmodes above.
+      The SVD works at the square root of the Fisher matrix's condition
+      number, so a mode that the eigen-decomposition rounds to $\infty$ can
+      come back finite but weak. The last column is the Gaussian prior's
+      width along the mode.
+    - **Templates.** The leading $U_k$ against frequency, with the share of
+      each mode's information that a cutoff at $f$ keeps.
+    - **What the templates are.** Each $U_k$ is projected onto a nested
+      basis: the whitened spectrum itself (a rescaling), then its relative
+      1PN, 1.5PN and 2PN corrections, $S (f/f_\mathrm{ref})^{e} / \sigma$ with
+      $e = 2/3, 1, 4/3$. A template spanned by the first two is the
+      1PN tilt, whose population coefficient is the flux-weighted
+      $\langle [M(1+z)]^{2/3} \rangle$. What the basis leaves over is shape
+      from the merger or tidal part of the waveform, or noise.
+
+    Everything here follows the cutoff dropdown above. The weakest modes sit
+    near the importance estimator's Monte Carlo noise, so read their
+    templates loosely.
+    """)
+    return
+
+
+@app.cell
+def _(
+    CUTOFFS_HZ,
+    FIDUCIALS,
+    FREE_PARAMETERS,
+    PRODUCTION_PRIORS,
+    ROOT_DIR,
+    band_fishers,
+    degeneracy_cutoff,
+    inputs,
+    prior_sigmas,
+    whitened,
+):
+    # Relative PN orders of an inspiral energy spectrum, as powers of f.
+    _exponents = (0.0, 2.0 / 3.0, 1.0, 4.0 / 3.0)
+    _basis_labels = (
+        "spectrum (amplitude)",
+        r"+1PN $f^{2/3}$",
+        r"+1.5PN $f$",
+        r"+2PN $f^{4/3}$",
+    )
+    _cutoff = float(degeneracy_cutoff.value)
+    _band = inputs.model_kwargs(fmin=_cutoff)
+    _mask = np.asarray(_band["frequency_mask"], dtype=bool)
+    _frequencies = np.asarray(inputs.observation.frequencies)[_mask]
+    _scales = [
+        float(np.sqrt(PRODUCTION_PRIORS[name].variance)) for name in FREE_PARAMETERS
+    ]
+    _labels = [parameter_label(name, root=ROOT_DIR) for name in FREE_PARAMETERS]
+
+    singular_modes = fisher_svd(
+        np.asarray(whitened)[_mask], FREE_PARAMETERS, parameter_scales=_scales
+    )
+    _eigen = fisher_eigenmodes(
+        band_fishers[_cutoff][1], FREE_PARAMETERS, parameter_scales=_scales
+    )
+    _mode_labels = [f"mode {k + 1}" for k in range(len(FREE_PARAMETERS))]
+    _widths = pd.DataFrame(
+        {
+            "SVD sigma": singular_modes.sigmas,
+            "eigen sigma": _eigen.sigmas,
+            "prior sigma": prior_sigma_along_modes(singular_modes, prior_sigmas),
+        },
+        index=pd.Index(_mode_labels, name="mode"),
+    )
+    _loadings = pd.DataFrame(
+        singular_modes.directions, index=_labels, columns=_mode_labels
+    ).round(3)
+
+    _n_shown = min(3, len(FREE_PARAMETERS))
+    _templates = plot_whitened_derivatives(
+        _frequencies,
+        singular_modes.templates[:, :_n_shown],
+        [
+            f"mode {k + 1} ($\\sigma$ = {singular_modes.sigmas[k]:.2g})"
+            for k in range(_n_shown)
+        ],
+        colors=combo_colors(_n_shown),
+        cutoffs=[cutoff for cutoff in CUTOFFS_HZ if cutoff > _cutoff],
+    )
+    _whitened_spectrum = (
+        np.asarray(inputs.spectral_density_fn(FIDUCIALS)[0])[_mask]
+        / np.asarray(_band["scale"])[_mask]
+    )
+    _basis = post_newtonian_templates(
+        _frequencies, _whitened_spectrum, _exponents, reference_frequency=10.0
+    )
+    template_fractions = cumulative_template_fractions(singular_modes.templates, _basis)
+    _composition = plot_template_composition(
+        template_fractions,
+        _basis_labels,
+        [
+            f"{label} ($\\sigma$ = {sigma:.2g})"
+            for label, sigma in zip(_mode_labels, singular_modes.sigmas, strict=True)
+        ],
+        colors=combo_colors(len(_basis_labels)),
+    )
+    _fractions = pd.DataFrame(
+        template_fractions, index=_mode_labels, columns=list(_basis_labels)
+    ).round(4)
+    mo.vstack(
+        [
+            mo.md(f"### All free parameters at {_cutoff:g} Hz"),
+            mo.md("Widths in prior standard deviations"),
+            _widths,
+            mo.md("Parameter loadings $V_k$"),
+            _loadings,
+            _templates,
+            mo.md("Cumulative share of each template spanned by the basis"),
+            _fractions,
+            _composition,
+        ]
+    )
+    return singular_modes, template_fractions
 
 
 if __name__ == "__main__":

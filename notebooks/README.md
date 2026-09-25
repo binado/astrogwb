@@ -108,6 +108,11 @@ standard deviations, with the Gaussian prior's width along each mode. The
 functions behind it are `whitened_jacobian`, `derivative_cosine_matrix`,
 `fisher_eigenmodes` and `prior_sigma_along_modes` in `astrogwb.sampling`, and
 the figures are in `astrogwb.paper.plotting.fisher`.
+A *Singular modes* section decomposes the rescaled whitened Jacobian with
+`fisher_svd` (more stable than the Fisher eigen-decomposition), plots each
+leading mode's spectral template, and names the templates by projecting them on
+the spectrum and its 1PN, 1.5PN and 2PN corrections
+(`post_newtonian_templates`, `cumulative_template_fractions`).
 Open it from the repository root with
 `uv run --extra notebook --group jupyter marimo edit notebooks/fisher_forecast.py`.
 
