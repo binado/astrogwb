@@ -37,9 +37,11 @@ population, seeds and mixing fractions — lives in those files, not here, and
 the redshift density that follows is read back off the generated file at run
 time.
 
-The **injection is the same for all 26 runs**: it is the "observed" data, so no
-run overrides it. Only `variable-catalog-size`, `variable-proposal-guard`,
-`astrophysical-parameters` and `waveform-approximant` override the proposal.
+`config/analysis.json` sets the default injection, the "observed" data. Only
+`time-delay` overrides it, with a catalog drawn from its own time-delayed
+population. `variable-catalog-size`, `variable-proposal-guard`,
+`astrophysical-parameters`, `waveform-approximant` and `time-delay` override the
+proposal.
 
 Neither a network nor a detector list is ever a shared default. A run that
 names no `analysis.network` must fail rather than silently inherit someone
@@ -98,6 +100,25 @@ mixture seed, so the three draws are independent.
 
 Waveform systematics: the same H0 measurement against an IMRPhenom proposal and
 a TaylorF2 one, both drawn from the seed-41 population.
+
+### `time-delay` (1 run)
+
+The delay-time slope α of `bns_md_time_delayed_cosmological`, whose mergers
+follow a Madau-Dickinson *formation* rate after a delay
+p(τ) ∝ τ^α on [20 Myr, 13 Gyr]. `delay-slope` samples `delay_slope` alone.
+
+`_base.json` declares the target population, the one new fiducial
+(α = −1) and its prior (Uniform[−3, 1]) itself rather than adding them to the
+shared layers: `config/fiducials.json` is a catalog layer too, so an edit there
+would invalidate every catalog. The injection is
+`md-delayed-imrphenom-s71-n32768`, drawn at the same α; the proposal is the
+ε = 0.1 guard catalog.
+
+The amplitude marginalized out is `local_merger_rate`, not H0: the delay is
+fixed in Gyr while lookback time scales as 1/H0, so H0 reshapes the redshift
+law instead of only rescaling it. The population declares this at
+registration, and `snakemake validate` rejects `amplitude_parameter = "H0"` for
+it.
 
 ## Adding one
 

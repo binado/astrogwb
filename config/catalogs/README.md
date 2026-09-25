@@ -26,8 +26,9 @@ layer model, the registry, and how to generate one.
 | `md-uniform-imrphenom-s61-n16384-eps1e-1` | `bns_md_uniform_mixture` (ε = 0.1) | 61 | 16384 | `IMRPhenomXAS_NRTidalv3` |
 | `md-uniform-imrphenom-s62-n16384-eps1e-2` | `bns_md_uniform_mixture` (ε = 0.01) | 62 | 16384 | `IMRPhenomXAS_NRTidalv3` |
 | `md-uniform-imrphenom-s63-n16384-eps1e-3` | `bns_md_uniform_mixture` (ε = 0.001) | 63 | 16384 | `IMRPhenomXAS_NRTidalv3` |
+| `md-delayed-imrphenom-s71-n32768` | `bns_md_time_delayed_cosmological` (α = −1) | 71 | 32768 | `IMRPhenomXAS_NRTidalv3` |
 
-Eight, not nine: `md-imrphenom-s41-n32768` serves as both the shared injection
+Nine, not ten: `md-imrphenom-s41-n32768` serves as both the default injection
 and `waveform-approximant/IMRPhenom`'s proposal, and the ε = 0.1 guard catalog
 serves both `astrophysical-parameters` runs and `variable-proposal-guard/eps1e-1`.
 
@@ -35,14 +36,14 @@ serves both `astrophysical-parameters` runs and `variable-proposal-guard/eps1e-1
 
 ### `md-imrphenom-s41-n32768`
 
-The fiducial injection: the "observed" catalog all 26 runs are compared
-against. Also serves as the proposal for `waveform-approximant/IMRPhenom`,
+The default injection: the "observed" catalog every run except `time-delay`
+is compared against. Also serves as the proposal for `waveform-approximant/IMRPhenom`,
 which measures IMRPhenom against itself as the systematics baseline.
 
 ### `md-imrphenom-s42-n8192`, `md-imrphenom-s42-n16384`, `md-imrphenom-s42-n32768`
 
 One seed-42 draw at three sizes, which is the `variable-catalog-size`
-experiment. The middle one is also the default proposal, used by 21 of the 26
+experiment. The middle one is also the default proposal, used by 21 of the 27
 runs; the other two exist only for that experiment's other two arms.
 
 `Predictive` allocates its per-draw keys with `jax.random.split`, which is
@@ -78,6 +79,16 @@ the Madau-Dickinson redshift density, not a mixture of it with a uniform
 component. Nothing reads a rate off a proposal — importance weighting takes the
 target's — and a catalog drawn from this population fails by name if it is used
 as an injection.
+
+### `md-delayed-imrphenom-s71-n32768`
+
+The `time-delay` injection. Mergers follow the Madau-Dickinson law as a
+*formation* rate after a power-law delay p(τ) ∝ τ^α on [20 Myr, 13 Gyr], with
+formation cut off above z = 20. The delay bounds and quadrature order are
+construction kwargs, so the file records them; the slope α = `delay_slope` is a
+hyperparameter, declared here as a `[fiducials]` override (α = −1) rather than
+in the shared `config/fiducials.json`, which would invalidate every other
+catalog.
 
 ## Adding one
 

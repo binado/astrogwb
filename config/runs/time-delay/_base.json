@@ -1,0 +1,26 @@
+{
+  "analysis": {
+    "network": "ET-2L-aligned-CE-Hanford",
+    "likelihood": "amplitude_marginalized",
+    "amplitude_parameter": "local_merger_rate",
+    "population": {
+      "model_name": "bns_md_time_delayed_cosmological",
+      "model_kwargs": {
+        "minimum_delay": 0.02,
+        "maximum_delay": 13.0,
+        "maximum_formation_redshift": 20.0,
+        "n_delay_nodes": 48
+      }
+    },
+    "catalog": {
+      "injection": "md-delayed-imrphenom-s71-n32768",
+      "proposal": "md-uniform-imrphenom-s61-n16384-eps1e-1"
+    }
+  },
+  "fiducials": {
+    "delay_slope": -1.0
+  },
+  "priors": {
+    "delay_slope": {"dist": "Uniform", "kwargs": {"low": -3.0, "high": 1.0}}
+  }
+}
