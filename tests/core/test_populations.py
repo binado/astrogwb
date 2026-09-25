@@ -39,18 +39,25 @@ from astrogwb_mock_population import (
 )
 from jax.typing import ArrayLike
 from numpyro import handlers
+from numpyro.primitives import Messenger
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.catalog import REDSHIFT_SITE
 from astrogwb.cosmology import log_gw_em_ratio
+from astrogwb.distributions.delay import PowerLawDelayDistribution
+from astrogwb.distributions.redshift import (
+    madau_dickinson_time_delayed_redshift_distribution,
+)
 from astrogwb.populations import (
+    AMPLITUDE_PARAMETERS,
     DEFAULT_DENSITY_SITES,
+    IsotropicInclination,
     Population,
     SourceFn,
+    amplitude_parameters,
     build_population,
     known_populations,
     register_population,
-    with_isotropic_inclination,
 )
 from astrogwb.populations.bns_madau_dickinson import (
     bns_md_cosmological,
@@ -58,7 +65,9 @@ from astrogwb.populations.bns_madau_dickinson import (
     bns_md_gaussian_modified_propagation,
     bns_md_gaussian_uniform_mixture,
     bns_md_modified_propagation,
+    bns_md_time_delayed_cosmological,
     bns_md_uniform_mixture,
+    madau_dickinson_time_delayed_total_merger_rate,
     madau_dickinson_total_merger_rate,
 )
 from astrogwb.utils.sampling import evaluate_sources, sample_sources
@@ -193,35 +202,74 @@ def reference(params: dict[str, float]) -> tuple[jax.Array, jax.Array, jax.Array
 # --------------------------------------------------------------------------- #
 WINDOW = {"minimum_redshift": Z_MIN, "maximum_redshift": Z_MAX, "n_grid": N_GRID}
 
-#: Every shipped population, its source declaration, and whether it declares a
-#: physical merger rate. The guard mixtures do not: the Madau-Dickinson total
-#: rate normalizes the Madau-Dickinson redshift density, not a mixture of it
-#: with a uniform component.
-SHIPPED: dict[str, tuple[Callable[..., Any], dict[str, float], bool]] = {
-    "bns_md_cosmological": (bns_md_cosmological, {}, True),
-    "bns_md_modified_propagation": (bns_md_modified_propagation, {}, True),
-    "bns_md_gaussian_cosmological": (bns_md_gaussian_cosmological, {}, True),
+#: The delay construction kwargs the time-delayed population takes on top of the
+#: window: a 20 Myr floor and formation cut off at z = 20, which also caps the
+#: delay.
+DELAY = {
+    "minimum_delay": 0.02,
+    "maximum_formation_redshift": 20.0,
+    "n_delay_nodes": 48,
+}
+
+#: Every shipped population, its source declaration, its extra construction
+#: kwargs, the merger rate it pairs with, and the amplitude parameters it
+#: declares. The guard mixtures declare no rate: the Madau-Dickinson total rate
+#: normalizes the Madau-Dickinson redshift density, not a mixture of it with a
+#: uniform component.
+SHIPPED: dict[
+    str,
+    tuple[
+        Callable[..., Any], dict[str, float], Callable[..., Any] | None, tuple[str, ...]
+    ],
+] = {
+    "bns_md_cosmological": (
+        bns_md_cosmological,
+        {},
+        madau_dickinson_total_merger_rate,
+        AMPLITUDE_PARAMETERS,
+    ),
+    "bns_md_modified_propagation": (
+        bns_md_modified_propagation,
+        {},
+        madau_dickinson_total_merger_rate,
+        AMPLITUDE_PARAMETERS,
+    ),
+    "bns_md_gaussian_cosmological": (
+        bns_md_gaussian_cosmological,
+        {},
+        madau_dickinson_total_merger_rate,
+        AMPLITUDE_PARAMETERS,
+    ),
     "bns_md_gaussian_modified_propagation": (
         bns_md_gaussian_modified_propagation,
         {},
-        True,
+        madau_dickinson_total_merger_rate,
+        AMPLITUDE_PARAMETERS,
+    ),
+    "bns_md_time_delayed_cosmological": (
+        bns_md_time_delayed_cosmological,
+        DELAY,
+        madau_dickinson_time_delayed_total_merger_rate,
+        ("local_merger_rate",),
     ),
     "bns_md_uniform_mixture": (
         bns_md_uniform_mixture,
         {"uniform_mixing_fraction": 0.2},
-        False,
+        None,
+        (),
     ),
     "bns_md_gaussian_uniform_mixture": (
         bns_md_gaussian_uniform_mixture,
         {"uniform_mixing_fraction": 0.2},
-        False,
+        None,
+        (),
     ),
 }
 
 
 def test_shipped_populations_are_registered() -> None:
     assert known_populations() == tuple(sorted(SHIPPED))
-    for name, (declaration, extra, _) in SHIPPED.items():
+    for name, (declaration, extra, _, _) in SHIPPED.items():
         source = build_population(name, **WINDOW, **extra).source_model
         assert source.func is declaration, name  # ty: ignore[unresolved-attribute]
 
@@ -233,13 +281,20 @@ def test_only_a_physical_population_declares_a_merger_rate() -> None:
     mixtures included, and nothing could tell that the recorded rate was not
     the normalization of the density the samples came from.
     """
-    for name, (_, extra, physical) in SHIPPED.items():
+    for name, (_, extra, expected, _) in SHIPPED.items():
         rate = build_population(name, **WINDOW, **extra).merger_rate_fn
-        if not physical:
+        if expected is None:
             assert rate is None, name
             continue
         assert rate is not None, name
-        assert rate.func is madau_dickinson_total_merger_rate, name  # ty: ignore[unresolved-attribute]
+        assert rate.func is expected, name  # ty: ignore[unresolved-attribute]
+
+
+def test_each_population_declares_its_amplitude_parameters() -> None:
+    for name, (_, _, _, declared) in SHIPPED.items():
+        assert amplitude_parameters(name) == declared, name
+    with pytest.raises(KeyError, match="bns_md_cosmological"):
+        amplitude_parameters("no_such_population")
 
 
 def test_a_population_binds_one_kwargs_mapping_to_both_callables() -> None:
@@ -823,7 +878,7 @@ def test_gaussian_uniform_mixture_matches_the_explicit_logaddexp_proposal() -> N
 
 
 # --------------------------------------------------------------------------- #
-# Isotropic inclination wrapper
+# Isotropic inclination Messenger
 # --------------------------------------------------------------------------- #
 def _draw_plated(model: SourceFn, n_events: int = 8) -> dict[str, jax.Array]:
     def plated(params: Mapping[str, ArrayLike]) -> dict[str, jax.Array]:
@@ -833,12 +888,13 @@ def _draw_plated(model: SourceFn, n_events: int = 8) -> dict[str, jax.Array]:
     return dict(handlers.seed(plated, 0)(POPULATION_PARAMS))
 
 
-def test_isotropic_inclination_wrapper_adds_inclination_without_perturbing_sites() -> (
+def test_isotropic_inclination_messenger_adds_inclination_without_perturbing_sites() -> (
     None
 ):
     """NumPyro keys sites by name, so a new inclination stream leaves the rest."""
     base = mock_population_model()
-    wrapped = with_isotropic_inclination(base)
+    wrapped = IsotropicInclination(base)
+    assert isinstance(wrapped, Messenger)
     base_sources = _draw_plated(base)
     wrapped_sources = _draw_plated(wrapped)
 
@@ -854,16 +910,28 @@ def test_isotropic_inclination_wrapper_adds_inclination_without_perturbing_sites
     assert bool(jnp.all(inclination <= jnp.pi))
 
 
-def test_isotropic_inclination_wrapper_rejects_an_already_inclined_model() -> None:
-    wrapped = with_isotropic_inclination(mock_population_model())
-    doubled = with_isotropic_inclination(wrapped)
+def test_isotropic_inclination_messenger_rejects_an_already_inclined_model() -> None:
+    wrapped = IsotropicInclination(mock_population_model())
+    doubled = IsotropicInclination(wrapped)
     with pytest.raises(ValueError, match="already returns 'inclination'"):
         _draw_plated(doubled, n_events=1)
 
 
+def test_isotropic_inclination_can_be_conditioned_by_an_outer_handler() -> None:
+    inclination = jnp.full((4,), 0.75)
+    conditioned = handlers.condition(
+        IsotropicInclination(mock_population_model()),
+        data={"inclination": inclination},
+    )
+
+    sources = _draw_plated(conditioned, n_events=4)
+
+    np.testing.assert_array_equal(sources["inclination"], inclination)
+
+
 def test_isotropic_inclination_is_absent_from_the_default_density() -> None:
     """Inclination has no hyperparameters, so it must not enter the weight."""
-    wrapped = with_isotropic_inclination(mock_population_model())
+    wrapped = IsotropicInclination(mock_population_model())
     samples = sample_sources(
         wrapped, jax.random.PRNGKey(0), POPULATION_PARAMS, num_samples=5
     )
@@ -880,3 +948,96 @@ def test_isotropic_inclination_is_absent_from_the_default_density() -> None:
         density_sites=DEFAULT_DENSITY_SITES,
     )
     np.testing.assert_array_equal(np.asarray(log_wrapped), np.asarray(log_base))
+
+
+# --------------------------------------------------------------------------- #
+# Time-delayed population
+# --------------------------------------------------------------------------- #
+DELAYED_PARAMS: dict[str, float] = {**POPULATION_PARAMS, "delay_slope": -1.0}
+
+
+def _delayed_population() -> Population:
+    return build_population("bns_md_time_delayed_cosmological", **WINDOW, **DELAY)
+
+
+def test_time_delayed_draws_evaluate_to_a_finite_density_with_a_slope_gradient() -> (
+    None
+):
+    source = _delayed_population().source_model
+    samples = sample_sources(
+        source, jax.random.PRNGKey(0), DELAYED_PARAMS, num_samples=64
+    )
+    assert jnp.all((samples["redshift"] >= Z_MIN) & (samples["redshift"] <= Z_MAX))
+
+    def total(slope: jax.Array) -> jax.Array:
+        log_prob, _ = evaluate(
+            source, {**DELAYED_PARAMS, "delay_slope": slope}, samples
+        )
+        return jnp.sum(log_prob)
+
+    # The fiducial slope sits exactly where numpyro's power law special-cases.
+    value, gradient = jax.value_and_grad(total)(jnp.asarray(-1.0))
+    assert jnp.isfinite(value)
+    assert jnp.isfinite(gradient)
+    nearby = jax.grad(total)(jnp.asarray(-1.0 + 1e-10))
+    np.testing.assert_allclose(nearby, gradient, rtol=1e-6)
+
+
+def test_time_delayed_rate_is_linear_in_the_local_rate_but_not_in_h0() -> None:
+    """Why the population declares ``local_merger_rate`` and not ``H0``.
+
+    The local rate only rescales. H0 changes lookback time against a delay
+    fixed in Gyr, so it reshapes the redshift law: ``R * H0^3`` is no longer
+    constant, which is what the H0 amplitude scaling assumes.
+    """
+    rate = _delayed_population().merger_rate_fn
+    assert rate is not None
+    base = rate(DELAYED_PARAMS)
+    scaled = rate(
+        {
+            **DELAYED_PARAMS,
+            "local_merger_rate": 3.0 * DELAYED_PARAMS["local_merger_rate"],
+        }
+    )
+    np.testing.assert_allclose(scaled, 3.0 * base, rtol=1e-12)
+
+    h0 = DELAYED_PARAMS["H0"]
+    moved = rate({**DELAYED_PARAMS, "H0": 1.2 * h0})
+    assert not np.isclose(moved * (1.2 * h0) ** 3, base * h0**3, rtol=1e-3)
+
+    undelayed = build_population("bns_md_cosmological", **WINDOW).merger_rate_fn
+    assert undelayed is not None
+    np.testing.assert_allclose(
+        undelayed({**POPULATION_PARAMS, "H0": 1.2 * h0}) * (1.2 * h0) ** 3,
+        undelayed(POPULATION_PARAMS) * h0**3,
+        rtol=1e-10,
+    )
+
+
+@pytest.mark.parametrize("slope", [-1.5, -1.0, 0.5])
+def test_time_delayed_ceiling_is_cosmological_not_a_fixed_number(slope: float) -> None:
+    """A delay longer than the lookback time to the cut-off is never available.
+
+    So the population's ceiling, t_L(z_cut), must give the same rate as an
+    effectively unbounded one: a higher ceiling only rescales the delay CDF,
+    which leaves every quadrature node in tau where it was. The H0 gradient
+    runs through the ceiling as well as through the cosmology.
+    """
+    params = {**DELAYED_PARAMS, "delay_slope": slope}
+    rate = _delayed_population().merger_rate_fn
+    assert rate is not None
+    unbounded = madau_dickinson_time_delayed_redshift_distribution(
+        params=params,
+        time_delay_distribution=PowerLawDelayDistribution(
+            slope, DELAY["minimum_delay"], 1.0e3
+        ),
+        n_delay_nodes=48,
+        maximum_formation_redshift=20.0,
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_GRID,
+    )
+    np.testing.assert_allclose(rate(params), unbounded.total_merger_rate(), rtol=1e-10)
+
+    gradient = jax.grad(lambda h0: rate({**params, "H0": h0}))(params["H0"])
+    assert jnp.isfinite(gradient)

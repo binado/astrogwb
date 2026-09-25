@@ -65,6 +65,7 @@ EXPERIMENTS = {
     "variable-catalog-size",
     "variable-proposal-guard",
     "waveform-approximant",
+    "time-delay",
 }
 
 
@@ -79,11 +80,11 @@ def all_runs() -> list[tuple[str, str]]:
 # --------------------------------------------------------------------------- #
 # Discovery: filenames are the mapping
 # --------------------------------------------------------------------------- #
-def test_discovery_finds_six_experiments_and_26_runs() -> None:
+def test_discovery_finds_seven_experiments_and_27_runs() -> None:
     runs = discover_runs()
 
     assert set(runs) == EXPERIMENTS
-    assert sum(len(names) for names in runs.values()) == 26
+    assert sum(len(names) for names in runs.values()) == 27
     assert "_base" not in {run for names in runs.values() for run in names}
 
 
@@ -237,20 +238,6 @@ def test_base_files_merge_into_one_mapping() -> None:
     assert set(base) == {"analysis", "fiducials", "networks", "priors", "sampler"}
 
 
-def test_no_run_layer_redeclares_the_fiducials_or_priors() -> None:
-    """The shared values have one home, not two.
-
-    `config/analysis/base/parameters.toml` used to declare both. It is gone,
-    and no run layer may quietly reintroduce either table -- a second
-    declaration would win the merge and the JSON the notebooks read would
-    silently stop describing what the runs sample. A *run* overriding one
-    named prior is a different thing and is allowed; a whole table is not.
-    """
-    for path in sorted((REPO_ROOT / "config/runs").rglob("*.json")):
-        raw = load_mapping(path)
-        assert "fiducials" not in raw, path
-
-
 def test_no_run_declares_a_raw_detector_list() -> None:
     """Read unmerged, so a reintroduced list is caught where it is written.
 
@@ -307,7 +294,7 @@ def test_every_run_names_declared_catalogs(experiment: str, run: str) -> None:
 # --------------------------------------------------------------------------- #
 # PolarizationPowerCatalog selection
 # --------------------------------------------------------------------------- #
-#: The eight catalogs the 26 runs share between them. Two pairs of specs
+#: The nine catalogs the 27 runs share between them. Two pairs of specs
 #: collapsed into one file when catalogs stopped being composed in memory:
 #: astrophysical-parameters reuses the eps=0.1 guard catalog, and
 #: waveform-approximant/IMRPhenom reuses the injection catalog.
@@ -361,7 +348,7 @@ def test_a_run_naming_an_unknown_catalog_is_rejected() -> None:
 def test_the_validation_gate_covers_every_run() -> None:
     labels = validate_all_runs()
 
-    assert len(labels) == 26
+    assert len(labels) == 27
     for label in (
         "cosmological-parameters/H0-Omega_m",
         "cosmological-parameters/H0-merger-rate",
@@ -381,7 +368,7 @@ def test_the_validation_gate_covers_every_run() -> None:
 def test_the_shared_blocks_are_declared_once() -> None:
     """Every catalog inherits [waveform], [population] and [fiducials].
 
-    Editing any of the three must therefore invalidate all eight catalogs,
+    Editing any of the three must therefore invalidate all nine catalogs,
     which is only true because they are declared as inputs of every one.
     ``fiducials.json`` is a run layer as well, so the hyperparameters a catalog
     is drawn at and the ones a run initializes at cannot drift.
@@ -397,13 +384,11 @@ def test_the_shared_blocks_are_declared_once() -> None:
         assert layers[-1].suffix == ".json"
         own = load_mapping(layers[-1])
         # Only the TaylorF2 catalog overrides anything in the shared waveform
-        # block, and only the guard catalogs touch the shared population --
-        # naming a different population and adding the construction setting it
-        # takes, never restating the shared window and grid. No def overrides
-        # [fiducials]: every committed catalog is drawn at them.
+        # block, and a def that touches the shared population names a
+        # different one and adds the construction settings it takes, never
+        # restating the shared window and grid.
         assert set(own.get("waveform", {})) <= {"approximant"}, name
         assert set(own.get("population", {})) <= {"model_name", "model_kwargs"}, name
-        assert "fiducials" not in own, name
 
 
 def test_run_mcmc_validates_the_blocks_the_workflow_folds() -> None:

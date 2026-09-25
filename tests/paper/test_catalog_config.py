@@ -150,6 +150,34 @@ def test_a_proposal_density_is_rejected_as_an_analysis_target() -> None:
         )
 
 
+def test_an_amplitude_the_population_cannot_marginalize_is_rejected() -> None:
+    """A time delay fixed in Gyr makes H0 reshape the redshift law, not rescale it."""
+    kwargs = {
+        "minimum_redshift": 0.35,
+        "maximum_redshift": 20.0,
+        "n_grid": 256,
+        "minimum_delay": 0.02,
+        "maximum_formation_redshift": 20.0,
+        "n_delay_nodes": 48,
+    }
+    label = "run 'toy' analysis.population.model_name"
+    with pytest.raises(ValueError, match="cannot marginalize 'H0'"):
+        check_population_model(
+            "bns_md_time_delayed_cosmological",
+            label=label,
+            kwargs=kwargs,
+            requires_merger_rate=True,
+            amplitude_parameter="H0",
+        )
+    check_population_model(
+        "bns_md_time_delayed_cosmological",
+        label=label,
+        kwargs=kwargs,
+        requires_merger_rate=True,
+        amplitude_parameter="local_merger_rate",
+    )
+
+
 def test_layers_must_declare_a_population(tmp_path: Path) -> None:
     path = tmp_path / "toy.json"
     path.write_text('{"num_samples": 8, "seed": 1}', encoding="utf-8")
