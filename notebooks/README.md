@@ -113,6 +113,10 @@ A *Singular modes* section decomposes the rescaled whitened Jacobian with
 leading mode's spectral template, and names the templates by projecting them on
 the spectrum and its 1PN, 1.5PN and 2PN corrections
 (`post_newtonian_templates`, `cumulative_template_fractions`).
+An approximant selector regenerates the chosen case's catalogs, source by
+source, under `IMRPhenomXAS` (tides zeroed) or `TaylorF2` with
+`astrogwb.paper.catalogs.with_approximant`; the default keeps the committed
+`IMRPhenomXAS_NRTidalv3` files.
 Open it from the repository root with
 `uv run --extra notebook --group jupyter marimo edit notebooks/fisher_forecast.py`.
 

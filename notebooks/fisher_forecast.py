@@ -20,7 +20,7 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from numpyro.distributions import MultivariateNormal, Normal, Uniform
 
-    from astrogwb.paper.catalogs import load_run_catalog
+    from astrogwb.paper.catalogs import load_run_catalog, with_approximant
     from astrogwb.paper.config import fiducials, networks, priors
     from astrogwb.paper.config.mcmc import materialize_prior
     from astrogwb.paper.config.runs import ANALYSIS_PATH, CATALOGS_ROOT, assemble_run
@@ -131,6 +131,18 @@ def _():
       `config/analysis.json`, its own proposal.
 
     Changing the selection reloads the catalogs and recomputes the Jacobian.
+
+    A second selector swaps the waveform model. The committed catalogs are
+    all `IMRPhenomXAS_NRTidalv3`; any other choice regenerates both catalogs'
+    own sources under it with `with_approximant`, so the comparison is paired
+    source by source and sees the waveform model and nothing else. Plain
+    `IMRPhenomXAS` carries no tides, so its sources get
+    $\Lambda_1 = \Lambda_2 = 0$; that is sound because no importance weight
+    here counts the $\Lambda$ densities. Ripple's `TaylorF2` has post-Newtonian
+    corrections in its phase only: its amplitude is Newtonian and never
+    terminates, so every source contributes $\propto f^{-7/3}$ and the
+    population changes only the spectrum's overall scale. Every shape mode is
+    then unconstrained.
     """)
     return
 
@@ -148,6 +160,21 @@ def _():
     )
     population_case
     return (population_case,)
+
+
+@app.cell
+def _():
+    approximant = mo.ui.dropdown(
+        options={
+            "IMRPhenomXAS_NRTidalv3 (committed catalogs)": "IMRPhenomXAS_NRTidalv3",
+            "IMRPhenomXAS (no tides)": "IMRPhenomXAS",
+            "TaylorF2 (Newtonian amplitude)": "TaylorF2",
+        },
+        value="IMRPhenomXAS_NRTidalv3 (committed catalogs)",
+        label="Waveform approximant",
+    )
+    approximant
+    return (approximant,)
 
 
 @app.cell
@@ -299,6 +326,7 @@ def _():
 
 @app.cell
 def _(
+    approximant,
     density_sites,
     detectors,
     injection_path,
@@ -311,12 +339,24 @@ def _(
     population_kwargs,
     proposal_path,
 ):
-    injection = load_run_catalog(injection_path, label="injection")
+    _approximant = str(approximant.value)
+    _tidal_sites = sorted({"lambda_1", "lambda_2"} & set(density_sites))
+    if _tidal_sites:
+        raise ValueError(
+            f"density_sites {_tidal_sites} would count the tides that "
+            "with_approximant may zero; the paired comparison needs them out"
+        )
+    injection = with_approximant(
+        load_run_catalog(injection_path, label="injection"), _approximant
+    )
     proposal = (
         injection
         if proposal_path == injection_path
-        else load_run_catalog(proposal_path, label="proposal")
+        else with_approximant(
+            load_run_catalog(proposal_path, label="proposal"), _approximant
+        )
     )
+    print("approximant:", injection.waveform_metadata.approximant)
     target = build_population(model_name, **population_kwargs)
     inputs = prepare_inference_inputs(
         injection,
