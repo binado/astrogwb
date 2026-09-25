@@ -1,0 +1,22 @@
+{
+  "analysis": {
+    "network": "ET-2L-aligned-CE-Hanford",
+    "likelihood": "amplitude_marginalized",
+    "amplitude_parameter": "local_merger_rate",
+    "population": {
+      "model_name": "bns_md_gaussian_cosmological"
+    },
+    "catalog": {
+      "injection": "md-gaussian-imrphenom-s81-n32768",
+      "proposal": "md-gaussian-imrphenom-s81-n32768"
+    }
+  },
+  "fiducials": {
+    "mass_mean": 1.33,
+    "mass_sigma": 0.09
+  },
+  "priors": {
+    "mass_mean": {"dist": "Uniform", "kwargs": {"low": 1.1, "high": 1.6}},
+    "mass_sigma": {"dist": "Uniform", "kwargs": {"low": 0.03, "high": 0.3}}
+  }
+}

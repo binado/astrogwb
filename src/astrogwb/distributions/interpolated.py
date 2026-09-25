@@ -125,9 +125,19 @@ class InterpolatedDistribution(dist.Distribution):
         Deliberately not ``@validate_sample``-decorated: importance weights
         built on this depend on getting ``-inf`` for an out-of-grid sample,
         not an exception.
+
+        Where the density vanishes -- off the table, or where the table itself
+        is zero, as a delayed merger rate is next to its formation cut-off --
+        the ``-inf`` comes through a double ``where`` so its derivative is
+        zero rather than the ``0 / 0`` of ``log`` at zero. One such sample
+        would otherwise turn an importance sum's gradient into NaN in every
+        bin. Positive entries still go through the same ``log`` of the same
+        quotient, so they are unchanged to the bit.
         """
         unnormalized_pdf = jnp.interp(value, self.x, self.y, left=0.0, right=0.0)
-        return jnp.log(unnormalized_pdf / self.norm)
+        positive = unnormalized_pdf > 0.0
+        safe_pdf = jnp.where(positive, unnormalized_pdf, 1.0)
+        return jnp.where(positive, jnp.log(safe_pdf / self.norm), -jnp.inf)
 
     def icdf(self, q: ArrayLike) -> jax.Array:
         """Inverse CDF by linear-in-CDF inversion on :attr:`cdf_grid`."""

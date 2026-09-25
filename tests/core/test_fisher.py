@@ -22,9 +22,17 @@ from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import DEFAULT_DENSITY_SITES
 from astrogwb.sampling import (
     SpectralDensityFn,
+    cumulative_template_fractions,
+    derivative_cosine_matrix,
+    fisher_eigenmodes,
+    fisher_from_whitened_jacobian,
     fisher_matrix_per_bin,
+    fisher_svd,
     gwb_spectral_density_model,
+    post_newtonian_templates,
+    prior_sigma_along_modes,
     spectral_density_jacobian,
+    whitened_jacobian,
 )
 
 
@@ -185,3 +193,268 @@ def test_importance_jacobian_matches_finite_differences(
             atol=1e-8 * float(jnp.max(jnp.abs(finite_difference))),
             err_msg=name,
         )
+
+
+# --------------------------------------------------------------------------- #
+# Degeneracy views: whitened derivatives, cosines, eigenmodes
+# --------------------------------------------------------------------------- #
+def test_whitened_jacobian_is_the_derivative_in_noise_units(
+    power_law: SpectralDensityFn,
+    power_law_params: dict[str, float],
+    bin_frequencies: jax.Array,
+    scale: jax.Array,
+) -> None:
+    amplitude, index = power_law_params["amplitude"], power_law_params["index"]
+    ratio = bin_frequencies / 10.0
+    expected = (
+        jnp.stack([ratio**index, amplitude * ratio**index * jnp.log(ratio)], axis=-1)
+        / scale[:, None]
+    )
+
+    whitened = whitened_jacobian(
+        power_law, power_law_params, ("amplitude", "index"), scale=scale
+    )
+
+    np.testing.assert_allclose(whitened, expected, rtol=1e-12)
+
+
+def test_whitened_jacobian_masked_bins_are_zero_even_with_infinite_scale(
+    power_law: SpectralDensityFn,
+    power_law_params: dict[str, float],
+    scale: jax.Array,
+) -> None:
+    mask = jnp.arange(scale.size) >= 2
+    whitened = whitened_jacobian(
+        power_law,
+        power_law_params,
+        ("amplitude", "index"),
+        scale=jnp.where(mask, scale, jnp.inf),
+        frequency_mask=mask,
+    )
+
+    np.testing.assert_array_equal(whitened[:2], 0.0)
+
+
+def test_fisher_from_whitened_jacobian_matches_fisher_matrix_per_bin(
+    power_law: SpectralDensityFn,
+    power_law_params: dict[str, float],
+    scale: jax.Array,
+) -> None:
+    names = ("amplitude", "index", "offset")
+    whitened = whitened_jacobian(power_law, power_law_params, names, scale=scale)
+
+    np.testing.assert_allclose(
+        fisher_from_whitened_jacobian(whitened),
+        fisher_matrix_per_bin(power_law, power_law_params, names, scale=scale),
+        rtol=1e-12,
+    )
+
+
+def test_derivative_cosine_matrix_is_minus_the_two_parameter_correlation() -> None:
+    fisher = np.array([[4.0, 3.0], [3.0, 9.0]])
+    covariance = np.linalg.inv(fisher)
+    correlation = covariance[0, 1] / np.sqrt(covariance[0, 0] * covariance[1, 1])
+
+    cosines = derivative_cosine_matrix(fisher)
+
+    np.testing.assert_allclose(np.diag(cosines), 1.0)
+    assert cosines[0, 1] == pytest.approx(-correlation)
+
+
+def test_derivative_cosine_matrix_uninformed_parameter_is_nan() -> None:
+    cosines = derivative_cosine_matrix(np.array([[4.0, 0.0], [0.0, 0.0]]))
+
+    assert cosines[0, 0] == pytest.approx(1.0)
+    assert np.all(np.isnan(cosines[1]))
+
+
+def test_fisher_eigenmodes_diagonal_matrix_gives_scaled_axes() -> None:
+    """Scales 2 and 0.5 turn diag(1, 64) into diag(4, 16); best-constrained first."""
+    fisher = np.diag([1.0, 64.0])
+
+    modes = fisher_eigenmodes(fisher, ("a", "b"), parameter_scales=(2.0, 0.5))
+
+    np.testing.assert_allclose(modes.sigmas, [0.25, 0.5])
+    np.testing.assert_allclose(modes.directions, [[0.0, 1.0], [1.0, 0.0]], atol=1e-12)
+
+
+def test_fisher_eigenmodes_rotated_matrix_recovers_its_axes() -> None:
+    angle = 0.3
+    rotation = np.array(
+        [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+    )
+    fisher = rotation @ np.diag([100.0, 1.0]) @ rotation.T
+
+    modes = fisher_eigenmodes(fisher, ("a", "b"))
+
+    np.testing.assert_allclose(modes.sigmas, [0.1, 1.0])
+    np.testing.assert_allclose(modes.directions[:, 0], rotation[:, 0], atol=1e-12)
+
+
+def test_fisher_eigenmodes_largest_component_is_positive() -> None:
+    fisher = np.array([[2.0, -1.9], [-1.9, 2.0]])
+
+    modes = fisher_eigenmodes(fisher, ("a", "b"))
+
+    leading = modes.directions[np.argmax(np.abs(modes.directions), axis=0), [0, 1]]
+    assert np.all(leading > 0.0)
+
+
+def test_fisher_eigenmodes_do_not_depend_on_parameter_units() -> None:
+    """Measuring `a` in units 1000 times smaller, with its scale to match."""
+    fisher = np.array([[4.0, 1.5], [1.5, 1.0]])
+    units = np.diag([1e-3, 1.0])
+
+    original = fisher_eigenmodes(fisher, ("a", "b"), parameter_scales=(2.0, 1.0))
+    converted = fisher_eigenmodes(
+        units @ fisher @ units, ("a", "b"), parameter_scales=(2e3, 1.0)
+    )
+
+    np.testing.assert_allclose(converted.sigmas, original.sigmas, rtol=1e-12)
+    np.testing.assert_allclose(converted.directions, original.directions, atol=1e-12)
+
+
+def test_fisher_eigenmodes_singular_direction_is_unconstrained() -> None:
+    fisher = np.array([[1.0, 1.0], [1.0, 1.0]])
+
+    modes = fisher_eigenmodes(fisher, ("a", "b"))
+
+    assert np.isfinite(modes.sigmas[0])
+    assert modes.sigmas[1] == np.inf
+
+
+@pytest.mark.parametrize(
+    ("fisher", "scales"),
+    [(np.eye(3), None), (np.eye(2), (1.0, 0.0)), (np.eye(2), (1.0,))],
+    ids=["wrong-shape", "zero-scale", "short-scales"],
+)
+def test_fisher_eigenmodes_rejects_inconsistent_inputs(
+    fisher: np.ndarray, scales: tuple[float, ...] | None
+) -> None:
+    with pytest.raises(ValueError, match="fisher has shape|parameter_scales"):
+        fisher_eigenmodes(fisher, ("a", "b"), parameter_scales=scales)
+
+
+def test_prior_sigma_along_modes_projects_onto_the_prior_axis() -> None:
+    """Axis-aligned modes: the prior on `b` sits on its mode, in scaled units."""
+    modes = fisher_eigenmodes(
+        np.diag([100.0, 1.0]), ("a", "b"), parameter_scales=(1.0, 2.0)
+    )
+
+    widths = prior_sigma_along_modes(modes, {"b": 3.0})
+
+    np.testing.assert_allclose(widths, [np.inf, 1.5])
+
+
+def test_prior_sigma_along_modes_rejects_an_unknown_parameter() -> None:
+    modes = fisher_eigenmodes(np.eye(2), ("a", "b"))
+
+    with pytest.raises(KeyError, match="not in"):
+        prior_sigma_along_modes(modes, {"c": 1.0})
+
+
+# --------------------------------------------------------------------------- #
+# Singular modes and their spectral templates
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def jacobian_columns() -> np.ndarray:
+    grid = np.linspace(0.1, 1.0, 40)
+    return np.stack([np.exp(-grid), grid * np.exp(-grid), np.sin(4 * grid)], axis=-1)
+
+
+def test_fisher_svd_agrees_with_the_eigenmodes_of_the_fisher_matrix(
+    jacobian_columns: np.ndarray,
+) -> None:
+    names, scales = ("a", "b", "c"), (2.0, 0.5, 1.0)
+
+    modes = fisher_svd(jacobian_columns, names, parameter_scales=scales)
+    reference = fisher_eigenmodes(
+        jacobian_columns.T @ jacobian_columns, names, parameter_scales=scales
+    )
+
+    np.testing.assert_allclose(modes.sigmas, reference.sigmas, rtol=1e-8)
+    np.testing.assert_allclose(modes.directions, reference.directions, atol=1e-8)
+
+
+def test_fisher_svd_reconstructs_the_rescaled_jacobian(
+    jacobian_columns: np.ndarray,
+) -> None:
+    scales = np.array([2.0, 0.5, 1.0])
+
+    modes = fisher_svd(jacobian_columns, ("a", "b", "c"), parameter_scales=scales)
+
+    np.testing.assert_allclose(
+        modes.templates @ np.diag(modes.singular_values) @ modes.directions.T,
+        jacobian_columns * scales,
+        atol=1e-12,
+    )
+
+
+def test_fisher_svd_templates_are_orthonormal(jacobian_columns: np.ndarray) -> None:
+    modes = fisher_svd(jacobian_columns, ("a", "b", "c"))
+
+    np.testing.assert_allclose(
+        modes.templates.T @ modes.templates, np.eye(3), atol=1e-12
+    )
+
+
+def test_fisher_svd_resolves_a_mode_the_eigendecomposition_rounds_to_zero() -> None:
+    """Singular values 1 and 1e-10 square to Fisher eigenvalues 1 and 1e-20."""
+    left, _ = np.linalg.qr(np.random.default_rng(0).normal(size=(50, 2)))
+    whitened = left @ np.diag([1.0, 1e-10])
+
+    modes = fisher_svd(whitened, ("a", "b"))
+    eigen = fisher_eigenmodes(whitened.T @ whitened, ("a", "b"))
+
+    assert modes.sigmas[1] == pytest.approx(1e10, rel=1e-6)
+    assert eigen.sigmas[1] == np.inf
+
+
+def test_fisher_svd_rank_deficient_jacobian_is_unconstrained(
+    jacobian_columns: np.ndarray,
+) -> None:
+    duplicated = np.column_stack([jacobian_columns[:, 0], 3.0 * jacobian_columns[:, 0]])
+
+    modes = fisher_svd(duplicated, ("a", "b"))
+
+    assert np.isfinite(modes.sigmas[0])
+    assert modes.sigmas[1] == np.inf
+
+
+def test_fisher_svd_rejects_a_column_count_mismatch(
+    jacobian_columns: np.ndarray,
+) -> None:
+    with pytest.raises(ValueError, match="whitened has shape"):
+        fisher_svd(jacobian_columns, ("a", "b"))
+
+
+def test_post_newtonian_templates_are_powers_of_frequency_times_the_spectrum() -> None:
+    frequencies = np.array([10.0, 20.0, 40.0])
+    spectrum = np.array([3.0, 2.0, 1.0])
+
+    templates = post_newtonian_templates(
+        frequencies, spectrum, (0.0, 1.0), reference_frequency=20.0
+    )
+
+    np.testing.assert_allclose(templates, [[3.0, 1.5], [2.0, 2.0], [1.0, 2.0]])
+
+
+def test_cumulative_template_fractions_count_a_vector_once_it_is_spanned(
+    jacobian_columns: np.ndarray,
+) -> None:
+    basis = jacobian_columns[:, :2]
+    vectors = np.column_stack([basis[:, 1], basis[:, 0] + basis[:, 1]])
+
+    fractions = cumulative_template_fractions(vectors, basis)
+
+    assert fractions[0, 0] < 1.0
+    np.testing.assert_allclose(fractions[:, -1], 1.0)
+    assert np.all(np.diff(fractions, axis=1) >= -1e-12)
+
+
+def test_cumulative_template_fractions_orthogonal_vector_is_unexplained() -> None:
+    basis = np.array([[1.0], [0.0], [0.0]])
+
+    fractions = cumulative_template_fractions(np.array([0.0, 2.0, 0.0]), basis)
+
+    np.testing.assert_allclose(fractions, [[0.0]])

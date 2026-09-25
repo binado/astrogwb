@@ -2,7 +2,7 @@
 
 Workflows in this directory are stored as plain `.py` files. Most are [Jupytext](https://jupytext.readthedocs.io/) **py:percent** notebooks — a way to represent Jupyter notebooks as Python source instead of `.ipynb` JSON. That keeps diffs readable and lets normal Python tooling (Ruff, `ty`) work on notebook code. The `.py` is the source of truth; `*.ipynb` is gitignored.
 
-[`fiducial_spectrum.py`](fiducial_spectrum.py) is a [marimo](https://docs.marimo.io/) notebook: a plain `.py` file whose cells form a reactive graph.
+[`fiducial_spectrum.py`](fiducial_spectrum.py) and [`fisher_forecast.py`](fisher_forecast.py) are [marimo](https://docs.marimo.io/) notebooks: plain `.py` files whose cells form a reactive graph.
 
 ## Two kinds, one directory
 
@@ -51,13 +51,17 @@ repository root as the working directory.
 - **`fiducial_spectrum.py`** — marimo notebook. One seeded forward-model draw
   of the fiducial $S_h$ / $\Omega_{\mathrm{GW}}$, network $S_{\mathrm{eff}}$,
   $\sigma$, and per-network SNR. No catalog file.
+- **`fisher_forecast.py`** — marimo notebook. Gaussian Fisher forecast of the
+  spectrum likelihood at the committed fiducials, one corner per parameter
+  block, overlaid at several low-frequency cutoffs.
 
-The paper notebooks merge a run's config layers with
-`assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
-merge the workflow performs by passing layer paths on argv. None of them reads
-an intermediate assembled-config artifact, so they run against a fresh clone.
+`mcmc.py`, `mcmc_plotting.py`, and `logposterior_grid.py` merge a run's config
+layers with `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper
+over the same merge the workflow performs by passing layer paths on argv. None
+of them reads an intermediate assembled-config artifact, so they run against a
+fresh clone.
 
-`fiducial_spectrum.py` is the exception: it stands in for no particular run, so
+`fiducial_spectrum.py` stands in for no particular run, so
 it reads the shared tables directly — `config/fiducials.json` and
 `config/networks.json` through `astrogwb.paper.config`, and the ordered network
 legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS` — rather than merging a
@@ -73,6 +77,48 @@ Open it from the repository root:
 ```bash
 uv run --extra notebook --group jupyter marimo edit notebooks/fiducial_spectrum.py
 ```
+
+`fisher_forecast.py` forecasts the Gaussian spectrum likelihood at the
+committed fiducials: one importance-spectrum Jacobian, summed into
+cosmological, modified-propagation, and astrophysical blocks at low-frequency
+cutoffs of 2, 5, 10, and 20 Hz. Gaussian priors from `priors()`
+(`config/priors.json`) are added on the $\Omega_m$, $n$ (`xi_n`), and
+$\gamma$ diagonals before each block is inverted; a slider sets how many
+standard deviations the constructed `xi_n` and `gamma` widths span, and
+$\Omega_m$ keeps the production Normal scale. It reads the band, redshift
+grid, and catalog names from `config/analysis.json` and needs those catalogs
+on disk (`outputs/catalogs/md-imrphenom-s41-n32768.h5` for both the injection
+and the proposal). A population selector can replace the baseline with the time-delayed
+Madau–Dickinson model: it then reads the `time-delay/delay-slope` run through
+`assemble_run`, forecasts $H_0$ and `delay_slope` in one block, and puts a
+Gaussian prior on `delay_slope` whose width is the experiment's Uniform divided
+by the slider value. That mode needs
+`outputs/catalogs/md-delayed-imrphenom-s71-n32768.h5` (injection) and
+`outputs/catalogs/md-uniform-imrphenom-s61-n16384-eps1e-1.h5` (proposal).
+A third case, *Gaussian masses*, keeps the undelayed Madau–Dickinson redshift
+law fixed and forecasts `mass_mean` and `mass_sigma` of
+`bns_md_gaussian_cosmological`, read from the `mass-model/gaussian-mass` run; it
+needs `outputs/catalogs/md-gaussian-imrphenom-s81-n32768.h5`, which serves as
+both injection and proposal. The `mass_sigma` derivative is dominated by the
+catalog's Monte Carlo noise at that size, which the notebook states.
+A final *Degeneracies* section, in both modes, plots each parameter's
+whitened derivative $\partial_a S / \sigma$ (unit-normalized; the same shape
+means a degeneracy) and the Fisher eigenmodes in units of the production prior
+standard deviations, with the Gaussian prior's width along each mode. The
+functions behind it are `whitened_jacobian`, `derivative_cosine_matrix`,
+`fisher_eigenmodes` and `prior_sigma_along_modes` in `astrogwb.sampling`, and
+the figures are in `astrogwb.paper.plotting.fisher`.
+A *Singular modes* section decomposes the rescaled whitened Jacobian with
+`fisher_svd` (more stable than the Fisher eigen-decomposition), plots each
+leading mode's spectral template, and names the templates by projecting them on
+the spectrum and its 1PN, 1.5PN and 2PN corrections
+(`post_newtonian_templates`, `cumulative_template_fractions`).
+An approximant selector regenerates the chosen case's catalogs, source by
+source, under `IMRPhenomXAS` (tides zeroed) or `TaylorF2` with
+`astrogwb.paper.catalogs.with_approximant`; the default keeps the committed
+`IMRPhenomXAS_NRTidalv3` files.
+Open it from the repository root with
+`uv run --extra notebook --group jupyter marimo edit notebooks/fisher_forecast.py`.
 
 For the shared scientific values on their own, without standing in for a
 particular run, read them from the package rather than retyping them:
@@ -123,7 +169,7 @@ ASTROGWB_NOTEBOOK_SMOKE=1 just test-notebooks
 
 ## Opening in Jupyter
 
-The percent notebooks open in the classic notebook UI after a conversion to `.ipynb`. `fiducial_spectrum.py` opens in marimo, as above.
+The percent notebooks open in the classic notebook UI after a conversion to `.ipynb`. `fiducial_spectrum.py` and `fisher_forecast.py` open in marimo, as above.
 
 To convert a percent notebook:
 

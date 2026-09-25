@@ -21,6 +21,7 @@ import pytest
 from repo import REPO_ROOT
 
 from astrogwb.catalog import PolarizationPowerCatalog
+from astrogwb.paper.catalogs import with_approximant
 from astrogwb.paper.config.catalogs import CatalogDefinition
 
 #: The hyperparameters a real catalog inherits from ``config/fiducials.json``.
@@ -277,3 +278,49 @@ def test_the_cli_rejects_a_block_that_is_not_a_json_object(generate_catalog) -> 
                 "out.h5",
             ]
         )
+
+
+@pytest.fixture(scope="module")
+def taylorf2_catalog(generate_catalog) -> PolarizationPowerCatalog:
+    return generate_catalog.build_catalog(_definition(model="bns_md_cosmological"))
+
+
+@pytest.mark.integration
+def test_with_approximant_keeps_the_sources_and_the_population(
+    taylorf2_catalog: PolarizationPowerCatalog,
+) -> None:
+    regenerated = with_approximant(taylorf2_catalog, "IMRPhenomXAS_NRTidalv3")
+
+    assert regenerated.waveform_metadata.approximant == "IMRPhenomXAS_NRTidalv3"
+    assert regenerated.population == taylorf2_catalog.population
+    for name, values in taylorf2_catalog.source_parameters.items():
+        np.testing.assert_array_equal(regenerated.source_parameters[name], values)
+    # Relative: the powers are ~1e-48, far below allclose's default atol.
+    assert not np.allclose(
+        regenerated.polarization_power,
+        taylorf2_catalog.polarization_power,
+        rtol=1e-3,
+        atol=0.0,
+    )
+
+
+@pytest.mark.integration
+def test_with_approximant_without_tides_zeroes_the_deformabilities(
+    taylorf2_catalog: PolarizationPowerCatalog,
+) -> None:
+    assert np.any(taylorf2_catalog.source_parameters["lambda_1"] > 0.0)
+
+    regenerated = with_approximant(taylorf2_catalog, "IMRPhenomXAS")
+
+    for name in ("lambda_1", "lambda_2"):
+        np.testing.assert_array_equal(regenerated.source_parameters[name], 0.0)
+    np.testing.assert_array_equal(
+        regenerated.source_parameters["redshift"],
+        taylorf2_catalog.source_parameters["redshift"],
+    )
+
+
+def test_with_approximant_same_approximant_is_the_catalog_itself(
+    taylorf2_catalog: PolarizationPowerCatalog,
+) -> None:
+    assert with_approximant(taylorf2_catalog, "TaylorF2") is taylorf2_catalog

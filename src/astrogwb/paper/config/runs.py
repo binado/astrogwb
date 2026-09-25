@@ -316,7 +316,7 @@ def resolve_catalog_names(
     The ``Snakefile`` calls this to declare ``run_mcmc``'s catalog inputs, which
     is why it works off the merged mapping rather than a validated
     :class:`~astrogwb.paper.config.mcmc.RunConfig`: the DAG must be buildable
-    without paying for full validation of all 27 runs.
+    without paying for full validation of all 28 runs.
     """
     return _catalog_names(assemble_run(experiment, run, root=root))
 

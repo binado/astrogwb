@@ -38,10 +38,10 @@ the redshift density that follows is read back off the generated file at run
 time.
 
 `config/analysis.json` sets the default injection, the "observed" data. Only
-`time-delay` overrides it, with a catalog drawn from its own time-delayed
-population. `variable-catalog-size`, `variable-proposal-guard`,
-`astrophysical-parameters`, `waveform-approximant` and `time-delay` override the
-proposal.
+`time-delay` and `mass-model` override it, each with a catalog drawn from its
+own population. `variable-catalog-size`, `variable-proposal-guard`,
+`astrophysical-parameters`, `waveform-approximant`, `time-delay` and
+`mass-model` override the proposal.
 
 Neither a network nor a detector list is ever a shared default. A run that
 names no `analysis.network` must fail rather than silently inherit someone
@@ -120,6 +120,23 @@ fixed in Gyr while lookback time scales as 1/H0, so H0 reshapes the redshift
 law instead of only rescaling it. The population declares this at
 registration, and `snakemake validate` rejects `amplitude_parameter = "H0"` for
 it.
+
+### `mass-model` (1 run)
+
+The component-mass law of `bns_md_gaussian_cosmological`: both masses i.i.d.
+N(μ, σ²) and ordered, on the default Madau-Dickinson redshift law, undelayed
+and held at its fiducials. `gaussian-mass` samples `mass_mean` and
+`mass_sigma` with `local_merger_rate` amplitude-marginalized.
+
+`_base.json` declares the population, the two new fiducials (μ = 1.33 M☉,
+σ = 0.09 M☉, the Galactic BNS values) and their priors (Uniform[1.1, 1.6] and
+Uniform[0.03, 0.3]) itself, for the same reason as `time-delay`. Unlike the
+ordered-uniform masses, whose hard edges importance weighting cannot
+differentiate across, this law has no compact support. The injection is
+`md-gaussian-imrphenom-s81-n32768`, drawn at those values, and it is also the
+proposal, as the default `config/analysis.json` pairs one catalog with both
+roles. The narrow mass law makes that proposal's effective sample size fall
+quickly away from the fiducial, so the priors are kept tight.
 
 ## Adding one
 

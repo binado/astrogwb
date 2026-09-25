@@ -148,6 +148,7 @@ def test_only_the_network_experiments_have_figure_rules() -> None:
         "variable-proposal-guard",
         "waveform-approximant",
         "time-delay",
+        "mass-model",
     }
 
 

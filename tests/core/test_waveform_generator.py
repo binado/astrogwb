@@ -843,3 +843,22 @@ def test_generate_is_the_length_one_batch(ripple_generator: RippleGenerator) -> 
 @pytest.mark.integration
 def test_polarization_power_is_float64(ripple_generator: RippleGenerator) -> None:
     assert ripple_generator.generate_batch(_ripple_sources()).dtype == jnp.float64
+
+
+@pytest.mark.parametrize(
+    ("approximant", "tidal"),
+    [("IMRPhenomXAS", False), ("IMRPhenomXAS_NRTidalv3", True), ("TaylorF2", True)],
+)
+def test_ripple_generator_reports_whether_its_approximant_carries_tides(
+    approximant: str, tidal: bool
+) -> None:
+    metadata = WaveformMetadata(
+        approximant=approximant,
+        minimum_frequency=16.0,
+        maximum_frequency=64.0,
+        reference_frequency=16.0,
+        sampling_frequency=512.0,
+        frequency_resolution=1.0,
+    )
+
+    assert RippleGenerator(metadata).carries_tides is tidal

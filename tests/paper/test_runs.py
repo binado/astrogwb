@@ -66,6 +66,7 @@ EXPERIMENTS = {
     "variable-proposal-guard",
     "waveform-approximant",
     "time-delay",
+    "mass-model",
 }
 
 
@@ -80,11 +81,11 @@ def all_runs() -> list[tuple[str, str]]:
 # --------------------------------------------------------------------------- #
 # Discovery: filenames are the mapping
 # --------------------------------------------------------------------------- #
-def test_discovery_finds_seven_experiments_and_27_runs() -> None:
+def test_discovery_finds_eight_experiments_and_28_runs() -> None:
     runs = discover_runs()
 
     assert set(runs) == EXPERIMENTS
-    assert sum(len(names) for names in runs.values()) == 27
+    assert sum(len(names) for names in runs.values()) == 28
     assert "_base" not in {run for names in runs.values() for run in names}
 
 
@@ -294,7 +295,7 @@ def test_every_run_names_declared_catalogs(experiment: str, run: str) -> None:
 # --------------------------------------------------------------------------- #
 # PolarizationPowerCatalog selection
 # --------------------------------------------------------------------------- #
-#: The nine catalogs the 27 runs share between them. Two pairs of specs
+#: The ten catalogs the 28 runs share between them. Two pairs of specs
 #: collapsed into one file when catalogs stopped being composed in memory:
 #: astrophysical-parameters reuses the eps=0.1 guard catalog, and
 #: waveform-approximant/IMRPhenom reuses the injection catalog.
@@ -348,7 +349,7 @@ def test_a_run_naming_an_unknown_catalog_is_rejected() -> None:
 def test_the_validation_gate_covers_every_run() -> None:
     labels = validate_all_runs()
 
-    assert len(labels) == 27
+    assert len(labels) == 28
     for label in (
         "cosmological-parameters/H0-Omega_m",
         "cosmological-parameters/H0-merger-rate",
@@ -358,6 +359,8 @@ def test_the_validation_gate_covers_every_run() -> None:
         "variable-proposal-guard/eps1e-3",
         "waveform-approximant/IMRPhenom",
         "waveform-approximant/TaylorF2",
+        "time-delay/delay-slope",
+        "mass-model/gaussian-mass",
     ):
         assert label in labels
 
@@ -368,7 +371,7 @@ def test_the_validation_gate_covers_every_run() -> None:
 def test_the_shared_blocks_are_declared_once() -> None:
     """Every catalog inherits [waveform], [population] and [fiducials].
 
-    Editing any of the three must therefore invalidate all nine catalogs,
+    Editing any of the three must therefore invalidate all ten catalogs,
     which is only true because they are declared as inputs of every one.
     ``fiducials.json`` is a run layer as well, so the hyperparameters a catalog
     is drawn at and the ones a run initializes at cannot drift.

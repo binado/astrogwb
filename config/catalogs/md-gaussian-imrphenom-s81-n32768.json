@@ -1,0 +1,11 @@
+{
+  "num_samples": 32768,
+  "seed": 81,
+  "population": {
+    "model_name": "bns_md_gaussian_cosmological"
+  },
+  "fiducials": {
+    "mass_mean": 1.33,
+    "mass_sigma": 0.09
+  }
+}

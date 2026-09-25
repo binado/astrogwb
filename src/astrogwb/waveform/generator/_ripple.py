@@ -51,6 +51,7 @@ from numpy.typing import ArrayLike
 
 __all__ = [
     "build_power_kernel",
+    "carries_tides",
     "check_sources",
     "next_smooth_even",
     "ripple_parameters",
@@ -134,6 +135,15 @@ def _approximant_metadata(approximant: str) -> dict[str, Any]:
             f"unsupported approximant {approximant!r}; available: {available}"
         )
     return ripplegw.get_waveform_metadata(approximant)
+
+
+def carries_tides(approximant: str) -> bool:
+    """Whether ``approximant`` models tidal deformability.
+
+    A model that does not must be handed zero ``lambda_1`` and ``lambda_2``;
+    see :func:`check_sources`.
+    """
+    return bool(_approximant_metadata(approximant).get("is_tidal", False))
 
 
 def next_smooth_even(minimum: int) -> int:

@@ -106,7 +106,7 @@ def _rule_inputs(stdout: str) -> list[str]:
     ]
 
 
-#: Every catalog name the 27 runs draw on, minus the default injection one
+#: Every catalog name the 28 runs draw on, minus the default injection one
 #: that ``_catalogs`` always creates.
 NON_INJECTION_CATALOGS = (
     "md-imrphenom-s42-n8192.h5",
@@ -117,11 +117,12 @@ NON_INJECTION_CATALOGS = (
     "md-uniform-imrphenom-s62-n16384-eps1e-2.h5",
     "md-uniform-imrphenom-s63-n16384-eps1e-3.h5",
     "md-delayed-imrphenom-s71-n32768.h5",
+    "md-gaussian-imrphenom-s81-n32768.h5",
 )
 
 
 def _all_catalogs(tmp_path: Path) -> Path:
-    """A fake catalogs directory holding all nine."""
+    """A fake catalogs directory holding all ten."""
     return _catalogs(tmp_path, *NON_INJECTION_CATALOGS)
 
 
@@ -226,7 +227,7 @@ def test_the_snakefile_no_longer_needs_ancient() -> None:
     assert "ancient(" not in SNAKEFILE.read_text()
 
 
-def test_catalogs_target_builds_all_9_catalogs() -> None:
+def test_catalogs_target_builds_all_10_catalogs() -> None:
     result = _snakemake(
         "--snakefile",
         str(SNAKEFILE),
@@ -240,7 +241,7 @@ def test_catalogs_target_builds_all_9_catalogs() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("rule waveform_catalog:") == 9
+    assert result.stdout.count("rule waveform_catalog:") == 10
     assert "rule population_config:" not in result.stdout
 
 
@@ -388,7 +389,7 @@ def test_experiments_target_builds_all_26_chains(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "rule assemble_config:" not in result.stdout
-    assert result.stdout.count("rule run_mcmc:") == 27
+    assert result.stdout.count("rule run_mcmc:") == 28
     # `experiments` is chains-only now; figures are opt-in via the plot rules.
     assert "rule plot_cosmological_parameters:" not in result.stdout
     assert "rule plot_modified_propagation:" not in result.stdout

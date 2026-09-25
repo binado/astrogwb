@@ -115,7 +115,7 @@ Nested mappings merge and lists replace, except that each overridden
 load-bearing, not incidental: key-merging a normal prior onto a uniform one
 would leave stale `low` / `high` behind.
 
-The seven experiments and their 27 runs:
+The eight experiments and their 28 runs:
 
 | Experiment | Runs |
 | --- | ---: |
@@ -126,9 +126,10 @@ The seven experiments and their 27 runs:
 | `variable-proposal-guard` | `eps1e-1`, `eps1e-2`, and `eps1e-3` |
 | `waveform-approximant` | `IMRPhenom` and `TaylorF2` |
 | `time-delay` | `delay-slope` |
+| `mass-model` | `gaussian-mass` |
 
 `run_mcmc` declares a run's layers as its own inputs, so editing a run's file
-retriggers exactly that chain. Editing any shared layer retriggers all 27,
+retriggers exactly that chain. Editing any shared layer retriggers all 28,
 which is correct.
 
 `snakemake validate` merges and catalog-checks every run without building
@@ -152,10 +153,11 @@ construction settings, and the hyperparameters -- lives in
 in the file itself. Never in the run config.
 
 The default injection catalog -- the "observed" data -- lives in
-`config/analysis.json`. Only `time-delay` overrides it, because its target
-population is not the one the default injection was drawn from. Only
-`variable-catalog-size`, `variable-proposal-guard`, `astrophysical-parameters`,
-`waveform-approximant` and `time-delay` override the proposal catalog.
+`config/analysis.json`. Only `time-delay` and `mass-model` override it,
+because their target populations are not the one the default injection was
+drawn from. Only `variable-catalog-size`, `variable-proposal-guard`,
+`astrophysical-parameters`, `waveform-approximant`, `time-delay` and
+`mass-model` override the proposal catalog.
 
 The importance-sampling *proposal density* is **not** in the config, and it is
 not derived from the config either. It is the proposal catalog's *own* recorded
