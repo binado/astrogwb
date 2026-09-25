@@ -27,6 +27,12 @@ hyperparameters alone. Evaluating or sampling one is the job of
 The factory's own signature is the kwargs schema: a construction key no
 population takes raises ``TypeError`` here rather than being filtered away.
 
+Registration also declares which hyperparameters the population lets a run
+marginalize analytically (:func:`amplitude_parameters`). That is a property of
+the density, not of the analysis: ``H0`` factors out of the spectrum only while
+the normalized redshift law is independent of it, which a delay measured in Gyr
+breaks. The declaration defaults to none, so a new population opts in.
+
 The name pins the name, not the mathematics: re-pointing a registered key at a
 different density would be invisible here.
 """
@@ -45,6 +51,7 @@ __all__ = [
     "MergerRateFn",
     "Population",
     "SourceFn",
+    "amplitude_parameters",
     "build_population",
     "known_populations",
     "register_population",
@@ -81,6 +88,7 @@ class Population(NamedTuple):
 type PopulationFactory = Callable[..., Population]
 
 _REGISTRY: dict[str, PopulationFactory] = {}
+_AMPLITUDE_PARAMETERS: dict[str, tuple[str, ...]] = {}
 
 #: Density factors a catalog selects when nothing narrower is requested.
 #: Every registered source model declares ``redshift`` -- the one source
@@ -92,19 +100,27 @@ DEFAULT_DENSITY_SITES: tuple[str, ...] = (
 )
 
 
-def register_population[F: PopulationFactory](name: str) -> Callable[[F], F]:
+def register_population[F: PopulationFactory](
+    name: str, *, amplitude_parameters: tuple[str, ...] = ()
+) -> Callable[[F], F]:
     """Register a population factory under ``name``, returning it unchanged.
 
     Physical and proposal populations share this one registry -- a proposal is
     just the population a catalog happened to be drawn from. The registered
     factory takes construction kwargs by keyword and returns a
     :class:`Population`; :func:`build_population` calls it.
+
+    ``amplitude_parameters`` names the hyperparameters whose effect on this
+    population's spectrum is a pure overall scaling, and so may be marginalized
+    analytically. Empty by default: claiming one wrongly gives a silently wrong
+    posterior, while omitting one only costs a sampled dimension.
     """
 
     def decorate(fn: F) -> F:
         if name in _REGISTRY:
             raise ValueError(f"population {name!r} is already registered")
         _REGISTRY[name] = fn
+        _AMPLITUDE_PARAMETERS[name] = tuple(amplitude_parameters)
         return fn
 
     return decorate
@@ -141,6 +157,17 @@ def build_population(name: str, **kwargs: float) -> Population:
             f"population {name!r}: {error}; its construction kwargs are: {accepted}"
         ) from None
     return factory(**kwargs)
+
+
+def amplitude_parameters(name: str) -> tuple[str, ...]:
+    """The hyperparameters population ``name`` may marginalize analytically."""
+    try:
+        return _AMPLITUDE_PARAMETERS[name]
+    except KeyError:
+        known = ", ".join(known_populations())
+        raise KeyError(
+            f"unknown population {name!r}; registered populations are: {known}"
+        ) from None
 
 
 def known_populations() -> tuple[str, ...]:

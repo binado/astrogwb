@@ -53,6 +53,14 @@ registered:
   sends an importance weight to zero, which is the property NUTS needs.
   Galactic BNS masses motivate the shape (a Gaussian around
   :math:`1.33\,M_\odot` with width :math:`\sim 0.09\,M_\odot`).
+
+``bns_md_time_delayed_cosmological`` reads the Madau-Dickinson law as the
+*formation* rate and delays mergers by :math:`p(\tau) \propto
+\tau^{\alpha}`, with the slope :math:`\alpha` the hyperparameter
+``delay_slope`` and the delay bounds construction kwargs. It declares only
+``local_merger_rate`` as an amplitude parameter: the delay is in Gyr while
+lookback time scales as :math:`1/H_0`, so the normalized redshift law depends on
+``H0`` and ``H0`` no longer factors out of the spectrum.
 """
 
 from __future__ import annotations
@@ -67,10 +75,15 @@ import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
 from astrogwb.cosmology import log_gw_em_ratio
+from astrogwb.distributions.delay import PowerLawDelayDistribution
 from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
+    madau_dickinson_time_delayed_redshift_distribution,
+)
+from astrogwb.distributions.redshift.time_delayed import (
+    TimeDelayedRedshiftDistribution,
 )
 from astrogwb.populations.registry import Population, register_population
 
@@ -83,14 +96,16 @@ __all__ = [
     "bns_md_gaussian_modified_propagation",
     "bns_md_gaussian_uniform_mixture",
     "bns_md_modified_propagation",
+    "bns_md_time_delayed_cosmological",
     "bns_md_uniform_mixture",
+    "madau_dickinson_time_delayed_total_merger_rate",
     "madau_dickinson_total_merger_rate",
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
 ]
 
 AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
-"""Parameters this population supports marginalizing analytically."""
+"""Parameters with an amplitude scaling here; a population declares its subset."""
 
 
 # Absolute scalings as module-level ``def``s (not closures over the fiducial)
@@ -245,6 +260,15 @@ def _redshift(
     return jnp.asarray(redshift), redshift_distribution
 
 
+def _require_local_merger_rate(params: Mapping[str, ArrayLike], owner: str) -> None:
+    """Fail by name rather than let a rate shape default the rate to 1.0."""
+    if "local_merger_rate" not in params:
+        raise ValueError(
+            f"{owner} requires params['local_merger_rate'] (Gpc^-3 yr^-1): a "
+            "merger-rate model has no meaningful default rate"
+        )
+
+
 def madau_dickinson_total_merger_rate(
     params: Mapping[str, ArrayLike],
     *,
@@ -262,12 +286,7 @@ def madau_dickinson_total_merger_rate(
     meaningful use, so a missing physical rate fails at the model that owns
     it rather than propagating a placeholder into a spectrum.
     """
-    if "local_merger_rate" not in params:
-        raise ValueError(
-            "madau_dickinson_total_merger_rate requires "
-            "params['local_merger_rate'] (Gpc^-3 yr^-1): a merger-rate model "
-            "has no meaningful default rate"
-        )
+    _require_local_merger_rate(params, "madau_dickinson_total_merger_rate")
     redshift_distribution = MadauDickinsonRedshiftDistribution(
         params=params,
         minimum_redshift=minimum_redshift,
@@ -486,6 +505,108 @@ def bns_md_gaussian_modified_propagation(
     )
 
 
+def _time_delayed_redshift_distribution(
+    params: Mapping[str, ArrayLike],
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
+    minimum_delay: float,
+    maximum_delay: float,
+    maximum_formation_redshift: float,
+    n_delay_nodes: int,
+) -> TimeDelayedRedshiftDistribution:
+    """The delayed Madau-Dickinson law, its delay slope read from ``params``.
+
+    The delay is built inside the model so ``delay_slope`` is a traced
+    hyperparameter like ``z_peak``; the bounds and the quadrature are
+    construction kwargs and so are recorded with the catalog.
+    """
+    return madau_dickinson_time_delayed_redshift_distribution(
+        params=params,
+        time_delay_distribution=PowerLawDelayDistribution(
+            params["delay_slope"], minimum_delay, maximum_delay
+        ),
+        n_delay_nodes=n_delay_nodes,
+        maximum_formation_redshift=maximum_formation_redshift,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        n_grid=n_grid,
+    )
+
+
+def madau_dickinson_time_delayed_total_merger_rate(
+    params: Mapping[str, ArrayLike],
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
+    minimum_delay: float,
+    maximum_delay: float,
+    maximum_formation_redshift: float,
+    n_delay_nodes: int,
+) -> jax.Array:
+    r"""Observer-frame total merger rate under the delayed Madau-Dickinson shape.
+
+    As :func:`madau_dickinson_total_merger_rate`, plus ``delay_slope`` in
+    ``params``. ``local_merger_rate`` is still the merger rate at
+    :math:`z = 0`: the delayed shape is rescaled to agree with the formation
+    rate there.
+    """
+    _require_local_merger_rate(params, "madau_dickinson_time_delayed_total_merger_rate")
+    return _time_delayed_redshift_distribution(
+        params,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        n_grid=n_grid,
+        minimum_delay=minimum_delay,
+        maximum_delay=maximum_delay,
+        maximum_formation_redshift=maximum_formation_redshift,
+        n_delay_nodes=n_delay_nodes,
+    ).total_merger_rate()
+
+
+def bns_md_time_delayed_cosmological(
+    params: Mapping[str, ArrayLike],
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
+    minimum_delay: float,
+    maximum_delay: float,
+    maximum_formation_redshift: float,
+    n_delay_nodes: int,
+) -> dict[str, jax.Array]:
+    r"""As :func:`bns_md_cosmological`, with mergers delayed from formation.
+
+    The Madau-Dickinson law is the formation rate; a merger follows after
+    :math:`\tau \sim p(\tau) \propto \tau^{\alpha}` on
+    ``[minimum_delay, maximum_delay]`` Gyr, where :math:`\alpha` is
+    ``params["delay_slope"]``. Formation stops above
+    ``maximum_formation_redshift``, and ``n_delay_nodes`` is the order of the
+    delay quadrature; see
+    :class:`~astrogwb.distributions.redshift.TimeDelayedRedshiftDistribution`.
+    Masses, spins, tides and propagation are the ordered-uniform
+    :func:`bns_md_cosmological` ones.
+    """
+    redshift_distribution = _time_delayed_redshift_distribution(
+        params,
+        minimum_redshift=minimum_redshift,
+        maximum_redshift=maximum_redshift,
+        n_grid=n_grid,
+        minimum_delay=minimum_delay,
+        maximum_delay=maximum_delay,
+        maximum_formation_redshift=maximum_formation_redshift,
+        n_delay_nodes=n_delay_nodes,
+    )
+    redshift = jnp.asarray(numpyro.sample("redshift", redshift_distribution))
+    return _declare_bns_madau_dickinson(
+        params,
+        redshift=redshift,
+        luminosity_distance=redshift_distribution.luminosity_distance(redshift),
+    )
+
+
 # --------------------------------------------------------------------- #
 # Registered populations
 # --------------------------------------------------------------------- #
@@ -520,7 +641,7 @@ def _guard_mixture_population(
     return Population(source_model=partial(source, **kwargs), merger_rate_fn=None)
 
 
-@register_population("bns_md_cosmological")
+@register_population("bns_md_cosmological", amplitude_parameters=AMPLITUDE_PARAMETERS)
 def _bns_md_cosmological_population(
     *, minimum_redshift: float, maximum_redshift: float, n_grid: int
 ) -> Population:
@@ -533,7 +654,9 @@ def _bns_md_cosmological_population(
     )
 
 
-@register_population("bns_md_modified_propagation")
+@register_population(
+    "bns_md_modified_propagation", amplitude_parameters=AMPLITUDE_PARAMETERS
+)
 def _bns_md_modified_propagation_population(
     *, minimum_redshift: float, maximum_redshift: float, n_grid: int
 ) -> Population:
@@ -551,7 +674,9 @@ def _bns_md_modified_propagation_population(
     )
 
 
-@register_population("bns_md_gaussian_cosmological")
+@register_population(
+    "bns_md_gaussian_cosmological", amplitude_parameters=AMPLITUDE_PARAMETERS
+)
 def _bns_md_gaussian_cosmological_population(
     *, minimum_redshift: float, maximum_redshift: float, n_grid: int
 ) -> Population:
@@ -564,7 +689,9 @@ def _bns_md_gaussian_cosmological_population(
     )
 
 
-@register_population("bns_md_gaussian_modified_propagation")
+@register_population(
+    "bns_md_gaussian_modified_propagation", amplitude_parameters=AMPLITUDE_PARAMETERS
+)
 def _bns_md_gaussian_modified_propagation_population(
     *, minimum_redshift: float, maximum_redshift: float, n_grid: int
 ) -> Population:
@@ -610,4 +737,39 @@ def _bns_md_gaussian_uniform_mixture_population(
         maximum_redshift=maximum_redshift,
         n_grid=n_grid,
         uniform_mixing_fraction=uniform_mixing_fraction,
+    )
+
+
+@register_population(
+    "bns_md_time_delayed_cosmological", amplitude_parameters=("local_merger_rate",)
+)
+def _bns_md_time_delayed_cosmological_population(
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
+    minimum_delay: float,
+    maximum_delay: float,
+    maximum_formation_redshift: float,
+    n_delay_nodes: int,
+) -> Population:
+    """:func:`bns_md_time_delayed_cosmological` with its delayed rate.
+
+    ``H0`` is not an amplitude parameter here: the delay is fixed in Gyr, so
+    moving ``H0`` reshapes the redshift law instead of only rescaling it.
+    """
+    kwargs = {
+        "minimum_redshift": minimum_redshift,
+        "maximum_redshift": maximum_redshift,
+        "n_grid": n_grid,
+        "minimum_delay": minimum_delay,
+        "maximum_delay": maximum_delay,
+        "maximum_formation_redshift": maximum_formation_redshift,
+        "n_delay_nodes": n_delay_nodes,
+    }
+    return Population(
+        source_model=partial(bns_md_time_delayed_cosmological, **kwargs),
+        merger_rate_fn=partial(
+            madau_dickinson_time_delayed_total_merger_rate, **kwargs
+        ),
     )

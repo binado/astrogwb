@@ -59,6 +59,7 @@ from astrogwb.populations import (
     Population,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
+    amplitude_parameters,
     build_population,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
@@ -194,7 +195,9 @@ def target_population(config: RunConfig) -> Population:
     normalized by one, so a proposal density named here would produce a
     spectrum with no scale rather than an error.
     ``check_population_model`` rejects it in pre-flight; this is the same
-    refusal at the point of use.
+    refusal at the point of use. So is a marginalized amplitude parameter the
+    population does not declare: the marginalization assumes the parameter
+    only rescales the spectrum.
     """
     declared = config.analysis.population
     population = build_population(declared.model_name, **declared.model_kwargs)
@@ -203,6 +206,14 @@ def target_population(config: RunConfig) -> Population:
             f"analysis.population.model_name {declared.model_name!r} declares "
             "no merger rate, so it cannot be an analysis target; it is a "
             "proposal density"
+        )
+    parameter = config.analysis.amplitude_parameter
+    if parameter is not None and parameter not in amplitude_parameters(
+        declared.model_name
+    ):
+        raise ValueError(
+            f"analysis.population.model_name {declared.model_name!r} cannot "
+            f"marginalize {parameter!r} analytically"
         )
     return population
 
