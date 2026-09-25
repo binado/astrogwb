@@ -13,6 +13,7 @@ from astrogwb.metadata import WaveformMetadata
 from astrogwb.utils import require_x64
 from astrogwb.waveform.generator._ripple import (
     build_power_kernel,
+    carries_tides,
     check_sources,
     next_smooth_even,
     ripple_parameters,
@@ -154,6 +155,11 @@ class RippleGenerator(PolarizationPowerGenerator):
         The underlying grid runs from ``delta_f``, not zero; see ``__init__``.
         """
         return jnp.asarray(self._frequencies[self._band])
+
+    @property
+    def carries_tides(self) -> bool:
+        """Whether this approximant models tidal deformability."""
+        return carries_tides(self.metadata.approximant)
 
     def check_sources(self, source_parameters: Mapping[str, ArrayLike]) -> None:
         """Check source values against what this approximant can represent.

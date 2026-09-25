@@ -24,6 +24,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from astrogwb.catalog import PolarizationPowerCatalog
+from astrogwb.waveform import RippleGenerator
 
 
 def load_run_catalog(path: Path | str, *, label: str) -> PolarizationPowerCatalog:
@@ -54,4 +55,43 @@ def validate_matching_frequency_grids(
         raise ValueError(f"{label} catalogs must have identical frequency grids")
 
 
-__all__ = ["load_run_catalog", "validate_matching_frequency_grids"]
+def with_approximant(
+    catalog: PolarizationPowerCatalog, approximant: str
+) -> PolarizationPowerCatalog:
+    """The same sources, regenerated under another Ripple approximant.
+
+    Every other waveform setting, the population record and the fiducials are
+    kept, so the result is paired with ``catalog`` source by source and a
+    comparison between the two sees the waveform model and nothing else. The
+    same approximant returns ``catalog`` itself.
+
+    An approximant that carries no tidal deformability gets
+    ``lambda_1 = lambda_2 = 0``: the point-particle limit, which is what it
+    models. The recorded population still declares the tides it drew, so this
+    is only sound while no importance weight counts the ``lambda`` densities
+    -- the caller's ``density_sites`` must not name them.
+    """
+    if approximant == catalog.waveform_metadata.approximant:
+        return catalog
+    generator = catalog.waveform_metadata.model_copy(
+        update={"approximant": approximant}
+    ).build()
+    sources = dict(catalog.source_parameters)
+    if isinstance(generator, RippleGenerator) and not generator.carries_tides:
+        for name in ("lambda_1", "lambda_2"):
+            if name in sources:
+                sources[name] = np.zeros_like(sources[name])
+    generator.check_sources(sources)
+    return PolarizationPowerCatalog.from_generator(
+        sources,
+        generator=generator,
+        population=catalog.population,
+        fiducials=catalog.fiducials,
+    )
+
+
+__all__ = [
+    "load_run_catalog",
+    "validate_matching_frequency_grids",
+    "with_approximant",
+]
