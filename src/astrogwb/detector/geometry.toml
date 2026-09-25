@@ -104,7 +104,7 @@ latitude = 46.45514666666667  # "46 + 27. / 60 + 18.528 / 3600"
 longitude = -119.4076571388889  # "-(119 + 24. / 60 + 27.5657 / 3600)"
 elevation = 142.554
 xarm_azimuth = 125.9994
-yarm_azimuth = 215.994
+yarm_azimuth = 215.9994
 xarm_tilt = -0.0006195
 yarm_tilt = 1.25e-05
 
