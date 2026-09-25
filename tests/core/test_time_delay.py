@@ -11,9 +11,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
+import pytest
 from scipy.integrate import quad
 
 from astrogwb.cosmology import lookback_time, redshift_at_lookback_time
+from astrogwb.distributions.delay import PowerLawDelayDistribution
 from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.distributions.redshift import (
     MadauDickinsonRedshiftDistribution,
@@ -151,3 +153,88 @@ def test_distribution_round_trips_as_a_pytree() -> None:
     np.testing.assert_allclose(jitted, distribution.log_prob(z), rtol=1e-15)
     assert rebuilt.n_delay_nodes == distribution.n_delay_nodes
     np.testing.assert_array_equal(rebuilt.log_prob(z), distribution.log_prob(z))
+
+
+# --------------------------------------------------------------------------- #
+# Power-law delay
+# --------------------------------------------------------------------------- #
+DELAYS = jnp.array([0.02, 0.1, 1.0, 5.0, 13.0])
+QUANTILES = jnp.linspace(0.0, 1.0, 9)
+
+
+@pytest.mark.parametrize("slope", [-3.0, -1.5, -1.0, -0.5, 0.0, 1.0])
+def test_power_law_delay_matches_numpyro_away_from_the_gradient_problem(
+    slope: float,
+) -> None:
+    ours = PowerLawDelayDistribution(slope, 0.02, 13.0)
+    reference = dist.DoublyTruncatedPowerLaw(slope, 0.02, 13.0)
+    np.testing.assert_allclose(ours.cdf(DELAYS), reference.cdf(DELAYS), atol=1e-14)
+    np.testing.assert_allclose(
+        ours.icdf(QUANTILES), reference.icdf(QUANTILES), rtol=1e-9
+    )
+    np.testing.assert_allclose(
+        ours.log_prob(DELAYS), reference.log_prob(DELAYS), atol=1e-13
+    )
+
+
+def test_power_law_delay_icdf_inverts_the_cdf() -> None:
+    delay = PowerLawDelayDistribution(-1.3, 0.02, 13.0)
+    np.testing.assert_allclose(delay.cdf(delay.icdf(QUANTILES)), QUANTILES, atol=1e-14)
+
+
+@pytest.mark.parametrize("offset", [-1e-6, -1e-9, -1e-12, 0.0, 1e-12, 1e-9, 1e-6])
+def test_power_law_delay_slope_gradient_is_smooth_through_minus_one(
+    offset: float,
+) -> None:
+    """numpyro's cdf/icdf slope gradients reach ~1e7 within 1e-9 of -1."""
+    interior = QUANTILES[1:-1]
+
+    def gradients(slope: float) -> tuple[jax.Array, ...]:
+        return tuple(
+            jax.grad(lambda a, f=f: f(PowerLawDelayDistribution(a, 0.02, 13.0)))(
+                jnp.asarray(slope)
+            )
+            for f in (
+                lambda d: d.cdf(DELAYS[1:-1]).sum(),
+                lambda d: d.icdf(interior).sum(),
+                lambda d: d.log_prob(DELAYS).sum(),
+            )
+        )
+
+    # 1e-4 admits the true O(offset) change at 1e-6 and nothing like the
+    # O(1e5) relative error the cancellation produces.
+    np.testing.assert_allclose(gradients(-1.0 + offset), gradients(-1.0), rtol=1e-4)
+
+
+def test_power_law_delay_samples_lie_in_the_support() -> None:
+    delay = PowerLawDelayDistribution(-1.0, 0.02, 13.0)
+    draws = delay.sample(jax.random.PRNGKey(0), (4096,))
+    assert jnp.all((draws >= 0.02) & (draws <= 13.0))
+    # Probability integral transform: F(draws) is uniform, mean 1/2 with a
+    # standard error of ~0.0045 at this size.
+    np.testing.assert_allclose(jnp.mean(delay.cdf(draws)), 0.5, atol=0.02)
+
+
+def test_power_law_delay_is_numpyros_class_and_survives_a_jit_boundary() -> None:
+    """Only the three formulas are overridden; the pytree layout is inherited."""
+    delay = PowerLawDelayDistribution(-1.0, 0.02, 13.0)
+    assert isinstance(delay, dist.DoublyTruncatedPowerLaw)
+
+    @jax.jit
+    def through(d: PowerLawDelayDistribution) -> PowerLawDelayDistribution:
+        return d
+
+    returned = through(delay)
+    assert type(returned) is PowerLawDelayDistribution
+    np.testing.assert_array_equal(returned.icdf(QUANTILES), delay.icdf(QUANTILES))
+
+
+def test_power_law_delay_cdf_saturates_outside_the_support() -> None:
+    delay = PowerLawDelayDistribution(-1.0, 0.02, 13.0)
+    np.testing.assert_array_equal(delay.cdf(jnp.array([0.001, 20.0])), [0.0, 1.0])
+
+
+def test_power_law_delay_rejects_a_zero_floor() -> None:
+    """The parent accepts ``low = 0``; the log-space formulas cannot."""
+    with pytest.raises(ValueError, match="low"):
+        PowerLawDelayDistribution(0.0, 0.0, 1.0, validate_args=True)

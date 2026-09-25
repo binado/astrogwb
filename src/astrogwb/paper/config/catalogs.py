@@ -169,6 +169,7 @@ def check_population_model(
     label: str,
     kwargs: Mapping[str, float | int] | None = None,
     requires_merger_rate: bool = False,
+    amplitude_parameter: str | None = None,
 ) -> None:
     """Reject a population a run or catalog def cannot actually be built from.
 
@@ -177,12 +178,19 @@ def check_population_model(
     reconstructs an observed total rate -- that it declares a merger rate at
     all. A guard mixture does not, so naming one as a target is a
     configuration error rather than a silently meaningless spectrum.
+    ``amplitude_parameter``, when given, must be one the population declares
+    it can marginalize analytically; otherwise the marginalized likelihood
+    would be a silently wrong posterior.
 
     Imports :mod:`astrogwb.populations` in its own body: the registry is
     populated by importing the models, which pulls in JAX, and this module is
     otherwise free of it.
     """
-    from astrogwb.populations import build_population, known_populations
+    from astrogwb.populations import (
+        amplitude_parameters,
+        build_population,
+        known_populations,
+    )
 
     known = known_populations()
     if name not in known:
@@ -190,6 +198,14 @@ def check_population_model(
             f"{label}: unknown population {name!r}; registered populations are: "
             f"{', '.join(known)}"
         )
+    if amplitude_parameter is not None:
+        supported = amplitude_parameters(name)
+        if amplitude_parameter not in supported:
+            raise ValueError(
+                f"{label}: population {name!r} cannot marginalize "
+                f"{amplitude_parameter!r} analytically; its amplitude parameters "
+                f"are: {', '.join(supported) or 'none'}"
+            )
     if kwargs is None:
         return
     try:
@@ -270,6 +286,7 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
                 label=f"{label} analysis.population.model_name",
                 kwargs=target.model_kwargs,
                 requires_merger_rate=True,
+                amplitude_parameter=config.analysis.amplitude_parameter,
             )
             logger.info("ok %s", label)
             labels.append(label)

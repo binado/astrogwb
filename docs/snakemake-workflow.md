@@ -71,15 +71,15 @@ its `input:` was already exactly these three files, so it only turned files the
 chain already depended on into a JSON copy of themselves. Re-run granularity is
 unchanged -- the rule is a per-run wildcard on `{experiment}/{run}`, so editing
 a run's TOML retriggers exactly its own chain and editing a `base/` file
-retriggers all 26.
+retriggers all 27.
 
 That granularity is what removed the stale-input wrapper the old workflow
-needed: one rule used to emit all 26 configs at once, so any edit invalidated
+needed: one rule used to emit all 27 configs at once, so any edit invalidated
 every one of them -- and the wrapper meant config changes never retriggered
 sampling at all.
 
 The `validate` rule replaces the old `configs` target. It merges, validates,
-and catalog-checks all 26 runs without building anything, so a config typo fails
+and catalog-checks all 27 runs without building anything, so a config typo fails
 before any catalog is built.
 
 The experiments are:

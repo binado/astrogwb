@@ -27,7 +27,7 @@ Every check is a `just` recipe, and CI runs the same string:
 - `uv run --group workflow snakemake --snakefile Snakefile --dry-run --cores 1 experiments`:
   production workflow entrypoint (omit `--dry-run` to execute). Chains come
   from `run_experiment_<name>` targets; figures are opt-in via the `plot_*`
-  rules. Run `snakemake validate` first: it merges and catalog-checks all 26 runs
+  rules. Run `snakemake validate` first: it merges and catalog-checks all 27 runs
   without building anything.
 
 ## Configuration

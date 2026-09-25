@@ -65,7 +65,7 @@ must not enter a catalog merge:
    field that would rot separately from it.
 
 The cost of sourcing the hyperparameters from `config/fiducials.json` is that
-editing *any* fiducial now invalidates all eight catalogs — GPU jobs — including
+editing *any* fiducial now invalidates all nine catalogs — GPU jobs — including
 an edit to the analysis-only `xi_0` / `xi_n`. That is the price of the two
 tables being one: while they were separate, keeping them in step was a manual
 two-file discipline that nothing checked. A def that wants an injection away
