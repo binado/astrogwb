@@ -15,6 +15,7 @@ from matplotlib.patches import Rectangle
 
 from astrogwb.paper.plotting.fisher import (
     plot_fisher_eigenmodes,
+    plot_template_composition,
     plot_whitened_derivatives,
 )
 
@@ -109,3 +110,29 @@ def test_eigenmode_loadings_are_annotated_per_cell() -> None:
 def test_eigenmodes_reject_a_shape_mismatch() -> None:
     with pytest.raises(ValueError, match="expected sigmas"):
         plot_fisher_eigenmodes(np.ones(2), np.eye(3), ("a", "b"))
+
+
+def test_template_composition_bars_fill_each_mode_to_one() -> None:
+    fractions = np.array([[0.9, 0.99], [0.1, 0.7]])
+
+    fig = plot_template_composition(fractions, ("amplitude", "+1PN"), ("1", "2"))
+
+    widths = np.zeros(2)
+    for bar in fig.axes[0].patches:
+        assert isinstance(bar, Rectangle)
+        widths[round(bar.get_y() + bar.get_height() / 2)] += bar.get_width()
+    np.testing.assert_allclose(widths, 1.0)
+
+
+def test_template_composition_segments_are_what_each_column_adds() -> None:
+    fig = plot_template_composition(np.array([[0.25, 0.75]]), ("a", "b"), ("1",))
+
+    segments = [
+        bar.get_width() for bar in fig.axes[0].patches if isinstance(bar, Rectangle)
+    ]
+    np.testing.assert_allclose(segments, [0.25, 0.5, 0.25])
+
+
+def test_template_composition_rejects_a_shape_mismatch() -> None:
+    with pytest.raises(ValueError, match="fractions has shape"):
+        plot_template_composition(np.ones((2, 2)), ("a",), ("1", "2"))

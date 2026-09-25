@@ -12,9 +12,15 @@ importing nothing from ``astrogwb``:
 - :func:`plot_fisher_eigenmodes` draws the principal axes of the Fisher
   matrix: the width of each constrained combination, beside the prior's width
   along it, and the loading of every parameter on it.
+- :func:`plot_template_composition` names each mode's spectral template: the
+  share of it that the spectrum itself, then each added frequency correction,
+  explains, and what is left over.
 
-The arrays come from :func:`astrogwb.sampling.whitened_jacobian` and
-:func:`astrogwb.sampling.fisher_eigenmodes`.
+The arrays come from :func:`astrogwb.sampling.whitened_jacobian`,
+:func:`astrogwb.sampling.fisher_eigenmodes`, :func:`astrogwb.sampling.fisher_svd`
+and :func:`astrogwb.sampling.cumulative_template_fractions`. A mode's template,
+``fisher_svd(...).templates``, is itself a set of whitened curves, so
+:func:`plot_whitened_derivatives` draws it too.
 """
 
 from __future__ import annotations
@@ -26,7 +32,11 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
 
-__all__ = ["plot_fisher_eigenmodes", "plot_whitened_derivatives"]
+__all__ = [
+    "plot_fisher_eigenmodes",
+    "plot_template_composition",
+    "plot_whitened_derivatives",
+]
 
 #: Cycled with the colors: degenerate parameters draw the same curve, and a
 #: second linestyle keeps the one underneath visible.
@@ -228,5 +238,78 @@ def plot_fisher_eigenmodes(
     loading_ax.tick_params(top=False, right=False)
     loading_ax.set_xlabel("mode")
     fig.colorbar(image, ax=loading_ax, fraction=0.046, pad=0.04, label="loading")
+    fig.tight_layout()
+    return fig
+
+
+def plot_template_composition(
+    fractions: ArrayLike,
+    basis_labels: Sequence[str],
+    mode_labels: Sequence[str],
+    *,
+    colors: Sequence[str] | None = None,
+) -> Figure:
+    r"""Stacked share of each mode's template explained by a nested basis.
+
+    Parameters
+    ----------
+    fractions:
+        Cumulative fractions, shape ``(K, B)``, from
+        :func:`astrogwb.sampling.cumulative_template_fractions`: entry
+        ``[k, j]`` is the share of mode ``k`` spanned by basis columns
+        ``0 .. j``.
+    basis_labels:
+        One label per basis column, naming what that column adds.
+    mode_labels:
+        One label per mode.
+    colors:
+        One color per basis column; the matplotlib cycle when omitted.
+
+    Returns
+    -------
+    Figure
+        One horizontal bar per mode, split into what each basis column adds
+        and a hatched remainder the whole basis leaves unexplained.
+    """
+    fractions = np.asarray(fractions, dtype=float)
+    if fractions.shape != (len(mode_labels), len(basis_labels)):
+        raise ValueError(
+            f"fractions has shape {fractions.shape}, expected "
+            f"{(len(mode_labels), len(basis_labels))}"
+        )
+    if colors is not None and len(colors) != len(basis_labels):
+        raise ValueError(f"{len(colors)} colors for {len(basis_labels)} basis columns")
+    fractions = np.clip(np.nan_to_num(fractions), 0.0, 1.0)
+    added = np.diff(fractions, axis=1, prepend=0.0)
+    rows = np.arange(len(mode_labels))
+    fig, ax = plt.subplots(figsize=(7.5, 1.0 + 0.55 * len(mode_labels)))
+    left = np.zeros(len(mode_labels))
+    for column, label in enumerate(basis_labels):
+        ax.barh(
+            rows,
+            added[:, column],
+            left=left,
+            color=None if colors is None else colors[column],
+            label=label,
+        )
+        left += added[:, column]
+    ax.barh(
+        rows,
+        1.0 - left,
+        left=left,
+        color="white",
+        edgecolor="0.5",
+        hatch="//",
+        label="unexplained",
+    )
+    ax.set_yticks(rows, list(mode_labels))
+    ax.invert_yaxis()
+    ax.set_xlim(0.0, 1.0)
+    ax.minorticks_off()
+    ax.tick_params(top=False, right=False)
+    ax.set_xlabel("share of the template's squared norm")
+    ax.legend(
+        loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=min(len(basis_labels) + 1, 4)
+    )
     fig.tight_layout()
     return fig

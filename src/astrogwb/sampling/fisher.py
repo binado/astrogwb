@@ -43,6 +43,17 @@ so :func:`derivative_cosine_matrix` -- the cosine between two of those curves
 matrix after rescaling each parameter by a reference width, giving the
 combinations the likelihood constrains and how well; without that rescaling
 the eigenvectors would depend on the parameters' units.
+
+:func:`fisher_svd` is the same decomposition taken on the rescaled whitened
+Jacobian :math:`\tilde W = U \Sigma V^\top` instead of on
+:math:`\tilde F = \tilde W^\top \tilde W = V \Sigma^2 V^\top`. It works at
+the square root of the Fisher matrix's condition number, so a weak mode that
+the eigen-decomposition rounds to zero stays finite, and it also returns
+:math:`U`: the unit spectral template, in noise units, through which the data
+see each mode. :func:`post_newtonian_templates` and
+:func:`cumulative_template_fractions` name those templates, by measuring how
+much of each a nested basis -- the spectrum itself, then its low-order
+frequency corrections -- explains.
 """
 
 from __future__ import annotations
@@ -59,10 +70,14 @@ from astrogwb.sampling.protocol import SpectralDensityFn
 
 __all__ = [
     "FisherEigenmodes",
+    "FisherModes",
+    "cumulative_template_fractions",
     "derivative_cosine_matrix",
     "fisher_eigenmodes",
     "fisher_from_whitened_jacobian",
     "fisher_matrix_per_bin",
+    "fisher_svd",
+    "post_newtonian_templates",
     "prior_sigma_along_modes",
     "spectral_density_jacobian",
     "whitened_jacobian",
@@ -239,7 +254,7 @@ def fisher_eigenmodes(
 
 
 def prior_sigma_along_modes(
-    modes: FisherEigenmodes, prior_sigmas: Mapping[str, float]
+    modes: FisherEigenmodes | FisherModes, prior_sigmas: Mapping[str, float]
 ) -> np.ndarray:
     r"""Width of independent Gaussian priors along each mode, in the modes' units.
 
@@ -263,3 +278,141 @@ def prior_sigma_along_modes(
     projected = np.einsum("ak,a,ak->k", modes.directions, precision, modes.directions)
     with np.errstate(divide="ignore"):
         return np.where(projected > 0.0, 1.0 / np.sqrt(projected), np.inf)
+
+
+class FisherModes(NamedTuple):
+    r"""Singular modes of a rescaled whitened Jacobian.
+
+    Mode ``k`` is the combination
+    :math:`\sum_a \mathrm{directions}_{ak}\,(\theta_a - \bar\theta_a) / s_a`,
+    measured to ``sigmas[k]``, and it changes the whitened spectrum along
+    ``templates[:, k]``. The modes are sorted best-constrained first.
+    """
+
+    parameter_names: tuple[str, ...]
+    #: The reference width :math:`s_a` each parameter was divided by.
+    parameter_scales: np.ndarray
+    #: Singular values :math:`\Sigma_k`, the square roots of the Fisher
+    #: eigenvalues in rescaled units.
+    singular_values: np.ndarray
+    #: Standard deviation along each mode, :math:`1 / \Sigma_k`; ``inf`` for a
+    #: direction the Jacobian carries no information about.
+    sigmas: np.ndarray
+    #: Unit parameter directions as columns, ``(P, P)``, each signed so its
+    #: largest component is positive.
+    directions: np.ndarray
+    #: Unit spectral templates as columns, ``(F, P)``, signed with their mode.
+    templates: np.ndarray
+
+
+def fisher_svd(
+    whitened: ArrayLike,
+    parameter_names: Sequence[str],
+    *,
+    parameter_scales: Sequence[float] | ArrayLike | None = None,
+    rcond: float | None = None,
+) -> FisherModes:
+    r"""Singular value decomposition of a rescaled whitened Jacobian.
+
+    ``whitened`` is ``(F, P)`` from :func:`whitened_jacobian`, with the bins a
+    band excludes set to zero. Each column is multiplied by its
+    ``parameter_scales`` entry (default one) before the decomposition, for the
+    reason :func:`fisher_eigenmodes` gives. The widths and directions agree
+    with :func:`fisher_eigenmodes` of the summed Fisher matrix wherever that is
+    numerically resolved.
+
+    A singular value at or below ``rcond`` times the largest, by default
+    ``max(F, P) * eps`` as :func:`numpy.linalg.matrix_rank` uses, is an
+    unconstrained direction and gets ``sigma = inf``. Because this works on
+    the Jacobian, that threshold sits at the square root of the Fisher
+    matrix's.
+    """
+    names = tuple(parameter_names)
+    whitened = np.asarray(whitened, dtype=float)
+    if whitened.ndim != 2 or whitened.shape[1] != len(names):
+        raise ValueError(
+            f"whitened has shape {whitened.shape}, expected (F, {len(names)}) "
+            f"for parameters {names}"
+        )
+    scales = (
+        np.ones(len(names))
+        if parameter_scales is None
+        else np.asarray(parameter_scales, dtype=float)
+    )
+    if scales.shape != (len(names),) or np.any(~np.isfinite(scales) | (scales <= 0)):
+        raise ValueError(
+            f"parameter_scales must be {len(names)} positive finite widths, got {scales}"
+        )
+    templates, singular_values, directions_t = np.linalg.svd(
+        whitened * scales, full_matrices=False
+    )
+    directions = directions_t.T
+    tolerance = (
+        np.finfo(float).eps * max(whitened.shape) if rcond is None else rcond
+    ) * (float(singular_values[0]) if singular_values.size else 0.0)
+    constrained = singular_values > tolerance
+    sigmas = np.full(len(names), np.inf)
+    sigmas[constrained] = 1.0 / singular_values[constrained]
+    leading = np.argmax(np.abs(directions), axis=0)
+    signs = np.sign(directions[leading, np.arange(len(names))])
+    return FisherModes(
+        names,
+        scales,
+        singular_values,
+        sigmas,
+        directions * signs,
+        templates * signs,
+    )
+
+
+def post_newtonian_templates(
+    frequencies: ArrayLike,
+    whitened_spectrum: ArrayLike,
+    exponents: Sequence[float],
+    *,
+    reference_frequency: float,
+) -> np.ndarray:
+    r"""Whitened spectrum times powers of frequency, shape ``(F, len(exponents))``.
+
+    Column ``j`` is :math:`(S_i / \sigma_i)\,(f_i / f_{\mathrm{ref}})^{e_j}`.
+    Exponent ``0`` is the spectrum itself -- an overall rescaling -- and
+    ``2/3``, ``1``, ``4/3`` are the relative 1PN, 1.5PN and 2PN corrections to
+    an inspiral energy spectrum, each proportional to a power of
+    :math:`\pi M (1+z) f`. ``reference_frequency`` only keeps the columns
+    commensurate; the span does not depend on it.
+    """
+    frequencies = np.asarray(frequencies, dtype=float)
+    spectrum = np.asarray(whitened_spectrum, dtype=float)
+    if frequencies.shape != spectrum.shape or frequencies.ndim != 1:
+        raise ValueError(
+            f"frequencies {frequencies.shape} and whitened_spectrum "
+            f"{spectrum.shape} must be matching 1-D arrays"
+        )
+    ratio = frequencies / float(reference_frequency)
+    return np.stack([spectrum * ratio**exponent for exponent in exponents], axis=-1)
+
+
+def cumulative_template_fractions(vectors: ArrayLike, basis: ArrayLike) -> np.ndarray:
+    r"""Fraction of each vector's squared norm spanned by the first ``j`` basis columns.
+
+    ``vectors`` is ``(F, K)`` and ``basis`` ``(F, B)``. Entry ``[k, j]`` is
+    :math:`\lVert \Pi_{j} v_k \rVert^2 / \lVert v_k \rVert^2`, with
+    :math:`\Pi_j` the orthogonal projector onto the span of basis columns
+    ``0 .. j``. Each row is non-decreasing and bounded by one; what the full
+    basis leaves unexplained is ``1 - fractions[:, -1]``. Nested, because the
+    columns of a frequency expansion are far from orthogonal and a separate
+    fraction per column would double-count.
+    """
+    vectors = np.asarray(vectors, dtype=float)
+    basis = np.asarray(basis, dtype=float)
+    if vectors.ndim == 1:
+        vectors = vectors[:, None]
+    if basis.ndim != 2 or basis.shape[0] != vectors.shape[0]:
+        raise ValueError(
+            f"basis has shape {basis.shape}, expected ({vectors.shape[0]}, B)"
+        )
+    # Gram-Schmidt through QR: column j of q spans what basis column j adds.
+    q, _ = np.linalg.qr(basis)
+    norms = np.sum(vectors**2, axis=0)
+    captured = np.cumsum((q.T @ vectors) ** 2, axis=0)
+    return (captured / np.where(norms > 0.0, norms, np.nan)).T

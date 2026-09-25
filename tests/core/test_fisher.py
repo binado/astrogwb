@@ -22,11 +22,14 @@ from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import DEFAULT_DENSITY_SITES
 from astrogwb.sampling import (
     SpectralDensityFn,
+    cumulative_template_fractions,
     derivative_cosine_matrix,
     fisher_eigenmodes,
     fisher_from_whitened_jacobian,
     fisher_matrix_per_bin,
+    fisher_svd,
     gwb_spectral_density_model,
+    post_newtonian_templates,
     prior_sigma_along_modes,
     spectral_density_jacobian,
     whitened_jacobian,
@@ -348,3 +351,110 @@ def test_prior_sigma_along_modes_rejects_an_unknown_parameter() -> None:
 
     with pytest.raises(KeyError, match="not in"):
         prior_sigma_along_modes(modes, {"c": 1.0})
+
+
+# --------------------------------------------------------------------------- #
+# Singular modes and their spectral templates
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def jacobian_columns() -> np.ndarray:
+    grid = np.linspace(0.1, 1.0, 40)
+    return np.stack([np.exp(-grid), grid * np.exp(-grid), np.sin(4 * grid)], axis=-1)
+
+
+def test_fisher_svd_agrees_with_the_eigenmodes_of_the_fisher_matrix(
+    jacobian_columns: np.ndarray,
+) -> None:
+    names, scales = ("a", "b", "c"), (2.0, 0.5, 1.0)
+
+    modes = fisher_svd(jacobian_columns, names, parameter_scales=scales)
+    reference = fisher_eigenmodes(
+        jacobian_columns.T @ jacobian_columns, names, parameter_scales=scales
+    )
+
+    np.testing.assert_allclose(modes.sigmas, reference.sigmas, rtol=1e-8)
+    np.testing.assert_allclose(modes.directions, reference.directions, atol=1e-8)
+
+
+def test_fisher_svd_reconstructs_the_rescaled_jacobian(
+    jacobian_columns: np.ndarray,
+) -> None:
+    scales = np.array([2.0, 0.5, 1.0])
+
+    modes = fisher_svd(jacobian_columns, ("a", "b", "c"), parameter_scales=scales)
+
+    np.testing.assert_allclose(
+        modes.templates @ np.diag(modes.singular_values) @ modes.directions.T,
+        jacobian_columns * scales,
+        atol=1e-12,
+    )
+
+
+def test_fisher_svd_templates_are_orthonormal(jacobian_columns: np.ndarray) -> None:
+    modes = fisher_svd(jacobian_columns, ("a", "b", "c"))
+
+    np.testing.assert_allclose(
+        modes.templates.T @ modes.templates, np.eye(3), atol=1e-12
+    )
+
+
+def test_fisher_svd_resolves_a_mode_the_eigendecomposition_rounds_to_zero() -> None:
+    """Singular values 1 and 1e-10 square to Fisher eigenvalues 1 and 1e-20."""
+    left, _ = np.linalg.qr(np.random.default_rng(0).normal(size=(50, 2)))
+    whitened = left @ np.diag([1.0, 1e-10])
+
+    modes = fisher_svd(whitened, ("a", "b"))
+    eigen = fisher_eigenmodes(whitened.T @ whitened, ("a", "b"))
+
+    assert modes.sigmas[1] == pytest.approx(1e10, rel=1e-6)
+    assert eigen.sigmas[1] == np.inf
+
+
+def test_fisher_svd_rank_deficient_jacobian_is_unconstrained(
+    jacobian_columns: np.ndarray,
+) -> None:
+    duplicated = np.column_stack([jacobian_columns[:, 0], 3.0 * jacobian_columns[:, 0]])
+
+    modes = fisher_svd(duplicated, ("a", "b"))
+
+    assert np.isfinite(modes.sigmas[0])
+    assert modes.sigmas[1] == np.inf
+
+
+def test_fisher_svd_rejects_a_column_count_mismatch(
+    jacobian_columns: np.ndarray,
+) -> None:
+    with pytest.raises(ValueError, match="whitened has shape"):
+        fisher_svd(jacobian_columns, ("a", "b"))
+
+
+def test_post_newtonian_templates_are_powers_of_frequency_times_the_spectrum() -> None:
+    frequencies = np.array([10.0, 20.0, 40.0])
+    spectrum = np.array([3.0, 2.0, 1.0])
+
+    templates = post_newtonian_templates(
+        frequencies, spectrum, (0.0, 1.0), reference_frequency=20.0
+    )
+
+    np.testing.assert_allclose(templates, [[3.0, 1.5], [2.0, 2.0], [1.0, 2.0]])
+
+
+def test_cumulative_template_fractions_count_a_vector_once_it_is_spanned(
+    jacobian_columns: np.ndarray,
+) -> None:
+    basis = jacobian_columns[:, :2]
+    vectors = np.column_stack([basis[:, 1], basis[:, 0] + basis[:, 1]])
+
+    fractions = cumulative_template_fractions(vectors, basis)
+
+    assert fractions[0, 0] < 1.0
+    np.testing.assert_allclose(fractions[:, -1], 1.0)
+    assert np.all(np.diff(fractions, axis=1) >= -1e-12)
+
+
+def test_cumulative_template_fractions_orthogonal_vector_is_unexplained() -> None:
+    basis = np.array([[1.0], [0.0], [0.0]])
+
+    fractions = cumulative_template_fractions(np.array([0.0, 2.0, 0.0]), basis)
+
+    np.testing.assert_allclose(fractions, [[0.0]])
