@@ -102,6 +102,16 @@ def _final_course(lat1: float, lat2: float, lon1: float, lon2: float) -> float:
     return (_initial_course(lat2, lat1, lon2, lon1) + math.pi) % (2.0 * math.pi)
 
 
+def _east_azimuth(north_azimuth: float) -> float:
+    """Convert a LAL azimuth (clockwise from North) to counter-clockwise from East.
+
+    ``CustomDetector`` azimuths follow LAL; the gwfast-derived expressions below
+    measure angles from East, like the great-circle ``ang`` terms they combine
+    with.
+    """
+    return 0.5 * math.pi - north_azimuth
+
+
 def _opening_angle(az1: float, az2: float) -> float:
     """Smallest angle between two arm azimuths (radians in, radians out)."""
     diff = ((az1 - az2 + math.pi) % (2.0 * math.pi)) - math.pi
@@ -217,7 +227,8 @@ def overlap_reduction_function(
     """Frequency-dependent ORF between two detectors.
 
     Each detector is a ``str`` site code (resolved via ``geometry.toml``)
-    or a gwmock ``CustomDetector``.
+    or a gwmock ``CustomDetector``; either way its arm azimuths follow the
+    LAL convention (clockwise from North).
     """
     frequencies = np.asarray(frequencies, dtype=float)
     det1 = resolve_detector(detector_1)
@@ -231,8 +242,13 @@ def overlap_reduction_function(
     )
     alpha = 2.0 * math.pi * frequencies * d / C_LIGHT
 
-    xax_1 = _azimuth_bisector(det1.xarm_azimuth_rad, det1.yarm_azimuth_rad)
-    xax_2 = _azimuth_bisector(det2.xarm_azimuth_rad, det2.yarm_azimuth_rad)
+    xarm_1 = _east_azimuth(det1.xarm_azimuth_rad)
+    yarm_1 = _east_azimuth(det1.yarm_azimuth_rad)
+    xarm_2 = _east_azimuth(det2.xarm_azimuth_rad)
+    yarm_2 = _east_azimuth(det2.yarm_azimuth_rad)
+
+    xax_1 = _azimuth_bisector(xarm_1, yarm_1)
+    xax_2 = _azimuth_bisector(xarm_2, yarm_2)
 
     ang_1 = (
         _initial_course(
@@ -259,8 +275,8 @@ def overlap_reduction_function(
     asin_arg = max(-1.0, min(1.0, 0.5 * d / R_EARTH))
     beta = 2.0 * math.asin(asin_arg)
 
-    ang_btw_arms_1 = _opening_angle(det1.xarm_azimuth_rad, det1.yarm_azimuth_rad)
-    ang_btw_arms_2 = _opening_angle(det2.xarm_azimuth_rad, det2.yarm_azimuth_rad)
+    ang_btw_arms_1 = _opening_angle(xarm_1, yarm_1)
+    ang_btw_arms_2 = _opening_angle(xarm_2, yarm_2)
 
     return _get_orf(alpha, beta, delta, big_delta, ang_btw_arms_1, ang_btw_arms_2)
 
