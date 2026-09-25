@@ -2,7 +2,7 @@
 
 Workflows in this directory are stored as plain `.py` files. Most are [Jupytext](https://jupytext.readthedocs.io/) **py:percent** notebooks — a way to represent Jupyter notebooks as Python source instead of `.ipynb` JSON. That keeps diffs readable and lets normal Python tooling (Ruff, `ty`) work on notebook code. The `.py` is the source of truth; `*.ipynb` is gitignored.
 
-[`fiducial_spectrum.py`](fiducial_spectrum.py) is a [marimo](https://docs.marimo.io/) notebook: a plain `.py` file whose cells form a reactive graph.
+[`fiducial_spectrum.py`](fiducial_spectrum.py) and [`waveform_approximant_spectra.py`](waveform_approximant_spectra.py) are [marimo](https://docs.marimo.io/) notebooks: plain `.py` files whose cells form a reactive graph.
 
 ## Two kinds, one directory
 
@@ -21,23 +21,32 @@ outside themselves and import nothing from `tests/core`.
   resolution $\Delta f$ is refined. The companion to
   `tests/core/test_frequency_resolution.py`, which owns the
   tolerances; the notebook owns the picture.
-- **`waveform_approximant_spectra.py`** — compare TaylorF2, IMRPhenomXAS,
-  IMRPhenomHM, and IMRPhenomXAS_NRTidalV3 spectra on identical stochastic
-  event draws, including percentile bands and fractional residuals to the
-  tidal reference. Higher-mode spectra use matched isotropic inclination draws
+- **`waveform_approximant_spectra.py`** — marimo notebook. Compare TaylorF2,
+  IMRPhenomXAS, IMRPhenomHM, and IMRPhenomXAS_NRTidalV3 spectra on identical
+  stochastic event draws, including percentile bands and fractional residuals.
+  Higher-mode spectra use matched isotropic inclination draws
   (`IsotropicInclination`) rather than the quadrupole analytic average.
-  It requires the `notebook` extra and the `jupyter` tooling group. It writes
-  `outputs/figures/waveform_approximant_spectra.pdf`; there is no data cache,
-  so every execution deterministically regenerates the draws from its fixed
-  seed. Execute it from the repository root with:
+  It requires the `notebook` extra and the `jupyter` tooling group. With
+  *Write figure* on it writes `outputs/figures/waveform_approximant_spectra.pdf`;
+  there is no data cache, so every execution deterministically regenerates the
+  draws from the seed control. The reference approximant and the percentile
+  band restyle the figure without touching the draws; the observation time,
+  the retained-draw count, and the seed re-run the forward model. Open it from
+  the repository root with:
 
   ```bash
-  uv run --extra notebook --group jupyter jupytext --to notebook --execute \
+  uv run --extra notebook --group jupyter marimo edit \
       notebooks/waveform_approximant_spectra.py
   ```
 
-  To convert without executing, omit `--execute`; the resulting sibling
-  `.ipynb` is gitignored.
+  To execute it without the editor, export an HTML report with the outputs
+  under `outputs/` (gitignored):
+
+  ```bash
+  uv run --extra notebook --group jupyter marimo export html \
+      notebooks/waveform_approximant_spectra.py \
+      -o outputs/waveform_approximant_spectra.html
+  ```
 
 **Paper analyses** — these drive real waveform catalogs through the
 `astrogwb.paper` configuration layer and are not self-contained by design. They
@@ -123,7 +132,7 @@ ASTROGWB_NOTEBOOK_SMOKE=1 just test-notebooks
 
 ## Opening in Jupyter
 
-The percent notebooks open in the classic notebook UI after a conversion to `.ipynb`. `fiducial_spectrum.py` opens in marimo, as above.
+The percent notebooks open in the classic notebook UI after a conversion to `.ipynb`. The marimo notebooks (`fiducial_spectrum.py`, `waveform_approximant_spectra.py`) open in marimo, as above.
 
 To convert a percent notebook:
 
