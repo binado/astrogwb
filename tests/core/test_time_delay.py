@@ -213,3 +213,17 @@ def test_power_law_delay_samples_lie_in_the_support() -> None:
     # Probability integral transform: F(draws) is uniform, mean 1/2 with a
     # standard error of ~0.0045 at this size.
     np.testing.assert_allclose(jnp.mean(delay.cdf(draws)), 0.5, atol=0.02)
+
+
+def test_power_law_delay_is_numpyros_class_and_survives_a_jit_boundary() -> None:
+    """Only the three formulas are overridden; the pytree layout is inherited."""
+    delay = PowerLawDelayDistribution(-1.0, 0.02, 13.0)
+    assert isinstance(delay, dist.DoublyTruncatedPowerLaw)
+
+    @jax.jit
+    def through(d: PowerLawDelayDistribution) -> PowerLawDelayDistribution:
+        return d
+
+    returned = through(delay)
+    assert type(returned) is PowerLawDelayDistribution
+    np.testing.assert_array_equal(returned.icdf(QUANTILES), delay.icdf(QUANTILES))

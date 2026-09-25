@@ -1,12 +1,13 @@
 r"""Delay-time distributions for mergers lagging their formation.
 
-:class:`PowerLawDelayDistribution` is :math:`p(\tau) \propto \tau^{\alpha}` on
-:math:`[\tau_{\min}, \tau_{\max}]`. It is what
-``numpyro.distributions.DoublyTruncatedPowerLaw`` describes, rewritten so the
-slope can be a sampled hyperparameter.
+:class:`PowerLawDelayDistribution` is ``numpyro.distributions.DoublyTruncatedPowerLaw``
+-- :math:`p(\tau) \propto \tau^{\alpha}` on :math:`[a, b]` -- with ``log_prob``,
+``cdf`` and ``icdf`` rewritten so the slope can be a sampled hyperparameter.
+Construction, support, pytree layout and ``sample`` (an ``icdf`` draw) are
+inherited.
 
-NumPyro's version special-cases :math:`\alpha = -1` exactly and otherwise
-evaluates :math:`(b^{1+\alpha} - a^{1+\alpha}) / (1 + \alpha)` as written. Within
+The parent special-cases :math:`\alpha = -1` exactly and otherwise evaluates
+:math:`(b^{1+\alpha} - a^{1+\alpha}) / (1 + \alpha)` as written. Within
 :math:`\sim 10^{-9}` of :math:`-1` that difference cancels, and the gradients of
 its ``cdf`` and ``icdf`` in :math:`\alpha` reach :math:`\sim 10^{7}`: a NUTS step
 landing there diverges, and :math:`\alpha = -1` is the canonical fiducial.
@@ -31,7 +32,7 @@ import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
-from numpyro.distributions.util import promote_shapes, validate_sample
+from numpyro.distributions.util import validate_sample
 
 __all__ = ["PowerLawDelayDistribution"]
 
@@ -57,57 +58,17 @@ def _log1p_ratio(y: jax.Array) -> jax.Array:
     return jnp.where(small, 1.0 - y / 2.0 + y**2 / 3.0, jnp.log1p(safe) / safe)
 
 
-class PowerLawDelayDistribution(dist.Distribution):
-    r"""Power-law delay :math:`p(\tau) \propto \tau^{\alpha}` on ``[low, high]``.
+class PowerLawDelayDistribution(dist.DoublyTruncatedPowerLaw):
+    r"""``DoublyTruncatedPowerLaw`` with a slope gradient smooth through :math:`-1`.
 
-    Parameters
-    ----------
-    slope:
-        The index :math:`\alpha`. Any real value, :math:`-1` included.
-    low, high:
-        The delay bounds, in the units the caller measures delays in (Gyr for
-        :class:`~astrogwb.distributions.redshift.TimeDelayedRedshiftDistribution`).
-    validate_args:
-        Forwarded to :class:`~numpyro.distributions.Distribution`.
+    Takes the parent's ``alpha``, ``low`` and ``high``: the index and the
+    delay bounds, in the units the caller measures delays in (Gyr for
+    :class:`~astrogwb.distributions.redshift.TimeDelayedRedshiftDistribution`).
     """
-
-    arg_constraints = {  # noqa: RUF012
-        "slope": dist.constraints.real,
-        "low": dist.constraints.positive,
-        "high": dist.constraints.positive,
-    }
-    reparametrized_params = ["slope", "low", "high"]  # noqa: RUF012
-    pytree_data_fields = ("slope", "low", "high")
-
-    def __init__(
-        self,
-        slope: ArrayLike,
-        low: ArrayLike,
-        high: ArrayLike,
-        *,
-        validate_args: bool | None = None,
-    ) -> None:
-        self.slope, self.low, self.high = promote_shapes(slope, low, high)
-        batch_shape = jnp.broadcast_shapes(
-            jnp.shape(slope), jnp.shape(low), jnp.shape(high)
-        )
-        super().__init__(batch_shape=batch_shape, validate_args=validate_args)
-
-    @dist.constraints.dependent_property(is_discrete=False, event_dim=0)
-    def support(self) -> dist.constraints.Constraint:
-        return dist.constraints.interval(self.low, self.high)
 
     def _shape(self) -> tuple[jax.Array, jax.Array]:
         """``(beta, log(high / low))``, the two numbers every formula needs."""
-        return 1.0 + jnp.asarray(self.slope), jnp.log(self.high / self.low)
-
-    def sample(
-        self, key: jax.Array | None, sample_shape: tuple[int, ...] = ()
-    ) -> jax.Array:
-        """Inverse-CDF draw."""
-        assert key is not None
-        u = jax.random.uniform(key, shape=sample_shape + self.batch_shape)
-        return self.icdf(u)
+        return 1.0 + jnp.asarray(self.alpha), jnp.log(self.high / self.low)
 
     @validate_sample
     def log_prob(self, value: ArrayLike) -> jax.Array:
@@ -118,7 +79,7 @@ class PowerLawDelayDistribution(dist.Distribution):
             + jnp.log(log_range)
             + jnp.log(_expm1_ratio(beta * log_range))
         )
-        return jnp.asarray(self.slope) * jnp.log(value) - log_normalization
+        return jnp.asarray(self.alpha) * jnp.log(value) - log_normalization
 
     def cdf(self, value: ArrayLike) -> jax.Array:
         beta, log_range = self._shape()
