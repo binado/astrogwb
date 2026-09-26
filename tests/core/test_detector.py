@@ -7,6 +7,11 @@ import numpy as np
 import pytest
 from gwmock_signal.detector import CustomDetector
 from gwmock_signal.network import Network
+from gwmock_signal.stochastic.overlap import (
+    DetectorSpec,
+    detector_tensors,
+    long_wavelength_overlap_reduction,
+)
 
 from astrogwb.detector import (
     load_detector,
@@ -68,7 +73,7 @@ def test_orf_colocated_is_normalized(frequencies: np.ndarray) -> None:
 
 
 def _arm_direction(det: CustomDetector, azimuth: float) -> np.ndarray:
-    # geometry.toml azimuths are measured counter-clockwise from local East.
+    # CustomDetector azimuths follow LAL: clockwise from local North.
     east = np.array([-math.sin(det.longitude_rad), math.cos(det.longitude_rad), 0.0])
     north = np.array(
         [
@@ -77,7 +82,7 @@ def _arm_direction(det: CustomDetector, azimuth: float) -> np.ndarray:
             math.cos(det.latitude_rad),
         ]
     )
-    return math.cos(azimuth) * east + math.sin(azimuth) * north
+    return math.sin(azimuth) * east + math.cos(azimuth) * north
 
 
 def _position_and_tensor(det: CustomDetector) -> tuple[np.ndarray, np.ndarray]:
@@ -204,6 +209,7 @@ def test_et_triangle_sum_upper_pairs_matches_reference(
         (arm_length_km / 2.0, -height / 3.0),
         (0.0, 2.0 * height / 3.0),
     ]
+    # gwfast bisector angles, counter-clockwise from East.
     xax_values = [-90.0, -30.0, 30.0]
 
     def _to_lat_lon(east_km: float, north_km: float) -> tuple[float, float]:
@@ -222,8 +228,8 @@ def test_et_triangle_sum_upper_pairs_matches_reference(
                 latitude_rad=math.radians(lat),
                 longitude_rad=math.radians(lon),
                 elevation_m=0.0,
-                xarm_azimuth_rad=math.radians((xax - 30.0) % 360.0),
-                yarm_azimuth_rad=math.radians((xax + 30.0) % 360.0),
+                xarm_azimuth_rad=math.radians((90.0 - (xax - 30.0)) % 360.0),
+                yarm_azimuth_rad=math.radians((90.0 - (xax + 30.0)) % 360.0),
             )
         )
 
@@ -279,3 +285,47 @@ def test_gwmock_et_triangle_orf_matches_geometry_table(
     table_sum = table_pw[0, 1, :] + table_pw[0, 2, :] + table_pw[1, 2, :]
 
     np.testing.assert_allclose(preset_sum, table_sum, atol=5e-3)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("name", ["H1", "L1", "V1", "K1"])
+def test_geometry_table_row_through_gwmock_matches_lal_response(name: str) -> None:
+    """A table row handed to gwmock orients its arms the way LAL does.
+
+    gwmock reads ``CustomDetector`` azimuths clockwise from North; a table
+    stored in any other convention would still build a detector here, just
+    with its arms pointing the wrong way. gwmock resolves the bare site code
+    to LAL's built-in detector, which is the reference.
+    """
+    tensor = detector_tensors([load_detector(name)])[name]
+
+    expected = detector_tensors([name])[name]
+    np.testing.assert_allclose(tensor, expected, atol=1e-6)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "detectors",
+    [
+        ("H1", "L1"),
+        (load_detector("S2"), load_detector("R2")),
+        tuple(Network.from_name("ET-2L-Aligned").detector_names),
+        tuple(Network.from_name("ET-2L-Misaligned").detector_names),
+    ],
+    ids=["H1-L1", "S2-R2", "ET-2L-Aligned", "ET-2L-Misaligned"],
+)
+def test_orf_low_frequency_limit_matches_gwmock_tensors(
+    detectors: tuple[DetectorSpec, DetectorSpec],
+) -> None:
+    """As f -> 0 the ORF tends to 2 D1:D2 built from gwmock's own tensors.
+
+    This pins the ORF to read ``CustomDetector`` azimuths as gwmock does, for
+    both table rows and gwmock presets. The tolerance covers the ORF's
+    spherical Earth against LAL's ellipsoidal vertex normals.
+    """
+    freqs = np.array([1e-3])
+
+    actual = overlap_reduction_function(freqs, *detectors)
+
+    expected = next(iter(long_wavelength_overlap_reduction(detectors, freqs).values()))
+    np.testing.assert_allclose(actual, expected, atol=5e-3)

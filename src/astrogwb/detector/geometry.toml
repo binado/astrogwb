@@ -2,118 +2,121 @@
 # frequency-dependent overlap reduction function for str-named (LAL/CE/ET)
 # detectors. gwmock CustomDetector presets carry their own geometry and do
 # not consult this table. ET rows are cross-validated against gwmock presets
-# in the test suite. Angles follow the LAL convention used by CustomDetector.
+# in the test suite. Arm azimuths follow the LAL convention CustomDetector
+# documents and gwmock applies: degrees clockwise from local North (so H1's
+# x-arm is 324, as in LAL's own table). gwfast measures them counter-clockwise
+# from East instead; convert with `lal = 90 - gwfast`. Tilts are degrees too.
 
 # LIGO Hanford
 [H1]
 latitude = 46.45514666666667  # "46 + 27. / 60 + 18.528 / 3600"
 longitude = -119.4076571388889  # "-(119 + 24. / 60 + 27.5657 / 3600)"
 elevation = 142.554
-xarm_azimuth = 125.9994
-yarm_azimuth = 215.9994
-xarm_tilt = -0.0006195
-yarm_tilt = 1.25e-05
+xarm_azimuth = 324.0006
+yarm_azimuth = 234.0006
+xarm_tilt = -0.0354947354083545  # LAL: -0.0006195 rad
+yarm_tilt = 0.000716197243913529  # LAL: 1.25e-05 rad
 
 # LIGO Livingston
 [L1]
 latitude = 30.562894333333332  # "30 + 33. / 60 + 46.4196 / 3600"
 longitude = -90.77424038888888  # "-(90 + 46. / 60 + 27.2654 / 3600)"
 elevation = -6.574
-xarm_azimuth = 197.7165
-yarm_azimuth = 287.7165
-xarm_tilt = -0.0003121
-yarm_tilt = -0.0006107
+xarm_azimuth = 252.2835
+yarm_azimuth = 162.2835
+xarm_tilt = -0.01788201278603299  # LAL: -0.0003121 rad
+yarm_tilt = -0.034990532548639375  # LAL: -0.0006107 rad
 
 # Virgo
 [V1]
 latitude = 43.631414472222225  # "43 + 37. / 60 + 53.0921 / 3600"
 longitude = 10.504496611111112  # "10 + 30. / 60 + 16.1878 / 3600"
 elevation = 51.884
-xarm_azimuth = 70.5674
-yarm_azimuth = 160.5674
+xarm_azimuth = 19.4326
+yarm_azimuth = 289.4326
 
 # KAGRA
 [K1]
 latitude = 36.411860338888886  # "36 + 24 / 60 + 42.69722 / 3600"
 longitude = 137.30595603055556  # "137 + 18 / 60 + 21.44171 / 3600"
 elevation = 414.181
-xarm_azimuth = 29.603765108422728  # "90 - 60.39623489157727"
-yarm_azimuth = 119.60357629670688  # "90 + 29.60357629670688"
-xarm_tilt = 0.0031414
-yarm_tilt = -0.003627
+xarm_azimuth = 60.396234891577272
+yarm_azimuth = 330.39642370329312
+xarm_tilt = 0.17998896176239682  # LAL: 0.0031414 rad
+yarm_tilt = -0.20781179229394958  # LAL: -0.003627 rad
 
 # ET triangular shape 1/3
 [E1]
 latitude = 43.63
 longitude = 10.5
 elevation = 52
-xarm_azimuth = 70.57
-yarm_azimuth = 130.57
+xarm_azimuth = 19.43
+yarm_azimuth = 319.43
 
 # ET triangular shape 2/3
 [E2]
 latitude = 43.72
 longitude = 10.55
 elevation = 60
-xarm_azimuth = 190.57
-yarm_azimuth = 250.57
+xarm_azimuth = 259.43
+yarm_azimuth = 199.43
 
 # ET triangular shape 3/3
 [E3]
 latitude = 43.7
 longitude = 10.42
 elevation = 60
-xarm_azimuth = 310.57
-yarm_azimuth = 10.57
+xarm_azimuth = 139.43
+yarm_azimuth = 79.43
 
 # ET L-shaped (aligned) Sardinia
 [S1]
 latitude = 40.52
 longitude = 9.417
 elevation = 300
-xarm_azimuth = 349.4
-yarm_azimuth = 79.4
+xarm_azimuth = 100.6
+yarm_azimuth = 10.6
 
 # ET L-shaped (mis-aligned) Sardinia
 [S2]
 latitude = 40.52
 longitude = 9.417
 elevation = 300
-xarm_azimuth = 21.75
-yarm_azimuth = 111.75
+xarm_azimuth = 68.25
+yarm_azimuth = 338.25
 
 # ET L-shaped (aligned) Netherlands
 [R1]
 latitude = 50.72
 longitude = 5.921
 elevation = 300
-xarm_azimuth = 261.86
-yarm_azimuth = 351.86
+xarm_azimuth = 188.14
+yarm_azimuth = 98.14
 
 # ET L-shaped (mis-aligned) Netherlands
 [R2]
 latitude = 50.72
 longitude = 5.921
 elevation = 0
-xarm_azimuth = 258.67
-yarm_azimuth = 348.67
+xarm_azimuth = 191.33
+yarm_azimuth = 101.33
 
 # Cosmic Explorer at Hanford
 [C1]
 latitude = 46.45514666666667  # "46 + 27. / 60 + 18.528 / 3600"
 longitude = -119.4076571388889  # "-(119 + 24. / 60 + 27.5657 / 3600)"
 elevation = 142.554
-xarm_azimuth = 125.9994
-yarm_azimuth = 215.9994
-xarm_tilt = -0.0006195
-yarm_tilt = 1.25e-05
+xarm_azimuth = 324.0006
+yarm_azimuth = 234.0006
+xarm_tilt = -0.0354947354083545  # LAL: -0.0006195 rad
+yarm_tilt = 0.000716197243913529  # LAL: 1.25e-05 rad
 
 # Cosmic Explorer at Livingston
 [C2]
 latitude = 30.562894333333332  # "30 + 33. / 60 + 46.4196 / 3600"
 longitude = -90.77424038888888  # "-(90 + 46. / 60 + 27.2654 / 3600)"
 elevation = -6.574
-xarm_azimuth = 197.7165
-yarm_azimuth = 287.7165
-xarm_tilt = -0.0003121
-yarm_tilt = -0.0006107
+xarm_azimuth = 252.2835
+yarm_azimuth = 162.2835
+xarm_tilt = -0.01788201278603299  # LAL: -0.0003121 rad
+yarm_tilt = -0.034990532548639375  # LAL: -0.0006107 rad
