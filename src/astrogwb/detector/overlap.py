@@ -1,9 +1,11 @@
 """Frequency-dependent overlap reduction and effective PSD utilities.
 
 The frequency-dependent overlap reduction function (ORF) is astrogwb's own
-contribution: gwmock ships only the long-wavelength, co-located limit
-(``gamma = 2 D_i:D_j``). This module keeps the validated analytic ORF
-(angle-based ``g1/g2/g3`` expansion) for resolved detector geometry.
+contribution. gwmock's ``long_wavelength_overlap_reduction`` is the
+frequency-independent tensor contraction ``gamma = 2 D_i:D_j``, valid in
+the long-wavelength (and co-located) limit. This module keeps the validated
+analytic ORF (angle-based ``g1/g2/g3`` expansion) for resolved detector
+geometry.
 """
 
 from __future__ import annotations
