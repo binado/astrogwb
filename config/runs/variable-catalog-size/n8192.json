@@ -1,7 +1,10 @@
 {
   "analysis": {
     "catalog": {
-      "proposal": "md-imrphenom-s42-n8192"
+      "proposal": {
+        "seed": 42,
+        "num_samples": 8192
+      }
     }
   }
 }

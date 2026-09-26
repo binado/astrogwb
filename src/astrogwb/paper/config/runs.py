@@ -7,16 +7,21 @@ registry -- and the ten ``Snakefile`` helpers that read it -- go away.
 
 A run config is three layers merged in order:
 
-0. ``config/{analysis,fiducials,networks,priors,sampler}.json`` -- the shared
-   values, one file per top-level block of a run config, each a single-key
+0. ``config/{analysis,fiducials,networks,priors,sampler,waveform,population}.json``
+   -- the shared values, one file per top-level block of a run config, each a single-key
    object whose key is its own stem. :func:`base_config_paths` is that list, so
    a caller that wants "everything shared" asks for it once.
 1. ``config/runs/<experiment>/_base.json`` -- the experiment override.
 2. ``config/runs/<experiment>/<run>.json`` -- the run override.
 
 Every layer is JSON, which is what lets ``jq`` fold a run config in the shell
-exactly as the workflow already folds a catalog config -- and what lets
-:func:`~astrogwb.paper.utils.load_mapping` be one parser rather than three.
+-- and what lets :func:`~astrogwb.paper.utils.load_mapping` be one parser
+rather than three.
+
+A run also owns its catalogs. ``[analysis.catalog]`` holds a partial spec per
+role, and :func:`resolve_catalog_blocks` completes it from the run's own
+``[waveform]``, ``[population]`` and ``[fiducials]``; the result is keyed by
+:class:`~astrogwb.metadata.CatalogRequest` and names the catalog file.
 
 :data:`EXPERIMENT_BASE` is required in every experiment directory rather than
 optional: a conditional Snakemake input complicates the DAG for no gain.
@@ -24,17 +29,13 @@ optional: a conditional Snakemake input complicates the DAG for no gain.
 There is no assembled-config artifact. Every *run* entrypoint is handed its
 layer files on argv (see :func:`add_config_arguments`) and merges them in
 process; :func:`assemble_run` is the convenience wrapper for the notebooks and
-for the validation gate, which address a run by name rather than by path. The
-catalog path differs: ``scripts/generate_catalog.py`` is handed the already
-merged blocks, because the ``Snakefile`` folds the layers with ``jq`` into a
-``temp()`` file rather than in Python. That file is a build intermediate, not a
-config an entrypoint reads.
+for the validation gate, which address a run by name rather than by path.
+``scripts/generate_catalog.py`` is handed a resolved request as JSON instead.
 
-**stdlib only, and deliberately so.** The ``Snakefile`` imports this module to
-build the DAG, so it must not reach pydantic, JAX, or ``astrogwb``: a
-validation error in any one run would otherwise break DAG construction for
-every target, and every ``--dry-run`` would pay for a JAX import. Catalog
-*validation* lives in :mod:`astrogwb.paper.config.catalogs` for that reason.
+**stdlib only, and deliberately so.** Resolution here is plain dict merging,
+so it has one implementation that the ``Snakefile``, ``RunConfig`` and the
+notebooks all share. Validating and keying the result -- which reaches
+pydantic -- lives in :mod:`astrogwb.paper.config.catalogs`.
 """
 
 from __future__ import annotations
@@ -69,38 +70,27 @@ FIDUCIALS_PATH = CONFIG_DIR / "fiducials.json"
 NETWORKS_PATH = CONFIG_DIR / "networks.json"
 PRIORS_PATH = CONFIG_DIR / "priors.json"
 SAMPLER_PATH = CONFIG_DIR / "sampler.json"
+#: The ``[waveform]`` and ``[population]`` blocks every catalog a run draws
+#: inherits. ``population`` here is the *catalog* default, not the analysis
+#: target, which is ``analysis.population``.
+WAVEFORM_PATH = CONFIG_DIR / "waveform.json"
+POPULATION_PATH = CONFIG_DIR / "population.json"
 ROOT_LAYERS = (
     ANALYSIS_PATH,
     FIDUCIALS_PATH,
     NETWORKS_PATH,
     PRIORS_PATH,
     SAMPLER_PATH,
+    WAVEFORM_PATH,
+    POPULATION_PATH,
 )
 
 #: Presentation settings, read by `astrogwb.paper.plotting`. Deliberately *not*
 #: a run-config layer: nothing a run samples depends on it.
 PLOTTING_PATH = CONFIG_DIR / "plotting.json"
 
-#: The ``[waveform]`` and ``[population]`` blocks every catalog inherits.
-#: Deliberately *not* run-config layers: ``RunConfig`` is ``extra="forbid"``.
-WAVEFORM_PATH = CONFIG_DIR / "waveform.json"
-POPULATION_PATH = CONFIG_DIR / "population.json"
-
-#: Every shared catalog layer, in merge order. Named rather than globbed
-#: because they sit among files that must not enter a catalog merge --
-#: ``config/priors.json``, ``config/networks.json``, ``config/plotting.json``.
-#: ``config/fiducials.json`` is deliberately in both this list and
-#: :data:`ROOT_LAYERS`: the hyperparameters a catalog is drawn at and the ones a
-#: run initializes at are the same table, stated once, so editing it invalidates
-#: every catalog as well as every run.
-CATALOG_ROOT_LAYERS = (WAVEFORM_PATH, POPULATION_PATH, FIDUCIALS_PATH)
-
 RUNS_DIR = CONFIG_DIR / "runs"
 EXPERIMENT_BASE = "_base.json"
-
-#: Catalogs follow the same two-layer shape as runs: the shared layers above,
-#: then one file per named catalog, whose stem is the name.
-CATALOGS_DIR = Path("config/catalogs")
 
 #: Root of everything the workflow writes, so the three output roots below are
 #: composed rather than re-typed. Relative to the working directory, as every
@@ -190,10 +180,10 @@ def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
 def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
     """Every shared layer a run inherits, in merge order: :data:`ROOT_LAYERS`.
 
-    Named explicitly rather than globbed. ``config/plotting.json`` and the two
-    catalog layers sit in the same directory without being run layers, which a
-    glob of ``config/*.json`` would sweep in -- and ``RunConfig`` is
-    ``extra="forbid"``, so it would sweep them in loudly. The five declare
+    Named explicitly rather than globbed. ``config/plotting.json`` sits in the
+    same directory without being a run layer, which a glob of
+    ``config/*.json`` would sweep in -- and ``RunConfig`` is
+    ``extra="forbid"``, so it would sweep it in loudly. The seven declare
     disjoint top-level blocks, so the order among them does not change the
     outcome; it is fixed anyway for reproducibility.
     """
@@ -244,81 +234,51 @@ def assemble_run(
 
 CATALOG_ROLES = ("injection", "proposal")
 
+#: The blocks a role's spec may override, each deep-merged over the run's own
+#: block of the same name. ``seed`` and ``num_samples`` have no default: they
+#: belong to a particular draw, so every role states them.
+CATALOG_OVERRIDABLE_BLOCKS = ("waveform", "population", "fiducials")
 
-def catalog_base_paths(root: Path | None = None) -> tuple[Path, ...]:
-    """Every shared catalog layer, in merge order.
 
-    :data:`CATALOG_ROOT_LAYERS`: ``config/waveform.json``,
-    ``config/population.json``, ``config/fiducials.json``. Named rather than
-    globbed, because a glob of ``config/*.json`` would also sweep in the run
-    tables and ``config/plotting.json``. They declare disjoint top-level keys,
-    so the order among them is arbitrary; a def is what overrides any of them.
+def resolve_catalog_blocks(raw: Mapping[str, Any], role: str) -> dict[str, Any]:
+    """The complete catalog blocks one role of a merged run config asks for.
 
-    Only ``config/catalogs/md-taylorf2-s41-n32768.json`` overrides anything in
-    the waveform block (the approximant), and only the guarded proposals touch
-    the population block; the rest of the tree inherits both verbatim. The
-    stored band matches ``config/analysis.json``'s ``[analysis]``
-    ``minimum_frequency`` / ``maximum_frequency``: the catalog grid *is* the
-    array every model is evaluated on. ``sampling_frequency`` is the waveform
-    backend's Nyquist, not the stored grid.
+    A role's spec in ``[analysis.catalog]`` is partial: it states the draw's
+    ``seed`` and ``num_samples`` and overrides whatever else differs. The rest
+    is the run's own ``[waveform]``, ``[population]`` and ``[fiducials]``, so
+    the injection is drawn at the very hyperparameters the run initializes at.
+    The overrides are recursive merges, so a guarded proposal that names another population still inherits
+    the shared redshift window.
+
+    Returns plain blocks, not a validated request: this module is stdlib-only,
+    and :meth:`astrogwb.metadata.CatalogRequest.from_blocks` is where they are
+    checked and keyed.
     """
-    resolved = root or Path()
-    paths = tuple(resolved / layer for layer in CATALOG_ROOT_LAYERS)
-    missing = [str(path) for path in paths if not path.is_file()]
-    if missing:
-        raise ValueError(f"missing shared catalog layers: {', '.join(missing)}")
-    return paths
-
-
-def catalog_config_paths(name: str, *, root: Path | None = None) -> tuple[Path, ...]:
-    """The ordered layer files that make up one catalog's config.
-
-    Mirrors :func:`run_config_paths`: the ``Snakefile`` declares exactly these
-    as the catalog rule's inputs, so editing any shared layer invalidates every
-    catalog.
-    """
-    resolved = root or Path()
-    definition = resolved / CATALOGS_DIR / f"{name}.json"
-    if not definition.is_file():
-        raise ValueError(f"unknown catalog {name}: {definition} does not exist")
-    return (*catalog_base_paths(resolved), definition)
-
-
-def discover_catalog_names(root: Path | None = None) -> tuple[str, ...]:
-    """Every declared catalog name, sorted. Stems of ``config/catalogs``."""
-    directory = (root or Path()) / CATALOGS_DIR
-    names = tuple(sorted(path.stem for path in directory.glob("*.json")))
-    if not names:
-        raise ValueError(f"{directory} declares no catalog configs")
-    return names
-
-
-def _catalog_names(raw: Mapping[str, Any]) -> dict[str, str]:
-    """The catalog each role names, from a raw config's ``[analysis.catalog]``."""
+    if role not in CATALOG_ROLES:
+        raise ValueError(f"unknown catalog role {role!r}; roles are {CATALOG_ROLES}")
     analysis = raw.get("analysis")
     catalog = analysis.get("catalog") if isinstance(analysis, Mapping) else None
-    if not isinstance(catalog, Mapping):
-        raise TypeError("run config must define an [analysis.catalog] table")
-    names: dict[str, str] = {}
-    for role in CATALOG_ROLES:
-        name = catalog.get(role)
-        if not isinstance(name, str) or not name:
-            raise TypeError(f"analysis.catalog.{role} must be a catalog name")
-        names[role] = name
-    return names
+    spec = catalog.get(role) if isinstance(catalog, Mapping) else None
+    if not isinstance(spec, Mapping):
+        raise TypeError(f"run config must define an [analysis.catalog.{role}] table")
+    blocks: dict[str, Any] = {}
+    for block in CATALOG_OVERRIDABLE_BLOCKS:
+        inherited = raw.get(block)
+        if not isinstance(inherited, Mapping):
+            raise TypeError(f"run config must define a [{block}] block")
+        blocks[block] = deep_merge(inherited, spec.get(block) or {})
+    for name in ("seed", "num_samples"):
+        if name not in spec:
+            raise TypeError(f"analysis.catalog.{role} must declare {name}")
+        blocks[name] = spec[name]
+    return blocks
 
 
-def resolve_catalog_names(
-    experiment: str, run: str, *, root: Path | None = None
-) -> dict[str, str]:
-    """The injection and proposal catalogs a run names, keyed by role.
-
-    The ``Snakefile`` calls this to declare ``run_mcmc``'s catalog inputs, which
-    is why it works off the merged mapping rather than a validated
-    :class:`~astrogwb.paper.config.mcmc.RunConfig`: the DAG must be buildable
-    without paying for full validation of all 27 runs.
-    """
-    return _catalog_names(assemble_run(experiment, run, root=root))
+def catalog_blocks(
+    experiment: str, run: str, role: str, *, root: Path | None = None
+) -> dict[str, Any]:
+    """:func:`resolve_catalog_blocks` for a run addressed by name."""
+    return resolve_catalog_blocks(assemble_run(experiment, run, root=root), role)
 
 
 def resolve_networks(
@@ -461,6 +421,11 @@ BLOCK_DESCRIPTIONS: dict[str, str] = {
     "networks": "each detector network by name, resolved to analysis.detectors",
     "priors": "the prior on every parameter",
     "sampler": "the sampling RNG seed and the NUTS settings",
+    "waveform": "the waveform settings every catalog of this run inherits",
+    "population": (
+        "the population every catalog of this run is drawn from, unless a "
+        "role overrides it"
+    ),
 }
 
 

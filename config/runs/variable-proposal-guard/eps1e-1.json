@@ -1,7 +1,16 @@
 {
   "analysis": {
     "catalog": {
-      "proposal": "md-uniform-imrphenom-s61-n16384-eps1e-1"
+      "proposal": {
+        "seed": 61,
+        "num_samples": 16384,
+        "population": {
+          "model_name": "bns_md_uniform_mixture",
+          "model_kwargs": {
+            "uniform_mixing_fraction": 0.1
+          }
+        }
+      }
     }
   }
 }

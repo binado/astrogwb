@@ -27,9 +27,9 @@
 # likelihood depends on the sampled parameters $\Lambda$ through them and the
 # total merger rate only.
 #
-# To run the notebook end-to-end, point `INJECTION_CATALOG_PATH` and
-# `PROPOSAL_CATALOG_PATH` at the `astrogwb_catalog` HDF5 files generated
-# by the catalog workflow (``outputs/catalogs/<name>.h5``).
+# The two catalogs are the ones `REFERENCE_RUN` asks for, looked up by key in
+# `CATALOG_DIR` (``outputs/catalogs/<key>.h5``, where the workflow builds them)
+# and generated there on a miss.
 
 # %% [markdown]
 # ## Environment bootstrap (Colab vs. local)
@@ -165,12 +165,12 @@ from numpyro.infer import MCMC, NUTS
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
-from astrogwb.paper.catalogs import load_run_catalog
+from astrogwb.paper.catalogs import run_catalog
 from astrogwb.paper.config import fiducials as committed_fiducials
 from astrogwb.paper.config import networks as committed_networks
 from astrogwb.paper.config import priors as committed_priors
 from astrogwb.paper.config.mcmc import build_run_config
-from astrogwb.paper.config.runs import assemble_run
+from astrogwb.paper.config.runs import CATALOGS_ROOT, assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.sampling import gwb_spectral_density_model
@@ -187,17 +187,13 @@ azp.style.use("arviz-variat")
 # %%
 # --- Catalog input ---------------------------------------------------------
 
+# The content-addressed catalog cache: a catalog lives at <key>.h5, and one
+# missing here is generated and saved on first use.
 if IN_COLAB:
-    INJECTION_CATALOG_PATH = Path(
-        "/content/drive/MyDrive/asgwb/md-imrphenom-s41-n32768.h5"
-    )
-    PROPOSAL_CATALOG_PATH = Path(
-        "/content/drive/MyDrive/asgwb/md-imrphenom-s42-n16384.h5"
-    )
+    CATALOG_DIR = Path("/content/drive/MyDrive/asgwb/catalogs")
 else:
     ROOT_DIR = Path()
-    INJECTION_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s41-n32768.h5"
-    PROPOSAL_CATALOG_PATH = ROOT_DIR / "outputs/catalogs/md-imrphenom-s42-n16384.h5"
+    CATALOG_DIR = ROOT_DIR / CATALOGS_ROOT
 
 # The run whose catalog composition this notebook reproduces. It used to be a
 # default buried in `config.figures.load_injection_spec`; naming it here makes
@@ -252,12 +248,12 @@ fixed_params = {k: v for k, v in fiducials.items() if k not in sampled_params}
 
 # %%
 # The two catalogs come from a run's own config layers, merged here the same
-# way the workflow merges them, so the notebook composes exactly what that run
-# composes. `assemble_run` addresses a run by name -- the workflow passes the
-# same layers on argv instead, but neither reads an intermediate artifact.
+# way the workflow merges them, so the notebook samples against exactly the
+# files that run does: each role resolves to a request, and its key names the
+# file in the cache.
 RUN_CONFIG = build_run_config(assemble_run(*REFERENCE_RUN))
-injection_catalog = load_run_catalog(INJECTION_CATALOG_PATH, label="injection")
-proposal_catalog = load_run_catalog(PROPOSAL_CATALOG_PATH, label="proposal")
+injection_catalog = run_catalog(*REFERENCE_RUN, "injection", cache_dir=CATALOG_DIR)
+proposal_catalog = run_catalog(*REFERENCE_RUN, "proposal", cache_dir=CATALOG_DIR)
 
 # The frequency band and redshift support stay the notebook's own knobs rather
 # than the reference run's, so the settings cell above stays live -- they are
@@ -519,8 +515,10 @@ inference_data = azb.from_numpyro(mcmc)
 inference_data.to_netcdf(out_dir / f"{base}.nc")
 
 run_config = {
-    "injection_catalog_path": str(INJECTION_CATALOG_PATH),
-    "proposal_catalog_path": str(PROPOSAL_CATALOG_PATH),
+    "catalogs": {
+        role: RUN_CONFIG.catalog_request(role).key()
+        for role in ("injection", "proposal")
+    },
     "detectors": list(detnames),
     "seed": seed,
     "observation_time": observation_time,

@@ -7,11 +7,10 @@ not re-exported; import them explicitly.
 What this package *does* expose is the three shared tables that
 ``config/fiducials.json``, ``config/priors.json`` and ``config/networks.json``
 own -- the same bytes the workflow merges into every run -- plus the three
-accessors that build something from a shared catalog layer:
+accessors that build something from the catalog defaults every run inherits:
 :func:`waveform_generator` from ``config/waveform.json``, and
 :func:`population_model` / :func:`population_metadata` from
-``config/population.json``. Those two files are catalog layers, not run layers;
-``config/fiducials.json`` is both.
+``config/population.json``.
 Before the tables lived here, the notebook and the figure scripts each kept a
 hand-written copy, and those copies drifted: the notebook sampled
 ``local_merger_rate`` under a prior that excluded its own fiducial. Consume
@@ -24,8 +23,8 @@ them from here instead::
     generator = waveform_generator()
 
 There is deliberately no accessor for the hyperparameters a catalog is drawn
-at: that is :func:`fiducials`, which ``config/catalogs/<name>.json`` inherits
-as a layer like any other. One table, one file.
+at: that is :func:`fiducials`, which a run's catalogs inherit from the run
+itself. One table, one file.
 
 Every accessor also takes keyword overrides, merged over the file, so a
 notebook can vary one entry without editing JSON or retyping the table::
@@ -41,7 +40,7 @@ any working directory but the repository root) and, for the priors, a numpyro
 import on every ``--dry-run``. :func:`priors` therefore imports
 :func:`~astrogwb.paper.config.mcmc.materialize_prior` inside its own body;
 :func:`waveform_generator` imports
-:class:`~astrogwb.paper.config.catalogs.WaveformMetadata` the same way. A
+:class:`~astrogwb.metadata.WaveformMetadata` the same way. A
 subprocess test in ``tests/paper/test_cli.py`` pins both halves.
 
 Paths are relative to the working directory, which for the workflow and every
@@ -187,8 +186,8 @@ def waveform_generator(
     any other name is a Ripple approximant.
 
     The settings are validated through
-    :class:`~astrogwb.paper.config.catalogs.WaveformMetadata` rather than coerced
-    field by field here, so this accessor and a catalog def reach a generator
+    :class:`~astrogwb.metadata.WaveformMetadata` rather than coerced
+    field by field here, so this accessor and a catalog request reach a generator
     down the same path and an override is checked instead of trusted.
 
     Imported here, not at module scope: ``catalogs`` reaches pydantic and
@@ -214,7 +213,7 @@ def population_model(root: Path | None = None, **kwargs: float) -> Population:
         population_model(n_grid=256, minimum_redshift=0.3)
 
     A key the named population does not take raises here rather than being
-    filtered away, which is the same contract a catalog def gets.
+    filtered away, which is the same contract a catalog request gets.
 
     Imports the registry in its own body: populating it means importing the
     population models, which reaches JAX, so this is not safe to call before
@@ -235,13 +234,12 @@ def population_metadata(
 
     ``seed`` is required and has no entry in the file: the shared layer declares
     the population, while a particular draw of it declares the seed -- which is
-    why ``config/catalogs/<name>.json`` carries one and
+    why each role in a run's ``[analysis.catalog]`` carries one and
     ``config/population.json`` does not.
 
     Keyword arguments override ``model_kwargs``, validated rather than trusted,
-    so this accessor and
-    :class:`~astrogwb.paper.config.catalogs.CatalogDefinition` reach a record
-    down the same path. An already-built record is re-derived with
+    so this accessor and :class:`~astrogwb.metadata.CatalogRequest` reach a
+    record down the same path. An already-built record is re-derived with
     :meth:`~astrogwb.metadata.PopulationMetadata.with_model_kwargs`.
 
     Imports the registry in its own body, and is not safe to call before

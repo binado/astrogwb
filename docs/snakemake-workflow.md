@@ -10,18 +10,17 @@ for real unless it is passed).
 All commands run with the repository root as their working directory.
 Source inputs live under `config/`; generated artifacts live under `outputs/`.
 
-The Snakefile computes its own inputs by globbing that tree --
-`discover_catalog_names()` over `config/catalogs/*.json` and `discover_runs()`
-over `config/runs/*/` -- and imports only the path and merge helpers from
-`astrogwb.paper.config.runs`, because a run's catalog names are known only
-after its layers are merged. No registry file translates a name into a path.
+The Snakefile computes its own inputs from that tree: `discover_runs()` globs
+`config/runs/*/`, and `resolve_run_catalogs()` resolves every run's two
+`[analysis.catalog]` roles into keyed requests, because what a run draws is
+known only after its layers are merged. No registry file translates a name into
+a path.
 
 ## Catalog workflow
 
-Catalog configs are committed in [`config/catalogs/`](../config/catalogs/):
-one `<name>.json` per catalog over the shared `config/waveform.json`,
-`config/population.json` and `config/fiducials.json` layers. Build all
-catalogs before running experiments:
+Catalogs are content-addressed: each distinct request any run makes is one
+`outputs/catalogs/<key>.h5`, and runs asking for the same draw share it. Build
+all of them before running experiments:
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
@@ -30,34 +29,32 @@ snakemake --snakefile Snakefile --cores 1 \
   --allowed-rules waveform_catalog catalogs catalogs
 ```
 
-Or build individual catalogs:
+Or build individual catalogs by key; `just catalogs` lists every key with what
+it draws and which runs use it:
 
 ```bash
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules waveform_catalog --dry-run \
-  outputs/catalogs/md-imrphenom-s41-n32768.h5 \
-  outputs/catalogs/md-imrphenom-s42-n16384.h5
+  --allowed-rules waveform_catalog --dry-run outputs/catalogs/<key>.h5
 ```
 
-One rule does the whole thing: it merges the catalog's config layers with `jq`,
-draws the registered population they name in-process, and generates waveforms
-for those rows. The population is not a workflow node and no longer a file
-either -- the layer list *is* the dependency edge, so editing
-`config/waveform.json`, `config/population.json` or `config/fiducials.json`
-invalidates every catalog. `jq` is therefore a workflow dependency, alongside
-`uv`. All durable
-catalogs live under `outputs/catalogs/`. The `--allowed-rules` filter
-keeps catalog generation explicit. MCMC commands omit these rules, so a missing
-catalog stops MCMC with a
+One rule does the whole thing: it hands `scripts/generate_catalog.py` the
+resolved request as JSON, which draws the registered population in-process and
+generates waveforms for those rows. The rule declares no config inputs: the
+path *is* the request's key, so editing anything a catalog is drawn from --
+`config/waveform.json`, `config/population.json`, `config/fiducials.json`, a
+role's spec, or the `astrogwb` version -- names a new file rather than
+invalidating the old one. `just catalogs --orphans` lists the files left behind.
+The `--allowed-rules` filter keeps catalog generation explicit. MCMC commands
+omit these rules, so a missing catalog stops MCMC with a
 `MissingInputException`.
 
-See [catalog generation](catalog-generation.md) for what a catalog records about
-itself.
+See [catalog generation](catalog-generation.md) for the request, the key, and
+what a catalog records about itself.
 
 ## Experiment workflow
 
 [`config/runs/`](../config/runs/) holds one `_base.json` per experiment and one
-JSON file per run, over the five shared `config/*.json` layers. `run_mcmc`
+JSON file per run, over the seven shared `config/*.json` layers. `run_mcmc`
 declares those layers as its own `input:` and folds them with `jq` into one
 `--<block>` flag per shared block, then writes:
 

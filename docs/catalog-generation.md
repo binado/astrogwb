@@ -2,117 +2,115 @@
 
 A **catalog** is one persisted waveform draw: a population drawn from a
 registered NumPyro model, with its frequency-domain polarization power reduced
-and written to `outputs/catalogs/<name>.h5`. Catalogs are the only expensive
+and written to `outputs/catalogs/<key>.h5`. Catalogs are the only expensive
 artifact in the workflow and the only generated input a run consumes.
 
 There is no separate "bank" any more. Catalogs used to be split in two: banks
 were persisted single-component draws, and a catalog was a cheap in-memory
-prefix or mixture over them, composed at run time from a five-field spec each
-run declared inline. Storing only polarization power made every catalog cheap
-enough to persist, so the composition step, the inline spec, and the
-`--bank NAME=PATH` plumbing all went away. A run names two catalogs; each
-catalog is a file.
+prefix or mixture over them, composed at run time. Storing only polarization
+power made every catalog cheap enough to persist, so the composition step and
+its plumbing went away.
 
-## Filenames are the mapping
+## Catalogs are content-addressed
+
+A run declares *what* each of its two catalogs draws, and the file is named by
+a hash of that declaration:
 
 ```text
-config/catalogs/<name>.json  ->  outputs/catalogs/<name>.h5
+config/runs/<experiment>/<run>.json [analysis.catalog.<role>]
+    -> CatalogRequest  ->  outputs/catalogs/<request.key()>.h5
 ```
 
-No registry translates between them. Adding a catalog means adding a JSON file;
-the `waveform_catalog` rule and the `catalogs` target pick it up by globbing.
+There is no catalog config tree and no name for a catalog. Two runs that ask
+for the same draw resolve to the same key and share one file; a run that
+changes anything about its draw -- a seed, a kwarg, a fiducial -- gets a new
+one. `just catalogs` maps the keys back to what they draw and which runs use
+them.
 
-A catalog config is four layers merged in order -- three shared files, then one
-file per named thing, the same shape a run config has. The shared three sit in
-`config/` beside the run tables rather than in a `base/` subdirectory, and they
-are named rather than globbed, because `config/priors.json`,
-`config/networks.json` and `config/plotting.json` are in that directory too and
-must not enter a catalog merge:
+### What a run declares
 
-1. `config/waveform.json` — the `[waveform]` block every catalog shares.
-   A catalog layer, not a run layer. Only
-   `config/catalogs/md-taylorf2-s41-n32768.json` overrides anything here
-   (the approximant). The stored band matches
-   `config/analysis.json`'s `[analysis]` `minimum_frequency` and
-   `maximum_frequency`: the
-   catalog grid *is* the array every model is evaluated on, and a run's band
-   selects bins on it with a mask rather than compressing it.
-   `sampling_frequency` is the waveform backend's Nyquist, not the stored grid.
-   `approximant="AnalyticInspiral"` selects the closed-form inspiral, and is the only
-   approximant accepting the optional `alpha` key (the inspiral termination
-   constant, defaulting to the Schwarzschild ISCO value); naming it alongside a
-   Ripple approximant is rejected. `WaveformMetadata.build()` constructs the
-   generator, and `astrogwb.paper.config.waveform_generator()` is the same path
-   for a notebook reading this file directly.
-2. `config/population.json` — the population every catalog is drawn from:
-   `model_name`, a key in the `astrogwb.populations` registry, and
-   `model_kwargs`, the construction settings bound into it. Those two keys are
-   exactly `PopulationMetadata`'s configurable half, so the block validates
-   straight into the record the `.h5` persists. It declares no `seed`: a seed
-   belongs to a particular draw rather than to the shared layer.
-3. `config/fiducials.json` — the hyperparameters the draw is made at. The same
-   table the runs initialize at, stated once. It used to be restated as a
-   `[population.params]` block here, which was an exact copy of the eight
-   fiducials a source model reads; the copy is gone. The propagation entries
-   `xi_0` / `xi_n` ride along and are inert during generation, because a source
-   model indexes `params` by name and the GR population never reads them —
-   `xi_0 = 1.0` is the value the injection is drawn at, so recording it is
-   accurate rather than misleading.
-4. `config/catalogs/<name>.json` — the seed, the sample count, and any
-   population or waveform override. Nothing else: `CatalogDefinition` is
-   `extra="forbid"`, so what each committed catalog is *for* is documented in
-   [`config/catalogs/README.md`](../config/catalogs/README.md) rather than in a
-   field that would rot separately from it.
-
-The cost of sourcing the hyperparameters from `config/fiducials.json` is that
-editing *any* fiducial now invalidates all nine catalogs — GPU jobs — including
-an edit to the analysis-only `xi_0` / `xi_n`. That is the price of the two
-tables being one: while they were separate, keeping them in step was a manual
-two-file discipline that nothing checked. A def that wants an injection away
-from the fiducials overrides the `[fiducials]` block like any other layer, so
-the freedom the separate table provided is preserved rather than lost.
-
-All three shared layers are declared as workflow inputs of every catalog, so
-editing any of them correctly invalidates all of them.
-
-The eight committed catalogs — what each is for, and which experiment needs it
-— are listed in [`config/catalogs/README.md`](../config/catalogs/README.md),
-next to the files themselves. There is one inventory, not two.
-
-`seed` and `num_samples` are catalog-level, not population-level: `s41` and
-`s42` are the *same* population drawn twice, so pushing either into the shared
-population layer would mean near-identical layer files. `CatalogDefinition`
-folds the seed into the population record during validation, which is where it
-belongs once a particular draw exists.
-
-## The population is a registered model
-
-A def names a population by its key in the `astrogwb.populations` registry, and
-supplies the construction kwargs it takes:
+Each role in `[analysis.catalog]` is a partial spec. `seed` and `num_samples`
+belong to the draw and are always stated; everything else is inherited from the
+run's own blocks, and a role overrides only what differs:
 
 ```json
-{
-  "num_samples": 16384,
-  "seed": 61,
-  "population": {
-    "model_name": "bns_md_uniform_mixture",
-    "model_kwargs": {
-      "uniform_mixing_fraction": 0.1
+"catalog": {
+  "injection": {"seed": 41, "num_samples": 32768},
+  "proposal": {
+    "seed": 61,
+    "num_samples": 16384,
+    "population": {
+      "model_name": "bns_md_uniform_mixture",
+      "model_kwargs": {"uniform_mixing_fraction": 0.1}
     }
   }
 }
 ```
 
-The redshift window and grid resolution are inherited from
+The inherited blocks are three run layers:
+
+1. `config/waveform.json` — the `[waveform]` settings every catalog shares.
+   Only `waveform-approximant/TaylorF2` overrides anything here (the
+   approximant). The stored band matches `config/analysis.json`'s
+   `minimum_frequency` and `maximum_frequency`: the catalog grid *is* the array
+   every model is evaluated on, and a run's band selects bins on it with a mask
+   rather than compressing it. `sampling_frequency` is the waveform backend's
+   Nyquist, not the stored grid. `approximant="AnalyticInspiral"` selects the
+   closed-form inspiral, and is the only approximant accepting the optional
+   `alpha` key (the inspiral termination constant, defaulting to the
+   Schwarzschild ISCO value); naming it alongside a Ripple approximant is
+   rejected. `astrogwb.paper.config.waveform_generator()` builds the same
+   generator for a notebook.
+2. `config/population.json` — the population a catalog is drawn from unless a
+   role overrides it: `model_name`, a key in the `astrogwb.populations`
+   registry, and `model_kwargs`, the construction settings bound into it. This
+   top-level `[population]` is the *draw* default; the analysis target is
+   `analysis.population`, a separate block. It declares no `seed`.
+3. `config/fiducials.json` — the hyperparameters the draw is made at: the run's
+   own merged `[fiducials]`, so the injection is drawn at exactly the values the
+   run initializes at. `time-delay` sets `delay_slope = -1` once, as a run
+   fiducial, and its injection inherits it.
+
+Overrides are recursive merges, so a guarded proposal that names another
+population keeps the shared redshift window and grid and adds the one setting
+it takes. `astrogwb.paper.config.runs.resolve_catalog_blocks` is the one
+implementation of that resolution; the workflow, `RunConfig.catalog_request`
+and the notebooks all go through it, and a test pins the workflow's keys and
+`RunConfig`'s agreeing for every run.
+
+Drawing at the run's fiducials has one visible cost: a run-level fiducial
+override also changes the proposal's key, even for a population that never
+reads it. `time-delay`'s proposal is therefore its own copy of the eps = 0.1
+guard catalog. The draws are identical; only the recorded fiducials differ.
+
+### The key, and what invalidates it
+
+`CatalogRequest` (in `astrogwb.metadata`) is the waveform settings, the
+population record with its seed, the fiducials, the sample count, and the
+`astrogwb` version. Its `key()` is the first 16 hex digits of a SHA-256 over
+its canonical JSON. Anything in the request invalidates the file by renaming
+it, so the workflow's catalog rule declares no config inputs at all.
+
+The version is in the key so that *code* changes invalidate catalogs too -- but
+only if it is bumped. **Bump `version` in `pyproject.toml` whenever a change
+alters what a population draw or a waveform generator produces.** Every key
+changes with it, so the next `snakemake catalogs` regenerates everything.
+`just catalogs --orphans` lists the files no run asks for any more.
+
+## The population is a registered model
+
+A catalog names a population by its key in the `astrogwb.populations`
+registry, and supplies the construction kwargs it takes -- the guarded proposal
+above, for example. The redshift window and grid resolution are inherited from
 `config/population.json` and the hyperparameters from `config/fiducials.json`;
 `model_kwargs` is one mapping, deep-merged across layers and passed whole to the
 factory. The population declares its density factors and source outputs.
 
-A def inherits every block it does not name, whether or not the population it
-names reads all of it: this one inherits `[fiducials]` whole,
+A role inherits every block it does not name, whether or not the population it
+names reads all of it: the guard inherits `[fiducials]` whole,
 `local_merger_rate` included, even though `bns_md_uniform_mixture` declares no
-merger rate. [`config/catalogs/README.md`](../config/catalogs/README.md) says
-why that is right for a guard mixture.
+merger rate. That is right for a guard mixture: it is a sampling density, and
+nothing reads a rate off a proposal (see below).
 
 **A registry key, not an import path.** Registry keys change only on purpose;
 module paths move as collateral whenever a module is reorganized, so a
@@ -218,7 +216,7 @@ fraction.
 
 ### Prefix stability across sizes
 
-The three `md-imrphenom-s42-n*` catalogs are generated independently and their
+The three seed-42 `variable-catalog-size` proposals are generated independently and their
 *source parameters* are still exact nested draws, which is what makes
 `variable-catalog-size` a clean series rather than three unrelated runs.
 `Predictive` allocates its per-draw keys with `jax.random.split`, which is
@@ -236,58 +234,42 @@ catalogs are not byte-identical to one another.
 
 ## Generate a catalog
 
-One command does the whole thing — population draw, waveform generation, power
-reduction, write.
-
-Every layer is JSON, so the fold is one `jq` pass into a merged file, and the
-generator is handed blocks read out of it rather than a list of paths:
-
-```bash
-layers="config/waveform.json config/population.json config/fiducials.json \
-  config/catalogs/md-imrphenom-s41-n32768.json"
-merged=outputs/catalogs/md-imrphenom-s41-n32768.merged.json
-
-jq -s 'reduce .[] as $layer ({}; . * $layer)' $layers > "$merged"
-
-uv run --extra paper python scripts/generate_catalog.py \
-  --name md-imrphenom-s41-n32768 \
-  --population "$(jq -c .population "$merged")" \
-  --fiducials "$(jq -c .fiducials "$merged")" \
-  --waveform "$(jq -c .waveform "$merged")" \
-  --seed "$(jq -r .seed "$merged")" \
-  --num-samples "$(jq -r .num_samples "$merged")" \
-  --output outputs/catalogs/md-imrphenom-s41-n32768.h5
-```
-
-`jq`'s `*` is a recursive merge, which is `astrogwb.paper.utils.deep_merge`
-exactly; the catalog layers carry no `[priors]` block, so the shallow-merge rule
-the run path needs never applies here. `tests/paper/test_runs.py` pins the two
-merges agreeing.
-
-The workflow splits those two commands into two rules. `merge_catalog_config`
-owns the fold and declares the layer files; `waveform_catalog` reads five keys
-out of its `temp()` output. Folding once and reading keys, rather than folding
-per flag, is the whole reason the merged file exists — it is a build
-intermediate, not an artifact, and the `.h5` records its own provenance either
-way. `waveform_catalog` refuses to overwrite an existing catalog unless
-`--force` is passed.
-
 Through the workflow, from the repository root:
 
 ```bash
-# every catalog
+# every catalog any run asks for
 snakemake --snakefile Snakefile --cores 1 \
-  --allowed-rules waveform_catalog catalogs --dry-run catalogs
+  --allowed-rules waveform_catalog catalogs catalogs
 
-# one catalog
+# one catalog, by key (`just catalogs` lists them)
 snakemake --snakefile Snakefile --cores 1 --allowed-rules waveform_catalog \
-  outputs/catalogs/md-taylorf2-s41-n32768.h5
+  outputs/catalogs/<key>.h5
 ```
+
+`rule waveform_catalog` hands `scripts/generate_catalog.py` the resolved request
+as JSON and the output path. The script refuses a path whose stem is not the
+request's key, so one draw cannot be filed under another's address, and writes
+atomically so an interrupted job never leaves a partial file.
 
 The `--allowed-rules` filter keeps catalog generation explicit. MCMC commands
 omit these rules, so a missing catalog stops the run with a
-`MissingInputException` rather than silently scheduling hours of waveform
-generation.
+`MissingInputException` rather than silently scheduling waveform generation.
+
+From Python the same generator sits behind a cache lookup:
+
+```python
+from astrogwb.catalog import load_or_generate
+from astrogwb.paper.catalogs import run_catalog
+
+# a committed run's catalog: resolved from its config, generated on a miss
+proposal = run_catalog("variable-proposal-guard", "eps1e-2", "proposal")
+
+# or any request, against any cache directory
+catalog = load_or_generate(request, "outputs/catalogs")
+```
+
+A hit is loaded and checked against the request it was asked for; a miss is
+generated and saved under the request's key.
 
 ## Catalogs record the density that drew them
 
@@ -315,8 +297,9 @@ both callables at once (they hash by identity, so two getters would force a
 recompile on every call).
 
 That is enough to reconstruct the exact map from hyperparameters to source
-density, which is why the run config no longer restates any of it and nothing
-has to be cross-checked. Before this, three partial records described one run —
+density. With the version, it is also enough to reconstruct the request the
+file answers, which is what `run_mcmc` checks each catalog against before
+sampling. Before this, three partial records described one run —
 the merged run TOML, a catalog attribute naming only the *shape* of the
 redshift proposal, and a config object derived from those two — reconciled by
 exact float equality over five hard-coded parameter names. Three more
@@ -343,10 +326,25 @@ what is registered, and a construction setting the population does not take
 raises `TypeError`. It does not serialize a callable or require the analysis
 run configuration.
 
-The format is `astrogwb_catalog_v7`, a direct HDF5 file. Root attributes hold
+The format is `astrogwb_catalog_v8`, a direct HDF5 file. Root attributes hold
 the waveform and population metadata (JSON is used for mappings and ordered
-lists); `frequency`, `polarization_power`, and `source_parameters` are HDF5
-datasets. Earlier formats require regeneration. The recorded density-site and
+lists) and `astrogwb_version`, the package version that generated the arrays;
+`frequency`, `polarization_power`, and `source_parameters` are HDF5
+datasets. Earlier formats require regeneration.
+
+## The catalog cache
+
+A `CatalogRequest` (`astrogwb.metadata`) is everything that determines a
+catalog: the waveform settings, the population record with its seed, the
+hyperparameters and size of the draw, and the `astrogwb` version. Its `key()`
+is a 16-hex-digit SHA-256 of the record's canonical JSON, and
+`astrogwb.catalog.load_or_generate(request, cache_dir)` keeps each catalog at
+`<cache_dir>/<key>.h5`: a miss generates and writes atomically, a hit is loaded
+and checked against the request it was asked for.
+
+The version is in the key so that code changes invalidate the cache -- but
+only if it is bumped. Bump `version` in `pyproject.toml` whenever a change
+alters what a population draw or a waveform generator produces. The recorded density-site and
 source-parameter order is preserved on load and when narrowing the redshift
 window.
 

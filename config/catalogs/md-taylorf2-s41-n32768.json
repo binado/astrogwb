@@ -1,7 +1,0 @@
-{
-  "num_samples": 32768,
-  "seed": 41,
-  "waveform": {
-    "approximant": "TaylorF2"
-  }
-}

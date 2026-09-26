@@ -42,9 +42,24 @@ _MINIMAL_ANALYSIS: dict[str, Any] = {
             "n_grid": 256,
         }
     },
-    "catalog": {"injection": "demo-catalog", "proposal": "demo-catalog"},
+    "catalog": {
+        "injection": {"seed": 1, "num_samples": 8},
+        "proposal": {"seed": 2, "num_samples": 8},
+    },
 }
 _MINIMAL_SAMPLER: dict[str, Any] = {"num_warmup": 2, "num_samples": 4}
+_MINIMAL_WAVEFORM: dict[str, Any] = {
+    "approximant": "AnalyticInspiral",
+    "minimum_frequency": 10.0,
+    "maximum_frequency": 16.0,
+    "reference_frequency": 10.0,
+    "sampling_frequency": 64.0,
+    "frequency_resolution": 2.0,
+}
+_MINIMAL_POPULATION: dict[str, Any] = {
+    "model_name": "bns_md_cosmological",
+    "model_kwargs": {"minimum_redshift": 0.0, "maximum_redshift": 20.0, "n_grid": 64},
+}
 
 
 def write_root_layers(
@@ -55,6 +70,8 @@ def write_root_layers(
     networks: dict[str, list[str]] | None = None,
     priors: dict[str, Any] | None = None,
     sampler: dict[str, Any] | None = None,
+    waveform: dict[str, Any] | None = None,
+    population: dict[str, Any] | None = None,
 ) -> None:
     """Write minimal shared ``config/*.json`` layers into a scratch tree.
 
@@ -76,6 +93,8 @@ def write_root_layers(
         if priors is not None
         else {"H0": {"dist": "Uniform", "kwargs": {"low": 20.0, "high": 140.0}}},
         "sampler": sampler if sampler is not None else _MINIMAL_SAMPLER,
+        "waveform": waveform if waveform is not None else _MINIMAL_WAVEFORM,
+        "population": population if population is not None else _MINIMAL_POPULATION,
     }
     for path in ROOT_LAYERS:
         key = path.stem

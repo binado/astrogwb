@@ -12,8 +12,14 @@
       }
     },
     "catalog": {
-      "injection": "md-imrphenom-s41-n32768",
-      "proposal": "md-imrphenom-s41-n32768"
+      "injection": {
+        "seed": 41,
+        "num_samples": 32768
+      },
+      "proposal": {
+        "seed": 41,
+        "num_samples": 32768
+      }
     }
   }
 }

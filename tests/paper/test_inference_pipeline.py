@@ -802,11 +802,20 @@ def test_a_guard_mixture_catalog_cannot_supply_an_observed_rate() -> None:
 
 
 def test_the_repository_ships_no_proposal_density_config() -> None:
-    """A run names two catalog files; the density is in each file."""
+    """A guard fraction is declared only as what a catalog draws.
+
+    The proposal density the weights divide by is read back off the proposal
+    file; a run states the fraction only in the catalog spec that draws it,
+    never as analysis configuration the weights could consult instead.
+    """
     shared = json.loads(
         (REPO_ROOT / "config/analysis.json").read_text(encoding="utf-8")
     )
 
     assert set(shared["analysis"]["catalog"]) == {"injection", "proposal"}
     for path in sorted((REPO_ROOT / "config/runs").rglob("*.json")):
-        assert "uniform_mixing_fraction" not in path.read_text(encoding="utf-8")
+        layer = json.loads(path.read_text(encoding="utf-8"))
+        analysis = dict(layer.get("analysis", {}))
+        analysis.pop("catalog", None)
+        outside_catalogs = {**layer, "analysis": analysis}
+        assert "uniform_mixing_fraction" not in json.dumps(outside_catalogs), path

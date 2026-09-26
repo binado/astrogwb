@@ -23,10 +23,14 @@ Usage -- one ``--config`` per layer, in merge order, exactly as
         --config config/priors.json \
         --config config/networks.json \
         --config config/sampler.json \
+        --config config/waveform.json \
+        --config config/population.json \
         --config config/runs/cosmological-parameters/_base.json \
         --config config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
-        --injection-catalog outputs/catalogs/md-imrphenom-s41-n32768.h5 \
-        --proposal-catalog outputs/catalogs/md-imrphenom-s42-n16384.h5
+        --injection-catalog outputs/catalogs/<injection key>.h5 \
+        --proposal-catalog outputs/catalogs/<proposal key>.h5
+
+``just catalogs`` prints each run's two keys.
 
 See docs/running-inference.md for the layer tree.
 
@@ -66,14 +70,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [analysis.catalog].injection names.",
+        help="The catalog file answering this run's [analysis.catalog].injection.",
     )
     parser.add_argument(
         "--proposal-catalog",
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file this run's [analysis.catalog].proposal names.",
+        help="The catalog file answering this run's [analysis.catalog].proposal.",
     )
     parser.add_argument(
         "--seed",
@@ -178,10 +182,14 @@ def main(argv: list[str] | None = None) -> None:
     from astrogwb.paper.catalogs import load_run_catalog
 
     injection_catalog = load_run_catalog(
-        args.injection_catalog.resolve(), label="injection"
+        args.injection_catalog.resolve(),
+        request=config.catalog_request("injection"),
+        label="injection",
     )
     proposal_catalog = load_run_catalog(
-        args.proposal_catalog.resolve(), label="proposal"
+        args.proposal_catalog.resolve(),
+        request=config.catalog_request("proposal"),
+        label="proposal",
     )
 
     jax, _ = configure_runtime(

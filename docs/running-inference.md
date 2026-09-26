@@ -9,7 +9,8 @@ against. The layers are the same list the workflow declares as the rule's
 
 ```bash
 LAYERS="config/analysis.json config/fiducials.json config/networks.json \
-  config/priors.json config/sampler.json \
+  config/priors.json config/sampler.json config/waveform.json \
+  config/population.json \
   config/runs/cosmological-parameters/_base.json \
   config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json"
 fold() { jq -s "map(.$1 // {}) | reduce .[] as \$b ({}; . $2 \$b)" $LAYERS; }
@@ -20,8 +21,10 @@ uv run --extra paper python scripts/run_mcmc.py \
   --networks "$(fold networks '*')" \
   --priors "$(fold priors '+')" \
   --sampler "$(fold sampler '*')" \
-  --injection-catalog outputs/catalogs/md-imrphenom-s41-n32768.h5 \
-  --proposal-catalog outputs/catalogs/md-imrphenom-s42-n16384.h5
+  --waveform "$(fold waveform '*')" \
+  --population "$(fold population '*')" \
+  --injection-catalog outputs/catalogs/<injection key>.h5 \
+  --proposal-catalog outputs/catalogs/<proposal key>.h5
 ```
 
 One operator per block is the whole merge rule: `*` (deep) everywhere, `+`
@@ -35,9 +38,11 @@ each block arrives folded, so there is no order left to get wrong. To override
 something for a single invocation, add a layer to `LAYERS` -- the stack is
 open-ended, which is the practical gain over a fixed assembled artifact.
 
-The two catalog roles are fixed, so the files are named flags rather than a
-name-to-path mapping. They are the catalogs the merged config's
-`[analysis.catalog]` block names.
+The two catalog roles are fixed, so the files are named flags. `just catalogs`
+prints each run's two keys. `run_mcmc` resolves the request each role of its
+config asks for and refuses a file that does not record exactly that request,
+so a file handed to the wrong role, or one built before the config changed,
+fails before JAX starts.
 
 `scripts/profile_model.py` still takes a run's layer *paths* as repeated
 `--config` flags -- it merges them in process, as the figure scripts do -- and
@@ -53,7 +58,8 @@ uv run --extra paper python scripts/profile_model.py --help
 three layers merged in order:
 
 ```text
-config/{analysis,fiducials,networks,priors,sampler}.json   the shared values
+config/{analysis,fiducials,networks,priors,sampler,
+        waveform,population}.json                          the shared values
 config/runs/<experiment>/_base.json                        the experiment override
 config/runs/<experiment>/<run>.json                        the run override
   -> outputs/chains/<experiment>/<run>.nc                  the chain
@@ -79,13 +85,16 @@ consume `fiducials`, `priors` and `networks` through `astrogwb.paper.config`.
 | `networks.json` | each detector network, by name |
 | `priors.json` | the prior on every parameter |
 | `sampler.json` | the sampling RNG seed and NUTS defaults |
+| `waveform.json` | the waveform settings every catalog of a run inherits |
+| `population.json` | the population a run's catalogs are drawn from, unless a role overrides it |
 
-Fiducials are **not** the injection: what was injected is recorded in the
-injection catalog file, which is where the observed spectrum's rate and density
-come from. They are where NUTS initializes each sampled parameter, what the
+Fiducials are also the hyperparameters a run's catalogs are drawn at, so the
+injection is drawn at exactly the values NUTS initializes at. What was
+injected is still read back off the injection catalog file, which is where the
+observed spectrum's rate and density come from. Fiducials are where NUTS
+initializes each sampled parameter, what the
 non-sampled sites are conditioned at, and the reference point an
-amplitude-marginalized run forms its ratio against. Nothing cross-checks them
-against a catalog, because nothing needs to. Every fiducial carries a prior;
+amplitude-marginalized run forms its ratio against. Every fiducial carries a prior;
 `RunConfig` retains the complete table and `analysis.sampled_params` selects
 the NUTS latents, leaving the rest to NumPyro effect handlers.
 
@@ -137,25 +146,25 @@ any catalog is built*, and a catalog is a GPU job.
 
 ## Catalogs and the proposal density
 
-Every run names two catalogs, one per role:
+Every run declares its two catalogs, one per role, as partial specs over its
+own `[waveform]`, `[population]` and `[fiducials]` blocks:
 
-```toml
-[analysis.catalog]
-injection = "md-imrphenom-s41-n32768"
-proposal  = "md-imrphenom-s42-n16384"
+```json
+"catalog": {
+  "injection": {"seed": 41, "num_samples": 32768},
+  "proposal": {"seed": 41, "num_samples": 32768}
+}
 ```
 
-That is the whole block, and injection versus proposal is two filenames and
-nothing else. How a catalog was drawn -- its population model, that model's
-construction settings, and the hyperparameters -- lives in
-`config/catalogs/<name>.json` and its shared layers and, once the file exists,
-in the file itself. Never in the run config.
+That is `config/analysis.json`'s default, and a role overrides only what
+differs -- the seed and size, a population, an approximant. Each role resolves
+to a `CatalogRequest`, whose key names the file; see
+[catalog generation](catalog-generation.md).
 
-The default injection catalog -- the "observed" data -- lives in
-`config/analysis.json`. Only `time-delay` overrides it, because its target
-population is not the one the default injection was drawn from. Only
-`variable-catalog-size`, `variable-proposal-guard`, `astrophysical-parameters`,
-`waveform-approximant` and `time-delay` override the proposal catalog.
+Only `time-delay` overrides the injection, because its target population is not
+the one the default injection was drawn from. Only `variable-catalog-size`,
+`variable-proposal-guard`, `astrophysical-parameters`, `waveform-approximant`
+and `time-delay` override the proposal.
 
 The importance-sampling *proposal density* is **not** in the config, and it is
 not derived from the config either. It is the proposal catalog's *own* recorded

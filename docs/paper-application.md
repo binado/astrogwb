@@ -42,30 +42,30 @@ path and does not go looking for a checkout. Committed configuration lives
 under `config/`; generated catalogs, chains, and figures under `outputs/`;
 scheduler and runtime logs under `logs/`.
 
-Filenames are the mapping, so there is no registry file:
+Filenames are the mapping for runs, and catalogs are named by the content
+hash of what a run asks for, so there is no registry file:
 
 ```text
-config/catalogs/<name>.json      ->  outputs/catalogs/<name>.h5
-config/population.json                          [population] every catalog shares
-                                                (a catalog layer; not a run layer)
+config/population.json                          the population a run's catalogs
+                                                are drawn from by default
 config/fiducials.json                           fiducial value of every parameter
-                                                (a run layer AND a catalog layer:
-                                                the values a catalog is drawn at)
+                                                (also the values a run's
+                                                catalogs are drawn at)
 config/priors.json                              prior on every parameter
 config/networks.json                            each detector network, by name
 config/analysis.json                            band, target population, catalogs
 config/sampler.json                             RNG seed and the NUTS defaults
-config/waveform.json                            [waveform] every catalog shares
-                                                (a catalog layer; not a run layer)
+config/waveform.json                            [waveform] a run's catalogs share
 config/plotting.json                            LaTeX labels and savefig settings
                                                 (presentation; not a run layer)
 config/runs/<experiment>/_base.json             the experiment override
 config/runs/<experiment>/<run>.json             the run override
   -> outputs/chains/<experiment>/<run>.nc       the chain
   -> outputs/chains/<experiment>/<run>.json     the config it was sampled with
+  -> outputs/catalogs/<key>.h5                  one per distinct catalog it asks for
 ```
 
-The five shared run layers are one file per top-level block of a run config,
+The seven shared run layers are one file per top-level block of a run config,
 each a single-key object whose key is its own stem. They are JSON so that `jq`
 can fold a block in the shell without importing the package, and three of them
 are read by more than the workflow: the notebooks and figure scripts consume

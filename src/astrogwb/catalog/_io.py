@@ -71,7 +71,7 @@ PARAMETER_NAMES_ATTR = "source_parameter_names"
 # --------------------------------------------------------------------- #
 # Polarization-power catalogs
 # --------------------------------------------------------------------- #
-CATALOG_FORMAT_NAME = "astrogwb_catalog_v7"
+CATALOG_FORMAT_NAME = "astrogwb_catalog_v8"
 CATALOG_DATASETS = ("frequency", "polarization_power", "source_parameters")
 
 #: Measured from the ``frequency`` dataset on write and never read back --
@@ -81,11 +81,15 @@ CATALOG_DATASETS = ("frequency", "polarization_power", "source_parameters")
 DF_ATTR = "df"
 POPULATION_NUM_SAMPLES_ATTR = "population_num_samples"
 POPULATION_PARAMS_ATTR = "population_params"
+#: The package version that generated the arrays. Part of a catalog's cache
+#: key, so a file must say which code produced it; added in v8.
+VERSION_ATTR = "astrogwb_version"
 
 REQUIRED_CATALOG_ATTRS = (
     *POPULATION_ATTRS,
     POPULATION_NUM_SAMPLES_ATTR,
     POPULATION_PARAMS_ATTR,
+    VERSION_ATTR,
 )
 
 
@@ -95,7 +99,7 @@ def save_polarization_power_catalog(
     *,
     compression: str | None = None,
 ) -> None:
-    """Write one catalog in the v7 direct-HDF5 format."""
+    """Write one catalog in the v8 direct-HDF5 format."""
     names, source_parameters = stack_columns(
         catalog.source_parameters, rows=catalog.num_samples
     )
@@ -107,6 +111,7 @@ def save_polarization_power_catalog(
         **catalog.population.to_attrs(),
         POPULATION_NUM_SAMPLES_ATTR: catalog.num_samples,
         POPULATION_PARAMS_ATTR: json.dumps(dict(catalog.fiducials), sort_keys=True),
+        VERSION_ATTR: catalog.version,
         PARAMETER_NAMES_ATTR: json.dumps(names),
     }
     write_h5(
@@ -151,6 +156,7 @@ def load_polarization_power_catalog[C: PolarizationPowerCatalog](
                     name=POPULATION_PARAMS_ATTR,
                 ).items()
             },
+            _version=str(attrs[VERSION_ATTR]),
         )
     population.check_registered()
     return catalog
