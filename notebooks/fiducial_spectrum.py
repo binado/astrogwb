@@ -24,6 +24,7 @@ with app.setup(hide_code=True):
         effective_psd,
         load_sensitivity_map,
         log_frequency_noise_scale,
+        overlap_reduction_function,
     )
     from astrogwb.frequency import frequency_mask as make_frequency_mask
     from astrogwb.frequency import uniform_grid_spacing
@@ -537,6 +538,122 @@ def _(
         plotted_colors = [color for _, color, _ in _kept]
         plotted_linestyles = [linestyle for _, _, linestyle in _kept]
     return plotted_colors, plotted_linestyles, plotted_networks
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Overlap reduction functions
+
+    The frequency-dependent overlap reduction function $\Gamma_{IJ}(f)$
+    measures the geometric reduction in cross-correlation sensitivity between
+    two detectors due to their separation and relative arm orientation.
+
+    The co-located equilateral triangle arms ($E_1$--$E_2$) maintain a constant
+    $\Gamma \approx -3/8$ up to kilohertz frequencies. The $2\mathrm{L}$ baselines
+    between Sardinia and the Netherlands ($S_1$--$R_1$ for aligned, $S_2$--$R_2$
+    for misaligned) provide strong low-frequency overlap ($-0.98$ and $-0.32$,
+    respectively) that falls off above $\sim 50\ \mathrm{Hz}$ over their
+    $\sim 1100\ \mathrm{km}$ separation. Baselines to Cosmic Explorer at Hanford
+    ($C_1$) oscillate rapidly above $\sim 20\ \mathrm{Hz}$ with period
+    $\Delta f \sim c/d \approx 35\ \mathrm{Hz}$.
+    """)
+    return
+
+
+@app.cell
+def _(DETECTOR_COMPARISON_LEGEND, format_axis_ticks, overlap_reduction_function):
+    def plot_overlap_reduction_functions(
+        frequencies: jax.Array | np.ndarray,
+        networks: Sequence[Network],
+        *,
+        colors: Sequence[str],
+        linestyles: Sequence[str],
+        representative_pairs: Mapping[str, tuple[str, str]] | None = None,
+        fmin: float = 2.0,
+        fmax: float = 4096.0,
+    ) -> Figure:
+        """Plot pairwise overlap reduction functions matching the detector networks."""
+        if len(networks) != len(colors) or len(networks) != len(linestyles):
+            raise ValueError("color and linestyle counts must match the networks")
+
+        if representative_pairs is None:
+            representative_pairs = {
+                "ET-triangular": ("E1", "E2"),
+                "ET-triangular-CE-Hanford": ("E1", "C1"),
+                "ET-2L-aligned": ("S1", "R1"),
+                "ET-2L-aligned-CE-Hanford": ("S1", "C1"),
+                "ET-2L-misaligned": ("S2", "R2"),
+                "ET-2L-misaligned-CE-Hanford": ("S2", "C1"),
+            }
+
+        _fig, ax = plt.subplots()
+        freq = np.asarray(frequencies)
+        mask = (freq >= fmin) & (freq <= fmax)
+        freq_in_band = freq[mask]
+
+        legend_handles = []
+        for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
+            if network.name not in representative_pairs:
+                continue
+            det1, det2 = representative_pairs[network.name]
+            orf = overlap_reduction_function(freq_in_band, det1, det2)
+            label = rf"{network.label} (${det1}$--${det2}$)"
+            (line,) = ax.semilogx(
+                freq_in_band,
+                orf,
+                color=color,
+                linestyle=linestyle,
+                label=label,
+            )
+            legend_handles.append(line)
+
+        ax.axhline(0.0, color="0.7", linestyle=":", linewidth=0.8)
+        ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+        ax.set_ylabel(r"$\Gamma(f)$")
+        ax.set_xlim(fmin, fmax)
+        ax.set_ylim(-1.05, 0.7)
+        ax.set_axisbelow(True)
+        ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+        format_axis_ticks(ax)
+        ax.legend(
+            handles=legend_handles,
+            **DETECTOR_COMPARISON_LEGEND,
+        )
+        _fig.tight_layout()
+        return _fig
+
+    return (plot_overlap_reduction_functions,)
+
+
+@app.cell
+def _(
+    BASE_DIR,
+    ROOT_DIR,
+    frequencies,
+    maximum_frequency,
+    minimum_frequency,
+    plot_overlap_reduction_functions,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks,
+    write_figures,
+):
+    _fig = plot_overlap_reduction_functions(
+        frequencies,
+        plotted_networks,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
+        fmin=minimum_frequency,
+        fmax=maximum_frequency,
+    )
+    if write_figures:
+        save_figures(
+            {BASE_DIR / "overlap_reduction_functions.pdf": _fig},
+            root=ROOT_DIR,
+        )
+    _fig
+    return
 
 
 @app.cell(hide_code=True)
