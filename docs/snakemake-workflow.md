@@ -55,8 +55,9 @@ what a catalog records about itself.
 
 [`config/runs/`](../config/runs/) holds one `_base.json` per experiment and one
 JSON file per run, over the seven shared `config/*.json` layers. `run_mcmc`
-declares those layers as its own `input:` and folds them with `jq` into one
-`--<block>` flag per shared block, then writes:
+declares those layers as its own `input:` and passes them, in merge order, as
+repeated `--config` flags; the script merges them in process with `knf`, then
+writes:
 
 ```text
 outputs/chains/<experiment>/<run>.nc      the chain (protected)

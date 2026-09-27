@@ -2,10 +2,9 @@
 
 ## Ad-hoc runs
 
-`scripts/run_mcmc.py` takes one flag per config block -- each already folded
-across the layers that declare it -- plus the two catalog files it samples
-against. The layers are the same list the workflow declares as the rule's
-`input:`, and `jq` does the folding:
+`scripts/run_mcmc.py` takes the run's config layers, one `--config` flag per
+file in merge order, plus the two catalog files it samples against. The layers
+are the same list the workflow declares as the rule's `input:`:
 
 ```bash
 LAYERS="config/analysis.json config/fiducials.json config/networks.json \
@@ -13,30 +12,29 @@ LAYERS="config/analysis.json config/fiducials.json config/networks.json \
   config/population.json \
   config/runs/cosmological-parameters/_base.json \
   config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json"
-fold() { jq -s "map(.$1 // {}) | reduce .[] as \$b ({}; . $2 \$b)" $LAYERS; }
 
 uv run --extra paper python scripts/run_mcmc.py \
-  --analysis "$(fold analysis '*')" \
-  --fiducials "$(fold fiducials '*')" \
-  --networks "$(fold networks '*')" \
-  --priors "$(fold priors '+')" \
-  --sampler "$(fold sampler '*')" \
-  --waveform "$(fold waveform '*')" \
-  --population "$(fold population '*')" \
+  $(for layer in $LAYERS; do printf -- '--config %s ' "$layer"; done) \
   --injection-catalog outputs/catalogs/<injection key>.h5 \
   --proposal-catalog outputs/catalogs/<proposal key>.h5
 ```
 
-One operator per block is the whole merge rule: `*` (deep) everywhere, `+`
-(shallow) for `priors`. Both spellings of that rule --
-`astrogwb.paper.config.runs.BLOCK_FOLDS` for the shell and
-`merge_config_layers` for Python -- live in one module, and a test pins them
-against each other over every run.
+The merge is `astrogwb.paper.config.runs.merge_config_layers`, which hands the
+layers to `knf` (pyknf): a deep merge left to right, arrays and scalars
+replacing, except that each `priors.<param>` table replaces the inherited one
+wholesale (`PRIOR_SHALLOW = "priors.*"`), so a Normal prior never inherits a
+Uniform's `low` / `high`. The `knf` CLI is the same engine, so this prints
+exactly the config the run will validate:
 
-Blocks rather than paths is why merge order is no longer yours to get right:
-each block arrives folded, so there is no order left to get wrong. To override
-something for a single invocation, add a layer to `LAYERS` -- the stack is
-open-ended, which is the practical gain over a fixed assembled artifact.
+```bash
+uv run --extra paper knf $LAYERS --shallow 'priors.*'
+```
+
+Merge order is yours to get right, and a wrong-but-valid order fails silently,
+so `run_mcmc` logs it; the workflow builds it from `run_config_paths`. To
+override something for a single invocation, add a layer to `LAYERS` -- the
+stack is open-ended, which is the practical gain over a fixed assembled
+artifact.
 
 The two catalog roles are fixed, so the files are named flags. `just catalogs`
 prints each run's two keys. `run_mcmc` resolves the request each role of its
@@ -73,9 +71,8 @@ complicates the DAG for no gain. What each committed run is *for* is documented
 in [`config/runs/README.md`](../config/runs/README.md), next to the files.
 
 The shared layers are **one file per top-level block of a run config, each a
-single-key object whose key is its own stem**. That is what lets `run_mcmc`
-take one flag per block, and what lets `jq` fold a block in the shell. Three of
-them are read by more than the workflow: the notebooks and figure scripts
+single-key object whose key is its own stem**, so a block has one home and
+its file is named after it. Three of them are read by more than the workflow: the notebooks and figure scripts
 consume `fiducials`, `priors` and `networks` through `astrogwb.paper.config`.
 
 | File | Owns |
