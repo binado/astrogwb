@@ -250,7 +250,7 @@ def population_metadata(
     ``config/population.json`` does not.
 
     Keyword arguments override ``model_kwargs``, validated rather than trusted,
-    so this accessor and :class:`~astrogwb.metadata.CatalogRequest` reach a
+    so this accessor and :class:`~astrogwb.metadata.CatalogMetadata` reach a
     record down the same path. An already-built record is re-derived with
     :meth:`~astrogwb.metadata.PopulationMetadata.with_model_kwargs`.
 

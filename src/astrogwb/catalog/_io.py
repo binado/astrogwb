@@ -105,15 +105,16 @@ def save_polarization_power_catalog(
     names, source_parameters = stack_columns(
         catalog.source_parameters, rows=catalog.num_samples
     )
+    metadata = catalog.metadata
     attrs: dict[str, str | int | float] = {
         FORMAT_NAME_ATTR: CATALOG_FORMAT_NAME,
         "domain": DOMAIN_FREQUENCY,
-        **catalog.waveform_metadata.to_attrs(),
+        **metadata.waveform.to_attrs(),
         DF_ATTR: catalog.df,
-        **catalog.population.to_attrs(),
-        POPULATION_NUM_SAMPLES_ATTR: catalog.num_samples,
-        POPULATION_PARAMS_ATTR: json.dumps(dict(catalog.fiducials), sort_keys=True),
-        VERSION_ATTR: catalog.version,
+        **metadata.population.to_attrs(),
+        POPULATION_NUM_SAMPLES_ATTR: metadata.num_samples,
+        POPULATION_PARAMS_ATTR: json.dumps(metadata.fiducials, sort_keys=True),
+        VERSION_ATTR: metadata.version,
         PARAMETER_NAMES_ATTR: json.dumps(names),
     }
     write_h5(
@@ -140,25 +141,31 @@ def load_polarization_power_catalog[C: PolarizationPowerCatalog](
             attrs[PARAMETER_NAMES_ATTR], label=label, name=PARAMETER_NAMES_ATTR
         )
         population = PopulationMetadata.from_attrs(attrs, label=label)
+        power = np.asarray(handle["polarization_power"])
+        try:
+            metadata = CatalogMetadata(
+                waveform=WaveformMetadata.from_attrs(attrs, label=label),
+                population=population,
+                fiducials={
+                    name: float(value)
+                    for name, value in json_object_attr(
+                        attrs[POPULATION_PARAMS_ATTR],
+                        label=label,
+                        name=POPULATION_PARAMS_ATTR,
+                    ).items()
+                },
+                num_samples=int(power.shape[1]),
+                version=str(attrs[VERSION_ATTR]),
+            )
+        except ValidationError as error:
+            raise ValueError(f"{label}: invalid catalog metadata: {error}") from error
         catalog = cls(
             source_parameters=unstack_columns(
                 np.asarray(handle["source_parameters"]), names
             ),
-            polarization_power=np.asarray(handle["polarization_power"]),
+            polarization_power=power,
             frequencies=np.asarray(handle["frequency"]),
-            _metadata=CatalogMetadata(
-                waveform=WaveformMetadata.from_attrs(attrs, label=label),
-                population=population,
-            ),
-            _fiducials={
-                name: float(value)
-                for name, value in json_object_attr(
-                    attrs[POPULATION_PARAMS_ATTR],
-                    label=label,
-                    name=POPULATION_PARAMS_ATTR,
-                ).items()
-            },
-            _version=str(attrs[VERSION_ATTR]),
+            _metadata=metadata,
         )
     population.check_registered()
     return catalog

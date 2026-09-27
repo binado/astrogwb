@@ -1,18 +1,22 @@
-"""Generate one waveform catalog from its resolved request.
+"""Generate one waveform catalog from its resolved metadata.
 
 The workflow's ``waveform_catalog`` rule is the caller: every run's
 ``[analysis.catalog]`` roles are resolved into
-:class:`~astrogwb.metadata.CatalogRequest` records when the DAG is built, and
-each distinct request becomes one job writing ``outputs/catalogs/<key>.h5``.
-This script is handed that request as JSON, generates it with
-:func:`astrogwb.catalog.generate`, and writes it atomically.
+:class:`~astrogwb.metadata.CatalogMetadata` records when the DAG is built, and
+each distinct record becomes one job writing ``outputs/catalogs/<key>.h5``.
+This script is handed that record as JSON and builds it with
+:func:`astrogwb.catalog.simulate` and a
+:class:`~astrogwb.catalog.CatalogGenerator`, which writes it atomically.
 
-The output's stem must be the request's key. The workflow names the file and
-the request separately, so this is where a mismatch between the two -- which
-would file one draw under another's address -- is refused.
+The output must be the record's :func:`~astrogwb.metadata.artifact_path` in
+its own directory. The workflow names the file and the record separately, so
+this is where a mismatch between the two -- which would file one draw under
+another's address -- is refused. An output that already exists is a cache hit:
+it is checked against the record and left alone, unless ``--force`` asks for it
+to be drawn again.
 
-Outside the workflow, :func:`astrogwb.catalog.load_or_generate` is the same
-generator behind a cache lookup, and needs no script.
+Outside the workflow, :func:`astrogwb.catalog.simulate` is the whole thing, and
+needs no script.
 
 Usage::
 
@@ -30,17 +34,17 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from astrogwb.catalog import generate, save_atomically
-from astrogwb.metadata import CatalogRequest
+from astrogwb.catalog import CatalogGenerator, simulate
+from astrogwb.metadata import CatalogMetadata, artifact_path
 from astrogwb.paper.config.catalogs import check_population_model
 
 logger = logging.getLogger(__name__)
 
 
-def _request(raw: str) -> CatalogRequest:
-    """Parse and validate the request off argv."""
+def _request(raw: str) -> CatalogMetadata:
+    """Parse and validate the catalog metadata off argv."""
     try:
-        return CatalogRequest.model_validate_json(raw)
+        return CatalogMetadata.model_validate_json(raw)
     except ValidationError as error:
         raise argparse.ArgumentTypeError(f"invalid catalog request: {error}") from None
 
@@ -50,7 +54,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description=(
             "Draw a BNS population from its registered NumPyro model, generate "
             "frequency-domain waveforms, and persist the polarization power as "
-            "an astrogwb_catalog HDF5 file named by the request's key."
+            "an astrogwb_catalog HDF5 file named by its metadata's key."
         )
     )
     parser.add_argument(
@@ -58,18 +62,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         required=True,
         type=_request,
         metavar="JSON",
-        help="The resolved CatalogRequest, as JSON.",
+        help="The resolved CatalogMetadata, as JSON.",
     )
     parser.add_argument(
         "--output",
         type=Path,
         required=True,
-        help="Destination .h5; its stem must be the request's key.",
+        help="Destination .h5; its stem must be the metadata's key.",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Replace an existing output catalog.",
+        help="Draw an existing output catalog again instead of reusing it.",
     )
     return parser.parse_args(argv)
 
@@ -80,38 +84,35 @@ def main(argv: Sequence[str] | None = None) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
     args = parse_args(argv)
-    request: CatalogRequest = args.request
+    metadata: CatalogMetadata = args.request
     output_path = args.output.expanduser().resolve()
-    if output_path.stem != request.key():
+    cache_dir = output_path.parent
+    if output_path != artifact_path(metadata, cache_dir):
         raise ValueError(
-            f"output {output_path.name} is not named by the request's key "
-            f"{request.key()}"
-        )
-    if output_path.exists() and not args.force:
-        raise FileExistsError(
-            f"refusing to replace existing catalog: {output_path}. "
-            "Pass --force only for an intentional replacement."
+            f"output {output_path.name} is not named by the metadata's key "
+            f"{metadata.key()}"
         )
 
-    population = request.metadata.population
+    population = metadata.population
     check_population_model(
         population.model_name,
-        label=f"catalog {request.key()} population.model_name",
+        label=f"catalog {metadata.key()} population.model_name",
         kwargs=population.model_kwargs,
     )
-    catalog = generate(request)
-    save_atomically(catalog, output_path)
+    if args.force:
+        output_path.unlink(missing_ok=True)
+    catalog = simulate(metadata, CatalogGenerator(), cache_dir)
 
     logger.info(
-        "Saved catalog %s: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",
-        request.key(),
+        "Catalog %s: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",
+        metadata.key(),
         catalog.num_samples,
         catalog.frequencies.size,
         catalog.frequencies[0].item(),
         catalog.frequencies[-1].item(),
-        request.metadata.waveform.approximant,
+        metadata.waveform.approximant,
     )
-    logger.info("Output written to %s", output_path)
+    logger.info("Catalog at %s", output_path)
 
 
 if __name__ == "__main__":

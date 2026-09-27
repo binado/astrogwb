@@ -138,6 +138,10 @@ def make_catalog(
                 model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
                 seed=seed,
             ),
+            fiducials={
+                name: float(value)
+                for name, value in (fiducials or PAPER_POPULATION_PARAMS).items()
+            },
+            num_samples=int(np.shape(polarization_power)[1]),
         ),
-        _fiducials=dict(fiducials or PAPER_POPULATION_PARAMS),
     )

@@ -125,8 +125,9 @@ def _catalog(
                 model_kwargs=MODEL_KWARGS,
                 seed=MOCK_POPULATION_SEED,
             ),
+            fiducials={name: float(value) for name, value in params.items()},
+            num_samples=int(power.shape[1]),
         ),
-        _fiducials=params,
     )
 
 

@@ -2,6 +2,7 @@ import re
 import shlex
 from pathlib import Path
 
+from astrogwb.metadata import artifact_path
 from astrogwb.paper.config.catalogs import resolve_run_catalogs
 from astrogwb.paper.config.runs import (
     BLOCK_FOLDS,
@@ -12,8 +13,9 @@ from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
 # No config module imports JAX or matplotlib at module scope, so DAG
 # construction stays cheap. Keying the catalogs does reach pydantic -- the key
-# is taken over a validated request -- which is the price of there being one
-# canonical form.
+# is taken over a validated CatalogMetadata -- which is the price of there
+# being one canonical form. `artifact_path` lives in astrogwb.metadata, not
+# astrogwb.catalog, for the same reason.
 
 
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
@@ -22,13 +24,19 @@ CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 
 
 def catalog_path(key: str) -> str:
-    return str(CATALOGS_DIR / f"{key}.h5")
+    """The file a catalog key names: where `simulate` caches its metadata."""
+    return str(artifact_path(run_catalogs.requests[key], CATALOGS_DIR))
+
+
+#: `artifact_path` with the key left as the rule's wildcard; `generate_catalog`
+#: refuses any output that is not the artifact path of the metadata it is given.
+CATALOG_PATTERN = str(CATALOGS_DIR / "{catalog}.h5")
 
 
 # Filenames are the mapping for runs: config/runs/<experiment>/<run>.json ->
 # outputs/chains/<experiment>/<run>.nc. Catalogs are content-addressed instead:
-# each run's [analysis.catalog] roles resolve to a request, and the request's
-# key names outputs/catalogs/<key>.h5. Two runs asking for the same draw share
+# each run's [analysis.catalog] roles resolve to a CatalogMetadata, and its key
+# names outputs/catalogs/<key>.h5. Two runs asking for the same draw share
 # one file, and any edit to a draw -- or a bump of the astrogwb version -- names
 # a new one, so the catalog rule needs no config inputs to rebuild correctly.
 runs = discover_runs()
@@ -139,7 +147,7 @@ def run_catalog_input(role):
 
 
 def catalog_request(wildcards):
-    """The request behind one catalog key, as the JSON the generator takes."""
+    """The metadata behind one catalog key, as the JSON the generator takes."""
     return run_catalogs.requests[wildcards.catalog].model_dump_json()
 
 
@@ -170,15 +178,15 @@ localrules:
 rule waveform_catalog:
     """Population draw + waveform generation, in one process.
 
-    The output path is the request's key, so the rule declares no config
+    The output path is the metadata's key, so the rule declares no config
     inputs: an edit that changes what a run asks for changes the key, and with
     it the file, rather than invalidating this one. The generator re-derives
-    the key from the request it is handed and refuses a path that disagrees.
+    the key from the metadata it is handed and refuses a path that disagrees.
     """
     input:
         script="scripts/generate_catalog.py",
     output:
-        catalog_path("{catalog}"),
+        CATALOG_PATTERN,
     params:
         request=catalog_request,
     shell:

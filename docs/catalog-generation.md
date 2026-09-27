@@ -18,7 +18,7 @@ a hash of that declaration:
 
 ```text
 config/runs/<experiment>/<run>.json [analysis.catalog.<role>]
-    -> CatalogRequest  ->  outputs/catalogs/<request.key()>.h5
+    -> CatalogMetadata  ->  outputs/catalogs/<metadata.key()>.h5
 ```
 
 There is no catalog config tree and no name for a catalog. Two runs that ask
@@ -85,11 +85,15 @@ guard catalog. The draws are identical; only the recorded fiducials differ.
 
 ### The key, and what invalidates it
 
-`CatalogRequest` (in `astrogwb.metadata`) is the waveform settings, the
+`CatalogMetadata` (in `astrogwb.metadata`) is the waveform settings, the
 population record with its seed, the fiducials, the sample count, and the
 `astrogwb` version. Its `key()` is the first 16 hex digits of a SHA-256 over
-its canonical JSON. Anything in the request invalidates the file by renaming
+its canonical JSON. Anything in the record invalidates the file by renaming
 it, so the workflow's catalog rule declares no config inputs at all.
+
+The record used to be called `CatalogRequest` and nested the waveform and
+population under a `metadata` field. `key()` still hashes that nested shape,
+so flattening it renamed no file.
 
 The version is in the key so that *code* changes invalidate catalogs too -- but
 only if it is bumped. **Bump `version` in `pyproject.toml` whenever a change
@@ -246,30 +250,31 @@ snakemake --snakefile Snakefile --cores 1 --allowed-rules waveform_catalog \
   outputs/catalogs/<key>.h5
 ```
 
-`rule waveform_catalog` hands `scripts/generate_catalog.py` the resolved request
-as JSON and the output path. The script refuses a path whose stem is not the
-request's key, so one draw cannot be filed under another's address, and writes
-atomically so an interrupted job never leaves a partial file.
+`rule waveform_catalog` hands `scripts/generate_catalog.py` the resolved
+`CatalogMetadata` as JSON and the output path. The script refuses a path that
+is not the metadata's `artifact_path`, so one draw cannot be filed under
+another's address, then calls `simulate`, which writes atomically so an
+interrupted job never leaves a partial file.
 
 The `--allowed-rules` filter keeps catalog generation explicit. MCMC commands
 omit these rules, so a missing catalog stops the run with a
 `MissingInputException` rather than silently scheduling waveform generation.
 
-From Python the same generator sits behind a cache lookup:
+From Python the same generator sits behind the same cache:
 
 ```python
-from astrogwb.catalog import load_or_generate
+from astrogwb.catalog import CatalogGenerator, simulate
 from astrogwb.paper.catalogs import run_catalog
 
 # a committed run's catalog: resolved from its config, generated on a miss
 proposal = run_catalog("variable-proposal-guard", "eps1e-2", "proposal")
 
-# or any request, against any cache directory
-catalog = load_or_generate(request, "outputs/catalogs")
+# or any CatalogMetadata, against any cache directory
+catalog = simulate(metadata, CatalogGenerator(), "outputs/catalogs")
 ```
 
-A hit is loaded and checked against the request it was asked for; a miss is
-generated and saved under the request's key.
+A hit is loaded and checked against the metadata it was asked for; a miss is
+generated and saved under the metadata's key.
 
 ## Catalogs record the density that drew them
 
@@ -297,9 +302,9 @@ both callables at once (they hash by identity, so two getters would force a
 recompile on every call).
 
 That is enough to reconstruct the exact map from hyperparameters to source
-density. With the version, it is also enough to reconstruct the request the
-file answers, which is what `run_mcmc` checks each catalog against before
-sampling. Before this, three partial records described one run —
+density. With the version, it is the file's whole `CatalogMetadata` --
+`PolarizationPowerCatalog.metadata` -- which is what `run_mcmc` checks each
+catalog against before sampling. Before this, three partial records described one run —
 the merged run TOML, a catalog attribute naming only the *shape* of the
 redshift proposal, and a config object derived from those two — reconciled by
 exact float equality over five hard-coded parameter names. Three more
@@ -334,13 +339,22 @@ datasets. Earlier formats require regeneration.
 
 ## The catalog cache
 
-A `CatalogRequest` (`astrogwb.metadata`) is everything that determines a
-catalog: the waveform settings, the population record with its seed, the
-hyperparameters and size of the draw, and the `astrogwb` version. Its `key()`
-is a 16-hex-digit SHA-256 of the record's canonical JSON, and
-`astrogwb.catalog.load_or_generate(request, cache_dir)` keeps each catalog at
-`<cache_dir>/<key>.h5`: a miss generates and writes atomically, a hit is loaded
-and checked against the request it was asked for.
+Catalogs and spectra share one cache, `astrogwb.catalog.simulate(metadata,
+generator, cache_dir)`, built from three pieces per artifact:
+
+| | metadata (`astrogwb.metadata`) | generator (`astrogwb.catalog`) | artifact |
+| --- | --- | --- | --- |
+| catalogs | `CatalogMetadata` | `CatalogGenerator()` | `PolarizationPowerCatalog` |
+| spectra | `SpectraMetadata` | `SpectrumGenerator(batch_size)` | `SpectralDensityCatalog` |
+
+A `CatalogMetadata` is everything that determines a catalog: the waveform
+settings, the population record with its seed, the hyperparameters and size of
+the draw, and the `astrogwb` version. Its `key()` is a 16-hex-digit SHA-256 of
+the record's canonical JSON, and `simulate` keeps each artifact at
+`artifact_path(metadata, cache_dir)` = `<cache_dir>/<key>.h5`: a miss generates
+and writes atomically, a hit is loaded and checked against the metadata it was
+asked for (`check_metadata`, which `run_mcmc` also applies to the files the
+workflow hands it by path).
 
 The version is in the key so that code changes invalidate the cache -- but
 only if it is bumped. Bump `version` in `pyproject.toml` whenever a change
@@ -372,7 +386,7 @@ It is produced by three pieces:
 - **`simulate(metadata, generator, cache_dir)`** serves
   `<cache_dir>/<key>.h5` on a hit -- after checking the file records the same
   key -- and generates and saves atomically on a miss. It is generic over the
-  artifact; spectra are its first user.
+  artifact, and is the same cache catalogs go through.
 
 ```python
 from astrogwb.catalog import SpectrumGenerator, simulate

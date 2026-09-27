@@ -70,10 +70,16 @@ POPULATION = PopulationMetadata(
     model_kwargs=POPULATION_RECORD["model_kwargs"],
     seed=CATALOG_SEED,
 )
-CATALOG_DEFAULTS: dict[str, Any] = {
-    "_metadata": CatalogMetadata(waveform=_waveform_generator(), population=POPULATION),
-    "_fiducials": POPULATION_RECORD["fiducials"],
-}
+
+
+def _metadata(num_samples: int) -> CatalogMetadata:
+    """The record a hand-built catalog of ``num_samples`` sources carries."""
+    return CatalogMetadata(
+        waveform=_waveform_generator(),
+        population=POPULATION,
+        fiducials=POPULATION_RECORD["fiducials"],
+        num_samples=num_samples,
+    )
 
 
 @pytest.mark.parametrize(
@@ -177,7 +183,17 @@ def test_catalog_rejects_malformed_power(power: np.ndarray, message: str) -> Non
             source_parameters={"redshift": np.array([0.1, 0.2])},
             polarization_power=power,
             frequencies=np.array([10.0, 12.0]),
-            **CATALOG_DEFAULTS,
+            _metadata=_metadata(max(power.shape[-1], 1)),
+        )
+
+
+def test_catalog_with_metadata_of_another_size_raises() -> None:
+    with pytest.raises(ValueError, match="the metadata records 3"):
+        PolarizationPowerCatalog(
+            source_parameters={"redshift": np.array([0.1, 0.2])},
+            polarization_power=np.ones((2, 2)),
+            frequencies=np.array([10.0, 12.0]),
+            _metadata=_metadata(3),
         )
 
 
@@ -188,7 +204,7 @@ def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None
             source_parameters={"redshift": values},
             polarization_power=np.ones((2, 2)),
             frequencies=np.array([10.0, 12.0]),
-            **CATALOG_DEFAULTS,
+            _metadata=_metadata(2),
         )
 
 
@@ -208,7 +224,7 @@ def test_catalog_requires_a_redshift_column() -> None:
             source_parameters={"source_frame_mass_1": np.array([1.4, 1.3])},
             polarization_power=np.ones((2, 2)),
             frequencies=np.array([10.0, 12.0]),
-            **CATALOG_DEFAULTS,
+            _metadata=_metadata(2),
         )
 
 
@@ -223,7 +239,7 @@ def _catalog(redshift: np.ndarray) -> PolarizationPowerCatalog:
             2, num_samples
         ),
         frequencies=np.array([10.0, 12.0]),
-        **CATALOG_DEFAULTS,
+        _metadata=_metadata(num_samples),
     )
 
 
@@ -258,9 +274,7 @@ def test_an_unknown_population_name_fails_clearly() -> None:
     with pytest.raises(KeyError, match="bns_md_cosmological"):
         replace(
             catalog,
-            _metadata=CatalogMetadata(
-                waveform=catalog.waveform_metadata, population=unknown
-            ),
+            _metadata=catalog.metadata.model_copy(update={"population": unknown}),
         ).get_population()
 
 
@@ -341,7 +355,7 @@ def test_catalog_rejects_a_non_uniform_frequency_grid() -> None:
             source_parameters={"redshift": np.array([0.1, 0.2, 0.3])},
             polarization_power=np.ones((3, 3)),
             frequencies=np.array([10.0, 12.0, 15.0]),
-            **CATALOG_DEFAULTS,
+            _metadata=_metadata(3),
         )
 
 
@@ -351,7 +365,7 @@ def test_one_bin_catalog_constructs_but_df_has_no_answer() -> None:
         source_parameters={"redshift": np.array([0.1, 0.2])},
         polarization_power=np.ones((1, 2)),
         frequencies=np.array([10.0]),
-        **CATALOG_DEFAULTS,
+        _metadata=_metadata(2),
     )
 
     with pytest.raises(ValueError, match="at least two bins"):
