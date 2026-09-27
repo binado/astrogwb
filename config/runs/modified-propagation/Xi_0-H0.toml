@@ -1,3 +1,5 @@
+# xi_0 with H0 amplitude-marginalized under a tight (1%) H0 prior, isolating
+# the propagation-cosmology degeneracy.
 [analysis]
 sampled_params = ["xi_0"]
 network = "ET-2L-aligned-CE-Hanford"
@@ -9,5 +11,7 @@ amplitude_num_nodes = 1024
 num_warmup = 500
 dense_mass = false
 
+# The only [priors] override in the tree. It replaces the shared Uniform
+# whole, rather than key-merging into it and keeping its low / high.
 [priors]
 H0 = { dist = "Normal", kwargs = { loc = 67.66, scale = 0.6766 } }

@@ -1,3 +1,4 @@
+# Omega_m, with H0 the analytically marginalized amplitude.
 [analysis]
 sampled_params = ["Omega_m"]
 network = "ET-2L-aligned-CE-Hanford"

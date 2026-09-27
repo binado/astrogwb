@@ -1,3 +1,15 @@
+# cosmological-parameters (8 runs): H0 -- or one parameter with H0
+# amplitude-marginalized out -- from the astrophysical background, across
+# detector networks.
+#
+# Six runs are one network each (ET-triangular, ET-2L-aligned,
+# ET-2L-misaligned and their CE-Hanford variants), sampling H0. The other two
+# marginalize H0 analytically: H0-Omega_m samples Omega_m, and H0-merger-rate
+# samples local_merger_rate. Every run uses the shared seed-41 catalog as both
+# injection and proposal.
+
+# Every run samples a single scalar, so NUTS gets a diagonal mass matrix and a
+# shorter warmup.
 [sampler]
 num_warmup = 500
 dense_mass = false

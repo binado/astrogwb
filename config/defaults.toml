@@ -1,16 +1,41 @@
+# The shared run layer: every top-level block of a run config, with the value
+# every run inherits unless its experiment's _base.toml or its own file
+# overrides it. A run is three layers merged in order:
+#
+#   config/defaults.toml -> config/runs/<experiment>/_base.toml -> <run>.toml
+#
+# Tables merge key by key; arrays and values replace. The one exception is
+# [priors]: an overridden [priors.<param>] replaces the inherited one whole.
+
+# Observing time, frequency band, the target population and its redshift grid,
+# and the two catalogs every run uses.
+#
+# Neither a network nor a detector list is ever a shared default: a run that
+# names no analysis.network must fail rather than silently inherit someone
+# else's, which is why none is declared here.
 [analysis]
 observation_time = 1.0
 minimum_frequency = 2.0
 maximum_frequency = 2048.0
 
+# The analysis target the weights are evaluated at -- not the catalog default,
+# which is the top-level [population] below.
 [analysis.population]
 model_name = "bns_md_modified_propagation"
 model_kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 256 }
 
+# Both roles default to one seed-41, 32768-source draw from [population] with
+# the shared IMRPhenom [waveform]. That catalog is the injection -- the
+# "observed" data -- of every run except time-delay, and the proposal of
+# cosmological-parameters, modified-propagation and
+# waveform-approximant/IMRPhenom. Each run's catalogs are drawn at its own
+# [fiducials], so editing [fiducials] re-keys every catalog.
 [analysis.catalog]
 injection = { seed = 41, num_samples = 32768 }
 proposal = { seed = 41, num_samples = 32768 }
 
+# The fiducial value of every parameter: where NUTS initializes, and what a
+# run's catalogs are drawn at.
 [fiducials]
 H0 = 67.66
 Omega_m = 0.3096
@@ -23,6 +48,8 @@ local_merger_rate = 770.0
 minimum_mass = 1.0
 mass_width = 1.5
 
+# Each detector network, by name. A run names one as analysis.network; the
+# figures' legend order is astrogwb.paper.plotting.DETECTOR_NETWORKS.
 [networks]
 ET-triangular = ["E1", "E2", "E3"]
 ET-triangular-CE-Hanford = ["E1", "E2", "E3", "C1"]
@@ -31,6 +58,8 @@ ET-2L-aligned-CE-Hanford = ["S1", "R1", "C1"]
 ET-2L-misaligned = ["S2", "R2"]
 ET-2L-misaligned-CE-Hanford = ["S2", "R2", "C1"]
 
+# The prior on every parameter, as a numpyro.distributions class and its
+# keyword arguments.
 [priors]
 H0 = { dist = "Uniform", kwargs = { low = 20.0, high = 140.0 } }
 Omega_m = { dist = "Normal", kwargs = { loc = 0.3096, scale = 0.006 } }
@@ -43,6 +72,7 @@ local_merger_rate = { dist = "Normal", kwargs = { loc = 770.0, scale = 7.7 } }
 minimum_mass = { dist = "Uniform", kwargs = { low = 0.5, high = 1.5 } }
 mass_width = { dist = "Uniform", kwargs = { low = 0.5, high = 3.0 } }
 
+# The sampling RNG seed and the NUTS defaults.
 [sampler]
 seed = 42
 num_warmup = 1000
@@ -55,6 +85,8 @@ forward_mode_differentiation = false
 progress_bar = true
 jit_model_args = true
 
+# The waveform settings every catalog of a run inherits, unless a catalog role
+# overrides them.
 [waveform]
 approximant = "IMRPhenomXAS_NRTidalv3"
 sampling_frequency = 8192.0
@@ -63,6 +95,7 @@ maximum_frequency = 2048.0
 reference_frequency = 20.0
 frequency_resolution = 1.0
 
+# The population a run's catalogs are drawn from, unless a role overrides it.
 [population]
 model_name = "bns_md_cosmological"
 model_kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 4096 }

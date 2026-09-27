@@ -1,3 +1,17 @@
+# time-delay (1 run): the delay-time slope alpha of
+# bns_md_time_delayed_cosmological, whose mergers follow a Madau-Dickinson
+# *formation* rate after a delay p(tau) ~ tau^alpha of at least 20 Myr, capped
+# only by the lookback time to the z = 20 formation cut-off.
+#
+# The target population, the one new fiducial and its prior are declared here
+# rather than in config/defaults.toml: every run's catalogs are drawn at its
+# fiducials, so a shared edit would re-key every catalog.
+#
+# The amplitude marginalized out is local_merger_rate, not H0: the delay is
+# fixed in Gyr while lookback time scales as 1/H0, so H0 reshapes the redshift
+# law instead of only rescaling it. The population declares this at
+# registration, and `snakemake validate` rejects amplitude_parameter = "H0"
+# for it.
 [analysis]
 network = "ET-2L-aligned-CE-Hanford"
 likelihood = "amplitude_marginalized"
@@ -11,6 +25,8 @@ minimum_delay = 0.02
 maximum_formation_redshift = 20.0
 n_delay_nodes = 48
 
+# The injection is drawn from the time-delayed population at this run's own
+# alpha -- the one run whose "observed" data is not the shared seed-41 draw.
 [analysis.catalog.injection]
 seed = 71
 num_samples = 32768
@@ -23,6 +39,10 @@ minimum_delay = 0.02
 maximum_formation_redshift = 20.0
 n_delay_nodes = 48
 
+# The eps = 0.1 guard (see astrophysical-parameters/_base.toml), as a separate
+# copy: the samples are identical to the shared one's, but it is drawn at this
+# run's fiducials, delay_slope = -1 included, so its record -- and key --
+# differ.
 [analysis.catalog.proposal]
 seed = 61
 num_samples = 16384

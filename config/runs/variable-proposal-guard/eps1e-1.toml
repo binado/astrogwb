@@ -1,3 +1,4 @@
+# eps = 0.1: the same draw astrophysical-parameters uses as its proposal.
 [analysis.catalog.proposal]
 seed = 61
 num_samples = 16384

@@ -1,9 +1,20 @@
+# astrophysical-parameters (2 runs): the Madau-Dickinson rate shape with H0
+# amplitude-marginalized out. madau-dickinson samples gamma, kappa and z_peak;
+# redshift-peak samples z_peak alone.
 [analysis]
 network = "ET-2L-aligned-CE-Hanford"
 likelihood = "amplitude_marginalized"
 amplitude_parameter = "H0"
 amplitude_num_nodes = 1024
 
+# The guarded (eps = 0.1) proposal: sampling the rate shape moves the posterior
+# away from the proposal, and a uniform-in-redshift component mixed into the
+# Madau-Dickinson law keeps the importance weights from degenerating. The
+# mixture is one density -- the same MixtureGeneral draws the redshifts and
+# evaluates their log density -- and declares no merger rate, since it is a
+# sampling density rather than a physical population: `snakemake validate`
+# rejects one named as an injection. Shared with
+# variable-proposal-guard/eps1e-1.
 [analysis.catalog.proposal]
 seed = 61
 num_samples = 16384
