@@ -8,12 +8,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from astrogwb.metadata import (
-    MODEL_KWARGS_ATTR,
-    MODEL_NAME_ATTR,
-    SEED_ATTR,
-    PopulationMetadata,
-)
+from astrogwb.metadata import PopulationMetadata
 
 MODEL_KWARGS = {"minimum_redshift": 0.1, "maximum_redshift": 10.0, "n_grid": 32}
 
@@ -27,21 +22,12 @@ def _record(**overrides: Any) -> PopulationMetadata:
     return PopulationMetadata(**{**fields, **overrides})
 
 
-def test_attrs_round_trip_preserves_every_field() -> None:
+def test_json_round_trip_preserves_every_field() -> None:
     record = _record()
-    restored = PopulationMetadata.from_attrs(record.to_attrs(), label="test")
+    restored = PopulationMetadata.model_validate_json(record.model_dump_json())
     assert restored == record
-
-
-def test_to_attrs_sorts_mapping_keys_so_a_file_is_reproducible() -> None:
-    attrs = _record(
-        model_kwargs={"maximum_redshift": 10.0, "minimum_redshift": 0.1}
-    ).to_attrs()
-    assert attrs[MODEL_KWARGS_ATTR] == json.dumps(
-        {"minimum_redshift": 0.1, "maximum_redshift": 10.0}, sort_keys=True
-    )
-    assert attrs[MODEL_NAME_ATTR] == "bns_md_cosmological"
-    assert attrs[SEED_ATTR] == 7
+    assert type(restored.model_kwargs["n_grid"]) is int
+    assert type(restored.model_kwargs["minimum_redshift"]) is float
 
 
 def test_kwargs_are_normalized() -> None:
@@ -94,7 +80,13 @@ def test_seed_must_be_a_non_boolean_int(seed: object) -> None:
         _record(seed=seed)
 
 
-def test_from_attrs_rejects_a_malformed_json_attribute() -> None:
-    attrs = {**_record().to_attrs(), MODEL_KWARGS_ATTR: "{not json"}
-    with pytest.raises(ValueError, match=MODEL_KWARGS_ATTR):
-        PopulationMetadata.from_attrs(attrs, label="broken.h5")
+def test_json_validation_rejects_a_malformed_record() -> None:
+    with pytest.raises(ValidationError, match="Invalid JSON"):
+        PopulationMetadata.model_validate_json("{not json")
+
+
+@pytest.mark.parametrize("seed", ["7", 7.0, True, None])
+def test_json_seed_must_be_a_non_boolean_int(seed: object) -> None:
+    payload = {**_record().model_dump(mode="json"), "seed": seed}
+    with pytest.raises(ValidationError, match="seed"):
+        PopulationMetadata.model_validate_json(json.dumps(payload))

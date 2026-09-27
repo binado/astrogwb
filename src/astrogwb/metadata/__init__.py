@@ -2,8 +2,8 @@
 
 A catalog file describes the density that drew it and the waveform backend
 that produced its power. Those two declarations are what this package owns:
-they are small, flat, JSON-shaped, and they are the only part of an artifact
-that travels as HDF5 attributes rather than as arrays.
+they are small, flat, JSON-shaped, and they are nested inside the complete metadata JSON
+stored in one HDF5 attribute.
 
 They live in their own top-level package, not beside the code that consumes
 them, because importing a submodule runs its parent package first:
@@ -28,28 +28,16 @@ from astrogwb.metadata.catalog import (
     content_key,
 )
 from astrogwb.metadata.population import (
-    MODEL_KWARGS_ATTR,
-    MODEL_NAME_ATTR,
-    POPULATION_ATTRS,
-    SEED_ATTR,
     PopulationMetadata,
 )
 from astrogwb.metadata.prior import PriorSpec
 from astrogwb.metadata.spectra import Hyperparameter, SpectraMetadata
 from astrogwb.metadata.waveform import (
-    REQUIRED_WAVEFORM_ATTRS,
-    WAVEFORM_ATTRS,
     WaveformMetadata,
 )
 
 __all__ = [
     "CATALOG_KEY_LENGTH",
-    "MODEL_KWARGS_ATTR",
-    "MODEL_NAME_ATTR",
-    "POPULATION_ATTRS",
-    "REQUIRED_WAVEFORM_ATTRS",
-    "SEED_ATTR",
-    "WAVEFORM_ATTRS",
     "CatalogMetadata",
     "Hyperparameter",
     "Keyed",

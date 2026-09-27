@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import Mock
 
@@ -81,7 +82,7 @@ def test_uniform_grid_handles_float_roundoff() -> None:
     assert metadata.frequency_resolution == 0.1
 
 
-def test_waveform_metadata_attrs_round_trip_includes_alpha() -> None:
+def test_waveform_metadata_json_round_trip_includes_alpha() -> None:
     generator = AnalyticInspiralGenerator(
         WaveformMetadata(
             approximant="AnalyticInspiral",
@@ -94,19 +95,19 @@ def test_waveform_metadata_attrs_round_trip_includes_alpha() -> None:
         )
     )
 
-    attrs = generator.metadata.to_attrs()
+    attrs = generator.metadata.model_dump(mode="json")
     assert attrs["alpha"] == ISCO_ALPHA
 
-    restored = WaveformMetadata.from_attrs(attrs, label="toy.h5")
-    assert restored.to_attrs() == attrs
+    restored = WaveformMetadata.model_validate_json(json.dumps(attrs))
+    assert restored.model_dump(mode="json") == attrs
 
     del attrs["reference_frequency"]
-    with pytest.raises(ValueError, match="toy.h5: missing waveform metadata"):
-        WaveformMetadata.from_attrs(attrs, label="toy.h5")
+    with pytest.raises(ValueError, match="reference_frequency"):
+        WaveformMetadata.model_validate_json(json.dumps(attrs))
 
 
 @pytest.mark.parametrize("use_taper", [True, False])
-def test_waveform_metadata_serializes_taper_setting_as_an_integer(
+def test_waveform_metadata_serializes_taper_setting_as_a_boolean(
     use_taper: bool,
 ) -> None:
     metadata = WaveformMetadata(
@@ -119,13 +120,13 @@ def test_waveform_metadata_serializes_taper_setting_as_an_integer(
         use_taper_in_tidal_corrections=use_taper,
     )
 
-    attrs = metadata.to_attrs()
-    assert attrs["use_taper_in_tidal_corrections"] == int(use_taper)
-    assert type(attrs["use_taper_in_tidal_corrections"]) is int
-    assert WaveformMetadata.from_attrs(attrs, label="toy.h5") == metadata
+    attrs = metadata.model_dump(mode="json")
+    assert attrs["use_taper_in_tidal_corrections"] is use_taper
+    assert type(attrs["use_taper_in_tidal_corrections"]) is bool
+    assert WaveformMetadata.model_validate_json(json.dumps(attrs)) == metadata
 
 
-def test_waveform_metadata_rejects_missing_taper_setting_attribute() -> None:
+def test_waveform_metadata_defaults_missing_taper_setting() -> None:
     metadata = WaveformMetadata(
         approximant="TaylorF2",
         minimum_frequency=10.0,
@@ -134,14 +135,18 @@ def test_waveform_metadata_rejects_missing_taper_setting_attribute() -> None:
         sampling_frequency=32.0,
         frequency_resolution=2.0,
     )
-    attrs = metadata.to_attrs()
+    attrs = metadata.model_dump(mode="json")
     del attrs["use_taper_in_tidal_corrections"]
 
-    with pytest.raises(ValueError, match="legacy.h5: missing waveform metadata"):
-        WaveformMetadata.from_attrs(attrs, label="legacy.h5")
+    assert (
+        WaveformMetadata.model_validate_json(
+            json.dumps(attrs)
+        ).use_taper_in_tidal_corrections
+        is True
+    )
 
 
-@pytest.mark.parametrize("value", [True, 2, 1.0, "1"])
+@pytest.mark.parametrize("value", [0, 1, 2, 1.0, "1"])
 def test_waveform_metadata_rejects_malformed_taper_setting_attribute(
     value: object,
 ) -> None:
@@ -152,11 +157,11 @@ def test_waveform_metadata_rejects_malformed_taper_setting_attribute(
         reference_frequency=10.0,
         sampling_frequency=32.0,
         frequency_resolution=2.0,
-    ).to_attrs()
+    ).model_dump(mode="json")
     attrs["use_taper_in_tidal_corrections"] = value
 
-    with pytest.raises(ValueError, match="invalid waveform metadata"):
-        WaveformMetadata.from_attrs(attrs, label="broken.h5")
+    with pytest.raises(ValueError, match="use_taper_in_tidal_corrections"):
+        WaveformMetadata.model_validate_json(json.dumps(attrs))
 
 
 def test_waveform_metadata_rejects_disabled_tidal_taper_for_analytic_inspiral() -> None:
@@ -186,7 +191,7 @@ def test_waveform_metadata_keeps_strict_validation_for_unknown_settings() -> Non
         WaveformMetadata.model_validate(settings)
 
 
-def test_from_attrs_rejects_a_non_numeric_frequency_attribute() -> None:
+def test_json_rejects_a_non_numeric_frequency() -> None:
     generator = AnalyticInspiralGenerator(
         WaveformMetadata(
             approximant="AnalyticInspiral",
@@ -198,14 +203,14 @@ def test_from_attrs_rejects_a_non_numeric_frequency_attribute() -> None:
             alpha=ISCO_ALPHA,
         )
     )
-    attrs = generator.metadata.to_attrs()
+    attrs = generator.metadata.model_dump(mode="json")
     attrs["minimum_frequency"] = "not-a-number"
 
-    with pytest.raises(ValueError, match="toy.h5: invalid waveform metadata"):
-        WaveformMetadata.from_attrs(attrs, label="toy.h5")
+    with pytest.raises(ValueError, match="minimum_frequency"):
+        WaveformMetadata.model_validate_json(json.dumps(attrs))
 
 
-def test_from_attrs_rejects_a_non_numeric_alpha_attribute() -> None:
+def test_json_rejects_a_non_numeric_alpha() -> None:
     generator = AnalyticInspiralGenerator(
         WaveformMetadata(
             approximant="AnalyticInspiral",
@@ -217,11 +222,11 @@ def test_from_attrs_rejects_a_non_numeric_alpha_attribute() -> None:
             alpha=ISCO_ALPHA,
         )
     )
-    attrs = generator.metadata.to_attrs()
+    attrs = generator.metadata.model_dump(mode="json")
     attrs["alpha"] = "not-a-number"
 
-    with pytest.raises(ValueError, match="toy.h5: invalid waveform metadata"):
-        WaveformMetadata.from_attrs(attrs, label="toy.h5")
+    with pytest.raises(ValueError, match="alpha"):
+        WaveformMetadata.model_validate_json(json.dumps(attrs))
 
 
 def test_waveform_metadata_builds_a_concrete_generator() -> None:

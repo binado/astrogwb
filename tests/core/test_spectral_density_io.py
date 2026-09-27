@@ -12,7 +12,6 @@ import pytest
 
 from astrogwb.catalog import SpectralDensityCatalog
 from astrogwb.catalog._io import (
-    REQUIRED_SPECTRAL_DENSITY_ATTRS,
     SPECTRAL_DENSITY_DATASETS,
     SPECTRAL_DENSITY_FORMAT_NAME,
 )
@@ -76,24 +75,11 @@ def test_round_trip_preserves_untapered_waveform_metadata(tmp_path: Path) -> Non
     expected.save(path)
 
     with h5py.File(path) as handle:
-        assert handle.attrs["use_taper_in_tidal_corrections"] == 0
-        assert type(handle.attrs["use_taper_in_tidal_corrections"]) is np.int64
+        metadata = json.loads(handle.attrs["metadata"])
+        assert metadata["waveform"]["use_taper_in_tidal_corrections"] is False
 
     actual = SpectralDensityCatalog.load(path)
     assert actual.waveform_metadata.use_taper_in_tidal_corrections is False
-
-
-def test_loading_a_catalog_without_taper_setting_is_rejected(tmp_path: Path) -> None:
-    path = tmp_path / "legacy.h5"
-    _catalog().save(path)
-    with h5py.File(path, "r+") as handle:
-        del handle.attrs["use_taper_in_tidal_corrections"]
-
-    with pytest.raises(
-        ValueError,
-        match="missing waveform metadata.*use_taper_in_tidal_corrections",
-    ):
-        SpectralDensityCatalog.load(path)
 
 
 def test_round_trip_preserves_spectra_and_provenance(tmp_path: Path) -> None:
@@ -104,18 +90,21 @@ def test_round_trip_preserves_spectra_and_provenance(tmp_path: Path) -> None:
     with h5py.File(path) as handle:
         assert handle.attrs["format_name"] == SPECTRAL_DENSITY_FORMAT_NAME
         assert set(handle) == set(SPECTRAL_DENSITY_DATASETS)
-        assert json.loads(handle.attrs["population_model_kwargs"]) == {
-            "n_grid": 32,
-            "maximum_redshift": 10.0,
-            "minimum_redshift": 0.1,
+        assert set(handle.attrs) == {
+            "format_name",
+            "domain",
+            "metadata",
+            "source_parameter_names",
         }
+        assert handle.attrs["metadata"] == expected.metadata.model_dump_json()
+        assert (
+            SpectraMetadata.model_validate_json(handle.attrs["metadata"])
+            == expected.metadata
+        )
         assert json.loads(handle.attrs["source_parameter_names"]) == [
             "H0",
             "local_merger_rate",
         ]
-        assert "average_mode" not in handle.attrs
-        assert handle.attrs["observation_time"] == 1.0
-        assert handle.attrs["astrogwb_version"] == expected.version
 
     actual = SpectralDensityCatalog.load(path)
     assert actual.metadata == expected.metadata
@@ -151,13 +140,12 @@ def test_missing_dataset_is_rejected(tmp_path: Path, dataset: str) -> None:
         SpectralDensityCatalog.load(path)
 
 
-@pytest.mark.parametrize("attr", REQUIRED_SPECTRAL_DENSITY_ATTRS)
-def test_missing_population_attribute_is_rejected(tmp_path: Path, attr: str) -> None:
+def test_missing_metadata_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "invalid.h5"
     _catalog().save(path)
     with h5py.File(path, "r+") as handle:
-        del handle.attrs[attr]
-    with pytest.raises(ValueError, match=attr):
+        del handle.attrs["metadata"]
+    with pytest.raises(ValueError, match="invalid.h5: missing.*metadata"):
         SpectralDensityCatalog.load(path)
 
 
@@ -175,7 +163,7 @@ def test_unknown_format_and_domain_are_rejected(tmp_path: Path) -> None:
         SpectralDensityCatalog.load(path)
 
 
-@pytest.mark.parametrize("legacy", ["v1", "v3"])
+@pytest.mark.parametrize("legacy", ["v1", "v3", "v4"])
 def test_legacy_format_is_rejected(tmp_path: Path, legacy: str) -> None:
     path = tmp_path / "legacy.h5"
     _catalog().save(path)
@@ -248,7 +236,9 @@ def test_unknown_population_is_rejected_on_load(tmp_path: Path) -> None:
     path = tmp_path / "unknown.h5"
     _catalog().save(path)
     with h5py.File(path, "r+") as handle:
-        handle.attrs["population_model"] = "not_registered"
+        metadata = json.loads(handle.attrs["metadata"])
+        metadata["population"]["model_name"] = "not_registered"
+        handle.attrs["metadata"] = json.dumps(metadata)
     with pytest.raises(KeyError, match="not_registered"):
         SpectralDensityCatalog.load(path)
 
@@ -272,3 +262,52 @@ def test_malformed_fields_are_rejected_at_construction(
 def test_hyperparameter_column_length_must_match_draws() -> None:
     with pytest.raises(ValueError, match="H0"):
         _catalog(hyperparameters={"H0": np.array([67.0, 67.0, 67.0])})
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("num_draws", "2", "num_draws"),
+        ("num_draws", True, "num_draws"),
+        ("unknown", 1, "unknown"),
+        ("waveform", {}, "waveform"),
+        ("population", {"model_name": "bns_md_cosmological", "seed": True}, "seed"),
+        ("hyperparameters", {"H0": "67"}, "hyperparameters"),
+    ],
+)
+def test_invalid_json_metadata_is_rejected(
+    tmp_path: Path, field: str, value: object, match: str
+) -> None:
+    path = tmp_path / "invalid.h5"
+    _catalog().save(path)
+    with h5py.File(path, "r+") as handle:
+        metadata = json.loads(handle.attrs["metadata"])
+        metadata[field] = value
+        handle.attrs["metadata"] = json.dumps(metadata)
+    with pytest.raises(
+        ValueError, match=f"(?s)invalid.h5: invalid catalog metadata:.*{match}"
+    ):
+        SpectralDensityCatalog.load(path)
+
+
+@pytest.mark.parametrize("payload", ["{not json", "[]", "null", 42])
+def test_malformed_metadata_is_rejected(tmp_path: Path, payload: str | int) -> None:
+    path = tmp_path / "invalid.h5"
+    _catalog().save(path)
+    with h5py.File(path, "r+") as handle:
+        handle.attrs["metadata"] = payload
+    with pytest.raises(ValueError, match="invalid.h5: invalid catalog metadata"):
+        SpectralDensityCatalog.load(path)
+
+
+def test_stored_draw_count_is_checked_against_arrays(tmp_path: Path) -> None:
+    path = tmp_path / "invalid.h5"
+    _catalog().save(path)
+    with h5py.File(path, "r+") as handle:
+        metadata = json.loads(handle.attrs["metadata"])
+        metadata["num_draws"] = 3
+        handle.attrs["metadata"] = json.dumps(metadata)
+    with pytest.raises(
+        ValueError, match="spectral_density has 2 draws; the metadata records 3"
+    ):
+        SpectralDensityCatalog.load(path)

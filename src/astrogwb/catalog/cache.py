@@ -112,7 +112,7 @@ def save_atomically(artifact: Artifact, path: str | Path) -> None:
 
     The file is written beside its destination and renamed into place, so a
     reader -- or a second writer racing on the same key -- sees either no file
-    or a complete one. Two racing writers produce the same bytes, so the last
+    or a complete one. Two racing writers produce equivalent artifacts, so the last
     rename winning is harmless.
     """
     path = Path(path)
