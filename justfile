@@ -67,12 +67,13 @@ test-notebooks:
     uv run --extra notebook --group jupyter \
         jupytext --to notebook --execute notebooks/catalog_convergence.py
 
-# Convert the py:percent notebooks to .ipynb. fiducial_spectrum.py is marimo.
+# Convert the py:percent notebooks to .ipynb. The marimo notebooks
+# (fiducial_spectrum.py, waveform_approximant_spectra.py) open in marimo
+# directly.
 convert-notebooks:
     uv run --group jupyter jupytext --to notebook \
         notebooks/catalog_convergence.py \
-        notebooks/mcmc.py \
-        notebooks/waveform_approximant_spectra.py
+        notebooks/mcmc.py
 
 run-notebook notebook:
     uv run --group jupyter marimo edit {{ notebook }}
