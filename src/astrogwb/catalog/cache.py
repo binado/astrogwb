@@ -1,4 +1,14 @@
-"""Generate a polarization-power catalog from its request, or reuse a cached one.
+"""Generate an artifact from its metadata, or reuse a cached one.
+
+Three abstractions: a *metadata* record that fully determines an artifact and
+names it with :meth:`key`; a *generator* that turns the record into the
+artifact; and :func:`simulate`, which serves ``<cache_dir>/<key>.h5`` on a hit
+and calls the generator on a miss. :func:`simulate` knows nothing about any
+particular artifact: :class:`~astrogwb.catalog.SpectrumGenerator` and
+:class:`~astrogwb.metadata.SpectraMetadata` are one instance of it.
+
+Polarization-power catalogs predate it and still go through their own pair,
+described below; they are the next thing to move onto :func:`simulate`.
 
 A catalog is fully determined by a :class:`~astrogwb.metadata.CatalogRequest`:
 the waveform settings, the population record with its seed, the
@@ -19,6 +29,7 @@ import logging
 import os
 import tempfile
 from pathlib import Path
+from typing import Protocol, Self
 
 import jax
 
@@ -28,14 +39,86 @@ from astrogwb.metadata import CatalogRequest
 from astrogwb.utils.sampling import sample_sources
 
 __all__ = [
+    "Artifact",
+    "Generator",
+    "Keyed",
+    "artifact_path",
     "catalog_path",
     "check_catalog_answers",
     "generate",
     "load_or_generate",
     "save_atomically",
+    "simulate",
 ]
 
 logger = logging.getLogger(__name__)
+
+
+class Keyed(Protocol):
+    """A metadata record: everything that determines an artifact, and its hash."""
+
+    def key(self) -> str: ...
+
+    def model_dump_json(self) -> str: ...
+
+
+class Artifact[M: Keyed](Protocol):
+    """A persisted artifact that carries the record it was generated from."""
+
+    @property
+    def metadata(self) -> M: ...
+
+    def save(self, path: str | Path) -> None: ...
+
+    @classmethod
+    def load(cls, path: str | Path) -> Self: ...
+
+
+class Generator[M: Keyed, A: Artifact](Protocol):
+    """Turns a metadata record into its artifact, and names the artifact type."""
+
+    @property
+    def artifact(self) -> type[A]: ...
+
+    def __call__(self, metadata: M) -> A: ...
+
+
+def artifact_path(metadata: Keyed, cache_dir: str | Path) -> Path:
+    """Where ``metadata``'s artifact lives in ``cache_dir``."""
+    return Path(cache_dir) / f"{metadata.key()}.h5"
+
+
+def simulate[M: Keyed, A: Artifact](
+    metadata: M, generator: Generator[M, A], cache_dir: str | Path | None = None
+) -> A:
+    """Return ``metadata``'s artifact from ``cache_dir``, generating it on a miss.
+
+    Without a ``cache_dir`` this is ``generator(metadata)``. A hit is loaded as
+    ``generator.artifact`` and its recorded metadata compared with
+    ``metadata``; a mismatch -- a file copied or renamed into the wrong key --
+    raises rather than serving an artifact of something else. A miss is
+    generated and saved atomically under the key.
+    """
+    if cache_dir is None:
+        return generator(metadata)
+
+    path = artifact_path(metadata, cache_dir)
+    if path.is_file():
+        artifact = generator.artifact.load(path)
+        recorded = artifact.metadata
+        if recorded.key() != metadata.key():
+            raise ValueError(
+                f"{path} records {recorded.key()}, not the requested "
+                f"{metadata.key()}:\n  recorded:  {recorded.model_dump_json()}\n"
+                f"  requested: {metadata.model_dump_json()}"
+            )
+        logger.info("%s: cache hit at %s", metadata.key(), path)
+        return artifact
+
+    logger.info("%s: cache miss, generating into %s", metadata.key(), path)
+    artifact = generator(metadata)
+    save_atomically(artifact, path)
+    return artifact
 
 
 def catalog_path(request: CatalogRequest, cache_dir: str | Path) -> Path:
@@ -96,7 +179,9 @@ def generate(request: CatalogRequest) -> PolarizationPowerCatalog:
     )
 
 
-def save_atomically(catalog: PolarizationPowerCatalog, path: str | Path) -> None:
+def save_atomically(
+    catalog: Artifact | PolarizationPowerCatalog, path: str | Path
+) -> None:
     """Write ``catalog`` to ``path`` without ever exposing a partial file.
 
     The file is written beside its destination and renamed into place, so a

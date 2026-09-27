@@ -5,7 +5,6 @@ app = marimo.App()
 
 with app.setup(hide_code=True):
     from collections.abc import Mapping, Sequence
-    from functools import partial
     from pathlib import Path
 
     import jax
@@ -19,8 +18,8 @@ with app.setup(hide_code=True):
     from matplotlib.lines import Line2D
     from matplotlib.projections import register_projection
     from matplotlib.ticker import LogFormatterMathtext, ScalarFormatter
-    from numpyro.infer import Predictive
 
+    from astrogwb.catalog import SpectrumGenerator, simulate
     from astrogwb.detector import (
         effective_psd,
         load_sensitivity_map,
@@ -33,13 +32,14 @@ with app.setup(hide_code=True):
         spectral_snr_squared_per_bin,
         spectral_snr_squared_per_log_frequency,
     )
+    from astrogwb.metadata import SpectraMetadata
     from astrogwb.paper.config import (
         fiducials,
         networks,
-        population_model,
-        waveform_generator,
+        population_metadata,
+        waveform_metadata,
     )
-    from astrogwb.paper.config.runs import FIGURES_DIR
+    from astrogwb.paper.config.runs import FIGURES_DIR, SPECTRA_ROOT
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -50,7 +50,6 @@ with app.setup(hide_code=True):
         save_figures,
         use_paper_style,
     )
-    from astrogwb.sampling import gwb_forward_model
     from astrogwb.utils import years_to_seconds
 
 
@@ -372,42 +371,35 @@ def _(
     observation_time,
     seed,
 ):
-    _population = population_model(
-        root=ROOT_DIR,
-        minimum_redshift=minimum_redshift,
-        maximum_redshift=maximum_redshift,
-    )
-    _merger_rate_fn = _population.merger_rate_fn
-    if _merger_rate_fn is None:
-        raise ValueError("configured population cannot simulate event counts")
-
-    _generator = waveform_generator(
-        root=ROOT_DIR,
-        approximant=approximant,
-        maximum_frequency=maximum_frequency,
-        frequency_resolution=frequency_resolution,
-    )
-    frequencies = jnp.asarray(_generator.frequencies)
-
-    _rate = float(jnp.asarray(_merger_rate_fn(FIDUCIALS)))
-    _mean_count = _rate * years_to_seconds(observation_time)
-    _max_events = max(int(np.ceil(_mean_count + n_max_sigma * np.sqrt(_mean_count))), 1)
-    _predictive = Predictive(
-        partial(
-            gwb_forward_model,
-            source_model=_population.source_model,
-            merger_rate_fn=_merger_rate_fn,
-            generator=_generator,
-            observation_time=observation_time,
-            batch_size=batch_size,
-            max_events=_max_events,
+    # The draw is a record: the same settings are served from
+    # outputs/spectra/<key>.h5 instead of being redrawn, so moving a slider
+    # back to a value already seen is a cache hit.
+    _metadata = SpectraMetadata(
+        waveform=waveform_metadata(
+            root=ROOT_DIR,
+            approximant=approximant,
+            maximum_frequency=maximum_frequency,
+            frequency_resolution=frequency_resolution,
         ),
-        num_samples=1,
-        return_sites=("spectral_density", "n_events", "total_merger_rate"),
+        population=population_metadata(
+            root=ROOT_DIR,
+            seed=seed,
+            minimum_redshift=minimum_redshift,
+            maximum_redshift=maximum_redshift,
+        ),
+        hyperparameters=FIDUCIALS,
+        num_draws=1,
+        observation_time=observation_time,
+        n_max_sigma=n_max_sigma,
     )
-    _draw = _predictive(jax.random.key(seed), FIDUCIALS)
-    spectral_density = jnp.asarray(_draw["spectral_density"][0])
-    _n_events = int(np.asarray(_draw["n_events"]).reshape(-1)[0])
+    _spectra = simulate(
+        _metadata,
+        SpectrumGenerator(batch_size=batch_size),
+        ROOT_DIR / SPECTRA_ROOT,
+    )
+    frequencies = jnp.asarray(_spectra.frequencies)
+    spectral_density = jnp.asarray(_spectra.spectral_density[0])
+    _n_events = int(_spectra.n_events[0])
 
     {"Number of events": _n_events}
     return frequencies, spectral_density

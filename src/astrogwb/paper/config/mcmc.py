@@ -28,10 +28,11 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
+    ValidationError,
     model_validator,
 )
 
-from astrogwb.metadata import CatalogRequest
+from astrogwb.metadata import CatalogRequest, PriorSpec
 from astrogwb.paper.config.runs import resolve_catalog_blocks
 from astrogwb.paper.utils import deep_merge
 
@@ -96,18 +97,12 @@ def check_redshift_grid(
 #
 #     {"dist": "<numpyro.distributions class name>", "kwargs": {...}}
 #
-# The class is looked up on `numpyro.distributions` by name, so adding a
-# distribution is zero-code -- it needs no registry entry here and no branch in
-# `prior_to_spec`, which recovers the same keys from the class's own
-# `arg_constraints`. Hand-rolled rather than a pydantic spec model: pydantic
-# could never construct distributions from raw config dicts natively anyway
-# (they are not models), so the validation lives next to the construction it
-# guards.
-#
-# There is deliberately no positional `args` form. `prior_to_spec` can only
-# ever emit kwargs, so a second spelling would make `RunConfig.save()` ->
-# reload non-canonical.
-_PRIOR_SPEC_KEYS = frozenset({"dist", "kwargs"})
+# The spec itself is `astrogwb.metadata.PriorSpec`: a spectral-density draw
+# records its sampled hyperparameters in the same format, so the record and its
+# validation live in the core package and this module only adapts it to the
+# run config's pydantic wire. Hand-rolled adapters rather than a PriorSpec
+# field: the run config holds *live* distributions, which pydantic can never
+# construct from raw config dicts natively (they are not models).
 
 
 def materialize_prior(value: Any) -> Distribution:
@@ -119,10 +114,10 @@ def materialize_prior(value: Any) -> Distribution:
 
     Construction only wraps Python floats and never evaluates a JAX op, which
     is what lets :func:`astrogwb.paper.runtime.configure_runtime` still set the
-    host device count after a config has been validated. Unlike the previous
-    two-tag protocol, an unknown name is caught *after* numpyro is imported
-    rather than before -- importing numpyro is not backend initialization, and
-    nothing on the DAG-construction path calls this.
+    host device count after a config has been validated. An unknown name is
+    caught *after* numpyro is imported rather than before -- importing numpyro
+    is not backend initialization, and nothing on the DAG-construction path
+    calls this.
     """
     # Every malformed-spec branch below raises ValueError even where the fault
     # is a wrong *type*, which is what TRY004 objects to. It is deliberate:
@@ -140,54 +135,22 @@ def materialize_prior(value: Any) -> Distribution:
             f"cannot materialize a prior from {type(value).__name__!r}; expected a "
             "spec mapping or a numpyro Distribution"
         )
-
-    extra = sorted({str(key) for key in value} - _PRIOR_SPEC_KEYS)
-    if extra:
-        raise ValueError(f"Extra inputs are not permitted for a prior spec: {extra}")
-    name = value.get("dist")
-    if not isinstance(name, str):
-        raise ValueError("a prior spec must name a distribution in 'dist'")  # noqa: TRY004
-    kwargs = value.get("kwargs")
-    if not isinstance(kwargs, Mapping):
-        raise ValueError(f"prior {name!r} must carry a 'kwargs' table")  # noqa: TRY004
-
-    cls = getattr(dist, name, None)
-    # `getattr` on a config-supplied string: the guard is what keeps it to
-    # distribution classes rather than any attribute the module happens to
-    # expose.
-    if not (isinstance(cls, type) and issubclass(cls, dist.Distribution)):
-        raise ValueError(f"{name!r} is not a numpyro distribution")  # noqa: TRY004
-
-    expected = set(cls.arg_constraints)
-    missing = sorted(expected - set(kwargs))
-    if missing:
-        raise ValueError(f"missing required key(s) {missing} for a {name} prior")
-    unexpected = sorted(set(kwargs) - expected)
-    if unexpected:
-        raise ValueError(
-            f"Extra inputs are not permitted for a {name} prior: {unexpected}"
-        )
-    return cls(**{key: float(val) for key, val in kwargs.items()})
+    try:
+        spec = PriorSpec.model_validate(dict(value))
+    except ValidationError as error:
+        # Re-raised as a plain ValueError: a ValidationError raised inside a
+        # validator is not re-wrapped with the outer field's location.
+        raise ValueError(f"invalid prior spec {dict(value)!r}: {error}") from None
+    return spec.build()
 
 
 def prior_to_spec(prior: Distribution) -> dict[str, Any]:
     """Serialize a materialized prior back to its wire-format spec.
 
-    Inverse of :func:`materialize_prior`. The constructor keyword names are
-    recovered from the class's own ``arg_constraints``, so this stays correct
-    for any distribution without a branch per type. The spec-constructed
-    distributions this module produces hold plain Python floats, so
-    ``float(...)`` never touches JAX.
+    Inverse of :func:`materialize_prior`; see
+    :meth:`astrogwb.metadata.PriorSpec.from_distribution`.
     """
-    import numpyro.distributions as dist
-
-    if not isinstance(prior, dist.Distribution):
-        raise TypeError(f"cannot serialize {type(prior).__name__!r} as a prior spec")
-    cls = type(prior)
-    return {
-        "dist": cls.__name__,
-        "kwargs": {key: float(getattr(prior, key)) for key in cls.arg_constraints},
-    }
+    return PriorSpec.from_distribution(prior).model_dump()
 
 
 if TYPE_CHECKING:

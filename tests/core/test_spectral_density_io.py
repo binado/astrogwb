@@ -16,11 +16,17 @@ from astrogwb.catalog._io import (
     SPECTRAL_DENSITY_DATASETS,
     SPECTRAL_DENSITY_FORMAT_NAME,
 )
-from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
+from astrogwb.metadata import (
+    PopulationMetadata,
+    PriorSpec,
+    SpectraMetadata,
+    WaveformMetadata,
+)
 
 
 def _catalog(**overrides: Any) -> SpectralDensityCatalog:
     use_taper = bool(overrides.pop("use_taper_in_tidal_corrections", True))
+    declared = overrides.pop("declared", {"H0": 67.0, "local_merger_rate": 800.0})
     waveform = WaveformMetadata(
         approximant="IMRPhenomXAS_NRTidalv3",
         minimum_frequency=20.0,
@@ -44,7 +50,7 @@ def _catalog(**overrides: Any) -> SpectralDensityCatalog:
             "H0": np.array([67.0, 67.0]),
             "local_merger_rate": np.array([800.0, 800.0]),
         },
-        "_metadata": CatalogMetadata(
+        "_metadata": SpectraMetadata(
             waveform=waveform,
             population=PopulationMetadata(
                 model_name="bns_md_cosmological",
@@ -55,9 +61,11 @@ def _catalog(**overrides: Any) -> SpectralDensityCatalog:
                 },
                 seed=7,
             ),
+            hyperparameters=declared,
+            num_draws=2,
+            observation_time=1.0,
+            n_max_sigma=5.0,
         ),
-        "n_max_sigma": 5.0,
-        "observation_time": 1.0,
     }
     return SpectralDensityCatalog(**{**fields, **overrides})
 
@@ -107,8 +115,11 @@ def test_round_trip_preserves_spectra_and_provenance(tmp_path: Path) -> None:
         ]
         assert "average_mode" not in handle.attrs
         assert handle.attrs["observation_time"] == 1.0
+        assert handle.attrs["astrogwb_version"] == expected.version
 
     actual = SpectralDensityCatalog.load(path)
+    assert actual.metadata == expected.metadata
+    assert actual.metadata.key() == expected.metadata.key()
     np.testing.assert_array_equal(actual.frequencies, expected.frequencies)
     np.testing.assert_array_equal(actual.spectral_density, expected.spectral_density)
     np.testing.assert_array_equal(actual.n_events, expected.n_events)
@@ -164,13 +175,62 @@ def test_unknown_format_and_domain_are_rejected(tmp_path: Path) -> None:
         SpectralDensityCatalog.load(path)
 
 
-def test_legacy_format_is_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy", ["v1", "v3"])
+def test_legacy_format_is_rejected(tmp_path: Path, legacy: str) -> None:
     path = tmp_path / "legacy.h5"
     _catalog().save(path)
     with h5py.File(path, "r+") as handle:
-        handle.attrs["format_name"] = "astrogwb_spectral_density_v1"
+        handle.attrs["format_name"] = f"astrogwb_spectral_density_{legacy}"
     with pytest.raises(ValueError, match="format_name"):
         SpectralDensityCatalog.load(path)
+
+
+def test_sampled_hyperparameter_round_trips_with_its_prior(tmp_path: Path) -> None:
+    prior = PriorSpec(dist="Uniform", kwargs={"low": 700.0, "high": 900.0})
+    expected = _catalog(
+        declared={"H0": 67.0, "local_merger_rate": prior},
+        hyperparameters={
+            "H0": np.array([67.0, 67.0]),
+            "local_merger_rate": np.array([750.0, 820.0]),
+        },
+    )
+    path = tmp_path / "sampled.h5"
+    expected.save(path)
+
+    actual = SpectralDensityCatalog.load(path)
+    assert actual.metadata.sampled == {"local_merger_rate": prior}
+    assert actual.metadata.key() == expected.metadata.key()
+    np.testing.assert_array_equal(
+        actual.hyperparameters["local_merger_rate"], [750.0, 820.0]
+    )
+
+
+def test_fixed_hyperparameter_column_must_repeat_its_value() -> None:
+    with pytest.raises(ValueError, match="local_merger_rate.*fixed"):
+        _catalog(
+            hyperparameters={
+                "H0": np.array([67.0, 67.0]),
+                "local_merger_rate": np.array([800.0, 801.0]),
+            }
+        )
+
+
+def test_hyperparameter_columns_must_match_the_metadata() -> None:
+    with pytest.raises(ValueError, match="do not match"):
+        _catalog(hyperparameters={"H0": np.array([67.0, 67.0])})
+
+
+def test_draw_count_must_match_the_metadata() -> None:
+    with pytest.raises(ValueError, match="draws"):
+        _catalog(
+            spectral_density=np.ones((3, 4)),
+            n_events=np.array([1, 2, 3]),
+            total_merger_rate=np.ones(3),
+            hyperparameters={
+                "H0": np.full(3, 67.0),
+                "local_merger_rate": np.full(3, 800.0),
+            },
+        )
 
 
 def test_hyperparameters_must_be_serialized_as_float64(tmp_path: Path) -> None:
@@ -200,8 +260,6 @@ def test_unknown_population_is_rejected_on_load(tmp_path: Path) -> None:
         ("n_events", np.array([1, 2, 3]), "n_events"),
         ("total_merger_rate", np.array([1.0]), "total_merger_rate"),
         ("frequencies", np.zeros((2, 2)), "one-dimensional"),
-        ("observation_time", 0.0, "observation_time"),
-        ("n_max_sigma", -1.0, "n_max_sigma"),
     ],
 )
 def test_malformed_fields_are_rejected_at_construction(

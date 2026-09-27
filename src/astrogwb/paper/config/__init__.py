@@ -72,7 +72,7 @@ from astrogwb.paper.utils import load_mapping
 if TYPE_CHECKING:
     from numpyro.distributions import Distribution
 
-    from astrogwb.metadata import PopulationMetadata
+    from astrogwb.metadata import PopulationMetadata, WaveformMetadata
     from astrogwb.populations.registry import Population
     from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -83,6 +83,7 @@ __all__ = [
     "population_model",
     "priors",
     "waveform_generator",
+    "waveform_metadata",
 ]
 
 
@@ -195,10 +196,21 @@ def waveform_generator(
     package via ``config.runs``. Ripple construction initializes the XLA
     backend, so this is not safe to call before ``configure_runtime``.
     """
+    return waveform_metadata(root, **kwargs).build()
+
+
+def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetadata:
+    """The waveform settings ``config/waveform.json`` declares, as a record.
+
+    What :func:`waveform_generator` builds, before it is built: the form a
+    :class:`~astrogwb.metadata.SpectraMetadata` or a catalog request carries.
+    Keyword arguments override the file and are validated, not trusted.
+    Touches no JAX, so it is safe before ``configure_runtime``.
+    """
     from astrogwb.metadata import WaveformMetadata
 
     settings = {**_load((root or Path()) / WAVEFORM_PATH, "waveform"), **kwargs}
-    return WaveformMetadata.model_validate(settings).build()
+    return WaveformMetadata.model_validate(settings)
 
 
 def population_model(root: Path | None = None, **kwargs: float) -> Population:
