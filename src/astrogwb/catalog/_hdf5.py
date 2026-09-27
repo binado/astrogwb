@@ -7,12 +7,7 @@ them, plus a handful of flat datasets. What is here is the h5py mechanics that
 shape implies, so the two readers differ only where the formats genuinely
 differ.
 
-The metadata codecs themselves are not here. Each record encodes itself --
-:meth:`astrogwb.waveform.PolarizationPowerGenerator.to_attrs` and
-:meth:`astrogwb.metadata.PopulationMetadata.to_attrs` -- over the scalar and
-JSON primitives in :mod:`astrogwb._attrs`, which imports no h5py. That is what
-keeps the waveform and population layers free of a serialization dependency,
-and leaves this module as the one place that opens a file.
+Metadata is stored as Pydantic JSON by the format-specific readers and writers.
 """
 
 from __future__ import annotations
@@ -22,8 +17,6 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import ArrayLike
-
-from astrogwb._attrs import scalar_attr
 
 try:
     import h5py
@@ -37,7 +30,6 @@ except ImportError as error:  # pragma: no cover
 #: guard message included: a reader importing it from here cannot bypass the
 #: try above.
 __all__ = [
-    "decoded_attrs",
     "h5py",
     "require_datasets",
     "write_h5",
@@ -59,14 +51,6 @@ def write_h5(
             handle.create_dataset(
                 name, data=np.asarray(values), compression=compression
             )
-
-
-def decoded_attrs(handle: h5py.Group) -> dict[str, str | int | float]:
-    """Read every root attribute, reduced to plain Python scalars."""
-    return {
-        str(name): scalar_attr(value, name=str(name))
-        for name, value in handle.attrs.items()
-    }
 
 
 def require_datasets(

@@ -1,16 +1,8 @@
-"""Decoding and encoding for the scalar attributes an HDF5 artifact carries.
+"""HDF5 layout checks and the named-column matrix encoding.
 
-h5py hands back NumPy scalars and, for older files, bytes; HDF5 attributes
-themselves hold only scalars and small arrays. Every persisted artifact in this
-package therefore reduces its metadata to ``str``/``int``/``float`` and encodes
-anything structured as JSON. This module is that codec, and the
-``{name: column} <-> (row, column) matrix`` pattern both formats use for their
-named parameter arrays.
-
-It touches no h5py: everything here operates on values a reader has already
-pulled out of a file, or values a writer is about to put in. That is what lets
-:mod:`astrogwb.metadata` serialize itself without the population
-layer taking on an optional dependency.
+Metadata serialization belongs to Pydantic. These helpers handle format
+identity and the ordered column names persisted alongside numerical arrays.
+They operate on file values without importing h5py.
 """
 
 from __future__ import annotations
@@ -25,12 +17,9 @@ from numpy.typing import ArrayLike, NDArray
 __all__ = [
     "DOMAIN_FREQUENCY",
     "FORMAT_NAME_ATTR",
-    "int_attr",
     "json_array_attr",
-    "json_object_attr",
     "require_attrs",
     "require_format",
-    "scalar_attr",
     "stack_columns",
     "unstack_columns",
 ]
@@ -40,44 +29,6 @@ __all__ = [
 #: one clear message instead of a cascade of missing names.
 FORMAT_NAME_ATTR = "format_name"
 DOMAIN_FREQUENCY = "frequency"
-
-
-def scalar_attr(value: Any, *, name: str) -> str | int | float:
-    """Reduce one raw attribute value to a plain Python scalar.
-
-    Booleans are rejected rather than widened to ``int``: an attribute that
-    reads back as ``True`` is a writer bug, and silently accepting it would let
-    a seed of ``True`` round-trip as ``1``.
-    """
-    if isinstance(value, bytes):
-        return value.decode()
-    if isinstance(value, np.str_):
-        return str(value)
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, np.floating):
-        return float(value)
-    if isinstance(value, bool) or not isinstance(value, str | int | float):
-        raise TypeError(
-            f"attribute {name!r} must be a str, non-boolean int, or float scalar"
-        )
-    return value
-
-
-def int_attr(value: Any, *, label: str, name: str) -> int:
-    """Read one attribute that must be a non-boolean integer."""
-    scalar = scalar_attr(value, name=name)
-    if isinstance(scalar, bool) or not isinstance(scalar, int):
-        raise TypeError(f"{label}: {name} must be an int")
-    return scalar
-
-
-def json_object_attr(value: Any, *, label: str, name: str) -> dict[str, Any]:
-    """Decode one attribute that must hold a JSON object."""
-    decoded = _json(value, label=label, name=name)
-    if not isinstance(decoded, dict):
-        raise TypeError(f"{label}: attribute {name!r} must decode to a JSON object")
-    return decoded
 
 
 def json_array_attr(value: Any, *, label: str, name: str) -> list[Any]:

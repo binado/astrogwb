@@ -1,14 +1,7 @@
 """Direct HDF5 persistence for the two catalog formats.
 
-Both writers stamp the same three metadata blocks -- format identity, the
-waveform descriptor, and the population record -- and differ only in their
-datasets and in the handful of attributes each artifact alone carries. The two
-shared blocks encode themselves: see
-:meth:`astrogwb.waveform.PolarizationPowerGenerator.to_attrs` and
-:meth:`astrogwb.metadata.PopulationMetadata.to_attrs`, with the h5py mechanics
-in :mod:`astrogwb.catalog._hdf5`. What is here is per-format: which datasets
-exist, which attributes are required, the shape and dtype checks a reader
-enforces before constructing a record.
+Both writers store their complete Pydantic record in a root ``metadata``
+JSON attribute. Dataset layout and column ordering remain format-specific.
 
 Structural validation is deliberately split. Cross-field invariants -- axis
 agreement, draw counts, the uniform grid -- belong to each record's
@@ -25,21 +18,18 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from astrogwb._attrs import (
     DOMAIN_FREQUENCY,
     FORMAT_NAME_ATTR,
-    int_attr,
     json_array_attr,
-    json_object_attr,
     require_attrs,
     require_format,
     stack_columns,
     unstack_columns,
 )
 from astrogwb.catalog._hdf5 import (
-    decoded_attrs,
     h5py,
     require_datasets,
     write_h5,
@@ -49,11 +39,8 @@ from astrogwb.catalog.spectral_density import (
     SpectralDensityCatalog,
 )
 from astrogwb.metadata import (
-    POPULATION_ATTRS,
     CatalogMetadata,
-    PopulationMetadata,
     SpectraMetadata,
-    WaveformMetadata,
 )
 
 __all__ = [
@@ -73,26 +60,10 @@ PARAMETER_NAMES_ATTR = "source_parameter_names"
 # --------------------------------------------------------------------- #
 # Polarization-power catalogs
 # --------------------------------------------------------------------- #
-CATALOG_FORMAT_NAME = "astrogwb_catalog_v8"
+CATALOG_FORMAT_NAME = "astrogwb_catalog_v9"
 CATALOG_DATASETS = ("frequency", "polarization_power", "source_parameters")
 
-#: Measured from the ``frequency`` dataset on write and never read back --
-#: the dataset is the truth, and the descriptor's ``frequency_resolution`` is
-#: only what was *asked for*. It is stamped so the realized bin width can be
-#: read off a file without loading its arrays.
-DF_ATTR = "df"
-POPULATION_NUM_SAMPLES_ATTR = "population_num_samples"
-POPULATION_PARAMS_ATTR = "population_params"
-#: The package version that generated the arrays. Part of a catalog's cache
-#: key, so a file must say which code produced it; added in v8.
-VERSION_ATTR = "astrogwb_version"
-
-REQUIRED_CATALOG_ATTRS = (
-    *POPULATION_ATTRS,
-    POPULATION_NUM_SAMPLES_ATTR,
-    POPULATION_PARAMS_ATTR,
-    VERSION_ATTR,
-)
+METADATA_ATTR = "metadata"
 
 
 def save_polarization_power_catalog(
@@ -101,7 +72,7 @@ def save_polarization_power_catalog(
     *,
     compression: str | None = None,
 ) -> None:
-    """Write one catalog in the v8 direct-HDF5 format."""
+    """Write one catalog in the v9 direct-HDF5 format."""
     names, source_parameters = stack_columns(
         catalog.source_parameters, rows=catalog.num_samples
     )
@@ -109,12 +80,7 @@ def save_polarization_power_catalog(
     attrs: dict[str, str | int | float] = {
         FORMAT_NAME_ATTR: CATALOG_FORMAT_NAME,
         "domain": DOMAIN_FREQUENCY,
-        **metadata.waveform.to_attrs(),
-        DF_ATTR: catalog.df,
-        **metadata.population.to_attrs(),
-        POPULATION_NUM_SAMPLES_ATTR: metadata.num_samples,
-        POPULATION_PARAMS_ATTR: json.dumps(metadata.fiducials, sort_keys=True),
-        VERSION_ATTR: metadata.version,
+        METADATA_ATTR: metadata.model_dump_json(),
         PARAMETER_NAMES_ATTR: json.dumps(names),
     }
     write_h5(
@@ -136,29 +102,12 @@ def load_polarization_power_catalog[C: PolarizationPowerCatalog](
     label = Path(path).name
     with h5py.File(path, "r") as handle:
         validate_catalog_file(handle, label=label)
-        attrs = decoded_attrs(handle)
+        attrs = handle.attrs
         names = json_array_attr(
             attrs[PARAMETER_NAMES_ATTR], label=label, name=PARAMETER_NAMES_ATTR
         )
-        population = PopulationMetadata.from_attrs(attrs, label=label)
+        metadata = _read_metadata(handle, CatalogMetadata, label=label)
         power = np.asarray(handle["polarization_power"])
-        try:
-            metadata = CatalogMetadata(
-                waveform=WaveformMetadata.from_attrs(attrs, label=label),
-                population=population,
-                fiducials={
-                    name: float(value)
-                    for name, value in json_object_attr(
-                        attrs[POPULATION_PARAMS_ATTR],
-                        label=label,
-                        name=POPULATION_PARAMS_ATTR,
-                    ).items()
-                },
-                num_samples=int(power.shape[1]),
-                version=str(attrs[VERSION_ATTR]),
-            )
-        except ValidationError as error:
-            raise ValueError(f"{label}: invalid catalog metadata: {error}") from error
         catalog = cls(
             source_parameters=unstack_columns(
                 np.asarray(handle["source_parameters"]), names
@@ -167,7 +116,7 @@ def load_polarization_power_catalog[C: PolarizationPowerCatalog](
             frequencies=np.asarray(handle["frequency"]),
             _metadata=metadata,
         )
-    population.check_registered()
+    metadata.population.check_registered()
     return catalog
 
 
@@ -183,7 +132,7 @@ def validate_catalog_file(handle: h5py.File | h5py.Group, *, label: str) -> None
     frequency = handle["frequency"]
     if frequency.ndim != 1:
         raise ValueError(f"{label}: frequency dataset must be one-dimensional")
-    WaveformMetadata.from_attrs(decoded_attrs(handle), label=label)
+    metadata = _read_metadata(handle, CatalogMetadata, label=label)
     power = handle["polarization_power"]
     if power.ndim != 2 or power.shape[0] != frequency.shape[0]:
         raise ValueError(
@@ -201,22 +150,10 @@ def validate_catalog_file(handle: h5py.File | h5py.Group, *, label: str) -> None
     if source.dtype != np.dtype(np.float64):
         raise ValueError(f"{label}: 'source_parameters' must be serialized as float64")
 
-    require_attrs(
-        handle.attrs,
-        REQUIRED_CATALOG_ATTRS,
-        label=label,
-        kind="population metadata",
-        hint="; regenerate this catalog",
-    )
-    count = int_attr(
-        handle.attrs[POPULATION_NUM_SAMPLES_ATTR],
-        label=label,
-        name=POPULATION_NUM_SAMPLES_ATTR,
-    )
-    if count != source.shape[0]:
+    if metadata.num_samples != source.shape[0]:
         raise ValueError(
-            f"{label}: population_num_samples ({count}) does not match the sample "
-            f"dimension ({source.shape[0]})"
+            f"{label}: metadata num_samples ({metadata.num_samples}) does not match "
+            f"the sample dimension ({source.shape[0]})"
         )
     names = _column_names(handle.attrs, label=label, columns=source.shape[1])
     if REDSHIFT_SITE not in names:
@@ -226,31 +163,13 @@ def validate_catalog_file(handle: h5py.File | h5py.Group, *, label: str) -> None
 # --------------------------------------------------------------------- #
 # Spectral-density catalogs
 # --------------------------------------------------------------------- #
-SPECTRAL_DENSITY_FORMAT_NAME = "astrogwb_spectral_density_v4"
+SPECTRAL_DENSITY_FORMAT_NAME = "astrogwb_spectral_density_v5"
 SPECTRAL_DENSITY_DATASETS = (
     "frequency",
     "spectral_density",
     "n_events",
     "total_merger_rate",
     "hyperparameters",
-)
-
-N_MAX_SIGMA_ATTR = "n_max_sigma"
-OBSERVATION_TIME_ATTR = "observation_time"
-#: Each hyperparameter's declaration, as a JSON object: a number for a fixed
-#: value, a ``{"dist", "kwargs"}`` spec for a prior. Added in v4, with the
-#: version, so a file records every field of its
-#: :class:`~astrogwb.metadata.SpectraMetadata` and hence its own cache key.
-HYPERPARAMETER_PRIORS_ATTR = "hyperparameter_priors"
-
-#: What a spectra file must carry. There is no optional tier: an older format
-#: is rejected by name, so every attribute is required outright.
-REQUIRED_SPECTRAL_DENSITY_ATTRS = (
-    *POPULATION_ATTRS,
-    N_MAX_SIGMA_ATTR,
-    OBSERVATION_TIME_ATTR,
-    HYPERPARAMETER_PRIORS_ATTR,
-    VERSION_ATTR,
 )
 
 
@@ -268,15 +187,8 @@ def save_spectral_density_catalog(
     attrs: dict[str, str | int | float] = {
         FORMAT_NAME_ATTR: SPECTRAL_DENSITY_FORMAT_NAME,
         "domain": DOMAIN_FREQUENCY,
-        **metadata.waveform.to_attrs(),
-        **metadata.population.to_attrs(),
+        METADATA_ATTR: metadata.model_dump_json(),
         PARAMETER_NAMES_ATTR: json.dumps(names),
-        N_MAX_SIGMA_ATTR: metadata.n_max_sigma,
-        OBSERVATION_TIME_ATTR: metadata.observation_time,
-        HYPERPARAMETER_PRIORS_ATTR: json.dumps(
-            metadata.model_dump(mode="json")["hyperparameters"], sort_keys=True
-        ),
-        VERSION_ATTR: metadata.version,
     }
     write_h5(
         path,
@@ -299,28 +211,12 @@ def load_spectral_density_catalog[C: SpectralDensityCatalog](
     label = Path(path).name
     with h5py.File(path, "r") as handle:
         validate_spectral_density_file(handle, label=label)
-        attrs = decoded_attrs(handle)
+        attrs = handle.attrs
         names = json_array_attr(
             attrs[PARAMETER_NAMES_ATTR], label=label, name=PARAMETER_NAMES_ATTR
         )
-        population = PopulationMetadata.from_attrs(attrs, label=label)
+        metadata = _read_metadata(handle, SpectraMetadata, label=label)
         spectral_density = np.asarray(handle["spectral_density"])
-        try:
-            metadata = SpectraMetadata(
-                waveform=WaveformMetadata.from_attrs(attrs, label=label),
-                population=population,
-                hyperparameters=json_object_attr(
-                    attrs[HYPERPARAMETER_PRIORS_ATTR],
-                    label=label,
-                    name=HYPERPARAMETER_PRIORS_ATTR,
-                ),
-                num_draws=int(spectral_density.shape[0]),
-                observation_time=float(attrs[OBSERVATION_TIME_ATTR]),
-                n_max_sigma=float(attrs[N_MAX_SIGMA_ATTR]),
-                version=str(attrs[VERSION_ATTR]),
-            )
-        except ValidationError as error:
-            raise ValueError(f"{label}: invalid spectra metadata: {error}") from error
         catalog = cls(
             spectral_density=spectral_density,
             frequencies=np.asarray(handle["frequency"]),
@@ -331,7 +227,7 @@ def load_spectral_density_catalog[C: SpectralDensityCatalog](
             ),
             _metadata=metadata,
         )
-    population.check_registered()
+    metadata.population.check_registered()
     return catalog
 
 
@@ -346,13 +242,7 @@ def validate_spectral_density_file(
         domain=DOMAIN_FREQUENCY,
     )
     require_datasets(handle, SPECTRAL_DENSITY_DATASETS, label=label)
-    WaveformMetadata.from_attrs(decoded_attrs(handle), label=label)
-    require_attrs(
-        handle.attrs,
-        REQUIRED_SPECTRAL_DENSITY_ATTRS,
-        label=label,
-        kind="population metadata",
-    )
+    _read_metadata(handle, SpectraMetadata, label=label)
 
     hyperparameters = handle["hyperparameters"]
     if hyperparameters.ndim != 2:
@@ -367,6 +257,17 @@ def validate_spectral_density_file(
 # --------------------------------------------------------------------- #
 # Shared between the two readers
 # --------------------------------------------------------------------- #
+def _read_metadata[M: BaseModel](
+    handle: h5py.File | h5py.Group, model: type[M], *, label: str
+) -> M:
+    """Validate the complete JSON record, identifying the file on failure."""
+    require_attrs(handle.attrs, (METADATA_ATTR,), label=label, kind="catalog metadata")
+    try:
+        return model.model_validate_json(handle.attrs[METADATA_ATTR])
+    except (ValidationError, TypeError, ValueError) as error:
+        raise ValueError(f"{label}: invalid catalog metadata: {error}") from error
+
+
 def _column_names(attrs: Any, *, label: str, columns: int) -> list[str]:
     """Read the column-name list and check it describes the stacked matrix."""
     names = json_array_attr(

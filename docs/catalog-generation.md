@@ -278,23 +278,18 @@ generated and saved under the metadata's key.
 
 ## Catalogs record the density that drew them
 
-Each catalog stores the complete population declaration, as HDF5 attributes
-written once at generation time:
+Each catalog stores its complete `CatalogMetadata` in a single root HDF5
+attribute, written once at generation time:
 
-```text
-population_model         = "bns_md_cosmological"
-population_model_kwargs  = '{"n_grid": 4096, "maximum_redshift": 20.0, "minimum_redshift": 0.0}'
-population_params        = '{"H0": 67.66, "Omega_m": 0.3096, "gamma": 1.42,
-                             "kappa": 4.62, "local_merger_rate": 770.0,
-                             "z_peak": 1.84}'
-population_seed          = 41
-population_num_samples   = 32768
+```python
+handle.attrs["metadata"] = catalog.metadata.model_dump_json()
 ```
 
-HDF5 attributes are flat scalars, so the mappings travel as JSON strings. The
-`population_*` block is one `PopulationMetadata`, the same record a
-spectral-density catalog carries, which is what keeps the two formats spelling
-these fields identically.
+The JSON record nests `waveform` and `population`, and includes `fiducials`,
+`num_samples`, and `version`. The population records its registered
+`model_name`, construction `model_kwargs`, and `seed`. Loading reads the
+attribute with `CatalogMetadata.model_validate_json()`; Pydantic handles the
+serialization and validation without a field-by-field HDF5 codec.
 
 What is *not* stored is a callable: `PolarizationPowerCatalog.get_population()`
 looks the name up in the registry and binds the recorded settings, returning
@@ -318,9 +313,8 @@ file. What still matters is that one value covers both sides of a ratio — a
 proposal density computed with the mass factors excluded, reweighted against a
 target that includes them, gives silently wrong weights with no shape error
 anywhere — which is why `build_importance_spectrum` takes it once and threads
-that one value into both callables it returns. Catalogs written before this
-moved still carry a `population_density_sites` attribute; the reader names the
-attributes it wants, so it is simply not read.
+that one value into both callables it returns. Older catalog formats that
+stored this choice require regeneration.
 
 ### What loading checks
 
@@ -331,11 +325,13 @@ what is registered, and a construction setting the population does not take
 raises `TypeError`. It does not serialize a callable or require the analysis
 run configuration.
 
-The format is `astrogwb_catalog_v8`, a direct HDF5 file. Root attributes hold
-the waveform and population metadata (JSON is used for mappings and ordered
-lists) and `astrogwb_version`, the package version that generated the arrays;
-`frequency`, `polarization_power`, and `source_parameters` are HDF5
-datasets. Earlier formats require regeneration.
+The format is `astrogwb_catalog_v9`, a direct HDF5 file. Its four root
+attributes are `format_name`, `domain`, `metadata`, and
+`source_parameter_names` (a JSON list ordering the parameter matrix columns).
+`frequency`, `polarization_power`, and `source_parameters` remain HDF5
+datasets. The metadata JSON includes the package version that generated the
+arrays. The derived `df` is not stored; it is measured from `frequency`.
+Earlier formats require regeneration.
 
 ## The catalog cache
 
@@ -358,11 +354,19 @@ workflow hands it by path).
 
 The version is in the key so that code changes invalidate the cache -- but
 only if it is bumped. Bump `version` in `pyproject.toml` whenever a change
-alters what a population draw or a waveform generator produces. The recorded density-site and
+alters what a population draw or a waveform generator produces. The
 source-parameter order is preserved on load and when narrowing the redshift
 window.
 
-The waveform attributes record `frequency_resolution` -- what was *requested*
+This persistence change leaves the package version and content-key algorithms
+unchanged because generated scientific values are unchanged. Existing files
+therefore remain at the same cache paths and fail loading if they use an old
+format. Explicitly remove affected legacy files in `outputs/catalogs/` and
+`outputs/spectra/`, then rerun their generation commands or workflow targets.
+Neither the loader nor `simulate` migrates or replaces them automatically.
+Canonical JSON hashing is separate from the Pydantic JSON stored in the file.
+
+The waveform metadata records `frequency_resolution` -- what was *requested*
 of the generating backend -- while the bin width used in every integral is
 measured from the `frequency` dataset itself (`PolarizationPowerCatalog.df`);
 the backend chooses the actual grid, so the two can differ.
@@ -370,7 +374,7 @@ the backend chooses the actual grid, so the two can differ.
 ## The spectral-density format
 
 The sibling artifact is a `SpectralDensityCatalog`, format
-`astrogwb_spectral_density_v4`. It persists the forward model's
+`astrogwb_spectral_density_v5`. It persists the forward model's
 *contraction* rather than the power it contracts, so a run that only needs
 predicted spectra never materializes `(F, N)` waveforms.
 
@@ -428,20 +432,15 @@ caller that needs a source model no record can name -- the
 | `total_merger_rate` | `(draws,)` | that draw's observer-frame total rate |
 | `hyperparameters` | `(draws, P)` | the value each row was drawn at, one column per name, ordered by `source_parameter_names` |
 
-Its root attributes are the same three blocks a power catalog stamps -- format
-identity, the waveform attributes, and the `PopulationMetadata` -- plus the rest
-of the `SpectraMetadata`, so a file records its own key:
-
-```
-n_max_sigma           = 5.0    # sized the static plate the Poisson count was capped against
-observation_time      = 1.0    # years; set the Poisson mean
-hyperparameter_priors = '{"H0": 67.66, "local_merger_rate": {"dist": "Normal", ...}, ...}'
-astrogwb_version      = "0.1.0"
-```
+Its four root attributes are also `format_name`, `domain`, `metadata`, and
+`source_parameter_names`. Here `metadata` is the complete
+`SpectraMetadata.model_dump_json()` record, including each hyperparameter's
+fixed value or prior, the draw count, observation time, plate depth, and package
+version. The reader uses `SpectraMetadata.model_validate_json()`.
 
 The two formats differ in what a row is, and that is the whole difference. A
 power catalog's sample axis indexes *sources* drawn once at one set of
-hyperparameters, recorded as scalar `population_params` fiducials. A
+hyperparameters, recorded as `fiducials` in the metadata JSON. A
 spectral-density catalog's row axis indexes *draws* of the whole forward model,
 so its hyperparameters are a column per name. A fixed hyperparameter's column
 must repeat its value; a sampled one's holds each row's draw.
