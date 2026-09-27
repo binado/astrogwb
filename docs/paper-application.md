@@ -66,9 +66,9 @@ config/runs/<experiment>/<run>.json             the run override
 ```
 
 The seven shared run layers are one file per top-level block of a run config,
-each a single-key object whose key is its own stem. They are JSON so that `jq`
-can fold a block in the shell without importing the package, and three of them
-are read by more than the workflow: the notebooks and figure scripts consume
+each a single-key object whose key is its own stem. They are JSON, merged by
+`knf` (which the `knf` CLI also exposes in the shell), and three of them are
+read by more than the workflow: the notebooks and figure scripts consume
 the same bytes through `astrogwb.paper.config.fiducials()` / `priors()` /
 `networks()`. Each accessor takes keyword overrides merged over the file, so a
 notebook can vary one value without editing JSON or retyping the table.

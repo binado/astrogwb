@@ -14,9 +14,9 @@ A run config is three layers merged in order:
 1. ``config/runs/<experiment>/_base.json`` -- the experiment override.
 2. ``config/runs/<experiment>/<run>.json`` -- the run override.
 
-Every layer is JSON, which is what lets ``jq`` fold a run config in the shell
--- and what lets :func:`~astrogwb.paper.utils.load_mapping` be one parser
-rather than three.
+Every layer is JSON. :func:`merge_config_layers` folds them with ``knf``, the
+engine behind the ``knf`` CLI, so the shell and Python spell one merge rule:
+``knf <layers> --shallow 'priors.*'`` prints what a run resolves to.
 
 A run also owns its catalogs. ``[analysis.catalog]`` holds a partial spec per
 role, and :func:`resolve_catalog_blocks` completes it from the run's own
@@ -26,28 +26,30 @@ role, and :func:`resolve_catalog_blocks` completes it from the run's own
 :data:`EXPERIMENT_BASE` is required in every experiment directory rather than
 optional: a conditional Snakemake input complicates the DAG for no gain.
 
-There is no assembled-config artifact. Every *run* entrypoint is handed its
-layer files on argv (see :func:`add_config_arguments`) and merges them in
-process; :func:`assemble_run` is the convenience wrapper for the notebooks and
+There is no assembled-config artifact. Every *run* entrypoint, ``run_mcmc``
+included, is handed its layer files on argv (see :func:`add_config_arguments`)
+and merges them in process; :func:`assemble_run` is the convenience wrapper for the notebooks and
 for the validation gate, which address a run by name rather than by path.
 ``scripts/generate_catalog.py`` is handed a resolved request as JSON instead.
 
-**stdlib only, and deliberately so.** Resolution here is plain dict merging,
-so it has one implementation that the ``Snakefile``, ``RunConfig`` and the
-notebooks all share. Validating and keying the result -- which reaches
-pydantic -- lives in :mod:`astrogwb.paper.config.catalogs`.
+**stdlib plus knf, and deliberately so.** Resolution here is plain dict
+merging, so it has one implementation that the ``Snakefile``, ``RunConfig`` and
+the notebooks all share.
+Validating and keying the result -- which reaches pydantic -- lives in
+:mod:`astrogwb.paper.config.catalogs`.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrogwb.paper.utils import deep_merge, load_mapping
+import knf
+
+from astrogwb.paper.utils import deep_merge, require_json
 
 if TYPE_CHECKING:
     from astrogwb.paper.plotting import Network
@@ -63,8 +65,7 @@ CONFIG_DIR = Path("config")
 #: a single-key object whose key is its own stem. ``fiducials``, ``priors`` and
 #: ``networks`` are also read directly by the notebooks and figure scripts
 #: through `astrogwb.paper.config`. All five are ordinary merge layers, so
-#: nothing here special-cases them, and all five are JSON so that `jq` can
-#: read them without importing the package.
+#: nothing here special-cases them.
 ANALYSIS_PATH = CONFIG_DIR / "analysis.json"
 FIDUCIALS_PATH = CONFIG_DIR / "fiducials.json"
 NETWORKS_PATH = CONFIG_DIR / "networks.json"
@@ -103,48 +104,31 @@ SPECTRA_ROOT = BASE_OUT_DIR / "spectra"
 FIGURES_DIR = BASE_OUT_DIR / "figures"
 
 
-def _merge_run_overlay(
-    base: Mapping[str, Any], override: Mapping[str, Any]
-) -> dict[str, Any]:
-    """Merge a run overlay, replacing named prior tables wholesale.
-
-    ``deep_merge`` key-merges nested mappings, which leaves stale ``low`` /
-    ``high`` behind when a uniform prior is replaced by a normal one. Each
-    ``[priors.<param>]`` table in ``override`` replaces the base spec instead.
-    """
-    overlay_priors = override.get("priors")
-    merged = deep_merge(
-        base, {key: value for key, value in override.items() if key != "priors"}
-    )
-    if not isinstance(overlay_priors, Mapping):
-        return merged
-    priors = dict(merged.get("priors") or {})
-    for name, spec in overlay_priors.items():
-        priors[name] = dict(spec) if isinstance(spec, Mapping) else spec
-    merged["priors"] = priors
-    return merged
+#: The one exception to a deep merge, as a ``knf`` key-path glob: each
+#: ``[priors.<param>]`` table replaces the inherited one wholesale. A run that
+#: swaps a uniform prior for a normal one must not key-merge onto it and keep
+#: the uniform's ``low`` / ``high`` beside ``loc`` / ``scale``.
+#: ``tests/paper/test_runs.py`` shows the deep merge failing on the one run
+#: that overrides a prior.
+PRIOR_SHALLOW = "priors.*"
 
 
 def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
     """Fold run-config layer files into one raw mapping, in the order given.
 
-    This is a *run-config* parser, not generic config infrastructure: it folds
-    :func:`_merge_run_overlay`, whose prior-replacement rule is domain-specific.
-    A run that swaps a uniform prior for a normal one must not inherit the
-    uniform's ``low`` / ``high``, and a plain deep merge would leave them
-    behind.
+    A deep merge, left to right -- arrays and scalars replace -- except at
+    :data:`PRIOR_SHALLOW`. This is a *run-config* parser, not generic config
+    infrastructure: the prior rule is domain-specific. The shared layers
+    declare disjoint top-level blocks, so one fold serves every layer.
 
     Order is the caller's responsibility and it is not recoverable from the
-    result, so it is logged. Applying the same fold to the shared layers is a
-    no-op difference from a plain deep merge -- they declare disjoint top-level
-    blocks -- so one function serves every layer.
+    result, so :func:`load_merged_config` logs it.
     """
     if not paths:
         raise ValueError("no config layers given")
-    merged: dict[str, Any] = {}
     for path in paths:
-        merged = _merge_run_overlay(merged, load_mapping(path))
-    return merged
+        require_json(path)
+    return knf.load(list(paths), shallow=PRIOR_SHALLOW)
 
 
 def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
@@ -410,103 +394,13 @@ def add_config_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-#: What each shared block is, for the ``--<block>`` flags below. Keyed by
-#: layer stem, which is also the block name and the flag name: one list, so a
-#: block cannot be named one thing in a file and another on argv.
-BLOCK_DESCRIPTIONS: dict[str, str] = {
-    "analysis": (
-        "observing time, frequency band, target population, sampled "
-        "parameters, likelihood, and the two catalogs"
-    ),
-    "fiducials": "the fiducial value of every parameter",
-    "networks": "each detector network by name, resolved to analysis.detectors",
-    "priors": "the prior on every parameter",
-    "sampler": "the sampling RNG seed and the NUTS settings",
-    "waveform": "the waveform settings every catalog of this run inherits",
-    "population": (
-        "the population every catalog of this run is drawn from, unless a "
-        "role overrides it"
-    ),
-}
-
-
-#: The ``jq`` program that folds one block out of an ordered layer list, per
-#: block. One operator each is the whole merge rule: ``*`` is a recursive
-#: merge, which is :func:`~astrogwb.paper.utils.deep_merge` exactly, and
-#: ``priors`` uses ``+`` -- a shallow merge -- so an overridden
-#: ``[priors.<param>]`` table replaces the inherited one rather than
-#: key-merging a normal prior onto a uniform one and leaving stale ``low`` /
-#: ``high`` behind. That is :func:`_merge_run_overlay`'s rule, stated once per
-#: block rather than as a carve-out inside one program.
-#:
-#: They live here, not in the ``Snakefile``, because they are the shell
-#: spelling of this module's own fold: two implementations of one rule, pinned
-#: against each other by ``tests/paper/test_runs.py`` over every run.
-BLOCK_FOLDS: dict[str, str] = {
-    block: (
-        f"map(.{block} // {{}}) | reduce .[] as $b ({{}}; . "
-        f"{'+' if block == 'priors' else '*'} $b)"
-    )
-    for block in BLOCK_DESCRIPTIONS
-}
-
-
-def json_block(raw: str) -> dict[str, Any]:
-    """Parse one merged config block off argv, rejecting anything but an object.
-
-    The argparse type behind :func:`add_block_arguments`. A ``jq`` fold that
-    failed substitutes an empty argument, which fails here rather than being
-    acted on as an empty block.
-    """
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise argparse.ArgumentTypeError(f"not valid JSON: {error}") from None
-    if not isinstance(value, dict):
-        raise argparse.ArgumentTypeError(
-            f"expected a JSON object, got {type(value).__name__}"
-        )
-    return value
-
-
-def add_block_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add one ``--<block>`` flag per shared layer, taking merged JSON.
-
-    The alternative to :func:`add_config_arguments` for an entrypoint that
-    wants the blocks rather than the layer paths: the workflow folds each block
-    with ``jq`` and passes it here, the way ``generate_catalog.py`` is already
-    handed its merged catalog blocks. The flags are derived from
-    :data:`ROOT_LAYERS`, so the file, the block and the flag share one name by
-    construction.
-    """
-    for path in ROOT_LAYERS:
-        block = path.stem
-        parser.add_argument(
-            f"--{block}",
-            required=True,
-            type=json_block,
-            metavar="JSON",
-            help=f"The merged [{block}] block: {BLOCK_DESCRIPTIONS[block]}.",
-        )
-
-
-def load_config_blocks(args: argparse.Namespace) -> dict[str, Any]:
-    """Reassemble the ``--<block>`` flags into one raw config mapping.
-
-    No merge happens here: each block arrives already folded across every layer
-    that declares it, so this is the inverse of the split
-    :func:`add_block_arguments` describes.
-    """
-    return {path.stem: getattr(args, path.stem) for path in ROOT_LAYERS}
-
-
 def load_merged_config(args: argparse.Namespace) -> dict[str, Any]:
     """Merge the ``--config`` layers an entrypoint was handed, order preserved.
 
     Merge order is the caller's to get right now that no single function owns
     it, and a wrong-but-valid order fails silently, so the resolved order is
-    logged before the merge and recorded next to every chain by
-    ``scripts/run_mcmc.py``.
+    logged before the merge. The workflow passes :func:`run_config_paths`, which
+    is the order by construction.
     """
     paths: list[Path] = list(args.config)
     logger.info(

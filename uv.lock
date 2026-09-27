@@ -3,16 +3,16 @@ revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'linux'",
-    "python_full_version == '3.13.*' and sys_platform == 'linux'",
-    "python_full_version < '3.13' and sys_platform == 'linux'",
     "python_full_version >= '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
     "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'linux'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 
@@ -237,12 +237,14 @@ notebook = [
     { name = "h5py" },
     { name = "matplotlib" },
     { name = "pandas" },
+    { name = "pyknf" },
     { name = "scipy" },
 ]
 paper = [
     { name = "arviz", extra = ["h5netcdf"] },
     { name = "gwmock-pop" },
     { name = "h5py" },
+    { name = "pyknf" },
 ]
 simulation = [
     { name = "gwmock-pop" },
@@ -258,6 +260,7 @@ dev = [
     { name = "jupytext" },
     { name = "marimo" },
     { name = "nbconvert" },
+    { name = "pyknf" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },
@@ -277,6 +280,7 @@ slurm = [
     { name = "jupytext" },
     { name = "marimo" },
     { name = "nbconvert" },
+    { name = "pyknf" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },
@@ -289,6 +293,7 @@ test = [
     { name = "pytest-xdist" },
 ]
 workflow = [
+    { name = "pyknf" },
     { name = "snakemake" },
 ]
 
@@ -314,6 +319,7 @@ requires-dist = [
     { name = "numpyro", specifier = ">=0.21.0" },
     { name = "pandas", marker = "extra == 'notebook'", specifier = ">=2.0" },
     { name = "pydantic", specifier = ">=2.11" },
+    { name = "pyknf", marker = "extra == 'paper'", specifier = ">=0.5,<0.6" },
     { name = "ripplegw", specifier = ">=0.3.1" },
     { name = "scipy", marker = "extra == 'notebook'", specifier = ">=1.10" },
 ]
@@ -326,6 +332,7 @@ dev = [
     { name = "jupytext", specifier = ">=1.19" },
     { name = "marimo", specifier = ">=0.24.2" },
     { name = "nbconvert", specifier = ">=7.16" },
+    { name = "pyknf", specifier = ">=0.5,<0.6" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.1" },
@@ -345,6 +352,7 @@ slurm = [
     { name = "jupytext", specifier = ">=1.19" },
     { name = "marimo", specifier = ">=0.24.2" },
     { name = "nbconvert", specifier = ">=7.16" },
+    { name = "pyknf", specifier = ">=0.5,<0.6" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.16.1" },
@@ -356,7 +364,10 @@ test = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
 ]
-workflow = [{ name = "snakemake", specifier = ">=9.24.0" }]
+workflow = [
+    { name = "pyknf", specifier = ">=0.5,<0.6" },
+    { name = "snakemake", specifier = ">=9.24.0" },
+]
 
 [[package]]
 name = "astropy"
@@ -3309,6 +3320,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/02/a5/5197bfd06417837ac079921c66fa6393f1dea3557272a263cebfef69e432/pyjwt-2.15.0.tar.gz", hash = "sha256:b11c5f9791d7bf51c2b39a81ed669f6b2dbbd669df2942f6c60167e9e3d1abe4", size = 120513, upload-time = "2026-09-23T16:56:00.689Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e8/55/40e45bf052ee8ee12a4dfd785519660f8effa7b065442b91646ec6828619/pyjwt-2.15.0-py3-none-any.whl", hash = "sha256:7a3742debf6b879e912dbb9819ceec1594be812452b78c5f2e2dfc56564954f8", size = 33680, upload-time = "2026-09-23T16:55:59.241Z" },
+]
+
+[[package]]
+name = "pyknf"
+version = "0.5.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/b2/f876c90fa6cd99b1720ba357fd331823f0696e29b5ff334988637a56bad4/pyknf-0.5.0-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:c4cb8b6d677eaaa460682f93216ef751dda0e959e4150bc6f77322cf4bb87460", size = 693944, upload-time = "2026-09-27T20:33:36.49Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/07/69994691aac0223822f1a22b74e4e594119679eb7c312418e7f12353cb68/pyknf-0.5.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:458dd52b61e2c9214cd1c66a677d3c42d2d4863acc0c03da5a4cf3ec6d825172", size = 675218, upload-time = "2026-09-27T20:33:37.942Z" },
+    { url = "https://files.pythonhosted.org/packages/82/18/b0994915fed34f52f658c60c3ce76c3d6755a20835f4c519d95d8bdb5e22/pyknf-0.5.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:76d15ee944e068b5087060e63567ecb2f656cffd268f3de5d0f09f85845d9f5f", size = 698493, upload-time = "2026-09-27T20:33:38.909Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/d4/7d5b61a4a5f667855c31d451e8370c6ecaadbc973947e4b205cd2387ed4d/pyknf-0.5.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8f5014ee99f6a1f7271af43e3980109e7f821b58716ff4b461e16cb832b17f80", size = 741225, upload-time = "2026-09-27T20:33:40.037Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/d8/7a4b00c4724b9d72528273334dfdd1749255bf7fb7997b8af28a255a414e/pyknf-0.5.0-cp39-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:3a67e3c6b3889de151ba2b02d4091cedc4d25176077cc210dd939c247fdc8344", size = 877091, upload-time = "2026-09-27T20:33:41.228Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/cc/ebb3fef3e2ea9c97076d4aead57855cbcc39cd2fe455becf6354c47b22a1/pyknf-0.5.0-cp39-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:9f4c5d8956b9c28b6b6f70170eab0517e05725fe3789bdc0ebbbf2e773af5b56", size = 956377, upload-time = "2026-09-27T20:33:42.214Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/cc/7599213ab4ba598c2ffb9f62eff86592e29b90e6e78b92da76318204290b/pyknf-0.5.0-cp39-abi3-win_amd64.whl", hash = "sha256:7d4b4fc76de24a772a59e63eefdd7bc7ce51627d61b28c0229abb82d5027626d", size = 665400, upload-time = "2026-09-27T20:33:43.238Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/06/67a285db1e25f47f869e74114a059a7f4d326602f1a0360d377b4a5f5c4f/pyknf-0.5.0-cp39-abi3-win_arm64.whl", hash = "sha256:8b5fadf3f87309aff5a4d36928eb02589a02c732b5050eb17d375ac29c0111c5", size = 628537, upload-time = "2026-09-27T20:33:44.189Z" },
 ]
 
 [[package]]
