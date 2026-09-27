@@ -41,8 +41,7 @@ One rule does the whole thing: it hands `scripts/generate_catalog.py` the
 resolved request as JSON, which draws the registered population in-process and
 generates waveforms for those rows. The rule declares no config inputs: the
 path *is* the request's key, so editing anything a catalog is drawn from --
-`config/waveform.json`, `config/population.json`, `config/fiducials.json`, a
-role's spec, or the `astrogwb` version -- names a new file rather than
+the run's `[waveform]`, `[population]` or `[fiducials]`, a role's spec, or the `astrogwb` version -- names a new file rather than
 invalidating the old one. `just catalogs --orphans` lists the files left behind.
 The `--allowed-rules` filter keeps catalog generation explicit. MCMC commands
 omit these rules, so a missing catalog stops MCMC with a
@@ -53,9 +52,9 @@ what a catalog records about itself.
 
 ## Experiment workflow
 
-[`config/runs/`](../config/runs/) holds one `_base.json` per experiment and one
-JSON file per run, over the seven shared `config/*.json` layers. `run_mcmc`
-declares those layers as its own `input:` and passes them, in merge order, as
+[`config/runs/`](../config/runs/) holds one `_base.toml` per experiment and one
+TOML file per run, over the shared `config/defaults.toml`. `run_mcmc` declares
+those three layers as its own `input:` and passes them, in merge order, as
 repeated `--config` flags; the script merges them in process with `knf`, then
 writes:
 
@@ -65,11 +64,11 @@ outputs/chains/<experiment>/<run>.json    the config it was sampled with
 ```
 
 There is no intermediate assembled config, and deleting that rule cost nothing:
-its `input:` was already exactly these three files, so it only turned files the
-chain already depended on into a JSON copy of themselves. Re-run granularity is
-unchanged -- the rule is a per-run wildcard on `{experiment}/{run}`, so editing
-a run's TOML retriggers exactly its own chain and editing a `base/` file
-retriggers all 27.
+its `input:` was already exactly these files, so it only turned files the
+chain already depended on into a copy of themselves. The rule is a per-run
+wildcard on `{experiment}/{run}`, so editing a run's file retriggers exactly
+its own chain, editing a `_base.toml` retriggers its experiment, and editing
+`config/defaults.toml` retriggers all 27.
 
 That granularity is what removed the stale-input wrapper the old workflow
 needed: one rule used to emit all 27 configs at once, so any edit invalidated

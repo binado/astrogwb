@@ -46,32 +46,33 @@ Filenames are the mapping for runs, and catalogs are named by the content
 hash of what a run asks for, so there is no registry file:
 
 ```text
-config/population.json                          the population a run's catalogs
-                                                are drawn from by default
-config/fiducials.json                           fiducial value of every parameter
-                                                (also the values a run's
-                                                catalogs are drawn at)
-config/priors.json                              prior on every parameter
-config/networks.json                            each detector network, by name
-config/analysis.json                            band, target population, catalogs
-config/sampler.json                             RNG seed and the NUTS defaults
-config/waveform.json                            [waveform] a run's catalogs share
-config/plotting.json                            LaTeX labels and savefig settings
+config/defaults.toml                            every block's shared default:
+                                                [analysis] band, target population,
+                                                  catalogs
+                                                [fiducials] every parameter (also
+                                                  what catalogs are drawn at)
+                                                [networks] each detector network
+                                                [priors] every parameter's prior
+                                                [sampler] RNG seed, NUTS defaults
+                                                [waveform] / [population] what a
+                                                  run's catalogs are drawn with
+config/plotting.toml                            LaTeX labels and savefig settings
                                                 (presentation; not a run layer)
-config/runs/<experiment>/_base.json             the experiment override
-config/runs/<experiment>/<run>.json             the run override
+config/runs/<experiment>/_base.toml             the experiment override
+config/runs/<experiment>/<run>.toml             the run override
   -> outputs/chains/<experiment>/<run>.nc       the chain
   -> outputs/chains/<experiment>/<run>.json     the config it was sampled with
   -> outputs/catalogs/<key>.h5                  one per distinct catalog it asks for
 ```
 
-The seven shared run layers are one file per top-level block of a run config,
-each a single-key object whose key is its own stem. They are JSON, merged by
-`knf` (which the `knf` CLI also exposes in the shell), and three of them are
-read by more than the workflow: the notebooks and figure scripts consume
-the same bytes through `astrogwb.paper.config.fiducials()` / `priors()` /
-`networks()`. Each accessor takes keyword overrides merged over the file, so a
-notebook can vary one value without editing JSON or retyping the table.
+A run is three TOML layers: `config/defaults.toml`, its experiment's
+`_base.toml`, and its own file, merged by `knf` (which the `knf` CLI also
+exposes in the shell). Each file opens with a comment saying what it is for.
+Several shared blocks are read by more than the workflow: the notebooks and
+figure scripts consume the same bytes through
+`astrogwb.paper.config.fiducials()` / `priors()` / `networks()`. Each accessor
+takes keyword overrides merged over the file, so a notebook can vary one value
+without editing TOML or retyping the table.
 
 There is no intermediate assembled config. The layers are merged in process by
 whatever runs -- the workflow passes them on argv as repeated `--config` flags,

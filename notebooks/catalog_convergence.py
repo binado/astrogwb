@@ -203,7 +203,7 @@ OMEGA_CATALOG_PATH = NOTEBOOK_DIR / (
 # catalog for analytic inclination averaging during the spectral contraction.
 
 # %%
-#: `config/fiducials.json`, read rather than restated. The generating
+#: the shared `[fiducials]` table, read rather than restated. The generating
 #: population ignores the propagation entries it carries -- modified
 #: propagation is target-side only, and at `xi_0 = 1` the two agree exactly --
 #: because a source model indexes `params` by name. This is the same table a

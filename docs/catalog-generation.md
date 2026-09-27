@@ -17,7 +17,7 @@ A run declares *what* each of its two catalogs draws, and the file is named by
 a hash of that declaration:
 
 ```text
-config/runs/<experiment>/<run>.json [analysis.catalog.<role>]
+config/runs/<experiment>/<run>.toml [analysis.catalog.<role>]
     -> CatalogMetadata  ->  outputs/catalogs/<metadata.key()>.h5
 ```
 
@@ -47,11 +47,12 @@ run's own blocks, and a role overrides only what differs:
 }
 ```
 
-The inherited blocks are three run layers:
+The inherited blocks are three of the run's merged blocks, each defaulted in
+`config/defaults.toml`:
 
-1. `config/waveform.json` — the `[waveform]` settings every catalog shares.
+1. `[waveform]` — the settings every catalog shares.
    Only `waveform-approximant/TaylorF2` overrides anything here (the
-   approximant). The stored band matches `config/analysis.json`'s
+   approximant). The stored band matches `[analysis]`'s
    `minimum_frequency` and `maximum_frequency`: the catalog grid *is* the array
    every model is evaluated on, and a run's band selects bins on it with a mask
    rather than compressing it. `sampling_frequency` is the waveform backend's
@@ -61,12 +62,12 @@ The inherited blocks are three run layers:
    Schwarzschild ISCO value); naming it alongside a Ripple approximant is
    rejected. `astrogwb.paper.config.waveform_generator()` builds the same
    generator for a notebook.
-2. `config/population.json` — the population a catalog is drawn from unless a
+2. `[population]` — the population a catalog is drawn from unless a
    role overrides it: `model_name`, a key in the `astrogwb.populations`
    registry, and `model_kwargs`, the construction settings bound into it. This
    top-level `[population]` is the *draw* default; the analysis target is
    `analysis.population`, a separate block. It declares no `seed`.
-3. `config/fiducials.json` — the hyperparameters the draw is made at: the run's
+3. `[fiducials]` — the hyperparameters the draw is made at: the run's
    own merged `[fiducials]`, so the injection is drawn at exactly the values the
    run initializes at. `time-delay` sets `delay_slope = -1` once, as a run
    fiducial, and its injection inherits it.
@@ -106,7 +107,7 @@ changes with it, so the next `snakemake catalogs` regenerates everything.
 A catalog names a population by its key in the `astrogwb.populations`
 registry, and supplies the construction kwargs it takes -- the guarded proposal
 above, for example. The redshift window and grid resolution are inherited from
-`config/population.json` and the hyperparameters from `config/fiducials.json`;
+the shared `[population]` table and the hyperparameters from the shared `[fiducials]` table;
 `model_kwargs` is one mapping, deep-merged across layers and passed whole to the
 factory. The population declares its density factors and source outputs.
 
@@ -412,7 +413,7 @@ spectra = simulate(metadata, SpectrumGenerator(batch_size=1024), SPECTRA_ROOT)
 ```
 
 A hyperparameter is a number to fix it for every draw, or a
-`{"dist", "kwargs"}` spec -- the `config/priors.json` format, validated by
+`{"dist", "kwargs"}` spec -- the format of the shared `[priors]` table, validated by
 `astrogwb.metadata.PriorSpec` -- to draw it independently once per row. Priors
 are data, so an edited bound re-keys the draws without a version bump. The seed
 is split into a hyperparameter key and a forward-model key; with priors, the
@@ -453,7 +454,7 @@ the registry. Earlier formats require regeneration.
 
 The recorded settings are the *generation* window, `[0.0, 20.0]`. The analysis
 window is narrower — `analysis.population.model_kwargs.minimum_redshift = 0.3`
-in `config/analysis.json` — so the per-sample log density cannot be
+in the shared `[analysis]` table — so the per-sample log density cannot be
 baked into the catalog: it depends on a truncation the run chooses, not on
 anything generation knows.
 

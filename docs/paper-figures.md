@@ -11,7 +11,7 @@ compared by more than one figure are the one shared piece, and they live in
 `(run name, LaTeX label)` pairs -- a network's label stays there because
 nothing reads it without also needing the order it sits in.
 
-Values live in [`config/plotting.json`](../config/plotting.json): the LaTeX
+Values live in [`config/plotting.toml`](../config/plotting.toml): the LaTeX
 label for each *parameter*, plus `figure_dpi` and `figure_format`. Scripts
 reach them through `astrogwb.paper.plotting.parameter_label`,
 `figure_dpi` and `figure_format`. Parameter labels used to be declared
@@ -38,7 +38,7 @@ the `[networks]` table those same layers carry. The detectors a figure reports
 an SNR for are therefore always the ones its chain was sampled with.
 
 That indirection is deliberate. Every network run happens to be named after the
-network it uses, so looking the legend name up in `config/networks.json`
+network it uses, so looking the legend name up in the shared `[networks]` table
 directly would give the same answer today -- but that is a property of the
 current tree, not a derivation. Going through the run means a run that changed
 its `network` moves the figure with it, instead of the figure quietly
@@ -111,12 +111,12 @@ The fiducial injection spectrum, network $S_{\mathrm{eff}}$, $\sigma$ overlay,
 and per-network SNR figures live in
 [`notebooks/fiducial_spectrum.py`](../notebooks/fiducial_spectrum.py) rather
 than the DAG. That notebook resolves no run config: it reads the shared
-fiducials and detector networks from `config/fiducials.json` and
-`config/networks.json` through `astrogwb.paper.config`, and the ordered network
+fiducials and detector networks from the shared `[fiducials]` and `[networks]`
+tables through `astrogwb.paper.config`, and the ordered network
 legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS`, but keeps its analysis
 window (`observation_time`, the frequency band, and the redshift bounds) and
 local plotting choices as literals of its own. Those mirror
-`config/analysis.json`, so editing that file does not change these figures --
+the shared `[analysis]` table, so editing that table does not change these figures --
 update the notebook's configuration cell too.
 
 ```bash

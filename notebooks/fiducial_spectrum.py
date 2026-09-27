@@ -91,15 +91,15 @@ def _():
     use_paper_style(root=ROOT_DIR)
 
     #: Where this notebook's figures go: under the one output root the workflow,
-    #: the figure scripts and `config/plotting.json` all agree on.
+    #: the figure scripts and `config/plotting.toml` all agree on.
     BASE_DIR = ROOT_DIR / FIGURES_DIR / "fiducial_spectrum"
 
-    # The whole fiducial point, from config/fiducials.json: the hyperparameters
+    # The whole fiducial point, from the shared [fiducials] table: the hyperparameters
     # the draw is taken at, and the H0 the Omega_GW conversion reads. `root=`
     # because the accessors resolve paths against the working directory.
     FIDUCIALS = fiducials(root=ROOT_DIR)
 
-    # Mirrors config/analysis.json. The frequency band is [analysis]; the
+    # Mirrors the shared [analysis] table. The frequency band is [analysis]; the
     # redshift bounds are analysis.population.model_kwargs. The approximant
     # and observation time are the controls in the next cells.
     minimum_frequency = 2.0
@@ -116,7 +116,7 @@ def _():
 
     # Ordered legend from astrogwb.paper.plotting.DETECTOR_NETWORKS -- a network's
     # label lives there because nothing reads it without the order it sits in --
-    # with each detector list resolved through config/networks.json. Order is
+    # with each detector list resolved through the shared [networks] table. Order is
     # load-bearing: detector_network_styles assigns a color by first appearance of
     # each base network name, so reordering recolors the curves and breaks the match
     # with the other network figures.
@@ -171,7 +171,7 @@ def _():
         value="Omega_GW",
         label="Plot spectrum",
     )
-    # Notebook-only: config/waveform.json is a catalog layer, so its 1 Hz
+    # Notebook-only: the shared [waveform] table is a catalog block, so its 1 Hz
     # resolution stays put. Finer grids resolve the SNR peak at ~5-10 Hz,
     # where 1 Hz bins leave only a handful of points per e-fold.
     frequency_resolution_choice = mo.ui.dropdown(
