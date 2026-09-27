@@ -70,7 +70,7 @@ GRID_PAIRS: tuple[tuple[str, str], ...] = (
 #: This figure asks "over what range of parameters does importance sampling
 #: against the proposal still work", which is a wider question than "what does
 #: the analysis assume". `Omega_m` is the one parameter where the two part
-#: company: `config/priors.json` gives it Normal(0.3096, 0.006), a Planck-tight
+#: company: the shared `[priors]` give it Normal(0.3096, 0.006), a Planck-tight
 #: constraint whose eps / 1-eps quantiles span about 0.004, so scanning it
 #: would show a flat patch rather than where the proposal degrades. Every other
 #: parameter scans its own prior, which is why this table has one entry and not
@@ -85,7 +85,7 @@ def grid_priors() -> tuple[
 ]:
     """The distribution scanned on each axis, per panel.
 
-    Sourced from `config/priors.json` so the axes match what the runs actually
+    Sourced from the shared `[priors]` so the axes match what the runs actually
     sample, except where `GRID_SCAN_RANGES` says otherwise.
     """
     inference = priors()

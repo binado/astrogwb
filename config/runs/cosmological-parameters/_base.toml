@@ -1,0 +1,3 @@
+[sampler]
+num_warmup = 500
+dense_mass = false

@@ -1,6 +1,6 @@
 """A prior over one hyperparameter, as a serializable record.
 
-The wire format is the one ``config/priors.json`` has always used::
+The wire format is the one every paper-config ``[priors]`` entry has always used::
 
     {"dist": "<numpyro.distributions class name>", "kwargs": {...}}
 

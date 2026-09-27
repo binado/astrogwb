@@ -29,7 +29,7 @@ def catalog_path(key: str) -> str:
 CATALOG_PATTERN = str(CATALOGS_DIR / "{catalog}.h5")
 
 
-# Filenames are the mapping for runs: config/runs/<experiment>/<run>.json ->
+# Filenames are the mapping for runs: config/runs/<experiment>/<run>.toml ->
 # outputs/chains/<experiment>/<run>.nc. Catalogs are content-addressed instead:
 # each run's [analysis.catalog] roles resolve to a CatalogMetadata, and its key
 # names outputs/catalogs/<key>.h5. Two runs asking for the same draw share
@@ -197,9 +197,9 @@ rule run_mcmc:
     """Sample one run into outputs/chains/<experiment>/<run>.nc."""
     input:
         script="scripts/run_mcmc.py",
-        # The same layers `assemble_config` used to declare, so re-run
-        # granularity is unchanged: edit a leaf -> one chain; edit
-        # config/sampler.json -> all 27. The catalogs are named by key, so an
+        # The run's three layers: edit a leaf -> one chain; edit an
+        # experiment's _base.toml -> that experiment; edit
+        # config/defaults.toml -> all 27. The catalogs are named by key, so an
         # edit to a draw reaches the chain through a new catalog path too.
         config=lambda w: config_layers(w.experiment, w.run),
         injection=run_catalog_input("injection"),
@@ -268,7 +268,7 @@ rule plot_cosmological_parameters:
         ),
         omega_m_chain="outputs/chains/cosmological-parameters/H0-Omega_m.nc",
         catalog=INJECTION_CATALOG,
-        # The layers of a run this figure actually plots, and the run TOMLs
+        # The layers of a run this figure actually plots, and the run files
         # behind --network-run.
         config=config_layers("cosmological-parameters", "ET-2L-aligned-CE-Hanford"),
         network_configs=network_config_inputs("cosmological-parameters"),

@@ -28,7 +28,7 @@ PAPER_POPULATION = population_metadata(REPO_ROOT, seed=41, n_grid=256)
 PAPER_MODEL = PAPER_POPULATION.model_name
 PAPER_MODEL_KWARGS: dict[str, float | int] = dict(PAPER_POPULATION.model_kwargs)
 
-#: The hyperparameters fixtures draw at: ``config/fiducials.json``, which is
+#: The hyperparameters fixtures draw at: the shared ``[fiducials]``, which is
 #: what a real catalog inherits. It carries ``xi_0`` / ``xi_n`` that
 #: ``bns_md_cosmological`` never reads -- source models index ``params`` by
 #: name, so the extra entries are inert here exactly as they are in generation.

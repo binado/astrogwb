@@ -12,11 +12,12 @@ delete one explicitly.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
-from astrogwb.paper.config.runs import ROOT_LAYERS, assemble_run
+import tomli_w
+
+from astrogwb.paper.config.runs import DEFAULTS_PATH, assemble_run
 
 # One sampled parameter (H0) on a three-detector network: the smallest assembly
 # that still carries a prior, a full [fiducials] table, and real detectors.
@@ -31,7 +32,7 @@ def example_raw() -> dict[str, Any]:
 
 #: The smallest ``[analysis]`` and ``[sampler]`` blocks that validate. Neither
 #: is what any test using them is about -- they exist because
-#: `base_config_paths` requires every shared layer to be present.
+#: `base_config_paths` requires a complete shared layer.
 _MINIMAL_ANALYSIS: dict[str, Any] = {
     "minimum_frequency": 2.0,
     "maximum_frequency": 2048.0,
@@ -62,7 +63,7 @@ _MINIMAL_POPULATION: dict[str, Any] = {
 }
 
 
-def write_root_layers(
+def write_defaults(
     root: Path,
     *,
     analysis: dict[str, Any] | None = None,
@@ -73,17 +74,13 @@ def write_root_layers(
     waveform: dict[str, Any] | None = None,
     population: dict[str, Any] | None = None,
 ) -> None:
-    """Write minimal shared ``config/*.json`` layers into a scratch tree.
+    """Write a minimal shared ``config/defaults.toml`` into a scratch tree.
 
-    Every path helper goes through `base_config_paths`, which requires all of
-    :data:`ROOT_LAYERS`, so a tmp_path tree that exercises the run or catalog
-    layers needs each one to exist even when the test says nothing about it.
-    Defaults are the smallest mappings that parse; pass a block explicitly when
-    the test is about its content.
-
-    Each file is keyed by its own stem, which is the layer-0 convention rather
-    than a convenience here: a test tree that broke it would not be exercising
-    the real one.
+    Every path helper goes through `base_config_paths`, which requires
+    :data:`DEFAULTS_PATH`, so a tmp_path tree that exercises the run or catalog
+    layers needs every block to exist even when the test says nothing about
+    it. Defaults are the smallest mappings that parse; pass a block explicitly
+    when the test is about its content.
     """
     tables: dict[str, Any] = {
         "analysis": analysis if analysis is not None else _MINIMAL_ANALYSIS,
@@ -96,8 +93,6 @@ def write_root_layers(
         "waveform": waveform if waveform is not None else _MINIMAL_WAVEFORM,
         "population": population if population is not None else _MINIMAL_POPULATION,
     }
-    for path in ROOT_LAYERS:
-        key = path.stem
-        target = root / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps({key: tables[key]}), encoding="utf-8")
+    target = root / DEFAULTS_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(tomli_w.dumps(tables), encoding="utf-8")

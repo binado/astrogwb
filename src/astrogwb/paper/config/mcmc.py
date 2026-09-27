@@ -175,7 +175,7 @@ PriorDistribution = Annotated[
 class AnalysisPopulation(BaseModel):
     """The population a run's sampled hyperparameters describe.
 
-    Shaped like ``config/population.json``'s block -- ``model_name`` and the
+    Shaped like the shared ``[population]`` block -- ``model_name`` and the
     flat ``model_kwargs`` :func:`~astrogwb.populations.build_population` is
     given -- but it is deliberately *not* a
     :class:`~astrogwb.metadata.PopulationMetadata`. That record describes a
@@ -224,7 +224,7 @@ class AnalysisConfig(BaseModel):
     model_config = _STRICT
 
     #: Resolved by `RunConfig._resolve_network` from the [networks] table that
-    #: `config/networks.json` contributes to every run's merge. Required, and
+    #: `config/defaults.toml` contributes to every run's merge. Required, and
     #: recorded by `RunConfig.save`: the chain's own config must say which
     #: detectors it was sampled with, not just which name they were reached by.
     detectors: tuple[str, ...]
@@ -268,8 +268,8 @@ class SamplerConfig(BaseModel):
     model_config = _STRICT
 
     #: The sampling RNG seed. It belongs to the sampler rather than to the run
-    #: as a whole, which is what lets `config/sampler.json` be the single-key
-    #: layer its stem names.
+    #: as a whole, so a run changes it by overriding `[sampler]` like any other
+    #: sampler setting.
     seed: int = 42
     num_warmup: Annotated[int, Field(gt=0)]
     num_samples: Annotated[int, Field(gt=0)]
@@ -292,7 +292,7 @@ class OutputConfig(BaseModel):
 class CatalogPopulation(BaseModel):
     """A population block: a registered name and its construction kwargs.
 
-    The shape of ``config/population.json``'s ``[population]`` block, which is
+    The shape of the shared ``[population]`` block, which is
     the default every catalog of a run is drawn from. No seed: that belongs to
     a particular draw, and each role in ``[analysis.catalog]`` states its own.
     """
@@ -365,8 +365,8 @@ class RunConfig(BaseModel):
     def _resolve_network(cls, data: Any) -> Any:
         """Turn ``analysis.network`` into ``analysis.detectors``, dropping the table.
 
-        ``config/networks.json`` is a merge layer, so the lookup table arrives
-        in the same mapping as the run that names one -- resolution is a pure
+        The shared ``[networks]`` table is merged like any other block, so the
+        lookup table arrives in the same mapping as the run that names one -- resolution is a pure
         function of the merged config and needs no file I/O, which is what
         keeps this module stdlib+pydantic.
 

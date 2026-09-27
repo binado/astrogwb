@@ -7,7 +7,7 @@ freshly introduced copy agrees on the day it is written and only diverges
 later. ``notebooks/`` is also outside ``[tool.ty.src].include``, so for the
 notebook this is the only automated guard there is.
 
-What drifted, before ``config/priors.json`` owned it:
+What drifted, before the shared ``[priors]`` table owned it:
 
 - ``notebooks/mcmc.py`` sampled ``local_merger_rate`` under
   ``Uniform(7.6, 250.0)`` while naming 770.0 as its fiducial -- a prior that
@@ -43,7 +43,7 @@ CONSUMERS = (
 #: convergence study, not an inference -- so the distribution rule below does
 #: not apply to it. Its one `dist` call is the Gaussian *likelihood* of the
 #: measured spectrum, which is a model, not a copied prior. It is still held to
-#: the table rule above: it draws its catalog at `config/fiducials.json`.
+#: the table rule above: it draws its catalog at the shared `[fiducials]`.
 PRIOR_FREE_CONSUMERS = ("notebooks/catalog_convergence.py",)
 
 

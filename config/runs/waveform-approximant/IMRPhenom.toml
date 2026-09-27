@@ -1,0 +1,2 @@
+[analysis]
+catalog = { proposal = { seed = 41, num_samples = 32768 } }

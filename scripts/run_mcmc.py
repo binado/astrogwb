@@ -2,7 +2,7 @@
 
 This is the SLURM-friendly port of ``notebooks/mcmc.py``: it importance-reweights a
 fixed polarization-power catalog through NUTS to infer cosmological / population
-hyperparameters, reading every setting from a TOML or JSON config file and emitting
+hyperparameters, reading every setting from its TOML config layers and emitting
 only ``logging`` progress (no plots). It saves an ArviZ ``InferenceData`` NetCDF
 and, beside it, the defaults-filled config that produced it -- so the chain and
 the record of its settings travel together.
@@ -19,13 +19,10 @@ test guards that distinction. See the runtime helper for the ordering.
 
 Usage -- one ``--config`` per layer, in merge order::
 
-    RUN=config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json
-    BASE=config/runs/cosmological-parameters/_base.json
+    RUN=config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml
+    BASE=config/runs/cosmological-parameters/_base.toml
     uv run --extra paper python scripts/run_mcmc.py \
-        --config config/analysis.json --config config/fiducials.json \
-        --config config/networks.json --config config/priors.json \
-        --config config/sampler.json --config config/waveform.json \
-        --config config/population.json --config $BASE --config $RUN \
+        --config config/defaults.toml --config $BASE --config $RUN \
         --injection-catalog outputs/catalogs/<injection key>.h5 \
         --proposal-catalog outputs/catalogs/<proposal key>.h5
 
@@ -93,7 +90,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Headless NumPyro MCMC runner for the astrophysical GWB. Reads all "
-            "settings from its JSON config layers; saves an ArviZ NetCDF."
+            "settings from its TOML config layers; saves an ArviZ NetCDF."
         )
     )
     add_config_arguments(parser)
@@ -288,7 +285,7 @@ def save(
     idata = az.from_numpyro(mcmc)
 
     # The proposal density lives in the catalog file, not in the config, so the
-    # assembled JSON config does not carry it. Stamping the catalog's own
+    # merged config does not carry it. Stamping the catalog's own
     # population record -- narrowed to this run's analysis window -- keeps the
     # chain the complete, self-describing record of what was sampled.
     if proposal is not None:

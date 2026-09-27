@@ -17,12 +17,12 @@ time:
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import tomli_w
 from config_fixtures import example_raw
 
 from astrogwb.paper.config.mcmc import (
@@ -113,9 +113,9 @@ assert jax.device_count() == 2, f"backend initialized early: {jax.devices()}"
 print("backend-safe:", specs["H0"])
 """
     # The subprocess needs a config on disk; there is no committed one to point
-    # at, so write the assembled run config out as JSON.
-    config_path = tmp_path / "run.json"
-    config_path.write_text(json.dumps(example_raw()), encoding="utf-8")
+    # at, so write the assembled run config out as a TOML layer.
+    config_path = tmp_path / "run.toml"
+    config_path.write_text(tomli_w.dumps(example_raw()), encoding="utf-8")
 
     result = subprocess.run(
         [sys.executable, "-c", script, str(config_path)],

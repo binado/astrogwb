@@ -1,0 +1,68 @@
+[analysis]
+observation_time = 1.0
+minimum_frequency = 2.0
+maximum_frequency = 2048.0
+
+[analysis.population]
+model_name = "bns_md_modified_propagation"
+model_kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 256 }
+
+[analysis.catalog]
+injection = { seed = 41, num_samples = 32768 }
+proposal = { seed = 41, num_samples = 32768 }
+
+[fiducials]
+H0 = 67.66
+Omega_m = 0.3096
+xi_0 = 1.0
+xi_n = 1.91
+gamma = 1.42
+kappa = 4.62
+z_peak = 1.84
+local_merger_rate = 770.0
+minimum_mass = 1.0
+mass_width = 1.5
+
+[networks]
+ET-triangular = ["E1", "E2", "E3"]
+ET-triangular-CE-Hanford = ["E1", "E2", "E3", "C1"]
+ET-2L-aligned = ["S1", "R1"]
+ET-2L-aligned-CE-Hanford = ["S1", "R1", "C1"]
+ET-2L-misaligned = ["S2", "R2"]
+ET-2L-misaligned-CE-Hanford = ["S2", "R2", "C1"]
+
+[priors]
+H0 = { dist = "Uniform", kwargs = { low = 20.0, high = 140.0 } }
+Omega_m = { dist = "Normal", kwargs = { loc = 0.3096, scale = 0.006 } }
+xi_0 = { dist = "Uniform", kwargs = { low = 0.5, high = 5.0 } }
+xi_n = { dist = "Uniform", kwargs = { low = 0.3, high = 3.0 } }
+gamma = { dist = "Uniform", kwargs = { low = -10.0, high = 10.0 } }
+kappa = { dist = "Uniform", kwargs = { low = -10.0, high = 10.0 } }
+z_peak = { dist = "Uniform", kwargs = { low = 0.0, high = 2.5 } }
+local_merger_rate = { dist = "Normal", kwargs = { loc = 770.0, scale = 7.7 } }
+minimum_mass = { dist = "Uniform", kwargs = { low = 0.5, high = 1.5 } }
+mass_width = { dist = "Uniform", kwargs = { low = 0.5, high = 3.0 } }
+
+[sampler]
+seed = 42
+num_warmup = 1000
+num_samples = 2000
+num_chains = 4
+target_accept = 0.9
+dense_mass = true
+max_tree_depth = 10
+forward_mode_differentiation = false
+progress_bar = true
+jit_model_args = true
+
+[waveform]
+approximant = "IMRPhenomXAS_NRTidalv3"
+sampling_frequency = 8192.0
+minimum_frequency = 2.0
+maximum_frequency = 2048.0
+reference_frequency = 20.0
+frequency_resolution = 1.0
+
+[population]
+model_name = "bns_md_cosmological"
+model_kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 4096 }
