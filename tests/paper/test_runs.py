@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
+import knf
 import pytest
 from config_fixtures import write_root_layers
 from repo import REPO_ROOT
@@ -27,7 +26,6 @@ from astrogwb.paper.config.catalogs import (
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import (
     BASE_OUT_DIR,
-    BLOCK_FOLDS,
     CATALOGS_ROOT,
     CHAINS_ROOT,
     EXPERIMENT_BASE,
@@ -38,7 +36,6 @@ from astrogwb.paper.config.runs import (
     catalog_blocks,
     discover_runs,
     load_base,
-    load_config_blocks,
     merge_config_layers,
     run_config_paths,
 )
@@ -152,11 +149,11 @@ def test_run_config_paths_are_the_layers_in_merge_order() -> None:
 
 
 def test_every_shared_layer_is_one_block_named_after_its_stem() -> None:
-    """The layer-0 convention, which the per-block CLI and `jq` folds rely on.
+    """The layer-0 convention: one file per block, named after the block.
 
     A shared layer that declared two blocks, or a block whose name did not
-    match its filename, would make "one flag per block, one file per block"
-    false -- and `astrogwb.paper.config`'s accessors look the table up by stem.
+    match its filename, would make "one file per block" false -- and
+    `astrogwb.paper.config`'s accessors look the table up by stem.
     """
     for path in base_config_paths(REPO_ROOT):
         declared = json.loads(path.read_text(encoding="utf-8"))
@@ -192,6 +189,15 @@ def test_assemble_run_is_merge_config_layers_over_run_config_paths() -> None:
 def test_merge_config_layers_rejects_an_empty_layer_list() -> None:
     with pytest.raises(ValueError, match="no config layers"):
         merge_config_layers([])
+
+
+def test_merge_config_layers_rejects_an_all_toml_layer_list(tmp_path: Path) -> None:
+    """knf would merge TOML layers; the run config stays one format until moved."""
+    path = tmp_path / "analysis.toml"
+    path.write_text("[analysis]\nnetwork = 'demo'\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="config layers are JSON"):
+        merge_config_layers([path])
 
 
 def test_assembling_an_unknown_run_names_the_missing_file() -> None:
@@ -431,27 +437,19 @@ def test_the_validation_gate_covers_every_run() -> None:
         assert label in labels
 
 
-def test_run_mcmc_validates_the_blocks_the_workflow_folds() -> None:
-    """The whole path: `jq` folds the layers, `run_mcmc` parses and validates.
+def test_run_mcmc_validates_the_layers_the_workflow_passes() -> None:
+    """The whole path: the workflow's `--config` layers, parsed and validated.
 
-    `run_mcmc` is the one entrypoint handed blocks rather than layer paths, and
-    nothing else executes its CLI -- ty does not check `argparse.Namespace`
+    `run_mcmc` is the one entrypoint the workflow runs per chain, and nothing
+    else executes its CLI -- ty does not check `argparse.Namespace`
     attributes, so a renamed flag would surface only in a submitted job. The
     run chosen is the one that overrides a prior, so the shallow `[priors]`
-    fold has to survive validation and not merely parse.
+    merge has to survive validation and not merely parse.
     """
-    jq = shutil.which("jq")
-    if jq is None:
-        pytest.skip("jq is not installed")
-
     run_mcmc = _import_script("run_mcmc")
-    layers = [str(path) for path in run_config_paths("modified-propagation", "Xi_0-H0")]
     argv: list[str] = []
-    for block, program in BLOCK_FOLDS.items():
-        folded = subprocess.run(
-            [jq, "-s", program, *layers], capture_output=True, text=True, check=True
-        )
-        argv += [f"--{block}", folded.stdout]
+    for path in run_config_paths("modified-propagation", "Xi_0-H0"):
+        argv += ["--config", str(path)]
     argv += [
         "--injection-catalog",
         "outputs/catalogs/injection.h5",
@@ -462,9 +460,9 @@ def test_run_mcmc_validates_the_blocks_the_workflow_folds() -> None:
     ]
 
     args = run_mcmc.parse_args(argv)
-    config = build_run_config(load_config_blocks(args))
+    config = build_run_config(run_mcmc.load_merged_config(args))
 
-    # The tight H0 prior the run overrides, which a deep fold would have
+    # The tight H0 prior the run overrides, which a deep merge would have
     # corrupted, reached the validated config as a Normal.
     assert type(config.priors["H0"]).__name__ == "Normal"
     assert config.analysis.sampled_params == ("xi_0",)
@@ -473,68 +471,22 @@ def test_run_mcmc_validates_the_blocks_the_workflow_folds() -> None:
     assert config.analysis.population.model_kwargs["n_grid"] == 256
 
 
-def test_the_jq_block_folds_match_the_python_merge() -> None:
-    """`run_mcmc` is handed blocks `jq` folded; this pins them against Python.
-
-    The workflow folds one block per `--<block>` flag, `*` everywhere and `+`
-    for `priors`, while the notebooks and the validation gate reach the same
-    mapping through `merge_config_layers`. Two implementations of one fold, so
-    the agreement is checked rather than argued -- over every run, because
-    exactly one of them (`modified-propagation/Xi_0-H0`) overrides a prior, and
-    that is the only run where `+` and `*` differ.
-    """
-    jq = shutil.which("jq")
-    if jq is None:
-        pytest.skip("jq is not installed")
-
-    overrode_a_prior = False
-    for experiment, runs in discover_runs().items():
-        for run in runs:
-            layers = [str(path) for path in run_config_paths(experiment, run)]
-            expected = merge_config_layers(run_config_paths(experiment, run))
-            folded = {}
-            for block, program in BLOCK_FOLDS.items():
-                result = subprocess.run(
-                    [jq, "-s", program, *layers],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                folded[block] = json.loads(result.stdout)
-            assert folded == expected, f"{experiment}/{run}"
-            if json.loads(Path(layers[-1]).read_text(encoding="utf-8")).get("priors"):
-                overrode_a_prior = True
-    assert overrode_a_prior, "no run exercises the shallow [priors] fold"
-
-
 def test_a_deep_fold_would_corrupt_the_one_prior_override() -> None:
-    """Why `priors` folds with `+`, as a failure rather than a comment.
+    """Why `PRIOR_SHALLOW` exists, as a failure rather than a comment.
 
     `config/priors.json` gives H0 a Uniform; `modified-propagation/Xi_0-H0`
     replaces it with a Normal. Key-merging the two leaves the Uniform's `low`
     and `high` beside the Normal's `loc` and `scale`, which `materialize_prior`
-    rejects -- loudly here, but only because the fold is shallow in production.
+    rejects -- loudly here, but only because the merge is shallow in production.
     """
-    jq = shutil.which("jq")
-    if jq is None:
-        pytest.skip("jq is not installed")
+    layers = run_config_paths("modified-propagation", "Xi_0-H0")
+    deep = knf.load(list(layers))
 
-    layers = [str(path) for path in run_config_paths("modified-propagation", "Xi_0-H0")]
-    deep = subprocess.run(
-        [jq, "-s", BLOCK_FOLDS["priors"].replace(". + $b", ". * $b"), *layers],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-    assert set(json.loads(deep.stdout)["H0"]["kwargs"]) == {
+    assert set(deep["priors"]["H0"]["kwargs"]) == {
         "low",
         "high",
         "loc",
         "scale",
     }
-    assert set(
-        merge_config_layers(run_config_paths("modified-propagation", "Xi_0-H0"))[
-            "priors"
-        ]["H0"]["kwargs"]
-    ) == {"loc", "scale"}
+    shallow = merge_config_layers(layers)
+    assert set(shallow["priors"]["H0"]["kwargs"]) == {"loc", "scale"}

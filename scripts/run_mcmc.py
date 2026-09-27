@@ -17,39 +17,25 @@ initializes its backend, so backend-claiming work happens only after
 may load JAX, but is kept free of array creation and device queries; a subprocess
 test guards that distinction. See the runtime helper for the ordering.
 
-Usage -- one flag per config block, each already merged across the layers
-that declare it::
+Usage -- one ``--config`` per layer, in merge order::
 
     RUN=config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json
     BASE=config/runs/cosmological-parameters/_base.json
-    LAYERS="config/analysis.json config/fiducials.json config/networks.json \
-        config/priors.json config/sampler.json config/waveform.json \
-        config/population.json $BASE $RUN"
     uv run --extra paper python scripts/run_mcmc.py \
-        --analysis "$(jq -s 'map(.analysis // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
-        --fiducials "$(jq -s 'map(.fiducials // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
-        --networks "$(jq -s 'map(.networks // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
-        --priors "$(jq -s 'map(.priors // {}) | reduce .[] as $b ({}; . + $b)' $LAYERS)" \
-        --sampler "$(jq -s 'map(.sampler // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
-        --waveform "$(jq -s 'map(.waveform // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
-        --population "$(jq -s 'map(.population // {}) | reduce .[] as $b ({}; . * $b)' $LAYERS)" \
+        --config config/analysis.json --config config/fiducials.json \
+        --config config/networks.json --config config/priors.json \
+        --config config/sampler.json --config config/waveform.json \
+        --config config/population.json --config $BASE --config $RUN \
         --injection-catalog outputs/catalogs/<injection key>.h5 \
         --proposal-catalog outputs/catalogs/<proposal key>.h5
 
-``scripts/catalogs.py ls`` prints each run's two keys.
+``scripts/catalogs.py ls`` prints each run's two keys, and
+``knf <layers> --shallow 'priors.*'`` prints the config those layers merge to.
 
-One operator per block is the whole merge rule: ``*`` (deep) everywhere, and
-``+`` (shallow) for ``priors``, so an overridden ``[priors.<param>]`` table
-replaces the inherited one rather than key-merging a normal prior onto a
-uniform one and leaving stale ``low`` / ``high`` behind. The ``run_mcmc``
-workflow rule declares the same layer files as ``input:`` and folds them
-exactly this way; ``tests/paper/test_runs.py`` pins the folds against
-``merge_config_layers``, which is the Python path the notebooks and the
-validation gate take.
-
-Taking blocks rather than paths is why merge order is no longer this script's
-concern: each block arrives folded, so there is no order left to get wrong and
-nothing to log. The resolved config still lands beside the chain.
+The layers are merged in process by ``merge_config_layers`` -- the same fold
+the notebooks, the figure scripts and the validation gate take -- and the
+``run_mcmc`` workflow rule declares the same files as its ``input:``. The
+resolved, defaults-filled config lands beside the chain.
 
 The run config's ``[analysis.catalog]`` block declares what each role draws;
 the two files are supplied directly as ``--injection-catalog`` and
@@ -88,8 +74,8 @@ from astrogwb.paper.config.catalogs import check_catalog_requests
 from astrogwb.paper.config.mcmc import RunConfig, build_run_config
 from astrogwb.paper.config.runs import (
     CATALOG_ROLES,
-    add_block_arguments,
-    load_config_blocks,
+    add_config_arguments,
+    load_merged_config,
 )
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
@@ -107,10 +93,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Headless NumPyro MCMC runner for the astrophysical GWB. Reads all "
-            "settings from a TOML or JSON config; saves an ArviZ NetCDF."
+            "settings from its JSON config layers; saves an ArviZ NetCDF."
         )
     )
-    add_block_arguments(parser)
+    add_config_arguments(parser)
     parser.add_argument(
         "--injection-catalog",
         type=Path,
@@ -286,8 +272,7 @@ def save(
 
     The resolved, defaults-filled config lands beside the chain, so two runs
     that reach the same settings by different overrides produce identical
-    records. There is no layer list to stamp: this script is handed blocks,
-    already folded, rather than an ordered list of files.
+    records.
     """
     import json
     from functools import partial
@@ -412,7 +397,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     config = build_run_config(
-        load_config_blocks(args),
+        load_merged_config(args),
         seed=args.seed,
         outdir=args.outdir.resolve() if args.outdir else None,
         label=args.label,

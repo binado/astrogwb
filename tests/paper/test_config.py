@@ -60,7 +60,7 @@ def test_deep_merge_nested_dicts_and_list_replacement() -> None:
 
 
 def test_load_mapping_rejects_a_non_json_layer(tmp_path: Path) -> None:
-    """One format, so "every layer is jq-readable" holds by construction."""
+    """Every run-config layer is JSON until the tree moves as a whole."""
     path = tmp_path / "config.toml"
     path.write_text("[analysis]\nnetwork = 'demo'\n", encoding="utf-8")
 
