@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 import numpyro.distributions as dist
 import pytest
@@ -27,6 +29,15 @@ from astrogwb.paper.utils import deep_merge, load_mapping
 from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
 
 PAPER_ROOT = REPO_ROOT
+
+
+def _read_record(path: Path) -> dict[str, Any]:
+    """Parse the config record `RunConfig.save` writes beside a chain.
+
+    The record is an output, not a config layer, so it stays JSON and is read
+    with `json` rather than `load_mapping`.
+    """
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def test_deep_merge_nested_dicts_and_list_replacement() -> None:
@@ -59,12 +70,12 @@ def test_deep_merge_nested_dicts_and_list_replacement() -> None:
     assert base["detector_ids"] == ["A", "B"]
 
 
-def test_load_mapping_rejects_a_non_json_layer(tmp_path: Path) -> None:
-    """Every run-config layer is JSON until the tree moves as a whole."""
-    path = tmp_path / "config.toml"
-    path.write_text("[analysis]\nnetwork = 'demo'\n", encoding="utf-8")
+def test_load_mapping_rejects_a_non_toml_layer(tmp_path: Path) -> None:
+    """Every run-config layer is TOML; a JSON one is refused, not parsed."""
+    path = tmp_path / "config.json"
+    path.write_text('{"analysis": {"network": "demo"}}', encoding="utf-8")
 
-    with pytest.raises(ValueError, match="config layers are JSON"):
+    with pytest.raises(ValueError, match="config layers are TOML"):
         load_mapping(path)
 
 
@@ -117,9 +128,9 @@ def test_derived_analysis_values_are_not_serialized(tmp_path) -> None:
 
     path = tmp_path / "run.json"
     config.save(path)
-    assert "grid" not in load_mapping(path)["analysis"]
+    assert "grid" not in _read_record(path)["analysis"]
 
-    reloaded = build_run_config(load_mapping(path))
+    reloaded = build_run_config(_read_record(path))
     assert reloaded.model_dump(mode="json") == config.model_dump(mode="json")
 
 
@@ -177,9 +188,9 @@ def test_marginalized_config_round_trips_through_save(tmp_path) -> None:
     path = tmp_path / "run.json"
     config.save(path)
 
-    assert "fixed_params" not in load_mapping(path)
+    assert "fixed_params" not in _read_record(path)
 
-    reloaded = build_run_config(load_mapping(path))
+    reloaded = build_run_config(_read_record(path))
 
     # Distributions have no value equality; compare their wire-format specs.
     assert {name: prior_to_spec(prior) for name, prior in reloaded.priors.items()} == {
@@ -196,7 +207,7 @@ def test_reloaded_marginalized_config_still_rejects_amplitude_parameter_sampled(
     config = build_run_config(_marginalized_raw())
     path = tmp_path / "run.json"
     config.save(path)
-    raw = load_mapping(path)
+    raw = _read_record(path)
     raw["analysis"]["sampled_params"] = [
         *raw["analysis"]["sampled_params"],
         "H0",

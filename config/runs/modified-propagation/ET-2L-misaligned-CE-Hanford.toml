@@ -1,0 +1,3 @@
+# xi_0 and xi_n on the ET-2L-misaligned-CE-Hanford network.
+[analysis]
+network = "ET-2L-misaligned-CE-Hanford"

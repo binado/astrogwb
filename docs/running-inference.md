@@ -7,11 +7,9 @@ file in merge order, plus the two catalog files it samples against. The layers
 are the same list the workflow declares as the rule's `input:`:
 
 ```bash
-LAYERS="config/analysis.json config/fiducials.json config/networks.json \
-  config/priors.json config/sampler.json config/waveform.json \
-  config/population.json \
-  config/runs/cosmological-parameters/_base.json \
-  config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json"
+LAYERS="config/defaults.toml \
+  config/runs/cosmological-parameters/_base.toml \
+  config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml"
 
 uv run --extra paper python scripts/run_mcmc.py \
   $(for layer in $LAYERS; do printf -- '--config %s ' "$layer"; done) \
@@ -56,34 +54,34 @@ uv run --extra paper python scripts/profile_model.py --help
 three layers merged in order:
 
 ```text
-config/{analysis,fiducials,networks,priors,sampler,
-        waveform,population}.json                          the shared values
-config/runs/<experiment>/_base.json                        the experiment override
-config/runs/<experiment>/<run>.json                        the run override
+config/defaults.toml                                       the shared values
+config/runs/<experiment>/_base.toml                        the experiment override
+config/runs/<experiment>/<run>.toml                        the run override
   -> outputs/chains/<experiment>/<run>.nc                  the chain
   -> outputs/chains/<experiment>/<run>.json                the config it was sampled with
 ```
 
 Filenames are the mapping. There is no inventory file: `discover_runs()` globs
-the tree, and a new run is a new JSON file. `_base.json` is required in every
+the tree, and a new run is a new TOML file. `_base.toml` is required in every
 experiment directory rather than optional -- a conditional Snakemake input
-complicates the DAG for no gain. What each committed run is *for* is documented
-in [`config/runs/README.md`](../config/runs/README.md), next to the files.
+complicates the DAG for no gain. What each committed run is *for* is written
+as a comment at the top of its own file; [`config/runs/README.md`](../config/runs/README.md)
+indexes the experiments and the catalogs they share.
 
-The shared layers are **one file per top-level block of a run config, each a
-single-key object whose key is its own stem**, so a block has one home and
-its file is named after it. Three of them are read by more than the workflow: the notebooks and figure scripts
-consume `fiducials`, `priors` and `networks` through `astrogwb.paper.config`.
+`config/defaults.toml` declares every top-level block of a run config, each
+commented with what it owns. Several are read by more than the workflow: the
+notebooks and figure scripts consume `fiducials`, `priors` and `networks`
+through `astrogwb.paper.config`.
 
-| File | Owns |
+| Block | Owns |
 | --- | --- |
-| `analysis.json` | observing time, frequency band, target population, and the two catalogs |
-| `fiducials.json` | the fiducial value of every parameter |
-| `networks.json` | each detector network, by name |
-| `priors.json` | the prior on every parameter |
-| `sampler.json` | the sampling RNG seed and NUTS defaults |
-| `waveform.json` | the waveform settings every catalog of a run inherits |
-| `population.json` | the population a run's catalogs are drawn from, unless a role overrides it |
+| `[analysis]` | observing time, frequency band, target population, and the two catalogs |
+| `[fiducials]` | the fiducial value of every parameter |
+| `[networks]` | each detector network, by name |
+| `[priors]` | the prior on every parameter |
+| `[sampler]` | the sampling RNG seed and NUTS defaults |
+| `[waveform]` | the waveform settings every catalog of a run inherits |
+| `[population]` | the population a run's catalogs are drawn from, unless a role overrides it |
 
 Fiducials are also the hyperparameters a run's catalogs are drawn at, so the
 injection is drawn at exactly the values NUTS initializes at. What was
@@ -95,26 +93,30 @@ amplitude-marginalized run forms its ratio against. Every fiducial carries a pri
 `RunConfig` retains the complete table and `analysis.sampled_params` selects
 the NUTS latents, leaving the rest to NumPyro effect handlers.
 
-A prior is `{"dist": "<numpyro.distributions class name>", "kwargs": {...}}`.
+A prior is `{ dist = "<numpyro.distributions class name>", kwargs = { ... } }`.
 The class is looked up on `numpyro.distributions` by name, so adding a
 distribution needs no code change. There is deliberately no positional `args`
 form: the serializer can only emit kwargs, so a second spelling would make the
 config `run_mcmc` writes next to each chain fail to round-trip.
 
 A run names a network -- `[analysis] network = "ET-2L-aligned-CE-Hanford"` --
-and `networks.json` resolves it to a detector list. `config/analysis.json`
+and the `[networks]` table resolves it to a detector list. `config/defaults.toml`
 deliberately declares no `analysis.network`: a run without one must fail rather
 than silently inherit someone else's. A run may not write out `detectors`
 alongside a `network`; to try a network that is not committed, add it in an
 overlay layer and name it:
 
-```json
-{"networks": {"scratch": ["S1", "R1"]}, "analysis": {"network": "scratch"}}
+```toml
+[networks]
+scratch = ["S1", "R1"]
+
+[analysis]
+network = "scratch"
 ```
 
 The chain's own config records both the resolved `detectors` and the `network`
 name they came from, so an archived chain stays checkable against a later edit
-to `networks.json`.
+to `[networks]`.
 
 Nested mappings merge and lists replace, except that each overridden
 `[priors.<param>]` table replaces the inherited one *wholesale*. That is
@@ -134,8 +136,9 @@ The seven experiments and their 27 runs:
 | `time-delay` | `delay-slope` |
 
 `run_mcmc` declares a run's layers as its own inputs, so editing a run's file
-retriggers exactly that chain. Editing any shared layer retriggers all 27,
-which is correct.
+retriggers exactly that chain, editing an experiment's `_base.toml` retriggers
+that experiment, and editing `config/defaults.toml` retriggers all 27, which is
+correct.
 
 `snakemake validate` merges and catalog-checks every run without building
 anything. Run it before a campaign: it fails on the first invalid run *before
@@ -146,14 +149,13 @@ any catalog is built*, and a catalog is a GPU job.
 Every run declares its two catalogs, one per role, as partial specs over its
 own `[waveform]`, `[population]` and `[fiducials]` blocks:
 
-```json
-"catalog": {
-  "injection": {"seed": 41, "num_samples": 32768},
-  "proposal": {"seed": 41, "num_samples": 32768}
-}
+```toml
+[analysis.catalog]
+injection = { seed = 41, num_samples = 32768 }
+proposal = { seed = 41, num_samples = 32768 }
 ```
 
-That is `config/analysis.json`'s default, and a role overrides only what
+That is `config/defaults.toml`'s default, and a role overrides only what
 differs -- the seed and size, a population, an approximant. Each role resolves
 to a `CatalogMetadata`, whose key names the file; see
 [catalog generation](catalog-generation.md).

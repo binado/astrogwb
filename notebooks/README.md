@@ -58,15 +58,15 @@ merge the workflow performs by passing layer paths on argv. None of them reads
 an intermediate assembled-config artifact, so they run against a fresh clone.
 
 `fiducial_spectrum.py` is the exception: it stands in for no particular run, so
-it reads the shared tables directly — `config/fiducials.json` and
-`config/networks.json` through `astrogwb.paper.config`, and the ordered network
+it reads the shared tables directly — `[fiducials]` and `[networks]` in
+`config/defaults.toml` through `astrogwb.paper.config`, and the ordered network
 legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS` — rather than merging a
 run's layers. Its $S_h$ is one seeded draw of `gwb_forward_model`, built from
-`config/population.json` and `config/waveform.json`, so it does not need a file
+the shared `[population]` and `[waveform]` tables, so it does not need a file
 under `outputs/catalogs/`. Its analysis window (`observation_time`, the frequency
 band, and the redshift bounds), the draw seed, and local plotting choices stay
-hand-written in its configuration cell, mirroring `config/analysis.json`.
-Editing that file does not update the notebook; mirror the change there by hand.
+hand-written in its configuration cell, mirroring the shared `[analysis]` table.
+Editing that table does not update the notebook; mirror the change there by hand.
 
 Open it from the repository root:
 
@@ -85,14 +85,14 @@ detectors = networks()["ET-2L-aligned-CE-Hanford"]
 higher_h0 = fiducials(H0=70.0)  # keyword overrides, merged over the file
 ```
 
-These are `config/fiducials.json`, `config/priors.json` and
-`config/networks.json` — the same files the workflow merges into every run, so
+These are the `[fiducials]`, `[priors]` and `[networks]` tables of
+`config/defaults.toml` — the same file the workflow merges into every run, so
 a notebook cannot drift from what the runs sample. `priors()` returns live
 NumPyro distributions. Each accessor also takes keyword overrides merged over
 the file, so varying one value does not mean retyping the table; a network name
 is hyphenated, so override one by unpacking a mapping
 (`networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})`). Each call is cached, so
-a long-lived kernel will not see an edit to the JSON until you call
+a long-lived kernel will not see an edit to the file until you call
 `fiducials.cache_clear()` (and likewise for the other two).
 
 ## Running them

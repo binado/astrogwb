@@ -1,0 +1,4 @@
+# A 8192-source seed-42 proposal.
+[analysis.catalog.proposal]
+seed = 42
+num_samples = 8192

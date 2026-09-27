@@ -7,7 +7,7 @@ JAX.
 
 from __future__ import annotations
 
-import json
+import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -29,25 +29,22 @@ def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str
     return merged
 
 
-def require_json(path: Path) -> None:
-    """Reject a config layer that is not a ``.json`` file.
+def require_toml(path: Path) -> None:
+    """Reject a config layer that is not a ``.toml`` file.
 
-    Every layer in ``config/`` is JSON. ``knf`` would merge an all-TOML layer
+    Every layer in ``config/`` is TOML. ``knf`` would merge an all-JSON layer
     list just as happily, which is exactly why the format is pinned here: a
     second format should arrive as one deliberate migration, not a stray file.
     ``astrogwb.detector``'s packaged ``geometry.toml`` and ``sensitivity.toml``
     are detector *data*, not config layers, and are read with ``tomllib`` where
     they are used.
     """
-    if path.suffix.lower() != ".json":
-        raise ValueError(f"config layers are JSON; got {path.suffix!r} for {path}")
+    if path.suffix.lower() != ".toml":
+        raise ValueError(f"config layers are TOML; got {path.suffix!r} for {path}")
 
 
 def load_mapping(path: Path) -> dict[str, Any]:
-    """Parse one JSON config file into a plain dict."""
-    require_json(path)
+    """Parse one TOML config file into a plain dict."""
+    require_toml(path)
     with path.open("rb") as handle:
-        raw = json.load(handle)
-    if not isinstance(raw, Mapping):
-        raise TypeError(f"{path} must contain a mapping")
-    return dict(raw)
+        return tomllib.load(handle)

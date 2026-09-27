@@ -56,7 +56,7 @@ from astrogwb.paper.snr import compute_network_snrs
 register_projection(MplAxes)
 jax.config.update("jax_enable_x64", True)
 
-# Parameter labels come from config/plotting.json via `parameter_label`, so the
+# Parameter labels come from config/plotting.toml via `parameter_label`, so the
 # three figure scripts cannot disagree about how a parameter is written. Labels
 # that name a *combination* of parameters rather than a parameter stay local --
 # see MERGER_RATE_LABELS below.

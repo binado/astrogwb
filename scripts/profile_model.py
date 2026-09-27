@@ -18,15 +18,9 @@ Usage -- one ``--config`` per layer, in merge order, exactly as
 ``scripts/run_mcmc.py`` takes them::
 
     uv run --extra paper python scripts/profile_model.py \
-        --config config/analysis.json \
-        --config config/fiducials.json \
-        --config config/priors.json \
-        --config config/networks.json \
-        --config config/sampler.json \
-        --config config/waveform.json \
-        --config config/population.json \
-        --config config/runs/cosmological-parameters/_base.json \
-        --config config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.json \
+        --config config/defaults.toml \
+        --config config/runs/cosmological-parameters/_base.toml \
+        --config config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
         --injection-catalog outputs/catalogs/<injection key>.h5 \
         --proposal-catalog outputs/catalogs/<proposal key>.h5
 

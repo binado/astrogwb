@@ -52,7 +52,7 @@ from astrogwb.paper.snr import compute_network_snrs
 register_projection(MplAxes)
 jax.config.update("jax_enable_x64", True)
 
-# Parameter labels come from config/plotting.json via `parameter_label`. The
+# Parameter labels come from config/plotting.toml via `parameter_label`. The
 # labels below name parameter *combinations*, not parameters, so they stay here.
 
 # Variable groups for each corner plot.

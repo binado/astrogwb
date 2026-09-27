@@ -78,7 +78,8 @@ build-backend = "uv_build"
 
 # Groups are tooling: never imported by shipped code, never part of a wheel.
 [dependency-groups]
-test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0"]
+# tomli-w: fixtures write scratch config layers, which are TOML.
+test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0", "tomli-w>=1.2"]
 # pyknf too: the Snakefile merges every run's layers at parse time to key its
 # catalogs, and it runs without the `paper` extra.
 workflow = ["snakemake>=9.24.0", "pyknf>=0.5,<0.6"]

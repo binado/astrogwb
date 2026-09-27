@@ -23,7 +23,7 @@ def test_use_paper_style_loads_stylesheet_and_applies_savefig_settings() -> None
 
     Passing it makes this test independent of where pytest was invoked from,
     and turns the assertions into a check that `use_paper_style` actually
-    applies what the JSON says rather than that a literal survived in the
+    applies what the settings file says rather than that a literal survived in the
     stylesheet.
     """
     plotting.use_paper_style(REPO_ROOT)
@@ -55,14 +55,16 @@ def test_the_stylesheet_declares_no_savefig_dpi_or_format() -> None:
 
 
 def test_committed_latex_labels_survive_the_move_out_of_python() -> None:
-    """The guard on JSON backslash escaping.
+    """The guard on TOML string escaping.
 
-    Every backslash in `config/plotting.json` is doubled. A *missed* doubling
-    is loud -- `\\,` and `\\m` are invalid JSON escapes, so the file will not
-    parse. Over-doubling is the quiet one: it parses, then emits a literal
-    `\\,` into the TeX stream, and with `text.usetex: True` that surfaces as a
-    LaTeX compile failure deep inside a figure job. These are the exact strings
-    the three figure scripts each carried as `r""` literals before the move.
+    `config/plotting.toml` writes every label as a single-quoted *literal*
+    string, so backslashes are verbatim, exactly as in the `r""` literals the
+    three figure scripts each carried before the move. Switching one to a
+    basic `"..."` string is loud -- `\\,` and `\\m` are invalid escapes, so the
+    file will not parse. Doubling the backslashes inside a literal string is
+    the quiet one: it parses, then emits a literal `\\\\,` into the TeX stream,
+    and with `text.usetex: True` that surfaces as a LaTeX compile failure deep
+    inside a figure job.
     """
     assert (
         plotting.parameter_label("H0", REPO_ROOT)

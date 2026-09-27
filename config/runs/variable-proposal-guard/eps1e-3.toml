@@ -1,0 +1,8 @@
+# eps = 0.001, at its own mixture seed.
+[analysis.catalog.proposal]
+seed = 63
+num_samples = 16384
+
+[analysis.catalog.proposal.population]
+model_name = "bns_md_uniform_mixture"
+model_kwargs = { uniform_mixing_fraction = 0.001 }

@@ -201,7 +201,7 @@ else:
 REFERENCE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
 
 # Detector settings. The network name resolves to its detector list through
-# config/networks.json -- the same table the reference run resolves through --
+# the shared [networks] table -- the same table the reference run resolves through --
 # so this cell stays a knob (change the name) without keeping a second copy of
 # the list. The detector names resolve further via the bundled geometry.toml /
 # sensitivity.toml.
@@ -218,8 +218,8 @@ n_grid = 256  # grid points for cosmology integrals / MD normalization
 minimum_frequency = 2
 maximum_frequency = 4096
 
-# Fiducial parameters and the prior on each, straight from config/fiducials.json
-# and config/priors.json -- the same tables every committed run merges. These
+# Fiducial parameters and the prior on each, straight from the shared [fiducials] and
+# [priors] tables -- the same tables every committed run merges. These
 # used to be hand-written here and had drifted: `local_merger_rate` carried a
 # Uniform(7.6, 250) prior that excluded its own fiducial of 770, and `Omega_m`
 # a broad uniform where the analysis assumes a Planck-tight normal. Reading

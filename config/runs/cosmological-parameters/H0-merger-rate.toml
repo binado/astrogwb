@@ -1,0 +1,9 @@
+# local_merger_rate, with H0 the analytically marginalized amplitude: the
+# reference the fixed-R0 H0 posterior (ET-2L-aligned-CE-Hanford, which pins
+# local_merger_rate to its fiducial) is compared against.
+[analysis]
+sampled_params = ["local_merger_rate"]
+network = "ET-2L-aligned-CE-Hanford"
+likelihood = "amplitude_marginalized"
+amplitude_parameter = "H0"
+amplitude_num_nodes = 1024

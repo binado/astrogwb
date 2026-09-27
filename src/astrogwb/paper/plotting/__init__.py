@@ -2,11 +2,11 @@
 
 Presentation-only helpers: colorblind-safe palettes, the neutral truth-line
 style (solid), a loader for ``paper.mplstyle``, the LaTeX parameter labels
-and savefig settings that ``config/plotting.json`` carries, and
+and savefig settings that ``config/plotting.toml`` carries, and
 :func:`save_figures`, the single writer that applies them. This module is
 independent of the ``astrogwb`` package and of the config layer: it imports
 nothing from either, at module scope or inside a function body -- it reads that
-one JSON file with stdlib ``json``, lazily, so the ``Snakefile`` can import
+one TOML file with stdlib ``tomllib``, lazily, so the ``Snakefile`` can import
 ``DETECTOR_NETWORK_RUNS`` while building the DAG without paying for any of it.
 
 Convention:
@@ -24,8 +24,9 @@ of the three network-comparison figures, and order is presentation.
 
 The split with ``config/``: *order and structure* are Python, *values* are
 data. So the ordered network legend is ``DETECTOR_NETWORKS`` here, while the
-detector list behind each name is ``config/networks.json``; and the LaTeX label
-for a *parameter* is ``config/plotting.json``, reached through
+detector list behind each name is the ``[networks]`` table in
+``config/defaults.toml``; and the LaTeX label for a *parameter* is
+``config/plotting.toml``, reached through
 :func:`parameter_label`, while the label for a *network* stays in
 ``DETECTOR_NETWORKS`` because nothing can read it without also needing the
 order it sits in.
@@ -33,7 +34,7 @@ order it sits in.
 
 from __future__ import annotations
 
-import json
+import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cache
@@ -53,21 +54,21 @@ _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
 #: and every script -- matching `astrogwb.paper.config.runs`. Read lazily, never
 #: at import: the `Snakefile` imports this module for `DETECTOR_NETWORK_RUNS`
 #: while building the DAG, and that import must stay free of file I/O.
-_SETTINGS_PATH = Path("config/plotting.json")
+_SETTINGS_PATH = Path("config/plotting.toml")
 
 
 @cache
 def _figure_settings(root: Path | None = None) -> Mapping[str, Any]:
-    """Parse ``config/plotting.json`` once.
+    """Parse ``config/plotting.toml`` once.
 
-    Read with stdlib ``json`` rather than ``astrogwb.paper.utils.load_mapping``
+    Read with stdlib ``tomllib`` rather than ``astrogwb.paper.utils.load_mapping``
     so this module keeps importing nothing from the config layer, at module
     scope or inside a function body.
 
     Proxied because ``@cache`` hands every caller the same object.
     """
     return MappingProxyType(
-        json.loads(((root or Path()) / _SETTINGS_PATH).read_text(encoding="utf-8"))
+        tomllib.loads(((root or Path()) / _SETTINGS_PATH).read_text(encoding="utf-8"))
     )
 
 
@@ -89,7 +90,7 @@ def figure_format(root: Path | None = None) -> str:
 
 
 def parameter_labels(root: Path | None = None) -> dict[str, str]:
-    """LaTeX display labels by parameter name, from ``config/plotting.json``.
+    """LaTeX display labels by parameter name, from ``config/plotting.toml``.
 
     Covers every fiducial plus ``importance_relative_ess``, which is a derived
     diagnostic rather than a parameter -- so this is a superset of
@@ -199,7 +200,7 @@ def save_figures(
 
     ``figures`` maps the output path to the figure to write, so the caller keeps
     owning *where* -- its ``--output-*`` flags -- while this owns *how*: the dpi
-    and format come from ``config/plotting.json``, and the written paths are
+    and format come from ``config/plotting.toml``, and the written paths are
     returned in iteration order so a caller can report them without restating
     them.
 

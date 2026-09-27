@@ -65,34 +65,32 @@ Forward-model spectra go through the same `simulate` outside the workflow: a
 `outputs/spectra/<key>.h5`, and `astrogwb.catalog.simulate(metadata,
 SpectrumGenerator(), cache_dir)` serves or generates it.
 
-A run config is three layers merged in order --
-`config/{analysis,fiducials,networks,priors,sampler,waveform,population}.json`,
-then the experiment `config/runs/<experiment>/_base.json`, then the run. The
-shared layers are one file per top-level block of a run config, each a
-single-key object whose key is its own stem, and a test pins that
-convention. The top-level `[population]` is the default a run's catalogs are
+A run config is three TOML layers merged in order -- `config/defaults.toml`,
+then the experiment `config/runs/<experiment>/_base.toml`, then the run.
+`config/defaults.toml` declares every top-level block of a run config with the
+value every run inherits. Every layer opens with a comment saying what it is
+for, so what each committed run -- and each catalog override -- is for lives in
+its own file; `config/runs/README.md` indexes the experiments and the catalogs
+they share. The top-level `[population]` is the default a run's catalogs are
 drawn from; the analysis target is `analysis.population`. `[fiducials]` is both
-where NUTS initializes and what a run's catalogs are drawn at, so editing
-`config/fiducials.json` re-keys every catalog. Three of the layers are also
-read directly by the notebooks and figure scripts through
+where NUTS initializes and what a run's catalogs are drawn at, so editing the
+shared `[fiducials]` re-keys every catalog. `[fiducials]`, `[priors]` and
+`[networks]` are also read directly by the notebooks and figure scripts through
 `astrogwb.paper.config.fiducials()` / `priors()` / `networks()`, and
-`waveform_generator()` / `population_model()` read the other two, so a copy
-cannot drift from what the runs sample. Every layer is JSON, and
-`merge_config_layers` folds them with `knf` (pyknf): a deep merge, except that
-each `priors.<param>` table replaces the inherited one (`PRIOR_SHALLOW =
+`waveform_generator()` / `population_model()` read `[waveform]` and
+`[population]`, so a copy cannot drift from what the runs sample.
+`merge_config_layers` folds the layers with `knf` (pyknf): a deep merge, except
+that each `priors.<param>` table replaces the inherited one (`PRIOR_SHALLOW =
 "priors.*"`). `knf <layers> --shallow 'priors.*'` prints the same merge in the
-shell. A run
-names a detector network (`analysis.network`) rather than listing detectors.
-What each committed run -- and each catalog override -- is for is documented in
-`config/runs/README.md`, next to the files. `config/plotting.json` is
-presentation -- LaTeX parameter labels and savefig settings, reached through
-`astrogwb.paper.plotting` -- and is deliberately *not* a run layer. No
-entrypoint is handed an assembled config. Every one -- `run_mcmc` and the
-figure and diagnostic scripts alike -- takes the layer paths as repeated
-`--config` flags and merges them in process, and the workflow rule declares
-the same files as its `input:`, so the dependency edge and the data path are
-one list. `run_mcmc` writes the resolved config next to the chain and stamps
-both catalog keys into it.
+shell. A run names a detector network (`analysis.network`) rather than listing
+detectors. `config/plotting.toml` is presentation -- LaTeX parameter labels and
+savefig settings, reached through `astrogwb.paper.plotting` -- and is
+deliberately *not* a run layer. No entrypoint is handed an assembled config.
+Every one -- `run_mcmc` and the figure and diagnostic scripts alike -- takes the
+layer paths as repeated `--config` flags and merges them in process, and the
+workflow rule declares the same files as its `input:`, so the dependency edge
+and the data path are one list. `run_mcmc` writes the resolved config next to
+the chain as JSON (an output, not a layer) and stamps both catalog keys into it.
 
 ## Coding and testing
 

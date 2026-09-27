@@ -1,0 +1,9 @@
+# xi_0 alone, with n pinned to its fiducial: a 1D problem, so NUTS gets a
+# diagonal mass matrix and a shorter warmup.
+[analysis]
+sampled_params = ["xi_0"]
+network = "ET-2L-aligned-CE-Hanford"
+
+[sampler]
+num_warmup = 500
+dense_mass = false

@@ -8,13 +8,12 @@ and the merge that turns them into a run config.
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
 import knf
 import pytest
-from config_fixtures import write_root_layers
+from config_fixtures import write_defaults
 from repo import REPO_ROOT
 
 from astrogwb.metadata import CatalogMetadata
@@ -90,17 +89,19 @@ def test_the_retired_inventories_are_gone() -> None:
     # config/banks went with the bank/catalog split: every catalog is a file
     # now, so there is one config tree for them and one output directory.
     assert not (PAPER_ROOT / "config/banks").exists()
-    # config/analysis/ went the same way as config/catalogs/base: every
-    # shared run layer is one config/*.json named after the block it declares,
-    # so there is no base/ to glob and no runs/ level to nest under.
+    # config/analysis/ went the same way as config/catalogs/base, and then the
+    # seven per-block config/*.json layers folded into config/defaults.toml:
+    # one shared layer, so there is no base/ to glob and no runs/ level to
+    # nest under.
     assert not (PAPER_ROOT / "config/analysis").exists()
-    assert (PAPER_ROOT / "config/analysis.json").is_file()
+    assert not list((PAPER_ROOT / "config").rglob("*.json"))
+    assert (PAPER_ROOT / "config/defaults.toml").is_file()
     assert (PAPER_ROOT / "config/runs").is_dir()
     # config/catalogs went when catalogs became content-addressed: a run
     # declares what it draws, and the file is named by the request's key.
     assert not (PAPER_ROOT / "config/catalogs").exists()
     # config/populations went with the gwmock graph path: a population is a
-    # registered NumPyro model now, named by config/population.json.
+    # registered NumPyro model now, named by the shared [population] table.
     assert not (PAPER_ROOT / "config/populations").exists()
 
 
@@ -120,58 +121,36 @@ def test_output_roots_are_derived_from_one_base() -> None:
 
 
 def test_run_config_paths_are_the_layers_in_merge_order() -> None:
-    """Every shared layer first, then the experiment, then the run.
+    """The shared layer first, then the experiment, then the run.
 
-    The shared names are asserted literally rather than against
-    `base_config_paths()`: a self-consistent comparison against the helper
-    would pass whatever list the helper happened to return, and what matters
-    here is that there is one file per top-level block and that the run's own
-    file is last.
+    Asserted literally rather than against `base_config_paths()`: a
+    self-consistent comparison against the helper would pass whatever list the
+    helper happened to return, and what matters here is that a run is three
+    layers and that its own file is last.
     """
     paths = run_config_paths("cosmological-parameters", "ET-triangular")
-    base = base_config_paths()
 
-    assert [path.name for path in base] == [
-        "analysis.json",
-        "fiducials.json",
-        "networks.json",
-        "priors.json",
-        "sampler.json",
-        "waveform.json",
-        "population.json",
-    ]
-    assert paths[: len(base)] == base
-    assert [path.name for path in paths[len(base) :]] == [
-        EXPERIMENT_BASE,
-        "ET-triangular.json",
+    assert paths[:1] == base_config_paths()
+    assert [str(path) for path in paths] == [
+        "config/defaults.toml",
+        f"config/runs/cosmological-parameters/{EXPERIMENT_BASE}",
+        "config/runs/cosmological-parameters/ET-triangular.toml",
     ]
     assert all(path.is_file() for path in paths)
 
 
-def test_every_shared_layer_is_one_block_named_after_its_stem() -> None:
-    """The layer-0 convention: one file per block, named after the block.
-
-    A shared layer that declared two blocks, or a block whose name did not
-    match its filename, would make "one file per block" false -- and
-    `astrogwb.paper.config`'s accessors look the table up by stem.
-    """
-    for path in base_config_paths(REPO_ROOT):
-        declared = json.loads(path.read_text(encoding="utf-8"))
-        assert list(declared) == [path.stem], path
-
-
 def test_plotting_settings_are_not_a_run_layer() -> None:
-    """`config/plotting.json` is presentation and must not reach a RunConfig.
+    """`config/plotting.toml` is presentation and must not reach a RunConfig.
 
-    It sits in the same directory as the three shared layers, so a glob would
-    sweep it in and `extra="forbid"` would then reject every run.
+    It sits in the same directory as the shared layer, so a glob would sweep it
+    in and `extra="forbid"` would then reject every run.
     """
     names = {
         path.name
         for path in run_config_paths("cosmological-parameters", "ET-triangular")
     }
 
-    assert "plotting.json" not in names
+    assert "plotting.toml" not in names
 
 
 def test_assemble_run_is_merge_config_layers_over_run_config_paths() -> None:
@@ -191,12 +170,12 @@ def test_merge_config_layers_rejects_an_empty_layer_list() -> None:
         merge_config_layers([])
 
 
-def test_merge_config_layers_rejects_an_all_toml_layer_list(tmp_path: Path) -> None:
-    """knf would merge TOML layers; the run config stays one format until moved."""
-    path = tmp_path / "analysis.toml"
-    path.write_text("[analysis]\nnetwork = 'demo'\n", encoding="utf-8")
+def test_merge_config_layers_rejects_an_all_json_layer_list(tmp_path: Path) -> None:
+    """knf would merge JSON layers too; the run config is one format, TOML."""
+    path = tmp_path / "defaults.json"
+    path.write_text('{"analysis": {"network": "demo"}}', encoding="utf-8")
 
-    with pytest.raises(ValueError, match="config layers are JSON"):
+    with pytest.raises(ValueError, match="config layers are TOML"):
         merge_config_layers([path])
 
 
@@ -206,10 +185,9 @@ def test_assembling_an_unknown_run_names_the_missing_file() -> None:
 
 
 def test_an_experiment_without_a_base_overlay_is_rejected(tmp_path: Path) -> None:
-    write_root_layers(tmp_path)
+    write_defaults(tmp_path)
     (tmp_path / "config/runs/demo").mkdir(parents=True)
-    # `{}` rather than an empty file: a layer is JSON now, and "" is not.
-    (tmp_path / "config/runs/demo/only.json").write_text("{}")
+    (tmp_path / "config/runs/demo/only.toml").write_text("")
 
     with pytest.raises(ValueError, match=f"missing a required {EXPERIMENT_BASE}"):
         discover_runs(tmp_path)
@@ -225,7 +203,7 @@ def test_base_files_merge_into_one_mapping() -> None:
     # state its own, or inherit someone else's silently.
     assert "network" not in base["analysis"]
     assert "detectors" not in base["analysis"]
-    # Every shared layer is in this merge, one block each.
+    # The shared layer declares every block of a run config.
     assert set(base) == {
         "analysis",
         "fiducials",
@@ -245,8 +223,8 @@ def test_no_run_declares_a_raw_detector_list() -> None:
     happens to agree.
     """
     layers = [
-        REPO_ROOT / "config/analysis.json",
-        *(REPO_ROOT / "config/runs").rglob("*.json"),
+        REPO_ROOT / "config/defaults.toml",
+        *(REPO_ROOT / "config/runs").rglob("*.toml"),
     ]
     for path in sorted(layers):
         analysis = load_mapping(path).get("analysis") or {}
@@ -385,9 +363,9 @@ def test_catalog_blocks_reject_malformed_catalogs(
     analysis: dict[str, object] = {"minimum_frequency": 2.0}
     if catalog is not None:
         analysis["catalog"] = catalog
-    write_root_layers(tmp_path, analysis=analysis)
-    (experiment / EXPERIMENT_BASE).write_text("{}", encoding="utf-8")
-    (experiment / "only.json").write_text("{}", encoding="utf-8")
+    write_defaults(tmp_path, analysis=analysis)
+    (experiment / EXPERIMENT_BASE).write_text("", encoding="utf-8")
+    (experiment / "only.toml").write_text("", encoding="utf-8")
 
     with pytest.raises(TypeError, match=message):
         for role in ("injection", "proposal"):
@@ -474,7 +452,7 @@ def test_run_mcmc_validates_the_layers_the_workflow_passes() -> None:
 def test_a_deep_fold_would_corrupt_the_one_prior_override() -> None:
     """Why `PRIOR_SHALLOW` exists, as a failure rather than a comment.
 
-    `config/priors.json` gives H0 a Uniform; `modified-propagation/Xi_0-H0`
+    `config/defaults.toml` gives H0 a Uniform; `modified-propagation/Xi_0-H0`
     replaces it with a Normal. Key-merging the two leaves the Uniform's `low`
     and `high` beside the Normal's `loc` and `scale`, which `materialize_prior`
     rejects -- loudly here, but only because the merge is shallow in production.

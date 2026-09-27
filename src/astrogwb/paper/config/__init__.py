@@ -5,12 +5,11 @@ The leaf modules (:mod:`~astrogwb.paper.config.runs`,
 not re-exported; import them explicitly.
 
 What this package *does* expose is the three shared tables that
-``config/fiducials.json``, ``config/priors.json`` and ``config/networks.json``
-own -- the same bytes the workflow merges into every run -- plus the three
-accessors that build something from the catalog defaults every run inherits:
-:func:`waveform_generator` from ``config/waveform.json``, and
-:func:`population_model` / :func:`population_metadata` from
-``config/population.json``.
+``config/defaults.toml`` declares as ``[fiducials]``, ``[priors]`` and
+``[networks]`` -- the same bytes the workflow merges into every run -- plus the
+three accessors that build something from the catalog defaults every run
+inherits: :func:`waveform_generator` from ``[waveform]``, and
+:func:`population_model` / :func:`population_metadata` from ``[population]``.
 Before the tables lived here, the notebook and the figure scripts each kept a
 hand-written copy, and those copies drifted: the notebook sampled
 ``local_merger_rate`` under a prior that excluded its own fiducial. Consume
@@ -24,10 +23,10 @@ them from here instead::
 
 There is deliberately no accessor for the hyperparameters a catalog is drawn
 at: that is :func:`fiducials`, which a run's catalogs inherit from the run
-itself. One table, one file.
+itself. One table, one place.
 
 Every accessor also takes keyword overrides, merged over the file, so a
-notebook can vary one entry without editing JSON or retyping the table::
+notebook can vary one entry without editing TOML or retyping the table::
 
     fiducials(H0=70.0)
     priors(xi_0={"dist": "Uniform", "kwargs": {"low": 0.1, "high": 5.0}})
@@ -51,7 +50,7 @@ anywhere, pass ``root=`` explicitly.
 Each accessor caches its parse and hands back a fresh copy, so a caller that
 mutates what it got does not poison the cache for everyone else -- overrides are
 merged *after* the cached parse, so they cannot either. A long-lived Jupyter
-session will not see an edit to the JSON until ``fiducials.cache_clear()``.
+session will not see an edit to the file until ``fiducials.cache_clear()``.
 """
 
 from __future__ import annotations
@@ -60,13 +59,7 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrogwb.paper.config.runs import (
-    FIDUCIALS_PATH,
-    NETWORKS_PATH,
-    POPULATION_PATH,
-    PRIORS_PATH,
-    WAVEFORM_PATH,
-)
+from astrogwb.paper.config.runs import DEFAULTS_PATH
 from astrogwb.paper.utils import load_mapping
 
 if TYPE_CHECKING:
@@ -89,7 +82,7 @@ __all__ = [
 
 @cache
 def _load(path: Path, key: str) -> dict[str, Any]:
-    """Parse one single-key layer file and return the table it declares."""
+    """Parse the shared layer file and return one block it declares."""
     raw = load_mapping(path)
     table = raw.get(key)
     if not isinstance(table, dict):
@@ -98,7 +91,7 @@ def _load(path: Path, key: str) -> dict[str, Any]:
 
 
 def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
-    """The fiducial hyperparameter values, from ``config/fiducials.json``.
+    """The fiducial hyperparameter values: the shared ``[fiducials]`` table.
 
     These are **not** the injection: what was injected is recorded in the
     injection catalog file, which is where the observed spectrum's rate and
@@ -116,14 +109,14 @@ def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
     :func:`priors` -- only ``RunConfig`` cross-checks the two tables.
     """
     table = {
-        **_load((root or Path()) / FIDUCIALS_PATH, "fiducials"),
+        **_load((root or Path()) / DEFAULTS_PATH, "fiducials"),
         **kwargs,
     }
     return {name: float(value) for name, value in table.items()}
 
 
 def priors(root: Path | None = None, **kwargs: Any) -> dict[str, Distribution]:
-    """The prior for each parameter, materialized from ``config/priors.json``.
+    """The prior for each parameter, materialized from the shared ``[priors]``.
 
     One entry per fiducial. The returned distributions hold plain Python
     floats and evaluating none of them touches JAX, so calling this does not
@@ -143,14 +136,14 @@ def priors(root: Path | None = None, **kwargs: Any) -> dict[str, Distribution]:
     from astrogwb.paper.config.mcmc import materialize_prior
 
     table = {
-        **_load((root or Path()) / PRIORS_PATH, "priors"),
+        **_load((root or Path()) / DEFAULTS_PATH, "priors"),
         **kwargs,
     }
     return {name: materialize_prior(spec) for name, spec in table.items()}
 
 
 def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ...]]:
-    """Detector networks by name, from ``config/networks.json``.
+    """Detector networks by name: the shared ``[networks]`` table.
 
     Each run names one of these keys as ``analysis.network``; ``RunConfig``
     resolves it to the detector list recorded in the chain's own config. The
@@ -160,7 +153,7 @@ def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ..
     Membership and content live here; *order* does not. The ordered legend of
     the network-comparison figures is
     :data:`astrogwb.paper.plotting.DETECTOR_NETWORKS`, because order is
-    presentation -- and because a JSON object is not an ordered thing.
+    presentation -- and because a TOML table is not an ordered thing.
 
     Keyword arguments override the file, and may name a network the file does
     not declare -- whose detectors then have to resolve through
@@ -171,7 +164,7 @@ def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ..
         networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})
     """
     table = {
-        **_load((root or Path()) / NETWORKS_PATH, "networks"),
+        **_load((root or Path()) / DEFAULTS_PATH, "networks"),
         **kwargs,
     }
     return {name: tuple(detectors) for name, detectors in table.items()}
@@ -180,7 +173,7 @@ def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ..
 def waveform_generator(
     root: Path | None = None, **kwargs: Any
 ) -> PolarizationPowerGenerator:
-    """Build the polarization-power generator from ``config/waveform.json``.
+    """Build the polarization-power generator from the shared ``[waveform]``.
 
     Keyword arguments override the file. ``approximant="AnalyticInspiral"`` selects
     the closed-form inspiral, and is the only approximant taking an ``alpha``;
@@ -200,7 +193,7 @@ def waveform_generator(
 
 
 def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetadata:
-    """The waveform settings ``config/waveform.json`` declares, as a record.
+    """The settings the shared ``[waveform]`` table declares, as a record.
 
     What :func:`waveform_generator` builds, before it is built: the form a
     :class:`~astrogwb.metadata.SpectraMetadata` or a catalog request carries.
@@ -209,12 +202,12 @@ def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetada
     """
     from astrogwb.metadata import WaveformMetadata
 
-    settings = {**_load((root or Path()) / WAVEFORM_PATH, "waveform"), **kwargs}
+    settings = {**_load((root or Path()) / DEFAULTS_PATH, "waveform"), **kwargs}
     return WaveformMetadata.model_validate(settings)
 
 
 def population_model(root: Path | None = None, **kwargs: float) -> Population:
-    """Build the generating population from ``config/population.json``.
+    """Build the generating population from the shared ``[population]``.
 
     Returns the registered :class:`~astrogwb.populations.registry.Population` --
     source model and merger rate together -- with its construction settings
@@ -234,7 +227,7 @@ def population_model(root: Path | None = None, **kwargs: float) -> Population:
     """
     from astrogwb.populations import build_population
 
-    table = _load((root or Path()) / POPULATION_PATH, "population")
+    table = _load((root or Path()) / DEFAULTS_PATH, "population")
     settings = {**table.get("model_kwargs", {}), **kwargs}
     return build_population(table["model_name"], **settings)
 
@@ -242,12 +235,12 @@ def population_model(root: Path | None = None, **kwargs: float) -> Population:
 def population_metadata(
     root: Path | None = None, *, seed: int, **kwargs: float
 ) -> PopulationMetadata:
-    """The population record a catalog drawn from ``config/population.json`` carries.
+    """The record a catalog drawn from the shared ``[population]`` carries.
 
     ``seed`` is required and has no entry in the file: the shared layer declares
     the population, while a particular draw of it declares the seed -- which is
-    why each role in a run's ``[analysis.catalog]`` carries one and
-    ``config/population.json`` does not.
+    why each role in a run's ``[analysis.catalog]`` carries one and the shared
+    ``[population]`` does not.
 
     Keyword arguments override ``model_kwargs``, validated rather than trusted,
     so this accessor and :class:`~astrogwb.metadata.CatalogMetadata` reach a
@@ -259,7 +252,7 @@ def population_metadata(
     """
     from astrogwb.metadata import PopulationMetadata
 
-    table = _load((root or Path()) / POPULATION_PATH, "population")
+    table = _load((root or Path()) / DEFAULTS_PATH, "population")
     return PopulationMetadata(
         model_name=table["model_name"],
         model_kwargs={**table.get("model_kwargs", {}), **kwargs},

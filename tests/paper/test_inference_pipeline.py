@@ -51,6 +51,7 @@ from astrogwb.paper.inference import (
     prepare_observation,
     target_population,
 )
+from astrogwb.paper.utils import load_mapping
 from astrogwb.populations import DEFAULT_DENSITY_SITES
 from astrogwb.sampling import gwb_spectral_density_model
 
@@ -808,13 +809,11 @@ def test_the_repository_ships_no_proposal_density_config() -> None:
     file; a run states the fraction only in the catalog spec that draws it,
     never as analysis configuration the weights could consult instead.
     """
-    shared = json.loads(
-        (REPO_ROOT / "config/analysis.json").read_text(encoding="utf-8")
-    )
+    shared = load_mapping(REPO_ROOT / "config/defaults.toml")
 
     assert set(shared["analysis"]["catalog"]) == {"injection", "proposal"}
-    for path in sorted((REPO_ROOT / "config/runs").rglob("*.json")):
-        layer = json.loads(path.read_text(encoding="utf-8"))
+    for path in sorted((REPO_ROOT / "config/runs").rglob("*.toml")):
+        layer = load_mapping(path)
         analysis = dict(layer.get("analysis", {}))
         analysis.pop("catalog", None)
         outside_catalogs = {**layer, "analysis": analysis}

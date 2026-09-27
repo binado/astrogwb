@@ -13,7 +13,7 @@ under another record's address. Outside a shell,
 same generator behind a cache lookup, and needs no script.
 
 A hyperparameter is a number to fix it, or a ``{"dist", "kwargs"}`` prior
-(the ``config/priors.json`` format) to draw it once per row.
+(the format of the shared ``[priors]`` table) to draw it once per row.
 
 Usage::
 

@@ -1,0 +1,7 @@
+# modified-propagation (8 runs): modified GW propagation (Xi_0, n) across the
+# same six networks as cosmological-parameters, sampling xi_0 and xi_n
+# together. Two runs narrow the problem: Xi_0 pins n and samples xi_0 alone,
+# and Xi_0-H0 samples xi_0 with H0 amplitude-marginalized under a tight prior.
+# Every run uses the shared seed-41 catalog as both injection and proposal.
+[analysis]
+sampled_params = ["xi_0", "xi_n"]

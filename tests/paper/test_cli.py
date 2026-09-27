@@ -100,7 +100,7 @@ def test_config_accessors_are_lazy_and_leave_the_backend_free() -> None:
        this test only pins that importing its *name* does not import JAX.
 
     Unlike the test above, this one runs from the repository root: the
-    accessors resolve `config/*.json` against the caller's cwd by design.
+    accessors resolve `config/defaults.toml` against the caller's cwd by design.
     """
     code = """
 import sys

@@ -1,0 +1,3 @@
+# The full rate shape: gamma, kappa and z_peak.
+[analysis]
+sampled_params = ["gamma", "kappa", "z_peak"]

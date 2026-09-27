@@ -1,0 +1,6 @@
+# The seed-41 injection population with only the approximant changed, so the
+# comparison with IMRPhenom isolates the waveform.
+[analysis.catalog.proposal]
+seed = 41
+num_samples = 32768
+waveform = { approximant = "TaylorF2" }

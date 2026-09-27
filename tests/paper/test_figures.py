@@ -20,7 +20,7 @@ import ast
 from pathlib import Path
 
 import pytest
-from config_fixtures import write_root_layers
+from config_fixtures import write_defaults
 from repo import REPO_ROOT
 
 from astrogwb.paper.config import networks
@@ -152,7 +152,7 @@ def test_only_the_network_experiments_have_figure_rules() -> None:
 
 
 def test_every_legend_network_is_declared_in_the_table() -> None:
-    """The legend cannot name a network `config/networks.json` does not have.
+    """The legend cannot name a network the shared `[networks]` table lacks.
 
     Membership lives in the table; only the order and the LaTeX label live in
     `DETECTOR_NETWORKS`. This is the seam between them.
@@ -179,12 +179,12 @@ def test_the_network_a_run_names_matches_its_legend_name() -> None:
 
 def test_resolve_networks_rejects_an_undeclared_network(tmp_path: Path) -> None:
     """A run naming a network the table lacks fails, naming both."""
-    write_root_layers(tmp_path, networks={"known": ["S1", "R1"]})
+    write_defaults(tmp_path, networks={"known": ["S1", "R1"]})
     experiment = tmp_path / "config/runs/demo"
     experiment.mkdir(parents=True)
-    (experiment / "_base.json").write_text("{}", encoding="utf-8")
-    (experiment / "only.json").write_text(
-        '{"analysis": {"network": "absent"}}', encoding="utf-8"
+    (experiment / "_base.toml").write_text("", encoding="utf-8")
+    (experiment / "only.toml").write_text(
+        '[analysis]\nnetwork = "absent"\n', encoding="utf-8"
     )
 
     with pytest.raises(ValueError, match=r"names network 'absent'"):
