@@ -21,10 +21,10 @@ import numpy as np
 import pytest
 from repo import REPO_ROOT
 
-from astrogwb.catalog import PolarizationPowerCatalog, generate
-from astrogwb.metadata import CatalogRequest
+from astrogwb.catalog import CatalogGenerator, PolarizationPowerCatalog
+from astrogwb.metadata import CatalogMetadata
 
-RequestFactory = Callable[..., CatalogRequest]
+RequestFactory = Callable[..., CatalogMetadata]
 
 
 @pytest.fixture(scope="module")
@@ -48,8 +48,8 @@ def make_request() -> RequestFactory:
         *,
         extra_kwargs: dict[str, Any] | None = None,
         extra_fiducials: dict[str, float] | None = None,
-    ) -> CatalogRequest:
-        return CatalogRequest.from_blocks(
+    ) -> CatalogMetadata:
+        return CatalogMetadata.from_blocks(
             population={
                 "model_name": model,
                 "model_kwargs": {
@@ -86,34 +86,34 @@ def make_request() -> RequestFactory:
 
 
 @pytest.mark.integration
-def test_generate_with_ripple_request_records_the_request(
+def test_generator_with_ripple_request_records_the_request(
     make_request: RequestFactory, tmp_path: Path
 ) -> None:
     request = make_request()
     path = tmp_path / "toy.h5"
-    generate(request).save(path)
+    CatalogGenerator()(request).save(path)
 
     restored = PolarizationPowerCatalog.load(path)
 
-    assert CatalogRequest.from_catalog(restored).key() == request.key()
+    assert restored.metadata.key() == request.key()
 
 
 @pytest.mark.integration
-def test_generate_with_same_request_is_reproducible(
+def test_generator_with_same_request_is_reproducible(
     make_request: RequestFactory,
 ) -> None:
-    first = generate(make_request())
-    second = generate(make_request())
+    first = CatalogGenerator()(make_request())
+    second = CatalogGenerator()(make_request())
 
     np.testing.assert_array_equal(first.polarization_power, second.polarization_power)
 
 
 @pytest.mark.integration
-def test_generate_with_guard_mixture_records_its_fraction(
+def test_generator_with_guard_mixture_records_its_fraction(
     make_request: RequestFactory,
 ) -> None:
     """The eps in the config is the eps the file records and reweights by."""
-    catalog = generate(
+    catalog = CatalogGenerator()(
         make_request(
             "bns_md_uniform_mixture", extra_kwargs={"uniform_mixing_fraction": 0.1}
         )
@@ -123,10 +123,10 @@ def test_generate_with_guard_mixture_records_its_fraction(
 
 
 @pytest.mark.integration
-def test_generate_with_gaussian_mass_model_records_its_fiducials(
+def test_generator_with_gaussian_mass_model_records_its_fiducials(
     make_request: RequestFactory,
 ) -> None:
-    catalog = generate(
+    catalog = CatalogGenerator()(
         make_request(
             "bns_md_gaussian_cosmological",
             extra_fiducials={"mass_mean": 1.33, "mass_sigma": 0.09},
@@ -157,7 +157,7 @@ def test_cli_with_output_not_named_by_key_raises(
     generate_catalog: ModuleType, make_request: RequestFactory, tmp_path: Path
 ) -> None:
     """The workflow names the file and the request separately; they must agree."""
-    with pytest.raises(ValueError, match="not named by the request's key"):
+    with pytest.raises(ValueError, match="not named by the metadata's key"):
         generate_catalog.main(
             [
                 "--request",
@@ -186,4 +186,4 @@ def test_cli_writes_the_catalog_under_its_key(
     )
 
     restored = PolarizationPowerCatalog.load(output)
-    assert CatalogRequest.from_catalog(restored).key() == request.key()
+    assert restored.metadata.key() == request.key()

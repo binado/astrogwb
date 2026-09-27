@@ -18,7 +18,7 @@ from numpyro import handlers
 from repo import REPO_ROOT
 
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.metadata import CatalogRequest
+from astrogwb.metadata import CatalogMetadata
 from astrogwb.paper.config.catalogs import (
     check_population_model,
     resolve_run_catalogs,
@@ -31,14 +31,14 @@ from astrogwb.populations import (
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 
-def _requests() -> dict[str, CatalogRequest]:
+def _requests() -> dict[str, CatalogMetadata]:
     return resolve_run_catalogs(REPO_ROOT).requests
 
 
-def _build(request: CatalogRequest) -> Population:
+def _build(request: CatalogMetadata) -> Population:
     """The population a request declares, built. ``PopulationMetadata.build`` is
     the same call generation makes, so this exercises the production path."""
-    return request.metadata.population.build()
+    return request.population.build()
 
 
 # --------------------------------------------------------------------------- #
@@ -48,9 +48,9 @@ def test_every_committed_catalog_names_a_registered_population() -> None:
     """Caught pre-flight, not at the top of a queued GPU generation job."""
     for key, request in _requests().items():
         check_population_model(
-            request.metadata.population.model_name,
+            request.population.model_name,
             label=f"catalog {key}",
-            kwargs=request.metadata.population.model_kwargs,
+            kwargs=request.population.model_kwargs,
         )
 
 
@@ -81,7 +81,7 @@ def test_only_the_guarded_proposals_declare_no_merger_rate() -> None:
     """
     for key, request in _requests().items():
         merger_rate_fn = _build(request).merger_rate_fn
-        expected_none = "uniform_mixture" in request.metadata.population.model_name
+        expected_none = "uniform_mixture" in request.population.model_name
         assert (merger_rate_fn is None) is expected_none, key
 
 
@@ -187,8 +187,8 @@ def _waveform(approximant: str, alpha: float | None = None) -> dict[str, object]
     return waveform
 
 
-def _request(waveform: dict[str, object]) -> CatalogRequest:
-    return CatalogRequest.from_blocks(
+def _request(waveform: dict[str, object]) -> CatalogMetadata:
+    return CatalogMetadata.from_blocks(
         population={
             "model_name": "bns_md_cosmological",
             "model_kwargs": {
@@ -217,7 +217,7 @@ def test_request_with_alpha_for_ripple_approximant_raises() -> None:
 
 
 def test_request_with_declared_alpha_reaches_analytic_generator() -> None:
-    generator = _request(_waveform("AnalyticInspiral", alpha=0.02)).metadata.waveform
+    generator = _request(_waveform("AnalyticInspiral", alpha=0.02)).waveform
     built = generator.build()
 
     assert isinstance(built, AnalyticInspiralGenerator)
@@ -225,7 +225,7 @@ def test_request_with_declared_alpha_reaches_analytic_generator() -> None:
 
 
 def test_request_without_alpha_defaults_to_isco() -> None:
-    built = _request(_waveform("AnalyticInspiral")).metadata.waveform.build()
+    built = _request(_waveform("AnalyticInspiral")).waveform.build()
 
     assert isinstance(built, AnalyticInspiralGenerator)
     assert built.metadata.alpha == ISCO_ALPHA

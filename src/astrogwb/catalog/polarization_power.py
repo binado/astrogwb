@@ -6,13 +6,15 @@ redshift proposal, and a config object derived from the two. They were
 reconciled by exact float equality over five hard-coded parameter names, which
 left ``xi_0``, ``xi_n`` and ``local_merger_rate`` checked by nothing at all.
 
-A catalog now records its complete population declaration -- the registered
-population name, the construction kwargs, and the density factors
-included in importance weighting, carried as one
-:class:`~astrogwb.metadata.PopulationMetadata` -- plus the hyperparameters it
-was drawn at. That is enough to reconstruct the exact map from hyperparameters
-to source density, so the run config no longer restates any of it and nothing
-has to be cross-checked.
+A catalog now records the complete :class:`~astrogwb.metadata.CatalogMetadata`
+it was generated from: the waveform settings, the population declaration -- the
+registered population name, its construction kwargs and seed, carried as one
+:class:`~astrogwb.metadata.PopulationMetadata` -- the hyperparameters it was
+drawn at, the draw size and the ``astrogwb`` version. That is enough to
+reconstruct the exact map from hyperparameters to source density, so the run
+config no longer restates any of it and nothing has to be cross-checked; and
+its :meth:`~astrogwb.metadata.CatalogMetadata.key` is the file name
+:func:`astrogwb.catalog.simulate` caches the catalog under.
 
 Immutability is a contract, not a language guarantee. The dataclass is frozen
 and transformations such as
@@ -24,7 +26,7 @@ through them.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Self
 
@@ -32,7 +34,6 @@ import jax
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb import __version__
 from astrogwb.frequency import uniform_grid_spacing
 from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import Population
@@ -60,9 +61,10 @@ class PolarizationPowerCatalog:
     ``polarization_power`` is frequency-first, shape ``(F, N)``; every source
     parameter has shape ``(N,)``.
 
-    The population record is private because its public interface is
-    :meth:`get_population`: what callers need is the reconstructed
-    ``fn(params)`` callables, not the strings they were rebuilt from. It is
+    The record is private and read through :attr:`metadata` and the
+    properties below, so a caller cannot rebind it away from the arrays it
+    describes; what a caller needs from the population is
+    :meth:`get_population`, not the strings it was rebuilt from. It is
     persisted as HDF5 attributes; the callables themselves never are.
     """
 
@@ -70,11 +72,6 @@ class PolarizationPowerCatalog:
     polarization_power: NDArray[Any]
     frequencies: NDArray[np.floating[Any]]
     _metadata: CatalogMetadata
-    _fiducials: Mapping[str, float]
-    #: The ``astrogwb`` version that generated the arrays. A catalog built in
-    #: memory is stamped with the running version; a loaded one keeps the
-    #: version its file records, which is what its cache key was taken over.
-    _version: str = field(default=__version__)
 
     def __post_init__(self) -> None:
         power = np.asarray(self.polarization_power)
@@ -90,6 +87,11 @@ class PolarizationPowerCatalog:
         num_frequencies, num_samples = power.shape
         if num_samples <= 0:
             raise ValueError("catalog must contain at least one sample")
+        if num_samples != self._metadata.num_samples:
+            raise ValueError(
+                f"polarization_power has {num_samples} samples; the metadata "
+                f"records {self._metadata.num_samples}"
+            )
         frequencies = np.asarray(self.frequencies)
         if frequencies.ndim != 1:
             raise ValueError("catalog frequencies must be one-dimensional")
@@ -129,11 +131,6 @@ class PolarizationPowerCatalog:
         object.__setattr__(self, "polarization_power", power)
         object.__setattr__(self, "frequencies", frequencies)
         object.__setattr__(self, "source_parameters", parameters)
-        object.__setattr__(
-            self,
-            "_fiducials",
-            {name: float(value) for name, value in self._fiducials.items()},
-        )
 
     @classmethod
     def from_generator(
@@ -153,9 +150,11 @@ class PolarizationPowerCatalog:
         parts, so a caller cannot pair a model name with another draw's seed or
         density sites -- the record is the unit that has to stay consistent.
 
-        ``fiducials`` stays separate because it is not part of the record: the
-        hyperparameters a draw was made *at* describe the samples, while the
-        record describes the density that produced them.
+        ``fiducials`` stays separate from it: the hyperparameters a draw was
+        made *at* describe the samples, while the population record describes
+        the density that produced them. Both are folded into the catalog's
+        :class:`~astrogwb.metadata.CatalogMetadata` here, with the generator's
+        waveform settings, the sample count and the running version.
 
         Frequencies come from the generator rather than from metadata: that is
         the axis the backend actually produces.
@@ -173,19 +172,27 @@ class PolarizationPowerCatalog:
         }
         frequencies = generator.frequencies
         power = jax.jit(generator.generate_batch)(source_parameters)
+        power = np.asarray(power)
         return cls(
             source_parameters=parameters,
-            polarization_power=np.asarray(power),
+            polarization_power=power,
             frequencies=np.asarray(frequencies),
             _metadata=CatalogMetadata(
-                waveform=generator.metadata, population=population
+                waveform=generator.metadata,
+                population=population,
+                fiducials={name: float(value) for name, value in fiducials.items()},
+                num_samples=int(power.shape[-1]),
             ),
-            _fiducials=fiducials,
         )
 
     # ----------------------------------------------------------------- #
     # The recorded population
     # ----------------------------------------------------------------- #
+    @property
+    def metadata(self) -> CatalogMetadata:
+        """Everything that determined this catalog; its key names the file."""
+        return self._metadata
+
     @property
     def population(self) -> PopulationMetadata:
         """The population declaration this catalog was drawn from."""
@@ -219,7 +226,7 @@ class PolarizationPowerCatalog:
         callables :meth:`get_population` returns: a target evaluation supplies
         its own, and binding these would silently pin them.
         """
-        return dict(self._fiducials)
+        return dict(self._metadata.fiducials)
 
     def get_population(self) -> Population:
         """Reconstruct the generating population with its kwargs bound.
@@ -239,7 +246,7 @@ class PolarizationPowerCatalog:
     @property
     def version(self) -> str:
         """The ``astrogwb`` version that generated this catalog."""
-        return self._version
+        return self._metadata.version
 
     @property
     def num_samples(self) -> int:
@@ -274,7 +281,9 @@ class PolarizationPowerCatalog:
         normalization. Draws truncated to a sub-window follow the same law as
         draws made directly from it, so only the support changes.
 
-        Returns a new catalog; the original is untouched.
+        Returns a new catalog; the original is untouched. Its
+        :attr:`metadata` records the narrowed window and the kept sample count,
+        so it no longer names a cached draw -- it is derived from one.
         """
         model_kwargs = self.population.model_kwargs
         missing = [name for name in REDSHIFT_WINDOW_KWARGS if name not in model_kwargs]
@@ -308,12 +317,14 @@ class PolarizationPowerCatalog:
                 name: values[keep] for name, values in self.source_parameters.items()
             },
             polarization_power=self.polarization_power[:, keep],
-            _metadata=CatalogMetadata(
-                waveform=self.waveform_metadata,
-                population=self.population.with_model_kwargs(
-                    minimum_redshift=float(minimum_redshift),
-                    maximum_redshift=float(maximum_redshift),
-                ),
+            _metadata=self._metadata.model_copy(
+                update={
+                    "population": self.population.with_model_kwargs(
+                        minimum_redshift=float(minimum_redshift),
+                        maximum_redshift=float(maximum_redshift),
+                    ),
+                    "num_samples": int(keep.size),
+                }
             ),
         )
 

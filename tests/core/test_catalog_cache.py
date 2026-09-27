@@ -1,4 +1,4 @@
-"""The catalog request, its content key, and the generate-or-load cache."""
+"""Catalog metadata, its content key, and catalogs through ``simulate``."""
 
 from __future__ import annotations
 
@@ -13,15 +13,15 @@ import pytest
 
 import astrogwb
 from astrogwb.catalog import (
+    CatalogGenerator,
     PolarizationPowerCatalog,
-    catalog_path,
-    check_catalog_answers,
-    generate,
-    load_or_generate,
+    artifact_path,
+    check_metadata,
+    simulate,
 )
-from astrogwb.metadata import CATALOG_KEY_LENGTH, CatalogRequest
+from astrogwb.metadata import CATALOG_KEY_LENGTH, CatalogMetadata
 
-RequestFactory = Callable[..., CatalogRequest]
+RequestFactory = Callable[..., CatalogMetadata]
 
 
 @pytest.fixture
@@ -70,7 +70,7 @@ def make_request(
 ) -> RequestFactory:
     """Build a small request, overriding any block by keyword."""
 
-    def build(**overrides: Any) -> CatalogRequest:
+    def build(**overrides: Any) -> CatalogMetadata:
         blocks: dict[str, Any] = {
             "population": population,
             "waveform": waveform,
@@ -80,7 +80,7 @@ def make_request(
             "version": astrogwb.__version__,
         }
         blocks.update(overrides)
-        return CatalogRequest.from_blocks(**blocks)
+        return CatalogMetadata.from_blocks(**blocks)
 
     return build
 
@@ -162,7 +162,7 @@ def test_from_blocks_without_version_uses_installed_version(
     waveform: dict[str, Any],
     fiducials: dict[str, float],
 ) -> None:
-    request = CatalogRequest.from_blocks(
+    request = CatalogMetadata.from_blocks(
         population=population,
         waveform=waveform,
         fiducials=fiducials,
@@ -173,67 +173,86 @@ def test_from_blocks_without_version_uses_installed_version(
     assert request.version == astrogwb.__version__
 
 
-def test_generate_with_foreign_version_raises(make_request: RequestFactory) -> None:
+def test_generator_with_foreign_version_raises(make_request: RequestFactory) -> None:
     with pytest.raises(ValueError, match="is installed"):
-        generate(make_request(version="0.0.0-other"))
+        CatalogGenerator()(make_request(version="0.0.0-other"))
 
 
-def test_saved_catalog_when_loaded_answers_its_request(
+def test_generated_catalog_records_its_metadata(make_request: RequestFactory) -> None:
+    request = make_request()
+
+    assert CatalogGenerator()(request).metadata == request
+
+
+def test_saved_catalog_when_loaded_records_its_metadata(
     make_request: RequestFactory, tmp_path: Path
 ) -> None:
     request = make_request()
     path = tmp_path / "catalog.h5"
-    generate(request).save(path)
+    CatalogGenerator()(request).save(path)
 
     restored = PolarizationPowerCatalog.load(path)
 
-    assert CatalogRequest.from_catalog(restored).key() == request.key()
+    assert restored.metadata == request
+    assert restored.metadata.key() == request.key()
 
 
-def test_load_or_generate_on_miss_writes_only_the_keyed_file(
+def test_restrict_redshift_records_the_narrowed_draw(
+    make_request: RequestFactory,
+) -> None:
+    catalog = CatalogGenerator()(make_request())
+
+    restricted = catalog.restrict_redshift(0.0, 1.0)
+
+    assert restricted.metadata.num_samples == restricted.num_samples
+    assert restricted.metadata.population.model_kwargs["maximum_redshift"] == 1.0
+    assert restricted.metadata.key() != catalog.metadata.key()
+
+
+def test_simulate_on_miss_writes_only_the_keyed_file(
     make_request: RequestFactory, tmp_path: Path
 ) -> None:
     request = make_request()
 
-    load_or_generate(request, tmp_path)
+    simulate(request, CatalogGenerator(), tmp_path)
 
     assert [path.name for path in tmp_path.iterdir()] == [f"{request.key()}.h5"]
 
 
-def test_load_or_generate_on_hit_does_not_rewrite_the_file(
+def test_simulate_on_hit_does_not_rewrite_the_file(
     make_request: RequestFactory, tmp_path: Path
 ) -> None:
     """A regeneration would replace the file, and with it the inode."""
     request = make_request()
-    first = load_or_generate(request, tmp_path)
-    inode = catalog_path(request, tmp_path).stat().st_ino
+    first = simulate(request, CatalogGenerator(), tmp_path)
+    inode = artifact_path(request, tmp_path).stat().st_ino
 
-    second = load_or_generate(request, tmp_path)
+    second = simulate(request, CatalogGenerator(), tmp_path)
 
-    assert catalog_path(request, tmp_path).stat().st_ino == inode
+    assert artifact_path(request, tmp_path).stat().st_ino == inode
     np.testing.assert_array_equal(first.polarization_power, second.polarization_power)
 
 
-def test_load_or_generate_with_file_under_wrong_key_raises(
+def test_simulate_with_file_under_wrong_key_raises(
     make_request: RequestFactory, tmp_path: Path
 ) -> None:
     other = make_request(seed=8)
-    generate(make_request()).save(catalog_path(other, tmp_path))
+    CatalogGenerator()(make_request()).save(artifact_path(other, tmp_path))
 
     with pytest.raises(ValueError, match="not the requested"):
-        load_or_generate(other, tmp_path)
+        simulate(other, CatalogGenerator(), tmp_path)
 
 
-def test_check_catalog_answers_with_other_request_raises(
+def test_check_metadata_with_other_request_raises(
     make_request: RequestFactory,
 ) -> None:
-    catalog = generate(make_request())
+    catalog = CatalogGenerator()(make_request())
 
     with pytest.raises(ValueError, match="not the requested"):
-        check_catalog_answers(catalog, make_request(num_samples=32), label="memory")
+        check_metadata(catalog, make_request(num_samples=32), label="memory")
 
 
-def test_generate_enables_x64_before_it_draws() -> None:
+def test_generator_enables_x64_before_it_draws() -> None:
     """Generation must configure x64 itself, not inherit it from Ripple's import.
 
     The population is drawn before the generator is built, and
@@ -247,12 +266,12 @@ import sys
 
 import jax
 
-from astrogwb.catalog import generate
-from astrogwb.metadata import CatalogRequest
+from astrogwb.catalog import CatalogGenerator
+from astrogwb.metadata import CatalogMetadata
 
 assert not jax.config.x64_enabled, "x64 was already on before generation"
-catalog = generate(
-    CatalogRequest.from_blocks(
+catalog = CatalogGenerator()(
+    CatalogMetadata.from_blocks(
         population={
             "model_name": "bns_md_cosmological",
             "model_kwargs": {"minimum_redshift": 0.0, "maximum_redshift": 5.0,

@@ -158,7 +158,7 @@ own `[waveform]`, `[population]` and `[fiducials]` blocks:
 
 That is `config/analysis.json`'s default, and a role overrides only what
 differs -- the seed and size, a population, an approximant. Each role resolves
-to a `CatalogRequest`, whose key names the file; see
+to a `CatalogMetadata`, whose key names the file; see
 [catalog generation](catalog-generation.md).
 
 Only `time-delay` overrides the injection, because its target population is not

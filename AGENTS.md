@@ -46,19 +46,21 @@ Catalogs are content-addressed. A run declares what each role draws in
 `[analysis.catalog]` -- a partial spec per role (`seed`, `num_samples`, and any
 `waveform` / `population` / `fiducials` override) over the run's own blocks of
 the same names. `resolve_catalog_blocks` (stdlib, in `config/runs.py`) is the
-one resolution; `CatalogRequest` (`astrogwb.metadata`) validates the result and
-its `key()` -- a hash of the canonical request -- names
-`outputs/catalogs/<key>.h5`. The Snakefile keys every run's roles at parse time
-(`resolve_run_catalogs`), `rule waveform_catalog` hands the generator the
-request as JSON and declares no config inputs, `run_mcmc` checks each loaded
-file against its own `RunConfig.catalog_request(role)`, and notebooks reach the
-same files through `astrogwb.paper.catalogs.run_catalog` /
-`astrogwb.catalog.load_or_generate`. There is no `config/catalogs/` and no
-catalog name. The version is part of the key, so **bump `version` in
+one resolution; `CatalogMetadata` (`astrogwb.metadata`) validates the result
+and its `key()` -- a hash of the canonical record -- names
+`outputs/catalogs/<key>.h5` (`astrogwb.metadata.artifact_path`). The same
+record is what a `PolarizationPowerCatalog` carries as `.metadata`. The
+Snakefile keys every run's roles at parse time (`resolve_run_catalogs`),
+`rule waveform_catalog` hands the generator the metadata as JSON and declares
+no config inputs, `run_mcmc` checks each loaded file against its own
+`RunConfig.catalog_request(role)`, and notebooks reach the same files through
+`astrogwb.paper.catalogs.run_catalog` /
+`astrogwb.catalog.simulate(metadata, CatalogGenerator(), cache_dir)`. There is
+no `config/catalogs/` and no catalog name. The version is part of the key, so **bump `version` in
 `pyproject.toml` whenever a change alters what a population draw or a waveform
 generator produces**, or stale catalogs keep being served. `just catalogs` maps
 keys back to what they draw and which runs use them.
-Forward-model spectra follow the same pattern outside the workflow: a
+Forward-model spectra go through the same `simulate` outside the workflow: a
 `SpectraMetadata` (each hyperparameter a fixed number or a prior spec) keys
 `outputs/spectra/<key>.h5`, and `astrogwb.catalog.simulate(metadata,
 SpectrumGenerator(), cache_dir)` serves or generates it.

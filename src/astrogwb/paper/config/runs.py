@@ -21,7 +21,7 @@ rather than three.
 A run also owns its catalogs. ``[analysis.catalog]`` holds a partial spec per
 role, and :func:`resolve_catalog_blocks` completes it from the run's own
 ``[waveform]``, ``[population]`` and ``[fiducials]``; the result is keyed by
-:class:`~astrogwb.metadata.CatalogRequest` and names the catalog file.
+:class:`~astrogwb.metadata.CatalogMetadata` and names the catalog file.
 
 :data:`EXPERIMENT_BASE` is required in every experiment directory rather than
 optional: a conditional Snakemake input complicates the DAG for no gain.
@@ -252,7 +252,7 @@ def resolve_catalog_blocks(raw: Mapping[str, Any], role: str) -> dict[str, Any]:
     the shared redshift window.
 
     Returns plain blocks, not a validated request: this module is stdlib-only,
-    and :meth:`astrogwb.metadata.CatalogRequest.from_blocks` is where they are
+    and :meth:`astrogwb.metadata.CatalogMetadata.from_blocks` is where they are
     checked and keyed.
     """
     if role not in CATALOG_ROLES:

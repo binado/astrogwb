@@ -32,7 +32,7 @@ from pydantic import (
     model_validator,
 )
 
-from astrogwb.metadata import CatalogRequest, PriorSpec
+from astrogwb.metadata import CatalogMetadata, PriorSpec
 from astrogwb.paper.config.runs import resolve_catalog_blocks
 from astrogwb.paper.utils import deep_merge
 
@@ -315,7 +315,7 @@ class CatalogSpec(BaseModel):
     always stated; ``waveform``, ``population`` and ``fiducials`` override the
     run's blocks of the same name, recursively, and are otherwise inherited.
     :meth:`RunConfig.catalog_request` resolves the result into the
-    :class:`~astrogwb.metadata.CatalogRequest` whose key names the file.
+    :class:`~astrogwb.metadata.CatalogMetadata` whose key names the file.
     """
 
     model_config = _STRICT
@@ -486,7 +486,7 @@ class RunConfig(BaseModel):
             if k not in self.analysis.sampled_params
         }
 
-    def catalog_request(self, role: str) -> CatalogRequest:
+    def catalog_request(self, role: str) -> CatalogMetadata:
         """The fully resolved catalog one role of this run samples against.
 
         Resolved by :func:`~astrogwb.paper.config.runs.resolve_catalog_blocks`,
@@ -495,7 +495,7 @@ class RunConfig(BaseModel):
         cannot be derived two ways.
         """
         raw = self.model_dump(mode="json")
-        return CatalogRequest.from_blocks(**resolve_catalog_blocks(raw, role))
+        return CatalogMetadata.from_blocks(**resolve_catalog_blocks(raw, role))
 
     def save(self, path: Path) -> None:
         """Write the validated run config as JSON."""

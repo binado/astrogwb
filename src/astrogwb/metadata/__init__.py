@@ -23,7 +23,8 @@ bodies, so nothing here imports JAX at module scope.
 from astrogwb.metadata.catalog import (
     CATALOG_KEY_LENGTH,
     CatalogMetadata,
-    CatalogRequest,
+    Keyed,
+    artifact_path,
     content_key,
 )
 from astrogwb.metadata.population import (
@@ -50,11 +51,12 @@ __all__ = [
     "SEED_ATTR",
     "WAVEFORM_ATTRS",
     "CatalogMetadata",
-    "CatalogRequest",
     "Hyperparameter",
+    "Keyed",
     "PopulationMetadata",
     "PriorSpec",
     "SpectraMetadata",
     "WaveformMetadata",
+    "artifact_path",
     "content_key",
 ]

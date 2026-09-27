@@ -4,23 +4,19 @@ Three abstractions: a *metadata* record that fully determines an artifact and
 names it with :meth:`key`; a *generator* that turns the record into the
 artifact; and :func:`simulate`, which serves ``<cache_dir>/<key>.h5`` on a hit
 and calls the generator on a miss. :func:`simulate` knows nothing about any
-particular artifact: :class:`~astrogwb.catalog.SpectrumGenerator` and
-:class:`~astrogwb.metadata.SpectraMetadata` are one instance of it.
+particular artifact. There are two instances of it:
 
-Polarization-power catalogs predate it and still go through their own pair,
-described below; they are the next thing to move onto :func:`simulate`.
+- :class:`~astrogwb.metadata.CatalogMetadata` and
+  :class:`~astrogwb.catalog.CatalogGenerator` for polarization-power catalogs;
+- :class:`~astrogwb.metadata.SpectraMetadata` and
+  :class:`~astrogwb.catalog.SpectrumGenerator` for spectral-density draws.
 
-A catalog is fully determined by a :class:`~astrogwb.metadata.CatalogRequest`:
-the waveform settings, the population record with its seed, the
-hyperparameters and size of the draw, and the ``astrogwb`` version that ran
-it. :func:`generate` turns a request into a catalog; :func:`load_or_generate`
-first looks for one already saved under the request's key.
-
-The cache is content-addressed: a catalog lives at ``<cache_dir>/<key>.h5``,
-so asking for the same thing twice finds the same file and changing anything
--- a seed, a kwarg, the package version -- names a different one. There is no
-index to keep in sync. A hit is still checked against the file's own record,
-which catches a file copied or renamed into the wrong place.
+The cache is content-addressed: an artifact lives at
+:func:`~astrogwb.metadata.artifact_path`, so asking for the same thing twice
+finds the same file and changing anything -- a seed, a kwarg, the package
+version -- names a different one. There is no index to keep in sync. A hit is
+still checked against the file's own record, which catches a file copied or
+renamed into the wrong place.
 """
 
 from __future__ import annotations
@@ -31,35 +27,19 @@ import tempfile
 from pathlib import Path
 from typing import Protocol, Self
 
-import jax
-
-from astrogwb import __version__
-from astrogwb.catalog.polarization_power import PolarizationPowerCatalog
-from astrogwb.metadata import CatalogRequest
-from astrogwb.utils.sampling import sample_sources
+from astrogwb.metadata import Keyed, artifact_path
 
 __all__ = [
     "Artifact",
     "Generator",
     "Keyed",
     "artifact_path",
-    "catalog_path",
-    "check_catalog_answers",
-    "generate",
-    "load_or_generate",
+    "check_metadata",
     "save_atomically",
     "simulate",
 ]
 
 logger = logging.getLogger(__name__)
-
-
-class Keyed(Protocol):
-    """A metadata record: everything that determines an artifact, and its hash."""
-
-    def key(self) -> str: ...
-
-    def model_dump_json(self) -> str: ...
 
 
 class Artifact[M: Keyed](Protocol):
@@ -83,11 +63,6 @@ class Generator[M: Keyed, A: Artifact](Protocol):
     def __call__(self, metadata: M) -> A: ...
 
 
-def artifact_path(metadata: Keyed, cache_dir: str | Path) -> Path:
-    """Where ``metadata``'s artifact lives in ``cache_dir``."""
-    return Path(cache_dir) / f"{metadata.key()}.h5"
-
-
 def simulate[M: Keyed, A: Artifact](
     metadata: M, generator: Generator[M, A], cache_dir: str | Path | None = None
 ) -> A:
@@ -105,13 +80,7 @@ def simulate[M: Keyed, A: Artifact](
     path = artifact_path(metadata, cache_dir)
     if path.is_file():
         artifact = generator.artifact.load(path)
-        recorded = artifact.metadata
-        if recorded.key() != metadata.key():
-            raise ValueError(
-                f"{path} records {recorded.key()}, not the requested "
-                f"{metadata.key()}:\n  recorded:  {recorded.model_dump_json()}\n"
-                f"  requested: {metadata.model_dump_json()}"
-            )
+        check_metadata(artifact, metadata, label=str(path))
         logger.info("%s: cache hit at %s", metadata.key(), path)
         return artifact
 
@@ -121,68 +90,25 @@ def simulate[M: Keyed, A: Artifact](
     return artifact
 
 
-def catalog_path(request: CatalogRequest, cache_dir: str | Path) -> Path:
-    """Where ``request``'s catalog lives in ``cache_dir``."""
-    return Path(cache_dir) / f"{request.key()}.h5"
+def check_metadata(artifact: Artifact, metadata: Keyed, *, label: str) -> None:
+    """Raise unless ``artifact`` records exactly ``metadata``.
 
-
-def generate(request: CatalogRequest) -> PolarizationPowerCatalog:
-    """Draw the population, generate its polarization power, and record both.
-
-    Values are checked once, on the concrete draw: generation is trace-safe
-    and trusts its inputs, so a population carrying a degree of freedom the
-    approximant cannot represent would otherwise be silently dropped.
+    What :func:`simulate` checks a cache hit with, and what a caller handed a
+    file by path -- rather than by cache directory -- checks it with, so a file
+    given to the wrong role or built from a draw nobody asks for any more is
+    refused before it is used.
     """
-    # x64 must be on before the draw. The population is sampled before the
-    # Ripple-backed generator is built, and importing ripplegw -- which turns
-    # this on globally -- happens only inside that generator, so relying on it
-    # would draw and persist every source column in float32.
-    jax.config.update("jax_enable_x64", True)
-
-    if request.version != __version__:
+    recorded = artifact.metadata
+    if recorded.key() != metadata.key():
         raise ValueError(
-            f"request is for astrogwb {request.version}, but {__version__} is "
-            "installed; a catalog is generated by the code its key names"
+            f"{label} records {recorded.key()}, not the requested "
+            f"{metadata.key()}:\n  recorded:  {recorded.model_dump_json()}\n"
+            f"  requested: {metadata.model_dump_json()}"
         )
 
-    population = request.metadata.population
-    source_model = population.build().source_model
-    logger.info(
-        "Catalog %s: population=%s seed=%d num_samples=%d kwargs=%s",
-        request.key(),
-        population.model_name,
-        population.seed,
-        request.num_samples,
-        population.model_kwargs,
-    )
-    samples = sample_sources(
-        source_model,
-        jax.random.PRNGKey(population.seed),
-        request.fiducials,
-        num_samples=request.num_samples,
-    )
 
-    generator = request.metadata.waveform.build()
-    logger.info(
-        "Generating %s waveforms for %d events (f_min=%.1f Hz, f_max=%.1f Hz)",
-        generator.metadata.approximant,
-        request.num_samples,
-        generator.metadata.minimum_frequency,
-        generator.metadata.maximum_frequency,
-    )
-    generator.check_sources(samples)
-    return PolarizationPowerCatalog.from_generator(
-        samples,
-        generator=generator,
-        population=population,
-        fiducials=request.fiducials,
-    )
-
-
-def save_atomically(
-    catalog: Artifact | PolarizationPowerCatalog, path: str | Path
-) -> None:
-    """Write ``catalog`` to ``path`` without ever exposing a partial file.
+def save_atomically(artifact: Artifact, path: str | Path) -> None:
+    """Write ``artifact`` to ``path`` without ever exposing a partial file.
 
     The file is written beside its destination and renamed into place, so a
     reader -- or a second writer racing on the same key -- sees either no file
@@ -196,43 +122,8 @@ def save_atomically(
     )
     os.close(handle)
     try:
-        catalog.save(temporary)
+        artifact.save(temporary)
         os.replace(temporary, path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
-
-
-def load_or_generate(
-    request: CatalogRequest, cache_dir: str | Path
-) -> PolarizationPowerCatalog:
-    """Return ``request``'s catalog from ``cache_dir``, generating it on a miss.
-
-    A hit is loaded and its recorded request compared with ``request``; a
-    mismatch raises rather than serving a catalog of something else. A miss is
-    generated and saved atomically under the request's key.
-    """
-    path = catalog_path(request, cache_dir)
-    if path.is_file():
-        catalog = PolarizationPowerCatalog.load(path)
-        check_catalog_answers(catalog, request, label=str(path))
-        logger.info("Catalog %s: cache hit at %s", request.key(), path)
-        return catalog
-
-    logger.info("Catalog %s: cache miss, generating into %s", request.key(), path)
-    catalog = generate(request)
-    save_atomically(catalog, path)
-    return catalog
-
-
-def check_catalog_answers(
-    catalog: PolarizationPowerCatalog, request: CatalogRequest, *, label: str
-) -> None:
-    """Raise unless ``catalog`` records exactly what ``request`` asks for."""
-    recorded = CatalogRequest.from_catalog(catalog)
-    if recorded.key() != request.key():
-        raise ValueError(
-            f"{label} records catalog {recorded.key()}, not the requested "
-            f"{request.key()}:\n  recorded:  {recorded.model_dump_json()}\n"
-            f"  requested: {request.model_dump_json()}"
-        )

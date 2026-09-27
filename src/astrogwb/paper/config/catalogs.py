@@ -4,7 +4,7 @@ A *catalog* is one persisted waveform draw: expensive to build (population
 draw + ripple waveform generation) and shared by every run that asks for the
 same one. A run declares what it needs in ``[analysis.catalog]`` -- a partial
 spec per role, resolved over the run's own ``[waveform]``, ``[population]``
-and ``[fiducials]`` into a :class:`~astrogwb.metadata.CatalogRequest` -- and
+and ``[fiducials]`` into a :class:`~astrogwb.metadata.CatalogMetadata` -- and
 the file lives at ``outputs/catalogs/<key>.h5``, where ``<key>`` is that
 request's content hash. No name translates between the two.
 
@@ -25,7 +25,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from astrogwb.metadata import CatalogRequest
+from astrogwb.metadata import CatalogMetadata
 from astrogwb.paper.config.mcmc import (
     RunConfig,
     build_run_config,
@@ -111,7 +111,7 @@ def check_catalog_requests(config: RunConfig, *, label: str) -> None:
             request = config.catalog_request(role)
         except ValueError as error:
             raise ValueError(f"{role_label}: {error}") from None
-        population = request.metadata.population
+        population = request.population
         check_redshift_grid(
             population.model_kwargs, label=f"{role_label}.population.model_kwargs"
         )
@@ -136,7 +136,7 @@ class RunCatalogs:
     there is no catalog config to glob.
     """
 
-    requests: dict[str, CatalogRequest]
+    requests: dict[str, CatalogMetadata]
     by_run: dict[tuple[str, str], dict[str, str]]
 
     def users(self, key: str) -> list[str]:
@@ -159,7 +159,7 @@ def resolve_run_catalogs(root: Path | None = None) -> RunCatalogs:
     :func:`~astrogwb.paper.config.runs.resolve_catalog_blocks`, and a test pins
     the two agreeing.
     """
-    requests: dict[str, CatalogRequest] = {}
+    requests: dict[str, CatalogMetadata] = {}
     by_run: dict[tuple[str, str], dict[str, str]] = {}
     for experiment, names in discover_runs(root).items():
         for run in names:
@@ -167,7 +167,7 @@ def resolve_run_catalogs(root: Path | None = None) -> RunCatalogs:
             roles: dict[str, str] = {}
             for role in CATALOG_ROLES:
                 try:
-                    request = CatalogRequest.from_blocks(
+                    request = CatalogMetadata.from_blocks(
                         **resolve_catalog_blocks(raw, role)
                     )
                 except ValueError as error:

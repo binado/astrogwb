@@ -337,8 +337,9 @@ def build_synthetic_importance(
                 },
                 seed=MOCK_POPULATION_SEED,
             ),
+            fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
+            num_samples=int(np.shape(polarization_power)[1]),
         ),
-        _fiducials=POPULATION_PARAMS,
     )
     spectrum = build_importance_spectrum(
         catalog,

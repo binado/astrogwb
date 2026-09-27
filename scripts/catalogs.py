@@ -22,7 +22,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from astrogwb.metadata import CatalogRequest
+from astrogwb.metadata import CatalogMetadata, artifact_path
 from astrogwb.paper.config.catalogs import RunCatalogs, resolve_run_catalogs
 from astrogwb.paper.config.runs import CATALOGS_ROOT
 
@@ -57,9 +57,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def describe(request: CatalogRequest) -> str:
-    """One line saying what a request draws."""
-    population = request.metadata.population
+def describe(request: CatalogMetadata) -> str:
+    """One line saying what a catalog draws."""
+    population = request.population
     kwargs = ", ".join(
         f"{name}={value:g}"
         for name, value in sorted(population.model_kwargs.items())
@@ -68,7 +68,7 @@ def describe(request: CatalogRequest) -> str:
     model = f"{population.model_name}({kwargs})" if kwargs else population.model_name
     return (
         f"{model} seed={population.seed} n={request.num_samples} "
-        f"{request.metadata.waveform.approximant} v{request.version}"
+        f"{request.waveform.approximant} v{request.version}"
     )
 
 
@@ -78,7 +78,7 @@ def format_listing(catalogs: RunCatalogs, cache_dir: Path) -> list[str]:
     for key, request in sorted(
         catalogs.requests.items(), key=lambda item: describe(item[1])
     ):
-        built = "built" if (cache_dir / f"{key}.h5").is_file() else "missing"
+        built = "built" if artifact_path(request, cache_dir).is_file() else "missing"
         lines.append(f"{key}  {built:<7}  {describe(request)}")
         lines.extend(f"    {user}" for user in catalogs.users(key))
     return lines

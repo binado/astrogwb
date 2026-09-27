@@ -1,10 +1,11 @@
-"""Combined provenance carried by every catalog, and the request that keys it."""
+"""What a polarization-power catalog is drawn from, and how every artifact is keyed."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING, Annotated, Any
+from pathlib import Path
+from typing import Annotated, Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,13 +13,11 @@ from astrogwb import __version__
 from astrogwb.metadata.population import PopulationMetadata
 from astrogwb.metadata.waveform import WaveformMetadata
 
-if TYPE_CHECKING:
-    from astrogwb.catalog import PolarizationPowerCatalog
-
 __all__ = [
     "CATALOG_KEY_LENGTH",
     "CatalogMetadata",
-    "CatalogRequest",
+    "Keyed",
+    "artifact_path",
     "content_key",
     "widen_model_kwargs",
 ]
@@ -52,33 +51,50 @@ def widen_model_kwargs(population: dict[str, Any]) -> None:
     }
 
 
+class Keyed(Protocol):
+    """A metadata record: everything that determines an artifact, and its hash."""
+
+    def key(self) -> str: ...
+
+    def model_dump_json(self) -> str: ...
+
+
+def artifact_path(metadata: Keyed, cache_dir: str | Path) -> Path:
+    """Where ``metadata``'s artifact lives in ``cache_dir``: ``<cache_dir>/<key>.h5``.
+
+    Here rather than beside :func:`astrogwb.catalog.simulate` so that code
+    which only names files -- the ``Snakefile`` building its DAG -- reaches it
+    without importing JAX.
+    """
+    return Path(cache_dir) / f"{metadata.key()}.h5"
+
+
 class CatalogMetadata(BaseModel):
-    """Waveform and population provenance as one immutable record."""
-
-    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
-
-    waveform: WaveformMetadata
-    population: PopulationMetadata
-
-
-class CatalogRequest(BaseModel):
     """Everything that determines a polarization-power catalog's contents.
 
-    :class:`CatalogMetadata` alone is not enough: two catalogs with the same
-    waveform and population record still differ if they were drawn at other
+    It is both the request and the provenance, as
+    :class:`~astrogwb.metadata.SpectraMetadata` is for spectra: a
+    :class:`~astrogwb.catalog.CatalogGenerator` turns it into a catalog, the
+    catalog carries it as :attr:`~astrogwb.catalog.PolarizationPowerCatalog.metadata`,
+    and :meth:`key` is the file name :func:`~astrogwb.catalog.simulate` caches
+    it under.
+
+    The waveform and population record alone are not enough: two catalogs
+    with the same ones still differ if they were drawn at other
     hyperparameters or at another size, and both differ if the code that drew
     them changed. ``fiducials`` and ``num_samples`` close the first gap and
     ``version`` the second -- as far as the package version is bumped when a
     population or waveform change alters a draw.
 
-    :meth:`key` is the content address a catalog is cached under. Every caller
-    -- the workflow, the generator script, a notebook -- derives it from this
-    one record, so there is one canonical form and no second hash to drift.
+    Every caller -- the workflow, the generator script, a notebook -- derives
+    the key from this one record, so there is one canonical form and no second
+    hash to drift.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
-    metadata: CatalogMetadata
+    waveform: WaveformMetadata
+    population: PopulationMetadata
     fiducials: dict[str, float]
     num_samples: Annotated[int, Field(gt=0)]
     version: str = __version__
@@ -90,22 +106,18 @@ class CatalogRequest(BaseModel):
         widened to ``float`` first, so a setting spelled ``2`` in one config and
         ``2.0`` in another names the same catalog; everything else is already
         type-stable under strict validation.
+
+        The payload nests ``waveform`` and ``population`` under ``metadata``,
+        the shape this record had before it was flattened, so every catalog
+        already on disk keeps its key.
         """
         payload = self.model_dump(mode="json")
-        widen_model_kwargs(payload["metadata"]["population"])
+        widen_model_kwargs(payload["population"])
+        payload["metadata"] = {
+            "waveform": payload.pop("waveform"),
+            "population": payload.pop("population"),
+        }
         return content_key(payload)
-
-    @classmethod
-    def from_catalog(cls, catalog: PolarizationPowerCatalog) -> CatalogRequest:
-        """The request a loaded catalog answers, as its file records it."""
-        return cls(
-            metadata=CatalogMetadata(
-                waveform=catalog.waveform_metadata, population=catalog.population
-            ),
-            fiducials=dict(catalog.fiducials),
-            num_samples=catalog.num_samples,
-            version=catalog.version,
-        )
 
     @classmethod
     def from_blocks(
@@ -117,8 +129,8 @@ class CatalogRequest(BaseModel):
         seed: int,
         num_samples: int,
         version: str | None = None,
-    ) -> CatalogRequest:
-        """Assemble a request from config-shaped blocks.
+    ) -> CatalogMetadata:
+        """Assemble a record from config-shaped blocks.
 
         ``population`` is the config's ``{model_name, model_kwargs}`` block:
         the seed belongs to the draw, so it is supplied on its own and folded
@@ -128,10 +140,8 @@ class CatalogRequest(BaseModel):
         if "seed" in population:
             raise ValueError("population may not declare seed: it is the draw's own")
         data: dict[str, Any] = {
-            "metadata": {
-                "waveform": waveform,
-                "population": {**population, "seed": seed},
-            },
+            "waveform": waveform,
+            "population": {**population, "seed": seed},
             "fiducials": fiducials,
             "num_samples": num_samples,
         }

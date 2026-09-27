@@ -1,7 +1,7 @@
 """Loading the two catalogs a run samples against, and the checks between them.
 
 A catalog is a file: ``outputs/catalogs/<key>.h5``, where ``<key>`` is the
-content hash of the :class:`~astrogwb.metadata.CatalogRequest` a run's role
+content hash of the :class:`~astrogwb.metadata.CatalogMetadata` a run's role
 resolves to. The workflow builds them with ``scripts/generate_catalog.py``;
 :func:`run_catalog` reaches the same files from a notebook, generating one on
 a miss. Either way the density its samples follow comes back off the file's
@@ -25,24 +25,29 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from astrogwb.catalog import (
+    CatalogGenerator,
     PolarizationPowerCatalog,
-    check_catalog_answers,
-    load_or_generate,
+    check_metadata,
+    simulate,
 )
-from astrogwb.metadata import CatalogRequest
+from astrogwb.metadata import CatalogMetadata
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import CATALOGS_ROOT, assemble_run
 
 
 def load_run_catalog(
-    path: Path | str, *, label: str, request: CatalogRequest | None = None
+    path: Path | str, *, label: str, request: CatalogMetadata | None = None
 ) -> PolarizationPowerCatalog:
     """Load one catalog file, validating its format and its population record.
 
     ``label`` is the role -- ``"injection"`` or ``"proposal"`` -- and is what
     identifies the catalog in error messages. Given a ``request``, the file
-    must also record exactly that request, which is how a run refuses a file
+    must also record exactly that metadata, which is how a run refuses a file
     handed to the wrong role or built from a draw it no longer asks for.
+
+    This is the by-path counterpart of :func:`~astrogwb.catalog.simulate`: a
+    workflow job is handed the file its rule built and must never generate
+    one, so a missing file raises instead of being drawn.
     """
     path = Path(path)
     if not path.is_file():
@@ -50,7 +55,7 @@ def load_run_catalog(
     try:
         catalog = PolarizationPowerCatalog.load(path)
         if request is not None:
-            check_catalog_answers(catalog, request, label=str(path))
+            check_metadata(catalog, request, label=str(path))
     except ValueError as error:
         raise ValueError(f"{label} catalog {path}: {error}") from error
     return catalog
@@ -66,14 +71,14 @@ def run_catalog(
 ) -> PolarizationPowerCatalog:
     """The catalog one role of a committed run samples against.
 
-    Resolves the run's config into its request and returns the cached file
+    Resolves the run's config into its catalog metadata and returns the cached file
     the workflow would have built, generating it on a miss. This is the
     notebook's way in: no path to hard-code, and no way to pair a run with a
     catalog it does not ask for. Generation reaches JAX, so call this after
     :func:`~astrogwb.paper.runtime.configure_runtime`.
     """
     config = build_run_config(assemble_run(experiment, run, root=root))
-    return load_or_generate(config.catalog_request(role), cache_dir)
+    return simulate(config.catalog_request(role), CatalogGenerator(), cache_dir)
 
 
 def validate_matching_frequency_grids(

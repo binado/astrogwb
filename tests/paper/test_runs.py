@@ -18,7 +18,7 @@ import pytest
 from config_fixtures import write_root_layers
 from repo import REPO_ROOT
 
-from astrogwb.metadata import CatalogRequest
+from astrogwb.metadata import CatalogMetadata
 from astrogwb.paper.config.catalogs import (
     check_catalog_requests,
     resolve_run_catalogs,
@@ -328,7 +328,7 @@ def test_the_injection_is_drawn_at_the_fiducials_the_run_initializes_at() -> Non
 
 def test_the_catalog_size_series_differs_only_in_size() -> None:
     requests = [
-        CatalogRequest.from_blocks(
+        CatalogMetadata.from_blocks(
             **catalog_blocks("variable-catalog-size", run, "proposal")
         )
         for run in ("n8192", "n16384", "n32768")
