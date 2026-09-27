@@ -58,6 +58,10 @@ catalog name. The version is part of the key, so **bump `version` in
 `pyproject.toml` whenever a change alters what a population draw or a waveform
 generator produces**, or stale catalogs keep being served. `just catalogs` maps
 keys back to what they draw and which runs use them.
+Forward-model spectra follow the same pattern outside the workflow: a
+`SpectraMetadata` (each hyperparameter a fixed number or a prior spec) keys
+`outputs/spectra/<key>.h5`, and `astrogwb.catalog.simulate(metadata,
+SpectrumGenerator(), cache_dir)` serves or generates it.
 
 A run config is three layers merged in order --
 `config/{analysis,fiducials,networks,priors,sampler,waveform,population}.json`,

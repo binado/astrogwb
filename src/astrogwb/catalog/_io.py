@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from pydantic import ValidationError
 
 from astrogwb._attrs import (
     DOMAIN_FREQUENCY,
@@ -51,6 +52,7 @@ from astrogwb.metadata import (
     POPULATION_ATTRS,
     CatalogMetadata,
     PopulationMetadata,
+    SpectraMetadata,
     WaveformMetadata,
 )
 
@@ -217,7 +219,7 @@ def validate_catalog_file(handle: h5py.File | h5py.Group, *, label: str) -> None
 # --------------------------------------------------------------------- #
 # Spectral-density catalogs
 # --------------------------------------------------------------------- #
-SPECTRAL_DENSITY_FORMAT_NAME = "astrogwb_spectral_density_v3"
+SPECTRAL_DENSITY_FORMAT_NAME = "astrogwb_spectral_density_v4"
 SPECTRAL_DENSITY_DATASETS = (
     "frequency",
     "spectral_density",
@@ -228,15 +230,20 @@ SPECTRAL_DENSITY_DATASETS = (
 
 N_MAX_SIGMA_ATTR = "n_max_sigma"
 OBSERVATION_TIME_ATTR = "observation_time"
+#: Each hyperparameter's declaration, as a JSON object: a number for a fixed
+#: value, a ``{"dist", "kwargs"}`` spec for a prior. Added in v4, with the
+#: version, so a file records every field of its
+#: :class:`~astrogwb.metadata.SpectraMetadata` and hence its own cache key.
+HYPERPARAMETER_PRIORS_ATTR = "hyperparameter_priors"
 
-#: What a spectra file must carry. Unlike the catalog format there is no
-#: optional tier -- v1 is the first version, so every population attribute is
-#: required outright, and a field added later gets its own additive treatment
-#: then.
+#: What a spectra file must carry. There is no optional tier: an older format
+#: is rejected by name, so every attribute is required outright.
 REQUIRED_SPECTRAL_DENSITY_ATTRS = (
     *POPULATION_ATTRS,
     N_MAX_SIGMA_ATTR,
     OBSERVATION_TIME_ATTR,
+    HYPERPARAMETER_PRIORS_ATTR,
+    VERSION_ATTR,
 )
 
 
@@ -250,14 +257,19 @@ def save_spectral_density_catalog(
     names, hyperparameters = stack_columns(
         catalog.hyperparameters, rows=catalog.num_draws
     )
+    metadata = catalog.metadata
     attrs: dict[str, str | int | float] = {
         FORMAT_NAME_ATTR: SPECTRAL_DENSITY_FORMAT_NAME,
         "domain": DOMAIN_FREQUENCY,
-        **catalog.waveform_metadata.to_attrs(),
-        **catalog.population.to_attrs(),
+        **metadata.waveform.to_attrs(),
+        **metadata.population.to_attrs(),
         PARAMETER_NAMES_ATTR: json.dumps(names),
-        N_MAX_SIGMA_ATTR: catalog.n_max_sigma,
-        OBSERVATION_TIME_ATTR: catalog.observation_time,
+        N_MAX_SIGMA_ATTR: metadata.n_max_sigma,
+        OBSERVATION_TIME_ATTR: metadata.observation_time,
+        HYPERPARAMETER_PRIORS_ATTR: json.dumps(
+            metadata.model_dump(mode="json")["hyperparameters"], sort_keys=True
+        ),
+        VERSION_ATTR: metadata.version,
     }
     write_h5(
         path,
@@ -285,20 +297,32 @@ def load_spectral_density_catalog[C: SpectralDensityCatalog](
             attrs[PARAMETER_NAMES_ATTR], label=label, name=PARAMETER_NAMES_ATTR
         )
         population = PopulationMetadata.from_attrs(attrs, label=label)
+        spectral_density = np.asarray(handle["spectral_density"])
+        try:
+            metadata = SpectraMetadata(
+                waveform=WaveformMetadata.from_attrs(attrs, label=label),
+                population=population,
+                hyperparameters=json_object_attr(
+                    attrs[HYPERPARAMETER_PRIORS_ATTR],
+                    label=label,
+                    name=HYPERPARAMETER_PRIORS_ATTR,
+                ),
+                num_draws=int(spectral_density.shape[0]),
+                observation_time=float(attrs[OBSERVATION_TIME_ATTR]),
+                n_max_sigma=float(attrs[N_MAX_SIGMA_ATTR]),
+                version=str(attrs[VERSION_ATTR]),
+            )
+        except ValidationError as error:
+            raise ValueError(f"{label}: invalid spectra metadata: {error}") from error
         catalog = cls(
-            spectral_density=np.asarray(handle["spectral_density"]),
+            spectral_density=spectral_density,
             frequencies=np.asarray(handle["frequency"]),
             n_events=np.asarray(handle["n_events"]),
             total_merger_rate=np.asarray(handle["total_merger_rate"]),
             hyperparameters=unstack_columns(
                 np.asarray(handle["hyperparameters"]), names
             ),
-            _metadata=CatalogMetadata(
-                waveform=WaveformMetadata.from_attrs(attrs, label=label),
-                population=population,
-            ),
-            n_max_sigma=float(attrs[N_MAX_SIGMA_ATTR]),
-            observation_time=float(attrs[OBSERVATION_TIME_ATTR]),
+            _metadata=metadata,
         )
     population.check_registered()
     return catalog

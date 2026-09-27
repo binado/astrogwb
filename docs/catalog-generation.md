@@ -355,10 +355,56 @@ the backend chooses the actual grid, so the two can differ.
 
 ## The spectral-density format
 
-`scripts/simulate_spectra.py` writes the sibling artifact: a
-`SpectralDensityCatalog`, format `astrogwb_spectral_density_v3`. It persists
-the forward model's *contraction* rather than the power it contracts, so a
-run that only needs predicted spectra never materializes `(F, N)` waveforms.
+The sibling artifact is a `SpectralDensityCatalog`, format
+`astrogwb_spectral_density_v4`. It persists the forward model's
+*contraction* rather than the power it contracts, so a run that only needs
+predicted spectra never materializes `(F, N)` waveforms.
+
+It is produced by three pieces:
+
+- **metadata** -- a `SpectraMetadata` (`astrogwb.metadata`): the waveform,
+  the population with its seed, each hyperparameter's fixed value *or* prior,
+  `num_draws`, `observation_time`, `n_max_sigma`, and the `astrogwb` version.
+  `key()` is its content hash.
+- **generator** -- `SpectrumGenerator(batch_size)` (`astrogwb.catalog`)
+  turns the metadata into draws. `batch_size` only chunks the waveform
+  reduction and consumes no randomness, so it lives here, not in the key.
+- **`simulate(metadata, generator, cache_dir)`** serves
+  `<cache_dir>/<key>.h5` on a hit -- after checking the file records the same
+  key -- and generates and saves atomically on a miss. It is generic over the
+  artifact; spectra are its first user.
+
+```python
+from astrogwb.catalog import SpectrumGenerator, simulate
+from astrogwb.metadata import SpectraMetadata
+from astrogwb.paper.config import fiducials, population_metadata, waveform_metadata
+from astrogwb.paper.config.runs import SPECTRA_ROOT
+
+metadata = SpectraMetadata(
+    waveform=waveform_metadata(),
+    population=population_metadata(seed=41),
+    hyperparameters={
+        **fiducials(),
+        "local_merger_rate": {"dist": "Normal", "kwargs": {"loc": 770.0, "scale": 7.7}},
+    },
+    num_draws=64,
+    observation_time=1.0,
+)
+spectra = simulate(metadata, SpectrumGenerator(batch_size=1024), SPECTRA_ROOT)
+```
+
+A hyperparameter is a number to fix it for every draw, or a
+`{"dist", "kwargs"}` spec -- the `config/priors.json` format, validated by
+`astrogwb.metadata.PriorSpec` -- to draw it independently once per row. Priors
+are data, so an edited bound re-keys the draws without a version bump. The seed
+is split into a hyperparameter key and a forward-model key; with priors, the
+static event plate is sized from the largest Poisson mean across the rows.
+
+`scripts/simulate_spectra.py --metadata JSON --output <key>.h5` is the same
+generator from a shell; it refuses an output whose stem is not the key. A
+caller that needs a source model no record can name -- the
+`IsotropicInclination` wrapper in `notebooks/waveform_approximant_spectra.py`
+-- calls the uncached `astrogwb.sampling.draw_spectral_density` directly.
 
 | Dataset | Shape | Meaning |
 | --- | --- | --- |
@@ -366,23 +412,25 @@ run that only needs predicted spectra never materializes `(F, N)` waveforms.
 | `spectral_density` | `(draws, F)` | one `gwb_forward_model` draw per row |
 | `n_events` | `(draws,)` | that draw's Poisson event count |
 | `total_merger_rate` | `(draws,)` | that draw's observer-frame total rate |
-| `hyperparameters` | `(draws, P)` | one column per name, ordered by `source_parameter_names` |
+| `hyperparameters` | `(draws, P)` | the value each row was drawn at, one column per name, ordered by `source_parameter_names` |
 
 Its root attributes are the same three blocks a power catalog stamps -- format
-identity, the six waveform attributes, and the `PopulationMetadata` -- plus three
-the draws cannot be read back from:
+identity, the waveform attributes, and the `PopulationMetadata` -- plus the rest
+of the `SpectraMetadata`, so a file records its own key:
 
 ```
-n_max_sigma      = 5.0   # sized the static plate the Poisson count was capped against
-observation_time = 1.0   # years; set the Poisson mean
+n_max_sigma           = 5.0    # sized the static plate the Poisson count was capped against
+observation_time      = 1.0    # years; set the Poisson mean
+hyperparameter_priors = '{"H0": 67.66, "local_merger_rate": {"dist": "Normal", ...}, ...}'
+astrogwb_version      = "0.1.0"
 ```
 
 The two formats differ in what a row is, and that is the whole difference. A
 power catalog's sample axis indexes *sources* drawn once at one set of
 hyperparameters, recorded as scalar `population_params` fiducials. A
 spectral-density catalog's row axis indexes *draws* of the whole forward model,
-so its hyperparameters are a column per name -- free to vary from row to row,
-even though the simulator holds them fixed today.
+so its hyperparameters are a column per name. A fixed hyperparameter's column
+must repeat its value; a sampled one's holds each row's draw.
 
 `SpectralDensityCatalog.load` validates the same way its sibling does: layout,
 shapes, serialized dtypes, then reconstruction of the recorded population from

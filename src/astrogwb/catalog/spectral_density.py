@@ -12,13 +12,18 @@ The two differ in what a row is, and that is the whole difference. A
 polarization-power catalog's sample axis indexes *sources* drawn once at one
 set of hyperparameters, which it records as scalar fiducials. A
 spectral-density catalog's row axis indexes *draws* of the whole forward
-model -- each with its own Poisson event count and total merger rate -- so its
-hyperparameters are a column per name, free to vary from row to row even though
-the simulator that writes them today holds them fixed.
+model -- each with its own Poisson event count and total merger rate -- and
+its hyperparameters are a column per name, because a hyperparameter may be
+drawn from a prior once per row.
 
-``n_max_sigma`` and ``observation_time`` are recorded because neither is
-recoverable from the arrays: the first sized the static plate the Poisson count
-was capped against and the second set the Poisson mean.
+Everything that determined the draws is one
+:class:`~astrogwb.metadata.SpectraMetadata`: the waveform and population, each
+hyperparameter's fixed value or prior, the draw count, the observation time,
+the plate depth ``n_max_sigma`` and the ``astrogwb`` version. Its
+:meth:`~astrogwb.metadata.SpectraMetadata.key` is the file name
+:func:`astrogwb.catalog.simulate` caches the draws under. The columns are what
+the record produced: a fixed hyperparameter's column must repeat its value, and
+a sampled one's holds the value each row was drawn at.
 """
 
 from __future__ import annotations
@@ -26,14 +31,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb.frequency import uniform_grid_spacing
-from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
+from astrogwb.metadata import PopulationMetadata, SpectraMetadata, WaveformMetadata
 from astrogwb.populations import Population
+
+if TYPE_CHECKING:
+    from astrogwb.sampling import SpectralDensityDraws
 
 __all__ = ["SpectralDensityCatalog"]
 
@@ -48,7 +56,9 @@ class SpectralDensityCatalog:
     ``n_events`` and ``total_merger_rate`` have shape ``(draws,)``, and every
     hyperparameter column has shape ``(draws,)``.
 
-    Like its sibling, the population record is private: what callers need is
+    The record is private and read through :attr:`metadata` and the
+    properties below, so a caller cannot rebind it away from the arrays it
+    describes; what a caller needs from the population is
     :meth:`get_population`, not the strings it was rebuilt from.
     """
 
@@ -57,18 +67,9 @@ class SpectralDensityCatalog:
     n_events: NDArray[Any]
     total_merger_rate: NDArray[Any]
     hyperparameters: Mapping[str, NDArray[Any]]
-    _metadata: CatalogMetadata
-    n_max_sigma: float
-    observation_time: float
+    _metadata: SpectraMetadata
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "n_max_sigma", float(self.n_max_sigma))
-        object.__setattr__(self, "observation_time", float(self.observation_time))
-        if self.n_max_sigma < 0.0:
-            raise ValueError("n_max_sigma must be non-negative")
-        if self.observation_time <= 0.0:
-            raise ValueError("observation_time must be positive")
-
         frequencies = np.asarray(self.frequencies)
         if frequencies.ndim != 1:
             raise ValueError("catalog frequencies must be one-dimensional")
@@ -81,8 +82,11 @@ class SpectralDensityCatalog:
         if spectra.ndim != 2 or spectra.shape[1] != frequencies.size:
             raise ValueError("spectral_density must have shape (draws, frequency)")
         draws = spectra.shape[0]
-        if draws <= 0:
-            raise ValueError("catalog must contain at least one draw")
+        if draws != self._metadata.num_draws:
+            raise ValueError(
+                f"spectral_density has {draws} draws; the metadata records "
+                f"{self._metadata.num_draws}"
+            )
 
         n_events = np.asarray(self.n_events)
         if n_events.ndim != 1 or n_events.shape[0] != draws:
@@ -108,15 +112,66 @@ class SpectralDensityCatalog:
                 )
             columns[name] = array
 
+        declared = set(self._metadata.hyperparameters)
+        if set(columns) != declared:
+            raise ValueError(
+                f"hyperparameter columns {sorted(columns)} do not match the "
+                f"metadata's {sorted(declared)}"
+            )
+        for name, value in self._metadata.fixed.items():
+            if not np.all(columns[name] == value):
+                raise ValueError(
+                    f"hyperparameter {name!r} is fixed at {value} in the "
+                    "metadata, but its column holds other values"
+                )
+
         object.__setattr__(self, "frequencies", frequencies)
         object.__setattr__(self, "spectral_density", spectra)
         object.__setattr__(self, "n_events", n_events)
         object.__setattr__(self, "total_merger_rate", rates)
         object.__setattr__(self, "hyperparameters", columns)
 
+    @classmethod
+    def from_draws(cls, draws: SpectralDensityDraws, metadata: SpectraMetadata) -> Self:
+        """Record ``draws`` as the output of ``metadata``.
+
+        The metadata is supplied rather than inferred: the caller ran the
+        forward model from it, so it is the only place that knows what drew
+        these arrays. Construction still checks that the two agree on the draw
+        count and on every fixed hyperparameter.
+        """
+        return cls(
+            spectral_density=draws.spectral_density,
+            frequencies=draws.frequencies,
+            n_events=draws.n_events,
+            total_merger_rate=draws.total_merger_rate,
+            hyperparameters=draws.hyperparameters,
+            _metadata=metadata,
+        )
+
     # ----------------------------------------------------------------- #
     # The recorded population
     # ----------------------------------------------------------------- #
+    @property
+    def metadata(self) -> SpectraMetadata:
+        """Everything that determined these draws; its key names their file."""
+        return self._metadata
+
+    @property
+    def version(self) -> str:
+        """The ``astrogwb`` version that generated these draws."""
+        return self._metadata.version
+
+    @property
+    def n_max_sigma(self) -> float:
+        """How many Poisson standard deviations the event plate reached."""
+        return self._metadata.n_max_sigma
+
+    @property
+    def observation_time(self) -> float:
+        """The observation time the Poisson mean was taken over, in years."""
+        return self._metadata.observation_time
+
     @property
     def population(self) -> PopulationMetadata:
         """The population declaration these draws were produced from."""
@@ -183,7 +238,7 @@ class SpectralDensityCatalog:
         return _io.load_spectral_density_catalog(cls, path)
 
     def save(self, path: str | Path, *, compression: str | None = None) -> None:
-        """Write the draws, waveform metadata, and the population record."""
+        """Write the draws and the metadata that determined them."""
         from astrogwb.catalog import _io
 
         _io.save_spectral_density_catalog(self, path, compression=compression)

@@ -99,6 +99,7 @@ BASE_OUT_DIR = Path("outputs")
 
 CHAINS_ROOT = BASE_OUT_DIR / "chains"
 CATALOGS_ROOT = BASE_OUT_DIR / "catalogs"
+SPECTRA_ROOT = BASE_OUT_DIR / "spectra"
 FIGURES_DIR = BASE_OUT_DIR / "figures"
 
 

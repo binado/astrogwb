@@ -24,6 +24,7 @@ from astrogwb.metadata.catalog import (
     CATALOG_KEY_LENGTH,
     CatalogMetadata,
     CatalogRequest,
+    content_key,
 )
 from astrogwb.metadata.population import (
     MODEL_KWARGS_ATTR,
@@ -32,6 +33,8 @@ from astrogwb.metadata.population import (
     SEED_ATTR,
     PopulationMetadata,
 )
+from astrogwb.metadata.prior import PriorSpec
+from astrogwb.metadata.spectra import Hyperparameter, SpectraMetadata
 from astrogwb.metadata.waveform import (
     REQUIRED_WAVEFORM_ATTRS,
     WAVEFORM_ATTRS,
@@ -48,6 +51,10 @@ __all__ = [
     "WAVEFORM_ATTRS",
     "CatalogMetadata",
     "CatalogRequest",
+    "Hyperparameter",
     "PopulationMetadata",
+    "PriorSpec",
+    "SpectraMetadata",
     "WaveformMetadata",
+    "content_key",
 ]

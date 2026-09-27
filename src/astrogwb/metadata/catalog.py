@@ -15,12 +15,41 @@ from astrogwb.metadata.waveform import WaveformMetadata
 if TYPE_CHECKING:
     from astrogwb.catalog import PolarizationPowerCatalog
 
-__all__ = ["CATALOG_KEY_LENGTH", "CatalogMetadata", "CatalogRequest"]
+__all__ = [
+    "CATALOG_KEY_LENGTH",
+    "CatalogMetadata",
+    "CatalogRequest",
+    "content_key",
+    "widen_model_kwargs",
+]
 
 #: Hex characters of the SHA-256 digest kept as a catalog key. 64 bits is far
 #: beyond collision range for a cache of tens of files, and short enough to
 #: read in a path.
 CATALOG_KEY_LENGTH = 16
+
+
+def content_key(payload: dict[str, Any]) -> str:
+    """The content address of one artifact's canonical JSON record.
+
+    ``payload`` is a record's ``model_dump(mode="json")`` after the record has
+    widened whatever it spells two ways -- an ``int`` setting that means the
+    same as its ``float`` -- to one form. Sorted keys and fixed separators do
+    the rest, so every artifact type hashes the same way and none can drift.
+    """
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()[:CATALOG_KEY_LENGTH]
+
+
+def widen_model_kwargs(population: dict[str, Any]) -> None:
+    """Widen a dumped population's construction kwargs to ``float`` in place.
+
+    A setting spelled ``2`` in one config and ``2.0`` in another names the
+    same draw, so both must hash alike.
+    """
+    population["model_kwargs"] = {
+        name: float(value) for name, value in population["model_kwargs"].items()
+    }
 
 
 class CatalogMetadata(BaseModel):
@@ -63,13 +92,8 @@ class CatalogRequest(BaseModel):
         type-stable under strict validation.
         """
         payload = self.model_dump(mode="json")
-        population = payload["metadata"]["population"]
-        population["model_kwargs"] = {
-            name: float(value) for name, value in population["model_kwargs"].items()
-        }
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        digest = hashlib.sha256(canonical.encode()).hexdigest()
-        return digest[:CATALOG_KEY_LENGTH]
+        widen_model_kwargs(payload["metadata"]["population"])
+        return content_key(payload)
 
     @classmethod
     def from_catalog(cls, catalog: PolarizationPowerCatalog) -> CatalogRequest:

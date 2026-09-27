@@ -17,8 +17,8 @@
 # # Waveform-approximant spectral draws
 #
 # Compare stochastic-background spectra made from the *same events* with four
-# Ripple frequency-domain approximants. Reusing one PRNG key for each NumPyro
-# `Predictive` call makes every call replay the same event count and source
+# Ripple frequency-domain approximants. Reusing one PRNG key for each
+# `draw_spectral_density` call makes every call replay the same event count and source
 # latent variables; only `WaveformMetadata.approximant` changes. The solid line
 # is the median of the retained draws and the shaded region is the 10th--90th
 # percentile interval.
@@ -39,21 +39,17 @@
 
 # %%
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 
 import jax
-import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from numpyro.infer import Predictive
 
 from astrogwb.paper.config import fiducials, population_model, waveform_generator
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
 from astrogwb.populations import IsotropicInclination
-from astrogwb.sampling import gwb_forward_model
-from astrogwb.utils import years_to_seconds
+from astrogwb.sampling import draw_spectral_density
 
 # Configure precision before constructing a JAX array or querying a device.
 jax.config.update("jax_enable_x64", True)
@@ -130,8 +126,9 @@ generators = {
 # %% [markdown]
 # ## Draw matched spectra
 #
-# `Predictive` assigns keys deterministically by sample-site name. Calling the
-# same model with the same fixed key therefore reproduces `n_events`, masses,
+# `draw_spectral_density` splits its key the same way on every call, and
+# `Predictive` inside it assigns keys deterministically by sample-site name.
+# Calling it with the same fixed key therefore reproduces `n_events`, masses,
 # redshifts, spins, tidal deformabilities, and inclinations exactly for every
 # approximant. Splitting the key in the loop would instead produce unrelated
 # catalogs and would confound waveform differences with Monte Carlo variation.
@@ -145,30 +142,24 @@ merger_rate_fn = population.merger_rate_fn
 if merger_rate_fn is None:
     raise ValueError("configured population cannot simulate event counts")
 
-rate = float(jnp.asarray(merger_rate_fn(CONFIG.hyperparameters)))
-mean_count = rate * years_to_seconds(CONFIG.observation_time)
-max_events = max(int(np.ceil(mean_count + CONFIG.n_max_sigma * np.sqrt(mean_count))), 1)
 shared_key = jax.random.key(CONFIG.seed)
 
 spectral_draws: dict[str, np.ndarray] = {}
 event_counts: dict[str, np.ndarray] = {}
 for approximant, generator in generators.items():
-    predictive = Predictive(
-        partial(
-            gwb_forward_model,
-            source_model=source_model,
-            merger_rate_fn=merger_rate_fn,
-            generator=generator,
-            observation_time=CONFIG.observation_time,
-            batch_size=CONFIG.batch_size,
-            max_events=max_events,
-        ),
-        num_samples=CONFIG.draw_count,
-        return_sites=("spectral_density", "n_events"),
+    draws = draw_spectral_density(
+        source_model=source_model,
+        merger_rate_fn=merger_rate_fn,
+        generator=generator,
+        hyperparameters=CONFIG.hyperparameters,
+        observation_time=CONFIG.observation_time,
+        num_draws=CONFIG.draw_count,
+        rng_key=shared_key,
+        batch_size=CONFIG.batch_size,
+        n_max_sigma=CONFIG.n_max_sigma,
     )
-    result = predictive(shared_key, CONFIG.hyperparameters)
-    spectral_draws[approximant] = np.asarray(result["spectral_density"])
-    event_counts[approximant] = np.asarray(result["n_events"])
+    spectral_draws[approximant] = draws.spectral_density
+    event_counts[approximant] = draws.n_events
 
 # The identical counts are a cheap explicit check that the stochastic traces
 # stayed paired. The fixed-key construction also pairs every named source site.
