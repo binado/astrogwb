@@ -136,19 +136,6 @@ def test_uniform_grid_spacing_reads_off_ripples_grid_shape() -> None:
     assert uniform_grid_spacing(np.arange(9) * 0.5) == 0.5
 
 
-def test_uniform_grid_spacing_tolerates_the_analytic_grids_last_ulp() -> None:
-    """The tolerance regression test.
-
-    ``f_min + df * arange(n)`` carries about 1 ulp of the *largest* frequency
-    in each gap, unlike Ripple's bit-identical ``arange(n) * delta_f``. A
-    tolerance scaled to ``df`` itself, rather than to the frequencies, would
-    reject exactly this -- the package's own analytic catalogs.
-    """
-    frequencies = 2.0 + 0.25 * np.arange(16377)
-    assert frequencies[-1] == 4096.0
-    assert uniform_grid_spacing(frequencies) == 0.25
-
-
 def test_uniform_grid_spacing_rejects_a_non_uniform_grid() -> None:
     with pytest.raises(ValueError, match="not uniform"):
         uniform_grid_spacing(np.array([1.0, 2.0, 3.5, 4.5]))

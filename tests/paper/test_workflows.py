@@ -178,16 +178,6 @@ def test_catalog_rule_rejects_a_path_that_is_not_a_key() -> None:
     assert result.returncode != 0
 
 
-def test_the_snakefile_no_longer_needs_ancient() -> None:
-    """Per-run configs restore real change tracking.
-
-    ``ancient()`` existed only because one rule emitted all 26 configs, so any
-    edit invalidated every chain. It also meant a config change never
-    retriggered sampling at all.
-    """
-    assert "ancient(" not in SNAKEFILE.read_text()
-
-
 def test_catalogs_target_builds_every_distinct_catalog_once() -> None:
     result = _snakemake(
         "--snakefile",

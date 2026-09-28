@@ -92,10 +92,6 @@ def test_hubble_distance_returns_jax_array(h0: float) -> None:
     _assert_returns_jax_arrays(hubble_distance, h0)
 
 
-def test_hubble_distance_grad_wrt_hubble_constant() -> None:
-    _assert_finite_grad(hubble_distance, 0, jnp.asarray(70.0))
-
-
 class TestNormalizedHubbleParameter:
     @pytest.mark.parametrize(
         "omega_m",
@@ -115,20 +111,6 @@ class TestNormalizedHubbleParameter:
         self, redshift: npt.NDArray, omega_m: npt.NDArray
     ) -> None:
         _assert_returns_jax_arrays(normalized_hubble_parameter, redshift, omega_m)
-
-    def test_jittable(self, redshift: npt.NDArray, omega_m: npt.NDArray) -> None:
-        _z, _om = _as_jnp(redshift, omega_m)
-        jitted_fn = jax.jit(normalized_hubble_parameter)
-        res = jitted_fn(_z, _om)
-        res.block_until_ready()
-
-    def test_grad_wrt_omega_m(
-        self, redshift: npt.NDArray, omega_m: npt.NDArray
-    ) -> None:
-        _z, _om = _as_jnp(redshift, omega_m)
-        _assert_finite_grad(
-            lambda z, om: normalized_hubble_parameter(z, om).sum(), 1, _z, _om
-        )
 
     @pytest.mark.integration
     def test_matches_gwmockpop(

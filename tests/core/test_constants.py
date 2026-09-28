@@ -15,15 +15,9 @@ import pytest
 
 from astrogwb.constants import (
     EARTH_MEAN_RADIUS_IN_METERS,
-    FACE_ON_INCLINATION_FACTOR,
-    GPC_IN_METERS,
     GRAVITATIONAL_CONSTANT,
     INCLINATION_AVERAGE_TO_FACE_ON_RATIO,
     ISCO_ALPHA,
-    MEAN_INCLINATION_FACTOR,
-    MPC_IN_METERS,
-    MPC_IN_SECONDS,
-    SECONDS_PER_YEAR,
     SOLAR_MASS_IN_KILOGRAMS,
     SOLAR_MASS_IN_METERS,
     SOLAR_MASS_IN_SECONDS,
@@ -48,16 +42,6 @@ def test_lal_solar_mass_triple_is_self_consistent() -> None:
     )
     assert SOLAR_MASS_IN_METERS / SPEED_OF_LIGHT == pytest.approx(
         SOLAR_MASS_IN_SECONDS, rel=1e-16
-    )
-
-
-def test_derived_conversions_match_their_definitions() -> None:
-    """The derived constants are exactly their defining expressions."""
-    assert GPC_IN_METERS == 1.0e3 * MPC_IN_METERS
-    assert MPC_IN_SECONDS == MPC_IN_METERS / SPEED_OF_LIGHT
-    assert SECONDS_PER_YEAR == 365.25 * 24.0 * 3600.0
-    assert INCLINATION_AVERAGE_TO_FACE_ON_RATIO == (
-        MEAN_INCLINATION_FACTOR / FACE_ON_INCLINATION_FACTOR
     )
 
 

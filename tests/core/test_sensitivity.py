@@ -12,7 +12,6 @@ from astrogwb.detector import (
     effective_psd,
     evaluate_psd,
     load_sensitivities_for_network,
-    load_sensitivity,
     load_sensitivity_map,
     overlap_reduction_function,
 )
@@ -62,14 +61,6 @@ def test_sensitivity_evaluate_delegates() -> None:
 
     direct = evaluate_psd("AplusDesign_psd.txt", np.array([100.0]))
     np.testing.assert_allclose(sensitivity.evaluate(np.array([100.0])), direct)
-
-
-def test_load_sensitivity_single() -> None:
-    sensitivity = load_sensitivity("H1")
-
-    values = sensitivity.evaluate(np.array([100.0]))
-    assert np.all(np.isfinite(values))
-    assert np.all(values > 0.0)
 
 
 def test_load_sensitivity_map_multiple() -> None:

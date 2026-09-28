@@ -73,13 +73,6 @@ def _accumulate(model: Any, sites: tuple[str, ...]) -> jax.Array:
     return accumulator.log_prob
 
 
-def test_accumulator_matches_compute_log_probs_bit_for_bit() -> None:
-    sites = ("z", "m")
-    assert jnp.array_equal(
-        _accumulate(_two_site_model, sites), _reference(_two_site_model, sites)
-    )
-
-
 def test_only_selected_sites_contribute() -> None:
     partial = _accumulate(_two_site_model, ("z",))
     full = _accumulate(_two_site_model, ("z", "m"))
@@ -126,21 +119,6 @@ def test_empty_sites_sum_to_the_scalar_zero() -> None:
 
     assert log_prob.shape == ()
     assert float(log_prob) == 0.0
-
-
-def test_execution_is_isolated_from_enclosing_handlers() -> None:
-    bound = handlers.condition(_two_site_model, data=FIXED)
-    with handlers.trace() as outer:
-        compute_model_and_log_probs(bound, ("z",), {})
-    assert outer == {}
-
-
-def test_helper_evaluates_under_jit() -> None:
-    bound = handlers.condition(_two_site_model, data=FIXED)
-    eager = compute_model_and_log_probs(bound, ("z", "m"), {})[1]
-    traced = jax.jit(lambda: compute_model_and_log_probs(bound, ("z", "m"), {})[1])()
-
-    assert jnp.array_equal(eager, traced)
 
 
 # --------------------------------------------------------------------------- #

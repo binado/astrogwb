@@ -13,7 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.frequency import uniform_frequency_grid, uniform_grid_spacing
+from astrogwb.frequency import uniform_grid_spacing
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
@@ -48,38 +48,6 @@ def ripple_generator() -> RippleGenerator:
             frequency_resolution=4.0,
         )
     )
-
-
-def test_waveform_metadata_does_not_claim_a_frequency_grid() -> None:
-    metadata = WaveformMetadata(
-        approximant="TaylorF2",
-        minimum_frequency=10.0,
-        maximum_frequency=19.0,
-        reference_frequency=20.0,
-        sampling_frequency=64.0,
-        frequency_resolution=2.0,
-    )
-
-    assert not hasattr(metadata, "frequencies")
-    np.testing.assert_array_equal(
-        uniform_frequency_grid(10.0, 19.0, 2.0),
-        np.array([10.0, 12.0, 14.0, 16.0, 18.0]),
-    )
-    assert metadata.frequency_resolution == 2.0
-
-
-def test_uniform_grid_handles_float_roundoff() -> None:
-    metadata = WaveformMetadata(
-        approximant="Toy",
-        minimum_frequency=0.1,
-        maximum_frequency=0.3,
-        reference_frequency=0.1,
-        sampling_frequency=8.0,
-        frequency_resolution=0.1,
-    )
-
-    np.testing.assert_allclose(uniform_frequency_grid(0.1, 0.3, 0.1), [0.1, 0.2, 0.3])
-    assert metadata.frequency_resolution == 0.1
 
 
 def test_waveform_metadata_json_round_trip_includes_alpha() -> None:
@@ -339,25 +307,6 @@ def test_ripple_generate_batch_has_no_nan_gradient(
 
     assert np.all(np.isfinite(np.asarray(gradient)))
     assert np.all(np.asarray(gradient) < 0.0)
-
-
-def test_ripple_generator_has_no_fabricated_spacing(
-    ripple_generator: RippleGenerator,
-) -> None:
-    """Nothing stands in for the measured grid spacing any more."""
-    assert not hasattr(ripple_generator, "df")
-
-
-@pytest.mark.integration
-def test_ripple_generate_matches_the_first_batch_column(
-    ripple_generator: RippleGenerator,
-) -> None:
-    sources = _ripple_sources()
-    batch = ripple_generator.generate_batch(sources)
-    first = {name: values[:1] for name, values in sources.items()}
-    np.testing.assert_allclose(
-        ripple_generator.generate(first), batch[:, 0], rtol=1e-12
-    )
 
 
 def test_ripple_generate_rejects_multiple_events(

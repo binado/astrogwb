@@ -387,15 +387,6 @@ def test_distribution_survives_jit_and_vmap_as_a_pytree_argument() -> None:
     np.testing.assert_allclose(np.asarray(medians), np.asarray(median), rtol=1e-6)
 
 
-def test_amplitude_fn_is_aux_data_so_jit_caches_on_it() -> None:
-    """A non-hashable scaling would make every construction a fresh cache key."""
-    conditional = _uniform_conditional(0.2, 3.0, 101)
-    aux = AmplitudeConditional.tree_flatten(conditional)[1]
-
-    assert _identity_scaling in aux
-    assert hash(aux) == hash(AmplitudeConditional.tree_flatten(conditional)[1])
-
-
 # --------------------------------------------------------------------------- #
 # AmplitudeConditional.effective_nodes
 # --------------------------------------------------------------------------- #

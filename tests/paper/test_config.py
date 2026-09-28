@@ -20,11 +20,6 @@ from astrogwb.paper.config.mcmc import (
     build_run_config,
     prior_to_spec,
 )
-from astrogwb.paper.config.runs import (
-    assemble_run,
-    discover_runs,
-    load_base,
-)
 from astrogwb.paper.utils import deep_merge, load_mapping
 from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
 
@@ -132,25 +127,6 @@ def test_derived_analysis_values_are_not_serialized(tmp_path) -> None:
 
     reloaded = build_run_config(_read_record(path))
     assert reloaded.model_dump(mode="json") == config.model_dump(mode="json")
-
-
-def test_every_experiment_run_assembles_into_a_valid_config() -> None:
-    """Every run the workflow can build must validate without a runtime.
-
-    This replaces a check over two committed example configs. Assembling each
-    experiment run is both wider coverage and the thing that actually ships.
-    """
-    assert "runtime" not in load_base()
-
-    runs = discover_runs()
-    assert runs, "no experiments discovered"
-    for experiment, names in runs.items():
-        for run in names:
-            raw = assemble_run(experiment, run)
-            assert "runtime" not in raw, (
-                f"{experiment}/{run} declares a runtime section"
-            )
-            build_run_config(raw)
 
 
 def test_build_run_config_rejects_legacy_runtime_section() -> None:

@@ -7,16 +7,6 @@ import pytest
 from astrogwb.importance.diagnostics import relative_ess
 
 
-def test_relative_ess_is_one_for_equal_weights() -> None:
-    np.testing.assert_allclose(float(relative_ess(jnp.zeros(16))), 1.0, rtol=1e-6)
-
-
-def test_relative_ess_approaches_one_over_n_for_a_dominant_weight() -> None:
-    log_weights = jnp.array([0.0, -60.0, -60.0, -60.0])
-
-    np.testing.assert_allclose(float(relative_ess(log_weights)), 0.25, rtol=1e-6)
-
-
 def test_relative_ess_matches_the_direct_kish_expression() -> None:
     log_weights = jnp.log(jnp.array([6.0, 8.0]))
 

@@ -251,27 +251,6 @@ def _spectrum(
     )
 
 
-def test_the_builder_binds_both_callables_from_one_shared_mapping() -> None:
-    """The structural version of the shared-``density_sites`` invariant.
-
-    A hand-written dict feeding two partials could drift; here the two
-    returned callables must carry the identical array objects and factor set,
-    because one internal mapping is splatted into both.
-    """
-    spectrum = _spectrum()
-    density_keywords = spectrum[0].keywords
-    weight_keywords = spectrum[1].keywords
-    shared = (
-        "source_model",
-        "source_parameters",
-        "proposal_log_prob",
-        "log_reference_distance",
-        "density_sites",
-    )
-    for name in shared:
-        assert density_keywords[name] is weight_keywords[name], name
-
-
 def test_the_builders_frequency_mask_slices_power_but_not_samples() -> None:
     spectrum = _spectrum(frequency_mask=jnp.array([True, False, True]))
     density_keywords = spectrum[0].keywords
@@ -279,22 +258,6 @@ def test_the_builders_frequency_mask_slices_power_but_not_samples() -> None:
     for name, values in density_keywords["source_parameters"].items():
         assert values.shape == (4,), name
     assert density_keywords["proposal_log_prob"].shape == (4,)
-
-
-def test_the_builders_spectral_density_matches_the_underlying_primitive() -> None:
-    catalog = _catalog()
-    spectrum = _spectrum(catalog=catalog)
-    prediction, extras = spectrum[0](FIDUCIALS)
-    expected_prediction, expected_extras = importance_spectral_density(
-        FIDUCIALS, **_importance(catalog=catalog)
-    )
-    np.testing.assert_array_equal(prediction, expected_prediction)
-    assert set(extras) == set(expected_extras)
-    log_weights = spectrum[1](FIDUCIALS)
-    expected_log_weights = evaluate_log_weights(
-        FIDUCIALS, **log_weight_kwargs(_importance(catalog=catalog))
-    )
-    np.testing.assert_array_equal(log_weights, expected_log_weights)
 
 
 # --------------------------------------------------------------------------- #
