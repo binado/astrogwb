@@ -641,11 +641,7 @@ def _parity_sources(approximant: str) -> dict[str, np.ndarray]:
 
 
 @pytest.mark.integration
-# gwmock does not implement IMRPhenomXP_NRTidalv3.
-@pytest.mark.parametrize(
-    "approximant",
-    [name for name in SUPPORTED_APPROXIMANTS if name != "IMRPhenomXP_NRTidalv3"],
-)
+@pytest.mark.parametrize("approximant", SUPPORTED_APPROXIMANTS)
 def test_power_matches_the_gwmock_backend(approximant: str) -> None:
     """Families supported by both adapters, against the GPL backend this replaces.
 

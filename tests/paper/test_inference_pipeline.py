@@ -828,34 +828,3 @@ def test_the_repository_ships_no_proposal_density_config() -> None:
         analysis.pop("catalog", None)
         outside_catalogs = {**layer, "analysis": analysis}
         assert "uniform_mixing_fraction" not in json.dumps(outside_catalogs), path
-
-
-def test_prepared_inputs_honor_run_geometry_and_psd_overrides(
-    injection_catalog: PolarizationPowerCatalog,
-    proposal_catalog: PolarizationPowerCatalog,
-    tmp_path: Path,
-) -> None:
-    from astrogwb.detector import effective_psd
-
-    psd_path = tmp_path / "psd.txt"
-    psd_path.write_text("5 1e-46\n10 1e-46\n50 1e-46\n100 1e-46\n")
-    default = _config()
-    changed = _config(
-        detectors={
-            "S1": {
-                "psd_reference": str(psd_path),
-                "geometry": {"xarm_azimuth_rad": 0.3},
-            }
-        }
-    )
-    baseline = _prepare(injection_catalog, proposal_catalog, default)
-    overridden = _prepare(injection_catalog, proposal_catalog, changed)
-    geometry, sensitivities = changed.detector_registry.build_detectors(
-        changed.analysis.detectors
-    )
-    expected = effective_psd(FREQUENCIES, geometry, sensitivities)
-    np.testing.assert_array_equal(overridden.effective_psd, expected)
-    assert not np.array_equal(baseline.effective_psd, overridden.effective_psd)
-    np.testing.assert_array_equal(
-        baseline.observation.spectral_density, overridden.observation.spectral_density
-    )

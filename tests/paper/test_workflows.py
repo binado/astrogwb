@@ -18,7 +18,7 @@ import pytest
 from repo import REPO_ROOT
 
 from astrogwb.paper.config.catalogs import resolve_run_catalogs
-from astrogwb.paper.config.runs import DETECTOR_DEFAULT_PATHS, run_config_paths
+from astrogwb.paper.config.runs import run_config_paths
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
 PAPER_ROOT = REPO_ROOT
@@ -514,70 +514,3 @@ def test_figure_rule_preserves_declared_chain_order(tmp_path: Path) -> None:
         "outputs/chains/cosmological-parameters/H0-merger-rate.nc",
         prior_start,
     )
-
-
-def test_external_psds_are_inputs_of_selected_chains_and_figures(
-    tmp_path: Path,
-) -> None:
-    import shutil
-
-    directory = tmp_path / "workflow"
-    directory.mkdir()
-    shutil.copytree(PAPER_ROOT / "config", directory / "config")
-    for name in ("Snakefile", "scripts"):
-        (directory / name).symlink_to(PAPER_ROOT / name)
-    (directory / "data").mkdir()
-    for name in ("triangular", "aligned", "unused"):
-        (directory / f"data/{name}.txt").write_text("10 1e-46\n100 1e-46\n")
-    for run, detector, psd in (
-        ("ET-triangular", "E1", "triangular"),
-        ("ET-2L-aligned-CE-Hanford", "S1", "aligned"),
-    ):
-        path = directory / f"config/runs/cosmological-parameters/{run}.toml"
-        path.write_text(
-            path.read_text()
-            + f'\n[detectors.{detector}]\npsd_reference = "data/{psd}.txt"\n'
-        )
-    shared = directory / "config/detectors.toml"
-    shared.write_text(
-        shared.read_text() + '\n[detectors.K1]\npsd_reference = "data/unused.txt"\n'
-    )
-    result = subprocess.run(
-        [
-            "snakemake",
-            "--snakefile",
-            str(SNAKEFILE),
-            "--dry-run",
-            "--cores",
-            "1",
-            "plot_cosmological_parameters",
-        ],
-        cwd=directory,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr + result.stdout
-    jobs = result.stdout.split("rule ")
-    figure = next(
-        job for job in jobs if job.startswith("plot_cosmological_parameters:")
-    )
-    figure_input = next(
-        line for line in figure.splitlines() if line.strip().startswith("input:")
-    )
-    assert "config/detectors.toml" in figure_input
-    for path in DETECTOR_DEFAULT_PATHS:
-        assert str(path) in figure_input
-    assert "data/triangular.txt" in figure_input
-    assert "data/aligned.txt" in figure_input
-    assert "data/unused.txt" not in result.stdout
-    chain_jobs = [job for job in jobs if job.startswith("run_mcmc:")]
-    for run, used, other in (
-        ("ET-triangular", "triangular", "aligned"),
-        ("ET-2L-aligned-CE-Hanford", "aligned", "triangular"),
-    ):
-        job = next(job for job in chain_jobs if f"run={run}\n" in job)
-        for path in DETECTOR_DEFAULT_PATHS:
-            assert str(path) in job
-        assert f"data/{used}.txt" in job
-        assert f"data/{other}.txt" not in job

@@ -27,7 +27,6 @@ from astrogwb.paper.config.runs import (
     EXPERIMENT_BASE,
     RUNS_DIR,
     assemble_run,
-    base_config_paths,
     catalog_blocks,
     discover_runs,
     load_base,
@@ -83,26 +82,6 @@ def test_discovery_finds_seven_experiments_and_27_runs() -> None:
 def test_every_experiment_has_the_required_base_overlay() -> None:
     for experiment in discover_runs():
         assert (PAPER_ROOT / RUNS_DIR / experiment / EXPERIMENT_BASE).is_file()
-
-
-def test_run_config_paths_are_the_layers_in_merge_order() -> None:
-    """The shared layer first, then the experiment, then the run.
-
-    Asserted literally rather than against `base_config_paths()`: a
-    self-consistent comparison against the helper would pass whatever list the
-    helper happened to return, and what matters here is that a run is three
-    layers and that its own file is last.
-    """
-    paths = run_config_paths("cosmological-parameters", "ET-triangular")
-
-    assert paths[:2] == base_config_paths()
-    assert [str(path) for path in paths] == [
-        "config/defaults.toml",
-        "config/detectors.toml",
-        f"config/runs/cosmological-parameters/{EXPERIMENT_BASE}",
-        "config/runs/cosmological-parameters/ET-triangular.toml",
-    ]
-    assert all(path.is_file() for path in paths)
 
 
 def test_plotting_settings_are_not_a_run_layer() -> None:

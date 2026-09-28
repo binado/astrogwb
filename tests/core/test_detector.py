@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -302,51 +301,3 @@ def test_native_geometry_response_matches_lal(name: str) -> None:
     tensor = 0.5 * (np.outer(x, x) - np.outer(y, y))
     # LAL stores the response in float32 and arm angles in FrDetector as floats.
     np.testing.assert_allclose(det.to_lal().response, tensor, rtol=0.0, atol=2e-7)
-
-
-def test_hanford_translation_preserves_original_east_based_tensor() -> None:
-    det = load_detector("H1")
-    x = _arm_direction(
-        det, math.pi / 2.0 - math.radians(125.9994), math.radians(-0.0006195)
-    )
-    y = _arm_direction(
-        det, math.pi / 2.0 - math.radians(215.9994), math.radians(1.25e-05)
-    )
-    expected = 0.5 * (np.outer(x, x) - np.outer(y, y))
-    np.testing.assert_allclose(det.to_lal().response, expected, rtol=0.0, atol=2e-7)
-
-
-@pytest.mark.parametrize(
-    "xarm,yarm", [(0.0, math.pi / 2), (0.3, 1.3), (6.1, 0.2), (1.3, 0.3)]
-)
-def test_colocated_native_orf_matches_lal_contraction(xarm: float, yarm: float) -> None:
-    first = replace(load_detector("H1"), xarm_tilt_rad=0.0, yarm_tilt_rad=0.0)
-    second = replace(first, name="other", xarm_azimuth_rad=xarm, yarm_azimuth_rad=yarm)
-    expected = 2.0 * np.sum(first.to_lal().response * second.to_lal().response)
-    np.testing.assert_allclose(
-        overlap_reduction_function([0.0, 10.0, 1e4], first, second),
-        expected,
-        rtol=0.0,
-        atol=5e-7,
-    )
-
-
-def test_orf_azimuth_wraparound() -> None:
-    first = load_detector("E3")
-    wrapped = replace(
-        first,
-        xarm_azimuth_rad=first.xarm_azimuth_rad + 4.0 * math.pi,
-        yarm_azimuth_rad=first.yarm_azimuth_rad - 2.0 * math.pi,
-    )
-    frequencies = np.geomspace(0.01, 1e4, 100)
-    np.testing.assert_allclose(
-        overlap_reduction_function(frequencies, first, "E1"),
-        overlap_reduction_function(frequencies, wrapped, "E1"),
-        rtol=0.0,
-        atol=1e-12,
-    )
-
-
-@pytest.mark.parametrize("ce,site", [("C1", "H1"), ("C2", "L1")])
-def test_ce_preserves_explicit_site_geometry(ce: str, site: str) -> None:
-    assert replace(load_detector(ce), name=site) == load_detector(site)

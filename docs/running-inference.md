@@ -121,8 +121,7 @@ network = "scratch"
 The chain's own config records both the resolved `detectors` and the `network`
 name they came from. It also records the complete `detector_registry`, including
 geometry, PSD references, labels, and network membership. Reloading that JSON
-uses the resolved settings without merging newer packaged defaults. Older
-saved configs without a registry receive the packaged defaults.
+uses the resolved settings without merging newer packaged defaults.
 
 Detector definitions default to the packaged `geometry.toml` and
 `sensitivity.toml`. Both use the same `[detectors.<name>]` structure as
@@ -145,10 +144,9 @@ Geometry uses gwmock's `CustomDetector` fields: `latitude_rad`,
 from North, and tilts measure altitude above the local horizon. Elevation is
 in metres. Known detectors accept partial geometry or PSD-only overrides. New
 names require latitude, longitude, elevation, both azimuths, and `psd_reference`;
-both tilts default to zero. Legacy degree fields are rejected in new overrides.
-Old saved JSON registries are translated on loading and saved with canonical
-fields afterward; mixed legacy and canonical geometry is rejected. Unknown
-fields, incomplete definitions, and undefined network members fail validation. Labels default to detector names and affect presentation only.
+both tilts default to zero. Unknown fields, incomplete definitions, and
+undefined network members fail validation. Labels default to detector names and
+affect presentation only.
 The optional `duty_factor` is reference metadata; it does not rescale a PSD or
 the observation time. Sensitivities for gwmock presets with upstream geometry
 live separately in the packaged `presets.toml` and remain available through

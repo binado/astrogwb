@@ -22,7 +22,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-import knf
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -35,7 +34,7 @@ from pydantic import (
 
 from astrogwb.metadata import CatalogMetadata, PriorSpec
 from astrogwb.paper.config.detectors import DetectorRegistry
-from astrogwb.paper.config.runs import DETECTOR_DEFAULT_PATHS, resolve_catalog_blocks
+from astrogwb.paper.config.runs import resolve_catalog_blocks
 from astrogwb.paper.utils import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
@@ -232,8 +231,9 @@ class AnalysisConfig(BaseModel):
     detectors: tuple[str, ...]
     #: The name that resolved to `detectors`, kept alongside it so a saved
     #: config records the intent as well as the result. Optional at the model
-    #: level so older saved configs with only `detectors` re-validate. That every *committed* run names one is a repo
-    #: test, not a model constraint.
+    #: level so a saved config that already carries the resolved detector list
+    #: re-validates. That every committed run names one is a repository test,
+    #: not a model constraint.
     network: str | None = None
     observation_time: float = 1.0
     minimum_frequency: float
@@ -369,8 +369,7 @@ class RunConfig(BaseModel):
 
         Merged layers carry complete `[detectors]` and `[networks]` tables.
         Saved configs carry their resolved `detector_registry` instead, so
-        they never reinterpret geometry against newer packaged defaults. Old
-        saved configs with only `analysis.detectors` get packaged definitions.
+        they never reinterpret geometry against newer packaged defaults.
         """
         if not isinstance(data, Mapping):
             return data
@@ -383,17 +382,10 @@ class RunConfig(BaseModel):
                 raise ValueError(
                     "resolved detector_registry cannot accompany detector overrides"
                 )
-            registry = DetectorRegistry.from_saved(saved_registry)
+            registry = DetectorRegistry.model_validate(saved_registry)
         else:
-            # Layer assembly already merged packaged detector files with pyknf.
-            # Legacy saved records have no detector table and need those defaults.
-            definitions = (
-                overrides
-                if overrides is not None
-                else knf.load(list(DETECTOR_DEFAULT_PATHS))["detectors"]
-            )
             registry = DetectorRegistry.model_validate(
-                {"detectors": definitions, "networks": table or {}}
+                {"detectors": overrides, "networks": table or {}}
             )
         raw["detector_registry"] = registry
         if saved_registry is not None:
@@ -406,13 +398,6 @@ class RunConfig(BaseModel):
         if name is None:
             return raw
         declared = analysis.get("detectors")
-        if table is None and saved_registry is None and declared is not None:
-            # Legacy records carry membership only in analysis.detectors.
-            registry = DetectorRegistry(
-                detectors=registry.detectors, networks={name: tuple(declared)}
-            )
-            raw["detector_registry"] = registry
-            table = registry.networks
 
         if not isinstance(table, Mapping) or name not in table:
             known = sorted(table) if isinstance(table, Mapping) else []
