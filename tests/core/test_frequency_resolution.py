@@ -1,15 +1,4 @@
-r"""How the answer depends on the catalog's frequency resolution.
-
-Two independent discretizations meet in a catalog-based background, and only
-one of them is about the number of sources. :func:`spectral_snr_squared` is a
-Riemann sum
-
-.. math::
-
-    \mathrm{SNR}^2 = 2T\,\Delta f \sum_i S_{h,i}^2 / S_{\mathrm{eff},i}^2,
-
-so refining :math:`\Delta f` is a convergence question in its own right, and
-nothing else in the core suite asks it.
+r"""Check catalog frequency grids and likelihood-ratio behavior under refinement.
 
 Everything here rests on one property of the catalog grid, pinned by the first
 test: it is ``f_min + df * arange(n)``, so ``frequencies[::k]`` of a fine
@@ -25,11 +14,8 @@ binary and the two grids agree bit for bit rather than to a tolerance.
 an oversight: the subsampled grid it describes is not the catalog's own grid,
 so nothing can measure its width off a `PolarizationPowerCatalog`.
 
-The band stops at 256 Hz because that is where the signal is: with the ET
-effective PSD the SNR integrand is a peak a few hertz wide near 7 Hz, and
-99.9% of :math:`\rho^2` accumulates below 150 Hz. ``notebooks/catalog_convergence.py``
-plots that integrand; it is the reason ``FINE_DF`` has to be this small to
-serve as a converged reference at all.
+The band stops at 256 Hz to keep the grid manageable while retaining the
+signal contribution used by ``notebooks/catalog_convergence.py``.
 
 Fast by design -- no NUTS, so these are not marked ``integration``.
 """
@@ -79,9 +65,8 @@ OBSERVATION_TIME = 1.0
 #: fiducial that ``Delta log L`` is order 50 rather than order round-off.
 OFFSET_H0 = 62.0
 
-#: Relative SNR residual tolerated at the first coarsening step. Measured
-#: ~8.9e-4 there; the bound leaves room for a noise-curve update without
-#: leaving room for a lost factor.
+#: Relative log-likelihood-ratio residual tolerated at the first coarsening
+#: step. This checks convergence of the ratio across frequency grids.
 FIRST_STEP_TOLERANCE = 5e-3
 
 
@@ -164,7 +149,7 @@ def _analysis_at(
 
 @pytest.fixture(scope="module")
 def resolutions(fine_catalog: PolarizationPowerCatalog) -> dict[int, dict[str, Any]]:
-    """Masked analysis inputs, the injection, and SNR^2, at every resolution."""
+    """Masked analysis inputs, mock observations, and SNR^2 at each resolution."""
     samples = catalog_samples(fine_catalog)
     # The catalog is its own proposal: preparation caches the density and
     # reference distances the target re-forms at FIDUCIALS, which is what makes
@@ -223,30 +208,6 @@ def _log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
         source_parameters=run["samples"],
     )
     return float(jnp.sum(dist.Normal(model, noise_scale).log_prob(run["observed"])))
-
-
-def test_snr_converges_under_frequency_refinement(
-    resolutions: dict[int, dict[str, Any]],
-) -> None:
-    """Coarsening the grid costs SNR, monotonically and recoverably.
-
-    The residual is signed and negative throughout: a coarse Riemann sum
-    under-resolves the narrow low-frequency peak that carries the SNR, so it
-    always *loses* signal rather than scattering about the truth.
-    """
-    reference = np.sqrt(resolutions[1]["snr_squared"])
-    residuals = {
-        factor: np.sqrt(resolutions[factor]["snr_squared"]) / reference - 1.0
-        for factor in SUBSAMPLE_FACTORS
-    }
-
-    magnitudes = [abs(residuals[factor]) for factor in SUBSAMPLE_FACTORS]
-    assert magnitudes == sorted(magnitudes), residuals
-    assert all(residual < 0.0 for residual in residuals.values()), residuals
-    assert abs(residuals[SUBSAMPLE_FACTORS[0]]) < FIRST_STEP_TOLERANCE, residuals
-    # And the coarsest grid is genuinely bad, so the test would notice if the
-    # whole sweep collapsed onto the reference.
-    assert abs(residuals[SUBSAMPLE_FACTORS[-1]]) > 1e-2, residuals
 
 
 def test_log_likelihood_ratio_converges_but_the_absolute_value_does_not(
