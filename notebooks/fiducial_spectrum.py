@@ -28,6 +28,7 @@ with app.setup(hide_code=True):
     from astrogwb.frequency import frequency_mask as make_frequency_mask
     from astrogwb.frequency import uniform_grid_spacing
     from astrogwb.gwb import (
+        omega_gw_from_spectral_density,
         spectral_snr_squared_per_bin,
         spectral_snr_squared_per_log_frequency,
     )
@@ -103,7 +104,7 @@ def _():
     # and observation time are the controls in the next cells.
     minimum_frequency = 2.0
     maximum_frequency = 4096.0
-    omega_gw_plot_limits: tuple[float | None, float | None] = (1e-15, None)
+    omega_gw_plot_limits: tuple[float | None, float | None] = (1e-13, 1e0)
     sh_plot_limits: tuple[float | None, float | None] = (None, None)
     minimum_redshift = 0.35
     maximum_redshift = 20.0
@@ -700,101 +701,6 @@ def _(format_axis_ticks, network_legend_handles):
 
 @app.cell
 def _(
-    format_axis_ticks,
-    network_legend_handles,
-    omega_gw_plot_limits: tuple[float | None, float | None],
-    sh_plot_limits: tuple[float | None, float | None],
-):
-    from astrogwb.gwb import omega_gw_from_spectral_density
-
-    def set_spectral_plot_limits(axis: MplAxes, spectrum: str) -> None:
-        """Apply the configured y limits for an $S_h$ or Omega_GW plot."""
-        limits_by_spectrum = {
-            "omega_gw": omega_gw_plot_limits,
-            "sh": sh_plot_limits,
-        }
-        try:
-            limits = limits_by_spectrum[spectrum]
-        except KeyError as error:
-            raise ValueError(f"unsupported spectral plot: {spectrum}") from error
-        axis.set_ylim(*limits, auto=None)
-
-    def plot_omega_gw_sensitivity(
-        frequencies: jax.Array | np.ndarray,
-        spectral_density: jax.Array | np.ndarray,
-        networks: Sequence[Network],
-        effective_psds: Mapping[str, jax.Array | np.ndarray],
-        *,
-        observation_time: float,
-        hubble_constant: float,
-        colors: Sequence[str],
-        linestyles: Sequence[str],
-        fmin: float = 2.0,
-        fmax: float = 4096.0,
-    ) -> Figure:
-        """Plot Omega_GW for the signal and per-log-frequency network sensitivity."""
-        if len(networks) != len(colors) or len(networks) != len(linestyles):
-            raise ValueError("color and linestyle counts must match the networks")
-
-        freq = np.asarray(frequencies)
-        signal_psd = np.asarray(spectral_density)
-        band = (freq >= fmin) & (freq <= fmax) & (freq > 0.0)
-        signal_valid = band & np.isfinite(signal_psd) & (signal_psd > 0.0)
-        observation_time_sec = years_to_seconds(observation_time)
-
-        omega_signal = np.asarray(
-            omega_gw_from_spectral_density(
-                jnp.asarray(signal_psd[signal_valid]),
-                jnp.asarray(freq[signal_valid]),
-                hubble_constant=hubble_constant,
-            )
-        )
-        _fig, ax = plt.subplots()
-        ax.loglog(
-            freq[signal_valid],
-            omega_signal,
-            color=SPECTRUM["omega_gw"],
-            linestyle=SPECTRUM_LINESTYLES["omega_gw"],
-            linewidth=2.0,
-        )
-
-        for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
-            effective_psd = np.asarray(effective_psds[network.name])
-            noise_scale = effective_psd / np.sqrt(2.0 * observation_time_sec * freq)
-            valid = band & np.isfinite(noise_scale) & (noise_scale > 0.0)
-            omega_noise = np.asarray(
-                omega_gw_from_spectral_density(
-                    jnp.asarray(noise_scale[valid]),
-                    jnp.asarray(freq[valid]),
-                    hubble_constant=hubble_constant,
-                )
-            )
-            ax.loglog(
-                freq[valid],
-                omega_noise,
-                color=color,
-                linestyle=linestyle,
-            )
-
-        set_spectral_plot_limits(ax, "omega_gw")
-        ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-        ax.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$")
-        ax.set_xlim(fmin, fmax)
-        ax.set_axisbelow(True)
-        ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
-        format_axis_ticks(ax)
-        ax.legend(
-            handles=network_legend_handles(networks, colors, linestyles),
-            **DETECTOR_COMPARISON_LEGEND,
-        )
-        _fig.tight_layout()
-        return _fig
-
-    return (plot_omega_gw_sensitivity,)
-
-
-@app.cell
-def _(
     BASE_DIR,
     ROOT_DIR,
     effective_psds: dict[str, jax.Array],
@@ -825,13 +731,108 @@ def _():
     mo.md(r"""
     ## $\Omega_{\mathrm{GW}}$ signal versus network sensitivity
 
-    The signal and sensitivity are both converted to dimensionless
-    $\Omega_{\mathrm{GW}}$ using the shared fiducial $H_0$. Each network's
-    curve is the conversion of $\sigma_{\ln f}=S_{\mathrm{eff}}/\sqrt{2Tf}$,
-    so the squared signal-to-sensitivity ratio is
-    $d\mathrm{SNR}^2/d\ln f$.
+    The signal and per-network sensitivity are compared on a common scale. By default, `plot_signal_and_sensitivity` shows $S_h$ and
+    $S_{\mathrm{eff}}/\sqrt{2fT}$, whose squared ratio is
+    $d\mathrm{SNR}^2/d\ln f$. Here both are transformed to dimensionless
+    $\Omega_{\mathrm{GW}}$ using the shared fiducial $H_0$.
     """)
     return
+
+
+@app.cell
+def _(format_axis_ticks, network_legend_handles):
+    from collections.abc import Callable
+    from functools import partial
+
+    def plot_signal_and_sensitivity(
+        frequencies: jax.Array | np.ndarray,
+        spectral_density: jax.Array | np.ndarray,
+        networks: Sequence[Network],
+        effective_psds: Mapping[str, jax.Array | np.ndarray],
+        *,
+        observation_time: float,
+        colors: Sequence[str],
+        linestyles: Sequence[str],
+        transform_fn: Callable[[jax.Array], jax.Array] | None = None,
+        sh_limits: tuple[float | None, float | None] = (None, None),
+        plot_limits: tuple[float | None, float | None] | None = None,
+        ylabel: str = r"$S_h(f)$",
+        fmin: float = 2.0,
+        fmax: float = 4096.0,
+    ) -> Figure:
+        """Plot a signal and network sensitivities on a shared spectral scale."""
+        if len(networks) != len(colors) or len(networks) != len(linestyles):
+            raise ValueError("color and linestyle counts must match the networks")
+
+        freq = np.asarray(frequencies)
+        signal = np.asarray(spectral_density)
+        band = (freq >= fmin) & (freq <= fmax) & (freq > 0.0)
+        observation_time_sec = years_to_seconds(observation_time)
+
+        if transform_fn is not None:
+            signal = np.asarray(transform_fn(jnp.asarray(signal)))
+
+        signal_valid = band & np.isfinite(signal) & (signal > 0.0)
+        _fig, ax = plt.subplots()
+        ax.loglog(
+            freq[signal_valid],
+            signal[signal_valid],
+            color=SPECTRUM["omega_gw"],
+            linestyle=SPECTRUM_LINESTYLES["omega_gw"],
+            linewidth=2.0,
+        )
+
+        for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
+            effective_psd_values = np.asarray(effective_psds[network.name])
+            noise = effective_psd_values / np.sqrt(2.0 * observation_time_sec * freq)
+            if transform_fn is not None:
+                noise = np.asarray(transform_fn(jnp.asarray(noise)))
+            valid = band & np.isfinite(noise) & (noise > 0.0)
+            ax.loglog(freq[valid], noise[valid], color=color, linestyle=linestyle)
+
+        transformed_sh_limits = list(sh_limits)
+        if transform_fn is not None:
+            for index, limit in enumerate(sh_limits):
+                if limit is None:
+                    continue
+                transformed = np.asarray(
+                    transform_fn(
+                        jnp.full(
+                            freq.shape, limit, dtype=jnp.asarray(spectral_density).dtype
+                        )
+                    )
+                )
+                valid = band & np.isfinite(transformed)
+                if np.any(valid):
+                    transformed_sh_limits[index] = (
+                        float(np.min(transformed[valid]))
+                        if index == 0
+                        else float(np.max(transformed[valid]))
+                    )
+                else:
+                    transformed_sh_limits[index] = None
+
+        limits = tuple(transformed_sh_limits)
+        if plot_limits is not None:
+            limits = tuple(
+                output_limit if output_limit is not None else input_limit
+                for output_limit, input_limit in zip(plot_limits, limits, strict=True)
+            )
+        ax.set_ylim(*limits, auto=None)
+        ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+        ax.set_ylabel(ylabel)
+        ax.set_xlim(fmin, fmax)
+        ax.set_axisbelow(True)
+        ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+        format_axis_ticks(ax)
+        ax.legend(
+            handles=network_legend_handles(networks, colors, linestyles),
+            **DETECTOR_COMPARISON_LEGEND,
+        )
+        _fig.tight_layout()
+        return _fig
+
+    return partial, plot_signal_and_sensitivity
 
 
 @app.cell
@@ -844,22 +845,32 @@ def _(
     maximum_frequency,
     minimum_frequency,
     observation_time,
-    plot_omega_gw_sensitivity,
+    omega_gw_plot_limits: tuple[float | None, float | None],
+    partial,
+    plot_signal_and_sensitivity,
     plotted_colors,
     plotted_linestyles,
     plotted_networks,
+    sh_plot_limits: tuple[float | None, float | None],
     spectral_density,
     write_figures,
 ):
-    _fig = plot_omega_gw_sensitivity(
+    _fig = plot_signal_and_sensitivity(
         frequencies,
         spectral_density,
         plotted_networks,
         effective_psds,
         observation_time=observation_time,
-        hubble_constant=FIDUCIALS["H0"],
         colors=plotted_colors,
         linestyles=plotted_linestyles,
+        transform_fn=partial(
+            omega_gw_from_spectral_density,
+            frequencies=jnp.asarray(frequencies),
+            hubble_constant=FIDUCIALS["H0"],
+        ),
+        sh_limits=sh_plot_limits,
+        plot_limits=omega_gw_plot_limits,
+        ylabel=r"$\Omega_{\mathrm{GW}}(f)$",
         fmin=minimum_frequency,
         fmax=maximum_frequency,
     )
@@ -869,6 +880,7 @@ def _(
             root=ROOT_DIR,
         )
     _fig
+
     return
 
 
