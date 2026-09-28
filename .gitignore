@@ -24,7 +24,6 @@ grids/
 !README.md
 !AGENTS.md
 !CLAUDE.md
-!/INEFFECTIVE_TOL_TESTS.md
 !docs/**/*.md
 !notebooks/README.md
 
