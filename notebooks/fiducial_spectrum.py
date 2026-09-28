@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.24.2"
+__generated_with = "0.25.0"
 app = marimo.App()
 
 with app.setup(hide_code=True):
@@ -554,15 +554,13 @@ def _():
     between Sardinia and the Netherlands ($S_1$--$R_1$ for aligned, $S_2$--$R_2$
     for misaligned) provide strong low-frequency overlap ($-0.98$ and $-0.32$,
     respectively) that falls off above $\sim 50\ \mathrm{Hz}$ over their
-    $\sim 1100\ \mathrm{km}$ separation. Baselines to Cosmic Explorer at Hanford
-    ($C_1$) oscillate rapidly above $\sim 20\ \mathrm{Hz}$ with period
-    $\Delta f \sim c/d \approx 35\ \mathrm{Hz}$.
+    $\sim 1100\ \mathrm{km}$ separation.
     """)
     return
 
 
 @app.cell
-def _(DETECTOR_COMPARISON_LEGEND, format_axis_ticks, overlap_reduction_function):
+def _(format_axis_ticks):
     def plot_overlap_reduction_functions(
         frequencies: jax.Array | np.ndarray,
         networks: Sequence[Network],
@@ -573,18 +571,15 @@ def _(DETECTOR_COMPARISON_LEGEND, format_axis_ticks, overlap_reduction_function)
         fmin: float = 2.0,
         fmax: float = 4096.0,
     ) -> Figure:
-        """Plot pairwise overlap reduction functions matching the detector networks."""
+        """Plot overlap reduction functions for the three ET network geometries."""
         if len(networks) != len(colors) or len(networks) != len(linestyles):
             raise ValueError("color and linestyle counts must match the networks")
 
         if representative_pairs is None:
             representative_pairs = {
                 "ET-triangular": ("E1", "E2"),
-                "ET-triangular-CE-Hanford": ("E1", "C1"),
                 "ET-2L-aligned": ("S1", "R1"),
-                "ET-2L-aligned-CE-Hanford": ("S1", "C1"),
                 "ET-2L-misaligned": ("S2", "R2"),
-                "ET-2L-misaligned-CE-Hanford": ("S2", "C1"),
             }
 
         _fig, ax = plt.subplots()
@@ -598,13 +593,12 @@ def _(DETECTOR_COMPARISON_LEGEND, format_axis_ticks, overlap_reduction_function)
                 continue
             det1, det2 = representative_pairs[network.name]
             orf = overlap_reduction_function(freq_in_band, det1, det2)
-            label = rf"{network.label} (${det1}$--${det2}$)"
             (line,) = ax.semilogx(
                 freq_in_band,
                 orf,
                 color=color,
                 linestyle=linestyle,
-                label=label,
+                label=network.label,
             )
             legend_handles.append(line)
 
