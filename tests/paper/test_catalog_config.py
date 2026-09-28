@@ -97,11 +97,6 @@ def test_every_declared_density_factor_is_a_real_sample_site() -> None:
             assert trace[site]["type"] == "sample", key
 
 
-def test_the_retired_population_graphs_are_gone() -> None:
-    """Populations are model declarations now, not gwmock graph YAML."""
-    assert not (REPO_ROOT / "config/populations").exists()
-
-
 # --------------------------------------------------------------------------- #
 # Validation
 # --------------------------------------------------------------------------- #

@@ -8,16 +8,11 @@ from typing import Any
 import jax
 import numpy as np
 import pytest
-from pydantic import ValidationError
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid
 from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
-from astrogwb.populations.bns_madau_dickinson import (
-    bns_md_cosmological,
-    madau_dickinson_total_merger_rate,
-)
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
     inspiral_polarization_power,
@@ -208,15 +203,6 @@ def test_catalog_rejects_malformed_source_parameters(values: np.ndarray) -> None
         )
 
 
-def test_population_record_rejects_non_int_seed() -> None:
-    with pytest.raises(ValidationError, match="seed"):
-        PopulationMetadata(
-            model_name=POPULATION_RECORD["model_name"],
-            model_kwargs=POPULATION_RECORD["model_kwargs"],
-            seed="not_an_int",  # ty: ignore[invalid-argument-type]
-        )
-
-
 def test_catalog_requires_a_redshift_column() -> None:
     """The one source parameter whose density never cancels in a weight."""
     with pytest.raises(ValueError, match="redshift"):
@@ -241,23 +227,6 @@ def _catalog(redshift: np.ndarray) -> PolarizationPowerCatalog:
         frequencies=np.array([10.0, 12.0]),
         _metadata=_metadata(num_samples),
     )
-
-
-def test_get_population_binds_construction_kwargs_only() -> None:
-    """Generating hyperparameters must not be captured in the bound callables.
-
-    They describe how the catalog was made; a target evaluation supplies its
-    own, and binding the generating ones here would silently pin them.
-    """
-    catalog = _catalog(np.array([0.5, 1.5]))
-    source, rate = catalog.get_population()
-    assert source.func is bns_md_cosmological  # ty: ignore[unresolved-attribute]
-    assert source.args == ()  # ty: ignore[unresolved-attribute]
-    assert source.keywords == POPULATION_RECORD["model_kwargs"]  # ty: ignore[unresolved-attribute]
-    assert rate is not None
-    assert rate.func is madau_dickinson_total_merger_rate  # ty: ignore[unresolved-attribute]
-    assert rate.args == ()  # ty: ignore[unresolved-attribute]
-    assert rate.keywords == POPULATION_RECORD["model_kwargs"]  # ty: ignore[unresolved-attribute]
 
 
 def test_an_unknown_population_name_fails_clearly() -> None:

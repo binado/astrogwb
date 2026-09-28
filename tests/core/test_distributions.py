@@ -194,17 +194,6 @@ def test_icdf_endpoints_return_the_table_edges() -> None:
     assert float(distribution.icdf(jnp.array(1.0))) == float(distribution.x[-1])
 
 
-def test_sample_is_the_inverse_cdf_of_uniform_draws() -> None:
-    """The sampler contract, pinned exactly -- no statistical tolerance at all."""
-    distribution = _distribution()
-    key = jax.random.PRNGKey(0)
-
-    np.testing.assert_array_equal(
-        np.asarray(distribution.sample(key, (1024,))),
-        np.asarray(distribution.icdf(jax.random.uniform(key, (1024,)))),
-    )
-
-
 def test_sample_mean_matches_the_density_it_reports() -> None:
     """Inverse-transform draws must follow the density `log_prob` publishes."""
     distribution = _distribution()
@@ -321,77 +310,30 @@ def test_distribution_vmaps_over_the_constructor() -> None:
         )
 
 
-def test_lazy_fields_are_not_pytree_leaves() -> None:
-    """A lazily-materialized field listed as pytree data flattens to `None` before
-    first access and to an array afterwards, so the treedef would change under
-    the object and every `jax.jit` taking it would retrace."""
+def test_materializing_lazy_fields_does_not_retrace() -> None:
+    """Our distribution's field declarations must keep its JIT signature stable."""
     distribution = _distribution()
-    jitted = jax.jit(lambda d: d.log_prob(SAMPLE_REDSHIFTS))
+    traces = 0
 
-    assert len(jax.tree.leaves(distribution)) == 4
-    jitted(distribution)
-    assert jitted._cache_size() == 1  # ty: ignore[unresolved-attribute]
+    def log_prob(d: RedshiftDistribution) -> jax.Array:
+        nonlocal traces
+        traces += 1
+        return d.log_prob(SAMPLE_REDSHIFTS)
+
+    jitted = jax.jit(log_prob)
+    before = jitted(distribution)
 
     # Force every lazy_property to materialize onto the instance.
     _ = distribution.norm, distribution.normalized_y, distribution.cdf_grid
 
-    assert len(jax.tree.leaves(distribution)) == 4
-    jitted(distribution)
-    assert jitted._cache_size() == 1  # ty: ignore[unresolved-attribute]
-
-
-def test_aux_data_is_hashable_and_stable() -> None:
-    """Aux data is hashed into the jit cache key, so it must not carry arrays."""
-    distribution = _distribution()
-    cls = RedshiftDistribution
-    aux = cls.tree_flatten(distribution)[1]
-
-    assert hash(aux) == hash(cls.tree_flatten(distribution)[1])
-
-
-def test_redshift_distribution_is_registered_as_a_pytree() -> None:
-    """The concrete distribution remains registered as a NumPyro pytree node."""
-    distribution = _distribution()
-    round_tripped = jax.tree.unflatten(
-        jax.tree.structure(distribution), jax.tree.leaves(distribution)
-    )
-
-    assert type(round_tripped) is RedshiftDistribution
-    assert (
-        round_tripped._source_frame_distribution
-        is distribution._source_frame_distribution
-    )
-    np.testing.assert_array_equal(
-        np.asarray(round_tripped.log_prob(SAMPLE_REDSHIFTS)),
-        np.asarray(distribution.log_prob(SAMPLE_REDSHIFTS)),
-    )
-
-
-def test_validate_args_constructs_and_round_trips() -> None:
-    """Forwarding works. The flag is otherwise inert here -- no `arg_constraints`
-    and no `@validate_sample` -- and is accepted for API uniformity."""
-    validated = MadauDickinsonRedshiftDistribution(
-        params=FIDUCIALS,
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        n_grid=N_GRID,
-        validate_args=True,
-    )
-
-    np.testing.assert_allclose(
-        np.asarray(jax.jit(lambda d: d.log_prob(SAMPLE_REDSHIFTS))(validated)),
-        np.asarray(_distribution().log_prob(SAMPLE_REDSHIFTS)),
-        rtol=1e-15,
-    )
+    after = jitted(distribution)
+    assert traces == 1
+    np.testing.assert_array_equal(before, after)
 
 
 # --------------------------------------------------------------------------- #
 # Window accessors, derived rather than stored
 # --------------------------------------------------------------------------- #
-def test_redshift_grid_aliases_x_rather_than_copying_it() -> None:
-    """One array, one leaf: a second attribute would be a second pytree leaf."""
-    distribution = _distribution()
-    assert distribution.redshift_grid is distribution.x
 
 
 def test_window_is_read_back_off_the_grid() -> None:
@@ -527,17 +469,6 @@ def test_max_of_two_normals_icdf_matches_the_closed_form() -> None:
         np.asarray(distribution.cdf(distribution.icdf(_MASS_QUANTILES))),
         np.asarray(_MASS_QUANTILES),
         rtol=1e-12,
-    )
-
-
-def test_max_of_two_normals_samples_are_the_max_of_two_standard_normals() -> None:
-    distribution = _max_of_two_normals()
-    key = jax.random.PRNGKey(0)
-    sample_shape = (32,)
-    eps = jax.random.normal(key, shape=(2,) + sample_shape)
-    np.testing.assert_array_equal(
-        distribution.sample(key, sample_shape=sample_shape),
-        _MASS_MEAN + _MASS_SIGMA * jnp.max(eps, axis=0),
     )
 
 

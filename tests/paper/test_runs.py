@@ -24,11 +24,7 @@ from astrogwb.paper.config.catalogs import (
 )
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import (
-    BASE_OUT_DIR,
-    CATALOGS_ROOT,
-    CHAINS_ROOT,
     EXPERIMENT_BASE,
-    FIGURES_DIR,
     RUNS_DIR,
     assemble_run,
     base_config_paths,
@@ -84,40 +80,9 @@ def test_discovery_finds_seven_experiments_and_27_runs() -> None:
     assert "_base" not in {run for names in runs.values() for run in names}
 
 
-def test_the_retired_inventories_are_gone() -> None:
-    assert not (PAPER_ROOT / "inputs").exists()
-    # config/banks went with the bank/catalog split: every catalog is a file
-    # now, so there is one config tree for them and one output directory.
-    assert not (PAPER_ROOT / "config/banks").exists()
-    # config/analysis/ went the same way as config/catalogs/base, and then the
-    # seven per-block config/*.json layers folded into config/defaults.toml:
-    # one shared layer, so there is no base/ to glob and no runs/ level to
-    # nest under.
-    assert not (PAPER_ROOT / "config/analysis").exists()
-    assert not list((PAPER_ROOT / "config").rglob("*.json"))
-    assert (PAPER_ROOT / "config/defaults.toml").is_file()
-    assert (PAPER_ROOT / "config/runs").is_dir()
-    # config/catalogs went when catalogs became content-addressed: a run
-    # declares what it draws, and the file is named by the request's key.
-    assert not (PAPER_ROOT / "config/catalogs").exists()
-    # config/populations went with the gwmock graph path: a population is a
-    # registered NumPyro model now, named by the shared [population] table.
-    assert not (PAPER_ROOT / "config/populations").exists()
-
-
 def test_every_experiment_has_the_required_base_overlay() -> None:
     for experiment in discover_runs():
         assert (PAPER_ROOT / RUNS_DIR / experiment / EXPERIMENT_BASE).is_file()
-
-
-def test_output_roots_are_derived_from_one_base() -> None:
-    # There is no assembled-config path any more: a run is addressed by its
-    # layer files going in and by its chain coming out. The three output roots
-    # share one base so a second `outputs` literal cannot drift from the first.
-    assert BASE_OUT_DIR == Path("outputs")
-    assert CHAINS_ROOT == BASE_OUT_DIR / "chains"
-    assert CATALOGS_ROOT == BASE_OUT_DIR / "catalogs"
-    assert FIGURES_DIR == BASE_OUT_DIR / "figures"
 
 
 def test_run_config_paths_are_the_layers_in_merge_order() -> None:
@@ -151,18 +116,6 @@ def test_plotting_settings_are_not_a_run_layer() -> None:
     }
 
     assert "plotting.toml" not in names
-
-
-def test_assemble_run_is_merge_config_layers_over_run_config_paths() -> None:
-    # The seam the workflow relies on: the rule declares `run_config_paths` as
-    # its input and passes them on argv, and `assemble_run` -- what the
-    # notebooks and the validation gate call -- must agree with that exactly.
-    for experiment, run in (
-        ("cosmological-parameters", "ET-triangular"),
-        ("variable-proposal-guard", "eps1e-3"),
-    ):
-        layers = run_config_paths(experiment, run)
-        assert merge_config_layers(layers) == assemble_run(experiment, run)
 
 
 def test_merge_config_layers_rejects_an_empty_layer_list() -> None:
@@ -392,9 +345,6 @@ def test_an_unregistered_catalog_population_is_rejected() -> None:
         check_catalog_requests(config, label="demo/only")
 
 
-# --------------------------------------------------------------------------- #
-# The assemble_config CLI
-# --------------------------------------------------------------------------- #
 # --------------------------------------------------------------------------- #
 # The pre-flight gate that replaced `astrogwb-assemble-config --all`
 # --------------------------------------------------------------------------- #

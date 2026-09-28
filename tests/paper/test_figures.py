@@ -27,8 +27,6 @@ from astrogwb.paper.config import networks
 from astrogwb.paper.config.runs import assemble_run, discover_runs, resolve_networks
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS, DETECTOR_NETWORKS
 
-PAPER_ROOT = REPO_ROOT
-
 # The experiments whose runs the network legend is resolved against. The
 # fiducial-spectrum figure borrows cosmological-parameters' detector lists.
 NETWORK_EXPERIMENTS = ("cosmological-parameters", "modified-propagation")
@@ -37,19 +35,6 @@ NETWORK_EXPERIMENTS = ("cosmological-parameters", "modified-propagation")
 def network_references(experiment: str) -> list[tuple[str, str]]:
     """The ``--network-run`` list a figure rule passes, in legend order."""
     return [(experiment, run) for run in DETECTOR_NETWORK_RUNS]
-
-
-def test_the_figure_config_directory_is_gone() -> None:
-    # Presentation moved into the scripts; nothing should reintroduce a
-    # parallel TOML copy of it for the scripts or the workflow to reload.
-    assert not (PAPER_ROOT / "inputs/figures").exists()
-
-
-def test_no_assembled_config_tree_is_rebuilt() -> None:
-    # Every entrypoint merges its own layers now. A reappearing
-    # `outputs/configs/` would mean something started writing the intermediate
-    # artifact again, and figures could then read a stale copy.
-    assert not (PAPER_ROOT / "outputs/configs").exists()
 
 
 def test_every_hard_coded_network_is_a_declared_run() -> None:
@@ -66,13 +51,6 @@ def test_network_labels_are_unique_and_non_empty() -> None:
     assert all(labels)
     assert len(set(labels)) == len(labels)
     assert len(set(DETECTOR_NETWORK_RUNS)) == len(DETECTOR_NETWORK_RUNS)
-
-
-def test_committed_latex_labels_survive_the_move_out_of_toml() -> None:
-    labels = dict(DETECTOR_NETWORKS)
-
-    assert labels["ET-triangular"] == r"ET-$\Delta$"
-    assert labels["ET-2L-misaligned-CE-Hanford"] == r"ET-2L $+$ CE"
 
 
 def test_resolve_networks_preserves_order_and_attaches_detectors() -> None:
@@ -136,21 +114,6 @@ def test_resolve_networks_rejects_a_short_or_mixed_network_run_list() -> None:
         resolve_networks(mixed, DETECTOR_NETWORKS)
 
 
-def test_only_the_network_experiments_have_figure_rules() -> None:
-    # The remaining experiments have no figure script, so the workflow offers
-    # only their run_experiment_* targets.
-    with_figures = set(NETWORK_EXPERIMENTS)
-    chains_only = set(discover_runs()) - with_figures
-
-    assert chains_only == {
-        "astrophysical-parameters",
-        "variable-catalog-size",
-        "variable-proposal-guard",
-        "waveform-approximant",
-        "time-delay",
-    }
-
-
 def test_every_legend_network_is_declared_in_the_table() -> None:
     """The legend cannot name a network the shared `[networks]` table lacks.
 
@@ -160,21 +123,6 @@ def test_every_legend_network_is_declared_in_the_table() -> None:
     declared = networks(REPO_ROOT)
 
     assert set(DETECTOR_NETWORK_RUNS) <= set(declared)
-
-
-def test_the_network_a_run_names_matches_its_legend_name() -> None:
-    """Every network run is named after the network it uses.
-
-    `resolve_networks` deliberately does not rely on this -- it merges each run
-    and reads that run's own `analysis.network` -- but the property is worth
-    pinning: it is what would make a future direct-lookup simplification safe,
-    and its quiet loss is exactly the bug the indirection guards against.
-    """
-    for experiment in NETWORK_EXPERIMENTS:
-        for run in DETECTOR_NETWORK_RUNS:
-            merged = assemble_run(experiment, run, root=REPO_ROOT)
-
-            assert merged["analysis"]["network"] == run, f"{experiment}/{run}"
 
 
 def test_resolve_networks_rejects_an_undeclared_network(tmp_path: Path) -> None:

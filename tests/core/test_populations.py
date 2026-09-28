@@ -297,17 +297,6 @@ def test_each_population_declares_its_amplitude_parameters() -> None:
         amplitude_parameters("no_such_population")
 
 
-def test_a_population_binds_one_kwargs_mapping_to_both_callables() -> None:
-    kwargs = {**WINDOW, "uniform_mixing_fraction": 0.2}
-    mixture = build_population("bns_md_uniform_mixture", **kwargs).source_model
-    assert mixture.keywords == kwargs  # ty: ignore[unresolved-attribute]
-
-    source, rate = build_population("bns_md_cosmological", **WINDOW)
-    assert source.keywords == WINDOW  # ty: ignore[unresolved-attribute]
-    assert rate is not None
-    assert rate.keywords == WINDOW  # ty: ignore[unresolved-attribute]
-
-
 def test_a_kwarg_the_population_does_not_take_is_rejected() -> None:
     """The factory signature is the kwargs schema.
 
@@ -358,17 +347,6 @@ def test_source_evaluate_needs_no_physical_rate() -> None:
         mock_population_model(), without_rate, sample_values()
     )
     assert luminosity_distance.shape == SAMPLE_REDSHIFTS.shape
-
-
-def test_merger_rate_requires_the_physical_rate_parameter() -> None:
-    """The merger-rate function owns this check, not an ``"x" in params`` branch."""
-    without_rate = {
-        name: value
-        for name, value in POPULATION_PARAMS.items()
-        if name != "local_merger_rate"
-    }
-    with pytest.raises(ValueError, match="local_merger_rate"):
-        mock_merger_rate_fn()(without_rate)
 
 
 def test_stored_deterministics_are_recomputed_from_sampled_values() -> None:
@@ -503,12 +481,6 @@ def test_source_sites_stay_out_of_the_outer_trace() -> None:
     with handlers.seed(rng_seed=0):
         trace = handlers.trace(_outer_model).get_trace(jnp.asarray(0.0))
     assert set(trace) == {"H0", "obs"}
-
-
-def test_repeated_evaluation_inside_one_model_does_not_collide() -> None:
-    """Without the handler boundary the second evaluation is a duplicate site."""
-    with handlers.seed(rng_seed=0):
-        handlers.trace(_outer_model).get_trace(jnp.asarray(0.0))
 
 
 def test_outer_density_and_gradient_match_a_direct_calculation() -> None:

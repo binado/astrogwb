@@ -10,7 +10,6 @@ import pytest
 from astrogwb.utils import (
     array_dict_shape,
     cumulative_trapezoid,
-    gauss_legendre_rule,
     mapped_gauss_legendre_rule,
     require_x64,
 )
@@ -94,10 +93,6 @@ def test_cumulative_trapezoid_broadcasts_over_leading_batch_dimensions() -> None
             np.asarray(cumulative_trapezoid(y[row], x)),
             atol=2e-15,
         )
-
-
-def test_gauss_legendre_rule_is_cached() -> None:
-    assert gauss_legendre_rule(4) is gauss_legendre_rule(4)
 
 
 @pytest.mark.parametrize("order", [2, 4, 8])

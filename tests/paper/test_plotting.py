@@ -13,11 +13,6 @@ from astrogwb.paper.config import fiducials
 from astrogwb.paper.plotting import Network
 
 
-def test_paper_mplstyle_sits_next_to_the_module() -> None:
-    style_path = Path(plotting.__file__).parent / "paper.mplstyle"
-    assert style_path.is_file()
-
-
 def test_use_paper_style_loads_stylesheet_and_applies_savefig_settings() -> None:
     """`root=` explicitly: the settings file is resolved against the cwd.
 

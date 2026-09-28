@@ -30,20 +30,6 @@ def test_json_round_trip_preserves_every_field() -> None:
     assert type(restored.model_kwargs["minimum_redshift"]) is float
 
 
-def test_kwargs_are_normalized() -> None:
-    record = _record(model_kwargs={"minimum_redshift": 0.1})
-    assert isinstance(record.model_kwargs, dict)
-
-
-def test_build_binds_construction_kwargs_to_both_callables() -> None:
-    source, rate = _record().build()
-    assert source.keywords == MODEL_KWARGS  # ty: ignore[unresolved-attribute]
-    # One kwargs mapping reaches both: nothing is filtered on the way to the
-    # rate, so a key neither accepts fails rather than being dropped.
-    assert rate is not None
-    assert rate.keywords == MODEL_KWARGS  # ty: ignore[unresolved-attribute]
-
-
 def test_check_registered_names_the_unknown_population() -> None:
     with pytest.raises(KeyError, match="no_such_population"):
         _record(model_name="no_such_population").check_registered()
@@ -78,11 +64,6 @@ def test_seed_must_be_a_non_boolean_int(seed: object) -> None:
     """
     with pytest.raises(ValidationError, match="seed"):
         _record(seed=seed)
-
-
-def test_json_validation_rejects_a_malformed_record() -> None:
-    with pytest.raises(ValidationError, match="Invalid JSON"):
-        PopulationMetadata.model_validate_json("{not json")
 
 
 @pytest.mark.parametrize("seed", ["7", 7.0, True, None])

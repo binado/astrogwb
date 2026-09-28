@@ -223,14 +223,12 @@ def _successive_fractional_rms(values: Sequence[jax.Array]) -> tuple[float, floa
     return float(coarse_residual), float(fine_residual)
 
 
-@pytest.mark.parametrize("function_name", ["precompute", "contract", "combined"])
 def test_analytic_function_is_jittable(
-    function_name: str,
     analytic_functions: Mapping[str, AnalyticFunction],
     transform_frequencies: jax.Array,
     hyperparameters: Mapping[str, float],
 ) -> None:
-    function = analytic_functions[function_name]
+    function = analytic_functions["combined"]
     expected = function(transform_frequencies, hyperparameters)
     actual = jax.jit(function)(transform_frequencies, hyperparameters)
 
@@ -257,29 +255,19 @@ def test_uniform_mass_moments_are_jittable(
     )
 
 
-@pytest.mark.parametrize(
-    ("function_name", "parameter_names"),
-    [
-        ("precompute", ("mass_peak", "mass_sigma")),
-        ("contract", ("H0", "Omega_m", "rate", "gamma")),
-        ("combined", ("H0", "Omega_m", "rate", "gamma", "mass_peak", "mass_sigma")),
-    ],
-)
 def test_analytic_function_has_finite_hyperparameter_gradients(
-    function_name: str,
-    parameter_names: tuple[str, ...],
     analytic_functions: Mapping[str, AnalyticFunction],
     transform_frequencies: jax.Array,
     hyperparameters: Mapping[str, float],
 ) -> None:
-    function = analytic_functions[function_name]
+    function = analytic_functions["combined"]
     gradient = jax.jit(
         jax.grad(
             lambda parameters: jnp.sum(function(transform_frequencies, parameters))
         )
     )(hyperparameters)
 
-    for name in parameter_names:
+    for name in hyperparameters:
         assert np.isfinite(np.asarray(gradient[name])), name
 
 

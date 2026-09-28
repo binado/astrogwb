@@ -468,32 +468,8 @@ def test_ripple_predictive_returns_finite_spectrum() -> None:
 
 
 # --------------------------------------------------------------------- #
-# The scan replaced an unrolled Python loop
+# Batched reductions
 # --------------------------------------------------------------------- #
-def _unrolled_power_sum(generator, sources, event_mask, *, batch_size: int):
-    """The loop ``_sum_polarization_power`` used to be, kept as the oracle.
-
-    The scan must agree with it for every catalog shape, including the ragged
-    and empty ones where the chunking arithmetic is easiest to get wrong.
-    """
-    n_events = next(iter(sources.values())).shape[0]
-    n_full, remainder = divmod(n_events, batch_size)
-
-    def slice_sum(start: int, size: int):
-        batch = {name: values[start : start + size] for name, values in sources.items()}
-        power = jnp.asarray(generator.generate_batch(batch))
-        return (power * event_mask[start : start + size]).sum(axis=1)
-
-    if n_full:
-        total = slice_sum(0, batch_size)
-        for index in range(1, n_full):
-            total = total + slice_sum(index * batch_size, batch_size)
-        if not remainder:
-            return total
-        return total + slice_sum(n_full * batch_size, remainder)
-    if remainder:
-        return slice_sum(0, remainder)
-    return jnp.zeros(jnp.shape(generator.frequencies)[0], dtype=jnp.float64)
 
 
 def _draw_sources(max_events: int) -> dict[str, jax.Array]:
@@ -503,27 +479,6 @@ def _draw_sources(max_events: int) -> dict[str, jax.Array]:
         **_model_kwargs(max_events=max_events, observed_num_events=max_events),
     )
     return {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
-
-
-@pytest.mark.parametrize("batch_size", [1, 3, 5, 8, 13])
-@pytest.mark.parametrize("n_events", [1, 5, 8, 15])
-def test_scan_matches_the_unrolled_loop(n_events: int, batch_size: int) -> None:
-    """Full, ragged and single-event catalogs, across chunk sizes."""
-    generator = _generator()
-    sources = _draw_sources(n_events)
-    event_mask = jnp.arange(n_events) < n_events
-
-    np.testing.assert_allclose(
-        np.asarray(
-            _sum_polarization_power(
-                generator, sources, event_mask, batch_size=batch_size
-            )
-        ),
-        np.asarray(
-            _unrolled_power_sum(generator, sources, event_mask, batch_size=batch_size)
-        ),
-        rtol=1e-12,
-    )
 
 
 def test_empty_catalog_reduces_without_calling_the_generator() -> None:

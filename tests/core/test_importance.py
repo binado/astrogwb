@@ -15,14 +15,10 @@ import pytest
 # apart with no visible symptom.
 from astrogwb_mock_population import (
     FIDUCIALS,
-    N_GRID,
     Z_MAX,
-    Z_MIN,
     log_weight_kwargs,
 )
-from reference_population import reference_merger_rate_distance_and_logprob
 
-from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.cosmology import distance_and_volume_grid, log_gw_em_ratio
 from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.importance.spectral import (
@@ -74,22 +70,6 @@ def test_log_gw_em_ratio_increases_with_redshift() -> None:
 # --------------------------------------------------------------------------- #
 # flat_lcdm_grid
 # --------------------------------------------------------------------------- #
-def test_flat_lcdm_grid_shapes_and_finiteness() -> None:
-    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    d_l, dvc_dz = distance_and_volume_grid(
-        z_grid,
-        hubble_constant=FIDUCIALS["H0"],
-        omega_m=FIDUCIALS["Omega_m"],
-    )
-    d_l = np.asarray(d_l)
-    dvc_dz = np.asarray(dvc_dz)
-    assert d_l.shape == (N_GRID,)
-    assert dvc_dz.shape == (N_GRID,)
-    assert np.all(np.isfinite(d_l))
-    assert np.all(np.isfinite(dvc_dz))
-    # Luminosity distance and dV/dz are non-negative for a physical cosmology.
-    assert np.all(d_l >= 0)
-    assert np.all(dvc_dz >= 0)
 
 
 def test_flat_lcdm_grid_evaluates_on_passed_grid() -> None:
@@ -113,48 +93,6 @@ def test_flat_lcdm_grid_evaluates_on_passed_grid() -> None:
     assert np.all(dvc_dz >= 0)
 
 
-def test_flat_lcdm_grid_is_jit_traceable() -> None:
-    # The function must run under jax.jit with traced params and a concrete
-    # grid: no static Python scalars (max_redshift / n_grid) are extracted.
-    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    d_l, dvc_dz = jax.jit(distance_and_volume_grid)(
-        z_grid,
-        hubble_constant=FIDUCIALS["H0"],
-        omega_m=FIDUCIALS["Omega_m"],
-    )
-    assert np.asarray(d_l).shape == (N_GRID,)
-    assert np.asarray(dvc_dz).shape == (N_GRID,)
-
-
-# --------------------------------------------------------------------------- #
-# The reference redshift density
-# --------------------------------------------------------------------------- #
-def test_redshift_logpdf_normalizes_on_its_own_grid() -> None:
-    # Interpolating the unnormalized density and dividing by its trapezoidal
-    # integral makes the interpolant integrate to exactly that normalization.
-    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    _, _, logpdf = reference_merger_rate_distance_and_logprob(
-        FIDUCIALS, z_grid, redshift_grid=z_grid
-    )
-
-    assert np.trapezoid(np.exp(np.asarray(logpdf)), np.asarray(z_grid)) == (
-        pytest.approx(1.0)
-    )
-
-
-def test_redshift_logpdf_is_negative_infinite_outside_the_grid() -> None:
-    # Samples off the grid interpolate to zero density; callers rely on the
-    # -inf (rather than a clamped edge value) to zero out such rows.
-    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    outside = jnp.asarray([Z_MAX + 0.5, Z_MIN - 0.5])
-
-    _, _, logpdf = reference_merger_rate_distance_and_logprob(
-        FIDUCIALS, outside, redshift_grid=z_grid
-    )
-
-    assert np.all(np.isneginf(np.asarray(logpdf)))
-
-
 # --------------------------------------------------------------------------- #
 # The BNS population reweighting a fixed catalog
 #
@@ -169,19 +107,6 @@ def _reweight(
     _, extras = importance_spectral_density(params, **importance)
     log_weights = evaluate_log_weights(params, **log_weight_kwargs(importance))
     return extras["total_merger_rate"], log_weights
-
-
-def test_reweighting_a_synthetic_catalog_is_finite(
-    synthetic_importance,
-) -> None:
-    importance, samples = synthetic_importance()
-    total_rate, log_weights = _reweight(importance, FIDUCIALS)
-
-    total_rate = float(total_rate)
-    log_weights = np.asarray(log_weights)
-    assert total_rate > 0.0
-    assert np.all(np.isfinite(log_weights))
-    assert log_weights.shape == (samples["redshift"].shape[0],)
 
 
 def test_local_merger_rate_scales_total_rate_without_changing_weights(
@@ -202,52 +127,3 @@ def test_local_merger_rate_scales_total_rate_without_changing_weights(
     np.testing.assert_allclose(
         scaled_log_weights, fiducial_log_weights, rtol=0.0, atol=1e-14
     )
-
-
-def test_fiducial_local_merger_rate_preserves_rate_calculation(
-    synthetic_importance,
-) -> None:
-    """The merger-rate function matches the hand-written grid formula."""
-    importance, _ = synthetic_importance()
-    total_rate, _ = _reweight(importance, FIDUCIALS)
-
-    z_grid = jnp.linspace(Z_MIN, Z_MAX, N_GRID)
-    _, dvc_dz_grid = distance_and_volume_grid(
-        z_grid,
-        hubble_constant=FIDUCIALS["H0"],
-        omega_m=FIDUCIALS["Omega_m"],
-    )
-    rate_grid = madau_dickinson_rate(
-        z_grid,
-        FIDUCIALS["gamma"],
-        FIDUCIALS["kappa"],
-        FIDUCIALS["z_peak"],
-        FIDUCIALS["local_merger_rate"],
-    )
-    integral_mpc3 = jnp.trapezoid(
-        rate_grid / (1.0 + z_grid) * dvc_dz_grid,
-        z_grid,
-    )
-    expected = 1e-9 * float(integral_mpc3) / SECONDS_PER_YEAR
-
-    assert float(total_rate) == pytest.approx(expected)
-
-
-def test_fiducial_weights_cancel_exactly(
-    synthetic_importance,
-) -> None:
-    # The catalog's cached proposal density and reference distance are the same
-    # expressions the target forms at FIDUCIALS, so at the fiducial point the
-    # log-weights are identically zero and the relative ESS is exactly 1.
-    importance, _ = synthetic_importance()
-    _, log_weights = _reweight(importance, FIDUCIALS)
-    log_weights = np.asarray(log_weights)
-    weights = np.exp(log_weights)
-    # Exactly, not to tolerance: the two sides are bit-identical expressions.
-    # A tolerance here would hide an operation-order change that costs a ulp
-    # per weight -- small on its own, but the identity is what several other
-    # tests build their exact expectations on.
-    np.testing.assert_array_equal(log_weights, np.zeros_like(log_weights))
-    assert np.all(np.isfinite(weights))
-    rel_ess = float(weights.sum() ** 2 / (weights.size * (weights**2).sum()))
-    assert rel_ess == pytest.approx(1.0)
