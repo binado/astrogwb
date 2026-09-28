@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.24.2"
+__generated_with = "0.25.0"
 app = marimo.App()
 
 with app.setup(hide_code=True):
@@ -23,7 +23,7 @@ with app.setup(hide_code=True):
     from astrogwb.detector import (
         effective_psd,
         load_sensitivity_map,
-        log_frequency_noise_scale,
+        overlap_reduction_function,
     )
     from astrogwb.frequency import frequency_mask as make_frequency_mask
     from astrogwb.frequency import uniform_grid_spacing
@@ -104,6 +104,8 @@ def _():
     # and observation time are the controls in the next cells.
     minimum_frequency = 2.0
     maximum_frequency = 4096.0
+    omega_gw_plot_limits: tuple[float | None, float | None] = (1e-13, 1e0)
+    sh_plot_limits: tuple[float | None, float | None] = (None, None)
     minimum_redshift = 0.35
     maximum_redshift = 20.0
 
@@ -126,16 +128,12 @@ def _():
         for name, label in DETECTOR_NETWORKS
     )
 
-    # Caps the Omega_GW panels above the signal: the L-shaped networks'
-    # calibration-line spikes otherwise stretch the axis to ~1e2.
-    OMEGA_GW_MAX: float | None = 1e-4
     CUMULATIVE_SNR_ABOVE_FMINS_HZ = (2.0, 5.0, 10.0, 20.0)
     return (
         BASE_DIR,
         CUMULATIVE_SNR_ABOVE_FMINS_HZ,
         FIDUCIALS,
         NETWORKS,
-        OMEGA_GW_MAX,
         ROOT_DIR,
         batch_size,
         maximum_frequency,
@@ -143,7 +141,9 @@ def _():
         minimum_frequency,
         minimum_redshift,
         n_max_sigma,
+        omega_gw_plot_limits,
         seed,
+        sh_plot_limits,
     )
 
 
@@ -165,11 +165,6 @@ def _():
         ],
         value="IMRPhenomXAS",
         label="Approximant",
-    )
-    spectrum_choice = mo.ui.dropdown(
-        options=["Omega_GW", "S_h"],
-        value="Omega_GW",
-        label="Plot spectrum",
     )
     # Notebook-only: the shared [waveform] table is a catalog block, so its 1 Hz
     # resolution stays put. Finer grids resolve the SNR peak at ~5-10 Hz,
@@ -199,7 +194,6 @@ def _():
     mo.vstack(
         [
             approximant_choice,
-            spectrum_choice,
             frequency_resolution_choice,
             observation_time_slider,
             include_cosmic_explorer_switch,
@@ -211,7 +205,6 @@ def _():
         frequency_resolution_choice,
         include_cosmic_explorer_switch,
         observation_time_slider,
-        spectrum_choice,
         write_figures_switch,
     )
 
@@ -257,26 +250,19 @@ def _():
         spectral_density_arr: jax.Array,
         frequency_mask: jax.Array,
         *,
-        h0: float,
         effective_psd_arr: jax.Array | np.ndarray | None = None,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
-        """Restrict $S_h$, $\\Omega_{\\mathrm{GW}}$, and optional $S_{\\mathrm{eff}}$ to the band."""
-        omega_gw = omega_gw_from_spectral_density(
-            spectral_density_arr,
-            frequencies,
-            hubble_constant=h0,
-        )
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+        r"""Restrict $S_h$ and optional $S_{\mathrm{eff}}$ to the frequency band."""
         mask = np.asarray(frequency_mask)
         freq = np.asarray(frequencies)[mask]
-        omega = np.asarray(omega_gw)[mask]
         sh = np.asarray(spectral_density_arr)[mask]
-        pos = (omega > 0.0) & (sh > 0.0) & (freq > 0.0)
+        pos = (sh > 0.0) & (freq > 0.0)
         seff: np.ndarray | None = None
         if effective_psd_arr is not None:
             seff = np.asarray(effective_psd_arr)[mask]
             pos = pos & np.isfinite(seff) & (seff > 0.0)
             seff = seff[pos]
-        return freq[pos], omega[pos], sh[pos], seff
+        return freq[pos], sh[pos], seff
 
     def snr_integrand_and_cumulative(
         spectral_density: np.ndarray,
@@ -407,7 +393,6 @@ def _(
 
 @app.cell
 def _(
-    FIDUCIALS,
     NETWORKS: tuple[Network, ...],
     band_limited_spectrum,
     frequencies,
@@ -439,14 +424,11 @@ def _(
     snr_lt_by_network: dict[str, np.ndarray] = {}
     snr_gt_by_network: dict[str, np.ndarray] = {}
     snr_density_by_network: dict[str, np.ndarray] = {}
-    sigma_ln_f_by_network: dict[str, np.ndarray] = {}
-    omega_sigma_ln_f_by_network: dict[str, np.ndarray] = {}
     for _network in NETWORKS:
-        _band_freq, _, _band_sh, _band_seff = band_limited_spectrum(
+        _band_freq, _band_sh, _band_seff = band_limited_spectrum(
             frequencies,
             spectral_density,
             frequency_mask,
-            h0=FIDUCIALS["H0"],
             effective_psd_arr=effective_psds[_network.name],
         )
         if _band_seff is None:
@@ -456,14 +438,6 @@ def _(
             _band_seff,
             _observation_time_sec,
             _df,
-        )
-        # Per e-fold rather than per bin, so neither curve moves with the grid.
-        _sigma_ln_f = np.asarray(
-            log_frequency_noise_scale(
-                jnp.asarray(_band_seff),
-                jnp.asarray(_band_freq),
-                observation_time,
-            )
         )
         frequency_by_network[_network.name] = _band_freq
         snr_squared_by_network[_network.name] = _snr_squared
@@ -477,31 +451,13 @@ def _(
                 _observation_time_sec,
             )
         )
-        sigma_ln_f_by_network[_network.name] = _sigma_ln_f
-        omega_sigma_ln_f_by_network[_network.name] = np.asarray(
-            omega_gw_from_spectral_density(
-                jnp.asarray(_sigma_ln_f),
-                jnp.asarray(_band_freq),
-                hubble_constant=FIDUCIALS["H0"],
-            )
-        )
-    fiducial_freq, fiducial_omega, fiducial_sh, _ = band_limited_spectrum(
-        frequencies,
-        spectral_density,
-        frequency_mask,
-        h0=FIDUCIALS["H0"],
-    )
+
     return (
         detector_colors,
         detector_linestyles,
         effective_psds,
-        fiducial_freq,
-        fiducial_omega,
-        fiducial_sh,
         frequency_by_network,
         frequency_mask,
-        omega_sigma_ln_f_by_network,
-        sigma_ln_f_by_network,
         snr_density_by_network,
         snr_gt_by_network,
         snr_lt_by_network,
@@ -537,6 +493,159 @@ def _(
         plotted_colors = [color for _, color, _ in _kept]
         plotted_linestyles = [linestyle for _, _, linestyle in _kept]
     return plotted_colors, plotted_linestyles, plotted_networks
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Overlap reduction functions
+
+    The frequency-dependent overlap reduction function $\Gamma_{IJ}(f)$
+    measures the geometric reduction in cross-correlation sensitivity between
+    two detectors due to their separation and relative arm orientation.
+
+    The co-located equilateral triangle arms ($E_1$--$E_2$) maintain a constant
+    $\Gamma \approx -3/8$ up to kilohertz frequencies. The $2\mathrm{L}$ baselines
+    between Sardinia and the Netherlands ($S_1$--$R_1$ for aligned, $S_2$--$R_2$
+    for misaligned) provide strong low-frequency overlap ($-0.98$ and $-0.32$,
+    respectively) that falls off above $\sim 50\ \mathrm{Hz}$ over their
+    $\sim 1100\ \mathrm{km}$ separation.
+    """)
+    return
+
+
+@app.cell
+def _(format_axis_ticks):
+    def plot_overlap_reduction_functions(
+        frequencies: jax.Array | np.ndarray,
+        networks: Sequence[Network],
+        *,
+        colors: Sequence[str],
+        linestyles: Sequence[str],
+        representative_pairs: Mapping[str, tuple[str, str]] | None = None,
+        squared: bool = False,
+        fmin: float = 2.0,
+        fmax: float = 4096.0,
+    ) -> Figure:
+        """Plot overlap reduction functions, optionally squared, for ET networks."""
+        if len(networks) != len(colors) or len(networks) != len(linestyles):
+            raise ValueError("color and linestyle counts must match the networks")
+
+        if representative_pairs is None:
+            representative_pairs = {
+                "ET-triangular": ("E1", "E2"),
+                "ET-2L-aligned": ("S1", "R1"),
+                "ET-2L-misaligned": ("S2", "R2"),
+            }
+
+        _fig, ax = plt.subplots()
+        freq = np.asarray(frequencies)
+        mask = (freq >= fmin) & (freq <= fmax)
+        freq_in_band = freq[mask]
+
+        legend_handles = []
+        for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
+            if network.name not in representative_pairs:
+                continue
+            det1, det2 = representative_pairs[network.name]
+            orf = overlap_reduction_function(freq_in_band, det1, det2)
+            values = orf**2 if squared else orf
+            (line,) = ax.semilogx(
+                freq_in_band,
+                values,
+                color=color,
+                linestyle=linestyle,
+                label=network.label,
+            )
+            legend_handles.append(line)
+
+        ax.axhline(0.0, color="0.7", linestyle=":", linewidth=0.8)
+        ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+        ax.set_ylabel(r"$\Gamma^2(f)$" if squared else r"$\Gamma(f)$")
+        ax.set_xlim(fmin, fmax)
+        ax.set_ylim(-0.03, 1.05) if squared else ax.set_ylim(-1.05, 0.7)
+        ax.set_axisbelow(True)
+        ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+        format_axis_ticks(ax)
+        ax.legend(
+            handles=legend_handles,
+            **DETECTOR_COMPARISON_LEGEND,
+        )
+        _fig.tight_layout()
+        return _fig
+
+    return (plot_overlap_reduction_functions,)
+
+
+@app.cell
+def _(
+    BASE_DIR,
+    ROOT_DIR,
+    frequencies,
+    maximum_frequency,
+    minimum_frequency,
+    plot_overlap_reduction_functions,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks,
+    write_figures,
+):
+    _fig = plot_overlap_reduction_functions(
+        frequencies,
+        plotted_networks,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
+        fmin=minimum_frequency,
+        fmax=maximum_frequency,
+    )
+    if write_figures:
+        save_figures(
+            {BASE_DIR / "overlap_reduction_functions.pdf": _fig},
+            root=ROOT_DIR,
+        )
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Squared overlap reduction functions
+
+    These curves show $\Gamma_{IJ}^2(f)$ for the same three ET baselines.
+    """)
+    return
+
+
+@app.cell
+def _(
+    BASE_DIR,
+    ROOT_DIR,
+    frequencies,
+    maximum_frequency,
+    minimum_frequency,
+    plot_overlap_reduction_functions,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks,
+    write_figures,
+):
+    _fig = plot_overlap_reduction_functions(
+        frequencies,
+        plotted_networks,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
+        squared=True,
+        fmin=minimum_frequency,
+        fmax=maximum_frequency,
+    )
+    if write_figures:
+        save_figures(
+            {BASE_DIR / "overlap_reduction_function_squares.pdf": _fig},
+            root=ROOT_DIR,
+        )
+    _fig
+    return
 
 
 @app.cell(hide_code=True)
@@ -620,108 +729,159 @@ def _(
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## $S_h$ versus network sensitivity curves
+    ## $\Omega_{\mathrm{GW}}$ signal versus network sensitivity
 
-    The sensitivity curves are $\sigma_{\ln f}(f) = S_{\mathrm{eff}}(f)/\sqrt{2Tf}$:
-    the noise over a bandwidth of about $f$, so they do not move with the
-    frequency grid. The squared ratio of a spectrum to a curve is
-    $d\mathrm{SNR}^2/d\ln f$, plotted below. The likelihood still uses the
-    per-bin scale $S_{\mathrm{eff}}/\sqrt{2T\Delta f}$, which is lower by
-    $\sqrt{f/\Delta f}$ and so is not a detectability threshold.
+    The signal and per-network sensitivity are compared on a common scale. By default, `plot_signal_and_sensitivity` shows $S_h$ and
+    $S_{\mathrm{eff}}/\sqrt{2fT}$, whose squared ratio is
+    $d\mathrm{SNR}^2/d\ln f$. Here both are transformed to dimensionless
+    $\Omega_{\mathrm{GW}}$ using the shared fiducial $H_0$.
     """)
     return
 
 
 @app.cell
 def _(format_axis_ticks, network_legend_handles):
-    def draw_spectrum_and_sensitivities(
-        ax: MplAxes,
-        frequency: np.ndarray,
-        spectrum: np.ndarray,
+    from collections.abc import Callable
+    from functools import partial
+
+    def plot_signal_and_sensitivity(
+        frequencies: jax.Array | np.ndarray,
+        spectral_density: jax.Array | np.ndarray,
         networks: Sequence[Network],
-        frequency_by_network: Mapping[str, np.ndarray],
-        sensitivities_by_network: Mapping[str, np.ndarray],
+        effective_psds: Mapping[str, jax.Array | np.ndarray],
         *,
+        observation_time: float,
         colors: Sequence[str],
         linestyles: Sequence[str],
-        spectrum_label: str,
-        spectrum_color: str,
-        spectrum_linestyle: str,
-        ylabel: str,
-        ymin: float | None = None,
-        ymax: float | None = None,
-        include_spectrum_in_legend: bool = True,
-        spectrum_legend_loc: str | None = None,
-        xlabel: bool = True,
-    ) -> None:
-        """Overlay a fiducial spectrum with per-network sensitivities on ``ax``.
-
-        When ``spectrum_legend_loc`` is set, the spectrum gets its own legend inside
-        the axes (e.g. ``"upper left"``). The network legend still uses
-        ``DETECTOR_COMPARISON_LEGEND`` above the frame and remains ``ax.legend_``
-        so ``tight_layout`` keeps reserving space for it; the inner legend is
-        pinned with ``ax.add_artist``.
-        """
+        transform_fn: Callable[[jax.Array], jax.Array] | None = None,
+        sh_limits: tuple[float | None, float | None] = (None, None),
+        plot_limits: tuple[float | None, float | None] | None = None,
+        ylabel: str = r"$S_h(f)$",
+        fmin: float = 2.0,
+        fmax: float = 4096.0,
+    ) -> Figure:
+        """Plot a signal and network sensitivities on a shared spectral scale."""
         if len(networks) != len(colors) or len(networks) != len(linestyles):
             raise ValueError("color and linestyle counts must match the networks")
-        if include_spectrum_in_legend and spectrum_legend_loc is not None:
-            raise ValueError(
-                "use at most one of include_spectrum_in_legend and spectrum_legend_loc"
-            )
 
-        (line_spectrum,) = ax.loglog(
-            frequency,
-            spectrum,
-            color=spectrum_color,
-            linestyle=spectrum_linestyle,
-            label=spectrum_label,
+        freq = np.asarray(frequencies)
+        signal = np.asarray(spectral_density)
+        band = (freq >= fmin) & (freq <= fmax) & (freq > 0.0)
+        observation_time_sec = years_to_seconds(observation_time)
+
+        if transform_fn is not None:
+            signal = np.asarray(transform_fn(jnp.asarray(signal)))
+
+        signal_valid = band & np.isfinite(signal) & (signal > 0.0)
+        _fig, ax = plt.subplots()
+        ax.loglog(
+            freq[signal_valid],
+            signal[signal_valid],
+            color=SPECTRUM["omega_gw"],
+            linestyle=SPECTRUM_LINESTYLES["omega_gw"],
+            linewidth=2.0,
         )
+
         for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
-            network_frequency = np.asarray(frequency_by_network[network.name])
-            sensitivity = np.asarray(sensitivities_by_network[network.name])
-            pos = (
-                np.isfinite(sensitivity)
-                & (sensitivity > 0.0)
-                & (network_frequency > 0.0)
-            )
-            ax.loglog(
-                network_frequency[pos],
-                sensitivity[pos],
-                color=color,
-                linestyle=linestyle,
-            )
+            effective_psd_values = np.asarray(effective_psds[network.name])
+            noise = effective_psd_values / np.sqrt(2.0 * observation_time_sec * freq)
+            if transform_fn is not None:
+                noise = np.asarray(transform_fn(jnp.asarray(noise)))
+            valid = band & np.isfinite(noise) & (noise > 0.0)
+            ax.loglog(freq[valid], noise[valid], color=color, linestyle=linestyle)
 
-        if xlabel:
-            ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+        transformed_sh_limits = list(sh_limits)
+        if transform_fn is not None:
+            for index, limit in enumerate(sh_limits):
+                if limit is None:
+                    continue
+                transformed = np.asarray(
+                    transform_fn(
+                        jnp.full(
+                            freq.shape, limit, dtype=jnp.asarray(spectral_density).dtype
+                        )
+                    )
+                )
+                valid = band & np.isfinite(transformed)
+                if np.any(valid):
+                    transformed_sh_limits[index] = (
+                        float(np.min(transformed[valid]))
+                        if index == 0
+                        else float(np.max(transformed[valid]))
+                    )
+                else:
+                    transformed_sh_limits[index] = None
+
+        limits = tuple(transformed_sh_limits)
+        if plot_limits is not None:
+            limits = tuple(
+                output_limit if output_limit is not None else input_limit
+                for output_limit, input_limit in zip(plot_limits, limits, strict=True)
+            )
+        ax.set_ylim(*limits, auto=None)
+        ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
         ax.set_ylabel(ylabel)
-        # Either bound may be pinned; the other keeps its autoscaled value.
-        auto_ymin, auto_ymax = ax.get_ylim()
-        ax.set_ylim(
-            auto_ymin if ymin is None else ymin,
-            auto_ymax if ymax is None else ymax,
-        )
+        ax.set_xlim(fmin, fmax)
         ax.set_axisbelow(True)
         ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
         format_axis_ticks(ax)
-        network_handles = network_legend_handles(networks, colors, linestyles)
-        legend_handles = (
-            [line_spectrum, *network_handles]
-            if include_spectrum_in_legend
-            else network_handles
+        ax.legend(
+            handles=network_legend_handles(networks, colors, linestyles),
+            **DETECTOR_COMPARISON_LEGEND,
         )
-        if spectrum_legend_loc is not None:
-            # Keep the detector legend as ax.legend_ so tight_layout still
-            # accounts for the above-axes bbox; pin the spectrum entry separately.
-            spectrum_legend = ax.legend(
-                handles=[line_spectrum],
-                loc=spectrum_legend_loc,
-                frameon=False,
-                handlelength=2.5,
-            )
-            ax.add_artist(spectrum_legend)
-        ax.legend(handles=legend_handles, **DETECTOR_COMPARISON_LEGEND)
+        _fig.tight_layout()
+        return _fig
 
-    return (draw_spectrum_and_sensitivities,)
+    return partial, plot_signal_and_sensitivity
+
+
+@app.cell
+def _(
+    BASE_DIR,
+    FIDUCIALS,
+    ROOT_DIR,
+    effective_psds: dict[str, jax.Array],
+    frequencies,
+    maximum_frequency,
+    minimum_frequency,
+    observation_time,
+    omega_gw_plot_limits: tuple[float | None, float | None],
+    partial,
+    plot_signal_and_sensitivity,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks,
+    sh_plot_limits: tuple[float | None, float | None],
+    spectral_density,
+    write_figures,
+):
+    _fig = plot_signal_and_sensitivity(
+        frequencies,
+        spectral_density,
+        plotted_networks,
+        effective_psds,
+        observation_time=observation_time,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
+        transform_fn=partial(
+            omega_gw_from_spectral_density,
+            frequencies=jnp.asarray(frequencies),
+            hubble_constant=FIDUCIALS["H0"],
+        ),
+        sh_limits=sh_plot_limits,
+        plot_limits=omega_gw_plot_limits,
+        ylabel=r"$\Omega_{\mathrm{GW}}(f)$",
+        fmin=minimum_frequency,
+        fmax=maximum_frequency,
+    )
+    if write_figures:
+        save_figures(
+            {BASE_DIR / "omega_gw_signal_vs_sensitivity.pdf": _fig},
+            root=ROOT_DIR,
+        )
+    _fig
+
+    return
 
 
 @app.cell(hide_code=True)
@@ -733,11 +893,7 @@ def _():
 
 
 @app.cell
-def _(
-    draw_spectrum_and_sensitivities,
-    format_axis_ticks,
-    network_legend_handles,
-):
+def _(format_axis_ticks, network_legend_handles):
     def _draw_snr_curves(
         ax: MplAxes,
         networks: Sequence[Network],
@@ -773,81 +929,6 @@ def _(
                 handles=network_legend_handles(networks, colors, linestyles),
                 **DETECTOR_COMPARISON_LEGEND,
             )
-
-    def plot_spectrum_and_snr_density(
-        frequency: np.ndarray,
-        spectrum: np.ndarray,
-        networks: Sequence[Network],
-        frequency_by_network: Mapping[str, np.ndarray],
-        sensitivities_by_network: Mapping[str, np.ndarray],
-        snr_density_by_network: Mapping[str, np.ndarray],
-        *,
-        observation_time: float,
-        colors: Sequence[str],
-        linestyles: Sequence[str],
-        spectrum_label: str,
-        spectrum_color: str,
-        spectrum_linestyle: str,
-        ylabel: str,
-        spectrum_max: float | None = None,
-    ) -> Figure:
-        """Stack the selected spectrum versus sensitivity over the SNR density.
-
-        The squared gap between the spectrum and a network's curve in the top
-        panel is that network's $d\\mathrm{SNR}^2/d\\ln f$ in the bottom one,
-        so the shared frequency axis lines the comparison up with where the
-        SNR accrues. The density is absolute, so each curve's area is its
-        network's $\\mathrm{SNR}^2$ at ``observation_time`` (years), which
-        the bottom panel states.
-        """
-        width, height = plt.rcParams["figure.figsize"]
-        _fig, (ax_top, ax_bottom) = plt.subplots(
-            2,
-            1,
-            sharex=True,
-            figsize=(width, 1.6 * height),
-            gridspec_kw={"height_ratios": (3, 2)},
-        )
-        draw_spectrum_and_sensitivities(
-            ax_top,
-            frequency,
-            spectrum,
-            networks,
-            frequency_by_network,
-            sensitivities_by_network,
-            colors=colors,
-            linestyles=linestyles,
-            spectrum_label=spectrum_label,
-            spectrum_color=spectrum_color,
-            spectrum_linestyle=spectrum_linestyle,
-            ylabel=ylabel,
-            ymax=spectrum_max,
-            include_spectrum_in_legend=False,
-            spectrum_legend_loc="upper left",
-            xlabel=False,
-        )
-        _draw_snr_curves(
-            ax_bottom,
-            networks,
-            frequency_by_network,
-            snr_density_by_network,
-            colors=colors,
-            linestyles=linestyles,
-            ylabel=r"$d\mathrm{SNR}^{2}/d\ln f$",
-            legend=False,
-        )
-        ax_bottom.text(
-            0.98,
-            0.92,
-            rf"$T = {observation_time:g}\ \mathrm{{yr}}$",
-            transform=ax_bottom.transAxes,
-            ha="right",
-            va="top",
-        )
-        # The bottom panel's semilogx reset the shared x formatter.
-        format_axis_ticks(ax_top)
-        _fig.tight_layout(h_pad=0.4)
-        return _fig
 
     def plot_snr_integrand(
         networks: Sequence[Network],
@@ -923,7 +1004,6 @@ def _(
         plot_snr_cumulative_above,
         plot_snr_cumulative_below,
         plot_snr_integrand,
-        plot_spectrum_and_snr_density,
     )
 
 
@@ -960,84 +1040,6 @@ def _(
     )
     if write_figures:
         save_figures({BASE_DIR / "snr_integrand.pdf": _fig}, root=ROOT_DIR)
-    _fig
-    return
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ### Network sensitivity and SNR density, stacked
-
-    The paper figure: the configured spectrum against each network's
-    $\sigma_{\ln f}$ on top, and below it $d\mathrm{SNR}^2/d\ln f$, whose
-    area in $\ln f$ is each network's $\mathrm{SNR}^2$ at the chosen
-    observation time. The ET geometries share nearly one shape, so the curves
-    separate by amplitude; the dashed +CE curves also extend to 10--30 Hz.
-    """)
-    return
-
-
-@app.cell
-def _(
-    BASE_DIR,
-    OMEGA_GW_MAX: float | None,
-    ROOT_DIR,
-    fiducial_freq,
-    fiducial_omega,
-    fiducial_sh,
-    frequency_by_network: dict[str, np.ndarray],
-    observation_time,
-    omega_sigma_ln_f_by_network: dict[str, np.ndarray],
-    plot_spectrum_and_snr_density,
-    plotted_colors,
-    plotted_linestyles,
-    plotted_networks,
-    sigma_ln_f_by_network: dict[str, np.ndarray],
-    snr_density_by_network: dict[str, np.ndarray],
-    spectrum_choice,
-    write_figures,
-):
-    if spectrum_choice.value == "Omega_GW":
-        _spectrum = fiducial_omega
-        _sensitivities = omega_sigma_ln_f_by_network
-        _spectrum_label = r"$\Omega_{\mathrm{GW}}$"
-        _spectrum_color = SPECTRUM["omega_gw"]
-        _spectrum_linestyle = ":"
-        _ylabel = r"$\Omega_{\mathrm{GW}}(f), \, \sigma_{\ln f}(f)$"
-        _spectrum_max = OMEGA_GW_MAX
-        _filename = "omega_sensitivity_and_snr_density.pdf"
-    else:
-        _spectrum = fiducial_sh
-        _sensitivities = sigma_ln_f_by_network
-        _spectrum_label = r"$S_h$"
-        _spectrum_color = SPECTRUM["sh"]
-        _spectrum_linestyle = SPECTRUM_LINESTYLES["sh"]
-        _ylabel = r"$S_h(f), \, \sigma_{\ln f}(f)\ \mathrm{[Hz^{-1}]}$"
-        _spectrum_max = None
-        _filename = "sh_sensitivity_and_snr_density.pdf"
-
-    _fig = plot_spectrum_and_snr_density(
-        fiducial_freq,
-        _spectrum,
-        plotted_networks,
-        frequency_by_network,
-        _sensitivities,
-        snr_density_by_network,
-        observation_time=observation_time,
-        colors=plotted_colors,
-        linestyles=plotted_linestyles,
-        spectrum_label=_spectrum_label,
-        spectrum_color=_spectrum_color,
-        spectrum_linestyle=_spectrum_linestyle,
-        ylabel=_ylabel,
-        spectrum_max=_spectrum_max,
-    )
-    if write_figures:
-        save_figures(
-            {BASE_DIR / _filename: _fig},
-            root=ROOT_DIR,
-        )
     _fig
     return
 
