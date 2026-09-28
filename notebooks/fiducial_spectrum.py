@@ -103,6 +103,8 @@ def _():
     # and observation time are the controls in the next cells.
     minimum_frequency = 2.0
     maximum_frequency = 4096.0
+    omega_gw_plot_limits: tuple[float | None, float | None] = (1e-15, None)
+    sh_plot_limits: tuple[float | None, float | None] = (None, None)
     minimum_redshift = 0.35
     maximum_redshift = 20.0
 
@@ -138,7 +140,9 @@ def _():
         minimum_frequency,
         minimum_redshift,
         n_max_sigma,
+        omega_gw_plot_limits,
         seed,
+        sh_plot_limits,
     )
 
 
@@ -695,8 +699,25 @@ def _(format_axis_ticks, network_legend_handles):
 
 
 @app.cell
-def _(format_axis_ticks, network_legend_handles):
+def _(
+    format_axis_ticks,
+    network_legend_handles,
+    omega_gw_plot_limits: tuple[float | None, float | None],
+    sh_plot_limits: tuple[float | None, float | None],
+):
     from astrogwb.gwb import omega_gw_from_spectral_density
+
+    def set_spectral_plot_limits(axis: MplAxes, spectrum: str) -> None:
+        """Apply the configured y limits for an $S_h$ or Omega_GW plot."""
+        limits_by_spectrum = {
+            "omega_gw": omega_gw_plot_limits,
+            "sh": sh_plot_limits,
+        }
+        try:
+            limits = limits_by_spectrum[spectrum]
+        except KeyError as error:
+            raise ValueError(f"unsupported spectral plot: {spectrum}") from error
+        axis.set_ylim(*limits, auto=None)
 
     def plot_omega_gw_sensitivity(
         frequencies: jax.Array | np.ndarray,
@@ -755,6 +776,7 @@ def _(format_axis_ticks, network_legend_handles):
                 linestyle=linestyle,
             )
 
+        set_spectral_plot_limits(ax, "omega_gw")
         ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
         ax.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$")
         ax.set_xlim(fmin, fmax)
