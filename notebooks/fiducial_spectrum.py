@@ -518,10 +518,11 @@ def _(format_axis_ticks):
         colors: Sequence[str],
         linestyles: Sequence[str],
         representative_pairs: Mapping[str, tuple[str, str]] | None = None,
+        squared: bool = False,
         fmin: float = 2.0,
         fmax: float = 4096.0,
     ) -> Figure:
-        """Plot overlap reduction functions for the three ET network geometries."""
+        """Plot overlap reduction functions, optionally squared, for ET networks."""
         if len(networks) != len(colors) or len(networks) != len(linestyles):
             raise ValueError("color and linestyle counts must match the networks")
 
@@ -543,9 +544,10 @@ def _(format_axis_ticks):
                 continue
             det1, det2 = representative_pairs[network.name]
             orf = overlap_reduction_function(freq_in_band, det1, det2)
+            values = orf**2 if squared else orf
             (line,) = ax.semilogx(
                 freq_in_band,
-                orf,
+                values,
                 color=color,
                 linestyle=linestyle,
                 label=network.label,
@@ -554,9 +556,9 @@ def _(format_axis_ticks):
 
         ax.axhline(0.0, color="0.7", linestyle=":", linewidth=0.8)
         ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
-        ax.set_ylabel(r"$\Gamma(f)$")
+        ax.set_ylabel(r"$\Gamma^2(f)$" if squared else r"$\Gamma(f)$")
         ax.set_xlim(fmin, fmax)
-        ax.set_ylim(-1.05, 0.7)
+        ax.set_ylim(-0.03, 1.05) if squared else ax.set_ylim(-1.05, 0.7)
         ax.set_axisbelow(True)
         ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
         format_axis_ticks(ax)
@@ -594,6 +596,47 @@ def _(
     if write_figures:
         save_figures(
             {BASE_DIR / "overlap_reduction_functions.pdf": _fig},
+            root=ROOT_DIR,
+        )
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ### Squared overlap reduction functions
+
+    These curves show $\Gamma_{IJ}^2(f)$ for the same three ET baselines.
+    """)
+    return
+
+
+@app.cell
+def _(
+    BASE_DIR,
+    ROOT_DIR,
+    frequencies,
+    maximum_frequency,
+    minimum_frequency,
+    plot_overlap_reduction_functions,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks,
+    write_figures,
+):
+    _fig = plot_overlap_reduction_functions(
+        frequencies,
+        plotted_networks,
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
+        squared=True,
+        fmin=minimum_frequency,
+        fmax=maximum_frequency,
+    )
+    if write_figures:
+        save_figures(
+            {BASE_DIR / "overlap_reduction_function_squares.pdf": _fig},
             root=ROOT_DIR,
         )
     _fig
@@ -652,6 +695,83 @@ def _(format_axis_ticks, network_legend_handles):
 
 
 @app.cell
+def _(format_axis_ticks, network_legend_handles):
+    from astrogwb.gwb import omega_gw_from_spectral_density
+
+    def plot_omega_gw_sensitivity(
+        frequencies: jax.Array | np.ndarray,
+        spectral_density: jax.Array | np.ndarray,
+        networks: Sequence[Network],
+        effective_psds: Mapping[str, jax.Array | np.ndarray],
+        *,
+        observation_time: float,
+        hubble_constant: float,
+        colors: Sequence[str],
+        linestyles: Sequence[str],
+        fmin: float = 2.0,
+        fmax: float = 4096.0,
+    ) -> Figure:
+        """Plot Omega_GW for the signal and per-log-frequency network sensitivity."""
+        if len(networks) != len(colors) or len(networks) != len(linestyles):
+            raise ValueError("color and linestyle counts must match the networks")
+
+        freq = np.asarray(frequencies)
+        signal_psd = np.asarray(spectral_density)
+        band = (freq >= fmin) & (freq <= fmax) & (freq > 0.0)
+        signal_valid = band & np.isfinite(signal_psd) & (signal_psd > 0.0)
+        observation_time_sec = years_to_seconds(observation_time)
+
+        omega_signal = np.asarray(
+            omega_gw_from_spectral_density(
+                jnp.asarray(signal_psd[signal_valid]),
+                jnp.asarray(freq[signal_valid]),
+                hubble_constant=hubble_constant,
+            )
+        )
+        _fig, ax = plt.subplots()
+        ax.loglog(
+            freq[signal_valid],
+            omega_signal,
+            color=SPECTRUM["omega_gw"],
+            linestyle=SPECTRUM_LINESTYLES["omega_gw"],
+            linewidth=2.0,
+        )
+
+        for network, color, linestyle in zip(networks, colors, linestyles, strict=True):
+            effective_psd = np.asarray(effective_psds[network.name])
+            noise_scale = effective_psd / np.sqrt(2.0 * observation_time_sec * freq)
+            valid = band & np.isfinite(noise_scale) & (noise_scale > 0.0)
+            omega_noise = np.asarray(
+                omega_gw_from_spectral_density(
+                    jnp.asarray(noise_scale[valid]),
+                    jnp.asarray(freq[valid]),
+                    hubble_constant=hubble_constant,
+                )
+            )
+            ax.loglog(
+                freq[valid],
+                omega_noise,
+                color=color,
+                linestyle=linestyle,
+            )
+
+        ax.set_xlabel(r"$f\ \mathrm{(Hz)}$")
+        ax.set_ylabel(r"$\Omega_{\mathrm{GW}}(f)$")
+        ax.set_xlim(fmin, fmax)
+        ax.set_axisbelow(True)
+        ax.grid(True, which="both", linestyle=":", linewidth=0.5, alpha=0.5)
+        format_axis_ticks(ax)
+        ax.legend(
+            handles=network_legend_handles(networks, colors, linestyles),
+            **DETECTOR_COMPARISON_LEGEND,
+        )
+        _fig.tight_layout()
+        return _fig
+
+    return (plot_omega_gw_sensitivity,)
+
+
+@app.cell
 def _(
     BASE_DIR,
     ROOT_DIR,
@@ -681,15 +801,52 @@ def _(
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## $S_h$ versus network sensitivity curves
+    ## $\Omega_{\mathrm{GW}}$ signal versus network sensitivity
 
-    The sensitivity curves are $\sigma_{\ln f}(f) = S_{\mathrm{eff}}(f)/\sqrt{2Tf}$:
-    the noise over a bandwidth of about $f$, so they do not move with the
-    frequency grid. The squared ratio of a spectrum to a curve is
-    $d\mathrm{SNR}^2/d\ln f$, plotted below. The likelihood still uses the
-    per-bin scale $S_{\mathrm{eff}}/\sqrt{2T\Delta f}$, which is lower by
-    $\sqrt{f/\Delta f}$ and so is not a detectability threshold.
+    The signal and sensitivity are both converted to dimensionless
+    $\Omega_{\mathrm{GW}}$ using the shared fiducial $H_0$. Each network's
+    curve is the conversion of $\sigma_{\ln f}=S_{\mathrm{eff}}/\sqrt{2Tf}$,
+    so the squared signal-to-sensitivity ratio is
+    $d\mathrm{SNR}^2/d\ln f$.
     """)
+    return
+
+
+@app.cell
+def _(
+    BASE_DIR,
+    FIDUCIALS,
+    ROOT_DIR,
+    effective_psds: dict[str, jax.Array],
+    frequencies,
+    maximum_frequency,
+    minimum_frequency,
+    observation_time,
+    plot_omega_gw_sensitivity,
+    plotted_colors,
+    plotted_linestyles,
+    plotted_networks,
+    spectral_density,
+    write_figures,
+):
+    _fig = plot_omega_gw_sensitivity(
+        frequencies,
+        spectral_density,
+        plotted_networks,
+        effective_psds,
+        observation_time=observation_time,
+        hubble_constant=FIDUCIALS["H0"],
+        colors=plotted_colors,
+        linestyles=plotted_linestyles,
+        fmin=minimum_frequency,
+        fmax=maximum_frequency,
+    )
+    if write_figures:
+        save_figures(
+            {BASE_DIR / "omega_gw_signal_vs_sensitivity.pdf": _fig},
+            root=ROOT_DIR,
+        )
+    _fig
     return
 
 
