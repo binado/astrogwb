@@ -641,9 +641,13 @@ def _parity_sources(approximant: str) -> dict[str, np.ndarray]:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("approximant", SUPPORTED_APPROXIMANTS)
+# gwmock does not implement IMRPhenomXP_NRTidalv3.
+@pytest.mark.parametrize(
+    "approximant",
+    [name for name in SUPPORTED_APPROXIMANTS if name != "IMRPhenomXP_NRTidalv3"],
+)
 def test_power_matches_the_gwmock_backend(approximant: str) -> None:
-    """Every supported family, against the GPL backend this replaces.
+    """Families supported by both adapters, against the GPL backend this replaces.
 
     Exact on the frequency axis: the grid rule is reimplemented, so any
     disagreement there is a bug, not rounding.
