@@ -7,7 +7,6 @@ do not ship as gwmock presets.
 
 from __future__ import annotations
 
-import math
 import tomllib
 from collections.abc import Mapping
 from functools import cache
@@ -26,22 +25,9 @@ def _geometry_table() -> Mapping[str, CustomDetector]:
     with open(GEOMETRY_FILE, "rb") as f:
         data = tomllib.load(f)
     return {
-        name: _custom_detector(name, row["geometry"])
+        name: CustomDetector(name=name, **row["geometry"])
         for name, row in data["detectors"].items()
     }
-
-
-def _custom_detector(name: str, row: Mapping) -> CustomDetector:
-    return CustomDetector(
-        name=name,
-        latitude_rad=math.radians(float(row["latitude"])),
-        longitude_rad=math.radians(float(row["longitude"])),
-        elevation_m=float(row["elevation"]),
-        xarm_azimuth_rad=math.radians(float(row["xarm_azimuth"])),
-        yarm_azimuth_rad=math.radians(float(row["yarm_azimuth"])),
-        xarm_tilt_rad=math.radians(float(row.get("xarm_tilt", 0.0))),
-        yarm_tilt_rad=math.radians(float(row.get("yarm_tilt", 0.0))),
-    )
 
 
 def load_detector(name: str) -> CustomDetector:

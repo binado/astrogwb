@@ -1,6 +1,6 @@
 # Shared detector networks and optional detector overrides. Later experiment
 # and run layers can override membership, PSD references, labels, or geometry.
-# Geometry fields use degrees and metres, as in the packaged geometry.toml.
+# Geometry fields use gwmock radians (azimuths clockwise from North) and metres, as in the packaged geometry.toml.
 
 # Each detector network, by name. A run names one as analysis.network; the
 # figures' legend order is astrogwb.paper.plotting.DETECTOR_NETWORKS.

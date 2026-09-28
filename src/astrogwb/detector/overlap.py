@@ -103,9 +103,12 @@ def _final_course(lat1: float, lat2: float, lon1: float, lon2: float) -> float:
 
 
 def _opening_angle(az1: float, az2: float) -> float:
-    """Smallest angle between two arm azimuths (radians in, radians out)."""
-    diff = ((az1 - az2 + math.pi) % (2.0 * math.pi)) - math.pi
-    return abs(diff)
+    """Signed opening from y to x in gwmock's clockwise-from-North convention.
+
+    Keeping the sign accounts for reversed arm ordering in external detectors;
+    all packaged paper detectors retain their positive opening angles.
+    """
+    return ((az1 - az2 + math.pi) % (2.0 * math.pi)) - math.pi
 
 
 def _azimuth_bisector(az1: float, az2: float) -> float:
@@ -231,8 +234,16 @@ def overlap_reduction_function(
     )
     alpha = 2.0 * math.pi * frequencies * d / C_LIGHT
 
-    xax_1 = _azimuth_bisector(det1.xarm_azimuth_rad, det1.yarm_azimuth_rad)
-    xax_2 = _azimuth_bisector(det2.xarm_azimuth_rad, det2.yarm_azimuth_rad)
+    # The analytic expansion uses counter-clockwise-from-East bisectors.
+    # Runtime detectors use gwmock's clockwise-from-North arm azimuths.
+    xax_1 = _azimuth_bisector(
+        math.pi / 2.0 - det1.xarm_azimuth_rad,
+        math.pi / 2.0 - det1.yarm_azimuth_rad,
+    )
+    xax_2 = _azimuth_bisector(
+        math.pi / 2.0 - det2.xarm_azimuth_rad,
+        math.pi / 2.0 - det2.yarm_azimuth_rad,
+    )
 
     ang_1 = (
         _initial_course(

@@ -383,7 +383,7 @@ class RunConfig(BaseModel):
                 raise ValueError(
                     "resolved detector_registry cannot accompany detector overrides"
                 )
-            registry = DetectorRegistry.model_validate(saved_registry)
+            registry = DetectorRegistry.from_saved(saved_registry)
         else:
             # Layer assembly already merged packaged detector files with pyknf.
             # Legacy saved records have no detector table and need those defaults.

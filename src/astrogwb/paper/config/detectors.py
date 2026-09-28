@@ -1,16 +1,16 @@
 """Serializable detector settings, resolved before runtime objects are built.
 
-Angles use the packaged table's degrees and elevations use metres. Only the
-build methods import detector libraries; reading and validating settings does
+Angles use gwmock's radians (azimuths clockwise from North); elevations use
+metres. Only the build methods import detector libraries; validating settings does
 not import JAX or initialize its backend.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -19,36 +19,43 @@ if TYPE_CHECKING:
 
     from astrogwb.detector import Sensitivity
 
+_LEGACY_GEOMETRY = frozenset(
+    {
+        "latitude",
+        "longitude",
+        "elevation",
+        "xarm_azimuth",
+        "yarm_azimuth",
+        "xarm_tilt",
+        "yarm_tilt",
+    }
+)
+
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
 
 class DetectorGeometry(BaseModel):
-    """Complete geometry in degrees and metres, matching ``geometry.toml``."""
+    """Complete geometry in gwmock radians and metres, matching ``geometry.toml``."""
 
     model_config = _STRICT
 
-    latitude: Annotated[float, Field(ge=-90.0, le=90.0)]
-    longitude: Annotated[float, Field(ge=-180.0, le=180.0)]
-    elevation: float
-    xarm_azimuth: float
-    yarm_azimuth: float
-    xarm_tilt: float = 0.0
-    yarm_tilt: float = 0.0
+    latitude_rad: Annotated[float, Field(ge=-math.pi / 2.0, le=math.pi / 2.0)]
+    longitude_rad: Annotated[float, Field(ge=-math.pi, le=math.pi)]
+    elevation_m: Annotated[float, Field(ge=-1e4, le=1e5)]
+    xarm_azimuth_rad: float
+    yarm_azimuth_rad: float
+    xarm_tilt_rad: float = 0.0
+    yarm_tilt_rad: float = 0.0
 
-    def build(self, name: str) -> CustomDetector:
-        """Construct geometry lazily, preserving the public detector name."""
-        from gwmock_signal.detector import CustomDetector
-
-        return CustomDetector(
-            name=name,
-            latitude_rad=math.radians(self.latitude),
-            longitude_rad=math.radians(self.longitude),
-            elevation_m=self.elevation,
-            xarm_azimuth_rad=math.radians(self.xarm_azimuth),
-            yarm_azimuth_rad=math.radians(self.yarm_azimuth),
-            xarm_tilt_rad=math.radians(self.xarm_tilt),
-            yarm_tilt_rad=math.radians(self.yarm_tilt),
-        )
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_legacy_fields(cls, data: Any) -> Any:
+        if isinstance(data, Mapping) and (legacy := data.keys() & _LEGACY_GEOMETRY):
+            raise ValueError(
+                f"legacy geometry fields {sorted(legacy)} are only supported in "
+                "saved JSON registries; use gwmock _rad/_m fields for overrides"
+            )
+        return data
 
 
 class DetectorConfig(BaseModel):
@@ -93,6 +100,46 @@ class DetectorRegistry(BaseModel):
     detectors: dict[str, DetectorConfig]
     networks: dict[str, tuple[str, ...]] = Field(default_factory=dict)
 
+    @classmethod
+    def from_saved(cls, data: Any) -> DetectorRegistry:
+        """Restore saved settings, translating pre-gwmock degree geometry.
+
+        This migration is exclusive to saved registries, never TOML overrides.
+        Copy each translated record so the caller's saved mapping stays intact.
+        """
+        if not isinstance(data, Mapping):
+            return cls.model_validate(data)
+        restored = dict(data)
+        definitions = restored.get("detectors")
+        if isinstance(definitions, Mapping):
+            definitions = dict(definitions)
+            for name, record in definitions.items():
+                if not isinstance(record, Mapping):
+                    continue
+                geometry = record.get("geometry")
+                if not isinstance(geometry, Mapping):
+                    continue
+                if not geometry.keys() & _LEGACY_GEOMETRY:
+                    continue
+                if any(key.endswith(("_rad", "_m")) for key in geometry):
+                    raise ValueError(
+                        f"mixed legacy and gwmock geometry fields for {name!r}"
+                    )
+                translated = {}
+                for key, value in geometry.items():
+                    if key == "elevation":
+                        translated["elevation_m"] = value
+                    elif key in _LEGACY_GEOMETRY:
+                        angle = math.radians(value)
+                        if "azimuth" in key:
+                            angle = (math.pi / 2.0 - angle) % (2.0 * math.pi)
+                        translated[f"{key}_rad"] = angle
+                    else:
+                        translated[key] = value
+                definitions[name] = dict(record, geometry=translated)
+            restored["detectors"] = definitions
+        return cls.model_validate(restored)
+
     @model_validator(mode="after")
     def _validate_networks(self) -> DetectorRegistry:
         for name, detector in self.detectors.items():
@@ -120,9 +167,14 @@ class DetectorRegistry(BaseModel):
         self, names: Sequence[str]
     ) -> tuple[tuple[CustomDetector, ...], dict[str, Sensitivity]]:
         """Build selected geometry and sensitivities in the supplied order."""
+        from gwmock_signal.detector import CustomDetector
+
         self.validate_members(names)
         return (
-            tuple(self.detectors[name].geometry.build(name) for name in names),
+            tuple(
+                CustomDetector(name=name, **self.detectors[name].geometry.model_dump())
+                for name in names
+            ),
             {name: self.detectors[name].build_sensitivity() for name in names},
         )
 

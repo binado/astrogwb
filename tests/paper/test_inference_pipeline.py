@@ -142,8 +142,7 @@ def _config(**overrides: Any) -> RunConfig:
         "num_chains": 1,
         "progress_bar": False,
     }
-    raw.update(overrides)
-    return build_run_config(raw)
+    return build_run_config(raw, **overrides)
 
 
 class AnalysisBounds(TypedDict):
@@ -843,7 +842,10 @@ def test_prepared_inputs_honor_run_geometry_and_psd_overrides(
     default = _config()
     changed = _config(
         detectors={
-            "S1": {"psd_reference": str(psd_path), "geometry": {"xarm_azimuth": 72.0}}
+            "S1": {
+                "psd_reference": str(psd_path),
+                "geometry": {"xarm_azimuth_rad": 0.3},
+            }
         }
     )
     baseline = _prepare(injection_catalog, proposal_catalog, default)

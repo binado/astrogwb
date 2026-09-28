@@ -136,15 +136,19 @@ psd_reference = "data/noise/e1_psd.txt"
 label = "ET channel 1"
 
 [detectors.E1.geometry]
-xarm_azimuth = 72.0
+xarm_azimuth_rad = 0.3141592653589793  # Original: 72.0 deg counter-clockwise from East
 ```
 
-Geometry uses degrees for `latitude`, `longitude`, arm azimuths and tilts,
-and metres for `elevation`. Known detectors accept partial geometry or PSD-only
-overrides. New names require `latitude`, `longitude`, `elevation`,
-`xarm_azimuth`, `yarm_azimuth`, and `psd_reference`; both arm tilts default to
-zero. Unknown fields, incomplete definitions, and undefined network members
-fail validation. Labels default to detector names and affect presentation only.
+Geometry uses gwmock's `CustomDetector` fields: `latitude_rad`,
+`longitude_rad`, `xarm_azimuth_rad`, `yarm_azimuth_rad`, `xarm_tilt_rad`,
+`yarm_tilt_rad`, and `elevation_m`. Angles are radians; azimuths run clockwise
+from North, and tilts measure altitude above the local horizon. Elevation is
+in metres. Known detectors accept partial geometry or PSD-only overrides. New
+names require latitude, longitude, elevation, both azimuths, and `psd_reference`;
+both tilts default to zero. Legacy degree fields are rejected in new overrides.
+Old saved JSON registries are translated on loading and saved with canonical
+fields afterward; mixed legacy and canonical geometry is rejected. Unknown
+fields, incomplete definitions, and undefined network members fail validation. Labels default to detector names and affect presentation only.
 The optional `duty_factor` is reference metadata; it does not rescale a PSD or
 the observation time. Sensitivities for gwmock presets with upstream geometry
 live separately in the packaged `presets.toml` and remain available through

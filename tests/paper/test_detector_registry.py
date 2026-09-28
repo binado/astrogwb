@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 import subprocess
 import sys
 from pathlib import Path
@@ -42,18 +41,18 @@ def test_partial_geometry_and_psd_overrides_preserve_other_fields() -> None:
     registry = detector_registry(
         detectors={
             "E1": {
-                "geometry": {"xarm_azimuth": 72.0},
+                "geometry": {"xarm_azimuth_rad": 0.3},
                 "psd_reference": "ET_D_psd",
                 "label": "ET channel 1",
             }
         }
     )
     first = registry.detectors["E1"]
-    assert first.geometry.latitude == default.detectors["E1"].geometry.latitude
-    assert first.geometry.xarm_azimuth == 72.0
+    assert first.geometry.latitude_rad == default.detectors["E1"].geometry.latitude_rad
+    assert first.geometry.xarm_azimuth_rad == 0.3
     assert first.label == "ET channel 1"
     geometry, sensitivities = registry.build_network("ET-triangular")
-    assert geometry[0].xarm_azimuth_rad == math.radians(72.0)
+    assert geometry[0].xarm_azimuth_rad == 0.3
     assert sensitivities["E1"].psd_reference == "ET_D_psd"
 
 
@@ -62,11 +61,11 @@ def test_new_detector_requires_complete_definition_and_defaults_tilts() -> None:
         detectors={
             "new": {
                 "geometry": {
-                    "latitude": 10.0,
-                    "longitude": 20.0,
-                    "elevation": 30.0,
-                    "xarm_azimuth": 40.0,
-                    "yarm_azimuth": 130.0,
+                    "latitude_rad": 0.1,
+                    "longitude_rad": 0.2,
+                    "elevation_m": 30.0,
+                    "xarm_azimuth_rad": 0.4,
+                    "yarm_azimuth_rad": 1.3,
                 },
                 "psd_reference": "ET_D_psd",
             }
@@ -83,10 +82,10 @@ def test_new_detector_requires_complete_definition_and_defaults_tilts() -> None:
     "overrides",
     [
         {"new": {"psd_reference": "ET_D_psd"}},
-        {"new": {"geometry": {"latitude": 10.0}}},
+        {"new": {"geometry": {"latitude_rad": 0.1}}},
         {"E1": {"psd_referenc": "ET_D_psd"}},
         {"E1": {"geometry": {"azimuth": 10.0}}},
-        {"E1": {"geometry": {"latitude": float("nan")}}},
+        {"E1": {"geometry": {"latitude_rad": float("nan")}}},
         {"E1": {"psd_reference": ""}},
         {"E1": {"psd_reference": "does-not-exist.txt"}},
     ],
@@ -116,7 +115,7 @@ def test_save_reload_uses_resolved_settings_without_packaged_merge(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = build_run_config(
-        example_raw(), detectors={"S1": {"geometry": {"elevation": 999.0}}}
+        example_raw(), detectors={"S1": {"geometry": {"elevation_m": 999.0}}}
     )
     path = tmp_path / "run.json"
     config.save(path)
@@ -128,7 +127,7 @@ def test_save_reload_uses_resolved_settings_without_packaged_merge(
     )
     reloaded = build_run_config(saved)
     assert reloaded.model_dump(mode="json") == config.model_dump(mode="json")
-    assert reloaded.detector_registry.detectors["S1"].geometry.elevation == 999.0
+    assert reloaded.detector_registry.detectors["S1"].geometry.elevation_m == 999.0
 
 
 def test_legacy_saved_config_gets_packaged_registry() -> None:
@@ -151,7 +150,7 @@ def test_detector_overrides_do_not_change_catalog_keys() -> None:
     after = build_run_config(
         raw,
         detectors={
-            "S1": {"geometry": {"xarm_azimuth": 72.0}, "psd_reference": "ET_D_psd"}
+            "S1": {"geometry": {"xarm_azimuth_rad": 0.3}, "psd_reference": "ET_D_psd"}
         },
     )
     for role in ("injection", "proposal"):
@@ -163,22 +162,22 @@ def test_layer_precedence_and_figure_registries(tmp_path: Path) -> None:
     shared = tmp_path / "config/detectors.toml"
     shared.write_text(
         shared.read_text()
-        + "\n[detectors.E1.geometry]\nxarm_azimuth = 71.0\nelevation = 80.0\n"
+        + "\n[detectors.E1.geometry]\nxarm_azimuth_rad = 0.31\nelevation_m = 80.0\n"
     )
     directory = tmp_path / "config/runs/demo"
     directory.mkdir(parents=True)
     (directory / "_base.toml").write_text(
-        '[analysis]\nnetwork = "custom"\n[detectors.E1.geometry]\nxarm_azimuth = 72.0\n'
+        '[analysis]\nnetwork = "custom"\n[detectors.E1.geometry]\nxarm_azimuth_rad = 0.3\n'
     )
     (directory / "one.toml").write_text(
-        "[detectors.E1.geometry]\nxarm_azimuth = 73.0\n"
+        "[detectors.E1.geometry]\nxarm_azimuth_rad = 0.32\n"
     )
     (directory / "two.toml").write_text('[detectors.E1]\npsd_reference = "ET_D_psd"\n')
     first = build_run_config(assemble_run("demo", "one", root=tmp_path))
     second = build_run_config(assemble_run("demo", "two", root=tmp_path))
-    assert first.detector_registry.detectors["E1"].geometry.xarm_azimuth == 73.0
-    assert second.detector_registry.detectors["E1"].geometry.xarm_azimuth == 72.0
-    assert first.detector_registry.detectors["E1"].geometry.elevation == 80.0
+    assert first.detector_registry.detectors["E1"].geometry.xarm_azimuth_rad == 0.32
+    assert second.detector_registry.detectors["E1"].geometry.xarm_azimuth_rad == 0.3
+    assert first.detector_registry.detectors["E1"].geometry.elevation_m == 80.0
     resolved = resolve_networks(
         [("demo", "one"), ("demo", "two")],
         [("one", "One"), ("two", "Two")],
@@ -269,3 +268,114 @@ def test_snr_uses_each_networks_own_detector_settings(
         maximum_frequency=100.0,
     )
     assert result.iloc[0].snr == pytest.approx(2.0 * result.iloc[1].snr)
+
+
+@pytest.mark.parametrize(
+    "network",
+    [
+        "ET-triangular",
+        "ET-triangular-CE-Hanford",
+        "ET-2L-aligned",
+        "ET-2L-aligned-CE-Hanford",
+        "ET-2L-misaligned",
+        "ET-2L-misaligned-CE-Hanford",
+    ],
+)
+def test_network_outputs_preserved_from_before_gwmock_migration(network: str) -> None:
+    from astrogwb.detector import effective_psd, pairwise_overlap_reduction_function
+
+    # Captured from the unmodified degree-table implementation on the same grid.
+    path = Path(__file__).parent / "fixtures/detector_networks_before_gwmock.npz"
+    geometry, sensitivities = detector_registry().build_network(network)
+    with np.load(path) as reference:
+        frequencies = reference["frequencies"]
+        actual = {
+            "orf": pairwise_overlap_reduction_function(frequencies, geometry),
+            "psd": effective_psd(frequencies, geometry, sensitivities),
+        }
+        for kind, result in actual.items():
+            expected = reference[f"{network}_{kind}"]
+            np.testing.assert_array_equal(np.isfinite(result), np.isfinite(expected))
+            np.testing.assert_allclose(
+                result, expected, rtol=1e-10, atol=1e-10 if kind == "orf" else 0.0
+            )
+
+
+def test_legacy_saved_registry_translates_then_saves_canonical_fields(
+    tmp_path: Path,
+) -> None:
+    config = build_run_config(example_raw())
+    saved = config.model_dump(mode="json")
+    path = Path(__file__).parent / "fixtures/legacy_detector_registry.json"
+    legacy = json.loads(path.read_text())
+    # Preserve an old custom setting instead of merging current defaults over it.
+    legacy["detectors"]["S1"]["geometry"]["xarm_azimuth"] = -270.0
+    saved["detector_registry"] = legacy
+    before = json.dumps(saved)
+    restored = build_run_config(saved)
+    assert json.dumps(saved) == before
+    geometry = restored.detector_registry.detectors["S1"].geometry
+    assert geometry.xarm_azimuth_rad == 0.0
+    for name, detector in config.detector_registry.detectors.items():
+        if name != "S1":
+            assert restored.detector_registry.detectors[name] == detector
+    for role in ("injection", "proposal"):
+        assert (
+            restored.catalog_request(role).key() == config.catalog_request(role).key()
+        )
+    output = tmp_path / "canonical.json"
+    restored.save(output)
+    canonical = json.loads(output.read_text())
+    assert set(canonical["detector_registry"]["detectors"]["S1"]["geometry"]) == {
+        "latitude_rad",
+        "longitude_rad",
+        "elevation_m",
+        "xarm_azimuth_rad",
+        "yarm_azimuth_rad",
+        "xarm_tilt_rad",
+        "yarm_tilt_rad",
+    }
+    assert build_run_config(canonical).model_dump(mode="json") == restored.model_dump(
+        mode="json"
+    )
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    [{"xarm_azimuth": 72.0}, {"xarm_azimuth": 72.0, "yarm_azimuth_rad": 0.4}],
+)
+def test_new_toml_overrides_reject_legacy_or_mixed_keys(
+    tmp_path: Path, geometry: dict
+) -> None:
+    from astrogwb.paper.config.runs import merge_config_layers
+
+    path = tmp_path / "detectors.toml"
+    fields = "\n".join(f"{key} = {value}" for key, value in geometry.items())
+    path.write_text(f"[detectors.E1.geometry]\n{fields}\n")
+    merged = merge_config_layers([path])
+    from astrogwb.paper.config.detectors import DetectorRegistry
+
+    with pytest.raises(ValidationError, match="legacy geometry fields.*_rad/_m"):
+        DetectorRegistry.model_validate(merged)
+
+
+def test_saved_registry_rejects_mixed_geometry_fields() -> None:
+    saved = build_run_config(example_raw()).model_dump(mode="json")
+    saved["detector_registry"]["detectors"]["E1"]["geometry"]["latitude"] = 43.63
+    with pytest.raises(ValidationError, match="mixed legacy and gwmock"):
+        build_run_config(saved)
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    [
+        {"latitude_rad": 2.0},
+        {"longitude_rad": 4.0},
+        {"elevation_m": 1e6},
+        {"xarm_azimuth_rad": float("inf")},
+        {"xarm_tilt_rad": float("nan")},
+    ],
+)
+def test_geometry_validation_matches_native_bounds(geometry: dict) -> None:
+    with pytest.raises(ValidationError):
+        detector_registry(detectors={"E1": {"geometry": geometry}})
