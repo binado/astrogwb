@@ -5,13 +5,12 @@ Filenames are the mapping. ``config/runs/<experiment>/<run>.toml`` samples into
 the two. That convention is what let the previous ``inputs/experiments.yaml``
 registry -- and the ten ``Snakefile`` helpers that read it -- go away.
 
-A run config is three layers merged in order:
+A run config is four layers merged in order:
 
-0. ``config/defaults.toml`` -- the shared values: every top-level block of a
-   run config, ``[analysis]``, ``[fiducials]``, ``[networks]``, ``[priors]``,
-   ``[sampler]``, ``[waveform]`` and ``[population]``.
-1. ``config/runs/<experiment>/_base.toml`` -- the experiment override.
-2. ``config/runs/<experiment>/<run>.toml`` -- the run override.
+0. ``config/defaults.toml`` -- shared scientific and sampling defaults.
+1. ``config/detectors.toml`` -- shared networks and detector overrides.
+2. ``config/runs/<experiment>/_base.toml`` -- the experiment override.
+3. ``config/runs/<experiment>/<run>.toml`` -- the run override.
 
 Every layer is TOML, so each one can say in a comment why it sets what it
 sets. :func:`merge_config_layers` folds them with ``knf``, the
@@ -61,13 +60,11 @@ logger = logging.getLogger(__name__)
 #: looking for a checkout: the caller's cwd is the answer.
 CONFIG_DIR = Path("config")
 
-#: The shared run layer: every top-level block of a run config, with the
-#: defaults every run inherits. ``[fiducials]``, ``[priors]``, ``[networks]``,
-#: ``[waveform]`` and ``[population]`` are also read directly by the notebooks
-#: and figure scripts through `astrogwb.paper.config`; the top-level
-#: ``[population]`` is the *catalog* default, not the analysis target, which
-#: is ``analysis.population``.
+#: Shared scientific defaults, also consumed directly by notebooks.
+#: The top-level population is the catalog default; analysis.population is
+#: the analysis target.
 DEFAULTS_PATH = CONFIG_DIR / "defaults.toml"
+DETECTORS_PATH = CONFIG_DIR / "detectors.toml"
 
 #: Presentation settings, read by `astrogwb.paper.plotting`. Deliberately *not*
 #: a run-config layer: nothing a run samples depends on it.
@@ -145,18 +142,16 @@ def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
 
 
 def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
-    """Every shared layer a run inherits, in merge order: :data:`DEFAULTS_PATH`.
+    """The shared scientific and detector layers, in merge order.
 
-    One file, returned as a tuple so callers splice it into a layer list the
-    same way whatever the shared layers become. Named explicitly rather than
-    globbed: ``config/plotting.toml`` sits in the same directory without being
-    a run layer, and ``RunConfig`` is ``extra="forbid"``, so a glob would sweep
-    it in loudly.
+    Named explicitly: config/plotting.toml is presentation and is not a run
+    layer. Paths are relative to the caller's working directory.
     """
-    path = (root or Path()) / DEFAULTS_PATH
-    if not path.is_file():
-        raise ValueError(f"missing shared config layer: {path}")
-    return (path,)
+    paths = tuple((root or Path()) / path for path in (DEFAULTS_PATH, DETECTORS_PATH))
+    for path in paths:
+        if not path.is_file():
+            raise ValueError(f"missing shared config layer: {path}")
+    return paths
 
 
 def run_config_paths(
@@ -187,7 +182,7 @@ def load_base(root: Path | None = None) -> dict[str, Any]:
 def assemble_run(
     experiment: str, run: str, *, root: Path | None = None
 ) -> dict[str, Any]:
-    """Merge one run's three layers into a raw config, addressing it by name.
+    """Merge one run's four layers into a raw config, addressing it by name.
 
     The convenience wrapper for callers that hold ``(experiment, run)`` rather
     than a list of paths: the notebooks, the validation gate, and the figure
@@ -318,14 +313,17 @@ def resolve_networks(
                 f"its merged [networks] table does not declare; known networks: "
                 f"{sorted(table)}"
             )
-        resolved.append(Network(name, label, tuple(detectors)))
+        from astrogwb.paper.config.detectors import DetectorRegistry
+
+        registry = DetectorRegistry.from_overrides(merged.get("detectors"), table)
+        resolved.append(Network(name, label, tuple(detectors), registry))
     return tuple(resolved)
 
 
 def add_network_run_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the repeated ``--network-run`` flag the network figures take.
 
-    Three layers times eight runs of ``--config`` is unworkable, so the network
+    Four layers times six networks of ``--config`` is unworkable, so the network
     figures are handed run *names* and re-derive the layer paths themselves.
     The workflow still declares those TOMLs as ``input:``, so the edges are
     real.
@@ -367,7 +365,7 @@ def add_config_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="PATH",
         help=(
             "One run-config layer file, in merge order; repeat once per "
-            "layer (config/defaults.toml, then the experiment _base.toml, "
+            "layer (config/defaults.toml, config/detectors.toml, then the experiment _base.toml, "
             "then the run)."
         ),
     )

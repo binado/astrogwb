@@ -8,6 +8,7 @@ are the same list the workflow declares as the rule's `input:`:
 
 ```bash
 LAYERS="config/defaults.toml \
+  config/detectors.toml \
   config/runs/cosmological-parameters/_base.toml \
   config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml"
 
@@ -51,10 +52,11 @@ uv run --extra paper python scripts/profile_model.py --help
 ## The configuration tree
 
 [`config/`](../config/) is the sole MCMC configuration source. A run config is
-three layers merged in order:
+four layers merged in order:
 
 ```text
-config/defaults.toml                                       the shared values
+config/defaults.toml                                       shared scientific values
+config/detectors.toml                                      shared detector settings
 config/runs/<experiment>/_base.toml                        the experiment override
 config/runs/<experiment>/<run>.toml                        the run override
   -> outputs/chains/<experiment>/<run>.nc                  the chain
@@ -68,8 +70,9 @@ complicates the DAG for no gain. What each committed run is *for* is written
 as a comment at the top of its own file; [`config/runs/README.md`](../config/runs/README.md)
 indexes the experiments and the catalogs they share.
 
-`config/defaults.toml` declares every top-level block of a run config, each
-commented with what it owns. Several are read by more than the workflow: the
+`config/defaults.toml` declares the scientific defaults; `config/detectors.toml`
+declares `[networks]` and an empty `[detectors]` table for optional overrides.
+Each block is commented with what it owns. Several are read by more than the workflow: the
 notebooks and figure scripts consume `fiducials`, `priors` and `networks`
 through `astrogwb.paper.config`.
 
@@ -77,7 +80,8 @@ through `astrogwb.paper.config`.
 | --- | --- |
 | `[analysis]` | observing time, frequency band, target population, and the two catalogs |
 | `[fiducials]` | the fiducial value of every parameter |
-| `[networks]` | each detector network, by name |
+| `[networks]` | each detector network, by name (in `detectors.toml`) |
+| `[detectors]` | optional geometry, PSD, and label overrides (in `detectors.toml`) |
 | `[priors]` | the prior on every parameter |
 | `[sampler]` | the sampling RNG seed and NUTS defaults |
 | `[waveform]` | the waveform settings every catalog of a run inherits |
@@ -115,8 +119,43 @@ network = "scratch"
 ```
 
 The chain's own config records both the resolved `detectors` and the `network`
-name they came from, so an archived chain stays checkable against a later edit
-to `[networks]`.
+name they came from. It also records the complete `detector_registry`, including
+geometry, PSD references, labels, and network membership. Reloading that JSON
+uses the resolved settings without merging newer packaged defaults. Older
+saved configs without a registry receive the packaged defaults.
+
+Detector definitions default to the packaged `geometry.toml` and
+`sensitivity.toml`. A shared, experiment, or run layer can override individual
+fields; later layers win:
+
+```toml
+[detectors.E1]
+psd_reference = "data/noise/e1_psd.txt"
+label = "ET channel 1"
+
+[detectors.E1.geometry]
+xarm_azimuth = 72.0
+```
+
+Geometry uses degrees for `latitude`, `longitude`, arm azimuths and tilts,
+and metres for `elevation`. Known detectors accept partial geometry or PSD-only
+overrides. New names require `latitude`, `longitude`, `elevation`,
+`xarm_azimuth`, `yarm_azimuth`, and `psd_reference`; both arm tilts default to
+zero. Unknown fields, incomplete definitions, and undefined network members
+fail validation. Labels default to detector names and affect presentation only.
+
+`psd_reference` keeps its existing resolution order: gwmock-noise preset,
+packaged noise-curve file, local file, then HTTP(S) URL. Local paths stay relative
+to the caller's working directory, including paths in override files. The
+workflow declares selected external local PSDs as chain and figure inputs.
+Detector changes leave population draws, waveform catalogs, catalog keys, and
+the package version unchanged.
+
+Notebooks can call `detector_registry()` and then
+`geometry, sensitivities = registry.build_network(name)`. A run uses
+`config.detector_registry`; network-comparison figures carry each run's own
+registry. Config loading and validation leave the JAX backend uninitialized;
+runtime detector objects are built lazily.
 
 Nested mappings merge and lists replace, except that each overridden
 `[priors.<param>]` table replaces the inherited one *wholesale*. That is
@@ -137,8 +176,8 @@ The seven experiments and their 27 runs:
 
 `run_mcmc` declares a run's layers as its own inputs, so editing a run's file
 retriggers exactly that chain, editing an experiment's `_base.toml` retriggers
-that experiment, and editing `config/defaults.toml` retriggers all 27, which is
-correct.
+that experiment, and editing either shared layer (`config/defaults.toml` or
+`config/detectors.toml`) retriggers all 27.
 
 `snakemake validate` merges and catalog-checks every run without building
 anything. Run it before a campaign: it fails on the first invalid run *before

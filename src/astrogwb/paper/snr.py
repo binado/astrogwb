@@ -64,9 +64,15 @@ def compute_network_snrs(
     rows: list[dict[str, Any]] = []
     for network in networks:
         detectors = network.detectors
-        sensitivities = load_sensitivity_map(detectors)
+        if network.detector_registry is None:
+            geometry = list(detectors)
+            sensitivities = load_sensitivity_map(detectors)
+        else:
+            geometry, sensitivities = network.detector_registry.build_detectors(
+                detectors
+            )
         effective_noise = jnp.asarray(
-            effective_psd(frequencies, list(detectors), sensitivities)
+            effective_psd(frequencies, geometry, sensitivities)
         )
         snr = float(
             spectral_snr(

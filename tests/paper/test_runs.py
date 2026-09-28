@@ -95,9 +95,10 @@ def test_run_config_paths_are_the_layers_in_merge_order() -> None:
     """
     paths = run_config_paths("cosmological-parameters", "ET-triangular")
 
-    assert paths[:1] == base_config_paths()
+    assert paths[:2] == base_config_paths()
     assert [str(path) for path in paths] == [
         "config/defaults.toml",
+        "config/detectors.toml",
         f"config/runs/cosmological-parameters/{EXPERIMENT_BASE}",
         "config/runs/cosmological-parameters/ET-triangular.toml",
     ]
@@ -161,6 +162,7 @@ def test_base_files_merge_into_one_mapping() -> None:
         "analysis",
         "fiducials",
         "networks",
+        "detectors",
         "priors",
         "sampler",
         "waveform",

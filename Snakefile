@@ -4,7 +4,8 @@ from pathlib import Path
 
 from astrogwb.metadata import artifact_path
 from astrogwb.paper.config.catalogs import resolve_run_catalogs
-from astrogwb.paper.config.runs import discover_runs, run_config_paths
+from astrogwb.paper.config.detectors import DetectorRegistry
+from astrogwb.paper.config.runs import assemble_run, discover_runs, run_config_paths
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
 # No config module imports JAX or matplotlib at module scope, so DAG
@@ -107,10 +108,21 @@ def network_config_inputs(experiment):
     Taken from `run_config_paths`, whose last layer is the run's own file, so
     the path convention lives in one place.
     """
-    return [
-        str(run_config_paths(experiment, run, root=Path("."))[-1])
+    return sorted({
+        path
         for run in DETECTOR_NETWORK_RUNS
-    ]
+        for path in (*config_layers(experiment, run), *detector_inputs(experiment, run))
+    })
+
+
+def detector_inputs(experiment, run):
+    """External PSD files used by the selected network, relative to the cwd."""
+    merged = assemble_run(experiment, run)
+    registry = DetectorRegistry.from_overrides(
+        merged.get("detectors"), merged.get("networks")
+    )
+    members = registry.networks[merged["analysis"]["network"]]
+    return [str(path) for path in registry.local_psd_inputs(members)]
 
 
 def run_catalog_input(role):
@@ -186,6 +198,8 @@ rule validate:
     """Pre-flight: merge, validate, and catalog-check every run, building nothing."""
     input:
         RUN_CONFIG_FILES,
+        sorted({path for experiment, names in runs.items() for run in names
+                for path in detector_inputs(experiment, run)}),
     output:
         "outputs/validated-runs.txt",
     shell:
@@ -197,11 +211,12 @@ rule run_mcmc:
     """Sample one run into outputs/chains/<experiment>/<run>.nc."""
     input:
         script="scripts/run_mcmc.py",
-        # The run's three layers: edit a leaf -> one chain; edit an
+        # The run's four layers: edit a leaf -> one chain; edit an
         # experiment's _base.toml -> that experiment; edit
-        # config/defaults.toml -> all 27. The catalogs are named by key, so an
+        # either shared config layer -> all 27. The catalogs are named by key, so an
         # edit to a draw reaches the chain through a new catalog path too.
         config=lambda w: config_layers(w.experiment, w.run),
+        psds=lambda w: detector_inputs(w.experiment, w.run),
         injection=run_catalog_input("injection"),
         proposal=run_catalog_input("proposal"),
     output:
@@ -350,6 +365,7 @@ rule importance_weights_grid:
     input:
         catalog=DEFAULT_PROPOSAL_CATALOG,
         config=config_layers(*FIGURE_RUN),
+        psds=detector_inputs(*FIGURE_RUN),
     output:
         h0_omega_m_pdf=(
             "outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf"

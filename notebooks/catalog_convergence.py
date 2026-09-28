@@ -67,7 +67,7 @@ from matplotlib.projections import register_projection
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
-from astrogwb.detector import effective_psd, gaussian_bin_scale, load_sensitivity_map
+from astrogwb.detector import effective_psd, gaussian_bin_scale
 from astrogwb.distributions.rates import madau_dickinson_rate
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import (
@@ -79,7 +79,12 @@ from astrogwb.gwb import (
 )
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.metadata import WaveformMetadata
-from astrogwb.paper.config import fiducials, population_metadata, population_model
+from astrogwb.paper.config import (
+    detector_registry,
+    fiducials,
+    population_metadata,
+    population_model,
+)
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.utils.sampling import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
@@ -170,7 +175,7 @@ CATALOG_SIZES: tuple[int, ...] = (
 NUM_REALIZATIONS = 4 if SMOKE else 16
 RNG_SEED = 20260901
 
-DETECTORS: tuple[str, ...] = ("E1", "E2", "E3")
+NETWORK = "ET-triangular"
 
 #: Observation time the likelihood scan is evaluated at, in years.
 OBSERVATION_TIME = 1.0
@@ -868,7 +873,7 @@ pd.DataFrame(
 # a clean, plausible, entirely spurious "convergence".
 
 # %%
-sensitivities = load_sensitivity_map(DETECTORS)
+DETECTORS, sensitivities = detector_registry().build_network(NETWORK)
 
 
 def analysis_at(factor: int) -> dict[str, Any]:

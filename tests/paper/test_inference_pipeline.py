@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import jax
 import jax.numpy as jnp
@@ -146,7 +146,14 @@ def _config(**overrides: Any) -> RunConfig:
     return build_run_config(raw)
 
 
-def _analysis_bounds(config: RunConfig) -> dict[str, float]:
+class AnalysisBounds(TypedDict):
+    minimum_redshift: float
+    maximum_redshift: float
+    minimum_frequency: float
+    maximum_frequency: float
+
+
+def _analysis_bounds(config: RunConfig) -> AnalysisBounds:
     population_kwargs = config.analysis.population.model_kwargs
     return {
         "minimum_redshift": float(population_kwargs["minimum_redshift"]),
@@ -161,12 +168,16 @@ def _prepare(
     proposal: PolarizationPowerCatalog,
     config: RunConfig,
 ):
+    detectors, sensitivities = config.detector_registry.build_detectors(
+        config.analysis.detectors
+    )
     return prepare_inference_inputs(
         injection,
         proposal,
         observation_time=config.analysis.observation_time,
         **_analysis_bounds(config),
-        detectors=config.analysis.detectors,
+        detectors=detectors,
+        sensitivities=sensitivities,
         target=target_population(config),
         density_sites=DEFAULT_DENSITY_SITES,
     )
@@ -818,3 +829,31 @@ def test_the_repository_ships_no_proposal_density_config() -> None:
         analysis.pop("catalog", None)
         outside_catalogs = {**layer, "analysis": analysis}
         assert "uniform_mixing_fraction" not in json.dumps(outside_catalogs), path
+
+
+def test_prepared_inputs_honor_run_geometry_and_psd_overrides(
+    injection_catalog: PolarizationPowerCatalog,
+    proposal_catalog: PolarizationPowerCatalog,
+    tmp_path: Path,
+) -> None:
+    from astrogwb.detector import effective_psd
+
+    psd_path = tmp_path / "psd.txt"
+    psd_path.write_text("5 1e-46\n10 1e-46\n50 1e-46\n100 1e-46\n")
+    default = _config()
+    changed = _config(
+        detectors={
+            "S1": {"psd_reference": str(psd_path), "geometry": {"xarm_azimuth": 72.0}}
+        }
+    )
+    baseline = _prepare(injection_catalog, proposal_catalog, default)
+    overridden = _prepare(injection_catalog, proposal_catalog, changed)
+    geometry, sensitivities = changed.detector_registry.build_detectors(
+        changed.analysis.detectors
+    )
+    expected = effective_psd(FREQUENCIES, geometry, sensitivities)
+    np.testing.assert_array_equal(overridden.effective_psd, expected)
+    assert not np.array_equal(baseline.effective_psd, overridden.effective_psd)
+    np.testing.assert_array_equal(
+        baseline.observation.spectral_density, overridden.observation.spectral_density
+    )

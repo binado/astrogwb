@@ -33,6 +33,7 @@ from pydantic import (
 )
 
 from astrogwb.metadata import CatalogMetadata, PriorSpec
+from astrogwb.paper.config.detectors import DetectorRegistry
 from astrogwb.paper.config.runs import resolve_catalog_blocks
 from astrogwb.paper.utils import deep_merge
 
@@ -224,14 +225,13 @@ class AnalysisConfig(BaseModel):
     model_config = _STRICT
 
     #: Resolved by `RunConfig._resolve_network` from the [networks] table that
-    #: `config/defaults.toml` contributes to every run's merge. Required, and
+    #: `config/detectors.toml` contributes to every run's merge. Required, and
     #: recorded by `RunConfig.save`: the chain's own config must say which
     #: detectors it was sampled with, not just which name they were reached by.
     detectors: tuple[str, ...]
     #: The name that resolved to `detectors`, kept alongside it so a saved
     #: config records the intent as well as the result. Optional at the model
-    #: level so a saved config -- which carries `detectors` and no [networks]
-    #: table -- re-validates. That every *committed* run names one is a repo
+    #: level so older saved configs with only `detectors` re-validate. That every *committed* run names one is a repo
     #: test, not a model constraint.
     network: str | None = None
     observation_time: float = 1.0
@@ -359,37 +359,35 @@ class RunConfig(BaseModel):
     #: ``analysis.population``.
     population: CatalogPopulation
     output: OutputConfig = Field(default_factory=OutputConfig)
+    detector_registry: DetectorRegistry
 
     @model_validator(mode="before")
     @classmethod
     def _resolve_network(cls, data: Any) -> Any:
-        """Turn ``analysis.network`` into ``analysis.detectors``, dropping the table.
+        """Resolve overrides and membership, or restore a complete saved registry.
 
-        The shared ``[networks]`` table is merged like any other block, so the
-        lookup table arrives in the same mapping as the run that names one -- resolution is a pure
-        function of the merged config and needs no file I/O, which is what
-        keeps this module stdlib+pydantic.
-
-        The table is *input to validation*, never a field: as a field it would
-        either land in every ``save()`` next to every chain, or need
-        ``exclude=True`` and break the save/reload round-trip. A validator
-        rather than a step in :func:`build_run_config` because
-        ``RunConfig.model_validate`` is public and callable directly, and
-        because the resulting ``ValidationError`` is what
-        ``scripts/validate_configs.py`` and the test suite already catch.
-
-        A config that already carries ``detectors`` is the ``save()`` output
-        being re-validated: ``save`` records the resolved list *and* the name it
-        came from, so both are present, and no ``[networks]`` table is. That
-        round-trip is why the two are cross-checked rather than rejected
-        outright -- when a table *is* present, as it always is in the config
-        tree, a hand-written list that disagrees with the named network is the
-        real error worth catching.
+        Raw layers carry `[detectors]` overrides and `[networks]` membership.
+        Saved configs carry their resolved `detector_registry` instead, so
+        they never reinterpret geometry against newer packaged defaults. Old
+        saved configs with only `analysis.detectors` get packaged definitions.
         """
         if not isinstance(data, Mapping):
             return data
         raw = dict(data)
         table = raw.pop("networks", None)
+        overrides = raw.pop("detectors", None)
+        saved_registry = raw.get("detector_registry")
+        if saved_registry is not None:
+            if table is not None or overrides is not None:
+                raise ValueError(
+                    "resolved detector_registry cannot accompany detector overrides"
+                )
+            registry = DetectorRegistry.model_validate(saved_registry)
+        else:
+            registry = DetectorRegistry.from_overrides(overrides, table)
+        raw["detector_registry"] = registry
+        if saved_registry is not None:
+            table = registry.networks
         analysis = raw.get("analysis")
         if not isinstance(analysis, Mapping):
             return raw  # let field validation report the real problem
@@ -398,10 +396,15 @@ class RunConfig(BaseModel):
         if name is None:
             return raw
         declared = analysis.get("detectors")
+        if table is None and saved_registry is None and declared is not None:
+            # Legacy records carry membership only in analysis.detectors.
+            registry = DetectorRegistry(
+                detectors=registry.detectors, networks={name: tuple(declared)}
+            )
+            raw["detector_registry"] = registry
+            table = registry.networks
 
         if not isinstance(table, Mapping) or name not in table:
-            if declared is not None:
-                return raw  # a saved config, re-validating without the table
             known = sorted(table) if isinstance(table, Mapping) else []
             raise ValueError(
                 f"analysis.network {name!r} is not declared in [networks]; "
@@ -425,6 +428,8 @@ class RunConfig(BaseModel):
             raise ValueError("config must define a non-empty [fiducials] table")
         if not self.priors:
             raise ValueError("config must define at least one [priors.<param>] table")
+
+        self.detector_registry.validate_members(self.analysis.detectors)
 
         priors = dict(self.priors)
         amplitude_parameter = self.analysis.amplitude_parameter

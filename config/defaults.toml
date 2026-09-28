@@ -1,8 +1,9 @@
 # The shared run layer: every top-level block of a run config, with the value
 # every run inherits unless its experiment's _base.toml or its own file
-# overrides it. A run is three layers merged in order:
+# overrides it. A run is four layers merged in order:
 #
-#   config/defaults.toml -> config/runs/<experiment>/_base.toml -> <run>.toml
+#   config/defaults.toml -> config/detectors.toml
+#   -> config/runs/<experiment>/_base.toml -> <run>.toml
 #
 # Tables merge key by key; arrays and values replace. The one exception is
 # [priors]: an overridden [priors.<param>] replaces the inherited one whole.
@@ -47,16 +48,6 @@ z_peak = 1.84
 local_merger_rate = 770.0
 minimum_mass = 1.0
 mass_width = 1.5
-
-# Each detector network, by name. A run names one as analysis.network; the
-# figures' legend order is astrogwb.paper.plotting.DETECTOR_NETWORKS.
-[networks]
-ET-triangular = ["E1", "E2", "E3"]
-ET-triangular-CE-Hanford = ["E1", "E2", "E3", "C1"]
-ET-2L-aligned = ["S1", "R1"]
-ET-2L-aligned-CE-Hanford = ["S1", "R1", "C1"]
-ET-2L-misaligned = ["S2", "R2"]
-ET-2L-misaligned-CE-Hanford = ["S2", "R2", "C1"]
 
 # The prior on every parameter, as a numpyro.distributions class and its
 # keyword arguments.

@@ -22,7 +22,6 @@ with app.setup(hide_code=True):
     from astrogwb.catalog import SpectrumGenerator, simulate
     from astrogwb.detector import (
         effective_psd,
-        load_sensitivity_map,
         log_frequency_noise_scale,
     )
     from astrogwb.frequency import frequency_mask as make_frequency_mask
@@ -34,8 +33,8 @@ with app.setup(hide_code=True):
     )
     from astrogwb.metadata import SpectraMetadata
     from astrogwb.paper.config import (
+        detector_registry,
         fiducials,
-        networks,
         population_metadata,
         waveform_metadata,
     )
@@ -120,9 +119,9 @@ def _():
     # load-bearing: detector_network_styles assigns a color by first appearance of
     # each base network name, so reordering recolors the curves and breaks the match
     # with the other network figures.
-    NETWORK_DETECTORS = networks(root=ROOT_DIR)
+    registry = detector_registry(root=ROOT_DIR)
     NETWORKS: tuple[Network, ...] = tuple(
-        Network(name, label, NETWORK_DETECTORS[name])
+        Network(name, label, registry.networks[name], registry)
         for name, label in DETECTOR_NETWORKS
     )
 
@@ -428,9 +427,11 @@ def _(
 
     effective_psds: dict[str, jax.Array] = {}
     for _network in NETWORKS:
-        _sensitivities = load_sensitivity_map(_network.detectors)
+        _geometry, _sensitivities = _network.detector_registry.build_detectors(
+            _network.detectors
+        )
         effective_psds[_network.name] = jnp.asarray(
-            effective_psd(frequencies, list(_network.detectors), _sensitivities)
+            effective_psd(frequencies, _geometry, _sensitivities)
         )
 
     _observation_time_sec = years_to_seconds(observation_time)

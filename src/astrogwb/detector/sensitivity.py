@@ -18,16 +18,14 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
-from gwmock_noise.gaussian.psd import (
-    is_remote_psd_reference,
-    resolve_bundled_psd_preset,
-)
 from gwmock_noise.spectral import interpolate_real_spectral_series, load_spectral_series
 from gwmock_signal.network import Network
 from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
 
-NOISE_CURVES_BASE_DIR = Path(__file__).parent / "noise_curves"
+from astrogwb.psd import NOISE_CURVES_BASE_DIR as NOISE_CURVES_BASE_DIR  # noqa: PLC0414
+from astrogwb.psd import resolve_psd_path
+
 SENSITIVITY_FILE = Path(__file__).parent / "sensitivity.toml"
 
 OutOfBand = Literal["inf", "zero"]
@@ -52,34 +50,6 @@ class Sensitivity:
         self, frequencies: ArrayLike, *, out_of_band: OutOfBand = "inf"
     ) -> NDArray[np.float64]:
         return evaluate_psd(self.psd_reference, frequencies, out_of_band=out_of_band)
-
-
-def resolve_psd_path(reference: str | Path) -> Path | str:
-    """Resolve a PSD reference to something gwmock-noise can load.
-
-    Resolution order: gwmock-noise bundled preset -> astrogwb
-    ``noise_curves/`` file -> absolute/relative path on disk -> HTTP(S) URL.
-    Bundled presets and on-disk files return a ``Path``; URLs return the
-    original ``str`` (gwmock-noise fetches them directly).
-    """
-    reference_str = str(reference)
-
-    bundled = resolve_bundled_psd_preset(reference_str)
-    if bundled is not None:
-        return bundled
-
-    packaged = NOISE_CURVES_BASE_DIR / reference_str
-    if packaged.exists():
-        return packaged
-
-    path = Path(reference)
-    if path.exists():
-        return path
-
-    if is_remote_psd_reference(reference_str):
-        return reference_str
-
-    raise FileNotFoundError(f"Could not resolve PSD reference: {reference!r}")
 
 
 def evaluate_psd(
