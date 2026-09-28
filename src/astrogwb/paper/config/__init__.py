@@ -50,7 +50,8 @@ anywhere, pass ``root=`` explicitly.
 Each accessor caches its parse and hands back a fresh copy, so a caller that
 mutates what it got does not poison the cache for everyone else -- overrides are
 merged *after* the cached parse, so they cannot either. A long-lived Jupyter
-session will not see an edit to the file until ``_load.cache_clear()``.
+session will not see an edit to the file until ``_load.cache_clear()``
+(or ``_load_registry.cache_clear()`` for detector definitions).
 """
 
 from __future__ import annotations
@@ -59,7 +60,11 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrogwb.paper.config.runs import DEFAULTS_PATH, DETECTORS_PATH
+from astrogwb.paper.config.runs import (
+    DEFAULTS_PATH,
+    DETECTORS_PATH,
+    merge_config_layers,
+)
 from astrogwb.paper.utils import load_mapping
 
 if TYPE_CHECKING:
@@ -171,6 +176,12 @@ def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ..
     return {name: tuple(detectors) for name, detectors in table.items()}
 
 
+@cache
+def _load_registry(path: Path) -> dict[str, Any]:
+    """Merge the shared registry file over packaged tables through pyknf."""
+    return merge_config_layers([path])
+
+
 def detector_registry(root: Path | None = None, **overrides: Any) -> DetectorRegistry:
     """Resolve shared detector settings lazily and return an independent registry.
 
@@ -180,15 +191,12 @@ def detector_registry(root: Path | None = None, **overrides: Any) -> DetectorReg
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.utils import deep_merge
 
-    shared = {
-        key: _load((root or Path()) / DETECTORS_PATH, key)
-        for key in ("detectors", "networks")
-    }
+    shared = _load_registry((root or Path()) / DETECTORS_PATH)
     settings = deep_merge(shared, overrides)
     unknown = settings.keys() - {"detectors", "networks"}
     if unknown:
         raise ValueError(f"unknown detector registry fields: {sorted(unknown)}")
-    return DetectorRegistry.from_overrides(**settings)
+    return DetectorRegistry.model_validate(settings)
 
 
 def waveform_generator(

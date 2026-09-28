@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -12,6 +13,7 @@ from astrogwb.detector import (
     effective_psd,
     evaluate_psd,
     load_sensitivities_for_network,
+    load_sensitivity,
     load_sensitivity_map,
     overlap_reduction_function,
 )
@@ -110,3 +112,17 @@ def test_load_sensitivities_for_network_et_preset(frequencies: np.ndarray) -> No
 
     eff = effective_psd(frequencies, network.detector_names, sensitivities)
     assert np.any(np.isfinite(eff))
+
+
+@pytest.mark.parametrize("name", ["E0", "ET1_SARD", "ET2_2L_ALIGNED_EMR"])
+def test_upstream_preset_sensitivities_remain_available(name: str) -> None:
+    assert load_sensitivity(name).psd_reference == "ET_COBA_10km_psd.txt"
+
+
+@pytest.mark.parametrize("section", ["test", "detectors.test"])
+def test_external_sensitivity_tables_accept_flat_and_registry_layouts(
+    tmp_path: Path, section: str
+) -> None:
+    path = tmp_path / "sensitivity.toml"
+    path.write_text(f'[{section}]\npsd_reference = "ET_D_psd"\n')
+    assert load_sensitivity("test", path=path).psd_reference == "ET_D_psd"

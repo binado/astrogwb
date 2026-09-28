@@ -18,7 +18,7 @@ import pytest
 from repo import REPO_ROOT
 
 from astrogwb.paper.config.catalogs import resolve_run_catalogs
-from astrogwb.paper.config.runs import run_config_paths
+from astrogwb.paper.config.runs import DETECTOR_DEFAULT_PATHS, run_config_paths
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
 PAPER_ROOT = REPO_ROOT
@@ -566,6 +566,8 @@ def test_external_psds_are_inputs_of_selected_chains_and_figures(
         line for line in figure.splitlines() if line.strip().startswith("input:")
     )
     assert "config/detectors.toml" in figure_input
+    for path in DETECTOR_DEFAULT_PATHS:
+        assert str(path) in figure_input
     assert "data/triangular.txt" in figure_input
     assert "data/aligned.txt" in figure_input
     assert "data/unused.txt" not in result.stdout
@@ -575,5 +577,7 @@ def test_external_psds_are_inputs_of_selected_chains_and_figures(
         ("ET-2L-aligned-CE-Hanford", "aligned", "triangular"),
     ):
         job = next(job for job in chain_jobs if f"run={run}\n" in job)
+        for path in DETECTOR_DEFAULT_PATHS:
+            assert str(path) in job
         assert f"data/{used}.txt" in job
         assert f"data/{other}.txt" not in job

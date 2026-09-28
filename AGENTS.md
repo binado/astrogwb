@@ -81,8 +81,9 @@ shared `[fiducials]` re-keys every catalog. `[fiducials]`, `[priors]` and
 `[population]`, so a copy cannot drift from what the runs sample.
 `merge_config_layers` folds the layers with `knf` (pyknf): a deep merge, except
 that each `priors.<param>` table replaces the inherited one (`PRIOR_SHALLOW =
-"priors.*"`). `knf <layers> --shallow 'priors.*'` prints the same merge in the
-shell. A run names a detector network (`analysis.network`) rather than listing
+"priors.*"`). `knf src/astrogwb/detector/{geometry,sensitivity}.toml <layers> --shallow 'priors.*'`
+prints the same merge in the shell. The packaged detector files use the same
+`[detectors.<name>]` format and are merged before the four run layers. A run names a detector network (`analysis.network`) rather than listing
 detectors. `config/plotting.toml` is presentation -- LaTeX parameter labels and
 savefig settings, reached through `astrogwb.paper.plotting` -- and is
 deliberately *not* a run layer. No entrypoint is handed an assembled config.

@@ -27,6 +27,7 @@ from astrogwb.psd import NOISE_CURVES_BASE_DIR as NOISE_CURVES_BASE_DIR  # noqa:
 from astrogwb.psd import resolve_psd_path
 
 SENSITIVITY_FILE = Path(__file__).parent / "sensitivity.toml"
+PRESET_SENSITIVITY_FILE = Path(__file__).parent / "presets.toml"
 
 OutOfBand = Literal["inf", "zero"]
 
@@ -106,9 +107,16 @@ def load_sensitivities_for_network(
 
 
 def _load_sensitivity_table(path: str | Path | None) -> Mapping[str, dict]:
-    path = Path(path) if path is not None else SENSITIVITY_FILE
-    with open(path, "rb") as f:
-        return tomllib.load(f)
+    if path is not None:
+        with Path(path).open("rb") as handle:
+            data = tomllib.load(handle)
+        # Keep accepting the flat layout used by existing external tables.
+        return data.get("detectors", data)
+    table: dict[str, dict] = {}
+    for source in (SENSITIVITY_FILE, PRESET_SENSITIVITY_FILE):
+        with source.open("rb") as handle:
+            table.update(tomllib.load(handle)["detectors"])
+    return table
 
 
 def _sensitivity_from_dict(data: Mapping) -> Sensitivity:

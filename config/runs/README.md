@@ -6,7 +6,9 @@ One file per run, and the filename is the mapping:
 config/runs/<experiment>/<run>.toml  ->  outputs/chains/<experiment>/<run>.nc
 ```
 
-A run is four layers merged in order:
+The packaged detector geometry and sensitivity tables use the same
+`[detectors.<name>]` layout as the shared registry and are merged first with
+pyknf. A run is four layers merged over those defaults in order:
 
 ```text
 config/defaults.toml  ->  config/detectors.toml

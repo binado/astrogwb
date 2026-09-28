@@ -25,7 +25,10 @@ def _geometry_table() -> Mapping[str, CustomDetector]:
     """Load ``geometry.toml`` into name -> ``CustomDetector`` (radians)."""
     with open(GEOMETRY_FILE, "rb") as f:
         data = tomllib.load(f)
-    return {name: _custom_detector(name, row) for name, row in data.items()}
+    return {
+        name: _custom_detector(name, row["geometry"])
+        for name, row in data["detectors"].items()
+    }
 
 
 def _custom_detector(name: str, row: Mapping) -> CustomDetector:

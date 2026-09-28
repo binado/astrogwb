@@ -68,7 +68,9 @@ config/runs/<experiment>/<run>.toml             the run override
 
 A run is four TOML layers: `config/defaults.toml`, `config/detectors.toml`, its experiment's
 `_base.toml`, and its own file, merged by `knf` (which the `knf` CLI also
-exposes in the shell). Each file opens with a comment saying what it is for.
+exposes in the shell). The packaged `geometry.toml` and `sensitivity.toml`
+are merged first, using the same `[detectors.<name>]` tables as the shared
+registry file. Each file opens with a comment saying what it is for.
 Several shared blocks are read by more than the workflow: the notebooks and
 figure scripts consume the same bytes through
 `astrogwb.paper.config.fiducials()` / `priors()` / `networks()` / `detector_registry()`. Each accessor

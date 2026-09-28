@@ -8,14 +8,11 @@ not import JAX or initialize its backend.
 from __future__ import annotations
 
 import math
-import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from astrogwb.paper.utils import deep_merge
 
 if TYPE_CHECKING:
     from gwmock_signal.detector import CustomDetector
@@ -23,7 +20,6 @@ if TYPE_CHECKING:
     from astrogwb.detector import Sensitivity
 
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
-_PACKAGED = Path(__file__).parents[2] / "detector"
 
 
 class DetectorGeometry(BaseModel):
@@ -63,6 +59,8 @@ class DetectorConfig(BaseModel):
     geometry: DetectorGeometry
     psd_reference: Annotated[str, Field(min_length=1, pattern=r"\S")]
     label: Annotated[str, Field(min_length=1)] | None = None
+    #: Reference metadata; does not rescale the PSD or observation time.
+    duty_factor: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
 
     @model_validator(mode="after")
     def _validate_reference(self) -> DetectorConfig:
@@ -117,34 +115,6 @@ class DetectorRegistry(BaseModel):
         missing = [name for name in names if name not in self.detectors]
         if missing:
             raise ValueError(f"{label} contains undefined detectors: {missing}")
-
-    @classmethod
-    def from_overrides(
-        cls,
-        detectors: Mapping[str, Any] | None = None,
-        networks: Mapping[str, Sequence[str]] | None = None,
-    ) -> DetectorRegistry:
-        """Merge packaged defaults field by field, then validate complete settings.
-
-        Only names with both packaged geometry and sensitivity are defaults.
-        New names must supply both; arm tilts default to zero.
-        """
-        geometry = tomllib.loads((_PACKAGED / "geometry.toml").read_text())
-        sensitivity = tomllib.loads((_PACKAGED / "sensitivity.toml").read_text())
-        defaults = {
-            name: {
-                "geometry": row,
-                "psd_reference": sensitivity[name]["psd_reference"],
-            }
-            for name, row in geometry.items()
-            if name in sensitivity
-        }
-        return cls.model_validate(
-            {
-                "detectors": deep_merge(defaults, dict(detectors or {})),
-                "networks": dict(networks or {}),
-            }
-        )
 
     def build_detectors(
         self, names: Sequence[str]

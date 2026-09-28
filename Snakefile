@@ -5,7 +5,12 @@ from pathlib import Path
 from astrogwb.metadata import artifact_path
 from astrogwb.paper.config.catalogs import resolve_run_catalogs
 from astrogwb.paper.config.detectors import DetectorRegistry
-from astrogwb.paper.config.runs import assemble_run, discover_runs, run_config_paths
+from astrogwb.paper.config.runs import (
+    DETECTOR_DEFAULT_PATHS,
+    assemble_run,
+    discover_runs,
+    run_config_paths,
+)
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
 # No config module imports JAX or matplotlib at module scope, so DAG
@@ -116,13 +121,16 @@ def network_config_inputs(experiment):
 
 
 def detector_inputs(experiment, run):
-    """External PSD files used by the selected network, relative to the cwd."""
+    """Packaged detector defaults and selected external local PSD files."""
     merged = assemble_run(experiment, run)
-    registry = DetectorRegistry.from_overrides(
-        merged.get("detectors"), merged.get("networks")
+    registry = DetectorRegistry.model_validate(
+        {"detectors": merged["detectors"], "networks": merged["networks"]}
     )
     members = registry.networks[merged["analysis"]["network"]]
-    return [str(path) for path in registry.local_psd_inputs(members)]
+    return [
+        str(path)
+        for path in (*DETECTOR_DEFAULT_PATHS, *registry.local_psd_inputs(members))
+    ]
 
 
 def run_catalog_input(role):

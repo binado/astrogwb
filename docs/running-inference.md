@@ -125,8 +125,10 @@ uses the resolved settings without merging newer packaged defaults. Older
 saved configs without a registry receive the packaged defaults.
 
 Detector definitions default to the packaged `geometry.toml` and
-`sensitivity.toml`. A shared, experiment, or run layer can override individual
-fields; later layers win:
+`sensitivity.toml`. Both use the same `[detectors.<name>]` structure as
+`config/detectors.toml`, and pyknf merges them before the four run layers.
+`DetectorRegistry` validates the resulting complete definitions. A shared,
+experiment, or run layer can override individual fields; later layers win:
 
 ```toml
 [detectors.E1]
@@ -143,11 +145,16 @@ overrides. New names require `latitude`, `longitude`, `elevation`,
 `xarm_azimuth`, `yarm_azimuth`, and `psd_reference`; both arm tilts default to
 zero. Unknown fields, incomplete definitions, and undefined network members
 fail validation. Labels default to detector names and affect presentation only.
+The optional `duty_factor` is reference metadata; it does not rescale a PSD or
+the observation time. Sensitivities for gwmock presets with upstream geometry
+live separately in the packaged `presets.toml` and remain available through
+the core sensitivity loaders.
 
 `psd_reference` keeps its existing resolution order: gwmock-noise preset,
 packaged noise-curve file, local file, then HTTP(S) URL. Local paths stay relative
 to the caller's working directory, including paths in override files. The
-workflow declares selected external local PSDs as chain and figure inputs.
+workflow declares the packaged detector tables and selected external local
+PSDs as chain and figure inputs.
 Detector changes leave population draws, waveform catalogs, catalog keys, and
 the package version unchanged.
 

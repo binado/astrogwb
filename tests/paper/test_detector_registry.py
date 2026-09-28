@@ -15,8 +15,7 @@ from config_fixtures import example_raw, write_defaults
 from pydantic import ValidationError
 from repo import REPO_ROOT
 
-from astrogwb.paper.config import detector_registry
-from astrogwb.paper.config.detectors import DetectorRegistry
+from astrogwb.paper.config import detector_registry, mcmc
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import assemble_run, resolve_networks
 
@@ -59,8 +58,8 @@ def test_partial_geometry_and_psd_overrides_preserve_other_fields() -> None:
 
 
 def test_new_detector_requires_complete_definition_and_defaults_tilts() -> None:
-    registry = DetectorRegistry.from_overrides(
-        {
+    registry = detector_registry(
+        detectors={
             "new": {
                 "geometry": {
                     "latitude": 10.0,
@@ -72,7 +71,7 @@ def test_new_detector_requires_complete_definition_and_defaults_tilts() -> None:
                 "psd_reference": "ET_D_psd",
             }
         },
-        {"custom": ["new", "E1"]},
+        networks={"custom": ["new", "E1"]},
     )
     geometry, sensitivities = registry.build_network("custom")
     assert [detector.name for detector in geometry] == ["new", "E1"]
@@ -94,13 +93,13 @@ def test_new_detector_requires_complete_definition_and_defaults_tilts() -> None:
 )
 def test_invalid_definitions_are_rejected(overrides: dict) -> None:
     with pytest.raises(ValidationError):
-        DetectorRegistry.from_overrides(overrides)
+        detector_registry(detectors=overrides)
 
 
 @pytest.mark.parametrize("members", [[], ["E1", "unknown"], ["E1", "E1"]])
 def test_invalid_members_are_rejected(members: list[str]) -> None:
     with pytest.raises(ValidationError):
-        DetectorRegistry.from_overrides(networks={"bad": members})
+        detector_registry(networks={"bad": members})
 
 
 def test_registry_instances_are_independent() -> None:
@@ -123,11 +122,9 @@ def test_save_reload_uses_resolved_settings_without_packaged_merge(
     config.save(path)
     saved = json.loads(path.read_text())
     monkeypatch.setattr(
-        DetectorRegistry,
-        "from_overrides",
-        classmethod(
-            lambda *_args, **_kwargs: pytest.fail("reinterpreted saved settings")
-        ),
+        mcmc.knf,
+        "load",
+        lambda *_args, **_kwargs: pytest.fail("reinterpreted saved settings"),
     )
     reloaded = build_run_config(saved)
     assert reloaded.model_dump(mode="json") == config.model_dump(mode="json")

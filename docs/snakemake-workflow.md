@@ -55,8 +55,9 @@ what a catalog records about itself.
 [`config/runs/`](../config/runs/) holds one `_base.toml` per experiment and one
 TOML file per run, over shared `config/defaults.toml` and `config/detectors.toml`.
 `run_mcmc` declares those four layers as its own `input:` and passes them, in merge order, as
-repeated `--config` flags; the script merges them in process with `knf`, then
-writes:
+repeated `--config` flags. The packaged `geometry.toml` and `sensitivity.toml`
+are also inputs for chains and network figures. The script merges those
+registry tables and the run layers in process with `knf`, then writes:
 
 ```text
 outputs/chains/<experiment>/<run>.nc      the chain (protected)

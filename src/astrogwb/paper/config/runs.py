@@ -15,7 +15,9 @@ A run config is four layers merged in order:
 Every layer is TOML, so each one can say in a comment why it sets what it
 sets. :func:`merge_config_layers` folds them with ``knf``, the
 engine behind the ``knf`` CLI, so the shell and Python spell one merge rule:
-``knf <layers> --shallow 'priors.*'`` prints what a run resolves to.
+``knf src/astrogwb/detector/{geometry,sensitivity}.toml <layers>
+--shallow 'priors.*'`` prints what a run resolves to. Both packaged tables
+use the same ``[detectors.<name>]`` layout as the shared registry file.
 
 A run also owns its catalogs. ``[analysis.catalog]`` holds a partial spec per
 role, and :func:`resolve_catalog_blocks` completes it from the run's own
@@ -66,6 +68,12 @@ CONFIG_DIR = Path("config")
 DEFAULTS_PATH = CONFIG_DIR / "defaults.toml"
 DETECTORS_PATH = CONFIG_DIR / "detectors.toml"
 
+#: Packaged geometry and sensitivity use the same registry tables as overrides.
+DETECTOR_DEFAULT_PATHS = tuple(
+    Path(__file__).parents[2] / "detector" / filename
+    for filename in ("geometry.toml", "sensitivity.toml")
+)
+
 #: Presentation settings, read by `astrogwb.paper.plotting`. Deliberately *not*
 #: a run-config layer: nothing a run samples depends on it.
 PLOTTING_PATH = CONFIG_DIR / "plotting.toml"
@@ -96,7 +104,8 @@ PRIOR_SHALLOW = "priors.*"
 def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
     """Fold run-config layer files into one raw mapping, in the order given.
 
-    A deep merge, left to right -- arrays and scalars replace -- except at
+    Packaged detector tables are the initial defaults. A deep merge, left to
+    right -- arrays and scalars replace -- except at
     :data:`PRIOR_SHALLOW`. This is a *run-config* parser, not generic config
     infrastructure: the prior rule is domain-specific.
 
@@ -107,7 +116,7 @@ def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
         raise ValueError("no config layers given")
     for path in paths:
         require_toml(path)
-    return knf.load(list(paths), shallow=PRIOR_SHALLOW)
+    return knf.load([*DETECTOR_DEFAULT_PATHS, *paths], shallow=PRIOR_SHALLOW)
 
 
 def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
@@ -315,7 +324,9 @@ def resolve_networks(
             )
         from astrogwb.paper.config.detectors import DetectorRegistry
 
-        registry = DetectorRegistry.from_overrides(merged.get("detectors"), table)
+        registry = DetectorRegistry.model_validate(
+            {"detectors": merged["detectors"], "networks": table}
+        )
         resolved.append(Network(name, label, tuple(detectors), registry))
     return tuple(resolved)
 
