@@ -10,14 +10,12 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
+from gwmock_signal.detector import CustomDetector
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb.detector import Sensitivity
-
-if TYPE_CHECKING:
-    from gwmock_signal.detector import CustomDetector
 
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
@@ -102,8 +100,6 @@ class DetectorRegistry(BaseModel):
         self, names: Sequence[str]
     ) -> tuple[tuple[CustomDetector, ...], dict[str, Sensitivity]]:
         """Build selected geometry and sensitivities in the supplied order."""
-        from gwmock_signal.detector import CustomDetector
-
         self.validate_members(names)
         return (
             tuple(
