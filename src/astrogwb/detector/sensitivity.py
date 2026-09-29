@@ -27,7 +27,6 @@ from astrogwb.psd import NOISE_CURVES_BASE_DIR as NOISE_CURVES_BASE_DIR  # noqa:
 from astrogwb.psd import resolve_psd_path
 
 SENSITIVITY_FILE = Path(__file__).parent / "sensitivity.toml"
-PRESET_SENSITIVITY_FILE = Path(__file__).parent / "presets.toml"
 
 OutOfBand = Literal["inf", "zero"]
 
@@ -40,9 +39,9 @@ class Sensitivity:
     ``"ET_D_psd"``), a file in astrogwb's ``noise_curves/`` directory, an
     absolute path, or an HTTP(S) URL.
 
-    ``sensitivity.toml`` may also list ``minimum_frequency``,
-    ``maximum_frequency``, and ``duty_factor`` as reference metadata for
-    analysis setup; those fields are not loaded into this object.
+    ``sensitivity.toml`` may also list ``minimum_frequency`` and
+    ``maximum_frequency`` as reference metadata for analysis setup; those
+    fields are not loaded into this object.
     """
 
     psd_reference: str | Path
@@ -98,8 +97,10 @@ def load_sensitivities_for_network(
 ) -> Mapping[str, Sensitivity]:
     """Load sensitivity curves keyed by each detector's public name.
 
-    ``network`` may be a gwmock preset alias (see ``Network.list_names()``)
-    or a ready :class:`~gwmock_signal.network.Network`.
+    ``network`` may be a gwmock network alias (see ``Network.list_names()``)
+    or a ready :class:`~gwmock_signal.network.Network`. Every detector must
+    have a row in ``sensitivity.toml``; a gwmock preset whose geometry is
+    supplied upstream therefore needs a ``path=`` table of its own.
     """
     if isinstance(network, str):
         network = Network.from_name(network)
@@ -112,11 +113,8 @@ def _load_sensitivity_table(path: str | Path | None) -> Mapping[str, dict]:
             data = tomllib.load(handle)
         # Keep accepting the flat layout used by existing external tables.
         return data.get("detectors", data)
-    table: dict[str, dict] = {}
-    for source in (SENSITIVITY_FILE, PRESET_SENSITIVITY_FILE):
-        with source.open("rb") as handle:
-            table.update(tomllib.load(handle)["detectors"])
-    return table
+    with SENSITIVITY_FILE.open("rb") as handle:
+        return tomllib.load(handle)["detectors"]
 
 
 def _sensitivity_from_dict(data: Mapping) -> Sensitivity:
