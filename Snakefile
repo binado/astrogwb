@@ -13,11 +13,10 @@ from astrogwb.paper.config.runs import (
 )
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
-# No config module imports JAX or matplotlib at module scope, so DAG
-# construction stays cheap. Keying the catalogs does reach pydantic -- the key
-# is taken over a validated CatalogMetadata -- which is the price of there
-# being one canonical form. `artifact_path` lives in astrogwb.metadata, not
-# astrogwb.catalog, for the same reason.
+# Keying the catalogs reaches pydantic: the key is taken over a validated
+# CatalogMetadata, which is the price of one canonical form. `artifact_path`
+# lives in astrogwb.metadata, not astrogwb.catalog, so naming a catalog file
+# does not import the catalog stack.
 
 
 JAX_PLATFORM = config.get("jax_platforms", "cuda")

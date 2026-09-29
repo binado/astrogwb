@@ -440,11 +440,8 @@ def test_accessor_kwargs_do_not_poison_the_cache() -> None:
 def test_the_restated_population_constants_match_the_registry() -> None:
     """`config.mcmc` copies two tuples out of the population layer.
 
-    It has to: `astrogwb.populations.registry` imports JAX at module scope, and
-    `tests/paper/test_cli.py` pins that importing the config layer does not --
-    every `snakemake --dry-run` would otherwise pay for it. Copies drift, so
-    this is the cross-check, and it is marked `integration` because asserting
-    it is what imports JAX.
+    Copies drift, so this is the cross-check. It is marked `integration`
+    because asserting it imports the population registry.
     """
     from typing import get_args
 

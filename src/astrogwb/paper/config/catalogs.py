@@ -11,11 +11,11 @@ request's content hash. No name translates between the two.
 Once built, the *file* is authoritative about what it holds, and
 ``scripts/run_mcmc.py`` checks it against the request its run resolves.
 
-Deliberately JAX-free at import: nothing here needs it. The registry lookup
-that validates a model name imports :mod:`astrogwb.populations` inside its own
-body. The load-bearing constraint is not this one, though -- it is that
-:func:`astrogwb.paper.runtime.configure_runtime` runs before the XLA backend is
-initialized, which ``tests/paper/test_cli.py`` guards directly.
+The registry lookup that validates a model name imports
+:mod:`astrogwb.populations` inside its own body. Importing this module loads
+the run models, and with them the detector registry and JAX. The load-bearing
+constraint is that :func:`astrogwb.paper.runtime.configure_runtime` runs before
+the XLA backend is initialized, which ``tests/paper/test_cli.py`` guards.
 """
 
 from __future__ import annotations

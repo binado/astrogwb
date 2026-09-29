@@ -1,14 +1,14 @@
 """Pydantic models and I/O for headless MCMC run configs.
 
-Importing this module requires only stdlib and pydantic: ``numpyro`` is
-imported lazily inside :func:`materialize_prior` / :func:`prior_to_spec`, so
-importing this module stays cheap and -- because the constructed
-distributions hold plain Python floats and no JAX op is ever evaluated --
-validating a config does not initialize the XLA backend. That last property is what
-:func:`astrogwb.paper.runtime.configure_runtime` relies on to set host device
-count / platform after config validation; it is guarded by a subprocess test
-in ``tests/test_prior_native_types.py`` (re-running ``set_host_device_count``
-after a backend init is a silent no-op, hence the subprocess).
+Importing this module loads the detector registry, and with it JAX. ``numpyro``
+is imported lazily inside :func:`materialize_prior` / :func:`prior_to_spec`.
+The constructed distributions hold plain Python floats and no JAX operation is
+evaluated, so validating a config leaves the XLA backend uninitialized. That
+property is what :func:`astrogwb.paper.runtime.configure_runtime` relies on to
+set host device count / platform after config validation; it is guarded by a
+subprocess test in ``tests/test_prior_native_types.py`` (re-running
+``set_host_device_count`` after a backend init is a silent no-op, hence the
+subprocess).
 
 The generic merge/load helpers (``deep_merge``, ``load_mapping``) live in
 :mod:`astrogwb.paper.utils`, and the run-assembly merge semantics live in
@@ -44,16 +44,12 @@ _STRICT = ConfigDict(frozen=True, extra="forbid")
 # Pydantic models
 # --------------------------------------------------------------------------- #
 # Restates astrogwb.populations.bns_madau_dickinson.AMPLITUDE_PARAMETERS rather
-# than importing it: this module must stay stdlib+pydantic only (see module
-# docstring), so a @pytest.mark.integration paper test cross-checks the two
-# lists instead.
+# than importing the population registry. tests/paper/test_config.py
+# cross-checks the two lists.
 AmplitudeParameter = Literal["H0", "local_merger_rate"]
 
 #: Restates astrogwb.populations.DEFAULT_DENSITY_SITES, for the same reason and
-#: under the same cross-check: `astrogwb.populations.registry` imports JAX at
-#: module scope, so importing the constant here would cost every
-#: `snakemake --dry-run` a JAX import and break the guard in
-#: `tests/paper/test_cli.py`.
+#: under the same cross-check.
 DEFAULT_DENSITY_SITES: tuple[str, ...] = (
     "redshift",
     "source_frame_mass_1",

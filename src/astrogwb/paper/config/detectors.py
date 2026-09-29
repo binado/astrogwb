@@ -1,8 +1,8 @@
 """Serializable detector settings, resolved before runtime objects are built.
 
 Angles use gwmock's radians (azimuths clockwise from North); elevations use
-metres. Only the build methods import detector libraries; validating settings does
-not import JAX or initialize its backend.
+metres. Importing this module loads the detector package, including JAX.
+Validating settings leaves the XLA backend uninitialized.
 """
 
 from __future__ import annotations
@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from astrogwb.detector import Sensitivity
+
 if TYPE_CHECKING:
     from gwmock_signal.detector import CustomDetector
-
-    from astrogwb.detector import Sensitivity
 
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
@@ -63,8 +63,6 @@ class DetectorConfig(BaseModel):
 
     def build_sensitivity(self) -> Sensitivity:
         """Build a sensitivity from this detector's PSD reference."""
-        from astrogwb.detector import Sensitivity
-
         return Sensitivity(self.psd_reference)
 
 
