@@ -276,7 +276,7 @@ def check_sources(approximant: str, source_parameters: Mapping[str, ArrayLike]) 
     drive a Python exception, and converting one to decide would sync the host
     on every batch. Call it once on a concrete catalog -- or on one eager draw
     from a population, via
-    :func:`~astrogwb.sampling.validate_source_model` -- before handing the
+    :func:`~astrogwb.inference.validate_source_model` -- before handing the
     model to inference.
 
     Raises:

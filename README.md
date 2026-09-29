@@ -34,7 +34,7 @@ pip install astrogwb[io]
   disagree about the law behind it.
 - `astrogwb.importance` reweights a fixed catalog to a target population and
   contracts it into a spectrum.
-- `astrogwb.sampling` exposes the caller-prepared NumPyro model.
+- `astrogwb.inference` exposes the caller-prepared NumPyro model.
 - `astrogwb.catalog` provides an array-native catalog that records the
   population that drew it, and reads and writes it as HDF5 behind the `io`
   extra.
@@ -64,7 +64,7 @@ import jax
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.metadata import PopulationMetadata, WaveformMetadata
 from astrogwb.populations import build_population
-from astrogwb.sampling.utils import sample_sources
+from astrogwb.inference.utils import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 model_kwargs = {"minimum_redshift": 0.0, "maximum_redshift": 20.0, "n_grid": 4096}

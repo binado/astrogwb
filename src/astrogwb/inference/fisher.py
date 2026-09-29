@@ -1,6 +1,6 @@
 r"""Per-frequency Fisher information of the diagonal Gaussian spectrum likelihood.
 
-:func:`~astrogwb.sampling.models.gwb_spectral_density_model` compares a
+:func:`~astrogwb.inference.models.gwb_spectral_density_model` compares a
 predicted spectrum to data bin by bin, :math:`d_i \sim \mathcal{N}(S_i(\theta),
 \sigma_i)`, with a scale that does not depend on :math:`\theta`. Its Fisher
 matrix is therefore a sum of per-bin terms,
@@ -20,7 +20,7 @@ constrains one direction in parameter space. Per-bin diagonals, or a
 cumulative sum over bins, are meaningful band diagnostics; the inverse of one
 bin's matrix is not.
 
-Any :class:`~astrogwb.sampling.SpectralDensityFn` works, as long as it is
+Any :class:`~astrogwb.inference.SpectralDensityFn` works, as long as it is
 differentiable in the requested parameters. The importance spectrum from
 :func:`~astrogwb.importance.spectral.build_importance_spectrum` is: it
 reweights a fixed catalog without drawing anything. Its derivative is still a
@@ -30,7 +30,7 @@ score-function estimator, with noise that grows as
 those fiducials. A hyperparameter that moves a support edge (a hard mass
 cutoff, say) differentiates only the density's normalization, not the sources
 crossing the edge, so its derivative is missing that boundary term.
-:func:`~astrogwb.sampling.forward_model.gwb_forward_model` is not a valid input:
+:func:`~astrogwb.inference.forward_model.gwb_forward_model` is not a valid input:
 its Poisson count is discrete, and differentiating through its draws gives one
 realization's derivative rather than the mean spectrum's.
 """
@@ -43,7 +43,7 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 
-from astrogwb.sampling.protocol import SpectralDensityFn
+from astrogwb.inference.protocol import SpectralDensityFn
 
 __all__ = ["fisher_matrix_per_bin", "spectral_density_jacobian"]
 
@@ -85,7 +85,7 @@ def fisher_matrix_per_bin(
 
     ``scale`` is the per-bin standard deviation the likelihood uses, normally
     ``gaussian_bin_scale(psd, time_years, df)``. ``frequency_mask`` selects
-    bins as in :func:`~astrogwb.sampling.models.gwb_spectral_density_model`:
+    bins as in :func:`~astrogwb.inference.models.gwb_spectral_density_model`:
     an excluded bin contributes exactly zero, even where its scale is
     infinite. Sum over the leading axis for the total Fisher matrix.
     """

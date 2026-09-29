@@ -5,7 +5,7 @@ source models use: condition every sample site, execute once, and read back
 both the model's return mapping and the sum of the selected sites' log
 densities. :func:`evaluate_sources` and :func:`sample_sources` apply that
 pattern to any per-source NumPyro model -- they know nothing about which
-populations exist. The other modules in :mod:`astrogwb.sampling` compose
+populations exist. The other modules in :mod:`astrogwb.inference` compose
 spectrum callables into inference models; nothing here depends on them.
 """
 

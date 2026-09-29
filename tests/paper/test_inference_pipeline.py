@@ -42,6 +42,7 @@ from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import spectral_density
 from astrogwb.importance.spectral import build_importance_spectrum
+from astrogwb.inference import gwb_spectral_density_model
 from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import RunConfig, build_run_config
 from astrogwb.paper.inference import (
@@ -53,7 +54,6 @@ from astrogwb.paper.inference import (
 )
 from astrogwb.paper.utils import load_mapping
 from astrogwb.populations import DEFAULT_DENSITY_SITES
-from astrogwb.sampling import gwb_spectral_density_model
 
 pytestmark = pytest.mark.integration
 
@@ -314,7 +314,7 @@ def test_model_kwargs_scale_is_the_full_grid_gaussian_bin_scale(
     injection_catalog: PolarizationPowerCatalog,
     proposal_catalog: PolarizationPowerCatalog,
 ) -> None:
-    """The scale is prepared here, not derived inside the sampling model."""
+    """The scale is prepared here, not derived inside the inference model."""
     config = _config()
 
     inputs = _prepare(injection_catalog, proposal_catalog, config)

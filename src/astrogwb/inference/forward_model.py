@@ -63,7 +63,7 @@ against a generator's waveform family::
 
     from numpyro.infer import Predictive
 
-    from astrogwb.sampling import gwb_forward_model, validate_source_model
+    from astrogwb.inference import gwb_forward_model, validate_source_model
 
     validate_source_model(
         params, source_model=source_model, generator=generator,

@@ -3,7 +3,7 @@
 :class:`SpectrumGenerator` is the generator half of
 :func:`astrogwb.catalog.simulate`: it builds the live population, waveform
 generator and priors a record names, runs
-:func:`~astrogwb.sampling.draw_spectral_density`, and stamps the result with
+:func:`~astrogwb.inference.draw_spectral_density`, and stamps the result with
 the record. It holds only what does not change the draws -- the waveform batch
 size -- so two generators with different settings answer the same metadata
 with the same file.
@@ -19,8 +19,8 @@ import jax
 
 from astrogwb import __version__
 from astrogwb.catalog.spectral_density import SpectralDensityCatalog
+from astrogwb.inference import draw_spectral_density, validate_source_model
 from astrogwb.metadata import SpectraMetadata
-from astrogwb.sampling import draw_spectral_density, validate_source_model
 
 __all__ = ["SpectrumGenerator"]
 

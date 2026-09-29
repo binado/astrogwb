@@ -1,4 +1,4 @@
-"""The callable sampling boundary, checked against independent likelihoods.
+"""The callable inference boundary, checked against independent likelihoods.
 
 Three layers, in order: the generic model against a hand-written Gaussian
 density; the importance-sampled spectrum against the hand-written grid-level
@@ -33,7 +33,7 @@ from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.distributions.amplitude import AmplitudeConditional, quadrature_grid
 from astrogwb.gwb import spectral_density
 from astrogwb.importance.spectral import importance_spectral_density
-from astrogwb.sampling import (
+from astrogwb.inference import (
     SpectralDensityFn,
     amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,

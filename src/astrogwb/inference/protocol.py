@@ -1,4 +1,4 @@
-"""Callable boundary between spectral predictions and sampling models."""
+"""Callable boundary between spectral predictions and inference models."""
 
 from collections.abc import Mapping
 from typing import Protocol
@@ -13,7 +13,7 @@ class SpectralDensityFn(Protocol):
     An analytic calculator may return ``{}`` for diagnostics. Diagnostic keys
     and shapes must stay stable during JAX tracing; keys must not collide with
     prior sites or likelihood-owned sites. Values are recorded unchanged as
-    NumPyro deterministics by the sampling model.
+    NumPyro deterministics by the inference model.
     """
 
     def __call__(

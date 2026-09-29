@@ -19,10 +19,10 @@ from numpyro.infer import Predictive
 
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO, ISCO_ALPHA
 from astrogwb.gwb.spectral import inclination_averaging_factor
+from astrogwb.inference import gwb_forward_model, validate_source_model
+from astrogwb.inference.forward_model import _sum_polarization_power
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.populations import IsotropicInclination
-from astrogwb.sampling import gwb_forward_model, validate_source_model
-from astrogwb.sampling.forward_model import _sum_polarization_power
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,

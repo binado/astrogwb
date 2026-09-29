@@ -26,9 +26,9 @@ import numpy as np
 import ripplegw
 from ripplegw.interfaces import AmplitudePhaseWaveform
 
+from astrogwb.inference.utils import sample_sources
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.populations import IsotropicInclination, build_population
-from astrogwb.sampling.utils import sample_sources
 from astrogwb.waveform import RippleGenerator
 from astrogwb.waveform.generator._ripple import ripple_parameters
 from astrogwb.waveform.polarization_power import polarization_power

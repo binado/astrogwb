@@ -17,13 +17,13 @@ class LogDensityFn:
     The model given to :meth:`__init__` can take positional or keyword
     arguments. Callers supply positional inputs via ``model_args`` and
     keyword inputs via ``model_kwargs`` (the convention every model in
-    :mod:`astrogwb.sampling.models` follows).
+    :mod:`astrogwb.inference.models` follows).
 
     Parameters
     ----------
     model:
         A NumPyro model called as ``model(*model_args, **model_kwargs)``. Every
-        model in :mod:`astrogwb.sampling.models` returns ``None``; a
+        model in :mod:`astrogwb.inference.models` returns ``None``; a
         ``functools.partial`` or a ``numpyro.handlers.Messenger`` wrapper
         (e.g. from ``handlers.block``/``handlers.condition``) around one
         satisfies this too.

@@ -130,7 +130,7 @@ arrays remain arguments.
 
 ```python
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
-from astrogwb.sampling.utils import evaluate_sources, sample_sources
+from astrogwb.inference.utils import evaluate_sources, sample_sources
 
 source_model, merger_rate_fn = build_population(
     "bns_md_cosmological", minimum_redshift=0.0, maximum_redshift=20.0, n_grid=4096
@@ -423,7 +423,7 @@ static event plate is sized from the largest Poisson mean across the rows.
 generator from a shell; it refuses an output whose stem is not the key. A
 caller that needs a source model no record can name -- the
 `IsotropicInclination` wrapper in `notebooks/waveform_approximant_spectra.py`
--- calls the uncached `astrogwb.sampling.draw_spectral_density` directly.
+-- calls the uncached `astrogwb.inference.draw_spectral_density` directly.
 
 | Dataset | Shape | Meaning |
 | --- | --- | --- |

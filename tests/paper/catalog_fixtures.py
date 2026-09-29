@@ -13,10 +13,10 @@ import numpy as np
 from repo import REPO_ROOT
 
 from astrogwb.catalog import PolarizationPowerCatalog
+from astrogwb.inference.utils import evaluate_sources
 from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.paper.config import fiducials, population_metadata
 from astrogwb.populations import build_population
-from astrogwb.sampling.utils import evaluate_sources
 
 #: The population every fixture catalog is drawn from: the committed one, read
 #: rather than restated, so a fixture cannot drift from what the runs sample

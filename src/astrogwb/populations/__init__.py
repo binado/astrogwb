@@ -1,10 +1,10 @@
 """Source populations declared as NumPyro models, addressed by registered name.
 
 One declaration serves generation and inference: a population's source model
-draws a catalog (:func:`~astrogwb.sampling.utils.sample_sources`), and
+draws a catalog (:func:`~astrogwb.inference.utils.sample_sources`), and
 conditioning those draws back into it recovers the per-sample source density
 the importance weights divide by
-(:func:`~astrogwb.sampling.utils.evaluate_sources`). Its merger-rate function
+(:func:`~astrogwb.inference.utils.evaluate_sources`). Its merger-rate function
 returns the one observer-frame scalar the same catalog's Poisson count and
 predicted spectrum need, or ``None`` when the population is a proposal density
 with no physical rate. That is what makes a catalog self-describing -- the file

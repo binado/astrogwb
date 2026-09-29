@@ -41,7 +41,7 @@ from astrogwb.metadata import PopulationMetadata, SpectraMetadata, WaveformMetad
 from astrogwb.populations import Population
 
 if TYPE_CHECKING:
-    from astrogwb.sampling import SpectralDensityDraws
+    from astrogwb.inference import SpectralDensityDraws
 
 __all__ = ["SpectralDensityCatalog"]
 
@@ -51,7 +51,7 @@ class SpectralDensityCatalog:
     """Forward-model spectral-density draws and the population that produced them.
 
     ``spectral_density`` is draw-first, shape ``(draws, F)`` -- the orientation
-    :func:`~astrogwb.sampling.gwb_forward_model` returns, kept rather than
+    :func:`~astrogwb.inference.gwb_forward_model` returns, kept rather than
     transposed so the simulator writes what the model produced.
     ``n_events`` and ``total_merger_rate`` have shape ``(draws,)``, and every
     hyperparameter column has shape ``(draws,)``.
