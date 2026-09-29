@@ -163,6 +163,43 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
 
 
 @pytest.mark.parametrize(
+    "grid_settings",
+    [
+        {"frequency_spacing": "loglinear", "turnover_frequency": 12.0},
+        {"frequency_spacing": "log"},
+    ],
+    ids=["loglinear", "log"],
+)
+def test_analytic_generator_evaluates_on_a_log_spaced_grid(
+    source_parameters: dict[str, np.ndarray], grid_settings: dict[str, Any]
+) -> None:
+    generator = AnalyticInspiralGenerator(
+        WaveformMetadata.model_validate(
+            {
+                "alpha": ISCO_ALPHA,
+                "approximant": "AnalyticInspiral",
+                "minimum_frequency": 10.0,
+                "maximum_frequency": 100.0,
+                "reference_frequency": 10.0,
+                "sampling_frequency": 256.0,
+                "frequency_resolution": 1.0,
+                **grid_settings,
+            }
+        )
+    )
+
+    frequencies, actual = generator(source_parameters)
+    expected = np.asarray(
+        inspiral_polarization_power(frequencies, source_parameters, alpha=ISCO_ALPHA)
+    ).T
+
+    assert frequencies[0] == 10.0
+    assert frequencies[-1] == 100.0
+    assert np.ptp(np.diff(np.asarray(frequencies))) > 0.0
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize(
     ("power", "message"),
     [
         (np.ones(2), "two-dimensional"),

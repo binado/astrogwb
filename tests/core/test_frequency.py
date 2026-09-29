@@ -6,9 +6,13 @@ import numpy as np
 import pytest
 
 from astrogwb.frequency import (
+    FrequencySpacing,
     apply_frequency_mask,
     bin_widths,
+    frequency_grid,
     frequency_mask,
+    log_frequency_grid,
+    loglinear_frequency_grid,
     noise_weighted_inner_product,
     uniform_frequency_grid,
     validate_frequency_grid,
@@ -159,6 +163,137 @@ def test_uniform_frequency_grid_rejects_invalid_settings(
 ) -> None:
     with pytest.raises(ValueError):
         uniform_frequency_grid(minimum, maximum, df)
+
+
+def test_loglinear_grid_spans_the_band_exactly() -> None:
+    frequencies = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
+
+    assert frequencies.dtype == np.float64
+    assert frequencies[0] == 2.0
+    assert frequencies[-1] == 2048.0
+    assert np.all(np.diff(frequencies) > 0.0)
+
+
+def test_loglinear_grid_is_uniform_up_to_the_turnover() -> None:
+    frequencies = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
+
+    np.testing.assert_array_equal(
+        frequencies[frequencies <= 100.0], uniform_frequency_grid(2.0, 100.0, 1.0)
+    )
+
+
+def test_loglinear_grid_is_geometric_above_the_turnover() -> None:
+    frequencies = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
+
+    above = frequencies[frequencies >= 100.0]
+    ratios = above[1:] / above[:-1]
+    np.testing.assert_allclose(ratios, ratios[0], rtol=1e-12)
+
+
+def test_loglinear_grid_spacing_is_continuous_at_the_turnover() -> None:
+    frequencies = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
+
+    gaps = np.diff(frequencies)
+    last_linear = np.flatnonzero(frequencies == 100.0)[0] - 1
+    assert gaps[last_linear] == 1.0
+    # The first geometric gap does not exceed df and is within one geometric
+    # step of it.
+    assert gaps[last_linear + 1] <= 1.0
+    assert gaps[last_linear + 1] > 1.0 - 1.0 / 100.0
+
+
+def test_loglinear_grid_has_far_fewer_bins_than_the_uniform_grid() -> None:
+    loglinear = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
+    uniform = uniform_frequency_grid(2.0, 2048.0, 1.0)
+
+    assert uniform.size == 2047
+    assert loglinear.size == 403
+
+
+def test_loglinear_grid_turns_at_the_last_linear_point_below_the_request() -> None:
+    frequencies = loglinear_frequency_grid(2.0, 2048.0, 4.0, 101.0)
+
+    # 2 + 4k <= 101 gives k = 24, so the effective turnover is 98.
+    assert 98.0 in frequencies
+    np.testing.assert_array_equal(frequencies[:25], 2.0 + 4.0 * np.arange(25))
+    assert frequencies[25] > 98.0
+    assert frequencies[25] - 98.0 <= 4.0
+
+
+def test_loglinear_bin_widths_grow_with_frequency_above_the_turnover() -> None:
+    frequencies = loglinear_frequency_grid(2.0, 2048.0, 1.0, 100.0)
+
+    widths = np.asarray(bin_widths(frequencies))
+    np.testing.assert_allclose(widths[:90], 1.0)
+    assert np.all(np.diff(widths[frequencies > 110.0]) > 0.0)
+    assert widths[-1] > 15.0
+
+
+@pytest.mark.parametrize(
+    ("minimum", "maximum", "df", "turnover"),
+    [
+        (2.0, 2048.0, 1.0, 2.0),
+        (2.0, 2048.0, 1.0, 1.0),
+        (2.0, 2048.0, 1.0, 2048.0),
+        (2.0, 2048.0, 1.0, 4000.0),
+        (0.0, 2048.0, 1.0, 100.0),
+        (2.0, 2048.0, 0.0, 100.0),
+        (2.0, 2048.0, -1.0, 100.0),
+        (2048.0, 2.0, 1.0, 100.0),
+        (2.0, 2048.0, 1.0, np.nan),
+    ],
+)
+def test_loglinear_grid_rejects_invalid_settings(
+    minimum: float, maximum: float, df: float, turnover: float
+) -> None:
+    with pytest.raises(ValueError):
+        loglinear_frequency_grid(minimum, maximum, df, turnover)
+
+
+def test_log_grid_is_geometric_with_df_wide_first_bin() -> None:
+    frequencies = log_frequency_grid(2.0, 2048.0, 0.5)
+
+    assert frequencies[0] == 2.0
+    assert frequencies[-1] == 2048.0
+    ratios = frequencies[1:] / frequencies[:-1]
+    np.testing.assert_allclose(ratios, ratios[0], rtol=1e-12)
+    assert frequencies[1] - frequencies[0] <= 0.5
+
+
+@pytest.mark.parametrize(
+    ("minimum", "maximum", "df"),
+    [(0.0, 10.0, 1.0), (10.0, 2.0, 1.0), (2.0, 10.0, 0.0)],
+)
+def test_log_grid_rejects_invalid_settings(
+    minimum: float, maximum: float, df: float
+) -> None:
+    with pytest.raises(ValueError):
+        log_frequency_grid(minimum, maximum, df)
+
+
+@pytest.mark.parametrize(
+    ("spacing", "turnover", "expected"),
+    [
+        ("linear", None, uniform_frequency_grid(2.0, 100.0, 1.0)),
+        ("log", None, log_frequency_grid(2.0, 100.0, 1.0)),
+        ("loglinear", 20.0, loglinear_frequency_grid(2.0, 100.0, 1.0, 20.0)),
+    ],
+)
+def test_frequency_grid_dispatches_on_the_spacing(
+    spacing: FrequencySpacing, turnover: float | None, expected: np.ndarray
+) -> None:
+    grid = frequency_grid(spacing, 2.0, 100.0, 1.0, turnover)
+
+    np.testing.assert_array_equal(grid, expected)
+
+
+def test_frequency_grid_requires_a_turnover_only_for_loglinear() -> None:
+    with pytest.raises(ValueError, match="needs a turnover_frequency"):
+        frequency_grid("loglinear", 2.0, 100.0, 1.0)
+    spacings: tuple[FrequencySpacing, ...] = ("linear", "log")
+    for spacing in spacings:
+        with pytest.raises(ValueError, match="only used by the 'loglinear'"):
+            frequency_grid(spacing, 2.0, 100.0, 1.0, 50.0)
 
 
 def test_noise_weighted_inner_product_weights_each_bin_by_its_own_width() -> None:

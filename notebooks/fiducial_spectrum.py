@@ -170,7 +170,7 @@ def _():
         label="Plot spectrum",
     )
     # Notebook-only: the shared [waveform] table is a catalog block, so its 1 Hz
-    # resolution stays put. Finer grids resolve the SNR peak at ~5-10 Hz,
+    # resolution and loglinear grid stay put. Finer uniform grids resolve the SNR peak at ~5-10 Hz,
     # where 1 Hz bins leave only a handful of points per e-fold.
     frequency_resolution_choice = mo.ui.dropdown(
         options={"1": 1.0, "0.5": 0.5, "0.25": 0.25, "0.125": 0.125},
@@ -390,7 +390,11 @@ def _(
             root=ROOT_DIR,
             approximant=approximant,
             maximum_frequency=maximum_frequency,
+            # Uniform, whatever the shared waveform's grid: this notebook
+            # exists to resolve the SNR peak with fine, even bins.
+            frequency_spacing="linear",
             frequency_resolution=frequency_resolution,
+            turnover_frequency=None,
         ),
         population=population_metadata(
             root=ROOT_DIR,

@@ -44,7 +44,7 @@ from jax.typing import ArrayLike as JaxArrayLike
 from numpy.typing import ArrayLike
 
 from astrogwb.constants import MPC_IN_SECONDS, SOLAR_MASS_IN_SECONDS
-from astrogwb.frequency import uniform_frequency_grid
+from astrogwb.frequency import frequency_grid
 from astrogwb.utils import require_x64
 from astrogwb.waveform.generator.base import PolarizationPowerGenerator
 
@@ -297,10 +297,12 @@ class AnalyticInspiralGenerator(PolarizationPowerGenerator):
 
     @property
     def frequencies(self) -> np.ndarray:
-        return uniform_frequency_grid(
+        return frequency_grid(
+            self.metadata.frequency_spacing,
             self.metadata.minimum_frequency,
             self.metadata.maximum_frequency,
             self.metadata.frequency_resolution,
+            self.metadata.turnover_frequency,
         )
 
     def generate_batch(self, source_parameters: Mapping[str, ArrayLike]) -> jax.Array:

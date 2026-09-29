@@ -49,7 +49,18 @@ The fields a role resolves to:
    band matches `[analysis]`'s `minimum_frequency` and `maximum_frequency`: the
    catalog grid *is* the array every model is evaluated on, and a run's band
    selects bins on it with a mask rather than compressing it.
-   `sampling_frequency` is the waveform backend's Nyquist, not the stored grid.
+   The grid is `frequency_spacing` over that band: `"loglinear"` (the default) is
+   uniform at `frequency_resolution` up to `turnover_frequency` and geometric
+   above it, with the bin width continuous at the turn, which is ~400 bins for
+   2--2048 Hz at 1 Hz and 100 Hz against 2047 for `"linear"`. `"log"` is
+   geometric throughout, `frequency_resolution` wide at `minimum_frequency`.
+   `turnover_frequency` belongs to `"loglinear"` alone: required there and
+   rejected elsewhere, so one grid has one record and one key. The turn falls on
+   the last uniform point not above `turnover_frequency`. For a `"linear"` Ripple
+   waveform `sampling_frequency` is the backend's Nyquist, not the stored grid;
+   the other spacings are built directly to `maximum_frequency` and do not use
+   it. `[waveforms.linear]` is the default on the uniform grid, for comparing the
+   two.
    `approximant="AnalyticInspiral"` selects the closed-form inspiral, and is
    the only approximant accepting the optional `alpha` key (the inspiral
    termination constant, defaulting to the Schwarzschild ISCO value); naming it
@@ -365,13 +376,18 @@ format. Explicitly remove affected legacy files in `outputs/catalogs/` and
 Neither the loader nor `simulate` migrates or replaces them automatically.
 Canonical JSON hashing is separate from the Pydantic JSON stored in the file.
 
-The waveform metadata records `frequency_resolution` -- what was *requested*
-of the generating backend -- while the bin widths used in every integral are
-derived from the `frequency` dataset itself (`astrogwb.frequency.bin_widths`,
-exposed as `PolarizationPowerCatalog.bin_widths`); the backend chooses the
-actual grid, so the two can differ. The grid need only be strictly increasing:
-each bin's width is half the distance between its neighbours, which is the
-grid spacing on a uniform grid.
+The waveform metadata records `frequency_spacing`, `frequency_resolution` and
+`turnover_frequency` -- what was *requested* of the generating backend -- while
+the bin widths used in every integral are derived from the `frequency` dataset
+itself (`astrogwb.frequency.bin_widths`, exposed as
+`PolarizationPowerCatalog.bin_widths`); the backend chooses the actual grid, so
+the two can differ. The grid need only be strictly increasing: each bin's width
+is half the distance between its neighbours, which is the grid spacing on a
+uniform grid and grows with frequency above the turn of a `"loglinear"` one.
+
+Adding the grid fields re-keyed every catalog and spectra file, and the version
+was bumped with them (0.2.0), so files from earlier versions are never served;
+regenerate them.
 
 ## The spectral-density format
 
