@@ -118,26 +118,3 @@ class DetectorRegistry(BaseModel):
     ) -> tuple[tuple[CustomDetector, ...], dict[str, Sensitivity]]:
         """Build a named network in its declared detector order."""
         return self.build_detectors(self.networks[name])
-
-    def local_psd_inputs(self, names: Sequence[str]) -> tuple[Path, ...]:
-        """Selected external local PSD files, using the runtime resolution order.
-
-        Presets and packaged files travel with the installed library, while
-        external files need explicit workflow edges. URLs are loaded at runtime.
-        """
-        from astrogwb.psd import NOISE_CURVES_BASE_DIR, resolve_psd_path
-
-        self.validate_members(names)
-        paths: dict[Path, None] = {}
-        for name in names:
-            resolved = resolve_psd_path(self.detectors[name].psd_reference)
-            if isinstance(resolved, Path):
-                absolute = resolved.resolve()
-                # A preset wins even if a same-named local file exists.
-                if absolute == Path(
-                    self.detectors[name].psd_reference
-                ).resolve() and not absolute.is_relative_to(
-                    NOISE_CURVES_BASE_DIR.resolve()
-                ):
-                    paths[resolved] = None
-        return tuple(paths)

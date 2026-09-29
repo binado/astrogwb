@@ -4,10 +4,8 @@ from pathlib import Path
 
 from astrogwb.metadata import artifact_path
 from astrogwb.paper.config.catalogs import resolve_run_catalogs
-from astrogwb.paper.config.detectors import DetectorRegistry
 from astrogwb.paper.config.runs import (
     DETECTOR_DEFAULT_PATHS,
-    assemble_run,
     discover_runs,
     run_config_paths,
 )
@@ -104,32 +102,9 @@ def network_run_flags(experiment):
     )
 
 
-def network_config_inputs(experiment):
-    """The run files behind `network_run_flags`, so the DAG edges are real.
-
-    The script re-derives these paths from the run names it is given; declaring
-    them here is what makes editing one network's config retrigger the figure.
-    Taken from `run_config_paths`, whose last layer is the run's own file, so
-    the path convention lives in one place.
-    """
-    return sorted({
-        path
-        for run in DETECTOR_NETWORK_RUNS
-        for path in (*config_layers(experiment, run), *detector_inputs(experiment, run))
-    })
-
-
-def detector_inputs(experiment, run):
-    """Packaged detector defaults and selected external local PSD files."""
-    merged = assemble_run(experiment, run)
-    registry = DetectorRegistry.model_validate(
-        {"detectors": merged["detectors"], "networks": merged["networks"]}
-    )
-    members = registry.networks[merged["analysis"]["network"]]
-    return [
-        str(path)
-        for path in (*DETECTOR_DEFAULT_PATHS, *registry.local_psd_inputs(members))
-    ]
+#: Packaged geometry and sensitivity. Every run merges these before its four
+#: layers, so an edit retriggers every chain.
+DETECTOR_INPUTS = [str(path) for path in DETECTOR_DEFAULT_PATHS]
 
 
 def run_catalog_input(role):
@@ -205,8 +180,7 @@ rule validate:
     """Pre-flight: merge, validate, and catalog-check every run, building nothing."""
     input:
         RUN_CONFIG_FILES,
-        sorted({path for experiment, names in runs.items() for run in names
-                for path in detector_inputs(experiment, run)}),
+        DETECTOR_INPUTS,
     output:
         "outputs/validated-runs.txt",
     shell:
@@ -223,7 +197,7 @@ rule run_mcmc:
         # either shared config layer -> all 27. The catalogs are named by key, so an
         # edit to a draw reaches the chain through a new catalog path too.
         config=lambda w: config_layers(w.experiment, w.run),
-        psds=lambda w: detector_inputs(w.experiment, w.run),
+        psds=DETECTOR_INPUTS,
         injection=run_catalog_input("injection"),
         proposal=run_catalog_input("proposal"),
     output:
@@ -290,10 +264,9 @@ rule plot_cosmological_parameters:
         ),
         omega_m_chain="outputs/chains/cosmological-parameters/H0-Omega_m.nc",
         catalog=INJECTION_CATALOG,
-        # The layers of a run this figure actually plots, and the run files
-        # behind --network-run.
+        # The layers of a run this figure actually plots. Each network run's
+        # own file is an input of its chain, which this rule already requires.
         config=config_layers("cosmological-parameters", "ET-2L-aligned-CE-Hanford"),
-        network_configs=network_config_inputs("cosmological-parameters"),
     output:
         detector_pdf="outputs/figures/cosmological-parameters/H0-by-detector.pdf",
         detector_csv="outputs/figures/cosmological-parameters/H0-by-detector.csv",
@@ -343,7 +316,6 @@ rule plot_modified_propagation:
         ),
         catalog=INJECTION_CATALOG,
         config=config_layers("modified-propagation", "ET-2L-aligned-CE-Hanford"),
-        network_configs=network_config_inputs("modified-propagation"),
     output:
         xi_n_corner_pdf="outputs/figures/modified-propagation/Xi0-n-corner.pdf",
         xi_n_ess_corner_pdf="outputs/figures/modified-propagation/Xi0-n-ess-corner.pdf",
@@ -372,7 +344,7 @@ rule importance_weights_grid:
     input:
         catalog=DEFAULT_PROPOSAL_CATALOG,
         config=config_layers(*FIGURE_RUN),
-        psds=detector_inputs(*FIGURE_RUN),
+        psds=DETECTOR_INPUTS,
     output:
         h0_omega_m_pdf=(
             "outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf"

@@ -336,8 +336,8 @@ def add_network_run_arguments(parser: argparse.ArgumentParser) -> None:
 
     Four layers times six networks of ``--config`` is unworkable, so the network
     figures are handed run *names* and re-derive the layer paths themselves.
-    The workflow still declares those TOMLs as ``input:``, so the edges are
-    real.
+    Each network run's config layers are inputs of its chain, and the figure
+    depends on those chains.
     """
     parser.add_argument(
         "--network-run",

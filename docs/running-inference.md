@@ -155,8 +155,8 @@ the core sensitivity loaders.
 `psd_reference` keeps its existing resolution order: gwmock-noise preset,
 packaged noise-curve file, local file, then HTTP(S) URL. Local paths stay relative
 to the caller's working directory, including paths in override files. The
-workflow declares the packaged detector tables and selected external local
-PSDs as chain and figure inputs.
+workflow declares the packaged detector tables as inputs of every chain and of
+`importance_weights_grid`. A local or remote PSD is loaded when the run executes.
 Detector changes leave population draws, waveform catalogs, catalog keys, and
 the package version unchanged.
 

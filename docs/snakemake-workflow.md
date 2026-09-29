@@ -56,7 +56,7 @@ what a catalog records about itself.
 TOML file per run, over shared `config/defaults.toml` and `config/detectors.toml`.
 `run_mcmc` declares those four layers as its own `input:` and passes them, in merge order, as
 repeated `--config` flags. The packaged `geometry.toml` and `sensitivity.toml`
-are also inputs for chains and network figures. The script merges those
+are also inputs of every chain and of `importance_weights_grid`. The script merges those
 registry tables and the run layers in process with `knf`, then writes:
 
 ```text
@@ -69,9 +69,7 @@ its `input:` was already exactly these files, so it only turned files the
 chain already depended on into a copy of themselves. The rule is a per-run
 wildcard on `{experiment}/{run}`, so editing a run's file retriggers exactly
 its own chain, editing a `_base.toml` retriggers its experiment, and editing
-either shared layer retriggers all 27. Selected external local PSD files are
-also inputs of the chain and figure rules, so a curve edit retriggers the
-calculations that use it.
+either shared layer retriggers all 27.
 
 That granularity is what removed the stale-input wrapper the old workflow
 needed: one rule used to emit all 27 configs at once, so any edit invalidated
