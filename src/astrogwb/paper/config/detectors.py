@@ -61,8 +61,9 @@ class DetectorConfig(BaseModel):
             raise ValueError(str(error)) from error
         return self
 
-    def build_sensitivity(self) -> Sensitivity:
-        """Build a sensitivity from this detector's PSD reference."""
+    @property
+    def sensitivity(self) -> Sensitivity:
+        """Sensitivity built from this detector's PSD reference."""
         return Sensitivity(self.psd_reference)
 
 
@@ -109,7 +110,7 @@ class DetectorRegistry(BaseModel):
                 CustomDetector(name=name, **self.detectors[name].geometry.model_dump())
                 for name in names
             ),
-            {name: self.detectors[name].build_sensitivity() for name in names},
+            {name: self.detectors[name].sensitivity for name in names},
         )
 
     def build_network(
