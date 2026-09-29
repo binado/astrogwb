@@ -140,7 +140,7 @@ def noise_weighted_inner_product(
 
     .. math::
 
-        (a|b) = \Delta f \sum_i \frac{a_i b_i}{S_i^2},
+        (a|b) = \Delta f \sum_i \frac{a_i^* b_i}{S_i^2},
 
     the Riemann sum approximating :math:`\int \mathrm{d}f\, a(f)\, b(f) /
     S(f)^2` on a grid of spacing :math:`\Delta f`. Frequencies are
@@ -153,7 +153,9 @@ def noise_weighted_inner_product(
     Parameters
     ----------
     a, b:
-        Arrays whose ``axis`` runs over frequency bins.
+        Arrays whose ``axis`` runs over frequency bins. ``a`` is conjugated, so
+        the product is the Hermitian one and complex strain enters correctly;
+        for real inputs this is a no-op.
     psd:
         Power spectral density :math:`S_i`, broadcastable against ``a`` and
         ``b``.
@@ -163,4 +165,4 @@ def noise_weighted_inner_product(
         Axis to contract over. Defaults to the trailing axis, so leading batch
         dimensions broadcast.
     """
-    return df * jnp.sum(a * b / psd**2, axis=axis)
+    return df * jnp.sum(jnp.conj(a) * b / psd**2, axis=axis)
