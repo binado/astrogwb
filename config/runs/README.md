@@ -8,16 +8,18 @@ config/runs/<experiment>/<run>.toml  ->  outputs/chains/<experiment>/<run>.nc
 
 The packaged detector geometry and sensitivity tables use the same
 `[detectors.<name>]` layout as the shared registry and are merged first with
-pyknf. A run is four layers merged over those defaults in order:
+pyknf. A run is six layers merged over those defaults in order:
 
 ```text
-config/defaults.toml  ->  config/detectors.toml
-  ->  <experiment>/_base.toml  ->  <run>.toml
+config/defaults.toml  ->  config/waveforms.toml  ->  config/populations.toml
+  ->  config/detectors.toml  ->  <experiment>/_base.toml  ->  <run>.toml
 ```
 
-`config/defaults.toml` declares shared scientific values, and
-`config/detectors.toml` declares networks and optional detector overrides.
-Both are inherited by every run.
+`config/defaults.toml` declares shared scientific values and the default
+catalog draw; `config/waveforms.toml` and `config/populations.toml` declare the
+named waveforms and populations a catalog or target refers to by
+`"${...}"` reference; `config/detectors.toml` declares networks and optional
+detector overrides. All four are inherited by every run.
 A run file carries only what distinguishes it. `_base.toml` is the experiment
 override and is required in every experiment directory -- a conditional
 Snakemake input would complicate the DAG for no gain. It is not a run, so it
@@ -46,16 +48,17 @@ model, the merge rules, and how to run one.
 
 ## The catalogs
 
-Each run declares what its two catalogs draw in `[analysis.catalog]`: a
-partial spec per role, over the run's own `[waveform]`, `[population]` and
-`[fiducials]`. The file is `outputs/catalogs/<key>.h5`, named by the hash of the
+Each run declares what its two catalogs draw as `[analysis.injection]` and
+`[analysis.proposal]`, each a `CatalogMetadata` once its references resolve. A
+run sets only the fields that differ: a size, a seed, or a named population or
+waveform. The file is `outputs/catalogs/<key>.h5`, named by the hash of the
 resolved request, so runs that ask for the same draw share one file.
 `just catalogs` lists every key, what it draws, and which runs use it. See
 [`docs/catalog-generation.md`](../../docs/catalog-generation.md).
 
-`config/defaults.toml` sets the default for both roles: a seed-41,
-32768-source draw from the shared `[population]` with the shared IMRPhenom
-waveform. That one catalog is the injection -- the "observed" data -- of every
+`config/defaults.toml` sets the default for both roles, `[catalog]`: a
+seed-41, 32768-source draw from `[populations.cosmological]` with the
+IMRPhenom `[waveforms.default]`. That one catalog is the injection -- the "observed" data -- of every
 run except `time-delay`, and the proposal of `cosmological-parameters`,
 `modified-propagation` and `waveform-approximant/IMRPhenom`.
 
@@ -64,10 +67,10 @@ The overrides, and who uses each; the file that declares a draw says why:
 | Draw | Role | Used by |
 | --- | --- | --- |
 | seed 42, n = 8192 / 16384 / 32768 | proposal | `variable-catalog-size` |
-| `bns_md_uniform_mixture`, eps = 0.1, seed 61, n = 16384 | proposal | `astrophysical-parameters`, `variable-proposal-guard/eps1e-1`, `time-delay` (a separate copy, drawn at its own fiducials) |
-| `bns_md_uniform_mixture`, eps = 0.01 / 0.001, seeds 62 / 63, n = 16384 | proposal | `variable-proposal-guard` |
-| `waveform.approximant = "TaylorF2"`, seed 41 | proposal | `waveform-approximant/TaylorF2` |
-| `bns_md_time_delayed_cosmological`, seed 71 | injection | `time-delay` |
+| `[populations.guard]` (`bns_md_uniform_mixture`, eps = 0.1, seed 61), n = 16384 | proposal | `astrophysical-parameters`, `variable-proposal-guard/eps1e-1`, `time-delay` (a separate copy, drawn at its own fiducials) |
+| `[populations.guard]` at eps = 0.01 / 0.001, seeds 62 / 63, n = 16384 | proposal | `variable-proposal-guard` |
+| `[waveforms.TaylorF2]`, seed 41 | proposal | `waveform-approximant/TaylorF2` |
+| `[populations.time_delayed]` (`bns_md_time_delayed_cosmological`, seed 71) | injection | `time-delay` |
 
 ## Adding one
 

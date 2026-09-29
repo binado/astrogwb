@@ -17,7 +17,13 @@ from typing import Any
 
 import tomli_w
 
-from astrogwb.paper.config.runs import DEFAULTS_PATH, DETECTORS_PATH, assemble_run
+from astrogwb.paper.config.runs import (
+    DEFAULTS_PATH,
+    DETECTORS_PATH,
+    POPULATIONS_PATH,
+    WAVEFORMS_PATH,
+    assemble_run,
+)
 
 # One sampled parameter (H0) on a three-detector network: the smallest assembly
 # that still carries a prior, a full [fiducials] table, and real detectors.
@@ -30,23 +36,29 @@ def example_raw() -> dict[str, Any]:
     return assemble_run(EXAMPLE_EXPERIMENT, EXAMPLE_RUN)
 
 
+def _role(seed: int) -> dict[str, Any]:
+    """A catalog role over the default waveform and population, at ``seed``."""
+    return {
+        "waveform": "${waveforms.default}",
+        "fiducials": "${fiducials}",
+        "num_samples": 8,
+        "population": {
+            "model_name": "${populations.default.model_name}",
+            "model_kwargs": "${populations.default.model_kwargs}",
+            "seed": seed,
+        },
+    }
+
+
 #: The smallest ``[analysis]`` and ``[sampler]`` blocks that validate. Neither
 #: is what any test using them is about -- they exist because
 #: `base_config_paths` requires a complete shared layer.
 _MINIMAL_ANALYSIS: dict[str, Any] = {
     "minimum_frequency": 2.0,
     "maximum_frequency": 2048.0,
-    "population": {
-        "model_kwargs": {
-            "minimum_redshift": 0.3,
-            "maximum_redshift": 20.0,
-            "n_grid": 256,
-        }
-    },
-    "catalog": {
-        "injection": {"seed": 1, "num_samples": 8},
-        "proposal": {"seed": 2, "num_samples": 8},
-    },
+    "population": "${populations.target}",
+    "injection": _role(1),
+    "proposal": _role(2),
 }
 _MINIMAL_SAMPLER: dict[str, Any] = {"num_warmup": 2, "num_samples": 4}
 _MINIMAL_WAVEFORM: dict[str, Any] = {
@@ -57,9 +69,25 @@ _MINIMAL_WAVEFORM: dict[str, Any] = {
     "sampling_frequency": 64.0,
     "frequency_resolution": 2.0,
 }
-_MINIMAL_POPULATION: dict[str, Any] = {
-    "model_name": "bns_md_cosmological",
-    "model_kwargs": {"minimum_redshift": 0.0, "maximum_redshift": 20.0, "n_grid": 64},
+_MINIMAL_POPULATIONS: dict[str, Any] = {
+    "default": {
+        "model_name": "bns_md_cosmological",
+        "model_kwargs": {
+            "minimum_redshift": 0.0,
+            "maximum_redshift": 20.0,
+            "n_grid": 64,
+        },
+        "seed": 1,
+    },
+    "target": {
+        "model_name": "bns_md_modified_propagation",
+        "model_kwargs": {
+            "minimum_redshift": 0.3,
+            "maximum_redshift": 20.0,
+            "n_grid": 256,
+        },
+        "seed": 0,
+    },
 }
 
 
@@ -72,29 +100,44 @@ def write_defaults(
     priors: dict[str, Any] | None = None,
     sampler: dict[str, Any] | None = None,
     waveform: dict[str, Any] | None = None,
-    population: dict[str, Any] | None = None,
+    populations: dict[str, Any] | None = None,
 ) -> None:
-    """Write a minimal shared ``config/defaults.toml`` into a scratch tree.
+    """Write the four minimal shared layers into a scratch tree.
 
-    Every path helper goes through `base_config_paths`, which requires
-    :data:`DEFAULTS_PATH`, so a tmp_path tree that exercises the run or catalog
-    layers needs every block to exist even when the test says nothing about
-    it. Defaults are the smallest mappings that parse; pass a block explicitly
-    when the test is about its content.
+    Every path helper goes through `base_config_paths`, which requires each
+    shared layer, so a tmp_path tree that exercises the run or catalog layers
+    needs every block to exist even when the test says nothing about it.
+    Defaults are the smallest mappings that validate; pass a block explicitly
+    when the test is about its content. ``waveform`` is written as
+    ``[waveforms.default]``, and ``populations`` must name a ``default`` and a
+    ``target``.
     """
-    tables: dict[str, Any] = {
+    defaults = {
         "analysis": analysis if analysis is not None else _MINIMAL_ANALYSIS,
         "fiducials": fiducials if fiducials is not None else {"H0": 67.66},
-        "networks": networks if networks is not None else {"demo": ["S1", "R1"]},
         "priors": priors
         if priors is not None
         else {"H0": {"dist": "Uniform", "kwargs": {"low": 20.0, "high": 140.0}}},
         "sampler": sampler if sampler is not None else _MINIMAL_SAMPLER,
-        "waveform": waveform if waveform is not None else _MINIMAL_WAVEFORM,
-        "population": population if population is not None else _MINIMAL_POPULATION,
     }
-    target = root / DEFAULTS_PATH
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shared = {"networks": tables.pop("networks"), "detectors": {}}
-    target.write_text(tomli_w.dumps(tables), encoding="utf-8")
-    (root / DETECTORS_PATH).write_text(tomli_w.dumps(shared), encoding="utf-8")
+    layers = {
+        DEFAULTS_PATH: defaults,
+        WAVEFORMS_PATH: {
+            "waveforms": {
+                "default": waveform if waveform is not None else _MINIMAL_WAVEFORM
+            }
+        },
+        POPULATIONS_PATH: {
+            "populations": populations
+            if populations is not None
+            else _MINIMAL_POPULATIONS
+        },
+        DETECTORS_PATH: {
+            "networks": networks if networks is not None else {"demo": ["S1", "R1"]},
+            "detectors": {},
+        },
+    }
+    for path, tables in layers.items():
+        target = root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(tomli_w.dumps(tables), encoding="utf-8")

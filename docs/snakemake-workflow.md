@@ -11,8 +11,8 @@ All commands run with the repository root as their working directory.
 Source inputs live under `config/`; generated artifacts live under `outputs/`.
 
 The Snakefile computes its own inputs from that tree: `discover_runs()` globs
-`config/runs/*/`, and `resolve_run_catalogs()` resolves every run's two
-`[analysis.catalog]` roles into keyed requests, because what a run draws is
+`config/runs/*/`, and `resolve_run_catalogs()` validates every run's
+`[analysis.injection]` and `[analysis.proposal]` into keyed requests, because what a run draws is
 known only after its layers are merged. No registry file translates a name into
 a path.
 
@@ -41,7 +41,7 @@ One rule does the whole thing: it hands `scripts/generate_catalog.py` the
 resolved request as JSON, which draws the registered population in-process and
 generates waveforms for those rows. The rule declares no config inputs: the
 path *is* the request's key, so editing anything a catalog is drawn from --
-the run's `[waveform]`, `[population]` or `[fiducials]`, a role's spec, or the `astrogwb` version -- names a new file rather than
+a named waveform or population, the run's `[fiducials]`, a role's fields, or the `astrogwb` version -- names a new file rather than
 invalidating the old one. `just catalogs --orphans` lists the files left behind.
 The `--allowed-rules` filter keeps catalog generation explicit. MCMC commands
 omit these rules, so a missing catalog stops MCMC with a
@@ -53,8 +53,9 @@ what a catalog records about itself.
 ## Experiment workflow
 
 [`config/runs/`](../config/runs/) holds one `_base.toml` per experiment and one
-TOML file per run, over shared `config/defaults.toml` and `config/detectors.toml`.
-`run_mcmc` declares those four layers as its own `input:` and passes them, in merge order, as
+TOML file per run, over the shared `config/defaults.toml`, `config/waveforms.toml`,
+`config/populations.toml` and `config/detectors.toml`.
+`run_mcmc` declares those six layers as its own `input:` and passes them, in merge order, as
 repeated `--config` flags. The packaged `geometry.toml` and `sensitivity.toml`
 are also inputs of every chain and of `importance_weights_grid`. The script merges those
 registry tables and the run layers in process with `knf`, then writes:
@@ -69,7 +70,7 @@ its `input:` was already exactly these files, so it only turned files the
 chain already depended on into a copy of themselves. The rule is a per-run
 wildcard on `{experiment}/{run}`, so editing a run's file retriggers exactly
 its own chain, editing a `_base.toml` retriggers its experiment, and editing
-either shared layer retriggers all 27.
+any shared layer retriggers all 27.
 
 That granularity is what removed the stale-input wrapper the old workflow
 needed: one rule used to emit all 27 configs at once, so any edit invalidated

@@ -27,7 +27,6 @@ from astrogwb.paper.config.runs import (
     EXPERIMENT_BASE,
     RUNS_DIR,
     assemble_run,
-    catalog_blocks,
     discover_runs,
     load_base,
     merge_config_layers,
@@ -136,7 +135,8 @@ def test_base_files_merge_into_one_mapping() -> None:
     # state its own, or inherit someone else's silently.
     assert "network" not in base["analysis"]
     assert "detectors" not in base["analysis"]
-    # The shared layer declares every block of a run config.
+    # The shared layers declare every block of a run config, plus the tables
+    # that exist only to be referenced.
     assert set(base) == {
         "analysis",
         "fiducials",
@@ -144,9 +144,23 @@ def test_base_files_merge_into_one_mapping() -> None:
         "detectors",
         "priors",
         "sampler",
-        "waveform",
-        "population",
+        "catalog",
+        "waveforms",
+        "populations",
     }
+
+
+def test_base_files_resolve_every_reference() -> None:
+    """No ``${...}`` survives the merge: every reference names a real table."""
+
+    def strings(value: object) -> list[str]:
+        if isinstance(value, dict):
+            return [s for item in value.values() for s in strings(item)]
+        if isinstance(value, list):
+            return [s for item in value for s in strings(item)]
+        return [value] if isinstance(value, str) else []
+
+    assert not [s for s in strings(load_base()) if "${" in s]
 
 
 def test_no_run_declares_a_raw_detector_list() -> None:
@@ -222,32 +236,39 @@ def test_run_config_and_raw_merge_key_a_catalog_identically(
 # --------------------------------------------------------------------------- #
 # Catalog resolution
 # --------------------------------------------------------------------------- #
-def test_catalog_blocks_inherit_the_run_blocks_under_a_role_override() -> None:
-    """The eps=0.1 guard names its own population but keeps the shared window."""
-    blocks = catalog_blocks("variable-proposal-guard", "eps1e-1", "proposal")
-    shared = load_base()["population"]["model_kwargs"]
+@pytest.mark.parametrize(
+    ("run", "seed", "fraction"),
+    [("eps1e-1", 61, 0.1), ("eps1e-2", 62, 0.01), ("eps1e-3", 63, 0.001)],
+)
+def test_a_guard_customized_at_its_source_keeps_the_shared_window(
+    run: str, seed: int, fraction: float
+) -> None:
+    """Each run overrides [populations.guard] itself; its proposal follows."""
+    raw = assemble_run("variable-proposal-guard", run)
+    proposal = CatalogMetadata.model_validate(raw["analysis"]["proposal"])
+    window = raw["catalog"]["population"]["model_kwargs"]
 
-    assert blocks["population"]["model_name"] == "bns_md_uniform_mixture"
-    assert blocks["population"]["model_kwargs"] == {
-        **shared,
-        "uniform_mixing_fraction": 0.1,
+    assert proposal.population.model_name == "bns_md_uniform_mixture"
+    assert proposal.population.model_kwargs == {
+        **window,
+        "uniform_mixing_fraction": fraction,
     }
-    assert (blocks["seed"], blocks["num_samples"]) == (61, 16384)
+    assert (proposal.population.seed, proposal.num_samples) == (seed, 16384)
 
 
 def test_the_injection_is_drawn_at_the_fiducials_the_run_initializes_at() -> None:
     raw = assemble_run("time-delay", "delay-slope")
-    blocks = catalog_blocks("time-delay", "delay-slope", "injection")
+    injection = raw["analysis"]["injection"]
 
-    assert blocks["fiducials"] == raw["fiducials"]
-    assert blocks["fiducials"]["delay_slope"] == -1.0
-    assert blocks["population"]["model_name"] == "bns_md_time_delayed_cosmological"
+    assert injection["fiducials"] == raw["fiducials"]
+    assert injection["fiducials"]["delay_slope"] == -1.0
+    assert injection["population"]["model_name"] == "bns_md_time_delayed_cosmological"
 
 
 def test_the_catalog_size_series_differs_only_in_size() -> None:
     requests = [
-        CatalogMetadata.from_blocks(
-            **catalog_blocks("variable-catalog-size", run, "proposal")
+        CatalogMetadata.model_validate(
+            assemble_run("variable-catalog-size", run)["analysis"]["proposal"]
         )
         for run in ("n8192", "n16384", "n32768")
     ]
@@ -274,41 +295,32 @@ def test_runs_asking_for_the_same_draw_share_one_catalog() -> None:
     assert by_run[("waveform-approximant", "TaylorF2")]["proposal"] != shared
 
 
-@pytest.mark.parametrize(
-    ("catalog", "message"),
-    [
-        ({"injection": {"seed": 1, "num_samples": 8}}, r"analysis\.catalog\.proposal"),
-        (None, r"analysis\.catalog\.injection"),
-        (
-            {
-                "injection": {"seed": 1, "num_samples": 8},
-                "proposal": {"num_samples": 8},
-            },
-            r"analysis\.catalog\.proposal must declare seed",
-        ),
-    ],
-    ids=["missing-role", "missing-table", "missing-seed"],
-)
-def test_catalog_blocks_reject_malformed_catalogs(
-    tmp_path: Path, catalog: dict[str, object] | None, message: str
-) -> None:
-    experiment = tmp_path / "config/runs/demo"
+def _demo_run(root: Path, run_layer: str) -> None:
+    """A one-run experiment over the minimal shared layers."""
+    write_defaults(root)
+    experiment = root / "config/runs/demo"
     experiment.mkdir(parents=True)
-    analysis: dict[str, object] = {"minimum_frequency": 2.0}
-    if catalog is not None:
-        analysis["catalog"] = catalog
-    write_defaults(tmp_path, analysis=analysis)
     (experiment / EXPERIMENT_BASE).write_text("", encoding="utf-8")
-    (experiment / "only.toml").write_text("", encoding="utf-8")
+    (experiment / "only.toml").write_text(run_layer, encoding="utf-8")
 
-    with pytest.raises(TypeError, match=message):
-        for role in ("injection", "proposal"):
-            catalog_blocks("demo", "only", role, root=tmp_path)
+
+def test_a_dangling_reference_fails_the_merge_naming_it(tmp_path: Path) -> None:
+    _demo_run(tmp_path, '[analysis.proposal]\nwaveform = "${waveforms.absent}"\n')
+
+    with pytest.raises(knf.InterpolationError, match=r"waveforms\.absent"):
+        assemble_run("demo", "only", root=tmp_path)
+
+
+def test_an_incomplete_role_is_rejected_naming_it(tmp_path: Path) -> None:
+    """Setting a key under a reference replaces it: the waveform loses its band."""
+    _demo_run(tmp_path, '[analysis.proposal.waveform]\napproximant = "TaylorF2"\n')
+    with pytest.raises(ValueError, match=r"demo/only analysis\.proposal"):
+        resolve_run_catalogs(tmp_path)
 
 
 def test_a_guard_mixture_is_rejected_as_an_injection() -> None:
     raw = assemble_run("variable-proposal-guard", "eps1e-1")
-    raw["analysis"]["catalog"]["injection"] = raw["analysis"]["catalog"]["proposal"]
+    raw["analysis"]["injection"] = raw["analysis"]["proposal"]
     config = build_run_config(raw)
 
     with pytest.raises(ValueError, match="declares no merger rate"):
@@ -317,8 +329,9 @@ def test_a_guard_mixture_is_rejected_as_an_injection() -> None:
 
 def test_an_unregistered_catalog_population_is_rejected() -> None:
     raw = assemble_run("cosmological-parameters", "ET-triangular")
-    raw["analysis"]["catalog"]["proposal"]["population"] = {
-        "model_name": "no_such_population"
+    raw["analysis"]["proposal"]["population"] = {
+        "model_name": "no_such_population",
+        "seed": 1,
     }
     config = build_run_config(raw)
 
@@ -375,8 +388,8 @@ def test_run_mcmc_validates_the_layers_the_workflow_passes() -> None:
     # corrupted, reached the validated config as a Normal.
     assert type(config.priors["H0"]).__name__ == "Normal"
     assert config.analysis.sampled_params == ("xi_0",)
-    assert config.analysis.catalog.injection.seed == 41
-    assert config.waveform["approximant"] == "IMRPhenomXAS_NRTidalv3"
+    assert config.analysis.injection.population.seed == 41
+    assert config.analysis.injection.waveform.approximant == "IMRPhenomXAS_NRTidalv3"
     assert config.analysis.population.model_kwargs["n_grid"] == 256
 
 

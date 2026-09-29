@@ -4,16 +4,15 @@ The leaf modules (:mod:`~astrogwb.paper.config.runs`,
 :mod:`~astrogwb.paper.config.mcmc`, :mod:`~astrogwb.paper.config.catalogs`) are
 not re-exported; import them explicitly.
 
-What this package *does* expose is the three shared tables that
-``config/defaults.toml`` and ``config/detectors.toml`` declare as
-``[fiducials]``, ``[priors]`` and ``[networks]`` -- the same bytes the workflow merges into every run -- plus the
-three accessors that build something from the catalog defaults every run
-inherits: :func:`waveform_generator` from ``[waveform]``, and
-:func:`population_model` / :func:`population_metadata` from ``[population]``.
-Before the tables lived here, the notebook and the figure scripts each kept a
-hand-written copy, and those copies drifted: the notebook sampled
-``local_merger_rate`` under a prior that excluded its own fiducial. Consume
-them from here instead::
+What this package *does* expose is the tables the shared layers declare --
+``[fiducials]``, ``[priors]`` and ``[networks]``, the same bytes the workflow
+merges into every run -- plus the accessors that build something from the
+default draw every run inherits, ``[catalog]``: :func:`waveform_generator`
+from its waveform, and :func:`population_model` / :func:`population_metadata`
+from its population. Before the tables lived here, the notebook and the figure
+scripts each kept a hand-written copy, and those copies drifted: the notebook
+sampled ``local_merger_rate`` under a prior that excluded its own fiducial.
+Consume them from here instead::
 
     from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
 
@@ -47,25 +46,22 @@ script is the repository root -- the same contract as
 :mod:`astrogwb.paper.config.runs`. Tests, which pytest may invoke from
 anywhere, pass ``root=`` explicitly.
 
-Each accessor caches its parse and hands back a fresh copy, so a caller that
-mutates what it got does not poison the cache for everyone else -- overrides are
-merged *after* the cached parse, so they cannot either. A long-lived Jupyter
-session will not see an edit to the file until ``_load.cache_clear()``
-(or ``_load_registry.cache_clear()`` for detector definitions).
+Every accessor reads one cached merge of the shared layers, with its
+references resolved, so a table here is exactly what a run inherits. Each
+hands back a fresh copy, so a caller that mutates what it got does not poison
+the cache for everyone else -- overrides are merged *after* the cached parse,
+so they cannot either. A long-lived Jupyter session will not see an edit to a
+shared layer until ``_shared.cache_clear()``.
 """
 
 from __future__ import annotations
 
+import copy
 from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrogwb.paper.config.runs import (
-    DEFAULTS_PATH,
-    DETECTORS_PATH,
-    merge_config_layers,
-)
-from astrogwb.paper.utils import load_mapping
+from astrogwb.paper.config.runs import load_base
 
 if TYPE_CHECKING:
     from numpyro.distributions import Distribution
@@ -88,13 +84,22 @@ __all__ = [
 
 
 @cache
-def _load(path: Path, key: str) -> dict[str, Any]:
-    """Parse the shared layer file and return one block it declares."""
-    raw = load_mapping(path)
-    table = raw.get(key)
-    if not isinstance(table, dict):
-        raise TypeError(f"{path} must declare a [{key}] table")
-    return table
+def _shared(root: Path) -> dict[str, Any]:
+    """Merge the shared layers once, references resolved."""
+    return load_base(root)
+
+
+def _table(root: Path | None, *path: str) -> dict[str, Any]:
+    """A fresh copy of one table of the shared merge, addressed by key path."""
+    table: Any = _shared(root or Path())
+    for depth, key in enumerate(path):
+        table = table.get(key) if isinstance(table, dict) else None
+        if not isinstance(table, dict):
+            raise TypeError(
+                f"the shared config layers must declare a "
+                f"[{'.'.join(path[: depth + 1])}] table"
+            )
+    return copy.deepcopy(table)
 
 
 def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
@@ -115,10 +120,7 @@ def fiducials(root: Path | None = None, **kwargs: float) -> dict[str, float]:
     not declare. An added fiducial is the caller's to keep consistent with
     :func:`priors` -- only ``RunConfig`` cross-checks the two tables.
     """
-    table = {
-        **_load((root or Path()) / DEFAULTS_PATH, "fiducials"),
-        **kwargs,
-    }
+    table = {**_table(root, "fiducials"), **kwargs}
     return {name: float(value) for name, value in table.items()}
 
 
@@ -142,10 +144,7 @@ def priors(root: Path | None = None, **kwargs: Any) -> dict[str, Distribution]:
     # Snakefile's DAG construction imports this package via `config.runs`.
     from astrogwb.paper.config.mcmc import materialize_prior
 
-    table = {
-        **_load((root or Path()) / DEFAULTS_PATH, "priors"),
-        **kwargs,
-    }
+    table = {**_table(root, "priors"), **kwargs}
     return {name: materialize_prior(spec) for name, spec in table.items()}
 
 
@@ -169,17 +168,8 @@ def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ..
 
         networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})
     """
-    table = {
-        **_load((root or Path()) / DETECTORS_PATH, "networks"),
-        **kwargs,
-    }
+    table = {**_table(root, "networks"), **kwargs}
     return {name: tuple(detectors) for name, detectors in table.items()}
-
-
-@cache
-def _load_registry(path: Path) -> dict[str, Any]:
-    """Merge the shared registry file over packaged tables through pyknf."""
-    return merge_config_layers([path])
 
 
 def detector_registry(root: Path | None = None, **overrides: Any) -> DetectorRegistry:
@@ -191,7 +181,7 @@ def detector_registry(root: Path | None = None, **overrides: Any) -> DetectorReg
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.utils import deep_merge
 
-    shared = _load_registry((root or Path()) / DETECTORS_PATH)
+    shared = {name: _table(root, name) for name in ("detectors", "networks")}
     settings = deep_merge(shared, overrides)
     unknown = settings.keys() - {"detectors", "networks"}
     if unknown:
@@ -202,7 +192,7 @@ def detector_registry(root: Path | None = None, **overrides: Any) -> DetectorReg
 def waveform_generator(
     root: Path | None = None, **kwargs: Any
 ) -> PolarizationPowerGenerator:
-    """Build the polarization-power generator from the shared ``[waveform]``.
+    """Build the polarization-power generator the default draw uses.
 
     Keyword arguments override the file. ``approximant="AnalyticInspiral"`` selects
     the closed-form inspiral, and is the only approximant taking an ``alpha``;
@@ -222,7 +212,7 @@ def waveform_generator(
 
 
 def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetadata:
-    """The settings the shared ``[waveform]`` table declares, as a record.
+    """The waveform the default draw, ``[catalog]``, uses, as a record.
 
     What :func:`waveform_generator` builds, before it is built: the form a
     :class:`~astrogwb.metadata.SpectraMetadata` or a catalog request carries.
@@ -231,12 +221,12 @@ def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetada
     """
     from astrogwb.metadata import WaveformMetadata
 
-    settings = {**_load((root or Path()) / DEFAULTS_PATH, "waveform"), **kwargs}
+    settings = {**_table(root, "catalog", "waveform"), **kwargs}
     return WaveformMetadata.model_validate(settings)
 
 
 def population_model(root: Path | None = None, **kwargs: float) -> Population:
-    """Build the generating population from the shared ``[population]``.
+    """Build the population the default draw, ``[catalog]``, is drawn from.
 
     Returns the registered :class:`~astrogwb.populations.registry.Population` --
     source model and merger rate together -- with its construction settings
@@ -254,36 +244,27 @@ def population_model(root: Path | None = None, **kwargs: float) -> Population:
     ``configure_runtime``. Keeping the import here is what lets the ``Snakefile``
     import this package to build its DAG.
     """
-    from astrogwb.populations import build_population
-
-    table = _load((root or Path()) / DEFAULTS_PATH, "population")
-    settings = {**table.get("model_kwargs", {}), **kwargs}
-    return build_population(table["model_name"], **settings)
+    return population_metadata(root).with_model_kwargs(**kwargs).build()
 
 
 def population_metadata(
-    root: Path | None = None, *, seed: int, **kwargs: float
+    root: Path | None = None, *, seed: int | None = None, **kwargs: float
 ) -> PopulationMetadata:
-    """The record a catalog drawn from the shared ``[population]`` carries.
+    """The record the default draw, ``[catalog]``, carries for its population.
 
-    ``seed`` is required and has no entry in the file: the shared layer declares
-    the population, while a particular draw of it declares the seed -- which is
-    why each role in a run's ``[analysis.catalog]`` carries one and the shared
-    ``[population]`` does not.
-
-    Keyword arguments override ``model_kwargs``, validated rather than trusted,
-    so this accessor and :class:`~astrogwb.metadata.CatalogMetadata` reach a
-    record down the same path. An already-built record is re-derived with
+    ``seed`` overrides the file's, which is the default draw's own. Keyword
+    arguments override ``model_kwargs``, validated rather than trusted, so this
+    accessor and :class:`~astrogwb.metadata.CatalogMetadata` reach a record down
+    the same path. An already-built record is re-derived with
     :meth:`~astrogwb.metadata.PopulationMetadata.with_model_kwargs`.
 
-    Imports the registry in its own body, and is not safe to call before
-    ``configure_runtime``, for the reason :func:`population_model` gives.
+    Touches no JAX, so it is safe before ``configure_runtime``; building the
+    record's population is not, for the reason :func:`population_model` gives.
     """
     from astrogwb.metadata import PopulationMetadata
 
-    table = _load((root or Path()) / DEFAULTS_PATH, "population")
-    return PopulationMetadata(
-        model_name=table["model_name"],
-        model_kwargs={**table.get("model_kwargs", {}), **kwargs},
-        seed=seed,
-    )
+    table = _table(root, "catalog", "population")
+    table["model_kwargs"] = {**table.get("model_kwargs", {}), **kwargs}
+    if seed is not None:
+        table["seed"] = seed
+    return PopulationMetadata.model_validate(table)

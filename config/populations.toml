@@ -1,0 +1,68 @@
+# Named populations, each a complete astrogwb.metadata.PopulationMetadata: a
+# registered model, its construction kwargs, and the seed a draw from it uses.
+# A catalog or an analysis target picks one by reference --
+# population = "${populations.guard}".
+#
+# The redshift window is stated once, in [populations.cosmological], and every
+# other population references its leaves, so narrowing it narrows them all.
+# A reference is atomic: to change a population for one run -- a seed, a
+# mixing fraction -- override it here, at its source, in that run's layer.
+
+# The population every catalog is drawn from unless its role names another.
+[populations.cosmological]
+model_name = "bns_md_cosmological"
+model_kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 4096 }
+seed = 41
+
+# The guarded proposal: the cosmological population mixed with a uniform
+# component, so no region the target reaches has vanishing proposal density.
+# It declares no merger rate, so it can only ever be a proposal.
+[populations.guard]
+model_name = "bns_md_uniform_mixture"
+seed = 61
+
+[populations.guard.model_kwargs]
+minimum_redshift = "${populations.cosmological.model_kwargs.minimum_redshift}"
+maximum_redshift = "${populations.cosmological.model_kwargs.maximum_redshift}"
+n_grid = "${populations.cosmological.model_kwargs.n_grid}"
+uniform_mixing_fraction = 0.1
+
+# Mergers delayed from star formation, drawn for the time-delay injection.
+[populations.time_delayed]
+model_name = "bns_md_time_delayed_cosmological"
+seed = 71
+
+[populations.time_delayed.model_kwargs]
+minimum_redshift = "${populations.cosmological.model_kwargs.minimum_redshift}"
+maximum_redshift = "${populations.cosmological.model_kwargs.maximum_redshift}"
+n_grid = "${populations.cosmological.model_kwargs.n_grid}"
+minimum_delay = 0.02
+maximum_formation_redshift = 20.0
+n_delay_nodes = 48
+
+# The analysis target every run's weights are evaluated at. It reduces exactly
+# to the cosmological population at xi_0 = 1, which is how a run that does not
+# sample the propagation parameters gets the standard law. The grid is coarser
+# than a draw's: it is the grid the spectral integral runs on. A target is
+# evaluated, not drawn from, so its seed is unused.
+[populations.target]
+model_name = "bns_md_modified_propagation"
+seed = 0
+
+[populations.target.model_kwargs]
+minimum_redshift = "${populations.cosmological.model_kwargs.minimum_redshift}"
+maximum_redshift = "${populations.cosmological.model_kwargs.maximum_redshift}"
+n_grid = 256
+
+# The time-delayed population as an analysis target, on the target's grid.
+[populations.time_delayed_target]
+model_name = "bns_md_time_delayed_cosmological"
+seed = 0
+
+[populations.time_delayed_target.model_kwargs]
+minimum_redshift = "${populations.target.model_kwargs.minimum_redshift}"
+maximum_redshift = "${populations.target.model_kwargs.maximum_redshift}"
+n_grid = "${populations.target.model_kwargs.n_grid}"
+minimum_delay = "${populations.time_delayed.model_kwargs.minimum_delay}"
+maximum_formation_redshift = "${populations.time_delayed.model_kwargs.maximum_formation_redshift}"
+n_delay_nodes = "${populations.time_delayed.model_kwargs.n_delay_nodes}"

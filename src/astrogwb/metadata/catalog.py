@@ -118,33 +118,3 @@ class CatalogMetadata(BaseModel):
             "population": payload.pop("population"),
         }
         return content_key(payload)
-
-    @classmethod
-    def from_blocks(
-        cls,
-        *,
-        population: dict[str, Any],
-        waveform: dict[str, Any],
-        fiducials: dict[str, float],
-        seed: int,
-        num_samples: int,
-        version: str | None = None,
-    ) -> CatalogMetadata:
-        """Assemble a record from config-shaped blocks.
-
-        ``population`` is the config's ``{model_name, model_kwargs}`` block:
-        the seed belongs to the draw, so it is supplied on its own and folded
-        into the record here. A block that declares one anyway is rejected
-        rather than silently overridden.
-        """
-        if "seed" in population:
-            raise ValueError("population may not declare seed: it is the draw's own")
-        data: dict[str, Any] = {
-            "waveform": waveform,
-            "population": {**population, "seed": seed},
-            "fiducials": fiducials,
-            "num_samples": num_samples,
-        }
-        if version is not None:
-            data["version"] = version
-        return cls.model_validate(data)

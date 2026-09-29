@@ -2,11 +2,11 @@
 
 A *catalog* is one persisted waveform draw: expensive to build (population
 draw + ripple waveform generation) and shared by every run that asks for the
-same one. A run declares what it needs in ``[analysis.catalog]`` -- a partial
-spec per role, resolved over the run's own ``[waveform]``, ``[population]``
-and ``[fiducials]`` into a :class:`~astrogwb.metadata.CatalogMetadata` -- and
-the file lives at ``outputs/catalogs/<key>.h5``, where ``<key>`` is that
-request's content hash. No name translates between the two.
+same one. A run declares what it needs in ``[analysis.injection]`` and
+``[analysis.proposal]`` -- each a :class:`~astrogwb.metadata.CatalogMetadata`
+once the merge has resolved its references -- and the file lives at
+``outputs/catalogs/<key>.h5``, where ``<key>`` is that request's content hash.
+No name translates between the two.
 
 Once built, the *file* is authoritative about what it holds, and
 ``scripts/run_mcmc.py`` checks it against the request its run resolves.
@@ -31,12 +31,7 @@ from astrogwb.paper.config.mcmc import (
     build_run_config,
     check_redshift_grid,
 )
-from astrogwb.paper.config.runs import (
-    CATALOG_ROLES,
-    assemble_run,
-    discover_runs,
-    resolve_catalog_blocks,
-)
+from astrogwb.paper.config.runs import CATALOG_ROLES, assemble_run, discover_runs
 
 logger = logging.getLogger(__name__)
 
@@ -100,18 +95,14 @@ def check_population_model(
 def check_catalog_requests(config: RunConfig, *, label: str) -> None:
     """Reject a run whose catalogs could not be drawn.
 
-    Resolves each role into its request -- which validates the waveform
-    settings and the population record -- and builds the population it names,
-    so an unregistered name or a construction setting it does not take fails
-    here rather than at the top of a queued generation job.
+    Each role is already a validated record, so what is left is to check its
+    redshift window and build the population it names: an unregistered name or
+    a construction setting it does not take fails here rather than at the top
+    of a queued generation job.
     """
     for role in CATALOG_ROLES:
-        role_label = f"{label} analysis.catalog.{role}"
-        try:
-            request = config.catalog_request(role)
-        except ValueError as error:
-            raise ValueError(f"{role_label}: {error}") from None
-        population = request.population
+        role_label = f"{label} analysis.{role}"
+        population = config.catalog_request(role).population
         check_redshift_grid(
             population.model_kwargs, label=f"{role_label}.population.model_kwargs"
         )
@@ -155,24 +146,21 @@ def resolve_run_catalogs(root: Path | None = None) -> RunCatalogs:
     Works off the raw merge rather than a validated :class:`RunConfig`, so the
     ``Snakefile`` can build its DAG without validating all 27 runs; the request
     itself is still validated, because the key is taken over its canonical
-    form. ``RunConfig.catalog_request`` goes through the same
-    :func:`~astrogwb.paper.config.runs.resolve_catalog_blocks`, and a test pins
-    the two agreeing.
+    form. ``RunConfig`` validates the same merged table, and a test pins the
+    two agreeing.
     """
     requests: dict[str, CatalogMetadata] = {}
     by_run: dict[tuple[str, str], dict[str, str]] = {}
     for experiment, names in discover_runs(root).items():
         for run in names:
-            raw = assemble_run(experiment, run, root=root)
+            analysis = assemble_run(experiment, run, root=root).get("analysis") or {}
             roles: dict[str, str] = {}
             for role in CATALOG_ROLES:
                 try:
-                    request = CatalogMetadata.from_blocks(
-                        **resolve_catalog_blocks(raw, role)
-                    )
+                    request = CatalogMetadata.model_validate(analysis.get(role))
                 except ValueError as error:
                     raise ValueError(
-                        f"{experiment}/{run} analysis.catalog.{role}: {error}"
+                        f"{experiment}/{run} analysis.{role}: {error}"
                     ) from None
                 key = request.key()
                 requests.setdefault(key, request)

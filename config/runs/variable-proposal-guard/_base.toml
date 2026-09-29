@@ -10,3 +10,9 @@ network = "ET-2L-aligned-CE-Hanford"
 likelihood = "amplitude_marginalized"
 amplitude_parameter = "H0"
 amplitude_num_nodes = 1024
+
+# Every run's proposal is a 16384-source guard draw; each run sets its own
+# eps and mixture seed on [populations.guard].
+[analysis.proposal]
+population = "${populations.guard}"
+num_samples = 16384

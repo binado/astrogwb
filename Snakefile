@@ -34,7 +34,8 @@ CATALOG_PATTERN = str(CATALOGS_DIR / "{catalog}.h5")
 
 # Filenames are the mapping for runs: config/runs/<experiment>/<run>.toml ->
 # outputs/chains/<experiment>/<run>.nc. Catalogs are content-addressed instead:
-# each run's [analysis.catalog] roles resolve to a CatalogMetadata, and its key
+# each run's [analysis.injection] / [analysis.proposal] resolve to a
+# CatalogMetadata, and its key
 # names outputs/catalogs/<key>.h5. Two runs asking for the same draw share
 # one file, and any edit to a draw -- or a bump of the astrogwb version -- names
 # a new one, so the catalog rule needs no config inputs to rebuild correctly.
@@ -192,9 +193,9 @@ rule run_mcmc:
     """Sample one run into outputs/chains/<experiment>/<run>.nc."""
     input:
         script="scripts/run_mcmc.py",
-        # The run's four layers: edit a leaf -> one chain; edit an
+        # The run's six layers: edit a leaf -> one chain; edit an
         # experiment's _base.toml -> that experiment; edit
-        # either shared config layer -> all 27. The catalogs are named by key, so an
+        # any shared config layer -> all 27. The catalogs are named by key, so an
         # edit to a draw reaches the chain through a new catalog path too.
         config=lambda w: config_layers(w.experiment, w.run),
         psds=DETECTOR_INPUTS,

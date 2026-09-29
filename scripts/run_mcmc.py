@@ -22,21 +22,23 @@ Usage -- one ``--config`` per layer, in merge order::
     RUN=config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml
     BASE=config/runs/cosmological-parameters/_base.toml
     uv run --extra paper python scripts/run_mcmc.py \
-        --config config/defaults.toml --config config/detectors.toml \
+        --config config/defaults.toml --config config/waveforms.toml \
+        --config config/populations.toml --config config/detectors.toml \
         --config $BASE --config $RUN \
         --injection-catalog outputs/catalogs/<injection key>.h5 \
         --proposal-catalog outputs/catalogs/<proposal key>.h5
 
 ``scripts/catalogs.py ls`` prints each run's two keys, and
-``knf <layers> --shallow 'priors.*'`` prints the config those layers merge to.
+``knf <layers> --shallow 'priors.*' --interpolate`` prints the config those
+layers merge to.
 
 The layers are merged in process by ``merge_config_layers`` -- the same fold
 the notebooks, the figure scripts and the validation gate take -- and the
 ``run_mcmc`` workflow rule declares the same files as its ``input:``. The
 resolved, defaults-filled config lands beside the chain.
 
-The run config's ``[analysis.catalog]`` block declares what each role draws;
-the two files are supplied directly as ``--injection-catalog`` and
+The run config's ``[analysis.injection]`` and ``[analysis.proposal]`` declare
+what each role draws; the two files are supplied directly as ``--injection-catalog`` and
 ``--proposal-catalog``. Each file is checked against the request its role
 resolves to before JAX claims a device, so a file handed to the wrong role, or
 one built from a config that has since changed, is refused rather than
@@ -100,14 +102,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file answering this run's [analysis.catalog].injection.",
+        help="The catalog file answering this run's [analysis.injection].",
     )
     parser.add_argument(
         "--proposal-catalog",
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file answering this run's [analysis.catalog].proposal.",
+        help="The catalog file answering this run's [analysis.proposal].",
     )
     parser.add_argument(
         "--seed",
@@ -181,7 +183,7 @@ def run(
         detectors=detectors,
         sensitivities=sensitivities,
         target=target_population(config),
-        density_sites=config.analysis.population.density_sites,
+        density_sites=config.analysis.density_sites,
     )
     model, marginalization = build_model(
         config,

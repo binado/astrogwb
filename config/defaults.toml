@@ -1,15 +1,20 @@
 # The shared run layer: every top-level block of a run config, with the value
 # every run inherits unless its experiment's _base.toml or its own file
-# overrides it. A run is four layers merged in order:
+# overrides it. A run is six layers merged in order:
 #
-#   config/defaults.toml -> config/detectors.toml
-#   -> config/runs/<experiment>/_base.toml -> <run>.toml
+#   config/defaults.toml -> config/waveforms.toml -> config/populations.toml
+#   -> config/detectors.toml -> config/runs/<experiment>/_base.toml -> <run>.toml
 #
 # Tables merge key by key; arrays and values replace. The one exception is
 # [priors]: an overridden [priors.<param>] replaces the inherited one whole.
+#
+# After the merge, every "${a.b}" string is replaced by the merged value at
+# a.b. A reference is atomic: a later layer that sets a key *under* one
+# replaces the whole reference, so a table whose fields a run may override one
+# at a time is written here as one reference per field.
 
-# Observing time, frequency band, the target population and its redshift grid,
-# and the two catalogs every run uses.
+# Observing time, frequency band, the target population, and the two catalogs
+# every run uses.
 #
 # Neither a network nor a detector list is ever a shared default: a run that
 # names no analysis.network must fail rather than silently inherit someone
@@ -18,22 +23,53 @@
 observation_time = 1.0
 minimum_frequency = 2.0
 maximum_frequency = 2048.0
+# The analysis target the weights are evaluated at -- not a catalog's
+# population, which is [catalog].population below.
+population = "${populations.target}"
 
-# The analysis target the weights are evaluated at -- not the catalog default,
-# which is the top-level [population] below.
-[analysis.population]
-model_name = "bns_md_modified_propagation"
-model_kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 256 }
-
-# Both roles default to one seed-41, 32768-source draw from [population] with
-# the shared IMRPhenom [waveform]. That catalog is the injection -- the
-# "observed" data -- of every run except time-delay, and the proposal of
+# Both roles default to the [catalog] draw. That catalog is the injection --
+# the "observed" data -- of every run except time-delay, and the proposal of
 # cosmological-parameters, modified-propagation and
-# waveform-approximant/IMRPhenom. Each run's catalogs are drawn at its own
-# [fiducials], so editing [fiducials] re-keys every catalog.
-[analysis.catalog]
-injection = { seed = 41, num_samples = 32768 }
-proposal = { seed = 41, num_samples = 32768 }
+# waveform-approximant/IMRPhenom. A run changes one field of a role -- its
+# seed, its size, its population or waveform -- by setting just that field.
+[analysis.injection]
+waveform = "${catalog.waveform}"
+fiducials = "${catalog.fiducials}"
+num_samples = "${catalog.num_samples}"
+
+[analysis.injection.population]
+model_name = "${catalog.population.model_name}"
+model_kwargs = "${catalog.population.model_kwargs}"
+seed = "${catalog.population.seed}"
+
+[analysis.proposal]
+waveform = "${catalog.waveform}"
+fiducials = "${catalog.fiducials}"
+num_samples = "${catalog.num_samples}"
+
+[analysis.proposal.population]
+model_name = "${catalog.population.model_name}"
+model_kwargs = "${catalog.population.model_kwargs}"
+seed = "${catalog.population.seed}"
+
+# The default draw, shaped like astrogwb.metadata.CatalogMetadata: a 32768-source
+# draw from the cosmological population with the default waveform. It is
+# drawn at the run's own [fiducials], so editing [fiducials] re-keys every
+# catalog. The record's version is the installed astrogwb's, never the config's.
+#
+# A reference can name another reference, but not reach *through* one:
+# "${catalog.population.seed}" cannot resolve if [catalog].population is
+# itself "${populations.cosmological}". So the population the roles reach into
+# field by field is spelled one reference per field here too.
+[catalog]
+waveform = "${waveforms.default}"
+fiducials = "${fiducials}"
+num_samples = 32768
+
+[catalog.population]
+model_name = "${populations.cosmological.model_name}"
+model_kwargs = "${populations.cosmological.model_kwargs}"
+seed = "${populations.cosmological.seed}"
 
 # The fiducial value of every parameter: where NUTS initializes, and what a
 # run's catalogs are drawn at.
@@ -75,18 +111,3 @@ max_tree_depth = 10
 forward_mode_differentiation = false
 progress_bar = true
 jit_model_args = true
-
-# The waveform settings every catalog of a run inherits, unless a catalog role
-# overrides them.
-[waveform]
-approximant = "IMRPhenomXAS_NRTidalv3"
-sampling_frequency = 8192.0
-minimum_frequency = 2.0
-maximum_frequency = 2048.0
-reference_frequency = 20.0
-frequency_resolution = 1.0
-
-# The population a run's catalogs are drawn from, unless a role overrides it.
-[population]
-model_name = "bns_md_cosmological"
-model_kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 4096 }

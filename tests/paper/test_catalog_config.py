@@ -1,6 +1,6 @@
 """The catalogs the committed runs ask for, and the populations they name.
 
-A run's ``[analysis.catalog]`` roles resolve to requests; once a catalog is
+A run's ``[analysis.injection]`` and ``[analysis.proposal]`` are requests; once a catalog is
 built, its *file* is authoritative about what it holds, and ``run_mcmc`` checks
 it against the request. What is left to check here is that every committed
 request can actually be drawn.
@@ -183,19 +183,21 @@ def _waveform(approximant: str, alpha: float | None = None) -> dict[str, object]
 
 
 def _request(waveform: dict[str, object]) -> CatalogMetadata:
-    return CatalogMetadata.from_blocks(
-        population={
-            "model_name": "bns_md_cosmological",
-            "model_kwargs": {
-                "minimum_redshift": 0.0,
-                "maximum_redshift": 20.0,
-                "n_grid": 256,
+    return CatalogMetadata.model_validate(
+        {
+            "population": {
+                "model_name": "bns_md_cosmological",
+                "model_kwargs": {
+                    "minimum_redshift": 0.0,
+                    "maximum_redshift": 20.0,
+                    "n_grid": 256,
+                },
+                "seed": 1,
             },
-        },
-        waveform=waveform,
-        fiducials={"H0": 67.66},
-        seed=1,
-        num_samples=8,
+            "waveform": waveform,
+            "fiducials": {"H0": 67.66},
+            "num_samples": 8,
+        }
     )
 
 

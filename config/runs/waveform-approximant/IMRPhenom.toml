@@ -1,5 +1,4 @@
 # The shared seed-41 IMRPhenom catalog as proposal, restated so the pair
 # visibly differs only in the approximant.
-[analysis.catalog.proposal]
-seed = 41
-num_samples = 32768
+[analysis.proposal]
+waveform = "${waveforms.default}"

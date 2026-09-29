@@ -111,8 +111,8 @@ def test_run_config_carries_no_proposal_density() -> None:
 
     assert not hasattr(config, "proposal")
     assert "proposal" not in config.model_dump(mode="json")
-    # `catalog.proposal` is the catalog, not the density -- it stays.
-    assert config.analysis.catalog.proposal
+    # `analysis.proposal` is the catalog's record, not the density -- it stays.
+    assert config.analysis.proposal
 
 
 def test_derived_analysis_values_are_not_serialized(tmp_path) -> None:

@@ -17,7 +17,7 @@ A run declares *what* each of its two catalogs draws, and the file is named by
 a hash of that declaration:
 
 ```text
-config/runs/<experiment>/<run>.toml [analysis.catalog.<role>]
+config/runs/<experiment>/<run>.toml [analysis.<role>]
     -> CatalogMetadata  ->  outputs/catalogs/<metadata.key()>.h5
 ```
 
@@ -29,55 +29,52 @@ them.
 
 ### What a run declares
 
-Each role in `[analysis.catalog]` is a partial spec. `seed` and `num_samples`
-belong to the draw and are always stated; everything else is inherited from the
-run's own blocks, and a role overrides only what differs:
+Each role, `[analysis.injection]` and `[analysis.proposal]`, is a complete
+`CatalogMetadata` once the merge resolves its `${...}` references (see
+[references](running-inference.md#references)). Both default to the shared
+draw, `[catalog]` in `config/defaults.toml`, field by field, and a run
+overrides only what differs:
 
-```json
-"catalog": {
-  "injection": {"seed": 41, "num_samples": 32768},
-  "proposal": {
-    "seed": 61,
-    "num_samples": 16384,
-    "population": {
-      "model_name": "bns_md_uniform_mixture",
-      "model_kwargs": {"uniform_mixing_fraction": 0.1}
-    }
-  }
-}
+```toml
+[analysis.proposal]
+population = "${populations.guard}"
+num_samples = 16384
 ```
 
-The inherited blocks are three of the run's merged blocks, each defaulted in
-`config/defaults.toml`:
+The fields a role resolves to:
 
-1. `[waveform]` — the settings every catalog shares.
-   Only `waveform-approximant/TaylorF2` overrides anything here (the
-   approximant). The stored band matches `[analysis]`'s
-   `minimum_frequency` and `maximum_frequency`: the catalog grid *is* the array
-   every model is evaluated on, and a run's band selects bins on it with a mask
-   rather than compressing it. `sampling_frequency` is the waveform backend's
-   Nyquist, not the stored grid. `approximant="AnalyticInspiral"` selects the
-   closed-form inspiral, and is the only approximant accepting the optional
-   `alpha` key (the inspiral termination constant, defaulting to the
-   Schwarzschild ISCO value); naming it alongside a Ripple approximant is
-   rejected. `astrogwb.paper.config.waveform_generator()` builds the same
+1. `waveform` — a named `[waveforms.<name>]` from `config/waveforms.toml`,
+   `default` unless the role names another. Only
+   `waveform-approximant/TaylorF2` does (`"${waveforms.TaylorF2}"`). The stored
+   band matches `[analysis]`'s `minimum_frequency` and `maximum_frequency`: the
+   catalog grid *is* the array every model is evaluated on, and a run's band
+   selects bins on it with a mask rather than compressing it.
+   `sampling_frequency` is the waveform backend's Nyquist, not the stored grid.
+   `approximant="AnalyticInspiral"` selects the closed-form inspiral, and is
+   the only approximant accepting the optional `alpha` key (the inspiral
+   termination constant, defaulting to the Schwarzschild ISCO value); naming it
+   alongside a Ripple approximant is rejected.
+   `astrogwb.paper.config.waveform_generator()` builds the default draw's
    generator for a notebook.
-2. `[population]` — the population a catalog is drawn from unless a
-   role overrides it: `model_name`, a key in the `astrogwb.populations`
-   registry, and `model_kwargs`, the construction settings bound into it. This
-   top-level `[population]` is the *draw* default; the analysis target is
-   `analysis.population`, a separate block. It declares no `seed`.
-3. `[fiducials]` — the hyperparameters the draw is made at: the run's
-   own merged `[fiducials]`, so the injection is drawn at exactly the values the
+2. `population` — a `PopulationMetadata`: `model_name`, a key in the
+   `astrogwb.populations` registry, `model_kwargs`, the construction settings
+   bound into it, and the draw's `seed`. The named populations live in
+   `config/populations.toml`, each with a default seed; a role that changes
+   only the seed sets `[analysis.<role>.population] seed = ...`, and a run
+   that changes a named population overrides it at its source
+   (`[populations.guard] seed = 62`). The analysis target is
+   `analysis.population`, a separate record.
+3. `fiducials` — the hyperparameters the draw is made at: `"${fiducials}"`, the
+   run's own merged table, so the injection is drawn at exactly the values the
    run initializes at. `time-delay` sets `delay_slope = -1` once, as a run
    fiducial, and its injection inherits it.
+4. `num_samples` — the draw's size.
 
-Overrides are recursive merges, so a guarded proposal that names another
-population keeps the shared redshift window and grid and adds the one setting
-it takes. `astrogwb.paper.config.runs.resolve_catalog_blocks` is the one
-implementation of that resolution; the workflow, `RunConfig.catalog_request`
-and the notebooks all go through it, and a test pins the workflow's keys and
-`RunConfig`'s agreeing for every run.
+Every named population states the redshift window by reference to
+`[populations.cosmological]`, so a guarded proposal keeps the shared window and
+grid and adds the one setting it takes. `RunConfig` validates the roles as
+`CatalogMetadata` and the workflow keys the same merged tables, and a test pins
+the two agreeing for every run.
 
 Drawing at the run's fiducials has one visible cost: a run-level fiducial
 override also changes the proposal's key, even for a population that never
@@ -106,12 +103,12 @@ changes with it, so the next `snakemake catalogs` regenerates everything.
 
 A catalog names a population by its key in the `astrogwb.populations`
 registry, and supplies the construction kwargs it takes -- the guarded proposal
-above, for example. The redshift window and grid resolution are inherited from
-the shared `[population]` table and the hyperparameters from the shared `[fiducials]` table;
-`model_kwargs` is one mapping, deep-merged across layers and passed whole to the
-factory. The population declares its density factors and source outputs.
+above, for example. The redshift window and grid resolution are referenced
+from `[populations.cosmological]` and the hyperparameters from the run's
+`[fiducials]`; `model_kwargs` is one mapping, passed whole to the factory. The
+population declares its density factors and source outputs.
 
-A role inherits every block it does not name, whether or not the population it
+A role inherits every field it does not name, whether or not the population it
 names reads all of it: the guard inherits `[fiducials]` whole,
 `local_merger_rate` included, even though `bns_md_uniform_mixture` declares no
 merger rate. That is right for a guard mixture: it is a sampling density, and
