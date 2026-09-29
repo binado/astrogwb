@@ -76,6 +76,30 @@ def test_noise_weighted_inner_product_matches_explicit_sum() -> None:
     np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-6)
 
 
+def test_noise_weighted_inner_product_conjugates_its_first_argument() -> None:
+    """The Hermitian product: ``(a|b) = (b|a)^*``, and real for ``a == b``."""
+    a = jnp.array([1.0 + 1.0j, 2.0 - 0.5j])
+    b = jnp.array([0.5 - 2.0j, 1.5 + 1.0j])
+    psd = jnp.array([0.5, 0.4])
+    df = 2.0
+
+    actual = noise_weighted_inner_product(a, b, psd, df)
+    reversed_ = noise_weighted_inner_product(b, a, psd, df)
+
+    expected = df * np.sum(
+        np.conj(np.asarray(a)) * np.asarray(b) / np.asarray(psd) ** 2
+    )
+    np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(actual), np.conj(np.asarray(reversed_)), rtol=1e-6
+    )
+    np.testing.assert_allclose(
+        np.asarray(noise_weighted_inner_product(a, a, psd, df)),
+        df * np.sum(np.abs(np.asarray(a)) ** 2 / np.asarray(psd) ** 2),
+        rtol=1e-6,
+    )
+
+
 def test_noise_weighted_inner_product_scales_linearly_with_df() -> None:
     a = jnp.array([1.3, 1.7, 4.6, 2.8])
     b = jnp.array([1.0, 2.0, 4.0, 3.0])
