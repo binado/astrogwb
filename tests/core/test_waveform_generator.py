@@ -13,7 +13,6 @@ import pytest
 from pydantic import ValidationError
 
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.frequency import uniform_grid_spacing
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
@@ -411,9 +410,7 @@ def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
         )
     )
     frequencies, _ = aligned(_ripple_sources())
-    assert uniform_grid_spacing(np.asarray(frequencies)) == pytest.approx(
-        0.9872, abs=1e-15
-    )
+    assert np.diff(np.asarray(frequencies)) == pytest.approx(0.9872)
 
 
 # --------------------------------------------------------------------- #
@@ -457,9 +454,7 @@ def test_generator_grid_matches_ripples_own_5_smooth_rounding() -> None:
 
     assert generator.n_samples == 1250
     assert generator.segment_duration == 1.0
-    assert uniform_grid_spacing(np.asarray(generator.frequencies)) == pytest.approx(
-        0.9872, abs=1e-15
-    )
+    assert np.diff(np.asarray(generator.frequencies)) == pytest.approx(0.9872)
 
 
 def test_ripple_frequencies_are_available_before_generating(

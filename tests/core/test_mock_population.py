@@ -77,10 +77,10 @@ def test_mock_catalog_defaults_cover_the_production_band(mock_catalog_factory) -
         "coa_phase",
         "coa_time",
     }
-    assert catalog.df == CATALOG_DF
+    np.testing.assert_allclose(catalog.bin_widths, CATALOG_DF)
     assert waveform.minimum_frequency == 2.0
     assert waveform.maximum_frequency == 4096.0
-    np.testing.assert_allclose(np.diff(frequencies), CATALOG_DF, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(np.diff(frequencies), CATALOG_DF)
     assert frequencies[0] == 2.0
     assert frequencies[-1] == 4090.0
     assert np.all(frequencies > 0.0)

@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any, Self
 import numpy as np
 from numpy.typing import NDArray
 
-from astrogwb.frequency import uniform_grid_spacing
+from astrogwb.frequency import bin_widths, validate_frequency_grid
 from astrogwb.metadata import PopulationMetadata, SpectraMetadata, WaveformMetadata
 from astrogwb.populations import Population
 
@@ -70,13 +70,9 @@ class SpectralDensityCatalog:
     _metadata: SpectraMetadata
 
     def __post_init__(self) -> None:
-        frequencies = np.asarray(self.frequencies)
-        if frequencies.ndim != 1:
-            raise ValueError("catalog frequencies must be one-dimensional")
-        if frequencies.size >= 2:
-            # Validation only, result discarded -- the same uniform-grid
-            # invariant a polarization-power catalog checks against itself.
-            uniform_grid_spacing(frequencies)
+        # The same grid invariant a polarization-power catalog checks against
+        # itself: finite and strictly increasing, with the spacing free to vary.
+        frequencies = validate_frequency_grid(self.frequencies)
 
         spectra = np.asarray(self.spectral_density)
         if spectra.ndim != 2 or spectra.shape[1] != frequencies.size:
@@ -211,15 +207,15 @@ class SpectralDensityCatalog:
         return int(self.spectral_density.shape[0])
 
     @property
-    def df(self) -> float:
-        """The frequency bin width, measured from the grid rather than recorded.
+    def bin_widths(self) -> NDArray[np.float64]:
+        """Each frequency bin's width, derived from the grid rather than recorded.
 
         The same distinction the polarization-power catalog draws: what was
         *asked for* lives on ``waveform_metadata.frequency_resolution``, and
-        the backend's realized spacing can differ. Raises on a one-bin
-        catalog, which is a supported shape -- there is no bin width to report.
+        the backend's realized grid can differ. Raises on a one-bin catalog,
+        which is a supported shape -- there is no bin width to report.
         """
-        return uniform_grid_spacing(self.frequencies)
+        return np.asarray(bin_widths(self.frequencies))
 
     # ----------------------------------------------------------------- #
     # Persistence

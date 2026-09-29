@@ -20,7 +20,7 @@ target outside inference::
         spectral_density_fn=spectrum,
         observed_spectral_density=observed,
         priors=priors,
-        scale=gaussian_bin_scale(effective_psd, observation_time, df),
+        scale=gaussian_bin_scale(effective_psd, observation_time, frequencies),
     )
 
 :func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.gwb_amplitude_marginalized_model`
@@ -53,7 +53,7 @@ def gwb_spectral_density_model(
 
     ``spectral_density_fn(params)`` returns a spectrum of shape ``(F,)`` and
     optional deterministic diagnostics. ``scale`` is the prepared per-bin
-    standard deviation, normally ``gaussian_bin_scale(psd, time_years, df)``.
+    standard deviation, normally ``gaussian_bin_scale(psd, time_years, frequencies)``.
     Use ``priors={}`` for likelihood-only evaluation. The observation site is
     ``spectral_density_obs`` with one frequency event dimension. Diagnostic
     names must not collide with priors or that observation site.

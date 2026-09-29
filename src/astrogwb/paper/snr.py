@@ -74,12 +74,16 @@ def compute_network_snrs(
         effective_noise = jnp.asarray(
             effective_psd(frequencies, geometry, sensitivities)
         )
+        # Full-grid arrays plus the mask, not `[band]` slices: bin widths are
+        # derived from the whole axis, so slicing first would mis-size the
+        # bins at the band's edges.
         snr = float(
             spectral_snr(
-                observed_spectral_density[band],
-                effective_noise[band],
+                observed_spectral_density,
+                effective_noise,
                 observation_seconds,
-                observation.df,
+                frequencies,
+                frequency_mask=band,
             )
         )
         rows.append(
