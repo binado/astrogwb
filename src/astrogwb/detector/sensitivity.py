@@ -5,8 +5,8 @@ analysis policy on top. The one numerical wrinkle is out-of-band behavior:
 ``gwmock_noise`` clips frequencies outside the curve grid to ``0`` (an
 *infinite* sensitivity contribution in an inverse-variance sum), whereas
 the SGWB analysis wants those bins to contribute *nothing*, i.e. PSD
-``inf``. ``evaluate_psd`` therefore re-applies the ``inf`` policy on top of
-the gwmock interpolation.
+``inf``. Calling a ``Sensitivity`` therefore re-applies the ``inf`` policy
+on top of the gwmock interpolation.
 """
 
 from __future__ import annotations
@@ -46,36 +46,27 @@ class Sensitivity:
 
     psd_reference: str | Path
 
-    def evaluate(
+    def __call__(
         self, frequencies: ArrayLike, *, out_of_band: OutOfBand = "inf"
     ) -> NDArray[np.float64]:
-        return evaluate_psd(self.psd_reference, frequencies, out_of_band=out_of_band)
+        """Interpolate this detector's PSD onto ``frequencies``.
 
+        ``out_of_band="zero"`` returns gwmock-noise's raw interpolation
+        (frequencies outside the curve grid clipped to ``0``).
+        ``out_of_band="inf"`` (default) instead maps those frequencies to
+        ``inf``, the astrogwb analysis convention so out-of-band bins drop
+        out of an inverse-variance contraction. Grid endpoints stay finite.
+        """
+        resolved = resolve_psd_path(self.psd_reference)
+        frequencies = np.asarray(frequencies, dtype=float)
+        grid, grid_values = load_spectral_series(resolved, kind="PSD")
+        values = interpolate_real_spectral_series(grid, grid_values, frequencies)
 
-def evaluate_psd(
-    reference: str | Path,
-    frequencies: ArrayLike,
-    *,
-    out_of_band: OutOfBand = "inf",
-) -> NDArray[np.float64]:
-    """Interpolate a PSD onto ``frequencies`` using gwmock-noise.
+        if out_of_band == "zero":
+            return values
 
-    ``out_of_band="zero"`` returns gwmock-noise's raw interpolation
-    (frequencies outside the curve grid clipped to ``0``).
-    ``out_of_band="inf"`` (default) instead maps those frequencies to
-    ``inf``, the astrogwb analysis convention so out-of-band bins drop out
-    of an inverse-variance contraction. Grid endpoints stay finite.
-    """
-    resolved = resolve_psd_path(reference)
-    frequencies = np.asarray(frequencies, dtype=float)
-    grid, grid_values = load_spectral_series(resolved, kind="PSD")
-    values = interpolate_real_spectral_series(grid, grid_values, frequencies)
-
-    if out_of_band == "zero":
-        return values
-
-    out_of_band_mask = (frequencies < grid.min()) | (frequencies > grid.max())
-    return np.where(out_of_band_mask, np.inf, values)
+        out_of_band_mask = (frequencies < grid.min()) | (frequencies > grid.max())
+        return np.where(out_of_band_mask, np.inf, values)
 
 
 def load_sensitivity(name: str, *, path: str | Path | None = None) -> Sensitivity:
