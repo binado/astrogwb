@@ -147,10 +147,6 @@ names require latitude, longitude, elevation, both azimuths, and `psd_reference`
 both tilts default to zero. Unknown fields, incomplete definitions, and
 undefined network members fail validation. Labels default to detector names and
 affect presentation only.
-The optional `duty_factor` is reference metadata; it does not rescale a PSD or
-the observation time. Sensitivities for gwmock presets with upstream geometry
-live separately in the packaged `presets.toml` and remain available through
-the core sensitivity loaders.
 
 `psd_reference` keeps its existing resolution order: gwmock-noise preset,
 packaged noise-curve file, local file, then HTTP(S) URL. Local paths stay relative

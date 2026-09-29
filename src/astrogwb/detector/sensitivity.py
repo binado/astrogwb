@@ -27,7 +27,6 @@ from astrogwb.psd import NOISE_CURVES_BASE_DIR as NOISE_CURVES_BASE_DIR  # noqa:
 from astrogwb.psd import resolve_psd_path
 
 SENSITIVITY_FILE = Path(__file__).parent / "sensitivity.toml"
-PRESET_SENSITIVITY_FILE = Path(__file__).parent / "presets.toml"
 
 OutOfBand = Literal["inf", "zero"]
 
@@ -39,10 +38,6 @@ class Sensitivity:
     ``psd_reference`` may be a gwmock-noise bundled preset name (e.g.
     ``"ET_D_psd"``), a file in astrogwb's ``noise_curves/`` directory, an
     absolute path, or an HTTP(S) URL.
-
-    ``sensitivity.toml`` may also list ``minimum_frequency``,
-    ``maximum_frequency``, and ``duty_factor`` as reference metadata for
-    analysis setup; those fields are not loaded into this object.
     """
 
     psd_reference: str | Path
@@ -112,11 +107,8 @@ def _load_sensitivity_table(path: str | Path | None) -> Mapping[str, dict]:
             data = tomllib.load(handle)
         # Keep accepting the flat layout used by existing external tables.
         return data.get("detectors", data)
-    table: dict[str, dict] = {}
-    for source in (SENSITIVITY_FILE, PRESET_SENSITIVITY_FILE):
-        with source.open("rb") as handle:
-            table.update(tomllib.load(handle)["detectors"])
-    return table
+    with SENSITIVITY_FILE.open("rb") as handle:
+        return tomllib.load(handle)["detectors"]
 
 
 def _sensitivity_from_dict(data: Mapping) -> Sensitivity:

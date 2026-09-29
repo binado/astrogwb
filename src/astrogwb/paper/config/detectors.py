@@ -43,8 +43,6 @@ class DetectorConfig(BaseModel):
     geometry: DetectorGeometry
     psd_reference: Annotated[str, Field(min_length=1, pattern=r"\S")]
     label: Annotated[str, Field(min_length=1)] | None = None
-    #: Reference metadata; does not rescale the PSD or observation time.
-    duty_factor: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
 
     @model_validator(mode="after")
     def _validate_reference(self) -> DetectorConfig:

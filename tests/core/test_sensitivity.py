@@ -4,7 +4,6 @@ from typing import Literal
 
 import numpy as np
 import pytest
-from gwmock_signal.detector import CustomDetector
 from gwmock_signal.network import Network
 
 from astrogwb.detector import (
@@ -97,16 +96,3 @@ def test_effective_psd_inf_for_single_detector(frequencies: np.ndarray) -> None:
 
     assert actual.shape == frequencies.shape
     assert np.all(np.isinf(actual))
-
-
-@pytest.mark.integration
-def test_load_sensitivities_for_network_et_preset(frequencies: np.ndarray) -> None:
-    network = Network.from_name("ET-Triangle-Sardinia")
-    sensitivities = load_sensitivities_for_network(network)
-
-    names = network.detector_names
-    assert all(isinstance(d, CustomDetector) for d in names)
-    assert set(sensitivities) == {"ET1_SARD", "ET2_SARD", "ET3_SARD"}
-
-    eff = effective_psd(frequencies, network.detector_names, sensitivities)
-    assert np.any(np.isfinite(eff))
