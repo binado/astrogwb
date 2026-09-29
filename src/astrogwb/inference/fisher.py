@@ -1,7 +1,8 @@
 r"""Per-frequency Fisher information of the diagonal Gaussian spectrum likelihood.
 
-:func:`~astrogwb.inference.models.gwb_spectral_density_model` compares a
-predicted spectrum to data bin by bin, :math:`d_i \sim \mathcal{N}(S_i(\theta),
+:func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_spectral_density_model`
+compares a predicted spectrum to data bin by bin,
+:math:`d_i \sim \mathcal{N}(S_i(\theta),
 \sigma_i)`, with a scale that does not depend on :math:`\theta`. Its Fisher
 matrix is therefore a sum of per-bin terms,
 
@@ -30,9 +31,9 @@ score-function estimator, with noise that grows as
 those fiducials. A hyperparameter that moves a support edge (a hard mass
 cutoff, say) differentiates only the density's normalization, not the sources
 crossing the edge, so its derivative is missing that boundary term.
-:func:`~astrogwb.inference.forward_model.gwb_forward_model` is not a valid input:
-its Poisson count is discrete, and differentiating through its draws gives one
-realization's derivative rather than the mean spectrum's.
+:func:`~astrogwb.inference.models.forward_model.gwb_forward_model` is not a valid
+input: its Poisson count is discrete, and differentiating through its draws
+gives one realization's derivative rather than the mean spectrum's.
 """
 
 from __future__ import annotations
@@ -83,11 +84,12 @@ def fisher_matrix_per_bin(
 ) -> jax.Array:
     r"""Per-bin Fisher matrices :math:`F_{ab,i}`, shape ``(F, P, P)``.
 
-    ``scale`` is the per-bin standard deviation the likelihood uses, normally
-    ``gaussian_bin_scale(psd, time_years, df)``. ``frequency_mask`` selects
-    bins as in :func:`~astrogwb.inference.models.gwb_spectral_density_model`:
-    an excluded bin contributes exactly zero, even where its scale is
-    infinite. Sum over the leading axis for the total Fisher matrix.
+        ``scale`` is the per-bin standard deviation the likelihood uses, normally
+        ``gaussian_bin_scale(psd, time_years, df)``. ``frequency_mask`` selects
+        bins as in
+    :func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_spectral_density_model`:
+        an excluded bin contributes exactly zero, even where its scale is
+        infinite. Sum over the leading axis for the total Fisher matrix.
     """
     jacobian = spectral_density_jacobian(spectral_density_fn, params, parameter_names)
     inverse_variance = jnp.asarray(scale) ** -2

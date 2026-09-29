@@ -325,7 +325,9 @@ def save(
         import jax
         from numpyro.infer import Predictive
 
-        from astrogwb.inference.models import amplitude_reconstruction_model
+        from astrogwb.inference.models.gaussian_gwb_marginalized_amplitude import (
+            amplitude_reconstruction_model,
+        )
 
         amplitude_parameter = marginalization.parameter
 

@@ -1,41 +1,22 @@
-r"""NumPyro inference from a spectrum callable and a prepared Gaussian scale.
+r"""Amplitude-marginalized inference and its post-hoc reconstruction.
 
-``gwb_spectral_density_model`` accepts any ``SpectralDensityFn``. For example,
-an analytic calculator can return no diagnostics::
+:func:`gwb_amplitude_marginalized_model` integrates one multiplicative
+parameter of an arbitrary :class:`~astrogwb.inference.SpectralDensityFn`
+under a prior, and publishes amplitude sufficient statistics instead of
+sampling that parameter. :func:`amplitude_reconstruction_model` consumes those
+statistics and a template rate via ``Predictive`` to recover joint
+amplitude/shape draws and the physical rate. Keep reconstruction separate from
+inference to avoid counting amplitude twice. When no rate is available, draw
+amplitudes directly from
+:class:`~astrogwb.distributions.amplitude.AmplitudeConditional` using the same
+statistics, prior, fiducial, scaling function, and grid.
 
-    def analytic_spectrum(params):
-        return params["amplitude"] * jnp.ones(3), {}
-
-The importance-sampled spectrum is one too, once the catalog is bound to a
-target outside inference::
-
-    spectrum = build_importance_spectrum(
-        catalog,
-        source_model=target.source_model,
-        merger_rate_fn=target.merger_rate_fn,
-        density_sites=DEFAULT_DENSITY_SITES,
-    )[0]
-    model = partial(
-        gwb_spectral_density_model,
-        spectral_density_fn=spectrum,
-        observed_spectral_density=observed,
-        priors=priors,
-        scale=gaussian_bin_scale(effective_psd, observation_time, df),
-    )
-
-For amplitude marginalization, diagnostics describe the pinned template, so an
-importance caller relabels the rate without touching any other extras::
+Diagnostics describe the pinned template, so an importance caller relabels the
+rate without touching any other extras::
 
     template_spectrum = with_renamed_diagnostics(
         spectrum, {"total_merger_rate": "template_merger_rate"}
     )
-
-``gwb_amplitude_marginalized_model`` publishes amplitude sufficient statistics.
-``amplitude_reconstruction_model`` consumes those statistics and a template rate
-via ``Predictive`` to recover joint amplitude/shape draws and the physical rate.
-Keep reconstruction separate from inference to avoid counting amplitude twice.
-When no rate is available, draw amplitudes directly from ``AmplitudeConditional``
-using the same statistics, prior, fiducial, scaling function, and grid.
 
 End-to-end sketch (toy data; runnable as-is):
 
@@ -142,50 +123,7 @@ from astrogwb.distributions.amplitude import (
 )
 from astrogwb.inference.protocol import SpectralDensityFn
 
-
-def gwb_spectral_density_model(
-    *,
-    spectral_density_fn: SpectralDensityFn,
-    observed_spectral_density: jax.Array,
-    priors: Mapping[str, dist.Distribution],
-    scale: jax.Array,
-    frequency_mask: jax.Array | None = None,
-) -> None:
-    """Sample parameters and compare a supplied spectrum to Gaussian observations.
-
-    ``spectral_density_fn(params)`` returns a spectrum of shape ``(F,)`` and
-    optional deterministic diagnostics. ``scale`` is the prepared per-bin
-    standard deviation, normally ``gaussian_bin_scale(psd, time_years, df)``.
-    Use ``priors={}`` for likelihood-only evaluation. The observation site is
-    ``spectral_density_obs`` with one frequency event dimension. Diagnostic
-    names must not collide with priors or that observation site.
-
-    ``frequency_mask`` is an optional boolean array of shape ``(F,)`` selecting
-    the bins the likelihood counts. It is a *traced* argument on a fixed grid,
-    so sweeping its value never triggers a recompile -- only changing its
-    length does, since that changes every array's shape. Excluded bins
-    contribute exactly zero, so the result equals evaluating the model on the
-    arrays compressed to the selection, and a masked bin's ``scale`` may be
-    infinite without producing a non-finite log density or gradient.
-
-    The mask is applied to the observation *site*
-    (``dist.Normal(...).mask(...)``) rather than with
-    :func:`numpyro.handlers.mask`: a handler applies to every sample site in
-    its scope, so an ``(F,)`` mask would also reach the scalar prior sites and
-    broadcast their log densities to shape ``(F,)``.
-    """
-    params = {name: numpyro.sample(name, prior) for name, prior in priors.items()}
-    prediction, extras = spectral_density_fn(params)
-    for name, value in extras.items():
-        numpyro.deterministic(name, value)
-    observation = dist.Normal(prediction, scale)
-    if frequency_mask is not None:
-        observation = observation.mask(frequency_mask)
-    numpyro.sample(
-        "spectral_density_obs",
-        observation.to_event(1),
-        obs=observed_spectral_density,
-    )
+__all__ = ["amplitude_reconstruction_model", "gwb_amplitude_marginalized_model"]
 
 
 def gwb_amplitude_marginalized_model(
@@ -215,12 +153,13 @@ def gwb_amplitude_marginalized_model(
     not collide with priors or these three likelihood-owned names. No merger
     rate is required and extras are never rescaled. Importance callers should
     rename their spectrum's ``total_merger_rate`` to ``template_merger_rate``
-    before returning it; see the module example. Use the unchanged
+    before returning it; see this module's docstring. Use the unchanged
     ``amplitude_reconstruction_model`` for rate-aware reconstruction, or
     ``AmplitudeConditional`` directly when only amplitude draws are needed.
 
     ``frequency_mask`` is an optional boolean array of shape ``(F,)`` selecting
-    the bins the likelihood counts, as in :func:`gwb_spectral_density_model`.
+    the bins the likelihood counts, as in
+    :func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_spectral_density_model`.
     Every sum below restricts to it.
 
     Raises ``ValueError`` if the amplitude is also present in ``priors``.

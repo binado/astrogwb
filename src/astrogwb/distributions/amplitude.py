@@ -1,8 +1,9 @@
 r"""Numerical marginalization of a multiplicative amplitude direction.
 
 Under the per-frequency Gaussian likelihood used by
-:func:`~astrogwb.inference.models.gwb_spectral_density_model`, one parameter can
-enter the predicted spectrum as a pure multiplicative factor,
+:func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_spectral_density_model`,
+one parameter can enter the predicted spectrum as a pure multiplicative
+factor,
 
 .. math:: \boldsymbol{\mu}(\varphi, \theta) = A(\varphi)\, \mathbf{m}(\theta)
 
@@ -194,7 +195,8 @@ class AmplitudeConditional(dist.Distribution):
 
     Given the amplitude sufficient statistics :math:`\hat A` and :math:`\rho`
     published by
-    :func:`~astrogwb.inference.models.gwb_amplitude_marginalized_model`, this is
+    :func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.gwb_amplitude_marginalized_model`
+    publishes them; this is
     the density
 
     .. math::
@@ -228,8 +230,8 @@ class AmplitudeConditional(dist.Distribution):
 
         This distribution is meant for :class:`~numpyro.infer.Predictive`
         (generative-only use in
-        :func:`~astrogwb.inference.models.amplitude_reconstruction_model`). Do
-        **not** ``numpyro.sample`` it as a latent site inside a NUTS model
+        :func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.amplitude_reconstruction_model`).
+        Do **not** ``numpyro.sample`` it as a latent site inside a NUTS model
         without revisiting two things. Its ``support`` is a
         :class:`~numpyro.distributions.constraints.dependent_property`, which
         routes latent use through NumPyro's dynamic-support path; and because
