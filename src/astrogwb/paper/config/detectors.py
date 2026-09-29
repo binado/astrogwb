@@ -64,6 +64,10 @@ class DetectorConfig(BaseModel):
         """Sensitivity built from this detector's PSD reference."""
         return Sensitivity(self.psd_reference)
 
+    def to_detector(self, name: str) -> CustomDetector:
+        """gwmock geometry object addressed by ``name``."""
+        return CustomDetector(name=name, **self.geometry.model_dump())
+
 
 class DetectorRegistry(BaseModel):
     """A complete resolved registry; serialized records need no default merge."""
@@ -102,10 +106,7 @@ class DetectorRegistry(BaseModel):
         """Build selected geometry and sensitivities in the supplied order."""
         self.validate_members(names)
         return (
-            tuple(
-                CustomDetector(name=name, **self.detectors[name].geometry.model_dump())
-                for name in names
-            ),
+            tuple(self.detectors[name].to_detector(name) for name in names),
             {name: self.detectors[name].sensitivity for name in names},
         )
 
