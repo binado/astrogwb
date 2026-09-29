@@ -19,6 +19,7 @@ Usage -- one ``--config`` per layer, in merge order, exactly as
 
     uv run --extra paper python scripts/profile_model.py \
         --config config/defaults.toml \
+        --config config/detectors.toml \
         --config config/runs/cosmological-parameters/_base.toml \
         --config config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
         --injection-catalog outputs/catalogs/<injection key>.h5 \
@@ -122,6 +123,9 @@ def build_potential(
         target_population,
     )
 
+    detectors, sensitivities = config.detector_registry.build_detectors(
+        config.analysis.detectors
+    )
     inputs = prepare_inference_inputs(
         injection_catalog,
         proposal_catalog,
@@ -130,7 +134,8 @@ def build_potential(
         maximum_redshift=config.analysis.population.model_kwargs["maximum_redshift"],
         minimum_frequency=config.analysis.minimum_frequency,
         maximum_frequency=config.analysis.maximum_frequency,
-        detectors=config.analysis.detectors,
+        detectors=detectors,
+        sensitivities=sensitivities,
         target=target_population(config),
         density_sites=config.analysis.population.density_sites,
     )

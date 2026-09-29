@@ -10,102 +10,57 @@
 # Sensitivity); out-of-band PSD masking follows each noise curve file's
 # tabulated grid via evaluate_psd().
 
-[H1]
+[detectors.H1]
 psd_reference = "AplusDesign_psd.txt"
 duty_factor = 0.7
 
-[L1]
+[detectors.L1]
 psd_reference = "AplusDesign_psd.txt"
 duty_factor = 0.7
 
-[V1]
+[detectors.V1]
 psd_reference = "avirgo_O5low_NEW_psd.txt"
 duty_factor = 0.7
 
-[K1]
+[detectors.K1]
 psd_reference = "kagra_128Mpc_psd.txt"
 duty_factor = 0.7
 
 # --- Einstein Telescope: triangle (str E1/E2/E3, geometry.toml) ---
-[E1]
+[detectors.E1]
 psd_reference = "ET_COBA_10km_psd.txt"
 duty_factor = 0.85
 
-[E2]
+[detectors.E2]
 psd_reference = "ET_COBA_10km_psd.txt"
 duty_factor = 0.85
 
-[E3]
+[detectors.E3]
 psd_reference = "ET_COBA_10km_psd.txt"
 duty_factor = 0.85
 
 # --- ET L-shaped sites (str S1/S2/R1/R2, geometry.toml) ---
-[S1]
+[detectors.S1]
 psd_reference = "ET_COBA_15km_psd.txt"
 duty_factor = 0.85
 
-[S2]
+[detectors.S2]
 psd_reference = "ET_COBA_15km_psd.txt"
 duty_factor = 0.85
 
-[R1]
+[detectors.R1]
 psd_reference = "ET_COBA_15km_psd.txt"
 duty_factor = 0.85
 
-[R2]
+[detectors.R2]
 psd_reference = "ET_COBA_15km_psd.txt"
 duty_factor = 0.85
 
 # --- Cosmic Explorer (str C1/C2, geometry.toml) ---
-[C1]
+[detectors.C1]
 psd_reference = "cosmic_explorer_strain_psd.txt"
 duty_factor = 0.85
 
-[C2]
+[detectors.C2]
 psd_reference = "cosmic_explorer_strain_psd.txt"
-duty_factor = 0.85
-
-# --- ET gwmock presets (CustomDetector geometry from gwmock_signal) ---
-[E0]
-psd_reference = "ET_COBA_10km_psd.txt"
-duty_factor = 0.85
-
-[ET1_SARD]
-psd_reference = "ET_COBA_10km_psd.txt"
-duty_factor = 0.85
-
-[ET2_SARD]
-psd_reference = "ET_COBA_10km_psd.txt"
-duty_factor = 0.85
-
-[ET3_SARD]
-psd_reference = "ET_COBA_10km_psd.txt"
-duty_factor = 0.85
-
-[ET1_EMR]
-psd_reference = "ET_COBA_10km_psd.txt"
-duty_factor = 0.85
-
-[ET2_EMR]
-psd_reference = "ET_COBA_10km_psd.txt"
-duty_factor = 0.85
-
-[ET3_EMR]
-psd_reference = "ET_COBA_10km_psd.txt"
-duty_factor = 0.85
-
-[ET1_2L_ALIGNED_SARD]
-psd_reference = "ET_COBA_10km_psd.txt"
-duty_factor = 0.85
-
-[ET2_2L_ALIGNED_EMR]
-psd_reference = "ET_COBA_10km_psd.txt"
-duty_factor = 0.85
-
-[ET1_2L_MISALIGNED_SARD]
-psd_reference = "ET_COBA_10km_psd.txt"
-duty_factor = 0.85
-
-[ET2_2L_MISALIGNED_EMR]
-psd_reference = "ET_COBA_10km_psd.txt"
 duty_factor = 0.85

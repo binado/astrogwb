@@ -5,8 +5,8 @@ The leaf modules (:mod:`~astrogwb.paper.config.runs`,
 not re-exported; import them explicitly.
 
 What this package *does* expose is the three shared tables that
-``config/defaults.toml`` declares as ``[fiducials]``, ``[priors]`` and
-``[networks]`` -- the same bytes the workflow merges into every run -- plus the
+``config/defaults.toml`` and ``config/detectors.toml`` declare as
+``[fiducials]``, ``[priors]`` and ``[networks]`` -- the same bytes the workflow merges into every run -- plus the
 three accessors that build something from the catalog defaults every run
 inherits: :func:`waveform_generator` from ``[waveform]``, and
 :func:`population_model` / :func:`population_metadata` from ``[population]``.
@@ -50,7 +50,8 @@ anywhere, pass ``root=`` explicitly.
 Each accessor caches its parse and hands back a fresh copy, so a caller that
 mutates what it got does not poison the cache for everyone else -- overrides are
 merged *after* the cached parse, so they cannot either. A long-lived Jupyter
-session will not see an edit to the file until ``fiducials.cache_clear()``.
+session will not see an edit to the file until ``_load.cache_clear()``
+(or ``_load_registry.cache_clear()`` for detector definitions).
 """
 
 from __future__ import annotations
@@ -59,17 +60,23 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from astrogwb.paper.config.runs import DEFAULTS_PATH
+from astrogwb.paper.config.runs import (
+    DEFAULTS_PATH,
+    DETECTORS_PATH,
+    merge_config_layers,
+)
 from astrogwb.paper.utils import load_mapping
 
 if TYPE_CHECKING:
     from numpyro.distributions import Distribution
 
     from astrogwb.metadata import PopulationMetadata, WaveformMetadata
+    from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.populations.registry import Population
     from astrogwb.waveform import PolarizationPowerGenerator
 
 __all__ = [
+    "detector_registry",
     "fiducials",
     "networks",
     "population_metadata",
@@ -147,8 +154,7 @@ def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ..
 
     Each run names one of these keys as ``analysis.network``; ``RunConfig``
     resolves it to the detector list recorded in the chain's own config. The
-    names resolve further, to geometry and sensitivity, through
-    ``astrogwb.detector``.
+    :func:`detector_registry` resolves the geometry and sensitivity settings.
 
     Membership and content live here; *order* does not. The ordered legend of
     the network-comparison figures is
@@ -156,18 +162,41 @@ def networks(root: Path | None = None, **kwargs: Any) -> dict[str, tuple[str, ..
     presentation -- and because a TOML table is not an ordered thing.
 
     Keyword arguments override the file, and may name a network the file does
-    not declare -- whose detectors then have to resolve through
-    ``astrogwb.detector`` on their own. Every committed name is hyphenated
+    not declare. Use :func:`detector_registry` with matching overrides when
+    building runtime detectors. Every committed name is hyphenated
     (``ET-2L-aligned``), so an override has to be unpacked from a mapping
     rather than written as a literal keyword::
 
         networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})
     """
     table = {
-        **_load((root or Path()) / DEFAULTS_PATH, "networks"),
+        **_load((root or Path()) / DETECTORS_PATH, "networks"),
         **kwargs,
     }
     return {name: tuple(detectors) for name, detectors in table.items()}
+
+
+@cache
+def _load_registry(path: Path) -> dict[str, Any]:
+    """Merge the shared registry file over packaged tables through pyknf."""
+    return merge_config_layers([path])
+
+
+def detector_registry(root: Path | None = None, **overrides: Any) -> DetectorRegistry:
+    """Resolve shared detector settings lazily and return an independent registry.
+
+    Overrides may contain ``detectors`` and ``networks`` tables, deep-merged
+    over the shared file. Runtime objects are built only by its build methods.
+    """
+    from astrogwb.paper.config.detectors import DetectorRegistry
+    from astrogwb.paper.utils import deep_merge
+
+    shared = _load_registry((root or Path()) / DETECTORS_PATH)
+    settings = deep_merge(shared, overrides)
+    unknown = settings.keys() - {"detectors", "networks"}
+    if unknown:
+        raise ValueError(f"unknown detector registry fields: {sorted(unknown)}")
+    return DetectorRegistry.model_validate(settings)
 
 
 def waveform_generator(

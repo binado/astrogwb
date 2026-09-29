@@ -53,10 +53,11 @@ what a catalog records about itself.
 ## Experiment workflow
 
 [`config/runs/`](../config/runs/) holds one `_base.toml` per experiment and one
-TOML file per run, over the shared `config/defaults.toml`. `run_mcmc` declares
-those three layers as its own `input:` and passes them, in merge order, as
-repeated `--config` flags; the script merges them in process with `knf`, then
-writes:
+TOML file per run, over shared `config/defaults.toml` and `config/detectors.toml`.
+`run_mcmc` declares those four layers as its own `input:` and passes them, in merge order, as
+repeated `--config` flags. The packaged `geometry.toml` and `sensitivity.toml`
+are also inputs of every chain and of `importance_weights_grid`. The script merges those
+registry tables and the run layers in process with `knf`, then writes:
 
 ```text
 outputs/chains/<experiment>/<run>.nc      the chain (protected)
@@ -68,7 +69,7 @@ its `input:` was already exactly these files, so it only turned files the
 chain already depended on into a copy of themselves. The rule is a per-run
 wildcard on `{experiment}/{run}`, so editing a run's file retriggers exactly
 its own chain, editing a `_base.toml` retriggers its experiment, and editing
-`config/defaults.toml` retriggers all 27.
+either shared layer retriggers all 27.
 
 That granularity is what removed the stale-input wrapper the old workflow
 needed: one rule used to emit all 27 configs at once, so any edit invalidated

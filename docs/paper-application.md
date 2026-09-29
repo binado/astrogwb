@@ -46,16 +46,17 @@ Filenames are the mapping for runs, and catalogs are named by the content
 hash of what a run asks for, so there is no registry file:
 
 ```text
-config/defaults.toml                            every block's shared default:
+config/defaults.toml                            shared scientific defaults:
                                                 [analysis] band, target population,
                                                   catalogs
                                                 [fiducials] every parameter (also
                                                   what catalogs are drawn at)
-                                                [networks] each detector network
                                                 [priors] every parameter's prior
                                                 [sampler] RNG seed, NUTS defaults
                                                 [waveform] / [population] what a
                                                   run's catalogs are drawn with
+config/detectors.toml                           [networks] membership and optional
+                                                [detectors] geometry/PSD/label overrides
 config/plotting.toml                            LaTeX labels and savefig settings
                                                 (presentation; not a run layer)
 config/runs/<experiment>/_base.toml             the experiment override
@@ -65,12 +66,14 @@ config/runs/<experiment>/<run>.toml             the run override
   -> outputs/catalogs/<key>.h5                  one per distinct catalog it asks for
 ```
 
-A run is three TOML layers: `config/defaults.toml`, its experiment's
+A run is four TOML layers: `config/defaults.toml`, `config/detectors.toml`, its experiment's
 `_base.toml`, and its own file, merged by `knf` (which the `knf` CLI also
-exposes in the shell). Each file opens with a comment saying what it is for.
+exposes in the shell). The packaged `geometry.toml` and `sensitivity.toml`
+are merged first, using the same `[detectors.<name>]` tables as the shared
+registry file. Each file opens with a comment saying what it is for.
 Several shared blocks are read by more than the workflow: the notebooks and
 figure scripts consume the same bytes through
-`astrogwb.paper.config.fiducials()` / `priors()` / `networks()`. Each accessor
+`astrogwb.paper.config.fiducials()` / `priors()` / `networks()` / `detector_registry()`. Each accessor
 takes keyword overrides merged over the file, so a notebook can vary one value
 without editing TOML or retyping the table.
 

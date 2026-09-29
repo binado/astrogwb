@@ -17,7 +17,7 @@ from typing import Any
 
 import tomli_w
 
-from astrogwb.paper.config.runs import DEFAULTS_PATH, assemble_run
+from astrogwb.paper.config.runs import DEFAULTS_PATH, DETECTORS_PATH, assemble_run
 
 # One sampled parameter (H0) on a three-detector network: the smallest assembly
 # that still carries a prior, a full [fiducials] table, and real detectors.
@@ -95,4 +95,6 @@ def write_defaults(
     }
     target = root / DEFAULTS_PATH
     target.parent.mkdir(parents=True, exist_ok=True)
+    shared = {"networks": tables.pop("networks"), "detectors": {}}
     target.write_text(tomli_w.dumps(tables), encoding="utf-8")
+    (root / DETECTORS_PATH).write_text(tomli_w.dumps(shared), encoding="utf-8")

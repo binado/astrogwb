@@ -25,7 +25,7 @@ of the three network-comparison figures, and order is presentation.
 The split with ``config/``: *order and structure* are Python, *values* are
 data. So the ordered network legend is ``DETECTOR_NETWORKS`` here, while the
 detector list behind each name is the ``[networks]`` table in
-``config/defaults.toml``; and the LaTeX label for a *parameter* is
+``config/detectors.toml``; and the LaTeX label for a *parameter* is
 ``config/plotting.toml``, reached through
 :func:`parameter_label`, while the label for a *network* stays in
 ``DETECTOR_NETWORKS`` because nothing can read it without also needing the
@@ -40,13 +40,16 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
+
+if TYPE_CHECKING:
+    from astrogwb.paper.config.detectors import DetectorRegistry
 
 _STYLE_PATH = Path(__file__).parent / "paper.mplstyle"
 
@@ -120,6 +123,7 @@ class Network:
     name: str
     label: str
     detectors: tuple[str, ...]
+    detector_registry: DetectorRegistry | None = None
 
 
 CATEGORY: dict[str, str] = {

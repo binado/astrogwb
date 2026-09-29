@@ -39,12 +39,18 @@ from typing import Any, NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
+from gwmock_signal.stochastic.overlap import detector_names
 from numpyro import handlers
 from numpyro.distributions import Distribution
 
 from astrogwb.catalog import PolarizationPowerCatalog
+from astrogwb.detector import (
+    DetectorSpec,
+    Sensitivity,
+    gaussian_bin_scale,
+    load_sensitivity_map,
+)
 from astrogwb.detector import effective_psd as compute_effective_psd
-from astrogwb.detector import gaussian_bin_scale, load_sensitivity_map
 from astrogwb.distributions.amplitude import (
     AmplitudeFn,
     MergerRateAmplitudeFn,
@@ -317,7 +323,8 @@ def prepare_inference_inputs(
     maximum_redshift: float,
     minimum_frequency: float,
     maximum_frequency: float,
-    detectors: Sequence[str],
+    detectors: Sequence[DetectorSpec],
+    sensitivities: Mapping[str, Sensitivity] | None = None,
     target: Population,
     density_sites: Sequence[str],
 ) -> InferenceInputs:
@@ -327,6 +334,10 @@ def prepare_inference_inputs(
     :func:`target_population` of the run config; build it once per run. It must
     declare a merger rate: the predicted spectrum is normalized by one, so a
     proposal density here would produce a spectrum with no scale.
+
+    ``detectors`` accepts names or geometry objects. Explicit ``sensitivities``
+    are keyed by public detector name; omitting them loads packaged defaults,
+    including for geometry objects carrying a known detector name.
 
     ``density_sites`` names the source-density factors the importance weights
     include, and is passed straight through to
@@ -366,7 +377,9 @@ def prepare_inference_inputs(
     # comes from the *proposal* grid. validate_matching_frequency_grids has
     # already proved the two arrays equal, so both results are bit-identical --
     # do not "tidy" either one to match the other.
-    sensitivities = load_sensitivity_map(detectors)
+    names = detector_names(list(detectors))
+    if sensitivities is None:
+        sensitivities = load_sensitivity_map(names)
     effective_psd_arr = jnp.asarray(
         compute_effective_psd(proposal_frequencies, list(detectors), sensitivities)
     )
@@ -386,7 +399,7 @@ def prepare_inference_inputs(
             f"only {num_bins} usable frequency bin(s) in "
             f"[{minimum_frequency}, {maximum_frequency}] Hz for "
             f"detectors "
-            f"{' '.join(detectors)}; widen the band or choose a detector "
+            f"{' '.join(names)}; widen the band or choose a detector "
             "network with full coverage"
         )
     excluded = int(jnp.sum(observation.frequency_mask)) - num_bins

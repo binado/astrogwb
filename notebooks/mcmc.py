@@ -167,7 +167,6 @@ from astrogwb.gwb import (
 )
 from astrogwb.paper.catalogs import run_catalog
 from astrogwb.paper.config import fiducials as committed_fiducials
-from astrogwb.paper.config import networks as committed_networks
 from astrogwb.paper.config import priors as committed_priors
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import CATALOGS_ROOT, assemble_run
@@ -203,10 +202,10 @@ REFERENCE_RUN = ("cosmological-parameters", "ET-2L-aligned-CE-Hanford")
 # Detector settings. The network name resolves to its detector list through
 # the shared [networks] table -- the same table the reference run resolves through --
 # so this cell stays a knob (change the name) without keeping a second copy of
-# the list. The detector names resolve further via the bundled geometry.toml /
-# sensitivity.toml.
+# the list. Runtime geometry and sensitivities use the reference run's resolved
+# registry, including its overrides.
 NETWORK = "ET-2L-aligned-CE-Hanford"
-detnames = committed_networks()[NETWORK]
+
 observation_time = 1.0  # [yr]; cancels in S_h, kept for the likelihood scale
 
 # Redshift grid for the cosmology integrals (and MD normalization)
@@ -252,6 +251,8 @@ fixed_params = {k: v for k, v in fiducials.items() if k not in sampled_params}
 # files that run does: each role resolves to a request, and its key names the
 # file in the cache.
 RUN_CONFIG = build_run_config(assemble_run(*REFERENCE_RUN))
+detnames = RUN_CONFIG.detector_registry.networks[NETWORK]
+detectors, sensitivities = RUN_CONFIG.detector_registry.build_network(NETWORK)
 injection_catalog = run_catalog(*REFERENCE_RUN, "injection", cache_dir=CATALOG_DIR)
 proposal_catalog = run_catalog(*REFERENCE_RUN, "proposal", cache_dir=CATALOG_DIR)
 
@@ -283,7 +284,8 @@ inputs = prepare_inference_inputs(
     maximum_redshift=maximum_redshift,
     minimum_frequency=minimum_frequency,
     maximum_frequency=maximum_frequency,
-    detectors=detnames,
+    detectors=detectors,
+    sensitivities=sensitivities,
     target=target,
     density_sites=DEFAULT_DENSITY_SITES,
 )
@@ -303,8 +305,8 @@ print("band bins:", int(jnp.sum(mask)), "of", frequencies.shape[0])
 # %% [markdown]
 # ## Effective PSD and analysis band
 #
-# `load_sensitivity_map` resolves the str-named detectors (e.g. `S1`, `R1`, `C1`) via the bundled
-# `geometry.toml` / `sensitivity.toml`. We then calculate the effective power spectral density
+# The registry resolves geometry and PSD references from packaged defaults plus
+# run overrides. We then calculate the effective power spectral density
 #
 # $$
 # S_{\mathrm{eff}} = \left(\sum_{a,b} \frac{\Gamma^2_{ab}(f)}{S_{n,a} S_{n,b}}  \right)^{-1/2}
@@ -520,6 +522,7 @@ run_config = {
         for role in ("injection", "proposal")
     },
     "detectors": list(detnames),
+    "detector_registry": RUN_CONFIG.detector_registry.model_dump(mode="json"),
     "seed": seed,
     "observation_time": observation_time,
     "sampled_params": list(sampled_params),

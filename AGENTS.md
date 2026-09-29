@@ -65,10 +65,10 @@ Forward-model spectra go through the same `simulate` outside the workflow: a
 `outputs/spectra/<key>.h5`, and `astrogwb.catalog.simulate(metadata,
 SpectrumGenerator(), cache_dir)` serves or generates it.
 
-A run config is three TOML layers merged in order -- `config/defaults.toml`,
+A run config is four TOML layers merged in order -- `config/defaults.toml`, then `config/detectors.toml`,
 then the experiment `config/runs/<experiment>/_base.toml`, then the run.
-`config/defaults.toml` declares every top-level block of a run config with the
-value every run inherits. Every layer opens with a comment saying what it is
+`config/defaults.toml` declares the shared scientific defaults;
+`config/detectors.toml` declares `[networks]` and optional `[detectors]` overrides. Every layer opens with a comment saying what it is
 for, so what each committed run -- and each catalog override -- is for lives in
 its own file; `config/runs/README.md` indexes the experiments and the catalogs
 they share. The top-level `[population]` is the default a run's catalogs are
@@ -81,8 +81,9 @@ shared `[fiducials]` re-keys every catalog. `[fiducials]`, `[priors]` and
 `[population]`, so a copy cannot drift from what the runs sample.
 `merge_config_layers` folds the layers with `knf` (pyknf): a deep merge, except
 that each `priors.<param>` table replaces the inherited one (`PRIOR_SHALLOW =
-"priors.*"`). `knf <layers> --shallow 'priors.*'` prints the same merge in the
-shell. A run names a detector network (`analysis.network`) rather than listing
+"priors.*"`). `knf src/astrogwb/detector/{geometry,sensitivity}.toml <layers> --shallow 'priors.*'`
+prints the same merge in the shell. The packaged detector files use the same
+`[detectors.<name>]` format and are merged before the four run layers. A run names a detector network (`analysis.network`) rather than listing
 detectors. `config/plotting.toml` is presentation -- LaTeX parameter labels and
 savefig settings, reached through `astrogwb.paper.plotting` -- and is
 deliberately *not* a run layer. No entrypoint is handed an assembled config.

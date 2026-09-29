@@ -67,8 +67,10 @@ def test_orf_colocated_is_normalized(frequencies: np.ndarray) -> None:
     np.testing.assert_allclose(actual, np.ones_like(frequencies))
 
 
-def _arm_direction(det: CustomDetector, azimuth: float) -> np.ndarray:
-    # geometry.toml azimuths are measured counter-clockwise from local East.
+def _arm_direction(
+    det: CustomDetector, azimuth: float, tilt: float = 0.0
+) -> np.ndarray:
+    # gwmock azimuths are measured clockwise from local North.
     east = np.array([-math.sin(det.longitude_rad), math.cos(det.longitude_rad), 0.0])
     north = np.array(
         [
@@ -77,7 +79,11 @@ def _arm_direction(det: CustomDetector, azimuth: float) -> np.ndarray:
             math.cos(det.latitude_rad),
         ]
     )
-    return math.cos(azimuth) * east + math.sin(azimuth) * north
+    up = np.cross(east, north)
+    return (
+        math.cos(tilt) * (math.sin(azimuth) * east + math.cos(azimuth) * north)
+        + math.sin(tilt) * up
+    )
 
 
 def _position_and_tensor(det: CustomDetector) -> tuple[np.ndarray, np.ndarray]:
@@ -85,6 +91,7 @@ def _position_and_tensor(det: CustomDetector) -> tuple[np.ndarray, np.ndarray]:
     position = R_EARTH * np.array(
         [math.cos(lat) * math.cos(lon), math.cos(lat) * math.sin(lon), math.sin(lat)]
     )
+    # The analytic ORF deliberately uses a spherical Earth and zero arm tilts.
     x = _arm_direction(det, det.xarm_azimuth_rad)
     y = _arm_direction(det, det.yarm_azimuth_rad)
     return position, 0.5 * (np.outer(x, x) - np.outer(y, y))
@@ -222,8 +229,10 @@ def test_et_triangle_sum_upper_pairs_matches_reference(
                 latitude_rad=math.radians(lat),
                 longitude_rad=math.radians(lon),
                 elevation_m=0.0,
-                xarm_azimuth_rad=math.radians((xax - 30.0) % 360.0),
-                yarm_azimuth_rad=math.radians((xax + 30.0) % 360.0),
+                xarm_azimuth_rad=(math.pi / 2.0 - math.radians(xax - 30.0))
+                % (2.0 * math.pi),
+                yarm_azimuth_rad=(math.pi / 2.0 - math.radians(xax + 30.0))
+                % (2.0 * math.pi),
             )
         )
 
@@ -279,3 +288,16 @@ def test_gwmock_et_triangle_orf_matches_geometry_table(
     table_sum = table_pw[0, 1, :] + table_pw[0, 2, :] + table_pw[1, 2, :]
 
     np.testing.assert_allclose(preset_sum, table_sum, atol=5e-3)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["H1", "L1", "V1", "K1", "E1", "E2", "E3", "S1", "S2", "R1", "R2", "C1", "C2"],
+)
+def test_native_geometry_response_matches_lal(name: str) -> None:
+    det = load_detector(name)
+    x = _arm_direction(det, det.xarm_azimuth_rad, det.xarm_tilt_rad)
+    y = _arm_direction(det, det.yarm_azimuth_rad, det.yarm_tilt_rad)
+    tensor = 0.5 * (np.outer(x, x) - np.outer(y, y))
+    # LAL stores the response in float32 and arm angles in FrDetector as floats.
+    np.testing.assert_allclose(det.to_lal().response, tensor, rtol=0.0, atol=2e-7)

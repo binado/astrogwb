@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import jax
 import jax.numpy as jnp
@@ -142,11 +142,17 @@ def _config(**overrides: Any) -> RunConfig:
         "num_chains": 1,
         "progress_bar": False,
     }
-    raw.update(overrides)
-    return build_run_config(raw)
+    return build_run_config(raw, **overrides)
 
 
-def _analysis_bounds(config: RunConfig) -> dict[str, float]:
+class AnalysisBounds(TypedDict):
+    minimum_redshift: float
+    maximum_redshift: float
+    minimum_frequency: float
+    maximum_frequency: float
+
+
+def _analysis_bounds(config: RunConfig) -> AnalysisBounds:
     population_kwargs = config.analysis.population.model_kwargs
     return {
         "minimum_redshift": float(population_kwargs["minimum_redshift"]),
@@ -161,12 +167,16 @@ def _prepare(
     proposal: PolarizationPowerCatalog,
     config: RunConfig,
 ):
+    detectors, sensitivities = config.detector_registry.build_detectors(
+        config.analysis.detectors
+    )
     return prepare_inference_inputs(
         injection,
         proposal,
         observation_time=config.analysis.observation_time,
         **_analysis_bounds(config),
-        detectors=config.analysis.detectors,
+        detectors=detectors,
+        sensitivities=sensitivities,
         target=target_population(config),
         density_sites=DEFAULT_DENSITY_SITES,
     )

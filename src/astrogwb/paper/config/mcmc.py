@@ -1,14 +1,14 @@
 """Pydantic models and I/O for headless MCMC run configs.
 
-Importing this module requires only stdlib and pydantic: ``numpyro`` is
-imported lazily inside :func:`materialize_prior` / :func:`prior_to_spec`, so
-importing this module stays cheap and -- because the constructed
-distributions hold plain Python floats and no JAX op is ever evaluated --
-validating a config does not initialize the XLA backend. That last property is what
-:func:`astrogwb.paper.runtime.configure_runtime` relies on to set host device
-count / platform after config validation; it is guarded by a subprocess test
-in ``tests/test_prior_native_types.py`` (re-running ``set_host_device_count``
-after a backend init is a silent no-op, hence the subprocess).
+Importing this module loads the detector registry, and with it JAX. ``numpyro``
+is imported lazily inside :func:`materialize_prior` / :func:`prior_to_spec`.
+The constructed distributions hold plain Python floats and no JAX operation is
+evaluated, so validating a config leaves the XLA backend uninitialized. That
+property is what :func:`astrogwb.paper.runtime.configure_runtime` relies on to
+set host device count / platform after config validation; it is guarded by a
+subprocess test in ``tests/test_prior_native_types.py`` (re-running
+``set_host_device_count`` after a backend init is a silent no-op, hence the
+subprocess).
 
 The generic merge/load helpers (``deep_merge``, ``load_mapping``) live in
 :mod:`astrogwb.paper.utils`, and the run-assembly merge semantics live in
@@ -33,6 +33,7 @@ from pydantic import (
 )
 
 from astrogwb.metadata import CatalogMetadata, PriorSpec
+from astrogwb.paper.config.detectors import DetectorRegistry
 from astrogwb.paper.config.runs import resolve_catalog_blocks
 from astrogwb.paper.utils import deep_merge
 
@@ -43,16 +44,12 @@ _STRICT = ConfigDict(frozen=True, extra="forbid")
 # Pydantic models
 # --------------------------------------------------------------------------- #
 # Restates astrogwb.populations.bns_madau_dickinson.AMPLITUDE_PARAMETERS rather
-# than importing it: this module must stay stdlib+pydantic only (see module
-# docstring), so a @pytest.mark.integration paper test cross-checks the two
-# lists instead.
+# than importing the population registry. tests/paper/test_config.py
+# cross-checks the two lists.
 AmplitudeParameter = Literal["H0", "local_merger_rate"]
 
 #: Restates astrogwb.populations.DEFAULT_DENSITY_SITES, for the same reason and
-#: under the same cross-check: `astrogwb.populations.registry` imports JAX at
-#: module scope, so importing the constant here would cost every
-#: `snakemake --dry-run` a JAX import and break the guard in
-#: `tests/paper/test_cli.py`.
+#: under the same cross-check.
 DEFAULT_DENSITY_SITES: tuple[str, ...] = (
     "redshift",
     "source_frame_mass_1",
@@ -224,15 +221,15 @@ class AnalysisConfig(BaseModel):
     model_config = _STRICT
 
     #: Resolved by `RunConfig._resolve_network` from the [networks] table that
-    #: `config/defaults.toml` contributes to every run's merge. Required, and
+    #: `config/detectors.toml` contributes to every run's merge. Required, and
     #: recorded by `RunConfig.save`: the chain's own config must say which
     #: detectors it was sampled with, not just which name they were reached by.
     detectors: tuple[str, ...]
     #: The name that resolved to `detectors`, kept alongside it so a saved
     #: config records the intent as well as the result. Optional at the model
-    #: level so a saved config -- which carries `detectors` and no [networks]
-    #: table -- re-validates. That every *committed* run names one is a repo
-    #: test, not a model constraint.
+    #: level so a saved config that already carries the resolved detector list
+    #: re-validates. That every committed run names one is a repository test,
+    #: not a model constraint.
     network: str | None = None
     observation_time: float = 1.0
     minimum_frequency: float
@@ -359,37 +356,36 @@ class RunConfig(BaseModel):
     #: ``analysis.population``.
     population: CatalogPopulation
     output: OutputConfig = Field(default_factory=OutputConfig)
+    detector_registry: DetectorRegistry
 
     @model_validator(mode="before")
     @classmethod
     def _resolve_network(cls, data: Any) -> Any:
-        """Turn ``analysis.network`` into ``analysis.detectors``, dropping the table.
+        """Resolve overrides and membership, or restore a complete saved registry.
 
-        The shared ``[networks]`` table is merged like any other block, so the
-        lookup table arrives in the same mapping as the run that names one -- resolution is a pure
-        function of the merged config and needs no file I/O, which is what
-        keeps this module stdlib+pydantic.
-
-        The table is *input to validation*, never a field: as a field it would
-        either land in every ``save()`` next to every chain, or need
-        ``exclude=True`` and break the save/reload round-trip. A validator
-        rather than a step in :func:`build_run_config` because
-        ``RunConfig.model_validate`` is public and callable directly, and
-        because the resulting ``ValidationError`` is what
-        ``scripts/validate_configs.py`` and the test suite already catch.
-
-        A config that already carries ``detectors`` is the ``save()`` output
-        being re-validated: ``save`` records the resolved list *and* the name it
-        came from, so both are present, and no ``[networks]`` table is. That
-        round-trip is why the two are cross-checked rather than rejected
-        outright -- when a table *is* present, as it always is in the config
-        tree, a hand-written list that disagrees with the named network is the
-        real error worth catching.
+        Merged layers carry complete `[detectors]` and `[networks]` tables.
+        Saved configs carry their resolved `detector_registry` instead, so
+        they never reinterpret geometry against newer packaged defaults.
         """
         if not isinstance(data, Mapping):
             return data
         raw = dict(data)
         table = raw.pop("networks", None)
+        overrides = raw.pop("detectors", None)
+        saved_registry = raw.get("detector_registry")
+        if saved_registry is not None:
+            if table is not None or overrides is not None:
+                raise ValueError(
+                    "resolved detector_registry cannot accompany detector overrides"
+                )
+            registry = DetectorRegistry.model_validate(saved_registry)
+        else:
+            registry = DetectorRegistry.model_validate(
+                {"detectors": overrides, "networks": table or {}}
+            )
+        raw["detector_registry"] = registry
+        if saved_registry is not None:
+            table = registry.networks
         analysis = raw.get("analysis")
         if not isinstance(analysis, Mapping):
             return raw  # let field validation report the real problem
@@ -400,8 +396,6 @@ class RunConfig(BaseModel):
         declared = analysis.get("detectors")
 
         if not isinstance(table, Mapping) or name not in table:
-            if declared is not None:
-                return raw  # a saved config, re-validating without the table
             known = sorted(table) if isinstance(table, Mapping) else []
             raise ValueError(
                 f"analysis.network {name!r} is not declared in [networks]; "
@@ -425,6 +419,8 @@ class RunConfig(BaseModel):
             raise ValueError("config must define a non-empty [fiducials] table")
         if not self.priors:
             raise ValueError("config must define at least one [priors.<param>] table")
+
+        self.detector_registry.validate_members(self.analysis.detectors)
 
         priors = dict(self.priors)
         amplitude_parameter = self.analysis.amplitude_parameter

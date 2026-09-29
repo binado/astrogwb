@@ -4,14 +4,17 @@ from pathlib import Path
 
 from astrogwb.metadata import artifact_path
 from astrogwb.paper.config.catalogs import resolve_run_catalogs
-from astrogwb.paper.config.runs import discover_runs, run_config_paths
+from astrogwb.paper.config.runs import (
+    DETECTOR_DEFAULT_PATHS,
+    discover_runs,
+    run_config_paths,
+)
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
-# No config module imports JAX or matplotlib at module scope, so DAG
-# construction stays cheap. Keying the catalogs does reach pydantic -- the key
-# is taken over a validated CatalogMetadata -- which is the price of there
-# being one canonical form. `artifact_path` lives in astrogwb.metadata, not
-# astrogwb.catalog, for the same reason.
+# Keying the catalogs reaches pydantic: the key is taken over a validated
+# CatalogMetadata, which is the price of one canonical form. `artifact_path`
+# lives in astrogwb.metadata, not astrogwb.catalog, so naming a catalog file
+# does not import the catalog stack.
 
 
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
@@ -99,18 +102,9 @@ def network_run_flags(experiment):
     )
 
 
-def network_config_inputs(experiment):
-    """The run files behind `network_run_flags`, so the DAG edges are real.
-
-    The script re-derives these paths from the run names it is given; declaring
-    them here is what makes editing one network's config retrigger the figure.
-    Taken from `run_config_paths`, whose last layer is the run's own file, so
-    the path convention lives in one place.
-    """
-    return [
-        str(run_config_paths(experiment, run, root=Path("."))[-1])
-        for run in DETECTOR_NETWORK_RUNS
-    ]
+#: Packaged geometry and sensitivity. Every run merges these before its four
+#: layers, so an edit retriggers every chain.
+DETECTOR_INPUTS = [str(path) for path in DETECTOR_DEFAULT_PATHS]
 
 
 def run_catalog_input(role):
@@ -186,6 +180,7 @@ rule validate:
     """Pre-flight: merge, validate, and catalog-check every run, building nothing."""
     input:
         RUN_CONFIG_FILES,
+        DETECTOR_INPUTS,
     output:
         "outputs/validated-runs.txt",
     shell:
@@ -197,11 +192,12 @@ rule run_mcmc:
     """Sample one run into outputs/chains/<experiment>/<run>.nc."""
     input:
         script="scripts/run_mcmc.py",
-        # The run's three layers: edit a leaf -> one chain; edit an
+        # The run's four layers: edit a leaf -> one chain; edit an
         # experiment's _base.toml -> that experiment; edit
-        # config/defaults.toml -> all 27. The catalogs are named by key, so an
+        # either shared config layer -> all 27. The catalogs are named by key, so an
         # edit to a draw reaches the chain through a new catalog path too.
         config=lambda w: config_layers(w.experiment, w.run),
+        psds=DETECTOR_INPUTS,
         injection=run_catalog_input("injection"),
         proposal=run_catalog_input("proposal"),
     output:
@@ -268,10 +264,9 @@ rule plot_cosmological_parameters:
         ),
         omega_m_chain="outputs/chains/cosmological-parameters/H0-Omega_m.nc",
         catalog=INJECTION_CATALOG,
-        # The layers of a run this figure actually plots, and the run files
-        # behind --network-run.
+        # The layers of a run this figure actually plots. Each network run's
+        # own file is an input of its chain, which this rule already requires.
         config=config_layers("cosmological-parameters", "ET-2L-aligned-CE-Hanford"),
-        network_configs=network_config_inputs("cosmological-parameters"),
     output:
         detector_pdf="outputs/figures/cosmological-parameters/H0-by-detector.pdf",
         detector_csv="outputs/figures/cosmological-parameters/H0-by-detector.csv",
@@ -321,7 +316,6 @@ rule plot_modified_propagation:
         ),
         catalog=INJECTION_CATALOG,
         config=config_layers("modified-propagation", "ET-2L-aligned-CE-Hanford"),
-        network_configs=network_config_inputs("modified-propagation"),
     output:
         xi_n_corner_pdf="outputs/figures/modified-propagation/Xi0-n-corner.pdf",
         xi_n_ess_corner_pdf="outputs/figures/modified-propagation/Xi0-n-ess-corner.pdf",
@@ -350,6 +344,7 @@ rule importance_weights_grid:
     input:
         catalog=DEFAULT_PROPOSAL_CATALOG,
         config=config_layers(*FIGURE_RUN),
+        psds=DETECTOR_INPUTS,
     output:
         h0_omega_m_pdf=(
             "outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf"

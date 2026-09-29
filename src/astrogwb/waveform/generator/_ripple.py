@@ -67,7 +67,11 @@ class _WaveformNames(Sequence[str]):
         # Imported here, not at module scope -- see the module docstring.
         import ripplegw
 
-        return tuple(ripplegw.list_waveforms(**self._filters))
+        return tuple(
+            name
+            for name in ripplegw.list_waveforms(**self._filters)
+            if name not in _EXCLUDED_APPROXIMANTS
+        )
 
     @overload
     def __getitem__(self, index: int) -> str: ...
@@ -86,6 +90,10 @@ class _WaveformNames(Sequence[str]):
 
 
 _CBC_FILTERS = {"domain": "FD", "source_type": "cbc"}
+
+#: Ripple registers this model; gwmock does not implement it, so it is omitted
+#: from every supported-approximant view.
+_EXCLUDED_APPROXIMANTS = frozenset({"IMRPhenomXP_NRTidalv3"})
 
 # Compatibility views for callers that used the former module-level groups.
 SUPPORTED_APPROXIMANTS = _WaveformNames(**_CBC_FILTERS)

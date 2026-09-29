@@ -36,8 +36,8 @@ def require_toml(path: Path) -> None:
     list just as happily, which is exactly why the format is pinned here: a
     second format should arrive as one deliberate migration, not a stray file.
     ``astrogwb.detector``'s packaged ``geometry.toml`` and ``sensitivity.toml``
-    are detector *data*, not config layers, and are read with ``tomllib`` where
-    they are used.
+    are also TOML: core reads them with ``tomllib`` and the paper application
+    merges their registry tables with its run layers through ``knf``.
     """
     if path.suffix.lower() != ".toml":
         raise ValueError(f"config layers are TOML; got {path.suffix!r} for {path}")

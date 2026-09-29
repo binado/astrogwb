@@ -6,13 +6,18 @@ One file per run, and the filename is the mapping:
 config/runs/<experiment>/<run>.toml  ->  outputs/chains/<experiment>/<run>.nc
 ```
 
-A run is three layers merged in order:
+The packaged detector geometry and sensitivity tables use the same
+`[detectors.<name>]` layout as the shared registry and are merged first with
+pyknf. A run is four layers merged over those defaults in order:
 
 ```text
-config/defaults.toml  ->  <experiment>/_base.toml  ->  <run>.toml
+config/defaults.toml  ->  config/detectors.toml
+  ->  <experiment>/_base.toml  ->  <run>.toml
 ```
 
-`config/defaults.toml` declares every block with the value every run inherits.
+`config/defaults.toml` declares shared scientific values, and
+`config/detectors.toml` declares networks and optional detector overrides.
+Both are inherited by every run.
 A run file carries only what distinguishes it. `_base.toml` is the experiment
 override and is required in every experiment directory -- a conditional
 Snakemake input would complicate the DAG for no gain. It is not a run, so it
