@@ -62,11 +62,9 @@ class DetectorConfig(BaseModel):
         return self
 
     def build_sensitivity(self) -> Sensitivity:
-        """Build a sensitivity using the existing preset/file/URL resolver."""
+        """Build a sensitivity from this detector's PSD reference."""
         from astrogwb.detector import Sensitivity
-        from astrogwb.psd import resolve_psd_path
 
-        resolve_psd_path(self.psd_reference)
         return Sensitivity(self.psd_reference)
 
 
