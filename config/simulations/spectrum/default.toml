@@ -1,0 +1,35 @@
+# A forward-model spectra draw, shaped like astrogwb.metadata.SpectraMetadata.
+# It is merged over the four shared layers (config/defaults.toml,
+# waveforms.toml, populations.toml, detectors.toml) and read by
+# scripts/simulate_spectra.py from the [spectra] table alone -- it is not a run
+# layer, and no MCMC run reads it.
+#
+#   uv run --extra paper python scripts/simulate_spectra.py \
+#       --config config/defaults.toml --config config/waveforms.toml \
+#       --config config/populations.toml --config config/detectors.toml \
+#       --config config/simulations/spectrum/default.toml
+#
+# A hyperparameter is one "${...}" reference, and which table it names decides
+# what it is: a [fiducials] entry fixes it for every draw, a [priors] entry
+# (a {dist, kwargs} table) draws it once per row. A later layer that sets a key
+# under [spectra.hyperparameters] replaces the reference whole. The
+# population is referenced whole; a layer that overrides its seed has to spell
+# the table out field by field, because a reference cannot be reached through.
+#
+# No `version`: the record carries the installed astrogwb's, never the config's.
+
+[spectra]
+waveform = "${waveforms.default}"
+population = "${populations.cosmological}"
+num_draws = 64
+observation_time = "${analysis.observation_time}"
+
+[spectra.hyperparameters]
+H0 = "${fiducials.H0}"
+Omega_m = "${fiducials.Omega_m}"
+gamma = "${fiducials.gamma}"
+kappa = "${fiducials.kappa}"
+z_peak = "${fiducials.z_peak}"
+minimum_mass = "${fiducials.minimum_mass}"
+mass_width = "${fiducials.mass_width}"
+local_merger_rate = "${priors.local_merger_rate}"

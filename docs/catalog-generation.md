@@ -436,8 +436,22 @@ are data, so an edited bound re-keys the draws without a version bump. The seed
 is split into a hyperparameter key and a forward-model key; with priors, the
 static event plate is sized from the largest Poisson mean across the rows.
 
-`scripts/simulate_spectra.py --metadata JSON --output <key>.h5` is the same
-generator from a shell; it refuses an output whose stem is not the key. A
+`scripts/simulate_spectra.py` is the same generator from a shell. It takes
+config layers like `run_mcmc` does -- the four shared `config/*.toml` layers,
+then `config/simulations/spectrum/<name>.toml` -- and validates the merged
+`[spectra]` table as the `SpectraMetadata`. In that table a hyperparameter is a
+`"${fiducials.X}"` reference (fixed) or a `"${priors.X}"` one (sampled). The
+output is `<--output-dir>/<key>.h5`, `outputs/spectra` by default, and the script
+refuses to replace it without `--force`:
+
+```bash
+uv run --extra paper python scripts/simulate_spectra.py \
+    --config config/defaults.toml --config config/waveforms.toml \
+    --config config/populations.toml --config config/detectors.toml \
+    --config config/simulations/spectrum/default.toml
+```
+
+The spectrum layers are not run layers: no chain reads `[spectra]`. A
 caller that needs a source model no record can name -- the
 `IsotropicInclination` wrapper in `notebooks/waveform_approximant_spectra.py`
 -- calls the uncached `astrogwb.inference.draw_spectral_density` directly.

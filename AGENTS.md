@@ -65,6 +65,9 @@ Forward-model spectra go through the same `simulate` outside the workflow: a
 `SpectraMetadata` (each hyperparameter a fixed number or a prior spec) keys
 `outputs/spectra/<key>.h5`, and `astrogwb.catalog.simulate(metadata,
 SpectrumGenerator(), cache_dir)` serves or generates it.
+`scripts/simulate_spectra.py` builds the same record from the `[spectra]` table
+of `--config` layers (the four shared layers, then
+`config/simulations/spectrum/<name>.toml`); those files are not run layers.
 
 A run config is six TOML layers merged in order -- the four shared layers
 `config/defaults.toml`, `config/waveforms.toml`, `config/populations.toml` and

@@ -1,43 +1,31 @@
-"""Draw forward-model spectra from their metadata and save them under its key.
+"""Draw forward-model spectra from config layers and save them under their key.
 
 The draws are fully determined by a :class:`~astrogwb.metadata.SpectraMetadata`
 -- waveform, population and seed, each hyperparameter's fixed value or prior,
-draw count, observation time and plate depth -- handed in as JSON. This script
-runs :class:`~astrogwb.catalog.SpectrumGenerator` on it and writes the result
-atomically. It writes ``(draws, F)`` spectra only; no ``(F, N)`` catalog power
-is ever materialized.
+draw count, observation time and plate depth -- declared as the ``[spectra]``
+table of the ``--config`` layers, merged in process exactly as ``run_mcmc``
+merges a run. This script runs :class:`~astrogwb.catalog.SpectrumGenerator` on
+it and writes the result atomically to ``<output-dir>/<key>.h5``. It writes
+``(draws, F)`` spectra only; no ``(F, N)`` catalog power is ever materialized.
 
-The output's stem must be the metadata's key, so a file can never be filed
-under another record's address. Outside a shell,
+The file is named by the metadata's key, so it can never be filed under another
+record's address. Outside a shell,
 ``astrogwb.catalog.simulate(metadata, SpectrumGenerator(), cache_dir)`` is the
 same generator behind a cache lookup, and needs no script.
 
-A hyperparameter is a number to fix it, or a ``{"dist", "kwargs"}`` prior
-(the format of the shared ``[priors]`` table) to draw it once per row.
+A hyperparameter is a ``"${fiducials.X}"`` reference to fix it, or a
+``"${priors.X}"`` one to draw it once per row; see
+``config/simulations/spectrum/default.toml``.
 
-Usage::
+Usage -- one ``--config`` per layer, in merge order::
 
-    uv run --extra io python scripts/simulate_spectra.py \\
-        --metadata "$(cat spectra.json)" \\
-        --output outputs/spectra/<key>.h5
+    uv run --extra paper python scripts/simulate_spectra.py \\
+        --config config/defaults.toml --config config/waveforms.toml \\
+        --config config/populations.toml --config config/detectors.toml \\
+        --config config/simulations/spectrum/default.toml
 
-where ``spectra.json`` is, for example::
-
-    {
-      "waveform": {"approximant": "TaylorF2", "sampling_frequency": 128.0,
-                   "minimum_frequency": 20.0, "maximum_frequency": 48.0,
-                   "reference_frequency": 20.0, "frequency_resolution": 4.0},
-      "population": {"model_name": "bns_md_cosmological", "seed": 0,
-                     "model_kwargs": {"minimum_redshift": 0.3,
-                                      "maximum_redshift": 20, "n_grid": 64}},
-      "hyperparameters": {"H0": 67.66, "Omega_m": 0.3096, "gamma": 1.42,
-                          "kappa": 4.62, "z_peak": 1.84, "minimum_mass": 1.0,
-                          "mass_width": 1.5,
-                          "local_merger_rate": {"dist": "Normal",
-                                                "kwargs": {"loc": 770.0, "scale": 7.7}}},
-      "num_draws": 8,
-      "observation_time": 1.0
-    }
+``knf <layers> --shallow 'priors.*' --interpolate`` prints the merged config,
+whose ``[spectra]`` table is the record.
 """
 
 from __future__ import annotations
@@ -46,42 +34,44 @@ import argparse
 import logging
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from pydantic import ValidationError
 
 from astrogwb.catalog import SpectrumGenerator, save_atomically
-from astrogwb.metadata import SpectraMetadata
+from astrogwb.metadata import SpectraMetadata, artifact_path
+from astrogwb.paper.config.runs import (
+    SPECTRA_ROOT,
+    add_config_arguments,
+    load_merged_config,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _metadata(raw: str) -> SpectraMetadata:
-    """Parse and validate the metadata off argv."""
-    try:
-        return SpectraMetadata.model_validate_json(raw)
-    except ValidationError as error:
-        raise argparse.ArgumentTypeError(f"invalid spectra metadata: {error}") from None
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Draw forward-model spectral densities from their SpectraMetadata "
-            "and save (draws, F) without materializing catalog power."
+            "Draw forward-model spectral densities from the [spectra] table of "
+            "their config layers and save (draws, F) without materializing "
+            "catalog power."
         )
     )
-    parser.add_argument(
-        "--metadata",
-        required=True,
-        type=_metadata,
-        metavar="JSON",
-        help="The SpectraMetadata, as JSON.",
+    add_config_arguments(
+        parser,
+        help=(
+            "One config layer file, in merge order; repeat once per layer (the "
+            "four shared config/*.toml layers, then a "
+            "config/simulations/spectrum/<name>.toml). Its [spectra] table is "
+            "the SpectraMetadata."
+        ),
     )
     parser.add_argument(
-        "--output",
+        "--output-dir",
         type=Path,
-        required=True,
-        help="Destination .h5; its stem must be the metadata's key.",
+        default=SPECTRA_ROOT,
+        metavar="DIR",
+        help=f"The spectra are written to <DIR>/<key>.h5 (default: {SPECTRA_ROOT}).",
     )
     parser.add_argument(
         "--batch-size",
@@ -97,18 +87,31 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def spectra_metadata(config: dict[str, Any]) -> SpectraMetadata:
+    """Validate the merged config's ``[spectra]`` table as a ``SpectraMetadata``.
+
+    The whole merge is not the record: it also carries ``[analysis]``,
+    ``[fiducials]``, ``[priors]`` and the rest, which the model forbids.
+    """
+    if "spectra" not in config:
+        raise ValueError(
+            "the merged config has no [spectra] table; add a "
+            "config/simulations/spectrum/<name>.toml layer"
+        )
+    try:
+        return SpectraMetadata.model_validate(config["spectra"])
+    except ValidationError as error:
+        raise ValueError(f"invalid [spectra] table: {error}") from None
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
     args = parse_args(argv)
-    metadata: SpectraMetadata = args.metadata
-    output = args.output.expanduser().resolve()
-    if output.stem != metadata.key():
-        raise ValueError(
-            f"output {output.name} is not named by the metadata's key {metadata.key()}"
-        )
+    metadata = spectra_metadata(load_merged_config(args))
+    output = artifact_path(metadata, args.output_dir.expanduser()).resolve()
     if output.exists() and not args.force:
         raise FileExistsError(
             f"refusing to replace existing spectra: {output}. "
