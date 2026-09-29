@@ -42,12 +42,12 @@ sample depends on it -- so it is declared by the analysis that reweights the
 draw. Adding a population means adding a registered source-model function under
 `src/astrogwb/populations/`, never an import path in a config.
 
-Catalogs are content-addressed. A run declares what each role draws in
-`[analysis.catalog]` -- a partial spec per role (`seed`, `num_samples`, and any
-`waveform` / `population` / `fiducials` override) over the run's own blocks of
-the same names. `resolve_catalog_blocks` (stdlib, in `config/runs.py`) is the
-one resolution; `CatalogMetadata` (`astrogwb.metadata`) validates the result
-and its `key()` -- a hash of the canonical record -- names
+Catalogs are content-addressed. A run declares what each role draws as
+`[analysis.injection]` and `[analysis.proposal]`, each a complete
+`CatalogMetadata` (`astrogwb.metadata`) once the merge resolves its `${...}`
+references; both default, field by field, to the shared draw `[catalog]`.
+`CatalogMetadata` validates the role and its `key()` -- a hash of the
+canonical record -- names
 `outputs/catalogs/<key>.h5` (`astrogwb.metadata.artifact_path`). The same
 record is what a `PolarizationPowerCatalog` carries as `.metadata`. The
 Snakefile keys every run's roles at parse time (`resolve_run_catalogs`),
@@ -65,25 +65,36 @@ Forward-model spectra go through the same `simulate` outside the workflow: a
 `outputs/spectra/<key>.h5`, and `astrogwb.catalog.simulate(metadata,
 SpectrumGenerator(), cache_dir)` serves or generates it.
 
-A run config is four TOML layers merged in order -- `config/defaults.toml`, then `config/detectors.toml`,
-then the experiment `config/runs/<experiment>/_base.toml`, then the run.
-`config/defaults.toml` declares the shared scientific defaults;
+A run config is six TOML layers merged in order -- the four shared layers
+`config/defaults.toml`, `config/waveforms.toml`, `config/populations.toml` and
+`config/detectors.toml`, then the experiment
+`config/runs/<experiment>/_base.toml`, then the run.
+`config/defaults.toml` declares the shared scientific defaults and the default
+draw `[catalog]`; `config/waveforms.toml` and `config/populations.toml` declare
+named `[waveforms.<name>]` / `[populations.<name>]` records (each population
+with a default seed) that catalogs and the analysis target refer to;
 `config/detectors.toml` declares `[networks]` and optional `[detectors]` overrides. Every layer opens with a comment saying what it is
 for, so what each committed run -- and each catalog override -- is for lives in
 its own file; `config/runs/README.md` indexes the experiments and the catalogs
-they share. The top-level `[population]` is the default a run's catalogs are
-drawn from; the analysis target is `analysis.population`. `[fiducials]` is both
+they share. The analysis target is `analysis.population`, a
+`PopulationMetadata` whose seed is unused. `[fiducials]` is both
 where NUTS initializes and what a run's catalogs are drawn at, so editing the
 shared `[fiducials]` re-keys every catalog. `[fiducials]`, `[priors]` and
 `[networks]` are also read directly by the notebooks and figure scripts through
 `astrogwb.paper.config.fiducials()` / `priors()` / `networks()`, and
-`waveform_generator()` / `population_model()` read `[waveform]` and
-`[population]`, so a copy cannot drift from what the runs sample.
+`waveform_generator()` / `population_model()` read `[catalog]`'s waveform and
+population, so a copy cannot drift from what the runs sample.
 `merge_config_layers` folds the layers with `knf` (pyknf): a deep merge, except
 that each `priors.<param>` table replaces the inherited one (`PRIOR_SHALLOW =
-"priors.*"`). `knf src/astrogwb/detector/{geometry,sensitivity}.toml <layers> --shallow 'priors.*'`
+"priors.*"`), then resolves every `"${a.b}"` reference against the merged
+result. A reference is atomic -- setting a key under one replaces it whole --
+and cannot be reached *through* (`${x.y}` fails when `x` is itself a
+reference), so a table that runs override field by field is spelled one
+reference per field; to change a named variant for one run, override it at its
+source. `[catalog]`, `[waveforms]` and `[populations]` exist only to be
+referenced, and `RunConfig` drops them. `knf src/astrogwb/detector/{geometry,sensitivity}.toml <layers> --shallow 'priors.*' --interpolate`
 prints the same merge in the shell. The packaged detector files use the same
-`[detectors.<name>]` format and are merged before the four run layers. A run names a detector network (`analysis.network`) rather than listing
+`[detectors.<name>]` format and are merged before the six run layers. A run names a detector network (`analysis.network`) rather than listing
 detectors. `config/plotting.toml` is presentation -- LaTeX parameter labels and
 savefig settings, reached through `astrogwb.paper.plotting` -- and is
 deliberately *not* a run layer. No entrypoint is handed an assembled config.

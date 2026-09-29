@@ -816,15 +816,20 @@ def test_the_repository_ships_no_proposal_density_config() -> None:
     """A guard fraction is declared only as what a catalog draws.
 
     The proposal density the weights divide by is read back off the proposal
-    file; a run states the fraction only in the catalog spec that draws it,
-    never as analysis configuration the weights could consult instead.
+    file; a run states the fraction only on the named population a catalog
+    draws from, never as analysis configuration the weights could consult
+    instead.
     """
-    shared = load_mapping(REPO_ROOT / "config/defaults.toml")
+    shared = load_mapping(REPO_ROOT / "config/populations.toml")
 
-    assert set(shared["analysis"]["catalog"]) == {"injection", "proposal"}
-    for path in sorted((REPO_ROOT / "config/runs").rglob("*.toml")):
+    assert "uniform_mixing_fraction" in shared["populations"]["guard"]["model_kwargs"]
+    layers = sorted(
+        [
+            *(REPO_ROOT / "config").glob("*.toml"),
+            *(REPO_ROOT / "config/runs").rglob("*.toml"),
+        ]
+    )
+    for path in layers:
         layer = load_mapping(path)
-        analysis = dict(layer.get("analysis", {}))
-        analysis.pop("catalog", None)
-        outside_catalogs = {**layer, "analysis": analysis}
-        assert "uniform_mixing_fraction" not in json.dumps(outside_catalogs), path
+        outside_populations = {k: v for k, v in layer.items() if k != "populations"}
+        assert "uniform_mixing_fraction" not in json.dumps(outside_populations), path

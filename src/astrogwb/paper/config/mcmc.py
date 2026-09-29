@@ -32,9 +32,9 @@ from pydantic import (
     model_validator,
 )
 
-from astrogwb.metadata import CatalogMetadata, PriorSpec
+from astrogwb.metadata import CatalogMetadata, PopulationMetadata, PriorSpec
 from astrogwb.paper.config.detectors import DetectorRegistry
-from astrogwb.paper.config.runs import resolve_catalog_blocks
+from astrogwb.paper.config.runs import CATALOG_ROLES
 from astrogwb.paper.utils import deep_merge
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
@@ -57,8 +57,8 @@ DEFAULT_DENSITY_SITES: tuple[str, ...] = (
 )
 
 #: The construction kwargs a population must be given to be evaluated on a
-#: redshift grid. Shared by `AnalysisPopulation` and, through
-#: :func:`check_redshift_grid`, by `CatalogPopulation` and each catalog request.
+#: redshift grid. Checked, through :func:`check_redshift_grid`, on the analysis
+#: target and on each catalog request.
 REDSHIFT_GRID_KWARGS: tuple[str, ...] = (
     "minimum_redshift",
     "maximum_redshift",
@@ -169,54 +169,6 @@ PriorDistribution = Annotated[
 ]
 
 
-class AnalysisPopulation(BaseModel):
-    """The population a run's sampled hyperparameters describe.
-
-    Shaped like the shared ``[population]`` block -- ``model_name`` and the
-    flat ``model_kwargs`` :func:`~astrogwb.populations.build_population` is
-    given -- but it is deliberately *not* a
-    :class:`~astrogwb.metadata.PopulationMetadata`. That record describes a
-    draw: its ``seed`` is mandatory and means nothing for a target that is
-    evaluated rather than sampled from.
-
-    ``model_kwargs`` carries the redshift window and grid, which is the one
-    statement of them: the same three numbers build the target callables *and*
-    define the grid its spectral integral runs on, so `grid` reads them back
-    out rather than a second block restating them.
-
-    ``density_sites`` selects the source-density factors importance weighting
-    includes, for both sides of every weight. It lives here because no catalog
-    depends on it -- the samples are the same whichever of their densities are
-    counted -- so the run that reweights a draw is what declares the choice.
-    Ordered and load-bearing: the two mass sites are one conceptual
-    ordered-pair contribution (the secondary's distribution is parameterized by
-    the drawn primary), and dropping either gives silently wrong weights with
-    no shape error anywhere.
-
-    The model name is validated against the registry by
-    `astrogwb.paper.config.catalogs.check_population_model`, not here: this
-    module must stay importable without JAX.
-    """
-
-    model_config = _STRICT
-
-    #: The default is the one every committed run uses; it reduces exactly to
-    #: the plain cosmological population at xi_0 = 1, which is how a run that
-    #: does not sample the propagation parameters gets the standard law without
-    #: naming a second population. An analysis target must declare a merger
-    #: rate, so a guard mixture cannot be named here.
-    model_name: str = "bns_md_modified_propagation"
-    model_kwargs: dict[str, float | int]
-    density_sites: tuple[str, ...] = DEFAULT_DENSITY_SITES
-
-    @model_validator(mode="after")
-    def _validate_model_kwargs(self) -> AnalysisPopulation:
-        check_redshift_grid(
-            self.model_kwargs, label="analysis.population.model_kwargs", required=True
-        )
-        return self
-
-
 class AnalysisConfig(BaseModel):
     model_config = _STRICT
 
@@ -238,12 +190,42 @@ class AnalysisConfig(BaseModel):
     #: parameter; resolved by `RunConfig._resolve_sampled_params`, which needs
     #: the [priors] table and so cannot live here.
     sampled_params: tuple[str, ...] = ()
-    population: AnalysisPopulation
-    catalog: CatalogConfig
+    #: The population the sampled hyperparameters describe: the target the
+    #: importance weights are evaluated at. The same record a catalog carries,
+    #: but evaluated rather than drawn from, so its seed is unused. Its
+    #: ``model_kwargs`` carry the redshift window and grid, which is the one
+    #: statement of them: the same three numbers build the target callables
+    #: *and* define the grid its spectral integral runs on.
+    #:
+    #: The model name is validated against the registry by
+    #: `astrogwb.paper.config.catalogs.check_population_model`, not here: this
+    #: module must stay importable without JAX.
+    population: PopulationMetadata
+    #: The source-density factors importance weighting includes, for both
+    #: sides of every weight. Declared by the analysis because no catalog
+    #: depends on it -- the samples are the same whichever of their densities
+    #: are counted. Ordered and load-bearing: the two mass sites are one
+    #: conceptual ordered-pair contribution (the secondary's distribution is
+    #: parameterized by the drawn primary), and dropping either gives silently
+    #: wrong weights with no shape error anywhere.
+    density_sites: tuple[str, ...] = DEFAULT_DENSITY_SITES
+    #: The "observed" data: the catalog whose spectrum is the measurement.
+    injection: CatalogMetadata
+    #: The catalog the importance weights reweight.
+    proposal: CatalogMetadata
     likelihood: Literal["default", "amplitude_marginalized"] = "default"
     amplitude_parameter: AmplitudeParameter | None = None
     amplitude_num_nodes: Annotated[int, Field(gt=1)] = 1024
     amplitude_prior_span_sigma: Annotated[float, Field(gt=0.0)] = 10.0
+
+    @model_validator(mode="after")
+    def _validate_target_grid(self) -> AnalysisConfig:
+        check_redshift_grid(
+            self.population.model_kwargs,
+            label="analysis.population.model_kwargs",
+            required=True,
+        )
+        return self
 
     @model_validator(mode="after")
     def _validate_amplitude_parameter(self) -> AnalysisConfig:
@@ -286,57 +268,10 @@ class OutputConfig(BaseModel):
     label: str = ""
 
 
-class CatalogPopulation(BaseModel):
-    """A population block: a registered name and its construction kwargs.
-
-    The shape of the shared ``[population]`` block, which is
-    the default every catalog of a run is drawn from. No seed: that belongs to
-    a particular draw, and each role in ``[analysis.catalog]`` states its own.
-    """
-
-    model_config = _STRICT
-
-    model_name: str
-    model_kwargs: dict[str, float | int] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _validate_redshift_window(self) -> CatalogPopulation:
-        check_redshift_grid(self.model_kwargs, label="population.model_kwargs")
-        return self
-
-
-class CatalogSpec(BaseModel):
-    """One role's catalog, as the run asks for it.
-
-    Partial by design. ``seed`` and ``num_samples`` are the draw's own and are
-    always stated; ``waveform``, ``population`` and ``fiducials`` override the
-    run's blocks of the same name, recursively, and are otherwise inherited.
-    :meth:`RunConfig.catalog_request` resolves the result into the
-    :class:`~astrogwb.metadata.CatalogMetadata` whose key names the file.
-    """
-
-    model_config = _STRICT
-
-    seed: int
-    num_samples: Annotated[int, Field(gt=0)]
-    waveform: dict[str, Any] = Field(default_factory=dict)
-    population: dict[str, Any] = Field(default_factory=dict)
-    fiducials: dict[str, float] = Field(default_factory=dict)
-
-
-class CatalogConfig(BaseModel):
-    """The two catalogs this run uses: the injection and the proposal.
-
-    Each role is a :class:`CatalogSpec` -- *what* to draw, not a name for a
-    file. The file is content-addressed: its path is the key of the resolved
-    request, so two runs asking for the same draw share one catalog and a run
-    that changes anything about its draw gets a new one.
-    """
-
-    model_config = _STRICT
-
-    injection: CatalogSpec
-    proposal: CatalogSpec
+#: Top-level tables that exist only to be referenced: once the merge has
+#: resolved every ``${...}``, what they said lives in the tables that referred
+#: to them, so a run config drops them rather than validating or saving them.
+AUTHORING_TABLES: tuple[str, ...] = ("catalog", "waveforms", "populations")
 
 
 class RunConfig(BaseModel):
@@ -349,14 +284,18 @@ class RunConfig(BaseModel):
     priors: dict[str, PriorDistribution]
     analysis: AnalysisConfig
     sampler: SamplerConfig
-    #: The waveform settings every catalog of this run inherits.
-    waveform: dict[str, Any]
-    #: The population every catalog of this run is drawn from unless a role
-    #: overrides it -- a *draw* default, not the analysis target, which is
-    #: ``analysis.population``.
-    population: CatalogPopulation
     output: OutputConfig = Field(default_factory=OutputConfig)
     detector_registry: DetectorRegistry
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_authoring_tables(cls, data: Any) -> Any:
+        """Drop the referenced-only tables; the saved config is resolved records."""
+        if not isinstance(data, Mapping):
+            return data
+        return {
+            key: value for key, value in data.items() if key not in AUTHORING_TABLES
+        }
 
     @model_validator(mode="before")
     @classmethod
@@ -483,15 +422,18 @@ class RunConfig(BaseModel):
         }
 
     def catalog_request(self, role: str) -> CatalogMetadata:
-        """The fully resolved catalog one role of this run samples against.
+        """The catalog one role of this run samples against, by role name.
 
-        Resolved by :func:`~astrogwb.paper.config.runs.resolve_catalog_blocks`,
-        the same stdlib function the ``Snakefile`` keys its catalog files with,
-        so the file a run is handed and the request it checks that file against
-        cannot be derived two ways.
+        ``analysis.injection`` or ``analysis.proposal``: each is already a
+        complete record, resolved by the merge that the ``Snakefile`` keys its
+        catalog files with, so the file a run is handed and the request it
+        checks that file against cannot be derived two ways.
         """
-        raw = self.model_dump(mode="json")
-        return CatalogMetadata.from_blocks(**resolve_catalog_blocks(raw, role))
+        if role not in CATALOG_ROLES:
+            raise ValueError(
+                f"unknown catalog role {role!r}; roles are {CATALOG_ROLES}"
+            )
+        return getattr(self.analysis, role)
 
     def save(self, path: Path) -> None:
         """Write the validated run config as JSON."""
@@ -514,7 +456,9 @@ def build_run_config(
 
     Named ``seed`` / ``outdir`` / ``label`` remain for CLI compatibility. Extra
     ``**overrides`` are deep-merged into the raw mapping (nested dicts merge;
-    other values replace) before validation.
+    other values replace) before validation. ``raw`` is already resolved, so an
+    override reaches only the table it names: overriding ``fiducials`` does not
+    re-draw the catalogs, whose records were resolved by the merge.
     """
     cli_overrides: dict[str, Any] = {}
     if seed is not None:

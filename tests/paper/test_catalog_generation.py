@@ -49,37 +49,39 @@ def make_request() -> RequestFactory:
         extra_kwargs: dict[str, Any] | None = None,
         extra_fiducials: dict[str, float] | None = None,
     ) -> CatalogMetadata:
-        return CatalogMetadata.from_blocks(
-            population={
-                "model_name": model,
-                "model_kwargs": {
-                    "minimum_redshift": 0.0,
-                    "maximum_redshift": 20.0,
-                    "n_grid": 256,
-                    **(extra_kwargs or {}),
+        return CatalogMetadata.model_validate(
+            {
+                "population": {
+                    "model_name": model,
+                    "model_kwargs": {
+                        "minimum_redshift": 0.0,
+                        "maximum_redshift": 20.0,
+                        "n_grid": 256,
+                        **(extra_kwargs or {}),
+                    },
+                    "seed": 41,
                 },
-            },
-            waveform={
-                "approximant": "TaylorF2",
-                "sampling_frequency": 512.0,
-                "minimum_frequency": 16.0,
-                "maximum_frequency": 64.0,
-                "reference_frequency": 16.0,
-                "frequency_resolution": 1.0,
-            },
-            fiducials={
-                "H0": 67.66,
-                "Omega_m": 0.3096,
-                "gamma": 1.42,
-                "kappa": 4.62,
-                "z_peak": 1.84,
-                "local_merger_rate": 770.0,
-                "minimum_mass": 1.0,
-                "mass_width": 1.5,
-                **(extra_fiducials or {}),
-            },
-            seed=41,
-            num_samples=8,
+                "waveform": {
+                    "approximant": "TaylorF2",
+                    "sampling_frequency": 512.0,
+                    "minimum_frequency": 16.0,
+                    "maximum_frequency": 64.0,
+                    "reference_frequency": 16.0,
+                    "frequency_resolution": 1.0,
+                },
+                "fiducials": {
+                    "H0": 67.66,
+                    "Omega_m": 0.3096,
+                    "gamma": 1.42,
+                    "kappa": 4.62,
+                    "z_peak": 1.84,
+                    "local_merger_rate": 770.0,
+                    "minimum_mass": 1.0,
+                    "mass_width": 1.5,
+                    **(extra_fiducials or {}),
+                },
+                "num_samples": 8,
+            }
         )
 
     return build

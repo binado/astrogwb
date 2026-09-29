@@ -19,6 +19,8 @@ Usage -- one ``--config`` per layer, in merge order, exactly as
 
     uv run --extra paper python scripts/profile_model.py \
         --config config/defaults.toml \
+        --config config/waveforms.toml \
+        --config config/populations.toml \
         --config config/detectors.toml \
         --config config/runs/cosmological-parameters/_base.toml \
         --config config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
@@ -65,14 +67,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file answering this run's [analysis.catalog].injection.",
+        help="The catalog file answering this run's [analysis.injection].",
     )
     parser.add_argument(
         "--proposal-catalog",
         type=Path,
         required=True,
         metavar="PATH",
-        help="The catalog file answering this run's [analysis.catalog].proposal.",
+        help="The catalog file answering this run's [analysis.proposal].",
     )
     parser.add_argument(
         "--seed",
@@ -137,7 +139,7 @@ def build_potential(
         detectors=detectors,
         sensitivities=sensitivities,
         target=target_population(config),
-        density_sites=config.analysis.population.density_sites,
+        density_sites=config.analysis.density_sites,
     )
     model, _ = build_model(
         config,

@@ -8,6 +8,8 @@ are the same list the workflow declares as the rule's `input:`:
 
 ```bash
 LAYERS="config/defaults.toml \
+  config/waveforms.toml \
+  config/populations.toml \
   config/detectors.toml \
   config/runs/cosmological-parameters/_base.toml \
   config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml"
@@ -22,11 +24,12 @@ The merge is `astrogwb.paper.config.runs.merge_config_layers`, which hands the
 layers to `knf` (pyknf): a deep merge left to right, arrays and scalars
 replacing, except that each `priors.<param>` table replaces the inherited one
 wholesale (`PRIOR_SHALLOW = "priors.*"`), so a Normal prior never inherits a
-Uniform's `low` / `high`. The `knf` CLI is the same engine, so this prints
-exactly the config the run will validate:
+Uniform's `low` / `high`. After the merge every `"${a.b}"` reference is
+resolved (see [references](#references)). The `knf` CLI is the same engine, so
+this prints exactly the config the run will validate:
 
 ```bash
-uv run --extra paper knf $LAYERS --shallow 'priors.*'
+uv run --extra paper knf $LAYERS --shallow 'priors.*' --interpolate
 ```
 
 Merge order is yours to get right, and a wrong-but-valid order fails silently,
@@ -52,10 +55,12 @@ uv run --extra paper python scripts/profile_model.py --help
 ## The configuration tree
 
 [`config/`](../config/) is the sole MCMC configuration source. A run config is
-four layers merged in order:
+six layers merged in order:
 
 ```text
 config/defaults.toml                                       shared scientific values
+config/waveforms.toml                                      named waveforms
+config/populations.toml                                    named populations
 config/detectors.toml                                      shared detector settings
 config/runs/<experiment>/_base.toml                        the experiment override
 config/runs/<experiment>/<run>.toml                        the run override
@@ -70,22 +75,30 @@ complicates the DAG for no gain. What each committed run is *for* is written
 as a comment at the top of its own file; [`config/runs/README.md`](../config/runs/README.md)
 indexes the experiments and the catalogs they share.
 
-`config/defaults.toml` declares the scientific defaults; `config/detectors.toml`
-declares `[networks]` and an empty `[detectors]` table for optional overrides.
-Each block is commented with what it owns. Several are read by more than the workflow: the
+`config/defaults.toml` declares the scientific defaults; `config/waveforms.toml`
+and `config/populations.toml` declare the named waveforms and populations that
+catalogs and targets refer to; `config/detectors.toml` declares `[networks]`
+and an empty `[detectors]` table for optional overrides. Each block is
+commented with what it owns. Several are read by more than the workflow: the
 notebooks and figure scripts consume `fiducials`, `priors` and `networks`
 through `astrogwb.paper.config`.
 
 | Block | Owns |
 | --- | --- |
-| `[analysis]` | observing time, frequency band, target population, and the two catalogs |
+| `[analysis]` | observing time, frequency band, target population, density sites, and the two catalogs |
+| `[catalog]` | the default draw both roles refer to, shaped like `CatalogMetadata` |
 | `[fiducials]` | the fiducial value of every parameter |
-| `[networks]` | each detector network, by name (in `detectors.toml`) |
-| `[detectors]` | optional geometry, PSD, and label overrides (in `detectors.toml`) |
 | `[priors]` | the prior on every parameter |
 | `[sampler]` | the sampling RNG seed and NUTS defaults |
-| `[waveform]` | the waveform settings every catalog of a run inherits |
-| `[population]` | the population a run's catalogs are drawn from, unless a role overrides it |
+| `[waveforms.<name>]` | a named `WaveformMetadata` (in `waveforms.toml`) |
+| `[populations.<name>]` | a named `PopulationMetadata`, seed included (in `populations.toml`) |
+| `[networks]` | each detector network, by name (in `detectors.toml`) |
+| `[detectors]` | optional geometry, PSD, and label overrides (in `detectors.toml`) |
+
+`[catalog]`, `[waveforms]` and `[populations]` exist only to be referenced:
+once the merge resolves every reference, what they said lives in the tables
+that named them, so `RunConfig` drops them and the saved config holds only
+resolved records.
 
 Fiducials are also the hyperparameters a run's catalogs are drawn at, so the
 injection is drawn at exactly the values NUTS initializes at. What was
@@ -125,7 +138,7 @@ uses the resolved settings without merging newer packaged defaults.
 
 Detector definitions default to the packaged `geometry.toml` and
 `sensitivity.toml`. Both use the same `[detectors.<name>]` structure as
-`config/detectors.toml`, and pyknf merges them before the four run layers.
+`config/detectors.toml`, and pyknf merges them before the six run layers.
 `DetectorRegistry` validates the resulting complete definitions. A shared,
 experiment, or run layer can override individual fields; later layers win:
 
@@ -167,6 +180,29 @@ Nested mappings merge and lists replace, except that each overridden
 load-bearing, not incidental: key-merging a normal prior onto a uniform one
 would leave stale `low` / `high` behind.
 
+### References
+
+After the merge, every string that is exactly `"${a.b}"` is replaced by the
+merged value at `a.b` -- a table, a number, whatever it is, with its type
+kept. That is how one table reuses another rather than restating it:
+`[catalog]` names its waveform as `"${waveforms.default}"`, and each catalog
+role in `[analysis]` names the fields of `[catalog]`. Three rules follow from
+how `knf` resolves them:
+
+- **References resolve against the final merge.** A run that overrides
+  `[fiducials]` reaches every catalog drawn at `"${fiducials}"`.
+- **A reference is atomic.** A layer that sets a key *under* a reference
+  replaces the whole reference, so `[analysis.proposal.waveform] approximant =
+  "TaylorF2"` leaves a waveform with nothing but an approximant, which fails
+  validation. That is why the shared layer spells each role one reference per
+  field: a run can then override `num_samples` or `population.seed` alone.
+  To change a named variant for one run, override it at its source --
+  `[populations.guard] seed = 62` -- and every role that names it follows.
+- **A reference can name another reference, but not reach through one.**
+  `"${catalog.population.seed}"` cannot resolve if `[catalog].population` is
+  itself `"${populations.cosmological}"`. A table that others reach into field
+  by field is therefore spelled one reference per field too.
+
 The seven experiments and their 27 runs:
 
 | Experiment | Runs |
@@ -181,8 +217,7 @@ The seven experiments and their 27 runs:
 
 `run_mcmc` declares a run's layers as its own inputs, so editing a run's file
 retriggers exactly that chain, editing an experiment's `_base.toml` retriggers
-that experiment, and editing either shared layer (`config/defaults.toml` or
-`config/detectors.toml`) retriggers all 27.
+that experiment, and editing any of the four shared layers retriggers all 27.
 
 `snakemake validate` merges and catalog-checks every run without building
 anything. Run it before a campaign: it fails on the first invalid run *before
@@ -190,19 +225,32 @@ any catalog is built*, and a catalog is a GPU job.
 
 ## Catalogs and the proposal density
 
-Every run declares its two catalogs, one per role, as partial specs over its
-own `[waveform]`, `[population]` and `[fiducials]` blocks:
+Every run declares its two catalogs, `[analysis.injection]` and
+`[analysis.proposal]`, each a `CatalogMetadata` once its references resolve.
+Both default to the shared draw, `[catalog]`:
 
 ```toml
-[analysis.catalog]
-injection = { seed = 41, num_samples = 32768 }
-proposal = { seed = 41, num_samples = 32768 }
+[catalog]
+waveform = "${waveforms.default}"
+fiducials = "${fiducials}"
+num_samples = 32768
+
+[catalog.population]
+model_name = "${populations.cosmological.model_name}"
+model_kwargs = "${populations.cosmological.model_kwargs}"
+seed = "${populations.cosmological.seed}"
 ```
 
-That is `config/defaults.toml`'s default, and a role overrides only what
-differs -- the seed and size, a population, an approximant. Each role resolves
-to a `CatalogMetadata`, whose key names the file; see
-[catalog generation](catalog-generation.md).
+and a run overrides only what differs -- a size and seed, a named population,
+a named waveform:
+
+```toml
+[analysis.proposal]
+population = "${populations.guard}"
+num_samples = 16384
+```
+
+Each role's key names its file; see [catalog generation](catalog-generation.md).
 
 Only `time-delay` overrides the injection, because its target population is not
 the one the default injection was drawn from. Only `variable-catalog-size`,
@@ -224,32 +272,27 @@ density cannot be baked into the file. Nothing about it is resolved at config
 time, so `snakemake validate` stays cheap: a config typo, or an unregistered
 population name, fails without any catalog having to exist.
 
-The `[analysis.population]` block is the *target* population the sampled
-hyperparameters describe:
+`analysis.population` is the *target* population the sampled hyperparameters
+describe, a `PopulationMetadata` like any catalog's -- its seed is unused,
+since a target is evaluated rather than drawn from:
 
 ```toml
-[analysis.population]
-model_name = "bns_md_modified_propagation"
-
-[analysis.population.model_kwargs]
-minimum_redshift = 0.3
-maximum_redshift = 20.0
-n_grid = 256
+[analysis]
+population = "${populations.target}"
 ```
 
-`model_name` is the default, and every committed run uses it. It reduces
-exactly to the plain cosmological population at `xi_0 = 1`, which is how a run
-that does not sample the propagation parameters gets the standard law without
-naming a second model.
+`[populations.target]` is `bns_md_modified_propagation`, which every run but
+`time-delay` uses. It reduces exactly to the plain cosmological population at
+`xi_0 = 1`, which is how a run that does not sample the propagation parameters
+gets the standard law without naming a second model.
 
-`model_kwargs` is the one statement of the redshift window and grid: the same
-three numbers build the target callables and define the grid the spectral
-integral runs on, so `AnalysisConfig.grid` reads them back rather than a second
-block restating them. A third key, `density_sites`, selects the source-density
-factors importance weighting includes; it defaults to redshift and the ordered
-mass pair, and no committed run overrides it. It lives here rather than on a
-catalog because no draw depends on it — the samples are the same whichever of
-their densities a later weight counts.
+Its `model_kwargs` are the one statement of the analysis redshift window and
+grid: the same three numbers build the target callables and define the grid
+the spectral integral runs on. `analysis.density_sites` selects the
+source-density factors importance weighting includes; it defaults to redshift
+and the ordered mass pair, and no committed run overrides it. It lives on the
+analysis rather than on a catalog because no draw depends on it -- the samples
+are the same whichever of their densities a later weight counts.
 
 The proposal catalog's recorded population, narrowed to the analysis window, is
 stamped into the saved chain's posterior attributes, so the `.nc` remains the

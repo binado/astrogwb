@@ -63,7 +63,7 @@ and detector settings in `config/detectors.toml` through `astrogwb.paper.config`
 and the ordered network
 legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS` — rather than merging a
 run's layers. Its $S_h$ is one seeded draw of `gwb_forward_model`, built from
-the shared `[population]` and `[waveform]` tables, so it does not need a file
+the population and waveform of the shared default draw, `[catalog]`, so it does not need a file
 under `outputs/catalogs/`. Its analysis window (`observation_time`, the frequency
 band, and the redshift bounds), the draw seed, and local plotting choices stay
 hand-written in its configuration cell, mirroring the shared `[analysis]` table.
@@ -95,8 +95,9 @@ a notebook cannot drift from what the runs sample. `priors()` returns live
 NumPyro distributions. Each accessor also takes keyword overrides merged over
 the file, so varying one value does not mean retyping the table; a network name
 is hyphenated, so override one by unpacking a mapping
-(`networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})`). Each accessor returns fresh settings from a cached parse. To see file edits
-in a long-lived kernel, clear `astrogwb.paper.config._load.cache_clear()`.
+(`networks(**{"ET-2L-aligned": ("S1", "R1", "C1")})`). Each accessor returns
+fresh settings from one cached merge of the shared layers. To see file edits
+in a long-lived kernel, call `astrogwb.paper.config._shared.cache_clear()`.
 Run-specific notebooks use `RunConfig.detector_registry` so their geometry
 and PSD overrides match inference.
 

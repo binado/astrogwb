@@ -1,7 +1,7 @@
 """Generate one waveform catalog from its resolved metadata.
 
 The workflow's ``waveform_catalog`` rule is the caller: every run's
-``[analysis.catalog]`` roles are resolved into
+``[analysis.injection]`` and ``[analysis.proposal]`` are validated into
 :class:`~astrogwb.metadata.CatalogMetadata` records when the DAG is built, and
 each distinct record becomes one job writing ``outputs/catalogs/<key>.h5``.
 This script is handed that record as JSON and builds it with

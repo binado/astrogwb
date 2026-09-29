@@ -48,13 +48,15 @@ hash of what a run asks for, so there is no registry file:
 ```text
 config/defaults.toml                            shared scientific defaults:
                                                 [analysis] band, target population,
-                                                  catalogs
+                                                  the injection and proposal catalogs
+                                                [catalog] the default draw, shaped
+                                                  like CatalogMetadata
                                                 [fiducials] every parameter (also
                                                   what catalogs are drawn at)
                                                 [priors] every parameter's prior
                                                 [sampler] RNG seed, NUTS defaults
-                                                [waveform] / [population] what a
-                                                  run's catalogs are drawn with
+config/waveforms.toml                           [waveforms.<name>] named waveforms
+config/populations.toml                         [populations.<name>] named populations
 config/detectors.toml                           [networks] membership and optional
                                                 [detectors] geometry/PSD/label overrides
 config/plotting.toml                            LaTeX labels and savefig settings
@@ -66,11 +68,14 @@ config/runs/<experiment>/<run>.toml             the run override
   -> outputs/catalogs/<key>.h5                  one per distinct catalog it asks for
 ```
 
-A run is four TOML layers: `config/defaults.toml`, `config/detectors.toml`, its experiment's
-`_base.toml`, and its own file, merged by `knf` (which the `knf` CLI also
-exposes in the shell). The packaged `geometry.toml` and `sensitivity.toml`
-are merged first, using the same `[detectors.<name>]` tables as the shared
-registry file. Each file opens with a comment saying what it is for.
+A run is six TOML layers: the four shared ones (`config/defaults.toml`,
+`config/waveforms.toml`, `config/populations.toml`, `config/detectors.toml`),
+its experiment's `_base.toml`, and its own file, merged by `knf` (which the
+`knf` CLI also exposes in the shell). The packaged `geometry.toml` and
+`sensitivity.toml` are merged first, using the same `[detectors.<name>]` tables
+as the shared registry file. After the merge, every `"${a.b}"` string resolves
+to the merged value at `a.b`, which is how a catalog names its waveform and
+population. Each file opens with a comment saying what it is for.
 Several shared blocks are read by more than the workflow: the notebooks and
 figure scripts consume the same bytes through
 `astrogwb.paper.config.fiducials()` / `priors()` / `networks()` / `detector_registry()`. Each accessor

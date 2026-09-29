@@ -5,24 +5,34 @@ Filenames are the mapping. ``config/runs/<experiment>/<run>.toml`` samples into
 the two. That convention is what let the previous ``inputs/experiments.yaml``
 registry -- and the ten ``Snakefile`` helpers that read it -- go away.
 
-A run config is four layers merged in order:
+A run config is six layers merged in order:
 
 0. ``config/defaults.toml`` -- shared scientific and sampling defaults.
-1. ``config/detectors.toml`` -- shared networks and detector overrides.
-2. ``config/runs/<experiment>/_base.toml`` -- the experiment override.
-3. ``config/runs/<experiment>/<run>.toml`` -- the run override.
+1. ``config/waveforms.toml`` -- named waveform settings.
+2. ``config/populations.toml`` -- named populations.
+3. ``config/detectors.toml`` -- shared networks and detector overrides.
+4. ``config/runs/<experiment>/_base.toml`` -- the experiment override.
+5. ``config/runs/<experiment>/<run>.toml`` -- the run override.
 
 Every layer is TOML, so each one can say in a comment why it sets what it
 sets. :func:`merge_config_layers` folds them with ``knf``, the
 engine behind the ``knf`` CLI, so the shell and Python spell one merge rule:
 ``knf src/astrogwb/detector/{geometry,sensitivity}.toml <layers>
---shallow 'priors.*'`` prints what a run resolves to. Both packaged tables
-use the same ``[detectors.<name>]`` layout as the shared registry file.
+--shallow 'priors.*' --interpolate`` prints what a run resolves to. Both
+packaged tables use the same ``[detectors.<name>]`` layout as the shared
+registry file.
 
-A run also owns its catalogs. ``[analysis.catalog]`` holds a partial spec per
-role, and :func:`resolve_catalog_blocks` completes it from the run's own
-``[waveform]``, ``[population]`` and ``[fiducials]``; the result is keyed by
-:class:`~astrogwb.metadata.CatalogMetadata` and names the catalog file.
+After the merge, every ``"${a.b}"`` string is replaced by the merged value at
+``a.b``. That is how one table reuses another: ``[catalog]`` names its
+waveform and population by reference, and each role in ``[analysis]`` refers
+to ``[catalog]``. A reference resolves against the *final* merge, so a run
+that overrides ``[fiducials]`` reaches every catalog drawn at them. It is also
+atomic: a layer that sets a key under a reference replaces the reference
+whole, which is why the shared layer spells each role one reference per field.
+
+A run owns its catalogs. ``[analysis.injection]`` and ``[analysis.proposal]``
+resolve to complete :class:`~astrogwb.metadata.CatalogMetadata` records, whose
+keys name the catalog files.
 
 :data:`EXPERIMENT_BASE` is required in every experiment directory rather than
 optional: a conditional Snakemake input complicates the DAG for no gain.
@@ -33,24 +43,23 @@ and merges them in process; :func:`assemble_run` is the convenience wrapper for 
 for the validation gate, which address a run by name rather than by path.
 ``scripts/generate_catalog.py`` is handed a resolved request as JSON instead.
 
-**stdlib plus knf, and deliberately so.** Resolution here is plain dict
-merging, so it has one implementation that the ``Snakefile``, ``RunConfig`` and
-the notebooks all share.
-Validating and keying the result -- which reaches pydantic -- lives in
-:mod:`astrogwb.paper.config.catalogs`.
+**stdlib plus knf, and deliberately so.** Resolution here is one knf merge,
+so it has one implementation that the ``Snakefile``, ``RunConfig`` and the
+notebooks all share. Validating and keying the result -- which reaches
+pydantic -- lives in :mod:`astrogwb.paper.config.catalogs`.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import knf
 
-from astrogwb.paper.utils import deep_merge, require_toml
+from astrogwb.paper.utils import require_toml
 
 if TYPE_CHECKING:
     from astrogwb.paper.plotting import Network
@@ -63,10 +72,15 @@ logger = logging.getLogger(__name__)
 CONFIG_DIR = Path("config")
 
 #: Shared scientific defaults, also consumed directly by notebooks.
-#: The top-level population is the catalog default; analysis.population is
-#: the analysis target.
+#: [catalog] is the default draw; analysis.population is the analysis target.
 DEFAULTS_PATH = CONFIG_DIR / "defaults.toml"
+#: Named waveforms and populations that catalogs and targets refer to.
+WAVEFORMS_PATH = CONFIG_DIR / "waveforms.toml"
+POPULATIONS_PATH = CONFIG_DIR / "populations.toml"
 DETECTORS_PATH = CONFIG_DIR / "detectors.toml"
+
+#: Every shared run layer, in merge order.
+SHARED_LAYER_PATHS = (DEFAULTS_PATH, WAVEFORMS_PATH, POPULATIONS_PATH, DETECTORS_PATH)
 
 #: Packaged geometry and sensitivity use the same registry tables as overrides.
 DETECTOR_DEFAULT_PATHS = tuple(
@@ -106,8 +120,9 @@ def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
 
     Packaged detector tables are the initial defaults. A deep merge, left to
     right -- arrays and scalars replace -- except at
-    :data:`PRIOR_SHALLOW`. This is a *run-config* parser, not generic config
-    infrastructure: the prior rule is domain-specific.
+    :data:`PRIOR_SHALLOW`, followed by resolving every ``${...}`` reference
+    against the merged result. This is a *run-config* parser, not generic
+    config infrastructure: the prior rule is domain-specific.
 
     Order is the caller's responsibility and it is not recoverable from the
     result, so :func:`load_merged_config` logs it.
@@ -116,7 +131,9 @@ def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
         raise ValueError("no config layers given")
     for path in paths:
         require_toml(path)
-    return knf.load([*DETECTOR_DEFAULT_PATHS, *paths], shallow=PRIOR_SHALLOW)
+    return knf.load(
+        [*DETECTOR_DEFAULT_PATHS, *paths], interpolate=True, shallow=PRIOR_SHALLOW
+    )
 
 
 def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
@@ -151,12 +168,12 @@ def discover_runs(root: Path | None = None) -> dict[str, tuple[str, ...]]:
 
 
 def base_config_paths(root: Path | None = None) -> tuple[Path, ...]:
-    """The shared scientific and detector layers, in merge order.
+    """The shared scientific, variant and detector layers, in merge order.
 
     Named explicitly: config/plotting.toml is presentation and is not a run
     layer. Paths are relative to the caller's working directory.
     """
-    paths = tuple((root or Path()) / path for path in (DEFAULTS_PATH, DETECTORS_PATH))
+    paths = tuple((root or Path()) / path for path in SHARED_LAYER_PATHS)
     for path in paths:
         if not path.is_file():
             raise ValueError(f"missing shared config layer: {path}")
@@ -191,7 +208,7 @@ def load_base(root: Path | None = None) -> dict[str, Any]:
 def assemble_run(
     experiment: str, run: str, *, root: Path | None = None
 ) -> dict[str, Any]:
-    """Merge one run's four layers into a raw config, addressing it by name.
+    """Merge one run's six layers into a raw config, addressing it by name.
 
     The convenience wrapper for callers that hold ``(experiment, run)`` rather
     than a list of paths: the notebooks, the validation gate, and the figure
@@ -200,53 +217,8 @@ def assemble_run(
     return merge_config_layers(run_config_paths(experiment, run, root=root))
 
 
+#: The two catalogs every run samples against, each a table under [analysis].
 CATALOG_ROLES = ("injection", "proposal")
-
-#: The blocks a role's spec may override, each deep-merged over the run's own
-#: block of the same name. ``seed`` and ``num_samples`` have no default: they
-#: belong to a particular draw, so every role states them.
-CATALOG_OVERRIDABLE_BLOCKS = ("waveform", "population", "fiducials")
-
-
-def resolve_catalog_blocks(raw: Mapping[str, Any], role: str) -> dict[str, Any]:
-    """The complete catalog blocks one role of a merged run config asks for.
-
-    A role's spec in ``[analysis.catalog]`` is partial: it states the draw's
-    ``seed`` and ``num_samples`` and overrides whatever else differs. The rest
-    is the run's own ``[waveform]``, ``[population]`` and ``[fiducials]``, so
-    the injection is drawn at the very hyperparameters the run initializes at.
-    The overrides are recursive merges, so a guarded proposal that names another population still inherits
-    the shared redshift window.
-
-    Returns plain blocks, not a validated request: this module is stdlib-only,
-    and :meth:`astrogwb.metadata.CatalogMetadata.from_blocks` is where they are
-    checked and keyed.
-    """
-    if role not in CATALOG_ROLES:
-        raise ValueError(f"unknown catalog role {role!r}; roles are {CATALOG_ROLES}")
-    analysis = raw.get("analysis")
-    catalog = analysis.get("catalog") if isinstance(analysis, Mapping) else None
-    spec = catalog.get(role) if isinstance(catalog, Mapping) else None
-    if not isinstance(spec, Mapping):
-        raise TypeError(f"run config must define an [analysis.catalog.{role}] table")
-    blocks: dict[str, Any] = {}
-    for block in CATALOG_OVERRIDABLE_BLOCKS:
-        inherited = raw.get(block)
-        if not isinstance(inherited, Mapping):
-            raise TypeError(f"run config must define a [{block}] block")
-        blocks[block] = deep_merge(inherited, spec.get(block) or {})
-    for name in ("seed", "num_samples"):
-        if name not in spec:
-            raise TypeError(f"analysis.catalog.{role} must declare {name}")
-        blocks[name] = spec[name]
-    return blocks
-
-
-def catalog_blocks(
-    experiment: str, run: str, role: str, *, root: Path | None = None
-) -> dict[str, Any]:
-    """:func:`resolve_catalog_blocks` for a run addressed by name."""
-    return resolve_catalog_blocks(assemble_run(experiment, run, root=root), role)
 
 
 def resolve_networks(
@@ -334,7 +306,7 @@ def resolve_networks(
 def add_network_run_arguments(parser: argparse.ArgumentParser) -> None:
     """Add the repeated ``--network-run`` flag the network figures take.
 
-    Four layers times six networks of ``--config`` is unworkable, so the network
+    Six layers times six networks of ``--config`` is unworkable, so the network
     figures are handed run *names* and re-derive the layer paths themselves.
     Each network run's config layers are inputs of its chain, and the figure
     depends on those chains.
@@ -376,8 +348,8 @@ def add_config_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="PATH",
         help=(
             "One run-config layer file, in merge order; repeat once per "
-            "layer (config/defaults.toml, config/detectors.toml, then the experiment _base.toml, "
-            "then the run)."
+            "layer (the four shared config/*.toml layers, then the experiment "
+            "_base.toml, then the run)."
         ),
     )
 

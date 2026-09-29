@@ -59,6 +59,7 @@ def population() -> dict[str, Any]:
             "maximum_redshift": 5.0,
             "n_grid": 64,
         },
+        "seed": 7,
     }
 
 
@@ -71,16 +72,15 @@ def make_request(
     """Build a small request, overriding any block by keyword."""
 
     def build(**overrides: Any) -> CatalogMetadata:
-        blocks: dict[str, Any] = {
+        record: dict[str, Any] = {
             "population": population,
             "waveform": waveform,
             "fiducials": fiducials,
-            "seed": 7,
             "num_samples": 16,
             "version": astrogwb.__version__,
         }
-        blocks.update(overrides)
-        return CatalogMetadata.from_blocks(**blocks)
+        record.update(overrides)
+        return CatalogMetadata.model_validate(record)
 
     return build
 
@@ -102,7 +102,7 @@ def test_key_of_fixed_request_matches_pinned_digest(
 @pytest.mark.parametrize(
     "override",
     [
-        lambda blocks: {"seed": 8},
+        lambda blocks: {"population": {**blocks["population"], "seed": 8}},
         lambda blocks: {"num_samples": 32},
         lambda blocks: {"version": "0.0.0-other"},
         lambda blocks: {"fiducials": {**blocks["fiducials"], "gamma": 1.5}},
@@ -150,24 +150,18 @@ def test_key_with_reordered_fiducials_is_the_same(
     assert make_request(fiducials=reordered).key() == make_request().key()
 
 
-def test_from_blocks_with_population_seed_raises(
-    make_request: RequestFactory, population: dict[str, Any]
-) -> None:
-    with pytest.raises(ValueError, match="may not declare seed"):
-        make_request(population={**population, "seed": 3})
-
-
-def test_from_blocks_without_version_uses_installed_version(
+def test_request_without_version_uses_installed_version(
     population: dict[str, Any],
     waveform: dict[str, Any],
     fiducials: dict[str, float],
 ) -> None:
-    request = CatalogMetadata.from_blocks(
-        population=population,
-        waveform=waveform,
-        fiducials=fiducials,
-        seed=7,
-        num_samples=16,
+    request = CatalogMetadata.model_validate(
+        {
+            "population": population,
+            "waveform": waveform,
+            "fiducials": fiducials,
+            "num_samples": 16,
+        }
     )
 
     assert request.version == astrogwb.__version__
@@ -234,9 +228,9 @@ def test_simulate_on_hit_does_not_rewrite_the_file(
 
 
 def test_simulate_with_file_under_wrong_key_raises(
-    make_request: RequestFactory, tmp_path: Path
+    make_request: RequestFactory, population: dict[str, Any], tmp_path: Path
 ) -> None:
-    other = make_request(seed=8)
+    other = make_request(population={**population, "seed": 8})
     CatalogGenerator()(make_request()).save(artifact_path(other, tmp_path))
 
     with pytest.raises(ValueError, match="not the requested"):
@@ -271,11 +265,12 @@ from astrogwb.metadata import CatalogMetadata
 
 assert not jax.config.x64_enabled, "x64 was already on before generation"
 catalog = CatalogGenerator()(
-    CatalogMetadata.from_blocks(
+    CatalogMetadata.model_validate(dict(
         population={
             "model_name": "bns_md_cosmological",
             "model_kwargs": {"minimum_redshift": 0.0, "maximum_redshift": 5.0,
                              "n_grid": 64},
+            "seed": 7,
         },
         waveform={
             "approximant": "AnalyticInspiral",
@@ -288,9 +283,8 @@ catalog = CatalogGenerator()(
         fiducials={"H0": 67.66, "Omega_m": 0.3096, "gamma": 1.42, "kappa": 4.62,
                    "z_peak": 1.84, "local_merger_rate": 770.0,
                    "minimum_mass": 1.0, "mass_width": 1.5},
-        seed=7,
         num_samples=4,
-    )
+    ))
 )
 assert catalog.source_parameters["redshift"].dtype == "float64"
 assert "ripplegw" not in sys.modules, "x64 came from importing ripplegw"

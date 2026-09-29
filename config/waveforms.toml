@@ -1,0 +1,27 @@
+# Named waveform settings, each a complete astrogwb.metadata.WaveformMetadata.
+# A catalog picks one by reference -- waveform = "${waveforms.default}" -- so a
+# run that draws with another approximant names a variant here rather than
+# patching the default.
+#
+# A reference is resolved after every layer is merged, and it is atomic: a
+# layer that sets a key *under* a reference replaces the whole reference. To
+# change a variant for one run, override it here, at its source.
+
+# The waveform every catalog draws with unless its role names another.
+[waveforms.default]
+approximant = "IMRPhenomXAS_NRTidalv3"
+sampling_frequency = 8192.0
+minimum_frequency = 2.0
+maximum_frequency = 2048.0
+reference_frequency = 20.0
+frequency_resolution = 1.0
+
+# The default band and resolution with the TaylorF2 approximant, for the
+# waveform-systematics proposal.
+[waveforms.TaylorF2]
+approximant = "TaylorF2"
+sampling_frequency = "${waveforms.default.sampling_frequency}"
+minimum_frequency = "${waveforms.default.minimum_frequency}"
+maximum_frequency = "${waveforms.default.maximum_frequency}"
+reference_frequency = "${waveforms.default.reference_frequency}"
+frequency_resolution = "${waveforms.default.frequency_resolution}"
