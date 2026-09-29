@@ -244,7 +244,6 @@ def test_bin_widths_can_be_traced_under_jit() -> None:
     ("frequencies", "message"),
     [
         (np.array([1.0]), "at least two bins"),
-        (np.array([3.0, 2.0, 1.0]), "strictly increasing"),
         (np.ones((2, 2)), "one-dimensional"),
     ],
 )

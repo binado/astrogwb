@@ -92,9 +92,11 @@ def bin_widths(frequencies: ArrayLike) -> jax.Array:
     then calling this on the selection would give the bins at the edge of a gap
     the wrong width.
 
-    Raises ``ValueError`` for a grid with fewer than two bins, which has no
-    width, and, when the values are concrete, for one that is not strictly
-    increasing. Under :func:`jax.jit` only the shape is checked.
+    The values are trusted: the grid is assumed strictly increasing, as
+    :func:`validate_frequency_grid` checks where a grid enters the package, so
+    this stays traceable under :func:`jax.jit`. Only the shape is checked,
+    raising ``ValueError`` for a grid that is not one-dimensional or has fewer
+    than two bins, which has no width.
     """
     grid = jnp.asarray(frequencies)
     if grid.ndim != 1:
@@ -104,12 +106,6 @@ def bin_widths(frequencies: ArrayLike) -> jax.Array:
     if grid.shape[0] < 2:
         raise ValueError("a frequency grid needs at least two bins to have a width")
     gaps = jnp.diff(grid)
-    try:
-        increasing = bool(jnp.all(gaps > 0.0))
-    except jax.errors.TracerBoolConversionError:
-        increasing = True  # traced values: only the shape is checkable
-    if not increasing:
-        raise ValueError("frequencies must be strictly increasing")
     return jnp.concatenate([gaps[:1], (gaps[:-1] + gaps[1:]) / 2.0, gaps[-1:]])
 
 

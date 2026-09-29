@@ -1,10 +1,11 @@
-"""Network effective PSD and per-bin Gaussian noise scale.
+r"""Network effective PSD and per-bin Gaussian noise scale.
 
 This module owns the detector/network noise model seen by a stochastic
 background search: the inverse-variance network ``effective_psd`` and the
-per-bin Gaussian scale ``σ_i = S_eff,i / √(2 T Δf_i)``, plus its
-grid-independent plotting counterpart ``σ_ln f = S_eff / √(2 T f)``. Overlap-reduction geometry
-stays in ``overlap``; GWB signal spectra stay in ``astrogwb.gwb``.
+per-bin Gaussian scale :math:`\sigma_i = S_{\mathrm{eff},i} / \sqrt{2 T \Delta f_i}`,
+plus its grid-independent plotting counterpart
+:math:`\sigma_{\ln f} = S_{\mathrm{eff}} / \sqrt{2 T f}`. Overlap-reduction
+geometry stays in ``overlap``; GWB signal spectra stay in ``astrogwb.gwb``.
 """
 
 from __future__ import annotations
