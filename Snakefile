@@ -207,6 +207,10 @@ rule run_mcmc:
         platform=JAX_PLATFORM,
         outdir=run_outdir,
         config_flags=lambda w: config_flags(w.experiment, w.run),
+        # The job looks its catalogs up by key in the cache the two inputs
+        # above live in, and --cached-only makes a miss an error rather than
+        # a generation: catalogs are built by `waveform_catalog`, upstream.
+        catalog_dir=str(CATALOGS_DIR),
     threads: 4
     resources:
         mem_mb=8000,
@@ -241,8 +245,7 @@ rule run_mcmc:
         $NANNY uv run --active --no-sync $UV_EXTRAS python {input.script:q} \
             {params.config_flags} --outdir {params.outdir:q} \
             --label {wildcards.run:q} \
-            --injection-catalog {input.injection:q} \
-            --proposal-catalog {input.proposal:q} \
+            --catalog-dir {params.catalog_dir:q} --cached-only \
             --platform {params.platform:q} $RUNTIME_FLAGS --force
         """
 

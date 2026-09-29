@@ -373,10 +373,9 @@ def test_run_mcmc_validates_the_layers_the_workflow_passes() -> None:
     for path in run_config_paths("modified-propagation", "Xi_0-H0"):
         argv += ["--config", str(path)]
     argv += [
-        "--injection-catalog",
-        "outputs/catalogs/injection.h5",
-        "--proposal-catalog",
-        "outputs/catalogs/proposal.h5",
+        "--catalog-dir",
+        "outputs/catalogs",
+        "--cached-only",
         "--label",
         "Xi_0-H0",
     ]
@@ -384,6 +383,8 @@ def test_run_mcmc_validates_the_layers_the_workflow_passes() -> None:
     args = run_mcmc.parse_args(argv)
     config = build_run_config(run_mcmc.load_merged_config(args))
 
+    assert args.cached_only
+    assert args.catalog_dir == Path("outputs/catalogs")
     # The tight H0 prior the run overrides, which a deep merge would have
     # corrupted, reached the validated config as a Normal.
     assert type(config.priors["H0"]).__name__ == "Normal"

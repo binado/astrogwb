@@ -3,8 +3,8 @@
 ## Ad-hoc runs
 
 `scripts/run_mcmc.py` takes the run's config layers, one `--config` flag per
-file in merge order, plus the two catalog files it samples against. The layers
-are the same list the workflow declares as the rule's `input:`:
+file in merge order. The layers are the same list the workflow declares as the
+rule's `input:`:
 
 ```bash
 LAYERS="config/defaults.toml \
@@ -15,9 +15,7 @@ LAYERS="config/defaults.toml \
   config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml"
 
 uv run --extra paper python scripts/run_mcmc.py \
-  $(for layer in $LAYERS; do printf -- '--config %s ' "$layer"; done) \
-  --injection-catalog outputs/catalogs/<injection key>.h5 \
-  --proposal-catalog outputs/catalogs/<proposal key>.h5
+  $(for layer in $LAYERS; do printf -- '--config %s ' "$layer"; done)
 ```
 
 The merge is `astrogwb.paper.config.runs.merge_config_layers`, which hands the
@@ -38,11 +36,15 @@ override something for a single invocation, add a layer to `LAYERS` -- the
 stack is open-ended, which is the practical gain over a fixed assembled
 artifact.
 
-The two catalog roles are fixed, so the files are named flags. `just catalogs`
-prints each run's two keys. `run_mcmc` resolves the request each role of its
-config asks for and refuses a file that does not record exactly that request,
-so a file handed to the wrong role, or one built before the config changed,
-fails before JAX starts.
+The catalogs are fetched the way a notebook fetches them:
+`astrogwb.catalog.simulate` looks each role's request up by key in
+`--catalog-dir` (default `outputs/catalogs`), checks a hit against the request,
+and generates a miss. Hits are served before JAX starts, so a file filed under
+the wrong key fails cheaply; a miss is generated only after the runtime is
+configured, because drawing a catalog initializes the XLA backend.
+`--cached-only` makes a miss an error instead -- the workflow passes it, since
+`rule waveform_catalog` builds the catalogs upstream. `just catalogs` prints
+each run's two keys.
 
 `scripts/profile_model.py` still takes a run's layer *paths* as repeated
 `--config` flags -- it merges them in process, as the figure scripts do -- and

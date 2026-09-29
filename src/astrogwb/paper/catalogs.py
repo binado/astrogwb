@@ -45,9 +45,9 @@ def load_run_catalog(
     must also record exactly that metadata, which is how a run refuses a file
     handed to the wrong role or built from a draw it no longer asks for.
 
-    This is the by-path counterpart of :func:`~astrogwb.catalog.simulate`: a
-    workflow job is handed the file its rule built and must never generate
-    one, so a missing file raises instead of being drawn.
+    This is the by-path counterpart of :func:`~astrogwb.catalog.simulate`, for
+    a caller handed a file rather than a request -- the figure scripts and the
+    SNR helper -- so a missing file raises instead of being drawn.
     """
     path = Path(path)
     if not path.is_file():

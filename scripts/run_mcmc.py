@@ -24,13 +24,10 @@ Usage -- one ``--config`` per layer, in merge order::
     uv run --extra paper python scripts/run_mcmc.py \
         --config config/defaults.toml --config config/waveforms.toml \
         --config config/populations.toml --config config/detectors.toml \
-        --config $BASE --config $RUN \
-        --injection-catalog outputs/catalogs/<injection key>.h5 \
-        --proposal-catalog outputs/catalogs/<proposal key>.h5
+        --config $BASE --config $RUN
 
-``scripts/catalogs.py ls`` prints each run's two keys, and
 ``knf <layers> --shallow 'priors.*' --interpolate`` prints the config those
-layers merge to.
+layers merge to, and ``scripts/catalogs.py ls`` prints each run's two keys.
 
 The layers are merged in process by ``merge_config_layers`` -- the same fold
 the notebooks, the figure scripts and the validation gate take -- and the
@@ -38,11 +35,14 @@ the notebooks, the figure scripts and the validation gate take -- and the
 resolved, defaults-filled config lands beside the chain.
 
 The run config's ``[analysis.injection]`` and ``[analysis.proposal]`` declare
-what each role draws; the two files are supplied directly as ``--injection-catalog`` and
-``--proposal-catalog``. Each file is checked against the request its role
-resolves to before JAX claims a device, so a file handed to the wrong role, or
-one built from a config that has since changed, is refused rather than
-sampled against.
+what each role draws, and the catalogs are fetched the way a notebook fetches
+them: :func:`astrogwb.catalog.simulate` serves ``<--catalog-dir>/<key>.h5``,
+checked against the request, and generates it on a miss. Hits are served
+before JAX claims a device, so a file filed under the wrong key is refused
+cheaply; a miss is generated only after the runtime is configured, because
+drawing a catalog initializes the XLA backend. ``--cached-only`` turns a miss
+into an error -- the workflow passes it, since its catalogs are built upstream
+by ``rule waveform_catalog``.
 
 The importance-sampling *proposal density* is not in the config and is not
 derived here either: the proposal catalog records its own population model,
@@ -74,6 +74,7 @@ from astrogwb.paper.config.catalogs import check_catalog_requests
 from astrogwb.paper.config.mcmc import RunConfig, build_run_config
 from astrogwb.paper.config.runs import (
     CATALOG_ROLES,
+    CATALOGS_ROOT,
     add_config_arguments,
     load_merged_config,
 )
@@ -98,18 +99,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     add_config_arguments(parser)
     parser.add_argument(
-        "--injection-catalog",
+        "--catalog-dir",
         type=Path,
-        required=True,
-        metavar="PATH",
-        help="The catalog file answering this run's [analysis.injection].",
+        default=CATALOGS_ROOT,
+        metavar="DIR",
+        help=(
+            "The catalog cache: each role's catalog is <DIR>/<key>.h5 "
+            f"(default: {CATALOGS_ROOT})."
+        ),
     )
     parser.add_argument(
-        "--proposal-catalog",
-        type=Path,
-        required=True,
-        metavar="PATH",
-        help="The catalog file answering this run's [analysis.proposal].",
+        "--cached-only",
+        action="store_true",
+        help=(
+            "Fail if a catalog is not already in --catalog-dir instead of "
+            "generating it. The workflow passes this: its catalogs are built "
+            "upstream."
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -423,29 +429,24 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_chain_path_available(config, timestamp=timestamp, force=args.force)
 
-    from astrogwb.paper.catalogs import load_run_catalog
+    from astrogwb.catalog import CatalogGenerator, simulate
 
-    # Load both catalogs before JAX claims a device, and check each against
-    # the request its role resolves to: a missing file, a file handed to the
-    # wrong role, or one generated from a draw the config no longer asks for
-    # all fail cheaply.
-    injection_catalog = load_run_catalog(
-        args.injection_catalog.resolve(),
-        request=config.catalog_request("injection"),
-        label="injection",
-    )
-    proposal_catalog = load_run_catalog(
-        args.proposal_catalog.resolve(),
-        request=config.catalog_request("proposal"),
-        label="proposal",
-    )
-    logger.info(
-        "Proposal density from %s: model=%s kwargs=%s params=%s",
-        config.catalog_request("proposal").key(),
-        proposal_catalog.population_model_name,
-        dict(proposal_catalog.population_model_kwargs),
-        dict(proposal_catalog.fiducials),
-    )
+    # Serve every cached catalog before JAX claims a device: `simulate` checks
+    # a hit against the request its role resolves to, so a file filed under
+    # the wrong key fails cheaply. A miss is either an error (--cached-only)
+    # or generated below -- after the runtime is configured, because drawing
+    # a catalog initializes the XLA backend.
+    generator = CatalogGenerator()
+    catalog_dir = args.catalog_dir.resolve()
+    catalogs: dict[str, PolarizationPowerCatalog] = {}
+    for role in CATALOG_ROLES:
+        try:
+            catalogs[role] = simulate(
+                config.catalog_request(role), generator, catalog_dir, generate=False
+            )
+        except FileNotFoundError:
+            if args.cached_only:
+                raise
 
     jax, chain_method = configure_runtime(
         num_chains=config.sampler.num_chains,
@@ -454,9 +455,23 @@ def main(argv: list[str] | None = None) -> None:
         cpu_threads=args.cpu_threads,
         chain_method=args.chain_method,
     )
+    for role in CATALOG_ROLES:
+        if role not in catalogs:
+            catalogs[role] = simulate(
+                config.catalog_request(role), generator, catalog_dir
+            )
+
+    proposal_catalog = catalogs["proposal"]
+    logger.info(
+        "Proposal density from %s: model=%s kwargs=%s params=%s",
+        config.catalog_request("proposal").key(),
+        proposal_catalog.population_model_name,
+        dict(proposal_catalog.population_model_kwargs),
+        dict(proposal_catalog.fiducials),
+    )
     mcmc, marginalization, inputs = run(
         config,
-        injection_catalog,
+        catalogs["injection"],
         proposal_catalog,
         jax,
         chain_method,

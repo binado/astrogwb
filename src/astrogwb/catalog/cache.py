@@ -64,7 +64,11 @@ class Generator[M: Keyed, A: Artifact](Protocol):
 
 
 def simulate[M: Keyed, A: Artifact](
-    metadata: M, generator: Generator[M, A], cache_dir: str | Path | None = None
+    metadata: M,
+    generator: Generator[M, A],
+    cache_dir: str | Path | None = None,
+    *,
+    generate: bool = True,
 ) -> A:
     """Return ``metadata``'s artifact from ``cache_dir``, generating it on a miss.
 
@@ -73,8 +77,15 @@ def simulate[M: Keyed, A: Artifact](
     ``metadata``; a mismatch -- a file copied or renamed into the wrong key --
     raises rather than serving an artifact of something else. A miss is
     generated and saved atomically under the key.
+
+    ``generate=False`` serves hits only: a miss raises ``FileNotFoundError``
+    naming the key and the path it was looked for at. That is how a caller
+    that must not generate -- a workflow job whose catalogs are built upstream
+    -- uses the same lookup, and how it checks for a hit without touching JAX.
     """
     if cache_dir is None:
+        if not generate:
+            raise ValueError("generate=False needs a cache_dir to serve hits from")
         return generator(metadata)
 
     path = artifact_path(metadata, cache_dir)
@@ -84,6 +95,11 @@ def simulate[M: Keyed, A: Artifact](
         logger.info("%s: cache hit at %s", metadata.key(), path)
         return artifact
 
+    if not generate:
+        raise FileNotFoundError(
+            f"{metadata.key()}: no cached artifact at {path}, and generation "
+            "is disabled"
+        )
     logger.info("%s: cache miss, generating into %s", metadata.key(), path)
     artifact = generator(metadata)
     save_atomically(artifact, path)
