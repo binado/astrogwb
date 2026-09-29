@@ -52,10 +52,11 @@ canonical record -- names
 record is what a `PolarizationPowerCatalog` carries as `.metadata`. The
 Snakefile keys every run's roles at parse time (`resolve_run_catalogs`),
 `rule waveform_catalog` hands the generator the metadata as JSON and declares
-no config inputs, `run_mcmc` checks each loaded file against its own
-`RunConfig.catalog_request(role)`, and notebooks reach the same files through
-`astrogwb.paper.catalogs.run_catalog` /
-`astrogwb.catalog.simulate(metadata, CatalogGenerator(), cache_dir)`. There is
+no config inputs, and `run_mcmc` and the notebooks alike reach the files through
+`astrogwb.catalog.simulate(metadata, CatalogGenerator(), cache_dir)` (notebooks
+via `astrogwb.paper.catalogs.run_catalog`), which checks a hit against the
+request and generates a miss -- unless `generate=False`, which the workflow's
+`run_mcmc --cached-only` uses so a job never generates. There is
 no `config/catalogs/` and no catalog name. The version is part of the key, so **bump `version` in
 `pyproject.toml` whenever a change alters what a population draw or a waveform
 generator produces**, or stale catalogs keep being served. `just catalogs` maps

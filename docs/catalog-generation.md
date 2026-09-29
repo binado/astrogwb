@@ -347,8 +347,9 @@ the draw, and the `astrogwb` version. Its `key()` is a 16-hex-digit SHA-256 of
 the record's canonical JSON, and `simulate` keeps each artifact at
 `artifact_path(metadata, cache_dir)` = `<cache_dir>/<key>.h5`: a miss generates
 and writes atomically, a hit is loaded and checked against the metadata it was
-asked for (`check_metadata`, which `run_mcmc` also applies to the files the
-workflow hands it by path).
+asked for (`check_metadata`). `generate=False` serves hits only and raises on
+a miss; `run_mcmc` fetches its catalogs through `simulate`, and the workflow
+passes `--cached-only` so a chain job never generates one.
 
 The version is in the key so that code changes invalidate the cache -- but
 only if it is bumped. Bump `version` in `pyproject.toml` whenever a change

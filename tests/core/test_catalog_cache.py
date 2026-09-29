@@ -227,6 +227,34 @@ def test_simulate_on_hit_does_not_rewrite_the_file(
     np.testing.assert_array_equal(first.polarization_power, second.polarization_power)
 
 
+def test_simulate_without_generation_on_miss_raises_and_writes_nothing(
+    make_request: RequestFactory, tmp_path: Path
+) -> None:
+    request = make_request()
+
+    with pytest.raises(FileNotFoundError, match=request.key()):
+        simulate(request, CatalogGenerator(), tmp_path, generate=False)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_simulate_without_generation_on_hit_serves_the_file(
+    make_request: RequestFactory, tmp_path: Path
+) -> None:
+    request = make_request()
+    simulate(request, CatalogGenerator(), tmp_path)
+
+    served = simulate(request, CatalogGenerator(), tmp_path, generate=False)
+
+    assert served.metadata == request
+
+
+def test_simulate_without_generation_or_cache_dir_raises(
+    make_request: RequestFactory,
+) -> None:
+    with pytest.raises(ValueError, match="needs a cache_dir"):
+        simulate(make_request(), CatalogGenerator(), generate=False)
+
+
 def test_simulate_with_file_under_wrong_key_raises(
     make_request: RequestFactory, population: dict[str, Any], tmp_path: Path
 ) -> None:

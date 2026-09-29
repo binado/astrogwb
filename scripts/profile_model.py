@@ -23,11 +23,10 @@ Usage -- one ``--config`` per layer, in merge order, exactly as
         --config config/populations.toml \
         --config config/detectors.toml \
         --config config/runs/cosmological-parameters/_base.toml \
-        --config config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml \
-        --injection-catalog outputs/catalogs/<injection key>.h5 \
-        --proposal-catalog outputs/catalogs/<proposal key>.h5
+        --config config/runs/cosmological-parameters/ET-2L-aligned-CE-Hanford.toml
 
-``just catalogs`` prints each run's two keys.
+Both catalogs are served from ``--catalog-dir`` by key and are never generated
+here: build them first (``just catalogs`` prints each run's two keys).
 
 See docs/running-inference.md for the layer tree.
 
@@ -45,7 +44,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from astrogwb.paper.config.mcmc import RunConfig, build_run_config
-from astrogwb.paper.config.runs import add_config_arguments, load_merged_config
+from astrogwb.paper.config.runs import (
+    CATALOGS_ROOT,
+    add_config_arguments,
+    load_merged_config,
+)
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
@@ -63,18 +66,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     add_config_arguments(parser)
     parser.add_argument(
-        "--injection-catalog",
+        "--catalog-dir",
         type=Path,
-        required=True,
-        metavar="PATH",
-        help="The catalog file answering this run's [analysis.injection].",
-    )
-    parser.add_argument(
-        "--proposal-catalog",
-        type=Path,
-        required=True,
-        metavar="PATH",
-        help="The catalog file answering this run's [analysis.proposal].",
+        default=CATALOGS_ROOT,
+        metavar="DIR",
+        help=(
+            "The catalog cache each role's <key>.h5 is served from; a missing "
+            f"catalog is an error (default: {CATALOGS_ROOT})."
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -177,20 +176,20 @@ def main(argv: list[str] | None = None) -> None:
     outdir = args.outdir.resolve()
     config = build_run_config(load_merged_config(args), seed=args.seed)
 
-    # Load both catalogs before JAX starts, the same way scripts/run_mcmc.py
+    # Serve both catalogs before JAX starts, the same way scripts/run_mcmc.py
     # does -- what is profiled must be the production model on production
     # inputs, including the proposal density each file records for itself.
-    from astrogwb.paper.catalogs import load_run_catalog
+    from astrogwb.catalog import CatalogGenerator, simulate
 
-    injection_catalog = load_run_catalog(
-        args.injection_catalog.resolve(),
-        request=config.catalog_request("injection"),
-        label="injection",
-    )
-    proposal_catalog = load_run_catalog(
-        args.proposal_catalog.resolve(),
-        request=config.catalog_request("proposal"),
-        label="proposal",
+    catalog_dir = args.catalog_dir.resolve()
+    injection_catalog, proposal_catalog = (
+        simulate(
+            config.catalog_request(role),
+            CatalogGenerator(),
+            catalog_dir,
+            generate=False,
+        )
+        for role in ("injection", "proposal")
     )
 
     jax, _ = configure_runtime(
