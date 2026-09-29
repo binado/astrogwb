@@ -96,7 +96,7 @@ def test_key_of_fixed_request_matches_pinned_digest(
     key = make_request(version="0.0.0-test").key()
 
     assert len(key) == CATALOG_KEY_LENGTH
-    assert key == "575d13b8e3f84c2d"
+    assert key == "d843f8ae4966e014"
 
 
 @pytest.mark.parametrize(
@@ -107,6 +107,14 @@ def test_key_of_fixed_request_matches_pinned_digest(
         lambda blocks: {"version": "0.0.0-other"},
         lambda blocks: {"fiducials": {**blocks["fiducials"], "gamma": 1.5}},
         lambda blocks: {"waveform": {**blocks["waveform"], "maximum_frequency": 18.0}},
+        lambda blocks: {"waveform": {**blocks["waveform"], "frequency_spacing": "log"}},
+        lambda blocks: {
+            "waveform": {
+                **blocks["waveform"],
+                "frequency_spacing": "loglinear",
+                "turnover_frequency": 12.0,
+            }
+        },
         lambda blocks: {
             "population": {
                 **blocks["population"],
@@ -117,7 +125,16 @@ def test_key_of_fixed_request_matches_pinned_digest(
             }
         },
     ],
-    ids=["seed", "num_samples", "version", "fiducial", "waveform", "model_kwarg"],
+    ids=[
+        "seed",
+        "num_samples",
+        "version",
+        "fiducial",
+        "waveform",
+        "log_spacing",
+        "loglinear_spacing",
+        "model_kwarg",
+    ],
 )
 def test_key_when_any_field_changes_changes(
     make_request: RequestFactory,

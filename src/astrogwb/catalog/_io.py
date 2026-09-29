@@ -4,7 +4,7 @@ Both writers store their complete Pydantic record in a root ``metadata``
 JSON attribute. Dataset layout and column ordering remain format-specific.
 
 Structural validation is deliberately split. Cross-field invariants -- axis
-agreement, draw counts, the uniform grid -- belong to each record's
+agreement, draw counts, the frequency grid -- belong to each record's
 ``__post_init__``, so they hold for an object built in memory and not only for
 one that has been through a file. The ``validate_*_file`` functions check what
 only a file can get wrong: a missing dataset or attribute, a foreign format

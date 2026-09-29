@@ -85,7 +85,7 @@ def test_key_of_fixed_metadata_matches_pinned_digest(
     key = make_metadata(version="0.0.0-test").key()
 
     assert len(key) == CATALOG_KEY_LENGTH
-    assert key == "bb17586f1434886f"
+    assert key == "cdfbd1a9382e8529"
 
 
 @pytest.mark.parametrize(

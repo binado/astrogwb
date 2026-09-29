@@ -18,21 +18,35 @@ window is the identity. Applying it would be arithmetic with no effect;
 ``tests/core/test_waveform_generator.py`` pins that against gwmock rather than
 leaving it as a claim here.
 
-*The full grid above DC still reaches Ripple.* Several models --
-``IMRPhenomXAS_NRTidalv3`` and ``IMRPhenomXPHM`` among them -- do not evaluate
-pointwise in the frequency argument, so handing Ripple only the in-band bins
-changes the in-band values. NRTidalv3 shows why: it reads the top of the grid
-as ``f_final = f[-1] + df`` and the spacing as ``df = f[1] - f[0]``, and
-``f_final`` sets a linear-in-frequency phase slope. Truncate the grid and the
-in-band phase winds away from the untruncated answer at fixed amplitude. The
-caller slices the result, never the input.
+*Which grid Ripple sees depends on ``frequency_spacing``.* With the default
+``"linear"`` spacing the full one-sided grid above DC reaches Ripple and the
+caller slices the result, never the input. Several models --
+``IMRPhenomXAS_NRTidalv3`` and ``IMRPhenomXPHM`` among them -- were assumed not
+to evaluate pointwise in the frequency argument, so handing Ripple only the
+in-band bins was avoided. NRTidalv3 shows why: it reads the top of the grid as
+``f_final = f[-1] + df`` and the spacing as ``df = f[1] - f[0]``.
 
-The DC bin is the one exception, and it is dropped at the input rather than
+The ``"log"`` and ``"loglinear"`` spacings do hand Ripple only the band's own
+grid, built straight to ``maximum_frequency``. Reading ``ripplegw`` (see
+``tests/core/test_waveform_generator.py`` for the empirical check), the only
+reads of the grid's shape are:
+
+* ``IMRPhenomD`` and ``IMRPhenomD_NRTidalv2`` snap the merger cutoff to
+  ``floor(f_cut / df) * df`` with ``df = f[1] - f[0]``. On a lin-log grid that is
+  the linear ``df``, a finer lattice than the grid above the turn, so the
+  cutoff is effectively exact.
+* ``IMRPhenomXAS_NRTidalv3``'s ``f_final`` enters only the phase slope
+  ``linb``; the amplitude never sees it, and the power
+  :math:`|h_+|^2 + |h_\times|^2` drops the phase.
+* ``IMRPhenomHM`` passes ``f[1] - f[0]`` on as ``deltaF`` and never reads it.
+
+The DC bin is the one exception on the linear path, and it is dropped at the input rather than
 sliced from the output: Ripple evaluates ``f = 0`` to NaN, and while
 ``nan_to_num`` keeps that out of the forward sum, no output-side treatment
 rescues reverse mode (see :func:`build_power_kernel`). Dropping it is safe precisely
 because the quantities above are read off the *top* of the grid and off the
-spacing, both of which one fewer leading bin leaves untouched.
+spacing, both of which one fewer leading bin leaves untouched. The other
+spacings start at ``minimum_frequency > 0`` and have no DC bin.
 
 ``ripplegw`` is imported inside function bodies, never at module scope:
 importing it enables JAX x64 globally, and ``import astrogwb`` must not carry
