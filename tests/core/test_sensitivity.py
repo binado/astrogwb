@@ -15,10 +15,9 @@ from astrogwb.detector import (
 )
 
 
-def test_sensitivity_evaluate_in_band_is_finite_and_positive() -> None:
-    values = Sensitivity(psd_reference="AplusDesign_psd.txt").evaluate(
-        np.array([25.0, 100.0, 500.0])
-    )
+def test_sensitivity_call_in_band_is_finite_and_positive() -> None:
+    sensitivity = Sensitivity(psd_reference="AplusDesign_psd.txt")
+    values = sensitivity(np.array([25.0, 100.0, 500.0]))
 
     assert values.shape == (3,)
     assert np.all(np.isfinite(values))
@@ -29,32 +28,30 @@ def test_sensitivity_evaluate_in_band_is_finite_and_positive() -> None:
     ("out_of_band", "expected_oob_value"),
     [("inf", np.inf), ("zero", 0.0)],
 )
-def test_sensitivity_evaluate_out_of_band_policy(
+def test_sensitivity_call_out_of_band_policy(
     out_of_band: Literal["inf", "zero"], expected_oob_value: float
 ) -> None:
     # 1.0 Hz is below the AplusDesign grid (min 5 Hz); 9000 Hz is above (max 5000).
-    values = Sensitivity(psd_reference="AplusDesign_psd.txt").evaluate(
-        np.array([1.0, 100.0, 9000.0]),
-        out_of_band=out_of_band,
-    )
+    sensitivity = Sensitivity(psd_reference="AplusDesign_psd.txt")
+    values = sensitivity(np.array([1.0, 100.0, 9000.0]), out_of_band=out_of_band)
 
     assert values[0] == expected_oob_value
     assert np.isfinite(values[1]) and values[1] > 0.0
     assert values[2] == expected_oob_value
 
 
-def test_sensitivity_evaluate_bundled_preset_runs() -> None:
-    values = Sensitivity(psd_reference="ET_D_psd").evaluate(np.array([20.0, 100.0]))
+def test_sensitivity_call_bundled_preset_runs() -> None:
+    sensitivity = Sensitivity(psd_reference="ET_D_psd")
+    values = sensitivity(np.array([20.0, 100.0]))
 
     assert np.all(np.isfinite(values))
     assert np.all(values > 0.0)
 
 
-def test_sensitivity_evaluate_unknown_reference_raises() -> None:
+def test_sensitivity_call_unknown_reference_raises() -> None:
+    sensitivity = Sensitivity(psd_reference="does_not_exist_anywhere.txt")
     with pytest.raises(FileNotFoundError):
-        Sensitivity(psd_reference="does_not_exist_anywhere.txt").evaluate(
-            np.array([100.0])
-        )
+        sensitivity(np.array([100.0]))
 
 
 def test_load_sensitivity_map_multiple() -> None:
@@ -62,7 +59,7 @@ def test_load_sensitivity_map_multiple() -> None:
 
     assert set(sensitivities) == {"H1", "L1", "V1"}
     for sensitivity in sensitivities.values():
-        values = sensitivity.evaluate(np.array([100.0]))
+        values = sensitivity(np.array([100.0]))
         assert np.all(np.isfinite(values))
         assert np.all(values > 0.0)
 

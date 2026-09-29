@@ -45,7 +45,7 @@ def effective_psd(
         return np.full(frequencies.shape, np.inf, dtype=float)
 
     names = detector_names(det_list)
-    psds = [sensitivities[name].evaluate(frequencies) for name in names]
+    psds = [sensitivities[name](frequencies) for name in names]
 
     inverse_variance = np.zeros(frequencies.shape, dtype=float)
     for i, det1 in enumerate(det_list):

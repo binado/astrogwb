@@ -5,7 +5,7 @@ analysis policy on top. The one numerical wrinkle is out-of-band behavior:
 ``gwmock_noise`` clips frequencies outside the curve grid to ``0`` (an
 *infinite* sensitivity contribution in an inverse-variance sum), whereas
 the SGWB analysis wants those bins to contribute *nothing*, i.e. PSD
-``inf``. ``Sensitivity.evaluate`` therefore re-applies the ``inf`` policy
+``inf``. Calling a ``Sensitivity`` therefore re-applies the ``inf`` policy
 on top of the gwmock interpolation.
 """
 
@@ -46,7 +46,7 @@ class Sensitivity:
 
     psd_reference: str | Path
 
-    def evaluate(
+    def __call__(
         self, frequencies: ArrayLike, *, out_of_band: OutOfBand = "inf"
     ) -> NDArray[np.float64]:
         """Interpolate this detector's PSD onto ``frequencies``.
