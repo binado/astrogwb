@@ -21,7 +21,7 @@ from astrogwb.utils import years_to_seconds
 
 from ._types import DetectorSpec
 from .overlap import overlap_reduction_function
-from .sensitivity import Sensitivity, evaluate_psd
+from .sensitivity import Sensitivity
 
 _NETWORK_SENSITIVITY_FACTOR = 0.16
 
@@ -45,9 +45,7 @@ def effective_psd(
         return np.full(frequencies.shape, np.inf, dtype=float)
 
     names = detector_names(det_list)
-    psds = [
-        evaluate_psd(sensitivities[name].psd_reference, frequencies) for name in names
-    ]
+    psds = [sensitivities[name].evaluate(frequencies) for name in names]
 
     inverse_variance = np.zeros(frequencies.shape, dtype=float)
     for i, det1 in enumerate(det_list):
