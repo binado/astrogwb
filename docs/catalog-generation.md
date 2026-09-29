@@ -130,7 +130,7 @@ arrays remain arguments.
 
 ```python
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
-from astrogwb.utils.sampling import evaluate_sources, sample_sources
+from astrogwb.sampling.utils import evaluate_sources, sample_sources
 
 source_model, merger_rate_fn = build_population(
     "bns_md_cosmological", minimum_redshift=0.0, maximum_redshift=20.0, n_grid=4096

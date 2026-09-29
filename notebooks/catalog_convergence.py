@@ -81,7 +81,7 @@ from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.paper.config import fiducials, population_metadata, population_model
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
-from astrogwb.utils.sampling import sample_sources
+from astrogwb.sampling.utils import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces

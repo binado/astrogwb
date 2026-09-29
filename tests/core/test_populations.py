@@ -70,7 +70,7 @@ from astrogwb.populations.bns_madau_dickinson import (
     madau_dickinson_time_delayed_total_merger_rate,
     madau_dickinson_total_merger_rate,
 )
-from astrogwb.utils.sampling import evaluate_sources, sample_sources
+from astrogwb.sampling.utils import evaluate_sources, sample_sources
 
 #: The deterministic output governing waveform amplitude.
 LUMINOSITY_DISTANCE_SITE = "luminosity_distance"
