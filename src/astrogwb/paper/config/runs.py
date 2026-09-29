@@ -333,11 +333,15 @@ def parse_run_reference(value: str) -> tuple[str, str]:
     return experiment, run
 
 
-def add_config_arguments(parser: argparse.ArgumentParser) -> None:
+def add_config_arguments(
+    parser: argparse.ArgumentParser, *, help: str | None = None
+) -> None:
     """Add the repeated ``--config`` layer flag shared by every entrypoint.
 
     Mirrors :func:`astrogwb.paper.runtime.add_runtime_arguments`: one
-    definition, so all entrypoints spell the flag the same way.
+    definition, so all entrypoints spell the flag the same way. ``help``
+    replaces the default text, which describes a run's six layers, for an
+    entrypoint whose layers differ.
     """
     parser.add_argument(
         "--config",
@@ -346,7 +350,8 @@ def add_config_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         required=True,
         metavar="PATH",
-        help=(
+        help=help
+        or (
             "One run-config layer file, in merge order; repeat once per "
             "layer (the four shared config/*.toml layers, then the experiment "
             "_base.toml, then the run)."
