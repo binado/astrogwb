@@ -34,10 +34,10 @@ def effective_psd(
     """Network effective PSD from an inverse-variance cross-correlation sum.
 
     ``detectors`` are matched to ``sensitivities`` by their public name
-    (gwmock ``detector_names``): plain str codes match directly, while
-    preset ``CustomDetector`` objects match on their ``name`` (e.g.
-    ``ET1_SARD``). The contraction and ``_NETWORK_SENSITIVITY_FACTOR``
-    are unchanged from the pre-refactor implementation.
+    (gwmock ``detector_names``): plain str codes match directly, while a
+    ``CustomDetector`` matches on its ``name``. The contraction and
+    ``_NETWORK_SENSITIVITY_FACTOR`` are unchanged from the pre-refactor
+    implementation.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     det_list = list(detectors)
