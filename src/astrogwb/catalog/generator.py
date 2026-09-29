@@ -18,7 +18,7 @@ import jax
 from astrogwb import __version__
 from astrogwb.catalog.polarization_power import PolarizationPowerCatalog
 from astrogwb.metadata import CatalogMetadata
-from astrogwb.utils.sampling import sample_sources
+from astrogwb.sampling.utils import sample_sources
 
 __all__ = ["CatalogGenerator"]
 

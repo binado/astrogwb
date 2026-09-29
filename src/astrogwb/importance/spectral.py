@@ -58,7 +58,7 @@ from astrogwb.gwb.spectral import spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.weights import importance_log_weights
 from astrogwb.populations.registry import MergerRateFn, SourceFn
-from astrogwb.utils.sampling import evaluate_sources
+from astrogwb.sampling.utils import evaluate_sources
 
 if TYPE_CHECKING:
     from astrogwb.catalog import PolarizationPowerCatalog

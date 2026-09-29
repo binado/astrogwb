@@ -1,4 +1,4 @@
-"""Contract tests for :mod:`astrogwb.utils.sampling`.
+"""Contract tests for :mod:`astrogwb.sampling.utils`.
 
 ``DensityAccumulator`` must reproduce numpyro's ``compute_log_probs``
 bit-for-bit -- including the ``intermediates`` and plate-subsample ``scale``
@@ -25,7 +25,7 @@ from numpyro import handlers
 from numpyro.infer import MCMC, NUTS
 from numpyro.infer.util import compute_log_probs, log_density
 
-from astrogwb.utils.sampling import (
+from astrogwb.sampling.utils import (
     DensityAccumulator,
     compute_model_and_log_probs,
     evaluate_sources,
