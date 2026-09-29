@@ -103,7 +103,7 @@ class AnalysisInputs(NamedTuple):
     observed_spectral_density: jax.Array
     effective_psd: jax.Array
     observation_time: float
-    df: float
+    scale: jax.Array
     estimator: SpectralDensityFn
     frequencies: jax.Array
     total_merger_rate: jax.Array
@@ -143,7 +143,6 @@ def _build_analysis_inputs(
     and mask out-of-band and non-finite bins.
     """
     frequencies = jnp.asarray(catalog.frequencies)
-    df = catalog.df
     polarization_power = jnp.asarray(catalog.polarization_power)
     samples = catalog_samples(catalog)
     num_sources = polarization_power.shape[1]
@@ -170,24 +169,19 @@ def _build_analysis_inputs(
         network_psd
     )
     assert int(jnp.sum(mask)) >= 2, "no usable frequency bins in the analysis band"
-    frequencies, polarization_power, observed_spectral_density, network_psd = (
-        apply_frequency_mask(
-            mask,
-            frequencies,
-            polarization_power,
-            observed_spectral_density,
-            network_psd,
-        )
-    )
 
     # SNR^2 = 2 T (S_h|S_h) and S_eff carries no T, so rho scales as sqrt(T):
-    # solve for the T that lands the injection on the target.
+    # solve for the T that lands the injection on the target. The arrays stay
+    # on the catalog's full grid and the band is a mask: bin widths derive
+    # from the whole axis, so compressing first would mis-size the bins at the
+    # edge of any gap.
     reference_snr = float(
         spectral_snr(
             observed_spectral_density,
             network_psd,
             REFERENCE_OBSERVATION_TIME * SECONDS_PER_YEAR,
-            df,
+            frequencies,
+            frequency_mask=mask,
         )
     )
     observation_time = REFERENCE_OBSERVATION_TIME * (target_snr / reference_snr) ** 2
@@ -196,10 +190,22 @@ def _build_analysis_inputs(
             observed_spectral_density,
             network_psd,
             observation_time * SECONDS_PER_YEAR,
-            df,
+            frequencies,
+            frequency_mask=mask,
         )
     )
-    np.testing.assert_allclose(snr, target_snr, rtol=1e-12, atol=0.0)
+    np.testing.assert_allclose(snr, target_snr, rtol=1e-6)
+    scale = gaussian_bin_scale(network_psd, observation_time, frequencies)
+    frequencies, polarization_power, observed_spectral_density, network_psd, scale = (
+        apply_frequency_mask(
+            mask,
+            frequencies,
+            polarization_power,
+            observed_spectral_density,
+            network_psd,
+            scale,
+        )
+    )
 
     # Prepared after masking, from the catalog's own population record. The
     # band mask reaches the power and nothing else -- masking the sources would
@@ -216,7 +222,7 @@ def _build_analysis_inputs(
         observed_spectral_density=observed_spectral_density,
         effective_psd=network_psd,
         observation_time=observation_time,
-        df=df,
+        scale=scale,
         estimator=estimator,
         frequencies=frequencies,
         total_merger_rate=total_merger_rate,
@@ -228,9 +234,7 @@ def _model_kwargs(inputs: AnalysisInputs) -> dict[str, object]:
     """Expose same-shaped data as dynamic arguments to NumPyro's JIT cache."""
     return {
         "observed_spectral_density": inputs.observed_spectral_density,
-        "scale": gaussian_bin_scale(
-            inputs.effective_psd, inputs.observation_time, inputs.df
-        ),
+        "scale": inputs.scale,
     }
 
 

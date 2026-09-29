@@ -25,7 +25,6 @@ with app.setup(hide_code=True):
         log_frequency_noise_scale,
     )
     from astrogwb.frequency import frequency_mask as make_frequency_mask
-    from astrogwb.frequency import uniform_grid_spacing
     from astrogwb.gwb import (
         omega_gw_from_spectral_density,
         spectral_snr_squared_per_bin,
@@ -258,8 +257,13 @@ def _():
         *,
         h0: float,
         effective_psd_arr: jax.Array | np.ndarray | None = None,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
-        """Restrict $S_h$, $\\Omega_{\\mathrm{GW}}$, and optional $S_{\\mathrm{eff}}$ to the band."""
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, np.ndarray]:
+        """Restrict $S_h$, $\\Omega_{\\mathrm{GW}}$, and optional $S_{\\mathrm{eff}}$ to the band.
+
+        The last element is the boolean selection *on the full grid*, so a
+        quantity that needs bin widths can be computed on the whole axis and
+        masked, never derived from the restricted frequencies.
+        """
         omega_gw = omega_gw_from_spectral_density(
             spectral_density_arr,
             frequencies,
@@ -275,15 +279,22 @@ def _():
             seff = np.asarray(effective_psd_arr)[mask]
             pos = pos & np.isfinite(seff) & (seff > 0.0)
             seff = seff[pos]
-        return freq[pos], omega[pos], sh[pos], seff
+        selected = np.zeros_like(mask)
+        selected[np.flatnonzero(mask)[pos]] = True
+        return freq[pos], omega[pos], sh[pos], seff, selected
 
     def snr_integrand_and_cumulative(
         spectral_density: np.ndarray,
         effective_psd_arr: np.ndarray,
         observation_time_sec: float,
-        df: float,
+        frequencies: np.ndarray,
+        selected: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Per-bin $\\Delta\\mathrm{SNR}^2$ and cumulative SNR from the left and right.
+
+        Every array is on the full grid and ``selected`` picks the bins to
+        report: widths come from the whole axis, so the bins beside a dropped
+        one keep their true width.
 
         ``SNR(<f)`` and ``SNR(>f)`` both include the bin at ``f``, so the last
         left-hand value and the first right-hand value equal the total SNR. Both
@@ -294,9 +305,10 @@ def _():
                 jnp.asarray(spectral_density),
                 jnp.asarray(effective_psd_arr),
                 observation_time_sec,
-                df,
+                jnp.asarray(frequencies),
+                frequency_mask=jnp.asarray(selected),
             )
-        )
+        )[selected]
         snr_lt = np.sqrt(np.cumsum(snr_squared))
         snr_gt = np.sqrt(np.cumsum(snr_squared[::-1])[::-1])
         total = snr_lt[-1]
@@ -416,7 +428,6 @@ def _(
     snr_integrand_and_cumulative,
     spectral_density,
 ):
-    _df = uniform_grid_spacing(frequencies)
     frequency_mask = make_frequency_mask(
         frequencies,
         fmin=minimum_frequency,
@@ -443,7 +454,7 @@ def _(
     sigma_ln_f_by_network: dict[str, np.ndarray] = {}
     omega_sigma_ln_f_by_network: dict[str, np.ndarray] = {}
     for _network in NETWORKS:
-        _band_freq, _, _band_sh, _band_seff = band_limited_spectrum(
+        _band_freq, _, _band_sh, _band_seff, _selected = band_limited_spectrum(
             frequencies,
             spectral_density,
             frequency_mask,
@@ -453,10 +464,11 @@ def _(
         if _band_seff is None:
             raise RuntimeError(f"{_network.name} effective PSD was not restricted")
         _snr_squared, _snr_lt, _snr_gt = snr_integrand_and_cumulative(
-            _band_sh,
-            _band_seff,
+            spectral_density,
+            effective_psds[_network.name],
             _observation_time_sec,
-            _df,
+            frequencies,
+            _selected,
         )
         # Per e-fold rather than per bin, so neither curve moves with the grid.
         _sigma_ln_f = np.asarray(
@@ -486,7 +498,7 @@ def _(
                 hubble_constant=FIDUCIALS["H0"],
             )
         )
-    fiducial_freq, fiducial_omega, fiducial_sh, _ = band_limited_spectrum(
+    fiducial_freq, fiducial_omega, fiducial_sh, _, _ = band_limited_spectrum(
         frequencies,
         spectral_density,
         frequency_mask,

@@ -2,7 +2,7 @@
 
 This module owns the detector/network noise model seen by a stochastic
 background search: the inverse-variance network ``effective_psd`` and the
-per-bin Gaussian scale ``σ = S_eff / √(2 T Δf)``, plus its
+per-bin Gaussian scale ``σ_i = S_eff,i / √(2 T Δf_i)``, plus its
 grid-independent plotting counterpart ``σ_ln f = S_eff / √(2 T f)``. Overlap-reduction geometry
 stays in ``overlap``; GWB signal spectra stay in ``astrogwb.gwb``.
 """
@@ -17,6 +17,7 @@ import numpy as np
 from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
 
+from astrogwb.frequency import bin_widths
 from astrogwb.utils import years_to_seconds
 
 from ._types import DetectorSpec
@@ -63,19 +64,32 @@ def effective_psd(
 def gaussian_bin_scale(
     effective_psd: jax.Array,
     observation_time: float,
-    df: float | jax.Array,
+    frequencies: ArrayLike,
 ) -> jax.Array:
-    """Per-bin Gaussian noise scale for a stochastic background search.
+    r"""Per-bin Gaussian noise scale for a stochastic background search.
+
+    .. math::
+
+        \sigma_i = \frac{S_{\mathrm{eff},i}}{\sqrt{2 T \Delta f_i}}
+
+    A bin of width :math:`\Delta f_i` averages :math:`T \Delta f_i` Fourier
+    modes, which is why the scale narrows on a coarser bin.
 
     Parameters
     ----------
+    effective_psd:
+        Network effective PSD, aligned with ``frequencies``.
     observation_time:
         Observation time in years. Converted to seconds internally.
-    df:
-        Frequency-bin width in Hz.
+    frequencies:
+        The frequency grid in Hz. Bin widths come from
+        :func:`astrogwb.frequency.bin_widths`, so pass the catalog's *full*
+        axis and mask afterwards rather than a selected sub-grid.
     """
     observation_time_sec = years_to_seconds(observation_time)
-    return effective_psd / jnp.sqrt(2.0 * observation_time_sec * df)
+    return effective_psd / jnp.sqrt(
+        2.0 * observation_time_sec * bin_widths(frequencies)
+    )
 
 
 def log_frequency_noise_scale(

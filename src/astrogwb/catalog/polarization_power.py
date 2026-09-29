@@ -34,7 +34,7 @@ import jax
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.frequency import uniform_grid_spacing
+from astrogwb.frequency import bin_widths, validate_frequency_grid
 from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import Population
 from astrogwb.waveform import PolarizationPowerGenerator
@@ -92,18 +92,15 @@ class PolarizationPowerCatalog:
                 f"polarization_power has {num_samples} samples; the metadata "
                 f"records {self._metadata.num_samples}"
             )
-        frequencies = np.asarray(self.frequencies)
-        if frequencies.ndim != 1:
-            raise ValueError("catalog frequencies must be one-dimensional")
+        # One-dimensional, finite and strictly increasing is the whole grid
+        # invariant, checked against itself rather than against a second
+        # record. The spacing is free to vary: widths are derived from the axis
+        # by `bin_widths`. Runs once per catalog, including every `load`.
+        frequencies = validate_frequency_grid(self.frequencies)
         if num_frequencies != frequencies.size:
             raise ValueError(
                 "polarization_power frequency axis does not match catalog frequencies"
             )
-        if frequencies.size >= 2:
-            # Validation only, result discarded: a uniform grid is a catalog
-            # invariant, checked against itself rather than against a second
-            # record. Runs once per catalog, including every `load`.
-            uniform_grid_spacing(frequencies)
 
         parameters: dict[str, NDArray[Any]] = {}
         for name, values in self.source_parameters.items():
@@ -254,17 +251,18 @@ class PolarizationPowerCatalog:
         return int(self.polarization_power.shape[1])
 
     @property
-    def df(self) -> float:
-        """The catalog's frequency bin width, measured from its own grid.
+    def bin_widths(self) -> NDArray[np.float64]:
+        """Each frequency bin's width, derived from the catalog's own grid.
 
-        Measured, not recorded: the generating backend chooses the actual
-        grid (Ripple's rounding is 5-smooth, not power-of-two), so its
-        spacing is the only thing that can be right. What was *asked for*
+        Derived, not recorded: the generating backend chooses the actual grid
+        (Ripple's rounding is 5-smooth, not power-of-two), so the axis it
+        produced is the only thing that can be right. What was *asked for*
         lives on ``waveform_metadata.frequency_resolution``, and the two can
-        differ. Raises on a one-bin catalog, which is a supported shape --
-        there is no bin width to report.
+        differ. The widths belong to the full grid; mask arrays, never this
+        axis. Raises on a one-bin catalog, which is a supported shape -- there
+        is no bin width to report.
         """
-        return uniform_grid_spacing(self.frequencies)
+        return np.asarray(bin_widths(self.frequencies))
 
     # ----------------------------------------------------------------- #
     # Transformations

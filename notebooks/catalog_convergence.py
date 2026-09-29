@@ -25,11 +25,11 @@
 #    power is.
 # 2. **Frequency resolution $\Delta f$.** `spectral_snr_squared` is a Riemann
 #    sum $2T\,\Delta f \sum_i S_{h,i}^2/S_{{\rm eff},i}^2$, so it approaches an
-#    integral as $\Delta f \to 0$. This one has a trap:
-#    `apply_frequency_mask`'s docstring warns that `df` must be passed
-#    explicitly. Subsample a grid `::k` and forget $\Delta f \to k\,\Delta f$
-#    and the SNR falls by $\sqrt{k}$ — which looks exactly like
-#    non-convergence, and is not.
+#    integral as $\Delta f \to 0$. Bin widths are derived from the frequency
+#    array, so subsampling a grid `::k` coarsens every width to $k\,\Delta f$
+#    with nothing to keep in step. (The SNR used to fall by $\sqrt{k}$ if a
+#    hand-carried `df` was forgotten, which looks exactly like
+#    non-convergence, and is not.)
 #
 # `packages/astrogwb/tests/test_frequency_resolution.py` and
 # `test_mock_population.py` own the tolerances. This notebook owns the picture:
@@ -69,7 +69,7 @@ from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale
 from astrogwb.distributions.rates import madau_dickinson_rate
-from astrogwb.frequency import apply_frequency_mask, frequency_mask
+from astrogwb.frequency import apply_frequency_mask, bin_widths, frequency_mask
 from astrogwb.gwb import (
     analytic_spectral_density_from_mass_moments,
     omega_gw_from_spectral_density,
@@ -391,7 +391,7 @@ def describe(catalog: PolarizationPowerCatalog) -> pd.Series:
             "seed": catalog.seed,
             "num_sources": catalog.num_samples,
             "num_frequencies": catalog.frequencies.size,
-            "df_hz": catalog.df,
+            "df_hz": float(np.median(catalog.bin_widths)),
             "f_min_hz": waveform.minimum_frequency,
             "f_max_hz": waveform.maximum_frequency,
             "total_merger_rate_per_s": float(catalog_merger_rate(catalog)),
@@ -866,11 +866,12 @@ pd.DataFrame(
 # resolution, and it holds the sources fixed so $\Delta f$ is the only thing
 # that varies.
 #
-# **Then, the trap.** Every call site must be told the new width. `df` is not
-# measured off the grid anywhere in `astrogwb` — masks may drop interior bins,
-# so the mean spacing of what survives is not the bin width. Subsample `::k`,
-# leave `df` at its old value, and `spectral_snr` falls by exactly $\sqrt{k}$:
-# a clean, plausible, entirely spurious "convergence".
+# **Then, the width.** `astrogwb` never takes a bin width from the caller: it
+# derives each width from the frequency array itself. The arrays stay on the
+# whole subsampled grid and the band is a mask, because masks may drop interior
+# bins and the spacing of what survives is not the bin width. Subsample `::k`
+# and every width becomes $k\,\Delta f$ on its own, with nothing to keep in
+# step.
 
 # %%
 DETECTORS, sensitivities = detector_registry().build_network(NETWORK)
@@ -878,31 +879,42 @@ DETECTORS, sensitivities = detector_registry().build_network(NETWORK)
 
 def analysis_at(factor: int) -> dict[str, Any]:
     """Re-derive the whole analysis on the grid coarsened by `factor`."""
-    frequencies = jnp.asarray(fine_frequencies[::factor])
-    power = jnp.asarray(fine_power[::factor])
-    # The line the trap is about: df tracks the subsampling.
-    df = factor * FINE_DF
+    grid = jnp.asarray(fine_frequencies[::factor])
+    power_full = jnp.asarray(fine_power[::factor])
 
-    psd = jnp.asarray(effective_psd(np.asarray(frequencies), DETECTORS, sensitivities))
-    mask = frequency_mask(frequencies, fmin=F_MIN, fmax=SNR_F_MAX) & jnp.isfinite(psd)
-    frequencies, power, psd = apply_frequency_mask(mask, frequencies, power, psd)
-    spectrum = spectral_density(
-        power,
+    psd_full = jnp.asarray(effective_psd(np.asarray(grid), DETECTORS, sensitivities))
+    mask = frequency_mask(grid, fmin=F_MIN, fmax=SNR_F_MAX) & jnp.isfinite(psd_full)
+    # Widths and the noise scale come from the whole subsampled axis; only then
+    # is the band selected.
+    noise_scale_full = gaussian_bin_scale(psd_full, OBSERVATION_TIME, grid)
+    spectrum_full = spectral_density(
+        power_full,
         jnp.ones(NUM_SOURCES),
         total_merger_rate,
         source_parameters=samples,
     )
+    snr = float(
+        spectral_snr(
+            spectrum_full,
+            psd_full,
+            OBSERVATION_TIME * SECONDS_PER_YEAR,
+            grid,
+            frequency_mask=mask,
+        )
+    )
+    frequencies, power, psd, noise_scale, spectrum = apply_frequency_mask(
+        mask, grid, power_full, psd_full, noise_scale_full, spectrum_full
+    )
     return {
         "factor": factor,
-        "df": df,
+        "df": float(np.median(np.asarray(bin_widths(grid)))),
         "num_bins": int(frequencies.shape[0]),
         "frequencies": frequencies,
         "power": power,
         "effective_psd": psd,
+        "noise_scale": noise_scale,
         "spectrum": spectrum,
-        "snr": float(
-            spectral_snr(spectrum, psd, OBSERVATION_TIME * SECONDS_PER_YEAR, df)
-        ),
+        "snr": snr,
     }
 
 
@@ -1000,7 +1012,7 @@ pd.DataFrame(
 # $\log\mathcal{L}$ itself.
 #
 # The Gaussian bin scale is
-# $\sigma_i = S_{{\rm eff},i}/\sqrt{2T\Delta f}$, so coarsening by $k$ grows
+# $\sigma_i = S_{{\rm eff},i}/\sqrt{2T\Delta f_i}$, so coarsening by $k$ grows
 # every $\sigma_i$ by $\sqrt{k}$ while dropping the bin count by $k$. The
 # normalization term $-\tfrac{1}{2}\sum_i \log(2\pi\sigma_i^2)$ therefore
 # scales with the number of bins and **does not converge to anything** — it is
@@ -1033,7 +1045,7 @@ scan_log_weights = build_importance_spectrum(
 
 def log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
     """Gaussian log-density of the injection under the H0-shifted template."""
-    noise_scale = gaussian_bin_scale(run["effective_psd"], OBSERVATION_TIME, run["df"])
+    noise_scale = run["noise_scale"]
     params = {**FIDUCIALS, "H0": hubble_constant}
     model = spectral_density(
         run["power"],
@@ -1054,17 +1066,7 @@ at_fiducial = {
 delta = {factor: scans[factor] - at_fiducial[factor] for factor in SUBSAMPLE_FACTORS}
 
 normalization = {
-    factor: float(
-        -0.5
-        * jnp.sum(
-            jnp.log(
-                2.0
-                * jnp.pi
-                * gaussian_bin_scale(run["effective_psd"], OBSERVATION_TIME, run["df"])
-                ** 2
-            )
-        )
-    )
+    factor: float(-0.5 * jnp.sum(jnp.log(2.0 * jnp.pi * run["noise_scale"] ** 2)))
     for factor, run in runs.items()
 }
 

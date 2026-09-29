@@ -328,7 +328,7 @@ attributes are `format_name`, `domain`, `metadata`, and
 `source_parameter_names` (a JSON list ordering the parameter matrix columns).
 `frequency`, `polarization_power`, and `source_parameters` remain HDF5
 datasets. The metadata JSON includes the package version that generated the
-arrays. The derived `df` is not stored; it is measured from `frequency`.
+arrays. Bin widths are not stored; they are derived from `frequency`.
 Earlier formats require regeneration.
 
 ## The catalog cache
@@ -366,9 +366,12 @@ Neither the loader nor `simulate` migrates or replaces them automatically.
 Canonical JSON hashing is separate from the Pydantic JSON stored in the file.
 
 The waveform metadata records `frequency_resolution` -- what was *requested*
-of the generating backend -- while the bin width used in every integral is
-measured from the `frequency` dataset itself (`PolarizationPowerCatalog.df`);
-the backend chooses the actual grid, so the two can differ.
+of the generating backend -- while the bin widths used in every integral are
+derived from the `frequency` dataset itself (`astrogwb.frequency.bin_widths`,
+exposed as `PolarizationPowerCatalog.bin_widths`); the backend chooses the
+actual grid, so the two can differ. The grid need only be strictly increasing:
+each bin's width is half the distance between its neighbours, which is the
+grid spacing on a uniform grid.
 
 ## The spectral-density format
 
