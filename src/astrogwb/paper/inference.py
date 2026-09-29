@@ -70,7 +70,7 @@ from astrogwb.populations import (
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
-from astrogwb.sampling import (
+from astrogwb.inference import (
     SpectralDensityFn,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,

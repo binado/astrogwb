@@ -37,7 +37,7 @@ from astrogwb.populations import (
     SourceFn,
     build_population,
 )
-from astrogwb.sampling.utils import evaluate_sources, sample_sources
+from astrogwb.inference.utils import evaluate_sources, sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 
@@ -49,7 +49,7 @@ def derived_columns(
     """Replay a source model at fixed source values, returning declared outputs.
 
     The test-side counterpart of the batched replay inside
-    :func:`astrogwb.sampling.utils.sample_sources`, and the same code path:
+    :func:`astrogwb.inference.utils.sample_sources`, and the same code path:
     sample sites take the supplied values, deterministic outputs are the
     model's recomputation. The result is the model's own return mapping -- the
     mapping that defines the source-output set -- so a stored deterministic is

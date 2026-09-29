@@ -58,11 +58,11 @@ from astrogwb.gwb.spectral import spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.weights import importance_log_weights
 from astrogwb.populations.registry import MergerRateFn, SourceFn
-from astrogwb.sampling.utils import evaluate_sources
+from astrogwb.inference.utils import evaluate_sources
 
 if TYPE_CHECKING:
     from astrogwb.catalog import PolarizationPowerCatalog
-    from astrogwb.sampling.protocol import SpectralDensityFn
+    from astrogwb.inference.protocol import SpectralDensityFn
 
 __all__ = [
     "LogWeightsFn",
@@ -122,7 +122,7 @@ def importance_spectral_density(
     """The importance-weighted spectrum at ``params``, with its diagnostics.
 
     Bind every keyword with :func:`functools.partial` to obtain a
-    :class:`~astrogwb.sampling.SpectralDensityFn`.
+    :class:`~astrogwb.inference.SpectralDensityFn`.
 
     Returns ``(spectrum, extras)``: ``spectrum`` has shape ``(F,)``, and
     ``extras`` holds ``total_merger_rate`` (observer frame, mergers per second)
@@ -195,7 +195,7 @@ def build_importance_spectrum(
     samples would silently truncate the population.
 
     Returns ``(spectral_density, log_weights)``: the importance-weighted
-    spectrum, ready for a sampling model, and per-source log importance
+    spectrum, ready for an inference model, and per-source log importance
     weights bound to the same arrays and target.
     """
     source_parameters = {

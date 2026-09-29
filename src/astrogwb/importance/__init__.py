@@ -1,6 +1,6 @@
 """Importance sampling of a fixed catalog against a target population.
 
-:mod:`astrogwb.sampling.models` consumes any ``params -> (spectrum, extras)``
+:mod:`astrogwb.inference.models` consumes any ``params -> (spectrum, extras)``
 callable. This subpackage supplies the catalog-based realization of one: the
 functions that reweight a fixed catalog to a target NumPyro source model, and
 the effective-sample-size diagnostic that says how much of that catalog is

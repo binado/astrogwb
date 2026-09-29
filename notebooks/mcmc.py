@@ -172,7 +172,7 @@ from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import CATALOGS_ROOT, assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
-from astrogwb.sampling import gwb_spectral_density_model
+from astrogwb.inference import gwb_spectral_density_model
 
 register_projection(MplAxes)
 

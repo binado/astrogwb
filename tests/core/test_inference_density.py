@@ -4,7 +4,7 @@ across swept-parameter key sets, and coverage of the amplitude-marginalized
 model's ``numpyro.factor`` branch.
 
 Uses a small analytic ``spectral_density_fn``, the same pattern
-``tests/core/test_spectral_sampling.py`` already uses, so these tests stay
+``tests/core/test_spectral_inference.py`` already uses, so these tests stay
 fast and need no catalog. As in production (``astrogwb.paper.inference.build_model``),
 ``spectral_density_fn`` and ``priors`` are baked into the model with
 ``functools.partial`` -- they are static, not part of the per-call
@@ -24,7 +24,7 @@ import pytest
 from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
 
-from astrogwb.sampling import (
+from astrogwb.inference import (
     LogDensityFn,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,

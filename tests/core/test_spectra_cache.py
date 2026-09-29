@@ -20,7 +20,7 @@ from astrogwb.catalog import (
     simulate,
 )
 from astrogwb.metadata import CATALOG_KEY_LENGTH, PriorSpec, SpectraMetadata
-from astrogwb.sampling import draw_spectral_density, padded_event_capacity
+from astrogwb.inference import draw_spectral_density, padded_event_capacity
 
 MetadataFactory = Callable[..., SpectraMetadata]
 

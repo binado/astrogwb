@@ -1,7 +1,7 @@
 """Profile the production NumPyro model's log-density under ``jax.profiler.trace``.
 
 This runs the exact model used by ``scripts/run_mcmc.py`` (the
-``astrogwb.sampling.models`` compared against a fiducial injection), but
+``astrogwb.inference.models`` compared against a fiducial injection), but
 instead of sampling it isolates the model's potential-energy function and traces
 its forward pass + gradient in a hot loop. The result is a Perfetto trace that
 shows which XLA ops dominate the model math (the cosmology grid integrals,

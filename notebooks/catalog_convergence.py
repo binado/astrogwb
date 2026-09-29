@@ -86,7 +86,7 @@ from astrogwb.paper.config import (
     population_model,
 )
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
-from astrogwb.sampling.utils import sample_sources
+from astrogwb.inference.utils import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces

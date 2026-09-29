@@ -49,7 +49,7 @@ from astrogwb.paper.config import fiducials, population_model, waveform_generato
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
 from astrogwb.populations import IsotropicInclination
-from astrogwb.sampling import draw_spectral_density
+from astrogwb.inference import draw_spectral_density
 
 # Configure precision before constructing a JAX array or querying a device.
 jax.config.update("jax_enable_x64", True)

@@ -60,7 +60,7 @@ from astrogwb.populations import (
     amplitude_H0_fn,
     merger_rate_H0_fn,
 )
-from astrogwb.sampling import (
+from astrogwb.inference import (
     SpectralDensityFn,
     amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
@@ -441,7 +441,7 @@ def test_marginalized_and_direct_h0_posteriors_agree(
 ) -> None:
     """The two models give the same H0 marginal on realistic data.
 
-    ``test_sampling.py::test_amplitude_marginalized_model_matches_the_general_model``
+    ``test_spectral_inference.py::test_amplitude_marginalized_model_matches_the_general_model``
     already pins the *exact* log-density equivalence at ``rtol=1e-3`` by
     numerical quadrature, which is far sharper than any MCMC comparison. What
     this adds is coverage of the full pipeline -- NUTS, ``Predictive``, the

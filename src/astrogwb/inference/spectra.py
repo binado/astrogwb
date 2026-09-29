@@ -1,6 +1,6 @@
 """Draw many forward-model spectra, with hyperparameters fixed or sampled.
 
-:func:`~astrogwb.sampling.gwb_forward_model` is one draw at one set of
+:func:`~astrogwb.inference.gwb_forward_model` is one draw at one set of
 hyperparameters. :func:`draw_spectral_density` is the loop every consumer had
 been writing around it: size the static event plate from the Poisson mean, run
 :class:`~numpyro.infer.Predictive`, and pull the arrays out. It works on live
@@ -43,7 +43,7 @@ from numpy.typing import NDArray
 from numpyro.infer import Predictive
 
 from astrogwb.populations import MergerRateFn, SourceFn
-from astrogwb.sampling.forward_model import gwb_forward_model
+from astrogwb.inference.forward_model import gwb_forward_model
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
 
