@@ -19,13 +19,13 @@ from numpyro.infer.util import log_density
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.importance.spectral import build_importance_spectrum
-from astrogwb.populations import DEFAULT_DENSITY_SITES
 from astrogwb.inference import (
     SpectralDensityFn,
     fisher_matrix_per_bin,
     gwb_spectral_density_model,
     spectral_density_jacobian,
 )
+from astrogwb.populations import DEFAULT_DENSITY_SITES
 
 
 @pytest.fixture

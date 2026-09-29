@@ -19,8 +19,8 @@ import jax
 
 from astrogwb import __version__
 from astrogwb.catalog.spectral_density import SpectralDensityCatalog
-from astrogwb.metadata import SpectraMetadata
 from astrogwb.inference import draw_spectral_density, validate_source_model
+from astrogwb.metadata import SpectraMetadata
 
 __all__ = ["SpectrumGenerator"]
 

@@ -42,8 +42,8 @@ import numpyro.distributions as dist
 from numpy.typing import NDArray
 from numpyro.infer import Predictive
 
-from astrogwb.populations import MergerRateFn, SourceFn
 from astrogwb.inference.forward_model import gwb_forward_model
+from astrogwb.populations import MergerRateFn, SourceFn
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
 

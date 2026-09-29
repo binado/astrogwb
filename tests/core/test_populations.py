@@ -48,6 +48,7 @@ from astrogwb.distributions.delay import PowerLawDelayDistribution
 from astrogwb.distributions.redshift import (
     madau_dickinson_time_delayed_redshift_distribution,
 )
+from astrogwb.inference.utils import evaluate_sources, sample_sources
 from astrogwb.populations import (
     AMPLITUDE_PARAMETERS,
     DEFAULT_DENSITY_SITES,
@@ -70,7 +71,6 @@ from astrogwb.populations.bns_madau_dickinson import (
     madau_dickinson_time_delayed_total_merger_rate,
     madau_dickinson_total_merger_rate,
 )
-from astrogwb.inference.utils import evaluate_sources, sample_sources
 
 #: The deterministic output governing waveform amplitude.
 LUMINOSITY_DISTANCE_SITE = "luminosity_distance"

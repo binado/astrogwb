@@ -55,17 +55,17 @@ from astrogwb.distributions.amplitude import quadrature_grid
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
 from astrogwb.importance.spectral import build_importance_spectrum
-from astrogwb.populations import (
-    DEFAULT_DENSITY_SITES,
-    amplitude_H0_fn,
-    merger_rate_H0_fn,
-)
 from astrogwb.inference import (
     SpectralDensityFn,
     amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
     with_renamed_diagnostics,
+)
+from astrogwb.populations import (
+    DEFAULT_DENSITY_SITES,
+    amplitude_H0_fn,
+    merger_rate_H0_fn,
 )
 
 pytestmark = pytest.mark.integration

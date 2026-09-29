@@ -59,6 +59,12 @@ from astrogwb.distributions.amplitude import (
 from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import spectral_density
 from astrogwb.importance.spectral import LogWeightsFn, build_importance_spectrum
+from astrogwb.inference import (
+    SpectralDensityFn,
+    gwb_amplitude_marginalized_model,
+    gwb_spectral_density_model,
+    with_renamed_diagnostics,
+)
 from astrogwb.paper.catalogs import validate_matching_frequency_grids
 from astrogwb.paper.config.mcmc import RunConfig
 from astrogwb.populations import (
@@ -69,12 +75,6 @@ from astrogwb.populations import (
     build_population,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
-)
-from astrogwb.inference import (
-    SpectralDensityFn,
-    gwb_amplitude_marginalized_model,
-    gwb_spectral_density_model,
-    with_renamed_diagnostics,
 )
 
 logger = logging.getLogger(__name__)

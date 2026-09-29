@@ -165,6 +165,7 @@ from numpyro.infer import MCMC, NUTS
 from astrogwb.gwb import (
     omega_gw_from_spectral_density,
 )
+from astrogwb.inference import gwb_spectral_density_model
 from astrogwb.paper.catalogs import run_catalog
 from astrogwb.paper.config import fiducials as committed_fiducials
 from astrogwb.paper.config import priors as committed_priors
@@ -172,7 +173,6 @@ from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import CATALOGS_ROOT, assemble_run
 from astrogwb.paper.inference import prepare_inference_inputs
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
-from astrogwb.inference import gwb_spectral_density_model
 
 register_projection(MplAxes)
 

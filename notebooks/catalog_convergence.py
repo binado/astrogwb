@@ -78,6 +78,7 @@ from astrogwb.gwb import (
     uniform_prior_mass_moments,
 )
 from astrogwb.importance.spectral import build_importance_spectrum
+from astrogwb.inference.utils import sample_sources
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.paper.config import (
     detector_registry,
@@ -86,7 +87,6 @@ from astrogwb.paper.config import (
     population_model,
 )
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
-from astrogwb.inference.utils import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces

@@ -57,8 +57,8 @@ from jax.typing import ArrayLike
 from astrogwb.gwb.spectral import spectral_density
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.importance.weights import importance_log_weights
-from astrogwb.populations.registry import MergerRateFn, SourceFn
 from astrogwb.inference.utils import evaluate_sources
+from astrogwb.populations.registry import MergerRateFn, SourceFn
 
 if TYPE_CHECKING:
     from astrogwb.catalog import PolarizationPowerCatalog
