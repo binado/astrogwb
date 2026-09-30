@@ -63,7 +63,7 @@ def _():
     noise realizations.
 
     We also compare amplitude-only Fisher uncertainties in $H_0$. The count
-    sweep fits a common Poisson data spectrum and evaluates widths at each MAP;
+    sweep fits a common reference spectrum and evaluates widths at each MAP;
     the redshift sweep retains the fiducial approximation
     $\sigma(H_0) = H_0 / \mathrm{SNR}$. Other parameters remain fixed.
     """)
@@ -94,7 +94,7 @@ def _():
 
     num_draws = 1000
     seed = 41
-    data_seed = 42  # independent of every template ensemble
+    data_seed = 42  # used only for the independent Poisson option
     batch_size = 1024
     observation_time = 1.0  # years; affects SNR, not fixed-count normalization
     minimum_frequency = 2.0
@@ -164,6 +164,12 @@ def _():
         registry,
         write_figures,
     )
+
+
+@app.cell
+def _():
+    data_reference = "largest_mean"  # mean spectrum at max(num_events), or "poisson"
+    return (data_reference,)
 
 
 @app.cell(hide_code=True)
@@ -633,10 +639,15 @@ def _():
     mo.md(r"""
     ### Fisher approximation to the inferred $H_0$ distribution
 
-    Fit every Monte Carlo **template** to one common, independently seeded
-    Poisson spectrum drawn at the fiducial hyperparameters and observing time.
-    The data include physical source and count fluctuations, without detector
-    noise. Smoke tests substitute one small fixed-count data draw.
+    Fit every Monte Carlo **template** to one common reference spectrum. By
+    default, average the full spectra from all draws at the largest configured
+    source count ($N=65536$, 1000 draws by default). This is a mean spectrum,
+    not a mean SNR, and the same reference is used for every $N$.
+
+    Set `data_reference = "poisson"` to use one independently seeded Poisson
+    spectrum at the fiducial hyperparameters and observing time instead. It
+    includes physical source and count fluctuations, without detector noise.
+    Smoke tests substitute one small fixed-count draw for that option.
 
     Reuse the amplitude-marginalized model's sufficient statistics:
     $\hat A_i = (d|t_i)/(t_i|t_i)$ and $\rho_i = \sqrt{(t_i|t_i)}$, using
@@ -666,34 +677,48 @@ def _(
     cache_only,
     compute_spectrum_snrs,
     data_metadata,
+    data_reference,
     maximum_frequency,
     minimum_frequency,
     network,
+    num_events_cases,
     registry,
 ):
-    data_catalog = simulate(
-        data_metadata,
-        SpectrumGenerator(batch_size=batch_size),
-        cache_dir,
-        generate=not cache_only,
-    )
-    data_spectrum = np.asarray(data_catalog.spectral_density[0], dtype=np.float64)
-    _snrs, _ = compute_spectrum_snrs(
-        data_catalog,
-        registry,
-        network,
-        minimum_frequency=minimum_frequency,
-        maximum_frequency=maximum_frequency,
-    )
-    data_snr = float(_snrs[0])
+    if data_reference == "largest_mean":
+        _reference_case = num_events_cases[max(num_events_cases)]
+        data_catalog = _reference_case.catalog
+        data_spectrum = np.mean(data_catalog.spectral_density, axis=0, dtype=np.float64)
+        data_snr = _reference_case.summary["mean_spectrum_snr"]
+        _averaged_draws = data_catalog.metadata.num_draws
+    elif data_reference == "poisson":
+        data_catalog = simulate(
+            data_metadata,
+            SpectrumGenerator(batch_size=batch_size),
+            cache_dir,
+            generate=not cache_only,
+        )
+        data_spectrum = np.asarray(data_catalog.spectral_density[0], dtype=np.float64)
+        _snrs, _ = compute_spectrum_snrs(
+            data_catalog,
+            registry,
+            network,
+            minimum_frequency=minimum_frequency,
+            maximum_frequency=maximum_frequency,
+        )
+        data_snr = float(_snrs[0])
+        _averaged_draws = 1
+    else:
+        raise ValueError('data_reference must be "largest_mean" or "poisson"')
     pd.DataFrame(
         [
             {
-                "data_key": data_metadata.key(),
-                "count": data_metadata.count,
+                "reference": data_reference,
+                "source_key": data_catalog.metadata.key(),
+                "count": data_catalog.metadata.count,
                 "num_events": int(data_catalog.n_events[0]),
+                "averaged_draws": _averaged_draws,
                 "snr": data_snr,
-                "seed": data_metadata.population.seed,
+                "seed": data_catalog.metadata.population.seed,
             }
         ]
     )
@@ -779,10 +804,14 @@ def _():
 
     A residual SD above one means template-induced MAP scatter exceeds the
     Fisher uncertainty. The table also shows the mean, RMS offset, and fraction
-    with $|r_i|>1$. All counts use the same independent data spectrum; the MAP
-    ensembles are not forced to center on the fiducial value. A mean offset can
-    reflect template error or physical fluctuations in that one data realization.
-    Repeated data realizations would be needed to separate those effects.
+    with $|r_i|>1$. All counts use the same reference; we do not recenter each
+    ensemble separately. The default mean reference shares its draws with the
+    largest template ensemble, so this measures convergence relative to that
+    ensemble and cannot reveal systematic errors shared by all draws. With 1000
+    draws, its random reference error is much smaller than individual template
+    scatter. The Poisson option instead includes fluctuations in one physical
+    data realization; repeated realizations would separate those from template
+    error.
     """)
     return
 

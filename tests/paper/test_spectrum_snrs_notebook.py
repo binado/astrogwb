@@ -25,6 +25,10 @@ def notebook_results(
         notebook = runpy.run_path(str(REPO_ROOT / "notebooks" / "spectrum_snrs.py"))
         app = notebook["app"]
         _, definitions = app.run()
+        default_cache_keys = {
+            path.stem for path in Path(definitions["cache_dir"]).glob("*.h5")
+        }
+        _, poisson_definitions = app.run(defs={"data_reference": "poisson"})
 
         from astrogwb.catalog import SpectrumGenerator
 
@@ -33,6 +37,10 @@ def notebook_results(
 
         patch.setattr(SpectrumGenerator, "__call__", forbid_generation)
         _, cached_definitions = app.run()
+        _, cached_poisson = app.run(defs={"data_reference": "poisson"})
+        np.testing.assert_array_equal(
+            poisson_definitions["data_spectrum"], cached_poisson["data_spectrum"]
+        )
         for group in ("num_events_cases", "minimum_redshift_cases"):
             for key, case in definitions[group].items():
                 np.testing.assert_array_equal(
@@ -40,7 +48,11 @@ def notebook_results(
                 )
 
         try:
-            yield definitions
+            yield {
+                **dict(definitions),
+                "poisson_results": poisson_definitions,
+                "default_cache_keys": default_cache_keys,
+            }
         finally:
             import matplotlib.pyplot as plt
 
@@ -61,11 +73,16 @@ def test_sweeps_keep_the_other_parameter_fixed(
         assert case.metadata.num_events == 8
         assert case.metadata.population.model_kwargs["minimum_redshift"] == cutoff
     assert counts[8].metadata.key() == cutoffs[0.35].metadata.key()
-    assert len(list(Path(notebook_results["cache_dir"]).glob("*.h5"))) == 6
+    assert len(notebook_results["default_cache_keys"]) == 5
     data = notebook_results["data_catalog"]
-    assert data.metadata.population.seed != counts[8].metadata.population.seed
-    assert data.metadata.num_draws == 1
-    assert data.metadata.fixed == counts[8].metadata.fixed
+    assert notebook_results["data_reference"] == "largest_mean"
+    assert data is counts[max(counts)].catalog
+    np.testing.assert_allclose(
+        notebook_results["data_spectrum"], np.mean(data.spectral_density, axis=0)
+    )
+    assert notebook_results["data_snr"] == pytest.approx(
+        counts[max(counts)].summary["mean_spectrum_snr"]
+    )
     assert notebook_results["write_figures"] is False
 
     for case in [*counts.values(), *cutoffs.values()]:
@@ -77,6 +94,18 @@ def test_sweeps_keep_the_other_parameter_fixed(
         np.testing.assert_allclose(case.sigma_h0, case.metadata.fixed["H0"] / case.snrs)
         assert case.summary["sd"] == pytest.approx(np.std(case.snrs, ddof=1))
         assert "mean_spectrum_snr" in case.summary
+
+
+def test_poisson_reference_remains_available(
+    notebook_results: Mapping[str, Any],
+) -> None:
+    results = notebook_results["poisson_results"]
+    data = results["data_catalog"]
+    assert results["data_reference"] == "poisson"
+    assert data.metadata == results["data_metadata"]
+    assert data.metadata.population.seed != results["base_metadata"].population.seed
+    assert data.metadata.num_draws == 1
+    np.testing.assert_array_equal(results["data_spectrum"], data.spectral_density[0])
 
 
 def test_four_overlays_have_ordered_matching_legends(

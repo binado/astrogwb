@@ -174,9 +174,13 @@ separate because SNR is nonlinear.
 
 The source-count section also overlays an amplitude-only Fisher approximation
 to the inferred H0 distribution. Each catalog draw is a Monte Carlo template
-fitted to one common, independently seeded Poisson data spectrum at the same
-fiducials, redshift bounds, waveform, and observing time. The default data seed
-is 42; template seed is 41. The amplitude-marginalized model supplies
+fitted to one common reference spectrum. By default, `data_reference = "largest_mean"`
+averages the full spectra from all 1000 draws at the largest configured count
+(`max(num_events)`, 65536 by default), then uses that same spectrum for every N.
+It averages spectra, not SNRs, and reuses that ensemble's checked artifact.
+Set `data_reference = "poisson"` to use one independently seeded physical data
+realization at the same fiducials, redshift bounds, waveform, and observing time.
+The Poisson seed is 42; template seed is 41. The amplitude-marginalized model supplies
 `amplitude_mle = (data|template)/(template|template)` and `template_optimal_snr`
 using the full spectra and its Gaussian noise weights. With `S_h ∝ 1/H0` and
 the shared uniform prior on H0, the MAP is `H0_fid / amplitude_mle`, clipped
@@ -196,11 +200,14 @@ the interval `[-1, 1]`. A displayed table reports mean, sample SD, RMS, and
 the fraction of offsets exceeding one Fisher sigma. These draws contain no
 detector noise, so a unit-width Gaussian is a comparison scale, not a required
 sampling distribution. A width greater than one indicates template-induced MAP
-scatter larger than the Fisher uncertainty. Ensemble-mean centering forced the
-average MAP to equal the fiducial H0 in the previous SNR-ratio approximation.
-The common independent data spectrum removes that constraint. A mean residual
-can reflect template error or fluctuations in the Poisson data realization;
-separating those effects requires repeated independent data realizations.
+scatter larger than the Fisher uncertainty. Every N uses the same reference;
+the ensembles are not separately recentered. The default reference shares
+draws with the largest template ensemble and measures convergence relative to
+that ensemble. It cannot detect systematic error shared by all draws. Averaging
+1000 draws makes random reference error much smaller than individual-template
+scatter. With the Poisson option, a mean residual can also reflect fluctuations
+in the physical data realization; separating those effects requires repeated
+independent data realizations.
 
 Fixed-count results measure **finite-catalog estimator scatter**. Increasing
 `num_events` tests convergence about the same rate-normalized spectrum;
@@ -214,7 +221,8 @@ The notebook uses `simulate` and the existing content-addressed spectrum cache
 at `default_cache_dir() / "spectra"`, shared across worktrees. Changing count,
 cutoff, seed, or draw count changes the key; detector settings and the analysis
 band do not. Identical baseline settings in the two sections share one
-artifact; the common Poisson data spectrum is a sixth cached artifact.
+artifact. The default largest-ensemble mean requires no additional artifact;
+the optional Poisson data spectrum is a sixth cached artifact.
 Set `cache_only = True` to require existing spectra; a missing or
 mismatched artifact fails explicitly.
 
@@ -235,8 +243,9 @@ and the checked spectrum artifact carries the generating record.
 
 `just test-spectrum-snrs-notebook` checks the marimo graph and runs both sweeps
 with `ASTROGWB_NOTEBOOK_SMOKE=1`: three realizations, source counts `[8, 16, 32]`,
-a redshift-sweep count of 8, a separate 64-source fixed-count data draw in place
-of the physical Poisson realization, and figure saving disabled. The execution
+a redshift-sweep count of 8, and figure saving disabled. Both reference options
+are tested; the Poisson option substitutes a separate 64-source fixed-count
+data draw for the physical realization. The execution
 tests use a temporary spectrum cache and check that repeat execution needs no generation.
 
 ## Scripts

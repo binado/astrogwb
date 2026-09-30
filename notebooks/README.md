@@ -54,7 +54,8 @@ repository root as the working directory.
 - **`spectrum_snrs.py`** — marimo notebook. Fixed-count spectrum ensembles
   swept over source count and minimum redshift, with SNR and $\sigma(H_0)$
   distribution overlays, plus an inferred $H_0$ Gaussian-mixture overlay for
-  the source-count sweep, fitted to one independent Poisson data spectrum,
+  the source-count sweep, fitted to the largest ensemble's mean spectrum
+  (or an independent Poisson realization),
   and normalized MAP residuals with a unit Gaussian
   reference. Uses the checked spectrum cache and writes six
   comparison figures. Run `just test-spectrum-snrs-notebook` for a tiny smoke test.
