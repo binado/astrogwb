@@ -1,4 +1,4 @@
-# A forward-model spectra draw, shaped like astrogwb.metadata.SpectraMetadata.
+# Poisson forward-model spectra, shaped like astrogwb.metadata.SpectraMetadata.
 # It is merged over the four shared layers (config/defaults.toml,
 # waveforms.toml, populations.toml, detectors.toml) and read by
 # scripts/simulate_spectra.py from the [spectra] table alone -- it is not a run
@@ -7,18 +7,19 @@
 #   uv run --extra paper python scripts/simulate_spectra.py \
 #       --config config/defaults.toml --config config/waveforms.toml \
 #       --config config/populations.toml --config config/detectors.toml \
-#       --config config/simulations/spectrum/default.toml
+#       --config config/simulations/spectrum/poisson.toml
 #
 # A hyperparameter is one "${...}" reference, and which table it names decides
 # what it is: a [fiducials] entry fixes it for every draw, a [priors] entry
 # (a {dist, kwargs} table) draws it once per row. A later layer that sets a key
 # under [spectra.hyperparameters] replaces the reference whole. The
-# population is referenced whole; a layer that overrides its seed has to spell
-# the table out field by field, because a reference cannot be reached through.
+# population is referenced whole; a layer can override its seed alone under
+# [spectra.population], keeping the other fields from the reference.
 #
 # No `version`: the record carries the installed astrogwb's, never the config's.
 
 [spectra]
+count = "poisson"
 waveform = "${waveforms.default}"
 population = "${populations.cosmological}"
 num_draws = 64

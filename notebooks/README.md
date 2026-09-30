@@ -62,7 +62,7 @@ it reads the shared tables directly — `[fiducials]` in `config/defaults.toml`
 and detector settings in `config/detectors.toml` through `astrogwb.paper.config`,
 and the ordered network
 legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS` — rather than merging a
-run's layers. Its $S_h$ is one seeded draw of `gwb_forward_model`, built from
+run's layers. Its $S_h$ is one seeded draw of `poisson_counts_forward_model`, built from
 the population and waveform of the shared default draw, `[catalog]`, so it does not need a file
 under `outputs/catalogs/`. Its analysis window (`observation_time`, the frequency
 band, and the redshift bounds), the draw seed, and local plotting choices stay

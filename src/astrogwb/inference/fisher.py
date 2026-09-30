@@ -31,7 +31,7 @@ score-function estimator, with noise that grows as
 those fiducials. A hyperparameter that moves a support edge (a hard mass
 cutoff, say) differentiates only the density's normalization, not the sources
 crossing the edge, so its derivative is missing that boundary term.
-:func:`~astrogwb.inference.models.forward_model.gwb_forward_model` is not a valid
+:func:`~astrogwb.inference.models.poisson_counts_forward_model.poisson_counts_forward_model` is not a valid
 input: its Poisson count is discrete, and differentiating through its draws
 gives one realization's derivative rather than the mean spectrum's.
 """

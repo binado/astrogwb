@@ -68,9 +68,8 @@ class SpectrumGenerator:
         if population.merger_rate_fn is None:
             raise ValueError(
                 f"population {metadata.population.model_name!r} declares no "
-                "merger rate, so there is no Poisson mean to draw an event count "
-                "from; it is a proposal density, not a population to simulate "
-                "observations from"
+                "physical merger rate; spectrum generation requires an "
+                "observer-frame rate in both count modes"
             )
         generator = metadata.waveform.build()
         priors = {name: spec.build() for name, spec in metadata.sampled.items()}
@@ -89,8 +88,11 @@ class SpectrumGenerator:
         )
 
         logger.info(
-            "Spectra %s: population=%s seed=%d draws=%d sampled=%s approximant=%s",
+            "Spectra %s: count=%s num_events=%s population=%s seed=%d draws=%d "
+            "sampled=%s approximant=%s",
             metadata.key(),
+            metadata.count,
+            metadata.num_events,
             metadata.population.model_name,
             metadata.population.seed,
             metadata.num_draws,
@@ -106,6 +108,8 @@ class SpectrumGenerator:
             num_draws=metadata.num_draws,
             rng_key=rng_key,
             batch_size=self.batch_size,
+            count=metadata.count,
+            num_events=metadata.num_events,
             n_max_sigma=metadata.n_max_sigma,
         )
         return self.artifact.from_draws(draws, metadata)

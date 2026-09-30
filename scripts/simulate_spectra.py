@@ -2,8 +2,8 @@
 
 The draws are fully determined by a :class:`~astrogwb.metadata.SpectraMetadata`
 -- waveform, population and seed, each hyperparameter's fixed value or prior,
-draw count, observation time and plate depth -- declared as the ``[spectra]``
-table of the ``--config`` layers, merged in process exactly as ``run_mcmc``
+draw count, observation time, count mode and source count or padding -- declared
+as the ``[spectra]`` table of the ``--config`` layers, merged in process exactly as ``run_mcmc``
 merges a run. This script runs :class:`~astrogwb.catalog.SpectrumGenerator` on
 it and writes the result atomically to ``<output-dir>/<key>.h5``. It writes
 ``(draws, F)`` spectra only; no ``(F, N)`` catalog power is ever materialized.
@@ -15,14 +15,15 @@ same generator behind a cache lookup, and needs no script.
 
 A hyperparameter is a ``"${fiducials.X}"`` reference to fix it, or a
 ``"${priors.X}"`` one to draw it once per row; see
-``config/simulations/spectrum/default.toml``.
+``config/simulations/spectrum/poisson.toml`` (Poisson) or ``fixed.toml``
+(exactly ``num_events`` sources in each of ``num_draws`` realizations).
 
 Usage -- one ``--config`` per layer, in merge order::
 
     uv run --extra paper python scripts/simulate_spectra.py \\
         --config config/defaults.toml --config config/waveforms.toml \\
         --config config/populations.toml --config config/detectors.toml \\
-        --config config/simulations/spectrum/default.toml
+        --config config/simulations/spectrum/poisson.toml
 
 ``knf <layers> --shallow 'priors.*' --interpolate`` prints the merged config,
 whose ``[spectra]`` table is the record.
@@ -52,9 +53,11 @@ logger = logging.getLogger(__name__)
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Draw forward-model spectral densities from the [spectra] table of "
+            "Draw Poisson or fixed-count forward-model spectral densities from "
+            "the [spectra] table of "
             "their config layers and save (draws, F) without materializing "
-            "catalog power."
+            "catalog power. Fixed mode requires num_events sources per realization; "
+            "num_draws sets the realization count."
         )
     )
     add_config_arguments(
@@ -121,8 +124,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     catalog = SpectrumGenerator(batch_size=args.batch_size)(metadata)
     save_atomically(catalog, output)
     logger.info(
-        "Saved spectra %s: %d draws, %d frequencies, to %s",
+        "Saved spectra %s: count=%s num_events=%s, %d draws, %d frequencies, to %s",
         metadata.key(),
+        metadata.count,
+        metadata.num_events,
         catalog.num_draws,
         catalog.frequencies.size,
         output,

@@ -400,7 +400,8 @@ It is produced by three pieces:
 
 - **metadata** -- a `SpectraMetadata` (`astrogwb.metadata`): the waveform,
   the population with its seed, each hyperparameter's fixed value *or* prior,
-  `num_draws`, `observation_time`, `n_max_sigma`, and the `astrogwb` version.
+  `num_draws`, `observation_time`, `count`, `num_events`, `n_max_sigma`, and
+  the `astrogwb` version.
   `key()` is its content hash.
 - **generator** -- `SpectrumGenerator(batch_size)` (`astrogwb.catalog`)
   turns the metadata into draws. `batch_size` only chunks the waveform
@@ -425,6 +426,7 @@ metadata = SpectraMetadata(
     },
     num_draws=64,
     observation_time=1.0,
+    count="poisson",
 )
 spectra = simulate(metadata, SpectrumGenerator(batch_size=1024), SPECTRA_ROOT)
 ```
@@ -435,6 +437,32 @@ A hyperparameter is a number to fix it for every draw, or a
 are data, so an edited bound re-keys the draws without a version bump. The seed
 is split into a hyperparameter key and a forward-model key; with priors, the
 static event plate is sized from the largest Poisson mean across the rows.
+
+`count="poisson"` (the default) uses `poisson_counts_forward_model`: it draws
+`N ~ Poisson(R * T)` and forms `S_h = A_inc * sum(P_i) / T`, with `T` in
+seconds and the observer-frame rate `R` in mergers per second. `n_max_sigma`
+defaults to `5.0`; draws above that padded static capacity retain their actual
+count but use only the capacity's sources. `num_events` must be omitted.
+
+`count="fixed"` uses `fixed_counts_forward_model`: it draws exactly the
+positive integer `num_events` sources and forms
+`S_h = A_inc * R * sum(P_i) / num_events`. `n_events` is deterministic and
+equals that count in every row. `n_max_sigma` stays `None`; supplying padding
+is rejected. Both models require a population with a physical merger rate.
+They share batched waveform reduction and the inclination convention:
+`A_inc` averages face-on power over isotropic inclinations when the source
+model omits inclination, and is one when inclination is supplied.
+
+`num_events` is the source count within each fixed realization; `num_draws`
+is the number of independent realizations. `observation_time` remains positive
+in both modes and is recorded in the key. It controls Poisson counts and
+cancels from fixed-count normalization.
+
+The complete normalized metadata, including the new count fields, is hashed.
+Previous spectrum cache addresses change; rerun spectrum generation under
+the new keys. There is no key migration. Population draws and waveform
+algorithms are unchanged, so this change does not bump the package version
+or invalidate polarization-power catalog caches.
 
 `scripts/simulate_spectra.py` is the same generator from a shell. It takes
 config layers like `run_mcmc` does -- the four shared `config/*.toml` layers,
@@ -448,7 +476,17 @@ refuses to replace it without `--force`:
 uv run --extra paper python scripts/simulate_spectra.py \
     --config config/defaults.toml --config config/waveforms.toml \
     --config config/populations.toml --config config/detectors.toml \
-    --config config/simulations/spectrum/default.toml
+    --config config/simulations/spectrum/poisson.toml
+```
+
+For 100 fixed-count realizations at the shared fiducials, each with
+`${catalog.num_samples}` sources:
+
+```bash
+uv run --extra paper python scripts/simulate_spectra.py \
+    --config config/defaults.toml --config config/waveforms.toml \
+    --config config/populations.toml --config config/detectors.toml \
+    --config config/simulations/spectrum/fixed.toml
 ```
 
 The spectrum layers are not run layers: no chain reads `[spectra]`. A
@@ -459,15 +497,16 @@ caller that needs a source model no record can name -- the
 | Dataset | Shape | Meaning |
 | --- | --- | --- |
 | `frequency` | `(F,)` | the generating backend's grid, as in a power catalog |
-| `spectral_density` | `(draws, F)` | one `gwb_forward_model` draw per row |
-| `n_events` | `(draws,)` | that draw's Poisson event count |
+| `spectral_density` | `(draws, F)` | one realization of the selected forward model per row |
+| `n_events` | `(draws,)` | that draw's Poisson count or the recorded fixed `num_events` |
 | `total_merger_rate` | `(draws,)` | that draw's observer-frame total rate |
 | `hyperparameters` | `(draws, P)` | the value each row was drawn at, one column per name, ordered by `source_parameter_names` |
 
 Its four root attributes are also `format_name`, `domain`, `metadata`, and
 `source_parameter_names`. Here `metadata` is the complete
 `SpectraMetadata.model_dump_json()` record, including each hyperparameter's
-fixed value or prior, the draw count, observation time, plate depth, and package
+fixed value or prior, the draw count, observation time, count mode, fixed source
+count or Poisson padding, and package
 version. The reader uses `SpectraMetadata.model_validate_json()`.
 
 The two formats differ in what a row is, and that is the whole difference. A
@@ -475,7 +514,8 @@ power catalog's sample axis indexes *sources* drawn once at one set of
 hyperparameters, recorded as `fiducials` in the metadata JSON. A
 spectral-density catalog's row axis indexes *draws* of the whole forward model,
 so its hyperparameters are a column per name. A fixed hyperparameter's column
-must repeat its value; a sampled one's holds each row's draw.
+must repeat its value; a sampled one's holds each row's draw. In fixed mode,
+every `n_events` entry must match the metadata's `num_events`.
 
 `SpectralDensityCatalog.load` validates the same way its sibling does: layout,
 shapes, serialized dtypes, then reconstruction of the recorded population from

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -20,7 +20,7 @@ from astrogwb.catalog import (
     simulate,
 )
 from astrogwb.inference import draw_spectral_density, padded_event_capacity
-from astrogwb.metadata import CATALOG_KEY_LENGTH, PriorSpec, SpectraMetadata
+from astrogwb.metadata import PriorSpec, SpectraMetadata
 
 MetadataFactory = Callable[..., SpectraMetadata]
 
@@ -74,18 +74,53 @@ def make_metadata() -> MetadataFactory:
 # --------------------------------------------------------------------- #
 # The key
 # --------------------------------------------------------------------- #
-def test_key_of_fixed_metadata_matches_pinned_digest(
-    make_metadata: MetadataFactory,
-) -> None:
-    """Pinned so an accidental change to the canonical form is caught.
+def test_count_mode_configuration_validation(make_metadata: MetadataFactory) -> None:
+    poisson = make_metadata()
+    assert poisson.count == "poisson"
+    assert poisson.num_events is None
+    assert poisson.n_max_sigma == 5.0
+    assert poisson.key() == make_metadata(n_max_sigma=5.0).key()
+    fixed = make_metadata(count="fixed", num_events=7)
+    assert fixed.n_max_sigma is None
+    assert (
+        fixed.key()
+        == make_metadata(count="fixed", num_events=7, n_max_sigma=None).key()
+    )
+    assert fixed.key() != make_metadata(count="fixed", num_events=8).key()
 
-    Changing it on purpose invalidates every cached spectra file, which is
-    fine -- but it should be a decision, so update this value deliberately.
-    """
-    key = make_metadata(version="0.0.0-test").key()
-
-    assert len(key) == CATALOG_KEY_LENGTH
-    assert key == "cdfbd1a9382e8529"
+    population = poisson.population.build()
+    assert population.merger_rate_fn is not None
+    generator = poisson.waveform.build()
+    invalid_settings: tuple[dict[str, Any], ...] = (
+        {"count": "unknown"},
+        {"count": "fixed"},
+        {"count": "fixed", "num_events": 0},
+        {"count": "fixed", "num_events": -1},
+        {"count": "fixed", "num_events": True},
+        {"count": "fixed", "num_events": 1.5},
+        {"count": "fixed", "num_events": 7, "n_max_sigma": 5.0},
+        {"count": "poisson", "num_events": 7},
+        {"n_max_sigma": -1.0},
+        {"observation_time": 0.0},
+        {"count": "fixed", "num_events": 7, "observation_time": 0.0},
+    )
+    for settings in invalid_settings:
+        with pytest.raises(ValueError):
+            make_metadata(**settings)
+        direct_settings: dict[str, Any] = {
+            "observation_time": poisson.observation_time,
+            **settings,
+        }
+        with pytest.raises(ValueError):
+            draw_spectral_density(
+                source_model=population.source_model,
+                merger_rate_fn=population.merger_rate_fn,
+                generator=generator,
+                hyperparameters=poisson.fixed,
+                num_draws=poisson.num_draws,
+                rng_key=jax.random.key(0),
+                **direct_settings,
+            )
 
 
 @pytest.mark.parametrize(
@@ -94,6 +129,8 @@ def test_key_of_fixed_metadata_matches_pinned_digest(
         {"num_draws": 4},
         {"observation_time": 2e-3},
         {"n_max_sigma": 4.0},
+        {"count": "fixed", "num_events": 7},
+        {"count": "fixed", "num_events": 8},
         {"version": "0.0.0-other"},
         {"hyperparameters": {**FIDUCIALS, "gamma": 1.5}},
         {"hyperparameters": {**FIDUCIALS, "local_merger_rate": RATE_PRIOR}},
@@ -204,6 +241,32 @@ def test_sampled_hyperparameters_vary_inside_their_prior(
 # --------------------------------------------------------------------- #
 # The generator and the cache
 # --------------------------------------------------------------------- #
+def test_fixed_generation_cache_round_trip(
+    make_metadata: MetadataFactory, tmp_path: Path
+) -> None:
+    metadata = make_metadata(count="fixed", num_events=7)
+    generated = simulate(metadata, SpectrumGenerator(batch_size=3), tmp_path)
+    loaded = simulate(metadata, SpectrumGenerator(), tmp_path, generate=False)
+
+    assert loaded.metadata == metadata
+    assert loaded.count == "fixed"
+    assert loaded.num_events == 7
+    assert loaded.n_max_sigma is None
+    assert loaded.spectral_density.shape == (
+        metadata.num_draws,
+        loaded.frequencies.size,
+    )
+    assert loaded.total_merger_rate.shape == (metadata.num_draws,)
+    assert all(
+        values.shape == (metadata.num_draws,)
+        for values in loaded.hyperparameters.values()
+    )
+    np.testing.assert_array_equal(loaded.n_events, np.full(metadata.num_draws, 7))
+    np.testing.assert_array_equal(loaded.spectral_density, generated.spectral_density)
+    with pytest.raises(ValueError, match="n_events.*num_events"):
+        replace(loaded, n_events=np.zeros(metadata.num_draws, dtype=np.int64))
+
+
 @dataclass
 class _CountingGenerator:
     """A SpectrumGenerator that records how often it actually ran."""

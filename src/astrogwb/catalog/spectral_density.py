@@ -12,14 +12,15 @@ The two differ in what a row is, and that is the whole difference. A
 polarization-power catalog's sample axis indexes *sources* drawn once at one
 set of hyperparameters, which it records as scalar fiducials. A
 spectral-density catalog's row axis indexes *draws* of the whole forward
-model -- each with its own Poisson event count and total merger rate -- and
+model -- each with a Poisson or fixed event count and total merger rate -- and
 its hyperparameters are a column per name, because a hyperparameter may be
 drawn from a prior once per row.
 
 Everything that determined the draws is one
 :class:`~astrogwb.metadata.SpectraMetadata`: the waveform and population, each
 hyperparameter's fixed value or prior, the draw count, the observation time,
-the plate depth ``n_max_sigma`` and the ``astrogwb`` version. Its
+the count mode, fixed source count or Poisson padding, and the ``astrogwb``
+version. Its
 :meth:`~astrogwb.metadata.SpectraMetadata.key` is the file name
 :func:`astrogwb.catalog.simulate` caches the draws under. The columns are what
 the record produced: a fixed hyperparameter's column must repeat its value, and
@@ -31,7 +32,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -50,11 +51,11 @@ __all__ = ["SpectralDensityCatalog"]
 class SpectralDensityCatalog:
     """Forward-model spectral-density draws and the population that produced them.
 
-    ``spectral_density`` is draw-first, shape ``(draws, F)`` -- the orientation
-    :func:`~astrogwb.inference.gwb_forward_model` returns, kept rather than
-    transposed so the simulator writes what the model produced.
+    ``spectral_density`` is draw-first, shape ``(draws, F)`` -- the forward
+    models' Predictive output, kept so the simulator writes what they produced.
     ``n_events`` and ``total_merger_rate`` have shape ``(draws,)``, and every
-    hyperparameter column has shape ``(draws,)``.
+    hyperparameter column has shape ``(draws,)``. In fixed mode every count
+    equals the recorded ``num_events``.
 
     The record is private and read through :attr:`metadata` and the
     properties below, so a caller cannot rebind it away from the arrays it
@@ -87,6 +88,10 @@ class SpectralDensityCatalog:
         n_events = np.asarray(self.n_events)
         if n_events.ndim != 1 or n_events.shape[0] != draws:
             raise ValueError("n_events must have shape (draws,)")
+        if self._metadata.count == "fixed" and not np.all(
+            n_events == self._metadata.num_events
+        ):
+            raise ValueError("fixed-mode n_events must match the metadata's num_events")
         rates = np.asarray(self.total_merger_rate)
         if rates.ndim != 1 or rates.shape[0] != draws:
             raise ValueError("total_merger_rate must have shape (draws,)")
@@ -134,7 +139,7 @@ class SpectralDensityCatalog:
         The metadata is supplied rather than inferred: the caller ran the
         forward model from it, so it is the only place that knows what drew
         these arrays. Construction still checks that the two agree on the draw
-        count and on every fixed hyperparameter.
+        count, fixed source count and every fixed hyperparameter.
         """
         return cls(
             spectral_density=draws.spectral_density,
@@ -159,13 +164,23 @@ class SpectralDensityCatalog:
         return self._metadata.version
 
     @property
-    def n_max_sigma(self) -> float:
-        """How many Poisson standard deviations the event plate reached."""
+    def count(self) -> Literal["poisson", "fixed"]:
+        """Whether each realization has a Poisson or fixed source count."""
+        return self._metadata.count
+
+    @property
+    def num_events(self) -> int | None:
+        """Sources per realization in fixed mode; ``None`` for Poisson mode."""
+        return self._metadata.num_events
+
+    @property
+    def n_max_sigma(self) -> float | None:
+        """Poisson plate padding in standard deviations; ``None`` for fixed counts."""
         return self._metadata.n_max_sigma
 
     @property
     def observation_time(self) -> float:
-        """The observation time the Poisson mean was taken over, in years."""
+        """Positive observation time in years; cancels for fixed-count spectra."""
         return self._metadata.observation_time
 
     @property
