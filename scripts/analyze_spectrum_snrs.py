@@ -111,7 +111,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="One detector registry layer in merge order; repeat for network and detector overrides.",
     )
     parser.add_argument("--network", default=DEFAULT_NETWORK, metavar="NAME")
-    parser.add_argument("--spectra-dir", type=Path, default=SPECTRA_ROOT)
+    parser.add_argument("--cache-dir", type=Path, default=SPECTRA_ROOT)
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -143,9 +143,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         network=args.network,
     )
     generator = SpectrumGenerator(batch_size=args.batch_size)
-    spectra_dir = args.spectra_dir.expanduser().resolve()
+    cache_dir = args.cache_dir.expanduser().resolve()
     try:
-        catalog = simulate(config.spectra, generator, spectra_dir, generate=False)
+        catalog = simulate(config.spectra, generator, cache_dir, generate=False)
     except FileNotFoundError:
         if args.cache_only:
             raise
@@ -153,7 +153,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     configure_runtime(num_chains=1)
     if catalog is None:
-        catalog = simulate(config.spectra, generator, spectra_dir)
+        catalog = simulate(config.spectra, generator, cache_dir)
     snrs, mean_spectrum_snr = compute_spectrum_snrs(
         catalog,
         config.detector_registry,
@@ -213,7 +213,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     provenance = {
         "config": config.model_dump(mode="json"),
         "spectrum_key": config.spectra.key(),
-        "source_path": str(artifact_path(config.spectra, spectra_dir)),
+        "source_path": str(artifact_path(config.spectra, cache_dir)),
         "spectra_config_paths": [
             str(path.expanduser().resolve()) for path in args.spectra_config
         ],

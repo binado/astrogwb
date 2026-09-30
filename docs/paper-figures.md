@@ -174,7 +174,7 @@ full frequency axis and its derived bin widths before applying the band mask.
 
 The same checked cache mechanism as the generator serves
 `outputs/spectra/<spectrum-key>.h5`, or generates and atomically saves a miss.
-`--spectra-dir` changes that cache directory; `--batch-size` defaults to 128
+`--cache-dir` changes that cache directory; `--batch-size` defaults to 128
 and only controls waveform memory on a miss. Generation can also be done first
 with `scripts/simulate_spectra.py` using those spectrum layers as repeated
 `--config` flags. `--cache-only` requires a hit and raises an error naming the
