@@ -150,6 +150,7 @@ extend-select = ["TID"]
 # F401: the setup cell is imports only; later cells are what use those names.
 # PLR1711: marimo writes a bare `return` on cells that export nothing.
 "notebooks/fiducial_spectrum.py" = ["F811", "F401", "PLR1711"]
+"notebooks/spectrum_snrs.py" = ["F811", "F401", "PLR1711"]
 
 [tool.ty.src]
 # Most of `scripts/` stays absent because fixture generators can import
@@ -163,7 +164,7 @@ include = [
     "scripts/run_mcmc.py",
     "scripts/profile_model.py",
     "scripts/simulate_spectra.py",
-    "scripts/analyze_spectrum_snrs.py",
+    "notebooks/spectrum_snrs.py",
 ]
 
 [tool.pytest.ini_options]

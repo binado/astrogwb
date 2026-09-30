@@ -2,7 +2,7 @@
 
 Workflows in this directory are stored as plain `.py` files. Most are [Jupytext](https://jupytext.readthedocs.io/) **py:percent** notebooks — a way to represent Jupyter notebooks as Python source instead of `.ipynb` JSON. That keeps diffs readable and lets normal Python tooling (Ruff, `ty`) work on notebook code. The `.py` is the source of truth; `*.ipynb` is gitignored.
 
-[`fiducial_spectrum.py`](fiducial_spectrum.py) is a [marimo](https://docs.marimo.io/) notebook: a plain `.py` file whose cells form a reactive graph.
+[`fiducial_spectrum.py`](fiducial_spectrum.py) and [`spectrum_snrs.py`](spectrum_snrs.py) are [marimo](https://docs.marimo.io/) notebooks: plain `.py` files whose cells form a reactive graph.
 
 ## Two kinds, one directory
 
@@ -51,28 +51,38 @@ repository root as the working directory.
 - **`fiducial_spectrum.py`** — marimo notebook. One seeded forward-model draw
   of the fiducial $S_h$ / $\Omega_{\mathrm{GW}}$, network $S_{\mathrm{eff}}$,
   $\sigma$, and per-network SNR. No catalog file.
+- **`spectrum_snrs.py`** — marimo notebook. Fixed-count spectrum ensembles
+  swept over source count and minimum redshift, with SNR and $\sigma(H_0)$
+  distribution overlays, plus an inferred $H_0$ Gaussian-mixture overlay for
+  the source-count sweep, fitted to one independent Poisson data spectrum,
+  and normalized MAP residuals with a unit Gaussian
+  reference. Uses the checked spectrum cache and writes six
+  comparison figures. Run `just test-spectrum-snrs-notebook` for a tiny smoke test.
 
 The paper notebooks merge a run's config layers with
 `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
 merge the workflow performs by passing layer paths on argv. None of them reads
 an intermediate assembled-config artifact, so they run against a fresh clone.
 
-`fiducial_spectrum.py` is the exception: it stands in for no particular run, so
-it reads the shared tables directly — `[fiducials]` in `config/defaults.toml`
-and detector settings in `config/detectors.toml` through `astrogwb.paper.config`,
-and the ordered network
-legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS` — rather than merging a
-run's layers. Its $S_h$ is one seeded draw of `poisson_counts_forward_model`, built from
-the population and waveform of the shared default draw, `[catalog]`, so it does not need a file
-under `outputs/catalogs/`. Its analysis window (`observation_time`, the frequency
-band, and the redshift bounds), the draw seed, and local plotting choices stay
-hand-written in its configuration cell, mirroring the shared `[analysis]` table.
-Editing that table does not update the notebook; mirror the change there by hand.
+`fiducial_spectrum.py` and `spectrum_snrs.py` stand in for no particular run.
+They read the shared fiducials, detector registry, and default draw's waveform
+and population through `astrogwb.paper.config`, rather than merging run layers.
+Their analysis window, draw seed, and plotting choices live in editable
+configuration cells. Editing the shared analysis table does not update those
+local controls; mirror the change there by hand.
 
-Open it from the repository root:
+`fiducial_spectrum.py` uses one seeded Poisson draw and the ordered network
+legend from `astrogwb.paper.plotting.DETECTOR_NETWORKS`. `spectrum_snrs.py` uses
+fixed-count ensembles for one selected network. Neither requires a waveform
+catalog under `outputs/catalogs/`; their spectra are served or generated through
+`simulate`.
+
+Open either notebook from the repository root:
 
 ```bash
 uv run --extra notebook --group jupyter marimo edit notebooks/fiducial_spectrum.py
+# Or open the SNR distribution sweeps:
+uv run --extra notebook --group jupyter marimo edit notebooks/spectrum_snrs.py
 ```
 
 For the shared scientific values on their own, without standing in for a
@@ -129,7 +139,7 @@ ASTROGWB_NOTEBOOK_SMOKE=1 just test-notebooks
 
 ## Opening in Jupyter
 
-The percent notebooks open in the classic notebook UI after a conversion to `.ipynb`. `fiducial_spectrum.py` opens in marimo, as above.
+The percent notebooks open in the classic notebook UI after a conversion to `.ipynb`. The two marimo notebooks open in marimo, as above.
 
 To convert a percent notebook:
 
