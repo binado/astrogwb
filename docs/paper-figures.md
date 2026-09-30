@@ -144,7 +144,7 @@ detector network per invocation. Run it from the repository root with the
 the same LaTeX installation as the other paper figures.
 
 For fixed-count spectra at shared fiducials, generate on a cache miss and then
-write SNR tables and a histogram:
+write SNR tables and a density plot:
 
 ```bash
 uv run --extra notebook python scripts/analyze_spectrum_snrs.py \
@@ -215,8 +215,9 @@ directories to retain band or detector-override comparisons:
   sample SD (`ddof=1`), 5th/95th percentiles, relative scatter (`SD/mean`) and
   the mean spectrum's SNR. Single-draw SD and zero-mean relative scatter are
   undefined and written as empty CSV cells.
-- `snr_histogram.pdf`: one raw-SNR count histogram, using the configured paper
-  figure format and resolution (`pdf` by default).
+- `snr_distribution.pdf`: one SNR density plot via `arviz_plots.plot_dist`
+  with a KDE, using the configured paper figure format and resolution (`pdf`
+  by default). A single draw or constant ensemble uses an ECDF instead.
 - `provenance.json`: the validated configuration and full generation metadata,
   artifact key/path, selected detector definitions, independently ordered
   `spectra_config_paths` and `detector_config_paths`, and analysis software

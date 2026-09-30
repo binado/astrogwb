@@ -181,7 +181,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     import pandas as pd
 
     from astrogwb.paper.plotting import save_figures, use_paper_style
-    from astrogwb.paper.plotting.snr import plot_snr_histogram
+    from astrogwb.paper.plotting.snr import plot_snr_distribution
 
     output_dir = (
         (
@@ -243,11 +243,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         json.dumps(provenance, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
     use_paper_style()
-    figure = plot_snr_histogram(
+    figure = plot_snr_distribution(
         snrs, network=config.network, distribution_label=distribution_label
     )
     try:
-        save_figures({output_dir / "snr_histogram": figure})
+        save_figures({output_dir / "snr_distribution": figure})
     finally:
         plt.close(figure)
     logger.info("Saved SNR analysis for %s to %s", config.spectra.key(), output_dir)
