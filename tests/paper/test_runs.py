@@ -311,9 +311,41 @@ def test_a_dangling_reference_fails_the_merge_naming_it(tmp_path: Path) -> None:
         assemble_run("demo", "only", root=tmp_path)
 
 
-def test_an_incomplete_role_is_rejected_naming_it(tmp_path: Path) -> None:
-    """Setting a key under a reference replaces it: the waveform loses its band."""
+def test_a_key_under_a_reference_merges_onto_its_referent(tmp_path: Path) -> None:
+    """A whole-string reference merges as the table it names.
+
+    A run that sets one field of a role's waveform keeps the rest of the
+    named record, and the other role, which names it untouched, is unchanged.
+    """
     _demo_run(tmp_path, '[analysis.proposal.waveform]\napproximant = "TaylorF2"\n')
+
+    merged = assemble_run("demo", "only", root=tmp_path)
+
+    default = merged["waveforms"]["default"]
+    assert merged["analysis"]["proposal"]["waveform"] == {
+        **default,
+        "approximant": "TaylorF2",
+    }
+    assert merged["analysis"]["injection"]["waveform"] == default
+
+
+def test_extends_inherits_a_base_table_and_leaves_no_key() -> None:
+    """The guard's kwargs are the cosmological ones plus its mixing fraction.
+
+    A run that overrides the fraction at the source still inherits the window.
+    """
+    raw = assemble_run("variable-proposal-guard", "eps1e-2")
+
+    guard = raw["populations"]["guard"]["model_kwargs"]
+    cosmological = raw["populations"]["cosmological"]["model_kwargs"]
+
+    assert guard == {**cosmological, "uniform_mixing_fraction": 0.01}
+    assert raw["analysis"]["proposal"]["population"] == raw["populations"]["guard"]
+    assert "extends" not in guard
+
+
+def test_an_invalid_role_is_rejected_naming_it(tmp_path: Path) -> None:
+    _demo_run(tmp_path, "[analysis.proposal]\nnum_samples = -1\n")
     with pytest.raises(ValueError, match=r"demo/only analysis\.proposal"):
         resolve_run_catalogs(tmp_path)
 

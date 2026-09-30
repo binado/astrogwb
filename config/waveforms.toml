@@ -3,10 +3,6 @@
 # run that draws with another approximant names a variant here rather than
 # patching the default.
 #
-# A reference is resolved after every layer is merged, and it is atomic: a
-# layer that sets a key *under* a reference replaces the whole reference. To
-# change a variant for one run, override it here, at its source.
-#
 # The frequency grid is frequency_spacing over [minimum_frequency,
 # maximum_frequency]. "loglinear" is linear at frequency_resolution up to
 # turnover_frequency and geometric above it, with the bin width continuous at
@@ -40,11 +36,5 @@ frequency_resolution = "${waveforms.default.frequency_resolution}"
 # The default band and grid with the TaylorF2 approximant, for the
 # waveform-systematics proposal.
 [waveforms.TaylorF2]
+extends = "${waveforms.default}"
 approximant = "TaylorF2"
-sampling_frequency = "${waveforms.default.sampling_frequency}"
-minimum_frequency = "${waveforms.default.minimum_frequency}"
-maximum_frequency = "${waveforms.default.maximum_frequency}"
-reference_frequency = "${waveforms.default.reference_frequency}"
-frequency_spacing = "${waveforms.default.frequency_spacing}"
-frequency_resolution = "${waveforms.default.frequency_resolution}"
-turnover_frequency = "${waveforms.default.turnover_frequency}"

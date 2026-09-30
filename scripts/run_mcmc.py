@@ -26,8 +26,9 @@ Usage -- one ``--config`` per layer, in merge order::
         --config config/populations.toml --config config/detectors.toml \
         --config $BASE --config $RUN
 
-``knf <layers> --shallow 'priors.*' --interpolate`` prints the config those
-layers merge to, and ``scripts/catalogs.py ls`` prints each run's two keys.
+``knf <layers> --shallow 'priors.*' --interpolate --merge-key extends`` prints
+the config those layers merge to, and ``scripts/catalogs.py ls`` prints each
+run's two keys.
 
 The layers are merged in process by ``merge_config_layers`` -- the same fold
 the notebooks, the figure scripts and the validation gate take -- and the

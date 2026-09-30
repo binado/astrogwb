@@ -4,9 +4,11 @@
 # population = "${populations.guard}".
 #
 # The redshift window is stated once, in [populations.cosmological], and every
-# other population references its leaves, so narrowing it narrows them all.
-# A reference is atomic: to change a population for one run -- a seed, a
-# mixing fraction -- override it here, at its source, in that run's layer.
+# other population's model_kwargs `extends` its model_kwargs, so narrowing it
+# narrows them all. A reference merges as the table it names, so one role can
+# change a single field -- a seed -- and keep the rest. To change a population
+# for every role that names it in one run -- a seed, a mixing fraction --
+# override it here, at its source, in that run's layer.
 
 # The population every catalog is drawn from unless its role names another.
 [populations.cosmological]
@@ -22,9 +24,7 @@ model_name = "bns_md_uniform_mixture"
 seed = 61
 
 [populations.guard.model_kwargs]
-minimum_redshift = "${populations.cosmological.model_kwargs.minimum_redshift}"
-maximum_redshift = "${populations.cosmological.model_kwargs.maximum_redshift}"
-n_grid = "${populations.cosmological.model_kwargs.n_grid}"
+extends = "${populations.cosmological.model_kwargs}"
 uniform_mixing_fraction = 0.1
 
 # Mergers delayed from star formation, drawn for the time-delay injection.
@@ -33,9 +33,7 @@ model_name = "bns_md_time_delayed_cosmological"
 seed = 71
 
 [populations.time_delayed.model_kwargs]
-minimum_redshift = "${populations.cosmological.model_kwargs.minimum_redshift}"
-maximum_redshift = "${populations.cosmological.model_kwargs.maximum_redshift}"
-n_grid = "${populations.cosmological.model_kwargs.n_grid}"
+extends = "${populations.cosmological.model_kwargs}"
 minimum_delay = 0.02
 maximum_formation_redshift = 20.0
 n_delay_nodes = 48
@@ -50,8 +48,7 @@ model_name = "bns_md_modified_propagation"
 seed = 0
 
 [populations.target.model_kwargs]
-minimum_redshift = "${populations.cosmological.model_kwargs.minimum_redshift}"
-maximum_redshift = "${populations.cosmological.model_kwargs.maximum_redshift}"
+extends = "${populations.cosmological.model_kwargs}"
 n_grid = 256
 
 # The time-delayed population as an analysis target, on the target's grid.
@@ -60,9 +57,5 @@ model_name = "bns_md_time_delayed_cosmological"
 seed = 0
 
 [populations.time_delayed_target.model_kwargs]
-minimum_redshift = "${populations.target.model_kwargs.minimum_redshift}"
-maximum_redshift = "${populations.target.model_kwargs.maximum_redshift}"
+extends = "${populations.time_delayed.model_kwargs}"
 n_grid = "${populations.target.model_kwargs.n_grid}"
-minimum_delay = "${populations.time_delayed.model_kwargs.minimum_delay}"
-maximum_formation_redshift = "${populations.time_delayed.model_kwargs.maximum_formation_redshift}"
-n_delay_nodes = "${populations.time_delayed.model_kwargs.n_delay_nodes}"

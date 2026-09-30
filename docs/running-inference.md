@@ -27,7 +27,7 @@ resolved (see [references](#references)). The `knf` CLI is the same engine, so
 this prints exactly the config the run will validate:
 
 ```bash
-uv run --extra paper knf $LAYERS --shallow 'priors.*' --interpolate
+uv run --extra paper knf $LAYERS --shallow 'priors.*' --interpolate --merge-key extends
 ```
 
 Merge order is yours to get right, and a wrong-but-valid order fails silently,
@@ -188,22 +188,26 @@ After the merge, every string that is exactly `"${a.b}"` is replaced by the
 merged value at `a.b` -- a table, a number, whatever it is, with its type
 kept. That is how one table reuses another rather than restating it:
 `[catalog]` names its waveform as `"${waveforms.default}"`, and each catalog
-role in `[analysis]` names the fields of `[catalog]`. Three rules follow from
+role in `[analysis]` names the fields of `[catalog]`. Four rules follow from
 how `knf` resolves them:
 
 - **References resolve against the final merge.** A run that overrides
   `[fiducials]` reaches every catalog drawn at `"${fiducials}"`.
-- **A reference is atomic.** A layer that sets a key *under* a reference
-  replaces the whole reference, so `[analysis.proposal.waveform] approximant =
-  "TaylorF2"` leaves a waveform with nothing but an approximant, which fails
-  validation. That is why the shared layer spells each role one reference per
-  field: a run can then override `num_samples` or `population.seed` alone.
-  To change a named variant for one run, override it at its source --
-  `[populations.guard] seed = 62` -- and every role that names it follows.
-- **A reference can name another reference, but not reach through one.**
-  `"${catalog.population.seed}"` cannot resolve if `[catalog].population` is
-  itself `"${populations.cosmological}"`. A table that others reach into field
-  by field is therefore spelled one reference per field too.
+- **A reference to a table merges as that table.** A layer that sets a key
+  *under* a reference overrides that field and keeps the rest, so
+  `[analysis.proposal.waveform] approximant = "TaylorF2"` gives the default
+  waveform with a different approximant, and a run can override `num_samples`
+  or `population.seed` alone. To change a named variant for every role that
+  names it in one run, override it at its source -- `[populations.guard]
+  seed = 62` -- and every role that names it follows. `--shallow` forces
+  replacement instead; `priors.*` is the one place we use it.
+- **A reference can be reached through.** `"${catalog.population.seed}"`
+  resolves even though `[catalog].population` is itself
+  `"${populations.cosmological}"`.
+- **`extends` inherits a table.** `extends = "${a.b}"` starts a table from
+  `a.b` and lets its own fields win, and the key is removed from the result.
+  `[populations.guard.model_kwargs]` is the cosmological population's
+  `model_kwargs` plus a mixing fraction. A table takes one base.
 
 The seven experiments and their 27 runs:
 
@@ -236,11 +240,7 @@ Both default to the shared draw, `[catalog]`:
 waveform = "${waveforms.default}"
 fiducials = "${fiducials}"
 num_samples = 32768
-
-[catalog.population]
-model_name = "${populations.cosmological.model_name}"
-model_kwargs = "${populations.cosmological.model_kwargs}"
-seed = "${populations.cosmological.seed}"
+population = "${populations.cosmological}"
 ```
 
 and a run overrides only what differs -- a size and seed, a named population,
