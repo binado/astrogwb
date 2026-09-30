@@ -14,9 +14,10 @@ import json
 import logging
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Annotated, Any, Self
+from typing import TYPE_CHECKING, Annotated, Any, Self
 
 import numpy as np
+from numpy.typing import ArrayLike
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb import __version__
@@ -33,6 +34,9 @@ from astrogwb.paper.snr import compute_spectrum_snrs, summarize_spectrum_snrs
 
 logger = logging.getLogger(__name__)
 DEFAULT_NETWORK = "ET-2L-aligned-CE-Hanford"
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 
 
 class SNRConfig(BaseModel):
@@ -135,6 +139,53 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def plot_snr_distribution(
+    snrs: ArrayLike, *, network: str, distribution_label: str
+) -> Figure:
+    """Plot the SNR density under the caller's active paper style.
+
+    Constant ensembles (including a single draw) use an ECDF because a KDE
+    requires nonzero scatter. These are simulation draws, not posterior chains.
+    """
+    # Presentation dependencies are lazy, like main's: importing/validating
+    # config leaves the XLA backend configurable and does not require a
+    # matplotlib session.
+    import arviz_plots as azp
+    import xarray as xr
+    from matplotlib.axes import Axes
+
+    values = np.asarray(snrs, dtype=np.float64)
+    kind = "ecdf" if np.ptp(values) == 0 else "kde"
+    collection = azp.plot_dist(
+        xr.DataTree.from_dict({"simulations": xr.Dataset({"snr": ("draw", values)})}),
+        group="simulations",
+        sample_dims=["draw"],
+        kind=kind,
+        backend="matplotlib",
+        visuals={
+            "credible_interval": False,
+            "point_estimate": False,
+            "point_estimate_text": False,
+            "title": False,
+            "remove_axis": False,
+        },
+        figure_kwargs={
+            "figsize": (6.4, 4.8),
+            "layout": "constrained",
+            # gwpy registers replacement default axes that ArviZ cannot
+            # identify, so restore the matplotlib axes class.
+            "subplot_kws": {"axes_class": Axes},
+        },
+    )
+    figure = collection.viz["figure"].item()
+    axis = figure.axes[0]
+    axis.set_xlabel("SNR")
+    axis.set_ylabel("Cumulative probability" if kind == "ecdf" else "Density")
+    axis.set_ylim(bottom=0)
+    axis.set_title(f"{network}\n{distribution_label}")
+    return figure
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -181,7 +232,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     import pandas as pd
 
     from astrogwb.paper.plotting import save_figures, use_paper_style
-    from astrogwb.paper.plotting.snr import plot_snr_distribution
 
     output_dir = (
         (
