@@ -167,6 +167,7 @@ def _gaussian_population_model() -> SourceFn:
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
         n_grid=N_GRID,
+        sample_inclination=False,
     ).source_model
 
 
@@ -176,6 +177,7 @@ def _gaussian_target_model() -> SourceFn:
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
         n_grid=N_GRID,
+        sample_inclination=False,
     ).source_model
 
 
@@ -550,6 +552,7 @@ def _uniform_mixture_model(uniform_mixing_fraction: float) -> SourceFn:
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
         n_grid=N_GRID,
+        sample_inclination=False,
         uniform_mixing_fraction=uniform_mixing_fraction,
     ).source_model
 
@@ -716,6 +719,7 @@ def _gaussian_mixture_model(uniform_mixing_fraction: float) -> SourceFn:
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
         n_grid=N_GRID,
+        sample_inclination=False,
         uniform_mixing_fraction=uniform_mixing_fraction,
     ).source_model
 
@@ -929,7 +933,12 @@ DELAYED_PARAMS: dict[str, float] = {**POPULATION_PARAMS, "delay_slope": -1.0}
 
 
 def _delayed_population() -> Population:
-    return build_population("bns_md_time_delayed_cosmological", **WINDOW, **DELAY)
+    return build_population(
+        "bns_md_time_delayed_cosmological",
+        **WINDOW,
+        **DELAY,
+        sample_inclination=False,
+    )
 
 
 def test_time_delayed_draws_evaluate_to_a_finite_density_with_a_slope_gradient() -> (

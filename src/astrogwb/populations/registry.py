@@ -126,7 +126,7 @@ def register_population[F: PopulationFactory](
     return decorate
 
 
-def build_population(name: str, **kwargs: float) -> Population:
+def build_population(name: str, **kwargs: float | bool) -> Population:
     """Build a registered population from its construction kwargs.
 
     ``kwargs`` is the flat construction mapping a catalog persists, passed

@@ -61,7 +61,7 @@ def describe(request: CatalogMetadata) -> str:
     """One line saying what a catalog draws."""
     population = request.population
     kwargs = ", ".join(
-        f"{name}={value:g}"
+        f"{name}={value if isinstance(value, bool) else format(value, 'g')}"
         for name, value in sorted(population.model_kwargs.items())
         if name not in _SHARED_KWARGS
     )

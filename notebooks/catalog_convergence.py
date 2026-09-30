@@ -203,9 +203,10 @@ OMEGA_CATALOG_PATH = NOTEBOOK_DIR / (
 #
 # The component-mass bounds are load-bearing here: `uniform_prior_mass_moments`
 # below is given the *same* bounds, and the analytic spectrum it feeds is only
-# the right oracle for this catalog if they agree. So is the omitted
-# `inclination` column: face-on BNS populations leave it out, which marks the
-# catalog for analytic inclination averaging during the spectral contraction.
+# the right ensemble-mean oracle for this catalog if they agree. The recorded
+# population samples isotropic inclination by default, so finite catalogs also
+# fluctuate in orientation. Each source's waveform includes its inclination;
+# the contraction applies no further inclination average.
 
 # %%
 #: the shared `[fiducials]` table, read rather than restated. The generating
@@ -227,14 +228,14 @@ MAXIMUM_COMPONENT_MASS = 2.5
 #: they are written as overrides rather than as a retyped table. The record
 #: travels into the generated file, so a cached catalog says which population
 #: produced it.
-POPULATION_KWARGS: dict[str, float | int] = {
+POPULATION_KWARGS: dict[str, float | int | bool] = {
     "minimum_redshift": Z_MIN,
     "maximum_redshift": Z_MAX,
     "n_grid": 4096,
 }
 POPULATION = population_metadata(seed=POPULATION_SEED, **POPULATION_KWARGS)
 POPULATION_MODEL = POPULATION.model_name
-POPULATION_MODEL_KWARGS: dict[str, float | int] = dict(POPULATION.model_kwargs)
+POPULATION_MODEL_KWARGS: dict[str, float | int | bool] = dict(POPULATION.model_kwargs)
 
 
 def population_model_fn():
@@ -242,7 +243,7 @@ def population_model_fn():
     return population_model(**POPULATION_KWARGS).source_model
 
 
-TARGET_KWARGS: dict[str, float | int] = {
+TARGET_KWARGS: dict[str, float | int | bool] = {
     "minimum_redshift": Z_MIN,
     "maximum_redshift": Z_MAX,
     "n_grid": N_GRID,

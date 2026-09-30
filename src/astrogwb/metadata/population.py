@@ -24,19 +24,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:
     from astrogwb.populations.registry import Population
 
-__all__ = ["PopulationMetadata"]
+__all__ = ["ModelKwargs", "PopulationMetadata"]
 
 
 #: Construction kwargs travel inside the metadata JSON, so they must be
 #: JSON scalars. Declaring that here rather than as prose in the config layer
 #: is what makes the round trip type-stable: an ``int`` stays an ``int`` and a
-#: ``float`` stays a ``float``.
-ModelKwargs = dict[str, float | int]
+#: ``float`` stays a ``float`` and the inclination choice stays a ``bool``.
+type ModelKwargs = dict[str, float | int | bool]
 
 
 class PopulationMetadata(BaseModel):
@@ -61,6 +61,17 @@ class PopulationMetadata(BaseModel):
     model_name: str
     model_kwargs: ModelKwargs = Field(default_factory=dict)
     seed: int
+
+    @field_validator("model_kwargs")
+    @classmethod
+    def _validate_model_kwargs(cls, kwargs: ModelKwargs) -> ModelKwargs:
+        for name, value in kwargs.items():
+            if name == "sample_inclination":
+                if not isinstance(value, bool):
+                    raise ValueError("sample_inclination must be a bool")
+            elif isinstance(value, bool):
+                raise ValueError(f"{name} must be a number, not a bool")
+        return kwargs
 
     def build(self) -> Population:
         """Reconstruct the generating population with its kwargs bound.
@@ -92,7 +103,7 @@ class PopulationMetadata(BaseModel):
         """
         self.build()
 
-    def with_model_kwargs(self, **updates: float) -> Self:
+    def with_model_kwargs(self, **updates: float | bool) -> Self:
         """A re-validated copy with construction kwargs overridden.
 
         Constructs rather than using ``model_copy(update=...)``, which writes

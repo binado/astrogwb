@@ -67,7 +67,12 @@ from astrogwb.populations import build_population
 from astrogwb.inference.utils import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
-model_kwargs = {"minimum_redshift": 0.0, "maximum_redshift": 20.0, "n_grid": 4096}
+model_kwargs = {
+    "minimum_redshift": 0.0,
+    "maximum_redshift": 20.0,
+    "n_grid": 4096,
+    "sample_inclination": True,
+}
 params = {
     "H0": 67.66,
     "Omega_m": 0.3096,
@@ -78,6 +83,8 @@ params = {
     "minimum_mass": 1.0,
     "mass_width": 1.5,
 }
+# Isotropic inclination is sampled by default; False selects analytic
+# quadrupole averaging and omits the inclination site and column.
 source_model = build_population("bns_md_cosmological", **model_kwargs).source_model
 source_parameters = sample_sources(
     source_model, jax.random.PRNGKey(42), params, num_samples=1024
