@@ -161,6 +161,7 @@ include = [
     "scripts/run_mcmc.py",
     "scripts/profile_model.py",
     "scripts/simulate_spectra.py",
+    "scripts/analyze_spectrum_snrs.py",
 ]
 
 [tool.pytest.ini_options]

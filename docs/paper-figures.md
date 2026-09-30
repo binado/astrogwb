@@ -134,7 +134,89 @@ snakemake --snakefile Snakefile --cores 1 \
   outputs/figures/standalone/importance_weights_grid_H0_Omega_m.pdf
 ```
 
-All new figure products are written under `outputs/figures/`.
+Standalone workflow figure products are written under `outputs/figures/`.
+
+## Spectrum-realization SNR analysis
+
+`scripts/analyze_spectrum_snrs.py` analyzes one spectrum ensemble and one named
+detector network per invocation. Run it from the repository root with the
+`notebook` extra for the plotting dependencies. The shared paper style requires
+the same LaTeX installation as the other paper figures.
+
+For fixed-count spectra at shared fiducials, generate on a cache miss and then
+write SNR tables and a histogram:
+
+```bash
+uv run --extra notebook python scripts/analyze_spectrum_snrs.py \
+    --config config/defaults.toml --config config/waveforms.toml \
+    --config config/populations.toml --config config/detectors.toml \
+    --config config/simulations/spectrum/fixed.toml \
+    --network ET-2L-aligned-CE-Hanford
+```
+
+The script validates an in-script `SNRConfig` containing `SpectraMetadata`, the
+resolved `DetectorRegistry`, the selected network and the frequency band.
+Detector definitions and overrides come from the merged `[detectors]` and
+`[networks]` tables. `--network` defaults to `ET-2L-aligned-CE-Hanford`.
+The analysis band comes from `[analysis].minimum_frequency` and
+`maximum_frequency`; the observing time comes from the spectrum metadata and
+is converted from years to seconds. Each SNR uses the full frequency axis and
+its derived bin widths before applying the band mask.
+
+The same checked cache mechanism as the generator serves
+`outputs/spectra/<spectrum-key>.h5`, or generates and atomically saves a miss.
+`--spectra-dir` changes that cache directory; `--batch-size` defaults to 128
+and only controls waveform memory on a miss. Generation can also be done first
+with `scripts/simulate_spectra.py` using the same layers.
+`--cache-only` (alias `--cached-only`) requires a hit and raises an error naming
+the missing key/path. A metadata mismatch always fails, without regeneration.
+
+Compare another network using the same saved spectra:
+
+```bash
+uv run --extra notebook python scripts/analyze_spectrum_snrs.py \
+    --config config/defaults.toml --config config/waveforms.toml \
+    --config config/populations.toml --config config/detectors.toml \
+    --config config/simulations/spectrum/fixed.toml \
+    --network ET-triangular --cache-only
+```
+
+Network selection, geometry/PSD overrides, and the analysis band stay outside
+the spectrum generation key. A spectrum-generation setting, including seed,
+source count, draw count or generating population, changes that key. Specify
+different cases in separate invocations; repeated `--config` flags merge one
+case and do not define a sweep.
+
+Outputs default to `outputs/snr/<spectrum-key>/<network>/`; `--output-dir`
+overrides this. Repeating an analysis replaces its outputs, so use distinct
+directories to retain band or detector-override comparisons:
+
+- `snr_draws.csv`: spectrum key, network, distribution label, zero-based draw
+  index, event count and per-realization SNR.
+- `snr_summary.csv`: detector membership, draw count, mean, median, unbiased
+  sample SD (`ddof=1`), 5th/95th percentiles, relative scatter (`SD/mean`) and
+  the mean spectrum's SNR. Single-draw SD and zero-mean relative scatter are
+  undefined and written as empty CSV cells.
+- `snr_histogram.pdf`: one raw-SNR count histogram, using the configured paper
+  figure format and resolution (`pdf` by default).
+- `provenance.json`: the validated configuration and full generation metadata,
+  artifact key/path, selected detector definitions, ordered config paths and
+  analysis software version.
+
+`mean(SNR)` and `SNR(mean spectrum)` are separate statistics: SNR is nonlinear.
+Fixed-count results measure **finite-catalog estimator scatter**; Poisson
+results represent **finite-observation realizations**. Both include source
+fluctuations and exclude detector-noise realizations. The source inclination
+convention is determined by the recorded population and software version. The
+current default BNS models analytically average inclination, so these outputs
+must not be interpreted as including sampled-orientation fluctuations.
+
+Only fixed-hyperparameter ensembles are accepted. The supplied Poisson example
+samples `local_merger_rate` and is rejected: add a later simulation layer
+setting `[spectra.hyperparameters].local_merger_rate` to
+`"${fiducials.local_merger_rate}"` to study source fluctuations at a fixed rate.
+There are no bootstrap intervals or sweep/convergence diagnostics in this
+first version, and no new workflow rule or generation cache format.
 
 ## Scripts
 
