@@ -106,7 +106,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument(
         "--cache-only",
-        "--cached-only",
         dest="cache_only",
         action="store_true",
         help="Require a checked cache hit; do not generate missing spectra.",
