@@ -19,8 +19,8 @@ from numpyro.infer import Predictive
 
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO, ISCO_ALPHA
 from astrogwb.gwb.spectral import inclination_averaging_factor
-from astrogwb.inference import gwb_forward_model, validate_source_model
-from astrogwb.inference.models.forward_model import _sum_polarization_power
+from astrogwb.inference import poisson_counts_forward_model, validate_source_model
+from astrogwb.inference.models._forward import _sum_polarization_power
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.populations import IsotropicInclination
 from astrogwb.utils import years_to_seconds
@@ -134,7 +134,7 @@ def test_conditioned_poisson_rate_is_total_merger_rate_times_observation_seconds
     None
 ):
     kwargs = _model_kwargs()
-    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    trace = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
     rate = trace["total_merger_rate"]["value"]
     observation_time_sec = years_to_seconds(kwargs["observation_time"])
     np.testing.assert_allclose(
@@ -153,7 +153,7 @@ def test_conditioned_poisson_rate_is_total_merger_rate_times_observation_seconds
 def test_spectrum_matches_the_sum_of_per_source_power_over_time() -> None:
     generator = _generator()
     kwargs = _model_kwargs(generator=generator)
-    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    trace = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
     expected = _expected_spectrum(
         trace,
         generator,
@@ -167,7 +167,7 @@ def test_spectrum_matches_the_sum_of_per_source_power_over_time() -> None:
 def test_batched_power_matches_a_single_generator_call(batch_size: int) -> None:
     generator = _generator()
     kwargs = _model_kwargs(generator=generator, batch_size=batch_size)
-    batched = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    batched = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
     expected = _expected_spectrum(
         batched,
         generator,
@@ -181,10 +181,12 @@ def test_batched_power_matches_a_single_generator_call(batch_size: int) -> None:
 def test_batch_size_does_not_change_the_spectrum() -> None:
     kwargs = _model_kwargs()
     first = _seeded_trace(
-        gwb_forward_model, POPULATION_PARAMS, **{**kwargs, "batch_size": 1}
+        poisson_counts_forward_model, POPULATION_PARAMS, **{**kwargs, "batch_size": 1}
     )
     second = _seeded_trace(
-        gwb_forward_model, POPULATION_PARAMS, **{**kwargs, "batch_size": N_EVENTS}
+        poisson_counts_forward_model,
+        POPULATION_PARAMS,
+        **{**kwargs, "batch_size": N_EVENTS},
     )
     np.testing.assert_allclose(
         first["spectral_density"]["value"],
@@ -197,7 +199,7 @@ def test_batch_size_does_not_change_the_spectrum() -> None:
 
 def test_missing_inclination_rescales_face_on_power() -> None:
     kwargs = _model_kwargs()
-    analytic = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    analytic = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
     sources = {
         name: analytic[name]["value"] for name in _plated_source_site_names(analytic)
     }
@@ -220,9 +222,11 @@ def test_returned_inclination_disables_analytic_rescaling() -> None:
         sources = dict(base_model(params))
         return {**sources, "inclination": jnp.zeros_like(sources["redshift"])}
 
-    baseline = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **_model_kwargs())
+    baseline = _seeded_trace(
+        poisson_counts_forward_model, POPULATION_PARAMS, **_model_kwargs()
+    )
     inclined = _seeded_trace(
-        gwb_forward_model,
+        poisson_counts_forward_model,
         POPULATION_PARAMS,
         **_model_kwargs(source_model=inclined_model),
     )
@@ -232,7 +236,9 @@ def test_returned_inclination_disables_analytic_rescaling() -> None:
         rtol=1e-12,
     )
 
-    model = partial(gwb_forward_model, **_model_kwargs(source_model=inclined_model))
+    model = partial(
+        poisson_counts_forward_model, **_model_kwargs(source_model=inclined_model)
+    )
 
     def spectrum(values: dict[str, jax.Array]) -> jax.Array:
         trace = handlers.trace(handlers.seed(model, 0)).get_trace(values)
@@ -246,7 +252,7 @@ def test_returned_inclination_disables_analytic_rescaling() -> None:
 def test_isotropic_inclination_messenger_disables_analytic_rescaling() -> None:
     wrapped = IsotropicInclination(mock_population_model())
     trace = _seeded_trace(
-        gwb_forward_model,
+        poisson_counts_forward_model,
         POPULATION_PARAMS,
         **_model_kwargs(source_model=wrapped),
     )
@@ -263,7 +269,7 @@ def test_isotropic_inclination_messenger_disables_analytic_rescaling() -> None:
 def test_predictive_stacks_fixed_shape_sites() -> None:
     kwargs = _model_kwargs()
     draws = Predictive(
-        partial(gwb_forward_model, **kwargs),
+        partial(poisson_counts_forward_model, **kwargs),
         num_samples=3,
         return_sites=("spectral_density", "n_events", "total_merger_rate"),
     )(jax.random.key(1), POPULATION_PARAMS)
@@ -278,7 +284,7 @@ def test_unobserved_poisson_count_is_jittable_and_keeps_static_shapes() -> None:
     kwargs = _model_kwargs(observed_num_events=None)
 
     def outputs(params):
-        trace = _seeded_trace(gwb_forward_model, params, **kwargs)
+        trace = _seeded_trace(poisson_counts_forward_model, params, **kwargs)
         return (
             trace["spectral_density"]["value"],
             trace["n_events"]["value"],
@@ -288,7 +294,7 @@ def test_unobserved_poisson_count_is_jittable_and_keeps_static_shapes() -> None:
     eager_spectrum, eager_n, eager_sources = outputs(_jax_params())
     compiled_spectrum, compiled_n, compiled_sources = jax.jit(outputs)(_jax_params())
 
-    assert not _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)[
+    assert not _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)[
         "n_events"
     ]["is_observed"]
     assert np.shape(eager_spectrum) == np.shape(compiled_spectrum)
@@ -302,7 +308,7 @@ def test_unobserved_poisson_count_is_jittable_and_keeps_static_shapes() -> None:
 def test_unobserved_poisson_predictive_stacks_static_capacity() -> None:
     kwargs = _model_kwargs(observed_num_events=None)
     draws = Predictive(
-        partial(gwb_forward_model, **kwargs),
+        partial(poisson_counts_forward_model, **kwargs),
         num_samples=3,
         return_sites=None,
     )(jax.random.key(2), POPULATION_PARAMS)
@@ -318,7 +324,7 @@ def test_unobserved_poisson_predictive_stacks_static_capacity() -> None:
 
 def test_zero_conditioned_count_has_zero_power_and_static_sources() -> None:
     kwargs = _model_kwargs(observed_num_events=0)
-    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    trace = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
 
     np.testing.assert_array_equal(trace["n_events"]["value"], 0)
     np.testing.assert_array_equal(
@@ -332,7 +338,7 @@ def test_zero_conditioned_count_has_zero_power_and_static_sources() -> None:
 def test_partial_count_masks_power_but_not_source_capacity() -> None:
     active_events = 3
     kwargs = _model_kwargs(observed_num_events=active_events)
-    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    trace = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
     generator = kwargs["generator"]
     sources = {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
     reference_power = jnp.asarray(generator.generate_batch(sources))[:, :active_events]
@@ -357,7 +363,7 @@ def test_count_above_capacity_is_silently_capped() -> None:
         max_events=max_events,
         observed_num_events=observed_count,
     )
-    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    trace = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
     sources = {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
     reference = jnp.asarray(kwargs["generator"].generate_batch(sources)).sum(axis=1)
 
@@ -374,7 +380,7 @@ def test_count_above_capacity_is_silently_capped() -> None:
 
 def test_jitted_spectrum_matches_eager() -> None:
     kwargs = _model_kwargs()
-    model = partial(gwb_forward_model, **kwargs)
+    model = partial(poisson_counts_forward_model, **kwargs)
     params = _jax_params()
 
     def spectrum(values: dict[str, jax.Array]) -> tuple[jax.Array, jax.Array]:
@@ -395,14 +401,14 @@ def test_missing_physical_rate_is_rejected() -> None:
         if name != "local_merger_rate"
     }
     with pytest.raises(ValueError, match="local_merger_rate"):
-        _seeded_trace(gwb_forward_model, params, **_model_kwargs())
+        _seeded_trace(poisson_counts_forward_model, params, **_model_kwargs())
 
 
 @pytest.mark.integration
 def test_ripple_spectrum_matches_the_sum_of_per_source_power_over_time() -> None:
     generator = _ripple_generator()
     kwargs = _ripple_kwargs(generator=generator)
-    trace = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    trace = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
     expected = _expected_spectrum(
         trace,
         generator,
@@ -419,7 +425,7 @@ def test_ripple_spectrum_matches_the_sum_of_per_source_power_over_time() -> None
 def test_ripple_batched_power_matches_a_single_generator_call(batch_size: int) -> None:
     kwargs = _ripple_kwargs(batch_size=batch_size)
     generator = kwargs["generator"]
-    batched = _seeded_trace(gwb_forward_model, POPULATION_PARAMS, **kwargs)
+    batched = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
     expected = _expected_spectrum(
         batched,
         generator,
@@ -433,10 +439,12 @@ def test_ripple_batched_power_matches_a_single_generator_call(batch_size: int) -
 @pytest.mark.integration
 def test_ripple_batch_size_does_not_change_the_spectrum() -> None:
     first = _seeded_trace(
-        gwb_forward_model, POPULATION_PARAMS, **_ripple_kwargs(batch_size=1)
+        poisson_counts_forward_model, POPULATION_PARAMS, **_ripple_kwargs(batch_size=1)
     )
     second = _seeded_trace(
-        gwb_forward_model, POPULATION_PARAMS, **_ripple_kwargs(batch_size=N_EVENTS)
+        poisson_counts_forward_model,
+        POPULATION_PARAMS,
+        **_ripple_kwargs(batch_size=N_EVENTS),
     )
     np.testing.assert_allclose(
         first["spectral_density"]["value"],
@@ -452,7 +460,7 @@ def test_ripple_predictive_returns_finite_spectrum() -> None:
     """One Predictive draw is eager; ``num_samples>1`` would ``lax.map`` into gwmock."""
     kwargs = _ripple_kwargs()
     draws = Predictive(
-        partial(gwb_forward_model, **kwargs),
+        partial(poisson_counts_forward_model, **kwargs),
         num_samples=1,
         return_sites=("spectral_density", "n_events", "total_merger_rate"),
     )(jax.random.key(1), POPULATION_PARAMS)
@@ -474,7 +482,7 @@ def test_ripple_predictive_returns_finite_spectrum() -> None:
 
 def _draw_sources(max_events: int) -> dict[str, jax.Array]:
     trace = _seeded_trace(
-        gwb_forward_model,
+        poisson_counts_forward_model,
         _jax_params(),
         **_model_kwargs(max_events=max_events, observed_num_events=max_events),
     )
@@ -514,10 +522,10 @@ def test_empty_catalog_reduces_without_calling_the_generator() -> None:
 def test_jitted_scan_matches_eager_for_full_and_ragged_catalogs(n_events: int) -> None:
     """``n_events=6`` divides ``BATCH_SIZE``; ``7`` leaves a remainder chunk."""
     kwargs = _model_kwargs(max_events=n_events, observed_num_events=n_events)
-    eager = _seeded_trace(gwb_forward_model, _jax_params(), **kwargs)
+    eager = _seeded_trace(poisson_counts_forward_model, _jax_params(), **kwargs)
 
     def spectrum(params):
-        trace = _seeded_trace(gwb_forward_model, params, **kwargs)
+        trace = _seeded_trace(poisson_counts_forward_model, params, **kwargs)
         return trace["spectral_density"]["value"]
 
     np.testing.assert_allclose(
@@ -532,9 +540,9 @@ def test_vmap_over_draws_shares_one_static_event_count() -> None:
     kwargs = _model_kwargs()
 
     def spectrum(params):
-        return _seeded_trace(gwb_forward_model, params, **kwargs)["spectral_density"][
-            "value"
-        ]
+        return _seeded_trace(poisson_counts_forward_model, params, **kwargs)[
+            "spectral_density"
+        ]["value"]
 
     params = _jax_params()
     stacked = {name: jnp.stack([value, value]) for name, value in params.items()}
@@ -614,9 +622,9 @@ def test_ripple_forward_model_is_jittable() -> None:
     kwargs = _ripple_kwargs()
 
     def spectrum(params):
-        return _seeded_trace(gwb_forward_model, params, **kwargs)["spectral_density"][
-            "value"
-        ]
+        return _seeded_trace(poisson_counts_forward_model, params, **kwargs)[
+            "spectral_density"
+        ]["value"]
 
     jitted = np.asarray(jax.jit(spectrum)(_jax_params()))
 
@@ -630,7 +638,7 @@ def test_ripple_predictive_stacks_multiple_draws() -> None:
     """``num_samples > 1`` maps the model, which eager Ripple could not survive."""
     kwargs = _ripple_kwargs()
     draws = Predictive(
-        partial(gwb_forward_model, **kwargs),
+        partial(poisson_counts_forward_model, **kwargs),
         num_samples=2,
         return_sites=("spectral_density", "n_events"),
     )(jax.random.key(0), _jax_params())

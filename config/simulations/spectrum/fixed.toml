@@ -1,0 +1,14 @@
+# Fixed-count spectra at the shared fiducials. Merge over defaults.toml,
+# waveforms.toml, populations.toml and detectors.toml, then pass to
+# scripts/simulate_spectra.py. This is a simulation layer, not a run layer.
+# num_events counts sources per realization; num_draws counts realizations.
+# Observation time stays positive but cancels from fixed-count normalization.
+
+[spectra]
+count = "fixed"
+num_events = "${catalog.num_samples}"
+num_draws = 100
+waveform = "${waveforms.default}"
+population = "${populations.cosmological}"
+observation_time = "${analysis.observation_time}"
+hyperparameters = "${fiducials}"

@@ -1,9 +1,10 @@
 """Draw many forward-model spectra, with hyperparameters fixed or sampled.
 
-:func:`~astrogwb.inference.gwb_forward_model` is one draw at one set of
-hyperparameters. :func:`draw_spectral_density` is the loop every consumer had
-been writing around it: size the static event plate from the Poisson mean, run
-:class:`~numpyro.infer.Predictive`, and pull the arrays out. It works on live
+:func:`~astrogwb.inference.poisson_counts_forward_model` and
+:func:`~astrogwb.inference.fixed_counts_forward_model` each make one draw at
+one set of hyperparameters. :func:`draw_spectral_density` selects the count
+model, sizes its static event plate, runs
+:class:`~numpyro.infer.Predictive`, and pulls the arrays out. It works on live
 objects -- a source model, a rate, a generator -- and records nothing, so a
 caller free to wrap its source model (in
 :class:`~astrogwb.populations.IsotropicInclination`, say) can still use it.
@@ -19,6 +20,7 @@ distribution it is drawn from once per draw. The draw runs in three stages:
 2. ``max_events`` sizes a plate, so it must be one static integer: evaluate the
    merger rate at every draw's hyperparameters and size the plate from the
    *largest* Poisson mean. With every hyperparameter fixed that is the one mean.
+   Fixed mode instead uses ``num_events`` directly and skips capacity sizing.
 3. Run the forward model with the second key, replaying stage 1's values as
    sample sites.
 
@@ -32,7 +34,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
-from typing import Any
+from typing import Any, Literal
 
 import jax
 import jax.numpy as jnp
@@ -42,7 +44,12 @@ import numpyro.distributions as dist
 from numpy.typing import NDArray
 from numpyro.infer import Predictive
 
-from astrogwb.inference.models.forward_model import gwb_forward_model
+from astrogwb.inference.models.fixed_counts_forward_model import (
+    fixed_counts_forward_model,
+)
+from astrogwb.inference.models.poisson_counts_forward_model import (
+    poisson_counts_forward_model,
+)
 from astrogwb.populations import MergerRateFn, SourceFn
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
@@ -76,8 +83,8 @@ class SpectralDensityDraws:
 def padded_event_capacity(mean_count: float, n_max_sigma: float) -> int:
     """Static plate size: the Poisson mean plus ``n_max_sigma`` standard deviations.
 
-    A draw above it is capped, as :func:`gwb_forward_model` documents; at the
-    default five sigma that is a one-in-a-few-million event per draw.
+    A draw above it is capped, as :func:`poisson_counts_forward_model` documents;
+    at the default five sigma that is a one-in-a-few-million event per draw.
     """
     if mean_count < 0.0:
         raise ValueError("Poisson mean must be non-negative")
@@ -96,11 +103,18 @@ def draw_spectral_density(
     num_draws: int,
     rng_key: jax.Array,
     batch_size: int = 128,
-    n_max_sigma: float = 5.0,
+    count: Literal["poisson", "fixed"] = "poisson",
+    num_events: int | None = None,
+    n_max_sigma: float | None = None,
 ) -> SpectralDensityDraws:
     """Draw ``num_draws`` spectra from the forward model.
 
-    ``observation_time`` is in years, as :func:`gwb_forward_model` takes it.
+    ``count="poisson"`` draws counts over positive ``observation_time`` in
+    years, with a static plate padded by ``n_max_sigma`` (default 5.0).
+    ``count="fixed"`` requires a positive static ``num_events`` and rejects
+    padding. It uses the population rate times the sample mean power, so
+    observation time cancels from its normalization. ``num_draws`` counts
+    realizations, while ``num_events`` counts sources within each realization.
     Enable ``jax_enable_x64`` before calling: the rate evaluation and the draws
     otherwise run in float32.
     """
@@ -110,6 +124,25 @@ def draw_spectral_density(
         raise ValueError("batch_size must be positive")
     if observation_time <= 0.0:
         raise ValueError("observation_time must be positive")
+    if count not in ("poisson", "fixed"):
+        raise ValueError("count must be 'poisson' or 'fixed'")
+    if count == "fixed":
+        if (
+            isinstance(num_events, bool)
+            or not isinstance(num_events, int)
+            or num_events <= 0
+        ):
+            raise ValueError(
+                "num_events must be a positive static integer for fixed counts"
+            )
+        if n_max_sigma is not None:
+            raise ValueError("n_max_sigma is only valid for Poisson counts")
+    else:
+        if num_events is not None:
+            raise ValueError("num_events is only valid for fixed counts")
+        n_max_sigma = 5.0 if n_max_sigma is None else n_max_sigma
+        if n_max_sigma < 0.0:
+            raise ValueError("n_max_sigma must be non-negative")
 
     fixed = {
         name: float(value)
@@ -137,22 +170,34 @@ def draw_spectral_density(
         **sampled,
     }
 
-    # Stage 2: one static plate, deep enough for the busiest draw.
-    rates = jax.vmap(lambda theta: jnp.reshape(merger_rate_fn(theta), ()))(columns)
-    mean_count = float(jnp.max(rates)) * years_to_seconds(observation_time)
-    max_events = padded_event_capacity(mean_count, n_max_sigma)
+    # Stage 2: choose a static source count or size the Poisson capacity.
+    if count == "fixed":
+        assert num_events is not None
+        forward = partial(
+            fixed_counts_forward_model,
+            source_model=source_model,
+            merger_rate_fn=merger_rate_fn,
+            generator=generator,
+            observation_time=observation_time,
+            batch_size=batch_size,
+            num_events=num_events,
+        )
+    else:
+        assert n_max_sigma is not None
+        rates = jax.vmap(lambda theta: jnp.reshape(merger_rate_fn(theta), ()))(columns)
+        mean_count = float(jnp.max(rates)) * years_to_seconds(observation_time)
+        max_events = padded_event_capacity(mean_count, n_max_sigma)
+        forward = partial(
+            poisson_counts_forward_model,
+            source_model=source_model,
+            merger_rate_fn=merger_rate_fn,
+            generator=generator,
+            observation_time=observation_time,
+            batch_size=batch_size,
+            max_events=max_events,
+        )
 
     # Stage 3: the forward model, replaying the stage-1 hyperparameters.
-    forward = partial(
-        gwb_forward_model,
-        source_model=source_model,
-        merger_rate_fn=merger_rate_fn,
-        generator=generator,
-        observation_time=observation_time,
-        batch_size=batch_size,
-        max_events=max_events,
-    )
-
     def model() -> None:
         theta: dict[str, Any] = dict(fixed)
         for name, prior in priors.items():
