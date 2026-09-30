@@ -41,13 +41,14 @@ def content_key(payload: dict[str, Any]) -> str:
 
 
 def widen_model_kwargs(population: dict[str, Any]) -> None:
-    """Widen a dumped population's construction kwargs to ``float`` in place.
+    """Widen numeric construction kwargs to ``float``, preserving booleans.
 
     A setting spelled ``2`` in one config and ``2.0`` in another names the
     same draw, so both must hash alike.
     """
     population["model_kwargs"] = {
-        name: float(value) for name, value in population["model_kwargs"].items()
+        name: value if isinstance(value, bool) else float(value)
+        for name, value in population["model_kwargs"].items()
     }
 
 
@@ -102,10 +103,10 @@ class CatalogMetadata(BaseModel):
     def key(self) -> str:
         """The content hash this catalog is cached under.
 
-        Hashes the canonical JSON of the whole record. Construction kwargs are
-        widened to ``float`` first, so a setting spelled ``2`` in one config and
-        ``2.0`` in another names the same catalog; everything else is already
-        type-stable under strict validation.
+        Hashes the canonical JSON of the whole record. Numeric construction
+        kwargs are widened to ``float``, so ``2`` and ``2.0`` name the same
+        catalog; boolean choices retain their type. Everything else is
+        already type-stable under strict validation.
 
         The payload nests ``waveform`` and ``population`` under ``metadata``,
         the shape this record had before it was flattened, so every catalog

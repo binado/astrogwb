@@ -225,7 +225,7 @@ def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetada
     return WaveformMetadata.model_validate(settings)
 
 
-def population_model(root: Path | None = None, **kwargs: float) -> Population:
+def population_model(root: Path | None = None, **kwargs: float | bool) -> Population:
     """Build the population the default draw, ``[catalog]``, is drawn from.
 
     Returns the registered :class:`~astrogwb.populations.registry.Population` --
@@ -235,6 +235,9 @@ def population_model(root: Path | None = None, **kwargs: float) -> Population:
     window without editing the file::
 
         population_model(n_grid=256, minimum_redshift=0.3)
+
+    ``sample_inclination=False`` selects explicit analytic quadrupole
+    averaging instead of the default isotropic inclination draw.
 
     A key the named population does not take raises here rather than being
     filtered away, which is the same contract a catalog request gets.
@@ -248,7 +251,7 @@ def population_model(root: Path | None = None, **kwargs: float) -> Population:
 
 
 def population_metadata(
-    root: Path | None = None, *, seed: int | None = None, **kwargs: float
+    root: Path | None = None, *, seed: int | None = None, **kwargs: float | bool
 ) -> PopulationMetadata:
     """The record the default draw, ``[catalog]``, carries for its population.
 

@@ -26,7 +26,7 @@ from astrogwb.populations import build_population
 #: The seed is a fixture detail; ``make_catalog`` takes its own.
 PAPER_POPULATION = population_metadata(REPO_ROOT, seed=41, n_grid=256)
 PAPER_MODEL = PAPER_POPULATION.model_name
-PAPER_MODEL_KWARGS: dict[str, float | int] = dict(PAPER_POPULATION.model_kwargs)
+PAPER_MODEL_KWARGS: dict[str, float | int | bool] = dict(PAPER_POPULATION.model_kwargs)
 
 #: The hyperparameters fixtures draw at: the shared ``[fiducials]``, which is
 #: what a real catalog inherits. It carries ``xi_0`` / ``xi_n`` that
@@ -49,7 +49,7 @@ def source_parameters(
     redshift: np.ndarray,
     *,
     model_name: str = PAPER_MODEL,
-    model_kwargs: Mapping[str, float | int] | None = None,
+    model_kwargs: Mapping[str, float | int | bool] | None = None,
     fiducials: Mapping[str, float] | None = None,
     population_params: Mapping[str, float] | None = None,
 ) -> dict[str, np.ndarray]:
@@ -60,6 +60,11 @@ def source_parameters(
         model_name, **(model_kwargs or PAPER_MODEL_KWARGS)
     ).source_model
     ones = np.ones_like(redshift)
+    inclination = (
+        {"inclination": 0.75 * ones}
+        if (model_kwargs or PAPER_MODEL_KWARGS).get("sample_inclination", True)
+        else {}
+    )
     columns = _derived_columns(
         model,
         fiducials or PAPER_POPULATION_PARAMS,
@@ -71,6 +76,7 @@ def source_parameters(
             "spin_2z": 0.0 * ones,
             "lambda_1": 400.0 * ones,
             "lambda_2": 300.0 * ones,
+            **inclination,
         },
     )
     return {name: np.asarray(values) for name, values in columns.items()}
@@ -88,7 +94,7 @@ def make_catalog(
     df: float = 10.0,
     seed: int = 41,
     model_name: str = PAPER_MODEL,
-    model_kwargs: Mapping[str, float | int] | None = None,
+    model_kwargs: Mapping[str, float | int | bool] | None = None,
     fiducials: Mapping[str, float] | None = None,
     population_params: Mapping[str, float] | None = None,
     extra_source_parameters: Mapping[str, np.ndarray] | None = None,

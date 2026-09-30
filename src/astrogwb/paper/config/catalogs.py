@@ -40,7 +40,7 @@ def check_population_model(
     name: str,
     *,
     label: str,
-    kwargs: Mapping[str, float | int] | None = None,
+    kwargs: Mapping[str, float | int | bool] | None = None,
     requires_merger_rate: bool = False,
     amplitude_parameter: str | None = None,
 ) -> None:

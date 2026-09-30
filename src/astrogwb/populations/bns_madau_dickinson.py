@@ -3,10 +3,14 @@ r"""BNS population with a Madau-Dickinson merger-rate density.
 Registered models live here rather than in several files because they are one
 population under two mass laws and two propagation laws.
 ``bns_md_modified_propagation`` reduces *exactly* to ``bns_md_cosmological`` at
-:math:`\Xi_0 = 1`; the Gaussian-mass counterparts share that pair. Everything
-except the mass sites and the ``luminosity_distance`` deterministic is declared
-once, by :func:`_declare_bns_madau_dickinson`, so the variants cannot disagree
-about the source density they share.
+:math:`\Xi_0 = 1`; the Gaussian-mass counterparts share that pair.
+
+Inclination is sampled isotropically by default; ``sample_inclination=False``
+omits it for explicit analytic quadrupole averaging during contraction. This
+construction setting is recorded with the population, not a generator option.
+Everything except the mass sites and the ``luminosity_distance`` deterministic
+is declared once, by :func:`_declare_bns_madau_dickinson`, so the variants cannot
+disagree about the source density they share.
 
 Each declaration below returns the mapping that defines the source-output
 set, with no notion of a physical rate; the rate lives in
@@ -78,6 +82,7 @@ from jax.typing import ArrayLike
 from astrogwb.cosmology import log_gw_em_ratio, lookback_time
 from astrogwb.distributions.delay import PowerLawDelayDistribution
 from astrogwb.distributions.mass import MaxOfTwoNormalsDistribution
+from astrogwb.distributions.orientation import UniformCosineDistribution
 from astrogwb.distributions.redshift.base import RedshiftDistribution
 from astrogwb.distributions.redshift.madau_dickinson import (
     MadauDickinsonRedshiftDistribution,
@@ -142,6 +147,12 @@ def amplitude_local_merger_rate_fn(marginalized_parameter: jax.Array) -> jax.Arr
     return marginalized_parameter
 
 
+def _require_sample_inclination(sample_inclination: bool) -> None:
+    """Keep the construction choice static and reject numeric substitutes."""
+    if not isinstance(sample_inclination, bool):
+        raise TypeError("sample_inclination must be a bool")
+
+
 #: Aligned-spin bounds.
 SPIN_MAGNITUDE = 0.05
 
@@ -193,11 +204,13 @@ def _declare_bns_madau_dickinson(
     *,
     luminosity_distance: jax.Array,
     redshift: jax.Array,
+    sample_inclination: bool = True,
     declare_masses: Callable[
         [Mapping[str, ArrayLike]], tuple[jax.Array, jax.Array]
     ] = _declare_ordered_uniform_masses,
 ) -> dict[str, jax.Array]:
     """Declare every site the propagation and mass variants share."""
+    _require_sample_inclination(sample_inclination)
     mass_1, mass_2 = declare_masses(params)
     spin_1z = numpyro.sample("spin_1z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))
     spin_2z = numpyro.sample("spin_2z", dist.Uniform(-SPIN_MAGNITUDE, SPIN_MAGNITUDE))
@@ -219,9 +232,7 @@ def _declare_bns_madau_dickinson(
         "luminosity_distance", luminosity_distance
     )
 
-    # Phase- and time-aligned. Waveform generators default a missing
-    # inclination to face-on; its absence also marks the catalog for analytic
-    # inclination averaging during the spectral contraction.
+    # Phase- and time-aligned; inclination is a separate stochastic site.
     zeros = jnp.zeros_like(redshift)
     coa_phase = numpyro.deterministic("coa_phase", zeros)
     coa_time = numpyro.deterministic("coa_time", zeros)
@@ -240,6 +251,12 @@ def _declare_bns_madau_dickinson(
         "coa_phase": coa_phase,
         "coa_time": coa_time,
     }
+    if sample_inclination:
+        sources["inclination"] = numpyro.sample(
+            "inclination", UniformCosineDistribution(validate_args=True)
+        )
+    # Without the column, generators use face-on power and the contraction
+    # applies the analytic quadrupole average. An explicit zero would skip it.
     return {name: jnp.asarray(values) for name, values in sources.items()}
 
 
@@ -303,6 +320,7 @@ def bns_md_cosmological(
     minimum_redshift: float,
     maximum_redshift: float,
     n_grid: int,
+    sample_inclination: bool = True,
 ) -> dict[str, jax.Array]:
     r"""BNS sources on a Madau-Dickinson redshift law, with standard GW propagation.
 
@@ -312,6 +330,11 @@ def bns_md_cosmological(
     run on; they are construction kwargs, bound once and serialized with the
     catalog. The ``bns_md_cosmological`` population pairs it with
     :func:`madau_dickinson_total_merger_rate`.
+
+    ``sample_inclination`` defaults to ``True``: each source has an isotropic
+    inclination in radians. ``False`` omits the site and column, selecting
+    analytic quadrupole inclination averaging during spectral contraction.
+    It changes the draw, not the merger rate or default importance factors.
     """
     redshift, redshift_distribution = _redshift(
         params,
@@ -321,6 +344,7 @@ def bns_md_cosmological(
     )
     return _declare_bns_madau_dickinson(
         params,
+        sample_inclination=sample_inclination,
         redshift=redshift,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift),
     )
@@ -333,6 +357,7 @@ def bns_md_uniform_mixture(
     maximum_redshift: float,
     n_grid: int,
     uniform_mixing_fraction: float,
+    sample_inclination: bool = True,
 ) -> dict[str, jax.Array]:
     r"""A Madau-Dickinson redshift law blended with a uniform guard component.
 
@@ -367,6 +392,7 @@ def bns_md_uniform_mixture(
     redshift = jnp.asarray(numpyro.sample("redshift", mixture))
     return _declare_bns_madau_dickinson(
         params,
+        sample_inclination=sample_inclination,
         redshift=redshift,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift),
     )
@@ -378,6 +404,7 @@ def bns_md_modified_propagation(
     minimum_redshift: float,
     maximum_redshift: float,
     n_grid: int,
+    sample_inclination: bool = True,
 ) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_cosmological`, with a modified GW propagation distance.
 
@@ -402,6 +429,7 @@ def bns_md_modified_propagation(
     )
     return _declare_bns_madau_dickinson(
         params,
+        sample_inclination=sample_inclination,
         redshift=redshift,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift)
         * jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"])),
@@ -414,6 +442,7 @@ def bns_md_gaussian_cosmological(
     minimum_redshift: float,
     maximum_redshift: float,
     n_grid: int,
+    sample_inclination: bool = True,
 ) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_cosmological`, with i.i.d. Gaussian component masses.
 
@@ -433,6 +462,7 @@ def bns_md_gaussian_cosmological(
     )
     return _declare_bns_madau_dickinson(
         params,
+        sample_inclination=sample_inclination,
         redshift=redshift,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift),
         declare_masses=_declare_ordered_gaussian_masses,
@@ -446,6 +476,7 @@ def bns_md_gaussian_uniform_mixture(
     maximum_redshift: float,
     n_grid: int,
     uniform_mixing_fraction: float,
+    sample_inclination: bool = True,
 ) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_uniform_mixture`, with i.i.d. Gaussian component masses.
 
@@ -472,6 +503,7 @@ def bns_md_gaussian_uniform_mixture(
     redshift = jnp.asarray(numpyro.sample("redshift", mixture))
     return _declare_bns_madau_dickinson(
         params,
+        sample_inclination=sample_inclination,
         redshift=redshift,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift),
         declare_masses=_declare_ordered_gaussian_masses,
@@ -484,6 +516,7 @@ def bns_md_gaussian_modified_propagation(
     minimum_redshift: float,
     maximum_redshift: float,
     n_grid: int,
+    sample_inclination: bool = True,
 ) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_modified_propagation`, with i.i.d. Gaussian component masses.
 
@@ -499,6 +532,7 @@ def bns_md_gaussian_modified_propagation(
     )
     return _declare_bns_madau_dickinson(
         params,
+        sample_inclination=sample_inclination,
         redshift=redshift,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift)
         * jnp.exp(log_gw_em_ratio(redshift, params["xi_0"], params["xi_n"])),
@@ -584,6 +618,7 @@ def bns_md_time_delayed_cosmological(
     minimum_delay: float,
     maximum_formation_redshift: float,
     n_delay_nodes: int,
+    sample_inclination: bool = True,
 ) -> dict[str, jax.Array]:
     r"""As :func:`bns_md_cosmological`, with mergers delayed from formation.
 
@@ -609,6 +644,7 @@ def bns_md_time_delayed_cosmological(
     redshift = jnp.asarray(numpyro.sample("redshift", redshift_distribution))
     return _declare_bns_madau_dickinson(
         params,
+        sample_inclination=sample_inclination,
         redshift=redshift,
         luminosity_distance=redshift_distribution.luminosity_distance(redshift),
     )
@@ -624,17 +660,24 @@ def bns_md_time_delayed_cosmological(
 
 
 def _madau_dickinson_population(
-    source: Callable[..., dict[str, jax.Array]], **kwargs: float
+    source: Callable[..., dict[str, jax.Array]],
+    *,
+    sample_inclination: bool = True,
+    **kwargs: float,
 ) -> Population:
     """Pair a Madau-Dickinson source declaration with the rate that normalizes it."""
+    _require_sample_inclination(sample_inclination)
     return Population(
-        source_model=partial(source, **kwargs),
+        source_model=partial(source, sample_inclination=sample_inclination, **kwargs),
         merger_rate_fn=partial(madau_dickinson_total_merger_rate, **kwargs),
     )
 
 
 def _guard_mixture_population(
-    source: Callable[..., dict[str, jax.Array]], **kwargs: float
+    source: Callable[..., dict[str, jax.Array]],
+    *,
+    sample_inclination: bool = True,
+    **kwargs: float,
 ) -> Population:
     """Bind a guard-mixture source declaration, with no merger rate.
 
@@ -645,16 +688,25 @@ def _guard_mixture_population(
     off a proposal -- importance weighting takes the *target's* -- and a
     catalog drawn from one now fails by name if used as an observation.
     """
-    return Population(source_model=partial(source, **kwargs), merger_rate_fn=None)
+    _require_sample_inclination(sample_inclination)
+    return Population(
+        source_model=partial(source, sample_inclination=sample_inclination, **kwargs),
+        merger_rate_fn=None,
+    )
 
 
 @register_population("bns_md_cosmological", amplitude_parameters=AMPLITUDE_PARAMETERS)
 def _bns_md_cosmological_population(
-    *, minimum_redshift: float, maximum_redshift: float, n_grid: int
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
+    sample_inclination: bool = True,
 ) -> Population:
     """:func:`bns_md_cosmological` with its Madau-Dickinson rate."""
     return _madau_dickinson_population(
         bns_md_cosmological,
+        sample_inclination=sample_inclination,
         minimum_redshift=minimum_redshift,
         maximum_redshift=maximum_redshift,
         n_grid=n_grid,
@@ -665,7 +717,11 @@ def _bns_md_cosmological_population(
     "bns_md_modified_propagation", amplitude_parameters=AMPLITUDE_PARAMETERS
 )
 def _bns_md_modified_propagation_population(
-    *, minimum_redshift: float, maximum_redshift: float, n_grid: int
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
+    sample_inclination: bool = True,
 ) -> Population:
     """:func:`bns_md_modified_propagation` with its Madau-Dickinson rate.
 
@@ -675,6 +731,7 @@ def _bns_md_modified_propagation_population(
     """
     return _madau_dickinson_population(
         bns_md_modified_propagation,
+        sample_inclination=sample_inclination,
         minimum_redshift=minimum_redshift,
         maximum_redshift=maximum_redshift,
         n_grid=n_grid,
@@ -685,11 +742,16 @@ def _bns_md_modified_propagation_population(
     "bns_md_gaussian_cosmological", amplitude_parameters=AMPLITUDE_PARAMETERS
 )
 def _bns_md_gaussian_cosmological_population(
-    *, minimum_redshift: float, maximum_redshift: float, n_grid: int
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
+    sample_inclination: bool = True,
 ) -> Population:
     """:func:`bns_md_gaussian_cosmological` with its Madau-Dickinson rate."""
     return _madau_dickinson_population(
         bns_md_gaussian_cosmological,
+        sample_inclination=sample_inclination,
         minimum_redshift=minimum_redshift,
         maximum_redshift=maximum_redshift,
         n_grid=n_grid,
@@ -700,11 +762,16 @@ def _bns_md_gaussian_cosmological_population(
     "bns_md_gaussian_modified_propagation", amplitude_parameters=AMPLITUDE_PARAMETERS
 )
 def _bns_md_gaussian_modified_propagation_population(
-    *, minimum_redshift: float, maximum_redshift: float, n_grid: int
+    *,
+    minimum_redshift: float,
+    maximum_redshift: float,
+    n_grid: int,
+    sample_inclination: bool = True,
 ) -> Population:
     """:func:`bns_md_gaussian_modified_propagation` with its Madau-Dickinson rate."""
     return _madau_dickinson_population(
         bns_md_gaussian_modified_propagation,
+        sample_inclination=sample_inclination,
         minimum_redshift=minimum_redshift,
         maximum_redshift=maximum_redshift,
         n_grid=n_grid,
@@ -718,10 +785,12 @@ def _bns_md_uniform_mixture_population(
     maximum_redshift: float,
     n_grid: int,
     uniform_mixing_fraction: float,
+    sample_inclination: bool = True,
 ) -> Population:
     """:func:`bns_md_uniform_mixture` as a proposal density, with no merger rate."""
     return _guard_mixture_population(
         bns_md_uniform_mixture,
+        sample_inclination=sample_inclination,
         minimum_redshift=minimum_redshift,
         maximum_redshift=maximum_redshift,
         n_grid=n_grid,
@@ -736,10 +805,12 @@ def _bns_md_gaussian_uniform_mixture_population(
     maximum_redshift: float,
     n_grid: int,
     uniform_mixing_fraction: float,
+    sample_inclination: bool = True,
 ) -> Population:
     """:func:`bns_md_gaussian_uniform_mixture` as a proposal, with no merger rate."""
     return _guard_mixture_population(
         bns_md_gaussian_uniform_mixture,
+        sample_inclination=sample_inclination,
         minimum_redshift=minimum_redshift,
         maximum_redshift=maximum_redshift,
         n_grid=n_grid,
@@ -758,12 +829,14 @@ def _bns_md_time_delayed_cosmological_population(
     minimum_delay: float,
     maximum_formation_redshift: float,
     n_delay_nodes: int,
+    sample_inclination: bool = True,
 ) -> Population:
     """:func:`bns_md_time_delayed_cosmological` with its delayed rate.
 
     ``H0`` is not an amplitude parameter here: the delay is fixed in Gyr, so
     moving ``H0`` reshapes the redshift law instead of only rescaling it.
     """
+    _require_sample_inclination(sample_inclination)
     kwargs = {
         "minimum_redshift": minimum_redshift,
         "maximum_redshift": maximum_redshift,
@@ -773,7 +846,11 @@ def _bns_md_time_delayed_cosmological_population(
         "n_delay_nodes": n_delay_nodes,
     }
     return Population(
-        source_model=partial(bns_md_time_delayed_cosmological, **kwargs),
+        source_model=partial(
+            bns_md_time_delayed_cosmological,
+            sample_inclination=sample_inclination,
+            **kwargs,
+        ),
         merger_rate_fn=partial(
             madau_dickinson_time_delayed_total_merger_rate, **kwargs
         ),

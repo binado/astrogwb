@@ -233,12 +233,11 @@ def test_the_observed_rate_comes_from_the_injection_catalogs_own_population(
         float(observation.total_merger_rate), float(expected_rate), rtol=1e-12
     )
     # The weights are identically one, so the observation is the plain
-    # unweighted contraction of the restricted power.
+    # unweighted contraction of the restricted power, whose inclination is
+    # already included by the sampled-orientation population.
     np.testing.assert_allclose(
         np.asarray(observation.spectral_density),
-        0.4
-        * float(expected_rate)
-        * np.asarray(restricted.polarization_power).mean(axis=1),
+        float(expected_rate) * np.asarray(restricted.polarization_power).mean(axis=1),
         rtol=1e-12,
     )
 

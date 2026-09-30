@@ -90,8 +90,9 @@ class SpectraMetadata(BaseModel):
     def key(self) -> str:
         """The content hash these draws are cached under.
 
-        Construction kwargs, fixed values and prior kwargs are widened to
-        ``float`` first, so ``2`` and ``2.0`` name the same draws.
+        Numeric construction kwargs, fixed values and prior kwargs are widened
+        to ``float``, so ``2`` and ``2.0`` name the same draws. Boolean
+        construction choices retain their type.
         """
         payload = self.model_dump(mode="json")
         widen_model_kwargs(payload["population"])

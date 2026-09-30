@@ -112,12 +112,13 @@ def make_redshift_grid(n_grid: int = N_GRID) -> jax.Array:
 
 
 def mock_population(n_grid: int = N_GRID) -> Population:
-    """The generating population: Madau-Dickinson, standard propagation."""
+    """The analytic-average fixture: Madau-Dickinson, standard propagation."""
     return build_population(
         "bns_md_cosmological",
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
         n_grid=n_grid,
+        sample_inclination=False,
     )
 
 
@@ -128,6 +129,7 @@ def mock_target_population(n_grid: int = N_GRID) -> Population:
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
         n_grid=n_grid,
+        sample_inclination=False,
     )
 
 
@@ -174,6 +176,7 @@ def mock_catalog(
                 "minimum_redshift": Z_MIN,
                 "maximum_redshift": Z_MAX,
                 "n_grid": N_GRID,
+                "sample_inclination": False,
             },
             seed=MOCK_POPULATION_SEED,
         ),
@@ -334,6 +337,7 @@ def build_synthetic_importance(
                     "minimum_redshift": Z_MIN,
                     "maximum_redshift": Z_MAX,
                     "n_grid": N_GRID,
+                    "sample_inclination": False,
                 },
                 seed=MOCK_POPULATION_SEED,
             ),

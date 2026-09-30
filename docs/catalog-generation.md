@@ -389,6 +389,68 @@ Adding the grid fields re-keyed every catalog and spectra file, and the version
 was bumped with them (0.2.0), so files from earlier versions are never served;
 regenerate them.
 
+## Inclination convention
+
+All shipped BNS population models sample isotropic inclination by default:
+`cos(iota)` is uniform on `[-1, 1]`, and the returned `inclination` sample site
+is in radians. Polarization-power catalogs store this column, and density
+reconstruction conditions on the recorded values even though inclination is
+excluded from the default importance-weight factors. The common,
+hyperparameter-independent inclination law cancels in those weights.
+
+Both fixed-count and Poisson spectrum realizations use the same recorded source
+model. Waveform power already includes each sampled inclination, so contraction
+uses an inclination factor of one. Spectrum files store contracted draws and
+population metadata, rather than the individual event columns. Sampling
+inclination restores orientation fluctuations in both count modes; fixed-count
+estimator scatter and Poisson observation scatter remain different experiments.
+
+For explicit analytic quadrupole averaging, set `sample_inclination = false`
+in the population's `model_kwargs`. For example, a layer can override the
+shared population and every role that inherits its settings:
+
+```toml
+[populations.cosmological.model_kwargs]
+sample_inclination = false
+```
+
+Or construct it directly with
+`build_population("bns_md_cosmological", sample_inclination=False, **kwargs)`.
+This omits the inclination sample site and column. Waveform generators then use
+face-on power, and contraction applies the analytic `2/5` factor. It preserves
+the quadrupole ensemble mean but removes orientation fluctuations; it is not a
+universal orientation average for higher-mode waveforms. The waveform comparison
+notebook uses the sampled default, without an additional `IsotropicInclination`
+wrapper. That handler remains available for custom models that omit inclination.
+
+The choice is a boolean construction setting, recorded in provenance and cache
+identity. It is not an option on the waveform or artifact generator. Numeric
+substitutes such as `0` and `1` are rejected for this setting.
+
+Version **0.3.0** changes the default population draw. Both catalog and spectrum
+artifacts therefore receive new keys; old face-on artifacts are not reused as
+sampled-inclination draws. From the repository root, regenerate workflow catalogs
+and chains with:
+
+```bash
+uv run --group workflow snakemake --snakefile Snakefile --cores 1 validate
+uv run --group workflow snakemake --snakefile Snakefile --cores 1 experiments
+```
+
+Regenerate spectra with the existing CLI, choosing either the `fixed` or
+`poisson` simulation layer:
+
+```bash
+uv run --extra paper python scripts/simulate_spectra.py \
+    --config config/defaults.toml --config config/waveforms.toml \
+    --config config/populations.toml --config config/detectors.toml \
+    --config config/simulations/spectrum/fixed.toml
+```
+
+A follow-up notebook will compare sampled and analytically averaged ensemble
+means, variance and frequency covariance at fixed hyperparameters in both count
+modes. Detector noise, shot-noise likelihoods and SNR studies are separate work.
+
 ## The spectral-density format
 
 The sibling artifact is a `SpectralDensityCatalog`, format
@@ -489,10 +551,10 @@ uv run --extra paper python scripts/simulate_spectra.py \
     --config config/simulations/spectrum/fixed.toml
 ```
 
-The spectrum layers are not run layers: no chain reads `[spectra]`. A
-caller that needs a source model no record can name -- the
-`IsotropicInclination` wrapper in `notebooks/waveform_approximant_spectra.py`
--- calls the uncached `astrogwb.inference.draw_spectral_density` directly.
+The spectrum layers are not run layers: no chain reads `[spectra]`. Callers
+using custom source-model compositions can still call the uncached
+`astrogwb.inference.draw_spectral_density` directly. Sampled inclination is
+already part of the registered BNS population and needs no custom composition.
 
 | Dataset | Shape | Meaning |
 | --- | --- | --- |

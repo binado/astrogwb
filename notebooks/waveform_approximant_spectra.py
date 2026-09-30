@@ -23,9 +23,9 @@
 # is the median of the retained draws and the shaded region is the 10th--90th
 # percentile interval.
 #
-# Higher-mode waveforms depend on inclination, so the source model is wrapped
-# with `IsotropicInclination`: each event draws $\iota$ from the isotropic
-# law ($\cos\iota$ uniform on $[-1, 1]$). Returning `inclination` also disables
+# The recorded population samples inclination by default: each event draws
+# $\iota$ from the isotropic law ($\cos\iota$ uniform on $[-1, 1]$).
+# Returning `inclination` also disables
 # the analytic $2/5$ face-on-to-isotropic rescaling, which is only valid for
 # quadrupole waveforms. The shared PRNG key then replays the same orientations
 # for every approximant.
@@ -49,7 +49,6 @@ from astrogwb.inference import draw_spectral_density
 from astrogwb.paper.config import fiducials, population_model, waveform_generator
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
-from astrogwb.populations import IsotropicInclination
 
 # Configure precision before constructing a JAX array or querying a device.
 jax.config.update("jax_enable_x64", True)
@@ -77,7 +76,7 @@ use_paper_style(root=ROOT_DIR)
 class ComparisonConfig:
     """All stochastic and numerical choices shared by the comparison."""
 
-    model_kwargs: dict[str, float | int]
+    model_kwargs: dict[str, float | int | bool]
     hyperparameters: dict[str, float]
     observation_time: float
     draw_count: int
@@ -137,7 +136,7 @@ generators = {
 
 # %%
 population = population_model(root=ROOT_DIR, **CONFIG.model_kwargs)
-source_model = IsotropicInclination(population.source_model)
+source_model = population.source_model
 merger_rate_fn = population.merger_rate_fn
 if merger_rate_fn is None:
     raise ValueError("configured population cannot simulate event counts")

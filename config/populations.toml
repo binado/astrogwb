@@ -11,9 +11,11 @@
 # override it here, at its source, in that run's layer.
 
 # The population every catalog is drawn from unless its role names another.
+# Sample isotropic inclination to retain orientation fluctuations. Set
+# sample_inclination = false for explicit analytic quadrupole averaging.
 [populations.cosmological]
 model_name = "bns_md_cosmological"
-model_kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 4096 }
+model_kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 4096, sample_inclination = true }
 seed = 41
 
 # The guarded proposal: the cosmological population mixed with a uniform
