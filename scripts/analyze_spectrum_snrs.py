@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Self
@@ -22,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb import __version__
 from astrogwb.catalog import SpectrumGenerator, simulate
-from astrogwb.metadata import SpectraMetadata, artifact_path
+from astrogwb.metadata import SpectraMetadata
 from astrogwb.paper.cache import default_cache_dir
 from astrogwb.paper.config.detectors import DetectorRegistry, load_detector_config
 from astrogwb.paper.config.runs import (
@@ -316,26 +317,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     ).to_csv(output_dir / "snr_summary.csv", index=False)
     provenance = {
         "config": config.model_dump(mode="json"),
-        "spectrum_key": config.spectra.key(),
-        "source_path": str(artifact_path(config.spectra, cache_dir)),
-        "spectra_config_paths": [
-            str(path.expanduser().resolve()) for path in args.spectra_config
-        ],
-        "detector_config_paths": [
-            str(path.expanduser().resolve()) for path in args.detector_config
-        ],
-        "selected_detectors": {
-            name: config.detector_registry.detectors[name].model_dump(mode="json")
-            for name in members
-        },
-        "analysis_version": __version__,
-        "distribution": distribution_label,
-        "fisher_scatter_parameters": list(args.plot_param_fisher_scatter),
-        "detector_noise_realizations": False,
-        "inclination_convention": (
-            "Defined by the recorded population model and version; "
-            "absent inclination uses analytic averaging."
-        ),
+        "cli_flags": list(sys.argv[1:] if argv is None else argv),
+        "version": __version__,
     }
     (output_dir / "provenance.json").write_text(
         json.dumps(provenance, indent=2, allow_nan=False) + "\n", encoding="utf-8"

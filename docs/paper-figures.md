@@ -223,12 +223,9 @@ directories to retain band or detector-override comparisons:
   density of that fixed hyperparameter's fiducial value divided by the
   per-draw SNR — the Fisher scatter a single network realization implies for
   the parameter. The x-axis labels it as `$\sigma_{H_0}$`-style LaTeX from
-  `config/plotting.toml`, and requested parameters are recorded in
-  `provenance.json` under `fisher_scatter_parameters`.
-- `provenance.json`: the validated configuration and full generation metadata,
-  artifact key/path, selected detector definitions, independently ordered
-  `spectra_config_paths` and `detector_config_paths`, and analysis software
-  version.
+  `config/plotting.toml`.
+- `provenance.json`: the validated configuration, the command-line flags as
+  invoked (`sys.argv[1:]`), and the analysis software version.
 
 `mean(SNR)` and `SNR(mean spectrum)` are separate statistics: SNR is nonlinear.
 Fixed-count results measure **finite-catalog estimator scatter**; Poisson
