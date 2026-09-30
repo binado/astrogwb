@@ -131,6 +131,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument(
+        "--plot-param-fisher-scatter",
+        dest="plot_param_fisher_scatter",
+        action="extend",
+        nargs="+",
+        default=[],
+        metavar="PARAM",
+        help=(
+            "Also plot the Fisher-scatter distribution of each named fixed "
+            "hyperparameter, its fiducial value divided by the per-draw SNR; "
+            "accepts several names and may be repeated."
+        ),
+    )
+    parser.add_argument(
         "--cache-only",
         dest="cache_only",
         action="store_true",
@@ -139,13 +152,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def plot_snr_distribution(
-    snrs: ArrayLike, *, network: str, distribution_label: str
+def plot_distribution(
+    values: ArrayLike,
+    *,
+    dataset_label: str,
+    xlabel: str,
+    network: str,
+    distribution_label: str,
 ) -> Figure:
-    """Plot the SNR density under the caller's active paper style.
+    """Plot the per-draw density of ``values`` under the active paper style.
 
-    Constant ensembles (including a single draw) use an ECDF because a KDE
-    requires nonzero scatter. These are simulation draws, not posterior chains.
+    ``dataset_label`` names the variable inside the plotted dataset; ``xlabel``
+    labels the x-axis. Constant ensembles (including a single draw) use an
+    ECDF because a KDE requires nonzero scatter. These are simulation draws,
+    not posterior chains.
     """
     # Presentation dependencies are lazy, like main's: importing/validating
     # config leaves the XLA backend configurable and does not require a
@@ -154,10 +174,12 @@ def plot_snr_distribution(
     import xarray as xr
     from matplotlib.axes import Axes
 
-    values = np.asarray(snrs, dtype=np.float64)
+    values = np.asarray(values, dtype=np.float64)
     kind = "ecdf" if np.ptp(values) == 0 else "kde"
     collection = azp.plot_dist(
-        xr.DataTree.from_dict({"simulations": xr.Dataset({"snr": ("draw", values)})}),
+        xr.DataTree.from_dict(
+            {"simulations": xr.Dataset({dataset_label: ("draw", values)})}
+        ),
         group="simulations",
         sample_dims=["draw"],
         kind=kind,
@@ -179,11 +201,21 @@ def plot_snr_distribution(
     )
     figure = collection.viz["figure"].item()
     axis = figure.axes[0]
-    axis.set_xlabel("SNR")
+    axis.set_xlabel(xlabel)
     axis.set_ylabel("Cumulative probability" if kind == "ecdf" else "Density")
     axis.set_ylim(bottom=0)
-    axis.set_title(f"{network}\n{distribution_label}")
+    # axis.set_title(f"{network}\n{distribution_label}")
     return figure
+
+
+def fisher_scatter_xlabel(latex: str) -> str:
+    """The LaTeX x-label for a parameter's Fisher scatter: sigma of its label.
+
+    The unit bracket of a parameter label (``$H_0\\,[\\mathrm{...}]$``) is
+    dropped: it has no meaningful place inside a subscript.
+    """
+    core = latex.split(r"\,[", 1)[0].strip("$")
+    return rf"$\sigma_{{{core}}}$"
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -200,6 +232,17 @@ def main(argv: Sequence[str] | None = None) -> None:
         detector_registry=load_detector_config(args.detector_config),
         network=args.network,
     )
+    fixed_hyperparameters = config.spectra.fixed
+    unknown_fisher_params = [
+        param
+        for param in args.plot_param_fisher_scatter
+        if param not in fixed_hyperparameters
+    ]
+    if unknown_fisher_params:
+        raise ValueError(
+            f"unknown Fisher-scatter parameter(s) {sorted(unknown_fisher_params)}; "
+            f"fixed hyperparameters: {sorted(fixed_hyperparameters)}"
+        )
     generator = SpectrumGenerator(batch_size=args.batch_size)
     cache_dir = args.cache_dir.expanduser().resolve()
     try:
@@ -231,7 +274,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     import matplotlib.pyplot as plt
     import pandas as pd
 
-    from astrogwb.paper.plotting import save_figures, use_paper_style
+    from astrogwb.paper.plotting import (
+        parameter_label,
+        save_figures,
+        use_paper_style,
+    )
 
     output_dir = (
         (
@@ -283,6 +330,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         },
         "analysis_version": __version__,
         "distribution": distribution_label,
+        "fisher_scatter_parameters": list(args.plot_param_fisher_scatter),
         "detector_noise_realizations": False,
         "inclination_convention": (
             "Defined by the recorded population model and version; "
@@ -293,13 +341,28 @@ def main(argv: Sequence[str] | None = None) -> None:
         json.dumps(provenance, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
     use_paper_style()
-    figure = plot_snr_distribution(
-        snrs, network=config.network, distribution_label=distribution_label
-    )
+    figures = {
+        output_dir / "snr_distribution": plot_distribution(
+            snrs,
+            dataset_label="snr",
+            xlabel="SNR",
+            network=config.network,
+            distribution_label=distribution_label,
+        )
+    }
+    for param in args.plot_param_fisher_scatter:
+        figures[output_dir / f"{param}_fisher_scatter"] = plot_distribution(
+            np.asarray(fixed_hyperparameters[param], dtype=np.float64) / snrs,
+            dataset_label=f"fisher_scatter_{param}",
+            xlabel=fisher_scatter_xlabel(parameter_label(param)),
+            network=config.network,
+            distribution_label=distribution_label,
+        )
     try:
-        save_figures({output_dir / "snr_distribution": figure})
+        save_figures(figures)
     finally:
-        plt.close(figure)
+        for figure in figures.values():
+            plt.close(figure)
     logger.info("Saved SNR analysis for %s to %s", config.spectra.key(), output_dir)
 
 

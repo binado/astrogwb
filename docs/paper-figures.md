@@ -218,6 +218,13 @@ directories to retain band or detector-override comparisons:
 - `snr_distribution.pdf`: one SNR density plot via `arviz_plots.plot_dist`
   with a KDE, using the configured paper figure format and resolution (`pdf`
   by default). A single draw or constant ensemble uses an ECDF instead.
+- `<param>_fisher_scatter.pdf`: one extra figure per parameter passed to
+  `--plot-param-fisher-scatter` (repeatable; accepts several names), the
+  density of that fixed hyperparameter's fiducial value divided by the
+  per-draw SNR — the Fisher scatter a single network realization implies for
+  the parameter. The x-axis labels it as `$\sigma_{H_0}$`-style LaTeX from
+  `config/plotting.toml`, and requested parameters are recorded in
+  `provenance.json` under `fisher_scatter_parameters`.
 - `provenance.json`: the validated configuration and full generation metadata,
   artifact key/path, selected detector definitions, independently ordered
   `spectra_config_paths` and `detector_config_paths`, and analysis software
@@ -236,6 +243,9 @@ Only fixed-hyperparameter ensembles are accepted. The supplied Poisson example
 samples `local_merger_rate` and is rejected: add a later simulation layer
 setting `[spectra.hyperparameters].local_merger_rate` to
 `"${fiducials.local_merger_rate}"` to study source fluctuations at a fixed rate.
+Pass `--plot-param-fisher-scatter H0 xi_0` to add the Fisher-scatter figures;
+the fiducial values come from the spectrum metadata, so every requested name
+must be a fixed hyperparameter.
 There are no bootstrap intervals or sweep/convergence diagnostics in this
 first version, and no new workflow rule or generation cache format.
 
