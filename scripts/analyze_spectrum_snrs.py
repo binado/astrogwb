@@ -153,14 +153,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def plot_distribution(
-    values: ArrayLike,
-    *,
-    dataset_label: str,
-    xlabel: str,
-    network: str,
-    distribution_label: str,
-) -> Figure:
+def plot_distribution(values: ArrayLike, *, dataset_label: str, xlabel: str) -> Figure:
     """Plot the per-draw density of ``values`` under the active paper style.
 
     ``dataset_label`` names the variable inside the plotted dataset; ``xlabel``
@@ -205,7 +198,6 @@ def plot_distribution(
     axis.set_xlabel(xlabel)
     axis.set_ylabel("Cumulative probability" if kind == "ecdf" else "Density")
     axis.set_ylim(bottom=0)
-    # axis.set_title(f"{network}\n{distribution_label}")
     return figure
 
 
@@ -326,11 +318,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     use_paper_style()
     figures = {
         output_dir / "snr_distribution": plot_distribution(
-            snrs,
-            dataset_label="snr",
-            xlabel="SNR",
-            network=config.network,
-            distribution_label=distribution_label,
+            snrs, dataset_label="snr", xlabel="SNR"
         )
     }
     for param in args.plot_param_fisher_scatter:
@@ -338,8 +326,6 @@ def main(argv: Sequence[str] | None = None) -> None:
             np.asarray(fixed_hyperparameters[param], dtype=np.float64) / snrs,
             dataset_label=f"fisher_scatter_{param}",
             xlabel=fisher_scatter_xlabel(parameter_label(param)),
-            network=config.network,
-            distribution_label=distribution_label,
         )
     try:
         save_figures(figures)
