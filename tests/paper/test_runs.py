@@ -329,6 +329,21 @@ def test_a_key_under_a_reference_merges_onto_its_referent(tmp_path: Path) -> Non
     assert merged["analysis"]["injection"]["waveform"] == default
 
 
+def test_extends_inherits_a_base_table_and_leaves_no_key() -> None:
+    """The guard's kwargs are the cosmological ones plus its mixing fraction.
+
+    A run that overrides the fraction at the source still inherits the window.
+    """
+    raw = assemble_run("variable-proposal-guard", "eps1e-2")
+
+    guard = raw["populations"]["guard"]["model_kwargs"]
+    cosmological = raw["populations"]["cosmological"]["model_kwargs"]
+
+    assert guard == {**cosmological, "uniform_mixing_fraction": 0.01}
+    assert raw["analysis"]["proposal"]["population"] == raw["populations"]["guard"]
+    assert "extends" not in guard
+
+
 def test_an_invalid_role_is_rejected_naming_it(tmp_path: Path) -> None:
     _demo_run(tmp_path, "[analysis.proposal]\nnum_samples = -1\n")
     with pytest.raises(ValueError, match=r"demo/only analysis\.proposal"):

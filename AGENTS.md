@@ -88,12 +88,14 @@ population, so a copy cannot drift from what the runs sample.
 `merge_config_layers` folds the layers with `knf` (pyknf): a deep merge, except
 that each `priors.<param>` table replaces the inherited one (`PRIOR_SHALLOW =
 "priors.*"`), then resolves every `"${a.b}"` reference against the merged
-result. A reference is atomic -- setting a key under one replaces it whole --
-and cannot be reached *through* (`${x.y}` fails when `x` is itself a
-reference), so a table that runs override field by field is spelled one
-reference per field; to change a named variant for one run, override it at its
+result. A reference to a table merges as that table -- setting a key under one
+overrides that field and keeps the rest, so a run changes one role's population
+seed alone -- and can be reached *through* (`${x.y}` resolves when `x` is
+itself a reference). A table that is a base plus additions is written
+`extends = "${a.b}"` (`MERGE_KEY = "extends"`); it takes one base. To change a
+named variant for every role that names it in one run, override it at its
 source. `[catalog]`, `[waveforms]` and `[populations]` exist only to be
-referenced, and `RunConfig` drops them. `knf src/astrogwb/detector/{geometry,sensitivity}.toml <layers> --shallow 'priors.*' --interpolate`
+referenced, and `RunConfig` drops them. `knf src/astrogwb/detector/{geometry,sensitivity}.toml <layers> --shallow 'priors.*' --interpolate --merge-key extends`
 prints the same merge in the shell. The packaged detector files use the same
 `[detectors.<name>]` format and are merged before the six run layers. A run names a detector network (`analysis.network`) rather than listing
 detectors. `config/plotting.toml` is presentation -- LaTeX parameter labels and

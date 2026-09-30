@@ -18,17 +18,19 @@ Every layer is TOML, so each one can say in a comment why it sets what it
 sets. :func:`merge_config_layers` folds them with ``knf``, the
 engine behind the ``knf`` CLI, so the shell and Python spell one merge rule:
 ``knf src/astrogwb/detector/{geometry,sensitivity}.toml <layers>
---shallow 'priors.*' --interpolate`` prints what a run resolves to. Both
-packaged tables use the same ``[detectors.<name>]`` layout as the shared
-registry file.
+--shallow 'priors.*' --interpolate --merge-key extends`` prints what a run
+resolves to. Both packaged tables use the same ``[detectors.<name>]`` layout
+as the shared registry file.
 
 After the merge, every ``"${a.b}"`` string is replaced by the merged value at
 ``a.b``. That is how one table reuses another: ``[catalog]`` names its
 waveform and population by reference, and each role in ``[analysis]`` refers
 to ``[catalog]``. A reference resolves against the *final* merge, so a run
-that overrides ``[fiducials]`` reaches every catalog drawn at them. It is also
-atomic: a layer that sets a key under a reference replaces the reference
-whole, which is why the shared layer spells each role one reference per field.
+that overrides ``[fiducials]`` reaches every catalog drawn at them. A
+reference to a table also merges as that table: a layer that sets a key under
+one overrides that field and keeps the rest, which is how a run changes one
+role's population seed. A table that is a base plus additions is written
+``extends = "${a.b}"`` (:data:`MERGE_KEY`).
 
 A run owns its catalogs. ``[analysis.injection]`` and ``[analysis.proposal]``
 resolve to complete :class:`~astrogwb.metadata.CatalogMetadata` records, whose
@@ -114,6 +116,10 @@ FIGURES_DIR = BASE_OUT_DIR / "figures"
 #: that overrides a prior.
 PRIOR_SHALLOW = "priors.*"
 
+#: The inheritance key: ``extends = "${a.b}"`` in a table starts it from the
+#: table ``a.b`` and lets its own fields win. It is removed from the result.
+MERGE_KEY = "extends"
+
 
 def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
     """Fold run-config layer files into one raw mapping, in the order given.
@@ -121,8 +127,9 @@ def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
     Packaged detector tables are the initial defaults. A deep merge, left to
     right -- arrays and scalars replace -- except at
     :data:`PRIOR_SHALLOW`, followed by resolving every ``${...}`` reference
-    against the merged result. This is a *run-config* parser, not generic
-    config infrastructure: the prior rule is domain-specific.
+    against the merged result and every :data:`MERGE_KEY` inheritance. This is
+    a *run-config* parser, not generic config infrastructure: the prior rule
+    is domain-specific.
 
     Order is the caller's responsibility and it is not recoverable from the
     result, so :func:`load_merged_config` logs it.
@@ -132,7 +139,10 @@ def merge_config_layers(paths: Sequence[Path]) -> dict[str, Any]:
     for path in paths:
         require_toml(path)
     return knf.load(
-        [*DETECTOR_DEFAULT_PATHS, *paths], interpolate=True, shallow=PRIOR_SHALLOW
+        [*DETECTOR_DEFAULT_PATHS, *paths],
+        interpolate=True,
+        shallow=PRIOR_SHALLOW,
+        merge_key=MERGE_KEY,
     )
 
 
