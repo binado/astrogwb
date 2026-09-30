@@ -43,7 +43,7 @@ def test_hdf5_layout_metadata_and_order_round_trip(tmp_path: Path) -> None:
     np.testing.assert_array_equal(
         restored.polarization_power, catalog.polarization_power
     )
-    assert restored.df == catalog.df
+    np.testing.assert_allclose(restored.bin_widths, catalog.bin_widths)
     assert restored.metadata == catalog.metadata
     assert restored.metadata.key() == catalog.metadata.key()
     for name in catalog.source_parameters:

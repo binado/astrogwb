@@ -163,6 +163,43 @@ def test_analytic_generator_evaluates_on_exact_metadata_grid(
 
 
 @pytest.mark.parametrize(
+    "grid_settings",
+    [
+        {"frequency_spacing": "loglinear", "turnover_frequency": 12.0},
+        {"frequency_spacing": "log"},
+    ],
+    ids=["loglinear", "log"],
+)
+def test_analytic_generator_evaluates_on_a_log_spaced_grid(
+    source_parameters: dict[str, np.ndarray], grid_settings: dict[str, Any]
+) -> None:
+    generator = AnalyticInspiralGenerator(
+        WaveformMetadata.model_validate(
+            {
+                "alpha": ISCO_ALPHA,
+                "approximant": "AnalyticInspiral",
+                "minimum_frequency": 10.0,
+                "maximum_frequency": 100.0,
+                "reference_frequency": 10.0,
+                "sampling_frequency": 256.0,
+                "frequency_resolution": 1.0,
+                **grid_settings,
+            }
+        )
+    )
+
+    frequencies, actual = generator(source_parameters)
+    expected = np.asarray(
+        inspiral_polarization_power(frequencies, source_parameters, alpha=ISCO_ALPHA)
+    ).T
+
+    assert frequencies[0] == 10.0
+    assert frequencies[-1] == 100.0
+    assert np.ptp(np.diff(np.asarray(frequencies))) > 0.0
+    np.testing.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize(
     ("power", "message"),
     [
         (np.ones(2), "two-dimensional"),
@@ -292,9 +329,9 @@ def test_restrict_redshift_rejects_an_empty_window() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# PolarizationPowerCatalog.df: measured from the grid, not recorded from the descriptor
+# PolarizationPowerCatalog.bin_widths: derived from the grid, not recorded from the descriptor
 # --------------------------------------------------------------------------- #
-def test_catalog_df_matches_the_generators_requested_resolution(
+def test_catalog_bin_widths_match_the_generators_requested_resolution(
     source_parameters: dict[str, np.ndarray],
 ) -> None:
     generator = AnalyticInspiralGenerator(
@@ -315,20 +352,31 @@ def test_catalog_df_matches_the_generators_requested_resolution(
         fiducials=POPULATION_RECORD["fiducials"],
     )
 
-    assert catalog.df == 2.0
+    np.testing.assert_allclose(catalog.bin_widths, 2.0)
 
 
-def test_catalog_rejects_a_non_uniform_frequency_grid() -> None:
-    with pytest.raises(ValueError, match="not uniform"):
+def test_catalog_accepts_a_non_uniform_frequency_grid() -> None:
+    catalog = PolarizationPowerCatalog(
+        source_parameters={"redshift": np.array([0.1, 0.2, 0.3])},
+        polarization_power=np.ones((3, 3)),
+        frequencies=np.array([10.0, 12.0, 15.0]),
+        _metadata=_metadata(3),
+    )
+
+    np.testing.assert_allclose(catalog.bin_widths, [2.0, 2.5, 3.0])
+
+
+def test_catalog_rejects_a_frequency_grid_that_is_not_increasing() -> None:
+    with pytest.raises(ValueError, match="strictly increasing"):
         PolarizationPowerCatalog(
             source_parameters={"redshift": np.array([0.1, 0.2, 0.3])},
             polarization_power=np.ones((3, 3)),
-            frequencies=np.array([10.0, 12.0, 15.0]),
+            frequencies=np.array([10.0, 15.0, 12.0]),
             _metadata=_metadata(3),
         )
 
 
-def test_one_bin_catalog_constructs_but_df_has_no_answer() -> None:
+def test_one_bin_catalog_constructs_but_bin_widths_has_no_answer() -> None:
     """A one-bin catalog is a supported shape -- there is just no width to report."""
     catalog = PolarizationPowerCatalog(
         source_parameters={"redshift": np.array([0.1, 0.2])},
@@ -338,11 +386,11 @@ def test_one_bin_catalog_constructs_but_df_has_no_answer() -> None:
     )
 
     with pytest.raises(ValueError, match="at least two bins"):
-        _ = catalog.df
+        _ = catalog.bin_widths
 
 
-def test_restrict_redshift_leaves_df_unchanged() -> None:
+def test_restrict_redshift_leaves_bin_widths_unchanged() -> None:
     catalog = _catalog(np.array([0.1, 0.5, 1.5, 19.0]))
     restricted = catalog.restrict_redshift(0.3, 2.0)
 
-    assert restricted.df == catalog.df
+    np.testing.assert_allclose(restricted.bin_widths, catalog.bin_widths)

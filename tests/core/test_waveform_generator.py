@@ -13,7 +13,6 @@ import pytest
 from pydantic import ValidationError
 
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.frequency import uniform_grid_spacing
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
@@ -24,6 +23,7 @@ from astrogwb.waveform.generator._ripple import (
     SUPPORTED_APPROXIMANTS,
     TIDAL_MODELS,
     next_smooth_even,
+    ripple_parameters,
 )
 
 
@@ -159,6 +159,112 @@ def test_waveform_metadata_keeps_strict_validation_for_unknown_settings() -> Non
         WaveformMetadata.model_validate(settings)
 
 
+def _grid_settings(**overrides: Any) -> dict[str, Any]:
+    return {
+        "approximant": "TaylorF2",
+        "minimum_frequency": 10.0,
+        "maximum_frequency": 100.0,
+        "reference_frequency": 10.0,
+        "sampling_frequency": 256.0,
+        **overrides,
+    }
+
+
+def test_waveform_metadata_defaults_to_a_uniform_grid() -> None:
+    metadata = WaveformMetadata.model_validate(_grid_settings())
+
+    assert metadata.frequency_spacing == "linear"
+    assert metadata.frequency_resolution == 1.0
+    assert metadata.turnover_frequency is None
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"frequency_spacing": "linear", "frequency_resolution": 2.0},
+        {"frequency_spacing": "log", "frequency_resolution": 0.5},
+        {
+            "frequency_spacing": "loglinear",
+            "frequency_resolution": 0.5,
+            "turnover_frequency": 40.0,
+        },
+    ],
+    ids=["linear", "log", "loglinear"],
+)
+def test_waveform_metadata_grid_settings_round_trip_through_json(
+    settings: dict[str, Any],
+) -> None:
+    metadata = WaveformMetadata.model_validate(_grid_settings(**settings))
+
+    attrs = metadata.model_dump(mode="json")
+    assert attrs["frequency_spacing"] == settings["frequency_spacing"]
+    assert attrs["turnover_frequency"] == settings.get("turnover_frequency")
+    assert WaveformMetadata.model_validate_json(json.dumps(attrs)) == metadata
+
+
+def test_waveform_metadata_reads_a_record_without_grid_settings_as_uniform() -> None:
+    attrs = WaveformMetadata.model_validate(
+        _grid_settings(frequency_resolution=2.0)
+    ).model_dump(mode="json")
+    for name in ("frequency_spacing", "turnover_frequency"):
+        del attrs[name]
+
+    restored = WaveformMetadata.model_validate_json(json.dumps(attrs))
+
+    assert restored.frequency_spacing == "linear"
+    assert restored.turnover_frequency is None
+
+
+@pytest.mark.parametrize(
+    ("settings", "message"),
+    [
+        ({"frequency_spacing": "loglinear"}, "turnover_frequency is required"),
+        (
+            {"frequency_spacing": "loglinear", "turnover_frequency": 10.0},
+            "strictly between",
+        ),
+        (
+            {"frequency_spacing": "loglinear", "turnover_frequency": 100.0},
+            "strictly between",
+        ),
+        (
+            {"frequency_spacing": "loglinear", "turnover_frequency": 200.0},
+            "strictly between",
+        ),
+        (
+            {"frequency_spacing": "linear", "turnover_frequency": 40.0},
+            "only valid for frequency_spacing='loglinear'",
+        ),
+        (
+            {"frequency_spacing": "log", "turnover_frequency": 40.0},
+            "only valid for frequency_spacing='loglinear'",
+        ),
+        (
+            {
+                "frequency_spacing": "log",
+                "minimum_frequency": 0.0,
+            },
+            "minimum_frequency > 0",
+        ),
+        (
+            {
+                "frequency_spacing": "loglinear",
+                "minimum_frequency": 0.0,
+                "turnover_frequency": 40.0,
+            },
+            "minimum_frequency > 0",
+        ),
+        ({"frequency_spacing": "geometric"}, "frequency_spacing"),
+        ({"turnover_frequency": 0.0}, "turnover_frequency"),
+    ],
+)
+def test_waveform_metadata_rejects_inconsistent_grid_settings(
+    settings: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        WaveformMetadata.model_validate(_grid_settings(**settings))
+
+
 def test_json_rejects_a_non_numeric_frequency() -> None:
     generator = AnalyticInspiralGenerator(
         WaveformMetadata(
@@ -266,8 +372,10 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
     leaves the spacing Ripple reads off the bottom of the grid intact, which
     is why the exclusion does not perturb the in-band values.
     """
-    delta_f = 256.0 / ripple_generator.n_samples
-    n_grid = ripple_generator.n_samples // 2
+    n_samples = ripple_generator.n_samples
+    assert n_samples is not None
+    delta_f = 256.0 / n_samples
+    n_grid = n_samples // 2
     kernel = Mock(return_value=jnp.ones((n_grid, 2), dtype=jnp.float64))
     object.__setattr__(ripple_generator, "_kernel", kernel)
 
@@ -282,6 +390,45 @@ def test_ripple_generator_calls_its_kernel_with_the_full_grid_above_dc(
     np.testing.assert_array_equal(
         power, np.ones((ripple_generator.frequencies.size, 2))
     )
+
+
+@pytest.mark.parametrize(
+    "grid_settings",
+    [
+        {"frequency_spacing": "loglinear", "turnover_frequency": 40.0},
+        {"frequency_spacing": "log"},
+    ],
+    ids=["loglinear", "log"],
+)
+def test_ripple_generator_evaluates_a_non_uniform_grid_directly(
+    grid_settings: dict[str, Any],
+) -> None:
+    """The log spacings hand Ripple the band's own grid and slice nothing.
+
+    They are not tied to an FFT segment: no Nyquist grid is built, so the
+    sampling frequency and the segment length play no part.
+    """
+    generator = RippleGenerator(
+        WaveformMetadata.model_validate(
+            _grid_settings(
+                minimum_frequency=20.0, frequency_resolution=2.0, **grid_settings
+            )
+        )
+    )
+    frequencies = np.asarray(generator.frequencies)
+    kernel = Mock(return_value=jnp.ones((frequencies.size, 2), dtype=jnp.float64))
+    object.__setattr__(generator, "_kernel", kernel)
+
+    power = generator.generate_batch(_ripple_sources())
+
+    kernel.assert_called_once()
+    np.testing.assert_array_equal(np.asarray(kernel.call_args.args[0]), frequencies)
+    assert frequencies[0] == 20.0
+    assert frequencies[-1] == 100.0
+    assert np.ptp(np.diff(frequencies)) > 0.0
+    assert power.shape == (frequencies.size, 2)
+    assert generator.n_samples is None
+    assert generator.segment_duration is None
 
 
 def test_ripple_generate_batch_has_no_nan_gradient(
@@ -411,9 +558,7 @@ def test_ripple_generator_infers_df_from_its_own_5_smooth_grid() -> None:
         )
     )
     frequencies, _ = aligned(_ripple_sources())
-    assert uniform_grid_spacing(np.asarray(frequencies)) == pytest.approx(
-        0.9872, abs=1e-15
-    )
+    assert np.diff(np.asarray(frequencies)) == pytest.approx(0.9872)
 
 
 # --------------------------------------------------------------------- #
@@ -457,9 +602,7 @@ def test_generator_grid_matches_ripples_own_5_smooth_rounding() -> None:
 
     assert generator.n_samples == 1250
     assert generator.segment_duration == 1.0
-    assert uniform_grid_spacing(np.asarray(generator.frequencies)) == pytest.approx(
-        0.9872, abs=1e-15
-    )
+    assert np.diff(np.asarray(generator.frequencies)) == pytest.approx(0.9872)
 
 
 def test_ripple_frequencies_are_available_before_generating(
@@ -682,6 +825,63 @@ def test_power_matches_the_gwmock_backend(approximant: str) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("approximant", SUPPORTED_APPROXIMANTS)
+def test_loglinear_power_agrees_with_a_dense_uniform_grid(approximant: str) -> None:
+    """Handing Ripple a lin-log grid instead of the FFT grid changes no power.
+
+    Ripple reads the grid's shape in three places (the cutoff snap in
+    ``IMRPhenomD``, ``f_final`` in ``IMRPhenomXAS_NRTidalv3`` and an unused
+    ``deltaF`` in ``IMRPhenomHM``), so this checks the reading rather than
+    trusting it.
+
+    The reference is the same kernel on the union of a dense 0.25 Hz lattice and
+    the lin-log points. It contains every lin-log point exactly, so nothing is
+    interpolated -- interpolation error would swamp the beating of the
+    multi-mode models -- while ``f[1] - f[0]`` is 0.25 Hz there against 1 Hz on
+    the lin-log grid, and the top of the grid is the same. Both places Ripple
+    reads are exercised, so any grid dependence would show at every point.
+    """
+    band = {
+        "approximant": approximant,
+        "sampling_frequency": 2048.0,
+        "minimum_frequency": 16.0,
+        "maximum_frequency": 1024.0,
+        "reference_frequency": 16.0,
+    }
+    sources = _parity_sources(approximant)
+    dense = RippleGenerator(
+        WaveformMetadata.model_validate({**band, "frequency_resolution": 0.25})
+    )
+    loglinear = RippleGenerator(
+        WaveformMetadata.model_validate(
+            {
+                **band,
+                "frequency_spacing": "loglinear",
+                "frequency_resolution": 1.0,
+                "turnover_frequency": 64.0,
+            }
+        )
+    )
+    frequencies = np.asarray(loglinear.frequencies)
+    union = np.union1d(np.asarray(dense.frequencies), frequencies)
+    assert union[1] - union[0] == 0.25
+    assert union[-1] == frequencies[-1]
+
+    power = np.asarray(jax.jit(loglinear.generate_batch)(sources))
+    union_power = np.asarray(
+        jax.jit(dense._kernel)(
+            jnp.asarray(union), ripple_parameters(approximant, sources)
+        )
+    )
+
+    assert np.all(np.isfinite(power))
+    assert np.all(power >= 0.0)
+    np.testing.assert_allclose(
+        power, union_power[np.searchsorted(union, frequencies)], rtol=1e-11, atol=0.0
+    )
+
+
+@pytest.mark.integration
 def test_dropping_the_cutoff_window_changes_nothing_in_band() -> None:
     """The reason this adapter carries no window at all.
 
@@ -703,7 +903,9 @@ def test_dropping_the_cutoff_window_changes_nothing_in_band() -> None:
             frequency_resolution=1.0,
         )
     )
-    full_grid = jnp.arange(generator.n_samples // 2 + 1) * (512.0 / generator.n_samples)
+    n_samples = generator.n_samples
+    assert n_samples is not None
+    full_grid = jnp.arange(n_samples // 2 + 1) * (512.0 / n_samples)
     window = jnp.asarray(_cutoff_window(full_grid, 16.0, 0.05, jnp))
 
     in_band = full_grid >= 16.0

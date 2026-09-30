@@ -294,7 +294,6 @@ proposal = inputs.proposal
 spectral_density_fn = inputs.spectral_density_fn
 
 frequencies = observation.frequencies
-df = observation.df
 mask = observation.frequency_mask
 effective_psd_arr = inputs.effective_psd
 samples = {name: jnp.asarray(v) for name, v in proposal.source_parameters.items()}

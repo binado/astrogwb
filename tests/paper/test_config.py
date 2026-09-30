@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from repo import REPO_ROOT
 
 from astrogwb.constants import ISCO_ALPHA
+from astrogwb.metadata import WaveformMetadata
 from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
 from astrogwb.paper.config.mcmc import (
     DEFAULT_DENSITY_SITES,
@@ -20,6 +21,7 @@ from astrogwb.paper.config.mcmc import (
     build_run_config,
     prior_to_spec,
 )
+from astrogwb.paper.config.runs import load_base
 from astrogwb.paper.utils import deep_merge, load_mapping
 from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
 
@@ -318,6 +320,39 @@ def test_waveform_generator_defaults_to_the_committed_ripple() -> None:
     assert generator.metadata.approximant == "IMRPhenomXAS_NRTidalv3"
     assert generator.metadata.minimum_frequency == 2.0
     assert generator.metadata.maximum_frequency == 2048.0
+
+
+def test_committed_waveform_uses_the_loglinear_grid() -> None:
+    metadata = waveform_generator(REPO_ROOT).metadata
+
+    assert metadata.frequency_spacing == "loglinear"
+    assert metadata.frequency_resolution == 1.0
+    assert metadata.turnover_frequency == 100.0
+
+
+def test_committed_waveform_variants_share_the_default_band_and_differ_in_grid() -> (
+    None
+):
+    waveforms = {
+        name: WaveformMetadata.model_validate(record)
+        for name, record in load_base(REPO_ROOT)["waveforms"].items()
+    }
+    default = waveforms["default"]
+
+    assert waveforms["linear"].frequency_spacing == "linear"
+    assert waveforms["linear"].turnover_frequency is None
+    assert (
+        waveforms["linear"].model_copy(
+            update={
+                "frequency_spacing": default.frequency_spacing,
+                "turnover_frequency": default.turnover_frequency,
+            }
+        )
+        == default
+    )
+    assert waveforms["TaylorF2"].approximant == "TaylorF2"
+    assert waveforms["TaylorF2"].frequency_spacing == default.frequency_spacing
+    assert waveforms["TaylorF2"].turnover_frequency == default.turnover_frequency
 
 
 def test_waveform_generator_can_select_untapered_nrtidal() -> None:

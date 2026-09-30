@@ -54,6 +54,7 @@ from astrogwb.paper.inference import (
 )
 from astrogwb.paper.utils import load_mapping
 from astrogwb.populations import DEFAULT_DENSITY_SITES
+from astrogwb.utils import years_to_seconds
 
 pytestmark = pytest.mark.integration
 
@@ -196,7 +197,6 @@ def test_prepare_observation_keeps_arrays_unmasked(
     assert observation.spectral_density.shape == FREQUENCIES.shape
     assert float(observation.total_merger_rate) > 0.0
     # The mask is carried alongside, not applied: notebooks plot the full band.
-    assert observation.df == 10.0
     np.testing.assert_array_equal(
         np.asarray(observation.frequency_mask), [False, True, True, True, False]
     )
@@ -323,8 +323,8 @@ def test_model_kwargs_scale_is_the_full_grid_gaussian_bin_scale(
         gaussian_bin_scale(
             inputs.effective_psd,
             config.analysis.observation_time,
-            # The catalog's bin width, never measured off the selected band.
-            10.0,
+            # The catalog's full grid, never a selected band.
+            FREQUENCIES,
         )
     )
 
@@ -353,7 +353,7 @@ def test_bins_without_network_coverage_narrow_the_band(
     monkeypatch: pytest.MonkeyPatch,
     uncovered: float,
 ) -> None:
-    """An uncovered bin is dropped, not fatal -- each survivor still has width df."""
+    """An uncovered bin is dropped, not fatal -- each survivor keeps its full-grid width."""
     config = _config()
     effective_noise = np.ones(FREQUENCIES.shape)
     effective_noise[2] = uncovered
@@ -366,13 +366,19 @@ def test_bins_without_network_coverage_narrow_the_band(
     kwargs = inputs.model_kwargs()
 
     # The band was [20, 30, 40] Hz; 30 Hz is uncovered, so the surviving band is
-    # gappy -- which is only sound because `df` is the catalog's attribute.
+    # gappy -- which is only sound because widths come from the full grid.
     np.testing.assert_array_equal(
         np.asarray(inputs.observation.frequency_mask),
         [False, True, False, True, False],
     )
     # The arrays keep the catalog's length; only the mask records the gap.
     assert kwargs["scale"].shape == (N_FREQ,)
+    # The survivors flank the gap, but each is still 10 Hz wide, not 20.
+    survivor_width = 10.0
+    expected_scale = 1.0 / np.sqrt(
+        2.0 * years_to_seconds(config.analysis.observation_time) * survivor_width
+    )
+    np.testing.assert_allclose(np.asarray(kwargs["scale"])[[1, 3]], expected_scale)
     assert kwargs["observed_spectral_density"].shape == (N_FREQ,)
     assert _bound(inputs)["polarization_power"].shape == (N_FREQ, N_RETAINED)
     np.testing.assert_array_equal(

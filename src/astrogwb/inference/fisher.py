@@ -85,7 +85,7 @@ def fisher_matrix_per_bin(
     r"""Per-bin Fisher matrices :math:`F_{ab,i}`, shape ``(F, P, P)``.
 
         ``scale`` is the per-bin standard deviation the likelihood uses, normally
-        ``gaussian_bin_scale(psd, time_years, df)``. ``frequency_mask`` selects
+        ``gaussian_bin_scale(psd, time_years, frequencies)``. ``frequency_mask`` selects
         bins as in
     :func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_spectral_density_model`:
         an excluded bin contributes exactly zero, even where its scale is

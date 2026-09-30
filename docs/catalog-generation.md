@@ -49,7 +49,18 @@ The fields a role resolves to:
    band matches `[analysis]`'s `minimum_frequency` and `maximum_frequency`: the
    catalog grid *is* the array every model is evaluated on, and a run's band
    selects bins on it with a mask rather than compressing it.
-   `sampling_frequency` is the waveform backend's Nyquist, not the stored grid.
+   The grid is `frequency_spacing` over that band: `"loglinear"` (the default) is
+   uniform at `frequency_resolution` up to `turnover_frequency` and geometric
+   above it, with the bin width continuous at the turn, which is ~400 bins for
+   2--2048 Hz at 1 Hz and 100 Hz against 2047 for `"linear"`. `"log"` is
+   geometric throughout, `frequency_resolution` wide at `minimum_frequency`.
+   `turnover_frequency` belongs to `"loglinear"` alone: required there and
+   rejected elsewhere, so one grid has one record and one key. The turn falls on
+   the last uniform point not above `turnover_frequency`. For a `"linear"` Ripple
+   waveform `sampling_frequency` is the backend's Nyquist, not the stored grid;
+   the other spacings are built directly to `maximum_frequency` and do not use
+   it. `[waveforms.linear]` is the default on the uniform grid, for comparing the
+   two.
    `approximant="AnalyticInspiral"` selects the closed-form inspiral, and is
    the only approximant accepting the optional `alpha` key (the inspiral
    termination constant, defaulting to the Schwarzschild ISCO value); naming it
@@ -328,7 +339,7 @@ attributes are `format_name`, `domain`, `metadata`, and
 `source_parameter_names` (a JSON list ordering the parameter matrix columns).
 `frequency`, `polarization_power`, and `source_parameters` remain HDF5
 datasets. The metadata JSON includes the package version that generated the
-arrays. The derived `df` is not stored; it is measured from `frequency`.
+arrays. Bin widths are not stored; they are derived from `frequency`.
 Earlier formats require regeneration.
 
 ## The catalog cache
@@ -365,10 +376,18 @@ format. Explicitly remove affected legacy files in `outputs/catalogs/` and
 Neither the loader nor `simulate` migrates or replaces them automatically.
 Canonical JSON hashing is separate from the Pydantic JSON stored in the file.
 
-The waveform metadata records `frequency_resolution` -- what was *requested*
-of the generating backend -- while the bin width used in every integral is
-measured from the `frequency` dataset itself (`PolarizationPowerCatalog.df`);
-the backend chooses the actual grid, so the two can differ.
+The waveform metadata records `frequency_spacing`, `frequency_resolution` and
+`turnover_frequency` -- what was *requested* of the generating backend -- while
+the bin widths used in every integral are derived from the `frequency` dataset
+itself (`astrogwb.frequency.bin_widths`, exposed as
+`PolarizationPowerCatalog.bin_widths`); the backend chooses the actual grid, so
+the two can differ. The grid need only be strictly increasing: each bin's width
+is half the distance between its neighbours, which is the grid spacing on a
+uniform grid and grows with frequency above the turn of a `"loglinear"` one.
+
+Adding the grid fields re-keyed every catalog and spectra file, and the version
+was bumped with them (0.2.0), so files from earlier versions are never served;
+regenerate them.
 
 ## The spectral-density format
 
@@ -417,8 +436,22 @@ are data, so an edited bound re-keys the draws without a version bump. The seed
 is split into a hyperparameter key and a forward-model key; with priors, the
 static event plate is sized from the largest Poisson mean across the rows.
 
-`scripts/simulate_spectra.py --metadata JSON --output <key>.h5` is the same
-generator from a shell; it refuses an output whose stem is not the key. A
+`scripts/simulate_spectra.py` is the same generator from a shell. It takes
+config layers like `run_mcmc` does -- the four shared `config/*.toml` layers,
+then `config/simulations/spectrum/<name>.toml` -- and validates the merged
+`[spectra]` table as the `SpectraMetadata`. In that table a hyperparameter is a
+`"${fiducials.X}"` reference (fixed) or a `"${priors.X}"` one (sampled). The
+output is `<--output-dir>/<key>.h5`, `outputs/spectra` by default, and the script
+refuses to replace it without `--force`:
+
+```bash
+uv run --extra paper python scripts/simulate_spectra.py \
+    --config config/defaults.toml --config config/waveforms.toml \
+    --config config/populations.toml --config config/detectors.toml \
+    --config config/simulations/spectrum/default.toml
+```
+
+The spectrum layers are not run layers: no chain reads `[spectra]`. A
 caller that needs a source model no record can name -- the
 `IsotropicInclination` wrapper in `notebooks/waveform_approximant_spectra.py`
 -- calls the uncached `astrogwb.inference.draw_spectral_density` directly.

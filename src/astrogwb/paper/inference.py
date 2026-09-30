@@ -85,13 +85,12 @@ class Observation:
     """The observed-data side of a run: the fiducial injection spectrum.
 
     Arrays are on the catalog's full frequency grid; ``frequency_mask`` selects
-    the analysis band within it. ``df`` is the catalog's grid-derived bin width
-    and stays valid under any mask, which is why it is carried here rather than
-    measured off a selected grid.
+    the analysis band within it. Bin widths are derived from ``frequencies`` --
+    the *full* axis -- so they stay right under any mask, which is why nothing
+    downstream is handed a selected grid.
     """
 
     frequencies: jax.Array
-    df: float
     total_merger_rate: jax.Array
     spectral_density: jax.Array
     frequency_mask: jax.Array
@@ -119,7 +118,7 @@ class InferenceInputs:
         The likelihoods take the observation, the per-bin Gaussian scale, and
         the boolean band mask: the catalog and the inclination convention
         already live inside :attr:`spectral_density_fn`, and the PSD,
-        observation time, and bin width are consumed here rather than inside
+        observation time, and bin widths are consumed here rather than inside
         the model.
 
         ``fmin``/``fmax`` narrow the run's band to a sub-band, intersected with
@@ -144,7 +143,7 @@ class InferenceInputs:
                     "lies inside the run's analysis band"
                 )
         scale = gaussian_bin_scale(
-            self.effective_psd, self.observation_time, observation.df
+            self.effective_psd, self.observation_time, observation.frequencies
         )
         return {
             "observed_spectral_density": observation.spectral_density,
@@ -283,7 +282,6 @@ def prepare_observation(
     )
     return Observation(
         frequencies=frequencies,
-        df=float(restricted.df),
         total_merger_rate=total_merger_rate,
         spectral_density=spectrum,
         frequency_mask=analysis_frequency_mask,
@@ -386,8 +384,9 @@ def prepare_inference_inputs(
     # `compute_effective_psd` returns inf wherever no detector pair contributes,
     # and Normal(loc, inf).log_prob is -inf -- a constant that kills NUTS with no
     # usable diagnostic. Exclude those bins along with the out-of-band ones. This
-    # is safe precisely because `df` is the catalog's grid-derived property: the
-    # selected bins need not be contiguous, and each still has width `df`.
+    # is safe precisely because bin widths come from the full frequency axis and
+    # the selection is a mask: the surviving bins need not be contiguous, and
+    # each keeps the width it has on the whole grid.
     band_mask = (
         observation.frequency_mask
         & jnp.isfinite(effective_psd_arr)
