@@ -7,18 +7,23 @@ Validating settings leaves the XLA backend uninitialized.
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated
 
+import knf
 from gwmock_signal.detector import CustomDetector
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb.detector import Sensitivity
+from astrogwb.paper.config.runs import DETECTOR_DEFAULT_PATHS, MERGE_KEY
+from astrogwb.paper.utils import require_toml
 from astrogwb.psd import resolve_psd_path
 
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+logger = logging.getLogger(__name__)
 
 
 class DetectorGeometry(BaseModel):
@@ -113,3 +118,26 @@ class DetectorRegistry(BaseModel):
     ) -> tuple[tuple[CustomDetector, ...], dict[str, Sensitivity]]:
         """Build a named network in its declared detector order."""
         return self.build_detectors(self.networks[name])
+
+
+def load_detector_config(paths: Sequence[Path]) -> DetectorRegistry:
+    """Merge packaged detector definitions and ordered TOML registry layers.
+
+    Later layers override earlier geometry, sensitivities and network
+    membership. References and ``extends`` resolve within this merge alone.
+    An empty layer list loads packaged detectors without named networks.
+    Only ``[detectors]`` and ``[networks]`` are accepted in the resolved config;
+    no runtime detector objects are built during loading or validation.
+    """
+    for path in paths:
+        require_toml(path)
+    logger.info(
+        "Detector config layers (merge order): %s",
+        " -> ".join(str(path) for path in (*DETECTOR_DEFAULT_PATHS, *paths)),
+    )
+    merged = knf.load(
+        [*DETECTOR_DEFAULT_PATHS, *paths],
+        interpolate=True,
+        merge_key=MERGE_KEY,
+    )
+    return DetectorRegistry.model_validate(merged)

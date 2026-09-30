@@ -1,6 +1,7 @@
 """Analyze one fixed-hyperparameter spectrum ensemble and one detector network.
 
-Repeat --config for the four shared layers, then the case's simulation layers.
+Repeat --spectra-config for scientific and simulation layers, and
+--detector-config for network definitions and detector overrides.
 The checked spectrum cache is reused, or populated on a miss. --cache-only
 requires an existing artifact. Detector settings do not enter the draw's key.
 See docs/paper-figures.md for examples and the distributions' interpretation.
@@ -21,12 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from astrogwb import __version__
 from astrogwb.catalog import SpectrumGenerator, simulate
 from astrogwb.metadata import SpectraMetadata, artifact_path
-from astrogwb.paper.config.detectors import DetectorRegistry
+from astrogwb.paper.config.detectors import DetectorRegistry, load_detector_config
 from astrogwb.paper.config.runs import (
     BASE_OUT_DIR,
     SPECTRA_ROOT,
-    add_config_arguments,
-    load_merged_config,
+    merge_config_layers,
 )
 from astrogwb.paper.runtime import configure_runtime
 from astrogwb.paper.snr import compute_spectrum_snrs, summarize_spectrum_snrs
@@ -65,8 +65,14 @@ class SNRConfig(BaseModel):
         return self
 
     @classmethod
-    def from_merged(cls, raw: Mapping[str, Any], *, network: str) -> Self:
-        """Extract the relevant resolved tables, omitting shared authoring data."""
+    def from_merged(
+        cls,
+        raw: Mapping[str, Any],
+        *,
+        detector_registry: DetectorRegistry,
+        network: str,
+    ) -> Self:
+        """Combine resolved spectrum settings with an independently loaded registry."""
         if "spectra" not in raw:
             raise ValueError(
                 "the merged config has no [spectra] table; add a "
@@ -78,10 +84,7 @@ class SNRConfig(BaseModel):
         return cls.model_validate(
             {
                 "spectra": raw["spectra"],
-                "detector_registry": {
-                    "detectors": raw.get("detectors"),
-                    "networks": raw.get("networks", {}),
-                },
+                "detector_registry": detector_registry,
                 "network": network,
                 "minimum_frequency": analysis.get("minimum_frequency"),
                 "maximum_frequency": analysis.get("maximum_frequency"),
@@ -91,9 +94,21 @@ class SNRConfig(BaseModel):
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    add_config_arguments(
-        parser,
-        help="One config layer in merge order; repeat for shared and simulation layers.",
+    parser.add_argument(
+        "--spectra-config",
+        action="append",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="One spectrum config layer in merge order; repeat for scientific and simulation layers.",
+    )
+    parser.add_argument(
+        "--detector-config",
+        action="append",
+        type=Path,
+        required=True,
+        metavar="PATH",
+        help="One detector registry layer in merge order; repeat for network and detector overrides.",
     )
     parser.add_argument("--network", default=DEFAULT_NETWORK, metavar="NAME")
     parser.add_argument("--spectra-dir", type=Path, default=SPECTRA_ROOT)
@@ -118,7 +133,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
     )
     args = parse_args(argv)
-    config = SNRConfig.from_merged(load_merged_config(args), network=args.network)
+    logger.info(
+        "Spectrum config layers (merge order): %s",
+        " -> ".join(str(path) for path in args.spectra_config),
+    )
+    config = SNRConfig.from_merged(
+        merge_config_layers(args.spectra_config),
+        detector_registry=load_detector_config(args.detector_config),
+        network=args.network,
+    )
     generator = SpectrumGenerator(batch_size=args.batch_size)
     spectra_dir = args.spectra_dir.expanduser().resolve()
     try:
@@ -191,7 +214,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         "config": config.model_dump(mode="json"),
         "spectrum_key": config.spectra.key(),
         "source_path": str(artifact_path(config.spectra, spectra_dir)),
-        "config_paths": [str(path.expanduser().resolve()) for path in args.config],
+        "spectra_config_paths": [
+            str(path.expanduser().resolve()) for path in args.spectra_config
+        ],
+        "detector_config_paths": [
+            str(path.expanduser().resolve()) for path in args.detector_config
+        ],
         "selected_detectors": {
             name: config.detector_registry.detectors[name].model_dump(mode="json")
             for name in members

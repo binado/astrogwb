@@ -19,10 +19,13 @@ def test_catalog_inference_snr_imports_leave_the_xla_backend_uninitialized() -> 
     those imports must leave the backend free even though they pull in jax.
     """
     code = """
+from pathlib import Path
 import astrogwb.paper.catalogs
 import astrogwb.paper.config.catalogs
 import astrogwb.paper.inference
 import astrogwb.paper.snr
+from astrogwb.paper.config.detectors import load_detector_config
+load_detector_config([Path('../config/detectors.toml')])
 import numpyro
 
 numpyro.set_host_device_count(2)

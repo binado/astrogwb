@@ -15,6 +15,7 @@ from repo import REPO_ROOT
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.metadata import WaveformMetadata
 from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
+from astrogwb.paper.config.detectors import load_detector_config
 from astrogwb.paper.config.mcmc import (
     DEFAULT_DENSITY_SITES,
     AmplitudeParameter,
@@ -26,6 +27,47 @@ from astrogwb.paper.utils import deep_merge, load_mapping
 from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
 
 PAPER_ROOT = REPO_ROOT
+
+
+def test_detector_loader_merges_packaged_definitions_and_ordered_overrides(
+    tmp_path: Path,
+) -> None:
+    packaged = load_detector_config([])
+    assert packaged.networks == {}
+    base = tmp_path / "networks.toml"
+    base.write_text(
+        '[networks]\nreference = ["S1", "R1"]\n'
+        'comparison = "${networks.reference}"\n'
+        '[detectors.custom]\nextends = "${detectors.S1}"\nlabel = "Custom"\n',
+        encoding="utf-8",
+    )
+    override = tmp_path / "override.toml"
+    override.write_text(
+        '[networks]\nreference = ["S1", "C1"]\n'
+        "[detectors.custom.geometry]\nxarm_azimuth_rad = 0.5\n"
+        '[detectors.custom]\npsd_reference = "${detectors.C1.psd_reference}"\n',
+        encoding="utf-8",
+    )
+    registry = load_detector_config([base, override])
+    assert registry.networks["reference"] == ("S1", "C1")
+    assert registry.networks["comparison"] == ("S1", "C1")
+    assert registry.detectors["custom"].geometry.xarm_azimuth_rad == 0.5
+    assert (
+        registry.detectors["custom"].geometry.latitude_rad
+        == packaged.detectors["S1"].geometry.latitude_rad
+    )
+    assert (
+        registry.detectors["custom"].psd_reference
+        == packaged.detectors["C1"].psd_reference
+    )
+    assert registry.detectors["custom"].label == "Custom"
+
+
+def test_detector_loader_rejects_spectrum_settings(tmp_path: Path) -> None:
+    layer = tmp_path / "wrong-group.toml"
+    layer.write_text("[spectra]\nnum_draws = 5\n", encoding="utf-8")
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        load_detector_config([layer])
 
 
 def _read_record(path: Path) -> dict[str, Any]:
