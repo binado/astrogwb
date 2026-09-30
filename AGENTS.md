@@ -63,8 +63,13 @@ generator produces**, or stale catalogs keep being served. `just catalogs` maps
 keys back to what they draw and which runs use them.
 Forward-model spectra go through the same `simulate` outside the workflow: a
 `SpectraMetadata` (each hyperparameter a fixed number or a prior spec) keys
-`outputs/spectra/<key>.h5`, and `astrogwb.catalog.simulate(metadata,
+`<cache_dir>/<key>.h5`, and `astrogwb.catalog.simulate(metadata,
 SpectrumGenerator(), cache_dir)` serves or generates it.
+The spectrum scripts default to `astrogwb.paper.cache.default_cache_dir() / "spectra"`,
+shared across worktrees. `platformdirs` honors `XDG_CACHE_HOME` on Linux and macOS,
+otherwise using the platform's user cache directory. CLI directory overrides
+take precedence; cache locations are outside the scientific metadata/key.
+Workflow catalog outputs remain under `outputs/catalogs`.
 `scripts/simulate_spectra.py` builds the same record from the `[spectra]` table
 of `--config` layers (the four shared layers, then
 `config/simulations/spectrum/<name>.toml`); those files are not run layers.

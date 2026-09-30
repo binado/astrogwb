@@ -173,8 +173,15 @@ spectrum metadata and is converted from years to seconds. Each SNR uses the
 full frequency axis and its derived bin widths before applying the band mask.
 
 The same checked cache mechanism as the generator serves
-`outputs/spectra/<spectrum-key>.h5`, or generates and atomically saves a miss.
-`--cache-dir` changes that cache directory; `--batch-size` defaults to 128
+`<cache-dir>/<spectrum-key>.h5`, or generates and atomically saves a miss.
+Both spectrum scripts default to the user cache directory's `astrogwb/spectra`
+subdirectory, shared across worktrees. `platformdirs` honors `XDG_CACHE_HOME`
+on Linux and macOS; without an override, the default is
+`~/.cache/astrogwb/spectra` on Linux and `~/Library/Caches/astrogwb/spectra`
+on macOS. `--cache-dir` changes the SNR script's cache directory;
+`--output-dir` selects the generation script's directory. These paths are
+local preferences and do not enter the spectrum metadata or cache key.
+`--batch-size` defaults to 128
 and only controls waveform memory on a miss. Generation can also be done first
 with `scripts/simulate_spectra.py` using those spectrum layers as repeated
 `--config` flags. `--cache-only` requires a hit and raises an error naming the

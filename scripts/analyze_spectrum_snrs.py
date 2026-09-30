@@ -22,10 +22,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from astrogwb import __version__
 from astrogwb.catalog import SpectrumGenerator, simulate
 from astrogwb.metadata import SpectraMetadata, artifact_path
+from astrogwb.paper.cache import default_cache_dir
 from astrogwb.paper.config.detectors import DetectorRegistry, load_detector_config
 from astrogwb.paper.config.runs import (
     BASE_OUT_DIR,
-    SPECTRA_ROOT,
     merge_config_layers,
 )
 from astrogwb.paper.runtime import configure_runtime
@@ -111,7 +111,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="One detector registry layer in merge order; repeat for network and detector overrides.",
     )
     parser.add_argument("--network", default=DEFAULT_NETWORK, metavar="NAME")
-    parser.add_argument("--cache-dir", type=Path, default=SPECTRA_ROOT)
+    cache_dir = default_cache_dir() / "spectra"
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=cache_dir,
+        metavar="DIR",
+        help=f"Checked spectrum cache directory (default: {cache_dir}).",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,

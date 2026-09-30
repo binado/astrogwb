@@ -54,6 +54,8 @@ paper = [
     "arviz[h5netcdf]>=1.2.0",
     # Merges the run-config layers (astrogwb.paper.config.runs).
     "pyknf>=0.6,<0.7",
+    # User cache paths, including XDG overrides on macOS.
+    "platformdirs>=4.11.12",
 ]
 # The analysis stack the notebooks and figure scripts import.
 notebook = [
