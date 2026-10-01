@@ -94,9 +94,10 @@ def _():
     registry = detector_registry(root=ROOT_DIR)
 
     # Each section varies one parameter and holds the other at its baseline.
-    num_events = [16384, 2 * 16384, 4 * 16384]
+
     minimum_redshift = [0.05, 0.15, 0.35]
     baseline_num_events = 16384
+    num_events = [baseline_num_events * x for x in [1, 2, 4, 8]]
     baseline_minimum_redshift = 0.35
     maximum_redshift = 20.0
 
@@ -109,7 +110,11 @@ def _():
     maximum_frequency = 2048.0
     network = "ET-2L-aligned-CE-Hanford"
 
-    cache_dir = default_cache_dir() / "spectra"
+    # cache_dir = default_cache_dir() / "spectra"
+    # cache_only = False
+    cache_dir = Path(
+        "/Users/binado/.codex/worktrees/e502/astrogwb/outputs/cache/astrogwb/spectra"
+    )
     cache_only = False
     write_figures = True
 
@@ -680,7 +685,11 @@ def _():
         maximum_frequency: float,
         max_bins: int = 64,
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        """Select frequency columns, retaining every row and masking constant bins."""
+        """Correlate relative residuals, retaining all rows and masking undefined bins.
+
+        Positive per-frequency normalization preserves Pearson correlations,
+        while dimensionless residuals avoid squaring tiny spectral densities.
+        """
         statistics = compute_spectrum_statistics(catalog)
         if max_bins < 2:
             raise ValueError("max_bins must be at least two")
@@ -701,7 +710,11 @@ def _():
             indices = indices[nearest]
             frequencies = statistics.frequencies[indices]
         rows = np.asarray(catalog.spectral_density[:, indices], dtype=np.float64)
-        centered = rows - rows.mean(axis=0)
+        mean = statistics.mean[indices]
+        residuals = np.full(rows.shape, np.nan)
+        np.divide(rows, mean, out=residuals, where=mean > 0)
+        residuals -= 1
+        centered = residuals - residuals.mean(axis=0)
         covariance = centered.T @ centered / (rows.shape[0] - 1)
         scale = np.sqrt(np.diag(covariance))
         denominator = scale[:, None] * scale[None, :]
@@ -747,7 +760,11 @@ def _():
         for axis, (title, cases) in zip(axes[0], groups.items(), strict=True):
             for label, statistics in cases.items():
                 plot_positive_curve(
-                    axis, statistics.frequencies, statistics.mean, band, label=label
+                    axis,
+                    statistics.frequencies,
+                    statistics.mean,
+                    band,
+                    label=label,
                 )
             axis.set_title(title)
             axis.set_ylabel(r"$\overline{S_h}\,[\mathrm{Hz}^{-1}]$")
@@ -859,19 +876,17 @@ def _():
             axis.set_xlabel(r"Frequency $[\mathrm{Hz}]$")
             axis.set_ylabel(r"Frequency $[\mathrm{Hz}]$")
             axis.set_title(label)
-        figure.colorbar(mesh, ax=list(axes[0]), label="Frequency correlation")
+        figure.suptitle(r"Relative residuals $r(f)=S_h(f)/\overline{S_h}(f)-1$")
+        figure.colorbar(mesh, ax=list(axes[0]), label="Relative-residual correlation")
         return figure
 
     return (
-        SpectrumStatistics,
-        NetworkSensitivity,
-        compute_spectrum_statistics,
         compute_network_sensitivity,
-        compute_frequency_correlation,
-        plot_spectrum_means,
-        plot_relative_variance,
-        plot_spectrum_sensitivity,
+        compute_spectrum_statistics,
         plot_frequency_correlations,
+        plot_relative_variance,
+        plot_spectrum_means,
+        plot_spectrum_sensitivity,
     )
 
 
@@ -923,8 +938,10 @@ def _():
     Compare absolute scatter with $\sigma_i=S_{\mathrm{eff},i}/\sqrt{2T\Delta f_i}$
     using full-grid bin widths, and separately with the per-e-fold presentation
     scale $\sigma_{\ln f}=S_{\mathrm{eff}}/\sqrt{2Tf}$. The latter is not a
-    per-bin significance threshold. Correlation heatmaps retain every draw
-    and select up to 64 frequency bins; coherent fluctuations can indicate
+    per-bin significance threshold. Heatmaps correlate the relative residuals
+    $r_i(f)$ across frequency, retaining every draw and selecting up to 64 bins.
+    Positive frequency-wise normalization preserves Pearson correlations with
+    those of $S_h$ itself. Coherent fluctuations can indicate
     amplitude scatter, while departures from unity reveal shape variation.
     """)
     return
@@ -932,14 +949,14 @@ def _():
 
 @app.cell
 def _(
-    compute_spectrum_statistics,
     compute_network_sensitivity,
-    num_events_cases,
-    minimum_redshift_cases,
-    registry,
-    network,
-    minimum_frequency,
+    compute_spectrum_statistics,
     maximum_frequency,
+    minimum_frequency,
+    minimum_redshift_cases,
+    network,
+    num_events_cases,
+    registry,
 ):
     spectrum_case_groups = {
         "Source count": {
@@ -979,11 +996,11 @@ def _(
         minimum_frequency=minimum_frequency,
         maximum_frequency=maximum_frequency,
     )
-    return spectrum_case_groups, spectrum_statistics, spectrum_sensitivity
+    return spectrum_case_groups, spectrum_sensitivity, spectrum_statistics
 
 
 @app.cell
-def _(plot_spectrum_means, spectrum_statistics, spectrum_sensitivity):
+def _(plot_spectrum_means, spectrum_sensitivity, spectrum_statistics):
     spectrum_mean_figure = plot_spectrum_means(
         spectrum_statistics, spectrum_sensitivity.band
     )
@@ -992,7 +1009,7 @@ def _(plot_spectrum_means, spectrum_statistics, spectrum_sensitivity):
 
 
 @app.cell
-def _(plot_relative_variance, spectrum_statistics, spectrum_sensitivity):
+def _(plot_relative_variance, spectrum_sensitivity, spectrum_statistics):
     spectrum_relative_variance_figure = plot_relative_variance(
         spectrum_statistics, spectrum_sensitivity.band
     )
@@ -1002,11 +1019,11 @@ def _(plot_relative_variance, spectrum_statistics, spectrum_sensitivity):
 
 @app.cell
 def _(
-    plot_spectrum_sensitivity,
-    spectrum_statistics,
-    spectrum_sensitivity,
-    network,
     base_metadata,
+    network,
+    plot_spectrum_sensitivity,
+    spectrum_sensitivity,
+    spectrum_statistics,
 ):
     num_events_spectrum_sensitivity_figure = plot_spectrum_sensitivity(
         spectrum_statistics["Source count"],
@@ -1020,10 +1037,10 @@ def _(
 
 @app.cell
 def _(
+    maximum_frequency,
+    minimum_frequency,
     plot_frequency_correlations,
     spectrum_case_groups,
-    minimum_frequency,
-    maximum_frequency,
 ):
     num_events_frequency_correlation_figure = plot_frequency_correlations(
         spectrum_case_groups["Source count"],
@@ -1036,11 +1053,11 @@ def _(
 
 @app.cell
 def _(
-    plot_spectrum_sensitivity,
-    spectrum_statistics,
-    spectrum_sensitivity,
-    network,
     base_metadata,
+    network,
+    plot_spectrum_sensitivity,
+    spectrum_sensitivity,
+    spectrum_statistics,
 ):
     minimum_redshift_spectrum_sensitivity_figure = plot_spectrum_sensitivity(
         spectrum_statistics["Minimum redshift"],
@@ -1054,10 +1071,10 @@ def _(
 
 @app.cell
 def _(
+    maximum_frequency,
+    minimum_frequency,
     plot_frequency_correlations,
     spectrum_case_groups,
-    minimum_frequency,
-    maximum_frequency,
 ):
     minimum_redshift_frequency_correlation_figure = plot_frequency_correlations(
         spectrum_case_groups["Minimum redshift"],
@@ -1395,18 +1412,18 @@ def _(minimum_redshift_cases):
 def _(
     BASE_DIR,
     ROOT_DIR,
+    minimum_redshift_frequency_correlation_figure,
     minimum_redshift_sigma_h0_figure,
     minimum_redshift_snr_figure,
+    minimum_redshift_spectrum_sensitivity_figure,
+    num_events_frequency_correlation_figure,
     num_events_h0_fisher_figure,
     num_events_h0_residual_figure,
     num_events_sigma_h0_figure,
     num_events_snr_figure,
+    num_events_spectrum_sensitivity_figure,
     spectrum_mean_figure,
     spectrum_relative_variance_figure,
-    num_events_spectrum_sensitivity_figure,
-    minimum_redshift_spectrum_sensitivity_figure,
-    num_events_frequency_correlation_figure,
-    minimum_redshift_frequency_correlation_figure,
     write_figures,
 ):
     if write_figures:
