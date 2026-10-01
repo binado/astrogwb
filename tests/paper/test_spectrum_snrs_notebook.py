@@ -277,3 +277,203 @@ def test_normalized_residuals_measure_template_scatter(
     x, density = axis.get_lines()[3].get_data()
     np.testing.assert_allclose(density, np.exp(-0.5 * x**2) / np.sqrt(2 * np.pi))
     assert axis.get_ylim()[1] > density.max()
+
+
+def _example_catalog(
+    notebook_results: Mapping[str, Any], spectra: Any, frequencies: Any
+) -> Any:
+    """Replace only the arrays in a valid fixed-hyperparameter smoke catalog."""
+    from dataclasses import replace
+
+    rows = np.asarray(spectra, dtype=np.float64)
+    original = next(iter(notebook_results["num_events_cases"].values())).catalog
+    metadata = original.metadata.model_copy(update={"num_draws": rows.shape[0]})
+    return replace(
+        original,
+        spectral_density=rows,
+        frequencies=np.asarray(frequencies, dtype=np.float64),
+        n_events=np.full(rows.shape[0], metadata.num_events),
+        total_merger_rate=np.full(rows.shape[0], original.total_merger_rate[0]),
+        hyperparameters={
+            name: np.full(rows.shape[0], value)
+            for name, value in metadata.fixed.items()
+        },
+        _metadata=metadata,
+    )
+
+
+def test_pointwise_spectrum_statistics(notebook_results: Mapping[str, Any]) -> None:
+    compute = notebook_results["compute_spectrum_statistics"]
+    rows = np.array([[1, 2, 0, 5], [2, 4, 0, 5], [3, 8, 0, 5]], dtype=float)
+    catalog = _example_catalog(notebook_results, rows, [2, 4, 8, 16])
+    statistics = compute(catalog)
+    np.testing.assert_allclose(statistics.mean, [2, 14 / 3, 0, 5])
+    np.testing.assert_allclose(statistics.variance, [1, 28 / 3, 0, 0])
+    np.testing.assert_allclose(
+        statistics.standard_deviation, [1, np.sqrt(28 / 3), 0, 0]
+    )
+    residuals = rows[:, [0, 1, 3]] / rows[:, [0, 1, 3]].mean(axis=0) - 1
+    np.testing.assert_allclose(
+        statistics.relative_variance[[0, 1, 3]], np.var(residuals, axis=0, ddof=1)
+    )
+    assert np.isnan(statistics.relative_variance[2])
+    for group in notebook_results["spectrum_statistics"].values():
+        for case in group.values():
+            positive = case.mean > 0
+            np.testing.assert_allclose(
+                case.relative_variance[positive],
+                case.variance[positive] / case.mean[positive] ** 2,
+                rtol=1e-12,
+            )
+
+
+def test_spectrum_statistics_reject_invalid_ensembles(
+    notebook_results: Mapping[str, Any],
+) -> None:
+    from dataclasses import replace
+
+    from astrogwb.metadata import PriorSpec
+
+    compute = notebook_results["compute_spectrum_statistics"]
+    for rows, message in (
+        ([[1, 2]], "at least two"),
+        ([[1, -2], [2, 3]], "finite and nonnegative"),
+        ([[1, np.nan], [2, 3]], "finite and nonnegative"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            compute(_example_catalog(notebook_results, rows, [2, 4]))
+    catalog = _example_catalog(notebook_results, [[1, 2], [2, 3]], [2, 4])
+    metadata = catalog.metadata.model_copy(
+        update={
+            "hyperparameters": {
+                **catalog.metadata.hyperparameters,
+                "H0": PriorSpec(dist="Uniform", kwargs={"low": 50.0, "high": 90.0}),
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="fixed hyperparameters"):
+        compute(replace(catalog, _metadata=metadata))
+
+
+def test_frequency_correlation_preserves_rows_and_masks_constant_bins(
+    notebook_results: Mapping[str, Any],
+) -> None:
+    compute = notebook_results["compute_frequency_correlation"]
+    rows = [[1, 2, 0, 5], [2, 4, 0, 5], [3, 8, 0, 5]]
+    catalog = _example_catalog(notebook_results, rows, [2, 4, 8, 16])
+    frequencies, correlation = compute(
+        catalog, minimum_frequency=2, maximum_frequency=16
+    )
+    np.testing.assert_array_equal(frequencies, catalog.frequencies)
+    np.testing.assert_allclose(
+        correlation[:2, :2], np.corrcoef(np.array(rows)[:, :2].T)
+    )
+    assert np.isnan(correlation[2:, :]).all()
+    assert np.isnan(correlation[:, 2:]).all()
+    full_frequencies = np.geomspace(2, 2048, 150)
+    rows = np.arange(1, 5)[:, None] * np.arange(1, 151)[None, :]
+    catalog = _example_catalog(notebook_results, rows, full_frequencies)
+    frequencies, correlation = compute(
+        catalog, minimum_frequency=4, maximum_frequency=1024
+    )
+    assert 2 <= frequencies.size <= 64
+    assert frequencies[0] >= 4 and frequencies[-1] <= 1024
+    assert np.all(np.diff(frequencies) > 0)
+    np.testing.assert_allclose(correlation, 1)
+    with pytest.raises(ValueError, match="at least two frequency bins"):
+        compute(catalog, minimum_frequency=3, maximum_frequency=3.01)
+
+
+def test_sensitivity_uses_full_nonuniform_grid(
+    notebook_results: Mapping[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrogwb.frequency import bin_widths
+    from astrogwb.utils import years_to_seconds
+
+    frequencies = np.array([2.0, 3.0, 7.0, 20.0])
+    catalog = _example_catalog(
+        notebook_results, [[1, 2, 3, 4], [2, 3, 4, 5]], frequencies
+    )
+    compute = notebook_results["compute_network_sensitivity"]
+    noise = np.array([10.0, 20.0, 30.0, np.inf])
+    monkeypatch.setitem(compute.__globals__, "effective_psd", lambda *args: noise)
+    sensitivity = compute(
+        catalog,
+        notebook_results["registry"],
+        notebook_results["network"],
+        minimum_frequency=3,
+        maximum_frequency=7,
+    )
+    seconds = years_to_seconds(catalog.observation_time)
+    np.testing.assert_array_equal(sensitivity.band, [False, True, True, False])
+    np.testing.assert_allclose(
+        sensitivity.per_bin,
+        noise / np.sqrt(2 * seconds * np.asarray(bin_widths(frequencies))),
+    )
+    np.testing.assert_allclose(
+        sensitivity.per_log_frequency, noise / np.sqrt(2 * seconds * frequencies)
+    )
+    assert not np.allclose(
+        sensitivity.per_bin[1:3],
+        noise[1:3] / np.sqrt(2 * seconds * np.asarray(bin_widths(frequencies[1:3]))),
+        rtol=1e-3,
+        atol=0,
+    )
+    with pytest.raises(ValueError, match="no spectrum bins"):
+        compute(
+            catalog,
+            notebook_results["registry"],
+            notebook_results["network"],
+            minimum_frequency=30,
+            maximum_frequency=40,
+        )
+
+
+def test_spectrum_comparison_figures_reuse_case_order_and_colors(
+    notebook_results: Mapping[str, Any],
+) -> None:
+    from matplotlib.colors import to_rgba
+
+    for panel, prefix in enumerate(("num_events", "minimum_redshift")):
+        snr_axis = notebook_results[f"{prefix}_snr_figure"].axes[0]
+        labels = [text.get_text() for text in snr_axis.get_legend().get_texts()]
+        colors = [to_rgba(line.get_color()) for line in snr_axis.get_lines()]
+        axes = [
+            notebook_results["spectrum_mean_figure"].axes[panel],
+            notebook_results["spectrum_relative_variance_figure"].axes[panel],
+            *notebook_results[f"{prefix}_spectrum_sensitivity_figure"].axes,
+        ]
+        for axis in axes:
+            assert axis.get_xscale() == axis.get_yscale() == "log"
+            assert [text.get_text() for text in axis.get_legend().get_texts()][
+                :3
+            ] == labels
+            assert [
+                to_rgba(line.get_color()) for line in axis.get_lines()[:3]
+            ] == colors
+        sensitivity_axes = axes[2:]
+        assert len(sensitivity_axes) == 2
+        assert "per-bin" in sensitivity_axes[0].get_title()
+        assert "Per-e-fold" in sensitivity_axes[1].get_title()
+        for axis in sensitivity_axes:
+            assert len(axis.get_lines()) == 4
+            assert axis.get_lines()[-1].get_linestyle() == "--"
+        correlation_figure = notebook_results[f"{prefix}_frequency_correlation_figure"]
+        assert len(correlation_figure.axes) == 4  # Three cases plus shared colorbar.
+        assert [axis.get_title() for axis in correlation_figure.axes[:3]] == labels
+        for axis in correlation_figure.axes[:3]:
+            assert axis.collections[0].get_clim() == (-1, 1)
+
+
+def test_logarithmic_comparison_masks_undefined_and_zero_values(
+    notebook_results: Mapping[str, Any],
+) -> None:
+    compute = notebook_results["compute_spectrum_statistics"]
+    catalog = _example_catalog(notebook_results, [[1, 0, 5], [3, 0, 5]], [2, 4, 8])
+    statistics = compute(catalog)
+    plot = notebook_results["plot_relative_variance"]
+    figure = plot({"Example": {"case": statistics}}, np.array([True, True, True]))
+    x, y = figure.axes[0].get_lines()[0].get_data()
+    np.testing.assert_array_equal(x, [2, 4, 8])
+    assert y[0] == pytest.approx(0.5)
+    assert np.isnan(y[1:]).all()

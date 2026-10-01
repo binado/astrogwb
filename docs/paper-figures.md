@@ -159,6 +159,31 @@ seed 41, batch size 1024, one observing year, the 2–2048 Hz analysis band, and
 network `ET-2L-aligned-CE-Hanford`. The waveform and its grid are read from the
 shared default draw. Editing plotting cells reuses the calculated case results.
 
+Before the SNR sections, **Spectrum comparisons** reuses both sweeps' checked
+catalogs. Two-panel plots compare their mean spectra and the sample variance of
+`S_h / mean(S_h) - 1`, normalized by each case's own frequency-wise mean.
+Statistics run along the realization axis with `ddof=1` and require at least
+two finite, nonnegative spectrum rows and fixed hyperparameters. Zero-mean
+relative statistics are undefined; logarithmic curves mask undefined and
+nonpositive values.
+
+Each sweep also compares absolute spectrum standard deviation with network
+sensitivity in two separately labeled panels: exact per-bin Gaussian
+uncertainty `S_eff / sqrt(2 T Delta_f)` and the per-e-fold presentation scale
+`S_eff / sqrt(2 T f)`. Both use the artifact's observing time in seconds, and
+bin widths are computed on the full frequency grid before band selection.
+The per-e-fold curve is not a per-bin significance threshold. Standard
+deviation is scatter among individual spectra, not the standard error of their
+mean; these fixed-count artifacts describe Monte Carlo estimator scatter,
+without detector-noise realizations.
+
+Frequency-correlation heatmaps use all realization rows and up to 64 unique
+bins nearest logarithmically spaced frequencies within the selected band.
+Zero-variance frequencies are masked, with a common color scale from -1 to 1.
+Mean-spectrum plots help distinguish convergence with source count from the
+population change caused by varying minimum redshift. These plots do not add
+bootstrap, draw-count convergence, or numerical exports from issue 310.
+
 Both sections display an SNR distribution overlay and an overlay of
 amplitude-only Fisher widths rather than a full multiparameter Fisher
 calculation. The count sweep evaluates widths at fitted MAPs, as described
@@ -226,9 +251,15 @@ the optional Poisson data spectrum is a sixth cached artifact.
 Set `cache_only = True` to require existing spectra; a missing or
 mismatched artifact fails explicitly.
 
-With `write_figures = True`, the only analysis files written are six overlays
+With `write_figures = True`, the only analysis files written are twelve figures
 under `outputs/figures/spectrum_snrs/`:
 
+- `spectrum_mean.pdf`
+- `spectrum_relative_variance.pdf`
+- `num_events_spectrum_sensitivity.pdf`
+- `minimum_redshift_spectrum_sensitivity.pdf`
+- `num_events_frequency_correlation.pdf`
+- `minimum_redshift_frequency_correlation.pdf`
 - `num_events_snr_distribution.pdf`
 - `num_events_sigma_H0_distribution.pdf`
 - `num_events_H0_fisher_distribution.pdf`

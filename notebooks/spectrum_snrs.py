@@ -29,8 +29,16 @@ with app.setup(hide_code=True):
     from numpy.typing import ArrayLike, NDArray
     from numpyro import handlers
 
-    from astrogwb.catalog import SpectralDensityCatalog, SpectrumGenerator, simulate
-    from astrogwb.detector import effective_psd, gaussian_bin_scale
+    from astrogwb.catalog import (
+        SpectralDensityCatalog,
+        SpectrumGenerator,
+        simulate,
+    )
+    from astrogwb.detector import (
+        effective_psd,
+        gaussian_bin_scale,
+        log_frequency_noise_scale,
+    )
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb import spectral_snr
     from astrogwb.inference import gwb_amplitude_marginalized_model
@@ -113,6 +121,8 @@ def _():
         num_draws = 3
         batch_size = 8
         write_figures = False
+        cache_dir = default_cache_dir() / "spectra"
+        cache_only = False
 
     # Read the shared draw's waveform rather than copying its scientific settings.
     base_metadata = SpectraMetadata(
@@ -135,7 +145,10 @@ def _():
             "count": "fixed" if SMOKE else "poisson",
             "num_events": 64 if SMOKE else None,
             "num_draws": 1,
-            "population": {**base_metadata.population.model_dump(), "seed": data_seed},
+            "population": {
+                **base_metadata.population.model_dump(),
+                "seed": data_seed,
+            },
         }
     )
     h0_prior = priors(root=ROOT_DIR)["H0"]
@@ -336,87 +349,84 @@ def _(
     return (analyze_case,)
 
 
-@app.cell(hide_code=True)
-def _():
-    def plot_distribution_overlay(
-        distributions: Mapping[str, ArrayLike], *, xlabel: str
-    ) -> Figure:
-        """Overlay ordered case distributions; use ECDFs if any case is constant."""
-        if not distributions:
-            raise ValueError("at least one distribution is required")
-        arrays = {
-            label: np.asarray(values, dtype=np.float64)
-            for label, values in distributions.items()
-        }
-        if any(
-            values.ndim != 1 or values.size == 0 or not np.all(np.isfinite(values))
-            for values in arrays.values()
-        ):
-            raise ValueError("distributions must be non-empty finite 1D arrays")
-        if any(np.ptp(values) == 0 for values in arrays.values()):
-            # Plot ECDFs directly: a single draw must not be padded to match
-            # longer cases, which would introduce NaNs into the distribution.
-            figure, axis = plt.subplots(
-                figsize=(6.4, 4.8),
-                layout="constrained",
-                subplot_kw={"axes_class": Axes},
-            )
-            for label, values in arrays.items():
-                axis.ecdf(values, label=label)
-            axis.set_xlabel(xlabel)
-            axis.set_ylabel("Cumulative probability")
-            axis.set_ylim(0, 1.05)
-            axis.legend()
-            return figure
-        if len({values.size for values in arrays.values()}) != 1:
-            raise ValueError("KDE overlays require the same draw count for each case")
-        datasets = {
-            label: xr.DataTree.from_dict(
-                {"simulations": xr.Dataset({"value": ("draw", values)})}
-            )
-            for label, values in arrays.items()
-        }
-        collection = azp.plot_dist(
-            datasets,
-            group="simulations",
-            sample_dims=["draw"],
-            kind="kde",
-            backend="matplotlib",
-            # Sample extrema are not physical distribution boundaries. Reflecting
-            # there exaggerates edge modes, especially for small ensembles.
-            # Extend the evaluation grid so the density's tails remain visible.
-            stats={
-                "dist": {
-                    "bound_correction": False,
-                    "extend": True,
-                    "extend_fct": 3,
-                }
-            },
-            aes={"color": ["model"]},
-            aes_by_visuals={"dist": ["color"]},
-            visuals={
-                "credible_interval": False,
-                "point_estimate": False,
-                "point_estimate_text": False,
-                "title": False,
-                "remove_axis": False,
-            },
-            figure_kwargs={
-                "figsize": (6.4, 4.8),
-                "layout": "constrained",
-                "subplot_kws": {"axes_class": Axes},
-            },
+@app.function(hide_code=True)
+def plot_distribution_overlay(
+    distributions: Mapping[str, ArrayLike], *, xlabel: str
+) -> Figure:
+    """Overlay ordered case distributions; use ECDFs if any case is constant."""
+    if not distributions:
+        raise ValueError("at least one distribution is required")
+    arrays = {
+        label: np.asarray(values, dtype=np.float64)
+        for label, values in distributions.items()
+    }
+    if any(
+        values.ndim != 1 or values.size == 0 or not np.all(np.isfinite(values))
+        for values in arrays.values()
+    ):
+        raise ValueError("distributions must be non-empty finite 1D arrays")
+    if any(np.ptp(values) == 0 for values in arrays.values()):
+        # Plot ECDFs directly: a single draw must not be padded to match
+        # longer cases, which would introduce NaNs into the distribution.
+        figure, axis = plt.subplots(
+            figsize=(6.4, 4.8),
+            layout="constrained",
+            subplot_kw={"axes_class": Axes},
         )
-        figure = collection.viz["figure"].item()
-        axis = figure.axes[0]
+        for label, values in arrays.items():
+            axis.ecdf(values, label=label)
         axis.set_xlabel(xlabel)
-        axis.set_ylabel("Density")
-        axis.set_ylim(bottom=0)
-        # Explicit handles retain the supplied case order in both overlays.
-        axis.legend(axis.get_lines(), list(arrays))
+        axis.set_ylabel("Cumulative probability")
+        axis.set_ylim(0, 1.05)
+        axis.legend()
         return figure
-
-    return (plot_distribution_overlay,)
+    if len({values.size for values in arrays.values()}) != 1:
+        raise ValueError("KDE overlays require the same draw count for each case")
+    datasets = {
+        label: xr.DataTree.from_dict(
+            {"simulations": xr.Dataset({"value": ("draw", values)})}
+        )
+        for label, values in arrays.items()
+    }
+    collection = azp.plot_dist(
+        datasets,
+        group="simulations",
+        sample_dims=["draw"],
+        kind="kde",
+        backend="matplotlib",
+        # Sample extrema are not physical distribution boundaries. Reflecting
+        # there exaggerates edge modes, especially for small ensembles.
+        # Extend the evaluation grid so the density's tails remain visible.
+        stats={
+            "dist": {
+                "bound_correction": False,
+                "extend": True,
+                "extend_fct": 3,
+            }
+        },
+        aes={"color": ["model"]},
+        aes_by_visuals={"dist": ["color"]},
+        visuals={
+            "credible_interval": False,
+            "point_estimate": False,
+            "point_estimate_text": False,
+            "title": False,
+            "remove_axis": False,
+        },
+        figure_kwargs={
+            "figsize": (6.4, 4.8),
+            "layout": "constrained",
+            "subplot_kws": {"axes_class": Axes},
+        },
+    )
+    figure = collection.viz["figure"].item()
+    axis = figure.axes[0]
+    axis.set_xlabel(xlabel)
+    axis.set_ylabel("Density")
+    axis.set_ylim(bottom=0)
+    # Explicit handles retain the supplied case order in both overlays.
+    axis.legend(axis.get_lines(), list(arrays))
+    return figure
 
 
 @app.cell(hide_code=True)
@@ -562,7 +572,9 @@ def _(H0FisherPrediction, gaussian_mixture_density):
         )
         grid = np.linspace(lower, upper, 2048)
         figure, axis = plt.subplots(
-            figsize=(6.4, 4.8), layout="constrained", subplot_kw={"axes_class": Axes}
+            figsize=(6.4, 4.8),
+            layout="constrained",
+            subplot_kw={"axes_class": Axes},
         )
         for label, prediction in predictions.items():
             density = gaussian_mixture_density(
@@ -586,15 +598,281 @@ def _(H0FisherPrediction, gaussian_mixture_density):
 
 
 @app.cell(hide_code=True)
-def _(baseline_minimum_redshift):
-    mo.md(rf"""
-    ## Source-count sweep
+def _():
+    @dataclass(frozen=True)
+    class SpectrumStatistics:
+        """Pointwise ensemble scatter, rather than uncertainty on its mean."""
 
-    Hold $z_{{\min}} = {baseline_minimum_redshift}$ fixed and vary $N$.
-    In the finite-variance convergence regime, estimator scatter scales as
-    $N^{{-1/2}}$; the rate normalization keeps the underlying spectrum fixed.
-    """)
-    return
+        frequencies: NDArray[np.float64]
+        mean: NDArray[np.float64]
+        variance: NDArray[np.float64]
+        standard_deviation: NDArray[np.float64]
+        relative_variance: NDArray[np.float64]
+
+    @dataclass(frozen=True)
+    class NetworkSensitivity:
+        band: NDArray[np.bool_]
+        per_bin: NDArray[np.float64]
+        per_log_frequency: NDArray[np.float64]
+
+    def compute_spectrum_statistics(
+        catalog: SpectralDensityCatalog,
+    ) -> SpectrumStatistics:
+        """Compute unbiased pointwise statistics along the realization axis."""
+        spectra = np.asarray(catalog.spectral_density, dtype=np.float64)
+        if catalog.metadata.sampled:
+            raise ValueError("spectrum scatter requires fixed hyperparameters")
+        if spectra.shape[0] < 2:
+            raise ValueError("spectrum scatter requires at least two realizations")
+        if not np.all(np.isfinite(spectra)) or np.any(spectra < 0):
+            raise ValueError("spectra must be finite and nonnegative")
+        mean = np.mean(spectra, axis=0)
+        variance = np.var(spectra, axis=0, ddof=1)
+        relative_variance = np.full(mean.shape, np.nan)
+        positive = mean > 0
+        residuals = spectra[:, positive] / mean[positive] - 1
+        relative_variance[positive] = np.var(residuals, axis=0, ddof=1)
+        return SpectrumStatistics(
+            np.asarray(catalog.frequencies, dtype=np.float64),
+            mean,
+            variance,
+            np.sqrt(variance),
+            relative_variance,
+        )
+
+    def compute_network_sensitivity(
+        catalog: SpectralDensityCatalog,
+        detector_registry: DetectorRegistry,
+        network: str,
+        *,
+        minimum_frequency: float,
+        maximum_frequency: float,
+    ) -> NetworkSensitivity:
+        """Evaluate both scales on the full grid; selection never changes widths."""
+        if not (
+            np.isfinite(minimum_frequency)
+            and np.isfinite(maximum_frequency)
+            and 0 <= minimum_frequency < maximum_frequency
+        ):
+            raise ValueError("frequency bounds must be finite and ordered")
+        frequencies = jnp.asarray(catalog.frequencies)
+        band = np.asarray(
+            frequency_mask(frequencies, fmin=minimum_frequency, fmax=maximum_frequency)
+        )
+        if not np.any(band):
+            raise ValueError("the analysis frequency band contains no spectrum bins")
+        geometry, sensitivities = detector_registry.build_network(network)
+        noise = jnp.asarray(effective_psd(frequencies, geometry, sensitivities))
+        return NetworkSensitivity(
+            band,
+            np.asarray(
+                gaussian_bin_scale(noise, catalog.observation_time, frequencies)
+            ),
+            np.asarray(
+                log_frequency_noise_scale(noise, frequencies, catalog.observation_time)
+            ),
+        )
+
+    def compute_frequency_correlation(
+        catalog: SpectralDensityCatalog,
+        *,
+        minimum_frequency: float,
+        maximum_frequency: float,
+        max_bins: int = 64,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Select frequency columns, retaining every row and masking constant bins."""
+        statistics = compute_spectrum_statistics(catalog)
+        if max_bins < 2:
+            raise ValueError("max_bins must be at least two")
+        if not (0 < minimum_frequency < maximum_frequency < np.inf):
+            raise ValueError(
+                "correlation frequency bounds must be positive and ordered"
+            )
+        band = (statistics.frequencies >= minimum_frequency) & (
+            statistics.frequencies <= maximum_frequency
+        )
+        indices = np.flatnonzero(band)
+        if indices.size < 2:
+            raise ValueError("correlation requires at least two frequency bins")
+        frequencies = statistics.frequencies[indices]
+        if indices.size > max_bins:
+            targets = np.geomspace(frequencies[0], frequencies[-1], max_bins)
+            nearest = np.unique(np.abs(frequencies[:, None] - targets).argmin(axis=0))
+            indices = indices[nearest]
+            frequencies = statistics.frequencies[indices]
+        rows = np.asarray(catalog.spectral_density[:, indices], dtype=np.float64)
+        centered = rows - rows.mean(axis=0)
+        covariance = centered.T @ centered / (rows.shape[0] - 1)
+        scale = np.sqrt(np.diag(covariance))
+        denominator = scale[:, None] * scale[None, :]
+        correlation = np.full(covariance.shape, np.nan)
+        np.divide(covariance, denominator, out=correlation, where=denominator > 0)
+        return frequencies, np.clip(correlation, -1, 1)
+
+    def plot_positive_curve(
+        axis: Axes,
+        frequencies: NDArray[np.float64],
+        values: NDArray[np.float64],
+        band: NDArray[np.bool_],
+        *,
+        label: str,
+        color: str | None = None,
+        linestyle: str = "-",
+    ) -> None:
+        """Mask invalid log values without joining across missing bins."""
+        valid = band & (frequencies > 0) & np.isfinite(values) & (values > 0)
+        axis.plot(
+            frequencies[band],
+            np.where(valid, values, np.nan)[band],
+            label=label,
+            color=color,
+            linestyle=linestyle,
+        )
+        axis.set_xscale("log")
+        axis.set_yscale("log")
+        axis.set_xlabel(r"Frequency $[\mathrm{Hz}]$")
+
+    def plot_spectrum_means(
+        groups: Mapping[str, Mapping[str, SpectrumStatistics]],
+        band: NDArray[np.bool_],
+    ) -> Figure:
+        figure, axes = plt.subplots(
+            1,
+            len(groups),
+            figsize=(12.8, 4.8),
+            layout="constrained",
+            squeeze=False,
+            subplot_kw={"axes_class": Axes},
+        )
+        for axis, (title, cases) in zip(axes[0], groups.items(), strict=True):
+            for label, statistics in cases.items():
+                plot_positive_curve(
+                    axis, statistics.frequencies, statistics.mean, band, label=label
+                )
+            axis.set_title(title)
+            axis.set_ylabel(r"$\overline{S_h}\,[\mathrm{Hz}^{-1}]$")
+            axis.legend()
+        return figure
+
+    def plot_relative_variance(
+        groups: Mapping[str, Mapping[str, SpectrumStatistics]],
+        band: NDArray[np.bool_],
+    ) -> Figure:
+        figure, axes = plt.subplots(
+            1,
+            len(groups),
+            figsize=(12.8, 4.8),
+            layout="constrained",
+            squeeze=False,
+            subplot_kw={"axes_class": Axes},
+        )
+        for axis, (title, cases) in zip(axes[0], groups.items(), strict=True):
+            for label, statistics in cases.items():
+                plot_positive_curve(
+                    axis,
+                    statistics.frequencies,
+                    statistics.relative_variance,
+                    band,
+                    label=label,
+                )
+            axis.set_title(title)
+            axis.set_ylabel(r"$\mathrm{Var}(S_h/\overline{S_h}-1)$")
+            axis.legend()
+        return figure
+
+    def plot_spectrum_sensitivity(
+        cases: Mapping[str, SpectrumStatistics],
+        sensitivity: NetworkSensitivity,
+        *,
+        network: str,
+        observation_time: float,
+    ) -> Figure:
+        figure, axes = plt.subplots(
+            1,
+            2,
+            figsize=(12.8, 4.8),
+            layout="constrained",
+            subplot_kw={"axes_class": Axes},
+        )
+        for axis, noise, title, noise_label in zip(
+            axes,
+            (sensitivity.per_bin, sensitivity.per_log_frequency),
+            ("Exact per-bin uncertainty", "Per-e-fold presentation scale"),
+            (r"$\sigma_i$", r"$\sigma_{\ln f}$"),
+            strict=True,
+        ):
+            for label, statistics in cases.items():
+                plot_positive_curve(
+                    axis,
+                    statistics.frequencies,
+                    statistics.standard_deviation,
+                    sensitivity.band,
+                    label=label,
+                )
+            frequencies = next(iter(cases.values())).frequencies
+            plot_positive_curve(
+                axis,
+                frequencies,
+                noise,
+                sensitivity.band,
+                label=f"{network}: {noise_label}",
+                color="0.35",
+                linestyle="--",
+            )
+            axis.set_title(title)
+            axis.set_ylabel(r"Standard deviation / sensitivity $[\mathrm{Hz}^{-1}]$")
+            axis.legend()
+        figure.suptitle(f"Network sensitivity: T = {observation_time:g} yr")
+        return figure
+
+    def plot_frequency_correlations(
+        cases: Mapping[str, SpectralDensityCatalog],
+        *,
+        minimum_frequency: float,
+        maximum_frequency: float,
+    ) -> Figure:
+        figure, axes = plt.subplots(
+            1,
+            len(cases),
+            figsize=(4.8 * len(cases), 4.8),
+            layout="constrained",
+            squeeze=False,
+            subplot_kw={"axes_class": Axes},
+        )
+        for axis, (label, catalog) in zip(axes[0], cases.items(), strict=True):
+            frequencies, correlation = compute_frequency_correlation(
+                catalog,
+                minimum_frequency=minimum_frequency,
+                maximum_frequency=maximum_frequency,
+            )
+            mesh = axis.pcolormesh(
+                frequencies,
+                frequencies,
+                np.ma.masked_invalid(correlation),
+                shading="nearest",
+                vmin=-1,
+                vmax=1,
+                cmap="RdBu_r",
+            )
+            axis.set_xscale("log")
+            axis.set_yscale("log")
+            axis.set_xlabel(r"Frequency $[\mathrm{Hz}]$")
+            axis.set_ylabel(r"Frequency $[\mathrm{Hz}]$")
+            axis.set_title(label)
+        figure.colorbar(mesh, ax=list(axes[0]), label="Frequency correlation")
+        return figure
+
+    return (
+        SpectrumStatistics,
+        NetworkSensitivity,
+        compute_spectrum_statistics,
+        compute_network_sensitivity,
+        compute_frequency_correlation,
+        plot_spectrum_means,
+        plot_relative_variance,
+        plot_spectrum_sensitivity,
+        plot_frequency_correlations,
+    )
 
 
 @app.cell
@@ -612,7 +890,198 @@ def _(analyze_case, baseline_minimum_redshift, num_events):
 
 
 @app.cell
-def _(num_events_cases, plot_distribution_overlay):
+def _(analyze_case, baseline_num_events, minimum_redshift):
+    minimum_redshift_cases = {
+        _cutoff: analyze_case(baseline_num_events, _cutoff)
+        for _cutoff in minimum_redshift
+    }
+    pd.DataFrame(
+        [
+            {"minimum_redshift": _cutoff, **_case.summary}
+            for _cutoff, _case in minimum_redshift_cases.items()
+        ]
+    )
+    return (minimum_redshift_cases,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## Spectrum comparisons
+
+    Each case uses its own frequency-wise mean to define
+    $r_i(f)=S_{h,i}(f)/\overline{S_h}(f)-1$. Variances use all independent
+    realizations with $\mathrm{ddof}=1$. Zero-mean relative statistics and
+    zero-variance correlations are undefined and masked.
+
+    These fixed-count draws measure finite-catalog Monte Carlo estimator
+    scatter at fixed hyperparameters, including the recorded inclination
+    convention. Changing $z_{\min}$ changes the population and its rate.
+    Standard deviation describes individual spectra, not the standard error
+    of the ensemble mean, and no detector-noise realizations are included.
+
+    Compare absolute scatter with $\sigma_i=S_{\mathrm{eff},i}/\sqrt{2T\Delta f_i}$
+    using full-grid bin widths, and separately with the per-e-fold presentation
+    scale $\sigma_{\ln f}=S_{\mathrm{eff}}/\sqrt{2Tf}$. The latter is not a
+    per-bin significance threshold. Correlation heatmaps retain every draw
+    and select up to 64 frequency bins; coherent fluctuations can indicate
+    amplitude scatter, while departures from unity reveal shape variation.
+    """)
+    return
+
+
+@app.cell
+def _(
+    compute_spectrum_statistics,
+    compute_network_sensitivity,
+    num_events_cases,
+    minimum_redshift_cases,
+    registry,
+    network,
+    minimum_frequency,
+    maximum_frequency,
+):
+    spectrum_case_groups = {
+        "Source count": {
+            rf"$N = {_count}$": _case.catalog
+            for _count, _case in num_events_cases.items()
+        },
+        "Minimum redshift": {
+            rf"$z_{{\min}} = {_cutoff:.2f}$": _case.catalog
+            for _cutoff, _case in minimum_redshift_cases.items()
+        },
+    }
+    _catalogs = [
+        _catalog
+        for _cases in spectrum_case_groups.values()
+        for _catalog in _cases.values()
+    ]
+    _reference = _catalogs[0]
+    if any(
+        not np.array_equal(_catalog.frequencies, _reference.frequencies)
+        or _catalog.observation_time != _reference.observation_time
+        for _catalog in _catalogs
+    ):
+        raise ValueError(
+            "spectrum comparisons require the same grid and observation time"
+        )
+    spectrum_statistics = {
+        _title: {
+            _label: compute_spectrum_statistics(_catalog)
+            for _label, _catalog in _cases.items()
+        }
+        for _title, _cases in spectrum_case_groups.items()
+    }
+    spectrum_sensitivity = compute_network_sensitivity(
+        _reference,
+        registry,
+        network,
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
+    )
+    return spectrum_case_groups, spectrum_statistics, spectrum_sensitivity
+
+
+@app.cell
+def _(plot_spectrum_means, spectrum_statistics, spectrum_sensitivity):
+    spectrum_mean_figure = plot_spectrum_means(
+        spectrum_statistics, spectrum_sensitivity.band
+    )
+    spectrum_mean_figure
+    return (spectrum_mean_figure,)
+
+
+@app.cell
+def _(plot_relative_variance, spectrum_statistics, spectrum_sensitivity):
+    spectrum_relative_variance_figure = plot_relative_variance(
+        spectrum_statistics, spectrum_sensitivity.band
+    )
+    spectrum_relative_variance_figure
+    return (spectrum_relative_variance_figure,)
+
+
+@app.cell
+def _(
+    plot_spectrum_sensitivity,
+    spectrum_statistics,
+    spectrum_sensitivity,
+    network,
+    base_metadata,
+):
+    num_events_spectrum_sensitivity_figure = plot_spectrum_sensitivity(
+        spectrum_statistics["Source count"],
+        spectrum_sensitivity,
+        network=network,
+        observation_time=base_metadata.observation_time,
+    )
+    num_events_spectrum_sensitivity_figure
+    return (num_events_spectrum_sensitivity_figure,)
+
+
+@app.cell
+def _(
+    plot_frequency_correlations,
+    spectrum_case_groups,
+    minimum_frequency,
+    maximum_frequency,
+):
+    num_events_frequency_correlation_figure = plot_frequency_correlations(
+        spectrum_case_groups["Source count"],
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
+    )
+    num_events_frequency_correlation_figure
+    return (num_events_frequency_correlation_figure,)
+
+
+@app.cell
+def _(
+    plot_spectrum_sensitivity,
+    spectrum_statistics,
+    spectrum_sensitivity,
+    network,
+    base_metadata,
+):
+    minimum_redshift_spectrum_sensitivity_figure = plot_spectrum_sensitivity(
+        spectrum_statistics["Minimum redshift"],
+        spectrum_sensitivity,
+        network=network,
+        observation_time=base_metadata.observation_time,
+    )
+    minimum_redshift_spectrum_sensitivity_figure
+    return (minimum_redshift_spectrum_sensitivity_figure,)
+
+
+@app.cell
+def _(
+    plot_frequency_correlations,
+    spectrum_case_groups,
+    minimum_frequency,
+    maximum_frequency,
+):
+    minimum_redshift_frequency_correlation_figure = plot_frequency_correlations(
+        spectrum_case_groups["Minimum redshift"],
+        minimum_frequency=minimum_frequency,
+        maximum_frequency=maximum_frequency,
+    )
+    minimum_redshift_frequency_correlation_figure
+    return (minimum_redshift_frequency_correlation_figure,)
+
+
+@app.cell(hide_code=True)
+def _(baseline_minimum_redshift):
+    mo.md(rf"""
+    ## Source-count sweep
+
+    Hold $z_{{\min}} = {baseline_minimum_redshift}$ fixed and vary $N$.
+    In the finite-variance convergence regime, estimator scatter scales as
+    $N^{{-1/2}}$; the rate normalization keeps the underlying spectrum fixed.
+    """)
+    return
+
+
+@app.cell
+def _(num_events_cases):
     num_events_snr_figure = plot_distribution_overlay(
         {rf"$N = {_count}$": _case.snrs for _count, _case in num_events_cases.items()},
         xlabel="SNR",
@@ -622,7 +1091,7 @@ def _(num_events_cases, plot_distribution_overlay):
 
 
 @app.cell
-def _(num_events_h0_predictions, plot_distribution_overlay):
+def _(num_events_h0_predictions):
     num_events_sigma_h0_figure = plot_distribution_overlay(
         {
             rf"$N = {_count}$": _prediction.sigma_h0
@@ -722,7 +1191,7 @@ def _(
             }
         ]
     )
-    return data_catalog, data_snr, data_spectrum
+    return data_catalog, data_spectrum
 
 
 @app.cell
@@ -835,11 +1304,11 @@ def _(base_metadata, num_events_h0_predictions):
         ]
     )
     num_events_h0_residual_summary
-    return num_events_h0_residual_summary, num_events_h0_residuals
+    return (num_events_h0_residuals,)
 
 
 @app.cell
-def _(num_events_h0_residuals, plot_distribution_overlay):
+def _(num_events_h0_residuals):
     num_events_h0_residual_figure = plot_distribution_overlay(
         {
             rf"$N = {_count}$": _residuals
@@ -857,12 +1326,20 @@ def _(num_events_h0_residuals, plot_distribution_overlay):
 
         _reference = ndtr(_grid)
     _axis.plot(
-        _grid, _reference, color="0.35", linestyle="--", label=r"$\mathcal{N}(0,1)$"
+        _grid,
+        _reference,
+        color="0.35",
+        linestyle="--",
+        label=r"$\mathcal{N}(0,1)$",
     )
     if _axis.get_ylabel() == "Density":
         _axis.set_ylim(
             0,
-            1.05 * max(float(np.max(_line.get_ydata())) for _line in _axis.get_lines()),
+            1.05
+            * max(
+                float(np.max(np.asarray(_line.get_ydata())))
+                for _line in _axis.get_lines()
+            ),
         )
     _axis.axvline(0, color="0.6", linewidth=0.8)
     _axis.axvspan(-1, 1, color="0.5", alpha=0.08)
@@ -889,22 +1366,7 @@ def _(baseline_num_events):
 
 
 @app.cell
-def _(analyze_case, baseline_num_events, minimum_redshift):
-    minimum_redshift_cases = {
-        _cutoff: analyze_case(baseline_num_events, _cutoff)
-        for _cutoff in minimum_redshift
-    }
-    pd.DataFrame(
-        [
-            {"minimum_redshift": _cutoff, **_case.summary}
-            for _cutoff, _case in minimum_redshift_cases.items()
-        ]
-    )
-    return (minimum_redshift_cases,)
-
-
-@app.cell
-def _(minimum_redshift_cases, plot_distribution_overlay):
+def _(minimum_redshift_cases):
     minimum_redshift_snr_figure = plot_distribution_overlay(
         {
             rf"$z_{{\min}} = {_cutoff:.2f}$": _case.snrs
@@ -917,7 +1379,7 @@ def _(minimum_redshift_cases, plot_distribution_overlay):
 
 
 @app.cell
-def _(minimum_redshift_cases, plot_distribution_overlay):
+def _(minimum_redshift_cases):
     minimum_redshift_sigma_h0_figure = plot_distribution_overlay(
         {
             rf"$z_{{\min}} = {_cutoff:.2f}$": _case.sigma_h0
@@ -939,11 +1401,28 @@ def _(
     num_events_h0_residual_figure,
     num_events_sigma_h0_figure,
     num_events_snr_figure,
+    spectrum_mean_figure,
+    spectrum_relative_variance_figure,
+    num_events_spectrum_sensitivity_figure,
+    minimum_redshift_spectrum_sensitivity_figure,
+    num_events_frequency_correlation_figure,
+    minimum_redshift_frequency_correlation_figure,
     write_figures,
 ):
     if write_figures:
         save_figures(
             {
+                BASE_DIR / "spectrum_mean.pdf": spectrum_mean_figure,
+                BASE_DIR
+                / "spectrum_relative_variance.pdf": spectrum_relative_variance_figure,
+                BASE_DIR
+                / "num_events_spectrum_sensitivity.pdf": num_events_spectrum_sensitivity_figure,
+                BASE_DIR
+                / "minimum_redshift_spectrum_sensitivity.pdf": minimum_redshift_spectrum_sensitivity_figure,
+                BASE_DIR
+                / "num_events_frequency_correlation.pdf": num_events_frequency_correlation_figure,
+                BASE_DIR
+                / "minimum_redshift_frequency_correlation.pdf": minimum_redshift_frequency_correlation_figure,
                 BASE_DIR / "num_events_snr_distribution.pdf": num_events_snr_figure,
                 BASE_DIR
                 / "num_events_sigma_H0_distribution.pdf": num_events_sigma_h0_figure,

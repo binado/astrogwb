@@ -52,12 +52,14 @@ repository root as the working directory.
   of the fiducial $S_h$ / $\Omega_{\mathrm{GW}}$, network $S_{\mathrm{eff}}$,
   $\sigma$, and per-network SNR. No catalog file.
 - **`spectrum_snrs.py`** — marimo notebook. Fixed-count spectrum ensembles
-  swept over source count and minimum redshift, with SNR and $\sigma(H_0)$
+  swept over source count and minimum redshift. Before the SNRs, compares
+  mean spectra, relative-residual variance, absolute standard deviation against
+  per-bin and per-e-fold network sensitivity, and frequency correlations. Includes SNR and $\sigma(H_0)$
   distribution overlays, plus an inferred $H_0$ Gaussian-mixture overlay for
   the source-count sweep, fitted to the largest ensemble's mean spectrum
   (or an independent Poisson realization),
   and normalized MAP residuals with a unit Gaussian
-  reference. Uses the checked spectrum cache and writes six
+  reference. Uses the checked spectrum cache and writes twelve
   comparison figures. Run `just test-spectrum-snrs-notebook` for a tiny smoke test.
 
 The paper notebooks merge a run's config layers with
