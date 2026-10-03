@@ -136,148 +136,115 @@ snakemake --snakefile Snakefile --cores 1 \
 
 Standalone workflow figure products are written under `outputs/figures/`.
 
-## Spectrum-realization SNR analysis
+## Spectrum-realization shot-noise analysis
 
-`notebooks/spectrum_snrs.py` is a marimo notebook with two local, fixed-count
-spectrum sweeps for one detector network. Open it from the repository root:
+`notebooks/spectrum_snrs.py` is a marimo notebook that justifies two choices of
+the appendix, the number of injections `N` (128k-256k recommended) and the
+minimum redshift `z_min`, by one criterion: **catalog shot noise stays below
+the expected `sigma(H0)`**. Open it from the repository root:
 
 ```bash
 uv run --extra notebook --group jupyter marimo edit notebooks/spectrum_snrs.py
 ```
 
-Edit its configuration cell to choose the network, observation time, frequency
-band, draw count, seed, batch size, cache directory, and sweep values. Scientific
-fiducials, waveform settings, population settings, and the detector registry
-come from the shared configuration accessors, as in `fiducial_spectrum.py`.
-There are no CLI configuration flags or Snakemake rules for this analysis.
+The notebook is a physics-first walkthrough: a markdown cell explains each
+step, and the code lives in named top-level functions collected in a toolbox
+section. Edit its configuration cell to choose the network, observation time,
+frequency band, draw count, seed, batch size, cache directory, sweep values,
+`tolerance` and `n_bootstrap`. Scientific fiducials, waveform settings,
+population settings, and the detector registry come from the shared
+configuration accessors, as in `fiducial_spectrum.py`. There are no CLI
+configuration flags or Snakemake rules for this analysis.
 
-The source-count section compares `num_events = [16384, 32768, 65536]` at
-`minimum_redshift = 0.35`. The minimum-redshift section compares
-`[0.05, 0.15, 0.35]` at `num_events = 16384`. Each case has 1000 independent
-realizations at fixed fiducial hyperparameters by default. Other defaults are
-seed 41, batch size 1024, one observing year, the 2–2048 Hz analysis band, and
-network `ET-2L-aligned-CE-Hanford`. The waveform and its grid are read from the
-shared default draw. Editing plotting cells reuses the calculated case results.
+### Ensembles
 
-Before the SNR sections, **Spectrum comparisons** reuses both sweeps' checked
-catalogs. Two-panel plots compare their mean spectra and the sample variance of
-`S_h / mean(S_h) - 1`, normalized by each case's own frequency-wise mean.
-Statistics run along the realization axis with `ddof=1` and require at least
-two finite, nonnegative spectrum rows and fixed hyperparameters. Zero-mean
-relative statistics are undefined; logarithmic curves mask undefined and
-nonpositive values.
+Every ensemble is a fixed-count set of independent draws (100 by default) at
+the fiducial hyperparameters, served from the checked spectrum cache or
+generated on a miss. Other defaults are seed 41, batch size 1024, one observing
+year, the 2-2048 Hz band, and network `ET-2L-aligned-CE-Hanford`.
 
-Each sweep also compares absolute spectrum standard deviation with network
-sensitivity in two separately labeled panels: exact per-bin Gaussian
-uncertainty `S_eff / sqrt(2 T Delta_f)` and the per-e-fold presentation scale
-`S_eff / sqrt(2 T f)`. Both use the artifact's observing time in seconds, and
-bin widths are computed on the full frequency grid before band selection.
-The per-e-fold curve is not a per-bin significance threshold. Standard
-deviation is scatter among individual spectra, not the standard error of their
-mean; these fixed-count artifacts describe Monte Carlo estimator scatter,
-without detector-noise realizations.
+- The **count sweep** uses `N = 2^12 ... 2^18` at `z_min = 0.35`.
+- The **grid** uses `N` in `{2^14, 2^16, 2^17, 2^18}` for `z_min` in
+  `{0.05, 0.15, 0.35}`. It reuses the count sweep's ensembles at the baseline
+  cutoff.
+- The **Poisson** ensemble draws its count from the population's rate.
 
-Frequency-correlation heatmaps use all realization rows and up to 64 unique
-bins nearest logarithmically spaced frequencies within the selected band.
-Zero-variance frequencies are masked, with a common color scale from -1 to 1.
-Mean-spectrum plots help distinguish convergence with source count from the
-population change caused by varying minimum redshift. These plots do not add
-bootstrap, draw-count convergence, or numerical exports from issue 310.
+Cache keys depend on count, cutoff, seed, and draw count, not on the detector
+or analysis band. `cache_only = True` requires existing spectra and fails
+explicitly on a missing one.
 
-Both sections display an SNR distribution overlay and an overlay of
-amplitude-only Fisher widths rather than a full multiparameter Fisher
-calculation. The count sweep evaluates widths at fitted MAPs, as described
-below; the redshift sweep uses `sigma(H0) = H0_fid / SNR`. Case labels and colors
-follow the configured list order. If any case is constant (including a single draw), all
-curves in that overlay use ECDFs; otherwise they use KDEs.
-KDEs extend beyond the observed extrema and do not reflect density at those
-sample-dependent edges; tiny smoke ensembles verify execution and layout,
-not the shape of the physical distribution. Compact summary
-tables are displayed in the notebook, including sample SD, quantiles, relative
-scatter, and the mean spectrum's SNR. `mean(SNR)` and `SNR(mean spectrum)` remain
-separate because SNR is nonlinear.
+### Offset statistic
 
-The source-count section also overlays an amplitude-only Fisher approximation
-to the inferred H0 distribution. Each catalog draw is a Monte Carlo template
-fitted to one common reference spectrum. By default, `data_reference = "largest_mean"`
-averages the full spectra from all 1000 draws at the largest configured count
-(`max(num_events)`, 65536 by default), then uses that same spectrum for every N.
-It averages spectra, not SNRs, and reuses that ensemble's checked artifact.
-Set `data_reference = "poisson"` to use one independently seeded physical data
-realization at the same fiducials, redshift bounds, waveform, and observing time.
-The Poisson seed is 42; template seed is 41. The amplitude-marginalized model supplies
-`amplitude_mle = (data|template)/(template|template)` and `template_optimal_snr`
-using the full spectra and its Gaussian noise weights. With `S_h ∝ 1/H0` and
-the shared uniform prior on H0, the MAP is `H0_fid / amplitude_mle`, clipped
-to that prior's support. Boundary MAPs are flagged in the displayed summary.
-The local Fisher width is evaluated at the MAP,
-`H0_MAP**2 / (H0_fid * template_optimal_snr)`. The plotted density is the
-equally weighted mixture of these per-draw Gaussians, evaluated directly without
-additional posterior sampling or KDE. It includes both template-induced MAP
-scatter and conditional Fisher uncertainty. If draws were observations fitted
-with a fixed mean template, the amplitude fit would instead use that fixed
-template and the varying draws as data. Fisher Gaussians at prior boundaries
-do not describe the truncated posterior.
+Each Monte Carlo template is fitted to a common reference spectrum with the
+amplitude-marginalized model's sufficient statistics (`amplitude_mle`,
+`template_optimal_snr`). With `S_h ∝ 1/H0` and the shared uniform prior on H0,
+the MAP is `H0_fid / amplitude_mle`, clipped to the prior's support; boundary
+MAPs are flagged in the displayed tables.
 
-It also overlays the per-template normalized MAP residuals,
-`(H0_MAP - H0_fid) / sigma(H0)`, against a standard normal reference and marks
-the interval `[-1, 1]`. A displayed table reports mean, sample SD, RMS, and
-the fraction of offsets exceeding one Fisher sigma. These draws contain no
-detector noise, so a unit-width Gaussian is a comparison scale, not a required
-sampling distribution. A width greater than one indicates template-induced MAP
-scatter larger than the Fisher uncertainty. Every N uses the same reference;
-the ensembles are not separately recentered. The default reference shares
-draws with the largest template ensemble and measures convergence relative to
-that ensemble. It cannot detect systematic error shared by all draws. Averaging
-1000 draws makes random reference error much smaller than individual-template
-scatter. With the Poisson option, a mean residual can also reflect fluctuations
-in the physical data realization; separating those effects requires repeated
-independent data realizations.
+The residual is `r = (H0_MAP - H0_fid) / sigma_ref` with the **fixed** width
+`sigma_ref = H0_fid / rho_ref`, where `rho_ref` is the SNR of the reference
+spectrum. Dividing by each draw's own width instead would mix numerator and
+denominator and skew the tails, so that variant is kept only as a cross-check
+column (`sd_per_draw`) and in the Fisher-mixture figure. Because shot noise and
+detector noise add in quadrature, `sd(r)` is the fractional inflation of
+`sigma(H0)` up to `sqrt(1 + sd^2) - 1`; the tolerance `sd(r) <= 0.1` is about
+0.5%. Errors on `mean`, `sd`, `rms`, `q95(|r|)` and `P(|r| > 1)` are seeded
+bootstrap errors from resampling draws.
 
-Fixed-count results measure **finite-catalog estimator scatter**. Increasing
-`num_events` tests convergence about the same rate-normalized spectrum;
-changing the minimum redshift changes the population and can change both the
-spectrum and its scatter. The draws include source fluctuations and exclude
-detector-noise realizations. The shared population's inclination convention
-is retained. Nearby sources can strongly affect tails, which require enough
-realizations to characterize reliably.
+The reference is `data_reference = "largest_mean"` by default, the mean spectrum
+over all draws at the largest `N` (a mean of spectra, not of SNRs), or
+`"poisson"`, one independently seeded Poisson draw (seed 42). The default
+shares draws with the largest ensemble, so it measures convergence relative to
+that ensemble and cannot reveal an error common to every draw. In the grid each
+`z_min` uses its own reference and `sigma_ref`, and its `N_max` point shares
+draws with that reference (about 1% of one template's scatter).
 
-The notebook uses `simulate` and the existing content-addressed spectrum cache
-at `default_cache_dir() / "spectra"`, shared across worktrees. Changing count,
-cutoff, seed, or draw count changes the key; detector settings and the analysis
-band do not. Identical baseline settings in the two sections share one
-artifact. The default largest-ensemble mean requires no additional artifact;
-the optional Poisson data spectrum is a sixth cached artifact.
-Set `cache_only = True` to require existing spectra; a missing or
-mismatched artifact fails explicitly.
+### Figures
 
-With `write_figures = True`, the only analysis files written are twelve figures
-under `outputs/figures/spectrum_snrs/`:
+With `write_figures = True`, the notebook writes fourteen figures under
+`outputs/figures/spectrum_snrs/`. The three **paper figures** are:
 
-- `spectrum_mean.pdf`
-- `spectrum_relative_variance.pdf`
-- `num_events_spectrum_sensitivity.pdf`
-- `minimum_redshift_spectrum_sensitivity.pdf`
-- `num_events_frequency_correlation.pdf`
-- `minimum_redshift_frequency_correlation.pdf`
-- `num_events_snr_distribution.pdf`
-- `num_events_sigma_H0_distribution.pdf`
-- `num_events_H0_fisher_distribution.pdf`
-- `num_events_H0_normalized_residual_distribution.pdf`
-- `minimum_redshift_snr_distribution.pdf`
-- `minimum_redshift_sigma_H0_distribution.pdf`
+- `paper_shot_noise_vs_detector.pdf` (A1): shot-noise standard deviation of the
+  spectrum for the paper's source counts against the per-bin detector
+  uncertainty `S_eff / sqrt(2 T Delta_f)`, with bin widths from the full grid
+  before band selection.
+- `paper_offset_scaling.pdf` (A2): left, kernel densities of the fixed-width
+  residuals with the tolerance band; right, `sd(r)` against `N` with bootstrap
+  errors, an `N^(-1/2)` guide through the smallest `N`, the tolerance line and
+  the Poisson ensemble as a separate marker.
+- `paper_offset_vs_min_redshift.pdf` (A3): `sd(r)` (solid) and `q95(|r|)`
+  (dashed) against `N`, one curve per `z_min`, with the guide and tolerance.
 
-Set `write_figures = False` for display only. Figure styling and export settings
-use the shared paper style, including its LaTeX requirement. No CSV or
-provenance JSON is exported; each case retains its metadata in notebook memory
-and the checked spectrum artifact carries the generating record.
+The eleven **supporting figures** are `spectrum_mean.pdf`,
+`spectrum_relative_variance.pdf`, `num_events_spectrum_sensitivity.pdf`,
+`minimum_redshift_spectrum_sensitivity.pdf`,
+`num_events_frequency_correlation.pdf`,
+`minimum_redshift_frequency_correlation.pdf`, `num_events_snr_distribution.pdf`,
+`num_events_sigma_H0_distribution.pdf`, `num_events_H0_fisher_distribution.pdf`,
+`minimum_redshift_snr_distribution.pdf` and
+`minimum_redshift_sigma_H0_distribution.pdf`. The minimum-redshift supporting
+figures use the recommended `N = 2^17`. Overlays use ECDFs if any case is
+constant and KDEs otherwise; KDEs extend beyond the observed extrema.
 
-`just test-spectrum-snrs-notebook` checks the marimo graph and runs both sweeps
-with `ASTROGWB_NOTEBOOK_SMOKE=1`: three realizations, source counts `[8, 16, 32]`,
-a redshift-sweep count of 8, and figure saving disabled. Both reference options
-are tested; the Poisson option substitutes a separate 64-source fixed-count
-data draw for the physical realization. The execution
-tests use a temporary spectrum cache and check that repeat execution needs no generation.
+The notebook ends with a verdict table (`sd(r)` and `q95(|r|)` at the two
+largest grid counts for each `z_min`, with pass/fail against the tolerance) and
+a conclusion filled in from it. Set `write_figures = False` for display only.
+Figure styling uses the shared paper style, including its LaTeX requirement.
+No CSV or provenance JSON is exported.
+
+Draws contain source fluctuations only, with the population's inclination
+convention retained, and no detector-noise realizations. Execute the smoke
+test, which checks that the whole notebook runs, with:
+
+```bash
+uv run --extra notebook --group dev marimo check --strict notebooks/spectrum_snrs.py
+ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/spectrum_snrs.py
+```
+
+Smoke mode uses three draws, counts `[8, 16, 32]`, a 64-source fixed-count
+stand-in for the Poisson option, and no figure saving. A full run
+(`N = 2^18`, 100 draws, three cutoffs) is expensive the first time, until the
+spectrum cache is populated.
 
 ## Scripts
 

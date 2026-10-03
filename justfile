@@ -67,11 +67,6 @@ test-notebooks:
     uv run --extra notebook --group jupyter \
         jupytext --to notebook --execute notebooks/catalog_convergence.py
 
-# Check the reactive graph and execute both spectrum SNR sweeps with tiny draws.
-test-spectrum-snrs-notebook:
-    uv run --extra notebook --group dev marimo check --strict notebooks/spectrum_snrs.py
-    uv run --extra notebook --group dev pytest tests/paper/test_spectrum_snrs_notebook.py
-
 # Convert the py:percent notebooks to .ipynb. Marimo notebooks stay as Python.
 convert-notebooks:
     uv run --group jupyter jupytext --to notebook \

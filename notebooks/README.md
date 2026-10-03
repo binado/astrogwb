@@ -51,16 +51,16 @@ repository root as the working directory.
 - **`fiducial_spectrum.py`** — marimo notebook. One seeded forward-model draw
   of the fiducial $S_h$ / $\Omega_{\mathrm{GW}}$, network $S_{\mathrm{eff}}$,
   $\sigma$, and per-network SNR. No catalog file.
-- **`spectrum_snrs.py`** — marimo notebook. Fixed-count spectrum ensembles
-  swept over source count and minimum redshift. Before the SNRs, compares
-  mean spectra, relative-residual variance, absolute standard deviation against
-  per-bin and per-e-fold network sensitivity, and frequency correlations. Includes SNR and $\sigma(H_0)$
-  distribution overlays, plus an inferred $H_0$ Gaussian-mixture overlay for
-  the source-count sweep, fitted to the largest ensemble's mean spectrum
-  (or an independent Poisson realization),
-  and normalized MAP residuals with a unit Gaussian
-  reference. Uses the checked spectrum cache and writes twelve
-  comparison figures. Run `just test-spectrum-snrs-notebook` for a tiny smoke test.
+- **`spectrum_snrs.py`** — marimo notebook for the appendix's shot-noise
+  argument. A physics-first walkthrough of how catalog shot noise scales with
+  the number of injections $N$ and the minimum redshift $z_{\min}$, judged
+  against the expected $\sigma(H_0)$. It fits every template to a common
+  reference spectrum, measures the MAP offset in units of a fixed
+  $\sigma_{\mathrm{ref}}$ with bootstrap errors, and ends with a pass/fail
+  verdict against a tolerance on $\mathrm{sd}(r)$. Uses the checked spectrum
+  cache and writes three paper figures (A1-A3) and eleven supporting
+  figures. Smoke test:
+  `ASTROGWB_NOTEBOOK_SMOKE=1 uv run --extra notebook --group dev python notebooks/spectrum_snrs.py`.
 
 The paper notebooks merge a run's config layers with
 `assemble_run(*REFERENCE_RUN)` — the by-name convenience wrapper over the same
