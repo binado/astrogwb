@@ -97,11 +97,11 @@ def _():
 
     minimum_redshift = [0.05, 0.15, 0.35]
     baseline_num_events = 16384
-    num_events = [baseline_num_events * x for x in [1, 2, 4, 8]]
+    num_events = [2**14, 2**16, 2**18]
     baseline_minimum_redshift = 0.35
     maximum_redshift = 20.0
 
-    num_draws = 1000
+    num_draws = 100
     seed = 41
     data_seed = 42  # used only for the independent Poisson option
     batch_size = 1024
@@ -156,6 +156,14 @@ def _():
             },
         }
     )
+    # Poisson forward-model ensemble: the count follows rate * observation_time.
+    poisson_metadata = SpectraMetadata.model_validate(
+        {
+            **base_metadata.model_dump(),
+            "count": "fixed" if SMOKE else "poisson",
+            "num_events": 64 if SMOKE else None,
+        }
+    )
     h0_prior = priors(root=ROOT_DIR)["H0"]
     # Inverting the MLE gives the MAP only for a uniform prior on H0.
     if not isinstance(h0_prior, dist.Uniform) or float(h0_prior.low) <= 0:
@@ -179,6 +187,7 @@ def _():
         minimum_redshift,
         network,
         num_events,
+        poisson_metadata,
         registry,
         write_figures,
     )
@@ -313,18 +322,8 @@ def _(
     registry,
     summarize_spectrum_snrs,
 ):
-    def analyze_case(num_events: int, minimum_redshift: float) -> SNRCase:
-        """Analyze one count/cutoff choice using this notebook's common settings."""
-        population = base_metadata.population.with_model_kwargs(
-            minimum_redshift=minimum_redshift
-        )
-        metadata = SpectraMetadata.model_validate(
-            {
-                **base_metadata.model_dump(),
-                "num_events": num_events,
-                "population": population,
-            }
-        )
+    def analyze_metadata(metadata: SpectraMetadata) -> SNRCase:
+        """Analyze one spectrum ensemble using this notebook's common settings."""
         catalog = simulate(
             metadata,
             SpectrumGenerator(batch_size=batch_size),
@@ -351,7 +350,22 @@ def _(
             catalog=catalog,
         )
 
-    return (analyze_case,)
+    def analyze_case(num_events: int, minimum_redshift: float) -> SNRCase:
+        """Analyze one count/cutoff choice using this notebook's common settings."""
+        population = base_metadata.population.with_model_kwargs(
+            minimum_redshift=minimum_redshift
+        )
+        return analyze_metadata(
+            SpectraMetadata.model_validate(
+                {
+                    **base_metadata.model_dump(),
+                    "num_events": num_events,
+                    "population": population,
+                }
+            )
+        )
+
+    return analyze_case, analyze_metadata
 
 
 @app.function(hide_code=True)
@@ -905,6 +919,22 @@ def _(analyze_case, baseline_minimum_redshift, num_events):
 
 
 @app.cell
+def _(analyze_metadata, poisson_metadata):
+    # Kept apart from num_events_cases: its count is random, not a sweep value.
+    poisson_case = analyze_metadata(poisson_metadata)
+    pd.DataFrame(
+        [
+            {
+                "count": poisson_case.metadata.count,
+                "mean_num_events": float(np.mean(poisson_case.catalog.n_events)),
+                **poisson_case.summary,
+            }
+        ]
+    )
+    return (poisson_case,)
+
+
+@app.cell
 def _(analyze_case, baseline_num_events, minimum_redshift):
     minimum_redshift_cases = {
         _cutoff: analyze_case(baseline_num_events, _cutoff)
@@ -956,6 +986,7 @@ def _(
     minimum_redshift_cases,
     network,
     num_events_cases,
+    poisson_case,
     registry,
 ):
     spectrum_case_groups = {
@@ -977,7 +1008,7 @@ def _(
     if any(
         not np.array_equal(_catalog.frequencies, _reference.frequencies)
         or _catalog.observation_time != _reference.observation_time
-        for _catalog in _catalogs
+        for _catalog in [*_catalogs, poisson_case.catalog]
     ):
         raise ValueError(
             "spectrum comparisons require the same grid and observation time"
@@ -989,6 +1020,7 @@ def _(
         }
         for _title, _cases in spectrum_case_groups.items()
     }
+    poisson_spectrum_statistics = compute_spectrum_statistics(poisson_case.catalog)
     spectrum_sensitivity = compute_network_sensitivity(
         _reference,
         registry,
@@ -996,7 +1028,12 @@ def _(
         minimum_frequency=minimum_frequency,
         maximum_frequency=maximum_frequency,
     )
-    return spectrum_case_groups, spectrum_sensitivity, spectrum_statistics
+    return (
+        poisson_spectrum_statistics,
+        spectrum_case_groups,
+        spectrum_sensitivity,
+        spectrum_statistics,
+    )
 
 
 @app.cell
@@ -1022,11 +1059,12 @@ def _(
     base_metadata,
     network,
     plot_spectrum_sensitivity,
+    poisson_spectrum_statistics,
     spectrum_sensitivity,
     spectrum_statistics,
 ):
     num_events_spectrum_sensitivity_figure = plot_spectrum_sensitivity(
-        spectrum_statistics["Source count"],
+        {**spectrum_statistics["Source count"], "Poisson": poisson_spectrum_statistics},
         spectrum_sensitivity,
         network=network,
         observation_time=base_metadata.observation_time,
@@ -1098,9 +1136,15 @@ def _(baseline_minimum_redshift):
 
 
 @app.cell
-def _(num_events_cases):
+def _(num_events_cases, poisson_case):
     num_events_snr_figure = plot_distribution_overlay(
-        {rf"$N = {_count}$": _case.snrs for _count, _case in num_events_cases.items()},
+        {
+            **{
+                rf"$N = {_count}$": _case.snrs
+                for _count, _case in num_events_cases.items()
+            },
+            "Poisson": poisson_case.snrs,
+        },
         xlabel="SNR",
     )
     num_events_snr_figure
@@ -1108,11 +1152,14 @@ def _(num_events_cases):
 
 
 @app.cell
-def _(num_events_h0_predictions):
+def _(num_events_h0_predictions, poisson_h0_prediction):
     num_events_sigma_h0_figure = plot_distribution_overlay(
         {
-            rf"$N = {_count}$": _prediction.sigma_h0
-            for _count, _prediction in num_events_h0_predictions.items()
+            **{
+                rf"$N = {_count}$": _prediction.sigma_h0
+                for _count, _prediction in num_events_h0_predictions.items()
+            },
+            "Poisson": poisson_h0_prediction.sigma_h0,
         },
         xlabel=r"$\sigma_{H_0,\mathrm{MAP}}\,[\mathrm{km\,s^{-1}\,Mpc^{-1}}]$",
     )
@@ -1127,7 +1174,7 @@ def _():
 
     Fit every Monte Carlo **template** to one common reference spectrum. By
     default, average the full spectra from all draws at the largest configured
-    source count ($N=65536$, 1000 draws by default). This is a mean spectrum,
+    source count ($N=262144$, 100 draws by default). This is a mean spectrum,
     not a mean SNR, and the same reference is used for every $N$.
 
     Set `data_reference = "poisson"` to use one independently seeded Poisson
@@ -1221,6 +1268,7 @@ def _(
     minimum_frequency,
     network,
     num_events_cases,
+    poisson_case,
     registry,
     template_amplitude_statistics,
 ):
@@ -1246,6 +1294,21 @@ def _(
             fiducial_h0=_case.metadata.fixed["H0"],
             h0_prior=h0_prior,
         )
+    if not np.array_equal(poisson_case.catalog.frequencies, data_catalog.frequencies):
+        raise ValueError("data and templates must use the same frequency grid")
+    _amplitudes, _snrs = template_amplitude_statistics(
+        poisson_case.catalog.spectral_density,
+        data_spectrum,
+        _scale,
+        _band,
+        fiducial_h0=poisson_case.metadata.fixed["H0"],
+    )
+    poisson_h0_prediction = fisher_h0_prediction(
+        _amplitudes,
+        _snrs,
+        fiducial_h0=poisson_case.metadata.fixed["H0"],
+        h0_prior=h0_prior,
+    )
     pd.DataFrame(
         [
             {
@@ -1256,18 +1319,29 @@ def _(
                     np.mean(_prediction.at_prior_boundary)
                 ),
             }
-            for _count, _prediction in num_events_h0_predictions.items()
+            for _count, _prediction in {
+                **num_events_h0_predictions,
+                "Poisson": poisson_h0_prediction,
+            }.items()
         ]
     )
-    return (num_events_h0_predictions,)
+    return num_events_h0_predictions, poisson_h0_prediction
 
 
 @app.cell
-def _(base_metadata, num_events_h0_predictions, plot_fisher_h0_mixtures):
+def _(
+    base_metadata,
+    num_events_h0_predictions,
+    plot_fisher_h0_mixtures,
+    poisson_h0_prediction,
+):
     num_events_h0_fisher_figure = plot_fisher_h0_mixtures(
         {
-            rf"$N = {_count}$": _prediction
-            for _count, _prediction in num_events_h0_predictions.items()
+            **{
+                rf"$N = {_count}$": _prediction
+                for _count, _prediction in num_events_h0_predictions.items()
+            },
+            "Poisson": poisson_h0_prediction,
         },
         fiducial_h0=base_metadata.fixed["H0"],
     )
@@ -1293,7 +1367,7 @@ def _():
     with $|r_i|>1$. All counts use the same reference; we do not recenter each
     ensemble separately. The default mean reference shares its draws with the
     largest template ensemble, so this measures convergence relative to that
-    ensemble and cannot reveal systematic errors shared by all draws. With 1000
+    ensemble and cannot reveal systematic errors shared by all draws. With 100
     draws, its random reference error is much smaller than individual template
     scatter. The Poisson option instead includes fluctuations in one physical
     data realization; repeated realizations would separate those from template
@@ -1303,11 +1377,14 @@ def _():
 
 
 @app.cell
-def _(base_metadata, num_events_h0_predictions):
+def _(base_metadata, num_events_h0_predictions, poisson_h0_prediction):
     num_events_h0_residuals = {
         _count: _prediction.normalized_residuals(fiducial_h0=base_metadata.fixed["H0"])
         for _count, _prediction in num_events_h0_predictions.items()
     }
+    poisson_h0_residuals = poisson_h0_prediction.normalized_residuals(
+        fiducial_h0=base_metadata.fixed["H0"]
+    )
     num_events_h0_residual_summary = pd.DataFrame(
         [
             {
@@ -1317,20 +1394,29 @@ def _(base_metadata, num_events_h0_predictions):
                 "rms": float(np.sqrt(np.mean(_residuals**2))),
                 "fraction_abs_gt_1": float(np.mean(np.abs(_residuals) > 1)),
             }
-            for _count, _residuals in num_events_h0_residuals.items()
+            for _count, _residuals in {
+                **num_events_h0_residuals,
+                "Poisson": poisson_h0_residuals,
+            }.items()
         ]
     )
     num_events_h0_residual_summary
-    return (num_events_h0_residuals,)
+    return num_events_h0_residuals, poisson_h0_residuals
 
 
 @app.cell
-def _(num_events_h0_residuals):
+def _(num_events_h0_residuals, poisson_h0_residuals):
+    _residual_labels = [rf"$N = {_count}$" for _count in num_events_h0_residuals] + [
+        "Poisson"
+    ]
     num_events_h0_residual_figure = plot_distribution_overlay(
-        {
-            rf"$N = {_count}$": _residuals
-            for _count, _residuals in num_events_h0_residuals.items()
-        },
+        dict(
+            zip(
+                _residual_labels,
+                [*num_events_h0_residuals.values(), poisson_h0_residuals],
+                strict=True,
+            )
+        ),
         xlabel=r"$(H_{0,\mathrm{MAP}}-H_{0,\mathrm{fid}})/\sigma_{H_0}$",
     )
     _axis = num_events_h0_residual_figure.axes[0]
@@ -1361,9 +1447,8 @@ def _(num_events_h0_residuals):
     _axis.axvline(0, color="0.6", linewidth=0.8)
     _axis.axvspan(-1, 1, color="0.5", alpha=0.08)
     _axis.legend(
-        _axis.get_lines()[: len(num_events_h0_residuals) + 1],
-        [rf"$N = {_count}$" for _count in num_events_h0_residuals]
-        + [r"$\mathcal{N}(0,1)$"],
+        _axis.get_lines()[: len(_residual_labels) + 1],
+        [*_residual_labels, r"$\mathcal{N}(0,1)$"],
     )
     num_events_h0_residual_figure
     return (num_events_h0_residual_figure,)
