@@ -67,7 +67,7 @@ test-notebooks:
     uv run --extra notebook --group jupyter \
         jupytext --to notebook --execute notebooks/catalog_convergence.py
 
-# Convert the py:percent notebooks to .ipynb. fiducial_spectrum.py is marimo.
+# Convert the py:percent notebooks to .ipynb. Marimo notebooks stay as Python.
 convert-notebooks:
     uv run --group jupyter jupytext --to notebook \
         notebooks/catalog_convergence.py \

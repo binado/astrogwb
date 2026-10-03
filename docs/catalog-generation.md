@@ -476,8 +476,8 @@ It is produced by three pieces:
 ```python
 from astrogwb.catalog import SpectrumGenerator, simulate
 from astrogwb.metadata import SpectraMetadata
+from astrogwb.paper.cache import default_cache_dir
 from astrogwb.paper.config import fiducials, population_metadata, waveform_metadata
-from astrogwb.paper.config.runs import SPECTRA_ROOT
 
 metadata = SpectraMetadata(
     waveform=waveform_metadata(),
@@ -490,7 +490,7 @@ metadata = SpectraMetadata(
     observation_time=1.0,
     count="poisson",
 )
-spectra = simulate(metadata, SpectrumGenerator(batch_size=1024), SPECTRA_ROOT)
+spectra = simulate(metadata, SpectrumGenerator(batch_size=1024), default_cache_dir() / "spectra")
 ```
 
 A hyperparameter is a number to fix it for every draw, or a
@@ -531,8 +531,14 @@ config layers like `run_mcmc` does -- the four shared `config/*.toml` layers,
 then `config/simulations/spectrum/<name>.toml` -- and validates the merged
 `[spectra]` table as the `SpectraMetadata`. In that table a hyperparameter is a
 `"${fiducials.X}"` reference (fixed) or a `"${priors.X}"` one (sampled). The
-output is `<--output-dir>/<key>.h5`, `outputs/spectra` by default, and the script
-refuses to replace it without `--force`:
+output is `<--output-dir>/<key>.h5`. The default is
+`default_cache_dir() / "spectra"`, shared with the SNR analysis script across
+worktrees: `~/Library/Caches/astrogwb/spectra` on macOS or
+`~/.cache/astrogwb/spectra` on Linux, with `XDG_CACHE_HOME` taking precedence
+on both. `--output-dir` overrides it. Cache locations are outside the
+scientific metadata and its key; workflow catalog outputs remain under
+`outputs/catalogs`. The script refuses to replace an existing file without
+`--force`:
 
 ```bash
 uv run --extra paper python scripts/simulate_spectra.py \

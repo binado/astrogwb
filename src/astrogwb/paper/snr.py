@@ -1,8 +1,7 @@
-"""Fiducial matched-filter SNR of the injected background, per detector network.
+"""Matched-filter SNRs of injection catalogs for the network-comparison figures.
 
-Deduplicated from two byte-identical copies in the chain-plotting scripts. It
-lives here rather than in :mod:`astrogwb.paper.inference` because it returns a
-``pandas.DataFrame`` and pandas is only in the ``plotting`` dependency group,
+It lives here rather than in :mod:`astrogwb.paper.inference` because it returns
+a ``pandas.DataFrame`` and pandas is only in the ``plotting`` dependency group,
 not a runtime dependency; and not in :mod:`astrogwb.paper.plotting`, which is
 documented as presentation-only and imports nothing from ``astrogwb``.
 """

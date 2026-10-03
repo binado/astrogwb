@@ -41,8 +41,8 @@ from pydantic import ValidationError
 
 from astrogwb.catalog import SpectrumGenerator, save_atomically
 from astrogwb.metadata import SpectraMetadata, artifact_path
+from astrogwb.paper.cache import default_cache_dir
 from astrogwb.paper.config.runs import (
-    SPECTRA_ROOT,
     add_config_arguments,
     load_merged_config,
 )
@@ -69,12 +69,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "the SpectraMetadata."
         ),
     )
+    cache_dir = default_cache_dir() / "spectra"
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=SPECTRA_ROOT,
+        default=cache_dir,
         metavar="DIR",
-        help=f"The spectra are written to <DIR>/<key>.h5 (default: {SPECTRA_ROOT}).",
+        help=f"The spectra are written to <DIR>/<key>.h5 (default: {cache_dir}).",
     )
     parser.add_argument(
         "--batch-size",

@@ -54,6 +54,8 @@ paper = [
     "arviz[h5netcdf]>=1.2.0",
     # Merges the run-config layers (astrogwb.paper.config.runs).
     "pyknf>=0.6,<0.7",
+    # User cache paths, including XDG overrides on macOS.
+    "platformdirs>=4.11.12",
 ]
 # The analysis stack the notebooks and figure scripts import.
 notebook = [
@@ -148,6 +150,7 @@ extend-select = ["TID"]
 # F401: the setup cell is imports only; later cells are what use those names.
 # PLR1711: marimo writes a bare `return` on cells that export nothing.
 "notebooks/fiducial_spectrum.py" = ["F811", "F401", "PLR1711"]
+"notebooks/spectrum_snrs.py" = ["F811", "F401", "PLR1711"]
 
 [tool.ty.src]
 # Most of `scripts/` stays absent because fixture generators can import
@@ -161,6 +164,7 @@ include = [
     "scripts/run_mcmc.py",
     "scripts/profile_model.py",
     "scripts/simulate_spectra.py",
+    "notebooks/spectrum_snrs.py",
 ]
 
 [tool.pytest.ini_options]
