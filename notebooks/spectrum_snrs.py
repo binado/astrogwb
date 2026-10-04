@@ -155,7 +155,9 @@ def _():
     **The tolerance.** Shot noise and detector noise are independent, so they
     add in quadrature: the effective uncertainty is
     $\sigma_{\mathrm{ref}}\sqrt{1+\mathrm{sd}(r)^2}$. We require
-    $\mathrm{sd}(r) \le 0.1$, which inflates $\sigma(H_0)$ by about 0.5%.
+    $\mathrm{sd}(r) \le 1$: the shot-noise scatter of the $H_0$ offset is at
+    most the statistical error itself, which inflates $\sigma(H_0)$ by at
+    most $\sqrt{2}-1 \approx 41\%$.
     """)
     return
 
@@ -184,16 +186,17 @@ def _():
     minimum_redshift = [0.05, 0.15, 0.35]
     num_events = [2**k for k in range(12, 19)]
     grid_counts = [2**14, 2**16, 2**17, 2**18]
-    paper_counts = [2**14, 2**16, 2**17, 2**18]
+    # Source counts overlaid on every figure except the scaling plots.
+    paper_counts = [2**14, 2**16, 2**18]
     recommended_num_events = 2**17
     maximum_redshift = 20.0
 
-    # The tolerance applies to sd(r): 0.1 inflates sigma(H0) by about 0.5%.
-    tolerance = 0.1
+    # The tolerance applies to sd(r): 1 inflates sigma(H0) by up to 41%.
+    tolerance = 1.0
     n_bootstrap = 500
     offset_seed = 7
 
-    num_draws = 100
+    num_draws = 200
     seed = 41
     data_seed = 42  # used only for the independent Poisson option
     batch_size = 1024
@@ -1761,8 +1764,11 @@ def _(
 ):
     spectrum_case_groups = {
         "Source count": {
-            count_label(_count): _case.catalog
-            for _count, _case in num_events_cases.items()
+            **{
+                count_label(_count): num_events_cases[_count].catalog
+                for _count in paper_counts
+            },
+            "Poisson": poisson_case.catalog,
         },
         "Minimum redshift": {
             redshift_label(_z): grid[_z][recommended_num_events].catalog
@@ -1774,7 +1780,7 @@ def _(
         for _cases in spectrum_case_groups.values()
         for _catalog in _cases.values()
     ]
-    check_common_grid([*_catalogs, poisson_case.catalog])
+    check_common_grid(_catalogs)
     spectrum_statistics = {
         _title: {
             _label: compute_spectrum_statistics(_catalog)
@@ -1782,15 +1788,8 @@ def _(
         }
         for _title, _cases in spectrum_case_groups.items()
     }
-    paper_spectrum_statistics = {
-        count_label(_count): spectrum_statistics["Source count"][count_label(_count)]
-        for _count in paper_counts
-    }
-    poisson_spectrum_statistics = compute_spectrum_statistics(poisson_case.catalog)
     spectrum_sensitivity = compute_network_sensitivity(_catalogs[0], settings)
     return (
-        paper_spectrum_statistics,
-        poisson_spectrum_statistics,
         spectrum_case_groups,
         spectrum_sensitivity,
         spectrum_statistics,
@@ -1798,9 +1797,9 @@ def _(
 
 
 @app.cell
-def _(paper_spectrum_statistics, settings, spectrum_sensitivity):
+def _(settings, spectrum_sensitivity, spectrum_statistics):
     shot_noise_figure = plot_shot_noise_vs_detector(
-        paper_spectrum_statistics,
+        spectrum_statistics["Source count"],
         spectrum_sensitivity,
         network=settings.network,
     )
@@ -1829,16 +1828,12 @@ def _(spectrum_sensitivity, spectrum_statistics):
 @app.cell
 def _(
     base_metadata,
-    poisson_spectrum_statistics,
     settings,
     spectrum_sensitivity,
     spectrum_statistics,
 ):
     num_events_spectrum_sensitivity_figure = plot_spectrum_sensitivity(
-        {
-            **spectrum_statistics["Source count"],
-            "Poisson": poisson_spectrum_statistics,
-        },
+        spectrum_statistics["Source count"],
         spectrum_sensitivity,
         network=settings.network,
         observation_time=base_metadata.observation_time,
@@ -1865,13 +1860,9 @@ def _(
 
 
 @app.cell
-def _(paper_counts, settings, spectrum_case_groups):
+def _(settings, spectrum_case_groups):
     num_events_frequency_correlation_figure = plot_frequency_correlations(
-        {
-            _label: _catalog
-            for _label, _catalog in spectrum_case_groups["Source count"].items()
-            if _label in {count_label(_count) for _count in paper_counts}
-        },
+        spectrum_case_groups["Source count"],
         minimum_frequency=settings.minimum_frequency,
         maximum_frequency=settings.maximum_frequency,
     )
@@ -1904,12 +1895,12 @@ def _():
 
 
 @app.cell
-def _(num_events_cases, poisson_case):
+def _(num_events_cases, paper_counts, poisson_case):
     num_events_snr_figure = plot_distribution_overlay(
         {
             **{
-                count_label(_count): _case.snrs
-                for _count, _case in num_events_cases.items()
+                count_label(_count): num_events_cases[_count].snrs
+                for _count in paper_counts
             },
             "Poisson": poisson_case.snrs,
         },
@@ -1945,8 +1936,8 @@ def _():
     cross-check; the two differ because of the numerator–denominator mixing
     described in Section 1. The default mean reference shares its draws with
     the largest ensemble, so that row measures convergence relative to it
-    and cannot reveal an error common to every draw; with 100 draws its own
-    scatter is about 1% of one template's.
+    and cannot reveal an error common to every draw; with 200 draws its own
+    scatter is about 0.5% of one template's.
     """)
     return
 
@@ -2018,12 +2009,12 @@ def _():
 
 
 @app.cell
-def _(offsets, poisson_offsets):
+def _(offsets, paper_counts, poisson_offsets):
     num_events_sigma_h0_figure = plot_distribution_overlay(
         {
             **{
-                count_label(_count): _prediction.sigma_h0
-                for _count, _prediction in offsets.predictions.items()
+                count_label(_count): offsets.predictions[_count].sigma_h0
+                for _count in paper_counts
             },
             "Poisson": next(iter(poisson_offsets.predictions.values())).sigma_h0,
         },
@@ -2034,12 +2025,12 @@ def _(offsets, poisson_offsets):
 
 
 @app.cell
-def _(offsets, poisson_offsets):
+def _(offsets, paper_counts, poisson_offsets):
     num_events_h0_fisher_figure = plot_fisher_h0_mixtures(
         {
             **{
-                count_label(_count): _prediction
-                for _count, _prediction in offsets.predictions.items()
+                count_label(_count): offsets.predictions[_count]
+                for _count in paper_counts
             },
             "Poisson": next(iter(poisson_offsets.predictions.values())),
         },
@@ -2061,8 +2052,8 @@ def _():
     variance (Section 1) and moves the curves of **Figure A3** up.
 
     The $N_{\max}$ point of each curve shares its draws with its own
-    reference, which biases it low by about 1% of one template's scatter
-    with 100 draws; read it as the end of the convergence curve rather than an
+    reference, which biases it low by about 0.5% of one template's scatter
+    with 200 draws; read it as the end of the convergence curve rather than an
     independent test.
     """)
     return
