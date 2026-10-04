@@ -237,6 +237,7 @@ notebook = [
     { name = "h5py" },
     { name = "matplotlib" },
     { name = "pandas" },
+    { name = "platformdirs" },
     { name = "pyknf" },
     { name = "scipy" },
 ]
@@ -244,6 +245,7 @@ paper = [
     { name = "arviz", extra = ["h5netcdf"] },
     { name = "gwmock-pop" },
     { name = "h5py" },
+    { name = "platformdirs" },
     { name = "pyknf" },
 ]
 simulation = [
@@ -321,6 +323,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "numpyro", specifier = ">=0.21.0" },
     { name = "pandas", marker = "extra == 'notebook'", specifier = ">=2.0" },
+    { name = "platformdirs", marker = "extra == 'paper'", specifier = ">=4.11.12" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pyknf", marker = "extra == 'paper'", specifier = ">=0.6,<0.7" },
     { name = "ripplegw", specifier = ">=0.3.1" },
