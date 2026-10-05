@@ -18,6 +18,7 @@ with app.setup(hide_code=True):
     from jax.scipy.special import log_ndtr, logsumexp
     from matplotlib.colors import Normalize
     from numpy.polynomial.hermite import hermgauss
+    from numpy.polynomial.legendre import leggauss
     from scipy.stats import norm
 
     from astrogwb.distributions.amplitude import AmplitudeConditional, amplitude_prior
@@ -110,6 +111,27 @@ def _(BoundedPrior):
         terms = jnp.where(inside, jnp.log(w) + log_prior, -jnp.inf)
         return jnp.log(jnp.sqrt(2.0) / rho) + logsumexp(terms, axis=-1)
 
+    def gauss_legendre_log_normalizer(bounded, mle, rho, k, half_width=7.0):
+        """``ln Z_k``: Gauss-Legendre on the support clipped to ``mle +/- 7 sigma_A``.
+
+        The bound enters as an integration limit, not as a mask, so the estimate
+        is smooth in ``mle`` and autodiff picks up the boundary term. The window
+        is centred on ``mle`` clipped into the support: an ``mle`` outside it gets
+        the slice of the support nearest to it.
+        """
+        x, w = leggauss(k)
+        mle, rho = jnp.asarray(mle), jnp.asarray(rho)
+        reach = half_width / rho
+        centre = jnp.clip(mle, bounded.lower, bounded.upper)
+        lo = jnp.maximum(bounded.lower, centre - reach)
+        hi = jnp.minimum(bounded.upper, centre + reach)
+        nodes = 0.5 * (hi + lo)[..., None] + 0.5 * (hi - lo)[..., None] * x
+        log_integrand = (
+            bounded.prior.log_prob(nodes)
+            - 0.5 * (rho[..., None] * (nodes - mle[..., None])) ** 2
+        )
+        return jnp.log(0.5 * (hi - lo)) + logsumexp(jnp.log(w) + log_integrand, axis=-1)
+
     def trapezoid_log_normalizer(bounded, mle, rho):
         """``ln Z`` from the library's fixed 1024-node trapezoid."""
         return AmplitudeConditional(mle, rho, prior=bounded.prior).log_normalizer
@@ -156,6 +178,7 @@ def _(BoundedPrior):
     return (
         dense_reference,
         gauss_hermite_log_normalizer,
+        gauss_legendre_log_normalizer,
         normal_reference,
         trapezoid_log_normalizer,
         uniform_reference,
@@ -194,6 +217,7 @@ def _(
     UPPER,
     dense_reference,
     gauss_hermite_log_normalizer,
+    gauss_legendre_log_normalizer,
     trapezoid_log_normalizer,
     uniform_reference,
 ):
@@ -202,8 +226,10 @@ def _(
     # sweep is about the lower bound, and past that the upper one takes over.
     errors: dict[str, dict[float, np.ndarray]] = {}
     trapezoid_errors: dict[str, dict[float, np.ndarray]] = {}
+    legendre_errors: dict[str, dict[float, np.ndarray]] = {}
     for _name, _bounded in BOUNDED.items():
         errors[_name], trapezoid_errors[_name] = {}, {}
+        legendre_errors[_name] = {}
         for _rho in RHOS:
             _rho_grid = jnp.full(D_GRID.shape, _rho)
             _mle = LOWER + D_GRID / _rho
@@ -229,9 +255,21 @@ def _(
                     trapezoid_log_normalizer(_bounded, _mle, _rho_grid) - _reference
                 )
             )
+            _per_k_legendre = np.stack(
+                [
+                    np.abs(
+                        np.asarray(
+                            gauss_legendre_log_normalizer(_bounded, _mle, _rho_grid, _k)
+                            - _reference
+                        )
+                    )
+                    for _k in K_VALUES
+                ]
+            )
+            legendre_errors[_name][_rho] = np.where(_valid, _per_k_legendre, np.nan)
             errors[_name][_rho] = np.where(_valid, _per_k, np.nan)
             trapezoid_errors[_name][_rho] = np.where(_valid, _trap, np.nan)
-    return errors, trapezoid_errors
+    return errors, legendre_errors, trapezoid_errors
 
 
 @app.cell(hide_code=True)
@@ -255,46 +293,56 @@ def _():
 
 
 @app.cell
-def _(BOUNDED, D_GRID, K_VALUES, RHOS, errors):
-    _fig, _axes = plt.subplots(
-        len(BOUNDED),
-        len(RHOS),
-        figsize=(3.0 * len(RHOS), 2.9 * len(BOUNDED)),
-        sharex=True,
-        sharey=True,
-        constrained_layout=True,
-    )
-    _norm = Normalize(vmin=-12, vmax=0)
-    _image = None
-    for _row, _name in enumerate(BOUNDED):
-        for _col, _rho in enumerate(RHOS):
-            _ax = _axes[_row, _col]
-            with np.errstate(divide="ignore"):
-                _log_err = np.log10(errors[_name][_rho])
-            _log_err = np.where(np.isinf(_log_err) & (_log_err > 0), np.nan, _log_err)
-            _image = _ax.pcolormesh(
-                np.arange(len(K_VALUES) + 1) - 0.5,
-                np.append(D_GRID - 0.01, D_GRID[-1] + 0.01),
-                np.clip(_log_err, -12, 0).T,
-                norm=_norm,
-                cmap="viridis_r",
-            )
-            _ax.plot(
-                np.arange(len(K_VALUES)),
-                2 * np.sqrt(K_VALUES),
-                "kx",
-                markersize=5,
-            )
-            _ax.set_xticks(range(len(K_VALUES)), [str(k) for k in K_VALUES])
-            _ax.set_ylim(D_GRID[0], D_GRID[-1])
-            if _row == 0:
-                _ax.set_title(rf"$\rho={_rho:g}$")
-            if _row == len(BOUNDED) - 1:
-                _ax.set_xlabel("$k$")
-            if _col == 0:
-                _ax.set_ylabel(f"{_name}\n$d = \\rho(\\hat A - a)$")
-    _fig.colorbar(_image, ax=_axes, label=r"$\log_{10}|\Delta \ln Z|$")
-    _fig
+def _(BOUNDED, D_GRID, K_VALUES, RHOS):
+    def error_heatmaps(errs, *, span_crosses):
+        """One ``log10 |dlnZ|`` heatmap of ``d`` against ``k`` per prior and rho."""
+        fig, axes = plt.subplots(
+            len(BOUNDED),
+            len(RHOS),
+            figsize=(3.0 * len(RHOS), 2.9 * len(BOUNDED)),
+            sharex=True,
+            sharey=True,
+            constrained_layout=True,
+        )
+        norm_ = Normalize(vmin=-12, vmax=0)
+        image = None
+        for row, name in enumerate(BOUNDED):
+            for col, rho in enumerate(RHOS):
+                ax = axes[row, col]
+                with np.errstate(divide="ignore"):
+                    log_err = np.log10(errs[name][rho])
+                log_err = np.where(np.isinf(log_err) & (log_err > 0), np.nan, log_err)
+                image = ax.pcolormesh(
+                    np.arange(len(K_VALUES) + 1) - 0.5,
+                    np.append(D_GRID - 0.01, D_GRID[-1] + 0.01),
+                    np.clip(log_err, -12, 0).T,
+                    norm=norm_,
+                    cmap="viridis_r",
+                )
+                if span_crosses:
+                    ax.plot(
+                        np.arange(len(K_VALUES)),
+                        2 * np.sqrt(K_VALUES),
+                        "kx",
+                        markersize=5,
+                    )
+                ax.set_xticks(range(len(K_VALUES)), [str(k) for k in K_VALUES])
+                ax.set_ylim(D_GRID[0], D_GRID[-1])
+                if row == 0:
+                    ax.set_title(rf"$\rho={rho:g}$")
+                if row == len(BOUNDED) - 1:
+                    ax.set_xlabel("$k$")
+                if col == 0:
+                    ax.set_ylabel(f"{name}\n$d = \\rho(\\hat A - a)$")
+        fig.colorbar(image, ax=axes, label=r"$\log_{10}|\Delta \ln Z|$")
+        return fig
+
+    return (error_heatmaps,)
+
+
+@app.cell
+def _(error_heatmaps, errors):
+    error_heatmaps(errors, span_crosses=True)
     return
 
 
@@ -305,7 +353,8 @@ def _():
 
     Slide the MLE across the lower bound at $\rho=30$ and plot the estimator's
     error and its derivative. The gradient is taken with `jax.grad` through the
-    masked rule, which is what the sampler differentiates. Two things matter:
+    masked rule, which is what the sampler differentiates (the red curve is the
+    Gauss-Legendre window of section 3, which has no mask). Two things matter:
     the **jumps** in $\ln Z$ each time a node crosses the bound, and the
     gradient, which for a *flat* prior is identically zero (the mask is
     piecewise constant and the prior's own derivative vanishes) while the true
@@ -321,6 +370,7 @@ def _(
     UPPER,
     dense_reference,
     gauss_hermite_log_normalizer,
+    gauss_legendre_log_normalizer,
     trapezoid_log_normalizer,
     uniform_reference,
 ):
@@ -361,6 +411,11 @@ def _(
                 _d, _fn(_bounded, _mle, _rho_grid) - _ref, label=f"GH $k={_k}$"
             )
             _ax_grad.plot(_d, _gradient(_fn, _bounded), label=f"GH $k={_k}$")
+        _gl = lambda b, m, r: gauss_legendre_log_normalizer(b, m, r, 16)
+        _ax_err.plot(
+            _d, _gl(_bounded, _mle, _rho_grid) - _ref, "C3", label="GL window $k=16$"
+        )
+        _ax_grad.plot(_d, _gradient(_gl, _bounded), "C3", label="GL window $k=16$")
         _ax_err.plot(
             _d,
             trapezoid_log_normalizer(_bounded, _mle, _rho_grid) - _ref,
@@ -383,7 +438,73 @@ def _(
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## 3. A smooth prior: Normal on $A$
+    ## 3. Gauss-Legendre on the clipped window
+
+    Gauss-Hermite fails at a bound because the bound is a *mask* it cannot
+    differentiate. The alternative is to make the bound an integration *limit*.
+    Integrate over $[\max(a,\hat A - 7\sigma_A),\ \min(b,\hat A + 7\sigma_A)]$
+    with a $k$-point Gauss-Legendre rule. On that window the integrand is a
+    Gaussian times a smooth prior, so the rule converges exponentially in $k$;
+    the window is centred on $\hat A$ and scaled by $1/\rho$, so it follows the
+    SNR; and the limits are piecewise-smooth in $\hat A$, so autodiff
+    differentiates through them (the Leibniz boundary term is exactly the
+    bound's pull). The $7\sigma_A$ truncation costs $\approx10^{-12}$. The
+    same code covers an infinite support, where nothing is clipped.
+
+    Same sweep as section 1, with no span markers (there is no node span to
+    cross):
+    """)
+    return
+
+
+@app.cell
+def _(error_heatmaps, legendre_errors):
+    error_heatmaps(legendre_errors, span_crosses=False)
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    The MLE far *outside* the support (a very bad fit, e.g. early in warmup) is
+    the one case the window cannot centre on $\hat A$: it takes the slice of the
+    support nearest to $\hat A$, over which the integrand is a steep exponential
+    that $k$ nodes must resolve. Error in $\ln Z$ at $\rho=30$, uniform prior, as
+    $\hat A$ moves below the lower bound:
+    """)
+    return
+
+
+@app.cell
+def _(
+    BOUNDED,
+    K_VALUES,
+    LOWER,
+    UPPER,
+    gauss_legendre_log_normalizer,
+    uniform_reference,
+):
+    _rho = 30.0
+    _outside = np.array([2.0, 5.0, 10.0, 20.0, 40.0])  # sigma_A below the bound
+    _mle = jnp.asarray(LOWER - _outside / _rho)
+    _rho_grid = jnp.full_like(_mle, _rho)
+    _reference = uniform_reference(_mle, _rho_grid, LOWER, UPPER)
+    print("MLE sigma_A below the lower bound:", _outside)
+    for _k in K_VALUES:
+        _err = np.abs(
+            np.asarray(
+                gauss_legendre_log_normalizer(BOUNDED["uniform"], _mle, _rho_grid, _k)
+                - _reference
+            )
+        )
+        print(f"GL k={_k:<4}", " ".join(f"{e:9.1e}" for e in _err))
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## 4. A smooth prior: Normal on $A$
 
     With no bound, GH has nothing to mask. What decides the error is whether the
     prior is smooth *on the scale of the node spacing*: a prior much wider than
@@ -401,6 +522,7 @@ def _(
     K_VALUES,
     NORMAL_PRIOR,
     gauss_hermite_log_normalizer,
+    gauss_legendre_log_normalizer,
     normal_reference,
     trapezoid_log_normalizer,
 ):
@@ -421,6 +543,19 @@ def _(
             for _k in K_VALUES
         ]
     )
+    normal_legendre = np.stack(
+        [
+            np.abs(
+                np.asarray(
+                    gauss_legendre_log_normalizer(
+                        _bounded, _mle, jnp.asarray(_rhos), _k
+                    )
+                    - _reference
+                )
+            )
+            for _k in K_VALUES
+        ]
+    )
     normal_trapezoid = np.abs(
         np.asarray(
             trapezoid_log_normalizer(_bounded, _mle, jnp.asarray(_rhos)) - _reference
@@ -434,6 +569,14 @@ def _(
             "o-",
             label=f"GH $k={_k}$",
         )
+        _ax.loglog(
+            NORMAL_PRIOR.scale * _rhos,
+            normal_legendre[_row] + 1e-17,
+            "s--",
+            color=f"C{_row}",
+            alpha=0.5,
+            label=f"GL $k={_k}$",
+        )
     _ax.loglog(
         NORMAL_PRIOR.scale * _rhos,
         normal_trapezoid + 1e-17,
@@ -443,15 +586,15 @@ def _(
     _ax.set_xlabel(r"$\sigma_\pi/\sigma_A = 0.5\rho$")
     _ax.set_ylabel(r"$|\Delta \ln Z|$")
     _ax.set_ylim(1e-17, 10)
-    _ax.legend(fontsize=7, ncol=2)
+    _ax.legend(fontsize=6, ncol=3)
     _fig
-    return normal_errors, normal_trapezoid
+    return normal_errors, normal_legendre, normal_trapezoid
 
 
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## 4. Conclusion
+    ## 5. Conclusion
 
     For each prior, SNR and tolerance, the table gives the best $k$ and the
     smallest bound distance $d_{\min}$ such that the GH error is below the
@@ -462,7 +605,17 @@ def _():
 
 
 @app.cell
-def _(BOUNDED, D_GRID, K_VALUES, RHOS, errors, normal_errors, trapezoid_errors):
+def _(
+    BOUNDED,
+    D_GRID,
+    K_VALUES,
+    RHOS,
+    errors,
+    legendre_errors,
+    normal_errors,
+    normal_legendre,
+    trapezoid_errors,
+):
     def minimum_distance(err, tol):
         """Smallest ``d`` with ``err < tol`` for all valid ``d' >= d`` (else inf)."""
         for i in range(len(D_GRID)):
@@ -480,7 +633,8 @@ def _(BOUNDED, D_GRID, K_VALUES, RHOS, errors, normal_errors, trapezoid_errors):
             f"(Gaussian tail Phi(-d) < tol needs d > {-norm.ppf(tol):.2f}) ==="
         )
         lines.append(
-            f"{'prior':<24}{'rho':>6}{'best k':>8}{'d_min (GH)':>12}{'d_min (trap)':>14}"
+            f"{'prior':<24}{'rho':>6}{'GH k':>6}{'d_min GH':>10}"
+            f"{'GL k':>6}{'d_min GL':>10}{'d_min trap':>12}"
         )
         for name in BOUNDED:
             for rho in RHOS:
@@ -490,10 +644,26 @@ def _(BOUNDED, D_GRID, K_VALUES, RHOS, errors, normal_errors, trapezoid_errors):
                 ]
                 best = int(np.argmin(per_k))
                 trap = minimum_distance(trapezoid_errors[name][rho], tol)
-                thresholds[(name, rho, tol)] = (K_VALUES[best], per_k[best], trap)
+                # Smallest k, since for GL more nodes never hurt: the first k to hit
+                # the lowest d_min on offer.
+                per_k_gl = [
+                    minimum_distance(legendre_errors[name][rho][i], tol)
+                    for i in range(len(K_VALUES))
+                ]
+                best_gl = int(np.argmin(per_k_gl))
+                thresholds[(name, rho, tol)] = (
+                    K_VALUES[best],
+                    per_k[best],
+                    K_VALUES[best_gl],
+                    per_k_gl[best_gl],
+                    trap,
+                )
                 lines.append(
-                    f"{name:<24}{rho:>6g}{K_VALUES[best] if np.isfinite(per_k[best]) else '-':>8}"
-                    f"{per_k[best]:>12.2f}{trap:>14.2f}"
+                    f"{name:<24}{rho:>6g}"
+                    f"{K_VALUES[best] if np.isfinite(per_k[best]) else '-':>6}"
+                    f"{per_k[best]:>10.2f}"
+                    f"{K_VALUES[best_gl] if np.isfinite(per_k_gl[best_gl]) else '-':>6}"
+                    f"{per_k_gl[best_gl]:>10.2f}{trap:>12.2f}"
                 )
         for name in BOUNDED:
             per_k = [
@@ -509,6 +679,28 @@ def _(BOUNDED, D_GRID, K_VALUES, RHOS, errors, normal_errors, trapezoid_errors):
                 + ", ".join(f"{2 * np.sqrt(k):.1f}" for k in K_VALUES)
                 + ")"
             )
+        for name in BOUNDED:
+            per_k = [
+                minimum_distance(legendre_errors[name][30.0][i], tol)
+                for i in range(len(K_VALUES))
+            ]
+            lines.append(
+                f"GL d_min by k at rho=30, {name}: "
+                + ", ".join(
+                    f"k={k}: {d:.2f}" for k, d in zip(K_VALUES, per_k, strict=True)
+                )
+            )
+        smooth_gl = [
+            min(
+                (
+                    k
+                    for k, e in zip(K_VALUES, normal_legendre[:, j], strict=True)
+                    if e < tol
+                ),
+                default=None,
+            )
+            for j in range(normal_legendre.shape[1])
+        ]
         smooth = [
             min(
                 (
@@ -522,7 +714,7 @@ def _(BOUNDED, D_GRID, K_VALUES, RHOS, errors, normal_errors, trapezoid_errors):
         ]
         lines.append(
             f"normal prior, smallest k below tol at sigma_pi/sigma_A "
-            f"= 0.5, 1.5, 5, 15, 50, 150: {smooth}"
+            f"= 0.5, 1.5, 5, 15, 50, 150: GH {smooth}, GL {smooth_gl}"
         )
     print("\n".join(lines))
     return (thresholds,)
@@ -569,20 +761,36 @@ def _():
        $1/A^2$ it also has a $\sim10^{-6}$ floor from the grid being uniform in
        $H_0$.
 
-    **Recommendation: keep the trapezoid for now; if profiling ever says the
-    amplitude integral matters, adopt GH with a trapezoid fallback.**
-    Plain GH is rejected: the MLE sits within a few $\sigma_A$ of a prior bound
-    in exactly the posteriors of interest, and there GH is inaccurate and its
-    gradient blind to the bound. The fallback rule is
-    $\min(d_{\mathrm{lo}}, d_{\mathrm{hi}}) \ge d^\star$ with
-    $d_{\mathrm{lo}}=\rho(\hat A-a)$, $d_{\mathrm{hi}}=\rho(b-\hat A)$ and
-    $d^\star\approx 3.5$ for $10^{-3}$ or $5$ for $10^{-6}$ (no $2\sqrt k$ term:
-    the threshold does not depend on $k$), with $k=16$ for a prior wider than
-    $\sim5\sigma_A$. It evaluates $\pi_A$ at 16 points instead of 1024, and the
-    switch is continuous to the tolerance. It is not free, though: the branch
-    needs a `lax.cond`, which turns into a select (both branches run) once
-    chains are `vmap`ped, so any speed-up has to be measured with the chain
-    layout used in production.
+    6. *Gauss-Legendre on the clipped window has no such failure.* With the
+       bound as an integration limit, $k=16$ ($10^{-3}$) or $k=32$ ($10^{-6}$)
+       is accurate over the whole sweep, $d\in[-2,12]$ at every $\rho$, even
+       $\rho=1$ where the support is only $3\sigma_A$ wide (the window just
+       shrinks to the support). Its gradient lies on the reference in section 2.
+       The error is smooth in $\hat A$: no jumps. The price against GH is node
+       count on a smooth infinite prior: the window always spans
+       $\pm7\sigma_A$, so a normal prior needs $k=16$--$32$ ($10^{-3}$) and
+       $32$--$64$ ($10^{-6}$) where GH needs 4 once $\sigma_\pi/\sigma_A\gtrsim5$.
+       Its weak spot is the MLE far outside the support: with $k=32$ the error
+       is $\lesssim5\times10^{-6}$ out to $40\sigma_A$ and $k=64$ gives
+       $\lesssim10^{-8}$ (the check above; the $4\times10^{-9}$ plateau at
+       $20\sigma_A$ is $k$-independent and I have not traced whether it is the
+       reference's precision).
+
+    **Recommendation: replace the trapezoid with Gauss-Legendre on the clipped
+    window; do not adopt Gauss-Hermite.** GH is rejected for bounded priors: it
+    is inaccurate and its gradient blind to a bound within $\sim3\sigma_A$ of
+    the MLE, which is where the bound matters. A hybrid would work but needs a
+    runtime `lax.cond` (a select under `vmap`). GL needs no branch, handles a
+    bounded or unbounded support with the same code, is correct near a bound,
+    and unlike the 1024-node trapezoid its accuracy does not degrade with
+    $\rho$. Suggested defaults are $k=32$ (about $10^{-6}$ in $\ln Z$) and a
+    $7\sigma_A$ half-width, i.e. 32 prior evaluations instead of 1024. What it
+    changes in the library, beyond `log_normalizer`: `AmplitudeConditional.icdf`
+    and `sample` tabulate a CDF on the fixed grid, so sampling would still need
+    that grid (or a window-based CDF), and `effective_nodes` would lose its
+    meaning. Before committing to it, benchmark it inside NUTS with the
+    production chain layout; the speed-up is structural (32 vs 1024
+    evaluations) and I have not measured it.
     """)
     return
 
