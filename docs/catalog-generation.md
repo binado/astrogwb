@@ -510,7 +510,7 @@ catalog = SpectralDensityCatalog.from_arrays(outputs, metadata)
 
 A hyperparameter is a number to fix it for every draw, or a
 `{"dist", "kwargs"}` spec -- the format of the shared `[priors]` table, validated by
-`astrogwb.metadata.PriorSpec` -- to draw it independently once per draw. Priors
+`astrogwb.distributions.config.DistributionConfig` -- to draw it independently once per draw. Priors
 are data, so an edited bound re-keys the draws without a version bump. Each
 seed is split into a hyperparameter key and a forward-model key, and the static
 Poisson event plate is sized per draw.

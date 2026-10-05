@@ -33,7 +33,7 @@ from pydantic import (
     model_validator,
 )
 
-from astrogwb.metadata import PriorSpec
+from astrogwb.distributions.config import DistributionConfig
 from astrogwb.paper.config.detectors import DetectorRegistry
 from astrogwb.paper.config.runs import CATALOG_ROLES
 from astrogwb.paper.utils import deep_merge
@@ -97,12 +97,14 @@ def check_redshift_grid(
 #
 #     {"dist": "<numpyro.distributions class name>", "kwargs": {...}}
 #
-# The spec itself is `astrogwb.metadata.PriorSpec`: a spectral-density draw
+# The config itself is
+# `astrogwb.distributions.config.DistributionConfig`: a spectral-density draw
 # records its sampled hyperparameters in the same format, so the record and its
 # validation live in the core package and this module only adapts it to the
-# run config's pydantic wire. Hand-rolled adapters rather than a PriorSpec
-# field: the run config holds *live* distributions, which pydantic can never
-# construct from raw config dicts natively (they are not models).
+# run config's pydantic wire. Hand-rolled adapters rather than a
+# DistributionConfig field: the run config holds *live* distributions, which
+# pydantic can never construct from raw config dicts natively (they are not
+# models).
 
 
 def materialize_prior(value: Any) -> Distribution:
@@ -136,7 +138,7 @@ def materialize_prior(value: Any) -> Distribution:
             "spec mapping or a numpyro Distribution"
         )
     try:
-        spec = PriorSpec.model_validate(dict(value))
+        spec = DistributionConfig.model_validate(dict(value))
     except ValidationError as error:
         # Re-raised as a plain ValueError: a ValidationError raised inside a
         # validator is not re-wrapped with the outer field's location.
@@ -148,9 +150,9 @@ def prior_to_spec(prior: Distribution) -> dict[str, Any]:
     """Serialize a materialized prior back to its wire-format spec.
 
     Inverse of :func:`materialize_prior`; see
-    :meth:`astrogwb.metadata.PriorSpec.from_distribution`.
+    :meth:`astrogwb.distributions.config.DistributionConfig.from_distribution`.
     """
-    return PriorSpec.from_distribution(prior).model_dump()
+    return DistributionConfig.from_distribution(prior).model_dump()
 
 
 if TYPE_CHECKING:

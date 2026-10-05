@@ -39,7 +39,7 @@ def _run(code: str) -> None:
 def test_importing_every_metadata_module_leaves_the_backend_uninitialized() -> None:
     _run(
         """
-import astrogwb.metadata
+import astrogwb.distributions.config
 import astrogwb.populations.metadata
 import astrogwb.waveform.metadata
 import astrogwb.simulators.polarization_power.metadata

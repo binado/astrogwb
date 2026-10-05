@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from astrogwb.metadata import PriorSpec
+from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import PopulationMetadata
 from astrogwb.simulators.core import split_seed
 from astrogwb.simulators.polarization_power import CatalogMetadata, polarization_power
@@ -81,7 +81,7 @@ def _spectra_metadata() -> SpectraMetadata:
         population=_population(),
         hyperparameters={
             "H0": 67.9,
-            "Om0": PriorSpec(dist="Uniform", kwargs={"low": 0.2, "high": 0.4}),
+            "Om0": DistributionConfig(dist="Uniform", kwargs={"low": 0.2, "high": 0.4}),
         },
         observation_time=1.0,
         count="fixed",
