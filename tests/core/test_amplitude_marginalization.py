@@ -58,7 +58,7 @@ ALPHA_TRUE = -0.6
 A_TRUE = 1.0
 PHI_FID = 2.0
 """Rate at which the Normal case's amplitude is one."""
-NUM_PHI = 4001
+NUM_PHI = 64001
 NUM_ALPHA = 41
 
 
@@ -237,8 +237,8 @@ def test_marginalized_model_alpha_density_and_gradient_match_numerical_marginal(
     )
 
     # No free constant: the Jacobian is carried by the pushforward prior.
-    np.testing.assert_allclose(value, expected_value, rtol=0, atol=1e-6)
-    np.testing.assert_allclose(grad, expected_grad, rtol=0, atol=1e-5)
+    np.testing.assert_allclose(value, expected_value, rtol=0, atol=1e-9)
+    np.testing.assert_allclose(grad, expected_grad, rtol=0, atol=1e-8)
 
 
 def test_amplitude_conditional_mixture_matches_numerical_amplitude_marginal(
@@ -289,7 +289,7 @@ def test_amplitude_conditional_log_prob_matches_conditioned_slice(
         phi, amplitude
     )
 
-    np.testing.assert_allclose(predicted, numerical, rtol=0, atol=1e-6)
+    np.testing.assert_allclose(predicted, numerical, rtol=0, atol=1e-9)
 
 
 def _uniform_log_normalizer(
