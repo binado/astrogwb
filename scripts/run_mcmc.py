@@ -286,7 +286,6 @@ def save(
     records.
     """
     import json
-    from functools import partial
 
     import arviz as az
     import numpy as np
@@ -324,11 +323,8 @@ def save(
 
     if marginalization is not None:
         import jax
-        from numpyro.infer import Predictive
 
-        from astrogwb.inference.models.gaussian_gwb_marginalized_amplitude import (
-            amplitude_reconstruction_model,
-        )
+        from astrogwb.distributions.amplitude import AmplitudeConditional
 
         amplitude_parameter = marginalization.parameter
 
@@ -336,31 +332,24 @@ def save(
         # chain was marginalized with -- which is why nothing about the
         # quadrature needs persisting to the NetCDF.
         # The sufficient statistics form the AmplitudeConditional batch shape;
-        # one Predictive invocation draws one amplitude per (chain, draw).
+        # one draw per (chain, draw), mapped back with the transform's inverse.
         posterior_samples = mcmc.get_samples(group_by_chain=True)
-        draws = Predictive(
-            partial(
-                amplitude_reconstruction_model,
-                amplitude_parameter=amplitude_parameter,
-                amplitude_fn=marginalization.amplitude_fn,
-                merger_rate_amplitude_fn=marginalization.merger_rate_fn,
-                prior=marginalization.prior,
-                fiducial=marginalization.fiducial,
-                grid=marginalization.grid,
-            ),
-            num_samples=1,
-            return_sites=[
-                amplitude_parameter,
-                "total_merger_rate",
-                "quadrature_effective_nodes",
-            ],
-        )(
-            jax.random.fold_in(jax.random.PRNGKey(config.sampler.seed), 1),
-            amplitude_mle=posterior_samples["amplitude_mle"],
-            template_optimal_snr=posterior_samples["template_optimal_snr"],
-            template_merger_rate=posterior_samples["template_merger_rate"],
+        conditional = AmplitudeConditional(
+            posterior_samples["amplitude_mle"],
+            posterior_samples["template_optimal_snr"],
+            prior=marginalization.prior,
+            grid=marginalization.grid,
         )
-        draws = {name: values[0] for name, values in draws.items()}
+        amplitude = conditional.sample(
+            jax.random.fold_in(jax.random.PRNGKey(config.sampler.seed), 1)
+        )
+        # `quadrature_effective_nodes` keeps its name even though the quadrature
+        # object is gone: it is read back from the posterior group, so renaming
+        # it would break existing NetCDFs.
+        draws = {
+            amplitude_parameter: marginalization.transform.inv(amplitude),
+            "quadrature_effective_nodes": conditional.effective_nodes,
+        }
 
         # `az.from_numpyro` returns an xarray DataTree, whose __setitem__ does
         # not accept a Dataset-style `(dims, values)` tuple: it would store the
@@ -395,9 +384,12 @@ def save(
     # still reweights well at the posterior.
     post = idata.posterior
     ress = post["importance_relative_ess"].values.ravel()
-    rate = post["total_merger_rate"].values.ravel()
     logger.info("importance_relative_ess: mean=%.3f min=%.3f", ress.mean(), ress.min())
-    logger.info("total_merger_rate [/s]: mean=%.4e", rate.mean())
+    # The marginalized trace holds the template's rate under another name, so
+    # there is no physical rate to log for it.
+    if marginalization is None:
+        rate = post["total_merger_rate"].values.ravel()
+        logger.info("total_merger_rate [/s]: mean=%.4e", rate.mean())
     logger.info("Saved %s", nc_path)
     return nc_path
 

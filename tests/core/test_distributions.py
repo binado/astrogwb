@@ -398,7 +398,7 @@ def test_redshift_distribution_uses_supplied_source_frame_callable() -> None:
 # --------------------------------------------------------------------------- #
 def test_normalized_density_is_independent_of_the_hubble_constant() -> None:
     """`dV_c/dz` is proportional to `H0^-3`, which cancels in the normalization --
-    the fact behind `merger_rate_H0_fn = H0**-3`. Measured -9e-19: float noise,
+    the fact behind the H0**-3 merger-rate scaling. Measured -9e-19: float noise,
     not an exact zero, so this is an `atol` assertion."""
 
     def log_prob_at(name: str, value: float) -> jax.Array:
@@ -414,7 +414,7 @@ def test_normalized_density_is_independent_of_the_hubble_constant() -> None:
 
 
 def test_total_merger_rate_scales_as_the_inverse_cube_of_the_hubble_constant() -> None:
-    """Pins `merger_rate_H0_fn = H0**-3` against the class itself."""
+    """Pins the H0**-3 merger-rate scaling against the class itself."""
 
     def rate_at(h0: float) -> jax.Array:
         return _distribution(H0=h0).total_merger_rate()

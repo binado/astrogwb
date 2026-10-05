@@ -78,6 +78,12 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
+from numpyro.distributions.transforms import (
+    AffineTransform,
+    ComposeTransform,
+    PowerTransform,
+    Transform,
+)
 
 from astrogwb.cosmology import log_gw_em_ratio, lookback_time
 from astrogwb.distributions.delay import PowerLawDelayDistribution
@@ -95,8 +101,8 @@ from astrogwb.populations.registry import Population, register_population
 
 __all__ = [
     "AMPLITUDE_PARAMETERS",
-    "amplitude_H0_fn",
-    "amplitude_local_merger_rate_fn",
+    "amplitude_H0_transform",
+    "amplitude_local_merger_rate_transform",
     "bns_md_cosmological",
     "bns_md_gaussian_cosmological",
     "bns_md_gaussian_modified_propagation",
@@ -106,45 +112,29 @@ __all__ = [
     "bns_md_uniform_mixture",
     "madau_dickinson_time_delayed_total_merger_rate",
     "madau_dickinson_total_merger_rate",
-    "merger_rate_H0_fn",
-    "merger_rate_local_merger_rate_fn",
 ]
 
 AMPLITUDE_PARAMETERS: tuple[str, ...] = ("H0", "local_merger_rate")
 """Parameters with an amplitude scaling here; a population declares its subset."""
 
 
-# Absolute scalings as module-level ``def``s (not closures over the fiducial)
-# so they are singletons: ``AmplitudeConditional`` carries the amplitude
-# function as pytree *aux* data, which JAX hashes into the jit cache key. A
-# lambda (or a ``functools.partial`` over a float) is identity-hashed, so a
-# fresh one per call would retrace the model on every construction. The
-# consumer forms the ratio ``f(varphi)/f(varphi_fid)`` itself.
+# Amplitude maps ``A = T(varphi)``, anchored at ``T(varphi_fid) = 1``.
 #
 # The predicted spectrum factorizes as ``f = g_R * g_F``. ``local_merger_rate``
 # enters only through ``total_merger_rate`` (linear; absent from ``log_weights``),
-# so ``g_R = varphi``, ``g_F = 1``, ``f = varphi``. ``H0`` enters the rate via
+# so ``f = varphi`` and ``A = varphi / fid``. ``H0`` enters the rate via
 # ``dV_c/dz ∝ h0^{-3}`` and the mean energy flux via
-# ``exp(-2 log d_L) ∝ h0^2``, so ``g_R = varphi^{-3}``, ``g_F = varphi^2``,
-# and ``f = varphi^{-1}``.
-def merger_rate_H0_fn(marginalized_parameter: jax.Array) -> jax.Array:
-    """Merger-rate scaling :math:`g_R(H_0) = H_0^{-3}`."""
-    return marginalized_parameter**-3
+# ``exp(-2 log d_L) ∝ h0^2``, so ``f = varphi^{-1}`` and ``A = fid / varphi``.
+# The library only ever sees the A-space prior that `amplitude_prior` builds from
+# one of these; the caller applies ``T.inv`` to amplitude draws.
+def amplitude_H0_transform(fiducial: float) -> Transform:
+    """Amplitude map :math:`A = H_{0,\\mathrm{fid}} / H_0` (decreasing)."""
+    return ComposeTransform([PowerTransform(-1.0), AffineTransform(0.0, fiducial)])
 
 
-def amplitude_H0_fn(marginalized_parameter: jax.Array) -> jax.Array:
-    """Total amplitude scaling :math:`f(H_0) = H_0^{-1}` (:math:`g_R g_F`)."""
-    return 1.0 / marginalized_parameter
-
-
-def merger_rate_local_merger_rate_fn(marginalized_parameter: jax.Array) -> jax.Array:
-    """Merger-rate scaling :math:`g_R(\\mathcal{R}_0) = \\mathcal{R}_0`."""
-    return marginalized_parameter
-
-
-def amplitude_local_merger_rate_fn(marginalized_parameter: jax.Array) -> jax.Array:
-    """Total amplitude scaling :math:`f(\\mathcal{R}_0) = \\mathcal{R}_0`."""
-    return marginalized_parameter
+def amplitude_local_merger_rate_transform(fiducial: float) -> Transform:
+    """Amplitude map :math:`A = \\mathcal{R}_0 / \\mathcal{R}_{0,\\mathrm{fid}}`."""
+    return AffineTransform(0.0, 1.0 / fiducial)
 
 
 def _require_sample_inclination(sample_inclination: bool) -> None:

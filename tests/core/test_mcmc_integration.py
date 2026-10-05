@@ -5,7 +5,7 @@ injection and the importance-sampling proposal, so every log-weight is exactly
 zero and the "observed" spectrum is the unweighted catalog contraction. With
 only :math:`H_0` free, the predicted spectrum is
 :math:`S_h(H_0) = A\,S_h(H_0^{\rm fid})` with :math:`A = H_0^{\rm fid}/H_0`
-(because ``amplitude_H0_fn`` is :math:`H_0^{-1}`), so the log-likelihood is
+(because the amplitude transform is :math:`H_0^{\rm fid}/H_0`), so the log-likelihood is
 exactly :math:`-\tfrac{1}{2}(1 - A)^2\rho^2`. Hence :math:`A \sim N(1,
 1/\rho^2)` truncated by the prior, giving :math:`\sigma_{H_0}/H_0^{\rm fid} =
 1/\rho` and a mean biased high by only :math:`1/\rho^2` (~4e-4 at
@@ -41,7 +41,8 @@ from astrogwb_mock_population import (
     mock_target_model,
 )
 from jax.typing import ArrayLike
-from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
+from numpyro import handlers
+from numpyro.infer import MCMC, NUTS, init_to_value
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.constants import SECONDS_PER_YEAR
@@ -50,22 +51,20 @@ from astrogwb.detector import (
     gaussian_bin_scale,
     load_sensitivity_map,
 )
-from astrogwb.distributions.amplitude import quadrature_grid
+from astrogwb.distributions.amplitude import (
+    AmplitudeConditional,
+    amplitude_prior,
+    quadrature_grid,
+)
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.inference import (
     SpectralDensityFn,
-    amplitude_reconstruction_model,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
-    with_renamed_diagnostics,
 )
-from astrogwb.populations import (
-    DEFAULT_DENSITY_SITES,
-    amplitude_H0_fn,
-    merger_rate_H0_fn,
-)
+from astrogwb.populations import DEFAULT_DENSITY_SITES, amplitude_H0_transform
 from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
 
 pytestmark = pytest.mark.integration
@@ -94,6 +93,8 @@ NUM_SAMPLES = 1000
 AMPLITUDE_NUM_NODES = 512
 
 H0_PRIOR = dist.Uniform(20.0, 140.0)
+H0_TRANSFORM = amplitude_H0_transform(FIDUCIALS["H0"])
+AMPLITUDE_PRIOR = amplitude_prior(H0_PRIOR, H0_TRANSFORM)
 OMEGA_M_PRIOR = dist.Normal(0.3096, 0.006)
 
 
@@ -279,49 +280,36 @@ def _marginalized_model(
     priors: dict[str, dist.Distribution],
     amplitude_grid: jax.Array,
 ):
-    return partial(
-        gwb_amplitude_marginalized_model,
-        # The spectrum is evaluated with H0 pinned, so its rate is the
-        # template's; publishing it as `total_merger_rate` would collide with
-        # the physical rate the reconstruction below writes under that name.
-        spectral_density_fn=with_renamed_diagnostics(
-            inputs.estimator, {"total_merger_rate": "template_merger_rate"}
+    """H0 is a ``priors`` site pinned at its fiducial: the spectrum is the template."""
+    return handlers.block(
+        handlers.condition(
+            partial(
+                gwb_amplitude_marginalized_model,
+                spectral_density_fn=inputs.estimator,
+                amplitude_prior=AMPLITUDE_PRIOR,
+                amplitude_grid=amplitude_grid,
+                priors={"H0": H0_PRIOR, **priors},
+            ),
+            data={"H0": FIDUCIALS["H0"]},
         ),
-        amplitude_parameter="H0",
-        amplitude_fiducial=FIDUCIALS["H0"],
-        # Passed by name, never wrapped: AmplitudeConditional hashes
-        # amplitude_fn into the jit cache key, so a freshly-minted callable
-        # retraces the model on every construction. Pinned by
-        # test_amplitude_scalings.py.
-        amplitude_fn=amplitude_H0_fn,
-        amplitude_prior=H0_PRIOR,
-        amplitude_grid=amplitude_grid,
-        priors=priors,
+        hide=["H0"],
     )
 
 
 def _reconstruct_h0(posterior: dict, amplitude_grid: jax.Array) -> dict:
     """Draw H0 back from the chain's sufficient statistics."""
-    draws = Predictive(
-        partial(
-            amplitude_reconstruction_model,
-            amplitude_parameter="H0",
-            amplitude_fn=amplitude_H0_fn,
-            merger_rate_amplitude_fn=merger_rate_H0_fn,
-            prior=H0_PRIOR,
-            fiducial=FIDUCIALS["H0"],
-            grid=amplitude_grid,
-        ),
-        num_samples=1,
-        return_sites=["H0", "total_merger_rate", "quadrature_effective_nodes"],
-    )(
-        # fold_in keeps the reconstruction key distinct from the chain's.
-        jax.random.fold_in(jax.random.PRNGKey(SEED), 1),
-        amplitude_mle=posterior["amplitude_mle"],
-        template_optimal_snr=posterior["template_optimal_snr"],
-        template_merger_rate=posterior["template_merger_rate"],
+    conditional = AmplitudeConditional(
+        posterior["amplitude_mle"],
+        posterior["template_optimal_snr"],
+        prior=AMPLITUDE_PRIOR,
+        grid=amplitude_grid,
     )
-    return {name: values[0] for name, values in draws.items()}
+    # fold_in keeps the reconstruction key distinct from the chain's.
+    amplitude = conditional.sample(jax.random.fold_in(jax.random.PRNGKey(SEED), 1))
+    return {
+        "H0": H0_TRANSFORM.inv(amplitude),
+        "quadrature_effective_nodes": conditional.effective_nodes,
+    }
 
 
 @pytest.fixture(scope="module")
@@ -333,7 +321,7 @@ def analysis_inputs(mock_catalog_factory) -> AnalysisInputs:
 @pytest.fixture(scope="module")
 def marginalized_result(analysis_inputs: AnalysisInputs) -> MarginalizedResult:
     """Run the marginalized chain once for both tests that inspect it."""
-    amplitude_grid = quadrature_grid(H0_PRIOR, num_nodes=AMPLITUDE_NUM_NODES)
+    amplitude_grid = quadrature_grid(AMPLITUDE_PRIOR, num_nodes=AMPLITUDE_NUM_NODES)
     posterior = _run_nuts(
         _marginalized_model(
             analysis_inputs, {"Omega_m": OMEGA_M_PRIOR}, amplitude_grid
@@ -394,7 +382,7 @@ def test_amplitude_marginalized_model_reconstructs_h0(
 
     assert set(posterior) >= {
         "Omega_m",
-        "template_merger_rate",
+        "total_merger_rate_at_unit_amplitude",
         "amplitude_mle",
         "template_optimal_snr",
         "importance_relative_ess",
@@ -419,11 +407,7 @@ def test_amplitude_marginalized_model_reconstructs_h0(
     )
 
     reconstructed = marginalized_result.reconstructed
-    assert set(reconstructed) == {
-        "H0",
-        "total_merger_rate",
-        "quadrature_effective_nodes",
-    }
+    assert set(reconstructed) == {"H0", "quadrature_effective_nodes"}
     for values in reconstructed.values():
         assert values.shape == (1, NUM_SAMPLES)
 
@@ -448,7 +432,7 @@ def test_marginalized_and_direct_h0_posteriors_agree(
     ``test_spectral_inference.py::test_amplitude_marginalized_model_matches_the_general_model``
     already pins the *exact* log-density equivalence at ``rtol=1e-3`` by
     numerical quadrature, which is far sharper than any MCMC comparison. What
-    this adds is coverage of the full pipeline -- NUTS, ``Predictive``, the
+    this adds is coverage of the full pipeline -- NUTS, the
     reconstruction conditional -- on realistic data, which is where a
     mismatched conditional would actually bite.
     """

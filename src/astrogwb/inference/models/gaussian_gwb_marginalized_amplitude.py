@@ -1,22 +1,21 @@
-r"""Amplitude-marginalized inference and its post-hoc reconstruction.
+r"""Amplitude-marginalized inference over a dimensionless amplitude.
 
 :func:`gwb_amplitude_marginalized_model` integrates one multiplicative
-parameter of an arbitrary :class:`~astrogwb.inference.SpectralDensityFn`
-under a prior, and publishes amplitude sufficient statistics instead of
-sampling that parameter. :func:`amplitude_reconstruction_model` consumes those
-statistics and a template rate via ``Predictive`` to recover joint
-amplitude/shape draws and the physical rate. Keep reconstruction separate from
-inference to avoid counting amplitude twice. When no rate is available, draw
-amplitudes directly from
-:class:`~astrogwb.distributions.amplitude.AmplitudeConditional` using the same
-statistics, prior, fiducial, scaling function, and grid.
+amplitude :math:`A` of an arbitrary :class:`~astrogwb.inference.SpectralDensityFn`
+under an A-space prior, and publishes amplitude sufficient statistics instead of
+sampling it. The spectrum is evaluated at the template (:math:`A = 1`); the
+model knows nothing about the physical parameter :math:`\varphi` behind the
+amplitude. The caller builds the A-space prior from a NumPyro ``Transform``
+:math:`T` with :func:`~astrogwb.distributions.amplitude.amplitude_prior`, pins
+:math:`\varphi` at its fiducial :math:`T(\varphi_{\mathrm{fid}}) = 1` when
+evaluating the spectrum, and recovers :math:`\varphi` afterwards by drawing
+:math:`A` from
+:class:`~astrogwb.distributions.amplitude.AmplitudeConditional` with the
+published statistics and applying :math:`T^{-1}`.
 
-Diagnostics describe the pinned template, so an importance caller relabels the
-rate without touching any other extras::
-
-    template_spectrum = with_renamed_diagnostics(
-        spectrum, {"total_merger_rate": "template_merger_rate"}
-    )
+The template spectrum's total merger rate is registered as
+``total_merger_rate_at_unit_amplitude`` so a template quantity never appears
+under the name of a physical one.
 
 End-to-end sketch (toy data; runnable as-is):
 
@@ -27,73 +26,71 @@ End-to-end sketch (toy data; runnable as-is):
     import jax
     import jax.numpy as jnp
     import numpy as np
+    import numpyro
     import numpyro.distributions as dist
     import xarray as xr
-    from numpyro.infer import MCMC, NUTS, Predictive
+    from numpyro import handlers
+    from numpyro.infer import MCMC, NUTS
 
-    from astrogwb.distributions.amplitude import quadrature_grid
     from astrogwb.detector import gaussian_bin_scale
-    from astrogwb.inference import (
-        amplitude_reconstruction_model,
-        gwb_amplitude_marginalized_model,
+    from astrogwb.distributions.amplitude import (
+        AmplitudeConditional,
+        amplitude_prior,
+        quadrature_grid,
     )
+    from astrogwb.inference import gwb_amplitude_marginalized_model
+    from astrogwb.populations import amplitude_H0_transform
 
-    # --- One-time setup: the prior and the grid the amplitude direction is
-    # marginalized on. The scalings are absolute functions of H0; the model
-    # anchors them at the fiducial itself.
+    # --- One-time setup: the A-space prior and the grid it is marginalized on.
     h0_fid = 70.0
-    amplitude_prior = dist.Uniform(20.0, 140.0)
-    grid = quadrature_grid(amplitude_prior, num_nodes=2001)
-
-    def h0_merger_rate_amplitude(h0):
-        return h0**-3
-
-    def h0_amplitude(h0):
-        return 1.0 / h0  # h0**-3 * h0**2
+    transform = amplitude_H0_transform(h0_fid)  # A = h0_fid / H0
+    h0_prior = dist.Uniform(20.0, 140.0)
+    prior = amplitude_prior(h0_prior, transform)
+    grid = quadrature_grid(prior, num_nodes=2001)
 
     def toy_spectrum(params):
         template_rate = 10.0 ** params["log10_rate"] * (h0_fid / params["H0"]) ** 3
         prediction = 0.4 * template_rate * (params["H0"] / h0_fid) ** 2 * jnp.ones(3)
-        return prediction, {"template_merger_rate": template_rate}
+        return prediction, {"total_merger_rate": template_rate}
 
     fiducials = {"H0": h0_fid, "log10_rate": -7.0}
     observed, _ = toy_spectrum(fiducials)
 
-    # --- Inference: NUTS on the amplitude-marginalized model.
-    model = partial(
-        gwb_amplitude_marginalized_model,
-        spectral_density_fn=toy_spectrum,
-        observed_spectral_density=observed,
-        scale=gaussian_bin_scale(jnp.ones(3), 1.0, 0.25),
-        amplitude_parameter="H0",
-        amplitude_fiducial=h0_fid,
-        amplitude_fn=h0_amplitude,
-        amplitude_prior=amplitude_prior,
-        amplitude_grid=grid,
-        priors={"log10_rate": dist.Uniform(-8.0, -6.0)},
+    # --- Inference: NUTS on the amplitude-marginalized model. H0 is a site of
+    # `priors`, conditioned at its fiducial and hidden from the trace, so the
+    # spectrum is evaluated at the template.
+    model = handlers.block(
+        handlers.condition(
+            partial(
+                gwb_amplitude_marginalized_model,
+                spectral_density_fn=toy_spectrum,
+                observed_spectral_density=observed,
+                scale=gaussian_bin_scale(jnp.ones(3), 1.0, 0.25),
+                amplitude_prior=prior,
+                amplitude_grid=grid,
+                priors={"H0": h0_prior, "log10_rate": dist.Uniform(-8.0, -6.0)},
+            ),
+            data={"H0": h0_fid},
+        ),
+        hide=["H0"],
     )
     mcmc = MCMC(NUTS(model), num_warmup=50, num_samples=50, num_chains=1,
                 progress_bar=False)
     mcmc.run(jax.random.PRNGKey(0))
 
-    # --- Reconstruction: pass the chain's statistics as a (chain, draw)
-    # batch and draw one H0 for every element.
+    # --- Reconstruction: one A per (chain, draw), mapped back with T.inv.
     chain_samples = mcmc.get_samples(group_by_chain=True)
-    draws = Predictive(
-        partial(amplitude_reconstruction_model,
-                amplitude_parameter="H0",
-                amplitude_fn=h0_amplitude,
-                merger_rate_amplitude_fn=h0_merger_rate_amplitude,
-                prior=amplitude_prior, fiducial=h0_fid, grid=grid),
-        num_samples=1,
-        return_sites=["H0", "total_merger_rate", "quadrature_effective_nodes"],
-    )(
-        jax.random.fold_in(jax.random.PRNGKey(0), 1),
-        amplitude_mle=chain_samples["amplitude_mle"],
-        template_optimal_snr=chain_samples["template_optimal_snr"],
-        template_merger_rate=chain_samples["template_merger_rate"],
+    conditional = AmplitudeConditional(
+        chain_samples["amplitude_mle"],
+        chain_samples["template_optimal_snr"],
+        prior=prior,
+        grid=grid,
     )
-    draws = {name: values[0] for name, values in draws.items()}
+    amplitude = conditional.sample(jax.random.fold_in(jax.random.PRNGKey(0), 1))
+    draws = {
+        "H0": transform.inv(amplitude),
+        "quadrature_effective_nodes": conditional.effective_nodes,
+    }
 
     # --- Merge: every returned site is (chain, draw); assign DataArrays.
     import arviz as az
@@ -108,7 +105,6 @@ End-to-end sketch (toy data; runnable as-is):
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -116,14 +112,18 @@ import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
-from astrogwb.distributions.amplitude import (
-    AmplitudeConditional,
-    AmplitudeFn,
-    MergerRateAmplitudeFn,
-)
+from astrogwb.distributions.amplitude import AmplitudeConditional
 from astrogwb.inference.protocol import SpectralDensityFn
 
-__all__ = ["amplitude_reconstruction_model", "gwb_amplitude_marginalized_model"]
+__all__ = ["gwb_amplitude_marginalized_model"]
+
+
+TEMPLATE_RATE_SITE = "total_merger_rate_at_unit_amplitude"
+LIKELIHOOD_SITES = (
+    "amplitude_mle",
+    "template_optimal_snr",
+    "amplitude_marginalized_log_likelihood",
+)
 
 
 def gwb_amplitude_marginalized_model(
@@ -132,48 +132,50 @@ def gwb_amplitude_marginalized_model(
     observed_spectral_density: jax.Array,
     priors: Mapping[str, dist.Distribution],
     scale: jax.Array,
-    amplitude_parameter: str,
-    amplitude_fiducial: ArrayLike,
-    amplitude_fn: AmplitudeFn,
     amplitude_prior: dist.Distribution,
     amplitude_grid: jax.Array | None = None,
     frequency_mask: jax.Array | None = None,
 ) -> None:
-    """Marginalize a multiplicative parameter of any supplied spectrum.
+    """Marginalize a multiplicative amplitude of any supplied spectrum.
 
-    Sample shape parameters from ``priors`` and evaluate the spectrum once with
-    ``amplitude_parameter`` pinned to ``amplitude_fiducial``. The amplitude
-    ratio is ``amplitude_fn(phi) / amplitude_fn(amplitude_fiducial)``; the
-    spectrum must factor this way throughout the amplitude prior's support.
-    Integrate under ``amplitude_prior`` using ``AmplitudeConditional`` and
-    its default quadrature grid when ``amplitude_grid`` is omitted.
+    Sample every site in ``priors`` and evaluate the spectrum once; that
+    spectrum is the template at :math:`A = 1`, so it must already be evaluated
+    at the fiducial of whichever physical parameter the amplitude stands for.
+    A caller pins that parameter with ``numpyro.handlers.condition`` plus
+    ``block`` on a ``priors`` site. Integrate :math:`A` under
+    ``amplitude_prior`` -- the A-space pushforward from
+    :func:`~astrogwb.distributions.amplitude.amplitude_prior` -- using
+    ``AmplitudeConditional`` and its default quadrature grid when
+    ``amplitude_grid`` is omitted.
 
     Records ``amplitude_mle``, ``template_optimal_snr``, the returned extras,
-    and the ``amplitude_marginalized_log_likelihood`` factor. Diagnostics must
-    not collide with priors or these three likelihood-owned names. No merger
-    rate is required and extras are never rescaled. Importance callers should
-    rename their spectrum's ``total_merger_rate`` to ``template_merger_rate``
-    before returning it; see this module's docstring. Use the unchanged
-    ``amplitude_reconstruction_model`` for rate-aware reconstruction, or
-    ``AmplitudeConditional`` directly when only amplitude draws are needed.
+    and the ``amplitude_marginalized_log_likelihood`` factor. The spectrum's
+    ``total_merger_rate`` extra, if any, is the template's and is registered as
+    ``total_merger_rate_at_unit_amplitude``; other extras are recorded
+    unchanged. Diagnostics must not collide with priors or the likelihood-owned
+    names. Draw amplitudes afterwards from ``AmplitudeConditional`` using the
+    same prior and grid, and map them to the physical parameter with the
+    inverse transform.
 
     ``frequency_mask`` is an optional boolean array of shape ``(F,)`` selecting
     the bins the likelihood counts, as in
     :func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_spectral_density_model`.
     Every sum below restricts to it.
 
-    Raises ``ValueError`` if the amplitude is also present in ``priors``.
-    All spectrum, observation, and scale arrays have shape ``(F,)``.
+    Raises ``ValueError`` if a diagnostic name collides with a sampled site, a
+    likelihood-owned site, or another published diagnostic. All spectrum, observation, and scale arrays have
+    shape ``(F,)``.
     """
-    if amplitude_parameter in priors:
-        raise ValueError(
-            f"{amplitude_parameter!r} is marginalized analytically and cannot "
-            "also be sampled; remove it from priors"
-        )
     params = {name: numpyro.sample(name, prior) for name, prior in priors.items()}
-    params[amplitude_parameter] = amplitude_fiducial
     model_spectral_density, extras = spectral_density_fn(params)
+    reserved = {*priors, *LIKELIHOOD_SITES}
+    published: dict[str, ArrayLike] = {}
     for name, value in extras.items():
+        site = TEMPLATE_RATE_SITE if name == "total_merger_rate" else name
+        if site in reserved or site in published:
+            raise ValueError(f"spectrum diagnostic {site!r} collides with a model site")
+        published[site] = value
+    for name, value in published.items():
         numpyro.deterministic(name, value)
 
     inverse_variance = scale**-2
@@ -200,9 +202,7 @@ def gwb_amplitude_marginalized_model(
     conditional = AmplitudeConditional(
         amplitude_mle,
         template_optimal_snr,
-        amplitude_fn=amplitude_fn,
         prior=amplitude_prior,
-        fiducial=amplitude_fiducial,
         grid=amplitude_grid,
     )
     # log p(d | A_mle) = -1/2 chi^2(A_mle, theta) + normalization, with
@@ -224,77 +224,3 @@ def gwb_amplitude_marginalized_model(
         "amplitude_marginalized_log_likelihood",
         log_likelihood_at_mle + conditional.log_normalizer,
     )
-
-
-def amplitude_reconstruction_model(
-    amplitude_mle: jax.Array,
-    template_optimal_snr: jax.Array,
-    template_merger_rate: jax.Array,
-    *,
-    amplitude_parameter: str,
-    amplitude_fn: AmplitudeFn,
-    merger_rate_amplitude_fn: MergerRateAmplitudeFn,
-    prior: dist.Distribution,
-    fiducial: Any,
-    grid: jax.Array | None = None,
-) -> None:
-    r"""Generative-only reconstruction of joint :math:`(\varphi, \theta)` posterior draws.
-
-    Consumed via :class:`~numpyro.infer.Predictive` with the sufficient
-    statistics published by :func:`gwb_amplitude_marginalized_model`; see this
-    module's docstring for the end-to-end sketch. The statistics' broadcast
-    shape is the batch shape of
-    :class:`~astrogwb.distributions.amplitude.AmplitudeConditional`, so a
-    ``(chain, draw)`` input batch yields one independent marginalized-parameter
-    draw for every chain element. There is no forward physics here -- no
-    catalog, no :math:`(F, N)` contraction -- so the cost is ``O(K)`` per draw
-    and the model runs against a saved chain alone.
-
-    Registered sites:
-
-    - ``amplitude_parameter`` as a ``sample`` site from
-      :class:`~astrogwb.distributions.amplitude.AmplitudeConditional`;
-    - ``total_merger_rate`` and ``quadrature_effective_nodes`` as
-      deterministics, the same names and definitions the reconstruction has
-      always published.
-
-    Parameters
-    ----------
-    amplitude_mle, template_optimal_snr, template_merger_rate:
-        Sufficient statistics published by
-        :func:`gwb_amplitude_marginalized_model`. Their shapes must broadcast to a
-        common batch shape; production reconstruction passes ``(chain, draw)``
-        arrays.
-    amplitude_parameter:
-        Name of the marginalized parameter; becomes the sample-site name of
-        the reconstructed draws (e.g. ``"H0"``).
-    amplitude_fn, prior, fiducial, grid:
-        Must be exactly what :func:`gwb_amplitude_marginalized_model` was given.
-        Reconstruction is only exact against the density the chain's factor
-        site actually integrated; a silently different one yields a wrong
-        marginalized posterior with no visible symptom, because the sufficient
-        statistics stay finite and plausible whatever conditional you pair
-        them with.
-    merger_rate_amplitude_fn:
-        The absolute merger-rate scaling :math:`g_R(\varphi)` alone, used to
-        turn ``template_merger_rate`` back into the physical rate.
-    """
-    conditional = AmplitudeConditional(
-        amplitude_mle,
-        template_optimal_snr,
-        amplitude_fn=amplitude_fn,
-        prior=prior,
-        fiducial=fiducial,
-        grid=grid,
-    )
-    phi = jnp.asarray(numpyro.sample(amplitude_parameter, conditional))
-    numpyro.deterministic(
-        "total_merger_rate",
-        template_merger_rate
-        * merger_rate_amplitude_fn(phi)
-        / merger_rate_amplitude_fn(jnp.asarray(fiducial)),
-    )
-    # `quadrature_effective_nodes` keeps its name even though the quadrature
-    # object is gone: it is written into the posterior group and read back by
-    # the paper's `run_mcmc.save`, so renaming it would break existing NetCDFs.
-    numpyro.deterministic("quadrature_effective_nodes", conditional.effective_nodes)
