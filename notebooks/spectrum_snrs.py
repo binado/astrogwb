@@ -38,7 +38,10 @@ with app.setup(hide_code=True):
     from astrogwb.distributions.amplitude import amplitude_prior
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb import spectral_snr
-    from astrogwb.inference import gwb_amplitude_marginalized_model
+    from astrogwb.inference import (
+        amplitude_H0_transform,
+        gwb_amplitude_marginalized_model,
+    )
     from astrogwb.paper.cache import default_cache_dir
     from astrogwb.paper.config import (
         detector_registry,
@@ -50,7 +53,6 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import FIGURES_DIR
     from astrogwb.paper.plotting import save_figures, use_paper_style
-    from astrogwb.populations.bns_madau_dickinson import amplitude_H0_transform
     from astrogwb.simulators.core import split_seed
     from astrogwb.simulators.spectra import (
         SpectralDensityCatalog,

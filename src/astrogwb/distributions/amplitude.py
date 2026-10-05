@@ -18,9 +18,9 @@ either way, and a caller recovers :math:`\varphi` from amplitude draws with
 :math:`T^{-1}`. The predicted spectrum factorizes into two independently-scaling
 pieces, a total merger rate and a mean energy flux (the importance-weighted
 polarization-power contraction); see
-:func:`~astrogwb.populations.bns_madau_dickinson.amplitude_H0_transform`
+:func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.amplitude_H0_transform`
 and
-:func:`~astrogwb.populations.bns_madau_dickinson.amplitude_local_merger_rate_transform`
+:func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.amplitude_local_merger_rate_transform`
 for the concrete maps for :math:`H_0` and ``local_merger_rate``. Define
 the noise-weighted inner product
 :math:`(x|y) = \sum_i x_i y_i / \sigma_i^2`. Then
@@ -133,7 +133,7 @@ def amplitude_prior(
         # ... run the model, draw A from `AmplitudeConditional(..., prior=prior)`
         h0 = transform.inv(amplitude)
 
-    See :func:`~astrogwb.populations.bns_madau_dickinson.amplitude_H0_transform`
+    See :func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.amplitude_H0_transform`
     for the packaged map.
     """
     return dist.TransformedDistribution(prior, transform)

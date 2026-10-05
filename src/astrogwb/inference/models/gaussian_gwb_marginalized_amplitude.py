@@ -39,7 +39,7 @@ End-to-end sketch (toy data; runnable as-is):
         quadrature_grid,
     )
     from astrogwb.inference import gwb_amplitude_marginalized_model
-    from astrogwb.populations import amplitude_H0_transform
+    from astrogwb.inference import amplitude_H0_transform
 
     # --- One-time setup: the A-space prior and the grid it is marginalized on.
     h0_fid = 70.0
@@ -110,14 +110,43 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
+from numpyro.distributions.transforms import (
+    AffineTransform,
+    ComposeTransform,
+    PowerTransform,
+    Transform,
+)
 
 from astrogwb.distributions.amplitude import AmplitudeConditional
 from astrogwb.inference.protocol import SpectralDensityFn
 
-__all__ = ["gwb_amplitude_marginalized_model"]
+__all__ = [
+    "amplitude_H0_transform",
+    "amplitude_local_merger_rate_transform",
+    "gwb_amplitude_marginalized_model",
+]
 
 
 TEMPLATE_RATE_SITE = "total_merger_rate_at_unit_amplitude"
+
+
+# Amplitude maps ``A = T(varphi)``, anchored at ``T(varphi_fid) = 1``.
+#
+# The predicted spectrum factorizes as ``f = g_R * g_F``. ``local_merger_rate``
+# enters only through ``total_merger_rate`` (linear; absent from ``log_weights``),
+# so ``f = varphi`` and ``A = varphi / fid``. ``H0`` enters the rate via
+# ``dV_c/dz ∝ h0^{-3}`` and the mean energy flux via
+# ``exp(-2 log d_L) ∝ h0^2``, so ``f = varphi^{-1}`` and ``A = fid / varphi``.
+# The library only ever sees the A-space prior that `amplitude_prior` builds from
+# one of these; the caller applies ``T.inv`` to amplitude draws.
+def amplitude_H0_transform(fiducial: float) -> Transform:
+    """Amplitude map :math:`A = H_{0,\\mathrm{fid}} / H_0` (decreasing)."""
+    return ComposeTransform([PowerTransform(-1.0), AffineTransform(0.0, fiducial)])
+
+
+def amplitude_local_merger_rate_transform(fiducial: float) -> Transform:
+    """Amplitude map :math:`A = \\mathcal{R}_0 / \\mathcal{R}_{0,\\mathrm{fid}}`."""
+    return AffineTransform(0.0, 1.0 / fiducial)
 
 
 def gwb_amplitude_marginalized_model(

@@ -57,6 +57,8 @@ from astrogwb.gwb import spectral_density
 from astrogwb.importance.spectral import LogWeightsFn, build_importance_spectrum
 from astrogwb.inference import (
     SpectralDensityFn,
+    amplitude_H0_transform,
+    amplitude_local_merger_rate_transform,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
 )
@@ -64,8 +66,6 @@ from astrogwb.paper.catalogs import validate_matching_frequency_grids
 from astrogwb.paper.config.mcmc import RunConfig
 from astrogwb.populations import (
     Population,
-    amplitude_H0_transform,
-    amplitude_local_merger_rate_transform,
     amplitude_parameters,
     build_population,
 )

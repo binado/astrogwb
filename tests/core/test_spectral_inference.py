@@ -39,10 +39,10 @@ from astrogwb.gwb import spectral_density
 from astrogwb.importance.spectral import importance_spectral_density
 from astrogwb.inference import (
     SpectralDensityFn,
+    amplitude_local_merger_rate_transform,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
 )
-from astrogwb.populations import amplitude_local_merger_rate_transform
 
 OBSERVED = jnp.array([1.4, 2.0, 3.2])
 SCALE = jnp.array([0.7, 0.9, 1.2])

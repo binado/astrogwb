@@ -21,8 +21,6 @@ initialize it.
 
 from astrogwb.populations.bns_madau_dickinson import (
     AMPLITUDE_PARAMETERS,
-    amplitude_H0_transform,
-    amplitude_local_merger_rate_transform,
     bns_md_cosmological,
     bns_md_gaussian_cosmological,
     bns_md_gaussian_modified_propagation,
@@ -54,8 +52,6 @@ __all__ = [
     "Population",
     "PopulationMetadata",
     "SourceFn",
-    "amplitude_H0_transform",
-    "amplitude_local_merger_rate_transform",
     "amplitude_parameters",
     "bns_md_cosmological",
     "bns_md_gaussian_cosmological",

@@ -18,7 +18,7 @@ from astrogwb.distributions.amplitude import (
     amplitude_prior,
     quadrature_grid,
 )
-from astrogwb.populations import amplitude_H0_transform
+from astrogwb.inference import amplitude_H0_transform
 
 type _AmplitudePrior = dist.Normal | dist.Uniform
 

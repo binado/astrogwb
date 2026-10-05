@@ -61,10 +61,11 @@ from astrogwb.gwb import spectral_density, spectral_snr
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.inference import (
     SpectralDensityFn,
+    amplitude_H0_transform,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
 )
-from astrogwb.populations import DEFAULT_DENSITY_SITES, amplitude_H0_transform
+from astrogwb.populations import DEFAULT_DENSITY_SITES
 from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
 
 pytestmark = pytest.mark.integration

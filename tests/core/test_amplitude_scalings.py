@@ -22,11 +22,11 @@ import pytest
 from astrogwb_mock_population import FIDUCIALS
 
 from astrogwb.importance.spectral import importance_spectral_density
-from astrogwb.populations import (
-    AMPLITUDE_PARAMETERS,
+from astrogwb.inference import (
     amplitude_H0_transform,
     amplitude_local_merger_rate_transform,
 )
+from astrogwb.populations import AMPLITUDE_PARAMETERS
 
 _TRANSFORMS = {
     "H0": amplitude_H0_transform,
