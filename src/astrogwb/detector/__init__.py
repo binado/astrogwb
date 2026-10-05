@@ -9,6 +9,7 @@ from .overlap import (
     overlap_reduction_function,
     pairwise_overlap_reduction_function,
 )
+from .psd import resolve_psd_path
 from .sensitivity import (
     Sensitivity,
     load_sensitivities_for_network,
@@ -29,4 +30,5 @@ __all__ = [
     "overlap_reduction_function",
     "pairwise_overlap_reduction_function",
     "resolve_detector",
+    "resolve_psd_path",
 ]
