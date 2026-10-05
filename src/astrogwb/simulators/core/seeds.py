@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ["split_seed"]
+__all__ = ["split_seed", "validate_seeds"]
 
 
 def split_seed(seed: int, n: int) -> NDArray[np.uint64]:
@@ -25,3 +28,21 @@ def split_seed(seed: int, n: int) -> NDArray[np.uint64]:
         ],
         dtype=np.uint64,
     )
+
+
+def validate_seeds(inputs: Mapping[str, Any]) -> NDArray[np.uint64]:
+    """``inputs["seeds"]`` as a non-empty, duplicate-free 1-d ``uint64`` array.
+
+    A repeated seed is a duplicate draw, so it raises rather than being kept.
+    """
+    seeds = np.asarray(inputs["seeds"])
+    if seeds.ndim != 1 or seeds.size == 0 or seeds.dtype != np.uint64:
+        raise TypeError(
+            "inputs['seeds'] must be a non-empty 1-d uint64 array, e.g. "
+            f"split_seed(41, 8); got dtype={seeds.dtype} shape={seeds.shape}"
+        )
+    if np.unique(seeds).size != seeds.size:
+        raise ValueError(
+            "inputs['seeds'] must not repeat: a repeat is a duplicate draw"
+        )
+    return seeds

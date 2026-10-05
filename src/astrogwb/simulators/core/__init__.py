@@ -7,7 +7,7 @@ Nothing in this package imports :mod:`astrogwb.populations`,
 
 from astrogwb.simulators.core.cache import Cached, cached, read
 from astrogwb.simulators.core.keys import CATALOG_KEY_LENGTH, Keyed, content_key
-from astrogwb.simulators.core.seeds import split_seed
+from astrogwb.simulators.core.seeds import split_seed, validate_seeds
 from astrogwb.simulators.core.tree import digest
 from astrogwb.simulators.core.types import Arrays, Tree
 
@@ -22,4 +22,5 @@ __all__ = [
     "digest",
     "read",
     "split_seed",
+    "validate_seeds",
 ]
