@@ -21,8 +21,6 @@ initialize it.
 
 from astrogwb.populations.bns_madau_dickinson import (
     AMPLITUDE_PARAMETERS,
-    amplitude_H0_fn,
-    amplitude_local_merger_rate_fn,
     bns_md_cosmological,
     bns_md_gaussian_cosmological,
     bns_md_gaussian_modified_propagation,
@@ -32,8 +30,6 @@ from astrogwb.populations.bns_madau_dickinson import (
     bns_md_uniform_mixture,
     madau_dickinson_time_delayed_total_merger_rate,
     madau_dickinson_total_merger_rate,
-    merger_rate_H0_fn,
-    merger_rate_local_merger_rate_fn,
 )
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.populations.orientation import IsotropicInclination
@@ -56,8 +52,6 @@ __all__ = [
     "Population",
     "PopulationMetadata",
     "SourceFn",
-    "amplitude_H0_fn",
-    "amplitude_local_merger_rate_fn",
     "amplitude_parameters",
     "bns_md_cosmological",
     "bns_md_gaussian_cosmological",
@@ -70,7 +64,5 @@ __all__ = [
     "known_populations",
     "madau_dickinson_time_delayed_total_merger_rate",
     "madau_dickinson_total_merger_rate",
-    "merger_rate_H0_fn",
-    "merger_rate_local_merger_rate_fn",
     "register_population",
 ]

@@ -5,28 +5,23 @@ Under the per-frequency Gaussian likelihood used by
 one parameter can enter the predicted spectrum as a pure multiplicative
 factor,
 
-.. math:: \boldsymbol{\mu}(\varphi, \theta) = A(\varphi)\, \mathbf{m}(\theta)
+.. math:: \boldsymbol{\mu}(A, \theta) = A\, \mathbf{m}(\theta)
 
-with :math:`\mathbf{m}(\theta)` the *template* -- the spectrum evaluated at a
-fixed reference value :math:`\varphi_{\mathrm{fid}}` of the marginalized
-parameter -- and
-
-.. math:: A(\varphi) = f(\varphi) / f(\varphi_{\mathrm{fid}})
-
-the dimensionless amplitude relative to that template, for an arbitrary
-scaling :math:`f` from the physical parameter :math:`\varphi`. Normalizing by
-:math:`f(\varphi_{\mathrm{fid}})` here rather than trusting :math:`f` to
-already satisfy :math:`f(\varphi_{\mathrm{fid}}) = 1` makes the anchoring
-structurally impossible to get wrong; it is also the correct construction for
-a non-power-law :math:`f`, where :math:`f(\varphi/\varphi_{\mathrm{fid}})`
-would be something else entirely. The predicted spectrum factorizes into two
-independently-scaling pieces, a total merger rate and a mean energy flux (the
-importance-weighted polarization-power contraction), so
-:math:`f = g_R \cdot g_F`; see
-:func:`~astrogwb.populations.bns_madau_dickinson.amplitude_H0_fn`
+with :math:`\mathbf{m}(\theta)` the *template* -- the spectrum evaluated at the
+point where the dimensionless amplitude :math:`A` equals one -- and
+:math:`A = T(\varphi)` a monotone map from the physical parameter
+:math:`\varphi` anchored so that :math:`T(\varphi_{\mathrm{fid}}) = 1`. This
+module knows nothing about :math:`\varphi`: it integrates over :math:`A` itself,
+under the pushforward prior :math:`\pi_A = T_{\#}\pi_\varphi` that
+:func:`amplitude_prior` builds. The marginal likelihood is the same integral
+either way, and a caller recovers :math:`\varphi` from amplitude draws with
+:math:`T^{-1}`. The predicted spectrum factorizes into two independently-scaling
+pieces, a total merger rate and a mean energy flux (the importance-weighted
+polarization-power contraction); see
+:func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.amplitude_H0_transform`
 and
-:func:`~astrogwb.populations.bns_madau_dickinson.amplitude_local_merger_rate_fn`
-for the concrete scalings for :math:`H_0` and ``local_merger_rate``. Define
+:func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.amplitude_local_merger_rate_transform`
+for the concrete maps for :math:`H_0` and ``local_merger_rate``. Define
 the noise-weighted inner product
 :math:`(x|y) = \sum_i x_i y_i / \sigma_i^2`. Then
 
@@ -43,13 +38,11 @@ completing the square in :math:`A` gives
     = -R - \tfrac{1}{2}\rho^2 (A - \hat{A})^2,
 
 with :math:`R = \tfrac{1}{2}\sum_i((d_i - \hat{A}m_i)/\sigma_i)^2` the
-best-fit residual. This module marginalizes :math:`\varphi` numerically under
-the caller's actual prior :math:`\pi(\varphi)`, rather than requiring the
-prior to be stated on :math:`A` itself. The log-integrand is
+best-fit residual. The log-integrand is
 
 .. math::
 
-    \ell(\varphi) = \ln\pi(\varphi) - \tfrac{1}{2}\bigl(\rho\bigl(A(\varphi) - \hat{A}\bigr)\bigr)^2,
+    \ell(A) = \ln\pi_A(A) - \tfrac{1}{2}\bigl(\rho\,(A - \hat{A})\bigr)^2,
 
 and the amplitude direction is integrated with the trapezoid rule on a fixed
 1D grid after a stable max-shift:
@@ -58,17 +51,17 @@ and the amplitude direction is integrated with the trapezoid rule on a fixed
 
     \ln Z = \ln p(d \mid \hat{A})
         + \ell_{\max}
-        + \ln\!\int \exp\bigl(\ell(\varphi) - \ell_{\max}\bigr)\, d\varphi,
+        + \ln\!\int \exp\bigl(\ell(A) - \ell_{\max}\bigr)\, dA,
 
 where :math:`\ln p(d \mid \hat{A}) = \ln\mathcal{N}_d - R` is the Gaussian
 log-likelihood at the MLE amplitude. Squaring
-:math:`\rho(A(\varphi) - \hat{A})` rather than forming
+:math:`\rho(A - \hat{A})` rather than forming
 :math:`\rho^2(A-\hat A)^2` avoids overflowing :math:`\rho^2` at very high SNR.
 
 The grid is *purely a quadrature scheme*: it is where the normalizing
 integral is evaluated, not what defines the distribution. The support is the
 prior's, and :meth:`AmplitudeConditional.log_prob` evaluates the analytic
-density at any :math:`\varphi` without touching the grid. The one place the
+density at any :math:`A` without touching the grid. The one place the
 distinction shows is :meth:`AmplitudeConditional.sample`, which inverts a CDF
 tabulated on the grid and therefore returns draws clipped to
 ``[grid[0], grid[-1]]`` -- slightly less than the declared support. That is
@@ -77,15 +70,15 @@ deliberate: the grid must cover essentially all the prior mass anyway (see
 of clipping would fix.
 
 "Exact up to quadrature error" only holds if the grid resolves the conditional
-posterior, whose width in :math:`\varphi` is :math:`\sigma_A/|A'(\varphi)|`.
-No quadrature rule rescues a Gaussian bump spanning three nodes, so grid
-adequacy must be checked with :attr:`AmplitudeConditional.effective_nodes`,
-not assumed.
+posterior, whose width in :math:`A` is :math:`\sigma_A = 1/\rho`. No quadrature
+rule rescues a Gaussian bump spanning three nodes, so grid adequacy must be
+checked with :attr:`AmplitudeConditional.effective_nodes`, not assumed.
 
-The conditional posterior of :math:`\varphi` given the two statistics is
+The conditional posterior of :math:`A` given the two statistics is
 exposed as :class:`AmplitudeConditional`, a NumPyro ``Distribution``: the
 marginalization factor in the model is its :attr:`log_normalizer`, and
-post-processing reconstructs :math:`\varphi` by drawing from it.
+post-processing reconstructs :math:`A` -- and :math:`\varphi = T^{-1}(A)` -- by
+drawing from it.
 
 Everything broadcasts over leading batch dimensions and contracts over the
 trailing grid axis, so post-processing can feed ``(chain, draw)`` shaped
@@ -94,40 +87,56 @@ statistics directly.
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 from numpyro.distributions import constraints
+from numpyro.distributions.transforms import Transform
 
 from astrogwb.importance.diagnostics import relative_ess
 from astrogwb.utils import cumulative_trapezoid
 
 
-class MergerRateAmplitudeFn(Protocol):
-    """Total merger rate at :math:`\\varphi` up to a constant, :math:`g_R(\\varphi)`.
+def amplitude_prior(
+    prior: dist.Distribution, transform: Transform
+) -> dist.TransformedDistribution:
+    r"""The amplitude-space pushforward :math:`\pi_A = T_{\#}\pi_\varphi` of a prior.
 
-    Only ratios :math:`g_R(\\varphi)/g_R(\\varphi_{\\mathrm{fid}})` are used, so
-    any overall normalization cancels.
+    ``transform`` maps the physical parameter :math:`\varphi` to the
+    dimensionless amplitude :math:`A`. It must be monotone and anchored at the
+    template, :math:`T(\varphi_{\mathrm{fid}}) = 1`: the model evaluates the
+    spectrum at the fiducial, and that spectrum is the :math:`A = 1` template.
+    An unanchored ``transform`` silently rescales every inferred amplitude.
+
+    The marginal likelihood is the same whether the integral runs over
+    :math:`\varphi` under :math:`\pi_\varphi` or over :math:`A` under
+    :math:`\pi_A`; the Jacobian is carried by the pushforward density. Amplitude
+    draws map back with ``transform.inv``.
+
+    Example
+    -------
+    For :math:`H_0` the amplitude is :math:`A = H_{0,\mathrm{fid}}/H_0`, a
+    decreasing map::
+
+        from numpyro.distributions.transforms import (
+            AffineTransform, ComposeTransform, PowerTransform,
+        )
+
+        h0_fid = 70.0
+        transform = ComposeTransform(
+            [PowerTransform(-1.0), AffineTransform(0.0, h0_fid)]
+        )  # transform(h0_fid) == 1
+        prior = amplitude_prior(dist.Uniform(20.0, 140.0), transform)
+        # ... run the model, draw A from `AmplitudeConditional(..., prior=prior)`
+        h0 = transform.inv(amplitude)
+
+    See :func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.amplitude_H0_transform`
+    for the packaged map.
     """
-
-    def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
-
-
-class AmplitudeFn(Protocol):
-    """Full multiplicative scaling :math:`f(\\varphi) = g_R(\\varphi)\\, g_F(\\varphi)`.
-
-    Implementations must be **hashable by value**:
-    :class:`AmplitudeConditional` carries this callable as pytree *aux* data,
-    which JAX hashes into the jit cache key. A module-level ``def`` is the
-    safe choice; a freshly-minted lambda or a ``functools.partial`` over
-    floats is identity-hashed and silently retraces the model on every
-    construction.
-    """
-
-    def __call__(self, marginalized_parameter: jax.Array) -> jax.Array: ...
+    return dist.TransformedDistribution(prior, transform)
 
 
 def quadrature_grid(
@@ -155,11 +164,26 @@ def quadrature_grid(
     ``.variance``, which some distributions (``TruncatedNormal``, for one) do
     not implement. Those callers must pass an explicit ``grid=``.
 
+    A :class:`~numpyro.distributions.TransformedDistribution` (what
+    :func:`amplitude_prior` returns) implements neither ``.mean`` nor
+    ``.variance`` and reports an unbounded support, so its grid is built on the
+    base distribution and pushed through the transforms, then sorted: a
+    decreasing map such as ``fid / H0`` reverses the order. The nodes are
+    uniform in the base parameter, hence non-uniform in the pushed-forward one,
+    which the trapezoid rule and :meth:`AmplitudeConditional.icdf` both handle.
+
     Raises
     ------
     TypeError
         If ``prior`` does not implement ``.variance``.
     """
+    if isinstance(prior, dist.TransformedDistribution):
+        nodes = quadrature_grid(
+            prior.base_dist, num_nodes=num_nodes, span_sigma=span_sigma
+        )
+        for transform in prior.transforms:
+            nodes = transform(nodes)
+        return jnp.sort(nodes)
     try:
         variance = prior.variance
     except NotImplementedError as exc:
@@ -191,71 +215,62 @@ def _log_trapezoid(log_y: jax.Array, x: jax.Array) -> jax.Array:
 
 
 class AmplitudeConditional(dist.Distribution):
-    r"""Conditional posterior of the marginalized parameter given the amplitude statistics.
+    r"""Conditional posterior of the amplitude given its sufficient statistics.
 
     Given the amplitude sufficient statistics :math:`\hat A` and :math:`\rho`
     published by
-    :func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.gwb_amplitude_marginalized_model`
-    publishes them; this is
-    the density
+    :func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.gwb_amplitude_marginalized_model`,
+    this is the density
 
     .. math::
 
-        p(\varphi \mid d, \theta) \propto
-        \pi(\varphi)\,
-        \exp\!\left[-\tfrac12\bigl(\rho\,(A(\varphi) - \hat A)\bigr)^2\right],
-        \qquad A(\varphi) = f(\varphi)/f(\varphi_{\mathrm{fid}}).
+        p(A \mid d, \theta) \propto
+        \pi_A(A)\,
+        \exp\!\left[-\tfrac12\bigl(\rho\,(A - \hat A)\bigr)^2\right].
 
-    The distribution owns the live pieces it is defined by -- the prior, the
-    scaling, the fiducial -- rather than a precomputed tabulation of them, so
-    nothing can go stale. The density above is evaluated analytically wherever
-    it is asked for; the ``grid`` enters only as the quadrature scheme for the
-    normalizing integral:
+    The distribution owns the live prior rather than a precomputed tabulation
+    of it, so nothing can go stale. The density above is evaluated analytically
+    wherever it is asked for; the ``grid`` enters only as the quadrature scheme
+    for the normalizing integral:
 
     - :attr:`log_normalizer` -- :math:`\ln Z` of the conditional under the
       trapezoid rule; this *is* the marginalization factor the model adds to
       its ``numpyro.factor`` site.
     - :meth:`sample` / :meth:`icdf` -- inverse-transform draws of
-      :math:`\varphi` for post-processing reconstruction, clipped to the grid.
+      :math:`A` for post-processing reconstruction, clipped to the grid.
     - :attr:`effective_nodes` -- grid-adequacy diagnostic.
 
-    Recomputing :math:`f` on the grid every step costs nothing in practice:
-    the grid enters the jitted model as a closure constant, so XLA
-    constant-folds :math:`f(\text{grid})` away entirely.
+    The grid enters the jitted model as a closure constant, so XLA
+    constant-folds anything that depends on it alone.
 
     The ``batch_shape`` is the broadcast of the two statistics' shapes, so a
-    ``(chain, draw)`` posterior feeds in directly.
+    ``(chain, draw)`` posterior feeds in directly. Map draws back to the
+    physical parameter with the inverse of the transform the prior was built
+    from (see :func:`amplitude_prior`).
 
     .. warning::
 
-        This distribution is meant for :class:`~numpyro.infer.Predictive`
-        (generative-only use in
-        :func:`~astrogwb.inference.models.gaussian_gwb_marginalized_amplitude.amplitude_reconstruction_model`).
-        Do **not** ``numpyro.sample`` it as a latent site inside a NUTS model
-        without revisiting two things. Its ``support`` is a
+        This distribution is meant for generative post-processing
+        (``AmplitudeConditional(...).sample(key)``). Do **not**
+        ``numpyro.sample`` it as a latent site inside a NUTS model without
+        revisiting two things. Its ``support`` is a
         :class:`~numpyro.distributions.constraints.dependent_property`, which
         routes latent use through NumPyro's dynamic-support path; and because
-        the support is the *prior's* -- unbounded for a ``Normal`` prior --
-        ``biject_to`` may be the identity, so a proposal outside the grid gets
-        a perfectly finite :meth:`log_prob` normalized against an integral
-        that never covered it. The tabulated implementation this replaced
-        returned ``-inf`` there and failed loudly instead.
+        the support is the *prior's* -- unbounded for a ``Normal`` prior, and
+        reported as ``Real()`` for a transformed one -- ``biject_to`` may be the
+        identity, so a proposal outside the grid gets a perfectly finite
+        :meth:`log_prob` normalized against an integral that never covered it.
 
     Parameters
     ----------
     amplitude_mle, template_optimal_snr:
         The amplitude sufficient statistics :math:`\hat A` and :math:`\rho`,
         broadcast against each other.
-    amplitude_fn:
-        The *absolute* scaling :math:`f(\varphi)`; the ratio to the fiducial is
-        formed here. Must be hashable by value -- see :class:`AmplitudeFn`.
     prior:
-        The prior :math:`\pi(\varphi)` on the marginalized parameter. Defines
-        the support and, together with ``num_nodes`` / ``span_sigma``, the
-        default quadrature grid.
-    fiducial:
-        Reference value :math:`\varphi_{\mathrm{fid}}` that defines the
-        template, i.e. the point at which :math:`A(\varphi) = 1`.
+        The amplitude-space prior :math:`\pi_A`, with :math:`A = 1` at the
+        template; see :func:`amplitude_prior`. Defines the support and,
+        together with ``num_nodes`` / ``span_sigma``, the default quadrature
+        grid.
     grid:
         Explicit quadrature nodes. Defaults to
         ``quadrature_grid(prior, num_nodes=..., span_sigma=...)``. An explicit
@@ -279,20 +294,14 @@ class AmplitudeConditional(dist.Distribution):
         "template_optimal_snr",
         "prior",
         "grid",
-        "fiducial",
     )
-    # Aux, not data: `amplitude_fn` is a Python callable, and JAX hashes aux
-    # data into the jit cache key. See `AmplitudeFn`.
-    pytree_aux_fields = ("amplitude_fn",)
 
     def __init__(
         self,
         amplitude_mle: ArrayLike,
         template_optimal_snr: ArrayLike,
         *,
-        amplitude_fn: AmplitudeFn,
         prior: dist.Distribution,
-        fiducial: ArrayLike,
         grid: jax.Array | None = None,
         num_nodes: int = 1024,
         span_sigma: float = 10.0,
@@ -300,9 +309,7 @@ class AmplitudeConditional(dist.Distribution):
     ) -> None:
         self.amplitude_mle = jnp.asarray(amplitude_mle)
         self.template_optimal_snr = jnp.asarray(template_optimal_snr)
-        self.amplitude_fn = amplitude_fn
         self.prior = prior
-        self.fiducial = jnp.asarray(fiducial)
         self.grid = (
             quadrature_grid(prior, num_nodes=num_nodes, span_sigma=span_sigma)
             if grid is None
@@ -319,8 +326,10 @@ class AmplitudeConditional(dist.Distribution):
     def support(self) -> constraints.Constraint:
         """The prior's support -- mathematically what the conditional lives on.
 
-        Note that :meth:`sample` covers slightly less than this, because
-        :meth:`icdf` clips to the quadrature grid.
+        A transformed prior reports ``Real()`` here, wider than its true
+        support; :meth:`log_prob` stays ``-inf`` off-support regardless, via the
+        base prior. :meth:`sample` covers slightly less than the support,
+        because :meth:`icdf` clips to the quadrature grid.
         """
         prior_support = self.prior.support
         if prior_support is None:
@@ -332,22 +341,19 @@ class AmplitudeConditional(dist.Distribution):
 
     def _log_density(
         self,
-        marginalized_parameter: jax.Array,
+        amplitude: jax.Array,
         amplitude_mle: jax.Array,
         template_optimal_snr: jax.Array,
     ) -> jax.Array:
-        r"""Unnormalized :math:`\ell(\varphi)` at arbitrary :math:`\varphi`.
+        r"""Unnormalized :math:`\ell(A)` at arbitrary :math:`A`.
 
         The single implementation behind the normalizer, the density, and the
         inverse-CDF draw -- which is what keeps them from drifting apart. The
         statistics are passed in rather than read off ``self`` so the caller
         controls broadcasting against the trailing grid axis.
         """
-        amplitude = self.amplitude_fn(marginalized_parameter) / self.amplitude_fn(
-            self.fiducial
-        )
         scaled_residual = template_optimal_snr * (amplitude - amplitude_mle)
-        log_prior = jnp.asarray(self.prior.log_prob(marginalized_parameter))
+        log_prior = jnp.asarray(self.prior.log_prob(amplitude))
         return log_prior - 0.5 * scaled_residual**2
 
     @property
@@ -363,7 +369,7 @@ class AmplitudeConditional(dist.Distribution):
     def log_normalizer(self) -> jax.Array:
         r""":math:`\ln Z` of the conditional -- the marginalization factor itself.
 
-        Stable :math:`\ln\int\exp(\ell)\,d\varphi` over the grid via
+        Stable :math:`\ln\int\exp(\ell)\,dA` over the grid via
         :func:`_log_trapezoid`. The amplitude-marginalized model adds exactly
         this to the log-likelihood at the MLE: the factor *is* the normalizing
         constant of the conditional that post-processing later samples.
@@ -402,7 +408,9 @@ class AmplitudeConditional(dist.Distribution):
         )
         # NumPyro's `Uniform.log_prob` returns its constant density everywhere
         # rather than -inf off-support, so the mask -- not the prior term -- is
-        # what keeps `log_prob` consistent with `support`.
+        # what keeps `log_prob` consistent with `support`. A transformed prior
+        # reports `Real()` support, so there the mask is vacuous and the
+        # `-inf` comes from the base prior's log-prob through the pushforward.
         return jnp.where(self.support.check(value), log_density, -jnp.inf)
 
     def icdf(self, q: ArrayLike) -> jax.Array:
@@ -422,7 +430,7 @@ class AmplitudeConditional(dist.Distribution):
         Returns
         -------
         jax.Array
-            :math:`\varphi` values, clipped to ``[grid[0], grid[-1]]``.
+            :math:`A` values, clipped to ``[grid[0], grid[-1]]``.
         """
         q = jnp.asarray(q)
         log_integrand = self._log_integrand

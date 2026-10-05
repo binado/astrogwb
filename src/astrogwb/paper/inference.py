@@ -42,6 +42,7 @@ import numpy as np
 from gwmock_signal.stochastic.overlap import detector_names
 from numpyro import handlers
 from numpyro.distributions import Distribution
+from numpyro.distributions.transforms import Transform
 
 from astrogwb.detector import (
     DetectorSpec,
@@ -50,30 +51,23 @@ from astrogwb.detector import (
     load_sensitivity_map,
 )
 from astrogwb.detector import effective_psd as compute_effective_psd
-from astrogwb.distributions.amplitude import (
-    AmplitudeFn,
-    MergerRateAmplitudeFn,
-    quadrature_grid,
-)
+from astrogwb.distributions.amplitude import amplitude_prior, quadrature_grid
 from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import spectral_density
 from astrogwb.importance.spectral import LogWeightsFn, build_importance_spectrum
 from astrogwb.inference import (
     SpectralDensityFn,
+    amplitude_H0_transform,
+    amplitude_local_merger_rate_transform,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
-    with_renamed_diagnostics,
 )
 from astrogwb.paper.catalogs import validate_matching_frequency_grids
 from astrogwb.paper.config.mcmc import RunConfig
 from astrogwb.populations import (
     Population,
-    amplitude_H0_fn,
-    amplitude_local_merger_rate_fn,
     amplitude_parameters,
     build_population,
-    merger_rate_H0_fn,
-    merger_rate_local_merger_rate_fn,
 )
 from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
 
@@ -163,27 +157,20 @@ class InferenceInputs:
 class AmplitudeMarginalization(NamedTuple):
     """Everything an amplitude-marginalized run needs, built once from a ``RunConfig``.
 
-    App-side plumbing, not a core type: unlike the ``AmplitudeQuadrature`` it
-    replaces, it holds *live* objects -- the prior distribution and the scaling
-    callables -- so there is nothing derived in it that could go stale against
-    the config it came from. The one array, ``grid``, is a quadrature scheme
-    rather than a tabulation of the density.
+    App-side plumbing, not a core type: it holds *live* objects -- the A-space
+    prior and the transform that built it -- so there is nothing derived in it
+    that could go stale against the config it came from. The one array,
+    ``grid``, is a quadrature scheme rather than a tabulation of the density.
     """
 
     parameter: str
     """Name of the marginalized parameter, e.g. ``"H0"``."""
 
-    fiducial: float
-    """Reference value defining the template; the amplitude is 1 here."""
+    transform: Transform
+    """Map :math:`A = T(\\varphi)` from the parameter to the amplitude; ``T.inv`` undoes it."""
 
     prior: Distribution
-    """Prior on the marginalized parameter; also defines the conditional's support."""
-
-    amplitude_fn: AmplitudeFn
-    """Absolute total scaling :math:`f(\\varphi) = g_R(\\varphi)\\, g_F(\\varphi)`."""
-
-    merger_rate_fn: MergerRateAmplitudeFn
-    """Absolute merger-rate scaling :math:`g_R(\\varphi)`, for the reconstructed rate."""
+    """Amplitude-space prior :math:`T_{\\#}\\pi_\\varphi`; also the conditional's support."""
 
     grid: jax.Array
     """Quadrature nodes the marginalization integral is evaluated on."""
@@ -463,62 +450,45 @@ def build_model(
     ``inputs.spectral_density_fn``; an analytic spectrum works just as well.
     """
     analysis = config.analysis
-    # `config.priors` holds every live parameter distribution. Fixed sites are
-    # conditioned and hidden below; a marginalized amplitude is the sole site
-    # omitted because its prior is already integrated into the likelihood.
+    # `config.priors` holds every live parameter distribution. Every fixed site
+    # -- a marginalized amplitude's parameter included -- is conditioned and
+    # hidden below, so its prior density never enters the posterior.
     priors = dict(config.priors)
     if analysis.likelihood == "amplitude_marginalized":
         parameter = analysis.amplitude_parameter
         assert parameter is not None
         # `build_run_config` guarantees the amplitude's prior lives in `priors`
         # and its fiducial lives in `fiducials` (see
-        # `RunConfig._resolve_sampled_params`), so the marginalization can be
-        # assembled inline: dispatch on the parameter name, then derive the
-        # quadrature grid from the very prior being integrated.
-        prior = priors.pop(parameter)
+        # `RunConfig._resolve_sampled_params`). The model pins the parameter at
+        # that fiducial through `config.fixed_params`, which is what makes the
+        # spectrum the A = 1 template; the library only sees the A-space prior.
+        fiducial = float(config.fiducials[parameter])
         if parameter == "H0":
-            amplitude_fn, merger_rate_fn = amplitude_H0_fn, merger_rate_H0_fn
+            transform = amplitude_H0_transform(fiducial)
         elif parameter == "local_merger_rate":
-            amplitude_fn, merger_rate_fn = (
-                amplitude_local_merger_rate_fn,
-                merger_rate_local_merger_rate_fn,
-            )
+            transform = amplitude_local_merger_rate_transform(fiducial)
         else:
             raise ValueError(f"unsupported amplitude parameter {parameter!r}")
+        prior = amplitude_prior(priors[parameter], transform)
         marginalization = AmplitudeMarginalization(
             parameter=parameter,
-            fiducial=float(config.fiducials[parameter]),
+            transform=transform,
             prior=prior,
-            amplitude_fn=amplitude_fn,
-            merger_rate_fn=merger_rate_fn,
             grid=quadrature_grid(
                 prior,
                 num_nodes=analysis.amplitude_num_nodes,
                 span_sigma=analysis.amplitude_prior_span_sigma,
             ),
         )
-        fixed_params = {
-            name: value for name, value in config.fixed_params.items() if name in priors
-        }
         model = _fix_model_params(
             partial(
                 gwb_amplitude_marginalized_model,
-                # The spectrum is evaluated at the pinned fiducial amplitude,
-                # so its rate is the *template* rate. Renaming it here is what
-                # keeps a template quantity out of the `total_merger_rate`
-                # site that post-processing reconstructs.
-                spectral_density_fn=with_renamed_diagnostics(
-                    spectral_density_fn,
-                    {"total_merger_rate": "template_merger_rate"},
-                ),
-                amplitude_parameter=parameter,
-                amplitude_fiducial=marginalization.fiducial,
-                amplitude_fn=marginalization.amplitude_fn,
+                spectral_density_fn=spectral_density_fn,
                 amplitude_prior=marginalization.prior,
                 amplitude_grid=marginalization.grid,
                 priors=priors,
             ),
-            fixed_params,
+            config.fixed_params,
         )
         return model, marginalization
 

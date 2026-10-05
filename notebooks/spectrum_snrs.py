@@ -35,9 +35,13 @@ with app.setup(hide_code=True):
         gaussian_bin_scale,
         log_frequency_noise_scale,
     )
+    from astrogwb.distributions.amplitude import amplitude_prior
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb import spectral_snr
-    from astrogwb.inference import gwb_amplitude_marginalized_model
+    from astrogwb.inference import (
+        amplitude_H0_transform,
+        gwb_amplitude_marginalized_model,
+    )
     from astrogwb.paper.cache import default_cache_dir
     from astrogwb.paper.config import (
         detector_registry,
@@ -49,7 +53,6 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.detectors import DetectorRegistry
     from astrogwb.paper.config.runs import FIGURES_DIR
     from astrogwb.paper.plotting import save_figures, use_paper_style
-    from astrogwb.populations.bns_madau_dickinson import amplitude_H0_fn
     from astrogwb.simulators.core import split_seed
     from astrogwb.simulators.spectra import (
         SpectralDensityCatalog,
@@ -869,10 +872,9 @@ def template_amplitude_statistics(
             observed_spectral_density=jnp.asarray(data),
             priors={},
             scale=jnp.asarray(scale),
-            amplitude_parameter="H0",
-            amplitude_fiducial=fiducial_h0,
-            amplitude_fn=amplitude_H0_fn,
-            amplitude_prior=h0_prior,
+            amplitude_prior=amplitude_prior(
+                h0_prior, amplitude_H0_transform(fiducial_h0)
+            ),
             frequency_mask=jnp.asarray(band),
         )
         return trace["amplitude_mle"]["value"], trace["template_optimal_snr"]["value"]

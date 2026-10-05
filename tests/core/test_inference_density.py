@@ -51,10 +51,6 @@ def data_kwargs(observed: jax.Array, scale: jax.Array) -> dict[str, Any]:
     return {"observed_spectral_density": observed, "scale": scale}
 
 
-def _identity_amplitude(marginalized_parameter: jax.Array) -> jax.Array:
-    return marginalized_parameter
-
-
 def _analytic(params: Mapping[str, ArrayLike]) -> tuple[jax.Array, dict[str, Any]]:
     shape = jnp.array([1.0, 1.5, 2.0]) + params["tilt"] * jnp.array([0.1, -0.2, 0.3])
     return jnp.asarray(params["h0"]) * shape, {}
@@ -93,12 +89,10 @@ def log_density_fn(model: Callable[..., None]) -> LogDensityFn:
 def amplitude_marginalized_model() -> Callable[..., None]:
     return partial(
         gwb_amplitude_marginalized_model,
-        spectral_density_fn=_analytic,
+        # `h0` pinned at its fiducial: the spectrum is the A = 1 template.
+        spectral_density_fn=lambda params: _analytic({**params, "h0": 70.0}),
         priors={"tilt": dist.Normal(0.0, 1.0)},
-        amplitude_parameter="h0",
-        amplitude_fiducial=70.0,
-        amplitude_fn=_identity_amplitude,
-        amplitude_prior=dist.Uniform(50.0, 90.0),
+        amplitude_prior=dist.Uniform(0.5, 1.5),
     )
 
 

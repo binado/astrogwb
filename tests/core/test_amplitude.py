@@ -15,8 +15,10 @@ import numpyro.distributions as dist
 
 from astrogwb.distributions.amplitude import (
     AmplitudeConditional,
+    amplitude_prior,
     quadrature_grid,
 )
+from astrogwb.inference import amplitude_H0_transform
 
 type _AmplitudePrior = dist.Normal | dist.Uniform
 
@@ -25,11 +27,6 @@ _LOG_TWO_PI = float(np.log(2.0 * np.pi))
 TEMPLATE = np.array([1.0, 2.0, 4.0, 3.0])
 DATA = np.array([1.3, 1.7, 4.6, 2.8])
 SCALE = np.array([0.5, 0.4, 0.8, 0.6])
-
-
-def _identity_scaling(marginalized_parameter: jax.Array) -> jax.Array:
-    """With ``fiducial=1.0`` this makes the amplitude the parameter itself."""
-    return marginalized_parameter
 
 
 def _statistics() -> tuple[jax.Array, jax.Array]:
@@ -48,11 +45,10 @@ def _uniform_conditional(
     *,
     batch_shape: tuple[int, ...] = (),
 ) -> AmplitudeConditional:
-    """The conditional under a uniform prior, with the parameter *being* the amplitude.
+    """The conditional under a uniform prior on the amplitude itself.
 
-    ``_identity_scaling`` anchored at ``fiducial=1.0`` gives
-    ``A(phi) = phi / 1.0 = phi``, which is what every brute-force reference in
-    this module assumes. The grid is left to default, so this also exercises
+    Every brute-force reference in this module integrates over ``A`` directly.
+    The grid is left to default, so this also exercises
     :func:`~astrogwb.distributions.amplitude.quadrature_grid` clipping a
     ten-standard-deviation span down to the uniform bounds.
     """
@@ -60,9 +56,7 @@ def _uniform_conditional(
     return AmplitudeConditional(
         jnp.broadcast_to(amplitude_mle, batch_shape),
         jnp.broadcast_to(template_optimal_snr, batch_shape),
-        amplitude_fn=_identity_scaling,
         prior=dist.Uniform(low, high),
-        fiducial=1.0,
         num_nodes=num_nodes,
     )
 
@@ -76,9 +70,7 @@ def _conditional_log_evidence(
     conditional = AmplitudeConditional(
         amplitude_mle,
         template_optimal_snr,
-        amplitude_fn=_identity_scaling,
         prior=prior,
-        fiducial=1.0,
         grid=grid,
     )
     log_likelihood_at_mle = (
@@ -165,23 +157,12 @@ def test_quadrature_grid_reproduces_the_hand_built_grids() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Nonlinear scaling: the real H0 pair, g_R = H0**-3, g_F = H0**2
+# Nonlinear map: the real H0 amplitude, A = H0_fid / H0
 # --------------------------------------------------------------------------- #
 
 
-def _h0_amplitude(marginalized_parameter: jax.Array) -> jax.Array:
-    """``f = g_R * g_F = H0**-3 * H0**2``, left unsimplified on purpose."""
-    return marginalized_parameter**-3 * marginalized_parameter**2
-
-
 def _h0_log_likelihood(h0: np.ndarray, h0_fid: float) -> np.ndarray:
-    """``log p(d | A = f(h0)/f(h0_fid))`` written out from the Gaussian definition.
-
-    ``f(h0)/f(h0_fid) = (h0**-3 * h0**2) / (h0_fid**-3 * h0_fid**2) = h0_fid/h0``,
-    the same net amplitude as the single-scaling formula this test used to
-    exercise -- the product of the two real exponents collapses to the
-    original inverse relation, so the brute-force reference is unchanged.
-    """
+    """``log p(d | A = h0_fid / h0)`` written out from the Gaussian definition."""
     amplitude = h0_fid / h0
     residual = (DATA - amplitude[:, None] * TEMPLATE) / SCALE
     return np.sum(-0.5 * residual**2 - np.log(SCALE) - 0.5 * _LOG_TWO_PI, axis=-1)
@@ -204,26 +185,27 @@ def _h0_brute_force_moments(
 
 
 def test_numerical_h0_marginalization_matches_brute_force_integration() -> None:
-    """The only coverage of the nonlinear scaling path, ``A(H0) = H0_fid / H0``.
+    """Pushforward prior, Jacobian and transformed grid against phi-space integration.
 
-    ``AmplitudeConditional.icdf`` materializes a ``batch_shape + (K,)`` CDF, so
-    this is the one test in the module where fixture size directly drives
-    memory, not just wall time.
+    The conditional lives on ``A = H0_fid / H0`` under the pushforward of a
+    uniform-in-H0 prior; ``T.inv`` of its draws must reproduce the moments of
+    the brute-force H0 posterior. ``AmplitudeConditional.icdf`` materializes a
+    ``batch_shape + (K,)`` CDF, so this is the one test in the module where
+    fixture size directly drives memory, not just wall time.
     """
     h0_fid = 70.0
     h0_low, h0_high = 50.0, 90.0
     count = 20_000
 
+    transform = amplitude_H0_transform(h0_fid)
     amplitude_mle, template_optimal_snr = _statistics()
     conditional = AmplitudeConditional(
         jnp.broadcast_to(amplitude_mle, (count,)),
         jnp.broadcast_to(template_optimal_snr, (count,)),
-        amplitude_fn=_h0_amplitude,
-        prior=dist.Uniform(h0_low, h0_high),
-        fiducial=h0_fid,
-        grid=jnp.linspace(h0_low, h0_high, 1001),
+        prior=amplitude_prior(dist.Uniform(h0_low, h0_high), transform),
+        num_nodes=1001,
     )
-    h0_draws = conditional.sample(jax.random.key(3))
+    h0_draws = transform.inv(conditional.sample(jax.random.key(3)))
     numeric_mean = float(jnp.mean(h0_draws))
     numeric_variance = float(jnp.var(h0_draws))
 
@@ -233,6 +215,17 @@ def test_numerical_h0_marginalization_matches_brute_force_integration() -> None:
 
     np.testing.assert_allclose(numeric_mean, brute_force_mean, atol=1.0)
     np.testing.assert_allclose(numeric_variance, brute_force_variance, rtol=0.25)
+
+
+def test_quadrature_grid_of_a_transformed_prior_is_sorted_and_spans_the_image() -> None:
+    """A decreasing map reverses the base grid; the result must be re-sorted."""
+    h0_fid = 70.0
+    prior = amplitude_prior(dist.Uniform(20.0, 140.0), amplitude_H0_transform(h0_fid))
+
+    grid = np.asarray(quadrature_grid(prior, num_nodes=101))
+
+    assert bool(np.all(np.diff(grid) > 0.0))
+    np.testing.assert_allclose(grid[[0, -1]], [h0_fid / 140.0, h0_fid / 20.0])
 
 
 # --------------------------------------------------------------------------- #
@@ -320,9 +313,7 @@ def test_log_prob_is_finite_off_the_grid_inside_the_prior_support() -> None:
     conditional = AmplitudeConditional(
         amplitude_mle,
         template_optimal_snr,
-        amplitude_fn=_identity_scaling,
         prior=dist.Normal(1.0, 0.3),
-        fiducial=1.0,
         grid=jnp.linspace(0.7, 1.3, 101),
     )
 
@@ -344,9 +335,7 @@ def test_support_matches_the_prior_support() -> None:
     conditional = AmplitudeConditional(
         amplitude_mle,
         template_optimal_snr,
-        amplitude_fn=_identity_scaling,
         prior=prior,
-        fiducial=1.0,
         grid=jnp.linspace(0.5, 1.5, 101),
     )
 
@@ -363,7 +352,7 @@ _MAPPED_FIELDS = ("amplitude_mle", "template_optimal_snr")
 
 
 def test_distribution_survives_jit_and_vmap_as_a_pytree_argument() -> None:
-    """``pytree_data_fields`` must carry the statistics, prior, grid, and fiducial."""
+    """``pytree_data_fields`` must carry the statistics, prior, and grid."""
     conditional = _uniform_conditional(0.2, 3.0, 2001, batch_shape=(4,))
     quantiles = 0.5 * jnp.ones(4)
 
@@ -372,7 +361,7 @@ def test_distribution_survives_jit_and_vmap_as_a_pytree_argument() -> None:
 
     # vmap over the statistics batch while keeping the definition unmapped: the
     # in_axes specimen mirrors the distribution's pytree, with 0 on the two
-    # statistics and None covering the prior / grid / fiducial subtrees. The
+    # statistics and None covering the prior / grid subtrees. The
     # gathered field order is a set iteration order, so build the values by
     # field name rather than positionally.
     _aux = AmplitudeConditional.tree_flatten(conditional)[1]
