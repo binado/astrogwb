@@ -1,17 +1,15 @@
 """Draw forward-model spectra from config layers and save them under their key.
 
-The draws are fully determined by a :class:`~astrogwb.simulators.spectra.SpectraMetadata`
--- waveform, population and seed, each hyperparameter's fixed value or prior,
-draw count, observation time, count mode and source count or padding -- declared
-as the ``[spectra]`` table of the ``--config`` layers, merged in process exactly as ``run_mcmc``
-merges a run. This script runs :class:`~astrogwb.simulators.spectra.SpectrumGenerator` on
-it and writes the result atomically to ``<output-dir>/<key>.h5``. It writes
-``(draws, F)`` spectra only; no ``(F, N)`` catalog power is ever materialized.
-
-The file is named by the metadata's key, so it can never be filed under another
-record's address. Outside a shell,
-``astrogwb.simulators.core.simulate(metadata, SpectrumGenerator(), cache_dir)`` is the
-same generator behind a cache lookup, and needs no script.
+The draws are determined by a :class:`~astrogwb.simulators.spectra.SpectraMetadata`
+-- waveform, population, each hyperparameter's fixed value or prior,
+observation time, count mode and source count or padding -- declared as the
+``[spectra]`` table of the ``--config`` layers, merged in process exactly as
+``run_mcmc`` merges a run, and by the seeds the sibling ``[draws]`` table names
+(``seed`` split into ``num_draws`` children). This script calls the cached
+:func:`~astrogwb.simulators.spectra.spectra` node on them, which writes
+``<output-dir>/spectra-<key>-<digest>.h5``. It writes ``(draws, F)`` spectra
+only; no ``(F, N)`` catalog power is ever materialized. A second invocation
+with the same layers is a cache hit.
 
 A hyperparameter is a ``"${fiducials.X}"`` reference to fix it, or a
 ``"${priors.X}"`` one to draw it once per row; see
@@ -26,7 +24,7 @@ Usage -- one ``--config`` per layer, in merge order::
         --config config/simulations/spectrum/poisson.toml
 
 ``knf <layers> --shallow 'priors.*' --interpolate`` prints the merged config,
-whose ``[spectra]`` table is the record.
+whose ``[spectra]`` table is the record and ``[draws]`` the seeds.
 """
 
 from __future__ import annotations
@@ -37,6 +35,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+from numpy.typing import NDArray
 from pydantic import ValidationError
 
 from astrogwb.paper.cache import default_cache_dir
@@ -44,8 +44,12 @@ from astrogwb.paper.config.runs import (
     add_config_arguments,
     load_merged_config,
 )
-from astrogwb.simulators.core import artifact_path, save_atomically
-from astrogwb.simulators.spectra import SpectraMetadata, SpectrumGenerator
+from astrogwb.simulators.core import split_seed
+from astrogwb.simulators.spectra import (
+    SpectralDensityCatalog,
+    SpectraMetadata,
+    spectra,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +61,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "the [spectra] table of "
             "their config layers and save (draws, F) without materializing "
             "catalog power. Fixed mode requires num_events sources per realization; "
-            "num_draws sets the realization count."
+            "[draws].num_draws sets the realization count."
         )
     )
     add_config_arguments(
@@ -75,10 +79,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=cache_dir,
         metavar="DIR",
-        help=f"The spectra are written to <DIR>/<key>.h5 (default: {cache_dir}).",
+        help=f"The cache directory (default: {cache_dir}).",
     )
     parser.add_argument(
-        "--batch-size",
+        "--chunk-size",
         type=int,
         default=128,
         help="Sources per waveform chunk; changes memory, not the draws.",
@@ -86,7 +90,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Replace an existing output spectra file.",
+        help="Draw again and replace an existing cached spectra file.",
     )
     return parser.parse_args(argv)
 
@@ -108,24 +112,39 @@ def spectra_metadata(config: dict[str, Any]) -> SpectraMetadata:
         raise ValueError(f"invalid [spectra] table: {error}") from None
 
 
+def draw_seeds(config: dict[str, Any]) -> NDArray[np.uint64]:
+    """The seeds the merged config's ``[draws]`` table names."""
+    draws = config.get("draws")
+    if not isinstance(draws, dict) or set(draws) != {"seed", "num_draws"}:
+        raise ValueError(
+            "the merged config needs a [draws] table with exactly seed and "
+            "num_draws; add it to the config/simulations/spectrum/<name>.toml layer"
+        )
+    if draws["num_draws"] <= 0:
+        raise ValueError("[draws].num_draws must be positive")
+    return split_seed(draws["seed"], draws["num_draws"])
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
     args = parse_args(argv)
-    metadata = spectra_metadata(load_merged_config(args))
-    output = artifact_path(metadata, args.output_dir.expanduser()).resolve()
-    if output.exists() and not args.force:
-        raise FileExistsError(
-            f"refusing to replace existing spectra: {output}. "
-            "Pass --force only for an intentional replacement."
-        )
+    config = load_merged_config(args)
+    metadata = spectra_metadata(config)
+    inputs = {"seeds": draw_seeds(config)}
+    cache_dir = args.output_dir.expanduser()
+    output = spectra.path(inputs, metadata, cache_dir).resolve()
+    if args.force:
+        output.unlink(missing_ok=True)
+    hit = output.exists()
 
-    catalog = SpectrumGenerator(batch_size=args.batch_size)(metadata)
-    save_atomically(catalog, output)
+    outputs = spectra(inputs, metadata, cache_dir=cache_dir, chunk_size=args.chunk_size)
+    catalog = SpectralDensityCatalog.from_arrays(outputs, metadata)
     logger.info(
-        "Saved spectra %s: count=%s num_events=%s, %d draws, %d frequencies, to %s",
+        "%s spectra %s: count=%s num_events=%s, %d draws, %d frequencies, at %s",
+        "Cache hit for" if hit else "Saved",
         metadata.key(),
         metadata.count,
         metadata.num_events,

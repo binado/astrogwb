@@ -1,8 +1,8 @@
 """Loading the two catalogs a run samples against, and the checks between them.
 
-A catalog is a file: ``outputs/catalogs/<key>.h5``, where ``<key>`` is the
-content hash of the :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` a run's role
-resolves to. The workflow builds them with ``scripts/generate_catalog.py``;
+A catalog is a file: ``outputs/catalogs/<stem>.h5``, where ``<stem>`` names the
+:class:`~astrogwb.simulators.polarization_power.CatalogMetadata` a run's role
+resolves to and the seed it is drawn at. The workflow builds them with ``scripts/generate_catalog.py``;
 :func:`run_catalog` reaches the same files from a notebook, generating one on
 a miss. Either way the density its samples follow comes back off the file's
 own population record rather than being reassembled from the run config.
@@ -26,35 +26,49 @@ from numpy.typing import ArrayLike
 
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import CATALOGS_ROOT, assemble_run
-from astrogwb.simulators.core import check_metadata, simulate
+from astrogwb.simulators.core import read
 from astrogwb.simulators.polarization_power import (
-    CatalogGenerator,
     CatalogMetadata,
     PolarizationPowerCatalog,
+    polarization_power,
 )
 
 
 def load_run_catalog(
-    path: Path | str, *, label: str, request: CatalogMetadata | None = None
+    path: Path | str,
+    *,
+    label: str,
+    request: tuple[CatalogMetadata, np.uint64] | None = None,
 ) -> PolarizationPowerCatalog:
     """Load one catalog file, validating its format and its population record.
 
     ``label`` is the role -- ``"injection"`` or ``"proposal"`` -- and is what
     identifies the catalog in error messages. Given a ``request``, the file
-    must also record exactly that metadata, which is how a run refuses a file
-    handed to the wrong role or built from a draw it no longer asks for.
+    must also record exactly that metadata and seed, which is how a run refuses
+    a file handed to the wrong role or built from a draw it no longer asks for.
 
-    This is the by-path counterpart of :func:`~astrogwb.simulators.core.simulate`, for
-    a caller handed a file rather than a request -- the figure scripts and the
+    This is the by-path counterpart of
+    :func:`~astrogwb.simulators.polarization_power.polarization_power`, for a
+    caller handed a file rather than a request -- the figure scripts and the
     SNR helper -- so a missing file raises instead of being drawn.
     """
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"{label} catalog not found: {path}")
     try:
-        catalog = PolarizationPowerCatalog.load(path)
+        inputs, outputs, recorded = read(path)
+        catalog = PolarizationPowerCatalog.from_arrays(
+            outputs, CatalogMetadata.model_validate_json(recorded)
+        )
         if request is not None:
-            check_metadata(catalog, request, label=str(path))
+            metadata, seed = request
+            if catalog.metadata.key() != metadata.key() or inputs["seed"] != seed:
+                raise ValueError(
+                    f"records {catalog.metadata.key()} at seed {inputs['seed']}, "
+                    f"not the requested {metadata.key()} at seed {seed}:\n"
+                    f"  recorded:  {catalog.metadata.model_dump_json()}\n"
+                    f"  requested: {metadata.model_dump_json()}"
+                )
     except ValueError as error:
         raise ValueError(f"{label} catalog {path}: {error}") from error
     return catalog
@@ -77,7 +91,9 @@ def run_catalog(
     :func:`~astrogwb.paper.runtime.configure_runtime`.
     """
     config = build_run_config(assemble_run(experiment, run, root=root))
-    return simulate(config.catalog_request(role), CatalogGenerator(), cache_dir)
+    metadata, seed = config.catalog_request(role)
+    outputs = polarization_power({"seed": seed}, metadata, cache_dir=cache_dir)
+    return PolarizationPowerCatalog.from_arrays(outputs, metadata)
 
 
 def validate_matching_frequency_grids(

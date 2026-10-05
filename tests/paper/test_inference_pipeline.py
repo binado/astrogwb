@@ -32,6 +32,7 @@ import pytest
 from catalog_fixtures import (
     PAPER_POPULATION_PARAMS,
     make_catalog,
+    save_catalog,
 )
 from config_fixtures import example_raw
 from numpyro.infer.util import log_density
@@ -99,11 +100,10 @@ def _write_catalog(
         polarization_power=rng.uniform(0.0, 1.0, size=(frequencies.size, N_SOURCES)),
         minimum_frequency=float(frequencies[0]),
         df=float(frequencies[1] - frequencies[0]),
-        seed=seed,
         model_name=("bns_md_uniform_mixture" if guarded else "bns_md_cosmological"),
         model_kwargs=kwargs,
     )
-    catalog.save(path)
+    save_catalog(catalog, path, seed=seed)
     return path
 
 

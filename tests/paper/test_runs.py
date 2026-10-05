@@ -230,7 +230,7 @@ def test_run_config_and_raw_merge_key_a_catalog_identically(
     config = build_run_config(assemble_run(experiment, run))
     workflow = resolve_run_catalogs().by_run[(experiment, run)][role]
 
-    assert config.catalog_request(role).key() == workflow
+    assert config.catalog_stem(role) == workflow
 
 
 # --------------------------------------------------------------------------- #
@@ -253,7 +253,8 @@ def test_a_guard_customized_at_its_source_keeps_the_shared_window(
         **window,
         "uniform_mixing_fraction": fraction,
     }
-    assert (proposal.population.seed, proposal.num_samples) == (seed, 16384)
+    assert proposal.num_samples == 16384
+    assert raw["analysis"]["seeds"]["proposal"] == seed
 
 
 def test_the_injection_is_drawn_at_the_fiducials_the_run_initializes_at() -> None:
@@ -363,7 +364,6 @@ def test_an_unregistered_catalog_population_is_rejected() -> None:
     raw = assemble_run("cosmological-parameters", "ET-triangular")
     raw["analysis"]["proposal"]["population"] = {
         "model_name": "no_such_population",
-        "seed": 1,
     }
     config = build_run_config(raw)
 
@@ -421,7 +421,7 @@ def test_run_mcmc_validates_the_layers_the_workflow_passes() -> None:
     # corrupted, reached the validated config as a Normal.
     assert type(config.priors["H0"]).__name__ == "Normal"
     assert config.analysis.sampled_params == ("xi_0",)
-    assert config.analysis.injection.population.seed == 41
+    assert config.analysis.seeds == {"injection": 41, "proposal": 41}
     assert config.analysis.injection.waveform.approximant == "IMRPhenomXAS_NRTidalv3"
     assert config.analysis.population.model_kwargs["n_grid"] == 256
 
@@ -445,3 +445,28 @@ def test_a_deep_fold_would_corrupt_the_one_prior_override() -> None:
     }
     shallow = merge_config_layers(layers)
     assert set(shallow["priors"]["H0"]["kwargs"]) == {"loc", "scale"}
+
+
+#: The seeds every committed run drew at before seeds left the population
+#: record; moving them to `[analysis.seeds]` must not change which draw a run
+#: samples against.
+EXPECTED_SEEDS = {
+    "variable-proposal-guard/eps1e-1": (41, 61),
+    "variable-proposal-guard/eps1e-2": (41, 62),
+    "variable-proposal-guard/eps1e-3": (41, 63),
+    "variable-catalog-size/n8192": (41, 42),
+    "variable-catalog-size/n16384": (41, 42),
+    "variable-catalog-size/n32768": (41, 42),
+    "astrophysical-parameters/madau-dickinson": (41, 61),
+    "astrophysical-parameters/redshift-peak": (41, 61),
+    "time-delay/delay-slope": (71, 61),
+}
+
+
+@pytest.mark.parametrize(("experiment", "run"), all_runs())
+def test_every_run_draws_at_the_seeds_it_always_did(experiment: str, run: str) -> None:
+    config = build_run_config(assemble_run(experiment, run))
+
+    seeds = (config.analysis.seeds["injection"], config.analysis.seeds["proposal"])
+
+    assert seeds == EXPECTED_SEEDS.get(f"{experiment}/{run}", (41, 41))

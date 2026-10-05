@@ -1,145 +1,199 @@
-"""Generate an artifact from its metadata, or reuse a cached one.
+"""Cache a simulator function's outputs on disk, addressed by its inputs.
 
-Three abstractions: a *metadata* record that fully determines an artifact and
-names it with :meth:`key`; a *generator* that turns the record into the
-artifact; and :func:`simulate`, which serves ``<cache_dir>/<key>.h5`` on a hit
-and calls the generator on a miss. :func:`simulate` knows nothing about any
-particular artifact. There are two instances of it:
+A *node* is a function ``fn(inputs, metadata, **settings) -> outputs``. Its
+``inputs`` and ``outputs`` are array trees (:mod:`astrogwb.simulators.core.types`);
+``metadata`` is a validated record that says everything else the result depends
+on and names itself with ``key()``. Seeds are inputs, not metadata: a seed picks
+one realization out of the distribution the metadata describes.
 
-- :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` and
-  :class:`~astrogwb.simulators.polarization_power.CatalogGenerator` for polarization-power catalogs;
-- :class:`~astrogwb.simulators.spectra.SpectraMetadata` and
-  :class:`~astrogwb.simulators.spectra.SpectrumGenerator` for spectral-density draws.
+:func:`cached` wraps a node so that, given a ``cache_dir``, the result lives at::
 
-The cache is content-addressed: an artifact lives at
-:func:`~astrogwb.simulators.core.artifact_path`, so asking for the same thing twice
-finds the same file and changing anything -- a seed, a kwarg, the package
-version -- names a different one. There is no index to keep in sync. A hit is
-still checked against the file's own record, which catches a file copied or
-renamed into the wrong place.
+    <cache_dir>/<fn.__name__>-<metadata.key()>-<digest(inputs)>.h5
+
+and the body runs only on a miss. Because the path is a function of the inputs'
+*content*, a node whose inputs are another node's outputs composes by content.
+``settings`` -- chunk sizes and other knobs that change cost but not the result
+-- are passed to the body and kept out of the path.
+
+The cache hits without importing JAX: only generating needs it.
 """
 
 from __future__ import annotations
 
+import functools
+import json
 import logging
 import os
+import platform
+import sys
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, Self
+from typing import Any, Protocol
 
-from astrogwb.simulators.core.keys import Keyed, artifact_path
+import numpy as np
 
-__all__ = [
-    "Artifact",
-    "Generator",
-    "Keyed",
-    "artifact_path",
-    "check_metadata",
-    "save_atomically",
-    "simulate",
-]
+from astrogwb import __version__
+from astrogwb.simulators.core.keys import Keyed
+from astrogwb.simulators.core.tree import (
+    _h5py,
+    digest,
+    leaves,
+    read_tree,
+    write_tree,
+)
+from astrogwb.simulators.core.types import Arrays, Tree
+
+__all__ = ["Cached", "cached", "read"]
 
 logger = logging.getLogger(__name__)
 
 
-class Artifact[M: Keyed](Protocol):
-    """A persisted artifact that carries the record it was generated from."""
+class _Node(Protocol):
+    """A plain function: ``fn(inputs, metadata, **settings) -> outputs``."""
 
-    @property
-    def metadata(self) -> M: ...
+    __name__: str
 
-    def save(self, path: str | Path) -> None: ...
-
-    @classmethod
-    def load(cls, path: str | Path) -> Self: ...
+    def __call__(self, *args: Any, **kwargs: Any) -> Arrays: ...
 
 
-class Generator[M: Keyed, A: Artifact](Protocol):
-    """Turns a metadata record into its artifact, and names the artifact type."""
+def read(path: str | Path) -> tuple[Arrays, Arrays, str]:
+    """Read one cached file: ``(inputs, outputs, metadata_json)``.
 
-    @property
-    def artifact(self) -> type[A]: ...
+    The by-path half of the cache, for callers that were handed a file rather
+    than a request. The metadata comes back as the JSON the node ran with;
+    validating it into a record is the caller's, since this package does not
+    know the record types.
+    """
+    h5py = _h5py()
+    with h5py.File(path, "r") as handle:
+        metadata_json = handle.attrs["metadata"]
+        if isinstance(metadata_json, bytes):
+            metadata_json = metadata_json.decode()
+        return (
+            read_tree(handle["inputs"]),
+            read_tree(handle["outputs"]),
+            str(metadata_json),
+        )
 
-    def __call__(self, metadata: M) -> A: ...
+
+def _reject_tracers(inputs: Tree, name: str) -> None:
+    """Refuse a traced input: a cache key needs concrete values."""
+    if "jax" not in sys.modules:
+        return
+    from jax.core import Tracer
+
+    for path, leaf in leaves(inputs):
+        if isinstance(leaf, Tracer):
+            raise TypeError(
+                f"{name}: input {path!r} is a JAX tracer. A cached simulator "
+                "hashes its inputs, so it cannot run under jit/vmap/grad; call "
+                "it eagerly, or call the undecorated body "
+                f"({name}.__wrapped__) inside the transformation."
+            )
 
 
-def simulate[M: Keyed, A: Artifact](
-    metadata: M,
-    generator: Generator[M, A],
-    cache_dir: str | Path | None = None,
+def _save_atomically(
+    path: Path,
     *,
-    generate: bool = True,
-) -> A:
-    """Return ``metadata``'s artifact from ``cache_dir``, generating it on a miss.
+    name: str,
+    inputs: Tree,
+    outputs: Arrays,
+    metadata: Keyed,
+) -> None:
+    """Write the file beside ``path`` and rename it into place.
 
-    Without a ``cache_dir`` this is ``generator(metadata)``. A hit is loaded as
-    ``generator.artifact`` and its recorded metadata compared with
-    ``metadata``; a mismatch -- a file copied or renamed into the wrong key --
-    raises rather than serving an artifact of something else. A miss is
-    generated and saved atomically under the key.
-
-    ``generate=False`` serves hits only: a miss raises ``FileNotFoundError``
-    naming the key and the path it was looked for at. That is how a caller
-    that must not generate -- a workflow job whose catalogs are built upstream
-    -- uses the same lookup, and how it checks for a hit without touching JAX.
+    A reader -- or a second writer racing on the same path -- sees either no
+    file or a complete one. Two racing writers produce equivalent files, so the
+    last rename winning is harmless.
     """
-    if cache_dir is None:
-        if not generate:
-            raise ValueError("generate=False needs a cache_dir to serve hits from")
-        return generator(metadata)
-
-    path = artifact_path(metadata, cache_dir)
-    if path.is_file():
-        artifact = generator.artifact.load(path)
-        check_metadata(artifact, metadata, label=str(path))
-        logger.info("%s: cache hit at %s", metadata.key(), path)
-        return artifact
-
-    if not generate:
-        raise FileNotFoundError(
-            f"{metadata.key()}: no cached artifact at {path}, and generation "
-            "is disabled"
-        )
-    logger.info("%s: cache miss, generating into %s", metadata.key(), path)
-    artifact = generator(metadata)
-    save_atomically(artifact, path)
-    return artifact
-
-
-def check_metadata(artifact: Artifact, metadata: Keyed, *, label: str) -> None:
-    """Raise unless ``artifact`` records exactly ``metadata``.
-
-    What :func:`simulate` checks a cache hit with, and what a caller handed a
-    file by path -- rather than by cache directory -- checks it with, so a file
-    given to the wrong role or built from a draw nobody asks for any more is
-    refused before it is used.
-    """
-    recorded = artifact.metadata
-    if recorded.key() != metadata.key():
-        raise ValueError(
-            f"{label} records {recorded.key()}, not the requested "
-            f"{metadata.key()}:\n  recorded:  {recorded.model_dump_json()}\n"
-            f"  requested: {metadata.model_dump_json()}"
-        )
-
-
-def save_atomically(artifact: Artifact, path: str | Path) -> None:
-    """Write ``artifact`` to ``path`` without ever exposing a partial file.
-
-    The file is written beside its destination and renamed into place, so a
-    reader -- or a second writer racing on the same key -- sees either no file
-    or a complete one. Two racing writers produce equivalent artifacts, so the last
-    rename winning is harmless.
-    """
-    path = Path(path)
+    h5py = _h5py()
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(
         dir=path.parent, prefix=f".{path.stem}.", suffix=".h5.tmp"
     )
     os.close(handle)
     try:
-        artifact.save(temporary)
+        with h5py.File(temporary, "w") as file:
+            file.attrs["metadata"] = metadata.model_dump_json()
+            file.attrs["node"] = name
+            file.attrs["version"] = __version__
+            file.attrs["created"] = datetime.now(UTC).isoformat()
+            file.attrs["host"] = platform.node()
+            write_tree(file.create_group("inputs"), inputs)
+            write_tree(file.create_group("outputs"), outputs)
         os.replace(temporary, path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
+
+
+def _to_numpy(tree: Any) -> Arrays:
+    return {
+        name: _to_numpy(value) if isinstance(value, dict) else np.asarray(value)
+        for name, value in tree.items()
+    }
+
+
+class Cached:
+    """A simulator node with a cache in front of it; build one with :func:`cached`.
+
+    ``__call__`` is ``(inputs, metadata, *, cache_dir=None, generate=True,
+    **settings)``. Without a ``cache_dir`` it calls the body directly. With one
+    it serves a hit from the file, raises ``FileNotFoundError`` on a miss when
+    ``generate`` is false, and otherwise runs the body and saves its outputs.
+    The undecorated body stays reachable as ``__wrapped__``.
+    """
+
+    def __init__(self, fn: _Node) -> None:
+        functools.update_wrapper(self, fn)
+        self.__wrapped__ = fn
+        self.__name__ = fn.__name__
+
+    def path(self, inputs: Tree, metadata: Keyed, cache_dir: str | Path) -> Path:
+        """Where ``(inputs, metadata)``'s result lives in ``cache_dir``."""
+        return Path(cache_dir) / f"{self.__name__}-{metadata.key()}-{digest(inputs)}.h5"
+
+    def __call__(
+        self,
+        inputs: Tree,
+        metadata: Keyed,
+        *,
+        cache_dir: str | Path | None = None,
+        generate: bool = True,
+        **settings: Any,
+    ) -> Arrays:
+        name = self.__name__
+        if cache_dir is None:
+            if not generate:
+                raise ValueError("generate=False needs a cache_dir to serve hits from")
+            return _to_numpy(self.__wrapped__(inputs, metadata, **settings))
+
+        _reject_tracers(inputs, name)
+        target = self.path(inputs, metadata, cache_dir)
+        if target.is_file():
+            _, outputs, recorded = read(target)
+            if json.loads(recorded) != json.loads(metadata.model_dump_json()):
+                raise ValueError(
+                    f"{target} records other metadata than the request:\n"
+                    f"  recorded:  {recorded}\n"
+                    f"  requested: {metadata.model_dump_json()}"
+                )
+            logger.info("%s: cache hit at %s", name, target)
+            return outputs
+
+        if not generate:
+            raise FileNotFoundError(
+                f"{name}: no cached result at {target}, and generation is disabled"
+            )
+        logger.info("%s: cache miss, generating into %s", name, target)
+        outputs = _to_numpy(self.__wrapped__(inputs, metadata, **settings))
+        _save_atomically(
+            target, name=name, inputs=inputs, outputs=outputs, metadata=metadata
+        )
+        return outputs
+
+
+def cached(fn: _Node) -> Cached:
+    """Turn ``fn(inputs, metadata, **settings)`` into a cached node."""
+    return Cached(fn)

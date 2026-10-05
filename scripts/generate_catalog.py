@@ -3,26 +3,27 @@
 The workflow's ``waveform_catalog`` rule is the caller: every run's
 ``[analysis.injection]`` and ``[analysis.proposal]`` are validated into
 :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` records when the DAG is built, and
-each distinct record becomes one job writing ``outputs/catalogs/<key>.h5``.
-This script is handed that record as JSON and builds it with
-:func:`astrogwb.simulators.core.simulate` and a
-:class:`~astrogwb.simulators.polarization_power.CatalogGenerator`, which writes it atomically.
+each distinct ``(record, seed)`` becomes one job writing
+``outputs/catalogs/polarization_power-<key>-<digest>.h5``. This script is handed
+that record as JSON, with the seed, and builds it with the cached
+:func:`~astrogwb.simulators.polarization_power.polarization_power` node, which
+writes it atomically.
 
-The output must be the record's :func:`~astrogwb.simulators.core.artifact_path` in
-its own directory. The workflow names the file and the record separately, so
-this is where a mismatch between the two -- which would file one draw under
-another's address -- is refused. An output that already exists is a cache hit:
-it is checked against the record and left alone, unless ``--force`` asks for it
+The output must be ``polarization_power.path`` of the record and seed in its own
+directory. The workflow names the file and the record separately, so this is
+where a mismatch between the two -- which would file one draw under another's
+address -- is refused. An output that already exists is a cache hit: it is
+checked against the record and left alone, unless ``--force`` asks for it
 to be drawn again.
 
-Outside the workflow, :func:`astrogwb.simulators.core.simulate` is the whole thing, and
+Outside the workflow, the node is the whole thing, and
 needs no script.
 
 Usage::
 
     uv run --extra paper python scripts/generate_catalog.py \\
-        --request "$(cat request.json)" \\
-        --output outputs/catalogs/<key>.h5
+        --request "$(cat request.json)" --seed 41 \\
+        --output outputs/catalogs/polarization_power-<key>-<digest>.h5
 """
 
 from __future__ import annotations
@@ -32,11 +33,15 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
+import numpy as np
 from pydantic import ValidationError
 
 from astrogwb.paper.config.catalogs import check_population_model
-from astrogwb.simulators.core import artifact_path, simulate
-from astrogwb.simulators.polarization_power import CatalogGenerator, CatalogMetadata
+from astrogwb.simulators.polarization_power import (
+    CatalogMetadata,
+    PolarizationPowerCatalog,
+    polarization_power,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +70,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="The resolved CatalogMetadata, as JSON.",
     )
     parser.add_argument(
+        "--seed",
+        required=True,
+        type=int,
+        help="The seed that picks the realization (non-negative integer).",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         required=True,
-        help="Destination .h5; its stem must be the metadata's key.",
+        help="Destination .h5; its stem must be polarization_power.path's.",
     )
     parser.add_argument(
         "--force",
@@ -85,12 +96,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     args = parse_args(argv)
     metadata: CatalogMetadata = args.request
+    if args.seed < 0:
+        raise ValueError("--seed must be non-negative")
+    inputs = {"seed": np.uint64(args.seed)}
     output_path = args.output.expanduser().resolve()
     cache_dir = output_path.parent
-    if output_path != artifact_path(metadata, cache_dir):
+    if output_path != polarization_power.path(inputs, metadata, cache_dir).resolve():
         raise ValueError(
             f"output {output_path.name} is not named by the metadata's key "
-            f"{metadata.key()}"
+            f"{metadata.key()} and seed {args.seed}"
         )
 
     population = metadata.population
@@ -101,7 +115,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     if args.force:
         output_path.unlink(missing_ok=True)
-    catalog = simulate(metadata, CatalogGenerator(), cache_dir)
+    outputs = polarization_power(inputs, metadata, cache_dir=cache_dir)
+    catalog = PolarizationPowerCatalog.from_arrays(outputs, metadata)
 
     logger.info(
         "Catalog %s: %d events, %d frequencies (%.2f-%.2f Hz), approximant=%s",

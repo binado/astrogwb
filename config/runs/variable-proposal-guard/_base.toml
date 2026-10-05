@@ -2,7 +2,7 @@
 # affects the same H0-MD problem as astrophysical-parameters/madau-dickinson --
 # H0 is the marginalized amplitude and NUTS samples the redshift-rate shape.
 # The runs differ only in their proposal's guard fraction, and each eps is
-# drawn at its own mixture seed, so the three draws are independent. See
+# drawn at its own seed, so the three draws are independent. See
 # astrophysical-parameters/_base.toml for what the guard mixture is.
 [analysis]
 sampled_params = ["gamma", "kappa", "z_peak"]
@@ -12,7 +12,7 @@ amplitude_parameter = "H0"
 amplitude_num_nodes = 1024
 
 # Every run's proposal is a 16384-source guard draw; each run sets its own
-# eps and mixture seed on [populations.guard].
+# eps on [populations.guard] and its seed in [analysis.seeds].
 [analysis.proposal]
 population = "${populations.guard}"
 num_samples = 16384

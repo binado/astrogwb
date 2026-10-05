@@ -13,7 +13,6 @@ import numpyro.distributions as dist
 import pytest
 from astrogwb_mock_population import (
     FIDUCIALS,
-    MOCK_POPULATION_SEED,
     N_GRID,
     Z_MAX,
     Z_MIN,
@@ -133,7 +132,6 @@ def _catalog(
             population=PopulationMetadata(
                 model_name="bns_md_cosmological",
                 model_kwargs=MODEL_KWARGS,
-                seed=MOCK_POPULATION_SEED,
             ),
             fiducials={name: float(value) for name, value in params.items()},
             num_samples=int(power.shape[1]),

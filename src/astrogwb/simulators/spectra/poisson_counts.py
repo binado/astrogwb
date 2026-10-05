@@ -14,7 +14,7 @@ a catalog into a static-capacity plate instead:
    (a Python integer, so the model is a valid JAX pytree and ``jax.jit``
    target). The source model returns that source dict, which is passed to the
    waveform generator.
-4. Generate polarization power over contiguous batches of ``batch_size``
+4. Generate polarization power over contiguous batches of ``chunk_size``
    with :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate_batch`,
    reducing each chunk to ``(F,)`` before the next so the ``(F, max_events)`` array
    is never materialized, and form
@@ -39,10 +39,10 @@ Mapping per-source :meth:`~astrogwb.waveform.PolarizationPowerGenerator.generate
 would stack ``(max_events, F)`` -- the OOM the batching exists to avoid -- not because
 of a vmap-inside-plate problem.
 
-Full batches of ``batch_size`` are reduced with :func:`jax.lax.scan`, so the
+Full batches of ``chunk_size`` are reduced with :func:`jax.lax.scan`, so the
 compiled graph carries one batch body however many chunks there are; a static
-remainder (``max_events % batch_size``) is a separate ``generate_batch``. Peak
-waveform memory is ``(F, batch_size)`` per draw. The scan bounds the *waveform*
+remainder (``max_events % chunk_size``) is a separate ``generate_batch``. Peak
+waveform memory is ``(F, chunk_size)`` per draw. The scan bounds the *waveform*
 intermediate, not the NumPyro draw: the catalog of source parameters is still
 materialized in full, so source storage remains ``O(max_events)``, and
 :class:`~numpyro.infer.Predictive` adds a leading draw axis on top of that.
@@ -79,7 +79,7 @@ against a generator's waveform family::
             merger_rate_fn=merger_rate_fn,
             generator=generator,
             observation_time=1.0,
-            batch_size=1024,
+            chunk_size=1024,
             max_events=10_000,
         ),
         num_samples=8,
@@ -114,7 +114,7 @@ def poisson_counts_forward_model(
     merger_rate_fn: MergerRateFn,
     generator: PolarizationPowerGenerator,
     observation_time: float,
-    batch_size: int,
+    chunk_size: int,
     max_events: int,
     observed_num_events: ArrayLike | None = None,
 ) -> None:
@@ -131,7 +131,7 @@ def poisson_counts_forward_model(
     grid; the Poisson rate converts it against ``merger_rate_fn``'s
     mergers-per-second :math:`\mathcal{R}`.
 
-    ``max_events`` and ``batch_size`` are Python integers, static under JIT.
+    ``max_events`` and ``chunk_size`` are Python integers, static under JIT.
     ``max_events`` is the plate dimension and capacity. ``n_events`` is an
     unobserved Poisson draw by default, or is conditioned on
     ``observed_num_events`` when supplied. A traced count only creates an
@@ -176,7 +176,7 @@ def poisson_counts_forward_model(
         generator,
         sources,
         event_mask,
-        batch_size=batch_size,
+        chunk_size=chunk_size,
     )
 
     numpyro.deterministic(

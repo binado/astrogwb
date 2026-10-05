@@ -80,7 +80,7 @@ class ComparisonConfig:
     hyperparameters: dict[str, float]
     observation_time: float
     draw_count: int
-    batch_size: int
+    chunk_size: int
     n_max_sigma: float
     seed: int
 
@@ -90,7 +90,7 @@ CONFIG = ComparisonConfig(
     hyperparameters=fiducials(root=ROOT_DIR),
     observation_time=1.0,
     draw_count=4,
-    batch_size=128,
+    chunk_size=128,
     n_max_sigma=5.0,
     seed=20250314,
 )
@@ -154,7 +154,7 @@ for approximant, generator in generators.items():
         observation_time=CONFIG.observation_time,
         num_draws=CONFIG.draw_count,
         rng_key=shared_key,
-        batch_size=CONFIG.batch_size,
+        chunk_size=CONFIG.chunk_size,
         n_max_sigma=CONFIG.n_max_sigma,
     )
     spectral_draws[approximant] = draws.spectral_density

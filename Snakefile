@@ -2,7 +2,6 @@ import re
 import shlex
 from pathlib import Path
 
-from astrogwb.simulators.core import artifact_path
 from astrogwb.paper.config.catalogs import resolve_run_catalogs
 from astrogwb.paper.config.runs import (
     DETECTOR_DEFAULT_PATHS,
@@ -10,12 +9,13 @@ from astrogwb.paper.config.runs import (
     run_config_paths,
 )
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
+from astrogwb.simulators.polarization_power import polarization_power
 
 # Keying the catalogs reaches pydantic: the key is taken over a validated
 # CatalogMetadata, which is the price of one canonical form. Importing the
 # records imports JAX (their parent packages do) but does not initialize the
-# XLA backend; `artifact_path` lives in astrogwb.simulators.core, which imports
-# no physics at all.
+# XLA backend; `polarization_power.path` names the file from the
+# metadata and the seed alone.
 
 
 JAX_PLATFORM = config.get("jax_platforms", "cuda")
@@ -23,23 +23,26 @@ CATALOGS_DIR = Path(config.get("catalogs_dir", "outputs/catalogs"))
 CHAIN_PATTERN = "outputs/chains/{experiment}/{run}.nc"
 
 
-def catalog_path(key: str) -> str:
-    """The file a catalog key names: where `simulate` caches its metadata."""
-    return str(artifact_path(run_catalogs.requests[key], CATALOGS_DIR))
+def catalog_path(stem: str) -> str:
+    """The file a catalog stem names: where `polarization_power` caches it."""
+    metadata, seed = run_catalogs.requests[stem]
+    return str(polarization_power.path({"seed": seed}, metadata, CATALOGS_DIR))
 
 
-#: `artifact_path` with the key left as the rule's wildcard; `generate_catalog`
-#: refuses any output that is not the artifact path of the metadata it is given.
+#: `polarization_power.path` with the stem left as the rule's wildcard;
+#: `generate_catalog` refuses any output that is not the path of the metadata
+#: and seed it is given.
 CATALOG_PATTERN = str(CATALOGS_DIR / "{catalog}.h5")
 
 
 # Filenames are the mapping for runs: config/runs/<experiment>/<run>.toml ->
 # outputs/chains/<experiment>/<run>.nc. Catalogs are content-addressed instead:
 # each run's [analysis.injection] / [analysis.proposal] resolve to a
-# CatalogMetadata, and its key
-# names outputs/catalogs/<key>.h5. Two runs asking for the same draw share
-# one file, and any edit to a draw -- or a bump of the astrogwb version -- names
-# a new one, so the catalog rule needs no config inputs to rebuild correctly.
+# CatalogMetadata, and that record plus the seed it is drawn at (analysis.seeds)
+# names outputs/catalogs/polarization_power-<key>-<digest>.h5. Two runs asking
+# for the same draw share one file, and any edit to a draw -- or a bump of the
+# astrogwb version -- names a new one, so the catalog rule needs no config
+# inputs to rebuild correctly.
 runs = discover_runs()
 run_catalogs = resolve_run_catalogs()
 
@@ -120,8 +123,13 @@ def run_catalog_input(role):
 
 
 def catalog_request(wildcards):
-    """The metadata behind one catalog key, as the JSON the generator takes."""
-    return run_catalogs.requests[wildcards.catalog].model_dump_json()
+    """The metadata behind one catalog stem, as the JSON the generator takes."""
+    return run_catalogs.requests[wildcards.catalog][0].model_dump_json()
+
+
+def catalog_seed(wildcards):
+    """The seed behind one catalog stem."""
+    return int(run_catalogs.requests[wildcards.catalog][1])
 
 
 def run_outdir(wildcards):
@@ -133,7 +141,7 @@ def experiment_chains(experiment):
 
 
 wildcard_constraints:
-    catalog="[0-9a-f]{16}",
+    catalog="polarization_power-[0-9a-f]{16}-[0-9a-f]{16}",
     experiment=EXPERIMENT_PATTERN,
     run=RUN_PATTERN,
 
@@ -151,10 +159,11 @@ localrules:
 rule waveform_catalog:
     """Population draw + waveform generation, in one process.
 
-    The output path is the metadata's key, so the rule declares no config
-    inputs: an edit that changes what a run asks for changes the key, and with
-    it the file, rather than invalidating this one. The generator re-derives
-    the key from the metadata it is handed and refuses a path that disagrees.
+    The output path is the metadata's key and the seed's digest, so the rule
+    declares no config inputs: an edit that changes what a run asks for changes
+    the path, and with it the file, rather than invalidating this one. The
+    generator re-derives the path from the metadata and seed it is handed and
+    refuses an output that disagrees.
     """
     input:
         script="scripts/generate_catalog.py",
@@ -162,9 +171,10 @@ rule waveform_catalog:
         CATALOG_PATTERN,
     params:
         request=catalog_request,
+        seed=catalog_seed,
     shell:
         "uv run --extra paper python {input.script:q}"
-        " --request {params.request:q}"
+        " --request {params.request:q} --seed {params.seed}"
         " --output {output:q} --force"
 
 

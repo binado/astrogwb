@@ -29,7 +29,7 @@ to ``[catalog]``. A reference resolves against the *final* merge, so a run
 that overrides ``[fiducials]`` reaches every catalog drawn at them. A
 reference to a table also merges as that table: a layer that sets a key under
 one overrides that field and keeps the rest, which is how a run changes one
-role's population seed. A table that is a base plus additions is written
+role's size. A table that is a base plus additions is written
 ``extends = "${a.b}"`` (:data:`MERGE_KEY`).
 
 A run owns its catalogs. ``[analysis.injection]`` and ``[analysis.proposal]``

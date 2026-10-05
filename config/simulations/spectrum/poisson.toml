@@ -1,7 +1,7 @@
-# Poisson forward-model spectra, shaped like astrogwb.metadata.SpectraMetadata.
+# Poisson forward-model spectra, shaped like astrogwb.simulators.spectra.SpectraMetadata.
 # It is merged over the four shared layers (config/defaults.toml,
 # waveforms.toml, populations.toml, detectors.toml) and read by
-# scripts/simulate_spectra.py from the [spectra] table alone -- it is not a run
+# scripts/simulate_spectra.py from the [spectra] and [draws] tables -- it is not a run
 # layer, and no MCMC run reads it.
 #
 #   uv run --extra paper python scripts/simulate_spectra.py \
@@ -13,8 +13,8 @@
 # what it is: a [fiducials] entry fixes it for every draw, a [priors] entry
 # (a {dist, kwargs} table) draws it once per row. A later layer that sets a key
 # under [spectra.hyperparameters] replaces the reference whole. The
-# population is referenced whole; a layer can override its seed alone under
-# [spectra.population], keeping the other fields from the reference.
+# population is referenced whole. [draws] is not part of the record: it says
+# which realizations to draw (num_draws seeds split from seed).
 #
 # No `version`: the record carries the installed astrogwb's, never the config's.
 
@@ -22,7 +22,6 @@
 count = "poisson"
 waveform = "${waveforms.default}"
 population = "${populations.cosmological}"
-num_draws = 64
 observation_time = "${analysis.observation_time}"
 
 [spectra.hyperparameters]
@@ -34,3 +33,8 @@ z_peak = "${fiducials.z_peak}"
 minimum_mass = "${fiducials.minimum_mass}"
 mass_width = "${fiducials.mass_width}"
 local_merger_rate = "${priors.local_merger_rate}"
+
+# Not part of the metadata: which realizations to draw.
+[draws]
+seed = 41
+num_draws = 64

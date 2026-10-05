@@ -179,19 +179,21 @@ def main(argv: list[str] | None = None) -> None:
     # Serve both catalogs before JAX starts, the same way scripts/run_mcmc.py
     # does -- what is profiled must be the production model on production
     # inputs, including the proposal density each file records for itself.
-    from astrogwb.simulators.core import simulate
-    from astrogwb.simulators.polarization_power import CatalogGenerator
+    from astrogwb.simulators.polarization_power import (
+        PolarizationPowerCatalog,
+        polarization_power,
+    )
 
     catalog_dir = args.catalog_dir.resolve()
-    injection_catalog, proposal_catalog = (
-        simulate(
-            config.catalog_request(role),
-            CatalogGenerator(),
-            catalog_dir,
-            generate=False,
+
+    def served(role: str) -> PolarizationPowerCatalog:
+        metadata, seed = config.catalog_request(role)
+        outputs = polarization_power(
+            {"seed": seed}, metadata, cache_dir=catalog_dir, generate=False
         )
-        for role in ("injection", "proposal")
-    )
+        return PolarizationPowerCatalog.from_arrays(outputs, metadata)
+
+    injection_catalog, proposal_catalog = served("injection"), served("proposal")
 
     jax, _ = configure_runtime(
         num_chains=config.sampler.num_chains,

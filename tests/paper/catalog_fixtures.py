@@ -8,6 +8,7 @@ matching what any later evaluation recomputes from the stored samples.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 
 import numpy as np
 from repo import REPO_ROOT
@@ -26,8 +27,7 @@ from astrogwb.waveform import WaveformMetadata
 #: against. ``n_grid`` is the one deliberate difference -- 256 keeps the
 #: cosmology integrals cheap enough for a unit test -- and it is written as an
 #: override so the difference is visible instead of buried in a retyped table.
-#: The seed is a fixture detail; ``make_catalog`` takes its own.
-PAPER_POPULATION = population_metadata(REPO_ROOT, seed=41, n_grid=256)
+PAPER_POPULATION = population_metadata(REPO_ROOT, n_grid=256)
 PAPER_MODEL = PAPER_POPULATION.model_name
 PAPER_MODEL_KWARGS: dict[str, float | int | bool] = dict(PAPER_POPULATION.model_kwargs)
 
@@ -95,7 +95,6 @@ def make_catalog(
     reference_frequency: float = 20.0,
     sampling_frequency: float = 128.0,
     df: float = 10.0,
-    seed: int = 41,
     model_name: str = PAPER_MODEL,
     model_kwargs: Mapping[str, float | int | bool] | None = None,
     fiducials: Mapping[str, float] | None = None,
@@ -145,7 +144,6 @@ def make_catalog(
             population=PopulationMetadata(
                 model_name=model_name,
                 model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
-                seed=seed,
             ),
             fiducials={
                 name: float(value)
@@ -153,4 +151,27 @@ def make_catalog(
             },
             num_samples=int(np.shape(polarization_power)[1]),
         ),
+    )
+
+
+def save_catalog(
+    catalog: PolarizationPowerCatalog, path: Path, *, seed: int = 41
+) -> None:
+    """Write ``catalog`` in the cache's file format, as ``polarization_power`` would.
+
+    Tests that hand a run a catalog *by path* need a file; this is the same
+    writer the cache uses, fed the catalog's arrays and an explicit seed.
+    """
+    from astrogwb.simulators.core.cache import _save_atomically
+
+    _save_atomically(
+        path,
+        name="polarization_power",
+        inputs={"seed": np.uint64(seed)},
+        outputs={
+            "frequencies": catalog.frequencies,
+            "polarization_power": catalog.polarization_power,
+            "source_parameters": dict(catalog.source_parameters),
+        },
+        metadata=catalog.metadata,
     )

@@ -18,11 +18,13 @@ class CatalogMetadata(BaseModel):
     """Everything that determines a polarization-power catalog's contents.
 
     It is both the request and the provenance, as
-    :class:`~astrogwb.simulators.spectra.SpectraMetadata` is for spectra: a
-    :class:`~astrogwb.simulators.polarization_power.CatalogGenerator` turns it into a catalog, the
-    catalog carries it as :attr:`~astrogwb.simulators.polarization_power.PolarizationPowerCatalog.metadata`,
-    and :meth:`key` is the file name :func:`~astrogwb.simulators.core.simulate` caches
-    it under.
+    :class:`~astrogwb.simulators.spectra.SpectraMetadata` is for spectra: the
+    :func:`~astrogwb.simulators.polarization_power.polarization_power` node
+    turns it and a seed into a catalog, the catalog carries it as
+    :attr:`~astrogwb.simulators.polarization_power.PolarizationPowerCatalog.metadata`,
+    and :meth:`key` is the middle part of the file name the node caches it
+    under. The seed is not part of it: it picks one realization of the
+    density this record describes.
 
     The waveform and population record alone are not enough: two catalogs
     with the same ones still differ if they were drawn at other

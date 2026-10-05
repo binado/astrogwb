@@ -37,10 +37,11 @@ stack is open-ended, which is the practical gain over a fixed assembled
 artifact.
 
 The catalogs are fetched the way a notebook fetches them:
-`astrogwb.simulators.core.simulate` looks each role's request up by key in
-`--catalog-dir` (default `outputs/catalogs`), checks a hit against the request,
-and generates a miss. Hits are served before JAX starts, so a file filed under
-the wrong key fails cheaply; a miss is generated only after the runtime is
+`astrogwb.simulators.polarization_power.polarization_power` looks each role's
+request (its metadata and `[analysis.seeds]` seed) up in `--catalog-dir`
+(default `outputs/catalogs`), checks a hit against the request, and generates a
+miss. Hits are served before JAX starts, so a file filed under the wrong name
+fails cheaply; a miss is generated only after the runtime is
 configured, because drawing a catalog initializes the XLA backend.
 `--cached-only` makes a miss an error instead -- the workflow passes it, since
 `rule waveform_catalog` builds the catalogs upstream. `just catalogs` prints
@@ -93,7 +94,7 @@ through `astrogwb.paper.config`.
 | `[priors]` | the prior on every parameter |
 | `[sampler]` | the sampling RNG seed and NUTS defaults |
 | `[waveforms.<name>]` | a named `WaveformMetadata` (in `waveforms.toml`) |
-| `[populations.<name>]` | a named `PopulationMetadata`, seed included (in `populations.toml`) |
+| `[populations.<name>]` | a named `PopulationMetadata` (in `populations.toml`) |
 | `[networks]` | each detector network, by name (in `detectors.toml`) |
 | `[detectors]` | optional geometry, PSD, and label overrides (in `detectors.toml`) |
 
@@ -197,11 +198,12 @@ how `knf` resolves them:
   *under* a reference overrides that field and keeps the rest, so
   `[analysis.proposal.waveform] approximant = "TaylorF2"` gives the default
   waveform with a different approximant, and a run can override `num_samples`
-  or `population.seed` alone. To change a named variant for every role that
-  names it in one run, override it at its source -- `[populations.guard]
-  seed = 62` -- and every role that names it follows. `--shallow` forces
+  or a role's seed (`[analysis.seeds]`) alone. To change a named variant for
+  every role that names it in one run, override it at its source --
+  `[populations.guard] model_kwargs.uniform_mixing_fraction = 0.01` -- and every
+  role that names it follows. `--shallow` forces
   replacement instead; `priors.*` is the one place we use it.
-- **A reference can be reached through.** `"${catalog.population.seed}"`
+- **A reference can be reached through.** `"${catalog.population.model_kwargs.n_grid}"`
   resolves even though `[catalog].population` is itself
   `"${populations.cosmological}"`.
 - **`extends` inherits a table.** `extends = "${a.b}"` starts a table from
@@ -243,7 +245,7 @@ num_samples = 32768
 population = "${populations.cosmological}"
 ```
 
-and a run overrides only what differs -- a size and seed, a named population,
+and a run overrides only what differs -- a size, a seed (`[analysis.seeds]`), a named population,
 a named waveform:
 
 ```toml
@@ -275,8 +277,8 @@ time, so `snakemake validate` stays cheap: a config typo, or an unregistered
 population name, fails without any catalog having to exist.
 
 `analysis.population` is the *target* population the sampled hyperparameters
-describe, a `PopulationMetadata` like any catalog's -- its seed is unused,
-since a target is evaluated rather than drawn from:
+describe, a `PopulationMetadata` like any catalog's, though a target is evaluated rather
+than drawn from:
 
 ```toml
 [analysis]

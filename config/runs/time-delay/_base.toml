@@ -32,6 +32,12 @@ population = "${populations.time_delayed}"
 population = "${populations.guard}"
 num_samples = 16384
 
+# The injection's seed differs from the shared draw's; the proposal keeps the
+# guard seed the other guard runs use.
+[analysis.seeds]
+injection = 71
+proposal = 61
+
 [fiducials]
 delay_slope = -1.0
 

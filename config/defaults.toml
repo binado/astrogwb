@@ -33,7 +33,7 @@ population = "${populations.target}"
 # the "observed" data -- of every run except time-delay, and the proposal of
 # cosmological-parameters, modified-propagation and
 # waveform-approximant/IMRPhenom. A run changes one field of a role -- its
-# seed, its size, its population or waveform -- by setting just that field.
+# size, its population or waveform -- by setting just that field.
 [analysis.injection]
 waveform = "${catalog.waveform}"
 fiducials = "${catalog.fiducials}"
@@ -46,7 +46,14 @@ fiducials = "${catalog.fiducials}"
 num_samples = "${catalog.num_samples}"
 population = "${catalog.population}"
 
-# The default draw, shaped like astrogwb.metadata.CatalogMetadata: a 32768-source
+# The seed each role is drawn at, a simulator input beside the role's metadata:
+# the same metadata at another seed is an independent realization. A run
+# overrides one role's seed alone.
+[analysis.seeds]
+injection = 41
+proposal = 41
+
+# The default draw, shaped like astrogwb.simulators.polarization_power.CatalogMetadata: a 32768-source
 # draw from the cosmological population with the default waveform. It is
 # drawn at the run's own [fiducials], so editing [fiducials] re-keys every
 # catalog. The record's version is the installed astrogwb's, never the config's.

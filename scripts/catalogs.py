@@ -1,7 +1,8 @@
 """Inspect the content-addressed catalog cache.
 
-Catalog files are named by key -- ``outputs/catalogs/<key>.h5`` -- which is
-unambiguous but unreadable. ``ls`` maps the keys back to what they hold: every
+Catalog files are named by key and seed --
+``outputs/catalogs/polarization_power-<key>-<digest>.h5`` -- which is
+unambiguous but unreadable. ``ls`` maps the names back to what they hold: every
 catalog a committed run asks for, what it draws, whether it has been built, and
 which runs sample against it. ``--orphans`` lists built files no run asks for
 any more (typically left behind by a config edit or a version bump), which are
@@ -22,9 +23,10 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+import numpy as np
+
 from astrogwb.paper.config.catalogs import RunCatalogs, resolve_run_catalogs
 from astrogwb.paper.config.runs import CATALOGS_ROOT
-from astrogwb.simulators.core import artifact_path
 from astrogwb.simulators.polarization_power import CatalogMetadata
 
 #: Construction kwargs every catalog shares by default, left out of the
@@ -58,8 +60,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def describe(request: CatalogMetadata) -> str:
+def describe(request: tuple[CatalogMetadata, np.uint64]) -> str:
     """One line saying what a catalog draws."""
+    request, seed = request
     population = request.population
     kwargs = ", ".join(
         f"{name}={value if isinstance(value, bool) else format(value, 'g')}"
@@ -68,25 +71,25 @@ def describe(request: CatalogMetadata) -> str:
     )
     model = f"{population.model_name}({kwargs})" if kwargs else population.model_name
     return (
-        f"{model} seed={population.seed} n={request.num_samples} "
+        f"{model} seed={seed} n={request.num_samples} "
         f"{request.waveform.approximant} v{request.version}"
     )
 
 
 def format_listing(catalogs: RunCatalogs, cache_dir: Path) -> list[str]:
-    """The ``ls`` table: one block per key, built ones marked."""
+    """The ``ls`` table: one block per file stem, built ones marked."""
     lines: list[str] = []
-    for key, request in sorted(
+    for stem, request in sorted(
         catalogs.requests.items(), key=lambda item: describe(item[1])
     ):
-        built = "built" if artifact_path(request, cache_dir).is_file() else "missing"
-        lines.append(f"{key}  {built:<7}  {describe(request)}")
-        lines.extend(f"    {user}" for user in catalogs.users(key))
+        built = "built" if (cache_dir / f"{stem}.h5").is_file() else "missing"
+        lines.append(f"{stem}  {built:<7}  {describe(request)}")
+        lines.extend(f"    {user}" for user in catalogs.users(stem))
     return lines
 
 
 def orphans(catalogs: RunCatalogs, cache_dir: Path) -> list[Path]:
-    """Built catalog files whose key no committed run resolves to."""
+    """Built catalog files whose stem no committed run resolves to."""
     if not cache_dir.is_dir():
         return []
     return sorted(

@@ -1,4 +1,6 @@
 # eps = 0.1: the same draw astrophysical-parameters uses as its proposal.
 [populations.guard]
-seed = 61
 model_kwargs.uniform_mixing_fraction = 0.1
+
+[analysis.seeds]
+proposal = 61

@@ -46,8 +46,8 @@ with app.setup(hide_code=True):
         save_figures,
         use_paper_style,
     )
-    from astrogwb.simulators.core import simulate
-    from astrogwb.simulators.spectra import SpectraMetadata, SpectrumGenerator
+    from astrogwb.simulators.core import split_seed
+    from astrogwb.simulators.spectra import SpectraMetadata, spectra
     from astrogwb.utils import years_to_seconds
 
 
@@ -106,10 +106,10 @@ def _():
     maximum_redshift = 20.0
 
     # One Poisson draw.
-    # batch_size chunks the waveform generation;
+    # chunk_size chunks the waveform generation;
     # n_max_sigma sizes the static event plate a Poisson tail above the mean count.
     seed = 41
-    batch_size = 1024
+    chunk_size = 1024
     n_max_sigma = 5.0
 
     # Ordered legend from astrogwb.paper.plotting.DETECTOR_NETWORKS -- a network's
@@ -135,7 +135,7 @@ def _():
         NETWORKS,
         OMEGA_GW_MAX,
         ROOT_DIR,
-        batch_size,
+        chunk_size,
         maximum_frequency,
         maximum_redshift,
         minimum_frequency,
@@ -373,7 +373,7 @@ def _(
     FIDUCIALS,
     ROOT_DIR,
     approximant,
-    batch_size,
+    chunk_size,
     frequency_resolution,
     maximum_frequency,
     maximum_redshift,
@@ -383,7 +383,7 @@ def _(
     seed,
 ):
     # The draw is a record: the same settings are served from
-    # outputs/spectra/<key>.h5 instead of being redrawn, so moving a slider
+    # outputs/spectra/spectra-<key>-<digest>.h5 instead of being redrawn, so moving a slider
     # back to a value already seen is a cache hit.
     _metadata = SpectraMetadata(
         waveform=waveform_metadata(
@@ -398,23 +398,22 @@ def _(
         ),
         population=population_metadata(
             root=ROOT_DIR,
-            seed=seed,
             minimum_redshift=minimum_redshift,
             maximum_redshift=maximum_redshift,
         ),
         hyperparameters=FIDUCIALS,
-        num_draws=1,
         observation_time=observation_time,
         n_max_sigma=n_max_sigma,
     )
-    _spectra = simulate(
+    _spectra = spectra(
+        {"seeds": split_seed(seed, 1)},
         _metadata,
-        SpectrumGenerator(batch_size=batch_size),
-        ROOT_DIR / SPECTRA_ROOT,
+        cache_dir=ROOT_DIR / SPECTRA_ROOT,
+        chunk_size=chunk_size,
     )
-    frequencies = jnp.asarray(_spectra.frequencies)
-    spectral_density = jnp.asarray(_spectra.spectral_density[0])
-    _n_events = int(_spectra.n_events[0])
+    frequencies = jnp.asarray(_spectra["frequencies"])
+    spectral_density = jnp.asarray(_spectra["spectral_density"][0])
+    _n_events = int(_spectra["n_events"][0])
 
     {"Number of events": _n_events}
     return frequencies, spectral_density

@@ -251,12 +251,11 @@ def population_model(root: Path | None = None, **kwargs: float | bool) -> Popula
 
 
 def population_metadata(
-    root: Path | None = None, *, seed: int | None = None, **kwargs: float | bool
+    root: Path | None = None, **kwargs: float | bool
 ) -> PopulationMetadata:
     """The record the default draw, ``[catalog]``, carries for its population.
 
-    ``seed`` overrides the file's, which is the default draw's own. Keyword
-    arguments override ``model_kwargs``, validated rather than trusted, so this
+    Keyword arguments override ``model_kwargs``, validated rather than trusted, so this
     accessor and :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` reach a record down
     the same path. An already-built record is re-derived with
     :meth:`~astrogwb.populations.PopulationMetadata.with_model_kwargs`.
@@ -268,6 +267,4 @@ def population_metadata(
 
     table = _table(root, "catalog", "population")
     table["model_kwargs"] = {**table.get("model_kwargs", {}), **kwargs}
-    if seed is not None:
-        table["seed"] = seed
     return PopulationMetadata.model_validate(table)

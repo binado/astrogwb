@@ -315,10 +315,10 @@ def save(
             sort_keys=True,
         )
 
-    # The key of each role's catalog: the address of the exact file sampled
+    # The file stem of each role's catalog: the address of the exact file sampled
     # against, which the resolved config beside the chain re-derives.
     idata.posterior.attrs["catalogs"] = json.dumps(
-        {role: config.catalog_request(role).key() for role in CATALOG_ROLES},
+        {role: config.catalog_stem(role) for role in CATALOG_ROLES},
         sort_keys=True,
     )
 
@@ -432,22 +432,28 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_chain_path_available(config, timestamp=timestamp, force=args.force)
 
-    from astrogwb.simulators.core import simulate
-    from astrogwb.simulators.polarization_power import CatalogGenerator
+    from astrogwb.simulators.polarization_power import (
+        PolarizationPowerCatalog,
+        polarization_power,
+    )
 
-    # Serve every cached catalog before JAX claims a device: `simulate` checks
-    # a hit against the request its role resolves to, so a file filed under
-    # the wrong key fails cheaply. A miss is either an error (--cached-only)
-    # or generated below -- after the runtime is configured, because drawing
-    # a catalog initializes the XLA backend.
-    generator = CatalogGenerator()
+    def catalog(role: str, *, generate: bool) -> PolarizationPowerCatalog:
+        metadata, seed = config.catalog_request(role)
+        outputs = polarization_power(
+            {"seed": seed}, metadata, cache_dir=catalog_dir, generate=generate
+        )
+        return PolarizationPowerCatalog.from_arrays(outputs, metadata)
+
+    # Serve every cached catalog before JAX claims a device: the cache checks a
+    # hit against the request its role resolves to, so a file filed under the
+    # wrong name fails cheaply. A miss is either an error (--cached-only) or
+    # generated below -- after the runtime is configured, because drawing a
+    # catalog initializes the XLA backend.
     catalog_dir = args.catalog_dir.resolve()
     catalogs: dict[str, PolarizationPowerCatalog] = {}
     for role in CATALOG_ROLES:
         try:
-            catalogs[role] = simulate(
-                config.catalog_request(role), generator, catalog_dir, generate=False
-            )
+            catalogs[role] = catalog(role, generate=False)
         except FileNotFoundError:
             if args.cached_only:
                 raise
@@ -461,14 +467,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     for role in CATALOG_ROLES:
         if role not in catalogs:
-            catalogs[role] = simulate(
-                config.catalog_request(role), generator, catalog_dir
-            )
+            catalogs[role] = catalog(role, generate=True)
 
     proposal_catalog = catalogs["proposal"]
     logger.info(
         "Proposal density from %s: model=%s kwargs=%s params=%s",
-        config.catalog_request("proposal").key(),
+        config.catalog_stem("proposal"),
         proposal_catalog.population_model_name,
         dict(proposal_catalog.population_model_kwargs),
         dict(proposal_catalog.fiducials),

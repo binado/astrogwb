@@ -5,8 +5,9 @@ draw + ripple waveform generation) and shared by every run that asks for the
 same one. A run declares what it needs in ``[analysis.injection]`` and
 ``[analysis.proposal]`` -- each a :class:`~astrogwb.simulators.polarization_power.CatalogMetadata`
 once the merge has resolved its references -- and the file lives at
-``outputs/catalogs/<key>.h5``, where ``<key>`` is that request's content hash.
-No name translates between the two.
+``outputs/catalogs/<stem>.h5``, where ``<stem>`` is
+``polarization_power-<key>-<digest>``: the request's content hash and the
+hash of the seed it is drawn at. No name translates between the two.
 
 Once built, the *file* is authoritative about what it holds, and
 ``scripts/run_mcmc.py`` checks it against the request its run resolves.
@@ -25,13 +26,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 from astrogwb.paper.config.mcmc import (
     RunConfig,
     build_run_config,
     check_redshift_grid,
 )
 from astrogwb.paper.config.runs import CATALOG_ROLES, assemble_run, discover_runs
-from astrogwb.simulators.polarization_power import CatalogMetadata
+from astrogwb.simulators.polarization_power import CatalogMetadata, polarization_power
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +105,7 @@ def check_catalog_requests(config: RunConfig, *, label: str) -> None:
     """
     for role in CATALOG_ROLES:
         role_label = f"{label} analysis.{role}"
-        population = config.catalog_request(role).population
+        population = config.catalog_request(role)[0].population
         check_redshift_grid(
             population.model_kwargs, label=f"{role_label}.population.model_kwargs"
         )
@@ -121,27 +124,27 @@ def check_catalog_requests(config: RunConfig, *, label: str) -> None:
 class RunCatalogs:
     """Every catalog the committed runs ask for, and which run asks for which.
 
-    ``requests`` maps each distinct key to its request, so a draw several runs
-    share appears once; ``by_run`` maps ``(experiment, run)`` to its
-    ``{role: key}``. This is the whole inventory the workflow builds from --
-    there is no catalog config to glob.
+    ``requests`` maps each distinct file stem to its ``(metadata, seed)``, so a
+    draw several runs share appears once; ``by_run`` maps ``(experiment, run)``
+    to its ``{role: stem}``. This is the whole inventory the workflow builds
+    from -- there is no catalog config to glob.
     """
 
-    requests: dict[str, CatalogMetadata]
+    requests: dict[str, tuple[CatalogMetadata, np.uint64]]
     by_run: dict[tuple[str, str], dict[str, str]]
 
-    def users(self, key: str) -> list[str]:
-        """Every ``experiment/run:role`` that samples against ``key``."""
+    def users(self, stem: str) -> list[str]:
+        """Every ``experiment/run:role`` that samples against ``stem``."""
         return [
             f"{experiment}/{run}:{role}"
             for (experiment, run), roles in self.by_run.items()
             for role, used in roles.items()
-            if used == key
+            if used == stem
         ]
 
 
 def resolve_run_catalogs(root: Path | None = None) -> RunCatalogs:
-    """Resolve both catalogs of every committed run into keyed requests.
+    """Resolve both catalogs of every committed run into requests named by file stem.
 
     Works off the raw merge rather than a validated :class:`RunConfig`, so the
     ``Snakefile`` can build its DAG without validating all 27 runs; the request
@@ -149,22 +152,24 @@ def resolve_run_catalogs(root: Path | None = None) -> RunCatalogs:
     form. ``RunConfig`` validates the same merged table, and a test pins the
     two agreeing.
     """
-    requests: dict[str, CatalogMetadata] = {}
+    requests: dict[str, tuple[CatalogMetadata, np.uint64]] = {}
     by_run: dict[tuple[str, str], dict[str, str]] = {}
     for experiment, names in discover_runs(root).items():
         for run in names:
             analysis = assemble_run(experiment, run, root=root).get("analysis") or {}
+            seeds = analysis.get("seeds") or {}
             roles: dict[str, str] = {}
             for role in CATALOG_ROLES:
                 try:
                     request = CatalogMetadata.model_validate(analysis.get(role))
-                except ValueError as error:
+                    seed = np.uint64(seeds[role])
+                except (KeyError, ValueError) as error:
                     raise ValueError(
-                        f"{experiment}/{run} analysis.{role}: {error}"
+                        f"{experiment}/{run} analysis.{role}: {error!r}"
                     ) from None
-                key = request.key()
-                requests.setdefault(key, request)
-                roles[role] = key
+                stem = polarization_power.path({"seed": seed}, request, "").stem
+                requests.setdefault(stem, (request, seed))
+                roles[role] = stem
             by_run[(experiment, run)] = roles
     return RunCatalogs(requests=requests, by_run=by_run)
 

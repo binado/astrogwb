@@ -18,3 +18,7 @@ amplitude_num_nodes = 1024
 [analysis.proposal]
 population = "${populations.guard}"
 num_samples = 16384
+
+# The guard draw's seed, shared with variable-proposal-guard/eps1e-1.
+[analysis.seeds]
+proposal = 61
