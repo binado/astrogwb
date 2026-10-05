@@ -30,10 +30,7 @@ from numpyro.infer.util import log_density
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.cosmology import log_gw_em_ratio
-from astrogwb.distributions.amplitude import (
-    amplitude_prior,
-    quadrature_grid,
-)
+from astrogwb.distributions.amplitude import amplitude_prior
 from astrogwb.importance.spectral import importance_spectral_density
 from astrogwb.inference import (
     SpectralDensityFn,
@@ -430,7 +427,6 @@ def _band_kwargs(marginalized: bool, *, compressed: bool) -> dict[str, Any]:
             "spectral_density_fn": _pinned(spectrum, rate=_BAND_FIDUCIAL_RATE),
             "priors": {"tilt": dist.Normal(0.0, 1.0)},
             "amplitude_prior": _BAND_AMPLITUDE_PRIOR,
-            "amplitude_grid": quadrature_grid(_BAND_AMPLITUDE_PRIOR, num_nodes=2001),
         }
     else:
         kwargs |= {

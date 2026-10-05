@@ -8,7 +8,7 @@ posterior :math:`p(\varphi, \alpha \mid d)` can be evaluated on a dense 2D grid
 through the general model, which gives numerical marginals that share no code
 with the A-space machinery under test.
 
-Three behaviours are pinned, one per test:
+Three behaviours are pinned against the general model, one per test:
 
 - the marginalized model's density of :math:`\alpha` is the :math:`\varphi`
   marginal of the general model's, with no leftover constant;
@@ -39,9 +39,14 @@ from numpyro import handlers
 from numpyro.distributions.transforms import Transform
 from numpyro.infer import Predictive
 
-from astrogwb.distributions.amplitude import AmplitudeConditional, amplitude_prior
+from astrogwb.distributions.amplitude import (
+    AmplitudeConditional,
+    amplitude_prior,
+    support_bounds,
+)
 from astrogwb.inference import (
     LogDensityFn,
+    amplitude_H0_transform,
     amplitude_local_merger_rate_transform,
     gwb_amplitude_marginalized_model,
     gwb_spectral_density_model,
@@ -212,7 +217,7 @@ def test_marginalized_model_alpha_density_matches_numerical_marginal(
     numerical = _log_trapezoid(log_joint_2d, model.case.phi_grid, axis=1)
 
     # No free constant: the Jacobian is carried by the pushforward prior.
-    np.testing.assert_allclose(log_marginalized, numerical, rtol=0, atol=1e-4)
+    np.testing.assert_allclose(log_marginalized, numerical, rtol=0, atol=1e-6)
 
 
 def test_amplitude_conditional_mixture_matches_numerical_amplitude_marginal(
@@ -263,4 +268,69 @@ def test_amplitude_conditional_log_prob_matches_conditioned_slice(
         phi, amplitude
     )
 
-    np.testing.assert_allclose(predicted, numerical, rtol=0, atol=1e-4)
+    np.testing.assert_allclose(predicted, numerical, rtol=0, atol=1e-6)
+
+
+def _uniform_log_normalizer(
+    lower: float, upper: float, mle: float, snr: float
+) -> tuple[float, float]:
+    """Closed-form ``(ln Z, d ln Z / d mle)`` for a ``Uniform(lower, upper)`` prior."""
+    lo, hi = snr * (lower - mle), snr * (upper - mle)
+    mass = jnp.exp(jax.scipy.special.log_ndtr(hi)) - jnp.exp(
+        jax.scipy.special.log_ndtr(lo)
+    )
+    log_z = 0.5 * jnp.log(2 * jnp.pi) - jnp.log(snr * (upper - lower)) + jnp.log(mass)
+    pdf = jax.scipy.stats.norm.pdf
+    return float(log_z), float(-snr * (pdf(hi) - pdf(lo)) / mass)
+
+
+@pytest.mark.parametrize("snr", [1e2, 1e4])
+def test_log_normalizer_is_independent_of_snr_resolution(snr: float) -> None:
+    lower, upper = 1.0, 2.0
+    mle = lower + 3.0 / snr  # the bound sits 3 sigma_A from the peak
+    conditional = AmplitudeConditional(mle, snr, prior=dist.Uniform(lower, upper))
+
+    expected, _ = _uniform_log_normalizer(lower, upper, mle, snr)
+
+    np.testing.assert_allclose(conditional.log_normalizer, expected, rtol=0, atol=1e-9)
+
+
+def test_log_normalizer_gradient_sees_the_bound() -> None:
+    lower, upper, snr = 1.0, 2.0, 1e3
+    prior = dist.Uniform(lower, upper)
+
+    def log_normalizer(mle: jax.Array) -> jax.Array:
+        return AmplitudeConditional(mle, snr, prior=prior).log_normalizer
+
+    for mle in (lower + 0.5 / snr, lower - 0.5 / snr):
+        _, expected = _uniform_log_normalizer(lower, upper, mle, snr)
+        np.testing.assert_allclose(
+            jax.grad(log_normalizer)(jnp.asarray(mle)), expected, rtol=1e-6
+        )
+
+
+def test_support_bounds_of_a_pushforward_are_ordered() -> None:
+    prior = amplitude_prior(dist.Uniform(20.0, 140.0), amplitude_H0_transform(70.0))
+
+    lower, upper = support_bounds(prior)
+
+    # A = 70 / H0 is decreasing, so the base's upper bound gives the lower one.
+    np.testing.assert_allclose([lower, upper], [0.5, 3.5])
+
+
+def test_samples_follow_the_conditioned_slice() -> None:
+    lower, upper, snr = 1.0, 2.0, 40.0
+    mle = lower + 0.5 / snr  # the bound truncates the likelihood peak
+    conditional = AmplitudeConditional(mle, snr, prior=dist.Uniform(lower, upper))
+
+    draws = np.asarray(conditional.sample(jax.random.key(0), (20_000,)))
+
+    grid = jnp.linspace(lower, lower + 12.0 / snr, 20_001)
+    density = jnp.exp(conditional.log_prob(grid))
+    mean = jnp.trapezoid(grid * density, grid)
+    std = jnp.sqrt(jnp.trapezoid((grid - mean) ** 2 * density, grid))
+
+    assert draws.min() >= lower
+    assert draws.max() <= upper
+    np.testing.assert_allclose(draws.mean(), mean, rtol=0, atol=4 * std / 20_000**0.5)
+    np.testing.assert_allclose(draws.std(), std, rtol=2e-2)

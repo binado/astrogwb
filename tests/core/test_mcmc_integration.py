@@ -51,11 +51,7 @@ from astrogwb.detector import (
     gaussian_bin_scale,
     load_sensitivity_map,
 )
-from astrogwb.distributions.amplitude import (
-    AmplitudeConditional,
-    amplitude_prior,
-    quadrature_grid,
-)
+from astrogwb.distributions.amplitude import AmplitudeConditional, amplitude_prior
 from astrogwb.frequency import apply_frequency_mask, frequency_mask
 from astrogwb.gwb import spectral_density, spectral_snr
 from astrogwb.importance.spectral import build_importance_spectrum
@@ -88,10 +84,6 @@ SEED = 42
 #: deviation is ~10%, too coarse to pin the Fisher width; at 1000 it is ~380.
 NUM_WARMUP = 500
 NUM_SAMPLES = 1000
-
-#: Nodes in the H0 quadrature grid the marginalization runs on.
-#: ``quadrature_effective_nodes`` is asserted rather than assumed.
-AMPLITUDE_NUM_NODES = 512
 
 H0_PRIOR = dist.Uniform(20.0, 140.0)
 H0_TRANSFORM = amplitude_H0_transform(FIDUCIALS["H0"])
@@ -279,7 +271,6 @@ def _direct_h0_model(inputs: AnalysisInputs, priors: dict[str, dist.Distribution
 def _marginalized_model(
     inputs: AnalysisInputs,
     priors: dict[str, dist.Distribution],
-    amplitude_grid: jax.Array,
 ):
     """H0 is a ``priors`` site pinned at its fiducial: the spectrum is the template."""
     return handlers.block(
@@ -288,7 +279,6 @@ def _marginalized_model(
                 gwb_amplitude_marginalized_model,
                 spectral_density_fn=inputs.estimator,
                 amplitude_prior=AMPLITUDE_PRIOR,
-                amplitude_grid=amplitude_grid,
                 priors={"H0": H0_PRIOR, **priors},
             ),
             data={"H0": FIDUCIALS["H0"]},
@@ -297,20 +287,16 @@ def _marginalized_model(
     )
 
 
-def _reconstruct_h0(posterior: dict, amplitude_grid: jax.Array) -> dict:
+def _reconstruct_h0(posterior: dict) -> dict:
     """Draw H0 back from the chain's sufficient statistics."""
     conditional = AmplitudeConditional(
         posterior["amplitude_mle"],
         posterior["template_optimal_snr"],
         prior=AMPLITUDE_PRIOR,
-        grid=amplitude_grid,
     )
     # fold_in keeps the reconstruction key distinct from the chain's.
     amplitude = conditional.sample(jax.random.fold_in(jax.random.PRNGKey(SEED), 1))
-    return {
-        "H0": H0_TRANSFORM.inv(amplitude),
-        "quadrature_effective_nodes": conditional.effective_nodes,
-    }
+    return {"H0": H0_TRANSFORM.inv(amplitude)}
 
 
 @pytest.fixture(scope="module")
@@ -322,17 +308,14 @@ def analysis_inputs(mock_catalog_factory) -> AnalysisInputs:
 @pytest.fixture(scope="module")
 def marginalized_result(analysis_inputs: AnalysisInputs) -> MarginalizedResult:
     """Run the marginalized chain once for both tests that inspect it."""
-    amplitude_grid = quadrature_grid(AMPLITUDE_PRIOR, num_nodes=AMPLITUDE_NUM_NODES)
     posterior = _run_nuts(
-        _marginalized_model(
-            analysis_inputs, {"Omega_m": OMEGA_M_PRIOR}, amplitude_grid
-        ),
+        _marginalized_model(analysis_inputs, {"Omega_m": OMEGA_M_PRIOR}),
         model_kwargs=_model_kwargs(analysis_inputs),
         init_values={"Omega_m": FIDUCIALS["Omega_m"]},
     )
     return MarginalizedResult(
         posterior=posterior,
-        reconstructed=_reconstruct_h0(posterior, amplitude_grid),
+        reconstructed=_reconstruct_h0(posterior),
     )
 
 
@@ -408,7 +391,7 @@ def test_amplitude_marginalized_model_reconstructs_h0(
     )
 
     reconstructed = marginalized_result.reconstructed
-    assert set(reconstructed) == {"H0", "quadrature_effective_nodes"}
+    assert set(reconstructed) == {"H0"}
     for values in reconstructed.values():
         assert values.shape == (1, NUM_SAMPLES)
 
@@ -417,11 +400,6 @@ def test_amplitude_marginalized_model_reconstructs_h0(
     np.testing.assert_allclose(
         np.std(h0), FIDUCIALS["H0"] / inputs.snr, rtol=0.15, atol=0.0
     )
-
-    # A health check on the amplitude grid: the conditional is ~1/rho wide over
-    # a 120-wide prior, so a grid too coarse to resolve it collapses to a
-    # handful of nodes.
-    assert np.all(np.asarray(reconstructed["quadrature_effective_nodes"]) > 10.0)
 
 
 def test_marginalized_and_direct_h0_posteriors_agree(

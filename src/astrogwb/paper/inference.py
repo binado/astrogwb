@@ -51,7 +51,7 @@ from astrogwb.detector import (
     load_sensitivity_map,
 )
 from astrogwb.detector import effective_psd as compute_effective_psd
-from astrogwb.distributions.amplitude import amplitude_prior, quadrature_grid
+from astrogwb.distributions.amplitude import amplitude_prior
 from astrogwb.frequency import frequency_mask as make_frequency_mask
 from astrogwb.gwb import spectral_density
 from astrogwb.importance.spectral import LogWeightsFn, build_importance_spectrum
@@ -159,8 +159,7 @@ class AmplitudeMarginalization(NamedTuple):
 
     App-side plumbing, not a core type: it holds *live* objects -- the A-space
     prior and the transform that built it -- so there is nothing derived in it
-    that could go stale against the config it came from. The one array,
-    ``grid``, is a quadrature scheme rather than a tabulation of the density.
+    that could go stale against the config it came from.
     """
 
     parameter: str
@@ -171,9 +170,6 @@ class AmplitudeMarginalization(NamedTuple):
 
     prior: Distribution
     """Amplitude-space prior :math:`T_{\\#}\\pi_\\varphi`; also the conditional's support."""
-
-    grid: jax.Array
-    """Quadrature nodes the marginalization integral is evaluated on."""
 
 
 def target_population(config: RunConfig) -> Population:
@@ -474,18 +470,12 @@ def build_model(
             parameter=parameter,
             transform=transform,
             prior=prior,
-            grid=quadrature_grid(
-                prior,
-                num_nodes=analysis.amplitude_num_nodes,
-                span_sigma=analysis.amplitude_prior_span_sigma,
-            ),
         )
         model = _fix_model_params(
             partial(
                 gwb_amplitude_marginalized_model,
                 spectral_density_fn=spectral_density_fn,
                 amplitude_prior=marginalization.prior,
-                amplitude_grid=marginalization.grid,
                 priors=priors,
             ),
             config.fixed_params,

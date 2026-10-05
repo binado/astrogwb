@@ -5,7 +5,6 @@
 network = "ET-2L-aligned-CE-Hanford"
 likelihood = "amplitude_marginalized"
 amplitude_parameter = "H0"
-amplitude_num_nodes = 1024
 
 # The guarded (eps = 0.1) proposal: sampling the rate shape moves the posterior
 # away from the proposal, and a uniform-in-redshift component mixed into the

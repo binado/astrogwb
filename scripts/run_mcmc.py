@@ -338,18 +338,11 @@ def save(
             posterior_samples["amplitude_mle"],
             posterior_samples["template_optimal_snr"],
             prior=marginalization.prior,
-            grid=marginalization.grid,
         )
         amplitude = conditional.sample(
             jax.random.fold_in(jax.random.PRNGKey(config.sampler.seed), 1)
         )
-        # `quadrature_effective_nodes` keeps its name even though the quadrature
-        # object is gone: it is read back from the posterior group, so renaming
-        # it would break existing NetCDFs.
-        draws = {
-            amplitude_parameter: marginalization.transform.inv(amplitude),
-            "quadrature_effective_nodes": conditional.effective_nodes,
-        }
+        draws = {amplitude_parameter: marginalization.transform.inv(amplitude)}
 
         # `az.from_numpyro` returns an xarray DataTree, whose __setitem__ does
         # not accept a Dataset-style `(dims, values)` tuple: it would store the
@@ -357,17 +350,6 @@ def save(
         for name, values in draws.items():
             idata.posterior[name] = xr.DataArray(
                 np.asarray(values), dims=("chain", "draw")
-            )
-
-        effective_nodes = draws["quadrature_effective_nodes"]
-
-        min_effective_nodes = float(np.min(effective_nodes))
-        if min_effective_nodes < 30:
-            logger.warning(
-                "quadrature_effective_nodes min=%.1f is below 30; the amplitude "
-                "grid may not resolve the conditional posterior. Consider "
-                "raising analysis.amplitude_num_nodes.",
-                min_effective_nodes,
             )
 
     idata.to_netcdf(nc_path)
