@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from numpy.typing import ArrayLike
 
-from astrogwb.metadata import PriorSpec
+from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import PopulationMetadata
 from astrogwb.simulators.core import Arrays, split_seed
 from astrogwb.simulators.polarization_power import (
@@ -59,7 +59,7 @@ SPECTRA = SpectraMetadata(
     population=POPULATION,
     hyperparameters={
         **{k: v for k, v in FIDUCIALS.items() if k != "local_merger_rate"},
-        "local_merger_rate": PriorSpec(
+        "local_merger_rate": DistributionConfig(
             dist="Uniform", kwargs={"low": 700.0, "high": 800.0}
         ),
     },

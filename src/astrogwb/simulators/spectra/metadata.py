@@ -7,7 +7,7 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb import __version__
-from astrogwb.metadata import PriorSpec
+from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations.metadata import PopulationMetadata, widen_model_kwargs
 from astrogwb.simulators.core.keys import content_key
 from astrogwb.waveform.metadata import WaveformMetadata
@@ -17,7 +17,7 @@ __all__ = ["Hyperparameter", "SpectraMetadata"]
 #: One hyperparameter's declaration: the value it is fixed at, or the prior it
 #: is sampled from once per draw. Which one is decided by the type alone, so a
 #: parameter cannot be both fixed and sampled.
-type Hyperparameter = float | PriorSpec
+type Hyperparameter = float | DistributionConfig
 
 
 class SpectraMetadata(BaseModel):
@@ -28,7 +28,7 @@ class SpectraMetadata(BaseModel):
     are cached under. Nothing outside it changes what the draws contain.
 
     ``hyperparameters`` holds, per name, either a number -- every draw is made
-    at that value -- or a :class:`~astrogwb.metadata.PriorSpec` it is drawn
+    at that value -- or a :class:`~astrogwb.distributions.config.DistributionConfig` it is drawn
     from, independently per draw. Draws at fixed hyperparameters are the
     all-numbers case. Priors are data rather than code, so editing a bound
     re-keys the artifact without a version bump.
@@ -74,16 +74,16 @@ class SpectraMetadata(BaseModel):
         return {
             name: float(value)
             for name, value in self.hyperparameters.items()
-            if not isinstance(value, PriorSpec)
+            if not isinstance(value, DistributionConfig)
         }
 
     @property
-    def sampled(self) -> dict[str, PriorSpec]:
+    def sampled(self) -> dict[str, DistributionConfig]:
         """The hyperparameters drawn once per draw, with their priors."""
         return {
             name: value
             for name, value in self.hyperparameters.items()
-            if isinstance(value, PriorSpec)
+            if isinstance(value, DistributionConfig)
         }
 
     def key(self) -> str:

@@ -9,6 +9,7 @@
 - :mod:`astrogwb.distributions.orientation` — isotropic polar-angle densities
 - :mod:`astrogwb.distributions.amplitude` — conditional posterior of a
   marginalized amplitude parameter
+- :mod:`astrogwb.distributions.config` — serializable distribution configurations
 """
 
 from astrogwb.distributions.delay import PowerLawDelayDistribution
