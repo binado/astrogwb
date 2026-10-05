@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
+import numpy as np
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -37,7 +38,7 @@ from astrogwb.paper.config.detectors import DetectorRegistry
 from astrogwb.paper.config.runs import CATALOG_ROLES
 from astrogwb.paper.utils import deep_merge
 from astrogwb.populations import PopulationMetadata
-from astrogwb.simulators.polarization_power import CatalogMetadata
+from astrogwb.simulators.polarization_power import CatalogMetadata, polarization_power
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
@@ -194,7 +195,7 @@ class AnalysisConfig(BaseModel):
     sampled_params: tuple[str, ...] = ()
     #: The population the sampled hyperparameters describe: the target the
     #: importance weights are evaluated at. The same record a catalog carries,
-    #: but evaluated rather than drawn from, so its seed is unused. Its
+    #: but evaluated rather than drawn from. Its
     #: ``model_kwargs`` carry the redshift window and grid, which is the one
     #: statement of them: the same three numbers build the target callables
     #: *and* define the grid its spectral integral runs on.
@@ -215,10 +216,23 @@ class AnalysisConfig(BaseModel):
     injection: CatalogMetadata
     #: The catalog the importance weights reweight.
     proposal: CatalogMetadata
+    #: The seed each catalog role is drawn at. A seed picks a realization of
+    #: the role's density, so it is a simulator input beside the metadata, not
+    #: a field of it. Must name every catalog role.
+    seeds: dict[str, Annotated[int, Field(ge=0)]]
     likelihood: Literal["default", "amplitude_marginalized"] = "default"
     amplitude_parameter: AmplitudeParameter | None = None
     amplitude_num_nodes: Annotated[int, Field(gt=1)] = 1024
     amplitude_prior_span_sigma: Annotated[float, Field(gt=0.0)] = 10.0
+
+    @model_validator(mode="after")
+    def _validate_seeds(self) -> AnalysisConfig:
+        if set(self.seeds) != set(CATALOG_ROLES):
+            raise ValueError(
+                f"analysis.seeds must name exactly {CATALOG_ROLES}, got "
+                f"{tuple(self.seeds)}"
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_target_grid(self) -> AnalysisConfig:
@@ -423,8 +437,11 @@ class RunConfig(BaseModel):
             if k not in self.analysis.sampled_params
         }
 
-    def catalog_request(self, role: str) -> CatalogMetadata:
+    def catalog_request(self, role: str) -> tuple[CatalogMetadata, np.uint64]:
         """The catalog one role of this run samples against, by role name.
+
+        Returns the record and the seed it is drawn at -- the two arguments of
+        :func:`~astrogwb.simulators.polarization_power.polarization_power`.
 
         ``analysis.injection`` or ``analysis.proposal``: each is already a
         complete record, resolved by the merge that the ``Snakefile`` keys its
@@ -435,7 +452,12 @@ class RunConfig(BaseModel):
             raise ValueError(
                 f"unknown catalog role {role!r}; roles are {CATALOG_ROLES}"
             )
-        return getattr(self.analysis, role)
+        return getattr(self.analysis, role), np.uint64(self.analysis.seeds[role])
+
+    def catalog_stem(self, role: str) -> str:
+        """The file stem one role's catalog is cached under."""
+        metadata, seed = self.catalog_request(role)
+        return polarization_power.path({"seed": seed}, metadata, "").stem
 
     def save(self, path: Path) -> None:
         """Write the validated run config as JSON."""

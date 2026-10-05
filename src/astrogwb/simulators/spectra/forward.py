@@ -50,14 +50,14 @@ def _sum_polarization_power(
     sources: Mapping[str, jax.Array],
     event_mask: ArrayLike,
     *,
-    batch_size: int,
+    chunk_size: int,
 ) -> jax.Array:
     """Sum frequency-first polarization power over sources, chunk by chunk.
 
-    Full batches of ``batch_size`` are reduced with :func:`jax.lax.scan`, so
+    Full batches of ``chunk_size`` are reduced with :func:`jax.lax.scan`, so
     the compiled body is one batch regardless of how many chunks there are; a
     static remainder is a separate ``generate_batch``. Peak waveform memory is
-    ``(F, batch_size)`` rather than ``(F, max_events)``.
+    ``(F, chunk_size)`` rather than ``(F, max_events)``.
 
     ``event_mask`` is sliced alongside each source batch, so inactive capacity
     slots do not contribute to the sum. The zero carry comes from
@@ -66,18 +66,18 @@ def _sum_polarization_power(
     """
     n_events = array_dict_shape(sources)[0]
     event_mask = jnp.asarray(event_mask)
-    n_full, remainder = divmod(n_events, batch_size)
+    n_full, remainder = divmod(n_events, chunk_size)
     total = jnp.zeros(np.shape(generator.frequencies)[0], dtype=jnp.float64)
 
     # A Python branch, not a traced one: n_full is static, and lax.scan over
     # zero chunks would still trace the waveform body it never runs.
     if n_full:
         chunks = {
-            name: values[: n_full * batch_size].reshape(n_full, batch_size)
+            name: values[: n_full * chunk_size].reshape(n_full, chunk_size)
             for name, values in sources.items()
         }
 
-        chunk_masks = event_mask[: n_full * batch_size].reshape(n_full, batch_size)
+        chunk_masks = event_mask[: n_full * chunk_size].reshape(n_full, chunk_size)
 
         def accumulate(
             carry: jax.Array,
@@ -92,8 +92,8 @@ def _sum_polarization_power(
             (chunks, chunk_masks),
         )
     if remainder:
-        tail = {name: values[n_full * batch_size :] for name, values in sources.items()}
-        tail_mask = event_mask[n_full * batch_size :]
+        tail = {name: values[n_full * chunk_size :] for name, values in sources.items()}
+        tail_mask = event_mask[n_full * chunk_size :]
         total = total + _batch_power_sum(generator, tail, tail_mask)
     return total
 

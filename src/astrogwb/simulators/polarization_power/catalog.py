@@ -8,13 +8,15 @@ left ``xi_0``, ``xi_n`` and ``local_merger_rate`` checked by nothing at all.
 
 A catalog now records the complete :class:`~astrogwb.simulators.polarization_power.CatalogMetadata`
 it was generated from: the waveform settings, the population declaration -- the
-registered population name, its construction kwargs and seed, carried as one
+registered population name and its construction kwargs, carried as one
 :class:`~astrogwb.populations.PopulationMetadata` -- the hyperparameters it was
 drawn at, the draw size and the ``astrogwb`` version. That is enough to
 reconstruct the exact map from hyperparameters to source density, so the run
 config no longer restates any of it and nothing has to be cross-checked; and
-its :meth:`~astrogwb.simulators.polarization_power.CatalogMetadata.key` is the file name
-:func:`astrogwb.simulators.core.simulate` caches the catalog under.
+its :meth:`~astrogwb.simulators.polarization_power.CatalogMetadata.key` names
+the cache file with the seed input
+(:func:`~astrogwb.simulators.polarization_power.polarization_power`). The seed
+picks the realization and is not part of the record.
 
 Immutability is a contract, not a language guarantee. The dataclass is frozen
 and transformations such as
@@ -27,18 +29,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from pathlib import Path
 from typing import Any, Self
 
-import jax
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import NDArray
 
 from astrogwb.frequency import bin_widths, validate_frequency_grid
 from astrogwb.populations import Population
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
-from astrogwb.waveform import PolarizationPowerGenerator
 from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = ["REDSHIFT_SITE", "PolarizationPowerCatalog"]
@@ -132,56 +131,19 @@ class PolarizationPowerCatalog:
         object.__setattr__(self, "source_parameters", parameters)
 
     @classmethod
-    def from_generator(
-        cls,
-        source_parameters: Mapping[str, ArrayLike],
-        *,
-        generator: PolarizationPowerGenerator,
-        population: PopulationMetadata,
-        fiducials: Mapping[str, float],
-    ) -> Self:
-        """Generate polarization power and return a validated catalog.
+    def from_arrays(cls, outputs: Mapping[str, Any], metadata: CatalogMetadata) -> Self:
+        """Wrap the arrays :func:`~astrogwb.simulators.polarization_power.polarization_power`
+        returns, and the record they were drawn from.
 
-        The population record is supplied rather than inferred: the caller ran
-        the model to draw ``source_parameters``, so it is the only place that
-        knows which population and settings produced them. It arrives as one
-        :class:`~astrogwb.populations.PopulationMetadata` rather than as its four
-        parts, so a caller cannot pair a model name with another draw's seed or
-        density sites -- the record is the unit that has to stay consistent.
-
-        ``fiducials`` stays separate from it: the hyperparameters a draw was
-        made *at* describe the samples, while the population record describes
-        the density that produced them. Both are folded into the catalog's
-        :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` here, with the generator's
-        waveform settings, the sample count and the running version.
-
-        Frequencies come from the generator rather than from metadata: that is
-        the axis the backend actually produces.
-
-        Generation runs under :func:`jax.jit`. Generators are deliberately
-        jit-free so they compose inside NumPyro models, which inference jits
-        anyway -- but this constructor is the opposite case. It is the eager,
-        whole-catalog entry point (it materializes NumPy immediately, so it
-        can never run under a trace), and at production sizes an unfused graph
-        would hold every waveform intermediate at once. The jit belongs here,
-        at the call site, rather than hidden inside the generator.
+        The metadata is supplied rather than inferred: the caller ran the node
+        from it, so it is the only place that knows what drew these arrays.
+        Construction still checks that the two agree on the sample count.
         """
-        parameters = {
-            name: np.asarray(values) for name, values in source_parameters.items()
-        }
-        frequencies = generator.frequencies
-        power = jax.jit(generator.generate_batch)(source_parameters)
-        power = np.asarray(power)
         return cls(
-            source_parameters=parameters,
-            polarization_power=power,
-            frequencies=np.asarray(frequencies),
-            _metadata=CatalogMetadata(
-                waveform=generator.metadata,
-                population=population,
-                fiducials={name: float(value) for name, value in fiducials.items()},
-                num_samples=int(power.shape[-1]),
-            ),
+            source_parameters=outputs["source_parameters"],
+            polarization_power=outputs["polarization_power"],
+            frequencies=outputs["frequencies"],
+            _metadata=metadata,
         )
 
     # ----------------------------------------------------------------- #
@@ -201,11 +163,6 @@ class PolarizationPowerCatalog:
     def waveform_metadata(self) -> WaveformMetadata:
         """The waveform settings that produced this catalog."""
         return self._metadata.waveform
-
-    @property
-    def seed(self) -> int:
-        """The seed the population draw used."""
-        return self.population.seed
 
     @property
     def population_model_name(self) -> str:
@@ -327,34 +284,3 @@ class PolarizationPowerCatalog:
                 }
             ),
         )
-
-    # ----------------------------------------------------------------- #
-    # Persistence
-    # ----------------------------------------------------------------- #
-    @classmethod
-    def load(cls, path: str | Path) -> Self:
-        """Read a catalog file, reconstructing and validating its population record.
-
-        Loading calls :meth:`~astrogwb.populations.PopulationMetadata.check_registered`
-        to verify the recorded population name is still registered; it does not
-        re-execute the population or compare derived columns against the stored
-        arrays. A catalog whose columns have drifted from its declared
-        population is not caught here.
-
-        Files written in older catalog formats are rejected; there is no
-        compatibility reader.
-        """
-        from astrogwb.simulators.core import _io
-
-        return _io.load_polarization_power_catalog(cls, path)
-
-    def save(self, path: str | Path, *, compression: str | None = None) -> None:
-        """Write source arrays, power, waveform metadata, and the population record.
-
-        The population travels as ``(population name, construction kwargs,
-        generating parameters, density sites)``. Neither this nor :meth:`load`
-        serializes a Python callable.
-        """
-        from astrogwb.simulators.core import _io
-
-        _io.save_polarization_power_catalog(self, path, compression=compression)

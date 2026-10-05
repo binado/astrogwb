@@ -1,116 +1,136 @@
-"""Turn a :class:`~astrogwb.simulators.spectra.SpectraMetadata` into spectral-density draws.
+"""The cached node that draws spectral densities from the forward model.
 
-:class:`SpectrumGenerator` is the generator half of
-:func:`astrogwb.simulators.core.simulate`: it builds the live population, waveform
-generator and priors a record names, runs
-:func:`~astrogwb.inference.draw_spectral_density`, and stamps the result with
-the record. It holds only what does not change the draws -- the waveform batch
-size -- so two generators with different settings answer the same metadata
-with the same file.
+:func:`spectra` builds the live population, waveform generator and priors a
+:class:`~astrogwb.simulators.spectra.SpectraMetadata` names and runs
+:func:`~astrogwb.simulators.spectra.draw_spectral_density` once per seed. One
+seed is one draw, hyperparameters and sources alike, so a draw depends on its
+own seed and on nothing else in the call: the draw at seed ``s`` is the same
+whether it was asked for alone or among a thousand.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any
 
-import jax
+import numpy as np
 
 from astrogwb import __version__
-from astrogwb.simulators.spectra.catalog import SpectralDensityCatalog
-from astrogwb.simulators.spectra.draws import draw_spectral_density
-from astrogwb.simulators.spectra.forward import validate_source_model
+from astrogwb.simulators.core import Arrays, Tree, cached
 from astrogwb.simulators.spectra.metadata import SpectraMetadata
 
-__all__ = ["SpectrumGenerator"]
+__all__ = ["spectra"]
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
-class SpectrumGenerator:
-    """Draw the spectra a :class:`~astrogwb.simulators.spectra.SpectraMetadata` describes.
+def _validate_seeds(inputs: Tree) -> np.ndarray[Any, np.dtype[np.uint64]]:
+    seeds = np.asarray(inputs["seeds"])
+    if seeds.ndim != 1 or seeds.size == 0 or seeds.dtype != np.uint64:
+        raise TypeError(
+            "inputs['seeds'] must be a non-empty 1-d uint64 array, e.g. "
+            f"split_seed(41, 8); got dtype={seeds.dtype} shape={seeds.shape}"
+        )
+    if np.unique(seeds).size != seeds.size:
+        raise ValueError(
+            "inputs['seeds'] must not repeat: a repeat is a duplicate draw"
+        )
+    return seeds
 
-    ``batch_size`` chunks the waveform reduction -- peak waveform memory is
-    ``(F, batch_size)`` per draw -- and consumes no randomness, which is why it
-    lives here and not in the metadata.
+
+@cached
+def spectra(
+    inputs: Tree, metadata: SpectraMetadata, *, chunk_size: int = 128
+) -> Arrays:
+    """Draw one spectrum per seed in ``inputs["seeds"]``.
+
+    ``chunk_size`` chunks the waveform reduction -- peak waveform memory is
+    ``(F, chunk_size)`` per draw -- and consumes no randomness, which is why it
+    is a setting and not metadata. Returns ``frequencies`` ``(F,)``, and
+    draw-first ``spectral_density`` ``(D, F)``, ``n_events`` ``(D,)``,
+    ``total_merger_rate`` ``(D,)`` and one ``hyperparameters`` column ``(D,)``
+    per declared hyperparameter.
+
+    Values are checked once, eagerly, before the draws: generation is
+    trace-safe and trusts its inputs, so a population carrying a degree of
+    freedom the approximant cannot represent would otherwise be silently
+    dropped.
     """
+    import jax
 
-    #: What this generator produces, and what :func:`astrogwb.simulators.core.simulate`
-    #: loads a cache hit as.
-    artifact: ClassVar[type[SpectralDensityCatalog]] = SpectralDensityCatalog
+    # x64 before any array: the rate evaluation and the draws must not depend
+    # on ripplegw's import turning it on as a side effect.
+    jax.config.update("jax_enable_x64", True)
 
-    batch_size: int = 128
+    from astrogwb.simulators._keys import seed_key
+    from astrogwb.simulators.spectra.draws import draw_spectral_density
+    from astrogwb.simulators.spectra.forward import validate_source_model
 
-    def __post_init__(self) -> None:
-        if self.batch_size <= 0:
-            raise ValueError("batch_size must be positive")
-
-    def __call__(self, metadata: SpectraMetadata) -> SpectralDensityCatalog:
-        """Draw ``metadata``'s spectra and record them against it.
-
-        Values are checked once, eagerly, before the draw: generation is
-        trace-safe and trusts its inputs, so a population carrying a degree of
-        freedom the approximant cannot represent would otherwise be silently
-        dropped.
-        """
-        # x64 before any array: the rate evaluation and the draws must not
-        # depend on ripplegw's import turning it on as a side effect.
-        jax.config.update("jax_enable_x64", True)
-
-        if metadata.version != __version__:
-            raise ValueError(
-                f"metadata is for astrogwb {metadata.version}, but {__version__} "
-                "is installed; draws are generated by the code their key names"
-            )
-
-        population = metadata.population.build()
-        if population.merger_rate_fn is None:
-            raise ValueError(
-                f"population {metadata.population.model_name!r} declares no "
-                "physical merger rate; spectrum generation requires an "
-                "observer-frame rate in both count modes"
-            )
-        generator = metadata.waveform.build()
-        priors = {name: spec.build() for name, spec in metadata.sampled.items()}
-
-        rng_key = jax.random.key(metadata.population.seed)
-        # One eager source at a representative point: the fixed values, and
-        # each prior's mean for the sampled ones.
-        validate_source_model(
-            {
-                **metadata.fixed,
-                **{name: float(prior.mean) for name, prior in priors.items()},
-            },
-            source_model=population.source_model,
-            generator=generator,
-            rng_key=rng_key,
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    if metadata.version != __version__:
+        raise ValueError(
+            f"metadata is for astrogwb {metadata.version}, but {__version__} "
+            "is installed; draws are generated by the code their key names"
         )
+    seeds = _validate_seeds(inputs)
 
-        logger.info(
-            "Spectra %s: count=%s num_events=%s population=%s seed=%d draws=%d "
-            "sampled=%s approximant=%s",
-            metadata.key(),
-            metadata.count,
-            metadata.num_events,
-            metadata.population.model_name,
-            metadata.population.seed,
-            metadata.num_draws,
-            sorted(priors),
-            metadata.waveform.approximant,
+    population = metadata.population.build()
+    if population.merger_rate_fn is None:
+        raise ValueError(
+            f"population {metadata.population.model_name!r} declares no "
+            "physical merger rate; spectrum generation requires an "
+            "observer-frame rate in both count modes"
         )
-        draws = draw_spectral_density(
+    generator = metadata.waveform.build()
+    priors = {name: spec.build() for name, spec in metadata.sampled.items()}
+
+    # One eager source at a representative point: the fixed values, and each
+    # prior's mean for the sampled ones.
+    validate_source_model(
+        {
+            **metadata.fixed,
+            **{name: float(prior.mean) for name, prior in priors.items()},
+        },
+        source_model=population.source_model,
+        generator=generator,
+        rng_key=seed_key(seeds[0]),
+    )
+
+    logger.info(
+        "Spectra %s: count=%s num_events=%s population=%s draws=%d sampled=%s "
+        "approximant=%s",
+        metadata.key(),
+        metadata.count,
+        metadata.num_events,
+        metadata.population.model_name,
+        seeds.size,
+        sorted(priors),
+        metadata.waveform.approximant,
+    )
+    draws = [
+        draw_spectral_density(
             source_model=population.source_model,
             merger_rate_fn=population.merger_rate_fn,
             generator=generator,
             hyperparameters={**metadata.fixed, **priors},
             observation_time=metadata.observation_time,
-            num_draws=metadata.num_draws,
-            rng_key=rng_key,
-            batch_size=self.batch_size,
+            num_draws=1,
+            rng_key=seed_key(seed),
+            chunk_size=chunk_size,
             count=metadata.count,
             num_events=metadata.num_events,
             n_max_sigma=metadata.n_max_sigma,
         )
-        return self.artifact.from_draws(draws, metadata)
+        for seed in seeds
+    ]
+    return {
+        "frequencies": draws[0].frequencies,
+        "spectral_density": np.concatenate([d.spectral_density for d in draws]),
+        "n_events": np.concatenate([d.n_events for d in draws]),
+        "total_merger_rate": np.concatenate([d.total_merger_rate for d in draws]),
+        "hyperparameters": {
+            name: np.concatenate([d.hyperparameters[name] for d in draws])
+            for name in draws[0].hyperparameters
+        },
+    }

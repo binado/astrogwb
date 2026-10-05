@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 from typing import Any, Protocol
 
-__all__ = ["CATALOG_KEY_LENGTH", "Keyed", "artifact_path", "content_key"]
+__all__ = ["CATALOG_KEY_LENGTH", "Keyed", "content_key"]
 
-#: Hex characters of the SHA-256 digest kept as a catalog key. 64 bits is far
-#: beyond collision range for a cache of tens of files, and short enough to
-#: read in a path.
+#: Hex characters of the SHA-256 digest kept as a key. 64 bits is far beyond
+#: collision range for a cache of tens of files, and short enough to read in a
+#: path.
 CATALOG_KEY_LENGTH = 16
 
 
@@ -37,13 +36,3 @@ class Keyed(Protocol):
     def key(self) -> str: ...
 
     def model_dump_json(self) -> str: ...
-
-
-def artifact_path(metadata: Keyed, cache_dir: str | Path) -> Path:
-    """Where ``metadata``'s artifact lives in ``cache_dir``: ``<cache_dir>/<key>.h5``.
-
-    Here rather than beside :func:`~astrogwb.simulators.core.cache.simulate` so
-    that code which only names files -- the ``Snakefile`` building its DAG --
-    reaches it without importing JAX.
-    """
-    return Path(cache_dir) / f"{metadata.key()}.h5"

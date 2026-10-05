@@ -170,20 +170,27 @@ def mock_catalog(
     generator: AnalyticInspiralGenerator,
 ) -> PolarizationPowerCatalog:
     """Wrap a mock draw in a catalog carrying the population that produced it."""
-    return PolarizationPowerCatalog.from_generator(
-        source_parameters,
-        generator=generator,
-        population=PopulationMetadata(
-            model_name="bns_md_cosmological",
-            model_kwargs={
-                "minimum_redshift": Z_MIN,
-                "maximum_redshift": Z_MAX,
-                "n_grid": N_GRID,
-                "sample_inclination": False,
-            },
-            seed=MOCK_POPULATION_SEED,
+    power = np.asarray(jax.jit(generator.generate_batch)(source_parameters))
+    return PolarizationPowerCatalog(
+        source_parameters={
+            name: np.asarray(values) for name, values in source_parameters.items()
+        },
+        polarization_power=power,
+        frequencies=np.asarray(generator.frequencies),
+        _metadata=CatalogMetadata(
+            waveform=generator.metadata,
+            population=PopulationMetadata(
+                model_name="bns_md_cosmological",
+                model_kwargs={
+                    "minimum_redshift": Z_MIN,
+                    "maximum_redshift": Z_MAX,
+                    "n_grid": N_GRID,
+                    "sample_inclination": False,
+                },
+            ),
+            fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
+            num_samples=int(power.shape[-1]),
         ),
-        fiducials=POPULATION_PARAMS,
     )
 
 
@@ -342,7 +349,6 @@ def build_synthetic_importance(
                     "n_grid": N_GRID,
                     "sample_inclination": False,
                 },
-                seed=MOCK_POPULATION_SEED,
             ),
             fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
             num_samples=int(np.shape(polarization_power)[1]),

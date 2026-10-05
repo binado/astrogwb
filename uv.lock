@@ -207,7 +207,7 @@ xarray = [
 
 [[package]]
 name = "astrogwb"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "gwmock-noise" },
@@ -837,7 +837,7 @@ wheels = [
 
 [[package]]
 name = "corner"
-version = "2.2.4.dev32+gd9c1219df"
+version = "2.3.0rc1"
 source = { git = "https://github.com/dfm/corner.py?rev=d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4#d9c1219dfbe6cfe02b3bfd8768428e5e7c88b3f4" }
 dependencies = [
     { name = "matplotlib" },

@@ -38,7 +38,7 @@
 # floor.
 #
 # **This notebook needs no external data**; it names a registered population
-# model and caches the catalog it builds to `notebooks/convergence_catalog.h5`
+# model and caches the catalogs it builds under `notebooks/convergence_catalogs/`
 # (gitignored).
 
 # %% [markdown]
@@ -81,12 +81,14 @@ from astrogwb.paper.config import (
     detector_registry,
     fiducials,
     population_metadata,
-    population_model,
 )
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
-from astrogwb.populations.evaluation import sample_sources
-from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
-from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
+from astrogwb.simulators.polarization_power import (
+    CatalogMetadata,
+    PolarizationPowerCatalog,
+    polarization_power,
+)
+from astrogwb.waveform import WaveformMetadata
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces
 # matplotlib's registered rectilinear axes with its own subclass on import.
@@ -185,17 +187,16 @@ H0_SCAN = np.linspace(60.0, 76.0, 17 if SMOKE else 33)
 #: The notebook may be executed from the repository root
 #: (`just test-notebooks`) or from its own directory (Jupyter).
 NOTEBOOK_DIR = Path("notebooks") if Path("notebooks").is_dir() else Path()
-SNR_CATALOG_PATH = NOTEBOOK_DIR / (
-    "convergence_catalog_smoke.h5" if SMOKE else "convergence_catalog.h5"
-)
-OMEGA_CATALOG_PATH = NOTEBOOK_DIR / (
-    "convergence_omega_catalog_smoke.h5" if SMOKE else "convergence_omega_catalog.h5"
+#: The catalog cache: files are named by metadata and seed, so the two grids
+#: below cannot be mistaken for one another and a stale file is never served.
+CATALOG_DIR = NOTEBOOK_DIR / (
+    "convergence_catalogs_smoke" if SMOKE else "convergence_catalogs"
 )
 
 # %% [markdown]
 # ## The source population
 #
-# One declaration, used twice: `sample_sources` samples from it, and the
+# One declaration, used twice: the catalog node samples from it, and the
 # importance weights below evaluate the *same* model's density at the stored
 # samples. That is what makes this catalog exactly its own proposal
 # ($\log w \equiv 0$ at the fiducials) rather than approximately so.
@@ -232,15 +233,7 @@ POPULATION_KWARGS: dict[str, float | int | bool] = {
     "maximum_redshift": Z_MAX,
     "n_grid": 4096,
 }
-POPULATION = population_metadata(seed=POPULATION_SEED, **POPULATION_KWARGS)
-POPULATION_MODEL = POPULATION.model_name
-POPULATION_MODEL_KWARGS: dict[str, float | int | bool] = dict(POPULATION.model_kwargs)
-
-
-def population_model_fn():
-    """The generating source model, with its construction settings bound."""
-    return population_model(**POPULATION_KWARGS).source_model
-
+POPULATION = population_metadata(**POPULATION_KWARGS)
 
 TARGET_KWARGS: dict[str, float | int | bool] = {
     "minimum_redshift": Z_MIN,
@@ -262,8 +255,8 @@ def make_redshift_grid() -> jax.Array:
 # %% [markdown]
 # ## Building or loading the catalogs
 #
-# Two catalogs, drawn from one population. `build_catalog` re-runs
-# `sample_sources` at the same seed for each, so the two files hold the *same*
+# Two catalogs, drawn from one population. `load_or_build_catalog` draws the
+# population at the same seed for each, so the two files hold the *same*
 # sources reduced onto different frequency grids — the wide 1 Hz grid the
 # $\Omega_{\rm gw}$ comparison needs, and the fine 0.125 Hz grid everything from
 # the SNR section on runs against.
@@ -277,109 +270,50 @@ def make_redshift_grid() -> jax.Array:
 # is what makes the catalog exactly its own importance proposal
 # ($\log w \equiv 0$) rather than approximately so.
 #
-# A cached file is reused only when its recorded population and waveform grid
-# still describe the configuration cell. That guard matters more here than in
-# `mcmc_example_models.py`: `FINE_DF` *is* the subject, so silently reusing a
-# catalog built at a different resolution would invalidate every result below
-# while looking perfectly healthy. The `grid` attribute records which of the two
-# a file holds.
+# A cached file is reused only when its path -- which names the population,
+# waveform grid, fiducials, size, version and seed -- matches the request. That
+# guard matters more here than in `mcmc_example_models.py`: `FINE_DF` *is* the
+# subject, so silently reusing a catalog built at a different resolution would
+# invalidate every result below while looking perfectly healthy.
 #
 # Each cell below ends by displaying its dataset: the rendering carries the
 # shape and the grid, the attributes the rest of the provenance -- population,
-# seed, source count, package version, and the total merger rate, which
-# `unpack` derives and stamps because the cache does not store it.
+# source count, package version, and the total merger rate, which `unpack`
+# derives because the cache does not store it.
 
 
 # %%
-def build_catalog(*, df: float, f_max: float, grid: str) -> PolarizationPowerCatalog:
-    """Draw the population and reduce it onto the `[F_MIN, f_max]` grid.
+def load_or_build_catalog(*, df: float, f_max: float) -> PolarizationPowerCatalog:
+    """Serve the catalog on the `[F_MIN, f_max]` grid, drawing it on a miss.
 
-    `grid` is a label carried into the population provenance, and from there
-    into the file's attributes, so the two cache files below are
-    self-describing rather than distinguished by filename.
+    Both grids are the same `POPULATION_SEED` draw, so they hold the *same*
+    sources reduced onto different frequency grids. The cache path is a
+    function of the metadata -- grid, population, fiducials, size, version --
+    and the seed, so a file built at another resolution is a different file,
+    not a stale hit.
 
     The derived columns -- distances, detector-frame masses -- come from the
     population itself, in one batched pass, so they are bit-identical to what
     every later density evaluation recomputes from the stored samples.
     """
-    parameters = {
-        name: np.asarray(values, dtype=np.float64)
-        for name, values in sample_sources(
-            population_model_fn(),
-            jax.random.PRNGKey(POPULATION_SEED),
-            FIDUCIALS,
-            num_samples=NUM_SOURCES,
-        ).items()
-    }
-
-    return PolarizationPowerCatalog.from_generator(
-        parameters,
-        generator=AnalyticInspiralGenerator(
-            WaveformMetadata(
-                alpha=ISCO_ALPHA,
-                approximant="AnalyticInspiral",
-                minimum_frequency=F_MIN,
-                maximum_frequency=f_max,
-                reference_frequency=F_MIN,
-                sampling_frequency=2.0 * f_max,
-                frequency_resolution=df,
-            )
+    metadata = CatalogMetadata(
+        waveform=WaveformMetadata(
+            alpha=ISCO_ALPHA,
+            approximant="AnalyticInspiral",
+            minimum_frequency=F_MIN,
+            maximum_frequency=f_max,
+            reference_frequency=F_MIN,
+            sampling_frequency=2.0 * f_max,
+            frequency_resolution=df,
         ),
         population=POPULATION,
         fiducials=FIDUCIALS,
+        num_samples=NUM_SOURCES,
     )
-
-
-def catalog_matches_configuration(
-    catalog: PolarizationPowerCatalog, *, df: float, f_max: float
-) -> bool:
-    """Does a cached catalog still describe the configuration cell?
-
-    The population half of the question no longer needs asking: the file
-    records its own model, settings and hyperparameters, and
-    `PolarizationPowerCatalog.load`
-    refuses a file whose columns no longer match them. What is left is the
-    waveform grid and the draw size, which the population record does not
-    cover.
-    """
-    waveform = catalog.waveform_metadata
-    return (
-        waveform.frequency_resolution == df
-        and waveform.minimum_frequency == F_MIN
-        and waveform.maximum_frequency == f_max
-        and catalog.num_samples == NUM_SOURCES
-        and catalog.seed == POPULATION_SEED
-        and catalog.population_model_name == POPULATION_MODEL
-        and dict(catalog.fiducials) == FIDUCIALS
-        and dict(catalog.population_model_kwargs) == POPULATION_MODEL_KWARGS
+    outputs = polarization_power(
+        {"seed": np.uint64(POPULATION_SEED)}, metadata, cache_dir=CATALOG_DIR
     )
-
-
-def load_or_build_catalog(
-    *, df: float, f_max: float, grid: str, path: Path
-) -> PolarizationPowerCatalog:
-    """Return the cached catalog if it is still current, else rebuild it.
-
-    A file written by an older astrogwb is *rejected* by
-    `PolarizationPowerCatalog.load` rather
-    than merely failing the configuration check below, so the read is guarded:
-    a stale cache is a rebuild, not a crash.
-    """
-    if path.is_file():
-        try:
-            cached = PolarizationPowerCatalog.load(path)
-        except (OSError, KeyError, ValueError) as error:
-            print(f"{path} is not a current astrogwb catalog ({error}); rebuilding")
-        else:
-            if catalog_matches_configuration(cached, df=df, f_max=f_max):
-                print(f"Loaded {path}")
-                return cached
-            print(f"{path} does not match this notebook's configuration; rebuilding")
-    catalog = build_catalog(df=df, f_max=f_max, grid=grid)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    catalog.save(path)
-    print(f"Built and wrote {path}")
-    return catalog
+    return PolarizationPowerCatalog.from_arrays(outputs, metadata)
 
 
 def describe(catalog: PolarizationPowerCatalog) -> pd.Series:
@@ -388,7 +322,7 @@ def describe(catalog: PolarizationPowerCatalog) -> pd.Series:
     return pd.Series(
         {
             "population": catalog.population_model_name,
-            "seed": catalog.seed,
+            "seed": POPULATION_SEED,
             "num_sources": catalog.num_samples,
             "num_frequencies": catalog.frequencies.size,
             "df_hz": float(np.median(catalog.bin_widths)),
@@ -424,9 +358,7 @@ def unpack(
 
 # The wide, coarse grid: the Omega_gw comparison and the Monte-Carlo
 # convergence below both run on this one.
-wide_catalog = load_or_build_catalog(
-    df=OMEGA_DF, f_max=OMEGA_F_MAX, grid="omega", path=OMEGA_CATALOG_PATH
-)
+wide_catalog = load_or_build_catalog(df=OMEGA_DF, f_max=OMEGA_F_MAX)
 wide_frequencies, wide_power, wide_samples, wide_merger_rate = unpack(wide_catalog)
 
 # The rate is derived from the file's own population rather than persisted:
@@ -436,9 +368,7 @@ describe(wide_catalog)
 
 # %%
 # The narrow, fine grid: everything from the SNR section on.
-catalog = load_or_build_catalog(
-    df=FINE_DF, f_max=SNR_F_MAX, grid="snr", path=SNR_CATALOG_PATH
-)
+catalog = load_or_build_catalog(df=FINE_DF, f_max=SNR_F_MAX)
 fine_frequencies, fine_power, samples, total_merger_rate = unpack(catalog)
 
 describe(catalog)

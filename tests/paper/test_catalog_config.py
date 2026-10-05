@@ -32,7 +32,11 @@ from astrogwb.waveform import AnalyticInspiralGenerator
 
 
 def _requests() -> dict[str, CatalogMetadata]:
-    return resolve_run_catalogs(REPO_ROOT).requests
+    """Every distinct catalog record the committed runs ask for, by file stem."""
+    return {
+        stem: metadata
+        for stem, (metadata, _) in resolve_run_catalogs(REPO_ROOT).requests.items()
+    }
 
 
 def _build(request: CatalogMetadata) -> Population:
@@ -192,7 +196,6 @@ def _request(waveform: dict[str, object]) -> CatalogMetadata:
                     "maximum_redshift": 20.0,
                     "n_grid": 256,
                 },
-                "seed": 1,
             },
             "waveform": waveform,
             "fiducials": {"H0": 67.66},

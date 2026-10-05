@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import pytest
@@ -17,7 +16,6 @@ def _record(**overrides: Any) -> PopulationMetadata:
     fields: dict[str, Any] = {
         "model_name": "bns_md_cosmological",
         "model_kwargs": MODEL_KWARGS,
-        "seed": 7,
     }
     return PopulationMetadata(**{**fields, **overrides})
 
@@ -54,20 +52,7 @@ def test_a_proposal_population_builds_with_no_merger_rate() -> None:
     assert record.build().merger_rate_fn is None
 
 
-@pytest.mark.parametrize("seed", ["7", 7.0, True, None])
-def test_seed_must_be_a_non_boolean_int(seed: object) -> None:
-    """``True`` is the case strict validation exists for.
-
-    Pydantic's default lax mode widens a bool to an int, so a seed of
-    ``True`` would validate as ``1`` and a draw would record a seed it was
-    never made at.
-    """
+def test_a_seed_is_not_part_of_the_record() -> None:
+    """A seed picks a realization; it is a simulator input, not metadata."""
     with pytest.raises(ValidationError, match="seed"):
-        _record(seed=seed)
-
-
-@pytest.mark.parametrize("seed", ["7", 7.0, True, None])
-def test_json_seed_must_be_a_non_boolean_int(seed: object) -> None:
-    payload = {**_record().model_dump(mode="json"), "seed": seed}
-    with pytest.raises(ValidationError, match="seed"):
-        PopulationMetadata.model_validate_json(json.dumps(payload))
+        _record(seed=7)

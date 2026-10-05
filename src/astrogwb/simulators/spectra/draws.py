@@ -8,9 +8,9 @@ model, sizes its static event plate, runs
 objects -- a source model, a rate, a generator -- and records nothing, so a
 caller free to wrap its source model (in
 :class:`~astrogwb.populations.IsotropicInclination`, say) can still use it.
-The recorded, cached path is :class:`astrogwb.simulators.spectra.SpectrumGenerator`,
+The recorded, cached path is :func:`astrogwb.simulators.spectra.spectra`,
 which builds those objects from a :class:`~astrogwb.simulators.spectra.SpectraMetadata`
-and calls this.
+and calls this once per seed.
 
 A hyperparameter is either a number, shared by every draw, or a numpyro
 distribution it is drawn from once per draw. The draw runs in three stages:
@@ -102,7 +102,7 @@ def draw_spectral_density(
     observation_time: float,
     num_draws: int,
     rng_key: jax.Array,
-    batch_size: int = 128,
+    chunk_size: int = 128,
     count: Literal["poisson", "fixed"] = "poisson",
     num_events: int | None = None,
     n_max_sigma: float | None = None,
@@ -120,8 +120,8 @@ def draw_spectral_density(
     """
     if num_draws <= 0:
         raise ValueError("num_draws must be positive")
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
     if observation_time <= 0.0:
         raise ValueError("observation_time must be positive")
     if count not in ("poisson", "fixed"):
@@ -179,7 +179,7 @@ def draw_spectral_density(
             merger_rate_fn=merger_rate_fn,
             generator=generator,
             observation_time=observation_time,
-            batch_size=batch_size,
+            chunk_size=chunk_size,
             num_events=num_events,
         )
     else:
@@ -193,7 +193,7 @@ def draw_spectral_density(
             merger_rate_fn=merger_rate_fn,
             generator=generator,
             observation_time=observation_time,
-            batch_size=batch_size,
+            chunk_size=chunk_size,
             max_events=max_events,
         )
 

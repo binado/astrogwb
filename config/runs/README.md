@@ -51,9 +51,10 @@ model, the merge rules, and how to run one.
 Each run declares what its two catalogs draw as `[analysis.injection]` and
 `[analysis.proposal]`, each a `CatalogMetadata` once its references resolve. A
 run sets only the fields that differ: a size, a seed, or a named population or
-waveform. The file is `outputs/catalogs/<key>.h5`, named by the hash of the
-resolved request, so runs that ask for the same draw share one file.
-`just catalogs` lists every key, what it draws, and which runs use it. See
+waveform. The file is `outputs/catalogs/polarization_power-<key>-<digest>.h5`,
+named by the hash of the resolved request and the seed it is drawn at
+(`[analysis.seeds]`), so runs that ask for the same draw share one file.
+`just catalogs` lists every file, what it draws, and which runs use it. See
 [`docs/catalog-generation.md`](../../docs/catalog-generation.md).
 
 `config/defaults.toml` sets the default for both roles, `[catalog]`: a
@@ -67,10 +68,10 @@ The overrides, and who uses each; the file that declares a draw says why:
 | Draw | Role | Used by |
 | --- | --- | --- |
 | seed 42, n = 8192 / 16384 / 32768 | proposal | `variable-catalog-size` |
-| `[populations.guard]` (`bns_md_uniform_mixture`, eps = 0.1, seed 61), n = 16384 | proposal | `astrophysical-parameters`, `variable-proposal-guard/eps1e-1`, `time-delay` (a separate copy, drawn at its own fiducials) |
+| `[populations.guard]` (`bns_md_uniform_mixture`, eps = 0.1), seed 61, n = 16384 | proposal | `astrophysical-parameters`, `variable-proposal-guard/eps1e-1`, `time-delay` (a separate copy, drawn at its own fiducials) |
 | `[populations.guard]` at eps = 0.01 / 0.001, seeds 62 / 63, n = 16384 | proposal | `variable-proposal-guard` |
 | `[waveforms.TaylorF2]`, seed 41 | proposal | `waveform-approximant/TaylorF2` |
-| `[populations.time_delayed]` (`bns_md_time_delayed_cosmological`, seed 71) | injection | `time-delay` |
+| `[populations.time_delayed]` (`bns_md_time_delayed_cosmological`), seed 71 | injection | `time-delay` |
 
 ## Adding one
 

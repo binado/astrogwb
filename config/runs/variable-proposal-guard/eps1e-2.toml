@@ -1,4 +1,6 @@
-# eps = 0.01, at its own mixture seed.
+# eps = 0.01, at its own seed.
 [populations.guard]
-seed = 62
 model_kwargs.uniform_mixing_fraction = 0.01
+
+[analysis.seeds]
+proposal = 62

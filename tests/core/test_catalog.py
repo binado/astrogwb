@@ -63,12 +63,31 @@ POPULATION_RECORD: dict[str, Any] = {
         "mass_width": 1.5,
     },
 }
-CATALOG_SEED = 42
 POPULATION = PopulationMetadata(
     model_name=POPULATION_RECORD["model_name"],
     model_kwargs=POPULATION_RECORD["model_kwargs"],
-    seed=CATALOG_SEED,
 )
+
+
+def _from_generator(
+    source_parameters: dict[str, np.ndarray], generator: AnalyticInspiralGenerator
+) -> PolarizationPowerCatalog:
+    """What the ``polarization_power`` node's outputs wrap into."""
+    power = np.asarray(jax.jit(generator.generate_batch)(source_parameters))
+    outputs = {
+        "frequencies": np.asarray(generator.frequencies),
+        "polarization_power": power,
+        "source_parameters": source_parameters,
+    }
+    return PolarizationPowerCatalog.from_arrays(
+        outputs,
+        CatalogMetadata(
+            waveform=generator.metadata,
+            population=POPULATION,
+            fiducials=POPULATION_RECORD["fiducials"],
+            num_samples=power.shape[-1],
+        ),
+    )
 
 
 def _metadata(num_samples: int) -> CatalogMetadata:
@@ -111,7 +130,7 @@ def test_generator_includes_largest_in_band_bin(
     assert generator.maximum_frequency == maximum_frequency
 
 
-def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes(
+def test_from_arrays_uses_generator_descriptor_and_preserves_parameter_dtypes(
     source_parameters: dict[str, np.ndarray],
 ) -> None:
     generator = AnalyticInspiralGenerator(
@@ -125,15 +144,9 @@ def test_from_generator_uses_generator_descriptor_and_preserves_parameter_dtypes
             frequency_resolution=2.0,
         )
     )
-    catalog = PolarizationPowerCatalog.from_generator(
-        source_parameters,
-        generator=generator,
-        population=POPULATION,
-        fiducials=POPULATION_RECORD["fiducials"],
-    )
+    catalog = _from_generator(source_parameters, generator)
 
-    assert catalog.waveform_metadata is generator.metadata
-    assert catalog.seed == 42
+    assert catalog.waveform_metadata == generator.metadata
     assert catalog.num_samples == 2
     assert catalog.source_parameters["integer_label"].dtype == np.int16
     np.testing.assert_array_equal(catalog.frequencies, generator.frequencies)
@@ -279,7 +292,6 @@ def test_an_unknown_population_name_fails_clearly() -> None:
     unknown = PopulationMetadata(
         model_name="no_such_population",
         model_kwargs=catalog.population.model_kwargs,
-        seed=catalog.population.seed,
     )
     with pytest.raises(KeyError, match="bns_md_cosmological"):
         replace(
@@ -349,12 +361,7 @@ def test_catalog_bin_widths_match_the_generators_requested_resolution(
             frequency_resolution=2.0,
         )
     )
-    catalog = PolarizationPowerCatalog.from_generator(
-        source_parameters,
-        generator=generator,
-        population=POPULATION,
-        fiducials=POPULATION_RECORD["fiducials"],
-    )
+    catalog = _from_generator(source_parameters, generator)
 
     np.testing.assert_allclose(catalog.bin_widths, 2.0)
 

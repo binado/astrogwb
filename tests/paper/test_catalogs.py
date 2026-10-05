@@ -13,11 +13,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import h5py
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from catalog_fixtures import make_catalog
+from catalog_fixtures import make_catalog, save_catalog
 
 from astrogwb.paper.catalogs import load_run_catalog, validate_matching_frequency_grids
 
@@ -26,7 +25,7 @@ def test_load_run_catalog_returns_the_whole_file(tmp_path: Path) -> None:
     """No prefixing: a catalog file is exactly the catalog a run samples."""
     redshift = np.linspace(0.1, 5.0, 6)
     path = tmp_path / "catalog.h5"
-    make_catalog(redshift=redshift).save(path)
+    save_catalog(make_catalog(redshift=redshift), path)
 
     loaded = load_run_catalog(path, label="proposal")
 
@@ -40,21 +39,25 @@ def test_load_run_catalog_names_the_role_on_a_missing_file(tmp_path: Path) -> No
         load_run_catalog(tmp_path / "absent.h5", label="proposal")
 
 
-def test_load_run_catalog_names_the_role_on_a_stale_file(tmp_path: Path) -> None:
-    """A file that cannot say what drew it fails here, before JAX claims a device."""
+def test_load_run_catalog_names_the_role_on_a_mismatched_request(
+    tmp_path: Path,
+) -> None:
+    """A file built from another draw than the run asks for is refused."""
     path = tmp_path / "catalog.h5"
-    make_catalog(redshift=np.linspace(0.1, 5.0, 4)).save(path)
-    with h5py.File(path, "r+") as handle:
-        handle.attrs["format_name"] = "astrogwb_catalog_v3"
+    catalog = make_catalog(redshift=np.linspace(0.1, 5.0, 4))
+    save_catalog(catalog, path, seed=41)
 
-    with pytest.raises(ValueError, match="injection catalog.*format_name"):
-        load_run_catalog(path, label="injection")
+    load_run_catalog(path, label="injection", request=(catalog.metadata, np.uint64(41)))
+    with pytest.raises(ValueError, match="injection catalog.*seed"):
+        load_run_catalog(
+            path, label="injection", request=(catalog.metadata, np.uint64(42))
+        )
 
 
 def test_load_run_catalog_is_eager(tmp_path: Path) -> None:
     """Loaded, not lazily opened: the file handle must not outlive the call."""
     path = tmp_path / "catalog.h5"
-    make_catalog(redshift=np.linspace(0.1, 5.0, 4)).save(path)
+    save_catalog(make_catalog(redshift=np.linspace(0.1, 5.0, 4)), path)
 
     loaded = load_run_catalog(path, label="injection")
     path.unlink()

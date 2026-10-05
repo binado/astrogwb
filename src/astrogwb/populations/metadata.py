@@ -2,8 +2,7 @@
 
 Every artifact this package persists -- a polarization-power catalog, a
 spectral-density catalog -- records the density that produced it: the
-registered population name, the flat construction kwargs it was built with,
-and the seed the draw used. That record was previously spelled out field by
+registered population name and the flat construction kwargs it was built with. That record was previously spelled out field by
 field on each artifact and re-encoded attribute by attribute in each writer, which is how the two
 formats drifted into naming the same thing differently.
 
@@ -61,18 +60,18 @@ class PopulationMetadata(BaseModel):
     rewrite.
 
     Validation is strict. That is not fussiness: in pydantic's default lax mode
-    a ``seed`` of ``True`` validates as ``1``, which would silently undo the
-    bool rejection this record has always had, and a ``"42"`` from a
-    hand-edited config would be accepted as an integer. Strict mode still
-    promotes ``int`` to ``float``, so a setting written ``2`` rather than
-    ``2.0`` keeps validating.
+    a ``True`` setting would validate as ``1``, silently undoing the bool
+    rejection this record has always had. Strict mode still promotes ``int`` to
+    ``float``, so a setting written ``2`` rather than ``2.0`` keeps validating.
+
+    There is no seed: a seed picks one realization of the density this record
+    describes, so it is an input to the simulator, not part of the record.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     model_name: str
     model_kwargs: ModelKwargs = Field(default_factory=dict)
-    seed: int
 
     @field_validator("model_kwargs")
     @classmethod
@@ -127,5 +126,4 @@ class PopulationMetadata(BaseModel):
         return type(self)(
             model_name=self.model_name,
             model_kwargs={**self.model_kwargs, **updates},
-            seed=self.seed,
         )

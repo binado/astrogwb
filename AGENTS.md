@@ -42,37 +42,54 @@ sample depends on it -- so it is declared by the analysis that reweights the
 draw. Adding a population means adding a registered source-model function under
 `src/astrogwb/populations/`, never an import path in a config.
 
-Catalogs are content-addressed. A run declares what each role draws as
-`[analysis.injection]` and `[analysis.proposal]`, each a complete
-`CatalogMetadata` (`astrogwb.simulators.polarization_power`) once the merge resolves its `${...}`
-references; both default, field by field, to the shared draw `[catalog]`.
-`CatalogMetadata` validates the role and its `key()` -- a hash of the
-canonical record -- names
-`outputs/catalogs/<key>.h5` (`astrogwb.simulators.core.artifact_path`). The same
-record is what a `PolarizationPowerCatalog` carries as `.metadata`. The
-Snakefile keys every run's roles at parse time (`resolve_run_catalogs`),
-`rule waveform_catalog` hands the generator the metadata as JSON and declares
-no config inputs, and `run_mcmc` and the notebooks alike reach the files through
-`astrogwb.simulators.core.simulate(metadata, CatalogGenerator(), cache_dir)` (notebooks
-via `astrogwb.paper.catalogs.run_catalog`), which checks a hit against the
-request and generates a miss -- unless `generate=False`, which the workflow's
-`run_mcmc --cached-only` uses so a job never generates. There is
-no `config/catalogs/` and no catalog name. The version is part of the key, so **bump `version` in
-`pyproject.toml` whenever a change alters what a population draw or a waveform
-generator produces**, or stale catalogs keep being served. `just catalogs` maps
-keys back to what they draw and which runs use them.
-Forward-model spectra go through the same `simulate` outside the workflow: a
-`SpectraMetadata` (each hyperparameter a fixed number or a prior spec) keys
-`<cache_dir>/<key>.h5`, and `astrogwb.simulators.core.simulate(metadata,
-SpectrumGenerator(), cache_dir)` serves or generates it.
+Simulators are cached functions. `astrogwb.simulators` holds nodes
+`fn(inputs, metadata, **settings) -> arrays`, wrapped by `@cached`
+(`astrogwb.simulators.core`): `inputs` and the returned arrays are nested dicts
+of arrays, `metadata` is a validated record that names itself with `key()`, and
+`settings` (a `chunk_size`) change cost, not the result. With a `cache_dir` the
+result lives at `<cache_dir>/<fn.__name__>-<metadata.key()>-<digest(inputs)>.h5`
+(`fn.path(inputs, metadata, cache_dir)`), the body runs only on a miss, and
+`generate=False` makes a miss raise `FileNotFoundError`. A **seed is an input,
+not metadata**: it picks one realization of the density the metadata describes
+(a 0-d `uint64` for `polarization_power`, a 1-d `uint64` array of per-draw
+`seeds` for `spectra`, from `split_seed(seed, n)`). `read(path)` returns the
+`(inputs, outputs, metadata_json)` of a file handed over by path.
+
+A run declares what each role draws as `[analysis.injection]` and
+`[analysis.proposal]`, each a complete `CatalogMetadata`
+(`astrogwb.simulators.polarization_power`) once the merge resolves its `${...}`
+references, plus the seed of each role in `[analysis.seeds]` (default 41 for
+both); both roles default, field by field, to the shared draw `[catalog]`.
+`RunConfig.catalog_request(role)` returns `(CatalogMetadata, np.uint64 seed)`.
+The file is `outputs/catalogs/polarization_power-<key>-<digest>.h5`. The
+Snakefile names every run's roles at parse time (`resolve_run_catalogs`, which
+maps each file stem to `(metadata, seed)`), `rule waveform_catalog` hands
+`scripts/generate_catalog.py` the metadata as JSON plus `--seed` and declares no
+config inputs, and `run_mcmc` and the notebooks alike reach the files through
+`astrogwb.simulators.polarization_power.polarization_power({"seed": seed},
+metadata, cache_dir=...)` (notebooks via `astrogwb.paper.catalogs.run_catalog`),
+which checks a hit against the request and generates a miss -- unless
+`generate=False`, which the workflow's `run_mcmc --cached-only` uses so a job
+never generates. `PolarizationPowerCatalog.from_arrays(outputs, metadata)` wraps
+the arrays. There is no `config/catalogs/` and no catalog name. The version is
+part of the key, so **bump `version` in `pyproject.toml` whenever a change alters
+what a population draw or a waveform generator produces**, or stale catalogs
+keep being served. `just catalogs` maps stems back to what they draw, at which
+seed, and which runs use them.
+Forward-model spectra use the same cache: a `SpectraMetadata` (each
+hyperparameter a fixed number or a prior spec) plus one seed per draw, through
+`astrogwb.simulators.spectra.spectra({"seeds": split_seed(seed, n)}, metadata,
+cache_dir=..., chunk_size=...)`. Each seed is one draw, so a draw depends on its
+own seed alone.
 The spectrum scripts default to `astrogwb.paper.cache.default_cache_dir() / "spectra"`,
 shared across worktrees. `platformdirs` honors `XDG_CACHE_HOME` on Linux and macOS,
 otherwise using the platform's user cache directory. CLI directory overrides
 take precedence; cache locations are outside the scientific metadata/key.
 Workflow catalog outputs remain under `outputs/catalogs`.
-`scripts/simulate_spectra.py` builds the same record from the `[spectra]` table
-of `--config` layers (the four shared layers, then
-`config/simulations/spectrum/<name>.toml`); those files are not run layers.
+`scripts/simulate_spectra.py` builds the record from the `[spectra]` table of
+`--config` layers (the four shared layers, then
+`config/simulations/spectrum/<name>.toml`) and the seeds from its sibling
+`[draws]` table (`seed`, `num_draws`); those files are not run layers.
 
 A run config is six TOML layers merged in order -- the four shared layers
 `config/defaults.toml`, `config/waveforms.toml`, `config/populations.toml` and
@@ -80,13 +97,12 @@ A run config is six TOML layers merged in order -- the four shared layers
 `config/runs/<experiment>/_base.toml`, then the run.
 `config/defaults.toml` declares the shared scientific defaults and the default
 draw `[catalog]`; `config/waveforms.toml` and `config/populations.toml` declare
-named `[waveforms.<name>]` / `[populations.<name>]` records (each population
-with a default seed) that catalogs and the analysis target refer to;
+named `[waveforms.<name>]` / `[populations.<name>]` records that catalogs and the analysis target refer to;
 `config/detectors.toml` declares `[networks]` and optional `[detectors]` overrides. Every layer opens with a comment saying what it is
 for, so what each committed run -- and each catalog override -- is for lives in
 its own file; `config/runs/README.md` indexes the experiments and the catalogs
 they share. The analysis target is `analysis.population`, a
-`PopulationMetadata` whose seed is unused. `[fiducials]` is both
+`PopulationMetadata`, evaluated rather than drawn. `[fiducials]` is both
 where NUTS initializes and what a run's catalogs are drawn at, so editing the
 shared `[fiducials]` re-keys every catalog. `[fiducials]`, `[priors]` and
 `[networks]` are also read directly by the notebooks and figure scripts through
@@ -98,7 +114,7 @@ that each `priors.<param>` table replaces the inherited one (`PRIOR_SHALLOW =
 "priors.*"`), then resolves every `"${a.b}"` reference against the merged
 result. A reference to a table merges as that table -- setting a key under one
 overrides that field and keeps the rest, so a run changes one role's population
-seed alone -- and can be reached *through* (`${x.y}` resolves when `x` is
+size alone -- and can be reached *through* (`${x.y}` resolves when `x` is
 itself a reference). A table that is a base plus additions is written
 `extends = "${a.b}"` (`MERGE_KEY = "extends"`); it takes one base. To change a
 named variant for every role that names it in one run, override it at its

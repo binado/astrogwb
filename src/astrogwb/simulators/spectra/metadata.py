@@ -33,14 +33,14 @@ class SpectraMetadata(BaseModel):
     all-numbers case. Priors are data rather than code, so editing a bound
     re-keys the artifact without a version bump.
 
-    The seed is the population's: one key drives both the hyperparameter draw
-    and the forward model. ``count`` selects Poisson counts or exactly
+    Neither a seed nor a draw count is part of it: the seeds are the
+    simulator's input, one per draw. ``count`` selects Poisson counts or exactly
     ``num_events`` sources per realization. ``observation_time`` is positive
     in both modes: it determines Poisson counts, but cancels from fixed-count
     spectrum normalization. ``n_max_sigma`` sizes the static Poisson event
     plate (default five sigma); fixed counts have no padding. These normalized
-    fields are all part of the key. ``batch_size`` is not: it only chunks the
-    waveform reduction and consumes no randomness, so it is the generator's.
+    fields are all part of the key. ``chunk_size`` is not: it only chunks the
+    waveform reduction and consumes no randomness, so it is the simulator's.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
@@ -48,7 +48,6 @@ class SpectraMetadata(BaseModel):
     waveform: WaveformMetadata
     population: PopulationMetadata
     hyperparameters: dict[str, Hyperparameter]
-    num_draws: Annotated[int, Field(gt=0)]
     observation_time: Annotated[float, Field(gt=0.0)]
     count: Literal["poisson", "fixed"] = "poisson"
     num_events: Annotated[int, Field(gt=0)] | None = None

@@ -36,8 +36,8 @@ def example_raw() -> dict[str, Any]:
     return assemble_run(EXAMPLE_EXPERIMENT, EXAMPLE_RUN)
 
 
-def _role(seed: int) -> dict[str, Any]:
-    """A catalog role over the default waveform and population, at ``seed``."""
+def _role() -> dict[str, Any]:
+    """A catalog role over the default waveform and population."""
     return {
         "waveform": "${waveforms.default}",
         "fiducials": "${fiducials}",
@@ -45,7 +45,6 @@ def _role(seed: int) -> dict[str, Any]:
         "population": {
             "model_name": "${populations.default.model_name}",
             "model_kwargs": "${populations.default.model_kwargs}",
-            "seed": seed,
         },
     }
 
@@ -57,8 +56,9 @@ _MINIMAL_ANALYSIS: dict[str, Any] = {
     "minimum_frequency": 2.0,
     "maximum_frequency": 2048.0,
     "population": "${populations.target}",
-    "injection": _role(1),
-    "proposal": _role(2),
+    "injection": _role(),
+    "proposal": _role(),
+    "seeds": {"injection": 1, "proposal": 2},
 }
 _MINIMAL_SAMPLER: dict[str, Any] = {"num_warmup": 2, "num_samples": 4}
 _MINIMAL_WAVEFORM: dict[str, Any] = {
@@ -77,7 +77,6 @@ _MINIMAL_POPULATIONS: dict[str, Any] = {
             "maximum_redshift": 20.0,
             "n_grid": 64,
         },
-        "seed": 1,
     },
     "target": {
         "model_name": "bns_md_modified_propagation",
@@ -86,7 +85,6 @@ _MINIMAL_POPULATIONS: dict[str, Any] = {
             "maximum_redshift": 20.0,
             "n_grid": 256,
         },
-        "seed": 0,
     },
 }
 

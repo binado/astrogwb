@@ -517,8 +517,7 @@ inference_data.to_netcdf(out_dir / f"{base}.nc")
 
 run_config = {
     "catalogs": {
-        role: RUN_CONFIG.catalog_request(role).key()
-        for role in ("injection", "proposal")
+        role: RUN_CONFIG.catalog_stem(role) for role in ("injection", "proposal")
     },
     "detectors": list(detnames),
     "detector_registry": RUN_CONFIG.detector_registry.model_dump(mode="json"),

@@ -1,13 +1,15 @@
-# Named populations, each a complete astrogwb.metadata.PopulationMetadata: a
-# registered model, its construction kwargs, and the seed a draw from it uses.
+# Named populations, each a complete astrogwb.populations.PopulationMetadata: a
+# registered model and its construction kwargs. A seed is not part of a
+# population: it picks one realization of the density, so a run states the seed
+# of each catalog role in [analysis.seeds].
 # A catalog or an analysis target picks one by reference --
 # population = "${populations.guard}".
 #
 # The redshift window is stated once, in [populations.cosmological], and every
 # other population's model_kwargs `extends` its model_kwargs, so narrowing it
 # narrows them all. A reference merges as the table it names, so one role can
-# change a single field -- a seed -- and keep the rest. To change a population
-# for every role that names it in one run -- a seed, a mixing fraction --
+# change a single field -- a size -- and keep the rest. To change a population
+# for every role that names it in one run -- a mixing fraction --
 # override it here, at its source, in that run's layer.
 
 # The population every catalog is drawn from unless its role names another.
@@ -16,14 +18,12 @@
 [populations.cosmological]
 model_name = "bns_md_cosmological"
 model_kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 4096, sample_inclination = true }
-seed = 41
 
 # The guarded proposal: the cosmological population mixed with a uniform
 # component, so no region the target reaches has vanishing proposal density.
 # It declares no merger rate, so it can only ever be a proposal.
 [populations.guard]
 model_name = "bns_md_uniform_mixture"
-seed = 61
 
 [populations.guard.model_kwargs]
 extends = "${populations.cosmological.model_kwargs}"
@@ -32,7 +32,6 @@ uniform_mixing_fraction = 0.1
 # Mergers delayed from star formation, drawn for the time-delay injection.
 [populations.time_delayed]
 model_name = "bns_md_time_delayed_cosmological"
-seed = 71
 
 [populations.time_delayed.model_kwargs]
 extends = "${populations.cosmological.model_kwargs}"
@@ -44,10 +43,9 @@ n_delay_nodes = 48
 # to the cosmological population at xi_0 = 1, which is how a run that does not
 # sample the propagation parameters gets the standard law. The grid is coarser
 # than a draw's: it is the grid the spectral integral runs on. A target is
-# evaluated, not drawn from, so its seed is unused.
+# evaluated, not drawn from.
 [populations.target]
 model_name = "bns_md_modified_propagation"
-seed = 0
 
 [populations.target.model_kwargs]
 extends = "${populations.cosmological.model_kwargs}"
@@ -56,7 +54,6 @@ n_grid = 256
 # The time-delayed population as an analysis target, on the target's grid.
 [populations.time_delayed_target]
 model_name = "bns_md_time_delayed_cosmological"
-seed = 0
 
 [populations.time_delayed_target.model_kwargs]
 extends = "${populations.time_delayed.model_kwargs}"

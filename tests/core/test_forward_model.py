@@ -34,7 +34,7 @@ from astrogwb.waveform import (
 )
 
 N_EVENTS = 8
-BATCH_SIZE = 3
+CHUNK_SIZE = 3
 F_MIN = 20.0
 F_MAX = 40.0
 DF = 10.0
@@ -89,7 +89,7 @@ def _model_kwargs(**overrides: Any) -> dict[str, Any]:
         "merger_rate_fn": mock_merger_rate_fn(),
         "generator": _generator(),
         "observation_time": _observation_time_for(N_EVENTS),
-        "batch_size": BATCH_SIZE,
+        "chunk_size": CHUNK_SIZE,
         "max_events": N_EVENTS,
         "observed_num_events": N_EVENTS,
     }
@@ -166,10 +166,10 @@ def test_spectrum_matches_the_sum_of_per_source_power_over_time() -> None:
     np.testing.assert_array_equal(trace["n_events"]["value"], N_EVENTS)
 
 
-@pytest.mark.parametrize("batch_size", [1, N_EVENTS, N_EVENTS + 5])
-def test_batched_power_matches_a_single_generator_call(batch_size: int) -> None:
+@pytest.mark.parametrize("chunk_size", [1, N_EVENTS, N_EVENTS + 5])
+def test_batched_power_matches_a_single_generator_call(chunk_size: int) -> None:
     generator = _generator()
-    kwargs = _model_kwargs(generator=generator, batch_size=batch_size)
+    kwargs = _model_kwargs(generator=generator, chunk_size=chunk_size)
     batched = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
     expected = _expected_spectrum(
         batched,
@@ -181,15 +181,15 @@ def test_batched_power_matches_a_single_generator_call(batch_size: int) -> None:
     )
 
 
-def test_batch_size_does_not_change_the_spectrum() -> None:
+def test_chunk_size_does_not_change_the_spectrum() -> None:
     kwargs = _model_kwargs()
     first = _seeded_trace(
-        poisson_counts_forward_model, POPULATION_PARAMS, **{**kwargs, "batch_size": 1}
+        poisson_counts_forward_model, POPULATION_PARAMS, **{**kwargs, "chunk_size": 1}
     )
     second = _seeded_trace(
         poisson_counts_forward_model,
         POPULATION_PARAMS,
-        **{**kwargs, "batch_size": N_EVENTS},
+        **{**kwargs, "chunk_size": N_EVENTS},
     )
     np.testing.assert_allclose(
         first["spectral_density"]["value"],
@@ -424,9 +424,9 @@ def test_ripple_spectrum_matches_the_sum_of_per_source_power_over_time() -> None
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("batch_size", [1, N_EVENTS, N_EVENTS + 5])
-def test_ripple_batched_power_matches_a_single_generator_call(batch_size: int) -> None:
-    kwargs = _ripple_kwargs(batch_size=batch_size)
+@pytest.mark.parametrize("chunk_size", [1, N_EVENTS, N_EVENTS + 5])
+def test_ripple_batched_power_matches_a_single_generator_call(chunk_size: int) -> None:
+    kwargs = _ripple_kwargs(chunk_size=chunk_size)
     generator = kwargs["generator"]
     batched = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
     expected = _expected_spectrum(
@@ -440,14 +440,14 @@ def test_ripple_batched_power_matches_a_single_generator_call(batch_size: int) -
 
 
 @pytest.mark.integration
-def test_ripple_batch_size_does_not_change_the_spectrum() -> None:
+def test_ripple_chunk_size_does_not_change_the_spectrum() -> None:
     first = _seeded_trace(
-        poisson_counts_forward_model, POPULATION_PARAMS, **_ripple_kwargs(batch_size=1)
+        poisson_counts_forward_model, POPULATION_PARAMS, **_ripple_kwargs(chunk_size=1)
     )
     second = _seeded_trace(
         poisson_counts_forward_model,
         POPULATION_PARAMS,
-        **_ripple_kwargs(batch_size=N_EVENTS),
+        **_ripple_kwargs(chunk_size=N_EVENTS),
     )
     np.testing.assert_allclose(
         first["spectral_density"]["value"],
@@ -512,7 +512,7 @@ def test_empty_catalog_reduces_without_calling_the_generator() -> None:
         cast(PolarizationPowerGenerator, _CountingGenerator()),
         sources,
         jnp.zeros(0, dtype=bool),
-        batch_size=BATCH_SIZE,
+        chunk_size=CHUNK_SIZE,
     )
 
     _CountingGenerator.generate_batch.assert_not_called()
@@ -523,7 +523,7 @@ def test_empty_catalog_reduces_without_calling_the_generator() -> None:
 
 @pytest.mark.parametrize("n_events", [6, 7])
 def test_jitted_scan_matches_eager_for_full_and_ragged_catalogs(n_events: int) -> None:
-    """``n_events=6`` divides ``BATCH_SIZE``; ``7`` leaves a remainder chunk."""
+    """``n_events=6`` divides ``CHUNK_SIZE``; ``7`` leaves a remainder chunk."""
     kwargs = _model_kwargs(max_events=n_events, observed_num_events=n_events)
     eager = _seeded_trace(poisson_counts_forward_model, _jax_params(), **kwargs)
 

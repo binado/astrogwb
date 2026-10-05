@@ -21,13 +21,23 @@ import numpy as np
 import pytest
 from repo import REPO_ROOT
 
+from astrogwb.simulators.core import read
 from astrogwb.simulators.polarization_power import (
-    CatalogGenerator,
     CatalogMetadata,
     PolarizationPowerCatalog,
+    polarization_power,
 )
 
 RequestFactory = Callable[..., CatalogMetadata]
+
+SEED = np.uint64(41)
+
+
+def _draw(request: CatalogMetadata, seed: np.uint64 = SEED) -> PolarizationPowerCatalog:
+    """The catalog ``request`` gives at ``seed``, generated without a cache."""
+    return PolarizationPowerCatalog.from_arrays(
+        polarization_power({"seed": seed}, request), request
+    )
 
 
 @pytest.fixture(scope="module")
@@ -62,7 +72,6 @@ def make_request() -> RequestFactory:
                         "n_grid": 256,
                         **(extra_kwargs or {}),
                     },
-                    "seed": 41,
                 },
                 "waveform": {
                     "approximant": "TaylorF2",
@@ -95,20 +104,21 @@ def test_generator_with_ripple_request_records_the_request(
     make_request: RequestFactory, tmp_path: Path
 ) -> None:
     request = make_request()
-    path = tmp_path / "toy.h5"
-    CatalogGenerator()(request).save(path)
+    outputs = polarization_power({"seed": SEED}, request, cache_dir=tmp_path)
+    path = polarization_power.path({"seed": SEED}, request, tmp_path)
+    inputs, _, recorded = read(path)
 
-    restored = PolarizationPowerCatalog.load(path)
-
-    assert restored.metadata.key() == request.key()
+    assert CatalogMetadata.model_validate_json(recorded).key() == request.key()
+    assert inputs["seed"] == SEED
+    assert PolarizationPowerCatalog.from_arrays(outputs, request).num_samples == 8
 
 
 @pytest.mark.integration
 def test_generator_with_same_request_is_reproducible(
     make_request: RequestFactory,
 ) -> None:
-    first = CatalogGenerator()(make_request())
-    second = CatalogGenerator()(make_request())
+    first = _draw(make_request())
+    second = _draw(make_request())
 
     np.testing.assert_array_equal(first.polarization_power, second.polarization_power)
 
@@ -118,7 +128,7 @@ def test_generator_with_guard_mixture_records_its_fraction(
     make_request: RequestFactory,
 ) -> None:
     """The eps in the config is the eps the file records and reweights by."""
-    catalog = CatalogGenerator()(
+    catalog = _draw(
         make_request(
             "bns_md_uniform_mixture", extra_kwargs={"uniform_mixing_fraction": 0.1}
         )
@@ -131,7 +141,7 @@ def test_generator_with_guard_mixture_records_its_fraction(
 def test_generator_with_gaussian_mass_model_records_its_fiducials(
     make_request: RequestFactory,
 ) -> None:
-    catalog = CatalogGenerator()(
+    catalog = _draw(
         make_request(
             "bns_md_gaussian_cosmological",
             extra_fiducials={"mass_mean": 1.33, "mass_sigma": 0.09},
@@ -152,8 +162,10 @@ def test_cli_with_unregistered_model_fails_before_generating(
             [
                 "--request",
                 request.model_dump_json(),
+                "--seed",
+                "41",
                 "--output",
-                str(tmp_path / f"{request.key()}.h5"),
+                str(polarization_power.path({"seed": SEED}, request, tmp_path)),
             ]
         )
 
@@ -167,6 +179,8 @@ def test_cli_with_output_not_named_by_key_raises(
             [
                 "--request",
                 make_request().model_dump_json(),
+                "--seed",
+                "41",
                 "--output",
                 str(tmp_path / "md-imrphenom-s41-n32768.h5"),
             ]
@@ -175,7 +189,9 @@ def test_cli_with_output_not_named_by_key_raises(
 
 def test_cli_with_invalid_request_exits(generate_catalog: ModuleType) -> None:
     with pytest.raises(SystemExit):
-        generate_catalog.parse_args(["--request", "null", "--output", "out.h5"])
+        generate_catalog.parse_args(
+            ["--request", "null", "--seed", "41", "--output", "out.h5"]
+        )
 
 
 @pytest.mark.integration
@@ -184,11 +200,18 @@ def test_cli_writes_the_catalog_under_its_key(
 ) -> None:
     """The surface `rule waveform_catalog` drives, end to end."""
     request = make_request()
-    output = tmp_path / f"{request.key()}.h5"
+    output = polarization_power.path({"seed": SEED}, request, tmp_path)
 
     generate_catalog.main(
-        ["--request", request.model_dump_json(), "--output", str(output)]
+        [
+            "--request",
+            request.model_dump_json(),
+            "--seed",
+            "41",
+            "--output",
+            str(output),
+        ]
     )
 
-    restored = PolarizationPowerCatalog.load(output)
-    assert restored.metadata.key() == request.key()
+    _, _, recorded = read(output)
+    assert CatalogMetadata.model_validate_json(recorded).key() == request.key()

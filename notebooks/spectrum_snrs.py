@@ -50,11 +50,11 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.runs import FIGURES_DIR
     from astrogwb.paper.plotting import save_figures, use_paper_style
     from astrogwb.populations.bns_madau_dickinson import amplitude_H0_fn
-    from astrogwb.simulators.core import simulate
+    from astrogwb.simulators.core import split_seed
     from astrogwb.simulators.spectra import (
         SpectralDensityCatalog,
         SpectraMetadata,
-        SpectrumGenerator,
+        spectra,
     )
     from astrogwb.utils import years_to_seconds
 
@@ -199,7 +199,7 @@ def _():
     num_draws = 200
     seed = 41
     data_seed = 42  # used only for the independent Poisson option
-    batch_size = 1024
+    chunk_size = 1024
     observation_time = 1.0  # years; affects SNR, not fixed-count normalization
     minimum_frequency = 2.0
     maximum_frequency = 2048.0
@@ -217,7 +217,7 @@ def _():
         paper_counts = [8, 16, 32]
         recommended_num_events = 32
         num_draws = 3
-        batch_size = 8
+        chunk_size = 8
         n_bootstrap = 20
         write_figures = False
 
@@ -225,13 +225,11 @@ def _():
     base_metadata = SpectraMetadata(
         count="fixed",
         num_events=grid_counts[-1],
-        num_draws=num_draws,
         observation_time=observation_time,
         hyperparameters={**FIDUCIALS},
         waveform=waveform_metadata(root=ROOT_DIR),
         population=population_metadata(
             root=ROOT_DIR,
-            seed=seed,
             minimum_redshift=baseline_minimum_redshift,
             maximum_redshift=maximum_redshift,
         ),
@@ -244,17 +242,9 @@ def _():
             "num_events": 64 if SMOKE else None,
         }
     )
-    # A single independently seeded draw, used only as an optional reference.
-    data_metadata = SpectraMetadata.model_validate(
-        {
-            **poisson_metadata.model_dump(),
-            "num_draws": 1,
-            "population": {
-                **base_metadata.population.model_dump(),
-                "seed": data_seed,
-            },
-        }
-    )
+    # The optional reference is one draw of the Poisson ensemble's metadata at
+    # an independent seed (settings.data_seed).
+    data_metadata = poisson_metadata
     h0_prior = priors(root=ROOT_DIR)["H0"]
     # Inverting the MLE gives the MAP only for a uniform prior on H0.
     if not isinstance(h0_prior, dist.Uniform) or float(h0_prior.low) <= 0:
@@ -264,7 +254,10 @@ def _():
         network=network,
         minimum_frequency=minimum_frequency,
         maximum_frequency=maximum_frequency,
-        batch_size=batch_size,
+        chunk_size=chunk_size,
+        seed=seed,
+        num_draws=num_draws,
+        data_seed=data_seed,
         cache_dir=cache_dir,
         cache_only=cache_only,
         h0_prior=h0_prior,
@@ -318,7 +311,12 @@ class AnalysisSettings:
     network: str
     minimum_frequency: float
     maximum_frequency: float
-    batch_size: int
+    chunk_size: int
+    #: The ensemble is ``num_draws`` draws at ``split_seed(seed, num_draws)``;
+    #: the optional Poisson reference is one draw at ``split_seed(data_seed, 1)``.
+    seed: int
+    num_draws: int
+    data_seed: int
     cache_dir: Path
     cache_only: bool
     h0_prior: dist.Uniform
@@ -393,6 +391,7 @@ class Reference:
     spectrum: NDArray[np.float64]
     snr: float
     averaged_draws: int
+    seed: int
 
     def row(self) -> dict[str, str | int | float]:
         """Describe the reference for a table."""
@@ -403,7 +402,7 @@ class Reference:
             "num_events": int(self.catalog.n_events[0]),
             "averaged_draws": self.averaged_draws,
             "snr": self.snr,
-            "seed": self.catalog.metadata.population.seed,
+            "seed": self.seed,
         }
 
 
@@ -558,13 +557,27 @@ def summarize_spectrum_snrs(
 
 
 @app.function(hide_code=True)
+def draw_catalog(
+    metadata: SpectraMetadata,
+    seeds: NDArray[np.uint64],
+    settings: AnalysisSettings,
+) -> SpectralDensityCatalog:
+    """Serve or generate the spectra ``metadata`` gives at ``seeds``."""
+    outputs = spectra(
+        {"seeds": seeds},
+        metadata,
+        cache_dir=settings.cache_dir,
+        generate=not settings.cache_only,
+        chunk_size=settings.chunk_size,
+    )
+    return SpectralDensityCatalog.from_arrays(outputs, metadata)
+
+
+@app.function(hide_code=True)
 def analyze_metadata(metadata: SpectraMetadata, settings: AnalysisSettings) -> SNRCase:
     """Serve or generate one spectrum ensemble and summarize its SNRs."""
-    catalog = simulate(
-        metadata,
-        SpectrumGenerator(batch_size=settings.batch_size),
-        settings.cache_dir,
-        generate=not settings.cache_only,
+    catalog = draw_catalog(
+        metadata, split_seed(settings.seed, settings.num_draws), settings
     )
     snrs, mean_spectrum_snr = compute_spectrum_snrs(catalog, settings)
     if np.any(snrs <= 0):
@@ -665,16 +678,14 @@ def select_reference(
             catalog=case.catalog,
             spectrum=np.mean(case.catalog.spectral_density, axis=0, dtype=np.float64),
             snr=float(case.summary["mean_spectrum_snr"]),
-            averaged_draws=case.catalog.metadata.num_draws,
+            averaged_draws=case.catalog.num_draws,
+            seed=settings.seed,
         )
     if kind == "poisson":
         if poisson_metadata is None:
             raise ValueError("the poisson reference needs its metadata")
-        catalog = simulate(
-            poisson_metadata,
-            SpectrumGenerator(batch_size=settings.batch_size),
-            settings.cache_dir,
-            generate=not settings.cache_only,
+        catalog = draw_catalog(
+            poisson_metadata, split_seed(settings.data_seed, 1), settings
         )
         snrs, _ = compute_spectrum_snrs(catalog, settings)
         return Reference(
@@ -683,6 +694,7 @@ def select_reference(
             spectrum=np.asarray(catalog.spectral_density[0], dtype=np.float64),
             snr=float(snrs[0]),
             averaged_draws=1,
+            seed=settings.data_seed,
         )
     raise ValueError('data_reference must be "largest_mean" or "poisson"')
 

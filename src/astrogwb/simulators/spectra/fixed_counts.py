@@ -32,12 +32,12 @@ def fixed_counts_forward_model(
     merger_rate_fn: MergerRateFn,
     generator: PolarizationPowerGenerator,
     observation_time: float,
-    batch_size: int,
+    chunk_size: int,
     num_events: int,
 ) -> None:
     """Draw a positive static source count and reduce to a strain spectrum.
 
-    ``num_events`` and ``batch_size`` are Python integers, static under JIT.
+    ``num_events`` and ``chunk_size`` are Python integers, static under JIT.
     ``params`` supplies the hyperparameters to both population callables;
     this model does not sample them. A physical observer-frame rate in
     mergers per second is required even though the count is fixed.
@@ -55,8 +55,8 @@ def fixed_counts_forward_model(
         or num_events <= 0
     ):
         raise ValueError("num_events must be a positive static integer")
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
     if observation_time <= 0.0:
         raise ValueError("observation_time must be positive")
 
@@ -70,7 +70,7 @@ def fixed_counts_forward_model(
         generator,
         sources,
         jnp.ones(num_events, dtype=bool),
-        batch_size=batch_size,
+        chunk_size=chunk_size,
     )
     numpyro.deterministic(
         "spectral_density",

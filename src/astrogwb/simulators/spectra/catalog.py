@@ -18,11 +18,11 @@ drawn from a prior once per row.
 
 Everything that determined the draws is one
 :class:`~astrogwb.simulators.spectra.SpectraMetadata`: the waveform and population, each
-hyperparameter's fixed value or prior, the draw count, the observation time,
-the count mode, fixed source count or Poisson padding, and the ``astrogwb``
-version. Its
-:meth:`~astrogwb.simulators.spectra.SpectraMetadata.key` is the file name
-:func:`astrogwb.simulators.core.simulate` caches the draws under. The columns are what
+hyperparameter's fixed value or prior, the observation time, the count mode,
+fixed source count or Poisson padding, and the ``astrogwb`` version. Its
+:meth:`~astrogwb.simulators.spectra.SpectraMetadata.key` names the cache file
+with the seeds input of :func:`~astrogwb.simulators.spectra.spectra`; the draw
+count is the length of that input. The columns are what
 the record produced: a fixed hyperparameter's column must repeat its value, and
 a sampled one's holds the value each row was drawn at.
 """
@@ -31,8 +31,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import Any, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -42,9 +41,6 @@ from astrogwb.populations import Population
 from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.simulators.spectra.metadata import SpectraMetadata
 from astrogwb.waveform.metadata import WaveformMetadata
-
-if TYPE_CHECKING:
-    from astrogwb.simulators.spectra import SpectralDensityDraws
 
 __all__ = ["SpectralDensityCatalog"]
 
@@ -81,11 +77,6 @@ class SpectralDensityCatalog:
         if spectra.ndim != 2 or spectra.shape[1] != frequencies.size:
             raise ValueError("spectral_density must have shape (draws, frequency)")
         draws = spectra.shape[0]
-        if draws != self._metadata.num_draws:
-            raise ValueError(
-                f"spectral_density has {draws} draws; the metadata records "
-                f"{self._metadata.num_draws}"
-            )
 
         n_events = np.asarray(self.n_events)
         if n_events.ndim != 1 or n_events.shape[0] != draws:
@@ -135,20 +126,20 @@ class SpectralDensityCatalog:
         object.__setattr__(self, "hyperparameters", columns)
 
     @classmethod
-    def from_draws(cls, draws: SpectralDensityDraws, metadata: SpectraMetadata) -> Self:
-        """Record ``draws`` as the output of ``metadata``.
+    def from_arrays(cls, outputs: Mapping[str, Any], metadata: SpectraMetadata) -> Self:
+        """Wrap the arrays :func:`~astrogwb.simulators.spectra.spectra` returns.
 
-        The metadata is supplied rather than inferred: the caller ran the
-        forward model from it, so it is the only place that knows what drew
-        these arrays. Construction still checks that the two agree on the draw
-        count, fixed source count and every fixed hyperparameter.
+        The metadata is supplied rather than inferred: the caller ran the node
+        from it, so it is the only place that knows what drew these arrays.
+        Construction checks that every column agrees on the draw count and that
+        the fixed source count and every fixed hyperparameter match the record.
         """
         return cls(
-            spectral_density=draws.spectral_density,
-            frequencies=draws.frequencies,
-            n_events=draws.n_events,
-            total_merger_rate=draws.total_merger_rate,
-            hyperparameters=draws.hyperparameters,
+            spectral_density=outputs["spectral_density"],
+            frequencies=outputs["frequencies"],
+            n_events=outputs["n_events"],
+            total_merger_rate=outputs["total_merger_rate"],
+            hyperparameters=outputs["hyperparameters"],
             _metadata=metadata,
         )
 
@@ -196,11 +187,6 @@ class SpectralDensityCatalog:
         return self._metadata.waveform
 
     @property
-    def seed(self) -> int:
-        """The seed the draws were folded from."""
-        return self.population.seed
-
-    @property
     def population_model_name(self) -> str:
         """The registry key of the population these draws used."""
         return self.population.model_name
@@ -233,25 +219,3 @@ class SpectralDensityCatalog:
         which is a supported shape -- there is no bin width to report.
         """
         return np.asarray(bin_widths(self.frequencies))
-
-    # ----------------------------------------------------------------- #
-    # Persistence
-    # ----------------------------------------------------------------- #
-    @classmethod
-    def load(cls, path: str | Path) -> Self:
-        """Read a spectra file, reconstructing and validating its population record.
-
-        Loading calls
-        :meth:`~astrogwb.populations.PopulationMetadata.check_registered` to
-        verify the recorded population name is still registered; it does not
-        re-run the forward model or compare the stored spectra against it.
-        """
-        from astrogwb.simulators.core import _io
-
-        return _io.load_spectral_density_catalog(cls, path)
-
-    def save(self, path: str | Path, *, compression: str | None = None) -> None:
-        """Write the draws and the metadata that determined them."""
-        from astrogwb.simulators.core import _io
-
-        _io.save_spectral_density_catalog(self, path, compression=compression)
