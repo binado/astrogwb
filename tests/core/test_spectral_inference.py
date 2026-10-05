@@ -152,10 +152,7 @@ def test_diagnostic_collisions_are_rejected(marginalized: bool, name: str) -> No
     model = (
         gwb_amplitude_marginalized_model if marginalized else gwb_spectral_density_model
     )
-    with pytest.raises(
-        ValueError if marginalized else AssertionError,
-        match="collides" if marginalized else "unique names",
-    ):
+    with pytest.raises(AssertionError, match="unique names"):
         handlers.trace(handlers.seed(model, 0)).get_trace(**kwargs)
 
 
@@ -174,21 +171,6 @@ def test_template_rate_is_published_under_its_unit_amplitude_name() -> None:
     np.testing.assert_allclose(
         trace["total_merger_rate_at_unit_amplitude"]["value"], 5.0
     )
-
-
-def test_a_diagnostic_named_like_the_renamed_template_rate_is_rejected() -> None:
-    kwargs = _generic_kwargs()
-    kwargs["spectral_density_fn"] = lambda params: (
-        OBSERVED,
-        {
-            "total_merger_rate": jnp.array(5.0),
-            "total_merger_rate_at_unit_amplitude": jnp.array(6.0),
-        },
-    )
-    with pytest.raises(ValueError, match="collides"):
-        handlers.trace(handlers.seed(gwb_amplitude_marginalized_model, 0)).get_trace(
-            **kwargs
-        )
 
 
 @pytest.mark.parametrize("explicit_grid", [False, True])

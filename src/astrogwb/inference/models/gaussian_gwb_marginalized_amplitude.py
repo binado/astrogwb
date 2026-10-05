@@ -110,7 +110,6 @@ import jax
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
-from jax.typing import ArrayLike
 
 from astrogwb.distributions.amplitude import AmplitudeConditional
 from astrogwb.inference.protocol import SpectralDensityFn
@@ -119,11 +118,6 @@ __all__ = ["gwb_amplitude_marginalized_model"]
 
 
 TEMPLATE_RATE_SITE = "total_merger_rate_at_unit_amplitude"
-LIKELIHOOD_SITES = (
-    "amplitude_mle",
-    "template_optimal_snr",
-    "amplitude_marginalized_log_likelihood",
-)
 
 
 def gwb_amplitude_marginalized_model(
@@ -152,8 +146,7 @@ def gwb_amplitude_marginalized_model(
     and the ``amplitude_marginalized_log_likelihood`` factor. The spectrum's
     ``total_merger_rate`` extra, if any, is the template's and is registered as
     ``total_merger_rate_at_unit_amplitude``; other extras are recorded
-    unchanged. Diagnostics must not collide with priors or the likelihood-owned
-    names. Draw amplitudes afterwards from ``AmplitudeConditional`` using the
+    unchanged. Draw amplitudes afterwards from ``AmplitudeConditional`` using the
     same prior and grid, and map them to the physical parameter with the
     inverse transform.
 
@@ -162,21 +155,13 @@ def gwb_amplitude_marginalized_model(
     :func:`~astrogwb.inference.models.gaussian_gwb_model.gwb_spectral_density_model`.
     Every sum below restricts to it.
 
-    Raises ``ValueError`` if a diagnostic name collides with a sampled site, a
-    likelihood-owned site, or another published diagnostic. All spectrum, observation, and scale arrays have
-    shape ``(F,)``.
+    All spectrum, observation, and scale arrays have shape ``(F,)``.
     """
     params = {name: numpyro.sample(name, prior) for name, prior in priors.items()}
     model_spectral_density, extras = spectral_density_fn(params)
-    reserved = {*priors, *LIKELIHOOD_SITES}
-    published: dict[str, ArrayLike] = {}
     for name, value in extras.items():
         site = TEMPLATE_RATE_SITE if name == "total_merger_rate" else name
-        if site in reserved or site in published:
-            raise ValueError(f"spectrum diagnostic {site!r} collides with a model site")
-        published[site] = value
-    for name, value in published.items():
-        numpyro.deterministic(name, value)
+        numpyro.deterministic(site, value)
 
     inverse_variance = scale**-2
     # `log_scale` is the per-bin Gaussian normalization, summed further down.
