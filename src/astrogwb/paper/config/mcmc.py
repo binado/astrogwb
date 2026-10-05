@@ -224,8 +224,6 @@ class AnalysisConfig(BaseModel):
     seeds: dict[str, Annotated[int, Field(ge=0)]]
     likelihood: Literal["default", "amplitude_marginalized"] = "default"
     amplitude_parameter: AmplitudeParameter | None = None
-    amplitude_num_nodes: Annotated[int, Field(gt=1)] = 1024
-    amplitude_prior_span_sigma: Annotated[float, Field(gt=0.0)] = 10.0
 
     @model_validator(mode="after")
     def _validate_seeds(self) -> AnalysisConfig:

@@ -36,17 +36,15 @@ End-to-end sketch (toy data; runnable as-is):
     from astrogwb.distributions.amplitude import (
         AmplitudeConditional,
         amplitude_prior,
-        quadrature_grid,
     )
     from astrogwb.inference import gwb_amplitude_marginalized_model
     from astrogwb.inference import amplitude_H0_transform
 
-    # --- One-time setup: the A-space prior and the grid it is marginalized on.
+    # --- One-time setup: the A-space prior the amplitude is marginalized under.
     h0_fid = 70.0
     transform = amplitude_H0_transform(h0_fid)  # A = h0_fid / H0
     h0_prior = dist.Uniform(20.0, 140.0)
     prior = amplitude_prior(h0_prior, transform)
-    grid = quadrature_grid(prior, num_nodes=2001)
 
     def toy_spectrum(params):
         template_rate = 10.0 ** params["log10_rate"] * (h0_fid / params["H0"]) ** 3
@@ -67,7 +65,6 @@ End-to-end sketch (toy data; runnable as-is):
                 observed_spectral_density=observed,
                 scale=gaussian_bin_scale(jnp.ones(3), 1.0, 0.25),
                 amplitude_prior=prior,
-                amplitude_grid=grid,
                 priors={"H0": h0_prior, "log10_rate": dist.Uniform(-8.0, -6.0)},
             ),
             data={"H0": h0_fid},
@@ -84,13 +81,9 @@ End-to-end sketch (toy data; runnable as-is):
         chain_samples["amplitude_mle"],
         chain_samples["template_optimal_snr"],
         prior=prior,
-        grid=grid,
     )
     amplitude = conditional.sample(jax.random.fold_in(jax.random.PRNGKey(0), 1))
-    draws = {
-        "H0": transform.inv(amplitude),
-        "quadrature_effective_nodes": conditional.effective_nodes,
-    }
+    draws = {"H0": transform.inv(amplitude)}
 
     # --- Merge: every returned site is (chain, draw); assign DataArrays.
     import arviz as az
@@ -156,7 +149,6 @@ def gwb_amplitude_marginalized_model(
     priors: Mapping[str, dist.Distribution],
     scale: jax.Array,
     amplitude_prior: dist.Distribution,
-    amplitude_grid: jax.Array | None = None,
     frequency_mask: jax.Array | None = None,
 ) -> None:
     """Marginalize a multiplicative amplitude of any supplied spectrum.
@@ -168,15 +160,14 @@ def gwb_amplitude_marginalized_model(
     ``block`` on a ``priors`` site. Integrate :math:`A` under
     ``amplitude_prior`` -- the A-space pushforward from
     :func:`~astrogwb.distributions.amplitude.amplitude_prior` -- using
-    ``AmplitudeConditional`` and its default quadrature grid when
-    ``amplitude_grid`` is omitted.
+    ``AmplitudeConditional``.
 
     Records ``amplitude_mle``, ``template_optimal_snr``, the returned extras,
     and the ``amplitude_marginalized_log_likelihood`` factor. The spectrum's
     ``total_merger_rate`` extra, if any, is the template's and is registered as
     ``total_merger_rate_at_unit_amplitude``; other extras are recorded
     unchanged. Draw amplitudes afterwards from ``AmplitudeConditional`` using the
-    same prior and grid, and map them to the physical parameter with the
+    same prior, and map them to the physical parameter with the
     inverse transform.
 
     ``frequency_mask`` is an optional boolean array of shape ``(F,)`` selecting
@@ -217,7 +208,6 @@ def gwb_amplitude_marginalized_model(
         amplitude_mle,
         template_optimal_snr,
         prior=amplitude_prior,
-        grid=amplitude_grid,
     )
     # log p(d | A_mle) = -1/2 chi^2(A_mle, theta) + normalization, with
     # chi^2(A_mle, theta) = data_norm - A_mle * data_template (the completed
