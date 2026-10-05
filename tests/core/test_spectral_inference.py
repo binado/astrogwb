@@ -1,10 +1,10 @@
 """The callable inference boundary, checked against independent likelihoods.
 
-Three layers, in order: the generic model against a hand-written Gaussian
-density; the importance-sampled spectrum against the hand-written grid-level
-formula;
-and the amplitude machinery -- statistics and marginalization --
-against explicit quadrature.
+Two layers, in order: the generic model against a hand-written Gaussian
+density, and the importance-sampled spectrum against the hand-written
+grid-level formula; then the frequency mask. The amplitude marginalization is
+checked against the full two-parameter likelihood in
+``test_amplitude_marginalization.py``.
 """
 
 from collections.abc import Mapping
@@ -30,12 +30,7 @@ from numpyro.infer.util import log_density
 from reference_population import reference_merger_rate_distance_and_logprob
 
 from astrogwb.cosmology import log_gw_em_ratio
-from astrogwb.distributions.amplitude import (
-    AmplitudeConditional,
-    amplitude_prior,
-    quadrature_grid,
-)
-from astrogwb.gwb import spectral_density
+from astrogwb.distributions.amplitude import amplitude_prior
 from astrogwb.importance.spectral import importance_spectral_density
 from astrogwb.inference import (
     SpectralDensityFn,
@@ -171,60 +166,6 @@ def test_template_rate_is_published_under_its_unit_amplitude_name() -> None:
     np.testing.assert_allclose(
         trace["total_merger_rate_at_unit_amplitude"]["value"], 5.0
     )
-
-
-@pytest.mark.parametrize("explicit_grid", [False, True])
-@pytest.mark.parametrize("empty_priors", [False, True])
-def test_generic_marginalization_without_rate_matches_quadrature(
-    explicit_grid: bool,
-    empty_priors: bool,
-) -> None:
-    kwargs = _generic_kwargs()
-    if explicit_grid:
-        kwargs["amplitude_grid"] = jnp.linspace(0.2, 4.0, 4001)
-    if empty_priors:
-        kwargs["priors"] = {}
-    calls = []
-
-    def spectrum(params):
-        calls.append(dict(params))
-        return _analytic({"tilt": 0.3, "rate": TEMPLATE_RATE, **params})
-
-    kwargs["spectral_density_fn"] = spectrum
-    value, trace = log_density(
-        gwb_amplitude_marginalized_model,
-        (),
-        kwargs,
-        {} if empty_priors else {"tilt": 0.3},
-    )
-    assert len(calls) == 1
-    assert "rate" not in calls[0]
-    assert "rate" not in trace
-    assert "spectral_density_obs" not in trace
-    assert "total_merger_rate_at_unit_amplitude" not in trace
-    template, _ = _analytic({"tilt": 0.3, "rate": TEMPLATE_RATE})
-    norm = jnp.sum((template / SCALE) ** 2)
-    mle = jnp.sum(OBSERVED * template / SCALE**2) / norm
-    np.testing.assert_allclose(trace["amplitude_mle"]["value"], mle, rtol=1e-12)
-    np.testing.assert_allclose(
-        trace["template_optimal_snr"]["value"], jnp.sqrt(norm), rtol=1e-12
-    )
-    grid = kwargs.get("amplitude_grid", quadrature_grid(AMPLITUDE_PRIOR))
-    predictions = grid[:, None] * template
-    likelihood = dist.Normal(predictions, SCALE).log_prob(OBSERVED).sum(axis=-1)
-    expected = jnp.log(
-        jnp.trapezoid(jnp.exp(likelihood + AMPLITUDE_PRIOR.log_prob(grid)), grid)
-    )
-    if not empty_priors:
-        expected += kwargs["priors"]["tilt"].log_prob(0.3)
-    np.testing.assert_allclose(value, expected, rtol=1e-11, atol=1e-11)
-    conditional = AmplitudeConditional(
-        mle,
-        jnp.sqrt(norm),
-        prior=AMPLITUDE_PRIOR,
-        grid=grid,
-    )
-    assert np.isfinite(conditional.sample(jax.random.key(1))).all()
 
 
 _TARGET_SOURCE = mock_target_model()
@@ -412,49 +353,6 @@ def test_generic_nuts_with_analytic_spectrum(marginalized: bool) -> None:
         assert {"amplitude_mle", "template_optimal_snr"} <= posterior.keys()
 
 
-# --------------------------------------------------------------------------- #
-# The amplitude machinery, on a catalog-free spectrum
-#
-# Folded here from the retired legacy-model suite: these test the likelihood
-# mathematics -- the sufficient statistics, the marginalization integral, and
-# rather than any particular way of
-# producing a spectrum. The spectrum below is a real catalog contraction only
-# because it must be strictly linear in the marginalized parameter; nothing
-# here reweights a population.
-# --------------------------------------------------------------------------- #
-FIDUCIAL_RATE = 2.0
-"""Reference value of the marginalized parameter; the amplitude is its ratio."""
-
-NOISE_SCALE = jnp.array([1.0, 1.4, 0.8, 1.2])
-_POWER = jnp.array([[1.0, 2.0], [3.0, 1.5], [2.0, 4.0], [1.0, 1.0]])
-_SENTINEL = jnp.array([0.2, -0.4])
-_MARGINALIZED_OBSERVED = jnp.array([2.4, 4.1, 5.9, 1.8])
-
-# The amplitude stands for `local_merger_rate`, so the physical prior lives on
-# rates and the A-space prior is its pushforward under A = rate / FIDUCIAL_RATE.
-# The fiducial rate is 2.0, so this covers amplitudes in [0.1, 2.5].
-_RATE_PRIOR = dist.Uniform(0.2, 5.0)
-_RATE_TRANSFORM = amplitude_local_merger_rate_transform(FIDUCIAL_RATE)
-_AMPLITUDE_PRIOR = amplitude_prior(_RATE_PRIOR, _RATE_TRANSFORM)
-_AMPLITUDE_GRID = quadrature_grid(_AMPLITUDE_PRIOR, num_nodes=2001)
-
-
-def _linear_spectrum(
-    params: Mapping[str, ArrayLike],
-) -> tuple[jax.Array, dict[str, jax.Array]]:
-    """A spectrum strictly linear in ``local_merger_rate``, as the real one is.
-
-    ``tilt`` only reshapes the per-source weights, so it is a genuine shape
-    parameter that the amplitude cannot absorb.
-    """
-    rate = jnp.asarray(params["local_merger_rate"])
-    weights = jnp.exp(jnp.asarray(params["tilt"]) * _SENTINEL)
-    prediction = spectral_density(
-        _POWER, weights, rate, source_parameters={"inclination": _SENTINEL}
-    )
-    return prediction, {"total_merger_rate": rate}
-
-
 def _pinned(spectrum: SpectralDensityFn, **fixed: float) -> SpectralDensityFn:
     """``spectrum`` with ``fixed`` parameters supplied, i.e. its template."""
 
@@ -464,120 +362,6 @@ def _pinned(spectrum: SpectralDensityFn, **fixed: float) -> SpectralDensityFn:
         return spectrum({**params, **fixed})
 
     return pinned
-
-
-_MARGINALIZED_KWARGS: dict[str, Any] = {
-    "spectral_density_fn": _pinned(_linear_spectrum, local_merger_rate=FIDUCIAL_RATE),
-    "observed_spectral_density": _MARGINALIZED_OBSERVED,
-    "scale": NOISE_SCALE,
-    "amplitude_prior": _AMPLITUDE_PRIOR,
-    "amplitude_grid": _AMPLITUDE_GRID,
-}
-
-
-def _condition_without_density(model, fixed_params):
-    """Supply fixed sample values without exposing their prior sites."""
-    return handlers.block(
-        handlers.condition(model, data=fixed_params), hide=list(fixed_params)
-    )
-
-
-def test_amplitude_statistics_match_explicit_sigma_weighted_sums() -> None:
-    """The published statistics are the sigma-space sums, not PSD-space ones.
-
-    Also pins, from the same trace, that the amplitude direction reaches the
-    potential as a ``numpyro.factor`` and never as an observed likelihood: a
-    ``spectral_density_obs`` site here would double-count the data against the
-    already-marginalized amplitude.
-    """
-    tilt = jnp.array(0.3)
-    model = _condition_without_density(gwb_amplitude_marginalized_model, {"tilt": tilt})
-    trace = handlers.trace(handlers.seed(model, rng_seed=0)).get_trace(
-        **_MARGINALIZED_KWARGS, priors={"tilt": dist.Normal(0.0, 1.0)}
-    )
-    template, _ = _linear_spectrum({"local_merger_rate": FIDUCIAL_RATE, "tilt": tilt})
-    template_norm = jnp.sum((template / NOISE_SCALE) ** 2)
-    data_template = jnp.sum(_MARGINALIZED_OBSERVED * template / NOISE_SCALE**2)
-
-    np.testing.assert_allclose(
-        np.asarray(trace["amplitude_mle"]["value"]),
-        np.asarray(data_template / template_norm),
-    )
-    np.testing.assert_allclose(
-        np.asarray(trace["template_optimal_snr"]["value"]),
-        np.asarray(jnp.sqrt(template_norm)),
-    )
-    # The published rate is the template's, at the pinned fiducial amplitude.
-    np.testing.assert_allclose(
-        np.asarray(trace["total_merger_rate_at_unit_amplitude"]["value"]),
-        FIDUCIAL_RATE,
-    )
-    factor_site = trace["amplitude_marginalized_log_likelihood"]
-    assert isinstance(factor_site["fn"], dist.Unit)
-    assert np.isfinite(float(factor_site["fn"].log_factor))
-    assert "spectral_density_obs" not in trace
-
-
-def _grid_for(prior: dist.Uniform | dist.Normal, num: int = 40_001) -> jax.Array:
-    if isinstance(prior, dist.Uniform):
-        return jnp.linspace(float(prior.low), float(prior.high), num)
-    loc, scale = float(prior.loc), float(prior.scale)
-    return jnp.linspace(loc - 40.0 * scale, loc + 40.0 * scale, num)
-
-
-@pytest.mark.parametrize(
-    "rate_prior",
-    [dist.Uniform(1.0, 3.0), dist.Normal(2.0, 0.8)],
-    ids=["uniform", "normal"],
-)
-def test_amplitude_marginalized_model_matches_the_general_model(
-    rate_prior: dist.Uniform | dist.Normal,
-) -> None:
-    """Numerically marginalize the general model and compare the log densities.
-
-    Both models are given the *same* prior on the same variable, the rate --
-    the marginalized model through its A-space pushforward, the general model
-    on its sample site. Integrating the general model over ``rate`` while the
-    marginalized one integrates over ``amplitude`` under the pushforward prior
-    must agree without any leftover constant -- the Jacobian is carried by the
-    prior -- which is what makes this a joint check on the factor term, the
-    normalizations, the pushforward, and the reference injection.
-    """
-    tilt = 0.35
-    general_kwargs = {
-        "spectral_density_fn": _linear_spectrum,
-        "observed_spectral_density": _MARGINALIZED_OBSERVED,
-        "scale": NOISE_SCALE,
-        "priors": {"local_merger_rate": rate_prior, "tilt": dist.Normal(0.0, 1.0)},
-    }
-
-    def general_log_density(rate: float) -> float:
-        value, _ = log_density(
-            gwb_spectral_density_model,
-            (),
-            general_kwargs,
-            {"local_merger_rate": jnp.asarray(rate), "tilt": jnp.asarray(tilt)},
-        )
-        return float(value)
-
-    grid = _grid_for(rate_prior, num=20_001)
-    rates = np.asarray(grid)
-    densities = np.exp([general_log_density(rate) for rate in rates])
-    numerical = float(np.log(np.trapezoid(densities, rates)))
-
-    marginalized, _ = log_density(
-        gwb_amplitude_marginalized_model,
-        (),
-        {
-            **_MARGINALIZED_KWARGS,
-            "amplitude_prior": amplitude_prior(rate_prior, _RATE_TRANSFORM),
-            "amplitude_grid": _RATE_TRANSFORM(_grid_for(rate_prior)),
-            "priors": {"tilt": dist.Normal(0.0, 1.0)},
-        },
-        {"tilt": jnp.asarray(tilt)},
-    )
-
-    np.testing.assert_allclose(float(marginalized), numerical, rtol=1e-3, atol=1e-3)
 
 
 # --------------------------------------------------------------------------- #
@@ -643,7 +427,6 @@ def _band_kwargs(marginalized: bool, *, compressed: bool) -> dict[str, Any]:
             "spectral_density_fn": _pinned(spectrum, rate=_BAND_FIDUCIAL_RATE),
             "priors": {"tilt": dist.Normal(0.0, 1.0)},
             "amplitude_prior": _BAND_AMPLITUDE_PRIOR,
-            "amplitude_grid": quadrature_grid(_BAND_AMPLITUDE_PRIOR, num_nodes=2001),
         }
     else:
         kwargs |= {
