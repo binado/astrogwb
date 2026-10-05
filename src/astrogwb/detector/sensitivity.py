@@ -23,8 +23,8 @@ from gwmock_signal.network import Network
 from gwmock_signal.stochastic.overlap import detector_names
 from numpy.typing import ArrayLike, NDArray
 
-from astrogwb.psd import NOISE_CURVES_BASE_DIR as NOISE_CURVES_BASE_DIR  # noqa: PLC0414
-from astrogwb.psd import resolve_psd_path
+from .psd import NOISE_CURVES_BASE_DIR as NOISE_CURVES_BASE_DIR  # noqa: PLC0414
+from .psd import resolve_psd_path
 
 SENSITIVITY_FILE = Path(__file__).parent / "sensitivity.toml"
 

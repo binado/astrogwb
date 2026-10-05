@@ -3,7 +3,7 @@
 from pathlib import Path
 from urllib.parse import urlparse
 
-NOISE_CURVES_BASE_DIR = Path(__file__).parent / "detector" / "noise_curves"
+NOISE_CURVES_BASE_DIR = Path(__file__).parent / "noise_curves"
 
 
 def resolve_psd_path(reference: str | Path) -> Path | str:

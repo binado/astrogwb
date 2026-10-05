@@ -17,10 +17,9 @@ import knf
 from gwmock_signal.detector import CustomDetector
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from astrogwb.detector import Sensitivity
+from astrogwb.detector import Sensitivity, resolve_psd_path
 from astrogwb.paper.config.runs import DETECTOR_DEFAULT_PATHS, MERGE_KEY
 from astrogwb.paper.utils import require_toml
-from astrogwb.psd import resolve_psd_path
 
 _STRICT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 logger = logging.getLogger(__name__)
