@@ -1,6 +1,5 @@
-"""Waveform generation, power reduction, propagation, and inspiral models."""
+"""Waveform generation, power reduction, and inspiral models."""
 
-from astrogwb.waveform.distance import apply_gw_distance_to_power
 from astrogwb.waveform.generator import (
     AnalyticInspiralGenerator,
     PolarizationPowerGenerator,
@@ -20,7 +19,6 @@ __all__ = [
     "PolarizationPowerGenerator",
     "RippleGenerator",
     "WaveformMetadata",
-    "apply_gw_distance_to_power",
     "chirp_mass",
     "inclination_factor",
     "inspiral_polarization_power",
