@@ -1,11 +1,11 @@
 """A catalog of forward-model spectral density, drawn without materializing power.
 
-The sibling of :mod:`astrogwb.catalog.polarization_power`. That catalog
+The sibling of :mod:`astrogwb.simulators.polarization_power.catalog`. That catalog
 persists ``(F, N)`` power for ``N`` sources and leaves the contraction to the
 consumer; this one persists the contraction itself -- one spectral density per
 draw -- and never holds a catalog's worth of waveforms at once. Both describe
 the density that produced them with the same
-:class:`~astrogwb.metadata.PopulationMetadata`, so a consumer reconstructs the
+:class:`~astrogwb.populations.PopulationMetadata`, so a consumer reconstructs the
 generating source model the same way from either.
 
 The two differ in what a row is, and that is the whole difference. A
@@ -17,12 +17,12 @@ its hyperparameters are a column per name, because a hyperparameter may be
 drawn from a prior once per row.
 
 Everything that determined the draws is one
-:class:`~astrogwb.metadata.SpectraMetadata`: the waveform and population, each
+:class:`~astrogwb.simulators.spectra.SpectraMetadata`: the waveform and population, each
 hyperparameter's fixed value or prior, the draw count, the observation time,
 the count mode, fixed source count or Poisson padding, and the ``astrogwb``
 version. Its
-:meth:`~astrogwb.metadata.SpectraMetadata.key` is the file name
-:func:`astrogwb.catalog.simulate` caches the draws under. The columns are what
+:meth:`~astrogwb.simulators.spectra.SpectraMetadata.key` is the file name
+:func:`astrogwb.simulators.core.simulate` caches the draws under. The columns are what
 the record produced: a fixed hyperparameter's column must repeat its value, and
 a sampled one's holds the value each row was drawn at.
 """
@@ -38,11 +38,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb.frequency import bin_widths, validate_frequency_grid
-from astrogwb.metadata import PopulationMetadata, SpectraMetadata, WaveformMetadata
 from astrogwb.populations import Population
+from astrogwb.populations.metadata import PopulationMetadata
+from astrogwb.simulators.spectra.metadata import SpectraMetadata
+from astrogwb.waveform.metadata import WaveformMetadata
 
 if TYPE_CHECKING:
-    from astrogwb.inference import SpectralDensityDraws
+    from astrogwb.simulators.spectra import SpectralDensityDraws
 
 __all__ = ["SpectralDensityCatalog"]
 
@@ -240,16 +242,16 @@ class SpectralDensityCatalog:
         """Read a spectra file, reconstructing and validating its population record.
 
         Loading calls
-        :meth:`~astrogwb.metadata.PopulationMetadata.check_registered` to
+        :meth:`~astrogwb.populations.PopulationMetadata.check_registered` to
         verify the recorded population name is still registered; it does not
         re-run the forward model or compare the stored spectra against it.
         """
-        from astrogwb.catalog import _io
+        from astrogwb.simulators.core import _io
 
         return _io.load_spectral_density_catalog(cls, path)
 
     def save(self, path: str | Path, *, compression: str | None = None) -> None:
         """Write the draws and the metadata that determined them."""
-        from astrogwb.catalog import _io
+        from astrogwb.simulators.core import _io
 
         _io.save_spectral_density_catalog(self, path, compression=compression)

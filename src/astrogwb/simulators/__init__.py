@@ -1,0 +1,7 @@
+"""Metadata-keyed generators: polarization-power catalogs and spectral-density draws.
+
+- :mod:`astrogwb.simulators.core` -- content keys, the HDF5 layer and the cache,
+  free of every physics package.
+- :mod:`astrogwb.simulators.polarization_power` -- per-source waveform power.
+- :mod:`astrogwb.simulators.spectra` -- forward-model spectral-density draws.
+"""

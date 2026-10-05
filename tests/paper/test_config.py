@@ -13,7 +13,6 @@ from pydantic import ValidationError
 from repo import REPO_ROOT
 
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.metadata import WaveformMetadata
 from astrogwb.paper.config import fiducials, networks, priors, waveform_generator
 from astrogwb.paper.config.detectors import load_detector_config
 from astrogwb.paper.config.mcmc import (
@@ -24,7 +23,11 @@ from astrogwb.paper.config.mcmc import (
 )
 from astrogwb.paper.config.runs import load_base
 from astrogwb.paper.utils import deep_merge, load_mapping
-from astrogwb.waveform import AnalyticInspiralGenerator, RippleGenerator
+from astrogwb.waveform import (
+    AnalyticInspiralGenerator,
+    RippleGenerator,
+    WaveformMetadata,
+)
 
 PAPER_ROOT = REPO_ROOT
 

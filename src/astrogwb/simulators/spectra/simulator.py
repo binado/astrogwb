@@ -1,7 +1,7 @@
-"""Turn a :class:`~astrogwb.metadata.SpectraMetadata` into spectral-density draws.
+"""Turn a :class:`~astrogwb.simulators.spectra.SpectraMetadata` into spectral-density draws.
 
 :class:`SpectrumGenerator` is the generator half of
-:func:`astrogwb.catalog.simulate`: it builds the live population, waveform
+:func:`astrogwb.simulators.core.simulate`: it builds the live population, waveform
 generator and priors a record names, runs
 :func:`~astrogwb.inference.draw_spectral_density`, and stamps the result with
 the record. It holds only what does not change the draws -- the waveform batch
@@ -18,9 +18,10 @@ from typing import ClassVar
 import jax
 
 from astrogwb import __version__
-from astrogwb.catalog.spectral_density import SpectralDensityCatalog
-from astrogwb.inference import draw_spectral_density, validate_source_model
-from astrogwb.metadata import SpectraMetadata
+from astrogwb.simulators.spectra.catalog import SpectralDensityCatalog
+from astrogwb.simulators.spectra.draws import draw_spectral_density
+from astrogwb.simulators.spectra.forward import validate_source_model
+from astrogwb.simulators.spectra.metadata import SpectraMetadata
 
 __all__ = ["SpectrumGenerator"]
 
@@ -29,14 +30,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class SpectrumGenerator:
-    """Draw the spectra a :class:`~astrogwb.metadata.SpectraMetadata` describes.
+    """Draw the spectra a :class:`~astrogwb.simulators.spectra.SpectraMetadata` describes.
 
     ``batch_size`` chunks the waveform reduction -- peak waveform memory is
     ``(F, batch_size)`` per draw -- and consumes no randomness, which is why it
     lives here and not in the metadata.
     """
 
-    #: What this generator produces, and what :func:`astrogwb.catalog.simulate`
+    #: What this generator produces, and what :func:`astrogwb.simulators.core.simulate`
     #: loads a cache hit as.
     artifact: ClassVar[type[SpectralDensityCatalog]] = SpectralDensityCatalog
 

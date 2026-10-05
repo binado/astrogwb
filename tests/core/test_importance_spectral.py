@@ -27,7 +27,6 @@ from jax.typing import ArrayLike
 from numpyro.distributions import constraints
 from reference_population import reference_merger_rate_distance_and_logprob
 
-from astrogwb.catalog import REDSHIFT_SITE, PolarizationPowerCatalog
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.gwb.spectral import spectral_density
 from astrogwb.importance import spectral
@@ -37,13 +36,19 @@ from astrogwb.importance.spectral import (
     evaluate_log_weights,
     importance_spectral_density,
 )
-from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
+    PopulationMetadata,
     SourceFn,
     build_population,
 )
 from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
+from astrogwb.simulators.polarization_power import (
+    REDSHIFT_SITE,
+    CatalogMetadata,
+    PolarizationPowerCatalog,
+)
+from astrogwb.waveform import WaveformMetadata
 
 #: The catalog column naming the effective distance the stored polarization
 #: power was generated at.

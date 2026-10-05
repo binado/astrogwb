@@ -1,8 +1,8 @@
-"""Turn a :class:`~astrogwb.metadata.CatalogMetadata` into a polarization-power catalog.
+"""Turn a :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` into a polarization-power catalog.
 
 :class:`CatalogGenerator` is the generator half of
-:func:`astrogwb.catalog.simulate` for catalogs, as
-:class:`~astrogwb.catalog.SpectrumGenerator` is for spectra: it draws the
+:func:`astrogwb.simulators.core.simulate` for catalogs, as
+:class:`~astrogwb.simulators.spectra.SpectrumGenerator` is for spectra: it draws the
 population the record names at its fiducials, generates the waveform power,
 and returns a catalog that carries the record.
 """
@@ -16,9 +16,9 @@ from typing import ClassVar
 import jax
 
 from astrogwb import __version__
-from astrogwb.catalog.polarization_power import PolarizationPowerCatalog
-from astrogwb.inference.utils import sample_sources
-from astrogwb.metadata import CatalogMetadata
+from astrogwb.populations.evaluation import sample_sources
+from astrogwb.simulators.polarization_power.catalog import PolarizationPowerCatalog
+from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
 
 __all__ = ["CatalogGenerator"]
 
@@ -27,13 +27,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class CatalogGenerator:
-    """Draw the catalog a :class:`~astrogwb.metadata.CatalogMetadata` describes.
+    """Draw the catalog a :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` describes.
 
     It holds no settings: everything that changes a catalog is in the record,
     so every generator answers the same metadata with the same file.
     """
 
-    #: What this generator produces, and what :func:`astrogwb.catalog.simulate`
+    #: What this generator produces, and what :func:`astrogwb.simulators.core.simulate`
     #: loads a cache hit as.
     artifact: ClassVar[type[PolarizationPowerCatalog]] = PolarizationPowerCatalog
 

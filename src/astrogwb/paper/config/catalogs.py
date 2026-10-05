@@ -3,7 +3,7 @@
 A *catalog* is one persisted waveform draw: expensive to build (population
 draw + ripple waveform generation) and shared by every run that asks for the
 same one. A run declares what it needs in ``[analysis.injection]`` and
-``[analysis.proposal]`` -- each a :class:`~astrogwb.metadata.CatalogMetadata`
+``[analysis.proposal]`` -- each a :class:`~astrogwb.simulators.polarization_power.CatalogMetadata`
 once the merge has resolved its references -- and the file lives at
 ``outputs/catalogs/<key>.h5``, where ``<key>`` is that request's content hash.
 No name translates between the two.
@@ -25,13 +25,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from astrogwb.metadata import CatalogMetadata
 from astrogwb.paper.config.mcmc import (
     RunConfig,
     build_run_config,
     check_redshift_grid,
 )
 from astrogwb.paper.config.runs import CATALOG_ROLES, assemble_run, discover_runs
+from astrogwb.simulators.polarization_power import CatalogMetadata
 
 logger = logging.getLogger(__name__)
 

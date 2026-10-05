@@ -1,16 +1,16 @@
 """Draw forward-model spectra from config layers and save them under their key.
 
-The draws are fully determined by a :class:`~astrogwb.metadata.SpectraMetadata`
+The draws are fully determined by a :class:`~astrogwb.simulators.spectra.SpectraMetadata`
 -- waveform, population and seed, each hyperparameter's fixed value or prior,
 draw count, observation time, count mode and source count or padding -- declared
 as the ``[spectra]`` table of the ``--config`` layers, merged in process exactly as ``run_mcmc``
-merges a run. This script runs :class:`~astrogwb.catalog.SpectrumGenerator` on
+merges a run. This script runs :class:`~astrogwb.simulators.spectra.SpectrumGenerator` on
 it and writes the result atomically to ``<output-dir>/<key>.h5``. It writes
 ``(draws, F)`` spectra only; no ``(F, N)`` catalog power is ever materialized.
 
 The file is named by the metadata's key, so it can never be filed under another
 record's address. Outside a shell,
-``astrogwb.catalog.simulate(metadata, SpectrumGenerator(), cache_dir)`` is the
+``astrogwb.simulators.core.simulate(metadata, SpectrumGenerator(), cache_dir)`` is the
 same generator behind a cache lookup, and needs no script.
 
 A hyperparameter is a ``"${fiducials.X}"`` reference to fix it, or a
@@ -39,13 +39,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from astrogwb.catalog import SpectrumGenerator, save_atomically
-from astrogwb.metadata import SpectraMetadata, artifact_path
 from astrogwb.paper.cache import default_cache_dir
 from astrogwb.paper.config.runs import (
     add_config_arguments,
     load_merged_config,
 )
+from astrogwb.simulators.core import artifact_path, save_atomically
+from astrogwb.simulators.spectra import SpectraMetadata, SpectrumGenerator
 
 logger = logging.getLogger(__name__)
 

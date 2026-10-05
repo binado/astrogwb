@@ -6,15 +6,15 @@ redshift proposal, and a config object derived from the two. They were
 reconciled by exact float equality over five hard-coded parameter names, which
 left ``xi_0``, ``xi_n`` and ``local_merger_rate`` checked by nothing at all.
 
-A catalog now records the complete :class:`~astrogwb.metadata.CatalogMetadata`
+A catalog now records the complete :class:`~astrogwb.simulators.polarization_power.CatalogMetadata`
 it was generated from: the waveform settings, the population declaration -- the
 registered population name, its construction kwargs and seed, carried as one
-:class:`~astrogwb.metadata.PopulationMetadata` -- the hyperparameters it was
+:class:`~astrogwb.populations.PopulationMetadata` -- the hyperparameters it was
 drawn at, the draw size and the ``astrogwb`` version. That is enough to
 reconstruct the exact map from hyperparameters to source density, so the run
 config no longer restates any of it and nothing has to be cross-checked; and
-its :meth:`~astrogwb.metadata.CatalogMetadata.key` is the file name
-:func:`astrogwb.catalog.simulate` caches the catalog under.
+its :meth:`~astrogwb.simulators.polarization_power.CatalogMetadata.key` is the file name
+:func:`astrogwb.simulators.core.simulate` caches the catalog under.
 
 Immutability is a contract, not a language guarantee. The dataclass is frozen
 and transformations such as
@@ -35,9 +35,11 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from astrogwb.frequency import bin_widths, validate_frequency_grid
-from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import Population
+from astrogwb.populations.metadata import PopulationMetadata
+from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
 from astrogwb.waveform import PolarizationPowerGenerator
+from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = ["REDSHIFT_SITE", "PolarizationPowerCatalog"]
 
@@ -143,14 +145,14 @@ class PolarizationPowerCatalog:
         The population record is supplied rather than inferred: the caller ran
         the model to draw ``source_parameters``, so it is the only place that
         knows which population and settings produced them. It arrives as one
-        :class:`~astrogwb.metadata.PopulationMetadata` rather than as its four
+        :class:`~astrogwb.populations.PopulationMetadata` rather than as its four
         parts, so a caller cannot pair a model name with another draw's seed or
         density sites -- the record is the unit that has to stay consistent.
 
         ``fiducials`` stays separate from it: the hyperparameters a draw was
         made *at* describe the samples, while the population record describes
         the density that produced them. Both are folded into the catalog's
-        :class:`~astrogwb.metadata.CatalogMetadata` here, with the generator's
+        :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` here, with the generator's
         waveform settings, the sample count and the running version.
 
         Frequencies come from the generator rather than from metadata: that is
@@ -333,7 +335,7 @@ class PolarizationPowerCatalog:
     def load(cls, path: str | Path) -> Self:
         """Read a catalog file, reconstructing and validating its population record.
 
-        Loading calls :meth:`~astrogwb.metadata.PopulationMetadata.check_registered`
+        Loading calls :meth:`~astrogwb.populations.PopulationMetadata.check_registered`
         to verify the recorded population name is still registered; it does not
         re-execute the population or compare derived columns against the stored
         arrays. A catalog whose columns have drifted from its declared
@@ -342,7 +344,7 @@ class PolarizationPowerCatalog:
         Files written in older catalog formats are rejected; there is no
         compatibility reader.
         """
-        from astrogwb.catalog import _io
+        from astrogwb.simulators.core import _io
 
         return _io.load_polarization_power_catalog(cls, path)
 
@@ -353,6 +355,6 @@ class PolarizationPowerCatalog:
         generating parameters, density sites)``. Neither this nor :meth:`load`
         serializes a Python callable.
         """
-        from astrogwb.catalog import _io
+        from astrogwb.simulators.core import _io
 
         _io.save_polarization_power_catalog(self, path, compression=compression)

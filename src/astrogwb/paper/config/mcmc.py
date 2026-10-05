@@ -32,10 +32,12 @@ from pydantic import (
     model_validator,
 )
 
-from astrogwb.metadata import CatalogMetadata, PopulationMetadata, PriorSpec
+from astrogwb.metadata import PriorSpec
 from astrogwb.paper.config.detectors import DetectorRegistry
 from astrogwb.paper.config.runs import CATALOG_ROLES
 from astrogwb.paper.utils import deep_merge
+from astrogwb.populations import PopulationMetadata
+from astrogwb.simulators.polarization_power import CatalogMetadata
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 

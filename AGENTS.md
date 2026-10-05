@@ -44,16 +44,16 @@ draw. Adding a population means adding a registered source-model function under
 
 Catalogs are content-addressed. A run declares what each role draws as
 `[analysis.injection]` and `[analysis.proposal]`, each a complete
-`CatalogMetadata` (`astrogwb.metadata`) once the merge resolves its `${...}`
+`CatalogMetadata` (`astrogwb.simulators.polarization_power`) once the merge resolves its `${...}`
 references; both default, field by field, to the shared draw `[catalog]`.
 `CatalogMetadata` validates the role and its `key()` -- a hash of the
 canonical record -- names
-`outputs/catalogs/<key>.h5` (`astrogwb.metadata.artifact_path`). The same
+`outputs/catalogs/<key>.h5` (`astrogwb.simulators.core.artifact_path`). The same
 record is what a `PolarizationPowerCatalog` carries as `.metadata`. The
 Snakefile keys every run's roles at parse time (`resolve_run_catalogs`),
 `rule waveform_catalog` hands the generator the metadata as JSON and declares
 no config inputs, and `run_mcmc` and the notebooks alike reach the files through
-`astrogwb.catalog.simulate(metadata, CatalogGenerator(), cache_dir)` (notebooks
+`astrogwb.simulators.core.simulate(metadata, CatalogGenerator(), cache_dir)` (notebooks
 via `astrogwb.paper.catalogs.run_catalog`), which checks a hit against the
 request and generates a miss -- unless `generate=False`, which the workflow's
 `run_mcmc --cached-only` uses so a job never generates. There is
@@ -63,7 +63,7 @@ generator produces**, or stale catalogs keep being served. `just catalogs` maps
 keys back to what they draw and which runs use them.
 Forward-model spectra go through the same `simulate` outside the workflow: a
 `SpectraMetadata` (each hyperparameter a fixed number or a prior spec) keys
-`<cache_dir>/<key>.h5`, and `astrogwb.catalog.simulate(metadata,
+`<cache_dir>/<key>.h5`, and `astrogwb.simulators.core.simulate(metadata,
 SpectrumGenerator(), cache_dir)` serves or generates it.
 The spectrum scripts default to `astrogwb.paper.cache.default_cache_dir() / "spectra"`,
 shared across worktrees. `platformdirs` honors `XDG_CACHE_HOME` on Linux and macOS,

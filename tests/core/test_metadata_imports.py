@@ -1,17 +1,17 @@
-"""The metadata package must stay importable without JAX.
+"""Metadata records must be importable without initializing the XLA backend.
 
-This is the core-side twin of ``tests/paper/test_cli.py``. The models in
-:mod:`astrogwb.metadata` are the wire format ``astrogwb.paper.config.catalogs``
-validates against at module scope, and the ``Snakefile`` imports that layer to
-build its DAG -- so a JAX import reaching them would be paid on every
-``--dry-run``.
+This is the core-side twin of ``tests/paper/test_cli.py``. The records live
+beside the code they describe (:mod:`astrogwb.populations.metadata`,
+:mod:`astrogwb.waveform.metadata`, :mod:`astrogwb.simulators`), so importing one
+runs its parent package, which imports JAX and NumPyro. That is fine: importing
+JAX does not initialize a backend. What would be fatal is *creating an array or
+querying devices* while a record is imported or built, because
+``astrogwb.paper.runtime.configure_runtime`` -- reached after the ``Snakefile``
+and ``scripts/run_mcmc.py`` have already validated their configs -- must still
+be able to choose the platform and device count.
 
-The trap this guards is not obvious from reading the modules: importing a
-submodule executes its parent package first, so a record living under
-:mod:`astrogwb.populations` or :mod:`astrogwb.waveform` drags in the population
-models or the generators -- and JAX with them -- however carefully the record's
-own imports are written. That is why these models sit in a top-level package,
-and why the edges back into those layers are taken inside method bodies.
+A late ``numpyro.set_host_device_count(2)`` that still yields two devices proves
+nothing initialized the backend first.
 """
 
 from __future__ import annotations
@@ -19,23 +19,34 @@ from __future__ import annotations
 import subprocess
 import sys
 
+BACKEND_FREE = """
+import numpyro
 
-def test_importing_metadata_does_not_import_jax() -> None:
-    code = """
-import sys
+numpyro.set_host_device_count(2)
+import jax
 
-import astrogwb.metadata
-import astrogwb.metadata.population
-
-assert 'jax' not in sys.modules, 'importing astrogwb.metadata imported jax'
-assert 'numpyro' not in sys.modules, 'importing astrogwb.metadata imported numpyro'
-assert 'h5py' not in sys.modules, 'importing astrogwb.metadata imported h5py'
+assert jax.device_count() == 2, f"backend initialized early: {jax.devices()}"
 """
+
+
+def _run(code: str) -> None:
     result = subprocess.run(
         [sys.executable, "-c", code], check=False, capture_output=True, text=True
     )
-
     assert result.returncode == 0, result.stderr
+
+
+def test_importing_every_metadata_module_leaves_the_backend_uninitialized() -> None:
+    _run(
+        """
+import astrogwb.metadata
+import astrogwb.populations.metadata
+import astrogwb.waveform.metadata
+import astrogwb.simulators.polarization_power.metadata
+import astrogwb.simulators.spectra.metadata
+"""
+        + BACKEND_FREE
+    )
 
 
 def test_building_a_population_still_reaches_the_registry() -> None:
@@ -45,23 +56,18 @@ def test_building_a_population_still_reaches_the_registry() -> None:
     called. Asserting both halves is what stops the import being "fixed" by
     dropping the edge instead of moving it.
     """
-    code = """
+    _run(
+        """
 import sys
 
-from astrogwb.metadata import PopulationMetadata
+from astrogwb.populations.metadata import PopulationMetadata
 
 record = PopulationMetadata(
     model_name='bns_md_cosmological',
     model_kwargs={'minimum_redshift': 0.0, 'maximum_redshift': 1.0, 'n_grid': 8},
     seed=1,
 )
-assert 'jax' not in sys.modules, 'constructing the record imported jax'
-
 record.check_registered()
-assert 'jax' in sys.modules, 'build() did not reach the registry'
 """
-    result = subprocess.run(
-        [sys.executable, "-c", code], check=False, capture_output=True, text=True
+        + BACKEND_FREE
     )
-
-    assert result.returncode == 0, result.stderr

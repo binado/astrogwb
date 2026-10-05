@@ -10,17 +10,14 @@ import h5py
 import numpy as np
 import pytest
 
-from astrogwb.catalog import SpectralDensityCatalog
-from astrogwb.catalog._io import (
+from astrogwb.metadata import PriorSpec
+from astrogwb.populations import PopulationMetadata
+from astrogwb.simulators.core._io import (
     SPECTRAL_DENSITY_DATASETS,
     SPECTRAL_DENSITY_FORMAT_NAME,
 )
-from astrogwb.metadata import (
-    PopulationMetadata,
-    PriorSpec,
-    SpectraMetadata,
-    WaveformMetadata,
-)
+from astrogwb.simulators.spectra import SpectralDensityCatalog, SpectraMetadata
+from astrogwb.waveform import WaveformMetadata
 
 
 def _catalog(**overrides: Any) -> SpectralDensityCatalog:

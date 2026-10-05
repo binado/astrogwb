@@ -21,8 +21,8 @@ What :func:`build_population` returns is a :class:`Population` of plain
 :func:`functools.partial` objects with the construction kwargs bound: a
 :data:`SourceFn` and an optional :data:`MergerRateFn`, each called with
 hyperparameters alone. Evaluating or sampling one is the job of
-:func:`astrogwb.inference.utils.evaluate_sources` and
-:func:`astrogwb.inference.utils.sample_sources`.
+:func:`astrogwb.populations.evaluation.evaluate_sources` and
+:func:`astrogwb.populations.evaluation.sample_sources`.
 
 The factory's own signature is the kwargs schema: a construction key no
 population takes raises ``TypeError`` here rather than being filtered away.

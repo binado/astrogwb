@@ -44,7 +44,6 @@ from jax.typing import ArrayLike
 from numpyro.infer import MCMC, NUTS, Predictive, init_to_value
 from reference_population import reference_merger_rate_distance_and_logprob
 
-from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import SECONDS_PER_YEAR
 from astrogwb.detector import (
     effective_psd,
@@ -67,6 +66,7 @@ from astrogwb.populations import (
     amplitude_H0_fn,
     merger_rate_H0_fn,
 )
+from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
 
 pytestmark = pytest.mark.integration
 

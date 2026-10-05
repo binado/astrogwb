@@ -33,7 +33,7 @@ role's population seed. A table that is a base plus additions is written
 ``extends = "${a.b}"`` (:data:`MERGE_KEY`).
 
 A run owns its catalogs. ``[analysis.injection]`` and ``[analysis.proposal]``
-resolve to complete :class:`~astrogwb.metadata.CatalogMetadata` records, whose
+resolve to complete :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` records, whose
 keys name the catalog files.
 
 :data:`EXPERIMENT_BASE` is required in every experiment directory rather than

@@ -12,12 +12,14 @@ from astrogwb.waveform.generator.analytical import (
     inspiral_polarization_power,
     termination_frequency,
 )
+from astrogwb.waveform.metadata import WaveformMetadata
 from astrogwb.waveform.polarization_power import polarization_power
 
 __all__ = [
     "AnalyticInspiralGenerator",
     "PolarizationPowerGenerator",
     "RippleGenerator",
+    "WaveformMetadata",
     "apply_gw_distance_to_power",
     "chirp_mass",
     "inclination_factor",

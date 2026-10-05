@@ -19,15 +19,18 @@ from numpyro.infer import Predictive
 
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO, ISCO_ALPHA
 from astrogwb.gwb.spectral import inclination_averaging_factor
-from astrogwb.inference import poisson_counts_forward_model, validate_source_model
-from astrogwb.inference.models._forward import _sum_polarization_power
-from astrogwb.metadata import WaveformMetadata
 from astrogwb.populations import IsotropicInclination
+from astrogwb.simulators.spectra import (
+    poisson_counts_forward_model,
+    validate_source_model,
+)
+from astrogwb.simulators.spectra.forward import _sum_polarization_power
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
     PolarizationPowerGenerator,
     RippleGenerator,
+    WaveformMetadata,
 )
 
 N_EVENTS = 8

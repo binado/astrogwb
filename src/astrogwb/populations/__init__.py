@@ -1,10 +1,10 @@
 """Source populations declared as NumPyro models, addressed by registered name.
 
 One declaration serves generation and inference: a population's source model
-draws a catalog (:func:`~astrogwb.inference.utils.sample_sources`), and
+draws a catalog (:func:`~astrogwb.populations.evaluation.sample_sources`), and
 conditioning those draws back into it recovers the per-sample source density
 the importance weights divide by
-(:func:`~astrogwb.inference.utils.evaluate_sources`). Its merger-rate function
+(:func:`~astrogwb.populations.evaluation.evaluate_sources`). Its merger-rate function
 returns the one observer-frame scalar the same catalog's Poisson count and
 predicted spectrum need, or ``None`` when the population is a proposal density
 with no physical rate. That is what makes a catalog self-describing -- the file
@@ -35,6 +35,7 @@ from astrogwb.populations.bns_madau_dickinson import (
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
+from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.populations.orientation import IsotropicInclination
 from astrogwb.populations.registry import (
     DEFAULT_DENSITY_SITES,
@@ -53,6 +54,7 @@ __all__ = [
     "IsotropicInclination",
     "MergerRateFn",
     "Population",
+    "PopulationMetadata",
     "SourceFn",
     "amplitude_H0_fn",
     "amplitude_local_merger_rate_fn",

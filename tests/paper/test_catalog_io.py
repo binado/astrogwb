@@ -10,9 +10,11 @@ import numpy as np
 import pytest
 from catalog_fixtures import make_catalog
 
-from astrogwb.catalog import PolarizationPowerCatalog
-from astrogwb.catalog._io import CATALOG_FORMAT_NAME, validate_catalog_file
-from astrogwb.metadata import CatalogMetadata
+from astrogwb.simulators.core._io import CATALOG_FORMAT_NAME, validate_catalog_file
+from astrogwb.simulators.polarization_power import (
+    CatalogMetadata,
+    PolarizationPowerCatalog,
+)
 
 
 def test_hdf5_layout_metadata_and_order_round_trip(tmp_path: Path) -> None:

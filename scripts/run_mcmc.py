@@ -37,7 +37,7 @@ resolved, defaults-filled config lands beside the chain.
 
 The run config's ``[analysis.injection]`` and ``[analysis.proposal]`` declare
 what each role draws, and the catalogs are fetched the way a notebook fetches
-them: :func:`astrogwb.catalog.simulate` serves ``<--catalog-dir>/<key>.h5``,
+them: :func:`astrogwb.simulators.core.simulate` serves ``<--catalog-dir>/<key>.h5``,
 checked against the request, and generates it on a miss. Hits are served
 before JAX claims a device, so a file filed under the wrong key is refused
 cheaply; a miss is generated only after the runtime is configured, because
@@ -82,8 +82,8 @@ from astrogwb.paper.config.runs import (
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
-    from astrogwb.catalog import PolarizationPowerCatalog
     from astrogwb.paper.inference import AmplitudeMarginalization
+    from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
 
 logger = logging.getLogger("run_mcmc")
 
@@ -432,7 +432,8 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_chain_path_available(config, timestamp=timestamp, force=args.force)
 
-    from astrogwb.catalog import CatalogGenerator, simulate
+    from astrogwb.simulators.core import simulate
+    from astrogwb.simulators.polarization_power import CatalogGenerator
 
     # Serve every cached catalog before JAX claims a device: `simulate` checks
     # a hit against the request its role resolves to, so a file filed under

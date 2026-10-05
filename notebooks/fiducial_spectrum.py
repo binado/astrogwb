@@ -19,7 +19,6 @@ with app.setup(hide_code=True):
     from matplotlib.projections import register_projection
     from matplotlib.ticker import LogFormatterMathtext, ScalarFormatter
 
-    from astrogwb.catalog import SpectrumGenerator, simulate
     from astrogwb.detector import (
         effective_psd,
         log_frequency_noise_scale,
@@ -30,7 +29,6 @@ with app.setup(hide_code=True):
         spectral_snr_squared_per_bin,
         spectral_snr_squared_per_log_frequency,
     )
-    from astrogwb.metadata import SpectraMetadata
     from astrogwb.paper.config import (
         detector_registry,
         fiducials,
@@ -48,6 +46,8 @@ with app.setup(hide_code=True):
         save_figures,
         use_paper_style,
     )
+    from astrogwb.simulators.core import simulate
+    from astrogwb.simulators.spectra import SpectraMetadata, SpectrumGenerator
     from astrogwb.utils import years_to_seconds
 
 

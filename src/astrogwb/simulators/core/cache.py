@@ -6,13 +6,13 @@ artifact; and :func:`simulate`, which serves ``<cache_dir>/<key>.h5`` on a hit
 and calls the generator on a miss. :func:`simulate` knows nothing about any
 particular artifact. There are two instances of it:
 
-- :class:`~astrogwb.metadata.CatalogMetadata` and
-  :class:`~astrogwb.catalog.CatalogGenerator` for polarization-power catalogs;
-- :class:`~astrogwb.metadata.SpectraMetadata` and
-  :class:`~astrogwb.catalog.SpectrumGenerator` for spectral-density draws.
+- :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` and
+  :class:`~astrogwb.simulators.polarization_power.CatalogGenerator` for polarization-power catalogs;
+- :class:`~astrogwb.simulators.spectra.SpectraMetadata` and
+  :class:`~astrogwb.simulators.spectra.SpectrumGenerator` for spectral-density draws.
 
 The cache is content-addressed: an artifact lives at
-:func:`~astrogwb.metadata.artifact_path`, so asking for the same thing twice
+:func:`~astrogwb.simulators.core.artifact_path`, so asking for the same thing twice
 finds the same file and changing anything -- a seed, a kwarg, the package
 version -- names a different one. There is no index to keep in sync. A hit is
 still checked against the file's own record, which catches a file copied or
@@ -27,7 +27,7 @@ import tempfile
 from pathlib import Path
 from typing import Protocol, Self
 
-from astrogwb.metadata import Keyed, artifact_path
+from astrogwb.simulators.core.keys import Keyed, artifact_path
 
 __all__ = [
     "Artifact",

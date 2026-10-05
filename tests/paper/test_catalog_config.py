@@ -18,7 +18,6 @@ from numpyro import handlers
 from repo import REPO_ROOT
 
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.metadata import CatalogMetadata
 from astrogwb.paper.config.catalogs import (
     check_population_model,
     resolve_run_catalogs,
@@ -28,6 +27,7 @@ from astrogwb.populations import (
     Population,
     known_populations,
 )
+from astrogwb.simulators.polarization_power import CatalogMetadata
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 

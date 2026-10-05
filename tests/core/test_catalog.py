@@ -9,12 +9,16 @@ import jax
 import numpy as np
 import pytest
 
-from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid
-from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
+from astrogwb.populations import PopulationMetadata
+from astrogwb.simulators.polarization_power import (
+    CatalogMetadata,
+    PolarizationPowerCatalog,
+)
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
+    WaveformMetadata,
     inspiral_polarization_power,
 )
 

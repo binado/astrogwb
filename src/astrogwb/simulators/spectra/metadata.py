@@ -7,10 +7,10 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrogwb import __version__
-from astrogwb.metadata.catalog import content_key, widen_model_kwargs
-from astrogwb.metadata.population import PopulationMetadata
-from astrogwb.metadata.prior import PriorSpec
-from astrogwb.metadata.waveform import WaveformMetadata
+from astrogwb.metadata import PriorSpec
+from astrogwb.populations.metadata import PopulationMetadata, widen_model_kwargs
+from astrogwb.simulators.core.keys import content_key
+from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = ["Hyperparameter", "SpectraMetadata"]
 

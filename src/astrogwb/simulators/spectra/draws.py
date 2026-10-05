@@ -8,8 +8,8 @@ model, sizes its static event plate, runs
 objects -- a source model, a rate, a generator -- and records nothing, so a
 caller free to wrap its source model (in
 :class:`~astrogwb.populations.IsotropicInclination`, say) can still use it.
-The recorded, cached path is :class:`astrogwb.catalog.SpectrumGenerator`,
-which builds those objects from a :class:`~astrogwb.metadata.SpectraMetadata`
+The recorded, cached path is :class:`astrogwb.simulators.spectra.SpectrumGenerator`,
+which builds those objects from a :class:`~astrogwb.simulators.spectra.SpectraMetadata`
 and calls this.
 
 A hyperparameter is either a number, shared by every draw, or a numpyro
@@ -44,13 +44,13 @@ import numpyro.distributions as dist
 from numpy.typing import NDArray
 from numpyro.infer import Predictive
 
-from astrogwb.inference.models.fixed_counts_forward_model import (
+from astrogwb.populations import MergerRateFn, SourceFn
+from astrogwb.simulators.spectra.fixed_counts import (
     fixed_counts_forward_model,
 )
-from astrogwb.inference.models.poisson_counts_forward_model import (
+from astrogwb.simulators.spectra.poisson_counts import (
     poisson_counts_forward_model,
 )
-from astrogwb.populations import MergerRateFn, SourceFn
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
 

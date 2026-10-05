@@ -21,8 +21,11 @@ import numpy as np
 import pytest
 from repo import REPO_ROOT
 
-from astrogwb.catalog import CatalogGenerator, PolarizationPowerCatalog
-from astrogwb.metadata import CatalogMetadata
+from astrogwb.simulators.polarization_power import (
+    CatalogGenerator,
+    CatalogMetadata,
+    PolarizationPowerCatalog,
+)
 
 RequestFactory = Callable[..., CatalogMetadata]
 
