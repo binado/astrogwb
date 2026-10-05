@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import jax
 import numpy as np
 import pytest
 from astrogwb_mock_population import load_mock_population
@@ -11,8 +10,6 @@ from numpy.testing import assert_allclose
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO, ISCO_ALPHA
 from astrogwb.simulators.spectra.forward import PackedPowerSum, normalize_spectra
 from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
-
-jax.config.update("jax_enable_x64", True)
 
 #: Events per draw; includes an empty draw and counts that no chunk size divides.
 COUNTS = [0, 7, 1, 13, 9]

@@ -79,8 +79,16 @@ seed, and which runs use them.
 Forward-model spectra use the same cache: a `SpectraMetadata` (each
 hyperparameter a fixed number or a prior spec) plus one seed per draw, through
 `astrogwb.simulators.spectra.spectra({"seeds": split_seed(seed, n)}, metadata,
-cache_dir=..., chunk_size=...)`. Each seed is one draw, so a draw depends on its
-own seed alone.
+cache_dir=..., chunk_size=..., superbatch=...)`. Each seed is one draw, so a
+draw's events depend on its own seed alone (event `i` comes from a key folded with
+`i`, so `chunk_size` and `superbatch` change cost, not the draw). A spectrum is a
+population draw reduced through a waveform: `astrogwb.simulators.population`
+draws hyperparameters, exact counts and flat `source_parameters` (a
+`PopulationDrawMetadata`, which `SpectraMetadata` extends; `.sources` is the
+waveform-free part), and `PackedPowerSum` reduces every draw's events as one
+stream, so no draw is padded to the largest. Poisson and fixed counts share that
+path and differ only in the per-draw count and normalization. Build a
+`SpectraSimulator` once and reuse it in a loop -- it owns the compiled stages.
 The spectrum scripts default to `astrogwb.paper.cache.default_cache_dir() / "spectra"`,
 shared across worktrees. `platformdirs` honors `XDG_CACHE_HOME` on Linux and macOS,
 otherwise using the platform's user cache directory. CLI directory overrides

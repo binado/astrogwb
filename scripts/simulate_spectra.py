@@ -2,7 +2,7 @@
 
 The draws are determined by a :class:`~astrogwb.simulators.spectra.SpectraMetadata`
 -- waveform, population, each hyperparameter's fixed value or prior,
-observation time, count mode and source count or padding -- declared as the
+observation time, count mode and fixed source count -- declared as the
 ``[spectra]`` table of the ``--config`` layers, merged in process exactly as
 ``run_mcmc`` merges a run, and by the seeds the sibling ``[draws]`` table names
 (``seed`` split into ``num_draws`` children). This script calls the cached
@@ -50,6 +50,7 @@ from astrogwb.simulators.spectra import (
     SpectraMetadata,
     spectra,
 )
+from astrogwb.simulators.spectra.simulator import DEFAULT_SUPERBATCH
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=128,
         help="Sources per waveform chunk; changes memory, not the draws.",
+    )
+    parser.add_argument(
+        "--superbatch",
+        type=int,
+        default=DEFAULT_SUPERBATCH,
+        help=(
+            "Draws whose sources are held and reduced as one stream; changes "
+            "memory (about superbatch x mean count sources), not the draws."
+        ),
     )
     parser.add_argument(
         "--force",
@@ -140,7 +150,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         output.unlink(missing_ok=True)
     hit = output.exists()
 
-    outputs = spectra(inputs, metadata, cache_dir=cache_dir, chunk_size=args.chunk_size)
+    outputs = spectra(
+        inputs,
+        metadata,
+        cache_dir=cache_dir,
+        chunk_size=args.chunk_size,
+        superbatch=args.superbatch,
+    )
     catalog = SpectralDensityCatalog.from_arrays(outputs, metadata)
     logger.info(
         "%s spectra %s: count=%s num_events=%s, %d draws, %d frequencies, at %s",

@@ -387,7 +387,9 @@ only if it is bumped. Bump `version` in `pyproject.toml` whenever a change
 alters what a population draw or a waveform generator produces. Version
 **0.4.0** moved the seed out of the metadata and changed the file layout, so
 every file from earlier versions is unreachable; remove the old
-`outputs/catalogs/` and `outputs/spectra/` files and regenerate.
+`outputs/catalogs/` and `outputs/spectra/` files and regenerate. The spectra
+simulator's later split into a population draw and a packed reduction changes
+the spectra record, hence its keys, but no catalog draw, so it did not bump.
 
 The waveform metadata records `frequency_spacing`, `frequency_resolution` and
 `turnover_frequency` -- what was *requested* of the generating backend -- while
@@ -464,6 +466,35 @@ A follow-up notebook will compare sampled and analytically averaged ensemble
 means, variance and frequency covariance at fixed hyperparameters in both count
 modes. Detector noise, shot-noise likelihoods and SNR studies are separate work.
 
+## The population node
+
+A spectrum is a population draw reduced through a waveform, and the first half
+is a node of its own: `astrogwb.simulators.population.population`.
+
+- **metadata** -- a `PopulationDrawMetadata`: the population, each
+  hyperparameter's fixed value or prior, `observation_time`, `count`,
+  `num_events` and the version. No waveform, so two waveforms' spectra records
+  share one population key (`SpectraMetadata.sources.key()`).
+- **inputs** -- `{"seeds": ...}`, as for spectra.
+- **outputs** -- `counts` `(draws,)`, `total_merger_rate` `(draws,)`,
+  `hyperparameters/<name>` `(draws,)` and the **flat** `source_parameters/<name>`
+  columns of length `counts.sum()`; draw `b` owns the slice
+  `offsets[b]:offsets[b + 1]` of `PopulationDraws.offsets`.
+
+Draw once and reduce through several waveforms -- the same events, so the
+differences are the waveform's alone:
+
+```python
+draws = PopulationDraws.from_arrays(
+    population({"seeds": seeds}, metadata.sources, cache_dir=cache_dir)
+)
+spectra_a = SpectraSimulator(metadata_a).reduce(draws)
+spectra_b = SpectraSimulator(metadata_b).reduce(draws)
+```
+
+Persisting a population pays when it is reused like this; a simulation loop
+calls `PopulationSampler` or `spectra` and keeps nothing.
+
 ## The spectral-density node
 
 The sibling artifact is a `SpectralDensityCatalog`. It holds the forward
@@ -474,14 +505,17 @@ It is produced by the cached node `astrogwb.simulators.spectra.spectra`:
 
 - **metadata** -- a `SpectraMetadata`: the waveform, the population, each
   hyperparameter's fixed value *or* prior, `observation_time`, `count`,
-  `num_events`, `n_max_sigma`, and the `astrogwb` version. No seed and no draw
-  count.
+  `num_events`, and the `astrogwb` version. It extends the waveform-free
+  `PopulationDrawMetadata` (see [the population node](#the-population-node)); its
+  `.sources` is that part. No seed and no draw count.
 - **inputs** -- `{"seeds": ...}`, a 1-d `uint64` array with no duplicates, one
   seed per draw, usually `split_seed(seed, num_draws)`. Each seed is one draw
   (hyperparameters and sources alike), so a draw depends on its own seed alone,
   not on its batchmates, and the same seed gives the same spectrum in any call.
-- **settings** -- `chunk_size` only chunks the waveform reduction and consumes
-  no randomness, so it is not in the path.
+- **settings** -- `chunk_size` chunks the waveform reduction and sets the ladder
+  of sizes sources are drawn at; `superbatch` is how many draws are held and
+  reduced as one stream (memory is about `superbatch` times the mean count in
+  sources). Neither consumes randomness, so neither is in the path.
 
 ```python
 from astrogwb.paper.cache import default_cache_dir
@@ -512,21 +546,30 @@ A hyperparameter is a number to fix it for every draw, or a
 `{"dist", "kwargs"}` spec -- the format of the shared `[priors]` table, validated by
 `astrogwb.distributions.config.DistributionConfig` -- to draw it independently once per draw. Priors
 are data, so an edited bound re-keys the draws without a version bump. Each
-seed is split into a hyperparameter key and a forward-model key, and the static
-Poisson event plate is sized per draw.
+seed is split into a hyperparameter key, a count key and a source key, and event
+`i` of a draw is drawn from the source key folded with `i`. Counts are exact --
+there is no padded capacity -- and the first `n` events of a draw do not depend
+on how many were drawn, so `chunk_size` and `superbatch` change cost, never the
+draws.
+
+The events of every draw in a superbatch are reduced as **one flat stream**
+(`PackedPowerSum`): chunks of `chunk_size` sources run through the waveform and
+are added to their draw's row with a segment sum, so no draw is padded to the
+largest, one compilation serves any counts, and a prior that spreads the
+merger rate several-fold costs no more waveforms than the counts need.
+`SpectraSimulator` owns the built population, generator and jitted stages and is
+memoized per record, so a loop that calls `spectra` again does not recompile.
 
 `count="poisson"` (the default) uses `poisson_counts_forward_model`: it draws
 `N ~ Poisson(R * T)` and forms `S_h = A_inc * sum(P_i) / T`, with `T` in
-seconds and the observer-frame rate `R` in mergers per second. `n_max_sigma`
-defaults to `5.0`; draws above that padded static capacity retain their actual
-count but use only the capacity's sources. `num_events` must be omitted.
+seconds and the observer-frame rate `R` in mergers per second, from the
+realized sources of that exact count. `num_events` must be omitted.
 
-`count="fixed"` uses `fixed_counts_forward_model`: it draws exactly the
-positive integer `num_events` sources and forms
-`S_h = A_inc * R * sum(P_i) / num_events`. `n_events` is deterministic and
-equals that count in every row. `n_max_sigma` stays `None`; supplying padding
-is rejected. Both models require a population with a physical merger rate.
-They share batched waveform reduction and the inclination convention:
+`count="fixed"` draws exactly the positive integer `num_events` sources and
+forms `S_h = A_inc * R * sum(P_i) / num_events`. `n_events` is deterministic and
+equals that count in every row. Both modes require a population with a physical
+merger rate. They share the packed reduction -- the count mode only changes the
+per-draw count and the normalization factor -- and the inclination convention:
 `A_inc` averages face-on power over isotropic inclinations when the source
 model omits inclination, and is one when inclination is supplied.
 
@@ -535,11 +578,11 @@ model omits inclination, and is one when inclination is supplied.
 in both modes and is recorded in the key. It controls Poisson counts and
 cancels from fixed-count normalization.
 
-The complete normalized metadata, including the new count fields, is hashed.
-Previous spectrum cache addresses change; rerun spectrum generation under
-the new keys. There is no key migration. Population draws and waveform
-algorithms are unchanged, so this change does not bump the package version
-or invalidate polarization-power catalog caches.
+The complete normalized metadata is hashed. `n_max_sigma` is gone from the
+record, so earlier spectrum cache addresses are unreachable; rerun spectrum
+generation under the new keys. There is no key migration. Polarization-power
+catalog draws and waveform algorithms are unchanged, so this does not bump the
+package version or invalidate polarization-power catalog caches.
 
 `scripts/simulate_spectra.py` is the same node from a shell. It takes
 config layers like `run_mcmc` does -- the four shared `config/*.toml` layers,
@@ -574,11 +617,13 @@ uv run --extra paper python scripts/simulate_spectra.py \
 ```
 
 The spectrum layers are not run layers: no chain reads `[spectra]`. Callers
-using custom source-model compositions can still call the uncached
-`astrogwb.inference.draw_spectral_density` directly. Sampled inclination is
-already part of the registered BNS population and needs no custom composition.
+using custom source-model compositions can still build a
+`PopulationSampler` from a live source model and rate and reduce its draws with
+`PackedPowerSum`. Sampled inclination is already part of the registered BNS
+population and needs no custom composition.
 
-The `outputs/` group of a spectra file holds:
+Pass `--superbatch` to bound the memory of a large Poisson draw. The `outputs/`
+group of a spectra file holds:
 
 | Dataset | Shape | Meaning |
 | --- | --- | --- |

@@ -17,9 +17,9 @@
 # # Waveform-approximant spectral draws
 #
 # Compare stochastic-background spectra made from the *same events* with four
-# Ripple frequency-domain approximants. Reusing one PRNG key for each
-# `draw_spectral_density` call makes every call replay the same event count and source
-# latent variables; only `WaveformMetadata.approximant` changes. The solid line
+# Ripple frequency-domain approximants. One population draw -- event counts and
+# source parameters -- is reduced through each waveform, so only
+# `WaveformMetadata.approximant` changes. The solid line
 # is the median of the retained draws and the shaded region is the 10th--90th
 # percentile interval.
 #
@@ -27,8 +27,8 @@
 # $\iota$ from the isotropic law ($\cos\iota$ uniform on $[-1, 1]$).
 # Returning `inclination` also disables
 # the analytic $2/5$ face-on-to-isotropic rescaling, which is only valid for
-# quadrupole waveforms. The shared PRNG key then replays the same orientations
-# for every approximant.
+# quadrupole waveforms. The shared population draw then carries the same
+# orientations to every approximant.
 #
 # The lower panel shows fractional residuals
 # $(S_h^A-S_h^\mathrm{NRTidalv3})/S_h^\mathrm{NRTidalv3}$. Bins where the
@@ -45,10 +45,17 @@ import jax
 import matplotlib.pyplot as plt
 import numpy as np
 
-from astrogwb.paper.config import fiducials, population_model, waveform_generator
+from astrogwb.paper.config import (
+    fiducials,
+    population_metadata,
+    waveform_generator,
+    waveform_metadata,
+)
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
-from astrogwb.simulators.spectra import draw_spectral_density
+from astrogwb.simulators.core import split_seed
+from astrogwb.simulators.population import PopulationDraws, population
+from astrogwb.simulators.spectra import SpectraMetadata, SpectraSimulator
 
 # Configure precision before constructing a JAX array or querying a device.
 jax.config.update("jax_enable_x64", True)
@@ -61,8 +68,7 @@ use_paper_style(root=ROOT_DIR)
 # ## Shared simulation configuration
 #
 # There is one configuration for the population, hyperparameters, observing
-# duration, waveform grid, number of retained draws, batching, capacity-tail
-# rule, and seed. The four generators below receive the same grid settings;
+# duration, waveform grid, number of retained draws, batching, and seed. The four generators below receive the same grid settings;
 # their approximant is their only differing metadata field. Fiducials,
 # population, and waveform settings come from the shared
 # `astrogwb.paper.config` accessors, so this comparison cannot drift from the
@@ -81,7 +87,6 @@ class ComparisonConfig:
     observation_time: float
     draw_count: int
     chunk_size: int
-    n_max_sigma: float
     seed: int
 
 
@@ -91,7 +96,6 @@ CONFIG = ComparisonConfig(
     observation_time=1.0,
     draw_count=4,
     chunk_size=128,
-    n_max_sigma=5.0,
     seed=20250314,
 )
 
@@ -125,40 +129,49 @@ generators = {
 # %% [markdown]
 # ## Draw matched spectra
 #
-# `draw_spectral_density` splits its key the same way on every call, and
-# `Predictive` inside it assigns keys deterministically by sample-site name.
-# Calling it with the same fixed key therefore reproduces `n_events`, masses,
-# redshifts, spins, tidal deformabilities, and inclinations exactly for every
-# approximant. Splitting the key in the loop would instead produce unrelated
-# catalogs and would confound waveform differences with Monte Carlo variation.
-# Non-tidal approximants deliberately do not consume the shared tidal latent
-# variables.
+# The population is drawn once, by `population`, and every approximant reduces
+# that same draw: `n_events`, masses, redshifts, spins, tidal deformabilities
+# and inclinations are identical by construction. The population record carries
+# no waveform, so all four spectra records share one population key. Drawing a
+# separate catalog per approximant would instead confound waveform differences
+# with Monte Carlo variation. Non-tidal approximants deliberately do not consume
+# the shared tidal latent variables.
 
 # %%
-population = population_model(root=ROOT_DIR, **CONFIG.model_kwargs)
-source_model = population.source_model
-merger_rate_fn = population.merger_rate_fn
-if merger_rate_fn is None:
-    raise ValueError("configured population cannot simulate event counts")
 
-shared_key = jax.random.key(CONFIG.seed)
+
+def spectra_metadata(approximant: str) -> SpectraMetadata:
+    """The record of one approximant's spectra; the population part is shared."""
+    return SpectraMetadata(
+        waveform=waveform_metadata(root=ROOT_DIR, approximant=approximant),
+        population=population_metadata(root=ROOT_DIR, **CONFIG.model_kwargs),
+        hyperparameters=CONFIG.hyperparameters,
+        observation_time=CONFIG.observation_time,
+    )
+
+
+reference_metadata = spectra_metadata(REFERENCE_APPROXIMANT)
+shared_population = PopulationDraws.from_arrays(
+    population(
+        {"seeds": split_seed(CONFIG.seed, CONFIG.draw_count)},
+        reference_metadata.sources,
+        chunk_size=CONFIG.chunk_size,
+    )
+)
 
 spectral_draws: dict[str, np.ndarray] = {}
 event_counts: dict[str, np.ndarray] = {}
-for approximant, generator in generators.items():
-    draws = draw_spectral_density(
-        source_model=source_model,
-        merger_rate_fn=merger_rate_fn,
-        generator=generator,
-        hyperparameters=CONFIG.hyperparameters,
-        observation_time=CONFIG.observation_time,
-        num_draws=CONFIG.draw_count,
-        rng_key=shared_key,
-        chunk_size=CONFIG.chunk_size,
-        n_max_sigma=CONFIG.n_max_sigma,
-    )
-    spectral_draws[approximant] = draws.spectral_density
-    event_counts[approximant] = draws.n_events
+for approximant in APPROXIMANTS:
+    metadata = spectra_metadata(approximant)
+    assert metadata.sources == reference_metadata.sources
+    # The check that a population fits an approximant is off on purpose: the
+    # tidal population goes through non-tidal approximants, which ignore the
+    # deformabilities, so the comparison isolates the waveform.
+    reduced = SpectraSimulator(
+        metadata, chunk_size=CONFIG.chunk_size, validate_sources=False
+    ).reduce(shared_population)
+    spectral_draws[approximant] = np.asarray(reduced["spectral_density"])
+    event_counts[approximant] = np.asarray(reduced["n_events"])
 
 # The identical counts are a cheap explicit check that the stochastic traces
 # stayed paired. The fixed-key construction also pairs every named source site.

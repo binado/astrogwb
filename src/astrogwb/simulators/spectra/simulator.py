@@ -53,9 +53,21 @@ class SpectraSimulator:
     reduction -- peak waveform memory is ``(F, chunk_size)`` -- and the size
     ladder sources are drawn at, and consumes no randomness, which is why it is a
     setting and not metadata.
+
+    ``validate_sources=False`` skips that check. It exists for a deliberate
+    comparison across approximants that carry fewer degrees of freedom than a
+    population has -- a tidal population through a non-tidal waveform, whose
+    generator then ignores the deformabilities -- and is never the right choice
+    for a record that is cached, since the dropped columns would not show.
     """
 
-    def __init__(self, metadata: SpectraMetadata, *, chunk_size: int = 128) -> None:
+    def __init__(
+        self,
+        metadata: SpectraMetadata,
+        *,
+        chunk_size: int = 128,
+        validate_sources: bool = True,
+    ) -> None:
         import jax
 
         # x64 before any array: the rate evaluation and the draws must not
@@ -81,19 +93,19 @@ class SpectraSimulator:
         self._generator = metadata.waveform.build()
         self._reducer = PackedPowerSum(self._generator, chunk_size=chunk_size)
 
-        population = metadata.population.build()
-        validate_source_model(
-            {
-                **metadata.fixed,
-                **{
-                    name: float(prior.build().mean)
-                    for name, prior in metadata.sampled.items()
+        if validate_sources:
+            validate_source_model(
+                {
+                    **metadata.fixed,
+                    **{
+                        name: float(prior.build().mean)
+                        for name, prior in metadata.sampled.items()
+                    },
                 },
-            },
-            source_model=population.source_model,
-            generator=self._generator,
-            rng_key=seed_key(np.uint64(0)),
-        )
+                source_model=metadata.population.build().source_model,
+                generator=self._generator,
+                rng_key=seed_key(np.uint64(0)),
+            )
 
     @property
     def metadata(self) -> SpectraMetadata:

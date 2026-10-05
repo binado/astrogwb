@@ -106,11 +106,9 @@ def _():
     maximum_redshift = 20.0
 
     # One Poisson draw.
-    # chunk_size chunks the waveform generation;
-    # n_max_sigma sizes the static event plate a Poisson tail above the mean count.
+    # chunk_size chunks the waveform generation.
     seed = 41
     chunk_size = 1024
-    n_max_sigma = 5.0
 
     # Ordered legend from astrogwb.paper.plotting.DETECTOR_NETWORKS -- a network's
     # label lives there because nothing reads it without the order it sits in --
@@ -140,7 +138,6 @@ def _():
         maximum_redshift,
         minimum_frequency,
         minimum_redshift,
-        n_max_sigma,
         seed,
     )
 
@@ -378,7 +375,6 @@ def _(
     maximum_frequency,
     maximum_redshift,
     minimum_redshift,
-    n_max_sigma,
     observation_time,
     seed,
 ):
@@ -403,7 +399,6 @@ def _(
         ),
         hyperparameters=FIDUCIALS,
         observation_time=observation_time,
-        n_max_sigma=n_max_sigma,
     )
     _spectra = spectra(
         {"seeds": split_seed(seed, 1)},

@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, cast
 
-import jax
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose, assert_array_equal
@@ -23,8 +22,6 @@ from astrogwb.simulators.spectra import (
 )
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import WaveformMetadata
-
-jax.config.update("jax_enable_x64", True)
 
 FIDUCIALS = {
     "H0": 67.66,

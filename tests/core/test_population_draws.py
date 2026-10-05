@@ -6,7 +6,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-import jax
 import numpy as np
 import numpyro.distributions as dist
 import pytest
@@ -22,8 +21,6 @@ from astrogwb.simulators.population import (
     population,
 )
 from astrogwb.utils import years_to_seconds
-
-jax.config.update("jax_enable_x64", True)
 
 POPULATION = PopulationMetadata(
     model_name="bns_md_cosmological",
