@@ -29,19 +29,20 @@ from astrogwb._attrs import (
     stack_columns,
     unstack_columns,
 )
-from astrogwb.catalog._hdf5 import (
+from astrogwb.simulators.core._hdf5 import (
     h5py,
     require_datasets,
     write_h5,
 )
-from astrogwb.catalog.polarization_power import REDSHIFT_SITE, PolarizationPowerCatalog
-from astrogwb.catalog.spectral_density import (
+from astrogwb.simulators.polarization_power.catalog import (
+    REDSHIFT_SITE,
+    PolarizationPowerCatalog,
+)
+from astrogwb.simulators.polarization_power.metadata import CatalogMetadata
+from astrogwb.simulators.spectra.catalog import (
     SpectralDensityCatalog,
 )
-from astrogwb.metadata import (
-    CatalogMetadata,
-    SpectraMetadata,
-)
+from astrogwb.simulators.spectra.metadata import SpectraMetadata
 
 __all__ = [
     "CATALOG_FORMAT_NAME",

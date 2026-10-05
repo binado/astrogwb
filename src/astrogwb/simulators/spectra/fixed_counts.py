@@ -20,7 +20,7 @@ from astrogwb.gwb.spectral import inclination_averaging_factor
 from astrogwb.populations import MergerRateFn, SourceFn
 from astrogwb.waveform import PolarizationPowerGenerator
 
-from ._forward import _require_luminosity_distance, _sum_polarization_power
+from .forward import _require_luminosity_distance, _sum_polarization_power
 
 __all__ = ["fixed_counts_forward_model"]
 

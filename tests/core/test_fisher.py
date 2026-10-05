@@ -17,7 +17,6 @@ from astrogwb_mock_population import (
 from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
 
-from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.inference import (
     SpectralDensityFn,
@@ -26,6 +25,7 @@ from astrogwb.inference import (
     spectral_density_jacobian,
 )
 from astrogwb.populations import DEFAULT_DENSITY_SITES
+from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
 
 
 @pytest.fixture

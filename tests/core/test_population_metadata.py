@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from astrogwb.metadata import PopulationMetadata
+from astrogwb.populations import PopulationMetadata
 
 MODEL_KWARGS = {"minimum_redshift": 0.1, "maximum_redshift": 10.0, "n_grid": 32}
 

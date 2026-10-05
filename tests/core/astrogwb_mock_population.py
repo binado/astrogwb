@@ -26,19 +26,22 @@ import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 
-from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.spectral import build_importance_spectrum
-from astrogwb.inference.utils import evaluate_sources, sample_sources
-from astrogwb.metadata import CatalogMetadata, PopulationMetadata, WaveformMetadata
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
     MergerRateFn,
     Population,
+    PopulationMetadata,
     SourceFn,
     build_population,
 )
-from astrogwb.waveform import AnalyticInspiralGenerator
+from astrogwb.populations.evaluation import evaluate_sources, sample_sources
+from astrogwb.simulators.polarization_power import (
+    CatalogMetadata,
+    PolarizationPowerCatalog,
+)
+from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
 
 
 def derived_columns(
@@ -49,7 +52,7 @@ def derived_columns(
     """Replay a source model at fixed source values, returning declared outputs.
 
     The test-side counterpart of the batched replay inside
-    :func:`astrogwb.inference.utils.sample_sources`, and the same code path:
+    :func:`astrogwb.populations.evaluation.sample_sources`, and the same code path:
     sample sites take the supplied values, deterministic outputs are the
     model's recomputation. The result is the model's own return mapping -- the
     mapping that defines the source-output set -- so a stored deterministic is
@@ -198,7 +201,7 @@ def build_mock_catalog(
     :class:`~astrogwb.waveform.AnalyticInspiralGenerator`, so the catalog is
     a genuine closed-form inspiral bank -- no Ripple backend, no persisted
     file -- and
-    :meth:`~astrogwb.catalog.PolarizationPowerCatalog.from_generator`
+    :meth:`~astrogwb.simulators.polarization_power.PolarizationPowerCatalog.from_generator`
     self-validates,
     so a malformed mock fails at construction rather than deep inside a model.
 

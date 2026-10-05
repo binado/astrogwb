@@ -94,7 +94,7 @@ guard catalog. The draws are identical; only the recorded fiducials differ.
 
 ### The key, and what invalidates it
 
-`CatalogMetadata` (in `astrogwb.metadata`) is the waveform settings, the
+`CatalogMetadata` (in `astrogwb.simulators.polarization_power`) is the waveform settings, the
 population record with its seed, the fiducials, the sample count, and the
 `astrogwb` version. Its `key()` is the first 16 hex digits of a SHA-256 over
 its canonical JSON. Anything in the record invalidates the file by renaming
@@ -138,7 +138,7 @@ arrays remain arguments.
 
 ```python
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
-from astrogwb.inference.utils import evaluate_sources, sample_sources
+from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 
 source_model, merger_rate_fn = build_population(
     "bns_md_cosmological", minimum_redshift=0.0, maximum_redshift=20.0, n_grid=4096
@@ -272,7 +272,8 @@ omit these rules, so a missing catalog stops the run with a
 From Python the same generator sits behind the same cache:
 
 ```python
-from astrogwb.catalog import CatalogGenerator, simulate
+from astrogwb.simulators.polarization_power import CatalogGenerator
+from astrogwb.simulators.core import simulate
 from astrogwb.paper.catalogs import run_catalog
 
 # a committed run's catalog: resolved from its config, generated on a miss
@@ -344,10 +345,10 @@ Earlier formats require regeneration.
 
 ## The catalog cache
 
-Catalogs and spectra share one cache, `astrogwb.catalog.simulate(metadata,
+Catalogs and spectra share one cache, `astrogwb.simulators.core.simulate(metadata,
 generator, cache_dir)`, built from three pieces per artifact:
 
-| | metadata (`astrogwb.metadata`) | generator (`astrogwb.catalog`) | artifact |
+| | metadata | generator | artifact |
 | --- | --- | --- | --- |
 | catalogs | `CatalogMetadata` | `CatalogGenerator()` | `PolarizationPowerCatalog` |
 | spectra | `SpectraMetadata` | `SpectrumGenerator(batch_size)` | `SpectralDensityCatalog` |
@@ -460,12 +461,12 @@ predicted spectra never materializes `(F, N)` waveforms.
 
 It is produced by three pieces:
 
-- **metadata** -- a `SpectraMetadata` (`astrogwb.metadata`): the waveform,
+- **metadata** -- a `SpectraMetadata` (`astrogwb.simulators.spectra`): the waveform,
   the population with its seed, each hyperparameter's fixed value *or* prior,
   `num_draws`, `observation_time`, `count`, `num_events`, `n_max_sigma`, and
   the `astrogwb` version.
   `key()` is its content hash.
-- **generator** -- `SpectrumGenerator(batch_size)` (`astrogwb.catalog`)
+- **generator** -- `SpectrumGenerator(batch_size)` (`astrogwb.simulators.spectra`)
   turns the metadata into draws. `batch_size` only chunks the waveform
   reduction and consumes no randomness, so it lives here, not in the key.
 - **`simulate(metadata, generator, cache_dir)`** serves
@@ -474,8 +475,9 @@ It is produced by three pieces:
   artifact, and is the same cache catalogs go through.
 
 ```python
-from astrogwb.catalog import SpectrumGenerator, simulate
-from astrogwb.metadata import SpectraMetadata
+from astrogwb.simulators.spectra import SpectrumGenerator
+from astrogwb.simulators.core import simulate
+from astrogwb.simulators.spectra import SpectraMetadata
 from astrogwb.paper.cache import default_cache_dir
 from astrogwb.paper.config import fiducials, population_metadata, waveform_metadata
 

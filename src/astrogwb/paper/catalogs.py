@@ -1,14 +1,14 @@
 """Loading the two catalogs a run samples against, and the checks between them.
 
 A catalog is a file: ``outputs/catalogs/<key>.h5``, where ``<key>`` is the
-content hash of the :class:`~astrogwb.metadata.CatalogMetadata` a run's role
+content hash of the :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` a run's role
 resolves to. The workflow builds them with ``scripts/generate_catalog.py``;
 :func:`run_catalog` reaches the same files from a notebook, generating one on
 a miss. Either way the density its samples follow comes back off the file's
 own population record rather than being reassembled from the run config.
 
 What used to live here has mostly moved to where it belongs:
-:meth:`~astrogwb.catalog.PolarizationPowerCatalog.restrict_redshift`
+:meth:`~astrogwb.simulators.polarization_power.PolarizationPowerCatalog.restrict_redshift`
 narrows the samples and the recorded population together, and the proposal density is evaluated by
 :func:`~astrogwb.importance.spectral.build_importance_spectrum` directly from
 the catalog's own source model. Fiducial GW propagation is gone
@@ -24,15 +24,14 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import ArrayLike
 
-from astrogwb.catalog import (
-    CatalogGenerator,
-    PolarizationPowerCatalog,
-    check_metadata,
-    simulate,
-)
-from astrogwb.metadata import CatalogMetadata
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import CATALOGS_ROOT, assemble_run
+from astrogwb.simulators.core import check_metadata, simulate
+from astrogwb.simulators.polarization_power import (
+    CatalogGenerator,
+    CatalogMetadata,
+    PolarizationPowerCatalog,
+)
 
 
 def load_run_catalog(
@@ -45,7 +44,7 @@ def load_run_catalog(
     must also record exactly that metadata, which is how a run refuses a file
     handed to the wrong role or built from a draw it no longer asks for.
 
-    This is the by-path counterpart of :func:`~astrogwb.catalog.simulate`, for
+    This is the by-path counterpart of :func:`~astrogwb.simulators.core.simulate`, for
     a caller handed a file rather than a request -- the figure scripts and the
     SNR helper -- so a missing file raises instead of being drawn.
     """

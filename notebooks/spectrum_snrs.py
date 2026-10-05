@@ -30,11 +30,6 @@ with app.setup(hide_code=True):
     from numpyro import handlers
     from scipy.stats import gaussian_kde
 
-    from astrogwb.catalog import (
-        SpectralDensityCatalog,
-        SpectrumGenerator,
-        simulate,
-    )
     from astrogwb.detector import (
         effective_psd,
         gaussian_bin_scale,
@@ -43,7 +38,6 @@ with app.setup(hide_code=True):
     from astrogwb.frequency import frequency_mask
     from astrogwb.gwb import spectral_snr
     from astrogwb.inference import gwb_amplitude_marginalized_model
-    from astrogwb.metadata import SpectraMetadata
     from astrogwb.paper.cache import default_cache_dir
     from astrogwb.paper.config import (
         detector_registry,
@@ -56,6 +50,12 @@ with app.setup(hide_code=True):
     from astrogwb.paper.config.runs import FIGURES_DIR
     from astrogwb.paper.plotting import save_figures, use_paper_style
     from astrogwb.populations.bns_madau_dickinson import amplitude_H0_fn
+    from astrogwb.simulators.core import simulate
+    from astrogwb.simulators.spectra import (
+        SpectralDensityCatalog,
+        SpectraMetadata,
+        SpectrumGenerator,
+    )
     from astrogwb.utils import years_to_seconds
 
     # Statistics of a residual sample; each takes (samples, axis) so that the

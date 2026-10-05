@@ -12,14 +12,17 @@ import numpy as np
 import pytest
 
 import astrogwb
-from astrogwb.catalog import (
-    CatalogGenerator,
-    PolarizationPowerCatalog,
+from astrogwb.simulators.core import (
+    CATALOG_KEY_LENGTH,
     artifact_path,
     check_metadata,
     simulate,
 )
-from astrogwb.metadata import CATALOG_KEY_LENGTH, CatalogMetadata
+from astrogwb.simulators.polarization_power import (
+    CatalogGenerator,
+    CatalogMetadata,
+    PolarizationPowerCatalog,
+)
 
 RequestFactory = Callable[..., CatalogMetadata]
 
@@ -305,8 +308,8 @@ import sys
 
 import jax
 
-from astrogwb.catalog import CatalogGenerator
-from astrogwb.metadata import CatalogMetadata
+from astrogwb.simulators.polarization_power import CatalogGenerator
+from astrogwb.simulators.polarization_power import CatalogMetadata
 
 assert not jax.config.x64_enabled, "x64 was already on before generation"
 catalog = CatalogGenerator()(

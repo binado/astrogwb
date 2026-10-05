@@ -63,7 +63,10 @@ against a generator's waveform family::
 
     from numpyro.infer import Predictive
 
-    from astrogwb.inference import poisson_counts_forward_model, validate_source_model
+    from astrogwb.simulators.spectra import (
+        poisson_counts_forward_model,
+        validate_source_model,
+    )
 
     validate_source_model(
         params, source_model=source_model, generator=generator,
@@ -99,7 +102,7 @@ from astrogwb.populations import MergerRateFn, SourceFn
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
 
-from ._forward import _require_luminosity_distance, _sum_polarization_power
+from .forward import _require_luminosity_distance, _sum_polarization_power
 
 _TOTAL_MERGER_RATE_SITE = "total_merger_rate"
 

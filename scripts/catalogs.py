@@ -22,9 +22,10 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from astrogwb.metadata import CatalogMetadata, artifact_path
 from astrogwb.paper.config.catalogs import RunCatalogs, resolve_run_catalogs
 from astrogwb.paper.config.runs import CATALOGS_ROOT
+from astrogwb.simulators.core import artifact_path
+from astrogwb.simulators.polarization_power import CatalogMetadata
 
 #: Construction kwargs every catalog shares by default, left out of the
 #: summary so what distinguishes one catalog from another stands out.

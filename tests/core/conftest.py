@@ -36,7 +36,7 @@ from astrogwb_mock_population import (
     load_mock_population,
 )
 
-from astrogwb.catalog import PolarizationPowerCatalog
+from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

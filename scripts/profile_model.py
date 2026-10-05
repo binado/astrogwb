@@ -52,7 +52,7 @@ from astrogwb.paper.config.runs import (
 from astrogwb.paper.runtime import add_runtime_arguments, configure_runtime
 
 if TYPE_CHECKING:
-    from astrogwb.catalog import PolarizationPowerCatalog
+    from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
 
 logger = logging.getLogger("profile_model")
 
@@ -179,7 +179,8 @@ def main(argv: list[str] | None = None) -> None:
     # Serve both catalogs before JAX starts, the same way scripts/run_mcmc.py
     # does -- what is profiled must be the production model on production
     # inputs, including the proposal density each file records for itself.
-    from astrogwb.catalog import CatalogGenerator, simulate
+    from astrogwb.simulators.core import simulate
+    from astrogwb.simulators.polarization_power import CatalogGenerator
 
     catalog_dir = args.catalog_dir.resolve()
     injection_catalog, proposal_catalog = (

@@ -9,7 +9,7 @@ still doing work.
 Import from explicit submodules rather than this package root:
 
 - :mod:`astrogwb.populations` -- populations as NumPyro model declarations
-- :mod:`astrogwb.catalog` -- the catalog that records the density that drew it
+- :mod:`astrogwb.simulators.polarization_power` -- the catalog that records the density that drew it
 - :mod:`astrogwb.importance.spectral` -- catalog preparation and the weighted spectrum
 - :mod:`astrogwb.importance.weights` -- the importance-weight arithmetic
 - :mod:`astrogwb.importance.diagnostics` -- effective sample size helper

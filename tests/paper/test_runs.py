@@ -16,7 +16,6 @@ import pytest
 from config_fixtures import write_defaults
 from repo import REPO_ROOT
 
-from astrogwb.metadata import CatalogMetadata
 from astrogwb.paper.config.catalogs import (
     check_catalog_requests,
     resolve_run_catalogs,
@@ -33,6 +32,7 @@ from astrogwb.paper.config.runs import (
     run_config_paths,
 )
 from astrogwb.paper.utils import load_mapping
+from astrogwb.simulators.polarization_power import CatalogMetadata
 
 
 def _import_script(name: str):

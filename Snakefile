@@ -2,7 +2,7 @@ import re
 import shlex
 from pathlib import Path
 
-from astrogwb.metadata import artifact_path
+from astrogwb.simulators.core import artifact_path
 from astrogwb.paper.config.catalogs import resolve_run_catalogs
 from astrogwb.paper.config.runs import (
     DETECTOR_DEFAULT_PATHS,
@@ -12,9 +12,10 @@ from astrogwb.paper.config.runs import (
 from astrogwb.paper.plotting import DETECTOR_NETWORK_RUNS
 
 # Keying the catalogs reaches pydantic: the key is taken over a validated
-# CatalogMetadata, which is the price of one canonical form. `artifact_path`
-# lives in astrogwb.metadata, not astrogwb.catalog, so naming a catalog file
-# does not import the catalog stack.
+# CatalogMetadata, which is the price of one canonical form. Importing the
+# records imports JAX (their parent packages do) but does not initialize the
+# XLA backend; `artifact_path` lives in astrogwb.simulators.core, which imports
+# no physics at all.
 
 
 JAX_PLATFORM = config.get("jax_platforms", "cuda")

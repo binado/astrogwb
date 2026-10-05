@@ -38,7 +38,7 @@ any working directory but the repository root) and, for the priors, a numpyro
 import on every ``--dry-run``. :func:`priors` therefore imports
 :func:`~astrogwb.paper.config.mcmc.materialize_prior` inside its own body;
 :func:`waveform_generator` imports
-:class:`~astrogwb.metadata.WaveformMetadata` the same way. A
+:class:`~astrogwb.waveform.WaveformMetadata` the same way. A
 subprocess test in ``tests/paper/test_cli.py`` pins both halves.
 
 Paths are relative to the working directory, which for the workflow and every
@@ -66,10 +66,10 @@ from astrogwb.paper.config.runs import load_base
 if TYPE_CHECKING:
     from numpyro.distributions import Distribution
 
-    from astrogwb.metadata import PopulationMetadata, WaveformMetadata
     from astrogwb.paper.config.detectors import DetectorRegistry
+    from astrogwb.populations import PopulationMetadata
     from astrogwb.populations.registry import Population
-    from astrogwb.waveform import PolarizationPowerGenerator
+    from astrogwb.waveform import PolarizationPowerGenerator, WaveformMetadata
 
 __all__ = [
     "detector_registry",
@@ -199,7 +199,7 @@ def waveform_generator(
     any other name is a Ripple approximant.
 
     The settings are validated through
-    :class:`~astrogwb.metadata.WaveformMetadata` rather than coerced
+    :class:`~astrogwb.waveform.WaveformMetadata` rather than coerced
     field by field here, so this accessor and a catalog request reach a generator
     down the same path and an override is checked instead of trusted.
 
@@ -215,11 +215,11 @@ def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetada
     """The waveform the default draw, ``[catalog]``, uses, as a record.
 
     What :func:`waveform_generator` builds, before it is built: the form a
-    :class:`~astrogwb.metadata.SpectraMetadata` or a catalog request carries.
+    :class:`~astrogwb.simulators.spectra.SpectraMetadata` or a catalog request carries.
     Keyword arguments override the file and are validated, not trusted.
     Touches no JAX, so it is safe before ``configure_runtime``.
     """
-    from astrogwb.metadata import WaveformMetadata
+    from astrogwb.waveform import WaveformMetadata
 
     settings = {**_table(root, "catalog", "waveform"), **kwargs}
     return WaveformMetadata.model_validate(settings)
@@ -257,14 +257,14 @@ def population_metadata(
 
     ``seed`` overrides the file's, which is the default draw's own. Keyword
     arguments override ``model_kwargs``, validated rather than trusted, so this
-    accessor and :class:`~astrogwb.metadata.CatalogMetadata` reach a record down
+    accessor and :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` reach a record down
     the same path. An already-built record is re-derived with
-    :meth:`~astrogwb.metadata.PopulationMetadata.with_model_kwargs`.
+    :meth:`~astrogwb.populations.PopulationMetadata.with_model_kwargs`.
 
     Touches no JAX, so it is safe before ``configure_runtime``; building the
     record's population is not, for the reason :func:`population_model` gives.
     """
-    from astrogwb.metadata import PopulationMetadata
+    from astrogwb.populations import PopulationMetadata
 
     table = _table(root, "catalog", "population")
     table["model_kwargs"] = {**table.get("model_kwargs", {}), **kwargs}

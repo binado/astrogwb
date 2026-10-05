@@ -37,7 +37,6 @@ from config_fixtures import example_raw
 from numpyro.infer.util import log_density
 from repo import REPO_ROOT
 
-from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.cosmology import log_gw_em_ratio
 from astrogwb.detector import gaussian_bin_scale
 from astrogwb.gwb import spectral_density
@@ -54,6 +53,7 @@ from astrogwb.paper.inference import (
 )
 from astrogwb.paper.utils import load_mapping
 from astrogwb.populations import DEFAULT_DENSITY_SITES
+from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
 from astrogwb.utils import years_to_seconds
 
 pytestmark = pytest.mark.integration

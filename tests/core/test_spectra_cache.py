@@ -13,14 +13,15 @@ import numpyro.distributions as dist
 import pytest
 
 import astrogwb
-from astrogwb.catalog import (
+from astrogwb.metadata import PriorSpec
+from astrogwb.simulators.core import artifact_path, simulate
+from astrogwb.simulators.spectra import (
     SpectralDensityCatalog,
+    SpectraMetadata,
     SpectrumGenerator,
-    artifact_path,
-    simulate,
+    draw_spectral_density,
+    padded_event_capacity,
 )
-from astrogwb.inference import draw_spectral_density, padded_event_capacity
-from astrogwb.metadata import PriorSpec, SpectraMetadata
 
 MetadataFactory = Callable[..., SpectraMetadata]
 

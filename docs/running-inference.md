@@ -37,7 +37,7 @@ stack is open-ended, which is the practical gain over a fixed assembled
 artifact.
 
 The catalogs are fetched the way a notebook fetches them:
-`astrogwb.catalog.simulate` looks each role's request up by key in
+`astrogwb.simulators.core.simulate` looks each role's request up by key in
 `--catalog-dir` (default `outputs/catalogs`), checks a hit against the request,
 and generates a miss. Hits are served before JAX starts, so a file filed under
 the wrong key fails cheaply; a miss is generated only after the runtime is

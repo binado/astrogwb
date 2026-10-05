@@ -43,7 +43,6 @@ from gwmock_signal.stochastic.overlap import detector_names
 from numpyro import handlers
 from numpyro.distributions import Distribution
 
-from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.detector import (
     DetectorSpec,
     Sensitivity,
@@ -76,6 +75,7 @@ from astrogwb.populations import (
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
+from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
 
 logger = logging.getLogger(__name__)
 

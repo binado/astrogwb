@@ -65,7 +65,6 @@ import pandas as pd
 from matplotlib.axes import Axes as MplAxes
 from matplotlib.projections import register_projection
 
-from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.constants import ISCO_ALPHA, SECONDS_PER_YEAR
 from astrogwb.detector import effective_psd, gaussian_bin_scale
 from astrogwb.distributions.rates import madau_dickinson_rate
@@ -78,8 +77,6 @@ from astrogwb.gwb import (
     uniform_prior_mass_moments,
 )
 from astrogwb.importance.spectral import build_importance_spectrum
-from astrogwb.inference.utils import sample_sources
-from astrogwb.metadata import WaveformMetadata
 from astrogwb.paper.config import (
     detector_registry,
     fiducials,
@@ -87,7 +84,9 @@ from astrogwb.paper.config import (
     population_model,
 )
 from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
-from astrogwb.waveform import AnalyticInspiralGenerator
+from astrogwb.populations.evaluation import sample_sources
+from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
+from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
 
 # gwpy, pulled in by gwmock-signal behind astrogwb.detector, replaces
 # matplotlib's registered rectilinear axes with its own subclass on import.

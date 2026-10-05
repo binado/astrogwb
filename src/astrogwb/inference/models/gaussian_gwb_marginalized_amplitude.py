@@ -34,8 +34,8 @@ End-to-end sketch (toy data; runnable as-is):
     from astrogwb.distributions.amplitude import quadrature_grid
     from astrogwb.detector import gaussian_bin_scale
     from astrogwb.inference import (
-        gwb_amplitude_marginalized_model,
         amplitude_reconstruction_model,
+        gwb_amplitude_marginalized_model,
     )
 
     # --- One-time setup: the prior and the grid the amplitude direction is

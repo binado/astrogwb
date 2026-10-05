@@ -13,10 +13,10 @@ import pytest
 from pydantic import ValidationError
 
 from astrogwb.constants import ISCO_ALPHA
-from astrogwb.metadata import WaveformMetadata
 from astrogwb.waveform import (
     AnalyticInspiralGenerator,
     RippleGenerator,
+    WaveformMetadata,
 )
 from astrogwb.waveform.generator._ripple import (
     PRECESSING_MODELS,

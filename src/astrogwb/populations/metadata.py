@@ -9,9 +9,9 @@ formats drifted into naming the same thing differently.
 
 This module never imports h5py or the population registry at
 module scope: populating the registry means importing the models, which
-reaches JAX, and :mod:`astrogwb.metadata` is deliberately importable without
-it. :meth:`build` and :meth:`check_registered` take that import in their own
-bodies, which is the only edge from here back into the population layer.
+reaches JAX, and nothing here may *initialize* the XLA backend. :meth:`build`
+and :meth:`check_registered` take that import in their own bodies, which is the
+only edge from here back into the registry.
 
 The record is deliberately not a cross-check: nothing here compares the
 declaration against the arrays it travels with. It is the single statement of
@@ -22,14 +22,14 @@ is made by the analysis that reweights the draw, and is declared there.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:
     from astrogwb.populations.registry import Population
 
-__all__ = ["ModelKwargs", "PopulationMetadata"]
+__all__ = ["ModelKwargs", "PopulationMetadata", "widen_model_kwargs"]
 
 
 #: Construction kwargs travel inside the metadata JSON, so they must be
@@ -37,6 +37,18 @@ __all__ = ["ModelKwargs", "PopulationMetadata"]
 #: is what makes the round trip type-stable: an ``int`` stays an ``int`` and a
 #: ``float`` stays a ``float`` and the inclination choice stays a ``bool``.
 type ModelKwargs = dict[str, float | int | bool]
+
+
+def widen_model_kwargs(population: dict[str, Any]) -> None:
+    """Widen numeric construction kwargs to ``float``, preserving booleans.
+
+    A setting spelled ``2`` in one config and ``2.0`` in another names the
+    same draw, so both must hash alike.
+    """
+    population["model_kwargs"] = {
+        name: value if isinstance(value, bool) else float(value)
+        for name, value in population["model_kwargs"].items()
+    }
 
 
 class PopulationMetadata(BaseModel):

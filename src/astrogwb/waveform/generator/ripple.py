@@ -10,7 +10,6 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from astrogwb.frequency import frequency_grid
-from astrogwb.metadata import WaveformMetadata
 from astrogwb.utils import require_x64
 from astrogwb.waveform.generator._ripple import (
     build_power_kernel,
@@ -19,6 +18,7 @@ from astrogwb.waveform.generator._ripple import (
     ripple_parameters,
 )
 from astrogwb.waveform.generator.base import PolarizationPowerGenerator
+from astrogwb.waveform.metadata import WaveformMetadata
 
 __all__ = ["RippleGenerator"]
 

@@ -2,20 +2,20 @@
 
 The workflow's ``waveform_catalog`` rule is the caller: every run's
 ``[analysis.injection]`` and ``[analysis.proposal]`` are validated into
-:class:`~astrogwb.metadata.CatalogMetadata` records when the DAG is built, and
+:class:`~astrogwb.simulators.polarization_power.CatalogMetadata` records when the DAG is built, and
 each distinct record becomes one job writing ``outputs/catalogs/<key>.h5``.
 This script is handed that record as JSON and builds it with
-:func:`astrogwb.catalog.simulate` and a
-:class:`~astrogwb.catalog.CatalogGenerator`, which writes it atomically.
+:func:`astrogwb.simulators.core.simulate` and a
+:class:`~astrogwb.simulators.polarization_power.CatalogGenerator`, which writes it atomically.
 
-The output must be the record's :func:`~astrogwb.metadata.artifact_path` in
+The output must be the record's :func:`~astrogwb.simulators.core.artifact_path` in
 its own directory. The workflow names the file and the record separately, so
 this is where a mismatch between the two -- which would file one draw under
 another's address -- is refused. An output that already exists is a cache hit:
 it is checked against the record and left alone, unless ``--force`` asks for it
 to be drawn again.
 
-Outside the workflow, :func:`astrogwb.catalog.simulate` is the whole thing, and
+Outside the workflow, :func:`astrogwb.simulators.core.simulate` is the whole thing, and
 needs no script.
 
 Usage::
@@ -34,9 +34,9 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from astrogwb.catalog import CatalogGenerator, simulate
-from astrogwb.metadata import CatalogMetadata, artifact_path
 from astrogwb.paper.config.catalogs import check_population_model
+from astrogwb.simulators.core import artifact_path, simulate
+from astrogwb.simulators.polarization_power import CatalogGenerator, CatalogMetadata
 
 logger = logging.getLogger(__name__)
 
