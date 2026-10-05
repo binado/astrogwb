@@ -1,25 +1,27 @@
 """Forward-model spectral-density draws, drawn from a :class:`SpectraMetadata`."""
 
 from astrogwb.simulators.spectra.catalog import SpectralDensityCatalog
-from astrogwb.simulators.spectra.draws import (
-    SpectralDensityDraws,
-    draw_spectral_density,
-    padded_event_capacity,
+from astrogwb.simulators.spectra.forward import (
+    PackedPowerSum,
+    normalize_spectra,
+    validate_source_model,
 )
-from astrogwb.simulators.spectra.fixed_counts import fixed_counts_forward_model
-from astrogwb.simulators.spectra.forward import validate_source_model
 from astrogwb.simulators.spectra.metadata import Hyperparameter, SpectraMetadata
 from astrogwb.simulators.spectra.poisson_counts import poisson_counts_forward_model
-from astrogwb.simulators.spectra.simulator import spectra
+from astrogwb.simulators.spectra.simulator import (
+    SpectraSimulator,
+    get_simulator,
+    spectra,
+)
 
 __all__ = [
     "Hyperparameter",
+    "PackedPowerSum",
     "SpectraMetadata",
+    "SpectraSimulator",
     "SpectralDensityCatalog",
-    "SpectralDensityDraws",
-    "draw_spectral_density",
-    "fixed_counts_forward_model",
-    "padded_event_capacity",
+    "get_simulator",
+    "normalize_spectra",
     "poisson_counts_forward_model",
     "spectra",
     "validate_source_model",

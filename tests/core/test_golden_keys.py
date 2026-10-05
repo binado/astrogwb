@@ -14,13 +14,16 @@ from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import PopulationMetadata
 from astrogwb.simulators.core import split_seed
 from astrogwb.simulators.polarization_power import CatalogMetadata, polarization_power
+from astrogwb.simulators.population import population
 from astrogwb.simulators.spectra import SpectraMetadata, spectra
 from astrogwb.waveform import WaveformMetadata
 
 CATALOG_KEY = "1a7d74705a3804d5"
-SPECTRA_KEY = "cac130cede94ba04"
+SPECTRA_KEY = "ae70dadcc56cadd5"
+POPULATION_KEY = "72e6e431f2316e25"
 CATALOG_PATH = "polarization_power-1a7d74705a3804d5-a6d964d9e7c90939.h5"
-SPECTRA_PATH = "spectra-cac130cede94ba04-ccfa6eba0950be8d.h5"
+SPECTRA_PATH = "spectra-ae70dadcc56cadd5-ccfa6eba0950be8d.h5"
+POPULATION_PATH = "population-72e6e431f2316e25-ccfa6eba0950be8d.h5"
 SPLIT_SEEDS = [15502207689350057789, 3547686303310379753, 4445048811325225245]
 
 
@@ -97,3 +100,14 @@ def test_spectra_metadata_key_is_stable() -> None:
 def test_spectra_path_is_stable() -> None:
     path = spectra.path({"seeds": split_seed(41, 3)}, _spectra_metadata(), "cache")
     assert path.name == SPECTRA_PATH
+
+
+def test_population_key_is_the_waveform_free_part_of_a_spectra_record() -> None:
+    assert _spectra_metadata().sources.key() == POPULATION_KEY
+
+
+def test_population_path_is_stable() -> None:
+    path = population.path(
+        {"seeds": split_seed(41, 3)}, _spectra_metadata().sources, "cache"
+    )
+    assert path.name == POPULATION_PATH

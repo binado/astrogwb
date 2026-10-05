@@ -209,7 +209,7 @@ def test_cached_node_round_trips_and_matches_the_sampler(tmp_path: Path) -> None
         columns = cast(dict[str, Any], outputs["source_parameters"])
         for name, values in expected.items():
             np.testing.assert_array_equal(columns[name], values)
-    assert expected["redshift"].shape == (int(np.sum(fresh["counts"])),)
+    assert expected["redshift"].shape == (int(np.asarray(fresh["counts"]).sum()),)
 
 
 def test_cached_node_rejects_repeated_and_mistyped_seeds() -> None:

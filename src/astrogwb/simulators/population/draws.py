@@ -71,6 +71,16 @@ class PopulationDraws:
     counts: NDArray[np.int64]
     source_parameters: dict[str, NDArray[Any]]
 
+    @classmethod
+    def from_arrays(cls, outputs: Mapping[str, Any]) -> PopulationDraws:
+        """Wrap the arrays :func:`~astrogwb.simulators.population.population` returns."""
+        return cls(
+            hyperparameters=dict(outputs["hyperparameters"]),
+            total_merger_rate=np.asarray(outputs["total_merger_rate"]),
+            counts=np.asarray(outputs["counts"], dtype=np.int64),
+            source_parameters=dict(outputs["source_parameters"]),
+        )
+
     @property
     def offsets(self) -> NDArray[np.int64]:
         """Start of each draw's slice, plus the total, shape ``(draws + 1,)``."""

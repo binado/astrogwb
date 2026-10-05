@@ -19,7 +19,7 @@ drawn from a prior once per row.
 Everything that determined the draws is one
 :class:`~astrogwb.simulators.spectra.SpectraMetadata`: the waveform and population, each
 hyperparameter's fixed value or prior, the observation time, the count mode,
-fixed source count or Poisson padding, and the ``astrogwb`` version. Its
+fixed source count, and the ``astrogwb`` version. Its
 :meth:`~astrogwb.simulators.spectra.SpectraMetadata.key` names the cache file
 with the seeds input of :func:`~astrogwb.simulators.spectra.spectra`; the draw
 count is the length of that input. The columns are what
@@ -165,11 +165,6 @@ class SpectralDensityCatalog:
     def num_events(self) -> int | None:
         """Sources per realization in fixed mode; ``None`` for Poisson mode."""
         return self._metadata.num_events
-
-    @property
-    def n_max_sigma(self) -> float | None:
-        """Poisson plate padding in standard deviations; ``None`` for fixed counts."""
-        return self._metadata.n_max_sigma
 
     @property
     def observation_time(self) -> float:
