@@ -10,8 +10,8 @@ with the A-space machinery under test.
 
 Three behaviours are pinned against the general model, one per test:
 
-- the marginalized model's density of :math:`\alpha` is the :math:`\varphi`
-  marginal of the general model's, with no leftover constant;
+- the marginalized model's density of :math:`\alpha`, and its gradient, are the
+  :math:`\varphi` marginal of the general model's, with no leftover constant;
 - the :math:`\varphi` posterior reconstructed as a mixture of
   :class:`~astrogwb.distributions.amplitude.AmplitudeConditional` over
   :math:`\alpha` is the :math:`\alpha` marginal of the general model's;
@@ -38,6 +38,7 @@ from jax.typing import ArrayLike
 from numpyro import handlers
 from numpyro.distributions.transforms import Transform
 from numpyro.infer import Predictive
+from numpyro.infer.util import log_density
 
 from astrogwb.distributions.amplitude import (
     AmplitudeConditional,
@@ -211,13 +212,33 @@ def _statistics(model: PowerLawModel, alpha: jax.Array) -> tuple[jax.Array, jax.
     return sites["amplitude_mle"], sites["template_optimal_snr"]
 
 
-def test_marginalized_model_alpha_density_matches_numerical_marginal(
-    model: PowerLawModel, log_joint_2d: jax.Array, log_marginalized: jax.Array
+def test_marginalized_model_alpha_density_and_gradient_match_numerical_marginal(
+    model: PowerLawModel,
 ) -> None:
-    numerical = _log_trapezoid(log_joint_2d, model.case.phi_grid, axis=1)
+    phi = model.case.phi_grid
+
+    def numerical(alpha: jax.Array) -> jax.Array:
+        """``log p(alpha, d)`` by quadrature of the general model over ``phi``."""
+        log_joint = jax.vmap(
+            lambda value: log_density(
+                model.general, (), {}, {"phi": value, "alpha": alpha}
+            )[0]
+        )(phi)
+        return _log_trapezoid(log_joint, phi, axis=0)
+
+    def marginalized(alpha: jax.Array) -> jax.Array:
+        return log_density(model.marginalized, (), {}, {"alpha": alpha})[0]
+
+    # The gradient is what NUTS follows, and it reaches the amplitude's prior
+    # bound through the statistics' dependence on alpha.
+    value, grad = jax.vmap(jax.value_and_grad(marginalized))(model.alpha_grid)
+    expected_value, expected_grad = jax.vmap(jax.value_and_grad(numerical))(
+        model.alpha_grid
+    )
 
     # No free constant: the Jacobian is carried by the pushforward prior.
-    np.testing.assert_allclose(log_marginalized, numerical, rtol=0, atol=1e-6)
+    np.testing.assert_allclose(value, expected_value, rtol=0, atol=1e-6)
+    np.testing.assert_allclose(grad, expected_grad, rtol=0, atol=1e-5)
 
 
 def test_amplitude_conditional_mixture_matches_numerical_amplitude_marginal(
@@ -273,15 +294,14 @@ def test_amplitude_conditional_log_prob_matches_conditioned_slice(
 
 def _uniform_log_normalizer(
     lower: float, upper: float, mle: float, snr: float
-) -> tuple[float, float]:
-    """Closed-form ``(ln Z, d ln Z / d mle)`` for a ``Uniform(lower, upper)`` prior."""
+) -> float:
+    """Closed-form ``ln Z`` for a ``Uniform(lower, upper)`` prior."""
     lo, hi = snr * (lower - mle), snr * (upper - mle)
     mass = jnp.exp(jax.scipy.special.log_ndtr(hi)) - jnp.exp(
         jax.scipy.special.log_ndtr(lo)
     )
     log_z = 0.5 * jnp.log(2 * jnp.pi) - jnp.log(snr * (upper - lower)) + jnp.log(mass)
-    pdf = jax.scipy.stats.norm.pdf
-    return float(log_z), float(-snr * (pdf(hi) - pdf(lo)) / mass)
+    return float(log_z)
 
 
 @pytest.mark.parametrize("snr", [1e2, 1e4])
@@ -290,23 +310,9 @@ def test_log_normalizer_is_independent_of_snr_resolution(snr: float) -> None:
     mle = lower + 3.0 / snr  # the bound sits 3 sigma_A from the peak
     conditional = AmplitudeConditional(mle, snr, prior=dist.Uniform(lower, upper))
 
-    expected, _ = _uniform_log_normalizer(lower, upper, mle, snr)
+    expected = _uniform_log_normalizer(lower, upper, mle, snr)
 
     np.testing.assert_allclose(conditional.log_normalizer, expected, rtol=0, atol=1e-9)
-
-
-def test_log_normalizer_gradient_sees_the_bound() -> None:
-    lower, upper, snr = 1.0, 2.0, 1e3
-    prior = dist.Uniform(lower, upper)
-
-    def log_normalizer(mle: jax.Array) -> jax.Array:
-        return AmplitudeConditional(mle, snr, prior=prior).log_normalizer
-
-    for mle in (lower + 0.5 / snr, lower - 0.5 / snr):
-        _, expected = _uniform_log_normalizer(lower, upper, mle, snr)
-        np.testing.assert_allclose(
-            jax.grad(log_normalizer)(jnp.asarray(mle)), expected, rtol=1e-6
-        )
 
 
 def test_support_bounds_of_a_pushforward_are_ordered() -> None:
