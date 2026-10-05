@@ -306,6 +306,10 @@ def test_an_unknown_population_name_fails_clearly() -> None:
         ).get_population()
 
 
+#: Hyperparameters a Madau-Dickinson law needs to be built.
+FIDUCIALS_FOR_LAW = POPULATION_RECORD["fiducials"]
+
+
 def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> None:
     """Truncating changes the density's *normalization*, so both must move."""
     catalog = _catalog(np.array([0.1, 0.5, 1.5, 19.0]))
@@ -322,11 +326,12 @@ def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> 
     assert restricted.population_redshift_kwargs["maximum_redshift"] == 2.0
     # Everything else about the record travels unchanged.
     assert restricted.fiducials == catalog.fiducials
-    # Both reconstructed callables see the narrowed window: they are built
-    # from the one flat kwargs mapping restrict_redshift rewrites.
-    for bound in restricted.get_population():
-        assert bound.keywords["minimum_redshift"] == 0.3  # ty: ignore[unresolved-attribute]
-        assert bound.keywords["maximum_redshift"] == 2.0  # ty: ignore[unresolved-attribute]
+    # The reconstructed population is built from the rewritten redshift record,
+    # so the law it samples is normalized on the narrowed window.
+    redshift_fn = restricted.get_population().source_model.keywords["redshift"]  # ty: ignore[unresolved-attribute]
+    distribution = redshift_fn(FIDUCIALS_FOR_LAW).distribution
+    assert float(distribution.minimum_redshift) == 0.3
+    assert float(distribution.maximum_redshift) == 2.0
 
 
 def test_restrict_redshift_leaves_the_original_untouched() -> None:
