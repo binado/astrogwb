@@ -27,11 +27,9 @@ hyperparameters alone. Evaluating or sampling one is the job of
 The factory's own signature is the kwargs schema: a construction key no
 population takes raises ``TypeError`` here rather than being filtered away.
 
-Registration also declares which hyperparameters the population lets a run
-marginalize analytically (:func:`amplitude_parameters`). That is a property of
-the density, not of the analysis: ``H0`` factors out of the spectrum only while
-the normalized redshift law is independent of it, which a delay measured in Gyr
-breaks. The declaration defaults to none, so a new population opts in.
+A population may itself be composed of registered sub-models (see
+:mod:`astrogwb.populations.redshift` and :mod:`astrogwb.populations.mass`);
+those use :class:`ComponentRegistry` too.
 
 The name pins the name, not the mathematics: re-pointing a registered key at a
 different density would be invisible here.
@@ -41,17 +39,17 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from inspect import signature
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import jax
 from jax.typing import ArrayLike
 
 __all__ = [
     "DEFAULT_DENSITY_SITES",
+    "ComponentRegistry",
     "MergerRateFn",
     "Population",
     "SourceFn",
-    "amplitude_parameters",
     "build_population",
     "known_populations",
     "register_population",
@@ -87,8 +85,57 @@ class Population(NamedTuple):
 
 type PopulationFactory = Callable[..., Population]
 
-_REGISTRY: dict[str, PopulationFactory] = {}
-_AMPLITUDE_PARAMETERS: dict[str, tuple[str, ...]] = {}
+
+class ComponentRegistry:
+    """A name-to-factory registry for one kind of building block.
+
+    Populations and their sub-models (redshift laws, mass laws) share this one
+    mechanism, so an unknown name and a construction kwarg the factory does not
+    take fail the same way everywhere: by naming the component and listing what
+    is registered or accepted, never as a ``TypeError`` about a private
+    factory function.
+    """
+
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+        self._factories: dict[str, Callable[..., Any]] = {}
+
+    def register[F: Callable[..., Any]](self, name: str) -> Callable[[F], F]:
+        """Register a factory under ``name``, returning it unchanged."""
+
+        def decorate(fn: F) -> F:
+            if name in self._factories:
+                raise ValueError(f"{self.kind} {name!r} is already registered")
+            self._factories[name] = fn
+            return fn
+
+        return decorate
+
+    def build(self, name: str, **kwargs: Any) -> Any:
+        """Call the factory registered as ``name`` with its construction kwargs."""
+        try:
+            factory = self._factories[name]
+        except KeyError:
+            known = ", ".join(self.names())
+            raise KeyError(
+                f"unknown {self.kind} {name!r}; registered {self.kind}s are: {known}"
+            ) from None
+        try:
+            signature(factory).bind(**kwargs)
+        except TypeError as error:
+            accepted = ", ".join(signature(factory).parameters)
+            raise TypeError(
+                f"{self.kind} {name!r}: {error}; its construction kwargs are: "
+                f"{accepted}"
+            ) from None
+        return factory(**kwargs)
+
+    def names(self) -> tuple[str, ...]:
+        """Every registered name, in sorted order."""
+        return tuple(sorted(self._factories))
+
+
+_POPULATIONS = ComponentRegistry("population")
 
 #: Density factors a catalog selects when nothing narrower is requested.
 #: Every registered source model declares ``redshift`` -- the one source
@@ -100,76 +147,32 @@ DEFAULT_DENSITY_SITES: tuple[str, ...] = (
 )
 
 
-def register_population[F: PopulationFactory](
-    name: str, *, amplitude_parameters: tuple[str, ...] = ()
-) -> Callable[[F], F]:
+def register_population[F: PopulationFactory](name: str) -> Callable[[F], F]:
     """Register a population factory under ``name``, returning it unchanged.
 
     Physical and proposal populations share this one registry -- a proposal is
     just the population a catalog happened to be drawn from. The registered
     factory takes construction kwargs by keyword and returns a
     :class:`Population`; :func:`build_population` calls it.
-
-    ``amplitude_parameters`` names the hyperparameters whose effect on this
-    population's spectrum is a pure overall scaling, and so may be marginalized
-    analytically. Empty by default: claiming one wrongly gives a silently wrong
-    posterior, while omitting one only costs a sampled dimension.
     """
-
-    def decorate(fn: F) -> F:
-        if name in _REGISTRY:
-            raise ValueError(f"population {name!r} is already registered")
-        _REGISTRY[name] = fn
-        _AMPLITUDE_PARAMETERS[name] = tuple(amplitude_parameters)
-        return fn
-
-    return decorate
+    return _POPULATIONS.register(name)
 
 
-def build_population(name: str, **kwargs: float | bool) -> Population:
+def build_population(name: str, **kwargs: Any) -> Population:
     """Build a registered population from its construction kwargs.
 
-    ``kwargs`` is the flat construction mapping a catalog persists, passed
-    whole: the redshift window and grid every population takes, plus whatever
-    else that one takes. An unknown name raises ``KeyError`` listing the
-    registered populations; a kwarg the named population does not take
-    raises ``TypeError`` naming the population and the kwargs it accepts.
-
-    The kwargs are bound against the factory's signature before it is
-    called, so a mismatch is reported against the *population* rather than
-    surfacing as a ``TypeError`` about a private factory function.
+    An unknown name raises ``KeyError`` listing the registered populations; a
+    kwarg the named population does not take raises ``TypeError`` naming the
+    population and the kwargs it accepts. The kwargs are bound against the
+    factory's signature first, so a mismatch is reported against the
+    *population*.
 
     The returned callables hash **by identity**. Build the population once per
     run and reuse it.
     """
-    try:
-        factory = _REGISTRY[name]
-    except KeyError:
-        known = ", ".join(known_populations())
-        raise KeyError(
-            f"unknown population {name!r}; registered populations are: {known}"
-        ) from None
-    try:
-        signature(factory).bind(**kwargs)
-    except TypeError as error:
-        accepted = ", ".join(signature(factory).parameters)
-        raise TypeError(
-            f"population {name!r}: {error}; its construction kwargs are: {accepted}"
-        ) from None
-    return factory(**kwargs)
-
-
-def amplitude_parameters(name: str) -> tuple[str, ...]:
-    """The hyperparameters population ``name`` may marginalize analytically."""
-    try:
-        return _AMPLITUDE_PARAMETERS[name]
-    except KeyError:
-        known = ", ".join(known_populations())
-        raise KeyError(
-            f"unknown population {name!r}; registered populations are: {known}"
-        ) from None
+    return _POPULATIONS.build(name, **kwargs)
 
 
 def known_populations() -> tuple[str, ...]:
     """Every registered population name, in sorted order."""
-    return tuple(sorted(_REGISTRY))
+    return _POPULATIONS.names()

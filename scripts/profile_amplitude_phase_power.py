@@ -26,7 +26,7 @@ import numpy as np
 import ripplegw
 from ripplegw.interfaces import AmplitudePhaseWaveform
 
-from astrogwb.populations import build_population
+from astrogwb.paper.config import population_model
 from astrogwb.populations.evaluation import sample_sources
 from astrogwb.waveform import RippleGenerator, WaveformMetadata
 from astrogwb.waveform.generator._ripple import ripple_parameters
@@ -139,8 +139,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.events < 1 or args.repeats < 1:
         raise ValueError("--events and --repeats must be positive")
 
-    source_model, _ = build_population(
-        "bns_md_cosmological",
+    source_model, _ = population_model(
         minimum_redshift=0.3,
         maximum_redshift=20.0,
         n_grid=256,

@@ -69,10 +69,13 @@ The fields a role resolves to:
    `astrogwb.paper.config.waveform_generator()` builds the default draw's
    generator for a notebook.
 2. `population` — a `PopulationMetadata`: `model_name`, a key in the
-   `astrogwb.populations` registry, `model_kwargs`, the construction settings
-   bound into it. The named populations live in `config/populations.toml`; a
-   run that changes a named population overrides it at its source
-   (`[populations.guard.model_kwargs] uniform_mixing_fraction = 0.01`). The
+   `astrogwb.populations` registry; `redshift` and `mass`, the registered
+   sub-models it is composed from (each a `model` name and its `kwargs`); and
+   `model_kwargs`, the population's own construction settings (inclination
+   choice, spin and tidal bounds). The named populations live in
+   `config/populations.toml`; a run that changes a named population overrides
+   it at its source
+   (`[populations.guard.redshift.kwargs] uniform_mixing_fraction = 0.01`). The
    analysis target is `analysis.population`, a separate record. There is no
    seed in it: a seed picks a realization of the density, so it is an input
    beside the metadata, stated per role in `[analysis.seeds]` (default 41 for
@@ -119,13 +122,13 @@ changes with it, so the next `snakemake catalogs` regenerates everything.
 A catalog names a population by its key in the `astrogwb.populations`
 registry, and supplies the construction kwargs it takes -- the guarded proposal
 above, for example. The redshift window and grid resolution are referenced
-from `[populations.cosmological]` and the hyperparameters from the run's
-`[fiducials]`; `model_kwargs` is one mapping, passed whole to the factory. The
-population declares its density factors and source outputs.
+from `[populations.cosmological.redshift.kwargs]` and the hyperparameters from
+the run's `[fiducials]`; each kwargs mapping is passed whole to its factory.
+The population declares its density factors and source outputs.
 
 A role inherits every field it does not name, whether or not the population it
 names reads all of it: the guard inherits `[fiducials]` whole,
-`local_merger_rate` included, even though `bns_md_uniform_mixture` declares no
+`local_merger_rate` included, even though the guard redshift model declares no
 merger rate. That is right for a guard mixture: it is a sampling density, and
 nothing reads a rate off a proposal (see below).
 
@@ -135,17 +138,31 @@ persisted `module:function` string is a reference that silently rots. An
 unknown key fails pre-flight, in `snakemake validate`, listing what is
 registered — before a GPU job is queued.
 
-A registered population is a *factory*: it takes the construction kwargs and
-returns the source model and the merger rate together, each a
-`functools.partial` with those kwargs bound. Hyperparameters and source
-arrays remain arguments.
+A registered population is a *factory*: it takes its sub-models and construction
+kwargs and returns the source model and the merger rate together, each a
+`functools.partial` with those bound. Hyperparameters and source arrays remain
+arguments. The sub-models are registered the same way, in their own
+registries: a *redshift model* builds a `RedshiftFn` (hyperparameters in, a
+`RedshiftLaw` out: the density `redshift` is drawn from and the luminosity
+distance on its cosmology), and a *mass model* builds a function declaring the
+two mass sites. The merger rate is read off the redshift law's own
+normalization, so a rate cannot be paired with a density that is not its own.
 
 ```python
-from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
+from astrogwb.populations import (
+    DEFAULT_DENSITY_SITES,
+    build_mass_model,
+    build_population,
+    build_redshift_model,
+)
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 
 source_model, merger_rate_fn = build_population(
-    "bns_md_cosmological", minimum_redshift=0.0, maximum_redshift=20.0, n_grid=4096
+    "bns_madau_dickinson",
+    redshift=build_redshift_model(
+        "madau_dickinson", minimum_redshift=0.0, maximum_redshift=20.0, n_grid=4096
+    ),
+    mass=build_mass_model("ordered_uniform"),
 )
 
 sources = sample_sources(source_model, key, params, num_samples=1024)
@@ -192,19 +209,32 @@ A bound partial hashes by identity: build it once per run and close a
 JIT-compiled function over it, while hyperparameters and source arrays are
 traced. To compile sampling, keep `num_samples` static.
 
-### Mass models
+### Redshift models, mass models and propagation
+
+`bns_madau_dickinson` is the one registered BNS population. Its redshift law
+and mass law are registered sub-models chosen per population record, and its
+spin and tidal-deformability bounds are plain kwargs (`maximum_spin`, default
+0.05; `maximum_tidal_deformability`, default 2000).
+
+Redshift models: `madau_dickinson`; `madau_dickinson_time_delayed` (the
+Madau-Dickinson law as a formation rate, delayed by `p(tau) ~ tau^alpha`;
+kwargs `minimum_delay`, `maximum_formation_redshift`, `n_delay_nodes`); and
+`madau_dickinson_uniform_guard` (see below).
+
+Propagation is always modified and read from the hyperparameters: when
+`xi_0` is among them the declared distance is multiplied by
+`Xi(z) = xi_0 + (1 - xi_0)(1 + z)^-xi_n`, and `xi_0 = 1` is standard
+propagation. Without `xi_0` the standard distance is used.
 
 Component masses are an ordered pair: `source_frame_mass_1` is the larger one.
-Two mass laws share the rest of the BNS Madau-Dickinson declaration:
+Two registered mass models:
 
-- **Ordered uniforms** (`bns_md_cosmological`, `bns_md_modified_propagation`,
-  `bns_md_uniform_mixture`). Parameters `minimum_mass` and `mass_width`; the
+- **Ordered uniforms** (`ordered_uniform`). Parameters `minimum_mass` and `mass_width`; the
   fiducial support is `[1.0, 2.5]` solar masses, with constant joint density
   `2 / width**2` on the ordered triangle. That triangle is compact, so a NUTS
   step that moves the edges can send catalog samples outside the support and
   drop their importance weights to zero.
-- **Ordered Gaussians** (`bns_md_gaussian_cosmological`,
-  `bns_md_gaussian_modified_propagation`, `bns_md_gaussian_uniform_mixture`).
+- **Ordered Gaussians** (`ordered_gaussian`).
   Both components are i.i.d. `Normal(mass_mean, mass_sigma)`, then ordered.
   The joint density `2 N(m1) N(m2)` lives on the half-plane `m1 >= m2`, with
   no compact mass support, so moving `(mass_mean, mass_sigma)` never zeros a
@@ -214,8 +244,8 @@ Two mass laws share the rest of the BNS Madau-Dickinson declaration:
 
 ### Guard mixtures are one density, not two draws
 
-`bns_md_uniform_mixture` blends a fraction ε of uniform-in-redshift draws into
-the Madau-Dickinson density with `numpyro.distributions.MixtureGeneral`. The
+The `madau_dickinson_uniform_guard` redshift model blends a fraction ε of
+uniform-in-redshift draws into the Madau-Dickinson density with `numpyro.distributions.MixtureGeneral`. The
 same mixture that draws the redshifts evaluates their log density, so the
 recorded guard fraction can never be something other than what was drawn. It
 replaced a pair of gwmock graphs differing only in their redshift block, a
@@ -308,7 +338,8 @@ handle.attrs["metadata"] = metadata.model_dump_json()
 
 The JSON record nests `waveform` and `population`, and includes `fiducials`,
 `num_samples`, and `version`. The population records its registered
-`model_name` and construction `model_kwargs`. Reading the file back, a caller
+`model_name`, its `redshift` and `mass` sub-model records, and construction
+`model_kwargs`. Reading the file back, a caller
 validates the attribute with `CatalogMetadata.model_validate_json()`; Pydantic
 handles the serialization and validation without a field-by-field HDF5 codec.
 
@@ -428,7 +459,7 @@ sample_inclination = false
 ```
 
 Or construct it directly with
-`build_population("bns_md_cosmological", sample_inclination=False, **kwargs)`.
+`build_population("bns_madau_dickinson", sample_inclination=False, redshift=..., mass=...)`.
 This omits the inclination sample site and column. Waveform generators then use
 face-on power, and contraction applies the analytic `2/5` factor. It preserves
 the quadrupole ensemble mean but removes orientation fluctuations; it is not a
@@ -605,7 +636,7 @@ shapes and that every column agrees on the draw count.
 ## What is *not* in the file: the analysis window
 
 The recorded settings are the *generation* window, `[0.0, 20.0]`. The analysis
-window is narrower — `analysis.population.model_kwargs.minimum_redshift = 0.3`
+window is narrower — `analysis.population.redshift.kwargs.minimum_redshift = 0.3`
 in the shared `[analysis]` table — so the per-sample log density cannot be
 baked into the catalog: it depends on a truncation the run chooses, not on
 anything generation knows.

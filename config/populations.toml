@@ -1,12 +1,14 @@
-# Named populations, each a complete astrogwb.populations.PopulationMetadata: a
-# registered model and its construction kwargs. A seed is not part of a
+# Named populations, each a complete astrogwb.populations.PopulationMetadata: the
+# registered population, the registered redshift and mass models it is composed
+# from (each a `model` and its `kwargs`), and its own construction kwargs. A seed
+# is not part of a
 # population: it picks one realization of the density, so a run states the seed
 # of each catalog role in [analysis.seeds].
 # A catalog or an analysis target picks one by reference --
 # population = "${populations.guard}".
 #
-# The redshift window is stated once, in [populations.cosmological], and every
-# other population's model_kwargs `extends` its model_kwargs, so narrowing it
+# The redshift window is stated once, in [populations.cosmological.redshift.kwargs],
+# and every other population `extends` the cosmological one, so narrowing it
 # narrows them all. A reference merges as the table it names, so one role can
 # change a single field -- a size -- and keep the rest. To change a population
 # for every role that names it in one run -- a mixing fraction --
@@ -15,46 +17,55 @@
 # The population every catalog is drawn from unless its role names another.
 # Sample isotropic inclination to retain orientation fluctuations. Set
 # sample_inclination = false for explicit analytic quadrupole averaging.
+# Modified propagation is always on and read from the hyperparameters:
+# xi_0 = 1 (the shared fiducial) is standard propagation.
 [populations.cosmological]
-model_name = "bns_md_cosmological"
-model_kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 4096, sample_inclination = true }
+model_name = "bns_madau_dickinson"
+model_kwargs = { sample_inclination = true }
+mass = { model = "ordered_uniform" }
+
+[populations.cosmological.redshift]
+model = "madau_dickinson"
+kwargs = { minimum_redshift = 0.35, maximum_redshift = 20.0, n_grid = 4096 }
 
 # The guarded proposal: the cosmological population mixed with a uniform
 # component, so no region the target reaches has vanishing proposal density.
 # It declares no merger rate, so it can only ever be a proposal.
 [populations.guard]
-model_name = "bns_md_uniform_mixture"
+extends = "${populations.cosmological}"
 
-[populations.guard.model_kwargs]
-extends = "${populations.cosmological.model_kwargs}"
+[populations.guard.redshift]
+model = "madau_dickinson_uniform_guard"
+
+[populations.guard.redshift.kwargs]
 uniform_mixing_fraction = 0.1
 
 # Mergers delayed from star formation, drawn for the time-delay injection.
 [populations.time_delayed]
-model_name = "bns_md_time_delayed_cosmological"
+extends = "${populations.cosmological}"
 
-[populations.time_delayed.model_kwargs]
-extends = "${populations.cosmological.model_kwargs}"
+[populations.time_delayed.redshift]
+model = "madau_dickinson_time_delayed"
+
+[populations.time_delayed.redshift.kwargs]
 minimum_delay = 0.02
 maximum_formation_redshift = 20.0
 n_delay_nodes = 48
 
-# The analysis target every run's weights are evaluated at. It reduces exactly
-# to the cosmological population at xi_0 = 1, which is how a run that does not
-# sample the propagation parameters gets the standard law. The grid is coarser
+# The analysis target every run's weights are evaluated at. It is the
+# cosmological population: a run that does not sample the propagation
+# parameters keeps xi_0 = 1 and gets the standard law. The grid is coarser
 # than a draw's: it is the grid the spectral integral runs on. A target is
 # evaluated, not drawn from.
 [populations.target]
-model_name = "bns_md_modified_propagation"
+extends = "${populations.cosmological}"
 
-[populations.target.model_kwargs]
-extends = "${populations.cosmological.model_kwargs}"
+[populations.target.redshift.kwargs]
 n_grid = 256
 
 # The time-delayed population as an analysis target, on the target's grid.
 [populations.time_delayed_target]
-model_name = "bns_md_time_delayed_cosmological"
+extends = "${populations.time_delayed}"
 
-[populations.time_delayed_target.model_kwargs]
-extends = "${populations.time_delayed.model_kwargs}"
-n_grid = "${populations.target.model_kwargs.n_grid}"
+[populations.time_delayed_target.redshift.kwargs]
+n_grid = "${populations.target.redshift.kwargs.n_grid}"

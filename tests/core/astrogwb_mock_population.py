@@ -30,11 +30,11 @@ from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
+    ComponentMetadata,
     MergerRateFn,
     Population,
     PopulationMetadata,
     SourceFn,
-    build_population,
 )
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 from astrogwb.simulators.polarization_power import (
@@ -67,8 +67,8 @@ def derived_columns(
 #: ``local_merger_rate`` is in Gpc^-3 yr^-1; the rest feed the Madau-Dickinson
 #: rate shape and the flat-LambdaCDM cosmology. ``xi_0 = 1`` makes the modified
 #: propagation law reduce exactly to the cosmological one, which is what lets a
-#: catalog drawn from ``bns_md_cosmological`` serve as its own proposal against
-#: a ``bns_md_modified_propagation`` target.
+#: catalog drawn at the standard law serve as its own proposal against a
+#: modified-propagation target.
 FIDUCIALS: dict[str, float] = {
     "H0": 67.66,
     "Omega_m": 0.3096,
@@ -114,26 +114,35 @@ def make_redshift_grid(n_grid: int = N_GRID) -> jax.Array:
     return jnp.linspace(Z_MIN, Z_MAX, n_grid)
 
 
-def mock_population(n_grid: int = N_GRID) -> Population:
-    """The analytic-average fixture: Madau-Dickinson, standard propagation."""
-    return build_population(
-        "bns_md_cosmological",
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        n_grid=n_grid,
-        sample_inclination=False,
+def mock_population_metadata(n_grid: int = N_GRID) -> PopulationMetadata:
+    """The analytic-average fixture's record: Madau-Dickinson, uniform masses."""
+    return PopulationMetadata(
+        model_name="bns_madau_dickinson",
+        model_kwargs={"sample_inclination": False},
+        redshift=ComponentMetadata(
+            model="madau_dickinson",
+            kwargs={
+                "minimum_redshift": Z_MIN,
+                "maximum_redshift": Z_MAX,
+                "n_grid": n_grid,
+            },
+        ),
+        mass=ComponentMetadata(model="ordered_uniform"),
     )
+
+
+def mock_population(n_grid: int = N_GRID) -> Population:
+    """The analytic-average fixture: standard propagation unless ``xi_0`` is given."""
+    return mock_population_metadata(n_grid).build()
 
 
 def mock_target_population(n_grid: int = N_GRID) -> Population:
-    """The target population the mock catalog is reweighted to."""
-    return build_population(
-        "bns_md_modified_propagation",
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        n_grid=n_grid,
-        sample_inclination=False,
-    )
+    """The target population the mock catalog is reweighted to.
+
+    The same population as the generating one: modified propagation comes from
+    the ``xi_0`` and ``xi_n`` the target's hyperparameters carry.
+    """
+    return mock_population(n_grid)
 
 
 def mock_population_model(n_grid: int = N_GRID) -> SourceFn:
@@ -179,15 +188,7 @@ def mock_catalog(
         frequencies=np.asarray(generator.frequencies),
         _metadata=CatalogMetadata(
             waveform=generator.metadata,
-            population=PopulationMetadata(
-                model_name="bns_md_cosmological",
-                model_kwargs={
-                    "minimum_redshift": Z_MIN,
-                    "maximum_redshift": Z_MAX,
-                    "n_grid": N_GRID,
-                    "sample_inclination": False,
-                },
-            ),
+            population=mock_population_metadata(),
             fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
             num_samples=int(power.shape[-1]),
         ),
@@ -341,15 +342,7 @@ def build_synthetic_importance(
         frequencies=np.asarray(generator.frequencies),
         _metadata=CatalogMetadata(
             waveform=generator.metadata,
-            population=PopulationMetadata(
-                model_name="bns_md_cosmological",
-                model_kwargs={
-                    "minimum_redshift": Z_MIN,
-                    "maximum_redshift": Z_MAX,
-                    "n_grid": N_GRID,
-                    "sample_inclination": False,
-                },
-            ),
+            population=mock_population_metadata(),
             fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
             num_samples=int(np.shape(polarization_power)[1]),
         ),

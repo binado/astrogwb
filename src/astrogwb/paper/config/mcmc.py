@@ -198,7 +198,7 @@ class AnalysisConfig(BaseModel):
     #: The population the sampled hyperparameters describe: the target the
     #: importance weights are evaluated at. The same record a catalog carries,
     #: but evaluated rather than drawn from. Its
-    #: ``model_kwargs`` carry the redshift window and grid, which is the one
+    #: ``redshift.kwargs`` carry the redshift window and grid, which is the one
     #: statement of them: the same three numbers build the target callables
     #: *and* define the grid its spectral integral runs on.
     #:
@@ -239,8 +239,8 @@ class AnalysisConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_target_grid(self) -> AnalysisConfig:
         check_redshift_grid(
-            self.population.model_kwargs,
-            label="analysis.population.model_kwargs",
+            self.population.redshift.kwargs,
+            label="analysis.population.redshift.kwargs",
             required=True,
         )
         return self

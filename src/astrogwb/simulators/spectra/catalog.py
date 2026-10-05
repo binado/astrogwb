@@ -193,8 +193,13 @@ class SpectralDensityCatalog:
 
     @property
     def population_model_kwargs(self) -> Mapping[str, Any]:
-        """The model's construction kwargs, as persisted."""
+        """The population's own construction kwargs, as persisted."""
         return dict(self.population.model_kwargs)
+
+    @property
+    def population_redshift_kwargs(self) -> Mapping[str, Any]:
+        """The redshift model's construction kwargs: the window and grid drawn on."""
+        return dict(self.population.redshift.kwargs)
 
     def get_population(self) -> Population:
         """Reconstruct the generating population with its kwargs bound.

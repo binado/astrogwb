@@ -66,10 +66,16 @@ def describe(request: tuple[CatalogMetadata, np.uint64]) -> str:
     population = request.population
     kwargs = ", ".join(
         f"{name}={value if isinstance(value, bool) else format(value, 'g')}"
-        for name, value in sorted(population.model_kwargs.items())
+        for name, value in sorted(
+            {**population.redshift.kwargs, **population.model_kwargs}.items()
+        )
         if name not in _SHARED_KWARGS
     )
-    model = f"{population.model_name}({kwargs})" if kwargs else population.model_name
+    model = (
+        f"{population.model_name}"
+        f"[{population.redshift.model}, {population.mass.model}]"
+        + (f"({kwargs})" if kwargs else "")
+    )
     return (
         f"{model} seed={seed} n={request.num_samples} "
         f"{request.waveform.approximant} v{request.version}"

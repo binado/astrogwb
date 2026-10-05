@@ -24,7 +24,9 @@ from astrogwb.paper.config.catalogs import (
 )
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
+    ComponentMetadata,
     Population,
+    PopulationMetadata,
     known_populations,
 )
 from astrogwb.simulators.polarization_power import CatalogMetadata
@@ -51,21 +53,16 @@ def _build(request: CatalogMetadata) -> Population:
 def test_every_committed_catalog_names_a_registered_population() -> None:
     """Caught pre-flight, not at the top of a queued GPU generation job."""
     for key, request in _requests().items():
-        check_population_model(
-            request.population.model_name,
-            label=f"catalog {key}",
-            kwargs=request.population.model_kwargs,
-        )
+        check_population_model(request.population, label=f"catalog {key}")
 
 
 def test_every_committed_catalog_can_build_its_population() -> None:
     """The construction kwargs and parameters must actually fit the population.
 
-    A typo in ``population.model_kwargs`` is otherwise invisible until generation
-    runs, and generation is the expensive step this pre-flight exists to
-    protect. The kwargs mapping now reaches the population whole, so a key it
-    does not take fails here rather than being filtered on its way to one of
-    two separately built callables.
+    A typo in a population or sub-model kwarg is otherwise invisible until
+    generation runs, and generation is the expensive step this pre-flight exists
+    to protect. Each kwargs mapping reaches its factory whole, so a key it does
+    not take fails here rather than being filtered away.
     """
     for key, request in _requests().items():
         with handlers.seed(rng_seed=0):
@@ -85,7 +82,7 @@ def test_only_the_guarded_proposals_declare_no_merger_rate() -> None:
     """
     for key, request in _requests().items():
         merger_rate_fn = _build(request).merger_rate_fn
-        expected_none = "uniform_mixture" in request.population.model_name
+        expected_none = "uniform_guard" in request.population.redshift.model
         assert (merger_rate_fn is None) is expected_none, key
 
 
@@ -104,27 +101,43 @@ def test_every_declared_density_factor_is_a_real_sample_site() -> None:
 # --------------------------------------------------------------------------- #
 # Validation
 # --------------------------------------------------------------------------- #
+def _population(
+    *, redshift: str = "madau_dickinson", **redshift_kwargs: float
+) -> PopulationMetadata:
+    return PopulationMetadata(
+        model_name="bns_madau_dickinson",
+        redshift=ComponentMetadata(
+            model=redshift,
+            kwargs={
+                "minimum_redshift": 0.3,
+                "maximum_redshift": 20.0,
+                "n_grid": 256,
+                **redshift_kwargs,
+            },
+        ),
+        mass=ComponentMetadata(model="ordered_uniform"),
+    )
+
+
 def test_an_unregistered_population_name_lists_the_known_set() -> None:
+    unknown = PopulationMetadata(
+        model_name="no_such_population",
+        redshift=_population().redshift,
+        mass=_population().mass,
+    )
     with pytest.raises(ValueError) as error:
-        check_population_model("no_such_population", label="catalog 'toy'")
+        check_population_model(unknown, label="catalog 'toy'")
     message = str(error.value)
     assert "catalog 'toy'" in message
     for name in known_populations():
         assert name in message
 
 
-def test_a_kwarg_the_population_does_not_take_is_rejected() -> None:
-    """The factory signature is the kwargs schema, so a stale key fails here."""
+def test_a_kwarg_the_component_does_not_take_is_rejected() -> None:
+    """Each factory signature is its kwargs schema, so a stale key fails here."""
     with pytest.raises(ValueError, match="uniform_mixing_fraction"):
         check_population_model(
-            "bns_md_cosmological",
-            label="catalog 'toy'",
-            kwargs={
-                "minimum_redshift": 0.0,
-                "maximum_redshift": 20.0,
-                "n_grid": 256,
-                "uniform_mixing_fraction": 0.1,
-            },
+            _population(uniform_mixing_fraction=0.1), label="catalog 'toy'"
         )
 
 
@@ -132,43 +145,24 @@ def test_a_proposal_density_is_rejected_as_an_analysis_target() -> None:
     """An analysis target reconstructs an observed rate, so it must declare one."""
     with pytest.raises(ValueError, match="declares no merger rate"):
         check_population_model(
-            "bns_md_uniform_mixture",
-            label="run 'toy' analysis.population.model_name",
-            kwargs={
-                "minimum_redshift": 0.3,
-                "maximum_redshift": 20.0,
-                "n_grid": 256,
-                "uniform_mixing_fraction": 0.1,
-            },
+            _population(
+                redshift="madau_dickinson_uniform_guard", uniform_mixing_fraction=0.1
+            ),
+            label="run 'toy' analysis.population",
             requires_merger_rate=True,
         )
 
 
-def test_an_amplitude_the_population_cannot_marginalize_is_rejected() -> None:
-    """A time delay fixed in Gyr makes H0 reshape the redshift law, not rescale it."""
-    kwargs = {
-        "minimum_redshift": 0.35,
-        "maximum_redshift": 20.0,
-        "n_grid": 256,
-        "minimum_delay": 0.02,
-        "maximum_formation_redshift": 20.0,
-        "n_delay_nodes": 48,
-    }
-    label = "run 'toy' analysis.population.model_name"
-    with pytest.raises(ValueError, match="cannot marginalize 'H0'"):
-        check_population_model(
-            "bns_md_time_delayed_cosmological",
-            label=label,
-            kwargs=kwargs,
-            requires_merger_rate=True,
-            amplitude_parameter="H0",
-        )
+def test_a_time_delayed_population_is_a_valid_analysis_target() -> None:
     check_population_model(
-        "bns_md_time_delayed_cosmological",
-        label=label,
-        kwargs=kwargs,
+        _population(
+            redshift="madau_dickinson_time_delayed",
+            minimum_delay=0.02,
+            maximum_formation_redshift=20.0,
+            n_delay_nodes=48,
+        ),
+        label="run 'toy' analysis.population",
         requires_merger_rate=True,
-        amplitude_parameter="local_merger_rate",
     )
 
 
@@ -190,12 +184,16 @@ def _request(waveform: dict[str, object]) -> CatalogMetadata:
     return CatalogMetadata.model_validate(
         {
             "population": {
-                "model_name": "bns_md_cosmological",
-                "model_kwargs": {
-                    "minimum_redshift": 0.0,
-                    "maximum_redshift": 20.0,
-                    "n_grid": 256,
+                "model_name": "bns_madau_dickinson",
+                "redshift": {
+                    "model": "madau_dickinson",
+                    "kwargs": {
+                        "minimum_redshift": 0.0,
+                        "maximum_redshift": 20.0,
+                        "n_grid": 256,
+                    },
                 },
+                "mass": {"model": "ordered_uniform"},
             },
             "waveform": waveform,
             "fiducials": {"H0": 67.66},

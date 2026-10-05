@@ -63,16 +63,21 @@ import jax
 
 from astrogwb.catalog import PolarizationPowerCatalog
 from astrogwb.metadata import PopulationMetadata, WaveformMetadata
-from astrogwb.populations import build_population
+from astrogwb.populations import ComponentMetadata
+from astrogwb.populations import (
+    build_mass_model,
+    build_population,
+    build_redshift_model,
+)
 from astrogwb.inference.utils import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
-model_kwargs = {
-    "minimum_redshift": 0.0,
-    "maximum_redshift": 20.0,
-    "n_grid": 4096,
-    "sample_inclination": True,
+redshift = {
+    "model": "madau_dickinson",
+    "kwargs": {"minimum_redshift": 0.0, "maximum_redshift": 20.0, "n_grid": 4096},
 }
+mass = {"model": "ordered_uniform", "kwargs": {}}
+model_kwargs = {"sample_inclination": True}
 params = {
     "H0": 67.66,
     "Omega_m": 0.3096,
@@ -85,7 +90,12 @@ params = {
 }
 # Isotropic inclination is sampled by default; False selects analytic
 # quadrupole averaging and omits the inclination site and column.
-source_model = build_population("bns_md_cosmological", **model_kwargs).source_model
+source_model = build_population(
+    "bns_madau_dickinson",
+    redshift=build_redshift_model(redshift["model"], **redshift["kwargs"]),
+    mass=build_mass_model(mass["model"], **mass["kwargs"]),
+    **model_kwargs,
+).source_model
 source_parameters = sample_sources(
     source_model, jax.random.PRNGKey(42), params, num_samples=1024
 )
@@ -103,9 +113,10 @@ catalog = PolarizationPowerCatalog.from_generator(
         )
     ),
     population=PopulationMetadata(
-        model_name="bns_md_cosmological",
+        model_name="bns_madau_dickinson",
         model_kwargs=model_kwargs,
-        seed=42,
+        redshift=ComponentMetadata(**redshift),
+        mass=ComponentMetadata(**mass),
     ),
     fiducials=params,
 )
@@ -114,13 +125,21 @@ catalog.save("catalog.h5")
 
 Reweighting it to a target population needs nothing else: the file says what
 drew it, so the proposal density is recovered rather than restated. A
-population is one registered name that yields both callables, so a target's
-source model and merger rate cannot be paired with one another by mistake.
+population is one registered name, composed from registered redshift and mass
+models, that yields both callables, so a target's source model and merger rate
+cannot be paired with one another by mistake. Modified propagation is always
+available: pass `xi_0` and `xi_n` among the hyperparameters, and `xi_0 = 1` is
+standard propagation.
 
 ```python
 from astrogwb.importance.spectral import build_importance_spectrum
 
-target = build_population("bns_md_modified_propagation", **model_kwargs)
+target = build_population(
+    "bns_madau_dickinson",
+    redshift=build_redshift_model(redshift["model"], **redshift["kwargs"]),
+    mass=build_mass_model(mass["model"], **mass["kwargs"]),
+    **model_kwargs,
+)
 spectrum_fn = build_importance_spectrum(
     PolarizationPowerCatalog.load("catalog.h5"),
     source_model=target.source_model,

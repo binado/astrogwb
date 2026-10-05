@@ -602,7 +602,7 @@ def analyze_case(
     settings: AnalysisSettings,
 ) -> SNRCase:
     """Analyze one count/cutoff choice using the notebook's common settings."""
-    population = base_metadata.population.with_model_kwargs(
+    population = base_metadata.population.with_redshift_kwargs(
         minimum_redshift=minimum_redshift
     )
     return analyze_metadata(

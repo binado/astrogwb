@@ -108,11 +108,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
 
     population = metadata.population
-    check_population_model(
-        population.model_name,
-        label=f"catalog {metadata.key()} population.model_name",
-        kwargs=population.model_kwargs,
-    )
+    check_population_model(population, label=f"catalog {metadata.key()} population")
     if args.force:
         output_path.unlink(missing_ok=True)
     outputs = polarization_power(inputs, metadata, cache_dir=cache_dir)

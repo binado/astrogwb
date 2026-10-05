@@ -81,8 +81,9 @@ from astrogwb.paper.config import (
     detector_registry,
     fiducials,
     population_metadata,
+    population_model,
 )
-from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
+from astrogwb.populations import DEFAULT_DENSITY_SITES
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerCatalog,
@@ -209,11 +210,10 @@ CATALOG_DIR = NOTEBOOK_DIR / (
 # the contraction applies no further inclination average.
 
 # %%
-#: the shared `[fiducials]` table, read rather than restated. The generating
-#: population ignores the propagation entries it carries -- modified
-#: propagation is target-side only, and at `xi_0 = 1` the two agree exactly --
-#: because a source model indexes `params` by name. This is the same table a
-#: generated catalog inherits as a config layer.
+#: the shared `[fiducials]` table, read rather than restated. It carries the
+#: propagation entries too; at `xi_0 = 1` modified propagation is the standard
+#: law exactly, so the generating population and the target agree. This is the
+#: same table a generated catalog inherits as a config layer.
 FIDUCIALS: dict[str, float] = fiducials()
 
 Z_MIN = 0.3
@@ -244,7 +244,7 @@ TARGET_KWARGS: dict[str, float | int | bool] = {
 
 def target_population_fn():
     """The target population: the same sources under modified propagation."""
-    return build_population("bns_md_modified_propagation", **TARGET_KWARGS)
+    return population_model(**TARGET_KWARGS)
 
 
 def make_redshift_grid() -> jax.Array:

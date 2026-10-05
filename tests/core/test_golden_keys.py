@@ -2,7 +2,7 @@
 
 Each record is built from literal fields with ``version`` pinned, so only a
 change to the canonical payload (or its hash) can move a key. The literals were
-captured when seeds became simulator inputs rather than metadata fields; a
+captured when the population record became composed sub-models; a
 deliberate change to a record or to the path scheme re-captures them.
 """
 
@@ -11,16 +11,16 @@ from __future__ import annotations
 import numpy as np
 
 from astrogwb.distributions.config import DistributionConfig
-from astrogwb.populations import PopulationMetadata
+from astrogwb.populations import ComponentMetadata, PopulationMetadata
 from astrogwb.simulators.core import split_seed
 from astrogwb.simulators.polarization_power import CatalogMetadata, polarization_power
 from astrogwb.simulators.spectra import SpectraMetadata, spectra
 from astrogwb.waveform import WaveformMetadata
 
-CATALOG_KEY = "1a7d74705a3804d5"
-SPECTRA_KEY = "cac130cede94ba04"
-CATALOG_PATH = "polarization_power-1a7d74705a3804d5-a6d964d9e7c90939.h5"
-SPECTRA_PATH = "spectra-cac130cede94ba04-ccfa6eba0950be8d.h5"
+CATALOG_KEY = "a4f77eea8d97ff0c"
+SPECTRA_KEY = "f461dfccb0a84990"
+CATALOG_PATH = "polarization_power-a4f77eea8d97ff0c-a6d964d9e7c90939.h5"
+SPECTRA_PATH = "spectra-f461dfccb0a84990-ccfa6eba0950be8d.h5"
 SPLIT_SEEDS = [15502207689350057789, 3547686303310379753, 4445048811325225245]
 
 
@@ -37,13 +37,13 @@ def _waveform() -> WaveformMetadata:
 
 def _population() -> PopulationMetadata:
     return PopulationMetadata(
-        model_name="bns_md_cosmological",
-        model_kwargs={
-            "minimum_redshift": 0.0,
-            "maximum_redshift": 2,
-            "n_grid": 32,
-            "sample_inclination": True,
-        },
+        model_name="bns_madau_dickinson",
+        model_kwargs={"sample_inclination": True},
+        redshift=ComponentMetadata(
+            model="madau_dickinson",
+            kwargs={"minimum_redshift": 0.0, "maximum_redshift": 2, "n_grid": 32},
+        ),
+        mass=ComponentMetadata(model="ordered_uniform"),
     )
 
 

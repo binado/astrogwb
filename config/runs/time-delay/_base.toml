@@ -1,5 +1,5 @@
 # time-delay (1 run): the delay-time slope alpha of
-# bns_md_time_delayed_cosmological, whose mergers follow a Madau-Dickinson
+# the madau_dickinson_time_delayed redshift model, whose mergers follow a Madau-Dickinson
 # *formation* rate after a delay p(tau) ~ tau^alpha of at least 20 Myr, capped
 # only by the lookback time to the z = 20 formation cut-off.
 #
@@ -10,9 +10,7 @@
 #
 # The amplitude marginalized out is local_merger_rate, not H0: the delay is
 # fixed in Gyr while lookback time scales as 1/H0, so H0 reshapes the redshift
-# law instead of only rescaling it. The population declares this at
-# registration, and `snakemake validate` rejects amplitude_parameter = "H0"
-# for it.
+# law instead of only rescaling it.
 [analysis]
 network = "ET-2L-aligned-CE-Hanford"
 likelihood = "amplitude_marginalized"

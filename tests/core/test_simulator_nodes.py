@@ -15,7 +15,7 @@ import pytest
 from numpy.typing import ArrayLike
 
 from astrogwb.distributions.config import DistributionConfig
-from astrogwb.populations import PopulationMetadata
+from astrogwb.populations import ComponentMetadata, PopulationMetadata
 from astrogwb.simulators.core import Arrays, split_seed
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
@@ -48,8 +48,12 @@ WAVEFORM = WaveformMetadata(
     frequency_resolution=10.0,
 )
 POPULATION = PopulationMetadata(
-    model_name="bns_md_cosmological",
-    model_kwargs={"minimum_redshift": 0.0, "maximum_redshift": 5.0, "n_grid": 64},
+    model_name="bns_madau_dickinson",
+    redshift=ComponentMetadata(
+        model="madau_dickinson",
+        kwargs={"minimum_redshift": 0.0, "maximum_redshift": 5.0, "n_grid": 64},
+    ),
+    mass=ComponentMetadata(model="ordered_uniform"),
 )
 CATALOG = CatalogMetadata(
     waveform=WAVEFORM, population=POPULATION, fiducials=FIDUCIALS, num_samples=6

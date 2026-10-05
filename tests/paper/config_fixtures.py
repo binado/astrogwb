@@ -42,10 +42,7 @@ def _role() -> dict[str, Any]:
         "waveform": "${waveforms.default}",
         "fiducials": "${fiducials}",
         "num_samples": 8,
-        "population": {
-            "model_name": "${populations.default.model_name}",
-            "model_kwargs": "${populations.default.model_kwargs}",
-        },
+        "population": "${populations.default}",
     }
 
 
@@ -69,23 +66,27 @@ _MINIMAL_WAVEFORM: dict[str, Any] = {
     "sampling_frequency": 64.0,
     "frequency_resolution": 2.0,
 }
+
+
+def _minimal_population(minimum_redshift: float, n_grid: int) -> dict[str, Any]:
+    return {
+        "model_name": "bns_madau_dickinson",
+        "model_kwargs": {},
+        "redshift": {
+            "model": "madau_dickinson",
+            "kwargs": {
+                "minimum_redshift": minimum_redshift,
+                "maximum_redshift": 20.0,
+                "n_grid": n_grid,
+            },
+        },
+        "mass": {"model": "ordered_uniform"},
+    }
+
+
 _MINIMAL_POPULATIONS: dict[str, Any] = {
-    "default": {
-        "model_name": "bns_md_cosmological",
-        "model_kwargs": {
-            "minimum_redshift": 0.0,
-            "maximum_redshift": 20.0,
-            "n_grid": 64,
-        },
-    },
-    "target": {
-        "model_name": "bns_md_modified_propagation",
-        "model_kwargs": {
-            "minimum_redshift": 0.3,
-            "maximum_redshift": 20.0,
-            "n_grid": 256,
-        },
-    },
+    "default": _minimal_population(0.0, 64),
+    "target": _minimal_population(0.3, 256),
 }
 
 

@@ -200,16 +200,16 @@ how `knf` resolves them:
   waveform with a different approximant, and a run can override `num_samples`
   or a role's seed (`[analysis.seeds]`) alone. To change a named variant for
   every role that names it in one run, override it at its source --
-  `[populations.guard] model_kwargs.uniform_mixing_fraction = 0.01` -- and every
+  `[populations.guard] redshift.kwargs.uniform_mixing_fraction = 0.01` -- and every
   role that names it follows. `--shallow` forces
   replacement instead; `priors.*` is the one place we use it.
-- **A reference can be reached through.** `"${catalog.population.model_kwargs.n_grid}"`
+- **A reference can be reached through.** `"${catalog.population.redshift.kwargs.n_grid}"`
   resolves even though `[catalog].population` is itself
   `"${populations.cosmological}"`.
 - **`extends` inherits a table.** `extends = "${a.b}"` starts a table from
   `a.b` and lets its own fields win, and the key is removed from the result.
-  `[populations.guard.model_kwargs]` is the cosmological population's
-  `model_kwargs` plus a mixing fraction. A table takes one base.
+  `[populations.guard.redshift.kwargs]` is the cosmological population's
+  redshift `kwargs` plus a mixing fraction. A table takes one base.
 
 The seven experiments and their 27 runs:
 
@@ -285,12 +285,13 @@ than drawn from:
 population = "${populations.target}"
 ```
 
-`[populations.target]` is `bns_md_modified_propagation`, which every run but
-`time-delay` uses. It reduces exactly to the plain cosmological population at
-`xi_0 = 1`, which is how a run that does not sample the propagation parameters
-gets the standard law without naming a second model.
+`[populations.target]` is the cosmological `bns_madau_dickinson` population on
+the target's grid, which every run but `time-delay` uses. Modified propagation
+is always on and read from the hyperparameters, and `xi_0 = 1` is standard
+propagation: a run that does not sample the propagation parameters keeps
+`xi_0 = 1` and gets the standard law without naming a second model.
 
-Its `model_kwargs` are the one statement of the analysis redshift window and
+Its `redshift.kwargs` are the one statement of the analysis redshift window and
 grid: the same three numbers build the target callables and define the grid
 the spectral integral runs on. `analysis.density_sites` selects the
 source-density factors importance weighting includes; it defaults to redshift

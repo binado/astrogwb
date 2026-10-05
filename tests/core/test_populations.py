@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from functools import partial
-from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -48,26 +47,21 @@ from astrogwb.distributions.redshift import (
     madau_dickinson_time_delayed_redshift_distribution,
 )
 from astrogwb.populations import (
-    AMPLITUDE_PARAMETERS,
     DEFAULT_DENSITY_SITES,
+    ComponentMetadata,
     IsotropicInclination,
     Population,
+    PopulationMetadata,
     SourceFn,
-    amplitude_parameters,
+    build_mass_model,
     build_population,
+    build_redshift_model,
+    known_mass_models,
     known_populations,
+    known_redshift_models,
+    register_mass_model,
     register_population,
-)
-from astrogwb.populations.bns_madau_dickinson import (
-    bns_md_cosmological,
-    bns_md_gaussian_cosmological,
-    bns_md_gaussian_modified_propagation,
-    bns_md_gaussian_uniform_mixture,
-    bns_md_modified_propagation,
-    bns_md_time_delayed_cosmological,
-    bns_md_uniform_mixture,
-    madau_dickinson_time_delayed_total_merger_rate,
-    madau_dickinson_total_merger_rate,
+    register_redshift_model,
 )
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
 from astrogwb.simulators.polarization_power import REDSHIFT_SITE
@@ -162,23 +156,7 @@ MASS_SITES = ("source_frame_mass_1", "source_frame_mass_2")
 
 
 def _gaussian_population_model() -> SourceFn:
-    return build_population(
-        "bns_md_gaussian_cosmological",
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        n_grid=N_GRID,
-        sample_inclination=False,
-    ).source_model
-
-
-def _gaussian_target_model() -> SourceFn:
-    return build_population(
-        "bns_md_gaussian_modified_propagation",
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        n_grid=N_GRID,
-        sample_inclination=False,
-    ).source_model
+    return _build(mass="ordered_gaussian").source_model
 
 
 #: The generating models whose draw path runs through the plated replay: the
@@ -213,118 +191,94 @@ DELAY = {
     "n_delay_nodes": 48,
 }
 
-#: Every shipped population, its source declaration, its extra construction
-#: kwargs, the merger rate it pairs with, and the amplitude parameters it
-#: declares. The guard mixtures declare no rate: the Madau-Dickinson total rate
-#: normalizes the Madau-Dickinson redshift density, not a mixture of it with a
-#: uniform component.
-SHIPPED: dict[
-    str,
-    tuple[
-        Callable[..., Any], dict[str, float], Callable[..., Any] | None, tuple[str, ...]
-    ],
-] = {
-    "bns_md_cosmological": (
-        bns_md_cosmological,
-        {},
-        madau_dickinson_total_merger_rate,
-        AMPLITUDE_PARAMETERS,
-    ),
-    "bns_md_modified_propagation": (
-        bns_md_modified_propagation,
-        {},
-        madau_dickinson_total_merger_rate,
-        AMPLITUDE_PARAMETERS,
-    ),
-    "bns_md_gaussian_cosmological": (
-        bns_md_gaussian_cosmological,
-        {},
-        madau_dickinson_total_merger_rate,
-        AMPLITUDE_PARAMETERS,
-    ),
-    "bns_md_gaussian_modified_propagation": (
-        bns_md_gaussian_modified_propagation,
-        {},
-        madau_dickinson_total_merger_rate,
-        AMPLITUDE_PARAMETERS,
-    ),
-    "bns_md_time_delayed_cosmological": (
-        bns_md_time_delayed_cosmological,
-        DELAY,
-        madau_dickinson_time_delayed_total_merger_rate,
-        ("local_merger_rate",),
-    ),
-    "bns_md_uniform_mixture": (
-        bns_md_uniform_mixture,
-        {"uniform_mixing_fraction": 0.2},
-        None,
-        (),
-    ),
-    "bns_md_gaussian_uniform_mixture": (
-        bns_md_gaussian_uniform_mixture,
-        {"uniform_mixing_fraction": 0.2},
-        None,
-        (),
-    ),
+
+def _build(
+    *,
+    mass: str = "ordered_uniform",
+    redshift: str = "madau_dickinson",
+    redshift_kwargs: Mapping[str, float] | None = None,
+    **model_kwargs: float | bool,
+) -> Population:
+    """The composed population, on the mock window with analytic inclination."""
+    return PopulationMetadata(
+        model_name="bns_madau_dickinson",
+        model_kwargs={"sample_inclination": False, **model_kwargs},
+        redshift=ComponentMetadata(
+            model=redshift, kwargs={**WINDOW, **(redshift_kwargs or {})}
+        ),
+        mass=ComponentMetadata(model=mass),
+    ).build()
+
+
+#: Every shipped redshift model, its extra construction kwargs, and whether it
+#: declares a physical merger rate. The guard mixture declares none: the
+#: Madau-Dickinson total rate normalizes the Madau-Dickinson redshift density,
+#: not a mixture of it with a uniform component.
+REDSHIFT_MODELS: dict[str, tuple[dict[str, float], bool]] = {
+    "madau_dickinson": ({}, True),
+    "madau_dickinson_time_delayed": (DELAY, True),
+    "madau_dickinson_uniform_guard": ({"uniform_mixing_fraction": 0.2}, False),
 }
 
 
-def test_shipped_populations_are_registered() -> None:
-    assert known_populations() == tuple(sorted(SHIPPED))
-    for name, (declaration, extra, _, _) in SHIPPED.items():
-        source = build_population(name, **WINDOW, **extra).source_model
-        assert source.func is declaration, name  # ty: ignore[unresolved-attribute]
+def test_shipped_components_are_registered() -> None:
+    assert known_populations() == ("bns_madau_dickinson",)
+    assert known_redshift_models() == tuple(sorted(REDSHIFT_MODELS))
+    assert known_mass_models() == ("ordered_gaussian", "ordered_uniform")
 
 
-def test_only_a_physical_population_declares_a_merger_rate() -> None:
-    """The pairing is structural now, so a proposal cannot carry a wrong rate.
-
-    Every catalog used to record ``rate_model = "madau_dickinson"``, guard
-    mixtures included, and nothing could tell that the recorded rate was not
-    the normalization of the density the samples came from.
-    """
-    for name, (_, extra, expected, _) in SHIPPED.items():
-        rate = build_population(name, **WINDOW, **extra).merger_rate_fn
-        if expected is None:
-            assert rate is None, name
-            continue
-        assert rate is not None, name
-        assert rate.func is expected, name  # ty: ignore[unresolved-attribute]
+def test_only_a_physical_redshift_model_declares_a_merger_rate() -> None:
+    """The pairing is structural, so a proposal cannot carry a wrong rate."""
+    for name, (extra, physical) in REDSHIFT_MODELS.items():
+        rate = _build(redshift=name, redshift_kwargs=extra).merger_rate_fn
+        assert (rate is not None) is physical, name
 
 
-def test_each_population_declares_its_amplitude_parameters() -> None:
-    for name, (_, _, _, declared) in SHIPPED.items():
-        assert amplitude_parameters(name) == declared, name
-    with pytest.raises(KeyError, match="bns_md_cosmological"):
-        amplitude_parameters("no_such_population")
-
-
-def test_a_kwarg_the_population_does_not_take_is_rejected() -> None:
-    """The factory signature is the kwargs schema.
-
-    The rate builder used to filter the flat mapping down to the window keys,
-    so a setting only the source model took was silently dropped on its way to
-    the rate -- and one no model took was dropped everywhere.
-    """
+def test_a_kwarg_the_component_does_not_take_is_rejected() -> None:
+    """Each factory's signature is its kwargs schema."""
     with pytest.raises(TypeError, match="uniform_mixing_fraction"):
-        build_population("bns_md_cosmological", **WINDOW, uniform_mixing_fraction=0.2)
-    with pytest.raises(TypeError, match="bns_md_cosmological"):
-        build_population("bns_md_cosmological", **WINDOW, no_such_kwarg=1.0)
+        build_redshift_model("madau_dickinson", **WINDOW, uniform_mixing_fraction=0.2)
+    with pytest.raises(TypeError, match="redshift model 'madau_dickinson'"):
+        build_redshift_model("madau_dickinson", **WINDOW, no_such_kwarg=1.0)
+    with pytest.raises(TypeError, match="mass model 'ordered_uniform'"):
+        build_mass_model("ordered_uniform", minimum_mass=1.0)
+    with pytest.raises(TypeError, match="population 'bns_madau_dickinson'"):
+        _build(no_such_kwarg=1.0)
 
 
-def test_unknown_population_names_list_the_known_set() -> None:
-    with pytest.raises(KeyError, match="bns_md_cosmological"):
+def test_unknown_names_list_the_known_set() -> None:
+    with pytest.raises(KeyError, match="bns_madau_dickinson"):
         build_population("no_such_population")
+    with pytest.raises(KeyError, match="madau_dickinson_time_delayed"):
+        build_redshift_model("no_such_redshift", **WINDOW)
+    with pytest.raises(KeyError, match="ordered_gaussian"):
+        build_mass_model("no_such_mass")
 
 
 def test_registering_a_name_twice_is_rejected() -> None:
-    def factory(
-        *, minimum_redshift: float, maximum_redshift: float, n_grid: int
-    ) -> Population:
+
+    def factory() -> Population:
         raise AssertionError("never called")
 
     with pytest.raises(ValueError, match="already registered"):
-        register_population("bns_md_cosmological")(factory)
+        register_population("bns_madau_dickinson")(factory)
+    with pytest.raises(ValueError, match="already registered"):
+        register_redshift_model("madau_dickinson")(lambda: None)
+    with pytest.raises(ValueError, match="already registered"):
+        register_mass_model("ordered_uniform")(lambda: None)
+
+
+def test_spin_and_tide_bounds_are_construction_kwargs() -> None:
+    samples = sample_sources(
+        _build(maximum_spin=0.01, maximum_tidal_deformability=50.0).source_model,
+        jax.random.PRNGKey(0),
+        POPULATION_PARAMS,
+        num_samples=256,
+    )
+    assert jnp.all(jnp.abs(samples["spin_1z"]) <= 0.01)
+    assert jnp.all(jnp.abs(samples["spin_2z"]) <= 0.01)
+    assert jnp.all((samples["lambda_1"] >= 0.0) & (samples["lambda_1"] <= 50.0))
+    assert jnp.all((samples["lambda_2"] >= 0.0) & (samples["lambda_2"] <= 50.0))
 
 
 # --------------------------------------------------------------------------- #
@@ -410,24 +364,10 @@ def test_modified_propagation_scales_the_distance_by_the_gw_em_ratio() -> None:
     np.testing.assert_allclose(distance, expected, rtol=1e-14)
 
 
-def test_modified_propagation_reduces_exactly_to_the_cosmological_model() -> None:
-    """At xi_0 = 1 the two declarations must agree bit-for-bit.
-
-    Every committed run pins ``xi_0 = 1`` in its fiducials while sampling a
-    modified-propagation target, so the catalogs are drawn cosmologically and
-    reweighted with the modified model. Anything less than exact here would put
-    a floor under the self-proposal log weights.
-    """
-    values = sample_values()
-    cosmological_log_prob, cosmological_distance = evaluate(
-        mock_population_model(), POPULATION_PARAMS, values
-    )
-    modified_log_prob, modified_distance = evaluate(
-        mock_target_model(), FIDUCIALS, values
-    )
-    assert FIDUCIALS["xi_0"] == 1.0
-    np.testing.assert_array_equal(cosmological_log_prob, modified_log_prob)
-    np.testing.assert_array_equal(cosmological_distance, modified_distance)
+def test_xi_0_without_xi_n_is_rejected_by_name() -> None:
+    params = {k: v for k, v in OFF_FIDUCIALS.items() if k != "xi_n"}
+    with pytest.raises(ValueError, match="xi_n"):
+        handlers.seed(mock_population_model(), 0)(params)
 
 
 # --------------------------------------------------------------------------- #
@@ -547,13 +487,9 @@ def _redshift_log_density(
 
 
 def _uniform_mixture_model(uniform_mixing_fraction: float) -> SourceFn:
-    return build_population(
-        "bns_md_uniform_mixture",
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        n_grid=N_GRID,
-        sample_inclination=False,
-        uniform_mixing_fraction=uniform_mixing_fraction,
+    return _build(
+        redshift="madau_dickinson_uniform_guard",
+        redshift_kwargs={"uniform_mixing_fraction": uniform_mixing_fraction},
     ).source_model
 
 
@@ -592,9 +528,9 @@ def test_uniform_mixture_keeps_the_cosmological_distance() -> None:
 
 @pytest.mark.parametrize("fraction", [-0.1, 1.5])
 def test_uniform_mixture_rejects_an_out_of_range_fraction(fraction: float) -> None:
-    model = _uniform_mixture_model(fraction)
+    """Rejected when the population is built, not when it is first executed."""
     with pytest.raises(ValueError, match="uniform_mixing_fraction"):
-        evaluate(model, POPULATION_PARAMS, sample_values())
+        _uniform_mixture_model(fraction)
 
 
 # --------------------------------------------------------------------------- #
@@ -714,13 +650,10 @@ def test_sampling_and_derivation_are_isolated_without_jit() -> None:
 # Ordered Gaussian masses
 # --------------------------------------------------------------------------- #
 def _gaussian_mixture_model(uniform_mixing_fraction: float) -> SourceFn:
-    return build_population(
-        "bns_md_gaussian_uniform_mixture",
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        n_grid=N_GRID,
-        sample_inclination=False,
-        uniform_mixing_fraction=uniform_mixing_fraction,
+    return _build(
+        mass="ordered_gaussian",
+        redshift="madau_dickinson_uniform_guard",
+        redshift_kwargs={"uniform_mixing_fraction": uniform_mixing_fraction},
     ).source_model
 
 
@@ -812,21 +745,6 @@ def test_gaussian_mass_density_stays_finite_when_hyperparameters_move() -> None:
         return log_prob
 
     assert np.all(np.isneginf(np.asarray(jax.jit(uniform_log_prob)(outside_uniform))))
-
-
-def test_gaussian_modified_propagation_reduces_exactly_to_the_cosmological_model() -> (
-    None
-):
-    values = sample_values()
-    cosmological_log_prob, cosmological_distance = evaluate(
-        _gaussian_population_model(), GAUSSIAN_PARAMS, values
-    )
-    modified_log_prob, modified_distance = evaluate(
-        _gaussian_target_model(), GAUSSIAN_FIDUCIALS, values
-    )
-    assert GAUSSIAN_FIDUCIALS["xi_0"] == 1.0
-    np.testing.assert_array_equal(cosmological_log_prob, modified_log_prob)
-    np.testing.assert_array_equal(cosmological_distance, modified_distance)
 
 
 def test_gaussian_and_uniform_models_share_distance() -> None:
@@ -933,12 +851,7 @@ DELAYED_PARAMS: dict[str, float] = {**POPULATION_PARAMS, "delay_slope": -1.0}
 
 
 def _delayed_population() -> Population:
-    return build_population(
-        "bns_md_time_delayed_cosmological",
-        **WINDOW,
-        **DELAY,
-        sample_inclination=False,
-    )
+    return _build(redshift="madau_dickinson_time_delayed", redshift_kwargs=DELAY)
 
 
 def test_time_delayed_draws_evaluate_to_a_finite_density_with_a_slope_gradient() -> (
@@ -986,7 +899,7 @@ def test_time_delayed_rate_is_linear_in_the_local_rate_but_not_in_h0() -> None:
     moved = rate({**DELAYED_PARAMS, "H0": 1.2 * h0})
     assert not np.isclose(moved * (1.2 * h0) ** 3, base * h0**3, rtol=1e-3)
 
-    undelayed = build_population("bns_md_cosmological", **WINDOW).merger_rate_fn
+    undelayed = _build().merger_rate_fn
     assert undelayed is not None
     np.testing.assert_allclose(
         undelayed({**POPULATION_PARAMS, "H0": 1.2 * h0}) * (1.2 * h0) ** 3,

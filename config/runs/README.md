@@ -68,10 +68,10 @@ The overrides, and who uses each; the file that declares a draw says why:
 | Draw | Role | Used by |
 | --- | --- | --- |
 | seed 42, n = 8192 / 16384 / 32768 | proposal | `variable-catalog-size` |
-| `[populations.guard]` (`bns_md_uniform_mixture`, eps = 0.1), seed 61, n = 16384 | proposal | `astrophysical-parameters`, `variable-proposal-guard/eps1e-1`, `time-delay` (a separate copy, drawn at its own fiducials) |
+| `[populations.guard]` (`madau_dickinson_uniform_guard`, eps = 0.1), seed 61, n = 16384 | proposal | `astrophysical-parameters`, `variable-proposal-guard/eps1e-1`, `time-delay` (a separate copy, drawn at its own fiducials) |
 | `[populations.guard]` at eps = 0.01 / 0.001, seeds 62 / 63, n = 16384 | proposal | `variable-proposal-guard` |
 | `[waveforms.TaylorF2]`, seed 41 | proposal | `waveform-approximant/TaylorF2` |
-| `[populations.time_delayed]` (`bns_md_time_delayed_cosmological`), seed 71 | injection | `time-delay` |
+| `[populations.time_delayed]` (`madau_dickinson_time_delayed`), seed 71 | injection | `time-delay` |
 
 ## Adding one
 

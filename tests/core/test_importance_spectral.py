@@ -37,11 +37,11 @@ from astrogwb.importance.spectral import (
 )
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
+    ComponentMetadata,
     PopulationMetadata,
     SourceFn,
-    build_population,
 )
-from astrogwb.populations.bns_madau_dickinson import bns_md_cosmological
+from astrogwb.populations.bns_madau_dickinson import bns_madau_dickinson
 from astrogwb.simulators.polarization_power import (
     REDSHIFT_SITE,
     CatalogMetadata,
@@ -73,16 +73,19 @@ OFF_FIDUCIALS = {
 OFF_POPULATION_PARAMS = {
     name: value for name, value in OFF_FIDUCIALS.items() if name not in {"xi_0", "xi_n"}
 }
-MODEL_KWARGS = {
-    "minimum_redshift": Z_MIN,
-    "maximum_redshift": Z_MAX,
-    "n_grid": N_GRID,
-    "sample_inclination": False,
-}
+POPULATION_RECORD = PopulationMetadata(
+    model_name="bns_madau_dickinson",
+    model_kwargs={"sample_inclination": False},
+    redshift=ComponentMetadata(
+        model="madau_dickinson",
+        kwargs={"minimum_redshift": Z_MIN, "maximum_redshift": Z_MAX, "n_grid": N_GRID},
+    ),
+    mass=ComponentMetadata(model="ordered_uniform"),
+)
 
 
 def _generating_model() -> SourceFn:
-    return build_population("bns_md_cosmological", **MODEL_KWARGS).source_model
+    return POPULATION_RECORD.build().source_model
 
 
 def _source_parameters(
@@ -129,10 +132,7 @@ def _catalog(
         frequencies=10.0 + 2.0 * np.arange(power.shape[0]),
         _metadata=CatalogMetadata(
             waveform=_waveform_metadata(power.shape[0]),
-            population=PopulationMetadata(
-                model_name="bns_md_cosmological",
-                model_kwargs=MODEL_KWARGS,
-            ),
+            population=POPULATION_RECORD,
             fiducials={name: float(value) for name, value in params.items()},
             num_samples=int(power.shape[1]),
         ),
@@ -219,7 +219,7 @@ def test_proposal_density_is_evaluated_only_during_preparation(
     target = mock_target_model()
     importance = _importance(source_model=target)
     assert len(calls) == 1
-    assert calls[0].func is bns_md_cosmological  # ty: ignore[unresolved-attribute]
+    assert calls[0].func is bns_madau_dickinson  # ty: ignore[unresolved-attribute]
 
     spectrum = partial(importance_spectral_density, **importance)
     spectrum(FIDUCIALS)

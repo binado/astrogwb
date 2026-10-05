@@ -225,19 +225,22 @@ def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetada
     return WaveformMetadata.model_validate(settings)
 
 
-def population_model(root: Path | None = None, **kwargs: float | bool) -> Population:
+def population_model(root: Path | None = None, **kwargs: float) -> Population:
     """Build the population the default draw, ``[catalog]``, is drawn from.
 
     Returns the registered :class:`~astrogwb.populations.registry.Population` --
     source model and merger rate together -- with its construction settings
-    bound. Keyword arguments override ``model_kwargs``, which is how a notebook
-    studies the committed population on a coarser grid or a narrower redshift
-    window without editing the file::
+    bound. Keyword arguments override the redshift model's kwargs, which is how a
+    notebook studies the committed population on a coarser grid or a narrower
+    redshift window without editing the file::
 
         population_model(n_grid=256, minimum_redshift=0.3)
 
-    ``sample_inclination=False`` selects explicit analytic quadrupole
-    averaging instead of the default isotropic inclination draw.
+    For another population-level setting, such as
+    ``sample_inclination=False`` (explicit analytic quadrupole averaging
+    instead of the default isotropic inclination draw), derive it from
+    :func:`population_metadata` with
+    :meth:`~astrogwb.populations.PopulationMetadata.with_model_kwargs`.
 
     A key the named population does not take raises here rather than being
     filtered away, which is the same contract a catalog request gets.
@@ -247,18 +250,19 @@ def population_model(root: Path | None = None, **kwargs: float | bool) -> Popula
     ``configure_runtime``. Keeping the import here is what lets the ``Snakefile``
     import this package to build its DAG.
     """
-    return population_metadata(root).with_model_kwargs(**kwargs).build()
+    return population_metadata(root, **kwargs).build()
 
 
 def population_metadata(
-    root: Path | None = None, **kwargs: float | bool
+    root: Path | None = None, **kwargs: float
 ) -> PopulationMetadata:
     """The record the default draw, ``[catalog]``, carries for its population.
 
-    Keyword arguments override ``model_kwargs``, validated rather than trusted, so this
-    accessor and :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` reach a record down
-    the same path. An already-built record is re-derived with
-    :meth:`~astrogwb.populations.PopulationMetadata.with_model_kwargs`.
+    Keyword arguments override the redshift model's kwargs, validated rather
+    than trusted, so this accessor and
+    :class:`~astrogwb.simulators.polarization_power.CatalogMetadata` reach a
+    record down the same path. An already-built record is re-derived with
+    :meth:`~astrogwb.populations.PopulationMetadata.with_redshift_kwargs`.
 
     Touches no JAX, so it is safe before ``configure_runtime``; building the
     record's population is not, for the reason :func:`population_model` gives.
@@ -266,5 +270,6 @@ def population_metadata(
     from astrogwb.populations import PopulationMetadata
 
     table = _table(root, "catalog", "population")
-    table["model_kwargs"] = {**table.get("model_kwargs", {}), **kwargs}
+    redshift = table["redshift"]
+    table["redshift"] = {**redshift, "kwargs": {**redshift.get("kwargs", {}), **kwargs}}
     return PopulationMetadata.model_validate(table)

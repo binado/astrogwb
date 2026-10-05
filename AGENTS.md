@@ -35,12 +35,16 @@ Every check is a `just` recipe, and CI runs the same string:
 Run workflow and application entrypoints from the repository root; configuration paths are relative to the caller's current working directory, and no checkout discovery is performed.
 
 A catalog records the density that drew it: its file carries the registered
-population model, that model's construction settings, the hyperparameters it
-was drawn at, and the `astrogwb` version that generated it. Which of those
+population model, the registered redshift and mass sub-models it is composed
+from and their construction settings, the hyperparameters it was drawn at, and
+the `astrogwb` version that generated it. Which of those
 density factors enter an importance weight is *not* part of the record -- no
 sample depends on it -- so it is declared by the analysis that reweights the
-draw. Adding a population means adding a registered source-model function under
-`src/astrogwb/populations/`, never an import path in a config.
+draw. Adding a variant means registering a sub-model -- a redshift model in
+`src/astrogwb/populations/redshift.py` or a mass model in
+`populations/mass.py` -- and naming it in a population record, never an import
+path in a config. A redshift model builds a `RedshiftFn` (hyperparameters in, a
+`RedshiftLaw` out), so the merger rate is read off the same law that is sampled.
 
 Simulators are cached functions. `astrogwb.simulators` holds nodes
 `fn(inputs, metadata, **settings) -> arrays`, wrapped by `@cached`

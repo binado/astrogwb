@@ -630,7 +630,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         **config.fiducials,
         "importance_relative_ess": args.importance_relative_ess,
     }
-    population_kwargs = config.analysis.population.model_kwargs
+    population_kwargs = config.analysis.population.redshift.kwargs
     networks = resolve_networks(args.network_runs, DETECTOR_NETWORKS)
     detector_labels = [network.label for network in networks]
     if len(args.detector_chains) != len(networks):

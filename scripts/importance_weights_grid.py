@@ -31,7 +31,7 @@ from matplotlib.projections import register_projection
 
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.paper.catalogs import load_run_catalog
-from astrogwb.paper.config import priors
+from astrogwb.paper.config import population_model, priors
 from astrogwb.paper.config.mcmc import build_run_config
 from astrogwb.paper.config.runs import (
     FIGURES_DIR,
@@ -44,7 +44,7 @@ from astrogwb.paper.plotting import (
     save_figures,
     use_paper_style,
 )
-from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
+from astrogwb.populations import DEFAULT_DENSITY_SITES
 
 # gwpy (via gwmock-signal) replaces matplotlib's default rectilinear axes.
 # Restore the standard projection for consistent plotting.
@@ -222,7 +222,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         "maximum_redshift": Z_MAX,
         "n_grid": N_REDSHIFT_GRID,
     }
-    target = build_population("bns_md_modified_propagation", **grid_kwargs)
+    target = population_model(**grid_kwargs)
     log_weights_fn = build_importance_spectrum(
         catalog,
         source_model=target.source_model,

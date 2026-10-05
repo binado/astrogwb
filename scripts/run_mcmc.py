@@ -183,8 +183,8 @@ def run(
         injection_catalog,
         proposal_catalog,
         observation_time=config.analysis.observation_time,
-        minimum_redshift=config.analysis.population.model_kwargs["minimum_redshift"],
-        maximum_redshift=config.analysis.population.model_kwargs["maximum_redshift"],
+        minimum_redshift=config.analysis.population.redshift.kwargs["minimum_redshift"],
+        maximum_redshift=config.analysis.population.redshift.kwargs["maximum_redshift"],
         minimum_frequency=config.analysis.minimum_frequency,
         maximum_frequency=config.analysis.maximum_frequency,
         detectors=detectors,
@@ -471,9 +471,11 @@ def main(argv: list[str] | None = None) -> None:
 
     proposal_catalog = catalogs["proposal"]
     logger.info(
-        "Proposal density from %s: model=%s kwargs=%s params=%s",
+        "Proposal density from %s: model=%s redshift=%s mass=%s kwargs=%s params=%s",
         config.catalog_stem("proposal"),
         proposal_catalog.population_model_name,
+        proposal_catalog.population.redshift,
+        proposal_catalog.population.mass,
         dict(proposal_catalog.population_model_kwargs),
         dict(proposal_catalog.fiducials),
     )

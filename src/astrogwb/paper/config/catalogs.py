@@ -22,7 +22,6 @@ the XLA backend is initialized, which ``tests/paper/test_cli.py`` guards.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,63 +33,41 @@ from astrogwb.paper.config.mcmc import (
     check_redshift_grid,
 )
 from astrogwb.paper.config.runs import CATALOG_ROLES, assemble_run, discover_runs
+from astrogwb.populations.metadata import PopulationMetadata
 from astrogwb.simulators.polarization_power import CatalogMetadata, polarization_power
 
 logger = logging.getLogger(__name__)
 
 
 def check_population_model(
-    name: str,
+    population: PopulationMetadata,
     *,
     label: str,
-    kwargs: Mapping[str, float | int | bool] | None = None,
     requires_merger_rate: bool = False,
-    amplitude_parameter: str | None = None,
 ) -> None:
     """Reject a population a run or catalog cannot actually be built from.
 
-    Checks as much as the caller supplies: the name is registered, ``kwargs``
-    are kwargs that population takes, and -- for an analysis target, which
-    reconstructs an observed total rate -- that it declares a merger rate at
-    all. A guard mixture does not, so naming one as a target is a
-    configuration error rather than a silently meaningless spectrum.
-    ``amplitude_parameter``, when given, must be one the population declares
-    it can marginalize analytically; otherwise the marginalized likelihood
-    would be a silently wrong posterior.
+    Builds the population the record names: the population and each sub-model
+    are registered, their kwargs are kwargs they take, and -- for an analysis
+    target, which reconstructs an observed total rate -- that the population
+    declares a merger rate at all. A guard-mixture redshift model does not, so
+    naming one as a target is a configuration error rather than a silently
+    meaningless spectrum.
 
-    Imports :mod:`astrogwb.populations` in its own body: the registry is
-    populated by importing the models, which pulls in JAX, and this module is
-    otherwise free of it.
+    Imports :mod:`astrogwb.populations` through ``build``, in its own body: the
+    registry is populated by importing the models, which pulls in JAX, and this
+    module is otherwise free of it.
     """
-    from astrogwb.populations import (
-        amplitude_parameters,
-        build_population,
-        known_populations,
-    )
-
-    known = known_populations()
-    if name not in known:
-        raise ValueError(
-            f"{label}: unknown population {name!r}; registered populations are: "
-            f"{', '.join(known)}"
-        )
-    if amplitude_parameter is not None:
-        supported = amplitude_parameters(name)
-        if amplitude_parameter not in supported:
-            raise ValueError(
-                f"{label}: population {name!r} cannot marginalize "
-                f"{amplitude_parameter!r} analytically; its amplitude parameters "
-                f"are: {', '.join(supported) or 'none'}"
-            )
-    if kwargs is None:
-        return
     try:
-        population = build_population(name, **kwargs)
+        built = population.build()
+    except KeyError as error:
+        raise ValueError(f"{label}: {error.args[0]}") from None
     except TypeError as error:
         raise ValueError(f"{label}: {error}") from None
-    if requires_merger_rate and population.merger_rate_fn is None:
+    if requires_merger_rate and built.merger_rate_fn is None:
         raise ValueError(
-            f"{label}: population {name!r} declares no merger rate, so it "
+            f"{label}: population {population.model_name!r} with redshift model "
+            f"{population.redshift.model!r} declares no merger rate, so it "
             "cannot be an analysis target or an injection; it is a proposal density"
         )
 
@@ -107,15 +84,14 @@ def check_catalog_requests(config: RunConfig, *, label: str) -> None:
         role_label = f"{label} analysis.{role}"
         population = config.catalog_request(role)[0].population
         check_redshift_grid(
-            population.model_kwargs, label=f"{role_label}.population.model_kwargs"
+            population.redshift.kwargs, label=f"{role_label}.population.redshift.kwargs"
         )
         # The injection is the "observed" data, whose spectrum is scaled by a
         # physical rate; a guard mixture declares none, so it can only ever be
         # a proposal.
         check_population_model(
-            population.model_name,
-            label=f"{role_label} population.model_name",
-            kwargs=population.model_kwargs,
+            population,
+            label=f"{role_label} population",
             requires_merger_rate=role == "injection",
         )
 
@@ -196,11 +172,9 @@ def validate_all_runs(root: Path | None = None) -> list[str]:
             check_catalog_requests(config, label=label)
             target = config.analysis.population
             check_population_model(
-                target.model_name,
-                label=f"{label} analysis.population.model_name",
-                kwargs=target.model_kwargs,
+                target,
+                label=f"{label} analysis.population",
                 requires_merger_rate=True,
-                amplitude_parameter=config.analysis.amplitude_parameter,
             )
             logger.info("ok %s", label)
             labels.append(label)

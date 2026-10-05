@@ -23,7 +23,6 @@ from astrogwb_mock_population import FIDUCIALS
 
 from astrogwb.importance.spectral import importance_spectral_density
 from astrogwb.populations import (
-    AMPLITUDE_PARAMETERS,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
     merger_rate_H0_fn,
@@ -57,6 +56,9 @@ def _spectrum(synthetic_importance, n_samples: int = 16):
         importance_spectral_density,
         **importance,
     )
+
+
+AMPLITUDE_PARAMETERS = ("H0", "local_merger_rate")
 
 
 @pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)

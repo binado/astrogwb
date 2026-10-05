@@ -53,7 +53,11 @@ from astrogwb.paper.inference import (
     target_population,
 )
 from astrogwb.paper.utils import load_mapping
-from astrogwb.populations import DEFAULT_DENSITY_SITES
+from astrogwb.populations import (
+    DEFAULT_DENSITY_SITES,
+    ComponentMetadata,
+    PopulationMetadata,
+)
 from astrogwb.simulators.polarization_power import PolarizationPowerCatalog
 from astrogwb.utils import years_to_seconds
 
@@ -84,6 +88,27 @@ GENERATION_KWARGS: dict[str, float | int] = {
 GUARD_FRACTION = 0.3
 
 
+def _population(
+    *, guard_fraction: float | None = None, **redshift_kwargs: float
+) -> PopulationMetadata:
+    """The generating population record: the paper one on the test window."""
+    kwargs = {**GENERATION_KWARGS, **redshift_kwargs}
+    if guard_fraction is not None:
+        kwargs["uniform_mixing_fraction"] = guard_fraction
+    return PopulationMetadata(
+        model_name="bns_madau_dickinson",
+        redshift=ComponentMetadata(
+            model=(
+                "madau_dickinson"
+                if guard_fraction is None
+                else "madau_dickinson_uniform_guard"
+            ),
+            kwargs=kwargs,
+        ),
+        mass=ComponentMetadata(model="ordered_uniform"),
+    )
+
+
 def _write_catalog(
     path: Path,
     *,
@@ -92,16 +117,12 @@ def _write_catalog(
     guarded: bool = False,
 ) -> Path:
     rng = np.random.default_rng(seed)
-    kwargs = dict(GENERATION_KWARGS)
-    if guarded:
-        kwargs["uniform_mixing_fraction"] = GUARD_FRACTION
     catalog = make_catalog(
         redshift=REDSHIFT,
         polarization_power=rng.uniform(0.0, 1.0, size=(frequencies.size, N_SOURCES)),
         minimum_frequency=float(frequencies[0]),
         df=float(frequencies[1] - frequencies[0]),
-        model_name=("bns_md_uniform_mixture" if guarded else "bns_md_cosmological"),
-        model_kwargs=kwargs,
+        population=_population(guard_fraction=GUARD_FRACTION if guarded else None),
     )
     save_catalog(catalog, path, seed=seed)
     return path
@@ -131,7 +152,10 @@ def _config(**overrides: Any) -> RunConfig:
         "maximum_frequency": maximum_frequency,
         "population": {
             **population,
-            "model_kwargs": {**population["model_kwargs"], "n_grid": 32},
+            "redshift": {
+                **population["redshift"],
+                "kwargs": {**population["redshift"]["kwargs"], "n_grid": 32},
+            },
         },
     }
     raw["sampler"] = {
@@ -154,7 +178,7 @@ class AnalysisBounds(TypedDict):
 
 
 def _analysis_bounds(config: RunConfig) -> AnalysisBounds:
-    population_kwargs = config.analysis.population.model_kwargs
+    population_kwargs = config.analysis.population.redshift.kwargs
     return {
         "minimum_redshift": float(population_kwargs["minimum_redshift"]),
         "maximum_redshift": float(population_kwargs["maximum_redshift"]),
@@ -226,7 +250,7 @@ def test_the_observed_rate_comes_from_the_injection_catalogs_own_population(
         redshift_grid=jnp.linspace(
             bounds["minimum_redshift"],
             bounds["maximum_redshift"],
-            int(restricted.population_model_kwargs["n_grid"]),
+            int(restricted.population_redshift_kwargs["n_grid"]),
         ),
     )
     np.testing.assert_allclose(
@@ -298,15 +322,15 @@ def test_restriction_narrows_the_proposals_recorded_population_too(
 
     assert inputs.proposal.num_samples == N_RETAINED
     assert (
-        inputs.proposal.population_model_kwargs["minimum_redshift"]
-        == (config.analysis.population.model_kwargs["minimum_redshift"])
+        inputs.proposal.population_redshift_kwargs["minimum_redshift"]
+        == (config.analysis.population.redshift.kwargs["minimum_redshift"])
     )
     assert (
-        inputs.proposal.population_model_kwargs["maximum_redshift"]
-        == (config.analysis.population.model_kwargs["maximum_redshift"])
+        inputs.proposal.population_redshift_kwargs["maximum_redshift"]
+        == (config.analysis.population.redshift.kwargs["maximum_redshift"])
     )
     # The file on disk is untouched.
-    assert proposal_catalog.population_model_kwargs["minimum_redshift"] == 0.0
+    assert proposal_catalog.population_redshift_kwargs["minimum_redshift"] == 0.0
 
 
 def test_model_kwargs_scale_is_the_full_grid_gaussian_bin_scale(
@@ -583,7 +607,7 @@ def _proposal_log_prob(catalog: PolarizationPowerCatalog) -> jax.Array:
     """The proposal density, restated from the grid formula the file implies."""
     from reference_population import reference_merger_rate_distance_and_logprob
 
-    kwargs = catalog.population_model_kwargs
+    kwargs = catalog.population_redshift_kwargs
     grid = jnp.linspace(
         float(kwargs["minimum_redshift"]),
         float(kwargs["maximum_redshift"]),
@@ -597,7 +621,7 @@ def _proposal_log_prob(catalog: PolarizationPowerCatalog) -> jax.Array:
         source_frame_mass_1=catalog.source_parameters["source_frame_mass_1"],
         source_frame_mass_2=catalog.source_parameters["source_frame_mass_2"],
     )
-    if catalog.population_model_name != "bns_md_uniform_mixture":
+    if catalog.population.redshift.model != "madau_dickinson_uniform_guard":
         return md_logprob
     # The mixture acts only on redshift; add the ordered-pair factor after
     # mixing rather than weighting it as if the uniform component included masses.
@@ -633,7 +657,7 @@ def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.
     # the likelihood's mask, not by compressing the power.
     power = jnp.asarray(catalog.polarization_power)
     redshift = jnp.asarray(catalog.source_parameters["redshift"])
-    population_kwargs = config.analysis.population.model_kwargs
+    population_kwargs = config.analysis.population.redshift.kwargs
 
     rate, distance, logprob = reference_merger_rate_distance_and_logprob(
         params,
@@ -767,11 +791,10 @@ def test_the_requested_density_factors_reach_the_bound_weights_unchanged(
         df=float(FREQUENCIES[1] - FREQUENCIES[0]),
         # Generated on the analysis window itself, so restricting to it leaves
         # the grid -- and with it the stored distances -- unchanged.
-        model_kwargs={
-            **GENERATION_KWARGS,
-            "minimum_redshift": bounds["minimum_redshift"],
-            "maximum_redshift": bounds["maximum_redshift"],
-        },
+        population=_population(
+            minimum_redshift=bounds["minimum_redshift"],
+            maximum_redshift=bounds["maximum_redshift"],
+        ),
     )
     restricted = narrow.restrict_redshift(
         bounds["minimum_redshift"], bounds["maximum_redshift"]
@@ -808,8 +831,7 @@ def test_a_guard_mixture_catalog_cannot_supply_an_observed_rate() -> None:
         polarization_power=np.ones((FREQUENCIES.size, N_SOURCES)),
         minimum_frequency=float(FREQUENCIES[0]),
         df=float(FREQUENCIES[1] - FREQUENCIES[0]),
-        model_name="bns_md_uniform_mixture",
-        model_kwargs={**GENERATION_KWARGS, "uniform_mixing_fraction": 0.1},
+        population=_population(guard_fraction=0.1),
     )
 
     assert guard.get_population().merger_rate_fn is None
@@ -827,7 +849,10 @@ def test_the_repository_ships_no_proposal_density_config() -> None:
     """
     shared = load_mapping(REPO_ROOT / "config/populations.toml")
 
-    assert "uniform_mixing_fraction" in shared["populations"]["guard"]["model_kwargs"]
+    assert (
+        "uniform_mixing_fraction"
+        in shared["populations"]["guard"]["redshift"]["kwargs"]
+    )
     layers = sorted(
         [
             *(REPO_ROOT / "config").glob("*.toml"),

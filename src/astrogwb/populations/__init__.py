@@ -8,9 +8,10 @@ the importance weights divide by
 returns the one observer-frame scalar the same catalog's Poisson count and
 predicted spectrum need, or ``None`` when the population is a proposal density
 with no physical rate. That is what makes a catalog self-describing -- the file
-records one registry name, the construction kwargs the population was built
-with, and the hyperparameters it was drawn at, which is everything needed to
-reconstruct the density that produced it.
+records one registry name, the registered redshift and mass sub-models and
+construction kwargs the population was built with, and the hyperparameters it
+was drawn at, which is everything needed to reconstruct the density that
+produced it.
 
 Importing this package registers every model it ships, the same way
 :mod:`astrogwb.detector` exposes its own submodules. That import pulls in JAX
@@ -20,57 +21,64 @@ initialize it.
 """
 
 from astrogwb.populations.bns_madau_dickinson import (
-    AMPLITUDE_PARAMETERS,
     amplitude_H0_fn,
     amplitude_local_merger_rate_fn,
-    bns_md_cosmological,
-    bns_md_gaussian_cosmological,
-    bns_md_gaussian_modified_propagation,
-    bns_md_gaussian_uniform_mixture,
-    bns_md_modified_propagation,
-    bns_md_time_delayed_cosmological,
-    bns_md_uniform_mixture,
-    madau_dickinson_time_delayed_total_merger_rate,
-    madau_dickinson_total_merger_rate,
+    bns_madau_dickinson,
     merger_rate_H0_fn,
     merger_rate_local_merger_rate_fn,
 )
-from astrogwb.populations.metadata import PopulationMetadata
+from astrogwb.populations.mass import (
+    MassFn,
+    build_mass_model,
+    known_mass_models,
+    register_mass_model,
+)
+from astrogwb.populations.metadata import ComponentMetadata, PopulationMetadata
 from astrogwb.populations.orientation import IsotropicInclination
+from astrogwb.populations.redshift import (
+    RedshiftFn,
+    RedshiftLaw,
+    RedshiftModel,
+    build_redshift_model,
+    known_redshift_models,
+    register_redshift_model,
+)
 from astrogwb.populations.registry import (
     DEFAULT_DENSITY_SITES,
+    ComponentRegistry,
     MergerRateFn,
     Population,
     SourceFn,
-    amplitude_parameters,
     build_population,
     known_populations,
     register_population,
 )
 
 __all__ = [
-    "AMPLITUDE_PARAMETERS",
     "DEFAULT_DENSITY_SITES",
+    "ComponentMetadata",
+    "ComponentRegistry",
     "IsotropicInclination",
+    "MassFn",
     "MergerRateFn",
     "Population",
     "PopulationMetadata",
+    "RedshiftFn",
+    "RedshiftLaw",
+    "RedshiftModel",
     "SourceFn",
     "amplitude_H0_fn",
     "amplitude_local_merger_rate_fn",
-    "amplitude_parameters",
-    "bns_md_cosmological",
-    "bns_md_gaussian_cosmological",
-    "bns_md_gaussian_modified_propagation",
-    "bns_md_gaussian_uniform_mixture",
-    "bns_md_modified_propagation",
-    "bns_md_time_delayed_cosmological",
-    "bns_md_uniform_mixture",
+    "bns_madau_dickinson",
+    "build_mass_model",
     "build_population",
+    "build_redshift_model",
+    "known_mass_models",
     "known_populations",
-    "madau_dickinson_time_delayed_total_merger_rate",
-    "madau_dickinson_total_merger_rate",
+    "known_redshift_models",
     "merger_rate_H0_fn",
     "merger_rate_local_merger_rate_fn",
+    "register_mass_model",
     "register_population",
+    "register_redshift_model",
 ]

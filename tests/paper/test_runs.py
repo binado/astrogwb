@@ -246,10 +246,10 @@ def test_a_guard_customized_at_its_source_keeps_the_shared_window(
     """Each run overrides [populations.guard] itself; its proposal follows."""
     raw = assemble_run("variable-proposal-guard", run)
     proposal = CatalogMetadata.model_validate(raw["analysis"]["proposal"])
-    window = raw["catalog"]["population"]["model_kwargs"]
+    window = raw["catalog"]["population"]["redshift"]["kwargs"]
 
-    assert proposal.population.model_name == "bns_md_uniform_mixture"
-    assert proposal.population.model_kwargs == {
+    assert proposal.population.redshift.model == "madau_dickinson_uniform_guard"
+    assert proposal.population.redshift.kwargs == {
         **window,
         "uniform_mixing_fraction": fraction,
     }
@@ -263,7 +263,9 @@ def test_the_injection_is_drawn_at_the_fiducials_the_run_initializes_at() -> Non
 
     assert injection["fiducials"] == raw["fiducials"]
     assert injection["fiducials"]["delay_slope"] == -1.0
-    assert injection["population"]["model_name"] == "bns_md_time_delayed_cosmological"
+    assert (
+        injection["population"]["redshift"]["model"] == "madau_dickinson_time_delayed"
+    )
 
 
 def test_the_catalog_size_series_differs_only_in_size() -> None:
@@ -337,11 +339,12 @@ def test_extends_inherits_a_base_table_and_leaves_no_key() -> None:
     """
     raw = assemble_run("variable-proposal-guard", "eps1e-2")
 
-    guard = raw["populations"]["guard"]["model_kwargs"]
-    cosmological = raw["populations"]["cosmological"]["model_kwargs"]
+    guard = raw["populations"]["guard"]["redshift"]["kwargs"]
+    cosmological = raw["populations"]["cosmological"]["redshift"]["kwargs"]
 
     assert guard == {**cosmological, "uniform_mixing_fraction": 0.01}
     assert raw["analysis"]["proposal"]["population"] == raw["populations"]["guard"]
+    assert "extends" not in raw["populations"]["guard"]
     assert "extends" not in guard
 
 
@@ -363,6 +366,7 @@ def test_a_guard_mixture_is_rejected_as_an_injection() -> None:
 def test_an_unregistered_catalog_population_is_rejected() -> None:
     raw = assemble_run("cosmological-parameters", "ET-triangular")
     raw["analysis"]["proposal"]["population"] = {
+        **raw["analysis"]["proposal"]["population"],
         "model_name": "no_such_population",
     }
     config = build_run_config(raw)
@@ -423,7 +427,7 @@ def test_run_mcmc_validates_the_layers_the_workflow_passes() -> None:
     assert config.analysis.sampled_params == ("xi_0",)
     assert config.analysis.seeds == {"injection": 41, "proposal": 41}
     assert config.analysis.injection.waveform.approximant == "IMRPhenomXAS_NRTidalv3"
-    assert config.analysis.population.model_kwargs["n_grid"] == 256
+    assert config.analysis.population.redshift.kwargs["n_grid"] == 256
 
 
 def test_a_deep_fold_would_corrupt_the_one_prior_override() -> None:

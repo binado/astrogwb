@@ -60,11 +60,15 @@ def test_building_a_population_still_reaches_the_registry() -> None:
         """
 import sys
 
-from astrogwb.populations.metadata import PopulationMetadata
+from astrogwb.populations.metadata import ComponentMetadata, PopulationMetadata
 
 record = PopulationMetadata(
-    model_name='bns_md_cosmological',
-    model_kwargs={'minimum_redshift': 0.0, 'maximum_redshift': 1.0, 'n_grid': 8},
+    model_name='bns_madau_dickinson',
+    redshift=ComponentMetadata(
+        model='madau_dickinson',
+        kwargs={'minimum_redshift': 0.0, 'maximum_redshift': 1.0, 'n_grid': 8},
+    ),
+    mass=ComponentMetadata(model='ordered_uniform'),
 )
 record.check_registered()
 """

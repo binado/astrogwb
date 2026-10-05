@@ -14,7 +14,7 @@ import numpy as np
 from repo import REPO_ROOT
 
 from astrogwb.paper.config import fiducials, population_metadata
-from astrogwb.populations import PopulationMetadata, build_population
+from astrogwb.populations import PopulationMetadata
 from astrogwb.populations.evaluation import evaluate_sources
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
@@ -28,13 +28,11 @@ from astrogwb.waveform import WaveformMetadata
 #: cosmology integrals cheap enough for a unit test -- and it is written as an
 #: override so the difference is visible instead of buried in a retyped table.
 PAPER_POPULATION = population_metadata(REPO_ROOT, n_grid=256)
-PAPER_MODEL = PAPER_POPULATION.model_name
-PAPER_MODEL_KWARGS: dict[str, float | int | bool] = dict(PAPER_POPULATION.model_kwargs)
 
 #: The hyperparameters fixtures draw at: the shared ``[fiducials]``, which is
-#: what a real catalog inherits. It carries ``xi_0`` / ``xi_n`` that
-#: ``bns_md_cosmological`` never reads -- source models index ``params`` by
-#: name, so the extra entries are inert here exactly as they are in generation.
+#: what a real catalog inherits. It carries ``xi_0 = 1`` and ``xi_n``, so the
+#: modified-propagation factor is applied and is exactly one, as it is in
+#: generation.
 PAPER_POPULATION_PARAMS: dict[str, float] = fiducials(REPO_ROOT)
 
 
@@ -51,21 +49,18 @@ def _derived_columns(model, params, sources):
 def source_parameters(
     redshift: np.ndarray,
     *,
-    model_name: str = PAPER_MODEL,
-    model_kwargs: Mapping[str, float | int | bool] | None = None,
+    population: PopulationMetadata = PAPER_POPULATION,
     fiducials: Mapping[str, float] | None = None,
     population_params: Mapping[str, float] | None = None,
 ) -> dict[str, np.ndarray]:
     """Complete a redshift ladder into every column the population declares."""
     if fiducials is None:
         fiducials = population_params
-    model = build_population(
-        model_name, **(model_kwargs or PAPER_MODEL_KWARGS)
-    ).source_model
+    model = population.build().source_model
     ones = np.ones_like(redshift)
     inclination = (
         {"inclination": 0.75 * ones}
-        if (model_kwargs or PAPER_MODEL_KWARGS).get("sample_inclination", True)
+        if population.model_kwargs.get("sample_inclination", True)
         else {}
     )
     columns = _derived_columns(
@@ -95,8 +90,7 @@ def make_catalog(
     reference_frequency: float = 20.0,
     sampling_frequency: float = 128.0,
     df: float = 10.0,
-    model_name: str = PAPER_MODEL,
-    model_kwargs: Mapping[str, float | int | bool] | None = None,
+    population: PopulationMetadata = PAPER_POPULATION,
     fiducials: Mapping[str, float] | None = None,
     population_params: Mapping[str, float] | None = None,
     extra_source_parameters: Mapping[str, np.ndarray] | None = None,
@@ -115,8 +109,7 @@ def make_catalog(
 
     parameters = source_parameters(
         redshift,
-        model_name=model_name,
-        model_kwargs=model_kwargs,
+        population=population,
         fiducials=fiducials,
     )
     if extra_source_parameters is not None:
@@ -141,10 +134,7 @@ def make_catalog(
                 sampling_frequency=sampling_frequency,
                 frequency_resolution=df,
             ),
-            population=PopulationMetadata(
-                model_name=model_name,
-                model_kwargs=dict(model_kwargs or PAPER_MODEL_KWARGS),
-            ),
+            population=population,
             fiducials={
                 name: float(value)
                 for name, value in (fiducials or PAPER_POPULATION_PARAMS).items()

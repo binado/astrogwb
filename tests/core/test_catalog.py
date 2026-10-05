@@ -11,7 +11,7 @@ import pytest
 
 from astrogwb.constants import ISCO_ALPHA
 from astrogwb.frequency import uniform_frequency_grid
-from astrogwb.populations import PopulationMetadata
+from astrogwb.populations import ComponentMetadata, PopulationMetadata
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerCatalog,
@@ -50,8 +50,12 @@ def _waveform_generator() -> WaveformMetadata:
 #: is the record of the density that drew it, so there is no valid catalog
 #: without one.
 POPULATION_RECORD: dict[str, Any] = {
-    "model_name": "bns_md_cosmological",
-    "model_kwargs": {"minimum_redshift": 0.0, "maximum_redshift": 20.0, "n_grid": 256},
+    "model_name": "bns_madau_dickinson",
+    "redshift": ComponentMetadata(
+        model="madau_dickinson",
+        kwargs={"minimum_redshift": 0.0, "maximum_redshift": 20.0, "n_grid": 256},
+    ),
+    "mass": ComponentMetadata(model="ordered_uniform"),
     "fiducials": {
         "H0": 67.66,
         "Omega_m": 0.3096,
@@ -65,7 +69,8 @@ POPULATION_RECORD: dict[str, Any] = {
 }
 POPULATION = PopulationMetadata(
     model_name=POPULATION_RECORD["model_name"],
-    model_kwargs=POPULATION_RECORD["model_kwargs"],
+    redshift=POPULATION_RECORD["redshift"],
+    mass=POPULATION_RECORD["mass"],
 )
 
 
@@ -291,9 +296,10 @@ def test_an_unknown_population_name_fails_clearly() -> None:
     # the record a real file produces.
     unknown = PopulationMetadata(
         model_name="no_such_population",
-        model_kwargs=catalog.population.model_kwargs,
+        redshift=catalog.population.redshift,
+        mass=catalog.population.mass,
     )
-    with pytest.raises(KeyError, match="bns_md_cosmological"):
+    with pytest.raises(KeyError, match="bns_madau_dickinson"):
         replace(
             catalog,
             _metadata=catalog.metadata.model_copy(update={"population": unknown}),
@@ -312,8 +318,8 @@ def test_restrict_redshift_narrows_the_samples_and_the_population_together() -> 
         restricted.polarization_power, catalog.polarization_power[:, [1, 2]]
     )
     assert restricted.num_samples == 2
-    assert restricted.population_model_kwargs["minimum_redshift"] == 0.3
-    assert restricted.population_model_kwargs["maximum_redshift"] == 2.0
+    assert restricted.population_redshift_kwargs["minimum_redshift"] == 0.3
+    assert restricted.population_redshift_kwargs["maximum_redshift"] == 2.0
     # Everything else about the record travels unchanged.
     assert restricted.fiducials == catalog.fiducials
     # Both reconstructed callables see the narrowed window: they are built
@@ -329,7 +335,7 @@ def test_restrict_redshift_leaves_the_original_untouched() -> None:
 
     assert catalog.num_samples == 4
     assert catalog.polarization_power.shape == (2, 4)
-    assert catalog.population_model_kwargs["minimum_redshift"] == 0.0
+    assert catalog.population_redshift_kwargs["minimum_redshift"] == 0.0
 
 
 def test_restrict_redshift_rejects_a_window_outside_the_generation_support() -> None:

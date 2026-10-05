@@ -171,8 +171,13 @@ class PolarizationPowerCatalog:
 
     @property
     def population_model_kwargs(self) -> Mapping[str, Any]:
-        """The model's construction kwargs, as persisted."""
+        """The population's own construction kwargs, as persisted."""
         return dict(self.population.model_kwargs)
+
+    @property
+    def population_redshift_kwargs(self) -> Mapping[str, Any]:
+        """The redshift model's construction kwargs: the window and grid drawn on."""
+        return dict(self.population.redshift.kwargs)
 
     @property
     def fiducials(self) -> Mapping[str, float]:
@@ -242,16 +247,18 @@ class PolarizationPowerCatalog:
         :attr:`metadata` records the narrowed window and the kept sample count,
         so it no longer names a cached draw -- it is derived from one.
         """
-        model_kwargs = self.population.model_kwargs
-        missing = [name for name in REDSHIFT_WINDOW_KWARGS if name not in model_kwargs]
+        redshift_kwargs = self.population.redshift.kwargs
+        missing = [
+            name for name in REDSHIFT_WINDOW_KWARGS if name not in redshift_kwargs
+        ]
         if missing:
             raise ValueError(
-                f"population {self.population.model_name!r} takes no "
+                f"redshift model {self.population.redshift.model!r} takes no "
                 f"{missing} construction setting(s), so its redshift window cannot "
                 "be narrowed"
             )
-        generated_min = float(model_kwargs["minimum_redshift"])
-        generated_max = float(model_kwargs["maximum_redshift"])
+        generated_min = float(redshift_kwargs["minimum_redshift"])
+        generated_max = float(redshift_kwargs["maximum_redshift"])
         if not generated_min <= minimum_redshift < maximum_redshift <= generated_max:
             raise ValueError(
                 f"analysis redshift support [{minimum_redshift:.4g}, "
@@ -276,7 +283,7 @@ class PolarizationPowerCatalog:
             polarization_power=self.polarization_power[:, keep],
             _metadata=self._metadata.model_copy(
                 update={
-                    "population": self.population.with_model_kwargs(
+                    "population": self.population.with_redshift_kwargs(
                         minimum_redshift=float(minimum_redshift),
                         maximum_redshift=float(maximum_redshift),
                     ),

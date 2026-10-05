@@ -17,7 +17,6 @@ from astrogwb.paper.config import fiducials, networks, priors, waveform_generato
 from astrogwb.paper.config.detectors import load_detector_config
 from astrogwb.paper.config.mcmc import (
     DEFAULT_DENSITY_SITES,
-    AmplitudeParameter,
     build_run_config,
     prior_to_spec,
 )
@@ -138,8 +137,8 @@ def test_build_run_config_deep_merges_extra_overrides() -> None:
 
 def test_analysis_population_declares_the_required_redshift_grid() -> None:
     config = build_run_config(example_raw())
-    kwargs = config.analysis.population.model_kwargs
-    expected = example_raw()["analysis"]["population"]["model_kwargs"]
+    kwargs = config.analysis.population.redshift.kwargs
+    expected = example_raw()["analysis"]["population"]["redshift"]["kwargs"]
     assert {"minimum_redshift", "maximum_redshift", "n_grid"} <= set(kwargs)
     assert kwargs["minimum_redshift"] == expected["minimum_redshift"]
     assert kwargs["maximum_redshift"] == expected["maximum_redshift"]
@@ -518,15 +517,11 @@ def test_accessor_kwargs_do_not_poison_the_cache() -> None:
 # --------------------------------------------------------------------------- #
 @pytest.mark.integration
 def test_the_restated_population_constants_match_the_registry() -> None:
-    """`config.mcmc` copies two tuples out of the population layer.
+    """`config.mcmc` copies the default density sites out of the population layer.
 
     Copies drift, so this is the cross-check. It is marked `integration`
     because asserting it imports the population registry.
     """
-    from typing import get_args
-
-    from astrogwb.populations import AMPLITUDE_PARAMETERS
     from astrogwb.populations import DEFAULT_DENSITY_SITES as registered_sites
 
-    assert get_args(AmplitudeParameter) == AMPLITUDE_PARAMETERS
     assert DEFAULT_DENSITY_SITES == registered_sites

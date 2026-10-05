@@ -57,21 +57,27 @@ def make_request() -> RequestFactory:
     """A tiny Ripple-backed request, with the hyperparameters a real one inherits."""
 
     def build(
-        model: str = "bns_md_cosmological",
+        model: str = "bns_madau_dickinson",
         *,
-        extra_kwargs: dict[str, Any] | None = None,
+        redshift: str = "madau_dickinson",
+        mass: str = "ordered_uniform",
+        extra_redshift_kwargs: dict[str, Any] | None = None,
         extra_fiducials: dict[str, float] | None = None,
     ) -> CatalogMetadata:
         return CatalogMetadata.model_validate(
             {
                 "population": {
                     "model_name": model,
-                    "model_kwargs": {
-                        "minimum_redshift": 0.0,
-                        "maximum_redshift": 20.0,
-                        "n_grid": 256,
-                        **(extra_kwargs or {}),
+                    "redshift": {
+                        "model": redshift,
+                        "kwargs": {
+                            "minimum_redshift": 0.0,
+                            "maximum_redshift": 20.0,
+                            "n_grid": 256,
+                            **(extra_redshift_kwargs or {}),
+                        },
                     },
+                    "mass": {"model": mass},
                 },
                 "waveform": {
                     "approximant": "TaylorF2",
@@ -130,11 +136,12 @@ def test_generator_with_guard_mixture_records_its_fraction(
     """The eps in the config is the eps the file records and reweights by."""
     catalog = _draw(
         make_request(
-            "bns_md_uniform_mixture", extra_kwargs={"uniform_mixing_fraction": 0.1}
+            redshift="madau_dickinson_uniform_guard",
+            extra_redshift_kwargs={"uniform_mixing_fraction": 0.1},
         )
     )
 
-    assert catalog.population_model_kwargs["uniform_mixing_fraction"] == 0.1
+    assert catalog.population_redshift_kwargs["uniform_mixing_fraction"] == 0.1
 
 
 @pytest.mark.integration
@@ -143,12 +150,12 @@ def test_generator_with_gaussian_mass_model_records_its_fiducials(
 ) -> None:
     catalog = _draw(
         make_request(
-            "bns_md_gaussian_cosmological",
+            mass="ordered_gaussian",
             extra_fiducials={"mass_mean": 1.33, "mass_sigma": 0.09},
         )
     )
 
-    assert catalog.population_model_name == "bns_md_gaussian_cosmological"
+    assert catalog.population.mass.model == "ordered_gaussian"
     assert catalog.fiducials["mass_mean"] == pytest.approx(1.33)
 
 
@@ -157,7 +164,7 @@ def test_cli_with_unregistered_model_fails_before_generating(
 ) -> None:
     request = make_request("no_such_population")
 
-    with pytest.raises(ValueError, match="bns_md_cosmological"):
+    with pytest.raises(ValueError, match="bns_madau_dickinson"):
         generate_catalog.main(
             [
                 "--request",
