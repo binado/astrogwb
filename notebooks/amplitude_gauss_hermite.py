@@ -132,9 +132,32 @@ def _(BoundedPrior):
         )
         return jnp.log(0.5 * (hi - lo)) + logsumexp(jnp.log(w) + log_integrand, axis=-1)
 
-    def trapezoid_log_normalizer(bounded, mle, rho):
-        """``ln Z`` from the library's fixed 1024-node trapezoid."""
-        return AmplitudeConditional(mle, rho, prior=bounded.prior).log_normalizer
+    def trapezoid_log_normalizer(bounded, mle, rho, num_nodes=1024):
+        """``ln Z`` from the fixed 1024-node trapezoid the library used to apply.
+
+        The library now integrates with Gauss-Legendre (see the conclusion), so
+        the old rule is reproduced here: nodes uniform in the *base*
+        distribution's variable, pushed through the transforms and sorted.
+        """
+        prior = bounded.prior
+        if isinstance(prior, dist.TransformedDistribution):
+            base = prior.base_dist
+            nodes = jnp.linspace(
+                base.support.lower_bound, base.support.upper_bound, num_nodes
+            )
+            for transform in prior.transforms:
+                nodes = transform(nodes)
+            nodes = jnp.sort(nodes)
+        else:
+            nodes = jnp.linspace(bounded.lower, bounded.upper, num_nodes)
+        mle, rho = jnp.asarray(mle), jnp.asarray(rho)
+        log_y = (
+            prior.log_prob(nodes)
+            - 0.5 * (rho[..., None] * (nodes - mle[..., None])) ** 2
+        )
+        shift = jnp.max(log_y, axis=-1, keepdims=True)
+        integral = jnp.trapezoid(jnp.exp(log_y - shift), nodes, axis=-1)
+        return jnp.squeeze(shift, axis=-1) + jnp.log(integral)
 
     def _log_diff(upper, lower):
         return upper + jnp.log1p(-jnp.exp(lower - upper))
@@ -594,6 +617,75 @@ def _(
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
+    ## High SNR
+
+    The sweeps above stop at $\rho=100$. The fixed grid's resolution is
+    $\Delta A\approx3/1024\approx3\times10^{-3}$ against $\sigma_A=1/\rho$, so it
+    breaks down at $\rho\gtrsim300$; GL with a $7\sigma_A$ window does not care.
+    Error in $\ln Z$ for $\rho=10^3$--$10^5$ with the MLE a distance $d$ from the
+    lower bound (the library's `AmplitudeConditional` is Gauss-Legendre $k=32$).
+    """)
+    return
+
+
+@app.cell
+def _(
+    BOUNDED,
+    LOWER,
+    UPPER,
+    dense_reference,
+    gauss_legendre_log_normalizer,
+    trapezoid_log_normalizer,
+    uniform_reference,
+):
+    _rows = []
+    for _name, _bounded in BOUNDED.items():
+        for _rho in [1e3, 1e4, 1e5]:
+            for _d in [-2.0, 0.0, 3.0, 12.0]:
+                _mle = jnp.asarray([LOWER + _d / _rho])
+                _r = jnp.asarray([_rho])
+                _ref = (
+                    uniform_reference(_mle, _r, LOWER, UPPER)
+                    if _name == "uniform"
+                    else dense_reference(_bounded, np.asarray(_mle), np.asarray(_r))
+                )
+                _library = AmplitudeConditional(
+                    _mle, _r, prior=_bounded.prior
+                ).log_normalizer
+                _rows.append(
+                    (
+                        _name,
+                        _rho,
+                        _d,
+                        float(
+                            jnp.abs(
+                                trapezoid_log_normalizer(_bounded, _mle, _r) - _ref
+                            )[0]
+                        ),
+                        float(
+                            jnp.abs(
+                                gauss_legendre_log_normalizer(_bounded, _mle, _r, 32)
+                                - _ref
+                            )[0]
+                        ),
+                        float(jnp.abs(_library - _ref)[0]),
+                    )
+                )
+    _lines = [
+        f"{'prior':<24}{'rho':>8}{'d':>6}{'trapezoid':>12}{'GL(32)':>12}{'library':>12}"
+    ]
+    _lines += [
+        f"{n:<24}{r:>8g}{d:>6g}{t:>12.1e}{g:>12.1e}{lib:>12.1e}"
+        for n, r, d, t, g, lib in _rows
+    ]
+    assert all(lib < 1e-6 for *_, lib in _rows), _rows
+    mo.md("```\n" + "\n".join(_lines) + "\n```")
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
     ## 5. Conclusion
 
     For each prior, SNR and tolerance, the table gives the best $k$ and the
@@ -791,6 +883,14 @@ def _():
     meaning. Before committing to it, benchmark it inside NUTS with the
     production chain layout; the speed-up is structural (32 vs 1024
     evaluations) and I have not measured it.
+
+    **Adopted.** `AmplitudeConditional` now integrates with Gauss-Legendre
+    $k=32$ on a $7\\sigma_A$ window clipped to the support
+    (`astrogwb.distributions.amplitude`), `sample`/`icdf` tabulate their CDF on
+    that same window, and `quadrature_grid` and `effective_nodes` are gone. The
+    `trapezoid` estimator in this notebook is a local copy of the retired rule,
+    kept so the comparison stays reproducible. The high-SNR table above shows
+    the library reaching $\\lesssim10^{-9}$ at $\\rho$ up to $10^5$.
     """)
     return
 
