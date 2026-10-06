@@ -175,7 +175,7 @@ def test_spectra_chunk_size_changes_cost_not_the_draws() -> None:
 
 
 @pytest.mark.integration
-def test_population_draw_does_not_depend_on_the_size_ladder() -> None:
+def test_population_draw_does_not_depend_on_chunk_size() -> None:
     key = batch_keys(41, 1)[0]
 
     small = PopulationSimulator(SPECTRA.sources, chunk_size=1)(key)
@@ -185,6 +185,23 @@ def test_population_draw_does_not_depend_on_the_size_ladder() -> None:
     assert small["total_merger_rate"] == large["total_merger_rate"]
     for name, column in small["source_parameters"].items():
         assert column.shape == (4,)
+        np.testing.assert_array_equal(column, large["source_parameters"][name])
+
+
+@pytest.mark.integration
+def test_poisson_population_draw_does_not_depend_on_chunk_size() -> None:
+    poisson = SPECTRA.model_copy(
+        update={"count": "poisson", "num_events": None, "observation_time": 1e-3}
+    )
+    key = batch_keys(41, 1)[0]
+
+    small = PopulationSimulator(poisson.sources, chunk_size=50)(key)
+    large = PopulationSimulator(poisson.sources, chunk_size=1000)(key)
+
+    count = int(small["count"])
+    assert count == int(large["count"]) > 50
+    for name, column in small["source_parameters"].items():
+        assert column.shape == (count,)
         np.testing.assert_array_equal(column, large["source_parameters"][name])
 
 

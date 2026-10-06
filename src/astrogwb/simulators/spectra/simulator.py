@@ -86,7 +86,7 @@ class SpectraSimulator:
     a population carrying a degree of freedom the approximant cannot represent
     would otherwise be silently dropped. ``chunk_size`` chunks the waveform
     reduction -- peak waveform memory is ``(F, chunk_size)`` -- and the size
-    ladder sources are drawn at. It consumes no randomness, which is why it is a
+    of the pieces Poisson-count sources are drawn in. It consumes no randomness, which is why it is a
     setting and not metadata.
 
     ``validate_sources=False`` skips that check. It exists for a deliberate

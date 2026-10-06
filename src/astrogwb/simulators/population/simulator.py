@@ -9,10 +9,12 @@ The stages differ in cost and in what must be static:
 1. *Hyperparameters and count* are cheap and drawn in one jitted call. The
    count comes back to the host as an integer, because the host uses it to
    decide a shape.
-2. *Sources* are drawn at a **bucketed** size, then trimmed to the draw's
-   count. Event ``i`` is drawn from ``fold_in(source_key, i)``, so the first
-   ``n`` events do not depend on the size drawn: the bucket ladder and
-   ``chunk_size`` change cost, never the realization.
+2. *Sources* are drawn in one vmap at a static size. A fixed ``num_events``
+   is one size, so it is drawn exactly. A Poisson count differs per key, and
+   each distinct size is a compile, so the sources are drawn in fixed
+   ``chunk_size`` pieces -- one compile -- and the last piece is trimmed to the
+   count. Event ``i`` is drawn from ``fold_in(source_key, i)``, wherever it
+   falls, so ``chunk_size`` changes cost, never the realization.
 
 Source sampling does not use ``numpyro.plate`` at a rate-derived size, so the
 population draw is independent of the merger rate.
@@ -43,17 +45,11 @@ from astrogwb.simulators.population.metadata import PopulationDrawMetadata
 from astrogwb.utils import years_to_seconds
 
 __all__ = [
-    "BUCKET_RATIO",
     "PopulationData",
     "PopulationSimulator",
     "bucket_size",
     "sample_sources_by_key",
 ]
-
-#: Geometric growth of the source-draw sizes. Sizes only affect cost -- every
-#: distinct one is a compile and padding is drawn and discarded -- so the ratio
-#: trades a few more compiles for less discarded sampling. It is not metadata.
-BUCKET_RATIO = 1.25
 
 
 class PopulationData(TypedDict):
@@ -69,7 +65,7 @@ class PopulationData(TypedDict):
     source_parameters: dict[str, NDArray[Any]]
 
 
-def bucket_size(count: int, chunk_size: int, ratio: float = BUCKET_RATIO) -> int:
+def bucket_size(count: int, chunk_size: int, ratio: float) -> int:
     """Smallest size of a geometric ladder of ``chunk_size`` multiples holding ``count``.
 
     At least one chunk, so an empty draw still has a shape to compile.
@@ -88,9 +84,10 @@ def sample_sources_by_key(
     source_model: SourceFn,
     params: Mapping[str, Any],
     key: jax.Array,
+    start: jax.Array,
     size: int,
 ) -> dict[str, jax.Array]:
-    """``size`` sources, event ``i`` drawn from ``fold_in(key, i)``.
+    """Events ``start`` to ``start + size``, event ``i`` drawn from ``fold_in(key, i)``.
 
     The counterpart of :func:`~astrogwb.populations.evaluation.sample_sources`
     with the same replay -- sampled sites are drawn, then every returned column,
@@ -98,11 +95,12 @@ def sample_sources_by_key(
     :func:`~astrogwb.populations.evaluation.evaluate_sources` -- but with one key
     per event instead of ``split(key, size)``. Splitting a key into ``n`` and
     into ``m > n`` children does not share a prefix, so there the drawn events
-    would depend on ``size``; here the first ``n`` events of ``size = m`` are the
-    ``size = n`` draw, which is what lets sizes be bucketed freely.
+    would depend on ``size``; here an event depends on its index alone, so a
+    population can be drawn in pieces of any size. ``start`` is a ``uint32``
+    scalar, traced, so every piece of one ``size`` shares a compile.
     """
     event_keys = jax.vmap(lambda i: jax.random.fold_in(key, i))(
-        jnp.arange(size, dtype=jnp.uint32)
+        start + jnp.arange(size, dtype=jnp.uint32)
     )
 
     def one_event(event_key: jax.Array) -> dict[str, jax.Array]:
@@ -158,9 +156,10 @@ class PopulationSimulator:
     ``simulator(key)`` is one draw in the layout of
     :class:`~astrogwb.simulators.population.PopulationData`; loop over
     :func:`~astrogwb.simulators.core.batch_keys` for several. Event ``j`` comes
-    from a key folded with ``j``. ``chunk_size`` sets the ladder
-    of sizes sources are drawn at, so it changes cost and compilation, not the
-    draw, which is why it is a setting and not metadata.
+    from a key folded with ``j``. With Poisson counts, ``chunk_size`` is the
+    size of the pieces sources are drawn in, one compile and ``ceil(count /
+    chunk_size)`` calls; a fixed ``num_events`` is drawn in one piece. It changes
+    cost, not the draw, which is why it is a setting and not metadata.
 
     The simulator holds the jitted stages, so reusing one keeps their
     compilations warm.
@@ -226,16 +225,33 @@ class PopulationSimulator:
         theta, rate, count_device = self._hyperparameters_and_count(key)
         hyperparameters = {n: np.asarray(v, dtype=np.float64) for n, v in theta.items()}
         count = int(count_device)
-        sources = self._draw_sources(
-            hyperparameters,
-            source_key,
-            size=bucket_size(count, self._chunk_size),
-        )
+        sources = self._sources(hyperparameters, source_key, count)
         return {
             "total_merger_rate": np.asarray(rate, dtype=np.float64),
             "count": np.asarray(count, dtype=np.int64),
             "hyperparameters": hyperparameters,
             "source_parameters": {
-                name: np.asarray(values)[:count] for name, values in sources.items()
+                name: values[:count] for name, values in sources.items()
             },
+        }
+
+    def _sources(
+        self, hyperparameters: Mapping[str, Any], key: jax.Array, count: int
+    ) -> dict[str, NDArray[Any]]:
+        """Columns of at least ``count`` events: one piece, or whole chunks."""
+        if self._metadata.num_events is not None:
+            # One count for every key, so one static size and one compile.
+            drawn = self._draw_sources(
+                hyperparameters, key, np.uint32(0), size=max(count, 1)
+            )
+            return {name: np.asarray(values) for name, values in drawn.items()}
+        pieces = [
+            self._draw_sources(
+                hyperparameters, key, np.uint32(start), size=self._chunk_size
+            )
+            for start in range(0, max(count, 1), self._chunk_size)
+        ]
+        return {
+            name: np.concatenate([np.asarray(piece[name]) for piece in pieces])
+            for name in pieces[0]
         }

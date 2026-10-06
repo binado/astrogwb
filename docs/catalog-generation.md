@@ -514,8 +514,8 @@ It is produced by the cached node `astrogwb.simulators.spectra.spectra`:
   seed per draw, usually `split_seed(seed, num_draws)`. Each seed is one draw
   (hyperparameters and sources alike), so a draw depends on its own seed alone,
   not on its batchmates, and the same seed gives the same spectrum in any call.
-- **settings** -- `chunk_size` chunks the waveform reduction and sets the ladder
-  of sizes sources are drawn at. It consumes no randomness, so it is not in the
+- **settings** -- `chunk_size` chunks the waveform reduction and sets the size
+  of the pieces Poisson-count sources are drawn in. It consumes no randomness, so it is not in the
   path. Memory is one draw's sources.
 
 ```python

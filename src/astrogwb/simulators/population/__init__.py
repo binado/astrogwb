@@ -5,7 +5,6 @@ from astrogwb.simulators.population.metadata import (
     PopulationDrawMetadata,
 )
 from astrogwb.simulators.population.simulator import (
-    BUCKET_RATIO,
     PopulationData,
     PopulationSimulator,
     bucket_size,
@@ -13,7 +12,6 @@ from astrogwb.simulators.population.simulator import (
 )
 
 __all__ = [
-    "BUCKET_RATIO",
     "Hyperparameter",
     "PopulationData",
     "PopulationDrawMetadata",
