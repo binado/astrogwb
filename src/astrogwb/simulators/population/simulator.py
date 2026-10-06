@@ -73,10 +73,10 @@ class PopulationData(TypedDict):
     ``offsets = concatenate([[0], cumsum(counts)])``.
     """
 
-    total_merger_rate: Any
-    counts: Any
-    hyperparameters: dict[str, Any]
-    source_parameters: dict[str, Any]
+    total_merger_rate: NDArray[np.float64]
+    counts: NDArray[np.int64]
+    hyperparameters: dict[str, NDArray[np.float64]]
+    source_parameters: dict[str, NDArray[Any]]
 
 
 def bucket_size(count: int, chunk_size: int, ratio: float = BUCKET_RATIO) -> int:
