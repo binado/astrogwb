@@ -48,8 +48,8 @@ from astrogwb.simulators.spectra import (
     SpectralDensityCatalog,
     SpectraMetadata,
     SpectraSimulator,
+    stack_spectra,
 )
-from astrogwb.simulators.spectra.simulator import DEFAULT_SUPERBATCH
 
 logger = logging.getLogger(__name__)
 
@@ -86,15 +86,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=128,
         help="Sources per waveform chunk; changes memory, not the draws.",
-    )
-    parser.add_argument(
-        "--superbatch",
-        type=int,
-        default=DEFAULT_SUPERBATCH,
-        help=(
-            "Draws whose sources are held and reduced as one stream; changes "
-            "memory (about superbatch x mean count sources), not the draws."
-        ),
     )
     parser.add_argument(
         "--force",
@@ -155,11 +146,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         if recorded.key() != metadata.key():
             raise ValueError(f"{output} records {recorded.key()}, not {metadata.key()}")
     else:
-        simulator = SpectraSimulator(
-            metadata, chunk_size=args.chunk_size, superbatch=args.superbatch
-        )
-        outputs = simulator(batch_keys(seed, num_draws))
-        write(output, outputs, metadata, seed=seed, batch_size=args.superbatch)
+        simulator = SpectraSimulator(metadata, chunk_size=args.chunk_size)
+        parts = []
+        for draw, key in enumerate(batch_keys(seed, num_draws), start=1):
+            parts.append(simulator(key))
+            logger.info("Drew spectrum %d/%d", draw, num_draws)
+        outputs = stack_spectra(parts)
+        write(output, outputs, metadata, seed=seed)
     catalog = SpectralDensityCatalog.from_arrays(outputs, metadata)
     logger.info(
         "%s spectra %s: count=%s num_events=%s, %d draws, %d frequencies, at %s",

@@ -476,23 +476,26 @@ is a node of its own: `astrogwb.simulators.population.population`.
   `num_events` and the version. No waveform, so two waveforms' spectra records
   share one population key (`SpectraMetadata.sources.key()`).
 - **inputs** -- `{"seeds": ...}`, as for spectra.
-- **outputs** -- `counts` `(draws,)`, `total_merger_rate` `(draws,)`,
-  `hyperparameters/<name>` `(draws,)` and the **flat** `source_parameters/<name>`
-  columns of length `counts.sum()`; draw `b` owns the slice
-  `offsets[b]:offsets[b + 1]` of `offsets = concatenate([[0], cumsum(counts)])`
-  (`PopulationData`).
+- **outputs** -- one draw per call: `count`, `total_merger_rate` and
+  `hyperparameters/<name>` are 0-d and each `source_parameters/<name>` column
+  is `(count,)` (`PopulationData`).
 
 Draw once and reduce through several waveforms -- the same events, so the
 differences are the waveform's alone:
 
 ```python
-draws = PopulationSimulator(metadata.sources)(batch_keys(seed, n))
-spectra_a = SpectraSimulator(metadata_a).reduce(draws)
-spectra_b = SpectraSimulator(metadata_b).reduce(draws)
+population = PopulationSimulator(metadata.sources)
+simulator_a, simulator_b = SpectraSimulator(metadata_a), SpectraSimulator(metadata_b)
+parts_a, parts_b = [], []
+for key in batch_keys(seed, n):
+    draw = population(key)
+    parts_a.append(simulator_a.reduce(draw))
+    parts_b.append(simulator_b.reduce(draw))
+spectra_a, spectra_b = stack_spectra(parts_a), stack_spectra(parts_b)
 ```
 
 Persisting a population pays when it is reused like this; a simulation loop
-calls `SpectraSimulator(...)(keys)` and keeps nothing.
+calls `SpectraSimulator(...)(key)` per draw and keeps nothing.
 
 ## The spectral-density node
 
@@ -512,9 +515,8 @@ It is produced by the cached node `astrogwb.simulators.spectra.spectra`:
   (hyperparameters and sources alike), so a draw depends on its own seed alone,
   not on its batchmates, and the same seed gives the same spectrum in any call.
 - **settings** -- `chunk_size` chunks the waveform reduction and sets the ladder
-  of sizes sources are drawn at; `superbatch` is how many draws are held and
-  reduced as one stream (memory is about `superbatch` times the mean count in
-  sources). Neither consumes randomness, so neither is in the path.
+  of sizes sources are drawn at. It consumes no randomness, so it is not in the
+  path. Memory is one draw's sources.
 
 ```python
 from astrogwb.paper.cache import default_cache_dir
@@ -548,14 +550,14 @@ are data, so an edited bound re-keys the draws without a version bump. Each
 seed is split into a hyperparameter key, a count key and a source key, and event
 `i` of a draw is drawn from the source key folded with `i`. Counts are exact --
 there is no padded capacity -- and the first `n` events of a draw do not depend
-on how many were drawn, so `chunk_size` and `superbatch` change cost, never the
-draws.
+on how many were drawn, so `chunk_size` changes cost, never the draws.
 
-The events of every draw in a superbatch are reduced as **one flat stream**
-(`PackedPowerSum`): chunks of `chunk_size` sources run through the waveform and
-are added to their draw's row with a segment sum, so no draw is padded to the
-largest, one compilation serves any counts, and a prior that spreads the
-merger rate several-fold costs no more waveforms than the counts need.
+A draw's events are reduced chunk by chunk (`ChunkedPowerSum`): chunks of
+`chunk_size` sources run through the waveform and are added into one `(F,)`
+sum, with a mask on the tail of the last chunk, so one compilation serves any
+count and a prior that spreads the merger rate several-fold costs no more
+waveforms than the counts need. A simulator call is one draw; `stack_spectra`
+joins a loop over `batch_keys` into the draw-first layout below.
 `SpectraSimulator` owns the built population, generator and jitted stages and is
 memoized per record, so a loop that calls `spectra` again does not recompile.
 
@@ -567,7 +569,7 @@ realized sources of that exact count. `num_events` must be omitted.
 `count="fixed"` draws exactly the positive integer `num_events` sources and
 forms `S_h = A_inc * R * sum(P_i) / num_events`. `n_events` is deterministic and
 equals that count in every row. Both modes require a population with a physical
-merger rate. They share the packed reduction -- the count mode only changes the
+merger rate. They share the chunked reduction -- the count mode only changes the
 per-draw count and the normalization factor -- and the inclination convention:
 `A_inc` averages face-on power over isotropic inclinations when the source
 model omits inclination, and is one when inclination is supplied.
@@ -618,10 +620,10 @@ uv run --extra paper python scripts/simulate_spectra.py \
 The spectrum layers are not run layers: no chain reads `[spectra]`. Callers
 using custom source-model compositions can still build a
 `PopulationSimulator` from a registered population and reduce its draws with
-`PackedPowerSum` (or `SpectraSimulator.reduce`). Sampled inclination is already part of the
+`ChunkedPowerSum` (or `SpectraSimulator.reduce`). Sampled inclination is already part of the
 registered BNS population and needs no custom composition.
 
-Pass `--superbatch` to bound the memory of a large Poisson draw. The `outputs/`
+The `outputs/`
 group of a spectra file holds:
 
 | Dataset | Shape | Meaning |

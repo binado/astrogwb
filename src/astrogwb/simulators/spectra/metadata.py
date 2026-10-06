@@ -27,8 +27,8 @@ class SpectraMetadata(PopulationDrawMetadata):
     ``num_events`` sources per realization, both exact -- there is no padded
     capacity. ``observation_time`` is positive in both modes: it determines
     Poisson counts, but cancels from fixed-count spectrum normalization.
-    ``chunk_size`` and the superbatch size are not part of it: they only shape
-    the reduction and consume no randomness, so they are the simulator's.
+    ``chunk_size`` is not part of it: it only shapes the reduction and consumes
+    no randomness, so it is the simulator's.
     """
 
     waveform: WaveformMetadata

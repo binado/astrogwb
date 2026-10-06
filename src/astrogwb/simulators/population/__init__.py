@@ -9,9 +9,7 @@ from astrogwb.simulators.population.simulator import (
     PopulationData,
     PopulationSimulator,
     bucket_size,
-    draw_keys,
     sample_sources_by_key,
-    segment_ids,
 )
 
 __all__ = [
@@ -21,7 +19,5 @@ __all__ = [
     "PopulationDrawMetadata",
     "PopulationSimulator",
     "bucket_size",
-    "draw_keys",
     "sample_sources_by_key",
-    "segment_ids",
 ]

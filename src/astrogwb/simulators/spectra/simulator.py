@@ -1,24 +1,23 @@
 """The simulator that draws spectral densities from the forward model.
 
 A spectrum is a population draw reduced through a waveform. The population half
--- hyperparameters, exact counts, sources -- is
+-- hyperparameters, exact count, sources -- is
 :class:`~astrogwb.simulators.population.PopulationSimulator`; the waveform half
-is :class:`~astrogwb.simulators.spectra.forward.PackedPowerSum`, which reduces
-the events of many draws as one stream so no draw is padded to the largest.
-:class:`SpectraSimulator` owns both, built once from a
-:class:`~astrogwb.simulators.spectra.SpectraMetadata`, so a loop that calls it
-again reuses every compilation.
+is :class:`~astrogwb.simulators.spectra.forward.ChunkedPowerSum`, which sums the
+draw's events chunk by chunk. :class:`SpectraSimulator` owns both, built once
+from a :class:`~astrogwb.simulators.spectra.SpectraMetadata`, so a loop that
+calls it again reuses every compilation.
 
-One key is one draw, hyperparameters and sources alike, so a draw's events
-depend on its own key and on nothing else in the call: the draw at key ``k`` is
-the same whether it was asked for alone or among a thousand. Its spectrum can
-differ in the last bits, because the packed sum's summation order follows its
-neighbours in the stream.
+One key is one draw, hyperparameters and sources alike, so the spectrum at key
+``k`` is the same whether it is asked for first or last in a loop.
+:func:`stack_spectra` joins the per-draw :class:`Spectrum` results into the
+draw-first :class:`SpectraData` layout the files and
+:class:`~astrogwb.simulators.spectra.SpectralDensityCatalog` use.
 """
 
 from __future__ import annotations
 
-import logging
+from collections.abc import Sequence
 from typing import Any, TypedDict
 
 import jax
@@ -29,22 +28,15 @@ from astrogwb import __version__
 from astrogwb.simulators.population.simulator import (
     PopulationData,
     PopulationSimulator,
-    segment_ids,
 )
 from astrogwb.simulators.spectra.forward import (
-    PackedPowerSum,
+    ChunkedPowerSum,
     normalize_spectra,
     validate_source_model,
 )
 from astrogwb.simulators.spectra.metadata import SpectraMetadata
 
-__all__ = ["SpectraData", "SpectraSimulator"]
-
-logger = logging.getLogger(__name__)
-
-#: Draws reduced per stream. Memory scales with ``superbatch`` times the mean
-#: count -- the flat source table plus its padded copy -- not with speed.
-DEFAULT_SUPERBATCH = 32
+__all__ = ["SpectraData", "SpectraSimulator", "Spectrum", "stack_spectra"]
 
 
 class SpectraData(TypedDict):
@@ -52,7 +44,22 @@ class SpectraData(TypedDict):
 
     ``frequencies`` is ``(F,)`` and shared by the batch. ``spectral_density`` is
     ``(D, F)``; ``n_events``, ``total_merger_rate`` and every ``hyperparameters``
-    column are ``(D,)``.
+    column are ``(D,)``. :func:`stack_spectra` builds it from per-draw
+    :class:`Spectrum` results.
+    """
+
+    frequencies: NDArray[np.float64]
+    spectral_density: NDArray[np.float64]
+    n_events: NDArray[np.int64]
+    total_merger_rate: NDArray[np.float64]
+    hyperparameters: dict[str, NDArray[np.float64]]
+
+
+class Spectrum(TypedDict):
+    """The spectrum of one draw.
+
+    ``frequencies`` and ``spectral_density`` are ``(F,)``; ``n_events``,
+    ``total_merger_rate`` and every ``hyperparameters`` value are 0-d.
     """
 
     frequencies: NDArray[np.float64]
@@ -65,10 +72,10 @@ class SpectraData(TypedDict):
 class SpectraSimulator:
     """Draws spectra for one :class:`SpectraMetadata`; build once, call often.
 
-    ``simulator(keys)`` is one spectrum per key, reduced ``superbatch`` draws at
-    a time; keys come from
-    :func:`~astrogwb.simulators.core.batch_keys`. ``reduce(draws)`` is the
-    transform half: it pushes already-drawn
+    ``simulator(key)`` is the :class:`Spectrum` of one draw; loop over
+    :func:`~astrogwb.simulators.core.batch_keys` and join with
+    :func:`stack_spectra` for several. ``reduce(population)`` is the transform
+    half: it pushes an already-drawn
     :class:`~astrogwb.simulators.population.PopulationData` through this
     waveform, so one population can meet several approximants.
 
@@ -79,9 +86,8 @@ class SpectraSimulator:
     a population carrying a degree of freedom the approximant cannot represent
     would otherwise be silently dropped. ``chunk_size`` chunks the waveform
     reduction -- peak waveform memory is ``(F, chunk_size)`` -- and the size
-    ladder sources are drawn at; ``superbatch`` sets how many draws share a
-    stream and the source table is ``superbatch * mean count`` events. Neither
-    consumes randomness, which is why they are settings and not metadata.
+    ladder sources are drawn at. It consumes no randomness, which is why it is a
+    setting and not metadata.
 
     ``validate_sources=False`` skips that check. It exists for a deliberate
     comparison across approximants that carry fewer degrees of freedom than a
@@ -95,7 +101,6 @@ class SpectraSimulator:
         metadata: SpectraMetadata,
         *,
         chunk_size: int = 128,
-        superbatch: int = DEFAULT_SUPERBATCH,
         validate_sources: bool = True,
     ) -> None:
         # x64 before any array: the rate evaluation and the draws must not
@@ -104,18 +109,15 @@ class SpectraSimulator:
 
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
-        if superbatch <= 0:
-            raise ValueError("superbatch must be positive")
         if metadata.version != __version__:
             raise ValueError(
                 f"metadata is for astrogwb {metadata.version}, but {__version__} "
                 "is installed; draws are generated by the code their key names"
             )
         self._metadata = metadata
-        self._superbatch = superbatch
         self._population = PopulationSimulator(metadata.sources, chunk_size=chunk_size)
         self._generator = metadata.waveform.build()
-        self._reducer = PackedPowerSum(self._generator, chunk_size=chunk_size)
+        self._reducer = ChunkedPowerSum(self._generator, chunk_size=chunk_size)
 
         if validate_sources:
             validate_source_model(
@@ -136,66 +138,51 @@ class SpectraSimulator:
         """The record this simulator draws."""
         return self._metadata
 
-    def reduce(self, draws: PopulationData) -> SpectraData:
-        """Spectra of ``draws``, which may come from a population simulator."""
-        sources = dict(draws["source_parameters"])
-        counts = np.asarray(draws["counts"], dtype=np.int64)
-        rate = np.asarray(draws["total_merger_rate"])
-        power_sums = self._reducer(sources, segment_ids(counts), int(counts.size))
+    def reduce(self, population: PopulationData) -> Spectrum:
+        """The spectrum of ``population``, which may come from a population simulator."""
+        sources = dict(population["source_parameters"])
+        count = int(population["count"])
+        rate = np.asarray(population["total_merger_rate"])
         density = normalize_spectra(
-            power_sums,
+            self._reducer(sources),
             sources,
             count=self._metadata.count,
             total_merger_rate=rate,
             observation_seconds=self._population.observation_seconds,
             num_events=self._metadata.num_events,
         )
-        hyperparameters: dict[str, Any] = dict(draws["hyperparameters"])
+        hyperparameters: dict[str, Any] = dict(population["hyperparameters"])
         return {
             "frequencies": np.asarray(self._generator.frequencies),
             "spectral_density": density,
-            "n_events": counts,
+            "n_events": np.asarray(count, dtype=np.int64),
             "total_merger_rate": rate,
             "hyperparameters": hyperparameters,
         }
 
-    def __call__(self, keys: jax.Array) -> SpectraData:
-        """One spectrum per key, reduced ``superbatch`` draws at a time."""
-        if keys.ndim != 1 or keys.shape[0] == 0:
-            raise ValueError(
-                f"keys must be a non-empty 1-d batch of keys, got shape {keys.shape}"
-            )
-        logger.info(
-            "Spectra %s: count=%s num_events=%s population=%s draws=%d "
-            "sampled=%s approximant=%s",
-            self._metadata.key(),
-            self._metadata.count,
-            self._metadata.num_events,
-            self._metadata.population.model_name,
-            keys.shape[0],
-            sorted(self._metadata.sampled),
-            self._metadata.waveform.approximant,
-        )
-        parts = [
-            self.reduce(self._population(keys[start : start + self._superbatch]))
-            for start in range(0, keys.shape[0], self._superbatch)
-        ]
-        return _concatenate(parts)
+    def __call__(self, key: jax.Array) -> Spectrum:
+        """The spectrum of the draw at ``key``."""
+        return self.reduce(self._population(key))
 
 
-def _concatenate(parts: list[SpectraData]) -> SpectraData:
-    """Join per-superbatch outputs along the draw axis."""
+def stack_spectra(parts: Sequence[Spectrum]) -> SpectraData:
+    """Join per-draw spectra along a new leading draw axis.
 
-    def join(name: str) -> NDArray[Any]:
-        return np.concatenate([np.asarray(part[name]) for part in parts])  # ty: ignore[invalid-key]
+    Every part must share one frequency grid, which the result keeps once.
+    """
+    if not parts:
+        raise ValueError("parts must be a non-empty sequence of spectra")
+
+    def stack(name: str) -> NDArray[Any]:
+        return np.stack([np.asarray(part[name]) for part in parts])  # ty: ignore[invalid-key]
 
     return {
         "frequencies": parts[0]["frequencies"],
-        "spectral_density": join("spectral_density"),
-        "n_events": join("n_events"),
-        "total_merger_rate": join("total_merger_rate"),
+        "spectral_density": stack("spectral_density"),
+        "n_events": stack("n_events"),
+        "total_merger_rate": stack("total_merger_rate"),
         "hyperparameters": {
-            name: np.concatenate(
+            name: np.stack(
                 [np.asarray(part["hyperparameters"][name]) for part in parts]
             )
             for name in parts[0]["hyperparameters"]

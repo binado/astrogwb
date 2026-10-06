@@ -58,6 +58,7 @@ with app.setup(hide_code=True):
         SpectralDensityCatalog,
         SpectraMetadata,
         SpectraSimulator,
+        stack_spectra,
     )
     from astrogwb.utils import years_to_seconds
 
@@ -573,9 +574,8 @@ def draw_catalog(
     elif settings.cache_only:
         raise FileNotFoundError(f"no cached spectra at {path}")
     else:
-        outputs = SpectraSimulator(metadata, chunk_size=settings.chunk_size)(
-            batch_keys(seed, num_draws)
-        )
+        simulator = SpectraSimulator(metadata, chunk_size=settings.chunk_size)
+        outputs = stack_spectra([simulator(key) for key in batch_keys(seed, num_draws)])
         write(path, outputs, metadata, seed=seed)
     return SpectralDensityCatalog.from_arrays(outputs, metadata)
 

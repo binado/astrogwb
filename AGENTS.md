@@ -44,17 +44,15 @@ draw. Adding a population means adding a registered source-model function under
 
 Simulators are partials implementing one protocol, `astrogwb.simulators.core.Simulator[**P, D, M]`:
 built from a validated metadata record `M` (it names itself with `key()`) plus
-cost-only settings (`chunk_size`, `superbatch`), then called on the inputs that
+cost-only settings (`chunk_size`), then called on the inputs that
 vary per item. `__call__` is the whole interface: its signature and the layout of
 its output `D` are the simulator's own contract. `PopulationSimulator` and
-`SpectraSimulator` take a batch of keys and return one item per key, item `i`
-depending on `keys[i]` alone (up to summation-order bits for packed reductions;
-each implements its own batching, e.g. the packed `segment_sum` reduction in
-`spectra`); `PolarizationPowerSimulator` takes one key and returns one catalog,
-already vectorized over its events. Anything static is bound in the
+`SpectraSimulator`, like `PolarizationPowerSimulator`, take one key and return
+one draw (a population, a `Spectrum`, a catalog), already vectorized over its
+events; callers loop over `batch_keys`. Anything static is bound in the
 constructor. The output `D`
 is a per-simulator `TypedDict` of array-like leaves (`PopulationData`,
-`SpectraData`, `PolarizationPowerData`), ragged batch layouts documented on it.
+`Spectrum`, `PolarizationPowerData`), layouts documented on it.
 A **stochastic simulator takes a JAX key**, not metadata: it picks one
 realization of the density the metadata describes. Batched keys come from
 `batch_keys(seed, n) = fold_in(key(seed), arange(n))`, which is prefix-stable and
@@ -88,16 +86,17 @@ draw or a waveform generator produces**, or stale catalogs keep being served.
 use them.
 Forward-model spectra: a `SpectraMetadata` (each hyperparameter a fixed number or
 a prior spec) plus one key per draw, through
-`SpectraSimulator(metadata, chunk_size=..., superbatch=...)(batch_keys(seed, n))`.
+`SpectraSimulator(metadata, chunk_size=...)(key)`, which returns one `Spectrum`;
+`stack_spectra([simulator(k) for k in batch_keys(seed, n)])` joins them into the
+draw-first `SpectraData` that files and `SpectralDensityCatalog` use.
 Each key is one draw, so a draw's events depend on its own key alone (event `i`
-comes from a key folded with `i`, so `chunk_size` and `superbatch` change cost,
-not the draw). A spectrum is a population draw reduced through a waveform:
+comes from a key folded with `i`, so `chunk_size` changes cost, not the draw). A spectrum is a population draw reduced through a waveform:
 `PopulationSimulator` (`astrogwb.simulators.population`) draws hyperparameters,
-exact counts and flat `source_parameters` (a `PopulationDrawMetadata`, which
+an exact `count` and flat `source_parameters` (a `PopulationDrawMetadata`, which
 `SpectraMetadata` extends; `.sources` is the waveform-free part), and
-`PackedPowerSum` reduces every draw's events as one stream, so no draw is padded
-to the largest. `SpectraSimulator.reduce(population_data)` pushes already-drawn
-populations through another waveform. Poisson and fixed counts share that path
+`ChunkedPowerSum` reduces the draw's events chunk by chunk with a masked tail.
+`SpectraSimulator.reduce(population_data)` pushes an already-drawn population
+through another waveform. Poisson and fixed counts share that path
 and differ only in the per-draw count and normalization. Build a simulator once
 and reuse it in a loop -- it owns the compiled stages.
 The spectrum scripts default to `astrogwb.paper.cache.default_cache_dir() / "spectra"`,

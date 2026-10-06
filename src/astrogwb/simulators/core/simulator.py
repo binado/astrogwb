@@ -1,22 +1,18 @@
 """The one protocol every simulator implements.
 
 A simulator is a *partial*: built from a metadata record and cost-only settings
-(a chunk size, a superbatch), then called on the inputs that vary per item.
+(a chunk size), then called on the inputs that vary per item.
 Everything the result depends on is either in the metadata, bound at
 construction, or an argument of the call -- there is no hidden state.
 
 ``__call__`` is the whole interface, and its signature and the layout of its
-output ``D`` are the simulator's own contract: a population or spectra simulator
-takes a batch of keys and returns one item per key (the population's layout is
-flat and ragged), while a catalog simulator takes one key and returns one
-catalog, already vectorized over its events. Where a call takes a batch, item
-``i`` depends on its own argument alone, up to summation-order bits for
-reductions packed across items. Batching is each simulator's own business (a
-packed ``segment_sum``, a loop over a compiled stage), not ``jax.vmap``, so it
-stays callable eagerly.
+output ``D`` are the simulator's own contract: a population, spectra or catalog
+simulator takes one key and returns one draw -- a population, a spectrum, a
+catalog -- each already vectorized over its own events. Several draws are a loop
+over keys, so a call never depends on its neighbours and stays callable eagerly.
 
-A *stochastic* simulator is one whose inputs include a JAX key. Batched keys come
-from :func:`~astrogwb.simulators.core.rng.batch_keys`.
+A *stochastic* simulator is one whose inputs include a JAX key. Keys for a loop
+come from :func:`~astrogwb.simulators.core.rng.batch_keys`.
 """
 
 from __future__ import annotations

@@ -55,7 +55,12 @@ from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
 from astrogwb.simulators.core import batch_keys
 from astrogwb.simulators.population import PopulationSimulator
-from astrogwb.simulators.spectra import SpectraMetadata, SpectraSimulator
+from astrogwb.simulators.spectra import (
+    SpectraMetadata,
+    SpectraSimulator,
+    Spectrum,
+    stack_spectra,
+)
 
 # Configure precision before constructing a JAX array or querying a device.
 jax.config.update("jax_enable_x64", True)
@@ -151,23 +156,33 @@ def spectra_metadata(approximant: str) -> SpectraMetadata:
 
 
 reference_metadata = spectra_metadata(REFERENCE_APPROXIMANT)
-shared_population = PopulationSimulator(
+population_simulator = PopulationSimulator(
     reference_metadata.sources, chunk_size=CONFIG.chunk_size
-)(batch_keys(CONFIG.seed, CONFIG.draw_count))
-
-spectral_draws: dict[str, np.ndarray] = {}
-event_counts: dict[str, np.ndarray] = {}
+)
+simulators: dict[str, SpectraSimulator] = {}
 for approximant in APPROXIMANTS:
     metadata = spectra_metadata(approximant)
     assert metadata.sources == reference_metadata.sources
     # The check that a population fits an approximant is off on purpose: the
     # tidal population goes through non-tidal approximants, which ignore the
     # deformabilities, so the comparison isolates the waveform.
-    reduced = SpectraSimulator(
+    simulators[approximant] = SpectraSimulator(
         metadata, chunk_size=CONFIG.chunk_size, validate_sources=False
-    ).reduce(shared_population)
-    spectral_draws[approximant] = np.asarray(reduced["spectral_density"])
-    event_counts[approximant] = np.asarray(reduced["n_events"])
+    )
+
+# One population per key, reduced through every approximant, so the draws pair.
+reduced_draws: dict[str, list[Spectrum]] = {name: [] for name in simulators}
+for key in batch_keys(CONFIG.seed, CONFIG.draw_count):
+    population = population_simulator(key)
+    for approximant, simulator in simulators.items():
+        reduced_draws[approximant].append(simulator.reduce(population))
+
+spectral_draws: dict[str, np.ndarray] = {}
+event_counts: dict[str, np.ndarray] = {}
+for approximant, parts in reduced_draws.items():
+    stacked = stack_spectra(parts)
+    spectral_draws[approximant] = np.asarray(stacked["spectral_density"])
+    event_counts[approximant] = np.asarray(stacked["n_events"])
 
 # The identical counts are a cheap explicit check that the stochastic traces
 # stayed paired. The fixed-key construction also pairs every named source site.
