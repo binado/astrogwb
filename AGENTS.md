@@ -45,11 +45,14 @@ draw. Adding a population means adding a registered source-model function under
 Simulators are partials implementing one protocol, `astrogwb.simulators.core.Simulator[**P, D, M]`:
 built from a validated metadata record `M` (it names itself with `key()`) plus
 cost-only settings (`chunk_size`, `superbatch`), then called on the inputs that
-vary per item. `simulate(*args)` does one item and `simulate_batch(*batched)` is
-semantically `vmap(simulate)` -- `simulate_batch(...)[i] == simulate(...[i])`, up
-to summation-order bits for packed reductions -- but each simulator implements
-its own batching (the packed `segment_sum` reduction in `spectra`). Every call
-argument is batched; anything static is bound in the constructor. The output `D`
+vary per item. `__call__` is the whole interface: its signature and the layout of
+its output `D` are the simulator's own contract. `PopulationSimulator` and
+`SpectraSimulator` take a batch of keys and return one item per key, item `i`
+depending on `keys[i]` alone (up to summation-order bits for packed reductions;
+each implements its own batching, e.g. the packed `segment_sum` reduction in
+`spectra`); `PolarizationPowerSimulator` takes one key and returns one catalog,
+already vectorized over its events. Anything static is bound in the
+constructor. The output `D`
 is a per-simulator `TypedDict` of array-like leaves (`PopulationData`,
 `SpectraData`, `PolarizationPowerData`), ragged batch layouts documented on it.
 A **stochastic simulator takes a JAX key**, not metadata: it picks one
@@ -85,7 +88,7 @@ draw or a waveform generator produces**, or stale catalogs keep being served.
 use them.
 Forward-model spectra: a `SpectraMetadata` (each hyperparameter a fixed number or
 a prior spec) plus one key per draw, through
-`SpectraSimulator(metadata, chunk_size=..., superbatch=...).simulate_batch(batch_keys(seed, n))`.
+`SpectraSimulator(metadata, chunk_size=..., superbatch=...)(batch_keys(seed, n))`.
 Each key is one draw, so a draw's events depend on its own key alone (event `i`
 comes from a key folded with `i`, so `chunk_size` and `superbatch` change cost,
 not the draw). A spectrum is a population draw reduced through a waveform:
