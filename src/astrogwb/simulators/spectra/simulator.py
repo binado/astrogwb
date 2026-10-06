@@ -26,8 +26,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb import __version__
-from astrogwb.simulators.population.draws import PopulationData, PopulationDraws
-from astrogwb.simulators.population.simulator import PopulationSimulator
+from astrogwb.simulators.population.simulator import (
+    PopulationData,
+    PopulationSimulator,
+    segment_ids,
+)
 from astrogwb.simulators.spectra.forward import (
     PackedPowerSum,
     normalize_spectra,
@@ -135,24 +138,24 @@ class SpectraSimulator:
 
     def reduce(self, draws: PopulationData) -> SpectraData:
         """Spectra of ``draws``, which may come from a population simulator."""
-        batch = PopulationDraws.from_arrays(draws)
-        power_sums = self._reducer(
-            batch.source_parameters, batch.segment_ids, int(batch.counts.size)
-        )
+        sources = dict(draws["source_parameters"])
+        counts = np.asarray(draws["counts"], dtype=np.int64)
+        rate = np.asarray(draws["total_merger_rate"])
+        power_sums = self._reducer(sources, segment_ids(counts), int(counts.size))
         density = normalize_spectra(
             power_sums,
-            batch.source_parameters,
+            sources,
             count=self._metadata.count,
-            total_merger_rate=batch.total_merger_rate,
+            total_merger_rate=rate,
             observation_seconds=self._population.observation_seconds,
             num_events=self._metadata.num_events,
         )
-        hyperparameters: dict[str, Any] = dict(batch.hyperparameters)
+        hyperparameters: dict[str, Any] = dict(draws["hyperparameters"])
         return {
             "frequencies": np.asarray(self._generator.frequencies),
             "spectral_density": density,
-            "n_events": batch.counts,
-            "total_merger_rate": batch.total_merger_rate,
+            "n_events": counts,
+            "total_merger_rate": rate,
             "hyperparameters": hyperparameters,
         }
 

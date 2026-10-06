@@ -479,21 +479,20 @@ is a node of its own: `astrogwb.simulators.population.population`.
 - **outputs** -- `counts` `(draws,)`, `total_merger_rate` `(draws,)`,
   `hyperparameters/<name>` `(draws,)` and the **flat** `source_parameters/<name>`
   columns of length `counts.sum()`; draw `b` owns the slice
-  `offsets[b]:offsets[b + 1]` of `PopulationDraws.offsets`.
+  `offsets[b]:offsets[b + 1]` of `offsets = concatenate([[0], cumsum(counts)])`
+  (`PopulationData`).
 
 Draw once and reduce through several waveforms -- the same events, so the
 differences are the waveform's alone:
 
 ```python
-draws = PopulationDraws.from_arrays(
-    population({"seeds": seeds}, metadata.sources, cache_dir=cache_dir)
-)
+draws = PopulationSimulator(metadata.sources).simulate_batch(batch_keys(seed, n))
 spectra_a = SpectraSimulator(metadata_a).reduce(draws)
 spectra_b = SpectraSimulator(metadata_b).reduce(draws)
 ```
 
 Persisting a population pays when it is reused like this; a simulation loop
-calls `PopulationSampler` or `spectra` and keeps nothing.
+calls `SpectraSimulator.simulate_batch` and keeps nothing.
 
 ## The spectral-density node
 
@@ -618,9 +617,9 @@ uv run --extra paper python scripts/simulate_spectra.py \
 
 The spectrum layers are not run layers: no chain reads `[spectra]`. Callers
 using custom source-model compositions can still build a
-`PopulationSampler` from a live source model and rate and reduce its draws with
-`PackedPowerSum`. Sampled inclination is already part of the registered BNS
-population and needs no custom composition.
+`PopulationSimulator` from a registered population and reduce its draws with
+`PackedPowerSum` (or `SpectraSimulator.reduce`). Sampled inclination is already part of the
+registered BNS population and needs no custom composition.
 
 Pass `--superbatch` to bound the memory of a large Poisson draw. The `outputs/`
 group of a spectra file holds:

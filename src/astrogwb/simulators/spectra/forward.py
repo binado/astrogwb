@@ -15,7 +15,7 @@ from numpy.typing import NDArray
 
 from astrogwb.gwb.spectral import inclination_averaging_factor
 from astrogwb.populations import SourceFn
-from astrogwb.simulators.population.draws import bucket_size
+from astrogwb.simulators.population.simulator import bucket_size
 from astrogwb.utils import array_dict_shape
 from astrogwb.waveform import PolarizationPowerGenerator
 

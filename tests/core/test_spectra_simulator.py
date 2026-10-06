@@ -13,7 +13,7 @@ from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import PopulationMetadata
 from astrogwb.simulators.core import batch_keys
-from astrogwb.simulators.population import PopulationDraws, PopulationSimulator
+from astrogwb.simulators.population import PopulationSimulator
 from astrogwb.simulators.spectra import SpectraMetadata, SpectraSimulator
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import WaveformMetadata
@@ -136,15 +136,13 @@ def test_fixed_spectra_with_one_source_scale_the_power_by_rate_and_inclination(
     )
     keys = batch_keys(41, 3)
     out = _spectra(metadata, keys)
-    draws = PopulationDraws.from_arrays(
-        PopulationSimulator(metadata.sources, chunk_size=CHUNK).simulate_batch(keys)
-    )
-    assert ("inclination" in draws.source_parameters) == sample_inclination
+    draws = PopulationSimulator(metadata.sources, chunk_size=CHUNK).simulate_batch(keys)
+    assert ("inclination" in draws["source_parameters"]) == sample_inclination
     generator = metadata.waveform.build()
     for draw in range(3):
-        sources = {k: v[draw : draw + 1] for k, v in draws.source_parameters.items()}
+        sources = {k: v[draw : draw + 1] for k, v in draws["source_parameters"].items()}
         power = np.asarray(generator.generate_batch(sources))[:, 0]
-        expected = inclination_factor * draws.total_merger_rate[draw] * power
+        expected = inclination_factor * draws["total_merger_rate"][draw] * power
         assert_allclose(out["spectral_density"][draw], expected, rtol=1e-10)
 
 
