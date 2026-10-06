@@ -16,6 +16,7 @@ from typing import Any, TypedDict
 
 import jax
 import numpy as np
+from numpy.typing import NDArray
 
 from astrogwb import __version__
 from astrogwb.populations.evaluation import sample_sources
@@ -29,14 +30,12 @@ logger = logging.getLogger(__name__)
 class PolarizationPowerData(TypedDict):
     """One catalog: ``frequencies`` ``(F,)``, ``polarization_power`` ``(F, N)``.
 
-    ``source_parameters`` columns are each ``(N,)``. A batch of ``B`` catalogs
-    stacks a leading axis on the last two -- ``(B, F, N)`` and ``(B, N)`` --
-    while ``frequencies`` is shared.
+    ``source_parameters`` columns are each ``(N,)``.
     """
 
-    frequencies: Any
-    polarization_power: Any
-    source_parameters: dict[str, Any]
+    frequencies: NDArray[np.float64]
+    polarization_power: NDArray[np.float64]
+    source_parameters: dict[str, NDArray[Any]]
 
 
 class PolarizationPowerSimulator:
