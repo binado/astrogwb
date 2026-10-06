@@ -88,6 +88,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Sources per waveform chunk; changes memory, not the draws.",
     )
     parser.add_argument(
+        "--source-chunk-size",
+        type=int,
+        default=None,
+        help="Sources per draw piece for Poisson counts (default: --chunk-size).",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Draw again and replace an existing cached spectra file.",
@@ -146,7 +152,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         if recorded.key() != metadata.key():
             raise ValueError(f"{output} records {recorded.key()}, not {metadata.key()}")
     else:
-        simulator = SpectraSimulator(metadata, chunk_size=args.chunk_size)
+        simulator = SpectraSimulator(
+            metadata,
+            chunk_size=args.chunk_size,
+            source_chunk_size=args.source_chunk_size,
+        )
         parts = []
         for draw, key in enumerate(batch_keys(seed, num_draws), start=1):
             parts.append(simulator(key))
