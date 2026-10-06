@@ -400,9 +400,7 @@ def _(
         hyperparameters=FIDUCIALS,
         observation_time=observation_time,
     )
-    _spectra = SpectraSimulator(_metadata, chunk_size=chunk_size).simulate_batch(
-        batch_keys(seed, 1)
-    )
+    _spectra = SpectraSimulator(_metadata, chunk_size=chunk_size)(batch_keys(seed, 1))
     frequencies = jnp.asarray(_spectra["frequencies"])
     spectral_density = jnp.asarray(_spectra["spectral_density"][0])
     _n_events = int(_spectra["n_events"][0])

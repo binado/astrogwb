@@ -158,7 +158,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         simulator = SpectraSimulator(
             metadata, chunk_size=args.chunk_size, superbatch=args.superbatch
         )
-        outputs = simulator.simulate_batch(batch_keys(seed, num_draws))
+        outputs = simulator(batch_keys(seed, num_draws))
         write(output, outputs, metadata, seed=seed, batch_size=args.superbatch)
     catalog = SpectralDensityCatalog.from_arrays(outputs, metadata)
     logger.info(

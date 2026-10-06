@@ -101,7 +101,7 @@ def test_bucket_size_rejects_degenerate_ladders(chunk_size: int, ratio: float) -
 
 
 def test_fixed_counts_are_exact_and_flat(make_simulator: SimulatorFactory) -> None:
-    draws = make_simulator("fixed", num_events=5).simulate_batch(batch_keys(41, 4))
+    draws = make_simulator("fixed", num_events=5)(batch_keys(41, 4))
     assert draws["counts"].tolist() == [5, 5, 5, 5]
     assert all(v.shape == (20,) for v in draws["source_parameters"].values())
     np.testing.assert_array_equal(
@@ -113,7 +113,7 @@ def test_poisson_counts_have_the_expected_mean(
     make_simulator: SimulatorFactory,
 ) -> None:
     expected = 20.0
-    draws = make_simulator(expected=expected).simulate_batch(batch_keys(41, 200))
+    draws = make_simulator(expected=expected)(batch_keys(41, 200))
     # The mean of 200 Poisson(20) counts has standard error sqrt(20 / 200).
     assert abs(draws["counts"].mean() - expected) < 5 * np.sqrt(expected / 200)
     assert draws["source_parameters"]["redshift"].shape == (int(draws["counts"].sum()),)
@@ -124,8 +124,8 @@ def test_a_draw_depends_on_its_own_seed_alone(
 ) -> None:
     simulator = make_simulator(sample_rate=True)
     keys = batch_keys(41, 6)
-    batch = simulator.simulate_batch(keys)
-    alone = simulator.simulate_batch(keys[3:4])
+    batch = simulator(keys)
+    alone = simulator(keys[3:4])
     offsets = np.concatenate([[0], np.cumsum(batch["counts"])])
     lo, hi = offsets[3], offsets[4]
     assert batch["counts"][3] == alone["counts"][0]
@@ -141,8 +141,8 @@ def test_chunk_size_changes_cost_not_the_draw(
     make_simulator: SimulatorFactory,
 ) -> None:
     keys = batch_keys(41, 5)
-    small = make_simulator(sample_rate=True, chunk_size=3).simulate_batch(keys)
-    large = make_simulator(sample_rate=True, chunk_size=64).simulate_batch(keys)
+    small = make_simulator(sample_rate=True, chunk_size=3)(keys)
+    large = make_simulator(sample_rate=True, chunk_size=64)(keys)
     np.testing.assert_array_equal(small["counts"], large["counts"])
     for name, values in small["source_parameters"].items():
         np.testing.assert_array_equal(values, large["source_parameters"][name])
@@ -151,7 +151,7 @@ def test_chunk_size_changes_cost_not_the_draw(
 def test_sampled_hyperparameter_follows_its_prior(
     make_simulator: SimulatorFactory,
 ) -> None:
-    draws = make_simulator(sample_rate=True).simulate_batch(batch_keys(41, 50))
+    draws = make_simulator(sample_rate=True)(batch_keys(41, 50))
     column = draws["hyperparameters"]["local_merger_rate"]
     assert column.min() >= 600.0 and column.max() <= 900.0
     assert column.std() > 0.0
@@ -193,32 +193,10 @@ def test_metadata_key_ignores_int_float_spelling_and_tracks_content() -> None:
     assert base.key() != _metadata(count="fixed", num_events=4).key()
 
 
-def test_simulate_batch_is_the_batch_of_simulate() -> None:
-    simulator = PopulationSimulator(_metadata(), chunk_size=CHUNK)
-    keys = batch_keys(41, 5)
-    batch = simulator.simulate_batch(keys)
-    offsets = np.concatenate([[0], np.cumsum(batch["counts"])])
-    for i in range(keys.shape[0]):
-        single = simulator.simulate(keys[i])
-        assert single["counts"] == batch["counts"][i]
-        # vmap may round a scalar differently than the batch does.
-        np.testing.assert_allclose(
-            single["total_merger_rate"], batch["total_merger_rate"][i], rtol=1e-12
-        )
-        for name, column in batch["hyperparameters"].items():
-            np.testing.assert_allclose(
-                single["hyperparameters"][name], column[i], rtol=1e-12
-            )
-        for name, column in batch["source_parameters"].items():
-            np.testing.assert_array_equal(
-                single["source_parameters"][name], column[offsets[i] : offsets[i + 1]]
-            )
-
-
-def test_simulate_batch_rejects_an_unbatched_key() -> None:
+def test_simulator_rejects_an_unbatched_key() -> None:
     simulator = PopulationSimulator(_metadata(), chunk_size=CHUNK)
     with pytest.raises(ValueError, match="1-d batch"):
-        simulator.simulate_batch(batch_keys(41, 1)[0])
+        simulator(batch_keys(41, 1)[0])
 
 
 def test_simulator_refuses_a_metadata_of_another_version() -> None:

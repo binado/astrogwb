@@ -42,8 +42,8 @@ class PolarizationPowerData(TypedDict):
 class PolarizationPowerSimulator:
     """Draws catalogs for one :class:`CatalogMetadata`; build once, call often.
 
-    ``simulate(key)`` draws ``metadata.num_samples`` sources at the fiducials and
-    their waveform power; ``simulate_batch(keys)`` stacks one catalog per key.
+    ``simulator(key)`` draws ``metadata.num_samples`` sources at the fiducials and
+    their waveform power: one catalog per key, vectorized over its events.
     Values are checked once, on the concrete draw: generation is trace-safe and
     trusts its inputs, so a population carrying a degree of freedom the
     approximant cannot represent would otherwise be silently dropped.
@@ -75,7 +75,7 @@ class PolarizationPowerSimulator:
         """The record this simulator draws."""
         return self._metadata
 
-    def simulate(self, key: jax.Array) -> PolarizationPowerData:
+    def __call__(self, key: jax.Array) -> PolarizationPowerData:
         """The catalog ``key`` draws."""
         metadata = self._metadata
         logger.info(
@@ -106,24 +106,5 @@ class PolarizationPowerSimulator:
         return {
             "frequencies": np.asarray(generator.frequencies),
             "polarization_power": np.asarray(self._power(samples)),
-            "source_parameters": parameters,
-        }
-
-    def simulate_batch(self, keys: jax.Array) -> PolarizationPowerData:
-        """One catalog per key, stacked along a leading axis."""
-        if keys.ndim != 1 or keys.shape[0] == 0:
-            raise ValueError(
-                f"keys must be a non-empty 1-d batch of keys, got shape {keys.shape}"
-            )
-        catalogs = [self.simulate(key) for key in keys]
-        parameters: dict[str, Any] = {
-            name: np.stack([catalog["source_parameters"][name] for catalog in catalogs])
-            for name in catalogs[0]["source_parameters"]
-        }
-        return {
-            "frequencies": catalogs[0]["frequencies"],
-            "polarization_power": np.stack(
-                [catalog["polarization_power"] for catalog in catalogs]
-            ),
             "source_parameters": parameters,
         }

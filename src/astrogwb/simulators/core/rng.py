@@ -14,8 +14,8 @@ def batch_keys(seed: int | np.integer, n: int) -> Any:
 
     Key ``i`` depends on ``(seed, i)`` alone, so asking for more keys extends
     the batch without changing the ones already there (prefix-stable). This is
-    how a stochastic simulator's batched call is seeded: ``simulate_batch(keys)``
-    and ``simulate(keys[i])`` see the same randomness.
+    how a stochastic simulator's batched call is seeded: ``simulator(keys)[i]``
+    and ``simulator(keys[i : i + 1])`` see the same randomness.
 
     Seeds are 64-bit, so this needs ``jax_enable_x64``: without it JAX would
     silently truncate the seed to 32 bits, and two different seeds could share a

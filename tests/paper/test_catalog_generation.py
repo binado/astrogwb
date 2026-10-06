@@ -37,7 +37,7 @@ SEED = np.uint64(41)
 
 def _draw(request: CatalogMetadata, seed: np.uint64 = SEED) -> PolarizationPowerCatalog:
     """The catalog ``request`` gives at ``seed``, generated in memory."""
-    outputs = PolarizationPowerSimulator(request).simulate(batch_keys(seed, 1)[0])
+    outputs = PolarizationPowerSimulator(request)(batch_keys(seed, 1)[0])
     return PolarizationPowerCatalog.from_arrays(outputs, request)
 
 

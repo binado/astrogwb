@@ -84,7 +84,7 @@ def _same(first: Arrays, second: Arrays) -> None:
 @pytest.mark.integration
 def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
     simulator = PolarizationPowerSimulator(CATALOG)
-    fresh = simulator.simulate(batch_keys(41, 1)[0])
+    fresh = simulator(batch_keys(41, 1)[0])
     path = write(tmp_path / "catalog.h5", fresh, CATALOG, seed=41)
 
     data, metadata, attrs = load(path, CatalogMetadata)
@@ -99,9 +99,9 @@ def test_polarization_power_round_trips_through_a_file(tmp_path: Path) -> None:
 @pytest.mark.integration
 def test_polarization_power_key_picks_the_realization() -> None:
     simulator = PolarizationPowerSimulator(CATALOG)
-    one = simulator.simulate(batch_keys(41, 1)[0])
-    again = simulator.simulate(batch_keys(41, 1)[0])
-    other = simulator.simulate(batch_keys(42, 1)[0])
+    one = simulator(batch_keys(41, 1)[0])
+    again = simulator(batch_keys(41, 1)[0])
+    other = simulator(batch_keys(42, 1)[0])
 
     np.testing.assert_array_equal(
         one["polarization_power"], again["polarization_power"]
@@ -110,24 +110,9 @@ def test_polarization_power_key_picks_the_realization() -> None:
 
 
 @pytest.mark.integration
-def test_polarization_power_batch_is_the_batch_of_simulate() -> None:
-    simulator = PolarizationPowerSimulator(CATALOG)
-    keys = batch_keys(41, 3)
-    batch = simulator.simulate_batch(keys)
-    assert batch["polarization_power"].shape[0] == 3
-    for i in range(3):
-        single = simulator.simulate(keys[i])
-        np.testing.assert_allclose(
-            single["polarization_power"], batch["polarization_power"][i], rtol=1e-12
-        )
-        for name, column in single["source_parameters"].items():
-            np.testing.assert_array_equal(column, batch["source_parameters"][name][i])
-
-
-@pytest.mark.integration
 def test_spectra_round_trip_through_a_file(tmp_path: Path) -> None:
     simulator = SpectraSimulator(SPECTRA, chunk_size=4)
-    fresh = simulator.simulate_batch(batch_keys(41, 3))
+    fresh = simulator(batch_keys(41, 3))
     path = write(tmp_path / "spectra.h5", fresh, SPECTRA, seed=41, batch_size=32)
 
     data, metadata, attrs = load(path, SpectraMetadata)
@@ -144,11 +129,11 @@ def test_a_spectrum_depends_on_its_own_key_alone() -> None:
     simulator = SpectraSimulator(SPECTRA, chunk_size=4)
     keys = batch_keys(41, 3)
 
-    together = simulator.simulate_batch(keys)
-    alone = simulator.simulate(keys[1])
+    together = simulator(keys)
+    alone = simulator(keys[1:2])
 
     np.testing.assert_allclose(
-        together["spectral_density"][1], alone["spectral_density"], rtol=1e-10
+        together["spectral_density"][1], alone["spectral_density"][0], rtol=1e-10
     )
 
 
@@ -156,8 +141,8 @@ def test_a_spectrum_depends_on_its_own_key_alone() -> None:
 def test_spectra_chunk_size_changes_cost_not_the_draws() -> None:
     keys = batch_keys(41, 2)
 
-    small = SpectraSimulator(SPECTRA, chunk_size=1).simulate_batch(keys)
-    large = SpectraSimulator(SPECTRA, chunk_size=64).simulate_batch(keys)
+    small = SpectraSimulator(SPECTRA, chunk_size=1)(keys)
+    large = SpectraSimulator(SPECTRA, chunk_size=64)(keys)
 
     np.testing.assert_allclose(
         small["spectral_density"], large["spectral_density"], rtol=1e-12

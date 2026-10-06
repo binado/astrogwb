@@ -78,7 +78,7 @@ def make_metadata() -> MetadataFactory:
 
 def _spectra(metadata: SpectraMetadata, keys: Any, **settings: Any) -> Any:
     simulator = SpectraSimulator(metadata, chunk_size=CHUNK, **settings)
-    return simulator.simulate_batch(keys)
+    return simulator(keys)
 
 
 def test_spectra_shapes_and_columns(make_metadata: MetadataFactory) -> None:
@@ -136,7 +136,7 @@ def test_fixed_spectra_with_one_source_scale_the_power_by_rate_and_inclination(
     )
     keys = batch_keys(41, 3)
     out = _spectra(metadata, keys)
-    draws = PopulationSimulator(metadata.sources, chunk_size=CHUNK).simulate_batch(keys)
+    draws = PopulationSimulator(metadata.sources, chunk_size=CHUNK)(keys)
     assert ("inclination" in draws["source_parameters"]) == sample_inclination
     generator = metadata.waveform.build()
     for draw in range(3):
@@ -152,9 +152,7 @@ def test_reducing_a_persisted_population_matches_drawing_in_one_go(
     metadata = make_metadata()
     keys = batch_keys(41, 4)
     drawn = _spectra(metadata, keys, superbatch=4)
-    persisted = PopulationSimulator(metadata.sources, chunk_size=CHUNK).simulate_batch(
-        keys
-    )
+    persisted = PopulationSimulator(metadata.sources, chunk_size=CHUNK)(keys)
     reduced = cast(
         dict[str, Any], SpectraSimulator(metadata, chunk_size=CHUNK).reduce(persisted)
     )
@@ -171,23 +169,6 @@ def test_the_same_population_feeds_two_waveforms(
     second = make_metadata(waveform=other_waveform)
     assert first.key() != second.key()
     assert first.sources.key() == second.sources.key()
-
-
-def test_simulate_batch_is_the_batch_of_simulate(
-    make_metadata: MetadataFactory,
-) -> None:
-    metadata = make_metadata()
-    simulator = SpectraSimulator(metadata, chunk_size=CHUNK)
-    keys = batch_keys(41, 4)
-    batch = simulator.simulate_batch(keys)
-    for i in range(keys.shape[0]):
-        single = simulator.simulate(keys[i])
-        assert single["n_events"] == batch["n_events"][i]
-        assert_allclose(
-            single["spectral_density"], batch["spectral_density"][i], rtol=1e-10
-        )
-        for name, column in batch["hyperparameters"].items():
-            assert_allclose(single["hyperparameters"][name], column[i], rtol=1e-12)
 
 
 def test_spectra_rejects_a_stale_version(make_metadata: MetadataFactory) -> None:

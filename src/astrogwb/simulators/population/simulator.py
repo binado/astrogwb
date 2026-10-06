@@ -70,8 +70,7 @@ class PopulationData(TypedDict):
     ``total_merger_rate`` and ``counts`` are ``(D,)``, each ``hyperparameters``
     column ``(D,)`` and each ``source_parameters`` column ``(counts.sum(),)``,
     draw ``b`` owning ``offsets[b]:offsets[b + 1]`` of
-    ``offsets = concatenate([[0], cumsum(counts)])``. For a single draw (no batch
-    axis) the first three are scalars and the columns are ``(count,)``.
+    ``offsets = concatenate([[0], cumsum(counts)])``.
     """
 
     total_merger_rate: Any
@@ -180,12 +179,9 @@ def _hyperparameters_and_counts(
 class PopulationSimulator:
     """Draws populations for one :class:`PopulationDrawMetadata`; build once, call often.
 
-    ``simulate(key)`` is one draw -- scalar ``total_merger_rate`` and ``counts``,
-    scalar hyperparameters, ``(count,)`` source columns -- and
-    ``simulate_batch(keys)`` is ``D`` draws in the flat layout of
-    :class:`~astrogwb.simulators.population.PopulationData`. Draw ``i`` of the
-    batch is ``simulate(keys[i])``: a draw depends on its own key alone, and
-    event ``j`` comes from a key folded with ``j``. ``chunk_size`` sets the ladder
+    ``simulator(keys)`` is one draw per key in the flat layout of
+    :class:`~astrogwb.simulators.population.PopulationData`. A draw depends on
+    its own key alone, and event ``j`` comes from a key folded with ``j``. ``chunk_size`` sets the ladder
     of sizes sources are drawn at, so it changes cost and compilation, not the
     draw, which is why it is a setting and not metadata. Keys come from
     :func:`~astrogwb.simulators.core.batch_keys`.
@@ -246,7 +242,7 @@ class PopulationSimulator:
         """The observation time in seconds, as Poisson counts use it."""
         return self._observation_seconds
 
-    def simulate_batch(self, keys: jax.Array) -> PopulationData:
+    def __call__(self, keys: jax.Array) -> PopulationData:
         """One population per key, in the flat layout of :class:`PopulationData`."""
         if keys.ndim != 1 or keys.shape[0] == 0:
             raise ValueError(
@@ -276,18 +272,4 @@ class PopulationSimulator:
             "source_parameters": {
                 name: np.concatenate(parts) for name, parts in columns.items()
             },
-        }
-
-    def simulate(self, key: jax.Array) -> PopulationData:
-        """The population ``key`` draws: scalars, and ``(count,)`` source columns."""
-        batch = self.simulate_batch(key[None])
-        hyperparameters: dict[str, Any] = {
-            name: np.asarray(column)[0]
-            for name, column in batch["hyperparameters"].items()
-        }
-        return {
-            "total_merger_rate": np.asarray(batch["total_merger_rate"])[0],
-            "counts": np.asarray(batch["counts"])[0],
-            "hyperparameters": hyperparameters,
-            "source_parameters": batch["source_parameters"],
         }

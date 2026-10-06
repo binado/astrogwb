@@ -153,7 +153,7 @@ def spectra_metadata(approximant: str) -> SpectraMetadata:
 reference_metadata = spectra_metadata(REFERENCE_APPROXIMANT)
 shared_population = PopulationSimulator(
     reference_metadata.sources, chunk_size=CONFIG.chunk_size
-).simulate_batch(batch_keys(CONFIG.seed, CONFIG.draw_count))
+)(batch_keys(CONFIG.seed, CONFIG.draw_count))
 
 spectral_draws: dict[str, np.ndarray] = {}
 event_counts: dict[str, np.ndarray] = {}

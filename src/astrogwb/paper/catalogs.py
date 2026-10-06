@@ -87,7 +87,7 @@ def generate_catalog(
     The seed becomes the draw's key through :func:`~astrogwb.simulators.core.batch_keys`
     (key 0 of the seed's batch). Generation reaches JAX.
     """
-    outputs = PolarizationPowerSimulator(metadata).simulate(batch_keys(seed, 1)[0])
+    outputs = PolarizationPowerSimulator(metadata)(batch_keys(seed, 1)[0])
     write(path, outputs, metadata, seed=int(seed))
     return PolarizationPowerCatalog.from_arrays(outputs, metadata)
 

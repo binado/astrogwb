@@ -65,8 +65,8 @@ class SpectraData(TypedDict):
 class SpectraSimulator:
     """Draws spectra for one :class:`SpectraMetadata`; build once, call often.
 
-    ``simulate(key)`` is one spectrum and ``simulate_batch(keys)`` one per key,
-    reduced ``superbatch`` draws at a time; keys come from
+    ``simulator(keys)`` is one spectrum per key, reduced ``superbatch`` draws at
+    a time; keys come from
     :func:`~astrogwb.simulators.core.batch_keys`. ``reduce(draws)`` is the
     transform half: it pushes already-drawn
     :class:`~astrogwb.simulators.population.PopulationData` through this
@@ -159,7 +159,7 @@ class SpectraSimulator:
             "hyperparameters": hyperparameters,
         }
 
-    def simulate_batch(self, keys: jax.Array) -> SpectraData:
+    def __call__(self, keys: jax.Array) -> SpectraData:
         """One spectrum per key, reduced ``superbatch`` draws at a time."""
         if keys.ndim != 1 or keys.shape[0] == 0:
             raise ValueError(
@@ -177,26 +177,10 @@ class SpectraSimulator:
             self._metadata.waveform.approximant,
         )
         parts = [
-            self.reduce(
-                self._population.simulate_batch(keys[start : start + self._superbatch])
-            )
+            self.reduce(self._population(keys[start : start + self._superbatch]))
             for start in range(0, keys.shape[0], self._superbatch)
         ]
         return _concatenate(parts)
-
-    def simulate(self, key: jax.Array) -> SpectraData:
-        """The spectrum ``key`` draws, without the draw axis."""
-        batch = self.simulate_batch(key[None])
-        hyperparameters: dict[str, Any] = {
-            name: column[0] for name, column in batch["hyperparameters"].items()
-        }
-        return {
-            "frequencies": batch["frequencies"],
-            "spectral_density": batch["spectral_density"][0],
-            "n_events": batch["n_events"][0],
-            "total_merger_rate": batch["total_merger_rate"][0],
-            "hyperparameters": hyperparameters,
-        }
 
 
 def _concatenate(parts: list[SpectraData]) -> SpectraData:

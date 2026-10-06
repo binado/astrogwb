@@ -573,9 +573,9 @@ def draw_catalog(
     elif settings.cache_only:
         raise FileNotFoundError(f"no cached spectra at {path}")
     else:
-        outputs = SpectraSimulator(
-            metadata, chunk_size=settings.chunk_size
-        ).simulate_batch(batch_keys(seed, num_draws))
+        outputs = SpectraSimulator(metadata, chunk_size=settings.chunk_size)(
+            batch_keys(seed, num_draws)
+        )
         write(path, outputs, metadata, seed=seed)
     return SpectralDensityCatalog.from_arrays(outputs, metadata)
 

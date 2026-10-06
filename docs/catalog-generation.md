@@ -486,13 +486,13 @@ Draw once and reduce through several waveforms -- the same events, so the
 differences are the waveform's alone:
 
 ```python
-draws = PopulationSimulator(metadata.sources).simulate_batch(batch_keys(seed, n))
+draws = PopulationSimulator(metadata.sources)(batch_keys(seed, n))
 spectra_a = SpectraSimulator(metadata_a).reduce(draws)
 spectra_b = SpectraSimulator(metadata_b).reduce(draws)
 ```
 
 Persisting a population pays when it is reused like this; a simulation loop
-calls `SpectraSimulator.simulate_batch` and keeps nothing.
+calls `SpectraSimulator(...)(keys)` and keeps nothing.
 
 ## The spectral-density node
 
