@@ -52,14 +52,14 @@ class SpectraData(TypedDict):
 
     ``frequencies`` is ``(F,)`` and shared by the batch. ``spectral_density`` is
     ``(D, F)``; ``n_events``, ``total_merger_rate`` and every ``hyperparameters``
-    column are ``(D,)``. For a single draw the draw axis is dropped.
+    column are ``(D,)``.
     """
 
-    frequencies: Any
-    spectral_density: Any
-    n_events: Any
-    total_merger_rate: Any
-    hyperparameters: dict[str, Any]
+    frequencies: NDArray[np.float64]
+    spectral_density: NDArray[np.float64]
+    n_events: NDArray[np.int64]
+    total_merger_rate: NDArray[np.float64]
+    hyperparameters: dict[str, NDArray[np.float64]]
 
 
 class SpectraSimulator:
