@@ -127,9 +127,9 @@ class SpectralDensityCatalog:
 
     @classmethod
     def from_arrays(cls, outputs: Mapping[str, Any], metadata: SpectraMetadata) -> Self:
-        """Wrap the arrays :func:`~astrogwb.simulators.spectra.spectra` returns.
+        """Wrap a :class:`~astrogwb.simulators.spectra.SpectraData` and its record.
 
-        The metadata is supplied rather than inferred: the caller ran the node
+        The metadata is supplied rather than inferred: the caller ran the simulator
         from it, so it is the only place that knows what drew these arrays.
         Construction checks that every column agrees on the draw count and that
         the fixed source count and every fixed hyperparameter match the record.

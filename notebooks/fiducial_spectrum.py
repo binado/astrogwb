@@ -35,7 +35,7 @@ with app.setup(hide_code=True):
         population_metadata,
         waveform_metadata,
     )
-    from astrogwb.paper.config.runs import FIGURES_DIR, SPECTRA_ROOT
+    from astrogwb.paper.config.runs import FIGURES_DIR
     from astrogwb.paper.plotting import (
         DETECTOR_COMPARISON_LEGEND,
         DETECTOR_NETWORKS,
@@ -46,8 +46,8 @@ with app.setup(hide_code=True):
         save_figures,
         use_paper_style,
     )
-    from astrogwb.simulators.core import split_seed
-    from astrogwb.simulators.spectra import SpectraMetadata, spectra
+    from astrogwb.simulators.core import batch_keys
+    from astrogwb.simulators.spectra import SpectraMetadata, SpectraSimulator
     from astrogwb.utils import years_to_seconds
 
 
@@ -400,11 +400,8 @@ def _(
         hyperparameters=FIDUCIALS,
         observation_time=observation_time,
     )
-    _spectra = spectra(
-        {"seeds": split_seed(seed, 1)},
-        _metadata,
-        cache_dir=ROOT_DIR / SPECTRA_ROOT,
-        chunk_size=chunk_size,
+    _spectra = SpectraSimulator(_metadata, chunk_size=chunk_size).simulate_batch(
+        batch_keys(seed, 1)
     )
     frequencies = jnp.asarray(_spectra["frequencies"])
     spectral_density = jnp.asarray(_spectra["spectral_density"][0])

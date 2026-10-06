@@ -77,6 +77,7 @@ from astrogwb.gwb import (
     uniform_prior_mass_moments,
 )
 from astrogwb.importance.spectral import build_importance_spectrum
+from astrogwb.paper.catalogs import ensure_catalog
 from astrogwb.paper.config import (
     detector_registry,
     fiducials,
@@ -86,7 +87,6 @@ from astrogwb.populations import DEFAULT_DENSITY_SITES, build_population
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerCatalog,
-    polarization_power,
 )
 from astrogwb.waveform import WaveformMetadata
 
@@ -310,10 +310,7 @@ def load_or_build_catalog(*, df: float, f_max: float) -> PolarizationPowerCatalo
         fiducials=FIDUCIALS,
         num_samples=NUM_SOURCES,
     )
-    outputs = polarization_power(
-        {"seed": np.uint64(POPULATION_SEED)}, metadata, cache_dir=CATALOG_DIR
-    )
-    return PolarizationPowerCatalog.from_arrays(outputs, metadata)
+    return ensure_catalog(metadata, POPULATION_SEED, CATALOG_DIR)
 
 
 def describe(catalog: PolarizationPowerCatalog) -> pd.Series:

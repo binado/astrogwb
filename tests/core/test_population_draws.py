@@ -1,10 +1,8 @@
-"""Population draws: seed locality, exact counts, flat layout and the cached node."""
+"""Population draws: key locality, exact counts, flat layout and the simulator."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
-from typing import Any, cast
 
 import numpy as np
 import numpyro.distributions as dist
@@ -13,12 +11,12 @@ from astrogwb_mock_population import POPULATION_PARAMS, mock_population
 
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import PopulationMetadata
-from astrogwb.simulators.core import split_seed
+from astrogwb.simulators.core import batch_keys
 from astrogwb.simulators.population import (
     PopulationDrawMetadata,
     PopulationSampler,
+    PopulationSimulator,
     bucket_size,
-    population,
 )
 from astrogwb.utils import years_to_seconds
 
@@ -95,7 +93,7 @@ def test_bucket_size_rejects_degenerate_ladders(chunk_size: int, ratio: float) -
 
 
 def test_fixed_counts_are_exact_and_flat(make_sampler: SamplerFactory) -> None:
-    draws = make_sampler("fixed", num_events=5)(split_seed(41, 4), chunk_size=CHUNK)
+    draws = make_sampler("fixed", num_events=5)(batch_keys(41, 4), chunk_size=CHUNK)
     assert draws.counts.tolist() == [5, 5, 5, 5]
     assert all(v.shape == (20,) for v in draws.source_parameters.values())
     np.testing.assert_array_equal(draws.offsets, [0, 5, 10, 15, 20])
@@ -104,7 +102,7 @@ def test_fixed_counts_are_exact_and_flat(make_sampler: SamplerFactory) -> None:
 
 def test_poisson_counts_have_the_expected_mean(make_sampler: SamplerFactory) -> None:
     expected = 20.0
-    draws = make_sampler(expected=expected)(split_seed(41, 200), chunk_size=CHUNK)
+    draws = make_sampler(expected=expected)(batch_keys(41, 200), chunk_size=CHUNK)
     # The mean of 200 Poisson(20) counts has standard error sqrt(20 / 200).
     assert abs(draws.counts.mean() - expected) < 5 * np.sqrt(expected / 200)
     assert draws.source_parameters["redshift"].shape == (int(draws.counts.sum()),)
@@ -112,9 +110,9 @@ def test_poisson_counts_have_the_expected_mean(make_sampler: SamplerFactory) -> 
 
 def test_a_draw_depends_on_its_own_seed_alone(make_sampler: SamplerFactory) -> None:
     sampler = make_sampler(sample_rate=True)
-    seeds = split_seed(41, 6)
-    batch = sampler(seeds, chunk_size=CHUNK)
-    alone = sampler(seeds[3:4], chunk_size=CHUNK)
+    keys = batch_keys(41, 6)
+    batch = sampler(keys, chunk_size=CHUNK)
+    alone = sampler(keys[3:4], chunk_size=CHUNK)
     lo, hi = batch.offsets[3], batch.offsets[4]
     assert batch.counts[3] == alone.counts[0]
     assert (
@@ -127,16 +125,16 @@ def test_a_draw_depends_on_its_own_seed_alone(make_sampler: SamplerFactory) -> N
 
 def test_chunk_size_changes_cost_not_the_draw(make_sampler: SamplerFactory) -> None:
     sampler = make_sampler(sample_rate=True)
-    seeds = split_seed(41, 5)
-    small = sampler(seeds, chunk_size=3)
-    large = sampler(seeds, chunk_size=64)
+    keys = batch_keys(41, 5)
+    small = sampler(keys, chunk_size=3)
+    large = sampler(keys, chunk_size=64)
     np.testing.assert_array_equal(small.counts, large.counts)
     for name, values in small.source_parameters.items():
         np.testing.assert_array_equal(values, large.source_parameters[name])
 
 
 def test_sampled_hyperparameter_follows_its_prior(make_sampler: SamplerFactory) -> None:
-    draws = make_sampler(sample_rate=True)(split_seed(41, 50), chunk_size=CHUNK)
+    draws = make_sampler(sample_rate=True)(batch_keys(41, 50), chunk_size=CHUNK)
     column = draws.hyperparameters["local_merger_rate"]
     assert column.min() >= 600.0 and column.max() <= 900.0
     assert column.std() > 0.0
@@ -191,28 +189,34 @@ def test_metadata_key_ignores_int_float_spelling_and_tracks_content() -> None:
     assert base.key() != _metadata(count="fixed", num_events=4).key()
 
 
-def test_cached_node_round_trips_and_matches_the_sampler(tmp_path: Path) -> None:
-    metadata = _metadata()
-    inputs = {"seeds": split_seed(41, 4)}
-    fresh = population(inputs, metadata, chunk_size=CHUNK)
-    first = population(inputs, metadata, cache_dir=tmp_path, chunk_size=CHUNK)
-    assert population.path(inputs, metadata, tmp_path).is_file()
-    again = population(
-        inputs, metadata, cache_dir=tmp_path, generate=False, chunk_size=CHUNK
-    )
-    expected = cast(dict[str, Any], fresh["source_parameters"])
-    for outputs in (first, again):
-        np.testing.assert_array_equal(outputs["counts"], fresh["counts"])
-        columns = cast(dict[str, Any], outputs["source_parameters"])
-        for name, values in expected.items():
-            np.testing.assert_array_equal(columns[name], values)
-    assert expected["redshift"].shape == (int(np.asarray(fresh["counts"]).sum()),)
+def test_simulate_batch_is_the_batch_of_simulate() -> None:
+    simulator = PopulationSimulator(_metadata(), chunk_size=CHUNK)
+    keys = batch_keys(41, 5)
+    batch = simulator.simulate_batch(keys)
+    offsets = np.concatenate([[0], np.cumsum(batch["counts"])])
+    for i in range(keys.shape[0]):
+        single = simulator.simulate(keys[i])
+        assert single["counts"] == batch["counts"][i]
+        # vmap may round a scalar differently than the batch does.
+        np.testing.assert_allclose(
+            single["total_merger_rate"], batch["total_merger_rate"][i], rtol=1e-12
+        )
+        for name, column in batch["hyperparameters"].items():
+            np.testing.assert_allclose(
+                single["hyperparameters"][name], column[i], rtol=1e-12
+            )
+        for name, column in batch["source_parameters"].items():
+            np.testing.assert_array_equal(
+                single["source_parameters"][name], column[offsets[i] : offsets[i + 1]]
+            )
 
 
-def test_cached_node_rejects_repeated_and_mistyped_seeds() -> None:
-    metadata = _metadata()
-    seeds = split_seed(41, 2)
-    with pytest.raises(ValueError, match="must not repeat"):
-        population({"seeds": np.repeat(seeds[:1], 2)}, metadata)
-    with pytest.raises(TypeError, match="uint64"):
-        population({"seeds": seeds.astype(np.int64)}, metadata)
+def test_simulate_batch_rejects_an_unbatched_key() -> None:
+    simulator = PopulationSimulator(_metadata(), chunk_size=CHUNK)
+    with pytest.raises(ValueError, match="1-d batch"):
+        simulator.simulate_batch(batch_keys(41, 1)[0])
+
+
+def test_simulator_refuses_a_metadata_of_another_version() -> None:
+    with pytest.raises(ValueError, match="is installed"):
+        PopulationSimulator(_metadata(version="0.0.1"), chunk_size=CHUNK)

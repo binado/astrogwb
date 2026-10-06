@@ -1,7 +1,8 @@
-"""Population draws -- hyperparameters, source counts and sources -- per seed."""
+"""Population draws -- hyperparameters, source counts and sources -- per key."""
 
 from astrogwb.simulators.population.draws import (
     BUCKET_RATIO,
+    PopulationData,
     PopulationDraws,
     PopulationSampler,
     bucket_size,
@@ -12,17 +13,17 @@ from astrogwb.simulators.population.metadata import (
     Hyperparameter,
     PopulationDrawMetadata,
 )
-from astrogwb.simulators.population.simulator import build_sampler, population
+from astrogwb.simulators.population.simulator import PopulationSimulator
 
 __all__ = [
     "BUCKET_RATIO",
     "Hyperparameter",
+    "PopulationData",
     "PopulationDrawMetadata",
     "PopulationDraws",
     "PopulationSampler",
+    "PopulationSimulator",
     "bucket_size",
-    "build_sampler",
     "draw_keys",
-    "population",
     "sample_sources_by_key",
 ]

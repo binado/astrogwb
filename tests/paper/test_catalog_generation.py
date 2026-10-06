@@ -3,7 +3,7 @@
 The RNG properties the persisted catalogs rely on -- reproducibility and prefix
 stability across sizes -- are properties of the population declaration and are
 pinned in ``tests/core/test_populations.py``; the key and the cache are pinned
-in ``tests/core/test_catalog_cache.py``. What is left for this layer is that
+in ``tests/core/test_golden_keys.py``. What is left for this layer is that
 the Ripple-backed production path generates what a request asks for, and that
 the workflow's entrypoint refuses to file a draw under another's key.
 """
@@ -21,11 +21,13 @@ import numpy as np
 import pytest
 from repo import REPO_ROOT
 
-from astrogwb.simulators.core import read
+from astrogwb.paper.catalogs import catalog_path
+from astrogwb.paper.catalogs import generate_catalog as draw_to
+from astrogwb.simulators.core import batch_keys, load
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerCatalog,
-    polarization_power,
+    PolarizationPowerSimulator,
 )
 
 RequestFactory = Callable[..., CatalogMetadata]
@@ -34,14 +36,13 @@ SEED = np.uint64(41)
 
 
 def _draw(request: CatalogMetadata, seed: np.uint64 = SEED) -> PolarizationPowerCatalog:
-    """The catalog ``request`` gives at ``seed``, generated without a cache."""
-    return PolarizationPowerCatalog.from_arrays(
-        polarization_power({"seed": seed}, request), request
-    )
+    """The catalog ``request`` gives at ``seed``, generated in memory."""
+    outputs = PolarizationPowerSimulator(request).simulate(batch_keys(seed, 1)[0])
+    return PolarizationPowerCatalog.from_arrays(outputs, request)
 
 
 @pytest.fixture(scope="module")
-def generate_catalog() -> ModuleType:
+def generate_catalog_script() -> ModuleType:
     """Import ``scripts/generate_catalog.py``, which is not an installed module."""
     path = REPO_ROOT / "scripts" / "generate_catalog.py"
     spec = importlib.util.spec_from_file_location("generate_catalog_script", path)
@@ -104,13 +105,13 @@ def test_generator_with_ripple_request_records_the_request(
     make_request: RequestFactory, tmp_path: Path
 ) -> None:
     request = make_request()
-    outputs = polarization_power({"seed": SEED}, request, cache_dir=tmp_path)
-    path = polarization_power.path({"seed": SEED}, request, tmp_path)
-    inputs, _, recorded = read(path)
+    path = catalog_path(request, SEED, tmp_path)
+    generated = draw_to(request, SEED, path)
+    _, recorded, attrs = load(path, CatalogMetadata)
 
-    assert CatalogMetadata.model_validate_json(recorded).key() == request.key()
-    assert inputs["seed"] == SEED
-    assert PolarizationPowerCatalog.from_arrays(outputs, request).num_samples == 8
+    assert recorded.key() == request.key()
+    assert attrs["seed"] == SEED
+    assert generated.num_samples == 8
 
 
 @pytest.mark.integration
@@ -153,29 +154,29 @@ def test_generator_with_gaussian_mass_model_records_its_fiducials(
 
 
 def test_cli_with_unregistered_model_fails_before_generating(
-    generate_catalog: ModuleType, make_request: RequestFactory, tmp_path: Path
+    generate_catalog_script: ModuleType, make_request: RequestFactory, tmp_path: Path
 ) -> None:
     request = make_request("no_such_population")
 
     with pytest.raises(ValueError, match="bns_md_cosmological"):
-        generate_catalog.main(
+        generate_catalog_script.main(
             [
                 "--request",
                 request.model_dump_json(),
                 "--seed",
                 "41",
                 "--output",
-                str(polarization_power.path({"seed": SEED}, request, tmp_path)),
+                str(catalog_path(request, SEED, tmp_path)),
             ]
         )
 
 
 def test_cli_with_output_not_named_by_key_raises(
-    generate_catalog: ModuleType, make_request: RequestFactory, tmp_path: Path
+    generate_catalog_script: ModuleType, make_request: RequestFactory, tmp_path: Path
 ) -> None:
     """The workflow names the file and the request separately; they must agree."""
     with pytest.raises(ValueError, match="not named by the metadata's key"):
-        generate_catalog.main(
+        generate_catalog_script.main(
             [
                 "--request",
                 make_request().model_dump_json(),
@@ -187,22 +188,22 @@ def test_cli_with_output_not_named_by_key_raises(
         )
 
 
-def test_cli_with_invalid_request_exits(generate_catalog: ModuleType) -> None:
+def test_cli_with_invalid_request_exits(generate_catalog_script: ModuleType) -> None:
     with pytest.raises(SystemExit):
-        generate_catalog.parse_args(
+        generate_catalog_script.parse_args(
             ["--request", "null", "--seed", "41", "--output", "out.h5"]
         )
 
 
 @pytest.mark.integration
 def test_cli_writes_the_catalog_under_its_key(
-    generate_catalog: ModuleType, make_request: RequestFactory, tmp_path: Path
+    generate_catalog_script: ModuleType, make_request: RequestFactory, tmp_path: Path
 ) -> None:
     """The surface `rule waveform_catalog` drives, end to end."""
     request = make_request()
-    output = polarization_power.path({"seed": SEED}, request, tmp_path)
+    output = catalog_path(request, SEED, tmp_path)
 
-    generate_catalog.main(
+    generate_catalog_script.main(
         [
             "--request",
             request.model_dump_json(),
@@ -213,5 +214,5 @@ def test_cli_writes_the_catalog_under_its_key(
         ]
     )
 
-    _, _, recorded = read(output)
-    assert CatalogMetadata.model_validate_json(recorded).key() == request.key()
+    _, recorded, _ = load(output, CatalogMetadata)
+    assert recorded.key() == request.key()

@@ -53,8 +53,8 @@ from astrogwb.paper.config import (
 )
 from astrogwb.paper.config.runs import FIGURES_DIR
 from astrogwb.paper.plotting import save_figures, use_paper_style
-from astrogwb.simulators.core import split_seed
-from astrogwb.simulators.population import PopulationDraws, population
+from astrogwb.simulators.core import batch_keys
+from astrogwb.simulators.population import PopulationSimulator
 from astrogwb.simulators.spectra import SpectraMetadata, SpectraSimulator
 
 # Configure precision before constructing a JAX array or querying a device.
@@ -151,13 +151,9 @@ def spectra_metadata(approximant: str) -> SpectraMetadata:
 
 
 reference_metadata = spectra_metadata(REFERENCE_APPROXIMANT)
-shared_population = PopulationDraws.from_arrays(
-    population(
-        {"seeds": split_seed(CONFIG.seed, CONFIG.draw_count)},
-        reference_metadata.sources,
-        chunk_size=CONFIG.chunk_size,
-    )
-)
+shared_population = PopulationSimulator(
+    reference_metadata.sources, chunk_size=CONFIG.chunk_size
+).simulate_batch(batch_keys(CONFIG.seed, CONFIG.draw_count))
 
 spectral_draws: dict[str, np.ndarray] = {}
 event_counts: dict[str, np.ndarray] = {}

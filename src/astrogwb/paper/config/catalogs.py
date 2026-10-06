@@ -6,8 +6,8 @@ same one. A run declares what it needs in ``[analysis.injection]`` and
 ``[analysis.proposal]`` -- each a :class:`~astrogwb.simulators.polarization_power.CatalogMetadata`
 once the merge has resolved its references -- and the file lives at
 ``outputs/catalogs/<stem>.h5``, where ``<stem>`` is
-``polarization_power-<key>-<digest>``: the request's content hash and the
-hash of the seed it is drawn at. No name translates between the two.
+``polarization_power-<key>-<seed>``: the request's content hash and the
+seed it is drawn at. No name translates between the two.
 
 Once built, the *file* is authoritative about what it holds, and
 ``scripts/run_mcmc.py`` checks it against the request its run resolves.
@@ -34,7 +34,7 @@ from astrogwb.paper.config.mcmc import (
     check_redshift_grid,
 )
 from astrogwb.paper.config.runs import CATALOG_ROLES, assemble_run, discover_runs
-from astrogwb.simulators.polarization_power import CatalogMetadata, polarization_power
+from astrogwb.simulators.polarization_power import CatalogMetadata, catalog_stem
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +167,7 @@ def resolve_run_catalogs(root: Path | None = None) -> RunCatalogs:
                     raise ValueError(
                         f"{experiment}/{run} analysis.{role}: {error!r}"
                     ) from None
-                stem = polarization_power.path({"seed": seed}, request, "").stem
+                stem = catalog_stem(request, seed)
                 requests.setdefault(stem, (request, seed))
                 roles[role] = stem
             by_run[(experiment, run)] = roles

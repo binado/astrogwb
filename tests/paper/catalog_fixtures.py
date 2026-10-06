@@ -16,6 +16,7 @@ from repo import REPO_ROOT
 from astrogwb.paper.config import fiducials, population_metadata
 from astrogwb.populations import PopulationMetadata, build_population
 from astrogwb.populations.evaluation import evaluate_sources
+from astrogwb.simulators.core import write
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerCatalog,
@@ -157,21 +158,19 @@ def make_catalog(
 def save_catalog(
     catalog: PolarizationPowerCatalog, path: Path, *, seed: int = 41
 ) -> None:
-    """Write ``catalog`` in the cache's file format, as ``polarization_power`` would.
+    """Write ``catalog`` in the simulators' file format.
 
     Tests that hand a run a catalog *by path* need a file; this is the same
-    writer the cache uses, fed the catalog's arrays and an explicit seed.
+    writer a generated catalog goes through, fed the catalog's arrays and an
+    explicit seed.
     """
-    from astrogwb.simulators.core.cache import _save_atomically
-
-    _save_atomically(
+    write(
         path,
-        name="polarization_power",
-        inputs={"seed": np.uint64(seed)},
-        outputs={
+        {
             "frequencies": catalog.frequencies,
             "polarization_power": catalog.polarization_power,
             "source_parameters": dict(catalog.source_parameters),
         },
-        metadata=catalog.metadata,
+        catalog.metadata,
+        seed=seed,
     )

@@ -38,7 +38,7 @@ from astrogwb.paper.config.detectors import DetectorRegistry
 from astrogwb.paper.config.runs import CATALOG_ROLES
 from astrogwb.paper.utils import deep_merge
 from astrogwb.populations import PopulationMetadata
-from astrogwb.simulators.polarization_power import CatalogMetadata, polarization_power
+from astrogwb.simulators.polarization_power import CatalogMetadata, catalog_stem
 
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
@@ -455,9 +455,9 @@ class RunConfig(BaseModel):
         return getattr(self.analysis, role), np.uint64(self.analysis.seeds[role])
 
     def catalog_stem(self, role: str) -> str:
-        """The file stem one role's catalog is cached under."""
+        """The file stem one role's catalog is kept under."""
         metadata, seed = self.catalog_request(role)
-        return polarization_power.path({"seed": seed}, metadata, "").stem
+        return catalog_stem(metadata, seed)
 
     def save(self, path: Path) -> None:
         """Write the validated run config as JSON."""

@@ -1,4 +1,4 @@
-"""Content addressing for cached artifacts.
+"""Content keys for simulator metadata records.
 
 Nothing here imports a physics package, so the ``Snakefile`` can name files
 without paying for JAX.

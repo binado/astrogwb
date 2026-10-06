@@ -132,10 +132,10 @@ class PolarizationPowerCatalog:
 
     @classmethod
     def from_arrays(cls, outputs: Mapping[str, Any], metadata: CatalogMetadata) -> Self:
-        """Wrap the arrays :func:`~astrogwb.simulators.polarization_power.polarization_power`
-        returns, and the record they were drawn from.
+        """Wrap a :class:`~astrogwb.simulators.polarization_power.PolarizationPowerData`
+        and the record it was drawn from.
 
-        The metadata is supplied rather than inferred: the caller ran the node
+        The metadata is supplied rather than inferred: the caller ran the simulator
         from it, so it is the only place that knows what drew these arrays.
         Construction still checks that the two agree on the sample count.
         """

@@ -51,7 +51,7 @@ model, the merge rules, and how to run one.
 Each run declares what its two catalogs draw as `[analysis.injection]` and
 `[analysis.proposal]`, each a `CatalogMetadata` once its references resolve. A
 run sets only the fields that differ: a size, a seed, or a named population or
-waveform. The file is `outputs/catalogs/polarization_power-<key>-<digest>.h5`,
+waveform. The file is `outputs/catalogs/polarization_power-<key>-<seed>.h5`,
 named by the hash of the resolved request and the seed it is drawn at
 (`[analysis.seeds]`), so runs that ask for the same draw share one file.
 `just catalogs` lists every file, what it draws, and which runs use it. See

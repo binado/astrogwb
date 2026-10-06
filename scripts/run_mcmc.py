@@ -406,17 +406,11 @@ def main(argv: list[str] | None = None) -> None:
     timestamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     ensure_chain_path_available(config, timestamp=timestamp, force=args.force)
 
-    from astrogwb.simulators.polarization_power import (
-        PolarizationPowerCatalog,
-        polarization_power,
-    )
+    from astrogwb.paper.catalogs import ensure_catalog
 
     def catalog(role: str, *, generate: bool) -> PolarizationPowerCatalog:
         metadata, seed = config.catalog_request(role)
-        outputs = polarization_power(
-            {"seed": seed}, metadata, cache_dir=catalog_dir, generate=generate
-        )
-        return PolarizationPowerCatalog.from_arrays(outputs, metadata)
+        return ensure_catalog(metadata, seed, catalog_dir, generate=generate)
 
     # Serve every cached catalog before JAX claims a device: the cache checks a
     # hit against the request its role resolves to, so a file filed under the

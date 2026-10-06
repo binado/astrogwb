@@ -12,14 +12,9 @@ from numpy.testing import assert_allclose, assert_array_equal
 from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import PopulationMetadata
-from astrogwb.simulators.core import split_seed
-from astrogwb.simulators.population import PopulationDraws, population
-from astrogwb.simulators.spectra import (
-    SpectraMetadata,
-    SpectraSimulator,
-    get_simulator,
-    spectra,
-)
+from astrogwb.simulators.core import batch_keys
+from astrogwb.simulators.population import PopulationDraws, PopulationSimulator
+from astrogwb.simulators.spectra import SpectraMetadata, SpectraSimulator
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import WaveformMetadata
 
@@ -81,12 +76,13 @@ def make_metadata() -> MetadataFactory:
     return make
 
 
-def _spectra(metadata: SpectraMetadata, seeds: np.ndarray, **settings: Any) -> Any:
-    return spectra({"seeds": seeds}, metadata, chunk_size=CHUNK, **settings)
+def _spectra(metadata: SpectraMetadata, keys: Any, **settings: Any) -> Any:
+    simulator = SpectraSimulator(metadata, chunk_size=CHUNK, **settings)
+    return simulator.simulate_batch(keys)
 
 
 def test_spectra_shapes_and_columns(make_metadata: MetadataFactory) -> None:
-    out = _spectra(make_metadata(), split_seed(41, 5))
+    out = _spectra(make_metadata(), batch_keys(41, 5))
     assert out["spectral_density"].shape == (5, out["frequencies"].size)
     assert out["n_events"].shape == out["total_merger_rate"].shape == (5,)
     assert set(out["hyperparameters"]) == {*FIDUCIALS, "local_merger_rate"}
@@ -94,15 +90,15 @@ def test_spectra_shapes_and_columns(make_metadata: MetadataFactory) -> None:
 
 
 def test_fixed_counts_report_the_recorded_count(make_metadata: MetadataFactory) -> None:
-    out = _spectra(make_metadata(count="fixed", num_events=5), split_seed(41, 3))
+    out = _spectra(make_metadata(count="fixed", num_events=5), batch_keys(41, 3))
     assert_array_equal(out["n_events"], [5, 5, 5])
 
 
 def test_a_draw_depends_on_its_own_seed_alone(make_metadata: MetadataFactory) -> None:
     metadata = make_metadata()
-    seeds = split_seed(41, 6)
-    batch = _spectra(metadata, seeds)
-    alone = _spectra(metadata, seeds[2:3])
+    keys = batch_keys(41, 6)
+    batch = _spectra(metadata, keys)
+    alone = _spectra(metadata, keys[2:3])
     assert batch["n_events"][2] == alone["n_events"][0]
     assert_allclose(
         batch["spectral_density"][2], alone["spectral_density"][0], rtol=1e-10
@@ -113,9 +109,9 @@ def test_superbatch_changes_cost_not_the_spectra(
     make_metadata: MetadataFactory,
 ) -> None:
     metadata = make_metadata()
-    seeds = split_seed(41, 5)
-    whole = _spectra(metadata, seeds, superbatch=5)
-    pieces = _spectra(metadata, seeds, superbatch=2)
+    keys = batch_keys(41, 5)
+    whole = _spectra(metadata, keys, superbatch=5)
+    pieces = _spectra(metadata, keys, superbatch=2)
     assert_array_equal(whole["n_events"], pieces["n_events"])
     assert_allclose(whole["spectral_density"], pieces["spectral_density"], rtol=1e-10)
 
@@ -138,10 +134,10 @@ def test_fixed_spectra_with_one_source_scale_the_power_by_rate_and_inclination(
     metadata = make_metadata(
         sample_inclination=sample_inclination, count="fixed", num_events=1
     )
-    seeds = split_seed(41, 3)
-    out = _spectra(metadata, seeds)
+    keys = batch_keys(41, 3)
+    out = _spectra(metadata, keys)
     draws = PopulationDraws.from_arrays(
-        population({"seeds": seeds}, metadata.sources, chunk_size=CHUNK)
+        PopulationSimulator(metadata.sources, chunk_size=CHUNK).simulate_batch(keys)
     )
     assert ("inclination" in draws.source_parameters) == sample_inclination
     generator = metadata.waveform.build()
@@ -156,10 +152,10 @@ def test_reducing_a_persisted_population_matches_drawing_in_one_go(
     make_metadata: MetadataFactory,
 ) -> None:
     metadata = make_metadata()
-    seeds = split_seed(41, 4)
-    drawn = _spectra(metadata, seeds, superbatch=4)
-    persisted = PopulationDraws.from_arrays(
-        population({"seeds": seeds}, metadata.sources, chunk_size=CHUNK)
+    keys = batch_keys(41, 4)
+    drawn = _spectra(metadata, keys, superbatch=4)
+    persisted = PopulationSimulator(metadata.sources, chunk_size=CHUNK).simulate_batch(
+        keys
     )
     reduced = cast(
         dict[str, Any], SpectraSimulator(metadata, chunk_size=CHUNK).reduce(persisted)
@@ -179,23 +175,28 @@ def test_the_same_population_feeds_two_waveforms(
     assert first.sources.key() == second.sources.key()
 
 
-def test_get_simulator_serves_one_object_per_record_and_chunk_size(
+def test_simulate_batch_is_the_batch_of_simulate(
     make_metadata: MetadataFactory,
 ) -> None:
     metadata = make_metadata()
-    assert get_simulator(metadata, chunk_size=CHUNK) is get_simulator(
-        make_metadata(), chunk_size=CHUNK
-    )
-    assert get_simulator(metadata, chunk_size=CHUNK) is not get_simulator(
-        metadata, chunk_size=CHUNK + 1
-    )
+    simulator = SpectraSimulator(metadata, chunk_size=CHUNK)
+    keys = batch_keys(41, 4)
+    batch = simulator.simulate_batch(keys)
+    for i in range(keys.shape[0]):
+        single = simulator.simulate(keys[i])
+        assert single["n_events"] == batch["n_events"][i]
+        assert_allclose(
+            single["spectral_density"], batch["spectral_density"][i], rtol=1e-10
+        )
+        for name, column in batch["hyperparameters"].items():
+            assert_allclose(single["hyperparameters"][name], column[i], rtol=1e-12)
 
 
 def test_spectra_rejects_a_stale_version(make_metadata: MetadataFactory) -> None:
     with pytest.raises(ValueError, match="is installed"):
-        _spectra(make_metadata(version="0.0.1"), split_seed(41, 1))
+        _spectra(make_metadata(version="0.0.1"), batch_keys(41, 1))
 
 
 def test_spectra_columns_are_numpy_not_jax(make_metadata: MetadataFactory) -> None:
-    out = cast(dict[str, Any], _spectra(make_metadata(), split_seed(41, 2)))
+    out = cast(dict[str, Any], _spectra(make_metadata(), batch_keys(41, 2)))
     assert isinstance(out["spectral_density"], np.ndarray)

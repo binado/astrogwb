@@ -1,8 +1,8 @@
-r"""Draw populations -- hyperparameters, a source count, the sources -- per seed.
+r"""Draw populations -- hyperparameters, a source count, the sources -- per key.
 
-One seed is one draw: its key splits into a hyperparameter key, a count key and
-a source key, always in that order, so a draw depends on its own seed alone and
-the same seed replays the same events whatever waveform consumes them.
+One key is one draw: it splits into a hyperparameter key, a count key and
+a source key, always in that order, so a draw depends on its own key alone and
+the same key replays the same events whatever waveform consumes them.
 
 The three stages differ in cost and in what must be static:
 
@@ -27,7 +27,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 import jax
 import jax.numpy as jnp
@@ -38,11 +38,11 @@ from numpyro.distributions import Distribution
 
 from astrogwb.populations import MergerRateFn, SourceFn
 from astrogwb.populations.evaluation import evaluate_sources
-from astrogwb.simulators._keys import seed_key
 from astrogwb.utils import years_to_seconds
 
 __all__ = [
     "BUCKET_RATIO",
+    "PopulationData",
     "PopulationDraws",
     "PopulationSampler",
     "bucket_size",
@@ -54,6 +54,21 @@ __all__ = [
 #: distinct one is a compile and padding is drawn and discarded -- so the ratio
 #: trades a few more compiles for less discarded sampling. It is not metadata.
 BUCKET_RATIO = 1.25
+
+
+class PopulationData(TypedDict):
+    """A batch of population draws; draws first, sources flat and ragged.
+
+    ``total_merger_rate`` and ``counts`` are ``(D,)``, each ``hyperparameters``
+    column ``(D,)`` and each ``source_parameters`` column ``(counts.sum(),)``,
+    draw ``b`` owning ``offsets[b]:offsets[b + 1]``. For a single draw (no batch
+    axis) the first three are scalars and the columns are ``(count,)``.
+    """
+
+    total_merger_rate: Any
+    counts: Any
+    hyperparameters: dict[str, Any]
+    source_parameters: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,13 +88,22 @@ class PopulationDraws:
 
     @classmethod
     def from_arrays(cls, outputs: Mapping[str, Any]) -> PopulationDraws:
-        """Wrap the arrays :func:`~astrogwb.simulators.population.population` returns."""
+        """Wrap a :class:`~astrogwb.simulators.population.PopulationData`."""
         return cls(
             hyperparameters=dict(outputs["hyperparameters"]),
             total_merger_rate=np.asarray(outputs["total_merger_rate"]),
             counts=np.asarray(outputs["counts"], dtype=np.int64),
             source_parameters=dict(outputs["source_parameters"]),
         )
+
+    def as_data(self) -> PopulationData:
+        """The draws as the batched tree :class:`PopulationSimulator` returns."""
+        return {
+            "total_merger_rate": self.total_merger_rate,
+            "counts": self.counts,
+            "hyperparameters": dict(self.hyperparameters),
+            "source_parameters": dict(self.source_parameters),
+        }
 
     @property
     def offsets(self) -> NDArray[np.int64]:
@@ -107,9 +131,8 @@ def bucket_size(count: int, chunk_size: int, ratio: float = BUCKET_RATIO) -> int
     return chunks * chunk_size
 
 
-def draw_keys(seeds: np.ndarray) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Per-draw ``(hyperparameter, count, source)`` keys for ``uint64`` ``seeds``."""
-    keys = jnp.stack([seed_key(seed) for seed in seeds])
+def draw_keys(keys: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """Per-draw ``(hyperparameter, count, source)`` keys of a batch of ``keys``."""
     split = jax.vmap(lambda key: jax.random.split(key, 3))(keys)
     return split[:, 0], split[:, 1], split[:, 2]
 
@@ -157,7 +180,7 @@ class PopulationSampler:
     Holds the jitted stages, so reusing one sampler keeps their compilations
     warm: both callables of a built population hash by identity, and a fresh
     equal rebuild would recompile. Needs ``jax_enable_x64`` before the first
-    call (``seed_key`` raises otherwise).
+    call, so the 64-bit seeds behind the keys are not truncated.
 
     ``count="poisson"`` draws ``Poisson(R(theta) * observation_time)`` per draw;
     ``count="fixed"`` draws ``num_events`` for every draw. A population that
@@ -236,9 +259,9 @@ class PopulationSampler:
         """The observation time in seconds, as Poisson counts use it."""
         return self._observation_seconds
 
-    def __call__(self, seeds: np.ndarray, *, chunk_size: int) -> PopulationDraws:
-        """Draw one population per seed; ``chunk_size`` only sets the size ladder."""
-        theta_keys, count_keys, source_keys = draw_keys(seeds)
+    def __call__(self, keys: jax.Array, *, chunk_size: int) -> PopulationDraws:
+        """Draw one population per key; ``chunk_size`` only sets the size ladder."""
+        theta_keys, count_keys, source_keys = draw_keys(keys)
         theta, rate, counts_device = self._stage_one(theta_keys, count_keys)
         hyperparameters = {n: np.asarray(v, dtype=np.float64) for n, v in theta.items()}
         counts = np.asarray(counts_device, dtype=np.int64)

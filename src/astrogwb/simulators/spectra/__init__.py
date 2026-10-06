@@ -8,21 +8,16 @@ from astrogwb.simulators.spectra.forward import (
 )
 from astrogwb.simulators.spectra.metadata import Hyperparameter, SpectraMetadata
 from astrogwb.simulators.spectra.poisson_counts import poisson_counts_forward_model
-from astrogwb.simulators.spectra.simulator import (
-    SpectraSimulator,
-    get_simulator,
-    spectra,
-)
+from astrogwb.simulators.spectra.simulator import SpectraData, SpectraSimulator
 
 __all__ = [
     "Hyperparameter",
     "PackedPowerSum",
+    "SpectraData",
     "SpectraMetadata",
     "SpectraSimulator",
     "SpectralDensityCatalog",
-    "get_simulator",
     "normalize_spectra",
     "poisson_counts_forward_model",
-    "spectra",
     "validate_source_model",
 ]

@@ -1,17 +1,17 @@
-"""The cached node that draws spectral densities from the forward model.
+"""The simulator that draws spectral densities from the forward model.
 
 A spectrum is a population draw reduced through a waveform. The population half
 -- hyperparameters, exact counts, sources -- is
-:class:`~astrogwb.simulators.population.PopulationSampler`; the waveform half is
-:class:`~astrogwb.simulators.spectra.forward.PackedPowerSum`, which reduces the
-events of many draws as one stream so no draw is padded to the largest.
+:class:`~astrogwb.simulators.population.PopulationSimulator`; the waveform half
+is :class:`~astrogwb.simulators.spectra.forward.PackedPowerSum`, which reduces
+the events of many draws as one stream so no draw is padded to the largest.
 :class:`SpectraSimulator` owns both, built once from a
 :class:`~astrogwb.simulators.spectra.SpectraMetadata`, so a loop that calls it
-again reuses every compilation. :func:`spectra` is the cached node around it.
+again reuses every compilation.
 
-One seed is one draw, hyperparameters and sources alike, so a draw's events
-depend on its own seed and on nothing else in the call: the draw at seed ``s``
-is the same whether it was asked for alone or among a thousand. Its spectrum can
+One key is one draw, hyperparameters and sources alike, so a draw's events
+depend on its own key and on nothing else in the call: the draw at key ``k`` is
+the same whether it was asked for alone or among a thousand. Its spectrum can
 differ in the last bits, because the packed sum's summation order follows its
 neighbours in the stream.
 """
@@ -19,20 +19,23 @@ neighbours in the stream.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
-from functools import lru_cache
-from typing import Any
+from typing import Any, TypedDict
 
+import jax
 import numpy as np
 from numpy.typing import NDArray
 
 from astrogwb import __version__
-from astrogwb.simulators.core import Arrays, Tree, cached, validate_seeds
-from astrogwb.simulators.population.draws import PopulationDraws
-from astrogwb.simulators.population.simulator import build_sampler
+from astrogwb.simulators.population.draws import PopulationData, PopulationDraws
+from astrogwb.simulators.population.simulator import PopulationSimulator
+from astrogwb.simulators.spectra.forward import (
+    PackedPowerSum,
+    normalize_spectra,
+    validate_source_model,
+)
 from astrogwb.simulators.spectra.metadata import SpectraMetadata
 
-__all__ = ["SpectraSimulator", "spectra"]
+__all__ = ["SpectraData", "SpectraSimulator"]
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +44,30 @@ logger = logging.getLogger(__name__)
 DEFAULT_SUPERBATCH = 32
 
 
+class SpectraData(TypedDict):
+    """Spectra of a batch of draws; draws first.
+
+    ``frequencies`` is ``(F,)`` and shared by the batch. ``spectral_density`` is
+    ``(D, F)``; ``n_events``, ``total_merger_rate`` and every ``hyperparameters``
+    column are ``(D,)``. For a single draw the draw axis is dropped.
+    """
+
+    frequencies: Any
+    spectral_density: Any
+    n_events: Any
+    total_merger_rate: Any
+    hyperparameters: dict[str, Any]
+
+
 class SpectraSimulator:
     """Draws spectra for one :class:`SpectraMetadata`; build once, call often.
+
+    ``simulate(key)`` is one spectrum and ``simulate_batch(keys)`` one per key,
+    reduced ``superbatch`` draws at a time; keys come from
+    :func:`~astrogwb.simulators.core.batch_keys`. ``reduce(draws)`` is the
+    transform half: it pushes already-drawn
+    :class:`~astrogwb.simulators.population.PopulationData` through this
+    waveform, so one population can meet several approximants.
 
     Building runs the one-off work: the population and waveform generator, the
     priors, and :func:`~astrogwb.simulators.spectra.forward.validate_source_model`
@@ -51,14 +76,15 @@ class SpectraSimulator:
     a population carrying a degree of freedom the approximant cannot represent
     would otherwise be silently dropped. ``chunk_size`` chunks the waveform
     reduction -- peak waveform memory is ``(F, chunk_size)`` -- and the size
-    ladder sources are drawn at, and consumes no randomness, which is why it is a
-    setting and not metadata.
+    ladder sources are drawn at; ``superbatch`` sets how many draws share a
+    stream and the source table is ``superbatch * mean count`` events. Neither
+    consumes randomness, which is why they are settings and not metadata.
 
     ``validate_sources=False`` skips that check. It exists for a deliberate
     comparison across approximants that carry fewer degrees of freedom than a
     population has -- a tidal population through a non-tidal waveform, whose
     generator then ignores the deformabilities -- and is never the right choice
-    for a record that is cached, since the dropped columns would not show.
+    for a record that is persisted, since the dropped columns would not show.
     """
 
     def __init__(
@@ -66,30 +92,25 @@ class SpectraSimulator:
         metadata: SpectraMetadata,
         *,
         chunk_size: int = 128,
+        superbatch: int = DEFAULT_SUPERBATCH,
         validate_sources: bool = True,
     ) -> None:
-        import jax
-
         # x64 before any array: the rate evaluation and the draws must not
         # depend on ripplegw's import turning it on as a side effect.
         jax.config.update("jax_enable_x64", True)
 
-        from astrogwb.simulators._keys import seed_key
-        from astrogwb.simulators.spectra.forward import (
-            PackedPowerSum,
-            validate_source_model,
-        )
-
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
+        if superbatch <= 0:
+            raise ValueError("superbatch must be positive")
         if metadata.version != __version__:
             raise ValueError(
                 f"metadata is for astrogwb {metadata.version}, but {__version__} "
                 "is installed; draws are generated by the code their key names"
             )
         self._metadata = metadata
-        self._chunk_size = chunk_size
-        self._sampler = build_sampler(metadata.sources)
+        self._superbatch = superbatch
+        self._population = PopulationSimulator(metadata.sources, chunk_size=chunk_size)
         self._generator = metadata.waveform.build()
         self._reducer = PackedPowerSum(self._generator, chunk_size=chunk_size)
 
@@ -104,7 +125,7 @@ class SpectraSimulator:
                 },
                 source_model=metadata.population.build().source_model,
                 generator=self._generator,
-                rng_key=seed_key(np.uint64(0)),
+                rng_key=jax.random.key(0),
             )
 
     @property
@@ -112,65 +133,75 @@ class SpectraSimulator:
         """The record this simulator draws."""
         return self._metadata
 
-    def reduce(self, draws: PopulationDraws) -> Arrays:
-        """Spectra of ``draws``, which may come from the population node.
-
-        Use it to push one population draw through several waveforms: build a
-        simulator per waveform and hand each the same
-        :class:`~astrogwb.simulators.population.PopulationDraws`.
-        """
-        from astrogwb.simulators.spectra.forward import normalize_spectra
-
-        num_draws = int(draws.counts.size)
+    def reduce(self, draws: PopulationData) -> SpectraData:
+        """Spectra of ``draws``, which may come from a population simulator."""
+        batch = PopulationDraws.from_arrays(draws)
         power_sums = self._reducer(
-            draws.source_parameters, draws.segment_ids, num_draws
+            batch.source_parameters, batch.segment_ids, int(batch.counts.size)
         )
         density = normalize_spectra(
             power_sums,
-            draws.source_parameters,
+            batch.source_parameters,
             count=self._metadata.count,
-            total_merger_rate=draws.total_merger_rate,
-            observation_seconds=self._sampler.observation_seconds,
+            total_merger_rate=batch.total_merger_rate,
+            observation_seconds=self._population.observation_seconds,
             num_events=self._metadata.num_events,
         )
-        hyperparameters: dict[str, Any] = dict(draws.hyperparameters)
+        hyperparameters: dict[str, Any] = dict(batch.hyperparameters)
         return {
             "frequencies": np.asarray(self._generator.frequencies),
             "spectral_density": density,
-            "n_events": draws.counts,
-            "total_merger_rate": draws.total_merger_rate,
+            "n_events": batch.counts,
+            "total_merger_rate": batch.total_merger_rate,
             "hyperparameters": hyperparameters,
         }
 
-    def __call__(
-        self, seeds: NDArray[np.uint64], *, superbatch: int = DEFAULT_SUPERBATCH
-    ) -> Arrays:
-        """One spectrum per seed, reduced ``superbatch`` draws at a time.
-
-        Returns ``frequencies`` ``(F,)``, and draw-first ``spectral_density``
-        ``(D, F)``, ``n_events`` ``(D,)``, ``total_merger_rate`` ``(D,)`` and one
-        ``hyperparameters`` column ``(D,)`` per declared hyperparameter.
-        """
-        if superbatch <= 0:
-            raise ValueError("superbatch must be positive")
+    def simulate_batch(self, keys: jax.Array) -> SpectraData:
+        """One spectrum per key, reduced ``superbatch`` draws at a time."""
+        if keys.ndim != 1 or keys.shape[0] == 0:
+            raise ValueError(
+                f"keys must be a non-empty 1-d batch of keys, got shape {keys.shape}"
+            )
+        logger.info(
+            "Spectra %s: count=%s num_events=%s population=%s draws=%d "
+            "sampled=%s approximant=%s",
+            self._metadata.key(),
+            self._metadata.count,
+            self._metadata.num_events,
+            self._metadata.population.model_name,
+            keys.shape[0],
+            sorted(self._metadata.sampled),
+            self._metadata.waveform.approximant,
+        )
         parts = [
             self.reduce(
-                self._sampler(
-                    seeds[start : start + superbatch], chunk_size=self._chunk_size
-                )
+                self._population.simulate_batch(keys[start : start + self._superbatch])
             )
-            for start in range(0, seeds.size, superbatch)
+            for start in range(0, keys.shape[0], self._superbatch)
         ]
         return _concatenate(parts)
 
+    def simulate(self, key: jax.Array) -> SpectraData:
+        """The spectrum ``key`` draws, without the draw axis."""
+        batch = self.simulate_batch(key[None])
+        hyperparameters: dict[str, Any] = {
+            name: column[0] for name, column in batch["hyperparameters"].items()
+        }
+        return {
+            "frequencies": batch["frequencies"],
+            "spectral_density": batch["spectral_density"][0],
+            "n_events": batch["n_events"][0],
+            "total_merger_rate": batch["total_merger_rate"][0],
+            "hyperparameters": hyperparameters,
+        }
 
-def _concatenate(parts: list[Arrays]) -> Arrays:
+
+def _concatenate(parts: list[SpectraData]) -> SpectraData:
     """Join per-superbatch outputs along the draw axis."""
 
     def join(name: str) -> NDArray[Any]:
-        return np.concatenate([np.asarray(part[name]) for part in parts])
+        return np.concatenate([np.asarray(part[name]) for part in parts])  # ty: ignore[invalid-key]
 
-    hyperparameters: Mapping[str, Any] = parts[0]["hyperparameters"]  # ty: ignore[invalid-assignment]
     return {
         "frequencies": parts[0]["frequencies"],
         "spectral_density": join("spectral_density"),
@@ -180,60 +211,6 @@ def _concatenate(parts: list[Arrays]) -> Arrays:
             name: np.concatenate(
                 [np.asarray(part["hyperparameters"][name]) for part in parts]
             )
-            for name in hyperparameters
+            for name in parts[0]["hyperparameters"]
         },
     }
-
-
-@lru_cache(maxsize=4)
-def _simulator(metadata_json: str, chunk_size: int) -> SpectraSimulator:
-    return SpectraSimulator(
-        SpectraMetadata.model_validate_json(metadata_json), chunk_size=chunk_size
-    )
-
-
-def get_simulator(
-    metadata: SpectraMetadata, *, chunk_size: int = 128
-) -> SpectraSimulator:
-    """The simulator for ``metadata``, built once and kept warm.
-
-    Memoized on the record's JSON (the metadata holds dicts, so it is not
-    hashable) and ``chunk_size``. The simulator's jitted stages hash by
-    identity, so serving the same object across calls is what keeps their
-    compilations. A few are kept, not all: each holds a built population and
-    waveform generator.
-    """
-    return _simulator(metadata.model_dump_json(), chunk_size)
-
-
-@cached
-def spectra(
-    inputs: Tree,
-    metadata: SpectraMetadata,
-    *,
-    chunk_size: int = 128,
-    superbatch: int = DEFAULT_SUPERBATCH,
-) -> Arrays:
-    """Draw one spectrum per seed in ``inputs["seeds"]``.
-
-    ``chunk_size`` and ``superbatch`` shape the reduction -- peak waveform
-    memory is ``(F, chunk_size)`` and the source table is
-    ``superbatch * mean count`` events -- and consume no randomness, which is why
-    they are settings and not metadata. Returns ``frequencies`` ``(F,)``, and
-    draw-first ``spectral_density`` ``(D, F)``, ``n_events`` ``(D,)``,
-    ``total_merger_rate`` ``(D,)`` and one ``hyperparameters`` column ``(D,)``
-    per declared hyperparameter.
-    """
-    seeds = validate_seeds(inputs)
-    logger.info(
-        "Spectra %s: count=%s num_events=%s population=%s draws=%d sampled=%s "
-        "approximant=%s",
-        metadata.key(),
-        metadata.count,
-        metadata.num_events,
-        metadata.population.model_name,
-        seeds.size,
-        sorted(metadata.sampled),
-        metadata.waveform.approximant,
-    )
-    return get_simulator(metadata, chunk_size=chunk_size)(seeds, superbatch=superbatch)

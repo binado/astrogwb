@@ -1,4 +1,4 @@
-"""Literal content keys and node paths: nothing may re-key a cache by accident.
+"""Literal content keys, file stems and batched keys: nothing may re-key a file by accident.
 
 Each record is built from literal fields with ``version`` pinned, so only a
 change to the canonical payload (or its hash) can move a key. The literals were
@@ -8,23 +8,20 @@ deliberate change to a record or to the path scheme re-captures them.
 
 from __future__ import annotations
 
+import jax
 import numpy as np
 
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import PopulationMetadata
-from astrogwb.simulators.core import split_seed
-from astrogwb.simulators.polarization_power import CatalogMetadata, polarization_power
-from astrogwb.simulators.population import population
-from astrogwb.simulators.spectra import SpectraMetadata, spectra
+from astrogwb.simulators.core import batch_keys
+from astrogwb.simulators.polarization_power import CatalogMetadata, catalog_stem
+from astrogwb.simulators.spectra import SpectraMetadata
 from astrogwb.waveform import WaveformMetadata
 
 CATALOG_KEY = "1a7d74705a3804d5"
 SPECTRA_KEY = "ae70dadcc56cadd5"
 POPULATION_KEY = "72e6e431f2316e25"
-CATALOG_PATH = "polarization_power-1a7d74705a3804d5-a6d964d9e7c90939.h5"
-SPECTRA_PATH = "spectra-ae70dadcc56cadd5-ccfa6eba0950be8d.h5"
-POPULATION_PATH = "population-72e6e431f2316e25-ccfa6eba0950be8d.h5"
-SPLIT_SEEDS = [15502207689350057789, 3547686303310379753, 4445048811325225245]
+CATALOG_STEM = f"polarization_power-{CATALOG_KEY}-41"
 
 
 def _waveform() -> WaveformMetadata:
@@ -64,18 +61,15 @@ def test_catalog_metadata_key_is_stable() -> None:
     assert _catalog_metadata().key() == CATALOG_KEY
 
 
-def test_polarization_power_path_is_stable() -> None:
-    path = polarization_power.path(
-        {"seed": np.uint64(41)}, _catalog_metadata(), "cache"
-    )
-    assert path.name == CATALOG_PATH
+def test_catalog_stem_is_the_key_and_the_seed() -> None:
+    assert catalog_stem(_catalog_metadata(), np.uint64(41)) == CATALOG_STEM
 
 
-def test_split_seed_is_stable_and_prefix_stable() -> None:
-    np.testing.assert_array_equal(
-        split_seed(41, 3), np.array(SPLIT_SEEDS, dtype=np.uint64)
-    )
-    np.testing.assert_array_equal(split_seed(41, 2), split_seed(41, 3)[:2])
+def test_batch_keys_are_prefix_stable_and_seed_dependent() -> None:
+    keys = jax.random.key_data(batch_keys(41, 3))
+    np.testing.assert_array_equal(jax.random.key_data(batch_keys(41, 2)), keys[:2])
+    assert not np.array_equal(jax.random.key_data(batch_keys(42, 3)), keys)
+    assert len({tuple(row) for row in np.asarray(keys).tolist()}) == 3
 
 
 def _spectra_metadata() -> SpectraMetadata:
@@ -97,17 +91,5 @@ def test_spectra_metadata_key_is_stable() -> None:
     assert _spectra_metadata().key() == SPECTRA_KEY
 
 
-def test_spectra_path_is_stable() -> None:
-    path = spectra.path({"seeds": split_seed(41, 3)}, _spectra_metadata(), "cache")
-    assert path.name == SPECTRA_PATH
-
-
 def test_population_key_is_the_waveform_free_part_of_a_spectra_record() -> None:
     assert _spectra_metadata().sources.key() == POPULATION_KEY
-
-
-def test_population_path_is_stable() -> None:
-    path = population.path(
-        {"seeds": split_seed(41, 3)}, _spectra_metadata().sources, "cache"
-    )
-    assert path.name == POPULATION_PATH
