@@ -5,6 +5,7 @@ app = marimo.App()
 
 with app.setup(hide_code=True):
     import os
+    from collections.abc import Sequence
     from pathlib import Path
 
     from astrogwb.paper.runtime import configure_runtime
@@ -29,6 +30,7 @@ with app.setup(hide_code=True):
         waveform_metadata,
     )
     from astrogwb.paper.config.detectors import DetectorRegistry
+    from astrogwb.paper.plotting import DETECTOR_NETWORKS
     from astrogwb.simulators.core import batch_keys
     from astrogwb.simulators.spectra import (
         BackgroundSpectralDensityMetadata,
@@ -46,8 +48,9 @@ def _():
     How much SNR does each detector network lose as the lower edge of the
     analysis band moves up? This notebook draws a Poisson ensemble of
     background spectra with `IMRPhenomXAS`, averages it (cached on disk),
-    computes the mean spectrum's SNR for every registry network at several
-    values of $f_{\min}$, and prints a LaTeX table (networks $\times$ cuts).
+    computes the mean spectrum's SNR for each paper network at several
+    values of $f_{\min}$, and prints LaTeX tables (networks $\times$ cuts),
+    one with the ET-COBA PSD for ET-$\Delta$ and one with the ET-D PSD.
     """)
     return
 
@@ -73,7 +76,7 @@ def _():
     cross-correlating detectors, weighting each pair by the overlap reduction
     function and combining them by inverse variance. A single detector has no
     cross-correlation, hence an infinite effective PSD and zero SNR; this is
-    why the rows are the registry's *networks*, not single detectors.
+    why the rows are *networks*, not single detectors.
 
     **Why the cut matters.** In the inspiral $S_h \propto f^{2/3}$, but
     third-generation detectors (ET, CE) have noise that falls steeply towards
@@ -135,7 +138,34 @@ def _():
         ),
     )
     registry = detector_registry(root=ROOT_DIR)
+
+    # ET-triangular with the ET-D PSD instead of the shared one. The geometry
+    # is copied from E1-E3; the overrides deep-merge, so ``registry`` is intact.
+    etd_psd = "ET-000A-18_ETD_hlf_psd.txt"
+    etd_registry = detector_registry(
+        root=ROOT_DIR,
+        detectors={
+            f"E{i}D": {
+                "geometry": registry.detectors[f"E{i}"].geometry.model_dump(),
+                "psd_reference": etd_psd,
+            }
+            for i in (1, 2, 3)
+        },
+        networks={
+            "ET-triangular-D-PSD": ["E1D", "E2D", "E3D"],
+            "ET-triangular-D-PSD-CE-Hanford": ["E1D", "E2D", "E3D", "C1"],
+        },
+    )
+    etd_swap = {
+        "ET-triangular": "ET-triangular-D-PSD",
+        "ET-triangular-CE-Hanford": "ET-triangular-D-PSD-CE-Hanford",
+    }
+    coba_rows = DETECTOR_NETWORKS
+    etd_rows = tuple((etd_swap.get(name, name), label) for name, label in coba_rows)
     return (
+        coba_rows,
+        etd_registry,
+        etd_rows,
         chunk_size,
         mean_spectra_outfile,
         maximum_frequency,
@@ -204,6 +234,7 @@ def mean_spectrum(
 @app.function(hide_code=True)
 def snr_table(
     registry: DetectorRegistry,
+    rows: Sequence[tuple[str, str]],
     frequencies: NDArray[np.float64],
     mean: NDArray[np.float64],
     observation_time: float,
@@ -215,7 +246,9 @@ def snr_table(
     Parameters
     ----------
     registry
-        Source of the networks; every ``registry.networks`` entry is a row.
+        Source of the networks.
+    rows
+        ``(network name, row label)`` pairs, in row order.
     frequencies, mean
         Frequency grid and mean spectral density.
     observation_time
@@ -228,16 +261,16 @@ def snr_table(
     Returns
     -------
     pandas.DataFrame
-        SNRs indexed by network name, with one column per cut.
+        SNRs indexed by row label, with one column per cut.
     """
     grid = jnp.asarray(frequencies)
     spectrum = jnp.asarray(mean)
     seconds = years_to_seconds(observation_time)
-    rows: dict[str, list[float]] = {}
-    for name in registry.networks:
+    values: dict[str, list[float]] = {}
+    for name, label in rows:
         geometry, sensitivities = registry.build_network(name)
         noise = jnp.asarray(effective_psd(grid, geometry, sensitivities))
-        rows[name] = [
+        values[label] = [
             float(
                 spectral_snr(
                     spectrum,
@@ -252,9 +285,20 @@ def snr_table(
             for fmin in minimum_frequencies
         ]
     return pd.DataFrame.from_dict(
-        rows,
+        values,
         orient="index",
         columns=[rf"$f_{{\min}} = {fmin:g}$ Hz" for fmin in minimum_frequencies],
+    )
+
+
+@app.function(hide_code=True)
+def latex_table(table: pd.DataFrame, caption: str, label: str) -> str:
+    """Render an SNR table as a LaTeX ``table`` environment."""
+    return table.to_latex(
+        float_format="%.1f",
+        column_format="l" + "r" * table.shape[1],
+        caption=caption,
+        label=label,
     )
 
 
@@ -287,6 +331,9 @@ def _():
 
 @app.cell
 def _(
+    coba_rows,
+    etd_registry,
+    etd_rows,
     frequencies,
     maximum_frequency,
     mean,
@@ -294,16 +341,33 @@ def _(
     observation_time,
     registry,
 ):
-    table = snr_table(
+    table_coba = snr_table(
         registry,
+        coba_rows,
         frequencies,
         mean,
         observation_time,
         minimum_frequencies,
         maximum_frequency,
     )
-    table
-    return (table,)
+    table_etd = snr_table(
+        etd_registry,
+        etd_rows,
+        frequencies,
+        mean,
+        observation_time,
+        minimum_frequencies,
+        maximum_frequency,
+    )
+    mo.vstack(
+        [
+            mo.md("**ET-$\\Delta$ with the ET-COBA PSD**"),
+            table_coba,
+            mo.md("**ET-$\\Delta$ with the ET-D PSD**"),
+            table_etd,
+        ]
+    )
+    return table_coba, table_etd
 
 
 @app.cell(hide_code=True)
@@ -315,17 +379,20 @@ def _():
 
 
 @app.cell
-def _(table):
-    latex = table.to_latex(
-        float_format="%.1f",
-        column_format="l" + "r" * table.shape[1],
-        caption=(
+def _(table_coba, table_etd):
+    blocks = [
+        latex_table(
+            table,
             "Mean-spectrum SNR of each detector network as the lower edge of "
-            "the analysis band is raised."
-        ),
-        label="tab:mean-spectrum-snr",
-    )
-    mo.md(f"```latex\n{latex}\n```")
+            f"the analysis band is raised, with {psd} PSD for ET-$\\Delta$.",
+            f"tab:mean-spectrum-snr-{tag}",
+        )
+        for table, psd, tag in (
+            (table_coba, "the ET-COBA", "coba"),
+            (table_etd, "the ET-D", "etd"),
+        )
+    ]
+    mo.md("\n\n".join(f"```latex\n{block}\n```" for block in blocks))
     return
 
 
@@ -336,7 +403,8 @@ def _():
 
     Along each row the SNR is non-increasing in $f_{\min}$. The rows differ
     in how fast they fall: networks whose sensitivity extends to a few Hz
-    lose the most when the cut rises.
+    lose the most when the cut rises. The two tables differ only in the
+    ET-$\\Delta$ rows (ET-COBA vs. ET-D noise curve); the 2L rows are identical.
     """)
     return
 
