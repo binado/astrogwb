@@ -37,8 +37,7 @@ from astrogwb_mock_population import (
     POPULATION_PARAMS,
     catalog_samples,
     make_redshift_grid,
-    mock_merger_rate_fn,
-    mock_target_model,
+    mock_population,
 )
 from jax.typing import ArrayLike
 from numpyro import handlers
@@ -62,6 +61,7 @@ from astrogwb.inference import (
     gwb_spectral_density_model,
 )
 from astrogwb.populations import DEFAULT_DENSITY_SITES
+from astrogwb.populations._types import PopulationModel
 from astrogwb.simulators.polarization_power import (
     CatalogMetadata,
     PolarizationPowerData,
@@ -107,18 +107,14 @@ class AnalysisInputs(NamedTuple):
     snr: float
 
 
-_TARGET_SOURCE = mock_target_model()
-_TARGET_RATE = mock_merger_rate_fn()
+_TARGET = mock_population()
 
 
-def pinned_target(params: Mapping[str, ArrayLike]) -> Mapping[str, jax.Array]:
-    """The target source model, unsampled hyperparameters pinned at the fiducials."""
-    return _TARGET_SOURCE({**FIDUCIALS, **params})
-
-
-def pinned_rate(params: Mapping[str, ArrayLike]) -> jax.Array:
-    """The rate needs the same pinning: it takes ``params`` independently."""
-    return _TARGET_RATE({**FIDUCIALS, **params})
+def pinned_target(
+    params: Mapping[str, ArrayLike],
+) -> tuple[jax.Array, PopulationModel]:
+    """The target population, unsampled hyperparameters pinned at the fiducials."""
+    return _TARGET({**FIDUCIALS, **params})
 
 
 class MarginalizedResult(NamedTuple):
@@ -156,7 +152,6 @@ def _build_analysis_inputs(
         polarization_power,
         jnp.ones(num_sources),
         total_merger_rate,
-        source_parameters=samples,
     )
 
     sensitivities = load_sensitivity_map(DETECTORS)
@@ -211,8 +206,7 @@ def _build_analysis_inputs(
     estimator = build_importance_spectrum(
         data,
         metadata,
-        source_model=pinned_target,
-        merger_rate_fn=pinned_rate,
+        population=pinned_target,
         density_sites=DEFAULT_DENSITY_SITES,
         frequency_mask=mask,
     )[0]

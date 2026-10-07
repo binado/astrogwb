@@ -10,9 +10,9 @@ amplitude_parameter = "H0"
 # away from the proposal, and a uniform-in-redshift component mixed into the
 # Madau-Dickinson law keeps the importance weights from degenerating. The
 # mixture is one density -- the same MixtureGeneral draws the redshifts and
-# evaluates their log density -- and declares no merger rate, since it is a
-# sampling density rather than a physical population: `snakemake validate`
-# rejects one named as an injection. Shared with
+# evaluates their log density -- and its merger rate does not normalize it,
+# since it is a sampling density rather than a physical population, so it must
+# not be named as an injection. Shared with
 # variable-proposal-guard/eps1e-1.
 [analysis.proposal]
 population = "${populations.guard}"

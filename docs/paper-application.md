@@ -19,7 +19,7 @@ execute:
 
 ```bash
 uv run --group workflow snakemake --snakefile Snakefile \
-  --allowed-rules validate run_mcmc plot_cosmological_parameters \
+  --allowed-rules run_mcmc plot_cosmological_parameters \
   --profile profiles/local --cores 8 --dry-run plot_cosmological_parameters
 ```
 

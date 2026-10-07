@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from numpyro import handlers
 
 from astrogwb.frequency import bin_widths
 from astrogwb.populations import PopulationMetadata
@@ -18,8 +19,13 @@ from astrogwb.waveform import WaveformMetadata
 
 #: The population record every draw carries: the density that drew it.
 POPULATION_RECORD: dict[str, Any] = {
-    "model_name": "bns_md_cosmological",
-    "model_kwargs": {"minimum_redshift": 0.0, "maximum_redshift": 20.0, "n_grid": 256},
+    "model_name": "bns_coba",
+    "model_kwargs": {
+        "mass_model": "uniform",
+        "minimum_redshift": 0.0,
+        "maximum_redshift": 20.0,
+        "n_grid": 256,
+    },
     "fiducials": {
         "H0": 67.66,
         "Omega_m": 0.3096,
@@ -92,13 +98,15 @@ def test_restrict_redshift_narrows_the_samples_and_the_population_together(
 
 
 def test_restrict_redshift_reaches_the_rebuilt_population(draw_factory) -> None:
-    """Both callables are built from the one flat kwargs mapping it rewrites."""
+    """The rebuilt population is built from the one flat kwargs mapping it rewrites."""
     data, metadata = draw_factory(np.array([0.1, 0.5, 1.5, 19.0]))
     _, narrowed = restrict_redshift(data, metadata, 0.3, 2.0)
 
-    for bound in narrowed.population.build():
-        assert bound.keywords["minimum_redshift"] == 0.3  # ty: ignore[unresolved-attribute]
-        assert bound.keywords["maximum_redshift"] == 2.0  # ty: ignore[unresolved-attribute]
+    rate, model = narrowed.population.build()(narrowed.fiducials)
+    with handlers.seed(rng_seed=0):
+        redshift = model()["redshift"]
+    assert float(rate) > 0.0
+    assert 0.3 <= float(redshift) <= 2.0
 
 
 def test_restrict_redshift_leaves_the_inputs_untouched(draw_factory) -> None:

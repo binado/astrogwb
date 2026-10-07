@@ -47,7 +47,6 @@ from astrogwb.paper.catalogs import load_run_catalog
 from astrogwb.paper.config.mcmc import RunConfig, build_run_config
 from astrogwb.paper.inference import (
     build_model,
-    catalog_total_merger_rate,
     prepare_inference_inputs,
     prepare_observation,
     target_population,
@@ -80,7 +79,8 @@ REDSHIFT = np.linspace(0.05, 1.5, N_SOURCES)
 #: the target population's analysis redshift support. Keeping them different is deliberate:
 #: it is what a real run does, and it stops a bug that conflates the two from
 #: cancelling out of both sides.
-GENERATION_KWARGS: dict[str, float | int] = {
+GENERATION_KWARGS: dict[str, float | int | str] = {
+    "mass_model": "uniform",
     "minimum_redshift": 0.0,
     "maximum_redshift": 20.0,
     "n_grid": 256,
@@ -108,7 +108,7 @@ def _write_catalog(
         polarization_power=rng.uniform(0.0, 1.0, size=(frequencies.size, N_SOURCES)),
         minimum_frequency=float(frequencies[0]),
         df=float(frequencies[1] - frequencies[0]),
-        model_name=("bns_md_uniform_mixture" if guarded else "bns_md_cosmological"),
+        model_name="bns_coba",
         model_kwargs=kwargs,
     )
     save_catalog(catalog, path, seed=seed)
@@ -503,14 +503,12 @@ def test_the_marginalized_likelihood_reads_the_band_off_the_mask_too(
     # The same likelihood with the band compressed away instead of masked.
     mask = np.asarray(inputs.observation.frequency_mask)
     target = target_population(config)
-    assert target.merger_rate_fn is not None
     compressed_model, _ = build_model(
         config,
         spectral_density_fn=build_importance_spectrum(
             inputs.proposal_data,
             inputs.proposal_metadata,
-            source_model=target.source_model,
-            merger_rate_fn=target.merger_rate_fn,
+            population=target,
             density_sites=DEFAULT_DENSITY_SITES,
             frequency_mask=inputs.observation.frequency_mask,
         )[0],
@@ -612,7 +610,7 @@ def _proposal_log_prob(
         source_frame_mass_1=data["source_parameters"]["source_frame_mass_1"],
         source_frame_mass_2=data["source_parameters"]["source_frame_mass_2"],
     )
-    if metadata.population.model_name != "bns_md_uniform_mixture":
+    if "uniform_mixing_fraction" not in kwargs:
         return md_logprob
     # The mixture acts only on redshift; add the ordered-pair factor after
     # mixing rather than weighting it as if the uniform component included masses.
@@ -676,7 +674,6 @@ def _grid_formula_spectrum(inputs: Any, config: RunConfig, params: dict) -> jax.
         power,
         jnp.exp(log_weights),
         rate,
-        source_parameters=data["source_parameters"],
     )
 
 
@@ -749,11 +746,9 @@ def test_a_catalog_reweighted_to_its_own_population_has_exactly_zero_log_weights
     identically one.
     """
     population = proposal_catalog[1].population.build()
-    assert population.merger_rate_fn is not None
     log_weights_fn = build_importance_spectrum(
         *proposal_catalog,
-        source_model=population.source_model,
-        merger_rate_fn=population.merger_rate_fn,
+        population=population,
         density_sites=DEFAULT_DENSITY_SITES,
     )[1]
     log_weights = log_weights_fn(proposal_catalog[1].fiducials)
@@ -807,30 +802,6 @@ def test_the_requested_density_factors_reach_the_bound_weights_unchanged(
         np.asarray(inputs.log_weights_fn(inputs.proposal_metadata.fiducials)),
         np.zeros(N_RETAINED),
     )
-
-
-def test_a_guard_mixture_catalog_cannot_supply_an_observed_rate() -> None:
-    """A proposal catalog used as an injection fails, rather than scaling wrong.
-
-    The Madau-Dickinson total rate normalizes the Madau-Dickinson redshift
-    density, not a mixture of it with a uniform component. Every guarded def
-    used to record that rate anyway, and ``catalog_total_merger_rate`` would
-    have returned it -- a finite number, off by the guard fraction, with no
-    error anywhere downstream.
-    """
-    guard = make_catalog(
-        redshift=REDSHIFT,
-        polarization_power=np.ones((FREQUENCIES.size, N_SOURCES)),
-        minimum_frequency=float(FREQUENCIES[0]),
-        df=float(FREQUENCIES[1] - FREQUENCIES[0]),
-        model_name="bns_md_uniform_mixture",
-        model_kwargs={**GENERATION_KWARGS, "uniform_mixing_fraction": 0.1},
-    )
-
-    _, guard_metadata = guard
-    assert guard_metadata.population.build().merger_rate_fn is None
-    with pytest.raises(ValueError, match="declares no merger rate"):
-        catalog_total_merger_rate(guard_metadata)
 
 
 def test_the_repository_ships_no_proposal_density_config() -> None:

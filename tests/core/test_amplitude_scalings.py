@@ -26,7 +26,6 @@ from astrogwb.inference import (
     amplitude_H0_transform,
     amplitude_local_merger_rate_transform,
 )
-from astrogwb.populations import AMPLITUDE_PARAMETERS
 
 _TRANSFORMS = {
     "H0": amplitude_H0_transform,
@@ -54,7 +53,7 @@ def _spectrum(synthetic_importance, n_samples: int = 16):
     )
 
 
-@pytest.mark.parametrize("parameter", AMPLITUDE_PARAMETERS)
+@pytest.mark.parametrize("parameter", tuple(_TRANSFORMS))
 def test_amplitude_factorization_matches_the_real_spectral_density(
     parameter: str, synthetic_importance
 ) -> None:

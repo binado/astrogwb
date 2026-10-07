@@ -117,15 +117,17 @@ class BackgroundSpectralDensitySimulator:
         self._reducer = ChunkedPowerSum(self._generator, chunk_size=chunk_size)
 
         if validate_sources:
-            validate_source_model(
+            _, model = metadata.population.build()(
                 {
                     **metadata.fixed,
                     **{
                         name: float(prior.build().mean)
                         for name, prior in metadata.sampled.items()
                     },
-                },
-                source_model=metadata.population.build().source_model,
+                }
+            )
+            validate_source_model(
+                model,
                 generator=self._generator,
                 rng_key=jax.random.key(0),
             )
@@ -142,7 +144,6 @@ class BackgroundSpectralDensitySimulator:
         rate = np.asarray(population["total_merger_rate"])
         density = normalize_spectra(
             self._reducer(sources),
-            sources,
             count=self._metadata.count,
             total_merger_rate=rate,
             observation_seconds=self._population.observation_seconds,

@@ -12,31 +12,13 @@ from astrogwb.gwb import (
 )
 
 
-def test_spectral_density_uses_source_inclination_factor() -> None:
+def test_spectral_density_is_the_rate_times_the_weighted_mean_power() -> None:
     power = jnp.array([[2.0, 4.0, 6.0], [1.0, 3.0, 5.0]])
     weights = jnp.array([1.0, 1.0, 2.0])
 
-    analytic = spectral_density(power, weights, 10.0, source_parameters={})
-    catalog = spectral_density(
-        power, weights, 10.0, source_parameters={"inclination": jnp.zeros(3)}
-    )
+    contracted = jax.jit(spectral_density)(power, weights, 10.0)
 
-    np.testing.assert_allclose(np.asarray(analytic), np.array([24.0, 56.0 / 3.0]))
-    np.testing.assert_allclose(np.asarray(catalog), np.array([60.0, 140.0 / 3.0]))
-
-
-def test_spectral_density_source_structure_is_jittable() -> None:
-    power = jnp.array([[2.0, 4.0], [1.0, 3.0]])
-    weights = jnp.ones(2)
-    contracted = jax.jit(spectral_density)
-
-    face_on = contracted(power, weights, 10.0, source_parameters={})
-    inclined = contracted(
-        power, weights, 10.0, source_parameters={"inclination": jnp.zeros(2)}
-    )
-
-    np.testing.assert_allclose(np.asarray(face_on), np.array([12.0, 8.0]))
-    np.testing.assert_allclose(np.asarray(inclined), np.array([30.0, 20.0]))
+    np.testing.assert_allclose(np.asarray(contracted), np.array([60.0, 140.0 / 3.0]))
 
 
 def test_omega_gw_round_trip() -> None:

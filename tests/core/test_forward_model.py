@@ -1,6 +1,5 @@
 """Exact Poisson-catalog forward model, checked against an explicit power sum."""
 
-from collections.abc import Mapping
 from functools import partial
 from typing import Any, cast
 from unittest.mock import Mock
@@ -9,17 +8,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from astrogwb_mock_population import (
-    POPULATION_PARAMS,
-    mock_merger_rate_fn,
-    mock_population_model,
-)
+from astrogwb_mock_population import POPULATION_PARAMS, mock_population
 from numpyro import handlers
 from numpyro.infer import Predictive
 
-from astrogwb.constants import INCLINATION_AVERAGE_TO_FACE_ON_RATIO, ISCO_ALPHA
-from astrogwb.gwb.spectral import inclination_averaging_factor
-from astrogwb.populations import IsotropicInclination
+from astrogwb.constants import ISCO_ALPHA
 from astrogwb.simulators.spectra import (
     poisson_counts_forward_model,
     validate_source_model,
@@ -75,7 +68,7 @@ def _ripple_generator() -> RippleGenerator:
 
 def _observation_time_for(expected_events: float) -> float:
     """Years of observation such that ``R * T = expected_events``."""
-    rate = mock_merger_rate_fn()(POPULATION_PARAMS)
+    rate, _ = mock_population()(POPULATION_PARAMS)
     return expected_events / (float(rate) * years_to_seconds(1.0))
 
 
@@ -85,8 +78,7 @@ def _jax_params() -> dict[str, jax.Array]:
 
 def _model_kwargs(**overrides: Any) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
-        "source_model": mock_population_model(),
-        "merger_rate_fn": mock_merger_rate_fn(),
+        "population": mock_population(),
         "generator": _generator(),
         "observation_time": _observation_time_for(N_EVENTS),
         "chunk_size": CHUNK_SIZE,
@@ -126,11 +118,7 @@ def _expected_spectrum(trace, generator, observation_time):
     sources = {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
     power = jnp.asarray(generator.generate_batch(sources))
     event_mask = jnp.arange(power.shape[-1]) < trace["n_events"]["value"]
-    return (
-        inclination_averaging_factor(sources)
-        * (power * event_mask).sum(axis=1)
-        / years_to_seconds(observation_time)
-    )
+    return (power * event_mask).sum(axis=1) / years_to_seconds(observation_time)
 
 
 def test_conditioned_poisson_rate_is_total_merger_rate_times_observation_seconds() -> (
@@ -198,75 +186,6 @@ def test_chunk_size_does_not_change_the_spectrum() -> None:
     )
     for name in _plated_source_site_names(first):
         np.testing.assert_array_equal(first[name]["value"], second[name]["value"])
-
-
-def test_missing_inclination_rescales_face_on_power() -> None:
-    kwargs = _model_kwargs()
-    analytic = _seeded_trace(poisson_counts_forward_model, POPULATION_PARAMS, **kwargs)
-    sources = {
-        name: analytic[name]["value"] for name in _plated_source_site_names(analytic)
-    }
-    power = _generator().generate_batch(sources)
-    event_mask = jnp.arange(power.shape[-1]) < analytic["n_events"]["value"]
-    np.testing.assert_allclose(
-        analytic["spectral_density"]["value"],
-        INCLINATION_AVERAGE_TO_FACE_ON_RATIO
-        * (power * event_mask).sum(axis=1)
-        / years_to_seconds(kwargs["observation_time"]),
-        rtol=1e-12,
-    )
-    assert "inclination" not in sources
-
-
-def test_returned_inclination_disables_analytic_rescaling() -> None:
-    base_model = mock_population_model()
-
-    def inclined_model(params: Mapping[str, jax.Array]) -> dict[str, jax.Array]:
-        sources = dict(base_model(params))
-        return {**sources, "inclination": jnp.zeros_like(sources["redshift"])}
-
-    baseline = _seeded_trace(
-        poisson_counts_forward_model, POPULATION_PARAMS, **_model_kwargs()
-    )
-    inclined = _seeded_trace(
-        poisson_counts_forward_model,
-        POPULATION_PARAMS,
-        **_model_kwargs(source_model=inclined_model),
-    )
-    np.testing.assert_allclose(
-        inclined["spectral_density"]["value"],
-        baseline["spectral_density"]["value"] / INCLINATION_AVERAGE_TO_FACE_ON_RATIO,
-        rtol=1e-12,
-    )
-
-    model = partial(
-        poisson_counts_forward_model, **_model_kwargs(source_model=inclined_model)
-    )
-
-    def spectrum(values: dict[str, jax.Array]) -> jax.Array:
-        trace = handlers.trace(handlers.seed(model, 0)).get_trace(values)
-        return trace["spectral_density"]["value"]
-
-    np.testing.assert_allclose(
-        jax.jit(spectrum)(_jax_params()), spectrum(_jax_params())
-    )
-
-
-def test_isotropic_inclination_messenger_disables_analytic_rescaling() -> None:
-    wrapped = IsotropicInclination(mock_population_model())
-    trace = _seeded_trace(
-        poisson_counts_forward_model,
-        POPULATION_PARAMS,
-        **_model_kwargs(source_model=wrapped),
-    )
-    sources = {name: trace[name]["value"] for name in _plated_source_site_names(trace)}
-    assert "inclination" in sources
-    assert inclination_averaging_factor(sources) == 1.0
-    np.testing.assert_allclose(
-        trace["spectral_density"]["value"],
-        _expected_spectrum(trace, _generator(), _model_kwargs()["observation_time"]),
-        rtol=1e-12,
-    )
 
 
 def test_predictive_stacks_fixed_shape_sites() -> None:
@@ -348,9 +267,7 @@ def test_partial_count_masks_power_but_not_source_capacity() -> None:
 
     np.testing.assert_allclose(
         trace["spectral_density"]["value"],
-        INCLINATION_AVERAGE_TO_FACE_ON_RATIO
-        * reference_power.sum(axis=1)
-        / years_to_seconds(kwargs["observation_time"]),
+        reference_power.sum(axis=1) / years_to_seconds(kwargs["observation_time"]),
         rtol=1e-12,
     )
     assert all(
@@ -373,9 +290,7 @@ def test_count_above_capacity_is_silently_capped() -> None:
     np.testing.assert_array_equal(trace["n_events"]["value"], observed_count)
     np.testing.assert_allclose(
         trace["spectral_density"]["value"],
-        INCLINATION_AVERAGE_TO_FACE_ON_RATIO
-        * reference
-        / years_to_seconds(kwargs["observation_time"]),
+        reference / years_to_seconds(kwargs["observation_time"]),
         rtol=1e-12,
     )
     assert all(source.shape == (max_events,) for source in sources.values())
@@ -394,17 +309,6 @@ def test_jitted_spectrum_matches_eager() -> None:
     compiled_spectrum, compiled_n = jax.jit(spectrum)(params)
     np.testing.assert_allclose(compiled_spectrum, eager_spectrum, rtol=1e-12)
     np.testing.assert_array_equal(compiled_n, eager_n)
-
-
-def test_missing_physical_rate_is_rejected() -> None:
-    """The rate model owns this check now, not an ``"x" in params`` branch."""
-    params = {
-        name: value
-        for name, value in POPULATION_PARAMS.items()
-        if name != "local_merger_rate"
-    }
-    with pytest.raises(ValueError, match="local_merger_rate"):
-        _seeded_trace(poisson_counts_forward_model, params, **_model_kwargs())
 
 
 @pytest.mark.integration
@@ -561,12 +465,8 @@ def test_vmap_over_draws_shares_one_static_event_count() -> None:
 # Validation the traced model cannot do for itself
 # --------------------------------------------------------------------- #
 def test_validate_source_model_accepts_a_matched_population() -> None:
-    validate_source_model(
-        _jax_params(),
-        source_model=mock_population_model(),
-        generator=_generator(),
-        rng_key=jax.random.key(0),
-    )
+    _, model = mock_population()(_jax_params())
+    validate_source_model(model, generator=_generator(), rng_key=jax.random.key(0))
 
 
 def test_validate_source_model_rejects_a_mismatched_approximant() -> None:
@@ -587,32 +487,30 @@ def test_validate_source_model_rejects_a_mismatched_approximant() -> None:
         )
     )
 
-    def tidal_population(params):
-        sources = dict(mock_population_model()(params))
+    _, model = mock_population()(_jax_params())
+
+    def tidal_population():
+        sources = dict(model())
         sources["lambda_1"] = jnp.full_like(sources["luminosity_distance"], 300.0)
         return sources
 
     with pytest.raises(ValueError, match="no tidal deformability"):
         validate_source_model(
-            _jax_params(),
-            source_model=tidal_population,
-            generator=aligned_spin,
-            rng_key=jax.random.key(0),
+            tidal_population, generator=aligned_spin, rng_key=jax.random.key(0)
         )
 
 
 def test_validate_source_model_requires_luminosity_distance() -> None:
-    def no_distance(params):
-        sources = dict(mock_population_model()(params))
+    _, model = mock_population()(_jax_params())
+
+    def no_distance():
+        sources = dict(model())
         del sources["luminosity_distance"]
         return sources
 
     with pytest.raises(KeyError, match="luminosity_distance"):
         validate_source_model(
-            _jax_params(),
-            source_model=no_distance,
-            generator=_generator(),
-            rng_key=jax.random.key(0),
+            no_distance, generator=_generator(), rng_key=jax.random.key(0)
         )
 
 

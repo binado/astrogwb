@@ -17,7 +17,6 @@ from astrogwb.paper.config import fiducials, networks, priors, waveform_generato
 from astrogwb.paper.config.detectors import load_detector_config
 from astrogwb.paper.config.mcmc import (
     DEFAULT_DENSITY_SITES,
-    AmplitudeParameter,
     build_run_config,
     prior_to_spec,
 )
@@ -518,15 +517,11 @@ def test_accessor_kwargs_do_not_poison_the_cache() -> None:
 # --------------------------------------------------------------------------- #
 @pytest.mark.integration
 def test_the_restated_population_constants_match_the_registry() -> None:
-    """`config.mcmc` copies two tuples out of the population layer.
+    """`config.mcmc` copies a tuple out of the population layer.
 
     Copies drift, so this is the cross-check. It is marked `integration`
     because asserting it imports the population registry.
     """
-    from typing import get_args
-
-    from astrogwb.populations import AMPLITUDE_PARAMETERS
     from astrogwb.populations import DEFAULT_DENSITY_SITES as registered_sites
 
-    assert get_args(AmplitudeParameter) == AMPLITUDE_PARAMETERS
     assert DEFAULT_DENSITY_SITES == registered_sites

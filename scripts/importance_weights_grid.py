@@ -218,17 +218,17 @@ def main(argv: Sequence[str] | None = None) -> None:
     n_samples = metadata.num_samples
     print(f"loaded catalog samples: n_proposal_samples={n_samples}")
 
-    grid_kwargs = {
-        "minimum_redshift": Z_MIN,
-        "maximum_redshift": Z_MAX,
-        "n_grid": N_REDSHIFT_GRID,
-    }
-    target = build_population("bns_md_modified_propagation", **grid_kwargs)
+    target = build_population(
+        "bns_coba",
+        mass_model="uniform",
+        minimum_redshift=Z_MIN,
+        maximum_redshift=Z_MAX,
+        n_grid=N_REDSHIFT_GRID,
+    )
     log_weights_fn = build_importance_spectrum(
         data,
         metadata,
-        source_model=target.source_model,
-        merger_rate_fn=target.merger_rate_fn,
+        population=target,
         density_sites=DEFAULT_DENSITY_SITES,
     )[1]
 

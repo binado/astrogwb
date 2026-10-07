@@ -30,10 +30,8 @@ from astrogwb.constants import ISCO_ALPHA
 from astrogwb.importance.spectral import build_importance_spectrum
 from astrogwb.populations import (
     DEFAULT_DENSITY_SITES,
-    MergerRateFn,
     Population,
     PopulationMetadata,
-    SourceFn,
     build_population,
 )
 from astrogwb.populations.evaluation import evaluate_sources, sample_sources
@@ -45,11 +43,11 @@ from astrogwb.waveform import AnalyticInspiralGenerator, WaveformMetadata
 
 
 def derived_columns(
-    model: SourceFn,
+    population: Population,
     params: Mapping[str, ArrayLike],
     sources: Mapping[str, ArrayLike],
 ) -> dict[str, jax.Array]:
-    """Replay a source model at fixed source values, returning declared outputs.
+    """Replay a population's model at fixed source values, returning declared outputs.
 
     The test-side counterpart of the batched replay inside
     :func:`astrogwb.populations.evaluation.sample_sources`, and the same code path:
@@ -59,7 +57,8 @@ def derived_columns(
     never trusted over the recomputation, and no static site-name list is
     needed.
     """
-    _, outputs = evaluate_sources(model, params, sources, density_sites=())
+    _, model = population(params)
+    _, outputs = evaluate_sources(model, sources, density_sites=())
     return outputs
 
 
@@ -67,8 +66,8 @@ def derived_columns(
 #: ``local_merger_rate`` is in Gpc^-3 yr^-1; the rest feed the Madau-Dickinson
 #: rate shape and the flat-LambdaCDM cosmology. ``xi_0 = 1`` makes the modified
 #: propagation law reduce exactly to the cosmological one, which is what lets a
-#: catalog drawn from ``bns_md_cosmological`` serve as its own proposal against
-#: a ``bns_md_modified_propagation`` target.
+#: catalog drawn without ``xi_0`` serve as its own proposal against a target
+#: evaluated with it.
 FIDUCIALS: dict[str, float] = {
     "H0": 67.66,
     "Omega_m": 0.3096,
@@ -115,50 +114,27 @@ def make_redshift_grid(n_grid: int = N_GRID) -> jax.Array:
 
 
 def mock_population(n_grid: int = N_GRID) -> Population:
-    """The analytic-average fixture: Madau-Dickinson, standard propagation."""
+    """The mock BNS population: Madau-Dickinson, uniform masses.
+
+    The generating population and the reweighting target are the same
+    registered model; they differ only in whether ``xi_0`` is among the
+    hyperparameters it is called with.
+    """
     return build_population(
-        "bns_md_cosmological",
+        "bns_coba",
+        mass_model="uniform",
         minimum_redshift=Z_MIN,
         maximum_redshift=Z_MAX,
         n_grid=n_grid,
-        sample_inclination=False,
     )
-
-
-def mock_target_population(n_grid: int = N_GRID) -> Population:
-    """The target population the mock catalog is reweighted to."""
-    return build_population(
-        "bns_md_modified_propagation",
-        minimum_redshift=Z_MIN,
-        maximum_redshift=Z_MAX,
-        n_grid=n_grid,
-        sample_inclination=False,
-    )
-
-
-def mock_population_model(n_grid: int = N_GRID) -> SourceFn:
-    """The generating source model: Madau-Dickinson, standard propagation."""
-    return mock_population(n_grid).source_model
-
-
-def mock_target_model(n_grid: int = N_GRID) -> SourceFn:
-    """The target source model the mock catalog is reweighted to."""
-    return mock_target_population(n_grid).source_model
-
-
-def mock_merger_rate_fn(n_grid: int = N_GRID) -> MergerRateFn:
-    """The Madau-Dickinson merger rate both mock populations declare."""
-    merger_rate_fn = mock_target_population(n_grid).merger_rate_fn
-    assert merger_rate_fn is not None
-    return merger_rate_fn
 
 
 def load_mock_population(num_sources: int = 1024) -> dict[str, np.ndarray]:
     """Draw the mock population as plain ``(N,)`` float64 arrays."""
+    _, model = mock_population()(POPULATION_PARAMS)
     samples = sample_sources(
-        mock_population_model(),
+        model,
         jax.random.PRNGKey(MOCK_POPULATION_SEED),
-        POPULATION_PARAMS,
         num_samples=num_sources,
     )
     return {name: np.asarray(values) for name, values in samples.items()}
@@ -181,12 +157,12 @@ def mock_catalog(
     metadata = CatalogMetadata(
         waveform=generator.metadata,
         population=PopulationMetadata(
-            model_name="bns_md_cosmological",
+            model_name="bns_coba",
             model_kwargs={
+                "mass_model": "uniform",
                 "minimum_redshift": Z_MIN,
                 "maximum_redshift": Z_MAX,
                 "n_grid": N_GRID,
-                "sample_inclination": False,
             },
         ),
         fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
@@ -210,10 +186,6 @@ def build_mock_catalog(
     a genuine closed-form inspiral bank -- no Ripple backend, no persisted
     file.
 
-    ``inclination`` is absent from the face-on population. That is deliberate:
-    the missing column selects the
-    ``INCLINATION_AVERAGE_TO_FACE_ON_RATIO = <g>/g(0) = 0.4`` converts face-on
-    power into the inclination average.
     """
     available_sources = min(values.shape[0] for values in population.values())
     if num_sources > available_sources:
@@ -272,17 +244,18 @@ def synthetic_source_parameters(n_samples: int = 16) -> dict[str, jax.Array]:
         "spin_2z": 0.0 * constant,
         "lambda_1": 400.0 * constant,
         "lambda_2": 300.0 * constant,
+        "inclination": (jnp.pi / 3.0) * constant,
     }
-    return derived_columns(mock_population_model(), POPULATION_PARAMS, stochastic)
+    return derived_columns(mock_population(), POPULATION_PARAMS, stochastic)
 
 
 def log_weight_kwargs(importance: Mapping[str, Any]) -> dict[str, Any]:
     """The subset of ``importance_spectral_density`` keywords the weights take.
 
-    ``evaluate_log_weights`` needs no power or rate;
-    this drops exactly those from a full spectrum keyword set.
+    ``evaluate_log_weights`` needs no power; this drops it from a full
+    spectrum keyword set.
     """
-    spectrum_only = {"polarization_power", "merger_rate_fn"}
+    spectrum_only = {"polarization_power"}
     return {
         name: value for name, value in importance.items() if name not in spectrum_only
     }
@@ -292,7 +265,7 @@ def build_synthetic_importance(
     n_samples: int = 16,
     *,
     polarization_power: jax.Array | None = None,
-    source_model: SourceFn | None = None,
+    population: Population | None = None,
 ) -> tuple[dict[str, Any], dict[str, jax.Array]]:
     """Build importance kwargs whose proposal *is* their target at the fiducials.
 
@@ -339,12 +312,12 @@ def build_synthetic_importance(
     metadata = CatalogMetadata(
         waveform=generator.metadata,
         population=PopulationMetadata(
-            model_name="bns_md_cosmological",
+            model_name="bns_coba",
             model_kwargs={
+                "mass_model": "uniform",
                 "minimum_redshift": Z_MIN,
                 "maximum_redshift": Z_MAX,
                 "n_grid": N_GRID,
-                "sample_inclination": False,
             },
         ),
         fiducials={name: float(value) for name, value in POPULATION_PARAMS.items()},
@@ -353,8 +326,7 @@ def build_synthetic_importance(
     spectrum = build_importance_spectrum(
         data,
         metadata,
-        source_model=mock_target_model() if source_model is None else source_model,
-        merger_rate_fn=mock_merger_rate_fn(),
+        population=mock_population() if population is None else population,
         density_sites=DEFAULT_DENSITY_SITES,
     )
     return (

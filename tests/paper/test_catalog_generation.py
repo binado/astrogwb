@@ -59,7 +59,7 @@ def make_request() -> RequestFactory:
     """A tiny Ripple-backed request, with the hyperparameters a real one inherits."""
 
     def build(
-        model: str = "bns_md_cosmological",
+        model: str = "bns_coba",
         *,
         extra_kwargs: dict[str, Any] | None = None,
         extra_fiducials: dict[str, float] | None = None,
@@ -69,6 +69,7 @@ def make_request() -> RequestFactory:
                 "population": {
                     "model_name": model,
                     "model_kwargs": {
+                        "mass_model": "uniform",
                         "minimum_redshift": 0.0,
                         "maximum_redshift": 20.0,
                         "n_grid": 256,
@@ -132,11 +133,7 @@ def test_generator_with_guard_mixture_records_its_fraction(
     make_request: RequestFactory,
 ) -> None:
     """The eps in the config is the eps the file records and reweights by."""
-    _, metadata = _draw(
-        make_request(
-            "bns_md_uniform_mixture", extra_kwargs={"uniform_mixing_fraction": 0.1}
-        )
-    )
+    _, metadata = _draw(make_request(extra_kwargs={"uniform_mixing_fraction": 0.1}))
 
     assert metadata.population.model_kwargs["uniform_mixing_fraction"] == 0.1
 
@@ -147,12 +144,12 @@ def test_generator_with_gaussian_mass_model_records_its_fiducials(
 ) -> None:
     _, metadata = _draw(
         make_request(
-            "bns_md_gaussian_cosmological",
+            extra_kwargs={"mass_model": "gaussian"},
             extra_fiducials={"mass_mean": 1.33, "mass_sigma": 0.09},
         )
     )
 
-    assert metadata.population.model_name == "bns_md_gaussian_cosmological"
+    assert metadata.population.model_kwargs["mass_model"] == "gaussian"
     assert metadata.fiducials["mass_mean"] == pytest.approx(1.33)
 
 
@@ -161,7 +158,7 @@ def test_cli_with_unregistered_model_fails_before_generating(
 ) -> None:
     request = make_request("no_such_population")
 
-    with pytest.raises(ValueError, match="bns_md_cosmological"):
+    with pytest.raises(ValueError, match="bns_coba"):
         generate_catalog_script.main(
             [
                 "--request",

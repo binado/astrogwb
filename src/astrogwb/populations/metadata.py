@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from astrogwb.populations.registry import Population
@@ -33,19 +33,19 @@ __all__ = ["ModelKwargs", "PopulationMetadata", "widen_model_kwargs"]
 
 #: Construction kwargs travel inside the metadata JSON, so they must be
 #: JSON scalars. Declaring that here rather than as prose in the config layer
-#: is what makes the round trip type-stable: an ``int`` stays an ``int`` and a
-#: ``float`` stays a ``float`` and the inclination choice stays a ``bool``.
-type ModelKwargs = dict[str, float | int | bool]
+#: is what makes the round trip type-stable: an ``int`` stays an ``int``, a
+#: ``float`` stays a ``float``, and a flag stays a ``bool`` or a ``str``.
+type ModelKwargs = dict[str, float | int | bool | str]
 
 
 def widen_model_kwargs(population: dict[str, Any]) -> None:
-    """Widen numeric construction kwargs to ``float``, preserving booleans.
+    """Widen numeric construction kwargs to ``float``, preserving booleans and strings.
 
     A setting spelled ``2`` in one config and ``2.0`` in another names the
     same draw, so both must hash alike.
     """
     population["model_kwargs"] = {
-        name: value if isinstance(value, bool) else float(value)
+        name: value if isinstance(value, bool | str) else float(value)
         for name, value in population["model_kwargs"].items()
     }
 
@@ -73,26 +73,13 @@ class PopulationMetadata(BaseModel):
     model_name: str
     model_kwargs: ModelKwargs = Field(default_factory=dict)
 
-    @field_validator("model_kwargs")
-    @classmethod
-    def _validate_model_kwargs(cls, kwargs: ModelKwargs) -> ModelKwargs:
-        for name, value in kwargs.items():
-            if name == "sample_inclination":
-                if not isinstance(value, bool):
-                    raise ValueError("sample_inclination must be a bool")
-            elif isinstance(value, bool):
-                raise ValueError(f"{name} must be a number, not a bool")
-        return kwargs
-
     def build(self) -> Population:
         """Reconstruct the generating population with its kwargs bound.
 
-        Returns both callables from one call rather than a getter each: they
-        hash by identity, so two getters would hand a caller a fresh,
-        equal-but-not-identical pair on every call and force a jit recompile.
+        The result hashes by identity, so a getter called twice would hand a
+        caller an equal-but-not-identical callable and force a jit recompile.
         Call once and reuse the result. An unknown name fails here, listing
-        what is registered; ``merger_rate_fn`` is ``None`` for a population
-        that declares no physical rate.
+        what is registered.
 
         Imports the registry in its own body: populating it means importing
         the population models, which reaches JAX, and this module is
@@ -114,7 +101,7 @@ class PopulationMetadata(BaseModel):
         """
         self.build()
 
-    def with_model_kwargs(self, **updates: float | bool) -> Self:
+    def with_model_kwargs(self, **updates: float | bool | str) -> Self:
         """A re-validated copy with construction kwargs overridden.
 
         Constructs rather than using ``model_copy(update=...)``, which writes

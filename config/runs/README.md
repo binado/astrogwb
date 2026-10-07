@@ -68,16 +68,16 @@ The overrides, and who uses each; the file that declares a draw says why:
 | Draw | Role | Used by |
 | --- | --- | --- |
 | seed 42, n = 8192 / 16384 / 32768 | proposal | `variable-catalog-size` |
-| `[populations.guard]` (`bns_md_uniform_mixture`, eps = 0.1), seed 61, n = 16384 | proposal | `astrophysical-parameters`, `variable-proposal-guard/eps1e-1`, `time-delay` (a separate copy, drawn at its own fiducials) |
+| `[populations.guard]` (`bns_coba` with `uniform_mixing_fraction = 0.1`), seed 61, n = 16384 | proposal | `astrophysical-parameters`, `variable-proposal-guard/eps1e-1`, `time-delay` (a separate copy, drawn at its own fiducials) |
 | `[populations.guard]` at eps = 0.01 / 0.001, seeds 62 / 63, n = 16384 | proposal | `variable-proposal-guard` |
 | `[waveforms.TaylorF2]`, seed 41 | proposal | `waveform-approximant/TaylorF2` |
-| `[populations.time_delayed]` (`bns_md_time_delayed_cosmological`), seed 71 | injection | `time-delay` |
+| `[populations.time_delayed]` (`bns_coba` with `time_delay = true`), seed 71 | injection | `time-delay` |
 
 ## Adding one
 
 Add a `.toml` file under an experiment directory, opening with a comment that
 says what it measures and how it differs from its `_base.toml`.
 `discover_runs` picks it up by globbing, and its stem becomes the chain path;
-add a row above if it starts a new experiment. Run `snakemake validate` first:
-it merges and catalog-checks all runs, and builds every named population,
+add a row above if it starts a new experiment. A dry run
+(`snakemake --dry-run experiments`) merges every run and resolves its catalogs
 before any GPU job is queued.

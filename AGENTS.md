@@ -27,8 +27,8 @@ Every check is a `just` recipe, and CI runs the same string:
 - `uv run --group workflow snakemake --snakefile Snakefile --dry-run --cores 1 experiments`:
   production workflow entrypoint (omit `--dry-run` to execute). Chains come
   from `run_experiment_<name>` targets; figures are opt-in via the `plot_*`
-  rules. Run `snakemake validate` first: it merges and catalog-checks all 27 runs
-  without building anything.
+  rules. The dry run above merges and catalog-checks all 27 runs without
+  building anything.
 
 ## Configuration
 
@@ -39,8 +39,17 @@ population model, that model's construction settings, the hyperparameters it
 was drawn at, and the `astrogwb` version that generated it. Which of those
 density factors enter an importance weight is *not* part of the record -- no
 sample depends on it -- so it is declared by the analysis that reweights the
-draw. Adding a population means adding a registered source-model function under
-`src/astrogwb/populations/`, never an import path in a config.
+draw. A population is a registered factory returning a callable
+`parameters -> (merger_rate, model)`, where `model()` is a no-argument NumPyro
+model whose sample sites are the columns a catalog stores; the rate and the
+density come from one call. `bns_coba` is the one shipped population, its
+variants (mass law, time delay, guard mixture) being construction kwargs.
+Adding a population means adding a registered factory under
+`src/astrogwb/populations/`, never an import path in a config. Which
+hyperparameters a population needs, which of them only rescale the spectrum
+(`analysis.amplitude_parameter`), and that a guard mixture is a proposal and
+never an analysis target or injection are contracts documented on the factory
+and trusted, not checked.
 
 Simulators are partials implementing one protocol, `astrogwb.simulators.core.Simulator[**P, D, M]`:
 built from a validated metadata record `M` (it names itself with `key()`) plus

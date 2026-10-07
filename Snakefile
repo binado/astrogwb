@@ -145,7 +145,6 @@ wildcard_constraints:
 
 localrules:
     waveform_catalog,
-    validate,
     plot_cosmological_parameters,
     plot_modified_propagation,
     importance_weights_grid,
@@ -179,22 +178,6 @@ rule catalogs:
     """Aggregate target: build every catalog any committed run asks for."""
     input:
         CATALOG_OUTPUTS,
-
-
-# Replaces `assemble_config --all`, whose real value was failing on the first
-# invalid run *before any catalog was built* -- a catalog is a GPU job.
-# Deliberately not an input of `run_mcmc`: run it by hand before a campaign.
-# `run_mcmc` re-checks its own run's catalogs anyway.
-rule validate:
-    """Pre-flight: merge, validate, and catalog-check every run, building nothing."""
-    input:
-        RUN_CONFIG_FILES,
-        DETECTOR_INPUTS,
-    output:
-        "outputs/validated-runs.txt",
-    shell:
-        "uv run --extra paper python scripts/validate_configs.py"
-        " --output {output:q}"
 
 
 rule run_mcmc:

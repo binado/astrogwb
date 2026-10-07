@@ -68,10 +68,10 @@ from astrogwb.inference.utils import sample_sources
 from astrogwb.waveform import AnalyticInspiralGenerator
 
 model_kwargs = {
+    "mass_model": "uniform",
     "minimum_redshift": 0.0,
     "maximum_redshift": 20.0,
     "n_grid": 4096,
-    "sample_inclination": True,
 }
 params = {
     "H0": 67.66,
@@ -83,12 +83,11 @@ params = {
     "minimum_mass": 1.0,
     "mass_width": 1.5,
 }
-# Isotropic inclination is sampled by default; False selects analytic
-# quadrupole averaging and omits the inclination site and column.
-source_model = build_population("bns_md_cosmological", **model_kwargs).source_model
-source_parameters = sample_sources(
-    source_model, jax.random.PRNGKey(42), params, num_samples=1024
-)
+# A population maps hyperparameters to (merger rate, model); model() is a
+# no-argument NumPyro model. Isotropic inclination is always sampled.
+population = build_population("bns_coba", **model_kwargs)
+_, model = population(params)
+source_parameters = sample_sources(model, jax.random.PRNGKey(42), num_samples=1024)
 
 catalog = PolarizationPowerCatalog.from_generator(
     source_parameters,
@@ -103,7 +102,7 @@ catalog = PolarizationPowerCatalog.from_generator(
         )
     ),
     population=PopulationMetadata(
-        model_name="bns_md_cosmological",
+        model_name="bns_coba",
         model_kwargs=model_kwargs,
         seed=42,
     ),
@@ -114,17 +113,16 @@ catalog.save("catalog.h5")
 
 Reweighting it to a target population needs nothing else: the file says what
 drew it, so the proposal density is recovered rather than restated. A
-population is one registered name that yields both callables, so a target's
-source model and merger rate cannot be paired with one another by mistake.
+population is one registered name whose one call yields the merger rate and the
+source model, so a target's rate and density cannot be paired by mistake.
 
 ```python
 from astrogwb.importance.spectral import build_importance_spectrum
 
-target = build_population("bns_md_modified_propagation", **model_kwargs)
+target = build_population("bns_coba", **model_kwargs)
 spectrum_fn = build_importance_spectrum(
     PolarizationPowerCatalog.load("catalog.h5"),
-    source_model=target.source_model,
-    merger_rate_fn=target.merger_rate_fn,
+    population=target,
 )[0]
 spectrum, extras = spectrum_fn({**params, "H0": 70.0, "xi_0": 1.2, "xi_n": 1.91})
 ```

@@ -14,12 +14,17 @@ from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations import PopulationMetadata
 from astrogwb.simulators.population import PopulationDrawMetadata
 
-MODEL_KWARGS = {"minimum_redshift": 0.1, "maximum_redshift": 10.0, "n_grid": 32}
+MODEL_KWARGS = {
+    "mass_model": "uniform",
+    "minimum_redshift": 0.1,
+    "maximum_redshift": 10.0,
+    "n_grid": 32,
+}
 
 
 def _record(**overrides: Any) -> PopulationMetadata:
     fields: dict[str, Any] = {
-        "model_name": "bns_md_cosmological",
+        "model_name": "bns_coba",
         "model_kwargs": MODEL_KWARGS,
     }
     return PopulationMetadata(**{**fields, **overrides})
@@ -31,6 +36,7 @@ def test_json_round_trip_preserves_every_field() -> None:
     assert restored == record
     assert type(restored.model_kwargs["n_grid"]) is int
     assert type(restored.model_kwargs["minimum_redshift"]) is float
+    assert restored.model_kwargs["mass_model"] == "uniform"
 
 
 def test_check_registered_names_the_unknown_population() -> None:
@@ -44,17 +50,23 @@ def test_check_registered_rejects_a_kwarg_the_population_does_not_take() -> None
     The flat kwargs mapping used to be filtered down to the shared window keys
     before reaching the rate function, so a stale key travelled unnoticed.
     """
-    record = _record(model_kwargs={**MODEL_KWARGS, "uniform_mixing_fraction": 0.1})
-    with pytest.raises(TypeError, match="uniform_mixing_fraction"):
+    record = _record(model_kwargs={**MODEL_KWARGS, "no_such_kwarg": 0.1})
+    with pytest.raises(TypeError, match="no_such_kwarg"):
         record.check_registered()
 
 
-def test_a_proposal_population_builds_with_no_merger_rate() -> None:
+def test_flags_travel_in_the_record_as_booleans_and_strings() -> None:
     record = _record(
-        model_name="bns_md_uniform_mixture",
-        model_kwargs={**MODEL_KWARGS, "uniform_mixing_fraction": 0.1},
+        model_kwargs={
+            **MODEL_KWARGS,
+            "time_delay": True,
+            "minimum_delay": 0.02,
+            "uniform_mixing_fraction": 0.1,
+        }
     )
-    assert record.build().merger_rate_fn is None
+    restored = PopulationMetadata.model_validate_json(record.model_dump_json())
+    assert restored.model_kwargs["time_delay"] is True
+    assert type(restored.model_kwargs["mass_model"]) is str
 
 
 def test_a_seed_is_not_part_of_the_record() -> None:

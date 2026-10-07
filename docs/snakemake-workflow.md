@@ -77,9 +77,9 @@ needed: one rule used to emit all 27 configs at once, so any edit invalidated
 every one of them -- and the wrapper meant config changes never retriggered
 sampling at all.
 
-The `validate` rule replaces the old `configs` target. It merges, validates,
-and catalog-checks all 27 runs without building anything, so a config typo fails
-before any catalog is built.
+There is no pre-flight rule: a dry run (`snakemake --dry-run experiments`) merges
+every run and resolves its catalog requests without building anything, so a
+config typo fails before any catalog is built.
 
 The experiments are:
 
@@ -96,10 +96,10 @@ Run one experiment's chains:
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules validate run_mcmc run_experiment_cosmological_parameters \
+  --allowed-rules run_mcmc run_experiment_cosmological_parameters \
   --profile profiles/local --cores 8 --dry-run run_experiment_cosmological_parameters
 snakemake --snakefile Snakefile \
-  --allowed-rules validate run_mcmc run_experiment_cosmological_parameters \
+  --allowed-rules run_mcmc run_experiment_cosmological_parameters \
   --profile profiles/slurm run_experiment_cosmological_parameters
 ```
 
@@ -107,7 +107,7 @@ Build the paper's complete cosmological-parameter section:
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules validate run_mcmc plot_cosmological_parameters \
+  --allowed-rules run_mcmc plot_cosmological_parameters \
   --profile profiles/slurm plot_cosmological_parameters
 ```
 
@@ -134,7 +134,7 @@ Snakemake's `localrules`, so they execute on the submit host.
 
 For the `plot_cosmological_parameters` target, Snakemake:
 
-1. assembles and validates the eight configs it needs, one local job each;
+1. resolves the eight configs it needs;
 2. submits the eight missing chains to SLURM;
 3. waits for the chain outputs;
 4. executes the one figure-and-table rule locally.

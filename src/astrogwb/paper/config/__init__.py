@@ -225,19 +225,18 @@ def waveform_metadata(root: Path | None = None, **kwargs: Any) -> WaveformMetada
     return WaveformMetadata.model_validate(settings)
 
 
-def population_model(root: Path | None = None, **kwargs: float | bool) -> Population:
+def population_model(
+    root: Path | None = None, **kwargs: float | bool | str
+) -> Population:
     """Build the population the default draw, ``[catalog]``, is drawn from.
 
     Returns the registered :class:`~astrogwb.populations.registry.Population` --
-    source model and merger rate together -- with its construction settings
-    bound. Keyword arguments override ``model_kwargs``, which is how a notebook
+    a callable ``parameters -> (merger_rate, model)`` -- with its construction
+    settings bound. Keyword arguments override ``model_kwargs``, which is how a notebook
     studies the committed population on a coarser grid or a narrower redshift
     window without editing the file::
 
         population_model(n_grid=256, minimum_redshift=0.3)
-
-    ``sample_inclination=False`` selects explicit analytic quadrupole
-    averaging instead of the default isotropic inclination draw.
 
     A key the named population does not take raises here rather than being
     filtered away, which is the same contract a catalog request gets.

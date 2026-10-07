@@ -66,7 +66,6 @@ from astrogwb.paper.catalogs import validate_matching_frequency_grids
 from astrogwb.paper.config.mcmc import RunConfig
 from astrogwb.populations import (
     Population,
-    amplitude_parameters,
     build_population,
 )
 from astrogwb.simulators.polarization_power import (
@@ -184,31 +183,12 @@ def target_population(config: RunConfig) -> Population:
     an equal rebuild under a jit-cached call forces a recompile.
     Hyperparameters remain their call argument.
 
-    An analysis target must declare a merger rate: the predicted spectrum is
-    normalized by one, so a proposal density named here would produce a
-    spectrum with no scale rather than an error.
-    ``check_population_model`` rejects it in pre-flight; this is the same
-    refusal at the point of use. So is a marginalized amplitude parameter the
-    population does not declare: the marginalization assumes the parameter
-    only rescales the spectrum.
+    The caller is trusted to name a physical population as the target, and a
+    marginalized amplitude parameter that only rescales its spectrum; see
+    :func:`~astrogwb.populations.bns_coba.bns_coba_population_fn`.
     """
     declared = config.analysis.population
-    population = build_population(declared.model_name, **declared.model_kwargs)
-    if population.merger_rate_fn is None:
-        raise ValueError(
-            f"analysis.population.model_name {declared.model_name!r} declares "
-            "no merger rate, so it cannot be an analysis target; it is a "
-            "proposal density"
-        )
-    parameter = config.analysis.amplitude_parameter
-    if parameter is not None and parameter not in amplitude_parameters(
-        declared.model_name
-    ):
-        raise ValueError(
-            f"analysis.population.model_name {declared.model_name!r} cannot "
-            f"marginalize {parameter!r} analytically"
-        )
-    return population
+    return build_population(declared.model_name, **declared.model_kwargs)
 
 
 def prepare_observation(
@@ -251,7 +231,6 @@ def prepare_observation(
         power,
         jnp.ones(power.shape[1]),
         total_merger_rate,
-        source_parameters=restricted["source_parameters"],
     )
     logger.info(
         "Constructed independent fiducial observed spectrum (rate0=%.4e /s)",
@@ -286,20 +265,10 @@ def catalog_total_merger_rate(metadata: CatalogMetadata) -> jax.Array:
     column: the rate is a property of the population and the redshift window,
     so a stored copy would be stale the moment the window is narrowed.
 
-    A catalog drawn from a proposal density has no such rate. A guard mixture
-    is not a physical population, and the Madau-Dickinson total rate is the
-    normalization of the Madau-Dickinson redshift density, not of a mixture of
-    it with a uniform component -- so this raises rather than returning a
-    number that would silently scale an observed spectrum by the wrong factor.
+    The caller is trusted to pass a physical catalog: a guard mixture's rate is
+    the Madau-Dickinson total rate, which does not normalize its density.
     """
-    merger_rate_fn = metadata.population.build().merger_rate_fn
-    if merger_rate_fn is None:
-        raise ValueError(
-            f"catalog population {metadata.population.model_name!r} declares no "
-            "merger rate, so it cannot supply an observed total rate; it is a "
-            "proposal density, not an injection"
-        )
-    rate = merger_rate_fn(metadata.fiducials)
+    rate, _ = metadata.population.build()(metadata.fiducials)
     return jnp.reshape(jnp.asarray(rate), ())
 
 
@@ -336,11 +305,6 @@ def prepare_inference_inputs(
     input rather than something read off the proposal: the catalog's samples do
     not depend on which of their densities are counted.
     """
-    if target.merger_rate_fn is None:
-        raise ValueError(
-            "the target population declares no merger rate, so it cannot "
-            "normalize a predicted spectrum; it is a proposal density"
-        )
     observation = prepare_observation(
         injection_data,
         injection_metadata,
@@ -414,8 +378,7 @@ def prepare_inference_inputs(
     spectral_density_fn, log_weights_fn = build_importance_spectrum(
         proposal_data,
         proposal_metadata,
-        source_model=target.source_model,
-        merger_rate_fn=target.merger_rate_fn,
+        population=target,
         density_sites=density_sites,
     )
     return InferenceInputs(

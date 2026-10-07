@@ -34,8 +34,7 @@ from astrogwb_mock_population import (
     FIDUCIALS,
     build_mock_catalog,
     catalog_samples,
-    mock_merger_rate_fn,
-    mock_target_model,
+    mock_population,
 )
 
 from astrogwb.constants import SECONDS_PER_YEAR
@@ -162,8 +161,7 @@ def resolutions(
     # every fiducial log-weight exactly zero.
     estimator, log_weights_fn = build_importance_spectrum(
         *fine_catalog,
-        source_model=mock_target_model(),
-        merger_rate_fn=mock_merger_rate_fn(),
+        population=mock_population(),
         density_sites=DEFAULT_DENSITY_SITES,
     )
     total_merger_rate = jnp.asarray(estimator(FIDUCIALS)[1]["total_merger_rate"])
@@ -187,7 +185,6 @@ def resolutions(
             run["polarization_power"],
             jnp.ones(NUM_SOURCES),
             total_merger_rate,
-            source_parameters=run["samples"],
         )
         run["snr_squared"] = float(
             spectral_snr_squared(
@@ -211,7 +208,6 @@ def _log_likelihood(run: dict[str, Any], hubble_constant: float) -> float:
         run["polarization_power"],
         jnp.exp(log_weights),
         total_merger_rate,
-        source_parameters=run["samples"],
     )
     log_prob = dist.Normal(model, run["noise_scale"]).log_prob(run["observed"])
     return float(jnp.sum(jnp.where(run["mask"], log_prob, 0.0)))

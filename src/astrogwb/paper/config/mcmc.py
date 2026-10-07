@@ -46,13 +46,13 @@ _STRICT = ConfigDict(frozen=True, extra="forbid")
 # --------------------------------------------------------------------------- #
 # Pydantic models
 # --------------------------------------------------------------------------- #
-# Restates astrogwb.populations.bns_madau_dickinson.AMPLITUDE_PARAMETERS rather
-# than importing the population registry. tests/paper/test_config.py
-# cross-checks the two lists.
+# The hyperparameters whose effect on the spectrum is a pure overall scaling,
+# so the likelihood can marginalize them analytically. Whether a population
+# honours that is a documented contract of its factory, not checked here.
 AmplitudeParameter = Literal["H0", "local_merger_rate"]
 
-#: Restates astrogwb.populations.DEFAULT_DENSITY_SITES, for the same reason and
-#: under the same cross-check.
+#: Restates astrogwb.populations.DEFAULT_DENSITY_SITES rather than importing the
+#: population registry. tests/paper/test_config.py cross-checks the two.
 DEFAULT_DENSITY_SITES: tuple[str, ...] = (
     "redshift",
     "source_frame_mass_1",
@@ -126,8 +126,7 @@ def materialize_prior(value: Any) -> Distribution:
     # this function runs as a pydantic BeforeValidator, and pydantic converts
     # only ValueError and AssertionError into a ValidationError. A TypeError
     # would escape as itself, past every `pytest.raises(ValidationError)` and
-    # past the `except (ValueError, TypeError)` in scripts/validate_configs.py
-    # that reports which run is broken.
+    # past anything that reports which run is broken by catching ValueError.
     import numpyro.distributions as dist
 
     if isinstance(value, dist.Distribution):

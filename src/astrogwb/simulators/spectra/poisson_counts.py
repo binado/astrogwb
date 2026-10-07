@@ -8,9 +8,9 @@ empirical rate :math:`N/T` in place of :math:`\mathcal{R}`. This module draws
 a catalog into a static-capacity plate instead:
 
 1. Evaluate the observer-frame merger rate :math:`\mathcal{R}` from
-   ``merger_rate_fn``.
+   the population.
 2. Sample :math:`N` as ``Poisson(\mathcal{R}\, T)``.
-3. Draw ``max_events`` sources from ``source_model`` under a static NumPyro plate
+3. Draw ``max_events`` sources from the population's model under a static NumPyro plate
    (a Python integer, so the model is a valid JAX pytree and ``jax.jit``
    target). The source model returns that source dict, which is passed to the
    waveform generator.
@@ -68,15 +68,12 @@ against a generator's waveform family::
         validate_source_model,
     )
 
-    validate_source_model(
-        params, source_model=source_model, generator=generator,
-        rng_key=jax.random.key(0),
-    )
+    _, model = population(params)
+    validate_source_model(model, generator=generator, rng_key=jax.random.key(0))
     simulate = Predictive(
         partial(
             poisson_counts_forward_model,
-            source_model=source_model,
-            merger_rate_fn=merger_rate_fn,
+            population=population,
             generator=generator,
             observation_time=1.0,
             chunk_size=1024,
@@ -97,8 +94,7 @@ import numpyro
 import numpyro.distributions as dist
 from jax.typing import ArrayLike
 
-from astrogwb.gwb.spectral import inclination_averaging_factor
-from astrogwb.populations import MergerRateFn, SourceFn
+from astrogwb.populations import Population
 from astrogwb.utils import years_to_seconds
 from astrogwb.waveform import PolarizationPowerGenerator
 
@@ -110,8 +106,7 @@ _TOTAL_MERGER_RATE_SITE = "total_merger_rate"
 def poisson_counts_forward_model(
     params: Mapping[str, ArrayLike],
     *,
-    source_model: SourceFn,
-    merger_rate_fn: MergerRateFn,
+    population: Population,
     generator: PolarizationPowerGenerator,
     observation_time: float,
     chunk_size: int,
@@ -120,16 +115,14 @@ def poisson_counts_forward_model(
 ) -> None:
     r"""Draw up to ``max_events`` sources and reduce them to a strain spectrum.
 
-    ``params`` is the hyperparameter dict ``source_model`` and
-    ``merger_rate_fn`` already accept -- this model does not sample them.
-    Normally the two members of one
-    :class:`~astrogwb.populations.Population`, built once per run and reused,
-    since both hash by identity and a fresh, equal rebuild forces a jit
-    recompile. A population that declares no merger rate cannot drive this
-    model: there is no Poisson mean to draw an event count from. ``observation_time`` is in years, the
-    same unit as :func:`~astrogwb.utils.years_to_seconds` and the analysis
-    grid; the Poisson rate converts it against ``merger_rate_fn``'s
-    mergers-per-second :math:`\mathcal{R}`.
+    ``params`` is the hyperparameter dict ``population`` accepts -- this model
+    does not sample them. ``population`` is built once per run and reused,
+    since it hashes by identity and a fresh, equal rebuild forces a jit
+    recompile. A proposal population has no meaningful Poisson mean and must
+    not drive this model. ``observation_time`` is in years, the same unit as
+    :func:`~astrogwb.utils.years_to_seconds` and the analysis grid; the Poisson
+    rate converts it against the population's mergers-per-second
+    :math:`\mathcal{R}`.
 
     ``max_events`` and ``chunk_size`` are Python integers, static under JIT.
     ``max_events`` is the plate dimension and capacity. ``n_events`` is an
@@ -143,25 +136,21 @@ def poisson_counts_forward_model(
       ``Poisson(total_merger_rate * observation_time_seconds)``;
     - ``total_merger_rate`` and ``spectral_density`` as deterministics.
 
-    Source sites from ``source_model`` are sampled under the ``events`` plate
+    Source sites from the population's model are sampled under the ``events`` plate
     of length ``max_events``, with inactive slots masked from their log
     density. The source arrays and waveform reduction retain that static
     capacity. If ``n_events > max_events``, the capacity is silently capped:
     all slots contribute, while the count site retains the actual draw. There
     is no ``spectral_density_obs`` site.
 
-    A source model that omits ``inclination`` generates face-on waveform power;
-    the contraction converts it to the isotropic inclination average. A model
-    that returns an ``inclination`` array has that orientation already included
-    in each waveform's power.
-
-    Raises ``KeyError`` if ``source_model`` does not return
+    Raises ``KeyError`` if the population's model does not return
     ``luminosity_distance``: it is the distance governing waveform amplitude,
     and every registered source model must declare it.
     """
     observation_time_sec = years_to_seconds(observation_time)
 
-    total_merger_rate = jnp.reshape(jnp.asarray(merger_rate_fn(params)), ())
+    merger_rate, model = population(params)
+    total_merger_rate = jnp.reshape(jnp.asarray(merger_rate), ())
     numpyro.deterministic(_TOTAL_MERGER_RATE_SITE, total_merger_rate)
     n_events = numpyro.sample(
         "n_events",
@@ -170,7 +159,7 @@ def poisson_counts_forward_model(
     )
     event_mask = jnp.arange(max_events) < n_events
     with numpyro.plate("events", max_events), numpyro.handlers.mask(mask=event_mask):
-        sources = dict(source_model(params))
+        sources = dict(model())
     _require_luminosity_distance(sources)
     power_sum = _sum_polarization_power(
         generator,
@@ -181,7 +170,7 @@ def poisson_counts_forward_model(
 
     numpyro.deterministic(
         "spectral_density",
-        inclination_averaging_factor(sources) * power_sum / observation_time_sec,
+        power_sum / observation_time_sec,
     )
 
 

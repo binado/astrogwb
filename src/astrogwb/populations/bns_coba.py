@@ -55,6 +55,7 @@ from astrogwb.distributions.redshift.madau_dickinson import (
 from astrogwb.populations._types import Parameters, Population, PopulationModel
 from astrogwb.populations.mass.gaussian_mass_pair import gaussian_mass_pair_model
 from astrogwb.populations.mass.uniform_mass_pair import uniform_mass_pair_model
+from astrogwb.populations.registry import register_population
 
 __all__ = ["bns_coba_population_fn"]
 
@@ -157,6 +158,7 @@ def _redshift_site(
     )
 
 
+@register_population("bns_coba")
 def bns_coba_population_fn(
     minimum_redshift: float,
     maximum_redshift: float,

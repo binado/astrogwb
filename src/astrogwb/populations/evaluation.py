@@ -24,6 +24,8 @@ from numpyro.distributions.util import is_identically_one
 from numpyro.infer import Predictive
 from numpyro.primitives import Messenger
 
+from astrogwb.populations._types import PopulationModel
+
 #: The plate :func:`evaluate_sources` executes a source model under.
 _SOURCES_PLATE = "sources"
 
@@ -125,15 +127,16 @@ def _num_sources(columns: Mapping[str, ArrayLike]) -> int:
 
 
 def evaluate_sources(
-    source_model: Callable[[Mapping[str, ArrayLike]], Mapping[str, jax.Array]],
-    params: Mapping[str, ArrayLike],
+    model: PopulationModel,
     source_parameters: Mapping[str, ArrayLike],
     *,
     density_sites: Sequence[str],
 ) -> tuple[jax.Array, dict[str, jax.Array]]:
     """Selected log density and the model's returned mapping, in one isolated pass.
 
-    ``source_model`` runs once under a ``sources`` plate of length ``N``, with
+    ``model`` is a no-argument source model, built from the hyperparameters it
+    closes over, so gradients with respect to them flow through its closure.
+    It runs once under a ``sources`` plate of length ``N``, with
     every column of ``source_parameters`` conditioned in. Conditioning only
     reaches *sample* sites: a stored deterministic column -- including
     ``luminosity_distance`` -- is ignored, and the returned mapping holds the
@@ -141,8 +144,7 @@ def evaluate_sources(
     into the log density; omitted factors execute but contribute nothing.
 
     Execution is isolated from enclosing handlers with ``handlers.block``, so
-    no source site reaches an outer trace or potential, while gradients with
-    respect to ``params`` flow normally.
+    no source site reaches an outer trace or potential.
 
     Returns ``(log_prob, outputs)``. ``log_prob`` has shape ``(N,)``, zeros when
     ``density_sites`` is empty. ``outputs`` is the model's return mapping.
@@ -155,12 +157,12 @@ def evaluate_sources(
     }
     num_sources = _num_sources(columns)
 
-    def plated(site_params: Mapping[str, ArrayLike]) -> Mapping[str, jax.Array]:
+    def plated() -> Mapping[str, jax.Array]:
         with numpyro.plate(_SOURCES_PLATE, num_sources):
-            return source_model(site_params)
+            return model()
 
-    model = _RequireObserved(handlers.condition(plated, data=columns))
-    outputs, log_prob = compute_model_and_log_probs(model, density_sites, params)
+    conditioned = _RequireObserved(handlers.condition(plated, data=columns))
+    outputs, log_prob = compute_model_and_log_probs(conditioned, density_sites)
     return (
         jnp.broadcast_to(log_prob, (num_sources,)),
         {name: jnp.asarray(value) for name, value in outputs.items()},
@@ -168,9 +170,8 @@ def evaluate_sources(
 
 
 def sample_sources(
-    source_model: Callable[[Mapping[str, ArrayLike]], Mapping[str, jax.Array]],
+    model: PopulationModel,
     key: jax.Array,
-    params: Mapping[str, ArrayLike],
     *,
     num_samples: int,
 ) -> dict[str, jax.Array]:
@@ -188,14 +189,12 @@ def sample_sources(
     output mapping, each column of shape ``(num_samples,)``.
     """
     with handlers.block():
-        draws = Predictive(source_model, num_samples=num_samples)(key, params)
-        probe = handlers.trace(
-            handlers.seed(source_model, jax.random.PRNGKey(0))
-        ).get_trace(params)
+        draws = Predictive(model, num_samples=num_samples)(key)
+        probe = handlers.trace(handlers.seed(model, jax.random.PRNGKey(0))).get_trace()
     sampled = {
         name: draws[name] for name, site in probe.items() if site["type"] == "sample"
     }
-    _, outputs = evaluate_sources(source_model, params, sampled, density_sites=())
+    _, outputs = evaluate_sources(model, sampled, density_sites=())
     return outputs
 
 

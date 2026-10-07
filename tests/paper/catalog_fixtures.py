@@ -30,22 +30,24 @@ from astrogwb.waveform import WaveformMetadata
 #: override so the difference is visible instead of buried in a retyped table.
 PAPER_POPULATION = population_metadata(REPO_ROOT, n_grid=256)
 PAPER_MODEL = PAPER_POPULATION.model_name
-PAPER_MODEL_KWARGS: dict[str, float | int | bool] = dict(PAPER_POPULATION.model_kwargs)
+PAPER_MODEL_KWARGS: dict[str, float | int | bool | str] = dict(
+    PAPER_POPULATION.model_kwargs
+)
 
 #: The hyperparameters fixtures draw at: the shared ``[fiducials]``, which is
-#: what a real catalog inherits. It carries ``xi_0`` / ``xi_n`` that
-#: ``bns_md_cosmological`` never reads -- source models index ``params`` by
-#: name, so the extra entries are inert here exactly as they are in generation.
+#: what a real catalog inherits. It carries ``xi_0`` = 1, so the modified
+#: propagation ratio is exactly one, exactly as it is in generation.
 PAPER_POPULATION_PARAMS: dict[str, float] = fiducials(REPO_ROOT)
 
 
-def _derived_columns(model, params, sources):
-    """Replay a source model at fixed source values, returning declared outputs.
+def _derived_columns(population, params, sources):
+    """Replay a population's model at fixed source values, returning its outputs.
 
     The same isolated, plated pass generation and every later evaluation take,
     so stored deterministics match their recomputation bit for bit.
     """
-    _, outputs = evaluate_sources(model, params, sources, density_sites=())
+    _, model = population(params)
+    _, outputs = evaluate_sources(model, sources, density_sites=())
     return outputs
 
 
@@ -53,24 +55,17 @@ def source_parameters(
     redshift: np.ndarray,
     *,
     model_name: str = PAPER_MODEL,
-    model_kwargs: Mapping[str, float | int | bool] | None = None,
+    model_kwargs: Mapping[str, float | int | bool | str] | None = None,
     fiducials: Mapping[str, float] | None = None,
     population_params: Mapping[str, float] | None = None,
 ) -> dict[str, np.ndarray]:
     """Complete a redshift ladder into every column the population declares."""
     if fiducials is None:
         fiducials = population_params
-    model = build_population(
-        model_name, **(model_kwargs or PAPER_MODEL_KWARGS)
-    ).source_model
+    population = build_population(model_name, **(model_kwargs or PAPER_MODEL_KWARGS))
     ones = np.ones_like(redshift)
-    inclination = (
-        {"inclination": 0.75 * ones}
-        if (model_kwargs or PAPER_MODEL_KWARGS).get("sample_inclination", True)
-        else {}
-    )
     columns = _derived_columns(
-        model,
+        population,
         fiducials or PAPER_POPULATION_PARAMS,
         {
             "redshift": redshift,
@@ -80,7 +75,7 @@ def source_parameters(
             "spin_2z": 0.0 * ones,
             "lambda_1": 400.0 * ones,
             "lambda_2": 300.0 * ones,
-            **inclination,
+            "inclination": 0.75 * ones,
         },
     )
     return {name: np.asarray(values) for name, values in columns.items()}
@@ -97,7 +92,7 @@ def make_catalog(
     sampling_frequency: float = 128.0,
     df: float = 10.0,
     model_name: str = PAPER_MODEL,
-    model_kwargs: Mapping[str, float | int | bool] | None = None,
+    model_kwargs: Mapping[str, float | int | bool | str] | None = None,
     fiducials: Mapping[str, float] | None = None,
     population_params: Mapping[str, float] | None = None,
     extra_source_parameters: Mapping[str, np.ndarray] | None = None,

@@ -72,10 +72,10 @@ Preview or build the section (from the repository root):
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules validate run_mcmc plot_cosmological_parameters \
+  --allowed-rules run_mcmc plot_cosmological_parameters \
   --profile profiles/local --cores 8 --dry-run plot_cosmological_parameters
 snakemake --snakefile Snakefile \
-  --allowed-rules validate run_mcmc plot_cosmological_parameters \
+  --allowed-rules run_mcmc plot_cosmological_parameters \
   --profile profiles/slurm plot_cosmological_parameters
 ```
 
@@ -84,7 +84,7 @@ multiple outputs, requesting one builds the complete section:
 
 ```bash
 snakemake --snakefile Snakefile \
-  --allowed-rules validate run_mcmc plot_cosmological_parameters \
+  --allowed-rules run_mcmc plot_cosmological_parameters \
   --profile profiles/local --cores 8 \
   outputs/figures/cosmological-parameters/H0-by-detector.pdf
 ```
