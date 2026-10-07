@@ -53,7 +53,7 @@ paper = [
     "astrogwb[io,simulation]",
     "arviz[h5netcdf]>=1.2.0",
     # Merges the run-config layers (astrogwb.paper.config.runs).
-    "pyknf>=0.6,<0.7",
+    "pyknf>=0.6,<0.8",
     # User cache paths, including XDG overrides on macOS.
     "platformdirs>=4.11.12",
 ]
@@ -84,7 +84,7 @@ build-backend = "uv_build"
 test = ["pytest>=9.0.2", "pytest-xdist>=3.8.0", "tomli-w>=1.2"]
 # pyknf too: the Snakefile merges every run's layers at parse time to key its
 # catalogs, and it runs without the `paper` extra.
-workflow = ["snakemake>=9.24.0", "pyknf>=0.6,<0.7"]
+workflow = ["snakemake>=9.24.0", "pyknf>=0.6,<0.8"]
 # Notebook *execution* tooling, as opposed to the `notebook` extra, which is
 # the library stack the notebooks import.
 jupyter = [
