@@ -113,6 +113,10 @@ default-groups = ["dev"]
 # paper ...` -- and a checkout is set up once with
 # `uv sync --extra notebook --group dev`.
 
+[tool.marimo.formatting]
+# Match ruff's default so marimo's saves do not reformat notebooks.
+line_length = 88
+
 [tool.ruff]
 extend-exclude = [".antigravitycli", ".cache", ".claude", ".cursor"]
 include = [
@@ -151,6 +155,7 @@ extend-select = ["TID"]
 # PLR1711: marimo writes a bare `return` on cells that export nothing.
 "notebooks/fiducial_spectrum.py" = ["F811", "F401", "PLR1711"]
 "notebooks/spectrum_snrs.py" = ["F811", "F401", "PLR1711"]
+"notebooks/mean_spectrum_snr_table.py" = ["PLR1711"]
 
 [tool.ty.src]
 # Most of `scripts/` stays absent because fixture generators can import

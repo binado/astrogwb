@@ -308,14 +308,6 @@ def check_sources(approximant: str, source_parameters: Mapping[str, ArrayLike]) 
                     f"{approximant} is an aligned-spin model; {name} must be "
                     "zero for every event"
                 )
-    if not metadata.get("is_tidal", False):
-        for name in ("lambda_1", "lambda_2"):
-            if bool(jnp.any(arrays[name] != 0.0)):
-                raise ValueError(
-                    f"{approximant} carries no tidal deformability; {name} "
-                    "must be zero for every event -- use an NRTidal "
-                    "approximant or TaylorF2"
-                )
     for name in ("lambda_1", "lambda_2"):
         if bool(jnp.any(arrays[name] < 0.0)):
             raise ValueError(f"{name} must be non-negative")
