@@ -1,4 +1,4 @@
-from .density import LogDensityFn
+from .density import GaussianGWBBatchedLikelihood, LogDensityFn
 from .fisher import fisher_matrix_per_bin, spectral_density_jacobian
 from .models import (
     amplitude_H0_transform,
@@ -9,6 +9,7 @@ from .models import (
 from .protocol import SpectralDensityFn
 
 __all__ = [
+    "GaussianGWBBatchedLikelihood",
     "LogDensityFn",
     "SpectralDensityFn",
     "amplitude_H0_transform",

@@ -7,8 +7,11 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
+import numpyro.distributions as dist
 from jax.typing import ArrayLike
 from numpyro.infer.util import log_density
+
+from .protocol import SpectralDensityFn
 
 
 class LogDensityFn:
@@ -84,4 +87,132 @@ class LogDensityFn:
         return self._evaluator(grids, fixed_params, tuple(model_args), model_kwargs)
 
 
-__all__ = ["LogDensityFn"]
+class GaussianGWBBatchedLikelihood:
+    """Grid-evaluate the Gaussian GWB log density for K networks at once.
+
+    ``spectral_density_fn`` is the expensive stage and does not depend on the
+    network; only ``scale`` and ``frequency_mask`` do, at O(F) per point. This
+    evaluator predicts the spectrum once per grid point and applies the
+    likelihood of every network to it.
+
+    It duplicates the Gaussian likelihood of
+    :func:`astrogwb.inference.gwb_spectral_density_model` for speed; the
+    equivalence test against :class:`LogDensityFn` keeps the two in sync. The
+    amplitude-marginalized likelihood is not covered.
+
+    Parameters
+    ----------
+    spectral_density_fn:
+        ``params -> (prediction, extras)`` with ``prediction`` of shape
+        ``(F,)``. Static; ``extras`` are discarded.
+    priors:
+        Prior of every parameter, static. Each contributes its log density at
+        the grid or ``fixed`` value, so a pinned site adds a constant, as in
+        :class:`LogDensityFn`.
+    chunk_size:
+        Forwarded to :func:`jax.lax.map` as ``batch_size`` for the prediction
+        stage. ``None`` evaluates one point at a time.
+
+    Notes
+    -----
+    Memory is ``(G, F)`` for the predictions plus ``(K, G, F)`` likelihood
+    intermediates. If a larger ``G`` needs it, ``lax.map`` over K instead of
+    ``vmap``.
+    """
+
+    def __init__(
+        self,
+        spectral_density_fn: SpectralDensityFn,
+        priors: Mapping[str, dist.Distribution],
+        *,
+        chunk_size: int | None = None,
+    ) -> None:
+        def evaluate(
+            names: tuple[str, ...],
+            grids: tuple[jax.Array, ...],
+            fixed: dict[str, ArrayLike],
+            observed: jax.Array,
+            scale: jax.Array,
+            mask: jax.Array,
+        ) -> jax.Array:
+            mesh = jnp.meshgrid(*grids, indexing="ij")
+            points = {
+                name: values.ravel() for name, values in zip(names, mesh, strict=True)
+            }
+            pred = jax.lax.map(
+                lambda point: spectral_density_fn(point | fixed)[0],
+                points,
+                batch_size=chunk_size,
+            )
+
+            values = points | fixed
+            log_prior = sum(
+                (prior.log_prob(values[name]) for name, prior in priors.items()),
+                start=jnp.zeros(()),
+            )
+
+            def likelihood(scale_k: jax.Array, mask_k: jax.Array) -> jax.Array:
+                logp = dist.Normal(pred, scale_k).log_prob(observed)
+                return jnp.where(mask_k, logp, 0.0).sum(-1)
+
+            total = log_prior[None] + jax.vmap(likelihood)(scale, mask)
+            sizes = tuple(grid.size for grid in grids)
+            return total.reshape(scale.shape[0], *sizes)
+
+        # `names` is static and `grids` a tuple: a dict argument would be
+        # flattened in sorted-key order, losing the insertion order of the axes.
+        self._evaluator = jax.jit(evaluate, static_argnums=0)
+
+    def __call__(
+        self,
+        grids: Mapping[str, jax.Array],
+        *,
+        fixed: Mapping[str, ArrayLike] | None = None,
+        observed_spectral_density: jax.Array,
+        scale: jax.Array,
+        frequency_mask: jax.Array | None = None,
+    ) -> jax.Array:
+        """Log density over the cartesian product of 1-2 grids, per network.
+
+        Parameters
+        ----------
+        grids:
+            Values of each swept parameter.
+        fixed:
+            Values of the remaining prior sites, pinned at every point.
+        observed_spectral_density:
+            Observed spectrum, ``(F,)``.
+        scale:
+            Per-bin standard deviation of each network, ``(K, F)``.
+        frequency_mask:
+            Boolean ``(K, F)`` of the bins each network counts; ``None``
+            counts all. Masked bins contribute exactly zero, whatever their
+            ``scale``.
+
+        Returns
+        -------
+        jax.Array
+            Shape ``(K, *grid sizes)``, grid axes in ``grids`` order.
+
+        Raises
+        ------
+        KeyError
+            At trace time, if a prior name is in neither ``grids`` nor ``fixed``.
+        """
+        scale = jnp.asarray(scale)
+        mask = (
+            jnp.ones(scale.shape, dtype=bool)
+            if frequency_mask is None
+            else jnp.asarray(frequency_mask)
+        )
+        return self._evaluator(
+            tuple(grids),
+            tuple(jnp.asarray(grid) for grid in grids.values()),
+            dict(fixed) if fixed is not None else {},
+            jnp.asarray(observed_spectral_density),
+            scale,
+            mask,
+        )
+
+
+__all__ = ["GaussianGWBBatchedLikelihood", "LogDensityFn"]
