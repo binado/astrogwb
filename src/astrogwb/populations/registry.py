@@ -1,10 +1,5 @@
 """Name-to-population registry.
 
-A catalog file records the *name* of the population that drew it, never an
-import path and never a pickled callable. Registry keys change only on
-purpose; module paths change as collateral whenever a module is moved, so a
-persisted ``module:function`` string is a reference that silently rots.
-
 A registered population is a *factory*: it takes the construction kwargs and
 returns a :data:`~astrogwb.populations._types.Population`, a callable
 ``parameters -> (merger_rate, model)``. The rate and the source density come
@@ -20,9 +15,6 @@ population takes raises ``TypeError`` here rather than being filtered away.
 Which hyperparameters a population needs, which of them factor out of the
 spectrum, and whether it is a physical population or a proposal density are
 contracts documented on the factory, not checked here.
-
-The name pins the name, not the mathematics: re-pointing a registered key at a
-different density would be invisible here.
 """
 
 from __future__ import annotations

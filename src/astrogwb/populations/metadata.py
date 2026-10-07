@@ -1,24 +1,3 @@
-"""The population declaration an artifact carries, as one record.
-
-Every artifact this package persists -- a polarization-power catalog, a
-spectral-density catalog -- records the density that produced it: the
-registered population name and the flat construction kwargs it was built with. That record was previously spelled out field by
-field on each artifact and re-encoded attribute by attribute in each writer, which is how the two
-formats drifted into naming the same thing differently.
-
-This module never imports h5py or the population registry at
-module scope: populating the registry means importing the models, which
-reaches JAX, and nothing here may *initialize* the XLA backend. :meth:`build`
-and :meth:`check_registered` take that import in their own bodies, which is the
-only edge from here back into the registry.
-
-The record is deliberately not a cross-check: nothing here compares the
-declaration against the arrays it travels with. It is the single statement of
-what drew them -- and only of that. Which of the population's density factors
-enter an importance weight is not part of it: that choice changes no sample,
-is made by the analysis that reweights the draw, and is declared there.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Self
