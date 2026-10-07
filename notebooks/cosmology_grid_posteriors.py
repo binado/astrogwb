@@ -86,11 +86,13 @@ def _():
     negligible. The two are drawn at different seeds, so the injection is
     not a subset of the proposal.
 
-    Three problems, each over all six detector networks:
+    Three problems, each over all six detector networks, each in its own
+    section below:
 
-    1. $H_0$ alone.
-    2. $H_0$ and $\Omega_m$.
-    3. $\Xi_0$ and $n$ (modified propagation), with $H_0$ fixed.
+    1. $H_0$ alone (*Inferring cosmological parameters*, H0).
+    2. $H_0$ and $\Omega_m$ (*Inferring cosmological parameters*, H0 and Omega_m).
+    3. $\Xi_0$ and $n$ (*Inferring modified propagation parameters*), with
+       $H_0$ fixed.
 
     Setting `ASTROGWB_NOTEBOOK_SMOKE=1` swaps in a tiny proposal and coarse
     grids so the whole notebook runs in a minute or two.
@@ -100,7 +102,7 @@ def _():
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## 1. Method
+    ## Method
 
     **Likelihood.** In each bin the observed spectrum is Gaussian about the
     predicted one with scale $\sigma_i = S_{\mathrm{eff},i}/\sqrt{2T\Delta f_i}$.
@@ -123,7 +125,7 @@ def _():
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## 2. Configuration
+    ## Configuration
     """)
 
 
@@ -390,6 +392,55 @@ def evaluate_grid(
 
 
 @app.function(hide_code=True)
+def grid_posterior(
+    run: str,
+    axes: Mapping[str, tuple[float, float, int]],
+    evaluator: GaussianGWBBatchedLikelihood,
+    *,
+    fiducials: Mapping[str, float],
+    observed: NDArray[np.float64],
+    per_network: Mapping[str, dict[str, object]],
+    settings: Mapping[str, object],
+    cache_dir: Path,
+    prefix: str,
+) -> tuple[dict[str, NDArray], dict[str, NDArray]]:
+    """One problem's grid log densities, cached under a settings digest.
+
+    Parameters
+    ----------
+    run
+        Problem name, also in the cache file name.
+    axes
+        ``(low, high, size)`` of each swept parameter.
+    evaluator
+        The problem's :class:`GaussianGWBBatchedLikelihood`.
+    fiducials
+        Every parameter; those not in ``axes`` are pinned at their value.
+    observed
+        Observed spectrum ``(F,)``.
+    per_network
+        :func:`network_data` by network name.
+    settings
+        Everything else the cached values depend on, for the digest.
+    cache_dir
+        Directory of the ``.npz`` file.
+    prefix
+        File name prefix, to keep smoke-run caches apart.
+
+    Returns
+    -------
+    tuple
+        See :func:`cached_log_densities`.
+    """
+    digest = settings_digest(run=run, axes=axes, **settings)
+    fixed = {k: v for k, v in fiducials.items() if k not in axes}
+    return cached_log_densities(
+        partial(evaluate_grid, evaluator, axes, fixed, observed, per_network),
+        cache_dir / f"{prefix}{run}_{digest}.npz",
+    )
+
+
+@app.function(hide_code=True)
 def marginal_density(
     grid: NDArray[np.float64], log_density: NDArray[np.float64], axis: int
 ) -> NDArray[np.float64]:
@@ -437,6 +488,52 @@ def median_and_hdi(
     order = np.argsort(cell)[::-1]
     kept = order[: int(np.searchsorted(np.cumsum(cell[order]), mass)) + 1]
     return median, float(grid[kept].min()), float(grid[kept].max())
+
+
+@app.function(hide_code=True)
+def summary_rows(
+    run: str,
+    grids: Mapping[str, NDArray[np.float64]],
+    log_densities: Mapping[str, NDArray[np.float64]],
+    axes: Mapping[str, tuple[float, float, int]],
+) -> list[dict[str, object]]:
+    """Median and 68% HDI of each swept parameter, for every network.
+
+    Parameters
+    ----------
+    run
+        Problem name, recorded in each row.
+    grids
+        Grid by parameter.
+    log_densities
+        Log density by network, with one axis per parameter in ``axes`` order.
+    axes
+        ``(low, high, size)`` of each swept parameter; only the keys are used.
+
+    Returns
+    -------
+    list of dict
+        One row per (network, parameter), ready for :class:`pandas.DataFrame`.
+    """
+    label = dict(DETECTOR_NETWORKS)
+    rows: list[dict[str, object]] = []
+    for network, log_density in log_densities.items():
+        for axis, name in enumerate(axes):
+            median, lo, hi = median_and_hdi(
+                grids[name], marginal_density(grids[name], log_density, axis=axis)
+            )
+            rows.append(
+                {
+                    "problem": run,
+                    "network": label[network],
+                    "parameter": name,
+                    "median": median,
+                    "lower": lo,
+                    "upper": hi,
+                    "half width": (hi - lo) / 2,
+                }
+            )
+    return rows
 
 
 @app.function(hide_code=True)
@@ -494,7 +591,7 @@ def plot_marginals(
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## 3. Proposal and injection
+    ## Proposal and injection
 
     The proposal is the 1M-source catalog, generated chunk by chunk on a miss
     and read from `outputs/catalogs/` afterwards. The injection is one
@@ -557,23 +654,16 @@ def _(
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## 4. Importance spectrum and evaluators
+    ## Importance spectrum
 
     Built once. The population is built a single time because it hashes by
-    identity, and each problem gets one `GaussianGWBBatchedLikelihood`, which
-    predicts every grid point once for all six networks.
+    identity. Each problem builds its own `GaussianGWBBatchedLikelihood` in
+    its section, which predicts every grid point once for all six networks.
     """)
 
 
 @app.cell
-def _(
-    PRIORS,
-    chunk_size,
-    grid_chunk_size,
-    population,
-    proposal_data,
-    proposal_metadata_loaded,
-):
+def _(population, proposal_data, proposal_metadata_loaded):
     target = build_population(population.model_name, **population.model_kwargs)
     spectral_density_fn, log_weights_fn = build_importance_spectrum(
         proposal_data,
@@ -581,37 +671,18 @@ def _(
         population=target,
         density_sites=DEFAULT_DENSITY_SITES,
     )
-    evaluators = {
-        name: GaussianGWBBatchedLikelihood(
-            spectral_density_fn, PRIORS, chunk_size=grid_chunk_size
-        )
-        for name in ("H0", "H0_Omega_m", "xi_0_xi_n")
-    }
-    return evaluators, log_weights_fn
-
-
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ## 5. Log densities (cached)
-    """)
+    return log_weights_fn, spectral_density_fn
 
 
 @app.cell
 def _(
-    FIDUCIALS,
-    cache_dir,
-    cache_name_prefix,
     data_seed,
-    evaluators,
     frequencies,
-    grid_specs,
     injection_metadata,
     maximum_frequency,
     minimum_frequency,
     network_names,
     observation_time,
-    observed,
     proposal_metadata_loaded,
     proposal_seed,
     registry,
@@ -627,49 +698,84 @@ def _(
         )
         for name in network_names
     }
-    posteriors = {}
-    for run, axes in grid_specs.items():
-        digest = settings_digest(
-            version=__version__,
-            run=run,
-            axes=axes,
-            networks=network_names,
-            seeds=(data_seed, proposal_seed),
-            band=(minimum_frequency, maximum_frequency),
-            observation_time=observation_time,
-            density_sites=DEFAULT_DENSITY_SITES,
-            injection=injection_metadata.key(),
-            proposal=proposal_metadata_loaded.key(),
-        )
-        posteriors[run] = cached_log_densities(
-            partial(
-                evaluate_grid,
-                evaluators[run],
-                axes,
-                {k: v for k, v in FIDUCIALS.items() if k not in axes},
-                observed,
-                per_network,
-            ),
-            cache_dir / f"{cache_name_prefix}{run}_{digest}.npz",
-        )
-    return (posteriors,)
+    # Everything a cached log density depends on besides its own axes.
+    cache_settings = {
+        "version": __version__,
+        "networks": network_names,
+        "seeds": (data_seed, proposal_seed),
+        "band": (minimum_frequency, maximum_frequency),
+        "observation_time": observation_time,
+        "density_sites": DEFAULT_DENSITY_SITES,
+        "injection": injection_metadata.key(),
+        "proposal": proposal_metadata_loaded.key(),
+    }
+    labelled_networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
+    return cache_settings, labelled_networks, per_network
 
 
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## 6. Sanity: importance effective sample size
+    # Inferring cosmological parameters
 
-    The relative ESS of the weights at the edges of the $H_0$ 68% interval of
-    the fiducial network. At the fiducials the target equals the proposal, so
-    it is one there by construction; what matters is that it stays large away
-    from them.
+    The two cosmological problems, with $H_0$ alone first and then $H_0$
+    together with $\Omega_m$.
+    """)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    ## H0
+
+    The posterior on $H_0$ alone, every other parameter pinned at its
+    fiducial. $H_0$ alone has one parameter, so its corner plot is its
+    marginal below.
     """)
 
 
 @app.cell
-def _(FIDUCIALS, fiducial_network, log_weights_fn, posteriors):
-    _grids, _log_densities = posteriors["H0"]
+def _(
+    FIDUCIALS,
+    PRIORS,
+    cache_dir,
+    cache_name_prefix,
+    cache_settings,
+    grid_chunk_size,
+    grid_specs,
+    observed,
+    per_network,
+    spectral_density_fn,
+):
+    h0_posterior = grid_posterior(
+        "H0",
+        grid_specs["H0"],
+        GaussianGWBBatchedLikelihood(
+            spectral_density_fn, PRIORS, chunk_size=grid_chunk_size
+        ),
+        fiducials=FIDUCIALS,
+        observed=observed,
+        per_network=per_network,
+        settings=cache_settings,
+        cache_dir=cache_dir,
+        prefix=cache_name_prefix,
+    )
+    return (h0_posterior,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    **Sanity: importance effective sample size.** The relative ESS of the
+    weights at the edges of the $H_0$ 68% interval of the fiducial network.
+    At the fiducials the target equals the proposal, so it is one there by
+    construction; what matters is that it stays large away from them.
+    """)
+
+
+@app.cell
+def _(FIDUCIALS, fiducial_network, h0_posterior, log_weights_fn):
+    _grids, _log_densities = h0_posterior
     _grid = _grids["H0"]
     _density = marginal_density(_grid, _log_densities[fiducial_network], axis=0)
     _, _lo, _hi = median_and_hdi(_grid, _density)
@@ -682,111 +788,241 @@ def _(FIDUCIALS, fiducial_network, log_weights_fn, posteriors):
     ess
 
 
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ## 7. Marginals per network
-    """)
-
-
 @app.cell
-def _(FIDUCIALS, grid_specs, network_names, posteriors):
-    _networks = [(n, l) for n, l in DETECTOR_NETWORKS if n in network_names]
-    marginal_figures = {}
-    for _run, (_grids, _log_densities) in posteriors.items():
-        # H0 for the cosmology problems, Xi_0 for modified propagation.
-        _parameter = next(iter(grid_specs[_run]))
-        _densities = {
-            name: marginal_density(_grids[_parameter], ld, axis=0)
+def _(FIDUCIALS, h0_posterior, labelled_networks):
+    _grids, _log_densities = h0_posterior
+    h0_marginal = plot_marginals(
+        "H0",
+        _grids["H0"],
+        {
+            name: marginal_density(_grids["H0"], ld, axis=0)
             for name, ld in _log_densities.items()
-        }
-        marginal_figures[_run] = plot_marginals(
-            _parameter, _grids[_parameter], _densities, _networks, FIDUCIALS[_parameter]
-        )
-    mo.vstack([mo.as_html(fig) for fig in marginal_figures.values()])
-    return (marginal_figures,)
+        },
+        labelled_networks,
+        FIDUCIALS["H0"],
+    )
+    mo.as_html(h0_marginal)
+    return (h0_marginal,)
+
+
+@app.cell
+def _(grid_specs, h0_posterior):
+    _grids, _log_densities = h0_posterior
+    h0_summary_rows = summary_rows("H0", _grids, _log_densities, grid_specs["H0"])
+    return (h0_summary_rows,)
 
 
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## 8. Corner plots (fiducial network)
+    ## H0 and Omega_m
 
-    $H_0$ alone has one parameter, so its corner plot is the marginal above.
-    At $\Xi_0 = 1$ the $n$ axis is degenerate: the valley along it is
-    expected.
+    $H_0$ and $\Omega_m$ together, $\Xi_0$ and $n$ pinned at their fiducials.
+    The $H_0$ marginal integrates over $\Omega_m$.
     """)
 
 
 @app.cell
-def _(FIDUCIALS, fiducial_network, grid_specs, posteriors):
-    corner_figures = {}
-    for _run in ("H0_Omega_m", "xi_0_xi_n"):
-        _grids, _log_densities = posteriors[_run]
-        _names = list(grid_specs[_run])
-        corner_figures[_run] = plot_corner_for_posterior_grid(
-            [_grids[name] for name in _names],
-            _log_densities[fiducial_network],
-            labels=[parameter_label(name) for name in _names],
-            truths=[FIDUCIALS[name] for name in _names],
-            **get_corner_kwargs(levels=CORNER_LEVELS),  # ty: ignore[invalid-argument-type]
-        )
-    mo.vstack([mo.as_html(fig) for fig in corner_figures.values()])
-    return (corner_figures,)
+def _(
+    FIDUCIALS,
+    PRIORS,
+    cache_dir,
+    cache_name_prefix,
+    cache_settings,
+    grid_chunk_size,
+    grid_specs,
+    observed,
+    per_network,
+    spectral_density_fn,
+):
+    h0_omega_m_posterior = grid_posterior(
+        "H0_Omega_m",
+        grid_specs["H0_Omega_m"],
+        GaussianGWBBatchedLikelihood(
+            spectral_density_fn, PRIORS, chunk_size=grid_chunk_size
+        ),
+        fiducials=FIDUCIALS,
+        observed=observed,
+        per_network=per_network,
+        settings=cache_settings,
+        cache_dir=cache_dir,
+        prefix=cache_name_prefix,
+    )
+    return (h0_omega_m_posterior,)
+
+
+@app.cell
+def _(FIDUCIALS, h0_omega_m_posterior, labelled_networks):
+    _grids, _log_densities = h0_omega_m_posterior
+    h0_omega_m_marginal = plot_marginals(
+        "H0",
+        _grids["H0"],
+        {
+            name: marginal_density(_grids["H0"], ld, axis=0)
+            for name, ld in _log_densities.items()
+        },
+        labelled_networks,
+        FIDUCIALS["H0"],
+    )
+    mo.as_html(h0_omega_m_marginal)
+    return (h0_omega_m_marginal,)
 
 
 @app.cell(hide_code=True)
 def _():
     mo.md(r"""
-    ## 9. Median and 68% HDI
+    Corner plot at the fiducial network.
     """)
 
 
 @app.cell
-def _(grid_specs, posteriors):
-    _label = dict(DETECTOR_NETWORKS)
-    _rows = []
-    for _run, (_grids, _log_densities) in posteriors.items():
-        for _network, _ld in _log_densities.items():
-            for _axis, _name in enumerate(grid_specs[_run]):
-                _median, _lo, _hi = median_and_hdi(
-                    _grids[_name], marginal_density(_grids[_name], _ld, axis=_axis)
-                )
-                _rows.append(
-                    {
-                        "problem": _run,
-                        "network": _label[_network],
-                        "parameter": _name,
-                        "median": _median,
-                        "lower": _lo,
-                        "upper": _hi,
-                        "half width": (_hi - _lo) / 2,
-                    }
-                )
-    summary = pd.DataFrame(_rows)
+def _(FIDUCIALS, fiducial_network, grid_specs, h0_omega_m_posterior):
+    _grids, _log_densities = h0_omega_m_posterior
+    _names = list(grid_specs["H0_Omega_m"])
+    h0_omega_m_corner = plot_corner_for_posterior_grid(
+        [_grids[name] for name in _names],
+        _log_densities[fiducial_network],
+        labels=[parameter_label(name) for name in _names],
+        truths=[FIDUCIALS[name] for name in _names],
+        **get_corner_kwargs(levels=CORNER_LEVELS),  # ty: ignore[invalid-argument-type]
+    )
+    mo.as_html(h0_omega_m_corner)
+    return (h0_omega_m_corner,)
+
+
+@app.cell
+def _(grid_specs, h0_omega_m_posterior):
+    _grids, _log_densities = h0_omega_m_posterior
+    h0_omega_m_summary_rows = summary_rows(
+        "H0_Omega_m", _grids, _log_densities, grid_specs["H0_Omega_m"]
+    )
+    return (h0_omega_m_summary_rows,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    # Inferring modified propagation parameters
+
+    $\Xi_0$ and $n$, with $H_0$ fixed at its fiducial. The marginal is in
+    $\Xi_0$, which integrates over $n$.
+    """)
+
+
+@app.cell
+def _(
+    FIDUCIALS,
+    PRIORS,
+    cache_dir,
+    cache_name_prefix,
+    cache_settings,
+    grid_chunk_size,
+    grid_specs,
+    observed,
+    per_network,
+    spectral_density_fn,
+):
+    xi_posterior = grid_posterior(
+        "xi_0_xi_n",
+        grid_specs["xi_0_xi_n"],
+        GaussianGWBBatchedLikelihood(
+            spectral_density_fn, PRIORS, chunk_size=grid_chunk_size
+        ),
+        fiducials=FIDUCIALS,
+        observed=observed,
+        per_network=per_network,
+        settings=cache_settings,
+        cache_dir=cache_dir,
+        prefix=cache_name_prefix,
+    )
+    return (xi_posterior,)
+
+
+@app.cell
+def _(FIDUCIALS, labelled_networks, xi_posterior):
+    _grids, _log_densities = xi_posterior
+    xi_marginal = plot_marginals(
+        "xi_0",
+        _grids["xi_0"],
+        {
+            name: marginal_density(_grids["xi_0"], ld, axis=0)
+            for name, ld in _log_densities.items()
+        },
+        labelled_networks,
+        FIDUCIALS["xi_0"],
+    )
+    mo.as_html(xi_marginal)
+    return (xi_marginal,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    Corner plot at the fiducial network. At $\Xi_0 = 1$ the $n$ axis is
+    degenerate: the valley along it is expected.
+    """)
+
+
+@app.cell
+def _(FIDUCIALS, fiducial_network, grid_specs, xi_posterior):
+    _grids, _log_densities = xi_posterior
+    _names = list(grid_specs["xi_0_xi_n"])
+    xi_corner = plot_corner_for_posterior_grid(
+        [_grids[name] for name in _names],
+        _log_densities[fiducial_network],
+        labels=[parameter_label(name) for name in _names],
+        truths=[FIDUCIALS[name] for name in _names],
+        **get_corner_kwargs(levels=CORNER_LEVELS),  # ty: ignore[invalid-argument-type]
+    )
+    mo.as_html(xi_corner)
+    return (xi_corner,)
+
+
+@app.cell
+def _(grid_specs, xi_posterior):
+    _grids, _log_densities = xi_posterior
+    xi_summary_rows = summary_rows(
+        "xi_0_xi_n", _grids, _log_densities, grid_specs["xi_0_xi_n"]
+    )
+    return (xi_summary_rows,)
+
+
+@app.cell(hide_code=True)
+def _():
+    mo.md(r"""
+    # Summary and output
+
+    Median and 68% HDI of every swept parameter, by problem and network.
+    Figures are written when the switch in *Configuration* is on.
+    """)
+
+
+@app.cell
+def _(h0_omega_m_summary_rows, h0_summary_rows, xi_summary_rows):
+    summary = pd.DataFrame(
+        [*h0_summary_rows, *h0_omega_m_summary_rows, *xi_summary_rows]
+    )
     summary
 
 
-@app.cell(hide_code=True)
-def _():
-    mo.md(r"""
-    ## 10. Write figures
-    """)
-
-
 @app.cell
-def _(FIGURES, corner_figures, marginal_figures, write_figures):
+def _(
+    FIGURES,
+    h0_marginal,
+    h0_omega_m_corner,
+    h0_omega_m_marginal,
+    write_figures,
+    xi_corner,
+    xi_marginal,
+):
     if write_figures.value:
         save_figures(
             {
-                **{
-                    FIGURES / f"marginals_{run}.pdf": fig
-                    for run, fig in marginal_figures.items()
-                },
-                **{
-                    FIGURES / f"corner_{run}.pdf": fig
-                    for run, fig in corner_figures.items()
-                },
+                FIGURES / "marginals_H0.pdf": h0_marginal,
+                FIGURES / "marginals_H0_Omega_m.pdf": h0_omega_m_marginal,
+                FIGURES / "corner_H0_Omega_m.pdf": h0_omega_m_corner,
+                FIGURES / "marginals_xi_0_xi_n.pdf": xi_marginal,
+                FIGURES / "corner_xi_0_xi_n.pdf": xi_corner,
             }
         )
 
