@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Self
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from astrogwb import __version__
 from astrogwb.distributions.config import DistributionConfig
 from astrogwb.populations.metadata import PopulationMetadata, widen_model_kwargs
 from astrogwb.simulators.core.keys import content_key
+
+if TYPE_CHECKING:
+    import jax
 
 __all__ = ["Hyperparameter", "PopulationDrawMetadata"]
 
@@ -54,14 +58,6 @@ class PopulationDrawMetadata(BaseModel):
     num_events: Annotated[int, Field(gt=0)] | None = None
     version: str = __version__
 
-    @model_validator(mode="after")
-    def _validate_counts(self) -> Self:
-        if self.count == "fixed" and self.num_events is None:
-            raise ValueError("num_events is required for fixed counts")
-        if self.count == "poisson" and self.num_events is not None:
-            raise ValueError("num_events is only valid for fixed counts")
-        return self
-
     @property
     def fixed(self) -> dict[str, float]:
         """The hyperparameters every draw shares, by name."""
@@ -79,6 +75,42 @@ class PopulationDrawMetadata(BaseModel):
             for name, value in self.hyperparameters.items()
             if isinstance(value, DistributionConfig)
         }
+
+    def prior_model(self) -> Callable[[], dict[str, jax.Array]]:
+        """A zero-argument NumPyro model of the hyperparameters of one draw.
+
+        Sampled hyperparameters are ``numpyro.sample`` sites; fixed ones are
+        ``numpyro.deterministic`` sites. The model returns every hyperparameter
+        by name, so it composes with ``Predictive``, ``handlers.condition`` and
+        ``log_density``.
+        """
+        # Deferred like ``DistributionConfig.build``: keeps this module light.
+        import jax.numpy as jnp
+        import numpyro
+
+        declared = {
+            name: self.hyperparameters[name] for name in sorted(self.hyperparameters)
+        }
+        priors = {
+            name: value.build()
+            for name, value in declared.items()
+            if isinstance(value, DistributionConfig)
+        }
+
+        def model() -> dict[str, jax.Array]:
+            theta: dict[str, jax.Array] = {}
+            for name, value in declared.items():
+                if name in priors:
+                    theta[name] = jnp.asarray(numpyro.sample(name, priors[name]))
+                else:
+                    theta[name] = jnp.asarray(
+                        numpyro.deterministic(
+                            name, jnp.asarray(value, dtype=jnp.float64)
+                        )
+                    )
+            return theta
+
+        return model
 
     def key(self) -> str:
         """The content hash these draws are cached under.

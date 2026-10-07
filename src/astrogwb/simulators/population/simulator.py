@@ -27,7 +27,7 @@ reused, such as two waveform approximants on the same sources.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from functools import partial
 from typing import Any, TypedDict
 
@@ -36,13 +36,13 @@ import jax.numpy as jnp
 import numpy as np
 from numpy.typing import NDArray
 from numpyro import handlers
-from numpyro.distributions import Distribution
 
 from astrogwb import __version__
 from astrogwb.populations import MergerRateFn, SourceFn
 from astrogwb.populations.evaluation import evaluate_sources
 from astrogwb.simulators.population.metadata import PopulationDrawMetadata
 from astrogwb.utils import years_to_seconds
+from astrogwb.utils.numpyro import sample_model
 
 __all__ = [
     "PopulationData",
@@ -102,19 +102,7 @@ def sample_sources_by_key(
     event_keys = jax.vmap(lambda i: jax.random.fold_in(key, i))(
         start + jnp.arange(size, dtype=jnp.uint32)
     )
-
-    def one_event(event_key: jax.Array) -> dict[str, jax.Array]:
-        with handlers.block():
-            trace = handlers.trace(handlers.seed(source_model, event_key)).get_trace(
-                params
-            )
-        return {
-            name: site["value"]
-            for name, site in trace.items()
-            if site["type"] == "sample"
-        }
-
-    sampled = jax.vmap(one_event)(event_keys)
+    sampled = jax.vmap(lambda k: sample_model(source_model, k, params))(event_keys)
     _, outputs = evaluate_sources(source_model, params, sampled, density_sites=())
     return outputs
 
@@ -123,23 +111,13 @@ def _hyperparameters_and_count(
     key: jax.Array,
     *,
     merger_rate_fn: MergerRateFn,
-    fixed: Mapping[str, float],
-    priors: Mapping[str, Distribution],
+    prior_model: Callable[[], Mapping[str, jax.Array]],
     observation_seconds: float,
     num_events: int | None,
 ) -> tuple[dict[str, jax.Array], jax.Array, jax.Array]:
     """Stage one: hyperparameters, merger rate and source count of one draw."""
     theta_key, count_key, _ = jax.random.split(key, 3)
-    subkeys = jax.random.split(theta_key, max(len(priors), 1))
-    theta = {
-        **{
-            name: jnp.asarray(value, dtype=jnp.float64) for name, value in fixed.items()
-        },
-        **{
-            name: jnp.reshape(prior.sample(subkeys[i]), ())
-            for i, (name, prior) in enumerate(priors.items())
-        },
-    }
+    theta = dict(handlers.seed(prior_model, theta_key)())
     rate = jnp.reshape(merger_rate_fn(theta), ())
     if num_events is not None:
         count = jnp.asarray(num_events, dtype=jnp.int64)
@@ -188,16 +166,12 @@ class PopulationSimulator:
         self._metadata = metadata
         self._chunk_size = chunk_size
         self._observation_seconds = years_to_seconds(metadata.observation_time)
-        priors = {
-            name: metadata.sampled[name].build() for name in sorted(metadata.sampled)
-        }
         # Static configuration is bound by ``partial``, so jit traces only the keys.
         self._hyperparameters_and_count = jax.jit(
             partial(
                 _hyperparameters_and_count,
                 merger_rate_fn=built.merger_rate_fn,
-                fixed=dict(metadata.fixed),
-                priors=priors,
+                prior_model=metadata.prior_model(),
                 observation_seconds=self._observation_seconds,
                 num_events=metadata.num_events,
             )
